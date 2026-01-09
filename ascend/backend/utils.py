@@ -39,13 +39,16 @@ backend_policy = None
 def get_backend_func(name, *args, **kwargs):
     global backend_policy
     if backend_policy is None:
-        try:
-            import torch
-            import torch_npu
-            backend_policy = "torch_npu"
-        except ImportError:
-            backend_policy = "mindspore"
-        print("the backend policy is {}".format(backend_policy))
+        backend_policy_env = os.getenv("TRITON_BACKEND", "default").lower()
+        if backend_policy_env == "torch_npu" or backend_policy_env == "mindspore":
+            backend_policy = backend_policy_env
+        if backend_policy is None:
+            try:
+                import torch
+                import torch_npu
+                backend_policy = "torch_npu"
+            except ImportError:
+                backend_policy = "mindspore"
     return backend_strategy_registry.execute_func(backend_policy, name, *args, **kwargs)
 
 

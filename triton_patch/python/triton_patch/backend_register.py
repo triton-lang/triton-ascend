@@ -285,6 +285,17 @@ def allocate_memory(size, stream):
 
 @backend_strategy_registry.register("torch_npu", "allocate_memory")
 def allocate_memory(size, stream):
+    return f"const_cast<void *>(at::empty({size}, at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte)).storage().data());"
+
+
+@backend_strategy_registry.register("mindspore", "allocate_sync_block_lock")
+def allocate_sync_block_lock(size, stream):
+    return '''device_context->device_res_manager_->BindDeviceToCurrentThread(false);
+    device_context->device_res_manager_->AllocateMemory({size}, reinterpret_cast<uint64_t>({stream}));'''
+
+
+@backend_strategy_registry.register("torch_npu", "allocate_sync_block_lock")
+def allocate_sync_block_lock(size, stream):
     return f"const_cast<void *>(at_npu::native::allocate_workspace({size}, {stream}).storage().data());"
 
 
@@ -301,8 +312,7 @@ def pre_launch():
 
 @backend_strategy_registry.register("mindspore", "async_launch")
 def async_launch(func):
-    return f'''mindspore::runtime::OpExecutor::DispatchLaunchTask({func});
-    mindspore::runtime::Pipeline::Get().launch_stage()->Wait();'''
+    return f'''mindspore::runtime::OpExecutor::DispatchLaunchTask({func});'''
 
 
 @backend_strategy_registry.register("torch_npu", "async_launch")

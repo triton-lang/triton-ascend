@@ -756,11 +756,18 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
   name.append(kernelName);
   void *workspace_addr_ptr = NULL;
   uint32_t blockNum4Workspace = gridX * gridY * gridZ;
+<<<<<<< HEAD:ascend/backend/driver.py
  	auto optionsWorkspace = at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte);
   {f'''
     uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
     at::Tensor workspace_tensor = at::empty(totalWorkSpaceSize, optionsWorkspace);  
     workspace_addr_ptr = const_cast<void *>(workspace_tensor.storage().data());
+=======
+  {get_backend_func("pre_launch")}
+  {f'''
+  uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
+  workspace_addr_ptr = {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
+>>>>>>> 3702ee46... fix mindspore when kernel's workspace sizeis not 0:third_party/ascend/backend/driver.py
   ''' if workspace_size > 0 else ''}
  	{'auto launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
     uint32_t blockNum = gridX * gridY * gridZ;
@@ -771,7 +778,6 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
         warned = true;
     }}
     #endif  
-    {get_backend_func("pre_launch")}
     {'blockNum = std::min(blockNum, (uint32_t)' + str(num_physical_blocks) + ');' if enable_auto_map_parallel_blocks else ''}
     // set mixBlockNumRation for nodeBasicBlockDim for msprof report
     uint32_t mixBlockNumRation = {mix_block_dim_ratio};

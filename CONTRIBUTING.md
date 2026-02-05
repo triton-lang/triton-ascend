@@ -10,9 +10,8 @@
 
 <h2 id="getting-started.md">Getting Started</h2>
 
-- Fork the Triton Ascend repository on [GitCode](https://gitcode.com/Ascend/triton-ascend).
+- Fork the Triton Ascend repository on [GitHub](https://github.com/triton-lang/triton-ascend).
 - Check the [README.md](https://gitcode.com/Ascend/triton-ascend/blob/master/README.md) file to obtain the project information and build the development environment.
-
 
 
 <h2 id="developer-guide.md">Developer Guide</h2>
@@ -22,8 +21,6 @@
 - **[Troubleshooting Gated Commit](#troubleshooting-gated-commit.md)**
 - **[Issue Specifications](#issue-specifications.md)**
 - **[Pull Request Proposal](#pull-request-proposal.md)**
-
-
 
 <h2 id="coding-style .md">Coding Style</h2>
 
@@ -35,7 +32,7 @@ Follow the coding style below to make Triton Ascend easy to develop, maintain, a
 
 - Unit Test Guide
 
-  Use the unified unit test style of the Triton Ascend community. The recommended unit test style for Python is [pytest](http://www.pytest.org/en/latest/), and that for C++ is [GoogleTest Primer](https://github.com/google/googletest/blob/master/docs/primer.md). The design intent of a test case should be reflected by its annotation name. For details about how to design test cases, see [gather Test Cases](https://gitcode.com/Ascend/triton-ascend/blob/master/ascend/examples/pytest_ut/test_gather.py) and [layer_norm Test Cases](https://gitcode.com/Ascend/triton-ascend/blob/master/ascend/examples/tutorials/03-layer-norm.py).
+  Use the unified unit test style of the Triton Ascend community. The recommended unit test style for Python is [pytest](http://www.pytest.org/en/latest/), and that for C++ is [GoogleTest Primer](https://github.com/google/googletest/blob/master/docs/primer.md). The design intent of a test case should be reflected by its annotation name. For details about how to design test cases, see [gather Test Cases](https://github.com/triton-lang/triton-ascend/tree/main/third_party/ascend/examples/custom_op/test_gather_load.py) and [layer_norm Test Cases](https://github.com/triton-lang/triton-ascend/tree/main/third_party/ascend/tutorials/03-layer-norm.py).
 
 - Refactoring Guide
 
@@ -60,7 +57,7 @@ git remote add upstream https://github.com/triton-lang/triton-ascend.git
 
 3. Develop code locally.
 
-Before developing your code, you need to set up the development environment according to the [Triton Ascend Installation Guide](https://gitcode.com/Ascend/triton-ascend/blob/main/docs/en/installation_guide.md).
+Before developing your code, you need to set up the development environment according to the [Triton Ascend Installation Guide](https://github.com/triton-lang/triton-ascend/blob/main/docs/en/installation_guide.md).
 
 To avoid inconsistency between branches, create a new local development branch for new features.
 

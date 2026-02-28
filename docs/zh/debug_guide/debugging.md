@@ -133,17 +133,17 @@ python your_triton_program.py
 
 以示范测试用例  [01-vector-add.py ](../../../third_party/ascend/tutorials/01-vector-add.py#) 举例说明编译流程：
 这是一个简单的两个tensor的加法计算，计算逻辑请参考示范用例中的注解。
-通过TRITON_DEBUG=1开启dump文件输出，可以获取到 kernel.ttir.mlir 和 kernel.ttadapter.mlir 
+通过TRITON_DEBUG=1开启dump文件输出，可以获取到 kernel.ttir.mlir 和 kernel.ttadapter.mlir
 - 运行用例
 ```
 TRITON_DEBUG=1 python 01-vector-add.py
 ```
 运行用例后会打印dump文件路径，默认是 ~/.triton/dump，显示如下：
 ```
-Dumping intermediate results to ~/.triton/dump/xxx 
+Dumping intermediate results to ~/.triton/dump/xxx
 # xxx是一串hash的唯一标识符
 ```
-进入该dump路径，查看 kernel.ttir.mlir 和 kernel.ttadapter.mlir 
+进入该dump路径，查看 kernel.ttir.mlir 和 kernel.ttadapter.mlir
 
 #### 3.4.1 TTIR（Triton Intermediate Representation）
 - TTIR 样例
@@ -290,24 +290,24 @@ import triton.language as tl
 
 @triton.jit
 def triton_kernel(
-    out_ptr0, 
-    in_ptr0, 
-    in_ptr1, 
+    out_ptr0,
+    in_ptr0,
+    in_ptr1,
     XBLOCK: tl.constexpr,  # 编译时常量参数
     USE_FP16: tl.constexpr  # 编译时常量参数
 ):
     # 打印编译时常量参数
     tl.static_print("XBLOCK = ", XBLOCK)
     tl.static_print("USE_FP16 = ", USE_FP16)
-    
+
     idx = tl.arange(0, XBLOCK)
     tmp0 = tl.load(in_ptr0 + idx)
     tmp1 = tl.load(in_ptr1 + idx)
-    
+
     # 打印常量计算结果
     elements_per_thread = XBLOCK // 32
     tl.static_print("Elements per thread = ", elements_per_thread)
-    
+
     tmp2 = tmp0 + tmp1
     tl.store(out_ptr0 + idx, tmp2)
 ```

@@ -28,6 +28,7 @@ WITH_DISPATCH = {}
 # Import and register Ascend extension dispatch handlers
 from triton.language.extra.cann.extension.dispatch import ASCEND_WITH_DISPATCH
 from triton.language.extra.cann.extension.builder import setup_unified_builder
+
 WITH_DISPATCH.update(ASCEND_WITH_DISPATCH)
 
 
@@ -47,6 +48,7 @@ def mangle_ty(ty):
     if ty.is_void():
         return 'V'
     raise TypeError(f'Unsupported type {ty}')
+
 
 mangle_ty = WITH_DISPATCH.get("mangle_ty", mangle_ty)
 
@@ -1375,7 +1377,8 @@ def ast_to_ttir(fn, specialization, context, options, codegen_fns, module_map, m
     prototype = language.function_type([], arg_types)
     generator = CodeGenerator(context, prototype, gscope=gscope, constants=all_constants, function_name=function_name,
                               jit_fn=fn, attributes=fn_attrs, is_kernel=True, file_name=file_name,
-                               begin_line=begin_line, options=options, codegen_fns=codegen_fns, module_map=module_map, module=module)
+                              begin_line=begin_line, options=options, codegen_fns=codegen_fns, module_map=module_map,
+                              module=module)
     generator.visit(fn.parse())
 
     ret = generator.module

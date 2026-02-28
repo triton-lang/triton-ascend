@@ -37,11 +37,7 @@ from .custom_op import (
 
 from . import builtin_custom_ops
 
-from .math_ops import (
-    atan2,
-    isfinited,
-    finitef
-)
+from .math_ops import (atan2, isfinited, finitef)
 
 from .aux_ops import (
     parallel,

@@ -986,7 +986,8 @@ class tensor(_value):
         assert False, "Transposition must be created by the AST Visitor"
 
     @builtin
-    def to(self, dtype: dtype, fp_downcast_rounding: Optional[str] = None, bitcast: bool = False, overflow_mode: Optional[str] = None, _builder=None):
+    def to(self, dtype: dtype, fp_downcast_rounding: Optional[str] = None, bitcast: bool = False,
+           overflow_mode: Optional[str] = None, _builder=None):
         """
         Alias for :py:func:`tensor.cast`.
         """
@@ -1547,7 +1548,9 @@ def dot(input, other, acc=None, input_precision=None, allow_tf32=None, max_num_i
         default_precision = "tf32" if (supports_tf32 and (allow_tf32 or allow_tf32 is None)) else "ieee"
         input_precision = os.getenv("TRITON_F32_DEFAULT", default_precision)
     else:
-        assert input_precision not in ["tf32", "tf32x3"], "input_precision == tf32 or tf32x3 is invalid, please use input_precision='hf32' on Ascend instead."
+        assert input_precision not in [
+            "tf32", "tf32x3"
+        ], "input_precision == tf32 or tf32x3 is invalid, please use input_precision='hf32' on Ascend instead."
     input_precision = _constexpr_to_value(input_precision)
     out_dtype = _constexpr_to_value(out_dtype)
     max_num_imprecise_acc = _constexpr_to_value(max_num_imprecise_acc)
@@ -1555,7 +1558,8 @@ def dot(input, other, acc=None, input_precision=None, allow_tf32=None, max_num_i
 
 
 @builtin
-def dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc=None, out_dtype=float32, lhs_k_pack=True, rhs_k_pack=True, _builder=None):
+def dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc=None, out_dtype=float32, lhs_k_pack=True,
+               rhs_k_pack=True, _builder=None):
     """
     Returns the matrix product of two blocks in microscaling format.
     lhs and rhs use microscaling formats described here:
@@ -1574,7 +1578,8 @@ def dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc=None,
     """
     out_dtype = _constexpr_to_value(out_dtype)
     assert out_dtype == float32, "Only float32 is supported for out_dtype at the moment"
-    return semantic.dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc, out_dtype, lhs_k_pack, rhs_k_pack, _builder)
+    return semantic.dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc, out_dtype, lhs_k_pack,
+                               rhs_k_pack, _builder)
 
 
 # -----------------------
@@ -1584,7 +1589,7 @@ def dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc=None,
 
 @builtin
 def load(pointer, mask=None, other=None, boundary_check=(), padding_option="", cache_modifier="", eviction_policy="",
-         volatile=False, care_padding = True, _builder=None):
+         volatile=False, care_padding=True, _builder=None):
     """
     Return a tensor of data whose values are loaded from memory at location defined by `pointer`:
 
@@ -2195,6 +2200,7 @@ def histogram(input, num_bins, _builder=None, _generator=None):
     num_bins = _constexpr_to_value(num_bins)
     return semantic.histogram(input, num_bins, _builder)
 
+
 @_tensor_member_fn
 @builtin
 def gather(src, index, axis, _builder=None):
@@ -2208,6 +2214,7 @@ def gather(src, index, axis, _builder=None):
     """
     axis = _constexpr_to_value(axis)
     return semantic.gather(src, index, axis, _builder)
+
 
 # -----------------------
 # Compiler Hint Ops
@@ -2896,7 +2903,6 @@ class tuple_type(base_type):
 
     def mangle(self):
         return 'T' + '_'.join(ty.mangle for ty in self.types) + 'T'
-
 
 
 class dtype_3_4(base_type):

@@ -53,9 +53,7 @@ testlist1 = [
     (10, 13, 35, 39),
 ]
 
-testlist2 = [
-    (16, 32, 16)
-]
+testlist2 = [(16, 32, 16)]
 
 typelist = [
     'float32',

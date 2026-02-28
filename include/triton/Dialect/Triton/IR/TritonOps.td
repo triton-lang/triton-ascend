@@ -1287,7 +1287,7 @@ def TT_ExperimentalTensormapFenceproxyAcquireOp: TT_Op<
 }
 //FIXME TODO: When upgrading to Triton 3.4.0, remove the commented line below
 //
-// Make Tensor Descriptor Op FIXME 
+// Make Tensor Descriptor Op FIXME
 //
 def TT_MakeTensorDescOp : TT_Op<"make_tensor_descriptor", [
     Pure,

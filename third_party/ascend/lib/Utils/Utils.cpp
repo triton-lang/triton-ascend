@@ -78,18 +78,19 @@ static std::optional<int64_t> getConstantOfAttr(const OpFoldResult &arg) {
 
 namespace ConverterUtils {
 
-std::optional<int64_t> getLastStrideOfReinterpretCastOp(memref::ReinterpretCastOp op) {
+std::optional<int64_t>
+getLastStrideOfReinterpretCastOp(memref::ReinterpretCastOp op) {
   SmallVector<OpFoldResult> mixedStrides = op.getMixedStrides();
   if (mixedStrides.empty()) {
-      op->emitError("ReinterpretCastOp has no strides");
-      return std::nullopt;
+    op->emitError("ReinterpretCastOp has no strides");
+    return std::nullopt;
   }
 
   OpFoldResult lastStride = mixedStrides.back();
 
   if (op.getStaticStrides().back() > 0) {
     return op.getStaticStrides().back();
-  } else if (isa<BlockArgument>(op.getStrides().back()) ) {
+  } else if (isa<BlockArgument>(op.getStrides().back())) {
     auto u = op.getStrides().back();
     while (auto blkArg = dyn_cast<BlockArgument>(u)) {
       if (auto forOp = dyn_cast<scf::ForOp>(blkArg.getOwner()->getParentOp())) {
@@ -100,7 +101,8 @@ std::optional<int64_t> getLastStrideOfReinterpretCastOp(memref::ReinterpretCastO
         break;
       }
     }
-    if (!u) return std::nullopt;
+    if (!u)
+      return std::nullopt;
     lastStride = u;
   }
 
@@ -111,8 +113,7 @@ std::optional<int64_t> getLastStrideOfReinterpretCastOp(memref::ReinterpretCastO
     if (auto constIndexOp = dyn_cast<arith::ConstantIndexOp>(defOp)) {
       int64_t constValue = constIndexOp.value();
       return constValue;
-    }
-    else if (auto constIntOp = dyn_cast<arith::ConstantIntOp>(defOp)) {
+    } else if (auto constIntOp = dyn_cast<arith::ConstantIntOp>(defOp)) {
       int64_t constValue = constIntOp.value();
       return constValue;
     }
@@ -123,17 +124,21 @@ std::optional<int64_t> getLastStrideOfReinterpretCastOp(memref::ReinterpretCastO
 bool isaPermutedMemRefType(MemRefType memRefType) {
   auto [ptrStrides, ptrOffsets] = getStridesAndOffset(memRefType);
   LLVM_DEBUG({
-    llvm::dbgs()<<"---------- [BEG] ptrStrides ----------\n";
-    for(auto stride: ptrStrides)llvm::dbgs()<<stride<<" ";llvm::dbgs()<<"\n";
-    llvm::dbgs()<<"---------- [END] ptrStrides ----------\n";
+    llvm::dbgs() << "---------- [BEG] ptrStrides ----------\n";
+    for (auto stride : ptrStrides)
+      llvm::dbgs() << stride << " ";
+    llvm::dbgs() << "\n";
+    llvm::dbgs() << "---------- [END] ptrStrides ----------\n";
   });
 
   switch (ptrStrides.size()) {
-    case 0: return false;
-    case 1: return false;
-    default: {
-      return ptrStrides[ptrStrides.size()-1] != 1;
-    }
+  case 0:
+    return false;
+  case 1:
+    return false;
+  default: {
+    return ptrStrides[ptrStrides.size() - 1] != 1;
+  }
   }
 }
 
@@ -244,11 +249,10 @@ memref::SubViewOp makeSubViewOp(Value src,
                                             src, offsets, sizes, strides);
 }
 
-tensor::ExtractSliceOp makeExtractSliceOp(Value src,
-                                          const llvm::SmallVector<OpFoldResult> &offsets,
-                                          const llvm::SmallVector<OpFoldResult> &sizes,
-                                          const Location &loc,
-                                          ConversionPatternRewriter &rewriter) {
+tensor::ExtractSliceOp
+makeExtractSliceOp(Value src, const llvm::SmallVector<OpFoldResult> &offsets,
+                   const llvm::SmallVector<OpFoldResult> &sizes,
+                   const Location &loc, ConversionPatternRewriter &rewriter) {
   auto srcType = cast<RankedTensorType>(src.getType());
   SmallVector<OpFoldResult> strides(srcType.getRank(),
                                     rewriter.getIndexAttr(1));
@@ -498,18 +502,18 @@ void traverseBackwardUpdateOperandChainIf(
       auto blockArgument = cast<BlockArgument>(operand);
       auto parentOp = blockArgument.getOwner()->getParentOp();
       if (auto whileOp = dyn_cast<scf::WhileOp>(parentOp);
-        whileOp && whileOp.getAfterBody() == blockArgument.getOwner()) {
+          whileOp && whileOp.getAfterBody() == blockArgument.getOwner()) {
         auto argNum = blockArgument.getArgNumber();
         auto conditionArg = whileOp.getConditionOp().getArgs()[argNum];
         handler(conditionArg);
-      } else if (auto loopOp =
-          dyn_cast<LoopLikeOpInterface>(parentOp)) {
+      } else if (auto loopOp = dyn_cast<LoopLikeOpInterface>(parentOp)) {
         OpOperand *initArgOperand = loopOp.getTiedLoopInit(blockArgument);
         if (!initArgOperand)
           return;
         Value initArg = initArgOperand->get();
         handler(initArg);
-        Value yieldedValue = loopOp.getTiedLoopYieldedValue(blockArgument)->get();
+        Value yieldedValue =
+            loopOp.getTiedLoopYieldedValue(blockArgument)->get();
         if (yieldedValue != blockArgument)
           handler(yieldedValue);
       }
@@ -521,7 +525,7 @@ void traverseBackwardUpdateOperandChainIf(
   }
 
   if (auto loopOp = dyn_cast<LoopLikeOpInterface>(op)) {
-    for (auto yieldedValue: loopOp.getYieldedValues())
+    for (auto yieldedValue : loopOp.getYieldedValues())
       handler(yieldedValue);
   }
 }
@@ -535,8 +539,8 @@ void traverseBackwardUpdateOperandChainIf(
   OpBuilder builder(rootOp->getContext());
   DenseSet<Operation *> handledOperation;
 
-  traverseBackwardUpdateOperandChainIf(rootOp, conditionFn, stopFn, actionFn, builder,
-                                       handledOperation);
+  traverseBackwardUpdateOperandChainIf(rootOp, conditionFn, stopFn, actionFn,
+                                       builder, handledOperation);
 }
 
 void traverseForwardUpdateUserChainIf(
@@ -642,7 +646,6 @@ ModuleOp getModuleOpFromOperation(Operation *op) {
 }
 
 } // namespace triton
-
 
 // TODO: imply these function below
 OpFoldResult addOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
@@ -872,136 +875,151 @@ OpFoldResult maxOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
   return b.create<arith::MaxSIOp>(loc, lhsValue, rhsValue).getResult();
 }
 
-void addReduceWithIndexAttr(ReduceWithIndexParams params, ConversionPatternRewriter &rewriter, linalg::ReduceOp reduceOp)
-{
-    const StringRef reduceRef = "reduce_mode";
-    const StringRef tieBreakLeftRef = "tie_break_left";
-    const StringRef unsignedSrcRef = "unsigned_src";
+void addReduceWithIndexAttr(ReduceWithIndexParams params,
+                            ConversionPatternRewriter &rewriter,
+                            linalg::ReduceOp reduceOp) {
+  const StringRef reduceRef = "reduce_mode";
+  const StringRef tieBreakLeftRef = "tie_break_left";
+  const StringRef unsignedSrcRef = "unsigned_src";
 
-    const StringRef tieBreakStr = params.tieBreakType == TieBreakType::LEFT ? "true" : "false";
-    const StringRef withIndexStr = params.withIndexType == ReduceWithIndexType::MAX ? "max_with_index" : "min_with_index";
-    const StringRef unsignedSrcStr = params.isUnsignedSrc ? "true" : "false";
+  const StringRef tieBreakStr =
+      params.tieBreakType == TieBreakType::LEFT ? "true" : "false";
+  const StringRef withIndexStr =
+      params.withIndexType == ReduceWithIndexType::MAX ? "max_with_index"
+                                                       : "min_with_index";
+  const StringRef unsignedSrcStr = params.isUnsignedSrc ? "true" : "false";
 
-    reduceOp->setAttr(reduceRef, rewriter.getStringAttr(withIndexStr));
-    reduceOp->setAttr(tieBreakLeftRef, rewriter.getStringAttr(tieBreakStr));
-    reduceOp->setAttr(unsignedSrcRef, rewriter.getStringAttr(unsignedSrcStr));
+  reduceOp->setAttr(reduceRef, rewriter.getStringAttr(withIndexStr));
+  reduceOp->setAttr(tieBreakLeftRef, rewriter.getStringAttr(tieBreakStr));
+  reduceOp->setAttr(unsignedSrcRef, rewriter.getStringAttr(unsignedSrcStr));
 }
 
-llvm::FailureOr<ReduceWithIndexParams> getReduceWithIndexParams(triton::ReduceOp op)
-{
-    auto tritonReduceBlock = op.getBody();
-    auto *tritonYield = tritonReduceBlock->getTerminator();
-    auto yieldValues = tritonYield->getOperands();
-    constexpr int yieldValuesNum = 2;
-    if (yieldValues.empty()) {
-      return llvm::failure();
+llvm::FailureOr<ReduceWithIndexParams>
+getReduceWithIndexParams(triton::ReduceOp op) {
+  auto tritonReduceBlock = op.getBody();
+  auto *tritonYield = tritonReduceBlock->getTerminator();
+  auto yieldValues = tritonYield->getOperands();
+  constexpr int yieldValuesNum = 2;
+  if (yieldValues.empty()) {
+    return llvm::failure();
+  }
+  if (yieldValues.size() != yieldValuesNum) {
+    return ReduceWithIndexParams{};
+  }
+
+  // Unify signed/unsigned and int/float predicate
+  enum class Predicate { Undefined = 0, lt = 1, gt = 2, eq = 3 };
+  enum class Signedness { NotApplicable = 0, Signed = 1, Unsigned = 2 };
+  auto unifyPredicateI =
+      [](arith::CmpIPredicate p) -> std::pair<Predicate, Signedness> {
+    switch (p) {
+    case arith::CmpIPredicate::slt:
+      return {Predicate::lt, Signedness::Signed};
+    case arith::CmpIPredicate::ult:
+      return {Predicate::lt, Signedness::Unsigned};
+    case arith::CmpIPredicate::sgt:
+      return {Predicate::gt, Signedness::Signed};
+    case arith::CmpIPredicate::ugt:
+      return {Predicate::gt, Signedness::Unsigned};
+    case arith::CmpIPredicate::eq:
+      return {Predicate::eq, Signedness::NotApplicable};
+    default:
+      return {Predicate::Undefined, Signedness::NotApplicable};
     }
-    if (yieldValues.size() != yieldValuesNum) {
-      return ReduceWithIndexParams{};
+  };
+  auto unifyPredicateF =
+      [](arith::CmpFPredicate p) -> std::pair<Predicate, Signedness> {
+    switch (p) {
+    case arith::CmpFPredicate::OLT:
+      return {Predicate::lt, Signedness::Signed};
+    case arith::CmpFPredicate::ULT:
+      return {Predicate::lt, Signedness::Unsigned};
+    case arith::CmpFPredicate::OGT:
+      return {Predicate::gt, Signedness::Signed};
+    case arith::CmpFPredicate::UGT:
+      return {Predicate::gt, Signedness::Unsigned};
+    case arith::CmpFPredicate::OEQ:
+      return {Predicate::eq, Signedness::Signed};
+    case arith::CmpFPredicate::UEQ:
+      return {Predicate::eq, Signedness::Unsigned};
+    default:
+      return {Predicate::Undefined, Signedness::NotApplicable};
     }
+  };
 
-    // Unify signed/unsigned and int/float predicate
-    enum class Predicate { Undefined = 0, lt = 1, gt = 2, eq = 3 };
-    enum class Signedness { NotApplicable = 0, Signed = 1, Unsigned = 2 };
-    auto unifyPredicateI = [](arith::CmpIPredicate p) -> std::pair<Predicate, Signedness> {
-        switch (p) {
-            case arith::CmpIPredicate::slt:
-                return {Predicate::lt, Signedness::Signed};
-            case arith::CmpIPredicate::ult:
-                return {Predicate::lt, Signedness::Unsigned};
-            case arith::CmpIPredicate::sgt:
-                return {Predicate::gt, Signedness::Signed};
-            case arith::CmpIPredicate::ugt:
-                return {Predicate::gt, Signedness::Unsigned};
-            case arith::CmpIPredicate::eq:
-                return {Predicate::eq, Signedness::NotApplicable};
-            default:
-                return {Predicate::Undefined, Signedness::NotApplicable};
-        }
-    };
-    auto unifyPredicateF = [](arith::CmpFPredicate p) -> std::pair<Predicate, Signedness> {
-        switch (p) {
-            case arith::CmpFPredicate::OLT:
-                return {Predicate::lt, Signedness::Signed};
-            case arith::CmpFPredicate::ULT:
-                return {Predicate::lt, Signedness::Unsigned};
-            case arith::CmpFPredicate::OGT:
-                return {Predicate::gt, Signedness::Signed};
-            case arith::CmpFPredicate::UGT:
-                return {Predicate::gt, Signedness::Unsigned};
-            case arith::CmpFPredicate::OEQ:
-                return {Predicate::eq, Signedness::Signed};
-            case arith::CmpFPredicate::UEQ:
-                return {Predicate::eq, Signedness::Unsigned};
-            default:
-                return {Predicate::Undefined, Signedness::NotApplicable};
-        }
-    };
+  // Composite predicate to pick index of min (or max) element have to be
+  // written in following form: (v means value and i means index)
+  // For leftmost element:
+  //    (new_v == old_v and new_i < old_i) or new_v < old_v
+  //    new_v < old_v or (new_v == old_v and new_i < old_i)
+  //    new_v < old_v // python3.11 ttir
+  //    (new_v == old_v and new_i < old_i) or new_v > old_v
+  //    new_v > old_v or (new_v == old_v and new_i < old_i)
+  //    new_v > old_v // python3.11 ttir
+  // For rightmost element:
+  //    (new_v == old_v and new_i > old_i) or new_v < old_v
+  //    new_v < old_v or (new_v == old_v and new_i > old_i)
+  //    (new_v == old_v and new_i > old_i) or new_v > old_v
+  //    new_v > old_v or (new_v == old_v and new_i > old_i)
 
-    // Composite predicate to pick index of min (or max) element have to be
-    // written in following form: (v means value and i means index)
-    // For leftmost element:
-    //    (new_v == old_v and new_i < old_i) or new_v < old_v
-    //    new_v < old_v or (new_v == old_v and new_i < old_i)
-    //    new_v < old_v // python3.11 ttir
-    //    (new_v == old_v and new_i < old_i) or new_v > old_v
-    //    new_v > old_v or (new_v == old_v and new_i < old_i)
-    //    new_v > old_v // python3.11 ttir
-    // For rightmost element:
-    //    (new_v == old_v and new_i > old_i) or new_v < old_v
-    //    new_v < old_v or (new_v == old_v and new_i > old_i)
-    //    (new_v == old_v and new_i > old_i) or new_v > old_v
-    //    new_v > old_v or (new_v == old_v and new_i > old_i)
+  std::map<std::vector<Predicate>, std::pair<ReduceWithIndexType, TieBreakType>>
+      m{
+          // leftmost
+          {{Predicate::eq, Predicate::lt, Predicate::lt},
+           {ReduceWithIndexType::MIN, TieBreakType::LEFT}},
+          {{Predicate::lt, Predicate::eq, Predicate::lt},
+           {ReduceWithIndexType::MIN, TieBreakType::LEFT}},
+          {{Predicate::lt}, {ReduceWithIndexType::MIN, TieBreakType::LEFT}},
+          {{Predicate::eq, Predicate::lt, Predicate::gt},
+           {ReduceWithIndexType::MAX, TieBreakType::LEFT}},
+          {{Predicate::gt, Predicate::eq, Predicate::lt},
+           {ReduceWithIndexType::MAX, TieBreakType::LEFT}},
+          {{Predicate::gt}, {ReduceWithIndexType::MAX, TieBreakType::LEFT}},
+          // rightmost
+          {{Predicate::eq, Predicate::gt, Predicate::lt},
+           {ReduceWithIndexType::MIN, TieBreakType::RIGHT}},
+          {{Predicate::lt, Predicate::eq, Predicate::gt},
+           {ReduceWithIndexType::MIN, TieBreakType::RIGHT}},
+          {{Predicate::eq, Predicate::gt, Predicate::gt},
+           {ReduceWithIndexType::MAX, TieBreakType::RIGHT}},
+          {{Predicate::gt, Predicate::eq, Predicate::gt},
+           {ReduceWithIndexType::MAX, TieBreakType::RIGHT}},
+      };
 
-    std::map<std::vector<Predicate>, std::pair<ReduceWithIndexType, TieBreakType>> m {
-        // leftmost
-        {{Predicate::eq, Predicate::lt, Predicate::lt}, {ReduceWithIndexType::MIN, TieBreakType::LEFT}},
-        {{Predicate::lt, Predicate::eq, Predicate::lt}, {ReduceWithIndexType::MIN, TieBreakType::LEFT}},
-        {{Predicate::lt}, {ReduceWithIndexType::MIN, TieBreakType::LEFT}},
-        {{Predicate::eq, Predicate::lt, Predicate::gt}, {ReduceWithIndexType::MAX, TieBreakType::LEFT}},
-        {{Predicate::gt, Predicate::eq, Predicate::lt}, {ReduceWithIndexType::MAX, TieBreakType::LEFT}},
-        {{Predicate::gt}, {ReduceWithIndexType::MAX, TieBreakType::LEFT}},
-        // rightmost
-        {{Predicate::eq, Predicate::gt, Predicate::lt}, {ReduceWithIndexType::MIN, TieBreakType::RIGHT}},
-        {{Predicate::lt, Predicate::eq, Predicate::gt}, {ReduceWithIndexType::MIN, TieBreakType::RIGHT}},
-        {{Predicate::eq, Predicate::gt, Predicate::gt}, {ReduceWithIndexType::MAX, TieBreakType::RIGHT}},
-        {{Predicate::gt, Predicate::eq, Predicate::gt}, {ReduceWithIndexType::MAX, TieBreakType::RIGHT}},
-    };
-
-    std::vector<Predicate> preds;
-    std::vector<Signedness> signednesses;
-    // A better way is to trace the arith.select
-    // Checking the operations one by one is hacky :(
-    for (auto &op : tritonReduceBlock->without_terminator()) {
-      Predicate pred = Predicate::Undefined;
-      Signedness signedness = Signedness::NotApplicable;
-      if (auto cmpiOp = dyn_cast<arith::CmpIOp>(op)) {
-        auto predi = cmpiOp.getPredicate();
-        std::tie(pred, signedness) = unifyPredicateI(predi);
-      }
-      if (auto cmpfOp = dyn_cast<arith::CmpFOp>(op)) {
-        auto predf = cmpfOp.getPredicate();
-        std::tie(pred, signedness) = unifyPredicateF(predf);
-      }
-      if (pred != Predicate::Undefined) {
-        preds.push_back(pred);
-        signednesses.push_back(signedness);
-      }
+  std::vector<Predicate> preds;
+  std::vector<Signedness> signednesses;
+  // A better way is to trace the arith.select
+  // Checking the operations one by one is hacky :(
+  for (auto &op : tritonReduceBlock->without_terminator()) {
+    Predicate pred = Predicate::Undefined;
+    Signedness signedness = Signedness::NotApplicable;
+    if (auto cmpiOp = dyn_cast<arith::CmpIOp>(op)) {
+      auto predi = cmpiOp.getPredicate();
+      std::tie(pred, signedness) = unifyPredicateI(predi);
     }
-
-    // check if sequence of predicates matches any sequence for min/max
-    // leftmost/rightmost
-    if (m.find(preds) == m.end()) {
-        return llvm::failure();
+    if (auto cmpfOp = dyn_cast<arith::CmpFOp>(op)) {
+      auto predf = cmpfOp.getPredicate();
+      std::tie(pred, signedness) = unifyPredicateF(predf);
     }
+    if (pred != Predicate::Undefined) {
+      preds.push_back(pred);
+      signednesses.push_back(signedness);
+    }
+  }
 
-    assert(!signednesses.empty());
-    const bool isUnsignedSrc =
-        signednesses[0] == Signedness::Unsigned ||
-        signednesses[signednesses.size() - 1] == Signedness::Unsigned;
-    return ReduceWithIndexParams{.withIndexType = m.at(preds).first,
-                                 .tieBreakType = m.at(preds).second,
-                                 .isUnsignedSrc = isUnsignedSrc};
+  // check if sequence of predicates matches any sequence for min/max
+  // leftmost/rightmost
+  if (m.find(preds) == m.end()) {
+    return llvm::failure();
+  }
+
+  assert(!signednesses.empty());
+  const bool isUnsignedSrc =
+      signednesses[0] == Signedness::Unsigned ||
+      signednesses[signednesses.size() - 1] == Signedness::Unsigned;
+  return ReduceWithIndexParams{.withIndexType = m.at(preds).first,
+                               .tieBreakType = m.at(preds).second,
+                               .isUnsignedSrc = isUnsignedSrc};
 }
 
 // Fold layout constant info to attr, otherwise convert to index type value
@@ -1070,7 +1088,7 @@ FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue value,
 
   std::map<std::pair<TypelessValue, const void *>,
            std::variant<int8_t, int16_t, int32_t, int64_t, uint32_t, uint64_t,
-           llvm::APFloat>>
+                        llvm::APFloat>>
       initMap = {
           {{TypelessValue::Zero, toPtr(f16Ty)}, halfZero},
           {{TypelessValue::Zero, toPtr(f32Ty)}, floatZero},
@@ -1186,18 +1204,17 @@ FailureOr<Value> specializeTypelessValueToConstant(TypelessValue value,
 }
 
 std::optional<int64_t> getIntAttr(const OpFoldResult ofr) {
-    Attribute attr;
-    if (auto val = dyn_cast<Value>(ofr)) {
-        if (!val.getDefiningOp<arith::ConstantOp>())
-            return std::nullopt;
-        attr = cast<IntegerAttr>(
-            val.getDefiningOp<arith::ConstantOp>().getValue());
-    } else {
-        attr = dyn_cast<Attribute>(ofr);
-    }
-    if (attr && isa<IntegerAttr>(attr))
-        return dyn_cast<IntegerAttr>(attr).getInt();
-    return std::nullopt;
+  Attribute attr;
+  if (auto val = dyn_cast<Value>(ofr)) {
+    if (!val.getDefiningOp<arith::ConstantOp>())
+      return std::nullopt;
+    attr = cast<IntegerAttr>(val.getDefiningOp<arith::ConstantOp>().getValue());
+  } else {
+    attr = dyn_cast<Attribute>(ofr);
+  }
+  if (attr && isa<IntegerAttr>(attr))
+    return dyn_cast<IntegerAttr>(attr).getInt();
+  return std::nullopt;
 }
 
 Value materializeValue(OpBuilder &builder, Location loc, OpFoldResult ofr) {
@@ -1207,7 +1224,8 @@ Value materializeValue(OpBuilder &builder, Location loc, OpFoldResult ofr) {
 
   auto intVal = getIntAttr(ofr);
   if (intVal.has_value()) {
-    return builder.create<arith::ConstantOp>(loc, builder.getI32IntegerAttr(intVal.value()));
+    return builder.create<arith::ConstantOp>(
+        loc, builder.getI32IntegerAttr(intVal.value()));
   }
   assert(intVal.has_value());
   return Value();
@@ -1217,23 +1235,22 @@ Value materializeValue(OpBuilder &builder, Location loc, OpFoldResult ofr) {
 }
 
 bool isZero(const OpFoldResult ofr) {
-    auto staticOfr = getIntAttr(ofr);
-    return staticOfr.has_value() && staticOfr.value() == 0;
+  auto staticOfr = getIntAttr(ofr);
+  return staticOfr.has_value() && staticOfr.value() == 0;
 }
 
 bool isOne(const OpFoldResult ofr) {
-    auto staticOfr = getIntAttr(ofr);
-    return staticOfr.has_value() && staticOfr.value() == 1;
+  auto staticOfr = getIntAttr(ofr);
+  return staticOfr.has_value() && staticOfr.value() == 1;
 }
 
 Value convertToIndexIfNeeded(Value input, const Location &loc, OpBuilder &b) {
-    auto inputType = input.getType();
-    if (auto intType = dyn_cast<IntegerType>(inputType)) {
-      if (intType.isInteger(32) || intType.isInteger(64)) {
-        return b.create<arith::IndexCastOp>(
-          loc, b.getIndexType(), input);
-      }
+  auto inputType = input.getType();
+  if (auto intType = dyn_cast<IntegerType>(inputType)) {
+    if (intType.isInteger(32) || intType.isInteger(64)) {
+      return b.create<arith::IndexCastOp>(loc, b.getIndexType(), input);
     }
-    return input;
+  }
+  return input;
 }
 } // namespace mlir

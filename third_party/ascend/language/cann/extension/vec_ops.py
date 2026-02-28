@@ -7,34 +7,24 @@
 
 import triton.language as tl
 from triton.language import semantic, core, standard
-from triton.language.core import (
-    _constexpr_to_value,
-    _tensor_member_fn,
-    _unwrap_iterable,
-    builtin,
-    constexpr,
-    dtype,
-    tensor,
-    check_bit_width,
-    _unwrap_if_constexpr,
-    range
-)
+from triton.language.core import (_constexpr_to_value, _tensor_member_fn, _unwrap_iterable, builtin, constexpr, dtype,
+                                  tensor, check_bit_width, _unwrap_if_constexpr, range)
 from triton.language.semantic import (
-    wrap_tensor, 
-    _str_to_rounding_mode, 
-    not_equal, 
+    wrap_tensor,
+    _str_to_rounding_mode,
+    not_equal,
     _str_to_dot_input_precision,
-    binary_op_type_checking_impl, 
-    integer_promote_impl, 
-    broadcast_impl_shape, 
-    _str_to_sem, 
-    _str_to_scope, 
+    binary_op_type_checking_impl,
+    integer_promote_impl,
+    broadcast_impl_shape,
+    _str_to_sem,
+    _str_to_scope,
     bitcast,
     bitwise_op_type_checking_impl,
-    to_tensor, 
-    _str_to_load_cache_modifier, 
+    to_tensor,
+    _str_to_load_cache_modifier,
     _str_to_eviction_policy,
-    _str_to_padding_option, 
+    _str_to_padding_option,
     _canonicalize_boundary_check,
 )
 
@@ -43,6 +33,7 @@ from .aux_ops import compile_hint_impl
 
 from typing import Optional, Tuple, List, overload
 from triton._C.libtriton import ir
+
 
 @_tensor_member_fn
 @builtin
@@ -62,12 +53,13 @@ def insert_slice(ful, sub, offsets, sizes, strides, _builder=None, _generator=No
     :type strides: tuple of ints
     """
 
-    def insert_slice_impl(ful: tensor, sub: tensor, offsets: List[tensor], sizes: List[int], strides: List[int], builder: ir.builder) -> tensor:
-        assert(len(ful.shape) == len(offsets))
-        assert(len(ful.shape) == len(sizes))
-        assert(len(ful.shape) == len(strides))
-        assert(all([s>=1 for s in sizes]))
-        assert(all([s>=0 for s in strides]))
+    def insert_slice_impl(ful: tensor, sub: tensor, offsets: List[tensor], sizes: List[int], strides: List[int],
+                          builder: ir.builder) -> tensor:
+        assert (len(ful.shape) == len(offsets))
+        assert (len(ful.shape) == len(sizes))
+        assert (len(ful.shape) == len(strides))
+        assert (all([s >= 1 for s in sizes]))
+        assert (all([s >= 0 for s in strides]))
         # Handle both tensor and int offsets (for interpreter mode)
         new_offsets = []
         for o in offsets:
@@ -84,10 +76,7 @@ def insert_slice(ful, sub, offsets, sizes, strides, _builder=None, _generator=No
 
     assert len(ful.shape) > 0
     assert len(ful.shape) == len(sub.shape)
-    new_offsets = [
-        semantic.to_tensor(o, _builder) if isinstance(o, constexpr) else o
-        for o in offsets
-    ]
+    new_offsets = [semantic.to_tensor(o, _builder) if isinstance(o, constexpr) else o for o in offsets]
     out = insert_slice_impl(ful, sub, new_offsets, sizes, strides, _builder)
     return out
 
@@ -108,12 +97,13 @@ def extract_slice(ful, offsets, sizes, strides, _builder=None, _generator=None) 
     :type strides: tuple of ints
     """
 
-    def extract_slice_impl(ful: tensor, offsets: List[tensor], sizes: List[int], strides: List[int], builder: ir.builder) -> tensor:
-        assert(len(ful.shape) == len(offsets))
-        assert(len(ful.shape) == len(sizes))
-        assert(len(ful.shape) == len(strides))
-        assert(all([s>=1 for s in sizes]))
-        assert(all([s>=0 for s in strides]))
+    def extract_slice_impl(ful: tensor, offsets: List[tensor], sizes: List[int], strides: List[int],
+                           builder: ir.builder) -> tensor:
+        assert (len(ful.shape) == len(offsets))
+        assert (len(ful.shape) == len(sizes))
+        assert (len(ful.shape) == len(strides))
+        assert (all([s >= 1 for s in sizes]))
+        assert (all([s >= 0 for s in strides]))
         # Handle both tensor and int offsets (for interpreter mode)
         new_offsets = []
         for o in offsets:
@@ -129,12 +119,10 @@ def extract_slice(ful, offsets, sizes, strides, _builder=None, _generator=None) 
         return tensor(out, ret_type)
 
     assert len(ful.shape) > 0
-    new_offsets = [
-        semantic.to_tensor(o, _builder) if isinstance(o, constexpr) else o
-        for o in offsets
-    ]
+    new_offsets = [semantic.to_tensor(o, _builder) if isinstance(o, constexpr) else o for o in offsets]
     sub = extract_slice_impl(ful, new_offsets, sizes, strides, _builder)
     return sub
+
 
 @_tensor_member_fn
 @builtin
@@ -165,16 +153,14 @@ def get_element(src, indice, _builder=None, _generator=None):
             else:
                 # Try to use .handle attribute if available
                 new_indice.append(i.handle if hasattr(i, 'handle') else i)
-        
+
         result = builder.create_extract_scalar(src.handle, new_indice)
         return wrap_tensor(result, src.type.scalar, None)
 
     assert len(src.shape) > 0
-    new_indice = [
-        semantic.to_tensor(i, _builder) if isinstance(i, constexpr) else i
-        for i in indice
-    ]
+    new_indice = [semantic.to_tensor(i, _builder) if isinstance(i, constexpr) else i for i in indice]
     return get_element_impl(src, new_indice, _builder)
+
 
 @builtin
 def flip(ptr, dim=-1, _builder=None, _generator=None):
@@ -236,15 +222,11 @@ def flip(ptr, dim=-1, _builder=None, _generator=None):
                     raise ValueError("ascend.flip requires tensor rank >= 1")
                 norm_dim = dim if dim >= 0 else dim + rank
                 if not (0 <= norm_dim < rank):
-                    raise ValueError(
-                        f"ascend.flip got invalid dim={dim} for shape {tuple(shape)}"
-                    )
+                    raise ValueError(f"ascend.flip got invalid dim={dim} for shape {tuple(shape)}")
                 dim = norm_dim
             else:
                 if dim < 0:
-                    raise ValueError(
-                        "ascend.flip with unknown rank requires non-negative dim"
-                    )
+                    raise ValueError("ascend.flip with unknown rank requires non-negative dim")
 
             flipped_vals = builder.create_flip(ptr.handle, dim)
             flipped = tensor(flipped_vals, type=ptr.type)
@@ -262,7 +244,10 @@ def flip(ptr, dim=-1, _builder=None, _generator=None):
             return ptr
         # reshape the swap dimension to (2, 2, ..., 2)
         idtype = core.get_int_dtype(bitwidth=ptr.dtype.primitive_bitwidth, signed=True)
-        y = core.reshape(ptr.to(idtype, bitcast=True, _builder=builder), ptr.shape.__getitem__(slice(None, _dim)) + [2] * steps + ptr.shape.__getitem__(slice(_dim + 1, None)), _builder=builder)
+        y = core.reshape(
+            ptr.to(idtype, bitcast=True, _builder=builder),
+            ptr.shape.__getitem__(slice(None, _dim)) + [2] * steps + ptr.shape.__getitem__(slice(_dim + 1, None)),
+            _builder=builder)
         for i in static_range(steps):
             y = y.__xor__(standard.xor_sum(y, _dim + i, True, _builder=builder, _generator=generator), _builder=builder)
         ptr = core.reshape(y, ptr.shape, _builder=builder).to(ptr.dtype, bitcast=True, _builder=builder)
@@ -282,6 +267,7 @@ class static_range:
     Iterator for non-JIT Python functions that need to iterate over constexpr values.
     This is used in functions like flip that are called during compilation.
     """
+
     def __init__(self, arg1, arg2=None, step=None):
         if step is None:
             self.step = core.constexpr(1)
@@ -328,13 +314,14 @@ def sort(ptr, dim=-1, descending=False, _builder=None):
     """
 
     def sort_impl(ptr: tensor, dim: int, descending, builder: ir.builder):
-        allowed_types = {tl.int8, tl.int16, tl.bfloat16, tl.float16, tl.float32, tl.int32, tl.int64, tl.float8e4nv, tl.float8e5}
+        allowed_types = {
+            tl.int8, tl.int16, tl.bfloat16, tl.float16, tl.float32, tl.int32, tl.int64, tl.float8e4nv, tl.float8e5
+        }
         base_ty = ptr.type.scalar if hasattr(ptr.type, "scalar") else ptr.type
         if base_ty not in allowed_types:
             raise TypeError(
                 f"ascend.sort only supports int8, int16, bfloat16, float16, float32, int32, int64, float8e4nv, float8e5"
-                f"but got {ptr.type}"
-            )
+                f"but got {ptr.type}")
 
         shape = getattr(ptr, "shape", None)
         if shape is None or shape == ():
@@ -353,17 +340,13 @@ def sort(ptr, dim=-1, descending=False, _builder=None):
             last_dim = rank - 1
             norm_dim = dim if dim >= 0 else dim + rank
             if norm_dim != last_dim:
-                raise ValueError(
-                    f"ascend.sort only supports sorting along the last dimension "
-                    f"(dim={last_dim} or -1) for shape {tuple(shape)}, but got dim={dim}"
-                )
+                raise ValueError(f"ascend.sort only supports sorting along the last dimension "
+                                 f"(dim={last_dim} or -1) for shape {tuple(shape)}, but got dim={dim}")
             dim = last_dim
         else:
             if dim != -1:
-                raise ValueError(
-                    "ascend.sort only supports the last dimension; when rank is unknown "
-                    "you must pass dim=-1"
-                )
+                raise ValueError("ascend.sort only supports the last dimension; when rank is unknown "
+                                 "you must pass dim=-1")
 
         if hasattr(descending, "value"):
             descending = bool(descending.value)
@@ -393,8 +376,8 @@ def sort(ptr, dim=-1, descending=False, _builder=None):
     return ret
 
 
-def ascend_cast_impl(input: tensor, dst_ty: dtype, builder: ir.builder,
-         fp_downcast_rounding: Optional[str] = None, overflow_mode: Optional[str] = None) -> tensor:
+def ascend_cast_impl(input: tensor, dst_ty: dtype, builder: ir.builder, fp_downcast_rounding: Optional[str] = None,
+                     overflow_mode: Optional[str] = None) -> tensor:
     src_ty = input.type
     if isinstance(dst_ty, tl.constexpr):
         dst_ty = dst_ty.value
@@ -404,7 +387,7 @@ def ascend_cast_impl(input: tensor, dst_ty: dtype, builder: ir.builder,
         dst_ty = tl.block_type(dst_ty.scalar, input.type.get_block_shapes())
     if src_ty == dst_ty:
         return input
-    
+
     src_sca_ty = src_ty.scalar
     dst_sca_ty = dst_ty.scalar
     if src_sca_ty == dst_sca_ty:
@@ -423,9 +406,9 @@ def ascend_cast_impl(input: tensor, dst_ty: dtype, builder: ir.builder,
             raise ValueError("fp_downcast_rounding should be set only for truncating fp conversions. "
                              "Source scalar type is " + str(src_sca_ty) + " and destination type is " + str(dst_sca_ty))
     if not is_compile_on_910_95:
-       if (src_sca_ty.is_fp8() or dst_sca_ty.is_fp8()) or (src_sca_ty.is_fp64() or dst_sca_ty.is_fp64()):
+        if (src_sca_ty.is_fp8() or dst_sca_ty.is_fp8()) or (src_sca_ty.is_fp64() or dst_sca_ty.is_fp64()):
             raise ValueError("[fp8, fp64] is unsupported on Ascend for now."
-                           "Source scalar type is " + str(src_sca_ty) + " and destination type is " + str(dst_sca_ty))
+                             "Source scalar type is " + str(src_sca_ty) + " and destination type is " + str(dst_sca_ty))
     if (src_sca_ty.is_fp8e4b15() or dst_sca_ty.is_fp8e4b15()):
         assert builder.codegen_fns.get(
             "convert_custom_types") is not None, "target doesn't provide conversion for this type."
@@ -468,7 +451,7 @@ def ascend_cast_impl(input: tensor, dst_ty: dtype, builder: ir.builder,
         if dst_sca_ty.is_bool():
             ty = input.dtype.to_ir(builder)
             _0 = tensor(builder.get_null_value(ty), input.dtype)
-            return not_equal(input, _0, builder) 
+            return not_equal(input, _0, builder)
         elif overflow_mode == "saturate" and \
              (src_sca_ty.is_int_unsigned() or dst_sca_ty.is_int_unsigned()) and \
              src_sca_ty.int_bitwidth >= dst_sca_ty.int_bitwidth:
@@ -505,7 +488,8 @@ def ascend_cast_impl(input: tensor, dst_ty: dtype, builder: ir.builder,
         if bitwidth == 64:
             return tensor(builder.create_ptr_to_int(input.handle, dst_ty.to_ir(builder)), dst_ty)
         if bitwidth == 1:
-            return not_equal(ascend_cast_impl(input, tl.int64, builder), tensor(builder.get_int64(0), tl.int64), builder)
+            return not_equal(ascend_cast_impl(input, tl.int64, builder), tensor(builder.get_int64(0), tl.int64),
+                             builder)
 
     # Casting integer types to pointer types
     if src_sca_ty.is_int() and dst_sca_ty.is_ptr():
@@ -517,9 +501,11 @@ def ascend_cast_impl(input: tensor, dst_ty: dtype, builder: ir.builder,
 
     assert False, f'cannot cast {input} to {dst_ty}'
 
+
 @_tensor_member_fn
 @builtin
-def cast(input, dtype: dtype, fp_downcast_rounding: Optional[str] = None, bitcast: bool = False, overflow_mode: Optional[str] = None, _builder=None):
+def cast(input, dtype: dtype, fp_downcast_rounding: Optional[str] = None, bitcast: bool = False,
+         overflow_mode: Optional[str] = None, _builder=None):
     """
     Casts a tensor to the given :code:`dtype`.
 

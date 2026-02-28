@@ -4,8 +4,8 @@ from triton.language.core import float32, int1
 from ..libdevice import atan, isnan, isinf
 from triton.runtime.jit import jit
 
-
 pi: core.constexpr = math_pi
+
 
 @core._tensor_member_fn
 @jit
@@ -40,6 +40,7 @@ def isfinited(x):
     nan_mask = isnan(x)
     inf_mask = isinf(x)
     return (~nan_mask & ~inf_mask).to(int1)
+
 
 @core._tensor_member_fn
 @jit

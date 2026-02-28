@@ -25,9 +25,9 @@
 
 #include "mlir/Analysis/DataFlow/SparseAnalysis.h"
 
+#include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
-#include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 
 namespace mlir {
 namespace triton {

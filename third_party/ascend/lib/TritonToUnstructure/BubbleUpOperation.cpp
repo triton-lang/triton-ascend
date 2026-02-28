@@ -448,8 +448,8 @@ void BubbleUpExtract<ExtractOpTy>::bubbleUpOperation(
 
 template <>
 void BubbleUpExtract<tensor::ExtractOp>::bubbleUpOperation(
-    tensor::ExtractOp op, tensor::ExtractSliceOp parentOp,
-    Location loc, PatternRewriter &rewriter) const {
+    tensor::ExtractOp op, tensor::ExtractSliceOp parentOp, Location loc,
+    PatternRewriter &rewriter) const {
   SmallVector<Value> newIndices;
   for (const auto &[offset, index] :
        llvm::zip_equal(parentOp.getMixedOffsets(), op.getIndices())) {

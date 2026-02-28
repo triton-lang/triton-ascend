@@ -96,7 +96,7 @@ def test_npu_1d(shape, dtype):
 ### Difference Analysis
 Ascend NPUs are equipped with multiple compute cores (AI cores), categorized into cube cores and vector cores. The exact number of AI cores varies by chip model and can be queried through the driver.active.utils.get_device_properties API. When executing a Triton kernel, the runtime APIs allow the number of concurrent tasks to exceed the available physical AI cores—though the total number of concurrent tasks is capped at 65,535. In such cases, these tasks are divided into multiple batches and scheduled to NPUs for execution. Crucially, the number of concurrent tasks within each individual batch still cannot surpass the number of physical AI cores. This batch scheduling introduces additional device-side overhead, which can impact the overall execution performance of Triton operators.
 
-To maximize the utilization of physical AI core resources on NPUs for accelerated parallel computing and minimize batch scheduling overhead, it is advisable to set the number of concurrent tasks to match the number of the underlying physical AI cores. For Triton operators that perform only vector core computations, the number of concurrent tasks should be equal to the number of vector cores. For other types of Triton operators (those using tl.dot), the number of concurrent tasks should be equal to the total number of AI cores. 
+To maximize the utilization of physical AI core resources on NPUs for accelerated parallel computing and minimize batch scheduling overhead, it is advisable to set the number of concurrent tasks to match the number of the underlying physical AI cores. For Triton operators that perform only vector core computations, the number of concurrent tasks should be equal to the number of vector cores. For other types of Triton operators (those using tl.dot), the number of concurrent tasks should be equal to the total number of AI cores.
 Tips: **TRITON_ALL_BLOCKS_PARALLEL** controls the automatic optimization of the number of logical cores based on the number of physical cores. This feature can be enabled only when logical cores can execute in parallel. When the number of logical cores is greater than the number of physical cores, enabling this feature will instruct the compiler to automatically adjust the number of logical cores to match the number of physical cores, thereby reducing scheduling overhead.
 |Dimension   |             Core Structure                  |                     Operator Type                   |
 |--------|----------------------------------------|------------------------------------------------|
@@ -105,27 +105,27 @@ Tips: **TRITON_ALL_BLOCKS_PARALLEL** controls the automatic optimization of the 
 
 
 ## FAQ
-After completing the basic migration procedure, you may encounter the following two types of new issues: 
-1. **coreDim** limit 
-This issue is triggered when grid dimensions exceed the hardware limit of NPUs. 
-Typical error message: `coreDim=xxxx can't be greater than UINT16_MAX`. 
-2. UB space overflow 
-Memory usage exceeds the NPU cache capacity. 
-Typical error message: `ub overflow, requires xxxx bits while 1572684 bits available!`. 
+After completing the basic migration procedure, you may encounter the following two types of new issues:
+1. **coreDim** limit
+This issue is triggered when grid dimensions exceed the hardware limit of NPUs.
+Typical error message: `coreDim=xxxx can't be greater than UINT16_MAX`.
+2. UB space overflow
+Memory usage exceeds the NPU cache capacity.
+Typical error message: `ub overflow, requires xxxx bits while 1572684 bits available!`.
 
 
 ### Solving the coreDim Limit Issue
-Issue analysis: 
-The **coreDim** parameter of NPUs cannot exceed **UINT16_MAX** (**65535**). When processing large-scale data, simplistic grid division may exceed this limit. 
+Issue analysis:
+The **coreDim** parameter of NPUs cannot exceed **UINT16_MAX** (**65535**). When processing large-scale data, simplistic grid division may exceed this limit.
 
-Case: Optimizing the `zeros_like` function   
-(data scale `N = 1073741824`; original `BLOCK_SIZE = 2048`; calculated `coreDim = 524288`, exceeding the limit of **65535**) 
+Case: Optimizing the `zeros_like` function
+(data scale `N = 1073741824`; original `BLOCK_SIZE = 2048`; calculated `coreDim = 524288`, exceeding the limit of **65535**)
 
-Solution 1: 
-To address the **coreDim** limit in the Ascend compiler, one solution is to set the environment variable *'TRITON_ALL_BLOCKS_PARALLEL'* to **1** by running this command: 
-export TRITON_ALL_BLOCKS_PARALLEL=1  
-Solution 2: 
-Another solution is to increase **BLOCK_SIZE** to reduce the number of required cores and ensure that **coreDim** remains within the limit. 
+Solution 1:
+To address the **coreDim** limit in the Ascend compiler, one solution is to set the environment variable *'TRITON_ALL_BLOCKS_PARALLEL'* to **1** by running this command:
+export TRITON_ALL_BLOCKS_PARALLEL=1
+Solution 2:
+Another solution is to increase **BLOCK_SIZE** to reduce the number of required cores and ensure that **coreDim** remains within the limit.
 The calculation follows: `coreDim = ceil(N / BLOCK_SIZE)`. → It needs to satisfy `ceil(N / BLOCK_SIZE) <= 65535 => BLOCK_SIZE >= ceil(N / 65535)`. Given `N = 1073741824`, we have `BLOCK_SIZE >= triton.next_power_of_2(triton.cdiv(1073741824, 65535)) = 32768`. Therefore, **32768** is the minimum safe value.
 
 Code before optimization:
@@ -189,11 +189,11 @@ def zeros_like(x, *, dtype=None, layout=None, device=None, pin_memory=None, memo
 
     out = torch.empty_like(x, device=device, dtype=dtype)
     N = x.numel()
-    min_block_size = triton.next_power_of_2(triton.cdiv(N, 65535)) 
+    min_block_size = triton.next_power_of_2(triton.cdiv(N, 65535))
     BLOCK_SIZE = max(32768, min_block_size) # The minimum value is 32768.
-    grid_fn = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),) 
+    grid_fn = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
 
-    zeros_kernel[grid_fn](out, N, BLOCK_SIZE=BLOCK_SIZE) 
+    zeros_kernel[grid_fn](out, N, BLOCK_SIZE=BLOCK_SIZE)
     return out
 ```
 
@@ -208,14 +208,14 @@ return out
 ```
 
 ### Handling the Compound Issue: coreDim + UB Overflow
-Issue analysis: 
-In some scenarios, solving the **coreDim** limit issue may inadvertently trigger a new issue—UB overflow. This typically occurs when increasing **BLOCK_SIZE** causes the data volume processed by a single thread block to exceed the UB cache capacity of NPUs. 
+Issue analysis:
+In some scenarios, solving the **coreDim** limit issue may inadvertently trigger a new issue—UB overflow. This typically occurs when increasing **BLOCK_SIZE** causes the data volume processed by a single thread block to exceed the UB cache capacity of NPUs.
 
-Case:   
-Data scale `N = 1073741824`; original `BLOCK_SIZE = 4096`; calculated `coreDim = 262144`, exceeding the limit of **65535**. After **BLOCK_SIZE** is adjusted to **32768**, **coreDim** is **32768** (within the limit), but UB overflow occurs. 
+Case:
+Data scale `N = 1073741824`; original `BLOCK_SIZE = 4096`; calculated `coreDim = 262144`, exceeding the limit of **65535**. After **BLOCK_SIZE** is adjusted to **32768**, **coreDim** is **32768** (within the limit), but UB overflow occurs.
 
-Solution: 
-Introduce the **BLOCK_SIZE_SUB** parameter to further subdivide large blocks, thereby controlling memory usage while maintaining a reasonable **coreDim**. 
+Solution:
+Introduce the **BLOCK_SIZE_SUB** parameter to further subdivide large blocks, thereby controlling memory usage while maintaining a reasonable **coreDim**.
 Code before optimization:
 ```diff
 import logging
@@ -288,7 +288,7 @@ def masked_fill(inp, mask, value):
     SUB_BLOCK_SIZE = 1024    # Control the UB usage.
 
     grid = lambda meta: (triton.cdiv(N, MAIN_BLOCK_SIZE),)
-    masked_fill_kernel[grid](inp, expand_mask.to(torch.int), value, out, N, 
+    masked_fill_kernel[grid](inp, expand_mask.to(torch.int), value, out, N,
                         MAIN_BLOCK_SIZE, SUB_BLOCK_SIZE)
     return out
 ```
@@ -298,15 +298,15 @@ Improper data tiling can lead to excessive unaligned memory access or computatio
 
 
 ### Discrete Memory Access and Inefficient Scalar Mapping Observed by Line-by-Line Code Comparison
-Set the environment variable *TRITON_DEBUG* to **1**, save **~/.triton/cache/xxx.ttadapter**, and execute: 
+Set the environment variable *TRITON_DEBUG* to **1**, save **~/.triton/cache/xxx.ttadapter**, and execute:
 ```diff
-bishengir-compile xxx.ttadapter --target=Ascend910B3 --enable-auto-multi-buffer=True --enable-hfusion-compile=true --enable-hivm-compile=true --enable-triton-kernel-compile=true --hivm-compile-args=bishengir-print-ir-after=hivm-inject-sync  
+bishengir-compile xxx.ttadapter --target=Ascend910B3 --enable-auto-multi-buffer=True --enable-hfusion-compile=true --enable-hivm-compile=true --enable-triton-kernel-compile=true --hivm-compile-args=bishengir-print-ir-after=hivm-inject-sync
 ```
-Compare the Triton-Python algorithm's logic with the internal operations of the output intermediate representations (IRs) to identify any operations that are not mapped to instructions. 
-Check whether pure scalar transfer or computation exists in the HIVM IR phase without being mapped to SIMD instructions. If such cases exist, they will create a significant performance bottleneck.   
+Compare the Triton-Python algorithm's logic with the internal operations of the output intermediate representations (IRs) to identify any operations that are not mapped to instructions.
+Check whether pure scalar transfer or computation exists in the HIVM IR phase without being mapped to SIMD instructions. If such cases exist, they will create a significant performance bottleneck.
 
-Problem: Discrete memory access and inefficient scalar mapping 
-Given `b[1024, 32] = a[1024, 32]`, the original Triton code binds thread blocks to the lowest dimension `32` in `[1024, 32]`, and then splits `1024` into `16` parts, yielding `[64, 16, 32]`. Finally, it binds thread blocks to dimension `64`. 
+Problem: Discrete memory access and inefficient scalar mapping
+Given `b[1024, 32] = a[1024, 32]`, the original Triton code binds thread blocks to the lowest dimension `32` in `[1024, 32]`, and then splits `1024` into `16` parts, yielding `[64, 16, 32]`. Finally, it binds thread blocks to dimension `64`.
 ```diff
 chunk_fwd_kernel_o[(NT, B * H)](
     p_g = tl.make_block_ptr(g, (T,), (H,), (i_t * BT,), (BT,), (0,))
@@ -323,11 +323,11 @@ chunk_fwd_kernel_o[(NT, B * H)](
 
 Optimization Approach
 
-Adjust **shape** and **stride** for **block_ptr** as follows: 
-The shape (1024, 32) is treated as a 2D matrix, where the lowest dimension `32` is contiguous. Accordingly, the stride should be `(32, 1)` instead of `(32,)`. This enables each thread block to access 32 contiguous elements. Bind thread blocks to the row dimension `(1024)` and configure each thread to process all 32 elements in a row. This approach guarantees contiguous memory access and high memory affinity 
+Adjust **shape** and **stride** for **block_ptr** as follows:
+The shape (1024, 32) is treated as a 2D matrix, where the lowest dimension `32` is contiguous. Accordingly, the stride should be `(32, 1)` instead of `(32,)`. This enables each thread block to access 32 contiguous elements. Bind thread blocks to the row dimension `(1024)` and configure each thread to process all 32 elements in a row. This approach guarantees contiguous memory access and high memory affinity
 
 Example:
-```diff 
+```diff
 block_ptr = tl.make_block_ptr(
     base=input_ptr,
     shape=(1024, 32),

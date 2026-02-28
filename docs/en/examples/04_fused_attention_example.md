@@ -267,7 +267,7 @@ class _attention(torch.autograd.Function):
         o = torch.empty_like(q)
         stage = 3 if causal else 1
         extra_kern_args = {}
-        
+
 
         # Number of NPU cores (adjust based on hardware)
         num_cores = 20

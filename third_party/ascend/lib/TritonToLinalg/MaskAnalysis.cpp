@@ -46,8 +46,8 @@ namespace triton {
 namespace {
 
 template <typename MemAccOpTy>
-std::optional<MaskState> runMaskAnalysisImpl(MemAccOpTy op, OpBuilder &builder)
-{
+std::optional<MaskState> runMaskAnalysisImpl(MemAccOpTy op,
+                                             OpBuilder &builder) {
   auto mask = op.getMask();
   if (!mask) {
     return std::nullopt;
@@ -78,7 +78,7 @@ LogicalResult MaskState::parse(Value operand, const Location &loc,
       if (initArgOperand) {
         Value initArg = initArgOperand->get();
         return parse(initArg, loc, builder);
-      }    
+      }
     }
   }
 
@@ -148,10 +148,10 @@ memref::SubViewOp MaskState::getSubview(Value source, const Location &loc,
   fixedOffsets.resize(rank, builder.getIndexAttr(0));
   fixedDims.resize(rank, builder.getIndexAttr(1));
 
-  auto dstType =
-      memref::SubViewOp::inferResultType(sourceType, fixedOffsets, fixedDims, strides);
-  return builder.create<memref::SubViewOp>(loc, cast<MemRefType>(dstType),
-                                           source, fixedOffsets, fixedDims, strides);
+  auto dstType = memref::SubViewOp::inferResultType(sourceType, fixedOffsets,
+                                                    fixedDims, strides);
+  return builder.create<memref::SubViewOp>(
+      loc, cast<MemRefType>(dstType), source, fixedOffsets, fixedDims, strides);
 }
 
 static memref::SubViewOp createSubview(Value src, const Location &loc,
@@ -182,7 +182,8 @@ LogicalResult MaskState::addStates(const MaskState &lhsState,
                                    const Location &loc, OpBuilder &builder) {
   if (lhsState.scalar && rhsState.scalar) {
     InFlightDiagnostic diag =
-        emitWarning(loc) << "Unexpected case where both lhs and rhs are scalars";
+        emitWarning(loc)
+        << "Unexpected case where both lhs and rhs are scalars";
     return failure();
   }
   if (!lhsState.scalar && !rhsState.scalar) {
@@ -267,8 +268,9 @@ LogicalResult MaskState::parseConstant(arith::ConstantOp constOp,
     auto elementType = attr.getElementType();
     assert(attr.isSplat() && isa<IntegerType>(elementType) &&
            "All elements must share a single integer constant value");
-    
-    if (elementType.isInteger(1) && isa<ShapedType>(constOp.getValue().getType())) {
+
+    if (elementType.isInteger(1) &&
+        isa<ShapedType>(constOp.getValue().getType())) {
       auto shapedType = cast<ShapedType>(constOp.getValue().getType());
       auto shape = shapedType.getShape();
       for (size_t i = 0; i < shape.size(); i++) {
@@ -368,7 +370,8 @@ LogicalResult MaskState::parseSel(arith::SelectOp selOp, const Location &loc,
   }
 
   MaskState falseState;
-  if (failed(falseState.parse(falseValue, loc, builder)) || !falseState.scalar) {
+  if (failed(falseState.parse(falseValue, loc, builder)) ||
+      !falseState.scalar) {
     return failure();
   }
 
@@ -376,7 +379,7 @@ LogicalResult MaskState::parseSel(arith::SelectOp selOp, const Location &loc,
   auto falseScalar = dyn_cast<IntegerAttr>(falseState.scalar.get<Attribute>());
 
   if (trueScalar && falseScalar) {
-    if(trueScalar.getInt() == 1 && falseScalar.getInt() == 0) {
+    if (trueScalar.getInt() == 1 && falseScalar.getInt() == 0) {
       start = condState.start;
       end = condState.end;
       dims = condState.dims;
@@ -418,14 +421,14 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
   if (failed(lhsState.parse(lhs, loc, builder))) {
     return failure();
   }
-  
+
   if (failed(rhsState.parse(rhs, loc, builder))) {
     return failure();
   }
 
   if (!(!lhsState.scalar && rhsState.scalar)) {
     InFlightDiagnostic diag = emitWarning(loc)
-                                << "[MaskState] Unsupported cmpi scenario";
+                              << "[MaskState] Unsupported cmpi scenario";
     return failure();
   }
 
@@ -460,7 +463,8 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
   }
   case arith::CmpIPredicate::sle: {
     // lhs <= rhs  <=>  lhs < rhs + 1
-    auto rhsPlusOne = addOpFoldResult(rhsState.scalar, builder.getIndexAttr(1), loc, builder);
+    auto rhsPlusOne =
+        addOpFoldResult(rhsState.scalar, builder.getIndexAttr(1), loc, builder);
     auto realBound = maxOpFoldResult(lhsState.start, rhsPlusOne, loc, builder);
     auto newEnd = minOpFoldResult(lhsState.end, realBound, loc, builder);
     auto newDim = subOpFoldResult(newEnd, lhsState.start, loc, builder);
@@ -656,7 +660,7 @@ void MaskState::eraseInsertedOps(Operation *rawOp, PatternRewriter &rewriter) {
       llvm::dbgs() << "[MaskState]==> inserted op: \n"
                    << *op << "\n[MaskState]<== is removed\n";
     });
-    
+
     rewriter.eraseOp(op);
     for (auto defOp : operandDefOps) {
       worklist.push_back(defOp);
@@ -664,8 +668,7 @@ void MaskState::eraseInsertedOps(Operation *rawOp, PatternRewriter &rewriter) {
   }
 }
 
-std::optional<MaskState> runMaskAnalysis(Operation *op, OpBuilder &builder)
-{
+std::optional<MaskState> runMaskAnalysis(Operation *op, OpBuilder &builder) {
   if (auto loadOp = dyn_cast<triton::LoadOp>(op)) {
     return runMaskAnalysisImpl(loadOp, builder);
   }

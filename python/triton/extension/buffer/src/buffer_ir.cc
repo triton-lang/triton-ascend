@@ -39,8 +39,7 @@ constexpr unsigned kIntegerAttrBitWidth = 64;
 
 struct BufferOpBuilder : public TritonOpBuilder {};
 
-void init_buffer_ir(py::module &&m)
-{
+void init_buffer_ir(py::module &&m) {
   m.def("load_dialects", [](MLIRContext &context) {
     DialectRegistry registry;
     registry.insert<memref::MemRefDialect>();
@@ -131,7 +130,8 @@ void init_buffer_ir(py::module &&m)
                  throw std::runtime_error("Expected strides to be positive");
                }
 
-               // getDimSize() returns -1 (ShapedType::kDynamic) for dynamic dimensions
+               // getDimSize() returns -1 (ShapedType::kDynamic) for dynamic
+               // dimensions
                if (!ShapedType::isDynamic(srcDim)) {
                  // verify the subview size does not exceed the source dimension
                  if (size > srcDim) {
@@ -146,10 +146,10 @@ void init_buffer_ir(py::module &&m)
                  }
                }
 
-               mixedSizes.push_back(
-                   IntegerAttr::get(IntegerType::get(context, kIntegerAttrBitWidth), size));
-               mixedStrides.push_back(
-                   IntegerAttr::get(IntegerType::get(context, kIntegerAttrBitWidth), stride));
+               mixedSizes.push_back(IntegerAttr::get(
+                   IntegerType::get(context, kIntegerAttrBitWidth), size));
+               mixedStrides.push_back(IntegerAttr::get(
+                   IntegerType::get(context, kIntegerAttrBitWidth), stride));
              }
 
              return self.create<memref::SubViewOp>(source, mixedOffsets,

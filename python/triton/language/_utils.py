@@ -28,6 +28,7 @@ def validate_block_shape(shape: List[int]):
         raise ValueError(f"numel ({numel}) exceeds triton maximum tensor numel ({TRITON_MAX_TENSOR_NUMEL})")
     return numel
 
+
 type_canonicalisation_dict = {
     # we canonicalise all bools to be unsigned:
     "bool": "u1",
@@ -89,6 +90,7 @@ BITWIDTH_DICT: Dict[str, int] = {
 
 for k, v in type_canonicalisation_dict.items():
     BITWIDTH_DICT[k] = BITWIDTH_DICT[v]
+
 
 def get_primitive_bitwidth(dtype: str) -> int:
     return BITWIDTH_DICT[dtype]

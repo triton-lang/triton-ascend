@@ -53,7 +53,7 @@ RUN curl -sSLk https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && \
     python3.9 /tmp/get-pip.py && \
     python3.10 /tmp/get-pip.py && \
     python3.11 /tmp/get-pip.py && \
-    rm -f /tmp/get-pip.py && \ 
+    rm -f /tmp/get-pip.py && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3.9 1 \
       --slave /usr/bin/python3 python3 /usr/bin/python3.9 \
       --slave /usr/bin/pip pip /usr/local/bin/pip3.9 \
@@ -87,5 +87,3 @@ RUN cd build && \
 
 RUN echo "source /usr/local/Ascend/ascend-toolkit/set_env.sh" >> ~/.bashrc && \
     echo "export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64/common/:/usr/local/Ascend/driver/lib64/driver/:$LD_LIBRARY_PATH" >> ~/.bashrc
-
-

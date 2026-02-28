@@ -46,7 +46,7 @@ def test_triton_autotune():
     def triton_calc_func(x0, x1):
         n = x0.numel()
         y0 = torch.empty_like(x0)
-        grid = lambda meta: (triton.cdiv(n, meta["XS"]), 1, 1)  # 计算 grid 大小 
+        grid = lambda meta: (triton.cdiv(n, meta["XS"]), 1, 1)  # 计算 grid 大小
         triton_calc_kernel[grid](y0, x0, x1, n)
         return y0
 
@@ -159,10 +159,10 @@ def add_kernel(
 ```Python
 @triton.jit
 def kernel_func(
-    outputptr, 
-    input_ptr, 
-    n_rows, 
-    n_cols, 
+    outputptr,
+    input_ptr,
+    n_rows,
+    n_cols,
     BLOCK_SIZE: tl.constexpr,
     XBLOCK: tl.constexpr,
     XBLOCK_SUB: tl.constexpr,
@@ -181,7 +181,7 @@ kernel_func[grid](y, x, n_rows, n_cols, BLOCK_SIZE=block_size)
 
 最后通过掩码比较和 `autotune` 中传入的 `key` 确认当前参数对应的切分轴。
 
-注意：1. 分割轴参数必须要与 `tl.program_id()` 相乘。 2. 必须要进行掩码比较，且该轴对应的key需要直接作为右值或以key为参数的min函数作为右值，才能对应到具体的切分轴，否则会导致参数解析失败。3. 识别出的分割轴参数仅限于候选参数列表，确保只有那些可以通过自动调优动态调整的参数才会被考虑。  
+注意：1. 分割轴参数必须要与 `tl.program_id()` 相乘。 2. 必须要进行掩码比较，且该轴对应的key需要直接作为右值或以key为参数的min函数作为右值，才能对应到具体的切分轴，否则会导致参数解析失败。3. 识别出的分割轴参数仅限于候选参数列表，确保只有那些可以通过自动调优动态调整的参数才会被考虑。
 
 ```Python
 @triton.autotune(
@@ -216,7 +216,7 @@ def triton_func(...):
 
 最后通过掩码比较和 `autotune` 中传入的 `key` 确认当前参数对应的分块轴。
 
-注意：1. 分块轴参数必须出现在 `tl.arange()` 的调用中，并且需在 `for` 循环中通过 `tl.range()`、`range()` 或整除运算（`//`）参与循环范围的计算。 2. 必须要进行掩码比较，且该轴对应的key需要直接作为右值或以key为参数的min函数作为右值，才能对应到具体的分块轴，否则会导致参数解析失败。3. 识别出的分块轴参数仅限于候选参数列表，确保只有那些可以通过自动调优动态调整的参数才会被考虑。  
+注意：1. 分块轴参数必须出现在 `tl.arange()` 的调用中，并且需在 `for` 循环中通过 `tl.range()`、`range()` 或整除运算（`//`）参与循环范围的计算。 2. 必须要进行掩码比较，且该轴对应的key需要直接作为右值或以key为参数的min函数作为右值，才能对应到具体的分块轴，否则会导致参数解析失败。3. 识别出的分块轴参数仅限于候选参数列表，确保只有那些可以通过自动调优动态调整的参数才会被考虑。
 
 ```Python
 @triton.autotune(

@@ -107,7 +107,7 @@ def test_atomic_cas(param_list):
 
     import random
     cmp_val = [random.randint(0, 10) for _ in range(ncore)]
-    
+
     cmp = torch.ones(split_size, shape[1], dtype=eval(f'torch.{dtype}')).to().npu() * cmp_val[0]
     for i in range(1, ncore):
         append = torch.ones(split_size, shape[1], dtype=eval(f'torch.{dtype}')).to().npu() * cmp_val[i]
@@ -118,23 +118,21 @@ def test_atomic_cas(param_list):
     pointer = torch.randint(low=0, high=10, size=(split_size, shape[1]), dtype=eval(f'torch.{dtype}')).npu()
     pointer_old = torch.full_like(pointer, -10).npu()
     pointer_ref = pointer.clone()
-    
+
     for i in range(ncore):
         val_subview = val[(i * split_size):((i + 1) * split_size)]
         pointer_ref = torch.where(pointer_ref == cmp_val[i], val_subview, pointer_ref)
-    
+
     n_elements = shape[0] * shape[1]
     atomic_cas[ncore, 1, 1](val, cmp, pointer, pointer_old, n_elements, BLOCK_SIZE=split_size * shape[1])
     test_common.validate_cmp(dtype, pointer, pointer_ref)
 
 
-@pytest.mark.parametrize('param_list',
-                         [
-                             ['int16', (8, 8), 1],
-                             ['int32', (32, 32), 1],
-                             ['float32', (32, 32), 1],
-                         ]
-                         )
+@pytest.mark.parametrize('param_list', [
+    ['int16', (8, 8), 1],
+    ['int32', (32, 32), 1],
+    ['float32', (32, 32), 1],
+])
 def test_atomic_cas_return_value(param_list):
     dtype, shape, ncore = param_list
     block_size = shape[0] * shape[1] // ncore
@@ -142,7 +140,7 @@ def test_atomic_cas_return_value(param_list):
 
     import random
     cmp_val = [random.randint(0, 10) for _ in range(ncore)]
-    
+
     cmp = torch.ones(split_size, shape[1], dtype=eval(f'torch.{dtype}')).to().npu() * cmp_val[0]
     for i in range(1, ncore):
         append = torch.ones(split_size, shape[1], dtype=eval(f'torch.{dtype}')).to().npu() * cmp_val[i]
@@ -154,11 +152,11 @@ def test_atomic_cas_return_value(param_list):
     pointer_old_ref = pointer.clone()
     pointer_old = torch.full_like(pointer, -10).npu()
     pointer_ref = pointer.clone()
-    
+
     for i in range(ncore):
         val_subview = val[(i * split_size):((i + 1) * split_size)]
         pointer_ref = torch.where(pointer_ref == cmp_val[i], val_subview, pointer_ref)
-    
+
     n_elements = shape[0] * shape[1]
     atomic_cas[ncore, 1, 1](val, cmp, pointer, pointer_old, n_elements, BLOCK_SIZE=split_size * shape[1])
     test_common.validate_cmp(dtype, pointer, pointer_ref)

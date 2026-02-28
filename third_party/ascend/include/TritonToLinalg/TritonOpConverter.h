@@ -24,8 +24,8 @@
 #ifndef TRITON_ADAPTER_TRITONOPCONVERTER_H
 #define TRITON_ADAPTER_TRITONOPCONVERTER_H
 
-#include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
+#include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "TritonToLinalg/TritonToLinalgPass.h"
 
@@ -230,15 +230,16 @@ class ReductionOpBaseConverter : public OpConversionPattern<OpTy> {
 public:
   using OpConversionPattern<OpTy>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(OpTy op,
-                                typename OpTy::Adaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const final {
+  LogicalResult
+  matchAndRewrite(OpTy op, typename OpTy::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const final {
     auto sourceType =
         cast<RankedTensorType>(adaptor.getOperands().front().getType());
     assert(sourceType.hasRank() && "Expected input is ranked");
 
     int64_t axis = op.getAxis();
-    assert(axis >= 0 && axis < sourceType.getRank() && "Expected reduction axis is within operand's rank");
+    assert(axis >= 0 && axis < sourceType.getRank() &&
+           "Expected reduction axis is within operand's rank");
 
     auto reductionOps = this->getReductionOps(op);
     if (reductionOps.size() == 1) {
@@ -405,13 +406,14 @@ protected:
                     Value source, Value initTensor, triton::ReduceOp reductionOp, bool compileOn91095Flag = false) const;
 
   LogicalResult
-  convertToTargetOp(triton::ReduceOp op, typename triton::ReduceOp::Adaptor adaptor,
+  convertToTargetOp(triton::ReduceOp op,
+                    typename triton::ReduceOp::Adaptor adaptor,
                     ConversionPatternRewriter &rewriter) const override;
 
   LogicalResult
-  convertToTargetOpExtended(triton::ReduceOp op, typename triton::ReduceOp::Adaptor adaptor,
+  convertToTargetOpExtended(triton::ReduceOp op,
+                            typename triton::ReduceOp::Adaptor adaptor,
                             ConversionPatternRewriter &rewriter) const override;
-
 };
 
 class ScanConverter : public ReductionOpBaseConverter<triton::ScanOp> {
@@ -429,9 +431,9 @@ protected:
                     ConversionPatternRewriter &rewriter) const override;
 
   LogicalResult
-  convertToTargetOpExtended(triton::ScanOp op, typename triton::ScanOp::Adaptor adaptor,
+  convertToTargetOpExtended(triton::ScanOp op,
+                            typename triton::ScanOp::Adaptor adaptor,
                             ConversionPatternRewriter &rewriter) const override;
-
 };
 
 class ExternElementwiseClOpConverter
@@ -497,15 +499,16 @@ public:
                   ConversionPatternRewriter &rewriter) const override;
 };
 
-template <typename LoopOpTy, typename =
-    std::enable_if_t<std::is_same_v<LoopOpTy, scf::ForOp> ||
-                     std::is_same_v<LoopOpTy, scf::WhileOp>>>
+template <typename LoopOpTy,
+          typename = std::enable_if_t<std::is_same_v<LoopOpTy, scf::ForOp> ||
+                                      std::is_same_v<LoopOpTy, scf::WhileOp>>>
 class LoopConverter : public OpConversionPattern<LoopOpTy> {
 public:
   using OpConversionPattern<LoopOpTy>::OpConversionPattern;
 
   LogicalResult
-  matchAndRewrite(LoopOpTy op, typename OpConversionPattern<LoopOpTy>::OpAdaptor adaptor,
+  matchAndRewrite(LoopOpTy op,
+                  typename OpConversionPattern<LoopOpTy>::OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     llvm::SmallDenseMap<Value, BlockData> known;
 
@@ -606,23 +609,25 @@ struct MatmulConverter : public OpConversionPattern<triton::DotOp> {
 };
 
 struct FlipOpConverter : public OpConversionPattern<triton::ascend::FlipOp> {
-    using OpConversionPattern<triton::ascend::FlipOp>::OpConversionPattern;
+  using OpConversionPattern<triton::ascend::FlipOp>::OpConversionPattern;
 
-    LogicalResult matchAndRewrite(triton::ascend::FlipOp op, OpAdaptor adaptor,
-                                  ConversionPatternRewriter &rewriter) const override;
+  LogicalResult
+  matchAndRewrite(triton::ascend::FlipOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
 
-    static constexpr StringRef baseFuncName = "triton_flip";
+  static constexpr StringRef baseFuncName = "triton_flip";
 };
 
 struct SortOpConverter : public OpConversionPattern<triton::ascend::SortOp> {
-    using OpConversionPattern<triton::ascend::SortOp>::OpConversionPattern;
+  using OpConversionPattern<triton::ascend::SortOp>::OpConversionPattern;
 
-    LogicalResult matchAndRewrite(triton::ascend::SortOp op, OpAdaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const override;
+  LogicalResult
+  matchAndRewrite(triton::ascend::SortOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
 };
 
 struct DotScaledConverter : public OpConversionPattern<triton::DotScaledOp> {
-    using OpConversionPattern<triton::DotScaledOp>::OpConversionPattern;
+  using OpConversionPattern<triton::DotScaledOp>::OpConversionPattern;
 
   LogicalResult
   matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
@@ -643,54 +648,69 @@ public:
   LogicalResult
   matchAndRewrite(triton::ascend::IndexPutOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_index_put";
 };
 
-class GatherOutToUbConverter : public OpConversionPattern<triton::ascend::GatherOutToUbOp> {
+class GatherOutToUbConverter
+    : public OpConversionPattern<triton::ascend::GatherOutToUbOp> {
 public:
-  using OpConversionPattern<triton::ascend::GatherOutToUbOp>::OpConversionPattern;
+  using OpConversionPattern<
+      triton::ascend::GatherOutToUbOp>::OpConversionPattern;
   LogicalResult
   matchAndRewrite(triton::ascend::GatherOutToUbOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
 private:
   static constexpr llvm::StringRef funcNameBase = "triton__gather_out_to_ub";
 };
 
-class ScatterUbToOutConverter : public OpConversionPattern<triton::ascend::ScatterUbToOutOp> {
+class ScatterUbToOutConverter
+    : public OpConversionPattern<triton::ascend::ScatterUbToOutOp> {
 public:
-  using OpConversionPattern<triton::ascend::ScatterUbToOutOp>::OpConversionPattern;
+  using OpConversionPattern<
+      triton::ascend::ScatterUbToOutOp>::OpConversionPattern;
   LogicalResult
   matchAndRewrite(triton::ascend::ScatterUbToOutOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_scatter_ub_to_out";
 };
 
-class IndirectLoadConverter : public OpConversionPattern<triton::ascend::IndirectLoadOp> {
+class IndirectLoadConverter
+    : public OpConversionPattern<triton::ascend::IndirectLoadOp> {
 public:
-  using OpConversionPattern<triton::ascend::IndirectLoadOp>::OpConversionPattern;
+  using OpConversionPattern<
+      triton::ascend::IndirectLoadOp>::OpConversionPattern;
   LogicalResult
   matchAndRewrite(triton::ascend::IndirectLoadOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_indirect_load";
 };
 
-class IndirectStoreConverter : public OpConversionPattern<triton::ascend::IndirectStoreOp> {
+class IndirectStoreConverter
+    : public OpConversionPattern<triton::ascend::IndirectStoreOp> {
 public:
-  using OpConversionPattern<triton::ascend::IndirectStoreOp>::OpConversionPattern;
+  using OpConversionPattern<
+      triton::ascend::IndirectStoreOp>::OpConversionPattern;
   LogicalResult
   matchAndRewrite(triton::ascend::IndirectStoreOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_indirect_store";
 };
 
-class IndexSelectSimdConverter : public OpConversionPattern<triton::ascend::IndexSelectSimdOp> {
+class IndexSelectSimdConverter
+    : public OpConversionPattern<triton::ascend::IndexSelectSimdOp> {
 public:
   explicit IndexSelectSimdConverter(MLIRContext *context);
-  using OpConversionPattern<triton::ascend::IndexSelectSimdOp>::OpConversionPattern;
+  using OpConversionPattern<
+      triton::ascend::IndexSelectSimdOp>::OpConversionPattern;
 
   LogicalResult
   matchAndRewrite(triton::ascend::IndexSelectSimdOp op, OpAdaptor adaptor,

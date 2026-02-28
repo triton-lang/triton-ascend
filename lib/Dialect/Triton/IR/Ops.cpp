@@ -800,13 +800,12 @@ void MakeTensorPtrOp::build(OpBuilder &builder, OperationState &state,
                builder.getDenseI32ArrayAttr(order));
 }
 
-//FIXME TODO: When upgrading to Triton 3.4.0, remove the commented line below
+// FIXME TODO: When upgrading to Triton 3.4.0, remove the commented line below
 //-- MakeTensorDescOp --
 void MakeTensorDescOp::build(OpBuilder &builder, OperationState &state,
                              Value base, ValueRange shape, ValueRange strides,
                              ArrayRef<int32_t> blockShape,
-                             bool isSignedInteger)
-{
+                             bool isSignedInteger) {
   auto ptrTy = dyn_cast<triton::PointerType>(base.getType());
   if (!ptrTy) {
     llvm::report_fatal_error("Expected pointer type");
@@ -822,8 +821,7 @@ void MakeTensorDescOp::build(OpBuilder &builder, OperationState &state,
 // -- DescriptorLoadOp --
 static LogicalResult verifyDescriptorLoadStoreType(Operation *op,
                                                    TensorDescType desc,
-                                                   RankedTensorType tensor)
-{
+                                                   RankedTensorType tensor) {
   RankedTensorType block = desc.getSignlessBlockType();
   ArrayRef<int64_t> blockShape = block.getShape();
   ArrayRef<int64_t> tensorShape = tensor.getShape();
@@ -839,19 +837,17 @@ static LogicalResult verifyDescriptorLoadStoreType(Operation *op,
 
   if (blockShape == tensorShape &&
       block.getElementType() == tensor.getElementType()) {
-        return success();
-      }
+    return success();
+  }
   return op->emitOpError("tensor descriptor block and tensor types must match");
 }
 
-LogicalResult DescriptorLoadOp::verify()
-{
+LogicalResult DescriptorLoadOp::verify() {
   return verifyDescriptorLoadStoreType(*this, getDesc().getType(), getType());
 }
 
 // -- DescriptorStoreOp --
-LogicalResult DescriptorStoreOp::verify()
-{
+LogicalResult DescriptorStoreOp::verify() {
   return verifyDescriptorLoadStoreType(*this, getDesc().getType(),
                                        getSrc().getType());
 }

@@ -55,8 +55,7 @@ public:
 class LoadConverter : public OpConversionPattern<triton::LoadOp> {
 private:
   LogicalResult toTensorAndReplace(triton::LoadOp &op,
-                                   RankedTensorType &tensorType,
-                                   Value localMem,
+                                   RankedTensorType &tensorType, Value localMem,
                                    bool mayImplicitTransposeWithLastAxis,
                                    const Location &loc,
                                    ConversionPatternRewriter &rewriter) const;

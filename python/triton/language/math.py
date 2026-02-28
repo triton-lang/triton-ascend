@@ -172,7 +172,7 @@ def sqrt_rn(x, _builder=None):
 @core.builtin
 @_check_dtype(dtypes=["bf16", "fp16", "fp32", "fp8e4nv", "fp8e5", "fp64"])
 @_add_math_1arg_docstr("inverse square root")
-@core._tensor_member_fn 
+@core._tensor_member_fn
 def rsqrt(x, _builder=None):
     x = semantic.to_tensor(x, _builder)
     return core.tensor(_builder.create_rsqrt(x.handle), x.type)
@@ -257,6 +257,7 @@ def fma(x, y, z, _builder=None):
     z, y = core.binary_op_type_legalization(z, y, _builder)
     return core.tensor(_builder.create_fma(x.handle, y.handle, z.handle), x.type)
 
+
 @core.builtin
 @_check_dtype(dtypes=["bf16", "fp16", "fp32"])
 @_add_math_1arg_docstr("error function")
@@ -264,6 +265,7 @@ def fma(x, y, z, _builder=None):
 def tanh(x, _builder=None):
     x = semantic.to_tensor(x, _builder)
     return core.tensor(_builder.create_tanh(x.handle), x.type)
+
 
 @core.builtin
 @_add_math_2arg_docstr("cdiv")
@@ -292,11 +294,7 @@ def cdiv(x, div, _builder=None):
         raise ValueError("cdiv does not support boolean type")
     elif x_scalar_type.is_int() and div_scalar_type.is_int():
         # integer cdiv: (x + div - 1) // div as before
-        return semantic.floordiv(
-            semantic.add(x, semantic.sub(div, 1, True, _builder), True, _builder),
-            div,
-            _builder
-        )
+        return semantic.floordiv(semantic.add(x, semantic.sub(div, 1, True, _builder), True, _builder), div, _builder)
     else:
         div_res = semantic.truediv(x, div, _builder)
         cdiv_res = core.tensor(_builder.create_ceil(div_res.handle), div_res.type)

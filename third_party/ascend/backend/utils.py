@@ -18,7 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-
 import functools
 import hashlib
 import os
@@ -163,9 +162,7 @@ def _get_npucompiler_path() -> str:
         if npu_compiler_path is None:
             npu_compiler_root = os.getenv("TRITON_NPU_COMPILER_PATH", None)
             if npu_compiler_root is None:
-                raise EnvironmentError(
-                    "Couldn't find executable bishengir-compile or TRITON_NPU_COMPILER_PATH."
-                )
+                raise EnvironmentError("Couldn't find executable bishengir-compile or TRITON_NPU_COMPILER_PATH.")
             npu_compiler_path = os.path.join(npu_compiler_root, "npuc")
     return npu_compiler_path, env
 
@@ -175,9 +172,7 @@ def _get_bisheng_path() -> str:
     if bisheng_path is None:
         npu_compiler_root = os.getenv("TRITON_NPU_COMPILER_PATH", None)
         if npu_compiler_root is None:
-            raise EnvironmentError(
-                "Couldn't find executable bisheng or TRITON_NPU_COMPILER_PATH"
-            )
+            raise EnvironmentError("Couldn't find executable bisheng or TRITON_NPU_COMPILER_PATH")
         bisheng_path = os.path.join(npu_compiler_root, "ccec")
     return bisheng_path
 
@@ -245,9 +240,7 @@ def _check_bishengir_is_regbased() -> bool:
 def _get_ascend_path() -> Path:
     path = os.getenv("ASCEND_HOME_PATH", "")
     if path == "":
-        raise EnvironmentError(
-            "ASCEND_HOME_PATH is not set, source <ascend-toolkit>/set_env.sh first"
-        )
+        raise EnvironmentError("ASCEND_HOME_PATH is not set, source <ascend-toolkit>/set_env.sh first")
     return Path(path)
 
 
@@ -499,6 +492,7 @@ def _check_bishengir_able_save_ir() -> bool:
     except Exception as e:
         print(f"ERROR: {e}")
         return False
+
 
 def get_ascend_arch_from_env():
     arch = os.getenv("TRITON_ASCEND_ARCH", "")

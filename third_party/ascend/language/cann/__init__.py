@@ -30,7 +30,6 @@ if not triton_enable_libdevice():
 libdevice.isfinited = extension.math_ops.isfinited
 libdevice.finitef = extension.math_ops.finitef
 libdevice.flip = extension.flip
-
 libdevice.umulhi = math.umulhi
 libdevice.exp = math.exp
 libdevice.exp2 = math.exp2

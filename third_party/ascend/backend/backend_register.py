@@ -23,10 +23,12 @@ from typing import Callable, Dict
 
 
 class BackendStrategyRegistry:
+
     def __init__(self):
-        self.strategies: Dict[str: Dict[str, Callable]] = {}
+        self.strategies: Dict[str:Dict[str, Callable]] = {}
 
     def register(self, category: str, method: str):
+
         def decorator(func: Callable):
             if category not in self.strategies:
                 self.strategies[category] = {}
@@ -34,6 +36,7 @@ class BackendStrategyRegistry:
                 raise ValueError(f"Strategy {method} already registered")
             self.strategies[category][method] = func
             return func
+
         return decorator
 
     def execute_func(self, category, method, *args, **kwargs):
@@ -45,7 +48,7 @@ class BackendStrategyRegistry:
 
     def list_categories(self):
         return list(self.strategies.keys())
-    
+
     def list_methods(self, category):
         if category not in self.strategies:
             raise ValueError(f"Strategy {category} not registered")
@@ -53,19 +56,21 @@ class BackendStrategyRegistry:
 
 
 class _LazyBackendStrategyRegister:
+
     def __init__(self):
         self._instance = None
-    
+
     def _get_instance(self):
         if self._instance is None:
             self._instance = BackendStrategyRegistry()
         return self._instance
-    
+
     def register(self, *args, **kwargs):
         return self._get_instance().register(*args, **kwargs)
-    
+
     def execute_func(self, *args, **kwargs):
         return self._get_instance().execute_func(*args, **kwargs)
+
 
 backend_strategy_registry = _LazyBackendStrategyRegister()
 
@@ -196,9 +201,9 @@ def get_cc_cmd(build_pch):
     ]
     if not build_pch:
         cc_cmd += [
-                f"-L{os.path.join(mindspore_path, 'lib')}",
-                f"-lmindspore_pynative_utils",
-            ]
+            f"-L{os.path.join(mindspore_path, 'lib')}",
+            f"-lmindspore_pynative_utils",
+        ]
     return cc_cmd
 
 

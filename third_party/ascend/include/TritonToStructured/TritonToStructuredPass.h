@@ -39,8 +39,8 @@ std::unique_ptr<OperationPass<ModuleOp>> createTritonToStructuredPass();
 std::unique_ptr<OperationPass<ModuleOp>>
 createTritonToStructuredPass(bool, bool);
 
-}  // namespace triton
-}  // namespace mlir
+} // namespace triton
+} // namespace mlir
 
 using namespace mlir;
 using namespace triton;
@@ -48,24 +48,24 @@ using namespace triton;
 class TritonToStructuredPass
     : public TritonToStructuredBase<TritonToStructuredPass> {
 public:
-    TritonToStructuredPass() = default;
+  TritonToStructuredPass() = default;
 
-    TritonToStructuredPass(bool enableMaskFallbackConversion, bool optimizeDynamicOffset) {
-        this->enableMaskFallbackConversion = enableMaskFallbackConversion;
-        this->optimizeDynamicOffset = optimizeDynamicOffset;
-    };
-    void getDependentDialects(DialectRegistry &registry) const override;
-    void runOnOperation() override;
+  TritonToStructuredPass(bool enableMaskFallbackConversion, bool optimizeDynamicOffset) {
+      this->enableMaskFallbackConversion = enableMaskFallbackConversion;
+      this->optimizeDynamicOffset = optimizeDynamicOffset;
+  };
+  void getDependentDialects(DialectRegistry &registry) const override;
+  void runOnOperation() override;
 
 private:
-    void populateTritonToStructuredCanonicalizationPatterns(
-        RewritePatternSet &patterns);
+  void populateTritonToStructuredCanonicalizationPatterns(
+      RewritePatternSet &patterns);
 
-    void populateTritonToStructuredPatterns(
-        RewritePatternSet &patterns, bool optimizeDynamicOffset,
-        bool enableMaskFallbackConversion);
+  void populateTritonToStructuredPatterns(
+      RewritePatternSet &patterns, bool optimizeDynamicOffset,
+      bool enableMaskFallbackConversion);
 
-    LogicalResult processSplatBinaryOperations(ModuleOp moduleOp);
+  LogicalResult processSplatBinaryOperations(ModuleOp moduleOp);
 };
 
-#endif  // TRITON_ADAPTER_CONVERSION_TRITONTOSTRUCTURED_H
+#endif // TRITON_ADAPTER_CONVERSION_TRITONTOSTRUCTURED_H

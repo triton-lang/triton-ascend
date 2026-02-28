@@ -30,7 +30,6 @@ from wheel.bdist_wheel import bdist_wheel
 
 import pybind11
 
-
 triton_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 os.environ.setdefault("TRITON_BUILD_WITH_CCACHE", "true")
@@ -524,6 +523,7 @@ def get_platform_dependent_src_path(subdir):
         (lambda version_major, version_minor1, version_minor2, : f"targets/{platform}/{subdir}"
          if int(version_major) >= 12 and int(version_minor1) >= 5 else subdir)(*version.split('.')))
 
+
 # FIXME:download&backend
 # download_and_copy(
 #     name="ptxas", src_path="bin/ptxas", dst_path="bin/ptxas", variable="TRITON_PTXAS_PATH",
@@ -655,6 +655,7 @@ class plugin_egginfo(egg_info):
 
 
 class BuildWheel(bdist_wheel):
+
     def run(self):
         add_links()
         bdist_wheel.run(self)
@@ -761,8 +762,7 @@ def get_default_version():
 
 def get_version():
     version = os.environ.get("TRITON_VERSION", get_default_version()) + os.environ.get(
-        "TRITON_WHEEL_VERSION_SUFFIX", ""
-    )
+        "TRITON_WHEEL_VERSION_SUFFIX", "")
     if not is_manylinux:
         version += get_git_commit_hash()
 
@@ -779,7 +779,6 @@ if not os.path.exists(readme):
     raise FileNotFoundError("Unable to find 'README.md'")
 with open(readme, encoding="utf-8") as fdesc:
     long_description = fdesc.read()
-
 
 setup(
     name=get_package_name(),
@@ -819,14 +818,8 @@ setup(
     ],
     test_suite="tests",
     install_requires=[
-        "attrs==24.2.0",
-        "numpy==1.26.4",
-        "scipy==1.13.1",
-        "decorator==5.1.1",
-        "psutil==6.0.0",
-        "pytest==8.3.2",
-        "pytest-xdist==3.6.1",
-        "pyyaml"
+        "attrs==24.2.0", "numpy==1.26.4", "scipy==1.13.1", "decorator==5.1.1", "psutil==6.0.0", "pytest==8.3.2",
+        "pytest-xdist==3.6.1", "pyyaml"
     ],
     extras_require={
         "build": [

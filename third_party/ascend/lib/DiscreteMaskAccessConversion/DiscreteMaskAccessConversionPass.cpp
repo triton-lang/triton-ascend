@@ -20,8 +20,8 @@
  * THE SOFTWARE.
  */
 
-#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 #include "Utils/Utils.h"
+#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -116,7 +116,8 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
   }
 };
 
-struct DiscreteMaskAtomicConversion : OpRewritePattern<mlir::triton::AtomicRMWOp> {
+struct DiscreteMaskAtomicConversion
+    : OpRewritePattern<mlir::triton::AtomicRMWOp> {
   using OpRewritePattern<mlir::triton::AtomicRMWOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(mlir::triton::AtomicRMWOp op,

@@ -60,4 +60,3 @@ python -m pytest -v third_party/ascend/unittest/kernels/test_triton_kernel.py
 
 ## 3、将pt文件上传至obs桶
 本地验证通过后，将pt文件统一上传到OBS桶当中，OBS桶链接：https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/test/kernels/{xxx}_pt/{kernel_name}.pt，xxx为vllm或sglang
-

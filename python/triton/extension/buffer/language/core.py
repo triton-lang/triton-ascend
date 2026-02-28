@@ -1,3 +1,4 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
 # Copyright 2018-2020 Philippe Tillet
 # Copyright 2020-2022 OpenAI
 #
@@ -37,7 +38,6 @@ from triton._C.libtriton import ir
 import triton.language.core as tl
 from triton.language import semantic as real_semantic
 
-
 T = TypeVar("T")
 
 TRITON_BUILTIN = "__triton_builtin__"
@@ -58,7 +58,6 @@ def builtin(fn: T) -> T:
     # also set triton_builtin to true so that CodeGenerator will recognize this function
     setattr(wrapper, TRITON_BUILTIN, True)
     setattr(wrapper, BUFFER_BUILTIN, True)
-
     return wrapper
 
 
@@ -74,9 +73,7 @@ class address_space:
     """
 
     def to_ir(self, builder: ir.builder) -> ir.type:
-        raise NotImplementedError(
-            "Abstract address_space cannot be converted to ir"
-        )
+        raise NotImplementedError("Abstract address_space cannot be converted to ir")
 
 
 class buffer_type(tl.dtype):
@@ -115,10 +112,8 @@ class buffer_type(tl.dtype):
     def __eq__(self, other) -> bool:
         if not isinstance(other, buffer_type):
             return False
-        return (self.element_ty == other.element_ty and
-                self.shape == other.shape and
-                self.space == other.space and
-                self.strides == other.strides)
+        return (self.element_ty == other.element_ty and self.shape == other.shape and self.space == other.space
+                and self.strides == other.strides)
 
     def __ne__(self, other) -> bool:
         return not self.__eq__(other)
@@ -162,20 +157,14 @@ class buffer(tl._value):
 
     def __str__(self) -> str:
         # ex. "<16x32xfloat32, address_space>"
-        res = '<' + 'x'.join(str(s)
-                             for s in self.shape) + 'x' + str(self.dtype)
+        res = '<' + 'x'.join(str(s) for s in self.shape) + 'x' + str(self.dtype)
         if self.space:
             res += ', ' + str(self.space)
         return res + '>'
 
     @builtin
-    def subview(
-        self,
-        offsets: List[tl.constexpr],
-        sizes: List[tl.constexpr],
-        strides: List[tl.constexpr],
-        _builder=None
-    ) -> 'buffer':
+    def subview(self, offsets: List[tl.constexpr], sizes: List[tl.constexpr], strides: List[tl.constexpr],
+                _builder=None) -> 'buffer':
         return subview(self, offsets, sizes, strides, _builder=_builder)
 
     @builtin
@@ -188,13 +177,7 @@ semantic = importlib.import_module(".semantic", package=__package__)
 
 
 @builtin
-def alloc(
-    etype: tl.dtype,
-    shape: List[tl.constexpr],
-    _address_space: address_space = None,
-    is_mem_unique: bool = False,
-    _builder=None
-) -> buffer:
+def alloc(etype: tl.dtype, shape: List[tl.constexpr], _address_space: address_space = None, _builder=None) -> buffer:
     """
     Allocates a region of local memory with the specified shape and type.
 
@@ -205,16 +188,11 @@ def alloc(
     :param _address_space: (Optional) backend-specific local memory address space
     :type _address_space: bl.address_space
     """
-    return semantic.alloc(etype, shape, _address_space, is_mem_unique, _builder)
+    return semantic.alloc(etype, shape, _address_space, _builder)
 
 
 @builtin
-def to_buffer(
-    tensor: tl.tensor,
-    space: address_space = None,
-    bind_buffer: buffer = None,
-    _builder=None
-) -> buffer:
+def to_buffer(tensor: tl.tensor, space: address_space = None, bind_buffer: buffer = None, _builder=None) -> buffer:
     """
     Convert a tensor to a buffer.
 
@@ -223,18 +201,11 @@ def to_buffer(
     :param space: the address space for the buffer (optional).
     :type space: address_space
     """
-    return semantic.to_buffer(
-        tensor, space, bind_buffer, _builder
-    )
+    return semantic.to_buffer(tensor, space, bind_buffer, _builder)
 
 
 @builtin
-def to_tensor(
-    memref: buffer,
-    writable: bool = True,
-    target_shape=None,
-    _builder=None
-) -> tl.tensor:
+def to_tensor(memref: buffer, writable: bool = True, target_shape=None, _builder=None) -> tl.tensor:
     """
     Create a tl.tensor from a bl.buffer.
 
@@ -246,64 +217,9 @@ def to_tensor(
     return semantic.to_tensor(memref, writable, _builder, target_shape=target_shape)
 
 
-def check_subview(src, offsets, sizes, strides):
-    """
-    Check data of subview methods which the data length and the offset value must be 32-byte aligned.
-
-    The conditions for checking data are as follows:
-    1. offset value must be 32-bytes aligned.
-    2. all strides must be 1.
-    3. the first point's offset in the second row of the last dimension must be 32-bytes aligned.
-
-    For instance, the following example fails to satisfy the specified criteria.
-        %subview = memref.subview %arg0[1, 1][4, 4][2, 2]
-        : memref<8x8xf32, strided<[8, 1], offset: 0>> to
-        memref<4x4xf32, strided<[16, 2], offset: 9>>
-    offsets = [8, 8] | sizes = [4, 4] | strides = [2, 2]
-    result_offset = 9
-    second_row_start_offset = 25
-    The scene will be go wrong because the follow conditions are not meet.
-        1) result_offset is not 32-bytes aligned.
-        2) strides = [2, 2], not all strides are equal to 1.
-        3) second_row_start_offset are not 32-bytes aligned.
-    """
-    bytes_per_block = 32
-    bits_per_byte = 8
-    base_byte = bytes_per_block // (src.dtype.primitive_bitwidth // bits_per_byte)
-    result_strides = []
-    result_offset = 0
-    second_row_start_offset = 0
-    length = len(strides)
-    src_strides = [1] * length
-    if length == 1:
-        if offset[0] % base_byte != 0:
-            raise TypeError(f"all strides should be 1 and the offset value should be 32-bytes aligned.")
-        return
-    for i in range(length - 2, -1, -1):
-        src_strides[i] = src_strides[i + 1] * src.shape[i + 1]
-    for i in range(0, length):
-        if isinstance(offsets[i], tl.tensor):
-            return
-        result_strides.append(src_strides[i] * strides[i])
-        result_offset = result_offset + offsets[i] * src_strides[i]
-    second_row_start_offset = result_offset + src_strides[-2] * strides[-2]
-    is_unaligned = False
-    if sizes[1] > 1:
-        is_unaligned = second_row_start_offset % base_byte != 0
-    stride_1 = all(s == 1 for s in strides)
-    is_unaligned = result_offset % base_byte != 0 or is_unaligned or not stride_1
-    if is_unaligned:
-        raise TypeError(f"all strides should be 1 and the offset value should be 32-bytes aligned.")
-
-
 @builtin
-def subview(
-    src: buffer,
-    offsets: List[tl.constexpr],
-    sizes: List[tl.constexpr],
-    strides: List[tl.constexpr],
-    _builder=None
-) -> buffer:
+def subview(src: buffer, offsets: List[tl.constexpr], sizes: List[tl.constexpr], strides: List[tl.constexpr],
+            _builder=None) -> buffer:
     '''
     Creates a subview of the source buffer with the specified offsets, sizes, and strides.
 
@@ -339,7 +255,6 @@ def subview(
         else:
             raise TypeError(f"strides[{i}] must be constexpr, got {type(stride).__name__}")
 
-    check_offsets = []
     new_offsets = []
     for offset in offsets:
         if isinstance(offset, tl.constexpr):
@@ -347,17 +262,13 @@ def subview(
             if offset < 0:
                 raise ValueError(f"Offset value must be non-negative, got {offset}")
             new_offsets.append(real_semantic.to_tensor(offset, _builder))
-            check_offsets.append(offset)
         elif isinstance(offset, int):
             # Convert regular integers to constexpr and then to tensor
             if offset < 0:
                 raise ValueError(f"Offset value must be non-negative, got {offset}")
             new_offsets.append(real_semantic.to_tensor(tl.constexpr(offset), _builder))
-            check_offsets.append(tl.constexpr(offset))
         else:
             # Assume it's already a tensor
             new_offsets.append(offset)
-            check_offsets.append(offset)
 
-    check_subview(src, check_offsets, new_sizes, new_strides)
     return semantic.subview(src, new_offsets, new_sizes, new_strides, _builder)

@@ -90,11 +90,11 @@ def triton_interleave_loadstore_with_mask(q_ptr, head_dim_half: tl.constexpr, bi
                          )
 def test_interleave(para_type, data_type, head_dim_half, bias):
     length = bias + head_dim_half * 2
-    q = torch.randn((length,), dtype=data_type).npu()
+    q = torch.randn((length, ), dtype=data_type).npu()
     k = torch.zeros_like(q, dtype=data_type).npu()
     k_ref = torch.zeros_like(q, dtype=data_type).npu()
 
-    triton_interleave_load[(1,)](q, k, head_dim_half, bias)
+    triton_interleave_load[(1, )](q, k, head_dim_half, bias)
     k_ref = torch_interleave_load(q, k_ref, head_dim_half, bias)
     assert torch.allclose(k, k_ref)
 

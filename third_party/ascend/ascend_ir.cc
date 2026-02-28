@@ -49,8 +49,7 @@ struct AscendNPUIROpBuilder : public TritonOpBuilder {
   explicit AscendNPUIROpBuilder(MLIRContext *context, std::string target = "")
       : TritonOpBuilder(context), target(target) {}
 
-  bool is_910_95()
-  {
+  bool is_910_95() {
     // TODO: Use enum instead of strings after enabling HACC in satandalone
     // build
     constexpr size_t kLen910 = sizeof(kTarget910_95) - 1;
@@ -72,8 +71,8 @@ struct ModeAndPipes {
   hivm::PipeAttr vectorPipe = {};
 };
 
-hivm::TCoreTypeAttr GetCore(MLIRContext *ctx, llvm::StringRef opName, llvm::StringRef sender)
-{
+hivm::TCoreTypeAttr GetCore(MLIRContext *ctx, llvm::StringRef opName,
+                            llvm::StringRef sender) {
   // Decide core type
   hivm::TCoreTypeAttr core;
   if (sender == "cube") {
@@ -83,7 +82,8 @@ hivm::TCoreTypeAttr GetCore(MLIRContext *ctx, llvm::StringRef opName, llvm::Stri
       core = hivm::TCoreTypeAttr::get(ctx, hivm::TCoreType::VECTOR);
   } else {
     if (sender != "vector") {
-      throw std::runtime_error("sync_block_set/wait only supports 'cube' or 'vector' as sender");
+      throw std::runtime_error(
+          "sync_block_set/wait only supports 'cube' or 'vector' as sender");
     }
     if (opName == "sync_block_set")
       core = hivm::TCoreTypeAttr::get(ctx, hivm::TCoreType::VECTOR);
@@ -94,9 +94,9 @@ hivm::TCoreTypeAttr GetCore(MLIRContext *ctx, llvm::StringRef opName, llvm::Stri
   return core;
 }
 
-void buildSyncBlockOp(AscendNPUIROpBuilder &self, const std::string &opName, std::string &sender,
-                      std::string &receiver, Value id, hivm::PIPE senderPipe, hivm::PIPE receiverPipe)
-{
+void buildSyncBlockOp(AscendNPUIROpBuilder &self, const std::string &opName,
+                      std::string &sender, std::string &receiver, Value id,
+                      hivm::PIPE senderPipe, hivm::PIPE receiverPipe) {
   auto *ctx = self.getBuilder().getContext();
   hivm::TCoreTypeAttr coreAttr = GetCore(ctx, opName, sender);
   hivm::PipeAttr prodPipe = hivm::PipeAttr::get(ctx, senderPipe);
@@ -118,8 +118,7 @@ void buildSyncBlockOp(AscendNPUIROpBuilder &self, const std::string &opName, std
 }
 
 ModeAndPipes GetSyncBlockModeAndPipes(MLIRContext *ctx,
-                                      const std::string &mode)
-{
+                                      const std::string &mode) {
   hivm::SyncBlockModeAttr modeAttr = {};
   hivm::PipeAttr cubePipe = {};
   hivm::PipeAttr vectorPipe = {};
@@ -143,7 +142,8 @@ ModeAndPipes GetSyncBlockModeAndPipes(MLIRContext *ctx,
     cubePipe = hivm::PipeAttr{};
     vectorPipe = hivm::PipeAttr::get(ctx, hivm::PIPE::PIPE_ALL);
   } else {
-    llvm::report_fatal_error(llvm::StringRef("Invalid sync-block mode: " + mode));
+    llvm::report_fatal_error(
+        llvm::StringRef("Invalid sync-block mode: " + mode));
   }
   return {modeAttr, cubePipe, vectorPipe};
 }
@@ -177,10 +177,10 @@ void init_ascend_ir(py::module &&m) {
       .export_values();
 
   py::enum_<hivm::VFMode>(m, "MODE", py::module_local())
-    .value("SIMD", hivm::VFMode::SIMD)
-    .value("SIMT", hivm::VFMode::SIMT)
-    .value("MIX", hivm::VFMode::MIX)
-    .export_values();
+      .value("SIMD", hivm::VFMode::SIMD)
+      .value("SIMT", hivm::VFMode::SIMT)
+      .value("MIX", hivm::VFMode::MIX)
+      .export_values();
 
   py::enum_<hivm::FixpipeDMAMode>(m, "FixpipeDMAMode", py::module_local())
       .value("NZ2DN", hivm::FixpipeDMAMode::NZ2DN)
@@ -211,9 +211,9 @@ void init_ascend_ir(py::module &&m) {
       .value("P_RELU", hivm::FixpipePreReluMode::P_RELU)
       .export_values();
   py::enum_<hivm::DataLayout>(m, "DataLayout", py::module_local())
-        .value("nZ", hivm::DataLayout::nZ)
-        .value("zN", hivm::DataLayout::zN)
-        .export_values();
+      .value("nZ", hivm::DataLayout::nZ)
+      .value("zN", hivm::DataLayout::zN)
+      .export_values();
 
   m.def("load_dialects", [](MLIRContext &context) {
     DialectRegistry registry;
@@ -228,7 +228,8 @@ void init_ascend_ir(py::module &&m) {
       .def(py::init<MLIRContext *, std::string>(), py::arg("context"),
            py::arg("target") = "")
       .def("get_core_type_attr",
-           [](AscendNPUIROpBuilder &self, hivm::TCoreType core_type) -> Attribute {
+           [](AscendNPUIROpBuilder &self,
+              hivm::TCoreType core_type) -> Attribute {
              return self.getBuilder().getAttr<hivm::TCoreTypeAttr>(core_type);
            })
       .def("get_pipe_attr",
@@ -308,15 +309,14 @@ void init_ascend_ir(py::module &&m) {
                                    attrVal);
            })
       .def("create_custom_op",
-           [](AscendNPUIROpBuilder &self,
-               const std::string &name,
-               const py::dict &attrs,
-               const std::vector<Value> &ins,
-               const std::vector<Value> &outs) -> std::vector<Value> {
+           [](AscendNPUIROpBuilder &self, const std::string &name,
+              const py::dict &attrs, const std::vector<Value> &ins,
+              const std::vector<Value> &outs) -> std::vector<Value> {
              ValueRange inputs{ins};
              ValueRange outputs{outs};
              TypeRange res_types{outputs};
-             auto op = self.create<hivm::CustomOp>(res_types, name, inputs, outputs);
+             auto op =
+                 self.create<hivm::CustomOp>(res_types, name, inputs, outputs);
              for (auto &attr : attrs) {
                std::string attr_name = py::cast<std::string>(attr.first);
                Attribute attr_value = py::cast<Attribute>(attr.second);
@@ -370,8 +370,10 @@ void init_ascend_ir(py::module &&m) {
              auto moduleOp = subBlockIdxOp->getParentOfType<ModuleOp>();
              auto *ctx = self.getBuilder().getContext();
              // If user explicitly uses sub.block idx, add attribute to module.
-             // NPU compiler will parse this attribute and disable auto tile and bind subblock pass.
-             moduleOp->setAttr("hivm.disable_auto_tile_and_bind_subblock", mlir::UnitAttr::get(ctx));
+             // NPU compiler will parse this attribute and disable auto tile and
+             // bind subblock pass.
+             moduleOp->setAttr("hivm.disable_auto_tile_and_bind_subblock",
+                               mlir::UnitAttr::get(ctx));
              return subBlockIdxOp;
            })
       .def("sync_block_all",
@@ -393,16 +395,20 @@ void init_ascend_ir(py::module &&m) {
            })
       .def("create_copy_tensor",
            [](AscendNPUIROpBuilder &self, Value src, Value dst) {
-             return self.create<hivm::CopyOp>(mlir::TypeRange{dst.getType()}, src, dst).getResult(0);
+             return self
+                 .create<hivm::CopyOp>(mlir::TypeRange{dst.getType()}, src, dst)
+                 .getResult(0);
            })
       .def("create_convert_layout",
            [](AscendNPUIROpBuilder &self, Value src, Type memrefType) -> Value {
              // src is a memref
              // the layout is incorrect (temporarily)
              auto *ctx = self.getBuilder().getContext();
-             return self.create<hivm::ConvertLayoutOp>(
-                 memrefType, src,
-                 hivm::DataLayoutAttr::get(ctx, hivm::DataLayout::ND),
-                 hivm::DataLayoutAttr::get(ctx, hivm::DataLayout::ND)).getResult();
+             return self
+                 .create<hivm::ConvertLayoutOp>(
+                     memrefType, src,
+                     hivm::DataLayoutAttr::get(ctx, hivm::DataLayout::ND),
+                     hivm::DataLayoutAttr::get(ctx, hivm::DataLayout::ND))
+                 .getResult();
            });
 }

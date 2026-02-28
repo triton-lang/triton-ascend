@@ -120,7 +120,8 @@ using namespace triton;
 // private:
 //   std::unique_ptr<OpBuilder> builder;
 //   std::unique_ptr<Location> lastLoc;
-//   bool lineInfoEnabled = !triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO");
+//   bool lineInfoEnabled =
+//       !triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO");
 // };
 
 std::string locationToString(Location loc) {
@@ -151,7 +152,7 @@ namespace ir {
 static py::class_<TritonOpBuilder> *builderClassPtr = nullptr;
 py::class_<TritonOpBuilder> *getBuilderClass() { return builderClassPtr; }
 
-}
+} // namespace ir
 
 void init_triton_ir(py::module &&m) {
   using ret = py::return_value_policy;
@@ -602,11 +603,12 @@ void init_triton_ir(py::module &&m) {
   static py::class_<TritonOpBuilder> builderClass(
       m, "builder", py::module_local(), py::dynamic_attr());
   ir::builderClassPtr = &builderClass;
-  builderClass.def(py::init<MLIRContext *, const std::string &>(),
-                   py::arg("context"),
-                   py::arg("compile_mode") = "simd",
-                   "Create a TritonOpBuilder with optional compile_mode (simt or simd, default: simd)")
- 	    .def("is_simt_mode", &TritonOpBuilder::isSimtMode,
+  builderClass
+      .def(py::init<MLIRContext *, const std::string &>(), py::arg("context"),
+           py::arg("compile_mode") = "simd",
+           "Create a TritonOpBuilder with optional compile_mode (simt or simd, "
+           "default: simd)")
+      .def("is_simt_mode", &TritonOpBuilder::isSimtMode,
            "Check if the compile mode is simt")
       // getters
       .def("create_module",
@@ -653,14 +655,13 @@ void init_triton_ir(py::module &&m) {
            [](TritonOpBuilder &self, std::string value) {
              return self.getBuilder().getStringAttr(value);
            })
-      .def("get_unit_attr",
-          [](TritonOpBuilder &self) {
-            return self.getBuilder().getUnitAttr();
-          })
+      .def(
+          "get_unit_attr",
+          [](TritonOpBuilder &self) { return self.getBuilder().getUnitAttr(); })
       .def("get_i64_array_attr",
-          [](TritonOpBuilder &self, const std::vector<int64_t>& array) {
-            return self.getBuilder().getI64ArrayAttr(array);
-          })
+           [](TritonOpBuilder &self, const std::vector<int64_t> &array) {
+             return self.getBuilder().getI64ArrayAttr(array);
+           })
       // Use arith.ConstantOp to create constants
       // Constants
       .def("get_int1",
@@ -1322,25 +1323,31 @@ void init_triton_ir(py::module &&m) {
            })
       .def("create_tensor_descriptor_type",
            [](TritonOpBuilder &self, Type blockTy, bool isSigned) -> Type {
-               auto ctx = self.getBuilder().getContext();
-               return triton::TensorDescType::get(ctx, cast<RankedTensorType>(blockTy), isSigned);
+             auto ctx = self.getBuilder().getContext();
+             return triton::TensorDescType::get(
+                 ctx, cast<RankedTensorType>(blockTy), isSigned);
            })
       .def("create_descriptor_load",
-           [](TritonOpBuilder &self, Value desc, std::vector<Value> &indices, CacheModifier cacheModifier,
+           [](TritonOpBuilder &self, Value desc, std::vector<Value> &indices,
+              CacheModifier cacheModifier,
               EvictionPolicy evictionPolicy) -> Value {
-                auto descTy = cast<triton::TensorDescType>(desc.getType());
-                auto resTy = descTy.getSignlessBlockType();
-                return self.create<DescriptorLoadOp>(resTy, desc, indices, cacheModifier, evictionPolicy);
+             auto descTy = cast<triton::TensorDescType>(desc.getType());
+             auto resTy = descTy.getSignlessBlockType();
+             return self.create<DescriptorLoadOp>(
+                 resTy, desc, indices, cacheModifier, evictionPolicy);
            })
       .def("create_descriptor_store",
-           [](TritonOpBuilder &self, Value desc, Value value, std::vector<Value> &indices) -> void {
-               self.create<DescriptorStoreOp>(desc, value, indices);
+           [](TritonOpBuilder &self, Value desc, Value value,
+              std::vector<Value> &indices) -> void {
+             self.create<DescriptorStoreOp>(desc, value, indices);
            })
-        // Make a tensor descriptor
+      // Make a tensor descriptor
       .def("create_make_tensor_descriptor",
-           [](TritonOpBuilder &self, Value &base, std::vector<Value> &shape, std::vector<Value> &strides,
-              std::vector<int32_t> &tensorShape, bool isSignedInteger) -> Value {
-                return self.create<MakeTensorDescOp>(base, shape, strides, tensorShape, isSignedInteger);
+           [](TritonOpBuilder &self, Value &base, std::vector<Value> &shape,
+              std::vector<Value> &strides, std::vector<int32_t> &tensorShape,
+              bool isSignedInteger) -> Value {
+             return self.create<MakeTensorDescOp>(base, shape, strides,
+                                                  tensorShape, isSignedInteger);
            })
       .def("create_tensormap_create",
            [](TritonOpBuilder &self, Value desc_ptr, Value global_address,

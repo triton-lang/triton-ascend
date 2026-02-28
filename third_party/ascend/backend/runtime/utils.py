@@ -62,9 +62,12 @@ def _init_npu_params():
 
 
 def __getattr__(name):
-    if name in ['target', 'device', 'prop', 'num_cube_core', 'num_vector_core', 'ub_size_in_kbytes', 'rf_size_in_kbytes']:
+    if name in [
+            'target', 'device', 'prop', 'num_cube_core', 'num_vector_core', 'ub_size_in_kbytes', 'rf_size_in_kbytes'
+    ]:
         return _init_npu_params()[name]
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
 
 # wrapper npu 32 bytes align, get and pass unalign info to triton meta
 # then autotune choose tiling param and send them to bishengIR

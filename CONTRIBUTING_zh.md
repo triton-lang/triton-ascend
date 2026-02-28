@@ -112,7 +112,7 @@ git push origin {your_new_branch_name}
 - 如果PR的标签显示ascend-cla/no，签署cla后评论/check-cla检查cla签署状态，cla签署成功后获得标签 ascend-cla/yes。
 
   ```shell
-  /check-cla 
+  /check-cla
   ```
 
 - 评论/compile启动流水线测试，如果未通过测试，根据提示修改后再次评论/compile触发流水线测试，通过后获得标签 ci-pipeline-passed。
@@ -146,8 +146,8 @@ git push origin {your_new_branch_name}
 - CI流水线未通过
 
   请根据提示信息，查找出CI流水线未通过的测试用例并检查原因，解决后重新运行CI流水线。
-  
-  
+
+
 
 <h2 id="ISSUE规范.md">ISSUE规范</h2>
 

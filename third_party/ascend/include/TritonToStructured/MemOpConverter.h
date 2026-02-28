@@ -22,6 +22,9 @@
 #ifndef TRITON_ADAPTER_MEMOPCONVERTER_H
 #define TRITON_ADAPTER_MEMOPCONVERTER_H
 
+#include "TritonToStructured/MaskAnalysis.h"
+#include "TritonToStructured/PtrAnalysis.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -33,9 +36,6 @@
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "TritonToStructured/PtrAnalysis.h"
-#include "TritonToStructured/MaskAnalysis.h"
 
 namespace MemOpConverter {
 
@@ -44,83 +44,87 @@ using namespace triton;
 
 class LoadConverter : public OpRewritePattern<triton::LoadOp> {
 public:
-    explicit LoadConverter(MLIRContext* context, bool optimizeDynamicOffset = false,
-                           bool enableMaskFallbackConversion = false)
-        : OpRewritePattern<triton::LoadOp>(context),
-          optimizeDynamicOffset(optimizeDynamicOffset),
-          enableMaskFallbackConversion(enableMaskFallbackConversion) {};
+  explicit LoadConverter(MLIRContext* context, bool optimizeDynamicOffset = false,
+                         bool enableMaskFallbackConversion = false)
+      : OpRewritePattern<triton::LoadOp>(context),
+        optimizeDynamicOffset(optimizeDynamicOffset),
+        enableMaskFallbackConversion(enableMaskFallbackConversion) {};
 
-    using OpRewritePattern<triton::LoadOp>::OpRewritePattern;
+  using OpRewritePattern<triton::LoadOp>::OpRewritePattern;
 
-    LogicalResult matchAndRewrite(triton::LoadOp op,
-                                  PatternRewriter& rewriter) const override;
+  LogicalResult matchAndRewrite(triton::LoadOp op,
+                                PatternRewriter &rewriter) const override;
 
 private:
-    bool optimizeDynamicOffset;
-    bool enableMaskFallbackConversion;
+  bool optimizeDynamicOffset;
+  bool enableMaskFallbackConversion;
 };
 
 class StoreConverter : public OpRewritePattern<triton::StoreOp> {
 public:
-    explicit StoreConverter(MLIRContext* context, bool optimizeDynamicOffset = false,
-                            bool enableMaskFallbackConversion = false)
-        : OpRewritePattern<triton::StoreOp>(context),
-          optimizeDynamicOffset(optimizeDynamicOffset),
-          enableMaskFallbackConversion(enableMaskFallbackConversion) {};
+  explicit StoreConverter(MLIRContext* context, bool optimizeDynamicOffset = false,
+                          bool enableMaskFallbackConversion = false)
+      : OpRewritePattern<triton::StoreOp>(context),
+        optimizeDynamicOffset(optimizeDynamicOffset),
+        enableMaskFallbackConversion(enableMaskFallbackConversion) {};
 
-    using OpRewritePattern<triton::StoreOp>::OpRewritePattern;
+  using OpRewritePattern<triton::StoreOp>::OpRewritePattern;
 
-    LogicalResult matchAndRewrite(triton::StoreOp op,
-                                  PatternRewriter& rewriter) const override;
+  LogicalResult matchAndRewrite(triton::StoreOp op,
+                                PatternRewriter &rewriter) const override;
 
 private:
-    bool optimizeDynamicOffset;
-    bool enableMaskFallbackConversion;
+  bool optimizeDynamicOffset;
+  bool enableMaskFallbackConversion;
 };
 
 class MemOpTransformer {
 public:
-    TritonToStructured::PtrState ptrState;
-    TritonToStructured::MaskState maskState;
+  TritonToStructured::PtrState ptrState;
+  TritonToStructured::MaskState maskState;
 
-    enum class MemType { load, store, deafaultType };
+  enum class MemType { load, store, deafaultType };
 
-    bool optimizeDynamicOffset;
+  bool optimizeDynamicOffset;
+  bool compileOn91095 = false;
 
-    MemType currentType = MemType::deafaultType;
+  MemOpTransformer(MemType memType, bool optimizeDynamicOffset = false)
+      : currentType(memType), optimizeDynamicOffset(optimizeDynamicOffset)  {}
 
-    MemOpTransformer(MemType memType, bool optimizeDynamicOffset = false)
-        : currentType(memType), optimizeDynamicOffset(optimizeDynamicOffset)  {}
+  MemOpTransformer(MemType memType, bool optimizeDynamicOffset = false,
+                   bool compileOn91095 = false)
+      : currentType(memType), optimizeDynamicOffset(optimizeDynamicOffset),
+        compileOn91095(compileOn91095) {}
 
-    Value materializeImplicitBroadcast(Value srcTensor, const Location loc,
-                                       PatternRewriter& rewriter);
+  Value materializeImplicitBroadcast(Value srcTensor, const Location loc,
+                                     PatternRewriter &rewriter);
 
-    Value materializeImplicitReshape(Value srcTensor, const Location loc,
-                                     PatternRewriter& rewriter);
+  Value materializeImplicitReshape(Value srcTensor, const Location loc,
+                                   PatternRewriter &rewriter);
 
-    Value materializeImplicitSelect(Value srcTensor, Value mask, Value other,
-                                    const Location loc,
-                                    PatternRewriter& rewriter);
+  Value materializeImplicitSelect(Value srcTensor, Value mask, Value other,
+                                  const Location loc,
+                                  PatternRewriter &rewriter);
 
-    Value materializeImplicitPermute(Value srcTensor, const Location loc,
-                                     PatternRewriter& rewriter);
+  Value materializeImplicitPermute(Value srcTensor, const Location loc,
+                                   PatternRewriter &rewriter);
 
-    Value createNewPtr(Value oldPtr, const Location loc,
-                      PatternRewriter& rewriter);
+  Value createNewPtr(Value oldPtr, const Location loc,
+                     PatternRewriter &rewriter);
 
-    Value createNewMask(Value oldPtr, const Location loc,
-                       PatternRewriter& rewriter);
+  Value createNewMask(Value oldPtr, const Location loc,
+                      PatternRewriter &rewriter);
 
-    Value createNewOther(Value oldOther, const Location loc,
-                        PatternRewriter& rewriter);
+  Value createNewOther(Value oldOther, const Location loc,
+                       PatternRewriter &rewriter);
 
-    bool applyPermuteOnMask();
+  bool applyPermuteOnMask();
 };
 
 // Create local lock var
 hivm::CreateSyncBlockLockOp createSyncBlockLockVar(OpBuilder &builder,
                                                    Location loc);
 
-}  // namespace MemOpConverter
+} // namespace MemOpConverter
 
 #endif

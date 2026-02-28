@@ -637,8 +637,6 @@ class InterpreterBuilder:
         else:  # scalar
             return TensorHandle(np.full(shape, arg.data, dtype=_get_np_dtype(arg.dtype)), arg.dtype.scalar)
 
-
-
     def create_atomic_cas(self, ptr, cmp, val, sem, scope):
         if sem not in self.ir_sem_to_interpreter_sem:
             raise ValueError(f"unsupported semantic {sem}")
@@ -1138,7 +1136,7 @@ class GridExecutor:
         assert len(grid) <= 3, "grid must have at most 3 dimensions"
         grid = grid + (1, ) * (3 - len(grid))
         interpreter_builder.set_grid_dim(*grid)
-        
+
         try:
             # Execute kernels - sub_vec_id simulation handled by AscendInterpreterBuilder
             if hasattr(interpreter_builder, 'execute_with_sub_vec_simulation'):

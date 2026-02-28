@@ -1,3 +1,4 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
 # Copyright 2018-2020 Philippe Tillet
 # Copyright 2020-2022 OpenAI
 #
@@ -18,3 +19,4 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
+

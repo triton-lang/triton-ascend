@@ -77,4 +77,3 @@ RUN cd build && \
     rm -rf build
 
 WORKDIR /home/triton
-

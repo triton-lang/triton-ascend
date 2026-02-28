@@ -44,17 +44,15 @@ def triton_interleave_load(q_ptr, k_ptr, head_dim_half: tl.constexpr, bias: tl.c
     tl.store(k_ptr + d_indices * 2 + 1 + bias, new_q_imag)
 
 
-@pytest.mark.parametrize('para_type,data_type,head_dim_half,bias',
-                         [
-                             ['float32', torch.float32, 16, 4],
-                         ]
-                         )
+@pytest.mark.parametrize('para_type,data_type,head_dim_half,bias', [
+    ['float32', torch.float32, 16, 4],
+])
 def test_interleave(para_type, data_type, head_dim_half, bias):
     length = bias + head_dim_half * 2
-    q = torch.randn((length,), dtype=data_type).npu()
+    q = torch.randn((length, ), dtype=data_type).npu()
     k = torch.zeros_like(q, dtype=data_type).npu()
     k_ref = torch.zeros_like(q, dtype=data_type).npu()
 
-    triton_interleave_load[(1,)](q, k, head_dim_half, bias)
+    triton_interleave_load[(1, )](q, k, head_dim_half, bias)
     k_ref = torch_interleave_load(q, k_ref, head_dim_half, bias)
     assert torch.allclose(k, k_ref)

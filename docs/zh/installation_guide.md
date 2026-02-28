@@ -280,4 +280,3 @@ git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend/pytho
     tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
     The maximum difference between torch and triton is 0.0
     ```
-

@@ -48,7 +48,8 @@ const std::string discreteAttrName = "DiscreteMemAccess";
 
 bool isaPermutedMemRefType(MemRefType);
 
-std::optional<int64_t> getLastStrideOfReinterpretCastOp(memref::ReinterpretCastOp op);
+std::optional<int64_t>
+getLastStrideOfReinterpretCastOp(memref::ReinterpretCastOp op);
 
 Value getTransposedValue(Value source, const Location loc,
                          ConversionPatternRewriter &rewriter,
@@ -65,11 +66,10 @@ memref::SubViewOp makeSubViewOp(Value src,
                                 const Location &loc,
                                 ConversionPatternRewriter &rewriter);
 
-tensor::ExtractSliceOp makeExtractSliceOp(Value src,
-                                          const llvm::SmallVector<OpFoldResult> &offsets,
-                                          const llvm::SmallVector<OpFoldResult> &sizes,
-                                          const Location &loc,
-                                          ConversionPatternRewriter &rewriter);
+tensor::ExtractSliceOp
+makeExtractSliceOp(Value src, const llvm::SmallVector<OpFoldResult> &offsets,
+                   const llvm::SmallVector<OpFoldResult> &sizes,
+                   const Location &loc, ConversionPatternRewriter &rewriter);
 
 std::optional<Operation *> getFullShapeOp(Value val,
                                           ConversionPatternRewriter &rewriter);
@@ -225,10 +225,11 @@ struct ReduceWithIndexParams {
   bool isUnsignedSrc;
 };
 
-llvm::FailureOr<ReduceWithIndexParams> getReduceWithIndexParams(triton::ReduceOp op);
+llvm::FailureOr<ReduceWithIndexParams>
+getReduceWithIndexParams(triton::ReduceOp op);
 
 void addReduceWithIndexAttr(ReduceWithIndexParams params,
-                            ConversionPatternRewriter& rewriter,
+                            ConversionPatternRewriter &rewriter,
                             linalg::ReduceOp reduceOp);
 
 OpFoldResult getOpFoldResultOfLayoutInfo(Value value, OpBuilder &builder);

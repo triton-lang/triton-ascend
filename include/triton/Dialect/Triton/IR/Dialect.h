@@ -13,7 +13,7 @@
 #include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h.inc"
-//FIXME TODO: When upgrading to Triton 3.4.0, remove the commented line below 
+// FIXME TODO: When upgrading to Triton 3.4.0, remove the commented line below
 #include "triton/Dialect/Triton/IR/OpInterfaces.h"
 #include "triton/Dialect/Triton/IR/OpsEnums.h.inc"
 #include "triton/Dialect/Triton/IR/Traits.h"

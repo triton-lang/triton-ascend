@@ -41,7 +41,7 @@ namespace triton {
 
 std::unique_ptr<OperationPass<ModuleOp>> createTritonToLinalgPass();
 
-std::unique_ptr<OperationPass<ModuleOp>> 
+std::unique_ptr<OperationPass<ModuleOp>>
 createTritonToLinalgPass(bool, bool, bool, bool, bool);
 
 enum TensorKind { NONE = -1, INPUT = 0, OUTPUT = 1, INPUT_OUTPUT = 2 };
@@ -75,14 +75,16 @@ private:
   void addProgramInfo(triton::FuncOp func, bool globalKernel);
 
   template <typename OpTy>
-  void addTensorKindToArguments(OpTy op, triton::FuncOp func, TensorKind tensorKind);
+  void addTensorKindToArguments(OpTy op, triton::FuncOp func,
+                                TensorKind tensorKind);
 
   template <TensorKind Kind, typename... Ops>
   void walkAndMarkTensorKind(triton::FuncOp func);
 
   void annotateTensorKindForModule(ModuleOp moduleOp);
 
-  void convertTTFunc(triton::FuncOp func, const bool existDot, const bool existSIMTOp);
+  void convertTTFunc(triton::FuncOp func, const bool existDot,
+                     const bool existSIMTOp);
 
   LogicalResult convertMultipleBlockControlFlow(Operation *funcOp,
                                                 OpBuilder &builder);
@@ -107,7 +109,7 @@ public:
 
   TritonToLinalgPass(bool globalKernel, bool namedOps, bool enableNd2nzOnVector,
                      bool enableSelectAnalysis, bool compileOn91095) {
-    this->globalKernel = globalKernel; 
+    this->globalKernel = globalKernel;
     this->namedOps = namedOps;
     this->enableNd2nzOnVector = enableNd2nzOnVector;
     this->enableSelectAnalysis = enableSelectAnalysis;

@@ -140,7 +140,7 @@ TRITON_DEBUG=1 python 01-vector-add.py
 ```
 After the test case is executed, the dump file path is displayed. The default path is **~/.triton/dump**. The following information is displayed:
 ```
-Dumping intermediate results to ~/.triton/dump/xxx 
+Dumping intermediate results to ~/.triton/dump/xxx
 # xxx is a unique hash identifier.
 ```
 Go to the dump path and view **kernel.ttir.mlir** and **kernel.ttadapter.mlir**.
@@ -290,24 +290,24 @@ import triton.language as tl
 
 @triton.jit
 def triton_kernel(
-    out_ptr0, 
-    in_ptr0, 
-    in_ptr1, 
+    out_ptr0,
+    in_ptr0,
+    in_ptr1,
     XBLOCK: tl.constexpr,  # Constant parameter during compilation
     USE_FP16: tl.constexpr  # Constant parameter during compilation
 ):
     # Print constant parameters during compilation.
     tl.static_print("XBLOCK = ", XBLOCK)
     tl.static_print("USE_FP16 = ", USE_FP16)
-    
+
     idx = tl.arange(0, XBLOCK)
     tmp0 = tl.load(in_ptr0 + idx)
     tmp1 = tl.load(in_ptr1 + idx)
-    
+
     # Print the constant calculation result.
     elements_per_thread = XBLOCK // 32
     tl.static_print("Elements per thread = ", elements_per_thread)
-    
+
     tmp2 = tmp0 + tmp1
     tl.store(out_ptr0 + idx, tmp2)
 ```

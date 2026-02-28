@@ -3,16 +3,16 @@
 ## 项目简介与价值主张
 Triton-Ascend是面向昇腾平台构建的Triton编译框架，旨在让Triton代码能够在昇腾硬件上高效运行。
 - #### 核心价值说明
-Triton是近几年来受到开发者青睐的Python化编译框架。开发者仅需关注Tile/Block的切分方式以及基于Tile/Block的运算逻辑，编译器将在Triton代码的编译过程中结合底层硬件特点自动完成内存分配、数据搬运、数据计算、流水并行等，因此，算子的开发难度大幅降低、开发效率显著提升。  
-Triton-Ascend将Triton编译栈适配到华为昇腾NPU上，在Triton的基础上提供一系列针对性的优化，使Triton代码能够编译后在昇腾硬件上高效运行。  
+Triton是近几年来受到开发者青睐的Python化编译框架。开发者仅需关注Tile/Block的切分方式以及基于Tile/Block的运算逻辑，编译器将在Triton代码的编译过程中结合底层硬件特点自动完成内存分配、数据搬运、数据计算、流水并行等，因此，算子的开发难度大幅降低、开发效率显著提升。
+Triton-Ascend将Triton编译栈适配到华为昇腾NPU上，在Triton的基础上提供一系列针对性的优化，使Triton代码能够编译后在昇腾硬件上高效运行。
 目前，Triton-Ascend仍在持续完善中，我们将不断提升Triton Python API完备度、数据类型支持度、访存方式灵活性等，并持续优化编译器的自动优化能力，提升Triton-Ascend整体的功能与性能泛化性。
 - #### 昇腾生态定位
 Triton-Ascend编译框架打通了Triton与昇腾硬件之间的壁垒，使熟悉Triton框架的开发者可以更有效率地使用昇腾NPU。它通过提供通用、高效的算子开发范式，为昇腾软件栈补齐了敏捷开发的关键一环，极大丰富了昇腾的算子库和上层应用生态。
 
 ## 最新动态与里程碑
 - #### 近期版本更新
-当前版本：[Triton-Ascend 3.2.0](https://pypi.org/project/triton-ascend/)  
-配套CANN版本：[昇腾CANN社区版8.5.0](https://www.hiascend.com/developer/download/community/result?module=cann&cann=8.5.0)  
+当前版本：[Triton-Ascend 3.2.0](https://pypi.org/project/triton-ascend/)
+配套CANN版本：[昇腾CANN社区版8.5.0](https://www.hiascend.com/developer/download/community/result?module=cann&cann=8.5.0)
 2026年版本计划：升级triton版本到triton3.4
 - #### 里程碑
 | 里程碑 | 重要特性更新情况 | 状态 |

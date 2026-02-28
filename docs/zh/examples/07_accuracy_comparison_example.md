@@ -12,7 +12,7 @@
 def test_add(x0, x1):
     """
     测试 Triton 实现的向量加法与 PyTorch 的结果,精度比对是否一致。
-    
+
     步骤：
     1. 使用 PyTorch 计算参考结果（torch_ref）
     2. 使用 Triton 编写 kernel 并计算结果（triton_cal）

@@ -616,7 +616,7 @@ class InterpreterBuilder:
     def create_extract_scalar(self, tensor_handle, indices):
         """
         Extract a scalar from a tensor using indices (equivalent to get_element).
-        
+
         :param tensor_handle: The tensor to extract from
         :param indices: List of scalar indices (can be TensorHandle or Python int)
         :return: Scalar value
@@ -632,9 +632,10 @@ class InterpreterBuilder:
                 index_values.append(int(idx.data.item()) if hasattr(idx.data, 'item') else int(idx.data))
             else:
                 # Fallback: try to extract data
-                index_values.append(int(idx.data.item()) if hasattr(idx, 'data') and hasattr(idx.data, 'item') 
-                                  else int(idx.data) if hasattr(idx, 'data') else int(idx))
-        
+                index_values.append(
+                    int(idx.data.item()) if hasattr(idx, 'data') and hasattr(idx.data, 'item') else
+                    int(idx.data) if hasattr(idx, 'data') else int(idx))
+
         # Extract the scalar value
         scalar_data = tensor_handle.data[tuple(index_values)]
         return TensorHandle(np.array([scalar_data]), tensor_handle.dtype.scalar)
@@ -642,7 +643,7 @@ class InterpreterBuilder:
     def create_insert_slice(self, full_tensor, sub_tensor, offsets, sizes, strides):
         """
         Insert a sub-tensor into a full tensor at specified offsets.
-        
+
         :param full_tensor: The full tensor (destination)
         :param sub_tensor: The sub-tensor to insert
         :param offsets: List of offset TensorHandle objects or Python ints
@@ -651,7 +652,7 @@ class InterpreterBuilder:
         :return: Modified tensor with sub_tensor inserted
         """
         result = full_tensor.data.copy()
-        
+
         # Convert offsets from TensorHandle or Python int to integers
         offset_values = []
         for off in offsets:
@@ -663,9 +664,10 @@ class InterpreterBuilder:
                 offset_values.append(int(off.data.item()) if hasattr(off.data, 'item') else int(off.data))
             else:
                 # Fallback
-                offset_values.append(int(off.data.item()) if hasattr(off, 'data') and hasattr(off.data, 'item')
-                                   else int(off.data) if hasattr(off, 'data') else int(off))
-        
+                offset_values.append(
+                    int(off.data.item()) if hasattr(off, 'data') and hasattr(off.data, 'item') else
+                    int(off.data) if hasattr(off, 'data') else int(off))
+
         # Build slices for insertion
         slices = []
         for i, (offset, size, stride) in enumerate(zip(offset_values, sizes, strides)):
@@ -674,16 +676,16 @@ class InterpreterBuilder:
                 slices.append(slice(offset, end))
             else:
                 slices.append(slice(offset, end, stride))
-        
+
         # Insert the sub-tensor
         result[tuple(slices)] = sub_tensor.data
-        
+
         return TensorHandle(result, full_tensor.dtype.scalar)
 
     def create_extract_slice(self, full_tensor, offsets, sizes, strides):
         """
         Extract a slice from a full tensor.
-        
+
         :param full_tensor: The full tensor
         :param offsets: List of offset TensorHandle objects or Python ints
         :param sizes: List of size integers
@@ -701,9 +703,10 @@ class InterpreterBuilder:
                 offset_values.append(int(off.data.item()) if hasattr(off.data, 'item') else int(off.data))
             else:
                 # Fallback
-                offset_values.append(int(off.data.item()) if hasattr(off, 'data') and hasattr(off.data, 'item')
-                                   else int(off.data) if hasattr(off, 'data') else int(off))
-        
+                offset_values.append(
+                    int(off.data.item()) if hasattr(off, 'data') and hasattr(off.data, 'item') else
+                    int(off.data) if hasattr(off, 'data') else int(off))
+
         # Build slices for extraction
         slices = []
         for i, (offset, size, stride) in enumerate(zip(offset_values, sizes, strides)):
@@ -712,16 +715,16 @@ class InterpreterBuilder:
                 slices.append(slice(offset, end))
             else:
                 slices.append(slice(offset, end, stride))
-        
+
         # Extract the slice
         extracted = full_tensor.data[tuple(slices)]
-        
+
         return TensorHandle(extracted, full_tensor.dtype.scalar)
 
     def create_index_select_simd(self, src_ptr, index_tensor, dim, src_shape, src_offset, read_shape, result_shape):
         """
         SIMD index_select operation (gather with indices along a dimension).
-        
+
         :param src_ptr: Source tensor pointer
         :param index_tensor: 1D tensor of indices
         :param dim: Dimension to select from
@@ -731,34 +734,35 @@ class InterpreterBuilder:
         :param result_shape: List of result shape (int or TensorHandle)
         :return: Result tensor with selected indices
         """
+
         # Convert src_shape, src_offset, read_shape to integers
         def to_int(val):
             if isinstance(val, TensorHandle):
                 return int(val.data.item())
             return int(val)
-        
+
         src_shape_vals = [to_int(s) for s in src_shape]
         src_offset_vals = [to_int(o) if o != -1 else -1 for o in src_offset]
         read_shape_vals = [to_int(r) if r != -1 else -1 for r in read_shape]
         result_shape_vals = [to_int(r) for r in result_shape]
-        
+
         # Get index values - handle both array and TensorHandle
         if isinstance(index_tensor, TensorHandle):
             indices = index_tensor.data.flatten()
         else:
             indices = np.asarray(index_tensor).flatten()
-        
+
         # Ensure indices are integers
         if indices.dtype not in [np.int32, np.int64]:
             indices = indices.astype(np.int32)
-        
+
         # Create result tensor
         result = np.empty(result_shape_vals, dtype=src_ptr.data.dtype)
-        
+
         # Perform index_select: for each index, read the specified data
         for out_idx, in_idx in enumerate(indices):
             in_idx = int(in_idx)
-            
+
             # Validate index bounds
             if not (0 <= in_idx < src_shape_vals[dim]):
                 # Out of bounds - fill with zeros
@@ -766,7 +770,7 @@ class InterpreterBuilder:
                 result_slices[dim] = slice(out_idx, out_idx + 1)
                 result[tuple(result_slices)] = 0
                 continue
-            
+
             # Build source slice
             src_slices = []
             for d in range(len(src_shape_vals)):
@@ -779,7 +783,7 @@ class InterpreterBuilder:
                     offset = max(0, min(offset, src_shape_vals[d] - 1))
                     read_size = min(read_size, src_shape_vals[d] - offset)
                     src_slices.append(slice(offset, offset + read_size))
-            
+
             # Build result slice
             result_slices = []
             for d in range(len(result_shape_vals)):
@@ -787,7 +791,7 @@ class InterpreterBuilder:
                     result_slices.append(slice(out_idx, out_idx + 1))
                 else:
                     result_slices.append(slice(None))
-            
+
             # Copy data with proper shape handling
             try:
                 src_data = src_ptr.data[tuple(src_slices)]
@@ -801,17 +805,17 @@ class InterpreterBuilder:
             except Exception as e:
                 # On error, fill with zeros
                 result[tuple(result_slices)] = 0
-        
+
         return TensorHandle(result, src_ptr.dtype.scalar)
 
     def create_get_sub_vec_id(self):
         """
         Get the Vector Core index on the AI Core.
-        
+
         In Interpreter mode, simulate multiple vector cores by maintaining
         a sub_vec_id counter. This is used for 1:2 hardware ratio emulation
         where different vector cores process different partitions of the data.
-        
+
         :return: Vector Core ID as TensorHandle (int64, scalar)
         """
         # Return the current sub_vec_id (set by GridExecutor)
@@ -821,10 +825,10 @@ class InterpreterBuilder:
     def sync_block_set(self, sender, receiver, event_id, sender_pipe_value, receiver_pipe_value):
         """
         Set synchronization event between compute and vector units.
-        
+
         In Interpreter mode, this is a no-op since we execute single-threaded.
         Synchronization is not needed in CPU emulation.
-        
+
         :param sender: Source unit ("cube" or "vector")
         :param receiver: Destination unit ("cube" or "vector")
         :param event_id: Event ID (TensorHandle)
@@ -837,10 +841,10 @@ class InterpreterBuilder:
     def sync_block_wait(self, sender, receiver, event_id, sender_pipe_value, receiver_pipe_value):
         """
         Wait for synchronization event between compute and vector units.
-        
+
         In Interpreter mode, this is a no-op since we execute single-threaded.
         Synchronization is not needed in CPU emulation.
-        
+
         :param sender: Source unit ("cube" or "vector")
         :param receiver: Destination unit ("cube" or "vector")
         :param event_id: Event ID (TensorHandle)
@@ -853,10 +857,10 @@ class InterpreterBuilder:
     def sync_block_all(self, mode, event_id):
         """
         Synchronize all compute or vector units globally.
-        
+
         In Interpreter mode, this is a no-op since we execute single-threaded.
         Synchronization is not needed in CPU emulation.
-        
+
         :param mode: Sync mode ("all_cube", "all_vector", "all", "all_sub_vector")
         :param event_id: Event ID (int, constexpr, or TensorHandle)
         """
@@ -1261,7 +1265,7 @@ def _patch_lang(fn):
             _patch_builtin(lang.math, interpreter_builder)
         _patch_lang_tensor(lang.tensor)
         _patch_lang_core(lang)
-    
+
     # Patch all modules in fn's globals that might be extension modules
     for name, value in list(fn.__globals__.items()):
         if value is None:
@@ -1279,7 +1283,7 @@ def _patch_lang(fn):
                     pass
         except Exception:
             pass
-    
+
     # Also try importing extension directly as fallback
     try:
         import triton.language.extra.cann.extension as extension
@@ -1375,7 +1379,7 @@ class GridExecutor:
         assert len(grid) <= 3, "grid must have at most 3 dimensions"
         grid = grid + (1, ) * (3 - len(grid))
         interpreter_builder.set_grid_dim(*grid)
-        
+
         # Infer the number of sub-vector cores from kernel parameters
         # Check for M and sub_M parameters (common pattern for 1:2 ratio)
         num_sub_vec_ids = 1
@@ -1390,7 +1394,7 @@ class GridExecutor:
             # Number of vector cores = M / sub_M
             if isinstance(M, int) and isinstance(sub_M, int) and sub_M > 0:
                 num_sub_vec_ids = max(1, M // sub_M)
-        
+
         try:
             # Loop over sub-vector IDs to simulate parallel vector core execution
             for sub_vec_id in range(num_sub_vec_ids):

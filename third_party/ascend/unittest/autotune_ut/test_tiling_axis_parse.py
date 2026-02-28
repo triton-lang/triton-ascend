@@ -26,15 +26,11 @@ from test_common import check_axes_parse_res, mock_autotuner
 
 def test_tiling_axis_parse_base_case1(mock_autotuner):
     import triton.backends.ascend.runtime
-    
-    @triton.autotune(
-        configs=[],
-        key=["n_elements"]
-    )
+
+    @triton.autotune(configs=[], key=["n_elements"])
     @triton.jit
-    def triton_tiling_axis_parse_base_case1(
-        x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr, BLOCK_SUB: tl.constexpr
-    ):
+    def triton_tiling_axis_parse_base_case1(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr,
+                                            BLOCK_SUB: tl.constexpr):
         offset = tl.program_id(axis=0) * BLOCK_SIZE
         base = tl.arange(0, BLOCK_SUB)
         loops = (BLOCK_SIZE + BLOCK_SUB - 1) // BLOCK_SUB  # <-
@@ -55,7 +51,7 @@ def test_tiling_axis_parse_base_case1(mock_autotuner):
         "low_dim_axes": ["x"],
         "reduction_axes": [],
     }
-    act_res = triton_tiling_axis_parse_base_case1[(1,)]()
+    act_res = triton_tiling_axis_parse_base_case1[(1, )]()
 
     check_axes_parse_res(act_res, ref_res)
 
@@ -63,15 +59,11 @@ def test_tiling_axis_parse_base_case1(mock_autotuner):
 @pytest.mark.skip
 def test_tiling_axis_parse_base_case2(mock_autotuner):
     import triton.backends.ascend.runtime
-    
-    @triton.autotune(
-        configs=[],
-        key=["n_elements"]
-    )
+
+    @triton.autotune(configs=[], key=["n_elements"])
     @triton.jit
-    def triton_tiling_axis_parse_base_case2(
-        x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr, BLOCK_SUB: tl.constexpr
-    ):
+    def triton_tiling_axis_parse_base_case2(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr,
+                                            BLOCK_SUB: tl.constexpr):
         offset = tl.program_id(axis=0) * BLOCK_SIZE
         base = tl.arange(0, BLOCK_SUB)
         for offset_sub in range(0, BLOCK_SIZE, BLOCK_SUB):
@@ -91,7 +83,7 @@ def test_tiling_axis_parse_base_case2(mock_autotuner):
         "low_dim_axes": ["x"],
         "reduction_axes": [],
     }
-    act_res = triton_tiling_axis_parse_base_case2[(1,)]()
+    act_res = triton_tiling_axis_parse_base_case2[(1, )]()
 
     check_axes_parse_res(act_res, ref_res)
 
@@ -99,15 +91,11 @@ def test_tiling_axis_parse_base_case2(mock_autotuner):
 @pytest.mark.skip
 def test_tiling_axis_parse_base_case3(mock_autotuner):
     import triton.backends.ascend.runtime
-    
-    @triton.autotune(
-        configs=[],
-        key=["n_elements"]
-    )
+
+    @triton.autotune(configs=[], key=["n_elements"])
     @triton.jit
-    def triton_tiling_axis_parse_base_case3(
-        x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr, BLOCK_SUB: tl.constexpr
-    ):
+    def triton_tiling_axis_parse_base_case3(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr,
+                                            BLOCK_SUB: tl.constexpr):
         offset = tl.program_id(axis=0) * BLOCK_SIZE
         base = tl.arange(0, BLOCK_SUB)[:]  # <-
         for offset_sub in range(0, BLOCK_SIZE, BLOCK_SUB):
@@ -127,6 +115,6 @@ def test_tiling_axis_parse_base_case3(mock_autotuner):
         "low_dim_axes": ["x"],
         "reduction_axes": [],
     }
-    act_res = triton_tiling_axis_parse_base_case3[(1,)]()
+    act_res = triton_tiling_axis_parse_base_case3[(1, )]()
 
     check_axes_parse_res(act_res, ref_res)

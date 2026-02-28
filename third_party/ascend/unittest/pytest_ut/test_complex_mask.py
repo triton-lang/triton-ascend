@@ -45,5 +45,5 @@ def test_complex_mask_copy():
     N = 1024
     x = torch.randn(N, dtype=torch.float32).npu()
     y = torch.empty_like(x).npu()
-    copy_kernel[(1,)](x, y, N=N, NUMEL=N)
+    copy_kernel[(1, )](x, y, N=N, NUMEL=N)
     torch.testing.assert_close(x, y)

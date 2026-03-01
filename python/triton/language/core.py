@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from enum import Enum
 from functools import partial, wraps
 import typing
-from typing import Union, Callable, List, Sequence, TypeVar, Optional
+from typing import Union, Callable, List, Sequence, TypeVar, Optional, Tuple
 import builtins
 from ..runtime.jit import jit
 import inspect

@@ -1,7 +1,7 @@
 from __future__ import annotations  # remove after python 3.11
 import warnings
 
-from typing import List, Optional, Sequence, Tuple, TypeVar
+from typing import List, Optional, Sequence, Tuple, TypeVar, Union
 import numbers
 
 from .._C.libtriton import ir
@@ -1129,7 +1129,7 @@ def _load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_
                          "pointers or loading a scalar. Because the compiler does not know the boundary; please "
                          "use block pointers (defined by `make_block_ptr`) instead")
 
-    if mask is not None and other is None and care_padding == True:
+    if mask is not None and other is None and care_padding:
         # Get element type to determine default padding value
         elt_ty = ptr.type.scalar.element_ty
         # Use 0.0 for floating point types, 0 for integer types
@@ -1594,7 +1594,6 @@ def dot(lhs: tl.tensor, rhs: tl.tensor, acc: tl.tensor, input_precision: Optiona
 
     M = lhs.type.shape[-2]
     N = rhs.type.shape[-1]
-    K = lhs.type.shape[-1]
     B = lhs.type.shape[0] if lhs_rank == 3 else None
     ret_ty = tl.block_type(ret_scalar_ty, [B, M, N] if B else [M, N])
     if acc is None:
@@ -1671,15 +1670,15 @@ def dot_scaled(lhs: tl.tensor, lhs_scale: tl.tensor, lhs_format: str, rhs: tl.te
     lhs = _bitcast_to_fp_type(lhs, lhs_format, builder)
     rhs = _bitcast_to_fp_type(rhs, rhs_format, builder)
 
-    if lhs_k_pack == False:
+    if not lhs_k_pack:
         dims = (1, 0)
-        dims = core._unwrap_iterable(dims)
+        dims = tl._unwrap_iterable(dims)
         tmp_lhs = permute(lhs, dims, builder)
         lhs = reshape(tmp_lhs, (lhs.shape[0], lhs.shape[1]), True, builder)
 
-    if rhs_k_pack == False:
+    if not rhs_k_pack:
         dims = (1, 0)
-        dims = core._unwrap_iterable(dims)
+        dims = tl._unwrap_iterable(dims)
         tmp_rhs = permute(rhs, dims, builder)
         rhs = reshape(tmp_rhs, (rhs.shape[0], rhs.shape[1]), True, builder)
 
@@ -1703,7 +1702,7 @@ def dot_scaled(lhs: tl.tensor, lhs_scale: tl.tensor, lhs_format: str, rhs: tl.te
     rhs_scale_handle = None if rhs_scale_is_none else rhs_scale.handle
     lhs_scale_handle = None if lhs_scale_is_none else lhs_scale.handle
     return tl.tensor(
-        builder.create_dot_scaled(lhs.handle, lhs_scale.handle, lhs_format_enum, rhs.handle, rhs_scale_handle,
+        builder.create_dot_scaled(lhs.handle, lhs_scale_handle, lhs_format_enum, rhs.handle, rhs_scale_handle,
                                   rhs_format_enum, acc_handle), ret_ty)
 
 

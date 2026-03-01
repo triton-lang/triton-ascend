@@ -8,7 +8,11 @@ import textwrap
 
 from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
 
+# Import and register Ascend extension dispatch handlers
 import triton.language.extra.cann.extension as extension
+from triton.language.extra.cann.extension.dispatch import ASCEND_WITH_DISPATCH
+from triton.language.extra.cann.extension.builder import setup_unified_builder
+
 from triton.extension.buffer.language import core as bl
 from triton.extension.buffer.language.builder import setup_unified_builder_with_buffer_builder
 
@@ -24,10 +28,6 @@ from .errors import (CompilationError, CompileTimeAssertionFailure, UnsupportedL
 from types import ModuleType
 # Central registry for all 'with' statement handlers
 WITH_DISPATCH = {}
-
-# Import and register Ascend extension dispatch handlers
-from triton.language.extra.cann.extension.dispatch import ASCEND_WITH_DISPATCH
-from triton.language.extra.cann.extension.builder import setup_unified_builder
 
 WITH_DISPATCH.update(ASCEND_WITH_DISPATCH)
 
@@ -966,7 +966,6 @@ class CodeGenerator(ast.NodeVisitor):
         flatten = False
         warp_specialize = False
         disable_licm = False
-        bind_sub_block = None
         if IteratorClass in [language.range, extension.parallel]:
             iterator = IteratorClass(*iter_args, **iter_kwargs)
             # visit iterator arguments
@@ -981,8 +980,6 @@ class CodeGenerator(ast.NodeVisitor):
             flatten = iterator.flatten
             warp_specialize = iterator.warp_specialize
             disable_licm = iterator.disable_licm
-            if (IteratorClass is extension.parallel):
-                bind_sub_block = iterator.bind_sub_block
         elif IteratorClass is range:
             # visit iterator arguments
             # note: only `range` iterator is supported now

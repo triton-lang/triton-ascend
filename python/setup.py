@@ -719,6 +719,7 @@ def get_packages():
         "triton/language/extra",
         "triton/runtime",
         "triton/backends",
+        "triton/backends/ascend/runtime",
         "triton/tools",
         "triton/extension",
         "triton/extension/buffer",
@@ -804,7 +805,7 @@ setup(
     zip_safe=False,
     # for PyPI
     keywords=["Compiler", "Deep Learning"],
-    url="https://gitcode.com/Ascend/triton-ascend/",
+    url="https://github.com/triton-lang/triton-ascend/",
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",

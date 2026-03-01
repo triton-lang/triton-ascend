@@ -255,16 +255,28 @@ jobs:
       - name: Install pip dependencies
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install cython setuptools wheel cmake==3.24 ninja pytest-forked pytest-xdist lit
+          python3 -m pip install cython setuptools wheel cmake==3.24 ninja pytest-forked pytest-xdist pybind11 lit
 
-      - name: Install Triton
+      - name: Install Triton-Ascend
         env:
           TRITON_BUILD_WITH_CCACHE: "true"
           CUDA_HOME: "/usr/local/cuda"
+          LLVM_INSTALL_PREFIX: "~/.triton/llvm"
+          LLVM_SYSPATH: "~/.triton/llvm"
+          TRITON_BUILD_WITH_CLANG_LLD: "true"
+          TRITON_BUILD_PROTON: "OFF"
+          TRITON_WHEEL_NAME: "triton-ascend"
+          TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=OFF"
         run: |
+          # This is the triton-ascend installation sequence. Generally, full installation
+          # is done with entering python subfolder and executing python3 -m pip install '.[tests]'
+          # At the moment, the triton-ascend installation steps vary slightly as described
+          # in the documentation files.          
           echo "PATH is '$PATH'"
           cd python
-          python3 -m pip install '.[tests]'
+          echo "Running command => python3 setup.py install"
+          echo "TRITON_WHEEL_NAME => '$TRITON_WHEEL_NAME'"
+          python3 setup.py install
 
       - &run-lit-tests-step
         name: Run lit tests
@@ -383,7 +395,7 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install lit
 
-      - name: Install Triton
+      - name: Install Triton-AMD
         id: amd-install-triton
         run: |
           echo "PATH is '$PATH'"

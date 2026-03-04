@@ -39,7 +39,7 @@ jobs:
           echo "enable_integration=true" >> $GITHUB_ENV
       - name: Checkout post-submit commits
         if: github.event_name == 'push'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # Only fetch two commits to check the latest changed files.
           fetch-depth: 2
@@ -114,7 +114,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -154,7 +154,7 @@ jobs:
         runner: ${{fromJson(needs.Runner-Preparation.outputs.matrix-CUDA)}}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: "true"
       - name: Compute cache keys
@@ -329,7 +329,7 @@ jobs:
         runner: ${{fromJson(needs.Runner-Preparation.outputs.matrix-MACOS)}}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: "true"
       - name: Install brew dependencies

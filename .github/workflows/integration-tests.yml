@@ -58,7 +58,7 @@ jobs:
           GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
           REPO_NAME="${{ github.repository }}"
           # ID of integration-tests workflow
-          WORKFLOW_ID="11678186"
+          WORKFLOW_ID="230890244"
 
           # Fetch the last run time of this workflow
           LAST_RUN=$(curl -s \
@@ -67,19 +67,25 @@ jobs:
             "https://api.github.com/repos/$REPO_NAME/actions/workflows/$WORKFLOW_ID/runs?branch=main&status=success&per_page=1" \
             | jq -r '.workflow_runs[0].updated_at')
 
-          # Convert to timestamp
-          LAST_RUN_TS=$(date -d "$LAST_RUN" +%s)
-          NOW_TS=$(date +%s)
-          DIFF=$(( (NOW_TS - LAST_RUN_TS) / 3600 )) # Difference in hours
-
-          echo "Last run was $DIFF hours ago."
-
-          if [ "$DIFF" -ge 4 ]; then
-            echo "Will run CI; last build was long enough ago."
+          # If the workflow has never run successfully before, run it now.
+          if [ "$LAST_RUN" = "null" ]; then
+            echo "Will run CI; no successful build found."
             echo "n_hours_since_last_run=true" >> $GITHUB_ENV
           else
-            echo "Will not run CI; last build was too recent."
-            echo "n_hours_since_last_run=false" >> $GITHUB_ENV
+            # Convert to timestamp
+            LAST_RUN_TS=$(date -d "$LAST_RUN" +%s)
+            NOW_TS=$(date +%s)
+            DIFF=$(( (NOW_TS - LAST_RUN_TS) / 3600 )) # Difference in hours
+
+            echo "Last run was $DIFF hours ago."
+
+            if [ "$DIFF" -ge 4 ]; then
+              echo "Will run CI; last build was long enough ago."
+              echo "n_hours_since_last_run=true" >> $GITHUB_ENV
+            else
+              echo "Will not run CI; last build was too recent."
+              echo "n_hours_since_last_run=false" >> $GITHUB_ENV
+            fi
           fi
       # We want to run integration tests on the main branch (i.e. post-submit)
       # occasionally, because pre-submit CI caches will only read from caches

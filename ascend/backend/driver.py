@@ -757,6 +757,7 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
   void *workspace_addr_ptr = NULL;
   uint32_t blockNum4Workspace = gridX * gridY * gridZ;
 <<<<<<< HEAD:ascend/backend/driver.py
+<<<<<<< HEAD:ascend/backend/driver.py
  	auto optionsWorkspace = at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte);
   {f'''
     uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
@@ -764,12 +765,20 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
     workspace_addr_ptr = const_cast<void *>(workspace_tensor.storage().data());
 =======
   {get_backend_func("pre_launch")}
+=======
+  {get_backend_func("pre_launch", True)}
+>>>>>>> d60528d2... optimize current_stream for mindspore:third_party/ascend/backend/driver.py
   {f'''
   uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
   workspace_addr_ptr = {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
 >>>>>>> 3702ee46... fix mindspore when kernel's workspace sizeis not 0:third_party/ascend/backend/driver.py
   ''' if workspace_size > 0 else ''}
+<<<<<<< HEAD:ascend/backend/driver.py
  	{'auto launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
+=======
+  {'auto launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
+    {get_backend_func("pre_launch", False)}
+>>>>>>> d60528d2... optimize current_stream for mindspore:third_party/ascend/backend/driver.py
     uint32_t blockNum = gridX * gridY * gridZ;
     #ifdef ENABLE_GRID_WARN_PRINT
       static bool warned = false;

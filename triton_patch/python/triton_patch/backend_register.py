@@ -31,7 +31,7 @@ class BackendStrategyRegistry:
             if category not in self.strategies:
                 self.strategies[category] = {}
             if method in self.strategies[category]:
-                raise ValueError(f"Strategy {name} already registered")
+                raise ValueError(f"Strategy {method} already registered")
             self.strategies[category][method] = func
             return func
         return decorator
@@ -159,7 +159,7 @@ def get_empty_tensor(size):
 
 
 @backend_strategy_registry.register("mindspore", "get_tensor_params_shape")
-def get_tensor_params_shape(args):
+def get_tensor_params_shape(*args):
     import mindspore
     tensor_params = [arg for arg in args if isinstance(arg, mindspore.Tensor)]
     tensor_params_shape = []
@@ -169,7 +169,7 @@ def get_tensor_params_shape(args):
 
 
 @backend_strategy_registry.register("torch_npu", "get_tensor_params_shape")
-def get_tensor_params_shape(args):
+def get_tensor_params_shape(*args):
     import torch
     tensor_params = [arg for arg in args if isinstance(arg, torch.Tensor)]
     tensor_params_shape = []
@@ -250,7 +250,10 @@ def set_current_device(device_id):
 @backend_strategy_registry.register("mindspore", "get_current_stream")
 def get_current_stream(device):
     import mindspore
-    return mindspore.current_stream().id
+    try:
+        return mindspore.current_stream().stream_ptr()
+    except Exception:
+        return mindspore.current_stream().id
 
 
 @backend_strategy_registry.register("torch_npu", "get_current_stream")
@@ -300,13 +303,16 @@ def allocate_sync_block_lock(size, stream):
 
 
 @backend_strategy_registry.register("mindspore", "pre_launch")
-def pre_launch():
-    return '''static auto device_context = mindspore::device::DeviceContextManager::GetInstance().GetOrCreateDeviceContext({mindspore::device::DeviceType::kAscend, mindspore::DeviceManagerConf::GetInstance()->device_id()});
-    device_context->device_res_manager_->BindDeviceToCurrentThread(false);'''
+def pre_launch(first_call):
+    if first_call:
+        return '''static auto device_context = mindspore::device::DeviceContextManager::GetInstance().GetOrCreateDeviceContext({mindspore::device::DeviceType::kAscend, mindspore::DeviceManagerConf::GetInstance()->device_id()});
+        device_context->device_res_manager_->BindDeviceToCurrentThread(false);'''
+    else:
+        return '''device_context->device_res_manager_->BindDeviceToCurrentThread(false);'''
 
 
 @backend_strategy_registry.register("torch_npu", "pre_launch")
-def pre_launch():
+def pre_launch(first_call):
     return ""
 
 

@@ -761,10 +761,16 @@ def get_default_version():
     return "3.2.0"
 
 
+def should_add_local_version_suffix():
+    if check_env_flag("TRITON_DISABLE_LOCAL_VERSION", "FALSE"):
+        return False
+    return not is_manylinux
+
+
 def get_version():
     version = os.environ.get("TRITON_VERSION", get_default_version()) + os.environ.get(
         "TRITON_WHEEL_VERSION_SUFFIX", "")
-    if not is_manylinux:
+    if should_add_local_version_suffix():
         version += get_git_commit_hash()
 
     return version
@@ -788,6 +794,7 @@ setup(
     author_email="phil@openai.com",
     description="A language and compiler for custom Deep Learning operations",
     long_description=long_description,
+    long_description_content_type="text/markdown",
     packages=get_packages(),
     entry_points=get_entry_points(),
     package_data=package_data,

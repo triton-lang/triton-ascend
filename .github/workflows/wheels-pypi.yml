@@ -1,4 +1,4 @@
-name: Wheels
+name: Wheels PyPI
 
 on:
   workflow_dispatch:
@@ -9,8 +9,11 @@ on:
 
 permissions: read-all
 
+env:
+  PYPI_REPO: testpypi
+
 jobs:
-  Build-Wheels:
+  Build-Wheels-PyPI:
     timeout-minutes: 180
     runs-on: ${{ matrix.config.runs_on }}
 
@@ -23,6 +26,7 @@ jobs:
         python-version: ['3.9', '3.10', '3.11']
 
     permissions:
+      id-token: write
       contents: read
 
     steps:
@@ -49,41 +53,39 @@ jobs:
           TRITON_BUILD_PROTON=OFF \
           TRITON_WHEEL_NAME="triton-ascend" \
           TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
+          TRITON_DISABLE_LOCAL_VERSION=TRUE \
           MAX_JOBS="$NUM_PROCS" \
           IS_MANYLINUX="${IS_MANYLINUX:-False}" \
           TRITON_WHEEL_VERSION_SUFFIX="${TRITON_WHEEL_VERSION_SUFFIX:-rc3}" \
           python setup.py bdist_wheel
           cd -
 
+
       - uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-${{ matrix.config.arch }}-py${{ matrix.python-version }}
+          name: pypi-wheels-${{ matrix.config.arch }}-py${{ matrix.python-version }}
           path: python/dist/*.whl
 
-      - name: Upload wheels to OBS
-        shell: bash
+      - name: Prepare .pypirc for PyPI upload
         env:
-          AK: ${{ secrets.OBS_AK }}
-          SK: ${{ secrets.OBS_SK }}
+          PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
-          if [ -z "${AK}" ] || [ -z "${SK}" ]; then
-            echo "Please set OBS_AK and OBS_SK secrets before uploading."
+          if [ -z "${PASSWORD}" ]; then
+            echo "Please set PYPI_TOKEN secret before publishing."
             exit 1
           fi
+          echo "Using PyPI repo: ${PYPI_REPO}"
+          {
+            echo "[${PYPI_REPO}]"
+            echo "  username = __token__"
+            echo "  password = ${PASSWORD}"
+          } > "$HOME/.pypirc"
 
-          OBSUTIL_URL="https://obs-community-intl.obs.ap-southeast-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${{ matrix.config.arch }}.tar.gz"
-
-          curl -fL "$OBSUTIL_URL" -o obsutil.tar.gz
-
-          file obsutil.tar.gz | grep -q gzip || {
-            echo "obsutil.tar.gz is not a gzip file"
+      - name: Publish wheels to PyPI
+        run: |
+          if ! ls python/dist/*.whl >/dev/null 2>&1; then
+            echo "No wheels found in python/dist/."
             exit 1
-          }
-
-          tar xzf obsutil.tar.gz
-          rm -f obsutil.tar.gz
-          mv obsutil* obsutil
-
-          obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-north-4.myhuaweicloud.com
-
-          obsutil/obsutil cp -u python/dist/*.whl obs://triton-build-package-test/triton-ascend/
+          fi
+          python -m pip install --upgrade twine -qq
+          python -m twine upload --skip-existing --repository "${PYPI_REPO}" --config-file $HOME/.pypirc python/dist/*.whl --verbose

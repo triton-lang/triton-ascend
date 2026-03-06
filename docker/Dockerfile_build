@@ -11,7 +11,6 @@ RUN apt update && \
     curl \
     git \
     gnupg \
-    make \
     sudo \
     unzip \
     vim \
@@ -63,17 +62,13 @@ RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.9 && \
     rm -f /usr/local/bin/pip /usr/local/bin/pip3 && \
     update-alternatives --set python /usr/bin/python3.10
 
-# Install triton requirments
-COPY Makefile requirements.txt requirements_dev.txt llvm-hash.txt build/
+# Install triton requirements
+COPY requirements.txt requirements_dev.txt build/
 
-RUN cd build && \
-    make install-deps && \
-    for PY in python3.9 python3.10 python3.11; do \
-      make install-dev-reqs PYTHON=${PY} && \
-      rm -f .req_dev_installed && \
+RUN for PY in python3.9 python3.10 python3.11; do \
+      ${PY} -m pip install -r build/requirements_dev.txt -qq && \
       rm -rf ~/.cache/pip; \
     done && \
-    cd .. && \
-    rm -rf build
+    rm -rf build/
 
 WORKDIR /home/triton

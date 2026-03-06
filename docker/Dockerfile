@@ -13,7 +13,6 @@ RUN apt update && \
     curl \
     git \
     gnupg \
-    make \
     sudo \
     unzip \
     vim \
@@ -69,21 +68,25 @@ RUN curl -sSLk https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && \
     rm -f /usr/local/bin/pip /usr/local/bin/pip3 && \
     update-alternatives --set python /usr/bin/python3.10
 
-# Install triton requirments
-COPY Makefile requirements.txt requirements_dev.txt  build/
-COPY cmake/llvm-hash.txt build/cmake/
+# Install triton requirements
+COPY requirements.txt requirements_dev.txt build/
 
-RUN cd build && \
-    make install-deps && \
-    make install-cann && \
-    for PY in python3.9 python3.10 python3.11; do \
-      make install-dev-reqs PYTHON=${PY} && \
-      make install-rt-reqs PYTHON=${PY} && \
-      rm -f .req_rt_installed .req_dev_installed && \
-      rm -rf ~/.cache/pip; \
-    done && \
-    cd .. && \
-    rm -rf build
+RUN for PY in python3.9 python3.10 python3.11; do \
+    ${PY} -m pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu -qq && \
+    ${PY} -m pip install -r build/requirements_dev.txt && \
+    ${PY} -m pip install -r build/requirements.txt -qq && \
+    rm -rf ~/.cache/pip; \
+  done
+
+RUN ARCH=$(uname -i) && \
+  TOOLKIT_URL="https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%208.5.0/Ascend-cann-toolkit_8.5.0_linux-${ARCH}.run" && \
+  KERNEL_URL="https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%208.5.0/Ascend-cann-${NPU_TYPE}-ops_8.5.0_linux-${ARCH}.run" && \
+  curl -sSL "${TOOLKIT_URL}" -o build/Ascend-cann-toolkit.run && \
+  curl -sSL "${KERNEL_URL}" -o build/Ascend-cann-kernels.run && \
+  chmod +x build/Ascend-cann-toolkit.run build/Ascend-cann-kernels.run && \
+  build/Ascend-cann-toolkit.run --full --quiet && \
+  build/Ascend-cann-kernels.run --install --quiet && \
+  rm -rf build/
 
 RUN echo "source /usr/local/Ascend/ascend-toolkit/set_env.sh" >> ~/.bashrc && \
     echo "export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64/common/:/usr/local/Ascend/driver/lib64/driver/:$LD_LIBRARY_PATH" >> ~/.bashrc

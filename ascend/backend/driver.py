@@ -756,29 +756,13 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
   name.append(kernelName);
   void *workspace_addr_ptr = NULL;
   uint32_t blockNum4Workspace = gridX * gridY * gridZ;
-<<<<<<< HEAD:ascend/backend/driver.py
-<<<<<<< HEAD:ascend/backend/driver.py
- 	auto optionsWorkspace = at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte);
+  {get_backend_func("pre_launch", True)}
   {f'''
     uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
-    at::Tensor workspace_tensor = at::empty(totalWorkSpaceSize, optionsWorkspace);  
-    workspace_addr_ptr = const_cast<void *>(workspace_tensor.storage().data());
-=======
-  {get_backend_func("pre_launch")}
-=======
-  {get_backend_func("pre_launch", True)}
->>>>>>> d60528d2... optimize current_stream for mindspore:third_party/ascend/backend/driver.py
-  {f'''
-  uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
-  workspace_addr_ptr = {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
->>>>>>> 3702ee46... fix mindspore when kernel's workspace sizeis not 0:third_party/ascend/backend/driver.py
+    workspace_addr_ptr = {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
   ''' if workspace_size > 0 else ''}
-<<<<<<< HEAD:ascend/backend/driver.py
  	{'auto launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
-=======
-  {'auto launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
     {get_backend_func("pre_launch", False)}
->>>>>>> d60528d2... optimize current_stream for mindspore:third_party/ascend/backend/driver.py
     uint32_t blockNum = gridX * gridY * gridZ;
     #ifdef ENABLE_GRID_WARN_PRINT
       static bool warned = false;
@@ -815,13 +799,7 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
       return {'ret' if enable_taskqueue else ''};
     }}
     ''' if lock_num > 0 else ''}
-    {f'''
-    uint64_t totalWorkSpaceSize = {workspace_size} * blockNum;
-    workspace_addr_ptr = {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
-    if (!workspace_addr_ptr) {{
-      {alloc_success_code if enable_taskqueue else workspace_fail_code}
-    }}
-    ''' if workspace_size > 0 else ''}
+    {'if (ret != RT_ERROR_NONE) return ret;' if (workspace_size > 0 and enable_taskqueue) else 'if (ret != RT_ERROR_NONE) return;' if (workspace_size > 0 and not enable_taskqueue) else ''}
     struct __attribute__((packed)) {{
       {'void* ffts_addr __attribute__((aligned(8)));' if target_support_ffts else ''}
       {'void* syncBlockLock __attribute__((aligned(8)));' if not metadata.force_simt_only else ''}

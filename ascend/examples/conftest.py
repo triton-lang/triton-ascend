@@ -19,30 +19,16 @@
 # THE SOFTWARE.
 
 import pytest
+import torch
 
 
-@pytest.fixture(scope="module", autouse=True)
-def assign_npu(request, worker_id):
-    marker = request.node.get_closest_marker("backend")
-    if marker:
-        backend = marker.args[0]
+@pytest.fixture(scope="session", autouse=True)
+def assign_npu(worker_id):
+    npu_count = torch.npu.device_count()
+    if worker_id == "master":
+        npu_id = 0
     else:
-        backend = "torch_npu"
-    if backend == "torch_npu":
-        import torch
-        npu_count = torch.npu.device_count()
-        if worker_id == "master":
-            npu_id = 0
-        else:
-            idx = int(worker_id.replace("gw", ""))
-            npu_id = idx % npu_count
-        torch.npu.set_device(npu_id)
-    elif backend == "mindspore":
-        import mindspore
-        npu_count = mindspore.device_context.ascend.device_count()
-        if worker_id == "master":
-            npu_id = 0
-        else:
-            idx = int(worker_id.replace("gw", ""))
-            npu_id = idx % npu_count
-        mindspore.set_device("Ascend", npu_id)
+        idx = int(worker_id.replace("gw", ""))
+        npu_id = idx % npu_count
+    torch.npu.set_device(npu_id)
+

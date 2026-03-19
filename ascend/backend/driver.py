@@ -759,7 +759,7 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
   {get_backend_func("pre_launch", True)}
   {f'''
     uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
-    workspace_addr_ptr = {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
+    {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
   ''' if workspace_size > 0 else ''}
  	{'auto launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
     {get_backend_func("pre_launch", False)}
@@ -785,7 +785,7 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
     uint16_t ModuleId = 0;
     {f'''
     uint64_t syncBlockLockSize = {lock_num} * sizeof(int64_t);
-    syncBlockLock_ptr = {get_backend_func("allocate_memory", "syncBlockLockSize", "stream")}
+    {get_backend_func("allocate_sync_block_lock", "syncBlockLockSize", "stream")}
     if (!syncBlockLock_ptr) {{
       {alloc_success_code if enable_taskqueue else sync_lock_fail_code}
     }}

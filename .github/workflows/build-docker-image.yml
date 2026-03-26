@@ -1,0 +1,94 @@
+name: Release Triton Ascend Images
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-release-images:
+    name: Build and Push Docker Images (${{ matrix.npu_type }})
+    runs-on: ubuntu-22.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        npu_type: ['910b', 'A3']
+    env:
+      QUAY_USER: ${{ secrets.QUAY_USER }}
+      QUAY_PASSWD: ${{ secrets.QUAY_PASSWD }}
+      HEAD_COMMIT: ${{ github.sha }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Buildx info
+        run: |
+          echo "Checking Docker Buildx version and builders..."
+          docker buildx version
+          docker buildx ls
+
+      - name: Build and push release images
+        shell: bash
+        run: |
+          if [ -z "${QUAY_USER}" ] || [ -z "${QUAY_PASSWD}" ]; then
+            echo "Please set QUAY_USER and QUAY_PASSWD secrets before building images."
+            exit 1
+          fi
+
+          if [ -n "${HEAD_COMMIT}" ]; then
+            GIT_COMMIT_SHORT="$(git rev-parse --short "${HEAD_COMMIT}")"
+          else
+            GIT_COMMIT_SHORT="$(git rev-parse --short HEAD)"
+          fi
+
+          echo "${QUAY_PASSWD}" | docker login -u "${QUAY_USER}" --password-stdin quay.io
+
+          BUILD_IMAGE=0
+          if [ -z "${BASE_COMMIT}" ]; then
+            echo "BASE_COMMIT not set. Forcing Docker image build..."
+            BUILD_IMAGE=1
+          elif [ -n "${filenames}" ] && echo "${filenames}" | grep -Eq '\b(docker/Dockerfile_build|Makefile|requirements(_dev)?\.txt)\b'; then
+            echo "Relevant files changed. Building Docker image..."
+            BUILD_IMAGE=1
+          else
+            echo "No relevant changes since BASE_COMMIT. Skipping Docker image build."
+          fi
+
+          if [ "$BUILD_IMAGE" -eq 1 ]; then
+            docker buildx build --platform "linux/amd64,linux/arm64" \
+              --build-arg NPU_TYPE=${{ matrix.npu_type }} \
+              -f docker/Dockerfile_build --push \
+              -t "quay.io/ascend/triton:dev-build-${GIT_COMMIT_SHORT}-${{ matrix.npu_type }}" .
+          fi
+
+          BUILD_IMAGE=0
+          if [ -z "${BASE_COMMIT}" ]; then
+            echo "BASE_COMMIT not set. Forcing Docker image build..."
+            BUILD_IMAGE=1
+          elif [ -n "${filenames}" ] && echo "${filenames}" | grep -Eq '\b(docker/Dockerfile|Makefile|requirements(_dev)?\.txt)\b'; then
+            echo "Relevant files changed. Building Docker image..."
+            BUILD_IMAGE=1
+          else
+            echo "No relevant changes since BASE_COMMIT. Skipping Docker image build."
+          fi
+
+          if [ "$BUILD_IMAGE" -eq 1 ]; then
+            docker buildx build --platform "linux/amd64,linux/arm64" \
+              --build-arg NPU_TYPE=${{ matrix.npu_type }} \
+              -f docker/Dockerfile --push \
+              -t "quay.io/ascend/triton:dev-${GIT_COMMIT_SHORT}-${{ matrix.npu_type }}" .
+          fi

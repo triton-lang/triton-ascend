@@ -1,0 +1,106 @@
+name: Wheels PyPI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 8 * * *"
+
+permissions: read-all
+
+env:
+  PYPI_REPO: testpypi
+
+jobs:
+  Build-Wheels-PyPI:
+    timeout-minutes: 180
+    runs-on: ${{ matrix.config.runs_on }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+        - {runs_on: 'ubuntu-22.04', arch: 'amd64'}
+        - {runs_on: 'ubuntu-22.04-arm', arch: 'arm64'}
+        python-version: ['3.9', '3.10', '3.11']
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install ccache
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache
+
+      - name: Build wheels
+        run: |
+          python --version
+          python -m pip install -r requirements_dev.txt -qq
+          NUM_PROCS=$(( $(nproc) / 3 ))
+          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          cd python
+          TRITON_BUILD_WITH_CLANG_LLD=true \
+          TRITON_BUILD_WITH_O1=true \
+          TRITON_BUILD_PROTON=OFF \
+          TRITON_WHEEL_NAME="triton-ascend" \
+          TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
+          TRITON_DISABLE_LOCAL_VERSION=TRUE \
+          MAX_JOBS="$NUM_PROCS" \
+          IS_MANYLINUX="${IS_MANYLINUX:-False}" \
+          TRITON_WHEEL_VERSION_SUFFIX="${TRITON_WHEEL_VERSION_SUFFIX:-rc3}" \
+          python setup.py bdist_wheel
+          cd -
+
+      - name: check wheels
+        run: |
+          ls -lh python/dist/*.whl
+          python3 - <<'PY'
+            import zipfile, glob, os
+            whl = glob.glob("python/dist/*.whl")
+            assert whl, "no wheel found in python/dist"
+            w = max(whl, key=os.path.getsize)
+            zf = zipfile.ZipFile(w)
+            items = sorted([(i.filename, i.file_size) for i in zf.infolist()], key=lambda x: x[1], reverse=True)
+            print("wheel:", w)
+            for name, sz in items[:15]:
+                print(f"{sz/1024/1024:8.2f} MB  {name}")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi-wheels-${{ matrix.config.arch }}-py${{ matrix.python-version }}
+          path: python/dist/*.whl
+
+      - name: Prepare .pypirc for PyPI upload
+        env:
+          PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          if [ -z "${PASSWORD}" ]; then
+            echo "Please set PYPI_TOKEN secret before publishing."
+            exit 1
+          fi
+          echo "Using PyPI repo: ${PYPI_REPO}"
+          {
+            echo "[${PYPI_REPO}]"
+            echo "  username = __token__"
+            echo "  password = ${PASSWORD}"
+          } > "$HOME/.pypirc"
+
+      - name: Publish wheels to PyPI
+        run: |
+          if ! ls python/dist/*.whl >/dev/null 2>&1; then
+            echo "No wheels found in python/dist/."
+            exit 1
+          fi
+          python -m pip install --upgrade twine -qq
+          python -m twine upload --skip-existing --repository "${PYPI_REPO}" --config-file $HOME/.pypirc python/dist/*.whl --verbose

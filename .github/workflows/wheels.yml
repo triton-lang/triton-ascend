@@ -1,109 +1,91 @@
 name: Wheels
+
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
   schedule:
     - cron: "0 8 * * *"
-  pull_request:
-    paths:
-      - .github/workflows/wheels_v2.yml
 
 permissions: read-all
 
 jobs:
-
   Build-Wheels:
-    timeout-minutes: 60
+    timeout-minutes: 180
+    runs-on: ${{ matrix.config.runs_on }}
 
-    runs-on: [self-hosted, CPU]
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+        - {runs_on: 'ubuntu-22.04', arch: 'amd64'}
+        - {runs_on: 'ubuntu-22.04-arm', arch: 'arm64'}
+        python-version: ['3.9', '3.10', '3.11']
+
     permissions:
       id-token: write
       contents: read
 
     steps:
-
-      - name: Prune stale docker containers
-        run: |
-          # If cibuildwheel crashes (or, say, is OOM-killed), it leaves behind a
-          # docker container.  Eventually these consume all the disk space on
-          # this machine.
-          docker container prune -f
-
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      # The LATEST_DATE here should be kept in sync with the one in Patch setup.py
-      - id: check-version
-        name: Check latest version
-        run: |
-          export PACKAGE_DATE=$(python3 -m pip install --user --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/ --dry-run triton-nightly== |& grep -oP '(?<=, )[0-9\.]+dev[0-9]+(?=\))' | grep -oP '(?<=dev)[0-9]+')
-          export LATEST_DATE=$(TZ=UTC0 git show --quiet --date='format-local:%Y%m%d%H%M%S' --format="%cd")
-          if cmp -s <(echo $PACKAGE_DATE) <(echo $LATEST_DATE); then
-            echo "new_commit=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "new_commit=true" >> "$GITHUB_OUTPUT"
-          fi
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
 
-      - name: Patch setup.py
-        if: ${{ steps.check-version.outputs.new_commit == 'true' }}
+      - name: Install ccache
         run: |
-          echo "" >> python/setup.cfg
-          echo "[build_ext]" >> python/setup.cfg
-          echo "base-dir=/project" >> python/setup.cfg
+          sudo apt-get update
+          sudo apt-get install -y ccache
 
       - name: Build wheels
-        if: ${{ steps.check-version.outputs.new_commit == 'true' }}
         run: |
-          python3 -m  pip install cibuildwheel --upgrade --user
-          export LATEST_DATE=$(TZ=UTC0 git show --quiet --date='format-local:%Y%m%d%H%M%S' --format="%cd")
-          # Pass MAX_JOBS=4 because, at time of writing, the VM "only" has 32GB
-          # of RAM and OOMs while building if we give it the default number of
-          # workers (2 * NUM_CPUs).
-          export CIBW_ENVIRONMENT="MAX_JOBS=4 \
-                  TRITON_BUILD_WITH_CLANG_LLD=1"
-          export CIBW_MANYLINUX_X86_64_IMAGE="quay.io/pypa/manylinux_2_28_x86_64:latest"
-          #export CIBW_MANYLINUX_PYPY_X86_64_IMAGE="quay.io/pypa/manylinux_2_28_x86_64:latest"
-          # many_linux_2_28 image comes with GCC 12.2.1, but not clang.
-          # With this install, it gets clang 16.0.6.
-          export CIBW_BEFORE_ALL="dnf install clang lld -y";
-          export CIBW_SKIP="cp{35,36,37}-*"
-          export CIBW_BUILD="cp3{9,10,11,12,13}-manylinux_x86_64"
-          python3 -m cibuildwheel python --output-dir wheelhouse
+          python --version
+          python -m pip install -r requirements_dev.txt -qq
+          NUM_PROCS=$(( $(nproc) / 3 ))
+          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          cd python
+          TRITON_BUILD_WITH_CLANG_LLD=true \
+          TRITON_BUILD_PROTON=OFF \
+          TRITON_WHEEL_NAME="triton-ascend" \
+          TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
+          MAX_JOBS="$NUM_PROCS" \
+          IS_MANYLINUX="${IS_MANYLINUX:-False}" \
+          TRITON_WHEEL_VERSION_SUFFIX="${TRITON_WHEEL_VERSION_SUFFIX:-rc3}" \
+          python setup.py bdist_wheel
+          cd -
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-manylinux_2_28_x86_64-wheels-upload
-          path: ./wheelhouse/*.whl
+          name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-py${{ matrix.python-version }}-wheels-upload
+          path: python/dist/*.whl
 
-      - name: Install Azure CLI
-        if: ${{ steps.check-version.outputs.new_commit == 'true' }}
+      - name: Upload wheels to OBS
+        shell: bash
+        env:
+          AK: ${{ secrets.OBS_AK }}
+          SK: ${{ secrets.OBS_SK }}
         run: |
-          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          if [ -z "${AK}" ] || [ -z "${SK}" ]; then
+            echo "Please set OBS_AK and OBS_SK secrets before uploading."
+            exit 1
+          fi
 
-      - name: Azure login
-        if: ${{ steps.check-version.outputs.new_commit == 'true' }}
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - id: generate-token
-        name: Generate token
-        if: ${{ steps.check-version.outputs.new_commit == 'true' }}
-        run: |
-          AZ_TOKEN=$(az account get-access-token --query accessToken)
-          echo "::add-mask::$AZ_TOKEN"
-          echo "access_token=$AZ_TOKEN" >> "$GITHUB_OUTPUT"
+          OBSUTIL_URL="https://obs-community-intl.obs.ap-southeast-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${{ matrix.config.arch }}.tar.gz"
 
-      - name: Publish wheels to Azure DevOps
-        if: ${{ steps.check-version.outputs.new_commit == 'true' }}
-        run: |
-          python3 -m pip install twine
-          python3 -m twine upload -r Triton-Nightly -u TritonArtifactsSP -p ${{ steps.generate-token.outputs.access_token }} --config-file utils/nightly.pypirc --non-interactive --verbose wheelhouse/*
+          curl -fL "$OBSUTIL_URL" -o obsutil.tar.gz
 
-      - name: Azure Logout
-        if: ${{ steps.check-version.outputs.new_commit == 'true' && (success() || failure()) }}
-        run: |
-          az logout
-          az cache purge
-          az account clear
+          file obsutil.tar.gz | grep -q gzip || {
+            echo "obsutil.tar.gz is not a gzip file"
+            exit 1
+          }
+
+          tar xzf obsutil.tar.gz
+          rm -f obsutil.tar.gz
+          mv obsutil* obsutil
+
+          obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-north-4.myhuaweicloud.com
+
+          obsutil/obsutil cp -u python/dist/*.whl obs://triton-build-package-test/triton-ascend/

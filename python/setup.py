@@ -860,6 +860,7 @@ setup(
     author_email="phil@openai.com",
     description="A language and compiler for custom Deep Learning operations",
     long_description=long_description,
+    long_description_content_type="text/markdown",
     packages=get_packages(),
     entry_points=get_entry_points(),
     package_data=package_data,

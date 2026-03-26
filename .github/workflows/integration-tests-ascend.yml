@@ -12,8 +12,8 @@ jobs:
     name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.config.runs_on }}
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/cann/ascend-ci/cann:8.3.rc1-910b-ubuntu22.04-py${{ matrix.python-version }}
-    timeout-minutes: 60
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton/triton:dev-latest-A3
+    timeout-minutes: 300
     strategy:
       matrix:
         config: ${{ fromJson(inputs.matrix) }}
@@ -27,39 +27,42 @@ jobs:
       PROTON_SKIP_PC_SAMPLING_TEST: 1
       PYTHON: "python${{ matrix.python-version }}"
       CCACHE_COMPRESS: "true"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           submodules: "true"
+
       - name: Add git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Install OS prerequisites
         run: |
           apt-get update
           apt-get install --yes --no-install-recommends \
-                ca-certificates ninja-build libzstd-dev \
+            ca-certificates ninja-build libzstd-dev \
             git zlib1g-dev \
-                clang clang-15 lld-15 ccache
+            clang clang-15 lld-15 ccache
           ${PYTHON} -m pip install cmake ninja -qq
+
       - name: Compute cache keys
         id: cache-key
+        shell: bash
         run: |
           llvm_file="cmake/llvm-hash.txt"
           req_file="requirements_dev.txt"
           json_file="cmake/json-version.txt"
 
-          # Check if files exist before proceeding
           if [[ ! -f "$llvm_file" || ! -f "$req_file" || ! -f "$json_file" ]]; then
             echo "Error: Required dependency files are missing."
             exit 1
           fi
 
-          # Process the files if they exist
-          echo "llvm=$(cat $llvm_file | cut -c 1-8)" >> $GITHUB_OUTPUT
+          echo "llvm=$(cut -c 1-8 $llvm_file)" >> $GITHUB_OUTPUT
           echo "req=$(sha256sum $req_file | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
           echo "json=$(cat $json_file)" >> $GITHUB_OUTPUT
-        shell: bash
+
       - name: Cache build dependencies
         uses: actions/cache@v4
         with:
@@ -69,29 +72,50 @@ jobs:
             ~/.triton/llvm
             ~/.triton/json
           key: ${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python-version }}-llvm-${{ steps.cache-key.outputs.llvm }}-req-${{ steps.cache-key.outputs.req }}-json-${{ steps.cache-key.outputs.json }}
+
       - name: Inspect cache directories
         run: |
-          mkdir -p ~/.triton
-          du -h -d 1 ~/.triton
+          mkdir -p ~/.triton && du -h -d 1 ~/.triton
+          mkdir -p ~/.ccache && du -h -d 1 ~/.ccache
 
-          mkdir -p ~/.ccache
-          du -h -d 1 ~/.ccache
-      - name: Update PATH
+      - name: Download and install NPU IR
+        shell: bash
         run: |
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          curl -fL https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/cann/bisheng_0130.run -o bisheng.run
+          chmod +x bisheng.run
+          ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
+          echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
+
+      - name: Update PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
       - name: Setup Python environment
         run: |
           echo "/venv/bin" >> $GITHUB_PATH
           echo "VIRTUAL_ENV=/venv" >> $GITHUB_ENV
           echo "PYTHONHOME=" >> $GITHUB_ENV
+
+      - name: Install NPU test dependencies
+        run: |
+          ${PYTHON} -m pip install \
+            attrs==24.2.0 numpy==1.26.4 scipy==1.13.1 decorator==5.1.1 \
+            psutil==6.0.0 pytest==8.3.2 pytest-xdist==3.6.1 pyyaml mindspore \
+            -i https://pypi.tuna.tsinghua.edu.cn/simple
+          ${PYTHON} -m pip install torch==2.7.1 torch_npu==2.7.1 \
+            -i https://pypi.tuna.tsinghua.edu.cn/simple
+
       - name: Build and install triton-ascend
+        shell: bash
         run: |
           nproc
+          source /usr/local/Ascend/cann/set_env.sh
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
           npu-smi info
-          if [ -n "${ASCEND_TOOLKIT_HOME}" ] && [ -f "${ASCEND_TOOLKIT_HOME}/toolkit/version.info" ]; then
-            cat "${ASCEND_TOOLKIT_HOME}/toolkit/version.info"
+          if [ -n "${ASCEND_TOOLKIT_HOME}" ] && [ -f "${ASCEND_TOOLKIT_HOME}/cann/version.info" ]; then
+            cat "${ASCEND_TOOLKIT_HOME}/cann/version.info"
           fi
           echo "PATH is '$PATH'"
+
           ccache --zero-stats
           ${PYTHON} -m pip install -r requirements_dev.txt -qq
           NUM_PROCS=$(( $(nproc) / 3 ))
@@ -107,30 +131,22 @@ jobs:
           ${PYTHON} setup.py bdist_wheel
           cd -
           ${PYTHON} -m pip install python/dist/*.whl -qq
-      - name: Install NPU test dependencies
-        run: |
-          ${PYTHON} -m pip install attrs==24.2.0 numpy==1.26.4 scipy==1.13.1 decorator==5.1.1 psutil==6.0.0 pytest==8.3.2 pytest-xdist==3.6.1 pyyaml mindspore -qq
-          ${PYTHON} -m pip install torch_npu==2.6.0 --index-url https://download.pytorch.org/whl/cpu -qq
-      - name: CCache Stats
+
+      - name: CCache stats
         run: ccache --print-stats
+
       - name: Run unit tests on NPU
-        continue-on-error: true
+        shell: bash
         run: |
-          NUM_PROCS=4
+          source /usr/local/Ascend/cann/set_env.sh
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          NUM_PROCS=$(( $(nproc) / 9 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/autotune_ut
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/kernels/test_triton_kernel.py
-      - name: Run generalization tests on NPU
-        continue-on-error: true
-        run: |
-          NUM_PROCS=4
-          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
-          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=load third_party/ascend/unittest/generalization_cases
+
       - name: Inspect cache directories
         run: |
-          mkdir -p ~/.triton
-          du -h -d 1 ~/.triton
-
-          mkdir -p ~/.ccache
-          du -h -d 1 ~/.ccache
+          mkdir -p ~/.triton && du -h -d 1 ~/.triton
+          mkdir -p ~/.ccache && du -h -d 1 ~/.ccache

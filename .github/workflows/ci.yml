@@ -1,4 +1,5 @@
 name: Integration Tests
+
 on:
   workflow_dispatch:
   pull_request:
@@ -8,13 +9,14 @@ on:
     types: [checks_requested]
   push:
     branches: [main]
+
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 permissions: read-all
 
 jobs:
-
   runner-preparation:
     uses: ./.github/workflows/runner-preparation.yml
 

@@ -1,0 +1,149 @@
+name: LLVM Build (manylinux)
+
+on:
+  push:
+    branches:
+      - llvm-head
+      - ascend-test
+      - test
+    paths:
+      - cmake/llvm-hash.txt
+  pull_request:
+    paths:
+      - .github/workflows/llvm-build-manylinux.yml
+      - .github/workflows/llvm-build/manylinux.Dockerfile
+  workflow_dispatch:
+
+env:
+  SCCACHE_DIR: ${{ github.workspace }}/sccache
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+
+  build:
+    name: Build on manylinux_2_28 (${{ matrix.config.arch }})
+    runs-on: ${{ matrix.config.runs_on }}
+    timeout-minutes: 240  # 4 hours
+
+    strategy:
+      fail-fast: true
+      matrix:
+        config:
+          - {arch: 'amd64', runs_on: 'ubuntu-22.04', manylinux_image: 'quay.io/pypa/manylinux_2_28_x86_64'}
+          - {arch: 'arm64', runs_on: 'ubuntu-22.04', manylinux_image: 'quay.io/pypa/manylinux_2_28_aarch64'}
+
+    steps:
+
+    - name: Checkout Repo
+      uses: actions/checkout@v4
+      with:
+        path: llvm-build
+
+    - name: Fetch LLVM Commit Hash
+      shell: bash
+      run: |
+        LLVM_COMMIT_HASH="$(cat llvm-build/cmake/llvm-hash.txt)"
+        echo "Found LLVM commit hash: ${LLVM_COMMIT_HASH}"
+        echo "llvm_commit_hash=${LLVM_COMMIT_HASH}" >> ${GITHUB_ENV}
+
+        SHORT_LLVM_COMMIT_HASH="${LLVM_COMMIT_HASH:0:8}"
+        echo "Short LLVM commit hash: ${SHORT_LLVM_COMMIT_HASH}"
+        echo "short_llvm_commit_hash=${SHORT_LLVM_COMMIT_HASH}" >> ${GITHUB_ENV}
+
+        INSTALL_DIR="llvm-${SHORT_LLVM_COMMIT_HASH}-manylinux_2_28-${{ matrix.config.arch }}"
+        echo "LLVM installation directory name: ${INSTALL_DIR}"
+        echo "llvm_install_dir=${INSTALL_DIR}" >> ${GITHUB_ENV}
+
+    - name: Checkout LLVM
+      uses: actions/checkout@v4
+      with:
+        repository: llvm/llvm-project
+        path: llvm-project
+        ref: ${{ env.llvm_commit_hash }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install sccache
+      run: python3 -m pip install sccache -qq
+
+    - name: Restore sccache
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.SCCACHE_DIR }}
+        key: manylinux_2_28-${{ matrix.config.arch }}-${{ env.short_llvm_commit_hash }}
+        restore-keys: manylinux_2_28-${{ matrix.config.arch }}-
+
+    - name: Set up QEMU (for aarch64 cross-build)
+      if: matrix.config.arch == 'arm64'
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm64
+
+    - name: Free disk space
+      run: |
+        df -h
+        sudo apt-get remove -y 'php.*' || true
+        sudo apt-get autoremove -y
+        sudo apt-get clean
+        df -h
+
+    - name: Prepare sccache directory
+      run: mkdir -p ${{ env.SCCACHE_DIR }}
+
+    - name: Build LLVM inside manylinux container
+      run: |
+        docker build \
+          --build-arg IMAGE=${{ matrix.config.manylinux_image }} \
+          --build-arg llvm_dir=llvm-project \
+          --file llvm-build/.github/workflows/llvm-build/manylinux.Dockerfile \
+          --tag llvm-manylinux-build \
+          --add-host host.docker.internal:host-gateway \
+          .
+
+    - name: Extract install artifacts from container
+      run: |
+        CONTAINER_ID=$(docker create llvm-manylinux-build)
+        docker cp "${CONTAINER_ID}:/install" "${{ env.llvm_install_dir }}"
+        docker rm "${CONTAINER_ID}"
+        tar czf "${{ env.llvm_install_dir }}.tar.gz" "${{ env.llvm_install_dir }}"
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: llvm-manylinux_2_28-${{ matrix.config.arch }}
+        path: |
+          ${{ github.workspace }}/llvm-*-manylinux_2_28-${{ matrix.config.arch }}.tar.gz
+
+    - name: Upload LLVM Artifacts to OBS
+      env:
+        AK: ${{ secrets.OBS_AK }}
+        SK: ${{ secrets.OBS_SK }}
+      run: |
+        if [ -z "${AK}" ] || [ -z "${SK}" ]; then
+          echo "Please set AK and SK secrets before uploading."
+          exit 1
+        fi
+
+        OBSUTIL_URL="https://obs-community-intl.obs.ap-southeast-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${{ matrix.config.arch }}.tar.gz"
+
+        curl -fL "$OBSUTIL_URL" -o obsutil.tar.gz
+        file obsutil.tar.gz | grep -q gzip || {
+          echo "obsutil.tar.gz is not a gzip file"
+          exit 1
+        }
+
+        tar xzf obsutil.tar.gz
+        rm -f obsutil.tar.gz
+        mv obsutil* obsutil
+
+        obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-north-4.myhuaweicloud.com
+        obsutil/obsutil cp -u "${{ env.llvm_install_dir }}.tar.gz" obs://triton-build-package-test/llvm-builds/
+
+    - name: Dump Sccache Statistics
+      run: sccache --show-stats

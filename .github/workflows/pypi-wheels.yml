@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - ".github/workflows/pypi-wheels.yml"
+      - "python/**"
   schedule:
     - cron: "0 8 * * *"
 
@@ -16,36 +20,40 @@ jobs:
   Build-Wheels-PyPI:
     timeout-minutes: 180
     runs-on: ${{ matrix.config.runs_on }}
+    container:
+      image: ${{ matrix.config.image }}
 
     strategy:
       fail-fast: false
       matrix:
         config:
-        - {runs_on: 'ubuntu-22.04', arch: 'amd64'}
-        - {runs_on: 'ubuntu-22.04-arm', arch: 'arm64'}
+        - {runs_on: 'ubuntu-22.04', arch: 'amd64', image: 'quay.io/pypa/manylinux_2_28_x86_64:latest'}
+        - {runs_on: 'ubuntu-22.04-arm', arch: 'arm64', image: 'quay.io/pypa/manylinux_2_28_aarch64:latest'}
         python-version: ['3.9', '3.10', '3.11']
-
-    permissions:
-      id-token: write
-      contents: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python-version }}
+          submodules: "true"
 
-      - name: Install ccache
+      - name: Set Python path
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ccache
+          PY_VER="${{ matrix.python-version }}"
+          PY_TAG="cp${PY_VER//./}"
+          echo "PYTHON=/opt/python/${PY_TAG}-${PY_TAG}/bin/python3" >> $GITHUB_ENV
+          echo "/opt/python/${PY_TAG}-${PY_TAG}/bin" >> $GITHUB_PATH
+
+      - name: Install build dependencies
+        run: |
+          yum install -y ccache clang lld
+          $PYTHON -m pip install ninja cmake -qq
+          $PYTHON -m pip install -r requirements_dev.txt -qq
 
       - name: Build wheels
         run: |
-          python --version
-          python -m pip install -r requirements_dev.txt -qq
+          export CC=$(which clang)
+          export CXX=$(which clang++)
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           cd python
@@ -54,34 +62,43 @@ jobs:
           TRITON_BUILD_PROTON=OFF \
           TRITON_WHEEL_NAME="triton-ascend" \
           TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
-          TRITON_DISABLE_LOCAL_VERSION=TRUE \
           MAX_JOBS="$NUM_PROCS" \
-          IS_MANYLINUX="${IS_MANYLINUX:-False}" \
-          TRITON_WHEEL_VERSION_SUFFIX="${TRITON_WHEEL_VERSION_SUFFIX:-rc3}" \
-          python setup.py bdist_wheel
+          IS_MANYLINUX="TRUE" \
+          TRITON_WHEEL_VERSION_SUFFIX="${TRITON_WHEEL_VERSION_SUFFIX:-.dev${{ github.run_number }}}" \
+          $PYTHON setup.py bdist_wheel
           cd -
 
-      - name: check wheels
+      - name: Check wheels
         run: |
           ls -lh python/dist/*.whl
-          python3 - <<'PY'
-            import zipfile, glob, os
-            whl = glob.glob("python/dist/*.whl")
-            assert whl, "no wheel found in python/dist"
-            w = max(whl, key=os.path.getsize)
-            zf = zipfile.ZipFile(w)
-            items = sorted([(i.filename, i.file_size) for i in zf.infolist()], key=lambda x: x[1], reverse=True)
-            print("wheel:", w)
-            for name, sz in items[:15]:
-                print(f"{sz/1024/1024:8.2f} MB  {name}")
-          PY
+          $PYTHON -c "import zipfile,glob,os;whl=glob.glob('python/dist/*.whl');assert whl,'no wheel found';w=max(whl,key=os.path.getsize);zf=zipfile.ZipFile(w);items=sorted([(i.filename,i.file_size) for i in zf.infolist()],key=lambda x:x[1],reverse=True);print('wheel:',w);[print(f'{sz/1024/1024:8.2f} MB  {name}') for name,sz in items[:15]]"
 
       - uses: actions/upload-artifact@v4
         with:
           name: pypi-wheels-${{ matrix.config.arch }}-py${{ matrix.python-version }}
           path: python/dist/*.whl
 
-      - name: Prepare .pypirc for PyPI upload
+  Publish-Wheels-PyPI:
+    needs: Build-Wheels-PyPI
+    runs-on: ubuntu-22.04
+    if: github.event_name != 'pull_request'
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pypi-wheels-*
+          path: dist/
+          merge-multiple: true
+
+      - name: List wheels
+        run: ls -lh dist/*.whl
+
+      - name: Prepare .pypirc
         env:
           PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
@@ -96,11 +113,7 @@ jobs:
             echo "  password = ${PASSWORD}"
           } > "$HOME/.pypirc"
 
-      - name: Publish wheels to PyPI
+      - name: Publish all wheels to PyPI
         run: |
-          if ! ls python/dist/*.whl >/dev/null 2>&1; then
-            echo "No wheels found in python/dist/."
-            exit 1
-          fi
-          python -m pip install --upgrade twine -qq
-          python -m twine upload --skip-existing --repository "${PYPI_REPO}" --config-file $HOME/.pypirc python/dist/*.whl --verbose
+          pip install --upgrade twine -qq
+          twine upload --skip-existing --repository "${PYPI_REPO}" --config-file $HOME/.pypirc dist/*.whl --verbose

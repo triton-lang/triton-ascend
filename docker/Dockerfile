@@ -79,8 +79,8 @@ RUN for PY in python3.9 python3.10 python3.11; do \
   done
 
 RUN ARCH=$(uname -i) && \
-  TOOLKIT_URL="https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%208.5.0/Ascend-cann-toolkit_8.5.0_linux-${ARCH}.run" && \
-  KERNEL_URL="https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%208.5.0/Ascend-cann-${NPU_TYPE}-ops_8.5.0_linux-${ARCH}.run" && \
+  TOOLKIT_URL="https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%209.0.T2/Ascend-cann-toolkit_9.0.0-beta.1_linux-${ARCH}.run" && \
+  KERNEL_URL="https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%209.0.T2/Ascend-cann-${NPU_TYPE}-ops_9.0.0-beta.1_linux-${ARCH}.run" && \
   curl -sSL "${TOOLKIT_URL}" -o build/Ascend-cann-toolkit.run && \
   curl -sSL "${KERNEL_URL}" -o build/Ascend-cann-kernels.run && \
   chmod +x build/Ascend-cann-toolkit.run build/Ascend-cann-kernels.run && \
@@ -88,5 +88,5 @@ RUN ARCH=$(uname -i) && \
   build/Ascend-cann-kernels.run --install --quiet && \
   rm -rf build/
 
-RUN echo "source /usr/local/Ascend/ascend-toolkit/set_env.sh" >> ~/.bashrc && \
+RUN echo "source /usr/local/Ascend/cann/set_env.sh" >> ~/.bashrc && \
     echo "export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64/common/:/usr/local/Ascend/driver/lib64/driver/:$LD_LIBRARY_PATH" >> ~/.bashrc

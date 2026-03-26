@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - ".github/workflows/wheels.yml"
+      - "python/**"
   schedule:
     - cron: "0 8 * * *"
 
@@ -18,8 +22,8 @@ jobs:
       fail-fast: false
       matrix:
         config:
-        - {runs_on: 'ubuntu-22.04', arch: 'amd64'}
-        - {runs_on: 'ubuntu-22.04-arm', arch: 'arm64'}
+          - {runs_on: 'ubuntu-22.04', arch: 'amd64'}
+          - {runs_on: 'ubuntu-22.04-arm', arch: 'arm64'}
         python-version: ['3.9', '3.10', '3.11']
 
     permissions:
@@ -72,7 +76,6 @@ jobs:
             exit 1
           fi
 
-
           OBSUTIL_URL="https://obs-community-intl.obs.ap-southeast-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${{ matrix.config.arch }}.tar.gz"
 
           curl -fL "$OBSUTIL_URL" -o obsutil.tar.gz
@@ -87,5 +90,4 @@ jobs:
           mv obsutil* obsutil
 
           obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-north-4.myhuaweicloud.com
-
           obsutil/obsutil cp -u python/dist/*.whl obs://triton-build-package-test/triton-ascend/

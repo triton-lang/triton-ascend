@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - ".github/workflows/wheels.yml"
+      - "python/**"
   schedule:
     - cron: "0 8 * * *"
 

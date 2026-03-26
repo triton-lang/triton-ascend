@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - ".github/workflows/pypi-wheels.yml"
+      - "python/**"
   schedule:
     - cron: "0 8 * * *"
 
@@ -64,17 +68,7 @@ jobs:
       - name: check wheels
         run: |
           ls -lh python/dist/*.whl
-          python3 - <<'PY'
-            import zipfile, glob, os
-            whl = glob.glob("python/dist/*.whl")
-            assert whl, "no wheel found in python/dist"
-            w = max(whl, key=os.path.getsize)
-            zf = zipfile.ZipFile(w)
-            items = sorted([(i.filename, i.file_size) for i in zf.infolist()], key=lambda x: x[1], reverse=True)
-            print("wheel:", w)
-            for name, sz in items[:15]:
-                print(f"{sz/1024/1024:8.2f} MB  {name}")
-          PY
+          python3 -c "import zipfile,glob,os;whl=glob.glob('python/dist/*.whl');assert whl,'no wheel found';w=max(whl,key=os.path.getsize);zf=zipfile.ZipFile(w);items=sorted([(i.filename,i.file_size) for i in zf.infolist()],key=lambda x:x[1],reverse=True);print('wheel:',w);[print(f'{sz/1024/1024:8.2f} MB  {name}') for name,sz in items[:15]]"
 
       - uses: actions/upload-artifact@v4
         with:

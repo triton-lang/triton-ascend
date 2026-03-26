@@ -12,8 +12,8 @@ jobs:
     name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.config.runs_on }}
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/cann/ascend-ci/cann:8.3.rc1-910b-ubuntu22.04-py${{ matrix.python-version }}
-    timeout-minutes: 60
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton/triton:dev-4258273a-910b
+    timeout-minutes: 120
     strategy:
       matrix:
         config: ${{ fromJson(inputs.matrix) }}
@@ -85,8 +85,10 @@ jobs:
           echo "VIRTUAL_ENV=/venv" >> $GITHUB_ENV
           echo "PYTHONHOME=" >> $GITHUB_ENV
       - name: Build and install triton-ascend
+        shell: bash
         run: |
           nproc
+          source /usr/local/Ascend/cann/set_env.sh
           npu-smi info
           if [ -n "${ASCEND_TOOLKIT_HOME}" ] && [ -f "${ASCEND_TOOLKIT_HOME}/toolkit/version.info" ]; then
             cat "${ASCEND_TOOLKIT_HOME}/toolkit/version.info"
@@ -109,13 +111,15 @@ jobs:
           ${PYTHON} -m pip install python/dist/*.whl -qq
       - name: Install NPU test dependencies
         run: |
-          ${PYTHON} -m pip install attrs==24.2.0 numpy==1.26.4 scipy==1.13.1 decorator==5.1.1 psutil==6.0.0 pytest==8.3.2 pytest-xdist==3.6.1 pyyaml mindspore -qq
-          ${PYTHON} -m pip install torch_npu==2.6.0 --index-url https://download.pytorch.org/whl/cpu -qq
+          ${PYTHON} -m pip install attrs==24.2.0 numpy==1.26.4 scipy==1.13.1 decorator==5.1.1 psutil==6.0.0 pytest==8.3.2 pytest-xdist==3.6.1 pyyaml mindspore -i https://pypi.tuna.tsinghua.edu.cn/simple
+          ${PYTHON} -m pip install torch==2.7.1 torch_npu==2.7.1 -i https://pypi.tuna.tsinghua.edu.cn/simple
       - name: CCache Stats
         run: ccache --print-stats
       - name: Run unit tests on NPU
         continue-on-error: true
+        shell: bash
         run: |
+          source /usr/local/Ascend/cann/set_env.sh
           NUM_PROCS=4
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
@@ -123,7 +127,9 @@ jobs:
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/kernels/test_triton_kernel.py
       - name: Run generalization tests on NPU
         continue-on-error: true
+        shell: bash
         run: |
+          source /usr/local/Ascend/cann/set_env.sh
           NUM_PROCS=4
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=load third_party/ascend/unittest/generalization_cases

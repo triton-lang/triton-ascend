@@ -94,4 +94,6 @@ jobs:
         run: |
           if [ x"${{ github.repository }}" == x"triton-lang/triton-ascend" ]; then
             echo '::set-output name=matrix-ASCEND::[{"name":"linux-aarch64-a3-4","runner_type":"linux-aarch64-a3-4","runs_on":["linux-aarch64-a3-4"]}]'
+          else
+            echo '::set-output name=matrix-ASCEND::[{"name":"linux-aarch64-a2-2","runner_type":"linux-aarch64-a2-2","runs_on":["linux-aarch64-a2-2"]}]'
           fi

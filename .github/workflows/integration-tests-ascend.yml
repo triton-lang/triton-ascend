@@ -12,8 +12,8 @@ jobs:
     name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.config.runs_on }}
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton/triton:dev-4258273a-910b
-    timeout-minutes: 120
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton/triton:dev-4258273a-A3
+    timeout-minutes: 300
     strategy:
       matrix:
         config: ${{ fromJson(inputs.matrix) }}

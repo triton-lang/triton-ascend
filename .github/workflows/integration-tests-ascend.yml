@@ -120,7 +120,7 @@ jobs:
         shell: bash
         run: |
           source /usr/local/Ascend/cann/set_env.sh
-          NUM_PROCS=4
+          NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/autotune_ut
@@ -130,7 +130,7 @@ jobs:
         shell: bash
         run: |
           source /usr/local/Ascend/cann/set_env.sh
-          NUM_PROCS=4
+          NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=load third_party/ascend/unittest/generalization_cases
       - name: Inspect cache directories

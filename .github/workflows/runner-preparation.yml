@@ -14,7 +14,7 @@ jobs:
     steps:
       - name: Decide pre-submit integration test enablement
         # Always enable integration tests for pre-submit pull requests.
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
         run: |
           echo "enable_integration=true" >> $GITHUB_ENV
       - name: Decide manual trigger integration test enablement

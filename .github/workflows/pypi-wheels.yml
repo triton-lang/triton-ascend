@@ -29,6 +29,7 @@ jobs:
         - {runs_on: 'ubuntu-22.04-arm', arch: 'arm64'}
         python-version: ['3.9', '3.10', '3.11']
 
+    environment: ci-approval
     permissions:
       id-token: write
       contents: read
@@ -36,6 +37,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: actions/setup-python@v6
         with:

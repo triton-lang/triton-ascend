@@ -10,6 +10,7 @@ on:
 jobs:
   integration-tests-ascend:
     name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.python-version }})
+    environment: ci-approval
     runs-on: ${{ matrix.config.runs_on }}
     container:
       image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton/triton:dev-4258273a-A3
@@ -32,6 +33,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: "true"
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Add git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Install OS prerequisites

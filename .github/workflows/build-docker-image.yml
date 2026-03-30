@@ -1,7 +1,7 @@
 name: Release Triton Ascend Images
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, reopened, synchronize]
     branches: [main]
   push:
@@ -15,6 +15,7 @@ jobs:
     name: Build and Push Docker Images (${{ matrix.npu_type }})
     runs-on: ubuntu-22.04
 
+    environment: ci-approval
     strategy:
       fail-fast: false
       matrix:

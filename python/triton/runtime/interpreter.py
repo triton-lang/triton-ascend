@@ -18,16 +18,17 @@ from .._C.libtriton import ir as _ir
 _has_ascend_support = False
 AscendInterpreterBuilder = None
 
+
 def _try_import_ascend():
     global _has_ascend_support, AscendInterpreterBuilder
     try:
         from . import ascend_interpreter
         AscendInterpreterBuilder = ascend_interpreter.AscendInterpreterBuilder
         _has_ascend_support = True
-    except ImportError as e:
+    except ImportError:
         _has_ascend_support = False
         AscendInterpreterBuilder = None
-    except Exception as e:
+    except Exception:
         # Catch other exceptions (like circular import) and log them
         _has_ascend_support = False
         AscendInterpreterBuilder = None
@@ -183,9 +184,9 @@ def _convert_float(input, input_dtype, output_dtype, rounding_mode):
     output_max_exponent = (1 << output_exponent_width) - 1
     exponent_output = np.maximum(0, np.minimum(exponent_unclamped, output_max_exponent))
     exponent_output = exponent_output.astype(output_unint_dtype)
-    # mark overflow index 
+    # mark overflow index
     overflow_index = exponent_unclamped > output_max_exponent - 1
-    
+
     sign_output = sign.astype(output_unint_dtype)
     if input_dtype.primitive_bitwidth > output_dtype.primitive_bitwidth:  # Downcast
         significand_output = (significand >> (input_dtype.fp_mantissa_width - output_dtype.fp_mantissa_width)) & (
@@ -214,7 +215,7 @@ def _convert_float(input, input_dtype, output_dtype, rounding_mode):
         significand_output[subnormal_index] = (significand_output[subnormal_index] >> shift[subnormal_index]) | (
             1 << (output_dtype.fp_mantissa_width - shift[subnormal_index]))
     # covert overflow value to inf
-    significand_output[overflow_index & ~input_nan_index] = 0 
+    significand_output[overflow_index & ~input_nan_index] = 0
     output = (sign_output << (output_dtype.primitive_bitwidth - 1)) | (
         exponent_output << output_dtype.fp_mantissa_width) | significand_output
     return output.reshape(input.shape)
@@ -637,8 +638,6 @@ class InterpreterBuilder:
         else:  # scalar
             return TensorHandle(np.full(shape, arg.data, dtype=_get_np_dtype(arg.dtype)), arg.dtype.scalar)
 
-
-
     def create_atomic_cas(self, ptr, cmp, val, sem, scope):
         if sem not in self.ir_sem_to_interpreter_sem:
             raise ValueError(f"unsupported semantic {sem}")
@@ -1037,7 +1036,7 @@ def _patch_lang(fn):
             _patch_builtin(lang.math, interpreter_builder)
         _patch_lang_tensor(lang.tensor)
         _patch_lang_core(lang)
-    
+
     # Patch Ascend extensions if using AscendInterpreterBuilder
     if hasattr(interpreter_builder, 'patch_extensions'):
         interpreter_builder.patch_extensions(fn)
@@ -1138,7 +1137,7 @@ class GridExecutor:
         assert len(grid) <= 3, "grid must have at most 3 dimensions"
         grid = grid + (1, ) * (3 - len(grid))
         interpreter_builder.set_grid_dim(*grid)
-        
+
         try:
             # Execute kernels - sub_vec_id simulation handled by AscendInterpreterBuilder
             if hasattr(interpreter_builder, 'execute_with_sub_vec_simulation'):

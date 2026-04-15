@@ -81,4 +81,3 @@ def fn_npu_3d(output_ptr, x_ptr, y_ptr, z_ptr, output_ptr1, XB: tl.constexpr, YB
     )
     tl.store(block_ptr_out, X)
 ```
-

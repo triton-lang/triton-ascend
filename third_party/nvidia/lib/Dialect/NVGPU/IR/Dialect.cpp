@@ -32,16 +32,17 @@
 using namespace mlir;
 using namespace mlir::triton::nvgpu;
 
-void mlir::triton::nvgpu::NVGPUDialect::initialize() {
-  addAttributes<
+void mlir::triton::nvgpu::NVGPUDialect::initialize()
+{
+    addAttributes<
 #define GET_ATTRDEF_LIST
 #include "Dialect/NVGPU/IR/NVGPUAttrDefs.cpp.inc"
-      >();
+        >();
 
-  addOperations<
+    addOperations<
 #define GET_OP_LIST
 #include "Dialect/NVGPU/IR/Ops.cpp.inc"
-      >();
+        >();
 }
 
 #define GET_OP_CLASSES

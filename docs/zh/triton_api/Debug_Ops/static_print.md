@@ -72,6 +72,3 @@ def basic_static_print_example(x_ptr, BLOCK_SIZE: tl.constexpr):
     #非常量不支fstring打印
     #tl.static_print(f"val:{val}")
 ```
-
-
-

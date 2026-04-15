@@ -72,6 +72,3 @@ def tt_softmax_3d(in_ptr, out_ptr,
 
     tl.store(out_ptr + idx, ret)
 ```
-
-
-

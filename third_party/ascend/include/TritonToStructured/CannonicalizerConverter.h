@@ -40,60 +40,50 @@ using namespace mlir;
 using namespace triton;
 
 class CmpConverter : public OpRewritePattern<arith::CmpIOp> {
-public:
-    explicit CmpConverter(MLIRContext* context)
-        : OpRewritePattern<arith::CmpIOp>(context) {}
+  public:
+    explicit CmpConverter(MLIRContext *context) : OpRewritePattern<arith::CmpIOp>(context) {}
 
     using OpRewritePattern<arith::CmpIOp>::OpRewritePattern;
 
-    LogicalResult matchAndRewrite(arith::CmpIOp cmpOp,
-                                  PatternRewriter& rewriter) const override;
+    LogicalResult matchAndRewrite(arith::CmpIOp cmpOp, PatternRewriter &rewriter) const override;
 };
 
 class SplatCmpConverter : public OpRewritePattern<arith::CmpIOp> {
-public:
-    explicit SplatCmpConverter(MLIRContext* context)
-        : OpRewritePattern<arith::CmpIOp>(context) {}
+  public:
+    explicit SplatCmpConverter(MLIRContext *context) : OpRewritePattern<arith::CmpIOp>(context) {}
     using OpRewritePattern<arith::CmpIOp>::OpRewritePattern;
 
-    LogicalResult matchAndRewrite(arith::CmpIOp op,
-                                  PatternRewriter &rewriter) const override;
+    LogicalResult matchAndRewrite(arith::CmpIOp op, PatternRewriter &rewriter) const override;
 };
 
 class AddPtrSplatConverter : public OpRewritePattern<triton::AddPtrOp> {
-public:
-    explicit AddPtrSplatConverter(MLIRContext *context)
-        : OpRewritePattern<triton::AddPtrOp>(context) {}
+  public:
+    explicit AddPtrSplatConverter(MLIRContext *context) : OpRewritePattern<triton::AddPtrOp>(context) {}
 
-    LogicalResult matchAndRewrite(triton::AddPtrOp op,
-                                  PatternRewriter &rewriter) const override;
+    LogicalResult matchAndRewrite(triton::AddPtrOp op, PatternRewriter &rewriter) const override;
 };
 
 class LoadBroadcastConverter : public OpRewritePattern<triton::LoadOp> {
-public:
-    explicit LoadBroadcastConverter(MLIRContext *context)
-        : OpRewritePattern<triton::LoadOp>(context) {}
+  public:
+    explicit LoadBroadcastConverter(MLIRContext *context) : OpRewritePattern<triton::LoadOp>(context) {}
 
-    LogicalResult matchAndRewrite(triton::LoadOp op,
-                                  PatternRewriter &rewriter) const override;
+    LogicalResult matchAndRewrite(triton::LoadOp op, PatternRewriter &rewriter) const override;
 };
 
 class PromotePointerIterArgsPattern : public OpRewritePattern<scf::ForOp> {
-public:
-    explicit PromotePointerIterArgsPattern(MLIRContext *context)
-        : OpRewritePattern<scf::ForOp>(context) {}
+  public:
+    explicit PromotePointerIterArgsPattern(MLIRContext *context) : OpRewritePattern<scf::ForOp>(context) {}
 
-    LogicalResult matchAndRewrite(scf::ForOp forOp,
-                                  PatternRewriter &rewriter) const override;
+    LogicalResult matchAndRewrite(scf::ForOp forOp, PatternRewriter &rewriter) const override;
 
-private:
+  private:
     // Information about a pointer iteration argument to be promoted
     struct PointerArgInfo {
-        unsigned oldIndex;    // Original index in the iteration arguments
-        Value basePointer;    // Base pointer value passed as init arg
-        Value offsetValue;    // Offset value used in addptr operation
-        Value newIterArg;     // New integer iteration argument
-        Value addPtrValue;    // The addptr operation result that updates the pointer
+        unsigned oldIndex; // Original index in the iteration arguments
+        Value basePointer; // Base pointer value passed as init arg
+        Value offsetValue; // Offset value used in addptr operation
+        Value newIterArg;  // New integer iteration argument
+        Value addPtrValue; // The addptr operation result that updates the pointer
         // Offset value used in advancePtr operation (with explicit inlined capacity)
         SmallVector<Value> offsetValues;
         SmallVector<Value> newInitArgs;
@@ -112,84 +102,57 @@ private:
     bool isPointerIterArg(Value iterArg) const;
 
     // Analyze a pointer iteration argument to determine if it matches the promotion pattern
-    std::optional<PointerArgInfo> analyzePointerIterArg(Value iterArg,
-                                                        Block &loopBody) const;
+    std::optional<PointerArgInfo> analyzePointerIterArg(Value iterArg, Block &loopBody) const;
 
     // Check if an index corresponds to a pointer argument being promoted
     bool isPointerArgIndex(ArrayRef<PointerArgInfo> pointerArgs, unsigned idx) const;
 
     // Get pointer argument information for a specific index
-    const PointerArgInfo* getPointerArgInfo(ArrayRef<PointerArgInfo> pointerArgs,
-                                           unsigned idx) const;
+    const PointerArgInfo *getPointerArgInfo(ArrayRef<PointerArgInfo> pointerArgs, unsigned idx) const;
 
     // Create a new for loop with updated iteration argument types
-    scf::ForOp createNewForLoop(scf::ForOp forOp,
-                                ArrayRef<Value> newInitArgs,
-                                ArrayRef<Type> newIterArgTypes,
+    scf::ForOp createNewForLoop(scf::ForOp forOp, ArrayRef<Value> newInitArgs, ArrayRef<Type> newIterArgTypes,
                                 PatternRewriter &rewriter) const;
 
     // Rewrite the loop body to use integer iteration arguments instead of pointers
-    LogicalResult rewriteLoopBody(scf::ForOp oldForOp,
-                                  scf::ForOp newForOp,
-                                  SmallVector<PointerArgInfo> &pointerArgs,
-                                  DenseMap<unsigned, unsigned> &indexMap,
-                                  PatternRewriter &rewriter) const;
+    LogicalResult rewriteLoopBody(scf::ForOp oldForOp, scf::ForOp newForOp, SmallVector<PointerArgInfo> &pointerArgs,
+                                  DenseMap<unsigned, unsigned> &indexMap, PatternRewriter &rewriter) const;
 
     // Create new iteration arguments by replacing pointers with integer offsets
     std::tuple<SmallVector<Value>, SmallVector<Type>, DenseMap<unsigned, unsigned>>
-    createNewIterArgs(scf::ForOp forOp,
-                      ArrayRef<PointerArgInfo> pointerArgs,
-                      PatternRewriter &rewriter) const;
+    createNewIterArgs(scf::ForOp forOp, ArrayRef<PointerArgInfo> pointerArgs, PatternRewriter &rewriter) const;
 
     // Create IR mapping for cloning operations, rebuilding pointers from integer offsets
-    IRMapping createIRMapping(scf::ForOp oldForOp,
-                              scf::ForOp newForOp,
-                              SmallVector<PointerArgInfo> &pointerArgs,
-                              DenseMap<unsigned, unsigned> &indexMap,
-                              PatternRewriter &rewriter) const;
+    IRMapping createIRMapping(scf::ForOp oldForOp, scf::ForOp newForOp, SmallVector<PointerArgInfo> &pointerArgs,
+                              DenseMap<unsigned, unsigned> &indexMap, PatternRewriter &rewriter) const;
 
     // Reconstruct a pointer value from base pointer and integer offset
-    Value rebuildPointer(scf::ForOp forOp,
-                         ArrayRef<PointerArgInfo> pointerArgs,
-                         unsigned idx,
+    Value rebuildPointer(scf::ForOp forOp, ArrayRef<PointerArgInfo> pointerArgs, unsigned idx,
                          PatternRewriter &rewriter) const;
 
     // Clone instructions from old loop body to new loop body, skipping transformed addptr ops
-    LogicalResult cloneInstructions(Block &oldBody,
-                                     Block &newBody,
-                                     ArrayRef<PointerArgInfo> pointerArgs,
-                                     DenseMap<unsigned, unsigned> &indexMap,
-                                     IRMapping &mapping,
-                                     PatternRewriter &rewriter) const;
+    LogicalResult cloneInstructions(Block &oldBody, Block &newBody, ArrayRef<PointerArgInfo> pointerArgs,
+                                    DenseMap<unsigned, unsigned> &indexMap, IRMapping &mapping,
+                                    PatternRewriter &rewriter) const;
 
     // Clone and transform the yield operation, converting pointer updates to integer additions
-    LogicalResult cloneYieldOp(scf::YieldOp yieldOp,
-                               ArrayRef<PointerArgInfo> pointerArgs,
-                               DenseMap<unsigned, unsigned> &indexMap,
-                               IRMapping &mapping,
+    LogicalResult cloneYieldOp(scf::YieldOp yieldOp, ArrayRef<PointerArgInfo> pointerArgs,
+                               DenseMap<unsigned, unsigned> &indexMap, IRMapping &mapping,
                                PatternRewriter &rewriter) const;
 
     // Create integer addition for pointer offset updates in the yield operation
-    Value createIntegerAdd(unsigned idx,
-                           ArrayRef<PointerArgInfo> pointerArgs,
-                           DenseMap<unsigned, unsigned> &indexMap,
+    Value createIntegerAdd(unsigned idx, ArrayRef<PointerArgInfo> pointerArgs, DenseMap<unsigned, unsigned> &indexMap,
                            PatternRewriter &rewriter) const;
 
     // Extract constant integer value from offset (handles both scalar and tensor constants)
     std::optional<int64_t> extractConstantOffset(Value offsetValue) const;
 
     // Replace the original loop results with reconstructed pointers from integer results
-    LogicalResult replaceResults(scf::ForOp oldForOp,
-                                 scf::ForOp newForOp,
-                                 ArrayRef<PointerArgInfo> pointerArgs,
-                                 DenseMap<unsigned, unsigned> &indexMap,
-                                 PatternRewriter &rewriter) const;
+    LogicalResult replaceResults(scf::ForOp oldForOp, scf::ForOp newForOp, ArrayRef<PointerArgInfo> pointerArgs,
+                                 DenseMap<unsigned, unsigned> &indexMap, PatternRewriter &rewriter) const;
 
     // Reconstruct final pointer from integer result after the loop
-    Value reconstructPointer(scf::ForOp forOp,
-                             unsigned idx,
-                             Value intResult,
-                             ArrayRef<PointerArgInfo> pointerArgs,
+    Value reconstructPointer(scf::ForOp forOp, unsigned idx, Value intResult, ArrayRef<PointerArgInfo> pointerArgs,
                              PatternRewriter &rewriter) const;
 
     LogicalResult matchAndRewriteAdvancePtr(scf::ForOp forOp, PatternRewriter &rewriter) const;
@@ -199,43 +162,31 @@ private:
     std::optional<PointerArgInfo> analyzePointerIterArgForAdvancePtr(Value iterArg, Block &loopBody) const;
 
     std::tuple<SmallVector<Value>, SmallVector<Type>, DenseMap<unsigned, unsigned>>
-    createNewIterArgsForAdvancePtr(
-                                   scf::ForOp forOp,
-                                   SmallVector<PointerArgInfo>& pointerArgs,
+    createNewIterArgsForAdvancePtr(scf::ForOp forOp, SmallVector<PointerArgInfo> &pointerArgs,
                                    PatternRewriter &rewriter) const;
 
-    IRMapping  createIRMappingForAdvancePtr(scf::ForOp oldForOp,
-                                           scf::ForOp newForOp,
+    IRMapping createIRMappingForAdvancePtr(scf::ForOp oldForOp, scf::ForOp newForOp,
                                            SmallVector<PointerArgInfo> &pointerArgs,
-                                           DenseMap<unsigned, unsigned> &indexMap,
-                                           PatternRewriter &rewriter) const;
+                                           DenseMap<unsigned, unsigned> &indexMap, PatternRewriter &rewriter) const;
 
-    Value rebuildPointerForAdvancePtr(scf::ForOp forOp,
-                                      ArrayRef<PointerArgInfo> pointerArgs,
-                                      unsigned idx,
+    Value rebuildPointerForAdvancePtr(scf::ForOp forOp, ArrayRef<PointerArgInfo> pointerArgs, unsigned idx,
                                       PatternRewriter &rewriter) const;
 
-    SmallVector<Value> createOffsetsForAdvancePtr(unsigned idx,
-                                                  ArrayRef<PointerArgInfo> pointerArgs,
+    SmallVector<Value> createOffsetsForAdvancePtr(unsigned idx, ArrayRef<PointerArgInfo> pointerArgs,
                                                   DenseMap<unsigned, unsigned> &indexMap,
                                                   PatternRewriter &rewriter) const;
 
-    LogicalResult cloneInstructionsForAdvancePtr(
-        Block &oldBody, Block &newBody, ArrayRef<PointerArgInfo> pointerArgs,
-        DenseMap<unsigned, unsigned> &indexMap, IRMapping &mapping,
-        PatternRewriter &rewriter) const;
+    LogicalResult cloneInstructionsForAdvancePtr(Block &oldBody, Block &newBody, ArrayRef<PointerArgInfo> pointerArgs,
+                                                 DenseMap<unsigned, unsigned> &indexMap, IRMapping &mapping,
+                                                 PatternRewriter &rewriter) const;
 
-    LogicalResult rewriteLoopBodyForAdvancePtr(
-                                 scf::ForOp oldForOp,
-                                 scf::ForOp newForOp,
-                                 SmallVector<PointerArgInfo> &pointerArgs,
-                                 DenseMap<unsigned, unsigned> &indexMap,
-                                 PatternRewriter &rewriter) const;
+    LogicalResult rewriteLoopBodyForAdvancePtr(scf::ForOp oldForOp, scf::ForOp newForOp,
+                                               SmallVector<PointerArgInfo> &pointerArgs,
+                                               DenseMap<unsigned, unsigned> &indexMap, PatternRewriter &rewriter) const;
 
-    LogicalResult cloneYieldOpForAdvancePtr(
-        scf::YieldOp yieldOp, ArrayRef<PointerArgInfo> pointerArgs,
-        DenseMap<unsigned, unsigned> &indexMap, IRMapping &mapping,
-        PatternRewriter &rewriter) const;
+    LogicalResult cloneYieldOpForAdvancePtr(scf::YieldOp yieldOp, ArrayRef<PointerArgInfo> pointerArgs,
+                                            DenseMap<unsigned, unsigned> &indexMap, IRMapping &mapping,
+                                            PatternRewriter &rewriter) const;
 
     SmallVector<Value> reconstructPointerForAdvance(scf::ForOp forOp, unsigned idx, Value intResult,
                                                     ArrayRef<PointerArgInfo> pointerArgs,
@@ -243,14 +194,12 @@ private:
 };
 
 class SimplifyTensorIterArgsPattern : public OpRewritePattern<scf::ForOp> {
-public:
-    explicit SimplifyTensorIterArgsPattern(MLIRContext *context)
-        : OpRewritePattern<scf::ForOp>(context) {}
+  public:
+    explicit SimplifyTensorIterArgsPattern(MLIRContext *context) : OpRewritePattern<scf::ForOp>(context) {}
 
-    LogicalResult matchAndRewrite(scf::ForOp forOp,
-                                  PatternRewriter &rewriter) const override;
+    LogicalResult matchAndRewrite(scf::ForOp forOp, PatternRewriter &rewriter) const override;
 
-private:
+  private:
     static constexpr llvm::StringLiteral kSimplifiedAttr = "tts.simplify_tensor_iter_args.done";
     static constexpr llvm::StringLiteral kFailedAttr = "tts.simplify_tensor_iter_args.failed";
     static constexpr llvm::StringLiteral kIncompleteAttr = "tts.simplify_tensor_iter_args.incomplete";
@@ -262,8 +211,8 @@ private:
 
     struct RelayMapM1 {
         unsigned innerIdx;
-        unsigned outerInitIdx;   // from inner.initArg block-arg mapping
-        unsigned outerYieldIdx;  // from outer.yield operand position of inner result
+        unsigned outerInitIdx;  // from inner.initArg block-arg mapping
+        unsigned outerYieldIdx; // from outer.yield operand position of inner result
     };
 
     struct CandidateInfo {
@@ -275,41 +224,40 @@ private:
     };
 
     bool isBlockArgumentFromAnotherForLoop(Value v) const;
-    std::optional<RelayMapM1> getRelayMapM1(
-        scf::ForOp innerFor, scf::ForOp outerFor, unsigned innerIdx) const;
-    void splitCandidatesByRelay(
-        SmallVector<CandidateInfo> all, SmallVector<CandidateInfo> &locals,
-        SmallVector<CandidateInfo> &relays) const;
+    std::optional<RelayMapM1> getRelayMapM1(scf::ForOp innerFor, scf::ForOp outerFor, unsigned innerIdx) const;
+    void splitCandidatesByRelay(SmallVector<CandidateInfo> all, SmallVector<CandidateInfo> &locals,
+                                SmallVector<CandidateInfo> &relays) const;
 
-    Value cloneShapeChain(
-        Location loc, Value base, ArrayRef<Operation *> chain, PatternRewriter &rewriter) const;
+    Value cloneShapeChain(Location loc, Value base, ArrayRef<Operation *> chain, PatternRewriter &rewriter) const;
     Value normalizeInitArgForShapePeel(Value v) const;
     std::optional<ShapeChainInfo> peelShapeChain(Value v) const;
     bool isArithWithConst(Operation *op, Value curVal, Value &nextVal, Value &constVal) const;
     Value getNewConstLikeOperand(Value cst, Type targetTy, PatternRewriter &rewriter) const;
     bool canBuildConstLikeOperand(Value cst, Type targetTy) const;
-    LogicalResult collectReverseLinearYieldPath(
-        Value yielded, Value iterArg, SmallVectorImpl<Operation *> &opsInExecOrder) const;
+    LogicalResult collectReverseLinearYieldPath(Value yielded, Value iterArg,
+                                                SmallVectorImpl<Operation *> &opsInExecOrder) const;
 
     bool extractBinaryArithOperands(Operation *op, Value &lhs, Value &rhs) const;
-    Value createSameBinaryArithOp(
-        Operation *oldOp, Location loc, Value lhs, Value rhs, PatternRewriter &rewriter) const;
+    Value createSameBinaryArithOp(Operation *oldOp, Location loc, Value lhs, Value rhs,
+                                  PatternRewriter &rewriter) const;
     bool isSafeToRewriteLanesByResultUses(scf::ForOp forOp, ArrayRef<CandidateInfo> candidates) const;
-    FailureOr<scf::ForOp> rewriteForWithLocalCandidates(
-        scf::ForOp forOp, ArrayRef<CandidateInfo> candidates,
-        const IRMapping *outerCaptureMap, PatternRewriter &rewriter) const;
-    LogicalResult precheckRelayCandidates(
-        scf::ForOp innerFor, ArrayRef<CandidateInfo> relayCandidates, scf::ForOp &outerForOut) const;
-    FailureOr<scf::ForOp> rewriteInnerForWithRelayCandidates(
-        scf::ForOp innerFor, ArrayRef<CandidateInfo> relayCandidates,
-        const IRMapping *outerCaptureMap, PatternRewriter &rewriter) const;
-    FailureOr<scf::ForOp> rewriteOuterForWithRelayCandidates(
-        scf::ForOp innerFor, scf::ForOp oldInnerFor, scf::ForOp outerFor,
-        ArrayRef<CandidateInfo> relayCandidates, PatternRewriter &rewriter) const;
-    LogicalResult rewriteForWithRelayCandidates(
-        scf::ForOp newfor, scf::ForOp oldFor, ArrayRef<CandidateInfo> relayCandidates,
-        PatternRewriter &rewriter) const;
+    FailureOr<scf::ForOp> rewriteForWithLocalCandidates(scf::ForOp forOp, ArrayRef<CandidateInfo> candidates,
+                                                        const IRMapping *outerCaptureMap,
+                                                        PatternRewriter &rewriter) const;
+    LogicalResult precheckRelayCandidates(scf::ForOp innerFor, ArrayRef<CandidateInfo> relayCandidates,
+                                          scf::ForOp &outerForOut) const;
+    FailureOr<scf::ForOp> rewriteInnerForWithRelayCandidates(scf::ForOp innerFor,
+                                                             ArrayRef<CandidateInfo> relayCandidates,
+                                                             const IRMapping *outerCaptureMap,
+                                                             PatternRewriter &rewriter) const;
+    FailureOr<scf::ForOp> rewriteOuterForWithRelayCandidates(scf::ForOp innerFor, scf::ForOp oldInnerFor,
+                                                             scf::ForOp outerFor,
+                                                             ArrayRef<CandidateInfo> relayCandidates,
+                                                             PatternRewriter &rewriter) const;
+    LogicalResult rewriteForWithRelayCandidates(scf::ForOp newfor, scf::ForOp oldFor,
+                                                ArrayRef<CandidateInfo> relayCandidates,
+                                                PatternRewriter &rewriter) const;
 };
-}  // namespace CannonicalizerConverter
+} // namespace CannonicalizerConverter
 
 #endif

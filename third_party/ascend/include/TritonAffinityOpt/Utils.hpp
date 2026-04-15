@@ -6,22 +6,15 @@
 
 namespace mlir::AffinityDAG {
 
-template<typename T, typename F>
-constexpr inline T enumOp(F&& func, T lhs, T rhs) {
-  static_assert(std::is_enum_v<T>, "T must be an enum type");
+template <typename T, typename F> constexpr inline T enumOp(F &&func, T lhs, T rhs)
+{
+    static_assert(std::is_enum_v<T>, "T must be an enum type");
 
-  using U = std::underlying_type_t<T>;
+    using U = std::underlying_type_t<T>;
 
-  return static_cast<T>(
-    std::invoke(
-      std::forward<F>(func),
-      static_cast<U>(lhs),
-      static_cast<U>(rhs)
-    )
-  );
+    return static_cast<T>(std::invoke(std::forward<F>(func), static_cast<U>(lhs), static_cast<U>(rhs)));
 }
 
-} // namespace TritonAffinity::Utils
-
+} // namespace mlir::AffinityDAG
 
 #endif

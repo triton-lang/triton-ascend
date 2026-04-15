@@ -6,11 +6,11 @@
 
 ```python
 triton.language.atomic_and(
-	pointer, 
-	val, 
-	mask=None, 
-	sem=None, 
-	scope=None, 
+	pointer,
+	val,
+	mask=None,
+	sem=None,
+	scope=None,
 	_semantic=None
 )→ pointer
 ```

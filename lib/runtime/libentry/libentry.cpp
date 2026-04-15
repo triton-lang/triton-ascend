@@ -25,12 +25,9 @@
 
 using namespace libentry;
 
-void libentry::ArgProcessor::classifyArguments(
-    const py::list& args,
-    const py::dict& kwargs,
-    const py::list& jit_params,
-    const std::unordered_set<int>& specialize_indices,
-    const std::unordered_set<int>& do_not_specialize_indices)
+void libentry::ArgProcessor::classifyArguments(const py::list &args, const py::dict &kwargs, const py::list &jit_params,
+                                               const std::unordered_set<int> &specialize_indices,
+                                               const std::unordered_set<int> &do_not_specialize_indices)
 {
     for (size_t i = 0; i < args.size(); ++i) {
         if (specialize_indices.count(i)) {
@@ -45,7 +42,7 @@ void libentry::ArgProcessor::classifyArguments(
     }
 
     for (size_t i = args.size(); i < jit_params.size(); ++i) {
-        const py::object& param = jit_params[i];
+        const py::object &param = jit_params[i];
         py::object val;
 
         if (kwargs.contains(param.attr("name"))) {
@@ -70,12 +67,8 @@ void libentry::ArgProcessor::classifyArguments(
 
 KeyType libentry::ArgProcessor::generateKey()
 {
-    auto is_tensor = [](py::handle x) {
-        return py::hasattr(x, "data_ptr");
-    };
-    auto is_int = [](py::handle x) {
-        return py::isinstance<py::int_>(x);
-    };
+    auto is_tensor = [](py::handle x) { return py::hasattr(x, "data_ptr"); };
+    auto is_int = [](py::handle x) { return py::isinstance<py::int_>(x); };
 
     py::list spec_key;
     for (auto arg : spec_args_) {
@@ -108,7 +101,7 @@ KeyType libentry::ArgProcessor::generateKey()
     }
 
     py::list result;
-    auto list_append = [&](const py::list& src) {
+    auto list_append = [&](const py::list &src) {
         for (auto handle : src) {
             result.append(handle);
         }

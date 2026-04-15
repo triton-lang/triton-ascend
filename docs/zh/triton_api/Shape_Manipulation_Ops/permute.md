@@ -71,4 +71,3 @@ def permute_example():
 result = permute_example()
 print(result.shape)  # 输出: (4, 2, 3)
 ```
-

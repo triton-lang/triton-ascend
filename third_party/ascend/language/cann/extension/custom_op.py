@@ -29,7 +29,6 @@ import itertools
 import triton.language.core as tl
 from . import core
 
-
 # Registry for custom op, mapping name to its configuration.
 _custom_op_registry = {}
 
@@ -41,13 +40,14 @@ def _get_op_class(name):
         # Allow bulitin custom ops used without registry.
         assert name.startswith('__builtin_'), f"Custom Op '{name}' not registered."
         # Return a dummy op class for builtin custom op.
-        op_class = type("_builtin_custom_op", (object, ), {
-            "name": name,
-            "core": core.CORE.VECTOR,
-            "pipe": core.PIPE.PIPE_V,
-            "mode": core.MODE.SIMT,
-            "signature": inspect.signature(object),
-        })
+        op_class = type(
+            "_builtin_custom_op", (object, ), {
+                "name": name,
+                "core": core.CORE.VECTOR,
+                "pipe": core.PIPE.PIPE_V,
+                "mode": core.MODE.SIMT,
+                "signature": inspect.signature(object),
+            })
     return op_class
 
 
@@ -190,7 +190,7 @@ def _make_attrs(op, builder):
 
 
 def _to_result(res, res_types):
-    assert(len(res) == len(res_types))
+    assert (len(res) == len(res_types))
     n_res = len(res)
     if n_res == 0:
         return None
@@ -286,6 +286,7 @@ _dtype_cname_dict = {
 def _cname(self):
     """Return the corresponding C name of the given tl.dtype"""
     return _dtype_cname_dict.get(self.name, self.name)
+
 
 # Add 'cname' property to tl.dtype class.
 tl.dtype.cname = property(_cname, None)

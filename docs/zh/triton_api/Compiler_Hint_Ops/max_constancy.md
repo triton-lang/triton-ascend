@@ -57,6 +57,3 @@ def basic_constancy_example(A, B, BLOCK_SIZE: tl.constexpr):
     result = input_data * 2
     tl.store(B + offsets, result)
 ```
-
-
-

@@ -59,8 +59,8 @@
 
 #include "llvm/Support/Debug.h"
 
-#include "TritonToStructured/TritonToStructuredPass.h"
 #include "TritonToStructured/PtrAnalysis.h"
+#include "TritonToStructured/TritonToStructuredPass.h"
 #include "Utils/InterleaveOptimization.h"
 #include "Utils/Utils.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
@@ -70,7 +70,7 @@
 namespace CannonicalizerConverter {
 using namespace mlir;
 using namespace triton;
-constexpr int  INT_TYPE_BIT_WIDTH = 32;
+constexpr int INT_TYPE_BIT_WIDTH = 32;
 
 // Match and rewrite pattern for optimizing cmp.ne (select(cond, 1, 0), 0) -> cond
 // This pattern transforms:
@@ -111,11 +111,11 @@ LogicalResult CmpConverter::matchAndRewrite(arith::CmpIOp cmpOp, PatternRewriter
     // 1. Check if RHS is a constant zero
     APInt rhsValue;
     if (!matchPattern(rhs, m_ConstantInt(&rhsValue))) {
-        return failure();  // RHS is not a constant
+        return failure(); // RHS is not a constant
     }
 
     if (!rhsValue.isZero()) {
-        return failure();  // RHS is not zero
+        return failure(); // RHS is not zero
     }
 
     // 2. Check if LHS is defined by a select operation
@@ -128,13 +128,15 @@ LogicalResult CmpConverter::matchAndRewrite(arith::CmpIOp cmpOp, PatternRewriter
     DenseElementsAttr trueAttr;
     DenseElementsAttr falseAttr;
     if (!matchPattern(selectOp.getTrueValue(), m_Constant(&trueAttr)) ||
-        !matchPattern(selectOp.getFalseValue(), m_Constant(&falseAttr))) {
-        return failure();  // Either true or false value is not constant
+        !matchPattern(selectOp.getFalseValue(), m_Constant(&falseAttr)))
+    {
+        return failure(); // Either true or false value is not constant
     }
 
     // 4. Check if true value is all 1s and false value is all 0s
-    if (!trueAttr.isSplat() || !trueAttr.getSplatValue<APInt>().isOne() ||
-        !falseAttr.isSplat() || !falseAttr.getSplatValue<APInt>().isZero()) {
+    if (!trueAttr.isSplat() || !trueAttr.getSplatValue<APInt>().isOne() || !falseAttr.isSplat() ||
+        !falseAttr.getSplatValue<APInt>().isZero())
+    {
         return failure();
     }
 
@@ -166,8 +168,7 @@ LogicalResult SplatCmpConverter::matchAndRewrite(arith::CmpIOp cmpOp, PatternRew
     }
     auto lhsSrc = lhsSplatOp.getSrc();
     auto rhsSrc = rhsSplatOp.getSrc();
-    auto newCmpOp = rewriter.create<arith::CmpIOp>(
-        cmpOp.getLoc(), cmpOp.getPredicate(), lhsSrc, rhsSrc);
+    auto newCmpOp = rewriter.create<arith::CmpIOp>(cmpOp.getLoc(), cmpOp.getPredicate(), lhsSrc, rhsSrc);
     auto cmpType = dyn_cast<RankedTensorType>(cmpOp.getType());
     if (!cmpType) {
         return failure();
@@ -192,12 +193,14 @@ LogicalResult AddPtrSplatConverter::matchAndRewrite(triton::AddPtrOp addPtrOp, P
     // Match ptr produced by splat
     auto ptr = addPtrOp.getPtr();
     auto ptrSplatOp = ptr.getDefiningOp<triton::SplatOp>();
-    if (!ptrSplatOp) return failure();
+    if (!ptrSplatOp)
+        return failure();
 
     // Match offset produced by broadcast
     auto offset = addPtrOp.getOffset();
     auto offsetBroadcastOp = offset.getDefiningOp<triton::BroadcastOp>();
-    if (!offsetBroadcastOp) return failure();
+    if (!offsetBroadcastOp)
+        return failure();
 
     // Extract sources
     auto ptrSrc = ptrSplatOp.getSrc();
@@ -206,10 +209,12 @@ LogicalResult AddPtrSplatConverter::matchAndRewrite(triton::AddPtrOp addPtrOp, P
     // Types must be ranked to reason about shapes
     auto resultType = dyn_cast<RankedTensorType>(addPtrOp.getResult().getType());
     auto offsetSrcType = dyn_cast<RankedTensorType>(offsetSrc.getType());
-    if (!resultType || !offsetSrcType) return failure();
+    if (!resultType || !offsetSrcType)
+        return failure();
 
     // If offset source already has same shape as result, nothing to do
-    if (resultType.getShape() == offsetSrcType.getShape()) return failure();
+    if (resultType.getShape() == offsetSrcType.getShape())
+        return failure();
 
     auto loc = addPtrOp.getLoc();
 
@@ -248,23 +253,28 @@ LogicalResult LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp, Pat
     // Match when ptr is defined by BroadcastOp
     Value ptr = loadOp.getPtr();
     auto ptrBroadcast = ptr.getDefiningOp<triton::BroadcastOp>();
-    if (!ptrBroadcast) return failure();
+    if (!ptrBroadcast)
+        return failure();
 
     auto ptrSrcType = dyn_cast<RankedTensorType>(ptrBroadcast.getSrc().getType());
-    if (!ptrSrcType) return failure();
+    if (!ptrSrcType)
+        return failure();
 
     // mask can be null
     Value mask = loadOp.getMask();
     Value maskSrc = nullptr;
     if (mask) {
         auto maskBroadcast = mask.getDefiningOp<triton::BroadcastOp>();
-        if (!maskBroadcast) return failure();
+        if (!maskBroadcast)
+            return failure();
         maskSrc = maskBroadcast.getSrc();
         // shapes of ptrBroadcast.src and maskBroadcast.src must match
         auto ptrSrcType = dyn_cast<RankedTensorType>(ptrBroadcast.getSrc().getType());
         auto maskSrcType = dyn_cast<RankedTensorType>(maskSrc.getType());
-        if (!ptrSrcType || !maskSrcType) return failure();
-        if (ptrSrcType.getShape() != maskSrcType.getShape()) return failure();
+        if (!ptrSrcType || !maskSrcType)
+            return failure();
+        if (ptrSrcType.getShape() != maskSrcType.getShape())
+            return failure();
     }
 
     // Prepare the smaller load: load from ptrBroadcast.src with maskSrc (or null)
@@ -286,14 +296,17 @@ LogicalResult LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp, Pat
         if (!matchPattern(other, m_Constant(&otherAttr)))
             return failure();
         auto denseOther = dyn_cast<DenseElementsAttr>(otherAttr);
-        if (!denseOther) return failure();
+        if (!denseOther)
+            return failure();
 
         // Build a small-shaped tensor type that uses the ptr src's shape but the element type of the 'other' constant
         auto ptrSrcRT = dyn_cast<RankedTensorType>(ptrBroadcast.getSrc().getType());
-        if (!ptrSrcRT) return failure();
+        if (!ptrSrcRT)
+            return failure();
 
         auto elemType = denseOther.getType().getElementType();
-        if (!elemType) return failure();
+        if (!elemType)
+            return failure();
 
         auto smallType = RankedTensorType::get(ptrSrcRT.getShape(), elemType);
 
@@ -314,16 +327,15 @@ LogicalResult LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp, Pat
 
     // Broadcast result back to original result type
     auto resultType = dyn_cast<RankedTensorType>(loadOp.getResult().getType());
-    if (!resultType) return failure();
+    if (!resultType)
+        return failure();
     auto broadcasted = rewriter.create<triton::BroadcastOp>(loc, resultType, newLoad.getResult());
 
     rewriter.replaceOp(loadOp, broadcasted.getResult());
     return success();
 }
 
-LogicalResult PromotePointerIterArgsPattern::matchAndRewrite(
-    scf::ForOp forOp,
-    PatternRewriter &rewriter) const
+LogicalResult PromotePointerIterArgsPattern::matchAndRewrite(scf::ForOp forOp, PatternRewriter &rewriter) const
 {
     // 1. Check if the loop meets transformation conditions
     if (failed(matchLoop(forOp))) {
@@ -409,7 +421,8 @@ LogicalResult PromotePointerIterArgsPattern::matchAndRewriteForAddPtr(scf::ForOp
 //     scf.yield %new_offset1,%new_offset2
 //   }
 //
-LogicalResult PromotePointerIterArgsPattern::matchAndRewriteAdvancePtr(scf::ForOp forOp, PatternRewriter &rewriter) const
+LogicalResult PromotePointerIterArgsPattern::matchAndRewriteAdvancePtr(scf::ForOp forOp,
+                                                                       PatternRewriter &rewriter) const
 {
     // 1. Check if the loop meets transformation conditions
     if (failed(matchLoop(forOp))) {
@@ -438,9 +451,9 @@ LogicalResult PromotePointerIterArgsPattern::matchLoop(scf::ForOp forOp) const
     auto lowerBound = forOp.getLowerBound();
     auto upperBound = forOp.getUpperBound();
     auto step = forOp.getStep();
-    if (!matchPattern(lowerBound, m_Constant()) ||
-        !matchPattern(upperBound, m_Constant()) ||
-        !matchPattern(step, m_Constant())) {
+    if (!matchPattern(lowerBound, m_Constant()) || !matchPattern(upperBound, m_Constant()) ||
+        !matchPattern(step, m_Constant()))
+    {
         return failure();
     }
     return success();
@@ -455,8 +468,7 @@ PromotePointerIterArgsPattern::collectPointerIterArgs(scf::ForOp forOp) const
         if (isPointerIterArg(iterArg)) {
             auto info = analyzePointerIterArg(iterArg, loopBody);
             if (info.has_value()) {
-                info->oldIndex = static_cast<unsigned>(idx),
-                info->basePointer = forOp.getInitArgs()[idx],
+                info->oldIndex = static_cast<unsigned>(idx), info->basePointer = forOp.getInitArgs()[idx],
                 result.push_back(info.value());
             }
         }
@@ -467,20 +479,20 @@ PromotePointerIterArgsPattern::collectPointerIterArgs(scf::ForOp forOp) const
 SmallVector<PromotePointerIterArgsPattern::PointerArgInfo>
 PromotePointerIterArgsPattern::collectPointerIterArgsForAdvancePtr(scf::ForOp forOp) const
 {
-   SmallVector<PointerArgInfo> result;
-   auto &loopBody = *forOp.getBody();
+    SmallVector<PointerArgInfo> result;
+    auto &loopBody = *forOp.getBody();
 
-   for (auto [idx, iterArg] : llvm::enumerate(forOp.getRegionIterArgs())) {
-       if (isa<triton::PointerType>(iterArg.getType())) {
-           auto info = analyzePointerIterArgForAdvancePtr(iterArg, loopBody);
-           if (info.has_value()) {
-               info->oldIndex = static_cast<unsigned>(idx);
-               info->basePointer = forOp.getInitArgs()[idx];
-               result.push_back(info.value());
-           }
-       }
-   }
-   return result;
+    for (auto [idx, iterArg] : llvm::enumerate(forOp.getRegionIterArgs())) {
+        if (isa<triton::PointerType>(iterArg.getType())) {
+            auto info = analyzePointerIterArgForAdvancePtr(iterArg, loopBody);
+            if (info.has_value()) {
+                info->oldIndex = static_cast<unsigned>(idx);
+                info->basePointer = forOp.getInitArgs()[idx];
+                result.push_back(info.value());
+            }
+        }
+    }
+    return result;
 }
 
 bool PromotePointerIterArgsPattern::isPointerIterArg(Value iterArg) const
@@ -492,17 +504,18 @@ bool PromotePointerIterArgsPattern::isPointerIterArg(Value iterArg) const
 std::optional<PromotePointerIterArgsPattern::PointerArgInfo>
 PromotePointerIterArgsPattern::analyzePointerIterArg(Value iterArg, Block &loopBody) const
 {
-    int memCount = 0;        // Count of memory operations (load/store) using this pointer
-    int addPtrCount = 0;     // Count of addptr operations on this pointer
-    Value addPtrResult = nullptr;  // Result of the addptr operation
-    Value offset = nullptr;        // Offset value used in addptr
-    Value addPtrValue = nullptr;   // The addptr operation result value
+    int memCount = 0;             // Count of memory operations (load/store) using this pointer
+    int addPtrCount = 0;          // Count of addptr operations on this pointer
+    Value addPtrResult = nullptr; // Result of the addptr operation
+    Value offset = nullptr;       // Offset value used in addptr
+    Value addPtrValue = nullptr;  // The addptr operation result value
 
     for (auto &op : loopBody) {
         TypeSwitch<Operation *>(&op)
             .Case<triton::LoadOp, triton::StoreOp>([&](auto memoryOp) {
                 // Check if this memory operation uses the pointer we're analyzing
-                if (memoryOp.getPtr() == iterArg) ++memCount;
+                if (memoryOp.getPtr() == iterArg)
+                    ++memCount;
             })
             .Case<triton::AddPtrOp>([&](auto addPtrOp) {
                 // Check if this addptr operation updates the pointer we're analyzing
@@ -513,12 +526,13 @@ PromotePointerIterArgsPattern::analyzePointerIterArg(Value iterArg, Block &loopB
                     addPtrValue = addPtrOp.getResult();
                 }
             })
-            .Default([](auto) {});  // Ignore other operations
+            .Default([](auto) {}); // Ignore other operations
     }
 
     // Check the terminator to see if the addptr result is yielded
     auto yieldOp = dyn_cast<scf::YieldOp>(loopBody.getTerminator());
-    if (!yieldOp) return std::nullopt;
+    if (!yieldOp)
+        return std::nullopt;
 
     bool isYielded = false;
     for (auto operand : yieldOp.getOperands()) {
@@ -533,13 +547,11 @@ PromotePointerIterArgsPattern::analyzePointerIterArg(Value iterArg, Block &loopB
     // 2. At least one memory operation using this pointer
     // 3. The addptr result is yielded
     if (addPtrCount == 1 && memCount >= 1 && isYielded) {
-        return PointerArgInfo{
-            .oldIndex = 0,
-            .basePointer = nullptr, // Will be set in collectPointerIterArgs
-            .offsetValue = offset,
-            .newIterArg = nullptr,  // Will be set in createNewIterArgs
-            .addPtrValue = addPtrValue
-        };
+        return PointerArgInfo {.oldIndex = 0,
+                               .basePointer = nullptr, // Will be set in collectPointerIterArgs
+                               .offsetValue = offset,
+                               .newIterArg = nullptr, // Will be set in createNewIterArgs
+                               .addPtrValue = addPtrValue};
     }
     return std::nullopt;
 }
@@ -552,7 +564,7 @@ PromotePointerIterArgsPattern::analyzePointerIterArgForAdvancePtr(Value iterArg,
     Value advancePtrResult = nullptr; // Result of the addptr operation
     SmallVector<Value> offsetValues;
     Value advancePtrValue = nullptr; // The addptr operation result value
-    int nonZeroConstant = 0; // Number of non-zero constants
+    int nonZeroConstant = 0;         // Number of non-zero constants
     for (auto &op : loopBody) {
         TypeSwitch<Operation *>(&op)
             .Case<triton::LoadOp, triton::StoreOp>([&](auto memoryOp) {
@@ -595,19 +607,18 @@ PromotePointerIterArgsPattern::analyzePointerIterArgForAdvancePtr(Value iterArg,
     // 3. The addptr result is yielded
     if (advancePtrCount == 1 && nonZeroConstant == 1 && memCount >= 1 && isYielded) {
         return PointerArgInfo {.oldIndex = 0,
-                              .basePointer = nullptr, // Will be set in collectPointerIterArgs
-                              .offsetValue = nullptr,
-                              .newIterArg = nullptr, // Will be set in createNewIterArgs
-                              .addPtrValue = advancePtrValue,
-                              .offsetValues = offsetValues};
+                               .basePointer = nullptr, // Will be set in collectPointerIterArgs
+                               .offsetValue = nullptr,
+                               .newIterArg = nullptr, // Will be set in createNewIterArgs
+                               .addPtrValue = advancePtrValue,
+                               .offsetValues = offsetValues};
     }
     return std::nullopt;
 }
 
-std::tuple<SmallVector<Value>, SmallVector<Type>, DenseMap<unsigned, unsigned>> PromotePointerIterArgsPattern::createNewIterArgs(
-    scf::ForOp forOp,
-    ArrayRef<PointerArgInfo> pointerArgs,
-    PatternRewriter &rewriter) const
+std::tuple<SmallVector<Value>, SmallVector<Type>, DenseMap<unsigned, unsigned>>
+PromotePointerIterArgsPattern::createNewIterArgs(scf::ForOp forOp, ArrayRef<PointerArgInfo> pointerArgs,
+                                                 PatternRewriter &rewriter) const
 {
     SmallVector<Value> newInitArgs;
     SmallVector<Type> newIterArgTypes;
@@ -616,8 +627,7 @@ std::tuple<SmallVector<Value>, SmallVector<Type>, DenseMap<unsigned, unsigned>> 
     for (unsigned i = 0; i < forOp.getInitArgs().size(); ++i) {
         if (isPointerArgIndex(pointerArgs, i)) {
             // Replace pointer with integer offset (initialized to 0)
-            Value zero = rewriter.create<arith::ConstantIntOp>(
-                forOp.getLoc(), 0, INT_TYPE_BIT_WIDTH);
+            Value zero = rewriter.create<arith::ConstantIntOp>(forOp.getLoc(), 0, INT_TYPE_BIT_WIDTH);
             newInitArgs.push_back(zero);
             newIterArgTypes.push_back(rewriter.getIntegerType(INT_TYPE_BIT_WIDTH));
         } else {
@@ -634,95 +644,85 @@ std::tuple<SmallVector<Value>, SmallVector<Type>, DenseMap<unsigned, unsigned>> 
 }
 
 std::tuple<SmallVector<Value>, SmallVector<Type>, DenseMap<unsigned, unsigned>>
-PromotePointerIterArgsPattern::createNewIterArgsForAdvancePtr(
-    scf::ForOp forOp,
-    SmallVector<PointerArgInfo>& pointerArgs,
-    PatternRewriter &rewriter) const
+PromotePointerIterArgsPattern::createNewIterArgsForAdvancePtr(scf::ForOp forOp,
+                                                              SmallVector<PointerArgInfo> &pointerArgs,
+                                                              PatternRewriter &rewriter) const
 {
-   DenseMap<unsigned, unsigned> indexMap;
-   SmallVector<Value> newInitArgs;
-   SmallVector<Type> newIterArgTypes;
-   SmallVector<Value> newInitArgsTemp;
-   SmallVector<Type> newIterArgTypesTemp;
+    DenseMap<unsigned, unsigned> indexMap;
+    SmallVector<Value> newInitArgs;
+    SmallVector<Type> newIterArgTypes;
+    SmallVector<Value> newInitArgsTemp;
+    SmallVector<Type> newIterArgTypesTemp;
 
-   for (unsigned i = 0; i < forOp.getInitArgs().size(); ++i) {
-       PointerArgInfo* infoTemp = nullptr;
-       bool isMatch = false;
+    for (unsigned i = 0; i < forOp.getInitArgs().size(); ++i) {
+        PointerArgInfo *infoTemp = nullptr;
+        bool isMatch = false;
 
-       // find the matching pointerArg
-       for (size_t k = 0; k < pointerArgs.size(); ++k) {
-           auto &info = pointerArgs[k];
-           if (info.oldIndex == i) {
-               infoTemp = &info;
-               isMatch = true;
-               break;
-           }
-       }
+        // find the matching pointerArg
+        for (size_t k = 0; k < pointerArgs.size(); ++k) {
+            auto &info = pointerArgs[k];
+            if (info.oldIndex == i) {
+                infoTemp = &info;
+                isMatch = true;
+                break;
+            }
+        }
 
-       if (!isMatch) {
-           // Preserve original argument unchanged
-           newInitArgsTemp.push_back(forOp.getInitArgs()[i]);
-           newIterArgTypesTemp.push_back(forOp.getInitArgs()[i].getType());
-       } else if (infoTemp != nullptr) {
-           // Replace pointer with integer offset (initialized to 0)
-           SmallVector<Value> newInitArgs;
-           SmallVector<Type> newIterArgTypes;
+        if (!isMatch) {
+            // Preserve original argument unchanged
+            newInitArgsTemp.push_back(forOp.getInitArgs()[i]);
+            newIterArgTypesTemp.push_back(forOp.getInitArgs()[i].getType());
+        } else if (infoTemp != nullptr) {
+            // Replace pointer with integer offset (initialized to 0)
+            SmallVector<Value> newInitArgs;
+            SmallVector<Type> newIterArgTypes;
 
-           if (infoTemp->offsetValues.empty()) {
-               Value zero = rewriter.create<arith::ConstantIntOp>(forOp.getLoc(), 0, 32);
-               newInitArgs.push_back(zero);
-               newIterArgTypes.push_back(rewriter.getIntegerType(INT_TYPE_BIT_WIDTH));
-               newInitArgsTemp.push_back(zero);
-               newIterArgTypesTemp.push_back(rewriter.getIntegerType(INT_TYPE_BIT_WIDTH));
-           } else {
-               Value zero = rewriter.create<arith::ConstantIntOp>(forOp.getLoc(), 0, 32);
-               for (size_t j = 0; j < infoTemp->offsetValues.size(); ++j) {
-                   Value offset = infoTemp->offsetValues[j];
-                   if (auto maskInt = getConstantIntValue(offset)) {
-                       newInitArgs.push_back(zero);
-                       newIterArgTypes.push_back(rewriter.getIntegerType(INT_TYPE_BIT_WIDTH));
-                       if (*maskInt == 0) {
-                           continue;
-                       }
-                       newInitArgsTemp.push_back(zero);
-                       newIterArgTypesTemp.push_back(rewriter.getIntegerType(INT_TYPE_BIT_WIDTH));
-                   }
-               }
-           }
+            if (infoTemp->offsetValues.empty()) {
+                Value zero = rewriter.create<arith::ConstantIntOp>(forOp.getLoc(), 0, 32);
+                newInitArgs.push_back(zero);
+                newIterArgTypes.push_back(rewriter.getIntegerType(INT_TYPE_BIT_WIDTH));
+                newInitArgsTemp.push_back(zero);
+                newIterArgTypesTemp.push_back(rewriter.getIntegerType(INT_TYPE_BIT_WIDTH));
+            } else {
+                Value zero = rewriter.create<arith::ConstantIntOp>(forOp.getLoc(), 0, 32);
+                for (size_t j = 0; j < infoTemp->offsetValues.size(); ++j) {
+                    Value offset = infoTemp->offsetValues[j];
+                    if (auto maskInt = getConstantIntValue(offset)) {
+                        newInitArgs.push_back(zero);
+                        newIterArgTypes.push_back(rewriter.getIntegerType(INT_TYPE_BIT_WIDTH));
+                        if (*maskInt == 0) {
+                            continue;
+                        }
+                        newInitArgsTemp.push_back(zero);
+                        newIterArgTypesTemp.push_back(rewriter.getIntegerType(INT_TYPE_BIT_WIDTH));
+                    }
+                }
+            }
 
-           infoTemp->newInitArgs = newInitArgs;
-           infoTemp->newIterArgTypes = newIterArgTypes;
-       } else {
-           newInitArgsTemp.push_back(forOp.getInitArgs()[i]);
-           newIterArgTypesTemp.push_back(forOp.getInitArgs()[i].getType());
-       }
-       // may change in future
-       indexMap[i] = i;
-   }
-   return {newInitArgsTemp, newIterArgTypesTemp, indexMap};
+            infoTemp->newInitArgs = newInitArgs;
+            infoTemp->newIterArgTypes = newIterArgTypes;
+        } else {
+            newInitArgsTemp.push_back(forOp.getInitArgs()[i]);
+            newIterArgTypesTemp.push_back(forOp.getInitArgs()[i].getType());
+        }
+        // may change in future
+        indexMap[i] = i;
+    }
+    return {newInitArgsTemp, newIterArgTypesTemp, indexMap};
 }
 
-scf::ForOp PromotePointerIterArgsPattern::createNewForLoop(
-    scf::ForOp forOp,
-    ArrayRef<Value> newInitArgs,
-    ArrayRef<Type> newIterArgTypes,
-    PatternRewriter &rewriter) const
+scf::ForOp PromotePointerIterArgsPattern::createNewForLoop(scf::ForOp forOp, ArrayRef<Value> newInitArgs,
+                                                           ArrayRef<Type> newIterArgTypes,
+                                                           PatternRewriter &rewriter) const
 {
-    return rewriter.create<scf::ForOp>(
-        forOp.getLoc(),
-        forOp.getLowerBound(),
-        forOp.getUpperBound(),
-        forOp.getStep(),
-        newInitArgs);
+    return rewriter.create<scf::ForOp>(forOp.getLoc(), forOp.getLowerBound(), forOp.getUpperBound(), forOp.getStep(),
+                                       newInitArgs);
 }
 
-LogicalResult
-PromotePointerIterArgsPattern::rewriteLoopBody(
-    scf::ForOp oldForOp,
-    scf::ForOp newForOp,
-    SmallVector<PointerArgInfo> &pointerArgs,
-    DenseMap<unsigned, unsigned> &indexMap,
-    PatternRewriter &rewriter) const
+LogicalResult PromotePointerIterArgsPattern::rewriteLoopBody(scf::ForOp oldForOp, scf::ForOp newForOp,
+                                                             SmallVector<PointerArgInfo> &pointerArgs,
+                                                             DenseMap<unsigned, unsigned> &indexMap,
+                                                             PatternRewriter &rewriter) const
 {
     Block &oldBody = *oldForOp.getBody();
     Block &newBody = *newForOp.getBody();
@@ -735,12 +735,10 @@ PromotePointerIterArgsPattern::rewriteLoopBody(
     return cloneInstructions(oldBody, newBody, pointerArgs, indexMap, mapping, rewriter);
 }
 
-LogicalResult
-PromotePointerIterArgsPattern::rewriteLoopBodyForAdvancePtr(
-    scf::ForOp oldForOp, scf::ForOp newForOp,
-    SmallVector<PointerArgInfo> &pointerArgs,
-    DenseMap<unsigned, unsigned> &indexMap,
-    PatternRewriter &rewriter) const
+LogicalResult PromotePointerIterArgsPattern::rewriteLoopBodyForAdvancePtr(scf::ForOp oldForOp, scf::ForOp newForOp,
+                                                                          SmallVector<PointerArgInfo> &pointerArgs,
+                                                                          DenseMap<unsigned, unsigned> &indexMap,
+                                                                          PatternRewriter &rewriter) const
 {
     Block &oldBody = *oldForOp.getBody();
     Block &newBody = *newForOp.getBody();
@@ -751,13 +749,10 @@ PromotePointerIterArgsPattern::rewriteLoopBodyForAdvancePtr(
     return cloneInstructionsForAdvancePtr(oldBody, newBody, pointerArgs, indexMap, mapping, rewriter);
 }
 
-IRMapping
-PromotePointerIterArgsPattern::createIRMapping(
-    scf::ForOp oldForOp,
-    scf::ForOp newForOp,
-    SmallVector<PointerArgInfo> &pointerArgs,
-    DenseMap<unsigned, unsigned> &indexMap,
-    PatternRewriter &rewriter) const
+IRMapping PromotePointerIterArgsPattern::createIRMapping(scf::ForOp oldForOp, scf::ForOp newForOp,
+                                                         SmallVector<PointerArgInfo> &pointerArgs,
+                                                         DenseMap<unsigned, unsigned> &indexMap,
+                                                         PatternRewriter &rewriter) const
 {
     IRMapping mapping;
     mapping.map(oldForOp.getInductionVar(), newForOp.getInductionVar());
@@ -786,12 +781,10 @@ PromotePointerIterArgsPattern::createIRMapping(
     return mapping;
 }
 
-IRMapping PromotePointerIterArgsPattern::createIRMappingForAdvancePtr(
-    scf::ForOp oldForOp,
-    scf::ForOp newForOp,
-    SmallVector<PointerArgInfo> &pointerArgs,
-    DenseMap<unsigned, unsigned> &indexMap,
-    PatternRewriter &rewriter) const
+IRMapping PromotePointerIterArgsPattern::createIRMappingForAdvancePtr(scf::ForOp oldForOp, scf::ForOp newForOp,
+                                                                      SmallVector<PointerArgInfo> &pointerArgs,
+                                                                      DenseMap<unsigned, unsigned> &indexMap,
+                                                                      PatternRewriter &rewriter) const
 {
     IRMapping mapping;
     mapping.map(oldForOp.getInductionVar(), newForOp.getInductionVar());
@@ -807,7 +800,7 @@ IRMapping PromotePointerIterArgsPattern::createIRMappingForAdvancePtr(
                     break;
                 }
             }
-            Value newIterArgTemp  = rebuildPointerForAdvancePtr(oldForOp, pointerArgs, i, rewriter);
+            Value newIterArgTemp = rebuildPointerForAdvancePtr(oldForOp, pointerArgs, i, rewriter);
             // Map original pointer argument to a reconstructed pointer
             mapping.map(oldIterArg, newIterArgTemp);
         } else {
@@ -821,16 +814,14 @@ IRMapping PromotePointerIterArgsPattern::createIRMappingForAdvancePtr(
 bool PromotePointerIterArgsPattern::isPointerArgIndex(ArrayRef<PointerArgInfo> pointerArgs, unsigned idx) const
 {
     for (auto &info : pointerArgs) {
-        if (info.oldIndex == idx) return true;
+        if (info.oldIndex == idx)
+            return true;
     }
     return false;
 }
 
-Value PromotePointerIterArgsPattern::rebuildPointer(
-    scf::ForOp forOp,
-    ArrayRef<PointerArgInfo> pointerArgs,
-    unsigned idx,
-    PatternRewriter &rewriter) const
+Value PromotePointerIterArgsPattern::rebuildPointer(scf::ForOp forOp, ArrayRef<PointerArgInfo> pointerArgs,
+                                                    unsigned idx, PatternRewriter &rewriter) const
 {
     const PointerArgInfo *info = nullptr;
     for (auto &argInfo : pointerArgs) {
@@ -839,7 +830,8 @@ Value PromotePointerIterArgsPattern::rebuildPointer(
             break;
         }
     }
-    if (!info) return nullptr;
+    if (!info)
+        return nullptr;
     // Create splat operation to broadcast integer offset to tensor shape
     auto baseType = info->basePointer.getType();
     Value splatOffset = nullptr;
@@ -848,25 +840,17 @@ Value PromotePointerIterArgsPattern::rebuildPointer(
         auto shape = rankedType.getShape();
 
         splatOffset = rewriter.create<triton::SplatOp>(
-            forOp.getLoc(),
-            RankedTensorType::get(shape, rewriter.getI32Type()),
-            info->newIterArg);
+            forOp.getLoc(), RankedTensorType::get(shape, rewriter.getI32Type()), info->newIterArg);
     } else {
         return nullptr;
     }
     // Create addptr operation: base pointer + splatted offset
-    return rewriter.create<triton::AddPtrOp>(
-        forOp.getLoc(),
-        info->basePointer.getType(),
-        info->basePointer,
-        splatOffset);
+    return rewriter.create<triton::AddPtrOp>(forOp.getLoc(), info->basePointer.getType(), info->basePointer,
+                                             splatOffset);
 }
 
-Value PromotePointerIterArgsPattern::rebuildPointerForAdvancePtr(
-    scf::ForOp forOp,
-    ArrayRef<PointerArgInfo> pointerArgs,
-    unsigned idx,
-    PatternRewriter &rewriter) const
+Value PromotePointerIterArgsPattern::rebuildPointerForAdvancePtr(scf::ForOp forOp, ArrayRef<PointerArgInfo> pointerArgs,
+                                                                 unsigned idx, PatternRewriter &rewriter) const
 {
     const PointerArgInfo *info = nullptr;
     for (auto &argInfo : pointerArgs) {
@@ -893,13 +877,10 @@ Value PromotePointerIterArgsPattern::rebuildPointerForAdvancePtr(
     return advanceOp;
 }
 
-LogicalResult PromotePointerIterArgsPattern::cloneInstructions(
-    Block &oldBody,
-    Block &newBody,
-    ArrayRef<PointerArgInfo> pointerArgs,
-    DenseMap<unsigned, unsigned> &indexMap,
-    IRMapping &mapping,
-    PatternRewriter &rewriter) const
+LogicalResult PromotePointerIterArgsPattern::cloneInstructions(Block &oldBody, Block &newBody,
+                                                               ArrayRef<PointerArgInfo> pointerArgs,
+                                                               DenseMap<unsigned, unsigned> &indexMap,
+                                                               IRMapping &mapping, PatternRewriter &rewriter) const
 {
     // Collect all operations from the old loop body except the terminator
     SmallVector<Operation *> toClone;
@@ -931,13 +912,11 @@ LogicalResult PromotePointerIterArgsPattern::cloneInstructions(
     return cloneYieldOp(yieldOp, pointerArgs, indexMap, mapping, rewriter);
 }
 
-LogicalResult PromotePointerIterArgsPattern::cloneInstructionsForAdvancePtr(
-    Block &oldBody,
-    Block &newBody,
-    ArrayRef<PointerArgInfo> pointerArgs,
-    DenseMap<unsigned, unsigned> &indexMap,
-    IRMapping &mapping,
-    PatternRewriter &rewriter) const
+LogicalResult PromotePointerIterArgsPattern::cloneInstructionsForAdvancePtr(Block &oldBody, Block &newBody,
+                                                                            ArrayRef<PointerArgInfo> pointerArgs,
+                                                                            DenseMap<unsigned, unsigned> &indexMap,
+                                                                            IRMapping &mapping,
+                                                                            PatternRewriter &rewriter) const
 {
     // Collect all operations from the old loop body except the terminator
     SmallVector<Operation *> toClone;
@@ -968,13 +947,12 @@ LogicalResult PromotePointerIterArgsPattern::cloneInstructionsForAdvancePtr(
     return cloneYieldOpForAdvancePtr(yieldOp, pointerArgs, indexMap, mapping, rewriter);
 }
 
-LogicalResult PromotePointerIterArgsPattern::cloneYieldOpForAdvancePtr(
-    scf::YieldOp yieldOp,
-    ArrayRef<PointerArgInfo> pointerArgs,
-    DenseMap<unsigned, unsigned> &indexMap,
-    IRMapping &mapping,
-    PatternRewriter &rewriter) const
-    {
+LogicalResult PromotePointerIterArgsPattern::cloneYieldOpForAdvancePtr(scf::YieldOp yieldOp,
+                                                                       ArrayRef<PointerArgInfo> pointerArgs,
+                                                                       DenseMap<unsigned, unsigned> &indexMap,
+                                                                       IRMapping &mapping,
+                                                                       PatternRewriter &rewriter) const
+{
     SmallVector<Value> newOperands;
     // Process each operand of the original yield operation
     for (unsigned i = 0; i < yieldOp.getNumOperands(); ++i) {
@@ -1003,12 +981,9 @@ LogicalResult PromotePointerIterArgsPattern::cloneYieldOpForAdvancePtr(
     return success();
 }
 
-LogicalResult PromotePointerIterArgsPattern::cloneYieldOp(
-    scf::YieldOp yieldOp,
-    ArrayRef<PointerArgInfo> pointerArgs,
-    DenseMap<unsigned, unsigned> &indexMap,
-    IRMapping &mapping,
-    PatternRewriter &rewriter) const
+LogicalResult PromotePointerIterArgsPattern::cloneYieldOp(scf::YieldOp yieldOp, ArrayRef<PointerArgInfo> pointerArgs,
+                                                          DenseMap<unsigned, unsigned> &indexMap, IRMapping &mapping,
+                                                          PatternRewriter &rewriter) const
 {
     SmallVector<Value> newOperands;
     // Process each operand of the original yield operation
@@ -1023,7 +998,7 @@ LogicalResult PromotePointerIterArgsPattern::cloneYieldOp(
         }
     }
     // Validate that all new operands are non-null
-    for (auto v: newOperands) {
+    for (auto v : newOperands) {
         if (!v) {
             return failure();
         }
@@ -1033,11 +1008,10 @@ LogicalResult PromotePointerIterArgsPattern::cloneYieldOp(
     return success();
 }
 
-SmallVector<Value> PromotePointerIterArgsPattern::createOffsetsForAdvancePtr(
-    unsigned idx,
-    ArrayRef<PointerArgInfo> pointerArgs,
-    DenseMap<unsigned, unsigned> &indexMap,
-    PatternRewriter &rewriter) const
+SmallVector<Value> PromotePointerIterArgsPattern::createOffsetsForAdvancePtr(unsigned idx,
+                                                                             ArrayRef<PointerArgInfo> pointerArgs,
+                                                                             DenseMap<unsigned, unsigned> &indexMap,
+                                                                             PatternRewriter &rewriter) const
 {
     const PointerArgInfo *info = nullptr;
     for (auto &argInfo : pointerArgs) {
@@ -1077,11 +1051,9 @@ SmallVector<Value> PromotePointerIterArgsPattern::createOffsetsForAdvancePtr(
     return offsets;
 }
 
-Value PromotePointerIterArgsPattern::createIntegerAdd(
-    unsigned idx,
-    ArrayRef<PointerArgInfo> pointerArgs,
-    DenseMap<unsigned, unsigned> &indexMap,
-    PatternRewriter &rewriter) const
+Value PromotePointerIterArgsPattern::createIntegerAdd(unsigned idx, ArrayRef<PointerArgInfo> pointerArgs,
+                                                      DenseMap<unsigned, unsigned> &indexMap,
+                                                      PatternRewriter &rewriter) const
 {
     const PointerArgInfo *info = nullptr;
     for (auto &argInfo : pointerArgs) {
@@ -1090,15 +1062,15 @@ Value PromotePointerIterArgsPattern::createIntegerAdd(
             break;
         }
     }
-    if (!info) return nullptr;
+    if (!info)
+        return nullptr;
     // Try to extract constant offset value
     Attribute offsetAttr;
     if (matchPattern(info->offsetValue, m_Constant(&offsetAttr))) {
         Location loc = info->offsetValue.getLoc();
         // Case 1: Integer attribute (scalar constant)
         if (auto intAttr = dyn_cast<IntegerAttr>(offsetAttr)) {
-            Value constOffset = rewriter.create<arith::ConstantIntOp>(
-                loc, intAttr.getInt(), INT_TYPE_BIT_WIDTH);
+            Value constOffset = rewriter.create<arith::ConstantIntOp>(loc, intAttr.getInt(), INT_TYPE_BIT_WIDTH);
             return rewriter.create<arith::AddIOp>(loc, info->newIterArg, constOffset);
         }
         // Case 2: DenseElementsAttr (tensor constant)
@@ -1108,16 +1080,16 @@ Value PromotePointerIterArgsPattern::createIntegerAdd(
                 // For integer-type DenseElementsAttr
                 if (denseAttr.getElementType().isInteger(INT_TYPE_BIT_WIDTH)) {
                     auto splatValue = denseAttr.getSplatValue<APInt>();
-                    Value constOffset = rewriter.create<arith::ConstantIntOp>(
-                        loc, splatValue.getZExtValue(), INT_TYPE_BIT_WIDTH);
+                    Value constOffset =
+                        rewriter.create<arith::ConstantIntOp>(loc, splatValue.getZExtValue(), INT_TYPE_BIT_WIDTH);
                     return rewriter.create<arith::AddIOp>(loc, info->newIterArg, constOffset);
                 }
             } else {
                 // If not a splat, but has only one element, we can still handle it
                 if (denseAttr.getNumElements() == 1) {
                     auto firstElement = *denseAttr.getValues<APInt>().begin();
-                    Value constOffset = rewriter.create<arith::ConstantIntOp>(
-                        loc, firstElement.getZExtValue(), INT_TYPE_BIT_WIDTH);
+                    Value constOffset =
+                        rewriter.create<arith::ConstantIntOp>(loc, firstElement.getZExtValue(), INT_TYPE_BIT_WIDTH);
                     return rewriter.create<arith::AddIOp>(loc, info->newIterArg, constOffset);
                 }
             }
@@ -1128,19 +1100,16 @@ Value PromotePointerIterArgsPattern::createIntegerAdd(
     return nullptr;
 }
 
-LogicalResult PromotePointerIterArgsPattern::replaceResults(
-    scf::ForOp oldForOp,
-    scf::ForOp newForOp,
-    ArrayRef<PointerArgInfo> pointerArgs,
-    DenseMap<unsigned, unsigned> &indexMap,
-    PatternRewriter &rewriter) const
+LogicalResult PromotePointerIterArgsPattern::replaceResults(scf::ForOp oldForOp, scf::ForOp newForOp,
+                                                            ArrayRef<PointerArgInfo> pointerArgs,
+                                                            DenseMap<unsigned, unsigned> &indexMap,
+                                                            PatternRewriter &rewriter) const
 {
     SmallVector<Value> newResults;
 
     for (unsigned i = 0; i < oldForOp.getNumResults(); ++i) {
         if (isPointerArgIndex(pointerArgs, i)) {
-            Value ptrResult = reconstructPointer(
-                oldForOp, i, newForOp.getResult(indexMap[i]), pointerArgs, rewriter);
+            Value ptrResult = reconstructPointer(oldForOp, i, newForOp.getResult(indexMap[i]), pointerArgs, rewriter);
             newResults.push_back(ptrResult);
         } else {
             newResults.push_back(newForOp.getResult(indexMap[i]));
@@ -1156,12 +1125,10 @@ LogicalResult PromotePointerIterArgsPattern::replaceResults(
     return success();
 }
 
-SmallVector<Value> PromotePointerIterArgsPattern::reconstructPointerForAdvance(
-    scf::ForOp forOp,
-    unsigned idx,
-    Value intResult,
-    ArrayRef<PointerArgInfo> pointerArgs,
-    PatternRewriter &rewriter) const
+SmallVector<Value> PromotePointerIterArgsPattern::reconstructPointerForAdvance(scf::ForOp forOp, unsigned idx,
+                                                                               Value intResult,
+                                                                               ArrayRef<PointerArgInfo> pointerArgs,
+                                                                               PatternRewriter &rewriter) const
 {
     const PointerArgInfo *info = nullptr;
     for (auto &argInfo : pointerArgs) {
@@ -1191,12 +1158,9 @@ SmallVector<Value> PromotePointerIterArgsPattern::reconstructPointerForAdvance(
     return addPtr;
 }
 
-Value PromotePointerIterArgsPattern::reconstructPointer(
-    scf::ForOp forOp,
-    unsigned idx,
-    Value intResult,
-    ArrayRef<PointerArgInfo> pointerArgs,
-    PatternRewriter &rewriter) const
+Value PromotePointerIterArgsPattern::reconstructPointer(scf::ForOp forOp, unsigned idx, Value intResult,
+                                                        ArrayRef<PointerArgInfo> pointerArgs,
+                                                        PatternRewriter &rewriter) const
 {
     const PointerArgInfo *info = nullptr;
     for (auto &argInfo : pointerArgs) {
@@ -1205,7 +1169,8 @@ Value PromotePointerIterArgsPattern::reconstructPointer(
             break;
         }
     }
-    if (!info) return nullptr;
+    if (!info)
+        return nullptr;
 
     // Create splat operation to broadcast integer result to tensor shape
     auto baseType = info->basePointer.getType();
@@ -1214,20 +1179,15 @@ Value PromotePointerIterArgsPattern::reconstructPointer(
         // Get the shape of the original tensor
         auto shape = rankedType.getShape();
 
-        splatOffset = rewriter.create<triton::SplatOp>(
-            forOp.getLoc(),
-            RankedTensorType::get(shape, rewriter.getI32Type()),
-            intResult);
+        splatOffset = rewriter.create<triton::SplatOp>(forOp.getLoc(),
+                                                       RankedTensorType::get(shape, rewriter.getI32Type()), intResult);
     } else {
         return nullptr;
     }
 
     // Create a tensor with the same shape, where all elements are the integer result
-    return rewriter.create<triton::AddPtrOp>(
-        forOp.getLoc(),
-        info->basePointer.getType(),
-        info->basePointer,
-        splatOffset);
+    return rewriter.create<triton::AddPtrOp>(forOp.getLoc(), info->basePointer.getType(), info->basePointer,
+                                             splatOffset);
 }
 
 void SimplifyTensorIterArgsPattern::ShapeChainInfo::dump() const
@@ -1255,7 +1215,8 @@ void SimplifyTensorIterArgsPattern::CandidateInfo::dump() const
     });
 }
 
-Value SimplifyTensorIterArgsPattern::cloneShapeChain(Location loc, Value base, ArrayRef<Operation *> chain, PatternRewriter &rewriter) const
+Value SimplifyTensorIterArgsPattern::cloneShapeChain(Location loc, Value base, ArrayRef<Operation *> chain,
+                                                     PatternRewriter &rewriter) const
 {
     Value cur = base;
     for (Operation *op : chain) {
@@ -1353,8 +1314,8 @@ Value SimplifyTensorIterArgsPattern::normalizeInitArgForShapePeel(Value v) const
     return parentFor.getInitArgs()[iterIdx];
 }
 
-std::optional<SimplifyTensorIterArgsPattern::RelayMapM1> SimplifyTensorIterArgsPattern::getRelayMapM1(
-    scf::ForOp innerFor, scf::ForOp outerFor, unsigned innerIdx) const
+std::optional<SimplifyTensorIterArgsPattern::RelayMapM1>
+SimplifyTensorIterArgsPattern::getRelayMapM1(scf::ForOp innerFor, scf::ForOp outerFor, unsigned innerIdx) const
 {
     if (innerIdx >= innerFor.getInitArgs().size() || innerIdx >= innerFor.getNumResults()) {
         return std::nullopt;
@@ -1383,8 +1344,7 @@ std::optional<SimplifyTensorIterArgsPattern::RelayMapM1> SimplifyTensorIterArgsP
         return std::nullopt;
     }
     OpOperand &onlyUse = *outerIterArg.getUses().begin();
-    if (onlyUse.getOwner() != innerFor.getOperation() ||
-        onlyUse.get() != innerFor.getInitArgs()[innerIdx]) {
+    if (onlyUse.getOwner() != innerFor.getOperation() || onlyUse.get() != innerFor.getInitArgs()[innerIdx]) {
         return std::nullopt;
     }
 
@@ -1397,7 +1357,8 @@ std::optional<SimplifyTensorIterArgsPattern::RelayMapM1> SimplifyTensorIterArgsP
         return std::nullopt;
     }
 
-    // only handle the case where inner result directly feeds into outer yield operand, without any intermediate use/def.
+    // only handle the case where inner result directly feeds into outer yield operand, without any intermediate
+    // use/def.
     Value innerRes = innerFor.getResult(innerIdx);
     std::optional<unsigned> outerYieldIdx;
     for (unsigned k = 0; k < outerYield.getNumOperands(); ++k) {
@@ -1415,7 +1376,7 @@ std::optional<SimplifyTensorIterArgsPattern::RelayMapM1> SimplifyTensorIterArgsP
         return std::nullopt;
     }
 
-    return RelayMapM1{
+    return RelayMapM1 {
         .innerIdx = innerIdx,
         .outerInitIdx = outerInitIdx,
         .outerYieldIdx = *outerYieldIdx,
@@ -1436,7 +1397,8 @@ void SimplifyTensorIterArgsPattern::splitCandidatesByRelay(
     }
 }
 
-std::optional<SimplifyTensorIterArgsPattern::ShapeChainInfo> SimplifyTensorIterArgsPattern::peelShapeChain(Value v) const
+std::optional<SimplifyTensorIterArgsPattern::ShapeChainInfo>
+SimplifyTensorIterArgsPattern::peelShapeChain(Value v) const
 {
     ShapeChainInfo info;
     Value cur = v;
@@ -1522,10 +1484,9 @@ bool SimplifyTensorIterArgsPattern::canBuildConstLikeOperand(Value cst, Type tar
     return dense && dense.isSplat();
 }
 
-LogicalResult SimplifyTensorIterArgsPattern::collectReverseLinearYieldPath(
-    Value yielded,
-    Value iterArg,
-    SmallVectorImpl<Operation *> &opsInExecOrder) const
+LogicalResult
+SimplifyTensorIterArgsPattern::collectReverseLinearYieldPath(Value yielded, Value iterArg,
+                                                             SmallVectorImpl<Operation *> &opsInExecOrder) const
 {
     SmallVector<Operation *> revOps;
     Value cur = yielded;
@@ -1576,7 +1537,6 @@ LogicalResult SimplifyTensorIterArgsPattern::collectReverseLinearYieldPath(
     return success();
 }
 
-
 LogicalResult SimplifyTensorIterArgsPattern::matchAndRewrite(scf::ForOp forOp, PatternRewriter &rewriter) const
 {
     LLVM_DEBUG({
@@ -1584,14 +1544,16 @@ LogicalResult SimplifyTensorIterArgsPattern::matchAndRewrite(scf::ForOp forOp, P
         forOp.dump();
     });
 
-    // if you want only simplify iter args once to avoid infinite pattern application, return failure when meeting done label
+    // if you want only simplify iter args once to avoid infinite pattern application, return failure when meeting done
+    // label
     if (forOp->hasAttr(kSimplifiedAttr)) {
         LLVM_DEBUG({
             llvm::dbgs() << "This For Op has been simplified before.\n";
             forOp.dump();
         });
     }
-    // If the forOp has been marked as failed before, it means we attempted to simplify it but couldn't, so we should not try again.
+    // If the forOp has been marked as failed before, it means we attempted to simplify it but couldn't, so we should
+    // not try again.
     if (forOp->hasAttr(kFailedAttr) || forOp->hasAttr(kIncompleteAttr)) {
         return failure();
     }
@@ -1620,8 +1582,9 @@ LogicalResult SimplifyTensorIterArgsPattern::matchAndRewrite(scf::ForOp forOp, P
         }
 
         // if initArg comes from another iterArg of an outer loop, get the ultimate source initArg.
-        // This handles the common nested relay pattern where inner loop iter arg is directly yielded from outer loop iter arg without modification.
-        // multiple for-loop levels of relay may require more complex data flow analysis to resolve the ultimate source initArg.
+        // This handles the common nested relay pattern where inner loop iter arg is directly yielded from outer loop
+        // iter arg without modification. multiple for-loop levels of relay may require more complex data flow analysis
+        // to resolve the ultimate source initArg.
         Value normalizedInitArg = normalizeInitArgForShapePeel(initArg);
 
         auto shapeInfoOpt = peelShapeChain(normalizedInitArg);
@@ -1642,12 +1605,13 @@ LogicalResult SimplifyTensorIterArgsPattern::matchAndRewrite(scf::ForOp forOp, P
 
         if (!relayMap.has_value() && isBlockArgumentFromAnotherForLoop(initArg)) {
             LLVM_DEBUG({
-                llvm::dbgs() << "Init arg is a block argument from another for loop, but does not form a simple relay pattern. Skipping candidate.\n";
+                llvm::dbgs() << "Init arg is a block argument from another for loop, but does not form a simple relay "
+                                "pattern. Skipping candidate.\n";
             });
             continue;
         }
 
-        candidates.push_back(CandidateInfo{
+        candidates.push_back(CandidateInfo {
             .idx = i,
             .shapeInfo = std::move(shapeInfo),
             .arithOps = std::move(chainOps),
@@ -1698,20 +1662,19 @@ LogicalResult SimplifyTensorIterArgsPattern::matchAndRewrite(scf::ForOp forOp, P
     SmallVector<CandidateInfo> relayCandidates;
     splitCandidatesByRelay(candidates, localCandidates, relayCandidates);
 
-    FailureOr<scf::ForOp> newForRes = rewriteForWithLocalCandidates(forOp, localCandidates, /*outerCaptureMap=*/ nullptr, rewriter);
+    FailureOr<scf::ForOp> newForRes =
+        rewriteForWithLocalCandidates(forOp, localCandidates, /*outerCaptureMap=*/nullptr, rewriter);
     if (failed(newForRes)) {
         return failure();
     }
     auto newFor = *newForRes;
 
     // case A: has relay -> continue relay pipeline
-    // If there are relay candidates, we need to rewrite the innerFor and outerFor together to maintain the relay relationship.
-    // The innerFor needs to be rewritten because the iterArg shape is changed after peeling,
-    // and the outerFor needs to be rewritten together to maintain the relay relationship between inner and outer iter args.
+    // If there are relay candidates, we need to rewrite the innerFor and outerFor together to maintain the relay
+    // relationship. The innerFor needs to be rewritten because the iterArg shape is changed after peeling, and the
+    // outerFor needs to be rewritten together to maintain the relay relationship between inner and outer iter args.
     if (!relayCandidates.empty()) {
-        LLVM_DEBUG({
-            llvm::dbgs() << "Nested For-loop args need to be rewritten to maintain relay relationship\n";
-        });
+        LLVM_DEBUG({ llvm::dbgs() << "Nested For-loop args need to be rewritten to maintain relay relationship\n"; });
         scf::ForOp oldFor = forOp;
         if (failed(rewriteForWithRelayCandidates(newFor, oldFor, relayCandidates, rewriter))) {
             newFor->setAttr(kFailedAttr, rewriter.getUnitAttr());
@@ -1720,9 +1683,7 @@ LogicalResult SimplifyTensorIterArgsPattern::matchAndRewrite(scf::ForOp forOp, P
         return success();
     }
 
-    LLVM_DEBUG({
-        llvm::dbgs() << "Only local candidates found, committing local rewrite\n";
-    });
+    LLVM_DEBUG({ llvm::dbgs() << "Only local candidates found, committing local rewrite\n"; });
     // case B: no relay -> commit local rewrite now
     if (newFor->hasAttr(kIncompleteAttr)) {
         newFor->removeAttr(kIncompleteAttr);
@@ -1738,31 +1699,71 @@ LogicalResult SimplifyTensorIterArgsPattern::matchAndRewrite(scf::ForOp forOp, P
 
 bool SimplifyTensorIterArgsPattern::extractBinaryArithOperands(Operation *op, Value &lhs, Value &rhs) const
 {
-    if (auto v = dyn_cast<arith::AddIOp>(op)) { lhs = v.getLhs(); rhs = v.getRhs(); return true; }
-    if (auto v = dyn_cast<arith::SubIOp>(op)) { lhs = v.getLhs(); rhs = v.getRhs(); return true; }
-    if (auto v = dyn_cast<arith::MulIOp>(op)) { lhs = v.getLhs(); rhs = v.getRhs(); return true; }
-    if (auto v = dyn_cast<arith::DivSIOp>(op)) { lhs = v.getLhs(); rhs = v.getRhs(); return true; }
+    if (auto v = dyn_cast<arith::AddIOp>(op)) {
+        lhs = v.getLhs();
+        rhs = v.getRhs();
+        return true;
+    }
+    if (auto v = dyn_cast<arith::SubIOp>(op)) {
+        lhs = v.getLhs();
+        rhs = v.getRhs();
+        return true;
+    }
+    if (auto v = dyn_cast<arith::MulIOp>(op)) {
+        lhs = v.getLhs();
+        rhs = v.getRhs();
+        return true;
+    }
+    if (auto v = dyn_cast<arith::DivSIOp>(op)) {
+        lhs = v.getLhs();
+        rhs = v.getRhs();
+        return true;
+    }
 
-    if (auto v = dyn_cast<arith::AddFOp>(op)) { lhs = v.getLhs(); rhs = v.getRhs(); return true; }
-    if (auto v = dyn_cast<arith::SubFOp>(op)) { lhs = v.getLhs(); rhs = v.getRhs(); return true; }
-    if (auto v = dyn_cast<arith::MulFOp>(op)) { lhs = v.getLhs(); rhs = v.getRhs(); return true; }
-    if (auto v = dyn_cast<arith::DivFOp>(op)) { lhs = v.getLhs(); rhs = v.getRhs(); return true; }
+    if (auto v = dyn_cast<arith::AddFOp>(op)) {
+        lhs = v.getLhs();
+        rhs = v.getRhs();
+        return true;
+    }
+    if (auto v = dyn_cast<arith::SubFOp>(op)) {
+        lhs = v.getLhs();
+        rhs = v.getRhs();
+        return true;
+    }
+    if (auto v = dyn_cast<arith::MulFOp>(op)) {
+        lhs = v.getLhs();
+        rhs = v.getRhs();
+        return true;
+    }
+    if (auto v = dyn_cast<arith::DivFOp>(op)) {
+        lhs = v.getLhs();
+        rhs = v.getRhs();
+        return true;
+    }
 
     return false;
 }
 
-Value SimplifyTensorIterArgsPattern::createSameBinaryArithOp(
-    Operation *oldOp, Location loc, Value lhs, Value rhs, PatternRewriter &rewriter) const
+Value SimplifyTensorIterArgsPattern::createSameBinaryArithOp(Operation *oldOp, Location loc, Value lhs, Value rhs,
+                                                             PatternRewriter &rewriter) const
 {
-    if (isa<arith::AddIOp>(oldOp)) return rewriter.create<arith::AddIOp>(loc, lhs, rhs).getResult();
-    if (isa<arith::SubIOp>(oldOp)) return rewriter.create<arith::SubIOp>(loc, lhs, rhs).getResult();
-    if (isa<arith::MulIOp>(oldOp)) return rewriter.create<arith::MulIOp>(loc, lhs, rhs).getResult();
-    if (isa<arith::DivSIOp>(oldOp)) return rewriter.create<arith::DivSIOp>(loc, lhs, rhs).getResult();
+    if (isa<arith::AddIOp>(oldOp))
+        return rewriter.create<arith::AddIOp>(loc, lhs, rhs).getResult();
+    if (isa<arith::SubIOp>(oldOp))
+        return rewriter.create<arith::SubIOp>(loc, lhs, rhs).getResult();
+    if (isa<arith::MulIOp>(oldOp))
+        return rewriter.create<arith::MulIOp>(loc, lhs, rhs).getResult();
+    if (isa<arith::DivSIOp>(oldOp))
+        return rewriter.create<arith::DivSIOp>(loc, lhs, rhs).getResult();
 
-    if (isa<arith::AddFOp>(oldOp)) return rewriter.create<arith::AddFOp>(loc, lhs, rhs).getResult();
-    if (isa<arith::SubFOp>(oldOp)) return rewriter.create<arith::SubFOp>(loc, lhs, rhs).getResult();
-    if (isa<arith::MulFOp>(oldOp)) return rewriter.create<arith::MulFOp>(loc, lhs, rhs).getResult();
-    if (isa<arith::DivFOp>(oldOp)) return rewriter.create<arith::DivFOp>(loc, lhs, rhs).getResult();
+    if (isa<arith::AddFOp>(oldOp))
+        return rewriter.create<arith::AddFOp>(loc, lhs, rhs).getResult();
+    if (isa<arith::SubFOp>(oldOp))
+        return rewriter.create<arith::SubFOp>(loc, lhs, rhs).getResult();
+    if (isa<arith::MulFOp>(oldOp))
+        return rewriter.create<arith::MulFOp>(loc, lhs, rhs).getResult();
+    if (isa<arith::DivFOp>(oldOp))
+        return rewriter.create<arith::DivFOp>(loc, lhs, rhs).getResult();
 
     return Value();
 }
@@ -1772,7 +1773,8 @@ FailureOr<scf::ForOp> SimplifyTensorIterArgsPattern::rewriteForWithLocalCandidat
     const IRMapping *outerCaptureMap, PatternRewriter &rewriter) const
 {
     // This function is used to rewrite the forOp with local candidate.
-    // The caller should have already validated that the candidate's shape chain can be peeled and the arithmetic chain can be rebuilt with constants.
+    // The caller should have already validated that the candidate's shape chain can be peeled and the arithmetic chain
+    // can be rebuilt with constants.
     if (candidates.empty()) {
         return forOp;
     }
@@ -1820,8 +1822,8 @@ FailureOr<scf::ForOp> SimplifyTensorIterArgsPattern::rewriteForWithLocalCandidat
         newInitArgs.push_back(v);
     }
 
-    auto newFor = rewriter.create<scf::ForOp>(
-        forOp.getLoc(), forOp.getLowerBound(), forOp.getUpperBound(), forOp.getStep(), newInitArgs);
+    auto newFor = rewriter.create<scf::ForOp>(forOp.getLoc(), forOp.getLowerBound(), forOp.getUpperBound(),
+                                              forOp.getStep(), newInitArgs);
     newFor->setAttr(kIncompleteAttr, rewriter.getUnitAttr());
 
     auto failAfterCreate = [&]() -> LogicalResult {
@@ -1943,8 +1945,7 @@ FailureOr<scf::ForOp> SimplifyTensorIterArgsPattern::rewriteForWithLocalCandidat
 }
 
 bool SimplifyTensorIterArgsPattern::isSafeToRewriteLanesByResultUses(
-    scf::ForOp forOp,
-    ArrayRef<SimplifyTensorIterArgsPattern::CandidateInfo> candidates) const
+    scf::ForOp forOp, ArrayRef<SimplifyTensorIterArgsPattern::CandidateInfo> candidates) const
 {
     if (candidates.empty()) {
         return false;
@@ -2015,8 +2016,7 @@ bool SimplifyTensorIterArgsPattern::isSafeToRewriteLanesByResultUses(
 }
 
 LogicalResult SimplifyTensorIterArgsPattern::precheckRelayCandidates(
-    scf::ForOp innerFor,
-    ArrayRef<SimplifyTensorIterArgsPattern::CandidateInfo> relayCandidates,
+    scf::ForOp innerFor, ArrayRef<SimplifyTensorIterArgsPattern::CandidateInfo> relayCandidates,
     scf::ForOp &outerForOut) const
 {
     if (relayCandidates.empty()) {
@@ -2062,8 +2062,9 @@ LogicalResult SimplifyTensorIterArgsPattern::precheckRelayCandidates(
         }
 
         // Conflict check: outer lane cannot be occupied multiple times
-        // different inner iter args mapped to the same outer iter arg or yield operand is not supported in this simple relay case,
-        // as it may require more complex data flow analysis to resolve the ultimate source init arg and final yield operand.
+        // different inner iter args mapped to the same outer iter arg or yield operand is not supported in this simple
+        // relay case, as it may require more complex data flow analysis to resolve the ultimate source init arg and
+        // final yield operand.
         if (!usedOuterInitIdx.insert(m.outerInitIdx).second) {
             return failure();
         }
@@ -2077,10 +2078,8 @@ LogicalResult SimplifyTensorIterArgsPattern::precheckRelayCandidates(
 }
 
 FailureOr<scf::ForOp> SimplifyTensorIterArgsPattern::rewriteInnerForWithRelayCandidates(
-    scf::ForOp innerFor,
-    ArrayRef<SimplifyTensorIterArgsPattern::CandidateInfo> relayCandidates,
-    const IRMapping *outerCaptureMap,
-    PatternRewriter &rewriter) const
+    scf::ForOp innerFor, ArrayRef<SimplifyTensorIterArgsPattern::CandidateInfo> relayCandidates,
+    const IRMapping *outerCaptureMap, PatternRewriter &rewriter) const
 {
     if (!innerFor || relayCandidates.empty()) {
         return failure();
@@ -2094,8 +2093,7 @@ FailureOr<scf::ForOp> SimplifyTensorIterArgsPattern::rewriteInnerForWithRelayCan
 
 FailureOr<scf::ForOp> SimplifyTensorIterArgsPattern::rewriteOuterForWithRelayCandidates(
     scf::ForOp innerFor, scf::ForOp oldInnerFor, scf::ForOp outerFor,
-    ArrayRef<SimplifyTensorIterArgsPattern::CandidateInfo> relayCandidates,
-    PatternRewriter &rewriter) const
+    ArrayRef<SimplifyTensorIterArgsPattern::CandidateInfo> relayCandidates, PatternRewriter &rewriter) const
 {
     if (!outerFor || !innerFor || relayCandidates.empty()) {
         return failure();
@@ -2126,12 +2124,8 @@ FailureOr<scf::ForOp> SimplifyTensorIterArgsPattern::rewriteOuterForWithRelayCan
     }
 
     rewriter.setInsertionPoint(outerFor);
-    auto newOuterFor = rewriter.create<scf::ForOp>(
-        outerFor.getLoc(),
-        outerFor.getLowerBound(),
-        outerFor.getUpperBound(),
-        outerFor.getStep(),
-        newOuterInitArgs);
+    auto newOuterFor = rewriter.create<scf::ForOp>(outerFor.getLoc(), outerFor.getLowerBound(),
+                                                   outerFor.getUpperBound(), outerFor.getStep(), newOuterInitArgs);
     newOuterFor->setAttr(kIncompleteAttr, rewriter.getUnitAttr());
 
     auto failAfterCreate = [&]() -> FailureOr<scf::ForOp> {
@@ -2261,10 +2255,9 @@ FailureOr<scf::ForOp> SimplifyTensorIterArgsPattern::rewriteOuterForWithRelayCan
     return newOuterFor;
 }
 
-LogicalResult SimplifyTensorIterArgsPattern::rewriteForWithRelayCandidates(
-    scf::ForOp newfor, scf::ForOp oldFor,
-    ArrayRef<CandidateInfo> relayCandidates,
-    PatternRewriter &rewriter) const
+LogicalResult SimplifyTensorIterArgsPattern::rewriteForWithRelayCandidates(scf::ForOp newfor, scf::ForOp oldFor,
+                                                                           ArrayRef<CandidateInfo> relayCandidates,
+                                                                           PatternRewriter &rewriter) const
 {
     // forOp is innerFor (already local-rewritten or to-be-relay-rewritten)
     scf::ForOp innerFor = newfor;
@@ -2290,4 +2283,4 @@ LogicalResult SimplifyTensorIterArgsPattern::rewriteForWithRelayCandidates(
     return success();
 }
 
-}
+} // namespace CannonicalizerConverter

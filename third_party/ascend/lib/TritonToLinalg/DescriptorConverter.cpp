@@ -28,13 +28,13 @@
 #include "Utils/Utils.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
-#include <utility>
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
+#include <utility>
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -116,22 +116,17 @@ LogicalResult DescriptorLoadConverter::matchAndRewrite(triton::DescriptorLoadOp 
     auto evict = triton::EvictionPolicyAttr::get(rewriter.getContext(), triton::EvictionPolicy::NORMAL);
     auto isVolatile = rewriter.getBoolAttr(false);
 
-    if (auto a = op->getAttrOfType<triton::CacheModifierAttr>("cache")) cache = a;
-    if (auto a = op->getAttrOfType<triton::EvictionPolicyAttr>("evict")) evict = a;
-    if (auto a = op->getAttrOfType<BoolAttr>("isVolatile")) isVolatile = a;
+    if (auto a = op->getAttrOfType<triton::CacheModifierAttr>("cache"))
+        cache = a;
+    if (auto a = op->getAttrOfType<triton::EvictionPolicyAttr>("evict"))
+        evict = a;
+    if (auto a = op->getAttrOfType<BoolAttr>("isVolatile"))
+        isVolatile = a;
 
-    auto newLoad = rewriter.create<triton::LoadOp>(
-        loc,
-        descTy.getSignlessBlockType(),
-        tensorPtr,
-        Value(),    // mask
-        Value(),    // other
-        boundaryCheck,
-        padding,
-        cache,
-        evict,
-        isVolatile
-    );
+    auto newLoad = rewriter.create<triton::LoadOp>(loc, descTy.getSignlessBlockType(), tensorPtr,
+                                                   Value(), // mask
+                                                   Value(), // other
+                                                   boundaryCheck, padding, cache, evict, isVolatile);
 
     rewriter.replaceOp(op, newLoad.getResult());
 
@@ -172,14 +167,9 @@ LogicalResult DescriptorStoreConverter::matchAndRewrite(triton::DescriptorStoreO
     auto cacheModifier = triton::CacheModifierAttr::get(rewriter.getContext(), triton::CacheModifier::NONE);
     auto evictionPolicy = triton::EvictionPolicyAttr::get(rewriter.getContext(), triton::EvictionPolicy::NORMAL);
 
-    auto newStore = rewriter.create<triton::StoreOp>(loc,
-        tensorPtr,
-        valueToStore,
-        Value(),   // mask
-        boundaryCheck,
-        cacheModifier,
-        evictionPolicy
-    );
+    auto newStore = rewriter.create<triton::StoreOp>(loc, tensorPtr, valueToStore,
+                                                     Value(), // mask
+                                                     boundaryCheck, cacheModifier, evictionPolicy);
 
     rewriter.eraseOp(op);
     return success();

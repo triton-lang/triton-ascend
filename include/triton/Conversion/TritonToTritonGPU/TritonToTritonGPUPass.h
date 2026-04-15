@@ -22,9 +22,8 @@ constexpr static char AttrNumThreadsPerWarp[] = "triton_gpu.threads-per-warp";
 std::unique_ptr<OperationPass<ModuleOp>> createConvertTritonToTritonGPUPass();
 
 // Create the pass with numWarps set explicitly.
-std::unique_ptr<OperationPass<ModuleOp>>
-createConvertTritonToTritonGPUPass(const std::string &target, int numWarps,
-                                   int threadsPerWarp = 32, int numCTAs = 1);
+std::unique_ptr<OperationPass<ModuleOp>> createConvertTritonToTritonGPUPass(const std::string &target, int numWarps,
+                                                                            int threadsPerWarp = 32, int numCTAs = 1);
 
 } // namespace triton
 } // namespace mlir

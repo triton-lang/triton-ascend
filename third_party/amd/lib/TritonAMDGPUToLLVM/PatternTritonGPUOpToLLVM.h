@@ -7,31 +7,21 @@
 #include "triton/Analysis/AxisInfo.h"
 
 namespace mlir::triton::AMD {
-void populateConvertLayoutOpToLLVMPatterns(
-    LLVMTypeConverter &typeConverter, const TargetInfo &targetInfo,
-    RewritePatternSet &patterns, int numWarps,
-    ModuleAxisInfoAnalysis &axisInfoAnalysis, PatternBenefit benefit);
+void populateConvertLayoutOpToLLVMPatterns(LLVMTypeConverter &typeConverter, const TargetInfo &targetInfo,
+                                           RewritePatternSet &patterns, int numWarps,
+                                           ModuleAxisInfoAnalysis &axisInfoAnalysis, PatternBenefit benefit);
 
-void populateDotOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
-                                 RewritePatternSet &patterns, int numWarps,
-                                 ModuleAxisInfoAnalysis &axisInfoAnalysis,
-                                 PatternBenefit benefit);
-void populateElementwiseOpToLLVMPatterns(
-    LLVMTypeConverter &typeConverter, RewritePatternSet &patterns, bool ftz,
-    ModuleAxisInfoAnalysis &axisInfoAnalysis, ModuleAllocation &allocation,
-    const TargetInfo &targetInfo, PatternBenefit benefit);
-void populateLoadStoreOpToLLVMPatterns(LLVMTypeConverter &typeConverter,
-                                       const TargetInfo &targetInfo,
-                                       RewritePatternSet &patterns,
-                                       int numWarps,
-                                       ModuleAxisInfoAnalysis &axisInfoAnalysis,
-                                       PatternBenefit benefit);
+void populateDotOpToLLVMPatterns(LLVMTypeConverter &typeConverter, RewritePatternSet &patterns, int numWarps,
+                                 ModuleAxisInfoAnalysis &axisInfoAnalysis, PatternBenefit benefit);
+void populateElementwiseOpToLLVMPatterns(LLVMTypeConverter &typeConverter, RewritePatternSet &patterns, bool ftz,
+                                         ModuleAxisInfoAnalysis &axisInfoAnalysis, ModuleAllocation &allocation,
+                                         const TargetInfo &targetInfo, PatternBenefit benefit);
+void populateLoadStoreOpToLLVMPatterns(LLVMTypeConverter &typeConverter, const TargetInfo &targetInfo,
+                                       RewritePatternSet &patterns, int numWarps,
+                                       ModuleAxisInfoAnalysis &axisInfoAnalysis, PatternBenefit benefit);
 
-void populateSPMDOpToLLVMPattern(LLVMTypeConverter &typeConverter,
-                                 RewritePatternSet &patterns,
-                                 PatternBenefit benefit);
-void populateTritonAMDGPUToLLVMPatterns(LLVMTypeConverter &typeConverter,
-                                        RewritePatternSet &patterns,
+void populateSPMDOpToLLVMPattern(LLVMTypeConverter &typeConverter, RewritePatternSet &patterns, PatternBenefit benefit);
+void populateTritonAMDGPUToLLVMPatterns(LLVMTypeConverter &typeConverter, RewritePatternSet &patterns,
                                         PatternBenefit benefit);
 
 } // namespace mlir::triton::AMD

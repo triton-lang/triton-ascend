@@ -70,4 +70,3 @@ def view_example():
 result = view_example()
 print(result.shape)  # 输出: (6, 4)
 ```
-

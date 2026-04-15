@@ -63,6 +63,3 @@ def fn_npu_(out0, out1, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr):
     tl.store(out0 + ij, xx)
     tl.store(out1 + ij, yy)
 ```
-
-
-

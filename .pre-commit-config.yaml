@@ -39,9 +39,10 @@ repos:
         exclude: "python/test/unit/language/test_line_info.py"
 
   - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v16.0.6
+    rev: v19.1.6
     hooks:
       - id: clang-format
+        exclude: '\.json$'
         stages: [pre-commit, pre-push, manual]
 
   # Expand YAML anchors in files used by github workflows, because github can't

@@ -19,15 +19,14 @@ using namespace mlir::triton;
 
 // Shortcuts for some commonly used LLVM ops to keep code simple and intuitive
 // Operators
-#define barSync(rewriter, op, bar, numThreads)                                 \
-  do {                                                                         \
-    ::mlir::triton::PTXBuilder ptxBuilder;                                     \
-    auto &barSyncOp = *ptxBuilder.create<>("bar.sync");                        \
-    barSyncOp(ptxBuilder.newConstantOperand(bar),                              \
-              ptxBuilder.newConstantOperand(numThreads));                      \
-    auto voidTy = void_ty(op->getContext());                                   \
-    ptxBuilder.launch(rewriter, op->getLoc(), voidTy);                         \
-  } while (0)
+#define barSync(rewriter, op, bar, numThreads)                                                                         \
+    do {                                                                                                               \
+        ::mlir::triton::PTXBuilder ptxBuilder;                                                                         \
+        auto &barSyncOp = *ptxBuilder.create<>("bar.sync");                                                            \
+        barSyncOp(ptxBuilder.newConstantOperand(bar), ptxBuilder.newConstantOperand(numThreads));                      \
+        auto voidTy = void_ty(op->getContext());                                                                       \
+        ptxBuilder.launch(rewriter, op->getLoc(), voidTy);                                                             \
+    } while (0)
 
 namespace mlir {
 namespace LLVM {
@@ -39,11 +38,9 @@ Value shuffleXor(Location loc, RewriterBase &rewriter, Value val, int i);
 Value shuffleUp(Location loc, RewriterBase &rewriter, Value val, int i);
 Value shuffleIdx(Location loc, RewriterBase &rewriter, Value val, int i);
 Value shuffleIdx(Location loc, RewriterBase &rewriter, Value val, Value i);
-Value permute(Location loc, RewriterBase &rewriter, Value a, Value b,
-              Value mask);
+Value permute(Location loc, RewriterBase &rewriter, Value a, Value b, Value mask);
 
-Value llGetPid(Location loc, RewriterBase &rewriter, ModuleOp moduleOp,
-               int axis);
+Value llGetPid(Location loc, RewriterBase &rewriter, ModuleOp moduleOp, int axis);
 
 /// Create a predicate with just single active thread.
 Value createElectPredicate(Location loc, RewriterBase &rewriter);

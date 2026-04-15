@@ -6,11 +6,11 @@
 
 ```python
 triton.language.extract_slice(
-	ful, 
-	offsets, 
-	sizes, 
-	strides, 
-	_builder=None, 
+	ful,
+	offsets,
+	sizes,
+	strides,
+	_builder=None,
 	_generator=None
 )→ tensor
 ```
@@ -37,7 +37,7 @@ triton.language.extract_slice(
 
 
 |        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 |  bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | 
+| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- |
 | Ascend A2/A3 | √    | √     | √     | √     | √     | √       | √         |  √       | √    | √    |  √    | ×    |
 
 
@@ -70,6 +70,3 @@ def triton_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
     out_msk = out_idx < n_elements
     tl.store(output_ptr + out_idx, out_sub, mask=out_msk)
 ```
-
-
-

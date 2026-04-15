@@ -6,8 +6,8 @@
 
 ```python
 triton.language.multibuffer(
-	src, 
-	size, 
+	src,
+	size,
 	_builder=None
 )→ None
 ```
@@ -44,7 +44,7 @@ triton.language.multibuffer(
 
 
 | 限制参数                   | 描述                                                                           |
-| --------------------- | ---------------------------------------------------------------------------- | 
+| --------------------- | ---------------------------------------------------------------------------- |
 |`size` | 当前实现仅支持 `size` 为 `2`。 |
 
 ### 2.4 使用方法
@@ -68,4 +68,3 @@ def triton_compile_hint(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK_
         tl.compile_hint(tmp2, "hint_d", [XBLOCK, XBLOCK_SUB])
         tl.store(out_ptr0 + (xindex), tmp2, xmask)
 ```
-

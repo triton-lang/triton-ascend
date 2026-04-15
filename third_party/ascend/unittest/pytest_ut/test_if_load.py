@@ -41,15 +41,14 @@ def triton_if_load(in_ptr0, out_ptr0, XBLOCK: tl.constexpr):
     tl.store(out_ptr0 + index, tmp0, None)
 
 
-@pytest.mark.parametrize('param_list',
-                            [
-                                ['float32', (32,), 32],
-                            ])
+@pytest.mark.parametrize('param_list', [
+    ['float32', (32, ), 32],
+])
 def test_if_load(param_list):
     dtype, shape, xblock = param_list
     x0 = test_common.generate_tensor(shape, dtype).npu()
     y_ref = x0.clone()
 
     y_cal = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
-    triton_if_load[(1,)](x0, y_cal, xblock)
+    triton_if_load[(1, )](x0, y_cal, xblock)
     test_common.validate_cmp(dtype, y_cal, y_ref)

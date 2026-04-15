@@ -11,31 +11,31 @@ using namespace mlir;
 
 namespace {
 
-struct TestMembarPass
-    : public PassWrapper<TestMembarPass, OperationPass<ModuleOp>> {
+struct TestMembarPass : public PassWrapper<TestMembarPass, OperationPass<ModuleOp>> {
 
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(TestMembarPass);
+    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(TestMembarPass);
 
-  StringRef getArgument() const final { return "test-print-membar"; }
-  StringRef getDescription() const final {
-    return "print the result of the allocation pass";
-  }
+    StringRef getArgument() const final { return "test-print-membar"; }
+    StringRef getDescription() const final { return "print the result of the allocation pass"; }
 
-  void runOnOperation() override {
-    Operation *operation = getOperation();
-    ModuleOp moduleOp = cast<ModuleOp>(operation);
-    // Print all ops after membar pass
-    ModuleAllocation allocation(moduleOp);
-    ModuleMembarAnalysis membarPass(&allocation,
-                                    mlir::triton::NVIDIA::canSkipBarSync);
-    membarPass.run();
-  }
+    void runOnOperation() override
+    {
+        Operation *operation = getOperation();
+        ModuleOp moduleOp = cast<ModuleOp>(operation);
+        // Print all ops after membar pass
+        ModuleAllocation allocation(moduleOp);
+        ModuleMembarAnalysis membarPass(&allocation, mlir::triton::NVIDIA::canSkipBarSync);
+        membarPass.run();
+    }
 };
 
 } // namespace
 
 namespace mlir {
 namespace test {
-void registerTestMembarPass() { PassRegistration<TestMembarPass>(); }
+void registerTestMembarPass()
+{
+    PassRegistration<TestMembarPass>();
+}
 } // namespace test
 } // namespace mlir

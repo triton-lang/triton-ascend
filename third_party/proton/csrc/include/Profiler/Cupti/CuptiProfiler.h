@@ -6,12 +6,12 @@
 namespace proton {
 
 class CuptiProfiler : public GPUProfiler<CuptiProfiler> {
-public:
-  CuptiProfiler();
-  virtual ~CuptiProfiler();
+  public:
+    CuptiProfiler();
+    virtual ~CuptiProfiler();
 
-private:
-  struct CuptiProfilerPimpl;
+  private:
+    struct CuptiProfilerPimpl;
 };
 
 } // namespace proton

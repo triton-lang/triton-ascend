@@ -20,13 +20,12 @@ namespace triton {
 namespace gpu {
 
 struct SharedMemory : public SideEffects::Resource::Base<SharedMemory> {
-  StringRef getName() final { return "<SharedMemory>"; }
+    StringRef getName() final { return "<SharedMemory>"; }
 };
 
 unsigned getTotalElemsPerThread(Type type);
 
-unsigned getTotalElemsPerThread(Attribute layout, ArrayRef<int64_t> shape,
-                                Type eltTy);
+unsigned getTotalElemsPerThread(Attribute layout, ArrayRef<int64_t> shape, Type eltTy);
 
 SmallVector<unsigned> getElemsPerThread(Type type);
 
@@ -55,25 +54,21 @@ SmallVector<unsigned> getContigPerThread(Attribute layout);
 // for thread 0 would be [A_{0, 0}, A_{0, 0}, A_{0, 0}, A_{0, 0}], returns [1,
 // 1]. Whereas for a tensor shape [128, 128], the elements for thread 0 would be
 // [A_{0, 0}, A_{0, 1}, A_{0, 2}, A_{0, 3}], returns [1, 4].
-SmallVector<unsigned> getUniqueContigPerThread(Attribute layout,
-                                               ArrayRef<int64_t> tensorShape);
+SmallVector<unsigned> getUniqueContigPerThread(Attribute layout, ArrayRef<int64_t> tensorShape);
 
 // Returns the number of threads per warp that have access to non-replicated
 // elements of the tensor. E.g. for a blocked layout with sizePerThread = [1,
 // 1], threadsPerWarp = [2, 16] and tensor shape = [2, 2], threads 0, 1, 16, 17
 // have access to the full tensor, whereas the other threads have access to
 // replicated elements, so this function returns [2, 2].
-SmallVector<unsigned>
-getThreadsPerWarpWithUniqueData(Attribute layout,
-                                ArrayRef<int64_t> tensorShape);
+SmallVector<unsigned> getThreadsPerWarpWithUniqueData(Attribute layout, ArrayRef<int64_t> tensorShape);
 
 // Returns the number of warps per CTA that have access to non-replicated
 // elements of the tensor. E.g. for a blocked layout with sizePerThread = [1,
 // 1], threadsPerWarp = [2, 16], warpsPerCTA = [1, 4] and tensor shape = [2, 2],
 // returns [1, 1], since the first warp has access to the full tensor, whereas
 // the other warps have access to replicated elements.
-SmallVector<unsigned>
-getWarpsPerCTAWithUniqueData(Attribute layout, ArrayRef<int64_t> tensorShape);
+SmallVector<unsigned> getWarpsPerCTAWithUniqueData(Attribute layout, ArrayRef<int64_t> tensorShape);
 
 // Returns the dimensions of the tensor from minor (fast-varying) to
 // major (slow-varying). For blocked, mma, and dotOperand layouts,
@@ -117,12 +112,9 @@ SmallVector<unsigned> getCTAOrder(Attribute layout);
  * (3) In the implementation of emitIndices, ShapePerCTATile will
  *     be replicated or wrapped to fit ShapePerCTA.
  */
-SmallVector<unsigned>
-getShapePerCTATile(Attribute layout,
-                   ArrayRef<int64_t> tensorShape = ArrayRef<int64_t>());
+SmallVector<unsigned> getShapePerCTATile(Attribute layout, ArrayRef<int64_t> tensorShape = ArrayRef<int64_t>());
 
-SmallVector<int64_t> getShapePerCTA(ArrayRef<unsigned> CTASplitNum,
-                                    ArrayRef<int64_t> shape);
+SmallVector<int64_t> getShapePerCTA(ArrayRef<unsigned> CTASplitNum, ArrayRef<int64_t> shape);
 SmallVector<int64_t> getShapePerCTA(Attribute layout, ArrayRef<int64_t> shape);
 SmallVector<int64_t> getShapePerCTA(Type type);
 
@@ -137,9 +129,8 @@ bool isExpensiveView(Type srcType, Type dstType);
 
 // Return a blocked encoding where the shape is distributed contiguously amongst
 // the threads, warps, CTAs with 1 element per threads.
-triton::gpu::BlockedEncodingAttr
-getDefaultBlockedEncoding(MLIRContext *context, ArrayRef<int64_t> shape,
-                          int numWarps, int threadsPerWarp, int numCTAs);
+triton::gpu::BlockedEncodingAttr getDefaultBlockedEncoding(MLIRContext *context, ArrayRef<int64_t> shape, int numWarps,
+                                                           int threadsPerWarp, int numCTAs);
 
 // Dump information about which threads/registers contain each of the tensor
 // elements.

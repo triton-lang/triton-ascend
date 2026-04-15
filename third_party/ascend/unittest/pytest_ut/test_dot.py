@@ -112,13 +112,12 @@ def triton_dot_2_ignore_tf32(output_ptr, x_ptr, y_ptr, B: tl.constexpr, C: tl.co
     oidx = bidx[:, None] * D + didx[None, :]
     tl.store(output_ptr + oidx, ret, mask=out_mask)
 
+
 testlist1 = [
     (10, 13, 35, 39),
 ]
 
-testlist2 = [
-    (16, 32, 16)
-]
+testlist2 = [(16, 32, 16)]
 
 typelist = [
     'float32',

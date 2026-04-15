@@ -64,4 +64,3 @@ def fn_npu_3d(output_ptr, x_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.cons
 
 x = test_common.generate_tensor(shape, dtype).npu()
 ```
-

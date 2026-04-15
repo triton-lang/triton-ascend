@@ -40,7 +40,7 @@ extensions = [
     'sphinx.ext.napoleon',
     'sphinx.ext.autosectionlabel',
     'myst_parser',
-    ]
+]
 
 autosummary_generate = True
 

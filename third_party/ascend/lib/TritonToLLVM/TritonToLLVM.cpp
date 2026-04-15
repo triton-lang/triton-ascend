@@ -166,66 +166,62 @@ static SmallVector<SmallVector<Value>> createDestOps(triton::ElementwiseInlineAs
     return ret;
 }
 
-static LogicalResult processScalarInlineAsm(triton::ElementwiseInlineAsmOp op,
-                                            PatternRewriter &rewriter)
+static LogicalResult processScalarInlineAsm(triton::ElementwiseInlineAsmOp op, PatternRewriter &rewriter)
 {
-  Location loc = op.getLoc();
+    Location loc = op.getLoc();
 
-  auto outsWrapped = createDestOps(op, rewriter, {}, loc);
+    auto outsWrapped = createDestOps(op, rewriter, {}, loc);
 
-  SmallVector<Value> outs;
-  for (const auto &resWrapped : outsWrapped) {
-    outs.push_back(resWrapped[0]);
-  }
-  rewriter.replaceOp(op, outs);
+    SmallVector<Value> outs;
+    for (const auto &resWrapped : outsWrapped) {
+        outs.push_back(resWrapped[0]);
+    }
+    rewriter.replaceOp(op, outs);
 
-  return success();
+    return success();
 }
 
-static LogicalResult processVectorInlineAsm(triton::ElementwiseInlineAsmOp op,
-                                            PatternRewriter &rewriter)
+static LogicalResult processVectorInlineAsm(triton::ElementwiseInlineAsmOp op, PatternRewriter &rewriter)
 {
-  Location loc = op.getLoc();
+    Location loc = op.getLoc();
 
-  SmallVector<SmallVector<Value>> unpackedOperands;
-  for (auto operand : op.getOperands()) {
-    auto unpackedOperand = unpackElements(loc, operand, rewriter);
-    unpackedOperands.push_back(unpackedOperand);
-  }
-
-  int64_t resultLength = get1DTensorLength(op->getResult(0));
-  if (resultLength % op.getPackedElement()) {
-    op.emitError("Result tensor should be diveded to pack");
-    return failure();
-  }
-
-  SmallVector<SmallVector<Value>> unpackedResults(op->getNumResults());
-  for (int64_t i = 0; i < resultLength; i += op.getPackedElement()) {
-    // Block of elements to process with one call to the inline asm.  This is
-    // ordered opposite `unpackedResults`: The outer dim is
-    // op.getPackedElement(), and the inner dim is the operand.
-    SmallVector<SmallVector<Value>> block(op.getPackedElement());
-    for (auto &os : unpackedOperands) {
-      for (int j = 0; j < op.getPackedElement(); j++) {
-        block[j].push_back(os[i + j]);
-      }
+    SmallVector<SmallVector<Value>> unpackedOperands;
+    for (auto operand : op.getOperands()) {
+        auto unpackedOperand = unpackElements(loc, operand, rewriter);
+        unpackedOperands.push_back(unpackedOperand);
     }
-    auto cur = createDestOps(op, rewriter, block, loc);
-    assert(cur.size() == unpackedResults.size());
-    for (unsigned j = 0; j < cur.size(); j++) {
-      unpackedResults[j].insert(unpackedResults[j].end(), cur[j].begin(),
-                                cur[j].end());
-    }
-  }
-  // Reorder and pack the results.
-  SmallVector<Value> outs;
-  for (int i = 0; i < unpackedResults.size(); i++) {
-    outs.push_back(rewriter.create<tensor::FromElementsOp>(
-        loc, op->getResult(i).getType(), unpackedResults[i]));
-  }
-  rewriter.replaceOp(op, outs);
 
-  return success();
+    int64_t resultLength = get1DTensorLength(op->getResult(0));
+    if (resultLength % op.getPackedElement()) {
+        op.emitError("Result tensor should be diveded to pack");
+        return failure();
+    }
+
+    SmallVector<SmallVector<Value>> unpackedResults(op->getNumResults());
+    for (int64_t i = 0; i < resultLength; i += op.getPackedElement()) {
+        // Block of elements to process with one call to the inline asm.  This is
+        // ordered opposite `unpackedResults`: The outer dim is
+        // op.getPackedElement(), and the inner dim is the operand.
+        SmallVector<SmallVector<Value>> block(op.getPackedElement());
+        for (auto &os : unpackedOperands) {
+            for (int j = 0; j < op.getPackedElement(); j++) {
+                block[j].push_back(os[i + j]);
+            }
+        }
+        auto cur = createDestOps(op, rewriter, block, loc);
+        assert(cur.size() == unpackedResults.size());
+        for (unsigned j = 0; j < cur.size(); j++) {
+            unpackedResults[j].insert(unpackedResults[j].end(), cur[j].begin(), cur[j].end());
+        }
+    }
+    // Reorder and pack the results.
+    SmallVector<Value> outs;
+    for (int i = 0; i < unpackedResults.size(); i++) {
+        outs.push_back(rewriter.create<tensor::FromElementsOp>(loc, op->getResult(i).getType(), unpackedResults[i]));
+    }
+    rewriter.replaceOp(op, outs);
+
+    return success();
 }
 
 } // namespace
@@ -233,11 +229,9 @@ static LogicalResult processVectorInlineAsm(triton::ElementwiseInlineAsmOp op,
 struct ElementwiseInlineAsmOpConversion : OpRewritePattern<triton::ElementwiseInlineAsmOp> {
     using OpRewritePattern<triton::ElementwiseInlineAsmOp>::OpRewritePattern;
 
-    LogicalResult matchAndRewrite(triton::ElementwiseInlineAsmOp op,
-                                  PatternRewriter &rewriter) const final
+    LogicalResult matchAndRewrite(triton::ElementwiseInlineAsmOp op, PatternRewriter &rewriter) const final
     {
-      return op.getOperands().empty() ? processScalarInlineAsm(op, rewriter)
-                                      : processVectorInlineAsm(op, rewriter);
+        return op.getOperands().empty() ? processScalarInlineAsm(op, rewriter) : processVectorInlineAsm(op, rewriter);
     }
 };
 

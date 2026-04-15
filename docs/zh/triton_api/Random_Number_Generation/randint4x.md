@@ -7,8 +7,8 @@ Triton 的 Philox 伪随机数生成器的最高效入口点。
 
 ```python
 triton.language.randint4x(
-	seed, 
-	offset, 
+	seed,
+	offset,
 	n_rounds: constexpr = 10
 )
 ```
@@ -81,6 +81,3 @@ def triton_randint4x1d(out_ptr, seed, L: tl.constexpr):
 	tl.store(pointers2, rnd2)
 	tl.store(pointers3, rnd3)
 ```
-
-
-

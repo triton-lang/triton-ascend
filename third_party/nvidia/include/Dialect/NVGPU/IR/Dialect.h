@@ -40,7 +40,8 @@
 
 namespace mlir {
 namespace triton {
-namespace nvgpu {} // namespace nvgpu
+namespace nvgpu {
+} // namespace nvgpu
 } // namespace triton
 } // namespace mlir
 

@@ -70,4 +70,3 @@ def join_example():
 result = join_example()
 print(result.shape)  # 输出: (2, 2, 3)
 ```
-

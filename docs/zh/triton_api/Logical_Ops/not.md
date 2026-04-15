@@ -72,6 +72,3 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
 
 x = test_common.generate_tensor(shape, dtype).npu()
 ```
-
-
-

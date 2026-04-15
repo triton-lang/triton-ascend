@@ -6,9 +6,9 @@
 
 ```python
 triton.language.get_element(
-	src, 
-	indice, 
-	_builder=None, 
+	src,
+	indice,
+	_builder=None,
 	_generator=None
 )→ scalar
 ```
@@ -35,7 +35,7 @@ triton.language.get_element(
 
 
 |        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | 
+| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- |
 | Ascend A2/A3 | √    | √     | √     | √     | √     | √       | √         |  √       | √    | √    |  √    | ×    |
 
 
@@ -56,7 +56,7 @@ triton.language.get_element(
 ```python@triton.jit
 def index_select_manual_kernel(in_ptr, indices_ptr, out_ptr, dim,
                                 g_stride: tl.constexpr, indice_length: tl.constexpr,
-                                g_block: tl.constexpr, g_block_sub: tl.constexpr, 
+                                g_block: tl.constexpr, g_block_sub: tl.constexpr,
                                 other_block: tl.constexpr):
     """
     Manual implementation using tl.get_element and tl.insert_slice.
@@ -76,14 +76,13 @@ def index_select_manual_kernel(in_ptr, indices_ptr, out_ptr, dim,
             for i in range(0, g_block_sub):
                 gather_offset = tl.get_element(indices, (i,)) * g_stride
                 val = tl.load(in_ptr + gather_offset + other_idx, other_mask)
-                tmp_buf = tl.insert_slice(tmp_buf, val[None, :], 
+                tmp_buf = tl.insert_slice(tmp_buf, val[None, :],
                                           offsets=(i, 0), sizes=(1, other_block), strides=(1, 1))
 
-            tl.store(out_ptr + g_idx[:, None] * g_stride + other_idx[None, :], 
+            tl.store(out_ptr + g_idx[:, None] * g_stride + other_idx[None, :],
                      tmp_buf, g_mask[:, None] & other_mask[None, :])
 ```
 
 ## 3. 语义GAP
 
 无语义差异
-

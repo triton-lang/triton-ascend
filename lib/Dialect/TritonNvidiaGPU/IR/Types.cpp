@@ -35,9 +35,10 @@ using namespace mlir::triton::nvidia_gpu;
 //===----------------------------------------------------------------------===//
 // Triton Dialect
 //===----------------------------------------------------------------------===//
-void ::mlir::triton::nvidia_gpu::TritonNvidiaGPUDialect::registerTypes() {
-  addTypes<
+void ::mlir::triton::nvidia_gpu::TritonNvidiaGPUDialect::registerTypes()
+{
+    addTypes<
 #define GET_TYPEDEF_LIST
 #include "triton/Dialect/TritonNvidiaGPU/IR/Types.cpp.inc"
-      >();
+        >();
 }

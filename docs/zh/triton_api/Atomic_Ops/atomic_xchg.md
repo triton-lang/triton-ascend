@@ -6,11 +6,11 @@
 
 ```python
 triton.language.atomic_xchg(
-	pointer, 
-	val, 
-	mask=None, 
-	sem=None, 
-	scope=None, 
+	pointer,
+	val,
+	mask=None,
+	sem=None,
+	scope=None,
 	_semantic=None
 )→ pointer
 ```
@@ -54,7 +54,7 @@ triton.language.atomic_xchg(
 
 
 | 差异点                   | 描述                                                                           |
-| --------------------- | ---------------------------------------------------------------------------- | 
+| --------------------- | ---------------------------------------------------------------------------- |
 |sem| 社区官方配置可接受的值为“acquire”、“release”、“acq_rel”（默认，代表“ACQUIRE_RELEASE”）和“relaxed”<br>我们只支持“acq_rel” |
 |scope               | 可接受的值为“gpu”、“cta”、或“sys”、 <br>我们只支持“gpu” |
 

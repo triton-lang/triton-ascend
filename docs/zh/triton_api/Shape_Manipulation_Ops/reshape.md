@@ -69,4 +69,3 @@ def reshape_example():
 result = reshape_example()
 print(result.shape)  # 输出: (6, 4)
 ```
-

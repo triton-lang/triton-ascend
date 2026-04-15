@@ -40,7 +40,7 @@ extern bool forceSimtTemplateFlag;
 namespace mlir {
 namespace triton {
 
-std::unique_ptr<OperationPass<ModuleOp>> 
+std::unique_ptr<OperationPass<ModuleOp>>
 createDiscreteMaskAccessConversionPass(const DiscreteMaskAccessConversionOptions &options = {});
 
 } // namespace triton
@@ -53,9 +53,9 @@ using namespace triton;
 
 class DiscreteMaskAccessConversionPass
     : public ::impl::DiscreteMaskAccessConversionBase<DiscreteMaskAccessConversionPass> {
-public:
-  explicit DiscreteMaskAccessConversionPass(const DiscreteMaskAccessConversionOptions &options);
-  void runOnOperation() override;
+  public:
+    explicit DiscreteMaskAccessConversionPass(const DiscreteMaskAccessConversionOptions &options);
+    void runOnOperation() override;
 };
 
 } // namespace

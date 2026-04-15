@@ -46,10 +46,10 @@ using namespace mlir;
 using namespace triton;
 
 class MarkTensorKindPass : public ::impl::MarkTensorKindBase<MarkTensorKindPass> {
-public:
-  MarkTensorKindPass() = default;
+  public:
+    MarkTensorKindPass() = default;
 
-  void runOnOperation() override;
+    void runOnOperation() override;
 };
 
 #endif // TRITON_ADAPTER_CONVERSION_MARKTENSORKINDPASS_H

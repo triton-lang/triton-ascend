@@ -6,32 +6,34 @@
 
 namespace proton {
 
-template <typename T> T atomicMax(std::atomic<T> &target, T value) {
-  T current = target.load();
-  while (current < value && !target.compare_exchange_weak(current, value))
-    ;
-  return current;
+template <typename T> T atomicMax(std::atomic<T> &target, T value)
+{
+    T current = target.load();
+    while (current < value && !target.compare_exchange_weak(current, value))
+        ;
+    return current;
 }
 
-template <typename T> T atomicMin(std::atomic<T> &target, T value) {
-  T current = target.load();
-  while (current > value && !target.compare_exchange_weak(current, value))
-    ;
-  return current;
+template <typename T> T atomicMin(std::atomic<T> &target, T value)
+{
+    T current = target.load();
+    while (current > value && !target.compare_exchange_weak(current, value))
+        ;
+    return current;
 }
 
 template <typename Condition, typename Function>
-void doubleCheckedLock(Condition enterCondition, std::mutex &lock,
-                       Function function) {
-  if (!enterCondition())
-    return;
+void doubleCheckedLock(Condition enterCondition, std::mutex &lock, Function function)
+{
+    if (!enterCondition())
+        return;
 
-  std::unique_lock<std::mutex> guard(lock);
+    std::unique_lock<std::mutex> guard(lock);
 
-  if (!enterCondition())
-    return;
+    if (!enterCondition())
+        return;
 
-  function();
+    function();
 }
 
 } // namespace proton

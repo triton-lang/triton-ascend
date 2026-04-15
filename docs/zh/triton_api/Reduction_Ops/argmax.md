@@ -67,4 +67,3 @@ def triton_argmax_1d(in_ptr0, out_ptr1, xnumel, XBLOCK: tl.constexpr):
 ## 3. 特殊取值情况
 
 对于 tensor[nan,inf] 的情况，返回inf所在的下标
-

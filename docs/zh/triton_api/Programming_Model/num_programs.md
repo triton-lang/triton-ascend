@@ -85,4 +85,3 @@ def triton_(in_ptr0, out_ptr0, x0_numel, r1_numel, XBLOCK: tl.constexpr, XBLOCK_
         tl.store(out_ptr0 + (x0), tmp2, xmask)
 
 ```
-

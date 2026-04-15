@@ -22,12 +22,12 @@ from ..runtime.jit import _normalize_ty, get_jit_fn_file_line
 from ..runtime import JITFunction
 from .errors import (CompilationError, CompileTimeAssertionFailure, UnsupportedLanguageConstruct)
 from types import ModuleType
+from triton.language.extra.cann.extension.dispatch import ASCEND_WITH_DISPATCH
+from triton.language.extra.cann.extension.builder import setup_unified_builder
+
 # Central registry for all 'with' statement handlers
 WITH_DISPATCH = {}
 
-# Import and register Ascend extension dispatch handlers
-from triton.language.extra.cann.extension.dispatch import ASCEND_WITH_DISPATCH
-from triton.language.extra.cann.extension.builder import setup_unified_builder
 WITH_DISPATCH.update(ASCEND_WITH_DISPATCH)
 
 
@@ -47,6 +47,7 @@ def mangle_ty(ty):
     if ty.is_void():
         return 'V'
     raise TypeError(f'Unsupported type {ty}')
+
 
 mangle_ty = WITH_DISPATCH.get("mangle_ty", mangle_ty)
 
@@ -854,7 +855,7 @@ class CodeGenerator(ast.NodeVisitor):
     def _verify_loop_carried_variable(self, name, loop_val, live_val):
         assert _is_triton_value(loop_val), f'cannot reassign constxpr {name} in the loop'
         assert _is_triton_value(live_val), f'cannot reasign constexpr {name} in the loop'
-        assert type(loop_val) == type(live_val), f'Loop carried variable {name} changed type'
+        assert type(loop_val) is type(live_val), f'Loop carried variable {name} changed type'
         assert not _is_triton_tensor(loop_val) or loop_val.type == live_val.type, \
             f'Loop-carried variable {name} has initial type {live_val.type} '\
             f'but is re-assigned to {loop_val.type} in loop! '\
@@ -964,7 +965,7 @@ class CodeGenerator(ast.NodeVisitor):
         flatten = False
         warp_specialize = False
         disable_licm = False
-        bind_sub_block = None
+        _bind_sub_block = None
         if IteratorClass in [language.range, extension.parallel]:
             iterator = IteratorClass(*iter_args, **iter_kwargs)
             # visit iterator arguments
@@ -980,7 +981,7 @@ class CodeGenerator(ast.NodeVisitor):
             warp_specialize = iterator.warp_specialize
             disable_licm = iterator.disable_licm
             if (IteratorClass is extension.parallel):
-                bind_sub_block = iterator.bind_sub_block
+                _bind_sub_block = iterator.bind_sub_block
         elif IteratorClass is range:
             # visit iterator arguments
             # note: only `range` iterator is supported now
@@ -1375,7 +1376,8 @@ def ast_to_ttir(fn, specialization, context, options, codegen_fns, module_map, m
     prototype = language.function_type([], arg_types)
     generator = CodeGenerator(context, prototype, gscope=gscope, constants=all_constants, function_name=function_name,
                               jit_fn=fn, attributes=fn_attrs, is_kernel=True, file_name=file_name,
-                               begin_line=begin_line, options=options, codegen_fns=codegen_fns, module_map=module_map, module=module)
+                              begin_line=begin_line, options=options, codegen_fns=codegen_fns, module_map=module_map,
+                              module=module)
     generator.visit(fn.parse())
 
     ret = generator.module

@@ -29,77 +29,97 @@ using namespace mlir;
 using namespace triton;
 
 // ArgMinConverter functions
-LogicalResult ArgMinConverter::matchComparisonResult(
-    Value currValue, Value currIndex, Value reduceValue, Value reduceIndex,
-    mlir::Block::iterator &it, Value &comparisonResult) {
-  LLVM_DEBUG(llvm::dbgs() << "Matching: " << *it << "\n");
+LogicalResult ArgMinConverter::matchComparisonResult(Value currValue, Value currIndex, Value reduceValue,
+                                                     Value reduceIndex, mlir::Block::iterator &it,
+                                                     Value &comparisonResult)
+{
+    LLVM_DEBUG(llvm::dbgs() << "Matching: " << *it << "\n");
 
-  auto cmpOp = dyn_cast<arith::CmpFOp>(*it);
-  auto cmpIOp = dyn_cast<arith::CmpIOp>(*it++);
-  if (!cmpOp && !cmpIOp)
-    return failure();
+    auto cmpOp = dyn_cast<arith::CmpFOp>(*it);
+    auto cmpIOp = dyn_cast<arith::CmpIOp>(*it++);
+    if (!cmpOp && !cmpIOp)
+        return failure();
 
-  if (cmpOp) {
-    if (cmpOp.getPredicate() != arith::CmpFPredicate::OLT ||
-        currValue != cmpOp.getLhs() || reduceValue != cmpOp.getRhs()) {
-      return failure();
+    if (cmpOp) {
+        if (cmpOp.getPredicate() != arith::CmpFPredicate::OLT || currValue != cmpOp.getLhs() ||
+            reduceValue != cmpOp.getRhs())
+        {
+            return failure();
+        }
+        comparisonResult = cmpOp;
     }
-    comparisonResult = cmpOp;
-  }
 
-  if (cmpIOp) {
-    if ((cmpIOp.getPredicate() != arith::CmpIPredicate::slt &&
-         cmpIOp.getPredicate() != arith::CmpIPredicate::ult) ||
-        currValue != cmpIOp.getLhs() || reduceValue != cmpIOp.getRhs()) {
-      return failure();
+    if (cmpIOp) {
+        if ((cmpIOp.getPredicate() != arith::CmpIPredicate::slt &&
+             cmpIOp.getPredicate() != arith::CmpIPredicate::ult) ||
+            currValue != cmpIOp.getLhs() || reduceValue != cmpIOp.getRhs())
+        {
+            return failure();
+        }
+        comparisonResult = cmpIOp;
     }
-    comparisonResult = cmpIOp;
-  }
 
-  return success();
+    return success();
 }
 
-float ArgMinConverter::getBaseReductionValue() {
-  return std::numeric_limits<float>::infinity();
+float ArgMinConverter::getBaseReductionValue()
+{
+    return std::numeric_limits<float>::infinity();
 }
 
-int8_t ArgMinConverter::getBaseReductionIntValue() { return std::numeric_limits<int8_t>::max(); }
-uint8_t ArgMinConverter::getBaseReductionUIntValue() { return std::numeric_limits<uint8_t>::max(); }
+int8_t ArgMinConverter::getBaseReductionIntValue()
+{
+    return std::numeric_limits<int8_t>::max();
+}
+uint8_t ArgMinConverter::getBaseReductionUIntValue()
+{
+    return std::numeric_limits<uint8_t>::max();
+}
 
 // ArgMaxConverter functions
-LogicalResult ArgMaxConverter::matchComparisonResult(
-    Value currValue, Value currIndex, Value reduceValue, Value reduceIndex,
-    mlir::Block::iterator &it, Value &comparisonResult) {
-  auto cmpOp = dyn_cast<arith::CmpFOp>(*it);
-  auto cmpIOp = dyn_cast<arith::CmpIOp>(*it++);
-  if (!cmpOp && !cmpIOp)
-    return failure();
+LogicalResult ArgMaxConverter::matchComparisonResult(Value currValue, Value currIndex, Value reduceValue,
+                                                     Value reduceIndex, mlir::Block::iterator &it,
+                                                     Value &comparisonResult)
+{
+    auto cmpOp = dyn_cast<arith::CmpFOp>(*it);
+    auto cmpIOp = dyn_cast<arith::CmpIOp>(*it++);
+    if (!cmpOp && !cmpIOp)
+        return failure();
 
-  if (cmpOp) {
-    if (cmpOp.getPredicate() != arith::CmpFPredicate::OGT ||
-        currValue != cmpOp.getLhs() || reduceValue != cmpOp.getRhs()) {
-      return failure();
+    if (cmpOp) {
+        if (cmpOp.getPredicate() != arith::CmpFPredicate::OGT || currValue != cmpOp.getLhs() ||
+            reduceValue != cmpOp.getRhs())
+        {
+            return failure();
+        }
+        comparisonResult = cmpOp;
     }
-    comparisonResult = cmpOp;
-  }
 
-  if (cmpIOp) {
-    if ((cmpIOp.getPredicate() != arith::CmpIPredicate::sgt &&
-         cmpIOp.getPredicate() != arith::CmpIPredicate::ugt) ||
-        currValue != cmpIOp.getLhs() || reduceValue != cmpIOp.getRhs()) {
-      return failure();
+    if (cmpIOp) {
+        if ((cmpIOp.getPredicate() != arith::CmpIPredicate::sgt &&
+             cmpIOp.getPredicate() != arith::CmpIPredicate::ugt) ||
+            currValue != cmpIOp.getLhs() || reduceValue != cmpIOp.getRhs())
+        {
+            return failure();
+        }
+        comparisonResult = cmpIOp;
     }
-    comparisonResult = cmpIOp;
-  }
 
-  return success();
+    return success();
 }
 
-float ArgMaxConverter::getBaseReductionValue() {
-  return -std::numeric_limits<float>::infinity();
+float ArgMaxConverter::getBaseReductionValue()
+{
+    return -std::numeric_limits<float>::infinity();
 }
 
-int8_t ArgMaxConverter::getBaseReductionIntValue() { return std::numeric_limits<int8_t>::min(); }
-uint8_t ArgMaxConverter::getBaseReductionUIntValue() { return std::numeric_limits<uint8_t>::min(); }
+int8_t ArgMaxConverter::getBaseReductionIntValue()
+{
+    return std::numeric_limits<int8_t>::min();
+}
+uint8_t ArgMaxConverter::getBaseReductionUIntValue()
+{
+    return std::numeric_limits<uint8_t>::min();
+}
 
 } // namespace TTOpConverters

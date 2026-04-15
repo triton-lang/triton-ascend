@@ -62,4 +62,3 @@ def flatten_kernel(x_ptr, output_ptr, M, N, BLOCK_SIZE: tl.constexpr):
     # 存储展平结果
     tl.store(output_ptr + offsets, x_flat, mask=mask)
 ```
-

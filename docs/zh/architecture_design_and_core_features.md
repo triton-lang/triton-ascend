@@ -5,23 +5,23 @@
 **Triton-Ascend 架构说明**
 
 **核心组件：**
-- **`Ascend language extension`**：适配 Ascend 的 Triton 语言扩展  
-- **`compiler`**：适配 Ascend 的 Triton 编译器  
+- **`Ascend language extension`**：适配 Ascend 的 Triton 语言扩展
+- **`compiler`**：适配 Ascend 的 Triton 编译器
 - **`driver`**：适配 Ascend 的设备驱动接口
 
 **组件功能：**
 
-- **`Ascend language extension`**  
+- **`Ascend language extension`**
   在标准 Triton 语言基础上，引入针对 Ascend NPU 架构的语法与语义扩展。
 
-- **`compiler`**  
+- **`compiler`**
   接收来自上层 Triton compiler 生成的中间表示文件 `TTIR`（Triton IR），执行一系列适配昇腾硬件的转换。
   ```
   Triton IR → Linalg IR → AscendNPU IR → triton_xxx_kernel.o
   ```
   Triton IR 转换为 Linalg IR，再经 BiSheng Compiler 生成面向 Ascend NPU 的可执行二进制文件  `triton_xxx_kernel.o`。
 
-- **`driver`**  
+- **`driver`**
   提供 Triton 运行时与 Ascend 软件栈（CANN）之间的对接能力， 加载由 BiSheng Compiler 生成的设备侧可执行内核 `triton_xxx_kernel.o` 。
 
 
@@ -30,7 +30,7 @@
 
 本项目在标准 Triton 基础上，扩展支持华为 Ascend NPU（通过 CANN 软件栈）。整体设计遵循以下**代码原则**：
 
-> - **若修改与目标硬件无关**（target independent），应保留在 **Triton core** 部分（如language、runtime的通用修改）；  
+> - **若修改与目标硬件无关**（target independent），应保留在 **Triton core** 部分（如language、runtime的通用修改）；
 > - **若修改与 Ascend 硬件强相关**（target affinitive），应放在 **Triton-Ascend** 中。
 
 
@@ -202,7 +202,7 @@ TritonToLinalg converts ttir to linalg ir.
 | PtrToIntConverter                          | triton::PtrToIntOp                                           |
 | MakeTensorPtrConverter                     | triton::PtrToIntOp to arith::IndexCastOp                     |
 
-#### 3.2.2.4 other passes 
+#### 3.2.2.4 other passes
 
 | Pass名称 | 功能描述 | 核心转换器 | 转换器描述 |
 |---|---|---|---|

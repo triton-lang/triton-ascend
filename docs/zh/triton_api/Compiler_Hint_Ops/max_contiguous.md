@@ -55,6 +55,3 @@ def triton_max_contiguous(A, B, BLOCK_SIZE : tl.constexpr):
     result = input_data* 2
     tl.store(B + offsets, result)
 ```
-
-
-

@@ -34,6 +34,7 @@ def compile_kernel(kernel, signature, constants):
 
 # ============== Kernel definitions ==============
 
+
 @al.register_custom_op
 class my_custom_op:
     core = al.CORE.VECTOR
@@ -60,10 +61,11 @@ def my_kernel(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):
 
 # ============== Pytest tests ==============
 
+
 def test_custom_op():
     """Test custom op compile to linalg MLIR."""
-    mlir = compile_kernel(my_kernel,
-        {"x_ptr": "*fp32", "y_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"}, {"BLOCK": 256})
+    mlir = compile_kernel(my_kernel, {"x_ptr": "*fp32", "y_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"},
+                          {"BLOCK": 256})
     assert mlir and len(mlir) > 0
     assert "func.func @my_kernel(" in mlir
     assert "hivm.hir.custom" in mlir
@@ -85,7 +87,7 @@ def test_custom_op():
 # ============== Main for manual testing ==============
 
 if __name__ == "__main__":
-    mlir = compile_kernel(my_kernel,
-        {"x_ptr": "*fp32", "y_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"}, {"BLOCK": 256})
+    mlir = compile_kernel(my_kernel, {"x_ptr": "*fp32", "y_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"},
+                          {"BLOCK": 256})
     print(f"✅ Generated MLIR ({len(mlir)} chars):\n")
     print(mlir)

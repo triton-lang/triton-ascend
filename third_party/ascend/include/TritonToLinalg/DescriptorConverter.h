@@ -50,7 +50,7 @@ struct Descriptor {
 bool hasATensorDescriptorType(mlir::TypeRange types);
 
 class DescriptorLoadConverter : public OpConversionPattern<triton::DescriptorLoadOp> {
-public:
+  public:
     using OpConversionPattern<triton::DescriptorLoadOp>::OpConversionPattern;
 
     LogicalResult matchAndRewrite(triton::DescriptorLoadOp op, OpAdaptor adaptor,
@@ -58,7 +58,7 @@ public:
 };
 
 class DescriptorStoreConverter : public OpConversionPattern<triton::DescriptorStoreOp> {
-public:
+  public:
     using OpConversionPattern<triton::DescriptorStoreOp>::OpConversionPattern;
 
     LogicalResult matchAndRewrite(triton::DescriptorStoreOp op, OpAdaptor adaptor,

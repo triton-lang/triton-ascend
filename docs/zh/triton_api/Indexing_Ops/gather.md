@@ -121,6 +121,3 @@ def test_gather(src_shape, indices_shape, axis):
     result = triton_gather(src, axis, indices)
     torch.testing.assert_close(result, ref, rtol=0, atol=0)
 ```
-
-
-

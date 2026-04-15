@@ -11,19 +11,17 @@ using namespace mlir;
 using namespace mlir::triton;
 
 class TritonGPUToLLVMTypeConverter : public LLVMTypeConverter {
-public:
-  using TypeConverter::convertType;
+  public:
+    using TypeConverter::convertType;
 
-  TritonGPUToLLVMTypeConverter(MLIRContext *ctx, LowerToLLVMOptions &option,
-                               const TargetInfoBase &targetInfo,
-                               const DataLayoutAnalysis *analysis = nullptr);
+    TritonGPUToLLVMTypeConverter(MLIRContext *ctx, LowerToLLVMOptions &option, const TargetInfoBase &targetInfo,
+                                 const DataLayoutAnalysis *analysis = nullptr);
 
-  Type getElementTypeForStruct(TensorOrMemDesc type);
-  Type convertTritonPointerType(triton::PointerType type);
-  Type convertTritonTensorType(RankedTensorType type,
-                               const TargetInfoBase &targetInfo);
-  Type convertMemDescType(MemDescType type, const TargetInfoBase &targetInfo);
-  Type convertAsyncToken(triton::gpu::AsyncTokenType type);
+    Type getElementTypeForStruct(TensorOrMemDesc type);
+    Type convertTritonPointerType(triton::PointerType type);
+    Type convertTritonTensorType(RankedTensorType type, const TargetInfoBase &targetInfo);
+    Type convertMemDescType(MemDescType type, const TargetInfoBase &targetInfo);
+    Type convertAsyncToken(triton::gpu::AsyncTokenType type);
 };
 
 #endif

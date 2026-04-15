@@ -33,176 +33,165 @@ namespace triton {
 namespace nvidia_gpu {
 
 // -- WarpGroupDotOp --
-mlir::LogicalResult WarpGroupDotOp::inferReturnTypes(
-    MLIRContext *context, std::optional<Location> location, ValueRange operands,
-    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
-    SmallVectorImpl<Type> &inferredReturnTypes) {
-  // type is the same as the accumulator
-  auto accTy = cast<RankedTensorType>(operands[2].getType());
-  inferredReturnTypes.push_back(accTy);
+mlir::LogicalResult WarpGroupDotOp::inferReturnTypes(MLIRContext *context, std::optional<Location> location,
+                                                     ValueRange operands, DictionaryAttr attributes,
+                                                     OpaqueProperties properties, RegionRange regions,
+                                                     SmallVectorImpl<Type> &inferredReturnTypes)
+{
+    // type is the same as the accumulator
+    auto accTy = cast<RankedTensorType>(operands[2].getType());
+    inferredReturnTypes.push_back(accTy);
 
-  // verify encodings
-  auto aEnc = cast<TensorOrMemDesc>(operands[0].getType()).getEncoding();
-  auto bEnc = cast<TensorOrMemDesc>(operands[1].getType()).getEncoding();
-  auto retEnc = accTy.getEncoding();
-  if (aEnc) {
-    assert(bEnc);
-    Dialect &dialect = aEnc.getDialect();
-    auto interface = dyn_cast<DialectInferLayoutInterface>(&dialect);
-    if (interface->inferDotOpEncoding(aEnc, 0, retEnc, location).failed())
-      return mlir::failure();
-    if (interface->inferDotOpEncoding(bEnc, 1, retEnc, location).failed())
-      return mlir::failure();
-  }
-  return mlir::success();
+    // verify encodings
+    auto aEnc = cast<TensorOrMemDesc>(operands[0].getType()).getEncoding();
+    auto bEnc = cast<TensorOrMemDesc>(operands[1].getType()).getEncoding();
+    auto retEnc = accTy.getEncoding();
+    if (aEnc) {
+        assert(bEnc);
+        Dialect &dialect = aEnc.getDialect();
+        auto interface = dyn_cast<DialectInferLayoutInterface>(&dialect);
+        if (interface->inferDotOpEncoding(aEnc, 0, retEnc, location).failed())
+            return mlir::failure();
+        if (interface->inferDotOpEncoding(bEnc, 1, retEnc, location).failed())
+            return mlir::failure();
+    }
+    return mlir::success();
 }
 
-void WarpGroupDotOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
-        &effects) {
-  auto &a = getAMutable();
-  auto &b = getBMutable();
-  if (isa<MemDescType>(a.get().getType()))
-    effects.emplace_back(MemoryEffects::Read::get(), &a,
-                         mlir::triton::gpu::SharedMemory::get());
-  if (isa<MemDescType>(b.get().getType()))
-    effects.emplace_back(MemoryEffects::Read::get(), &b,
-                         mlir::triton::gpu::SharedMemory::get());
+void WarpGroupDotOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects)
+{
+    auto &a = getAMutable();
+    auto &b = getBMutable();
+    if (isa<MemDescType>(a.get().getType()))
+        effects.emplace_back(MemoryEffects::Read::get(), &a, mlir::triton::gpu::SharedMemory::get());
+    if (isa<MemDescType>(b.get().getType()))
+        effects.emplace_back(MemoryEffects::Read::get(), &b, mlir::triton::gpu::SharedMemory::get());
 }
 
-bool WarpGroupDotOp::needsPartialAccumulator() {
-  const auto &a = getA();
-  const auto &d = getD();
-  auto aTensorTy = cast<TensorOrMemDesc>(a.getType());
-  auto aElTy = cast<TensorOrMemDesc>(a.getType()).getElementType();
-  bool isFP8 = aElTy.isFloat8E5M2() || aElTy.isFloat8E4M3FN() ||
-               aElTy.isFloat8E5M2FNUZ() || aElTy.isFloat8E4M3FNUZ();
-  bool accFP32 = cast<TensorOrMemDesc>(d.getType()).getElementType().isF32();
-  uint32_t maxNumImpreciseAcc = getMaxNumImpreciseAcc();
-  return isFP8 && accFP32 && maxNumImpreciseAcc <= aTensorTy.getShape()[1];
+bool WarpGroupDotOp::needsPartialAccumulator()
+{
+    const auto &a = getA();
+    const auto &d = getD();
+    auto aTensorTy = cast<TensorOrMemDesc>(a.getType());
+    auto aElTy = cast<TensorOrMemDesc>(a.getType()).getElementType();
+    bool isFP8 = aElTy.isFloat8E5M2() || aElTy.isFloat8E4M3FN() || aElTy.isFloat8E5M2FNUZ() || aElTy.isFloat8E4M3FNUZ();
+    bool accFP32 = cast<TensorOrMemDesc>(d.getType()).getElementType().isF32();
+    uint32_t maxNumImpreciseAcc = getMaxNumImpreciseAcc();
+    return isFP8 && accFP32 && maxNumImpreciseAcc <= aTensorTy.getShape()[1];
 }
 
 // -- WarpGroupDotWaitOp --
-LogicalResult WarpGroupDotWaitOp::inferReturnTypes(
-    ::mlir::MLIRContext *context, ::std::optional<::mlir::Location> location,
-    ::mlir::ValueRange operands, ::mlir::DictionaryAttr attributes,
-    ::mlir::OpaqueProperties properties, ::mlir::RegionRange regions,
-    ::llvm::SmallVectorImpl<::mlir::Type> &inferredReturnTypes) {
-  for (Value operand : operands)
-    inferredReturnTypes.push_back(operand.getType());
-  return mlir::success();
+LogicalResult WarpGroupDotWaitOp::inferReturnTypes(::mlir::MLIRContext *context,
+                                                   ::std::optional<::mlir::Location> location,
+                                                   ::mlir::ValueRange operands, ::mlir::DictionaryAttr attributes,
+                                                   ::mlir::OpaqueProperties properties, ::mlir::RegionRange regions,
+                                                   ::llvm::SmallVectorImpl<::mlir::Type> &inferredReturnTypes)
+{
+    for (Value operand : operands)
+        inferredReturnTypes.push_back(operand.getType());
+    return mlir::success();
 }
 
 ///--- Async related ops ---
-void GetAsyncTaskIdOp::build(::mlir::OpBuilder &builder,
-                             ::mlir::OperationState &state) {
-  build(builder, state, builder.getI32Type());
+void GetAsyncTaskIdOp::build(::mlir::OpBuilder &builder, ::mlir::OperationState &state)
+{
+    build(builder, state, builder.getI32Type());
 }
 
-void CreateTokenOp::build(::mlir::OpBuilder &builder,
-                          ::mlir::OperationState &state, uint32_t num) {
-  auto tokenType = TokenType::get(builder.getContext());
-  auto resultType = RankedTensorType::get({num}, tokenType);
-  build(builder, state, resultType, num);
+void CreateTokenOp::build(::mlir::OpBuilder &builder, ::mlir::OperationState &state, uint32_t num)
+{
+    auto tokenType = TokenType::get(builder.getContext());
+    auto resultType = RankedTensorType::get({num}, tokenType);
+    build(builder, state, resultType, num);
 }
 
-static LogicalResult verifyBarrierType(Operation *op, MemDescType barrierType) {
-  if (!barrierType.getElementType().isInteger(64) ||
-      barrierType.getShape() != ArrayRef<int64_t>({1}))
-    return op->emitOpError(
-        "barrier allocation must be a descriptor of 1xi64 type");
-  return success();
+static LogicalResult verifyBarrierType(Operation *op, MemDescType barrierType)
+{
+    if (!barrierType.getElementType().isInteger(64) || barrierType.getShape() != ArrayRef<int64_t>({1}))
+        return op->emitOpError("barrier allocation must be a descriptor of 1xi64 type");
+    return success();
 }
 
 // -- InitBarrierOp --
-LogicalResult InitBarrierOp::verify() {
-  if (failed(verifyBarrierType(*this, getAlloc().getType())))
-    return failure();
-  return success();
+LogicalResult InitBarrierOp::verify()
+{
+    if (failed(verifyBarrierType(*this, getAlloc().getType())))
+        return failure();
+    return success();
 }
 
-void InitBarrierOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
-        &effects) {
-  effects.emplace_back(MemoryEffects::Write::get(), &getAllocMutable(),
-                       mlir::triton::gpu::SharedMemory::get());
+void InitBarrierOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects)
+{
+    effects.emplace_back(MemoryEffects::Write::get(), &getAllocMutable(), mlir::triton::gpu::SharedMemory::get());
 }
 
 // -- InvalBarrierOp --
-LogicalResult InvalBarrierOp::verify() {
-  if (failed(verifyBarrierType(*this, getAlloc().getType())))
-    return failure();
-  return success();
+LogicalResult InvalBarrierOp::verify()
+{
+    if (failed(verifyBarrierType(*this, getAlloc().getType())))
+        return failure();
+    return success();
 }
 
-void InvalBarrierOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
-        &effects) {
-  effects.emplace_back(MemoryEffects::Write::get(), &getAllocMutable(),
-                       mlir::triton::gpu::SharedMemory::get());
+void InvalBarrierOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects)
+{
+    effects.emplace_back(MemoryEffects::Write::get(), &getAllocMutable(), mlir::triton::gpu::SharedMemory::get());
 }
 
 // -- BarrierExpectOp --
-LogicalResult BarrierExpectOp::verify() {
-  if (failed(verifyBarrierType(*this, getAlloc().getType())))
-    return failure();
-  return success();
+LogicalResult BarrierExpectOp::verify()
+{
+    if (failed(verifyBarrierType(*this, getAlloc().getType())))
+        return failure();
+    return success();
 }
 
-void BarrierExpectOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
-        &effects) {
-  effects.emplace_back(MemoryEffects::Write::get(), &getAllocMutable(),
-                       mlir::triton::gpu::SharedMemory::get());
+void BarrierExpectOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects)
+{
+    effects.emplace_back(MemoryEffects::Write::get(), &getAllocMutable(), mlir::triton::gpu::SharedMemory::get());
 }
 
 // -- WaitBarrierOp --
-LogicalResult WaitBarrierOp::verify() {
-  if (failed(verifyBarrierType(*this, getAlloc().getType())))
-    return failure();
-  return success();
+LogicalResult WaitBarrierOp::verify()
+{
+    if (failed(verifyBarrierType(*this, getAlloc().getType())))
+        return failure();
+    return success();
 }
 
-void WaitBarrierOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
-        &effects) {
-  // The wait will flip the phase therefore it reads and writes the barrier.
-  effects.emplace_back(MemoryEffects::Read::get(), &getAllocMutable(),
-                       mlir::triton::gpu::SharedMemory::get());
-  effects.emplace_back(MemoryEffects::Write::get(), &getAllocMutable(),
-                       mlir::triton::gpu::SharedMemory::get());
+void WaitBarrierOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects)
+{
+    // The wait will flip the phase therefore it reads and writes the barrier.
+    effects.emplace_back(MemoryEffects::Read::get(), &getAllocMutable(), mlir::triton::gpu::SharedMemory::get());
+    effects.emplace_back(MemoryEffects::Write::get(), &getAllocMutable(), mlir::triton::gpu::SharedMemory::get());
 }
 
 // -- AsyncTMACopyGlobalToLocalOp --
-LogicalResult AsyncTMACopyGlobalToLocalOp::verify() {
-  if (failed(verifyBarrierType(*this, getBarrier().getType())))
-    return failure();
-  if (getCoord().size() < 1 || getCoord().size() > 5)
-    return emitOpError("TMA copies must have between 1 and 5 coordinates");
-  if (!getResult().getType().getMutableMemory())
-    return emitOpError("Cannot store into immutable memory");
-  return success();
+LogicalResult AsyncTMACopyGlobalToLocalOp::verify()
+{
+    if (failed(verifyBarrierType(*this, getBarrier().getType())))
+        return failure();
+    if (getCoord().size() < 1 || getCoord().size() > 5)
+        return emitOpError("TMA copies must have between 1 and 5 coordinates");
+    if (!getResult().getType().getMutableMemory())
+        return emitOpError("Cannot store into immutable memory");
+    return success();
 }
 
 void AsyncTMACopyGlobalToLocalOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
-        &effects) {
-  effects.emplace_back(MemoryEffects::Read::get(), &getDescPtrMutable(),
-                       mlir::triton::GlobalMemory::get());
-  effects.emplace_back(MemoryEffects::Write::get(), &getBarrierMutable(),
-                       mlir::triton::gpu::SharedMemory::get());
-  effects.emplace_back(MemoryEffects::Write::get(), &getResultMutable(),
-                       mlir::triton::gpu::SharedMemory::get());
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects)
+{
+    effects.emplace_back(MemoryEffects::Read::get(), &getDescPtrMutable(), mlir::triton::GlobalMemory::get());
+    effects.emplace_back(MemoryEffects::Write::get(), &getBarrierMutable(), mlir::triton::gpu::SharedMemory::get());
+    effects.emplace_back(MemoryEffects::Write::get(), &getResultMutable(), mlir::triton::gpu::SharedMemory::get());
 }
 
 // -- AsyncTMACopyLocalToGlobalOp --
 void AsyncTMACopyLocalToGlobalOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
-        &effects) {
-  effects.emplace_back(MemoryEffects::Write::get(), &getDescPtrMutable(),
-                       mlir::triton::GlobalMemory::get());
-  effects.emplace_back(MemoryEffects::Read::get(), &getSrcMutable(),
-                       mlir::triton::gpu::SharedMemory::get());
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects)
+{
+    effects.emplace_back(MemoryEffects::Write::get(), &getDescPtrMutable(), mlir::triton::GlobalMemory::get());
+    effects.emplace_back(MemoryEffects::Read::get(), &getSrcMutable(), mlir::triton::gpu::SharedMemory::get());
 }
 
 } // namespace nvidia_gpu

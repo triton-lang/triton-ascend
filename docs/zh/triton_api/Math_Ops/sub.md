@@ -51,7 +51,7 @@ def triton_sub(in_ptr0, in_ptr1, out_ptr0, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.
         x0 = offset + (loop1 * XBLOCK_SUB) + base1
         tmp0 = tl.load(in_ptr0 + (x0), None)
         tmp1 = tl.load(in_ptr1 + (x0), None)
-        tmp2 = tmp0 - tmp1  
+        tmp2 = tmp0 - tmp1
         tl.store(out_ptr0 + (x0), tmp2, None)
 ```
 

@@ -40,9 +40,8 @@ namespace mlir::triton::gpu {
 // Returns std::nullopt if the given layout can't be converted to an LL.
 // TODO(jlebar): Remove the std::optional once all layouts are supported.
 //
-std::optional<LinearLayout>
-toLinearLayout(ArrayRef<int64_t> shape, Attribute layout,
-               std::optional<int32_t> elemBitWidth = std::nullopt);
+std::optional<LinearLayout> toLinearLayout(ArrayRef<int64_t> shape, Attribute layout,
+                                           std::optional<int32_t> elemBitWidth = std::nullopt);
 
 // Given a linear layout where the input dimensions contain a "block" dimension,
 // this method sets the "block" dimension to 0 and removes the corresponding
@@ -77,9 +76,8 @@ LinearLayout getLayoutWithinBlock(const LinearLayout &layout);
 //     offsets <- get offsets using the intermediate linear layout
 //     load registers[vecIdx * loadVec, (vecIdx + 1) * loadVec)] from shared
 //     memory
-LinearLayout chooseShemLayoutForRegToRegConversion(
-    MLIRContext *ctx, ArrayRef<unsigned> tensorShape,
-    ArrayRef<unsigned> repShape, ArrayRef<unsigned> order);
+LinearLayout chooseShemLayoutForRegToRegConversion(MLIRContext *ctx, ArrayRef<unsigned> tensorShape,
+                                                   ArrayRef<unsigned> repShape, ArrayRef<unsigned> order);
 
 // This function constructs a linear layout that maps
 // <register, lane, warp> to <shared memory offset, iteration>.
@@ -241,11 +239,9 @@ LinearLayout chooseShemLayoutForRegToRegConversion(
 // TODO(Keren): We should replace tensorTy with a LinearLayout and the element
 // bit width of the tensor in the future to support more flexible tensor
 // encodings
-std::optional<LinearLayout>
-chooseStMatrixLayout(MLIRContext *ctx, RankedTensorType tensorTy,
-                     ArrayRef<unsigned> repShape,
-                     ArrayRef<unsigned> paddedRepShape,
-                     ArrayRef<unsigned> order, int swizzleByteSize);
+std::optional<LinearLayout> chooseStMatrixLayout(MLIRContext *ctx, RankedTensorType tensorTy,
+                                                 ArrayRef<unsigned> repShape, ArrayRef<unsigned> paddedRepShape,
+                                                 ArrayRef<unsigned> order, int swizzleByteSize);
 } // namespace mlir::triton::gpu
 
 #endif // TRITON_DIALECT_TRITONGPU_IR_LINEARLAYOUTCONVERSIONS_H

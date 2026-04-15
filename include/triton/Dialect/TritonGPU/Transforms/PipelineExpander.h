@@ -25,49 +25,46 @@ namespace triton {
 
 /// Options to dictate how loops should be pipelined.
 struct PipeliningOption {
-  /// Lambda returning all the operation in the forOp, with their stage, in the
-  /// order picked for the pipelined loop.
-  using GetScheduleFnType = std::function<void(
-      scf::ForOp, std::vector<std::pair<Operation *, unsigned>> &)>;
-  GetScheduleFnType getScheduleFn = nullptr;
-  enum class PipelinerPart {
-    Prologue,
-    Kernel,
-    Epilogue,
-  };
-  /// Lambda called by the pipeliner to allow the user to annotate the IR while
-  /// it is generated.
-  /// The callback passes the operation created along with the part of the
-  /// pipeline and the iteration index. The iteration index is always 0 for the
-  /// kernel. For the prologue and epilogue, it corresponds to the iteration
-  /// peeled out of the loop in the range [0, maxStage[.
-  using AnnotationlFnType =
-      std::function<void(Operation *, PipelinerPart, unsigned)>;
-  AnnotationlFnType annotateFn = nullptr;
+    /// Lambda returning all the operation in the forOp, with their stage, in the
+    /// order picked for the pipelined loop.
+    using GetScheduleFnType = std::function<void(scf::ForOp, std::vector<std::pair<Operation *, unsigned>> &)>;
+    GetScheduleFnType getScheduleFn = nullptr;
+    enum class PipelinerPart {
+        Prologue,
+        Kernel,
+        Epilogue,
+    };
+    /// Lambda called by the pipeliner to allow the user to annotate the IR while
+    /// it is generated.
+    /// The callback passes the operation created along with the part of the
+    /// pipeline and the iteration index. The iteration index is always 0 for the
+    /// kernel. For the prologue and epilogue, it corresponds to the iteration
+    /// peeled out of the loop in the range [0, maxStage[.
+    using AnnotationlFnType = std::function<void(Operation *, PipelinerPart, unsigned)>;
+    AnnotationlFnType annotateFn = nullptr;
 
-  /// Control whether the epilogue should be peeled out of the loop or
-  /// operations should be predicated to skip the early stages in the last loop
-  /// iterations. If the epilogue is predicated; the user needs to provide a
-  /// lambda to generate the predicated version of operations.
-  bool peelEpilogue = true;
+    /// Control whether the epilogue should be peeled out of the loop or
+    /// operations should be predicated to skip the early stages in the last loop
+    /// iterations. If the epilogue is predicated; the user needs to provide a
+    /// lambda to generate the predicated version of operations.
+    bool peelEpilogue = true;
 
-  /// Control whether the transformation checks that the number of iterations is
-  /// greater or equal to the number of stages and skip the transformation if
-  /// this is not the case. If the loop is dynamic and this is set to true the
-  /// pipeliner will have to predicate operations in the the prologue/epilogue.
-  bool supportDynamicLoops = false;
+    /// Control whether the transformation checks that the number of iterations is
+    /// greater or equal to the number of stages and skip the transformation if
+    /// this is not the case. If the loop is dynamic and this is set to true the
+    /// pipeliner will have to predicate operations in the the prologue/epilogue.
+    bool supportDynamicLoops = false;
 
-  // Callback to predicate operations when the prologue or epilogue are not
-  // peeled. This takes the original operation, an i1 predicate value and the
-  // pattern rewriter. It is expected to replace the given operation with
-  // the predicated equivalent and return it, or return nullptr if the
-  // predication is impossible. In the latter case, pipelining will fail and
-  // may leave IR in a partially transformed state.
-  using PredicateOpFnType =
-      std::function<Operation *(RewriterBase &, Operation *, Value)>;
-  PredicateOpFnType predicateFn = nullptr;
+    // Callback to predicate operations when the prologue or epilogue are not
+    // peeled. This takes the original operation, an i1 predicate value and the
+    // pattern rewriter. It is expected to replace the given operation with
+    // the predicated equivalent and return it, or return nullptr if the
+    // predication is impossible. In the latter case, pipelining will fail and
+    // may leave IR in a partially transformed state.
+    using PredicateOpFnType = std::function<Operation *(RewriterBase &, Operation *, Value)>;
+    PredicateOpFnType predicateFn = nullptr;
 
-  // TODO: add option to decide if the prologue should be peeled.
+    // TODO: add option to decide if the prologue should be peeled.
 };
 
 /// Generate a pipelined version of the scf.for loop based on the schedule given
@@ -91,8 +88,7 @@ struct PipeliningOption {
 /// If `modifiedIR` is provided, it will be set to a value that indicates
 /// whether pipelining modified the IR before failing, signaling to the caller
 /// whether they can proceed with different transformations.
-FailureOr<scf::ForOp> pipelineForLoop(RewriterBase &rewriter, scf::ForOp forOp,
-                                      const PipeliningOption &options,
+FailureOr<scf::ForOp> pipelineForLoop(RewriterBase &rewriter, scf::ForOp forOp, const PipeliningOption &options,
                                       bool *modifiedIR = nullptr);
 
 } // namespace triton

@@ -80,4 +80,3 @@ def triton_max_1d(in_ptr0, out_ptr1, xnumel, XBLOCK : tl.constexpr):
 ### 2.4 特殊限制
 
 Ascend A3 对比 GPU 不支持uint16、uint32、uint64、fp64
-

@@ -21,8 +21,7 @@ void decomposeSplatOpToSharedLayoutConversion(ModuleOp module);
 /// given |module| op, but bypass the decomposition if |shortcutFn| returns
 /// true.
 using ShortcutFn = std::function<bool(RankedTensorType, RankedTensorType)>;
-void decomposeTensorCoreToDotLayoutConversion(ModuleOp module,
-                                              ShortcutFn shortcutFn);
+void decomposeTensorCoreToDotLayoutConversion(ModuleOp module, ShortcutFn shortcutFn);
 
 } // namespace triton::gpu
 

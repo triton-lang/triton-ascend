@@ -9,30 +9,33 @@ using namespace mlir::triton::gpu;
 #define GET_TYPEDEF_CLASSES
 #include "triton/Dialect/TritonGPU/IR/Types.cpp.inc"
 
-Type TokenType::parse(AsmParser &parser) {
-  if (parser.parseLess())
-    return Type();
+Type TokenType::parse(AsmParser &parser)
+{
+    if (parser.parseLess())
+        return Type();
 
-  int type = 1;
-  if (parser.parseInteger(type))
-    return Type();
+    int type = 1;
+    if (parser.parseInteger(type))
+        return Type();
 
-  if (parser.parseGreater())
-    return Type();
+    if (parser.parseGreater())
+        return Type();
 
-  return TokenType::get(parser.getContext(), type);
+    return TokenType::get(parser.getContext(), type);
 }
 
-void TokenType::print(AsmPrinter &printer) const {
-  printer << "<" << getType() << ">";
+void TokenType::print(AsmPrinter &printer) const
+{
+    printer << "<" << getType() << ">";
 }
 
 //===----------------------------------------------------------------------===//
 // Triton Dialect
 //===----------------------------------------------------------------------===//
-void ::mlir::triton::gpu::TritonGPUDialect::registerTypes() {
-  addTypes<
+void ::mlir::triton::gpu::TritonGPUDialect::registerTypes()
+{
+    addTypes<
 #define GET_TYPEDEF_LIST
 #include "triton/Dialect/TritonGPU/IR/Types.cpp.inc"
-      >();
+        >();
 }

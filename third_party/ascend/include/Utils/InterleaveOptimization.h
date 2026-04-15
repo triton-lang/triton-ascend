@@ -72,24 +72,18 @@ MemRefType expandInterleaveMemRefType(MemRefType originType);
 
 bool checkIsCaseOffsetValid(OpFoldResult originOffset);
 
-std::pair<OpFoldResult, IndexMode>
-recountReinterpretCastOffset(OpFoldResult originOffset, Builder &builder);
+std::pair<OpFoldResult, IndexMode> recountReinterpretCastOffset(OpFoldResult originOffset, Builder &builder);
 
-LogicalResult
-DeinterleaveStatusOptimization(triton::LoadOp op,
-                               triton::LoadOp::Adaptor adaptor,
-                               ConversionPatternRewriter &rewriter);
+LogicalResult DeinterleaveStatusOptimization(triton::LoadOp op, triton::LoadOp::Adaptor adaptor,
+                                             ConversionPatternRewriter &rewriter);
 
-LogicalResult DeinterleaveStatusWithMaskOptimization(
-    triton::LoadOp op, triton::LoadOp::Adaptor adaptor,
-    ConversionPatternRewriter &rewriter, MaskState &mstate,
-    Value localMem);
+LogicalResult DeinterleaveStatusWithMaskOptimization(triton::LoadOp op, triton::LoadOp::Adaptor adaptor,
+                                                     ConversionPatternRewriter &rewriter, MaskState &mstate,
+                                                     Value localMem);
 
-LogicalResult
-InterleaveStatusOptimization(SmallVector<Operation *> materializeVec);
+LogicalResult InterleaveStatusOptimization(SmallVector<Operation *> materializeVec);
 
-LogicalResult
-InterleaveStatusWithMaskOptimization(SmallVector<Operation *> materializeVec);
+LogicalResult InterleaveStatusWithMaskOptimization(SmallVector<Operation *> materializeVec);
 
 } // namespace triton
 } // namespace mlir

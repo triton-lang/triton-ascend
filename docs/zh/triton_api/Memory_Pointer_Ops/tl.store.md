@@ -102,7 +102,7 @@ def triton_ldst_indirect_08_kernel(
     tmp3 = tmp3 + 1 - 8
     out0_idx = in_idx0[:, None] * RS + tmp3[None, :]
     tl.store(out_ptr0 + out0_idx, tmp2)
-    
+
 def triton_ldst_indirect_08_func(xc, x2, xs, rs): # [8-24] ori 8 16
     nr = x2.size()[0]
     nc = xc.numel()
@@ -113,13 +113,13 @@ def triton_ldst_indirect_08_func(xc, x2, xs, rs): # [8-24] ori 8 16
     triton_ldst_indirect_08_kernel[nr // xs, 1, 1](
         y0, xc, x2, xc1, stride_in_r, XS = xs, RS = rs)
     return y0
-    
+
 def torch_ldst_indirect_08_func(xr, xc, x2):
     flatten_idx = (xr[:, None] * x2.stride()[0] + xc[None, :]).flatten()
     extracted = x2.flatten()[flatten_idx].reshape([xr.numel(), xc.numel()])
     print(extracted)
     return torch.exp(extracted)
-    
+
 DEV = "npu"
 DTYPE = torch.float32
 offset = 8
@@ -135,4 +135,3 @@ torch_ref = torch_ldst_indirect_08_func(xr, xc, x2)
 triton_cal = triton_ldst_indirect_08_func(xc, x2, blocksize, lowdimsize)
 torch.testing.assert_close(triton_cal, torch_ref)
 ```
-

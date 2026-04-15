@@ -26,12 +26,12 @@
 #include "ascend/include/Utils/Utils.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
-#include <utility>
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
+#include <utility>
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -75,9 +75,7 @@ BroadcastHoister::BroadcastHoister(triton::BroadcastOp op)
 {
     source = nullptr;
     if (findSrc(op.getSrc()).failed()) {
-        LLVM_DEBUG({
-            llvm::dbgs() << "No legal source found for broadcast op\n";
-        });
+        LLVM_DEBUG({ llvm::dbgs() << "No legal source found for broadcast op\n"; });
     }
     opToHoist = op;
     auto resultType = dyn_cast<RankedTensorType>(op.getType());
@@ -131,9 +129,7 @@ LogicalResult BroadcastHoister::parseAddptr(triton::AddPtrOp addptrOp, const Loc
 
     RankedTensorType offsetType = dyn_cast<RankedTensorType>(addptrOp.getOffset().getType());
     if (!offsetType || !offsetType.hasStaticShape()) {
-        LLVM_DEBUG({
-            llvm::dbgs() << "Offset must be a ranked tensor with static shape.\n";
-        });
+        LLVM_DEBUG({ llvm::dbgs() << "Offset must be a ranked tensor with static shape.\n"; });
         return failure();
     }
 
@@ -154,9 +150,7 @@ LogicalResult BroadcastHoister::parseAddptr(triton::AddPtrOp addptrOp, const Loc
         }
     }
     if (hoistDim == -1) {
-        LLVM_DEBUG({
-            llvm::dbgs() << "No dimension to hoist found in AddPtrOp offset.\n";
-        });
+        LLVM_DEBUG({ llvm::dbgs() << "No dimension to hoist found in AddPtrOp offset.\n"; });
     }
     newAddPtrOp->setAttr("hoist_dim", rewriter.getI64IntegerAttr(static_cast<int64_t>(hoistDim)));
     broadcastMap[addptrOp.getResult()] = newAddPtrOp.getResult();
@@ -170,9 +164,7 @@ LogicalResult BroadcastHoister::parseSplat(triton::SplatOp splatOp, const Locati
     auto src = splatOp.getSrc();
     auto dst = splatOp.getResult();
     if (!isa<triton::PointerType>(src.getType())) {
-        LLVM_DEBUG({
-            llvm::dbgs() << "SplatOp source must be of pointer type.\n";
-        });
+        LLVM_DEBUG({ llvm::dbgs() << "SplatOp source must be of pointer type.\n"; });
         return failure();
     }
 
@@ -188,9 +180,7 @@ LogicalResult BroadcastHoister::parseBroadcast(triton::BroadcastOp broadcastOp, 
 {
     // Another broadcast for ptr tensor
     // To be fixed if needed in future
-    LLVM_DEBUG({
-        llvm::dbgs() << "Now cannot handle multi broadcast for ptr tensor.\n";
-    });
+    LLVM_DEBUG({ llvm::dbgs() << "Now cannot handle multi broadcast for ptr tensor.\n"; });
     return failure();
 }
 
@@ -212,9 +202,8 @@ bool BroadcastHoister::canBroadcast()
         }
     }
     if (broadcastedDims != 1) {
-        LLVM_DEBUG({
-            llvm::dbgs() << "Now cannot handle broadcast for ptr tensor with multi broadcasted dimension.\n";
-        });
+        LLVM_DEBUG(
+            { llvm::dbgs() << "Now cannot handle broadcast for ptr tensor with multi broadcasted dimension.\n"; });
         return false;
     }
     return source != nullptr && isa<triton::PointerType>(source.getType());

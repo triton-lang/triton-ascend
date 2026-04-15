@@ -9,17 +9,17 @@ namespace proton {
 /// Incrementally build a list of contexts by shadowing the stack with
 /// user-defined scopes.
 class ShadowContextSource : public ContextSource, public ScopeInterface {
-public:
-  ShadowContextSource() = default;
+  public:
+    ShadowContextSource() = default;
 
-  std::vector<Context> getContexts() override { return contextStack; }
+    std::vector<Context> getContexts() override { return contextStack; }
 
-  void enterScope(const Scope &scope) override;
+    void enterScope(const Scope &scope) override;
 
-  void exitScope(const Scope &scope) override;
+    void exitScope(const Scope &scope) override;
 
-private:
-  std::vector<Context> contextStack;
+  private:
+    std::vector<Context> contextStack;
 };
 
 } // namespace proton

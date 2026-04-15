@@ -70,4 +70,3 @@ def expand_dims_example():
 result = expand_dims_example()
 print(result.shape)  # 输出: (2, 1, 3)
 ```
-

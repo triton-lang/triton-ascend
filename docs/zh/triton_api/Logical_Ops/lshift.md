@@ -5,8 +5,8 @@
 
 ```
 triton.language.core.__lshift__(
-	input: tl.tensor, 
-	other: tl.tensor, 
+	input: tl.tensor,
+	other: tl.tensor,
 	builder: ir.builder
 ) -> tl.tensor
 ```
@@ -68,6 +68,3 @@ def triton_lshift_3d(in_ptr0, out_ptr0, L : tl.constexpr, M : tl.constexpr, N : 
     odx = lblk_idx[:, None, None] * N * M + mblk_idx[None, :, None] * N + nblk_idx[None, None, :]
     tl.store(out_ptr0+odx, ret)
 ```
-
-
-

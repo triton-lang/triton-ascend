@@ -12,10 +12,10 @@ def DiscreteMaskAccessConversion : Pass<"discrete-mask-access-conversion", "mlir
   let summary = "Recognize and convert discrete mask memory access";
   let constructor = "triton::createDiscreteMaskAccessConversionPass()";
   let options = [
-    Option<"compileOn91095", "compile-on-910-95", 
+    Option<"compileOn91095", "compile-on-910-95",
         "bool", /*default*/"false",
         "compile on 910_95">,
-    Option<"forceSimtTemplate", "force-simt-template", 
+    Option<"forceSimtTemplate", "force-simt-template",
         "bool", /*default*/"false",
         "force to use simt template">
   ];

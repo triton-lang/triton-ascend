@@ -157,4 +157,3 @@ data = libdevice.index_select_simd(
 **测试文件：**
 
 - `ascend/examples/pytest_ut/test_index_select.py` - 2D 张量 index_select 测试（多种形状组合）
-

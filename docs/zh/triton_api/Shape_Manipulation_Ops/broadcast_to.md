@@ -67,4 +67,3 @@ def matrix_add_bias_kernel(x_ptr, bias_ptr, output_ptr, M, N, BLOCK_M: tl.conste
     output = x + bias_broadcast
     tl.store(output_ptr + offsets, output, mask=mask)
 ```
-

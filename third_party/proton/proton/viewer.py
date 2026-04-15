@@ -92,7 +92,7 @@ derivable_metrics = {
 }
 
 # FLOPS have a specific width to their metric
-default_flop_factor_dict = {f"flop/s": 1, f"gflop/s": 1e9, f"tflop/s": 1e12}
+default_flop_factor_dict = {"flop/s": 1, "gflop/s": 1e9, "tflop/s": 1e12}
 derivable_metrics.update(
     {key: FactorDict("flops", default_flop_factor_dict)
      for key in default_flop_factor_dict.keys()})

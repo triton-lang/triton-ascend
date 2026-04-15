@@ -32,10 +32,10 @@ namespace nvidia_gpu {
 
 // Used by Triton runtime
 struct ClusterInfo {
-  ClusterInfo() : clusterDimX(1), clusterDimY(1), clusterDimZ(1) {}
-  int clusterDimX;
-  int clusterDimY;
-  int clusterDimZ;
+    ClusterInfo() : clusterDimX(1), clusterDimY(1), clusterDimZ(1) {}
+    int clusterDimX;
+    int clusterDimY;
+    int clusterDimZ;
 };
 
 } // namespace nvidia_gpu
@@ -44,11 +44,9 @@ struct ClusterInfo {
 
 namespace mlir {
 
-std::unique_ptr<Pass> createTritonNvidiaGPUPlanCTAPass(
-    mlir::triton::nvidia_gpu::ClusterInfo *clusterInfo = nullptr);
+std::unique_ptr<Pass> createTritonNvidiaGPUPlanCTAPass(mlir::triton::nvidia_gpu::ClusterInfo *clusterInfo = nullptr);
 
-std::unique_ptr<Pass>
-createTritonNvidiaGPUFenceInsertionPass(int computeCapability = 90);
+std::unique_ptr<Pass> createTritonNvidiaGPUFenceInsertionPass(int computeCapability = 90);
 
 std::unique_ptr<Pass> createTritonNvidiaGPUTMALoweringPass();
 

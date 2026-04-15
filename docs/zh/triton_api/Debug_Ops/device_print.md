@@ -65,7 +65,7 @@ def add_kernel(x_ptr,  # *Pointer* to first input vector.
 
     pid = tl.program_id(axis=0)  # We use a 1D launch grid so axis is 0.
     block_start = pid * BLOCK_SIZE
-    offsets = block_start + tl.arange(0, BLOCK_SIZE) 
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
     tl.device_print("offsets:", offsets)// ❌ 无法打印，已被优化
 ```
 
@@ -90,4 +90,3 @@ def kernel(x_ptr):
     # 打印二维张量val的值
     tl.device_print("val:",val)
 ```
-

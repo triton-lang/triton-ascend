@@ -4,9 +4,9 @@
 
 ## 计算内核
 
-以下 Triton 内核实现了一个带偏置项的批量矩阵乘法（Batched Matrix Multiplication with Bias）：  
-计算公式为：  
-$$ \text{output}[b, i, j] = \sum_k \text{x}[b, i, k] \cdot \text{y}[k, j] + \text{z}[b, i, j] $$  
+以下 Triton 内核实现了一个带偏置项的批量矩阵乘法（Batched Matrix Multiplication with Bias）：
+计算公式为：
+$$ \text{output}[b, i, j] = \sum_k \text{x}[b, i, k] \cdot \text{y}[k, j] + \text{z}[b, i, j] $$
 其中：
 - `x` 的形状为 `(A, B)`
 - `y` 的形状为 `(B, C)`
@@ -108,7 +108,7 @@ def validate_cmp(dtype, y_cal, y_ref):
     """在 NPU 上比较 Triton 计算结果与 PyTorch 参考结果，按数据类型设置容差或严格相等。"""
     y_cal=y_cal.npu()
     y_ref=y_ref.npu()
-    if dtype == 'float16': 
+    if dtype == 'float16':
         torch.testing.assert_close(y_ref, y_cal,  rtol=1e-03, atol=1e-03, equal_nan=True)
     elif dtype == 'bfloat16':
         torch.testing.assert_close(y_ref.to(torch.float32), y_cal.to(torch.float32),  rtol=1e-03, atol=1e-03, equal_nan=True)
@@ -128,8 +128,8 @@ def validate_cmp(dtype, y_cal, y_ref):
 
 ```python
 # 测试用例配置：(A, B, C) 表示矩阵 x: (A,B), y: (B,C), bias/output: (A,C)
-testlist = [   
-    (16, 16, 16), 
+testlist = [
+    (16, 16, 16),
 ]
 
 # 支持的数据类型列表（当前仅 float16）
@@ -140,11 +140,11 @@ typelist = ['float16',]
 def test_dot_2_Bias(sigtype, A, B, C):
     """对 triton_dot_2_Bias 内核进行端到端功能测试。"""
     dtype = get_torch_typename(sigtype)
-    
+
     # 生成输入张量并移至 NPU
     x0 = generate_tensor(shape=(A, B), dtype=sigtype).npu()
     x1 = generate_tensor(shape=(B, C), dtype=sigtype).npu()
-    
+
     # 偏置项统一用 float32 生成（避免整数偏置导致精度问题）
     if 'int' in sigtype:
         bias = generate_tensor(shape=(A, C), dtype='int32').npu()
@@ -153,13 +153,13 @@ def test_dot_2_Bias(sigtype, A, B, C):
     else:
         bias = generate_tensor(shape=(A, C), dtype='float32').npu()
         ans = torch_dot_Bias(x0, x1, bias).to(eval(f"torch.{dtype}"))
-    
+
     # 初始化输出张量
     output = torch.zeros((A, C), dtype=dtype).npu()
-    
+
     # 启动 Triton 内核（grid=(1,1,1)，单 block 执行）
     triton_dot_2_Bias[1, 1, 1](output, x0, x1, bias, A, B, C, debug=True)
-    
+
     # 验证结果正确性
     validate_cmp(sigtype, output, ans)
     print(f"Test matmul with dtype={sigtype}, shape=({A},{B},{C}) PASSED!")

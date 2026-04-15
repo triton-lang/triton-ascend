@@ -29,12 +29,12 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
-#include <utility>
 #include <queue>
 #include <string>
+#include <utility>
 
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/Attributes.h"
@@ -49,8 +49,8 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/Transforms/DialectConversion.h"
 
-#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 
 #include "llvm/ADT/ArrayRef.h"
@@ -68,8 +68,8 @@ namespace TritonToStructured {
 using namespace mlir;
 using namespace triton;
 
-bool isMultiple(const OpFoldResult &dividend,
-                const OpFoldResult &divisor) {
+bool isMultiple(const OpFoldResult &dividend, const OpFoldResult &divisor)
+{
     auto staticDividend = getIntAttr(dividend);
     auto staticDivisor = getIntAttr(divisor);
     if (!staticDividend || !staticDivisor) {
@@ -78,57 +78,59 @@ bool isMultiple(const OpFoldResult &dividend,
     return staticDividend.value() % staticDivisor.value() == 0;
 }
 
-bool isEqual(const OpFoldResult &ofr1,
-             const OpFoldResult &ofr2) {
+bool isEqual(const OpFoldResult &ofr1, const OpFoldResult &ofr2)
+{
     auto staticOfr1 = getIntAttr(ofr1);
     auto staticOfr2 = getIntAttr(ofr2);
     return staticOfr1 == staticOfr2;
 }
 
-bool isLess(const OpFoldResult &ofr1,
-            const OpFoldResult &ofr2) {
+bool isLess(const OpFoldResult &ofr1, const OpFoldResult &ofr2)
+{
     auto staticOfr1 = getIntAttr(ofr1);
     auto staticOfr2 = getIntAttr(ofr2);
     // When sorting for permute, the value determined at runtime
     // is greater than the value determined at compile time.
     if (!staticOfr1 && !staticOfr2) {
-        return false;   // keep relative order (stable_sort)
+        return false; // keep relative order (stable_sort)
     }
     if (!staticOfr1 && staticOfr2) {
-        return false;   // dynamic > static
+        return false; // dynamic > static
     }
     if (staticOfr1 && !staticOfr2) {
-        return true;    // static < dynamic
+        return true; // static < dynamic
     }
     return staticOfr1.value() < staticOfr2.value();
 }
 
-bool isGreater(const OpFoldResult &ofr1,
-               const OpFoldResult &ofr2) {
+bool isGreater(const OpFoldResult &ofr1, const OpFoldResult &ofr2)
+{
     auto staticOfr1 = getIntAttr(ofr1);
     auto staticOfr2 = getIntAttr(ofr2);
     // When sorting for permute, the value determined at runtime
     // is greater than the value determined at compile time.
     if (!staticOfr1 && !staticOfr2) {
-        return false;   // keep relative order (stable_sort)
+        return false; // keep relative order (stable_sort)
     }
     if (!staticOfr1 && staticOfr2) {
-        return true;    // dynamic > static
+        return true; // dynamic > static
     }
     if (staticOfr1 && !staticOfr2) {
-        return false;   // static < dynamic
+        return false; // static < dynamic
     }
     return staticOfr1.value() > staticOfr2.value();
 }
 
-void StateInfo::dump() const {
-    llvm::dbgs()  << "StateInfo: \n";
-    llvm::dbgs()  << "dimIndex = " << dimIndex << "\n";
-    llvm::dbgs()  << "shape = " << shape << "\n";
-    llvm::dbgs()  << "stride = " << stride << "\n";
+void StateInfo::dump() const
+{
+    llvm::dbgs() << "StateInfo: \n";
+    llvm::dbgs() << "dimIndex = " << dimIndex << "\n";
+    llvm::dbgs() << "shape = " << shape << "\n";
+    llvm::dbgs() << "stride = " << stride << "\n";
 }
 
-void PtrState::dump() const {
+void PtrState::dump() const
+{
     llvm::dbgs() << "PtrState: \n";
     llvm::dbgs() << "source:" << source << "\n";
     llvm::dbgs() << "scalar:" << offset << "\n";
@@ -152,17 +154,19 @@ void PtrState::dump() const {
     llvm::dbgs() << "stateInfo:\n";
     llvm::dbgs() << "\n";
     for (auto info : stateInfo) {
-        llvm::dbgs()  << "-----------------------------------------\n";
+        llvm::dbgs() << "-----------------------------------------\n";
         info.dump();
-        llvm::dbgs()  << "-----------------------------------------\n";
+        llvm::dbgs() << "-----------------------------------------\n";
     }
 }
 
-bool PtrState::isEmpty() const {
+bool PtrState::isEmpty() const
+{
     return (stateInfo.empty() && !source && !offset);
 }
 
-bool PtrState::isScalar() const {
+bool PtrState::isScalar() const
+{
     bool scalar = true;
     for (auto info : stateInfo) {
         auto staticStride = getIntAttr(info.stride);
@@ -172,7 +176,8 @@ bool PtrState::isScalar() const {
     return scalar && (offset || source);
 }
 
-bool PtrState::hasSource() const {
+bool PtrState::hasSource() const
+{
     return source != nullptr;
 }
 
@@ -181,22 +186,21 @@ bool PtrState::isBlockPtr() const
     return !order.empty();
 }
 
-bool PtrState::isSameSizeAs(const PtrState& x) const {
-  if (this->sizes.size() != x.sizes.size())
-    return false;
+bool PtrState::isSameSizeAs(const PtrState &x) const
+{
+    if (this->sizes.size() != x.sizes.size())
+        return false;
 
-  for (size_t i = 0; i < this->sizes.size(); ++i) {
-    if (this->sizes[i] != x.sizes[i])
-      return false;
-  }
-  return true;
+    for (size_t i = 0; i < this->sizes.size(); ++i) {
+        if (this->sizes[i] != x.sizes[i])
+            return false;
+    }
+    return true;
 }
 
-void PtrState::updatePtrState(SmallVector<StateInfo> stateInfo,
-                              SmallVector<OpFoldResult> sizes,
-                              Value source, OpFoldResult offset,
-                              const Location loc, OpBuilder &builder,
-                              bool shouldLinearize) {
+void PtrState::updatePtrState(SmallVector<StateInfo> stateInfo, SmallVector<OpFoldResult> sizes, Value source,
+                              OpFoldResult offset, const Location loc, OpBuilder &builder, bool shouldLinearize)
+{
     this->stateInfo = stateInfo;
     this->sizes = sizes;
     this->source = source;
@@ -205,7 +209,8 @@ void PtrState::updatePtrState(SmallVector<StateInfo> stateInfo,
     this->normalizeState(loc, builder);
 }
 
-void PtrState::normalizeState(const Location loc, OpBuilder &builder) {
+void PtrState::normalizeState(const Location loc, OpBuilder &builder)
+{
     SmallVector<StateInfo> newStateInfo;
     auto zeroAttr = builder.getIndexAttr(0);
 
@@ -215,30 +220,28 @@ void PtrState::normalizeState(const Location loc, OpBuilder &builder) {
         while (it != this->stateInfo.end() && isZero(it->stride)) {
             auto newShape = it->shape;
             auto dimIndex = it->dimIndex;
-            for (++it; it != this->stateInfo.end() && isZero(it->stride)
-                   && it->dimIndex == dimIndex; ++it) {
+            for (++it; it != this->stateInfo.end() && isZero(it->stride) && it->dimIndex == dimIndex; ++it) {
                 newShape = mulOpFoldResult(newShape, it->shape, loc, builder);
             }
             newStateInfo.emplace_back(zeroAttr, newShape, dimIndex);
         }
-        if (it == this->stateInfo.end())    break;
+        if (it == this->stateInfo.end())
+            break;
         // if the info is the only one with oriSize 1 in this dimension, skip it
         // e.g., stride [0, 1] shape [1, 128] sizes [1, 128] do not delete the first info
-        if (isOne(it->shape) && !isOne(sizes[it->dimIndex]))    continue;
+        if (isOne(it->shape) && !isOne(sizes[it->dimIndex]))
+            continue;
         newStateInfo.emplace_back(*it);
     }
 
     this->stateInfo = newStateInfo;
 }
 
-LogicalResult PtrAnalysis::visitOperandAddptr(triton::AddPtrOp addptrOp,
-                                              PtrState &state,
-                                              const Location loc,
-                                              OpBuilder &builder) {
+LogicalResult PtrAnalysis::visitOperandAddptr(triton::AddPtrOp addptrOp, PtrState &state, const Location loc,
+                                              OpBuilder &builder)
+{
     if (!state.isEmpty()) {
-        LLVM_DEBUG({
-            addptrOp.emitError("PtrAnalysis: PtrState should be empty when visiting addptr");
-        });
+        LLVM_DEBUG({ addptrOp.emitError("PtrAnalysis: PtrState should be empty when visiting addptr"); });
         return failure();
     }
 
@@ -248,15 +251,12 @@ LogicalResult PtrAnalysis::visitOperandAddptr(triton::AddPtrOp addptrOp,
     });
 
     PtrState ptrState;
-    if (visitOperand(addptrOp.getPtr(), ptrState, addptrOp.getLoc(), builder)
-            .failed()) {
+    if (visitOperand(addptrOp.getPtr(), ptrState, addptrOp.getLoc(), builder).failed()) {
         return failure();
     }
 
     PtrState offsetState;
-    if (visitOperand(addptrOp.getOffset(), offsetState, addptrOp.getLoc(),
-                     builder)
-            .failed()) {
+    if (visitOperand(addptrOp.getOffset(), offsetState, addptrOp.getLoc(), builder).failed()) {
         return failure();
     }
 
@@ -271,26 +271,21 @@ LogicalResult PtrAnalysis::visitOperandAddptr(triton::AddPtrOp addptrOp,
     });
 
     if (!ptrState.source) {
-        LLVM_DEBUG({
-            addptrOp.emitError("ptr field should provide source / base pointer");
-        });
+        LLVM_DEBUG({ addptrOp.emitError("ptr field should provide source / base pointer"); });
         return failure();
     }
     return state.addState(ptrState, offsetState, addptrOp, builder);
 }
 
-LogicalResult PtrAnalysis::visitOperandMakeTensorPtr(triton::MakeTensorPtrOp makeTPtrOp,
-                                                     PtrState &state,
-                                                     const Location loc,
-                                                     OpBuilder &builder)
+LogicalResult PtrAnalysis::visitOperandMakeTensorPtr(triton::MakeTensorPtrOp makeTPtrOp, PtrState &state,
+                                                     const Location loc, OpBuilder &builder)
 {
     if (!state.isEmpty()) {
         makeTPtrOp.emitError("PtrAnalysis: PtrState should be empty when visiting make_tensor_ptr");
         return failure();
     }
     if (makeTPtrOp.getOrder().empty()) {
-        LLVM_DEBUG(makeTPtrOp->emitRemark(
-            "PtrAnalysis: expect tt.make_tensor_ptr to have order field set"));
+        LLVM_DEBUG(makeTPtrOp->emitRemark("PtrAnalysis: expect tt.make_tensor_ptr to have order field set"));
         return failure();
     }
 
@@ -314,13 +309,13 @@ LogicalResult PtrAnalysis::visitOperandMakeTensorPtr(triton::MakeTensorPtrOp mak
     }
     state.stateInfo = newStateInfo;
 
-    assert(state.isBlockPtr() &&
-            "tt.make_tensor_ptr pointer state should describe a block pointer");
+    assert(state.isBlockPtr() && "tt.make_tensor_ptr pointer state should describe a block pointer");
 
     return success();
 }
 
-bool PtrAnalysis::operandIsScalar(Value operand) {
+bool PtrAnalysis::operandIsScalar(Value operand)
+{
     auto tensorType = dyn_cast<mlir::RankedTensorType>(operand.getType());
     auto elementType = tensorType ? tensorType.getElementType() : operand.getType();
     bool isScalar = true;
@@ -329,13 +324,11 @@ bool PtrAnalysis::operandIsScalar(Value operand) {
             isScalar = tensorType.getDimSize(i) == 1;
         }
     }
-    return isScalar &&
-           (isa<IntegerType>(elementType) ||
-           isa<IndexType>(elementType));
+    return isScalar && (isa<IntegerType>(elementType) || isa<IndexType>(elementType));
 }
 
-LogicalResult PtrAnalysis::initStateByScalar(Value operand, PtrState &state,
-                                             const Location loc, OpBuilder &builder) {
+LogicalResult PtrAnalysis::initStateByScalar(Value operand, PtrState &state, const Location loc, OpBuilder &builder)
+{
     OpFoldResult newOffset;
     SmallVector<OpFoldResult> newSizes;
     SmallVector<StateInfo> newStateInfo;
@@ -344,8 +337,7 @@ LogicalResult PtrAnalysis::initStateByScalar(Value operand, PtrState &state,
         if (!isa<BlockArgument>(operand) && operand.getDefiningOp()) {
             builder.setInsertionPointAfter(operand.getDefiningOp());
         }
-        auto castOp = builder.create<arith::IndexCastOp>(
-            loc, builder.getIndexType(), operand);
+        auto castOp = builder.create<arith::IndexCastOp>(loc, builder.getIndexType(), operand);
         newOffset = castOp.getResult();
     } else if (isa<IndexType>(operand.getType())) {
         newOffset = operand;
@@ -367,42 +359,36 @@ LogicalResult PtrAnalysis::initStateByScalar(Value operand, PtrState &state,
     return success();
 }
 
-LogicalResult PtrAnalysis::initStateByPointer(Value operand, PtrState &state,
-                                              const Location loc, OpBuilder &builder) {
+LogicalResult PtrAnalysis::initStateByPointer(Value operand, PtrState &state, const Location loc, OpBuilder &builder)
+{
     Value newSource;
     SmallVector<OpFoldResult> newSizes;
     SmallVector<StateInfo> newStateInfo;
 
     if (auto op = operand.getDefiningOp()) {
-      if (auto addPtrOp = dyn_cast<triton::AddPtrOp>(op)) {
-        return visitOperandAddptr(cast<triton::AddPtrOp>(op), state, loc,
-                                  builder);
-      } else if (auto bitCastOp = dyn_cast<triton::BitcastOp>(op)) {
-        newSource = operand;
-      } else if (auto makeTensorOp = dyn_cast<triton::MakeTensorPtrOp>(op)) {
-        LLVM_DEBUG({
-            op->emitWarning("Unexpected operand defining operation tts.make_tptr.");
-        });
-        return failure();
-      } else if (auto intToPtrOp = dyn_cast<triton::IntToPtrOp>(op)) {
-        newSource = operand;
-      } else {
-        LLVM_DEBUG({
-            op->emitWarning("PtrAnalysis: Unexpected operand.");
-        });
-        return failure();
-      }
+        if (auto addPtrOp = dyn_cast<triton::AddPtrOp>(op)) {
+            return visitOperandAddptr(cast<triton::AddPtrOp>(op), state, loc, builder);
+        } else if (auto bitCastOp = dyn_cast<triton::BitcastOp>(op)) {
+            newSource = operand;
+        } else if (auto makeTensorOp = dyn_cast<triton::MakeTensorPtrOp>(op)) {
+            LLVM_DEBUG({ op->emitWarning("Unexpected operand defining operation tts.make_tptr."); });
+            return failure();
+        } else if (auto intToPtrOp = dyn_cast<triton::IntToPtrOp>(op)) {
+            newSource = operand;
+        } else {
+            LLVM_DEBUG({ op->emitWarning("PtrAnalysis: Unexpected operand."); });
+            return failure();
+        }
     } else {
-      newSource = operand;
+        newSource = operand;
     }
     auto newOffset = builder.getIndexAttr(0);
     state.updatePtrState(newStateInfo, newSizes, newSource, newOffset, loc, builder);
     return success();
 }
 
-LogicalResult PtrState::mulState(const PtrState &lhsState,
-                                 const PtrState &rhsState, Operation *op,
-                                 OpBuilder &builder) {
+LogicalResult PtrState::mulState(const PtrState &lhsState, const PtrState &rhsState, Operation *op, OpBuilder &builder)
+{
     auto loc = op->getLoc();
 
     LLVM_DEBUG({
@@ -411,25 +397,20 @@ LogicalResult PtrState::mulState(const PtrState &lhsState,
     });
 
     if (!isEmpty()) {
-        LLVM_DEBUG({
-            op->emitError("PtrAnalysis: PtrState should be empty when multiplying");
-        });
+        LLVM_DEBUG({ op->emitError("PtrAnalysis: PtrState should be empty when multiplying"); });
         return failure();
     }
 
     // neither lhs nor rhs should have source, since multiplying base pointer
     // does not make sense
     if (lhsState.hasSource() || rhsState.hasSource()) {
-        LLVM_DEBUG({
-            op->emitError("PtrAnalysis: do not support base inters in multiplying");
-        });
+        LLVM_DEBUG({ op->emitError("PtrAnalysis: do not support base inters in multiplying"); });
         return failure();
     } else if (!lhsState.isScalar() && !rhsState.isScalar()) {
         // do not support both tensors are effectively non-scalar
         LLVM_DEBUG({
-            op->emitError(
-                "PtrAnalysis: only support multiplying pointer states when one of "
-                "them represent a scalar");
+            op->emitError("PtrAnalysis: only support multiplying pointer states when one of "
+                          "them represent a scalar");
         });
         return failure();
     }
@@ -442,14 +423,13 @@ LogicalResult PtrState::mulState(const PtrState &lhsState,
     }
 
     SmallVector<StateInfo> newStateInfo;
-    for(auto info : lhs->stateInfo) {
+    for (auto info : lhs->stateInfo) {
         OpFoldResult newStride = mulOpFoldResult(info.stride, rhs->offset, loc, builder);
         newStateInfo.emplace_back(newStride, info.shape, info.dimIndex);
     }
 
     auto newOffset = mulOpFoldResult(lhsState.offset, rhsState.offset, loc, builder);
-    updatePtrState(newStateInfo, lhs->sizes, lhs->source,
-                   newOffset, loc, builder, lhs->shouldLinearize);
+    updatePtrState(newStateInfo, lhs->sizes, lhs->source, newOffset, loc, builder, lhs->shouldLinearize);
 
     LLVM_DEBUG({
         llvm::dbgs() << "After mulState: \n";
@@ -460,43 +440,36 @@ LogicalResult PtrState::mulState(const PtrState &lhsState,
     return success();
 }
 
-LogicalResult PtrState::subState(const PtrState &lhsState,
-                                 const PtrState &rhsState, Operation *op,
-                                 OpBuilder &builder) {
+LogicalResult PtrState::subState(const PtrState &lhsState, const PtrState &rhsState, Operation *op, OpBuilder &builder)
+{
     auto loc = op->getLoc();
     if (!isEmpty()) {
-        LLVM_DEBUG({
-            op->emitError("PtrAnalysis: PtrState should be empty when subtracting");
-        });
+        LLVM_DEBUG({ op->emitError("PtrAnalysis: PtrState should be empty when subtracting"); });
         return failure();
     }
 
     if (lhsState.hasSource() && rhsState.hasSource()) {
-        LLVM_DEBUG({
-            op->emitError("PtrAnalysis: do not support both sides have base pointers in sub");
-        });
+        LLVM_DEBUG({ op->emitError("PtrAnalysis: do not support both sides have base pointers in sub"); });
         return failure();
     }
 
     if (!rhsState.isScalar()) {
         LLVM_DEBUG({
-            op->emitError(
-                "PtrAnalysis: only support sub when one of "
-                "them represents a scalar");
+            op->emitError("PtrAnalysis: only support sub when one of "
+                          "them represents a scalar");
         });
         return failure();
     }
 
     auto newOffset = subOpFoldResult(lhsState.offset, rhsState.offset, loc, builder);
-    updatePtrState(lhsState.stateInfo, lhsState.sizes, lhsState.source,
-                   newOffset, loc, builder, lhsState.shouldLinearize);
+    updatePtrState(lhsState.stateInfo, lhsState.sizes, lhsState.source, newOffset, loc, builder,
+                   lhsState.shouldLinearize);
 
     return success();
 }
 
-LogicalResult PtrState::addState(PtrState &lhsState,
-                                 PtrState &rhsState, Operation *op,
-                                 OpBuilder &builder) {
+LogicalResult PtrState::addState(PtrState &lhsState, PtrState &rhsState, Operation *op, OpBuilder &builder)
+{
     auto loc = op->getLoc();
 
     LLVM_DEBUG({
@@ -505,15 +478,11 @@ LogicalResult PtrState::addState(PtrState &lhsState,
     });
 
     if (!isEmpty()) {
-        LLVM_DEBUG({
-            op->emitError("PtrAnalysis: PtrState should be empty when adding");
-        });
+        LLVM_DEBUG({ op->emitError("PtrAnalysis: PtrState should be empty when adding"); });
         return failure();
     }
     if (!lhsState.isSameSizeAs(rhsState)) {
-        LLVM_DEBUG({
-            op->emitError("PtrAnalysis: The original size of the addition should be the same");
-        });
+        LLVM_DEBUG({ op->emitError("PtrAnalysis: The original size of the addition should be the same"); });
         return failure();
     }
 
@@ -526,8 +495,7 @@ LogicalResult PtrState::addState(PtrState &lhsState,
             newStateInfo.emplace_back(newInfo);
             continue;
         }
-        if (!isMultiple(lIt->shape, rIt->shape) &&
-            !isMultiple(rIt->shape, lIt->shape)) {
+        if (!isMultiple(lIt->shape, rIt->shape) && !isMultiple(rIt->shape, lIt->shape)) {
             LLVM_DEBUG({
                 llvm::dbgs() << "LHS PtrState: \n";
                 lhsState.dump();
@@ -535,15 +503,14 @@ LogicalResult PtrState::addState(PtrState &lhsState,
                 rhsState.dump();
                 llvm::dbgs() << "----------------------------------------------\n";
             });
-            LLVM_DEBUG({
-                op->emitError("PtrAnalysis: the add operation have incompatible sizes");
-            });
+            LLVM_DEBUG({ op->emitError("PtrAnalysis: the add operation have incompatible sizes"); });
             return failure();
         }
 
         auto newShape = minOpFoldResult(lIt->shape, rIt->shape, loc, builder);
         if ((isLess(newShape, lIt->shape) && !isZero(lIt->stride) ||
-            isLess(newShape, rIt->shape) && !isZero(rIt->stride))) {
+             isLess(newShape, rIt->shape) && !isZero(rIt->stride)))
+        {
             LLVM_DEBUG({
                 llvm::dbgs() << "LHS PtrState: \n";
                 lhsState.dump();
@@ -553,7 +520,7 @@ LogicalResult PtrState::addState(PtrState &lhsState,
             });
             LLVM_DEBUG({
                 op->emitError("PtrAnalysis: the add operation have incompatible sizes."
-                            "Valid dimensions are split.");
+                              "Valid dimensions are split.");
             });
             return failure();
         }
@@ -561,10 +528,14 @@ LogicalResult PtrState::addState(PtrState &lhsState,
         auto newStride = addOpFoldResult(lIt->stride, rIt->stride, loc, builder);
         newStateInfo.emplace_back(newStride, newShape, lIt->dimIndex);
 
-        if (isEqual(lIt->shape, newShape))  ++lIt;
-        else    lIt->shape = divOpFoldResult(lIt->shape, newShape, loc, builder);
-        if (isEqual(rIt->shape, newShape))  ++rIt;
-        else    rIt->shape = divOpFoldResult(rIt->shape, newShape, loc, builder);
+        if (isEqual(lIt->shape, newShape))
+            ++lIt;
+        else
+            lIt->shape = divOpFoldResult(lIt->shape, newShape, loc, builder);
+        if (isEqual(rIt->shape, newShape))
+            ++rIt;
+        else
+            rIt->shape = divOpFoldResult(rIt->shape, newShape, loc, builder);
     }
 
     while (rIt != rhsState.stateInfo.end()) {
@@ -579,8 +550,7 @@ LogicalResult PtrState::addState(PtrState &lhsState,
     auto newShouldLinearize = lhsState.shouldLinearize || rhsState.shouldLinearize;
     auto newSizes = lhsState.sizes;
 
-    updatePtrState(newStateInfo, newSizes, newSource,
-        newOffset, loc, builder, newShouldLinearize);
+    updatePtrState(newStateInfo, newSizes, newSource, newOffset, loc, builder, newShouldLinearize);
 
     LLVM_DEBUG({
         llvm::dbgs() << "After addState: \n";
@@ -591,7 +561,8 @@ LogicalResult PtrState::addState(PtrState &lhsState,
     return success();
 }
 
-triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
+triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc)
+{
     SmallVector<int64_t> tensorSizes;
     SmallVector<OpFoldResult> tensorStrides;
 
@@ -600,7 +571,8 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
 
     for (auto id : permuteIds) {
         auto info = stateInfo[id];
-        if (isZero(info.stride))    continue;
+        if (isZero(info.stride))
+            continue;
         tensorStrides.emplace_back(info.stride);
         tensorSizes.emplace_back(getIntAttr(info.shape).value());
     }
@@ -611,29 +583,24 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
         if (offsetValue.getType().isIndex()) {
             offsetValue = builder.create<arith::IndexCastOp>(loc, builder.getI32Type(), offsetValue);
         }
-        auto addptrOp = builder.create<triton::AddPtrOp>(
-            loc, source.getType(), source, offsetValue);
+        auto addptrOp = builder.create<triton::AddPtrOp>(loc, source.getType(), source, offsetValue);
         return addptrOp;
     }
 
     SmallVector<Value> cachedRange;
     auto ptrType = cast<triton::PointerType>(source.getType());
     auto ptrTensorType = RankedTensorType::get({tensorSizes}, ptrType);
-    auto broadCastType = RankedTensorType::get({tensorSizes},  builder.getI32Type());
+    auto broadCastType = RankedTensorType::get({tensorSizes}, builder.getI32Type());
 
     if (tensorSizes.size() != tensorStrides.size()) {
-        LLVM_DEBUG({
-            InFlightDiagnostic diag =
-            emitError(loc) << "PtrAnalysis: inconsistent tensor sizes and strides";
-        });
+        LLVM_DEBUG(
+            { InFlightDiagnostic diag = emitError(loc) << "PtrAnalysis: inconsistent tensor sizes and strides"; });
         return nullptr;
     }
     for (size_t i = 0; i < tensorSizes.size(); ++i) {
         // make range
-        auto indexI32RowType =
-            RankedTensorType::get({tensorSizes[i]}, builder.getI32Type());
-        Value makeRangeOp =
-            builder.create<triton::MakeRangeOp>(loc, indexI32RowType, 0, tensorSizes[i]);
+        auto indexI32RowType = RankedTensorType::get({tensorSizes[i]}, builder.getI32Type());
+        Value makeRangeOp = builder.create<triton::MakeRangeOp>(loc, indexI32RowType, 0, tensorSizes[i]);
 
         // multiply stride
         Value strideValue = materializeValue(builder, loc, tensorStrides[i]);
@@ -646,7 +613,8 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
         // reshape
         Value expandedValue = rangeAfterMul;
         for (size_t j = 0; j < tensorSizes.size(); ++j) {
-            if (j == i) continue;
+            if (j == i)
+                continue;
             expandedValue = builder.create<triton::ExpandDimsOp>(loc, expandedValue, j);
         }
 
@@ -713,20 +681,12 @@ triton::MakeTensorPtrOp PtrState::createMakeTensorPtrOp(OpBuilder &builder, Loca
         newOrder.push_back(static_cast<int32_t>(i));
     }
 
-    return builder.create<triton::MakeTensorPtrOp>(
-        loc,
-        source,
-        ValueRange(newShape),
-        ValueRange(newStrides),
-        ValueRange(newOffsets),
-        newBlkShape,
-        newOrder
-    );
+    return builder.create<triton::MakeTensorPtrOp>(loc, source, ValueRange(newShape), ValueRange(newStrides),
+                                                   ValueRange(newOffsets), newBlkShape, newOrder);
 }
 
-LogicalResult PtrAnalysis::visitOperandMul(arith::MulIOp mulOp, PtrState &state,
-                                           const Location loc,
-                                           OpBuilder &builder) {
+LogicalResult PtrAnalysis::visitOperandMul(arith::MulIOp mulOp, PtrState &state, const Location loc, OpBuilder &builder)
+{
     LLVM_DEBUG({
         llvm::dbgs() << "----------------------------------------------\n";
         llvm::dbgs() << "Visit Mul operation: " << mulOp << "\n";
@@ -745,29 +705,26 @@ LogicalResult PtrAnalysis::visitOperandMul(arith::MulIOp mulOp, PtrState &state,
     return state.mulState(lhsState, rhsState, mulOp, builder);
 }
 
-LogicalResult PtrAnalysis::visitOperandSub(arith::SubIOp subOp, PtrState &state,
-                                           const Location loc,
-                                           OpBuilder &builder) {
-  PtrState lhsState;
-  if (visitOperand(subOp.getLhs(), lhsState, loc, builder).failed()) {
-    return failure();
-  }
+LogicalResult PtrAnalysis::visitOperandSub(arith::SubIOp subOp, PtrState &state, const Location loc, OpBuilder &builder)
+{
+    PtrState lhsState;
+    if (visitOperand(subOp.getLhs(), lhsState, loc, builder).failed()) {
+        return failure();
+    }
 
-  PtrState rhsState;
-  if (visitOperand(subOp.getRhs(), rhsState, loc, builder).failed()) {
-    return failure();
-  }
+    PtrState rhsState;
+    if (visitOperand(subOp.getRhs(), rhsState, loc, builder).failed()) {
+        return failure();
+    }
 
-  return state.subState(lhsState, rhsState, subOp, builder);
+    return state.subState(lhsState, rhsState, subOp, builder);
 }
 
-LogicalResult PtrAnalysis::visitOperandMakeRange(triton::MakeRangeOp rangeOp,
-                                                 PtrState &state, Location loc,
-                                                 OpBuilder &builder) {
+LogicalResult PtrAnalysis::visitOperandMakeRange(triton::MakeRangeOp rangeOp, PtrState &state, Location loc,
+                                                 OpBuilder &builder)
+{
     if (!state.isEmpty()) {
-        LLVM_DEBUG({
-            rangeOp.emitError("PtrAnalysis: PtrState should be empty when visiting make_range");
-        });
+        LLVM_DEBUG({ rangeOp.emitError("PtrAnalysis: PtrState should be empty when visiting make_range"); });
         return failure();
     }
 
@@ -777,9 +734,7 @@ LogicalResult PtrAnalysis::visitOperandMakeRange(triton::MakeRangeOp rangeOp,
     auto end = rangeOp.getEnd();
     auto stride = (end - start + shape[0] - 1) / shape[0];
     if (stride != 1) {
-        LLVM_DEBUG({
-            rangeOp.emitError("PtrAnalysis: make_range op with stride != 1 is not supported");
-        });
+        LLVM_DEBUG({ rangeOp.emitError("PtrAnalysis: make_range op with stride != 1 is not supported"); });
         return failure();
     }
 
@@ -796,32 +751,25 @@ LogicalResult PtrAnalysis::visitOperandMakeRange(triton::MakeRangeOp rangeOp,
     return success();
 }
 
-LogicalResult
-PtrAnalysis::visitOperandBroadcast(triton::BroadcastOp broadcastOp,
-                                   PtrState &state, const Location loc,
-                                   OpBuilder &builder) {
+LogicalResult PtrAnalysis::visitOperandBroadcast(triton::BroadcastOp broadcastOp, PtrState &state, const Location loc,
+                                                 OpBuilder &builder)
+{
     if (!state.isEmpty()) {
-        LLVM_DEBUG({
-            broadcastOp.emitError("PtrAnalysis: PtrState should be empty when visiting broadcast");
-        });
+        LLVM_DEBUG({ broadcastOp.emitError("PtrAnalysis: PtrState should be empty when visiting broadcast"); });
         return failure();
     }
 
     auto src = broadcastOp.getSrc();
     auto dst = broadcastOp.getResult();
     if (!isa<ShapedType>(dst.getType())) {
-        LLVM_DEBUG({
-            broadcastOp.emitRemark("PtrAnalysis: broadcast dst should be a shaped type");
-        });
+        LLVM_DEBUG({ broadcastOp.emitRemark("PtrAnalysis: broadcast dst should be a shaped type"); });
         return failure();
     }
 
     auto srcShape = cast<ShapedType>(src.getType()).getShape();
     auto dstShape = cast<ShapedType>(dst.getType()).getShape();
     if (srcShape.size() != dstShape.size()) {
-        LLVM_DEBUG({
-            broadcastOp.emitRemark("PtrAnalysis: broadcast src and dst should have the same rank");
-        });
+        LLVM_DEBUG({ broadcastOp.emitRemark("PtrAnalysis: broadcast src and dst should have the same rank"); });
         return failure();
     }
     if (visitOperand(src, state, loc, builder).failed()) {
@@ -840,9 +788,7 @@ PtrAnalysis::visitOperandBroadcast(triton::BroadcastOp broadcastOp,
     SmallVector<StateInfo> newStateInfo(state.stateInfo);
     SmallVector<OpFoldResult> newSizes;
     if (srcShape.size() != dstShape.size()) {
-        LLVM_DEBUG({
-            broadcastOp.emitRemark("PtrAnalysis: unexpected state info size in broadcast");
-        });
+        LLVM_DEBUG({ broadcastOp.emitRemark("PtrAnalysis: unexpected state info size in broadcast"); });
         return failure();
     }
     for (size_t i = 0; i < dstShape.size(); ++i) {
@@ -851,29 +797,24 @@ PtrAnalysis::visitOperandBroadcast(triton::BroadcastOp broadcastOp,
             continue;
         } else if (srcShape[i] < dstShape[i] && srcShape[i] == 1) {
             for (auto &info : newStateInfo) {
-                if (info.dimIndex != i)  continue;
+                if (info.dimIndex != i)
+                    continue;
                 info.shape = builder.getIndexAttr(dstShape[i]);
             }
         } else {
-            LLVM_DEBUG({
-                broadcastOp.emitRemark("unexpected dimensions used in broadcast");
-            });
+            LLVM_DEBUG({ broadcastOp.emitRemark("unexpected dimensions used in broadcast"); });
             return failure();
         }
     }
-    state.updatePtrState(newStateInfo, newSizes, state.source,
-                         state.offset, loc, builder, state.shouldLinearize);
+    state.updatePtrState(newStateInfo, newSizes, state.source, state.offset, loc, builder, state.shouldLinearize);
     return success();
 }
 
-LogicalResult PtrAnalysis::visitOperandSplat(triton::SplatOp splatOp,
-                                             PtrState &state,
-                                             const Location loc,
-                                             OpBuilder &builder) {
+LogicalResult PtrAnalysis::visitOperandSplat(triton::SplatOp splatOp, PtrState &state, const Location loc,
+                                             OpBuilder &builder)
+{
     if (!state.isEmpty()) {
-        LLVM_DEBUG({
-            splatOp.emitError("PtrAnalysis: PtrState should be empty when visiting splat");
-        });
+        LLVM_DEBUG({ splatOp.emitError("PtrAnalysis: PtrState should be empty when visiting splat"); });
         return failure();
     }
 
@@ -897,9 +838,7 @@ LogicalResult PtrAnalysis::visitOperandSplat(triton::SplatOp splatOp,
     });
 
     if (!state.isScalar()) {
-        LLVM_DEBUG({
-            splatOp.emitRemark("PtrAnalysis: splat source should be scalar");
-        });
+        LLVM_DEBUG({ splatOp.emitRemark("PtrAnalysis: splat source should be scalar"); });
         return failure();
     }
 
@@ -913,13 +852,10 @@ LogicalResult PtrAnalysis::visitOperandSplat(triton::SplatOp splatOp,
             newStateInfo.emplace_back(zeroAttr, currentSize, i);
         }
     } else {
-        LLVM_DEBUG({
-            splatOp.emitRemark("PtrAnalysis: unsupported splat pattern");
-        });
+        LLVM_DEBUG({ splatOp.emitRemark("PtrAnalysis: unsupported splat pattern"); });
         return failure();
     }
-    state.updatePtrState(newStateInfo, newSizes, state.source,
-                         state.offset, loc, builder, state.shouldLinearize);
+    state.updatePtrState(newStateInfo, newSizes, state.source, state.offset, loc, builder, state.shouldLinearize);
 
     LLVM_DEBUG({
         llvm::dbgs() << "After SPLAT ptrState: \n";
@@ -929,14 +865,11 @@ LogicalResult PtrAnalysis::visitOperandSplat(triton::SplatOp splatOp,
     return success();
 }
 
-LogicalResult
-PtrAnalysis::visitOperandExpandDims(triton::ExpandDimsOp expandDimsOp,
-                                    PtrState &state, const Location loc,
-                                    OpBuilder &builder) {
+LogicalResult PtrAnalysis::visitOperandExpandDims(triton::ExpandDimsOp expandDimsOp, PtrState &state,
+                                                  const Location loc, OpBuilder &builder)
+{
     if (!state.isEmpty()) {
-        LLVM_DEBUG({
-            expandDimsOp.emitError("PtrAnalysis: PtrState should be empty when visiting expand_dims");
-        });
+        LLVM_DEBUG({ expandDimsOp.emitError("PtrAnalysis: PtrState should be empty when visiting expand_dims"); });
         return failure();
     }
 
@@ -944,16 +877,17 @@ PtrAnalysis::visitOperandExpandDims(triton::ExpandDimsOp expandDimsOp,
         return failure();
     }
 
-    auto dstShape =
-        cast<ShapedType>(expandDimsOp.getResult().getType()).getShape();
+    auto dstShape = cast<ShapedType>(expandDimsOp.getResult().getType()).getShape();
     auto axis = expandDimsOp.getAxis();
 
     SmallVector<StateInfo> newStateInfo(state.stateInfo);
     SmallVector<OpFoldResult> newSizes(state.sizes);
     size_t insertPos = 0;
     for (auto &info : newStateInfo) {
-        if (info.dimIndex >= axis)   ++info.dimIndex;
-        if (info.dimIndex < axis)    ++insertPos;
+        if (info.dimIndex >= axis)
+            ++info.dimIndex;
+        if (info.dimIndex < axis)
+            ++insertPos;
     }
     auto zeroAttr = builder.getIndexAttr(0);
     auto oneAttr = builder.getIndexAttr(1);
@@ -962,28 +896,22 @@ PtrAnalysis::visitOperandExpandDims(triton::ExpandDimsOp expandDimsOp,
     newStateInfo.insert(newStateInfo.begin() + insertPos, insertInfo);
     newSizes.insert(newSizes.begin() + axis, oneAttr);
 
-    state.updatePtrState(newStateInfo, newSizes, state.source,
-                         state.offset, loc, builder, state.shouldLinearize);
+    state.updatePtrState(newStateInfo, newSizes, state.source, state.offset, loc, builder, state.shouldLinearize);
     return success();
 }
 
-LogicalResult PtrAnalysis::visitOperandConstSplat(arith::ConstantOp op,
-                                                  PtrState &state,
-                                                  const Location loc,
-                                                  OpBuilder &builder) {
+LogicalResult PtrAnalysis::visitOperandConstSplat(arith::ConstantOp op, PtrState &state, const Location loc,
+                                                  OpBuilder &builder)
+{
     if (!state.isEmpty()) {
-        LLVM_DEBUG({
-            op->emitError("PtrAnalysis: PtrState should be empty when visiting const_splat");
-        });
+        LLVM_DEBUG({ op->emitError("PtrAnalysis: PtrState should be empty when visiting const_splat"); });
         return failure();
     }
 
     auto attr = cast<DenseElementsAttr>(op.getValue());
     auto elementType = attr.getElementType();
     if (!attr.isSplat() || !isa<IntegerType>(elementType)) {
-        LLVM_DEBUG({
-            op->emitError("PtrAnalysis: only support splat integer constant");
-        });
+        LLVM_DEBUG({ op->emitError("PtrAnalysis: only support splat integer constant"); });
         return failure();
     }
 
@@ -1006,31 +934,26 @@ LogicalResult PtrAnalysis::visitOperandConstSplat(arith::ConstantOp op,
     return success();
 }
 
-LogicalResult PtrAnalysis::visitOperandExtSI(arith::ExtSIOp extOp,
-                                             PtrState &state,
-                                             const Location loc,
-                                             OpBuilder &builder) {
+LogicalResult PtrAnalysis::visitOperandExtSI(arith::ExtSIOp extOp, PtrState &state, const Location loc,
+                                             OpBuilder &builder)
+{
     if (!state.isEmpty()) {
-        LLVM_DEBUG({
-            extOp.emitError("PtrAnalysis: PtrState should be empty when visiting extsi");
-        });
+        LLVM_DEBUG({ extOp.emitError("PtrAnalysis: PtrState should be empty when visiting extsi"); });
         return failure();
     }
 
-    if(visitOperand(extOp.getIn(), state, loc, builder).failed()) {
+    if (visitOperand(extOp.getIn(), state, loc, builder).failed()) {
         return failure();
     }
 
     return success();
 }
 
-LogicalResult PtrAnalysis::visitOperandRem(arith::RemSIOp remOp,
-                                           PtrState &state, const Location loc,
-                                           OpBuilder &builder) {
+LogicalResult PtrAnalysis::visitOperandRem(arith::RemSIOp remOp, PtrState &state, const Location loc,
+                                           OpBuilder &builder)
+{
     if (!state.isEmpty()) {
-        LLVM_DEBUG({
-            remOp.emitError("PtrAnalysis: PtrState should be empty when visiting remsi");
-        });
+        LLVM_DEBUG({ remOp.emitError("PtrAnalysis: PtrState should be empty when visiting remsi"); });
         return failure();
     }
     LLVM_DEBUG({
@@ -1046,7 +969,7 @@ LogicalResult PtrAnalysis::visitOperandRem(arith::RemSIOp remOp,
     if (!rhsState.isScalar() || rhsState.hasSource()) {
         LLVM_DEBUG({
             remOp.emitRemark("PtrAnalysis: only support cases when rhs of remainder "
-                            "contains scalar");
+                             "contains scalar");
         });
         return failure();
     }
@@ -1062,38 +985,25 @@ LogicalResult PtrAnalysis::visitOperandRem(arith::RemSIOp remOp,
     auto divisorAttr = rhsState.offset;
 
     auto staticOffset = getIntAttr(state.offset);
-    if ((!staticOffset.has_value() ||
-         !isMultiple(state.offset, divisorAttr)) &&
-         !hasAnnotation) {
-        LLVM_DEBUG({
-            remOp.emitRemark("PtrAnalysis: dynamic offset before REMSI, adding annotation");
-        });
+    if ((!staticOffset.has_value() || !isMultiple(state.offset, divisorAttr)) && !hasAnnotation) {
+        LLVM_DEBUG({ remOp.emitRemark("PtrAnalysis: dynamic offset before REMSI, adding annotation"); });
         return failure();
     }
 
     if (!getIntAttr(divisorAttr).has_value()) {
-        LLVM_DEBUG({
-            remOp.emitError(
-                "PtrAnalysis: do not support dynamix divisor in REMSI.");
-        });
+        LLVM_DEBUG({ remOp.emitError("PtrAnalysis: do not support dynamix divisor in REMSI."); });
         return failure();
     }
 
     SmallVector<StateInfo> newStateInfo;
     for (auto info : state.stateInfo) {
         if (!getIntAttr(info.stride).has_value()) {
-            LLVM_DEBUG({
-                remOp.emitError(
-                    "PtrAnalysis: do not support dynamix stride before REMSI.");
-            });
+            LLVM_DEBUG({ remOp.emitError("PtrAnalysis: do not support dynamix stride before REMSI."); });
             return failure();
         }
 
         if (!isMultiple(divisorAttr, info.shape) && !isMultiple(info.shape, divisorAttr)) {
-            LLVM_DEBUG({
-                remOp.emitError(
-                    "PtrAnalysis: do not support dynamix stride before REMSI.");
-            });
+            LLVM_DEBUG({ remOp.emitError("PtrAnalysis: do not support dynamix stride before REMSI."); });
         }
 
         if (isMultiple(info.stride, divisorAttr)) {
@@ -1105,10 +1015,7 @@ LogicalResult PtrAnalysis::visitOperandRem(arith::RemSIOp remOp,
 
             auto staticNonContiguousSize = getIntAttr(nonContiguousSize);
             if (!staticNonContiguousSize.has_value()) {
-                LLVM_DEBUG({
-                    remOp.emitError(
-                        "PtrAnalysis: do not support dynamix size before REMSI.");
-                });
+                LLVM_DEBUG({ remOp.emitError("PtrAnalysis: do not support dynamix size before REMSI."); });
                 return failure();
             }
 
@@ -1118,17 +1025,15 @@ LogicalResult PtrAnalysis::visitOperandRem(arith::RemSIOp remOp,
             newStateInfo.emplace_back(info.stride, contiguousSize, info.dimIndex);
         } else {
             LLVM_DEBUG({
-                remOp.emitError(
-                    "PtrAnalysis: stride that are not divisible by REMSI are not allowed "
-                    "to precede REMSI");
+                remOp.emitError("PtrAnalysis: stride that are not divisible by REMSI are not allowed "
+                                "to precede REMSI");
             });
             return failure();
         }
     }
 
     auto newOffset = remOpFoldResult(state.offset, divisorAttr, loc, builder);
-    state.updatePtrState(newStateInfo, state.sizes, state.source,
-                         newOffset, loc, builder, true);
+    state.updatePtrState(newStateInfo, state.sizes, state.source, newOffset, loc, builder, true);
 
     LLVM_DEBUG({
         llvm::dbgs() << "after VisitRemOperands \n";
@@ -1138,13 +1043,11 @@ LogicalResult PtrAnalysis::visitOperandRem(arith::RemSIOp remOp,
     return success();
 }
 
-LogicalResult PtrAnalysis::visitOperandDiv(arith::DivSIOp divOp,
-                                           PtrState &state, const Location loc,
-                                           OpBuilder &builder) {
+LogicalResult PtrAnalysis::visitOperandDiv(arith::DivSIOp divOp, PtrState &state, const Location loc,
+                                           OpBuilder &builder)
+{
     if (!state.isEmpty()) {
-        LLVM_DEBUG({
-            divOp.emitError("PtrAnalysis: PtrState should be empty when visiting divsi");
-        });
+        LLVM_DEBUG({ divOp.emitError("PtrAnalysis: PtrState should be empty when visiting divsi"); });
         return failure();
     }
     LLVM_DEBUG({
@@ -1160,7 +1063,7 @@ LogicalResult PtrAnalysis::visitOperandDiv(arith::DivSIOp divOp,
     if (!rhsState.isScalar() || rhsState.hasSource()) {
         LLVM_DEBUG({
             divOp.emitRemark("PtrAnalysis: only support cases when rhs of remainder "
-                            "contains scalar");
+                             "contains scalar");
         });
         return failure();
     }
@@ -1183,20 +1086,13 @@ LogicalResult PtrAnalysis::visitOperandDiv(arith::DivSIOp divOp,
     auto divisorAttr = rhsState.offset;
 
     auto staticOffset = getIntAttr(state.offset);
-    if ((!staticOffset.has_value() ||
-         !isMultiple(state.offset, divisorAttr)) &&
-         !hasAnnotation) {
-        LLVM_DEBUG({
-            divOp.emitRemark("PtrAnalysis: dynamic offset before DIVSI, adding annotation");
-        });
+    if ((!staticOffset.has_value() || !isMultiple(state.offset, divisorAttr)) && !hasAnnotation) {
+        LLVM_DEBUG({ divOp.emitRemark("PtrAnalysis: dynamic offset before DIVSI, adding annotation"); });
         return failure();
     }
 
     if (!getIntAttr(divisorAttr).has_value()) {
-        LLVM_DEBUG({
-            divOp.emitError(
-                "PtrAnalysis: do not support dynamix divisor in DIVSI.");
-        });
+        LLVM_DEBUG({ divOp.emitError("PtrAnalysis: do not support dynamix divisor in DIVSI."); });
         return failure();
     }
 
@@ -1204,18 +1100,12 @@ LogicalResult PtrAnalysis::visitOperandDiv(arith::DivSIOp divOp,
     for (auto info : state.stateInfo) {
         auto staticStride = getIntAttr(info.stride);
         if (!staticStride.has_value()) {
-            LLVM_DEBUG({
-                divOp.emitError(
-                    "PtrAnalysis: do not support dynamix stride before DIVSI.");
-            });
+            LLVM_DEBUG({ divOp.emitError("PtrAnalysis: do not support dynamix stride before DIVSI."); });
             return failure();
         }
 
         if (!isMultiple(divisorAttr, info.shape) && !isMultiple(info.shape, divisorAttr)) {
-            LLVM_DEBUG({
-                divOp.emitError(
-                    "PtrAnalysis: do not support dynamix stride before DivSI.");
-            });
+            LLVM_DEBUG({ divOp.emitError("PtrAnalysis: do not support dynamix stride before DivSI."); });
         }
 
         if (isMultiple(info.stride, divisorAttr)) {
@@ -1228,10 +1118,7 @@ LogicalResult PtrAnalysis::visitOperandDiv(arith::DivSIOp divOp,
 
             auto staticContiguousSize = getIntAttr(contiguousSize);
             if (!staticContiguousSize.has_value()) {
-                LLVM_DEBUG({
-                    divOp.emitError(
-                        "PtrAnalysis: do not support dynamix size before DIVSI.");
-                });
+                LLVM_DEBUG({ divOp.emitError("PtrAnalysis: do not support dynamix size before DIVSI."); });
                 return failure();
             }
 
@@ -1241,17 +1128,15 @@ LogicalResult PtrAnalysis::visitOperandDiv(arith::DivSIOp divOp,
             newStateInfo.emplace_back(zeroAttr, nonContiguousSize, info.dimIndex);
         } else {
             LLVM_DEBUG({
-                divOp.emitError(
-                    "PtrAnalysis: stride that are not divisible by DIVSI are not allowed "
-                    "to precede DIVSI");
+                divOp.emitError("PtrAnalysis: stride that are not divisible by DIVSI are not allowed "
+                                "to precede DIVSI");
             });
             return failure();
         }
     }
 
     auto newOffset = divOpFoldResult(state.offset, divisorAttr, loc, builder);
-    state.updatePtrState(newStateInfo, state.sizes, state.source,
-                         newOffset, loc, builder, true);
+    state.updatePtrState(newStateInfo, state.sizes, state.source, newOffset, loc, builder, true);
 
     LLVM_DEBUG({
         llvm::dbgs() << "after VisitDivOperands \n";
@@ -1260,9 +1145,8 @@ LogicalResult PtrAnalysis::visitOperandDiv(arith::DivSIOp divOp,
     return success();
 }
 
-LogicalResult PtrAnalysis::visitOperandAdd(arith::AddIOp addOp, PtrState &state,
-                                           const Location loc,
-                                           OpBuilder &builder) {
+LogicalResult PtrAnalysis::visitOperandAdd(arith::AddIOp addOp, PtrState &state, const Location loc, OpBuilder &builder)
+{
     PtrState lhsState;
     if (visitOperand(addOp.getLhs(), lhsState, loc, builder).failed()) {
         return failure();
@@ -1274,9 +1158,8 @@ LogicalResult PtrAnalysis::visitOperandAdd(arith::AddIOp addOp, PtrState &state,
     return state.addState(lhsState, rhsState, addOp, builder);
 }
 
-LogicalResult PtrAnalysis::visitOperand(Value operand, PtrState &state,
-                                        const Location loc,
-                                        OpBuilder &builder) {
+LogicalResult PtrAnalysis::visitOperand(Value operand, PtrState &state, const Location loc, OpBuilder &builder)
+{
     if (knownPtrs.find(operand) != knownPtrs.end()) {
         state = knownPtrs.lookup(operand);
         return success();
@@ -1317,13 +1200,13 @@ LogicalResult PtrAnalysis::visitOperand(Value operand, PtrState &state,
     } else if (auto op = operand.getDefiningOp<triton::LoadOp>()) {
         LLVM_DEBUG({
             op.emitRemark("TritonToStructured: Invalid dynamic offset"
-                        "The load operation's offset cannot be derived from another load result.");
+                          "The load operation's offset cannot be derived from another load result.");
         });
         return failure();
     } else if (auto op = operand.getDefiningOp<arith::FPToSIOp>()) {
         LLVM_DEBUG({
             op.emitWarning("IllegalTypeConversionInAddressCalculation"
-                        "float-to-int precision conversion is not supported during address computation.");
+                           "float-to-int precision conversion is not supported during address computation.");
             llvm::dbgs() << "Operand: \n";
             operand.dump();
             llvm::dbgs() << "----------------------------------------------\n";
@@ -1331,9 +1214,8 @@ LogicalResult PtrAnalysis::visitOperand(Value operand, PtrState &state,
         return failure();
     } else if (!operand.getDefiningOp()) {
         if (!knownPtrs.contains(operand)) {
-            LLVM_DEBUG({
-                llvm::dbgs() << "TritonToStructured: Pointer analysis is not supported for input parameters\n";
-            });
+            LLVM_DEBUG(
+                { llvm::dbgs() << "TritonToStructured: Pointer analysis is not supported for input parameters\n"; });
             return failure();
         }
 
@@ -1355,7 +1237,8 @@ LogicalResult PtrAnalysis::visitOperand(Value operand, PtrState &state,
     return success();
 }
 
-LogicalResult PtrAnalysis::rewriteAddptrOp(triton::AddPtrOp op) {
+LogicalResult PtrAnalysis::rewriteAddptrOp(triton::AddPtrOp op)
+{
     OpBuilder builder(op);
     auto loc = op.getLoc();
 
@@ -1371,7 +1254,8 @@ LogicalResult PtrAnalysis::rewriteAddptrOp(triton::AddPtrOp op) {
     return success();
 }
 
-void PtrState::analyzePermute() {
+void PtrState::analyzePermute()
+{
     const size_t n = stateInfo.size();
     generateOriginPermuteIds();
 
@@ -1414,16 +1298,13 @@ void PtrState::analyzePermute() {
     }
     auto isIdentity = [&](ArrayRef<size_t> perm) -> bool {
         for (size_t i = 0; i < perm.size(); ++i)
-            if (perm[i] != i) return false;
+            if (perm[i] != i)
+                return false;
         return true;
     };
 
-    std::stable_sort(
-        permuteIds.begin(),
-        permuteIds.end(),
-        [&](size_t a, size_t b) {
-            return isGreater(stateInfo[a].stride, stateInfo[b].stride);
-    });
+    std::stable_sort(permuteIds.begin(), permuteIds.end(),
+                     [&](size_t a, size_t b) { return isGreater(stateInfo[a].stride, stateInfo[b].stride); });
 
     // If already in canonical axis order, do not permute.
     if (isIdentity(permuteIds)) {
@@ -1432,8 +1313,7 @@ void PtrState::analyzePermute() {
 
     // Tail axis must be physically contiguous (stride == 1),
     // otherwise addptr-based permutation is invalid.
-    auto tailStride =
-    getIntAttr(stateInfo[permuteIds.back()].stride);
+    auto tailStride = getIntAttr(stateInfo[permuteIds.back()].stride);
     if (!tailStride.has_value() || tailStride.value() != 1) {
         generateOriginPermuteIds();
         return;
@@ -1449,9 +1329,9 @@ void PtrState::analyzePermute() {
     const size_t newContig = countContiguousAxes(newStateInfo);
     LLVM_DEBUG({
         llvm::dbgs() << "----------------------------------------------\n";
-        llvm::dbgs() << "after analyzePermute:\n" <<
-                     "oldContig: " << oldContig << "\n" <<
-                     "newContig: " << newContig << "\n";
+        llvm::dbgs() << "after analyzePermute:\n"
+                     << "oldContig: " << oldContig << "\n"
+                     << "newContig: " << newContig << "\n";
         dump();
     });
     // only permute if contiguous axes increased
@@ -1464,7 +1344,8 @@ void PtrState::analyzePermute() {
     generateOriginPermuteIds();
 }
 
-std::optional<int32_t> extractDivisibilityFromOpFoldResult(mlir::OpFoldResult ofr) {
+std::optional<int32_t> extractDivisibilityFromOpFoldResult(mlir::OpFoldResult ofr)
+{
     auto value = dyn_cast<mlir::Value>(ofr);
     if (!value) {
         return std::nullopt;
@@ -1496,7 +1377,7 @@ void PtrState::generateOriginPermuteIds()
     }
     return;
 }
- 
+
 // Formula of "contiguous axes"
 // - axis i is contiguous if stride[i] == product(shape[0..i-1]).
 // We only prove contiguity from the rightmost axis outward.
@@ -1531,4 +1412,4 @@ size_t PtrState::countContiguousAxes(SmallVector<StateInfo> stateInfo) const
     }
     return cnt;
 }
-}
+} // namespace TritonToStructured

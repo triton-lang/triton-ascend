@@ -31,30 +31,24 @@ namespace FunctionConverter {
 using namespace mlir;
 using namespace triton;
 
-class GetProgramIDConverter
-    : public OpConversionPattern<triton::GetProgramIdOp> {
-  using OpConversionPattern<triton::GetProgramIdOp>::OpConversionPattern;
+class GetProgramIDConverter : public OpConversionPattern<triton::GetProgramIdOp> {
+    using OpConversionPattern<triton::GetProgramIdOp>::OpConversionPattern;
 
-  static uint32_t constexpr LAUNCH_GRID_RANK =
-      getMaxEnumValForProgramIDDim() + 1;
+    static uint32_t constexpr LAUNCH_GRID_RANK = getMaxEnumValForProgramIDDim() + 1;
 
-public:
-  LogicalResult
-  matchAndRewrite(triton::GetProgramIdOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override;
+  public:
+    LogicalResult matchAndRewrite(triton::GetProgramIdOp op, OpAdaptor adaptor,
+                                  ConversionPatternRewriter &rewriter) const override;
 };
 
-class GetNumProgramsConverter
-    : public OpConversionPattern<triton::GetNumProgramsOp> {
-  using OpConversionPattern<triton::GetNumProgramsOp>::OpConversionPattern;
+class GetNumProgramsConverter : public OpConversionPattern<triton::GetNumProgramsOp> {
+    using OpConversionPattern<triton::GetNumProgramsOp>::OpConversionPattern;
 
-  static uint32_t constexpr LAUNCH_GRID_RANK =
-      getMaxEnumValForProgramIDDim() + 1;
+    static uint32_t constexpr LAUNCH_GRID_RANK = getMaxEnumValForProgramIDDim() + 1;
 
-public:
-  LogicalResult
-  matchAndRewrite(triton::GetNumProgramsOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override;
+  public:
+    LogicalResult matchAndRewrite(triton::GetNumProgramsOp op, OpAdaptor adaptor,
+                                  ConversionPatternRewriter &rewriter) const override;
 };
 } // namespace FunctionConverter
 #endif

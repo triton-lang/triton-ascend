@@ -47,6 +47,3 @@ def basic_static_assert_example(x_ptr, BLOCK_SIZE: tl.constexpr):
     # val = tl.load(x_ptr)
     # tl.static_assert(val <= 64)
 ```
-
-
-

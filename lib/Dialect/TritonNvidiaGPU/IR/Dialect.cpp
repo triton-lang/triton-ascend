@@ -46,24 +46,24 @@ using namespace mlir::triton::nvidia_gpu;
 
 //===----------------------------------------------------------------------===//
 
-void TritonNvidiaGPUDialect::initialize() {
-  registerTypes();
+void TritonNvidiaGPUDialect::initialize()
+{
+    registerTypes();
 
-  addAttributes<
+    addAttributes<
 #define GET_ATTRDEF_LIST
 #include "triton/Dialect/TritonNvidiaGPU/IR/TritonNvidiaGPUAttrDefs.cpp.inc"
-      >();
-  addOperations<
+        >();
+    addOperations<
 #define GET_OP_LIST
 #include "triton/Dialect/TritonNvidiaGPU/IR/Ops.cpp.inc"
 #include "triton/Dialect/TritonNvidiaGPU/IR/OpsEnums.cpp.inc"
-      >();
+        >();
 }
 
 // verify TritonNvidiaGPU ops
-LogicalResult
-TritonNvidiaGPUDialect::verifyOperationAttribute(Operation *op,
-                                                 NamedAttribute attr) {
-  // TODO: fill this.
-  return success();
+LogicalResult TritonNvidiaGPUDialect::verifyOperationAttribute(Operation *op, NamedAttribute attr)
+{
+    // TODO: fill this.
+    return success();
 }

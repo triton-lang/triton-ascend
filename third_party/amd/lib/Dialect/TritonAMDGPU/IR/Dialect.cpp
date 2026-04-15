@@ -33,16 +33,17 @@
 using namespace mlir;
 using namespace mlir::triton::amdgpu;
 
-void mlir::triton::amdgpu::TritonAMDGPUDialect::initialize() {
-  addAttributes<
+void mlir::triton::amdgpu::TritonAMDGPUDialect::initialize()
+{
+    addAttributes<
 #define GET_ATTRDEF_LIST
 #include "Dialect/TritonAMDGPU/IR/TritonAMDGPUAttrDefs.cpp.inc"
-      >();
+        >();
 
-  addOperations<
+    addOperations<
 #define GET_OP_LIST
 #include "Dialect/TritonAMDGPU/IR/Ops.cpp.inc"
-      >();
+        >();
 }
 
 #define GET_OP_CLASSES

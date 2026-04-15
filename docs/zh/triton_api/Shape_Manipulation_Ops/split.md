@@ -64,4 +64,3 @@ def complex_split_kernel(complex_ptr, real_ptr, imag_ptr, M, N, BLOCK_M: tl.cons
     tl.store(real_ptr + offsets, real_part, mask=mask)
     tl.store(imag_ptr + offsets, imag_part, mask=mask)
 ```
-

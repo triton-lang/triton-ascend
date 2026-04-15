@@ -130,4 +130,3 @@ def flash_attention_fwd(q_ptr, k_ptr, v_ptr, o_ptr, ...):
 
     tl.store(o_ptr + offsets, acc)
 ```
-

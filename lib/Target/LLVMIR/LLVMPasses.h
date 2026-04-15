@@ -8,9 +8,9 @@ namespace llvm {
 // Breaking up those phis into elementary types allows better optimizations
 // downstream.
 struct BreakStructPhiNodesPass : PassInfoMixin<BreakStructPhiNodesPass> {
-  PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+    PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
 
-  static StringRef name() { return "BreakStructPhiNodesPass"; }
+    static StringRef name() { return "BreakStructPhiNodesPass"; }
 };
 
 } // namespace llvm

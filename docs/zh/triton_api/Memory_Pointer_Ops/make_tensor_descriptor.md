@@ -92,4 +92,3 @@ M_BLOCK, N_BLOCK = 32, 32
 grid = (M // M_BLOCK, N // N_BLOCK)
 inplace_abs[grid](x, M, N, M_BLOCK, N_BLOCK)
 ```
-

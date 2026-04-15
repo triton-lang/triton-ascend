@@ -2,7 +2,7 @@ import importlib.util
 import itertools
 import shutil
 import tempfile
-from concurrent.futures import Executor, Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 import torch

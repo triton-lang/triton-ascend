@@ -56,4 +56,3 @@ def triton_kernel(out_ptr0, in_ptr0, in_ptr1, N: tl.constexpr):
 ### 2.4. 特殊限制
 
 Ascend A3 相比 GPU 缺失uint8、uint16、uint32、uint64的支持
-

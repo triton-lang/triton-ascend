@@ -69,4 +69,3 @@ def broadcast_kernel(
     tl.store(output_ptr + offsets, result)
 
 ```
-

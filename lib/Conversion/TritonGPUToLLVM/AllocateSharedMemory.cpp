@@ -17,39 +17,36 @@ namespace triton {
 
 namespace {
 
-struct AllocateSharedMemory
-    : public mlir::triton::impl::AllocateSharedMemoryBase<
-          AllocateSharedMemory> {
-  void runOnOperation() override {
-    ModuleOp mod = getOperation();
-    MLIRContext *ctx = &getContext();
-    ModuleAllocation allocation(mod);
+struct AllocateSharedMemory : public mlir::triton::impl::AllocateSharedMemoryBase<AllocateSharedMemory> {
+    void runOnOperation() override
+    {
+        ModuleOp mod = getOperation();
+        MLIRContext *ctx = &getContext();
+        ModuleAllocation allocation(mod);
 
-    mod.walk([&](FunctionOpInterface funcOp) {
-      funcOp.walk([&](Operation *op) {
-        auto *funcAllocation = allocation.getFuncData(funcOp);
-        auto oBufferId = funcAllocation->getBufferId(op);
-        int offset = -1;
-        if (oBufferId != Allocation::InvalidBufferId)
-          offset = funcAllocation->getOffset(oBufferId);
-        else if (op->getNumResults() == 1) {
-          Value value = op->getResult(0);
-          auto vBufferId = funcAllocation->getBufferId(value);
-          if (vBufferId != Allocation::InvalidBufferId)
-            offset = funcAllocation->getOffset(vBufferId);
-        }
-        if (offset == -1)
-          return;
-        if (op->hasAttr("allocation.offset"))
-          return;
-        op->setAttr("allocation.offset",
-                    IntegerAttr::get(IntegerType::get(ctx, 32), offset));
-      });
-    });
-    mod->setAttr("triton_gpu.shared",
-                 mlir::IntegerAttr::get(mlir::IntegerType::get(ctx, 32),
-                                        allocation.getSharedMemorySize()));
-  }
+        mod.walk([&](FunctionOpInterface funcOp) {
+            funcOp.walk([&](Operation *op) {
+                auto *funcAllocation = allocation.getFuncData(funcOp);
+                auto oBufferId = funcAllocation->getBufferId(op);
+                int offset = -1;
+                if (oBufferId != Allocation::InvalidBufferId)
+                    offset = funcAllocation->getOffset(oBufferId);
+                else if (op->getNumResults() == 1) {
+                    Value value = op->getResult(0);
+                    auto vBufferId = funcAllocation->getBufferId(value);
+                    if (vBufferId != Allocation::InvalidBufferId)
+                        offset = funcAllocation->getOffset(vBufferId);
+                }
+                if (offset == -1)
+                    return;
+                if (op->hasAttr("allocation.offset"))
+                    return;
+                op->setAttr("allocation.offset", IntegerAttr::get(IntegerType::get(ctx, 32), offset));
+            });
+        });
+        mod->setAttr("triton_gpu.shared",
+                     mlir::IntegerAttr::get(mlir::IntegerType::get(ctx, 32), allocation.getSharedMemorySize()));
+    }
 };
 
 } // namespace
@@ -60,8 +57,9 @@ namespace triton {
 
 namespace gpu {
 
-std::unique_ptr<OperationPass<ModuleOp>> createAllocateSharedMemoryPass() {
-  return std::make_unique<AllocateSharedMemory>();
+std::unique_ptr<OperationPass<ModuleOp>> createAllocateSharedMemoryPass()
+{
+    return std::make_unique<AllocateSharedMemory>();
 }
 
 } // namespace gpu

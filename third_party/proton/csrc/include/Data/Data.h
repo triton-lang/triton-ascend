@@ -13,38 +13,35 @@ namespace proton {
 enum class OutputFormat { Hatchet, Count };
 
 class Data : public ThreadLocalOpInterface {
-public:
-  Data(const std::string &path, ContextSource *contextSource = nullptr)
-      : path(path), contextSource(contextSource) {}
-  virtual ~Data() = default;
+  public:
+    Data(const std::string &path, ContextSource *contextSource = nullptr) : path(path), contextSource(contextSource) {}
+    virtual ~Data() = default;
 
-  /// Add a new scope to the data.
-  /// If the scope is already present, add a child scope under/inside it.
-  /// [MT] The implementation must be thread-safe.
-  virtual size_t addScope(size_t scopeId, const std::string &name = {}) = 0;
+    /// Add a new scope to the data.
+    /// If the scope is already present, add a child scope under/inside it.
+    /// [MT] The implementation must be thread-safe.
+    virtual size_t addScope(size_t scopeId, const std::string &name = {}) = 0;
 
-  /// Add a single metric to the data.
-  /// [MT] The implementation must be thread-safe.
-  virtual void addMetric(size_t scopeId, std::shared_ptr<Metric> metric) = 0;
+    /// Add a single metric to the data.
+    /// [MT] The implementation must be thread-safe.
+    virtual void addMetric(size_t scopeId, std::shared_ptr<Metric> metric) = 0;
 
-  /// Add multiple metrics to the data.
-  /// [MT] The implementation must be thread-safe.
-  virtual void addMetrics(size_t scopeId,
-                          const std::map<std::string, MetricValueType> &metrics,
-                          bool aggregable) = 0;
+    /// Add multiple metrics to the data.
+    /// [MT] The implementation must be thread-safe.
+    virtual void addMetrics(size_t scopeId, const std::map<std::string, MetricValueType> &metrics, bool aggregable) = 0;
 
-  /// Dump the data to the given output format.
-  /// [MT] Thread-safe.
-  void dump(OutputFormat outputFormat);
+    /// Dump the data to the given output format.
+    /// [MT] Thread-safe.
+    void dump(OutputFormat outputFormat);
 
-protected:
-  /// The actual implementation of the dump operation.
-  /// [MT] Thread-safe.
-  virtual void doDump(std::ostream &os, OutputFormat outputFormat) const = 0;
+  protected:
+    /// The actual implementation of the dump operation.
+    /// [MT] Thread-safe.
+    virtual void doDump(std::ostream &os, OutputFormat outputFormat) const = 0;
 
-  mutable std::shared_mutex mutex;
-  const std::string path{};
-  ContextSource *contextSource{};
+    mutable std::shared_mutex mutex;
+    const std::string path {};
+    ContextSource *contextSource {};
 };
 
 OutputFormat parseOutputFormat(const std::string &outputFormat);

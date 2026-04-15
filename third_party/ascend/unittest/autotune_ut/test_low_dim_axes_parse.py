@@ -26,14 +26,9 @@ from test_common import check_axes_parse_res, mock_autotuner
 def test_low_dim_axis_parse_base_case1(mock_autotuner):
     import triton.backends.ascend.runtime
 
-    @triton.autotune(
-        configs=[],
-        key=["n_elements"]
-    )
+    @triton.autotune(configs=[], key=["n_elements"])
     @triton.jit
-    def triton_low_dim_axis_parse_base_case1(
-        x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
-    ):
+    def triton_low_dim_axis_parse_base_case1(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
         pid = tl.program_id(axis=0)
         block_start = pid * BLOCK_SIZE  # <- Separate assignment
 
@@ -53,6 +48,6 @@ def test_low_dim_axis_parse_base_case1(mock_autotuner):
         "low_dim_axes": ["x"],
         "reduction_axes": [],
     }
-    act_res = triton_low_dim_axis_parse_base_case1[(1,)]()
+    act_res = triton_low_dim_axis_parse_base_case1[(1, )]()
 
     check_axes_parse_res(act_res, ref_res)

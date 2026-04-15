@@ -26,9 +26,7 @@ __all__ = [
 ]
 
 import enum
-from typing import (
-    TypeVar, List, Union
-)
+from typing import (TypeVar, List, Union)
 
 from triton._C.libtriton import ir
 from triton._C.libtriton.ascend import ir as ascend_ir
@@ -41,10 +39,8 @@ from triton.language import semantic as real_semantic
 T = TypeVar('T')
 
 
-def create_address_space(
-    address_space: ascend_ir.AddressSpace,
-    builder: ascend_ir.ascendnpu_ir_builder
-) -> ir.attribute:
+def create_address_space(address_space: ascend_ir.AddressSpace,
+                         builder: ascend_ir.ascendnpu_ir_builder) -> ir.attribute:
     return builder.get_target_attribute(address_space)
 
 
@@ -62,29 +58,27 @@ class PIPE(enum.Enum):
 def create_sync_block_set(sender, receiver, event_id, sender_pipe: PIPE, receiver_pipe: PIPE, _builder=None):
     if isinstance(event_id, int):
         _builder.sync_block_set(sender, receiver,
-                                real_semantic.to_tensor(tl.constexpr(event_id), _builder).handle,
-                                sender_pipe.value, receiver_pipe.value)
+                                real_semantic.to_tensor(tl.constexpr(event_id), _builder).handle, sender_pipe.value,
+                                receiver_pipe.value)
     elif isinstance(event_id, tl.constexpr):
         _builder.sync_block_set(sender, receiver,
-                                real_semantic.to_tensor(event_id, _builder).handle,
-                                sender_pipe.value, receiver_pipe.value)
+                                real_semantic.to_tensor(event_id, _builder).handle, sender_pipe.value,
+                                receiver_pipe.value)
     else:
-        _builder.sync_block_set(sender, receiver,
-                                event_id.handle, sender_pipe.value, receiver_pipe.value)
+        _builder.sync_block_set(sender, receiver, event_id.handle, sender_pipe.value, receiver_pipe.value)
 
 
 def create_sync_block_wait(sender, receiver, event_id, sender_pipe: PIPE, receiver_pipe: PIPE, _builder=None):
     if isinstance(event_id, int):
         _builder.sync_block_wait(sender, receiver,
-                                 real_semantic.to_tensor(tl.constexpr(event_id), _builder).handle,
-                                 sender_pipe.value, receiver_pipe.value)
+                                 real_semantic.to_tensor(tl.constexpr(event_id), _builder).handle, sender_pipe.value,
+                                 receiver_pipe.value)
     elif isinstance(event_id, tl.constexpr):
         _builder.sync_block_wait(sender, receiver,
-                                 real_semantic.to_tensor(event_id, _builder).handle,
-                                 sender_pipe.value, receiver_pipe.value)
+                                 real_semantic.to_tensor(event_id, _builder).handle, sender_pipe.value,
+                                 receiver_pipe.value)
     else:
-        _builder.sync_block_wait(sender, receiver,
-                                 event_id.handle, sender_pipe.value, receiver_pipe.value)
+        _builder.sync_block_wait(sender, receiver, event_id.handle, sender_pipe.value, receiver_pipe.value)
 
 
 def sub_vec_id(builder: ascend_ir.ascendnpu_ir_builder) -> tl.tensor:

@@ -53,6 +53,3 @@ def debug_barrier_basic(A, B, C, BLOCK_SIZE: tl.constexpr):
 ```
 
 **注意：** `debug_barrier` 主要用于调试，通常不应在性能关键的生产代码中使用，因为它可能会因同步而引入开销。
-
-
-

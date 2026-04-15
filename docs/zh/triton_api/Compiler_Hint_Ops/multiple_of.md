@@ -48,10 +48,7 @@ import triton.language as tl
 def basic_multiple_of_example(A, B, BLOCK_SIZE: tl.constexpr):
     offsets = tl.arange(0, BLOCK_SIZE)
     input_data = tl.load(A + offsets)
-  
+
     # 声明输入张量的第一个值是BLOCK_SIZE的倍数
     input_data = tl.multiple_of(input_data, BLOCK_SIZE)
 ```
-
-
-

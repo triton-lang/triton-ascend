@@ -72,4 +72,3 @@ def tt_clamp_2d(in_ptr, out_ptr, min_ptr, max_ptr,
 
        tl.store(out_ptr + idx, ret)
 ```
-

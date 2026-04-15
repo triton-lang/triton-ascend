@@ -33,17 +33,14 @@ Attribute createTmpLayout(Attribute layout, ArrayRef<unsigned> warpsPerCTA);
  * @return pair of created operations
  */
 std::pair<triton::gpu::ConvertLayoutOp, triton::gpu::ConvertLayoutOp>
-createNewConvertOps(OpBuilder &builder, triton::gpu::ConvertLayoutOp &cvtOp,
-                    Attribute tmpLayout);
+createNewConvertOps(OpBuilder &builder, triton::gpu::ConvertLayoutOp &cvtOp, Attribute tmpLayout);
 
 struct Resources {
-  int LDS;
+    int LDS;
 };
 
-Resources
-estimateResourcesForReplacement(OpBuilder builder,
-                                mlir::triton::gpu::ConvertLayoutOp cvtOp,
-                                Attribute tmpLayout);
+Resources estimateResourcesForReplacement(OpBuilder builder, mlir::triton::gpu::ConvertLayoutOp cvtOp,
+                                          Attribute tmpLayout);
 
 } // namespace mlir::triton::AMD
 

@@ -4,7 +4,7 @@ add_triton_library(DiscreteMaskAccessConversion
   DEPENDS
   DiscreteMaskAccessConversionPassIncGen
 
-  LINK_LIBS 
+  LINK_LIBS
   BiShengIRHIVMDialect
   MLIRIR
   MLIRPass

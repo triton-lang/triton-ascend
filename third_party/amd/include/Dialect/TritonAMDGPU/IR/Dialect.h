@@ -42,7 +42,8 @@
 
 namespace mlir {
 namespace triton {
-namespace amdgpu {} // namespace amdgpu
+namespace amdgpu {
+} // namespace amdgpu
 } // namespace triton
 } // namespace mlir
 

@@ -6,12 +6,12 @@
 namespace proton {
 
 class RoctracerProfiler : public GPUProfiler<RoctracerProfiler> {
-public:
-  RoctracerProfiler();
-  virtual ~RoctracerProfiler();
+  public:
+    RoctracerProfiler();
+    virtual ~RoctracerProfiler();
 
-private:
-  struct RoctracerProfilerPimpl;
+  private:
+    struct RoctracerProfilerPimpl;
 };
 
 } // namespace proton

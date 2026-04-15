@@ -23,11 +23,9 @@ namespace nvgpu {
 using Constraints = std::vector<std::string>;
 using OperandsAndConstraints = std::vector<std::pair<Value, std::string>>;
 
-LogicalResult
-rewriteAsPtxAsm(mlir::Operation *op, mlir::PatternRewriter &rewriter,
-                std::string ptxAsm,
-                const OperandsAndConstraints &operandsAndConstraints = {},
-                const Constraints &outputConstraints = {});
+LogicalResult rewriteAsPtxAsm(mlir::Operation *op, mlir::PatternRewriter &rewriter, std::string ptxAsm,
+                              const OperandsAndConstraints &operandsAndConstraints = {},
+                              const Constraints &outputConstraints = {});
 
 } // namespace nvgpu
 

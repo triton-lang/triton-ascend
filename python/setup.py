@@ -30,7 +30,6 @@ from wheel.bdist_wheel import bdist_wheel
 
 import pybind11
 
-
 triton_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 os.environ.setdefault("TRITON_BUILD_WITH_CCACHE", "true")
@@ -425,7 +424,7 @@ class CMakeBuild(build_ext):
         current_ld_path = os.environ.get('LD_LIBRARY_PATH', '')
         os.environ['LD_LIBRARY_PATH'] = f'{hitest_home}:{current_ld_path}'
 
-        print(f"The currently set environment variables for the hitest coverage tool are read.")
+        print("The currently set environment variables for the hitest coverage tool are read.")
         print(f"  HitestHome: {hitest_home} (environment variables HITEST_HOME)")
         print(f"  HITEST_USER_ACCOUNT: {hitest_user_account} (environment variables HITEST_USER_ACCOUNT)")
         print(f"  lltcovRootpath: {lltcov_rootpath} (environment variables LLTCOV_ROOTPATH)")
@@ -596,6 +595,7 @@ def get_platform_dependent_src_path(subdir):
         (lambda version_major, version_minor1, version_minor2, : f"targets/{platform}/{subdir}"
          if int(version_major) >= 12 and int(version_minor1) >= 5 else subdir)(*version.split('.')))
 
+
 # FIXME:download&backend
 # download_and_copy(
 #     name="ptxas", src_path="bin/ptxas", dst_path="bin/ptxas", variable="TRITON_PTXAS_PATH",
@@ -727,6 +727,7 @@ class plugin_egginfo(egg_info):
 
 
 class BuildWheel(bdist_wheel):
+
     def run(self):
         add_links()
         bdist_wheel.run(self)
@@ -833,8 +834,7 @@ def get_default_version():
 
 def get_version():
     version = os.environ.get("TRITON_VERSION", get_default_version()) + os.environ.get(
-        "TRITON_WHEEL_VERSION_SUFFIX", ""
-    )
+        "TRITON_WHEEL_VERSION_SUFFIX", "")
     if not is_manylinux:
         version += get_git_commit_hash()
 
@@ -851,7 +851,6 @@ if not os.path.exists(readme):
     raise FileNotFoundError("Unable to find 'README.md'")
 with open(readme, encoding="utf-8") as fdesc:
     long_description = fdesc.read()
-
 
 setup(
     name=get_package_name(),

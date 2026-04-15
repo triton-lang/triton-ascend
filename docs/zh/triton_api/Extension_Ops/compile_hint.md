@@ -55,4 +55,3 @@ def triton_compile_hint(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK_
         tl.compile_hint(tmp2, "hint_d", [XBLOCK, XBLOCK_SUB])
         tl.store(out_ptr0 + (xindex), tmp2, xmask)
 ```
-

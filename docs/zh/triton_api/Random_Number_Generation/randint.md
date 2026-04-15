@@ -6,8 +6,8 @@
 
 ```python
 triton.language.randint(
-	seed, 
-	offset, 
+	seed,
+	offset,
 	n_rounds: constexpr = 10
 )
 ```
@@ -62,6 +62,3 @@ def kernel_randint(x_ptr, n_rounds: tl.constexpr, N: tl.constexpr, XBLOCK: tl.co
 y_cali = torch.zeros(shape, dtype=eval('torch.int32')).npu()
 kernel_randint[ncore, 1, 1](y_cali, 10, numel, xblock)
 ```
-
-
-

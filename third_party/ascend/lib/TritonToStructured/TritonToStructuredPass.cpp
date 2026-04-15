@@ -28,11 +28,11 @@
 
 #include "Utils/InterleaveOptimization.h"
 #include "Utils/Utils.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -40,10 +40,10 @@
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
@@ -53,6 +53,9 @@
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 
+#include "TritonToStructured/CannonicalizerConverter.h"
+#include "TritonToStructured/MemOpConverter.h"
+#include "TritonToStructured/PtrAnalysis.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -62,24 +65,21 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/LogicalResult.h"
-#include "TritonToStructured/CannonicalizerConverter.h"
-#include "TritonToStructured/PtrAnalysis.h"
-#include "TritonToStructured/MemOpConverter.h"
-
 
 #define DEBUG_TYPE "triton-to-structured"
 
 using namespace mlir;
 using namespace triton;
 
-void TritonToStructuredPass::getDependentDialects(DialectRegistry &registry) const {
-  registry.insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
-                  linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
-                  tensor::TensorDialect, bufferization::BufferizationDialect,
-                  memref::MemRefDialect, hivm::HIVMDialect, annotation::AnnotationDialect>();
+void TritonToStructuredPass::getDependentDialects(DialectRegistry &registry) const
+{
+    registry.insert<func::FuncDialect, arith::ArithDialect, math::MathDialect, linalg::LinalgDialect,
+                    affine::AffineDialect, scf::SCFDialect, tensor::TensorDialect, bufferization::BufferizationDialect,
+                    memref::MemRefDialect, hivm::HIVMDialect, annotation::AnnotationDialect>();
 }
 
-void TritonToStructuredPass::populateTritonToStructuredCanonicalizationPatterns(RewritePatternSet &patterns) {
+void TritonToStructuredPass::populateTritonToStructuredCanonicalizationPatterns(RewritePatternSet &patterns)
+{
     // TODO enable this optimization after fixing the bisheng bug it causes in current version
     // patterns.add<CannonicalizerConverter::CmpConverter>(patterns.getContext());
     patterns.add<CannonicalizerConverter::PromotePointerIterArgsPattern>(patterns.getContext());
@@ -90,18 +90,17 @@ void TritonToStructuredPass::populateTritonToStructuredCanonicalizationPatterns(
     patterns.add<CannonicalizerConverter::LoadBroadcastConverter>(patterns.getContext());
 }
 
-void TritonToStructuredPass::populateTritonToStructuredPatterns(
-    RewritePatternSet &patterns, bool optimizeDynamicOffset,
-    bool enableMaskFallbackConversion) {
-    patterns.add<MemOpConverter::LoadConverter>(
-        patterns.getContext(), optimizeDynamicOffset,
-        enableMaskFallbackConversion);
-    patterns.add<MemOpConverter::StoreConverter>(
-        patterns.getContext(), optimizeDynamicOffset,
-        enableMaskFallbackConversion);
+void TritonToStructuredPass::populateTritonToStructuredPatterns(RewritePatternSet &patterns, bool optimizeDynamicOffset,
+                                                                bool enableMaskFallbackConversion)
+{
+    patterns.add<MemOpConverter::LoadConverter>(patterns.getContext(), optimizeDynamicOffset,
+                                                enableMaskFallbackConversion);
+    patterns.add<MemOpConverter::StoreConverter>(patterns.getContext(), optimizeDynamicOffset,
+                                                 enableMaskFallbackConversion);
 }
 
-LogicalResult TritonToStructuredPass::processSplatBinaryOperations(ModuleOp moduleOp) {
+LogicalResult TritonToStructuredPass::processSplatBinaryOperations(ModuleOp moduleOp)
+{
     mlir::RewritePatternSet patterns(&getContext());
     patterns.add<CannonicalizerConverter::SplatCmpConverter>(patterns.getContext());
     if (failed(applyPatternsAndFoldGreedily(moduleOp, std::move(patterns)))) {
@@ -111,27 +110,22 @@ LogicalResult TritonToStructuredPass::processSplatBinaryOperations(ModuleOp modu
     return success();
 }
 
-void TritonToStructuredPass::runOnOperation() {
+void TritonToStructuredPass::runOnOperation()
+{
     auto moduleOp = getOperation();
     ConversionTarget target(getContext());
     RewritePatternSet canonicalizerPatterns(&getContext());
 
     this->populateTritonToStructuredCanonicalizationPatterns(canonicalizerPatterns);
-    if (failed(applyPatternsAndFoldGreedily(moduleOp,
-                                            std::move(canonicalizerPatterns)))) {
+    if (failed(applyPatternsAndFoldGreedily(moduleOp, std::move(canonicalizerPatterns)))) {
         moduleOp.emitWarning("Canonicalize failed");
     }
 
     RewritePatternSet tritonToStructuredPatterns(&getContext());
-    populateTritonToStructuredPatterns(tritonToStructuredPatterns,
-                                       optimizeDynamicOffset,
-                                       enableMaskFallbackConversion);
+    populateTritonToStructuredPatterns(tritonToStructuredPatterns, optimizeDynamicOffset, enableMaskFallbackConversion);
 
-    if (failed(applyPatternsAndFoldGreedily(moduleOp,
-                                            std::move(tritonToStructuredPatterns)))) {
-        LLVM_DEBUG({
-            moduleOp->emitRemark("PtrAnalysis: rewrite MemOp failed");
-        });
+    if (failed(applyPatternsAndFoldGreedily(moduleOp, std::move(tritonToStructuredPatterns)))) {
+        LLVM_DEBUG({ moduleOp->emitRemark("PtrAnalysis: rewrite MemOp failed"); });
     }
 
     if (failed(processSplatBinaryOperations(moduleOp))) {
@@ -146,13 +140,13 @@ void TritonToStructuredPass::runOnOperation() {
     }
 }
 
-std::unique_ptr<OperationPass<ModuleOp>> triton::createTritonToStructuredPass() {
-  return std::make_unique<TritonToStructuredPass>();
+std::unique_ptr<OperationPass<ModuleOp>> triton::createTritonToStructuredPass()
+{
+    return std::make_unique<TritonToStructuredPass>();
 }
 
-std::unique_ptr<OperationPass<ModuleOp>>
-triton::createTritonToStructuredPass(
-  bool enableMaskFallbackConversion, bool optimizeDynamicOffset) {
-  return std::make_unique<TritonToStructuredPass>(
-    enableMaskFallbackConversion, optimizeDynamicOffset);
+std::unique_ptr<OperationPass<ModuleOp>> triton::createTritonToStructuredPass(bool enableMaskFallbackConversion,
+                                                                              bool optimizeDynamicOffset)
+{
+    return std::make_unique<TritonToStructuredPass>(enableMaskFallbackConversion, optimizeDynamicOffset);
 }

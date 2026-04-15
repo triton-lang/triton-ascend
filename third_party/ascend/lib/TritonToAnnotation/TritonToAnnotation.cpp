@@ -22,11 +22,11 @@
 
 #include "TritonToAnnotation/Passes.h"
 
+#include "Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
-#include "Dialect/TritonAscend/IR/TritonAscendDialect.h"
 namespace mlir {
 namespace triton {
 #define GEN_PASS_DEF_TRITONTOANNOTATION
@@ -37,40 +37,38 @@ namespace triton {
 using namespace mlir;
 
 namespace {
-struct TritonToAnnotationPass
-    : public mlir::triton::impl::TritonToAnnotationBase<
-          TritonToAnnotationPass> {
-  void runOnOperation() override;
+struct TritonToAnnotationPass : public mlir::triton::impl::TritonToAnnotationBase<TritonToAnnotationPass> {
+    void runOnOperation() override;
 };
 } // namespace
 
-struct TritonAnnotationConversionPattern
-    : OpRewritePattern<mlir::triton::ascend::AnnotationOp> {
-  using OpRewritePattern<mlir::triton::ascend::AnnotationOp>::OpRewritePattern;
+struct TritonAnnotationConversionPattern : OpRewritePattern<mlir::triton::ascend::AnnotationOp> {
+    using OpRewritePattern<mlir::triton::ascend::AnnotationOp>::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(mlir::triton::ascend::AnnotationOp op,
-                                PatternRewriter &rewriter) const final {
-    auto markOp = rewriter.create<annotation::MarkOp>(op.getLoc(), op.getSrc());
-    // Forward all annotations.
-    markOp->setAttrs(op->getAttrs());
-    rewriter.eraseOp(op);
-    return success();
-  }
+    LogicalResult matchAndRewrite(mlir::triton::ascend::AnnotationOp op, PatternRewriter &rewriter) const final
+    {
+        auto markOp = rewriter.create<annotation::MarkOp>(op.getLoc(), op.getSrc());
+        // Forward all annotations.
+        markOp->setAttrs(op->getAttrs());
+        rewriter.eraseOp(op);
+        return success();
+    }
 };
 
-void TritonToAnnotationPass::runOnOperation() {
-  auto module = getOperation();
-  ConversionTarget target(getContext());
-  target.addLegalDialect<annotation::AnnotationDialect>();
+void TritonToAnnotationPass::runOnOperation()
+{
+    auto module = getOperation();
+    ConversionTarget target(getContext());
+    target.addLegalDialect<annotation::AnnotationDialect>();
 
-  RewritePatternSet patterns(&getContext());
-  patterns.add<TritonAnnotationConversionPattern>(patterns.getContext());
-  if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
-    signalPassFailure();
-  }
+    RewritePatternSet patterns(&getContext());
+    patterns.add<TritonAnnotationConversionPattern>(patterns.getContext());
+    if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
+        signalPassFailure();
+    }
 }
 
-std::unique_ptr<OperationPass<ModuleOp>>
-mlir::triton::createTritonToAnnotationPass() {
-  return std::make_unique<TritonToAnnotationPass>();
+std::unique_ptr<OperationPass<ModuleOp>> mlir::triton::createTritonToAnnotationPass()
+{
+    return std::make_unique<TritonToAnnotationPass>();
 }

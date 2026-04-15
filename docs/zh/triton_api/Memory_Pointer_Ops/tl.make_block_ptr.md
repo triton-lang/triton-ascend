@@ -176,4 +176,3 @@ def test_makeblockptr_order(shape, permute_order):
     test_common.validate_cmp("int32", triton_cal, torch_ref)
 
 ```
-

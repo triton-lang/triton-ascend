@@ -47,6 +47,3 @@ def basic_device_assert_example(x_ptr, BLOCK_SIZE: tl.constexpr):
     # 检查数据有效性（比如检查张量中没有负值）
     tl.device_assert(tl.min(x) >= 0, "All values must be non-negative")
 ```
-
-
-

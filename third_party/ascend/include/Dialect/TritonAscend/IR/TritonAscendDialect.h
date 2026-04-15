@@ -29,8 +29,6 @@
 
 namespace mlir::triton::ascend {
 
-
-
 } // namespace mlir::triton::ascend
 
 #endif // TRITON_DIALECT_ASCEND_DIALECT_H

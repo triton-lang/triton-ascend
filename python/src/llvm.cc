@@ -390,7 +390,7 @@ void init_triton_llvm(py::module &&m) {
       py::arg("arch") = "", py::arg("features") = "",
       py::arg("flags") = std::vector<std::string>{},
       py::arg("enable_fp_fusion") = false,
- 	    py::call_guard<py::gil_scoped_release>());
+      py::call_guard<py::gil_scoped_release>());
 
   m.def(
       "translate_to_asm",

@@ -13,68 +13,63 @@
 #include "llvm/ADT/STLExtras.h"
 #include <cstdint>
 
-
 using namespace mlir;
 using namespace mlir::triton;
 
-
 namespace mlir::triton::ascend {
 
-void GatherOutToUbOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects)
+void GatherOutToUbOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects)
 {
-  effects.emplace_back(MemoryEffects::Read::get(), &getSrcMutable(),
-                       triton::GlobalMemory::get());
+    effects.emplace_back(MemoryEffects::Read::get(), &getSrcMutable(), triton::GlobalMemory::get());
 }
 
-void IndirectLoadOp::getEffects(
-    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
-        &effects) {
-  effects.emplace_back(MemoryEffects::Read::get(), &getSrcMutable(),
-                       triton::GlobalMemory::get());
+void IndirectLoadOp::getEffects(SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects)
+{
+    effects.emplace_back(MemoryEffects::Read::get(), &getSrcMutable(), triton::GlobalMemory::get());
 }
 
 //-- IndexSelectSimdOp --
-LogicalResult IndexSelectSimdOp::inferReturnTypes(
-    MLIRContext *context, std::optional<Location> location, ValueRange operands,
-    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
-    SmallVectorImpl<Type> &inferredReturnTypes) {
-  
-  // Get operands using adaptor
-  IndexSelectSimdOpAdaptor adaptor(operands, attributes, properties, regions);
-  
-  // Get element type from src pointer
-  Type elemType;
-  if (auto ptrType = dyn_cast<triton::PointerType>(adaptor.getSrc().getType())) {
-    elemType = ptrType.getPointeeType();
-  } else {
-    return failure();
-  }
-  
-  // Get index shape to determine the size of dim
-  auto indicesType = dyn_cast<RankedTensorType>(adaptor.getIndex().getType());
-  if (!indicesType)
-    return failure();
-  int64_t numIndices = indicesType.getShape()[0];
-  
-  // Use adaptor to get attributes - this is the compatible way
-  int32_t dim = adaptor.getDim();
-  auto readShapeAttr = adaptor.getReadShape();
-  
-  // Build result shape: read_shape but with dim replaced by numIndices
-  SmallVector<int64_t> resultShape;
-  for (size_t i = 0; i < readShapeAttr.size(); ++i) {
-    if (i == static_cast<size_t>(dim)) {
-      resultShape.push_back(numIndices);
+LogicalResult IndexSelectSimdOp::inferReturnTypes(MLIRContext *context, std::optional<Location> location,
+                                                  ValueRange operands, DictionaryAttr attributes,
+                                                  OpaqueProperties properties, RegionRange regions,
+                                                  SmallVectorImpl<Type> &inferredReturnTypes)
+{
+
+    // Get operands using adaptor
+    IndexSelectSimdOpAdaptor adaptor(operands, attributes, properties, regions);
+
+    // Get element type from src pointer
+    Type elemType;
+    if (auto ptrType = dyn_cast<triton::PointerType>(adaptor.getSrc().getType())) {
+        elemType = ptrType.getPointeeType();
     } else {
-      resultShape.push_back(readShapeAttr[i]);
+        return failure();
     }
-  }
-  
-  // Create result tensor type
-  inferredReturnTypes.push_back(RankedTensorType::get(resultShape, elemType));
-  
-  return success();
+
+    // Get index shape to determine the size of dim
+    auto indicesType = dyn_cast<RankedTensorType>(adaptor.getIndex().getType());
+    if (!indicesType)
+        return failure();
+    int64_t numIndices = indicesType.getShape()[0];
+
+    // Use adaptor to get attributes - this is the compatible way
+    int32_t dim = adaptor.getDim();
+    auto readShapeAttr = adaptor.getReadShape();
+
+    // Build result shape: read_shape but with dim replaced by numIndices
+    SmallVector<int64_t> resultShape;
+    for (size_t i = 0; i < readShapeAttr.size(); ++i) {
+        if (i == static_cast<size_t>(dim)) {
+            resultShape.push_back(numIndices);
+        } else {
+            resultShape.push_back(readShapeAttr[i]);
+        }
+    }
+
+    // Create result tensor type
+    inferredReturnTypes.push_back(RankedTensorType::get(resultShape, elemType));
+
+    return success();
 }
 
 // FlipOp
@@ -93,11 +88,10 @@ LogicalResult FlipOp::inferReturnTypes(MLIRContext *context, std::optional<Locat
 }
 
 //-- SortOp --
-LogicalResult SortOp::inferReturnTypes(
-    MLIRContext *context, std::optional<Location> location, ValueRange operands,
-    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
-    SmallVectorImpl<Type> &inferredReturnTypes)
-    {
+LogicalResult SortOp::inferReturnTypes(MLIRContext *context, std::optional<Location> location, ValueRange operands,
+                                       DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
+                                       SmallVectorImpl<Type> &inferredReturnTypes)
+{
     if (operands.size() != 1) {
         return emitOptionalError(location, "expected exactly one operand for SortOp");
     }
@@ -112,7 +106,7 @@ LogicalResult SortOp::inferReturnTypes(
     auto srcEnc = srcTy.getEncoding();
 
     if (srcShape.empty()) {
-    return emitOptionalError(location, "input tensor must have rank >= 1");
+        return emitOptionalError(location, "input tensor must have rank >= 1");
     }
 
     Type sortedTy = RankedTensorType::get(srcShape, srcTy.getElementType(), srcEnc);

@@ -71,4 +71,3 @@ def trans_example():
 result = trans_example()
 print(result.shape)  # 输出: (4, 2, 3)
 ```
-

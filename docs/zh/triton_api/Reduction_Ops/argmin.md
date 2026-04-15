@@ -64,4 +64,3 @@ def triton_argmin_1d(in_ptr0, out_ptr1, xnumel, XBLOCK: tl.constexpr):
     tmp4 = tl.argmin(tmp0, 0)
     tl.store(out_ptr1, tmp4, None)
 ```
-

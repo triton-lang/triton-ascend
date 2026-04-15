@@ -57,11 +57,11 @@
 
 #include "llvm/Support/Debug.h"
 
-#include "TritonToStructured/PtrAnalysis.h"
-#include "TritonToStructured/MaskAnalysis.h"
-#include "TritonToStructured/CannonicalizerConverter.h"
-#include "TritonToLinalg/TritonToLinalgPass.h"
 #include "TritonToLinalg/ImplicitPermute.h"
+#include "TritonToLinalg/TritonToLinalgPass.h"
+#include "TritonToStructured/CannonicalizerConverter.h"
+#include "TritonToStructured/MaskAnalysis.h"
+#include "TritonToStructured/PtrAnalysis.h"
 
 #include "Utils/InterleaveOptimization.h"
 #include "Utils/Utils.h"
@@ -75,9 +75,7 @@ using namespace mlir;
 using namespace triton;
 using namespace TritonToStructured;
 
-
-LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
-                                             PatternRewriter &rewriter) const
+LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op, PatternRewriter &rewriter) const
 {
     // no need to analyze and rewrite
     if (compileOn91095Flag && !existDotFlag) {
@@ -85,7 +83,8 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
             llvm::dbgs() << "----------------------------------------------\n";
             llvm::dbgs() << "compileOn91095Flag :" << compileOn91095Flag << "\n";
             llvm::dbgs() << "!existDotFlag :" << !existDotFlag << "\n";
-            llvm::dbgs() << "no need to analyze and rewrite Load" << "\n";
+            llvm::dbgs() << "no need to analyze and rewrite Load"
+                         << "\n";
             llvm::dbgs() << "----------------------------------------------\n";
         });
         return success();
@@ -106,8 +105,8 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
     } else if (oldPtr.getDefiningOp<triton::AddPtrOp>()) {
         newPtr = tf.createNewAddPtr(oldPtr, loc, rewriter);
     } else {
-        InFlightDiagnostic diag =
-        emitWarning(loc) << "PtrAnalysis: only MakeTensorPtrOp, AdvanceOp, and AddPtrOp are supported.";
+        InFlightDiagnostic diag = emitWarning(loc)
+                                  << "PtrAnalysis: only MakeTensorPtrOp, AdvanceOp, and AddPtrOp are supported.";
         return success();
     }
     if (!tf.ptrState.isPermuted) {
@@ -119,31 +118,25 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
     auto newOther = tf.createNewOther(oldOther, loc, rewriter);
 
     if (!newPtr) {
-        InFlightDiagnostic diag =
-        emitWarning(loc) << "PtrAnalysis: failed to analyze load pointer.";
+        InFlightDiagnostic diag = emitWarning(loc) << "PtrAnalysis: failed to analyze load pointer.";
         return failure();
     }
 
     if (oldMask && !newMask) {
-        InFlightDiagnostic diag =
-        emitWarning(loc) << "MaskAnalysis: failed to analyze load mask.";
+        InFlightDiagnostic diag = emitWarning(loc) << "MaskAnalysis: failed to analyze load mask.";
         return failure();
     }
 
-    auto loadOp = rewriter.create<triton::LoadOp>(loc, newPtr, newMask, newOther,
-                                   op.getBoundaryCheck(), op.getPadding(),
-                                   op.getCache(), op.getEvict(), op.getIsVolatile());
+    auto loadOp = rewriter.create<triton::LoadOp>(loc, newPtr, newMask, newOther, op.getBoundaryCheck(),
+                                                  op.getPadding(), op.getCache(), op.getEvict(), op.getIsVolatile());
 
-    auto permuteResult = tf.materializeImplicitPermute(
-        loadOp.getResult(), loc, rewriter);
+    auto permuteResult = tf.materializeImplicitPermute(loadOp.getResult(), loc, rewriter);
 
     rewriter.replaceOp(op, permuteResult);
     return success();
 }
 
-
-LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
-                                              PatternRewriter &rewriter) const
+LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op, PatternRewriter &rewriter) const
 {
     auto loc = op.getLoc();
     auto oldPtr = op.getPtr();
@@ -159,8 +152,8 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
     } else if (oldPtr.getDefiningOp<triton::AddPtrOp>()) {
         newPtr = tf.createNewAddPtr(oldPtr, loc, rewriter);
     } else {
-        InFlightDiagnostic diag =
-        emitWarning(loc) << "PtrAnalysis: only MakeTensorPtrOp, AdvanceOp, and AddPtrOp are supported.";
+        InFlightDiagnostic diag = emitWarning(loc)
+                                  << "PtrAnalysis: only MakeTensorPtrOp, AdvanceOp, and AddPtrOp are supported.";
         return success();
     }
     if (!tf.ptrState.isPermuted) {
@@ -170,29 +163,25 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
     auto newMask = tf.createNewMask(oldMask, loc, rewriter);
 
     if (!newPtr) {
-        InFlightDiagnostic diag =
-        emitWarning(loc) << "PtrAnalysis: failed to analyze store pointer.";
+        InFlightDiagnostic diag = emitWarning(loc) << "PtrAnalysis: failed to analyze store pointer.";
         return failure();
     }
 
     if (oldMask && !newMask) {
-        InFlightDiagnostic diag =
-        emitWarning(loc) << "MaskAnalysis: failed to analyze store mask.";
+        InFlightDiagnostic diag = emitWarning(loc) << "MaskAnalysis: failed to analyze store mask.";
         return failure();
     }
 
-    auto permuteResult = tf.materializeImplicitPermute(
-        oldValue, loc, rewriter);
+    auto permuteResult = tf.materializeImplicitPermute(oldValue, loc, rewriter);
 
-    auto storeOp = rewriter.create<triton::StoreOp>(loc, newPtr, permuteResult, newMask,
-               op.getBoundaryCheck(), op.getCache(), op.getEvict());
+    auto storeOp = rewriter.create<triton::StoreOp>(loc, newPtr, permuteResult, newMask, op.getBoundaryCheck(),
+                                                    op.getCache(), op.getEvict());
 
     rewriter.eraseOp(op);
     return success();
 }
 
-LogicalResult AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op,
-                                                  PatternRewriter &rewriter) const
+LogicalResult AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, PatternRewriter &rewriter) const
 {
     auto loc = op.getLoc();
     auto oldPtr = op.getPtr();
@@ -227,28 +216,19 @@ LogicalResult AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op,
 
     Type newAtomicResTy = newVal.getType();
 
-    auto newAtomic = rewriter.create<triton::AtomicRMWOp>(
-        loc,
-        newAtomicResTy,
-        op.getAtomicRmwOp(),
-        newPtr,
-        newVal,
-        newMask,
-        op.getSem(),
-        op.getScope());
+    auto newAtomic = rewriter.create<triton::AtomicRMWOp>(loc, newAtomicResTy, op.getAtomicRmwOp(), newPtr, newVal,
+                                                          newMask, op.getSem(), op.getScope());
 
     // The returned old value should be in OLD layout for users => permute back (load-side).
     MemOpTransformer tfLoad(MemOpTransformer::MemType::load);
     tfLoad.ptrState = tf.ptrState;
-    Value permutedRes =
-        tfLoad.materializeImplicitPermute(newAtomic.getResult(), loc, rewriter);
+    Value permutedRes = tfLoad.materializeImplicitPermute(newAtomic.getResult(), loc, rewriter);
 
     rewriter.replaceOp(op, permutedRes);
     return success();
 }
 
-LogicalResult AtomicCASConverter::matchAndRewrite(triton::AtomicCASOp op,
-                                                  PatternRewriter &rewriter) const
+LogicalResult AtomicCASConverter::matchAndRewrite(triton::AtomicCASOp op, PatternRewriter &rewriter) const
 {
     auto loc = op.getLoc();
     auto oldPtr = op.getPtr();
@@ -279,29 +259,22 @@ LogicalResult AtomicCASConverter::matchAndRewrite(triton::AtomicCASOp op,
     // CAS result (old value) must have same shape as cmp/val operands.
     Type newAtomicResTy = newVal.getType();
 
-    auto newAtomic = rewriter.create<triton::AtomicCASOp>(
-        loc,
-        newAtomicResTy,
-        newPtr,
-        newCmp,
-        newVal,
-        op.getSem(),
-        op.getScope());
+    auto newAtomic =
+        rewriter.create<triton::AtomicCASOp>(loc, newAtomicResTy, newPtr, newCmp, newVal, op.getSem(), op.getScope());
 
     MemOpTransformer tfLoad(MemOpTransformer::MemType::load);
     tfLoad.ptrState = tf.ptrState;
-    Value permutedRes =
-        tfLoad.materializeImplicitPermute(newAtomic.getResult(), loc, rewriter);
+    Value permutedRes = tfLoad.materializeImplicitPermute(newAtomic.getResult(), loc, rewriter);
 
     rewriter.replaceOp(op, permutedRes);
     return success();
 }
 
-Value MemOpTransformer::materializeImplicitPermute(Value srcTensor, const Location loc,
-                                                   PatternRewriter &rewriter)
+Value MemOpTransformer::materializeImplicitPermute(Value srcTensor, const Location loc, PatternRewriter &rewriter)
 {
     auto inTy = dyn_cast<RankedTensorType>(srcTensor.getType());
-    if (!inTy || !ptrState.isPermuted)  return srcTensor;
+    if (!inTy || !ptrState.isPermuted)
+        return srcTensor;
 
     auto inShape = inTy.getShape();
     auto orderSize = ptrState.sizes.size();
@@ -323,8 +296,7 @@ Value MemOpTransformer::materializeImplicitPermute(Value srcTensor, const Locati
     }
     SmallVector<int64_t> outShape(permuteOrder.size());
     if (inShape.size() != outShape.size()) {
-        InFlightDiagnostic diag =
-        emitWarning(loc) << "PtrAnalysis: incompatible shape for permute";
+        InFlightDiagnostic diag = emitWarning(loc) << "PtrAnalysis: incompatible shape for permute";
         return srcTensor;
     }
 
@@ -337,8 +309,7 @@ Value MemOpTransformer::materializeImplicitPermute(Value srcTensor, const Locati
     return transOp.getResult();
 }
 
-Value MemOpTransformer::createNewAddPtr(Value oldPtr,
-                                        const Location loc, PatternRewriter &rewriter)
+Value MemOpTransformer::createNewAddPtr(Value oldPtr, const Location loc, PatternRewriter &rewriter)
 {
     TritonToStructured::PtrAnalysis ptrAnalysis;
 
@@ -349,8 +320,7 @@ Value MemOpTransformer::createNewAddPtr(Value oldPtr,
 
     if (ptrAnalysis.visitOperand(oldPtr, ptrState, loc, rewriter).failed()) {
         ptrState.shouldLinearize = false;
-        InFlightDiagnostic diag =
-        emitWarning(loc) << "PtranAlysis: failed to analyze load/store ptr.";
+        InFlightDiagnostic diag = emitWarning(loc) << "PtranAlysis: failed to analyze load/store ptr.";
         return oldPtr;
     }
 
@@ -361,8 +331,7 @@ Value MemOpTransformer::createNewAddPtr(Value oldPtr,
     // after normalization, stride is [128, 1]
     OpFoldResult maxStride = rewriter.getIndexAttr(1);
     for (auto it = ptrState.stateInfo.rbegin(); it != ptrState.stateInfo.rend(); ++it) {
-        if (TritonToStructured::isOne(it->shape) &&
-            isZero(it->stride)) {
+        if (TritonToStructured::isOne(it->shape) && isZero(it->stride)) {
             it->stride = maxStride;
         }
         maxStride = maxOpFoldResult(maxStride, it->stride, loc, rewriter);
@@ -372,14 +341,13 @@ Value MemOpTransformer::createNewAddPtr(Value oldPtr,
     return ptrState.createAddPtrOp(rewriter, loc);
 }
 
-Value MemOpTransformer::createNewTensorPtr(Value oldPtr, const Location loc,
-                                           PatternRewriter& rewriter)
+Value MemOpTransformer::createNewTensorPtr(Value oldPtr, const Location loc, PatternRewriter &rewriter)
 {
     TritonToStructured::PtrAnalysis ptrAnalysis;
     auto makeTPtrOp = oldPtr.getDefiningOp<triton::MakeTensorPtrOp>();
     if (!makeTPtrOp) {
-        InFlightDiagnostic diag =
-        emitWarning(loc) << "PtrAnalysis: load pointer must originate from 'make_tensor_ptr' operation";
+        InFlightDiagnostic diag = emitWarning(loc)
+                                  << "PtrAnalysis: load pointer must originate from 'make_tensor_ptr' operation";
         return oldPtr;
     }
     if (ptrAnalysis.visitOperandMakeTensorPtr(makeTPtrOp, ptrState, loc, rewriter).failed()) {
@@ -398,8 +366,7 @@ Value MemOpTransformer::createNewTensorPtr(Value oldPtr, const Location loc,
     return ptrState.createMakeTensorPtrOp(rewriter, loc);
 }
 
-Value MemOpTransformer::createNewAdvancePtr(Value oldPtr, const Location loc,
-                                            PatternRewriter& rewriter)
+Value MemOpTransformer::createNewAdvancePtr(Value oldPtr, const Location loc, PatternRewriter &rewriter)
 {
     TritonToStructured::PtrAnalysis ptrAnalysis;
     auto advOp = oldPtr.getDefiningOp<triton::AdvanceOp>();
@@ -414,9 +381,11 @@ Value MemOpTransformer::createNewAdvancePtr(Value oldPtr, const Location loc,
         return oldPtr;
     }
     auto newBasePtr = createNewTensorPtr(basePtr, loc, rewriter);
-    if (!newBasePtr) return oldPtr;
+    if (!newBasePtr)
+        return oldPtr;
 
-    if (!ptrState.isPermuted) return oldPtr;
+    if (!ptrState.isPermuted)
+        return oldPtr;
     // 2) Rewrite advance offsets according to the new make_tensor_ptr layout.
     auto oldOffsets = advOp.getOffsets();
     SmallVector<Value> newOffsets;
@@ -428,10 +397,10 @@ Value MemOpTransformer::createNewAdvancePtr(Value oldPtr, const Location loc,
     return rewriter.create<triton::AdvanceOp>(loc, newBasePtr.getType(), newBasePtr, newOffsets);
 }
 
-Value MemOpTransformer::createNewMask(Value oldMask,
-                                      const Location loc, PatternRewriter &rewriter)
+Value MemOpTransformer::createNewMask(Value oldMask, const Location loc, PatternRewriter &rewriter)
 {
-    if (!oldMask)  return nullptr;
+    if (!oldMask)
+        return nullptr;
 
     LLVM_DEBUG({
         llvm::dbgs() << "----------------------------------------------\n";
@@ -446,8 +415,7 @@ Value MemOpTransformer::createNewMask(Value oldMask,
             maskState.dump();
             llvm::dbgs() << "----------------------------------------------\n";
         });
-        InFlightDiagnostic diag =
-        emitWarning(loc) << "MaskAnalysis: failed to analyze load/store mask.";
+        InFlightDiagnostic diag = emitWarning(loc) << "MaskAnalysis: failed to analyze load/store mask.";
         return nullptr;
     }
 
@@ -456,12 +424,10 @@ Value MemOpTransformer::createNewMask(Value oldMask,
     auto itMask = maskState.stateInfo.begin();
 
     // match and create new mask info
-    while (itPtr != ptrState.stateInfo.end() &&
-           itMask != maskState.stateInfo.end()) {
+    while (itPtr != ptrState.stateInfo.end() && itMask != maskState.stateInfo.end()) {
         // ptr'shape must be multiple of mask'shape or vice versa
         if (!isMultiple(itMask->shape, itPtr->shape)) {
-            InFlightDiagnostic diag =
-            emitWarning(loc) << "MaskAnalysis: incompatible shapes between ptr and mask.";
+            InFlightDiagnostic diag = emitWarning(loc) << "MaskAnalysis: incompatible shapes between ptr and mask.";
             LLVM_DEBUG({
                 llvm::dbgs() << "----------------------------------------------\n";
                 ptrState.dump();
@@ -474,29 +440,25 @@ Value MemOpTransformer::createNewMask(Value oldMask,
 
         auto newShape = minOpFoldResult(itMask->shape, itPtr->shape, loc, rewriter);
         if (isLess(newShape, itMask->shape) && !itMask->hasBroadCast) {
-            InFlightDiagnostic diag =
-            emitWarning(loc) << "MaskAnalysis: the mask shape is incompatible with ptr shape.";
+            InFlightDiagnostic diag = emitWarning(loc)
+                                      << "MaskAnalysis: the mask shape is incompatible with ptr shape.";
             return nullptr;
         }
 
-        TritonToStructured::dimInfo newInfo(
-            itMask->offset, newShape, itMask->dimIndex,
-            itMask->hasBroadCast, itMask->currentType,
-            itMask->rhs
-        );
+        TritonToStructured::dimInfo newInfo(itMask->offset, newShape, itMask->dimIndex, itMask->hasBroadCast,
+                                            itMask->currentType, itMask->rhs);
 
         if (!isZero(itPtr->stride)) {
             newMaskInfo.emplace_back(newInfo);
         }
-        
+
         ++itPtr;
         if (isEqual(itMask->shape, newShape)) {
             ++itMask;
         }
     }
 
-    if (itPtr != ptrState.stateInfo.end() ||
-        itMask != maskState.stateInfo.end()) {
+    if (itPtr != ptrState.stateInfo.end() || itMask != maskState.stateInfo.end()) {
         LLVM_DEBUG({
             llvm::dbgs() << "----------------------------------------------\n";
             llvm::dbgs() << "MaskAnalysis: failed to apply permute on mask.\n";
@@ -505,8 +467,8 @@ Value MemOpTransformer::createNewMask(Value oldMask,
             maskState.dump();
             llvm::dbgs() << "----------------------------------------------\n";
         });
-        InFlightDiagnostic diag =
-        emitWarning(loc) << "MaskAnalysis: incompatible number of dimensions between ptr and mask.";
+        InFlightDiagnostic diag = emitWarning(loc)
+                                  << "MaskAnalysis: incompatible number of dimensions between ptr and mask.";
         return nullptr;
     }
 
@@ -521,12 +483,11 @@ Value MemOpTransformer::createNewMask(Value oldMask,
             maskState.dump();
             llvm::dbgs() << "----------------------------------------------\n";
         });
-        InFlightDiagnostic diag =
-        emitWarning(loc) << "MaskAnalysis: failed to apply permute on mask.";
+        InFlightDiagnostic diag = emitWarning(loc) << "MaskAnalysis: failed to apply permute on mask.";
         return nullptr;
     }
 
-     LLVM_DEBUG({
+    LLVM_DEBUG({
         llvm::dbgs() << "After matching MaskState: \n";
         for (auto info : newMaskInfo) {
             info.dump();
@@ -538,15 +499,14 @@ Value MemOpTransformer::createNewMask(Value oldMask,
     return newMask;
 }
 
-Value MemOpTransformer::createNewOther(Value oldOther,
-                                       const Location loc, PatternRewriter &rewriter)
+Value MemOpTransformer::createNewOther(Value oldOther, const Location loc, PatternRewriter &rewriter)
 {
-    if (!oldOther || !maskState.newMask)  return nullptr;
-    
+    if (!oldOther || !maskState.newMask)
+        return nullptr;
+
     auto ptrType = dyn_cast<triton::PointerType>(ptrState.source.getType());
     if (!ptrType) {
-        InFlightDiagnostic diag =
-        emitWarning(loc) << "PtrAnalysis: source of ptrState is not a pointer type.";
+        InFlightDiagnostic diag = emitWarning(loc) << "PtrAnalysis: source of ptrState is not a pointer type.";
         return nullptr;
     }
     Type elementType = ptrType.getPointeeType();
@@ -555,22 +515,17 @@ Value MemOpTransformer::createNewOther(Value oldOther,
     for (auto info : maskState.stateInfo) {
         auto staticShape = getIntAttr(info.shape);
         if (!staticShape.has_value()) {
-            InFlightDiagnostic diag =
-            emitWarning(loc) << "MaskAnalysis: dynamic shape is not supported in reshape\n";
+            InFlightDiagnostic diag = emitWarning(loc) << "MaskAnalysis: dynamic shape is not supported in reshape\n";
             return oldOther;
         }
         targetShape.emplace_back(staticShape.value());
     }
     auto targetShapeAttr = DenseIntElementsAttr::get(
-        RankedTensorType::get({static_cast<int64_t>(targetShape.size())},
-        rewriter.getI64Type()),
-        targetShape);
-    auto targetShapeType = RankedTensorType::get(
-        targetShape, elementType);
+        RankedTensorType::get({static_cast<int64_t>(targetShape.size())}, rewriter.getI64Type()), targetShape);
+    auto targetShapeType = RankedTensorType::get(targetShape, elementType);
     auto targetShapeValue = rewriter.create<arith::ConstantOp>(loc, targetShapeAttr);
 
-    auto reshapeOp = rewriter.create<tensor::ReshapeOp>(
-        loc, targetShapeType, oldOther, targetShapeValue);
+    auto reshapeOp = rewriter.create<tensor::ReshapeOp>(loc, targetShapeType, oldOther, targetShapeValue);
 
     return reshapeOp.getResult();
 }
@@ -591,4 +546,4 @@ bool MemOpTransformer::applyPermuteOnMask()
     return true;
 }
 
-}  // namespace ImplicitPermute
+} // namespace ImplicitPermute

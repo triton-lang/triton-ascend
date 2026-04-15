@@ -62,6 +62,3 @@ def sort_kernel_2d(X, Z, N: tl.constexpr, M: tl.constexpr, descending: tl.conste
     x = tl.sort(x, descending=descending, dim=0)
     tl.store(Z + off2d, x)
 ```
-
-
-

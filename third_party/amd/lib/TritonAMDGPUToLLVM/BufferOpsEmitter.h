@@ -58,34 +58,31 @@ namespace mlir::LLVM::AMD {
 // Failure to meet 1) will result in a scalarized loop (very poor performance).
 // Failure to meet 2) and 3) will result in incorrect memory access.
 struct BufferEmitter {
-  BufferEmitter(RewriterBase &rw, Location loc,
-                mlir::triton::AMD::TargetInfo ti);
+    BufferEmitter(RewriterBase &rw, Location loc, mlir::triton::AMD::TargetInfo ti);
 
-  // Create a resource descriptor that points to the area of memory we want to
-  // load from
-  Value createResourceDescriptor(Value basePtr);
+    // Create a resource descriptor that points to the area of memory we want to
+    // load from
+    Value createResourceDescriptor(Value basePtr);
 
-  // Emit a predicated rocdl.raw.ptr.buffer.load
-  Value emitLoad(Type type, Value rsrcDesc, Value offset, Value pred,
-                 Value falseVal);
+    // Emit a predicated rocdl.raw.ptr.buffer.load
+    Value emitLoad(Type type, Value rsrcDesc, Value offset, Value pred, Value falseVal);
 
-  // Emit a predicated rocdl.raw.ptr.buffer.store
-  void emitStore(Value rsrcDesc, Value offset, Value data, Value pred);
+    // Emit a predicated rocdl.raw.ptr.buffer.store
+    void emitStore(Value rsrcDesc, Value offset, Value data, Value pred);
 
-private:
-  // Fill common buffer operation arguments.
-  void fillCommonArgs(Type type, Value rsrcDesc, Value vOffsetElems, Value pred,
-                      SmallVector<Value> &args);
+  private:
+    // Fill common buffer operation arguments.
+    void fillCommonArgs(Type type, Value rsrcDesc, Value vOffsetElems, Value pred, SmallVector<Value> &args);
 
-  // Given a type, the buffer type can be either the same type
-  // or a packed version. E.g., a vector of 8xfp16 can be bitcasted to
-  // a vector of 4xi32. This usually makes the life of the backend easier
-  Type getBufferOpType(Type type);
+    // Given a type, the buffer type can be either the same type
+    // or a packed version. E.g., a vector of 8xfp16 can be bitcasted to
+    // a vector of 4xi32. This usually makes the life of the backend easier
+    Type getBufferOpType(Type type);
 
-  // Rewriter utilities
-  RewriterBase &rewriter;
-  Location loc;
-  mlir::triton::AMD::TargetInfo targetInfo;
+    // Rewriter utilities
+    RewriterBase &rewriter;
+    Location loc;
+    mlir::triton::AMD::TargetInfo targetInfo;
 };
 
 } // namespace mlir::LLVM::AMD

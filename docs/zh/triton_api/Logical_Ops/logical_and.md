@@ -6,8 +6,8 @@
 
 ```
 triton.language.semantic.logical_and(
-	input: tl.tensor, 
-	other: tl.tensor, 
+	input: tl.tensor,
+	other: tl.tensor,
 	builder: ir.builder
 ) -> tl.tensor
 ```
@@ -73,4 +73,3 @@ def triton_logical_and_3d(in_ptr0, in_ptr1, out_ptr0, XB, YB, ZB, L: tl.constexp
     odx = lblk_idx[:, None, None] * N * M + mblk_idx[None, :, None] * N + nblk_idx[None, None, :]
     tl.store(out_ptr0 + odx, ret)
 ```
-

@@ -6,12 +6,12 @@
 
 ```python
 triton.language.insert_slice(
-	ful, 
-	sub, 
-	offsets, 
-	sizes, 
-	strides, 
-	_builder=None, 
+	ful,
+	sub,
+	offsets,
+	sizes,
+	strides,
+	_builder=None,
 	_generator=None
 )→ tensor
 ```
@@ -39,7 +39,7 @@ triton.language.insert_slice(
 
 
 |        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | 
+| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- |
 | Ascend A2/A3 | √    | √     | √     | √     | √     | √       | √         |  √       | √    | √    |  √    | ×    |
 
 
@@ -82,5 +82,3 @@ def triton_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
 ## 3. 语义GAP
 
 无语义差异
-
-

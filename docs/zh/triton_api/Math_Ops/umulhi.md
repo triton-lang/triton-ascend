@@ -60,6 +60,3 @@ def umulhi_kernel(X, Y, Z, N: tl.constexpr):
     z = tl.umulhi(x, y)
     tl.store(Z + tl.arange(0, N), z)
 ```
-
-
-

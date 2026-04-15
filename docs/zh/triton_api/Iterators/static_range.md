@@ -56,6 +56,3 @@ def optimized_kernel(x_ptr, y_ptr, BLOCK_SIZE: tl.constexpr):
 ```
 
 `static_range` 通过牺牲代码大小来换取运行时性能，适用于已知且较小的循环次数场景。
-
-
-

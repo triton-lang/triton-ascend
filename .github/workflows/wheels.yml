@@ -7,7 +7,6 @@ on:
   pull_request:
     paths:
       - ".github/workflows/wheels.yml"
-      - "python/**"
   schedule:
     - cron: "0 8 * * *"
 
@@ -88,4 +87,4 @@ jobs:
           mv obsutil* obsutil
 
           obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-north-4.myhuaweicloud.com
-          obsutil/obsutil cp -u python/dist/*.whl obs://triton-build-package-test/triton-ascend/
+          obsutil/obsutil cp -u dist/*.whl obs://triton-build-package-test/triton-ascend/

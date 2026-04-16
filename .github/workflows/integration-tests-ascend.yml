@@ -180,6 +180,7 @@ jobs:
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           LLVM_SYSPATH="${LLVM_SYSPATH}" \
+          TRITON_OFFLINE_BUILD=1 \
           TRITON_BUILD_WITH_CLANG_LLD=true \
           TRITON_BUILD_WITH_O1=true \
           TRITON_BUILD_PROTON=OFF \

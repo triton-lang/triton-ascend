@@ -25,11 +25,9 @@ RUN curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xBA693236
     echo "deb [signed-by=/usr/share/keyrings/deadsnakes-ppa.gpg] http://ppa.launchpad.net/deadsnakes/ppa/ubuntu jammy main" > /etc/apt/sources.list.d/deadsnakes-ppa.list && \
     apt-get update && \
     apt install --yes --no-install-recommends --no-install-suggests \
-    clang \
-    clang-format \
-    cmake \
-    lld \
-    ninja-build \
+    clang-15 \
+    lld-15 \
+    ccache \
     python3-dev \
     python3-venv \
     python3.11 \
@@ -71,6 +69,7 @@ COPY requirements.txt requirements_dev.txt build/
 
 RUN for PY in python3.9 python3.10 python3.11; do \
       ${PY} -m pip install -r build/requirements_dev.txt -qq && \
+      ${PY} -m pip install cmake ninja wheel pybind11 -qq && \
       rm -rf ~/.cache/pip; \
     done && \
     rm -rf build/

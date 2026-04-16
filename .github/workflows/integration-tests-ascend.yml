@@ -79,6 +79,48 @@ jobs:
           mkdir -p ~/.triton && du -h -d 1 ~/.triton
           mkdir -p ~/.ccache && du -h -d 1 ~/.ccache
 
+      - name: Build LLVM from source
+        shell: bash
+        run: |
+          LLVM_INSTALL_PREFIX="$HOME/.triton/llvm/llvm-local-install"
+          if [ -d "${LLVM_INSTALL_PREFIX}" ]; then
+            echo "LLVM already cached at ${LLVM_INSTALL_PREFIX}, skipping build."
+            echo "LLVM_SYSPATH=${LLVM_INSTALL_PREFIX}" >> $GITHUB_ENV
+            exit 0
+          fi
+
+          LLVM_COMMIT=$(cat cmake/llvm-hash.txt | tr -d '[:space:]')
+          LLVM_SHORT=$(echo ${LLVM_COMMIT} | cut -c1-7)
+          PATCH_FILE="third_party/ascend/llvm_patch/${LLVM_SHORT}.patch"
+
+          echo "Building LLVM commit: ${LLVM_COMMIT}"
+          git clone --no-checkout https://github.com/llvm/llvm-project.git /tmp/llvm-project
+          cd /tmp/llvm-project
+          git checkout ${LLVM_COMMIT}
+
+          if [ -f "${GITHUB_WORKSPACE}/${PATCH_FILE}" ]; then
+            echo "Applying patch: ${PATCH_FILE}"
+            git apply "${GITHUB_WORKSPACE}/${PATCH_FILE}"
+          fi
+
+          mkdir build && cd build
+          cmake ../llvm \
+            -G Ninja \
+            -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
+            -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
+            -DCMAKE_LINKER=/usr/bin/lld-15 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
+            -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
+            -DLLVM_ENABLE_LLD=ON \
+            -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
+          ninja install
+          cp bin/FileCheck ${LLVM_INSTALL_PREFIX}/bin/FileCheck
+
+          rm -rf /tmp/llvm-project
+          echo "LLVM_SYSPATH=${LLVM_INSTALL_PREFIX}" >> $GITHUB_ENV
+
       - name: Download and install Bisheng compiler
         shell: bash
         run: |
@@ -136,6 +178,7 @@ jobs:
           ccache --zero-stats
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          LLVM_SYSPATH="${LLVM_SYSPATH}" \
           TRITON_BUILD_WITH_CLANG_LLD=true \
           TRITON_BUILD_WITH_O1=true \
           TRITON_BUILD_PROTON=OFF \

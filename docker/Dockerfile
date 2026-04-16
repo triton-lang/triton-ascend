@@ -23,9 +23,7 @@ RUN curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xBA693236
     | gpg --dearmor > /usr/share/keyrings/deadsnakes-ppa.gpg && \
     chmod 644 /usr/share/keyrings/deadsnakes-ppa.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/deadsnakes-ppa.gpg] http://ppa.launchpad.net/deadsnakes/ppa/ubuntu jammy main" > /etc/apt/sources.list.d/deadsnakes-ppa.list && \
-    apt-get update || true
-
-RUN apt update && \
+    apt-get update && \
     apt install --yes --no-install-recommends --no-install-suggests \
     clang \
     clang-format \

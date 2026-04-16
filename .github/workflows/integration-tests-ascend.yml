@@ -94,8 +94,9 @@ jobs:
           PATCH_FILE="third_party/ascend/llvm_patch/${LLVM_SHORT}.patch"
 
           echo "Building LLVM commit: ${LLVM_COMMIT}"
-          git clone --no-checkout https://github.com/llvm/llvm-project.git /tmp/llvm-project
+          git clone --no-checkout --depth 1 https://github.com/llvm/llvm-project.git /tmp/llvm-project
           cd /tmp/llvm-project
+          git fetch --depth 1 origin ${LLVM_COMMIT}
           git checkout ${LLVM_COMMIT}
 
           if [ -f "${GITHUB_WORKSPACE}/${PATCH_FILE}" ]; then

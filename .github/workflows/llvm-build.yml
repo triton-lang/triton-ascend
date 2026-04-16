@@ -86,7 +86,7 @@ jobs:
         restore-keys: ${{ matrix.config.target-os }}-${{ matrix.config.arch }}-
 
     - name: Free disk space
-      uses: jlumbroso/free-disk-space@main
+      uses: jlumbroso/free-disk-space@v1
       with:
         tool-cache: false
         android: true

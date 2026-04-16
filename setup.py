@@ -530,6 +530,9 @@ class CMakeBuild(build_ext):
     def get_proton_cmake_args(self):
         cmake_args = get_thirdparty_packages([get_json_package_info()])
         cmake_args += self.get_pybind11_cmake_args()
+        ascend_home_path = get_env_with_keys(["ASCEND_HOME_PATH"])
+        if ascend_home_path != "":
+            cmake_args += ["-DASCEND_HOME_PATH=" + ascend_home_path]
         cupti_include_dir = get_env_with_keys(["TRITON_CUPTI_INCLUDE_PATH"])
         if cupti_include_dir == "":
             cupti_include_dir = os.path.join(get_base_dir(), "third_party", "nvidia", "backend", "include")

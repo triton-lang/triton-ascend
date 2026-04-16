@@ -1,4 +1,6 @@
 #include "Device.h"
+#include "Driver/GPU/AscendclApi.h"
+#include "Driver/GPU/AscendrtApi.h"
 #include "Driver/GPU/CudaApi.h"
 #include "Driver/GPU/HipApi.h"
 
@@ -7,6 +9,9 @@
 namespace proton {
 
 Device getDevice(DeviceType type, uint64_t index) {
+  if (type == DeviceType::ASCEND) {
+    return ascend::getDevice(index);
+  }
   if (type == DeviceType::CUDA) {
     return cuda::getDevice(index);
   }
@@ -17,6 +22,9 @@ Device getDevice(DeviceType type, uint64_t index) {
 }
 
 const std::string getDeviceTypeString(DeviceType type) {
+  if (type == DeviceType::ASCEND) {
+    return DeviceTraits<DeviceType::ASCEND>::name;
+  }
   if (type == DeviceType::CUDA) {
     return DeviceTraits<DeviceType::CUDA>::name;
   } else if (type == DeviceType::HIP) {

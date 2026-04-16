@@ -19,6 +19,8 @@ def _select_backend() -> str:
         return "cupti"
     elif backend == "hip":
         return "roctracer"
+    elif backend == "npu":
+        return "ascend"
     else:
         raise ValueError("No backend is available for the current target.")
 
@@ -38,6 +40,8 @@ def _get_backend_default_path(backend: str) -> str:
 def _get_mode_str(backend: str, mode: Optional[Union[str, BaseMode]]) -> str:
     if backend == "instrumentation":
         prefix = triton.runtime.driver.active.get_current_target().backend
+        if prefix == "npu":
+            prefix = "ascend"
         return f"{prefix}:{mode}" if mode else prefix
     return str(mode) if mode else ""
 

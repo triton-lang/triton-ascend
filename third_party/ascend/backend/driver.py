@@ -28,6 +28,8 @@ import sysconfig
 from typing import Optional
 import functools
 import hashlib
+import configparser
+from triton.runtime import _allocation
 from triton.runtime.cache import get_cache_manager, get_dump_manager
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
@@ -39,6 +41,7 @@ from triton.backends.ascend.utils import (
     convert_sigtype_to_int,
     _is_auto_map_parallel_blocks_enabled,
     get_ascend_arch_from_env,
+    _get_ascend_path,
     is_ffts_supported,
     force_disable_ffts,
     get_backend_func
@@ -79,11 +82,31 @@ class NPUUtils(object):
 
     @functools.lru_cache()
     def get_device_properties(self, device):
-        # temperoarily added "max_shared_mem" properties to avoid triton-compiler complain
-        # fetch available memory at runtime
+        arch = self.get_arch()
+        if not arch:
+            raise RuntimeError(
+                "Cannot query device properties: rtGetSocVersion returned empty. "
+                "NPU not available?"
+            )
+
+        ascend_path = _get_ascend_path()
+        platform_config = ascend_path / "compiler" / "data" / "platform_config" / f"{arch}.ini"
+        if not platform_config.is_file():
+            raise RuntimeError(f"Cannot find {platform_config}")
+
+        config = configparser.ConfigParser()
+        config.read(platform_config)
+        # Read from [VectorCoreSpec] because that's what BiShengIR's NPUTargetSpec.td
+        # UbSize matches with; the [AICoreSpec] section can differ on some chips (e.g. 310B).
+        ub_size = config.get("VectorCoreSpec", "ub_size", fallback=None)
+        if ub_size is None:
+            raise RuntimeError("Cannot find [VectorCoreSpec] ub_size")
+
+        ub_size = int(ub_size)
+
         num_aic = self.get_aicore_num()
         num_aiv = num_aic * 2
-        return {"max_shared_mem": 1, "num_aicore": num_aic, "num_vectorcore": num_aiv}
+        return {"max_shared_mem": ub_size, "num_aicore": num_aic, "num_vectorcore": num_aiv}
 
     @functools.lru_cache()
     def get_arch(self):
@@ -109,6 +132,7 @@ class NPULauncher(object):
         constants = src.constants if hasattr(src, "constants") else dict()
         cst_key = lambda i: src.fn.arg_names.index(i) if isinstance(i, str) else i
         constants = {cst_key(key): value for key, value in constants.items()}
+        constants = {key[0] if isinstance(key, tuple) else key: value for key, value in constants.items()}
         signature = {cst_key(key): value for key, value in src.signature.items()}
         wrapper_src = make_launcher(constants, signature, metadata)
         so_launcher_path = make_npu_launcher_stub(header_src, wrapper_src, metadata.debug)
@@ -122,21 +146,42 @@ class NPULauncher(object):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self.launch = getattr(mod, "launch")
+        self.global_scratch_size   = getattr(metadata, "global_scratch_size", 0)
+        self.global_scratch_align  = getattr(metadata, "global_scratch_align", 1)
+        self.profile_scratch_size  = getattr(metadata, "profile_scratch_size", 0)
+        self.profile_scratch_align = getattr(metadata, "profile_scratch_align", 1)
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, gridX, gridY, gridZ, stream, function,
+                 packed_metadata, launch_metadata,
+                 launch_enter_hook, launch_exit_hook,
+                 *kernel_args, **kwargs):
         if self.compile_only:
-            cache_manager = get_cache_manager(args[5]['hash'])
+            cache_manager = get_cache_manager(packed_metadata['hash'])
             print("[INFO]: skip running kernel")
             print(f"[INFO]: The compiled kernel cache is in {cache_manager.cache_dir}")
+            return
         if self.enable_msprof_register_tensor:
-            tensor_params_shape = get_backend_func("get_tensor_params_shape", *args)
-            # args[5] must be the packed metadata.
-            # Check the launch wrapper in which PyArg_ParseTuple specifies the ordering of args
-            args[5]['tensor_params_shape'] = tensor_params_shape
+            tensor_params_shape = get_backend_func("get_tensor_params_shape", *kernel_args)
+            packed_metadata['tensor_params_shape'] = tensor_params_shape
         else:
-            if self.compile_only:
-                return
-            profiler_registered = self.launch(*args, **kwargs)
+            def allocate_scratch(size, align, allocator):
+                if size > 0:
+                    grid_size = gridX * gridY * gridZ
+                    alloc_size = grid_size * size
+                    alloc_fn = allocator.get()
+                    return alloc_fn(alloc_size, align, stream)
+                return None
+
+            global_scratch = allocate_scratch(self.global_scratch_size, self.global_scratch_align, _allocation._allocator)
+            profile_scratch = allocate_scratch(self.profile_scratch_size, self.profile_scratch_align,
+                                               _allocation._profile_allocator)
+
+            profiler_registered = self.launch(
+                gridX, gridY, gridZ, stream, function,
+                global_scratch, profile_scratch,
+                packed_metadata, launch_metadata,
+                launch_enter_hook, launch_exit_hook,
+                *kernel_args, **kwargs)
             import triton
             triton.backends.ascend.utils.TRITON_PROFILER_REGISTERED = True if profiler_registered == 1 else False
 
@@ -475,6 +520,7 @@ def make_launcher(constants, signature, metadata):
         if ty == "void*":
             return "O"
         return {
+            "PyObject*": "O",
             "float": "f",
             "double": "d",
             "long": "l",
@@ -516,7 +562,7 @@ def make_launcher(constants, signature, metadata):
         *args_expand
     """
     args_format = ''.join([format_of(ty) for ty in signature.values()])
-    format = "iiiKKOOOO" + args_format
+    format = "iiiKKOOOOOO" + args_format
     signature = ','.join(map(_serialize_signature, signature.values()))
     signature = list(filter(bool, signature.split(',')))
     signature = {i: s for i, s in enumerate(signature)}
@@ -801,7 +847,12 @@ extern "C" {
 
 {cpp_device_pointer}
 
-static void _launch(const char* kernelName, const void* func, rtStream_t stream, int gridX, int gridY, int gridZ, std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{', ' + arg_decls if len(signature) > 0 else ''}) {{
+static void _launch(
+    const char* kernelName, const void* func, rtStream_t stream,
+    int gridX, int gridY, int gridZ,
+    std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds,
+    void *global_scratch, void *profile_scratch
+    {', ' + arg_decls if len(signature) > 0 else ''}) {{
   // only 1D parallelization is supported for NPU
   // Pointer type becomes flattend 1-D Memref tuple: base_ptr, data_ptr, offset, shape, stride
   // base_ptr offset shape and stride are not used, arbitrarily set for now
@@ -860,6 +911,8 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
       {'void* workspace_addr __attribute__((aligned(8)));' if not metadata.force_simt_only else ''}
       {' '.join(f'{ty_to_cpp(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in signature.items() if i not in constants and ty != "constexpr")}
       {' '.join(f'{ty_to_cpp(ty)} grid{mark} __attribute__((aligned(4)));' for mark, ty in grid_info.items())}
+      {'void* global_scratch __attribute__((aligned(8)));' if metadata.force_simt_only else ''}
+      {'void* profile_scratch __attribute__((aligned(8)));' if metadata.force_simt_only else ''}
       {'void* DTData __attribute__((aligned(8)));' if enable_device_print else ''}
     }} args = {{
       {'static_cast<void*>(ffts_addr),' if target_support_ffts else ''}
@@ -869,6 +922,8 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
         [f'static_cast<{ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if i not in constants and ty != "constexpr"]
       )}
       {', '.join(f'static_cast<{ty_to_cpp(ty)}>(grid{mark})' for mark, ty in grid_info.items())}
+      {', static_cast<void*>(global_scratch)' if metadata.force_simt_only else ''}
+      {', static_cast<void*>(profile_scratch)' if metadata.force_simt_only else ''}
       {', static_cast<void*>(DTData)' if enable_device_print else ''}
     }};
     {cpp_msprof_call_before_launch}
@@ -921,12 +976,15 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
   PyObject *launch_metadata = NULL;
   PyObject *launch_enter_hook = NULL;
   PyObject *launch_exit_hook = NULL;
+  PyObject *global_scratch_obj = NULL;
+  PyObject *profile_scratch_obj = NULL;
   std::vector<std::vector<int64_t>> tensorShapes;
 
   {newline.join([f"{_extracted_type(ty)} _arg{i};" for i, ty in signature.items()])}
   if(!PyArg_ParseTuple(
       args, \"{format}\",
       &gridX, &gridY, &gridZ, &stream, &function,
+      &global_scratch_obj, &profile_scratch_obj,
       &packedMetadata, &launch_metadata,
       &launch_enter_hook, &launch_exit_hook{args_list})) {{
     return NULL;
@@ -949,6 +1007,24 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
       return NULL;
   }}
 
+  void *global_scratch = 0;
+  if (global_scratch_obj != Py_None) {{
+    DevicePtrInfo global_scratch_info = getPointer(global_scratch_obj, -1);
+    if (!global_scratch_info.valid) {{
+      return NULL;
+    }}
+    global_scratch = global_scratch_info.dev_ptr;
+  }}
+
+  void *profile_scratch = 0;
+  if (profile_scratch_obj != Py_None) {{
+    DevicePtrInfo profile_scratch_info = getPointer(profile_scratch_obj, -1);
+    if (!profile_scratch_info.valid) {{
+      return NULL;
+    }}
+    profile_scratch = profile_scratch_info.dev_ptr;
+  }}
+
   // get kernel_name
   PyObject *kernelNameObj = PyDict_GetItemString(packedMetadata, "kernel_name");
   const char *kernelName = PyUnicode_AsUTF8(kernelNameObj);
@@ -965,7 +1041,11 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
 
   // raise exception asap
   {newline.join(ptr_decls)}
-  _launch(kernelName, function, stream, gridX, gridY, gridZ, tensorShapes, tensorKinds{', ' + ', '.join(internal_args_list) if len(internal_args_list) > 0 else ''});
+  _launch(kernelName, function, stream,
+          gridX, gridY, gridZ,
+          tensorShapes, tensorKinds,
+          global_scratch, profile_scratch
+          {', ' + ', '.join(internal_args_list) if len(internal_args_list) > 0 else ''});
   if (PyErr_Occurred()) {{
     return NULL;
   }}

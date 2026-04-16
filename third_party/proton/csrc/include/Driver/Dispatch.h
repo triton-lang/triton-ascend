@@ -11,9 +11,11 @@
 #define DISPATCH_ARGS_2(t1, t2) t1 v1, t2 v2
 #define DISPATCH_ARGS_3(t1, t2, t3) t1 v1, t2 v2, t3 v3
 #define DISPATCH_ARGS_4(t1, t2, t3, t4) t1 v1, t2 v2, t3 v3, t4 v4
-#define DISPATCH_ARGS_N(_4, _3, _2, _1, _0, N, ...) DISPATCH_ARGS##N
+#define DISPATCH_ARGS_5(t1, t2, t3, t4, t5) t1 v1, t2 v2, t3 v3, t4 v4, t5 v5
+#define DISPATCH_ARGS_6(t1, t2, t3, t4, t5, t6) t1 v1, t2 v2, t3 v3, t4 v4, t5 v5, t6 v6
+#define DISPATCH_ARGS_N(_6, _5, _4, _3, _2, _1, _0, N, ...) DISPATCH_ARGS##N
 #define DISPATCH_ARGS(...)                                                     \
-  DISPATCH_ARGS_N(_0, ##__VA_ARGS__, _4, _3, _2, _1, _0)                       \
+  DISPATCH_ARGS_N(_0, ##__VA_ARGS__, _6, _5, _4, _3, _2, _1, _0)               \
   (__VA_ARGS__)
 
 #define DISPATCH_VALS_0()
@@ -21,9 +23,11 @@
 #define DISPATCH_VALS_2(t1, t2) , v1, v2
 #define DISPATCH_VALS_3(t1, t2, t3) , v1, v2, v3
 #define DISPATCH_VALS_4(t1, t2, t3, t4) , v1, v2, v3, v4
-#define DISPATCH_VALS_N(_4, _3, _2, _1, _0, N, ...) DISPATCH_VALS##N
+#define DISPATCH_VALS_5(t1, t2, t3, t4, t5) , v1, v2, v3, v4, v5
+#define DISPATCH_VALS_6(t1, t2, t3, t4, t5, t6) , v1, v2, v3, v4, v5, v6
+#define DISPATCH_VALS_N(_6, _5, _4, _3, _2, _1, _0, N, ...) DISPATCH_VALS##N
 #define DISPATCH_VALS(...)                                                     \
-  DISPATCH_VALS_N(_0, ##__VA_ARGS__, _4, _3, _2, _1, _0)                       \
+  DISPATCH_VALS_N(_0, ##__VA_ARGS__, _6, _5, _4, _3, _2, _1, _0)               \
   (__VA_ARGS__)
 
 #define DEFINE_DISPATCH_TEMPLATE(CheckSuccess, FuncName, ExternLib, FuncType,  \

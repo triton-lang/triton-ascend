@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, Optional, Tuple, Union
+import json
 
 from triton._C.libtriton import ir, passes, ascend
 from triton.backends.ascend.utils import (
@@ -942,6 +943,8 @@ class NPUOptions:
     enable_simt_reorder_instruction: bool = False
     # disable simt fma optimization to get high precision
     disable_fma: bool = False
+    # proton instrumentation mode
+    instrumentation_mode: str = ""
 
     def __post_init__(self):
         # Parse compile_mode and set related fields
@@ -972,7 +975,10 @@ def ttir_to_npubin(mod, metadata, opt):
     # Get Triton-MLIR as string
     ttir_code = str(mod)
     metadata = _parse_ttir_metadata(ttir_code, metadata)
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with (
+        tempfile.TemporaryDirectory() as tmpdir,
+        tempfile.NamedTemporaryFile() as tmpfile
+    ):
         # prepare input
         src_path = os.path.join(tmpdir, "kernel.ttir.mlir")
         Path(src_path).write_text(ttir_code)
@@ -997,6 +1003,9 @@ def ttir_to_npubin(mod, metadata, opt):
                 _compile_option_list += ["--enable-simt-reorder-instruction=true"]
             if opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
+            _compile_option_list += [f"--triton-metadata-output={tmpfile.name}"]
+            if AscendBackend.instrumentation:
+                _compile_option_list += AscendBackend.instrumentation.manager["ttir_to_npubin"]()
             enable_libdevice_simt = triton_enable_libdevice_simt()
             if (enable_libdevice_simt):
                 bisheng_options = metadata["bisheng_options"]
@@ -1028,10 +1037,13 @@ def ttir_to_npubin(mod, metadata, opt):
             print(f"[DEBUG] {bin_path} is not found")
             print(f"[DEBUG] Stderr:\n{error_msg}")
             raise subprocess.CalledProcessError(ret.returncode, cmd_list, ret.stdout, ret.stderr)
+        triton_metadata = json.load(tmpfile)
+        metadata.update(triton_metadata)
         return Path(bin_path).read_bytes()
 
 
 class AscendBackend(BaseBackend):
+    instrumentation = None
 
     @staticmethod
     def supports_target(target: GPUTarget):
@@ -1091,6 +1103,9 @@ class AscendBackend(BaseBackend):
 
     def load_dialects(self, ctx):
         ascend.load_dialects(ctx)
+        ascend.ir.load_dialects(ctx)
+        if AscendBackend.instrumentation:
+            AscendBackend.instrumentation.load_dialects(ctx)
 
     def add_stages(self, stages, options, language):
         if self.target.backend == "npu":

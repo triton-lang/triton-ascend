@@ -1,5 +1,7 @@
 add_proton_library(ProtonDriver
 	Device.cpp
+	GPU/AscendclApi.cpp
+	GPU/AscendrtApi.cpp
 	GPU/CudaApi.cpp
 	GPU/CuptiApi.cpp
 	GPU/HipApi.cpp

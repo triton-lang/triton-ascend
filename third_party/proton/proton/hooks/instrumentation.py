@@ -4,6 +4,7 @@ from typing import Dict, Optional, Union, Any
 import triton
 from triton._C.libtriton import ir as triton_ir
 from triton._C.libtriton import proton as triton_proton
+from triton._C.libtriton import ascend as triton_ascend
 from triton._C.libtriton import amd as triton_amd
 from triton._C.libtriton import nvidia as triton_nvidia
 from triton._C.libtriton import passes as triton_passes
@@ -19,6 +20,29 @@ from .. import mode
 
 # TODO(fywkevin): add support for major.minor
 VERSION = 1
+
+
+class AscendAllocator:
+
+    def __init__(self, instrumentation_hook):
+        self.instrumentation_hook = instrumentation_hook
+
+    def __call__(self, size: int, alignment: int, stream: Optional[int]):
+        if alignment != self.instrumentation_hook.profile_buffer_alignment:
+            raise RuntimeError(
+                f"Alignment mismatch: {alignment} != {self.instrumentation_hook.profile_buffer_alignment}")
+        aligned_size = (size + alignment - 1) // alignment * alignment
+        # Note: profile_buffer_size may be smaller than the aligned size if the kernel launches many blocks
+        # and the host CPU cannot store all profiling data in memory. This streaming mode is not yet implemented.
+        # In the future, we should support copying data incrementally from device to host to enable
+        # more efficient profiling data processing, rather than relying solely on post-processing.
+        aligned_size = max(aligned_size, self.instrumentation_hook.profile_buffer_size)
+
+        # Create the buffer
+        import torch
+        buffer = torch.empty((aligned_size, ), dtype=torch.uint8, device="npu")
+        self.instrumentation_hook.buffer = buffer
+        return buffer
 
 
 class CudaAllocator:
@@ -119,6 +143,8 @@ def _interpret_mode(mode_obj: Union[str, mode.InstrumentationMode]) -> mode.Inst
 
 def _get_backend_name() -> str:
     backend = triton.runtime.driver.active.get_current_target().backend
+    if backend == "npu":
+        return "ascend"
     if backend == "cuda":
         return "nvidia"
     elif backend == "hip":
@@ -141,7 +167,12 @@ class InstrumentationHook(Hook):
         # Mapping of function objects to their scope ID pairs
         self.mode: mode.InstrumentationMode = _interpret_mode(mode_obj)
 
-        self.allocator = CudaAllocator(self)
+        backend_name = _get_backend_name()
+        if backend_name == "ascend":
+            self.allocator = AscendAllocator(self)
+        else:
+            self.allocator = CudaAllocator(self)
+
         self.buffer = None
         self.metadata_path: Dict[Any, Optional[str]] = {}
 
@@ -182,12 +213,41 @@ class InstrumentationHook(Hook):
             elif backend_name == "amd":
                 arch = triton.runtime.driver.active.utils.get_device_properties(device)["arch"].split(":")[0]
                 triton_proton.add_convert_proton_amd_gpu_to_llvm(pm, arch)
+        
+        def to_npubin_args():
+            def enum_to_str(value: bool, dict) -> str:
+                rev = {v: k for k, v in dict.items()}
+                return rev[value]
+            
+            metric_type = enum_to_str(self.mode.metric_type, mode.metric_types)
+            buffer_strategy = enum_to_str(self.mode.buffer_strategy, mode.buffer_strategies)
+            buffer_type = enum_to_str(self.mode.buffer_type, mode.buffer_types)
+            sampling_strategy = enum_to_str(self.mode.sampling_strategy, mode.sampling_strategies)
+            granularity = enum_to_str(self.mode.granularity, mode.granularities)
+            is_long_clk = False if mode.Optimize.CLOCK32 in self.mode.optimizations else True
+
+            return (
+                f"--proton-metric-type={metric_type}",
+                f"--proton-sampling-strategy={sampling_strategy}",
+                f"--proton-sampling-options={self.mode.sampling_options}",
+                f"--proton-granularity={granularity}",
+                f"--proton-buffer-strategy={buffer_strategy}",
+                f"--proton-buffer-type={buffer_type}",
+                f"--proton-buffer-size={self.mode.buffer_size}",
+                f"--proton-max-shared-mem={max_shared_mem}",
+                f"--proton-profile-scratch-size={self.profile_buffer_size}",
+                f"--proton-profile-scratch-alignment={self.profile_buffer_alignment}",
+                f"--proton-clk-ext={is_long_clk}"
+            )
+
 
         backends[backend_name].compiler.instrumentation = Instrumentation({
             "ttgpuir_to_llvmir":
             lambda pm: to_llvmir_passes(pm),
             "llvmir_to_llvm":
             lambda pm: to_llvm_passes(pm),
+            "ttir_to_npubin":
+            lambda: to_npubin_args()
         })
 
         # Set up the profiling allocator
@@ -240,11 +300,17 @@ class InstrumentationHook(Hook):
         ir_path = next((path for key, path in metadata_group.items() if key.endswith(("ttgir"))), None)
         metadata_path = next((path for key, path in metadata_group.items() if key.endswith(("json"))), None)
         self.metadata_path[function] = metadata_path
+        if not ir_path:
+            # ascend SIMT does not generate ttgir
+            ir_path = next((path for key, path in metadata_group.items() if key.endswith(("ttir"))), None)
 
         if ir_path:
             context = triton_ir.context()
             triton_ir.load_dialects(context)
             backend_name = _get_backend_name()
+            if backend_name == "ascend":
+                triton_ascend.load_dialects(context)
+                triton_ascend.ir.load_dialects(context)
             if backend_name == "nvidia":
                 triton_nvidia.load_dialects(context)
             elif backend_name == "amd":

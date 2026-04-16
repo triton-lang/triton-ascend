@@ -4,6 +4,9 @@ set(PROTON_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/csrc")
 set(PROTON_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
 # ============ Check for includes =============
+if(NOT ASCEND_HOME_PATH)
+  message(FATAL_ERROR "Ascend home path not defined")
+endif()
 if(NOT CUPTI_INCLUDE_DIR)
   message(FATAL_ERROR "CUPTI include directory not defined")
 endif()

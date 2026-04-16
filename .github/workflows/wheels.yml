@@ -61,7 +61,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-py${{ matrix.python-version }}-wheels-upload
-          path: python/dist/*.whl
+          path: dist/*.whl
 
       - name: Upload wheels to OBS
         shell: bash

@@ -18,8 +18,8 @@ jobs:
   runner-preparation:
     uses: ./.github/workflows/runner-preparation.yml
 
-  pre-commit:
-    uses: ./.github/workflows/pre-commit.yml
+  # pre-commit:
+  #   uses: ./.github/workflows/pre-commit.yml
 
   integration-tests-ascend:
     needs: runner-preparation

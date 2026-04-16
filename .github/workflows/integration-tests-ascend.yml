@@ -45,7 +45,7 @@ jobs:
             ca-certificates ninja-build libzstd-dev \
             git zlib1g-dev \
             clang clang-15 lld-15 ccache
-          ${PYTHON} -m pip install cmake ninja -qq
+          ${PYTHON} -m pip install cmake ninja
 
       - name: Compute cache keys
         id: cache-key
@@ -145,7 +145,7 @@ jobs:
           IS_MANYLINUX="${IS_MANYLINUX:-False}" \
           TRITON_WHEEL_VERSION_SUFFIX="${TRITON_WHEEL_VERSION_SUFFIX:-rc3}" \
           ${PYTHON} setup.py bdist_wheel
-          ${PYTHON} -m pip install python/dist/*.whl -qq
+          ${PYTHON} -m pip install dist/*.whl
 
       - name: CCache stats
         run: ccache --print-stats

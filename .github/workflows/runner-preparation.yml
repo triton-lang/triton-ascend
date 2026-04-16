@@ -3,31 +3,25 @@ name: Runner Preparation
 on:
   workflow_call:
     outputs:
-      matrix-NVIDIA:
-        value: ${{ jobs.prepare.outputs.matrix-NVIDIA }}
-      matrix-AMD:
-        value: ${{ jobs.prepare.outputs.matrix-AMD }}
-      matrix-MACOS:
-        value: ${{ jobs.prepare.outputs.matrix-MACOS }}
+      matrix-ASCEND:
+        value: ${{ jobs.prepare.outputs.matrix-ASCEND }}
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
-      matrix-NVIDIA: ${{ steps.set-matrix.outputs.matrix-NVIDIA }}
-      matrix-AMD: ${{ steps.set-matrix.outputs.matrix-AMD }}
-      matrix-MACOS: ${{ steps.set-matrix.outputs.matrix-MACOS }}
+      matrix-ASCEND: ${{ steps.set-matrix.outputs.matrix-ASCEND }}
     steps:
       - name: Decide pre-submit integration test enablement
         # Always enable integration tests for pre-submit pull requests.
         if: github.event_name == 'pull_request'
-        run: |
-          echo "enable_integration=true" >> $GITHUB_ENV
+        run: echo "enable_integration=true" >> $GITHUB_ENV
+
       - name: Decide manual trigger integration test enablement
-        # Always enable integration tests when manually triggered
+        # Always enable integration tests when manually triggered.
         if: github.event_name == 'workflow_dispatch'
-        run: |
-          echo "enable_integration=true" >> $GITHUB_ENV
+        run: echo "enable_integration=true" >> $GITHUB_ENV
+
       - name: Checkout post-submit commits
         if: github.event_name == 'push'
         uses: actions/checkout@v4
@@ -58,10 +52,14 @@ jobs:
             "https://api.github.com/repos/$REPO_NAME/actions/workflows/$WORKFLOW_ID/runs?branch=main&status=success&per_page=1" \
             | jq -r '.workflow_runs[0].updated_at')
 
-          # Convert to timestamp
-          LAST_RUN_TS=$(date -d "$LAST_RUN" +%s)
-          NOW_TS=$(date +%s)
-          DIFF=$(( (NOW_TS - LAST_RUN_TS) / 3600 )) # Difference in hours
+          if [ -z "$LAST_RUN" ] || [ "$LAST_RUN" = "null" ]; then
+            # No previous run found, set DIFF to large value to trigger test run
+            DIFF=9999
+          else
+            LAST_RUN_TS=$(date -d "$LAST_RUN" +%s)
+            NOW_TS=$(date +%s)
+            DIFF=$(( (NOW_TS - LAST_RUN_TS) / 3600 )) # Difference in hours
+          fi
 
           echo "Last run was $DIFF hours ago."
 
@@ -82,24 +80,18 @@ jobs:
       # caching is to speed up CI).
       #
       # As a compromise, run every N hours, or if a build dependency changes
-      # (e.g.  we update the LLVM hash).
+      # (e.g. we update the LLVM hash).
       - name: Decide whether to run integration tests post-submit
         if: |
           github.event_name == 'push' &&
           (steps.detect-change.outputs.any_changed == 'true' ||
            env.n_hours_since_last_run == 'true')
-        run: |
-          echo "enable_integration=true" >> $GITHUB_ENV
+        run: echo "enable_integration=true" >> $GITHUB_ENV
+
       - name: Prepare runner matrix
         id: set-matrix
         if: env.enable_integration == 'true'
         run: |
-          if [ x"${{ github.repository }}" == x"triton-lang/triton" ]; then
-            echo '::set-output name=matrix-NVIDIA::[["nvidia-a100"], ["nvidia-h100"], ["nvidia-gb200"]]'
-            echo '::set-output name=matrix-AMD::[["self-hosted", "gfx90a"], ["amd-gfx942"], ["amd-gfx950"]]'
-            echo '::set-output name=matrix-MACOS::[["macos-latest"]]'
-          else
-            echo '::set-output name=matrix-NVIDIA::["ubuntu-latest"]'
-            echo '::set-output name=matrix-AMD::["ubuntu-latest"]'
-            echo '::set-output name=matrix-MACOS::[["macos-latest"]]'
+          if [ x"${{ github.repository }}" == x"triton-lang/triton-ascend" ]; then
+            echo 'matrix-ASCEND=[{"name":"linux-aarch64-a3-4","runner_type":"linux-aarch64-a3-4","runs_on":["linux-aarch64-a3-4"]}]' >> $GITHUB_OUTPUT
           fi

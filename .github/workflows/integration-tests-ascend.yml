@@ -1,0 +1,167 @@
+name: Integration Tests NPU
+
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        required: true
+        type: string
+
+jobs:
+  integration-tests-ascend:
+    name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.config.runs_on }}
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton/triton:dev-latest-A3
+    timeout-minutes: 300
+    strategy:
+      matrix:
+        config: ${{ fromJson(inputs.matrix) }}
+        python-version: ['3.9', '3.10', '3.11']
+      fail-fast: false
+    env:
+      RUNNER_TYPE: ${{ matrix.config.runner_type }}
+      TRITON_BUILD_WITH_CCACHE: "true"
+      TRITON_BUILD_WITH_CLANG_LLD: "TRUE"
+      TRITON_USE_ASSERT_ENABLED_LLVM: "TRUE"
+      TRITON_DISABLE_LINE_INFO: 1
+      PROTON_SKIP_PC_SAMPLING_TEST: 1
+      PYTHON: "python${{ matrix.python-version }}"
+      CCACHE_COMPRESS: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: "true"
+
+      - name: Add git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install OS prerequisites
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends \
+            ca-certificates ninja-build libzstd-dev \
+            git zlib1g-dev \
+            clang clang-15 lld-15 ccache
+          ${PYTHON} -m pip install cmake ninja -qq
+
+      - name: Compute cache keys
+        id: cache-key
+        shell: bash
+        run: |
+          llvm_file="cmake/llvm-hash.txt"
+          req_file="requirements_dev.txt"
+          json_file="cmake/json-version.txt"
+
+          if [[ ! -f "$llvm_file" || ! -f "$req_file" || ! -f "$json_file" ]]; then
+            echo "Error: Required dependency files are missing."
+            exit 1
+          fi
+
+          echo "llvm=$(cut -c 1-8 $llvm_file)" >> $GITHUB_OUTPUT
+          echo "req=$(sha256sum $req_file | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
+          echo "json=$(cat $json_file)" >> $GITHUB_OUTPUT
+
+      - name: Cache build dependencies
+        uses: actions/cache@v4
+        with:
+          # Note that we cannot use environment variables here given there is
+          # no shell to interpret them in the paths.
+          path: |
+            ~/.triton/llvm
+            ~/.triton/json
+          key: ${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python-version }}-llvm-${{ steps.cache-key.outputs.llvm }}-req-${{ steps.cache-key.outputs.req }}-json-${{ steps.cache-key.outputs.json }}
+
+      - name: Inspect cache directories
+        run: |
+          mkdir -p ~/.triton && du -h -d 1 ~/.triton
+          mkdir -p ~/.ccache && du -h -d 1 ~/.ccache
+
+      - name: Download and install Bisheng compiler
+        shell: bash
+        run: |
+          OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
+          BISHENG_FILENAME=$(sed -n '1p' cmake/bisheng-version.txt)
+          BISHENG_SHA256=$(sed -n '2p' cmake/bisheng-version.txt | sed 's/^sha256://')
+
+          if [ -z "${BISHENG_FILENAME}" ]; then
+            echo "Error: bisheng filename not found in cmake/bisheng-version.txt"
+            exit 1
+          fi
+
+          echo "Downloading: ${BISHENG_FILENAME}"
+          curl -fL "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
+
+          if [ -n "${BISHENG_SHA256}" ]; then
+            echo "Verifying SHA256 checksum..."
+            echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
+          else
+            echo "Warning: No SHA256 checksum provided, skipping verification"
+          fi
+
+          chmod +x bisheng.run
+          ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
+          echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
+
+      - name: Update PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Setup Python environment
+        run: |
+          echo "/venv/bin" >> $GITHUB_PATH
+          echo "VIRTUAL_ENV=/venv" >> $GITHUB_ENV
+          echo "PYTHONHOME=" >> $GITHUB_ENV
+
+      - name: Install NPU test dependencies
+        run: |
+          ${PYTHON} -m pip install -r requirements.txt -r requirements_dev.txt \
+            -i https://repo.huaweicloud.com/repository/pypi/simple/
+          ${PYTHON} -m pip install torch==2.7.1 torch_npu==2.7.1 mindspore \
+            -i https://repo.huaweicloud.com/repository/pypi/simple/
+
+      - name: Build and install triton-ascend
+        shell: bash
+        run: |
+          nproc
+          source /usr/local/Ascend/cann/set_env.sh
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          npu-smi info
+          if [ -n "${ASCEND_TOOLKIT_HOME}" ] && [ -f "${ASCEND_TOOLKIT_HOME}/cann/version.info" ]; then
+            cat "${ASCEND_TOOLKIT_HOME}/cann/version.info"
+          fi
+          echo "PATH is '$PATH'"
+
+          ccache --zero-stats
+          NUM_PROCS=$(( $(nproc) / 3 ))
+          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          TRITON_BUILD_WITH_CLANG_LLD=true \
+          TRITON_BUILD_WITH_O1=true \
+          TRITON_BUILD_PROTON=OFF \
+          TRITON_WHEEL_NAME="triton-ascend" \
+          TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
+          MAX_JOBS="$NUM_PROCS" \
+          IS_MANYLINUX="${IS_MANYLINUX:-False}" \
+          TRITON_WHEEL_VERSION_SUFFIX="${TRITON_WHEEL_VERSION_SUFFIX:-rc3}" \
+          ${PYTHON} setup.py bdist_wheel
+          ${PYTHON} -m pip install python/dist/*.whl -qq
+
+      - name: CCache stats
+        run: ccache --print-stats
+
+      - name: Run unit tests on NPU
+        shell: bash
+        run: |
+          source /usr/local/Ascend/cann/set_env.sh
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          NUM_PROCS=$(( $(nproc) / 9 ))
+          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
+          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/autotune_ut
+          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/kernels/test_triton_kernel.py
+
+      - name: Inspect cache directories
+        run: |
+          mkdir -p ~/.triton && du -h -d 1 ~/.triton
+          mkdir -p ~/.ccache && du -h -d 1 ~/.ccache

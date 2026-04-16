@@ -18,7 +18,7 @@ on:
 jobs:
 
   release:
-    if: ${{ github.repository == 'triton-lang/triton' }}
+    if: ${{ github.repository == 'triton-lang/triton-ascend' }}
     name: Create Release
     runs-on: ubuntu-latest
     permissions:
@@ -49,10 +49,11 @@ jobs:
             # important: version must be fixed in setup.py
             sed -i -e "s:^TRITON_VERSION = .*:TRITON_VERSION = '${tag_or_branch}':" setup.py || exit 1
           fi
-          echo "RELEASE_NAME=triton-$tag_or_branch" >> "$GITHUB_ENV"
+          echo "RELEASE_NAME=triton-ascend$tag_or_branch" >> "$GITHUB_ENV"
       - name: Create source distribution
         run: |
-          pip install build || exit 1
+          python -m pip install --upgrade pip || exit 1
+          python -m pip install "setuptools<70" wheel build || exit 1
           python -m build -s || exit 1
           cd dist || exit 1
           release_file=( *.tar.gz )
@@ -61,7 +62,7 @@ jobs:
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/${{env.RELEASE_FILE}}
+          files: dist/${{ env.RELEASE_FILE }}
       - name: Upload source distribution to GHA artifacts for release tags
         if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
         uses: actions/upload-artifact@v4.4.0

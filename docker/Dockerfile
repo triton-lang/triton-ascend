@@ -1,18 +1,8 @@
-FROM ubuntu:22.04
+FROM ubuntu:22.04 AS base
 
 SHELL ["/bin/bash", "-c"]
-ARG CHIP_TYPE=A3
-ARG CANN_VERSION=8.5.0
-ENV DEBIAN_FRONTEND=noninteractive \
-    TZ="Asia/shanghai" \
-    CHIP_TYPE=${CHIP_TYPE} \
-    CANN_VERSION=${CANN_VERSION}
-
-RUN \
-    echo "===== 镜像构建参数 =====" && \
-    echo "CHIP_TYPE: ${CHIP_TYPE}" && \
-    echo "CANN_VERSION: ${CANN_VERSION}" && \
-    echo "========================"
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ="Asia/shanghai"
 
 RUN apt update && \
     apt install --yes --no-install-recommends --no-install-suggests \
@@ -21,7 +11,6 @@ RUN apt update && \
     curl \
     git \
     gnupg \
-    make \
     sudo \
     unzip \
     vim \
@@ -31,16 +20,17 @@ RUN apt update && \
     update-ca-certificates
 
 RUN curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xBA6932366A755776" \
-    | gpg --dearmor > /usr/share/keyrings/deadsnakes-ppa.gpg  && \
+    | gpg --dearmor > /usr/share/keyrings/deadsnakes-ppa.gpg && \
     chmod 644 /usr/share/keyrings/deadsnakes-ppa.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/deadsnakes-ppa.gpg] http://ppa.launchpad.net/deadsnakes/ppa/ubuntu jammy main" > /etc/apt/sources.list.d/deadsnakes-ppa.list && \
     apt-get update || true
 
-RUN apt install --yes --no-install-recommends --no-install-suggests \
-    clang-15 \
+RUN apt update && \
+    apt install --yes --no-install-recommends --no-install-suggests \
+    clang \
     clang-format \
     cmake \
-    lld-15 \
+    lld \
     ninja-build \
     python3-dev \
     python3-venv \
@@ -76,31 +66,43 @@ RUN curl -sSLk https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && \
     rm -f /usr/local/bin/pip /usr/local/bin/pip3 && \
     update-alternatives --set python /usr/bin/python3.10
 
-# Install triton requirments
-COPY Makefile requirements.txt requirements_dev.txt  build/
-COPY cmake/llvm-hash.txt build/cmake/
+# ── build stage: build tools only, no CANN ──────────────────────────────────
+FROM base AS build
 
-RUN cd build && \
-    make install-deps && \
-    make install-cann && \
-    for PY in python3.9 python3.10 python3.11; do \
-      make install-dev-reqs PYTHON=${PY} && \
-      make install-rt-reqs PYTHON=${PY} && \
-      rm -f .req_rt_installed .req_dev_installed && \
+COPY requirements.txt requirements_dev.txt build/
+
+RUN for PY in python3.9 python3.10 python3.11; do \
+      ${PY} -m pip install -r build/requirements_dev.txt -qq && \
       rm -rf ~/.cache/pip; \
     done && \
-    cd .. && \
-    rm -rf build
+    rm -rf build/
 
-# Install triton for 3.9/3.10/3.11 python dev
-COPY . triton-ascend/
-RUN cd triton-ascend && \
-    cd python && \
-    for PY in python3.9 python3.10 python3.11; do \
-      ${PY} setup.py clean --all && \
-      ${PY} -m pip install . ; \
-    done && \
-    cd ..
+WORKDIR /home/triton
 
-RUN echo "export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64/common/:/usr/local/Ascend/driver/lib64/driver/:\$LD_LIBRARY_PATH" >> ~/.bashrc && \
-    echo "source /usr/local/Ascend/cann/set_env.sh" >> ~/.bashrc
+# ── release stage: full runtime with CANN ───────────────────────────────────
+FROM base AS release
+
+ARG NPU_TYPE
+ENV NPU_TYPE=${NPU_TYPE}
+
+COPY requirements.txt requirements_dev.txt build/
+
+RUN for PY in python3.9 python3.10 python3.11; do \
+    ${PY} -m pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu -qq && \
+    ${PY} -m pip install -r build/requirements_dev.txt && \
+    ${PY} -m pip install -r build/requirements.txt -qq && \
+    rm -rf ~/.cache/pip; \
+  done
+
+RUN ARCH=$(uname -i) && \
+  TOOLKIT_URL="https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%209.0.T2/Ascend-cann-toolkit_9.0.0-beta.1_linux-${ARCH}.run" && \
+  KERNEL_URL="https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%209.0.T2/Ascend-cann-${NPU_TYPE}-ops_9.0.0-beta.1_linux-${ARCH}.run" && \
+  curl -sSL "${TOOLKIT_URL}" -o build/Ascend-cann-toolkit.run && \
+  curl -sSL "${KERNEL_URL}" -o build/Ascend-cann-kernels.run && \
+  chmod +x build/Ascend-cann-toolkit.run build/Ascend-cann-kernels.run && \
+  build/Ascend-cann-toolkit.run --full --quiet && \
+  build/Ascend-cann-kernels.run --install --quiet && \
+  rm -rf build/
+
+RUN echo "source /usr/local/Ascend/cann/set_env.sh" >> ~/.bashrc && \
+    echo "export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64/common/:/usr/local/Ascend/driver/lib64/driver/:$LD_LIBRARY_PATH" >> ~/.bashrc

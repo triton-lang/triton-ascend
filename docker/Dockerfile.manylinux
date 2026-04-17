@@ -80,5 +80,5 @@ RUN ARCH=$(uname -i) && \
   build/Ascend-cann-kernels.run --install --quiet && \
   rm -rf build/
 
-RUN echo "source /usr/local/Ascend/cann/set_env.sh" >> ~/.bashrc && \
-    echo "export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64/common/:/usr/local/Ascend/driver/lib64/driver/:$LD_LIBRARY_PATH" >> ~/.bashrc
+RUN echo "export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64/common/:/usr/local/Ascend/driver/lib64/driver/:$LD_LIBRARY_PATH" >> ~/.bashrc&& \
+    echo "source /usr/local/Ascend/cann/set_env.sh" >> ~/.bashrc

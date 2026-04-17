@@ -17,6 +17,7 @@ RUN apt update && \
     curl \
     git \
     gnupg \
+    make \
     sudo \
     unzip \
     vim \
@@ -32,7 +33,10 @@ RUN curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xBA693236
     apt-get update && \
     apt install --yes --no-install-recommends --no-install-suggests \
     clang-15 \
+    clang-format \
+    cmake \
     lld-15 \
+    ninja-build \
     ccache \
     python3-dev \
     python3-venv \
@@ -107,5 +111,5 @@ RUN ARCH=$(uname -i) && \
   build/Ascend-cann-kernels.run --install --quiet && \
   rm -rf build/
 
-RUN echo "source /usr/local/Ascend/cann/set_env.sh" >> ~/.bashrc && \
-    echo "export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64/common/:/usr/local/Ascend/driver/lib64/driver/:$LD_LIBRARY_PATH" >> ~/.bashrc
+RUN echo "export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64/common/:/usr/local/Ascend/driver/lib64/driver/:$LD_LIBRARY_PATH" >> ~/.bashrc&& \
+    echo "source /usr/local/Ascend/cann/set_env.sh" >> ~/.bashrc

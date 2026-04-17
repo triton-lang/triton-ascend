@@ -15,13 +15,13 @@ jobs:
       - name: Decide pre-submit integration test enablement
         # Always enable integration tests for pre-submit pull requests.
         if: github.event_name == 'pull_request'
-        run: echo "enable_integration=true" >> $GITHUB_ENV
-
+        run: |
+          echo "enable_integration=true" >> $GITHUB_ENV
       - name: Decide manual trigger integration test enablement
         # Always enable integration tests when manually triggered.
         if: github.event_name == 'workflow_dispatch'
-        run: echo "enable_integration=true" >> $GITHUB_ENV
-
+        run: |
+          echo "enable_integration=true" >> $GITHUB_ENV
       - name: Checkout post-submit commits
         if: github.event_name == 'push'
         uses: actions/checkout@v4
@@ -80,14 +80,14 @@ jobs:
       # caching is to speed up CI).
       #
       # As a compromise, run every N hours, or if a build dependency changes
-      # (e.g. we update the LLVM hash).
+      # (e.g.  we update the LLVM hash).
       - name: Decide whether to run integration tests post-submit
         if: |
           github.event_name == 'push' &&
           (steps.detect-change.outputs.any_changed == 'true' ||
            env.n_hours_since_last_run == 'true')
-        run: echo "enable_integration=true" >> $GITHUB_ENV
-
+        run: |
+          echo "enable_integration=true" >> $GITHUB_ENV
       - name: Prepare runner matrix
         id: set-matrix
         if: env.enable_integration == 'true'

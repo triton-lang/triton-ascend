@@ -15,6 +15,9 @@ ENV PY39=/opt/python/cp39-cp39/bin/python3.9
 ENV PY310=/opt/python/cp310-cp310/bin/python3.10
 ENV PY311=/opt/python/cp311-cp311/bin/python3.11
 
+# Configure dnf to retry on transient network failures
+RUN echo "retries=3" >> /etc/dnf/dnf.conf
+
 # Install build tools via dnf (AlmaLinux 8)
 RUN dnf install -y \
     clang \

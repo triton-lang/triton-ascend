@@ -4,6 +4,9 @@ SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ="Asia/shanghai"
 
+# Configure apt to retry on transient network failures
+RUN echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
+
 RUN apt update && \
     apt install --yes --no-install-recommends --no-install-suggests \
     bash \

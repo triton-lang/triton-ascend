@@ -12,7 +12,7 @@ permissions: read-all
 jobs:
 
   Build-Wheels:
-    timeout-minutes: 240
+    timeout-minutes: 360
     runs-on: ${{ matrix.config.runs_on }}
 
     strategy:
@@ -44,10 +44,17 @@ jobs:
 
       - name: Build wheels
         run: |
-          python3 -m pip install cibuildwheel --upgrade
+          python --version
+          # Make sure cibuildwheel is updated to latest, this will enable latest python builds
+          python3 -m pip install cibuildwheel --upgrade --user
+          # Pass MAX_JOBS=4 because, at time of writing, the VM "only" has 32GB
+          # of RAM and OOMs while building if we give it the default number of
+          # workers (2 * NUM_CPUs).
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
 
+          # required to build Python 3.14 with cibuildwheel 2.23.3
+          # todo: Need to update system Python to 3.11 and update cibuildwheel to latest
           export CIBW_ENVIRONMENT="MAX_JOBS=${NUM_PROCS} \
             TRITON_BUILD_WITH_CLANG_LLD=true \
             TRITON_BUILD_PROTON=OFF \
@@ -55,6 +62,8 @@ jobs:
             TRITON_APPEND_CMAKE_ARGS='-DTRITON_BUILD_UT=OFF' \
             TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX:-rc3}"
 
+          # many_linux_2_28 image comes with GCC 12.2.1, but not clang.
+          # With this install, it gets clang 16.0.6.
           export CIBW_BEFORE_ALL="dnf install -y clang lld ccache"
 
           if [[ ${{ matrix.config.arch }} == 'x86_64' ]]; then

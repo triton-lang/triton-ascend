@@ -30,7 +30,7 @@ jobs:
       matrix:
         config:
         - {runner: 'Ubuntu 22.04', runs_on: 'ubuntu-22.04', target-os: 'ubuntu', arch: 'amd64'}
-        - {runner: 'Ubuntu 22.04 ARM64', runs_on: 'ubuntu-22.04', target-os: 'ubuntu', arch: 'arm64'}
+        - {runner: 'Ubuntu 22.04 ARM64', runs_on: 'ubuntu-22.04-arm', target-os: 'ubuntu', arch: 'arm64'}
 
     steps:
 

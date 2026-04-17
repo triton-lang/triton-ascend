@@ -29,6 +29,10 @@ jobs:
       contents: read
 
     steps:
+
+      - name: Prune stale docker containers
+        run: docker container prune -f
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -95,4 +99,4 @@ jobs:
           mv obsutil* obsutil
 
           obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-north-4.myhuaweicloud.com
-          obsutil/obsutil cp -u wheelhouse/*.whl obs://triton-build-package-test/triton-ascend/
+          obsutil/obsutil cp -u wheelhouse/*.whl obs://triton-ascend-artifacts/triton-ascend/

@@ -151,7 +151,7 @@ jobs:
 
         obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-north-4.myhuaweicloud.com
 
-        obsutil/obsutil cp -u "${{ env.llvm_install_dir }}.tar.gz" obs://triton-build-package-test/llvm-builds/
+        obsutil/obsutil cp -u "${{ env.llvm_install_dir }}.tar.gz" obs://triton-ascend-artifacts/llvm-builds/
 
     - name: Dump Sccache Statistics
       run: sccache --show-stats

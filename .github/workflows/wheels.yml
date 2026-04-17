@@ -49,6 +49,7 @@ jobs:
             TRITON_APPEND_CMAKE_ARGS='-DTRITON_BUILD_UT=OFF' \
             TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX:-rc3}"
 
+          export CIBW_BEFORE_BUILD="pip install nanobind>=2.4"
           export CIBW_BEFORE_ALL="dnf install -y clang lld ccache"
 
           if [[ "${{ matrix.config.arch }}" == "x86_64" ]]; then

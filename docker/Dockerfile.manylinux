@@ -42,7 +42,7 @@ FROM base AS build
 COPY requirements.txt requirements_dev.txt build/
 
 RUN for PY in ${PY39} ${PY310} ${PY311}; do \
-      ${PY} -m pip install -r build/requirements_dev.txt -qq && \
+      ${PY} -m pip install -r build/requirements_dev.txt && \
       rm -rf ~/.cache/pip; \
     done && \
     rm -rf build/
@@ -58,9 +58,9 @@ ENV NPU_TYPE=${NPU_TYPE}
 COPY requirements.txt requirements_dev.txt build/
 
 RUN for PY in ${PY39} ${PY310} ${PY311}; do \
-    ${PY} -m pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu -qq && \
+    ${PY} -m pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu && \
     ${PY} -m pip install -r build/requirements_dev.txt && \
-    ${PY} -m pip install -r build/requirements.txt -qq && \
+    ${PY} -m pip install -r build/requirements.txt && \
     rm -rf ~/.cache/pip; \
   done
 
@@ -80,5 +80,5 @@ RUN ARCH=$(uname -i) && \
   build/Ascend-cann-kernels.run --install --quiet && \
   rm -rf build/
 
-RUN echo "export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64/common/:/usr/local/Ascend/driver/lib64/driver/:$LD_LIBRARY_PATH" >> ~/.bashrc&& \
+RUN echo "export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64/common/:/usr/local/Ascend/driver/lib64/driver/:\$LD_LIBRARY_PATH" >> ~/.bashrc && \
     echo "source /usr/local/Ascend/cann/set_env.sh" >> ~/.bashrc

@@ -81,12 +81,8 @@ jobs:
             exit 1
           fi
 
-          ARCH="${{ matrix.config.arch }}"
-          if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; fi
-          if [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi
-
-          OBSUTIL_URL="https://obs-community-intl.obs.ap-southeast-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${ARCH}.tar.gz"
-
+          OBSUTIL_URL="https://obs-community-intl.obs.ap-southeast-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${{ matrix.config.arch == 'x86_64' && 'amd64' || 'arm64' }}.tar.gz"
+          
           curl -fL "$OBSUTIL_URL" -o obsutil.tar.gz
 
           file obsutil.tar.gz | grep -q gzip || {
@@ -98,5 +94,5 @@ jobs:
           rm -f obsutil.tar.gz
           mv obsutil* obsutil
 
-          obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-north-4.myhuaweicloud.com
+          obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-southwest-2.myhuaweicloud.com
           obsutil/obsutil cp -u wheelhouse/*.whl obs://triton-ascend-artifacts/triton-ascend/

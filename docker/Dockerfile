@@ -4,8 +4,11 @@ SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ="Asia/shanghai"
 
-# Configure apt to retry on transient network failures
-RUN echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
+# Configure apt: use mirror, retry on failures, reduce timeouts
+RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.huaweicloud.com|g' /etc/apt/sources.list && \
+    sed -i 's|http://security.ubuntu.com|http://mirrors.huaweicloud.com|g' /etc/apt/sources.list && \
+    echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries
 
 RUN apt update && \
     apt install --yes --no-install-recommends --no-install-suggests \

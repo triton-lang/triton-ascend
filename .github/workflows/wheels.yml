@@ -22,6 +22,7 @@ jobs:
         - {runs_on: 'ubuntu-22.04', arch: 'x86_64'}
         - {runs_on: 'ubuntu-22.04-arm', arch: 'aarch64'}
 
+
     permissions:
       id-token: write
       contents: read
@@ -55,6 +56,7 @@ jobs:
 
           # required to build Python 3.14 with cibuildwheel 2.23.3
           # todo: Need to update system Python to 3.11 and update cibuildwheel to latest
+
           export CIBW_ENVIRONMENT="MAX_JOBS=${NUM_PROCS} \
             TRITON_BUILD_WITH_CLANG_LLD=true \
             TRITON_BUILD_PROTON=OFF \
@@ -64,7 +66,7 @@ jobs:
 
           # many_linux_2_28 image comes with GCC 12.2.1, but not clang.
           # With this install, it gets clang 16.0.6.
-          export CIBW_BEFORE_ALL="dnf install -y clang lld ccache"
+          export CIBW_BEFORE_ALL="dnf install clang lld ccache -y"
 
           if [[ ${{ matrix.config.arch }} == 'x86_64' ]]; then
             export CIBW_MANYLINUX_X86_64_IMAGE="quay.io/pypa/manylinux_2_28_${{ matrix.config.arch }}:latest"

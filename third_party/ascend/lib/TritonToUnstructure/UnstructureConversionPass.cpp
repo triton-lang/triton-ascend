@@ -21,11 +21,10 @@
  */
 
 #include "TritonToUnstructure/UnstructureConversionPass.h"
-#include "TritonToStructured/CannonicalizerConverter.h"
 #include "TritonToLinalg/MaskAnalysis.h"
+#include "TritonToStructured/CannonicalizerConverter.h"
 #include "Utils/Utils.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
-
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
@@ -231,7 +230,8 @@ UnstructuredMemAccessConverter<MemAccOpTy>::UnstructuredMemAccessConverter(
     const llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
     const llvm::SmallDenseMap<Value, bool> &fromTensorArg)
     : OpRewritePattern<MemAccOpTy>(context),
-      forceScalarizeMode(forceScalarizeMode), offsetMap(offsetMap), fromTensorArg(fromTensorArg) {}
+      forceScalarizeMode(forceScalarizeMode), offsetMap(offsetMap),
+      fromTensorArg(fromTensorArg) {}
 
 template <typename MemAccOpTy>
 LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
@@ -259,8 +259,9 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
 
   if (ptrOffsetInfo.isStructured() && !isDiscreteMask &&
-      (!ptrOffsetInfo.isScalarLike() || llvm::all_of(ptrType.getShape(), [](int64_t dim) { return dim == 1; })))
-      return failure();
+      (!ptrOffsetInfo.isScalarLike() ||
+       llvm::all_of(ptrType.getShape(), [](int64_t dim) { return dim == 1; })))
+    return failure();
 
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
@@ -344,15 +345,18 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
     os << "UnStructured Flag check:\n";
-    os << "ptrOffsetInfo.isStructured: " << ptrOffsetInfo.isStructured() << "\n";
+    os << "ptrOffsetInfo.isStructured: " << ptrOffsetInfo.isStructured()
+       << "\n";
     os << "compileOn91095Flag: " << compileOn91095Flag << "\n";
     os << "forceSimtTemplateFlag: " << forceSimtTemplateFlag << "\n";
   });
 
   // Fast path on A5: rewrite tt.load/store to tt.indirect_load/store directly.
-  if (compileOn91095Flag && forceSimtTemplateFlag && (ptrOffsetInfo.isUnstructuredOrScalarlike() || isDiscreteMask)) {
+  if (compileOn91095Flag && forceSimtTemplateFlag &&
+      (ptrOffsetInfo.isUnstructuredOrScalarlike() || isDiscreteMask)) {
     if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-      assert(isa<triton::PointerType>(srcPtr.getType()) && "src must be ptr type");
+      assert(isa<triton::PointerType>(srcPtr.getType()) &&
+             "src must be ptr type");
       Value mask = op.getMask();
       Value other = op.getOther();
       auto resultType = op.getType();
@@ -366,7 +370,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       });
       return success();
     } else if constexpr (std::is_same_v<MemAccOpTy, triton::StoreOp>) {
-      assert(isa<triton::PointerType>(srcPtr.getType()) && "src must be ptr type");
+      assert(isa<triton::PointerType>(srcPtr.getType()) &&
+             "src must be ptr type");
       Value value = op.getValue();
       Value mask = op.getMask();
       auto indirect = rewriter.create<triton::ascend::IndirectStoreOp>(
@@ -399,7 +404,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   for (size_t i = 0; i < resultShape.size(); i++) {
     auto size = resultShape[i];
-    auto structured = ptrOffsetInfo.getStructuredRef()[i] == PtrOffsetInfo::AxisInfo::structured;
+    auto structured = ptrOffsetInfo.getStructuredRef()[i] ==
+                      PtrOffsetInfo::AxisInfo::structured;
     // handle indirect dimension
     strides.push_back(rewriter.getIndexAttr(1));
     Value sizeVal =
@@ -423,14 +429,14 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       Value loopLower = zeroIdx;
       Value loopUpper = sizeVal;
       if (mstate && i < mstate->dims.size() && i < mstate->offsets.size()) {
-        Value maskOffset = getValueOrCreateConstantIndexOp(
-            rewriter, loc, mstate->offsets[i]);
+        Value maskOffset =
+            getValueOrCreateConstantIndexOp(rewriter, loc, mstate->offsets[i]);
         maskOffset = rewriter.create<arith::MaxSIOp>(loc, maskOffset, zeroIdx);
         maskOffset = rewriter.create<arith::MinSIOp>(loc, maskOffset, sizeVal);
         loopLower = maskOffset;
 
-        Value maskDim = getValueOrCreateConstantIndexOp(
-            rewriter, loc, mstate->dims[i]);
+        Value maskDim =
+            getValueOrCreateConstantIndexOp(rewriter, loc, mstate->dims[i]);
         maskDim = rewriter.create<arith::AddIOp>(loc, maskOffset, maskDim);
         maskDim = rewriter.create<arith::MinSIOp>(loc, maskDim, sizeVal);
         loopUpper = maskDim;
@@ -467,8 +473,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       auto I64Type = rewriter.getIntegerType(64);
       srcPtr = mtptOp.getBase();
       extractedOffset = rewriter.create<arith::ConstantIntOp>(loc, 0, 64);
-      for (auto [indVar, offset, stride] :
-           llvm::zip_equal(offsets, ptrOffsetInfo.getOffsets(), mtptOp.getStrides())) {
+      for (auto [indVar, offset, stride] : llvm::zip_equal(
+               offsets, ptrOffsetInfo.getOffsets(), mtptOp.getStrides())) {
         Value inductionVar = rewriter.create<arith::IndexCastOp>(
             loc, I64Type, cast<Value>(indVar));
         Value tptOffset = rewriter.create<arith::ExtSIOp>(loc, I64Type, offset);
@@ -521,9 +527,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     Value result;
     if (!isa<RankedTensorType>(value.getType()) &&
         (std::is_same_v<MemAccOpTy, triton::AtomicRMWOp> ||
-        std::is_same_v<MemAccOpTy, triton::AtomicCASOp>)) {
-      value =
-          rewriter.create<triton::SplatOp>(loc, extractedType, value);
+         std::is_same_v<MemAccOpTy, triton::AtomicCASOp>)) {
+      value = rewriter.create<triton::SplatOp>(loc, extractedType, value);
     }
     if (!isa<RankedTensorType>(value.getType())) {
       SmallVector<Value> indices;
@@ -531,15 +536,14 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
         auto idx = getValueOrCreateConstantIndexOp(rewriter, loc, idxOfr);
         indices.push_back(idx);
       }
-      result = rewriter.create<tensor::InsertOp>(
-          loc, value, iterArg, indices);
+      result = rewriter.create<tensor::InsertOp>(loc, value, iterArg, indices);
     } else {
-      result = rewriter.create<tensor::InsertSliceOp>(
-          loc, value, iterArg, offsets, sizes, strides);
+      result = rewriter.create<tensor::InsertSliceOp>(loc, value, iterArg,
+                                                      offsets, sizes, strides);
     }
     rewriter.create<scf::YieldOp>(loc, result)
-          ->setAttr(ConverterUtils::discreteAttrName,
-                    UnitAttr::get(rewriter.getContext()));
+        ->setAttr(ConverterUtils::discreteAttrName,
+                  UnitAttr::get(rewriter.getContext()));
     rewriter.restoreInsertionPoint(insertPoint);
     if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
       if (op.getMask() && op.getOther()) {
@@ -557,8 +561,10 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   } else {
     if constexpr (std::is_same_v<MemAccOpTy, triton::AtomicRMWOp>) {
       if (fullyUnstructured && accessedOp.getMask()) {
-        auto mask = createExtractOp(loc, accessedOp.getMask(), rewriter,
-                                    SmallVector<OpFoldResult>(ptrOffsetInfo.getRank(), rewriter.getIndexAttr(0)));
+        auto mask = createExtractOp(
+            loc, accessedOp.getMask(), rewriter,
+            SmallVector<OpFoldResult>(ptrOffsetInfo.getRank(),
+                                      rewriter.getIndexAttr(0)));
         rewriter.create<scf::IfOp>(loc, mask, [&](OpBuilder &b, Location loc) {
           b.create<triton::AtomicRMWOp>(
                loc, accessedOp.getType(), accessedOp.getAtomicRmwOp(),
@@ -602,7 +608,7 @@ void TritonToUnstructurePass::runPreparse(LoopLikeOpInterface op) {
     yields = op.getYieldedValues();
   }
 
-  for (auto[arg, yield] : llvm::zip_equal(args, yields)) {
+  for (auto [arg, yield] : llvm::zip_equal(args, yields)) {
     if (auto tensorType = dyn_cast<RankedTensorType>(yield.getType())) {
       parse(yield, loc, rewriter, offsetMapForLoopArgs);
       offsetMap[arg] = offsetMapForLoopArgs.at(yield);
@@ -617,7 +623,8 @@ void TritonToUnstructurePass::runPreparse(LoopLikeOpInterface op) {
   }
 }
 
-static bool isFromTensorArg(Value v, llvm::SmallDenseMap<Value, bool> &fromTensorArg) {
+static bool isFromTensorArg(Value v,
+                            llvm::SmallDenseMap<Value, bool> &fromTensorArg) {
   if (fromTensorArg.contains(v))
     return fromTensorArg.at(v);
   auto *defOp = v.getDefiningOp();
@@ -625,12 +632,12 @@ static bool isFromTensorArg(Value v, llvm::SmallDenseMap<Value, bool> &fromTenso
     fromTensorArg[v] = isa<RankedTensorType>(v.getType());
     return isa<RankedTensorType>(v.getType());
   }
-    for (auto opr : defOp->getOperands()) {
-      if (isFromTensorArg(opr, fromTensorArg)) {
-        fromTensorArg[v] = true;
-        return true;
-      }
+  for (auto opr : defOp->getOperands()) {
+    if (isFromTensorArg(opr, fromTensorArg)) {
+      fromTensorArg[v] = true;
+      return true;
     }
+  }
   fromTensorArg[v] = false;
   return false;
 }
@@ -646,15 +653,16 @@ void TritonToUnstructurePass::runParse(MemAccOpTy op) {
   isFromTensorArg(op.getPtr(), fromTensorArg);
 }
 
-LogicalResult TritonToUnstructurePass::processIfYieldAddHoistOperations(ModuleOp moduleOp)
-{
-    mlir::RewritePatternSet patterns(&getContext());
-    patterns.add<CannonicalizerConverter::IfYieldAddHoistConverter>(patterns.getContext());
-    if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
-        moduleOp.emitWarning("IfYieldAddHoist processing failed");
-        return failure();
-    }
-    return success();
+LogicalResult
+TritonToUnstructurePass::processIfYieldAddHoistOperations(ModuleOp moduleOp) {
+  mlir::RewritePatternSet patterns(&getContext());
+  patterns.add<CannonicalizerConverter::IfYieldAddHoistConverter>(
+      patterns.getContext());
+  if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
+    moduleOp.emitWarning("IfYieldAddHoist processing failed");
+    return failure();
+  }
+  return success();
 }
 
 TritonToUnstructurePass::TritonToUnstructurePass(

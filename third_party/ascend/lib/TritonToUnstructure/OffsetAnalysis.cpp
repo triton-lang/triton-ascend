@@ -802,12 +802,13 @@ void parseSelect(arith::SelectOp op, const Location &loc,
   if (!dstType)
     return;
 
-  // recognize "all dims size == 1", which cannot be handled in linalg pass's rewrite loop right now
-  // fix rewrite loop in linalg pass and remove this special handling
+  // recognize "all dims size == 1", which cannot be handled in linalg pass's
+  // rewrite loop right now fix rewrite loop in linalg pass and remove this
+  // special handling
   bool dstAllDimsAreOne = false;
   if (auto rankedDstType = dyn_cast<RankedTensorType>(dstType)) {
-    dstAllDimsAreOne = llvm::all_of(
-        rankedDstType.getShape(), [](int64_t dim) { return dim == 1; });
+    dstAllDimsAreOne = llvm::all_of(rankedDstType.getShape(),
+                                    [](int64_t dim) { return dim == 1; });
   }
 
   if (dstAllDimsAreOne) {
@@ -815,13 +816,15 @@ void parseSelect(arith::SelectOp op, const Location &loc,
     return;
   }
 
-  auto dstIsScalar = trueValueScalarLike && falseValueScalarLike && conditionScalarLike;
+  auto dstIsScalar =
+      trueValueScalarLike && falseValueScalarLike && conditionScalarLike;
   offsetMap[dst].setScalarLike(dstIsScalar);
 
   auto &dstStructured = offsetMap[dst].getStructuredRef();
   dstStructured.resize(trueValueStructured.size());
   for (size_t i = 0; i < dstStructured.size(); i++)
-    dstStructured[i] = (dstIsScalar) ? PtrOffsetInfo::AxisInfo::scalarlike : PtrOffsetInfo::AxisInfo::unstructured;
+    dstStructured[i] = (dstIsScalar) ? PtrOffsetInfo::AxisInfo::scalarlike
+                                     : PtrOffsetInfo::AxisInfo::unstructured;
 }
 
 void parseFPToSI(arith::FPToSIOp op, const Location &loc,
@@ -988,7 +991,8 @@ void parseIf(scf::IfOp op, const Location &loc, RewriterBase &rewriter,
     elseStructured = elseOffsetInfo.getStructuredRef();
     dstIsScalar = dstIsScalar && elseOffsetInfo.isScalarLike();
     if (thenSrcPtr != elseOffsetInfo.getPtr()) {
-      emitError(loc) << "Currently ptr type from different source not supported";
+      emitError(loc)
+          << "Currently ptr type from different source not supported";
     }
   }
 
@@ -1000,7 +1004,8 @@ void parseIf(scf::IfOp op, const Location &loc, RewriterBase &rewriter,
   dstStructured.resize(thenStructured.size());
   for (size_t i = 0; i < dstStructured.size(); i++)
     if (op.elseBlock())
-      dstStructured[i] = (dstIsScalar) ? PtrOffsetInfo::AxisInfo::scalarlike : PtrOffsetInfo::AxisInfo::unstructured;
+      dstStructured[i] = (dstIsScalar) ? PtrOffsetInfo::AxisInfo::scalarlike
+                                       : PtrOffsetInfo::AxisInfo::unstructured;
     else
       dstStructured[i] = thenStructured[i];
   SmallVector<Value> dstOffsets(thenOffsetInfo.getOffsetsRef().size());

@@ -40,12 +40,7 @@ class OpBuilder;
 namespace triton {
 // use to decode the pattern in a mask used for load and store
 
-enum class MaskPosition {
-  Head,
-  Tail,
-  Middle,
-  Unknown
-};
+enum class MaskPosition { Head, Tail, Middle, Unknown };
 
 class MaskState {
 public:
@@ -60,8 +55,7 @@ public:
     return dims.size();
   }
 
-  MaskPosition getMaskPosition(llvm::ArrayRef<int64_t> &tensorShape)
-  {
+  MaskPosition getMaskPosition(llvm::ArrayRef<int64_t> &tensorShape) {
     if (getRank() != tensorShape.size()) {
       return MaskPosition::Unknown;
     }
@@ -110,17 +104,16 @@ public:
                                          OpBuilder &builder) const;
 
   tensor::ExtractSliceOp getExtractSlice(Value source, const Location &loc,
-                                        OpBuilder &builder,
-                                        SmallVector<OpFoldResult> offsets,
-                                        SmallVector<OpFoldResult> dims) const;
+                                         OpBuilder &builder,
+                                         SmallVector<OpFoldResult> offsets,
+                                         SmallVector<OpFoldResult> dims) const;
 
   tensor::InsertSliceOp getInsertSlice(Value source, Value dest,
                                        const Location &loc,
                                        OpBuilder &builder) const;
 
   tensor::InsertSliceOp getInsertSlice(Value source, Value dest,
-                                       const Location &loc,
-                                       OpBuilder &builder,
+                                       const Location &loc, OpBuilder &builder,
                                        SmallVector<OpFoldResult> offsets,
                                        SmallVector<OpFoldResult> dims) const;
 

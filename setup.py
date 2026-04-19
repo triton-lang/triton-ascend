@@ -47,7 +47,6 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from python.build_helpers import get_base_dir, get_cmake_dir
 
-
 triton_dir = os.path.dirname(os.path.abspath(__file__))
 
 os.environ.setdefault("TRITON_BUILD_WITH_CCACHE", "true")
@@ -543,8 +542,7 @@ class CMakeBuild(build_ext):
             "-DPython3_EXECUTABLE:FILEPATH=" + sys.executable, "-DPython3_INCLUDE_DIR=" + python_include_dir,
             "-DTRITON_CODEGEN_BACKENDS=" + ';'.join([b.name for b in backends if not b.is_external]),
             "-DTRITON_PLUGIN_DIRS=" + ';'.join([b.src_dir for b in backends if b.is_external]),
-            "-DTRITON_WHEEL_DIR=" + wheeldir,
-            "-DLLVM_MAJOR_VERSION_22_COMPATIBLE=ON"
+            "-DTRITON_WHEEL_DIR=" + wheeldir, "-DLLVM_MAJOR_VERSION_22_COMPATIBLE=ON"
         ]
         if lit_dir is not None:
             cmake_args.append("-DLLVM_EXTERNAL_LIT=" + lit_dir)
@@ -633,6 +631,7 @@ class CMakeBuild(build_ext):
                     # strip command not available or failed, continue without stripping
                     pass
             print(f"Copied triton-mlir-opt to {triton_mlir_opt_dst}")
+
 
 def download_and_copy_dependencies():
     nvidia_version_path = os.path.join(get_base_dir(), "cmake", "nvidia-toolchain-version.json")
@@ -828,6 +827,7 @@ class plugin_egg_info(egg_info):
 
 
 class BuildWheel(bdist_wheel):
+
     def run(self):
         add_links(external_only=True)
         bdist_wheel.run(self)
@@ -926,6 +926,7 @@ PYTHON_CLASSIFIERS = [
 ]
 CLASSIFIERS = BASE_CLASSIFIERS + PYTHON_CLASSIFIERS
 
+
 # temporary design
 # Using version.txt containing version and commitid will be better and
 # the version.txt will be converted to versin.py when compilation.
@@ -938,8 +939,7 @@ def get_default_version():
 
 def get_version():
     version = os.environ.get("TRITON_VERSION", get_default_version()) + os.environ.get(
-        "TRITON_WHEEL_VERSION_SUFFIX", ""
-    )
+        "TRITON_WHEEL_VERSION_SUFFIX", "")
     if not is_manylinux:
         version += get_git_commit_hash()
 
@@ -1000,7 +1000,6 @@ if not os.path.exists(readme):
     raise FileNotFoundError("Unable to find 'README.md'")
 with open(readme, encoding="utf-8") as fdesc:
     long_description = fdesc.read()
-
 
 setup(
     name=get_package_name(),

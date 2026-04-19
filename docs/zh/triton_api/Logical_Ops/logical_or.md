@@ -6,8 +6,8 @@
 
 ```python
 triton.language.semantic.logical_or(
- input: tl.tensor, 
- other: tl.tensor, 
+ input: tl.tensor,
+ other: tl.tensor,
  builder: ir.builder
 ) -> tl.tensor
 ```

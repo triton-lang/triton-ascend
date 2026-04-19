@@ -7,11 +7,11 @@
 
 ```python
 triton.language.extract_slice(
- ful, 
- offsets, 
- sizes, 
- strides, 
- _builder=None, 
+ ful,
+ offsets,
+ sizes,
+ strides,
+ _builder=None,
  _generator=None
 )→ tensor
 ```
@@ -37,7 +37,7 @@ triton.language.extract_slice(
 #### 2.2.1 DataType 支持
 
 |        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 |  bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | 
+| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- |
 | Ascend A2/A3 | √    | √     | √     | √     | √     | √       | √         |  √       | √    | √    |  √    | ×    |
 
 #### 2.2.2 Shape 支持

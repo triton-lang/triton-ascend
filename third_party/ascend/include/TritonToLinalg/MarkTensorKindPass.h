@@ -45,7 +45,8 @@ enum TensorKind { NONE = -1, INPUT = 0, OUTPUT = 1, INPUT_OUTPUT = 2 };
 using namespace mlir;
 using namespace triton;
 
-class MarkTensorKindPass : public ::impl::MarkTensorKindBase<MarkTensorKindPass> {
+class MarkTensorKindPass
+    : public ::impl::MarkTensorKindBase<MarkTensorKindPass> {
 public:
   MarkTensorKindPass() = default;
 

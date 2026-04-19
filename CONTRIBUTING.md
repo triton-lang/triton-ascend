@@ -119,7 +119,7 @@ Gated commit may encounter the following exceptions. Rectify the exceptions acco
 - CI pipeline failed
 
   Find the failed test cases of the CI pipeline as prompted, and then check the cause. After the fault is rectified, run the CI pipeline again.
-  
+
 <h2 id="issue-specifications.md">Issue Specifications</h2>
 
 A good way to contribute to the project is to send a detailed report when you encounter a problem. We are always very grateful for detailed and thorough bug reports, and we will be very grateful to you for that!

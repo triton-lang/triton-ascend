@@ -7,11 +7,11 @@
 
 ```python
 triton.language.atomic_min(
- pointer, 
- val, 
- mask=None, 
- sem=None, 
- scope=None, 
+ pointer,
+ val,
+ mask=None,
+ sem=None,
+ scope=None,
  _semantic=None
 )→ pointer
 ```
@@ -40,7 +40,7 @@ triton.language.atomic_min(
 
 |        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
 | ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
-GPU     | ×     | ×      |  √     | ×     | ×      | ×      | ×      |√    | ×     | √    | ×      | ×      | ×     | 
+GPU     | ×     | ×      |  √     | ×     | ×      | ×      | ×      |√    | ×     | √    | ×      | ×      | ×     |
 | Ascend A2/A3 | √    | √     | √     | ×     | ×      | ×      | ×      | ×     | √    | √    | ×    | √    | ×    |
 
 结论：Ascend 对比 GPU 缺失int64的支持能力。

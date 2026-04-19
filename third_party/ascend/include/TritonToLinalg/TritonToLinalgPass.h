@@ -41,7 +41,8 @@ namespace triton {
 
 std::unique_ptr<OperationPass<ModuleOp>> createTritonToLinalgPass();
 
-std::unique_ptr<OperationPass<ModuleOp>> createTritonToLinalgPass(bool, bool, bool, bool, bool);
+std::unique_ptr<OperationPass<ModuleOp>>
+createTritonToLinalgPass(bool, bool, bool, bool, bool);
 
 } // namespace triton
 } // namespace mlir
@@ -69,7 +70,8 @@ private:
   // without giving a reference argument
   void addProgramInfo(triton::FuncOp func, bool globalKernel);
 
-  void convertTTFunc(triton::FuncOp func, const bool existDot, const bool existSIMTOp);
+  void convertTTFunc(triton::FuncOp func, const bool existDot,
+                     const bool existSIMTOp);
 
   LogicalResult convertMultipleBlockControlFlow(Operation *funcOp,
                                                 OpBuilder &builder);

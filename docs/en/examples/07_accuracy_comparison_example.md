@@ -12,7 +12,7 @@ Compute kernel:
 def test_add(x0, x1):
     """
     Test the vector addition implemented by Triton and compare its accuracy with that of PyTorch.
-    
+
     Procedure:
     1. Use PyTorch to compute the reference result (torch_ref).
     2. Use Triton to compile the kernel and compute the result (triton_cal).

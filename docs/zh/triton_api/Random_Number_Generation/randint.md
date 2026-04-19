@@ -7,8 +7,8 @@
 
 ```python
 triton.language.randint(
- seed, 
- offset, 
+ seed,
+ offset,
  n_rounds: constexpr = 10
 )
 ```

@@ -3,7 +3,7 @@ import itertools
 import os
 import shutil
 import pathlib
-from concurrent.futures import Executor, Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 import torch

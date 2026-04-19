@@ -7,11 +7,11 @@
 
 ```python
 triton.language.atomic_add(
- pointer, 
- val, 
- mask=None, 
- sem=None, 
- scope=None, 
+ pointer,
+ val,
+ mask=None,
+ sem=None,
+ scope=None,
  _semantic=None
 )→ pointer
 ```
@@ -54,7 +54,7 @@ triton.language.atomic_add(
 > 相对社区能力缺失且无法实现
 
 | 差异点                   | 描述                                                                           |
-| --------------------- | ---------------------------------------------------------------------------- | 
+| --------------------- | ---------------------------------------------------------------------------- |
 |数据类型| Ascend 对比 GPU 缺失int64，fp64的支持能力（硬件限制） |
 |sem| 社区官方配置可接受的值为“acquire”、“release”、“acq_rel”（默认，代表“ACQUIRE_RELEASE”）和“relaxed”<br>我们只支持“acq_rel” |
 |scope               | 可接受的值为“gpu”、“cta”、或“sys”、 <br>我们只支持“gpu” |

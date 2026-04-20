@@ -91,14 +91,14 @@ jobs:
           - name: base-build
             dockerfile: docker/Dockerfile
             target: build
-            npu_type: ""
+            chip_type: ""
             tag_commit: "dev-build-{commit}"
             tag_latest: "dev-build-latest"
             check: build_dockerfile
           - name: manylinux-build
             dockerfile: docker/Dockerfile.manylinux
             target: build
-            npu_type: ""
+            chip_type: ""
             tag_commit: "manylinux-build-{commit}"
             tag_latest: "manylinux-build-latest"
             check: build_manylinux
@@ -106,14 +106,14 @@ jobs:
           - name: release-910b
             dockerfile: docker/Dockerfile
             target: release
-            npu_type: "910b"
+            chip_type: "910b"
             tag_commit: "dev-{commit}-910b"
             tag_latest: "dev-latest-910b"
             check: build_dockerfile
           - name: manylinux-release-910b
             dockerfile: docker/Dockerfile.manylinux
             target: ""
-            npu_type: "910b"
+            chip_type: "910b"
             tag_commit: "manylinux-{commit}-910b"
             tag_latest: "manylinux-latest-910b"
             check: build_manylinux
@@ -121,14 +121,14 @@ jobs:
           - name: release-A3
             dockerfile: docker/Dockerfile
             target: release
-            npu_type: "A3"
+            chip_type: "A3"
             tag_commit: "dev-{commit}-A3"
             tag_latest: "dev-latest-A3"
             check: build_dockerfile
           - name: manylinux-release-A3
             dockerfile: docker/Dockerfile.manylinux
             target: ""
-            npu_type: "A3"
+            chip_type: "A3"
             tag_commit: "manylinux-{commit}-A3"
             tag_latest: "manylinux-latest-A3"
             check: build_manylinux
@@ -186,17 +186,17 @@ jobs:
             TARGET_ARG="--target ${{ matrix.target }}"
           fi
 
-          NPU_ARG=""
-          if [ -n "${{ matrix.npu_type }}" ]; then
-            NPU_ARG="--build-arg NPU_TYPE=${{ matrix.npu_type }}"
+          CHIP_ARG=""
+          if [ -n "${{ matrix.chip_type }}" ]; then
+            CHIP_ARG="--build-arg CHIP_TYPE=${{ matrix.chip_type }}"
           fi
 
           docker buildx build --platform "linux/amd64,linux/arm64" \
-            ${TARGET_ARG} ${NPU_ARG} \
+            ${TARGET_ARG} ${CHIP_ARG} \
             -f ${{ matrix.dockerfile }} --push \
             -t "quay.io/ascend/triton:${TAG_COMMIT}" .
 
           docker buildx build --platform "linux/amd64,linux/arm64" \
-            ${TARGET_ARG} ${NPU_ARG} \
+            ${TARGET_ARG} ${CHIP_ARG} \
             -f ${{ matrix.dockerfile }} --push \
             -t "quay.io/ascend/triton:${{ matrix.tag_latest }}" .

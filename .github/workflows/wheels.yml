@@ -21,7 +21,7 @@ jobs:
         config:
         - {runs_on: 'ubuntu-22.04', arch: 'x86_64'}
         - {runs_on: 'ubuntu-22.04-arm', arch: 'aarch64'}
-        python: ["cp39", "cp310", "cp311"]
+        python: ["cp310", "cp311", "cp312", "cp313"]
 
 
     permissions:
@@ -95,7 +95,7 @@ jobs:
             exit 1
           fi
 
-          OBSUTIL_URL="https://obs-community-intl.obs.ap-southeast-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${{ matrix.config.arch == 'x86_64' && 'amd64' || 'arm64' }}.tar.gz"
+          OBSUTIL_URL="https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${{ matrix.config.arch == 'x86_64' && 'amd64' || 'arm64' }}.tar.gz"
           
           curl -fL "$OBSUTIL_URL" -o obsutil.tar.gz
 

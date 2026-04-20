@@ -2,7 +2,7 @@
 # Build stage (build tools only):
 #   docker buildx build --platform linux/amd64,linux/arm64 --target build -t triton-ascend-manylinux-build .
 # Release stage (full runtime with CANN):
-#   docker buildx build --platform linux/amd64,linux/arm64 --target release --build-arg NPU_TYPE=910b -t triton-ascend-manylinux .
+#   docker buildx build --platform linux/amd64,linux/arm64 --target release --build-arg CHIP_TYPE=910b -t triton-ascend-manylinux .
 FROM quay.io/pypa/manylinux_2_28_x86_64 AS base-amd64
 FROM quay.io/pypa/manylinux_2_28_aarch64 AS base-arm64
 ARG TARGETARCH=amd64
@@ -11,7 +11,6 @@ FROM base-${TARGETARCH} AS base
 SHELL ["/bin/bash", "-c"]
 
 # Python interpreters are pre-installed at /opt/python/cpXX-cpXX/bin/
-ENV PY39=/opt/python/cp39-cp39/bin/python3.9
 ENV PY310=/opt/python/cp310-cp310/bin/python3.10
 ENV PY311=/opt/python/cp311-cp311/bin/python3.11
 
@@ -41,7 +40,7 @@ FROM base AS build
 
 COPY requirements.txt requirements_dev.txt build/
 
-RUN for PY in ${PY39} ${PY310} ${PY311}; do \
+RUN for PY in ${PY310} ${PY311}; do \
       ${PY} -m pip install -r build/requirements_dev.txt && \
       rm -rf ~/.cache/pip; \
     done && \
@@ -52,12 +51,14 @@ WORKDIR /home/triton
 # ── release stage: full runtime with CANN ───────────────────────────────────
 FROM base AS release
 
-ARG NPU_TYPE
-ENV NPU_TYPE=${NPU_TYPE}
+ARG CHIP_TYPE=A3
+ARG CANN_VERSION=8.5.0
+ENV CHIP_TYPE=${CHIP_TYPE}
+ENV CANN_VERSION=${CANN_VERSION}
 
 COPY requirements.txt requirements_dev.txt build/
 
-RUN for PY in ${PY39} ${PY310} ${PY311}; do \
+RUN for PY in ${PY310} ${PY311}; do \
     ${PY} -m pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu && \
     ${PY} -m pip install -r build/requirements_dev.txt && \
     ${PY} -m pip install -r build/requirements.txt && \
@@ -68,11 +69,27 @@ RUN for PY in ${PY39} ${PY310} ${PY311}; do \
 RUN ln -sf /opt/python/cp310-cp310/bin/python3.10 /usr/local/bin/python3 && \
     ln -sf /opt/python/cp310-cp310/bin/pip3.10 /usr/local/bin/pip3
 
-# Install Ascend CANN toolkit
+# Download and install CANN toolkit + kernels
 RUN ARCH=$(uname -i) && \
   export TMPDIR=/tmp && \
-  TOOLKIT_URL="https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%209.0.T2/Ascend-cann-toolkit_9.0.0-beta.1_linux-${ARCH}.run" && \
-  KERNEL_URL="https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%209.0.T2/Ascend-cann-${NPU_TYPE}-ops_9.0.0-beta.1_linux-${ARCH}.run" && \
+  CANN_BASE_URL="https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%20${CANN_VERSION}" && \
+  TOOLKIT_URL="${CANN_BASE_URL}/Ascend-cann-toolkit_${CANN_VERSION}_linux-${ARCH}.run" && \
+  case "${CANN_VERSION}" in \
+    8.5.0) \
+      KERNEL_URL="${CANN_BASE_URL}/Ascend-cann-${CHIP_TYPE}-ops_${CANN_VERSION}_linux-${ARCH}.run" ;; \
+    8.3.RC*|8.2.RC*) \
+      if [ "${CHIP_TYPE}" = "A3" ]; then \
+        KERNEL_URL="${CANN_BASE_URL}/Atlas-A3-cann-kernels_${CANN_VERSION}_linux-${ARCH}.run"; \
+      else \
+        KERNEL_URL="${CANN_BASE_URL}/Ascend-cann-kernels-${CHIP_TYPE}_${CANN_VERSION}_linux-${ARCH}.run"; \
+      fi ;; \
+    *) \
+      echo "Unsupported CANN_VERSION for automatic kernels package selection: ${CANN_VERSION}" >&2; \
+      echo "Please add the correct kernels package URL pattern for this version." >&2; \
+      exit 1 ;; \
+  esac && \
+  echo "TOOLKIT_URL: ${TOOLKIT_URL}" && \
+  echo "KERNEL_URL: ${KERNEL_URL}" && \
   curl -sSL "${TOOLKIT_URL}" -o build/Ascend-cann-toolkit.run && \
   curl -sSL "${KERNEL_URL}" -o build/Ascend-cann-kernels.run && \
   chmod +x build/Ascend-cann-toolkit.run build/Ascend-cann-kernels.run && \

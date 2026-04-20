@@ -19,14 +19,10 @@
 
 CLA签署地址 [sign](https://clasign.osinfra.cn/sign/690ca9ddf91c03dee6082ab1)
 
-
-
 <h2 id="入门.md">入门</h2>
 
 - 在[GitCode](https://gitcode.com/Ascend/triton-ascend)上Fork Triton Ascend存储库。
 - 阅读[README.md](https://gitcode.com/Ascend/triton-ascend/blob/master/README.md)获取项目信息和构建开发环境。
-
-
 
 <h2 id="开发指导.md">开发指导</h2>
 
@@ -36,25 +32,21 @@ CLA签署地址 [sign](https://clasign.osinfra.cn/sign/690ca9ddf91c03dee6082ab1)
 - **[ISSUE规范](#ISSUE规范.md)**
 - **[提出PR](#提出PR.md)**
 
-
-
 <h2 id="代码风格.md">代码风格</h2>
 
 请遵循以下编码风格，以使得Triton Ascend易于开发、维护和审查。
 
 - 编码指南
 
-  请使用Triton Ascend社区统一的编码风格，python建议的编码风格是[PEP 8编码样式](https://pep8.org/)，C++编码所建议的风格是  [LLVM 编码规范](https://llvm.org/docs/CodingStandards.html))  。可以使用[clang-tidy](https://github.com/llvm/llvm-project/blob/main/.clang-tidy)，[CppLint](https://github.com/cpplint/cpplint)，[CppCheck](http://cppcheck.sourceforge.net/)，[CMakeLint](https://github.com/cmake-lint/cmake-lint)，[CodeSpell](https://github.com/codespell-project/codespell)，[ShellCheck](https://github.com/koalaman/shellcheck)和[pylint](https://pylint.org/)检查代码的格式，建议在您的IDE中安装这些插件。
+  请使用Triton Ascend社区统一的编码风格，python建议的编码风格是[PEP 8编码样式](https://pep8.org/)，C++编码所建议的风格是  [LLVM 编码规范](https://llvm.org/docs/CodingStandards.html)。可以使用[clang-tidy](https://github.com/llvm/llvm-project/blob/main/.clang-tidy)，[CppLint](https://github.com/cpplint/cpplint)，[CppCheck](http://cppcheck.sourceforge.net/)，[CMakeLint](https://github.com/cmake-lint/cmake-lint)，[CodeSpell](https://github.com/codespell-project/codespell)，[ShellCheck](https://github.com/koalaman/shellcheck)和[pylint](https://pylint.org/)检查代码的格式，建议在您的IDE中安装这些插件。
 
 - 单元测试指南
 
-  请使用Triton Ascend社区统一的单元测试风格，python建议的单元测试风格是[pytest](http://www.pytest.org/en/latest/)，C++建议的单元测试风格是[Googletest Primer](#https://github.com/google/googletest/blob/master/docs/primer.md)。测试用例的设计意图应该通过它的注释名称来反映。测试用例的设计请参考[gather测试用例](https://gitcode.com/Ascend/triton-ascend/blob/master/ascend/examples/pytest_ut/test_gather.py)，[layer_norm测试用例](https://gitcode.com/Ascend/triton-ascend/blob/master/ascend/examples/tutorials/03-layer-norm.py)
+  请使用Triton Ascend社区统一的单元测试风格，python建议的单元测试风格是[pytest](http://www.pytest.org/en/latest/)，C++建议的单元测试风格是[Googletest Primer](https://github.com/google/googletest/blob/master/docs/primer.md)。测试用例的设计意图应该通过它的注释名称来反映。测试用例的设计请参考[gather测试用例](https://gitcode.com/Ascend/triton-ascend/blob/master/ascend/examples/pytest_ut/test_gather.py)，[layer_norm测试用例](https://gitcode.com/Ascend/triton-ascend/blob/master/ascend/examples/tutorials/03-layer-norm.py)
 
 - 重构指南
 
   我们鼓励开发人员对我们的代码进行重构来消除【代码坏味道】。重构的代码也应该遵循编码风格和测试风格的要求。当您收到警告时，您需要重构要合并的代码。
-
-
 
 <h2 id="Fork-Pull开发模式.md">Fork-Pull开发模式</h2>
 
@@ -123,13 +115,11 @@ git push origin {your_new_branch_name}
 
 - 如果SC-FAIL，检查修改后可评论compile#openlibing手动触发检查，检查通过后获得标签 SC-SUCC。
 
-  ```tex
+  ```shell
   compile#openlibing
   ```
 
 - 流水线pass之后（收到ci-pipeline-passed、ascend-cla/yes、SC-SUCC标签），根据提示@committers进行代码review，以便快速合入。
-
-
 
 <h2 id="代码门禁异常处理.md">代码门禁异常处理</h2>
 
@@ -147,8 +137,6 @@ git push origin {your_new_branch_name}
 
   请根据提示信息，查找出CI流水线未通过的测试用例并检查原因，解决后重新运行CI流水线。
   
-  
-
 <h2 id="ISSUE规范.md">ISSUE规范</h2>
 
 为项目做贡献的一个好的方法是在遇到问题时发送详细报告。我们总是非常感谢写得详细、彻底的错误报告，并会因此非常感谢您！
@@ -170,8 +158,6 @@ git push origin {your_new_branch_name}
 - 如果问题已经打开一段时间，请您在解决该问题前进行预检查。
 - 如果您解决了自己报告的问题，在关闭该问题前还需要让其他人知道。
 
-
-
 <h2 id="提出PR.md">提出PR</h2>
 
 - 在[GitCode](https://gitcode.com/Ascend/triton-ascend)上提出您的想法作为问题。
@@ -181,9 +167,9 @@ git push origin {your_new_branch_name}
 - 在PR被充分讨论后，将根据讨论结果对PR进行合并、拒绝或放弃。
 - PR样例：[PR样例](https://gitcode.com/Ascend/triton-ascend/pull/936)
 
-### 注意事项：
+## 注意事项
 
--   应避免任何不相关的更改。
--   确保您的提交历史是简洁有序的。
--   创建PR前请rebase上游仓库最新代码。
--   对于错误修复 PR，请确保链接所有相关Issue 和 PR。
+- 应避免任何不相关的更改。
+- 确保您的提交历史是简洁有序的。
+- 创建PR前请rebase上游仓库最新代码。
+- 对于错误修复 PR，请确保链接所有相关Issue 和 PR。

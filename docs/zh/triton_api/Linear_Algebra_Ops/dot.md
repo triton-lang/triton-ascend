@@ -1,4 +1,5 @@
 # triton.language.dot
+
 ## 1. OP 概述
 
 简介：对两个tensor进行矩阵乘操作。tensor需要是二维或三维并且维度需一致。对于三维块，tl.dot执行批量矩阵乘法，其中每个块的第一维代表批量维度。
@@ -24,8 +25,6 @@ triton.language.dot(input, other, acc=None, input_precision=None, allow_tf32=Non
 返回值：
 `tl.tensor`：矩阵乘结果
 
-
-
 ### 2.2 支持规格
 
 #### 2.2.1 DataType 支持
@@ -46,8 +45,6 @@ triton.language.dot(input, other, acc=None, input_precision=None, allow_tf32=Non
 
 结论：在 Shape 方面，GPU 与 Ascend 平台无差异。
 
-
-
 ### 2.3 特殊限制说明
 
 - Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。
@@ -57,8 +54,6 @@ triton.language.dot(input, other, acc=None, input_precision=None, allow_tf32=Non
 - max_num_imprecise_acc 暂时不支持
 
 - out_dtype对比GPU 缺乏int8和FP16的类型支持
-
-
 
 ### 2.4 使用方法
 

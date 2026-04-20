@@ -1,4 +1,5 @@
 # triton.language.extra.ascend.libdevice.index_select_simd
+
 ## 1 功能作用说明
 
 在非尾轴维度上并行 gather 多个索引，并以 tile 为单位将数据零拷贝地从全局内存（GM）直接搬运到统一缓冲区（UB）的正确位置。该操作等效于 `torch.index_select` 的高性能实现，适用于嵌入层查找、稀疏索引访问等场景。
@@ -157,4 +158,3 @@ data = libdevice.index_select_simd(
 **测试文件：**
 
 - `ascend/examples/pytest_ut/test_index_select.py` - 2D 张量 index_select 测试（多种形状组合）
-

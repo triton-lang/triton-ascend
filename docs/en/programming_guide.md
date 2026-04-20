@@ -1,4 +1,5 @@
 # Triton Operator Development Guide
+
 This document focuses on the issues that need to be paid attention to during Triton operator development on NPUs, which are divided into three aspects: multi-core task parallelism, single-core data transfer, and single-core data computation. First, section "Multi-Core Task Parallelism" describes the basis for setting the maximum number of hardware cores and the specific implementation. Then, section "Single-Core Data Transfer" describes how to set the proper data block size in a loop, introduces the common optimization methods, and describes how to handle the UB overflow problem that may occur. Finally, section "Single-Core Data Computation" focuses on how to develop Triton operators and highlights the key points.
 
 ## Multi-Core Task Parallelism
@@ -72,10 +73,10 @@ def _attn_fwd(Q, K, V, M, Out, acc, scale,
         qvk_offset = off_z.to(tl.int64) * stride_qz + off_h.to(tl.int64) * stride_qh
 ```
 
-
 ## Single-Core Data Transfer
 
 ### Setting the Proper Data Block Size (BLOCK SIZE)
+
 Take **add_kernel** as an example. The variables and operations determine the on-chip memory usage. You can change the value of **BLOCK_SIZE** to adjust the size of the data block in the loop and the size of the intermediate result. If the upper limit is exceeded, the expected usage size is displayed and an error is reported during operator compilation. To achieve the maximum compute-to-memory ratio, **BLOCK_SIZE** needs to be as large as possible without exceeding the on-chip space. You can set different **BLOCK_SIZE** values in advance by using [autotune](#triton-autotune) of Triton-Ascend. The optimal setting is automatically selected during running.
 
 ```python
@@ -223,6 +224,7 @@ Performance benchmark comparison: Select the optimal parameters that adapt to th
 Tuning result caching: The optimal configuration after tuning is cached. The optimal configuration is reused when the operator is called, avoiding repeated tuning. 
 
 - Simple example
+
     ```diff
     import triton.language as tl
 
@@ -246,7 +248,9 @@ Tuning result caching: The optimal configuration after tuning is cached. The opt
         output = x + y
         tl.store(output_ptr + offsets, output, mask=mask)
     ```
+
 - Note: You can set the following environment variables to print the optimal parameter information.
+
     ```diff
     export TRITON_PRINT_AUTOTUNING=1
     ```
@@ -254,6 +258,7 @@ Tuning result caching: The optimal configuration after tuning is cached. The opt
 ### How Do I Avoid UB Overflow on the NPU?
 
 [Description] On the NPU, the UB or L1 size has an upper limit. When this error occurs, reduce the amount of data transferred at a time and use the for loop to process long sequences.
+
 ```diff
 E triton.compiler. errors.MLIRCompilationError:
 E ///--------------------- [ERROR][Triton][BEG]-------------------------
@@ -263,23 +268,25 @@ E
 E loc("/tmp/tmpsb6qkdih/kernel.ttadapter.mlir":3:3): error: ub overflow, requires 3072256 bits while 1572864 bits available! (possible reason
 large or block number is more than what user expect due to multi-buffer feature is enabled and some ops need extra local buffer. )
 ```
+
 [Note] The UB size of the A2 series products is 192 KB (1,572,864 bits).
 
-
 ## Single-Core Data Computation
+
 ### R&D Goals
+
 Implement basic data operation operators (such as addition, subtraction, multiplication, division, activation functions, and simple matrix element operations) on the Ascend NPU single core. Ensure that operators are efficiently executed on a single core, laying a foundation for subsequent multi-core parallel processing and distributed expansion. 
 
-
 ### Development Procedure
-1. Determine the operator function. 
+
+1.Determine the operator function. 
 -Determine the shapes and data types (such as float16, float32, and int32) of the input and output tensors. 
 -Check whether broadcast and boundary processing are required. 
  
-
-2. Write kernel functions. 
+2.Write kernel functions. 
 Single-kernel computation corresponds to block-level data processing.   
 Single-kernel data computation example: vector addition 
+
 ```diff
 
 @triton.jit
@@ -299,7 +306,9 @@ def add_kernel(x_ptr, # Pointer to first input vector.
     output = x + y
     tl.store(output_ptr + offsets, output, mask=mask)
 ```
+
 Calling:
+
  ```diff
 def add(x: torch.Tensor, y: torch.Tensor):
     output = torch.empty_like(x)
@@ -308,7 +317,9 @@ def add(x: torch.Tensor, y: torch.Tensor):
     add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
     return output
 ```
+
 Use the above function to compute **element-wise sum** of two torch.tensor objects and test its correctness.
+
  ```diff
 torch.manual_seed(0)
 size = 98432
@@ -326,23 +337,21 @@ f'{torch.max(torch.abs(output_torch - output_triton))}')
 # The maximum difference between torch and triton is 0.0
 ```
 
- 
-3. Key points of single-kernel computation
-
+3.Key points of single-kernel computation
 -Block-level data processing: Each computing block is responsible for a small segment of data, ensuring parallelism.
 
 -Boundary check: Use **mask** or **if (tid < N)** to avoid out-of-bounds access.
 
 -Block size selection: Properly set the block and grid.
  
-
-4. Performance points 
+4.Performance points 
 (1) Memory access optimization 
 -Ensure sequential access. 
 -Use the aligned stride to avoid cross-row/cross-column jump access. 
 -Align the data block size to the 32-byte boundary. 
 Ensure that the input and output buffers are aligned during allocation to avoid memory access performance deterioration. 
 Example: 
+
  ```diff
 BLOCK_SIZE = 256 # 256 x 4 bytes = 1024 bytes, which are well-aligned.
 
@@ -386,6 +395,7 @@ def vec_add(x, y):
 -Divide a large matrix into small blocks. Each block is computed in the UB. 
 -Sub-block division should ensure both memory access continuity and computing unit utilization. 
 Example: 
+
  ```diff
 BLOCK_M = 64   # Each block processes 64 rows.
 BLOCK_N = 64   # Each block processes 64 columns.

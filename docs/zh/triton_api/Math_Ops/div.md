@@ -1,4 +1,5 @@
 # div
+
 ## 1. OP 概述
 
 简介：除法，四则运算 ‘/’，无tl.div方法
@@ -29,13 +30,10 @@
 
 #### 2.2.1 DataType 支持
 
-
 || uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
 |---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
 |GPU| √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
 |Ascend A2/A3| × | √ | × | √ | × | √ | × | √ | √ | √ | √ | √ |
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -46,19 +44,15 @@
 
 结论：在 Shape 方面，GPU 与 Ascend 平台无差异。
 
-
-
 ### 2.3 特殊限制说明
 
 Ascend A3 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持
-
-
 
 ### 2.4 使用方法
 
 以下示例实现了对输入张量 `in_ptr0, in_ptr1` 做除法计算：
 
-```
+```python
 @triton.jit
 def triton_div(in_ptr0, in_ptr1, out_ptr0, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
     offset = tl.program_id(0) * XBLOCK
@@ -71,6 +65,3 @@ def triton_div(in_ptr0, in_ptr1, out_ptr0, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.
         tmp2 = tmp0 / tmp1
         tl.store(out_ptr0 + (x0), tmp2, None)
 ```
-
-
-

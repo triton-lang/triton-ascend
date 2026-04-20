@@ -1,14 +1,15 @@
 # triton.language.semantic.less_equal
+
 ## 1. OP 概述
 
 简介：用于比较两个张量的元素, 与`<=`等价。
 函数原型：
 
-```
+```python
 triton.language.semantic.less_equal(
-	input: tl.tensor, 
-	other: tl.tensor, 
-	builder: ir.builder
+ input: tl.tensor, 
+ other: tl.tensor, 
+ builder: ir.builder
 ) -> tl.tensor
 ```
 
@@ -36,8 +37,6 @@ triton.language.semantic.less_equal(
 | GPU          | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
 | Ascend A2/A3 | √ | √ | √ | × | × | × | × | √ | √ | √ | × | √ | √ |
 
-
-
 结论：Triton-Ascend 对比 GPU 暂不支持uint, fp64,  fp8。
 
 #### 2.2.2 Shape 支持
@@ -55,13 +54,11 @@ triton.language.semantic.less_equal(
 
 Triton-Ascend 对比 GPU 缺失fp64的支持能力, uint, fp8类型支持中。
 
-
-
 ### 2.4 使用方法
 
 以下示例实现了对三维张量`x0`、`x1`做小于等于运算：
 
-```
+```python
 @triton.jit
 def triton_le_3d(in_ptr0, in_ptr1, out_ptr0, L: tl.constexpr, M: tl.constexpr, N: tl.constexpr):
     lblk_idx = tl.arange(0, L)

@@ -274,7 +274,7 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
       - kernel_name
       - tensor_kinds
       - shared (currently hardcoded)
-      - name (combined kernel_name and mix_mode)
+      - name (kernel_name)
 
     Additionally, removes the mix_mode attribute from the IR.
     """
@@ -302,13 +302,10 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
     metadata["shared"] = 1
     # Force disable auto tile and bind subblock if attribute is present in module
     metadata["auto_tile_and_bind_subblock"] = not re.search(DISABLE_AUTO_TILE_AND_BIND_SUBBLOCK_REGEX, linalg)
-    # the mix mode is also encoded into metadata['name'] for runtime to distinguish
     metadata["mix_mode"] = re.search(MIX_MODE_REGEX, linalg).group(1)
     metadata["parallel_mode"] = re.search(PARALLEL_MODE_REGEX, linalg).group(1)
     metadata["kernel_name"] = re.search(KERNEL_NAME_REGEX, linalg).group(1)
-    # Use while "_" to split kernel_name and mix_mode.
-    # Check the function load_binary in npu_driver.py.
-    metadata["name"] = metadata["kernel_name"] + "_" + metadata["mix_mode"]
+    metadata["name"] = metadata["kernel_name"]
     # Parse all tensor kinds from arguments
     metadata["tensor_kinds"] = [int(kind) for _, kind in re.findall(TENSOR_KIND_REGEX, linalg)]
     # init the ub bits of triton kernel for inductor autotune using
@@ -340,7 +337,7 @@ def _parse_ttir_metadata(ttir: str, metadata: dict):
     # Note: Currently, for TTIR inputs, we only support vector kernels.
     metadata["mix_mode"] = "aiv"
     metadata["kernel_name"] = re.search(KERNEL_NAME_REGEX, ttir).group(1)
-    metadata["name"] = metadata["kernel_name"] + "_" + metadata["mix_mode"]
+    metadata["name"] = metadata["kernel_name"]
     # Parse all tensor kinds from arguments
     metadata["tensor_kinds"] = [int(kind) for _, kind in re.findall(TENSOR_KIND_REGEX, ttir)]
     return metadata
@@ -538,7 +535,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             + ["-o", bin_file]
         )
         vf_merge_level = metadata["vf_merge_level"]
-        if vf_merge_level:
+        if vf_merge_level is not None:
             cmd_list += [f"--enable-vf-merge-level={vf_merge_level}"]
 
         hfusion_enable_multiple_consumer_fusion = metadata["hfusion_enable_multiple_consumer_fusion"]
@@ -792,7 +789,7 @@ class NPUOptions:
     arch: str = ""
 
     cluster_dims: tuple = (1, 1, 1)
-    num_warps: int = 4
+    num_warps: int = 32
     num_ctas: int = 1
     num_stages: int = 1
     warp_size: int = 32
@@ -994,7 +991,7 @@ class AscendBackend(BaseBackend):
         # CANN runtime limits the length of kernel name <= 50.
         # Considering '\n' is appended, thus the real kernel name <= 49.
         KERNEL_NAME_MAX_LEN = 49
-        kernel_name_orig, _ = metadata.name.rsplit("_", 1)
+        kernel_name_orig = metadata.kernel_name
         if len(kernel_name_orig) > KERNEL_NAME_MAX_LEN:
             kernel_name = kernel_name_orig[-KERNEL_NAME_MAX_LEN:]
         else:

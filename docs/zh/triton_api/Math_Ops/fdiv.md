@@ -1,4 +1,5 @@
 # triton.language.fdiv
+
 ## 1. 函数概述
 
 简介：计算x和y的逐元素快速除法。
@@ -48,8 +49,6 @@ torch对u8支持。
 
 fp64开发中。
 
-
-
 ### 2.4 使用方法
 
 以下示例实现了对输入张量 `x` 和`y`的逐元素快速除法：
@@ -77,4 +76,3 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
     tl.store(output_ptr + idx, ret)
 
 ```
-

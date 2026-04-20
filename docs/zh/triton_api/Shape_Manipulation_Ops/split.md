@@ -1,4 +1,5 @@
 # triton.language.split
+
 ## 1 功能作用说明
 
 将输入张量沿着最后一个维度分割成两个张量，输出张量的最后一个维度大小为输入张量的一半，其他维度保持不变。
@@ -64,4 +65,3 @@ def complex_split_kernel(complex_ptr, real_ptr, imag_ptr, M, N, BLOCK_M: tl.cons
     tl.store(real_ptr + offsets, real_part, mask=mask)
     tl.store(imag_ptr + offsets, imag_part, mask=mask)
 ```
-

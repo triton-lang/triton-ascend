@@ -1,13 +1,14 @@
 # triton.language.semantic.logical_or
+
 ## 1. OP 概述
 
 简介：用于对两个张量进行逐元素逻辑或运算
 
-```
+```python
 triton.language.semantic.logical_or(
-	input: tl.tensor, 
-	other: tl.tensor, 
-	builder: ir.builder
+ input: tl.tensor, 
+ other: tl.tensor, 
+ builder: ir.builder
 ) -> tl.tensor
 ```
 
@@ -56,7 +57,7 @@ triton.language.semantic.logical_or(
 
 以下示例实现了对三维张量`x0`、`x1`做逻辑或运算：
 
-```
+```python
 @triton.jit
 def triton_logical_and_3d(in_ptr0, in_ptr1, out_ptr0, XB, YB, ZB, L: tl.constexpr, M: tl.constexpr, N: tl.constexpr):
     lblk_idx = tl.arange(0, L) + tl.program_id(0) * XB
@@ -69,6 +70,3 @@ def triton_logical_and_3d(in_ptr0, in_ptr1, out_ptr0, XB, YB, ZB, L: tl.constexp
     odx = lblk_idx[:, None, None] * N * M + mblk_idx[None, :, None] * N + nblk_idx[None, None, :]
     tl.store(out_ptr0 + odx, ret)
 ```
-
-
-

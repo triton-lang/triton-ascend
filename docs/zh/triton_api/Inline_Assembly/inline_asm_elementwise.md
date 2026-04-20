@@ -1,4 +1,5 @@
 # triton.language.inline_asm_elementwise
+
 ## 1. 函数概述
 
 `inline_asm_elementwise` 用于在Triton内核中执行内联汇编代码，实现对张量的逐元素操作。
@@ -69,4 +70,3 @@ def triton_asm_add(x_ptr,
 1.内联汇编的寄存器仅支持`int64(s64)` 和`float32(f32)`。
 2.约束限制仅支持`l`。
 3.目前仅支持输入一维张量，计算高维张量需展开。
-

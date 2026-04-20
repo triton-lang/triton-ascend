@@ -1,4 +1,5 @@
 # triton.language.interleave
+
 ## 1 功能作用说明
 
 将两个相同形状的输入张量在最后一个维度上交错排列，输出张量的最后一个维度大小为输入张量的2倍，其他维度保持不变。
@@ -71,4 +72,3 @@ def interleave_example():
 result = interleave_example()
 print(result.shape)  # 输出: (2, 6)
 ```
-

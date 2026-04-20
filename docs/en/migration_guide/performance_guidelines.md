@@ -1,6 +1,7 @@
 # NPU High-Performance Programming Guide
 
 ## Combining Grid Cores
+
 ### I. Principles for Automatically Combining Grid Cores
 
 Some scenarios requiring migration of Triton operators from GPUs to NPUs. Due to architectural differences, the Triton operators developed on GPUs often utilize large grid core counts. When executed on NPUs, these operators cannot be scheduled all at once. Delivering them in batches introduces significant latency and degrades performance. To optimize NPU-based Triton operators, you need to check the grid core counts first. In cases with large grid core counts, set the environment variable *TRITON_ALL_BLOCKS_PARALLEL* to improve operator execution performance.
@@ -10,6 +11,7 @@ Some scenarios requiring migration of Triton operators from GPUs to NPUs. Due to
 ### I. Core Principles of Instruction Parallelism Optimization
 
 When executing Triton operators, NPUs leverage parallel mechanisms such as multi-buffer and instruction parallelism to parallelize data-in, computation, and data-out, thereby enhancing performance. However, in certain scenarios, the multi-buffer mechanism cannot be enabled, which reduces the degree of parallelism (DOP) and degrades operator execution performance. If this issue occurs during performance optimization, consider the following aspects and implement optimizations based on the provided code examples:\
+
 1. Data transfer and computation involve dependencies, which introduce synchronization. The memory transfer engine (MTE) can only be triggered after vector computation completes, resulting in low DOP.\
 2. In cases where the operator lacks multiple data loads or a single execution completes without tiling, the multi-buffer mechanism cannot be enabled.\
 3. The multi-buffer mechanism requires additional UB space. If the UB space is insufficient during computation, the multi-buffer mechanism cannot be enabled.
@@ -125,13 +127,13 @@ When executing Triton operators, NPUs leverage parallel mechanisms such as multi
     +       )
     ```
 
-
 ## Optimizing Data Types
 
 ### I. Core Principles of Data Type Optimization
 
 Some operations of the A2/A3 vector units do not support certain data types. In this case, the corresponding vector operations will degrade to scalar operations, affecting performance. If the overall operator accuracy is not affected, it is advisable to use supported data types to improve performance.
 The following operations are involved.
+
 |  **Operator Name** |  **Unsupported Data Type** |
 |---|---|
 | Vector Add| int64 | 
@@ -142,6 +144,7 @@ The following operations are involved.
 - Example code of the Triton operator Vector Add
 
     For the following Triton operator, when the input tensors `x` and `y` utilize the int64 data type, `x1 + y1` is expanded into a scalar operation, which degrades performance. Provided that computational accuracy remains unaffected, it is advisable to use the int32 data type.
+
     ``` diff
     @triton.jit
     def npu_vector_add_kernel(

@@ -1,4 +1,5 @@
 # triton.language.add
+
 ## 1. OP 概述
 
 简介：加法  ，与四则运算 ‘+’等价
@@ -7,8 +8,6 @@
 ```python
 triton.language.add(x, y, sanitize_overflow: constexpr = True, _builder=None)
 ```
-
-
 
 ## 2. OP 规格
 
@@ -28,13 +27,10 @@ triton.language.add(x, y, sanitize_overflow: constexpr = True, _builder=None)
 
 #### 2.2.1 DataType 支持
 
-
 || uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
 |---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
 |GPU| √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
 |Ascend A2/A3| √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -49,7 +45,7 @@ triton.language.add(x, y, sanitize_overflow: constexpr = True, _builder=None)
 
 以下示例实现了对输入张量 `x_ptr, y_ptr` 做加法计算：
 
-```
+```python
 @triton.jit
 def add_kernel(x_ptr,  # *Pointer* to first input vector.
                y_ptr,  # *Pointer* to second input vector.
@@ -71,4 +67,3 @@ def add_kernel(x_ptr,  # *Pointer* to first input vector.
 ## 3. 特殊说明
 
 > Ascend A3 对比 GPU 不支持fp64
-

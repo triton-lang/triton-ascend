@@ -1,13 +1,12 @@
 # triton.language.arange
+
 ## 1. OP 概述
 
 简介：`triton.language.arange`函数用于生成一个从`start`到`end`（不包括`end`）的连续整数序列。
 
-```
+```python
 triton.language.arange(start,end, _semantic=None)
 ```
-
-
 
 ## 2. OP 规格
 
@@ -27,13 +26,10 @@ triton.language.arange(start,end, _semantic=None)
 
 结论：要求arange的参数start、end必须是constant，因此无类型，支持类型对应的值范围，最大到int32，硬件指令也只支持到int32。
 
-
 |                | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
 | --------- | ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
 | GPU            | ×    | ×     | ×     | ×     | ×      | √      | ×      | ×     | ×    | ×    | ×    | ×    | ×    |
 | Ascend  A2/A3 | ×    | ×     | √     | ×     | ×      | ×      | ×      | ×     | ×    | ×    | ×    | ×    | ×    |
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -41,8 +37,6 @@ triton.language.arange(start,end, _semantic=None)
 end >= 0,  start  >= 0
 
 结论：在 Shape 方面，GPU 与 Ascend 平台无差异。
-
-
 
 ### 2.3 特殊限制说明
 
@@ -52,8 +46,6 @@ end >= 0,  start  >= 0
 2.NV和Triton-ascend都限制end的最大值TRITON_MAX_TENSOR_NUMEL = 1048576
 3.arange的输入必须是constant常量，即已支持uint、int类型的小于1048576（最大值TRITON_MAX_TENSOR_NUMEL ）的数值。int64不支持。
 4.arange的start 和 end 应大于等于0。
-
-
 
 ### 2.4 使用方法
 

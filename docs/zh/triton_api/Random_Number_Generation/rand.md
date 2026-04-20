@@ -1,4 +1,5 @@
 # triton.language.rand
+
 ## 1. OP 概述
 
 简介：给定 1 个 seed 标量和 1 个 offset 块，返回 1 个 在 **U**(**0**,**1**) 中的 float32 类型的随机块。
@@ -6,9 +7,9 @@
 
 ```python
 triton.language.rand(
-	seed, 
-	offset, 
-	n_rounds: constexpr = 10
+ seed, 
+ offset, 
+ n_rounds: constexpr = 10
 )
 ```
 
@@ -20,7 +21,7 @@ triton.language.rand(
 | ------------- | ----------------- | -------------------------------------------------------------- |
 | `seed`        | `int`或 `tensor`           | 用于生成随机数的种子                                                   |
 | `offset`       |`int`或 `tensor`     | 用于生成随机数的偏移量                     |
-| `n_rounds`     | `constexpr `，默认值为10   | Philox 算法的迭代轮数 |
+| `n_rounds`     | `constexpr`，默认值为10   | Philox 算法的迭代轮数 |
 
 返回值：
 1 个 float32 类型的随机块，shape与offset的相同，其值在 `[0.0, 1.0)` 区间内均匀分布
@@ -43,7 +44,6 @@ triton.language.rand(
 
 > 相对社区能力暂不支持
 
-
 ### 2.4 使用方法
 
 以下示例实现了对rand的调用：
@@ -64,6 +64,3 @@ ncore = 1 if numel < 32 else 32
 xblock = math.ceil(numel / ncore) 
 kernel_rand[ncore, 1, 1](y_calf, 10, numel, xblock)
 ```
-
-
-

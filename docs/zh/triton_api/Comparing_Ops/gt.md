@@ -1,13 +1,14 @@
 # triton.language.semantic.greater_than
+
 ## 1. OP 概述
 
 简介：用于比较两个张量的元素，与`>`等价。
 
-```
+```python
 triton.language.semantic.greater_than(
-	input: tl.tensor, 
-	other: tl.tensor, 
-	builder: ir.builder
+ input: tl.tensor, 
+ other: tl.tensor, 
+ builder: ir.builder
 ) -> tl.tensor
 ```
 
@@ -56,7 +57,7 @@ Ascend 对比 GPU 缺失uint、fp64的支持能力。
 
 以下示例实现了对三维张量`x0`、`x1`做大于运算：
 
-```
+```python
 @triton.jit
 def triton_gt_3d(in_ptr0, in_ptr1, out_ptr0, L: tl.constexpr, M: tl.constexpr, N: tl.constexpr):
     lblk_idx = tl.arange(0, L)

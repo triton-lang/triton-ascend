@@ -1,4 +1,5 @@
 # triton.language.atomic_min
+
 ## 1. OP 概述
 
 简介：原子性取最小值操作，在指定的内存位置执行原子最小值操作
@@ -6,12 +7,12 @@
 
 ```python
 triton.language.atomic_min(
-	pointer, 
-	val, 
-	mask=None, 
-	sem=None, 
-	scope=None, 
-	_semantic=None
+ pointer, 
+ val, 
+ mask=None, 
+ sem=None, 
+ scope=None, 
+ _semantic=None
 )→ pointer
 ```
 

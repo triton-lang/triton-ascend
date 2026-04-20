@@ -8,6 +8,7 @@
 计算公式为：  
 $$ \text{output}[b, i, j] = \sum_k \text{x}[b, i, k] \cdot \text{y}[k, j] + \text{z}[b, i, j] $$  
 其中：
+
 - `x` 的形状为 `(A, B)`
 - `y` 的形状为 `(B, C)`
 - `z`（偏置）的形状为 `(A, C)`
@@ -59,6 +60,7 @@ def triton_dot_2_Bias(
     oidx = bidx[:, None] * C + didx[None, :]  # 与 Zidx 相同，可复用
     tl.store(output_ptr + oidx, ret)
 ```
+
 ## 工具方法
 
 以下辅助函数用于支持 Triton 内核的测试与验证，包括 PyTorch 参考实现、数据类型映射、随机张量生成及结果校验。

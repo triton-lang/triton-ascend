@@ -1,4 +1,5 @@
 # triton.language.histogram
+
 ## 1. OP 概述
 
 简介：基于 input 计算 1 个具有 num_bins 个 bin 的直方图，每个 bin 宽度为 1，起始于 0。
@@ -6,11 +7,11 @@
 
 ```python
 triton.language.histogram(
-	input, 
-	num_bins, 
-	mask=None, 
-	_semantic=None, 
-	_generator=None
+ input, 
+ num_bins, 
+ mask=None, 
+ _semantic=None, 
+ _generator=None
 )
 ```
 
@@ -70,5 +71,3 @@ histogram_kernel[(1, )](x, z, M=M, N=N)
 ## 3. 语义GAP
 
 > 相对社区能力缺失但能开发支持
-
-

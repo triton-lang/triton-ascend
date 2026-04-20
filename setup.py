@@ -950,6 +950,50 @@ def get_package_name():
     return os.environ.get("TRITON_WHEEL_NAME", "triton_ascend")
 
 
+ARCHITECTURE_ALIASES = {
+    "x86_64": "x86_64",
+    "amd64": "x86_64",
+    "i386": "x86_64",
+    "i686": "x86_64",
+    "arm64": "arm",
+    "aarch64": "arm",
+    "armv7l": "arm",
+    "armv8l": "arm",
+    "arm": "arm",
+}
+
+ARCHITECTURE_DEPENDENCIES = {
+    "x86_64": ["triton==3.2.0"],
+    "arm": ["triton==3.5.0"],
+}
+
+
+def get_architecture():
+    arch = platform.machine().lower()
+    try:
+        return ARCHITECTURE_ALIASES[arch]
+    except KeyError as exc:
+        raise RuntimeError(f"Unsupported CPU architecture: {arch}") from exc
+
+
+def get_install_requirements():
+    install_requires = [
+        "attrs==24.2.0",
+        "numpy==1.26.4",
+        "scipy==1.13.1;python_version<'3.13'",
+        "scipy==1.15.1;python_version>='3.13'",
+        "decorator==5.1.1",
+        "psutil==6.0.0",
+        "pytest==8.3.2",
+        "pytest-xdist==3.6.1",
+        "pyyaml",
+        "pybind11",
+        "pandas",
+    ]
+    arch = get_architecture()
+    return [*install_requires, *ARCHITECTURE_DEPENDENCIES[arch]]
+
+
 is_manylinux = check_env_flag("IS_MANYLINUX", "FALSE")
 readme = os.path.join(triton_dir, "README.md")
 if not os.path.exists(readme):
@@ -988,19 +1032,7 @@ setup(
     python_requires=PYTHON_REQUIRES,
     classifiers=CLASSIFIERS,
     test_suite="tests",
-    install_requires=[
-        "attrs==24.2.0",
-        "numpy==1.26.4",
-        "scipy==1.13.1;python_version<'3.13'",
-        "scipy==1.15.1;python_version>='3.13'",
-        "decorator==5.1.1",
-        "psutil==6.0.0",
-        "pytest==8.3.2",
-        "pytest-xdist==3.6.1",
-        "pyyaml",
-        "pybind11",
-        "pandas",
-    ],
+    install_requires=get_install_requirements(),
     extras_require={
         "build": [
             "cmake>=3.20,<4.0",

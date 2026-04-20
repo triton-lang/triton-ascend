@@ -91,9 +91,6 @@ void ControlSsbufV2(ModuleOp module) {
     llvm::DenseSet<mlir::Operation*> processedScopes2;
     module->walk([&](SyncBlockWaitOp op) {
         auto pipeS = hivm::PipeAttr::get(op->getContext(), hivm::PIPE::PIPE_S);
-        if (op.getTpipe() == pipeS || op.getPipe() == pipeS) {
-            return;
-        }
 
         // 向上查找父scope.scope操作
         mlir::Operation* parentOp = op->getParentOp();
@@ -495,35 +492,41 @@ scf::ForOp transformLoop(scf::ForOp forOp, OpBuilder &builder) {
 }
 
 // Find the first occurrence of convert_layout or fixpipe operation after the specified operation
-Value findFirstTargetOpAfterWait(SyncBlockWaitOp waitOp, SmallVector<Value>& excludedValues)
+Operation* findFirstTargetOpAfterWait(SyncBlockWaitOp waitOp, SmallVector<Operation*>& excludedValues)
 {
     bool startSearching = false;
     
     for (Operation &op : waitOp->getBlock()->getOperations()) {
-        Value res = nullptr;
+        // meet waitop, start searching
         if (&op == waitOp) {
             startSearching = true;
             continue;
         }
-        
-        if (startSearching) {
-            if (isa<hivm::ConvertLayoutOp>(op)) {
-                res = op.getOperands()[0];
-            }
-            if (isa<hivm::FixpipeOp>(op)) {
-                res = op.getOperands()[1];
-            }
-            if (isa<hivm::CopyOp>(op)) {
-                res = op.getOperands()[1];
-            }
-            if (isa<memref::MemorySpaceCastOp>(op)) {
-                res = op.getOperands()[0];
-            }
+
+        // have not meet waitOp, skip
+        if (!startSearching) {
+            continue;
         }
+
+        Operation* res = nullptr;
+
+        if (isa<hivm::ConvertLayoutOp>(op)) {
+            res = op.getOperands()[0].getDefiningOp();
+        } else if (isa<hivm::FixpipeOp>(op)) {
+            res = op.getOperands()[1].getDefiningOp();
+        } else if (isa<hivm::CopyOp>(op)) {
+            res = op.getOperands()[1].getDefiningOp();
+        } else if (isa<memref::MemorySpaceCastOp>(op)) {
+            res = op.getOperands()[0].getDefiningOp();
+        }
+
+        // get res
         if (res) {
+          // in excludedValues → skip，search next one
           if (llvm::is_contained(excludedValues, res)) {
               continue;
           }
+          // not in excludedValues → note and return
           excludedValues.push_back(res);
           return res;
         }
@@ -532,12 +535,12 @@ Value findFirstTargetOpAfterWait(SyncBlockWaitOp waitOp, SmallVector<Value>& exc
     return nullptr;
 }
 
-void getWaitType(std::string CoreType, scf::ForOp forOp, SmallVector<bool>& waitTypes, SmallVector<Value>& allocTypes)
+void getWaitType(std::string CoreType, scf::ForOp forOp, SmallVector<bool>& waitTypes, SmallVector<Operation*>& allocTypes)
 {
     auto scalarWaitPipe = PipeAttr::get(forOp.getContext(), hivm::PIPE::PIPE_S);
     auto cubeWaitPipe = PipeAttr::get(forOp.getContext(), hivm::PIPE::PIPE_FIX);
     auto vectorWaitPipe = PipeAttr::get(forOp.getContext(), hivm::PIPE::PIPE_MTE3);
-    SmallVector<Value> excludedValues;
+    SmallVector<Operation*> excludedValues;
     forOp.walk([&](Operation* op) {
         if (auto waitOp = dyn_cast<SyncBlockWaitOp>(op)) {
             auto parentOp = op->getParentOp();
@@ -545,16 +548,27 @@ void getWaitType(std::string CoreType, scf::ForOp forOp, SmallVector<bool>& wait
                 auto ifOp = dyn_cast<scf::IfOp>(parentOp);
                 if (forOp == ifOp->getParentOp()) {
                   auto waitPipe = waitOp.getPipe();
-                  if ((waitPipe == cubeWaitPipe && CoreType == "cube") || (waitPipe == vectorWaitPipe && CoreType == "vector")) {
-                      auto allocOp = findFirstTargetOpAfterWait(waitOp, excludedValues);
-                      waitTypes.push_back(0);
-                      allocTypes.push_back(allocOp);
-                  }
-                  else if (waitPipe != scalarWaitPipe) {
-                      auto allocOp = findFirstTargetOpAfterWait(waitOp, excludedValues);
-                      waitTypes.push_back(1);
-                      allocTypes.push_back(allocOp);
-                  }
+                  auto setPipe = waitOp.getTpipe();
+                  if (waitPipe == scalarWaitPipe || setPipe == scalarWaitPipe) {
+                      bool hasBackward = waitOp->hasAttr("ssbuf.backward");
+                      if (hasBackward) {
+                          waitTypes.push_back(0);
+                          allocTypes.push_back(waitOp);
+                      } else {
+                          waitTypes.push_back(1);
+                          allocTypes.push_back(waitOp);
+                      }
+                  } else {
+                      if ((waitPipe == cubeWaitPipe && CoreType == "cube") || (waitPipe == vectorWaitPipe && CoreType == "vector")) {
+                          auto allocOp = findFirstTargetOpAfterWait(waitOp, excludedValues);
+                          waitTypes.push_back(0);
+                          allocTypes.push_back(allocOp);
+                      } else {
+                          auto allocOp = findFirstTargetOpAfterWait(waitOp, excludedValues);
+                          waitTypes.push_back(1);
+                          allocTypes.push_back(allocOp);
+                      }
+                   }
                 }
             }
         }
@@ -574,7 +588,8 @@ DenseMap<int, int> getCounterOffset(scf::ForOp forOp) {
                     if (auto waitIfOp = dyn_cast<scf::IfOp>(op->getParentOp())) {
                         if (waitIfOp == ifOp) {
                           auto waitPipe = waitOp.getPipe();
-                          if ((waitPipe != scalarWaitPipe)) {
+                          auto setPipe = waitOp.getTpipe();
+                          if ((waitPipe != scalarWaitPipe || setPipe != scalarWaitPipe)) {
                               bufferMap[i]++;
                           }
                         }
@@ -587,7 +602,8 @@ DenseMap<int, int> getCounterOffset(scf::ForOp forOp) {
     return bufferMap;
 }
 
-SmallVector<Value> addBufValLoop(scf::ForOp forOp, DenseMap<Value, int> VecBitMap, DenseMap<Value, int>CubeBitMap, OpBuilder &builder)
+SmallVector<Value> addBufValLoop(scf::ForOp forOp, DenseMap<Operation*, int> VecBitMap,
+                                 DenseMap<Operation*, int> CubeBitMap, OpBuilder &builder)
 {
     auto aiCAttr = hivm::TCoreTypeAttr::get(
             builder.getContext(),
@@ -662,7 +678,7 @@ SmallVector<Value> addBufValLoop(scf::ForOp forOp, DenseMap<Value, int> VecBitMa
     );
 
     SmallVector<bool> WaitType;
-    SmallVector<Value> AllocType;
+    SmallVector<Operation*> AllocType;
     SmallVector<Value> bufferPtrs;
     if (isAIC) {
         builder.setInsertionPointToStart(&forOp->getRegion(0).front());
@@ -1145,18 +1161,28 @@ int getNestingDepth(scf::ForOp forOp) {
     return depth;
 }
 
-void printDenseMap(const mlir::DenseMap<mlir::Value, int>& Map)
+void printDenseMap(const mlir::DenseMap<mlir::Operation*, int>& Map)
 {
     for (const auto& pair : Map) {
-        mlir::Value val = pair.first;
-        int bitValue = pair.second;
-        llvm::outs()<<val<<"  "<<bitValue<<"  allocmap\n\n\n";
+        auto op = pair.first;
+        auto bitValue = pair.second;
+
+        // ✅ 正确打印 Operation 的方法：print(llvm::outs())
+        llvm::outs() << "Operation: \n";
+        llvm::outs().flush();
+        llvm::outs() << "Operation Name: " << *op << "\n";
+        
+        // 打印对应的值
+        llvm::outs() << "  |  Bit Value: " << bitValue << "  |  allocmap\n";
+        llvm::outs().flush();
+        llvm::outs() << "------------------------------------------------\n\n";
         llvm::outs().flush();
     }
-    llvm::outs()<<"------------------------------\n\n\n";
+    llvm::outs().flush();
 }
 
-void getAllocBit(ModuleOp module, DenseMap<Value, int>& VecBitMap, DenseMap<Value, int>& CubeBitMap, OpBuilder builder)
+void getAllocBit(ModuleOp module, DenseMap<Operation*, int>& VecBitMap,
+                 DenseMap<Operation*, int> & CubeBitMap, OpBuilder builder)
 {
     auto aiCAttr = hivm::TCoreTypeAttr::get(
         builder.getContext(),
@@ -1165,47 +1191,94 @@ void getAllocBit(ModuleOp module, DenseMap<Value, int>& VecBitMap, DenseMap<Valu
     auto cubeWaitPipe = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_FIX);
     auto vectorWaitPipe = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_MTE3);
 
-    int cubeAcc = 0;
-    int vecAcc = 0;
     SmallVector<scope::ScopeOp> scopeOpToEdit;
     module.walk([&](scope::ScopeOp scopeOp) {
       scopeOpToEdit.push_back(scopeOp);
     });
+
+    int cubeAcc = 0;
+    int vecAcc = 0;
     for (auto scopeOp : scopeOpToEdit) {
-      SmallVector<Value> excludedValues;
-      if (scopeOp->hasAttr("hivm.tcore_type")) {
-          auto attr = scopeOp->getAttr("hivm.tcore_type");
-          if (attr == aiCAttr) {
-              scopeOp.walk([&](SyncBlockWaitOp waitOp) {
-                    auto parentOp = waitOp->getParentOp();
-                    if (isa<scf::IfOp>(parentOp) && parentOp->hasAttr("ssbuffer")) {
-                        auto waitPipe = waitOp.getPipe();
-                        if (waitPipe != scalarWaitPipe) {
-                          auto allocOp = findFirstTargetOpAfterWait(waitOp, excludedValues);
-                          if (VecBitMap.find(allocOp) != VecBitMap.end()) {
-                              CubeBitMap[allocOp] = VecBitMap[allocOp];
-                          } else {
-                              CubeBitMap[allocOp] = cubeAcc;
-                              cubeAcc++;
-                          }
-                        }
-                    }
-              });
-          } else {
-              scopeOp.walk([&](SyncBlockWaitOp waitOp) {
-                    auto parentOp = waitOp->getParentOp();
-                    if (isa<scf::IfOp>(parentOp) && parentOp->hasAttr("ssbuffer")) {
-                        auto waitPipe = waitOp.getPipe();
-                        if (waitPipe != scalarWaitPipe) {
-                          auto allocOp = findFirstTargetOpAfterWait(waitOp, excludedValues);
-                          if (VecBitMap.find(allocOp) == VecBitMap.end()) {
-                              VecBitMap[allocOp] = vecAcc;
-                              vecAcc++;
-                          }
-                        }
-                    }
-              });
+      SmallVector<Operation*> excludedValues;
+      if (!scopeOp->hasAttr("hivm.tcore_type")) continue;
+
+      auto attr = scopeOp -> getAttr("hivm.tcore_type");
+      if (attr == aiCAttr) {
+        // CUBE 类型：分配 cubeAcc 自增 ID
+        scopeOp.walk([&](SyncBlockWaitOp waitOp) {
+          auto parentOp = waitOp->getParentOp();
+          if (isa<scf::IfOp>(parentOp) && parentOp->hasAttr("ssbuffer")) {
+            auto waitPipe = waitOp.getPipe();
+            if (waitPipe != scalarWaitPipe) {
+              auto allocOp = findFirstTargetOpAfterWait(waitOp, excludedValues);
+              if (VecBitMap.count(allocOp)) {
+                CubeBitMap[allocOp] = VecBitMap[allocOp];
+                cubeAcc++;
+              } else {
+                CubeBitMap[allocOp] = cubeAcc++;
+              }
+            }
           }
+        });
+      } else {
+        // VEC 类型：分配 vecAcc 自增 ID
+        scopeOp.walk([&](SyncBlockWaitOp waitOp) {
+          auto parentOp = waitOp->getParentOp();
+          if (isa<scf::IfOp>(parentOp) && parentOp->hasAttr("ssbuffer")) {
+            auto waitPipe = waitOp.getPipe();
+            if (waitPipe != scalarWaitPipe) {
+              auto allocOp = findFirstTargetOpAfterWait(waitOp, excludedValues);
+              if (!VecBitMap.count(allocOp)) {
+                VecBitMap[allocOp] = vecAcc++;
+              }
+            }
+          }
+        });
+      }
+    }
+
+    // 记录【自增ID的最大值】，用于后面偏移计算
+    const int maxVecId = vecAcc - 2;
+    const int maxCubeId = cubeAcc - 2;
+    // ======================== 阶段 2：分配【偏移ID】给 waitOp（绝对不重复）========================
+    for (auto scopeOp : scopeOpToEdit) {
+      if (!scopeOp->hasAttr("hivm.tcore_type")) continue;
+
+      auto attr = scopeOp->getAttr("hivm.tcore_type");
+      if (attr == aiCAttr) {
+        // CUBE：waitOp = maxCubeId + 1 + flagid
+        scopeOp.walk([&](SyncBlockWaitOp waitOp) {
+          auto parentOp = waitOp->getParentOp();
+          if (isa<scf::IfOp>(parentOp) && parentOp->hasAttr("ssbuffer")) {
+            auto setPipe = waitOp.getTpipe();
+            auto waitPipe = waitOp.getPipe();
+            if (setPipe != scalarWaitPipe && waitPipe == scalarWaitPipe) {
+              uint32_t flagid = 0;
+              if (auto attr = waitOp->getAttrOfType<mlir::IntegerAttr>("ssbuf.flagid")) {
+                flagid = attr.getUInt();
+              }
+              // 核心修改：偏移分配，不再写死 16
+              CubeBitMap[waitOp] = (maxCubeId >= 0 ? (maxCubeId + 1) : 0) + flagid;
+            }
+          }
+        });
+      } else {
+        // VEC：waitOp = maxVecId + 1 + flagid
+        scopeOp.walk([&](SyncBlockWaitOp waitOp) {
+          auto parentOp = waitOp->getParentOp();
+          if (isa<scf::IfOp>(parentOp) && parentOp->hasAttr("ssbuffer")) {
+            auto setPipe = waitOp.getTpipe();
+            auto waitPipe = waitOp.getPipe();
+            if (setPipe != scalarWaitPipe && waitPipe == scalarWaitPipe) {
+              uint32_t flagid = 0;
+              if (auto attr = waitOp->getAttrOfType<mlir::IntegerAttr>("ssbuf.flagid")) {
+                flagid = attr.getUInt();
+              }
+              // 核心修改：偏移分配
+              VecBitMap[waitOp] = (maxVecId >= 0 ? (maxVecId + 1) : 0) + flagid;
+            }
+          }
+        });
       }
     }
 }
@@ -1291,8 +1364,8 @@ void FlowSssbuf(ModuleOp module) {
     llvm::sort(transformLoops, [](scf::ForOp a, scf::ForOp b) {
         return getNestingDepth(a) > getNestingDepth(b);
     });
-    DenseMap<Value, int> VecBitMap;
-    DenseMap<Value, int> CubeBitMap;
+    DenseMap<Operation*, int> VecBitMap;
+    DenseMap<Operation*, int> CubeBitMap;
     getAllocBit(module, VecBitMap, CubeBitMap, builder);
     printDenseMap(CubeBitMap);
     printDenseMap(VecBitMap);
@@ -3556,10 +3629,12 @@ void GetBlockInfos(SmallVector<WaitSetRegion> &regions, Block &body) {
 
     auto pipeS = hivm::PipeAttr::get(op->getContext(), hivm::PIPE::PIPE_S);
     if (auto syncWait = dyn_cast<SyncBlockWaitOp>(op)) {
-      if (syncWait.getTpipe() == pipeS || syncWait.getPipe() == pipeS) {
+      if ((syncWait.getTpipe() == pipeS || syncWait.getPipe() == pipeS) && (std::next(it) != body.end())) {
+        if (isa<scf::ForOp>(&*std::next(it)) || isa<triton::LoadOp>(&*std::next(it)))
           return;
       }
     }
+
     Operation *lastSetOp = nullptr;
 
     // 扫描到下一个 wait, 收集所有 set
@@ -4599,6 +4674,16 @@ scf::ForOp addDoubleBuffForArgs(ModuleOp module, SmallVector<Value> uniqueDeps, 
     return newForOp;
 }
 
+static bool isScalarValue(Value value)
+{
+  if (!value) return false;
+  Type type = value.getType();
+
+  return type.isIntOrIndex() || mlir::isa<FloatType>(type) ||
+       mlir::isa<triton::PointerType>(type) ||
+       mlir::isa<LLVM::LLVMPointerType>(type);
+}
+
 SmallVector<Value> buildNBufferProducer(OpBuilder &builder, Location loc,
                                         Value frontCnt, Value newDepVal,
                                         ArrayRef<Value> buffs,
@@ -4616,8 +4701,15 @@ SmallVector<Value> buildNBufferProducer(OpBuilder &builder, Location loc,
                                                   bufferIndex, constants[0]);
 
   auto dstShapedType = mlir::dyn_cast<ShapedType>(newDepVal.getType());
-  auto maskType = RankedTensorType::get(dstShapedType.getShape(), isBuffer0.getType());
-  Value mask = builder.create<tensor::SplatOp>(loc, maskType, isBuffer0);
+  Value mask;
+  if (isScalarValue(isBuffer0) == 0) {
+      auto maskType = RankedTensorType::get(dstShapedType.getShape(), isBuffer0.getType());
+      mask = builder.create<tensor::SplatOp>(loc, maskType, isBuffer0);
+      llvm::outs() << "build NBufferProducer debug15\n";
+      llvm::outs().flush();
+  } else {
+    mask = isBuffer0;
+  }
   Value newBuff0 = builder.create<arith::SelectOp>(loc, mask, newDepVal, buffs[0]);
 
   results.push_back(newBuff0);
@@ -4668,7 +4760,7 @@ SmallVector<Value> buildNBufferProducer(OpBuilder &builder, Location loc,
 
     // Update buffer[i]
     dstShapedType = mlir::dyn_cast<ShapedType>(newDepVal.getType());
-    maskType = RankedTensorType::get(dstShapedType.getShape(), isCurrent.getType());
+    auto maskType = RankedTensorType::get(dstShapedType.getShape(), isCurrent.getType());
     mask = builder.create<tensor::SplatOp>(loc, maskType, isCurrent);
     Value updatedBuffer = builder.create<arith::SelectOp>(loc, mask, newDepVal, buffs[i]);
 
@@ -4743,8 +4835,13 @@ SmallVector<Value> buildNBufferConsumer(OpBuilder &builder, Location loc,
   Value isBuffer0 = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
                                                 bufferIndex, constants[0]);
   auto dstShapedType = mlir::dyn_cast<ShapedType>(oldBuffs[0].getType());
-  auto maskType = RankedTensorType::get(dstShapedType.getShape(), isBuffer0.getType());
-  auto mask = builder.create<tensor::SplatOp>(loc, maskType, isBuffer0);
+  Value mask;
+  if (isScalarValue(isBuffer0) == 0) {
+    auto maskType = RankedTensorType::get(dstShapedType.getShape(), isBuffer0.getType());
+    mask = builder.create<tensor::SplatOp>(loc, maskType, isBuffer0);
+  } else {
+    mask = isBuffer0;
+  }
 
   // 1. Double-buffer specialization (avoid generating scf.if)
   if (bufferNum == 2) {
@@ -4806,7 +4903,7 @@ SmallVector<Value> buildNBufferConsumer(OpBuilder &builder, Location loc,
   Value isLast = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
                                                bufferIndex, constants[last]);
 
-  maskType = RankedTensorType::get({}, isLast.getType());
+  auto maskType = RankedTensorType::get({}, isLast.getType());
   dstShapedType = mlir::dyn_cast<ShapedType>(oldBuffs[last].getType());
   maskType = RankedTensorType::get(dstShapedType.getShape(), isLast.getType());
   mask = builder.create<tensor::SplatOp>(loc, maskType, isLast);

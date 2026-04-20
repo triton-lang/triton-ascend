@@ -1,4 +1,5 @@
 # triton.language.device_assert
+
 **使用`device_assert`需要将环境变量`TRITON_DEBUG`的值设置为非`0`才能生效。**
 
 ## 1. 函数概述
@@ -28,8 +29,6 @@ A3：
 | GPU | × | × | × | × | × | × | × | × | × | × | × | × | ✓ |
 | Ascend A2/A3 | × | × | × | × | × | × | × | × | × | × | × | × | ✓ |
 
-
-
 ### 2.3 使用方法
 
 ```python
@@ -47,6 +46,3 @@ def basic_device_assert_example(x_ptr, BLOCK_SIZE: tl.constexpr):
     # 检查数据有效性（比如检查张量中没有负值）
     tl.device_assert(tl.min(x) >= 0, "All values must be non-negative")
 ```
-
-
-

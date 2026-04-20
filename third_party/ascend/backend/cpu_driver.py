@@ -42,7 +42,7 @@ class CPUUtils(object):
         # fetch available memory at runtime
         return {"max_shared_mem": 1}
     
-    def load_binary(self, name, kernel, shared, device):
+    def load_binary(self, name, kernel, shared, device, mix_mode=None):
         # TODO (temperoarily fake function) load a binary from binary object to device
         # return value are: (mod, funcptr/handle, n_regs, n_spills)
         return None, kernel, 0, 0

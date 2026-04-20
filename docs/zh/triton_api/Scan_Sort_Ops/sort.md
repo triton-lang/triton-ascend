@@ -1,4 +1,5 @@
 # triton.language.sort
+
 ## 1. 函数概述
 
 简介：对输入张量`x`按维度进行升序或者降序的排序。
@@ -62,6 +63,3 @@ def sort_kernel_2d(X, Z, N: tl.constexpr, M: tl.constexpr, descending: tl.conste
     x = tl.sort(x, descending=descending, dim=0)
     tl.store(Z + off2d, x)
 ```
-
-
-

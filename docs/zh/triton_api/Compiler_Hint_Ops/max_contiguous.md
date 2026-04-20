@@ -1,4 +1,5 @@
 # triton.language.max_contiguous
+
 ## 1. 函数概述
 
 `max_contiguous` 用于向编译器声明输入张量中的连续性模式，告知编译器输入张量的前`value`个数是连续的。
@@ -31,8 +32,6 @@ A3：
 | GPU | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Ascend A2/A3 | ✓ | ✓ | ✓ | × | × | ×| × | ✓ | ✓ | ✓ | × | ✓ | ✓ |
 
-
-
 ### 2.3 特殊限制说明
 
 > 相对社区能力缺失且无法实现
@@ -55,6 +54,3 @@ def triton_max_contiguous(A, B, BLOCK_SIZE : tl.constexpr):
     result = input_data* 2
     tl.store(B + offsets, result)
 ```
-
-
-

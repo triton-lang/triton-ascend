@@ -1,4 +1,5 @@
 # triton.language.view
+
 ## 1 功能作用说明
 
 创建张量的视图，改变形状但不复制数据，类似于reshape，但更强调视图的概念，保持数据在内存中的连续性。
@@ -70,4 +71,3 @@ def view_example():
 result = view_example()
 print(result.shape)  # 输出: (6, 4)
 ```
-

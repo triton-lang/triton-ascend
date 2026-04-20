@@ -4,6 +4,7 @@
 triton.jit(fn: T)→ JITFunction[T]
 triton.jit(*, version=None, repr: Callable | None = None, launch_metadata: Callable | None = None, do_not_specialize: Iterable[int] | None = None, debug: bool | None = None, noinline: bool | None = None)→ Callable[[T], JITFunction[T]]
 ```
+
 使用 Triton 编译器的 JIT 编译函数的装饰器。
 
 - 注:当调用 JIT 编译的函数时，如果参数具有 `.data_ptr()` 方法和 `.dtype` 属性，则会隐式转换为指针。

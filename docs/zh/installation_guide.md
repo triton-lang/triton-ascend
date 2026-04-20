@@ -149,8 +149,10 @@ git clone https://gitcode.com/Ascend/triton-ascend.git
 cd triton-ascend
 git checkout main
 
-# 可选，若本地有编译好的LLVM，可以直接指定本地LLVM，不会触发下载LLVM预编译包
-LLVM_SYSPATH=/path/to/LLVM \
+# 可选，若本地有编译好的LLVM，可以直接指定本地LLVM，不会触发下载LLVM预编译包。若无，忽略这条，直接执行下面的运行安装命令即可。
+export LLVM_SYSPATH=/path/to/LLVM
+
+# 执行安装命令
 pip install -e python
 ```
 
@@ -260,10 +262,10 @@ triton-ascend/CMakeLists.txt
 
 不同`CHIP_TYPE`选项对应的机器可参考：
 
-| 选项序号 | **CHIP_TYPE 参数值** | 对应机器/产品系列 |                 典型整机                 |   别称    |
-| :---: |:-----------------:| :---: |:-----------------------------------:|:-------:|
-| 1 |       `A3`        | Atlas A3 训练系列产品 |        Atlas 900 A3 SuperPoD        |  910C   |
-| 2 |      `910b`       | Atlas A2 训练系列产品 |            Atlas800T A2             |   A2    |
+| 选项序号 | **CHIP_TYPE 参数值** | 对应机器/产品系列 |                 典型整机                 |
+| :---: |:-----------------:| :---: |:-----------------------------------:|
+| 1 |       `A3`        | Atlas A3 训练系列产品 |        Atlas 900 A3 SuperPoD        |
+| 2 |       `A2`        | Atlas A2 训练系列产品 |            Atlas800T A2             |
 
 ```bash
 git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend
@@ -292,7 +294,6 @@ docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container --net=host -
 -v /usr/local/dcmi:/usr/local/dcmi \
 -v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi \
 -v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi \
--v /usr/local/Ascend:/usr/local/Ascend \
 -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
 -v /home:/home \
 -v /etc/ascend_install.info:/etc/ascend_install.info \

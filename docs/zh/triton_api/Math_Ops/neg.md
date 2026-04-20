@@ -1,4 +1,5 @@
 # triton.language.neg
+
 ## 1. 函数概述
 
 简介：将tensor的值取负。

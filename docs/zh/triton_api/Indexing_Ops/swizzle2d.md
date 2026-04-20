@@ -1,4 +1,5 @@
 # triton.language.swizzle2d
+
 ## 1. 函数概述
 
 简介：**将一个大小为 size_i × size_j 的行优先矩阵的索引，按每 size_g 行一组，分别转换为列优先矩阵的索引。**。
@@ -63,6 +64,3 @@ def fn_npu_(out0, out1, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr):
     tl.store(out0 + ij, xx)
     tl.store(out1 + ij, yy)
 ```
-
-
-

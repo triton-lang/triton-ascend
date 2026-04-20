@@ -1,17 +1,18 @@
 # triton.language.store
+
 ## 1. OP 概述
 
 原型：
 
 ```python
 triton.language.store(
-	pointer,
-	value,
-	mask=None,
-	boundary_check=(),
-	cache_modifier='',
-	eviction_policy='',
-	_semantic=None
+ pointer,
+ value,
+ mask=None,
+ boundary_check=(),
+ cache_modifier='',
+ eviction_policy='',
+ _semantic=None
 )
 ```
 
@@ -23,7 +24,7 @@ triton.language.store(
 
 | 参数名           | 类型                | 说明                                                             |
 | ------------- | ----------------- | -------------------------------------------------------------- |
-| `pointer`        | `triton.PointerType` <br> 或 ` tensor<triton.PointerType>` <br> 或`triton.PointerType<tensor>`（来源于`tl.make_block_ptr`）         | 指向GM上待存储地址的指针                                                    |
+| `pointer`        | `triton.PointerType` <br> 或 `tensor<triton.PointerType>` <br> 或`triton.PointerType<tensor>`（来源于`tl.make_block_ptr`）         | 指向GM上待存储地址的指针                                                    |
 | `value`       | `tensor` 或 `scalar`  | 要存储的值，支持隐式广播和隐式类型转换  |
 | `mask`       | `int1`或`tensor<int1>`    | 可选参数，当且仅当`pointer` 不来源于`tl.make_block_ptr`时可传入<br>若`mask[i]==False` ，则不会将`value[i]`存储到`pointer[i]`指向的地址,是`True`则正常存储 <br>若`pointer`来源于`tl.make_block_ptr`，则`mask`必须是`None`                                        |
 | `boundary_check` | `tuple(int)` | 可选参数，当且仅当`pointer`来源于`tl.make_block_ptr`时可传入<br>整数元组，指示需要做边界检查的维度                                         |
@@ -44,8 +45,6 @@ triton.language.store(
 
 结论：Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。
 专家意见：eviction_policy和cache_modifier参见load
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -135,4 +134,3 @@ torch_ref = torch_ldst_indirect_08_func(xr, xc, x2)
 triton_cal = triton_ldst_indirect_08_func(xc, x2, blocksize, lowdimsize)
 torch.testing.assert_close(triton_cal, torch_ref)
 ```
-

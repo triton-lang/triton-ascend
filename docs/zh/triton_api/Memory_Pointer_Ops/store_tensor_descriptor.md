@@ -1,14 +1,15 @@
 # triton.language.store_tensor_descriptor
+
 ## 1. OP 概述
 
 简介：将数据块存储到张量描述符指定内存位置
 
 ```python
 triton.language.store_tensor_descriptor(
-	desc: tensor_descriptor_base, 
-	offsets: Sequence[constexpr | tensor], 
-	value: tensor,
-	_semantic=None
+ desc: tensor_descriptor_base, 
+ offsets: Sequence[constexpr | tensor], 
+ value: tensor,
+ _semantic=None
 ) → tensor
 ```
 
@@ -29,13 +30,10 @@ triton.language.store_tensor_descriptor(
 
 #### 2.2.1 DataType 支持
 
-
 || uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
 |---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
 |GPU| √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × |
 |Ascend A2/A3| √ | √ | x | √ | × | √ | × | √ | √ | √ | √ | × |
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -80,10 +78,10 @@ def inplace_abs(in_out_ptr, M, N, M_BLOCK: tl.constexpr, N_BLOCK: tl.constexpr):
         strides=[N, 1],
         block_shape=[M_BLOCK, N_BLOCK],
     )
-	# 计算当前线程对应的偏移量
+ # 计算当前线程对应的偏移量
     moffset = tl.program_id(0) * M_BLOCK
     noffset = tl.program_id(1) * N_BLOCK
-	# 加载数据，计算绝对值，存储结果
+ # 加载数据，计算绝对值，存储结果
     value = desc.load([moffset, noffset])
     desc.store([moffset, noffset], tl.abs(value))
 ## 初始化张量
@@ -94,4 +92,3 @@ M_BLOCK, N_BLOCK = 32, 32
 grid = (M // M_BLOCK, N // N_BLOCK)
 inplace_abs[grid](x, M, N, M_BLOCK, N_BLOCK)
 ```
-

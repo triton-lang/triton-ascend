@@ -1,4 +1,5 @@
 # triton.language.max_constancy
+
 ## 1. 函数概述
 
 `max_constancy` 用于向编译器声明输入张量中值的常量性模式，告知编译器输入数据中每组连续的值都是相等的。
@@ -31,8 +32,6 @@ A3：
 | GPU | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Ascend A2/A3 | ✓ | ✓ | ✓ | × | × | ×| × | ✓ | ✓ | ✓ | × | ✓ | ✓ |
 
-
-
 ### 2.3 特殊限制说明
 
 > 相对社区能力缺失且无法实现
@@ -57,6 +56,3 @@ def basic_constancy_example(A, B, BLOCK_SIZE: tl.constexpr):
     result = input_data * 2
     tl.store(B + offsets, result)
 ```
-
-
-

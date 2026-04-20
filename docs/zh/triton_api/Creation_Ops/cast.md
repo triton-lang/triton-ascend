@@ -1,4 +1,5 @@
 # triton.language.cast
+
 ## 1 功能作用说明
 
 将张量转换为指定的数据类型，支持数值类型转换、位级别重解释（bitcast）、浮点降精度舍入模式，以及Ascend扩展的整数溢出处理模式。
@@ -112,4 +113,3 @@ def quantization_kernel(x_ptr, output_ptr, scale, zero_point, M, N, BLOCK_M: tl.
     # 存储量化结果
     tl.store(output_ptr + offsets, x_quantized, mask=mask)
 ```
-

@@ -1,4 +1,5 @@
 # triton.language.fma
+
 ## 1. 函数概述
 
 简介：计算x、y和z的逐元素融合乘加操作。
@@ -75,6 +76,3 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
 
     tl.store(output_ptr + idx, ret)
 ```
-
-
-

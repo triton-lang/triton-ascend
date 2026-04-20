@@ -1,6 +1,7 @@
 # Examples
 
 ## Triton Examples
+
 |Example|Description|
 |--|--|
 | [01_vector_add_example](./01_vector_add_example.md)| Example of simple addition|

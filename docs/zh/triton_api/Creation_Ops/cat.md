@@ -1,9 +1,10 @@
 # triton.language.cat
+
 ## 1. OP 概述
 
 简介：`triton.language.cat`函数用于将指定的tensor进行拼接。
 
-```
+```python
 triton.language.cat(input, other, can_reorder=False, _semantic=None)
 ```
 
@@ -25,14 +26,10 @@ triton.language.cat(input, other, can_reorder=False, _semantic=None)
 
 #### 2.2.1 DataType 支持
 
-
-
 || uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
 |---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
 | Ascend A2/A3 | ✓ | ✓ | × | ✓ | × | ✓ | × | ✓ | ✓ | ✓ | ✓ | ✓ | 
 | GPU支持 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -49,7 +46,7 @@ triton.language.cat(input, other, can_reorder=False, _semantic=None)
 
 以下示例实现了对1D shape的两个tensor进行的拼接：
 
-```pythonimport
+```python
 import triton.language as tl
 
 import torch
@@ -88,6 +85,3 @@ def test_cat(shape, dtype):
 
     test_common.validate_cmp(dtype, ans, output)
 ```
-
-
-

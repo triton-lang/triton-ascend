@@ -1,4 +1,5 @@
 # triton.language.multiple_of
+
 ## 1. 函数概述
 
 `multiple_of` 用于向编译器声明输入张量中的第一个值是某个数的倍数。
@@ -31,8 +32,6 @@ A3：
 | GPU | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Ascend A2/A3 | ✓ | ✓ | ✓ | × | × | ×| × | ✓ | ✓ | ✓ | × | ✓ | ✓ |
 
-
-
 ### 2.3 特殊限制说明
 
 > 相对社区能力缺失且无法实现
@@ -52,6 +51,3 @@ def basic_multiple_of_example(A, B, BLOCK_SIZE: tl.constexpr):
     # 声明输入张量的第一个值是BLOCK_SIZE的倍数
     input_data = tl.multiple_of(input_data, BLOCK_SIZE)
 ```
-
-
-

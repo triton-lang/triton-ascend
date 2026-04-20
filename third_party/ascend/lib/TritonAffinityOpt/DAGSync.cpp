@@ -2,38 +2,53 @@
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "TritonAffinityOpt/Utils.hpp"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMInterfaces.h"
 #include "bishengir/Dialect/HIVM/Transforms/Passes.h"
 #include "bishengir/Dialect/HIVM/Utils/Utils.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Analysis/DataFlow/DeadCodeAnalysis.h"
-#include "mlir/Analysis/DataFlow/SparseAnalysis.h"
 #include "mlir/Analysis/DataFlowFramework.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dominance.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/Value.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
-#include "triton/Analysis/Alias.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallBitVector.h"
 #include "llvm/Support/Casting.h"
 
 #include "Utils/Utils.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/FormatVariadic.h"
+#include <cstddef>
 #include <memory>
 #include <optional>
 
 #include "TritonAffinityOpt/DAG.h"
+#include "triton/Dialect/Triton/IR/Types.h"
 
 namespace mlir {
 namespace triton {
@@ -42,11 +57,14 @@ namespace triton {
 }  // namespace triton
 }  // namespace mlir
 
+#define DEBUG_TYPE "triton-affinity-dag-sync"
+
 // 使用 DAG 命名空间
 using namespace mlir;
 using namespace hivm;
 using namespace AffinityDAG;
 
+constexpr size_t MAX_FLAG_ID = 14;
 llvm::DenseMap<Value, CoreType>* valueTypes;
 // 修改类声明，将数据搬运逻辑集成到同步插入中
 namespace {
@@ -744,10 +762,10 @@ void DAGSyncPass::insertSyncAndMovementForCrossBlock(mlir::Operation *srcOp, mli
 
         // wait 在内层 block 入口前
         mlir::Operation *parentOp = dstBlock->getParentOp();
+        while (srcOp->getBlock() != parentOp->getBlock()) {
+            parentOp = parentOp->getBlock()->getParentOp();
+        }
         if (parentOp) {
-            while (srcOp->getBlock() != parentOp->getBlock()) {
-                parentOp = parentOp->getBlock()->getParentOp();
-            }
             builder.setInsertionPoint(parentOp);
             coreAttr = hivm::TCoreTypeAttr::get(builder.getContext(), hivm::TCoreType::VECTOR);
             builder.create<SyncBlockWaitOp>(loc, coreAttr, setPipe, waitPipe, flagId);
@@ -940,6 +958,142 @@ static void rewriteCopyChainForCbub(
   return;
 }
 
+bool valueIsPtrOrShapedPtr(Value value)
+{
+    auto type = value.getType();
+    if (llvm::isa<triton::PointerType>(type)) {
+        return true;
+    }
+
+    if (auto tensorType = llvm::dyn_cast<ShapedType>(type)) {
+        return llvm::isa<triton::PointerType>(tensorType.getElementType());
+    }
+
+    return false;
+}
+
+using AliasSet = llvm::SmallBitVector;
+using AliasInfo = llvm::DenseMap<Value, AliasSet>;
+constexpr size_t EXPECTED_MAX_ROOT_PTR_COUNT = 16;
+
+/**
+ * Reworked alias analysis inplace of triton::SharedMemoryAliasAnalysis or mlir::AliasAnalysis
+ * where both failed to establish aliases from function arguments (i.e. global memory):
+ * 1. triton::SharedMemoryAliasAnalysis - does not reach global memory
+ * 2. mlir::AliasAnalysis - marks all function arguments as MayAlias or PartialAlias;
+ *      we may be able to get around by marking all arguments as noalias, but it may affect other analyses...
+ */
+AliasInfo getAlias(triton::FuncOp funcOp, Graph::ValueMapRaw& valueMap)
+{
+    AliasInfo aliasInfo;
+
+    struct WorkNode {
+        Value value;
+        Value cause;
+    };
+
+    llvm::SmallVector<WorkNode, 0> worklist;
+
+    auto addDownstreamToWorklist = [&worklist](ValueNode* node) {
+        if (node == nullptr) {
+            return;
+        }
+        for (auto *output : node->getOutputs()) {
+            if (auto *opNode = dyn_cast<OpNode>(output)) {
+                for (auto result : opNode->op->getResults()) {
+                    if (valueIsPtrOrShapedPtr(result)) {
+                        worklist.push_back({
+                            result,
+                            node->value
+                        });
+                    }
+                }
+            } else if (auto *valueNode = dyn_cast<ValueNode>(output)) {
+                worklist.push_back({
+                    valueNode->value,
+                    node->value
+                });
+            }
+        }
+    };
+
+    SmallVector<Value, EXPECTED_MAX_ROOT_PTR_COUNT> rootPtrs;
+
+    for (auto arg : funcOp.getBody().getArguments()) {
+        if (valueIsPtrOrShapedPtr(arg)) {
+            rootPtrs.push_back(arg);
+        }
+    }
+    funcOp.walk([&](Operation* op) {
+        // If an op generates ptr from nowhere (e.g. tt.empty()), then we consider it as a root
+        bool generatesRootPtr = !llvm::any_of(op->getOperands(), valueIsPtrOrShapedPtr);
+        if (generatesRootPtr) {
+            for (auto result : op->getResults()) {
+                if (valueIsPtrOrShapedPtr(result)) {
+                    rootPtrs.push_back(result);
+                }
+            }
+        }
+    });
+
+    size_t numRootPtrs = rootPtrs.size();
+
+    for (auto [index, value] : llvm::enumerate(rootPtrs)) {
+        auto& bitset = aliasInfo[value];
+        bitset.resize(numRootPtrs);
+        bitset[index] = true;
+
+        addDownstreamToWorklist(getFromSmartPtr(valueMap, value));
+    }
+
+    while (!worklist.empty()) {
+        auto [value, upstream] = worklist.pop_back_val();
+        if (!valueIsPtrOrShapedPtr(value)) {
+            continue;
+        }
+        auto node = getFromSmartPtr(valueMap, value);
+        if (!node) {
+            continue;
+        }
+
+        /**
+         * Safety:
+         * 1. aliasInfo[value] : may insert into densemap and cause resize
+         * 2. aliasInfo[upstream] : steady reference without any insertion into the densemap, will not cause resize, since upstream is in the map
+         * 3. after aliasInfo[upstream] : currAlias is still valid
+         */
+        auto& currAlias = aliasInfo[value];
+        auto& causeAlias = aliasInfo[upstream];
+
+        if (!causeAlias.test(currAlias)) {
+            continue;
+        }
+
+        currAlias |= causeAlias;
+        addDownstreamToWorklist(node);
+    }
+    return aliasInfo;
+}
+
+/**
+ * @returns whether two values share any root ptr
+ */
+bool mayAlias(AliasInfo &aliasInfo, Value valueA, Value valueB)
+{
+    auto aliasesA = getPtr(aliasInfo, valueA);
+    auto aliasesB = getPtr(aliasInfo, valueB);
+    if (
+        !valueIsPtrOrShapedPtr(valueA) ||
+        !valueIsPtrOrShapedPtr(valueB) ||
+        aliasesA == nullptr ||
+        aliasesB == nullptr
+    ) {
+        return false;
+    }
+
+    return aliasesA->anyCommon(*aliasesB);
+}
+
 template <typename OpTy>
 OpTy createBlockSync(OpBuilder builder,
                      hivm::TCoreType coreType,
@@ -955,34 +1109,7 @@ OpTy createBlockSync(OpBuilder builder,
     return builder.create<OpTy>(cause->getLoc(), coreAttr, setPipe, waitPipe, flagId);
 }
 
-// since we do not have llvm::set_intersects in this version...
-template <class S1Ty, class S2Ty> bool intersects(S1Ty &s1, S2Ty &s2)
-{
-    if (s1.size() > s2.size()) {
-        return intersects(s2, s1);
-    }
-
-    return llvm::any_of(s1, [&](auto e) { return s2.count(e); });
-}
-
-bool mayAlias(DataFlowSolver &solver, Value ptrA, Value ptrB)
-{
-    if (ptrA == ptrB) {
-        return true;
-    }
-    const auto *stateA = solver.lookupState<dataflow::Lattice<AliasInfo>>(ptrA);
-    const auto *stateB = solver.lookupState<dataflow::Lattice<AliasInfo>>(ptrB);
-    if (!stateA || !stateB) { // not triton ptr type
-        return true;
-    }
-    auto infoA = stateA->getValue();
-    auto infoB = stateB->getValue();
-
-    return intersects(infoA.getAllocs(), infoB.getAllocs());
-}
-
 const size_t MAX_EXPECTED_PARENTS_COUNT = 8;
-
 std::optional<std::pair<Operation *, Operation *>> findAncestorCommonBlock(mlir::Operation *opA, mlir::Operation *opB)
 {
     if (opA->getBlock() == opB->getBlock()) {
@@ -1034,11 +1161,11 @@ struct SyncCandidate {
 };
 
 // setOp, waitOp
-void createBlockSyncBetween(OpBuilder builder,
-                            hivm::PIPE srcPipe,
-                            hivm::PIPE dstPipe,
-                            SyncCandidate candidate,
-                            int flag)
+std::pair<SyncBlockSetOp, SyncBlockWaitOp> createBlockSyncBetween(OpBuilder builder,
+                                                                  hivm::PIPE srcPipe,
+                                                                  hivm::PIPE dstPipe,
+                                                                  SyncCandidate candidate,
+                                                                  int flag)
 {
     auto srcCoreType = toHivm(candidate.srcCoreType);
     auto dstCoreType = toHivm(!candidate.srcCoreType);
@@ -1047,25 +1174,46 @@ void createBlockSyncBetween(OpBuilder builder,
     auto setOp = createBlockSync<SyncBlockSetOp>(builder, srcCoreType, srcPipe, dstPipe, flag, candidate.setCause);
     builder.setInsertionPoint(candidate.waitBefore);
     auto waitOp = createBlockSync<SyncBlockWaitOp>(builder, dstCoreType, srcPipe, dstPipe, flag, candidate.waitCause);
+    return {setOp, waitOp};
 };
+
+/**
+ * @returns the source/destination of a memory op
+ *
+ * Strangely, triton memory ops do not register their pointers to memory effects, so we need some special cases as fallback here
+ */
+Value getMemoryAddress(Operation *op, MemoryEffects::EffectInstance effect)
+{
+    if (mlir::Value v = effect.getValue())
+        return v;
+
+    return TypeSwitch<Operation*, Value>(op)
+        .Case<
+            triton::StoreOp,
+            triton::LoadOp,
+            triton::AtomicRMWOp,
+            triton::AtomicCASOp
+        >([](auto op) {
+            return op.getPtr();
+        })
+        .Default([](auto) {
+            return nullptr;
+        });
+}
 
 void addMemEffectsSync(triton::FuncOp funcOp, Graph *graph, OpBuilder &builder, int &syncFlag)
 {
     DominanceInfo domInfo(funcOp);
     PostDominanceInfo postDomInfo(funcOp);
-    DataFlowSolver solver;
-    solver.load<dataflow::DeadCodeAnalysis>();
-    solver.load<SharedMemoryAliasAnalysis>();
-
-    if (failed(solver.initializeAndRun(funcOp))) {
-        funcOp->emitWarning("SharedMemoryAliasAnalysis failed! This could lead to potential memory related issues! \n");
-    }
 
     // [(node, EffectInstance, LinearisationPt)]
     llvm::SmallVector<std::tuple<OpNode *, MemoryEffects::EffectInstance>> memOps;
 
     // [(setAfter, waitBefore, srcOP, dstOp)][CoreType]
     llvm::SmallVector<SyncCandidate> candidates;
+    llvm::SmallVector<SyncCandidate> backwardCandidates;
+
+    auto aliasInfo = getAlias(funcOp, graph->getValueMap());
 
     funcOp.walk([&](MemoryEffectOpInterface memIface) {
         auto *op = memIface.getOperation();
@@ -1082,15 +1230,22 @@ void addMemEffectsSync(triton::FuncOp funcOp, Graph *graph, OpBuilder &builder, 
             if (!isa<MemoryEffects::Write, MemoryEffects::Read>(effect.getEffect())) {
                 continue;
             }
+            auto currVal = getMemoryAddress(op, effect);
+            if (!currVal) {
+                op->emitWarning("Mem effect src/dst is unknown!");
+                continue;
+            }
             memOps.emplace_back(currNode, effect);
             bool isWrite = isa<MemoryEffects::Write>(effect.getEffect());
             for (auto &[prevNode, prevEffect] : memOps) {
+                auto prevVal = getMemoryAddress(prevNode->op, prevEffect);
                 if ((isa<MemoryEffects::Write>(prevEffect.getEffect()) || isWrite) &&
-                    mayAlias(solver, prevEffect.getValue(), effect.getValue()) &&
+                    mayAlias(aliasInfo, prevVal, currVal) &&
                     prevNode->isOn() != currNode->isOn() // write is forced on single core type, so we are safe to judge
                                                          // based on whether the core types are different
                 ) {
                     CoreType srcCoreType = isWrite ? !currNode->isOn() : prevNode->isOn();
+                    CoreType dstCoreType = !srcCoreType;
                     auto opPair = findAncestorCommonBlock(prevNode->op, currNode->op);
                     if (!opPair.has_value()) {
                         op->emitWarning(
@@ -1102,19 +1257,77 @@ void addMemEffectsSync(triton::FuncOp funcOp, Graph *graph, OpBuilder &builder, 
                         continue;
                     }
                     candidates.push_back(SyncCandidate {srcCoreType, prevNode->op, setAfter, op, waitBefore});
+
+                    if (op->getParentOfType<LoopLikeOpInterface>()) { // need to insert backward sync
+                        backwardCandidates.push_back(SyncCandidate {
+                            dstCoreType,
+                            op,
+                            waitBefore,
+                            prevNode->op,
+                            setAfter
+                        });
+                    }
                 }
             }
         }
     });
 
-    auto addBlockSyncCommon = [&builder, &syncFlag](SyncCandidate cand) {
-        llvm::dbgs() << "\n\n=== Insert sync between ===\n"
+    /**
+     * Adds block sync operations for the candidate
+     * Specially, for backward syncs, we also perform a kick-start for first wait and clean-up to avoid affecting possible future syncs
+     */
+    auto addBlockSyncCommon = [&builder, &syncFlag, &aliasInfo](SyncCandidate cand) {
+        LLVM_DEBUG(llvm::dbgs() << "\n\n=== Insert sync between ===\n"
                      << *cand.setAfter << "\n"
-                     << *cand.waitBefore << "\n=== Insert Sync End ===\n\n";
+                     << "Cause: " << *cand.setCause << "\n");
+
+        LLVM_DEBUG(llvm::dbgs() << "----------" << "\n"
+                     << *cand.waitBefore << "\n"
+                     << "Cause: " << *cand.waitCause << "\n");
+
+        LLVM_DEBUG(llvm::dbgs() << "=== Insert Sync End ===\n\n");
 
         auto srcPipe = cand.srcCoreType == CoreType::CUBE_ONLY ? hivm::PIPE::PIPE_FIX : hivm::PIPE::PIPE_MTE2;
         auto dstPipe = hivm::PIPE::PIPE_S;
-        createBlockSyncBetween(builder, srcPipe, dstPipe, cand, syncFlag % 14);
+        auto [forwardSet, forwardWait] = createBlockSyncBetween(builder, srcPipe, dstPipe, cand, syncFlag % MAX_FLAG_ID);
+        forwardSet->setAttr("ssbuf.flagid", builder.getUI32IntegerAttr(syncFlag));
+        forwardWait->setAttr("ssbuf.flagid", builder.getUI32IntegerAttr(syncFlag));
+
+        auto loopAncestor = cand.waitBefore->getParentOfType<LoopLikeOpInterface>();
+        if (loopAncestor) { // backward sync, need to kick-start and clean-up; only need to ensure
+                                                  // the first and last one, because we ensure once a flag is consumed,
+                                                  // it will be set by construction (wait-set in the same block)
+            while (auto newAncestor = loopAncestor->getParentOfType<LoopLikeOpInterface>()) {
+                loopAncestor = newAncestor;
+            }
+
+            auto srcPipe = cand.srcCoreType != CoreType::CUBE_ONLY ? hivm::PIPE::PIPE_FIX : hivm::PIPE::PIPE_MTE2;
+            auto backendFlag = syncFlag;
+            syncFlag++;
+            auto backwardCandidate = SyncCandidate {
+                !cand.srcCoreType,
+                cand.waitCause,
+                cand.waitBefore,
+                cand.setCause,
+                cand.setAfter
+            };
+            auto [backwardSet, backwardWait] = createBlockSyncBetween(builder, srcPipe, dstPipe,
+                backwardCandidate, syncFlag % MAX_FLAG_ID);
+
+            backwardSet->setAttr("ssbuf.backward", builder.getUnitAttr());
+            backwardWait->setAttr("ssbuf.backward", builder.getUnitAttr());
+            backwardSet->setAttr("ssbuf.flagid", builder.getUI32IntegerAttr(backendFlag));
+            backwardWait->setAttr("ssbuf.flagid", builder.getUI32IntegerAttr(backendFlag));
+
+            builder.setInsertionPoint(loopAncestor);
+            auto kickstart = createBlockSync<SyncBlockSetOp>(
+                builder, toHivm(backwardCandidate.srcCoreType), srcPipe, dstPipe, syncFlag, backwardCandidate.setCause);
+
+            builder.setInsertionPointAfter(loopAncestor);
+            auto cleanup = createBlockSync<SyncBlockWaitOp>(
+                builder, toHivm(!backwardCandidate.srcCoreType), srcPipe, dstPipe, syncFlag, backwardCandidate.waitCause);
+        }
+
         syncFlag++;
     };
 
@@ -1154,36 +1367,44 @@ void addMemEffectsSync(triton::FuncOp funcOp, Graph *graph, OpBuilder &builder, 
         return false;
     };
 
-    llvm::sort(candidates, [&](const SyncCandidate &a, const SyncCandidate &b) {
-        if (a.setAfter != b.setAfter) {
-            return setAfterDominate(a.setAfter, b.setAfter);
-        }
+    /**
+     * Sorts the candidates by (setAfter, waitBefore), and then removes redundant sync candidates that fully contains another
+     */
+    auto selectCandidatesToInsertSync = [&setAfterDominate, &waitBeforePostDominate, &addBlockSyncCommon](
+                                            llvm::SmallVectorImpl<SyncCandidate>& candidates) {
+        llvm::sort(candidates, [&](const SyncCandidate &a, const SyncCandidate &b) {
+            if (a.setAfter != b.setAfter) {
+                return setAfterDominate(a.setAfter, b.setAfter);
+            }
 
-        if (a.waitBefore != b.waitBefore) {
-            return waitBeforePostDominate(a.waitBefore, b.waitBefore);
-        }
+            if (a.waitBefore != b.waitBefore) {
+                return waitBeforePostDominate(a.waitBefore, b.waitBefore);
+            }
 
-        return false;
-    });
+            return false;
+        });
 
-    for (auto [i, cand] : llvm::enumerate(candidates)) {
-        bool shouldInsert = true;
-        for (auto otherCand : ArrayRef(candidates).drop_front(i + 1)) {
-            bool duplicated = (cand.waitBefore == otherCand.waitBefore && cand.setAfter == otherCand.setAfter &&
-                               cand.srcCoreType == otherCand.srcCoreType);
-            bool containsOther =
-                (cand.srcCoreType == otherCand.srcCoreType && setAfterDominate(cand.setAfter, otherCand.setAfter) &&
-                 waitBeforePostDominate(cand.waitBefore, otherCand.waitBefore));
-            if (duplicated || containsOther) {
-                shouldInsert = false;
-                break;
+        for (auto [i, cand] : llvm::enumerate(candidates)) {
+            bool shouldInsert = true;
+            for (auto otherCand : ArrayRef(candidates).drop_front(i + 1)) {
+                bool duplicated = (cand.waitBefore == otherCand.waitBefore && cand.setAfter == otherCand.setAfter &&
+                                   cand.srcCoreType == otherCand.srcCoreType);
+                bool containsOther =
+                    (cand.srcCoreType == otherCand.srcCoreType && setAfterDominate(cand.setAfter, otherCand.setAfter) &&
+                     waitBeforePostDominate(cand.waitBefore, otherCand.waitBefore));
+                if (duplicated || containsOther) {
+                    shouldInsert = false;
+                    break;
+                }
+            }
+
+            if (shouldInsert) {
+                addBlockSyncCommon(cand);
             }
         }
+    };
 
-        if (shouldInsert) {
-            addBlockSyncCommon(cand);
-        }
-    }
+    selectCandidatesToInsertSync(candidates);
 }
 
 void DAGSyncPass::runOnOperation()
@@ -1213,8 +1434,21 @@ void DAGSyncPass::runOnOperation()
         auto opMapRaw = main_graph.getOpMapLegacy();
         valueTypes = &main_graph.getValueTypes();
         auto *opMap = &opMapRaw;
+        for (const auto& pair : *opMap) {
+            Operation* op = pair.first;  // 键：Operation 指针
+            Node* node = pair.second;    // 值：Node 指针
 
-        if (!opMap || !valueTypes) {
+            // 打印指针地址（最直接的方式）
+            // llvm::outs() << "Operation*: " << *op
+            //              << "\n";
+            for (auto res : op->getResults()) {
+                 llvm::outs() << "Value: " << (*valueTypes)[res]
+                         << "\n";
+            }
+
+        }
+
+        if (!opMap) {
             llvm::errs() << "Warning: Failed to create DAG graph for function " << funcOp.getName() << "\n";
             continue;
         }
@@ -1239,7 +1473,7 @@ void DAGSyncPass::runOnOperation()
             // 检查是否是 scf.for 操作
             if (auto forOp = mlir::dyn_cast<mlir::scf::ForOp>(op)) {
                 // 处理 scf.for 循环的特殊同步逻辑
-                int temp = syncFlag % 14;
+                int temp = syncFlag % MAX_FLAG_ID;
                 processScfForSync(forOp, currentNode, valueTypes, builder, temp);
             }
 
@@ -1258,7 +1492,7 @@ void DAGSyncPass::runOnOperation()
             // 4. 遍历当前节点的所有输入节点
             for (ValueNode *inputValNode : currentNode->getInputs()) {
                 auto inputOp = inputValNode->value.getDefiningOp();
-                if (!inputOp || !opMap->contains(inputOp)) {
+                if (!inputOp && opMap->contains(inputOp)) {
                     continue;
                 }
 

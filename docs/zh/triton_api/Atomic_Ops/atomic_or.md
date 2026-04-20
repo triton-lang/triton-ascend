@@ -1,4 +1,5 @@
 # triton.language.atomic_or
+
 ## 1. OP 概述
 
 简介：原子性逻辑或操作，在指定的内存位置执行逻辑或（|）操作
@@ -6,12 +7,12 @@
 
 ```python
 triton.language.atomic_or(
-	pointer, 
-	val, 
-	mask=None, 
-	sem=None, 
-	scope=None, 
-	_semantic=None
+ pointer, 
+ val, 
+ mask=None, 
+ sem=None, 
+ scope=None, 
+ _semantic=None
 )→ pointer
 ```
 

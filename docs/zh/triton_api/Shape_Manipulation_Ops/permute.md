@@ -1,4 +1,5 @@
 # triton.language.permute
+
 ## 1 功能作用说明
 
 根据dims参数重新排列张量的维度，不改变张量的数据，仅改变维度的顺序。支持任意维度的重新排列。
@@ -47,8 +48,6 @@
 
 ### 2.4 特殊限制说明
 
-
-
 * 不支持维度高于8的转置
 
 ### 2.5 使用方法
@@ -71,4 +70,3 @@ def permute_example():
 result = permute_example()
 print(result.shape)  # 输出: (4, 2, 3)
 ```
-

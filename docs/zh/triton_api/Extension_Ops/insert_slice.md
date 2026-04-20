@@ -1,4 +1,5 @@
 # triton.language.insert_slice
+
 ## 1. OP 概述
 
 简介：将一个张量（子张量）插入到另一个张量的指定位置，即将一个张量按照操作指定的偏移量、大小和步幅参数插入到另一个张量中。
@@ -6,13 +7,13 @@
 
 ```python
 triton.language.insert_slice(
-	ful, 
-	sub, 
-	offsets, 
-	sizes, 
-	strides, 
-	_builder=None, 
-	_generator=None
+ ful, 
+ sub, 
+ offsets, 
+ sizes, 
+ strides, 
+ _builder=None, 
+ _generator=None
 )→ tensor
 ```
 
@@ -37,11 +38,9 @@ triton.language.insert_slice(
 
 #### 2.2.1 DataType 支持
 
-
 |        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | bf16 | bool |
 | ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | 
 | Ascend A2/A3 | √    | √     | √     | √     | √     | √       | √         |  √       | √    | √    |  √    | ×    |
-
 
 #### 2.2.2 Shape 支持
 
@@ -82,5 +81,3 @@ def triton_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
 ## 3. 语义GAP
 
 无语义差异
-
-

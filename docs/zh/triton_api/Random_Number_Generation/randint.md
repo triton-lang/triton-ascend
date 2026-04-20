@@ -1,4 +1,5 @@
 # triton.language.randint
+
 ## 1. OP 概述
 
 简介：给定 1 个 seed 标量和 1 个 offset 块，返回 1 个 int32 类型的随机块。
@@ -6,9 +7,9 @@
 
 ```python
 triton.language.randint(
-	seed, 
-	offset, 
-	n_rounds: constexpr = 10
+ seed, 
+ offset, 
+ n_rounds: constexpr = 10
 )
 ```
 
@@ -22,7 +23,7 @@ triton.language.randint(
 | ------------- | ----------------- | -------------------------------------------------------------- |
 | `seed`        | `int`或 `tensor`           | 用于生成随机数的种子                                                   |
 | `offset`       |`int`或 `tensor`     | 用于生成随机数的偏移量                     |
-| `n_rounds`     | `constexpr `，默认值为10   | Philox 算法的迭代轮数 |
+| `n_rounds`     | `constexpr`，默认值为10   | Philox 算法的迭代轮数 |
 
 返回值：
 1 个 int32 类型的随机块，shape与offset相同
@@ -62,6 +63,3 @@ def kernel_randint(x_ptr, n_rounds: tl.constexpr, N: tl.constexpr, XBLOCK: tl.co
 y_cali = torch.zeros(shape, dtype=eval('torch.int32')).npu()
 kernel_randint[ncore, 1, 1](y_cali, 10, numel, xblock)
 ```
-
-
-

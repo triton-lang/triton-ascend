@@ -1,4 +1,5 @@
 # triton.language.cos
+
 ## 1. 函数概述
 
 简介：对输入x计算的逐元素余弦。
@@ -73,6 +74,3 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
 
     tl.store(output_ptr + idx, ret)
 ```
-
-
-

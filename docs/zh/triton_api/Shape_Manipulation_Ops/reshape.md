@@ -1,4 +1,5 @@
 # triton.language.reshape
+
 ## 1 功能作用说明
 
 将张量重新解释为新的形状。
@@ -69,4 +70,3 @@ def reshape_example():
 result = reshape_example()
 print(result.shape)  # 输出: (6, 4)
 ```
-

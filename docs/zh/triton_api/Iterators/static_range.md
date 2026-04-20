@@ -1,4 +1,5 @@
 # triton.language.static_range
+
 ## 1. 函数概述
 
 `static_range` 是一个静态范围的迭代器，与 `range` 类似但会在编译时进行积极的循环展开优化。
@@ -27,8 +28,6 @@ A3：
 | GPU | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | × | × | × | × | × |
 | Ascend 910系列 | ✓ | ✓ | ✓ | ×|×| × | × | ✓ | × | × | × | × | × |
 
-
-
 ### 2.3 特殊限制说明
 
 > 相对社区能力缺失且无法实现
@@ -56,6 +55,3 @@ def optimized_kernel(x_ptr, y_ptr, BLOCK_SIZE: tl.constexpr):
 ```
 
 `static_range` 通过牺牲代码大小来换取运行时性能，适用于已知且较小的循环次数场景。
-
-
-

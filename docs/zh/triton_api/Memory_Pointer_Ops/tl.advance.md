@@ -1,4 +1,5 @@
 # triton.language.advance
+
 ## 1. OP 概述
 
 简介：将`tl.make_block_ptr`的offset增加一个偏移量
@@ -6,9 +7,9 @@
 
 ```python
 triton.language.advance(
-	base: triton.PointerType,
-	offsets: tuple(int | constexpr),
-	_semantic=None
+ base: triton.PointerType,
+ offsets: tuple(int | constexpr),
+ _semantic=None
 )
 ```
 
@@ -81,4 +82,3 @@ def fn_npu_3d(output_ptr, x_ptr, y_ptr, z_ptr, output_ptr1, XB: tl.constexpr, YB
     )
     tl.store(block_ptr_out, X)
 ```
-

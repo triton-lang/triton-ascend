@@ -1,4 +1,5 @@
 # triton.language.broadcast_to
+
 ## 1 功能作用说明
 
 将张量广播到目标形状，自动处理维度对齐。广播操作不会复制数据，而是通过改变张量的形状和步长来实现。
@@ -67,4 +68,3 @@ def matrix_add_bias_kernel(x_ptr, bias_ptr, output_ptr, M, N, BLOCK_M: tl.conste
     output = x + bias_broadcast
     tl.store(output_ptr + offsets, output, mask=mask)
 ```
-

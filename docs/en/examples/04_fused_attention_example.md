@@ -1,11 +1,13 @@
 # Fused Attention
 
 This section implements a **fused attention forward pass kernel of the Flash Attention v2 style** based on **Triton**, which is applicable to the Ascend NPU platform. The implementation supports:
+
 - **Causal and non-causal attention**
 - **Tiling for processing long sequences**
 - **Max-shifted softmax for numerical stability optimization**
 
 The overall structure contains two core Triton kernels:
+
 1. `_attn_fwd_inner`: performs attention computation between a single query block and key/value blocks (causal masks are processed in phases).
 2. `_attn_fwd`: schedules all query blocks and manages the block pointer, accumulator, and normalization.
 

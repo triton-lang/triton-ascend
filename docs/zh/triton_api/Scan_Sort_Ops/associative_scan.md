@@ -1,9 +1,10 @@
 # triton.language.associative_scan
+
 ## 1. OP 概述
 
 简介：`triton.language.associative_scan` 对输入tensor沿指定轴应用关联扫描操作，使用combine_fn函数组合元素并更新进位值。
 
-```
+```python
 triton.language.associative_scan(input, axis, combine_fn, reverse=False, _semantic=None, _generator=None)
 ```
 
@@ -20,7 +21,6 @@ triton.language.associative_scan(input, axis, combine_fn, reverse=False, _semant
 | `_semantic` | `Optional[str]` | 保留参数，暂不支持外部调用 |
 | `_generator` | `Optional[Generator]` | 保留参数，暂不支持外部调用 |
 
-
 返回值：
 `tensor`：对输入tensor沿指定轴应用关联扫描操作，使用combine_fn函数组合元素并更新进位值之后的tensor。
 
@@ -28,15 +28,10 @@ triton.language.associative_scan(input, axis, combine_fn, reverse=False, _semant
 
 #### 2.2.1 DataType 支持
 
-
 || uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
 |---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
 | GPU支持 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Ascend A2/A3 | ✓ | ✓ | × | ✓ | × | ✓ | × | ✓ | ✓ | ✓ | ✓ | ✓ | 
-
-
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -126,4 +121,3 @@ def triton_kernel_2d_scan(
     tl.store(out_ptr0 + idx, ret)
 
 ```
-

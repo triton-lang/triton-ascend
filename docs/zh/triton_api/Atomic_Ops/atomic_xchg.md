@@ -1,4 +1,5 @@
 # triton.language.atomic_xchg
+
 ## 1. OP 概述
 
 简介：原子性交换操作，在指定的内存位置执行原子交换操作
@@ -6,12 +7,12 @@
 
 ```python
 triton.language.atomic_xchg(
-	pointer, 
-	val, 
-	mask=None, 
-	sem=None, 
-	scope=None, 
-	_semantic=None
+ pointer, 
+ val, 
+ mask=None, 
+ sem=None, 
+ scope=None, 
+ _semantic=None
 )→ pointer
 ```
 
@@ -37,12 +38,10 @@ triton.language.atomic_xchg(
 
 #### 2.2.1 DataType 支持
 
-
 |        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
 | ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
 | GPU      | ×      | ×    |  √      | ×    |  ×    | √   | √    | √      | ×    | √      | √    | ×    |  ×    |
 | Ascend A2/A3 | √    | √     | √     | √     | √     | √     | √     | √      | √    | √    | ×    | ×    | ×    |
-
 
 #### 2.2.2 Shape 支持
 
@@ -52,12 +51,10 @@ triton.language.atomic_xchg(
 
 > 相对社区能力缺失且无法实现
 
-
 | 差异点                   | 描述                                                                           |
 | --------------------- | ---------------------------------------------------------------------------- | 
 |sem| 社区官方配置可接受的值为“acquire”、“release”、“acq_rel”（默认，代表“ACQUIRE_RELEASE”）和“relaxed”<br>我们只支持“acq_rel” |
 |scope               | 可接受的值为“gpu”、“cta”、或“sys”、 <br>我们只支持“gpu” |
-
 
 ### 2.4 使用方法
 

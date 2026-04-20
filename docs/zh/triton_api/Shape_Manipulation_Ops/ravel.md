@@ -1,4 +1,5 @@
 # triton.language.ravel
+
 ## 1 功能作用说明
 
 将输入张量展平为一维张量，保持元素在内存中的顺序，输出张量的总元素数与输入张量相同。
@@ -62,4 +63,3 @@ def flatten_kernel(x_ptr, output_ptr, M, N, BLOCK_SIZE: tl.constexpr):
     # 存储展平结果
     tl.store(output_ptr + offsets, x_flat, mask=mask)
 ```
-

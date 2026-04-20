@@ -1,10 +1,11 @@
 # triton.language.cdiv
+
 ## 1. OP 概述
 
 简介：计算张量的向上取整除法
 函数原型：
 
-```
+```python
 triton.language.cdiv(x, div)
 ```
 
@@ -52,7 +53,7 @@ triton.language.cdiv(x, div)
 
 以下示例实现了对输入张量 `x` 和`y`做向上取整除法运算：
 
-```
+```python
 @triton.jit
 def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
             XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr,
@@ -74,6 +75,3 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
 
     tl.store(output_ptr + idx, ret)
 ```
-
-
-

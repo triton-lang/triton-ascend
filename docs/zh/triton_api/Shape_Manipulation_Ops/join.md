@@ -1,4 +1,5 @@
 # triton.language.join
+
 ## 1 功能作用说明
 
 将两个相同形状的输入张量沿着新的最小维度连接，输出张量比输入张量多一个维度，大小为2，保持其他维度不变。
@@ -70,4 +71,3 @@ def join_example():
 result = join_example()
 print(result.shape)  # 输出: (2, 2, 3)
 ```
-

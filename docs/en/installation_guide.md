@@ -1,5 +1,13 @@
 # Installation Guide
 
+Choose the appropriate installation method as needed and proceed to the corresponding steps:
+
+- **Install via pip**: Select this option if you intend to use the pip package of Triton-Ascend directly. Please proceed to the next step to complete the prerequisite configuration in <a href="#env-prepare">Environment Preparation</a>, then perform the pip installation.
+- **Install from source**: Select this option for developers working with the Triton-Ascend source code. Please proceed to the next step to complete the prerequisite configuration in <a href="#env-prepare">Environment Preparation</a>, then choose either <a href="#auto-code-base">Quick Installation</a> or <a href="#hand-code-base">Manual Installation</a>.
+- **Install via Docker**: No environment preparation required. You may directly proceed to <a href="#docker-build">Build with Docker</a>.
+
+<a id="env-prepare"></a>
+
 ## Preparing the Environment
 
 ### Python Version Requirements
@@ -48,6 +56,8 @@ Note: If `ERROR: No matching distribution found for torch==2.7.1+cpu` is display
 pip install torch==2.7.1+cpu --index-url https://download.pytorch.org/whl/cpu
 ```
 
+<a id="pip-base"></a>
+
 ## Installing Triton-Ascend Using Pip
 
 ### Latest Stable Version
@@ -80,9 +90,15 @@ You can also find all nightly build packages in [History](https://test.pypi.org/
 
 Note: If you encounter SSL-related errors when running the `pip install` command, add the `--trusted-host test.pypi.org --trusted-host test-files.pythonhosted.org` option to solve them.
 
+<a id="code-base"></a>
+
 ## Installing Triton-Ascend Using the Source Code
 
-If you need to develop or customize Triton-Ascend, you should install it by compiling the source code. This method allows you to adjust the source code based on project requirements and compile and install a customized Triton-Ascend version.
+If you need to develop or customize Triton-Ascend, you should install it by compiling from source. This method allows you to modify the source code according to your project requirements and build a customized version of Triton-Ascend.
+
+Before building, you need to install the required build dependencies as outlined in <a href="#code-require">Dependency Installation</a>.
+
+We recommend completing the source installation of Triton-Ascend using the <a href="#auto-code-base">Quick Installation</a> method. If you have special requirements, such as no network access on the target machine, you can use <a href="#hand-code-base">Manual Installation</a> instead.
 
 ### System Requirements
 
@@ -93,6 +109,8 @@ If you need to develop or customize Triton-Ascend, you should install it by comp
 | PyTorch2.8.0      | 13.3.1               | 2.28               |
 | PyTorch2.9.1      | 13.3.1               | 2.28               |
 | PyTorch2.10       | 13.3.1               | 2.28               |
+
+<a id="code-require"></a>
 
 ### Dependencies
 
@@ -122,7 +140,26 @@ sudo yum install -y zlib-devel
 pip install ninja cmake wheel pybind11 # build-time dependencies
 ```
 
-### Building with LLVM
+<a id="auto-code-base"></a>
+
+### Quick Installation
+
+```bash
+git clone https://gitcode.com/Ascend/triton-ascend.git
+cd triton-ascend
+git checkout main
+
+# Optional: If a pre-compiled LLVM is available locally, you can specify the path to avoid downloading the pre-built LLVM package.
+# Skip this command if no local LLVM exists and execute the installation command directly.
+export LLVM_SYSPATH=/path/to/LLVM
+
+# Run the installation command
+pip install -e python
+```
+
+<a id="hand-code-base"></a>
+
+### Manual Installation - Building with LLVM
 
 Triton uses LLVM 22 to generate code for GPUs and CPUs. Similarly, the BiSheng Compiler of Ascend depends on LLVM to generate NPU code. Therefore, you need to compile the LLVM source code. Pay attention to the specific LLVM version of dependencies. LLVM build supports two methods. **You only need to follow either method**.
 
@@ -213,29 +250,86 @@ git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend
 
    After uncommenting the code snippet, rebuild the project to solve the problem.
 
-2. Run the Triton example.
+<a id="docker-build"></a>
+
+## Installation via Docker
+
+We provide a Dockerfile to help you build a Docker environment image. During installation, the corresponding CANN Toolkit and Kernel packages will be automatically downloaded from the official CANN website. You need to specify the CANN-related parameters for your machine using `--build-arg`.
+
+| Parameter Name | Default Value | Available Options |
+|----------------|---------------|---------------------------------|
+| CHIP_TYPE      | A3            | A3, 910B |
+| CANN_VERSION   | 8.5.0 (Recommended) | 8.5.0, 8.3.RC1, 8.3.RC2, 8.2.RC1, 8.2.RC2 |
+
+You can check the NPU model on your system using the `npu-smi` command.
+
+For the machines corresponding to different `CHIP_TYPE` options, refer to the table below:
+
+| Option No. | **CHIP_TYPE Value** | Corresponding Server/Product Series | Typical Server Model |
+|:----------:|:-------------------:|:----------------------------------:|:-----------------------------------:|
+| 1 | `A3` | Atlas A3 Training Series | Atlas 900 A3 SuperPoD |
+| 2 | `A2` | Atlas A2 Training Series | Atlas 800T A2 |
+
+```bash
+git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend
+docker build \
+--build-arg CHIP_TYPE=A3 \
+--build-arg CANN_VERSION=8.5.0 \
+-t triton-ascend-image:latest -f ./docker/Dockerfile .
+```
+
+To start a container from this image, you can use the following command as a reference:
+
+```bash
+docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container --net=host --privileged \
+--security-opt seccomp=unconfined \
+--device=/dev/davinci0 \
+--device=/dev/davinci1 \
+--device=/dev/davinci2 \
+--device=/dev/davinci3 \
+--device=/dev/davinci4 \
+--device=/dev/davinci5 \
+--device=/dev/davinci6 \
+--device=/dev/davinci7 \
+--device=/dev/davinci_manager \
+--device=/dev/devmm_svm \
+--device=/dev/hisi_hdc \
+-v /usr/local/dcmi:/usr/local/dcmi \
+-v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi \
+-v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi \
+-v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
+-v /home:/home \
+-v /etc/ascend_install.info:/etc/ascend_install.info \
+triton-ascend-image:latest \
+/bin/bash
+
+# Enter the container
+docker exec -u root -it triton-ascend_container /bin/bash
+```
+
+## Run the Triton example
 
    Install the runtime dependencies. Refer to the following command:
 
-   ```bash
+ ```bash
    # Pull the triton-ascend source code repository and examples (optional; required to pull the source code repository when running examples without source code compilation and installation).
    git clone https://gitcode.com/Ascend/triton-ascend.git
    cd triton-ascend && pip install -r requirements_dev.txt
-   ```
+ ```
 
    Run the [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py) instance.
 
-   ```bash
+ ```bash
    # Set the CANN environment variables (for example, as the root user and with the default installation path /usr/local/Ascend).
    source /usr/local/Ascend/ascend-toolkit/set_env.sh
    # Run the tutorials example.
    python3 ./third_party/ascend/tutorials/01-vector-add.py
-   ```
+ ```
 
-    If an output similar to the following is displayed, the environment is correctly configured:
+  If an output similar to the following is displayed, the environment is correctly configured:
 
-    ```python
+```python
     tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
     tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
     The maximum difference between torch and triton is 0.0
-    ```
+```

@@ -1,4 +1,5 @@
 # triton.language.broadcast
+
 ## 1 功能作用说明
 
 将两个张量广播到共同兼容的形状，使它们可以进行逐元素操作。
@@ -69,4 +70,3 @@ def broadcast_kernel(
     tl.store(output_ptr + offsets, result)
 
 ```
-

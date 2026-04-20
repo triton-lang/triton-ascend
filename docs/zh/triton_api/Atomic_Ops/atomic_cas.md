@@ -1,17 +1,18 @@
 # triton.language.atomic_cas
+
 ## 1. OP 概述
 
-简介：原子性比较和交换操作，将 *pointer 值与 cmp 进行比较，若相等，则将 *pointer 更新为 val，否则 *pointer 不变。
+简介：原子性比较和交换操作，将 *pointer 值与 cmp 进行比较，若相等，则将*pointer 更新为 val，否则 *pointer 不变。
 原型：
 
 ```python
 triton.language.atomic_cas(
-	pointer,
-	cmp, 
-	val, 
-	sem=None, 
-	scope=None, 
-	_semantic=None
+ pointer,
+ cmp, 
+ val, 
+ sem=None, 
+ scope=None, 
+ _semantic=None
 )→ pointer
 ```
 
@@ -23,7 +24,7 @@ triton.language.atomic_cas(
 
 | 参数名           | 类型                | 说明                                                             |
 | ------------- | ----------------- | -------------------------------------------------------------- |
-| `pointer`        | `triton.PointerDType`          | 要操作的内存位置，若 *pointer == cmp，则将 *pointer 更新为 val，计算后的结果写回到该内存                                                     |
+| `pointer`        | `triton.PointerDType`          | 要操作的内存位置，若 *pointer == cmp，则将*pointer 更新为 val，计算后的结果写回到该内存                                                     |
 | `cmp`     | `pointer.dtype.element_ty`   | 用于与目标内存进行比较的值 |
 | `val`       | `pointer.dtype.element_ty`    | 用于更新的目标值                                      |
 | `sem` | `str`，可选 | 指定操作的内存语义<br>社区官方配置可接受的值为“acquire”、“release”、“acq_rel”（默认，代表“ACQUIRE_RELEASE”）和“relaxed”<br>我们只支持“acq_rel”：<br>- acquire：获取锁后，能够看到之前的释放操作（相当于一个“读取”操作，并且这个读取操作会阻塞，直到能够读取到“最新”的数据，也就是其他线程释放后的数据）<br>- release：在释放锁之前的所有操作，对后续获取锁的线程可见（相当于一个“写入”操作，并且这个写入操作会“同步”所有之前的写操作）                                             |

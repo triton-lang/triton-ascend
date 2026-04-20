@@ -5,6 +5,7 @@
 **Q: How can I correctly install Triton-Ascend? Is it possible to install it directly using pip?**
 
 A: You can directly use pip to install it.
+
 ```Python
 pip install triton-ascend
 ```
@@ -12,6 +13,7 @@ pip install triton-ascend
 **Q: Can community Triton and Triton-Ascend coexist?**
 
 A: No. You need to uninstall the community Triton first before installing Triton-Ascend.
+
 - Note: When installing other software that depends on Triton, the community Triton will be automatically installed, which will overwrite the already installed Triton-Ascend directory.
 In this case, you also need to uninstall the community Triton and Triton-Ascend first before installing Triton-Ascend.
 
@@ -36,7 +38,7 @@ For details about the debugging method, see [Debugging in Interpreter Mode](./de
 
 **Q: Why is the error message "MLIRCompilationError" displayed during kernel compilation? How can I locate the failed pass?**
 
-A: For details, see [Compilation Error Debugging](./debug_guide/debugging.md#52-compilation-errors-debugging).
+A: For details, see [Compilation Error Debugging](./debug_guide/debugging.md#52-compilation-error-debugging).
 
 ## 4. Debugging and Logging
 

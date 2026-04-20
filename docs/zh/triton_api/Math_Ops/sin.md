@@ -1,4 +1,5 @@
 # triton.language.sin
+
 ## 1. 函数概述
 
 简介：计算x的逐元素正弦值。
@@ -71,6 +72,3 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
 
     tl.store(output_ptr + idx, ret)
 ```
-
-
-

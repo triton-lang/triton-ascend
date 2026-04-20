@@ -1,4 +1,5 @@
 # triton.language.softmax
+
 ## 1. 函数概述
 
 简介：计算x的逐元素softmax。
@@ -72,6 +73,3 @@ def tt_softmax_3d(in_ptr, out_ptr,
 
     tl.store(out_ptr + idx, ret)
 ```
-
-
-

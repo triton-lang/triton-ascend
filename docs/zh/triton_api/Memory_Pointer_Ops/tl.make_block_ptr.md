@@ -1,4 +1,5 @@
 # triton.language.make_block_ptr
+
 ## 1. OP 概述
 
 简介：创建指向GM上张量的指针
@@ -6,13 +7,13 @@
 
 ```python
 triton.language.make_block_ptr(
-	base: triton.PointerType,
-	shape: List[tensor],
-	strides: tuple(int | constexpr),
-	offsets: tuple(int | constexpr),
-	block_shape:tuple(int | constexpr),
-	order:tuple(constexpr),
-	_semantic=None
+ base: triton.PointerType,
+ shape: List[tensor],
+ strides: tuple(int | constexpr),
+ offsets: tuple(int | constexpr),
+ block_shape:tuple(int | constexpr),
+ order:tuple(constexpr),
+ _semantic=None
 )
 ```
 
@@ -57,6 +58,7 @@ triton.language.make_block_ptr(
 `tl.make_block_ptr`的结果不允许进行算数运算，需要改变偏移量时，可以通过：
 
 1. 重新调用make_block_ptr，修改`offset`参数:
+
    ```python
    for block_idx in range(pid, NUM_BLOCKS, 20):
        task_hz_idx = block_idx // NUM_BLOCKS_M
@@ -74,7 +76,9 @@ triton.language.make_block_ptr(
            order=(1, 0),
        )
    ```
+
 2. 调用`tl.advance`调整偏移量:
+
    ```python
    block_ptr_in=tl.make_block_ptr(
        base = x_ptr,
@@ -176,4 +180,3 @@ def test_makeblockptr_order(shape, permute_order):
     test_common.validate_cmp("int32", triton_cal, torch_ref)
 
 ```
-

@@ -3,9 +3,11 @@
 ```python
 classtriton.Config(self, kwargs, num_warps=4, num_stages=2, num_ctas=1, maxnreg=None, pre_hook=None)
 ```
+
 表示自动调优可能尝试的内核配置的对象
 
 **变量：**
+
 - kwargs – 1 个元参数字典，用于作为关键字参数传递给内核。
 
 - num_warps – 在为 GPU 编译时内核使用的线程数。例如，如果 num_warps=8，则每个内核实例将自动并行化，使用 8 * 32 = 256 个线程协作执行。
@@ -23,6 +25,7 @@ __init__(self, kwargs, num_warps=4, num_stages=2, num_ctas=1, maxnreg=None, pre_
 ```
 
 **方法：**
+
 | init(self, kwargs[, num_warps, ...]) |
 |-----|
 |all_kwargs (self)|

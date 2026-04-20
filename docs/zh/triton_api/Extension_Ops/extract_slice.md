@@ -1,4 +1,5 @@
 # triton.language.extract_slice
+
 ## 1. OP 概述
 
 简介：从输入张量中按照操作指定的偏移量、大小和步幅参数提取一个张量。
@@ -6,12 +7,12 @@
 
 ```python
 triton.language.extract_slice(
-	ful, 
-	offsets, 
-	sizes, 
-	strides, 
-	_builder=None, 
-	_generator=None
+ ful, 
+ offsets, 
+ sizes, 
+ strides, 
+ _builder=None, 
+ _generator=None
 )→ tensor
 ```
 
@@ -35,12 +36,9 @@ triton.language.extract_slice(
 
 #### 2.2.1 DataType 支持
 
-
 |        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 |  bf16 | bool |
 | ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | 
 | Ascend A2/A3 | √    | √     | √     | √     | √     | √       | √         |  √       | √    | √    |  √    | ×    |
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -70,6 +68,3 @@ def triton_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
     out_msk = out_idx < n_elements
     tl.store(output_ptr + out_idx, out_sub, mask=out_msk)
 ```
-
-
-

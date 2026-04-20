@@ -1,9 +1,10 @@
 # triton.language.zeros_like
+
 ## 1. OP 概述
 
 简介：`triton.language.zeros_like`返回与给定张量具有相同形状和类型的零的张量。
 
-```
+```python
 triton.language.zeros_like(input)
 ```
 
@@ -22,13 +23,10 @@ triton.language.zeros_like(input)
 
 #### 2.2.1 DataType 支持
 
-
 || uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
 |---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
 | Ascend A2/A3 | ✓ | ✓ | × | ✓ | × | ✓ | × | ✓ | ✓ | ✓ | ✓ | × | 
 | GPU支持 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | × |
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -61,6 +59,3 @@ def fn_npu_(output_ptr, x_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.conste
     tl.store(output_ptr + oidx, ret)
 
 ```
-
-
-

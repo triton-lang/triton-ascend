@@ -11,7 +11,7 @@ NPUs are strongly bound to physical cores in Triton multi-core parallelism. This
     |Essence of grids| Logical task dimension (decoupled from physical cores)| Physical core group mapping (bound to the AI core topology)|
     |Limit on the number of cores/dimensions| No hard limit on the grid dimensions/sizes| Grid size ≤ Total number of AI cores; topology matching required by 2D|
 
-GPUs can be bound to multiple dimensions (a 3D grid of `[n, m, l]` is equivalent to` n × m × l` parallel threads). Each thread corresponds to only one kernel execution and executes only once.\
+GPUs can be bound to multiple dimensions (a 3D grid of `[n, m, l]` is equivalent to`n × m × l` parallel threads). Each thread corresponds to only one kernel execution and executes only once.\
 In NPUs, vector cores and cube cores belong to multiple physical cores. The number of cores varies with the generation of hardware. Each core executes only one block and can schedule the block execution repeatedly.
 
 ### Full Utilization of Cores
@@ -24,7 +24,6 @@ triton_gelu[n, 1, 1](...)  # The first parameter indicates the number of cores i
 ```
 
 By optimizing the number of cores, you can fully schedule and utilize all computing resources, thereby maximizing the degree of parallelism (DOP) and throughput. Note that the number of cores in the current version must be less than or equal to 65,535.
-
 
 ## Single-Core Data Transfer Strategy
 
@@ -42,11 +41,9 @@ xblock_sub: the granularity of intra-core tiling (fine-grained intra-core tiling
 
 By manually selecting the optimal tiling configurations based on your actual scenario, you can maximize the utilization of on-chip memory during each computation cycle, preventing performance bottlenecks caused by frequent access to the global memory.
 
-
 Taking the GELU operator as an example, adjusting the tiling parameters helps effectively adapt to the on-chip cache capacity limit, thereby improving execution efficiency.
 
 Note: Atlas 800T/I A2 has an on-chip memory capacity of 192 KB. When designing the tiling strategy, ensure that the data volume of each computation cycle does not exceed this capacity.
-
 
 #### Example GELU Operator
 
@@ -88,7 +85,6 @@ Precautions
 Therefore, this simple writing is suitable for computing small-scale tensors or for understanding the basic writing and call method of Triton kernels.
 
 2. Application scenarios: This method helps developers quickly understand and get started with Triton programming. However, for large-scale data sets or scenarios demanding high performance, developers are advised to use more complex data tiling strategies to fully utilize hardware resources and prevent memory overflow. In this way, developers can quickly get started with Triton programming and understand how to define, call, and optimize Triton kernel functions.
-
 
 #### More Efficient Triton Writing
 
@@ -134,10 +130,13 @@ tl.load() and tl.store()
 ```
 
 ## Compilation Optimization
+
 ### Ascend NPU IR Optimization
+
 The following table lists the compilation options for Ascend NPU IR optimization, which are adapted to the hardware and software features of Ascend.
 **Usage**: During the autotune configuration phase, pass the values of the compilation options.
 For example, to enable the `multibuffer` option, pass `'multibuffer': True` to `triton.Config` during the autotune configuration phase. For details, see [Autotune Example](../examples/06_autotune_example.md).
+
 ```python
     def get_autotune_config():
         return [

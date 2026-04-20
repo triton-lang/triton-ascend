@@ -8,6 +8,7 @@ The following Triton kernel implements batched matrix multiplication with bias:
 The formula is as follows: 
 $$ \text{output}[b, i, j] = \sum_k \text{x}[b, i, k] \cdot \text{y}[k, j] + \text{z}[b, i, j] $$  
 Specifically:
+
 - The shape of `x` is `(A, B)`.
 - The shape of `y` is `(B, C)`.
 - The shape of `z` (bias) is `(A, C)`.
@@ -59,6 +60,7 @@ def triton_dot_2_Bias(
     oidx = bidx[:, None] * C + didx[None, :]  # Same as Zidx, which can be reused.
     tl.store(output_ptr + oidx, ret)
 ```
+
 ## Tools and Methods
 
 The following helper functions are used to support the testing and verification of Triton kernels, including PyTorch reference implementation, data type mapping, random tensor generation, and result verification.

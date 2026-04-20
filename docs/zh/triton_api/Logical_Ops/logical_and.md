@@ -1,14 +1,15 @@
 # triton.language.semantic.logical_and
+
 ## 1. OP 概述
 
 简介：用于对两个张量进行逐元素逻辑与运算
 函数原型：
 
-```
+```python
 triton.language.semantic.logical_and(
-	input: tl.tensor, 
-	other: tl.tensor, 
-	builder: ir.builder
+ input: tl.tensor, 
+ other: tl.tensor, 
+ builder: ir.builder
 ) -> tl.tensor
 ```
 
@@ -36,10 +37,7 @@ triton.language.semantic.logical_and(
 | GPU          | × | × | × | × | × | × | × | × | × | × | × | × | √ |
 | Ascend A2/A3 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | √ |
 
-
-
 结论：在 DataType 方面, Ascend相比GPU额外增加了对整型、浮点型（除fp64,fp8）的支持。
-
 
 #### 2.2.2 Shape 支持
 
@@ -60,7 +58,7 @@ triton.language.semantic.logical_and(
 
 以下示例实现了对三维张量`x0`、`x1`做逻辑与运算：
 
-```
+```python
 @triton.jit
 def triton_logical_and_3d(in_ptr0, in_ptr1, out_ptr0, XB, YB, ZB, L: tl.constexpr, M: tl.constexpr, N: tl.constexpr):
     lblk_idx = tl.arange(0, L) + tl.program_id(0) * XB
@@ -73,4 +71,3 @@ def triton_logical_and_3d(in_ptr0, in_ptr1, out_ptr0, XB, YB, ZB, L: tl.constexp
     odx = lblk_idx[:, None, None] * N * M + mblk_idx[None, :, None] * N + nblk_idx[None, None, :]
     tl.store(out_ptr0 + odx, ret)
 ```
-

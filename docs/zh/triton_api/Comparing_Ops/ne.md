@@ -1,8 +1,8 @@
 # ne
+
 ## 1. OP 概述
 
 简介：用于比较两个张量的元素, 与`!=`等价。
-
 
 作为`tensor`的内置运算符使用, 如`x!=y`。
 
@@ -49,7 +49,7 @@ Triton-Ascend 对比 GPU 缺失fp64的支持能力, uint, fp8类型支持中。
 
 以下示例实现了对张量`x0`、`x1`做`!=`运算：
 
-```
+```python
 @triton.jit
 def triton_ne(in_ptr0, in_ptr1, out_ptr0, N: tl.constexpr, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
        offset = tl.program_id(0) * XBLOCK

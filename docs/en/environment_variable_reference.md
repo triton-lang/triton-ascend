@@ -1,4 +1,4 @@
-## Environment Variables
+# Environment Variables
 
 The following table describes how to set environment variables.
 

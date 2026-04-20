@@ -1,4 +1,5 @@
 # triton.language.and
+
 ## 1. 函数概述
 
 简介：计算两个元素的与值。
@@ -74,4 +75,3 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
 x = test_common.generate_tensor(shape, dtype).npu()
 y = test_common.generate_tensor(shape, dtype).npu()
 ```
-

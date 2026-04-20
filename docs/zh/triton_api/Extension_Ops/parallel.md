@@ -1,4 +1,5 @@
 # triton.language.parallel
+
 ## 1. 函数概述
 
 `parallel` 是一个专门用于多核心并行执行的迭代器，继承自 `range` 类，提供显式的多核心并行语义。
@@ -39,8 +40,6 @@ A3：
 | GPU | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | × | × | × | × | × |
 | Ascend A2/A3 | ✓ | ✓ | ✓ | ×|×| × | × | ✓ | × | × | × | × | × |
 
-
-
 ### 2.3 特殊限制说明
 
 `bind_sub_block` 为真时在ir中并体现出跟`range`的区别，功能是否实现待验证。
@@ -72,4 +71,3 @@ def parallel_kernel(
     val = tl.load(b_ptr)
     tl.store(output_ptr1 + x,val)
 ```
-

@@ -1,4 +1,5 @@
 # triton.language.randn
+
 ## 1. OP 概述
 
 简介：给定 1 个 seed 标量和 1 个 offset 块，返回 1 个 在 **N**(**0**,**1**)中（服从标准正态分布）的 float32 类型的随机块。
@@ -6,9 +7,9 @@
 
 ```python
 triton.language.randn(
-	seed, 
-	offset, 
-	n_rounds: constexpr = 10
+ seed, 
+ offset, 
+ n_rounds: constexpr = 10
 )
 ```
 
@@ -20,7 +21,7 @@ triton.language.randn(
 | ------------- | ----------------- | -------------------------------------------------------------- |
 | `seed`        | `int`或 `tensor`           | 用于生成随机数的种子                                                   |
 | `offset`       |`int`或 `tensor`     | 用于生成随机数的偏移量                     |
-| `n_rounds`     | `constexpr `，默认值为10   | Philox 算法的迭代轮数 |
+| `n_rounds`     | `constexpr`，默认值为10   | Philox 算法的迭代轮数 |
 
 返回值：
 1 个 float32 类型的随机块，shape与offset的相同，其值服从标准正态分布 `N(0, 1)`
@@ -43,7 +44,6 @@ triton.language.randn(
 
 > 相对社区能力缺失且无法实现
 
-
 ### 2.4 使用方法
 
 以下示例实现了对randn的调用：
@@ -64,6 +64,3 @@ ncore = 1 if numel < 32 else 32
 xblock = math.ceil(numel / ncore) 
 kernel_randn[ncore, 1, 1](y_calf, 10, numel, xblock)
 ```
-
-
-

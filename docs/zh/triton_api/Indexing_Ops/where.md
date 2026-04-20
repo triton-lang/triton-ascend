@@ -1,4 +1,5 @@
 # triton.language.where
+
 ## 1. 函数概述
 
 简介：根据条件进行判断返回的是张量x还是y的值，条件为真时，返回x的值，否则返回y的值。
@@ -76,4 +77,3 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
 x = test_common.generate_tensor(shape, dtype).npu()
 y = test_common.generate_tensor(shape, dtype).npu()
 ```
-

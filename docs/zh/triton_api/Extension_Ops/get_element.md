@@ -1,4 +1,5 @@
 # triton.language.get_element
+
 ## 1. OP 概述
 
 简介：根据给定的索引，从输入张量中读取单个元素。
@@ -6,10 +7,10 @@
 
 ```python
 triton.language.get_element(
-	src, 
-	indice, 
-	_builder=None, 
-	_generator=None
+ src, 
+ indice, 
+ _builder=None, 
+ _generator=None
 )→ scalar
 ```
 
@@ -33,12 +34,9 @@ triton.language.get_element(
 
 #### 2.2.1 DataType 支持
 
-
 |        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | bf16 | bool |
 | ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | 
 | Ascend A2/A3 | √    | √     | √     | √     | √     | √       | √         |  √       | √    | √    |  √    | ×    |
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -86,4 +84,3 @@ def index_select_manual_kernel(in_ptr, indices_ptr, out_ptr, dim,
 ## 3. 语义GAP
 
 无语义差异
-

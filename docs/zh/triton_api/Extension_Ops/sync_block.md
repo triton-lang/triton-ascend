@@ -1,4 +1,5 @@
 # triton.language.sync_block_set
+
 ## 1. 函数概述
 
 显式的核心间同步指令，用于协调 Cube-Vector 架构中不同核心间的执行顺序和数据一致性。
@@ -130,4 +131,3 @@ def flash_attention_fwd(q_ptr, k_ptr, v_ptr, o_ptr, ...):
 
     tl.store(o_ptr + offsets, acc)
 ```
-

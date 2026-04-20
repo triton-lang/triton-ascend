@@ -1,12 +1,13 @@
 # triton.language.dot_scaled
+
 ## 1. OP 概述
 
 简介：**计算以缩放格式表示两个矩阵块的矩阵乘积**
 
 ```python
 triton.language.dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, 
-						acc=None, lhs_k_pack=True, rhs_k_pack=True, 	 	
-	 					out_dtype=triton.language.float32, _semantic=None)
+      acc=None, lhs_k_pack=True, rhs_k_pack=True,    
+       out_dtype=triton.language.float32, _semantic=None)
 ```
 
 ## 2. OP 规格
@@ -22,8 +23,8 @@ triton.language.dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_forma
 | `rhs_scale`        | `tensor`          | 右矩阵缩放张量的基指针（支持int8格式）                                                       |
 | `rhs_format`        | `string`          | 右矩阵张量的存放格式 （支持"bf16"和"fp16"）                                                      |
 | `acc`       | `tensor`    | 累积张量                                                        |
-| `lhs_k_pack`     | `(bool, optional)`    | true	沿 K 维度打包<br>false	沿 M 维度打包<br>|
-| `rhs_k_pack ` | `(bool, optional)` | true	沿 K 维度打包<br>false	沿 N 维度打包<br>|
+| `lhs_k_pack`     | `(bool, optional)`    | true 沿 K 维度打包<br>false 沿 M 维度打包<br>|
+| `rhs_k_pack` | `(bool, optional)` | true 沿 K 维度打包<br>false 沿 N 维度打包<br>|
 | `_semantic`   | -                 | 保留参数，暂不支持外部调用                                                |
 
 返回值：
@@ -58,8 +59,6 @@ triton.language.dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_forma
 3、由于硬件存在对齐要求，需要限制scale矩阵做broadcast的倍数，至少应为16
 
 4、当前支持的缩放矩阵格式为int8，社区为uint8
-
-
 
 ### 2.4 使用方法
 

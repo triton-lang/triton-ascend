@@ -1,4 +1,5 @@
 # triton.language.expand_dims
+
 ## 1 功能作用说明
 
 在指定轴位置插入大小为1的维度，不改变张量的数据，仅增加维度数。支持负索引，从右向左计数。
@@ -70,4 +71,3 @@ def expand_dims_example():
 result = expand_dims_example()
 print(result.shape)  # 输出: (2, 1, 3)
 ```
-

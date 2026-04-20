@@ -1,4 +1,5 @@
 # triton.language.maximum
+
 ## 1. 函数概述
 
 简介：计算x和y的逐元素最大值。
@@ -16,7 +17,7 @@ triton.language.maximum(x, y, propagate_nan: ~triton.language.core.constexpr = <
 | ------------- | ----------------- | -------------------------------------------------------------- |
 | `x`        | `tensor`          | 张量数据                                                      |
 | `y`       | `tensor`    | 张量数据                                                        |
-| `propagate_nan `       | `tl.PropagateNan`    | 是否传播NaN值                                                        |
+| `propagate_nan`       | `tl.PropagateNan`    | 是否传播NaN值                                                        |
 | `_semantic`   | -                 | 保留参数，暂不支持外部调用
 
 返回值：
@@ -75,6 +76,3 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
     tl.store(output_ptr + idx, ret)
 
 ```
-
-
-

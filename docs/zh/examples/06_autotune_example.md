@@ -6,6 +6,7 @@
 当前Triton-Ascend autotune支持block size、multibuffer（编译器的优化），因为硬件架构差异不支持num_warps、num_stages参数，未来还会持续增加autotune可调项。
 
 ## 社区 autotune 使用示例
+
 ```Python
 import torch, torch_npu
 import triton
@@ -69,6 +70,7 @@ if __name__ == "__main__":
 ```
 
 ## 进阶 autotune 使用示例
+
 ```Python
 # 下面说明进阶 autotune 与社区版的参数使用要点
 #
@@ -149,6 +151,7 @@ def add_kernel(
 ```
 
 说明：
+
 1. Triton-Ascend默认采取benchmark的方式取片上计算时间，当设置环境变量`export TRITON_BENCH_METHOD="npu"`后，会通过`torch_npu.profiler.profile`的方式获取每个kernel配置下的片上计算时间，对于一些triton kernel计算快速的情况，例如小shape算子，相较于默认方式能够获取更准确的计算时间，但是会显著增加整体autotune的时间，请谨慎开启
 2. 目前该进阶用法针对的是 Vector 类算子，不支持 Cube 类算子。更多进阶使用示例可以参考[autotune进阶使用示例](https://gitcode.com/Ascend/triton-ascend/tree/main/third_party/ascend/unittest/autotune_ut)
 
@@ -302,7 +305,9 @@ def triton_func(input_ptr, output_ptr, ...):
 ```
 
 ## 更多功能
+
 ### 自动生成最优配置的 Profiling 结果
+
 ```Python
 # 自动在`auto_profile_dir`目录中生成当前autotune最优kernel配置的profiling结果，即利用`torch_npu.profiler.profile`采集的性能数据
 # 在社区autotune用法和进阶autotune用法中均可生效

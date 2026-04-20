@@ -1,4 +1,5 @@
 # triton.language.umulhi
+
 ## 1. 函数概述
 
 简介：计算x和y的2N位乘积中每个元素的最显著N位。
@@ -45,8 +46,6 @@ torch_npu对u8的支持。
 
 int64不支持
 
-
-
 ### 2.4 使用方法
 
 以下示例实现了对输入张量 `x` 做显著N位：
@@ -60,6 +59,3 @@ def umulhi_kernel(X, Y, Z, N: tl.constexpr):
     z = tl.umulhi(x, y)
     tl.store(Z + tl.arange(0, N), z)
 ```
-
-
-

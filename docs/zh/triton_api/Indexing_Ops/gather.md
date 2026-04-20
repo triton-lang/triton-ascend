@@ -1,4 +1,5 @@
 # triton.language.gather
+
 ## 1. OP 概述
 
 简介：对`src`tensor沿`axis`维度按照`index`执行gather操作，gather操作含义见下图:
@@ -7,10 +8,10 @@
 
 ```python
 triton.language.gather(
-	src: tensor,
-	index: tensor,
-	axis: int,
-	_semantic=None
+ src: tensor,
+ index: tensor,
+ axis: int,
+ _semantic=None
 )
 ```
 
@@ -121,6 +122,3 @@ def test_gather(src_shape, indices_shape, axis):
     result = triton_gather(src, axis, indices)
     torch.testing.assert_close(result, ref, rtol=0, atol=0)
 ```
-
-
-

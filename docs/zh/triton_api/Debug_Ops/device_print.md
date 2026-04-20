@@ -1,4 +1,5 @@
 # triton.language.device_print
+
 ## 1. 函数概述
 
 `device_print` 用于在NPU运行时从设备端打印信息，与`static_print`不同，这是在内核执行时实时输出信息。 **使用`device_print`需要将环境变量`TRITON_DEVICE_PRINT`的值设置为`True`。**
@@ -26,8 +27,6 @@ A3：
 |------|-------|-------|-------|-------|--------|--------|--------|-------|------|------|------|------|------|
 | GPU | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Ascend A2/A3 | ✓ | ✓ | ✓ | × | × | ×| × | ✓ | ✓ | ✓ | × | ✓ | ✓ |
-
-
 
 ### 2.2.2 Shape 支持
 
@@ -71,8 +70,6 @@ def add_kernel(x_ptr,  # *Pointer* to first input vector.
 
 另外在特定情况下，`device_print`会展开一些辅助dma代码，导致底层报错，相关功能还在优化中
 
-
-
 ### 2.4 使用方法
 
 **注意**：`prefix`字符串前缀在使用`device_print`时是必需加上的，否则会导致编译错误。
@@ -90,4 +87,3 @@ def kernel(x_ptr):
     # 打印二维张量val的值
     tl.device_print("val:",val)
 ```
-

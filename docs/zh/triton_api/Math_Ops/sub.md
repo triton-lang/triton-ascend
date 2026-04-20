@@ -1,4 +1,5 @@
 # sub
+
 ## 1. OP 概述
 
 简介：减法  ，四则运算 ‘-’，无tl.sub方法
@@ -19,13 +20,10 @@
 
 #### 2.2.1 DataType 支持
 
-
 || uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
 |---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
 |GPU| √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
 |Ascend A2/A3| √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -40,7 +38,7 @@
 
 以下示例实现了对输入张量 `in_ptr0, in_ptr1` 做减法计算：
 
-```
+```python
 @triton.jit
 def triton_sub(in_ptr0, in_ptr1, out_ptr0, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
     offset = tl.program_id(0) * XBLOCK

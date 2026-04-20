@@ -1,9 +1,10 @@
 # triton.language.argmax
+
 ## 1. OP 概述
 
 简介：在指定维度上返回最大值所在的下标
 
-```
+```python
 triton.language.argmax(input, axis, tie_break_left=True, keep_dims=False)
 ```
 
@@ -25,13 +26,10 @@ triton.language.argmax(input, axis, tie_break_left=True, keep_dims=False)
 
 #### 2.2.1 DataType 支持
 
-
 || uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
 |---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
 |GPU| √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
 |Ascend A2A3系列| √ | √ | x | √ | × | √ | × | √ | √ | √ | √ | √ |
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -48,8 +46,6 @@ triton.language.argmax(input, axis, tie_break_left=True, keep_dims=False)
 
 Ascend A3 对比 GPU 缺失uint16、uint32、uint64、fp64的支持
 
-
-
 ### 2.4 使用方法
 
 更多示例参考triton-ascend代码仓，ascend/examples/generalization_cases/test_argmax.py
@@ -62,9 +58,6 @@ def triton_argmax_1d(in_ptr0, out_ptr1, xnumel, XBLOCK: tl.constexpr):
     tl.store(out_ptr1, tmp4, None)
 ```
 
-
-
 ## 3. 特殊取值情况
 
 对于 tensor[nan,inf] 的情况，返回inf所在的下标
-

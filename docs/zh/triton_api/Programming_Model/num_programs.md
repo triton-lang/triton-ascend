@@ -1,13 +1,13 @@
 # triton.language.num_programs
+
 ## 1. OP 概述
 
 简介：返回沿给定 axis 启动的程序实例数量
 函数原型：
 
-```
+```python
 triton.language.num_programs(axis)
 ```
-
 
 ## 2. OP 规格
 
@@ -29,23 +29,19 @@ triton.language.num_programs(axis)
 | GPU          | × | × | √ | × | × | × | × | × | × | × | × | × | × |
 | Ascend A2/A3 | × | × | √ | × | × | × | × | × | × | × | × | × | × |
 
-
-
 #### 2.2.2 Shape 支持
 
 无相关设置
-
 
 ### 2.3 特殊限制说明
 
 无
 
-
 ### 2.4 使用方法
 
-例子可以参考[test_3Dgrid.py](../../../../ascend/examples/pytest_ut/test_3Dgrid.py)
+例子可以参考[test_3Dgrid.py](../../../../third_party/ascend/unittest/pytest_ut/test_3Dgrid.py)
 
-```
+```python
 @triton.jit
 def triton_(in_ptr0, out_ptr0, x0_numel, r1_numel, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr,
             block_id_threshold: tl.constexpr, XBLOCK1: tl.constexpr, num_core: tl.constexpr):
@@ -85,4 +81,3 @@ def triton_(in_ptr0, out_ptr0, x0_numel, r1_numel, XBLOCK: tl.constexpr, XBLOCK_
         tl.store(out_ptr0 + (x0), tmp2, xmask)
 
 ```
-

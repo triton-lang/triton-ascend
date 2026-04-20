@@ -1,4 +1,5 @@
 # triton.language.atomic_add
+
 ## 1. OP 概述
 
 简介：原子性加法操作，在指定的内存位置执行原子加法
@@ -6,12 +7,12 @@
 
 ```python
 triton.language.atomic_add(
-	pointer, 
-	val, 
-	mask=None, 
-	sem=None, 
-	scope=None, 
-	_semantic=None
+ pointer, 
+ val, 
+ mask=None, 
+ sem=None, 
+ scope=None, 
+ _semantic=None
 )→ pointer
 ```
 

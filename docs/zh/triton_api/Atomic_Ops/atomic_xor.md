@@ -1,4 +1,5 @@
 # triton.language.atomic_xor
+
 ## 1. OP 概述
 
 简介：原子性逻辑异或操作，在指定的内存位置执行逻辑异或
@@ -6,12 +7,12 @@
 
 ```python
 triton.language.atomic_xor(
-	pointer, 
-	val, 
-	mask=None, 
-	sem=None, 
-	scope=None, 
-	_semantic=None
+ pointer, 
+ val, 
+ mask=None, 
+ sem=None, 
+ scope=None, 
+ _semantic=None
 )→ pointer
 ```
 
@@ -37,13 +38,10 @@ triton.language.atomic_xor(
 
 #### 2.2.1 DataType 支持
 
-
 |        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
 | ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
 | GPU    | ×     | ×      |√     | ×     | ×      | √       | √       | √     | ×    | ×    | ×    | ×    | ×    |
 | Ascend A2/A3| √    | √     | √     | √     | √     | √       | √         |  √       | ×    | ×    | ×    | ×    | ×    |
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -52,7 +50,6 @@ triton.language.atomic_xor(
 ### 2.3 特殊限制说明
 
 > 相对社区能力缺失且无法实现
-
 
 | 差异点                   | 描述                                                                           |
 | --------------------- | ---------------------------------------------------------------------------- | 

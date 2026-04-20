@@ -1,9 +1,10 @@
 # triton.language.ceil
+
 ## 1. OP 概述
 
 简介：计算张量中每个元素的向上取整值
 
-```
+```python
 triton.language.ceil(x, _semantic=None)
 ```
 
@@ -28,8 +29,6 @@ triton.language.ceil(x, _semantic=None)
 | GPU          | × | × | × | × | × | × | × | × | × | √ | √ | × | × |
 | Ascend A2/A3 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | √ |
 
-
-
 #### 2.2.2 Shape 支持
 
 |        | 支持维度范围         |
@@ -45,13 +44,11 @@ triton.language.ceil(x, _semantic=None)
 
 Ascend 对比 GPU 缺失fp64的支持能力, 但多了fp16、bf16的支持能力, 支持整型输入。
 
-
-
 ### 2.4 使用方法
 
 以下示例实现了对输入张量 `x` 做向上取整运算：
 
-```
+```python
 @triton.jit
 def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
             XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr,
@@ -73,4 +70,3 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
 
     tl.store(output_ptr + idx, ret)
 ```
-

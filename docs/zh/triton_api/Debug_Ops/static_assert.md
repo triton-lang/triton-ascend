@@ -1,4 +1,5 @@
 # triton.language.static_assert
+
 ## 1. 函数概述
 
 `static_assert` 用于在编译时断言条件是否成立，如果条件不满足则编译失败。这是一个编译时检查工具，不需要设置调试环境变量。
@@ -26,8 +27,6 @@ A3：
 | GPU | × | × | × | × | × | × | × | × | × | × | × | × | ✓ |
 | Ascend A2/A3 | × | × | × | × | × | × | × | × | × | × | × | × | ✓ |
 
-
-
 **注意：** `cond` 语句中值的类型必须为 `constexpr`。
 
 ### 2.3 使用方法
@@ -47,6 +46,3 @@ def basic_static_assert_example(x_ptr, BLOCK_SIZE: tl.constexpr):
     # val = tl.load(x_ptr)
     # tl.static_assert(val <= 64)
 ```
-
-
-

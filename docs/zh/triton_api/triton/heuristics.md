@@ -3,6 +3,7 @@
 ```python
 triton.heuristics(values)
 ```
+
 用于指定如何计算某些元参数值的装饰器。这在自动调优成本过高或不适用的情况下非常有用。
 
 ```python

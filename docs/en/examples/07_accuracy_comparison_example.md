@@ -114,6 +114,7 @@ def accuracy_comparison(y_cal, y_ref):
 ```
 
 You can run the following command to execute the sample code: tutorials/14-accuracy-comparison.py.
+
 ```Python
 python triton-ascend/ascend/examples/tutorials/14-accuracy-comparison.py
 ```

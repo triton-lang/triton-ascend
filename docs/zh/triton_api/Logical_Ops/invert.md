@@ -1,4 +1,5 @@
 # triton.language.invert
+
 ## 1. 函数概述
 
 简介：将tensor每个值按比特位进行翻转。
@@ -73,6 +74,3 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
 
 x = test_common.generate_tensor(shape, dtype).npu()
 ```
-
-
-

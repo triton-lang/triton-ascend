@@ -87,6 +87,7 @@ class AutoTilingTuner(Autotuner):
             use_cuda_graph,
             do_bench,
         )
+        self.user_defined_do_bench = do_bench is not None
         if not hints:
             self.hints = {}
         else:
@@ -495,17 +496,19 @@ class AutoTilingTuner(Autotuner):
 
         if len(run_fns) == 1:
             # we ignore expensive profiling method when only single config is left
-            return {config: self.do_bench(fn) for config, fn in run_fns.items()}
+            return {config: self.do_bench(fn, quantiles=(0.5, 0.2, 0.8)) for config, fn in run_fns.items()}
 
         use_profiling = os.getenv("TRITON_BENCH_METHOD", "default").lower() == "npu"
-        if use_profiling:
+        # Respect user-provided benchmarkers even when NPU profiling mode is enabled.
+        use_npu_profiling = use_profiling and not self.user_defined_do_bench
+        if use_npu_profiling:
             from ..testing import do_bench_npu
 
             time_cost = do_bench_npu(list(run_fns.values()), clear_l2_cache=False)
             assert len(time_cost) == len(run_fns)
             return {config: cost for config, cost in zip(run_fns.keys(), time_cost)}
         else:
-            return {config: self.do_bench(fn) for config, fn in run_fns.items()}
+            return {config: self.do_bench(fn, quantiles=(0.5, 0.2, 0.8)) for config, fn in run_fns.items()}
 
     def _make_kernel_call(self, *args, config, **meta):
         # check for conflicts, i.e. meta-parameters both provided

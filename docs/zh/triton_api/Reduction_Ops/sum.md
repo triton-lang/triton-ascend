@@ -1,10 +1,10 @@
 # triton.language.sum
+
 ## 1. OP 概述
 
 简介：`triton.language.sum` 计算输入tensor沿指定轴的元素和，返回求和结果。
 
-
-```
+```python
 triton.language.sum(input, axis=None, keep_dims=False)
 ```
 
@@ -18,7 +18,6 @@ triton.language.sum(input, axis=None, keep_dims=False)
 | `axis` | `int` 或 `None` | 沿着哪个维度进行求和操作。如果为None，则对所有维度求和 |
 | `keep_dims` | `bool` | 如果为True，保持被求和的维度为长度1 |
 
-
 返回值：
 `tensor`：计算输入tensor沿指定轴的元素和，返回求和结果。
 
@@ -26,13 +25,10 @@ triton.language.sum(input, axis=None, keep_dims=False)
 
 #### 2.2.1 DataType 支持
 
-
 || uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
 |---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
 | Ascend A2/A3 | ✓ | ✓ | × | ✓ | × | ✓ | × | ✓ | ✓ | ✓ | ✓ | ✓ | 
 | GPU支持 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -68,4 +64,3 @@ def tt_sum_2d(in_ptr, out_ptr,
     tl.store(out_ptr + oidx, ret)
 
 ```
-

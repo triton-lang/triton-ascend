@@ -1,4 +1,5 @@
 # triton.language.static_print
+
 ## 1.函数概述
 
 `static_print` 用于在编译时打印信息，类似于Python的`print()`函数，但它在内核编译期间执行而不是运行时执行。
@@ -28,7 +29,6 @@ A3：
 |------|-------|-------|-------|-------|--------|--------|--------|-------|------|------|------|------|------|
 | GPU | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Ascend A2/A3 | ✓ | ✓ | ✓ | × | × | ×| × | ✓ | ✓ | ✓ | × | ✓ | ✓ |
-
 
 ### 2.2.2 Shape 支持
 
@@ -72,6 +72,3 @@ def basic_static_print_example(x_ptr, BLOCK_SIZE: tl.constexpr):
     #非常量不支fstring打印
     #tl.static_print(f"val:{val}")
 ```
-
-
-

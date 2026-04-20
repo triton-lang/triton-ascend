@@ -1,4 +1,5 @@
 # 指导：如何新增kernel测试用例
+
 新增kernel测试用例可以分为三大步:
 1、准备pt文件
 2、在triton-ascend仓中添加kernel算子，完成本地kernel测试
@@ -25,15 +26,15 @@ batch_size = 2
 grid = (batch_size,)
 
 input_data = {
-	"output_token_ids_ptr": torch.zeros((batch_size, 4), dtype=torch.int32, device=DEVICE),
-	"cu_num_draft_tokens_ptr": torch.tensor([2, 1], dtype=torch.int32, device=DEVICE),
-	# ... 其它字段
+"output_token_ids_ptr": torch.zeros((batch_size, 4), dtype=torch.int32, device=DEVICE),
+"cu_num_draft_tokens_ptr": torch.tensor([2, 1], dtype=torch.int32, device=DEVICE),
+# ... 其它字段
 }
 
 # 保存输入副本到 CPU
 input_data_before = {
-	k: (v.clone().cpu() if isinstance(v, torch.Tensor) else copy.deepcopy(v))
-	for k, v in input_data.items()
+ k: (v.clone().cpu() if isinstance(v, torch.Tensor) else copy.deepcopy(v))
+ for k, v in input_data.items()
 }
 # 预处理 input_data_before 符合 NPU kernel 输入
 input_data_before["npu_need_param_key"] = NPU_NEED_PARAMS_VALUE
@@ -54,10 +55,11 @@ torch.save(save_obj, "<kernel_name>.pt")
 python -m pytest -v third_party/ascend/unittest/kernels/test_triton_kernel.py
 
 **说明**
+
 - 指定单个 kernel：在项目根目录下执行 python -m pytest -v ascend/test/common/test_triton_kernel.py --kernel={kernel_name}
 - pt文件查找策略：优先使用仓库内匹配的本地 pt，若本地不存在则按需从远端 OBS 下载 {kernel_name}.pt文件。
 - 本地已存在的pt文件，在执行完测试后不会删除，从obs桶取的文件在跑完测试后会被测试程序直接删除。
 
 ## 3、将pt文件上传至obs桶
-本地验证通过后，将pt文件统一上传到OBS桶当中，OBS桶链接：https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/test/kernels/{xxx}_pt/{kernel_name}.pt，xxx为vllm或sglang
 
+本地验证通过后，将pt文件统一上传到OBS桶当中，OBS桶链接：`https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/test/kernels/{xxx}_pt/{kernel_name}.pt，xxx为vllm或sglang`

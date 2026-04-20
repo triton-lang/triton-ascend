@@ -1,9 +1,10 @@
 # triton.language.cumsum
+
 ## 1. OP 概述
 
 简介：`triton.language.cumsum` 计算输入tensor沿指定轴的累积和，返回累积求和结果。
 
-```
+```python
 triton.language.cumsum(input, axis=0, reverse=False)
 ```
 
@@ -17,7 +18,6 @@ triton.language.cumsum(input, axis=0, reverse=False)
 | `axis` | `int` | 沿着哪个维度进行累积和操作，默认为0 |
 | `reverse` | `bool` | 如果为True，沿反方向进行累积和操作 |
 
-
 `cumsum` 函数计算沿指定轴的累积和（前缀和）。例如，对于输入 `[a, b, c, d]`，累积和结果为 `[a, a+b, a+b+c, a+b+c+d]`。
 
 当 `reverse=True` 时，计算反向累积和：`[a+b+c+d, b+c+d, c+d, d]`。
@@ -29,12 +29,10 @@ triton.language.cumsum(input, axis=0, reverse=False)
 
 #### 2.2.1 DataType 支持
 
-
 || uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
 |---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
 | Ascend A2/A3 | ✓ | ✓ | × | ✓ | × | ✓ | × | ✓ | ✓ | ✓ | ✓ | ✓ | 
 | GPU支持 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-
 
 #### 2.2.2 Shape 支持
 
@@ -71,4 +69,3 @@ def triton_kernel_2d(
     ret = tl.cumsum(x, axis=dim, reverse=reverse)
     tl.store(out_ptr0 + idx, ret)
 ```
-

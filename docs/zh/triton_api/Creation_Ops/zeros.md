@@ -1,9 +1,10 @@
 # triton.language.zeros
+
 ## 1. OP 概述
 
 简介：`triton.language.zeros`返回用给定形状和dtype的标量值0填充的张量。
 
-```
+```python
 triton.language.zeros(shape, dtype)
 ```
 
@@ -14,7 +15,7 @@ triton.language.zeros(shape, dtype)
 | 参数名           | 类型                  | 说明                                   |
 | ------------- | ----------------- | ---------------------------- |
 | `shape`           | `tuple of ints`               | 新数组的形状，例如 (8, 16) 或 (8, ) |
-| `dtype `            | `tl.dtype`               |  新数组的数据类型，例如 tl.float16  |
+| `dtype`            | `tl.dtype`               |  新数组的数据类型，例如 tl.float16  |
 
 返回值：
 `tensor`：返回用给定形状和dtype的标量值0填充的张量。
@@ -23,13 +24,10 @@ triton.language.zeros(shape, dtype)
 
 #### 2.2.1 DataType 支持
 
-
 || uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
 |---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
 | Ascend A2/A3 | ✓ | ✓ | × | ✓ | × | ✓ | × | ✓ | ✓ | ✓ | ✓ | × | 
 | GPU支持 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | × |
-
-
 
 #### 2.2.2 Shape 支持
 
@@ -61,6 +59,3 @@ def fn_f32(output_ptr, x_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constex
 
     tl.store(output_ptr + oidx, ret)
 ```
-
-
-

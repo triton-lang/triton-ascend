@@ -1,4 +1,5 @@
 # triton.language.clamp
+
 ## 1. 函数概述
 
 简介：限制张量x的范围为[min，max]之间。
@@ -31,8 +32,6 @@ triton.language.clamp(x, min, max, propagate_nan: ~triton.language.core.constexp
 | GPU    | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     | √    | √    | √    | √    | ×    |
 | Ascend A2/A3 | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     | √    | √    | ×    | √    | ×    |
 
-
-
 #### 2.2.2 Shape 支持
 
 |        | 支持维度范围          |
@@ -47,8 +46,6 @@ triton.language.clamp(x, min, max, propagate_nan: ~triton.language.core.constexp
 > 相对社区能力缺失且无法实现
 
 比 GPU 少了fp64的支持。
-
-
 
 ### 2.4 使用方法
 
@@ -72,4 +69,3 @@ def tt_clamp_2d(in_ptr, out_ptr, min_ptr, max_ptr,
 
        tl.store(out_ptr + idx, ret)
 ```
-

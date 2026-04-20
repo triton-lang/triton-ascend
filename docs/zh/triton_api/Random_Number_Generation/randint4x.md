@@ -1,4 +1,5 @@
 # triton.language.randint4x
+
 ## 1. OP 概述
 
 简介：给定 1 个 seed 标量和 1 个 offset 块，返回 4 个 int32 类型的随机块。
@@ -7,9 +8,9 @@ Triton 的 Philox 伪随机数生成器的最高效入口点。
 
 ```python
 triton.language.randint4x(
-	seed, 
-	offset, 
-	n_rounds: constexpr = 10
+ seed, 
+ offset, 
+ n_rounds: constexpr = 10
 )
 ```
 
@@ -21,7 +22,7 @@ triton.language.randint4x(
 | ------------- | ----------------- | -------------------------------------------------------------- |
 | `seed`        |`int`或 `tensor`          | 用于生成随机数的种子                                                   |
 | `offset`       | `int`或 `tensor`      | 用于生成随机数的偏移量                     |
-| `n_rounds`     | `constexpr `，默认值为10   | Philox 算法的迭代轮数 |
+| `n_rounds`     | `constexpr`，默认值为10   | Philox 算法的迭代轮数 |
 
 返回值：
 4 个 int32 类型的随机块，每个块的shape与offset相同
@@ -43,7 +44,6 @@ triton.language.randint4x(
 ### 2.3 特殊限制说明
 
 > 相对社区能力缺失且无法实现
-
 
 ### 2.4 使用方法
 
@@ -70,17 +70,14 @@ kernel_randint4x[ncore, 1, 1](y_cali, 10, numel, xblock)
 ```python
 @triton.jit
 def triton_randint4x1d(out_ptr, seed, L: tl.constexpr):
-	idx = tl.arange(0, L)
-	rnd0, rnd1, rnd2, rnd3 = tl.randint4x(seed, idx)
-	pointers0 = out_ptr + idx
-	pointers1 = out_ptr + L + idx
-	pointers2 = out_ptr + 2 * L + idx
-	pointers3 = out_ptr + 3 * L + idx
-	tl.store(pointers0, rnd0)
-	tl.store(pointers1, rnd1)
-	tl.store(pointers2, rnd2)
-	tl.store(pointers3, rnd3)
+ idx = tl.arange(0, L)
+ rnd0, rnd1, rnd2, rnd3 = tl.randint4x(seed, idx)
+ pointers0 = out_ptr + idx
+ pointers1 = out_ptr + L + idx
+ pointers2 = out_ptr + 2 * L + idx
+ pointers3 = out_ptr + 3 * L + idx
+ tl.store(pointers0, rnd0)
+ tl.store(pointers1, rnd1)
+ tl.store(pointers2, rnd2)
+ tl.store(pointers3, rnd3)
 ```
-
-
-

@@ -1,4 +1,5 @@
 # triton.language.atomic_and
+
 ## 1. OP 概述
 
 简介：原子性逻辑与操作，在指定的内存位置执行逻辑与
@@ -6,12 +7,12 @@
 
 ```python
 triton.language.atomic_and(
-	pointer, 
-	val, 
-	mask=None, 
-	sem=None, 
-	scope=None, 
-	_semantic=None
+ pointer, 
+ val, 
+ mask=None, 
+ sem=None, 
+ scope=None, 
+ _semantic=None
 )→ pointer
 ```
 

@@ -1,11 +1,12 @@
 # Autotune
 
-In this section, we will demonstrate how to use the autotune method of Triton to automatically select the optimal kernel configuration parameters. Currently, Triton-Ascend autotune is fully compatible with the usage of the autotune in the community (visit https://triton-lang.org/main/python-api/generated/triton.autotune.html). That is, users need to manually pass some defined **triton.Config** to autotune, and then autotune selects the optimal kernel configuration through benchmarking. In addition, Triton-Ascend provides the **advanced autotune** usage. Users need to provide information such as the split and tiling axes of the current Triton kernel. In this case, autotune automatically generates some possible optimal kernel configurations based on the actual input size, and then selects the optimal configuration through benchmarking or profiling.
+In this section, we will demonstrate how to use the autotune method of Triton to automatically select the optimal kernel configuration parameters. Currently, Triton-Ascend autotune is fully compatible with the usage of the autotune in the community (visit <https://triton-lang.org/main/python-api/generated/triton.autotune.html>). That is, users need to manually pass some defined **triton.Config** to autotune, and then autotune selects the optimal kernel configuration through benchmarking. In addition, Triton-Ascend provides the **advanced autotune** usage. Users need to provide information such as the split and tiling axes of the current Triton kernel. In this case, autotune automatically generates some possible optimal kernel configurations based on the actual input size, and then selects the optimal configuration through benchmarking or profiling.
 
 Note:
 Currently, Triton-Ascend autotune supports block size and multibuffer (compiler optimization). However, the **num_warps** and **num_stages** parameters are not supported due to hardware architecture differences. In the future, more adjustable autotune options will be added.
 
 ## Community Autotune Usage Example
+
 ```Python
 import torch, torch_npu
 import triton
@@ -69,6 +70,7 @@ if __name__ == "__main__":
 ```
 
 ## Advanced Autotune Usage Example
+
 ```Python
 # The following are parameters added or modified compared with the community autotune.
 # Note: When either split_params or tiling_params is not empty, the advanced autotune method is automatically triggered.
@@ -124,6 +126,7 @@ def add_kernel(
 ```
 
 Note:
+
 1. By default, Triton-Ascend uses the benchmark mode to obtain the on-chip computation time. After the environment variable is set by running `export TRITON_BENCH_METHOD="npu"`, the on-chip computation time of each kernel is obtained by using `torch_npu.profiler.profile`. For some Triton kernels that compute fast, such as small-shape operators, this method can obtain more accurate computation time than the default method. However, this will significantly increase the overall autotune time. Therefore, exercise caution when enabling this method.
 2. Currently, this advanced usage is mainly used for vector operators and is not supported by cube operators. For more advanced usage examples, see [Advanced Autotune Cases](https://gitcode.com/Ascend/triton-ascend/tree/master/ascend/examples/autotune_cases).
 
@@ -276,7 +279,9 @@ def triton_func(input_ptr, output_ptr, ...):
 ```
 
 ## More Functions
+
 ### Automatically Generating the Profiling Result of the Optimal Configuration
+
 ```Python
 # Automatically generate the profiling result of the optimal kernel configuration of the current autotune in the `auto_profile_dir` directory, that is, the performance data collected by `torch_npu.profiler.profile`.
 # This takes effect in both the community autotune usage and advanced autotune usage.

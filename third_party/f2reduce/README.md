@@ -1,5 +1,4 @@
-f2reduce: a MIT-licenced library for Gaussian elimination over GF(2)
-====================================================================
+# f2reduce: a MIT-licenced library for Gaussian elimination over GF(2)
 
 This is a very lightweight implementation for converting a binary matrix
 to row reduced echelon form. It incorporates the following optimisations:
@@ -43,8 +42,7 @@ processor caches, we expose another function to return a recommended stride:
 Although `f2reduce` is compiled in C++11, the resulting static library
 has C-linkage so can be called from any C/C++ code.
 
-Dependencies
-------------
+## Dependencies
 
 `f2reduce` has no dependencies; just compile `f2reduce.cpp` with the
 `-O3 -march=native` flags to produce a static library and include the header

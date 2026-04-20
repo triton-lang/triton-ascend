@@ -2009,6 +2009,7 @@ def dot(input, other, acc=None, input_precision=None, allow_tf32=None, max_num_i
       specified (i.e. at least one must be :code:`None`).
     """
     assert input_precision is None or allow_tf32 is None, "Only one of input_precision and allow_tf32 can be specified"
+    assert not allow_tf32, "allow_tf32 is not supported as 'True', please use fp32 on Ascend instead."
     if input_precision is None:
         supports_tf32 = "tf32" in _semantic.builder.options.allowed_dot_input_precisions
         input_precision = knobs.language.fp32_default or ("tf32" if (supports_tf32 and

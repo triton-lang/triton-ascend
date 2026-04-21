@@ -28,6 +28,10 @@ jobs:
       PROTON_SKIP_PC_SAMPLING_TEST: 1
       PYTHON: "python${{ matrix.python-version }}"
       CCACHE_COMPRESS: "true"
+      UV_INDEX_URL: "https://repo.huaweicloud.com/repository/pypi/simple/"
+      UV_INDEX_STRATEGY: "unsafe-best-match"
+      UV_NO_CACHE: 1
+      UV_SYSTEM_PYTHON: 1
 
     steps:
       - name: Checkout
@@ -45,7 +49,7 @@ jobs:
             ca-certificates ninja-build libzstd-dev \
             git zlib1g-dev \
             clang clang-15 lld-15 ccache
-          ${PYTHON} -m pip install cmake ninja
+          ${PYTHON} -m pip install uv cmake ninja
 
       - name: Compute cache keys
         id: cache-key
@@ -159,13 +163,10 @@ jobs:
 
       - name: Install NPU test dependencies
         run: |
-          ${PYTHON} -m pip install -r requirements.txt -r requirements_dev.txt \
-            -i https://repo.huaweicloud.com/repository/pypi/simple/
-          ${PYTHON} -m pip install torch==2.7.1 torch_npu==2.7.1 mindspore \
-            -i https://repo.huaweicloud.com/repository/pypi/simple/
+          ${PYTHON} -m uv pip install -r requirements.txt -r requirements_dev.txt
+          ${PYTHON} -m uv pip install torch==2.7.1 torch_npu==2.7.1 mindspore
           # NOTE: lit is installed for future MLIR FileCheck tests (currently disabled)
-          ${PYTHON} -m pip install lit \
-            -i https://repo.huaweicloud.com/repository/pypi/simple/
+          ${PYTHON} -m uv pip install lit
 
       - name: Build and install triton-ascend
         shell: bash
@@ -193,7 +194,7 @@ jobs:
           IS_MANYLINUX="${IS_MANYLINUX:-False}" \
           TRITON_WHEEL_VERSION_SUFFIX="${TRITON_WHEEL_VERSION_SUFFIX:-rc3}" \
           ${PYTHON} setup.py bdist_wheel
-          ${PYTHON} -m pip install dist/*.whl
+          ${PYTHON} -m uv pip install dist/*.whl
 
       - name: CCache stats
         run: ccache --print-stats

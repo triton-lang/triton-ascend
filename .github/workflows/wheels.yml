@@ -23,6 +23,10 @@ jobs:
         - {runs_on: 'ubuntu-22.04-arm', arch: 'aarch64'}
         python: ["cp310", "cp311", "cp312", "cp313"]
 
+    env:
+      UV_INDEX_STRATEGY: "unsafe-best-match"
+      UV_NO_CACHE: 1
+      UV_SYSTEM_PYTHON: 1
 
     permissions:
       id-token: write
@@ -48,7 +52,8 @@ jobs:
         run: |
           python --version
           # Make sure cibuildwheel is updated to latest, this will enable latest python builds
-          python3 -m pip install cibuildwheel --upgrade --user
+          python3 -m pip install uv
+          python3 -m uv pip install cibuildwheel --upgrade --user
           # Pass MAX_JOBS=4 because, at time of writing, the VM "only" has 32GB
           # of RAM and OOMs while building if we give it the default number of
           # workers (2 * NUM_CPUs).

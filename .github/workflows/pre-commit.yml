@@ -7,6 +7,10 @@ jobs:
   pre-commit:
     name: pre-commit (code formatting)
     runs-on: ubuntu-latest
+    env:
+      UV_INDEX_STRATEGY: "unsafe-best-match"
+      UV_NO_CACHE: 1
+      UV_SYSTEM_PYTHON: 1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,7 +33,8 @@ jobs:
           key: ${{ runner.os }}-${{ steps.cache-key.outputs.pre_commit_hash }}
       - name: Check pre-commit
         run: |
-          python3 -m pip install --upgrade pre-commit
+          python3 -m pip install uv
+          python3 -m uv pip install --upgrade pre-commit
           python3 -m pre_commit run --all-files --verbose
       - name: Print diff of changes if pre-commit failed
         if: failure()

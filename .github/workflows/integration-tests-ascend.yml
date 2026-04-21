@@ -44,8 +44,12 @@ jobs:
           apt-get install --yes --no-install-recommends \
             ca-certificates ninja-build libzstd-dev \
             git zlib1g-dev \
-            clang clang-15 lld-15 ccache
-          ${PYTHON} -m pip install cmake ninja
+            clang-15 lld-15 ccache
+          ln -sf /usr/bin/clang-15 /usr/bin/clang
+          ln -sf /usr/bin/clang++-15 /usr/bin/clang++
+          ln -sf /usr/bin/lld-15 /usr/bin/lld
+          ln -sf /usr/bin/ld.lld-15 /usr/bin/ld.lld
+          ${PYTHON} -m pip install cmake ninja wheel pybind11
 
       - name: Compute cache keys
         id: cache-key
@@ -173,15 +177,17 @@ jobs:
           nproc
           source /usr/local/Ascend/cann/set_env.sh
           export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
-          npu-smi info
+          # npu-smi info
           if [ -n "${ASCEND_TOOLKIT_HOME}" ] && [ -f "${ASCEND_TOOLKIT_HOME}/cann/version.info" ]; then
             cat "${ASCEND_TOOLKIT_HOME}/cann/version.info"
           fi
           echo "PATH is '$PATH'"
 
+          pip uninstall triton-ascend -y || true
           ccache --zero-stats
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          cd python
           LLVM_SYSPATH="${LLVM_SYSPATH}" \
           TRITON_OFFLINE_BUILD=1 \
           TRITON_BUILD_WITH_CLANG_LLD=true \
@@ -192,8 +198,8 @@ jobs:
           MAX_JOBS="$NUM_PROCS" \
           IS_MANYLINUX="${IS_MANYLINUX:-False}" \
           TRITON_WHEEL_VERSION_SUFFIX="${TRITON_WHEEL_VERSION_SUFFIX:-rc3}" \
-          ${PYTHON} setup.py bdist_wheel
-          ${PYTHON} -m pip install dist/*.whl
+          ${PYTHON} setup.py install
+          cd ..
 
       - name: CCache stats
         run: ccache --print-stats

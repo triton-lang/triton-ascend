@@ -46,15 +46,15 @@ jobs:
           if [[ ${tag_or_branch} == v* ]]; then
             # strip trailing v from tag name
             tag_or_branch="${tag_or_branch#v}"
-            # important: version must be fixed in setup.py
-            sed -i -e "s:^TRITON_VERSION = .*:TRITON_VERSION = '${tag_or_branch}':" setup.py || exit 1
+            # important: version must be fixed in version.txt
+            echo "${tag_or_branch}" > version.txt
           fi
           echo "RELEASE_NAME=triton-ascend-$tag_or_branch" >> "$GITHUB_ENV"
       - name: Create source distribution
         run: |
           python -m pip install --upgrade pip || exit 1
           python -m pip install "setuptools<70" wheel build || exit 1
-          python -m build -s || exit 1
+          python -m build -s python --outdir dist || exit 1
           cd dist || exit 1
           release_file=( *.tar.gz )
           echo "RELEASE_FILE=${release_file}" >> "$GITHUB_ENV"

@@ -1,0 +1,202 @@
+name: Release Triton Ascend Images
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pre-check:
+    name: Pre-check
+    runs-on: ubuntu-22.04
+    env:
+      QUAY_USER: ${{ secrets.QUAY_USER }}
+      QUAY_PASSWD: ${{ secrets.QUAY_PASSWD }}
+      HEAD_COMMIT: ${{ github.sha }}
+    outputs:
+      ready: ${{ steps.prereqs.outputs.ready }}
+      git_commit_short: ${{ steps.prereqs.outputs.git_commit_short }}
+      build_dockerfile: ${{ steps.changes.outputs.build_dockerfile }}
+      build_manylinux: ${{ steps.changes.outputs.build_manylinux }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed files
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }})
+          else
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          fi
+          echo "Changed files:"
+          echo "${CHANGED_FILES}"
+
+          BUILD_DOCKERFILE=false
+          BUILD_MANYLINUX=false
+
+          if [ -z "${CHANGED_FILES}" ]; then
+            echo "No changed files detected. Forcing build..."
+            BUILD_DOCKERFILE=true
+            BUILD_MANYLINUX=true
+          else
+            if echo "${CHANGED_FILES}" | grep -Eq '(docker/Dockerfile|Makefile|requirements(_dev)?\.txt)'; then
+              BUILD_DOCKERFILE=true
+            fi
+            if echo "${CHANGED_FILES}" | grep -Eq '(docker/Dockerfile\.manylinux|Makefile|requirements(_dev)?\.txt)'; then
+              BUILD_MANYLINUX=true
+            fi
+          fi
+
+          echo "build_dockerfile=${BUILD_DOCKERFILE}" >> $GITHUB_OUTPUT
+          echo "build_manylinux=${BUILD_MANYLINUX}" >> $GITHUB_OUTPUT
+
+      - name: Check prerequisites
+        id: prereqs
+        run: |
+          if [ -z "${QUAY_USER}" ] || [ -z "${QUAY_PASSWD}" ]; then
+            echo "QUAY_USER or QUAY_PASSWD not set. Skipping build."
+            echo "ready=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          if [ -n "${HEAD_COMMIT}" ]; then
+            GIT_COMMIT_SHORT="$(git rev-parse --short "${HEAD_COMMIT}")"
+          else
+            GIT_COMMIT_SHORT="$(git rev-parse --short HEAD)"
+          fi
+
+          echo "ready=true" >> $GITHUB_OUTPUT
+          echo "git_commit_short=${GIT_COMMIT_SHORT}" >> $GITHUB_OUTPUT
+
+  build-images:
+    name: Build ${{ matrix.name }}
+    runs-on: ubuntu-22.04
+    needs: pre-check
+    if: needs.pre-check.outputs.ready == 'true'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Base images (no NPU)
+          - name: base-build
+            dockerfile: docker/Dockerfile
+            target: build
+            chip_type: ""
+            tag_commit: "dev-build-{commit}"
+            tag_latest: "dev-build-latest"
+            check: build_dockerfile
+          - name: manylinux-build
+            dockerfile: docker/Dockerfile.manylinux
+            target: build
+            chip_type: ""
+            tag_commit: "manylinux-build-{commit}"
+            tag_latest: "manylinux-build-latest"
+            check: build_manylinux
+          # Release images - 910b
+          - name: release-910b
+            dockerfile: docker/Dockerfile
+            target: release
+            chip_type: "910b"
+            tag_commit: "dev-{commit}-910b"
+            tag_latest: "dev-latest-910b"
+            check: build_dockerfile
+          - name: manylinux-release-910b
+            dockerfile: docker/Dockerfile.manylinux
+            target: ""
+            chip_type: "910b"
+            tag_commit: "manylinux-{commit}-910b"
+            tag_latest: "manylinux-latest-910b"
+            check: build_manylinux
+          # Release images - A3
+          - name: release-A3
+            dockerfile: docker/Dockerfile
+            target: release
+            chip_type: "A3"
+            tag_commit: "dev-{commit}-A3"
+            tag_latest: "dev-latest-A3"
+            check: build_dockerfile
+          - name: manylinux-release-A3
+            dockerfile: docker/Dockerfile.manylinux
+            target: ""
+            chip_type: "A3"
+            tag_commit: "manylinux-{commit}-A3"
+            tag_latest: "manylinux-latest-A3"
+            check: build_manylinux
+
+    env:
+      QUAY_USER: ${{ secrets.QUAY_USER }}
+      QUAY_PASSWD: ${{ secrets.QUAY_PASSWD }}
+
+    steps:
+      - name: Check if should build
+        id: should
+        run: |
+          CHECK="${{ matrix.check }}"
+          BUILD_DOCKERFILE="${{ needs.pre-check.outputs.build_dockerfile }}"
+          BUILD_MANYLINUX="${{ needs.pre-check.outputs.build_manylinux }}"
+          SHOULD_BUILD=false
+          if [ "$CHECK" = "build_dockerfile" ] && [ "$BUILD_DOCKERFILE" = "true" ]; then
+            SHOULD_BUILD=true
+          elif [ "$CHECK" = "build_manylinux" ] && [ "$BUILD_MANYLINUX" = "true" ]; then
+            SHOULD_BUILD=true
+          fi
+          echo "build=${SHOULD_BUILD}" >> $GITHUB_OUTPUT
+
+      - name: Checkout code
+        if: steps.should.outputs.build == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: steps.should.outputs.build == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.should.outputs.build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Buildx info
+        if: steps.should.outputs.build == 'true'
+        run: |
+          echo "Checking Docker Buildx version and builders..."
+          docker buildx version
+          docker buildx ls
+
+      - name: Docker login
+        if: steps.should.outputs.build == 'true'
+        run: echo "${QUAY_PASSWD}" | docker login -u "${QUAY_USER}" --password-stdin quay.io
+
+      - name: Build and push
+        if: steps.should.outputs.build == 'true'
+        run: |
+          GIT_COMMIT_SHORT="${{ needs.pre-check.outputs.git_commit_short }}"
+          TAG_COMMIT=$(echo "${{ matrix.tag_commit }}" | sed "s/{commit}/${GIT_COMMIT_SHORT}/")
+
+          TARGET_ARG=""
+          if [ -n "${{ matrix.target }}" ]; then
+            TARGET_ARG="--target ${{ matrix.target }}"
+          fi
+
+          CHIP_ARG=""
+          if [ -n "${{ matrix.chip_type }}" ]; then
+            CHIP_ARG="--build-arg CHIP_TYPE=${{ matrix.chip_type }}"
+          fi
+
+          docker buildx build --platform "linux/amd64,linux/arm64" \
+            ${TARGET_ARG} ${CHIP_ARG} \
+            -f ${{ matrix.dockerfile }} --push \
+            -t "quay.io/ascend/triton:${TAG_COMMIT}" .
+
+          docker buildx build --platform "linux/amd64,linux/arm64" \
+            ${TARGET_ARG} ${CHIP_ARG} \
+            -f ${{ matrix.dockerfile }} --push \
+            -t "quay.io/ascend/triton:${{ matrix.tag_latest }}" .

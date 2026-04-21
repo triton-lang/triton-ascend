@@ -45,7 +45,8 @@ jobs:
             ca-certificates ninja-build libzstd-dev \
             git zlib1g-dev \
             clang clang-15 lld-15 ccache
-          ${PYTHON} -m pip install cmake ninja
+          ${PYTHON} -m pip install cmake ninja \
+            -i https://repo.huaweicloud.com/repository/pypi/simple/
 
       - name: Compute cache keys
         id: cache-key
@@ -193,7 +194,8 @@ jobs:
           IS_MANYLINUX="${IS_MANYLINUX:-False}" \
           TRITON_WHEEL_VERSION_SUFFIX="${TRITON_WHEEL_VERSION_SUFFIX:-rc3}" \
           ${PYTHON} setup.py bdist_wheel
-          ${PYTHON} -m pip install dist/*.whl
+          ${PYTHON} -m pip install dist/*.whl \
+            -i https://repo.huaweicloud.com/repository/pypi/simple/
 
       - name: CCache stats
         run: ccache --print-stats

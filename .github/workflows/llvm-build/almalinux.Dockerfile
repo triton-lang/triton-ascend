@@ -1,8 +1,8 @@
 FROM almalinux:8
 ARG llvm_dir=llvm-project
 # Add the cache artifacts and the LLVM source tree to the container
-ADD sccache /sccache
-ADD "${llvm_dir}" /source/llvm-project
+COPY sccache /sccache
+COPY "${llvm_dir}" /source/llvm-project
 ENV SCCACHE_DIR="/sccache"
 ENV SCCACHE_CACHE_SIZE="2G"
 
@@ -27,7 +27,7 @@ RUN cmake -GNinja -Bbuild \
   -DCMAKE_CXX_FLAGS="-Wno-everything" \
   -DCMAKE_LINKER=lld \
   -DCMAKE_INSTALL_PREFIX="/install" \
-  -DCMAKE_PREFIX_PATH="/usr/local/lib/python3.9/site-packages/nanobind" \
+  -Dnanobind_DIR="/usr/local/lib/python3.9/site-packages/nanobind/cmake" \
   -DPython3_EXECUTABLE=/usr/bin/python3.9 \
   -DPython_EXECUTABLE=/usr/bin/python3.9 \
   -DLLVM_BUILD_UTILS=ON \

@@ -1,15 +1,15 @@
 FROM centos:7
 ARG llvm_dir=llvm-project
 # Add the cache artifacts and the LLVM source tree to the container
-ADD sccache /sccache
-ADD "${llvm_dir}" /source/llvm-project
+COPY sccache /sccache
+COPY "${llvm_dir}" /source/llvm-project
 ENV SCCACHE_DIR="/sccache"
 ENV SCCACHE_CACHE_SIZE="2G"
 
 RUN echo -e "[llvmtoolset-build]\nname=LLVM Toolset 13.0 - Build\nbaseurl=https://buildlogs.centos.org/c7-llvm-toolset-13.0.x86_64/\ngpgcheck=0\nenabled=1" > /etc/yum.repos.d/llvmtoolset-build.repo
 
 # Note: This is required patch since CentOS have reached EOL
-# otherwise any yum install setp will fail
+# otherwise any yum install step will fail
 RUN sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
 RUN sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo
 RUN sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo

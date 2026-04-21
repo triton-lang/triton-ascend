@@ -1,0 +1,49 @@
+name: Integration Tests
+on:
+  workflow_dispatch:
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
+      - 'MANIFEST.in'
+      - '.gitignore'
+      - '.github/CODEOWNERS'
+      - '.github/dependabot.yml'
+      - 'cmake/llvm-hash.txt'
+      - 'third_party/ascend/llvm_patch/**'
+      - 'docker/**'
+      - 'requirements.txt'
+      - 'requirements_dev.txt'
+      - '.github/workflows/build-docker-image.yml'
+      - '.github/workflows/create_release.yml'
+      - '.github/workflows/documentation.yml'
+      - '.github/workflows/llvm-build.yml'
+      - '.github/workflows/llvm-build/**'
+      - '.github/workflows/pre-commit.yml'
+      - '.github/workflows/runner-preparation.yml'
+      - '.github/workflows/wheels.yml'
+  merge_group:
+    branches: [main, 'dev-**']
+    types: [checks_requested]
+  push:
+    branches: [main]
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+permissions: read-all
+
+jobs:
+
+  runner-preparation:
+    uses: ./.github/workflows/runner-preparation.yml
+
+  # pre-commit:
+  #   uses: ./.github/workflows/pre-commit.yml
+
+  integration-tests-ascend:
+    needs: runner-preparation
+    if: needs.runner-preparation.outputs.matrix-ASCEND != ''
+    uses: ./.github/workflows/integration-tests-ascend.yml
+    with:
+      matrix: ${{ needs.runner-preparation.outputs.matrix-ASCEND }}

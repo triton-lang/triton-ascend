@@ -1,0 +1,121 @@
+name: Integration Tests NPU
+
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        required: true
+        type: string
+
+jobs:
+  integration-tests-ascend:
+    name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.python_version }})
+    runs-on: ${{ matrix.config.runs_on }}
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:${{ matrix.cann_version }}-${{ matrix.config.chip_type }}-${{ matrix.os }}-py${{ matrix.python_version }}-latest
+    timeout-minutes: 300
+    strategy:
+      matrix:
+        config: ${{ fromJson(inputs.matrix) }}
+        cann_version: ["8.5.0"]
+        os: [ubuntu22.04]
+        python_version: ["3.10", "3.11"]
+      fail-fast: false
+    env:
+      PROTON_SKIP_PC_SAMPLING_TEST: 1
+      PYTHON: "python${{ matrix.python_version }}"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: "true"
+
+      - name: Add git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache build dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.triton/llvm
+            ~/.triton/json
+            ~/.ccache
+          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'third_party/ascend/llvm_patch/*.patch') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-
+
+      - name: Download and install Bisheng compiler
+        shell: bash
+        run: |
+          if [ ! -f cmake/bisheng-version.txt ]; then
+            echo "cmake/bisheng-version.txt not found, skipping"
+            exit 0
+          fi
+
+          OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
+          BISHENG_FILENAME=$(sed -n '1p' cmake/bisheng-version.txt | xargs)
+          BISHENG_SHA256=$(sed -n '2p' cmake/bisheng-version.txt | sed 's/^sha256://' | xargs)
+
+          if [ -z "${BISHENG_FILENAME}" ]; then
+            echo "Error: cmake/bisheng-version.txt must contain a Bisheng filename on the first line." >&2
+            exit 1
+          fi
+
+          echo "Downloading: ${BISHENG_FILENAME}"
+          curl -fL "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
+
+          if [ -n "${BISHENG_SHA256}" ]; then
+            echo "Verifying SHA256 checksum..."
+            echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
+          else
+            echo "Warning: No SHA256 checksum provided, skipping verification"
+          fi
+
+          chmod +x bisheng.run
+          ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
+          echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
+
+      - name: Build and install triton-ascend
+        working-directory: python
+        shell: bash
+        env:
+          TRITON_BUILD_WITH_CCACHE: "true"
+          TRITON_BUILD_WITH_CLANG_LLD: "TRUE"
+          TRITON_DISABLE_LINE_INFO: 1
+          CCACHE_COMPRESS: "true"
+          TRITON_BUILD_WITH_O1: true
+          TRITON_BUILD_PROTON: OFF
+          TRITON_WHEEL_NAME: "triton-ascend"
+          TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=OFF"
+        run: |
+          nproc
+          source /usr/local/Ascend/cann/set_env.sh
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          npu-smi info
+          if [ -n "${ASCEND_TOOLKIT_HOME}" ] && [ -f "${ASCEND_TOOLKIT_HOME}/cann/version.info" ]; then
+            cat "${ASCEND_TOOLKIT_HOME}/cann/version.info"
+          fi
+
+          ${PYTHON} -m pip uninstall triton-ascend triton -y || true
+          ccache --zero-stats
+          NUM_PROCS=$(( $(nproc) / 3 ))
+          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          MAX_JOBS="$NUM_PROCS" ${PYTHON} setup.py bdist_wheel
+          ${PYTHON} -m pip install dist/*.whl \
+            -i https://repo.huaweicloud.com/repository/pypi/simple/ --force-reinstall
+
+      - name: CCache stats
+        run: ccache --print-stats
+
+      - name: Run unit tests on NPU
+        shell: bash
+        run: |
+          source /usr/local/Ascend/cann/set_env.sh
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          NUM_PROCS=$(( $(nproc) / 9 ))
+          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
+          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/autotune_ut
+          # NOTE: kernel tests are temporarily disabled due to intermittent failures
+          # that cause CI instability. TODO: Fix flaky kernel tests and re-enable.
+          # ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/kernels/test_triton_kernel.py

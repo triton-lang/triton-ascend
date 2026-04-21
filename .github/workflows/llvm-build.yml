@@ -2,12 +2,13 @@ name: LLVM Build
 
 on:
   push:
-    branches:
-      - llvm-head
     paths:
       - cmake/llvm-hash.txt
+      - third_party/ascend/llvm_patch/**
   pull_request:
     paths:
+      - cmake/llvm-hash.txt
+      - third_party/ascend/llvm_patch/**
       - .github/workflows/llvm-build.yml
   workflow_dispatch:
 
@@ -23,7 +24,7 @@ jobs:
   build:
     name: Build on ${{ matrix.config.runner }}
     runs-on: ${{ matrix.config.runs_on }}
-    timeout-minutes: 240  # 4 hours
+    timeout-minutes: 240
 
     strategy:
       fail-fast: true
@@ -31,6 +32,9 @@ jobs:
         config:
         - {runner: 'Ubuntu 22.04', runs_on: 'ubuntu-22.04', target-os: 'ubuntu', arch: 'x64'}
         - {runner: 'Ubuntu 22.04 ARM64', runs_on: 'ubuntu-22.04-arm', target-os: 'ubuntu', arch: 'arm64'}
+        - {runner: 'CentOS 7', runs_on: 'ubuntu-22.04', target-os: 'centos', arch: 'x64'}
+        - {runner: 'AlmaLinux 8', runs_on: 'ubuntu-22.04', target-os: 'almalinux', arch: 'x64'}
+        - {runner: 'AlmaLinux 8 ARM64', runs_on: 'ubuntu-22.04-arm', target-os: 'almalinux', arch: 'arm64'}
 
     steps:
 
@@ -38,11 +42,6 @@ jobs:
       uses: actions/checkout@v4
       with:
         path: llvm-build
-
-    - name: Install ccache
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ccache
 
     - name: Fetch LLVM Commit Hash
       shell: bash
@@ -55,7 +54,19 @@ jobs:
         echo "Short LLVM commit hash: ${SHORT_LLVM_COMMIT_HASH}"
         echo "short_llvm_commit_hash=${SHORT_LLVM_COMMIT_HASH}" >> ${GITHUB_ENV}
 
-        INSTALL_DIR="llvm-${SHORT_LLVM_COMMIT_HASH}-${{ matrix.config.target-os }}-${{ matrix.config.arch }}"
+    - name: Compute Patch Hash
+      shell: bash
+      run: |
+        PATCH_DIR="llvm-build/third_party/ascend/llvm_patch"
+        if [ -d "${PATCH_DIR}" ] && [ "$(ls -A ${PATCH_DIR}/*.patch 2>/dev/null)" ]; then
+          PATCH_HASH=$(cat ${PATCH_DIR}/*.patch | sha256sum | cut -d' ' -f1 | cut -c1-8)
+        else
+          PATCH_HASH="00000000"
+        fi
+        echo "Patch hash: ${PATCH_HASH}"
+        echo "patch_hash=${PATCH_HASH}" >> ${GITHUB_ENV}
+
+        INSTALL_DIR="llvm-${{ env.short_llvm_commit_hash }}-${PATCH_HASH}-${{ matrix.config.target-os }}-${{ matrix.config.arch }}"
         echo "LLVM installation directory name: ${INSTALL_DIR}"
         echo "llvm_install_dir=${INSTALL_DIR}" >> ${GITHUB_ENV}
 
@@ -98,51 +109,113 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ${{ env.SCCACHE_DIR }}
-        key: ${{ matrix.config.target-os }}-${{ matrix.config.arch }}-${{ env.short_llvm_commit_hash }}
+        key: ${{ matrix.config.target-os }}-${{ matrix.config.arch }}-${{ env.short_llvm_commit_hash }}-${{ env.patch_hash }}
         restore-keys: ${{ matrix.config.target-os }}-${{ matrix.config.arch }}-
 
-    - name: Free disk space
-      uses: jlumbroso/free-disk-space@v1.3.1
-      with:
-        tool-cache: false
-        android: true
-        dotnet: true
-        haskell: true
-        large-packages: false
-        swap-storage: true
-
-    # NOTE: check-mlir is temporarily disabled because the LLVM patches in
-    # third_party/ascend/llvm_patch/ modify bytecode encoding for several ops
-    # (FuncOp, CondBranchOp, MatmulOp, etc.), causing MLIR bytecode roundtrip
-    # tests to fail. The patches are needed for triton-ascend functionality.
-    # TODO: Fix the patch's readProperties/writeProperties implementations to
-    # ensure bytecode compatibility, then re-enable check-mlir.
-    - name: Configure, Build, and Install LLVM
-      run: |
+    - name: Configure, Build, and Install LLVM (Ubuntu)
+      if: matrix.config.target-os == 'ubuntu'
+      run: >
         python3 -m pip install -r llvm-project/mlir/python/requirements.txt
 
-        cmake -GNinja -Bllvm-project/build \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_C_COMPILER=clang \
-          -DCMAKE_CXX_COMPILER=clang++ \
-          -DCMAKE_C_COMPILER_LAUNCHER=sccache \
-          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
-          -DCMAKE_INSTALL_PREFIX="${{ env.llvm_install_dir }}" \
-          -DCMAKE_LINKER=lld \
-          -DLLVM_BUILD_UTILS=ON \
-          -DLLVM_BUILD_TOOLS=ON \
-          -DLLVM_ENABLE_ASSERTIONS=ON \
-          -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-          -DLLVM_ENABLE_PROJECTS="mlir;lld" \
-          -DLLVM_INSTALL_UTILS=ON \
-          -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
-          -DLLVM_ENABLE_TERMINFO=OFF \
-          -DLLVM_ENABLE_ZSTD=OFF \
-          llvm-project/llvm
+        cmake -GNinja -Bllvm-project/build
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+        -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+        -DCMAKE_INSTALL_PREFIX="${{ env.llvm_install_dir }}"
+        -DCMAKE_LINKER=lld
+        -DLLVM_BUILD_UTILS=ON
+        -DLLVM_BUILD_TOOLS=ON
+        -DLLVM_ENABLE_ASSERTIONS=ON
+        -DMLIR_ENABLE_BINDINGS_PYTHON=ON
+        -DLLVM_ENABLE_PROJECTS="mlir;lld"
+        -DLLVM_INSTALL_UTILS=ON
+        -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU"
+        -DLLVM_ENABLE_TERMINFO=OFF
+        -DLLVM_ENABLE_ZSTD=OFF
+        llvm-project/llvm
 
         ninja -C llvm-project/build install
 
         tar czf "${{ env.llvm_install_dir }}.tar.gz" "${{ env.llvm_install_dir }}"
+
+    
+    - name: Configure, Build, and Install LLVM (macOS arm64)
+      if: matrix.config.arch == 'arm64' && matrix.config.target-os == 'macos'
+      run: >
+        python3 -m pip install -r llvm-project/mlir/python/requirements.txt
+
+        cmake -GNinja -Bllvm-project/build
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+        -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+        -DCMAKE_INSTALL_PREFIX="${{ env.llvm_install_dir }}"
+        -DCMAKE_LINKER=lld
+        -DCMAKE_OSX_ARCHITECTURES=arm64
+        -DLLVM_BUILD_UTILS=ON
+        -DLLVM_BUILD_TOOLS=ON
+        -DLLVM_ENABLE_ASSERTIONS=ON
+        -DMLIR_ENABLE_BINDINGS_PYTHON=ON
+        -DLLVM_ENABLE_PROJECTS="mlir;lld"
+        -DLLVM_ENABLE_ZSTD=OFF
+        -DLLVM_INSTALL_UTILS=ON
+        -DLLVM_TARGETS_TO_BUILD="AArch64;NVPTX;AMDGPU"
+        -DLLVM_USE_HOST_TOOLS=ON
+        -DLLVM_ENABLE_TERMINFO=OFF
+        -DLLVM_ABI_BREAKING_CHECKS=FORCE_OFF
+        llvm-project/llvm
+
+        ninja -C llvm-project/build install
+
+        tar czf "${{ env.llvm_install_dir }}.tar.gz" "${{ env.llvm_install_dir }}"
+
+
+    - name: Configure, Build, Test, and Install LLVM (CentOS)
+      if: matrix.config.target-os == 'centos'
+      run: |
+        # if this step crashes, it can leave behind a stale docker container
+        docker container prune -f
+        docker rmi -f $(docker images -q) 2>/dev/null || true
+
+        docker build --tag llvm-build --build-arg llvm_dir=llvm-project \
+          -f llvm-build/.github/workflows/llvm-build/centos.Dockerfile .
+
+        # Create temporary container to copy cache and installed artifacts.
+        CONTAINER_ID=$(docker create llvm-build)
+        docker cp "${CONTAINER_ID}:/install" "${{ env.llvm_install_dir }}"
+        tar czf "${{ env.llvm_install_dir }}.tar.gz" "${{ env.llvm_install_dir }}"
+
+        # We remove the existing directory, otherwise docker will
+        # create a subdirectory inside the existing directory.
+        rm -rf "${{ env.SCCACHE_DIR }}"
+        docker cp "${CONTAINER_ID}:/sccache" "${{ env.SCCACHE_DIR }}"
+        sudo chown -R "$(id -u -n):$(id -g -n)" "${{ env.SCCACHE_DIR }}"
+
+        docker rm "${CONTAINER_ID}"
+
+    - name: Configure, Build, Test, and Install LLVM (AlmaLinux)
+      if: matrix.config.target-os == 'almalinux'
+      run: |
+        # if this step crashes, it can leave behind a stale docker container
+        docker container prune -f
+        docker rmi -f $(docker images -q) 2>/dev/null || true
+
+        docker build --tag llvm-build --build-arg llvm_dir=llvm-project \
+          -f llvm-build/.github/workflows/llvm-build/almalinux.Dockerfile .
+
+        # Create temporary container to copy cache and installed artifacts.
+        CONTAINER_ID=$(docker create llvm-build)
+
+        # We remove the existing directories, otherwise docker cp will
+        # create a subdirectory inside the existing directory.
+        rm -rf "${{ env.SCCACHE_DIR }}" "${{ env.llvm_install_dir }}"
+
+        docker cp "${CONTAINER_ID}:/install" "${{ env.llvm_install_dir }}"
+        tar czf "${{ env.llvm_install_dir }}.tar.gz" "${{ env.llvm_install_dir }}"
+
+        docker cp "${CONTAINER_ID}:/sccache" "${{ env.SCCACHE_DIR }}"
+        sudo chown -R "$(id -u -n):$(id -g -n)" "${{ env.SCCACHE_DIR }}"
+
+        docker rm "${CONTAINER_ID}"
 
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
@@ -152,13 +225,14 @@ jobs:
           ${{ github.workspace }}/llvm-*-${{ matrix.config.target-os }}-${{ matrix.config.arch }}.tar.gz
 
     - name: Upload LLVM Artifacts to OBS
+      if: github.event_name == 'push' && github.repository == 'triton-lang/triton-ascend'
       env:
         AK: ${{ secrets.OBS_AK }}
         SK: ${{ secrets.OBS_SK }}
       run: |
         if [ -z "${AK}" ] || [ -z "${SK}" ]; then
-          echo "Please set AK and SK secrets before uploading."
-          exit 1
+          echo "OBS credentials not available, skipping upload."
+          exit 0
         fi
 
         OBSUTIL_URL="https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${{ matrix.config.arch == 'x64' && 'amd64' || 'arm64' }}.tar.gz"

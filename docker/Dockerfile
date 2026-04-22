@@ -95,8 +95,8 @@ RUN ARCH=$(uname -i) && \
     esac && \
     echo "TOOLKIT_URL: ${TOOLKIT_URL}" && \
     echo "KERNEL_URL: ${KERNEL_URL}" && \
-    curl -sSL "${TOOLKIT_URL}" -o /tmp/Ascend-cann-toolkit.run && \
-    curl -sSL "${KERNEL_URL}" -o /tmp/Ascend-cann-kernels.run && \
+    curl --retry 3 --retry-delay 5 --retry-max-time 300 -sSL "${TOOLKIT_URL}" -o /tmp/Ascend-cann-toolkit.run && \
+    curl --retry 3 --retry-delay 5 --retry-max-time 300 -sSL "${KERNEL_URL}" -o /tmp/Ascend-cann-kernels.run && \
     chmod +x /tmp/Ascend-cann-toolkit.run /tmp/Ascend-cann-kernels.run && \
     /tmp/Ascend-cann-toolkit.run --full --quiet && \
     /tmp/Ascend-cann-kernels.run --install --quiet && \

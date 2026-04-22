@@ -21,27 +21,9 @@
 # THE SOFTWARE.
 
 __all__ = [
-    "ascend_address_space",
-    "builtin",
-    "CORE",
-    "copy_from_ub_to_l1",
-    "copy",
-    "debug_barrier",
-    "fixpipe",
-    "FixpipeDMAMode",
-    "FixpipeDualDstMode",
-    "FixpipePreQuantMode",
-    "FixpipePreReluMode",
-    "int64",
-    "is_builtin",
-    "MODE",
-    "PIPE",
-    "IteratorType",
-    "sub_vec_id",
-    "sub_vec_num",
-    "sync_block_all",
-    "sync_block_set",
-    "sync_block_wait",
+    "ascend_address_space", "builtin", "CORE", "copy_from_ub_to_l1", "copy", "debug_barrier", "fixpipe",
+    "FixpipeDMAMode", "FixpipeDualDstMode", "FixpipePreQuantMode", "FixpipePreReluMode", "int64", "is_builtin", "MODE",
+    "PIPE", "IteratorType", "sub_vec_id", "sub_vec_num", "sync_block_all", "sync_block_set", "sync_block_wait",
     "SYNC_IN_VF"
 ]
 
@@ -58,8 +40,8 @@ from triton.language.core import _unwrap_if_constexpr
 from triton.backends.ascend.driver import NPUUtils
 
 from . import semantic as semantic
-PIPE = semantic.PIPE
 
+PIPE = semantic.PIPE
 
 T = TypeVar("T")
 
@@ -95,6 +77,7 @@ class int64(int):
     For custom op, python int argument will be converted to int32 by default,
     if a device-side int64 is required, you can pass an al.int64(x) to it.
     """
+
     def __new__(cls, value):
         obj = int.__new__(cls, value)
         obj.type = tl.int64
@@ -141,6 +124,7 @@ class IteratorType(enum.Enum):
 
 
 class ascend_address_space_base(bl.address_space):
+
     def __init__(self, address_space_value: ascend_ir.AddressSpace) -> None:
         super().__init__()
         self.real_address_space = address_space_value
@@ -152,11 +136,9 @@ class ascend_address_space_base(bl.address_space):
 class ascend_address_space_group:
 
     def __init__(self):
-        for k, v in {
-            k: v
-            for k, v in ascend_ir.AddressSpace.__dict__.items()
-            if isinstance(v, ascend_ir.AddressSpace)
-        }.items():
+        for k, v in {k: v
+                     for k, v in ascend_ir.AddressSpace.__dict__.items()
+                     if isinstance(v, ascend_ir.AddressSpace)}.items():
             setattr(self, k, ascend_address_space_base(v))
 
 
@@ -199,13 +181,13 @@ def copy(src: Union[tl.tensor, bl.buffer], dst: Union[tl.tensor, bl.buffer], _se
     return semantic.copy(src, dst, _semantic)
 
 
-def create_sync_block(sender, receiver, event_id, is_set: bool,
-                      sender_pipe=None, receiver_pipe=None,
-                      _semantic=None):
+def create_sync_block(sender, receiver, event_id, is_set: bool, sender_pipe=None, receiver_pipe=None, _semantic=None):
     sender = _unwrap_if_constexpr(sender)
     receiver = _unwrap_if_constexpr(receiver)
-    assert isinstance(sender, str) and (sender == "cube" or sender == "vector"), f"ERROR: sender = {sender}, only supports cube/vector"
-    assert isinstance(receiver, str) and (receiver == "cube" or receiver == "vector"), f"ERROR: receiver = {receiver}, only supports cube/vector"
+    assert isinstance(sender, str) and (sender == "cube"
+                                        or sender == "vector"), f"ERROR: sender = {sender}, only supports cube/vector"
+    assert isinstance(receiver, str) and (receiver == "cube" or receiver
+                                          == "vector"), f"ERROR: receiver = {receiver}, only supports cube/vector"
     if isinstance(event_id, int):
         assert (event_id >= 0) and (event_id < 16), f"event_id: {event_id} should be 0 ~ 15"
     if sender == receiver:
@@ -240,7 +222,8 @@ def sync_block_all(mode, event_id, _semantic=None):
     event_id = _unwrap_if_constexpr(event_id)
     assert isinstance(mode, str), f"mode: {mode} is not string"
     assert isinstance(event_id, int) and (event_id >= 0) and (event_id < 16), f"event_id: {event_id} should be 0 ~ 15"
-    assert mode in ("all_cube", "all_vector", "all", "all_sub_vector"), f"ERROR: mode = {mode}, only supports all_cube/all_vector/all/all_sub_vector"
+    assert mode in ("all_cube", "all_vector", "all",
+                    "all_sub_vector"), f"ERROR: mode = {mode}, only supports all_cube/all_vector/all/all_sub_vector"
     _semantic.builder.sync_block_all(mode, event_id)
 
 
@@ -300,26 +283,19 @@ def fixpipe(
     if dst.space != ascend_address_space.UB:
         raise TypeError("dst must be located in the UB memory region")
 
-    if len(dst.shape) == 2 and (
-        dst.type.element_ty == tl.float32 or dst.type.element_ty == tl.int32
-    ):
+    if len(dst.shape) == 2 and (dst.type.element_ty == tl.float32 or dst.type.element_ty == tl.int32):
         N = dst.shape[1]
         if N % 8 != 0:
             raise ValueError("32b Fixpipe last dim must be aligned to 8")
         if (dma_mode != FixpipeDMAMode.NZ2ND) and (N % 16 != 0):
             raise ValueError("32b non-NZ2ND Fixpipe last dim must be aligned to 16")
         if (dual_dst_mode == FixpipeDualDstMode.COLUMN_SPLIT) and (N % 32 != 0):
-            raise ValueError(
-                "32b Column split dual Fixpipe last dim must be aligned to 32"
-            )
+            raise ValueError("32b Column split dual Fixpipe last dim must be aligned to 32")
         M = dst.shape[0]
         if (dma_mode == FixpipeDMAMode.NZ2DN) and (M % 8 != 0):
             raise ValueError("32b NZ2DN Fixpipe first dim must be aligned to 8")
-    dst16bits = (
-        dst.type.element_ty == tl.float16
-        or dst.type.element_ty == tl.int16
-        or dst.type.element_ty == tl.bfloat16
-    )
+    dst16bits = (dst.type.element_ty == tl.float16 or dst.type.element_ty == tl.int16
+                 or dst.type.element_ty == tl.bfloat16)
     if len(dst.shape) == 2 and dst16bits:
         N = dst.shape[1]
         if N % 16 != 0:
@@ -328,9 +304,8 @@ def fixpipe(
         if (dma_mode == FixpipeDMAMode.NZ2DN) and (M % 16 != 0):
             raise ValueError("16b NZ2DN Fixpipe first dim must be aligned to 16")
 
-    return semantic.fixpipe(
-        src, dst, dma_mode, dual_dst_mode, FixpipePreQuantMode.NO_QUANT, FixpipePreReluMode.NO_RELU, _semantic
-    )
+    return semantic.fixpipe(src, dst, dma_mode, dual_dst_mode, FixpipePreQuantMode.NO_QUANT, FixpipePreReluMode.NO_RELU,
+                            _semantic)
 
 
 class SYNC_IN_VF(enum.Enum):

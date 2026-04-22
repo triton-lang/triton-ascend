@@ -12,9 +12,11 @@ from types import ModuleType
 
 from typing import Any, Callable, Dict, Optional, Tuple, Type, Union, Iterable, List
 
-
+# Import and register Ascend extension dispatch handlers
 import triton.language.extra.cann.extension as extension
-from triton.extension.buffer.language import core as bl
+from triton.language.extra.cann.extension.dispatch import ASCEND_WITH_DISPATCH
+from triton.language.extra.cann.extension.builder import setup_unified_builder
+
 from triton.extension.buffer.language.builder import setup_unified_builder_with_buffer_builder
 
 from .. import knobs, language
@@ -28,19 +30,16 @@ from .._utils import find_paths_if, get_iterable_path, set_iterable_path
 
 from .errors import (CompilationError, CompileTimeAssertionFailure, UnsupportedLanguageConstruct)
 
+# Central registry for all 'with' statement handlers
+WITH_DISPATCH = {}
+WITH_DISPATCH.update(ASCEND_WITH_DISPATCH)
+
 
 def check_identifier_legality(name, type):
     pattern = r'^[a-zA-Z_][a-zA-Z0-9_]*$'
     if not re.match(pattern, name):
         raise CompilationError(f"invalid {type} identifier: {name}", name)
     return name
-# Central registry for all 'with' statement handlers
-WITH_DISPATCH = {}
-
-# Import and register Ascend extension dispatch handlers
-from triton.language.extra.cann.extension.dispatch import ASCEND_WITH_DISPATCH
-from triton.language.extra.cann.extension.builder import setup_unified_builder
-WITH_DISPATCH.update(ASCEND_WITH_DISPATCH)
 
 
 def mangle_fn(name, arg_tys, constants, caller_context):
@@ -1004,7 +1003,7 @@ class CodeGenerator(ast.NodeVisitor):
         """
         Handle 'with' statements with dispatch pattern for Ascend extensions,
         falling back to standard context manager protocol for general cases.
-        
+
         This implementation:
         1. First tries dispatch mechanism for Ascend-specific context managers (e.g., scope)
         2. Falls back to standard Python context manager protocol for general cases
@@ -1019,7 +1018,7 @@ class CodeGenerator(ast.NodeVisitor):
                 if handler:
                     # Dispatch to registered handler (e.g., handle_scope_with)
                     return handler(self, node)
-        
+
         # Fall back to standard context manager protocol (community logic)
         # Lower `with` statements by constructing context managers and calling their enter/exit hooks
         # Instantiate each context manager with builder injection
@@ -1188,7 +1187,6 @@ class CodeGenerator(ast.NodeVisitor):
         flatten = False
         warp_specialize = False
         disable_licm = False
-        bind_sub_block = None
         if IteratorClass in [language.range, extension.parallel]:
             iterator = IteratorClass(*iter_args, **iter_kwargs)
             # visit iterator arguments
@@ -1203,8 +1201,6 @@ class CodeGenerator(ast.NodeVisitor):
             flatten = iterator.flatten
             warp_specialize = iterator.warp_specialize
             disable_licm = iterator.disable_licm
-            if (IteratorClass is extension.parallel):
-                bind_sub_block = iterator.bind_sub_block
         elif IteratorClass is range:
             # visit iterator arguments
             # note: only `range` iterator is supported now
@@ -1378,7 +1374,7 @@ class CodeGenerator(ast.NodeVisitor):
         if isinstance(fn, JITFunction):
             _check_fn_args(node, fn, args)
             return self.call_JitFunction(fn, args, kws)
-        if (hasattr(fn, '__self__') and _is_triton_value(fn.__self__)) or language.core.is_builtin(fn)or isinstance(
+        if (hasattr(fn, '__self__') and _is_triton_value(fn.__self__)) or language.core.is_builtin(fn) or isinstance(
                 fn, ConstexprFunction):
             # Copy builder's location and insertion point.
             ip, last_loc = self._get_insertion_point_and_loc()

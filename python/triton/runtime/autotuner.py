@@ -7,12 +7,13 @@ import hashlib
 import json
 from functools import cached_property
 import itertools
+import triton
 
-from typing import Any, Dict, Tuple, List, Optional, List
+from typing import Any, Dict, Tuple, Optional, List
 
 from .. import knobs
 from .jit import KernelInterface, JITFunction
-from .errors import OutOfResources, PTXASError
+from .errors import OutOfResources
 from .driver import driver
 from .cache import get_cache_manager, triton_key
 from triton._C.libtriton import get_cache_invalidating_env_vars
@@ -478,45 +479,28 @@ def heuristics(values):
 
 
 _ALL_PARAMS = {
-    "BM_list", "BN_list",
-    "multibuffer", "unit_flag",
-    "limit_auto_multi_buffer_only_for_local_buffer",
-    "limit_auto_multi_buffer_of_local_buffer",
-    "set_workspace_multibuffer",
-    "enable_hivm_auto_cv_balance",
-    "tile_mix_vector_loop",
-    "tile_mix_cube_loop"
+    "BM_list", "BN_list", "multibuffer", "unit_flag", "limit_auto_multi_buffer_only_for_local_buffer",
+    "limit_auto_multi_buffer_of_local_buffer", "set_workspace_multibuffer", "enable_hivm_auto_cv_balance",
+    "tile_mix_vector_loop", "tile_mix_cube_loop"
 }
 
 _DEFAULTS = {
-    "BM_list": [16, 32, 64, 128],
-    "BN_list": [16, 32, 64, 128],
-    "multibuffer": [False],
-    "unit_flag": [False],
-    "limit_auto_multi_buffer_only_for_local_buffer": [True],
-    "limit_auto_multi_buffer_of_local_buffer": ["no-l0c"],
-    "set_workspace_multibuffer": [2, 4],
-    "enable_hivm_auto_cv_balance": [True],
-    "tile_mix_vector_loop": [2, 4],
+    "BM_list": [16, 32, 64, 128], "BN_list": [16, 32, 64, 128], "multibuffer": [False], "unit_flag": [False],
+    "limit_auto_multi_buffer_only_for_local_buffer": [True], "limit_auto_multi_buffer_of_local_buffer": ["no-l0c"],
+    "set_workspace_multibuffer": [2, 4], "enable_hivm_auto_cv_balance": [True], "tile_mix_vector_loop": [2, 4],
     "tile_mix_cube_loop": [2, 4]
 }
 
 _VALID_VALUES = {
-    "limit_auto_multi_buffer_of_local_buffer": ["no-limit", "no-l0c"],
-    "set_workspace_multibuffer": [2, 4],
-    "tile_mix_vector_loop": [2, 4, 8],
-    "tile_mix_cube_loop": [2, 4, 8]
+    "limit_auto_multi_buffer_of_local_buffer": ["no-limit", "no-l0c"], "set_workspace_multibuffer": [2, 4],
+    "tile_mix_vector_loop": [2, 4, 8], "tile_mix_cube_loop": [2, 4, 8]
 }
 
 _CUBE_PARAMS = {"multibuffer", "unit_flag", "limit_auto_multi_buffer_of_local_buffer"}
 _MIXCV_PARAMS = {
-    "multibuffer", "unit_flag",
-    "limit_auto_multi_buffer_only_for_local_buffer",
-    "limit_auto_multi_buffer_of_local_buffer",
-    "set_workspace_multibuffer",
-    "enable_hivm_auto_cv_balance",
-    "tile_mix_vector_loop",
-    "tile_mix_cube_loop"
+    "multibuffer", "unit_flag", "limit_auto_multi_buffer_only_for_local_buffer",
+    "limit_auto_multi_buffer_of_local_buffer", "set_workspace_multibuffer", "enable_hivm_auto_cv_balance",
+    "tile_mix_vector_loop", "tile_mix_cube_loop"
 }
 _VECTOR_PARAMS = {"multibuffer"}
 
@@ -534,37 +518,28 @@ def _check_int_in_set(val: List[Any], valid_set: set, param_name: str) -> bool:
 
 
 _VALIDATION_RULES = {
-    "multibuffer": {
-        "desc": "must be non-empty list/tuple of boolean values",
-        "check": _check_boolean_list
-    },
-    "unit_flag": {
-        "desc": "must be non-empty list/tuple of boolean values",
-        "check": _check_boolean_list
-    },
-    "limit_auto_multi_buffer_only_for_local_buffer": {
-        "desc": "must be non-empty list/tuple of boolean values",
-        "check": _check_boolean_list
-    },
-    "limit_auto_multi_buffer_of_local_buffer": {
-        "desc": f"must be one or more of: {_VALID_VALUES['limit_auto_multi_buffer_of_local_buffer']}",
-        "check": lambda val, param_name: _check_string_in_set(val, _VALID_VALUES['limit_auto_multi_buffer_of_local_buffer'], "limit_auto_multi_buffer_of_local_buffer")
-    },
-    "set_workspace_multibuffer": {
-        "desc": f"must be one or more of: {_VALID_VALUES['set_workspace_multibuffer']}",
-        "check": lambda val, param_name: _check_int_in_set(val, _VALID_VALUES['set_workspace_multibuffer'], "set_workspace_multibuffer")
-    },
-    "enable_hivm_auto_cv_balance": {
-        "desc": "must be non-empty list/tuple of boolean values",
-        "check": _check_boolean_list
-    },
-    "tile_mix_vector_loop": {
-        "desc": f"must be one or more of: {_VALID_VALUES['tile_mix_vector_loop']}",
-        "check": lambda val, param_name: _check_int_in_set(val, _VALID_VALUES['tile_mix_vector_loop'], "tile_mix_vector_loop")
-    },
-    "tile_mix_cube_loop": {
-        "desc": f"must be one or more of: {_VALID_VALUES['tile_mix_cube_loop']}",
-        "check": lambda val, param_name: _check_int_in_set(val, _VALID_VALUES['tile_mix_cube_loop'], "tile_mix_cube_loop")
+    "multibuffer": {"desc": "must be non-empty list/tuple of boolean values", "check": _check_boolean_list},
+    "unit_flag": {"desc": "must be non-empty list/tuple of boolean values", "check":
+                  _check_boolean_list}, "limit_auto_multi_buffer_only_for_local_buffer":
+    {"desc": "must be non-empty list/tuple of boolean values", "check":
+     _check_boolean_list}, "limit_auto_multi_buffer_of_local_buffer": {
+         "desc":
+         f"must be one or more of: {_VALID_VALUES['limit_auto_multi_buffer_of_local_buffer']}", "check":
+         lambda val, param_name: _check_string_in_set(val, _VALID_VALUES['limit_auto_multi_buffer_of_local_buffer'],
+                                                      "limit_auto_multi_buffer_of_local_buffer")
+     }, "set_workspace_multibuffer": {
+         "desc":
+         f"must be one or more of: {_VALID_VALUES['set_workspace_multibuffer']}", "check":
+         lambda val, param_name: _check_int_in_set(val, _VALID_VALUES['set_workspace_multibuffer'],
+                                                   "set_workspace_multibuffer")
+     }, "enable_hivm_auto_cv_balance":
+    {"desc": "must be non-empty list/tuple of boolean values", "check": _check_boolean_list}, "tile_mix_vector_loop": {
+        "desc":
+        f"must be one or more of: {_VALID_VALUES['tile_mix_vector_loop']}", "check":
+        lambda val, param_name: _check_int_in_set(val, _VALID_VALUES['tile_mix_vector_loop'], "tile_mix_vector_loop")
+    }, "tile_mix_cube_loop": {
+        "desc": f"must be one or more of: {_VALID_VALUES['tile_mix_cube_loop']}", "check":
+        lambda val, param_name: _check_int_in_set(val, _VALID_VALUES['tile_mix_cube_loop'], "tile_mix_cube_loop")
     }
 }
 
@@ -579,13 +554,8 @@ class BaseAutotuner:
         validation_rules: Validation rules for parameters (described in detail below).
     """
 
-    def __init__(
-        self,
-        operator_name: str,
-        supported_params: set,
-        default_params: Dict[str, Any],
-        validation_rules: Dict[str, Dict[str, Any]]
-    ):
+    def __init__(self, operator_name: str, supported_params: set, default_params: Dict[str, Any],
+                 validation_rules: Dict[str, Dict[str, Any]]):
         self.operator_name = operator_name
         self.supported_params = supported_params
         self.default_params = default_params
@@ -631,10 +601,15 @@ class BaseAutotuner:
 
         valid_kwargs = {k: v for k, v in kwargs.items() if k in self.supported_params}
 
-        other_kwargs = {k: v for k, v in kwargs.items() if k not in self.supported_params and k not in self.SPECIAL_PARAMS_NO_WARNING}
+        other_kwargs = {
+            k: v
+            for k, v in kwargs.items()
+            if k not in self.supported_params and k not in self.SPECIAL_PARAMS_NO_WARNING
+        }
         if other_kwargs:
             print(
-                f"[WARNING] Parameter(s) {list(other_kwargs.keys())} do not belong to {self.operator_name} and have been ignored.")
+                f"[WARNING] Parameter(s) {list(other_kwargs.keys())} do not belong to {self.operator_name} and have been ignored."
+            )
 
         configs = []
 
@@ -647,7 +622,10 @@ class BaseAutotuner:
         for param_name in sorted(self.supported_params):
             if param_name == "limit_auto_multi_buffer_only_for_local_buffer":
                 dynamic_params[param_name] = valid_kwargs.get(param_name, _DEFAULTS[param_name])
-            elif param_name in ["set_workspace_multibuffer", "enable_hivm_auto_cv_balance", "tile_mix_vector_loop", "tile_mix_cube_loop"]:
+            elif param_name in [
+                    "set_workspace_multibuffer", "enable_hivm_auto_cv_balance", "tile_mix_vector_loop",
+                    "tile_mix_cube_loop"
+            ]:
                 if not limit_flag:
                     dynamic_params[param_name] = valid_kwargs.get(param_name, _DEFAULTS[param_name])
             else:
@@ -674,26 +652,14 @@ class BaseAutotuner:
         return configs
 
 
-CubeAutotuner = BaseAutotuner(
-    operator_name="cube",
-    supported_params=_CUBE_PARAMS,
-    default_params=_DEFAULTS,
-    validation_rules=_VALIDATION_RULES
-)
+CubeAutotuner = BaseAutotuner(operator_name="cube", supported_params=_CUBE_PARAMS, default_params=_DEFAULTS,
+                              validation_rules=_VALIDATION_RULES)
 
-MixcvAutotuner = BaseAutotuner(
-    operator_name="mixcv",
-    supported_params=_MIXCV_PARAMS,
-    default_params=_DEFAULTS,
-    validation_rules=_VALIDATION_RULES
-)
+MixcvAutotuner = BaseAutotuner(operator_name="mixcv", supported_params=_MIXCV_PARAMS, default_params=_DEFAULTS,
+                               validation_rules=_VALIDATION_RULES)
 
-VectorAutotuner = BaseAutotuner(
-    operator_name="vector",
-    supported_params=_VECTOR_PARAMS,
-    default_params=_DEFAULTS,
-    validation_rules=_VALIDATION_RULES
-)
+VectorAutotuner = BaseAutotuner(operator_name="vector", supported_params=_VECTOR_PARAMS, default_params=_DEFAULTS,
+                                validation_rules=_VALIDATION_RULES)
 
 
 def get_autotune_cube_config(**kwargs: Any) -> List[triton.Config]:
@@ -701,7 +667,6 @@ def get_autotune_cube_config(**kwargs: Any) -> List[triton.Config]:
     Generate autotune configuration for the cube operator.
     Supported parameters: multibuffer, unit_flag, limit_auto_multi_buffer_of_local_buffer.
     """
-    import triton
     return CubeAutotuner.get_configs(**kwargs)
 
 
@@ -712,7 +677,6 @@ def get_autotune_cv_config(**kwargs: Any) -> List[triton.Config]:
                 limit_auto_multi_buffer_of_local_buffer, set_workspace_multibuffer,
                 enable_hivm_auto_cv_balance, tile_mix_vector_loop, tile_mix_cube_loop
     """
-    import triton
     return MixcvAutotuner.get_configs(**kwargs)
 
 
@@ -721,5 +685,4 @@ def get_autotune_vector_config(**kwargs: Any) -> List[triton.Config]:
     Generate autotune configuration for the vector operator.
     Supported parameters: multibuffer
     """
-    import triton
     return VectorAutotuner.get_configs(**kwargs)

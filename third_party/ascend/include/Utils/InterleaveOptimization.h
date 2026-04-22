@@ -82,8 +82,7 @@ DeinterleaveStatusOptimization(triton::LoadOp op,
 
 LogicalResult DeinterleaveStatusWithMaskOptimization(
     triton::LoadOp op, triton::LoadOp::Adaptor adaptor,
-    ConversionPatternRewriter &rewriter, MaskState &mstate,
-    Value localMem);
+    ConversionPatternRewriter &rewriter, MaskState &mstate, Value localMem);
 
 LogicalResult
 InterleaveStatusOptimization(SmallVector<Operation *> materializeVec);

@@ -137,10 +137,10 @@ Before automatically parsing parameters, the system obtains the parameters that 
 ```Python
 @triton.jit
 def kernel_func(
-    outputptr, 
-    input_ptr, 
-    n_rows, 
-    n_cols, 
+    outputptr,
+    input_ptr,
+    n_rows,
+    n_cols,
     BLOCK_SIZE: tl.constexpr,
     XBLOCK: tl.constexpr,
     XBLOCK_SUB: tl.constexpr,
@@ -159,7 +159,7 @@ The split axis parameters are parsed based on the kernel splitting statement `tl
 
 Finally, the split axis corresponding to the current parameters is identified through mask comparison and the `key` passed in `autotune`.
 
-Notes: 1. The split axis parameter must be multiplied by `tl.program_id()`. 2. The mask comparison must be performed, and the `key` corresponding to the split axis or the min function with the `key` as the parameter must be used as the right value. Otherwise, the axis cannot be identified and the parameter parsing will fail.3. The identified axis parameters are limited to the candidate parameter list. This ensures that only the parameters that can be dynamically tuned by autotune are considered. 
+Notes: 1. The split axis parameter must be multiplied by `tl.program_id()`. 2. The mask comparison must be performed, and the `key` corresponding to the split axis or the min function with the `key` as the parameter must be used as the right value. Otherwise, the axis cannot be identified and the parameter parsing will fail.3. The identified axis parameters are limited to the candidate parameter list. This ensures that only the parameters that can be dynamically tuned by autotune are considered.
 
 ```Python
 @triton.autotune(
@@ -193,7 +193,7 @@ The tiling axis parameter is determined based on the `tl.arange()`, `tl.range()`
 
 Finally, the split axis corresponding to the current parameter is identified through mask comparison with the `key` passed in `autotune`.
 
-Notes: 1. The tiling axis parameters must be used in the call of `tl.arange()` and be involved in the computation of the loop range in the `for` loop through `tl.range()`, `range()`, or integer division (`//`). 2. The mask comparison must be performed, and the key corresponding to the tiling axis or the min function with the key as the parameter must be used as the right value. Otherwise, the axis cannot be identified and the parameter parsing will fail.3. The identified tiling parameters are limited to the candidate parameter list. This ensures that only the parameters that can be dynamically tuned by autotune are considered. 
+Notes: 1. The tiling axis parameters must be used in the call of `tl.arange()` and be involved in the computation of the loop range in the `for` loop through `tl.range()`, `range()`, or integer division (`//`). 2. The mask comparison must be performed, and the key corresponding to the tiling axis or the min function with the key as the parameter must be used as the right value. Otherwise, the axis cannot be identified and the parameter parsing will fail.3. The identified tiling parameters are limited to the candidate parameter list. This ensures that only the parameters that can be dynamically tuned by autotune are considered.
 
 ```Python
 @triton.autotune(

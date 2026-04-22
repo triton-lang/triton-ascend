@@ -10,8 +10,8 @@
 
 <h2 id="getting-started.md">Getting Started</h2>
 
-- Fork the Triton Ascend repository on [GitCode](https://gitcode.com/Ascend/triton-ascend).
-- Check the [README.md](https://gitcode.com/Ascend/triton-ascend/blob/master/README.md) file to obtain the project information and build the development environment.
+- Fork the Triton Ascend repository on [GitHub](https://github.com/triton-lang/triton-ascend).
+- Check the [README.md](https://github.com/triton-lang/triton-ascend/blob/main/README.md) file to obtain the project information and build the development environment.
 
 <h2 id="developer-guide.md">Developer Guide</h2>
 
@@ -31,7 +31,7 @@ Follow the coding style below to make Triton Ascend easy to develop, maintain, a
 
 - Unit Test Guide
 
-  Use the unified unit test style of the Triton Ascend community. The recommended unit test style for Python is [pytest](http://www.pytest.org/en/latest/), and that for C++ is [GoogleTest Primer](https://github.com/google/googletest/blob/master/docs/primer.md). The design intent of a test case should be reflected by its annotation name. For details about how to design test cases, see [gather Test Cases](https://gitcode.com/Ascend/triton-ascend/blob/master/ascend/examples/pytest_ut/test_gather.py) and [layer_norm Test Cases](https://gitcode.com/Ascend/triton-ascend/blob/master/ascend/examples/tutorials/03-layer-norm.py).
+  Use the unified unit test style of the Triton Ascend community. The recommended unit test style for Python is [pytest](http://www.pytest.org/en/latest/), and that for C++ is [GoogleTest Primer](https://github.com/google/googletest/blob/main/docs/primer.md). The design intent of a test case should be reflected by its annotation name. For details about how to design test cases, see [gather Test Cases](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/examples/custom_op/test_gather_load.py) and [layer_norm Test Cases](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/03-layer-norm.py).
 
 - Refactoring Guide
 
@@ -48,23 +48,23 @@ Before committing your code to the Triton Ascend project, ensure that you have f
 Use git to clone the Triton Ascend project you have forked and add the upstream repository.
 
 ```shell
-git clone https://github.com/triton-lang/{your_forked_repo}/triton-ascend.git && cd triton-ascend && git submodule update --init --depth 1
+git clone https://github.com/{your_forked_repo}/triton-ascend.git && cd triton-ascend && git submodule update --init --depth 1
 git remote add upstream https://github.com/triton-lang/triton-ascend.git
 ```
 
 3.Develop code locally.
 
-Before developing your code, you need to set up the development environment according to the [Triton Ascend Installation Guide](https://gitcode.com/Ascend/triton-ascend/blob/main/docs/en/installation_guide.md).
+Before developing your code, you need to set up the development environment according to the [Triton Ascend Installation Guide](https://github.com/triton-lang/triton-ascend/blob/main/docs/en/installation_guide.md).
 
 To avoid inconsistency between branches, create a new local development branch for new features.
 
 ```shell
-git checkout -b {new_branch_name} origin/master
+git checkout -b {new_branch_name} origin/main
 git fetch upstream #Fetch the latest code from the upstream repository
-git rebase upstream/master #Rebase onto the latest upstream
+git rebase upstream/main #Rebase onto the latest upstream
 ```
 
-Taking the master branch as an example, Triton Ascend may create version branches or downstream development branches as required. After creating a branch and synchronizing the upstream master branch, you can start developing your code.
+Taking the main branch as an example, Triton Ascend may create release branches or downstream development branches as required. After creating a branch and synchronizing the upstream main branch, you can start developing your code.
 
 4.Perform a self-test.
 
@@ -86,7 +86,7 @@ git push origin {your_new_branch_name}
 
 6.Create a pull request to the Triton Ascend main repository.
 
-After pushing code to your remote repository, create a pull request between your new branch and the Triton Ascend master branch. After the merge request is created, Jenkins CI will be automatically set to build your pipeline test. You are advised to merge your pull request to the upstream master branch as soon as possible to reduce the merge risk.
+After pushing code to your remote repository, create a pull request between your new branch and the Triton Ascend main branch. After the merge request is created, Jenkins CI will be automatically set to build your pipeline test. You are advised to merge your pull request to the upstream main branch as soon as possible to reduce the merge risk.
 
 The pipeline execution process after a PR is committed is as follows:
 
@@ -119,7 +119,7 @@ Gated commit may encounter the following exceptions. Rectify the exceptions acco
 - CI pipeline failed
 
   Find the failed test cases of the CI pipeline as prompted, and then check the cause. After the fault is rectified, run the CI pipeline again.
-  
+
 <h2 id="issue-specifications.md">Issue Specifications</h2>
 
 A good way to contribute to the project is to send a detailed report when you encounter a problem. We are always very grateful for detailed and thorough bug reports, and we will be very grateful to you for that!
@@ -133,7 +133,7 @@ Please include the following information when you file an issue:
 - What did you expect to happen?
 - How to reproduce the issue? (As accurately as possible)
 
-For details about the templates for filling in issues of different categories, see [Issue Specifications](https://gitcode.com/Ascend/triton-ascend/issues/create/choose).
+You can choose from one of the pre-defined templates when [submitting issues of different categories](https://github.com/triton-lang/triton-ascend/issues/new/choose).
 
 Notes for contributors:
 

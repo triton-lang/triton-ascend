@@ -1,11 +1,11 @@
 #pragma once
-#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 #include "ascend/include/AutoBlockify/Passes.h"
+#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 #include "ascend/include/TritonToAnnotation/Passes.h"
 #include "ascend/include/TritonToHFusion/Passes.h"
 #include "ascend/include/TritonToHIVM/Passes.h"
-#include "ascend/include/TritonToLinalg/Passes.h"
 #include "ascend/include/TritonToLLVM/Passes.h"
+#include "ascend/include/TritonToLinalg/Passes.h"
 
 #include "ascend/include/TritonToGraph/Passes.h"
 #include "ascend/include/TritonToStructured/Passes.h"
@@ -17,9 +17,9 @@
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 
-#include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "amd/include/Dialect/TritonAMDGPU/IR/Dialect.h"
 #include "amd/include/TritonAMDGPUTransforms/Passes.h"
+#include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "nvidia/include/Dialect/NVGPU/IR/Dialect.h"
 #include "nvidia/include/Dialect/NVWS/IR/Dialect.h"
 #include "proton/Dialect/include/Conversion/ProtonGPUToLLVM/Passes.h"
@@ -163,7 +163,7 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
       mlir::triton::proton::ProtonDialect,
       mlir::triton::proton::gpu::ProtonGPUDialect, mlir::ROCDL::ROCDLDialect,
       mlir::triton::gluon::GluonDialect,
-      mlir::triton::ascend::TritonAscendDialect,
-      mlir::hivm::HIVMDialect, mlir::scope::ScopeDialect, mlir::hacc::HACCDialect,
+      mlir::triton::ascend::TritonAscendDialect, mlir::hivm::HIVMDialect,
+      mlir::scope::ScopeDialect, mlir::hacc::HACCDialect,
       mlir::annotation::AnnotationDialect, mlir::hfusion::HFusionDialect>();
 }

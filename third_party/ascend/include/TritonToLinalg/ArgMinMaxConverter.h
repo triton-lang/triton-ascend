@@ -137,8 +137,9 @@ class ArgMinMaxBaseConverter : public OpConversionPattern<triton::ReduceOp> {
 public:
   ArgMinMaxBaseConverter(MLIRContext *context) : OpConversionPattern(context) {}
 
-  LogicalResult matchAndRewrite(triton::ReduceOp op, OpAdaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const override {
+  LogicalResult
+  matchAndRewrite(triton::ReduceOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
     if (op.getBody()->getNumArguments() != 4) {
       return failure();
     }
@@ -214,7 +215,7 @@ public:
         auto pred = cmpOp.getPredicate();
         if (pred == arith::CmpIPredicate::ugt ||
             pred == arith::CmpIPredicate::ult) {
-            isUnsigned = true;
+          isUnsigned = true;
         }
         if (pred == arith::CmpIPredicate::eq ||
             pred == arith::CmpIPredicate::ne) {
@@ -248,12 +249,13 @@ public:
     }
 
     auto reduceWithIndexParams = getReduceWithIndexParams(op);
-    auto valuesAccBaseVal = rewriter.create<arith::ConstantOp>(loc, valueType, valueAttr);
+    auto valuesAccBaseVal =
+        rewriter.create<arith::ConstantOp>(loc, valueType, valueAttr);
     int indicesInitValue =
         (llvm::succeeded(reduceWithIndexParams) &&
          reduceWithIndexParams->tieBreakType == TieBreakType::RIGHT)
-        ? -1
-        : std::numeric_limits<int32_t>::max();
+            ? -1
+            : std::numeric_limits<int32_t>::max();
 
     auto indexType = elemTypes[1];
     auto indicesAccBaseVal = rewriter.create<arith::ConstantOp>(
@@ -296,7 +298,7 @@ public:
     // but ignoring it will lead to compiling failure
     if (llvm::succeeded(reduceWithIndexParams) &&
         reduceWithIndexParams->tieBreakType != TieBreakType::None) {
-        addReduceWithIndexAttr(*reduceWithIndexParams, rewriter, linalgOp);
+      addReduceWithIndexAttr(*reduceWithIndexParams, rewriter, linalgOp);
     }
 
     if (isScalarReduce) {

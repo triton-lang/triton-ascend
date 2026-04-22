@@ -96,7 +96,7 @@ jobs:
           fi
 
           OBSUTIL_URL="https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${{ matrix.config.arch == 'x86_64' && 'amd64' || 'arm64' }}.tar.gz"
-          
+
           curl -fL "$OBSUTIL_URL" -o obsutil.tar.gz
 
           file obsutil.tar.gz | grep -q gzip || {

@@ -6,7 +6,7 @@
 
 ```python
 triton.language.load_tensor_descriptor(
- desc: tensor_descriptor_base, 
+ desc: tensor_descriptor_base,
  offsets: Sequence[constexpr | tensor],
  _semantic=None
 ) → tensor

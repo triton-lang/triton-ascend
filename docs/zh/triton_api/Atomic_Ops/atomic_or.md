@@ -7,11 +7,11 @@
 
 ```python
 triton.language.atomic_or(
- pointer, 
- val, 
- mask=None, 
- sem=None, 
- scope=None, 
+ pointer,
+ val,
+ mask=None,
+ sem=None,
+ scope=None,
  _semantic=None
 )→ pointer
 ```

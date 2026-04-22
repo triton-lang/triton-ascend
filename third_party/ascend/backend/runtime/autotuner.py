@@ -37,8 +37,7 @@ import triton
 from triton.runtime.autotuner import Autotuner, Config
 from triton.tools.get_ascend_devices import is_compile_on_910_95
 
-from .autoparser import (LowDimsAxesParser, PtrNumsParser, ReductionAxesParser,
-                         SplitAxesParser, TilingAxesParser)
+from .autoparser import (LowDimsAxesParser, PtrNumsParser, ReductionAxesParser, SplitAxesParser, TilingAxesParser)
 from .utils import get_byte_per_numel, is_valid_axis_name, valid_axis_names
 
 
@@ -119,18 +118,12 @@ class AutoTilingTuner(Autotuner):
         self.print_autotuning = os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1"
         # Compile kernels in parallel by default for triton.runtime.JITFunction,
         # but not for others, e.g., LibEntry, since it's not compatible with AsyncCompileMode
-        self.compile_parallel = (
-            isinstance(self.fn, triton.runtime.JITFunction)
-            and os.getenv("TRITON_AUTOTUNE_PARALLEL_COMPILE", "1") == "1"
-        )
+        self.compile_parallel = (isinstance(self.fn, triton.runtime.JITFunction)
+                                 and os.getenv("TRITON_AUTOTUNE_PARALLEL_COMPILE", "1") == "1")
 
     def _expand_simt_num_warps_configs(self, base_configs: List[Config]) -> List[Config]:
         _default_cand_num_warps = [8, 16, 32, 64]
-        cand_num_warps = (
-            _default_cand_num_warps
-            if self.user_specified_warps is None
-            else [self.user_specified_warps]
-        )
+        cand_num_warps = (_default_cand_num_warps if self.user_specified_warps is None else [self.user_specified_warps])
 
         simt_configs = []
         for base_cfg in base_configs:
@@ -146,10 +139,8 @@ class AutoTilingTuner(Autotuner):
     def _expand_simd_multibuffer_configs(self, base_configs: List[Config]) -> List[Config]:
         if self.user_specified_multibuffer is not None:
             if self.print_autotuning:
-                print(
-                    "Triton autotuning: Skip SIMD multibuffer expansion because user "
-                    f"specified multibuffer={self.user_specified_multibuffer}"
-                )
+                print("Triton autotuning: Skip SIMD multibuffer expansion because user "
+                      f"specified multibuffer={self.user_specified_multibuffer}")
             return base_configs
 
         opposite_default_multibuffer = not self.default_multibuffer
@@ -161,24 +152,16 @@ class AutoTilingTuner(Autotuner):
             simd_configs.append(new_cfg)
 
         if self.print_autotuning:
-            print(
-                "Triton autotuning: Expanded to "
-                f"{len(simd_configs)} SIMD configs (toggle multibuffer={opposite_default_multibuffer})"
-            )
+            print("Triton autotuning: Expanded to "
+                  f"{len(simd_configs)} SIMD configs (toggle multibuffer={opposite_default_multibuffer})")
         return simd_configs
 
     def _init_axis_params(self, key, split_params, tiling_params, low_dim_axes, reduction_axes):
         if isinstance(key, list):
-            if (
-                split_params 
-                or tiling_params 
-                or low_dim_axes 
-                or reduction_axes
-            ):
+            if (split_params or tiling_params or low_dim_axes or reduction_axes):
                 raise ValueError(
                     "If any axis-related parameters (split_params, tiling_params, low_dim_axes, reduction_axes)"
-                    " are provided, 'key' must be a dict, not a list."
-                )
+                    " are provided, 'key' must be a dict, not a list.")
             if len(key) > len(valid_axis_names):
                 raise ValueError("Number of parameters exceeds the number of available axes.")
             self.keys = {axis: param for axis, param in zip(valid_axis_names, key)}
@@ -189,8 +172,7 @@ class AutoTilingTuner(Autotuner):
             if any([split_params, tiling_params, low_dim_axes, reduction_axes]) is None:
                 raise ValueError(
                     "If 'key' is a dict, all axis-related parameters (split_params, tiling_params, low_dim_axes,"
-                    " reduction_axes) must be provided."
-                )
+                    " reduction_axes) must be provided.")
             if not isinstance(split_params, dict):
                 raise ValueError("split_params must be a dict, got: {}".format(type(split_params)))
             if not isinstance(tiling_params, dict):
@@ -207,8 +189,8 @@ class AutoTilingTuner(Autotuner):
             )
             if not used_axes.issubset(self.keys.keys()):
                 raise ValueError(
-                    "The following axes are used but not present in the 'key': {}".format(used_axes - set(self.keys.keys()))
-                )
+                    "The following axes are used but not present in the 'key': {}".format(used_axes -
+                                                                                          set(self.keys.keys())))
 
         self.split_params = split_params
         self.all_split_params = {}
@@ -229,7 +211,7 @@ class AutoTilingTuner(Autotuner):
         # parse pointer params nums
         if self.num_buffers == -1:
             self.num_buffers = self._autoparse_ptr_nums(all_args)
-        
+
         # parse autotiling axes
         # reduction axis must be parsed before other axes. it will alter the key
         if not self.reduction_axes:
@@ -249,9 +231,7 @@ class AutoTilingTuner(Autotuner):
                 self.persistent_reduction = True
 
         if not self.split_params:
-            all_split_params = self._autoparse_split_params(
-                self._get_constexpr_candidates()
-            )
+            all_split_params = self._autoparse_split_params(self._get_constexpr_candidates())
             self.all_split_params = dict(all_split_params)
             self.fixed_split_params = {}
             self.fixed_grid_dim_values = self._get_fixed_grid_dim_values(
@@ -260,10 +240,7 @@ class AutoTilingTuner(Autotuner):
             )
             self.fixed_grid_dims = set(self.fixed_grid_dim_values.keys())
 
-            fixed_grid_axes = {
-                axis for axis, pid_dim in self.axis_pid_dims.items()
-                if pid_dim in self.fixed_grid_dims
-            }
+            fixed_grid_axes = {axis for axis, pid_dim in self.axis_pid_dims.items() if pid_dim in self.fixed_grid_dims}
 
             # Only missing constexpr params are tunable, and fixed-grid axes
             # should not be tuned on split.
@@ -290,23 +267,16 @@ class AutoTilingTuner(Autotuner):
             # When split axes are provided by hints, parse axis->program_id mapping
             # independently for fixed-grid semantics and diagnostics.
             self._autoparse_axis_pid_dims()
-        miss_params = [
-            arg for arg in miss_params
-            if arg not in self.split_params.values()
-        ]
+        miss_params = [arg for arg in miss_params if arg not in self.split_params.values()]
         if not self.tiling_params:
             self.tiling_params = self._autoparse_tiling_params(miss_params)
         miss_params = [arg for arg in miss_params if arg not in self.tiling_params.values()]
         if miss_params:
-            raise ValueError(
-                f"Missing required arguments: {miss_params}. "
-                f"These arguments must be explicitly provided and cannot be automatically tuned. "
-                f"Please ensure that these arguments are passed when calling the function."
-            )
-        
-    def _gen_tile_configs(
-        self, kv_dict: Dict[str, int], dtype: torch.dtype
-    ) -> List[Config]:
+            raise ValueError(f"Missing required arguments: {miss_params}. "
+                             f"These arguments must be explicitly provided and cannot be automatically tuned. "
+                             f"Please ensure that these arguments are passed when calling the function.")
+
+    def _gen_tile_configs(self, kv_dict: Dict[str, int], dtype: torch.dtype) -> List[Config]:
         from .tile_generator import KernelMeta, TileGenerator
 
         axis_sizes = {}
@@ -314,9 +284,7 @@ class AutoTilingTuner(Autotuner):
             if not is_valid_axis_name(k):
                 continue
             if not isinstance(v, int):
-                raise ValueError(
-                    f"Not supported dim type: {type(v)}, `int` is the only supported type"
-                )
+                raise ValueError(f"Not supported dim type: {type(v)}, `int` is the only supported type")
             axis_sizes[k] = v
 
         kernel_meta = KernelMeta(
@@ -343,9 +311,7 @@ class AutoTilingTuner(Autotuner):
             self.gen_configs = self._expand_simd_multibuffer_configs(self.gen_configs)
 
         if len(self.gen_configs) == 0:
-            print(
-                "[WARNING] The generated candidate tiling configs are empty based on provided parameters!"
-            )
+            print("[WARNING] The generated candidate tiling configs are empty based on provided parameters!")
 
         if self.print_autotuning:
             print("Generated configs number: {}".format(len(self.gen_configs)))
@@ -372,11 +338,7 @@ class AutoTilingTuner(Autotuner):
         for _, arg in _args.items():
             if hasattr(arg, "dtype"):
                 key.append(str(arg.dtype))
-                dtype = (
-                    arg.dtype
-                    if get_byte_per_numel(arg.dtype) >= get_byte_per_numel(dtype)
-                    else dtype
-                )
+                dtype = (arg.dtype if get_byte_per_numel(arg.dtype) >= get_byte_per_numel(dtype) else dtype)
         if dtype is None:
             raise NotImplementedError("Not support for non-Tensor inputs")
 
@@ -429,10 +391,8 @@ class AutoTilingTuner(Autotuner):
 
         self.best_config = config
         if self.print_autotuning and not used_cached_result:
-            print(
-                f"Triton autotuning for function {self.base_fn.__name__} finished after "
-                f"{self.bench_time:.2f}s; best config selected: {self.best_config};"
-            )
+            print(f"Triton autotuning for function {self.base_fn.__name__} finished after "
+                  f"{self.bench_time:.2f}s; best config selected: {self.best_config};")
 
         if not used_cached_result and self.auto_profile_dir is not None:
             self._profile(*args, config=self.best_config, **kwargs)
@@ -463,8 +423,8 @@ class AutoTilingTuner(Autotuner):
             future_kernels = []
             try:
                 with (
-                    ThreadPoolExecutor(max_workers=max_workers) as executor,
-                    triton.AsyncCompileMode(executor),
+                        ThreadPoolExecutor(max_workers=max_workers) as executor,
+                        triton.AsyncCompileMode(executor),
                 ):
                     for config, fn in kernels_call.items():
                         future_kernels.append((config, fn(warmup=True)))
@@ -541,6 +501,7 @@ class AutoTilingTuner(Autotuner):
                     raise
 
             self.post_hook(full_nargs, exception=None)
+
         return kernel_call
 
     def warmup(self, *args, **kwargs):
@@ -552,22 +513,14 @@ class AutoTilingTuner(Autotuner):
 
             max_workers = min(psutil.cpu_count(logical=False) // 2, len(pruned_configs))
             with (
-                ThreadPoolExecutor(max_workers=max_workers) as executor,
-                triton.AsyncCompileMode(executor),
+                    ThreadPoolExecutor(max_workers=max_workers) as executor,
+                    triton.AsyncCompileMode(executor),
             ):
                 for config in pruned_configs:
-                    ret.append(self.fn.warmup(
-                        *args,
-                        **kwargs,
-                        **config.all_kwargs()
-                    ))
+                    ret.append(self.fn.warmup(*args, **kwargs, **config.all_kwargs()))
         else:
             for config in pruned_configs:
-                ret.append(self.fn.warmup(
-                    *args,
-                    **kwargs,
-                    **config.all_kwargs()
-                ))
+                ret.append(self.fn.warmup(*args, **kwargs, **config.all_kwargs()))
         self.nargs = None
         return ret
 
@@ -576,9 +529,7 @@ class AutoTilingTuner(Autotuner):
 
         kernel_call = self._make_kernel_call(*args, config=config, **meta)
         fn = functools.partial(kernel_call, warmup=False)
-        do_bench_npu(
-            fn, prof_dir=self.auto_profile_dir, keep_res=True
-        )
+        do_bench_npu(fn, prof_dir=self.auto_profile_dir, keep_res=True)
 
     def _autoparse_split_params(self, candidates_params: List[str]) -> Dict[str, str]:
         """
@@ -590,11 +541,9 @@ class AutoTilingTuner(Autotuner):
         self.split_axis_pid_dims = dict(getattr(parser, "split_axis_pid_dims", {}))
         self.axis_pid_dims = dict(getattr(parser, "axis_pid_dims", {}))
         if self.print_autotuning:
-            print(
-                f"Ascend autotuning parse split axes: {split_axes}, "
-                f"split axis pid dims: {self.split_axis_pid_dims}, "
-                f"axis pid dims: {self.axis_pid_dims}"
-            )
+            print(f"Ascend autotuning parse split axes: {split_axes}, "
+                  f"split axis pid dims: {self.split_axis_pid_dims}, "
+                  f"axis pid dims: {self.axis_pid_dims}")
         return split_axes
 
     def _autoparse_axis_pid_dims(self) -> Dict[str, int]:
@@ -612,10 +561,8 @@ class AutoTilingTuner(Autotuner):
         self.axis_pid_dims = dict(getattr(parser, "axis_pid_dims", {}))
         self.split_axis_pid_dims = dict(getattr(parser, "split_axis_pid_dims", {}))
         if self.print_autotuning:
-            print(
-                "Ascend autotuning parse axis pid dims (independent): "
-                f"{self.axis_pid_dims}"
-            )
+            print("Ascend autotuning parse axis pid dims (independent): "
+                  f"{self.axis_pid_dims}")
         return self.axis_pid_dims
 
     def _get_constexpr_candidates(self) -> List[str]:
@@ -633,12 +580,8 @@ class AutoTilingTuner(Autotuner):
                 if not isinstance(arg, ast.arg):
                     continue
                 ann = arg.annotation
-                if (
-                    isinstance(ann, ast.Attribute)
-                    and isinstance(ann.value, ast.Name)
-                    and ann.value.id == "tl"
-                    and ann.attr == "constexpr"
-                ):
+                if (isinstance(ann, ast.Attribute) and isinstance(ann.value, ast.Name) and ann.value.id == "tl"
+                        and ann.attr == "constexpr"):
                     constexpr_names.append(arg.arg)
             break
         return constexpr_names
@@ -657,7 +600,7 @@ class AutoTilingTuner(Autotuner):
 
     def _extract_fixed_grid_dims(self, grid) -> Dict[int, int]:
         if isinstance(grid, int):
-            grid = (grid,)
+            grid = (grid, )
         if not isinstance(grid, (tuple, list)):
             return {}
         fixed_dims = {}
@@ -668,7 +611,7 @@ class AutoTilingTuner(Autotuner):
 
     def _normalize_grid_tuple(self, grid_out):
         if isinstance(grid_out, int):
-            return (grid_out,)
+            return (grid_out, )
         if isinstance(grid_out, (tuple, list)):
             return tuple(grid_out)
         return None
@@ -736,11 +679,9 @@ class AutoTilingTuner(Autotuner):
         parser = TilingAxesParser(func_ast, self.keys, candidates_params)
         tiling_axes = parser.parse()
         if self.print_autotuning:
-            print(
-                f"Ascend autotuning parse tiling axes: {tiling_axes}"
-            )
+            print(f"Ascend autotuning parse tiling axes: {tiling_axes}")
         return tiling_axes
-    
+
     def _autoparse_reduction_axes(self) -> List[str]:
         """
         Extracts the reduction axis parameters from triton kernel code.
@@ -753,10 +694,8 @@ class AutoTilingTuner(Autotuner):
         reduction_axes = [f"r{axis}" for axis in reduction_axes]
 
         if self.print_autotuning:
-            print(
-                f"Ascend autotuning parse keys: {self.keys} \n"
-                f"Ascend autotuning parse reduction axes: {reduction_axes}"
-            )
+            print(f"Ascend autotuning parse keys: {self.keys} \n"
+                  f"Ascend autotuning parse reduction axes: {reduction_axes}")
         return reduction_axes
 
     def _autoparse_low_dim_axes(self) -> List[str]:
@@ -771,11 +710,9 @@ class AutoTilingTuner(Autotuner):
                 print("[WARNING] Failed to parse low-dimensional axes, fallback to empty low_dim_axes.")
             return []
         if self.print_autotuning:
-            print(
-                f"Ascend autotuning parse low dimensional axes: {low_dim_axes}"
-            )
+            print(f"Ascend autotuning parse low dimensional axes: {low_dim_axes}")
         return low_dim_axes
-    
+
     def _autoparse_ptr_nums(self, all_args: dict) -> int:
         """
         Counts the number of pointer parameters from triton kernel code.
@@ -788,9 +725,7 @@ class AutoTilingTuner(Autotuner):
                 ptr_params.append(k)
 
         if self.print_autotuning:
-            print(
-                f"Ascend autotuning parse pointer params: {ptr_params}, pointer nums: {ptr_nums}"
-            )
+            print(f"Ascend autotuning parse pointer params: {ptr_params}, pointer nums: {ptr_nums}")
         return ptr_nums
 
     def _get_persistent_reduction_threshold(self, reduction_axis: str) -> int:
@@ -865,6 +800,7 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore_va
     def decorator(fn):
         return AutoTilingTuner(fn, fn.arg_names, configs, key, reset_to_zero, restore_value, pre_hook=pre_hook,
                                post_hook=post_hook, prune_configs_by=prune_configs_by, warmup=warmup, rep=rep,
-                               use_cuda_graph=use_cuda_graph, do_bench=do_bench, auto_profile_dir=auto_prof_dir, hints=hints)
+                               use_cuda_graph=use_cuda_graph, do_bench=do_bench, auto_profile_dir=auto_prof_dir,
+                               hints=hints)
 
     return decorator

@@ -7,10 +7,10 @@
 
 ```python
 triton.language.histogram(
- input, 
- num_bins, 
- mask=None, 
- _semantic=None, 
+ input,
+ num_bins,
+ mask=None,
+ _semantic=None,
  _generator=None
 )
 ```
@@ -62,7 +62,7 @@ def histogram_kernel(x_ptr, z_ptr, M: tl.constexpr, N: tl.constexpr):
     x = tl.load(x_ptr + offset1)
     z = tl.histogram(x, N)
     tl.store(z_ptr + offset2, z)
-    
+
 x = torch.randint(0, N, (M, ), device=device, dtype=torch.int32)
 z = torch.empty(N, dtype=torch.int32, device=device)
 histogram_kernel[(1, )](x, z, M=M, N=N)

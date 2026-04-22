@@ -24,7 +24,7 @@ Triton算子在NPU上执行时，为了提升性能，NPU底层提供multi buffe
     ```diff
     @triton.jit
     def npu_vector_add_kernel(
-        input,                          # [Tensor] input tensor (1 x col)     
+        input,                          # [Tensor] input tensor (1 x col)
         output,                         # [Tensor] output tensor (1 x col)
         M: tl.constexpr,                # len of the vector
         BLOCK_SIZE: tl.constexpr
@@ -40,7 +40,7 @@ Triton算子在NPU上执行时，为了提升性能，NPU底层提供multi buffe
     ```diff
     @triton.jit
     def npu_vector_add_kernel(
-        input,                          # [Tensor] input tensor (1 x col)     
+        input,                          # [Tensor] input tensor (1 x col)
         output,                         # [Tensor] output tensor (1 x col)
         M: tl.constexpr,                # len of the vector
         BLOCK_SIZE: tl.constexpr
@@ -135,7 +135,7 @@ A2/A3向量运算单元的部分运算操作不支持某些数据类型，这种
 
 |  **OP名称**  |  **不支持的数据类型**  |
 |---|---|
-| Vector ADD | int64 | 
+| Vector ADD | int64 |
 | Vector CMP | int64/int32 |
 
 ### 二、代码示例
@@ -147,7 +147,7 @@ A2/A3向量运算单元的部分运算操作不支持某些数据类型，这种
     ``` diff
     @triton.jit
     def npu_vector_add_kernel(
-        x,                          # [Tensor] input tensor (1 x col)     
+        x,                          # [Tensor] input tensor (1 x col)
         y,                          # [Tensor] input tensor (1 x col)
         z,                          # [Tensor] output tensor (1 x col)
         vector_len: tl.constexpr,   # len of the vector

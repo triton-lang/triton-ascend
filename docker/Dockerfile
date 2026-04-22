@@ -15,6 +15,11 @@ RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.huaweicloud.com|g' /etc/a
     sed -i 's|http://security.ubuntu.com|http://mirrors.huaweicloud.com|g' /etc/apt/sources.list && \
     echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries && \
     echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries && \
+    apt update && \
+    apt install --yes --no-install-recommends --no-install-suggests \
+    ca-certificates \
+    curl \
+    gnupg && \
     curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xBA6932366A755776" \
     | gpg --dearmor > /usr/share/keyrings/deadsnakes-ppa.gpg && \
     chmod 644 /usr/share/keyrings/deadsnakes-ppa.gpg && \
@@ -22,14 +27,11 @@ RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.huaweicloud.com|g' /etc/a
     apt update && \
     apt install --yes --no-install-recommends --no-install-suggests \
     bash \
-    ca-certificates \
     clang-15 \
     clang-format \
     cmake \
     ccache \
-    curl \
     git \
-    gnupg \
     lld-15 \
     make \
     ninja-build \

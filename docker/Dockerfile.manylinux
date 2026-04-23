@@ -50,8 +50,8 @@ RUN export TMPDIR=/tmp && \
     KERNEL_URL="${CANN_BASE_URL}/Ascend-cann-${CHIP_TYPE}-ops_${CANN_VERSION}_linux-${ARCH}.run" && \
     echo "TOOLKIT_URL: ${TOOLKIT_URL}" && \
     echo "KERNEL_URL: ${KERNEL_URL}" && \
-    curl --retry 3 --retry-delay 5 --retry-max-time 300 -sSL "${TOOLKIT_URL}" -o /tmp/Ascend-cann-toolkit.run && \
-    curl --retry 3 --retry-delay 5 --retry-max-time 300 -sSL "${KERNEL_URL}" -o /tmp/Ascend-cann-kernels.run && \
+    curl --retry 10 --retry-delay 10 --retry-max-time 600 --connect-timeout 30 -sSL "${TOOLKIT_URL}" -o /tmp/Ascend-cann-toolkit.run && \
+    curl --retry 10 --retry-delay 10 --retry-max-time 600 --connect-timeout 30 -sSL "${KERNEL_URL}" -o /tmp/Ascend-cann-kernels.run && \
     chmod +x /tmp/Ascend-cann-toolkit.run /tmp/Ascend-cann-kernels.run && \
     /tmp/Ascend-cann-toolkit.run --full --quiet && \
     /tmp/Ascend-cann-kernels.run --install --quiet && \

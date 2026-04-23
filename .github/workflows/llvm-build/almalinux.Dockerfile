@@ -1,16 +1,17 @@
 FROM almalinux:8
 ARG llvm_dir=llvm-project
 # Add the cache artifacts and the LLVM source tree to the container
-ADD sccache /sccache
-ADD "${llvm_dir}" /source/llvm-project
+COPY sccache /sccache
+COPY "${llvm_dir}" /source/llvm-project
 ENV SCCACHE_DIR="/sccache"
 ENV SCCACHE_CACHE_SIZE="2G"
 
 RUN dnf install --assumeyes llvm-toolset
-RUN dnf install --assumeyes python38-pip python38-devel git
+RUN dnf install --assumeyes python39-pip python39-devel git
+RUN alternatives --set python3 /usr/bin/python3.9
 
 RUN python3 -m pip install --upgrade pip
-RUN python3 -m pip install --upgrade cmake ninja sccache lit
+RUN python3 -m pip install --upgrade cmake ninja sccache lit nanobind
 
 # Install MLIR's Python Dependencies
 RUN python3 -m pip install -r /source/llvm-project/mlir/python/requirements.txt
@@ -26,11 +27,14 @@ RUN cmake -GNinja -Bbuild \
   -DCMAKE_CXX_FLAGS="-Wno-everything" \
   -DCMAKE_LINKER=lld \
   -DCMAKE_INSTALL_PREFIX="/install" \
+  -Dnanobind_DIR="/usr/local/lib/python3.9/site-packages/nanobind/cmake" \
+  -DPython3_EXECUTABLE=/usr/bin/python3.9 \
+  -DPython_EXECUTABLE=/usr/bin/python3.9 \
   -DLLVM_BUILD_UTILS=ON \
   -DLLVM_BUILD_TOOLS=ON \
   -DLLVM_ENABLE_ASSERTIONS=ON \
   -DMLIR_ENABLE_BINDINGS_PYTHON=ON \
-  -DLLVM_ENABLE_PROJECTS=mlir \
+  -DLLVM_ENABLE_PROJECTS="mlir;lld" \
   -DLLVM_ENABLE_TERMINFO=OFF \
   -DLLVM_INSTALL_UTILS=ON \
   -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \

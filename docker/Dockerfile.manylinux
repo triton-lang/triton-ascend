@@ -26,7 +26,7 @@ RUN echo "retries=3" >> /etc/dnf/dnf.conf && \
     zlib-devel && \
     dnf clean all && \
     mkdir -p /root/.config/pip && \
-    echo -e "[global]\nindex-url = https://repo.huaweicloud.com/repository/pypi/simple" > /root/.config/pip/pip.conf && \
+    echo -e "[global]\nindex-url = https://repo.huaweicloud.com/repository/pypi/simple\nextra-index-url = https://download.pytorch.org/whl/cpu" > /root/.config/pip/pip.conf && \
     /opt/python/cp310-cp310/bin/python3.10 -m pip install --upgrade cmake && \
     ln -sf /opt/python/cp310-cp310/bin/cmake /usr/local/bin/cmake && \
     ln -sf /opt/python/cp310-cp310/bin/python3.10 /usr/local/bin/python3 && \

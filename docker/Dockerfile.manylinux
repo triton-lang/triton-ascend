@@ -32,7 +32,7 @@ RUN echo "retries=3" >> /etc/dnf/dnf.conf && \
     ln -sf /opt/python/cp310-cp310/bin/python3.10 /usr/local/bin/python3 && \
     ln -sf /opt/python/cp310-cp310/bin/pip3.10 /usr/local/bin/pip3
 
-COPY requirements.txt requirements_dev.txt
+COPY requirements.txt requirements_dev.txt ./
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     for VER in ${PY_VERSIONS}; do \

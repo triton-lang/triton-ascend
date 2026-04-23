@@ -68,7 +68,7 @@ RUN mkdir -p /root/.config/pip && \
     rm -f /usr/local/bin/pip /usr/local/bin/pip3 && \
     update-alternatives --set python /usr/bin/python3.10
 
-COPY requirements.txt requirements_dev.txt
+COPY requirements.txt requirements_dev.txt ./
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     for VER in ${PY_VERSIONS}; do \

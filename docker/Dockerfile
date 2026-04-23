@@ -3,8 +3,7 @@ FROM ubuntu:22.04
 ARG PY_VERSIONS="3.10 3.11"
 ARG CHIP_TYPE=A3
 ARG CANN_VERSION=8.5.0
-ARG TOOLKIT_URL=""
-ARG KERNEL_URL=""
+ARG CANN_VERSION_PATH=8.5.0
 
 SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
@@ -79,7 +78,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       ${PY} -m pip install -r requirements.txt; \
     done
 
-RUN echo "TOOLKIT_URL: ${TOOLKIT_URL}" && \
+RUN ARCH=$(uname -i) && \
+    CANN_BASE_URL="https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%20${CANN_VERSION_PATH}" && \
+    TOOLKIT_URL="${CANN_BASE_URL}/Ascend-cann-toolkit_${CANN_VERSION}_linux-${ARCH}.run" && \
+    KERNEL_URL="${CANN_BASE_URL}/Ascend-cann-${CHIP_TYPE}-ops_${CANN_VERSION}_linux-${ARCH}.run" && \
+    echo "TOOLKIT_URL: ${TOOLKIT_URL}" && \
     echo "KERNEL_URL: ${KERNEL_URL}" && \
     curl --retry 3 --retry-delay 5 --retry-max-time 300 -sSL "${TOOLKIT_URL}" -o /tmp/Ascend-cann-toolkit.run && \
     curl --retry 3 --retry-delay 5 --retry-max-time 300 -sSL "${KERNEL_URL}" -o /tmp/Ascend-cann-kernels.run && \

@@ -28,7 +28,7 @@ env:
   CANN_VERSION_PATHS: |
     {
       "8.5.0": "8.5.0",
-      "9.0.0-beta.2": "9.0.T511"
+      "9.0.0-beta.2": "9.0.0.T511"
     }
 
 jobs:
@@ -61,15 +61,11 @@ jobs:
           username: ${{ secrets.QUAY_USER }}
           password: ${{ secrets.QUAY_PASSWD }}
 
-      - name: Resolve CANN URLs
+      - name: Resolve CANN version path
         id: cann
         run: |
           VERSION_PATH=$(echo '${{ env.CANN_VERSION_PATHS }}' | jq -r '."${{ matrix.cann_version }}"')
-          CANN_BASE_URL="https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%20${VERSION_PATH}"
-          TOOLKIT_URL="${CANN_BASE_URL}/Ascend-cann-toolkit_${{ matrix.cann_version }}_linux-x86_64.run"
-          KERNEL_URL="${CANN_BASE_URL}/Ascend-cann-${{ matrix.chip_type }}-ops_${{ matrix.cann_version }}_linux-x86_64.run"
-          echo "toolkit_url=${TOOLKIT_URL}" >> $GITHUB_OUTPUT
-          echo "kernel_url=${KERNEL_URL}" >> $GITHUB_OUTPUT
+          echo "version_path=${VERSION_PATH}" >> $GITHUB_OUTPUT
 
       - name: Generate tags
         id: tags
@@ -95,7 +91,6 @@ jobs:
           build-args: |
             CHIP_TYPE=${{ matrix.chip_type }}
             CANN_VERSION=${{ matrix.cann_version }}
-            TOOLKIT_URL=${{ steps.cann.outputs.toolkit_url }}
-            KERNEL_URL=${{ steps.cann.outputs.kernel_url }}
+            CANN_VERSION_PATH=${{ steps.cann.outputs.version_path }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

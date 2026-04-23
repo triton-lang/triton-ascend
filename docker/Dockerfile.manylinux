@@ -6,6 +6,8 @@ FROM base-${TARGETARCH} AS base
 ARG PY_VERSIONS="3.10 3.11"
 ARG CHIP_TYPE=A3
 ARG CANN_VERSION=8.5.0
+ARG TOOLKIT_URL=""
+ARG KERNEL_URL=""
 
 SHELL ["/bin/bash", "-c"]
 
@@ -42,10 +44,15 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       ${PY} -m pip install -r requirements.txt; \
     done
 
-RUN curl -sSL https://repo.oepkgs.net/ascend/cann/ascend.repo -o /etc/yum.repos.d/ascend.repo && \
-    dnf makecache && \
-    dnf install -y Ascend-cann-toolkit-${CANN_VERSION} Ascend-cann-${CHIP_TYPE}-ops-${CANN_VERSION} && \
-    dnf clean all && \
+RUN export TMPDIR=/tmp && \
+    echo "TOOLKIT_URL: ${TOOLKIT_URL}" && \
+    echo "KERNEL_URL: ${KERNEL_URL}" && \
+    curl --retry 3 --retry-delay 5 --retry-max-time 300 -sSL "${TOOLKIT_URL}" -o /tmp/Ascend-cann-toolkit.run && \
+    curl --retry 3 --retry-delay 5 --retry-max-time 300 -sSL "${KERNEL_URL}" -o /tmp/Ascend-cann-kernels.run && \
+    chmod +x /tmp/Ascend-cann-toolkit.run /tmp/Ascend-cann-kernels.run && \
+    /tmp/Ascend-cann-toolkit.run --full --quiet && \
+    /tmp/Ascend-cann-kernels.run --install --quiet && \
+    rm -f /tmp/Ascend-cann-toolkit.run /tmp/Ascend-cann-kernels.run && \
     echo "export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64/common/:/usr/local/Ascend/driver/lib64/driver/:\$LD_LIBRARY_PATH" >> ~/.bashrc && \
     echo "source /usr/local/Ascend/cann/set_env.sh" >> ~/.bashrc
 

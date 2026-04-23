@@ -3,6 +3,8 @@ FROM ubuntu:22.04
 ARG PY_VERSIONS="3.10 3.11"
 ARG CHIP_TYPE=A3
 ARG CANN_VERSION=8.5.0
+ARG TOOLKIT_URL=""
+ARG KERNEL_URL=""
 
 SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
@@ -77,12 +79,14 @@ RUN --mount=type=cache,target=/root/.cache/pip \
       ${PY} -m pip install -r requirements.txt; \
     done
 
-RUN wget -q https://ascend.devcloud.huaweicloud.com/cann/debian/cann-keyring_1.0.0_all.deb && \
-    dpkg -i cann-keyring_1.0.0_all.deb && \
-    rm cann-keyring_1.0.0_all.deb && \
-    apt update && \
-    apt install --yes ascend-cann-toolkit=${CANN_VERSION} ascend-cann-${CHIP_TYPE}-ops=${CANN_VERSION} && \
-    apt clean && rm -rf /var/lib/apt/lists/* && \
+RUN echo "TOOLKIT_URL: ${TOOLKIT_URL}" && \
+    echo "KERNEL_URL: ${KERNEL_URL}" && \
+    curl --retry 3 --retry-delay 5 --retry-max-time 300 -sSL "${TOOLKIT_URL}" -o /tmp/Ascend-cann-toolkit.run && \
+    curl --retry 3 --retry-delay 5 --retry-max-time 300 -sSL "${KERNEL_URL}" -o /tmp/Ascend-cann-kernels.run && \
+    chmod +x /tmp/Ascend-cann-toolkit.run /tmp/Ascend-cann-kernels.run && \
+    /tmp/Ascend-cann-toolkit.run --full --quiet && \
+    /tmp/Ascend-cann-kernels.run --install --quiet && \
+    rm -f /tmp/Ascend-cann-toolkit.run /tmp/Ascend-cann-kernels.run && \
     echo "export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64/common/:/usr/local/Ascend/driver/lib64/driver/:\$LD_LIBRARY_PATH" >> ~/.bashrc && \
     echo "source /usr/local/Ascend/cann/set_env.sh" >> ~/.bashrc
 

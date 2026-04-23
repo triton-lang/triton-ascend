@@ -204,6 +204,25 @@ def is_linux_os(os_id):
     return False
 
 
+def get_llvm_patch_hash():
+    """Compute a hash of all LLVM patch files, matching the llvm-build workflow naming."""
+    patch_dir = os.path.join(get_base_dir(), "third_party", "ascend", "llvm_patch")
+    if os.path.isdir(patch_dir):
+        patch_files = sorted(
+            f for f in os.listdir(patch_dir) if f.endswith('.patch') and os.path.isfile(os.path.join(patch_dir, f))
+        )
+    else:
+        patch_files = []
+    if not patch_files:
+        return "00000000"
+    import hashlib
+    h = hashlib.sha256()
+    for pf in patch_files:
+        with open(os.path.join(patch_dir, pf), "rb") as f:
+            h.update(f.read())
+    return h.hexdigest()[:8]
+
+
 # llvm
 def get_llvm_package_info():
     system = platform.system()
@@ -251,7 +270,8 @@ def get_llvm_package_info():
     llvm_hash_path = os.path.join(get_base_dir(), "cmake", "llvm-hash.txt")
     with open(llvm_hash_path, "r") as llvm_hash_file:
         rev = llvm_hash_file.read(8)
-    name = f"llvm-{rev}-{system_suffix}"
+    patch_hash = get_llvm_patch_hash()
+    name = f"llvm-{rev}-{patch_hash}-{system_suffix}"
     # Create a stable symlink that doesn't include revision
     sym_name = f"llvm-{system_suffix}"
     url = f"https://triton-ascend-artifacts.obs.myhuaweicloud.com/llvm-builds/{name}.tar.gz"

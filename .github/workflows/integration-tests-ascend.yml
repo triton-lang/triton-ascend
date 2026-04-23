@@ -12,7 +12,7 @@ jobs:
     name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.config.runs_on }}
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton/triton:dev-latest-A3
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton/triton:ubuntu-A3-8.5.0-latest
     timeout-minutes: 300
     strategy:
       matrix:
@@ -23,7 +23,6 @@ jobs:
       RUNNER_TYPE: ${{ matrix.config.runner_type }}
       TRITON_BUILD_WITH_CCACHE: "true"
       TRITON_BUILD_WITH_CLANG_LLD: "TRUE"
-      TRITON_USE_ASSERT_ENABLED_LLVM: "TRUE"
       TRITON_DISABLE_LINE_INFO: 1
       PROTON_SKIP_PC_SAMPLING_TEST: 1
       PYTHON: "python${{ matrix.python-version }}"
@@ -41,87 +40,19 @@ jobs:
       - name: Install OS prerequisites
         run: |
           apt-get update
-          apt-get install --yes --no-install-recommends \
-            ca-certificates ninja-build libzstd-dev \
-            git zlib1g-dev \
-            clang clang-15 lld-15 ccache
+          apt-get install --yes --no-install-recommends libzstd-dev
           ${PYTHON} -m pip install cmake ninja \
             -i https://repo.huaweicloud.com/repository/pypi/simple/
-
-      - name: Compute cache keys
-        id: cache-key
-        shell: bash
-        run: |
-          llvm_file="cmake/llvm-hash.txt"
-          req_file="requirements_dev.txt"
-          json_file="cmake/json-version.txt"
-
-          if [[ ! -f "$llvm_file" || ! -f "$req_file" || ! -f "$json_file" ]]; then
-            echo "Error: Required dependency files are missing."
-            exit 1
-          fi
-
-          echo "llvm=$(cut -c 1-8 $llvm_file)" >> $GITHUB_OUTPUT
-          echo "req=$(sha256sum $req_file | cut -d ' ' -f 1)" >> $GITHUB_OUTPUT
-          echo "json=$(cat $json_file)" >> $GITHUB_OUTPUT
 
       - name: Cache build dependencies
         uses: actions/cache@v4
         with:
-          # Note that we cannot use environment variables here given there is
-          # no shell to interpret them in the paths.
           path: |
             ~/.triton/llvm
             ~/.triton/json
-          key: ${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python-version }}-llvm-${{ steps.cache-key.outputs.llvm }}-req-${{ steps.cache-key.outputs.req }}-json-${{ steps.cache-key.outputs.json }}
-
-      - name: Inspect cache directories
-        run: |
-          mkdir -p ~/.triton && du -h -d 1 ~/.triton
-          mkdir -p ~/.ccache && du -h -d 1 ~/.ccache
-
-      - name: Build LLVM from source
-        shell: bash
-        run: |
-          LLVM_INSTALL_PREFIX="$HOME/.triton/llvm/llvm-local-install"
-          if [ -d "${LLVM_INSTALL_PREFIX}" ]; then
-            echo "LLVM already cached at ${LLVM_INSTALL_PREFIX}, skipping build."
-            echo "LLVM_SYSPATH=${LLVM_INSTALL_PREFIX}" >> $GITHUB_ENV
-            exit 0
-          fi
-
-          LLVM_COMMIT=$(cat cmake/llvm-hash.txt | tr -d '[:space:]')
-          LLVM_SHORT=$(echo ${LLVM_COMMIT} | cut -c1-7)
-          PATCH_FILE="third_party/ascend/llvm_patch/${LLVM_SHORT}.patch"
-
-          echo "Building LLVM commit: ${LLVM_COMMIT}"
-          git clone --no-checkout --depth 1 https://github.com/llvm/llvm-project.git /tmp/llvm-project
-          cd /tmp/llvm-project
-          git fetch --depth 1 origin ${LLVM_COMMIT}
-          git checkout ${LLVM_COMMIT}
-
-          if [ -f "${GITHUB_WORKSPACE}/${PATCH_FILE}" ]; then
-            echo "Applying patch: ${PATCH_FILE}"
-            git apply "${GITHUB_WORKSPACE}/${PATCH_FILE}"
-          fi
-
-          mkdir build && cd build
-          cmake ../llvm \
-            -G Ninja \
-            -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
-            -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
-            -DCMAKE_LINKER=/usr/bin/lld-15 \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DLLVM_ENABLE_ASSERTIONS=ON \
-            -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
-            -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
-            -DLLVM_ENABLE_LLD=ON \
-            -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
-          ninja install
-          cp bin/FileCheck ${LLVM_INSTALL_PREFIX}/bin/FileCheck
-
-          rm -rf /tmp/llvm-project
-          echo "LLVM_SYSPATH=${LLVM_INSTALL_PREFIX}" >> $GITHUB_ENV
+            ~/.ccache
+          key: ${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python-version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'third_party/ascend/llvm_patch/*.patch') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python-version }}-triton-
 
       - name: Download and install Bisheng compiler
         shell: bash
@@ -152,20 +83,9 @@ jobs:
       - name: Update PATH
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Setup Python environment
-        run: |
-          echo "/venv/bin" >> $GITHUB_PATH
-          echo "VIRTUAL_ENV=/venv" >> $GITHUB_ENV
-          echo "PYTHONHOME=" >> $GITHUB_ENV
-
       - name: Install NPU test dependencies
         run: |
-          ${PYTHON} -m pip install -r requirements.txt -r requirements_dev.txt \
-            -i https://repo.huaweicloud.com/repository/pypi/simple/
-          ${PYTHON} -m pip install torch==2.7.1 torch_npu==2.7.1 mindspore \
-            -i https://repo.huaweicloud.com/repository/pypi/simple/
-          # NOTE: lit is installed for future MLIR FileCheck tests (currently disabled)
-          ${PYTHON} -m pip install lit \
+          ${PYTHON} -m pip install mindspore lit \
             -i https://repo.huaweicloud.com/repository/pypi/simple/
 
       - name: Build and install triton-ascend
@@ -183,9 +103,6 @@ jobs:
           ccache --zero-stats
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
-          LLVM_SYSPATH="${LLVM_SYSPATH}" \
-          TRITON_OFFLINE_BUILD=1 \
-          TRITON_BUILD_WITH_CLANG_LLD=true \
           TRITON_BUILD_WITH_O1=true \
           TRITON_BUILD_PROTON=OFF \
           TRITON_WHEEL_NAME="triton-ascend" \
@@ -230,8 +147,3 @@ jobs:
       #       echo "MLIR test directory not found: ${TEST_MLIR_DIR}"
       #       exit 1
       #     fi
-
-      - name: Inspect cache directories
-        run: |
-          mkdir -p ~/.triton && du -h -d 1 ~/.triton
-          mkdir -p ~/.ccache && du -h -d 1 ~/.ccache

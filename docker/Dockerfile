@@ -53,7 +53,7 @@ RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.huaweicloud.com|g' /etc/a
     update-alternatives --install /usr/bin/lld lld /usr/bin/lld-15 100
 
 RUN mkdir -p /root/.config/pip && \
-    echo -e "[global]\nindex-url = https://repo.huaweicloud.com/repository/pypi/simple\ntrusted-host = repo.huaweicloud.com" > /root/.config/pip/pip.conf && \
+    echo -e "[global]\nindex-url = https://repo.huaweicloud.com/repository/pypi/simple" > /root/.config/pip/pip.conf && \
     curl -sSLk https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && \
     python3.10 /tmp/get-pip.py && \
     python3.11 /tmp/get-pip.py && \

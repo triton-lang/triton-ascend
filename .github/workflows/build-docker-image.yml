@@ -26,41 +26,15 @@ permissions:
 
 jobs:
   build-images:
-    name: Build ${{ matrix.name }}
+    name: Build ${{ matrix.os }}-${{ matrix.chip_type }}-${{ matrix.cann_version }}
     runs-on: ubuntu-22.04
 
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: ubuntu-910b
-            dockerfile: docker/Dockerfile
-            chip_type: "910b"
-            cann_version: "8.5.0"
-            torch_version: "2.7.1"
-            tag_commit: "ubuntu-910b-{commit}"
-            tag_latest: "ubuntu-910b-latest"
-          - name: ubuntu-A3
-            dockerfile: docker/Dockerfile
-            chip_type: "A3"
-            cann_version: "8.5.0"
-            torch_version: "2.7.1"
-            tag_commit: "ubuntu-A3-{commit}"
-            tag_latest: "ubuntu-A3-latest"
-          - name: manylinux-910b
-            dockerfile: docker/Dockerfile.manylinux
-            chip_type: "910b"
-            cann_version: "8.5.0"
-            torch_version: "2.7.1"
-            tag_commit: "manylinux-910b-{commit}"
-            tag_latest: "manylinux-910b-latest"
-          - name: manylinux-A3
-            dockerfile: docker/Dockerfile.manylinux
-            chip_type: "A3"
-            cann_version: "8.5.0"
-            torch_version: "2.7.1"
-            tag_commit: "manylinux-A3-{commit}"
-            tag_latest: "manylinux-A3-latest"
+        os: [ubuntu, manylinux]
+        chip_type: [910b, A3]
+        cann_version: [8.5.0, 9.0.0-beta.2]
 
     steps:
       - name: Checkout code
@@ -84,19 +58,23 @@ jobs:
         id: tags
         run: |
           GIT_COMMIT_SHORT="$(git rev-parse --short HEAD)"
-          TAG_COMMIT=$(echo "${{ matrix.tag_commit }}" | sed "s/{commit}/${GIT_COMMIT_SHORT}/")
+          DOCKERFILE="${{ matrix.os == 'manylinux' && 'docker/Dockerfile.manylinux' || 'docker/Dockerfile' }}"
+          TAG_COMMIT="${{ matrix.os }}-${{ matrix.chip_type }}-${{ matrix.cann_version }}-${GIT_COMMIT_SHORT}"
+          TAG_LATEST="${{ matrix.os }}-${{ matrix.chip_type }}-${{ matrix.cann_version }}-latest"
+          echo "dockerfile=${DOCKERFILE}" >> $GITHUB_OUTPUT
           echo "tag_commit=${TAG_COMMIT}" >> $GITHUB_OUTPUT
+          echo "tag_latest=${TAG_LATEST}" >> $GITHUB_OUTPUT
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: ${{ steps.tags.outputs.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' }}
           tags: |
             quay.io/ascend/triton:${{ steps.tags.outputs.tag_commit }}
-            quay.io/ascend/triton:${{ matrix.tag_latest }}
+            quay.io/ascend/triton:${{ steps.tags.outputs.tag_latest }}
           build-args: |
             CHIP_TYPE=${{ matrix.chip_type }}
             CANN_VERSION=${{ matrix.cann_version }}

@@ -6,11 +6,13 @@ on:
       - cmake/llvm-hash.txt
       - third_party/ascend/llvm_patch/**
       - .github/workflows/llvm-build.yml
+      - .github/workflows/llvm-build/**
   pull_request:
     paths:
       - cmake/llvm-hash.txt
       - third_party/ascend/llvm_patch/**
       - .github/workflows/llvm-build.yml
+      - .github/workflows/llvm-build/**
   workflow_dispatch:
 
 env:

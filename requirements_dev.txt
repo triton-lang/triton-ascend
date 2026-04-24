@@ -1,8 +1,8 @@
 auditwheel
 cmake
-lit
 einops
 expecttest
+lit
 ninja
 patchelf
 pybind11

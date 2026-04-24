@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths:
       - 'docker/Dockerfile'
-      - 'docker/Dockerfile.manylinux'
       - 'Makefile'
       - 'requirements.txt'
       - 'requirements_dev.txt'
@@ -14,7 +13,6 @@ on:
     branches: [main]
     paths:
       - 'docker/Dockerfile'
-      - 'docker/Dockerfile.manylinux'
       - 'Makefile'
       - 'requirements.txt'
       - 'requirements_dev.txt'
@@ -33,13 +31,12 @@ env:
 
 jobs:
   build-images:
-    name: Build ${{ matrix.os }}-${{ matrix.chip_type }}-${{ matrix.cann_version }}
+    name: Build ${{ matrix.chip_type }}-${{ matrix.cann_version }}
     runs-on: ubuntu-22.04
 
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu, manylinux]
         chip_type: [910b, A3]
         cann_version: [8.5.0, 9.0.0-beta.2]
 
@@ -71,10 +68,8 @@ jobs:
         id: tags
         run: |
           GIT_COMMIT_SHORT="$(git rev-parse --short HEAD)"
-          DOCKERFILE="${{ matrix.os == 'manylinux' && 'docker/Dockerfile.manylinux' || 'docker/Dockerfile' }}"
-          TAG_COMMIT="${{ matrix.os }}-${{ matrix.chip_type }}-${{ matrix.cann_version }}-${GIT_COMMIT_SHORT}"
-          TAG_LATEST="${{ matrix.os }}-${{ matrix.chip_type }}-${{ matrix.cann_version }}-latest"
-          echo "dockerfile=${DOCKERFILE}" >> $GITHUB_OUTPUT
+          TAG_COMMIT="${{ matrix.chip_type }}-${{ matrix.cann_version }}-${GIT_COMMIT_SHORT}"
+          TAG_LATEST="${{ matrix.chip_type }}-${{ matrix.cann_version }}-latest"
           echo "tag_commit=${TAG_COMMIT}" >> $GITHUB_OUTPUT
           echo "tag_latest=${TAG_LATEST}" >> $GITHUB_OUTPUT
 
@@ -82,7 +77,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ steps.tags.outputs.dockerfile }}
+          file: docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' }}
           tags: |

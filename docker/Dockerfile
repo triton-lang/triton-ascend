@@ -45,6 +45,7 @@ RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.huaweicloud.com|g' /etc/a
     unzip \
     vim \
     wget \
+    libzstd-dev \
     zlib1g-dev && \
     apt clean && rm -rf /var/lib/apt/lists/* && \
     update-ca-certificates && \

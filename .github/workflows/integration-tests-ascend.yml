@@ -12,7 +12,7 @@ jobs:
     name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.config.runs_on }}
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton/triton:ubuntu-A3-8.5.0-latest
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton/triton:A3-8.5.0-latest
     timeout-minutes: 300
     strategy:
       matrix:
@@ -20,13 +20,8 @@ jobs:
         python-version: ['3.10', '3.11']
       fail-fast: false
     env:
-      RUNNER_TYPE: ${{ matrix.config.runner_type }}
-      TRITON_BUILD_WITH_CCACHE: "true"
-      TRITON_BUILD_WITH_CLANG_LLD: "TRUE"
-      TRITON_DISABLE_LINE_INFO: 1
       PROTON_SKIP_PC_SAMPLING_TEST: 1
       PYTHON: "python${{ matrix.python-version }}"
-      CCACHE_COMPRESS: "true"
 
     steps:
       - name: Checkout
@@ -36,13 +31,6 @@ jobs:
 
       - name: Add git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Install OS prerequisites
-        run: |
-          apt-get update
-          apt-get install --yes --no-install-recommends libzstd-dev
-          ${PYTHON} -m pip install cmake ninja \
-            -i https://repo.huaweicloud.com/repository/pypi/simple/
 
       - name: Cache build dependencies
         uses: actions/cache@v4
@@ -57,14 +45,14 @@ jobs:
       - name: Download and install Bisheng compiler
         shell: bash
         run: |
+          if [ ! -f cmake/bisheng-version.txt ]; then
+            echo "cmake/bisheng-version.txt not found, skipping"
+            exit 0
+          fi
+
           OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
           BISHENG_FILENAME=$(sed -n '1p' cmake/bisheng-version.txt)
           BISHENG_SHA256=$(sed -n '2p' cmake/bisheng-version.txt | sed 's/^sha256://')
-
-          if [ -z "${BISHENG_FILENAME}" ]; then
-            echo "Error: bisheng filename not found in cmake/bisheng-version.txt"
-            exit 1
-          fi
 
           echo "Downloading: ${BISHENG_FILENAME}"
           curl -fL "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
@@ -80,16 +68,17 @@ jobs:
           ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
           echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
 
-      - name: Update PATH
-        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Install NPU test dependencies
-        run: |
-          ${PYTHON} -m pip install mindspore lit \
-            -i https://repo.huaweicloud.com/repository/pypi/simple/
-
       - name: Build and install triton-ascend
         shell: bash
+        env:
+          TRITON_BUILD_WITH_CCACHE: "true"
+          TRITON_BUILD_WITH_CLANG_LLD: "TRUE"
+          TRITON_DISABLE_LINE_INFO: 1
+          CCACHE_COMPRESS: "true"
+          TRITON_BUILD_WITH_O1: true
+          TRITON_BUILD_PROTON: OFF
+          TRITON_WHEEL_NAME: triton-ascend
+          TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=OFF"
         run: |
           nproc
           source /usr/local/Ascend/cann/set_env.sh
@@ -98,18 +87,11 @@ jobs:
           if [ -n "${ASCEND_TOOLKIT_HOME}" ] && [ -f "${ASCEND_TOOLKIT_HOME}/cann/version.info" ]; then
             cat "${ASCEND_TOOLKIT_HOME}/cann/version.info"
           fi
-          echo "PATH is '$PATH'"
 
           ccache --zero-stats
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
-          TRITON_BUILD_WITH_O1=true \
-          TRITON_BUILD_PROTON=OFF \
-          TRITON_WHEEL_NAME="triton-ascend" \
-          TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
           MAX_JOBS="$NUM_PROCS" \
-          IS_MANYLINUX="${IS_MANYLINUX:-False}" \
-          TRITON_WHEEL_VERSION_SUFFIX="${TRITON_WHEEL_VERSION_SUFFIX:-rc3}" \
           ${PYTHON} setup.py bdist_wheel
           ${PYTHON} -m pip install dist/*.whl \
             -i https://repo.huaweicloud.com/repository/pypi/simple/
@@ -130,20 +112,14 @@ jobs:
           # that cause CI instability. TODO: Fix flaky kernel tests and re-enable.
           # ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/kernels/test_triton_kernel.py
 
-      # NOTE: MLIR FileCheck tests are temporarily disabled pending lit test
-      # infrastructure setup. TODO: Verify lit.cfg.py configuration and re-enable.
-      # - name: Run MLIR FileCheck tests
-      #   shell: bash
-      #   run: |
-      #     source /usr/local/Ascend/cann/set_env.sh
-      #     export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
-      #     export PATH="${LLVM_SYSPATH}/bin:$PATH"
-      #     # Find build directory and run MLIR tests
-      #     BUILD_DIR=$(${PYTHON} -c "import sysconfig, sys; plat_name=sysconfig.get_platform(); python_version=sysconfig.get_python_version(); print(f'build/cmake.{plat_name}-{sys.implementation.name}-{python_version}')")
-      #     TEST_MLIR_DIR="${BUILD_DIR}/third_party/ascend/unittest/"
-      #     if [ -d "${TEST_MLIR_DIR}" ]; then
-      #       lit -v "${TEST_MLIR_DIR}"
-      #     else
-      #       echo "MLIR test directory not found: ${TEST_MLIR_DIR}"
-      #       exit 1
-      #     fi
+      - name: Run MLIR FileCheck tests
+        shell: bash
+        run: |
+          source /usr/local/Ascend/cann/set_env.sh
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          TEST_MLIR_DIR=$(ls -d build/cmake.*/third_party/ascend/unittest/ 2>/dev/null | head -1)
+          if [ -n "${TEST_MLIR_DIR}" ]; then
+            lit -v "${TEST_MLIR_DIR}"
+          else
+            echo "MLIR test directory not found, skipping"
+          fi

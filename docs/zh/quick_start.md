@@ -61,18 +61,26 @@ pip install triton-ascend
 
 ## 快速使用Docker 安装环境
 
-我们提供了Dockerfile帮助您安装Docker环境镜像。安装过程将会自动从CANN官网中下载安装对应的CANN Toolkit和Kernel包，需要您通过`--build-arg`指定您机器需要安装的CANN相关参数。
+我们提供了Dockerfile帮助您安装Docker环境镜像。构建过程使用`quay.io/ascend/cann`预构建镜像作为基础镜像，跳过CANN安装步骤，显著加快构建速度。
 
-| 参数名称 | 默认值 | 可选值                                   |
-| -------- | ------ |---------------------------------------|
-| CHIP_TYPE | A3     | A3、910b                               |
-| CANN_VERSION | 8.5.0（推荐） | 8.5.0、8.3.RC1、8.3.RC2、8.2.RC1、8.2.RC2 |
+您需要通过`--build-arg`指定`CANN_BASE_IMAGE`参数来选择适合您机器的CANN基础镜像。可用的CANN基础镜像标签可在[quay.io/ascend/cann](https://quay.io/repository/ascend/cann?tab=tags)查看。
+
+| CANN版本 | 芯片类型 | Python版本 | 镜像标签 |
+|---|---|---|---|
+| 8.5.0 | `A2` | 3.10 | `8.5.0-910b-ubuntu22.04-py3.10` |
+| 8.5.0 | `A3` | 3.10 | `8.5.0-a3-ubuntu22.04-py3.10` |
+| 8.5.0 | `A2` | 3.11 | `8.5.0-910b-ubuntu22.04-py3.11` |
+| 8.5.0 | `A3` | 3.11 | `8.5.0-a3-ubuntu22.04-py3.11` |
+| 9.0.0-beta.2 | `A2` | 3.10 | `9.0.0-beta.2-910b-ubuntu22.04-py3.10` |
+| 9.0.0-beta.2 | `A3` | 3.10 | `9.0.0-beta.2-a3-ubuntu22.04-py3.10` |
+| 9.0.0-beta.2 | `A2` | 3.11 | `9.0.0-beta.2-910b-ubuntu22.04-py3.11` |
+| 9.0.0-beta.2 | `A3` | 3.11 | `9.0.0-beta.2-a3-ubuntu22.04-py3.11` |
 
 您可以通过 npu-smi 命令查看系统上的NPU型号。
 
-不同`CHIP_TYPE`选项对应的机器可参考：
+不同芯片类型对应的机器可参考：
 
-| 选项序号 | **CHIP_TYPE 参数值** | 对应机器/产品系列 |                 典型整机                 |
+| 选项序号 | **芯片类型** | 对应机器/产品系列 |                 典型整机                 |
 | :---: |:-----------------:| :---: |:-----------------------------------:|
 | 1 |       `A3`        | Atlas A3 训练系列产品 |        Atlas 900 A3 SuperPoD        |
 | 2 |       `A2`        | Atlas A2 训练系列产品 |            Atlas800T A2             |
@@ -80,8 +88,7 @@ pip install triton-ascend
 ```bash
 git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend
 docker build \
---build-arg CHIP_TYPE=A3 \
---build-arg CANN_VERSION=8.5.0 \
+--build-arg CANN_BASE_IMAGE=quay.io/ascend/cann:8.5.0-a3-ubuntu22.04-py3.10 \
 -t triton-ascend-image:latest -f ./docker/Dockerfile .
 ```
 

@@ -38,7 +38,7 @@ RUN mkdir -p /root/.config/pip && \
 COPY requirements.txt requirements_dev.txt ./
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements_dev.txt && \
-    pip install -r requirements.txt
+    python3 -m pip install -r requirements_dev.txt && \
+    python3 -m pip install -r requirements.txt
 
 WORKDIR /home/triton

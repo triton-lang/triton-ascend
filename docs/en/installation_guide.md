@@ -260,14 +260,14 @@ You need to specify the `CANN_BASE_IMAGE` build arg to select the appropriate CA
 
 | CANN Version | Chip Type | Python | Image Tag |
 |---|---|---|---|
-| 8.5.0 | 910b | 3.10 | `8.5.0-910b-ubuntu22.04-py3.10` |
-| 8.5.0 | A3 | 3.10 | `8.5.0-a3-ubuntu22.04-py3.10` |
-| 8.5.0 | 910b | 3.11 | `8.5.0-910b-ubuntu22.04-py3.11` |
-| 8.5.0 | A3 | 3.11 | `8.5.0-a3-ubuntu22.04-py3.11` |
-| 9.0.0-beta.2 | 910b | 3.10 | `9.0.0-beta.2-910b-ubuntu22.04-py3.10` |
-| 9.0.0-beta.2 | A3 | 3.10 | `9.0.0-beta.2-a3-ubuntu22.04-py3.10` |
-| 9.0.0-beta.2 | 910b | 3.11 | `9.0.0-beta.2-910b-ubuntu22.04-py3.11` |
-| 9.0.0-beta.2 | A3 | 3.11 | `9.0.0-beta.2-a3-ubuntu22.04-py3.11` |
+| 8.5.0 | `A2` | 3.10 | `8.5.0-910b-ubuntu22.04-py3.10` |
+| 8.5.0 | `A3` | 3.10 | `8.5.0-a3-ubuntu22.04-py3.10` |
+| 8.5.0 | `A2` | 3.11 | `8.5.0-910b-ubuntu22.04-py3.11` |
+| 8.5.0 | `A3` | 3.11 | `8.5.0-a3-ubuntu22.04-py3.11` |
+| 9.0.0-beta.2 | `A2` | 3.10 | `9.0.0-beta.2-910b-ubuntu22.04-py3.10` |
+| 9.0.0-beta.2 | `A3` | 3.10 | `9.0.0-beta.2-a3-ubuntu22.04-py3.10` |
+| 9.0.0-beta.2 | `A2` | 3.11 | `9.0.0-beta.2-910b-ubuntu22.04-py3.11` |
+| 9.0.0-beta.2 | `A3` | 3.11 | `9.0.0-beta.2-a3-ubuntu22.04-py3.11` |
 
 You can check the NPU model on your system using the `npu-smi` command.
 

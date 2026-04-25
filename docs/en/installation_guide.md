@@ -254,18 +254,26 @@ git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend
 
 ## Installation via Docker
 
-We provide a Dockerfile to help you build a Docker environment image. During installation, the corresponding CANN Toolkit and Kernel packages will be automatically downloaded from the official CANN website. You need to specify the CANN-related parameters for your machine using `--build-arg`.
+We provide a Dockerfile to help you build a Docker environment image. The build uses pre-built CANN images from `quay.io/ascend/cann` as the base, which significantly speeds up the build process by skipping the CANN installation step.
 
-| Parameter Name | Default Value | Available Options |
-|----------------|---------------|---------------------------------|
-| CHIP_TYPE      | A3            | A3, 910B |
-| CANN_VERSION   | 8.5.0 (Recommended) | 8.5.0, 8.3.RC1, 8.3.RC2, 8.2.RC1, 8.2.RC2 |
+You need to specify the `CANN_BASE_IMAGE` build arg to select the appropriate CANN base image for your machine. Available CANN base image tags can be found at [quay.io/ascend/cann](https://quay.io/repository/ascend/cann?tab=tags).
+
+| CANN Version | Chip Type | Python | Image Tag |
+|---|---|---|---|
+| 8.5.0 | 910b | 3.10 | `8.5.0-910b-ubuntu22.04-py3.10` |
+| 8.5.0 | A3 | 3.10 | `8.5.0-a3-ubuntu22.04-py3.10` |
+| 8.5.0 | 910b | 3.11 | `8.5.0-910b-ubuntu22.04-py3.11` |
+| 8.5.0 | A3 | 3.11 | `8.5.0-a3-ubuntu22.04-py3.11` |
+| 9.0.0-beta.2 | 910b | 3.10 | `9.0.0-beta.2-910b-ubuntu22.04-py3.10` |
+| 9.0.0-beta.2 | A3 | 3.10 | `9.0.0-beta.2-a3-ubuntu22.04-py3.10` |
+| 9.0.0-beta.2 | 910b | 3.11 | `9.0.0-beta.2-910b-ubuntu22.04-py3.11` |
+| 9.0.0-beta.2 | A3 | 3.11 | `9.0.0-beta.2-a3-ubuntu22.04-py3.11` |
 
 You can check the NPU model on your system using the `npu-smi` command.
 
-For the machines corresponding to different `CHIP_TYPE` options, refer to the table below:
+For the machines corresponding to different chip types, refer to the table below:
 
-| Option No. | **CHIP_TYPE Value** | Corresponding Server/Product Series | Typical Server Model |
+| Option No. | **Chip Type** | Corresponding Server/Product Series | Typical Server Model |
 |:----------:|:-------------------:|:----------------------------------:|:-----------------------------------:|
 | 1 | `A3` | Atlas A3 Training Series | Atlas 900 A3 SuperPoD |
 | 2 | `A2` | Atlas A2 Training Series | Atlas 800T A2 |
@@ -273,8 +281,7 @@ For the machines corresponding to different `CHIP_TYPE` options, refer to the ta
 ```bash
 git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend
 docker build \
---build-arg CHIP_TYPE=A3 \
---build-arg CANN_VERSION=8.5.0 \
+--build-arg CANN_BASE_IMAGE=quay.io/ascend/cann:8.5.0-a3-ubuntu22.04-py3.10 \
 -t triton-ascend-image:latest -f ./docker/Dockerfile .
 ```
 

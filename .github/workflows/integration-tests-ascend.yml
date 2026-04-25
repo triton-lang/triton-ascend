@@ -78,7 +78,7 @@ jobs:
           TRITON_BUILD_WITH_O1: true
           TRITON_BUILD_PROTON: OFF
           TRITON_WHEEL_NAME: triton-ascend
-          TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=OFF"
+          TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=ON"
         run: |
           nproc
           source /usr/local/Ascend/cann/set_env.sh
@@ -117,8 +117,9 @@ jobs:
         run: |
           source /usr/local/Ascend/cann/set_env.sh
           export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
-          TEST_MLIR_DIR=$(ls -d build/cmake.*/third_party/ascend/unittest/ 2>/dev/null | head -1)
-          if [ -n "${TEST_MLIR_DIR}" ]; then
+          TEST_MLIR_DIR=$(ls -d build/cmake.*/third_party/ascend/unittest 2>/dev/null | head -1 || true)
+          echo "TEST_MLIR_DIR=${TEST_MLIR_DIR:-<not found>}"
+          if [ -n "${TEST_MLIR_DIR}" ] && [ -d "${TEST_MLIR_DIR}" ]; then
             lit -v "${TEST_MLIR_DIR}"
           else
             echo "MLIR test directory not found, skipping"

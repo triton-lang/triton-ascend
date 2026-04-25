@@ -51,8 +51,13 @@ jobs:
           fi
 
           OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
-          BISHENG_FILENAME=$(sed -n '1p' cmake/bisheng-version.txt)
-          BISHENG_SHA256=$(sed -n '2p' cmake/bisheng-version.txt | sed 's/^sha256://')
+          BISHENG_FILENAME=$(sed -n '1p' cmake/bisheng-version.txt | xargs)
+          BISHENG_SHA256=$(sed -n '2p' cmake/bisheng-version.txt | sed 's/^sha256://' | xargs)
+
+          if [ -z "${BISHENG_FILENAME}" ]; then
+            echo "Error: cmake/bisheng-version.txt must contain a Bisheng filename on the first line." >&2
+            exit 1
+          fi
 
           echo "Downloading: ${BISHENG_FILENAME}"
           curl -fL "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
@@ -122,5 +127,14 @@ jobs:
           if [ -n "${TEST_MLIR_DIR}" ] && [ -d "${TEST_MLIR_DIR}" ]; then
             lit -v "${TEST_MLIR_DIR}"
           else
-            echo "MLIR test directory not found, skipping"
+            echo "MLIR test directory not found."
+            echo "Expected to match: build/cmake.*/third_party/ascend/unittest"
+            echo "Working directory: $(pwd)"
+            if [ -d build ]; then
+              echo "Contents of build directory:"
+              find build -maxdepth 4 -print
+            else
+              echo "build directory does not exist"
+            fi
+            exit 1
           fi

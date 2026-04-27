@@ -9,19 +9,21 @@ on:
 
 jobs:
   integration-tests-ascend:
-    name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.python-version }})
+    name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.python_version }})
     runs-on: ${{ matrix.config.runs_on }}
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton/triton:A3-8.5.0-latest
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:${{ matrix.cann_version }}-${{ matrix.config.chip_type }}-${{ matrix.os }}-py${{ matrix.python_version }}-latest
     timeout-minutes: 300
     strategy:
       matrix:
         config: ${{ fromJson(inputs.matrix) }}
-        python-version: ['3.10', '3.11']
+        cann_version: ["8.5.0"]
+        os: [ubuntu22.04]
+        python_version: ["3.10", "3.11"]
       fail-fast: false
     env:
       PROTON_SKIP_PC_SAMPLING_TEST: 1
-      PYTHON: "python${{ matrix.python-version }}"
+      PYTHON: "python${{ matrix.python_version }}"
 
     steps:
       - name: Checkout
@@ -39,8 +41,8 @@ jobs:
             ~/.triton/llvm
             ~/.triton/json
             ~/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python-version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'third_party/ascend/llvm_patch/*.patch') }}
-          restore-keys: ${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python-version }}-triton-
+          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'third_party/ascend/llvm_patch/*.patch') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-
 
       - name: Download and install Bisheng compiler
         shell: bash

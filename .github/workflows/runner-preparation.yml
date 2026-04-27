@@ -93,5 +93,5 @@ jobs:
         if: env.enable_integration == 'true'
         run: |
           if [ x"${{ github.repository }}" == x"triton-lang/triton-ascend" ]; then
-            echo 'matrix-ASCEND=[{"name":"linux-aarch64-a3-4","runner_type":"linux-aarch64-a3-4","runs_on":["linux-aarch64-a3-4"]}]' >> $GITHUB_OUTPUT
+            echo 'matrix-ASCEND=[{"name":"linux-aarch64-a3-4","runner_type":"linux-aarch64-a3-4","runs_on":["linux-aarch64-a3-4"],"chip_type":"a3"}]' >> $GITHUB_OUTPUT
           fi

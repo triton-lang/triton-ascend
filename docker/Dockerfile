@@ -30,6 +30,9 @@ RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.huaweicloud.com|g' /etc/a
     libzstd-dev \
     zlib1g-dev && \
     apt clean && rm -rf /var/lib/apt/lists/* && \
+    update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 100 && \
+    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-15 100 && \
+    update-alternatives --install /usr/bin/lld lld /usr/bin/lld-15 100 && \
     update-ca-certificates
 
 RUN mkdir -p /root/.config/pip && \

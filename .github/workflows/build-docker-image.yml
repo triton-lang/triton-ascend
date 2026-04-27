@@ -47,7 +47,7 @@ jobs:
 
       - name: Login to Quay.io
         if: github.event_name == 'push'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: quay.io
           username: ${{ secrets.QUAY_USER }}

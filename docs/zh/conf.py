@@ -42,6 +42,8 @@ extensions = [
     'myst_parser',
     ]
 
+myst_heading_anchors = 4
+
 autosummary_generate = True
 
 # Add any paths that contain templates here, relative to this directory.
@@ -71,4 +73,8 @@ html_static_path = ["_static"]
 
 html_css_files = [
     "custom.css",
+]
+
+html_js_files = [
+    "lang_switcher.js",
 ]

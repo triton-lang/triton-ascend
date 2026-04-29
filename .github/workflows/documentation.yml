@@ -1,61 +1,92 @@
 name: Documentation
+
+# Workflow 1 of the docs pipeline.
+#
+# Responsibility: build the sphinx site for both languages and stash the result
+# (HTML + a small metadata folder) as a GitHub Actions artifact. That artifact
+# is consumed by the companion "Documentation" workflow, which runs in the
+# upstream context and has the OBS credentials needed to publish.
+#
+# Why split: secrets like OBS_AK/OBS_SK are not available to fork PRs. Keeping
+# this workflow strictly read-only means fork PRs can build and validate docs
+# without touching any credentials or external storage.
+
 on:
   workflow_dispatch:
   schedule:
     - cron: "0 0 * * *"
+  push:
+    branches: [release/3.2.1, main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs-preview.yml'
+      - '.github/workflows/documentation.yml'
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs-preview.yml'
+      - '.github/workflows/documentation.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  Build-Documentation:
-    runs-on: linux-aarch64-a2-1
-    container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:8.3.rc1-910b-ubuntu22.04-py3.11
+  build:
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
-    env:
-      PYTHON: "python3"
 
     steps:
-      - name: Checkout branch
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
-      - name: Clear docs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Compute version slug
+        id: ver
         run: |
-          rm -rf /tmp/triton-docs
-        continue-on-error: true
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            REF="${{ github.base_ref }}"
+          else
+            REF="${{ github.ref_name }}"
+          fi
+          SLUG="${REF//\//-}"
+          echo "slug=${SLUG}" >> "$GITHUB_OUTPUT"
+          echo "Version slug: ${SLUG}"
 
       - name: Install dependent packages
-        run: sudo -E make docs-requirements
+        if: github.event.action != 'closed'
+        run: python3 -m pip install -r docs/zh/requirement.txt
 
-      #- name: Fetch dependent branches
-      #  run: |
-      #    git fetch origin main:main
+      - name: Build zh docs
+        if: github.event.action != 'closed'
+        run: python3 -m sphinx docs/zh "_site/${{ steps.ver.outputs.slug }}/zh"
 
-      - name: Build docs
+      - name: Build en docs
+        if: github.event.action != 'closed'
+        run: python3 -m sphinx docs/en "_site/${{ steps.ver.outputs.slug }}/en"
+
+      - name: Add landing page
+        if: github.event.action != 'closed'
+        run: cp docs/landing.html _site/index.html
+
+      - name: Stash deploy metadata
         run: |
-          # Limit the number of threads to reduce CPU memory usage
-          # This CI node has 24 cores
-          MAX_JOBS=24 sudo -E make docs-only
+          mkdir -p _meta
+          echo "${{ github.event_name }}"        > _meta/event
+          echo "${{ steps.ver.outputs.slug }}"   > _meta/slug
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "${{ github.event.pull_request.number }}"   > _meta/pr_number
+            echo "${{ github.event.action }}"                > _meta/pr_action
+            echo "${{ github.event.pull_request.head.sha }}" > _meta/sha
+          fi
 
-      - name: Update docs
-        run: |
-          sudo mkdir /tmp/triton-docs/
-          sudo mv docs/_build/html/* /tmp/triton-docs/
-          sudo git checkout gh-pages
-          sudo cp -r CNAME /tmp/triton-docs/
-          sudo cp -r index.html /tmp/triton-docs/
-          sudo cp -r .nojekyll /tmp/triton-docs/
-          sudo rm -rf *
-          sudo cp -r /tmp/triton-docs/* .
-          sudo git add .
-          sudo git config --global user.email "N/A"
-          sudo git config --global user.name "gh-actions-bot"
-          sudo git commit -am "[GH-PAGES] Updated website"
-
-      - name: Publish docs
-        run: |
-          sudo git push origin gh-pages
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docs-artifact
+          path: |
+            _site
+            _meta
+          if-no-files-found: warn
+          retention-days: 7

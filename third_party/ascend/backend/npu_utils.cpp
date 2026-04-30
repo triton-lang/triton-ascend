@@ -33,6 +33,13 @@
 
 #include "runtime/runtime/rt.h"
 
+#ifdef USE_TORCH_NPU
+#include <ATen/ATen.h>
+#include <torch_npu/csrc/core/npu/NPUWorkspaceAllocator.h>
+#include <torch_npu/csrc/framework/OpCommand.h>
+#include <functional>
+#endif
+
 // Use map to differentiate same name functions from different binary
 static std::unordered_map<std::string, size_t> registered_names;
 static std::unordered_map<std::string, std::unique_ptr<size_t>> func_stubs;
@@ -318,6 +325,24 @@ static PyObject* copyMemory(PyObject* self, PyObject* args) {
 	Py_INCREF(Py_None);
 	return Py_None;
 }
+
+#ifdef USE_TORCH_NPU
+extern "C" void* triton_allocate_workspace(uint64_t size) {
+  auto tensor = at::empty(size, at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte));
+  return const_cast<void*>(tensor.storage().data());
+}
+
+extern "C" void* triton_allocate_sync_block_lock(uint64_t size, void* stream) {
+  auto tensor = at_npu::native::allocate_workspace(size, reinterpret_cast<rtStream_t>(stream));
+  return const_cast<void*>(tensor.storage().data());
+}
+
+extern "C" void triton_async_launch(void* func_obj, const char* name) {
+  auto& func = *static_cast<std::function<rtError_t()>*>(func_obj);
+  at_npu::native::OpCommand cmd;
+  cmd.Name(name).SetCustomHandler(func).Run();
+}
+#endif
 
 static PyMethodDef NpuUtilsMethods[] = {
     {"load_kernel_binary", loadKernelBinary, METH_VARARGS,

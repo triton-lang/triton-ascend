@@ -59,7 +59,7 @@ class NPUUtils(object):
         cache = get_cache_manager(key)
         fname = "npu_utils.so"
         cache_path = cache.get_file(fname)
-        if cache_path is None:
+        if cache_path is None or not os.path.exists(cache_path):
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_src_path = os.path.join(tmpdir, "npu_utils.cpp")
                 with open(tmp_src_path, "w") as f:
@@ -113,8 +113,6 @@ class NPULauncher(object):
         signature = {cst_key(key): value for key, value in src.signature.items()}
         wrapper_src = generate_npu_wrapper_src(constants, signature, metadata)
         so_launcher_path = make_npu_launcher_stub(header_src, wrapper_src, metadata.debug)
-        npu_utils_inst = NPUUtils()
-        os.environ["TRITON_NPU_UTILS_SO_PATH"] = npu_utils_inst.npu_utils_mod.__file__
         # setup for remote run
         # TODO: use a var to pack all vars required to run on a remote machine
         self.mix_mode = metadata.mix_mode
@@ -533,7 +531,9 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     sync_lock_fail_code = 'fprintf(stderr, "Error: syncBlockLock allocation failed\\n"); return;'
     workspace_fail_code = 'fprintf(stderr, "Error: workspace allocation failed\\n"); return;'
 
-    cpp_npu_utils_dlopen = """
+    npu_utils_inst = NPUUtils()
+    npu_utils_so_path = npu_utils_inst.npu_utils_mod.__file__
+    cpp_npu_utils_dlopen = f"""
 typedef void* (*triton_allocate_workspace_t)(uint64_t);
 typedef void* (*triton_allocate_sync_block_lock_t)(uint64_t, void*);
 typedef void  (*triton_async_launch_t)(void*, const char*);
@@ -542,22 +542,18 @@ static triton_allocate_workspace_t g_allocate_workspace = nullptr;
 static triton_allocate_sync_block_lock_t g_allocate_sync_block_lock = nullptr;
 static triton_async_launch_t g_async_launch = nullptr;
 
-static void init_npu_utils() {
+static void init_npu_utils() {{
     if (g_allocate_workspace) return;
-    const char* so_path = getenv("TRITON_NPU_UTILS_SO_PATH");
-    if (!so_path) {
-        fprintf(stderr, "Error: TRITON_NPU_UTILS_SO_PATH not set\\n");
-        return;
-    }
+    const char* so_path = "{npu_utils_so_path}";
     void* handle = dlopen(so_path, RTLD_LAZY);
-    if (!handle) {
+    if (!handle) {{
         fprintf(stderr, "Error: dlopen %s failed: %s\\n", so_path, dlerror());
         return;
-    }
+    }}
     g_allocate_workspace = (triton_allocate_workspace_t)dlsym(handle, "triton_allocate_workspace");
     g_allocate_sync_block_lock = (triton_allocate_sync_block_lock_t)dlsym(handle, "triton_allocate_sync_block_lock");
     g_async_launch = (triton_async_launch_t)dlsym(handle, "triton_async_launch");
-}
+}}
 """
 
     cpp_device_pointer = """

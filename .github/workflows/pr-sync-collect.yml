@@ -1,0 +1,43 @@
+name: PR Sync Collect
+
+# Fork-safe collector: runs in the unprivileged pull_request context (no
+# secrets) and only writes PR metadata to an artifact. The privileged
+# pr-synchronization.yml workflow consumes the artifact via workflow_run.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Save PR metadata
+        env:
+          PR_ID:    ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_DESC:  ${{ github.event.pull_request.body }}
+          STARTER:  ${{ github.event.pull_request.user.login }}
+          URL_B:    ${{ github.event.pull_request.head.repo.html_url }}
+          BRANCH_B: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir pr-meta
+          jq -n \
+            --arg pr_id    "$PR_ID" \
+            --arg pr_title "$PR_TITLE" \
+            --arg pr_desc  "${PR_DESC:-}" \
+            --arg starter  "$STARTER" \
+            --arg url_b    "$URL_B" \
+            --arg branch_b "$BRANCH_B" \
+            --arg head_sha "$HEAD_SHA" \
+            '{pr_id:$pr_id, pr_title:$pr_title, pr_desc:$pr_desc, starter:$starter, url_b:$url_b, branch_b:$branch_b, head_sha:$head_sha}' \
+            > pr-meta/meta.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr-meta
+          path: pr-meta/
+          retention-days: 1

@@ -1,0 +1,188 @@
+name: PR Synchronization
+
+# Privileged side of the blue-yellow integration. Runs via workflow_run so it
+# can access secrets even for fork PRs. NEVER check out the PR head SHA in
+# this workflow — fork code must not execute under the secret-bearing token.
+
+on:
+  workflow_run:
+    workflows: ["PR Sync Collect"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_id:
+        description: PR number to trigger against
+        required: true
+
+concurrency:
+  # Serialize per-PR (backend dedupes by pr number; concurrent /start fails).
+  group: pr-sync-${{ github.event.workflow_run.head_branch || inputs.pr_id }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  trigger:
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'pull_request' &&
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      pull-requests: write
+      statuses: write
+      actions: read
+    steps:
+      # Default checkout pulls the base repo at the workflow's ref (safe).
+      # Do not pass ref: head_sha — that would execute fork code.
+      - uses: actions/checkout@v4
+
+      - name: Download PR meta artifact
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-meta
+          path: pr-meta
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Resolve PR context
+        id: ctx
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            f=pr-meta/meta.json
+            PR_ID=$(jq -r '.pr_id // empty'    "$f")
+            PR_TITLE=$(jq -r '.pr_title // empty' "$f")
+            PR_DESC=$(jq -r '.pr_desc // empty'   "$f")
+            STARTER=$(jq -r '.starter // empty'   "$f")
+            URL_B=$(jq -r '.url_b // empty'       "$f")
+            BRANCH_B=$(jq -r '.branch_b // empty' "$f")
+            HEAD_SHA=$(jq -r '.head_sha // empty' "$f")
+          else
+            PR_ID="${{ inputs.pr_id }}"
+            P=$(gh pr view "$PR_ID" --json title,body,author,headRefName,headRefOid,headRepository,headRepositoryOwner)
+            PR_TITLE=$(echo "$P" | jq -r .title)
+            PR_DESC=$(echo  "$P" | jq -r '.body // ""')
+            STARTER=$(echo  "$P" | jq -r .author.login)
+            BRANCH_B=$(echo "$P" | jq -r .headRefName)
+            HEAD_SHA=$(echo "$P" | jq -r .headRefOid)
+            OWNER=$(echo "$P"   | jq -r .headRepositoryOwner.login)
+            REPO=$(echo "$P"    | jq -r .headRepository.name)
+            URL_B="https://github.com/${OWNER}/${REPO}"
+          fi
+
+          # Fork-controlled values: validate before use.
+          [[ "$PR_ID"    =~ ^[0-9]+$ ]]                                            || { echo "invalid PR_ID";   exit 1; }
+          [[ "$URL_B"    =~ ^https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/?$ ]] || { echo "invalid URL_B";   exit 1; }
+          [[ "$BRANCH_B" =~ ^[A-Za-z0-9._/-]+$ ]]                                  || { echo "invalid BRANCH_B"; exit 1; }
+          [[ "$STARTER"  =~ ^[A-Za-z0-9._-]+$ ]]                                   || { echo "invalid STARTER";  exit 1; }
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]                                      || { echo "invalid HEAD_SHA"; exit 1; }
+
+          {
+            echo "pr_id=$PR_ID"
+            echo "starter=$STARTER"
+            echo "url_b=$URL_B"
+            echo "branch_b=$BRANCH_B"
+            echo "head_sha=$HEAD_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+          # PR_TITLE / PR_DESC may contain newlines; pass via env file as multi-line values.
+          {
+            echo "PR_TITLE<<__EOF__"
+            printf '%s\n' "$PR_TITLE"
+            echo "__EOF__"
+            echo "PR_DESC<<__EOF__"
+            printf '%s\n' "$PR_DESC"
+            echo "__EOF__"
+          } >> "$GITHUB_ENV"
+
+      - name: Set commit status (pending)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA:      ${{ steps.ctx.outputs.head_sha }}
+          TARGET:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api -X POST "repos/${{ github.repository }}/statuses/${SHA}" \
+            -f state=pending \
+            -f context='blue-yellow/pipeline' \
+            -f description='Pipeline running' \
+            -f target_url="$TARGET"
+
+      - name: Upsert sticky comment (running)
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          number: ${{ steps.ctx.outputs.pr_id }}
+          header: blue-yellow
+          message: |
+            ⏳ **Blue-Yellow pipeline running** — [view logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+      - name: Trigger pipeline
+        id: run
+        # Advisory: don't fail the workflow on backend errors. Final state is
+        # surfaced via the commit status step below.
+        continue-on-error: true
+        env:
+          BASE_URL:           ${{ secrets.BLUE_YELLOW_BASE_URL }}
+          APP_CODE:           ${{ secrets.BLUE_YELLOW_APP_CODE }}
+          APP_KEY:            ${{ secrets.BLUE_YELLOW_APP_KEY }}
+          APP_SECRET:         ${{ secrets.BLUE_YELLOW_APP_SECRET }}
+          YELLOW_PIPELINE_ID: ${{ vars.YELLOW_PIPELINE_ID }}
+          YELLOW_GROUP_ID:    ${{ vars.YELLOW_GROUP_ID }}
+          URL_Y:              ${{ vars.YELLOW_REPO_URL }}
+          BRANCH_Y:           ${{ vars.YELLOW_BRANCH }}
+          PR_ID:              ${{ steps.ctx.outputs.pr_id }}
+          STARTER:            ${{ steps.ctx.outputs.starter }}
+          URL_B:              ${{ steps.ctx.outputs.url_b }}
+          BRANCH_B:           ${{ steps.ctx.outputs.branch_b }}
+          # PR_TITLE / PR_DESC inherited from $GITHUB_ENV (set in Resolve PR context).
+          STATUS_FILE:        ${{ runner.temp }}/by-status
+        run: |
+          chmod +x scripts/pr-synchronization-trigger.sh
+          scripts/pr-synchronization-trigger.sh
+
+      - name: Read final status
+        if: always()
+        id: final
+        run: |
+          F="${{ runner.temp }}/by-status"
+          if [ -f "$F" ]; then
+            cat "$F" >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "status=UNKNOWN"
+              echo "msg=no status file produced"
+              echo "blueRecordId="
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set commit status (final)
+        if: always() && steps.ctx.outputs.head_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA:      ${{ steps.ctx.outputs.head_sha }}
+          STATE:    ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
+          DESC:     ${{ steps.final.outputs.status }}
+          TARGET:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api -X POST "repos/${{ github.repository }}/statuses/${SHA}" \
+            -f state="$STATE" \
+            -f context='blue-yellow/pipeline' \
+            -f description="${DESC:-UNKNOWN}" \
+            -f target_url="$TARGET"
+
+      - name: Upsert sticky comment (final)
+        if: always()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          number: ${{ steps.ctx.outputs.pr_id }}
+          header: blue-yellow
+          message: |
+            ${{ steps.run.outcome == 'success' && '✅' || '❌' }} **Blue-Yellow pipeline: ${{ steps.final.outputs.status }}**
+
+            - msg: `${{ steps.final.outputs.msg }}`
+            - blueRecordId: `${{ steps.final.outputs.blueRecordId }}`
+            - [run logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})

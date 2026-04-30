@@ -1,0 +1,225 @@
+name: Docs Preview
+
+# Workflow 2 of the docs pipeline.
+#
+# Triggered by the "Docs Build" workflow finishing. Runs in the upstream
+# context (workflow_run always uses the workflow file from the default branch)
+# so it can read OBS_AK/OBS_SK secrets and publish — even when the source build
+# was triggered by a fork PR.
+#
+# Security invariants:
+#   - This workflow MUST NOT checkout PR-submitted code (no `actions/checkout`
+#     with a PR ref). It only consumes the prebuilt artifact as opaque blobs.
+#   - Workflow 1 stays strictly read-only; only this workflow ever touches
+#     secrets or pushes to OBS/GitHub Pages.
+#
+# Two destinations, different roles:
+#   - GitHub Pages: production-only. Push to release/main publishes versioned
+#     docs to ${SLUG}/ on the gh-pages branch.
+#   - OBS: PR previews only (no production mirror). Each PR push deploys to
+#     pr-preview/pr-${PR_NUM}/; closing the PR removes that preview.
+
+on:
+  workflow_run:
+    workflows: ["Documentation"]
+    types: [completed]
+
+permissions:
+  contents: write       # required to push to the gh-pages branch
+  pull-requests: write
+  actions: read
+
+env:
+  OBS_BUCKET: triton-ascend-artifacts
+  OBS_PREVIEW_PREFIX: pr-preview
+  OBS_ENDPOINT: https://obs.cn-southwest-2.myhuaweicloud.com
+  OBS_WEBSITE_BASE: https://triton.osinfra.cn
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    concurrency:
+      group: docs-deploy-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docs-artifact
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifact/
+
+      - name: Read metadata
+        id: meta
+        run: |
+          EVENT=$(cat artifact/_meta/event)
+          SLUG=$(cat artifact/_meta/slug)
+          echo "event=${EVENT}" >> "$GITHUB_OUTPUT"
+          echo "slug=${SLUG}"   >> "$GITHUB_OUTPUT"
+          if [ -f artifact/_meta/pr_number ]; then
+            PR_NUM=$(cat artifact/_meta/pr_number)
+            PR_ACTION=$(cat artifact/_meta/pr_action)
+            SHA=$(cat artifact/_meta/sha)
+            echo "pr_number=${PR_NUM}"    >> "$GITHUB_OUTPUT"
+            echo "pr_action=${PR_ACTION}" >> "$GITHUB_OUTPUT"
+            echo "sha=${SHA}"             >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy to GitHub Pages (production)
+        if: steps.meta.outputs.event != 'pull_request'
+        env:
+          SLUG: ${{ steps.meta.outputs.slug }}
+        run: |
+          REPO_URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          if ! git clone --branch gh-pages --single-branch "${REPO_URL}" gh-pages-repo; then
+            git init gh-pages-repo
+            git -C gh-pages-repo checkout -b gh-pages
+            git -C gh-pages-repo remote add origin "${REPO_URL}"
+          fi
+          cd gh-pages-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          rm -rf "${SLUG}" 2>/dev/null || true
+          cp -r ../artifact/_site/"${SLUG}" ./
+          cp ../artifact/_site/index.html ./
+          python3 - <<'PY'
+          import json, os
+          slug = os.environ["SLUG"]
+          path = "versions.json"
+          if os.path.exists(path):
+              with open(path) as f:
+                  data = json.load(f)
+          else:
+              data = {"default": "main", "versions": []}
+          data.setdefault("versions", [])
+          if not any(v.get("slug") == slug for v in data["versions"]):
+              data["versions"].append({"slug": slug})
+          data["default"] = "main"
+          with open(path, "w") as f:
+              json.dump(data, f, indent=2)
+              f.write("\n")
+          PY
+          git add -A
+          git commit -m "docs: deploy ${SLUG}" || echo "No changes"
+          git push -u origin gh-pages
+
+      - name: Check OBS credentials
+        id: obs-check
+        env:
+          AK: ${{ secrets.OBS_AK }}
+          SK: ${{ secrets.OBS_SK }}
+        run: |
+          if [ -n "${AK}" ] && [ -n "${SK}" ]; then
+            echo "has_obs=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_obs=false" >> "$GITHUB_OUTPUT"
+            echo "OBS_AK / OBS_SK secrets not configured; skipping OBS deployment."
+          fi
+
+      - name: Install obsutil
+        if: steps.obs-check.outputs.has_obs == 'true'
+        env:
+          AK: ${{ secrets.OBS_AK }}
+          SK: ${{ secrets.OBS_SK }}
+        run: |
+          curl -fL "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_amd64.tar.gz" -o obsutil.tar.gz
+          tar xzf obsutil.tar.gz
+          sudo mv obsutil_linux_*/obsutil /usr/local/bin/obsutil
+          obsutil config -i="${AK}" -k="${SK}" -e="${OBS_ENDPOINT}"
+
+      - name: Deploy PR preview to OBS
+        if: steps.obs-check.outputs.has_obs == 'true' && steps.meta.outputs.event == 'pull_request' && steps.meta.outputs.pr_action != 'closed'
+        env:
+          PR_NUM: ${{ steps.meta.outputs.pr_number }}
+          SLUG: ${{ steps.meta.outputs.slug }}
+        run: |
+          PREVIEW_PREFIX="obs://${OBS_BUCKET}/${OBS_PREVIEW_PREFIX}/pr-${PR_NUM}/"
+          # Synthesize a single-slug versions.json so the landing page can auto-redirect
+          # instead of showing "No documentation has been published yet."
+          printf '{"default":"%s","versions":[{"slug":"%s"}]}\n' "${SLUG}" "${SLUG}" \
+            > artifact/_site/versions.json
+          obsutil rm -r -f "${PREVIEW_PREFIX}" || true
+          obsutil cp -r -f -u -flat "artifact/_site/" "${PREVIEW_PREFIX}"
+          obsutil cp -f "artifact/_site/index.html"     "${PREVIEW_PREFIX}index.html"
+          obsutil cp -f "artifact/_site/versions.json"  "${PREVIEW_PREFIX}versions.json"
+
+      - name: Cleanup PR preview from OBS
+        if: steps.obs-check.outputs.has_obs == 'true' && steps.meta.outputs.event == 'pull_request' && steps.meta.outputs.pr_action == 'closed'
+        env:
+          PR_NUM: ${{ steps.meta.outputs.pr_number }}
+        run: |
+          obsutil rm -r -f "obs://${OBS_BUCKET}/${OBS_PREVIEW_PREFIX}/pr-${PR_NUM}/" || true
+
+      - name: Comment preview URL on PR
+        if: steps.meta.outputs.event == 'pull_request' && steps.meta.outputs.pr_action != 'closed'
+        uses: actions/github-script@v7
+        env:
+          PR_NUM: ${{ steps.meta.outputs.pr_number }}
+          SHA: ${{ steps.meta.outputs.sha }}
+          OBS_PREVIEW_BASE: ${{ env.OBS_WEBSITE_BASE }}
+          OBS_PREVIEW_PREFIX: ${{ env.OBS_PREVIEW_PREFIX }}
+        with:
+          script: |
+            const prNum = parseInt(process.env.PR_NUM);
+            const sha = (process.env.SHA || '').slice(0, 7);
+            const url = `${process.env.OBS_PREVIEW_BASE}/${process.env.OBS_PREVIEW_PREFIX}/pr-${prNum}/index.html`;
+            const marker = '<!-- obs-docs-preview -->';
+            const body = [
+              marker,
+              `📖 **Docs preview** for commit \`${sha}\`:`,
+              ``,
+              `🔗 ${url}`,
+              ``,
+              `_Auto-deployed to OBS on every push. Removed when PR is closed._`,
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNum,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNum,
+                body,
+              });
+            }
+
+      - name: Note preview removal on close
+        if: steps.meta.outputs.event == 'pull_request' && steps.meta.outputs.pr_action == 'closed'
+        uses: actions/github-script@v7
+        env:
+          PR_NUM: ${{ steps.meta.outputs.pr_number }}
+        with:
+          script: |
+            const prNum = parseInt(process.env.PR_NUM);
+            const marker = '<!-- obs-docs-preview -->';
+            const body = `${marker}\n🧹 PR closed; preview removed from OBS.`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNum,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            }

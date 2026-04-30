@@ -40,7 +40,14 @@ Triton Ascend
     :maxdepth: 2
     :caption: 典型算子样例
 
-    example/index.md
+    examples/index.md
+    examples/01_vector_add_example.md
+    examples/02_fused_softmax_example.md
+    examples/03_layer_norm_example.md
+    examples/04_fused_attention_example.md
+    examples/05_matrix_multiplication_example.md
+    examples/06_autotune_example.md
+    examples/07_accuracy_comparison_example.md
 
 .. toctree::
     :maxdepth: 2
@@ -66,7 +73,7 @@ Triton Ascend
     :maxdepth: 1
     :caption: 环境变量
 
-    environment_variable.md
+    environment_variable_reference.md
 
 .. toctree::
     :maxdepth: 1

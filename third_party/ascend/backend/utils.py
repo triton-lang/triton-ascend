@@ -439,6 +439,8 @@ def _build_npu_ext(obj_name: str, header_path, src_path, *, kernel_launcher="tor
     # FIXME: check why this condition works wrong in parall scene
     if kernel_launcher == "torch":
         cc_cmd += get_backend_func("get_cc_cmd", build_pch=False)
+        if obj_name == "npu_utils":
+            cc_cmd += ["-DUSE_TORCH_NPU"]
 
     cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-Winvalid-pch", "-o", so_path]
 

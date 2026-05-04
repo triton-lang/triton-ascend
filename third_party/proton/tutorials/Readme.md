@@ -40,8 +40,7 @@ import triton.profiler as proton
 
 # Recommended for Ascend
 session_id = proton.start(
-    "ascend_proton_fat_test",      # profile name (becomes prefix of output file)
-    context="shadow"               # required on Ascend
+    "ascend_proton_fat_test"      # profile name (becomes prefix of output file)
 )
 ```
 
@@ -58,17 +57,17 @@ proton.activate(session_id)     # resume profiling
 #### 3. `proton.scope()` – Define a profiled region with custom metrics (most important!)
 
 ```python
-with proton.scope(
-    name="vector_add [N=67M x 200 iters]",
-    metrics={
+   with proton.scope(f"vector_add [N={N:,} x {ITERATIONS} iters]", {
         "flops": float(N) * ITERATIONS,
         "bytes_loaded": 2 * N * x.element_size() * ITERATIONS,
         "bytes_stored": 1 * N * x.element_size() * ITERATIONS,
         "total_bytes": 3 * N * x.element_size() * ITERATIONS,
         "block_size": BLOCK_SIZE,
-        # You can add any scalar (int/float/0-D tensor)
-    }
-):
+        "duration_ms": elapsed_ms,
+        "tflops": tflops,
+        "gbps": gbps
+    }):
+
     # Your kernel launches here
     for _ in range(ITERATIONS):
         vector_add_kernel[grid](x, y, out, N, BLOCK_SIZE)
@@ -105,51 +104,59 @@ import triton.language as tl
 import triton.profiler as proton
 
 @triton.jit
-def vector_add_kernel(...): ...
+def vector_add_kernel(
+    x_ptr, y_ptr, out_ptr,
+    n: tl.constexpr,
+    BLOCK_SIZE: tl.constexpr
+):
+    pid = tl.program_id(0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n
+    x = tl.load(x_ptr + offsets, mask=mask)
+    y = tl.load(y_ptr + offsets, mask=mask)
+    tl.store(out_ptr + offsets, x + y, mask=mask)
+
 
 def run_proton_test():
-    # 1. Start with shadow context
-    session_id = proton.start("ascend_proton_fat_test", context="shadow")
-
+    proton.start("ascend_proton_fat_test")
     N = 64 * 1024 * 1024
     ITERATIONS = 200
     BLOCK_SIZE = 2048
-
     x = torch.ones(N, device="npu", dtype=torch.float32)
     y = torch.ones(N, device="npu", dtype=torch.float32)
     out = torch.empty_like(x)
-
     grid = (int(triton.cdiv(N, BLOCK_SIZE)),)
-
-    # Warm-up
     for _ in range(20):
         vector_add_kernel[grid](x, y, out, N, BLOCK_SIZE)
-    torch.npu.synchronize()
-
-    # Profile with custom metrics
-    with proton.scope(f"vector_add [N={N:,} x {ITERATIONS} iters]", {
-        "flops": float(N) * ITERATIONS,
-        "bytes_loaded": 2 * N * x.element_size() * ITERATIONS,
-        "bytes_stored": 1 * N * x.element_size() * ITERATIONS,
-        "total_bytes": 3 * N * x.element_size() * ITERATIONS,
-        "block_size": BLOCK_SIZE
-    }):
+        torch.npu.synchronize()
         start_event = torch.npu.Event(enable_timing=True)
         end_event = torch.npu.Event(enable_timing=True)
-        
         start_event.record()
         for _ in range(ITERATIONS):
             vector_add_kernel[grid](x, y, out, N, BLOCK_SIZE)
         end_event.record()
-        
         torch.npu.synchronize()
         elapsed_ms = start_event.elapsed_time(end_event)
-
-        # You can still print your own metrics
-        print(f"✅ Measured: {elapsed_ms:.3f} ms | ...")
-
+        total_flops = float(N) * ITERATIONS
+        total_bytes_gb = 3 * N * x.element_size() * ITERATIONS / 1e9
+        tflops = (total_flops / elapsed_ms / 1e6) if elapsed_ms > 0 else 0
+        gbps = (total_bytes_gb / (elapsed_ms / 1000)) if elapsed_ms > 0 else 0
+        print(f"Measured: {elapsed_ms:.3f} ms | {tflops:.2f} TFLOPS | {gbps:.2f} GB/s")
+        with proton.scope(f"vector_add [N={N:,} x {ITERATIONS} iters]", {
+            "flops": float(N) * ITERATIONS,
+            "bytes_loaded": 2 * N * x.element_size() * ITERATIONS,
+            "bytes_stored": 1 * N * x.element_size() * ITERATIONS,
+            "total_bytes": 3 * N * x.element_size() * ITERATIONS,
+            "block_size": BLOCK_SIZE,
+            "duration_ms": elapsed_ms,
+            "tflops": tflops,
+            "gbps": gbps
+        }):
+            pass
     proton.finalize()
-    print("✅ Proton test finished!")
+    print("Proton test is over!")
+
 
 if __name__ == "__main__":
     run_proton_test()
@@ -168,14 +175,17 @@ After `finalize()`, you get a JSON file (Hatchet format):
       {
         "children": [],
         "frame": { "name": "vector_add [N=67,108,864 x 200 iters]", "type": "function" },
-        "metrics": {
-          "block_size": 2048,
-          "bytes_loaded": 107374182400,
-          "bytes_stored": 53687091200,
-          "flops": 13421772800.0,
-          "total_bytes": 161061273600
-        }
-      }
+                "metrics": {
+                    "block_size": 40960,
+                    "bytes_loaded": 2147483648000,
+                    "bytes_stored": 1073741824000,
+                    "duration_ms": 5561.438415527344,
+                    "flops": 268435456000.0,
+                    "gbps": 11584.155901710412,
+                    "tflops": 965.3463251425343,
+                    "total_bytes": 3221225472000
+                }
+      	 }
     ],
     "frame": { "name": "ROOT", "type": "function" },
     "metrics": { ... }

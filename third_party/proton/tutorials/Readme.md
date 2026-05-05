@@ -253,4 +253,3 @@ For full NPU profiling (operators, CANN stack, AI Core metrics) use Huawei tools
 
 **Happy profiling on Ascend!**  
 If you have more examples or discover new features in newer `triton-ascend` releases, feel free to update this guide.
-

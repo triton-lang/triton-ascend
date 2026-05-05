@@ -1,4 +1,4 @@
-**Proton Profiling Guide for Ascend NPU (via Triton-Ascend)**
+# Proton Profiling Guide for Ascend NPU (via Triton-Ascend)
 
 > `README.md` style documentation for using **Proton** (`triton.profiler`) on Huawei Ascend NPU.
 

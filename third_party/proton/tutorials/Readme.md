@@ -4,7 +4,7 @@
 
 ---
 
-### Overview
+## Overview
 
 **Proton** is Triton's lightweight, hierarchical profiler. It supports call-path profiling, custom software metrics (FLOPs, bytes, etc.), and scopes.
 
@@ -171,11 +171,11 @@ After `finalize()`, you get a JSON file (Hatchet format):
 ```json
 [
   {
-    "children": [
+     "children": [
       {
         "children": [],
         "frame": { "name": "vector_add [N=67,108,864 x 200 iters]", "type": "function" },
-                "metrics": {
+                 "metrics": {
                     "block_size": 40960,
                     "bytes_loaded": 2147483648000,
                     "bytes_stored": 1073741824000,
@@ -185,7 +185,7 @@ After `finalize()`, you get a JSON file (Hatchet format):
                     "tflops": 965.3463251425343,
                     "total_bytes": 3221225472000
                 }
-      	 }
+        }
     ],
     "frame": { "name": "ROOT", "type": "function" },
     "metrics": { ... }
@@ -194,6 +194,7 @@ After `finalize()`, you get a JSON file (Hatchet format):
 ```
 
 **Important limitation on Ascend**:
+
 - No automatic `time` / `duration` metrics.
 - Only the metrics you pass to `proton.scope(...)` appear.
 - Use manual `torch.npu.Event` (as in the example) for wall-time measurement.
@@ -244,6 +245,7 @@ python -m proton your_script.py
 - Only custom metrics from `scope()` are recorded.
 
 For full NPU profiling (operators, CANN stack, AI Core metrics) use Huawei tools:
+
 - `msprof`
 - `torch_npu.profiler.profile`
 
@@ -251,3 +253,4 @@ For full NPU profiling (operators, CANN stack, AI Core metrics) use Huawei tools
 
 **Happy profiling on Ascend!**  
 If you have more examples or discover new features in newer `triton-ascend` releases, feel free to update this guide.
+

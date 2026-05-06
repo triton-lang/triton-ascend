@@ -327,17 +327,20 @@ static PyObject* copyMemory(PyObject* self, PyObject* args) {
 }
 
 #ifdef USE_TORCH_NPU
-extern "C" void* triton_allocate_workspace(uint64_t size) {
+extern "C" void* triton_allocate_workspace(uint64_t size)
+{
   auto tensor = at::empty(size, at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte));
   return const_cast<void*>(tensor.storage().data());
 }
 
-extern "C" void* triton_allocate_sync_block_lock(uint64_t size, void* stream) {
+extern "C" void* triton_allocate_sync_block_lock(uint64_t size, void* stream)
+{
   auto tensor = at_npu::native::allocate_workspace(size, reinterpret_cast<rtStream_t>(stream));
   return const_cast<void*>(tensor.storage().data());
 }
 
-extern "C" void triton_async_launch(void* func_obj, const char* name) {
+extern "C" void triton_async_launch(void* func_obj, const char* name)
+{
   auto& func = *static_cast<std::function<rtError_t()>*>(func_obj);
   at_npu::native::OpCommand cmd;
   cmd.Name(name).SetCustomHandler(func).Run();

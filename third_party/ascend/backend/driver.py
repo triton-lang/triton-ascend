@@ -32,8 +32,6 @@ from triton.runtime.cache import get_cache_manager, get_dump_manager, default_ca
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
 from triton.backends.ascend.utils import (
-    _precompile_npu_hash,
-    _precompile_npu_ext,
     _build_npu_ext,
     _check_cxx11_abi,
     convert_sigtype_to_int,
@@ -64,7 +62,7 @@ class NPUUtils(object):
                 tmp_src_path = os.path.join(tmpdir, "npu_utils.cpp")
                 with open(tmp_src_path, "w") as f:
                     f.write(src)
-                so = _build_npu_ext("npu_utils", None, tmp_src_path)
+                so = _build_npu_ext("npu_utils", tmp_src_path)
                 with open(so, "rb") as f:
                     cache_path = cache.put(f.read(), fname, binary=True)
         import importlib.util
@@ -106,13 +104,12 @@ class NPULauncher(object):
         self.compile_only = os.getenv("TRITON_COMPILE_ONLY", 'false').lower() in ('true', '1')
         self.enable_msprof_register_tensor = os.getenv("TRITON_REGISTER_TENSOR_MSPROF", 'false').lower() in ('true', '1')
         debug_mode = metadata.debug
-        header_src = generate_npu_header_src()
         constants = src.constants if hasattr(src, "constants") else dict()
         cst_key = lambda i: src.fn.arg_names.index(i) if isinstance(i, str) else i
         constants = {cst_key(key): value for key, value in constants.items()}
         signature = {cst_key(key): value for key, value in src.signature.items()}
         wrapper_src = generate_npu_wrapper_src(constants, signature, metadata)
-        so_launcher_path = make_npu_launcher_stub(header_src, wrapper_src, metadata.debug)
+        so_launcher_path = make_npu_launcher_stub(wrapper_src, metadata.debug)
         # setup for remote run
         # TODO: use a var to pack all vars required to run on a remote machine
         self.mix_mode = metadata.mix_mode
@@ -205,56 +202,12 @@ class NPUDriver(DriverBase):
         return get_backend_func("get_empty_tensor", cache_size // 4)
 
 
-def _precompile_npu_ext_with_lock(header_src, enable_precompile):
-    import fcntl
-    precompile_hash = _precompile_npu_hash(header_src)
-    cache = get_cache_manager(precompile_hash)
-    gch_path = cache.get_file("precompiled.h.gch")
-    header_path = cache.get_file("precompiled.h")
-    if enable_precompile: 
-        if header_path is not None and gch_path is not None:
-            return header_path
-    else:
-        if header_path is not None:
-            return header_path
-    cache_dir = os.getenv("TRITON_CACHE_DIR", "").strip() or default_cache_dir()
-    lock_path = os.path.join(cache_dir, f"{precompile_hash}.lock")
-    with open(lock_path, "a+") as f:
-        try:
-            fcntl.flock(f, fcntl.LOCK_EX)
-            header_path = cache.get_file("precompiled.h")
-            if enable_precompile:
-                gch_path = cache.get_file("precompiled.h.gch")
-                if header_path is not None and gch_path is not None:
-                    return header_path
-            else:
-                if header_path is not None:
-                    return header_path
-            header_path = cache.put(header_src, "precompiled.h", binary=False)
-            if not enable_precompile:
-                return header_path
-            src_dir = os.path.dirname(header_path)
-            gch_path = os.path.join(src_dir, "precompiled.h.gch")
-            _precompile_npu_ext(header_path, gch_path)
-            return header_path
-        finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
-    
-
-def make_npu_launcher_stub(header_src, wrapper_src, debug=False):
+def make_npu_launcher_stub(wrapper_src, debug=False):
     """
     Generate the launcher stub to launch the kernel
     """
-    enable_precompile = not os.getenv("TRITON_DISABLE_PRECOMPILE", 'false').lower() in ('true', '1')
-    # if precompile header file and its gch file not exist, do precompile
-    header_path = _precompile_npu_ext_with_lock(header_src, enable_precompile)
-    assert header_path is not None, "the precompiled.h path is empty."
-    
-    # try to get cached file
     so_cache_key = hashlib.sha256(wrapper_src.encode("utf-8")).hexdigest()
     so_cache_manager = get_cache_manager(so_cache_key)
-    # append the cxx11_abi value to the launcher name to avoid
-    # linking to a launcher with wrong cxx11_abi.
     use_cxx11_abi = _check_cxx11_abi()
     name = f"launcher_cxx11abi{use_cxx11_abi}"
     suffix = sysconfig.get_config_var('EXT_SUFFIX')
@@ -262,9 +215,6 @@ def make_npu_launcher_stub(header_src, wrapper_src, debug=False):
 
     if debug:
         dump_manager = get_dump_manager(so_cache_key)
-        if header_path is not None:
-            print(f"Dumping precompiled.h to {dump_manager.cache_dir}")
-            dump_manager.put(header_src, "precompiled.h", binary=False)
         print(f"Dumping {name}.cxx to {dump_manager.cache_dir}")
         dump_manager.put(wrapper_src, f"{name}.cxx", binary = False)
 
@@ -274,12 +224,11 @@ def make_npu_launcher_stub(header_src, wrapper_src, debug=False):
 
     kernel_launcher_type = "torch"
 
-
     with tempfile.TemporaryDirectory() as tmpdir:
         src_path = os.path.join(tmpdir, f"{name}.cxx")
         with open(src_path, "w") as f:
             f.write(wrapper_src)
-        so_path = _build_npu_ext(name, header_path, src_path, kernel_launcher=kernel_launcher_type, precompile=enable_precompile)
+        so_path = _build_npu_ext(name, src_path, kernel_launcher=kernel_launcher_type)
         if debug:
             with open(so_path, "rb") as f:
                 dump_manager.put(f.read(), so_name, binary=True)
@@ -355,49 +304,6 @@ def extract_device_print_code_from_cann():
         read_header('internal/debug_tunnel/tunnel_impl.h')
     ])
 
-
-def generate_npu_header_src():
-    enable_taskqueue = os.getenv(
-        "TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
-    return f"""
-/*
- * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
- * Copyright 2018-2020 Philippe Tillet
- * Copyright 2020-2022 OpenAI
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
-#ifndef TRITON_NPU_HEADERS
-#define TRITON_NPU_HEADERS
-
-#include <assert.h>
-#include <stdbool.h>
-#include <string>
-#include <sys/syscall.h>
-#include <vector>
-#include <Python.h>
-#include "runtime/runtime/rt.h"
-#include <acl/acl.h>
-{get_backend_func("header_file", enable_taskqueue)}
-
-#endif
-"""
 
 # the template is from triton-adapter HEAD. Wrapping the generated kernel binary into a python module
 def generate_npu_wrapper_src(constants, signature, metadata):
@@ -775,12 +681,23 @@ extern "C" {
     ret = rtKernelLaunchWithFlagV2(func, blockNum, &argsInfo, NULL, stream, 0, &cfgInfo);
 """
 
-    precompile_headers = f"""
-#include "precompiled.h"
+    npu_headers = f"""
+#ifndef TRITON_NPU_HEADERS
+#define TRITON_NPU_HEADERS
+#include <assert.h>
+#include <stdbool.h>
+#include <string>
+#include <sys/syscall.h>
+#include <vector>
+#include <Python.h>
+#include "runtime/runtime/rt.h"
+#include <acl/acl.h>
+{get_backend_func("header_file", enable_taskqueue)}
+#endif
 """
 
     return f"""
-{precompile_headers}
+{npu_headers}
 {'#define __CCE_ENABLE_PRINT__' if enable_device_print else ''}
 {extract_device_print_code_from_cann() if enable_device_print else ''}
 #define PY_SSIZE_T_CLEAN

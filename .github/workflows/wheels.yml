@@ -39,16 +39,22 @@ jobs:
       - id: set
         shell: bash
         run: |
-          # For PRs, only build a single wheel for A5 pipelines. For main/schedule/dispatch, build for all platforms.
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            cat <<'EOF' >> "$GITHUB_OUTPUT"
-          matrix={"config":[{"runs_on":"ubuntu-22.04","arch":"x86_64"}],"python":["cp311"]}
-          EOF
+            JSON=$(jq -nc '{
+              config: [{runs_on: "ubuntu-22.04", arch: "x86_64"}],
+              python: ["cp311"]
+            }')
           else
-            cat <<'EOF' >> "$GITHUB_OUTPUT"
-          matrix={"config":[{"runs_on":"ubuntu-22.04","arch":"x86_64"},{"runs_on":"ubuntu-22.04-arm","arch":"aarch64"}],"python":["cp310","cp311","cp312","cp313"]}
-          EOF
+            JSON=$(jq -nc '{
+              config: [
+                {runs_on: "ubuntu-22.04",     arch: "x86_64"},
+                {runs_on: "ubuntu-22.04-arm", arch: "aarch64"}
+              ],
+              python: ["cp310","cp311","cp312","cp313"]
+            }')
           fi
+          echo "matrix=$JSON" >> "$GITHUB_OUTPUT"
+
 
   Build-Wheels:
     needs: Matrix-Prep

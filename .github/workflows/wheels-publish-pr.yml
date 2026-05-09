@@ -212,7 +212,8 @@ jobs:
             write_status "START_FAILURE" "wheel filename not provided (publish skipped or workflow_dispatch input empty)"
             exit 1
           fi
-          OBS_URL="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/triton-ascend/${PR_ID}/${WHEEL_NAME}"
+          WHEEL_NAME_ENC=$(printf '%s' "$WHEEL_NAME" | jq -sRr @uri)
+          OBS_URL="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/triton-ascend/${PR_ID}/${WHEEL_NAME_ENC}"
 
           START_BODY=$(cat <<EOF
           {
@@ -261,10 +262,11 @@ jobs:
               -H "$H_CODE" -H "$H_KEY" -H "$H_SEC" -H "$H_JSON" \
               -X POST "${BASE_URL}/query" -d "${QUERY_BODY}" || true)
             QR=$(cat /tmp/by_query.body 2>/dev/null || true)
-            ST=$(echo "$QR"   | grep -o '"status":"[^"]*"'           | head -1 | cut -d'"' -f4)
-            MSG=$(echo "$QR"  | grep -o '"msg":"[^"]*"'              | head -1 | cut -d'"' -f4)
-            YPURL=$(echo "$QR" | grep -o '"yellowPipelineUrl":"[^"]*"' | head -1 | cut -d'"' -f4)
+            ST=$(printf '%s' "$QR"   | grep -o '"status":"[^"]*"'           | head -1 | cut -d'"' -f4 || true)
+            MSG=$(printf '%s' "$QR"  | grep -o '"msg":"[^"]*"'              | head -1 | cut -d'"' -f4 || true)
+            YPURL=$(printf '%s' "$QR" | grep -o '"yellowPipelineUrl":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
             echo "[#${N}] HTTP=${QHTTP} status=${ST:-pending} msg=${MSG}"
+            echo "  body: ${QR}"
             write_status "${ST:-PENDING}" "${MSG}" "${YPURL}"
             case "${ST}" in
               SUCCESS|FAILURE|MQS_SEND_FAILURE|UNAUTHORIZED|START_FAILURE|TIMEOUT|ABORT)

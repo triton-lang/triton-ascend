@@ -333,4 +333,12 @@ jobs:
       - name: Remove PR wheels from OBS
         env:
           PR_NUM: ${{ github.event.pull_request.number }}
-        run: obsutil/obsutil rm -r -f "obs://triton-ascend-artifacts/triton-ascend/${PR_NUM}/" || true
+        run: |
+          # Guard against a missing/malformed PR_NUM: an empty value would
+          # collapse the URL to .../triton-ascend/ and `rm -rf` would wipe
+          # every PR's wheels. Require a positive integer before proceeding.
+          if [[ ! "${PR_NUM:-}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Refusing to delete: PR_NUM='${PR_NUM:-}' is not a positive integer" >&2
+            exit 1
+          fi
+          obsutil/obsutil rm -r -f "obs://triton-ascend-artifacts/triton-ascend/${PR_NUM}/" || true

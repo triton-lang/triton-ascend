@@ -111,7 +111,8 @@ jobs:
     - name: Install Prerequisites
       shell: bash
       run: |
-        python3 -m pip install cmake ninja sccache
+        python3 -m pip install uv
+        uv pip install cmake ninja sccache
         mkdir -p ${{ env.SCCACHE_DIR }}
         rm -rf ${{ env.SCCACHE_DIR }}/*
 
@@ -125,7 +126,7 @@ jobs:
     - name: Configure, Build, and Install LLVM (Ubuntu)
       if: matrix.config.target-os == 'ubuntu'
       run: >
-        python3 -m pip install -r llvm-project/mlir/python/requirements.txt
+        uv pip install -r llvm-project/mlir/python/requirements.txt
 
         cmake -GNinja -Bllvm-project/build
         -DCMAKE_BUILD_TYPE=Release

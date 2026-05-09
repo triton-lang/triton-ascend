@@ -100,7 +100,8 @@ jobs:
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           MAX_JOBS="$NUM_PROCS" \
           ${PYTHON} setup.py bdist_wheel
-          ${PYTHON} -m pip install dist/*.whl \
+          ${PYTHON} -m pip install uv
+          uv pip install dist/*.whl \
             -i https://repo.huaweicloud.com/repository/pypi/simple/
 
       - name: CCache stats

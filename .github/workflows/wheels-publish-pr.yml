@@ -120,7 +120,6 @@ jobs:
     timeout-minutes: 90
     permissions:
       pull-requests: write
-      statuses: write
     steps:
       # Default checkout pulls the base repo at the workflow's ref (safe).
       # Do not pass ref: head_sha — that would execute fork code.
@@ -162,31 +161,8 @@ jobs:
             echo "__EOF__"
           } >> "$GITHUB_ENV"
 
-      - name: Set commit status (pending)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA:      ${{ steps.ctx.outputs.head_sha }}
-          TARGET:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          gh api -X POST "repos/${{ github.repository }}/statuses/${SHA}" \
-            -f state=pending \
-            -f context='blue-yellow/pipeline' \
-            -f description='Pipeline running' \
-            -f target_url="$TARGET"
-
-      - name: Upsert sticky comment (running)
-        uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          number: ${{ steps.ctx.outputs.pr_id }}
-          header: blue-yellow
-          message: |
-            ⏳ **Blue-Yellow pipeline running** — [view logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-
       - name: Trigger pipeline
         id: run
-        # Advisory: don't fail the workflow on backend errors. Final state is
-        # surfaced via the commit status step below.
-        continue-on-error: true
         env:
           BASE_URL:           ${{ secrets.BLUE_YELLOW_BASE_URL }}
           APP_CODE:           ${{ secrets.BLUE_YELLOW_APP_CODE }}
@@ -318,21 +294,6 @@ jobs:
               echo "yellowPipelineUrl="
             } >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Set commit status (final)
-        if: always() && steps.ctx.outputs.head_sha != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA:      ${{ steps.ctx.outputs.head_sha }}
-          STATE:    ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
-          DESC:     ${{ steps.final.outputs.status }}
-          TARGET:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          gh api -X POST "repos/${{ github.repository }}/statuses/${SHA}" \
-            -f state="$STATE" \
-            -f context='blue-yellow/pipeline' \
-            -f description="${DESC:-UNKNOWN}" \
-            -f target_url="$TARGET"
 
       - name: Upsert sticky comment (final)
         if: always() && steps.ctx.outputs.pr_id != ''

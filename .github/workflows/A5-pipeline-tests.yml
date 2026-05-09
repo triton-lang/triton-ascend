@@ -136,18 +136,14 @@ jobs:
           # Title/body are mutable by the PR author at any time — same race
           # the original artifact collector had.
           P=$(gh pr view "$PR_ID" --repo "${{ github.repository }}" \
-                --json title,body,baseRefName,headRefOid)
+                --json title,body,baseRefName)
           PR_TITLE=$(echo "$P" | jq -r .title)
           PR_DESC=$(echo  "$P" | jq -r '.body // ""')
           BRANCH_B=$(echo "$P" | jq -r .baseRefName)
-          HEAD_SHA=$(echo "$P" | jq -r .headRefOid)
-          URL_B="${{ github.server_url }}/${{ github.repository }}"
 
           {
             echo "pr_id=$PR_ID"
-            echo "url_b=$URL_B"
             echo "branch_b=$BRANCH_B"
-            echo "head_sha=$HEAD_SHA"
           } >> "$GITHUB_OUTPUT"
 
           # PR_TITLE / PR_DESC may contain newlines; pass via env file as multi-line values.
@@ -170,7 +166,7 @@ jobs:
           YELLOW_PIPELINE_ID: ${{ vars.YELLOW_PIPELINE_ID }}
           YELLOW_GROUP_ID:    ${{ vars.YELLOW_GROUP_ID }}
           PR_ID:              ${{ steps.ctx.outputs.pr_id }}
-          URL_B:              ${{ steps.ctx.outputs.url_b }}
+          URL_B:              ${{ github.server_url }}/${{ github.repository }}
           BRANCH_B:           ${{ steps.ctx.outputs.branch_b }}
           # workflow_run path: from publish job output. workflow_dispatch: from input.
           WHEEL_NAME:         ${{ inputs.wheel_name || needs.publish.outputs.wheel_name }}

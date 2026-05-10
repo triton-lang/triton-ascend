@@ -304,7 +304,7 @@ def allocate_memory(size, stream):
 @backend_strategy_registry.register("mindspore", "allocate_sync_block_lock")
 def allocate_sync_block_lock(size, stream):
     return f'''auto sync_ptr = std::make_shared<mindspore::kernel::pyboost::MemBlock>(device_context, {size}, reinterpret_cast<uint64_t>({stream}));
-    syncBlockLock_ptr = work_ptr->ptr_;'''
+    syncBlockLock_ptr = sync_ptr->ptr_;'''
 
 
 @backend_strategy_registry.register("torch_npu", "allocate_sync_block_lock")

@@ -38,6 +38,7 @@
 #include <torch_npu/csrc/core/npu/NPUWorkspaceAllocator.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <functional>
+#include <mutex>
 #endif
 
 // Use map to differentiate same name functions from different binary
@@ -327,15 +328,25 @@ static PyObject* copyMemory(PyObject* self, PyObject* args) {
 }
 
 #ifdef USE_TORCH_NPU
+static std::mutex retained_tensor_mutex;
+static std::vector<at::Tensor> retained_tensors;
+
+static void retainTensor(const at::Tensor &tensor) {
+  std::lock_guard<std::mutex> guard(retained_tensor_mutex);
+  retained_tensors.push_back(tensor);
+}
+
 extern "C" void* triton_allocate_workspace(uint64_t size)
 {
   auto tensor = at::empty(size, at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte));
+  retainTensor(tensor);
   return const_cast<void*>(tensor.storage().data());
 }
 
 extern "C" void* triton_allocate_sync_block_lock(uint64_t size, void* stream)
 {
   auto tensor = at_npu::native::allocate_workspace(size, reinterpret_cast<rtStream_t>(stream));
+  retainTensor(tensor);
   return const_cast<void*>(tensor.storage().data());
 }
 

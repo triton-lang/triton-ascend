@@ -310,8 +310,11 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     import os
     workspace_size = int(metadata.workspace_size) \
                           if hasattr(metadata, 'workspace_size') else -1
-    lock_init_value = int(metadata.lock_init_value) \
-                          if hasattr(metadata, 'lock_init_value') else 0
+    lock_init_value = int(
+        metadata.lock_init_value if hasattr(metadata, 'lock_init_value')
+        else metadata.lock_init_val if hasattr(metadata, 'lock_init_val')
+        else 0
+    )
     lock_num = int(metadata.lock_num) \
                           if hasattr(metadata, 'lock_num') else -1
     bs_task_type = metadata.bs_task_type if hasattr(metadata, 'bs_task_type') else 0

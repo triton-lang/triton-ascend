@@ -204,6 +204,14 @@ def get_cc_cmd():
 
 @backend_strategy_registry.register("torch_npu", "get_cc_cmd")
 def get_cc_cmd():
+    return [
+        f"-D_GLIBCXX_USE_CXX11_ABI={get_torch_cxx_abi()}",
+        "-ldl",
+    ]
+
+
+@backend_strategy_registry.register("torch_npu", "get_cc_cmd_npu_utils")
+def get_cc_cmd_npu_utils():
     import torch
     import torch_npu
     torch_path = os.path.dirname(os.path.realpath(torch.__file__))
@@ -214,6 +222,7 @@ def get_cc_cmd():
         f"-D_GLIBCXX_USE_CXX11_ABI={get_torch_cxx_abi()}",
         f"-L{os.path.join(torch_npu_path, 'lib')}",
         f"-ltorch_npu",
+        "-DUSE_TORCH_NPU",
     ]
     return cc_cmd
 

@@ -13,7 +13,7 @@ name: A5 Pipeline Tests
 
 on:
   workflow_run:
-    workflows: ["Wheels"]
+    workflows: ["A5 Wheels Build"]
     types: [completed]
   pull_request_target:
     types: [closed]
@@ -39,7 +39,6 @@ jobs:
   publish:
     if: >-
       github.event_name == 'workflow_run' &&
-      github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:

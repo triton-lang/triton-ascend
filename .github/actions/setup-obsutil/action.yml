@@ -1,0 +1,44 @@
+name: Setup obsutil
+description: >
+  Download obsutil into the calling job's workspace and configure it against
+  the southwest-2 endpoint. Leaves the binary at obsutil/obsutil (relative to
+  the workspace) for subsequent steps to invoke.
+
+inputs:
+  ak:
+    description: OBS access key (typically secrets.OBS_AK)
+    required: true
+  sk:
+    description: OBS secret key (typically secrets.OBS_SK)
+    required: true
+  arch:
+    description: Runner CPU arch — amd64 or arm64
+    required: false
+    default: amd64
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        AK: ${{ inputs.ak }}
+        SK: ${{ inputs.sk }}
+        ARCH: ${{ inputs.arch }}
+      run: |
+        if [ -z "${AK}" ] || [ -z "${SK}" ]; then
+          echo "setup-obsutil: ak/sk inputs are empty."
+          exit 1
+        fi
+
+        curl -fL "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${ARCH}.tar.gz" -o obsutil.tar.gz
+
+        file obsutil.tar.gz | grep -q gzip || {
+          echo "obsutil.tar.gz is not a gzip file"
+          exit 1
+        }
+
+        tar xzf obsutil.tar.gz
+        rm -f obsutil.tar.gz
+        mv obsutil_linux_* obsutil
+
+        obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-southwest-2.myhuaweicloud.com

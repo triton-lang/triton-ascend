@@ -1,0 +1,354 @@
+name: A5 Pipeline Tests
+# Combined orchestration after Wheels finishes (or on PR close):
+#   publish: download wheel artifact → upload to obs://.../triton-ascend/<N>/
+#   trigger: needs publish; calls blue-yellow /start and polls /query
+#   cleanup: removes obs://.../triton-ascend/<N>/ when the PR closes
+#
+# Manually triggerable via workflow_dispatch to re-run the blue-yellow side
+# alone (skips publish; assumes the wheel + manifest already on OBS).
+#
+# All paths run in base-repo context, so secrets are available even for fork
+# PRs. NEVER check out the PR head SHA — fork code must not execute under
+# the secret-bearing token.
+
+on:
+  workflow_run:
+    workflows: ["A5 Wheels Build"]
+    types: [completed]
+  pull_request_target:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr_id:
+        description: PR number to (re)trigger blue-yellow against
+        required: true
+      wheel_name:
+        description: Wheel filename on OBS (e.g. triton_ascend-...whl). Required for manual re-trigger; auto-filled by publish job on the workflow_run path.
+        required: false
+
+concurrency:
+  # Pick whichever identifier the active event provides; cancel-in-progress
+  # is false because /start is non-idempotent (a cancelled task can collide
+  # with a follow-up one).
+  group: pr-pipeline-${{ inputs.pr_id || github.event.workflow_run.head_sha || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      pr_num: ${{ steps.pr.outputs.num }}
+      wheel_name: ${{ steps.wheel.outputs.name }}
+    steps:
+      # Sparse checkout: only the composite action is needed; no source tree.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions/setup-obsutil
+
+      - name: Resolve PR number
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          NUM=$(gh api "/repos/${{ github.repository }}/pulls?state=open&head=${HEAD_OWNER}:${HEAD_BRANCH}" \
+                  --jq 'if length > 0 then .[0].number else empty end')
+          if [ -z "${NUM}" ]; then
+            echo "No open PR found for ${HEAD_OWNER}:${HEAD_BRANCH}; nothing to publish."
+            exit 0
+          fi
+          echo "num=${NUM}" >> "$GITHUB_OUTPUT"
+
+      - name: Download wheel artifact
+        if: steps.pr.outputs.num != ''
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cibw-wheels-*
+          path: wheelhouse
+          merge-multiple: true
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve wheel filename
+        id: wheel
+        if: steps.pr.outputs.num != ''
+        # PR build matrix produces a single wheel; capture its filename and
+        # forward it to the trigger job via job outputs (no need to upload a
+        # separate manifest to OBS — yellow pipeline reads obs_url directly).
+        run: echo "name=$(basename wheelhouse/*.whl)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup obsutil
+        if: steps.pr.outputs.num != ''
+        uses: ./.github/actions/setup-obsutil
+        with:
+          ak: ${{ secrets.OBS_AK }}
+          sk: ${{ secrets.OBS_SK }}
+
+      - name: Upload to OBS
+        if: steps.pr.outputs.num != ''
+        env:
+          PR_NUM: ${{ steps.pr.outputs.num }}
+        run: |
+          DEST="obs://triton-ascend-artifacts/triton-ascend/${PR_NUM}/"
+          obsutil/obsutil cp -u wheelhouse/*.whl "$DEST"
+
+  trigger:
+    needs: publish
+    # Run after publish on the workflow_run path, OR alone on workflow_dispatch.
+    # !cancelled() lets us proceed when publish was skipped (workflow_dispatch).
+    if: |
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'workflow_run' &&
+         needs.publish.result == 'success' &&
+         needs.publish.outputs.pr_num != '')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      pull-requests: write
+      statuses: write
+    steps:
+      # Default checkout pulls the base repo at the workflow's ref (safe).
+      # Do not pass ref: head_sha — that would execute fork code.
+      - uses: actions/checkout@v4
+
+      - name: Resolve PR context
+        id: ctx
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # workflow_dispatch → input; workflow_run → publish output.
+          PR_ID: ${{ inputs.pr_id || needs.publish.outputs.pr_num }}
+        run: |
+          set -euo pipefail
+
+          # Title/body are mutable by the PR author at any time — same race
+          # the original artifact collector had.
+          P=$(gh pr view "$PR_ID" --repo "${{ github.repository }}" \
+                --json title,body,baseRefName,headRefOid)
+          PR_TITLE=$(echo "$P" | jq -r .title)
+          PR_DESC=$(echo  "$P" | jq -r '.body // ""')
+          BRANCH_B=$(echo "$P" | jq -r .baseRefName)
+          HEAD_SHA=$(echo "$P" | jq -r .headRefOid)
+
+          {
+            echo "pr_id=$PR_ID"
+            echo "branch_b=$BRANCH_B"
+            echo "head_sha=$HEAD_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+          # PR_TITLE / PR_DESC may contain newlines; pass via env file as multi-line values.
+          {
+            echo "PR_TITLE<<__EOF__"
+            printf '%s\n' "$PR_TITLE"
+            echo "__EOF__"
+            echo "PR_DESC<<__EOF__"
+            printf '%s\n' "$PR_DESC"
+            echo "__EOF__"
+          } >> "$GITHUB_ENV"
+
+      - name: Set commit status (pending)
+        if: steps.ctx.outputs.head_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA:      ${{ steps.ctx.outputs.head_sha }}
+          TARGET:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api -X POST "repos/${{ github.repository }}/statuses/${SHA}" \
+            -f state=pending \
+            -f context='A5 Pipeline Tests' \
+            -f description='Pipeline running' \
+            -f target_url="$TARGET"
+
+      - name: Trigger pipeline
+        id: run
+        env:
+          BASE_URL:           ${{ secrets.BLUE_YELLOW_BASE_URL }}
+          APP_CODE:           ${{ secrets.BLUE_YELLOW_APP_CODE }}
+          APP_KEY:            ${{ secrets.BLUE_YELLOW_APP_KEY }}
+          APP_SECRET:         ${{ secrets.BLUE_YELLOW_APP_SECRET }}
+          YELLOW_PIPELINE_ID: ${{ vars.YELLOW_PIPELINE_ID }}
+          YELLOW_GROUP_ID:    ${{ vars.YELLOW_GROUP_ID }}
+          PR_ID:              ${{ steps.ctx.outputs.pr_id }}
+          URL_B:              ${{ github.server_url }}/${{ github.repository }}
+          BRANCH_B:           ${{ steps.ctx.outputs.branch_b }}
+          # workflow_run path: from publish job output. workflow_dispatch: from input.
+          WHEEL_NAME:         ${{ inputs.wheel_name || needs.publish.outputs.wheel_name }}
+          # PR_TITLE / PR_DESC inherited from $GITHUB_ENV (set in Resolve PR context).
+          STATUS_FILE:        ${{ runner.temp }}/by-status
+        run: |
+          # Blue/Yellow cross-region pipeline trigger.
+          # Flow: POST /start -> poll /query -> exit on terminal status (SUCCESS=0).
+          set -euo pipefail
+
+          H_CODE="X-Apig-AppCode: ${APP_CODE}"
+          H_KEY="AppKey: ${APP_KEY}"
+          H_SEC="AppSecret: ${APP_SECRET}"
+          H_JSON="Content-Type: application/json"
+
+          TS=$(date +%Y%m%d%H%M%S)
+          BRI="pr-${PR_ID}-${TS}"
+          BTI="task-${PR_ID}-${TS}"
+
+          write_status(){
+            # $3 (yellowPipelineUrl) only populated on terminal SUCCESS; blank otherwise.
+            printf 'status=%s\nmsg=%s\nblueRecordId=%s\nyellowPipelineUrl=%s\n' \
+              "$1" "$2" "$BRI" "${3:-}" > "$STATUS_FILE"
+          }
+
+          json_escape(){
+            python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()),end="")'
+          }
+
+          PR_TITLE_J=$(printf '%s' "${PR_TITLE}"   | json_escape)
+          PR_DESC_J=$(printf  '%s' "${PR_DESC:-}"  | json_escape)
+
+          # WHEEL_NAME comes from publish job output (workflow_run) or from the
+          # workflow_dispatch input. If empty, the upstream produced no wheel
+          # or the operator forgot to provide one for manual re-trigger.
+          if [ -z "${WHEEL_NAME:-}" ]; then
+            echo "WHEEL_NAME is empty"
+            write_status "START_FAILURE" "wheel filename not provided (publish skipped or workflow_dispatch input empty)"
+            exit 1
+          fi
+          WHEEL_NAME_ENC=$(printf '%s' "$WHEEL_NAME" | jq -sRr @uri)
+          OBS_URL="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/triton-ascend/${PR_ID}/${WHEEL_NAME_ENC}"
+
+          START_BODY=$(cat <<EOF
+          {
+            "bluePipelineId": "null",
+            "blueRecordId": "${BRI}",
+            "blueRecordTaskId": "${BTI}",
+            "blueRecordTaskName": "PR-${PR_ID}-CI",
+            "yellowPipelineId": "${YELLOW_PIPELINE_ID}",
+            "yellowGroupId": "${YELLOW_GROUP_ID}",
+            "starter": "z00856207",
+            "branch": "main",
+            "parameter": {
+              "pr": "${PR_ID}",
+              "title": ${PR_TITLE_J},
+              "description": ${PR_DESC_J},
+              "url_b": "${URL_B}",
+              "branch_b": "${BRANCH_B}",
+              "obs_url": "${OBS_URL}"
+            }
+          }
+          EOF
+          )
+          # /start is non-idempotent: do not auto-retry (a 502 retry can collide
+          # with the already-accepted task and surface as "task already exists").
+          R=$(curl -sS --max-time 30 \
+            -o /tmp/by_start.body -w '%{http_code}' \
+            -H "$H_CODE" -H "$H_KEY" -H "$H_SEC" -H "$H_JSON" \
+            -X POST "${BASE_URL}/start" -d "${START_BODY}" || true)
+          BODY=$(cat /tmp/by_start.body 2>/dev/null || true)
+          echo "HTTP=${R} response: ${BODY}"
+          if [ "$R" != "200" ] || ! echo "$BODY" | grep -q '"code":200'; then
+            write_status "START_FAILURE" "HTTP=${R} body=${BODY}"
+            exit 1
+          fi
+
+          QUERY_BODY=$(cat <<EOF
+          {"blueRecordId":"${BRI}","blueRecordTaskId":"${BTI}"}
+          EOF
+          )
+
+          ST=""; MSG=""; DONE=false
+          for ((N=1; N<=240; N++)); do
+            sleep 15
+            QHTTP=$(curl -sS --retry 3 --retry-all-errors --retry-delay 5 \
+              -o /tmp/by_query.body -w '%{http_code}' \
+              -H "$H_CODE" -H "$H_KEY" -H "$H_SEC" -H "$H_JSON" \
+              -X POST "${BASE_URL}/query" -d "${QUERY_BODY}" || true)
+            QR=$(cat /tmp/by_query.body 2>/dev/null || true)
+            ST=$(printf '%s' "$QR"   | grep -o '"status":"[^"]*"'           | head -1 | cut -d'"' -f4 || true)
+            MSG=$(printf '%s' "$QR"  | grep -o '"msg":"[^"]*"'              | head -1 | cut -d'"' -f4 || true)
+            YPURL=$(printf '%s' "$QR" | grep -o '"yellowPipelineUrl":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+            echo "[#${N}] HTTP=${QHTTP} status=${ST:-pending} msg=${MSG}"
+            echo "  body: ${QR}"
+            write_status "${ST:-PENDING}" "${MSG}" "${YPURL}"
+            case "${ST}" in
+              SUCCESS|FAILURE|MQS_SEND_FAILURE|UNAUTHORIZED|START_FAILURE|TIMEOUT|ABORT)
+                DONE=true; break;;
+            esac
+          done
+
+          if [ "$DONE" != "true" ]; then
+            write_status "TIMEOUT" "polling exceeded 240 attempts without a terminal status"
+            exit 1
+          fi
+          echo "terminal status: ${ST} - ${MSG}"
+          [ "$ST" = "SUCCESS" ] || exit 1
+
+      - name: Read final status
+        if: always() && steps.ctx.outputs.pr_id != ''
+        id: final
+        run: |
+          F="${{ runner.temp }}/by-status"
+          if [ -f "$F" ]; then
+            cat "$F" >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "status=UNKNOWN"
+              echo "msg=no status file produced"
+              echo "blueRecordId="
+              echo "yellowPipelineUrl="
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set commit status (final)
+        if: always() && steps.ctx.outputs.head_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA:      ${{ steps.ctx.outputs.head_sha }}
+          STATE:    ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
+          DESC:     ${{ steps.final.outputs.status }}
+          TARGET:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api -X POST "repos/${{ github.repository }}/statuses/${SHA}" \
+            -f state="$STATE" \
+            -f context='A5 Pipeline Tests' \
+            -f description="${DESC:-UNKNOWN}" \
+            -f target_url="$TARGET"
+
+  cleanup:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    # pull_request_target runs in base-repo context, so secrets are available
+    # even for fork PRs. The default checkout ref under this trigger is the
+    # base branch (never PR head), so we can safely load the local composite
+    # action without executing fork-supplied code.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions/setup-obsutil
+
+      - uses: ./.github/actions/setup-obsutil
+        with:
+          ak: ${{ secrets.OBS_AK }}
+          sk: ${{ secrets.OBS_SK }}
+
+      - name: Remove PR wheels from OBS
+        env:
+          PR_NUM: ${{ github.event.pull_request.number }}
+        run: |
+          # Guard against a missing/malformed PR_NUM: an empty value would
+          # collapse the URL to .../triton-ascend/ and `rm -rf` would wipe
+          # every PR's wheels. Require a positive integer before proceeding.
+          if [[ ! "${PR_NUM:-}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Refusing to delete: PR_NUM='${PR_NUM:-}' is not a positive integer" >&2
+            exit 1
+          fi
+          obsutil/obsutil rm -r -f "obs://triton-ascend-artifacts/triton-ascend/${PR_NUM}/" || true

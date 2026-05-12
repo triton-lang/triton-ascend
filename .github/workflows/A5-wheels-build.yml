@@ -1,0 +1,85 @@
+name: A5 Wheels Build
+
+on:
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
+      - 'MANIFEST.in'
+      - '.gitignore'
+      - '.github/CODEOWNERS'
+      - '.github/dependabot.yml'
+      - 'cmake/llvm-hash.txt'
+      - 'third_party/ascend/llvm_patch/**'
+      - 'docker/**'
+      - 'requirements.txt'
+      - 'requirements_dev.txt'
+      - '.github/workflows/build-docker-image.yml'
+      - '.github/workflows/create_release.yml'
+      - '.github/workflows/documentation.yml'
+      - '.github/workflows/llvm-build.yml'
+      - '.github/workflows/llvm-build/**'
+      - '.github/workflows/pre-commit.yml'
+      - '.github/workflows/runner-preparation.yml'
+
+concurrency:
+  group: wheels-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  Build-Wheels:
+    timeout-minutes: 360
+    runs-on: linux-amd64-cpu-16
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:8.5.0-910b-ubuntu22.04-py3.11-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: "true"
+
+      - name: Add git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache build dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.triton/llvm
+            ~/.triton/json
+            ${{ github.workspace }}/.ccache
+          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-wheels-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'third_party/ascend/llvm_patch/*.patch') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-wheels
+
+      - name: Build and install triton-ascend
+        shell: bash
+        env:
+          TRITON_BUILD_WITH_CCACHE: "true"
+          TRITON_BUILD_WITH_CLANG_LLD: "TRUE"
+          TRITON_DISABLE_LINE_INFO: 1
+          CCACHE_COMPRESS: "true"
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          TRITON_BUILD_WITH_O1: true
+          TRITON_BUILD_PROTON: OFF
+          TRITON_WHEEL_NAME: triton-ascend
+          TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=ON"
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --zero-stats
+          NUM_PROCS=$(( $(nproc) / 3 ))
+          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          MAX_JOBS="$NUM_PROCS" \
+          python setup.py bdist_wheel --dist-dir=./wheelhouse
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-manylinux_2_28_x86_64-wheels-upload
+          path: ./wheelhouse/*.whl

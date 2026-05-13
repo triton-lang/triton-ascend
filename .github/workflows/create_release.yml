@@ -21,6 +21,10 @@ jobs:
     if: ${{ github.repository == 'triton-lang/triton-ascend' }}
     name: Create Release
     runs-on: ubuntu-latest
+    env:
+      UV_INDEX_STRATEGY: "unsafe-best-match"
+      UV_NO_CACHE: 1
+      UV_SYSTEM_PYTHON: 1
     permissions:
       contents: write
     outputs:

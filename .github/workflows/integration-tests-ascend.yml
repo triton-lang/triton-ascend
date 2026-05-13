@@ -24,6 +24,10 @@ jobs:
     env:
       PROTON_SKIP_PC_SAMPLING_TEST: 1
       PYTHON: "python${{ matrix.python_version }}"
+      UV_INDEX_URL: "https://repo.huaweicloud.com/repository/pypi/simple/"
+      UV_INDEX_STRATEGY: "unsafe-best-match"
+      UV_NO_CACHE: 1
+      UV_SYSTEM_PYTHON: 1
 
     steps:
       - name: Checkout

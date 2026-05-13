@@ -28,6 +28,10 @@ jobs:
     name: Build on ${{ matrix.config.runner }}
     runs-on: ${{ matrix.config.runs_on }}
     timeout-minutes: 240
+    env:
+      UV_INDEX_STRATEGY: "unsafe-best-match"
+      UV_NO_CACHE: 1
+      UV_SYSTEM_PYTHON: 1
 
     strategy:
       fail-fast: true

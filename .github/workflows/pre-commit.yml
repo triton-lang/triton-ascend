@@ -7,6 +7,10 @@ jobs:
   pre-commit:
     name: pre-commit (code formatting)
     runs-on: ubuntu-latest
+    env:
+      UV_INDEX_STRATEGY: "unsafe-best-match"
+      UV_NO_CACHE: 1
+      UV_SYSTEM_PYTHON: 1
     steps:
       - name: Checkout
         uses: actions/checkout@v4

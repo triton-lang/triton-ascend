@@ -1,0 +1,92 @@
+
+/*
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/AddBlockIdForControlOps.h"
+#include "llvm/Support/Debug.h"
+
+using namespace mlir;
+#define DEBUG_TYPE "add-block-id-for-control-ops"
+#define LOG_DEBUG(msg) LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << msg)
+
+using namespace mlir::triton;
+
+// Pass Entry Point
+// Pass 入口点
+void AddBlockIdForControlOpsPass::runOnOperation() {
+  LOG_DEBUG("\n--- enter InterCoreTransferAndSyncPass --->\n");
+  ModuleOp module = getOperation();
+
+  // Step 1: find the max block_id
+  int maxBlockId = -1;
+  module.walk([&](Operation *op) {
+    if (auto attr = op->getAttrOfType<IntegerAttr>("ssbuffer.block_id")) {
+      int currentId = attr.getInt();
+      if (currentId > maxBlockId) {
+        maxBlockId = currentId;
+      }
+    }
+  });
+
+  LOG_DEBUG("[InterCoreTransferAndSyncPass] maxBlockId: " << maxBlockId << "\n");
+
+  // Step 2: add block_id for control flow ops
+  module.walk([&](Operation *op) {
+
+    // skip op with block_id
+    if (op->getAttrOfType<IntegerAttr>("ssbuffer.block_id")) {
+      return;
+    }
+
+    if (isa<scf::ForOp, scf::IfOp, scf::WhileOp>(op)) {
+      maxBlockId++;
+      op->setAttr("ssbuffer.block_id",
+                  IntegerAttr::get(IntegerType::get(module.getContext(), 32), maxBlockId));
+      LOG_DEBUG("Added block_id " << maxBlockId << " to " << *op << "\n");
+    }
+  });
+
+  LOG_DEBUG("Finished adding block_ids for control flow ops.\n");
+  
+  // IR validity verification
+  if (failed(module.verify())) {
+    module.emitError("AddBlockIdForControlOps: generated invalid IR");
+    signalPassFailure();
+  }
+}
+
+// Create the pass
+namespace mlir {
+namespace triton {
+
+std::unique_ptr<OperationPass<ModuleOp>> createAddBlockIdForControlOpsPass()
+{
+    return std::make_unique<AddBlockIdForControlOpsPass>();
+}
+
+void registerAddBlockIdForControlOpsPasses()
+{
+  registerPass([]() -> std::unique_ptr<mlir::Pass> { return createAddBlockIdForControlOpsPass(); });
+}
+
+} // namespace triton
+} // namespace mlir

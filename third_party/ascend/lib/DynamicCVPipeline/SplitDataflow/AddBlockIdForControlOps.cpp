@@ -1,4 +1,3 @@
-
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
  *
@@ -25,15 +24,16 @@
 #include "llvm/Support/Debug.h"
 
 using namespace mlir;
-#define DEBUG_TYPE "add-block-id-for-control-ops"
-#define LOG_DEBUG(msg) LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << msg)
+
+static constexpr const char *DEBUG_TYPE = "add-block-id-for-control-ops";
+#define LOG_DEBUG(...) LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__)
 
 using namespace mlir::triton;
 
 // Pass Entry Point
-// Pass 入口点
-void AddBlockIdForControlOpsPass::runOnOperation() {
-  LOG_DEBUG("\n--- enter InterCoreTransferAndSyncPass --->\n");
+void AddBlockIdForControlOpsPass::runOnOperation()
+{
+  LOG_DEBUG("\n--- enter AddBlockIdForControlOpsPass --->\n");
   ModuleOp module = getOperation();
 
   // Step 1: find the max block_id
@@ -47,11 +47,10 @@ void AddBlockIdForControlOpsPass::runOnOperation() {
     }
   });
 
-  LOG_DEBUG("[InterCoreTransferAndSyncPass] maxBlockId: " << maxBlockId << "\n");
+  LOG_DEBUG("maxBlockId: " << maxBlockId << "\n");
 
   // Step 2: add block_id for control flow ops
   module.walk([&](Operation *op) {
-
     // skip op with block_id
     if (op->getAttrOfType<IntegerAttr>("ssbuffer.block_id")) {
       return;
@@ -59,19 +58,14 @@ void AddBlockIdForControlOpsPass::runOnOperation() {
 
     if (isa<scf::ForOp, scf::IfOp, scf::WhileOp>(op)) {
       maxBlockId++;
+      static constexpr int kIntegerBitWidth = 32;
       op->setAttr("ssbuffer.block_id",
-                  IntegerAttr::get(IntegerType::get(module.getContext(), 32), maxBlockId));
+                  IntegerAttr::get(IntegerType::get(module.getContext(), kIntegerBitWidth), maxBlockId));
       LOG_DEBUG("Added block_id " << maxBlockId << " to " << *op << "\n");
     }
   });
 
-  LOG_DEBUG("Finished adding block_ids for control flow ops.\n");
-  
-  // IR validity verification
-  if (failed(module.verify())) {
-    module.emitError("AddBlockIdForControlOps: generated invalid IR");
-    signalPassFailure();
-  }
+  LOG_DEBUG("\n--- exit AddBlockIdForControlOpsPass --->\n");
 }
 
 // Create the pass

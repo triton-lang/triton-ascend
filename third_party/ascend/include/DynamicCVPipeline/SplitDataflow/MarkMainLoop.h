@@ -29,27 +29,25 @@
 
 namespace mlir {
 namespace triton {
-
 // Define pass
 // Pass for marking the main computation loop in the module
-// 用于标记模块中主计算循环的 Pass
 class MarkMainLoopPass : public PassWrapper<MarkMainLoopPass, OperationPass<ModuleOp>> {
 public:
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(MarkMainLoopPass)
+    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(MarkMainLoopPass)
 
-  MarkMainLoopPass() = default;
+    MarkMainLoopPass() = default;
 
-  // Run the pass
-  void runOnOperation() override;
+    // Run the pass
+    void runOnOperation() override;
 
-  // Return the pass argument name
-  static constexpr ::llvm::StringRef getArgumentName() { return "mark-main-loop"; }
-  ::llvm::StringRef getArgument() const override { return "mark-main-loop"; }
-  ::llvm::StringRef getDescription() const override
-  {
-      return "Mark main computation loops with main_loop attribute";
-  }
-  ::llvm::StringRef getName() const override { return "MarkMainLoopPass"; }
+    // Return the pass argument name
+    static constexpr ::llvm::StringRef getArgumentName() { return "mark-main-loop"; }
+    ::llvm::StringRef getArgument() const override { return "mark-main-loop"; }
+    ::llvm::StringRef getDescription() const override
+    {
+        return "Mark main computation loops with main_loop attribute";
+    }
+    ::llvm::StringRef getName() const override { return "MarkMainLoopPass"; }
 
 private:
 };

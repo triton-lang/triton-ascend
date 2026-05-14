@@ -8,6 +8,7 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Tools/mlir-opt/MlirOptMain.h"
 #include "mlir/Pass/PassManager.h"
+#include "ascend/include/DynamicCVPipeline/AddDynamicCVPipeline.h"
 
 #include "ascend/include/AutoBlockify/Passes.h"
 #include "ascend/include/TritonToStructured/Passes.h"
@@ -353,6 +354,13 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
  	   
   m.def("add_dag_ssbuffer", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::createDAGSSBufferPass());});
+
+  m.def("add_dynamic_cv_pipeline", [](mlir::PassManager &pm,
+    bool compileOn91095) {
+      AddDynamicCVPipelineOptions opts;
+      opts.compileOn91095 = compileOn91095;
+      pm.addPass(mlir::triton::createAddDynamicCVPipelinePass(opts));
+    });
 }
 
 // Forward declaration for ascend_ir bindings (defined in ascend_ir.cc)

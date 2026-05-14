@@ -871,6 +871,8 @@ class NPUOptions:
     enable_persistent: bool = False
     optimize_epilogue: bool = False
     enable_fp_fusion: bool = True
+    launch_cooperative_grid: bool = False
+    backend_name: str = 'cann'
     allow_fp8e4nv: bool = False
     auto_tile_and_bind_subblock: bool = True
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")

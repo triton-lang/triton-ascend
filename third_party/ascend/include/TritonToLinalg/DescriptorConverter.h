@@ -45,6 +45,7 @@ struct Descriptor {
     Value base;
     SmallVector<Value> shape;
     SmallVector<Value> strides;
+    triton::PaddingOptionAttr padding;
 };
 
 bool hasATensorDescriptorType(mlir::TypeRange types);

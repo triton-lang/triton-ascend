@@ -53,7 +53,7 @@ torch_npu支持u8。
 
 ```python
 @triton.jit
-def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
+def fn_npu_(output_ptr, x_ptr,
             XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr,
             XNUMEL: tl.constexpr, YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):
     xoffs = tl.program_id(0) * XB
@@ -67,7 +67,6 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
     idx = xidx[:, None, None] * YNUMEL * ZNUMEL + yidx[None, :, None] * ZNUMEL + zidx[None, None, :]
 
     X = tl.load(x_ptr + idx)
-    Y = tl.load(y_ptr + idx)
 
     ret = tl.sqrt_rn(X)
 

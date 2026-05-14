@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+﻿# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@ import hashlib
 import glob
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -39,12 +40,14 @@ from triton.backends.ascend.utils import (
     _enable_unpublished_feature,
     _enable_print_ub_bits,
     _enable_dump_memory_info,
+    _enable_msdebug,
     _get_kernel_target,
     _get_llvm_path,
     _get_mlir_path,
     _get_npucompiler_path,
     _get_triton_adapter_opt_path,
     _get_triton_mlir_opt_path,
+    _get_triton_opt_path,
     _get_bishengir_opt_path,
     _is_ascend_sanitizer_enabled,
     _is_debug_line_info_disabled,
@@ -52,6 +55,7 @@ from triton.backends.ascend.utils import (
     downgrade_llir,
     force_disable_ffts,
     triton_enable_libdevice_simt,
+    get_cann_version,
 )
 from triton.backends.ascend.driver import (
     NPUUtils
@@ -162,6 +166,29 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             enable_select_analysis,
             compile_on_910_95
         )
+        if metadata["enable_dynamic_cv_pipeline"]:
+            ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
+
+        _val = metadata.get("intra_cache_num")
+        if _val is not None:
+            ascend.passes.ttir.set_buffer_count(0, _val)
+
+        _val = metadata.get("inter_cache_num")
+        if _val is not None:
+            ascend.passes.ttir.set_buffer_count(1, _val)
+
+        _val = metadata.get("load_cache_num")
+        if _val is not None:
+            ascend.passes.ttir.set_buffer_count(2, _val)
+
+        if opt.debug:
+            # Print the equivalent triton-opt command line so the pass
+            # pipeline can be reproduced and debugged outside of Python.
+            cmd = [_get_triton_opt_path(), src_path,
+                   f"--pass-pipeline={pm.get_pipeline_str()}",
+                   "--mlir-print-debuginfo", "-o", dst_path]
+            print(f"[DEBUG] cmd list: {shlex.join(cmd)}")
+
         pm.run(mod)
 
         if opt.debug:
@@ -186,7 +213,7 @@ def linalg_to_bc_by_triton_mlir_opt(linalg: str, metadata, opt):
         ttadapter_path = os.path.join(tmpdir, "kernel.ttadapter.mlir")
         bc_path = os.path.join(tmpdir, "kernel.mlirbc")
         Path(ttadapter_path).write_text(linalg)
-        
+
         triton_mlir_opt_path = _get_triton_mlir_opt_path()
 
         # The --emit-bytecode flag ensures output is in BC format
@@ -206,7 +233,7 @@ def linalg_to_bc_by_triton_mlir_opt(linalg: str, metadata, opt):
         # Read bytecode as binary before temp directory is cleaned up
         with open(bc_path, "rb") as f:
             bc_data = f.read()
-        
+
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])
             dump_manager.put(bc_data, "kernel.mlirbc", binary=True)
@@ -238,6 +265,7 @@ def bc_to_linalg_by_bishengir_opt(bc_data: bytes, metadata, opt):
             [
                 bishengir_opt_path,
                 bc_path,
+                "--mlir-print-debuginfo",
                 "-o",
                 mlir_path,
             ],
@@ -249,7 +277,7 @@ def bc_to_linalg_by_bishengir_opt(bc_data: bytes, metadata, opt):
 
         # Read the generated MLIR text
         linalg_text = Path(mlir_path).read_text()
-        
+
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])
             dump_manager.put(linalg_text, "kernel.mlir", binary=False)
@@ -393,10 +421,17 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         callback_path = os.path.join(tmpdir, "libkernel.so")
         _compile_option_list = get_common_bishengir_compile_options(metadata)
 
-        multibuffer = metadata["multibuffer"]
-        if multibuffer is not None:
+        multibuffer = metadata.get("multibuffer")
+        num_stages = metadata.get("num_stages")
+
+        if multibuffer is not None or num_stages is not None:
+            multi_buffer_value = True
+            if multibuffer is not None and not multibuffer:
+                multi_buffer_value = False
+            elif num_stages is not None and num_stages == 1:
+                multi_buffer_value = False
             _compile_option_list += [
-                f"--enable-auto-multi-buffer={multibuffer}",
+                f"--enable-auto-multi-buffer={multi_buffer_value}",
             ]
 
         disable_tightly_coupled_buffer_reuse = metadata["disable_tightly_coupled_buffer_reuse"]
@@ -472,7 +507,13 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--append-bisheng-options=-mllvm --cce-vf-remove-membar={enable_cce_vf_remove_membar}"]
 
-        if metadata["enable_vf_fusion"]:
+        # TEMP: Allow TRITON_ENABLE_VF_FUSION env var to override metadata configuration
+        env_vf = os.getenv("TRITON_ENABLE_VF_FUSION")
+        enable_vf_fusion = (
+            env_vf.lower() in ("true", "1", "yes") if env_vf is not None
+            else metadata.get("enable_vf_fusion", False)
+        )
+        if enable_vf_fusion:
             _compile_option_list += ["--enable-vf-fusion"]
 
         enable_drop_unit_dims = metadata["enable_drop_unit_dims"]
@@ -509,8 +550,14 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 _compile_option_list += \
                     [f"--link-aicore-bitcode={bitcode}"]
 
+        enable_auto_blockify = metadata["enable_auto_blockify"]
         if _is_auto_map_parallel_blocks_enabled():
-            _compile_option_list += ["--enable-auto-blockify-loop"]
+            if (enable_auto_blockify is None or enable_auto_blockify):
+                _compile_option_list += ["--enable-auto-blockify-loop"]
+        else:
+            if enable_auto_blockify:
+                _compile_option_list += ["--enable-auto-blockify-loop"]
+
         npu_compiler_path, env = _get_npucompiler_path()
         if npu_compiler_path.endswith("bishengir-compile"):
             _compile_option_list += [
@@ -527,7 +574,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += ["--disable-hfusion-vectorize=true"]
 
         if opt.debug:
-            _compile_option_list += ["--bishengir-print-ir-after=hivm-inject-sync"]
+            _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
         cmd_list = (
             [npu_compiler_path, ttadapter_path]
@@ -535,7 +582,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             + ["-o", bin_file]
         )
         vf_merge_level = metadata["vf_merge_level"]
-        if vf_merge_level is not None:
+        if vf_merge_level is not None and vf_merge_level != 1:
             cmd_list += [f"--enable-vf-merge-level={vf_merge_level}"]
 
         hfusion_enable_multiple_consumer_fusion = metadata["hfusion_enable_multiple_consumer_fusion"]
@@ -604,16 +651,27 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             f"--target={NPUUtils().get_arch()}",
         ]
 
-        multibuffer = metadata["multibuffer"]
-        if multibuffer is not None:
-            _compile_option_list += [
-                f"--enable-auto-multi-buffer={multibuffer}",
-            ]
+        multibuffer = metadata.get("multibuffer")
+        num_stages = metadata.get("num_stages")
+
+        if multibuffer is not None or num_stages is not None:
+            multi_buffer_value = True
+            if multibuffer is not None and not multibuffer:
+                multi_buffer_value = False
+            elif num_stages is not None and num_stages == 1:
+                multi_buffer_value = False
+            _compile_option_list.append(f"--enable-auto-multi-buffer={multi_buffer_value}")
 
         enable_ubuf_saving = metadata["enable_ubuf_saving"]
         if enable_ubuf_saving is not None:
             _compile_option_list += [
                 f"--enable-ubuf-saving={enable_ubuf_saving}",
+            ]
+
+        enable_preload = metadata["enable_preload"]
+        if enable_preload is not None:
+            _compile_option_list += [
+                f"--enable-preload={enable_preload}",
             ]
 
         _compile_option_list += [
@@ -630,6 +688,10 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
 
         if _enable_dump_memory_info():
             _compile_option_list += ["--enable-memory-display=true"]
+
+        if _enable_msdebug():
+            _compile_option_list += ["--enable-ms-debug=true"]
+
 
         enable_hivm_auto_cv_balance = metadata["enable_hivm_auto_cv_balance"]
         if enable_hivm_auto_cv_balance is not None:
@@ -729,7 +791,8 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             ]
 
         if opt.debug:
-            _compile_option_list += ["--bishengir-print-ir-after=hivm-inject-sync"]
+            _compile_option_list += ["--mlir-print-ir-after-failure"]
+            _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
         cmd_list = (
             [npu_compiler_path, ttadapter_path]
             + _compile_option_list
@@ -791,7 +854,7 @@ class NPUOptions:
     cluster_dims: tuple = (1, 1, 1)
     num_warps: int = 32
     num_ctas: int = 1
-    num_stages: int = 1
+    num_stages: int = 1 if is_compile_on_910_95 else 2
     warp_size: int = 32
     num_buffers_warp_spec: int = 0
     num_consumer_groups: int = 0
@@ -799,6 +862,7 @@ class NPUOptions:
     reg_inc_consumer: int = 0
 
     auto_blockify_size: int = 1
+    enable_auto_blockify: bool = None
     compile_on_910_95: bool = is_compile_on_910_95
     optimize_dynamic_offset: bool = False
     enable_mask_fallback_conversion: bool = False
@@ -809,7 +873,6 @@ class NPUOptions:
     enable_fp_fusion: bool = True
     allow_fp8e4nv: bool = False
     auto_tile_and_bind_subblock: bool = True
-    vf_merge_level: int = 0
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")
     deprecated_fp8_dtypes: Tuple[str] = ()
     vf_merge_level: int = 1
@@ -821,6 +884,7 @@ class NPUOptions:
 
     multibuffer: bool = not is_compile_on_910_95
     enable_ubuf_saving: bool = None
+    enable_preload: bool = None
     enable_auto_bind_sub_block: bool = None
     disable_tightly_coupled_buffer_reuse: bool = False
     enable_select_analysis: bool = True
@@ -845,7 +909,9 @@ class NPUOptions:
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
     enable_vf_fusion: bool = False
+    # todo: this code will be removed in version 530.
     add_auto_scheduling: bool = False
+    enable_dynamic_cv_pipeline: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = False
 
     stream: int = None
@@ -896,6 +962,7 @@ class NPUOptions:
 
     def hash(self):
         key = "_".join([f"{name}-{val}" for name, val in self.__dict__.items()])
+        key = "_".join([key, get_cann_version()])
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
@@ -937,6 +1004,17 @@ def ttir_to_npubin(mod, metadata, opt):
                     _compile_option_list += [
                         f"--append-bisheng-options={bisheng_options}"
                     ]
+
+            # Enable SIMT auto-blockify if user opted in, or if the env var is
+            # set and the user didn't explicitly opt out (matches the SIMD path
+            # at line ~541).
+            enable_auto_blockify = opt.enable_auto_blockify
+            if _is_auto_map_parallel_blocks_enabled():
+                if enable_auto_blockify is None or enable_auto_blockify:
+                    _compile_option_list += ["--enable-auto-blockify-loop"]
+            else:
+                if enable_auto_blockify:
+                    _compile_option_list += ["--enable-auto-blockify-loop"]
 
         npu_compiler_path, env = _get_npucompiler_path()
         cmd_list = (

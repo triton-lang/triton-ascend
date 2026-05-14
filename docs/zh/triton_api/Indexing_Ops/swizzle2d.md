@@ -21,7 +21,7 @@ triton.language.swizzle2d(i, j, size_i, size_j, size_g)
 | `size_g`        | `int`          | 整型                                                      |
 
 返回值：
-`out0，out1`：同i，j shape的张量
+`out0, out1`：同i, j shape的张量
 
 ### 2.2 OP 规格
 
@@ -49,9 +49,10 @@ triton.language.swizzle2d(i, j, size_i, size_j, size_g)
 
 ### 2.4 使用方法
 
-以下示例实现了对输入张量 `x` 做逐元素指数（以2为底）：
+以下示例将行优先矩阵的索引按每 `size_g` 行一组转换为列优先矩阵的索引：
 
-```python@triton.jit@triton.jit@triton.jit@triton.jit
+```python
+@triton.jit
 def fn_npu_(out0, out1, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr):
     i = tl.arange(0, XB)[:, None]
     j = tl.arange(0, YB)[None, :]

@@ -16,7 +16,7 @@ triton.language.min(input, axis=None, return_indices=False, return_indices_tie_b
 | :---: | :---: | --- |
 | `input` | `tensor` | 输入的张量数据 |
 | `axis`   | `int` | 指定在哪个维度上进行规约 |
-| `keep_dims` | `bool` | 保持规约后的维度 |
+| `keep_dims` | `bool` | 如果为True，保留被规约的维度(大小为1) |
 | `return_indices` | `bool` | True返回最小值的同时返回最小值相关所在下标 |
 | `return_indices_tie_break_left` | `bool` | True如果多个元素有相同的最小值，返回最左侧最小值的下标。|
 
@@ -51,7 +51,7 @@ triton.language.min(input, axis=None, return_indices=False, return_indices_tie_b
 || uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
 |---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
 |GPU| √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
-|Ascend A2/A3| √ | √ | x | √ | × | √ | × | √ | √ | √ | √ | √ |
+|Ascend A2/A3| √ | √ | × | √ | × | √ | × | √ | √ | √ | √ | √ |
 
 #### 2.2.2 Shape 支持
 

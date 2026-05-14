@@ -22,7 +22,7 @@ CLA签署地址 [sign](https://clasign.osinfra.cn/sign/690ca9ddf91c03dee6082ab1)
 <h2 id="入门.md">入门</h2>
 
 - 在[GitCode](https://gitcode.com/Ascend/triton-ascend)上Fork Triton Ascend存储库。
-- 阅读[README.md](https://gitcode.com/Ascend/triton-ascend/blob/master/README.md)获取项目信息和构建开发环境。
+- 阅读[README.md](https://gitcode.com/Ascend/triton-ascend/blob/main/README_zh.md)获取项目信息和构建开发环境。
 
 <h2 id="开发指导.md">开发指导</h2>
 
@@ -70,12 +70,12 @@ git remote add upstream https://gitcode.com/Ascend/triton-ascend.git
 为避免多个分支间的不一致问题，请创建新的本地开发分支进行新特性的开发：
 
 ```shell
-git checkout -b {new_branch_name} origin/master
+git checkout -b {new_branch_name} upstream/main
 git fetch upstream #Fetch the latest code from the upstream repository
-git rebase upstream/master #Rebase onto the latest upstream
+git rebase upstream/main #Rebase onto the latest upstream
 ```
 
-以master分支为例，Triton Ascend可能会根据需要创建版本分支或下游开发分支。当您创建完分支&同步上游master分支更新后，就可以开始开发您的代码了。
+以main分支为例，Triton Ascend可能会根据需要创建版本分支或下游开发分支。当您创建完分支&同步上游main分支更新后，就可以开始开发您的代码了。
 
 4、代码更改自测
 
@@ -97,7 +97,7 @@ git push origin {your_new_branch_name}
 
 6、向Triton Ascend主仓创建拉取请求
 
-代码推送至您的远程仓库后，您需要在您的新分支和Triton Ascend master分支之间新建Pull Request。完成新建合并请求后，“Jenkins CI“将自动设置为您构建流水线测试。您的Pull Request请尽快合并到上游master分支，以降低合并风险。
+代码推送至您的远程仓库后，您需要在您的新分支和Triton Ascend main分支之间新建Pull Request。完成新建合并请求后，“Jenkins CI“将自动设置为您构建流水线测试。您的Pull Request请尽快合并到上游main分支，以降低合并风险。
 
 提交PR后流水线执行命令流程
 

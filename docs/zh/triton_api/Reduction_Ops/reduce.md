@@ -2,7 +2,7 @@
 
 ## 1. OP 概述
 
-简介：`triton.language.reduce` 将输入tensor根据提供轴axis，应用combine_fn计算，返回计算完的tensor。
+简介：`triton.language.reduce` 沿指定轴 `axis` 对输入 tensor 应用 `combine_fn` 进行规约，返回规约后的结果张量。
 
 ```python
 triton.language.reduce(input, axis, combine_fn, keep_dims=False, _semantic=None, _generator=None)
@@ -18,13 +18,13 @@ triton.language.reduce(input, axis, combine_fn, keep_dims=False, _semantic=None,
 | `axis` | `int` 或 `None` | 沿着哪个维度进行reduce操作。如果为None，则reduce所有维度 |
 | `combine_fn` | `Callable` | 用于组合两个标量tensor组的函数（必须用@triton.jit标记） |
 | `keep_dims` | `bool` | 如果为True，保持被reduce的维度为长度1 |
-| `_semantic` | `Optional[str]` | （保留参数，暂不支持外部调用 |
+| `_semantic` | `Optional[str]` | 保留参数，暂不支持外部调用 |
 | `_generator` | `Optional[Generator]` | 保留参数，暂不支持外部调用 |
 
 **注意**：此函数也可以作为tensor的成员函数调用，如 `x.reduce(...)` 而不是 `reduce(x, ...)`
 
 返回值：
-`tensor`：将输入tensor根据提供的轴axis，应用combine_fn计算，返回计算完的tensor。
+`tensor`：沿指定轴 `axis` 规约后的结果张量。
 
 ### 2.2 支持规格
 

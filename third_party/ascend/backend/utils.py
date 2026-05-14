@@ -28,7 +28,7 @@ import subprocess
 import sysconfig
 from pathlib import Path
 import logging
-from platform import python_version
+import platform
 from triton.tools.get_ascend_devices import is_compile_on_910_95
 from triton.backends.ascend.backend_register import backend_strategy_registry
 
@@ -151,40 +151,53 @@ def _get_llvm_path(path: str, *paths) -> str:
     return os.path.join(root_path, path, *paths)
 
 
+def _get_tool_path(tool_name: str) -> str:
+    """
+    Get the path to a Triton tool binary.
+    Search order:
+      1. Installed package location (triton/_C/)
+      2. TRITON_BUILD_DIR environment variable
+      3. System PATH
+    """
+    try:
+        import triton._C.libtriton as libtriton
+        tool_path = os.path.join(os.path.dirname(libtriton.__file__), tool_name)
+        if os.path.exists(tool_path) and os.access(tool_path, os.X_OK):
+            return tool_path
+    except (ImportError, AttributeError):
+        pass
+    
+    build_path = os.getenv("TRITON_BUILD_DIR", "")
+    if build_path:
+        tool_path = os.path.join(build_path, "bin", tool_name)
+        if os.path.exists(tool_path) and os.access(tool_path, os.X_OK):
+            return tool_path
+    
+    tool_path = shutil.which(tool_name)
+    if tool_path:
+        return tool_path
+    
+    raise EnvironmentError(
+        f"Could not find {tool_name} tool. "
+        f"It should be installed in triton/_C/ directory or available in PATH."
+    )
+
+
+def _get_triton_opt_path() -> str:
+    """
+    Get the path to triton-opt tool.
+    This tool is used to convert ttir to ttadapter.
+    """
+    return _get_tool_path("triton-opt")
+
+
 def _get_triton_mlir_opt_path() -> str:
     """
     Get the path to triton-mlir-opt tool.
     This tool is used to convert MLIR to Bytecode format, supporting both
     MLIR native ops and AscendNPU-IR custom ops.
     """
-    # First, try to find it in the installed package location
-    # triton/_C/ is where the extension module is installed
-    try:
-        import triton._C.libtriton as libtriton
-        libtriton_path = os.path.dirname(libtriton.__file__)
-        tool_path = os.path.join(libtriton_path, "triton-mlir-opt")
-        if os.path.exists(tool_path) and os.access(tool_path, os.X_OK):
-            return tool_path
-    except (ImportError, AttributeError):
-        pass
-    
-    # Fallback: try to find it in the build directory
-    # This is useful during development
-    build_path = os.getenv("TRITON_BUILD_DIR", "")
-    if build_path:
-        tool_path = os.path.join(build_path, "bin", "triton-mlir-opt")
-        if os.path.exists(tool_path) and os.access(tool_path, os.X_OK):
-            return tool_path
-    
-    # Last resort: try to find it in PATH
-    tool_path = shutil.which("triton-mlir-opt")
-    if tool_path:
-        return tool_path
-    
-    raise EnvironmentError(
-        "Could not find triton-mlir-opt tool. "
-        "It should be installed in triton/_C/ directory or available in PATH."
-    )
+    return _get_tool_path("triton-mlir-opt")
 
 
 def _get_bishengir_opt_path() -> str:
@@ -328,6 +341,10 @@ def _enable_print_ub_bits() -> bool:
 
 def _enable_dump_memory_info() -> bool:
     return os.getenv("TRITON_MEMORY_DISPLAY", "false").lower() in ("true", "1")
+
+
+def _enable_msdebug() -> bool:
+    return os.getenv("LLVM_EXTRACT_DI_LOCAL_VARIABLES", "false").lower() in ("true", "1")
 
 
 def _get_cxx():
@@ -623,3 +640,41 @@ def triton_support_ffts():
 def triton_enable_libdevice_simt():
     enable_libdevice_simt = os.getenv("TRITON_ENABLE_LIBDEVICE_SIMT", False)
     return enable_libdevice_simt
+
+
+def get_cann_version():
+    ascend_path = _get_ascend_path()
+    arch = get_machine_arch()
+    cann_version_file_path = os.path.join(ascend_path, arch + "-linux", "ascend_toolkit_install.info")
+    if not os.path.exists(cann_version_file_path):
+        cann_version_file_path = os.path.join(ascend_path, arch + "-linux", "ascend_all_cann_install.info")
+    version = ""
+    innerversion = ""
+    with open(cann_version_file_path) as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("version="):
+                version = line.split('=')[1]
+            elif line.startswith("innerversion="):
+                innerversion = line.split('=')[1]
+    if version and innerversion:
+        return "CANN-" + version + "-" + innerversion
+    if version:
+        return "CANN-" + version
+    raise ValueError(f"get_cann_version is empty!")
+
+
+def get_machine_arch():
+    ARCHITECTURE_ALIASES = {
+        "x86_64": "x86_64",
+        "amd64": "x86_64",
+        "i386": "x86_64",
+        "i686": "x86_64",
+        "arm64": "aarch64",
+        "aarch64": "aarch64",
+        "armv7l": "aarch64",
+        "armv8l": "aarch64",
+        "arm": "aarch64",
+    }
+    system_arch = platform.machine()
+    return ARCHITECTURE_ALIASES[system_arch]

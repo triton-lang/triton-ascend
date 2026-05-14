@@ -51,7 +51,8 @@ triton.language.core.__lshift__(
 
 > 相对社区能力缺失且无法实现
 
-Ascend 对比 GPU 缺失uint的支持能力，并且输入右参数为tensor时不支持。
+1. Ascend 相比 GPU 缺失 uint 类型支持。
+2. 右操作数 `other` 仅支持标量，不支持 tensor（即 `x << 2` 合法，`x << y`（`y` 为 tensor）暂不支持）。
 
 ### 2.4 使用方法
 

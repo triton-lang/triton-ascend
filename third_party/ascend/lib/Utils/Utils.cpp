@@ -22,6 +22,7 @@
 
 #include "ascend/include/Utils/Utils.h"
 
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -34,6 +35,7 @@
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Transforms/DialectConversion.h"
 
@@ -1085,6 +1087,7 @@ OpFoldResult getOpFoldResultOfLayoutInfo(Value value, OpBuilder &builder) {
 FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue value,
                                                    Type type, OpBuilder &b) {
   mlir::Type f16Ty = Float16Type::get(b.getContext());
+  mlir::Type bf16Ty = BFloat16Type::get(b.getContext());
   mlir::Type f32Ty = Float32Type::get(b.getContext());
   mlir::Type i8TySL = IntegerType::get(
       b.getContext(), 8, IntegerType::SignednessSemantics::Signless);
@@ -1115,6 +1118,11 @@ FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue value,
   llvm::APFloat halfMax = llvm::APFloat::getInf(llvm::APFloat::IEEEhalf());
   llvm::APFloat halfMin =
       llvm::APFloat::getInf(llvm::APFloat::IEEEhalf(), true);
+    llvm::APFloat bfloatZero = llvm::APFloat::getZero(llvm::APFloat::BFloat());
+    llvm::APFloat bfloatOne(llvm::APFloat::BFloat(), 1);
+    llvm::APFloat bfloatMax = llvm::APFloat::getInf(llvm::APFloat::BFloat());
+    llvm::APFloat bfloatMin =
+      llvm::APFloat::getInf(llvm::APFloat::BFloat(), true);
   llvm::APFloat floatZero = llvm::APFloat::getZero(llvm::APFloat::IEEEsingle());
   llvm::APFloat floatOne(llvm::APFloat::IEEEsingle(), 1);
   llvm::APFloat floatMax = llvm::APFloat::getInf(llvm::APFloat::IEEEsingle());
@@ -1127,6 +1135,7 @@ FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue value,
            llvm::APFloat>>
       initMap = {
           {{TypelessValue::Zero, toPtr(f16Ty)}, halfZero},
+          {{TypelessValue::Zero, toPtr(bf16Ty)}, bfloatZero},
           {{TypelessValue::Zero, toPtr(f32Ty)}, floatZero},
           {{TypelessValue::Zero, toPtr(i16TySL)}, (int16_t)0},
           {{TypelessValue::Zero, toPtr(i16TyS)}, (int16_t)0},
@@ -1138,6 +1147,7 @@ FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue value,
           {{TypelessValue::Zero, toPtr(i64TyS)}, (int64_t)0},
           {{TypelessValue::Zero, toPtr(i64TyU)}, (int64_t)0},
           {{TypelessValue::Min, toPtr(f16Ty)}, halfMin},
+          {{TypelessValue::Min, toPtr(bf16Ty)}, bfloatMin},
           {{TypelessValue::Min, toPtr(f32Ty)}, floatMin},
           {{TypelessValue::Min, toPtr(i16TySL)},
            std::numeric_limits<int16_t>::min()},
@@ -1158,6 +1168,7 @@ FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue value,
           {{TypelessValue::Min, toPtr(i64TyU)},
            std::numeric_limits<int64_t>::min()},
           {{TypelessValue::Max, toPtr(f16Ty)}, halfMax},
+          {{TypelessValue::Max, toPtr(bf16Ty)}, bfloatMax},
           {{TypelessValue::Max, toPtr(f32Ty)}, floatMax},
           {{TypelessValue::Max, toPtr(i16TySL)},
            std::numeric_limits<int16_t>::max()},
@@ -1198,6 +1209,9 @@ FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue value,
   if (isa<Float16Type>(type))
     return success(
         FloatAttr::get(f16Ty, std::get<llvm::APFloat>(initMap.at(key))));
+  if (isa<BFloat16Type>(type))
+    return success(
+        FloatAttr::get(bf16Ty, std::get<llvm::APFloat>(initMap.at(key))));
   if (isa<Float32Type>(type))
     return success(
         FloatAttr::get(f32Ty, std::get<llvm::APFloat>(initMap.at(key))));
@@ -1305,5 +1319,17 @@ RankedTensorType getExtractSlicedType(ArrayRef<OpFoldResult> shape,
     }
   }
   return RankedTensorType::get(targetShape, elemType);
+}
+
+bool checkStructureAnnotated(Operation* op, RewriterBase& rewriter)
+{
+  return llvm::any_of(op->getUsers(), [&rewriter](Operation *user) {
+    auto annotationOp = dyn_cast<annotation::MarkOp>(user);
+    if (annotationOp && annotationOp->hasAttr(ConverterUtils::continuousAttrName)) {
+      rewriter.eraseOp(annotationOp);
+      return true;
+    }
+    return false;
+  });
 }
 } // namespace mlir

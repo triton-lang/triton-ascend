@@ -23,8 +23,12 @@
 #include "TritonToUnstructure/OffsetAnalysis.h"
 #include "Utils/Utils.h"
 
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "triton/Dialect/Triton/IR/Types.h"
 
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "triton-offset-analysis"
@@ -239,6 +243,11 @@ void parse(Value operand, const Location &loc, RewriterBase &rewriter,
         parseExtractSlice(extractSliceOp, loc, rewriter, offsetMap);
       } else if (auto insertSliceOp = dyn_cast<tensor::InsertSliceOp>(defOp)) {
         parseInsertSlice(insertSliceOp, loc, rewriter, offsetMap);
+      } else if (auto customOp = dyn_cast<hivm::CustomOp>(defOp)) {
+        auto opResult = dyn_cast<OpResult>(operand);
+        assert(opResult && "Expected operand to be an OpResult");
+        unsigned resultIdx = opResult.getResultNumber();
+        parseCustomOp(customOp, loc, rewriter, offsetMap, resultIdx);
       }
     }
   } else if (auto blockArgument = dyn_cast<BlockArgument>(operand)) {
@@ -1154,6 +1163,41 @@ void parseIntToPtr(triton::IntToPtrOp op, const Location &loc,
   auto dst = op.getResult();
   offsetMap[dst] = PtrOffsetInfo(dst);
   offsetMap[dst].setScalarLike(true);
+}
+
+void parseCustomOp(hivm::CustomOp op, const Location &loc, RewriterBase &rewriter,
+                   llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap, unsigned int resultIdx)
+{
+    for (auto operand : op.getInputs()) {
+        parse(operand, op->getLoc(), rewriter, offsetMap);
+    }
+    auto dst = op->getResult(resultIdx);
+    offsetMap[dst] = PtrOffsetInfo();
+    auto tensorType = dyn_cast<RankedTensorType>(dst.getType());
+    if (!tensorType) {
+        if (isa<triton::PointerType>(dst.getType())) {
+            offsetMap[dst].setPtr(dst);
+            offsetMap[dst].setZeroOffset();
+        } else if (isa<IntegerType>(dst.getType())) {
+            offsetMap[dst].setOffset(dst);
+        } else {
+            emitError(loc) << "Unsupported return type for hivm.custom: " << dst.getType();
+        }
+        return;
+    }
+    if (llvm::isa<triton::PointerType>(tensorType.getElementType())) {
+      if (checkStructureAnnotated(op, rewriter)) {
+        auto srcValArrayAttr = op->getAttrOfType<DenseI32ArrayAttr>(ConverterUtils::customSrcPtrIndexAttrName);
+        assert(srcValArrayAttr && "structure hivm.custom op should present src tensor<tt.ptr>");
+        auto srcValArray = srcValArrayAttr.asArrayRef();
+        assert(srcValArray[resultIdx] != -1 && "tensor<tt.ptr> result should map to src tensor<tt.ptr>");
+        auto srcOffsetInfo = offsetMap[op->getOperand(srcValArray[resultIdx])];
+        offsetMap[dst] = srcOffsetInfo;
+        return;
+      }
+      emitError(loc) << "Unsupported return unstructure RankedTensor of tt.ptr for hivm.custom: " << dst;
+    }
+    offsetMap[dst].setUnstructured(tensorType.getRank());
 }
 
 } // namespace triton

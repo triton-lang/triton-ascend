@@ -54,20 +54,28 @@
 ### 2.5 使用方法
 
 ```python
+import torch
 import triton
 import triton.language as tl
 
 @triton.jit
-def expand_dims_example():
+def expand_dims_example(out_ptr):
     # 创建2x3的张量
     x = tl.zeros([2, 3], dtype=tl.float32)
 
     # 在axis=1位置插入维度，变成2x1x3
     y = tl.expand_dims(x, axis=1)
 
-    return y
+    # 将结果写回外部张量
+    offs = (
+        tl.arange(0, 2)[:, None, None] * 3
+        + tl.arange(0, 1)[None, :, None] * 3
+        + tl.arange(0, 3)[None, None, :]
+    )
+    tl.store(out_ptr + offs, y)
 
 ## 调用示例
-result = expand_dims_example()
-print(result.shape)  # 输出: (2, 1, 3)
+out = torch.empty((2, 1, 3), dtype=torch.float32, device="npu")
+expand_dims_example[(1,)](out)
+print(out.shape)  # 输出: torch.Size([2, 1, 3])
 ```

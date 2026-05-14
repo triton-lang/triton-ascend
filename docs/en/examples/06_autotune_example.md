@@ -1,9 +1,11 @@
 # Autotune
 
-In this section, we will demonstrate how to use the autotune method of Triton to automatically select the optimal kernel configuration parameters. Currently, Triton-Ascend autotune is fully compatible with the usage of the autotune in the community (visit <https://triton-lang.org/main/python-api/generated/triton.autotune.html>). That is, users need to manually pass some defined **triton.Config** to autotune, and then autotune selects the optimal kernel configuration through benchmarking. In addition, Triton-Ascend provides the **advanced autotune** usage. Users need to provide information such as the split and tiling axes of the current Triton kernel. In this case, autotune automatically generates some possible optimal kernel configurations based on the actual input size, and then selects the optimal configuration through benchmarking or profiling.
+If you want the recommended Triton-Ascend autotune usage, the meaning of `configs=[]`, and the scope of automatic tiling, read the [Triton-Ascend Autotune Guide](../autotune_guide.md) first.
+
+In this section, we show how to use Triton autotune to select the best kernel configuration automatically. Triton-Ascend is fully compatible with the community autotune interface (see <https://triton-lang.org/main/python-api/generated/triton.autotune.html>): users can provide a set of predefined `triton.Config` objects, and autotune selects the best one through benchmarking. Triton-Ascend also provides an advanced mode in which autotune can infer split and tiling axes from kernel semantics, generate promising candidate configurations automatically, and then select the best configuration through benchmarking or profiling.
 
 Note:
-Currently, Triton-Ascend autotune supports block size and multibuffer (compiler optimization). However, the **num_warps** and **num_stages** parameters are not supported due to hardware architecture differences. In the future, more adjustable autotune options will be added.
+Currently, Triton-Ascend autotune supports block size and multibuffer (a compiler optimization). However, the **num_warps** and **num_stages** parameters are not supported because of hardware-architecture differences. More tunable autotune options will be added in the future.
 
 ## Community Autotune Usage Example
 
@@ -163,7 +165,7 @@ Notes: 1. The split axis parameter must be multiplied by `tl.program_id()`. 2. T
 
 ```Python
 @triton.autotune(
-    key={"n_elements"} # It needs to be specified.
+    key=["n_elements"] # It needs to be specified.
     ...
 )
 @triton.jit
@@ -197,7 +199,7 @@ Notes: 1. The tiling axis parameters must be used in the call of `tl.arange()` a
 
 ```Python
 @triton.autotune(
-    key={"n_rows", "n_cols"} # It needs to be specified.
+    key=["n_rows", "n_cols"] # It needs to be specified.
     ...
 )
 @triton.jit
@@ -233,7 +235,7 @@ Notes: 1. The low-dimensional axis must be computed using `tl.arange()` and slic
 
 ```Python
 @triton.autotune(
-    key={"n_rows", "n_cols"} # Automatically allocated in the order of {"x": "n_rows", "y": "n_cols"}
+    key=["n_rows", "n_cols"] # Automatically allocated in the order of {"x": "n_rows", "y": "n_cols"}
     ...
 )
 @triton.jit

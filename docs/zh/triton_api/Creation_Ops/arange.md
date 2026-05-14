@@ -5,7 +5,7 @@
 简介：`triton.language.arange`函数用于生成一个从`start`到`end`（不包括`end`）的连续整数序列。
 
 ```python
-triton.language.arange(start,end, _semantic=None)
+triton.language.arange(start, end, _semantic=None)
 ```
 
 ## 2. OP 规格
@@ -44,7 +44,7 @@ end >= 0,  start  >= 0
 
 1.函数用于生成一个[start, end) 的连续整数序列，CUDA要求range=(end-start)必须为2的幂次方。Triton-ascend并无此要求。
 2.NV和Triton-ascend都限制end的最大值TRITON_MAX_TENSOR_NUMEL = 1048576
-3.arange的输入必须是constant常量，即已支持uint、int类型的小于1048576（最大值TRITON_MAX_TENSOR_NUMEL ）的数值。int64不支持。
+3.arange的输入必须是constant常量，支持uint、int类型的小于1048576（最大值TRITON_MAX_TENSOR_NUMEL ）的数值。int64不支持。
 4.arange的start 和 end 应大于等于0。
 
 ### 2.4 使用方法
@@ -57,6 +57,7 @@ def triton_arange(z, BLOCK: tl.constexpr, START: tl.constexpr, END: tl.constexpr
     off = tl.arange(0, BLOCK)
     val = tl.arange(START, END)
     tl.store(z + off, val)
+
 @pytest.mark.parametrize('param_list',[[0, 128],])
 def test_case_access(param_list):
     start, end = param_list
@@ -64,5 +65,5 @@ def test_case_access(param_list):
     block = end - start
     dtype = 'int32'
     y_cal = torch.zeros(shape, dtype=torch.int32).npu()
-    triton_arange_access[(1, )](y_cal, START = start, END = end, BLOCK = block)
+    triton_arange[(1, )](y_cal, START = start, END = end, BLOCK = block)
 ```

@@ -130,8 +130,10 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
         return failure();
     }
 
+    auto newBoundaryCheck = tf.getBoundaryCheck(op.getBoundaryCheck());
+
     auto loadOp = rewriter.create<triton::LoadOp>(loc, newPtr, newMask, newOther,
-                                   op.getBoundaryCheck(), op.getPadding(),
+                                   newBoundaryCheck, op.getPadding(),
                                    op.getCache(), op.getEvict(), op.getIsVolatile());
 
     auto permuteResult = tf.materializeImplicitPermute(
@@ -184,8 +186,10 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
     auto permuteResult = tf.materializeImplicitPermute(
         oldValue, loc, rewriter);
 
+    auto newBoundaryCheck = tf.getBoundaryCheck(op.getBoundaryCheck());
+
     auto storeOp = rewriter.create<triton::StoreOp>(loc, newPtr, permuteResult, newMask,
-               op.getBoundaryCheck(), op.getCache(), op.getEvict());
+               newBoundaryCheck, op.getCache(), op.getEvict());
 
     rewriter.eraseOp(op);
     return success();
@@ -377,7 +381,6 @@ Value MemOpTransformer::createNewTensorPtr(Value oldPtr, const Location loc,
 {
     TritonToStructured::PtrAnalysis ptrAnalysis;
     auto makeTPtrOp = oldPtr.getDefiningOp<triton::MakeTensorPtrOp>();
-    auto oldOrderAttr = makeTPtrOp->getAttr("order");
     if (!makeTPtrOp) {
         InFlightDiagnostic diag =
         emitWarning(loc) << "PtrAnalysis: load pointer must originate from 'make_tensor_ptr' operation";
@@ -395,9 +398,7 @@ Value MemOpTransformer::createNewTensorPtr(Value oldPtr, const Location loc,
         ptrState.dump();
         llvm::dbgs() << "----------------------------------------------\n";
     });
-    auto new_op = ptrState.createMakeTensorPtrOp(rewriter, loc);
-    new_op->setAttr("original_order", oldOrderAttr);
-    return new_op;
+    return ptrState.createMakeTensorPtrOp(rewriter, loc);
 }
 
 Value MemOpTransformer::createNewAdvancePtr(Value oldPtr, const Location loc,
@@ -575,6 +576,37 @@ Value MemOpTransformer::createNewOther(Value oldOther,
         loc, targetShapeType, oldOther, targetShapeValue);
 
     return reshapeOp.getResult();
+}
+
+// Remap boundary_check for block ptr implicit permute.
+// Formula
+// - newAxis = rank - 1 - position(oldAxis in ptrState.order)
+// Rules implemented
+// - ptrState.order records original axes in memory-priority order.
+// - createMakeTensorPtrOp rebuilds the new block ptr from reverse(ptrState.order),
+//   so the rebuilt ptr is canonicalized to descending order [rank-1, ..., 0].
+// - So each old boundary_check axis must be translated into the axis index
+//   of the rewritten block ptr before creating the new load/store.
+// Examples
+// - order=[1,0], boundary_check=[0] => [0]
+// - order=[0,1], boundary_check=[0,1] => [1,0]
+// - order=[2,0,1], boundary_check=[0,2] => [1,2]
+SmallVector<int32_t> MemOpTransformer::getBoundaryCheck(ArrayRef<int32_t> oldBoundaryCheck) const
+{
+    SmallVector<int32_t> newBoundaryCheck(oldBoundaryCheck.begin(), oldBoundaryCheck.end());
+    if (!ptrState.isPermuted || !ptrState.isBlockPtr() || newBoundaryCheck.empty()) {
+        return newBoundaryCheck;
+    }
+
+    int32_t rank = static_cast<int32_t>(ptrState.order.size());
+    for (auto &boundaryAxis : newBoundaryCheck) {
+        auto pos = llvm::find(ptrState.order, static_cast<size_t>(boundaryAxis));
+        if (pos == ptrState.order.end()) {
+            continue;
+        }
+        boundaryAxis = rank - 1 - static_cast<int32_t>(std::distance(ptrState.order.begin(), pos));
+    }
+    return newBoundaryCheck;
 }
 
 bool MemOpTransformer::applyPermuteOnMask()

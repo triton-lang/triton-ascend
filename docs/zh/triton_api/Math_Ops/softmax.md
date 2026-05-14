@@ -31,8 +31,8 @@ triton.language.softmax(x, dim=None, keep_dims=False, ieee_rounding=False)
 | GPU    | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     |  √    | √    | √    |  √    | ×    |
 | Ascend A2/A3 | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     | √    | √    | ×    | √    | ×    |
 
-结论：Ascend 比 GPU 少了fp64的支持。
-torch_npu不支持u8。
+结论：Ascend 相比 GPU 缺失 fp64 支持。
+torch_npu 不支持 uint8。
 
 #### 2.2.2 Shape 支持
 
@@ -69,7 +69,7 @@ def tt_softmax_3d(in_ptr, out_ptr,
     idx = xidx[:, None, None] * ynumel * znumel + yidx[None, :, None] * znumel + zidx[None, None, :]
 
     a = tl.load(in_ptr + idx)
-    ret = tl.softmax(a)
+    ret = tl.softmax(a, dim=2)
 
     tl.store(out_ptr + idx, ret)
 ```

@@ -29,7 +29,7 @@ import pytest
 import test_common
 
 @triton.jit
-def fn_npu_(output_ptr, x_ptr,XB : tl.constexpr,YB : tl.constexpr,ZB : tl.constexpr):
+def fn_npu_(output_ptr, x_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr, can_reorder: tl.constexpr):
     xidx=tl.arange(0,XB)
     yidx=tl.arange(0,YB)
     zidx=tl.arange(0,ZB)
@@ -38,7 +38,7 @@ def fn_npu_(output_ptr, x_ptr,XB : tl.constexpr,YB : tl.constexpr,ZB : tl.conste
 
     X = tl.load(x_ptr+idx)
 
-    ret = tl.ravel(X)
+    ret = tl.ravel(X, can_reorder=can_reorder)
 
     oidx=tl.arange(0,XB*YB*ZB)
     tl.store(output_ptr+oidx,ret)
@@ -55,7 +55,8 @@ testlist = [
 ]
 
 @pytest.mark.parametrize('sigtype, dtype, XB, YB, ZB',testlist)
-def test_ravel(sigtype, dtype, XB, YB, ZB):
+@pytest.mark.parametrize('can_reorder', [False, True])
+def test_ravel(sigtype, dtype, XB, YB, ZB, can_reorder):
 
     x = torch.randint(low=-128,high=128,size=(XB,YB,ZB),dtype=dtype).npu()
     ans = torch.ravel(x)
@@ -64,7 +65,7 @@ def test_ravel(sigtype, dtype, XB, YB, ZB):
 
     output = torch.randint(1, (XB*YB*ZB,), dtype=dtype).npu()
 
-    fn_npu_[1,1,1](output,x, XB, YB, ZB)
+    fn_npu_[1, 1, 1](output, x, XB, YB, ZB, can_reorder)
 
     print(output[0:16])
 

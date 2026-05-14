@@ -360,6 +360,6 @@ block_ptr = tl.make_block_ptr(
     strides=(32, 1),
     offsets=(i_t * BT, 0),
     block_shape=(BT, 32),
-    order=(1, 0) # First row then column (FRTC)
+    order=(1, 0) # Row-major: dim 1 is innermost (stride 1), dim 0 is outermost
 )
 ```

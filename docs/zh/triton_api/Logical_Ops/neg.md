@@ -1,11 +1,15 @@
-# triton.language.neg
+# triton.language.tensor.__neg__
 
 ## 1. 函数概述
 
 简介：将tensor的值取负。
 
 ```python
-triton.language.neg(x)
+# 通过操作符
+-x
+
+# 或直接调用 dunder 方法
+x.__neg__()
 ```
 
 ## 2. 规格
@@ -29,7 +33,7 @@ triton.language.neg(x)
 | GPU    | √     | √      | √     | √      |  √      |  √       |  √       | √      | √    | √   | √    | √    | √    |
 | Ascend A2/A3 | √    | √     | √     | √      | ×     | ×      | ×      | √     | √    | √    | ×    | √    | ×   |
 
-结论：Ascend 比 GPU 少了uint、fp64、bool类型的支持。
+结论：Ascend 相比 GPU 缺失 uint、fp64、bool 类型支持。
 
 #### 2.2.2 Shape 支持
 
@@ -44,13 +48,14 @@ triton.language.neg(x)
 
 > 相对社区能力缺失且无法实现
 
-Ascend 比 GPU 少了uint、fp64、bool类型的支持。
+Ascend 相比 GPU 缺失 uint、fp64、bool 类型支持。
 
 ### 2.4 使用方法
 
-以下示例实现了对输入张量 `x` 做逐元素指数（以2为底）：
+以下示例实现了对输入张量 `x` 做逐元素取负：
 
-```python@triton.jit@triton.jit@triton.jit@triton.jit
+```python
+@triton.jit
 def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
             XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr,
             XNUMEL: tl.constexpr, YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):

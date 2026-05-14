@@ -32,7 +32,7 @@ Extension_Ops/index_select_simd.md
 |api|简要说明|
 |--|--|
 |[atomic_add](./Atomic_Ops/atomic_add.md)  |在由 pointer 指定的内存位置执行原子加法 |
-|[atomic_and](./Atomic_Ops/atomic_and.md)  |在由 pointer 指定的内存位置执行原子逻辑和操作 |
+|[atomic_and](./Atomic_Ops/atomic_and.md)  |在由 pointer 指定的内存位置执行原子逻辑与操作 |
 |[atomic_cas](./Atomic_Ops/atomic_cas.md)  |在由 pointer 指定的内存位置执行 1 个原子比较并交换操作 |
 |[atomic_max](./Atomic_Ops/atomic_max.md)  |在由 pointer 指定的内存位置执行 1 个原子最大值操作 |
 |[atomic_min](./Atomic_Ops/atomic_min.md)  |在由 pointer 指定的内存位置执行 1 个原子最小值操作 |
@@ -83,12 +83,12 @@ Comparing_Ops/ne.md
 |--|--|
 |[debug_barrier](./Compiler_Hint_Ops/debug_barrier.md) |插入 1 个屏障以同步 1 个块中的所有线程 |
 |[max_constancy](./Compiler_Hint_Ops/max_constancy.md) |告知编译器 input 中的第 1 个值是常量 |
-|[max_contiguous](./Compiler_Hint_Ops/max_contiguous.md) |告知编译器 input 中的第 1 个值是连续 |
+|[max_contiguous](./Compiler_Hint_Ops/max_contiguous.md) |告知编译器 input 中的第 1 个值是连续的 |
 |[multiple_of](./Compiler_Hint_Ops/multiple_of.md) |告知编译器 input 中的所有值都是 value 的倍数 |
 |[assume](./Compiler_Hint_Ops/assume.md)         | 用于向编译器提供条件假设信息，允许编译器基于已知为真的条件进行优化。 |
 |[compile_hint](./Extension_Ops/compile_hint.md) | 一个编译器提示（hint）机制，允许用户为张量附加元数据信息，这些信息会被传递到编译器后端，用于指导优化和代码生成。|
 |[multibuffer](./Extension_Ops/multibuffer.md) | 为张量设置多缓冲，允许编译器对同一张量创建多个副本。 |
-|[parallel](./Extension_Ops/parallel.md) | `parallel` 是一个专门用于多核心并行执行的迭代器,提供显式的多核心并行语义。 |
+|[parallel](./Extension_Ops/parallel.md) | `parallel` 是一个专门用于多核心并行执行的迭代器，提供显式的多核心并行语义。 |
 |[sync_block指令](./Extension_Ops/sync_block.md) | 显式的核心间同步指令，用于协调 Cube-Vector 架构中不同核心间的执行顺序和数据一致性。 |
 
 ```{toctree}
@@ -169,7 +169,7 @@ Indexing_Ops/where.md
 Indexing_Ops/swizzle2d.md
 Extension_Ops/get_element.md
 Extension_Ops/index_select_simd.md
-Indexing_Ops/tl.gather.md
+Indexing_Ops/gather.md
 ```
 
 ## 内联汇编
@@ -254,8 +254,9 @@ Logical_Ops/xor.md
 |[sub](./Math_Ops/sub.md) | 四则运算减法 ‘-’ |
 |[mul](./Math_Ops/mul.md) | 四则运算乘法 ‘*’ |
 |[div](./Math_Ops/div.md) | 四则运算除法 ‘/’ |
+|[floordiv](./Math_Ops/floordiv.md) | 取整除法，四则运算 ‘//’ |
 |[abs](./Math_Ops/abs.md) |计算 x 的逐元素绝对值 |
-|[neg](./Math_Ops/neg.md) | 将tensor的值取负。 |
+|[neg](./Math_Ops/neg.md) | 将tensor的值取负 |
 |[cdiv](./Math_Ops/cdiv.md) |计算 x 除以 div 的向上取整除法 |
 |[ceil](./Math_Ops/ceil.md) |计算 x 的逐元素向上取整值 |
 |[clamp](./Math_Ops/clamp.md) |将输入张量 x 的值限制在 [min, max] 范围内 |
@@ -272,7 +273,7 @@ Logical_Ops/xor.md
 |[mod](./Math_Ops/mod.md) | 取模运算 |
 |[maximum](./Math_Ops/maximum.md) |计算 x 和 y 的逐元素最大值 |
 |[minimum](./Math_Ops/minimum.md) |计算 x 和 y 的逐元素最小值 |
-|[rsqrt](./Math_Ops/rsqrt.md) |计算 x 的逐元素的平方根倒数 |
+|[rsqrt](./Math_Ops/rsqrt.md) |计算 x 的逐元素平方根倒数 |
 |[sigmoid](./Math_Ops/sigmoid.md) |计算 x 的逐元素 sigmoid 函数值 |
 |[sin](./Math_Ops/sin.md) |Computes the element-wise sine of x. 计算 x 的逐元素正弦值 |
 |[softmax](./Math_Ops/softmax.md) |计算 x 的逐元素 softmax 值 |
@@ -288,6 +289,7 @@ Math_Ops/add.md
 Math_Ops/sub.md
 Math_Ops/mul.md
 Math_Ops/div.md
+Math_Ops/floordiv.md
 Math_Ops/abs.md
 Math_Ops/neg.md
 Math_Ops/cdiv.md
@@ -325,6 +327,7 @@ Math_Ops/umulhi.md
 |[advance](./Memory_Pointer_Ops/tl.advance.md) |推进一个块指针|
 |[load_tensor_descriptor](./Memory_Pointer_Ops/load_tensor_descriptor.md) | 从张量描述符加载数据块 |
 |[make_tensor_descriptor](./Memory_Pointer_Ops/make_tensor_descriptor.md) | 创建张量描述符对象 |
+|[store_tensor_descriptor](./Memory_Pointer_Ops/store_tensor_descriptor.md) | 将数据块存储到张量描述符指定内存位置 |
 
 ```{toctree}
 :maxdepth: 3
@@ -336,6 +339,7 @@ Memory_Pointer_Ops/tl.make_block_ptr.md
 Memory_Pointer_Ops/tl.advance.md
 Memory_Pointer_Ops/load_tensor_descriptor.md
 Memory_Pointer_Ops/make_tensor_descriptor.md
+Memory_Pointer_Ops/store_tensor_descriptor.md
 ```
 
 ## 编程模型
@@ -432,7 +436,7 @@ Scan_Sort_Ops/sort.md
 |[ravel](./Shape_Manipulation_Ops/ravel.md) | 返回 x 的连续扁平视图 |
 |[reshape](./Shape_Manipulation_Ops/reshape.md) | 返回一个具有与输入相同元素数但具有提供的形状的张量|
 |[split](./Shape_Manipulation_Ops/split.md) | 将张量沿其最后一个维度分成两部分，该维度大小必须为 2 |
-|[trans](./Shape_Manipulation_Ops/trans.md) | 排列张量的维度。 |
+|[trans](./Shape_Manipulation_Ops/trans.md) | 将张量转置 |
 |[view](./Shape_Manipulation_Ops/view.md) | 返回具有与输入相同元素但形状不同的张量 |
 |[extract_slice](./Extension_Ops/extract_slice.md)|  从输入张量中按照操作指定的偏移量、大小和步幅参数提取一个张量。 |
 |[insert_slice](./Extension_Ops/insert_slice.md)| 将一个张量（子张量）插入到另一个张量的指定位置，按照操作指定的偏移量、大小和步幅参数插入到另一个张量中。 |

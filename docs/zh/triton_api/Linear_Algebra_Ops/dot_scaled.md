@@ -5,9 +5,9 @@
 简介：**计算以缩放格式表示两个矩阵块的矩阵乘积**
 
 ```python
-triton.language.dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, 
-      acc=None, lhs_k_pack=True, rhs_k_pack=True,    
-       out_dtype=triton.language.float32, _semantic=None)
+triton.language.dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format,
+    acc=None, lhs_k_pack=True, rhs_k_pack=True,
+    out_dtype=triton.language.float32, _semantic=None)
 ```
 
 ## 2. OP 规格
@@ -64,7 +64,8 @@ triton.language.dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_forma
 
 以下示例实现了对输入张量 `x` 做就地绝对值计算：
 
-```python@triton.jit
+```python
+@triton.jit
 def dot_scale_kernel(a_base, stride_a0: tl.constexpr, stride_a1: tl.constexpr, a_scale, b_base, stride_b0: tl.constexpr,
                      stride_b1: tl.constexpr, b_scale, out,
                      BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr, type_a: tl.constexpr,

@@ -33,14 +33,14 @@ msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
 
 ```python
 # source simulator路径
-export LD_LIBRARY_PATH=/root/CANN/Install_CANN/Ascend/ascend_toolkit/latest/tools/simulator/{soc-version}/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$HOME/CANN/Install_CANN/Ascend/ascend_toolkit/latest/tools/simulator/{soc-version}/lib:$LD_LIBRARY_PATH
 # 执行算子仿真流水图采集
 msprof op simulator --kernel-name=_layer_norm_fwd_fused --soc-version={soc-version} python3 03-layer-norm.py
 ```
 
 - 注：上述示例 `soc-version=Ascend910B3`
 
-|Soc-Version|||
+| Ascend 910 系列 | Ascend 310 / 310P 系列 | Ascend 310B 系列 |
 | :---: | :---: | :---: |
 |Ascend910A|Ascend310|Ascend310B1|
 |Ascend910B|Ascend310P1|Ascend310B2|
@@ -67,10 +67,10 @@ MindStudio Insight工具以时序图方式为用户提供指令在昇腾AI处理
   **图3** MindStudio Insight时间线界面  
   ![alt text](../figures/trace_json_with_insight.png)
 
-visualize_data.bin支持在Mind Studio Insight可视化呈现：
+visualize_data.bin支持在MindStudio Insight可视化呈现：
 
 - 除了与trace.json一样可以采集到性能数据之外，visualize_data.bin还提供了与源代码（如：03-layer-norm.py）对应的指令关联看板。  
-  **图4** Mind Studio Insight-visualize_data.bin指令关联\
+  **图4** MindStudio Insight-visualize_data.bin指令关联\
   - 注：以下采集项的结果数据含义可参考《MindStudio Insight 工具》的[算子调优](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/GUI_baseddevelopmenttool/msascendinsightug/Insight_userguide_0068.html)章节。
   ![alt text](../figures/visualize_data_with_insight.png)
 
@@ -131,7 +131,7 @@ def npu_vector_cmp_kernel(
     stride_out_row,    # [Scalar] stride of row in Out, normally equals to stride_x_row
     M,                 # [Scalar] row number
     N,                 # [Scalar] col number
-    eps,               # [Scalar] epsilon to aviod division by zeros
+    eps,               # [Scalar] epsilon to avoid division by zeros
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr
 ):

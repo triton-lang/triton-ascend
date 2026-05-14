@@ -30,7 +30,7 @@ triton.language.flip(x, dim=None)
 | GPU    | √     | √      | √     | √      |  √      |  √       |  √       | √      | √    | √   | √    | √    | √    |
 | Ascend A2/A3 | √    | √     | √     | √     | ×     | ×      | ×      | √     | √    | √    | ×    | √    | √    |
 
-结论：Ascend 比 GPU 少了uint、fp64类型的支持。
+结论：Ascend 相比 GPU 缺失 uint、fp64 类型支持。
 
 #### 2.2.2 Shape 支持
 
@@ -45,13 +45,14 @@ triton.language.flip(x, dim=None)
 
 > 相对社区能力缺失且无法实现
 
-Ascend 比 GPU 少了uint、fp64类型的支持。
+Ascend 相比 GPU 缺失 uint、fp64 类型支持。
 
 ### 2.4 使用方法
 
-以下示例实现了对输入张量 `x` 做逐元素指数（以2为底）：
+以下示例将输入张量 `x` 沿指定维度进行翻转：
 
-```python@triton.jit@triton.jit@triton.jit
+```python
+@triton.jit
 def fn_npu_3d(output_ptr, x_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr, XNUMEL: tl.constexpr,
             YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):
     xidx = tl.arange(0, XB) + tl.program_id(0) * XB
@@ -59,7 +60,7 @@ def fn_npu_3d(output_ptr, x_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.cons
     zidx = tl.arange(0, ZB) + tl.program_id(2) * ZB
     idx = xidx[:, None, None] * YNUMEL * ZNUMEL + yidx[None, :, None] * ZNUMEL + zidx[None, None, :]
     X = tl.load(x_ptr + idx)
-    ret = libdevice.flip(X, 2)
+    ret = tl.flip(X, 2)
     oidx = xidx[:, None, None] * YNUMEL * ZNUMEL + yidx[None, :, None] * ZNUMEL + zidx[None, None, :]
     tl.store(output_ptr + oidx, ret)
 

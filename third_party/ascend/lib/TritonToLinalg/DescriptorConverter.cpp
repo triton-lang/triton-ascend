@@ -69,6 +69,7 @@ Descriptor unpackDescriptor(TensorDescType type, Value desc, ConversionPatternRe
     for (auto st : makeDescOp.getStrides()) {
         res.strides.push_back(rewriter.createOrFold<arith::ExtSIOp>(makeDescOp.getLoc(), rewriter.getI64Type(), st));
     }
+    res.padding = makeDescOp.getPaddingAttr();
 
     return res;
 }
@@ -83,6 +84,17 @@ SmallVector<int32_t> computeOrder(ArrayRef<int64_t> shape)
         order.push_back(i);
     }
     return order;
+}
+
+DenseI32ArrayAttr getFullBoundaryCheckAttr(ConversionPatternRewriter &rewriter,
+                                           ArrayRef<int64_t> shape)
+{
+    SmallVector<int32_t> boundaryCheck;
+    boundaryCheck.reserve(shape.size());
+    for (int32_t dim = 0; dim < static_cast<int32_t>(shape.size()); ++dim) {
+        boundaryCheck.push_back(dim);
+    }
+    return rewriter.getDenseI32ArrayAttr(boundaryCheck);
 }
 
 LogicalResult DescriptorLoadConverter::matchAndRewrite(triton::DescriptorLoadOp op, OpAdaptor adaptor,
@@ -110,8 +122,8 @@ LogicalResult DescriptorLoadConverter::matchAndRewrite(triton::DescriptorLoadOp 
                                                                computeOrder(blockShape) // order
     );
     // 3. replace tt.load
-    auto boundaryCheck = rewriter.getDenseI32ArrayAttr({});
-    triton::PaddingOptionAttr padding = nullptr;
+    auto boundaryCheck = getFullBoundaryCheckAttr(rewriter, blockShape);
+    triton::PaddingOptionAttr padding = desc.padding;
     auto cache = triton::CacheModifierAttr::get(rewriter.getContext(), triton::CacheModifier::NONE);
     auto evict = triton::EvictionPolicyAttr::get(rewriter.getContext(), triton::EvictionPolicy::NORMAL);
     auto isVolatile = rewriter.getBoolAttr(false);
@@ -168,7 +180,7 @@ LogicalResult DescriptorStoreConverter::matchAndRewrite(triton::DescriptorStoreO
 
     auto maskType = RankedTensorType::get(blockShape, rewriter.getI1Type());
     rewriter.create<arith::ConstantOp>(loc, DenseElementsAttr::get(maskType, true));
-    auto boundaryCheck = rewriter.getDenseI32ArrayAttr({});
+    auto boundaryCheck = getFullBoundaryCheckAttr(rewriter, blockShape);
     auto cacheModifier = triton::CacheModifierAttr::get(rewriter.getContext(), triton::CacheModifier::NONE);
     auto evictionPolicy = triton::EvictionPolicyAttr::get(rewriter.getContext(), triton::EvictionPolicy::NORMAL);
 

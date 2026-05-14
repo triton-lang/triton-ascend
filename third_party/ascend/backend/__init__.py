@@ -25,31 +25,30 @@ from .testing import do_bench_npu
 
 
 def _apply_ascend_patch():
-    from triton.compiler.compiler import ASTSource
+    from triton.compiler.code_generator import CodeGenerator
 
-    if not getattr(ASTSource, "_ascend_patch_applied", False):
-        _original_make_ir = ASTSource.make_ir
+    if not getattr(CodeGenerator, "_ascend_patch_applied", False):
+        _original_cg_init = CodeGenerator.__init__
 
-        def _patched_make_ir(self, target, options, codegen_fns, module_map, context):
+        def _patched_cg_init(self, *args, **kwargs):
             """
             Monkey Patch for Ascend:
-            Injects 'hacc.target' attribute into the module after generation.
+            Injects 'hacc.target' attribute into the module after initilization of module.
             """
-            module = _original_make_ir(self, target, options, codegen_fns, module_map, context)
-
+            _original_cg_init(self, *args, **kwargs)
+            options = self.builder.options
+            context = self.context
             if hasattr(options, "arch") and options.arch:
                 try:
                     builder = ascend_ir.ascendnpu_ir_builder(context, options.arch)
 
                     target_attr_str = f'#hacc.target<"{options.arch}">'
-                    module.set_attr("hacc.target", builder.parse_attr(target_attr_str))
+                    self.module.set_attr("hacc.target", builder.parse_attr(target_attr_str))
                 except Exception as e:
                     logging.warning(f"[Ascend Patch] Failed to set hacc.target: {e}")
 
-            return module
-
-        ASTSource.make_ir = _patched_make_ir
-        ASTSource._ascend_patch_applied = True
+        CodeGenerator.__init__ = _patched_cg_init
+        CodeGenerator._ascend_patch_applied = True
 
 
 __all__ = ["do_bench_npu"]

@@ -18,6 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+from .autotuner import get_max_configs, max_autotune
+
 
 def _patch_autotune():
     try:

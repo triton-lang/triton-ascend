@@ -12,7 +12,11 @@
 
 ### Python版本要求
 
-当前Triton-Ascend要求的Python版本为:**py3.9-py3.11**。
+| Triton-Ascend版本 | Python支持版本 | 备注              |
+|-------------------|----------------------|-----------------|
+| 3.2.1             | py3.9 - py3.13       | py3.9不支持aarch64 |
+| 3.2.0             | py3.9 - py3.11       |                 |
+| 3.2.0rc4          | py3.9 - py3.11       |                 |
 
 ### 安装CANN
 
@@ -31,20 +35,22 @@
 - 商用版
 
 | Triton-Ascend版本 | CANN商用版本 | CANN发布日期 |
-|-------------------|----------------------|--------------------|
-| 3.2.0             | CANN 8.5.0           | 2026/01/16         |
-| 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.3.RC1         | 2025/11/20<br>2025/10/30         |
+|-------------------|----------------------|-----------------|
+| 3.2.1           | CANN 9.0.0             | 2026/04/30      |
+| 3.2.0             | CANN 8.5.0           | 2026/01/16      |
+| 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.3.RC1   | 2025/11/20<br>2025/10/30 |
 
 - 社区版
 
-| Triton-Ascend版本 | CANN社区版本 | CANN发布日期 |
+| Triton-Ascend版本   | CANN社区版本 | CANN发布日期 |
 |-------------------|----------------------|--------------------|
+| 3.2.1             | CANN 9.0.0             | 2026/04/30      |
 | 3.2.0             | CANN 8.5.0           | 2026/01/16         |
 | 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.5.0.alpha001<br>CANN 8.3.RC1         | 2025/11/20<br>2025/11/12<br>2025/10/30         |
 
 ### 安装torch_npu
 
-当前配套的torch_npu版本为2.7.1版本。
+当前配套的 torch_npu 版本为 2.7.1。
 
 ```bash
 pip install torch_npu==2.7.1
@@ -56,7 +62,7 @@ pip install torch_npu==2.7.1
 pip install torch==2.7.1+cpu --index-url https://download.pytorch.org/whl/cpu
 ```
 
-<a id="pip-base"></a>
+<a id="code-require"></a>
 
 ## 通过pip安装Triton-Ascend
 
@@ -65,32 +71,25 @@ pip install torch==2.7.1+cpu --index-url https://download.pytorch.org/whl/cpu
 您可以通过pip安装Triton-Ascend的最新稳定版本。
 
 ```shell
-pip install triton-ascend
+pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
 ```
 
-- 注意：社区 Triton 和 Triton-Ascend 不能同时存在。在安装依赖Triton的其他软件时，会自动安装社区 Triton，将覆盖掉已安装的 Triton-Ascend 目录。
-
-此时也需要先卸载社区 Triton 和 Triton-Ascend，再安装 Triton-Ascend。
+- 注意：triton-ascend 3.2.0 及以下 Triton-Ascend和Triton 不能同时存在。需要先卸载社区 Triton，再安装 Triton-Ascend。<br>
+triton-ascend 3.2.1 及以上，Triton-Ascend 通过将 Triton 声明为安装依赖来缓解安装覆盖问题。
+安装 Triton-Ascend 时会先安装社区 Triton，再由 Triton-Ascend 覆盖同名目录，从而避免后续安装其他依赖 Triton 的软件包时再次安装 Triton 而覆盖 Triton-Ascend。
+x86 与 arm 使用不同版本的社区 Triton 安装包的原因是社区从 3.5 版本开始才提供 arm 版本安装包：x86 依赖 triton==3.2.0，arm 依赖 triton==3.5.0。
 
 ```shell
 pip uninstall triton
 pip uninstall triton-ascend
-pip install triton-ascend
+pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
 ```
 
-### nightly build版本
-
-我们为用户提供了每日更新的nightly包，用户可通过以下命令进行安装。
+### 历史稳定版本
 
 ```shell
-pip install -i https://test.pypi.org/simple/ "triton-ascend<3.2.0rc" --pre --no-cache-dir
+pip install triton-ascend==3.2.0
 ```
-
-同时用户也能在 [历史列表](https://test.pypi.org/project/triton-ascend/#history) 中找到所有的nightly build包。
-
-注意，如果您在执行`pip install`时遇到ssl相关报错，可追加`--trusted-host test.pypi.org --trusted-host test-files.pythonhosted.org`选项解决。
-
-<a id="code-base"></a>
 
 ## 通过源码安装Triton-Ascend
 
@@ -104,7 +103,6 @@ pip install -i https://test.pypi.org/simple/ "triton-ascend<3.2.0rc" --pre --no-
 
 | Pytorch版本 | 推荐的GCC版本 | 推荐的GLIBC版本 |
 |-------------------|----------------------|--------------------|
-| PyTorch2.6.0      | (aarch64)11.2.1<br>(x86) 9.3.1 | (aarch64)>=2.28<br>(x86)>=2.17 |
 | PyTorch2.7.1      | 11.2.1               | 2.28               |
 | PyTorch2.8.0      | 13.3.1               | 2.28               |
 | PyTorch2.9.1      | 13.3.1               | 2.28               |
@@ -160,7 +158,7 @@ pip install -e python
 
 ### 手动安装 - 基于LLVM构建
 
-Triton 使用 LLVM22 为 GPU 和 CPU 生成代码。同样，昇腾的毕昇编译器也依赖 LLVM 生成 NPU 代码，因此需要编译 LLVM 源码才能使用。请关注依赖的 LLVM 特定版本。LLVM的构建支持两种构建方式，**以下两种方式二选一即可**，无需重复执行。
+Triton 使用 LLVM 22 为 GPU 和 CPU 生成代码。同样，昇腾的毕昇编译器也依赖 LLVM 生成 NPU 代码，因此需要编译 LLVM 源码才能使用。请关注依赖的 LLVM 特定版本。LLVM的构建支持两种构建方式，**以下两种方式二选一即可**，无需重复执行。
 
 #### 代码准备: `git checkout` 检出指定版本的LLVM
 

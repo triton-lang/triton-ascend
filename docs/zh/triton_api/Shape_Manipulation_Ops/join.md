@@ -53,21 +53,29 @@
 ### 2.5 使用方法
 
 ```python
+import torch
 import triton
 import triton.language as tl
 
 @triton.jit
-def join_example():
+def join_example(out_ptr):
     # 创建两个2x3的张量
     x = tl.zeros([2, 3], dtype=tl.float32)
-    y = tl.ones([2, 3], dtype=tl.float32)
+    y = tl.full([2, 3], 1.0, dtype=tl.float32)
 
     # 连接，变成2x2x3
     z = tl.join(x, y)
 
-    return z
+    # 将结果写回外部张量
+    offs = (
+        tl.arange(0, 2)[:, None, None] * (2 * 3)
+        + tl.arange(0, 2)[None, :, None] * 3
+        + tl.arange(0, 3)[None, None, :]
+    )
+    tl.store(out_ptr + offs, z)
 
 ## 调用示例
-result = join_example()
-print(result.shape)  # 输出: (2, 2, 3)
+out = torch.empty((2, 2, 3), dtype=torch.float32, device="npu")
+join_example[(1,)](out)
+print(out.shape)  # 输出: torch.Size([2, 2, 3])
 ```

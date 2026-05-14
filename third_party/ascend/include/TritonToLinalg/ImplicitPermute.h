@@ -113,6 +113,8 @@ public:
     Value createNewOther(Value oldOther, const Location loc,
                         PatternRewriter& rewriter);
 
+    SmallVector<int32_t> getBoundaryCheck(ArrayRef<int32_t> oldBoundaryCheck) const;
+
     bool applyPermuteOnMask();
 };
 

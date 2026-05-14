@@ -136,15 +136,39 @@ def fixpipe(
     pre_quant_mode,
     pre_relu_mode,
     _semantic=None,
-) -> None:
-    _semantic.builder._ascend_builder.create_fixpipe(
-        src.handle,
-        dst.handle,
-        dma_mode.value,
-        dual_dst_mode.value,
-        pre_quant_mode.value,
-        pre_relu_mode.value,
-    )
+):
+    if dst is None:
+        result = _semantic.builder._ascend_builder.create_fixpipe(
+            src.handle,
+            dst,
+            dma_mode.value,
+            dual_dst_mode.value,
+            pre_quant_mode.value,
+            pre_relu_mode.value,
+        )
+        if dual_dst_mode == al.FixpipeDualDstMode.ROW_SPLIT:
+            new_shape = list(src.type.shape)
+            if len(new_shape) >= 1 and new_shape[0] > 0:
+                new_shape[0] = new_shape[0] // 2
+            new_type = tl.block_type(src.type.element_ty, new_shape)
+            return tl.tensor(result, new_type)
+        elif dual_dst_mode == al.FixpipeDualDstMode.COLUMN_SPLIT:
+            new_shape = list(src.type.shape)
+            if len(new_shape) >= 2 and new_shape[1] > 0:
+                new_shape[1] = new_shape[1] // 2
+            new_type = tl.block_type(src.type.element_ty, new_shape)
+            return tl.tensor(result, new_type)
+        else:
+            return tl.tensor(result, src.type)
+    else:
+        _semantic.builder._ascend_builder.create_fixpipe(
+            src.handle,
+            dst.handle,
+            dma_mode.value,
+            dual_dst_mode.value,
+            pre_quant_mode.value,
+            pre_relu_mode.value,
+        )
 
 
 def debug_barrier(sync_mode: str, _semantic=None) -> None:

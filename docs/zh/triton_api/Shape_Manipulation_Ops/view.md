@@ -54,20 +54,24 @@
 ### 2.5 使用方法
 
 ```python
+import torch
 import triton
 import triton.language as tl
 
 @triton.jit
-def view_example():
+def view_example(out_ptr):
     # 创建2x3x4的张量
     x = tl.zeros([2, 3, 4], dtype=tl.float32)
 
     # 创建视图，变成6x4
     y = tl.view(x, [6, 4])
 
-    return y
+    # 将结果写回外部张量
+    offs = tl.arange(0, 6)[:, None] * 4 + tl.arange(0, 4)[None, :]
+    tl.store(out_ptr + offs, y)
 
 ## 调用示例
-result = view_example()
-print(result.shape)  # 输出: (6, 4)
+out = torch.empty((6, 4), dtype=torch.float32, device="npu")
+view_example[(1,)](out)
+print(out.shape)  # 输出: torch.Size([6, 4])
 ```

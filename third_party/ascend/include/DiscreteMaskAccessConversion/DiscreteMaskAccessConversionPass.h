@@ -52,6 +52,7 @@ class DiscreteMaskAccessConversionPass
     : public ::impl::DiscreteMaskAccessConversionBase<DiscreteMaskAccessConversionPass> {
 public:
   explicit DiscreteMaskAccessConversionPass(const DiscreteMaskAccessConversionOptions &options);
+  void getDependentDialects(DialectRegistry &registry) const override;
   void runOnOperation() override;
 };
 

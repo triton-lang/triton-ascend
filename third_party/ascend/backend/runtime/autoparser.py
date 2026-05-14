@@ -221,8 +221,11 @@ class SplitAxesParser(AxesKeyParser):
                     split_axes_val = node.right.id
                     split_axis_pid_dim = self.program_id_var_dims.get(node.left.id)
             elif isinstance(node.left, ast.Call) and isinstance(node.left.func, ast.Attribute):
-                if node.left.func.value.id == "tl" and \
-                   node.left.func.attr == "program_id":
+                if (
+                    isinstance(node.left.func.value, ast.Name)
+                    and node.left.func.value.id == "tl"
+                    and node.left.func.attr == "program_id"
+                ):
                     if isinstance(node.right, ast.Name):
                         split_axes_val = node.right.id
                         split_axis_pid_dim = self._get_program_id_dim(node.left)
@@ -232,7 +235,11 @@ class SplitAxesParser(AxesKeyParser):
                     split_axes_val = node.left.id
                     split_axis_pid_dim = self.program_id_var_dims.get(node.right.id)
             elif isinstance(node.right, ast.Call) and isinstance(node.right.func, ast.Attribute):
-                if node.right.func.value.id == "tl" and node.right.func.attr == "program_id":
+                if (
+                    isinstance(node.right.func.value, ast.Name)
+                    and node.right.func.value.id == "tl"
+                    and node.right.func.attr == "program_id"
+                ):
                     if isinstance(node.left, ast.Name):
                         split_axes_val = node.left.id
                         split_axis_pid_dim = self._get_program_id_dim(node.right)

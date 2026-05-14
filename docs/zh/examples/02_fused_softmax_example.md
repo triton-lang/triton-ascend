@@ -76,10 +76,9 @@ def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride, n
 我们可以创建一个辅助函数，该函数能够将核函数及其元参数加入执行队列，以处理任意给定的输入张量。
 
 ```Python
-target = triton.runtime.driver.active.get_current_target()
 kernels = {}
 
-def softmax(x, stream):
+def softmax(x):
     n_rows, n_cols = x.shape
 
     # 每次循环迭代的块大小是大于或等于`x`列数的最小二的幂
@@ -113,11 +112,9 @@ def softmax(x, stream):
 需要在一个具有不规则行和列数的矩阵上测试处理好的内核，此举可以验证Padding机制是否起作用
 
 ```Python
-device = torch.npu.current_device()
-stream = torch.npu.current_stream(device).npu_stream
 torch.manual_seed(0)
 x = torch.randn(1823, 781, device='npu')
-y_triton = softmax(x, stream)
+y_triton = softmax(x)
 y_torch = torch.softmax(x, axis=1)
 assert torch.allclose(y_triton, y_torch), (y_triton, y_torch)
 print(y_triton)

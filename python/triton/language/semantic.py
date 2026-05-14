@@ -1642,7 +1642,7 @@ class TritonSemantic(Generic[TensorTy]):
         lhs_format_enum = self._str_to_fp_type(lhs_format)
         rhs_format_enum = self._str_to_fp_type(rhs_format)
         if is_compile_on_910_95:
-            allowed_formats = {"bf16", "fp16", "e4m3", "e5m2"}
+            allowed_formats = {"bf16", "fp16", "e4m3", "e5m2", "e2m1"}
         else:
             allowed_formats = {"bf16", "fp16"}  # unsupported fp8/4 dtype: "e2m1", "e4m3", "e5m2"
         assert lhs_format in allowed_formats, f"NYI: lhs_format {lhs_format}"

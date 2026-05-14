@@ -7,13 +7,13 @@
 
 ```python
 triton.language.atomic_cas(
- pointer,
- cmp, 
- val, 
- sem=None, 
- scope=None, 
- _semantic=None
-)→ pointer
+    pointer,
+    cmp,
+    val,
+    sem=None,
+    scope=None,
+    _semantic=None
+) -> pointer
 ```
 
 可以作为tensor的成员函数调用，如`x.atomic_cas(...)`，与`atomic_cas(x, ...)`等效。
@@ -54,7 +54,7 @@ triton.language.atomic_cas(
 > 相对社区能力缺失且无法实现
 
 | 差异点                   | 描述                                                                           |
-| --------------------- | ---------------------------------------------------------------------------- | 
+| --------------------- | ---------------------------------------------------------------------------- |
 |数据类型| Ascend 对比 GPU 缺失fp64的支持能力（硬件限制） |
 |sem| 社区官方配置可接受的值为“acquire”、“release”、“acq_rel”（默认，代表“ACQUIRE_RELEASE”）和“relaxed”<br>我们只支持“acq_rel” |
 |scope               | 可接受的值为“gpu”、“cta”、或“sys”、 <br>我们只支持“gpu” |
@@ -79,14 +79,14 @@ def atomic_cas(in_ptr0, in_ptr1, out_ptr0, out_ptr1, n_elements, BLOCK_SIZE: tl.
 
 dtype, shape, ncore = ['int16', (8, 8), 2]
 block_size = shape[0] * shape[1] // ncore
-split_size = shape[0] // ncore 
+split_size = shape[0] // ncore
 cmp_val = [random.randint(0, 10) for _ in range(ncore)]
-cmp = torch.ones(split_size, shape[1], dtype=eval(f'torch.{dtype}')).to().npu() * cmp_val[0]
+cmp = torch.ones(split_size, shape[1], dtype=getattr(torch, dtype)).npu() * cmp_val[0]
 for i in range(1, ncore):
-    append = torch.ones(split_size, shape[1], dtype=eval(f'torch.{dtype}')).to().npu() * cmp_val[i]
+    append = torch.ones(split_size, shape[1], dtype=getattr(torch, dtype)).npu() * cmp_val[i]
     cmp = torch.cat([cmp, append], dim=0)
-val = torch.randint(low=0, high=10, size=shape, dtype=eval(f'torch.{dtype}')).npu()
-pointer = torch.randint(low=0, high=10, size=(split_size, shape[1]), dtype=eval(f'torch.{dtype}')).npu()
+val = torch.randint(low=0, high=10, size=shape, dtype=getattr(torch, dtype)).npu()
+pointer = torch.randint(low=0, high=10, size=(split_size, shape[1]), dtype=getattr(torch, dtype)).npu()
 pointer_old = torch.full_like(pointer, -10).npu()
 n_elements = shape[0] * shape[1]
 atomic_cas[ncore, 1, 1](val, cmp, pointer, pointer_old, n_elements, BLOCK_SIZE=split_size * shape[1])

@@ -823,14 +823,14 @@ UnsplatConverter::matchAndRewrite(triton::UnsplatOp op, OpAdaptor adaptor,
   auto src = adaptor.getSrc();
   auto srcType = cast<RankedTensorType>(src.getType());
   auto shape = srcType.getShape();
-  
+
   // Create index constants for all dimensions (all zeros since we're extracting the single element)
   SmallVector<Value> indices;
   for (int64_t dim : shape) {
     indices.push_back(rewriter.create<arith::ConstantOp>(
         loc, rewriter.getIndexAttr(0)));
   }
-  
+
   // Extract the scalar element from the tensor
   auto elementType = srcType.getElementType();
   auto extractOp = rewriter.create<tensor::ExtractOp>(loc, elementType, src, indices);
@@ -1902,7 +1902,7 @@ LogicalResult TritonMulhiuiConverter::matchAndRewrite(
   Value opl = op.getX();
   Value opr = op.getY();
   Value res = op.getResult();
-  auto newMulOp = rewriter.create<arith::MulSIExtendedOp>(
+  auto newMulOp = rewriter.create<arith::MulUIExtendedOp>(
       loc, res.getType(), res.getType(), opl, opr);
   // triton only need the high value
   rewriter.replaceOp(op, ValueRange{newMulOp.getHigh()});
@@ -1994,7 +1994,7 @@ MatmulConverter::matchAndRewrite(triton::DotOp op, OpAdaptor adaptor,
   auto dstType = cast<RankedTensorType>(op.getType());
   auto elemTy = dstType.getElementType();
   auto inputPrec = op.getInputPrecision();
-  
+
   auto createOp = [&](auto &&rewriter, ValueRange operands, ValueRange results) -> Operation* {
     if (dstType.getRank() == 2)
       return rewriter.template create<linalg::MatmulOp>(op.getLoc(), operands, results);
@@ -2189,7 +2189,9 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                      lhsElemType == triton::ScaleDotElemType::E5M2) &&
                     (rhsElemType == triton::ScaleDotElemType::E4M3 ||
                      rhsElemType == triton::ScaleDotElemType::E5M2);
-  if (isFP8Input) {
+  bool isFP4Input = (lhsElemType == triton::ScaleDotElemType::E2M1) &&
+                    (rhsElemType == triton::ScaleDotElemType::E2M1);
+  if (isFP8Input || isFP4Input) {
     if (!rhsScale) {
       RankedTensorType defaultScaleTy = RankedTensorType::get({1}, rewriter.getI8Type());
       Value defaultScaleVal = rewriter.create<arith::ConstantOp>(loc, rewriter.getI8IntegerAttr(1));
@@ -2198,6 +2200,25 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     }
     Value acc = c ? c : rewriter.create<tensor::EmptyOp>(loc, dstType.getShape(), dstType.getElementType());
 
+    // Get the ScaleDotElemType enum
+    // Helper to convert
+    auto convertFormat = [&](triton::ScaleDotElemType ty) -> mlir::hfusion::DataformatAttr {
+      auto ctx = rewriter.getContext();
+      switch (ty) {
+        case triton::ScaleDotElemType::E2M1:
+          return mlir::hfusion::DataformatAttr::get(ctx, mlir::hfusion::Dataformat::FP4E2M1_T);
+        case triton::ScaleDotElemType::E4M3:
+          return mlir::hfusion::DataformatAttr::get(ctx, mlir::hfusion::Dataformat::FP8E4M3_T);
+        case triton::ScaleDotElemType::E5M2:
+          return mlir::hfusion::DataformatAttr::get(ctx, mlir::hfusion::Dataformat::FP8E5M2_T);
+        default:
+          llvm_unreachable("unsupported ScaleDotElemType");
+      }
+    };
+
+    auto lhsFmt = convertFormat(lhsElemType);
+    auto rhsFmt = convertFormat(rhsElemType);
+
     Value matmulMxResult = rewriter.create<hfusion::MatMulMxOp>(
       loc,
       dstType,
@@ -2205,7 +2226,9 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
       rhs,
       lhsScale,
       rhsScale,
-      acc
+      acc,
+      lhsFmt,
+      rhsFmt
     );
 
     Value finalResult = matmulMxResult;
@@ -2241,6 +2264,48 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
   Type bf16Ty = rewriter.getBF16Type();
   Type fp16Ty = rewriter.getF16Type();
   Type fp32Ty = rewriter.getF32Type();
+  bool fastMath = op.getFastMath();
+
+  auto createNanSplat = [&](RankedTensorType tensorTy) -> Value {
+    auto floatTy = cast<FloatType>(tensorTy.getElementType());
+    auto nanAttr = rewriter.getFloatAttr(
+        floatTy,
+        APFloat::getNaN(floatTy.getFloatSemantics())
+    );
+    Value empty = rewriter.create<tensor::EmptyOp>(loc, tensorTy.getShape(), tensorTy.getElementType());
+    return rewriter.create<linalg::FillOp>(loc, ValueRange{rewriter.create<arith::ConstantOp>(loc, nanAttr)}, ValueRange{empty}).getResult(0);
+  };
+
+  auto createNaNMask = [&](Value scaleTensor, RankedTensorType scaleTy) -> Value {
+    if (scaleTy.getElementType().isIntOrIndex()) {
+      auto bitWidth = scaleTy.getElementTypeBitWidth();
+      auto allOnes = APInt::getAllOnes(bitWidth);
+      auto sentinel = rewriter.create<arith::ConstantOp>(
+        loc,
+        scaleTy,
+        DenseElementsAttr::get(scaleTy, allOnes)
+      );
+      return rewriter.create<arith::CmpIOp>(
+        loc,
+        arith::CmpIPredicate::eq,
+        scaleTensor,
+        sentinel
+      ).getResult();
+    }
+
+    return rewriter.create<arith::CmpFOp>(
+      loc,
+      arith::CmpFPredicate::UNO,
+      scaleTensor,
+      scaleTensor
+    ).getResult();
+  };
+
+  auto applyNaNMask = [&](Value valueTensor, Value maskTensor) -> Value {
+    auto valueTy = cast<RankedTensorType>(valueTensor.getType());
+    Value nanTensor = createNanSplat(valueTy);
+    return rewriter.create<arith::SelectOp>(loc, maskTensor, nanTensor, valueTensor).getResult();
+  };
 
   if (lhsScaleTy.getElementType().isIntOrIndex()) {
     RankedTensorType lhsScaleI16Ty = RankedTensorType::get(lhsScaleTy.getShape(), i16Ty);
@@ -2445,6 +2510,34 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
       rhs,
       scaledRhs
     ).getResult();
+
+    if (!fastMath) {
+      Value rhsScaleNaNMask = createNaNMask(transposedRhsScale, transposedRhsScaleTy);
+      Value rhsExpandedMask = rewriter.create<triton::ExpandDimsOp>(
+        op.getLoc(),
+        RankedTensorType::get(rhsExpandedShape1, rewriter.getI1Type()),
+        rhsScaleNaNMask,
+        rewriter.getI32IntegerAttr(2)
+      ).getResult();
+      Value rhsBroadcastMask = rewriter.create<triton::BroadcastOp>(
+        op.getLoc(),
+        RankedTensorType::get(rhsBroadcastShape, rewriter.getI1Type()),
+        rhsExpandedMask
+      ).getResult();
+      Value transposedBroadcastMask = rewriter.create<triton::TransOp>(
+        op.getLoc(),
+        RankedTensorType::get({rhsD0, rhsD2, rhsD1}, rewriter.getI1Type()),
+        rhsBroadcastMask,
+        DenseI32ArrayAttr::get(rewriter.getContext(), transposeOrder)
+      ).getResult();
+      Value collapsedRhsMask = rewriter.create<tensor::CollapseShapeOp>(
+        op.getLoc(),
+        RankedTensorType::get({rhsD0 * rhsD2, rhsD1}, rewriter.getI1Type()),
+        transposedBroadcastMask,
+        rhsReassociation
+      ).getResult();
+      rhs = applyNaNMask(rhs, collapsedRhsMask);
+    }
   }
 
   int64_t D0 = lhsScaleTy.getShape()[0];
@@ -2487,6 +2580,28 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     lhs,
     scaledLhs
   ).getResult();
+
+  if (!fastMath) {
+    Value lhsScaleNaNMask = createNaNMask(lhsScale, lhsScaleTy);
+    Value lhsExpandedMask = rewriter.create<triton::ExpandDimsOp>(
+      op.getLoc(),
+      RankedTensorType::get(expandedShape1, rewriter.getI1Type()),
+      lhsScaleNaNMask,
+      rewriter.getI32IntegerAttr(2)
+    ).getResult();
+    Value lhsBroadcastMask = rewriter.create<triton::BroadcastOp>(
+      op.getLoc(),
+      RankedTensorType::get(broadcastShape, rewriter.getI1Type()),
+      lhsExpandedMask
+    ).getResult();
+    Value collapsedLhsMask = rewriter.create<tensor::CollapseShapeOp>(
+      op.getLoc(),
+      RankedTensorType::get({D0, D1 * D2}, rewriter.getI1Type()),
+      lhsBroadcastMask,
+      reassociation
+    ).getResult();
+    scaledLhsFinal = applyNaNMask(scaledLhsFinal, collapsedLhsMask);
+  }
 
   Operation *matmulOp;
   if (dstType.getRank() == 2) {
@@ -2762,7 +2877,7 @@ LogicalResult
 IndexSelectSimdConverter::matchAndRewrite(triton::ascend::IndexSelectSimdOp op, OpAdaptor adaptor,
                                           ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
-  
+
   // Get converted operands
   Value src = adaptor.getSrc();
   Value indexTensor = adaptor.getIndex();
@@ -2770,16 +2885,16 @@ IndexSelectSimdConverter::matchAndRewrite(triton::ascend::IndexSelectSimdOp op, 
   auto srcOffsetVals = adaptor.getSrcOffset();
   auto readShapeAttr = op.getReadShape();
   int32_t dim = op.getDim();
-  
+
   // Get result type
   auto resultTensorType = cast<RankedTensorType>(op.getResult().getType());
   auto elemType = resultTensorType.getElementType();
   auto resultShape = resultTensorType.getShape();
-  
+
   // Convert src (tt.ptr -> memref) to the correct memref shape
   // src is now memref<?xT> after type conversion, need to reinterpret to full shape
   auto srcMemRefType = cast<MemRefType>(src.getType());
-  
+
   // DenseI32ArrayAttr can be implicitly converted to ArrayRef<int32_t>
   ArrayRef<int32_t> readShape = readShapeAttr;
 
@@ -2796,11 +2911,11 @@ IndexSelectSimdConverter::matchAndRewrite(triton::ascend::IndexSelectSimdOp op, 
   SmallVector<int64_t> fullSrcShape;
   SmallVector<int64_t> staticSizes;
   SmallVector<Value> sizes;
-  
+
   for (size_t i = 0; i < srcShapeVals.size(); ++i) {
     bool isDynamicDim = (i == static_cast<size_t>(dim) && readShape[i] == -1);
     int64_t staticSize;
-    
+
     if (isDynamicDim) {
       // Dynamic dimension: readShape[i] == -1 indicates dynamic
       staticSize = ShapedType::kDynamic;
@@ -2829,7 +2944,7 @@ IndexSelectSimdConverter::matchAndRewrite(triton::ascend::IndexSelectSimdOp op, 
   for (size_t i = 0; i < srcShapeVals.size(); ++i) {
     int64_t staticStride = 1;
     bool isDynamic = false;
-    
+
     // Check if stride needs to be dynamic (any dimension after i is dynamic)
     for (size_t j = i + 1; j < srcShapeVals.size(); ++j) {
       if (staticSizes[j] == ShapedType::kDynamic) {
@@ -2838,7 +2953,7 @@ IndexSelectSimdConverter::matchAndRewrite(triton::ascend::IndexSelectSimdOp op, 
       }
       staticStride *= staticSizes[j];
     }
-    
+
     if (isDynamic) {
       staticStride = ShapedType::kDynamic;
       // Compute stride dynamically: stride[i] = product of sizes after i
@@ -2862,43 +2977,43 @@ IndexSelectSimdConverter::matchAndRewrite(triton::ascend::IndexSelectSimdOp op, 
   auto srcMemRef = rewriter.create<memref::ReinterpretCastOp>(
       loc, fullSrcMemRefType, src, offsets, sizes, strides,
       staticOffsets, staticSizes, staticStrides);
-  
+
   // Allocate output buffer
   auto resultMemRefType = MemRefType::get(resultShape, elemType);
   auto outputBuffer = rewriter.create<memref::AllocOp>(loc, resultMemRefType);
-  
+
   // Get indices tensor type for extracting
   auto indicesTensorType = cast<RankedTensorType>(indexTensor.getType());
   int64_t numIndices = indicesTensorType.getShape()[0];
-  
+
   // Create for loop
   auto zeroIdx = rewriter.create<arith::ConstantIndexOp>(loc, 0);
   auto numIndicesVal = rewriter.create<arith::ConstantIndexOp>(loc, numIndices);
   auto stepOne = rewriter.create<arith::ConstantIndexOp>(loc, 1);
   auto forOp = rewriter.create<scf::ForOp>(loc, zeroIdx, numIndicesVal, stepOne);
-  
+
   // Mark as parallel loop
   forOp->setAttr("hivm.parallel_loop", rewriter.getUnitAttr());
-  
+
   // Build loop body
   Block *loopBody = forOp.getBody();
   auto savedInsertionPoint = rewriter.saveInsertionPoint();
   rewriter.setInsertionPointToStart(loopBody);
-  
+
   // Remove the terminator temporarily
   Operation *terminator = &loopBody->back();
   rewriter.setInsertionPoint(terminator);
-  
+
   Value iv = forOp.getInductionVar();
-  
+
   // Extract index from indices tensor
   Value selectedIdx = rewriter.create<tensor::ExtractOp>(loc, indexTensor, ValueRange{iv});
   Value selectedIdxAsIndex = rewriter.create<arith::IndexCastOp>(
       loc, rewriter.getIndexType(), selectedIdx);
-  
+
   // Build source subview offsets/sizes/strides
   SmallVector<OpFoldResult> srcSubviewOffsets, srcSubviewSizes, srcSubviewStrides;
-  
+
   for (size_t i = 0; i < srcOffsetVals.size(); ++i) {
     if (i == static_cast<size_t>(dim)) {
       // Use the selected index for this dimension
@@ -2916,10 +3031,10 @@ IndexSelectSimdConverter::matchAndRewrite(triton::ascend::IndexSelectSimdOp op, 
     }
     srcSubviewStrides.push_back(rewriter.getIndexAttr(1));
   }
-  
+
   auto srcSubview = rewriter.create<memref::SubViewOp>(
       loc, srcMemRef, srcSubviewOffsets, srcSubviewSizes, srcSubviewStrides);
-  
+
   // Build destination subview
   SmallVector<OpFoldResult> dstSubviewOffsets, dstSubviewSizes, dstSubviewStrides;
   for (size_t i = 0; i < resultShape.size(); ++i) {
@@ -2932,7 +3047,7 @@ IndexSelectSimdConverter::matchAndRewrite(triton::ascend::IndexSelectSimdOp op, 
     }
     dstSubviewStrides.push_back(rewriter.getIndexAttr(1));
   }
-  
+
   auto dstSubview = rewriter.create<memref::SubViewOp>(
       loc, outputBuffer, dstSubviewOffsets, dstSubviewSizes, dstSubviewStrides);
 
@@ -2951,24 +3066,24 @@ IndexSelectSimdConverter::matchAndRewrite(triton::ascend::IndexSelectSimdOp op, 
                        rewriter.getDenseI32ArrayAttr({static_cast<int32_t>(dim)}));
     dstMarkOp->setAttr("hfusion.stride_align_value_in_byte",
                        rewriter.getDenseI32ArrayAttr({32}));
-    
+
     // Copy from source to destination
     rewriter.create<memref::CopyOp>(loc, srcSubview, dstSubview);
   }
-  
+
   // Restore insertion point
   rewriter.restoreInsertionPoint(savedInsertionPoint);
-  
+
   // Convert memref to tensor
   auto resultTensor = rewriter.create<bufferization::ToTensorOp>(
       loc, resultTensorType, outputBuffer, true, true);
-  
+
   // Mark as index_select_simd
   resultTensor->setAttr("index_select_simd", rewriter.getUnitAttr());
-  
+
   // Replace the original op
   rewriter.replaceOp(op, resultTensor);
-  
+
   return success();
 }
 

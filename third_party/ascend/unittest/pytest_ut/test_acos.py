@@ -58,3 +58,34 @@ def test_asinh_special(param_list):
         torch.testing.assert_close(y_ref, y_cal, rtol=bf16_tolerance, atol=bf16_tolerance)
     else:
         torch.testing.assert_close(y_ref, y_cal, rtol=1e-3, atol=1e-3)
+
+
+@triton.jit
+def acos_kernel(in_ptr0, out_ptr0, n_elements, BLOCK_SIZE: tl.constexpr):
+    offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    x = tl.load(in_ptr0 + offsets, mask=mask)
+    x = x.to(tl.float32)
+    y = libdevice.acos(x)
+    tl.store(out_ptr0 + offsets, y, mask=mask)
+
+
+@pytest.mark.acos
+@pytest.mark.parametrize('shape', [(), (1, ), (1024, 1024), (20, 320, 15), (16, 128, 64, 60), (16, 7, 57, 32, 29)])
+@pytest.mark.parametrize('dtype', [torch.float16, torch.float32, torch.bfloat16])
+def test_accuracy_acos(shape, dtype):
+    inp = torch.randn(shape, dtype=dtype, device='npu')
+    ref_out = torch.acos(inp)
+    res_out = torch.zeros_like(ref_out)
+    n_elements = inp.numel()
+    grid = (triton.cdiv(n_elements, 1024),)
+    acos_kernel[grid](inp, res_out, n_elements, BLOCK_SIZE=1024)
+    print("ref_out:", ref_out)
+    print("res_out:", res_out)
+    if dtype == torch.bfloat16:
+        bf16_tolerance = 1.0 / 128
+        torch.testing.assert_close(res_out, ref_out, rtol=bf16_tolerance, atol=bf16_tolerance, equal_nan=True)
+    elif dtype == torch.float16:
+        torch.testing.assert_close(res_out, ref_out, rtol=1e-3, atol=1e-4, equal_nan=True)
+    else:
+        torch.testing.assert_close(res_out, ref_out, rtol=1e-6, atol=1e-4, equal_nan=True)

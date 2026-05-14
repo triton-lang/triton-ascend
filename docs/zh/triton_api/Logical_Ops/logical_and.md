@@ -1,16 +1,11 @@
-# triton.language.semantic.logical_and
+# triton.language.tensor.logical_and
 
 ## 1. OP 概述
 
 简介：用于对两个张量进行逐元素逻辑与运算
-函数原型：
 
 ```python
-triton.language.semantic.logical_and(
- input: tl.tensor, 
- other: tl.tensor, 
- builder: ir.builder
-) -> tl.tensor
+x.logical_and(y)
 ```
 
 作为`tensor`的成员函数调用, 如`x0.logical_and(x1)`。
@@ -37,7 +32,7 @@ triton.language.semantic.logical_and(
 | GPU          | × | × | × | × | × | × | × | × | × | × | × | × | √ |
 | Ascend A2/A3 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | √ |
 
-结论：在 DataType 方面, Ascend相比GPU额外增加了对整型、浮点型（除fp64,fp8）的支持。
+结论：在 DataType 方面, Ascend相比GPU额外增加了对整型、浮点型（除fp64, fp8）的支持。
 
 #### 2.2.2 Shape 支持
 

@@ -49,18 +49,23 @@ triton.language.randn(
 以下示例实现了对randn的调用：
 
 ```python
+import math
+import torch
+import triton
+import triton.language as tl
+
 @triton.jit
 def kernel_randn(x_ptr, n_rounds: tl.constexpr, N: tl.constexpr, XBLOCK: tl.constexpr):
     block_offset = tl.program_id(0) * XBLOCK
-    block_size = XBLOCK if block_offset + XBLOCK <= N else N - block_offset
-    for inner_idx in range(block_size):
-        global_offset = block_offset + inner_idx
-        rand_vals = tl.randn(5, 10 + global_offset, n_rounds) # 对每个索引生成一个随机数
-        tl.store(x_ptr + global_offset, rand_vals) # 存储随机数
+    offsets = block_offset + tl.arange(0, XBLOCK)  # 块级 offset 张量
+    mask = offsets < N
+    rand_vals = tl.randn(5, 10 + offsets, n_rounds)  # 一次生成一整块随机数
+    tl.store(x_ptr + offsets, rand_vals, mask=mask)
 
-y_calf = torch.zeros(shape, dtype=eval('torch.float32')).npu()
+shape = (1024,)
+y_calf = torch.zeros(shape, dtype=torch.float32).npu()
 numel = y_calf.numel()
 ncore = 1 if numel < 32 else 32
-xblock = math.ceil(numel / ncore) 
+xblock = math.ceil(numel / ncore)
 kernel_randn[ncore, 1, 1](y_calf, 10, numel, xblock)
 ```

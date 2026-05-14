@@ -10,4 +10,6 @@ add_subdirectory(TritonToUnstructure)
 add_subdirectory(TritonToLLVM)
 add_subdirectory(TritonToStructured)
 add_subdirectory(AutoBlockify)
+# todo: this code will be removed in version 530.
 add_subdirectory(TritonAffinityOpt)
+add_subdirectory(DynamicCVPipeline)

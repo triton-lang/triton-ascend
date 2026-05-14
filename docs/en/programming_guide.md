@@ -32,11 +32,11 @@ According to the sample code, fix the number of cores, and then process task blo
 ```python
 NUM_CORE = vectorcore_num
 grid = (NUM_CORE ,) 
-_attn_fwd[grid](Q, K, V, M, Out, acc, scale......)
+_attn_fwd[grid](Q, K, V, M, Out, acc, scale, ...)
 
 @triton.jit
 def _attn_fwd(Q, K, V, M, Out, acc, scale,  
-              ......
+              ...,
               stride_qz, stride_qh, 
               Z: tl.constexpr, H: tl.constexpr,
               N_CTX: tl.constexpr,
@@ -191,7 +191,7 @@ Before the AI Core performs computation, data needs to be transferred to the on-
 +   base_offset = pid * BLOCK_SIZE
     
 +   # Calculate the total number of blocks that need to be processed
-+   num_sub_blocks = BLOCK_SIZE // BLOCK_SIZE_SUB
++   num_sub_blocks = tl.cdiv(BLOCK_SIZE, BLOCK_SIZE_SUB)
     
 +   # Loop processing each sub block
 +   for sub_block_idx in range(num_sub_blocks):
@@ -216,12 +216,14 @@ Before the AI Core performs computation, data needs to be transferred to the on-
 
 ### Triton Autotune
 
-In tiling block optimization, the values of block parameters such as **BLOCK_SIZE** and **BLOCK_SIZE_SUB** directly affect the operator performance. However, manually debugging parameter combinations is inefficient and it is difficult to find the optimal values. triton.autotune is an autotune tool provided by the Triton framework. It can traverse preset parameter configurations, compare the performance of different parameter configurations, and automatically select the optimal parameter combination. It is the core auxiliary means of tiling optimization.
+In tiling block optimization, the values of block parameters such as **BLOCK_SIZE** and **BLOCK_SIZE_SUB** directly affect operator performance. However, manually trying parameter combinations is inefficient and makes it difficult to find the best values. `triton.autotune` is the autotuning utility provided by the Triton framework. It can sweep over preset parameter configurations, compare their performance, and automatically select the best combination. It is a core tool for tiling optimization.
+
+For the recommended Triton-Ascend usage of `configs=[]`, the scope of automatic tiling, see the [Triton-Ascend Autotune Guide](./autotune_guide.md).
 
 - Core functions 
-Automatically traversal of the parameter space: Test the performance of different values of block parameters of the constexpr type such as **BLOCK_SIZE** and **BLOCK_SIZE_SUB** in batches. 
-Performance benchmark comparison: Select the optimal parameters that adapt to the current hardware based on the operator execution duration. 
-Tuning result caching: The optimal configuration after tuning is cached. The optimal configuration is reused when the operator is called, avoiding repeated tuning. 
+Automatic exploration of the parameter space: Test different values of constexpr block parameters such as **BLOCK_SIZE** and **BLOCK_SIZE_SUB** in batches. 
+Benchmark-based comparison: Select the optimal parameters for the current hardware based on execution time. 
+Caching of tuning results: Cache the best configuration after tuning so that later calls can reuse it without tuning again. 
 
 - Simple example
 

@@ -290,11 +290,12 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       rewriter.setInsertionPoint(op);
       ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
     } else if constexpr (std::is_same_v<MemAccOpTy, triton::AtomicRMWOp>) {
-      auto selectOp = op.getVal().template getDefiningOp<arith::SelectOp>();
-      op = rewriter.replaceOpWithNewOp<triton::AtomicRMWOp>(
-          op, op.getType(), op.getAtomicRmwOp(), op.getPtr(),
-          selectOp.getTrueValue(), selectOp.getCondition(), op.getSem(),
-          op.getScope());
+      if (auto selectOp = op.getVal().template getDefiningOp<arith::SelectOp>()) {
+        op = rewriter.replaceOpWithNewOp<triton::AtomicRMWOp>(
+            op, op.getType(), op.getAtomicRmwOp(), op.getPtr(),
+            selectOp.getTrueValue(), selectOp.getCondition(), op.getSem(),
+            op.getScope());
+      }
     }
     rewriter.setInsertionPoint(op);
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
@@ -728,7 +729,7 @@ void TritonToUnstructurePass::getDependentDialects(
   registry.insert<func::FuncDialect, arith::ArithDialect, linalg::LinalgDialect,
                   affine::AffineDialect, scf::SCFDialect, tensor::TensorDialect,
                   bufferization::BufferizationDialect, memref::MemRefDialect,
-                  triton::TritonDialect>();
+                  triton::TritonDialect, triton::ascend::TritonAscendDialect>();
 }
 
 std::unique_ptr<OperationPass<ModuleOp>> triton::createTritonToUnstructurePass(

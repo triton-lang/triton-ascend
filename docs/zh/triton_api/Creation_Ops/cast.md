@@ -93,7 +93,7 @@ def cast_advanced_example():
     # 浮点降精度，向零舍入
     z = x.cast(tl.float16, fp_downcast_rounding="rtz")
 
-    # 整数转换，饱和模式（Ascend扩展）
+    # float32 → int8，启用饱和模式（Ascend 扩展，超出 int8 范围的值会被截断到 [-128, 127]）
     w = x.cast(tl.int8, overflow_mode="saturate")
 
     return y, z, w

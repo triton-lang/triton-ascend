@@ -30,8 +30,8 @@ triton.language.umulhi(x, y, _semantic=None)
 | GPU    | ×    | ×     | √     | ×     | ×     | ×      | ×      | √     | ×    | ×    | ×    | ×    | ×    |
 | Ascend A2/A3 | ×    | ×     | √     | ×     | ×     | ×      | ×      | ×     | ×    | ×    | ×    | ×    | ×    |
 
-结论：Ascend 比 GPU 少了int64的支持。
-torch_npu对u8的支持。
+结论：Ascend 相比 GPU 缺失 int64 支持。
+torch_npu 对 uint8 的支持。
 
 #### 2.2.2 Shape 支持
 

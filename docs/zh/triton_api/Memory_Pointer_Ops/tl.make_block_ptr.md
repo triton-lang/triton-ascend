@@ -101,7 +101,7 @@ triton.language.make_block_ptr(
 
 - | 差异点                                 | 描述                                                         | 解决途径                       |
   | -------------------------------------- | ------------------------------------------------------------ | ------------------------------ |
-  | 与分支、循环语句搭配使用时的泛化性问题 | 当前`tl.make_tensor_ptr`，如果与较复杂的循环和分支语句搭配使用，可能会出现编译问题 | 大量泛化测试暴露问题，迭代解决 |
+  | 与分支、循环语句搭配使用时的泛化性问题 | 当前`tl.make_block_ptr`，如果与较复杂的循环和分支语句搭配使用，可能会出现编译问题 | 大量泛化测试暴露问题，迭代解决 |
 
 ### 2.4 使用方法
 
@@ -166,7 +166,7 @@ def test_makeblockptr_order(shape, permute_order):
                 in0_permuted_strides[0], in0_permuted_strides[1], in0_permuted_strides[2], # stride for in0
                 in0_stride_order[0], in0_stride_order[1], in0_stride_order[2], # stride order for in0
                 out0_strides[0], out0_strides[1], out0_strides[2], # stride for out0
-                out0_stride_order[0], out0_stride_order[1], out0_stride_order[2], # stride orderfor out0
+                out0_stride_order[0], out0_stride_order[1], out0_stride_order[2], # stride order for out0
                 shape[0], shape[1], shape[2], # task indexing space
                 tile_size0=tile_sizes[0],
                 tile_size1=tile_sizes[1],

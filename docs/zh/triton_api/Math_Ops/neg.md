@@ -48,10 +48,11 @@ Ascend 比 GPU 少了uint、fp64、bool类型的支持。
 
 ### 2.4 使用方法
 
-以下示例实现了对输入张量 `x` 做逐元素指数（以2为底）：
+以下示例实现了对输入张量 `x` 做逐元素取反：
 
-```python@triton.jit@triton.jit@triton.jit@triton.jit
-def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
+```python
+@triton.jit
+def fn_npu_(output_ptr, x_ptr,
             XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr,
             XNUMEL: tl.constexpr, YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):
     xoffs = tl.program_id(0) * XB
@@ -65,11 +66,8 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
     idx = xidx[:, None, None] * YNUMEL * ZNUMEL + yidx[None, :, None] * ZNUMEL + zidx[None, None, :]
 
     X = tl.load(x_ptr + idx)
-    Y = tl.load(y_ptr + idx)
 
     ret = -X
 
     tl.store(output_ptr + idx, ret)
-
-x = test_common.generate_tensor(shape, dtype).npu()
 ```

@@ -1,11 +1,15 @@
-# triton.language.xor
+# triton.language.tensor.__xor__
 
 ## 1. 函数概述
 
 简介：计算两个元素的异或值。
 
 ```python
-triton.language.xor(x, y, _semantic=None)
+# 通过操作符
+x ^ y
+
+# 或直接调用 dunder 方法
+x.__xor__(y)
 ```
 
 ## 2. 规格
@@ -30,7 +34,7 @@ triton.language.xor(x, y, _semantic=None)
 | GPU    | √     | √      | √     | √      |  ×      |  ×       |  ×       | √      | ×    | ×    | ×    | ×    | √    |
 | Ascend A2/A3 | √    | √     | √     | √     | ×     | ×      | ×      | √     | ×    | ×    | ×    | ×    | √    |
 
-结论：Ascend 比 GPU 少了uint类型的支持。
+结论：Ascend 相比 GPU 缺失 uint 类型支持。
 
 #### 2.2.2 Shape 支持
 
@@ -45,13 +49,14 @@ triton.language.xor(x, y, _semantic=None)
 
 > 相对社区能力暂不支持
 
-Ascend 比 GPU 少了uint类型的支持。
+Ascend 相比 GPU 缺失 uint 类型支持。
 
 ### 2.4 使用方法
 
-以下示例实现了对输入张量 `x` 做逐元素指数（以2为底）：
+以下示例计算两个输入张量的逐元素异或：
 
-```python@triton.jit
+```python
+@triton.jit
 def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
             XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr,
             XNUMEL: tl.constexpr, YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):

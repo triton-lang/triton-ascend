@@ -56,7 +56,7 @@ python -m pytest -v third_party/ascend/unittest/kernels/test_triton_kernel.py
 
 **说明**
 
-- 指定单个 kernel：在项目根目录下执行 python -m pytest -v ascend/test/common/test_triton_kernel.py --kernel={kernel_name}
+- 指定单个 kernel：在项目根目录下执行 python -m pytest -v third_party/ascend/unittest/kernels/test_triton_kernel.py --kernel={kernel_name}
 - pt文件查找策略：优先使用仓库内匹配的本地 pt，若本地不存在则按需从远端 OBS 下载 {kernel_name}.pt文件。
 - 本地已存在的pt文件，在执行完测试后不会删除，从obs桶取的文件在跑完测试后会被测试程序直接删除。
 

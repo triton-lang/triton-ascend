@@ -19,7 +19,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
+#include <queue>
+#include "DynamicCVPipeline/AllocMultiCache/DependencyDataAnalysis.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
@@ -29,6 +30,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Block.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 #include <algorithm>
 #include <cstdint>
@@ -53,10 +55,17 @@ public:
     llvm::StringRef getArgument() const final {
       return "ub-usage-opt";
     }
+private:
+    int getValueSizeInBytes(Value value);
+    void buildUBUsageGraph(Block *block, DenseMap<Operation *, int> &op2nodeId, DenseMap<int, Operation *> &nodeId2op,
+                               SmallVector<SmallVector<int>> &linkOut, SmallVector<SmallVector<int>> &linkIn,
+                               SmallVector<int> &linkSize, SmallVector<int> &linkStart, SmallVector<int> &linkEnd,
+                               SmallVector<int> &nodeBlockId, SmallVector<int> &nodeCoreType, SmallVector<int> &nodeArgs, const CVPipeline::MemoryDependenceGraph &memGraph);
+    llvm::LogicalResult UBUsageOptimization(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph);
 };
 }}
 
-static int getValueSizeInBytes(Value value)
+int UBUsageOptPass::getValueSizeInBytes(Value value)
 {
     Type type = value.getType();
     auto getElemBytes = [](Type elemType) -> int64_t {
@@ -66,7 +75,7 @@ static int getValueSizeInBytes(Value value)
         }
         return 1;
     };
-
+    //Tensor
     if (auto rankedTensorType = dyn_cast<RankedTensorType>(type)) {
         if (!rankedTensorType.hasStaticShape()) {
             return 1;
@@ -80,7 +89,7 @@ static int getValueSizeInBytes(Value value)
         }
         return static_cast<int>(std::max<int64_t>(1, numElements * getElemBytes(rankedTensorType.getElementType())));
     }
-
+    // Memref
     if (auto memRefType = dyn_cast<MemRefType>(type)) {
         if (!memRefType.hasStaticShape()) {
             return 1;
@@ -94,35 +103,32 @@ static int getValueSizeInBytes(Value value)
         }
         return static_cast<int>(std::max<int64_t>(1, numElements * getElemBytes(memRefType.getElementType())));
     }
-
+    // Vector
     if (auto vectorType = dyn_cast<VectorType>(type)) {
         return static_cast<int>(
             std::max<int64_t>(1, vectorType.getNumElements() * getElemBytes(vectorType.getElementType())));
     }
-
+    // Index
+    if (auto idxTy = dyn_cast<IndexType>(value.getType())) {
+        DataLayout dataLayout(getOperation());
+        unsigned bitWidth = dataLayout.getTypeSizeInBits(IndexType::get(getOperation()->getContext()));
+        return bitWidth / 8;
+    }
     return static_cast<int>(getElemBytes(type));
 }
 
-void buildUBUsageGraph(Block *block, DenseMap<Operation *, int> &op2nodeId, DenseMap<int, Operation *> &nodeId2op,
+void UBUsageOptPass::buildUBUsageGraph(Block *block, DenseMap<Operation *, int> &op2nodeId, DenseMap<int, Operation *> &nodeId2op,
                                SmallVector<SmallVector<int>> &linkOut, SmallVector<SmallVector<int>> &linkIn,
                                SmallVector<int> &linkSize, SmallVector<int> &linkStart, SmallVector<int> &linkEnd,
                                SmallVector<int> &nodeBlockId, SmallVector<int> &nodeCoreType, SmallVector<int> &nodeArgs, const CVPipeline::MemoryDependenceGraph &memGraph)
 {
-    op2nodeId.clear();
-    nodeId2op.clear();
-    linkOut.clear();
-    linkIn.clear();
-    linkSize.clear();
-    linkStart.clear();
-    linkEnd.clear();
-    nodeBlockId.clear();
-    nodeCoreType.clear();
-    nodeArgs.clear();
-
     DenseMap<int, int> cubeBlockId2nodeId;
     const int cubeCoreType = static_cast<int>(CVPipeline::CoreType::CUBE_ONLY);
 
     auto getOrCreateNodeId = [&](Operation *op) -> int {
+        if(op2nodeId.find(op)!=op2nodeId.end()) {
+            return op2nodeId.at(op);
+        }
         auto &bm = CVPipeline::ComputeBlockIdManager::getInstance();
         int coreType = static_cast<int>(CVPipeline::getOpCoreType(op));
         int blockId = bm.getBlockIdByOp(op);
@@ -151,14 +157,15 @@ void buildUBUsageGraph(Block *block, DenseMap<Operation *, int> &op2nodeId, Dens
         return nodeId;
     };
 
-    for (Operation &op : *block) {
-        getOrCreateNodeId(&op);
-    }
-
     DenseMap<std::pair<int, int>, bool> visited;
     auto addEdge = [&](int src, int dst, int sizeInBytes) {
         if(visited.contains(std::make_pair(src, dst))){
             return;
+        }
+        if (src == dst) {
+            //self-cycle can only be args dependency.
+            LOG_DEBUG("Find one self-cycle: id edge from "<< src << " to "<< dst << " size = "<< sizeInBytes);
+            LOG_DEBUG("op edge from " << *nodeId2op[src] << " to "<< *nodeId2op[dst]);
         }
         int edgeId = static_cast<int>(linkSize.size());
         linkSize.push_back(sizeInBytes);
@@ -175,9 +182,6 @@ void buildUBUsageGraph(Block *block, DenseMap<Operation *, int> &op2nodeId, Dens
         for (unsigned argIdx = 0; argIdx < maxArgIdx; ++argIdx) {
             Value yielded = terminator->getOperand(argIdx);
             Operation *defOp = yielded.getDefiningOp();
-            if (!defOp) {
-                continue;
-            }
             Operation *defInBlock = CVPipeline::getAncestorInBlock(defOp, block);
             if (!defInBlock || defInBlock->getBlock() != block) {
                 continue;
@@ -189,28 +193,49 @@ void buildUBUsageGraph(Block *block, DenseMap<Operation *, int> &op2nodeId, Dens
         }
     }
 
-    block->walk([&](Operation *blockOp){
-        int dstNode = getOrCreateNodeId(blockOp);
-        blockOp->walk([&](Operation *op){
+    for(Operation &blockOp : *block) {
+        int dstNode = getOrCreateNodeId(&blockOp);
+        blockOp.walk([&](Operation *op){
             for (Value operand : op->getOperands()) {
                 Operation *srcInBlock = nullptr;
                 bool fromArgEdge = false;
                 if (Operation *defOp = operand.getDefiningOp()) {
                     srcInBlock = CVPipeline::getAncestorInBlock(defOp, block);
+                    if (srcInBlock && srcInBlock == &blockOp) {
+                        // To avoid unnesessary self-cycle.
+                        // some ops in block(op) used parent(blockop) args can lead one self-cycle.
+                        continue;
+                    }
                 } else if (auto blockArg = dyn_cast<BlockArgument>(operand)) {
-                    if (blockArg.getOwner() == block && terminator &&
-                        blockArg.getArgNumber() < terminator->getNumOperands())
-                    {
-                        Value yielded = terminator->getOperand(blockArg.getArgNumber());
-                        if (Operation *yieldDefOp = yielded.getDefiningOp()) {
-                            srcInBlock = CVPipeline::getAncestorInBlock(yieldDefOp, block);
-                            fromArgEdge = true;
+                    if (blockArg.getOwner() == block && terminator) {
+                        unsigned numArgs = block->getNumArguments();
+                        unsigned numYieldOperands = terminator->getNumOperands();
+                        // for op offset=1, while op offset=0
+                        int offset = (int)numArgs - (int)numYieldOperands; 
+                        int argIdx = (int)blockArg.getArgNumber() - offset;
+
+                        if (argIdx >= 0 && argIdx < (int)numYieldOperands) {
+                            Value yielded = terminator->getOperand(argIdx);
+                            if (Operation *yieldDefOp = yielded.getDefiningOp()) {
+                                srcInBlock = CVPipeline::getAncestorInBlock(yieldDefOp, block);
+                                fromArgEdge = true;
+                            }
                         }
                     }
                 }
                 if (!srcInBlock || srcInBlock->getBlock() != block) {
                     continue;
                 }
+                // To avoid unnesessary self-cycle.
+                // Two ops in the same cube block lead to self-cycle, so continue it. 
+                auto &bm = CVPipeline::ComputeBlockIdManager::getInstance();
+                int coreType = static_cast<int>(CVPipeline::getOpCoreType(op));
+                int srcBlockId = bm.getBlockIdByOp(srcInBlock);
+                int dstBlockId = bm.getBlockIdByOp(&blockOp);
+                if (coreType == cubeCoreType && srcBlockId == dstBlockId) {
+                    continue;
+                }
+
                 int srcNode = getOrCreateNodeId(srcInBlock);
                 int edgeSize = getValueSizeInBytes(operand);
                 if (fromArgEdge) {
@@ -225,30 +250,80 @@ void buildUBUsageGraph(Block *block, DenseMap<Operation *, int> &op2nodeId, Dens
                 if (!srcInBlock || srcInBlock->getBlock() != block) {
                     continue;
                 }
+                if (srcInBlock && srcInBlock == &blockOp) {
+                    // To avoid unnesessary self-cycle.
+                    // some ops in block(op) used parent(blockop) args can lead one self-cycle.
+                    continue;
+                }
+                // To avoid unnesessary self-cycle.
+                // Two ops in the same cube block lead to self-cycle, so continue it. 
+                auto &bm = CVPipeline::ComputeBlockIdManager::getInstance();
+                int coreType = static_cast<int>(CVPipeline::getOpCoreType(op));
+                int srcBlockId = bm.getBlockIdByOp(srcInBlock);
+                int dstBlockId = bm.getBlockIdByOp(&blockOp);
+                if (coreType == cubeCoreType && srcBlockId == dstBlockId) {
+                    continue;
+                }
+
                 int srcNode = getOrCreateNodeId(srcInBlock);
                 addEdge(srcNode, dstNode, 0);
             }
         });
-    });
+    }
+}
+
+SmallVector<int> findDependency(int targetNdoe, int preNode, const SmallVector<SmallVector<int>> &linkIn,
+                             const SmallVector<int> &linkStart) 
+{
+    SmallVector<int> dependNodes;
+    DenseSet<int> visited;
+    std::queue<int> queue;
+    queue.push(targetNdoe);
+    visited.insert(targetNdoe);
+    while (!queue.empty()) {
+        int curNode = queue.front();
+        queue.pop();
+        LOG_DEBUG("curNode = "<<curNode);
+        if(curNode == preNode){
+            continue; // we find other linkin of b in A->B, so pass A.
+        }
+
+        for (int inEdgeId : linkIn[curNode]) {
+            int inStart = linkStart[inEdgeId];
+            LOG_DEBUG("instart = "<<inStart);
+            if (visited.insert(inStart).second) {
+                dependNodes.push_back(inStart);
+                queue.push(inStart);
+            }
+        }
+    }
+    return dependNodes;
 }
 
 bool isActiveEndNode(int srcNode, int endNode, const SmallVector<SmallVector<int>> &linkIn,
                              const SmallVector<int> &linkStart, const SmallVector<int> &nodeBlockId,
-                             const SmallVector<int> &nodeCoreType)
+                             const SmallVector<int> &nodeCoreType, DenseMap<int, Operation *> nodeId2op)
 {
     int nodeNum = static_cast<int>(nodeBlockId.size());
     if (nodeCoreType[endNode] != nodeCoreType[srcNode]) {
         return false;
     }
     if (nodeBlockId[endNode] == -1) {
+        // meet scf.yield/return..
         return false;
     }
     if(nodeBlockId[srcNode] == nodeBlockId[endNode]) {
+        // same cmpute block not leaf
         return false;
     }
-    for (int inEdgeId : linkIn[endNode]) {
-        int inStart = linkStart[inEdgeId];
-        if (nodeBlockId[inStart] != nodeBlockId[srcNode]) {
+    // To avoid cycles: we only collect 2 kind node:
+    // 1. endNode only from src compute block. A->endnode->...
+    // 2. endNode's srcs donnot depend any compute block.  A->endnode;args/const/->src1->endnode->...
+    // In fact the second kind includes first;
+    // BFS/DFS search expanding dependNodes transitively
+    auto dependNodes = findDependency(endNode, srcNode, linkIn, linkStart);
+    for (int node : dependNodes) {
+        if (nodeBlockId[node] != nodeBlockId[endNode] && nodeBlockId[node] != nodeBlockId[srcNode]) {
             return false;
         }
     }
@@ -260,24 +335,27 @@ static SmallVector<SmallVector<int>> collectNeedUbOpts(const SmallVector<SmallVe
                                                         const SmallVector<int> &linkStart,
                                                         const SmallVector<int> &linkEnd,
                                                         const SmallVector<int> &nodeBlockId,
-                                                        const SmallVector<int> &nodeCoreType)
+                                                        const SmallVector<int> &nodeCoreType, DenseMap<int, Operation *> nodeId2op)
 {
     SmallVector<SmallVector<int>> needUbOpts;
-    int maxBlockId = -1;
+    int maxBlockId = -1; // FIXME: We need to count how many compute block in the graph, but use max is not accurate.
     for (int blockId : nodeBlockId) {
         maxBlockId = std::max(maxBlockId, blockId);
     }
     if (maxBlockId >= 0) {
         needUbOpts.resize(static_cast<size_t>(maxBlockId + 1));
     }
-
-    for (int i = 0, nodeNum = static_cast<int>(nodeBlockId.size()); i < nodeNum; ++i) {
+    for (int i = 0; i < nodeBlockId.size(); ++i) {
         int srcBlockId = nodeBlockId[i];
         int srcCoreType = nodeCoreType[i];
+        if (srcCoreType != CVPipeline::CoreType::VECTOR_ONLY ){
+            // only vector block need ub optimization.
+            continue;
+        }
         bool canOptimize = false;
         for (int outEdgeId : linkOut[i]) {
             int dstNode = linkEnd[outEdgeId];
-            if (isActiveEndNode(i, dstNode, linkIn, linkStart, nodeBlockId, nodeCoreType))
+            if (isActiveEndNode(i, dstNode, linkIn, linkStart, nodeBlockId, nodeCoreType, nodeId2op))
             {
                 canOptimize = true;
                 break;
@@ -302,26 +380,24 @@ static int sumIncomingLinkSize(int nodeId, const SmallVector<SmallVector<int>> &
 bool findUniqueDependentNode(int curNode, int optBlockId, const SmallVector<SmallVector<int>> &linkOut,
                                      const SmallVector<SmallVector<int>> &linkIn, const SmallVector<int> &linkStart,
                                      const SmallVector<int> &linkEnd, const SmallVector<int> &linkSize,
-                                     const SmallVector<int> &nodeBlockId, int &uniqueNextNode, int &edgeSizeToNext)
+                                     const SmallVector<int> &nodeBlockId, int &uniqueNextNode)
 {
+    // only find A link single chain.
     if (linkOut[curNode].size() != 1) return false;
+    // sigle chian must be in one compute block.
     auto edgeId = linkOut[curNode][0];
     uniqueNextNode = linkEnd[edgeId];
-    if (nodeBlockId[uniqueNextNode] == optBlockId || nodeBlockId[uniqueNextNode] == -1) {
+    if (nodeBlockId[uniqueNextNode] != nodeBlockId[curNode]) {
         return false;
     }
+    // uniqueNextNode's dependent is all in nodeBlockId[curNode]
     bool onlyDependsOnCur = true;
-    for (int inEdgeId : linkIn[uniqueNextNode]) {
-        int inStart = linkStart[inEdgeId];
-        if (inStart != curNode) {
-            onlyDependsOnCur = false;
-            break;
+    auto dependNodes = findDependency(uniqueNextNode, curNode, linkIn, linkStart);
+    for (auto node: dependNodes) {
+        if(nodeBlockId[node]!=nodeBlockId[curNode]) {
+            return false;
         }
     }
-    if (!onlyDependsOnCur) {
-        return false;
-    }
-    edgeSizeToNext = linkSize[edgeId];
     return true;
 }
 
@@ -330,22 +406,24 @@ static DenseMap<int, int> collectRecordChange(const SmallVector<SmallVector<int>
                                               const SmallVector<SmallVector<int>> &linkIn,
                                               const SmallVector<int> &linkSize, const SmallVector<int> &linkStart,
                                               const SmallVector<int> &linkEnd, const SmallVector<int> &nodeBlockId,
-                                              const SmallVector<int> &nodeCoreType)
+                                              const SmallVector<int> &nodeCoreType, DenseMap<int, Operation *> nodeId2op)
 {
     DenseMap<int, int> recordChange;
     int nodeNum = static_cast<int>(nodeBlockId.size());
     for (int optBlockId = 0, blockNum = static_cast<int>(needUbOpts.size()); optBlockId < blockNum; ++optBlockId) {
         for (int optNode : needUbOpts[optBlockId]) {
+            LOG_DEBUG("optNode: "<< *nodeId2op.at(optNode));
             SmallVector<int> activateSet;
             for (int outEdgeId : linkOut[optNode]) {
                 int dstNode = linkEnd[outEdgeId];
-                if (isActiveEndNode(optNode, dstNode, linkIn, linkStart, nodeBlockId, nodeCoreType))
+                if (isActiveEndNode(optNode, dstNode, linkIn, linkStart, nodeBlockId, nodeCoreType, nodeId2op))
                 {
                     if (std::find(activateSet.begin(), activateSet.end(), dstNode) == activateSet.end()) {
                         activateSet.push_back(dstNode);
                     }
                 }
             }
+            LOG_DEBUG("activateSet Size:"<< activateSet.size());
 
             for (int activateNode : activateSet) {
                 int originUBSize = sumIncomingLinkSize(activateNode, linkIn, linkSize);
@@ -354,25 +432,42 @@ static DenseMap<int, int> collectRecordChange(const SmallVector<SmallVector<int>
                 chain.push_back(activateNode);
                 int bestCutPointIdx = -1;
 
+                // find the activate chain.
                 while (true) {
                     int curNode = chain.back();
                     int uniqueNextNode = -1;
-                    int edgeSizeToNext = 0;
                     if (!findUniqueDependentNode(curNode, optBlockId, linkOut, linkIn, linkStart, linkEnd, linkSize,
-                                                 nodeBlockId, uniqueNextNode, edgeSizeToNext))
+                                                 nodeBlockId, uniqueNextNode))
                     {
                         break;
                     }
 
                     chain.push_back(uniqueNextNode);
-                    if (edgeSizeToNext < minUBSize) {
-                        minUBSize = edgeSizeToNext;
-                        bestCutPointIdx = static_cast<int>(chain.size()) - 1;
+                }
+                for (auto i = 0; i <chain.size(); i++) {
+                    auto nowUBSize = 0;
+                    LOG_DEBUG("now chain op = "<< *nodeId2op.at(chain[i]));
+                    for (auto cutEdgeId : linkOut[chain[i]]) {
+
+                        nowUBSize += linkSize[cutEdgeId];
+                    }
+                    if (nowUBSize < minUBSize) {
+                        bestCutPointIdx = i+1;
+                        minUBSize = nowUBSize;
                     }
                 }
+
                 if (bestCutPointIdx > 0) {
+                    // need to change not only chain[i], and chain[i]'s dependency.
                     for (int i = 0; i < bestCutPointIdx; ++i) {
                         recordChange[chain[i]] = optBlockId;
+                        auto chainPreNode = i-1<0 ? optNode:chain[i-1];
+                        auto dependNodes = findDependency(chain[i], chainPreNode, linkIn, linkStart);
+                        for (auto node: dependNodes) {
+                            if(nodeBlockId[node] != optBlockId) {
+                                recordChange[node] = optBlockId;
+                            }
+                        }
                     }
                 }
             }
@@ -381,7 +476,7 @@ static DenseMap<int, int> collectRecordChange(const SmallVector<SmallVector<int>
     return recordChange;
 }
 
-llvm::LogicalResult UBUsageOptimization(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph)
+llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph)
 {
     if (!isa<scf::ForOp>(block->getParentOp())){
         return llvm::success();
@@ -399,21 +494,24 @@ llvm::LogicalResult UBUsageOptimization(Block *block, const CVPipeline::MemoryDe
     buildUBUsageGraph(block, op2nodeId, nodeId2op, linkOut, linkIn, linkSize, linkStart, linkEnd, nodeBlockId,
                       nodeCoreType, nodeArgs, memGraph);
     SmallVector<SmallVector<int>> needUbOpts =
-        collectNeedUbOpts(linkOut, linkIn, linkStart, linkEnd, nodeBlockId, nodeCoreType);
+        collectNeedUbOpts(linkOut, linkIn, linkStart, linkEnd, nodeBlockId, nodeCoreType, nodeId2op);
     int candidateCnt = 0;
     for (const auto &nodes : needUbOpts) {
         candidateCnt += static_cast<int>(nodes.size());
+        for (auto opid : nodes) {
+            LOG_DEBUG("maybe need opt: "<< *nodeId2op[opid]<< "\t id = "<< opid<<"\n");
+        }
     }
     LOG_DEBUG("Find " << candidateCnt << " op maybe need UB optimization\n");
     llvm::DenseMap<int, int> recordChange =
-        collectRecordChange(needUbOpts, linkOut, linkIn, linkSize, linkStart, linkEnd, nodeBlockId, nodeCoreType);
+        collectRecordChange(needUbOpts, linkOut, linkIn, linkSize, linkStart, linkEnd, nodeBlockId, nodeCoreType, nodeId2op);
     LOG_DEBUG("Need change blockId for " << recordChange.size() << " nodes\n");
 
     auto &bm = CVPipeline::ComputeBlockIdManager::getInstance();
     for (const auto &it : recordChange) {
         int nodeId = it.first;
         int optBlockId = it.second;
-        return bm.markOpBlockId(nodeId2op[nodeId], optBlockId);
+        bm.updateBlockId(nodeId2op[nodeId], optBlockId);
     }
     return llvm::success();
 }

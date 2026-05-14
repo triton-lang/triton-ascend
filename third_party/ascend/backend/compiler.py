@@ -369,25 +369,25 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += [
                 f"--enable-auto-multi-buffer={multi_buffer_value}",
             ]
-        
+
         storage_align = metadata["storage_align"]
         if storage_align is not None:
             _compile_option_list += [
                 f"--enable-hivm-auto-storage-align={storage_align}",
             ]
-        
+
         ops_reorder = metadata["ops_reorder"]
         if ops_reorder is not None:
             _compile_option_list += [
                 f"--enable-ops-reorder={ops_reorder}",
             ]
- 
+
         vf_fusion_mode = metadata["vf_fusion_mode"]
         if vf_fusion_mode is not None:
             _compile_option_list += [
                 f"--vf-fusion-mode={vf_fusion_mode}",
             ]
- 
+
         code_motion = metadata["code_motion"]
         if code_motion is not None:
             _compile_option_list += [
@@ -451,6 +451,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if auto_multi_buffer is not None:
             _compile_option_list += \
                 [f"--limit-auto-multi-buffer-of-local-buffer={auto_multi_buffer}"]
+        auto_multi_buffer_buffer = metadata["limit_auto_multi_buffer_buffer"]
+        if auto_multi_buffer_buffer is not None:
+            _compile_option_list += \
+                [f"--limit-auto-multi-buffer-buffer={auto_multi_buffer_buffer}"]
 
         enable_mixed_cv = metadata["enable_mixed_cv"]
         if enable_mixed_cv is not None:
@@ -623,19 +627,19 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _compile_option_list += [
                 f"--enable-ubuf-saving={enable_ubuf_saving}",
             ]
-        
+
         storage_align = metadata["storage_align"]
         if storage_align is not None:
             _compile_option_list += [
                 f"--enable-hivm-auto-storage-align={storage_align}",
             ]
-        
+
         ops_reorder = metadata["ops_reorder"]
         if ops_reorder is not None:
             _compile_option_list += [
                 f"--enable-ops-reorder={ops_reorder}",
             ]
- 
+
         code_motion = metadata["code_motion"]
         if code_motion is not None:
             _compile_option_list += [
@@ -876,6 +880,7 @@ class NPUOptions:
     disable_size_align_for_cast: bool = None
     limit_auto_multi_buffer_only_for_local_buffer: bool = None
     limit_auto_multi_buffer_of_local_buffer: str = None
+    limit_auto_multi_buffer_buffer: str = None
     set_workspace_multibuffer: int = None
     tile_mix_vector_loop: int = None
     tile_mix_cube_loop: int = None

@@ -165,6 +165,20 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         )
         if metadata["enable_dynamic_cv_pipeline"]:
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
+
+            # ascend.passes.ttir.plan_compute_block(pm)
+            # ascend.passes.ttir.compute_block_opt(pm)
+            # ascend.passes.ttir.split_dataflow(pm)
+            # ascend.passes.ttir.separate_memory_from_compute(pm)
+            # ascend.passes.ttir.alloc_multi_cache(pm)
+            # ascend.passes.ttir.add_control_flow_condition(pm)
+
+            # ascend.passes.ttir.op_classifier(pm)
+            # ascend.passes.ttir.plan_cube_block(pm)
+            # ascend.passes.ttir.plan_vector_block(pm)
+            # ascend.passes.ttir.reorder_ops(pm)
+            # ascend.passes.ttir.fuse_AdotBaddC(pm)
+            # ascend.passes.ttir.ub_usage_opt(pm)
         pm.run(mod)
 
         if opt.debug:

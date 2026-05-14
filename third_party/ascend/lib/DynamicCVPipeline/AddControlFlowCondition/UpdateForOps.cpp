@@ -264,18 +264,16 @@ LogicalResult UpdateForOpsPass::addBlockCountersAndInnerDepConds(ModuleOp module
   return success();
 }
 
-// Insert sync ops for a single forOp
-static WalkResult insertSyncOpsForForOp(scf::ForOp forOp, Block *forBody,
-                                        hivm::TCoreTypeAttr coreType,
-                                        PipeAttr setPipe, PipeAttr waitPipe,
-                                        int waitFlagId, int setFlagId)
+// Insert sync ops inside a forOp: wait at start, set before yield
+static LogicalResult insertSyncOpsInsideForOp(Block *forBody, Location loc,
+                                               hivm::TCoreTypeAttr coreType,
+                                               PipeAttr setPipe, PipeAttr waitPipe,
+                                               int waitFlagId, int setFlagId)
 {
   Operation *forTerminator = forBody->getTerminator();
   if (!forTerminator) {
-    return WalkResult::interrupt();
+    return failure();
   }
-
-  Location loc = forOp.getLoc();
 
   // Insert wait at for loop start
   OpBuilder insertionBuilder(&forBody->front());
@@ -288,119 +286,113 @@ static WalkResult insertSyncOpsForForOp(scf::ForOp forOp, Block *forBody,
   setBuilder.setInsertionPoint(forTerminator);
   setBuilder.create<SyncBlockSetOp>(loc, coreType, setPipe, waitPipe, setFlagAttr);
 
-  return WalkResult::advance();
+  return success();
 }
 
-// Insert sync ops for a single scopeOp
-static WalkResult insertSyncOpsForCube(scope::ScopeOp scopeOp,
-                                       hivm::TCoreTypeAttr coreType,
-                                       PipeAttr setPipe, PipeAttr waitPipe,
-                                       int waitFlagId, int setFlagId)
+// Insert set before or wait after a forOp
+static LogicalResult insertSetOrWaitForForOp(scf::ForOp forOp, Location loc,
+                                             hivm::TCoreTypeAttr coreType,
+                                             PipeAttr setPipe, PipeAttr waitPipe,
+                                             int flagId, bool isBefore)
 {
-  Block &scopeBlock = scopeOp.getRegion().front();
-  Operation *scopeTerminator = scopeBlock.getTerminator();
-  if (!scopeTerminator) {
-    return WalkResult::interrupt();
+  OpBuilder builder(forOp);
+  auto flagAttr = builder.getIntegerAttr(builder.getI64Type(), flagId);
+  if (isBefore) {
+    builder.create<SyncBlockSetOp>(loc, coreType, setPipe, waitPipe, flagAttr);
+  } else {
+    builder.setInsertionPointAfter(forOp);
+    builder.create<SyncBlockWaitOp>(loc, coreType, setPipe, waitPipe, flagAttr);
   }
-
-  OpBuilder scopeBuilder(scopeTerminator);
-  auto scopeFlagAttr = scopeBuilder.getIntegerAttr(scopeBuilder.getI64Type(), waitFlagId);
-  scopeBuilder.setInsertionPoint(scopeTerminator);
-  scopeBuilder.create<SyncBlockWaitOp>(scopeTerminator->getLoc(), coreType,
-                                        setPipe, waitPipe, scopeFlagAttr);
-
-  WalkResult innerResult = scopeOp.walk([&](scf::ForOp forOp) -> WalkResult {
-    if (!forOp->hasAttr("ssbuffer.main_loop")) {
-      return WalkResult::advance();
-    }
-    Block &forBody = forOp.getRegion().front();
-    return insertSyncOpsForForOp(forOp, &forBody, coreType, setPipe, waitPipe,
-                                 waitFlagId, setFlagId);
-  });
-  if (innerResult.wasInterrupted()) {
-    return WalkResult::interrupt();
-  }
-
-  return WalkResult::advance();
+  return success();
 }
 
-// Insert sync ops for a single scopeOp (vector variant: inserts SyncBlockSetOp at scope start)
-static WalkResult insertSyncOpsForVector(scope::ScopeOp scopeOp,
-                                         hivm::TCoreTypeAttr coreType,
-                                         PipeAttr setPipe, PipeAttr waitPipe,
-                                         int waitFlagId, int setFlagId)
+// Insert PIPE_S for a main_loop forOp based on forOp type and scope type
+static LogicalResult insertPipeSForMainLoopForOp(scf::ForOp forOp, scope::ScopeOp scopeOp,
+                                                  bool isScopeCube, bool isScopeVector,
+                                                  PipeAttr setPipe, PipeAttr waitPipe,
+                                                  int flagId)
 {
-  Block &scopeBlock = scopeOp.getRegion().front();
-  OpBuilder builder(&scopeBlock, scopeBlock.begin());
-  auto scopeFlagAttr = builder.getIntegerAttr(builder.getI64Type(), setFlagId);
-  builder.create<SyncBlockSetOp>(scopeOp.getLoc(), coreType, setPipe, waitPipe, scopeFlagAttr);
+  Block *forBody = &forOp.getRegion().front();
+  Location loc = forOp.getLoc();
+  bool isVectorFirst = forOp->hasAttr("ssbuffer.vector_first");
+  auto cubeType = hivm::TCoreTypeAttr::get(forOp.getContext(), hivm::TCoreType::CUBE);
+  auto vectorType = hivm::TCoreTypeAttr::get(forOp.getContext(), hivm::TCoreType::VECTOR);
 
-  WalkResult innerResult = scopeOp.walk([&](scf::ForOp forOp) -> WalkResult {
-    if (!forOp->hasAttr("ssbuffer.main_loop")) {
-      return WalkResult::advance();
+  if (isVectorFirst) {
+    if (isScopeCube) {
+      // vector_first + CUBE: before forop (SET), inside (WAIT/SET)
+      if (failed(insertSetOrWaitForForOp(forOp, loc, cubeType, setPipe, waitPipe, flagId, true))) {
+        return failure();
+      }
+      if (failed(insertSyncOpsInsideForOp(forBody, loc, cubeType, setPipe, waitPipe, flagId, flagId))) {
+        return failure();
+      }
+    } else if (isScopeVector) {
+      // vector_first + VECTOR: inside (WAIT/SET), after forop (WAIT)
+      if (failed(insertSyncOpsInsideForOp(forBody, loc, vectorType, setPipe, waitPipe, flagId, flagId))) {
+        return failure();
+      }
+      if (failed(insertSetOrWaitForForOp(forOp, loc, vectorType, setPipe, waitPipe, flagId, false))) {
+        return failure();
+      }
     }
-    Block &forBody = forOp.getRegion().front();
-    return insertSyncOpsForForOp(forOp, &forBody, coreType, setPipe, waitPipe,
-                                 waitFlagId, setFlagId);
-  });
-  if (innerResult.wasInterrupted()) {
-    return WalkResult::interrupt();
+  } else {
+    // cube_first (including default when neither attribute is present)
+    if (isScopeCube) {
+      // cube_first + CUBE: inside (WAIT/SET), after forop (WAIT)
+      if (failed(insertSyncOpsInsideForOp(forBody, loc, cubeType, setPipe, waitPipe, flagId, flagId))) {
+        return failure();
+      }
+      if (failed(insertSetOrWaitForForOp(forOp, loc, cubeType, setPipe, waitPipe, flagId, false))) {
+        return failure();
+      }
+    } else if (isScopeVector) {
+      // cube_first + VECTOR: before forop (SET), inside (WAIT/SET)
+      if (failed(insertSetOrWaitForForOp(forOp, loc, vectorType, setPipe, waitPipe, flagId, true))) {
+        return failure();
+      }
+      if (failed(insertSyncOpsInsideForOp(forBody, loc, vectorType, setPipe, waitPipe, flagId, flagId))) {
+        return failure();
+      }
+    }
   }
-
-  return WalkResult::advance();
+  return success();
 }
 
-// Insert inter-core PIPE_S synchronization for cube cores
-static LogicalResult insertInterCorePipeSForCube(ModuleOp module)
+LogicalResult UpdateForOpsPass::insertInterCorePipeS(ModuleOp module)
 {
   auto cubeCoreType = hivm::TCoreTypeAttr::get(module.getContext(), hivm::TCoreType::CUBE);
-  auto setPipeType = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
-  auto waitPipeType = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
-
-  WalkResult result = module.walk([&](scope::ScopeOp scopeOp) -> WalkResult {
-    auto attr = scopeOp->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type");
-    if (!attr || attr != cubeCoreType) {
-      return WalkResult::advance();
-    }
-
-    return insertSyncOpsForCube(scopeOp, cubeCoreType, setPipeType, waitPipeType,
-                                kPipeSFlagId, kPipeSFlagId);
-  });
-
-  return result.wasInterrupted() ? failure() : success();
-}
-
-// Insert inter-core PIPE_S synchronization for vector cores
-static LogicalResult insertInterCorePipeSForVector(ModuleOp module)
-{
   auto vectorCoreType = hivm::TCoreTypeAttr::get(module.getContext(), hivm::TCoreType::VECTOR);
   auto setPipeType = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
   auto waitPipeType = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
 
   WalkResult result = module.walk([&](scope::ScopeOp scopeOp) -> WalkResult {
-    auto attr = scopeOp->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type");
-    if (!attr || attr != vectorCoreType) {
+    auto scopeTypeAttr = scopeOp->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type");
+    if (!scopeTypeAttr) {
       return WalkResult::advance();
     }
 
-    return insertSyncOpsForVector(scopeOp, vectorCoreType, setPipeType, waitPipeType,
-                                  kPipeSFlagId, kPipeSFlagId);
+    bool isScopeCube = (scopeTypeAttr == cubeCoreType);
+    bool isScopeVector = (scopeTypeAttr == vectorCoreType);
+
+    WalkResult innerResult = scopeOp.walk([&](scf::ForOp forOp) -> WalkResult {
+      if (!forOp->hasAttr("ssbuffer.main_loop")) {
+        return WalkResult::advance();
+      }
+      if (failed(insertPipeSForMainLoopForOp(forOp, scopeOp, isScopeCube, isScopeVector,
+                                             setPipeType, waitPipeType, kPipeSFlagId))) {
+        return WalkResult::interrupt();
+      }
+      return WalkResult::advance();
+    });
+
+    if (innerResult.wasInterrupted()) {
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
   });
 
   return result.wasInterrupted() ? failure() : success();
-}
-
-LogicalResult UpdateForOpsPass::insertInterCorePipeS(ModuleOp module)
-{
-  if (failed(insertInterCorePipeSForCube(module))) {
-    return failure();
-  }
-
-  if (failed(insertInterCorePipeSForVector(module))) {
-    return failure();
-  }
-
-  return success();
 }
 
 void UpdateForOpsPass::runOnOperation()

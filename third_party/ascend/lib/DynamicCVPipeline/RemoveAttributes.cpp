@@ -40,7 +40,7 @@ using namespace CVPipeline;
 static constexpr const char *DEBUG_TYPE = "RemoveAttributes";
 #define LOG_DEBUG(...) LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__)
 
-static constexpr llvm::StringLiteral kAttrsToRemove[] {kBlockId, kCoreType, kTransferId};
+static constexpr llvm::StringLiteral kAttrsToRemove[] {kBlockId, kCoreType, kTransferId, kCubeFirst, kVectorFirst};
 
 void RemoveSsbufAttrPass::runOnOperation() {
     auto module = getOperation();

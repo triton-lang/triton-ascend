@@ -81,6 +81,24 @@ void MarkMainLoopPass::runOnOperation()
         }
     }
 
+    // Add cube_first or vector_first attribute based on first occurrence
+    module.walk([&](scf::ForOp forOp) {
+        if (!forOp->hasAttr("ssbuffer.main_loop")) {
+            return;
+        }
+
+        for (Operation &op : forOp.getBody()->getOperations()) {
+            if (isa<hivm::FixpipeOp>(&op)) {
+                forOp->setAttr("ssbuffer.cube_first", UnitAttr::get(module.getContext()));
+                break;
+            }
+            if (isa<hivm::CopyOp>(&op)) {
+                forOp->setAttr("ssbuffer.vector_first", UnitAttr::get(module.getContext()));
+                break;
+            }
+        }
+    });
+
     LOG_DEBUG("--- exit MarkMainLoopPass --->\n");
 }
 

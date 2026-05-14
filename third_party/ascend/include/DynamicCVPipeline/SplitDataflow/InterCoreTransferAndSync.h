@@ -89,13 +89,13 @@ private:
                                 mlir::Operation *currConsStart,
                                 llvm::SmallVector<DependencyInfo> &memDependencies);
 
-    SmallVector<int64_t> computeExpectedShape(mlir::Value value);
-    bool isShapeExpected(mlir::Value value, llvm::SmallVector<int64_t> &expectedShape);
+    SmallVector<int64_t, 2> computeExpectedShape(mlir::Value value);
+    bool isShapeExpected(mlir::Value value, llvm::SmallVector<int64_t, 2> &expectedShape);
     mlir::Value normalizeIfNeeded(mlir::OpBuilder &builder,
                                   DependencyInfo &dep,
                                   mlir::Location loc,
                                   mlir::Value origValue,
-                                  llvm::SmallVector<int64_t> expectedShape,
+                                  llvm::SmallVector<int64_t, 2> expectedShape,
                                   int originBlockId);
     void Nd2NzNormalize(mlir::OpBuilder &builder, DependencyInfo &dep, mlir::Location loc);
     void rewriteMatmulWithNewShape(mlir::OpBuilder &builder,

@@ -390,6 +390,21 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
   m.def("remove_ssbuf_attr", [](PassManager &pm) {
     pm.addPass(createRemoveSsbufAttrPass());
   });
+
+  // submodule
+  m.def("op_classifier", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createOpClassifierPass());});
+  m.def("plan_cube_block", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createPlanCubeBlockPass());});
+  m.def("plan_vector_block", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createPlanVectorBlockPass());});
+  m.def("reorder_ops", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createReorderOpsByBlockIdPass());});
+  m.def("fuse_AdotBaddC", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createFuseAdotBaddCPass());});
+  m.def("ub_usage_opt", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createUBUsageOptPass());});
+
 }
 
 // Forward declaration for ascend_ir bindings (defined in ascend_ir.cc)

@@ -68,10 +68,20 @@ private:
             LOG_DEBUG("Other operand is not defined by any operation, cannot fuse.");
             return false;
         }
+
+        // Check the addf's result is used by other matmul.
+        // TODO: this can be remove after bishengir-compile support fixpipe to L1.
+        auto addfResult = fuseInfo.addf.getResult();
+        for (auto user : addfResult.getUsers()) {
+            if (auto userMatmul = dyn_cast<linalg::MatmulOp>(user)) {
+                return false;
+            }
+        }
         
         // Check if defOp dominates matmul
-        DominanceInfo dominance(fuseInfo.matmul->getParentOp());
-        if (!dominance.properlyDominates(defOp, fuseInfo.matmul)) {
+        auto matmul = fuseInfo.matmul;
+        DominanceInfo dominance(matmul->getParentOp());
+        if (!dominance.properlyDominates(defOp, matmul)) {
             LOG_DEBUG("Defining operation does not dominate matmul, cannot fuse.");
             return false;
         }
@@ -138,6 +148,8 @@ void mlir::triton::FuseAdotBaddCPass::runOnOperation()
 {
     ModuleOp module = getOperation();
     SmallVector<FuseInfo> fuseCandidates;
+    LOG_DEBUG("== FuseAdotBaddC Pass Start ==\n");
+    LOG_DEBUG(module);
     
     module.walk([&](Operation *op) {
         if (auto matmul = dyn_cast<linalg::MatmulOp>(op)) {
@@ -152,6 +164,9 @@ void mlir::triton::FuseAdotBaddCPass::runOnOperation()
             
             // Check conditions
             if (userCount != 1 || op->getBlock() != singleUser->getBlock() || !isa<arith::AddFOp>(singleUser)) {
+                llvm::errs() << "Matmul has " << userCount << " users, expected exactly 1. ";
+                llvm::errs() << "matumu = " << *matmul << "\n";
+                llvm::errs() << "singleUser = " << *singleUser<< "\n";
                 module->emitError() << "[" << DEBUG_TYPE << "] The previous pass split errors.";
                 signalPassFailure();
                 return;

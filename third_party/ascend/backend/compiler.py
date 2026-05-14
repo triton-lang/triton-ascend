@@ -179,6 +179,44 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             # ascend.passes.ttir.reorder_ops(pm)
             # ascend.passes.ttir.fuse_AdotBaddC(pm)
             # ascend.passes.ttir.ub_usage_opt(pm)
+
+            ascend.passes.ttir.remove_ssbuf_attr(pm)
+
+        _env_val = os.getenv("TRITON_INTRA_CACHE_NUM")
+        _val = int(_env_val) if _env_val is not None else metadata.get("intra_cache_num")
+        if _val is not None:
+            ascend.passes.ttir.set_buffer_count(0, _val)
+
+        _env_val = os.getenv("TRITON_INTER_CACHE_NUM")
+        _val = int(_env_val) if _env_val is not None else metadata.get("inter_cache_num")
+        if _val is not None:
+            ascend.passes.ttir.set_buffer_count(1, _val)
+
+        _env_val = os.getenv("TRITON_LOAD_CACHE_NUM")
+        _val = int(_env_val) if _env_val is not None else metadata.get("load_cache_num")
+        if _val is not None:
+            ascend.passes.ttir.set_buffer_count(2, _val)
+
+        _val = metadata.get("intra_cache_num")
+        if _val is not None:
+            ascend.passes.ttir.set_buffer_count(0, _val)
+
+        _val = metadata.get("inter_cache_num")
+        if _val is not None:
+            ascend.passes.ttir.set_buffer_count(1, _val)
+
+        _val = metadata.get("load_cache_num")
+        if _val is not None:
+            ascend.passes.ttir.set_buffer_count(2, _val)
+
+        if opt.debug:
+            # Print the equivalent triton-opt command line so the pass
+            # pipeline can be reproduced and debugged outside of Python.
+            cmd = [_get_triton_opt_path(), src_path,
+                   f"--pass-pipeline={pm.get_pipeline_str()}",
+                   "--mlir-print-debuginfo", "-o", dst_path]
+            print(f"[DEBUG] cmd list: {shlex.join(cmd)}")
+
         pm.run(mod)
 
         if opt.debug:

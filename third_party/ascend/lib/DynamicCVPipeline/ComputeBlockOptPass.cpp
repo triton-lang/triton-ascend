@@ -38,7 +38,7 @@ void ComputeBlockOptPass::runOnOperation()
 
     OpPassManager pm(module.getOperationName());
 
-    pm.addPass(createUBUsageOptPass());
+    // pm.addPass(createUBUsageOptPass());
     pm.addPass(createUnifyAllocBlockPass());
     pm.addPass(createReorderOpsByBlockIdPass());
     pm.addPass(createFuseAdotBaddCPass());

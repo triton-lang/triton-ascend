@@ -46,7 +46,6 @@ void PlanComputeBlockPass::runOnOperation()
     OpPassManager pm(module.getOperationName());
     CVPipeline::ComputeBlockIdManager::getInstance().reset();
     LOG_DEBUG("Enter pass.\n");
-    LOG_DEBUG("Input ir:\n" << module << "\n");
 
     // Step 1: Run OpClassifierPass to classify operations
     pm.addPass(createOpClassifierPass());
@@ -66,6 +65,7 @@ void PlanComputeBlockPass::runOnOperation()
     }
 
     LOG_DEBUG("Process successfully\n");
+    LOG_DEBUG("after plan compute Onput ir:\n" << module << "\n");
 }
 
 namespace mlir {

@@ -452,11 +452,14 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 [f"--append-bisheng-options=-mllvm --cce-vf-remove-membar={enable_cce_vf_remove_membar}"]
 
         # TEMP: Allow TRITON_ENABLE_VF_FUSION env var to override metadata configuration
-        env_vf = os.getenv("TRITON_ENABLE_VF_FUSION")
-        enable_vf_fusion = (
-            env_vf.lower() in ("true", "1", "yes") if env_vf is not None
-            else metadata.get("enable_vf_fusion", False)
-        )
+        enable_vf_env = os.getenv("TRITON_ENABLE_VF_FUSION")
+        if enable_vf_env is not None:
+            enable_vf_fusion = enable_vf_env.lower() in ("true", "1", "yes")
+        elif "enable_vf_fusion" in metadata:
+            enable_vf_fusion = metadata["enable_vf_fusion"]
+        else:
+            enable_vf_fusion = None
+
         if enable_vf_fusion is not None:
             _compile_option_list += [f"--enable-vf-fusion={enable_vf_fusion}"]
 
@@ -862,7 +865,7 @@ class NPUOptions:
     tile_mix_cube_loop: int = None
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
-    enable_vf_fusion: bool = False
+    enable_vf_fusion: bool = None
     add_auto_scheduling: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = False
 

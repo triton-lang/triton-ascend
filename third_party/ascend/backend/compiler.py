@@ -209,14 +209,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         if _val is not None:
             ascend.passes.ttir.set_buffer_count(2, _val)
 
-        if opt.debug:
-            # Print the equivalent triton-opt command line so the pass
-            # pipeline can be reproduced and debugged outside of Python.
-            cmd = [_get_triton_opt_path(), src_path,
-                   f"--pass-pipeline={pm.get_pipeline_str()}",
-                   "--mlir-print-debuginfo", "-o", dst_path]
-            print(f"[DEBUG] cmd list: {shlex.join(cmd)}")
-
         pm.run(mod)
 
         if opt.debug:

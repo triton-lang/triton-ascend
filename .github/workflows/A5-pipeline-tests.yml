@@ -169,10 +169,10 @@ jobs:
       - name: Trigger pipeline
         id: run
         env:
+          BASE_URL:           ${{ secrets.BLUE_YELLOW_BASE_URL }}
           APP_CODE:           ${{ secrets.BLUE_YELLOW_APP_CODE }}
           APP_KEY:            ${{ secrets.BLUE_YELLOW_APP_KEY }}
           APP_SECRET:         ${{ secrets.BLUE_YELLOW_APP_SECRET }}
-          BASE_URL:           ${{ vars.BLUE_YELLOW_BASE_URL }}
           YELLOW_PIPELINE_ID: ${{ vars.YELLOW_PIPELINE_ID }}
           YELLOW_GROUP_ID:    ${{ vars.YELLOW_GROUP_ID }}
           PR_ID:              ${{ steps.ctx.outputs.pr_id }}

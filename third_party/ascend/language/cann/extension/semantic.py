@@ -175,3 +175,26 @@ def debug_barrier(sync_mode: str, _semantic=None) -> None:
     target = tl.tensor(_semantic.builder.get_int64(0), tl.int64)
     attr = _semantic.builder.get_string_attr(sync_mode)
     _semantic.builder.create_debug_barrier(target.handle, "SYNC_IN_VF", attr)
+
+
+def conv1d(
+    input_tensor: tl.tensor, weight_tensor: tl.tensor, bias: Union[tl.tensor, None],
+    stride: int, padding_size: int, dilation: int, groups: int,
+    output_shape, _semantic=None
+) -> tl.tensor:
+    bias_handle = None if bias is None else bias.handle
+
+    element_ty = input_tensor.type.element_ty
+    output_ty = tl.block_type(element_ty, output_shape)
+    out = _semantic.builder.create_conv1d(
+        input_tensor.handle,
+        weight_tensor.handle,
+        bias_handle,
+        stride,
+        padding_size,
+        dilation,
+        groups,
+        output_ty.to_ir(_semantic.builder)
+    )
+    return tl.tensor(out, output_ty)
+    

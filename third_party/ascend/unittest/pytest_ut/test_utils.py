@@ -1,10 +1,11 @@
 import os
 import platform
+import hashlib
 from unittest.mock import patch, mock_open
 import unittest
 import pytest
 from triton.backends.ascend.utils import (
-    get_cann_version,
+    get_cann_version_file_hash,
     get_machine_arch,
 )
 
@@ -30,31 +31,18 @@ def test_get_machine_arch_unknown_case(mock_machine):
         get_machine_arch()
 
 
-def test_get_cann_version_normal_case():
+def test_get_cann_version_file_hash_normal_case():
     test_version = "9.0.0"
     test_inner_version = "v100rc00"
-    test_file_context = f"version={test_version}\ninnerversion={test_inner_version}"
+    test_file_context = f"version={test_version}\ninnerversion={test_inner_version}".encode("utf-8")
     with patch("builtins.open", mock_open(read_data=test_file_context)):
-        result = get_cann_version()
-        assert result == "CANN-" + test_version + "-" + test_inner_version
+        result = get_cann_version_file_hash()
+        excepted_hash = hashlib.sha256(test_file_context).hexdigest()
+        assert result == excepted_hash
 
 
-def test_get_cann_version_inner_empty_case():
-    test_version = "9.0.0"
-    test_file_context = f"version={test_version}\naaa=bbb"
-    with patch("builtins.open", mock_open(read_data=test_file_context)):
-        result = get_cann_version()
-        assert result == "CANN-" + test_version
-
-
-def test_get_cann_version_file_not_find_case():
+def test_get_cann_version_file_hash_file_not_find_case():
     with patch("builtins.open") as mock_open_file:
         mock_open_file.side_effect = FileNotFoundError
         with pytest.raises(FileNotFoundError):
-            get_cann_version()
-
-
-def test_get_cann_version_empty_file_case():
-    with patch("builtins.open", mock_open(read_data="")):
-        with pytest.raises(ValueError):
-            get_cann_version()
+            get_cann_version_file_hash()

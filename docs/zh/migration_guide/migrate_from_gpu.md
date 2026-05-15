@@ -1,16 +1,53 @@
 # GPU Triton算子迁移
 
-概述：本文着重介绍了进行GPU Triton算子迁移中值得注意的问题，分为三个方面：多核任务并行、单核数据搬运、单核数据运算。首先在多核任务并行中我们强调了迁移核心原则，以及完整迁移示例。然后在单核数据搬运中介绍了从 GPU 迁移到 NPU 的基本步骤。最后在单核数据运算最后进行了GPU 和 NPU在Triton问题上的差异分析。此外补充了一些常见问题及其处理方式。
+概述：本文介绍 GPU Triton 算子迁移到昇腾 NPU 时的通用处理思路和常见问题。迁移时建议先完成 Python 侧设备与运行时接口替换，再检查 grid 分核、访存对齐、单核计算、UB 空间和 coreDim 限制，最后结合具体示例完成代码修改和正确性验证。
 
-## 多核任务并行
+## 通用迁移流程
 
-### 迁移核心原则
+### 迁移 Python 侧设备和运行时接口
 
-- 放弃 GPU「逻辑 grid 自由定义」，转为昇腾「物理核组绑定」；
-- Vector算子场景下要求 32 字节访存对齐，cube-vector融合算子场景下要求 512 字节对齐，并移除 GPU 专属同步 API（如cuda中控制线程 / 流 / kernel 同步的专用接口）；
-- grid 优先用 1D，2D NPU适配写法也会合并为1D, 实际grid值应对齐芯片物理核数，比如：(20,) 与 (4, 5) 的效果是一样的。
+在修改具体 Triton kernel 前，先完成 Python 侧设备迁移：
 
-### 完整迁移示例（向量加法）
+1. 在 Python 文件中增加 `import torch_npu`。
+2. 查找 `device="cuda"`、`device='cuda'`、`.cuda()` 和 `.to("cuda")` 等设备指定方式，改为 `device="npu"`、`device='npu'`、`.npu()` 或 `.to("npu")`。
+3. 查找 `torch.cuda.*`、CUDA stream、CUDA event、CUDA synchronize 等 GPU 专属接口，改为 NPU 对应接口或删除不必要的同步逻辑。
+4. 删除只为 GPU 设备发现服务的逻辑，例如 `triton.runtime.driver.active.get_active_torch_device()` 相关设备断言。
+5. 保持 Triton kernel 主体逻辑不变，先用 NPU Tensor 完成编译和正确性验证。
+
+### 调整 grid 分核
+
+GPU 上常见的写法会把 grid 设计为大量逻辑 program，由硬件和运行时调度到 SM 上执行。迁移到 NPU 时，应优先考虑物理 AI Core 数量和算子类型：
+
+- grid 优先使用 1D；2D NPU 适配写法也会合并为 1D，例如 `(20,)` 与 `(4, 5)` 的效果相同。
+- Vector-only 算子的并发任务数通常按 Vector Core 数量组织；包含 `tl.dot` 的算子通常按 AI Core 数量组织。
+- 当逻辑 grid 远大于物理核数时，需要评估是否改成每个 program 内部循环处理多个 tile，或在逻辑核之间无顺序依赖时使用 `TRITON_ALL_BLOCKS_PARALLEL`。
+- coreDim 不能超过 `UINT16_MAX`（65535），大 shape 算子需要结合 BLOCK_SIZE 或分块方式控制 grid 大小。
+
+| 维度 | 核心结构 | 算子类型 |
+|------|----------|----------|
+| 昇腾 NPU (Ascend) | 多个 AI Core，分为 Cube Core（矩阵乘）和 Vector Core（向量计算） | Vector-only 算子 → 并发任务数 = Vector Core 数；含 `tl.dot` 算子 → 并发任务数 = AI Core 数 |
+| GPU NVIDIA/AMD | 多个 CUDA Core（标量/向量计算） + Tensor Core（矩阵乘） | GPU 算子一般由编译器和硬件自动决定并发度 |
+
+### 检查单核数据搬运
+
+完成设备替换后，需要继续检查单个 program 内的数据搬运方式：
+
+- Vector 算子场景下要求 32 字节访存对齐，cube-vector 融合算子场景下要求 512 字节对齐。
+- 保留 tail mask，确认边界元素不会越界访问。
+- 检查一次 tile 的片上内存占用，避免触发 UB 空间溢出。
+- 移除或替换 GPU 专属同步 API，例如 CUDA thread、stream、event 或 kernel synchronize 相关接口。
+
+### 检查单核数据运算
+
+NPU 与 GPU 的计算单元和支持的数据类型存在差异。迁移后应先保证正确性，再根据性能问题调整：
+
+- 对整数索引、offset、长度等中间值，优先确认当前数据类型是否被 NPU 路径高效支持。
+- 对含 `tl.dot` 的算子，确认 M/N/K tile、累加 dtype 和输出 dtype 是否符合 NPU 后端要求。
+- 对长序列、长 hidden size 或大 K 维循环，优先通过 tiling 控制单次搬入和计算规模。
+
+## 迁移示例
+
+### 示例 1：向量加法完整迁移
 
 ```diff
 import torch
@@ -58,11 +95,9 @@ print(f'The maximum difference between torch and triton is '
 f'{torch.max(torch.abs(output_torch - output_triton))}')
 ```
 
-## 单核数据搬运
+### 示例 2：设备替换与单核数据搬运
 
-首先需要了解从 GPU 迁移到 NPU 的基本步骤。以下是一个可在 GPU 上正常运行的Triton内核示例：
-
-- 迁移到 NPU 的第一步，只需将 device='cuda' 改为 device='npu'，即可尝试在 NPU 上运行：
+以下示例展示将设备从 CUDA 替换为 NPU 后，对单核数据搬运场景进行正确性验证：
 
 ```diff
 import pytest
@@ -93,20 +128,6 @@ def test_npu_1d(shape, dtype):
     fn_broadcast_1d[(1,)](output, x, XS, YS)
     assert torch.allclose(std, output)
 ```
-
-## 单核数据运算
-
-### 差异分析
-
-昇腾 NPU 平台具备多个计算核心（即AI Core，包括cube/vector两类），具体个数与底层芯片型号相关，底层物理AI Core个数可以通过driver.active.utils.get_device_properties接口获取。虽然运行时接口允许在执行Triton kernel时启动多于底层物理AI Core个数的并发任务（最大并发任务个数不得超过65535），但当并发任务数多于底层物理核数时，这些并发任务实际将划分为多个批次调度到NPU上运行，单个批次内的并行任务个数依然不能超过底层物理AI Core个数。分批调度会产生额外的设备侧开销，从而影响Triton算子整体执行性能。
-
-为能充分利用NPU的物理AI Core资源进行并行计算加速，同时避免分批调度开销，建议开发者将并发任务个数配置为底层AI Core个数。对于仅涉及Vector计算的Triton算子，并发任务个数应等于Vector Core的个数；其他类型的Triton算子（即Triton算子内使用了tl.dot），并发任务个数应等于AI Core的个数。  
-补充：TRITON_ALL_BLOCKS_PARALLEL ：启用或禁用自动根据物理核数优化逻辑核数，仅当逻辑核间可并行时方可启动。当逻辑核数大于物理核数时，启动该优化，则编译器自动调整逻辑核数量为物理核数，减少调度开销。
-
-|维度    |             核心结构                   |                     算子类型                    |
-|--------|----------------------------------------|------------------------------------------------|
-|昇腾 NPU (Ascend) |多个 AI Core，分为 Cube Core（矩阵乘）和 Vector Core（向量计算）| Vector-only 算子 → 并发任务数 = Vector Core 数；含 tl.dot 算子 → 并发任务数 = AI Core 数 |
-|GPU NVIDIA/AMD| 多个 CUDA Core（标量/向量计算） + Tensor Core（矩阵乘）| GPU 算子一般都能映射到 CUDA Core/Tensor Core，由编译器和硬件自动决定并发度 |
 
 ## 常见问题概览
 

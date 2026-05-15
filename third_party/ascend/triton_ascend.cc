@@ -276,6 +276,38 @@ void init_triton_ascend_ir(py::module &&m) {
             startOffset
           );
       })
+    // conv1d operation
+    .def("create_conv1d",
+      [](TritonOpBuilder &self, Value input, Value weight, py::object bias,
+        int64_t stride, int64_t padding_size, int64_t dilation, int64_t groups,
+        Type output_type) -> Value {
+          Value biasValue;
+          if (!bias.is_none()) {
+            biasValue = bias.cast<Value>();
+          } else {
+            biasValue = Value();
+          }
+          auto &builder = self.getBuilder();
+          auto strideAttr = builder.getI64IntegerAttr(stride);
+          auto paddingSizeAttr = builder.getI64IntegerAttr(padding_size);
+          auto dilationAttr = builder.getI64IntegerAttr(dilation);
+          auto groupsAttr = builder.getI64IntegerAttr(groups);
+          auto op = self.create<triton::ascend::Conv1dOp>(
+              output_type,
+              input,
+              weight,
+              biasValue,
+              strideAttr,
+              paddingSizeAttr,
+              dilationAttr,
+              groupsAttr
+          );
+          return op.getResult();
+      },
+      py::arg("input"), py::arg("weight"), py::arg("bias"),
+      py::arg("stride"), py::arg("padding_size"), py::arg("dilation"),
+      py::arg("groups"), py::arg("output_type")
+      )
     // Add sort
     .def("create_sort",
       [](TritonOpBuilder &self, Value src, int64_t dim, bool descending) -> Value {

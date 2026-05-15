@@ -62,6 +62,8 @@ public:
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createAddControlFlowConditionPass();
+
+void registerAddControlFlowConditionPasses();
 } // namespace triton
 } // namespace mlir
 #endif // TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_ADD_CONTROLFLOW_CONDITION_PASS_H

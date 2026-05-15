@@ -129,7 +129,7 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp)
     int producerIfOpIndex = -1;
     for (Value buffer : producerBuffers) {
       for (Operation *user : buffer.getUsers()) {
-        if (isa<mlir::bufferization::MaterializeInDestinationOp>(user)) {
+        if (isa<mlir::bufferization::MaterializeInDestinationOp>(user) || isa<hivm::CopyOp>(user)) {
           producerIfOpIndex = findIfOpIndexInList(user, ifOps, ifOpIndex);
           if (producerIfOpIndex == -1) {
             LDBG("Can not find the producerBuffers in any ifOps\nproducerBuffers: " << *user);

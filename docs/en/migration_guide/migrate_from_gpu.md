@@ -1,16 +1,53 @@
 # Migrating Triton Operators from GPUs
 
-This document outlines key considerations for migrating Triton operators from GPUs, organized into three key aspects: multi-core task parallelism, single-core data transfer, and single-core data computation. In the "Multi-Core Task Parallelism" section, we highlight core migration principles and provide a complete migration example. The "Single-Core Data Transfer" section describes the basic procedure for migrating operators from GPUs to NPUs. Finally, the "Single-Core Data Computation" analyzes the differences between GPUs and NPUs with respect to Triton issues. We also provide answers to frequently asked questions (FAQ).
+This document describes the general procedure and common issues for migrating GPU Triton operators to Ascend NPUs. Start by replacing Python-side device and runtime interfaces, then check grid core allocation, memory access alignment, single-program computation, UB usage, and coreDim limits. The examples later in this document show how to apply these steps in code.
 
-## Multi-Core Task Parallelism
+## General Migration Procedure
 
-### Core Migration Principles
+### Migrate Python-Side Device and Runtime Interfaces
 
-- Shift from GPUs' "logical grid flexibility" to Ascend's "physical core group binding".
-- Enforce 32-byte memory alignment in vector operator scenarios and 512-byte memory alignment in cube-vector operator scenarios. And remove GPU-specific synchronization APIs(such as the dedicated interfaces for controlling thread / stream / kernel synchronization in CUDA).
-- Prefer 1D grids. NPUs' 2D adaptations will be merged into the 1D form. Actual grid values must align with the physical core count available on chips. For example, `(20,)` and `(4, 5)` will produce equivalent execution results.
+Before modifying a specific Triton kernel, migrate the Python-side device code first:
 
-### Complete Migration Example (Vector Addition)
+1. Add `import torch_npu` to the Python file.
+2. Find `device="cuda"`, `device='cuda'`, `.cuda()`, `.to("cuda")`, and similar device specifications, and change them to `device="npu"`, `device='npu'`, `.npu()`, or `.to("npu")`.
+3. Find GPU-specific APIs such as `torch.cuda.*`, CUDA streams, CUDA events, and CUDA synchronization, then replace them with NPU counterparts or remove unnecessary synchronization logic.
+4. Remove logic that exists only for GPU device discovery, such as assertions around `triton.runtime.driver.active.get_active_torch_device()`.
+5. Keep the Triton kernel body unchanged at first, and use NPU tensors to verify compilation and correctness.
+
+### Adjust Grid Core Allocation
+
+GPU kernels often use a large logical grid and rely on the runtime and hardware to schedule programs onto SMs. On NPUs, first consider the physical AI Core count and operator type:
+
+- Prefer 1D grids. NPU 2D adaptations are merged into 1D; for example, `(20,)` and `(4, 5)` produce equivalent execution results.
+- For Vector-only operators, organize concurrent tasks around the Vector Core count. For operators containing `tl.dot`, organize concurrent tasks around the AI Core count.
+- If the logical grid is much larger than the physical core count, consider letting each program process multiple tiles in an inner loop, or use `TRITON_ALL_BLOCKS_PARALLEL` when logical programs have no ordering dependency.
+- `coreDim` cannot exceed `UINT16_MAX` (65535). For large shapes, control grid size through BLOCK_SIZE or tiling.
+
+| Dimension | Core Structure | Operator Type |
+|-----------|----------------|---------------|
+| Ascend NPU | Multiple AI cores, categorized into Cube Cores for matrix multiplication and Vector Cores for vector computation | Vector-only operators -> concurrent task count = Vector Core count; operators containing `tl.dot` -> concurrent task count = AI Core count |
+| NVIDIA/AMD GPU | Multiple CUDA cores for scalar/vector computation and Tensor Cores for matrix multiplication | GPU concurrency is generally determined by the compiler and hardware |
+
+### Check Single-Program Data Transfer
+
+After device replacement, check data movement inside each program:
+
+- Vector operators require 32-byte memory access alignment, and cube-vector fused operators require 512-byte alignment.
+- Keep tail masks and verify that boundary elements are not accessed out of bounds.
+- Check on-chip memory usage for each tile to avoid UB overflow.
+- Remove or replace GPU-specific synchronization APIs, such as CUDA thread, stream, event, or kernel synchronization interfaces.
+
+### Check Single-Program Computation
+
+NPU and GPU compute units differ in supported data types and execution behavior. After migration, verify correctness first, then adjust based on performance symptoms:
+
+- For integer indices, offsets, and lengths, confirm whether the current dtype is efficiently supported by the NPU path.
+- For operators containing `tl.dot`, check M/N/K tiling, accumulator dtype, and output dtype.
+- For long sequence, long hidden size, or large K loops, use tiling to control the amount of data moved and computed at one time.
+
+## Migration Examples
+
+### Example 1: Complete Vector Addition Migration
 
 ```diff
 import torch
@@ -58,11 +95,9 @@ print(f'The maximum difference between torch and triton is '
 f'{torch.max(torch.abs(output_torch - output_triton))}')
 ```
 
-## Single-Core Data Transfer
+### Example 2: Device Replacement and Single-Program Data Transfer
 
-First off, you need to understand the basic steps for migrating from GPUs to NPUs. Below is an example Triton kernel that runs properly on GPUs:
-
-- The first step is to change `device='cuda'` to `device='npu'` to run the kernel on NPUs.
+The following example replaces CUDA tensors with NPU tensors and verifies correctness for a single-program data transfer case.
 
 ```diff
 import pytest
@@ -93,20 +128,6 @@ def test_npu_1d(shape, dtype):
     fn_broadcast_1d[(1,)](output, x, XS, YS)
     assert torch.allclose(std, output)
 ```
-
-## Single-Core Data Computation
-
-### Difference Analysis
-
-Ascend NPUs are equipped with multiple compute cores (AI cores), categorized into cube cores and vector cores. The exact number of AI cores varies by chip model and can be queried through the driver.active.utils.get_device_properties API. When executing a Triton kernel, the runtime APIs allow the number of concurrent tasks to exceed the available physical AI cores—though the total number of concurrent tasks is capped at 65,535. In such cases, these tasks are divided into multiple batches and scheduled to NPUs for execution. Crucially, the number of concurrent tasks within each individual batch still cannot surpass the number of physical AI cores. This batch scheduling introduces additional device-side overhead, which can impact the overall execution performance of Triton operators.
-
-To maximize the utilization of physical AI core resources on NPUs for accelerated parallel computing and minimize batch scheduling overhead, it is advisable to set the number of concurrent tasks to match the number of the underlying physical AI cores. For Triton operators that perform only vector core computations, the number of concurrent tasks should be equal to the number of vector cores. For other types of Triton operators (those using tl.dot), the number of concurrent tasks should be equal to the total number of AI cores. 
-Tips: **TRITON_ALL_BLOCKS_PARALLEL** controls the automatic optimization of the number of logical cores based on the number of physical cores. This feature can be enabled only when logical cores can execute in parallel. When the number of logical cores is greater than the number of physical cores, enabling this feature will instruct the compiler to automatically adjust the number of logical cores to match the number of physical cores, thereby reducing scheduling overhead.
-
-|Dimension   |             Core Structure                  |                     Operator Type                   |
-|--------|----------------------------------------|------------------------------------------------|
-|Ascend NPU|Multiple AI cores, categorized into cube cores (for matrix multiplication) and vector cores (for vector computation)| Vector-only operators → Number of concurrent tasks = Number of vector cores; Operators using tl.dot → Number of concurrent tasks = Number of AI cores|
-|GPU NVIDIA/AMD| Multiple CUDA cores (for scalar/vector computation) + Tensor cores (for matrix multiplication)| Generally, GPU operators can be mapped to CUDA cores or tensor cores. The concurrency is automatically determined by the compiler and hardware.|
 
 ## FAQ
 

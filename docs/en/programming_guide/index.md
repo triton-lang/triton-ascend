@@ -2,7 +2,18 @@
 
 This document focuses on the issues that need to be paid attention to during Triton operator development on NPUs, which are divided into three aspects: multi-core task parallelism, single-core data transfer, and single-core data computation. First, section "Multi-Core Task Parallelism" describes the basis for setting the maximum number of hardware cores and the specific implementation. Then, section "Single-Core Data Transfer" describes how to set the proper data block size in a loop, introduces the common optimization methods, and describes how to handle the UB overflow problem that may occur. Finally, section "Single-Core Data Computation" focuses on how to develop Triton operators and highlights the key points.
 
-## Multi-Core Task Parallelism
+## Documentation Structure
+
+This guide separates common development rules from operator-specific development paths:
+
+- This page covers common Triton-Ascend concerns, including core allocation, on-chip memory, memory access, tiling, and autotune.
+- [Vector Operator Development](./vector_operator.md) describes element-wise, reduction, gather/scatter, and other operators mainly executed on Vector Cores.
+- [Cube Operator Development](./cube_operator.md) describes operators whose main computation is `tl.dot`, matrix multiplication, or batched matrix multiplication.
+- [CV Fusion Operator Development](./cv_fusion_operator.md) describes operators that combine Cube computation with Vector post-processing, reductions, softmax, or cross-core coordination.
+
+For simple operators, refer to this repository's `docs/en/examples/` and `third_party/ascend/tutorials/`. For complex operators, refer to complete optimization cases in `tutorial/best_practice/` of [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops).
+
+## Common Multi-Core Task Parallelism
 
 ### Setting the Maximum Number of Hardware Cores
 
@@ -73,11 +84,11 @@ def _attn_fwd(Q, K, V, M, Out, acc, scale,
         qvk_offset = off_z.to(tl.int64) * stride_qz + off_h.to(tl.int64) * stride_qh
 ```
 
-## Single-Core Data Transfer
+## Common Single-Core Data Transfer
 
 ### Setting the Proper Data Block Size (BLOCK SIZE)
 
-Take **add_kernel** as an example. The variables and operations determine the on-chip memory usage. You can change the value of **BLOCK_SIZE** to adjust the size of the data block in the loop and the size of the intermediate result. If the upper limit is exceeded, the expected usage size is displayed and an error is reported during operator compilation. To achieve the maximum compute-to-memory ratio, **BLOCK_SIZE** needs to be as large as possible without exceeding the on-chip space. You can set different **BLOCK_SIZE** values in advance by using [autotune](#triton-autotune) of Triton-Ascend. The optimal setting is automatically selected during running.
+Take **add_kernel** as an example. The variables and operations determine the on-chip memory usage. You can change the value of **BLOCK_SIZE** to adjust the size of the data block in the loop and the size of the intermediate result. If the upper limit is exceeded, the expected usage size is displayed and an error is reported during operator compilation. To achieve the maximum compute-to-memory ratio, **BLOCK_SIZE** needs to be as large as possible without exceeding the on-chip space. You can set different **BLOCK_SIZE** values in advance by using [autotune](../examples/06_autotune_example.md) of Triton-Ascend. The optimal setting is automatically selected during running.
 
 ```python
 import triton.language as tl
@@ -155,7 +166,7 @@ def pick_kernel(
 
 - Performance analysis and comparison before and after optimization
 
-You can use the msProf tool to execute the test case to obtain the **PROF_***\** folder, which contains the **op_summary_***\****.csv** file. This file can be used to analyze the pipeline. Note: *\** indicates the timestamp. For details, see the [performance data collection methods](./debug_guide/profiling.md).
+You can use the msProf tool to execute the test case to obtain the **PROF_***\** folder, which contains the **op_summary_***\****.csv** file. This file can be used to analyze the pipeline. Note: *\** indicates the timestamp. For details, see the [performance data collection methods](../debug_guide/profiling.md).
 
 ||Op Name|aiv_mte2_time(us)|aiv_mte2_ratio|
 |:---- |:--------|:--------|:--------|
@@ -273,7 +284,7 @@ large or block number is more than what user expect due to multi-buffer feature 
 
 [Note] The UB size of the A2 series products is 192 KB (1,572,864 bits).
 
-## Single-Core Data Computation
+## Common Single-Core Data Computation
 
 ### R&D Goals
 

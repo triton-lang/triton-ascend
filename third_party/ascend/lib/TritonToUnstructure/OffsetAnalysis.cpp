@@ -811,19 +811,6 @@ void parseSelect(arith::SelectOp op, const Location &loc,
   if (!dstType)
     return;
 
-  // recognize "all dims size == 1", which cannot be handled in linalg pass's rewrite loop right now
-  // fix rewrite loop in linalg pass and remove this special handling
-  bool dstAllDimsAreOne = false;
-  if (auto rankedDstType = dyn_cast<RankedTensorType>(dstType)) {
-    dstAllDimsAreOne = llvm::all_of(
-        rankedDstType.getShape(), [](int64_t dim) { return dim == 1; });
-  }
-
-  if (dstAllDimsAreOne) {
-    offsetMap[dst].setUnstructured(dstType.getRank());
-    return;
-  }
-
   auto dstIsScalar = trueValueScalarLike && falseValueScalarLike && conditionScalarLike;
   offsetMap[dst].setScalarLike(dstIsScalar);
 

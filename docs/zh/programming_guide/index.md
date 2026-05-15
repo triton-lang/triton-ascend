@@ -2,7 +2,18 @@
 
 概述：本文着重介绍了在NPU上进行Triton算子开发中值得注意的问题，分为三个方面：多核任务并行、单核数据搬运、单核数据运算。首先在多核任务并行中介绍了设置最大硬件核数的依据以及具体的实现。然后在单核数据搬运中具体描述了如何设置合适的循环内数据分块大小，并且介绍了过程中常用的优化手段，还补充了可能面临的UB OVERFLOW问题的处理方式。最后回归单个算子，在单核数据运算层面着重介绍了如何开发Triton算子，并强调了相关的关键点。
 
-## 多核任务并行
+## 文档组织
+
+本指南将通用开发原则和按硬件执行单元划分的算子开发路径分开组织：
+
+- 本页介绍所有 Triton-Ascend 算子都需要关注的通用问题，包括分核、片上内存、访存、Tiling 和 Autotune。
+- [Vector 算子开发](./vector_operator.md) 介绍主要由 Vector Core 执行的逐元素、归约、Gather/Scatter 等算子。
+- [Cube 算子开发](./cube_operator.md) 介绍以 `tl.dot`、矩阵乘、批量矩阵乘为核心的算子。
+- [CV 融合算子开发](./cv_fusion_operator.md) 介绍同一个算子中同时存在 Cube 计算和 Vector 后处理、归约、Softmax 或跨核协同的场景。
+
+简单算子优先参考本仓 `docs/zh/examples/` 和 `third_party/ascend/tutorials/`；复杂算子优先参考 GitHub 上的 [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops) 中 `tutorial/best_practice/` 的完整优化案例。
+
+## 通用多核任务并行
 
 ### 设置最大硬件核数
 
@@ -73,11 +84,11 @@ def _attn_fwd(Q, K, V, M, Out, acc, scale,
         qvk_offset = off_z.to(tl.int64) * stride_qz + off_h.to(tl.int64) * stride_qh
 ```
 
-## 单核数据搬运
+## 通用单核数据搬运
 
 ### 设置合适的循环内数据分块大小（BLOCK SIZE）
 
-以add_kernel为例，变量和操作共同决定了片上内存空间的占用大，通过修改BLOCK_SIZE大小可以调整循环内数据分块和计算中间结果占用的大小。如果超过上限则算子编译时会提示预期占用大小并报错。要达到最大计算访存比，BLOCK_SIZE需要在不超出片上空间时尽可能大，这可以通过Triton-Ascend的[Autotune](#triton-autotune-自动调优)预先设置不同的BLOCK_SIZE，运行时会自动选取最优设置。
+以add_kernel为例，变量和操作共同决定了片上内存空间的占用大，通过修改BLOCK_SIZE大小可以调整循环内数据分块和计算中间结果占用的大小。如果超过上限则算子编译时会提示预期占用大小并报错。要达到最大计算访存比，BLOCK_SIZE需要在不超出片上空间时尽可能大，这可以通过Triton-Ascend的[Autotune](../examples/06_autotune_example.md)预先设置不同的BLOCK_SIZE，运行时会自动选取最优设置。
 
 ```python
 import triton.language as tl
@@ -155,7 +166,7 @@ def pick_kernel(
 
 - 优化前后性能分析和对比
 
-通过msprof工具执行用例可得到PROF_*文件夹，里面包含了op_summary_\*.csv文件，该文件可以帮助分析流水情况。注：“\*”表示时间戳，[性能数据采集参考方法](./debug_guide/profiling.md)。
+通过msprof工具执行用例可得到PROF_*文件夹，里面包含了op_summary_\*.csv文件，该文件可以帮助分析流水情况。注：“\*”表示时间戳，[性能数据采集参考方法](../debug_guide/profiling.md)。
 
 ||Op Name|aiv_mte2_time(us)|aiv_mte2_ratio|
 |:---- |:--------|:--------|:--------|
@@ -273,7 +284,7 @@ large or block number is more than what user expect due to multi-buffer feature 
 
 【注意】A2系列产品UB大小为192KB(1572864 bits)。
 
-## 单核数据运算
+## 通用单核数据运算
 
 ### 开发目标
 

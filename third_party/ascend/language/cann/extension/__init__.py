@@ -39,6 +39,7 @@ from .core import (
     sync_block_set,
     sync_block_wait,
     SYNC_IN_VF,
+    conv1d,
 )
 
 from .scope import scope
@@ -100,6 +101,7 @@ __all__ = [
     "sub_vec_num",
     "sync_block_all",
     "SYNC_IN_VF",
+    "conv1d",
 
     # address space
     "ascend_address_space",

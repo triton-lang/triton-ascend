@@ -356,7 +356,7 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
     bool shapedResult = true;
     for (auto result : op->getResults())
       shapedResult &= isa<ShapedType>(result.getType());
-    if (!shapedResult || isa<LoopLikeOpInterface, scf::IfOp>(op)) {
+    if (!shapedResult || isa<LoopLikeOpInterface, scf::IfOp, arith::SelectOp>(op)) {
       LLVM_DEBUG({ op->setAttr("MixUse", UnitAttr::get(context)); });
       return;
     }

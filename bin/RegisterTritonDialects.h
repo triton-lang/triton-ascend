@@ -1,6 +1,7 @@
 #pragma once
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 #include "ascend/include/AutoBlockify/Passes.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/TritonToAnnotation/Passes.h"
 #include "ascend/include/TritonToHFusion/Passes.h"
 #include "ascend/include/TritonToHIVM/Passes.h"
@@ -150,6 +151,9 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
   mlir::triton::proton::gpu::registerAllocateProtonGlobalScratchBufferPass();
   mlir::triton::proton::gpu::registerScheduleBufferStorePass();
   mlir::triton::proton::gpu::registerAddSchedBarriersPass();
+
+  // DynamicCVPipeline passes
+  mlir::triton::registerAddControlFlowConditionPasses();
 
   registry.insert<
       mlir::triton::TritonDialect, mlir::cf::ControlFlowDialect,

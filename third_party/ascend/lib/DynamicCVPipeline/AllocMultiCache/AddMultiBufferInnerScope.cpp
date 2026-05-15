@@ -50,17 +50,21 @@ using BufferMap = DenseMap<Value, SmallVector<BufferPair>>;
 // Buffer count constants
 constexpr int kBufferCountOne = 1;
 
+// Attribute name constants
+static constexpr const char *kAttrBlockId = "ssbuffer.block_id";
+static constexpr const char *kAttrMainLoop = "ssbuffer.main_loop";
+
 namespace mlir {
 namespace triton {
 
 // Check if forOp has main_loop attribute
 static bool hasMainLoopAttr(scf::ForOp forOp)
 {
-    if (forOp->hasAttr("ssbuffer.main_loop")) {
+    if (forOp->hasAttr(kAttrMainLoop)) {
         return true;
     }
     if (auto *term = forOp.getBody()->getTerminator())
-        return term->hasAttr("ssbuffer.main_loop");
+        return term->hasAttr(kAttrMainLoop);
     return false;
 }
 
@@ -101,7 +105,7 @@ struct InnerBlockInfo {
 // Get ssbuffer block_id attribute from op, returns INT_MIN if not found
 static int getSsbufferId(Operation *op)
 {
-    if (auto idAttr = op->getAttrOfType<IntegerAttr>("ssbuffer.block_id"))
+    if (auto idAttr = op->getAttrOfType<IntegerAttr>(kAttrBlockId))
         return idAttr.getInt();
     return INT_MIN;
 }
@@ -126,17 +130,17 @@ static int getForOpPriority(scf::ForOp f)
     constexpr int priorityIterArgs = 3;
 
     // Check if forOp itself has main_loop attribute
-    bool hasMainloop = f->hasAttr("ssbuffer.main_loop");
+    bool hasMainloop = f->hasAttr(kAttrMainLoop);
     bool bodyHasMainloop = false;
     bool bodyHasBlockId = false;
 
     // Check terminator for main_loop and block_id attributes
     if (auto *term = f.getBody()->getTerminator()) {
-        bodyHasMainloop = term->hasAttr("ssbuffer.main_loop");
-        bodyHasBlockId = term->getAttrOfType<IntegerAttr>("ssbuffer.block_id") != nullptr;
+        bodyHasMainloop = term->hasAttr(kAttrMainLoop);
+        bodyHasBlockId = term->getAttrOfType<IntegerAttr>(kAttrBlockId) != nullptr;
     }
 
-    bool opHasBlockId = f->getAttrOfType<IntegerAttr>("ssbuffer.block_id") != nullptr;
+    bool opHasBlockId = f->getAttrOfType<IntegerAttr>(kAttrBlockId) != nullptr;
     bool hasIterArgs = f.getNumResults() > 0 || !f.getInitArgs().empty();
 
     if (hasMainloop || bodyHasMainloop) {
@@ -198,7 +202,7 @@ static scf::ForOp findNestedMainloopInForOp(scf::ForOp forOp)
         auto nestedFor = dyn_cast<scf::ForOp>(op);
         if (!nestedFor)
             continue;
-        if (nestedFor->hasAttr("ssbuffer.main_loop"))
+        if (nestedFor->hasAttr(kAttrMainLoop))
             return nestedFor;
     }
     return {};
@@ -211,7 +215,7 @@ bool isInsideMainLoopForOp(Operation *op)
         return false;
     }
     if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
-        return forOp->hasAttr("ssbuffer.main_loop");
+        return forOp->hasAttr(kAttrMainLoop);
     }
     return false;
 }
@@ -221,7 +225,7 @@ bool isInsideMainLoopForOpTraverse(Operation *op)
     Operation *parent = op->getParentOp();
     while (parent) {
         if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
-            if (forOp->hasAttr("ssbuffer.main_loop")) {
+            if (forOp->hasAttr(kAttrMainLoop)) {
                 return true;
             }
         }
@@ -254,7 +258,7 @@ static int groupOpsBySsbufferId(SmallVector<Operation *> &allOps,
 
 // Returns 0=success (including normal skip when blocks empty), -1=invalid negative block ID
 static int collectInnerBlockInfo(scf::ForOp forOp, DenseMap<Value, InnerBlockInfo> &blocks,
-    DenseMap<Value, SmallVector<Value>> &depValueMap)
+                                 DenseMap<Value, SmallVector<Value>> &depValueMap)
 {
     depValueMap.clear();
     Block *body = forOp.getBody();
@@ -370,7 +374,8 @@ SmallVector<Value> collectScalarDeps(DenseMap<Value, SmallVector<Value>> &depVal
 }
 
 // Compute iteration index: (iv - lb) / step, used for buffer selection in double buffering
-static Value getIterCount(OpBuilder &builder, mlir::scf::ForOp forOp, Location loc, SmallVector<Operation *> *newOps)
+static Value getIterCount(OpBuilder &builder, mlir::scf::ForOp forOp, Location loc, SmallVector<Operation *> *newOps,
+                          int blockId = -1)
 {
     auto i32Type = builder.getI32Type();
     Value iv = forOp.getInductionVar();
@@ -398,6 +403,9 @@ static Value getIterCount(OpBuilder &builder, mlir::scf::ForOp forOp, Location l
             iterIdx = builder.create<mlir::arith::DivUIOp>(loc, iv, step);
             if (newOps)
                 newOps->push_back(iterIdx.getDefiningOp());
+            if (blockId >= 0) {
+                iterIdx.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
+            }
         }
     } else {
         // General case: (iv - lb) / step
@@ -406,6 +414,10 @@ static Value getIterCount(OpBuilder &builder, mlir::scf::ForOp forOp, Location l
         if (newOps) {
             newOps->push_back(diff.getDefiningOp());
             newOps->push_back(iterIdx.getDefiningOp());
+        }
+        if (blockId >= 0) {
+            diff.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
+            iterIdx.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
         }
     }
 
@@ -430,6 +442,9 @@ static Value getIterCount(OpBuilder &builder, mlir::scf::ForOp forOp, Location l
     }
     if (newOps)
         newOps->push_back(result.getDefiningOp());
+    if (blockId >= 0) {
+        result.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
+    }
     return result;
 }
 
@@ -438,7 +453,7 @@ static int buildIfChain(OpBuilder &builder, Location loc, Value indexVal, SmallV
                         SmallVector<Operation *> &newOps, SmallVector<Operation *> &outIfOps,
                         function_ref<Operation *(OpBuilder &, Location, Value)> createOpFn,
                         function_ref<Value(OpBuilder &, Location, Operation *)> yieldFn,
-                        std::optional<mlir::TypeRange> resultTypes = std::nullopt)
+                        std::optional<mlir::TypeRange> resultTypes = std::nullopt, int blockId = -1)
 {
     int N = buffers.size();
     auto types = resultTypes.value_or(mlir::TypeRange {});
@@ -452,6 +467,12 @@ static int buildIfChain(OpBuilder &builder, Location loc, Value indexVal, SmallV
     newOps.push_back(firstCond.getDefiningOp());
     newOps.push_back(firstIf);
     outIfOps.push_back(firstIf);
+
+    // Tag counter operations with block_id
+    if (blockId >= 0) {
+        zero.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
+        firstCond.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
+    }
 
     // Then branch: use buffer[0]
     builder.setInsertionPointToStart(&firstIf.getThenRegion().front());
@@ -481,6 +502,12 @@ static int buildIfChain(OpBuilder &builder, Location loc, Value indexVal, SmallV
         newOps.push_back(cond.getDefiningOp());
         newOps.push_back(nestedIf);
         outIfOps.push_back(nestedIf);
+
+        // Tag counter operations with block_id
+        if (blockId >= 0) {
+            iVal.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
+            cond.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
+        }
 
         // Then branch: use buffer[i]
         builder.setInsertionPointToStart(&nestedIf.getThenRegion().front());
@@ -517,14 +544,20 @@ static int buildIfChain(OpBuilder &builder, Location loc, Value indexVal, SmallV
 
 // Compute buffer index: iterCount % N
 static Value computeBufferIndex(OpBuilder &builder, mlir::scf::ForOp forOp, Location loc, int N,
-                                SmallVector<Operation *> *newOps)
+                                SmallVector<Operation *> *newOps, int blockId = -1)
 {
-    Value iterCount = getIterCount(builder, forOp, loc, newOps);
+    Value iterCount = getIterCount(builder, forOp, loc, newOps, blockId);
     Value Nval = builder.create<mlir::arith::ConstantIntOp>(loc, N, 32);
     Value bufIdx = builder.create<mlir::arith::RemSIOp>(loc, iterCount, Nval);
     if (newOps) {
         newOps->push_back(Nval.getDefiningOp());
         newOps->push_back(bufIdx.getDefiningOp());
+    }
+    // Tag counter operations with block_id
+    if (blockId >= 0) {
+        MLIRContext *ctx = builder.getContext();
+        Nval.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
+        bufIdx.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
     }
     return bufIdx;
 }
@@ -537,9 +570,7 @@ static SmallVector<Operation *> insertProducerLogic(OpBuilder &builder, Value de
     Location loc = depVal.getLoc();
     // Single buffer producer logic
     if (N == kBufferCountOne) {
-        Operation *producerOp = builder.create<mlir::bufferization::MaterializeInDestinationOp>(
-            loc, mlir::Type {}, depVal, buffers[0].second, mlir::UnitAttr::get(builder.getContext()),
-            mlir::UnitAttr::get(builder.getContext()));
+        Operation *producerOp = builder.create<hivm::CopyOp>(loc, mlir::TypeRange {}, depVal, buffers[0].second);
         if (!producerOp)
             return newOps;
         newOps.push_back(producerOp);
@@ -551,15 +582,12 @@ static SmallVector<Operation *> insertProducerLogic(OpBuilder &builder, Value de
     if (buildIfChain(
         builder, loc, bufIdx, buffers, newOps, dummyOutIfOps,
         [&](OpBuilder &b, Location l, Value buffer) -> Operation* {
-            return b.create<mlir::bufferization::MaterializeInDestinationOp>(
-                l, mlir::Type{}, depVal, buffer,
-                mlir::UnitAttr::get(b.getContext()),
-                mlir::UnitAttr::get(b.getContext()));
+            return b.create<hivm::CopyOp>(
+                l, mlir::TypeRange{}, depVal, buffer);
         },
         nullptr) != 0) {
     return {};
     }
-
     return newOps;
 }
 
@@ -582,18 +610,23 @@ static mlir::bufferization::ToTensorOp createToTensorOp(OpBuilder &builder, Loca
 }
 
 static int insertConsumerLogic(OpBuilder &builder, Value depVal, SmallVector<BufferPair> &buffers,
-                               mlir::scf::ForOp forOp, SmallVector<Operation *> &outIfOps, int groupId = -1)
+                               mlir::scf::ForOp forOp, SmallVector<Operation *> &outIfOps, int groupId = -1,
+                               int blockId = -1)
 {
     SmallVector<Operation *> newOps;
     int N = buffers.size();
     Location loc = builder.getInsertionPoint()->getLoc();
 
     if (N == kBufferCountOne) {
-        outIfOps.push_back(handleSingleBufferConsumer(builder, loc, buffers));
+        Operation *consumerOp = handleSingleBufferConsumer(builder, loc, buffers);
+        outIfOps.push_back(consumerOp);
+        if (groupId >= 0) {
+            consumerOp->setAttr("ssbuffer.intraDeps", builder.getI32ArrayAttr({groupId, 0}));
+        }
         return 0;
     }
 
-    Value readIdx = computeBufferIndex(builder, forOp, loc, N, &newOps);
+    Value readIdx = computeBufferIndex(builder, forOp, loc, N, &newOps, blockId);
     auto memrefType = mlir::cast<mlir::MemRefType>(buffers[0].second.getType());
     auto tensorType = mlir::RankedTensorType::get(memrefType.getShape(), memrefType.getElementType());
     mlir::TypeRange resultTypes(tensorType);
@@ -605,7 +638,7 @@ static int insertConsumerLogic(OpBuilder &builder, Value depVal, SmallVector<Buf
         [&](OpBuilder &b, Location l, Operation *op) -> Value {
             return cast<mlir::bufferization::ToTensorOp>(op).getResult();
         },
-        resultTypes);
+        resultTypes, blockId);
     if (ret != 0) {
         return ret;
     }
@@ -619,7 +652,7 @@ static void addBlockAttrForOps(SmallVector<Operation *> &newOps, int blockId, Op
 {
     auto attr = builder.getI32IntegerAttr(blockId);
     for (auto *op : newOps)
-        op->setAttr("ssbuffer.block_id", attr);
+        op->setAttr(kAttrBlockId, attr);
 }
 
 // Add dep_mark attribute to operation
@@ -641,8 +674,7 @@ static void addDepMarkAttr(Operation *op, int depMark, OpBuilder &builder)
 static void addIntraBufferAttr(SmallVector<Operation *> &ops, OpBuilder &builder)
 {
     for (auto *op : ops) {
-        if (isa<scf::IfOp>(op) || isa<bufferization::MaterializeInDestinationOp>(op) ||
-            isa<bufferization::ToTensorOp>(op)) {
+        if (isa<scf::IfOp>(op) || isa<hivm::CopyOp>(op) || isa<bufferization::ToTensorOp>(op)) {
             op->setAttr("ssbuffer.intra_buffer", builder.getUnitAttr());
         }
     }
@@ -737,12 +769,15 @@ static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp, BufferMap
         OpBuilder consumedBuilder(mainLoopForOp.getContext());
         consumedBuilder.setInsertionPoint(depUser);
         SmallVector<Operation *> resultIfOps;
-        int ret = insertConsumerLogic(consumedBuilder, depVal, buffers, mainLoopForOp, resultIfOps, groupId);
+        int ret =
+            insertConsumerLogic(consumedBuilder, depVal, buffers, mainLoopForOp, resultIfOps, groupId, userBlockId);
         if (ret != 0)
             return -1;
 
         if (resultIfOps.empty())
             continue;
+        // Tag consumer with block_id
+        addBlockAttrForOps(resultIfOps, userBlockId, globalBuilder);
         // Tag consumer: N > 1 only tag scf.if, N == 1 tag to_tensor
         if (buffers.size() > kBufferCountOne) {
             for (auto *op : resultIfOps) {
@@ -769,10 +804,9 @@ static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp, BufferMap
 static int processTensorDependencies(mlir::scf::ForOp mainLoopForOp, DenseMap<Value, InnerBlockInfo> &blocks,
                                      DenseMap<Value, SmallVector<Value>> &depValueMap,
                                      DenseMap<Value, SmallVector<Operation *>> &depUserMap, BufferMap &bufferMap,
-                                     OpBuilder &globalBuilder)
+                                     OpBuilder &globalBuilder, int &groupId)
 {
     SmallVector<Operation *> seenOps;
-    int groupId = 0;
 
     for (auto &blockPair : blocks) {
         Value blockKey = blockPair.first;
@@ -822,7 +856,8 @@ static int processTensorDependencies(mlir::scf::ForOp mainLoopForOp, DenseMap<Va
     return 0;
 }
 
-static BufferMap insertBuffersBeforeFor(mlir::scf::ForOp forOp, SmallVector<Value> &valueList, OpBuilder &builder)
+static BufferMap insertBuffersBeforeFor(mlir::scf::ForOp forOp, SmallVector<Value> &valueList, OpBuilder &builder,
+                                        int groupId)
 {
     BufferMap bufferMap;
     Block *parentBlock = forOp->getBlock();
@@ -831,7 +866,6 @@ static BufferMap insertBuffersBeforeFor(mlir::scf::ForOp forOp, SmallVector<Valu
 
     using BufferCountManager = mlir::triton::BufferCountManager;
     int bufNum = BufferCountManager::getInstance().getBufferCountByType(BufferCountManager::DepType::IntraCore);
-    int groupId = 0;
 
     for (Value depVal : valueList) {
         ShapedType shapedType = cast<ShapedType>(depVal.getType());
@@ -873,7 +907,8 @@ static bool hasMemrefDepValue(DenseMap<Value, SmallVector<Value>> &depValueMap)
     return false;
 }
 
-static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp, OpBuilder &builder, scope::ScopeOp vectorScope)
+static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp, OpBuilder &builder, scope::ScopeOp vectorScope,
+                               int &groupId)
 {
     DenseMap<Value, InnerBlockInfo> blocks;
     DenseMap<Value, SmallVector<Value>> depValueMap;
@@ -892,14 +927,15 @@ static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp, OpBuilder &builde
     auto depUserMap = buildDepUserMap(blocks);
 
     auto valueList = collectBufferValues(depValueMap);
-    auto bufferMap = insertBuffersBeforeFor(mainLoopForOp, valueList, builder);
+    auto bufferMap = insertBuffersBeforeFor(mainLoopForOp, valueList, builder, groupId);
 
     auto scalarValueList = collectScalarDeps(depValueMap, depUserMap);
 
     OpBuilder globalBuilder(mainLoopForOp.getContext());
     markScalarDeps(scalarValueList, depUserMap, globalBuilder, 1);
 
-    if (processTensorDependencies(mainLoopForOp, blocks, depValueMap, depUserMap, bufferMap, globalBuilder) != 0) {
+    if (processTensorDependencies(mainLoopForOp, blocks, depValueMap, depUserMap, bufferMap, globalBuilder, groupId) !=
+        0) {
         return -1;
     }
 
@@ -945,6 +981,7 @@ void AddMultiBufferInnerScopePass::runOnOperation()
             return WalkResult::advance();
 
         // Step 4: Process each main_loop forOp
+        int groupId = 0;
         for (scf::ForOp mainLoopForOp : mainLoopForOps) {
             scf::ForOp nestedMainloop = findNestedMainloopInForOp(mainLoopForOp);
             if (nestedMainloop) {
@@ -952,7 +989,7 @@ void AddMultiBufferInnerScopePass::runOnOperation()
                 signalPassFailure();
                 return WalkResult::interrupt();
             }
-            if (addInnerMultiBuffer(mainLoopForOp, builder, scope) != 0) {
+            if (addInnerMultiBuffer(mainLoopForOp, builder, scope, groupId) != 0) {
                 LDBG("addInnerMultiBuffer failed");
                 signalPassFailure();
                 return WalkResult::interrupt();

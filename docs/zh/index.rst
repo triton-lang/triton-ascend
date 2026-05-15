@@ -27,7 +27,10 @@ Triton Ascend
     :maxdepth: 2
     :caption: Triton 算子开发指南
 
-    programming_guide.md
+    programming_guide/index.md
+    programming_guide/vector_operator.md
+    programming_guide/cube_operator.md
+    programming_guide/cv_fusion_operator.md
 
 .. toctree::
     :maxdepth: 2
@@ -71,9 +74,9 @@ Triton Ascend
 
 .. toctree::
     :maxdepth: 1
-    :caption: 环境变量
+    :caption: 环境变量和编译选项
 
-    environment_variable_reference.md
+    environment_variable_and_compiler_options_reference.md
 
 .. toctree::
     :maxdepth: 1

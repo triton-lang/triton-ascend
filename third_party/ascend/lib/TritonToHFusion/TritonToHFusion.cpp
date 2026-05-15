@@ -132,6 +132,80 @@ namespace {
       return success();
     }
   };
+
+  struct TritonConv1dToHFusionConversion
+    : OpRewritePattern<triton::ascend::Conv1dOp> {
+    using OpRewritePattern<triton::ascend::Conv1dOp>::OpRewritePattern;
+
+    LogicalResult matchAndRewrite(triton::ascend::Conv1dOp op,
+      PatternRewriter &rewriter) const final {
+      auto loc = op.getLoc();
+
+      Value input = op.getInput();
+      Value weight = op.getWeight();
+      Value biasValue = op.getBias();
+      int64_t stride = op.getStride();
+      int64_t padding_size = op.getPaddingSize();
+      int64_t dilation = op.getDilation();
+      int64_t groups = op.getGroups();
+
+      auto inputType = mlir::cast<RankedTensorType>(input.getType());
+      auto weightType = mlir::cast<RankedTensorType>(weight.getType());
+      if (!inputType.hasStaticShape() || !weightType.hasStaticShape()) {
+        return failure();
+      }
+
+      ArrayRef<int64_t> inputShape = inputType.getShape();
+      ArrayRef<int64_t> weightShape = weightType.getShape();
+
+      bool isBatched = inputShape.size() == 3;
+      int64_t N;
+      if (isBatched) N = inputShape[0];
+      int64_t L_in = inputShape[isBatched ? 2 : 1];
+      int64_t C_out = weightShape[0];
+      int64_t kernel_size = weightShape[2];
+
+      if (stride == 0) {
+        return failure();
+      }
+      int64_t L_out = (L_in + 2 * padding_size - dilation * (kernel_size - 1) - 1) / stride + 1;
+
+      auto resultType = mlir::cast<RankedTensorType>(op.getResult().getType());
+      Type resultElementType = resultType.getElementType();
+
+      constexpr int64_t dim2 = 2;
+      constexpr int64_t dim3 = 3;
+      Value initTensor;
+      if (isBatched) {
+        SmallVector<int64_t, dim3> outputShape{N, C_out, L_out};
+        initTensor = rewriter.create<tensor::EmptyOp>(loc, outputShape, resultElementType);
+      } else {
+        SmallVector<int64_t, dim2> outputShape{C_out, L_out};
+        initTensor = rewriter.create<tensor::EmptyOp>(loc, outputShape, resultElementType);
+      }
+
+      SmallVector<Value, dim3> ins;
+      ins.push_back(input);
+      ins.push_back(weight);
+      if (biasValue) {
+        ins.push_back(biasValue);
+      }
+
+      auto newOp = rewriter.create<hfusion::Conv1DOp>(
+          loc,
+          ins,
+          initTensor,
+          stride,
+          padding_size,
+          dilation,
+          groups
+      );
+
+      rewriter.replaceOp(op, newOp.getResult());
+
+      return success();
+    }
+  };
 }
 
 namespace {
@@ -151,6 +225,7 @@ void TritonToHFusionPass::runOnOperation() {
   patterns.add<TritonHistogramToHFusionConversion>(patterns.getContext());
   patterns.add<TritonFpToFpToHFusionConversion>(patterns.getContext());
   patterns.add<TritonModToHFusionConversion>(patterns.getContext());
+ 	patterns.add<TritonConv1dToHFusionConversion>(patterns.getContext());
 
   // Apply patterns with greedy rewriting
   // This allows patterns to return failure() without causing pass failure

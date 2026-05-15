@@ -18,7 +18,7 @@ The Triton-Ascend compilation framework removes the barriers between Triton and 
 
 - ### Latest Updates
 
-Current version: [Triton-Ascend 3.2.1](https://pypi.org/project/triton-ascend/)  
+Current version: [Triton-Ascend 3.2.1](https://gitcode.com/Ascend/triton-ascend/releases/v3.2.1)  
 CANN version: [CANN Community Edition 9.0.0](https://www.hiascend.com/developer/download/community/result?module=cann&cann=9.0.0)  
 Version plan for 2026: Upgrade to Triton 3.5.
 
@@ -100,7 +100,7 @@ The OSs supported by Triton-Ascend are the same as those supported by CANN. Down
 
 - [Architecture Design and Core Features](./docs/en/architecture_design_and_core_features.md)
 
-- [Operator Development Guide](./docs/en/programming_guide.md)
+- [Operator Development Guide](./docs/en/programming_guide/index.md)
 
 - [Operator Migration Guide](./docs/en/migration_guide/migrate_from_gpu.md)
 
@@ -108,7 +108,7 @@ The OSs supported by Triton-Ascend are the same as those supported by CANN. Down
 
 - [Performance Optimization Guide](./docs/en/debug_guide/profiling.md#)
 
-- [Environment Variables](docs/en/environment_variable_reference.md)
+- [Environment Variables and Compiler Options](docs/en/environment_variable_and_compiler_options_reference.md)
 
 ## FAQ
 

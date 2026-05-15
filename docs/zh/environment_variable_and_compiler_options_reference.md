@@ -1,4 +1,19 @@
-# 环境变量
+# 环境变量与编译选项
+
+本文汇总 Triton-Ascend 中可由开发者显式控制的行为开关，包括运行前设置的环境变量，以及编译期通过 `triton.Config` 或 kernel launch meta-parameter 传入的 NPU 编译选项。
+
+## 环境变量
+
+### 环境变量用法示例
+
+环境变量需在运行 Python 程序前设置，例如：
+
+```bash
+export TRITON_DEBUG=1
+python run_kernel.py
+```
+
+### 环境变量参考表
 
 环境变量配置参考下表：
 
@@ -35,3 +50,47 @@
 | **运行与调度** | ENABLE_PRINT_UB_BITS | 0 或未设置 | 打开后可以获取当前UB占用量，给inductor使用。 | 0：不启用<br>1：启用 | |
 | **其他** | TRITON_BENCH_METHOD | 未设置 | 使用昇腾NPU时，将`testing.py`中的`do_bench`切换为`do_bench_npu`（需配合`INDUCTOR_ASCEND_AGGRESSIVE_AUTOTUNE = 1`使用）。设为`default`时即使NPU可用，仍调用原`do_bench`函数。 | "npu"：切换为`do_bench_npu` | |
 | **其他** | TRITON_REMOTE_RUN_CONFIG_PATH | path | 指定远程运行的配置路径。 | 直接给定path | |
+
+## 编译选项
+
+编译选项用于控制单个 Triton kernel 的编译策略，可通过 `triton.Config`、Autotune 参数或 kernel launch meta-parameter 传入。
+
+### 编译选项用法示例
+
+例如，可在 kernel launch 时直接传入 `multibuffer`：
+
+```python
+import triton
+import triton.language as tl
+
+@triton.jit
+def kernel(..., BLOCK_SIZE: tl.constexpr):
+    ...
+
+grid = (triton.cdiv(n_elements, 1024),)
+kernel[grid](..., BLOCK_SIZE=1024, multibuffer=True)
+```
+
+### 编译选项参考表
+
+编译选项配置参考下表：
+
+| 类别 | 编译选项 | 默认值/可选值 | 功能说明 | 配置说明 |
+|------|----------|----------------|----------|----------|
+| **通用流水** | `multibuffer` | `True`、`False`；910_95 编译场景默认关闭 | 启用或禁用 ping-pong/double buffer 流水。 | `triton.Config` 或 launch meta-parameter |
+| **CV 融合** | `enable_auto_bind_sub_block` | `None`、`True`、`False` | 启用或禁用自动绑定 sub-block。 | `triton.Config` 或 launch meta-parameter |
+| **CV 融合** | `enable_hivm_auto_cv_balance` | `None`、`True`、`False` | 启用或禁用自动 CV balance。 | `triton.Config` 或 Autotune 参数 |
+| **CV 融合/同步** | `sync_solver` | `None`、`True`、`False` | 启用或禁用 HIVM 同步求解器。 | `triton.Config` 或 launch meta-parameter |
+| **同步** | `unit_flag` | `None`、`True`、`False` | Cube 搬出相关同步优化项。 | `triton.Config` 或 Autotune 参数 |
+| **同步** | `inject_barrier_all` | `None`、`True`、`False` | 启用或禁用自动注入 barrier 同步。 | `triton.Config` 或 launch meta-parameter |
+| **同步** | `inject_block_all` | `None`、`True`、`False` | 启用或禁用自动注入 block 同步。 | `triton.Config` 或 launch meta-parameter |
+| **多缓冲范围** | `limit_auto_multi_buffer_only_for_local_buffer` | `None`、`True`、`False` | 限制自动 multi-buffer 只作用于 local buffer。 | `triton.Config` 或 Autotune 参数 |
+| **多缓冲范围** | `limit_auto_multi_buffer_of_local_buffer` | `None`、`"no-limit"`、`"no-l0c"` | 配置 local buffer 自动 multi-buffer 的 scope。 | `triton.Config` 或 Autotune 参数 |
+| **Workspace** | `set_workspace_multibuffer` | `None`、`2`、`4` | 配置 workspace multi-buffer 档位。 | `triton.Config` 或 Autotune 参数 |
+| **CV 融合 tiling** | `tile_mix_vector_loop` | `None`、`2`、`4`、`8` | 配置 Vector loop 的切分份数。 | `triton.Config` 或 Autotune 参数 |
+| **CV 融合 tiling** | `tile_mix_cube_loop` | `None`、`2`、`4`、`8` | 配置 Cube loop 的切分份数。 | `triton.Config` 或 Autotune 参数 |
+| **CV 融合/同步** | `disable_auto_inject_block_sync` | `None`、`True`、`False` | 启用或禁用自动 block sync 注入。 | `triton.Config` 或 launch meta-parameter |
+| **运行流** | `stream` | `None` 或 NPU stream 标识 | 指定 NPU stream。 | launch meta-parameter |
+| **编译 Pass** | `enable_linearize` | 版本相关 | 启用或禁用 linearization pass。 | `triton.Config` 或 launch meta-parameter |
+| **CV 融合/layout** | `enable_nd2nz_on_vector` | 默认 `False` | 启用或禁用 Vector 路径上的 ND 到 NZ 布局转换。 | `triton.Config` 或 launch meta-parameter |
+| **大 grid 优化** | `auto_blockify_size` | 默认 `1` | 启用或禁用 AutoBlockify pass。未设置 `TRITON_ALL_BLOCKS_PARALLEL` 时忽略。 | launch meta-parameter 或 `triton.Config` |

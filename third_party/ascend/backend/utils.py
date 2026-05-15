@@ -642,26 +642,24 @@ def triton_enable_libdevice_simt():
     return enable_libdevice_simt
 
 
-def get_cann_version():
+def get_cann_version_file_hash():
     ascend_path = _get_ascend_path()
     arch = get_machine_arch()
     cann_version_file_path = os.path.join(ascend_path, arch + "-linux", "ascend_toolkit_install.info")
     if not os.path.exists(cann_version_file_path):
         cann_version_file_path = os.path.join(ascend_path, arch + "-linux", "ascend_all_cann_install.info")
-    version = ""
-    innerversion = ""
-    with open(cann_version_file_path) as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith("version="):
-                version = line.split('=')[1]
-            elif line.startswith("innerversion="):
-                innerversion = line.split('=')[1]
-    if version and innerversion:
-        return "CANN-" + version + "-" + innerversion
-    if version:
-        return "CANN-" + version
-    raise ValueError(f"get_cann_version is empty!")
+    return get_file_hash256(cann_version_file_path)
+
+
+def get_file_hash256(file_path):
+    sha256 = hashlib.sha256()
+    try:
+        with open(file_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256.update(byte_block)
+        return sha256.hexdigest()
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"Can't find file {os.path.basename(file_path)}") from e
 
 
 def get_machine_arch():

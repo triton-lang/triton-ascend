@@ -135,9 +135,8 @@ jobs:
           # Title/body are mutable by the PR author at any time — same race
           # the original artifact collector had.
           P=$(gh pr view "$PR_ID" --repo "${{ github.repository }}" \
-                --json title,body,baseRefName,headRefOid)
+                --json title,baseRefName,headRefOid)
           PR_TITLE=$(echo "$P" | jq -r .title)
-          PR_DESC=$(echo  "$P" | jq -r '.body // ""')
           BRANCH_B=$(echo "$P" | jq -r .baseRefName)
           HEAD_SHA=$(echo "$P" | jq -r .headRefOid)
 
@@ -147,13 +146,10 @@ jobs:
             echo "head_sha=$HEAD_SHA"
           } >> "$GITHUB_OUTPUT"
 
-          # PR_TITLE / PR_DESC may contain newlines; pass via env file as multi-line values.
+          # PR_TITLE may contain newlines; pass via env file as multi-line values.
           {
             echo "PR_TITLE<<__EOF__"
             printf '%s\n' "$PR_TITLE"
-            echo "__EOF__"
-            echo "PR_DESC<<__EOF__"
-            printf '%s\n' "$PR_DESC"
             echo "__EOF__"
           } >> "$GITHUB_ENV"
 
@@ -184,7 +180,7 @@ jobs:
           BRANCH_B:           ${{ steps.ctx.outputs.branch_b }}
           # workflow_run path: from publish job output. workflow_dispatch: from input.
           WHEEL_NAME:         ${{ inputs.wheel_name || needs.publish.outputs.wheel_name }}
-          # PR_TITLE / PR_DESC inherited from $GITHUB_ENV (set in Resolve PR context).
+          # PR_TITLE inherited from $GITHUB_ENV (set in Resolve PR context).
           STATUS_FILE:        ${{ runner.temp }}/by-status
         run: |
           # Blue/Yellow cross-region pipeline trigger.
@@ -211,7 +207,6 @@ jobs:
           }
 
           PR_TITLE_J=$(printf '%s' "${PR_TITLE}"   | json_escape)
-          PR_DESC_J=$(printf  '%s' "${PR_DESC:-}"  | json_escape)
 
           # WHEEL_NAME comes from publish job output (workflow_run) or from the
           # workflow_dispatch input. If empty, the upstream produced no wheel
@@ -237,7 +232,7 @@ jobs:
             "parameter": {
               "pr": "${PR_ID}",
               "title": ${PR_TITLE_J},
-              "description": ${PR_DESC_J},
+              "description": ${PR_ID},
               "url_b": "${URL_B}",
               "branch_b": "${BRANCH_B}",
               "obs_url": "${OBS_URL}"

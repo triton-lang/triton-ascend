@@ -44,20 +44,12 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'third_party/ascend/llvm_patch/*.patch') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-
 
-      - name: Get csrc hash
-        id: get_csrc_hash
-        run: |
-          CSRC_HASH=$(find ./lib ./include ./python ./third_party/ascend \
-            ./setup.py ./CMakeLists.txt \
-            -type f -not -path '*/.*' 2>/dev/null | sort | xargs sha256sum | sha256sum | awk '{print $1}')
-          echo "CSRC_HASH=$CSRC_HASH" >> $GITHUB_OUTPUT
-
       - name: Cache triton-ascend wheel
         id: cache-wheel
         uses: runs-on/cache@v4
         with:
           path: dist
-          key: triton-ascend-wheel-v1-${{ runner.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-cann${{ matrix.cann_version }}-${{ steps.get_csrc_hash.outputs.CSRC_HASH }}
+          key: triton-ascend-wheel-v1-${{ runner.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-cann${{ matrix.cann_version }}-${{ hashFiles('lib/**', 'include/**', 'python/**', 'third_party/ascend/**', 'setup.py', 'CMakeLists.txt', '.github/workflows/integration-tests-ascend.yml') }}
 
       - name: Download and install Bisheng compiler
         shell: bash

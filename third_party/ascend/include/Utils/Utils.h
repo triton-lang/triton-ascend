@@ -30,6 +30,7 @@
 #include "mlir/Dialect/Utils/StructuredOpsUtils.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -37,6 +38,7 @@
 
 #include <functional>
 #include <optional>
+#include <string>
 
 namespace mlir {
 
@@ -45,6 +47,8 @@ namespace ConverterUtils {
 const std::string GeneratedByMakeTensorPtrTAG = "GeneratedByMakeTensorPtr";
 const std::string discreteMaskAttrName = "DiscreteMask";
 const std::string discreteAttrName = "DiscreteMemAccess";
+const std::string continuousAttrName = "ContinuousMemAccess";
+const std::string customSrcPtrIndexAttrName = "SrcPtrIndex";
 
 bool isaPermutedMemRefType(MemRefType);
 
@@ -256,6 +260,8 @@ Value convertToIndexIfNeeded(Value intValue, const Location &loc, OpBuilder &b);
 RankedTensorType getExtractSlicedType(ArrayRef<OpFoldResult> shape,
                                       const llvm::SmallBitVector &droppedDims,
                                       Type elemType);
+
+bool checkStructureAnnotated(Operation *op, RewriterBase &rewriter);
 } // namespace mlir
 
 #endif // TRITONNPU_UTILS_UTILS_H

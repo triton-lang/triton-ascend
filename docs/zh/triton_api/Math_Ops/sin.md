@@ -29,8 +29,8 @@ triton.language.sin(x, _semantic=None)
 | GPU    | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     | ×    | √    | √    | ×    | ×    |
 | Ascend A2/A3 | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     | √    | √    | ×    | √    | ×    |
 
-结论：Ascend 比 GPU 少了fp64的支持，但多了fp16，bf16的支持。
-torch_npu支持u8。
+结论：Ascend 相比 GPU 缺失 fp64 支持，但额外支持 fp16、bf16。
+torch_npu 支持 uint8。
 
 #### 2.2.2 Shape 支持
 
@@ -53,7 +53,7 @@ torch_npu支持u8。
 
 ```python
 @triton.jit
-def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
+def fn_npu_(output_ptr, x_ptr,
             XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr,
             XNUMEL: tl.constexpr, YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):
     xoffs = tl.program_id(0) * XB

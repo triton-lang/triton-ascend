@@ -7,13 +7,13 @@
 
 ```python
 triton.language.atomic_add(
- pointer, 
- val, 
- mask=None, 
- sem=None, 
- scope=None, 
- _semantic=None
-)→ pointer
+    pointer,
+    val,
+    mask=None,
+    sem=None,
+    scope=None,
+    _semantic=None
+) -> pointer
 ```
 
 可以作为tensor的成员函数调用，如`x.atomic_add(...)`，与`atomic_add(x, ...)`等效。
@@ -54,7 +54,7 @@ triton.language.atomic_add(
 > 相对社区能力缺失且无法实现
 
 | 差异点                   | 描述                                                                           |
-| --------------------- | ---------------------------------------------------------------------------- | 
+| --------------------- | ---------------------------------------------------------------------------- |
 |数据类型| Ascend 对比 GPU 缺失int64，fp64的支持能力（硬件限制） |
 |sem| 社区官方配置可接受的值为“acquire”、“release”、“acq_rel”（默认，代表“ACQUIRE_RELEASE”）和“relaxed”<br>我们只支持“acq_rel” |
 |scope               | 可接受的值为“gpu”、“cta”、或“sys”、 <br>我们只支持“gpu” |
@@ -80,9 +80,9 @@ dtype, shape, ncore = ['int16', (32, 32), 2]
 block_size = shape[0] * shape[1] / ncore
 split_size = shape[0] // ncore
 x0_value = 3
-x0 = torch.full(shape, x0_value, dtype = eval(f'torch.{dtype}')).npu()
-x1 = torch.full((split_size, shape[1]), 2, dtype = eval(f'torch.{dtype}')).npu()
-y = torch.full((split_size, shape[1]), -10, dtype = eval(f'torch.{dtype}')).npu()
+x0 = torch.full(shape, x0_value, dtype = getattr(torch, dtype)).npu()
+x1 = torch.full((split_size, shape[1]), 2, dtype = getattr(torch, dtype)).npu()
+y = torch.full((split_size, shape[1]), -10, dtype = getattr(torch, dtype)).npu()
 n_elements = shape[0] * shape[1]
 atomic_add[ncore, 1, 1](x0, x1, y, n_elements, BLOCK_SIZE=split_size * shape[1])
 ```

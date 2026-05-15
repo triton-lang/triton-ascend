@@ -7,13 +7,13 @@
 
 ```python
 triton.language.atomic_and(
- pointer, 
- val, 
- mask=None, 
- sem=None, 
- scope=None, 
- _semantic=None
-)→ pointer
+    pointer,
+    val,
+    mask=None,
+    sem=None,
+    scope=None,
+    _semantic=None
+) -> pointer
 ```
 
 可以作为tensor的成员函数调用，如`x.atomic_and(...)`，与`atomic_and(x, ...)`等效。
@@ -71,13 +71,13 @@ def atomic_and(in_ptr0, out_ptr0, out_ptr1, n_elements, BLOCK_SIZE: tl.constexpr
     x1 = yindex
     tmp0 = tl.load(in_ptr0 + (x0), xmask)
     tmp1 = tl.atomic_and(out_ptr0 + (x1), tmp0, xmask)
-    tl.store(out_ptr1 + (x1), tmp1, xmask
+    tl.store(out_ptr1 + (x1), tmp1, xmask)
 
 dtype, shape, ncore = ['int32', (32, 32), 2]
 block_size = shape[0] * shape[1] // ncore
 split_size = shape[0] // ncore
-val = torch.randint(low=0, high=10, size=shape, dtype=eval(f'torch.{dtype}')).npu()
-pointer = torch.randint(low=0, high=10, size=(split_size, shape[1]), dtype=eval(f'torch.{dtype}')).npu()
+val = torch.randint(low=0, high=10, size=shape, dtype=getattr(torch, dtype)).npu()
+pointer = torch.randint(low=0, high=10, size=(split_size, shape[1]), dtype=getattr(torch, dtype)).npu()
 pointer_old = torch.full_like(pointer, -10).npu()
 n_elements = shape[0] * shape[1]
 atomic_and[ncore, 1, 1](val, pointer, pointer_old, n_elements, BLOCK_SIZE=split_size * shape[1])

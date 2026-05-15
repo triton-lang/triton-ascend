@@ -31,8 +31,8 @@ triton.language.fdiv(x, y, ieee_rounding=False, _semantic=None)
 | GPU    | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     | ×    | √    | √    | ×    | ×    |
 | Ascend A2/A3 | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     | √    | √    | ×    | √    | ×    |
 
-结论：Ascend 比 GPU 少了fp64的支持，但多了fp16，bf16的支持。
-torch对u8支持。
+结论：Ascend 相比 GPU 缺失 fp64 支持，但额外支持 fp16、bf16。
+torch 对 uint8 支持。
 
 #### 2.2.2 Shape 支持
 
@@ -55,7 +55,7 @@ fp64开发中。
 
 ```python
 @triton.jit
-def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
+def fn_npu_(output_ptr, x_ptr, y_ptr,
             XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr,
             XNUMEL: tl.constexpr, YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):
     xoffs = tl.program_id(0) * XB

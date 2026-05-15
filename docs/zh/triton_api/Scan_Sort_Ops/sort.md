@@ -5,7 +5,7 @@
 简介：对输入张量`x`按维度进行升序或者降序的排序。
 
 ```python
-triton.language.sort(x, dim: constexpr | None = None, descending: constexpr = constexpr[0])
+triton.language.sort(x, dim: constexpr | None = None, descending: constexpr = False)
 ```
 
 ## 2. 规格
@@ -30,8 +30,8 @@ triton.language.sort(x, dim: constexpr | None = None, descending: constexpr = co
 | GPU    | √    | √     | √      | √     | ×     | ×      | ×      | √     | √    | √    | √    | √    | √    |
 | Ascend A2/A3 | √     | √      | ×     | ×     | ×     | ×      | ×      | ×     | √    | √    | ×    | √    | ×    |
 
-结论：Ascend 比 GPU 少了int32，uint8，int64，fp64，bool的支持。
-torch_npu支持u8。
+结论：Ascend 相比 GPU 缺失 int32、uint8、int64、float64、bool 支持。
+torch_npu支持uint8。
 
 #### 2.2.2 Shape 支持
 
@@ -46,7 +46,7 @@ torch_npu支持u8。
 
 > 相对社区能力缺失且无法实现
 
-毕升编译器限制，int32，uint8，int64，fp64，bool无法实现。
+毕升编译器限制，int32、uint8、int64、float64、bool 无法实现。
 
 ### 2.4 使用方法
 
@@ -60,6 +60,6 @@ def sort_kernel_2d(X, Z, N: tl.constexpr, M: tl.constexpr, descending: tl.conste
     offy = pid * M
     off2d = offx + offy
     x = tl.load(X + off2d)
-    x = tl.sort(x, descending=descending, dim=0)
+    x = tl.sort(x, dim=0, descending=descending)
     tl.store(Z + off2d, x)
 ```

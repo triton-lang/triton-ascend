@@ -31,7 +31,7 @@ triton.language.where(condition, x, y, _semantic=None)
 | GPU    | √     | √      | √     | √      |  √      |  √       |  √       | √      | √    | √   | √    | √    | √    |
 | Ascend A2/A3 | √    | √     | √     | √     | ×     | ×      | ×      | √     | √    | √    | ×    | √    | √    |
 
-结论：Ascend 比 GPU 少了uint、fp64类型的支持。
+结论：Ascend 相比 GPU 缺失 uint、fp64 类型支持。
 
 #### 2.2.2 Shape 支持
 
@@ -46,13 +46,14 @@ triton.language.where(condition, x, y, _semantic=None)
 
 > 相对社区能力缺失且无法实现
 
-Ascend 比 GPU 少了uint、fp64类型的支持。
+Ascend 相比 GPU 缺失 uint、fp64 类型支持。
 
 ### 2.4 使用方法
 
-以下示例实现了对输入张量 `x` 做逐元素指数（以2为底）：
+以下示例根据条件 `X < Y` 逐元素选择：条件为真时取 `X` 的元素，否则取常量 `1`。
 
-```python@triton.jit@triton.jit@triton.jit@triton.jit
+```python
+@triton.jit
 def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
             XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr,
             XNUMEL: tl.constexpr, YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):

@@ -359,6 +359,6 @@ block_ptr = tl.make_block_ptr(
     strides=(32, 1),
     offsets=(i_t * BT, 0),
     block_shape=(BT, 32),
-    order=(1, 0) # 先行后列
+    order=(1, 0) # 行优先布局：维度 1 最连续（stride 1），维度 0 最不连续
 )
 ```

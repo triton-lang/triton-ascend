@@ -5,7 +5,7 @@
 简介：限制张量x的范围为[min，max]之间。
 
 ```python
-triton.language.clamp(x, min, max, propagate_nan: ~triton.language.core.constexpr = <PROPAGATE_NAN.NONE: 0>, _semantic=None)
+triton.language.clamp(x, min, max, propagate_nan: constexpr = PropagateNan.NONE, _semantic=None)
 ```
 
 ## 2. 规格
@@ -15,8 +15,8 @@ triton.language.clamp(x, min, max, propagate_nan: ~triton.language.core.constexp
 | 参数名           | 类型                | 说明                                                             |
 | ------------- | ----------------- | -------------------------------------------------------------- |
 | `x`        | `tensor`          | 张量数据                                                      |
-| `min`       | `constexpr`    | 最小值                                                        |
-| `max`     | `constexpr`    | 最大值 |
+| `min`       | `tensor`       | 下界（可为张量或标量，会广播到 `x` 的 shape） |
+| `max`       | `tensor`       | 上界（可为张量或标量，会广播到 `x` 的 shape） |
 | `propagate_nan` | `triton.language.core.constexpr` | 是否对min或max做Nan的传播                                              |
 | `_semantic`   | -                 | 保留参数，暂不支持外部调用
 
@@ -45,7 +45,7 @@ triton.language.clamp(x, min, max, propagate_nan: ~triton.language.core.constexp
 
 > 相对社区能力缺失且无法实现
 
-比 GPU 少了fp64的支持。
+Ascend 相比 GPU 缺失 fp64 支持。
 
 ### 2.4 使用方法
 

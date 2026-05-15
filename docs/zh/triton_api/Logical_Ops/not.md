@@ -1,11 +1,15 @@
-# triton.language.not
+# triton.language.tensor.__not__
 
 ## 1. 函数概述
 
-简介：将tensor的值按位取反。
+简介：对 tensor 做逐元素逻辑非（0 变 1，非零变 0）。对应 Python 的 `not` 关键字 —— Triton 通过 AST visitor 特殊处理，把 `not X` 重写为 `X.__not__()`。与按位取反 `~X`（见 [invert](./invert.md)）不同：前者是逻辑非，后者是按位翻转。
 
 ```python
-triton.language.not(x)
+# 通过 not 关键字（Triton AST 拦截处理）
+not x
+
+# 或直接调用 dunder 方法
+x.__not__()
 ```
 
 ## 2. 规格
@@ -29,7 +33,7 @@ triton.language.not(x)
 | GPU    | ×     | ×      | ×     | ×      |  ×      |  ×       |  ×       | ×      | ×    | ×   | ×    | ×    | √    |
 | Ascend A2/A3 | √    | √     | √     | ×     | ×     | ×      | ×      | √     | ×    | ×    | ×    | ×    | √    |
 
-结论：Ascend 比 GPU 多了非bool类型的支持。
+结论：Ascend 相比 GPU 额外支持非 bool 类型。
 
 #### 2.2.2 Shape 支持
 
@@ -48,9 +52,10 @@ triton.language.not(x)
 
 ### 2.4 使用方法
 
-以下示例实现了对输入张量 `x` 做逐元素指数（以2为底）：
+以下示例对输入张量 `x` 做逐元素按位取反：
 
-```python@triton.jit@triton.jit@triton.jit@triton.jit@triton.jit
+```python
+@triton.jit
 def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
             XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr,
             XNUMEL: tl.constexpr, YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):

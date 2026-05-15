@@ -31,7 +31,7 @@ triton.language.minimum(x, y, propagate_nan: ~triton.language.core.constexpr = <
 | GPU    | √    | √     | √     | ×     | ×     | ×      | ×      | √     | √    | √    | √    | √    | √    |
 | Ascend A2/A3 | √    | √     | √     | √     | ×     | ×      | ×      | √     | √    | √    | ×    | √    | √    |
 
-结论：Ascend 比 GPU 少了fp64的支持。
+结论：Ascend 相比 GPU 缺失 fp64 支持。
 
 #### 2.2.2 Shape 支持
 
@@ -54,7 +54,7 @@ triton.language.minimum(x, y, propagate_nan: ~triton.language.core.constexpr = <
 
 ```python
 @triton.jit
-def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
+def fn_npu_(output_ptr, x_ptr, y_ptr,
             XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr,
             XNUMEL: tl.constexpr, YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):
     xoffs = tl.program_id(0) * XB

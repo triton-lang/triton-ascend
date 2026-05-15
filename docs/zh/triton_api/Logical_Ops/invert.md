@@ -1,12 +1,15 @@
-# triton.language.invert
+# triton.language.tensor.__invert__
 
 ## 1. 函数概述
 
 简介：将tensor每个值按比特位进行翻转。
-函数原型（Triton3.4.0版本）：
 
 ```python
-triton.language.invert(x, _semantic=None)
+# 通过操作符
+~x
+
+# 或直接调用 dunder 方法
+x.__invert__()
 ```
 
 ## 2. 规格
@@ -49,10 +52,11 @@ Ascend 比 GPU 少了uint类型的支持。
 
 ### 2.4 使用方法
 
-以下示例实现了对输入张量 `x` 做逐元素指数（以2为底）：
+以下示例实现了对输入张量 `x` 做逐元素按位取反：
 
-```python@triton.jit@triton.jit
-def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
+```python
+@triton.jit
+def fn_npu_(output_ptr, x_ptr,
             XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr,
             XNUMEL: tl.constexpr, YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):
     xoffs = tl.program_id(0) * XB
@@ -66,11 +70,8 @@ def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
     idx = xidx[:, None, None] * YNUMEL * ZNUMEL + yidx[None, :, None] * ZNUMEL + zidx[None, None, :]
 
     X = tl.load(x_ptr + idx)
-    Y = tl.load(y_ptr + idx)
 
     ret = ~X
 
     tl.store(output_ptr + idx, ret)
-
-x = test_common.generate_tensor(shape, dtype).npu()
 ```

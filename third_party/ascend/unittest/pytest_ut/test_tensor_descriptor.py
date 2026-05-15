@@ -183,3 +183,44 @@ def test_reduce_max(dtype_str, shape, axis, device):
     actual = torch.zeros(expected.shape, dtype=getattr(torch, dtype_str), device=device)
     kernel[(1, )](inp, actual, *shape, *expected.shape, axis=axis)
     assert torch.equal(expected, actual)
+
+
+@pytest.mark.parametrize("dtype", ['float32', 'float16', 'bfloat16'])
+@pytest.mark.parametrize("padding", ["zero", "nan"])
+def test_tensor_descriptor_padding(dtype, padding):
+
+    @triton.jit
+    def device_tma_load(in_ptr, out_ptr, IM, IN, YM, YN, M_BLOCK: tl.constexpr, N_BLOCK: tl.constexpr,
+                        padding: tl.constexpr):
+        x_desc = tl.make_tensor_descriptor(in_ptr, shape=[IM, IN], strides=[IN, 1], block_shape=[M_BLOCK, N_BLOCK],
+                                           padding_option=padding)
+        out_desc = tl.make_tensor_descriptor(out_ptr, shape=[YM, YN], strides=[YN, 1], block_shape=[M_BLOCK, N_BLOCK])
+
+        moffset = tl.program_id(0) * M_BLOCK
+        noffset = tl.program_id(1) * N_BLOCK
+
+        value = x_desc.load([moffset, noffset])
+
+        out_desc.store([moffset, noffset], value)
+
+    def alloc_fn(size: int, alignment: float, stream: float):
+        return torch.ones(size, device="npu", dtype=torch.float32)
+
+    triton.set_allocator(alloc_fn)
+
+    IM, IN = 48, 48
+    OM, ON = 64, 64
+    M_BLOCK = 32
+    N_BLOCK = 32
+    torch_dtype = getattr(torch, dtype)
+    input_tensor = torch.arange(IM * IN, device="npu", dtype=torch_dtype).reshape(IM, IN)
+    out_device_tma = torch.zeros((OM, ON), device="npu", dtype=torch_dtype)
+    grid = (triton.cdiv(OM, M_BLOCK), triton.cdiv(ON, N_BLOCK))
+    device_tma_load[grid](input_tensor, out_device_tma, IM, IN, OM, ON, M_BLOCK, N_BLOCK, padding)
+    expected = torch.zeros((OM, ON), device="npu", dtype=torch_dtype)
+    expected[0:IN, 0:IM] = input_tensor
+    if padding == "nan":
+        expected[:, IN:ON] = float('nan')
+        expected[IM:OM, :] = float('nan')
+
+    torch.testing.assert_close(expected, out_device_tma, equal_nan=True)

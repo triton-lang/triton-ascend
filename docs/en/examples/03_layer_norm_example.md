@@ -98,7 +98,7 @@ def _layer_norm(M, N, dtype, eps=1e-5, device='npu'):
     x.requires_grad_(True)
     # Forward pass
     y_tri = layer_norm(x, weight, bias, eps)
-    y_ref = torch.nn.functional.layer_norm(x, weight, bias, eps).to(dtype)
+    y_ref = torch.nn.functional.layer_norm(x, w_shape, weight, bias, eps).to(dtype)
     # Determine whether the results are approximate.
     assert torch.allclose(y_tri, y_ref, atol=1e-2, rtol=0)
     print(f"y_tri: {y_tri}")

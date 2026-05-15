@@ -24,7 +24,7 @@ triton.language.rand(
 | `n_rounds`     | `constexpr`，默认值为10   | Philox 算法的迭代轮数 |
 
 返回值：
-1 个 float32 类型的随机块，shape与offset的相同，其值在 `[0.0, 1.0)` 区间内均匀分布
+1 个 float32 类型的随机块，其shape与offset的shape相同，其值在 `[0.0, 1.0)` 区间内均匀分布
 
 ### 2.2 支持规格
 

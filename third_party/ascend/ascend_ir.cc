@@ -34,6 +34,8 @@
 #include "mlir/AsmParser/AsmParser.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -569,30 +571,63 @@ void init_ascend_ir(py::module &&m) {
              return MemRefType::get(shape, elementType, layout, memorySpace);
            })
       .def("create_fixpipe",
-           [](AscendNPUIROpBuilder &self, Value src, Value dst,
-              hivm::FixpipeDMAMode dma_mode,
-              hivm::FixpipeDualDstMode dual_dst_mode,
-              hivm::FixpipePreQuantMode pre_quant_mode,
-              hivm::FixpipePreReluMode pre_relu_mode) -> void {
-             if (!dyn_cast<RankedTensorType>(src.getType())) {
-               llvm_unreachable("src is not of RankedTensorType");
-             }
-             if (!dyn_cast<MemRefType>(dst.getType())) {
-               llvm_unreachable("dst is not of MemRefType");
-             }
-             auto *ctx = self.getBuilder().getContext();
-             auto dma_mode_attr =
-                 mlir::hivm::FixpipeDMAModeAttr::get(ctx, dma_mode);
-             auto dual_dst_mode_attr =
-                 mlir::hivm::FixpipeDualDstModeAttr::get(ctx, dual_dst_mode);
-             auto pre_quant_mode_attr =
-                 mlir::hivm::FixpipePreQuantModeAttr::get(ctx, pre_quant_mode);
-             auto pre_relu_mode_attr =
-                 mlir::hivm::FixpipePreReluModeAttr::get(ctx, pre_relu_mode);
-             auto channel_split = BoolAttr::get(ctx, false);
-             auto op = self.create<hivm::FixpipeOp>(
-                 mlir::TypeRange{}, src, dst, dma_mode_attr, dual_dst_mode_attr,
-                 pre_quant_mode_attr, pre_relu_mode_attr, channel_split);
+           [](AscendNPUIROpBuilder &self, Value src, py::object dst_obj, hivm::FixpipeDMAMode dma_mode,
+              hivm::FixpipeDualDstMode dual_dst_mode, hivm::FixpipePreQuantMode pre_quant_mode,
+              hivm::FixpipePreReluMode pre_relu_mode) -> py::object {
+               if (!dyn_cast<RankedTensorType>(src.getType())) {
+                   llvm_unreachable("src is not of RankedTensorType");
+               }
+
+               auto *ctx = self.getBuilder().getContext();
+               auto loc = self.getLastLoc();
+
+               Value dstValue;
+               bool needCreateDst = dst_obj.is_none();
+
+               if (needCreateDst) {
+                   auto srcType = dyn_cast<RankedTensorType>(src.getType());
+                   auto srcShape = srcType.getShape();
+
+                   llvm::SmallVector<int64_t> dstShape(srcShape.begin(), srcShape.end());
+
+                   if (dual_dst_mode == hivm::FixpipeDualDstMode::ROW_SPLIT) {
+                       if (dstShape.size() >= 1 && dstShape[0] > 0) {
+                           dstShape[0] = dstShape[0] / 2;
+                       }
+                   } else if (dual_dst_mode == hivm::FixpipeDualDstMode::COLUMN_SPLIT) {
+                       if (dstShape.size() >= 2 && dstShape[1] > 0) {
+                           dstShape[1] = dstShape[1] / 2;
+                       }
+                   }
+
+                   auto dstType = RankedTensorType::get(dstShape, srcType.getElementType());
+                   auto emptyTensor = self.create<tensor::EmptyOp>(dstType.getShape(), dstType.getElementType());
+                   dstValue = emptyTensor.getResult();
+               } else {
+                   dstValue = py::cast<Value>(dst_obj);
+                   if (!dyn_cast<ShapedType>(dstValue.getType())) {
+                       llvm_unreachable("dst is not of ShapedType");
+                   }
+               }
+
+               auto dma_mode_attr = mlir::hivm::FixpipeDMAModeAttr::get(ctx, dma_mode);
+               auto dual_dst_mode_attr = mlir::hivm::FixpipeDualDstModeAttr::get(ctx, dual_dst_mode);
+               auto pre_quant_mode_attr = mlir::hivm::FixpipePreQuantModeAttr::get(ctx, pre_quant_mode);
+               auto pre_relu_mode_attr = mlir::hivm::FixpipePreReluModeAttr::get(ctx, pre_relu_mode);
+               auto channel_split = BoolAttr::get(ctx, false);
+               if (needCreateDst) {
+                   return py::cast<Value>(self.create<hivm::FixpipeOp>(mlir::TypeRange {dstValue.getType()}, src,
+                                                                       dstValue, dma_mode_attr, dual_dst_mode_attr,
+                                                                       pre_quant_mode_attr, pre_relu_mode_attr,
+                                                                       channel_split)
+                                              .getResult(0));
+
+               } else {
+                   self.create<hivm::FixpipeOp>(mlir::TypeRange {}, src, dstValue, dma_mode_attr, dual_dst_mode_attr,
+                                                pre_quant_mode_attr, pre_relu_mode_attr, channel_split);
+                   return py::none();
+               }
+
            })
       .def("create_annotation_mark",
            [](TritonOpBuilder &self, Value &ptr, const std::string &attrKey,

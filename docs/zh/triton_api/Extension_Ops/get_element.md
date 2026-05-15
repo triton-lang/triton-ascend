@@ -7,11 +7,11 @@
 
 ```python
 triton.language.get_element(
- src, 
- indice, 
- _builder=None, 
- _generator=None
-)→ scalar
+    src,
+    indice,
+    _builder=None,
+    _generator=None
+) -> scalar
 ```
 
 可以作为tensor的成员函数调用，如`x.get_element(...)`，与`get_element(x, ...)`等效。
@@ -35,7 +35,7 @@ triton.language.get_element(
 #### 2.2.1 DataType 支持
 
 |        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | 
+| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- |
 | Ascend A2/A3 | √    | √     | √     | √     | √     | √       | √         |  √       | √    | √    |  √    | ×    |
 
 #### 2.2.2 Shape 支持
@@ -51,10 +51,11 @@ triton.language.get_element(
 
 以下示例实现了get_element的调用：
 
-```python@triton.jit
+```python
+@triton.jit
 def index_select_manual_kernel(in_ptr, indices_ptr, out_ptr, dim,
                                 g_stride: tl.constexpr, indice_length: tl.constexpr,
-                                g_block: tl.constexpr, g_block_sub: tl.constexpr, 
+                                g_block: tl.constexpr, g_block_sub: tl.constexpr,
                                 other_block: tl.constexpr):
     """
     Manual implementation using tl.get_element and tl.insert_slice.
@@ -74,10 +75,10 @@ def index_select_manual_kernel(in_ptr, indices_ptr, out_ptr, dim,
             for i in range(0, g_block_sub):
                 gather_offset = tl.get_element(indices, (i,)) * g_stride
                 val = tl.load(in_ptr + gather_offset + other_idx, other_mask)
-                tmp_buf = tl.insert_slice(tmp_buf, val[None, :], 
+                tmp_buf = tl.insert_slice(tmp_buf, val[None, :],
                                           offsets=(i, 0), sizes=(1, other_block), strides=(1, 1))
 
-            tl.store(out_ptr + g_idx[:, None] * g_stride + other_idx[None, :], 
+            tl.store(out_ptr + g_idx[:, None] * g_stride + other_idx[None, :],
                      tmp_buf, g_mask[:, None] & other_mask[None, :])
 ```
 

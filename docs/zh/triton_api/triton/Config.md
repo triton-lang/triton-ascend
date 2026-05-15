@@ -1,7 +1,7 @@
 # triton.Config
 
 ```python
-classtriton.Config(self, kwargs, num_warps=4, num_stages=2, num_ctas=1, maxnreg=None, pre_hook=None)
+class triton.Config(self, kwargs, num_warps, num_stages, num_ctas, maxnreg, pre_hook)
 ```
 
 表示自动调优可能尝试的内核配置的对象

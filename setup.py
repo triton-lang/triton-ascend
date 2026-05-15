@@ -654,6 +654,24 @@ class CMakeBuild(build_ext):
                     pass
             print(f"Copied triton-mlir-opt to {triton_mlir_opt_dst}")
 
+        # Copy triton-opt tool to extdir for runtime use
+        # This tool is needed for converting ttir to ttadapter
+        triton_opt_src = os.path.join(cmake_dir, "bin", "triton-opt")
+        if os.path.exists(triton_opt_src):
+            triton_opt_dst = os.path.join(extdir, "triton-opt")
+            shutil.copy2(triton_opt_src, triton_opt_dst)
+            # Make it executable (Unix-like systems)
+            if platform.system() != "Windows":
+                os.chmod(triton_opt_dst, 0o755)
+                # Strip debug symbols to reduce binary size (can reduce size by ~80%)
+                try:
+                    subprocess.check_call(["strip", "--strip-all", triton_opt_dst])
+                    print(f"Stripped triton-opt to reduce size")
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    # strip command not available or failed, continue without stripping
+                    pass
+            print(f"Copied triton-opt to {triton_opt_dst}")
+
 def download_and_copy_dependencies():
     nvidia_version_path = os.path.join(get_base_dir(), "cmake", "nvidia-toolchain-version.json")
     with open(nvidia_version_path, "r") as nvidia_version_file:
@@ -983,7 +1001,7 @@ ARCHITECTURE_ALIASES = {
 }
 
 ARCHITECTURE_DEPENDENCIES = {
-    "x86_64": ["triton==3.2.0"],
+    "x86_64": ["triton==3.5.0"],
     "arm": ["triton==3.5.0"],
 }
 

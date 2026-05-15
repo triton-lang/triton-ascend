@@ -28,7 +28,7 @@ triton.language.load(
 | ------------- | ----------------- | -------------------------------------------------------------- |
 | `pointer`        | `triton.PointerType` <br> 或 `tensor<triton.PointerType>` <br> 或`triton.PointerType<tensor>`（来源于`tl.make_block_ptr`）         | 指向GM上待读取数据的指针                                                    |
 | `mask`       | `int1`或`tensor<int1>`    | 可选参数，当且仅当`pointer` 不来源于`tl.make_block_ptr`时可传入<br>若`mask[i]==False` ，则不会读取`pointer[i]`指向的数据,是`True`则正常读取 <br>若`pointer`来源于`tl.make_block_ptr`，则`mask`必须是`None`                                        |
-| `other`     | `tensor` 或`scalar`   | 可选参数，当且仅当`mask!=None`时可传入<br> 若`mask[i]==False` ，将返回值的第`i`个位置设置为`other[i]`或`other`（若`other`是`scalar`类型）, 需要支持tensor，因为tritonGPU社区上是tensor和scalar都支持的，other[]] = mask[i]|
+| `other`     | `tensor` 或`scalar`   | 可选参数，当且仅当`mask!=None`时可传入<br> 若`mask[i]==False` ，将返回值的第`i`个位置设置为`other[i]`或`other`（若`other`是`scalar`类型）, 需要支持tensor，因为tritonGPU社区上是tensor和scalar都支持的 |
 | `boundary_check` | `tuple(int)` | 可选参数，当且仅当`pointer`来源于`tl.make_block_ptr`时可传入<br>整数元组，指示需要做边界检查的维度                                         |
 | `padding_option`   | `""`或`"zero"`或`"nan"`               | 可选参数，当且仅当`boundary_check`不为空时可传入<br>表示访问越界时填充的值 |
 | `cache_modifier`   | `""` 或 `"ca"`或`"cg"`                | 可选参数，控制NVIDIA PTX上的cache选项，对Ascend硬件无效                                                |

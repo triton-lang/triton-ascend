@@ -72,7 +72,7 @@ def add_kernel(x_ptr,  # *Pointer* to first input vector.
 
 ### 2.4 使用方法
 
-**注意**：`prefix`字符串前缀在使用`device_print`时是必需加上的，否则会导致编译错误。
+**注意**：`prefix`字符串前缀在使用`device_print`时是必须加上的，否则会导致编译错误。
 
 ```python
 import triton

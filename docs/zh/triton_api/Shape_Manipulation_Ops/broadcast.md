@@ -48,7 +48,8 @@
 
 **基本用法：**
 
-```python@triton.jit@triton.jit
+```python
+@triton.jit
 def broadcast_kernel(
     output_ptr,
     BLOCK_SIZE: tl.constexpr

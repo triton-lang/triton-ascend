@@ -544,6 +544,12 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
       op->removeAttr("MetaUse");
     }
   });
+  // hivm.custom present library call, shouldn't be metause
+  funcOp.walk([&](hivm::CustomOp op) {
+    if (isMetaUse(op)) {
+      op->removeAttr("MetaUse");
+    }
+  });
   LLVM_DEBUG({
     os << "[UseAnalysis] After post-process, funcOp is " << *funcOp << "\n";
   });

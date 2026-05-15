@@ -18,7 +18,7 @@ triton.language.dot(input, other, acc=None, input_precision=None, allow_tf32=Non
 | `input`        | `int8 fp16 bf16 fp32`     |     第一个输入，2D or 3D 张量， 为了避免溢出 取值范围限制为-5-5     |                                                       |
 | `other`       | `int8 fp16 bf16 fp32`     |     第二个输入,  2D or 3D 张量，为了避免溢出 取值范围限制为-5-5    |                                                   |
 | `acc`           | `int32  float32`    | 存累加结果的张量, accumulator tensor. If not None, the result is added to this tensor, acc_dtype支持 {:code:`float16`, :code:`float32`, :code:`int32`} |
-| `input_precision`   | -                 |  Available options for nvidia 通过选择精度模式来决定是否启用 Tensor Cores 加速    |
+| `input_precision`   | -                 |  Available options for NVIDIA 通过选择精度模式来决定是否启用 Tensor Cores 加速    |
 | `max_num_imprecise_acc`     | `int`    | 多少次低精度的累加数（当前昇腾不支持低精度累加） |
 | `out_dtype`     | `fp32  int32`    | 输出结果类型|
 
@@ -49,7 +49,7 @@ triton.language.dot(input, other, acc=None, input_precision=None, allow_tf32=Non
 
 - Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。
 
-- acc 不能支持FP16，为了精度硬件默认就是FP32
+- acc 不能支持fp16，为了精度硬件默认就是fp32
 
 - max_num_imprecise_acc 暂时不支持
 

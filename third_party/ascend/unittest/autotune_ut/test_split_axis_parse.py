@@ -130,6 +130,42 @@ def test_split_axis_parse_base_case3(mock_autotuner):
     check_axes_parse_res(act_res, ref_res)
 
 
+def test_split_axis_parse_base_case4(mock_autotuner):
+    import triton.backends.ascend.runtime
+    
+    @triton.autotune(
+        configs=[],
+        key=["n_elements"]
+    )
+    @triton.jit
+    def triton_split_axis_parse_base_case4(
+        x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
+    ):
+        offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)  # <- Fully fused
+        mask = offsets < n_elements
+
+        x = tl.load(x_ptr + offsets, mask=mask)
+        y = tl.load(y_ptr + offsets, mask=mask)
+        output_x = x[:, None].to(tl.float32) * 1 # left=Call(func=Attribute(value=Subscipt(...),),))
+        output_y = 1 * y[None, :].to(tl.float32)
+
+        output_offsets = tl.program_id(axis=0) * BLOCK_SIZE * BLOCK_SIZE + \
+                         tl.arange(0, BLOCK_SIZE)[:, None] * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)[None, :]
+        tl.store(output_ptr + output_offsets, output_x + output_y, mask=mask)
+
+    ref_res = {
+        "keys": {"x": "n_elements"},
+        "split_params": {"x": "BLOCK_SIZE"},
+        "tiling_params": {},
+        "low_dim_axes": ["x"],
+        "reduction_axes": [],
+    }
+    grid = lambda meta: (meta["BLOCK_SIZE"],)
+    act_res = triton_split_axis_parse_base_case4[grid]()
+
+    check_axes_parse_res(act_res, ref_res)
+
+
 def test_grid_stride_loop_block_only_tiling_semantics(mock_autotuner):
     import triton.backends.ascend.runtime
 

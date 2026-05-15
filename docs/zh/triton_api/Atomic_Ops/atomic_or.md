@@ -7,13 +7,13 @@
 
 ```python
 triton.language.atomic_or(
- pointer, 
- val, 
- mask=None, 
- sem=None, 
- scope=None, 
- _semantic=None
-)→ pointer
+    pointer,
+    val,
+    mask=None,
+    sem=None,
+    scope=None,
+    _semantic=None
+) -> pointer
 ```
 
 可以作为tensor的成员函数调用，如`x.atomic_or(...)`，与`atomic_or(x, ...)`等效。

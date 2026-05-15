@@ -163,7 +163,7 @@ TritonToLinalg converts ttir to linalg ir.
 | Converter                                  | 描述                                                  |
 | ------------------------------------------ | ------------------------------------------------------------ |
 | StoreConverter                             | triton::StoreOp to memref::copy                              |
-| AddPtrConverter                            | triton::AddPtrOp to memref::ReinterpretCast                  |
+| AddPtrConverter                            | triton::AddPtrOp to memref::ReinterpretCastOp                  |
 | GetProgramIDConverter                      | triton::GetProgramIdOp to a param in functionOp              |
 | GetNumProgramsConverter                    | triton::GetNumProgramsOp to a param in functionOp            |
 | LoadConverter                              | triton::LoadOp to memref::copy and bufferization::ToTensorOp |

@@ -53,20 +53,28 @@
 ### 2.5 使用方法
 
 ```python
+import torch
 import triton
 import triton.language as tl
 
 @triton.jit
-def permute_example():
+def permute_example(out_ptr):
     # 创建2x3x4的张量
     x = tl.zeros([2, 3, 4], dtype=tl.float32)
 
     # 转置维度，变成4x2x3
     y = tl.permute(x, [2, 0, 1])
 
-    return y
+    # 将结果写回外部张量
+    offs = (
+        tl.arange(0, 4)[:, None, None] * (2 * 3)
+        + tl.arange(0, 2)[None, :, None] * 3
+        + tl.arange(0, 3)[None, None, :]
+    )
+    tl.store(out_ptr + offs, y)
 
 ## 调用示例
-result = permute_example()
-print(result.shape)  # 输出: (4, 2, 3)
+out = torch.empty((4, 2, 3), dtype=torch.float32, device="npu")
+permute_example[(1,)](out)
+print(out.shape)  # 输出: torch.Size([4, 2, 3])
 ```

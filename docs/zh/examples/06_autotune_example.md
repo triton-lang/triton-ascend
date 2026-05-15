@@ -1,5 +1,7 @@
 # 自动调优 （Autotune）
 
+如果你希望先了解 Triton-Ascend autotune 的推荐用法、`configs=[]` 的含义，以及自动 Tiling 的适用边界，建议先阅读 [Triton-Ascend autotune 使用指南](../autotune_guide.md)。
+
 在本节中，我们将展示使用 Triton 的 autotune 方法自动选择最优的 kernel 配置参数。当前 Triton-Ascend autotune 完全兼容社区 autotune 的使用方法（参考[社区文档](https://triton-lang.org/main/python-api/generated/triton.autotune.html)），即需要用户手动传入一些定义好的 triton.Config，然后 autotune 会通过 benchmark 的方式选择其中的最优 kernel 配置；此外 Triton-Ascend 提供了**进阶的 autotune** 用法，用户无需提供triton kernel 的切分轴、tiling 轴等信息，autotune 会根据triton kernel语义自动解析切分轴、tiling轴等信息，并自动生成一些可能最优的 kernel 配置，然后通过 benchmark 或者 profiling 的方式选择其中的最优配置。
 
 说明：
@@ -123,7 +125,7 @@ if __name__ == "__main__":
 @triton.autotune(
     configs=[],
     key=["n_elements"],
-}
+)
 @triton.jit
 def add_kernel(
     x_ptr,  # *指向*第一个输入向量的指针。

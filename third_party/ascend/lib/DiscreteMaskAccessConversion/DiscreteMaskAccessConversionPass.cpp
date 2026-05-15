@@ -369,6 +369,12 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
   });
 }
 
+void DiscreteMaskAccessConversionPass::getDependentDialects(
+    DialectRegistry &registry) const
+{
+  registry.insert<arith::ArithDialect, triton::TritonDialect, hivm::HIVMDialect>();
+}
+
 std::unique_ptr<OperationPass<ModuleOp>>
 mlir::triton::createDiscreteMaskAccessConversionPass(
     const DiscreteMaskAccessConversionOptions &options) {

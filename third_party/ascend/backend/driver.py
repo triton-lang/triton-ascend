@@ -550,7 +550,10 @@ def make_launcher(constants, signature, metadata):
         "TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
     enable_grid_warn_print = os.getenv(
         "TRITON_GRID_WARN_PRINT", 'false').lower() in ('true', '1')
-    enable_auto_map_parallel_blocks = _is_auto_map_parallel_blocks_enabled()
+    # Per-kernel metadata wins; fall back to the env var when unset.
+    enable_auto_map_parallel_blocks = getattr(metadata, "enable_auto_blockify", None)
+    if enable_auto_map_parallel_blocks is None:
+        enable_auto_map_parallel_blocks = _is_auto_map_parallel_blocks_enabled()
     npu_utils = NPUUtils()
     num_physical_blocks = npu_utils.get_aivector_core_num(
     ) if mix_mode == "aiv" else npu_utils.get_aicore_num()

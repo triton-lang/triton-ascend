@@ -2029,7 +2029,7 @@ def dot(input, other, acc=None, input_precision=None, allow_tf32=None, max_num_i
 
 
 @builtin
-def dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc=None, fast_math=False, lhs_k_pack=True,
+def dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc=None, fast_math=True, lhs_k_pack=True,
                rhs_k_pack=True, out_dtype=float32, _semantic=None):
     """
     Returns the matrix product of two blocks in microscaling format.

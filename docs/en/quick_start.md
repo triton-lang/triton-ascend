@@ -21,11 +21,11 @@ Minimum hardware configuration: single-device 32 GB graphics memory (recommended
 
 ### Software Dependency
 
-Python (Python 3.9 to Python 3.11), CANN_TOOLKIT, CANN_OPS, [requirements.txt](../../requirements.txt), and [requirements_dev.txt](../../requirements_dev.txt)
+Python (Python 3.9 to Python 3.13,Tips:Python 3.9 does not support AArch64), CANN_TOOLKIT, CANN_OPS, [requirements.txt](../../requirements.txt), and [requirements_dev.txt](../../requirements_dev.txt)
 
 For details about the CANN installation and configuration script, see [CANN installation description](https://www.hiascend.com/document/detail/zh/canncommercial/850/softwareinst/instg/instg_0000.html?Mode=PmIns&InstallType=local&OS=Ubuntu). Developers can select the CANN version, product series, CPU architecture, operating system, and installation method to find the corresponding installation commands.
 
-You need to select the required version (8.5.0 is recommended) based on the Ascend card model you use. The CANN installation takes about 5 to 10 minutes. Wait until the installation is complete.
+You need to select the required version (9.0.0 is recommended) based on the Ascend card model you use. The CANN installation takes about 5 to 10 minutes. Wait until the installation is complete.
 
 - Note: If the user does not specify an installation path, the software will be installed to the default path as follows.
 For root user: `/usr/local/Ascend`

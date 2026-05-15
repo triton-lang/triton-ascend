@@ -103,6 +103,8 @@ public:
     return !start && !end && !scalar && dims.size() != 0 && offsets.size() != 0;
   }
 
+  bool isMemrefSubviewValid(Value source, OpBuilder &builder) const;
+
   // parse value recursively
   LogicalResult parse(Value operand, const Location &loc, OpBuilder &builder);
 

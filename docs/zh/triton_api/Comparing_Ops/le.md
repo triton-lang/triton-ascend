@@ -37,7 +37,7 @@ triton.language.semantic.less_equal(
 | GPU          | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
 | Ascend A2/A3 | √ | √ | √ | × | × | × | × | √ | √ | √ | × | √ | √ |
 
-结论：Triton-Ascend 对比 GPU 暂不支持uint, fp64,  fp8。
+结论：Triton-Ascend 对比 GPU 暂不支持 uint8/uint16/uint32/uint64、fp64。
 
 #### 2.2.2 Shape 支持
 
@@ -52,7 +52,7 @@ triton.language.semantic.less_equal(
 
 > 相对社区能力缺失且无法实现
 
-Triton-Ascend 对比 GPU 缺失fp64的支持能力, uint, fp8类型支持中。
+Triton-Ascend 对比 GPU 缺失 fp64 的支持能力，uint8/uint16/uint32/uint64 类型支持开发中。
 
 ### 2.4 使用方法
 

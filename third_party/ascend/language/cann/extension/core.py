@@ -273,11 +273,11 @@ class FixpipePreReluMode(enum.Enum):
 @builtin
 def fixpipe(
     src: tl.tensor,
-    dst: bl.buffer,
+    dst: Union[None, bl.buffer] = None,
     dma_mode: FixpipeDMAMode = FixpipeDMAMode.NZ2ND,
     dual_dst_mode: FixpipeDualDstMode = FixpipeDualDstMode.NO_DUAL,
     _semantic=None,
-) -> None:
+) -> Union[None, tl.tensor]:
     """
     Directly store a tensor on L0C to a local buffer via fixpipe.
     Fixpipe is pipeline that performing data movement from L0C to other memory hierarchies.
@@ -286,50 +286,66 @@ def fixpipe(
 
     :param src: the source tensor, Must be located in the l0C memory region.
     :type src: tl.tensor
-    :param dst: The destination buffer, Must be located in the UB memory region.
-    :type dst: bl.buffer
+    :param dst: The destination buffer in UB. If None, an empty tensor will be created. 
+                Must be buffer type in UB if provided.
+    :type dst: bl.buffer | None
     :param dma_mode: DMA transfer mode, "nz2nd" enables NZ to ND layout transformation
-    :type dma_mode: str
+    :type dma_mode: FixpipeDMAMode
+    :param dual_dst_mode: Dual destination mode for split operations
+    :type dual_dst_mode: FixpipeDualDstMode
+    :return: If dst is None, returns the created tensor; otherwise returns None.
+    :rtype: tl.tensor | None
     """
     if not _semantic.builder.is_910_95():
         raise RuntimeError("this feature is only supported on Ascend910_95")
     if not isinstance(src, tl.tensor):
         raise TypeError("src is not of tensor type")
-    elif not isinstance(dst, bl.buffer):
-        raise TypeError("dst is not of buffer type")
-    if dst.space != ascend_address_space.UB:
-        raise TypeError("dst must be located in the UB memory region")
 
-    if len(dst.shape) == 2 and (
-        dst.type.element_ty == tl.float32 or dst.type.element_ty == tl.int32
-    ):
-        N = dst.shape[1]
-        if N % 8 != 0:
-            raise ValueError("32b Fixpipe last dim must be aligned to 8")
-        if (dma_mode != FixpipeDMAMode.NZ2ND) and (N % 16 != 0):
-            raise ValueError("32b non-NZ2ND Fixpipe last dim must be aligned to 16")
-        if (dual_dst_mode == FixpipeDualDstMode.COLUMN_SPLIT) and (N % 32 != 0):
-            raise ValueError(
-                "32b Column split dual Fixpipe last dim must be aligned to 32"
-            )
-        M = dst.shape[0]
-        if (dma_mode == FixpipeDMAMode.NZ2DN) and (M % 8 != 0):
-            raise ValueError("32b NZ2DN Fixpipe first dim must be aligned to 8")
-    dst16bits = (
-        dst.type.element_ty == tl.float16
-        or dst.type.element_ty == tl.int16
-        or dst.type.element_ty == tl.bfloat16
-    )
-    if len(dst.shape) == 2 and dst16bits:
-        N = dst.shape[1]
-        if N % 16 != 0:
-            raise ValueError("16b Fixpipe last dim must be aligned to 16")
-        M = dst.shape[0]
-        if (dma_mode == FixpipeDMAMode.NZ2DN) and (M % 16 != 0):
-            raise ValueError("16b NZ2DN Fixpipe first dim must be aligned to 16")
+    if dst is not None:
+        if not isinstance(dst, bl.buffer):
+            raise TypeError("dst must be buffer type or None")
+        if dst.space != ascend_address_space.UB:
+            raise TypeError("dst's AddressSpace must be UB")
+        if len(dst.shape) == 2 and (
+            dst.type.element_ty == tl.float32 or dst.type.element_ty == tl.int32
+        ):
+            N = dst.shape[1]
+            if N % 8 != 0:
+                raise ValueError("32b Fixpipe last dim must be aligned to 8")
+            if (dma_mode != FixpipeDMAMode.NZ2ND) and (N % 16 != 0):
+                raise ValueError(
+                    "32b non-NZ2ND Fixpipe last dim must be aligned to 16"
+                )
+            if (dual_dst_mode == FixpipeDualDstMode.COLUMN_SPLIT) and (N % 32 != 0):
+                raise ValueError(
+                    "32b Column split dual Fixpipe last dim must be aligned to 32"
+                )
+            M = dst.shape[0]
+            if (dma_mode == FixpipeDMAMode.NZ2DN) and (M % 8 != 0):
+                raise ValueError("32b NZ2DN Fixpipe first dim must be aligned to 8")
+        dst16bits = (
+            dst.type.element_ty == tl.float16
+            or dst.type.element_ty == tl.int16
+            or dst.type.element_ty == tl.bfloat16
+        )
+        if len(dst.shape) == 2 and dst16bits:
+            N = dst.shape[1]
+            if N % 16 != 0:
+                raise ValueError("16b Fixpipe last dim must be aligned to 16")
+            M = dst.shape[0]
+            if (dma_mode == FixpipeDMAMode.NZ2DN) and (M % 16 != 0):
+                raise ValueError(
+                    "16b NZ2DN Fixpipe first dim must be aligned to 16"
+                )
 
     return semantic.fixpipe(
-        src, dst, dma_mode, dual_dst_mode, FixpipePreQuantMode.NO_QUANT, FixpipePreReluMode.NO_RELU, _semantic
+        src,
+        dst,
+        dma_mode,
+        dual_dst_mode,
+        FixpipePreQuantMode.NO_QUANT,
+        FixpipePreReluMode.NO_RELU,
+        _semantic,
     )
 
 

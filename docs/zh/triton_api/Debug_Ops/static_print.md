@@ -66,9 +66,9 @@ import triton.language as tl
 
 @triton.jit
 def basic_static_print_example(x_ptr, BLOCK_SIZE: tl.constexpr):
-    idx = arange(0,4)
+    idx = tl.arange(0, 4)
     val = tl.load(x_ptr + idx)
     tl.static_print("val:",val)
-    #非常量不支fstring打印
+    #非常量不支持fstring打印
     #tl.static_print(f"val:{val}")
 ```

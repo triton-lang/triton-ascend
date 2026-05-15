@@ -256,9 +256,9 @@ def acos(arg0: core.tensor, _semantic=None):
         is_neg_mid = _semantic.less_than(arg0, 0.0)
         acos_mid_signed = _semantic.where(is_neg_mid, _semantic.sub(pi, acos_mid, True), acos_mid)
 
-    is_center = _semantic.less_than(abs_x, 0.5)
-    res_mid_boundary = _semantic.where(is_center, acos_center, acos_mid_signed)
-    return res_mid_boundary
+        is_center = _semantic.less_than(abs_x, 0.6)
+        res_mid_boundary = _semantic.where(is_center, acos_center, acos_mid_signed)
+        return res_mid_boundary
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])

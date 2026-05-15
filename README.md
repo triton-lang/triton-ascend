@@ -18,22 +18,22 @@ The Triton-Ascend compilation framework removes the barriers between Triton and 
 
 - ### Latest Updates
 
-Current version: [Triton-Ascend 3.2.0](https://pypi.org/project/triton-ascend/)  
-CANN version: [CANN Community Edition 8.5.0](https://www.hiascend.com/developer/download/community/result?module=cann&cann=8.5.0)  
+Current version: [Triton-Ascend 3.2.1](https://pypi.org/project/triton-ascend/)  
+CANN version: [CANN Community Edition 9.0.0](https://www.hiascend.com/developer/download/community/result?module=cann&cann=9.0.0)  
 Version plan for 2026: Upgrade to Triton 3.5.
 
 - #### Milestones
 
-| Milestone| Important Update| Status|
-|------|------|------|
-| 2026.04 | Triton-Ascend 3.2.0 post version released|  |
-| 2026.01.20 | Triton-Ascend 3.2.0 official version released| ✅ |
-| 2025.11.14 | The pre-release version Triton-Ascend 3.2.0rc4 is available.<br>[Extended the tt.fp_to_fp API to support conversion to the FP8 type.](https://gitcode.com/Ascend/triton-ascend/pull/891)<br>[Added the scatter_ub_to_out API to support efficient data scattering from the UB to the GM.](https://gitcode.com/Ascend/triton-ascend/pull/864)| ✅ |
-| 2025.09.30 | Improved the Triton Python APIs of the Scan/Sort class, supported non-contiguous memory access, and completed the adaptation of key Triton operators in the vLLM and sglang open-source repositories.| ✅ |
-| 2025.09.19 | Supported the extraction of the Triton-Ascend [nightly package](https://test.pypi.org/project/triton-ascend/#history). | ✅ |
-| 2025.08.15 | Improved the support for the Triton Python APIs of the Atomic class, completed the adaptation of key Triton operators in the Flaggems open-source repository, and provided reference cases for high-performance implementation of simple operators such as Matmul.| ✅ |
-| 2025.06.30 | Supported 85% of Triton Python APIs and contiguous memory access, covering basic application scenarios.| ✅ |
-| 2025.05.20 | Triton-Ascend is open-source, and the GitCode code repository is alive!| ✅ |
+| Milestone  | Important Update                                                                                                                                                                                                                                                                                                                             | Status|
+|------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------|
+| 2026.04.30 | Triton-Ascend 3.2.1 official version released                                           | ✅ |
+| 2026.01.20 | Triton-Ascend 3.2.0 official version released                                                                                                                                                                                                                                                                                                | ✅ |
+| 2025.11.14 | The pre-release version Triton-Ascend 3.2.0rc4 is available.<br>[Extended the tt.fp_to_fp API to support conversion to the FP8 type.](https://gitcode.com/Ascend/triton-ascend/pull/891)<br>[Added the scatter_ub_to_out API to support efficient data scattering from the UB to the GM.](https://gitcode.com/Ascend/triton-ascend/pull/864) | ✅ |
+| 2025.09.30 | Improved the Triton Python APIs of the Scan/Sort class, supported non-contiguous memory access, and completed the adaptation of key Triton operators in the vLLM and sglang open-source repositories.                                                                                                                                        | ✅ |
+| 2025.09.19 | Supported the extraction of the Triton-Ascend [nightly package](https://test.pypi.org/project/triton-ascend/#history).                                                                                                                                                                                                                       | ✅ |
+| 2025.08.15 | Improved the support for the Triton Python APIs of the Atomic class, completed the adaptation of key Triton operators in the Flaggems open-source repository, and provided reference cases for high-performance implementation of simple operators such as Matmul.                                                                           | ✅ |
+| 2025.06.30 | Supported 85% of Triton Python APIs and contiguous memory access, covering basic application scenarios.                                                                                                                                                                                                                                      | ✅ |
+| 2025.05.20 | Triton-Ascend is open-source, and the GitCode code repository is alive!                                                                                                                                                                                                                                                                      | ✅ |
 
 - #### Community Activities
 
@@ -78,13 +78,15 @@ The OSs supported by Triton-Ascend are the same as those supported by CANN. Down
 
 | Triton-Ascend Version| CANN Commercial Version| Release Date|
 |-------------------|----------------------|--------------------|
+| 3.2.1           | CANN 9.0.0             | 2026/04/30         |
 | 3.2.0             | CANN 8.5.0           | 2026/01/16         |
-| 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.3.RC1         | 2025/11/20<br>2025/10/30         |
+| 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.3.RC1   | 2025/11/20<br>2025/10/30   |
 
 - Community versions
 
 | Triton-Ascend Version| CANN Community Version| Release Date|
 |-------------------|----------------------|--------------------|
+| 3.2.1           | CANN 9.0.0             | 2026/04/30         |
 | 3.2.0             | CANN 8.5.0           | 2026/01/16         |
 | 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.5.0.alpha001<br>CANN 8.3.RC1         | 2025/11/20<br>2025/11/12<br>2025/10/30         |
 

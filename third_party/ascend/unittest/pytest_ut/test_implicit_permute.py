@@ -46,8 +46,56 @@ case_4d = [
 
 
 # ----------------------------------------------------------
-# Triton kernel
+# Triton kernel: addptr with implicit permute kernels
 # ----------------------------------------------------------
+@triton.jit
+def addptr_implicit_perm_load_2d(
+    ptr,
+    out,
+    ynumel,
+    xnumel,
+    stride_y,
+    stride_x,
+    out_stride_x,
+    out_stride_y,
+    YBLOCK: tl.constexpr,
+    XBLOCK: tl.constexpr,
+):
+    x = tl.program_id(0) * XBLOCK + tl.arange(0, XBLOCK)[:, None]
+    y = tl.program_id(1) * YBLOCK + tl.arange(0, YBLOCK)[None, :]
+    mask = (x < xnumel) & (y < ynumel)
+
+    offset = x * stride_x + y * stride_y
+    val = tl.load(ptr + offset, mask=mask)
+
+    out_offset = x * out_stride_x + y * out_stride_y
+    tl.store(out + out_offset, val, mask=mask)
+
+
+@triton.jit
+def addptr_implicit_perm_store_2d(
+    ptr,
+    out,
+    ynumel,
+    xnumel,
+    in_stride_x,
+    in_stride_y,
+    stride_y,
+    stride_x,
+    YBLOCK: tl.constexpr,
+    XBLOCK: tl.constexpr,
+):
+    x = tl.program_id(0) * XBLOCK + tl.arange(0, XBLOCK)[:, None]
+    y = tl.program_id(1) * YBLOCK + tl.arange(0, YBLOCK)[None, :]
+    mask = (x < xnumel) & (y < ynumel)
+
+    in_offset = x * in_stride_x + y * in_stride_y
+    val = tl.load(ptr + in_offset, mask=mask)
+
+    out_offset = x * stride_x + y * stride_y
+    tl.store(out + out_offset, val, mask=mask)
+
+
 @triton.jit
 def addptr_implicit_perm_load_store_2d_static_stride(
     ptr,
@@ -241,6 +289,79 @@ def addptr_implicit_perm_load_store_4d(
     tl.store(out + offset, val, mask=mask)
 
 
+# ----------------------------------------------------------
+# Triton kernel: make_tensor_ptr with implicit permute kernels
+# ----------------------------------------------------------
+@triton.jit
+def make_tensor_ptr_implicit_perm_load_2d(
+    ptr,
+    out,
+    ynumel,
+    xnumel,
+    STRIDE_Y,
+    STRIDE_X,
+    OUT_STRIDE_X,
+    OUT_STRIDE_Y,
+    YBLOCK: tl.constexpr,
+    XBLOCK: tl.constexpr,
+):
+    y0 = tl.program_id(1) * YBLOCK
+    x0 = tl.program_id(0) * XBLOCK
+    y = y0 + tl.arange(0, YBLOCK)[None, :]
+    x = x0 + tl.arange(0, XBLOCK)[:, None]
+    xmask = x < xnumel
+    ymask = y < ynumel
+    mask = xmask & ymask
+
+    tptr = tl.make_block_ptr(
+        base=ptr,
+        shape=(xnumel, ynumel),
+        strides=(STRIDE_X, STRIDE_Y),
+        offsets=(x0, y0),
+        block_shape=(XBLOCK, YBLOCK),
+        order=(0, 1),
+    )
+
+    val = tl.load(tptr)
+    out_offset = x * OUT_STRIDE_X + y * OUT_STRIDE_Y
+    tl.store(out + out_offset, val, mask=mask)
+
+
+@triton.jit
+def make_tensor_ptr_implicit_perm_store_2d(
+    ptr,
+    out,
+    ynumel,
+    xnumel,
+    IN_STRIDE_X,
+    IN_STRIDE_Y,
+    STRIDE_Y,
+    STRIDE_X,
+    YBLOCK: tl.constexpr,
+    XBLOCK: tl.constexpr,
+):
+    y0 = tl.program_id(1) * YBLOCK
+    x0 = tl.program_id(0) * XBLOCK
+    y = y0 + tl.arange(0, YBLOCK)[None, :]
+    x = x0 + tl.arange(0, XBLOCK)[:, None]
+    xmask = x < xnumel
+    ymask = y < ynumel
+    mask = xmask & ymask
+
+    in_offset = x * IN_STRIDE_X + y * IN_STRIDE_Y
+    val = tl.load(ptr + in_offset, mask=mask)
+
+    tptr = tl.make_block_ptr(
+        base=out,
+        shape=(xnumel, ynumel),
+        strides=(STRIDE_X, STRIDE_Y),
+        offsets=(x0, y0),
+        block_shape=(XBLOCK, YBLOCK),
+        order=(0, 1),
+    )
+    tl.store(tptr, val, boundary_check=(0, 1))
+
+
 @triton.jit
 def make_tensor_ptr_implicit_perm_load_store_2d_static_stride(
     ptr,
@@ -403,7 +524,9 @@ def make_tensor_ptr_implicit_perm_load_3d_static_stride(
     tl.store(out + out_offset, val, mask=mask)
 
 
-
+# ----------------------------------------------------------
+# Triton kernel: advance with implicit permute kernels
+# ----------------------------------------------------------
 @triton.jit
 def advance_implicit_perm_load_store_2d_static_stride(
     ptr,
@@ -505,6 +628,91 @@ def _assert_row_major_4d(A, X, Y, Z, W):
 # ----------------------------------------------------------
 # pytest case: addptr kernels
 # ----------------------------------------------------------
+@pytest.mark.parametrize("X, Y, XBLOCK, YBLOCK", case_2d)
+@pytest.mark.parametrize("dtype, sigtype", types_all)
+def test_addptr_implicit_perm_load_2d(
+    X, Y, XBLOCK, YBLOCK, dtype, sigtype
+):
+    A = test_common.generate_tensor(shape=(X, Y), dtype=sigtype).npu()
+    _assert_row_major_2d(A, X, Y)
+
+    xnumel = Y
+    ynumel = X
+
+    STRIDE_X = 1
+    STRIDE_Y = Y
+
+    out = torch.empty((xnumel, ynumel), device="npu", dtype=A.dtype)
+    assert out.is_contiguous()
+    OUT_STRIDE_X = ynumel
+    OUT_STRIDE_Y = 1
+
+    grid = (ceil_div(xnumel, XBLOCK), ceil_div(ynumel, YBLOCK), 1)
+
+    addptr_implicit_perm_load_2d[grid](
+        A,
+        out,
+        ynumel,
+        xnumel,
+        STRIDE_Y,
+        STRIDE_X,
+        OUT_STRIDE_X,
+        OUT_STRIDE_Y,
+        YBLOCK=YBLOCK,
+        XBLOCK=XBLOCK,
+    )
+
+    ref = A.T.contiguous()
+    torch.testing.assert_close(out, ref)
+
+
+@pytest.mark.parametrize("X, Y, XBLOCK, YBLOCK", case_2d)
+@pytest.mark.parametrize("dtype, sigtype", types_all)
+def test_addptr_implicit_perm_store_2d(
+    X, Y, XBLOCK, YBLOCK, dtype, sigtype
+):
+    """
+    Test goal:
+      - Real memory layout: A[X, Y], row-major (stride = (Y, 1))
+      - Load uses row-major semantics only
+      - Store uses implicit transpose semantics only
+      - Output shape: [Y, X] row-major
+      - Result: out == A.T
+    """
+    A = test_common.generate_tensor(shape=(X, Y), dtype=sigtype).npu()
+    _assert_row_major_2d(A, X, Y)
+
+    xnumel = X
+    ynumel = Y
+
+    IN_STRIDE_X = Y
+    IN_STRIDE_Y = 1
+
+    STRIDE_X = 1
+    STRIDE_Y = X
+
+    out = torch.empty((Y, X), device="npu", dtype=A.dtype)
+    assert out.is_contiguous()
+
+    grid = (ceil_div(xnumel, XBLOCK), ceil_div(ynumel, YBLOCK), 1)
+
+    addptr_implicit_perm_store_2d[grid](
+        A,
+        out,
+        ynumel,
+        xnumel,
+        IN_STRIDE_X,
+        IN_STRIDE_Y,
+        STRIDE_Y,
+        STRIDE_X,
+        YBLOCK=YBLOCK,
+        XBLOCK=XBLOCK,
+    )
+
+    ref = A.T.contiguous()
+    torch.testing.assert_close(out, ref)
+
+
 @pytest.mark.parametrize("X, Y, XBLOCK, YBLOCK", case_2d)
 @pytest.mark.parametrize("dtype, sigtype", types_all)
 def test_addptr_implicit_perm_load_store_2d_static_stride(
@@ -817,6 +1025,100 @@ def test_addptr_implicit_perm_load_store_4d(
 # ----------------------------------------------------------
 @pytest.mark.parametrize("X, Y, XBLOCK, YBLOCK", case_2d)
 @pytest.mark.parametrize("dtype, sigtype", types_all)
+def test_make_tensor_ptr_implicit_perm_load_2d(
+    X, Y, XBLOCK, YBLOCK, dtype, sigtype
+):
+    """
+    Test goal:
+      - Real memory layout: A[X, Y], row-major (stride = (Y, 1))
+      - Kernel view (logical): shape = (Y, X), stride = (1, Y) (implicit transpose)
+      - Load via make_block_ptr with implicit permute stride
+      - Store with row-major output stride
+      - Output shape: [Y, X] row-major
+      - Result: out == A.T
+    """
+    A = test_common.generate_tensor(shape=(X, Y), dtype=sigtype).npu()
+    _assert_row_major_2d(A, X, Y)
+
+    xnumel = Y
+    ynumel = X
+
+    STRIDE_X = 1
+    STRIDE_Y = Y
+
+    out = torch.empty((xnumel, ynumel), device="npu", dtype=A.dtype)
+    assert out.is_contiguous()
+    OUT_STRIDE_X = ynumel
+    OUT_STRIDE_Y = 1
+
+    grid = (ceil_div(xnumel, XBLOCK), ceil_div(ynumel, YBLOCK), 1)
+
+    make_tensor_ptr_implicit_perm_load_2d[grid](
+        A,
+        out,
+        ynumel,
+        xnumel,
+        STRIDE_Y,
+        STRIDE_X,
+        OUT_STRIDE_X,
+        OUT_STRIDE_Y,
+        YBLOCK=YBLOCK,
+        XBLOCK=XBLOCK,
+    )
+
+    ref = A.T.contiguous()
+    torch.testing.assert_close(out, ref)
+
+
+@pytest.mark.parametrize("X, Y, XBLOCK, YBLOCK", case_2d)
+@pytest.mark.parametrize("dtype, sigtype", types_all)
+def test_make_tensor_ptr_implicit_perm_store_2d(
+    X, Y, XBLOCK, YBLOCK, dtype, sigtype
+):
+    """
+    Test goal:
+      - Real memory layout: A[X, Y], row-major (stride = (Y, 1))
+      - Load uses row-major semantics only
+      - Store via make_block_ptr with implicit transpose semantics only
+      - Output shape: [Y, X] row-major
+      - Result: out == A.T
+    """
+    A = test_common.generate_tensor(shape=(X, Y), dtype=sigtype).npu()
+    _assert_row_major_2d(A, X, Y)
+
+    xnumel = X
+    ynumel = Y
+
+    IN_STRIDE_X = Y
+    IN_STRIDE_Y = 1
+
+    STRIDE_X = 1
+    STRIDE_Y = X
+
+    out = torch.empty((Y, X), device="npu", dtype=A.dtype)
+    assert out.is_contiguous()
+
+    grid = (ceil_div(xnumel, XBLOCK), ceil_div(ynumel, YBLOCK), 1)
+
+    make_tensor_ptr_implicit_perm_store_2d[grid](
+        A,
+        out,
+        ynumel,
+        xnumel,
+        IN_STRIDE_X,
+        IN_STRIDE_Y,
+        STRIDE_Y,
+        STRIDE_X,
+        YBLOCK=YBLOCK,
+        XBLOCK=XBLOCK,
+    )
+
+    ref = A.T.contiguous()
+    torch.testing.assert_close(out, ref)
+
+
+@pytest.mark.parametrize("X, Y, XBLOCK, YBLOCK", case_2d)
+@pytest.mark.parametrize("dtype, sigtype", types_all)
 def test_make_tensor_ptr_implicit_perm_load_store_2d_static_stride(
     X, Y, XBLOCK, YBLOCK, dtype, sigtype
 ):
@@ -1067,15 +1369,20 @@ def test_advance_implicit_perm_load_store_3d_static_stride(
 
 
 if __name__ == "__main__":
+    test_addptr_implicit_perm_load_2d(*case_2d[0], *types_all[0])
+    test_addptr_implicit_perm_store_2d(*case_2d[0], *types_all[0])
     test_addptr_implicit_perm_load_store_2d_static_stride(*case_2d[0], *types_all[0])
     test_addptr_implicit_perm_load_store_2d(*case_2d[0], *types_all[0])
     test_addptr_implicit_perm_load_store_3d_static_stride(*case_3d[0], *types_all[0])
     test_addptr_implicit_perm_load_store_3d(*case_3d[0], *types_all[0])
     test_addptr_implicit_perm_load_store_4d_static_stride(*case_4d[0], *types_all[0])
     test_addptr_implicit_perm_load_store_4d(*case_4d[0], *types_all[0])
+
+    test_make_tensor_ptr_implicit_perm_load_2d(*case_2d[0], *types_all[0])
+    test_make_tensor_ptr_implicit_perm_store_2d(*case_2d[0], *types_all[0])
+    test_make_tensor_ptr_implicit_perm_load_3d_static_stride(*case_3d[0], *types_all[0])
     test_make_tensor_ptr_implicit_perm_load_store_2d_static_stride(*case_2d[0], *types_all[0])
     test_make_tensor_ptr_implicit_perm_load_store_3d_static_stride(*case_3d[0], *types_all[0])
     test_make_tensor_ptr_implicit_perm_load_store_3d(*case_3d[0], *types_all[0])
-    test_make_tensor_ptr_implicit_perm_load_3d_static_stride(*case_3d[0], *types_all[0])
     test_advance_implicit_perm_load_store_2d_static_stride(*case_2d[0], *types_all[0])
     test_advance_implicit_perm_load_store_3d_static_stride(*case_3d[0], *types_all[0])

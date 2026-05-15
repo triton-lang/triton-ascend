@@ -22,13 +22,14 @@
 
 #ifndef TRITON_ANALYSIS_OFFSETANALYSIS_H
 #define TRITON_ANALYSIS_OFFSETANALYSIS_H
-
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
+#include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
@@ -267,6 +268,9 @@ void parseInsert(tensor::InsertOp op, const Location &loc,
 void parseIntToPtr(triton::IntToPtrOp op, const Location &loc,
                    RewriterBase &rewriter,
                    llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap);
+
+void parseCustomOp(hivm::CustomOp op, const Location &loc, RewriterBase &rewriter,
+                   llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap, unsigned resultIdx);
 } // namespace triton
 
 } // namespace mlir

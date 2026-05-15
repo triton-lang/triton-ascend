@@ -97,10 +97,8 @@ public:
   matchAndRewrite(hivm::CustomOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override
   {
-    auto res_types = adaptor.getOutputs().getTypes();
-    auto new_op = rewriter.create<hivm::CustomOp>(
-      op->getLoc(), res_types, adaptor.getOperands(), op->getAttrs());
-    rewriter.replaceOp(op, new_op);
+    llvm::SmallDenseMap<Value, BlockData> known;
+    BlockDataParser::rewriteCustomOp(op, adaptor, rewriter, known);
     return success();
   }
 };
@@ -992,9 +990,12 @@ void TritonToLinalgPass::runOnOperation() {
       markOp->setAttr(hivm::AddressSpaceAttr::getMnemonic(),
                       {hivm::AddressSpaceAttr::get(rewriter.getContext(),
                                                    hivm::AddressSpace::GM)});
+      auto oldMemrefType = cast<MemRefType>(reinterpretCastOp.getResult().getType());
+      auto newMemrefType = MemRefType::get(oldMemrefType.getShape(), oldMemrefType.getElementType(),
+          StridedLayoutAttr::get(&getContext(), ShapedType::kDynamic, staticStrides));
       rewriter.replaceOpWithNewOp<memref::ReinterpretCastOp>(
           reinterpretCastOp,
-          cast<MemRefType>(reinterpretCastOp.getResult().getType()), newCastOp,
+          newMemrefType, newCastOp,
           ValueRange({}), reinterpretCastOp.getSizes(),
           reinterpretCastOp.getStrides(), SmallVector<int64_t>({0}),
           reinterpretCastOp.getStaticSizes(),

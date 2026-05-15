@@ -33,14 +33,14 @@ The command for generating the operator simulation pipeline diagram is similar t
 
 ```python
 # Path of the source simulator
-export LD_LIBRARY_PATH=/root/CANN/Install_CANN/Ascend/ascend_toolkit/latest/tools/simulator/{soc-version}/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$HOME/CANN/Install_CANN/Ascend/ascend_toolkit/latest/tools/simulator/{soc-version}/lib:$LD_LIBRARY_PATH
 # Collecting the operator simulation pipeline diagram
 msprof op simulator --kernel-name=_layer_norm_fwd_fused --soc-version={soc-version} python3 03-layer-norm.py
 ```
 
 - Note: In the preceding example, `soc-version=Ascend910B3`.
 
-|Soc-Version|
+| Ascend 910 series | Ascend 310 / 310P series | Ascend 310B series |
 | :---: | :---: | :---: |
 |Ascend910A|Ascend310|Ascend310B1|
 |Ascend910B|Ascend310P1|Ascend310B2|
@@ -131,7 +131,7 @@ def npu_vector_cmp_kernel(
     stride_out_row,    # [Scalar] stride of row in Out, normally equals to stride_x_row
     M,                 # [Scalar] row number
     N,                 # [Scalar] col number
-    eps,               # [Scalar] epsilon to aviod division by zeros
+    eps,               # [Scalar] epsilon to avoid division by zeros
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr
 ):

@@ -55,7 +55,7 @@ triton.language.cdiv(x, div)
 
 ```python
 @triton.jit
-def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
+def fn_npu_(output_ptr, x_ptr, y_ptr,
             XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr,
             XNUMEL: tl.constexpr, YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):
     xoffs = tl.program_id(0) * XB

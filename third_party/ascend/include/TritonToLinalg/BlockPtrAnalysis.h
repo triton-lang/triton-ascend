@@ -22,11 +22,11 @@
 
 #ifndef TRITON_ANALYSIS_BLOCKPTRANALYSIS_H
 #define TRITON_ANALYSIS_BLOCKPTRANALYSIS_H
-
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -262,6 +262,10 @@ public:
                         ConversionPatternRewriter &rewriter,
                         const llvm::SmallDenseMap<Value, BlockData> &known);
 
+  static void parseCustomOp(hivm::CustomOp op, BlockData &data, const Location &loc,
+                            ConversionPatternRewriter &rewriter, const llvm::SmallDenseMap<Value, BlockData> &known,
+                            unsigned resultIdx);
+
   static void rewriteAddPtr(triton::AddPtrOp op,
                             triton::AddPtrOp::Adaptor &adaptor,
                             ConversionPatternRewriter &rewriter,
@@ -275,6 +279,9 @@ public:
   static void rewriteAdvanceOp(triton::AdvanceOp op,
                                ConversionPatternRewriter &rewriter,
                                llvm::SmallDenseMap<Value, BlockData> &known);
+
+  static void rewriteCustomOp(hivm::CustomOp op, hivm::CustomOp::Adaptor &adaptor, ConversionPatternRewriter &rewriter,
+                              const llvm::SmallDenseMap<Value, BlockData> &known);
 
   template <typename T>
   static std::enable_if_t<std::is_same_v<T, scf::YieldOp> ||

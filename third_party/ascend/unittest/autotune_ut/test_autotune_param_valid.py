@@ -423,6 +423,8 @@ def test_resolve_axis_length_arg_name_uses_base_vv_axis_expr_for_reduction_axis(
 
 def test_apply_vv_axis_semantic_result_promotes_internal_axis_map_only():
     namespace = _load_autotuner_methods(
+        "_normalize_reduction_axis_name",
+        "_normalize_reduction_axes",
         "_normalize_vv_reduction_axes",
         "_get_parser_axis_arg_names",
         "_is_direct_runtime_length_arg_name",
@@ -449,6 +451,12 @@ def test_apply_vv_axis_semantic_result_promotes_internal_axis_map_only():
         keys=["n_elements"],
         dual_reduction=False,
     )
+    tuner._normalize_reduction_axis_name = _normalize_loaded_method(
+        namespace["_normalize_reduction_axis_name"]
+    )
+    tuner._normalize_reduction_axes = _normalize_loaded_method(
+        namespace["_normalize_reduction_axes"]
+    ).__get__(tuner, SimpleNamespace)
     tuner._normalize_vv_reduction_axes = _normalize_loaded_method(
         namespace["_normalize_vv_reduction_axes"]
     ).__get__(tuner, SimpleNamespace)
@@ -1209,3 +1217,74 @@ def test_expand_simt_num_warps_configs_default_candidates():
 
     assert len(expanded_configs) == 4
     assert [cfg.num_warps for cfg in expanded_configs] == [8, 16, 32, 64]
+
+
+@pytest.mark.parametrize(
+    ("raw_axis", "expected"),
+    [
+        ("x", "rx"),
+        ("rx", "rx"),
+        ("rrx", "rx"),
+        ("y", "ry"),
+        ("ry", "ry"),
+        ("rry", "ry"),
+        ("rfoo", "rfoo"),
+        ("rrfoo", "rrfoo"),
+    ],
+)
+def test_normalize_reduction_axis_name_canonicalizes_only_known_base_axes(raw_axis, expected):
+    namespace = _load_autotuner_methods("_normalize_reduction_axis_name")
+
+    result = _normalize_loaded_method(namespace["_normalize_reduction_axis_name"])(raw_axis)
+
+    assert result == expected
+
+
+def test_autoparse_reduction_axes_normalizes_prefixed_parser_output_before_persisting():
+    namespace = _load_autotuner_methods(
+        "_normalize_reduction_axis_name",
+        "_normalize_reduction_axes",
+        "_get_axis_base_name",
+        "_autoparse_reduction_axes",
+    )
+
+    class StubReductionAxesParser:
+        def __init__(self, func_ast, axis_arg_names):
+            self.func_ast = func_ast
+            self.axis_arg_names = axis_arg_names
+
+        def parse(self):
+            return ["rx", "ry"]
+
+    namespace["ReductionAxesParser"] = StubReductionAxesParser
+
+    promoted_axes = []
+    refresh_calls = []
+
+    tuner = SimpleNamespace(
+        fn=SimpleNamespace(parse=lambda: "fake-func-ast"),
+        axis_arg_names={"rx": "seq_len", "ry": "dim"},
+        reduction_axes=[],
+        print_autotuning=False,
+        _get_parser_axis_arg_names=lambda: {"rx": "seq_len", "ry": "dim"},
+        _promote_axis_arg_name_to_reduction=lambda axis: promoted_axes.append(axis),
+        _refresh_vector_axes=lambda: refresh_calls.append(True),
+    )
+    tuner._get_axis_base_name = _normalize_loaded_method(
+        namespace["_get_axis_base_name"]
+    )
+    tuner._normalize_reduction_axis_name = _normalize_loaded_method(
+        namespace["_normalize_reduction_axis_name"]
+    )
+    tuner._normalize_reduction_axes = _normalize_loaded_method(
+        namespace["_normalize_reduction_axes"]
+    ).__get__(tuner, SimpleNamespace)
+
+    reduction_axes = _normalize_loaded_method(namespace["_autoparse_reduction_axes"])(
+        tuner
+    )
+
+    assert promoted_axes == ["x", "y"]
+    assert reduction_axes == ["rx", "ry"]
+    assert tuner.reduction_axes == ["rx", "ry"]
+    assert refresh_calls == [True]

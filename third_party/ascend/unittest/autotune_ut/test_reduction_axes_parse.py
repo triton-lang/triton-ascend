@@ -61,11 +61,11 @@ def test_triton_max_last_dim_case1(mock_autotuner):
             tl.store(out_ptr0 + x0, block_res, x0_mask)
 
     ref_res = {
-        "keys": {"x": "x0_numel", "ry": "r1_numel"},
+        "keys": {"x": "x0_numel", "y": "r1_numel"},
         "split_params": {"x": "X0BLOCK"},
-        "tiling_params": {"x": "X0BLOCK_SUB", "ry": "R1BLOCK_SUB"},
-        "low_dim_axes": ["ry"],
-        "reduction_axes": ["ry"],
+        "tiling_params": {"x": "X0BLOCK_SUB", "y": "R1BLOCK_SUB"},
+        "low_dim_axes": ["y"],
+        "reduction_axes": ["y"],
     }
     grid = lambda meta: (meta["X0BLOCK"],)
     act_res = triton_max_last_dim1[grid]()
@@ -109,11 +109,11 @@ def test_triton_max_last_dim_case2(mock_autotuner):
             tl.store(out_ptr0 + x0, block_res, x0_mask)
 
     ref_res = {
-        "keys": {"x": "x0_numel", "ry": "r1_numel"},
+        "keys": {"x": "x0_numel", "y": "r1_numel"},
         "split_params": {"x": "X0BLOCK"},
-        "tiling_params": {"x": "X0BLOCK_SUB", "ry": "R1BLOCK_SUB"},
-        "low_dim_axes": ["ry"],
-        "reduction_axes": ["ry"],
+        "tiling_params": {"x": "X0BLOCK_SUB", "y": "R1BLOCK_SUB"},
+        "low_dim_axes": ["y"],
+        "reduction_axes": ["y"],
     }
     grid = lambda meta: (meta["X0BLOCK"],)
     act_res = triton_max_last_dim2[grid]()
@@ -157,11 +157,11 @@ def test_triton_max_last_dim_case3(mock_autotuner):
             tl.store(out_ptr0 + x0, block_res, x0_mask)
 
     ref_res = {
-        "keys": {"x": "x0_numel", "ry": "r1_numel"},
+        "keys": {"x": "x0_numel", "y": "r1_numel"},
         "split_params": {"x": "X0BLOCK"},
-        "tiling_params": {"x": "X0BLOCK_SUB", "ry": "R1BLOCK_SUB"},
-        "low_dim_axes": ["ry"],
-        "reduction_axes": ["ry"],
+        "tiling_params": {"x": "X0BLOCK_SUB", "y": "R1BLOCK_SUB"},
+        "low_dim_axes": ["y"],
+        "reduction_axes": ["y"],
     }
     grid = lambda meta: (meta["X0BLOCK"],)
     act_res = triton_max_last_dim3[grid]()
@@ -206,11 +206,11 @@ def test_reduction_axes_parse_kernel_type_vector_auto_consistency(mock_autotuner
             tl.store(out_ptr0 + x0, block_res, x0_mask)
 
     ref_res = {
-        "keys": {"x": "x0_numel", "ry": "r1_numel"},
+        "keys": {"x": "x0_numel", "y": "r1_numel"},
         "split_params": {"x": "X0BLOCK"},
-        "tiling_params": {"x": "X0BLOCK_SUB", "ry": "R1BLOCK_SUB"},
-        "low_dim_axes": ["ry"],
-        "reduction_axes": ["ry"],
+        "tiling_params": {"x": "X0BLOCK_SUB", "y": "R1BLOCK_SUB"},
+        "low_dim_axes": ["y"],
+        "reduction_axes": ["y"],
     }
     grid = lambda meta: (meta["X0BLOCK"],)
     act_res = triton_reduction_axes_parse_kernel_type_vector_auto_consistency[grid]()

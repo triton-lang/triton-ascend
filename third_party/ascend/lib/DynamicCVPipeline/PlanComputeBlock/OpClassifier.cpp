@@ -401,6 +401,85 @@ int OpClassifierPass::patternMatchCUBE()
     return 0;
 }
 
+// Helper: Check if a value is a scalar (not a tensor type)
+static bool isScalarType(Value value)
+{
+    return !isa<RankedTensorType>(value.getType());
+}
+
+// Helper: Check if a value is a scalar iter_arg from scf.for
+// An iter_arg is a BlockArgument of scf.for's loop body, and it must be scalar type
+static bool isScalarIterArgOp(Value iterArg)
+{
+    // iter_arg is a BlockArgument of scf.for's body
+    auto blockArg = dyn_cast<BlockArgument>(iterArg);
+    if (!blockArg)
+        return false;
+    // Check if parent is scf.for
+    Operation *parentOp = blockArg.getOwner()->getParentOp();
+    if (!isa<scf::ForOp>(parentOp))
+        return false;
+    // Check if the iter_arg is scalar type (not tensor)
+    return isScalarType(iterArg);
+}
+
+// Helper: Find iter_arg initialization op and yield-assigning op for scf.for loop-carried scalar
+// When a def comes from an scf.for iter_arg and is a scalar compute op, we need to:
+// 1. Find the iter_arg's initialization op (the op that provides the initial value)
+// 2. Find the yieldOp, then trace to the op that provides the yielded value
+// All found ops are added to upstreamOps
+static void findIterArgUpstreamOps(Value def, llvm::SmallVectorImpl<Operation *> &upstreamOps)
+{
+    // Check if def is a block argument (iter_arg)
+    auto blockArg = dyn_cast<BlockArgument>(def);
+    if (!blockArg)
+        return;
+
+    // Check if parent is scf.for
+    Operation *parentOp = blockArg.getOwner()->getParentOp();
+    auto forOp = dyn_cast<scf::ForOp>(parentOp);
+    if (!forOp)
+        return;
+
+    // Get the iter_arg index from block argument
+    unsigned argIdx = blockArg.getArgNumber();
+
+    LLVM_DEBUG(DBGS() << "[fqf] blockArg.getArgNumber " << argIdx << ": " << def << "\n");
+    LLVM_DEBUG(DBGS() << "[fqf] forOp.getInitArgs().size() " << forOp.getInitArgs().size() << "\n");
+
+    // Get the iter_arg and check its type - must be scalar (not tensor)
+    // The init value is at forOp.getInitArgs()[argIdx]
+    if (argIdx > forOp.getInitArgs().size() || argIdx == 0)
+        return;
+    Value initValue = forOp.getInitArgs()[argIdx - 1];
+    if (!isScalarType(initValue))
+        return;
+
+    // Find the initialization op for this iter_arg
+    Operation *initDef = initValue.getDefiningOp();
+    if (initDef && initDef != forOp) {
+        LLVM_DEBUG(DBGS() << "[findIterArgUpstreamOps] init def: " << *initDef << "\n");
+        upstreamOps.push_back(initDef);
+    }
+
+    // Find the yieldOp and the op that provides the yielded value
+    // The yieldOp has operands corresponding to the iteration results
+    // For iter_arg i, yieldOp.getOperand(i) is the value yielded for that iter_arg
+    Operation *yieldOp = forOp.getBody()->getTerminator();
+    LLVM_DEBUG(DBGS() << "[fqf] yieldOp->getNumOperands() " << yieldOp->getNumOperands() << "\n");
+    if (!isa<scf::YieldOp>(yieldOp))
+        return;
+    if (argIdx > yieldOp->getNumOperands())
+        return;
+
+    Value yieldedValue = yieldOp->getOperand(argIdx - 1);
+    Operation *yieldedDef = yieldedValue.getDefiningOp();
+    if (yieldedDef && yieldedDef != forOp) {
+        LLVM_DEBUG(DBGS() << "[findIterArgUpstreamOps] yielded def: " << *yieldedDef << "\n");
+        upstreamOps.push_back(yieldedDef);
+    }
+}
+
 // Helper function to get upstream operations based on both SSA and memory dependencies
 void OpClassifierPass::getUpstreamOpsWithMemoryDeps(Operation *cur, llvm::SmallVectorImpl<Operation *> &upstreamOps)
 {
@@ -408,8 +487,12 @@ void OpClassifierPass::getUpstreamOpsWithMemoryDeps(Operation *cur, llvm::SmallV
     for (Value operand : cur->getOperands()) {
         Operation *def = operand.getDefiningOp();
         if (def && def != cur) {
+            // Check if this def is an scf.for iter_arg that is a scalar
             LLVM_DEBUG(DBGS() << "push op: " << *def << "\n");
             upstreamOps.push_back(def);
+        }
+        if (isScalarIterArgOp(operand)) {
+            findIterArgUpstreamOps(operand, upstreamOps);
         }
     }
     if (!isa<bufferization::ToTensorOp>(cur)) {
@@ -637,6 +720,83 @@ void OpClassifierPass::markFillOpsAsCube()
             LLVM_DEBUG(DBGS() << "\tfill-cube (outs is CUBE): " << *op << "\n");
             opCoreTypes[op] = OP_CUBE_ONLY;
         }
+
+        // Case 3: handle fill op in scf.if with all CUBE ops
+        handleFillInScfIf(op);
+    }
+}
+
+// Helper: Handle fill op in scf.if - if all ops in scf.if are CUBE, mark scf.if and propagate upstream
+void OpClassifierPass::handleFillInScfIf(Operation *fillOp)
+{
+    if (!isa<linalg::FillOp>(fillOp))
+        return;
+
+    Operation *parentOp = fillOp->getParentOp();
+    auto ifOp = dyn_cast<scf::IfOp>(parentOp);
+    if (!ifOp)
+        return;
+
+    // Only handle scf.if used for conditional branching (no iter_args)
+    // If scf.if has results (iter_args), it's used as a loop structure, skip it
+    if (!ifOp.getResults().empty())
+        return;
+
+    // Check if all ops in scf.if's blocks are CUBE (except yield terminator)
+    bool allOpsAreCube = true;
+    for (Region &region : ifOp->getRegions()) {
+        for (Block &block : region) {
+            for (Operation &innerOp : block.getOperations()) {
+                if (isa<scf::YieldOp>(innerOp))
+                    continue;
+                // Check if this op is marked as CUBE
+                if (opCoreTypes[&innerOp] != OP_CUBE_ONLY) {
+                    allOpsAreCube = false;
+                    break;
+                }
+            }
+            if (!allOpsAreCube)
+                break;
+        }
+        if (!allOpsAreCube)
+            break;
+    }
+
+    if (allOpsAreCube) {
+        LLVM_DEBUG(DBGS() << "\tfill in scf.if with all CUBE ops, mark scf.if as CUBE: " << *ifOp << "\n");
+        opCoreTypes[ifOp] = OP_CUBE_ONLY;
+        // Propagate CUBE upstream for the scf.if
+        propagateCubeUpstreamForOp(ifOp);
+    }
+}
+
+// Helper: Propagate CUBE core type upstream for a given operation
+void OpClassifierPass::propagateCubeUpstreamForOp(Operation *startOp)
+{
+    std::queue<Operation *> cubeQueue;
+    llvm::DenseSet<Operation *> cubeVisited;
+    cubeVisited.insert(startOp);
+    cubeQueue.push(startOp);
+
+    while (!cubeQueue.empty()) {
+        Operation *cur = cubeQueue.front();
+        cubeQueue.pop();
+
+        // Get upstream operations
+        llvm::SmallVector<Operation *> upstreamOps;
+        getUpstreamOpsWithMemoryDeps(cur, upstreamOps);
+
+        for (Operation *upstreamOp : upstreamOps) {
+            if (!upstreamOp || cubeVisited.count(upstreamOp))
+                continue;
+            if (isa<linalg::MatmulOp>(upstreamOp))
+                continue;
+
+            cubeVisited.insert(upstreamOp);
+            LLVM_DEBUG(DBGS() << "\t\tcube upstream: " << upstreamOp->getName().getStringRef() << "\n");
+            opCoreTypes[upstreamOp] = OP_CUBE_ONLY;
+            cubeQueue.push(upstreamOp);
+        }
     }
 }
 
@@ -666,7 +826,8 @@ int OpClassifierPass::propagateVectorUpstream()
         vecQueue.pop();
         // Skip builtin.module, func.func, and func.return operations
         if (isa<ModuleOp, func::FuncOp, func::ReturnOp>(cur) ||
-            (isa<memref::CopyOp, memref::AllocaOp>(cur) && opCoreTypes[cur] == OP_CUBE_ONLY)) {
+            (isa<memref::CopyOp, memref::AllocaOp>(cur) && opCoreTypes[cur] == OP_CUBE_ONLY))
+        {
             continue;
         }
         LLVM_DEBUG(DBGS() << "vec-def: " << *cur << "\n");

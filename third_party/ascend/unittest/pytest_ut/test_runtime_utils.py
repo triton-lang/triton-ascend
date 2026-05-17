@@ -20,6 +20,8 @@
 import logging
 import os
 from triton.backends.ascend import utils
+from triton.backends.ascend.runtime import utils as runtime_utils
+import torch
 
 
 def test_get_logger():
@@ -31,3 +33,9 @@ def test_get_ascend_arch_from_env():
     os.environ["TRITON_ASCEND_ARCH"] = "Ascend910_9599"
     result = utils.get_ascend_arch_from_env()
     assert result == "Ascend910_9599"
+
+
+def test_get_byte_per_numel_supports_unsigned_integer_dtypes():
+    assert runtime_utils.get_byte_per_numel(torch.uint16) == 2
+    assert runtime_utils.get_byte_per_numel(torch.uint32) == 4
+    assert runtime_utils.get_byte_per_numel(torch.uint64) == 8

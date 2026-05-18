@@ -73,6 +73,25 @@ bool isDefinedInside(Value v, Operation *op)
     return op->isProperAncestor(defOp);
 }
 
+Value getViewSource(Value val)
+{
+    while (auto viewLike = val.getDefiningOp<ViewLikeOpInterface>()) {
+        val = viewLike.getViewSource();
+    }
+    return val;
+}
+
+MemoryEffects::EffectInstance remapEffectValue(const MemoryEffects::EffectInstance &effect, Value value)
+{
+    if (auto result = dyn_cast<OpResult>(value)) {
+        return MemoryEffects::EffectInstance(effect.getEffect(), result, effect.getParameters(), effect.getStage(),
+                                             effect.getEffectOnFullRegion(), effect.getResource());
+    }
+
+    return MemoryEffects::EffectInstance(effect.getEffect(), cast<BlockArgument>(value), effect.getParameters(),
+                                         effect.getStage(), effect.getEffectOnFullRegion(), effect.getResource());
+}
+
 } // namespace
 
 MemoryDependenceGraph::MemoryDependenceGraph(Operation *root, AliasAnalysis &aa) : root(root), aa(aa)
@@ -202,11 +221,18 @@ SmallVector<MemoryEffects::EffectInstance> MemoryDependenceGraph::collectOuterEf
 
     SmallVector<MemoryEffects::EffectInstance> filtered;
     filtered.reserve(raw->size());
-    for (auto &e : *raw) {
-        if (isDefinedInside(e.getValue(), op)) {
+    for (const auto &e : *raw) {
+        Value value = e.getValue();
+        if (!value) {
+            filtered.push_back(e);
             continue;
         }
-        filtered.push_back(e);
+
+        Value source = getViewSource(value);
+        if (isDefinedInside(source, op)) {
+            continue;
+        }
+        filtered.push_back(source == value ? e : remapEffectValue(e, source));
     }
     return filtered;
 }
@@ -217,13 +243,7 @@ AliasResult MemoryDependenceGraph::queryAlias(Value lhs, Value rhs)
         auto arg = llvm::dyn_cast<BlockArgument>(val);
         return arg && arg.getOwner()->isEntryBlock();
     };
-    auto getSource = [] (Value val) -> Value {
-        while (auto viewLike = val.getDefiningOp<ViewLikeOpInterface>()) {
-            val = viewLike.getViewSource();
-        }
-        return val;
-    };
-    if (isFuncEntryArg(getSource(lhs)) && isFuncEntryArg(getSource(rhs))) {
+    if (isFuncEntryArg(getViewSource(lhs)) && isFuncEntryArg(getViewSource(rhs))) {
         return lhs == rhs ? AliasResult::MustAlias : AliasResult::NoAlias;
     }
     return aa.alias(lhs, rhs);

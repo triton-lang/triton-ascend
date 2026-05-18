@@ -34,8 +34,13 @@
 // Unknown ops (no SideEffect interface) act as full barriers: they depend on
 // all prior writers/readers and become the sole writer for every slot.
 
-#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/Debug.h"
+
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/Block.h"
@@ -45,11 +50,10 @@
 #include "mlir/IR/Region.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
-#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SetVector.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/Support/Debug.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 
 using namespace mlir;
@@ -79,10 +83,22 @@ bool isDefinedInside(Value v, Operation *op)
     return op->isProperAncestor(defOp);
 }
 
+static Value getAliasSource(Value val)
+{
+    auto *op = val.getDefiningOp();
+    if (!op) {
+        return nullptr;
+    }
+    return llvm::TypeSwitch<Operation *, Value>(op)
+        .Case([](ViewLikeOpInterface viewOp) { return viewOp.getViewSource(); })
+        .Case([](bufferization::ToTensorOp totensorOp) { return totensorOp.getMemref(); })
+        .Default([](auto) { return nullptr; });
+}
+
 Value getViewSource(Value val)
 {
-    while (auto viewLike = val.getDefiningOp<ViewLikeOpInterface>()) {
-        val = viewLike.getViewSource();
+    while (auto source = getAliasSource(val)) {
+        val = source;
     }
     return val;
 }
@@ -336,14 +352,27 @@ SmallVector<MemoryEffects::EffectInstance> MemoryDependenceGraph::collectOuterEf
 
 AliasResult MemoryDependenceGraph::queryAlias(Value lhs, Value rhs)
 {
+    auto lhsSource = getViewSource(lhs);
+    auto rhsSource = getViewSource(rhs);
+    if (!lhsSource) {
+        lhsSource = lhs;
+    }
+    if (!rhsSource) {
+        rhsSource = rhs;
+    }
+
     auto isFuncEntryArg = [] (const Value &val) -> bool {
         auto arg = llvm::dyn_cast<BlockArgument>(val);
-        return arg && arg.getOwner()->isEntryBlock();
+        if (!arg) {
+            return false;
+        }
+        auto *block = arg.getOwner();
+        return block->isEntryBlock() && llvm::isa<func::FuncOp>(block->getParentOp());
     };
-    if (isFuncEntryArg(getViewSource(lhs)) && isFuncEntryArg(getViewSource(rhs))) {
-        return lhs == rhs ? AliasResult::MustAlias : AliasResult::NoAlias;
+    if (isFuncEntryArg(lhsSource) && isFuncEntryArg(rhsSource)) {
+        return lhsSource == rhsSource ? AliasResult::MustAlias : AliasResult::NoAlias;
     }
-    return aa.alias(lhs, rhs);
+    return aa.alias(lhsSource, rhsSource);
 }
 
 SmallVector<MemoryDependenceGraph::MemSlot *> MemoryDependenceGraph::findAliasSlots(Value v)

@@ -27,6 +27,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
 
+#include "bishengir/Dialect/Utils/Util.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -173,8 +174,15 @@ void OpClassifierPass::markCube(Operation *op)
 void OpClassifierPass::matchToTensorPattern(Operation *def)
 {
     auto toTensorOp = dyn_cast<bufferization::ToTensorOp>(def);
+    constexpr llvm::StringLiteral kMayImplicitTransposeWithLastAxis = "MayImplicitTransposeWithLastAxis";
+
     if (!toTensorOp)
         return;
+
+    // special case: implicit transpose
+    if (utils::getAnnotateOpWithAttr(toTensorOp.getResult(), kMayImplicitTransposeWithLastAxis)) {
+        return;
+    }
 
     markCube(toTensorOp);
     cubeSeeds.push_back(toTensorOp);
@@ -476,79 +484,6 @@ int OpClassifierPass::propagateCubeUpstream()
     return 0;
 }
 
-constexpr size_t kMaxAliasCount = 2;
-
-static inline SmallVector<Value, kMaxAliasCount> getAliasingOperands(Operation *op)
-{
-    if (auto viewOp = llvm::dyn_cast<ViewLikeOpInterface>(op)) {
-        return {viewOp.getViewSource()};
-    }
-    if (isa<CastOpInterface, bufferization::ToMemrefOp, bufferization::ToTensorOp, annotation::MarkOp>(op)) {
-        return {op->getOperand(0)};
-    }
-    if (auto selectOp = llvm::dyn_cast<arith::SelectOp>(op)) {
-        return {selectOp.getTrueValue(), selectOp.getFalseValue()};
-    }
-
-    return {};
-}
-
-static bool collectToMemoryAllocation(Operation *op, llvm::SmallPtrSetImpl<Operation *> &out)
-{
-    if (out.contains(op)) {
-        LOG_DEBUG("Short circuited at: " << *op << "\n");
-        return true;
-    }
-
-    if (llvm::isa<memref::AllocOp>(op)) {
-        out.insert(op);
-        LOG_DEBUG("Succeeded at: " << *op << "\n");
-        return true;
-    }
-
-    auto tracedToAlloc = false;
-    auto upstreamAliases = getAliasingOperands(op);
-
-    if (upstreamAliases.empty()) {
-        LOG_DEBUG("Stopped at non-aliasing op: " << *op << "\n");
-    }
-
-    for (Value srcVal : upstreamAliases) {
-        if (auto *op = srcVal.getDefiningOp()) {
-            if (collectToMemoryAllocation(op, out)) {
-                tracedToAlloc = true;
-            }
-        }
-    }
-
-    if (!tracedToAlloc) {
-        LOG_DEBUG("Not marked as VECTOR_ONLY since op does not trace to alloc: " << *op << "\n");
-        return false;
-    }
-
-    out.insert(op);
-    return true;
-}
-
-void OpClassifierPass::markUpstreamsOfImplicitTranspose()
-{
-    static constexpr llvm::StringLiteral kMayImplicitTransposeWithLastAxis = "MayImplicitTransposeWithLastAxis";
-    static constexpr size_t kMaxExpectedAffected = 16;
-
-    auto module = getOperation();
-    llvm::SmallPtrSet<Operation *, kMaxExpectedAffected> affectedOps;
-    module.walk([&](annotation::MarkOp markOp) {
-        if (markOp.isAnnotatedBy(kMayImplicitTransposeWithLastAxis)) {
-            LOG_DEBUG("Tracing Upstream Of " << *markOp << "\n");
-            collectToMemoryAllocation(markOp, affectedOps);
-        }
-    });
-
-    for (auto *op : affectedOps) {
-        opCoreTypes[op] = OP_VECTOR_ONLY;
-    }
-}
-
 // ============================================================================
 // Step 3: Mark remaining operations as VECTOR
 // ============================================================================
@@ -575,9 +510,6 @@ int OpClassifierPass::markRemainingAsVector()
             opCoreTypes[op] = OP_VECTOR_ONLY;
         }
     }
-
-    // Special case: aliases of annotation.mark {MayImplicitTransposeWithLastAxis} to alloc should all be VECTOR_ONLY
-    markUpstreamsOfImplicitTranspose();
 
     return 0;
 }

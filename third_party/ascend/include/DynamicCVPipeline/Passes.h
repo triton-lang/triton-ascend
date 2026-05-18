@@ -25,6 +25,7 @@
 
 #include "AddDynamicCVPipeline.h"
 #include "ascend/include/DynamicCVPipeline/PreCheckAvailable.h"
+#include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
 #include "third_party/ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
 #include "third_party/ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
 #include "third_party/ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"

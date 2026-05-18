@@ -20,21 +20,29 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
-#define TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
+#ifndef TRITON_ADAPTER_DYNAMIC_CVPIPELINE_STANDARDIZE_OP_H
+#define TRITON_ADAPTER_DYNAMIC_CVPIPELINE_STANDARDIZE_OP_H
 
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 
-namespace mlir {
-namespace triton {
+namespace mlir::triton {
 
-std::unique_ptr<OperationPass<ModuleOp>> createUBUsageOptPass();
-std::unique_ptr<OperationPass<ModuleOp>> createUnifyAllocBlockPass();
-void registerUnifyAllocBlockPass();
-std::unique_ptr<OperationPass<ModuleOp>> createFixpipeOptPass();
+class StandardizeOpPass : public PassWrapper<StandardizeOpPass, OperationPass<ModuleOp>> {
+public:
+    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(StandardizeOpPass);
 
-} // namespace triton
-} // namespace mlir
+    StandardizeOpPass() = default;
+    void runOnOperation() override;
 
-#endif // TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
+    llvm::StringRef getArgument() const final {
+      return "ssbuf-standardize-op";
+    }
+};
+
+std::unique_ptr<OperationPass<ModuleOp>> createStandardizeOpPass();
+void registerStandardizeOpPasses();
+
+} // namespace mlir::triton
+
+#endif // TRITON_ADAPTER_DYNAMIC_CVPIPELINE_STANDARDIZE_OP_H

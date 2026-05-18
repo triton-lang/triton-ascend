@@ -334,7 +334,7 @@ void OpClassifierPass::matchExtractSlicePattern(Operation *user)
     cubeSeeds.push_back(extractSliceOp);
     // Also mark downstream hivm.hir.store as CUBE
     for (Operation *sliceUser : extractSliceOp->getUsers()) {
-        if (isa<hivm::StoreOp>(sliceUser)) {
+        if (isa<hivm::StoreOp>(sliceUser) || isa<bufferization::MaterializeInDestinationOp>(sliceUser)) {
             markCube(sliceUser);
             cubeSeeds.push_back(sliceUser);
         }
@@ -1274,186 +1274,6 @@ int OpClassifierPass::stampToIR()
     return 0;
 }
 
-// ============================================================================
-// Pre-legalize matmul: Replace matmul with zero-filled accumulator + add
-// ============================================================================
-//   matmul(A, B, C) -> matmul(A, B, zero) + add(result, C)
-//   - zero = linalg.fill(tensor.empty(const 0), const 0)
-//   - add(result, C) adds the original outs value to the matmul result
-// This effectively changes a*b+c to result=a*b+0, add(result, c)
-// This must be done before initializePass so that the classification pass
-// sees the modified IR structure.
-// ============================================================================
-
-// Helper: bulk delete operations and clean up tracking structures
-void OpClassifierPass::bulkDeleteOps(llvm::SmallVectorImpl<Operation *> &opsToDelete)
-{
-    llvm::DenseSet<Operation *> deletedOps(opsToDelete.begin(), opsToDelete.end());
-    for (Operation *op : opsToDelete) {
-        if (!op || !op->getBlock()) {
-            continue;
-        }
-        if (op->use_empty()) {
-            auto it = std::find(allOps.begin(), allOps.end(), op);
-            if (it != allOps.end()) {
-                allOps.erase(it);
-            }
-            opCoreTypes.erase(op);
-            op->erase();
-        }
-    }
-
-    // Remove any stale references from the classifier map
-    for (Operation *op : deletedOps) {
-        opCoreTypes.erase(op);
-    }
-}
-
-int OpClassifierPass::preLegalizeMatmul()
-{
-    LLVM_DEBUG(DBGS() << "--- Pre-legalizing matmul operations --->\n");
-
-    // Collect all linalg::MatmulOp from the module
-    llvm::SmallVector<linalg::MatmulOp> matmulOps;
-    getOperation().walk([&](linalg::MatmulOp matmulOp) { matmulOps.push_back(matmulOp); });
-
-    if (matmulOps.empty()) {
-        LLVM_DEBUG(DBGS() << "\tNo matmul operations found\n");
-        return 0;
-    }
-
-    LLVM_DEBUG(DBGS() << "\tFound " << matmulOps.size() << " matmul operations\n");
-
-    // deferredDelete pattern: collect ops to delete, erase after iteration completes
-    // avoids iterator invalidation when erasing during the loop
-    llvm::SmallVector<Operation *> opsToDelete;
-
-    for (linalg::MatmulOp matmulOp : matmulOps) {
-        if (!matmulOp || !matmulOp->getBlock()) {
-            continue;
-        }
-
-        if (matmulOp.getNumResults() == 0) {
-            continue;
-        }
-
-        auto outputs = matmulOp.getDpsInits();
-        if (outputs.empty()) {
-            continue;
-        }
-        Value outsValue = outputs[0];
-        if (!outsValue) {
-            continue;
-        }
-
-        Value matmulResult = matmulOp.getResult(0);
-
-        // Get element type from result tensor
-        auto rankedTensorType = dyn_cast<RankedTensorType>(matmulResult.getType());
-        if (!rankedTensorType) {
-            LLVM_DEBUG(DBGS() << "matmul result is not a ranked tensor, skipping\n");
-            continue;
-        }
-        Type elemType = rankedTensorType.getElementType();
-
-        mlir::OpBuilder builder(matmulOp);
-        Location loc = matmulOp.getLoc();
-
-        // [Step 1] Create tensor.empty for the new accumulator tensor
-        // Same shape and type as original matmul output
-        SmallVector<Value> dynamicSizes;
-        for (int64_t i = 0; i < rankedTensorType.getRank(); ++i) {
-            if (rankedTensorType.isDynamicDim(i)) {
-                dynamicSizes.push_back(builder.create<tensor::DimOp>(loc, outsValue, i));
-            }
-        }
-        auto emptyOp = builder.create<tensor::EmptyOp>(loc, rankedTensorType.getShape(),
-                                                       rankedTensorType.getElementType(), dynamicSizes);
-
-        // [Step 2] Create zero constant based on element type
-        // Supports both floating-point (arith.constant float) and integer types
-        Value zeroValue;
-        if (auto floatType = dyn_cast<FloatType>(elemType)) {
-            APFloat zeroAPFloat = APFloat::getZero(floatType.getFloatSemantics());
-            zeroValue = builder.create<arith::ConstantFloatOp>(loc, zeroAPFloat, floatType).getResult();
-        } else if (auto intType = dyn_cast<IntegerType>(elemType)) {
-            zeroValue = builder.create<arith::ConstantIntOp>(loc, 0, intType).getResult();
-        } else {
-            LLVM_DEBUG(DBGS() << "matmul element type is not float or int, skipping\n");
-            continue;
-        }
-
-        // [Step 3] Use linalg.fill to populate empty tensor with zero -> zero accumulator
-        auto fillOp = builder.create<linalg::FillOp>(loc, ValueRange {zeroValue}, ValueRange {emptyOp.getResult()});
-
-        // [Step 4] Get matmul's two input matrices A and B
-        auto inputs = matmulOp.getDpsInputs();
-        if (inputs.size() < kMinMatmulInputs) {
-            LLVM_DEBUG(DBGS() << "matmul has insufficient inputs, skipping\n");
-            continue;
-        }
-        Value a = inputs[0];
-        Value b = inputs[1];
-
-        // [Step 5] Create new matmul using zero-filled tensor as accumulator
-        // New matmul runs entirely on CUBE with no VECTOR dependency
-        auto newMatmul = builder.create<linalg::MatmulOp>(loc, ValueRange {a, b}, ValueRange {fillOp.getResult(0)});
-
-        // Copy attributes from original matmul to new matmul (skipping internal attrs)
-        for (auto attr : matmulOp->getAttrs()) {
-            StringRef attrName = attr.getName().getValue();
-            if (attrName == "operandSegmentSizes" || attrName == "res_attrs" || attrName == "arg_attrs") {
-                continue;
-            }
-            newMatmul->setAttr(attr.getName(), attr.getValue());
-        }
-
-        // [Step 6] Create add: add(new_matmul_result, outs_value)
-        // This is the "c" in a*b+c, added after the matmul result
-        Operation *addOp;
-        if (isa<FloatType>(elemType)) {
-            addOp = builder.create<arith::AddFOp>(loc, newMatmul.getResult(0), outsValue).getOperation();
-        } else {
-            addOp = builder.create<arith::AddIOp>(loc, newMatmul.getResult(0), outsValue).getOperation();
-        }
-
-        // Move addOp to right after newMatmul
-        addOp->moveAfter(newMatmul.getOperation());
-
-        // [Step 7] Get add result and replace uses of original matmul result
-        Value addResult = addOp->getResult(0);
-
-        // Replace all uses of original matmulResult with addResult, EXCEPT addOp's own operand
-        for (auto &use : llvm::make_early_inc_range(matmulResult.getUses())) {
-            if (use.getOwner() == addOp) {
-                continue;
-            }
-            use.set(addResult);
-        }
-
-        // This tag is useful for later work
-        addOp->setAttr(CVPipeline::kAddFromMatmul, builder.getUnitAttr());
-
-        // [Step 8] Mark new operations as CUBE_ONLY
-        opCoreTypes[newMatmul.getOperation()] = OP_CUBE_ONLY;
-        opCoreTypes[emptyOp.getOperation()] = OP_CUBE_ONLY;
-        opCoreTypes[zeroValue.getDefiningOp()] = OP_CUBE_ONLY;
-        opCoreTypes[fillOp.getOperation()] = OP_CUBE_ONLY;
-        opCoreTypes[addOp] = OP_CUBE_ONLY;
-
-        // [Step 9] Mark original matmul for deferred deletion
-        opsToDelete.push_back(matmulOp.getOperation());
-
-        LLVM_DEBUG(DBGS() << "[OpClassifier] Transformed matmul to zero-filled accumulator + add\n");
-    }
-
-    // Step 10: Delete all marked original matmuls in bulk
-    bulkDeleteOps(opsToDelete);
-
-    LLVM_DEBUG(DBGS() << "--- Pre-legalize matmul complete --->\n");
-    return 0;
-}
-
 // Run the pass
 void OpClassifierPass::runOnOperation()
 {
@@ -1464,17 +1284,7 @@ void OpClassifierPass::runOnOperation()
 
     LLVM_DEBUG(DBGS() << "\n--- Running OpClassifierPass --->\n");
 
-    // Pre-legalize matmul: transform matmul to zero-filled accumulator + add BEFORE initializePass
-    // This transforms: matmul(A, B, C) -> matmul(A, B, zero) + add(result, C)
-    // where zero = linalg.fill(tensor.empty(const 0), const 0)
-    // This effectively changes a*b+c to result=a*b+0, add(result, c)
-    if (preLegalizeMatmul() != 0) {
-        signalPassFailure();
-        return;
-    }
-
     // Initialize memory dependence graph for tracking memory side effects
-
     aliasAnalysis = std::make_shared<AliasAnalysis>(module);
     memDepGraph = std::make_shared<CVPipeline::MemoryDependenceGraph>(module, *aliasAnalysis);
 

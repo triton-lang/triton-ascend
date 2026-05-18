@@ -2,6 +2,7 @@
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/RefineArgsBlockId.h"
 #include "ascend/include/DynamicCVPipeline/Passes.h"
+#include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
 #include "ascend/include/TritonToLinalg/Passes.h"
 #include "ascend/include/TritonControlFlowOpt/Passes.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
@@ -104,6 +105,7 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
   // DynamicCVPipeline passes
   mlir::triton::registerAddDynamicCVPipelinePasses();
   mlir::triton::registerPreCheckAvailablePasses();
+  mlir::triton::registerStandardizeOpPasses();
   mlir::triton::registerAddControlFlowConditionPasses();
   mlir::triton::registerAddMultiBufferOuterScopePasses();
   mlir::triton::registerAddMultiBufferInnerScopePasses();

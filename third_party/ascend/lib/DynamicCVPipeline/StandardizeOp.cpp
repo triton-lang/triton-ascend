@@ -20,21 +20,46 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
-#define TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/LogicalResult.h"
+#include <memory>
 
-#include "mlir/IR/BuiltinOps.h"
-#include "mlir/Pass/Pass.h"
+#include "mlir/Pass/PassManager.h"
+#include "mlir/Pass/PassRegistry.h"
 
-namespace mlir {
-namespace triton {
+#include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
+#include "ascend/include/DynamicCVPipeline/StandardizeOp/PatternMatchRewrites.h"
 
-std::unique_ptr<OperationPass<ModuleOp>> createUBUsageOptPass();
-std::unique_ptr<OperationPass<ModuleOp>> createUnifyAllocBlockPass();
-void registerUnifyAllocBlockPass();
-std::unique_ptr<OperationPass<ModuleOp>> createFixpipeOptPass();
+using namespace mlir;
+using namespace triton;
+using namespace CVSplit;
 
-} // namespace triton
-} // namespace mlir
+static constexpr const char *DEBUG_TYPE = "StandardizeOp";
+#define LOG_DEBUG(...) LLVM_DEBUG(llvm::dbgs() << "\n[" << DEBUG_TYPE << "] " << __VA_ARGS__ << "\n")
 
-#endif // TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
+namespace mlir::triton {
+
+void StandardizeOpPass::runOnOperation()
+{
+    auto op = getOperation();
+    OpPassManager pm(op.getOperationName());
+    pm.addPass(createPatternMatchRewritePass());
+
+    if (llvm::failed(runPipeline(pm, op))) {
+        LOG_DEBUG("Pipeline Failed!");
+        signalPassFailure();
+    }
+}
+
+std::unique_ptr<OperationPass<ModuleOp>> createStandardizeOpPass()
+{
+    return std::make_unique<StandardizeOpPass>();
+};
+
+void registerStandardizeOpPasses()
+{
+    registerPass(createStandardizeOpPass);
+    registerPass(createPatternMatchRewritePass);
+}
+
+} // namespace mlir::triton

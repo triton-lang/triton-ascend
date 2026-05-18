@@ -22,8 +22,10 @@
 
 #include "llvm/Support/Debug.h"
 
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/PassManager.h"
 
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache.h"
@@ -52,15 +54,18 @@ AddDynamicCVPipelinePass::AddDynamicCVPipelinePass(
 void AddDynamicCVPipelinePass::runOnOperation()
 {
     auto moduleOp = getOperation();
+    OpBuilder builder(moduleOp.getContext());
     compileOn91095Flag = this->compileOn91095;
 
     LDBG("Enter pass");
+    moduleOp->removeAttr(CVPipeline::ERRCODE_ATTR);
 
     if (!compileOn91095Flag) {
         llvm::errs() << "Add-dynamic-cv-pipeline is only supported on 91095 now.\n";
         return;
     }
 
+    ModuleOp moduleBackup(moduleOp->clone());
     PassManager pm(&getContext(), moduleOp.getOperationName());
 
     pm.addPass(createPlanComputeBlockPass());
@@ -71,11 +76,22 @@ void AddDynamicCVPipelinePass::runOnOperation()
     pm.addPass(createAddControlFlowConditionPass());
     pm.addPass(createRemoveSsbufAttrPass());
 
-    if (failed(runPipeline(pm, getOperation()))) {
-        moduleOp->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
-        signalPassFailure();
+    if (failed(runPipeline(pm, moduleOp))) {
+        auto errCodeAttr = moduleOp->getAttrOfType<IntegerAttr>(CVPipeline::ERRCODE_ATTR);
+        if (!errCodeAttr) {
+            moduleOp->emitWarning() << "[" << DEBUG_TYPE << "] "
+                << "Pass failed; fallback to compilation without dynamic CV pipeline.";
+        }
+        
+        int errCode = errCodeAttr ? static_cast<int>(errCodeAttr.getInt()) : CVPipeline::ERRCODE_FAILED;
+        moduleOp->setAttrs(moduleBackup.getOperation()->getAttrs());
+        moduleOp.getBodyRegion().takeBody(moduleBackup.getBodyRegion());
+        moduleBackup->destroy();
+        moduleOp->setAttr(CVPipeline::ERRCODE_ATTR, builder.getI32IntegerAttr(errCode));
+        return;
     }
 
+    moduleBackup->destroy();
     LDBG("Process successfully");
 }
 

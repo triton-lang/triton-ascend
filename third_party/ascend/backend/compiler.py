@@ -70,6 +70,35 @@ from triton.tools.get_ascend_devices import is_compile_on_910_95
 def min_dot_size(target: GPUTarget):
     return lambda lhsType, rhsType: (1, 1, 1)
 
+# Get result code saved in module {attr_name = rc}
+def _get_then_remove_rc(mod, attr_name: str) -> int:
+    get_int_attr = getattr(ascend.ir, "get_int_attr", None)
+    remove_attr = getattr(ascend.ir, "remove_attr", None)
+
+    if get_int_attr is None:
+        return -1
+    attr_value = get_int_attr(mod, attr_name)
+
+    if remove_attr:
+        remove_attr(mod, attr_name)
+    
+    if not isinstance(attr_value, int):
+        return -1
+
+    return attr_value
+
+
+def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
+    rc = _get_then_remove_rc(mod, "triton_ascend.dynamic_cv_pipeline.rc")
+    if rc != -1 and rc > 0:
+        # When the option dynamic_cv_pipeline is set to False,
+        # these options should also reverted.
+        metadata["enable_dynamic_cv_pipeline"] = False
+        metadata["enable_mixed_cv"] = kwargs["enable_mixed_cv"]
+        metadata["disable_auto_inject_block_sync"] = kwargs["disable_auto_inject_block_sync"]
+        if opt.debug:
+            print(f"SSBUFFER return code={rc}, will fallback to enable_dynamic_cv_pipeline=False")
+
 
 def make_ttir(mod, metadata, opt):
     if "hash" not in metadata:
@@ -112,6 +141,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         enable_mask_fallback_conversion = metadata["enable_mask_fallback_conversion"]
         optimize_dynamic_offset = metadata["optimize_dynamic_offset"]
         auto_blockify_size = metadata["auto_blockify_size"]
+        enable_mixed_cv = metadata["enable_mixed_cv"]
+        disable_auto_inject_block_sync = metadata["disable_auto_inject_block_sync"]
         if not _is_auto_map_parallel_blocks_enabled():
             auto_blockify_size = 1
         pm = ir.pass_manager(mod.context)
@@ -165,6 +196,12 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             compile_on_910_95
         )
         if metadata["enable_dynamic_cv_pipeline"]:
+            if metadata["set_workspace_multibuffer"] != None:
+                raise ValueError(
+                    "\"enable_dynamic_cv_pipeline\" cannot be used with \"set_workspace_multibuffer\"."
+                )
+            metadata["enable_mixed_cv"] = True
+            metadata["disable_auto_inject_block_sync"] = True
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
 
         _val = metadata.get("intra_cache_num")
@@ -180,6 +217,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             ascend.passes.ttir.set_buffer_count(2, _val)
 
         pm.run(mod)
+        _adjust_metadata_by_module_result(mod, metadata, opt,
+                                          enable_mixed_cv=enable_mixed_cv,
+                                          disable_auto_inject_block_sync=disable_auto_inject_block_sync)
 
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])

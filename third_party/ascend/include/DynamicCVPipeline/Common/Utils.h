@@ -23,6 +23,7 @@
 #ifndef ADD_AUTO_SCHEDULING_COMMON_UTILS_H
 #define ADD_AUTO_SCHEDULING_COMMON_UTILS_H
 #include <string_view>
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/StringRef.h"
@@ -35,6 +36,9 @@ inline constexpr llvm::StringLiteral kBlockId = "ssbuffer.block_id";
 inline constexpr llvm::StringLiteral kTransferId = "ssbuffer.transfer_id";
 inline constexpr llvm::StringLiteral kCubeFirst = "ssbuffer.cube_first";
 inline constexpr llvm::StringLiteral kVectorFirst = "ssbuffer.vector_first";
+inline constexpr const char *ERRCODE_ATTR = "triton_ascend.dynamic_cv_pipeline.rc";
+static constexpr const int ERRCODE_FAILED = 1;
+static constexpr const int ERRCODE_IGNORED = 2;
 
 enum CoreType {
     UNDETERMINED = 0,
@@ -59,6 +63,7 @@ inline constexpr CoreType fromStrCoreType(std::string_view s)
 CoreType getOpCoreType(Operation *op);
 std::optional<int64_t> getOpBlockId(Operation *op);
 llvm::LogicalResult verifyOpBlockId(Operation *op);
+void setFallbackAttr(ModuleOp module);
 
 inline bool isCubeOp(Operation *op)
 {

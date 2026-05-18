@@ -60,8 +60,13 @@ void PlanComputeBlockPass::runOnOperation()
     pm.addPass(createReorderOpsByBlockIdPass());
 
     if (failed(runPipeline(pm, module))) {
-        module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
+        auto errCodeAttr = module->getAttrOfType<IntegerAttr>(CVPipeline::ERRCODE_ATTR);
+        int errCode = errCodeAttr ? static_cast<int>(errCodeAttr.getInt()) : CVPipeline::ERRCODE_FAILED;
+        if (errCode != CVPipeline::ERRCODE_IGNORED) {
+            module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
+        }
         signalPassFailure();
+        return;
     }
 
     LOG_DEBUG("Process successfully\n");

@@ -3,6 +3,7 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Builders.h"
 namespace mlir {
 namespace CVPipeline {
 
@@ -54,6 +55,12 @@ std::optional<int64_t> getOpBlockId(Operation *op)
     }
 
     return blockIdAttr.getInt();
+}
+
+void setFallbackAttr(ModuleOp module)
+{
+    OpBuilder builder(module.getContext());
+    module->setAttr(CVPipeline::ERRCODE_ATTR, builder.getI32IntegerAttr(CVPipeline::ERRCODE_IGNORED));
 }
 
 } // namespace CVPipeline

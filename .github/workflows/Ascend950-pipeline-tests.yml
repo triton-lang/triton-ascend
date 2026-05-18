@@ -1,4 +1,4 @@
-name: A5 Pipeline Tests
+name: Ascend950 Pipeline Tests
 # Combined orchestration after Wheels finishes (or on PR close):
 #   publish: download wheel artifact → upload to obs://.../triton-ascend/<N>/
 #   trigger: needs publish; calls blue-yellow /start and polls /query
@@ -13,7 +13,7 @@ name: A5 Pipeline Tests
 
 on:
   workflow_run:
-    workflows: ["A5 Wheels Build"]
+    workflows: ["Ascend950 Wheels Build"]
     types: [completed]
   pull_request_target:
     types: [closed]
@@ -240,16 +240,47 @@ jobs:
           }
           EOF
           )
-          # /start is non-idempotent: do not auto-retry (a 502 retry can collide
-          # with the already-accepted task and surface as "task already exists").
-          R=$(curl -sS --max-time 30 \
-            -o /tmp/by_start.body -w '%{http_code}' \
-            -H "$H_CODE" -H "$H_KEY" -H "$H_SEC" -H "$H_JSON" \
-            -X POST "${BASE_URL}/start" -d "${START_BODY}" || true)
-          BODY=$(cat /tmp/by_start.body 2>/dev/null || true)
-          echo "HTTP=${R} response: ${BODY}"
-          if [ "$R" != "200" ] || ! echo "$BODY" | grep -q '"code":200'; then
-            write_status "START_FAILURE" "HTTP=${R} body=${BODY}"
+          # /start retry: only on gateway/network failures (502/504,
+          # APIG.0203, curl=000); any other response is terminal. BRI/BTI are
+          # reused across attempts so the backend can dedupe a request the
+          # gateway lost mid-flight. --max-time 70 exceeds APIG's ~60s backend
+          # timeout so curl waits out the 502 instead of giving up first.
+          START_OK=false
+          LAST_R=""; LAST_BODY=""
+          DUP_RE='(exist|duplicate|already)'
+          for ((I=1; I<=5; I++)); do
+            R=$(curl -sS --max-time 70 \
+              -o /tmp/by_start.body -w '%{http_code}' \
+              -H "$H_CODE" -H "$H_KEY" -H "$H_SEC" -H "$H_JSON" \
+              -X POST "${BASE_URL}/start" -d "${START_BODY}" || echo "000")
+            BODY=$(cat /tmp/by_start.body 2>/dev/null || true)
+            LAST_R="$R"; LAST_BODY="$BODY"
+            echo "[start #${I}] HTTP=${R} response: ${BODY}"
+
+            if [ "$R" = "200" ] && echo "$BODY" | grep -q '"code":200'; then
+              START_OK=true
+              break
+            fi
+            if echo "$BODY" | grep -Eiq "\"(error_msg|msg|message)\":\"[^\"]*${DUP_RE}"; then
+              echo "[start #${I}] backend reports duplicate task — treating as already-accepted"
+              START_OK=true
+              break
+            fi
+            # Retry on gateway/backend timeout (APIG.0203, 502) or curl network
+            # failure (HTTP=000). All other errors are non-retryable.
+            if [ "$R" = "502" ] || [ "$R" = "504" ] || [ "$R" = "000" ] \
+                || echo "$BODY" | grep -q 'APIG\.0203'; then
+              SLEEP=$(( I * 5 ))
+              echo "[start #${I}] retryable failure — sleeping ${SLEEP}s before retry"
+              sleep "$SLEEP"
+              continue
+            fi
+            echo "[start #${I}] non-retryable failure — aborting"
+            break
+          done
+
+          if [ "$START_OK" != "true" ]; then
+            write_status "START_FAILURE" "HTTP=${LAST_R} body=${LAST_BODY}"
             exit 1
           fi
 
@@ -259,8 +290,8 @@ jobs:
           )
 
           ST=""; MSG=""; DONE=false
-          for ((N=1; N<=240; N++)); do
-            sleep 15
+          for ((N=1; N<=720; N++)); do
+            sleep 60
             QHTTP=$(curl -sS --retry 3 --retry-all-errors --retry-delay 5 \
               -o /tmp/by_query.body -w '%{http_code}' \
               -H "$H_CODE" -H "$H_KEY" -H "$H_SEC" -H "$H_JSON" \

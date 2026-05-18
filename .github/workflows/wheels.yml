@@ -48,6 +48,16 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Cache build dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.triton-cache
+            ${{ github.workspace }}/.ccache
+          key: wheels-${{ matrix.config.arch }}-${{ matrix.python }}-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
+          restore-keys: |
+            wheels-${{ matrix.config.arch }}-${{ matrix.python }}-
+
       - name: Build wheels
         run: |
           python --version
@@ -59,6 +69,10 @@ jobs:
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
 
+          # Pre-create cache dirs on host so cibuildwheel's bind-mount sees them
+          # at /project/.triton-cache and /project/.ccache inside the container.
+          mkdir -p .triton-cache .ccache
+
           # required to build Python 3.14 with cibuildwheel 2.23.3
           # todo: Need to update system Python to 3.11 and update cibuildwheel to latest
 
@@ -67,7 +81,11 @@ jobs:
             TRITON_BUILD_PROTON=OFF \
             TRITON_WHEEL_NAME=triton-ascend \
             TRITON_APPEND_CMAKE_ARGS='-DTRITON_BUILD_UT=OFF' \
-            TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX:-rc3}"
+            TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX:-rc3} \
+            TRITON_HOME=/project/.triton-cache \
+            TRITON_BUILD_WITH_CCACHE=true \
+            CCACHE_DIR=/project/.ccache \
+            CCACHE_COMPRESS=true"
 
           # many_linux_2_28 image comes with GCC 12.2.1, but not clang.
           # With this install, it gets clang 16.0.6.
@@ -85,7 +103,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-wheels-upload
+          name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-${{ matrix.python }}-wheels-upload
           path: ./wheelhouse/*.whl
 
       - name: Setup obsutil

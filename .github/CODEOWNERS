@@ -2,64 +2,65 @@
 # the repo. Unless a later match takes precedence,
 # @global-owner1 and @global-owner2 will be requested for
 # review when someone opens a pull request.
-*       @ptillet
+*       @HEX1A0A
 
 # --------
 # Analyses
 # --------
 # Alias analysis
-include/triton/Analysis/Alias.h @Jokeren
-lib/Analysis/Alias.cpp @Jokeren
+include/triton/Analysis/Alias.h @TecJesh
+lib/Analysis/Alias.cpp @TecJesh
 # Allocation analysis
-include/triton/Analysis/Allocation.h @Jokeren
-lib/Analysis/Allocation.cpp @Jokeren
+include/triton/Analysis/Allocation.h @TecJesh
+lib/Analysis/Allocation.cpp @TecJesh
 # Membar analysis
-include/triton/Analysis/Membar.h @Jokeren
-lib/Analysis/Membar.cpp @Jokeren
+include/triton/Analysis/Membar.h @TecJesh
+lib/Analysis/Membar.cpp @TecJesh
 # AxisInfo analysis
-include/triton/Analysis/AxisInfo.h @ptillet
-lib/Analysis/AxisInfo.cpp @ptillet
+include/triton/Analysis/AxisInfo.h @TecJesh
+lib/Analysis/AxisInfo.cpp @TecJesh
 # Utilities
-include/triton/Analysis/Utility.h @Jokeren
-lib/Analysis/Utility.cpp @Jokeren
+include/triton/Analysis/Utility.h @TecJesh
+lib/Analysis/Utility.cpp @TecJesh
 
 # ----------
 # Dialects
 # ----------
 # Pipeline pass
-lib/Dialect/TritonGPU/Transforms/Pipeline.cpp @ptillet
+lib/Dialect/TritonGPU/Transforms/Pipeline.cpp @TecJesh
 # Prefetch pass
-lib/Dialect/TritonGPU/Transforms/Prefetch.cpp @ptillet
+lib/Dialect/TritonGPU/Transforms/Prefetch.cpp @TecJesh
 # Coalesce pass
-lib/Dialect/TritonGPU/Transforms/Coalesce.cpp @ptillet
+lib/Dialect/TritonGPU/Transforms/Coalesce.cpp @TecJesh
 # Layout simplification pass
-lib/Dialect/TritonGPU/Transforms/Combine.cpp @ptillet
+lib/Dialect/TritonGPU/Transforms/Combine.cpp @TecJesh
 
 # -----------
 # Conversions
 # -----------
 # TritonToTritonGPU
-include/triton/Conversion/TritonToTritonGPU/ @ptillet
-lib/Dialect/TritonGPU/Transforms/TritonGPUConversion.cpp @ptillet
+include/triton/Conversion/TritonToTritonGPU/ @TecJesh
+lib/Dialect/TritonGPU/Transforms/TritonGPUConversion.cpp @TecJesh
 
 # -----------
 # third_party
 # -----------
-third_party/amd/ @antiagainst @zhanglx13
-third_party/proton/ @Jokeren @crobeck @fywkevin
+third_party/amd/ @TecJesh
+third_party/proton/ @TecJesh
+third_party/ascend/ @HEX1A0A
 
 # -----------
 # gluon
 # -----------
-python/triton/experimental/gluon/ @peterbell10
-python/src/gluon_ir.cc @peterbell10
-python/test/gluon @peterbell10
-test/Gluon @peterbell10
-include/triton/Dialect/Gluon @peterbell10
-lib/Dialect/Gluon @peterbell10
+python/triton/experimental/gluon/ @TecJesh
+python/src/gluon_ir.cc @TecJesh
+python/test/gluon @TecJesh
+test/Gluon @TecJesh
+include/triton/Dialect/Gluon @TecJesh
+lib/Dialect/Gluon @TecJesh
 
 # -----------
 # Linear Layouts
 # -----------
-lib/Tools/ @lezcano
-lib/Dialect/TritonGPU/IR/LinearLayoutConversions.cpp @lezcano
+lib/Tools/ @TecJesh
+lib/Dialect/TritonGPU/IR/LinearLayoutConversions.cpp @TecJesh

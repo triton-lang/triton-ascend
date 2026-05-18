@@ -87,10 +87,12 @@ void ComputeBlockIdManager::updateBlockId(Operation *op, int blockId)
     auto it = opToBlockId.find(op);
     if (it != opToBlockId.end()) {
         int preBlockId = it->second;
-        auto &vec = blockIdToOps[preBlockId];
-        auto vecIt = llvm::find(vec, op);
-        if (vecIt != vec.end()) {
-            vec.erase(vecIt);
+        if (preBlockId != -1) {
+            auto &vec = blockIdToOps[preBlockId];
+            auto vecIt = llvm::find(vec, op);
+            if (vecIt != vec.end()) {
+                vec.erase(vecIt);
+            }
         }
     }
     opToBlockId[op] = blockId;

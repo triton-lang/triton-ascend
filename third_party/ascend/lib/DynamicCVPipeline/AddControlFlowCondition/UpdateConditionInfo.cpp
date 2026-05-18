@@ -243,7 +243,7 @@ DenseMap<int, DenseMap<Value, SmallVector<Value>>> UpdateConditionInfoPass::exte
         }
         int tcbGroupId = findTcbGroupId(buffer, tightlyCoupledBufferGroups);
         if (tcbGroupId == -1) {
-          LDBG("Can not find tightly_coupled_buffer id" << "\n");
+          LDBG("Can not find tightly_coupled_buffer id of: " << buffer << "\n");
           return errorMap;
         }
         if (addEquivalentValues(buffer, tightlyCoupledBufferGroups[tcbGroupId], producers) == -1) {
@@ -819,28 +819,28 @@ int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(scf::ForOp forOp)
     LDBG("Skip buildTensorIterArgIfOpVarMap: no tensor iter_args info for this forOp\n");
     return UPDATE_CONDITION_INFO_SUCCESS;
   }
-  
+
   auto &depsVec = info->tensorIterArgDepsMap[forOp];
   auto &indicesMap = info->tensorIterArgIndicesMap[forOp];
 
   llvm::DenseMap<scf::IfOp, llvm::DenseSet<Value>> producerVars;
   llvm::DenseMap<scf::IfOp, llvm::DenseSet<Value>> consumerVars;
-  
+
   for (auto &depEntry : depsVec) {
     Value origIterArg = depEntry.iterArg;
     TensorIterArgIfOpRelation &relation = depEntry;
-    
+
     if (!indicesMap.count(origIterArg)) {
       LDBG("[Error]: origIterArg not found in indicesMap\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
     SmallVector<int> &argIndices = indicesMap[origIterArg];
-    
+
     if (relation.consumers.size() != argIndices.size()) {
       LDBG("[Error]: consumers size mismatch: " << relation.consumers.size() << " vs " << argIndices.size() << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
-    
+
     // Establish a mapping (one-to-one) from consumers to variables
     llvm::DenseMap<scf::IfOp, Value> consumerToVar;
     for (size_t i = 0; i < relation.consumers.size(); ++i) {
@@ -848,20 +848,20 @@ int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(scf::ForOp forOp)
       Value var = forOp.getRegionIterArg(argIndices[i]);
       consumerToVar[consumer] = var;
     }
-    
+
     // Add all the variables of the consumers that depend on each producer
     for (scf::IfOp producer : relation.producers) {
       for (auto &[consumer, var] : consumerToVar) {
         producerVars[producer].insert(var);
       }
     }
-    
+
     // Add all the variables of the consumers that depend on each producer
     for (auto &[consumer, var] : consumerToVar) {
       consumerVars[consumer].insert(var);
     }
   }
-  
+
   // Convert the temporary data structure to tensorIfOpVarMap
   for (auto &[producer, vars] : producerVars) {
     auto &ifOpVars = info->tensorIterArgIfOpVars[producer];
@@ -869,7 +869,7 @@ int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(scf::ForOp forOp)
       ifOpVars.producerVars.push_back(var);
     }
   }
-  
+
   for (auto &[consumer, vars] : consumerVars) {
     auto &ifOpVars = info->tensorIterArgIfOpVars[consumer];
     for (Value var : vars) {

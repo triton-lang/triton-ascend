@@ -27,11 +27,13 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Block.h"
@@ -157,6 +159,28 @@ BlockOpGraph::BlockOpGraph(ArrayRef<Operation *> allOps, Block *block, const Mem
     }
 }
 
+// ============================================================================
+// Method: collectBlockIds
+// ============================================================================
+/**
+ * @brief Collects block IDs across operations, traversing nested operations when necessary.
+ *
+ * **Purpose**:
+ * Resolves or assigns unique block IDs for a list of operations, ensuring that sub-operations
+ * within nested regions are accounted for when checking scheduling groups.
+ *
+ * **Inputs & Assumptions**:
+ * - `allOps` (ArrayRef<Operation *>): List of outer operations.
+ * - `bm` (ComputeBlockIdManager &): The block ID manager.
+ *
+ * **Outputs & Guarantees**:
+ * - Returns a `DenseMap<Operation *, int>` associating each operation with its block ID.
+ * - Returns `llvm::failure()` if validation of any operation block ID fails.
+ *
+ * **Safety Boundaries & Constraints**:
+ * - If an operation does not have a block ID assigned directly, performs a recursive walk on its
+ *   nested regions to find a unified block ID. If nested block IDs conflict, assigns a new unique ID.
+ */
 static llvm::FailureOr<DenseMap<Operation *, int>> collectBlockIds(ArrayRef<Operation *> allOps, ComputeBlockIdManager &bm)
 {
     DenseMap<Operation *, int> opBlockId;
@@ -164,10 +188,31 @@ static llvm::FailureOr<DenseMap<Operation *, int>> collectBlockIds(ArrayRef<Oper
         if (llvm::failed(verifyOpBlockId(op))) {
             return llvm::failure();
         }
-        auto blockIdAttrRes = getOpBlockId(op);
-        int64_t blockId =
-            blockIdAttrRes.has_value() ? blockIdAttrRes.value() : bm.getNextId();
-        opBlockId[op] = blockId;
+        auto blockIdOpt = getOpBlockId(op);
+        if (blockIdOpt.has_value()) {
+            opBlockId[op] = blockIdOpt.value();
+            continue;
+        }
+
+        auto result = op->walk([&](Operation *nestedOp) {
+            if (nestedOp != op && !llvm::isa<scf::YieldOp, linalg::FillOp>(nestedOp)) {
+                return WalkResult::interrupt();
+            }
+            auto currBlockIdOpt = getOpBlockId(nestedOp);
+            if (!blockIdOpt.has_value()) {
+                blockIdOpt = getOpBlockId(nestedOp);
+            }
+            if (currBlockIdOpt.has_value() && currBlockIdOpt != blockIdOpt) {
+                return WalkResult::interrupt();
+            }
+            return WalkResult::advance();
+        });
+        if (result.wasInterrupted() || !blockIdOpt.has_value()) {
+            blockIdOpt = bm.getNextId();
+        } else {
+            bm.updateBlockId(op, blockIdOpt.value());
+        }
+        opBlockId[op] = blockIdOpt.value();
     }
     return opBlockId;
 }
@@ -390,14 +435,15 @@ static llvm::LogicalResult reorderOpsInBlock(Block &block, const MemoryDependenc
 
 void ReorderOpsByBlockIdPass::runOnOperation()
 {
-    LOG_DEBUG("\n=== Pass: TuningOpSeq ===\n");
-    OpBuilder const builder(&getContext());
-
     auto moduleOp = getOperation();
+    LOG_DEBUG("Input mlir:\n" << moduleOp << "\n");
+    llvm::dbgs().flush();
+
+    OpBuilder const builder(&getContext());
     auto &aa = getAnalysis<AliasAnalysis>();
     auto memGraph = MemoryDependenceGraph(moduleOp, aa);
     auto bm = ComputeBlockIdManager(moduleOp);
-    moduleOp.walk([&](Block *block) {
+    auto result = moduleOp.walk([&](Block *block) {
         auto *parentOp = block->getParentOp();
         if (!parentOp ||
             // whitelist ops to reorder
@@ -405,12 +451,16 @@ void ReorderOpsByBlockIdPass::runOnOperation()
             return WalkResult::skip();
         }
         if (llvm::failed(reorderOpsInBlock(*block, memGraph, bm))) {
-            signalPassFailure();
+            return WalkResult::interrupt();
         }
         return WalkResult::advance();
     });
 
-    LOG_DEBUG("=== Pass TuningOpSeq complete ===\n");
+    if (result.wasInterrupted()) {
+        signalPassFailure();
+        return;
+    }
+    LOG_DEBUG("Output mlir:\n" << moduleOp << "\n");
 }
 
 std::unique_ptr<OperationPass<ModuleOp>> mlir::triton::createReorderOpsByBlockIdPass()

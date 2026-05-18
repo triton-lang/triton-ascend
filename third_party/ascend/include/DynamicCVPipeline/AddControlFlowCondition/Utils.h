@@ -34,7 +34,6 @@ namespace triton {
 
 // Attribute names for DynamicCV pipeline
 inline constexpr llvm::StringLiteral kSSBufferIfAttr = "ssbuffer.if";
-inline constexpr llvm::StringLiteral kHIVMMatmulLimitedInCubeAttr = "hivm.matmul_limited_in_cube";
 
 // Collect all nested ops within an operation's regions
 LogicalResult collectAllNestedOps(Operation *op, llvm::DenseSet<Operation *> &regionOps);

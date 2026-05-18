@@ -47,6 +47,8 @@ from triton.backends.ascend.utils import (
     _is_ascend_sanitizer_enabled,
     _is_debug_line_info_disabled,
     _is_auto_map_parallel_blocks_enabled,
+    _get_auto_blockify_blacklist_reasons,
+    _warn_auto_blockify_disabled,
     downgrade_llir,
     force_disable_ffts,
     triton_enable_libdevice_simt,
@@ -127,6 +129,18 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
     # use triton_adapter to lower Triton-MLIR to linalg
     # Get Triton-MLIR as string
     ttir_code = str(mod)
+    auto_map_parallel_blocks_enabled = _is_auto_map_parallel_blocks_enabled()
+    blacklist_reasons = []
+    has_auto_blockify_blacklist_op = metadata.get("has_auto_blockify_blacklist_op")
+    if has_auto_blockify_blacklist_op is None and auto_map_parallel_blocks_enabled:
+        blacklist_reasons = _get_auto_blockify_blacklist_reasons(ttir_code)
+        has_auto_blockify_blacklist_op = bool(blacklist_reasons)
+    elif has_auto_blockify_blacklist_op is None:
+        has_auto_blockify_blacklist_op = False
+    metadata["has_auto_blockify_blacklist_op"] = has_auto_blockify_blacklist_op
+    if has_auto_blockify_blacklist_op and blacklist_reasons:
+        kernel_name = re.search(r"tt\.func\spublic\s+@(\w+)", ttir_code).group(1)
+        _warn_auto_blockify_disabled(kernel_name or "<unknown>", blacklist_reasons)
     with tempfile.TemporaryDirectory() as tmpdir:
         src_path = os.path.join(tmpdir, "kernel.ttir.mlir")
         dst_path = os.path.join(tmpdir, "kernel.ttadapter.mlir")
@@ -143,7 +157,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         auto_blockify_size = metadata["auto_blockify_size"]
         enable_mixed_cv = metadata["enable_mixed_cv"]
         disable_auto_inject_block_sync = metadata["disable_auto_inject_block_sync"]
-        if not _is_auto_map_parallel_blocks_enabled():
+        if has_auto_blockify_blacklist_op or not auto_map_parallel_blocks_enabled:
             auto_blockify_size = 1
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
@@ -311,6 +325,13 @@ def _parse_ttir_metadata(ttir: str, metadata: dict):
     metadata["mix_mode"] = "aiv"
     metadata["kernel_name"] = re.search(KERNEL_NAME_REGEX, ttir).group(1)
     metadata["name"] = metadata["kernel_name"]
+    auto_map_parallel_blocks_enabled = _is_auto_map_parallel_blocks_enabled()
+    has_auto_blockify_blacklist_op = metadata.get("has_auto_blockify_blacklist_op")
+    if has_auto_blockify_blacklist_op is None and auto_map_parallel_blocks_enabled:
+        has_auto_blockify_blacklist_op = bool(_get_auto_blockify_blacklist_reasons(ttir))
+    elif has_auto_blockify_blacklist_op is None:
+        has_auto_blockify_blacklist_op = False
+    metadata["has_auto_blockify_blacklist_op"] = has_auto_blockify_blacklist_op
     # Parse all tensor kinds from arguments
     metadata["tensor_kinds"] = [int(kind) for _, kind in re.findall(TENSOR_KIND_REGEX, ttir)]
     return metadata
@@ -557,7 +578,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 _compile_option_list += \
                     [f"--link-aicore-bitcode={bitcode}"]
 
-        if _is_auto_map_parallel_blocks_enabled():
+        if _is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False):
             _compile_option_list += ["--enable-auto-blockify-loop"]
         npu_compiler_path, env = _get_npucompiler_path()
         if npu_compiler_path.endswith("bishengir-compile"):
@@ -794,7 +815,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--disable-size-align-for-cast={disable_size_align_for_cast}"]
 
-        if _is_auto_map_parallel_blocks_enabled():
+        if _is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False):
             _compile_option_list += ["--enable-auto-blockify-loop"]
         npu_compiler_path, env = _get_npucompiler_path()
         if npu_compiler_path.endswith("bishengir-compile"):
@@ -931,6 +952,7 @@ class NPUOptions:
     add_auto_scheduling: bool = False
     enable_dynamic_cv_pipeline: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = False
+    has_auto_blockify_blacklist_op: Optional[bool] = None
 
     stream: int = None
     parallel_mode: str = "simd"

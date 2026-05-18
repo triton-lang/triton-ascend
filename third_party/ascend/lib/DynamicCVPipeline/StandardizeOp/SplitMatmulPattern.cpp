@@ -606,7 +606,7 @@ static LogicalResult splitMatmul(linalg::MatmulOp matmulOp, PatternRewriter &rew
     }
     auto fillOp = rewriter.create<linalg::FillOp>(emptyOp.getLoc(), zeroValue, emptyOp.getResult());
     auto zeroVal = fillOp.getResult(0);
-    splitInfo.outerInValue.replaceUsesWithIf(zeroVal, [&](OpOperand &opop) { return opop.getOwner() == outerDefOp; });
+    splitInfo.outerInValue.replaceUsesWithIf(zeroVal, [&](OpOperand &operand) { return operand.getOwner() == outerDefOp; });
 
     auto forOp = llvm::dyn_cast_if_present<scf::ForOp>(splitInfo.outerOutValue.getDefiningOp());
     if (!splitInfo.mayNotExec || !forOp) {

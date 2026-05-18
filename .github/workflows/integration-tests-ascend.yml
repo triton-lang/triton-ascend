@@ -34,6 +34,13 @@ jobs:
       - name: Add git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Config infra cache mirrors
+        run: |
+          CACHING_URL="cache-service.nginx-pypi-cache.svc.cluster.local"
+          sed -Ei "s@(ports|archive).ubuntu.com@${CACHING_URL}:8081@g" /etc/apt/sources.list
+          pip config set global.index-url http://${CACHING_URL}/pypi/simple
+          pip config set global.trusted-host "${CACHING_URL}"
+
       - name: Cache build dependencies
         uses: actions/cache@v4
         with:
@@ -102,7 +109,7 @@ jobs:
           MAX_JOBS="$NUM_PROCS" \
           ${PYTHON} setup.py bdist_wheel
           ${PYTHON} -m pip install dist/*.whl \
-            -i https://repo.huaweicloud.com/repository/pypi/simple/
+            -i http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple/
 
       - name: CCache stats
         run: ccache --print-stats

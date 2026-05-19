@@ -747,6 +747,92 @@ def test_vector_axes_materialize_axis_sizes_prefers_fixed_tiling_expr_for_non_sp
     assert diagnostics["y"]["resolved_by"] == "fixed_tiling_expr_arg"
 
 
+def test_parse_cv_params_preserves_block_size_n_for_inline_dot_rhs_expression():
+    from triton.backends.ascend.runtime.dsl_analysis.cv_param_parser import (
+        parse_cv_params,
+    )
+
+    func_ast = ast.parse(
+        """
+def matmul_kernel(
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    M,
+    N,
+    K: tl.constexpr,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_cm,
+    stride_cn,
+    phy_grids,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    BLOCK_SIZE_K: tl.constexpr,
+    GROUP_SIZE_M: tl.constexpr = 4,
+):
+    offs_am = (0 + tl.arange(0, BLOCK_SIZE_M)) % M
+    offs_bn = (0 + tl.arange(0, BLOCK_SIZE_N)) % N
+    offs_k = tl.arange(0, BLOCK_SIZE_K)
+    a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
+    b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
+    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.int32)
+    for i in range(4):
+        for j in range(0, tl.cdiv(K // 4, BLOCK_SIZE_K)):
+            k = i * tl.cdiv(K // 4, BLOCK_SIZE_K) + j
+            a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0)
+            b_uint8 = tl.load(b_ptrs, mask=offs_k[:, None] < K, other=0)
+            mask = 3 << (2 * i)
+            b = (b_uint8 & mask) >> (2 * i)
+            tensor_full = tl.full((1,), 1, dtype=tl.int8)
+            accumulator += tl.dot(a, b.to(tl.int8) - tensor_full, out_dtype=tl.int32)
+"""
+    ).body[0]
+
+    parse_result = parse_cv_params(
+        func_ast,
+        parser_mode="mix",
+        arg_names=[
+            "a_ptr",
+            "b_ptr",
+            "c_ptr",
+            "M",
+            "N",
+            "K",
+            "stride_am",
+            "stride_ak",
+            "stride_bk",
+            "stride_bn",
+            "stride_cm",
+            "stride_cn",
+            "phy_grids",
+        ],
+        provided_args={
+            "M": 2,
+            "N": 3,
+            "K": 128,
+            "stride_am": 128,
+            "stride_ak": 1,
+            "stride_bk": 3,
+            "stride_bn": 1,
+            "stride_cm": 3,
+            "stride_cn": 1,
+            "phy_grids": 1,
+        },
+        explicit_tunable_params=["BLOCK_SIZE_M", "BLOCK_SIZE_N", "BLOCK_SIZE_K"],
+    )
+
+    tunable_names = {item.name for item in parse_result.tunable_params}
+
+    assert "BLOCK_SIZE_M" in tunable_names
+    assert "BLOCK_SIZE_N" in tunable_names
+    assert "BLOCK_SIZE_K" in tunable_names
+    assert parse_result.dot_sites
+    assert parse_result.dot_sites[0].n.tunable_param == "BLOCK_SIZE_N"
+
+
 @triton.autotune(
     configs=[],
     key=["n_elements"],

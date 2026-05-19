@@ -1608,11 +1608,18 @@ BlockDataParser::rewriteTerminator(
       }
     }
 
+    auto sizesRef = state.getSizesRef();
+    size_t dimIdx = 0;
     for (OpFoldResult stride : state.getStridesRef()) {
       if (isa<Attribute>(stride)) {
-        auto constStride = stride.get<Attribute>();
-        assert(isa<IntegerAttr>(constStride) &&
-               dyn_cast<IntegerAttr>(constStride).getInt() == 1 &&
+        auto constStride = cast<Attribute>(stride);
+        assert(isa<IntegerAttr>(constStride) && "attribute strides should be IntegerAttr");
+
+        auto strideVal = dyn_cast<IntegerAttr>(constStride).getInt();
+        bool isSizeOne = (dimIdx < sizesRef.size() &&
+                          isa<Attribute>(sizesRef[dimIdx]) &&
+                          cast<IntegerAttr>(cast<Attribute>(sizesRef[dimIdx])).getInt() == 1);
+        assert((strideVal == 1 || (strideVal == 0 && isSizeOne)) &&
                "attribute strides should be ones");
         auto constOp = rewriter.create<arith::ConstantOp>(
             op.getLoc(), rewriter.getIndexAttr(1));
@@ -1620,6 +1627,7 @@ BlockDataParser::rewriteTerminator(
       } else {
         operands.push_back(stride.get<Value>());
       }
+      dimIdx++;
     }
   }
 

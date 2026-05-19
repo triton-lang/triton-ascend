@@ -40,8 +40,9 @@ jobs:
           path: |
             ~/.triton/llvm
             ~/.triton/json
+            ~/.triton/nvidia
             ~/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'third_party/ascend/llvm_patch/*.patch') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-
 
       - name: Download and install Bisheng compiler

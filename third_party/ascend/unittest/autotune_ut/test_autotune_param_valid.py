@@ -493,13 +493,16 @@ def test_generate_key_and_configs_uses_axis_arg_names_for_kv_dict():
         return 0 if dtype is None else 1
 
     namespace["get_byte_per_numel"] = fake_get_byte_per_numel
+    namespace["_expand_configs_with_hints"] = lambda fn, configs, config_hints: configs
 
     tuner = SimpleNamespace(
         arg_names=["x_ptr", "n_elements"],
+        fn=SimpleNamespace(),
         _get_constexpr_candidates=lambda: [],
         cache={},
         auto_gen_config=True,
         parser_mode="vector",
+        config_hints={},
         gen_configs=[],
         user_configs=[],
         is_simt_mode=False,
@@ -566,13 +569,16 @@ def test_generate_key_and_configs_preserves_promoted_reduction_axis_identity():
         dtype = "float16"
 
     namespace["get_byte_per_numel"] = lambda dtype: 0 if dtype is None else 1
+    namespace["_expand_configs_with_hints"] = lambda fn, configs, config_hints: configs
 
     tuner = SimpleNamespace(
         arg_names=["x_ptr", "n_elements"],
+        fn=SimpleNamespace(),
         _get_constexpr_candidates=lambda: [],
         cache={},
         auto_gen_config=True,
         parser_mode="vector",
+        config_hints={},
         gen_configs=[],
         user_configs=[],
         is_simt_mode=False,
@@ -1245,23 +1251,25 @@ def test_expand_hints_invalid_key():
 
 
 def test_expand_hints_invalid_value_container():
+    @triton.autotune(
+        configs=[triton.Config({"BLOCK_SIZE": 128})],
+        key=["n_elements"],
+        hints={
+            "GROUP_M": 4,
+        }
+    )
+    @triton.jit
+    def kernel_invalid_hint_value(
+            x_ptr,
+            output_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+            GROUP_M: tl.constexpr,
+    ):
+        pass
+
     with pytest.raises(ValueError, match="must be a non-empty list/tuple"):
-        @triton.autotune(
-            configs=[triton.Config({"BLOCK_SIZE": 128})],
-            key=["n_elements"],
-            hints={
-                "GROUP_M": 4,
-            }
-        )
-        @triton.jit
-        def kernel_invalid_hint_value(
-                x_ptr,
-                output_ptr,
-                n_elements,
-                BLOCK_SIZE: tl.constexpr,
-                GROUP_M: tl.constexpr,
-        ):
-            pass
+        _materialize_expanded_configs(kernel_invalid_hint_value)
 
 
 def test_expand_hints_invalid_multibuffer_values():
@@ -1284,22 +1292,24 @@ def test_expand_hints_invalid_multibuffer_values():
 
 
 def test_expand_hints_invalid_compile_option_value():
+    @triton.autotune(
+        configs=[triton.Config({"BLOCK_SIZE": 128})],
+        key=["n_elements"],
+        hints={
+            "num_stages": [3],
+        }
+    )
+    @triton.jit
+    def kernel_invalid_compile_hint(
+            x_ptr,
+            output_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+    ):
+        pass
+
     with pytest.raises(ValueError, match="Invalid value for 'num_stages'"):
-        @triton.autotune(
-            configs=[triton.Config({"BLOCK_SIZE": 128})],
-            key=["n_elements"],
-            hints={
-                "num_stages": [3],
-            }
-        )
-        @triton.jit
-        def kernel_invalid_compile_hint(
-                x_ptr,
-                output_ptr,
-                n_elements,
-                BLOCK_SIZE: tl.constexpr,
-        ):
-            pass
+        _materialize_expanded_configs(kernel_invalid_compile_hint)
 
 
 def test_expand_hints_defer_when_only_auto_generated_configs_exist():
@@ -1319,7 +1329,8 @@ def test_expand_hints_defer_when_only_auto_generated_configs_exist():
     ):
         pass
 
-    assert kernel_require_configs.configs == []
+    assert len(kernel_require_configs.configs) == 1
+    assert all("GROUP_M" not in cfg.kwargs for cfg in kernel_require_configs.configs)
     assert kernel_require_configs.config_hints == {
         "GROUP_M": [2, 4],
     }

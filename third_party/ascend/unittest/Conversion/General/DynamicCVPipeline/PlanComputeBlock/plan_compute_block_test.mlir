@@ -22,14 +22,14 @@
 // CHECK: [[CYCLE_A:%[0-9]+]] = arith.truncf %arg3 {ssbuffer.block_id = [[TC01_VEC]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32> to tensor<4x4xf16>
 // CHECK: [[CYCLE_C:%[0-9]+]] = linalg.matmul {ssbuffer.block_id = [[TC01_CYCLE:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} ins({{.*}}, [[CYCLE_A]] : tensor<4x4xf16>, tensor<4x4xf16>)
 // CHECK: [[DEP_ALLOC0:%[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = [[TC01_DEP_LOAD0:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf16>
-// CHECK-NEXT: [[DEP_T0:%[0-9]+]] = bufferization.to_tensor [[DEP_ALLOC0]] restrict writable {ssbuffer.block_id = [[TC01_DEP_LOAD0]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf16> to tensor<4x4xf16>
+// CHECK-NEXT: [[DEP_T0:%[0-9]+]] = bufferization.to_tensor [[DEP_ALLOC0]] restrict writable {ssbuffer.block_id = [[TC01_DEP_LOAD0]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf16>
 // CHECK: [[DEP_FILL0:%[0-9]+]] = linalg.fill {ssbuffer.block_id = [[TC01_DEP0:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} ins({{.*}} : f32) outs({{.*}} : tensor<4x4xf32>) -> tensor<4x4xf32>
 // CHECK-NEXT: [[DEP_MM0:%[0-9]+]] = linalg.matmul {ssbuffer.block_id = [[TC01_DEP0]] : i32, ssbuffer.core_type = "CUBE"} ins({{.*}}, [[DEP_T0]] : tensor<4x4xf16>, tensor<4x4xf16>) outs([[DEP_FILL0]] : tensor<4x4xf32>)
 // CHECK: linalg.matmul {ssbuffer.block_id = [[TC01_VF0:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} ins({{.*}}, %arg5 : tensor<4x4xf16>, tensor<4x4xf16>) outs({{.*}} : tensor<4x4xf32>)
 // CHECK: arith.addf {{.*}}, %arg7 {ssbuffer.block_id = [[TC01_VF_VEC:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
 // CHECK: [[DEP_ADD1:%[0-9]+]] = arith.addf [[DEP_MM0]], {{.*}} {ssbuffer.block_id = [[TC01_VF_VEC]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
 // CHECK-NEXT: [[DEP_CAST1:%[0-9]+]] = arith.truncf [[DEP_ADD1]] {ssbuffer.block_id = [[TC01_VF_VEC]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32> to tensor<4x4xf16>
-// CHECK: [[DEP_T1:%[0-9]+]] = bufferization.to_tensor {{.*}} {ssbuffer.block_id = [[TC01_DEP1:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf16> to tensor<4x4xf16>
+// CHECK: [[DEP_T1:%[0-9]+]] = bufferization.to_tensor {{.*}} {ssbuffer.block_id = [[TC01_DEP1:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf16>
 // CHECK: [[DEP_FILL1:%[0-9]+]] = linalg.fill {ssbuffer.block_id = [[TC01_DEP1]] : i32, ssbuffer.core_type = "CUBE"} ins({{.*}} : f32) outs({{.*}} : tensor<4x4xf32>) -> tensor<4x4xf32>
 // CHECK-NEXT: [[DEP_MM1_CUBE:%[0-9]+]] = linalg.matmul {ssbuffer.block_id = [[TC01_DEP1]] : i32, ssbuffer.core_type = "CUBE"} ins([[DEP_CAST1]], [[DEP_T1]] : tensor<4x4xf16>, tensor<4x4xf16>) outs([[DEP_FILL1]] : tensor<4x4xf32>)
 // CHECK-NEXT: [[DEP_MM1:%[0-9]+]] = arith.addf [[DEP_MM1_CUBE]], {{.*}} {ssbuffer.block_id = [[TC01_DEP_VEC:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
@@ -41,7 +41,7 @@
 // CHECK-NEXT: [[TR_MM:%[0-9]+]] = linalg.matmul {ssbuffer.block_id = [[TC01_TR]] : i32, ssbuffer.core_type = "CUBE"} ins({{.*}}, [[TR]] : tensor<4x4xf16>, tensor<4x4xf16>) outs([[TR_FILL]] : tensor<4x4xf32>)
 // CHECK: [[MEM_ALLOC:%[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = [[TC01_MEM:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf32>
 // CHECK-NEXT: linalg.fill {ssbuffer.block_id = [[TC01_MEM]] : i32, ssbuffer.core_type = "CUBE"} ins({{.*}} : f32) outs([[MEM_ALLOC]] : memref<4x4xf32>)
-// CHECK-NEXT: [[MEM_T:%[0-9]+]] = bufferization.to_tensor [[MEM_ALLOC]] restrict writable {ssbuffer.block_id = [[TC01_MEM]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf32> to tensor<4x4xf32>
+// CHECK-NEXT: [[MEM_T:%[0-9]+]] = bufferization.to_tensor [[MEM_ALLOC]] restrict writable {ssbuffer.block_id = [[TC01_MEM]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf32>
 // CHECK: [[MEM_FILL:%[0-9]+]] = linalg.fill {ssbuffer.block_id = [[TC01_MEM]] : i32, ssbuffer.core_type = "CUBE"} ins({{.*}} : f32) outs({{.*}} : tensor<4x4xf32>) -> tensor<4x4xf32>
 // CHECK-NEXT: [[MEM_MM:%[0-9]+]] = linalg.matmul {ssbuffer.block_id = [[TC01_MEM]] : i32, ssbuffer.core_type = "CUBE"} ins([[MEM_T]], {{.*}} : tensor<4x4xf32>, tensor<4x4xf32>) outs([[MEM_FILL]] : tensor<4x4xf32>)
 // CHECK: return {{.*}}
@@ -65,8 +65,8 @@ func.func @tc01_single_block_comprehensive(
   %alloc_b = memref.alloc() : memref<4x4xf16>
   memref.copy %ma, %alloc_a : memref<4x4xf16> to memref<4x4xf16>
   memref.copy %mb, %alloc_b : memref<4x4xf16> to memref<4x4xf16>
-  %load_a = bufferization.to_tensor %alloc_a restrict writable : memref<4x4xf16> to tensor<4x4xf16>
-  %load_b = bufferization.to_tensor %alloc_b restrict writable : memref<4x4xf16> to tensor<4x4xf16>
+  %load_a = bufferization.to_tensor %alloc_a restrict writable : memref<4x4xf16>
+  %load_b = bufferization.to_tensor %alloc_b restrict writable : memref<4x4xf16>
   %tr_init = tensor.empty() : tensor<4x4xf16>
   %load_bt = linalg.transpose ins(%load_b : tensor<4x4xf16>) outs(%tr_init : tensor<4x4xf16>) permutation = [1, 0]
   %mm0_empty = tensor.empty() : tensor<4x4xf32>
@@ -84,7 +84,7 @@ func.func @tc01_single_block_comprehensive(
   %vec_from_cube2 = arith.addf %vec_from_cube1, %store1 : tensor<4x4xf32>
 
   // Same producer has both CUBE and VECTOR consumers.
-  %shared_tensor = bufferization.to_tensor %shared_src restrict writable : memref<4x4xf32> to tensor<4x4xf32>
+  %shared_tensor = bufferization.to_tensor %shared_src restrict writable : memref<4x4xf32>
   %shared_fill = linalg.fill ins(%two : f32) outs(%dst1 : tensor<4x4xf32>) -> tensor<4x4xf32>
   %shared_mm = linalg.matmul ins(%shared_tensor, %fb : tensor<4x4xf32>, tensor<4x4xf32>) outs(%shared_fill : tensor<4x4xf32>) -> tensor<4x4xf32>
   %shared_vec = arith.addf %shared_tensor, %fa : tensor<4x4xf32>
@@ -103,7 +103,7 @@ func.func @tc01_single_block_comprehensive(
   // No-result fill with memref outs must be classified with the downstream CUBE use.
   %scratch = memref.alloc() : memref<4x4xf32>
   linalg.fill ins(%zero : f32) outs(%scratch : memref<4x4xf32>)
-  %scratch_tensor = bufferization.to_tensor %scratch restrict writable : memref<4x4xf32> to tensor<4x4xf32>
+  %scratch_tensor = bufferization.to_tensor %scratch restrict writable : memref<4x4xf32>
   %scratch_mm = linalg.matmul ins(%scratch_tensor, %fa : tensor<4x4xf32>, tensor<4x4xf32>) outs(%dst1 : tensor<4x4xf32>) -> tensor<4x4xf32>
 
   // VF findCandidates/updateCandidates: VECTOR chains are blocked by
@@ -132,8 +132,8 @@ func.func @tc01_single_block_comprehensive(
   // anchors, a cube result feeding another cube dot, and vector side users.
   %dep_alloc0 = memref.alloc() : memref<4x4xf16>
   %dep_alloc1 = memref.alloc() : memref<4x4xf16>
-  %dep_t0 = bufferization.to_tensor %dep_alloc0 restrict writable : memref<4x4xf16> to tensor<4x4xf16>
-  %dep_t1 = bufferization.to_tensor %dep_alloc1 restrict writable : memref<4x4xf16> to tensor<4x4xf16>
+  %dep_t0 = bufferization.to_tensor %dep_alloc0 restrict writable : memref<4x4xf16>
+  %dep_t1 = bufferization.to_tensor %dep_alloc1 restrict writable : memref<4x4xf16>
   %dep_pre0 = arith.subf %fa, %fb : tensor<4x4xf32>
   %dep_pre1 = arith.mulf %dep_pre0, %fa : tensor<4x4xf32>
   %dep_cast0 = arith.truncf %dep_pre1 : tensor<4x4xf32> to tensor<4x4xf16>
@@ -175,8 +175,8 @@ func.func @tc01_single_block_comprehensive(
 // CHECK-NEXT: [[ALLOC_B:%[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = [[TC02_OUTER]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf16>
 // CHECK-NEXT: memref.copy %arg0, [[ALLOC_A]] {ssbuffer.block_id = [[TC02_OUTER]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf16> to memref<4x4xf16>
 // CHECK-NEXT: memref.copy %arg1, [[ALLOC_B]] {ssbuffer.block_id = [[TC02_OUTER]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf16> to memref<4x4xf16>
-// CHECK-NEXT: [[LOAD_A:%[0-9]+]] = bufferization.to_tensor [[ALLOC_A]] restrict writable {ssbuffer.block_id = [[TC02_OUTER]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf16> to tensor<4x4xf16>
-// CHECK-NEXT: [[LOAD_B:%[0-9]+]] = bufferization.to_tensor [[ALLOC_B]] restrict writable {ssbuffer.block_id = [[TC02_OUTER]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf16> to tensor<4x4xf16>
+// CHECK-NEXT: [[LOAD_A:%[0-9]+]] = bufferization.to_tensor [[ALLOC_A]] restrict writable {ssbuffer.block_id = [[TC02_OUTER]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf16>
+// CHECK-NEXT: [[LOAD_B:%[0-9]+]] = bufferization.to_tensor [[ALLOC_B]] restrict writable {ssbuffer.block_id = [[TC02_OUTER]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf16>
 // CHECK-NEXT: [[OUTER_EMPTY:%[0-9]+]] = tensor.empty() {ssbuffer.block_id = [[TC02_OUTER]] : i32, ssbuffer.core_type = "CUBE"} : tensor<4x4xf32>
 // CHECK-NEXT: [[ZERO:%[A-Za-z0-9_]+]] = arith.constant {ssbuffer.block_id = [[TC02_OUTER]] : i32, ssbuffer.core_type = "CUBE"} 0.000000e+00 : f32
 // CHECK-NEXT: [[OUTER_FILL:%[0-9]+]] = linalg.fill {ssbuffer.block_id = [[TC02_OUTER]] : i32, ssbuffer.core_type = "CUBE"} ins([[ZERO]] : f32) outs([[OUTER_EMPTY]] : tensor<4x4xf32>) -> tensor<4x4xf32>
@@ -235,8 +235,8 @@ func.func @tc02_nested_control_flow(
   %alloc_b = memref.alloc() : memref<4x4xf16>
   memref.copy %ma, %alloc_a : memref<4x4xf16> to memref<4x4xf16>
   memref.copy %mb, %alloc_b : memref<4x4xf16> to memref<4x4xf16>
-  %load_a = bufferization.to_tensor %alloc_a restrict writable : memref<4x4xf16> to tensor<4x4xf16>
-  %load_b = bufferization.to_tensor %alloc_b restrict writable : memref<4x4xf16> to tensor<4x4xf16>
+  %load_a = bufferization.to_tensor %alloc_a restrict writable : memref<4x4xf16>
+  %load_b = bufferization.to_tensor %alloc_b restrict writable : memref<4x4xf16>
   %empty = tensor.empty() : tensor<4x4xf32>
   %fill = linalg.fill ins(%zero : f32) outs(%empty : tensor<4x4xf32>) -> tensor<4x4xf32>
   %outer_mm = linalg.matmul ins(%load_a, %load_b : tensor<4x4xf16>, tensor<4x4xf16>) outs(%fill : tensor<4x4xf32>) -> tensor<4x4xf32>
@@ -340,7 +340,7 @@ func.func @tc03d_all_cube_matmul_only(
 // CHECK-NEXT: [[ZERO:%[A-Za-z0-9_]+]] = arith.constant {ssbuffer.block_id = [[TC03E_VEC:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} 0.000000e+00 : f32
 // CHECK-NEXT: [[ALLOC:%[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = [[TC03E_CUBE:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf32>
 // CHECK-NEXT: linalg.fill {ssbuffer.block_id = [[TC03E_CUBE]] : i32, ssbuffer.core_type = "CUBE"} ins([[ZERO]] : f32) outs([[ALLOC]] : memref<4x4xf32>)
-// CHECK-NEXT: [[T:%[0-9]+]] = bufferization.to_tensor [[ALLOC]] restrict writable {ssbuffer.block_id = [[TC03E_CUBE]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf32> to tensor<4x4xf32>
+// CHECK-NEXT: [[T:%[0-9]+]] = bufferization.to_tensor [[ALLOC]] restrict writable {ssbuffer.block_id = [[TC03E_CUBE]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf32>
 // CHECK-NEXT: [[EMPTY:%[0-9]+]] = tensor.empty() {ssbuffer.block_id = [[TC03E_CUBE]] : i32, ssbuffer.core_type = "CUBE"} : tensor<4x4xf32>
 // CHECK-NEXT: [[ACC_ZERO:%[A-Za-z0-9_]+]] = arith.constant {ssbuffer.block_id = [[TC03E_CUBE]] : i32, ssbuffer.core_type = "CUBE"} 0.000000e+00 : f32
 // CHECK-NEXT: [[FILL:%[0-9]+]] = linalg.fill {ssbuffer.block_id = [[TC03E_CUBE]] : i32, ssbuffer.core_type = "CUBE"} ins([[ACC_ZERO]] : f32) outs([[EMPTY]] : tensor<4x4xf32>) -> tensor<4x4xf32>
@@ -353,7 +353,7 @@ func.func @tc03e_memref_fill_no_result(
   %zero = arith.constant 0.0 : f32
   %scratch = memref.alloc() : memref<4x4xf32>
   linalg.fill ins(%zero : f32) outs(%scratch : memref<4x4xf32>)
-  %t = bufferization.to_tensor %scratch restrict writable : memref<4x4xf32> to tensor<4x4xf32>
+  %t = bufferization.to_tensor %scratch restrict writable : memref<4x4xf32>
   %r = linalg.matmul ins(%t, %a : tensor<4x4xf32>, tensor<4x4xf32>) outs(%dst : tensor<4x4xf32>) -> tensor<4x4xf32>
   return %r : tensor<4x4xf32>
 }

@@ -44,7 +44,6 @@ void PlanComputeBlockPass::runOnOperation()
 {
     ModuleOp module = getOperation();
     OpPassManager pm(module.getOperationName());
-    CVPipeline::ComputeBlockIdManager::getInstance().reset();
     LOG_DEBUG("Enter pass.\n");
 
     // Step 1: Run OpClassifierPass to classify operations

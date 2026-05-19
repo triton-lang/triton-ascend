@@ -28,7 +28,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/Error.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -158,7 +157,7 @@ BlockOpGraph::BlockOpGraph(ArrayRef<Operation *> allOps, Block *block, const Mem
     }
 }
 
-static llvm::FailureOr<DenseMap<Operation *, int>> collectBlockIds(ArrayRef<Operation *> allOps)
+static llvm::FailureOr<DenseMap<Operation *, int>> collectBlockIds(ArrayRef<Operation *> allOps, ComputeBlockIdManager &bm)
 {
     DenseMap<Operation *, int> opBlockId;
     for (Operation *op : allOps) {
@@ -167,7 +166,7 @@ static llvm::FailureOr<DenseMap<Operation *, int>> collectBlockIds(ArrayRef<Oper
         }
         auto blockIdAttrRes = getOpBlockId(op);
         int64_t blockId =
-            blockIdAttrRes.has_value() ? blockIdAttrRes.value() : ComputeBlockIdManager::getInstance().getNextId();
+            blockIdAttrRes.has_value() ? blockIdAttrRes.value() : bm.getNextId();
         opBlockId[op] = blockId;
     }
     return opBlockId;
@@ -330,12 +329,12 @@ static void applyReorder(Block &block, ArrayRef<Operation *> reordered)
     }
 }
 
-static llvm::LogicalResult reorderOpsInBlock(Block &block, const MemoryDependenceGraph &memGraph)
+static llvm::LogicalResult reorderOpsInBlock(Block &block, const MemoryDependenceGraph &memGraph, ComputeBlockIdManager &bm)
 {
     const auto allOps = llvm::to_vector(llvm::make_pointer_range(block.without_terminator()));
 
     const BlockOpGraph graph {allOps, &block, memGraph};
-    llvm::FailureOr<DenseMap<Operation *, int>> opBlockIdOpt = collectBlockIds(allOps);
+    llvm::FailureOr<DenseMap<Operation *, int>> opBlockIdOpt = collectBlockIds(allOps, bm);
     if (failed(opBlockIdOpt)) {
         return failure();
     }
@@ -364,6 +363,7 @@ void ReorderOpsByBlockIdPass::runOnOperation()
     auto moduleOp = getOperation();
     auto &aa = getAnalysis<AliasAnalysis>();
     auto memGraph = MemoryDependenceGraph(moduleOp, aa);
+    auto bm = ComputeBlockIdManager(moduleOp);
     moduleOp.walk([&](Block *block) {
         auto *parentOp = block->getParentOp();
         if (!parentOp ||
@@ -371,7 +371,7 @@ void ReorderOpsByBlockIdPass::runOnOperation()
             !(isa<func::FuncOp>(parentOp) || isa<scf::SCFDialect>(parentOp->getDialect()))) {
             return WalkResult::skip();
         }
-        if (llvm::failed(reorderOpsInBlock(*block, memGraph))) {
+        if (llvm::failed(reorderOpsInBlock(*block, memGraph, bm))) {
             signalPassFailure();
         }
         return WalkResult::advance();

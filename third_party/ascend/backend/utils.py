@@ -565,7 +565,7 @@ def triton_support_ffts():
 
 def triton_enable_libdevice_simt():
     enable_libdevice_simt = os.getenv("TRITON_ENABLE_LIBDEVICE_SIMT", False)
-    return enable_libdevice_simt
+    return enable_libdevice_simt and is_compile_on_910_95
 
 
 def get_cann_version_file_hash():

@@ -497,6 +497,18 @@ void init_ascend_ir(py::module &&m) {
     context.appendDialectRegistry(registry);
     context.loadAllAvailableDialects();
   });
+  m.def("get_int_attr",
+        [](OpState &op, std::string &name) -> py::object {
+          auto ret = op->getAttrOfType<IntegerAttr>(name);
+          if (!ret) {
+            return py::none();
+          }
+          return py::cast(ret.getInt());
+        });
+  m.def("remove_attr",
+        [](OpState &op, std::string &name) -> void {
+          op->removeAttr(name);
+        });
 
   py::class_<AscendNPUIROpBuilder, TritonOpBuilder>(
       m, "ascendnpu_ir_builder", py::module_local(), py::dynamic_attr())

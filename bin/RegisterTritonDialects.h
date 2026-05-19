@@ -1,6 +1,11 @@
 #pragma once
 #include "ascend/include/TritonToLinalg/Passes.h"
+#include "ascend/include/TritonControlFlowOpt/Passes.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferOuterScope.h"
+#include "ascend/include/DynamicCVPipeline/Passes.h"
+#include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
 #include "ascend/include/TritonToStructured/Passes.h"
 #include "ascend/include/TritonToAnnotation/Passes.h"
 #include "ascend/include/TritonToUnstructure/Passes.h"
@@ -66,6 +71,7 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
   // mlir::triton::registerConvertNVGPUToLLVMPass();
   // mlir::triton::registerDecomposeUnsupportedNVIDIAConversions();
   mlir::triton::registerTritonToLinalgPasses();
+  mlir::triton::registerTritonControlFlowOptPasses();
   mlir::triton::registerDiscreteMaskAccessConversion();
   mlir::triton::registerTritonToStructuredPasses();
   mlir::triton::registerTritonToAnnotationPasses();
@@ -89,6 +95,12 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
   // mlir::registerTritonAMDGPUStreamPipelineV2();
   // mlir::registerTritonAMDGPUCanonicalizePointers();
   // mlir::registerTritonAMDGPUConvertToBufferOps();
+
+  // DynamicCVPipeline passes
+  mlir::triton::registerAddDynamicCVPipelinePasses();
+  mlir::triton::registerAddControlFlowConditionPasses();
+  mlir::triton::registerAddMultiBufferOuterScopePasses();
+  mlir::triton::registerRemoveSsbufAttrPasses();
 
   // TODO: register Triton & TritonGPU passes
   registry.insert<mlir::triton::TritonDialect, mlir::cf::ControlFlowDialect,

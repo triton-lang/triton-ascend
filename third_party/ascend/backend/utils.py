@@ -34,6 +34,19 @@ from triton.backends.ascend.backend_register import backend_strategy_registry
 
 import pybind11
 
+AUTO_BLOCKIFY_BLACKLIST_RULES = (
+    (re.compile(r"\btt\.atomic_(?:rmw|cas)\b"), "atomic operations"),
+    (re.compile(r"\btt\.elementwise_inline_asm\b"), "inline elementwise assembly"),
+    (
+        re.compile(r"\btt\.load\b[^\n]*\bisVolatile\s*=\s*true\b"),
+        "loads with volatile",
+    ),
+    (
+        re.compile(r"\btt\.(?:load|store)\b[^\n]*\bcacheModifier\s*="),
+        "loads or stores with cache modifiers",
+    ),
+)
+
 backend_policy = None
 
 
@@ -261,6 +274,21 @@ def _is_debug_line_info_disabled() -> bool:
 
 def _is_auto_map_parallel_blocks_enabled() -> bool:
     return os.getenv("TRITON_ALL_BLOCKS_PARALLEL", "false").lower() in ("true", "1")
+
+
+def _get_auto_blockify_blacklist_reasons(ir_text: str):
+    return [description for pattern, description in AUTO_BLOCKIFY_BLACKLIST_RULES if pattern.search(ir_text)]
+
+
+def _warn_auto_blockify_disabled(kernel_name: str, blacklist_reasons) -> None:
+    if not blacklist_reasons:
+        return
+    reasons = ", ".join(blacklist_reasons)
+    print(
+        f"[WARNING] AutoBlockify disabled for kernel '{kernel_name}'. "
+        f"Unsafe ops: {reasons}. Enabling may cause correctness issues. "
+        "To force enable: set has_auto_blockify_blacklist_op=False."
+    )
 
 
 def _enable_unpublished_feature() -> bool:

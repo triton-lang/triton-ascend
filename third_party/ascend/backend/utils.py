@@ -45,6 +45,10 @@ AUTO_BLOCKIFY_BLACKLIST_RULES = (
         re.compile(r"\btt\.(?:load|store)\b[^\n]*\bcacheModifier\s*="),
         "loads or stores with cache modifiers",
     ),
+    (
+        re.compile(r"^\s*tt\.return\b.*?^\s*tt\.return\b", re.MULTILINE | re.DOTALL),
+        "multiple tt.return operations",
+    ),
 )
 
 backend_policy = None

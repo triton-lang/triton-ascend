@@ -139,7 +139,9 @@ void mlir::triton::PreserveControlAttrsCanonicalizePass::runOnOperation()
     RewritePatternSet patterns(&getContext());
     populateCanonicalizationPatterns(&getContext(), patterns);
 
+    PreserveControlAttrsListener listener;
     GreedyRewriteConfig config;
+    config.listener = &listener;
 
     if (failed(applyPatternsAndFoldGreedily(getOperation(),
                                             FrozenRewritePatternSet(std::move(patterns)),

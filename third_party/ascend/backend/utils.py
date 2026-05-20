@@ -273,7 +273,8 @@ def _is_debug_line_info_disabled() -> bool:
 
 
 def _is_auto_map_parallel_blocks_enabled() -> bool:
-    return os.getenv("TRITON_ALL_BLOCKS_PARALLEL", "false").lower() in ("true", "1")
+    default_parallel = "true" if is_compile_on_910_95 else "false"
+    return os.getenv("TRITON_ALL_BLOCKS_PARALLEL", default_parallel).lower() in ("true", "1")
 
 
 def _get_auto_blockify_blacklist_reasons(ir_text: str):

@@ -49,6 +49,17 @@ def check_npu_smi_device():
         return False
 
 
+def is_a5(arch: str) -> bool:
+    """True if ``arch`` (an rtGetSocVersion SOC string) is an A5 / 950-class NPU.
+
+    A5 is the only Ascend generation with SIMT support, 248 KiB usable UB, and
+    no FFTS. Production silicon reports ``Ascend910_95xx``; pre-release silicon
+    reports ``Ascend950PR_*`` / ``Ascend950DT_*``. Note that A3 (``Ascend910_93xx``)
+    shares the ``Ascend910_9`` prefix and must NOT match, hence ``Ascend910_95``.
+    """
+    return arch.startswith("Ascend910_95") or arch.startswith("Ascend950")
+
+
 ascend_devices = get_ascend_devices()
 pci_condition = any("0xd806" in dev for dev in ascend_devices)
 npu_smi_condition = check_npu_smi_device()

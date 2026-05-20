@@ -28,11 +28,11 @@ import sysconfig
 from typing import Optional
 import functools
 import hashlib
-import configparser
 from triton.runtime import _allocation
 from triton.runtime.cache import get_cache_manager, get_dump_manager
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
+from triton.tools.get_ascend_devices import is_a5
 from triton.backends.ascend.utils import (
     _precompile_npu_hash,
     _precompile_npu_ext,
@@ -41,7 +41,6 @@ from triton.backends.ascend.utils import (
     convert_sigtype_to_int,
     _is_auto_map_parallel_blocks_enabled,
     get_ascend_arch_from_env,
-    _get_ascend_path,
     is_ffts_supported,
     force_disable_ffts,
     get_backend_func
@@ -88,25 +87,18 @@ class NPUUtils(object):
                 "Cannot query device properties: rtGetSocVersion returned empty. "
                 "NPU not available?"
             )
-
-        ascend_path = _get_ascend_path()
-        platform_config = ascend_path / "compiler" / "data" / "platform_config" / f"{arch}.ini"
-        if not platform_config.is_file():
-            raise RuntimeError(f"Cannot find {platform_config}")
-
-        config = configparser.ConfigParser()
-        config.read(platform_config)
-        # Read from [VectorCoreSpec] because that's what BiShengIR's NPUTargetSpec.td
-        # UbSize matches with; the [AICoreSpec] section can differ on some chips (e.g. 310B).
-        ub_size = config.get("VectorCoreSpec", "ub_size", fallback=None)
-        if ub_size is None:
-            raise RuntimeError("Cannot find [VectorCoreSpec] ub_size")
-
-        ub_size = int(ub_size)
-
         num_aic = self.get_aicore_num()
         num_aiv = num_aic * 2
-        return {"max_shared_mem": ub_size, "num_aicore": num_aic, "num_vectorcore": num_aiv}
+        # max_shared_mem is the on-chip UB (Unified Buffer) budget. A5 (950)
+        # exposes 248 KiB usable (256 KiB physical, 8 KiB reserved); A2/A3
+        # expose 192 KiB. This is a resource-limit budget — proton sizes its
+        # scratch against it — so report the usable figure, not the physical.
+        ub_size_in_kbytes = 248 if is_a5(arch) else 192
+        return {
+            "max_shared_mem": ub_size_in_kbytes * 1024,
+            "num_aicore": num_aic,
+            "num_vectorcore": num_aiv,
+        }
 
     @functools.lru_cache()
     def get_arch(self):

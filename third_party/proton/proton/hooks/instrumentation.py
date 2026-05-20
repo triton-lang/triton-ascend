@@ -169,6 +169,18 @@ class InstrumentationHook(Hook):
 
         backend_name = _get_backend_name()
         if backend_name == "ascend":
+            # Proton on Ascend currently only supports SIMT-capable chips
+            # (A5 / 950). On A2/A3 hardware the SIMT compile path
+            # bishengir-compile relies on is unavailable, so the proton
+            # lowering would fail downstream with cryptic unknown-flag
+            # errors. Fail upfront with a clear message instead.
+            from triton.tools.get_ascend_devices import is_a5
+            arch = triton.runtime.driver.active.utils.get_arch()
+            if not is_a5(arch):
+                raise RuntimeError(
+                    f"proton instrumentation on Ascend requires SIMT-capable "
+                    f"hardware (A5 / 950); current chip is {arch!r}."
+                )
             self.allocator = AscendAllocator(self)
         else:
             self.allocator = CudaAllocator(self)

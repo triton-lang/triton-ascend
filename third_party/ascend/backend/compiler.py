@@ -99,6 +99,23 @@ def make_ttir(mod, metadata, opt):
 
 
 def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
+    # Proton on Ascend is supported only in pure-SIMT compile mode. The
+    # non-SIMT pipeline doesn't know how to lower `proton.record` ops, so
+    # detect them early and tell the user how to fix it instead of letting
+    # the failure surface as an opaque MLIR lowering error downstream.
+    # (add_stages only routes here when !force_simt_only, so reaching this
+    # function with proton ops means the kernel was compiled in non-SIMT.)
+    def _reject_proton(op):
+        if op.get_name() == "proton.record":
+            raise RuntimeError(
+                "Kernel uses proton instrumentation ops but is being compiled "
+                "in non-SIMT mode. Proton on Ascend is supported only with "
+                "compile_mode='simt_only'. Pin it via "
+                "@triton.autotune(configs=[Config({'compile_mode': 'simt_only'})]) "
+                "or pass compile_mode='simt_only' at the kernel call site."
+            )
+    mod.walk(_reject_proton)
+
     # use triton_adapter to lower Triton-MLIR to linalg
     # Get Triton-MLIR as string
     ttir_code = str(mod)

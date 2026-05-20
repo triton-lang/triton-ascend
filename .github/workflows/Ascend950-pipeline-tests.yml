@@ -53,6 +53,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Debug workspace
+        run: |
+          echo "PWD=$(pwd)"
+          echo "GITHUB_WORKSPACE=${GITHUB_WORKSPACE}"
+          echo "--- ls $GITHUB_WORKSPACE ---"
+          ls -la "${GITHUB_WORKSPACE}" || true
+          echo "--- ls .github/actions ---"
+          ls -la "${GITHUB_WORKSPACE}/.github/actions" || true
+          echo "--- ls setup-obsutil ---"
+          ls -la "${GITHUB_WORKSPACE}/.github/actions/setup-obsutil" || true
+
       - name: Resolve PR number
         id: pr
         env:

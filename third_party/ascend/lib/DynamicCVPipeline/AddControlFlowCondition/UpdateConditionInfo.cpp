@@ -83,8 +83,8 @@ SmallVector<SmallVector<Value>> UpdateConditionInfoPass::allocSSBuffer(ModuleOp 
         auto ptr0 = builder.create<mlir::LLVM::IntToPtrOp>(scopeOp->getLoc(), ptrType, addr0Const.getResult());
         auto ptr1 = builder.create<mlir::LLVM::IntToPtrOp>(scopeOp->getLoc(), ptrType, addr1Const.getResult());
 
-        builder.create<LLVM::StoreOp>(scopeOp->getLoc(), zeroConst, ptr0);
-        builder.create<LLVM::StoreOp>(scopeOp->getLoc(), zeroConst, ptr1);
+        builder.create<LLVM::StoreOp>(scopeOp->getLoc(), zeroConst, ptr0, 0, /*volatile=*/true);
+        builder.create<LLVM::StoreOp>(scopeOp->getLoc(), zeroConst, ptr1, 0, /*volatile=*/true);
 
         ssbufferVec0Ptrs.push_back(ptr0.getResult());
         ssbufferVec1Ptrs.push_back(ptr1.getResult());
@@ -544,15 +544,15 @@ Value UpdateConditionInfoPass::addCrossCoreConditions(
     Value cond = nullptr;
     if (isAIC) {
       Value vec0Value = builder.create<LLVM::LoadOp>(loc, builder.getI32Type(),
-          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
       Value vec1Value = builder.create<LLVM::LoadOp>(loc, builder.getI32Type(),
-          getSSBufferPtr(isAIC, inputGroupIdx, 1, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, inputGroupIdx, 1, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
       Value vec0Cond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sgt, vec0Value, zeroConst);
       Value vec1Cond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sgt, vec1Value, zeroConst);
       cond = builder.create<arith::AndIOp>(loc, vec0Cond, vec1Cond);
     } else {
       Value value = builder.create<LLVM::LoadOp>(loc, builder.getI32Type(),
-          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
       cond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sgt, value, zeroConst);
     }
     combineCondition(cond);
@@ -567,15 +567,15 @@ Value UpdateConditionInfoPass::addCrossCoreConditions(
     Value cond = nullptr;
     if (isAIC) {
       Value vec0Value = builder.create<LLVM::LoadOp>(loc, builder.getI32Type(),
-          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
       Value vec1Value = builder.create<LLVM::LoadOp>(loc, builder.getI32Type(),
-          getSSBufferPtr(isAIC, outputGroupIdx, 1, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, outputGroupIdx, 1, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
       Value vec0Cond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt, vec0Value, bufferNum);
       Value vec1Cond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt, vec1Value, bufferNum);
       cond = builder.create<arith::AndIOp>(loc, vec0Cond, vec1Cond);
     } else {
       Value value = builder.create<LLVM::LoadOp>(loc, builder.getI32Type(),
-          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
       cond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt, value, bufferNum);
     }
     combineCondition(cond);
@@ -600,42 +600,42 @@ void UpdateConditionInfoPass::updateCrossCoreControlVars(
   for (int inputGroupIdx : crossCoreInputValues) {
     if (isAIC) {
       Value vec0Value = builder.create<LLVM::LoadOp>(loc, builder.getI32Type(),
-          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
       Value vec1Value = builder.create<LLVM::LoadOp>(loc, builder.getI32Type(),
-          getSSBufferPtr(isAIC, inputGroupIdx, 1, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, inputGroupIdx, 1, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
       Value vec0NewValue = builder.create<arith::SubIOp>(loc, vec0Value, oneConst);
       Value vec1NewValue = builder.create<arith::SubIOp>(loc, vec1Value, oneConst);
       builder.create<LLVM::StoreOp>(loc, vec0NewValue,
-          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
       builder.create<LLVM::StoreOp>(loc, vec1NewValue,
-          getSSBufferPtr(isAIC, inputGroupIdx, 1, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, inputGroupIdx, 1, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
     } else {
       Value value = builder.create<LLVM::LoadOp>(loc, builder.getI32Type(),
-          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
       Value newValue = builder.create<arith::SubIOp>(loc, value, oneConst);
       builder.create<LLVM::StoreOp>(loc, newValue,
-          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
     }
   }
 
   for (int outputGroupIdx : crossCoreOutputValues) {
     if (isAIC) {
       Value vec0Value = builder.create<LLVM::LoadOp>(loc, builder.getI32Type(),
-          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
       Value vec1Value = builder.create<LLVM::LoadOp>(loc, builder.getI32Type(),
-          getSSBufferPtr(isAIC, outputGroupIdx, 1, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, outputGroupIdx, 1, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
       Value vec0NewValue = builder.create<arith::AddIOp>(loc, vec0Value, oneConst);
       Value vec1NewValue = builder.create<arith::AddIOp>(loc, vec1Value, oneConst);
       builder.create<LLVM::StoreOp>(loc, vec0NewValue,
-          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
       builder.create<LLVM::StoreOp>(loc, vec1NewValue,
-          getSSBufferPtr(isAIC, outputGroupIdx, 1, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, outputGroupIdx, 1, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
     } else {
       Value value = builder.create<LLVM::LoadOp>(loc, builder.getI32Type(),
-          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
       Value newValue = builder.create<arith::AddIOp>(loc, value, oneConst);
       builder.create<LLVM::StoreOp>(loc, newValue,
-          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs));
+          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs, ssbufferPtrs), 0, /*volatile=*/true);
     }
   }
 }

@@ -47,6 +47,8 @@ from triton.backends.ascend.utils import (
     _is_ascend_sanitizer_enabled,
     _is_debug_line_info_disabled,
     _is_auto_map_parallel_blocks_enabled,
+    _get_auto_blockify_blacklist_reasons,
+    _warn_auto_blockify_disabled,
     downgrade_llir,
     force_disable_ffts,
     triton_enable_libdevice_simt,
@@ -69,6 +71,35 @@ from triton.tools.get_ascend_devices import is_compile_on_910_95
 # TODO: materialize the concrete min shape
 def min_dot_size(target: GPUTarget):
     return lambda lhsType, rhsType: (1, 1, 1)
+
+# Get result code saved in module {attr_name = rc}
+def _get_then_remove_rc(mod, attr_name: str) -> int:
+    get_int_attr = getattr(ascend.ir, "get_int_attr", None)
+    remove_attr = getattr(ascend.ir, "remove_attr", None)
+
+    if get_int_attr is None:
+        return -1
+    attr_value = get_int_attr(mod, attr_name)
+
+    if remove_attr:
+        remove_attr(mod, attr_name)
+    
+    if not isinstance(attr_value, int):
+        return -1
+
+    return attr_value
+
+
+def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
+    rc = _get_then_remove_rc(mod, "triton_ascend.dynamic_cv_pipeline.rc")
+    if rc != -1 and rc > 0:
+        # When the option dynamic_cv_pipeline is set to False,
+        # these options should also reverted.
+        metadata["enable_dynamic_cv_pipeline"] = False
+        metadata["enable_mixed_cv"] = kwargs["enable_mixed_cv"]
+        metadata["disable_auto_inject_block_sync"] = kwargs["disable_auto_inject_block_sync"]
+        if opt.debug:
+            print(f"SSBUFFER return code={rc}, will fallback to enable_dynamic_cv_pipeline=False")
 
 
 def make_ttir(mod, metadata, opt):
@@ -98,6 +129,18 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
     # use triton_adapter to lower Triton-MLIR to linalg
     # Get Triton-MLIR as string
     ttir_code = str(mod)
+    auto_map_parallel_blocks_enabled = _is_auto_map_parallel_blocks_enabled()
+    blacklist_reasons = []
+    has_auto_blockify_blacklist_op = metadata.get("has_auto_blockify_blacklist_op")
+    if has_auto_blockify_blacklist_op is None and auto_map_parallel_blocks_enabled:
+        blacklist_reasons = _get_auto_blockify_blacklist_reasons(ttir_code)
+        has_auto_blockify_blacklist_op = bool(blacklist_reasons)
+    elif has_auto_blockify_blacklist_op is None:
+        has_auto_blockify_blacklist_op = False
+    metadata["has_auto_blockify_blacklist_op"] = has_auto_blockify_blacklist_op
+    if has_auto_blockify_blacklist_op and blacklist_reasons:
+        kernel_name = re.search(r"tt\.func\spublic\s+@(\w+)", ttir_code).group(1)
+        _warn_auto_blockify_disabled(kernel_name or "<unknown>", blacklist_reasons)
     with tempfile.TemporaryDirectory() as tmpdir:
         src_path = os.path.join(tmpdir, "kernel.ttir.mlir")
         dst_path = os.path.join(tmpdir, "kernel.ttadapter.mlir")
@@ -112,7 +155,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         enable_mask_fallback_conversion = metadata["enable_mask_fallback_conversion"]
         optimize_dynamic_offset = metadata["optimize_dynamic_offset"]
         auto_blockify_size = metadata["auto_blockify_size"]
-        if not _is_auto_map_parallel_blocks_enabled():
+        enable_mixed_cv = metadata["enable_mixed_cv"]
+        disable_auto_inject_block_sync = metadata["disable_auto_inject_block_sync"]
+        if has_auto_blockify_blacklist_op or not auto_map_parallel_blocks_enabled:
             auto_blockify_size = 1
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
@@ -165,6 +210,12 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             compile_on_910_95
         )
         if metadata["enable_dynamic_cv_pipeline"]:
+            if metadata["set_workspace_multibuffer"] != None:
+                raise ValueError(
+                    "\"enable_dynamic_cv_pipeline\" cannot be used with \"set_workspace_multibuffer\"."
+                )
+            metadata["enable_mixed_cv"] = True
+            metadata["disable_auto_inject_block_sync"] = True
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
 
         _val = metadata.get("intra_cache_num")
@@ -180,6 +231,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             ascend.passes.ttir.set_buffer_count(2, _val)
 
         pm.run(mod)
+        _adjust_metadata_by_module_result(mod, metadata, opt,
+                                          enable_mixed_cv=enable_mixed_cv,
+                                          disable_auto_inject_block_sync=disable_auto_inject_block_sync)
 
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])
@@ -271,6 +325,13 @@ def _parse_ttir_metadata(ttir: str, metadata: dict):
     metadata["mix_mode"] = "aiv"
     metadata["kernel_name"] = re.search(KERNEL_NAME_REGEX, ttir).group(1)
     metadata["name"] = metadata["kernel_name"]
+    auto_map_parallel_blocks_enabled = _is_auto_map_parallel_blocks_enabled()
+    has_auto_blockify_blacklist_op = metadata.get("has_auto_blockify_blacklist_op")
+    if has_auto_blockify_blacklist_op is None and auto_map_parallel_blocks_enabled:
+        has_auto_blockify_blacklist_op = bool(_get_auto_blockify_blacklist_reasons(ttir))
+    elif has_auto_blockify_blacklist_op is None:
+        has_auto_blockify_blacklist_op = False
+    metadata["has_auto_blockify_blacklist_op"] = has_auto_blockify_blacklist_op
     # Parse all tensor kinds from arguments
     metadata["tensor_kinds"] = [int(kind) for _, kind in re.findall(TENSOR_KIND_REGEX, ttir)]
     return metadata
@@ -369,25 +430,25 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += [
                 f"--enable-auto-multi-buffer={multi_buffer_value}",
             ]
-        
+
         storage_align = metadata["storage_align"]
         if storage_align is not None:
             _compile_option_list += [
                 f"--enable-hivm-auto-storage-align={storage_align}",
             ]
-        
+
         ops_reorder = metadata["ops_reorder"]
         if ops_reorder is not None:
             _compile_option_list += [
                 f"--enable-ops-reorder={ops_reorder}",
             ]
- 
+
         vf_fusion_mode = metadata["vf_fusion_mode"]
         if vf_fusion_mode is not None:
             _compile_option_list += [
                 f"--vf-fusion-mode={vf_fusion_mode}",
             ]
- 
+
         code_motion = metadata["code_motion"]
         if code_motion is not None:
             _compile_option_list += [
@@ -451,6 +512,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if auto_multi_buffer is not None:
             _compile_option_list += \
                 [f"--limit-auto-multi-buffer-of-local-buffer={auto_multi_buffer}"]
+        auto_multi_buffer_buffer = metadata["limit_auto_multi_buffer_buffer"]
+        if auto_multi_buffer_buffer is not None:
+            _compile_option_list += \
+                [f"--limit-auto-multi-buffer-buffer={auto_multi_buffer_buffer}"]
 
         enable_mixed_cv = metadata["enable_mixed_cv"]
         if enable_mixed_cv is not None:
@@ -513,7 +578,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 _compile_option_list += \
                     [f"--link-aicore-bitcode={bitcode}"]
 
-        if _is_auto_map_parallel_blocks_enabled():
+        if _is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False):
             _compile_option_list += ["--enable-auto-blockify-loop"]
         npu_compiler_path, env = _get_npucompiler_path()
         if npu_compiler_path.endswith("bishengir-compile"):
@@ -623,19 +688,19 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _compile_option_list += [
                 f"--enable-ubuf-saving={enable_ubuf_saving}",
             ]
-        
+
         storage_align = metadata["storage_align"]
         if storage_align is not None:
             _compile_option_list += [
                 f"--enable-hivm-auto-storage-align={storage_align}",
             ]
-        
+
         ops_reorder = metadata["ops_reorder"]
         if ops_reorder is not None:
             _compile_option_list += [
                 f"--enable-ops-reorder={ops_reorder}",
             ]
- 
+
         code_motion = metadata["code_motion"]
         if code_motion is not None:
             _compile_option_list += [
@@ -750,7 +815,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--disable-size-align-for-cast={disable_size_align_for_cast}"]
 
-        if _is_auto_map_parallel_blocks_enabled():
+        if _is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False):
             _compile_option_list += ["--enable-auto-blockify-loop"]
         npu_compiler_path, env = _get_npucompiler_path()
         if npu_compiler_path.endswith("bishengir-compile"):
@@ -876,6 +941,7 @@ class NPUOptions:
     disable_size_align_for_cast: bool = None
     limit_auto_multi_buffer_only_for_local_buffer: bool = None
     limit_auto_multi_buffer_of_local_buffer: str = None
+    limit_auto_multi_buffer_buffer: str = None
     set_workspace_multibuffer: int = None
     tile_mix_vector_loop: int = None
     tile_mix_cube_loop: int = None
@@ -886,6 +952,7 @@ class NPUOptions:
     add_auto_scheduling: bool = False
     enable_dynamic_cv_pipeline: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = False
+    has_auto_blockify_blacklist_op: Optional[bool] = None
 
     stream: int = None
     parallel_mode: str = "simd"

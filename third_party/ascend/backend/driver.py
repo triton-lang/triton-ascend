@@ -512,7 +512,14 @@ def generate_npu_wrapper_src(constants, signature, metadata):
         "TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
     enable_grid_warn_print = os.getenv(
         "TRITON_GRID_WARN_PRINT", 'false').lower() in ('true', '1')
-    enable_auto_map_parallel_blocks = _is_auto_map_parallel_blocks_enabled()
+    has_auto_blockify_blacklist_op = getattr(
+      metadata,
+      "has_auto_blockify_blacklist_op",
+      False,
+    )
+    enable_auto_map_parallel_blocks = (
+      _is_auto_map_parallel_blocks_enabled() and not has_auto_blockify_blacklist_op
+    )
     npu_utils = NPUUtils()
     num_physical_blocks = npu_utils.get_aivector_core_num(
     ) if mix_mode == "aiv" else npu_utils.get_aicore_num()

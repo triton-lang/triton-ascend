@@ -49,6 +49,17 @@ def _is_tl_transpose_call(node: ast.AST) -> bool:
     )
 
 
+def _merge_tensor_name_candidates(*candidates: Optional[str]) -> Optional[str]:
+    names = []
+    for candidate in candidates:
+        if candidate is None or candidate in names:
+            continue
+        names.append(candidate)
+    if len(names) == 1:
+        return names[0]
+    return None
+
+
 def _extract_tensor_name_from_expr(expr: ast.AST) -> Optional[str]:
     if isinstance(expr, ast.Name):
         return expr.id
@@ -75,6 +86,21 @@ def _extract_tensor_name_from_expr(expr: ast.AST) -> Optional[str]:
         if expr.args:
             return _extract_tensor_name_from_expr(expr.args[0])
         return None
+
+    if isinstance(expr, ast.UnaryOp):
+        return _extract_tensor_name_from_expr(expr.operand)
+
+    if isinstance(expr, ast.BinOp):
+        return _merge_tensor_name_candidates(
+            _extract_tensor_name_from_expr(expr.left),
+            _extract_tensor_name_from_expr(expr.right),
+        )
+
+    if isinstance(expr, ast.IfExp):
+        return _merge_tensor_name_candidates(
+            _extract_tensor_name_from_expr(expr.body),
+            _extract_tensor_name_from_expr(expr.orelse),
+        )
 
     if isinstance(expr, ast.Attribute) and isinstance(expr.value, ast.Name):
         return expr.value.id
@@ -140,11 +166,41 @@ class _DotSiteCollector(ast.NodeVisitor):
     def _resolve_tensor_name_and_role(self, expr: ast.AST):
         transposed = _is_tl_transpose_call(expr)
         base_expr = expr.args[0] if transposed and isinstance(expr, ast.Call) and expr.args else expr
-        tensor_name = self._extract_tensor_name(base_expr)
-        role = self.tensor_roles.get(tensor_name, None)
+        tensor_name, role = self._extract_tensor_name_and_role(base_expr)
         if transposed:
             role = self._swap_role(role)
         return tensor_name, role
+
+    def _extract_tensor_name_and_role(self, expr: ast.AST):
+        if isinstance(expr, ast.BinOp):
+            left_name, left_role = self._extract_tensor_name_and_role(expr.left)
+            right_name, right_role = self._extract_tensor_name_and_role(expr.right)
+            if left_role is not None and right_role is None:
+                return left_name, left_role
+            if right_role is not None and left_role is None:
+                return right_name, right_role
+            if left_role is not None and right_role is not None and left_name == right_name:
+                return left_name, left_role
+            return None, None
+
+        if isinstance(expr, ast.UnaryOp):
+            return self._extract_tensor_name_and_role(expr.operand)
+
+        if isinstance(expr, ast.IfExp):
+            body_name, body_role = self._extract_tensor_name_and_role(expr.body)
+            else_name, else_role = self._extract_tensor_name_and_role(expr.orelse)
+            if body_role is not None and else_role is None:
+                return body_name, body_role
+            if else_role is not None and body_role is None:
+                return else_name, else_role
+            if body_role is not None and else_role is not None and body_name == else_name:
+                return body_name, body_role
+            return None, None
+
+        tensor_name = self._extract_tensor_name(expr)
+        if tensor_name is None:
+            return None, None
+        return tensor_name, self.tensor_roles.get(tensor_name, None)
 
     def _extract_tensor_name(self, expr: ast.AST) -> Optional[str]:
         return _extract_tensor_name_from_expr(expr)

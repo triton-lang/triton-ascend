@@ -681,7 +681,7 @@ int OpClassifierPass::propagateVectorUpstream()
 
             // Skip operations that should not be marked VECTOR:
             // - matmul: never mark matmul as vector (CUBE-only operation)
-            if (isa<linalg::MatmulOp>(def)) {
+            if (isa<linalg::MatmulOp>(def) || isa<scf::SCFDialect>(def->getDialect())) {
                 LLVM_DEBUG(DBGS() << "skip " << def->getName().getStringRef() << ": should not be marked VECTOR\n");
                 continue;
             }

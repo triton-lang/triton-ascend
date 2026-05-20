@@ -344,6 +344,58 @@ module {
 
 // -----
 
+// CHECK-LABEL: func.func @for_same_slot_loop_carry_preserved(
+// CHECK: scope.scope : () -> () {
+// CHECK: scf.for
+// CHECK: scf.if
+// CHECK: scf.while
+// CHECK: memref.store
+// CHECK: scope.return
+// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: scope.scope : () -> () {
+// CHECK: %[[FOR:.*]]:2 = scf.for
+// CHECK: %[[IF:.*]]:2 = scf.if
+// CHECK: %[[WHILE:.*]]:2 = scf.while
+// CHECK: arith.extsi
+// CHECK: scf.yield %[[WHILE]]#0, %[[WHILE]]#1 : i32, i64
+// CHECK: scf.yield %[[IF]]#0, %[[IF]]#1 : i32, i64
+// CHECK: memref.store %[[FOR]]#1
+// CHECK: scope.return
+// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+module {
+  func.func @for_same_slot_loop_carry_preserved(%lb: i32, %ub: i32, %cond: i1, %vec_init: i32, %cube_init: i64, %outv: memref<1xi32>, %outc: memref<1xi64>) {
+    %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
+    %idxc = arith.constant {ssbuffer.core_type = "CUBE"} 0 : index
+    %c1v = arith.constant {ssbuffer.core_type = "VECTOR"} 1 : i32
+    %c2v = arith.constant {ssbuffer.core_type = "VECTOR"} 2 : i32
+    %c1c = arith.constant {ssbuffer.core_type = "CUBE"} 1 : i64
+    %0:2 = scf.for %i = %lb to %ub step %c1v iter_args(%state = %vec_init, %cube = %cube_init) -> (i32, i64) : i32 {
+      %1:2 = scf.if %cond -> (i32, i64) {
+        %2 = arith.addi %state, %c2v {ssbuffer.core_type = "VECTOR"} : i32
+        %3:2 = scf.while (%iter = %state, %acc = %cube) : (i32, i64) -> (i32, i64) {
+          %4 = arith.cmpi slt, %iter, %2 {ssbuffer.core_type = "VECTOR"} : i32
+          scf.condition(%4) %iter, %acc : i32, i64
+        } do {
+        ^bb0(%iter_arg: i32, %acc_arg: i64):
+          %4 = arith.addi %iter_arg, %c1v {ssbuffer.core_type = "VECTOR"} : i32
+          %5 = arith.extsi %iter_arg {ssbuffer.core_type = "CUBE"} : i32 to i64
+          %6 = arith.addi %acc_arg, %5 {ssbuffer.core_type = "CUBE"} : i64
+          scf.yield {ssbuffer.core_type = "VECTOR, CUBE"} %4, %6 : i32, i64
+        } attributes {ssbuffer.core_type = "VECTOR, CUBE"}
+        scf.yield {ssbuffer.core_type = "VECTOR, CUBE"} %3#0, %3#1 : i32, i64
+      } else {
+        scf.yield {ssbuffer.core_type = "VECTOR, CUBE"} %state, %cube : i32, i64
+      } {ssbuffer.core_type = "VECTOR, CUBE"}
+      scf.yield {ssbuffer.core_type = "VECTOR, CUBE"} %1#0, %1#1 : i32, i64
+    } {ssbuffer.core_type = "VECTOR, CUBE"}
+    memref.store %0#0, %outv[%idxv] {ssbuffer.core_type = "VECTOR"} : memref<1xi32>
+    memref.store %0#1, %outc[%idxc] {ssbuffer.core_type = "CUBE"} : memref<1xi64>
+    func.return
+  }
+}
+
+// -----
+
 // CHECK-LABEL: func.func @memref_slot_neutralize_uses_alloc(
 // CHECK: scope.scope : () -> () {
 // CHECK: scf.if

@@ -31,6 +31,7 @@
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
@@ -323,6 +324,10 @@ SmallVector<Value> collectBufferValues(DenseMap<Value, SmallVector<Value>> &depV
             if (!shapedType)
                 continue;
 
+            // Skip tensor::EmptyOp - it should only get dep_mark, not buffer allocation
+            if (isa<tensor::EmptyOp>(op))
+                continue;
+
             valueList.push_back(depVal);
         }
     }
@@ -344,8 +349,16 @@ SmallVector<Value> collectScalarDeps(DenseMap<Value, SmallVector<Value>> &depVal
             if (!depDefinedOp)
                 continue;
 
-            if (isa<ShapedType>(depVal.getType()))
-                continue;
+            if (isa<ShapedType>(depVal.getType())) {
+                // tensor::EmptyOp should be treated like scalar, add dep_mark
+                if (!isa<tensor::EmptyOp>(depDefinedOp))
+                    continue;
+                // Check if definingOp's parentOp is a main_loop forOp
+                auto *parentOp = depDefinedOp->getParentOp();
+                if (!parentOp || !isa<scf::ForOp>(parentOp) ||
+                    !parentOp->hasAttr(kAttrMainLoop))
+                    continue;
+            }
 
             auto userIt = depUserMap.find(depVal);
             if (userIt == depUserMap.end())
@@ -448,7 +461,6 @@ static Value getIterCount(OpBuilder &builder, mlir::scf::ForOp forOp, Location l
     return result;
 }
 
-// Build if-else chain for buffer selection: if (idx==0) -> buf[0] else ... else -> buf[N-1]
 static int buildIfChain(OpBuilder &builder, Location loc, Value indexVal, SmallVector<BufferPair> &buffers,
                         SmallVector<Operation *> &newOps, SmallVector<Operation *> &outIfOps,
                         function_ref<Operation *(OpBuilder &, Location, Value)> createOpFn,
@@ -457,88 +469,137 @@ static int buildIfChain(OpBuilder &builder, Location loc, Value indexVal, SmallV
 {
     int N = buffers.size();
     auto types = resultTypes.value_or(mlir::TypeRange {});
+    bool hasResults = !types.empty();
 
-    // Create condition: index == 0
-    Value zero = builder.create<mlir::arith::ConstantIntOp>(loc, 0, 32);
-    Value firstCond = builder.create<mlir::arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::eq, indexVal, zero);
-    auto firstIf = builder.create<mlir::scf::IfOp>(loc, types, firstCond, true, true);
+    // For N==2: use original nested structure (known to work)
+    if (N == 2) {
+        // Create condition: index == 0
+        Value zero = builder.create<mlir::arith::ConstantIntOp>(loc, 0, 32);
+        Value firstCond = builder.create<mlir::arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::eq, indexVal, zero);
+        auto firstIf = builder.create<mlir::scf::IfOp>(loc, types, firstCond, true, true);
 
-    newOps.push_back(zero.getDefiningOp());
-    newOps.push_back(firstCond.getDefiningOp());
-    newOps.push_back(firstIf);
-    outIfOps.push_back(firstIf);
+        newOps.push_back(zero.getDefiningOp());
+        newOps.push_back(firstCond.getDefiningOp());
+        newOps.push_back(firstIf);
+        outIfOps.push_back(firstIf);
 
-    // Tag counter operations with block_id
+        if (blockId >= 0) {
+            zero.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
+            firstCond.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
+        }
+
+        // Then branch: use buffer[0]
+        builder.setInsertionPointToStart(&firstIf.getThenRegion().front());
+        Operation *op0 = createOpFn(builder, loc, buffers[0].second);
+        if (!op0) return -1;
+        newOps.push_back(op0);
+        if (yieldFn && hasResults) {
+            builder.create<mlir::scf::YieldOp>(loc, yieldFn(builder, loc, op0));
+        } else {
+            builder.create<mlir::scf::YieldOp>(loc);
+        }
+
+        // Else branch: use buffer[1]
+        builder.setInsertionPointToStart(&firstIf.getElseRegion().front());
+        Operation *op1 = createOpFn(builder, loc, buffers[1].second);
+        if (!op1) return -1;
+        newOps.push_back(op1);
+        if (yieldFn && hasResults) {
+            builder.create<mlir::scf::YieldOp>(loc, yieldFn(builder, loc, op1));
+        } else {
+            builder.create<mlir::scf::YieldOp>(loc);
+        }
+
+        builder.setInsertionPointAfter(firstIf);
+        return 0;
+    }
+
+    // Create rootIf (idx == 0)
+    Value zeroVal = builder.create<mlir::arith::ConstantIntOp>(loc, 0, 32);
+    Value firstCond = builder.create<mlir::arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::eq, indexVal, zeroVal);
     if (blockId >= 0) {
-        zero.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
+        zeroVal.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
         firstCond.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
     }
+    newOps.push_back(zeroVal.getDefiningOp());
+    newOps.push_back(firstCond.getDefiningOp());
 
-    // Then branch: use buffer[0]
-    builder.setInsertionPointToStart(&firstIf.getThenRegion().front());
+    auto rootIf = builder.create<mlir::scf::IfOp>(loc, types, firstCond, true, true);
+    if (!rootIf) return -1;
+    newOps.push_back(rootIf);
+    outIfOps.push_back(rootIf);
+
+    // Then branch of rootIf: use buffer[0]
+    builder.setInsertionPointToStart(&rootIf.getThenRegion().front());
     Operation *op0 = createOpFn(builder, loc, buffers[0].second);
-    if (!op0) {
-        return -1;
-    }
+    if (!op0) return -1;
     newOps.push_back(op0);
-    if (yieldFn) {
+    if (hasResults && yieldFn) {
         builder.create<mlir::scf::YieldOp>(loc, yieldFn(builder, loc, op0));
     } else {
         builder.create<mlir::scf::YieldOp>(loc);
     }
 
-    // Build nested else-if chain for buffer[1] to buffer[N-2]
-    mlir::Block *currentElseBlock = &firstIf.getElseRegion().front();
+    // Build the nested if chain in rootIf's else region
+    Block *currentElseBlock = &rootIf.getElseRegion().front();
+    scf::IfOp parentIf = rootIf;
+
     for (int i = 1; i < N - 1; ++i) {
+        // Set insertion to current else block
         builder.setInsertionPointToStart(currentElseBlock);
+
+        // Create condition for idx == i
         Value iVal = builder.create<mlir::arith::ConstantIntOp>(loc, i, 32);
         Value cond = builder.create<mlir::arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::eq, indexVal, iVal);
-        auto nestedIf = builder.create<mlir::scf::IfOp>(loc, types, cond, true, true);
-        if (!nestedIf) {
-            return -1;
-        }
-
-        newOps.push_back(iVal.getDefiningOp());
-        newOps.push_back(cond.getDefiningOp());
-        newOps.push_back(nestedIf);
-        outIfOps.push_back(nestedIf);
-
-        // Tag counter operations with block_id
         if (blockId >= 0) {
             iVal.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
             cond.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
         }
+        newOps.push_back(iVal.getDefiningOp());
+        newOps.push_back(cond.getDefiningOp());
+
+        // Create nested if for this level
+        auto nestedIf = builder.create<mlir::scf::IfOp>(loc, types, cond, true, true);
+        if (!nestedIf) return -1;
+        newOps.push_back(nestedIf);
 
         // Then branch: use buffer[i]
         builder.setInsertionPointToStart(&nestedIf.getThenRegion().front());
         Operation *op = createOpFn(builder, loc, buffers[i].second);
-        if (!op) {
-            return -1;
-        }
+        if (!op) return -1;
         newOps.push_back(op);
-        if (yieldFn) {
+        if (hasResults && yieldFn) {
             builder.create<mlir::scf::YieldOp>(loc, yieldFn(builder, loc, op));
         } else {
             builder.create<mlir::scf::YieldOp>(loc);
         }
 
+        // Now we need to update parentIf's else block to yield the nestedIf result
+        // Set insertion to end of parentIf's else block and add yield
+        builder.setInsertionPointToEnd(currentElseBlock);
+        if (hasResults && yieldFn) {
+            // Yield the nestedIf's result from parent's else
+            builder.create<mlir::scf::YieldOp>(loc, nestedIf.getResults());
+        } else {
+            builder.create<mlir::scf::YieldOp>(loc);
+        }
+
+        // Move to nestedIf's else block for next iteration
+        parentIf = nestedIf;
         currentElseBlock = &nestedIf.getElseRegion().front();
     }
 
-    // Final else branch: use buffer[N-1]
+    // Final else: use buffer[N-1]
     builder.setInsertionPointToStart(currentElseBlock);
     Operation *opLast = createOpFn(builder, loc, buffers[N - 1].second);
-    if (!opLast) {
-        return -1;
-    }
+    if (!opLast) return -1;
     newOps.push_back(opLast);
-    if (yieldFn) {
+    if (hasResults && yieldFn) {
         builder.create<mlir::scf::YieldOp>(loc, yieldFn(builder, loc, opLast));
     } else {
         builder.create<mlir::scf::YieldOp>(loc);
     }
-
-    builder.setInsertionPointAfter(firstIf);
+    builder.setInsertionPointAfter(rootIf);
     return 0;
 }
 
@@ -570,7 +631,8 @@ static SmallVector<Operation *> insertProducerLogic(OpBuilder &builder, Value de
     Location loc = depVal.getLoc();
     // Single buffer producer logic
     if (N == kBufferCountOne) {
-        Operation *producerOp = builder.create<hivm::CopyOp>(loc, mlir::TypeRange {}, depVal, buffers[0].second);
+        Operation *producerOp = builder.create<hivm::CopyOp>(
+            loc, mlir::TypeRange{}, depVal, buffers[0].second);
         if (!producerOp)
             return newOps;
         newOps.push_back(producerOp);
@@ -580,14 +642,15 @@ static SmallVector<Operation *> insertProducerLogic(OpBuilder &builder, Value de
     Value bufIdx = computeBufferIndex(builder, forOp, loc, N, &newOps);
     SmallVector<Operation *> dummyOutIfOps;
     if (buildIfChain(
-        builder, loc, bufIdx, buffers, newOps, dummyOutIfOps,
-        [&](OpBuilder &b, Location l, Value buffer) -> Operation* {
-            return b.create<hivm::CopyOp>(
-                l, mlir::TypeRange{}, depVal, buffer);
-        },
-        nullptr) != 0) {
-    return {};
+            builder, loc, bufIdx, buffers, newOps, dummyOutIfOps,
+            [&](OpBuilder &b, Location l, Value buffer) -> Operation * {
+                return b.create<hivm::CopyOp>(l, mlir::TypeRange{}, depVal, buffer);
+            },
+            nullptr) != 0)
+    {
+        return {};
     }
+
     return newOps;
 }
 
@@ -632,7 +695,7 @@ static int insertConsumerLogic(OpBuilder &builder, Value depVal, SmallVector<Buf
     mlir::TypeRange resultTypes(tensorType);
     int ret = buildIfChain(
         builder, loc, readIdx, buffers, newOps, outIfOps,
-        [&](OpBuilder &b, Location l, Value buffer) -> Operation* {
+        [&](OpBuilder &b, Location l, Value buffer) -> Operation * {
             return createToTensorOp(b, l, tensorType, buffer);
         },
         [&](OpBuilder &b, Location l, Operation *op) -> Value {
@@ -669,12 +732,12 @@ static void addDepMarkAttr(Operation *op, int depMark, OpBuilder &builder)
     }
 }
 
-// Add ssbuffer.intra_buffer attribute to buffer operations
-// Only tag scf::IfOp (multi-buffer), materialize_in_destination/to_tensor (single buffer)
 static void addIntraBufferAttr(SmallVector<Operation *> &ops, OpBuilder &builder)
 {
     for (auto *op : ops) {
-        if (isa<scf::IfOp>(op) || isa<hivm::CopyOp>(op) || isa<bufferization::ToTensorOp>(op)) {
+        if (isa<scf::IfOp>(op) || isa<hivm::CopyOp>(op) ||
+            isa<bufferization::ToTensorOp>(op))
+        {
             op->setAttr("ssbuffer.intra_buffer", builder.getUnitAttr());
         }
     }
@@ -824,6 +887,15 @@ static int processTensorDependencies(mlir::scf::ForOp mainLoopForOp, DenseMap<Va
 
             // Validate dependency value (skip BlockArgument, null definingOp, non-ShapedType)
             if (isa<BlockArgument>(depVal) || !depVal.getDefiningOp() || !isa<ShapedType>(depVal.getType()))
+                continue;
+
+            // Skip tensor::EmptyOp - it should only get dep_mark, not buffer allocation
+            if (isa<tensor::EmptyOp>(depVal.getDefiningOp()))
+                continue;
+
+            // Check if definingOp's parentOp is the main_loop forOp
+            auto *parentOp = depVal.getDefiningOp()->getParentOp();
+            if (parentOp != mainLoopForOp.getOperation())
                 continue;
 
             auto userIt = depUserMap.find(depVal);

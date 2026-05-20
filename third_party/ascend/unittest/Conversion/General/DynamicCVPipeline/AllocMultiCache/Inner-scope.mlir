@@ -570,4 +570,138 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     return
   }
 
+//===--------------------------------------------------------------------===//
+// T19: tensor.empty Dependency Test
+// Test: tensor.empty inside main_loop body gets dep_mark like scalar
+// Key Check: tensor.empty defines producer, gets dep_mark
+//         : consumer of tensor.empty also gets dep_mark
+//===--------------------------------------------------------------------===//
+// CHECK-LABEL: func.func @test_t19_tensor_empty_dep_mark
+// CHECK-DAG: tensor.empty({{.*}}) {{.*}} ssbuffer.dep_mark
+// CHECK-DAG: arith.addf {{.*}} ssbuffer.dep_mark
+// CHECK-NOT: tensor.empty {{.*}} ssbuffer.intraDeps
+func.func @test_t19_tensor_empty_dep_mark() {
+    %c0_i32 = arith.constant 0 : i32
+    %c100_i32 = arith.constant 100 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %cst = arith.constant 1.0 : f32
+    scope.scope : () -> () {
+      %empty_128 = tensor.empty() : tensor<128xf32>
+      %initial = linalg.fill {ssbuffer.block_id = 5 : i32} ins(%cst : f32) outs(%empty_128 : tensor<128xf32>) -> tensor<128xf32>
+      %loop_result = scf.for %i = %c0_i32 to %c100_i32 step %c1_i32 iter_args(%arg = %initial) -> (tensor<128xf32>) : i32 {
+        %empty = tensor.empty() {ssbuffer.block_id = 5 : i32} : tensor<128xf32>
+        %consumed = arith.addf %empty, %empty {ssbuffer.block_id = 6 : i32} : tensor<128xf32>
+        %new_fill = linalg.fill {ssbuffer.block_id = 5 : i32} ins(%cst : f32) outs(%empty : tensor<128xf32>) -> tensor<128xf32>
+        scf.yield %new_fill : tensor<128xf32>
+      } {ssbuffer.main_loop = 1 : i64}
+      scope.return
+    } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+    return
+  }
+
+//===--------------------------------------------------------------------===//
+// T20: Mixed Dependencies Test (tensor.empty + scalar + normal tensor)
+// Test: all three types coexist, each gets correct dep_mark handling
+// Key Check: tensor.empty -> dep_mark like scalar
+//         : scalar (i32) -> dep_mark when used by cross-block consumer
+//         : normal tensor -> buffer allocation
+//===--------------------------------------------------------------------===//
+// CHECK-LABEL: func.func @test_t20_mixed_dependencies
+// CHECK-DAG: tensor.empty({{.*}}) {{.*}} ssbuffer.dep_mark
+// CHECK-DAG: arith.mulf {{.*}} {ssbuffer.block_id = 6
+// CHECK-NOT: tensor.empty {{.*}} ssbuffer.intraDeps
+func.func @test_t20_mixed_dependencies() {
+    %c0_i32 = arith.constant 0 : i32
+    %c100_i32 = arith.constant 100 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %cst = arith.constant 1.0 : f32
+    scope.scope : () -> () {
+      %empty_tensor = tensor.empty() : tensor<128xf32>
+      %filled_tensor = linalg.fill {ssbuffer.block_id = 5 : i32} ins(%cst : f32) outs(%empty_tensor : tensor<128xf32>) -> tensor<128xf32>
+      %loop_result = scf.for %i = %c0_i32 to %c100_i32 step %c1_i32 iter_args(%arg = %filled_tensor) -> (tensor<128xf32>) : i32 {
+        %empty = tensor.empty() {ssbuffer.block_id = 5 : i32} : tensor<128xf32>
+        %consumed = arith.addf %empty, %empty {ssbuffer.block_id = 6 : i32} : tensor<128xf32>
+        %scaled = arith.mulf %consumed, %consumed {ssbuffer.block_id = 6 : i32} : tensor<128xf32>
+        %new_fill = linalg.fill {ssbuffer.block_id = 5 : i32} ins(%cst : f32) outs(%empty : tensor<128xf32>) -> tensor<128xf32>
+        scf.yield %new_fill : tensor<128xf32>
+      } {ssbuffer.main_loop = 1 : i64}
+      scope.return
+    } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+    return
+  }
+
+//===--------------------------------------------------------------------===//
+// T21: tensor.empty inside nested forOp (not main_loop) should NOT get dep_mark
+// Test: tensor.empty defined inside a nested forOp (not main_loop) should not be tagged
+// Key Check: tensor.empty in nested forOp -> no dep_mark
+//         : only tensor.empty in main_loop scope gets dep_mark
+//===--------------------------------------------------------------------===//
+// CHECK-LABEL: func.func @test_t21_tensor_empty_in_nested_for
+// CHECK-NOT: tensor.empty {{.*}} ssbuffer.dep_mark
+func.func @test_t21_tensor_empty_in_nested_for() {
+    %c0_i32 = arith.constant 0 : i32
+    %c100_i32 = arith.constant 100 : i32
+    %c10_i32 = arith.constant 10 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %cst = arith.constant 1.0 : f32
+    scope.scope : () -> () {
+      %empty_128 = tensor.empty() : tensor<128xf32>
+      %initial = linalg.fill {ssbuffer.block_id = 5 : i32} ins(%cst : f32) outs(%empty_128 : tensor<128xf32>) -> tensor<128xf32>
+      %loop_result = scf.for %i = %c0_i32 to %c100_i32 step %c1_i32 iter_args(%arg = %initial) -> (tensor<128xf32>) : i32 {
+        %inner_loop_result = scf.for %j = %c0_i32 to %c10_i32 step %c1_i32 iter_args(%arg2 = %arg) -> (tensor<128xf32>) : i32 {
+          // tensor.empty inside nested forOp - should NOT get dep_mark
+          %empty_nested = tensor.empty() {ssbuffer.block_id = 5 : i32} : tensor<128xf32>
+          %consumed = arith.addf %empty_nested, %empty_nested {ssbuffer.block_id = 6 : i32} : tensor<128xf32>
+          %new_fill = linalg.fill {ssbuffer.block_id = 5 : i32} ins(%cst : f32) outs(%empty_nested : tensor<128xf32>) -> tensor<128xf32>
+          scf.yield %new_fill : tensor<128xf32>
+        } {ssbuffer.block_id = 7 : i32}
+        // tensor.empty in main_loop body but nested forOp scope - should NOT get dep_mark
+        %main_empty = tensor.empty() {ssbuffer.block_id = 5 : i32} : tensor<128xf32>
+        %main_consumed = arith.addf %main_empty, %main_empty {ssbuffer.block_id = 6 : i32} : tensor<128xf32>
+        %main_fill = linalg.fill {ssbuffer.block_id = 5 : i32} ins(%cst : f32) outs(%main_empty : tensor<128xf32>) -> tensor<128xf32>
+        scf.yield %main_fill : tensor<128xf32>
+      } {ssbuffer.main_loop = 1 : i64}
+      scope.return
+    } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+    return
+  }
+
+//===--------------------------------------------------------------------===//
+// T22: tensor.empty inside scf.if (not main_loop) should NOT get dep_mark
+// Test: tensor.empty defined inside an scf.if within main_loop body
+//       should not be tagged because its parentOp is scf.if, not main_loop forOp
+// Key Check: tensor.empty in scf.if -> no dep_mark
+//         : only tensor.empty with parentOp = main_loop forOp gets dep_mark
+//===--------------------------------------------------------------------===//
+// CHECK-LABEL: func.func @test_t22_tensor_empty_in_nested_if
+// CHECK-NOT: tensor.empty {{.*}} ssbuffer.dep_mark
+func.func @test_t22_tensor_empty_in_nested_if() {
+    %c0_i32 = arith.constant 0 : i32
+    %c100_i32 = arith.constant 100 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %cst = arith.constant 1.0 : f32
+    scope.scope : () -> () {
+      %empty_128 = tensor.empty() : tensor<128xf32>
+      %initial = linalg.fill {ssbuffer.block_id = 5 : i32} ins(%cst : f32) outs(%empty_128 : tensor<128xf32>) -> tensor<128xf32>
+      %loop_result = scf.for %i = %c0_i32 to %c100_i32 step %c1_i32 iter_args(%arg = %initial) -> (tensor<128xf32>) : i32 {
+        %cond = arith.cmpi eq, %i, %c0_i32 : i32
+        // tensor.empty inside scf.if - its parentOp is scf.if, NOT main_loop forOp
+        // should NOT get dep_mark
+        %if_result:2 = scf.if %cond -> (tensor<128xf32>, tensor<128xf32>) {
+          %empty_if = tensor.empty() {ssbuffer.block_id = 5 : i32} : tensor<128xf32>
+          %consumed_if = arith.addf %empty_if, %empty_if {ssbuffer.block_id = 6 : i32} : tensor<128xf32>
+          scf.yield %consumed_if, %consumed_if : tensor<128xf32>, tensor<128xf32>
+        } else {
+          %empty_else = tensor.empty() {ssbuffer.block_id = 5 : i32} : tensor<128xf32>
+          %consumed_else = arith.mulf %empty_else, %empty_else {ssbuffer.block_id = 6 : i32} : tensor<128xf32>
+          scf.yield %consumed_else, %consumed_else : tensor<128xf32>, tensor<128xf32>
+        }
+        %new_fill = linalg.fill {ssbuffer.block_id = 5 : i32} ins(%cst : f32) outs(%arg : tensor<128xf32>) -> tensor<128xf32>
+        scf.yield %new_fill : tensor<128xf32>
+      } {ssbuffer.main_loop = 1 : i64}
+      scope.return
+    } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+    return
+  }
+
 }

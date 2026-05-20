@@ -34,6 +34,7 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
 #include "ascend/include/DynamicCVPipeline/SeparateMemoryFromComputePass.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflowPass.h"
+#include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 
 static constexpr const char *DEBUG_TYPE = "AddDynamicCVPipeline";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
@@ -71,6 +72,7 @@ void AddDynamicCVPipelinePass::runOnOperation()
     pm.addPass(createPlanComputeBlockPass());
     pm.addPass(createComputeBlockOptPass());
     pm.addPass(createSplitDataflowPass());
+    pm.addPass(createAnalyzeDataFlowPass());
     pm.addPass(createSeparateMemoryFromComputePass());
     pm.addPass(createAllocMultiCachePass());
     pm.addPass(createAddControlFlowConditionPass());

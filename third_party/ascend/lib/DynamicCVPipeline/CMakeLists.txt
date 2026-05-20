@@ -23,13 +23,19 @@ file(GLOB Compute_BLOCK_OPT_SRC_FILES CONFIGURE_DEPENDS
     "ComputeBlockOpt/*.cpp"
 )
 
+file(GLOB ANALYZE_DATAFLOW_SRC_FILES CONFIGURE_DEPENDS
+    "AnalyzeDataFlow/*.cpp"
+)
+
 add_triton_library(DynamicCVPipeline
   AddDynamicCVPipeline.cpp
   PlanComputeBlock.cpp
   ComputeBlockOptPass.cpp
+  AnalyzeDataFlow.cpp
   ${PLAN_COMPUTE_BLOCK_PASS_SRC}
   ${COMMON_SRC}
   ${Compute_BLOCK_OPT_SRC_FILES}
+  ${ANALYZE_DATAFLOW_SRC_FILES}
   SplitDataflow.cpp
   SeparateMemoryFromComputePass.cpp
   AllocMultiCache.cpp

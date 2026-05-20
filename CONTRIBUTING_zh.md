@@ -23,10 +23,8 @@ CLA签署地址 [sign](https://clasign.osinfra.cn/sign/690ca9ddf91c03dee6082ab1)
 
 <h2 id="入门.md">入门</h2>
 
-- 在[GitCode](https://gitcode.com/Ascend/triton-ascend)上Fork Triton Ascend存储库。
-- 阅读[README.md](https://gitcode.com/Ascend/triton-ascend/blob/master/README.md)获取项目信息和构建开发环境。
-
-
+- 在[GitHub](https://github.com/triton-lang/triton-ascend)上fork Triton-Ascend代码库。
+- 阅读[README.md](https://github.com/triton-lang/triton-ascend/blob/main/README.md)获取项目信息和构建开发环境。
 
 <h2 id="开发指导.md">开发指导</h2>
 
@@ -48,7 +46,7 @@ CLA签署地址 [sign](https://clasign.osinfra.cn/sign/690ca9ddf91c03dee6082ab1)
 
 - 单元测试指南
 
-  请使用Triton Ascend社区统一的单元测试风格，python建议的单元测试风格是[pytest](http://www.pytest.org/en/latest/)，C++建议的单元测试风格是[Googletest Primer](#https://github.com/google/googletest/blob/master/docs/primer.md)。测试用例的设计意图应该通过它的注释名称来反映。测试用例的设计请参考[gather测试用例](https://gitcode.com/Ascend/triton-ascend/blob/master/ascend/examples/pytest_ut/test_gather.py)，[layer_norm测试用例](https://gitcode.com/Ascend/triton-ascend/blob/master/ascend/examples/tutorials/03-layer-norm.py)
+  请使用Triton Ascend社区统一的单元测试风格，python建议的单元测试风格是[pytest](http://www.pytest.org/en/latest/)，C++建议的单元测试风格是[Googletest Primer](https://github.com/google/googletest/blob/main/docs/primer.md)。测试用例的设计意图应该通过它的注释名称来反映。测试用例的设计请参考[gather测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/custom_op/test_gather_load.py)，[layer_norm测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/05-layer-norm.py)
 
 - 重构指南
 
@@ -67,23 +65,23 @@ CLA签署地址 [sign](https://clasign.osinfra.cn/sign/690ca9ddf91c03dee6082ab1)
 使用git克隆您fork的Triton Ascend项目&添加上游仓库upstream：
 
 ```shell
-git clone https://gitcode.com/{your_forked_repo}/triton-ascend.git && cd triton-ascend && git submodule update --init --depth 1
-git remote add upstream https://gitcode.com/Ascend/triton-ascend.git
+git clone https://github.com/{your_forked_repo}/triton-ascend.git && cd triton-ascend && git submodule update --init --depth 1
+git remote add upstream https://github.com/triton-lang/triton-ascend.git
 ```
 
 3、本地环境开发代码
 
-在开发您的代码之前，您需要根据[Triton Ascend安装指南](https://gitcode.com/Ascend/triton-ascend/blob/main/docs/zh/installation_guide.md)搭建开发环境。
+在开发您的代码之前，您需要根据[Triton Ascend安装指南](https://github.com/triton-lang/triton-ascend/blob/main/docs/zh/installation_guide.md)搭建开发环境。
 
 为避免多个分支间的不一致问题，请创建新的本地开发分支进行新特性的开发：
 
 ```shell
-git checkout -b {new_branch_name} origin/master
-git fetch upstream #Fetch the latest code from the upstream repository
-git rebase upstream/master #Rebase onto the latest upstream
+git checkout -b {new_branch_name} origin/main
+git fetch upstream       # Fetch the latest code from the upstream repository
+git rebase upstream/main # Rebase onto the latest upstream trunk
 ```
 
-以master分支为例，Triton Ascend可能会根据需要创建版本分支或下游开发分支。当您创建完分支&同步上游master分支更新后，就可以开始开发您的代码了。
+以main分支为例，Triton Ascend可能会根据需要创建版本分支或下游开发分支。当您创建完分支&同步上游main分支更新后，就可以开始开发您的代码了。
 
 4、代码更改自测
 
@@ -105,7 +103,7 @@ git push origin {your_new_branch_name}
 
 6、向Triton Ascend主仓创建拉取请求
 
-代码推送至您的远程仓库后，您需要在您的新分支和Triton Ascend master分支之间新建Pull Request。完成新建合并请求后，“Jenkins CI“将自动设置为您构建流水线测试。您的Pull Request请尽快合并到上游master分支，以降低合并风险。
+代码推送至您的远程仓库后，您需要在您的新分支和Triton Ascend main分支之间新建Pull Request。完成新建合并请求后，“Jenkins CI“将自动设置为您构建流水线测试。您的Pull Request请尽快合并到上游main分支，以降低合并风险。
 
 提交PR后流水线执行命令流程
 
@@ -162,7 +160,7 @@ git push origin {your_new_branch_name}
 - 您预计会发生什么？
 - 如何重现它？（尽可能精确）
 
-不同类别的ISSUE填写模板请参考[ISSUE填写规范](https://gitcode.com/Ascend/triton-ascend/issues/create/choose)
+您也可以选择其中一个预定义的[issue填写模板](https://github.com/triton-lang/triton-ascend/issues/new/choose)
 
 问题咨询：
 
@@ -174,12 +172,11 @@ git push origin {your_new_branch_name}
 
 <h2 id="提出PR.md">提出PR</h2>
 
-- 在[GitCode](https://gitcode.com/Ascend/triton-ascend)上提出您的想法作为问题。
+- 在[GitHub](https://github.com/triton-lang/triton-ascend)上提出您的想法作为问题。
 - 如果要开发的新功能需要大量设计细节，您还应提交设计方案。
 - 在问题讨论和设计方案审查达成共识后，再进行fork开发并提交PR。
 - 在从Approver那里收到2+LGTM（Looks Good To Me）前不允许任何PR 。请注意审批人不允许在自己的PR上添加LGTM。
 - 在PR被充分讨论后，将根据讨论结果对PR进行合并、拒绝或放弃。
-- PR样例：[PR样例](https://gitcode.com/Ascend/triton-ascend/pull/936)
 
 ### 注意事项：
 

@@ -10,10 +10,12 @@ Triton-Ascend将Triton编译栈适配到华为昇腾NPU上，在Triton的基础�
 Triton-Ascend编译框架打通了Triton与昇腾硬件之间的壁垒，使熟悉Triton框架的开发者可以更有效率地使用昇腾NPU。它通过提供通用、高效的算子开发范式，为昇腾软件栈补齐了敏捷开发的关键一环，极大丰富了昇腾的算子库和上层应用生态。
 
 ## 最新动态与里程碑
-- #### 近期版本更新
-当前版本：[Triton-Ascend 3.2.0](https://pypi.org/project/triton-ascend/)  
-配套CANN版本：[昇腾CANN社区版8.5.0](https://www.hiascend.com/developer/download/community/result?module=cann&cann=8.5.0)  
-2026年版本计划：升级triton版本到triton3.5
+
+- ### 近期版本更新
+
+当前版本：[Triton-Ascend 3.2.1](https://github.com/triton-lang/triton-ascend/releases/v3.2.1)
+配套CANN版本：[昇腾CANN社区版9.0.0](https://www.hiascend.com/developer/download/community/result?module=cann&cann=9.0.0)
+2026年版本计划：升级Triton版本到Triton3.5
 
 - #### 里程碑
 | 里程碑 | 重要特性更新情况 | 状态 |
@@ -63,17 +65,17 @@ Triton-Ascend 所支持的操作系统与 CANN 一致。请参考 CANN 官方文
 
 - 商用版
 
-| Triton-Ascend版本 | CANN商用版本 | CANN发布日期 |
+| Triton-Ascend版本 | CANN商用版本         | CANN发布日期       |
 |-------------------|----------------------|--------------------|
 | 3.2.0             | CANN 8.5.0           | 2026/01/16         |
-| 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.3.RC1         | 2025/11/20<br>2025/10/30         |
+| 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.3.RC1 | 2025/11/20<br>2025/10/30 |
 
 - 社区版
 
 | Triton-Ascend版本 | CANN社区版本 | CANN发布日期 |
 |-------------------|----------------------|--------------------|
 | 3.2.0             | CANN 8.5.0           | 2026/01/16         |
-| 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.5.0.alpha001<br>CANN 8.3.RC1         | 2025/11/20<br>2025/11/12<br>2025/10/30         |
+| 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.5.0.alpha001<br>CANN 8.3.RC1 | 2025/11/20<br>2025/11/12<br>2025/10/30 |
 
 ## 入门指引
 

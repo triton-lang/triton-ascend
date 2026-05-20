@@ -268,6 +268,41 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
     export TRITON_PRINT_AUTOTUNING=1
     ```
 
+### 进阶：使用 max_autotune 自动调优
+
+对于 Ascend NPU 算子，要想达到最优性能，除BLOCK_SIZE外，还需调优 num_stages、enable_hivm_auto_cv_balance、tile_mix_vector_loop 等多个硬件相关参数。若使用 @triton.autotune 手动枚举所有组合，会导致配置列表爆炸式增长，代码难以维护。
+
+max_autotune 是专为 Ascend NPU 设计的扩展装饰器（位于 triton.backends.ascend.runtime），允许用户仅提供基础配置，其余调优参数以列表形式传入，装饰器自动生成全部组合的 Config 列表。
+
+- 核心作用
+开发者只需提供少量基础配置（如BLOCK_SIZE），所有与该算子类型相关的编译器选项（例如 num_stages、enable_hivm_auto_cv_balance、tile_mix_vector_loop、enable_ubuf_saving 等）都会通过内置的合理默认值自动纳入最优组合的搜索范围，无需开发者显式列举，一次性完成最优 tiling 和编译器选项组合的自动寻优。若开发者希望对某些参数进行限定，也可通过显式传入列表来覆盖默认搜索范围。
+
+- 简单示例
+
+    ```diff
+    from triton.backends.ascend.runtime import max_autotune
+
+    @max_autotune(
+        configs=[
+            triton.Config({'BLOCK_SIZE': 128}),
+            triton.Config({'BLOCK_SIZE': 256}),
+        ],
+        key=['n_elements'],
+        kernel_type="vector",           # 算子类型，支持 cube/mixcv/vector
+        enable_ubuf_saving=[True, False] # 可选，默认已包含
+    )
+    @triton.jit
+    def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr, **META):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(x_ptr + offsets, mask=mask)
+        y = tl.load(y_ptr + offsets, mask=mask)
+        output = x + y
+        tl.store(output_ptr + offsets, output, mask=mask)
+    ```
+
 ### 如何在NPU上避免UB OVERFLOW
 
 【描述】在NPU上，UB或者L1 Size存在上限，当出现该错误时，需要减少单次搬运的数据量，以for循环的方式处理长序列场景。

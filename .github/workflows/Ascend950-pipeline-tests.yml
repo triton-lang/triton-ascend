@@ -1,4 +1,11 @@
 name: Ascend950 Pipeline Tests
+run-name: >-
+  ${{
+    (github.event_name == 'workflow_run' && github.event.workflow_run.display_title)
+    || (github.event_name == 'pull_request_target' && format('cleanup · {0}', github.event.pull_request.title))
+    || (github.event_name == 'workflow_dispatch' && format('manual re-trigger · PR #{0}', inputs.pr_id))
+    || format('run {0}', github.run_id)
+  }}
 # Combined orchestration after Wheels finishes (or on PR close):
 #   publish: download wheel artifact → upload to obs://.../triton-ascend/<N>/
 #   trigger: needs publish; calls blue-yellow /start and polls /query

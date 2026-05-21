@@ -42,13 +42,13 @@ According to the sample code, fix the number of cores, and then process task blo
 
 ```python
 NUM_CORE = vectorcore_num
-grid = (NUM_CORE ,) 
+grid = (NUM_CORE ,)
 _attn_fwd[grid](Q, K, V, M, Out, acc, scale, ...)
 
 @triton.jit
-def _attn_fwd(Q, K, V, M, Out, acc, scale,  
+def _attn_fwd(Q, K, V, M, Out, acc, scale,
               ...,
-              stride_qz, stride_qh, 
+              stride_qz, stride_qh,
               Z: tl.constexpr, H: tl.constexpr,
               N_CTX: tl.constexpr,
               HEAD_DIM: tl.constexpr,
@@ -94,13 +94,13 @@ Take **add_kernel** as an example. The variables and operations determine the on
 import triton.language as tl
 
 @triton.jit
-def add_kernel(x_ptr, 
-               y_ptr, 
-               out_ptr, 
+def add_kernel(x_ptr,
+               y_ptr,
+               out_ptr,
                n,  # Total number of elements.
                BLOCK_SIZE: tl.constexpr,  # Number of block elements.
-               ): 
-    pid = tl.program_id(0) 
+               ):
+    pid = tl.program_id(0)
     NUM_CORE = tl.num_programs(0)
     NUM_BLOCKS = tl.cdiv(n, BLOCK_SIZE)
     for block_idx in range(pid, NUM_BLOCKS, NUM_CORE):
@@ -200,10 +200,10 @@ Before the AI Core performs computation, data needs to be transferred to the on-
 + def masked_fill_kernel(inp, expand_mask, value, out, N, BLOCK_SIZE: tl.constexpr, BLOCK_SIZE_SUB: tl.constexpr):
     pid = tl.program_id(axis=0)
 +   base_offset = pid * BLOCK_SIZE
-    
+
 +   # Calculate the total number of blocks that need to be processed
 +   num_sub_blocks = tl.cdiv(BLOCK_SIZE, BLOCK_SIZE_SUB)
-    
+
 +   # Loop processing each sub block
 +   for sub_block_idx in range(num_sub_blocks):
 +       # Calculate the offset of the current sub block
@@ -214,10 +214,10 @@ Before the AI Core performs computation, data needs to be transferred to the on-
         # Load input and mask
         input_vals = tl.load(inp + offsets, mask=mask, other=0)
         fill_mask_vals = tl.load(expand_mask + offsets, mask=mask, other=0).to(tl.int1)
-    
+
         # Write the original input first
         tl.store(out + offsets, input_vals, mask=mask)
- 
+
         # Overlay and write value at the position that needs to be filled
 -       value_to_write = tl.full([BLOCK_SIZE], value, dtype=input_vals.dtype)
 +       value_to_write = tl.full([BLOCK_SIZE_SUB], value, dtype=input_vals.dtype)
@@ -231,10 +231,10 @@ In tiling block optimization, the values of block parameters such as **BLOCK_SIZ
 
 For the recommended Triton-Ascend usage of `configs=[]`, the scope of automatic tiling, see the [Triton-Ascend Autotune Guide](./autotune_guide.md).
 
-- Core functions 
-Automatic exploration of the parameter space: Test different values of constexpr block parameters such as **BLOCK_SIZE** and **BLOCK_SIZE_SUB** in batches. 
-Benchmark-based comparison: Select the optimal parameters for the current hardware based on execution time. 
-Caching of tuning results: Cache the best configuration after tuning so that later calls can reuse it without tuning again. 
+- Core functions
+Automatic exploration of the parameter space: Test different values of constexpr block parameters such as **BLOCK_SIZE** and **BLOCK_SIZE_SUB** in batches.
+Benchmark-based comparison: Select the optimal parameters for the current hardware based on execution time.
+Caching of tuning results: Cache the best configuration after tuning so that later calls can reuse it without tuning again.
 
 - Simple example
 
@@ -288,17 +288,17 @@ large or block number is more than what user expect due to multi-buffer feature 
 
 ### R&D Goals
 
-Implement basic data operation operators (such as addition, subtraction, multiplication, division, activation functions, and simple matrix element operations) on the Ascend NPU single core. Ensure that operators are efficiently executed on a single core, laying a foundation for subsequent multi-core parallel processing and distributed expansion. 
+Implement basic data operation operators (such as addition, subtraction, multiplication, division, activation functions, and simple matrix element operations) on the Ascend NPU single core. Ensure that operators are efficiently executed on a single core, laying a foundation for subsequent multi-core parallel processing and distributed expansion.
 
 ### Development Procedure
 
-1.Determine the operator function. 
--Determine the shapes and data types (such as float16, float32, and int32) of the input and output tensors. 
--Check whether broadcast and boundary processing are required. 
- 
-2.Write kernel functions. 
-Single-kernel computation corresponds to block-level data processing.   
-Single-kernel data computation example: vector addition 
+1.Determine the operator function.
+-Determine the shapes and data types (such as float16, float32, and int32) of the input and output tensors.
+-Check whether broadcast and boundary processing are required.
+
+2.Write kernel functions.
+Single-kernel computation corresponds to block-level data processing.
+Single-kernel data computation example: vector addition
 
 ```diff
 
@@ -345,8 +345,8 @@ print(output_triton)
 print(f'The maximum difference between torch and triton is '
 f'{torch.max(torch.abs(output_torch - output_triton))}')
 # Out:
-# tensor([1.3713, 1.3076, 0.4940, ..., 0.6724, 1.2141, 0.9733], device='npu')  
-# tensor([1.3713, 1.3076, 0.4940, ..., 0.6724, 1.2141, 0.9733], device='npu')  
+# tensor([1.3713, 1.3076, 0.4940, ..., 0.6724, 1.2141, 0.9733], device='npu')
+# tensor([1.3713, 1.3076, 0.4940, ..., 0.6724, 1.2141, 0.9733], device='npu')
 # The maximum difference between torch and triton is 0.0
 ```
 
@@ -356,14 +356,14 @@ f'{torch.max(torch.abs(output_torch - output_triton))}')
 -Boundary check: Use **mask** or **if (tid < N)** to avoid out-of-bounds access.
 
 -Block size selection: Properly set the block and grid.
- 
-4.Performance points 
-(1) Memory access optimization 
--Ensure sequential access. 
--Use the aligned stride to avoid cross-row/cross-column jump access. 
--Align the data block size to the 32-byte boundary. 
-Ensure that the input and output buffers are aligned during allocation to avoid memory access performance deterioration. 
-Example: 
+
+4.Performance points
+(1) Memory access optimization
+-Ensure sequential access.
+-Use the aligned stride to avoid cross-row/cross-column jump access.
+-Align the data block size to the 32-byte boundary.
+Ensure that the input and output buffers are aligned during allocation to avoid memory access performance deterioration.
+Example:
 
  ```diff
 BLOCK_SIZE = 256 # 256 x 4 bytes = 1024 bytes, which are well-aligned.
@@ -404,10 +404,10 @@ def vec_add(x, y):
     return z
 ```
 
-(2) Sub-block division 
--Divide a large matrix into small blocks. Each block is computed in the UB. 
--Sub-block division should ensure both memory access continuity and computing unit utilization. 
-Example: 
+(2) Sub-block division
+-Divide a large matrix into small blocks. Each block is computed in the UB.
+-Sub-block division should ensure both memory access continuity and computing unit utilization.
+Example:
 
  ```diff
 BLOCK_M = 64   # Each block processes 64 rows.

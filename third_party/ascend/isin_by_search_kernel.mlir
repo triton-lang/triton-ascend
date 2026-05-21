@@ -5,9 +5,9 @@
 // CHECK-SAME: iter_args({{.*}}) -> (tensor<1xi1>, tensor<1xi1>, index, index, index, index) : i32
 module {
   tt.func public @isin_by_search_kernel(
-    %arg0: !tt.ptr<i64> {tt.divisibility = 16 : i32}, 
-    %arg1: !tt.ptr<i16> {tt.divisibility = 16 : i32}, 
-    %arg2: !tt.ptr<i1> {tt.divisibility = 16 : i32}, 
+    %arg0: !tt.ptr<i64> {tt.divisibility = 16 : i32},
+    %arg1: !tt.ptr<i16> {tt.divisibility = 16 : i32},
+    %arg2: !tt.ptr<i1> {tt.divisibility = 16 : i32},
     %arg3: i32 {tt.divisibility = 16 : i32}
   ) attributes {noinline = false} {
     %c1_i64 = arith.constant 1 : i64

@@ -203,30 +203,17 @@ jobs:
         path: |
           ${{ github.workspace }}/llvm-*-${{ matrix.config.target-os }}-${{ matrix.config.arch }}.tar.gz
 
+    - name: Setup obsutil
+      if: github.event_name == 'push' && github.repository == 'triton-lang/triton-ascend'
+      uses: ./llvm-build/.github/actions/setup-obsutil
+      with:
+        ak: ${{ secrets.OBS_AK }}
+        sk: ${{ secrets.OBS_SK }}
+        arch: ${{ matrix.config.arch == 'x64' && 'amd64' || 'arm64' }}
+
     - name: Upload LLVM Artifacts to OBS
       if: github.event_name == 'push' && github.repository == 'triton-lang/triton-ascend'
-      env:
-        AK: ${{ secrets.OBS_AK }}
-        SK: ${{ secrets.OBS_SK }}
       run: |
-        if [ -z "${AK}" ] || [ -z "${SK}" ]; then
-          echo "OBS credentials not available, skipping upload."
-          exit 0
-        fi
-
-        OBSUTIL_URL="https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${{ matrix.config.arch == 'x64' && 'amd64' || 'arm64' }}.tar.gz"
-
-        curl -fL "$OBSUTIL_URL" -o obsutil.tar.gz
-        file obsutil.tar.gz | grep -q gzip || {
-          echo "obsutil.tar.gz is not a gzip file"
-          exit 1
-        }
-
-        tar xzf obsutil.tar.gz
-        rm -f obsutil.tar.gz
-        mv obsutil* obsutil
-
-        obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-southwest-2.myhuaweicloud.com
         obsutil/obsutil cp -u "${{ env.llvm_install_dir }}.tar.gz" obs://triton-ascend-artifacts/llvm-builds/
 
     - name: Dump Sccache Statistics

@@ -24,10 +24,10 @@
 #ifndef TRITON_ADAPTER_TRITONOPCONVERTER_H
 #define TRITON_ADAPTER_TRITONOPCONVERTER_H
 
-#include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
-#include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
-#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "TritonToLinalg/TritonToLinalgPass.h"
+#include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
+#include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -239,15 +239,16 @@ class ReductionOpBaseConverter : public OpConversionPattern<OpTy> {
 public:
   using OpConversionPattern<OpTy>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(OpTy op,
-                                typename OpTy::Adaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const final {
+  LogicalResult
+  matchAndRewrite(OpTy op, typename OpTy::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const final {
     auto sourceType =
         cast<RankedTensorType>(adaptor.getOperands().front().getType());
     assert(sourceType.hasRank() && "Expected input is ranked");
 
     int64_t axis = op.getAxis();
-    assert(axis >= 0 && axis < sourceType.getRank() && "Expected reduction axis is within operand's rank");
+    assert(axis >= 0 && axis < sourceType.getRank() &&
+           "Expected reduction axis is within operand's rank");
 
     auto realReductionOps = this->getRealReductionOps(op);
     if (realReductionOps.size() == 1) {
@@ -257,18 +258,17 @@ public:
   }
 
 protected:
-  llvm::SmallVector<Operation *> getReductionOps(OpTy reductionOp) const
-  {
+  llvm::SmallVector<Operation *> getReductionOps(OpTy reductionOp) const {
     auto reductionBody = reductionOp.getBody();
     return llvm::map_to_vector(reductionBody->without_terminator(),
                                [](Operation &op) { return &op; });
   }
 
-  llvm::SmallVector<Operation *> getRealReductionOps(OpTy reductionOp) const
-  {
+  llvm::SmallVector<Operation *> getRealReductionOps(OpTy reductionOp) const {
     llvm::SmallVector<Operation *> realOps;
     for (Operation &bodyOp : reductionOp.getBody()->without_terminator()) {
-      // Skips non-reduce operations, including type conversion operations (this can be extended as needed).
+      // Skips non-reduce operations, including type conversion operations (this
+      // can be extended as needed).
       if (isa<arith::ExtFOp, arith::TruncFOp, arith::BitcastOp>(&bodyOp))
         continue;
       realOps.push_back(&bodyOp);
@@ -276,10 +276,9 @@ protected:
     return realOps;
   }
 
-  arith::ConstantOp getMultiOpReductionBaseConstOp(ConversionPatternRewriter &rewriter, OpTy op,
- 	                                              Location loc,
- 	                                              Type constantType) const
-  {
+  arith::ConstantOp
+  getMultiOpReductionBaseConstOp(ConversionPatternRewriter &rewriter, OpTy op,
+                                 Location loc, Type constantType) const {
     // for multiop reduce of 1 element result is defined as exactly this element
     // for multiop reduce of tensor with N elements default value
     // is not involved in result computation
@@ -290,104 +289,106 @@ protected:
     assert(constantType.isIntOrFloat());
 
     if (constantType.isInteger()) {
-      return rewriter.create<arith::ConstantOp>(loc, constantType,
-        rewriter.getIntegerAttr(constantType, 0));
+      return rewriter.create<arith::ConstantOp>(
+          loc, constantType, rewriter.getIntegerAttr(constantType, 0));
     }
-    return rewriter.create<arith::ConstantOp>(loc, constantType,
-      rewriter.getFloatAttr(constantType, 0.f));
+    return rewriter.create<arith::ConstantOp>(
+        loc, constantType, rewriter.getFloatAttr(constantType, 0.f));
   }
 
   arith::ConstantOp getReductionBaseConstOp(ConversionPatternRewriter &rewriter,
-                                      Operation *reductionOp,
-                                      Type constantType) const
-  {
+                                            Operation *reductionOp,
+                                            Type constantType) const {
     const int64_t bitWidth = constantType.getIntOrFloatBitWidth();
 
-    auto attr = llvm::TypeSwitch<Operation *, TypedAttr>(reductionOp)
-                    .Case([&](arith::AddFOp) {
-                      return rewriter.getFloatAttr(constantType, 0.f);
-                    })
-                    .Case([&](arith::AddIOp) {
-                      return rewriter.getIntegerAttr(constantType, 0);
-                    })
-                    .Case([&](arith::MulFOp) {
-                      return rewriter.getFloatAttr(constantType, 1.f);
-                    })
-                    .Case([&](arith::MulIOp) {
-                      return rewriter.getIntegerAttr(constantType, 1);
-                    })
-                    .template Case<arith::MaximumFOp, arith::MaxNumFOp>([&](auto) {
-                      return rewriter.getFloatAttr(
-                          constantType, -std::numeric_limits<float>::infinity());
-                    })
-                    .template Case<arith::MinimumFOp, arith::MinNumFOp>([&](auto) {
-                      return rewriter.getFloatAttr(
-                          constantType, std::numeric_limits<float>::infinity());
-                    })
-                    .Case([&](arith::MinSIOp) {
-                      return rewriter.getIntegerAttr(constantType,
-                                                     llvm::maxIntN(bitWidth));
-                    })
-                    .Case([&](arith::MinUIOp) {
-                      return rewriter.getIntegerAttr(constantType,
-                                                     llvm::maxUIntN(bitWidth));
-                    })
-                    .Case([&](arith::MaxSIOp) {
-                      return rewriter.getIntegerAttr(constantType,
-                                                     llvm::minIntN(bitWidth));
-                    })
-                    .Case([&](arith::MaxUIOp) {
-                      return rewriter.getIntegerAttr(constantType, 0);
-                    })
-                    .Case([&](arith::OrIOp) {
-                      return rewriter.getIntegerAttr(constantType, 0);
-                    })
-                    .Case([&](arith::AndIOp) {
-                      return rewriter.getIntegerAttr(constantType, 1);
-                    })
-                    .Case([&](arith::XOrIOp) {
-                      return rewriter.getIntegerAttr(constantType, 0);
-                    })
-                    .Default([](Operation *op) {
-                      op->dump();
-                      llvm_unreachable("Reduction op not supported yet");
-                      return nullptr;
-                    });
+    auto attr =
+        llvm::TypeSwitch<Operation *, TypedAttr>(reductionOp)
+            .Case([&](arith::AddFOp) {
+              return rewriter.getFloatAttr(constantType, 0.f);
+            })
+            .Case([&](arith::AddIOp) {
+              return rewriter.getIntegerAttr(constantType, 0);
+            })
+            .Case([&](arith::MulFOp) {
+              return rewriter.getFloatAttr(constantType, 1.f);
+            })
+            .Case([&](arith::MulIOp) {
+              return rewriter.getIntegerAttr(constantType, 1);
+            })
+            .template Case<arith::MaximumFOp, arith::MaxNumFOp>([&](auto) {
+              return rewriter.getFloatAttr(
+                  constantType, -std::numeric_limits<float>::infinity());
+            })
+            .template Case<arith::MinimumFOp, arith::MinNumFOp>([&](auto) {
+              return rewriter.getFloatAttr(
+                  constantType, std::numeric_limits<float>::infinity());
+            })
+            .Case([&](arith::MinSIOp) {
+              return rewriter.getIntegerAttr(constantType,
+                                             llvm::maxIntN(bitWidth));
+            })
+            .Case([&](arith::MinUIOp) {
+              return rewriter.getIntegerAttr(constantType,
+                                             llvm::maxUIntN(bitWidth));
+            })
+            .Case([&](arith::MaxSIOp) {
+              return rewriter.getIntegerAttr(constantType,
+                                             llvm::minIntN(bitWidth));
+            })
+            .Case([&](arith::MaxUIOp) {
+              return rewriter.getIntegerAttr(constantType, 0);
+            })
+            .Case([&](arith::OrIOp) {
+              return rewriter.getIntegerAttr(constantType, 0);
+            })
+            .Case([&](arith::AndIOp) {
+              return rewriter.getIntegerAttr(constantType, 1);
+            })
+            .Case([&](arith::XOrIOp) {
+              return rewriter.getIntegerAttr(constantType, 0);
+            })
+            .Default([](Operation *op) {
+              op->dump();
+              llvm_unreachable("Reduction op not supported yet");
+              return nullptr;
+            });
 
-    return rewriter.create<arith::ConstantOp>(reductionOp->getLoc(), constantType, attr);
+    return rewriter.create<arith::ConstantOp>(reductionOp->getLoc(),
+                                              constantType, attr);
   }
 
-  bool requiresF32Conversion(const Type elemType, Operation *reductionOp) const
-  {
+  bool requiresF32Conversion(const Type elemType,
+                             Operation *reductionOp) const {
     return isa<FloatType>(elemType) &&
-          elemType.getIntOrFloatBitWidth() <
-              Float32Type::get(elemType.getContext()).getIntOrFloatBitWidth() &&
-          (isa<arith::AddFOp>(reductionOp) || isa<arith::MulFOp>(reductionOp));
+           elemType.getIntOrFloatBitWidth() <
+               Float32Type::get(elemType.getContext())
+                   .getIntOrFloatBitWidth() &&
+           (isa<arith::AddFOp>(reductionOp) || isa<arith::MulFOp>(reductionOp));
   }
 
-  Value getReductionElement(
-    Value lhs, Value rhs, const Location loc, Operation *reductionOp, OpBuilder &b,
-    const bool convertLhsToF32Precision) const
-  {
+  Value getReductionElement(Value lhs, Value rhs, const Location loc,
+                            Operation *reductionOp, OpBuilder &b,
+                            const bool convertLhsToF32Precision) const {
     return llvm::TypeSwitch<Operation *, Value>(reductionOp)
-      .template Case<arith::AddFOp, arith::MulFOp>([&](auto reductionOp) {
-        if (convertLhsToF32Precision) {
-          lhs = b.create<arith::ExtFOp>(loc, Float32Type::get(b.getContext()),
-                                        lhs);
-        }
-        return b.create<decltype(reductionOp)>(loc, lhs, rhs);
-      })
-      .template Case<arith::AddIOp, arith::MulIOp, arith::MaximumFOp, arith::MaxNumFOp,
-            arith::MinimumFOp, arith::MinNumFOp, arith::MinSIOp, arith::MinUIOp,
-            arith::MaxSIOp, arith::MaxUIOp, arith::AndIOp, arith::OrIOp,
-            arith::XOrIOp>([&](auto reductionOp) {
+        .template Case<arith::AddFOp, arith::MulFOp>([&](auto reductionOp) {
+          if (convertLhsToF32Precision) {
+            lhs = b.create<arith::ExtFOp>(loc, Float32Type::get(b.getContext()),
+                                          lhs);
+          }
           return b.create<decltype(reductionOp)>(loc, lhs, rhs);
-      })
-      .Default([](Operation *op) {
-        op->dump();
-        llvm_unreachable("Reduction op not yet supported");
-        return nullptr;
-      });
+        })
+        .template Case<arith::AddIOp, arith::MulIOp, arith::MaximumFOp,
+                       arith::MaxNumFOp, arith::MinimumFOp, arith::MinNumFOp,
+                       arith::MinSIOp, arith::MinUIOp, arith::MaxSIOp,
+                       arith::MaxUIOp, arith::AndIOp, arith::OrIOp,
+                       arith::XOrIOp>([&](auto reductionOp) {
+          return b.create<decltype(reductionOp)>(loc, lhs, rhs);
+        })
+        .Default([](Operation *op) {
+          op->dump();
+          llvm_unreachable("Reduction op not yet supported");
+          return nullptr;
+        });
   }
 
   virtual bool isReductionOpSupported(Operation *reductionOp) const = 0;
@@ -413,26 +414,31 @@ protected:
 
   static bool isMultiReductionOpSupported(Operation *reductionOp);
 
-  Value cloneReduceOps(OpBuilder &builder, Value in, Value out,
- 	                        Value opIns, Value opOuts, triton::ReduceOp op) const;
+  Value cloneReduceOps(OpBuilder &builder, Value in, Value out, Value opIns,
+                       Value opOuts, triton::ReduceOp op) const;
 
-  void checkIsNotCallOp(const llvm::SmallVector<Operation*>& reductionOps) const;
+  void
+  checkIsNotCallOp(const llvm::SmallVector<Operation *> &reductionOps) const;
 
-  bool isSCFOpReduce(const llvm::SmallVector<Operation*>& reductionOps) const;
+  bool isSCFOpReduce(const llvm::SmallVector<Operation *> &reductionOps) const;
 
-  bool isMultiOpReduce(const llvm::SmallVector<Operation*>& reductionOps) const;
+  bool
+  isMultiOpReduce(const llvm::SmallVector<Operation *> &reductionOps) const;
 
-  Value computeReduceResultWithCompileFlag(OpBuilder &opBuilder, Location loc, Value lhs, Value rhs,
-                    Value source, Value initTensor, triton::ReduceOp reductionOp, bool compileOn91095Flag = false) const;
+  Value computeReduceResultWithCompileFlag(
+      OpBuilder &opBuilder, Location loc, Value lhs, Value rhs, Value source,
+      Value initTensor, triton::ReduceOp reductionOp,
+      bool compileOn91095Flag = false) const;
 
   LogicalResult
-  convertToTargetOp(triton::ReduceOp op, typename triton::ReduceOp::Adaptor adaptor,
+  convertToTargetOp(triton::ReduceOp op,
+                    typename triton::ReduceOp::Adaptor adaptor,
                     ConversionPatternRewriter &rewriter) const override;
 
   LogicalResult
-  convertToTargetOpExtended(triton::ReduceOp op, typename triton::ReduceOp::Adaptor adaptor,
+  convertToTargetOpExtended(triton::ReduceOp op,
+                            typename triton::ReduceOp::Adaptor adaptor,
                             ConversionPatternRewriter &rewriter) const override;
-
 };
 
 class ScanConverter : public ReductionOpBaseConverter<triton::ScanOp> {
@@ -450,9 +456,9 @@ protected:
                     ConversionPatternRewriter &rewriter) const override;
 
   LogicalResult
-  convertToTargetOpExtended(triton::ScanOp op, typename triton::ScanOp::Adaptor adaptor,
+  convertToTargetOpExtended(triton::ScanOp op,
+                            typename triton::ScanOp::Adaptor adaptor,
                             ConversionPatternRewriter &rewriter) const override;
-
 };
 
 class ExternElementwiseClOpConverter
@@ -518,15 +524,16 @@ public:
                   ConversionPatternRewriter &rewriter) const override;
 };
 
-template <typename LoopOpTy, typename =
-    std::enable_if_t<std::is_same_v<LoopOpTy, scf::ForOp> ||
-                     std::is_same_v<LoopOpTy, scf::WhileOp>>>
+template <typename LoopOpTy,
+          typename = std::enable_if_t<std::is_same_v<LoopOpTy, scf::ForOp> ||
+                                      std::is_same_v<LoopOpTy, scf::WhileOp>>>
 class LoopConverter : public OpConversionPattern<LoopOpTy> {
 public:
   using OpConversionPattern<LoopOpTy>::OpConversionPattern;
 
   LogicalResult
-  matchAndRewrite(LoopOpTy op, typename OpConversionPattern<LoopOpTy>::OpAdaptor adaptor,
+  matchAndRewrite(LoopOpTy op,
+                  typename OpConversionPattern<LoopOpTy>::OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     llvm::SmallDenseMap<Value, BlockData> known;
 
@@ -627,23 +634,25 @@ struct MatmulConverter : public OpConversionPattern<triton::DotOp> {
 };
 
 struct FlipOpConverter : public OpConversionPattern<triton::ascend::FlipOp> {
-    using OpConversionPattern<triton::ascend::FlipOp>::OpConversionPattern;
+  using OpConversionPattern<triton::ascend::FlipOp>::OpConversionPattern;
 
-    LogicalResult matchAndRewrite(triton::ascend::FlipOp op, OpAdaptor adaptor,
-                                  ConversionPatternRewriter &rewriter) const override;
+  LogicalResult
+  matchAndRewrite(triton::ascend::FlipOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
 
-    static constexpr StringRef baseFuncName = "triton_flip";
+  static constexpr StringRef baseFuncName = "triton_flip";
 };
 
 struct SortOpConverter : public OpConversionPattern<triton::ascend::SortOp> {
-    using OpConversionPattern<triton::ascend::SortOp>::OpConversionPattern;
+  using OpConversionPattern<triton::ascend::SortOp>::OpConversionPattern;
 
-    LogicalResult matchAndRewrite(triton::ascend::SortOp op, OpAdaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const override;
+  LogicalResult
+  matchAndRewrite(triton::ascend::SortOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
 };
 
 struct DotScaledConverter : public OpConversionPattern<triton::DotScaledOp> {
-    using OpConversionPattern<triton::DotScaledOp>::OpConversionPattern;
+  using OpConversionPattern<triton::DotScaledOp>::OpConversionPattern;
 
   LogicalResult
   matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
@@ -658,60 +667,76 @@ public:
                   ConversionPatternRewriter &rewriter) const override;
 };
 
-class IndexPutConverter : public OpConversionPattern<triton::ascend::IndexPutOp> {
+class IndexPutConverter
+    : public OpConversionPattern<triton::ascend::IndexPutOp> {
 public:
   using OpConversionPattern<triton::ascend::IndexPutOp>::OpConversionPattern;
   LogicalResult
   matchAndRewrite(triton::ascend::IndexPutOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_index_put";
 };
 
-class GatherOutToUbConverter : public OpConversionPattern<triton::ascend::GatherOutToUbOp> {
+class GatherOutToUbConverter
+    : public OpConversionPattern<triton::ascend::GatherOutToUbOp> {
 public:
-  using OpConversionPattern<triton::ascend::GatherOutToUbOp>::OpConversionPattern;
+  using OpConversionPattern<
+      triton::ascend::GatherOutToUbOp>::OpConversionPattern;
   LogicalResult
   matchAndRewrite(triton::ascend::GatherOutToUbOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
 private:
   static constexpr llvm::StringRef funcNameBase = "triton__gather_out_to_ub";
 };
 
-class ScatterUbToOutConverter : public OpConversionPattern<triton::ascend::ScatterUbToOutOp> {
+class ScatterUbToOutConverter
+    : public OpConversionPattern<triton::ascend::ScatterUbToOutOp> {
 public:
-  using OpConversionPattern<triton::ascend::ScatterUbToOutOp>::OpConversionPattern;
+  using OpConversionPattern<
+      triton::ascend::ScatterUbToOutOp>::OpConversionPattern;
   LogicalResult
   matchAndRewrite(triton::ascend::ScatterUbToOutOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_scatter_ub_to_out";
 };
 
-class IndirectLoadConverter : public OpConversionPattern<triton::ascend::IndirectLoadOp> {
+class IndirectLoadConverter
+    : public OpConversionPattern<triton::ascend::IndirectLoadOp> {
 public:
-  using OpConversionPattern<triton::ascend::IndirectLoadOp>::OpConversionPattern;
+  using OpConversionPattern<
+      triton::ascend::IndirectLoadOp>::OpConversionPattern;
   LogicalResult
   matchAndRewrite(triton::ascend::IndirectLoadOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_indirect_load";
 };
 
-class IndirectStoreConverter : public OpConversionPattern<triton::ascend::IndirectStoreOp> {
+class IndirectStoreConverter
+    : public OpConversionPattern<triton::ascend::IndirectStoreOp> {
 public:
-  using OpConversionPattern<triton::ascend::IndirectStoreOp>::OpConversionPattern;
+  using OpConversionPattern<
+      triton::ascend::IndirectStoreOp>::OpConversionPattern;
   LogicalResult
   matchAndRewrite(triton::ascend::IndirectStoreOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_indirect_store";
 };
 
-class IndexSelectSimdConverter : public OpConversionPattern<triton::ascend::IndexSelectSimdOp> {
+class IndexSelectSimdConverter
+    : public OpConversionPattern<triton::ascend::IndexSelectSimdOp> {
 public:
   explicit IndexSelectSimdConverter(MLIRContext *context);
-  using OpConversionPattern<triton::ascend::IndexSelectSimdOp>::OpConversionPattern;
+  using OpConversionPattern<
+      triton::ascend::IndexSelectSimdOp>::OpConversionPattern;
 
   LogicalResult
   matchAndRewrite(triton::ascend::IndexSelectSimdOp op, OpAdaptor adaptor,

@@ -44,7 +44,7 @@ def triton_mod(in_ptr0, in_ptr1, out_ptr0, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.
     offset = tl.program_id(0) * XBLOCK
     base1 = tl.arange(0, XBLOCK_SUB)
     loops1: tl.constexpr = (XBLOCK + XBLOCK_SUB - 1) // XBLOCK_SUB
-    for loop1 in range(loops1):     
+    for loop1 in range(loops1):
         x0 = offset + (loop1 * XBLOCK_SUB) + base1
         tmp0 = tl.load(in_ptr0 + (x0), None)
         tmp1 = tl.load(in_ptr1 + (x0), None)

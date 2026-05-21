@@ -89,7 +89,7 @@ For the machines corresponding to different chip types, refer to the table below
 | 2 | `A2` | Atlas A2 Training Series | Atlas 800T A2 |
 
 ```bash
-git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend
+git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
 docker build \
 --build-arg CANN_BASE_IMAGE=quay.io/ascend/cann:8.5.0-a3-ubuntu22.04-py3.10 \
 -t triton-ascend-image:latest -f ./docker/Dockerfile .
@@ -132,7 +132,7 @@ Run the example: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector
 # Set CANN environment variables (using the default root installation path `/usr/local/Ascend` as an example)
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
 # Clone the triton-ascend repository and examples (optional; required for running examples if not installed from source)
-git clone https://gitcode.com/Ascend/triton-ascend.git
+git clone https://github.com/triton-lang/triton-ascend.git
 # Run the tutorials example:
 python3 ./triton-ascend/third_party/ascend/tutorials/01-vector-add.py
 ```
@@ -144,3 +144,106 @@ tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0
 ```
+## From GPU to NPU: Migrating Triton Examples
+
+Triton-Ascend maintains full syntax compatibility with the community Triton, requiring only changes to tensor device declarations and a few torch.cuda.* APIs to run existing GPU examples on Ascend NPU. Below is a complete migration process demonstrated through a typical vector addition test.
+
+The GPU version example file `test_add.py` is as follows:
+
+```python
+import pytest
+import torch
+from torch.testing import assert_close
+
+import triton
+import triton.language as tl
+
+
+@triton.jit
+def add_kernel(
+    x_ptr,
+    y_ptr,
+    output_ptr,
+    n_elements,
+    BLOCK_SIZE: tl.constexpr,
+):
+    pid = tl.program_id(axis=0)
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    x = tl.load(x_ptr + offsets, mask=mask)
+    y = tl.load(y_ptr + offsets, mask=mask)
+    tl.store(output_ptr + offsets, x + y, mask=mask)
+
+
+@pytest.mark.parametrize('SIZE,BLOCK_SIZE', [(98432, 1024)])
+def test_add(SIZE, BLOCK_SIZE):
+    device_id = torch.cuda.current_device()
+    device = torch.device('cuda', device_id)
+
+    x = torch.randn(SIZE, device='cuda', dtype=torch.float32)
+    y = torch.randn(SIZE, device='cuda', dtype=torch.float32)
+
+    output_cpu = torch.empty(SIZE, dtype=torch.float32)
+    output = output_cpu.cuda()
+
+    def grid(meta):
+        return (triton.cdiv(SIZE, meta['BLOCK_SIZE']),)
+
+    add_kernel[grid](x, y, output, SIZE, BLOCK_SIZE=BLOCK_SIZE)
+
+    torch.cuda.synchronize()
+
+    output_torch = x + y
+    assert_close(output, output_torch, rtol=1e-3, atol=1e-3)
+```
+To migrate, simply replace the GPU-related APIs with their corresponding NPU versions. The mapping is as follows:
+
+| GPU Syntax                      | NPU Syntax                      |
+| ------------------------------- | ------------------------------- |
+| `device='cuda'`                 | `device='npu'`                  |
+| `tensor.cuda()`                 | `tensor.npu()`                  |
+| `torch.cuda.current_device()`   | `torch.npu.current_device()`    |
+| `torch.cuda.synchronize()`      | `torch.npu.synchronize()`       |
+
+The kernel functions annotated with `@triton.jit` use the Triton generic language and generally do not require special modifications. The Launch grid calling method is also completely consistent with the GPU version.
+
+The core changes are shown in diff format:
+
+```diff
+import pytest
+import torch
+from torch.testing import assert_close
+
+import triton
+import triton.language as tl
+
+# ...（kernel code remains unchanged）...
+
+@pytest.mark.parametrize('SIZE,BLOCK_SIZE', [(98432, 1024)])
+def test_add(SIZE, BLOCK_SIZE):
+-   device_id = torch.cuda.current_device()
++   device_id = torch.npu.current_device()
+
+-   x = torch.randn(SIZE, device='cuda', dtype=torch.float32)
+-   y = torch.randn(SIZE, device='cuda', dtype=torch.float32)
++   x = torch.randn(SIZE, device='npu', dtype=torch.float32)
++   y = torch.randn(SIZE, device='npu', dtype=torch.float32)
+
+    output_cpu = torch.empty(SIZE, dtype=torch.float32)
+-   output = output_cpu.cuda()
++   output = output_cpu.npu()
+
+    add_kernel[grid](x, y, output, SIZE, BLOCK_SIZE=BLOCK_SIZE)
+
+-   torch.cuda.synchronize()
++   torch.npu.synchronize()
+
+    output_torch = x + y
+    assert_close(output, output_torch, rtol=1e-3, atol=1e-3)
+```
+After making the modifications, run the test case with `pytest`. Successful execution indicates a successful migration.
+```
+pytest test_add.py
+```
+If the `pytest` component is not installed, you can install it using `pip install pytest`.

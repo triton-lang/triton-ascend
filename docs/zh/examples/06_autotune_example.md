@@ -49,7 +49,7 @@ def test_triton_autotune():
     def triton_calc_func(x0, x1):
         n = x0.numel()
         y0 = torch.empty_like(x0)
-        grid = lambda meta: (triton.cdiv(n, meta["XS"]), 1, 1)  # 计算 grid 大小 
+        grid = lambda meta: (triton.cdiv(n, meta["XS"]), 1, 1)  # 计算 grid 大小
         triton_calc_kernel[grid](y0, x0, x1, n)
         return y0
 
@@ -85,7 +85,7 @@ if __name__ == "__main__":
 #        3. 若 configs 不为空，则框架默认不会自动生成候选 tiling 配置;
 #        4. 若 configs 不为空，且hints.auto_gen_config=True,则框架自动生成Config,并与用户定义Config合并进行配置择优；
 #        5. 进阶版本支持通过设置os.environ["TRITON_BENCH_METHOD"] = ( "npu" ) 来设置性能采集方式。
-# 
+#
 # hints(Dict[str, str])：
 # 注意：1. hints可选，用户不填时框架会自动解析切分轴（split_params），分块轴（tiling_params）等相关参数
 #      2. 用户可通过hints传参来生成tiling,涉及切分轴（split_params）、分块轴（tiling_params）、低维轴（low_dim_axes）、规约轴（reduction_axes），且四个参数需同时提供
@@ -155,7 +155,7 @@ def add_kernel(
 说明：
 
 1. Triton-Ascend默认采取benchmark的方式取片上计算时间，当设置环境变量`export TRITON_BENCH_METHOD="npu"`后，会通过`torch_npu.profiler.profile`的方式获取每个kernel配置下的片上计算时间，对于一些triton kernel计算快速的情况，例如小shape算子，相较于默认方式能够获取更准确的计算时间，但是会显著增加整体autotune的时间，请谨慎开启
-2. 目前该进阶用法针对的是 Vector 类算子，不支持 Cube 类算子。更多进阶使用示例可以参考[autotune进阶使用示例](https://gitcode.com/Ascend/triton-ascend/tree/main/third_party/ascend/unittest/autotune_ut)
+2. 目前该进阶用法针对的是 Vector 类算子，不支持 Cube 类算子。更多进阶使用示例可以参考[autotune进阶使用示例](https://gitcode.com/Ascend/triton-ascend/tree/main/third_party/ascend/unittest/autotune_ut/)。
 
 ### 参数自动解析
 
@@ -164,10 +164,10 @@ def add_kernel(
 ```Python
 @triton.jit
 def kernel_func(
-    outputptr, 
-    input_ptr, 
-    n_rows, 
-    n_cols, 
+    outputptr,
+    input_ptr,
+    n_rows,
+    n_cols,
     BLOCK_SIZE: tl.constexpr,
     XBLOCK: tl.constexpr,
     XBLOCK_SUB: tl.constexpr,
@@ -186,7 +186,7 @@ kernel_func[grid](y, x, n_rows, n_cols, BLOCK_SIZE=block_size)
 
 最后通过掩码比较和 `autotune` 中传入的 `key` 确认当前参数对应的切分轴。
 
-注意：1. 分割轴参数必须要与 `tl.program_id()` 相乘。 2. 必须要进行掩码比较，且该轴对应的key需要直接作为右值或以key为参数的min函数作为右值，才能对应到具体的切分轴，否则会导致参数解析失败。3. 识别出的分割轴参数仅限于候选参数列表，确保只有那些可以通过自动调优动态调整的参数才会被考虑。  
+注意：1. 分割轴参数必须要与 `tl.program_id()` 相乘。 2. 必须要进行掩码比较，且该轴对应的key需要直接作为右值或以key为参数的min函数作为右值，才能对应到具体的切分轴，否则会导致参数解析失败。3. 识别出的分割轴参数仅限于候选参数列表，确保只有那些可以通过自动调优动态调整的参数才会被考虑。
 
 ```Python
 @triton.autotune(
@@ -221,7 +221,7 @@ def triton_func(...):
 
 最后通过掩码比较和 `autotune` 中传入的 `key` 确认当前参数对应的分块轴。
 
-注意：1. 分块轴参数必须出现在 `tl.arange()` 的调用中，并且需在 `for` 循环中通过 `tl.range()`、`range()` 或整除运算（`//`）参与循环范围的计算。 2. 必须要进行掩码比较，且该轴对应的key需要直接作为右值或以key为参数的min函数作为右值，才能对应到具体的分块轴，否则会导致参数解析失败。3. 识别出的分块轴参数仅限于候选参数列表，确保只有那些可以通过自动调优动态调整的参数才会被考虑。  
+注意：1. 分块轴参数必须出现在 `tl.arange()` 的调用中，并且需在 `for` 循环中通过 `tl.range()`、`range()` 或整除运算（`//`）参与循环范围的计算。 2. 必须要进行掩码比较，且该轴对应的key需要直接作为右值或以key为参数的min函数作为右值，才能对应到具体的分块轴，否则会导致参数解析失败。3. 识别出的分块轴参数仅限于候选参数列表，确保只有那些可以通过自动调优动态调整的参数才会被考虑。
 
 ```Python
 @triton.autotune(

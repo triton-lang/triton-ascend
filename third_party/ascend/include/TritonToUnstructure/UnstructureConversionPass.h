@@ -27,8 +27,8 @@
 #include "mlir/Pass/Pass.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
-#include "mlir/IR/PatternMatch.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
+#include "mlir/IR/PatternMatch.h"
 
 #define GEN_PASS_DECL_TRITONTOUNSTRUCTURE
 #include "ascend/include/TritonToUnstructure/Passes.h.inc"
@@ -98,7 +98,8 @@ public:
                                 PatternRewriter &rewriter) const override;
 
 private:
-  bool checkUnstructureAnnotated(MemAccOpTy op, PatternRewriter &rewriter) const;
+  bool checkUnstructureAnnotated(MemAccOpTy op,
+                                 PatternRewriter &rewriter) const;
   Value createExtractOp(Location loc, Value value, PatternRewriter &rewriter,
                         ArrayRef<OpFoldResult> iterIdx) const;
   Value createExtractOp(Location loc, Value value, PatternRewriter &rewriter,

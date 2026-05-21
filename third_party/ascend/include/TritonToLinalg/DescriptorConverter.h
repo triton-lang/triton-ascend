@@ -42,28 +42,32 @@ using namespace mlir;
 using namespace triton;
 
 struct Descriptor {
-    Value base;
-    SmallVector<Value> shape;
-    SmallVector<Value> strides;
-    triton::PaddingOptionAttr padding;
+  Value base;
+  SmallVector<Value> shape;
+  SmallVector<Value> strides;
+  triton::PaddingOptionAttr padding;
 };
 
 bool hasATensorDescriptorType(mlir::TypeRange types);
 
-class DescriptorLoadConverter : public OpConversionPattern<triton::DescriptorLoadOp> {
+class DescriptorLoadConverter
+    : public OpConversionPattern<triton::DescriptorLoadOp> {
 public:
-    using OpConversionPattern<triton::DescriptorLoadOp>::OpConversionPattern;
+  using OpConversionPattern<triton::DescriptorLoadOp>::OpConversionPattern;
 
-    LogicalResult matchAndRewrite(triton::DescriptorLoadOp op, OpAdaptor adaptor,
-                                  ConversionPatternRewriter &rewriter) const override;
+  LogicalResult
+  matchAndRewrite(triton::DescriptorLoadOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
 };
 
-class DescriptorStoreConverter : public OpConversionPattern<triton::DescriptorStoreOp> {
+class DescriptorStoreConverter
+    : public OpConversionPattern<triton::DescriptorStoreOp> {
 public:
-    using OpConversionPattern<triton::DescriptorStoreOp>::OpConversionPattern;
+  using OpConversionPattern<triton::DescriptorStoreOp>::OpConversionPattern;
 
-    LogicalResult matchAndRewrite(triton::DescriptorStoreOp op, OpAdaptor adaptor,
-                                  ConversionPatternRewriter &rewriter) const override;
+  LogicalResult
+  matchAndRewrite(triton::DescriptorStoreOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
 };
 
 } // end of namespace DescriptorConverter

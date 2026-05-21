@@ -5,8 +5,8 @@
 `parallel` 是一个专门用于多核心并行执行的迭代器，继承自 `range` 类，提供显式的多核心并行语义。
 
 ```python
-triton.language.parallel(arg1, arg2=None, step=None, num_stages=None, 
-                         loop_unroll_factor=None, bind_sub_block: bool = False, 
+triton.language.parallel(arg1, arg2=None, step=None, num_stages=None,
+                         loop_unroll_factor=None, bind_sub_block: bool = False,
                          _semantic=None)
 ```
 
@@ -25,7 +25,7 @@ triton.language.parallel(arg1, arg2=None, step=None, num_stages=None,
 | `_semantic` | - | - | 保留参数，暂不支持外部调用 |
 
 > **注意**：`parallel` 相比于 `range` 移除了以下参数：
-> 
+>
 > - `disallow_acc_multi_buffer`
 > - `flatten`
 > - `warp_specialize`
@@ -58,7 +58,7 @@ def parallel_kernel(
     x = tl.arange(0,n_elements)
     x0 = x // 4
     x1 = x % 4
-    
+
     a_ptr = input_ptr + x0
     b_ptr = input_ptr + x0
     for i in tl.parallel(0, 3, 1, bind_sub_block = False):

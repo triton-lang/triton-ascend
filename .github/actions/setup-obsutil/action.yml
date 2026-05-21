@@ -14,7 +14,7 @@ inputs:
   arch:
     description: Runner CPU arch — amd64 or arm64
     required: false
-    default: amd64
+    default: arm64
 
 runs:
   using: composite

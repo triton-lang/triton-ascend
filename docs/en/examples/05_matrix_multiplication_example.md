@@ -4,9 +4,9 @@ This section describes how to implement a matrix multiplication kernel using Tri
 
 ## Compute Kernel
 
-The following Triton kernel implements batched matrix multiplication with bias: 
-The formula is as follows: 
-$$ \text{output}[b, i, j] = \sum_k \text{x}[b, i, k] \cdot \text{y}[k, j] + \text{z}[b, i, j] $$  
+The following Triton kernel implements batched matrix multiplication with bias:
+The formula is as follows:
+$$ \text{output}[b, i, j] = \sum_k \text{x}[b, i, k] \cdot \text{y}[k, j] + \text{z}[b, i, j] $$
 Specifically:
 
 - The shape of `x` is `(A, B)`.
@@ -110,7 +110,7 @@ def validate_cmp(dtype, y_cal, y_ref):
     """Compare the Triton compute result with the PyTorch reference result on the NPU, and set the tolerance or strict equality based on the data type."""
     y_cal=y_cal.npu()
     y_ref=y_ref.npu()
-    if dtype == 'float16': 
+    if dtype == 'float16':
         torch.testing.assert_close(y_ref, y_cal,  rtol=1e-03, atol=1e-03, equal_nan=True)
     elif dtype == 'bfloat16':
         torch.testing.assert_close(y_ref.to(torch.float32), y_cal.to(torch.float32),  rtol=1e-03, atol=1e-03, equal_nan=True)
@@ -130,8 +130,8 @@ Use `pytest` to verify the parameterization function of the `triton_dot_2_Bias` 
 
 ```python
 # Test case configuration: (A, B, C) indicates that matrix x is (A, B), y is (B, C), and bias/output is (A, C).
-testlist = [   
-    (16, 16, 16), 
+testlist = [
+    (16, 16, 16),
 ]
 
 # Supported data types (only float16 is supported currently)
@@ -142,11 +142,11 @@ typelist = ['float16',]
 def test_dot_2_Bias(sigtype, A, B, C):
     """Perform an end-to-end function test on the triton_dot_2_Bias kernel."""
     dtype = get_torch_typename(sigtype)
-    
+
     # Generate the input tensor and move it to the NPU.
     x0 = generate_tensor(shape=(A, B), dtype=sigtype).npu()
     x1 = generate_tensor(shape=(B, C), dtype=sigtype).npu()
-    
+
     # The bias items are generated using float32 (to avoid accuracy issues caused by integer bias).
     if 'int' in sigtype:
         bias = generate_tensor(shape=(A, C), dtype='int32').npu()
@@ -155,13 +155,13 @@ def test_dot_2_Bias(sigtype, A, B, C):
     else:
         bias = generate_tensor(shape=(A, C), dtype='float32').npu()
         ans = torch_dot_Bias(x0, x1, bias).to(eval(f"torch.{dtype}"))
-    
+
     # Initialize the output tensor.
     output = torch.zeros((A, C), dtype=dtype).npu()
-    
+
     # Start the Triton kernel (grid=(1,1,1), single-block execution).
     triton_dot_2_Bias[1, 1, 1](output, x0, x1, bias, A, B, C, debug=True)
-    
+
     # Verify the result correctness.
     validate_cmp(sigtype, output, ans)
     print(f"Test matmul with dtype={sigtype}, shape=({A},{B},{C}) PASSED!")

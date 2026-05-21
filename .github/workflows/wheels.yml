@@ -73,6 +73,12 @@ jobs:
           # at /project/.triton-cache and /project/.ccache inside the container.
           mkdir -p .triton-cache .ccache
 
+          # Wheel version: <base>rc3+devYYYYMMDD. Compute the build date once on
+          # the host (UTC) so all matrix cells agree even if they straddle
+          # midnight. IS_MANYLINUX=TRUE suppresses the +git<hash> append in
+          # setup.py's get_version() since +dev<date> is our local segment.
+          BUILD_DATE=$(date -u +%Y%m%d)
+
           # required to build Python 3.14 with cibuildwheel 2.23.3
           # todo: Need to update system Python to 3.11 and update cibuildwheel to latest
 
@@ -81,7 +87,8 @@ jobs:
             TRITON_BUILD_PROTON=OFF \
             TRITON_WHEEL_NAME=triton-ascend \
             TRITON_APPEND_CMAKE_ARGS='-DTRITON_BUILD_UT=OFF' \
-            TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX:-rc3} \
+            TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX:-rc3}+dev${BUILD_DATE} \
+            IS_MANYLINUX=TRUE \
             TRITON_HOME=/project/.triton-cache \
             TRITON_BUILD_WITH_CCACHE=true \
             CCACHE_DIR=/project/.ccache \
@@ -117,4 +124,4 @@ jobs:
       - name: Upload wheels to OBS
         if: github.event_name != 'pull_request'
         shell: bash
-        run: obsutil/obsutil cp -u wheelhouse/*.whl "obs://triton-ascend-artifacts/triton-ascend/"
+        run: obsutil/obsutil cp -u wheelhouse/*.whl "obs://ascend-artifcat-packages/pypi/packages/ascend/repos/pypi/triton-ascend/nightly/"

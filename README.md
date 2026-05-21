@@ -1,5 +1,3 @@
-# Triton-Ascend
-
 ## Project Overview and Value Proposition
 
 Triton-Ascend is a Triton compilation framework built for the Ascend platform, aiming to enable Triton code to run efficiently on Ascend hardware.
@@ -18,8 +16,8 @@ The Triton-Ascend compilation framework removes the barriers between Triton and 
 
 - ### Latest Updates
 
-Current version: [Triton-Ascend 3.2.1](https://gitcode.com/Ascend/triton-ascend/releases/v3.2.1)  
-CANN version: [CANN Community Edition 9.0.0](https://www.hiascend.com/developer/download/community/result?module=cann&cann=9.0.0)  
+Current version: [Triton-Ascend 3.2.1](https://github.com/triton-lang/triton-ascend/releases/v3.2.1)
+CANN version: [CANN Community Edition 9.0.0](https://www.hiascend.com/developer/download/community/result?module=cann&cann=9.0.0)
 Version plan for 2026: Upgrade to Triton 3.5.
 
 - #### Milestones
@@ -76,19 +74,19 @@ The OSs supported by Triton-Ascend are the same as those supported by CANN. Down
 
 - Commercial versions
 
-| Triton-Ascend Version| CANN Commercial Version| Release Date|
+| Triton-Ascend Version| CANN Commercial Version | Release Date |
 |-------------------|----------------------|--------------------|
-| 3.2.1           | CANN 9.0.0             | 2026/04/30         |
+| 3.2.1             | CANN 9.0.0           | 2026/04/30         |
 | 3.2.0             | CANN 8.5.0           | 2026/01/16         |
-| 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.3.RC1   | 2025/11/20<br>2025/10/30   |
+| 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.3.RC1 | 2025/11/20<br>2025/10/30 |
 
 - Community versions
 
-| Triton-Ascend Version| CANN Community Version| Release Date|
+| Triton-Ascend Version | CANN Community Version | Release Date |
 |-------------------|----------------------|--------------------|
-| 3.2.1           | CANN 9.0.0             | 2026/04/30         |
+| 3.2.1             | CANN 9.0.0           | 2026/04/30         |
 | 3.2.0             | CANN 8.5.0           | 2026/01/16         |
-| 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.5.0.alpha001<br>CANN 8.3.RC1         | 2025/11/20<br>2025/11/12<br>2025/10/30         |
+| 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.5.0.alpha001<br>CANN 8.3.RC1 | 2025/11/20<br>2025/11/12<br>2025/10/30 |
 
 ## Getting Started
 

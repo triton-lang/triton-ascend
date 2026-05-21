@@ -49,19 +49,25 @@ class BroadcastConverter : public OpConversionPattern<triton::BroadcastOp> {
 public:
   using OpConversionPattern<triton::BroadcastOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(triton::BroadcastOp op, OpAdaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const override;
+  LogicalResult
+  matchAndRewrite(triton::BroadcastOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
 };
 
 class BroadcastHoister {
 public:
   BroadcastHoister(triton::BroadcastOp op);
-  LogicalResult parse(Value operand, const Location &loc, ConversionPatternRewriter &rewriter);
-  LogicalResult parseAddptr(triton::AddPtrOp op, const Location &loc, ConversionPatternRewriter &rewriter);
-  LogicalResult parseBroadcast(triton::BroadcastOp op, const Location &loc, ConversionPatternRewriter &rewriter);
-  LogicalResult parseSplat(triton::SplatOp op, const Location &loc, ConversionPatternRewriter &rewriter);
+  LogicalResult parse(Value operand, const Location &loc,
+                      ConversionPatternRewriter &rewriter);
+  LogicalResult parseAddptr(triton::AddPtrOp op, const Location &loc,
+                            ConversionPatternRewriter &rewriter);
+  LogicalResult parseBroadcast(triton::BroadcastOp op, const Location &loc,
+                               ConversionPatternRewriter &rewriter);
+  LogicalResult parseSplat(triton::SplatOp op, const Location &loc,
+                           ConversionPatternRewriter &rewriter);
   LogicalResult findSrc(Value operand);
-  LogicalResult replaceBroadcastOp(triton::BroadcastOp op, ConversionPatternRewriter &rewriter);
+  LogicalResult replaceBroadcastOp(triton::BroadcastOp op,
+                                   ConversionPatternRewriter &rewriter);
   bool canBroadcast();
 
 private:

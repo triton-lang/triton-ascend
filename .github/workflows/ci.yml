@@ -27,7 +27,7 @@ on:
     branches: [main, 'dev-**']
     types: [checks_requested]
   push:
-    branches: [main]
+    branches: [main, 'release/**']
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -38,8 +38,8 @@ jobs:
   runner-preparation:
     uses: ./.github/workflows/runner-preparation.yml
 
-  # pre-commit:
-  #   uses: ./.github/workflows/pre-commit.yml
+  pre-commit:
+    uses: ./.github/workflows/pre-commit.yml
 
   integration-tests-ascend:
     needs: runner-preparation

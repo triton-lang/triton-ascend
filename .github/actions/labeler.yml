@@ -1,0 +1,36 @@
+build:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'CMakeLists.txt'
+          - 'cmake/**'
+          - 'Makefile'
+          - 'setup.py'
+          - 'pyproject.toml'
+          - 'MANIFEST.in'
+          - 'safe_compile.cmake'
+
+CICD:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/workflows/**'
+          - '.github/actions/**'
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'requirements*.txt'
+          - '.github/dependabot.yml'
+
+document:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
+          - 'docs/**'
+
+release:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'RELEASE.md'
+          - 'version.txt'
+  - head-branch: ['^release/']
+  - base-branch: ['^release/']

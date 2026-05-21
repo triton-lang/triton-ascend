@@ -21,6 +21,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include <optional>
 
 using namespace mlir;
@@ -186,4 +187,42 @@ std::optional<int64_t> triton::getForDirectChildBlockId(Operation *op) {
     }
   }
   return getOpBlockId(op);
+}
+
+// Find the tcb group id that contains value v
+int triton::findTcbGroupId(Value v, llvm::DenseMap<int, SmallVector<Value>> &tightlyCoupledBufferGroups)
+{
+  for (auto &tcbEntry : tightlyCoupledBufferGroups) {
+    if (llvm::is_contained(tcbEntry.second, v)) {
+      return tcbEntry.first;
+    }
+  }
+  return -1;
+}
+
+// Get isCube/isVector based on the scope's tcore_type attribute
+// Returns failure if scopeOp does not have tcore_type attribute or it's not CUBE/VECTOR
+LogicalResult triton::getScopeType(Operation *scopeOp, bool &isCube, bool &isVector)
+{
+  isCube = false;
+  isVector = false;
+
+  if (!scopeOp->hasAttr("hivm.tcore_type")) {
+    return failure();
+  }
+
+  auto attr = scopeOp->getAttr("hivm.tcore_type");
+  auto aiCAttr = hivm::TCoreTypeAttr::get(scopeOp->getContext(), hivm::TCoreType::CUBE);
+  auto aiVAttr = hivm::TCoreTypeAttr::get(scopeOp->getContext(), hivm::TCoreType::VECTOR);
+  if (attr == aiCAttr) {
+    isCube = true;
+  } else if (attr == aiVAttr) {
+    isVector = true;
+  }
+
+  if (!isCube && !isVector) {
+    return failure();
+  }
+
+  return success();
 }

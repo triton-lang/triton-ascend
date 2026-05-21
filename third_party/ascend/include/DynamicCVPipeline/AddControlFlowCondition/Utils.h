@@ -55,6 +55,13 @@ std::optional<int64_t> getOpBlockId(Operation *op);
 // Get the block_id of the immediate child of scf.for that contains op
 std::optional<int64_t> getForDirectChildBlockId(Operation *op);
 
+// Find the tcb group id that contains value v
+int findTcbGroupId(Value v, llvm::DenseMap<int, SmallVector<Value>> &tightlyCoupledBufferGroups);
+
+// Set isCube/isVector based on the scope's tcore_type attribute
+// Returns failure if scopeOp does not have tcore_type attribute
+LogicalResult getScopeType(Operation *scopeOp, bool &isCube, bool &isVector);
+
 } // namespace triton
 } // namespace mlir
 #endif // TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_UTILS_H

@@ -1,8 +1,8 @@
 #include "Profiler/Instrumentation/InstrumentationProfiler.h"
 #include "TraceDataIO/CircularLayoutParser.h"
 
-#include "Profiler/Instrumentation/AscendRuntime.h"
 #include "Driver/GPU/CudaApi.h"
+#include "Profiler/Instrumentation/AscendRuntime.h"
 #include "Profiler/Instrumentation/CudaRuntime.h"
 #include "Profiler/Instrumentation/HipRuntime.h"
 #include "Utility/Numeric.h"
@@ -50,7 +50,8 @@ InstrumentationProfiler::setMode(const std::vector<std::string> &mode) {
   }
   if (toLower(mode[0]) == toLower(DeviceTraits<DeviceType::ASCEND>::name)) {
     runtime = std::make_unique<AscendRuntime>();
-  } else if (toLower(mode[0]) == toLower(DeviceTraits<DeviceType::CUDA>::name)) {
+  } else if (toLower(mode[0]) ==
+             toLower(DeviceTraits<DeviceType::CUDA>::name)) {
     runtime = std::make_unique<CudaRuntime>();
   } else if (toLower(mode[0]) == toLower(DeviceTraits<DeviceType::HIP>::name)) {
     runtime = std::make_unique<HipRuntime>();

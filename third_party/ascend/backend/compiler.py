@@ -105,13 +105,12 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
     # function with proton ops means the kernel was compiled in non-SIMT.)
     def _reject_proton(op):
         if op.get_name() == "proton.record":
-            raise RuntimeError(
-                "Kernel uses proton instrumentation ops but is being compiled "
-                "in non-SIMT mode. Proton on Ascend is supported only with "
-                "compile_mode='simt_only'. Pin it via "
-                "@triton.autotune(configs=[Config({'compile_mode': 'simt_only'})]) "
-                "or pass compile_mode='simt_only' at the kernel call site."
-            )
+            raise RuntimeError("Kernel uses proton instrumentation ops but is being compiled "
+                               "in non-SIMT mode. Proton on Ascend is supported only with "
+                               "compile_mode='simt_only'. Pin it via "
+                               "@triton.autotune(configs=[Config({'compile_mode': 'simt_only'})]) "
+                               "or pass compile_mode='simt_only' at the kernel call site.")
+
     mod.walk(_reject_proton)
 
     # use triton_adapter to lower Triton-MLIR to linalg
@@ -921,10 +920,7 @@ def ttir_to_npubin(mod, metadata, opt):
     # Get Triton-MLIR as string
     ttir_code = str(mod)
     metadata = _parse_ttir_metadata(ttir_code, metadata)
-    with (
-        tempfile.TemporaryDirectory() as tmpdir,
-        tempfile.NamedTemporaryFile() as tmpfile
-    ):
+    with (tempfile.TemporaryDirectory() as tmpdir, tempfile.NamedTemporaryFile() as tmpfile):
         # prepare input
         src_path = os.path.join(tmpdir, "kernel.ttir.mlir")
         Path(src_path).write_text(ttir_code)

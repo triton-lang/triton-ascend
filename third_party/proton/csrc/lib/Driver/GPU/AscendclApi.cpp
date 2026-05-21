@@ -1,6 +1,6 @@
 #include "Driver/GPU/AscendclApi.h"
-#include "Driver/GPU/AscendrtApi.h"
 #include "Driver/Dispatch.h"
+#include "Driver/GPU/AscendrtApi.h"
 
 namespace proton {
 
@@ -16,7 +16,8 @@ struct ExternLibAscendcl : public ExternLibBase {
 
 void *ExternLibAscendcl::lib = nullptr;
 
-DEFINE_DISPATCH(ExternLibAscendcl, memAllocHost, aclrtMallocHost, void **, size_t)
+DEFINE_DISPATCH(ExternLibAscendcl, memAllocHost, aclrtMallocHost, void **,
+                size_t)
 
 DEFINE_DISPATCH(ExternLibAscendcl, memFreeHost, aclrtFreeHost, void *)
 

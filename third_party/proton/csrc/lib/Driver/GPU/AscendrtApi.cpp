@@ -1,6 +1,6 @@
-#include "Driver/GPU/AscendclApi.h"
 #include "Driver/GPU/AscendrtApi.h"
 #include "Driver/Dispatch.h"
+#include "Driver/GPU/AscendclApi.h"
 
 namespace proton {
 
@@ -16,21 +16,25 @@ struct ExternLibAscendrt : public ExternLibBase {
 
 void *ExternLibAscendrt::lib = nullptr;
 
-DEFINE_DISPATCH(ExternLibAscendrt, ctxGetCurrent, rtCtxGetCurrent, rtContext_t *)
+DEFINE_DISPATCH(ExternLibAscendrt, ctxGetCurrent, rtCtxGetCurrent,
+                rtContext_t *)
 
 DEFINE_DISPATCH(ExternLibAscendrt, ctxGetDevice, rtGetDevice, int32_t *)
 
 DEFINE_DISPATCH(ExternLibAscendrt, ctxGetStreamPriorityRange,
                 rtDeviceGetStreamPriorityRange, int32_t *, int32_t *)
 
-DEFINE_DISPATCH(ExternLibAscendrt, streamCreateWithPriority, rtStreamCreate, rtStream_t *, int32_t)
+DEFINE_DISPATCH(ExternLibAscendrt, streamCreateWithPriority, rtStreamCreate,
+                rtStream_t *, int32_t)
 
-DEFINE_DISPATCH(ExternLibAscendrt, streamSynchronize, rtStreamSynchronize, rtStream_t)
+DEFINE_DISPATCH(ExternLibAscendrt, streamSynchronize, rtStreamSynchronize,
+                rtStream_t)
 
-DEFINE_DISPATCH(ExternLibAscendrt, memcpyDToHAsync, rtMemcpyAsync, void *, uint64_t,
-                void *, uint64_t, rtMemcpyKind_t, rtStream_t)
+DEFINE_DISPATCH(ExternLibAscendrt, memcpyDToHAsync, rtMemcpyAsync, void *,
+                uint64_t, void *, uint64_t, rtMemcpyKind_t, rtStream_t)
 
-DEFINE_DISPATCH(ExternLibAscendrt, getSocVersion, rtGetSocVersion, char *, uint32_t)
+DEFINE_DISPATCH(ExternLibAscendrt, getSocVersion, rtGetSocVersion, char *,
+                uint32_t)
 
 Device getDevice(uint64_t index) {
   uint32_t deviceId = static_cast<uint32_t>(index);

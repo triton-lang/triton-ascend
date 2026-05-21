@@ -77,10 +77,8 @@ class NPUUtils(object):
     def get_device_properties(self, device):
         arch = self.get_arch()
         if not arch:
-            raise RuntimeError(
-                "Cannot query device properties: rtGetSocVersion returned empty. "
-                "NPU not available?"
-            )
+            raise RuntimeError("Cannot query device properties: rtGetSocVersion returned empty. "
+                               "NPU not available?")
         num_aic = self.get_aicore_num()
         num_aiv = num_aic * 2
         # max_shared_mem is the on-chip UB (Unified Buffer) budget. A5 (950)
@@ -134,15 +132,13 @@ class NPULauncher(object):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self.launch = getattr(mod, "launch")
-        self.global_scratch_size   = getattr(metadata, "global_scratch_size", 0)
-        self.global_scratch_align  = getattr(metadata, "global_scratch_align", 1)
-        self.profile_scratch_size  = getattr(metadata, "profile_scratch_size", 0)
+        self.global_scratch_size = getattr(metadata, "global_scratch_size", 0)
+        self.global_scratch_align = getattr(metadata, "global_scratch_align", 1)
+        self.profile_scratch_size = getattr(metadata, "profile_scratch_size", 0)
         self.profile_scratch_align = getattr(metadata, "profile_scratch_align", 1)
 
-    def __call__(self, gridX, gridY, gridZ, stream, function,
-                 packed_metadata, launch_metadata,
-                 launch_enter_hook, launch_exit_hook,
-                 *kernel_args, **kwargs):
+    def __call__(self, gridX, gridY, gridZ, stream, function, packed_metadata, launch_metadata, launch_enter_hook,
+                 launch_exit_hook, *kernel_args, **kwargs):
         if self.compile_only:
             cache_manager = get_cache_manager(packed_metadata['hash'])
             print("[INFO]: skip running kernel")
@@ -152,6 +148,7 @@ class NPULauncher(object):
             tensor_params_shape = get_backend_func("get_tensor_params_shape", *kernel_args)
             packed_metadata['tensor_params_shape'] = tensor_params_shape
         else:
+
             def allocate_scratch(size, align, allocator):
                 if size > 0:
                     grid_size = gridX * gridY * gridZ
@@ -160,16 +157,14 @@ class NPULauncher(object):
                     return alloc_fn(alloc_size, align, stream)
                 return None
 
-            global_scratch = allocate_scratch(self.global_scratch_size, self.global_scratch_align, _allocation._allocator)
+            global_scratch = allocate_scratch(self.global_scratch_size, self.global_scratch_align,
+                                              _allocation._allocator)
             profile_scratch = allocate_scratch(self.profile_scratch_size, self.profile_scratch_align,
                                                _allocation._profile_allocator)
 
-            profiler_registered = self.launch(
-                gridX, gridY, gridZ, stream, function,
-                global_scratch, profile_scratch,
-                packed_metadata, launch_metadata,
-                launch_enter_hook, launch_exit_hook,
-                *kernel_args, **kwargs)
+            profiler_registered = self.launch(gridX, gridY, gridZ, stream, function, global_scratch, profile_scratch,
+                                              packed_metadata, launch_metadata, launch_enter_hook, launch_exit_hook,
+                                              *kernel_args, **kwargs)
             import triton
             triton.backends.ascend.utils.TRITON_PROFILER_REGISTERED = True if profiler_registered == 1 else False
 

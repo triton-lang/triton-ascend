@@ -177,10 +177,8 @@ class InstrumentationHook(Hook):
             from triton.tools.get_ascend_devices import is_a5
             arch = triton.runtime.driver.active.utils.get_arch()
             if not is_a5(arch):
-                raise RuntimeError(
-                    f"proton instrumentation on Ascend requires SIMT-capable "
-                    f"hardware (A5 / 950); current chip is {arch!r}."
-                )
+                raise RuntimeError(f"proton instrumentation on Ascend requires SIMT-capable "
+                                   f"hardware (A5 / 950); current chip is {arch!r}.")
             self.allocator = AscendAllocator(self)
         else:
             self.allocator = CudaAllocator(self)
@@ -225,12 +223,13 @@ class InstrumentationHook(Hook):
             elif backend_name == "amd":
                 arch = triton.runtime.driver.active.utils.get_device_properties(device)["arch"].split(":")[0]
                 triton_proton.add_convert_proton_amd_gpu_to_llvm(pm, arch)
-        
+
         def to_npubin_args():
+
             def enum_to_str(value: bool, dict) -> str:
                 rev = {v: k for k, v in dict.items()}
                 return rev[value]
-            
+
             metric_type = enum_to_str(self.mode.metric_type, mode.metric_types)
             buffer_strategy = enum_to_str(self.mode.buffer_strategy, mode.buffer_strategies)
             buffer_type = enum_to_str(self.mode.buffer_type, mode.buffer_types)
@@ -238,27 +237,18 @@ class InstrumentationHook(Hook):
             granularity = enum_to_str(self.mode.granularity, mode.granularities)
             is_long_clk = False if mode.Optimize.CLOCK32 in self.mode.optimizations else True
 
-            return (
-                f"--proton-metric-type={metric_type}",
-                f"--proton-sampling-strategy={sampling_strategy}",
-                f"--proton-sampling-options={self.mode.sampling_options}",
-                f"--proton-granularity={granularity}",
-                f"--proton-buffer-strategy={buffer_strategy}",
-                f"--proton-buffer-type={buffer_type}",
-                f"--proton-buffer-size={self.mode.buffer_size}",
-                f"--proton-max-shared-mem={max_shared_mem}",
-                f"--proton-profile-scratch-size={self.profile_buffer_size}",
-                f"--proton-profile-scratch-alignment={self.profile_buffer_alignment}",
-                f"--proton-clk-ext={is_long_clk}"
-            )
-
+            return (f"--proton-metric-type={metric_type}", f"--proton-sampling-strategy={sampling_strategy}",
+                    f"--proton-sampling-options={self.mode.sampling_options}", f"--proton-granularity={granularity}",
+                    f"--proton-buffer-strategy={buffer_strategy}", f"--proton-buffer-type={buffer_type}",
+                    f"--proton-buffer-size={self.mode.buffer_size}", f"--proton-max-shared-mem={max_shared_mem}",
+                    f"--proton-profile-scratch-size={self.profile_buffer_size}",
+                    f"--proton-profile-scratch-alignment={self.profile_buffer_alignment}",
+                    f"--proton-clk-ext={is_long_clk}")
 
         backends[backend_name].compiler.instrumentation = Instrumentation({
             "ttgpuir_to_llvmir":
-            lambda pm: to_llvmir_passes(pm),
-            "llvmir_to_llvm":
-            lambda pm: to_llvm_passes(pm),
-            "ttir_to_npubin":
+            lambda pm: to_llvmir_passes(pm), "llvmir_to_llvm":
+            lambda pm: to_llvm_passes(pm), "ttir_to_npubin":
             lambda: to_npubin_args()
         })
 

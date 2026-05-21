@@ -44,12 +44,11 @@ void AscendRuntime::processHostBuffer(
   int64_t chunkSize = std::min(hostBufferSize, deviceBufferSize);
   int64_t sizeLeftOnDevice = deviceBufferSize;
   while (chunkSize > 0) {
-    ascend::memcpyDToHAsync<true>(reinterpret_cast<void *>(hostBuffer),
-                                  chunkSize,
-                                  reinterpret_cast<void*>(deviceBuffer),
-                                  chunkSize, 
-                                  rtMemcpyKind_t::RT_MEMCPY_DEVICE_TO_HOST,
-                                  reinterpret_cast<rtStream_t>(stream));
+    ascend::memcpyDToHAsync<true>(
+        reinterpret_cast<void *>(hostBuffer), chunkSize,
+        reinterpret_cast<void *>(deviceBuffer), chunkSize,
+        rtMemcpyKind_t::RT_MEMCPY_DEVICE_TO_HOST,
+        reinterpret_cast<rtStream_t>(stream));
     // We should not use synchronization here in general if we want to copy
     // buffer while the kernel is running. But for the sake of simplicity, we
     // only copy the buffer after the kernel is finished for now.

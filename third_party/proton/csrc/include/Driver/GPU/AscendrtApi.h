@@ -13,7 +13,8 @@ template <bool CheckSuccess> rtError_t ctxGetCurrent(rtContext_t *pctx);
 template <bool CheckSuccess> rtError_t ctxGetDevice(int32_t *device);
 
 template <bool CheckSuccess>
-rtError_t ctxGetStreamPriorityRange(int32_t *leastPriority, int32_t *greatestPriority);
+rtError_t ctxGetStreamPriorityRange(int32_t *leastPriority,
+                                    int32_t *greatestPriority);
 
 template <bool CheckSuccess>
 rtError_t streamCreateWithPriority(rtStream_t *pStream, int32_t priority);

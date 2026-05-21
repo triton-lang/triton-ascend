@@ -487,11 +487,13 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   auto resultShape = ptrType.getShape();
   auto resultElementType = getResultElementType(ptrType);
   int64_t sizeInByte = getTypeSizeInByte(resultElementType);
+  int64_t continuousLowRankTotalSize = 1;
 
   for (int i = ptrOffsetInfo.getRank() - 1; i >= 0; i--) {
     if (!ptrOffsetInfo.isStructured(i))
       break;
     sizeInByte *= resultShape[i];
+    continuousLowRankTotalSize *= resultShape[i];
   }
 
   // Force scalarize if memory is not aligned
@@ -509,7 +511,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   // SIMT Indirect Fast-Path Lowering in 950 seiries
   bool indirectFastPathEnabled =
       compileOn91095Flag && forceSimtTemplateFlag &&
-      (ptrOffsetInfo.isUnstructuredOrScalarlike() || routeDiscreteMaskToSimt);
+      (ptrOffsetInfo.isUnstructuredOrScalarlike() || routeDiscreteMaskToSimt ||
+        (!ptrOffsetInfo.isStructured() && continuousLowRankTotalSize < 64));
   bool rankWithinIndirectLoadStoreFastPathLimit = resultShape.size() <= 5;
   if (indirectFastPathEnabled &&
       succeeded(tryRewriteIndirectFastPath(op, loc, srcPtr, ptrOffset,

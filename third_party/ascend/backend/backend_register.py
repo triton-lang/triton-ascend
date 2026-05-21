@@ -298,7 +298,7 @@ def allocate_memory(size, stream):
 
 @backend_strategy_registry.register("torch_npu", "allocate_memory")
 def allocate_memory(size, stream):
-    return f"init_npu_utils(); workspace_addr_ptr = g_allocate_workspace({size});"
+    return f"init_npu_utils(); workspace_addr_ptr = g_allocate_workspace({size}, &workspace_handle);"
 
 
 @backend_strategy_registry.register("mindspore", "allocate_sync_block_lock")
@@ -309,7 +309,7 @@ def allocate_sync_block_lock(size, stream):
 
 @backend_strategy_registry.register("torch_npu", "allocate_sync_block_lock")
 def allocate_sync_block_lock(size, stream):
-    return f"init_npu_utils(); syncBlockLock_ptr = g_allocate_sync_block_lock({size}, {stream});"
+    return f"init_npu_utils(); syncBlockLock_ptr = g_allocate_sync_block_lock({size}, {stream}, &syncBlockLock_handle);"
 
 
 @backend_strategy_registry.register("mindspore", "pre_launch")

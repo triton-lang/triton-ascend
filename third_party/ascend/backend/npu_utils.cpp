@@ -30,6 +30,7 @@
 #include <unordered_map>
 #include <fstream>
 #include <algorithm>
+#include <utility>
 
 #include "runtime/runtime/rt.h"
 
@@ -38,7 +39,6 @@
 #include <torch_npu/csrc/core/npu/NPUWorkspaceAllocator.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
 #include <functional>
-#include <mutex>
 #endif
 
 // Use map to differentiate same name functions from different binary
@@ -328,26 +328,44 @@ static PyObject* copyMemory(PyObject* self, PyObject* args) {
 }
 
 #ifdef USE_TORCH_NPU
-static std::mutex retained_tensor_mutex;
-static std::vector<at::Tensor> retained_tensors;
+struct RetainedTensorHandle {
+  explicit RetainedTensorHandle(at::Tensor tensor) : tensor(std::move(tensor)) {}
 
-static void retainTensor(const at::Tensor &tensor) {
-  std::lock_guard<std::mutex> guard(retained_tensor_mutex);
-  retained_tensors.push_back(tensor);
+  at::Tensor tensor;
+};
+
+static void *retainTensor(at::Tensor tensor, void **handle) {
+  if (handle == nullptr) {
+    return nullptr;
+  }
+  auto *retained = new RetainedTensorHandle(std::move(tensor));
+  *handle = retained;
+  return const_cast<void*>(retained->tensor.storage().data());
 }
 
-extern "C" void* triton_allocate_workspace(uint64_t size)
+extern "C" void* triton_allocate_workspace(uint64_t size, void **handle)
 {
+  if (handle == nullptr) {
+    return nullptr;
+  }
+  *handle = nullptr;
   auto tensor = at::empty(size, at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte));
-  retainTensor(tensor);
-  return const_cast<void*>(tensor.storage().data());
+  return retainTensor(std::move(tensor), handle);
 }
 
-extern "C" void* triton_allocate_sync_block_lock(uint64_t size, void* stream)
+extern "C" void* triton_allocate_sync_block_lock(uint64_t size, void* stream, void **handle)
 {
+  if (handle == nullptr) {
+    return nullptr;
+  }
+  *handle = nullptr;
   auto tensor = at_npu::native::allocate_workspace(size, reinterpret_cast<rtStream_t>(stream));
-  retainTensor(tensor);
-  return const_cast<void*>(tensor.storage().data());
+  return retainTensor(std::move(tensor), handle);
+}
+
+extern "C" void triton_release_retained_tensor(void *handle)
+{
+  delete static_cast<RetainedTensorHandle*>(handle);
 }
 
 extern "C" void triton_async_launch(void* func_obj, const char* name)

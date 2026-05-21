@@ -73,7 +73,9 @@ class NPUUtils(object):
         # setup for remote run
         env_arch = get_ascend_arch_from_env()
 
-    def load_binary(self, name, kernel, shared, device, mix_mode):
+    def load_binary(self, name, kernel, shared, device, mix_mode=None):
+        if mix_mode is None:
+            name, mix_mode = name.rsplit("_", 1)
         return self.npu_utils_mod.load_kernel_binary(name, kernel, shared, device, mix_mode)
 
     @functools.lru_cache()
@@ -443,13 +445,15 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     npu_utils_inst = NPUUtils()
     npu_utils_so_path = npu_utils_inst.npu_utils_mod.__file__
     cpp_npu_utils_dlopen = f"""
-typedef void* (*triton_allocate_workspace_t)(uint64_t);
-typedef void* (*triton_allocate_sync_block_lock_t)(uint64_t, void*);
+typedef void* (*triton_allocate_workspace_t)(uint64_t, void**);
+typedef void* (*triton_allocate_sync_block_lock_t)(uint64_t, void*, void**);
 typedef void  (*triton_async_launch_t)(void*, const char*);
+typedef void  (*triton_release_retained_tensor_t)(void*);
 
 static triton_allocate_workspace_t g_allocate_workspace = nullptr;
 static triton_allocate_sync_block_lock_t g_allocate_sync_block_lock = nullptr;
 static triton_async_launch_t g_async_launch = nullptr;
+static triton_release_retained_tensor_t g_release_retained_tensor = nullptr;
 
 static void init_npu_utils() {{
     if (g_allocate_workspace) return;
@@ -462,6 +466,16 @@ static void init_npu_utils() {{
     g_allocate_workspace = (triton_allocate_workspace_t)dlsym(handle, "triton_allocate_workspace");
     g_allocate_sync_block_lock = (triton_allocate_sync_block_lock_t)dlsym(handle, "triton_allocate_sync_block_lock");
     g_async_launch = (triton_async_launch_t)dlsym(handle, "triton_async_launch");
+    g_release_retained_tensor = (triton_release_retained_tensor_t)dlsym(handle, "triton_release_retained_tensor");
+}}
+
+static void release_npu_tensor_handle(void* handle) {{
+    if (!handle) return;
+    if (!g_release_retained_tensor) {{
+        fprintf(stderr, "Error: triton_release_retained_tensor is unavailable\\n");
+        return;
+    }}
+    g_release_retained_tensor(handle);
 }}
 """
 
@@ -690,6 +704,7 @@ extern "C" {
 #include <assert.h>
 #include <stdbool.h>
 #include <string>
+#include <memory>
 #include <sys/syscall.h>
 #include <vector>
 #include <Python.h>
@@ -722,13 +737,19 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
   std::string name = "";
   name.append(kernelName);
   void *workspace_addr_ptr = NULL;
+  void *workspace_handle = NULL;
   uint32_t blockNum4Workspace = gridX * gridY * gridZ;
   {get_backend_func("pre_launch", True)}
   {f'''
   uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
   {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
+  std::shared_ptr<void> workspace_handle_guard(workspace_handle, release_npu_tensor_handle);
+  if (!workspace_addr_ptr) {{
+    {workspace_fail_code}
+  }}
   ''' if workspace_size > 0 else ''}
   {'std::function<rtError_t()> launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
+    {f'(void)workspace_handle_guard;' if workspace_size > 0 else ''}
     {get_backend_func("pre_launch", False)}
     uint32_t blockNum = gridX * gridY * gridZ;
 
@@ -750,10 +771,12 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
     {'if (ret != RT_ERROR_NONE) return ret;' if (target_support_ffts and enable_taskqueue) else 'if (ret != RT_ERROR_NONE) return;' if (target_support_ffts and (not enable_taskqueue)) else ''}
     // stub argument for workspace
     void *syncBlockLock_ptr = NULL;
+    void *syncBlockLock_handle = NULL;
     uint16_t ModuleId = 0;
     {f'''
     uint64_t syncBlockLockSize = {lock_num} * sizeof(int64_t);
     {get_backend_func("allocate_sync_block_lock", "syncBlockLockSize", "stream")}
+    std::shared_ptr<void> syncBlockLock_handle_guard(syncBlockLock_handle, release_npu_tensor_handle);
     if (!syncBlockLock_ptr) {{
       {alloc_success_code if enable_taskqueue else sync_lock_fail_code}
     }}

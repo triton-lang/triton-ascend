@@ -2,6 +2,7 @@ from pathlib import Path
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[2] / "backend"
+PYTEST_DIR = Path(__file__).resolve().parent
 
 
 def test_npu_utils_uses_releaseable_tensor_handles():
@@ -23,6 +24,20 @@ def test_npu_utils_logs_tensor_handle_lifecycle():
     assert 'logRetainedTensor("release", retained);' in src
     assert 'retainTensor(std::move(tensor), handle, "workspace", size)' in src
     assert 'retainTensor(std::move(tensor), handle, "sync_block_lock", size)' in src
+
+
+def test_runtime_lifecycle_case_explicitly_prints_release():
+    runtime_case = PYTEST_DIR / "test_backend_npu_utils_runtime_lifetime.py"
+
+    assert runtime_case.exists()
+    src = runtime_case.read_text()
+
+    assert 'print("[TEST] release workspace tensor handle", flush=True)' in src
+    assert 'print("[TEST] release sync_block_lock tensor handle", flush=True)' in src
+    assert "triton_release_retained_tensor(workspace_handle)" in src
+    assert "triton_release_retained_tensor(sync_handle)" in src
+    assert "[TRITON_NPU_TENSOR_LIFETIME] action=release kind=workspace" in src
+    assert "[TRITON_NPU_TENSOR_LIFETIME] action=release kind=sync_block_lock" in src
 
 
 def test_launcher_keeps_tensor_handles_until_launch_finishes():

@@ -41,6 +41,8 @@ void AnalyzeDataFlowPass::runOnOperation()
 
   pm.addPass(createAnalyzeArgsPass());
 
+  pm.addPass(createAnalyzeFlagPass());
+
   if (failed(runPipeline(pm, module))) {
     module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
     signalPassFailure();
@@ -60,6 +62,7 @@ std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeDataFlowPass()
 void registerAnalyzeDataFlowPasses()
 {
     registerPass(createAnalyzeArgsPass);
+    registerPass(createAnalyzeFlagPass);
     registerPass(createAnalyzeDataFlowPass);
 }
 

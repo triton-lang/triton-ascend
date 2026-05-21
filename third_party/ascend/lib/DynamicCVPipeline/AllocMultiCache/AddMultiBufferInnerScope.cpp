@@ -448,16 +448,27 @@ static Value getIterCount(OpBuilder &builder, mlir::scf::ForOp forOp, Location l
     return result;
 }
 
-// Build if-else chain for buffer selection: if (idx==0) -> buf[0] else ... else -> buf[N-1]
-static int buildIfChain(OpBuilder &builder, Location loc, Value indexVal, SmallVector<BufferPair> &buffers,
-                        SmallVector<Operation *> &newOps, SmallVector<Operation *> &outIfOps,
-                        function_ref<Operation *(OpBuilder &, Location, Value)> createOpFn,
-                        function_ref<Value(OpBuilder &, Location, Operation *)> yieldFn,
-                        std::optional<mlir::TypeRange> resultTypes = std::nullopt, int blockId = -1)
+// yieldFn is used for normal op case, getNestedResults is used for nested if case
+static void createConditionalYield(OpBuilder &builder, Location loc, bool hasResults,
+                                 function_ref<Value(OpBuilder &, Location, Operation *)> yieldFn,
+                                 Operation *op, std::function<SmallVector<Value>()> getNestedResults = nullptr)
 {
-    int N = buffers.size();
-    auto types = resultTypes.value_or(mlir::TypeRange {});
+    if (hasResults && getNestedResults) {
+        builder.create<mlir::scf::YieldOp>(loc, getNestedResults());
+    } else if (hasResults && yieldFn && op) {
+        builder.create<mlir::scf::YieldOp>(loc, yieldFn(builder, loc, op));
+    } else {
+        builder.create<mlir::scf::YieldOp>(loc);
+    }
+}
 
+// Build if-else chain for N==2 (simple nested structure)
+static int buildIfChainTwoBuffers(OpBuilder &builder, Location loc, Value indexVal, SmallVector<BufferPair> &buffers,
+                                  SmallVector<Operation *> &newOps, SmallVector<Operation *> &outIfOps,
+                                  function_ref<Operation *(OpBuilder &, Location, Value)> createOpFn,
+                                  function_ref<Value(OpBuilder &, Location, Operation *)> yieldFn,
+                                  mlir::TypeRange types, bool hasResults, int blockId)
+{
     // Create condition: index == 0
     Value zero = builder.create<mlir::arith::ConstantIntOp>(loc, 0, 32);
     Value firstCond = builder.create<mlir::arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::eq, indexVal, zero);
@@ -477,69 +488,117 @@ static int buildIfChain(OpBuilder &builder, Location loc, Value indexVal, SmallV
     // Then branch: use buffer[0]
     builder.setInsertionPointToStart(&firstIf.getThenRegion().front());
     Operation *op0 = createOpFn(builder, loc, buffers[0].second);
-    if (!op0) {
-        return -1;
-    }
+    if (!op0) return -1;
     newOps.push_back(op0);
-    if (yieldFn) {
-        builder.create<mlir::scf::YieldOp>(loc, yieldFn(builder, loc, op0));
-    } else {
-        builder.create<mlir::scf::YieldOp>(loc);
-    }
+    createConditionalYield(builder, loc, hasResults, yieldFn, op0, nullptr);
 
-    // Build nested else-if chain for buffer[1] to buffer[N-2]
-    mlir::Block *currentElseBlock = &firstIf.getElseRegion().front();
+    // Else branch: use buffer[1]
+    builder.setInsertionPointToStart(&firstIf.getElseRegion().front());
+    Operation *op1 = createOpFn(builder, loc, buffers[1].second);
+    if (!op1) return -1;
+    newOps.push_back(op1);
+    createConditionalYield(builder, loc, hasResults, yieldFn, op1, nullptr);
+
+    builder.setInsertionPointAfter(firstIf);
+    return 0;
+}
+
+// Build if-else chain for N>2 (if-else-if-else chain with proper yield passthrough)
+static int buildIfChainMultiBuffers(OpBuilder &builder, Location loc, Value indexVal, SmallVector<BufferPair> &buffers,
+                                    SmallVector<Operation *> &newOps, SmallVector<Operation *> &outIfOps,
+                                    function_ref<Operation *(OpBuilder &, Location, Value)> createOpFn,
+                                    function_ref<Value(OpBuilder &, Location, Operation *)> yieldFn,
+                                    mlir::TypeRange types, bool hasResults, int blockId)
+{
+    int N = buffers.size();
+
+    // Create rootIf (idx == 0)
+    Value zeroVal = builder.create<mlir::arith::ConstantIntOp>(loc, 0, 32);
+    Value firstCond = builder.create<mlir::arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::eq, indexVal, zeroVal);
+    if (blockId >= 0) {
+        zeroVal.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
+        firstCond.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
+    }
+    newOps.push_back(zeroVal.getDefiningOp());
+    newOps.push_back(firstCond.getDefiningOp());
+
+    auto rootIf = builder.create<mlir::scf::IfOp>(loc, types, firstCond, true, true);
+    if (!rootIf) return -1;
+    newOps.push_back(rootIf);
+    outIfOps.push_back(rootIf);
+
+    // Then branch of rootIf: use buffer[0]
+    builder.setInsertionPointToStart(&rootIf.getThenRegion().front());
+    Operation *op0 = createOpFn(builder, loc, buffers[0].second);
+    if (!op0) return -1;
+    newOps.push_back(op0);
+    createConditionalYield(builder, loc, hasResults, yieldFn, op0, nullptr);
+
+    // Build the nested if chain in rootIf's else region
+    Block *currentElseBlock = &rootIf.getElseRegion().front();
+
     for (int i = 1; i < N - 1; ++i) {
+        // Set insertion to current else block
         builder.setInsertionPointToStart(currentElseBlock);
+
+        // Create condition for idx == i
         Value iVal = builder.create<mlir::arith::ConstantIntOp>(loc, i, 32);
         Value cond = builder.create<mlir::arith::CmpIOp>(loc, mlir::arith::CmpIPredicate::eq, indexVal, iVal);
-        auto nestedIf = builder.create<mlir::scf::IfOp>(loc, types, cond, true, true);
-        if (!nestedIf) {
-            return -1;
-        }
-
-        newOps.push_back(iVal.getDefiningOp());
-        newOps.push_back(cond.getDefiningOp());
-        newOps.push_back(nestedIf);
-        outIfOps.push_back(nestedIf);
-
-        // Tag counter operations with block_id
         if (blockId >= 0) {
             iVal.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
             cond.getDefiningOp()->setAttr(kAttrBlockId, builder.getI32IntegerAttr(blockId));
         }
+        newOps.push_back(iVal.getDefiningOp());
+        newOps.push_back(cond.getDefiningOp());
+
+        // Create nested if for this level
+        auto nestedIf = builder.create<mlir::scf::IfOp>(loc, types, cond, true, true);
+        if (!nestedIf) return -1;
+        newOps.push_back(nestedIf);
 
         // Then branch: use buffer[i]
         builder.setInsertionPointToStart(&nestedIf.getThenRegion().front());
         Operation *op = createOpFn(builder, loc, buffers[i].second);
-        if (!op) {
-            return -1;
-        }
+        if (!op) return -1;
         newOps.push_back(op);
-        if (yieldFn) {
-            builder.create<mlir::scf::YieldOp>(loc, yieldFn(builder, loc, op));
-        } else {
-            builder.create<mlir::scf::YieldOp>(loc);
-        }
+        createConditionalYield(builder, loc, hasResults, yieldFn, op, nullptr);
 
+        // Set insertion to end of currentElseBlock and add yield
+        builder.setInsertionPointToEnd(currentElseBlock);
+        createConditionalYield(builder, loc, hasResults, yieldFn, nullptr, [&nestedIf]() { return nestedIf.getResults(); });
+
+        // Move to nestedIf's else block for next iteration
         currentElseBlock = &nestedIf.getElseRegion().front();
     }
 
-    // Final else branch: use buffer[N-1]
+    // Final else: use buffer[N-1]
     builder.setInsertionPointToStart(currentElseBlock);
     Operation *opLast = createOpFn(builder, loc, buffers[N - 1].second);
-    if (!opLast) {
-        return -1;
-    }
+    if (!opLast) return -1;
     newOps.push_back(opLast);
-    if (yieldFn) {
-        builder.create<mlir::scf::YieldOp>(loc, yieldFn(builder, loc, opLast));
-    } else {
-        builder.create<mlir::scf::YieldOp>(loc);
-    }
+    createConditionalYield(builder, loc, hasResults, yieldFn, opLast, nullptr);
 
-    builder.setInsertionPointAfter(firstIf);
+    builder.setInsertionPointAfter(rootIf);
     return 0;
+}
+
+// Build if-else chain for buffer selection: if (idx==0) -> buf[0] else ... else -> buf[N-1]
+static int buildIfChain(OpBuilder &builder, Location loc, Value indexVal, SmallVector<BufferPair> &buffers,
+                        SmallVector<Operation *> &newOps, SmallVector<Operation *> &outIfOps,
+                        function_ref<Operation *(OpBuilder &, Location, Value)> createOpFn,
+                        function_ref<Value(OpBuilder &, Location, Operation *)> yieldFn,
+                        std::optional<mlir::TypeRange> resultTypes = std::nullopt, int blockId = -1)
+{
+    int N = buffers.size();
+    auto types = resultTypes.value_or(mlir::TypeRange {});
+    bool hasResults = !types.empty();
+
+    if (N == 2) {
+        return buildIfChainTwoBuffers(builder, loc, indexVal, buffers, newOps, outIfOps,
+                                       createOpFn, yieldFn, types, hasResults, blockId);
+    }
+    return buildIfChainMultiBuffers(builder, loc, indexVal, buffers, newOps, outIfOps,
+                                    createOpFn, yieldFn, types, hasResults, blockId);
 }
 
 // Compute buffer index: iterCount % N
@@ -570,7 +629,8 @@ static SmallVector<Operation *> insertProducerLogic(OpBuilder &builder, Value de
     Location loc = depVal.getLoc();
     // Single buffer producer logic
     if (N == kBufferCountOne) {
-        Operation *producerOp = builder.create<hivm::CopyOp>(loc, mlir::TypeRange {}, depVal, buffers[0].second);
+        Operation *producerOp = builder.create<hivm::CopyOp>(
+            loc, mlir::TypeRange{}, depVal, buffers[0].second);
         if (!producerOp)
             return newOps;
         newOps.push_back(producerOp);
@@ -669,8 +729,6 @@ static void addDepMarkAttr(Operation *op, int depMark, OpBuilder &builder)
     }
 }
 
-// Add ssbuffer.intra_buffer attribute to buffer operations
-// Only tag scf::IfOp (multi-buffer), materialize_in_destination/to_tensor (single buffer)
 static void addIntraBufferAttr(SmallVector<Operation *> &ops, OpBuilder &builder)
 {
     for (auto *op : ops) {

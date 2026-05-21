@@ -463,6 +463,21 @@ int OpClassifierPass::propagateCubeUpstream()
             if (!def || cubeVisited.count(def) || isa<linalg::MatmulOp>(def))
                 continue;
 
+            // Skip arith dialect ops with tensor results (they should be VECTOR, not CUBE)
+            if (isa<arith::ArithDialect>(def->getDialect())) {
+                bool hasTensorResult = false;
+                for (Value result : def->getResults()) {
+                    if (isa<RankedTensorType>(result.getType())) {
+                        hasTensorResult = true;
+                        break;
+                    }
+                }
+                if (hasTensorResult) {
+                    LLVM_DEBUG(DBGS() << "skip " << def->getName().getStringRef() << ": arith tensor op\n");
+                    continue;
+                }
+            }
+
             // Skip operations inside linalg block (internal values)
             // But don't skip the linalg op itself
             if (isInsideNestedLinalgRegion(def)) {
@@ -598,7 +613,8 @@ int OpClassifierPass::propagateVectorUpstream()
         vecQueue.pop();
         // Skip builtin.module, func.func, and func.return operations
         if (isa<ModuleOp, func::FuncOp, func::ReturnOp>(cur) ||
-            (isa<memref::CopyOp, memref::AllocaOp>(cur) && opCoreTypes[cur] == OP_CUBE_ONLY)) {
+            (isa<memref::CopyOp, memref::AllocaOp>(cur) && opCoreTypes[cur] == OP_CUBE_ONLY))
+        {
             continue;
         }
         LLVM_DEBUG(DBGS() << "vec-def: " << *cur << "\n");
@@ -613,7 +629,7 @@ int OpClassifierPass::propagateVectorUpstream()
 
             // Skip operations that should not be marked VECTOR:
             // - matmul: never mark matmul as vector (CUBE-only operation)
-            if (isa<linalg::MatmulOp>(def)) {
+            if (isa<linalg::MatmulOp>(def) || isa<scf::SCFDialect>(def->getDialect())) {
                 LLVM_DEBUG(DBGS() << "skip " << def->getName().getStringRef() << ": should not be marked VECTOR\n");
                 continue;
             }

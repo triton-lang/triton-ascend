@@ -493,13 +493,16 @@ def test_generate_key_and_configs_uses_axis_arg_names_for_kv_dict():
         return 0 if dtype is None else 1
 
     namespace["get_byte_per_numel"] = fake_get_byte_per_numel
+    namespace["_expand_configs_with_hints"] = lambda fn, configs, config_hints: configs
 
     tuner = SimpleNamespace(
         arg_names=["x_ptr", "n_elements"],
+        fn=SimpleNamespace(),
         _get_constexpr_candidates=lambda: [],
         cache={},
         auto_gen_config=True,
         parser_mode="vector",
+        config_hints={},
         gen_configs=[],
         user_configs=[],
         is_simt_mode=False,
@@ -566,13 +569,16 @@ def test_generate_key_and_configs_preserves_promoted_reduction_axis_identity():
         dtype = "float16"
 
     namespace["get_byte_per_numel"] = lambda dtype: 0 if dtype is None else 1
+    namespace["_expand_configs_with_hints"] = lambda fn, configs, config_hints: configs
 
     tuner = SimpleNamespace(
         arg_names=["x_ptr", "n_elements"],
+        fn=SimpleNamespace(),
         _get_constexpr_candidates=lambda: [],
         cache={},
         auto_gen_config=True,
         parser_mode="vector",
+        config_hints={},
         gen_configs=[],
         user_configs=[],
         is_simt_mode=False,
@@ -1005,6 +1011,14 @@ def test_add_invalid_hints_axes_name():
             pass
 
 
+def _materialize_expanded_configs(kernel):
+    x = torch.zeros(1, dtype=torch.float32)
+    output = torch.empty_like(x)
+    kernel.cache = {}
+    kernel.generate_key_and_configs(x, output, x.numel())
+    return kernel.configs
+
+
 def test_expand_explicit_configs_with_hints():
     base_configs = [
         triton.Config({"BLOCK_SIZE": 128}),
@@ -1028,10 +1042,12 @@ def test_expand_explicit_configs_with_hints():
     ):
         pass
 
-    assert len(kernel_with_group_hint.configs) == 12
+    assert len(kernel_with_group_hint.configs) == 2
+    expanded_configs = _materialize_expanded_configs(kernel_with_group_hint)
+    assert len(expanded_configs) == 12
     actual_triplets = {
         (cfg.kwargs["BLOCK_SIZE"], cfg.kwargs["GROUP_M"], cfg.num_stages)
-        for cfg in kernel_with_group_hint.configs
+        for cfg in expanded_configs
     }
     expected_triplets = {
         (128, 2, 1), (128, 2, 2),
@@ -1063,9 +1079,10 @@ def test_expand_hints_multibuffer_maps_to_num_stages():
     ):
         pass
 
-    assert len(kernel_with_multibuffer_alias.configs) == 2
-    assert {cfg.num_stages for cfg in kernel_with_multibuffer_alias.configs} == {1, 2}
-    assert all("multibuffer" not in cfg.kwargs for cfg in kernel_with_multibuffer_alias.configs)
+    expanded_configs = _materialize_expanded_configs(kernel_with_multibuffer_alias)
+    assert len(expanded_configs) == 2
+    assert {cfg.num_stages for cfg in expanded_configs} == {1, 2}
+    assert all("multibuffer" not in cfg.kwargs for cfg in expanded_configs)
     assert kernel_with_multibuffer_alias.config_hints == {
         "GROUP_M": [2],
         "num_stages": [2, 1],
@@ -1092,8 +1109,9 @@ def test_expand_hints_explicit_num_stages_precedes_multibuffer():
     ):
         pass
 
-    assert len(kernel_num_stages_precedence.configs) == 2
-    assert {cfg.num_stages for cfg in kernel_num_stages_precedence.configs} == {1}
+    expanded_configs = _materialize_expanded_configs(kernel_num_stages_precedence)
+    assert len(expanded_configs) == 2
+    assert {cfg.num_stages for cfg in expanded_configs} == {1}
     assert kernel_num_stages_precedence.config_hints == {
         "GROUP_M": [2, 4],
         "num_stages": [1],
@@ -1124,10 +1142,11 @@ def test_expand_explicit_configs_with_mixed_hints():
     ):
         pass
 
-    assert len(kernel_with_mixed_hints.configs) == 8
-    assert {cfg.num_stages for cfg in kernel_with_mixed_hints.configs} == {1, 2}
-    assert {cfg.kwargs["GROUP_M"] for cfg in kernel_with_mixed_hints.configs} == {2, 4}
-    assert {cfg.kwargs["enable_ubuf_saving"] for cfg in kernel_with_mixed_hints.configs} == {True, False}
+    expanded_configs = _materialize_expanded_configs(kernel_with_mixed_hints)
+    assert len(expanded_configs) == 8
+    assert {cfg.num_stages for cfg in expanded_configs} == {1, 2}
+    assert {cfg.kwargs["GROUP_M"] for cfg in expanded_configs} == {2, 4}
+    assert {cfg.kwargs["enable_ubuf_saving"] for cfg in expanded_configs} == {True, False}
 
 
 def test_expand_hints_coexist_with_axis_hints():
@@ -1159,8 +1178,9 @@ def test_expand_hints_coexist_with_axis_hints():
     ):
         pass
 
-    assert len(kernel_with_axis_hints.configs) == 8
-    assert {cfg.num_stages for cfg in kernel_with_axis_hints.configs} == {1, 2}
+    expanded_configs = _materialize_expanded_configs(kernel_with_axis_hints)
+    assert len(expanded_configs) == 8
+    assert {cfg.num_stages for cfg in expanded_configs} == {1, 2}
     assert kernel_with_axis_hints.hints == {
         "axes": {"x": "n_elements"},
         "split_params": {"x": "BLOCK_SIZE"},
@@ -1171,6 +1191,43 @@ def test_expand_hints_coexist_with_axis_hints():
     assert kernel_with_axis_hints.config_hints == {
         "GROUP_M": [2, 4],
         "num_stages": [1, 2],
+    }
+
+
+def test_expand_hints_defer_explicit_configs_until_runtime():
+    @triton.autotune(
+        configs=[triton.Config({"BLOCK_SIZE": 128})],
+        key=["n_elements"],
+        hints={
+            "GROUP_M": [2, 4],
+        }
+    )
+    @triton.jit
+    def kernel_defer_explicit_configs(
+            x_ptr,
+            output_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+            GROUP_M: tl.constexpr,
+    ):
+        pass
+
+    assert len(kernel_defer_explicit_configs.configs) == 1
+    assert kernel_defer_explicit_configs.config_hints == {
+        "GROUP_M": [2, 4],
+        "num_stages": [1, 2],
+    }
+
+    expanded_configs = _materialize_expanded_configs(kernel_defer_explicit_configs)
+    assert len(expanded_configs) == 4
+    assert {
+        (cfg.kwargs["GROUP_M"], cfg.num_stages)
+        for cfg in expanded_configs
+    } == {
+        (2, 1),
+        (2, 2),
+        (4, 1),
+        (4, 2),
     }
 
 
@@ -1194,23 +1251,25 @@ def test_expand_hints_invalid_key():
 
 
 def test_expand_hints_invalid_value_container():
+    @triton.autotune(
+        configs=[triton.Config({"BLOCK_SIZE": 128})],
+        key=["n_elements"],
+        hints={
+            "GROUP_M": 4,
+        }
+    )
+    @triton.jit
+    def kernel_invalid_hint_value(
+            x_ptr,
+            output_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+            GROUP_M: tl.constexpr,
+    ):
+        pass
+
     with pytest.raises(ValueError, match="must be a non-empty list/tuple"):
-        @triton.autotune(
-            configs=[triton.Config({"BLOCK_SIZE": 128})],
-            key=["n_elements"],
-            hints={
-                "GROUP_M": 4,
-            }
-        )
-        @triton.jit
-        def kernel_invalid_hint_value(
-                x_ptr,
-                output_ptr,
-                n_elements,
-                BLOCK_SIZE: tl.constexpr,
-                GROUP_M: tl.constexpr,
-        ):
-            pass
+        _materialize_expanded_configs(kernel_invalid_hint_value)
 
 
 def test_expand_hints_invalid_multibuffer_values():
@@ -1233,41 +1292,48 @@ def test_expand_hints_invalid_multibuffer_values():
 
 
 def test_expand_hints_invalid_compile_option_value():
+    @triton.autotune(
+        configs=[triton.Config({"BLOCK_SIZE": 128})],
+        key=["n_elements"],
+        hints={
+            "num_stages": [3],
+        }
+    )
+    @triton.jit
+    def kernel_invalid_compile_hint(
+            x_ptr,
+            output_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+    ):
+        pass
+
     with pytest.raises(ValueError, match="Invalid value for 'num_stages'"):
-        @triton.autotune(
-            configs=[triton.Config({"BLOCK_SIZE": 128})],
-            key=["n_elements"],
-            hints={
-                "num_stages": [3],
-            }
-        )
-        @triton.jit
-        def kernel_invalid_compile_hint(
-                x_ptr,
-                output_ptr,
-                n_elements,
-                BLOCK_SIZE: tl.constexpr,
-        ):
-            pass
+        _materialize_expanded_configs(kernel_invalid_compile_hint)
 
 
-def test_expand_hints_require_explicit_configs():
-    with pytest.raises(ValueError, match="Config expansion hints require explicit configs"):
-        @triton.autotune(
-            configs=[],
-            key=["n_elements"],
-            hints={
-                "GROUP_M": [2, 4],
-            }
-        )
-        @triton.jit
-        def kernel_require_configs(
-                x_ptr,
-                output_ptr,
-                n_elements,
-                GROUP_M: tl.constexpr,
-        ):
-            pass
+def test_expand_hints_defer_when_only_auto_generated_configs_exist():
+    @triton.autotune(
+        configs=[],
+        key=["n_elements"],
+        hints={
+            "GROUP_M": [2, 4],
+        }
+    )
+    @triton.jit
+    def kernel_require_configs(
+            x_ptr,
+            output_ptr,
+            n_elements,
+            GROUP_M: tl.constexpr,
+    ):
+        pass
+
+    assert len(kernel_require_configs.configs) == 1
+    assert all("GROUP_M" not in cfg.kwargs for cfg in kernel_require_configs.configs)
+    assert kernel_require_configs.config_hints == {
+        "GROUP_M": [2, 4],
+    }
 
 
 def test_non_simt_num_stages_candidates_priority():

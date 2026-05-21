@@ -82,7 +82,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %lhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<128x256xbf16>
       %lhs = bufferization.to_tensor %lhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<128x256xbf16> to tensor<128x256xbf16>
+          : memref<128x256xbf16>
       annotation.mark %lhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<128x256xbf16>
 
       %rhs_vec = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x256xbf16>
@@ -105,7 +105,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %rhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<64x256xbf16>
       %rhs = bufferization.to_tensor %rhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<64x256xbf16> to tensor<64x256xbf16>
+          : memref<64x256xbf16>
       annotation.mark %rhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<64x256xbf16>
 
       %rhs_t_empty = tensor.empty() {ssbuffer.core_type = "CUBE"} : tensor<256x64xbf16>
@@ -187,7 +187,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %lhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<128x256xbf16>
       %lhs = bufferization.to_tensor %lhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<128x256xbf16> to tensor<128x256xbf16>
+          : memref<128x256xbf16>
       annotation.mark %lhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<128x256xbf16>
 
       %rhs_vec = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x256xbf16>
@@ -210,7 +210,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %rhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<64x256xbf16>
       %rhs = bufferization.to_tensor %rhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<64x256xbf16> to tensor<64x256xbf16>
+          : memref<64x256xbf16>
       annotation.mark %rhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<64x256xbf16>
 
       %rhs_t_empty = tensor.empty() {ssbuffer.core_type = "CUBE"} : tensor<256x64xbf16>
@@ -292,7 +292,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %lhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<128x256xbf16>
       %lhs = bufferization.to_tensor %lhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<128x256xbf16> to tensor<128x256xbf16>
+          : memref<128x256xbf16>
       annotation.mark %lhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<128x256xbf16>
 
       %rhs_vec = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x256xbf16>
@@ -315,7 +315,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %rhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<64x256xbf16>
       %rhs = bufferization.to_tensor %rhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<64x256xbf16> to tensor<64x256xbf16>
+          : memref<64x256xbf16>
       annotation.mark %rhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<64x256xbf16>
 
       %rhs_t_empty = tensor.empty() {ssbuffer.core_type = "CUBE"} : tensor<256x64xbf16>
@@ -397,7 +397,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %lhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<128x256xbf16>
       %lhs = bufferization.to_tensor %lhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<128x256xbf16> to tensor<128x256xbf16>
+          : memref<128x256xbf16>
       annotation.mark %lhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<128x256xbf16>
 
       %rhs_vec = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x256xbf16>
@@ -420,7 +420,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %rhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<64x256xbf16>
       %rhs = bufferization.to_tensor %rhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<64x256xbf16> to tensor<64x256xbf16>
+          : memref<64x256xbf16>
       annotation.mark %rhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<64x256xbf16>
 
       %rhs_t_empty = tensor.empty() {ssbuffer.core_type = "CUBE"} : tensor<256x64xbf16>
@@ -502,7 +502,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %lhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<128x256xbf16>
       %lhs = bufferization.to_tensor %lhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<128x256xbf16> to tensor<128x256xbf16>
+          : memref<128x256xbf16>
       annotation.mark %lhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<128x256xbf16>
 
       %rhs_vec = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x256xbf16>
@@ -525,7 +525,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %rhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<64x256xbf16>
       %rhs = bufferization.to_tensor %rhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<64x256xbf16> to tensor<64x256xbf16>
+          : memref<64x256xbf16>
       annotation.mark %rhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<64x256xbf16>
 
       %rhs_t_empty = tensor.empty() {ssbuffer.core_type = "CUBE"} : tensor<256x64xbf16>
@@ -607,7 +607,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %lhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<128x256xbf16>
       %lhs = bufferization.to_tensor %lhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<128x256xbf16> to tensor<128x256xbf16>
+          : memref<128x256xbf16>
       annotation.mark %lhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<128x256xbf16>
 
       %rhs_vec = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x256xbf16>
@@ -630,7 +630,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %rhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<64x256xbf16>
       %rhs = bufferization.to_tensor %rhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<64x256xbf16> to tensor<64x256xbf16>
+          : memref<64x256xbf16>
       annotation.mark %rhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<64x256xbf16>
 
       %rhs_t_empty = tensor.empty() {ssbuffer.core_type = "CUBE"} : tensor<256x64xbf16>
@@ -712,7 +712,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %lhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<128x256xbf16>
       %lhs = bufferization.to_tensor %lhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<128x256xbf16> to tensor<128x256xbf16>
+          : memref<128x256xbf16>
       annotation.mark %lhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<128x256xbf16>
 
       %rhs_vec = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x256xbf16>
@@ -735,7 +735,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %rhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<64x256xbf16>
       %rhs = bufferization.to_tensor %rhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<64x256xbf16> to tensor<64x256xbf16>
+          : memref<64x256xbf16>
       annotation.mark %rhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<64x256xbf16>
 
       %rhs_t_empty = tensor.empty() {ssbuffer.core_type = "CUBE"} : tensor<256x64xbf16>
@@ -817,7 +817,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %lhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<128x256xbf16>
       %lhs = bufferization.to_tensor %lhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<128x256xbf16> to tensor<128x256xbf16>
+          : memref<128x256xbf16>
       annotation.mark %lhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<128x256xbf16>
 
       %rhs_vec = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x256xbf16>
@@ -840,7 +840,7 @@ module {
           : memref<?x?xbf16, strided<[?, ?], offset: ?>> to memref<?x?xbf16, strided<[256, 1]>>
       annotation.mark %rhs_cube {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : memref<64x256xbf16>
       %rhs = bufferization.to_tensor %rhs_cube restrict writable {ssbuffer.core_type = "CUBE"}
-          : memref<64x256xbf16> to tensor<64x256xbf16>
+          : memref<64x256xbf16>
       annotation.mark %rhs {MayImplicitTransposeWithLastAxis, ssbuffer.core_type = "CUBE"} : tensor<64x256xbf16>
 
       %rhs_t_empty = tensor.empty() {ssbuffer.core_type = "CUBE"} : tensor<256x64xbf16>

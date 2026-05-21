@@ -509,7 +509,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   // SIMT Indirect Fast-Path Lowering in 950 seiries
   bool indirectFastPathEnabled =
       compileOn91095Flag && forceSimtTemplateFlag &&
-      (!ptrOffsetInfo.isStructured() || routeDiscreteMaskToSimt);
+      (ptrOffsetInfo.isUnstructuredOrScalarlike() || routeDiscreteMaskToSimt);
   bool rankWithinIndirectLoadStoreFastPathLimit = resultShape.size() <= 5;
   if (indirectFastPathEnabled &&
       succeeded(tryRewriteIndirectFastPath(op, loc, srcPtr, ptrOffset,

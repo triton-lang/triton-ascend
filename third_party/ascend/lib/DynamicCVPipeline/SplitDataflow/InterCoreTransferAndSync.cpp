@@ -732,7 +732,6 @@ LogicalResult InterCoreTransferAndSyncPass::handleVectorToCube(OpBuilder &builde
         transferIndex, dep.iniConsumerBlockId);
 
     int flagId = flagManager.acquireId(prodStart);
-    assert(flagId != -1 && "No available flag_id!!");
     auto [newProdStart, newProdEnd] = getBlockStartEnd(dep.producerBlockId, module);
     auto [newConsStart, newConsEnd] = getBlockStartEnd(dep.consumerBlockId, module);
     insertInterCoreSync(builder, transferOp, newConsStart, newConsEnd, flagId, loc, transferIndex);
@@ -765,7 +764,6 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(OpBuilder &builde
     auto [newProdStart, newProdEnd] = getBlockStartEnd(dep.producerBlockId, module); // C Block
     auto [newConsStart, newConsEnd] = getBlockStartEnd(dep.consumerBlockId, module); // V Block
     int flagId = flagManager.acquireId(newProdStart);
-    assert(flagId != -1 && "No available flag_id!!");
     insertInterCoreSync(builder, transferOp, newConsStart, newConsEnd, flagId, loc, transferIndex);
 
     transferIndex++;
@@ -797,7 +795,6 @@ LogicalResult InterCoreTransferAndSyncPass::handleMemoryDependency(OpBuilder &bu
 
     // Get flag ID
     int flagId = flagManager.acquireId(prodStart);
-    assert(flagId != -1 && "No available flag_id!!");
 
     // Determine sync direction: CUBE->VECTOR or VECTOR->CUBE
     bool isCubeToVector = (dep.type == DependencyType::CubeToVector);

@@ -21,16 +21,32 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/Debug.h"
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "llvm/Support/LogicalResult.h"
 
 namespace mlir {
 namespace CVPipeline {
+
+ComputeBlockIdManager::ComputeBlockIdManager(Operation *root)
+{
+    cntComputeBlockId = 0;
+    blockIdToOps.clear();
+    opToBlockId.clear();
+    root->walk([&](Operation *op) {
+        if (auto blockIdAttr = op->getAttrOfType<IntegerAttr>(kBlockId)) {
+            if (auto blockId = blockIdAttr.getInt()) {
+                opToBlockId[op] = blockId;
+                blockIdToOps[blockId].push_back(op);
+                cntComputeBlockId = std::max(cntComputeBlockId, static_cast<int>(blockId));
+            }
+        }
+    });
+    cntComputeBlockId++; // ensure new id is unique
+}
 
 bool ComputeBlockIdManager::isWholeCubeReady(Operation *seedOp, llvm::DenseMap<Operation *, int> &indegree)
 {
@@ -58,41 +74,25 @@ bool ComputeBlockIdManager::isSameBlock(Operation *a, Operation *b)
     return false;
 }
 
-unsigned int ComputeBlockIdManager::getNextId()
+int ComputeBlockIdManager::getNextId()
 {
-    std::lock_guard<std::mutex> lock(managerMutex);
     return cntComputeBlockId++;
-}
-
-llvm::LogicalResult ComputeBlockIdManager::markOpBlockId(Operation *op, int blockId)
-{
-    if (blockId < 0) {
-        op->emitError("marking block id as negative");
-        return llvm::failure();
-    }
-    if (!op) {
-        return llvm::success();
-    }
-    MLIRContext *ctx = op->getContext();
-    op->setAttr(kBlockId, IntegerAttr::get(IntegerType::get(ctx, blockIdWidth), blockId));
-    return record(op, blockId);
 }
 
 void ComputeBlockIdManager::updateBlockId(Operation *op, int blockId)
 {
-
+    // Force Update.
     MLIRContext *ctx = op->getContext();
     op->setAttr(kBlockId, IntegerAttr::get(IntegerType::get(ctx, blockIdWidth), blockId));
-    std::lock_guard<std::mutex> lock(managerMutex);
     auto it = opToBlockId.find(op);
     if (it != opToBlockId.end()) {
         int preBlockId = it->second;
         auto &vec = blockIdToOps[preBlockId];
-        auto vecIt = llvm::find(vec, op);  
+        auto vecIt = llvm::find(vec, op);
         if (vecIt != vec.end()) {
             vec.erase(vecIt);
         }
-    } 
+    }
     opToBlockId[op] = blockId;
     blockIdToOps[blockId].push_back(op);
 }
@@ -102,7 +102,7 @@ llvm::SmallVector<Operation *> ComputeBlockIdManager::getOpsByBlockId(int blockI
     if (blockId == -1) {
         return {};
     }
-    std::lock_guard<std::mutex> lock(managerMutex);
+
     auto it = blockIdToOps.find(blockId);
     if (it == blockIdToOps.end()) {
         return {};
@@ -112,7 +112,6 @@ llvm::SmallVector<Operation *> ComputeBlockIdManager::getOpsByBlockId(int blockI
 
 int ComputeBlockIdManager::getBlockIdByOp(Operation *op)
 {
-    std::lock_guard<std::mutex> lock(managerMutex);
     auto it = opToBlockId.find(op);
     if (it != opToBlockId.end()) {
         return it->second;
@@ -120,34 +119,11 @@ int ComputeBlockIdManager::getBlockIdByOp(Operation *op)
     return -1;
 }
 
-llvm::LogicalResult ComputeBlockIdManager::markOpsWithNewId(llvm::SmallVectorImpl<Operation *> &ops)
+llvm::LogicalResult ComputeBlockIdManager::markAndRecord(Operation *op, int blockId)
 {
-    if (ops.empty()) {
-        return llvm::success();
-    }
-    int id = static_cast<int>(getNextId());
-    for (Operation *op : ops) {
-        if (llvm::failed(markOpBlockId(op, id))) {
-            return llvm::failure();
-        }
-    }
-    return llvm::success();
-}
-
-void ComputeBlockIdManager::reset()
-{
-    std::lock_guard<std::mutex> lock(managerMutex);
-    cntComputeBlockId = 0;
-    blockIdToOps.clear();
-    opToBlockId.clear();
-}
-
-llvm::LogicalResult ComputeBlockIdManager::record(Operation *op, int blockId)
-{
-    if (!op || blockId < 0) {
-        return llvm::success();
-    }
-    std::lock_guard<std::mutex> lock(managerMutex);
+    // When we call mark, we assume the op have no record in manager.
+    MLIRContext *ctx = op->getContext();
+    op->setAttr(kBlockId, IntegerAttr::get(IntegerType::get(ctx, blockIdWidth), blockId));
     auto itOld = opToBlockId.find(op);
     if (itOld != opToBlockId.end()) {
         llvm::errs() << "Error: Operation already has a block id. Op: " << *op << ", old block id: " << itOld->second
@@ -156,14 +132,36 @@ llvm::LogicalResult ComputeBlockIdManager::record(Operation *op, int blockId)
     }
 
     opToBlockId[op] = blockId;
-    auto &vec = blockIdToOps[blockId];
-    for (Operation *existing : vec) {
-        if (existing == op) {
-            return llvm::success();
+    blockIdToOps[blockId].push_back(op);
+    return llvm::success();
+}
+
+llvm::LogicalResult ComputeBlockIdManager::markOpBlockId(Operation *op)
+{
+    int blockId = getNextId();
+    return markAndRecord(op, blockId);
+}
+
+llvm::LogicalResult ComputeBlockIdManager::markOpsWithNewId(llvm::SmallVectorImpl<Operation *> &ops)
+{
+    if (ops.empty()) {
+        return llvm::success();
+    }
+    int id = getNextId();
+    for (Operation *op : ops) {
+
+        if (llvm::failed(markAndRecord(op, id))) {
+            return llvm::failure();
         }
     }
-    vec.push_back(op);
     return llvm::success();
+}
+
+void ComputeBlockIdManager::reset()
+{
+    cntComputeBlockId = 0;
+    blockIdToOps.clear();
+    opToBlockId.clear();
 }
 
 } // namespace CVPipeline

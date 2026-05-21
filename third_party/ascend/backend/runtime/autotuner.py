@@ -207,14 +207,11 @@ def _expand_configs_with_hints(fn, configs, config_hints: Dict[str, object]):
     if not config_hints:
         return configs
 
-    if not configs:
-        raise ValueError(
-            "Config expansion hints require explicit configs. "
-            "Use 'configs' together with expansion keys in 'hints'."
-        )
-
     constexpr_names = _get_constexpr_candidates_from_fn(fn)
     _validate_config_hint_values(config_hints, constexpr_names)
+
+    if not configs:
+        return configs
 
     keys = list(config_hints.keys())
     values = [config_hints[key] for key in keys]
@@ -266,7 +263,6 @@ class AutoTilingTuner(Autotuner):
             config_hints,
             inject_default_num_stages=bool(configs) and bool(config_hints),
         )
-        configs = _expand_configs_with_hints(fn, configs, config_hints)
 
         super().__init__(
             fn,
@@ -2103,6 +2099,16 @@ class AutoTilingTuner(Autotuner):
                     if arg_name in _args
                 }
                 self._gen_tile_configs(_kv_dict, dtype, all_args)
+                self.gen_configs = _expand_configs_with_hints(
+                    self.fn,
+                    self.gen_configs,
+                    self.config_hints,
+                )
+            expanded_user_configs = _expand_configs_with_hints(
+                self.fn,
+                self.user_configs,
+                self.config_hints,
+            )
             if len(self.gen_configs) == 0 and len(self.user_configs) == 0:
                 self.configs = [
                     Config(
@@ -2117,7 +2123,7 @@ class AutoTilingTuner(Autotuner):
                     )
                 ]
             else:
-                self.configs = self.gen_configs + self.user_configs
+                self.configs = self.gen_configs + expanded_user_configs
         return key
 
     def run(self, *args, **kwargs):

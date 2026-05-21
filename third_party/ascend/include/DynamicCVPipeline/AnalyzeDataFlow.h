@@ -60,7 +60,23 @@ public:
   }
 };
 
+// Pass for analyzing flag operations
+class AnalyzeFlagPass : public PassWrapper<AnalyzeFlagPass, OperationPass<ModuleOp>> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(AnalyzeFlagPass)
+
+  AnalyzeFlagPass() = default;
+
+  void runOnOperation() override;
+
+  llvm::StringRef getArgument() const override { return "analyze-flag"; }
+  llvm::StringRef getDescription() const override {
+    return "Analyze flag operations for control flow optimization";
+  }
+};
+
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeArgsPass();
+std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeFlagPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeDataFlowPass();
 
 void registerAnalyzeDataFlowPasses();

@@ -6,8 +6,8 @@ module{
 // CHECK-LABEL: func.func @test_core_type_deps(
 // CHECK: [[ALLOC_VEC:%[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = [[TC_VEC3:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
 // CHECK-NEXT: [[ALLOC_0_VEC:%[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
-// CHECK-NEXT: [[TO_TENSOR0:%[0-9]+]] = bufferization.to_tensor [[ALLOC_VEC]] restrict writable {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16> to tensor<64x64xf16>
-// CHECK-NEXT: [[TO_TENSOR1:%[0-9]+]] = bufferization.to_tensor [[ALLOC_0_VEC]] restrict writable {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16> to tensor<64x64xf16>
+// CHECK-NEXT: [[TO_TENSOR0:%[0-9]+]] = bufferization.to_tensor [[ALLOC_VEC]] restrict writable {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
+// CHECK-NEXT: [[TO_TENSOR1:%[0-9]+]] = bufferization.to_tensor [[ALLOC_0_VEC]] restrict writable {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
 // CHECK-NEXT: [[SUBF_VEC:%[0-9]+]] = arith.subf %arg0, %arg1 {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
 // CHECK-NEXT: [[EXP_VEC:%[0-9]+]] = math.exp [[SUBF_VEC]] {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
 // CHECK-NEXT: [[TRUNC_CUBE0:%[0-9]+]] = arith.truncf [[EXP_VEC]] {ssbuffer.block_id = [[TC_CUBE0:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} : tensor<64x64xf32> to tensor<64x64xf16>
@@ -31,8 +31,8 @@ module{
     func.func @test_core_type_deps(%arg0: tensor<64x64xf32>, %arg1: tensor<64x64xf32>, %arg2: tensor<64xf32>, %arg3: tensor<64xf32>) -> tensor<64x64xf16> {
         %alloc_0 = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
         %alloc_1 = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
-        %0 = bufferization.to_tensor %alloc_0 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16> to tensor<64x64xf16>
-        %1 = bufferization.to_tensor %alloc_1 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16> to tensor<64x64xf16>
+        %0 = bufferization.to_tensor %alloc_0 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
+        %1 = bufferization.to_tensor %alloc_1 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
         %2 = arith.subf %arg0, %arg1 {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
         %3 = math.exp %2 {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
         %4 = arith.truncf %3 {ssbuffer.core_type = "CUBE"} : tensor<64x64xf32> to tensor<64x64xf16>   
@@ -58,7 +58,7 @@ module{
 
 // CHECK-LABEL: func.func @test_shrink_cube_block(
 // CHECK-NEXT: [[ALLOC_VEC:%[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = [[TC_VEC4:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x128xf16>
-// CHECK-NEXT: [[TO_TENSOR_VEC4:%[0-9]+]] = bufferization.to_tensor [[ALLOC_VEC]] restrict writable {ssbuffer.block_id = [[TC_VEC4]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x128xf16> to tensor<64x128xf16>
+// CHECK-NEXT: [[TO_TENSOR_VEC4:%[0-9]+]] = bufferization.to_tensor [[ALLOC_VEC]] restrict writable {ssbuffer.block_id = [[TC_VEC4]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x128xf16>
 // CHECK-NEXT: [[SUBF_CUBE2:%[0-9]+]] = arith.subf %arg0, %arg5 {ssbuffer.block_id = [[TC_CUBE2:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} : tensor<64x64xf32>
 // CHECK-NEXT: [[EXP_VEC6:%[0-9]+]] = math.exp [[SUBF_CUBE2]] {ssbuffer.block_id = [[TC_VEC6:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
 // CHECK-NEXT: [[TRUNC_CUBE3:%[0-9]+]] = arith.truncf [[EXP_VEC6]] {ssbuffer.block_id = [[TC_CUBE3:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} : tensor<64x64xf32> to tensor<64x64xf16>
@@ -77,16 +77,16 @@ module{
 
     func.func @test_shrink_cube_block(%arg0: tensor<64x64xf32>, %arg1: tensor<64xf32>, %arg2: tensor<64x128xf32>, %arg3: tensor<128x64xf16>, %arg4: tensor<128x64xf16>, %arg5: tensor<64x64xf32>, %arg6: tensor<64xf32>) -> tensor<64x64xf16> {
         %alloc_8 = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x128xf16>
-        %32 = bufferization.to_tensor %alloc_8 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x128xf16> to tensor<64x128xf16>
-        %37 = arith.subf %arg0, %arg5 {ssbuffer.core_type = "CUBE", ssbuffer.block_id = 0} : tensor<64x64xf32>
+        %32 = bufferization.to_tensor %alloc_8 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x128xf16>
+        %37 = arith.subf %arg0, %arg5 {ssbuffer.core_type = "CUBE"} : tensor<64x64xf32>
         %38 = math.exp %37 {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
-        %39 = arith.truncf %38 {ssbuffer.core_type = "CUBE", ssbuffer.block_id = 1} : tensor<64x64xf32> to tensor<64x64xf16>
+        %39 = arith.truncf %38 {ssbuffer.core_type = "CUBE"} : tensor<64x64xf32> to tensor<64x64xf16>
         %40 = tensor.empty() {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf16>
         %transposed_13 = linalg.transpose ins(%39 : tensor<64x64xf16>) outs(%40 : tensor<64x64xf16>) permutation = [1, 0] {ssbuffer.core_type = "VECTOR"}
-        %41 = linalg.matmul {input_precision = "ieee", ssbuffer.core_type = "CUBE", ssbuffer.block_id = 1} ins(%transposed_13, %32 : tensor<64x64xf16>, tensor<64x128xf16>) outs(%arg2 : tensor<64x128xf32>) -> tensor<64x128xf32>
+        %41 = linalg.matmul {input_precision = "ieee", ssbuffer.core_type = "CUBE"} ins(%transposed_13, %32 : tensor<64x64xf16>, tensor<64x128xf16>) outs(%arg2 : tensor<64x128xf32>) -> tensor<64x128xf32>
         %2 = tensor.empty() {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
         %3 = tensor.empty() {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
-        %42 = linalg.matmul {input_precision = "ieee", ssbuffer.core_type = "CUBE", ssbuffer.block_id = 3} ins(%32, %arg4 : tensor<64x128xf16>, tensor<128x64xf16>) outs(%3 : tensor<64x64xf32>) -> tensor<64x64xf32>
+        %42 = linalg.matmul {input_precision = "ieee", ssbuffer.core_type = "CUBE"} ins(%32, %arg4 : tensor<64x128xf16>, tensor<128x64xf16>) outs(%3 : tensor<64x64xf32>) -> tensor<64x64xf32>
         %broadcasted_14 = linalg.broadcast ins(%arg6 : tensor<64xf32>) outs(%2 : tensor<64x64xf32>) dimensions = [1] {ssbuffer.core_type = "VECTOR"}
         %43 = arith.subf %42, %broadcasted_14 {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
         %44 = arith.extf %39 {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf16> to tensor<64x64xf32>
@@ -99,7 +99,7 @@ module{
 
 // CHECK-LABEL: func.func @test_fusion_cycle_dot(
 // CHECK: [[ALLOC_VEC:%[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = [[TC_VEC4:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
-// CHECK-NEXT: [[TO_TENSOR_VEC:%[0-9]+]] = bufferization.to_tensor [[ALLOC_VEC]] restrict writable {ssbuffer.block_id = [[TC_VEC4]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16> to tensor<64x64xf16>
+// CHECK-NEXT: [[TO_TENSOR_VEC:%[0-9]+]] = bufferization.to_tensor [[ALLOC_VEC]] restrict writable {ssbuffer.block_id = [[TC_VEC4]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
 // CHECK-NEXT: [[TRUNC_CUBE1:%[0-9]+]] = arith.truncf %arg0 {ssbuffer.block_id = [[TC_CUBE1:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} : tensor<64x64xf32> to tensor<64x64xf16>
 // CHECK-NEXT: [[EXTF_VEC3:%[0-9]+]] = arith.extf [[TRUNC_CUBE1]] {ssbuffer.block_id = [[TC_VEC3:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf16> to tensor<64x64xf32>
 // CHECK-NEXT: [[ADDF_VEC3:%[0-9]+]] = arith.addf [[EXTF_VEC3]], %arg1 {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
@@ -111,7 +111,7 @@ module{
 
     func.func @test_fusion_cycle_dot(%arg0: tensor<64x64xf32>, %arg1: tensor<64x64xf32>) -> tensor<64x64xf32> {
         %alloc_0 = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
-        %0 = bufferization.to_tensor %alloc_0 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16> to tensor<64x64xf16>
+        %0 = bufferization.to_tensor %alloc_0 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
         %a = arith.truncf %arg0 {ssbuffer.core_type = "CUBE"} : tensor<64x64xf32> to tensor<64x64xf16>
         %b0 = arith.extf %a {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf16> to tensor<64x64xf32>
         %b1 = arith.addf %b0, %arg1 {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>

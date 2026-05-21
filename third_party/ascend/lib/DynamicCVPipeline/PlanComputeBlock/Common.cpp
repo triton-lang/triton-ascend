@@ -21,14 +21,14 @@
  */
  
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
+#include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
 namespace mlir {
 namespace CVPipeline {
 
 void initializeIndegreeForBlock(Block *block, llvm::DenseMap<Operation *, int> &indegree,
-                                const MemoryDependenceGraph &memGraph)
+                                const MemoryDependenceGraph &memGraph, ComputeBlockIdManager &bm)
 {
-    auto &bm = ComputeBlockIdManager::getInstance();
 
     block->walk([&](Operation *op) {
         if (op->getBlock() != block) { return; }

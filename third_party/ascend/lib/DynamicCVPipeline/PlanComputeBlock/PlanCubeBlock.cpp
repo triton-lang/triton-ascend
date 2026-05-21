@@ -64,6 +64,7 @@ class SeedRegionPlanner {
     Operation *seed;
     Block *block;
     const MemoryDependenceGraph &memGraph;
+    ComputeBlockIdManager &bm;
     llvm::DenseSet<Operation *> &assigned;
     llvm::SmallVectorImpl<Operation *> &group;
     bool willCreateCycle(Operation *op);
@@ -77,8 +78,9 @@ public:
                       Block *block,
                       const MemoryDependenceGraph &memGraph,
                       llvm::DenseSet<Operation *> &assigned,
-                      llvm::SmallVectorImpl<Operation *> &group)
-        : seed(seed), block(block), memGraph(memGraph), assigned(assigned), group(group)
+                      llvm::SmallVectorImpl<Operation *> &group,
+                      ComputeBlockIdManager &bm)
+        : seed(seed), block(block), memGraph(memGraph), assigned(assigned), group(group), bm(bm)
     {
         group.push_back(seed);
     }
@@ -95,6 +97,7 @@ struct DependencyCycleDetector {
     llvm::DenseSet<mlir::Operation *> &okSet;
     llvm::DenseSet<mlir::Operation *> visited;
     const MemoryDependenceGraph &memGraph;
+    ComputeBlockIdManager &bm;
     Block *block;
     void clear() { visited.clear(); }
     bool operator()(Operation *cur);
@@ -102,8 +105,9 @@ struct DependencyCycleDetector {
 
     DependencyCycleDetector(Block *block,
                             const MemoryDependenceGraph &memGraph,
-                            llvm::DenseSet<mlir::Operation *> &okSet)
-        : block(block), memGraph(memGraph), okSet(okSet)
+                            llvm::DenseSet<mlir::Operation *> &okSet,
+                            ComputeBlockIdManager &bm)
+        : block(block), memGraph(memGraph), okSet(okSet), bm(bm)
     {}
 };
 
@@ -125,7 +129,6 @@ bool DependencyCycleDetector::operator()(Operation *cur)
     }
     for (auto *user : allusers) {
         auto *userInBlock = getAncestorInBlock(user, block);
-        auto &bm = ComputeBlockIdManager::getInstance();
         if (bm.getBlockIdByOp(userInBlock) == -1) {
             if (dfs(userInBlock)) {
                 return true;
@@ -147,7 +150,7 @@ bool SeedRegionPlanner::willCreateCycle(Operation *op)
     llvm::DenseSet<mlir::Operation *> okSet(group.begin(), group.end());
     okSet.insert(op);
 
-    DependencyCycleDetector dfs = {block, memGraph, okSet};
+    DependencyCycleDetector dfs = {block, memGraph, okSet, bm};
 
     // DFS from every result in okSet
     for (mlir::Operation *okOp : okSet) {
@@ -161,7 +164,6 @@ bool SeedRegionPlanner::willCreateCycle(Operation *op)
             if (okSet.contains(userInBlock)) {
                 continue;
             }
-            auto &bm = ComputeBlockIdManager::getInstance();
             if (bm.getBlockIdByOp(userInBlock) == -1) {
                 dfs.clear();
                 if (dfs(userInBlock)) {
@@ -280,6 +282,7 @@ class TopologicalPartitionPlanner {
     llvm::DenseMap<Operation *, int> indegree;
     llvm::DenseSet<Operation *> &assigned;
     const MemoryDependenceGraph &memGraph;
+    ComputeBlockIdManager &bm;
     llvm::DenseSet<Operation *> newassigned;
     llvm::DenseSet<Operation *> bypassVisited;
     std::queue<Operation *> queue;
@@ -295,10 +298,10 @@ class TopologicalPartitionPlanner {
 public:
     TopologicalPartitionPlanner(Block *block,
                                 llvm::DenseSet<Operation *> &assigned,
-                                const MemoryDependenceGraph &memGraph)
-        : block(block), assigned(assigned), memGraph(memGraph)
+                                const MemoryDependenceGraph &memGraph, ComputeBlockIdManager &bm)
+        : block(block), assigned(assigned), memGraph(memGraph), bm(bm)
     {
-        initializeIndegreeForBlock(block, indegree, memGraph);
+        initializeIndegreeForBlock(block, indegree, memGraph, bm);
 
         block->walk([&](Operation *op) {
             if (op->getBlock() == block && isCubeOp(op) && !assigned.contains(op)) {
@@ -320,14 +323,13 @@ void TopologicalPartitionPlanner::removeNonCubeOpsRecursively(Operation *op)
     auto *block = op->getBlock();
     SmallVector<Operation *> allusers;
     allusers.append(op->getUsers().begin(), op->getUsers().end());
-    auto &bm = ComputeBlockIdManager::getInstance();
     for (auto *memUser : memGraph.getExecAfter(op)) {
         allusers.push_back(memUser);
     }
     for (auto *user : allusers) {
         auto *userInBlock = getAncestorInBlock(user, block);
         if (!userInBlock || !indegree.contains(userInBlock) ||
-            ComputeBlockIdManager::getInstance().isSameBlock(userInBlock, op)) {
+            bm.isSameBlock(userInBlock, op)) {
             continue;
         }
         LOG_DEBUG("Sub indegree to " << *userInBlock << " from " << *op << "new degree =  " << indegree[userInBlock] - 1
@@ -337,7 +339,6 @@ void TopologicalPartitionPlanner::removeNonCubeOpsRecursively(Operation *op)
             !shouldSkip(userInBlock)) {
             continue;
         }
-        auto &bm = ComputeBlockIdManager::getInstance();
         auto blockId = bm.getBlockIdByOp(userInBlock);
         if (blockId == -1) {
             removeNonCubeOpsRecursively(userInBlock);
@@ -368,7 +369,6 @@ static bool mapsAreDiff(const llvm::DenseMap<Operation *, int> &a, const llvm::D
  */
 llvm::LogicalResult TopologicalPartitionPlanner::removeReadyNonCubeOps()
 {
-    auto &bm = ComputeBlockIdManager::getInstance();
     auto indegreeBefore = indegree;
     size_t beforeVisitedSize = bypassVisited.size();
     for (auto &p : indegree) {
@@ -493,7 +493,6 @@ llvm::SmallVector<Operation *> TopologicalPartitionPlanner::createNewGroupFromQu
 
 llvm::LogicalResult TopologicalPartitionPlanner::run()
 {
-    auto &bm = ComputeBlockIdManager::getInstance();
     while (nonAssignedCubeCnt > 0) {
         if (failed(populateQueueWithReadyOps())) {
             return llvm::failure();
@@ -530,7 +529,7 @@ static SmallVector<Operation *> collectMatmulOps(Block *block)
  * Main entry point: Process a single block by grouping operations into
  * execution blocks using BFS and topological traversal.
  */
-static llvm::LogicalResult processBlockWithCubeBFS(Block *block, const MemoryDependenceGraph &memGraph)
+static llvm::LogicalResult processBlockWithCubeBFS(Block *block, const MemoryDependenceGraph &memGraph, ComputeBlockIdManager &bm)
 {
     llvm::DenseSet<Operation *> assigned;
     auto allDots = collectMatmulOps(block);
@@ -542,19 +541,19 @@ static llvm::LogicalResult processBlockWithCubeBFS(Block *block, const MemoryDep
         }
 
         llvm::SmallVector<Operation *> newGroup;
-        SeedRegionPlanner regionPlanner {dot, block, memGraph, assigned, newGroup};
+        SeedRegionPlanner regionPlanner {dot, block, memGraph, assigned, newGroup, bm};
         regionPlanner.run();
 
         for (auto *op : newGroup) {
             assigned.insert(op);
         }
-        if (llvm::failed(ComputeBlockIdManager::getInstance().markOpsWithNewId(newGroup))) {
+        if (llvm::failed(bm.markOpsWithNewId(newGroup))) {
           return llvm::failure();
         }
     }
 
     // Phase 2: Handle remaining Cube Ops following Topo order
-    TopologicalPartitionPlanner topoPlanner {block, assigned, memGraph};
+    TopologicalPartitionPlanner topoPlanner {block, assigned, memGraph, bm};
     return topoPlanner.run();
 }
 
@@ -564,10 +563,11 @@ void mlir::triton::PlanCubeBlockPass::runOnOperation()
     auto moduleOp = getOperation();
     auto &aa = getAnalysis<AliasAnalysis>();
     auto memGraph = MemoryDependenceGraph(moduleOp, aa);
+    auto bm = ComputeBlockIdManager(moduleOp);
 
     // We do not need to skip linalg blocks since they do not have core types and do not contain matmul
     auto result = moduleOp.walk([&](Block *block) {
-      if (llvm::failed(processBlockWithCubeBFS(block, memGraph))) {
+      if (llvm::failed(processBlockWithCubeBFS(block, memGraph, bm))) {
         return WalkResult::interrupt();
       }
       return WalkResult::advance();

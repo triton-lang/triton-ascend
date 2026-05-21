@@ -38,34 +38,28 @@ namespace CVPipeline {
  */
 class ComputeBlockIdManager {
 public:
-    static ComputeBlockIdManager &getInstance()
-    {
-        static ComputeBlockIdManager instance;
-        return instance;
-    }
 
-    unsigned int getNextId();
-
+    ComputeBlockIdManager(Operation *root);
     bool isSameBlock(Operation *a, Operation *b);
     bool isWholeCubeReady(Operation *seedOp, llvm::DenseMap<Operation *, int> &indegree);
-
-    llvm::LogicalResult markOpBlockId(Operation *op, int blockId);
+    
+    llvm::LogicalResult markOpBlockId(Operation *op);
+    llvm::LogicalResult markOpsWithNewId(llvm::SmallVectorImpl<Operation *> &ops);
     void updateBlockId(Operation *op, int blockId);
-
+    
     llvm::SmallVector<Operation *> getOpsByBlockId(int blockId);
     int getBlockIdByOp(Operation *op);
-    llvm::LogicalResult markOpsWithNewId(llvm::SmallVectorImpl<Operation *> &ops);
     void reset();
-
-private:
-    ComputeBlockIdManager() : cntComputeBlockId(0) {}
-    llvm::LogicalResult record(Operation *op, int blockId);
-
-    unsigned int cntComputeBlockId;
+    int getNextId();
+    
+    private:
+    
+    int cntComputeBlockId;
     llvm::DenseMap<int, llvm::SmallVector<Operation *>> blockIdToOps;
     llvm::DenseMap<Operation *, int> opToBlockId;
     mutable std::mutex managerMutex;
     const int blockIdWidth = 32;
+    llvm::LogicalResult markAndRecord(Operation *op, int blockId);
 };
 
 } // namespace CVPipeline

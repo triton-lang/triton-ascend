@@ -27,13 +27,16 @@
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Block.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <queue>
 
 #define DEBUG_TYPE "ub-usage-opt"
@@ -60,8 +63,8 @@ class UBUsageOptPass : public PassWrapper<UBUsageOptPass, OperationPass<ModuleOp
                            SmallVector<SmallVector<int>> &linkOut, SmallVector<SmallVector<int>> &linkIn,
                            SmallVector<int> &linkSize, SmallVector<int> &linkStart, SmallVector<int> &linkEnd,
                            SmallVector<int> &nodeBlockId, SmallVector<int> &nodeCoreType, SmallVector<int> &nodeArgs,
-                           const CVPipeline::MemoryDependenceGraph &memGraph);
-    llvm::LogicalResult UBUsageOptimization(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph);
+                           const CVPipeline::MemoryDependenceGraph &memGraph, CVPipeline::ComputeBlockIdManager &bm);
+    llvm::LogicalResult UBUsageOptimization(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph, CVPipeline::ComputeBlockIdManager &bm);
 };
 } // namespace triton
 } // namespace mlir
@@ -123,7 +126,7 @@ void UBUsageOptPass::buildUBUsageGraph(Block *block, DenseMap<Operation *, int> 
                                        SmallVector<SmallVector<int>> &linkIn, SmallVector<int> &linkSize,
                                        SmallVector<int> &linkStart, SmallVector<int> &linkEnd,
                                        SmallVector<int> &nodeBlockId, SmallVector<int> &nodeCoreType,
-                                       SmallVector<int> &nodeArgs, const CVPipeline::MemoryDependenceGraph &memGraph)
+                                       SmallVector<int> &nodeArgs, const CVPipeline::MemoryDependenceGraph &memGraph, CVPipeline::ComputeBlockIdManager &bm)
 {
     DenseMap<int, int> cubeBlockId2nodeId;
     const int cubeCoreType = static_cast<int>(CVPipeline::CoreType::CUBE_ONLY);
@@ -132,7 +135,6 @@ void UBUsageOptPass::buildUBUsageGraph(Block *block, DenseMap<Operation *, int> 
         if (op2nodeId.find(op) != op2nodeId.end()) {
             return op2nodeId.at(op);
         }
-        auto &bm = CVPipeline::ComputeBlockIdManager::getInstance();
         int coreType = static_cast<int>(CVPipeline::getOpCoreType(op));
         int blockId = bm.getBlockIdByOp(op);
         bool canShrink = (coreType == cubeCoreType && blockId != -1);
@@ -232,7 +234,6 @@ void UBUsageOptPass::buildUBUsageGraph(Block *block, DenseMap<Operation *, int> 
                 }
                 // To avoid unnesessary self-cycle.
                 // Two ops in the same cube block lead to self-cycle, so continue it.
-                auto &bm = CVPipeline::ComputeBlockIdManager::getInstance();
                 int coreType = static_cast<int>(CVPipeline::getOpCoreType(op));
                 int srcBlockId = bm.getBlockIdByOp(srcInBlock);
                 int dstBlockId = bm.getBlockIdByOp(&blockOp);
@@ -261,7 +262,6 @@ void UBUsageOptPass::buildUBUsageGraph(Block *block, DenseMap<Operation *, int> 
                 }
                 // To avoid unnesessary self-cycle.
                 // Two ops in the same cube block lead to self-cycle, so continue it.
-                auto &bm = CVPipeline::ComputeBlockIdManager::getInstance();
                 int coreType = static_cast<int>(CVPipeline::getOpCoreType(op));
                 int srcBlockId = bm.getBlockIdByOp(srcInBlock);
                 int dstBlockId = bm.getBlockIdByOp(&blockOp);
@@ -486,14 +486,15 @@ struct DependencyCycleDetector {
     llvm::DenseSet<mlir::Operation *> &okSet; // node in okSet will become one compute block;
     llvm::DenseSet<mlir::Operation *> visited;
     const CVPipeline::MemoryDependenceGraph &memGraph;
+    CVPipeline::ComputeBlockIdManager &bm;
     Block *block;
     void clear() { visited.clear(); }
     bool operator()(Operation *cur);
     bool dfs(Operation *cur) { return (*this)(cur); };
 
     DependencyCycleDetector(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
-                            llvm::DenseSet<mlir::Operation *> &okSet)
-        : block(block), memGraph(memGraph), okSet(okSet)
+                            llvm::DenseSet<mlir::Operation *> &okSet, CVPipeline::ComputeBlockIdManager &bm)
+        : block(block), memGraph(memGraph), okSet(okSet), bm(bm)
     {
     }
 };
@@ -516,7 +517,6 @@ bool DependencyCycleDetector::operator()(Operation *cur)
     }
     for (auto *user : allusers) {
         auto *userInBlock = CVPipeline::getAncestorInBlock(user, block);
-        auto &bm = CVPipeline::ComputeBlockIdManager::getInstance();
         if (bm.getBlockIdByOp(userInBlock) == -1) {
             if (dfs(userInBlock)) {
                 return true;
@@ -537,13 +537,12 @@ bool DependencyCycleDetector::operator()(Operation *cur)
     * Walk from every op in targetBlockId and willaddOps.
     * if reach other blockid ops and dfs find any targetBlockId op, then there is cycle.
 */
-static bool willCreateCycle(llvm::SmallVectorImpl<Operation *> &willaddOps, Block *block,
-                            const CVPipeline::MemoryDependenceGraph &memGraph, int targetBlockId)
+std::optional<bool> willCreateCycle(llvm::SmallVectorImpl<Operation *> &willaddOps, Block *block,
+                            const CVPipeline::MemoryDependenceGraph &memGraph, int targetBlockId, CVPipeline::ComputeBlockIdManager &bm)
 {
     // Step1: Init, Add willaddOps to targetBlockId.
     // OkSet is new block, includes two part: 1. original ops in targetBlockId. 2. willaddOps.
     llvm::DenseSet<mlir::Operation *> okSet;  
-    auto &bm = CVPipeline::ComputeBlockIdManager::getInstance();
     for (auto op : bm.getOpsByBlockId(targetBlockId)) {
         okSet.insert(op);
     }
@@ -554,7 +553,7 @@ static bool willCreateCycle(llvm::SmallVectorImpl<Operation *> &willaddOps, Bloc
         originBlockId[op] = bm.getBlockIdByOp(op);
         bm.updateBlockId(op, targetBlockId);
     }
-    DependencyCycleDetector dfs = {block, memGraph, okSet};
+    DependencyCycleDetector dfs = {block, memGraph, okSet, bm};
 
     // Step2: Walk from every op in okSet
     auto ret = false;
@@ -600,10 +599,8 @@ static bool willCreateCycle(llvm::SmallVectorImpl<Operation *> &willaddOps, Bloc
 }
 
 bool applyRecordChange(DenseMap<int, int> &recordChange, DenseMap<int, Operation *> &nodeId2op,
-                       const CVPipeline::MemoryDependenceGraph &memGraph)
+                       const CVPipeline::MemoryDependenceGraph &memGraph, CVPipeline::ComputeBlockIdManager &bm)
 {
-    auto &bm = CVPipeline::ComputeBlockIdManager::getInstance();
-
     // Get ever blockid should be add which nodeId in recordChange.
     DenseMap<int, SmallVector<int>> blockWilladd;
     for (const auto &it : recordChange) {
@@ -619,7 +616,7 @@ bool applyRecordChange(DenseMap<int, int> &recordChange, DenseMap<int, Operation
         for (int nodeId : willaddNodes) {
             willaddOps.push_back(nodeId2op[nodeId]);
         }
-        if (willCreateCycle(willaddOps, willaddOps[0]->getBlock(), memGraph, targetBlockId)) {
+        if (willCreateCycle(willaddOps, willaddOps[0]->getBlock(), memGraph, targetBlockId, bm).value_or(true)) {
             LOG_DEBUG("Find cycle when apply change for blockId: " << targetBlockId << "\n");
             for (auto nodeId : willaddNodes) {
                 LOG_DEBUG("  - " << *nodeId2op[nodeId]<<"\n");
@@ -636,7 +633,7 @@ bool applyRecordChange(DenseMap<int, int> &recordChange, DenseMap<int, Operation
     return hasError;
 }
 
-llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph)
+llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph, CVPipeline::ComputeBlockIdManager &bm)
 {
     if (!isa<scf::ForOp>(block->getParentOp())) {
         return llvm::success();
@@ -652,7 +649,7 @@ llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(Block *block, const CVPi
     SmallVector<int> nodeCoreType;
     SmallVector<int> nodeArgs;
     buildUBUsageGraph(block, op2nodeId, nodeId2op, linkOut, linkIn, linkSize, linkStart, linkEnd, nodeBlockId,
-                      nodeCoreType, nodeArgs, memGraph);
+                      nodeCoreType, nodeArgs, memGraph, bm);
     SmallVector<SmallVector<int>> needUbOpts =
         collectNeedUbOpts(linkOut, linkIn, linkStart, linkEnd, nodeBlockId, nodeCoreType, nodeId2op);
     int candidateCnt = 0;
@@ -667,7 +664,7 @@ llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(Block *block, const CVPi
                                                                 linkEnd, nodeBlockId, nodeCoreType, nodeId2op);
     LOG_DEBUG("Need change blockId for " << recordChange.size() << " nodes\n");
 
-    if (applyRecordChange(recordChange, nodeId2op, memGraph)) {
+    if (applyRecordChange(recordChange, nodeId2op, memGraph, bm)) {
         // FIXME: it shouldn't happen....
         llvm::errs() << "Some skiped when apply UB usage optimization changes.\n";
     }
@@ -681,12 +678,13 @@ void mlir::triton::UBUsageOptPass::runOnOperation()
     ModuleOp module = getOperation();
     auto &aliasAnalysis = getAnalysis<AliasAnalysis>();
     CVPipeline::MemoryDependenceGraph memDepGraph(module, aliasAnalysis);
+    auto bm = CVPipeline::ComputeBlockIdManager(module);
 
     llvm::SmallVector<Block *> blocks;
     module.walk([&](Block *block) { blocks.push_back(block); });
 
     for (Block *block : blocks) {
-        if (UBUsageOptimization(block, memDepGraph).failed()) {
+        if (UBUsageOptimization(block, memDepGraph, bm).failed()) {
             llvm::errs() << "UB usage optimization failed in block:\n";
         }
     }

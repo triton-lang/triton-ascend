@@ -36,7 +36,7 @@ namespace CVPipeline {
 
 Operation *getAncestorInBlock(Operation *inner, Block *block);
 void initializeIndegreeForBlock(Block *block, llvm::DenseMap<Operation *, int> &indegree,
-                                const MemoryDependenceGraph &memGraph);
+                                const MemoryDependenceGraph &memGraph, ComputeBlockIdManager &bm);
 
 } // namespace CVPipeline
 } // namespace mlir

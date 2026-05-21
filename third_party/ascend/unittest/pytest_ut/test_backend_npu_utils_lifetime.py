@@ -12,7 +12,17 @@ def test_npu_utils_uses_releaseable_tensor_handles():
     assert "struct RetainedTensorHandle" in src
     assert "triton_release_retained_tensor" in src
     assert "new RetainedTensorHandle" in src
-    assert "delete static_cast<RetainedTensorHandle*>" in src
+    assert "delete retained;" in src
+
+
+def test_npu_utils_logs_tensor_handle_lifecycle():
+    src = (BACKEND_DIR / "npu_utils.cpp").read_text()
+
+    assert "[TRITON_NPU_TENSOR_LIFETIME]" in src
+    assert 'logRetainedTensor("create", retained);' in src
+    assert 'logRetainedTensor("release", retained);' in src
+    assert 'retainTensor(std::move(tensor), handle, "workspace", size)' in src
+    assert 'retainTensor(std::move(tensor), handle, "sync_block_lock", size)' in src
 
 
 def test_launcher_keeps_tensor_handles_until_launch_finishes():

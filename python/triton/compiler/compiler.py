@@ -17,6 +17,8 @@ from pathlib import Path
 import re
 import functools
 import os
+import time
+from .compile_time import CompileTimeTracker, emit_ta_compile_time_log
 
 # - ^\s*tt\.func\s+ : match the start of the string, any leading whitespace, the keyword func,
 #    and any following whitespace
@@ -257,6 +259,8 @@ def compile(src, target=None, options=None, _env_vars=None):
         # cache hit!
         metadata = json.loads(Path(metadata_path).read_text())
         return CompiledKernel(src, metadata_group, hash)
+    compile_time_tracker = CompileTimeTracker()
+    total_compile_start = time.perf_counter()
     # initialize metadata
     metadata = {
         "hash": hash,
@@ -279,14 +283,16 @@ def compile(src, target=None, options=None, _env_vars=None):
     codegen_fns = backend.get_codegen_implementation()
     module_map = backend.get_module_map()
     try:
-        module = src.make_ir(options, codegen_fns, module_map, context)
+        with compile_time_tracker.record("ast_to_ttir"):
+            module = src.make_ir(options, codegen_fns, module_map, context)
     except Exception as e:
         filter_traceback(e)
         raise
     use_ir_loc = os.environ.get("USE_IR_LOC", None)
     for ext, compile_ir in list(stages.items())[first_stage:]:
         try:
-            next_module = compile_ir(module, metadata)
+            with compile_time_tracker.record(f"stage_{ext}"):
+                next_module = compile_ir(module, metadata)
         except Exception as e:
             if (ext == "ttadapter"):
                 stage_name = "ConvertTritonIRToLinalgIR"
@@ -315,9 +321,12 @@ def compile(src, target=None, options=None, _env_vars=None):
             print(f"Creating new locations for {ir_full_name}")
         module = next_module
     # write-back metadata
-    metadata_group[metadata_filename] = fn_cache_manager.put(json.dumps(metadata, default=vars), metadata_filename,
-                                                             binary=False)
-    fn_cache_manager.put_group(metadata_filename, metadata_group)
+    with compile_time_tracker.record("metadata_writeback"):
+        metadata_group[metadata_filename] = fn_cache_manager.put(json.dumps(metadata, default=vars), metadata_filename,
+                                                                 binary=False)
+        fn_cache_manager.put_group(metadata_filename, metadata_group)
+    total_compile_time = time.perf_counter() - total_compile_start
+    emit_ta_compile_time_log(src, metadata, options, compile_time_tracker.timings, total_compile_time)
     # Compilation completed, disabling multithreading in context.
     # This is needed to safely finalize threads pool inside context: if current process forks before
     # python GC deletes context object, thread pool in child process will be invalid, which could

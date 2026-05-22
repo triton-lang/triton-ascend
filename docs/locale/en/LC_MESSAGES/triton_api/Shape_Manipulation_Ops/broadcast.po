@@ -16,7 +16,7 @@ msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:5
 msgid "将两个张量广播到共同兼容的形状，使它们可以进行逐元素操作。"
-msgstr ""
+msgstr "Broadcasts two tensors to a mutually compatible shape, enabling element-wise operations."
 "Broadcasts two tensors to a mutually compatible shape so that they can "
 "undergo element-wise operations."
 
@@ -34,12 +34,12 @@ msgstr "**Function:**"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:13
 msgid "自动对齐不同秩张量得到目标形状"
-msgstr ""
+msgstr "Automatically aligns tensors of different ranks to achieve the target shape"
 "Automatically aligns tensors of different ranks to obtain the target shape"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:14
 msgid "将大小为1的维度扩展到目标形状中对应维度的大小"
-msgstr ""
+msgstr "Expands dimensions of size 1 to the corresponding dimension size in the target shape"
 "Expands dimensions of size 1 to match the corresponding dimension size in "
 "the target shape"
 
@@ -101,12 +101,12 @@ msgstr "**Type:** tensor"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:28
 msgid "**形状：** 两个tensor共同兼容的目标形状"
-msgstr ""
+msgstr "**Shape:** The mutually compatible target shape of the two tensors"
 "**Shape:** A target shape that is mutually compatible for both tensors"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:29
 msgid "**数据类型：** 每个返回的张量保持其输入的原始数据类型"
-msgstr ""
+msgstr "**Data type:** Each returned tensor retains the original data type of its input"
 "**Data Type:** Each returned tensor retains the original data type of its "
 "input"
 

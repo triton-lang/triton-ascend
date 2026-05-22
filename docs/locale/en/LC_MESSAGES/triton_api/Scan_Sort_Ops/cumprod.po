@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/cumprod.md:5
 msgid "简介：`triton.language.cumprod` 计算输入tensor沿指定轴的累积乘积，返回累积乘积结果。"
-msgstr ""
+msgstr "Description: `triton.language.cumprod` computes the cumulative product of the input tensor along the specified axis."
 "Description: `triton.language.cumprod` computes the cumulative product of "
 "the input tensor along the specified axis, returning the cumulative product "
 "result."
@@ -63,7 +63,7 @@ msgstr "`int`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/cumprod.md
 msgid "沿着哪个维度进行累积乘积操作，默认为0"
-msgstr ""
+msgstr "The dimension along which to compute the cumulative product, default is 0"
 "The dimension along which to perform cumulative product, defaults to 0"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/cumprod.md
@@ -89,7 +89,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Scan_Sort_Ops/cumprod.md:23
 msgid "当 `reverse=True` 时，计算反向累积乘积：`[a*b*c*d, b*c*d, c*d, d]`。"
-msgstr ""
+msgstr "When `reverse=True`, computes the reverse cumulative product: `[a*b*c*d, b*c*d, c*d, d]`."
 "When `reverse=True`, computes the reverse cumulative product: `[a*b*c*d, "
 "b*c*d, c*d, d]`."
 
@@ -179,7 +179,7 @@ msgstr "2.2.2 Shape Support"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/cumprod.md:38
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 

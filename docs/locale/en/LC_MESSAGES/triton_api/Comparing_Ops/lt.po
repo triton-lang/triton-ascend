@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Comparing_Ops/lt.md:5
 msgid "简介：用于比较两个张量的元素, 与`<`等价。 函数原型："
-msgstr ""
+msgstr "Description: Used to compare elements of two tensors, equivalent to `<`. Function prototype:"
 "Description: Compares elements of two tensors, equivalent to `<`. Function "
 "prototype:"
 
@@ -158,7 +158,7 @@ msgstr "×"
 
 #: ../../zh/triton_api/Comparing_Ops/lt.md:40
 msgid "结论：Triton-Ascend 对比 GPU 缺失 uint8/uint16/uint32/uint64、fp64 的支持能力。"
-msgstr ""
+msgstr "Conclusion: Triton-Ascend lacks support for uint8/uint16/uint32/uint64 and fp64 compared to GPU."
 "Conclusion: Triton-Ascend lacks support for uint8/uint16/uint32/uint64 and "
 "fp64 compared to GPU."
 
@@ -176,7 +176,7 @@ msgstr "No restrictions"
 
 #: ../../zh/triton_api/Comparing_Ops/lt.md:49
 msgid "结论：在 Shape 方面, GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 
@@ -186,13 +186,13 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Comparing_Ops/lt.md:53
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
 #: ../../zh/triton_api/Comparing_Ops/lt.md:55
 msgid "Triton-Ascend 对比 GPU 缺失 fp64 的支持能力。uint8/uint16/uint32/uint64 支持开发中。"
-msgstr ""
+msgstr "Triton-Ascend lacks fp64 support compared to GPU. Support for uint8/uint16/uint32/uint64 is under development."
 "Triton-Ascend lacks fp64 support compared to GPU. Support for "
 "uint8/uint16/uint32/uint64 is under development."
 
@@ -202,6 +202,6 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Comparing_Ops/lt.md:59
 msgid "以下示例实现了对三维张量`x0`、`x1`做小于运算："
-msgstr ""
+msgstr "The following example performs a less-than operation on 3D tensors `x0` and `x1`:"
 "The following example demonstrates the less-than operation on 3D tensors "
 "`x0` and `x1`:"

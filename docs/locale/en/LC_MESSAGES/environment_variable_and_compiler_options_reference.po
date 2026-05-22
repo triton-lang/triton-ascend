@@ -30,7 +30,7 @@ msgstr "Environment Variable Usage Example"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md:9
 msgid "环境变量需在运行 Python 程序前设置，例如："
-msgstr ""
+msgstr "Environment variables must be set before running the Python program, for example:"
 "Set environment variables before starting the Python program. Example:"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md:16
@@ -95,13 +95,13 @@ msgstr "MLIR_ENABLE_DUMP"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "在每次 MLIR 优化前转储所有内核的 IR。使用 `MLIR_ENABLE_DUMP=kernelName`可以只转储特定内核的IR。"
-msgstr ""
+msgstr "Dumps all kernel IR before each MLIR optimization pass. Use `MLIR_ENABLE_DUMP=kernelName` to dump IR for only a specific kernel."
 "Dumps the IR of all kernels before each MLIR optimization pass. Use "
 "`MLIR_ENABLE_DUMP=kernelName` to dump only the IR of a specific kernel."
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "0：不转储<br>1：转储所有内核IR kernelName：转储特定内核IR"
-msgstr ""
+msgstr "0: Do not dump<br>1: Dump all kernel IR kernelName: Dump IR for a specific kernel"
 "0: Do not dump<br>1: Dump IR of all kernels<br>kernelName: Dump IR of a "
 "specific kernel"
 
@@ -150,7 +150,7 @@ msgstr "TRITON_INTERPRET"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "使用 Triton 解释器而非 GPU 运行，支持在核函数代码中插入 Python 断点"
-msgstr ""
+msgstr "Use the Triton interpreter instead of running on GPU; supports inserting Python breakpoints in kernel function code."
 "Uses the Triton interpreter instead of running on a GPU, allowing Python "
 "breakpoints to be inserted in kernel function code."
 
@@ -164,7 +164,7 @@ msgstr "TRITON_ENABLE_LLVM_DEBUG"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "向LLVM 传递`-debug`参数，输出大量调试信息。若信息过多，可使用`TRITON_LLVM_DEBUG_ONLY`限制输出范围。"
-msgstr ""
+msgstr "Passes the `-debug` parameter to LLVM, outputting extensive debugging information. If the information is too verbose, use `TRITON_LLVM_DEBUG_ONLY` to limit the output scope."
 "Passes the `-debug` parameter to LLVM, outputting extensive debugging "
 "information. If the output is too verbose, use `TRITON_LLVM_DEBUG_ONLY` to "
 "limit the scope."
@@ -235,7 +235,7 @@ msgstr "TRITON_PRINT_AUTOTUNING"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "在自动调优完成后，输出每个内核的最佳配置及总耗时。"
-msgstr ""
+msgstr "After autotuning is complete, outputs the best configuration for each kernel and the total time consumed."
 "Outputs the best configuration and total time consumption for each kernel "
 "after autotuning is complete."
 
@@ -249,7 +249,7 @@ msgstr "MLIR_ENABLE_REMARK"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "启用MLIR 编译过程中的备注信息输出，包括以备注形式输出的性能警告。"
-msgstr ""
+msgstr "Enables remark information output during MLIR compilation, including performance warnings output as remarks."
 "Enables remark output during MLIR compilation, including performance "
 "warnings output as remarks."
 
@@ -263,7 +263,7 @@ msgstr "TRITON_KERNEL_DUMP"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "启用或禁用 Triton 内核的转储功能，当启用时，Triton 会将生成的内核代码（各编译阶段IR及最终PTX）保存到指定目录。"
-msgstr ""
+msgstr "Enables or disables the Triton kernel dump feature. When enabled, Triton saves the generated kernel code (IR at each compilation stage and final PTX) to a specified directory."
 "Enables or disables the Triton kernel dump function. When enabled, Triton "
 "saves the generated kernel code (IR at each compilation stage and the final "
 "PTX) to the specified directory."
@@ -278,7 +278,7 @@ msgstr "Current working directory or not set"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "指定 Triton 内核转储文件的保存目录。当`TRITON_KERNEL_DUMP=1`时保存IR和PTX的目录。"
-msgstr ""
+msgstr "Specifies the directory for saving Triton kernel dump files. The directory where IR and PTX are saved when `TRITON_KERNEL_DUMP=1`."
 "Specifies the directory for saving Triton kernel dump files. The directory "
 "where IR and PTX are saved when `TRITON_KERNEL_DUMP=1`."
 
@@ -305,7 +305,7 @@ msgstr "0: Do not start<br>1: Enable `tl.device_print` function"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "每个线程的GM缓冲区最大为16KB，超限内容将被丢弃。该值目前固定，后续将通过环境变量调整。"
-msgstr ""
+msgstr "Each thread's GM buffer has a maximum size of 16KB; content exceeding this limit will be discarded. This value is currently fixed and will be adjustable via an environment variable in the future."
 "The GM buffer for each thread is at most 16 KB. Excess content will be "
 "discarded. This value is currently fixed and will be adjustable via "
 "environment variables in the future."
@@ -400,7 +400,7 @@ msgstr "1 (enabled)"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "控制是否默认启用浮点运算融合优化，覆盖默认的浮点运算融合行为（如mul+add->fma）。"
-msgstr ""
+msgstr "Controls whether floating-point operation fusion optimization is enabled by default, overriding the default floating-point fusion behavior (e.g., mul+add->fma)."
 "Controls whether to enable floating-point operation fusion optimization by "
 "default, overriding the default floating-point fusion behavior (such as "
 "mul+add->fma)."
@@ -411,7 +411,7 @@ msgstr "TRITON_KERNEL_OVERRIDE"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "启用或禁用 Triton 内核覆盖功能，允许在每个编译阶段开始时用用户指定的外部文件（IR/PTX等）覆盖默认生成的内核代码。"
-msgstr ""
+msgstr "Enables or disables the Triton kernel override feature, allowing user-specified external files (IR/PTX, etc.) to override the default generated kernel code at the beginning of each compilation stage."
 "Enables or disables the Triton kernel override function, allowing user-"
 "specified external files (IR/PTX, etc.) to override the default generated "
 "kernel code at the beginning of each compilation stage."
@@ -422,7 +422,7 @@ msgstr "TRITON_OVERRIDE_DIR"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "指定 Triton 内核覆盖文件的查找目录。当`TRITON_KERNEL_OVERRIDE=1`时加载IR/PTX文件的目录。"
-msgstr ""
+msgstr "Specifies the directory for looking up Triton kernel override files. The directory from which IR/PTX files are loaded when `TRITON_KERNEL_OVERRIDE=1`."
 "Specifies the directory for finding Triton kernel override files. The "
 "directory from which IR/PTX files are loaded when "
 "`TRITON_KERNEL_OVERRIDE=1`."
@@ -433,7 +433,7 @@ msgstr "TRITON_ASCEND_COMPILE_SPEED_OPT"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "控制JIT编译器在发现内核编译失败后是否跳过后续编译阶段。设为`1`跳过（默认`0`继续尝试）。"
-msgstr ""
+msgstr "Controls whether the JIT compiler skips subsequent compilation stages after a kernel compilation failure. Set to `1` to skip (default `0` continues trying)."
 "Controls whether the JIT compiler skips subsequent compilation stages after "
 "a kernel compilation failure. Set to `1` to skip (default `0` to continue "
 "trying)."
@@ -518,7 +518,7 @@ msgstr "ENABLE_PRINT_UB_BITS"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "打开后可以获取当前UB占用量，给inductor使用。"
-msgstr ""
+msgstr "When enabled, retrieves the current UB usage for use by inductor."
 "When enabled, the current UB usage can be obtained for use by the inductor."
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
@@ -803,7 +803,7 @@ msgstr "Default `False`"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "启用或禁用 Vector 路径上的 ND 到 NZ 布局转换。"
-msgstr ""
+msgstr "Enables or disables ND to NZ layout conversion on the Vector path."
 "Enables or disables the ND to NZ layout transformation on the vector path."
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
@@ -820,7 +820,7 @@ msgstr "Default `1`"
 
 #: ../../zh/environment_variable_and_compiler_options_reference.md
 msgid "启用或禁用 AutoBlockify pass。未设置 `TRITON_ALL_BLOCKS_PARALLEL` 时忽略。"
-msgstr ""
+msgstr "Enables or disables the AutoBlockify pass. Ignored when `TRITON_ALL_BLOCKS_PARALLEL` is not set."
 "Enables or disables the AutoBlockify pass. Ignored when "
 "`TRITON_ALL_BLOCKS_PARALLEL` is not set."
 

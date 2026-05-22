@@ -27,7 +27,7 @@ msgstr "Release Compatibility Matrix"
 
 #: ../../zh/release_note.md:7
 msgid "以下是 Triton-Ascend 版本的发布兼容性矩阵："
-msgstr ""
+msgstr "The following is the release compatibility matrix for Triton-Ascend versions."
 "The release compatibility matrix of the Triton-Ascend version is as"
 "follows."
 
@@ -77,7 +77,7 @@ msgstr "Release Date"
 
 #: ../../zh/release_note.md:15
 msgid "以下是 Triton-Ascend 的发布计划。请注意：补丁版本是可选的。"
-msgstr ""
+msgstr "The following is the release plan for Triton-Ascend. Note: Patch versions are optional."
 "The following is the release plan of Triton-Ascend. Note: The patch"
 "version is optional."
 
@@ -141,7 +141,7 @@ msgstr "1\. **Full-stack support for Ascend NPU**"
 
 #: ../../zh/release_note.md:32
 msgid "完整的 Triton IR 到 NPU 指令集编译流水线"
-msgstr ""
+msgstr "Complete compilation pipeline from Triton IR to NPU instruction set."
 "   - The instruction set compilation pipeline from Triton IR to NPU is"
 "complete."
 
@@ -183,7 +183,7 @@ msgstr "1\. **Data type**: Some data types are still being improved."
 
 #: ../../zh/release_note.md:46
 msgid "**算子覆盖**: 正在持续扩展支持的算子集合"
-msgstr ""
+msgstr "**Operator Coverage**: The supported operator set is continuously expanding."
 "2. **Operator coverage**: The supported operator set is being"
 "continuously expanded."
 

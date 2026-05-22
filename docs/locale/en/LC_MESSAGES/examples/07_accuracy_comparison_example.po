@@ -12,7 +12,7 @@ msgstr "Accuracy Comparison"
 
 #: ../../zh/examples/07_accuracy_comparison_example.md:3
 msgid "在本节中，我们将使用 Triton 编写一个简单的精度比对的程序。 在此过程中，用户会学习到："
-msgstr ""
+msgstr "In this section, we will write a simple accuracy comparison program using Triton. In the process, you will learn:"
 "In this section, you will use Triton to write a simple accuracy "
 "comparison program. During this process, you will learn:"
 
@@ -30,12 +30,12 @@ msgstr "Compute kernel:"
 
 #: ../../zh/examples/07_accuracy_comparison_example.md:67
 msgid "创建一个精度比对函数，适应每一种dtype，采用对应的精度比对方法。"
-msgstr ""
+msgstr "Create an accuracy comparison function that adapts to each dtype using the corresponding accuracy comparison method."
 "Create an accuracy comparison function that adapts to each dtype and"
 "uses the corresponding accuracy comparison method."
 
 #: ../../zh/examples/07_accuracy_comparison_example.md:116
 msgid "可以使用下面指令，运行参考示例代码：tutorials/14-accuracy-comparison.py"
-msgstr ""
+msgstr "You can use the following command to run the reference example code: tutorials/14-accuracy-comparison.py"
 "You can run the following command to execute the sample code:"
 "tutorials/14-accuracy-comparison.py."

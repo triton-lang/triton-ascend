@@ -16,7 +16,7 @@ msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:5
 msgid "`inline_asm_elementwise` 用于在Triton内核中执行内联汇编代码，实现对张量的逐元素操作。"
-msgstr ""
+msgstr "`inline_asm_elementwise` is used to execute inline assembly code within a Triton kernel, enabling element-wise operations on tensors."
 "`inline_asm_elementwise` is used to execute inline assembly code within a "
 "Triton kernel, performing element-wise operations on tensors."
 
@@ -58,7 +58,7 @@ msgstr "Required"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "要执行的汇编代码，必须匹配目标平台的汇编格式"
-msgstr ""
+msgstr "The assembly code to execute must match the assembly format of the target platform."
 "The assembly code to execute, must match the assembly format of the target "
 "platform"
 
@@ -92,7 +92,7 @@ msgstr "`dtype` / `Sequence[dtype]`"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "返回张量的元素类型（可以是单个类型或类型元组）"
-msgstr ""
+msgstr "The element type of the returned tensor (can be a single type or a tuple of types)."
 "Returns the element type of the tensor (can be a single type or a tuple of "
 "types)"
 

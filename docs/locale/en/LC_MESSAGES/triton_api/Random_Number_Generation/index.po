@@ -24,7 +24,7 @@ msgstr "[randint4x](./randint4x.md)"
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
 msgid "给定 1 个seed 标量和 1 个offset 块，返回 4 个 int32 类型的随机块"
-msgstr ""
+msgstr "Given 1 seed scalar and 1 offset block, returns 4 int32 random blocks"
 "Given 1 seed scalar and 1 offset block, returns 4 random blocks of type "
 "int32"
 
@@ -34,7 +34,7 @@ msgstr "[randint](./randint.md)"
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
 msgid "给定 1 个 seed 标量和 1 个 offset 块，返回 1 个 int32 类型的随机块"
-msgstr ""
+msgstr "Given 1 seed scalar and 1 offset block, returns 1 int32 random block"
 "Given 1 seed scalar and 1 offset block, returns 1 random block of type int32"
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
@@ -43,7 +43,7 @@ msgstr "[rand](./rand.md)"
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
 msgid "给定 1 个 seed 标量和 1 个 offset 块，返回 1 个在 U(0,1) 中的 float32 类型的随机块"
-msgstr ""
+msgstr "Given 1 seed scalar and 1 offset block, returns 1 float32 random block in U(0,1)"
 "Given 1 seed scalar and 1 offset block, returns 1 random block of type "
 "float32 in U(0,1)"
 
@@ -53,6 +53,6 @@ msgstr "[randn](./randn.md)"
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
 msgid "给定 1 个 seed 标量和 1 个 offset 块，返回 1 个在 N(0,1) 中的 float32 类型的随机块"
-msgstr ""
+msgstr "Given 1 seed scalar and 1 offset block, returns 1 float32 random block in N(0,1)"
 "Given 1 seed scalar and 1 offset block, returns 1 random block of type "
 "float32 in N(0,1)"

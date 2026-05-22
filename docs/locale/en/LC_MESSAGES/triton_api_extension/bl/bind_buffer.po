@@ -32,7 +32,7 @@ msgstr "2.2 Return Value"
 
 #: ../../zh/triton_api_extension/bl/bind_buffer.md:46
 msgid "如果使用bind_buffer参数,返回bind_buffer本身"
-msgstr ""
+msgstr "If the bind_buffer parameter is used, returns the bind_buffer itself"
 "If the `bind_buffer` parameter is used, the function returns"
 "`bind_buffer` itself."
 
@@ -70,7 +70,7 @@ msgstr "In principle, all types supported by computation are supported."
 
 #: ../../zh/triton_api_extension/bl/bind_buffer.md:76
 msgid "实际后端实现时，在OneShotBufferize之后。替换的是source和target的alloc，因此二者的shape需要一致"
-msgstr ""
+msgstr "In the actual backend implementation, this occurs after OneShotBufferize. It replaces the alloc of both source and target, so their shapes must be consistent."
 "In the actual backend implementation, after `OneShotBufferize`, the"
 "`alloc` operations of the source and target are replaced, so their"
 "shapes must match."

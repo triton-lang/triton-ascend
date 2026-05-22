@@ -64,7 +64,7 @@ msgstr "Reserved parameter; external invocation is not supported yet"
 
 #: ../../zh/triton_api/Math_Ops/erf.md:16
 msgid "返回值： `x`：输出张量的shape与输入x的shape相同"
-msgstr ""
+msgstr "Return value: `x`: The output tensor has the same shape as the input tensor `x`."
 "Return value: `x`: the output tensor has the same shape as the input x"
 
 #: ../../zh/triton_api/Math_Ops/erf.md:19
@@ -157,7 +157,7 @@ msgstr "Only supports 1D to 5D tensors"
 
 #: ../../zh/triton_api/Math_Ops/erf.md:35
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support; both support 1 to 5 dimensional tensors."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms; both support 1 to 5 dimensional tensors."
 
@@ -167,13 +167,13 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Math_Ops/erf.md:39
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
 #: ../../zh/triton_api/Math_Ops/erf.md:41
 msgid "Ascend 比 GPU 少了fp64的支持，但多了fp16和bf16的支持。"
-msgstr ""
+msgstr "Ascend lacks fp64 support compared to GPU, but adds support for fp16 and bf16."
 "Ascend lacks fp64 support compared to GPU but adds fp16 and bf16 support."
 
 #: ../../zh/triton_api/Math_Ops/erf.md:43
@@ -182,6 +182,6 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Math_Ops/erf.md:45
 msgid "以下示例实现了对输入张量 `x` 做逐元素误差计算："
-msgstr ""
+msgstr "The following example computes the element-wise error function of the input tensor `x`:"
 "The following example demonstrates element-wise error function on input "
 "tensor `x`:"

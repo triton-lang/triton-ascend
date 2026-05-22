@@ -23,7 +23,7 @@ msgstr "Installation Guide"
 
 #: ../../zh/installation_guide.md:3
 msgid "请根据需要，选择不同的安装方式，跳转至对应步骤："
-msgstr ""
+msgstr "Choose a different installation method as needed and jump to the corresponding steps."
 "Choose the appropriate installation method as needed and proceed to "
 "thecorresponding steps:"
 
@@ -144,7 +144,7 @@ msgstr ""
 
 #: ../../zh/installation_guide.md:61
 msgid "观察到类似的输出即说明环境已搭建完成。"
-msgstr ""
+msgstr "Observing similar output indicates that the environment has been successfully set up."
 "If an output similar to the following is displayed, the environment is "
 "correctly configured:"
 
@@ -231,7 +231,7 @@ msgstr ""
 #: ../../zh/installation_guide.md:89
 #, python-brace-format
 msgid "在安装过程中，CANN 版本“**{version}**”请选择如下版本之一。建议下载安装 8.5.0 版本:"
-msgstr ""
+msgstr "During installation, choose one of the following CANN versions “**{version}**”. It is recommended to download and install version 8.5.0."
 "During installation, select one of the following CANN versions for "
 "\"**{version}**\". It is recommended to download and install version "
 "8.5.0:"
@@ -383,7 +383,7 @@ msgstr ""
 
 #: ../../zh/installation_guide.md:159
 msgid "在构建前，您需要完成相关构建组件的<a href=\"#code-require\">依赖安装</a>。"
-msgstr ""
+msgstr "Before building, you need to complete the <a href=\"#code-require\">dependency installation</a> for the relevant build components."
 "Before building, you need to install the required build dependencies as "
 "outlined in <a href=\"#code-require\">Dependency Installation</a>."
 
@@ -452,7 +452,7 @@ msgstr "Install System Library Dependencies"
 
 #: ../../zh/installation_guide.md:178
 msgid "安装zlib1g-dev/lld/clang，可选择安装ccache包用于加速构建。"
-msgstr ""
+msgstr "Install zlib1g-dev/lld/clang, and optionally install the ccache package to speed up the build."
 "Install zlib1g-dev, lld, and clang. You can also install the ccache "
 "package to accelerate builds."
 
@@ -466,7 +466,7 @@ msgstr "Recommended version: lld >= 15"
 
 #: ../../zh/installation_guide.md:190
 msgid "Triton-Ascend的构建强依赖zlib1g-dev，如果您使用yum源，请参考如下命令安装："
-msgstr ""
+msgstr "Triton-Ascend's build strongly depends on zlib1g-dev. If you use yum, please refer to the following command to install."
 "Building Triton-Ascend has a strong dependency on zlib1g-dev. If you use "
 "the yum package manager, install it using the following command:"
 
@@ -520,7 +520,7 @@ msgstr ""
 
 #: ../../zh/installation_guide.md:243
 msgid "步骤2：设置环境变量 LLVM_INSTALL_PREFIX 为您的目标安装路径："
-msgstr ""
+msgstr "Step 2: Set the environment variable LLVM_INSTALL_PREFIX to your target installation path."
 "Step 2: Set the environment variable LLVM_INSTALL_PREFIX to your target "
 "installation path:"
 
@@ -543,7 +543,7 @@ msgstr "Build Triton-Ascend"
 #: ../../zh/installation_guide.md:283
 #, python-brace-format
 msgid "步骤1：请确认已设置 [基于LLVM构建] 章节中，LLVM安装的目标路径 ${LLVM_INSTALL_PREFIX}"
-msgstr ""
+msgstr "Step 1: Please confirm that the target LLVM installation path ${LLVM_INSTALL_PREFIX} from the [LLVM-based Build] section has been set."
 "Step 1: Confirm that the LLVM installation target path "
 "${LLVM_INSTALL_PREFIX} has been set as described in the Building Based on"
 " LLVM section."
@@ -583,7 +583,7 @@ msgstr "Installation via Dockerfile"
 
 #: ../../zh/installation_guide.md:313
 msgid "我们提供了Dockerfile帮助您安装Docker环境镜像。构建过程使用`quay.io/ascend/cann`预构建镜像作为基础镜像，跳过CANN安装步骤，显著加快构建速度。"
-msgstr ""
+msgstr "We provide a Dockerfile to help you install the Docker environment image. The build process uses the `quay.io/ascend/cann` pre-built image as the base image, skipping the CANN installation step and significantly accelerating the build."
 "We provide a Dockerfile to help you build a Docker environment image. The"
 " build process uses the `quay.io/ascend/cann` pre-built image as the base"
 " image, skipping the CANN installation step and significantly "
@@ -741,7 +741,7 @@ msgstr ""
 
 #: ../../zh/installation_guide.md:392
 msgid "观察到类似的输出即说明环境配置正确。"
-msgstr ""
+msgstr "Observing similar output indicates that the environment is correctly configured."
 "If the output is similar to the following, the environment is correctly "
 "configured:"
 

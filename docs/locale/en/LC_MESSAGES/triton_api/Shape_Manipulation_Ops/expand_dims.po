@@ -16,7 +16,7 @@ msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/expand_dims.md:5
 msgid "在指定轴位置插入大小为1的维度，不改变张量的数据，仅增加维度数。支持负索引，从右向左计数。"
-msgstr ""
+msgstr "Inserts a dimension of size 1 at the specified axis position, without changing the tensor's data, only increasing the number of dimensions. Supports negative indexing, counting from right to left."
 "Inserts a dimension of size 1 at the specified axis position without "
 "changing the data, only increasing the number of dimensions. Supports "
 "negative indexing, counting from right to left."
@@ -43,7 +43,7 @@ msgstr "Inserts a dimension of size 1 at the specified axis position"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/expand_dims.md:15
 msgid "不改变张量的数据，仅增加维度数"
-msgstr ""
+msgstr "Does not change the tensor's data, only increases the number of dimensions"
 "Does not change the tensor's data, only increases the number of dimensions"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/expand_dims.md:16
@@ -112,7 +112,7 @@ msgstr "**Type:** tensor"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/expand_dims.md:30
 msgid "**形状：** 在指定axis位置插入大小为1的维度"
-msgstr ""
+msgstr "**Shape:** Inserts a dimension of size 1 at the specified axis position"
 "**Shape:** Dimension of size 1 inserted at the specified axis position"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/expand_dims.md:31
@@ -121,7 +121,7 @@ msgstr "**Data Type:** Same as the input tensor"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/expand_dims.md:32
 msgid "**内存布局：** 通过tensor::ExpandShapeOp实现，无数据拷贝"
-msgstr ""
+msgstr "**Memory layout:** Implemented via tensor::ExpandShapeOp, no data copy"
 "**Memory Layout:** Implemented via tensor::ExpandShapeOp, no data copy"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/expand_dims.md:34
@@ -130,7 +130,7 @@ msgstr "**Constraints:**"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/expand_dims.md:36
 msgid "axis必须在[-rank-1, rank]范围内，其中rank为输入张量的维度数"
-msgstr ""
+msgstr "axis must be in the range [-rank-1, rank], where rank is the number of dimensions of the input tensor"
 "axis must be in the range [-rank-1, rank], where rank is the number of "
 "dimensions of the input tensor"
 

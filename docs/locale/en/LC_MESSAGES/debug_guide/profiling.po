@@ -300,7 +300,7 @@ msgstr "Theoretical Parameters"
 
 #: ../../zh/debug_guide/profiling.md:81
 msgid "理论性能为算子实际性能的理想目标。不同的硬件平台的硬件规格各异，理论性能可以帮助我们了解硬件的潜能，从而设定性能优化的目标。"
-msgstr ""
+msgstr "Theoretical performance is the ideal target for actual operator performance. Different hardware platforms have different hardware specifications, and theoretical performance helps us understand the hardware's potential, thereby setting performance optimization goals."
 "The theoretical performance is the ideal objective of the actual"
 "performance of the operator. Different hardware platforms have different"
 "hardware specifications. Theoretical performance helps us understand the"
@@ -370,7 +370,7 @@ msgstr ""
 
 #: ../../zh/debug_guide/profiling.md:88
 msgid "搬运不同大小的数据块时，对带宽的利用率（有效带宽/理论带宽）不一样。针对每次搬运数据量较小的情况，实测性能达不到理论带宽。"
-msgstr ""
+msgstr "When transferring data blocks of different sizes, the bandwidth utilization (effective bandwidth / theoretical bandwidth) varies. For small data transfers per operation, the measured performance cannot reach the theoretical bandwidth."
 "> Note:"
 ">"
 "> - If multiple transfer instructions exist at the same time, the"
@@ -423,7 +423,7 @@ msgstr "Locating Bottlenecks"
 
 #: ../../zh/debug_guide/profiling.md:94
 msgid "获取性能数据后，和理论数值差异较大的地方、耗时较长的流程被认为是“瓶颈点”。下文将介绍如何通过性能数据找到瓶颈点和对应的优化方向。"
-msgstr ""
+msgstr "After obtaining performance data, areas with significant deviation from theoretical values and time-consuming processes are considered “bottlenecks.” The following section describes how to identify bottlenecks and corresponding optimization directions through performance data."
 "After the performance data is obtained, processes that deviate"
 "significantly from theoretical values or consume excessive time are"
 "identified as \"bottlenecks.\" The following describes how to find"
@@ -562,7 +562,7 @@ msgstr "analyse_data_code_mapping"
 
 #: ../../zh/debug_guide/profiling.md:115
 msgid "示例：i64/i32 的compare在npu上无法启用vector导致向量计算转为标量计算"
-msgstr ""
+msgstr "Example: i64/i32 comparison on NPU cannot enable vectorization, causing vector computation to fall back to scalar computation."
 "Example: i64/i32 Comparison Failing to Vectorize on NPU, Leading to"
 "Scalar Fallback"
 

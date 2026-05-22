@@ -32,7 +32,7 @@ msgstr "what `configs=[]` means on the Ascend backend;"
 
 #: ../../zh/autotune_guide.md:9
 msgid "自动 Tiling 模式的适用边界，以及何时回到手写 `triton.Config`。"
-msgstr ""
+msgstr "Applicability boundaries of automatic Tiling mode, and when to fall back to hand-written `triton.Config`."
 "when automatic tiling is a good fit, and when you should fall back to"
 "handwritten `triton.Config`."
 
@@ -55,7 +55,7 @@ msgstr "This means:"
 
 #: ../../zh/autotune_guide.md:40
 msgid "`key` 的语义与社区版保持一致，用于决定哪些输入变化会触发重新选择配置；"
-msgstr ""
+msgstr "The semantics of `key` are consistent with the community version, used to determine which input changes trigger re-selection of the configuration."
 "`key` has the same semantics as in community Triton and determines"
 "which runtime-input changes trigger re-selection of a configuration;"
 
@@ -74,7 +74,7 @@ msgstr "1\. Enable Ascend's extension for autotune first"
 
 #: ../../zh/autotune_guide.md:45
 msgid "只有导入下面这行后，才会进入 Triton-Ascend 的 autotune 扩展路径："
-msgstr ""
+msgstr "Only after importing the following line will the Triton-Ascend autotune extension path be entered."
 "Only after importing the following line will Triton-Ascend enter the"
 "autotune extension path:"
 
@@ -110,7 +110,7 @@ msgstr "3\. `key` has the same meaning as in community Triton"
 
 #: ../../zh/autotune_guide.md:68
 msgid "`key` 的本质是 autotune 的 cache key。凡是填入 `key` 的参数，只要取值发生变化，就会触发重新 autotune。"
-msgstr ""
+msgstr "The essence of `key` is the cache key for autotune. Any parameter listed in `key` will trigger re-autotuning whenever its value changes."
 "`key` is effectively the autotune cache key. Any parameter included in"
 "`key` triggers autotune again when its value changes."
 
@@ -128,19 +128,19 @@ msgstr ""
 
 #: ../../zh/autotune_guide.md:72
 msgid "4. 希望参与自动调优的参数不要被提前固定"
-msgstr ""
+msgstr "4. Parameters intended for automatic tuning should not be fixed in advance."
 "4. Do not fix parameters that should participate in automatic tuning"
 "too early"
 
 #: ../../zh/autotune_guide.md:74
 msgid "如果希望某个 `tl.constexpr` 参与自动 Tiling 生成，需要同时满足下面三点："
-msgstr ""
+msgstr "For a `tl.constexpr` to participate in automatic Tiling generation, the following three conditions must be met simultaneously:"
 "If you want a `tl.constexpr` parameter to participate in automatic"
 "tiling generation, all of the following must be true:"
 
 #: ../../zh/autotune_guide.md:76
 msgid "它本身必须是 Tiling 参数，也就是会影响每个 block（逻辑核）处理的数据规模或 tile 大小的参数；"
-msgstr ""
+msgstr "It must itself be a Tiling parameter, i.e., a parameter that affects the data size or tile size processed by each block (logical core)."
 "it must be a tiling parameter, meaning that it affects how much data"
 "each block processes or how tile sizes are formed;"
 
@@ -154,7 +154,7 @@ msgstr "it must not have a default value in the kernel definition."
 
 #: ../../zh/autotune_guide.md:80
 msgid "例如下面这种写法，`BLOCK_M` 会参与自动调优："
-msgstr ""
+msgstr "For example, in the following code, `BLOCK_M` will participate in automatic tuning."
 "For example, in the following code, `BLOCK_M` participates in automatic"
 "tuning:"
 
@@ -164,13 +164,13 @@ msgstr "If you explicitly pass:"
 
 #: ../../zh/autotune_guide.md:105
 msgid "那这个参数就已经被固定，不再属于自动生成范围。"
-msgstr ""
+msgstr "Then this parameter is already fixed and is no longer within the scope of automatic generation."
 "then the parameter is already fixed and is no longer part of the"
 "automatic-generation space."
 
 #: ../../zh/autotune_guide.md:107
 msgid "同样，如果在 kernel 定义中给某个调优参数提供了默认值，例如："
-msgstr ""
+msgstr "Similarly, if a default value is provided for a tuning parameter in the kernel definition, for example:"
 "Likewise, if a tunable parameter is given a default value in the kernel"
 "definition, for example:"
 
@@ -187,7 +187,7 @@ msgstr ""
 
 #: ../../zh/autotune_guide.md:120
 msgid "5. 如果 Tiling 参数会影响 grid，grid 必须写成 lambda 形式"
-msgstr ""
+msgstr "5. If Tiling parameters affect the grid, the grid must be written in lambda form."
 "5. If a tiling parameter affects the grid, the grid must be written"
 "as a lambda"
 
@@ -241,13 +241,13 @@ msgstr ""
 
 #: ../../zh/autotune_guide.md:138
 msgid "Triton-Ascend 在保持这套接口习惯不变的前提下，主要扩展了下面几件事。"
-msgstr ""
+msgstr "While preserving these interface conventions unchanged, Triton-Ascend mainly extends the following aspects."
 "Triton-Ascend keeps the same usage style but extends it in several"
 "important ways."
 
 #: ../../zh/autotune_guide.md:140
 msgid "1. 支持 `configs=[]` 自动生成候选配置"
-msgstr ""
+msgstr "1. Supports automatic generation of candidate configurations via `configs=[]`."
 "1. Support for `configs=[]` to generate candidate configurations"
 "automatically"
 
@@ -267,14 +267,14 @@ msgstr "2\. Parallel compilation of multiple candidates"
 
 #: ../../zh/autotune_guide.md:146
 msgid "当 autotune 需要评估多个候选配置时，Triton-Ascend 默认会并行编译这些候选配置，以缩短首次调优时延。"
-msgstr ""
+msgstr "When autotune needs to evaluate multiple candidate configurations, Triton-Ascend compiles these candidates in parallel by default to reduce first-time tuning latency."
 "When autotune needs to evaluate multiple candidate configurations,"
 "Triton-Ascend compiles them in parallel by default to reduce first-tune"
 "latency."
 
 #: ../../zh/autotune_guide.md:148
 msgid "这一能力默认开启，可通过环境变量 `TRITON_AUTOTUNE_PARALLEL_COMPILE=0` 关闭。"
-msgstr ""
+msgstr "This feature is enabled by default and can be disabled via the environment variable `TRITON_AUTOTUNE_PARALLEL_COMPILE=0`."
 "This behavior is enabled by default and can be disabled with"
 "`TRITON_AUTOTUNE_PARALLEL_COMPILE=0`."
 
@@ -302,7 +302,7 @@ msgstr "Scope and Behavior of Automatic Tiling Generation"
 
 #: ../../zh/autotune_guide.md:156
 msgid "前面的第 1 点说明了 Triton-Ascend 支持 `configs=[]` 自动生成候选配置。对这项能力，进行以下几点说明。"
-msgstr ""
+msgstr "Point 1 above describes Triton-Ascend's support for `configs=[]` to automatically generate candidate configurations. Here are additional notes on this capability."
 "The first extension above shows that Triton-Ascend supports automatic"
 "generation of candidate configurations with `configs=[]`. The following"
 "points further clarify the behavior of this capability."
@@ -331,7 +331,7 @@ msgstr ""
 
 #: ../../zh/autotune_guide.md:164
 msgid "2. 候选配置会带上 Ascend 硬件约束"
-msgstr ""
+msgstr "2. Candidate configurations incorporate Ascend hardware constraints."
 "2. Candidate configurations are filtered with Ascend hardware"
 "constraints"
 
@@ -347,13 +347,13 @@ msgstr ""
 
 #: ../../zh/autotune_guide.md:168
 msgid "3. 自动 Tiling 模式的目标是方便给出“性能不错”的配置"
-msgstr ""
+msgstr "3. The goal of automatic Tiling mode is to conveniently provide a “decent performance” configuration."
 "3. The goal of automatic tiling is to provide a reasonably good"
 "configuration"
 
 #: ../../zh/autotune_guide.md:170
 msgid "为了权衡寻优时间和寻优效果，当前自动 Tiling 会对生成配置数量做大量剪枝，因此并不保证自动生成结果一定能达到手工极致调优的性能上限。"
-msgstr ""
+msgstr "To balance search time and optimization quality, the current automatic Tiling extensively prunes the number of generated configurations, so it does not guarantee that the automatically generated results will reach the performance ceiling of manual tuning."
 "To balance tuning cost and tuning result quality, current automatic"
 "tiling prunes the candidate space heavily. As a result, the"
 "automatically generated result is not guaranteed to reach the upper"
@@ -361,14 +361,14 @@ msgstr ""
 
 #: ../../zh/autotune_guide.md:172
 msgid "这项能力的目标，是在尽量降低用户使用门槛和寻优成本的前提下，方便地给用户提供一个性能还不错的 Tiling 配置。"
-msgstr ""
+msgstr "The goal of this capability is to conveniently provide users with a reasonably good Tiling configuration while minimizing the barrier to entry and optimization cost."
 "The goal of this feature is to lower the usage barrier and tuning cost"
 "while making it easy to obtain a configuration with reasonably good"
 "performance."
 
 #: ../../zh/autotune_guide.md:174
 msgid "4. 自动 Tiling 生成失败时需要用户手写 `triton.Config`"
-msgstr ""
+msgstr "4. When automatic Tiling generation fails, users need to write `triton.Config` manually."
 "4. When automatic tiling fails, users need handwritten"
 "`triton.Config`"
 
@@ -406,7 +406,7 @@ msgstr "configurations are defined explicitly by the user;"
 
 #: ../../zh/autotune_guide.md:198
 msgid "框架负责 benchmark、选择最优配置和缓存复用；"
-msgstr ""
+msgstr "The framework is responsible for benchmarking, selecting the optimal configuration, and cache reuse."
 "the framework still handles benchmarking, best-config selection, and"
 "cache reuse;"
 
@@ -416,13 +416,13 @@ msgstr "the usage pattern remains consistent with community Triton autotune."
 
 #: ../../zh/autotune_guide.md:201
 msgid "进阶用法：自动 Tiling 与其他参数联合调优"
-msgstr ""
+msgstr "Advanced Usage: Joint Tuning of Automatic Tiling with Other Parameters"
 "Advanced Usage: Combine Automatic Tiling with Other Tunable"
 "Parameters"
 
 #: ../../zh/autotune_guide.md:203
 msgid "以下内容属于进阶用法，只有当用户希望在自动 Tiling 模式下，继续联合调优 kernel 的非 Tiling 参数或编译参数时，再考虑使用。"
-msgstr ""
+msgstr "The following content covers advanced usage; only consider using it when you want to jointly tune non-Tiling parameters or compilation parameters of the kernel under automatic Tiling mode."
 "The following content is advanced usage and should only be considered"
 "when you want to continue tuning non-tiling kernel parameters or"
 "compilation parameters together with automatic tiling."
@@ -433,26 +433,26 @@ msgstr "1\. Community autotune: enumerate all tunable parameters manually"
 
 #: ../../zh/autotune_guide.md:207
 msgid "社区标准写法是由用户手工枚举所有候选配置："
-msgstr ""
+msgstr "The standard community approach involves users manually enumerating all candidate configurations."
 "In the standard community style, users enumerate all candidate"
 "configurations manually:"
 
 #: ../../zh/autotune_guide.md:234
 msgid "2. Triton-Ascend：手工枚举 Tiling 参数和 Ascend 编译参数"
-msgstr ""
+msgstr "2. Triton-Ascend: Manual enumeration of Tiling parameters and Ascend compilation parameters."
 "2. Triton-Ascend: enumerate tiling parameters and Ascend compilation"
 "parameters manually"
 
 #: ../../zh/autotune_guide.md:236
 msgid "在 Triton-Ascend 中，如果希望继续走手工枚举模式，也可以把 Ascend 侧参数一起放进手工配置空间："
-msgstr ""
+msgstr "In Triton-Ascend, if you wish to continue using the manual enumeration mode, you can also include Ascend-side parameters in the manual configuration space."
 "In Triton-Ascend, if you still want to use manual enumeration, you can"
 "also put Ascend-side parameters into the handwritten configuration"
 "space:"
 
 #: ../../zh/autotune_guide.md:263
 msgid "3. Triton-Ascend：自动生成 Tiling，同时联合调优其他参数"
-msgstr ""
+msgstr "3. Triton-Ascend: Automatic Tiling generation with joint tuning of other parameters."
 "3. Triton-Ascend: generate tiling automatically while tuning other"
 "parameters jointly"
 
@@ -472,13 +472,13 @@ msgstr "This means:"
 
 #: ../../zh/autotune_guide.md:286
 msgid "Tiling 相关参数仍然由 Triton-Ascend 自动生成；"
-msgstr ""
+msgstr "Tiling-related parameters are still automatically generated by Triton-Ascend."
 "tiling-related parameters are still generated automatically by"
 "Triton-Ascend;"
 
 #: ../../zh/autotune_guide.md:287
 msgid "非 Tiling 参数或编译参数由用户通过 `hints` 显式给出候选集合；"
-msgstr ""
+msgstr "Non-Tiling parameters or compilation parameters are explicitly provided by the user as candidate sets via `hints`."
 "non-tiling parameters or compilation parameters are provided"
 "explicitly by the user through `hints`;"
 
@@ -510,14 +510,14 @@ msgstr "set `configs=[]`;"
 
 #: ../../zh/autotune_guide.md:296
 msgid "让 Ascend backend 基于 kernel DSL 和运行时 shape 自动完成候选生成、筛选、benchmark 与缓存复用。"
-msgstr ""
+msgstr "Let the Ascend backend automatically perform candidate generation, filtering, benchmarking, and cache reuse based on the kernel DSL and runtime shapes."
 "let the Ascend backend generate, filter, benchmark, and cache"
 "candidate configurations automatically based on the kernel DSL and"
 "runtime shapes."
 
 #: ../../zh/autotune_guide.md:298
 msgid "如果场景不适合自动 Tiling 模式，再回到手写 `triton.Config` 即可。"
-msgstr ""
+msgstr "If the scenario is not suitable for automatic Tiling mode, simply switch back to hand-written `triton.Config`."
 "If your case is not suitable for automatic tiling, you can return to"
 "handwritten `triton.Config`."
 

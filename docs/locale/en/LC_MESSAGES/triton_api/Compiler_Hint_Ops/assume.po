@@ -16,7 +16,7 @@ msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Compiler_Hint_Ops/assume.md:5
 msgid "`assume` 用于向编译器提供条件假设信息，允许编译器基于已知为真的条件进行优化。这是一个编译器提示操作，不会在运行时检查条件。"
-msgstr ""
+msgstr "`assume` is used to provide conditional assumption information to the compiler, allowing the compiler to optimize based on conditions known to be true. This is a compiler hint operation and does not check conditions at runtime."
 "`assume` provides conditional assumption information to the compiler, "
 "allowing it to optimize based on conditions known to be true. This is a "
 "compiler hint operation and does not check conditions at runtime."
@@ -155,6 +155,6 @@ msgstr "2.3 Usage"
 
 #: ../../zh/triton_api/Compiler_Hint_Ops/assume.md:31
 msgid "`assume` 操作允许开发者在确保正确性的前提下，帮助编译器生成更高效的代码。"
-msgstr ""
+msgstr "The `assume` operation allows developers to help the compiler generate more efficient code while ensuring correctness."
 "The `assume` operation allows developers to help the compiler generate more "
 "efficient code while ensuring correctness."

@@ -16,7 +16,7 @@ msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:5
 msgid "显式的核心间同步指令，用于协调 Cube-Vector 架构中不同核心间的执行顺序和数据一致性。"
-msgstr ""
+msgstr "Explicit inter-core synchronization instruction, used to coordinate execution order and data consistency between different cores in the Cube-Vector architecture."
 "Explicit inter-core synchronization instruction used to coordinate execution"
 " order and data consistency between different cores in the Cube-Vector "
 "architecture."
@@ -31,7 +31,7 @@ msgstr "2.1 Function Overview"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:11
 msgid "生产者核心完成任务后，向消费者发送同步信号。"
-msgstr ""
+msgstr "After the producer core completes its task, it sends a synchronization signal to the consumer."
 "After completing the task, the producer core sends a synchronization signal "
 "to the consumer."
 
@@ -117,7 +117,7 @@ msgstr "2.2.2 Special Limitations"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:30
 msgid "`sender` 和 `receiver` 不能相同，不能自己给自己发信号"
-msgstr ""
+msgstr "`sender` and `receiver` cannot be the same; a core cannot send a signal to itself."
 "`sender` and `receiver` cannot be the same. A core cannot send a signal to "
 "itself."
 
@@ -135,7 +135,7 @@ msgstr "3.1 Function Overview"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:37
 msgid "消费者核心等待生产者的同步信号。"
-msgstr ""
+msgstr "The consumer core waits for the producer's synchronization signal."
 "The consumer core waits for the synchronization signal from the producer."
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:43
@@ -160,7 +160,7 @@ msgstr "`sender` and `receiver` cannot be the same"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:57
 msgid "`event_id` 必须与对应 `sync_block_set` 使用的 ID 一致"
-msgstr ""
+msgstr "`event_id` must match the ID used by the corresponding `sync_block_set`."
 "`event_id` must be consistent with the ID used by the corresponding "
 "`sync_block_set`"
 
@@ -174,7 +174,7 @@ msgstr "4.1 Function Overview"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:63
 msgid "全局屏障同步，让所有指定类型的核心同步到同一点。"
-msgstr ""
+msgstr "Global barrier synchronization, synchronizing all specified types of cores to the same point."
 "Global barrier synchronization, bringing all cores of the specified type to "
 "the same point."
 

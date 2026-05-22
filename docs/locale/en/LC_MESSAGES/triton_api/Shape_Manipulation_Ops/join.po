@@ -16,7 +16,7 @@ msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:5
 msgid "将两个相同形状的输入张量沿着新的最小维度连接，输出张量比输入张量多一个维度，大小为2，保持其他维度不变。"
-msgstr ""
+msgstr "Joins two input tensors of the same shape along a new trailing dimension. The output tensor has one more dimension of size 2 than the input, with other dimensions unchanged."
 "Concatenates two input tensors of the same shape along a new minor "
 "dimension. The output tensor has one more dimension than the input tensors, "
 "with a size of 2, keeping other dimensions unchanged."
@@ -39,12 +39,12 @@ msgstr "**Function:**"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:14
 msgid "将两个相同形状的输入张量沿着新的最小维度连接"
-msgstr ""
+msgstr "Joins two input tensors of the same shape along a new trailing dimension"
 "Concatenates two input tensors of the same shape along a new minor dimension"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:15
 msgid "输出张量比输入张量多一个维度，大小为2"
-msgstr ""
+msgstr "The output tensor has one more dimension of size 2 than the input tensor"
 "The output tensor has one more dimension than the input tensor, with a size "
 "of 2"
 
@@ -110,7 +110,7 @@ msgstr "**Type:** tensor"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:30
 msgid "**形状：** 输入tensor广播后的形状加上一个大小为2的维度"
-msgstr ""
+msgstr "**Shape:** The broadcast shape of the input tensors plus a dimension of size 2"
 "**Shape:** Broadcast shape of the input tensor plus a dimension of size 2"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:31
@@ -127,7 +127,7 @@ msgstr "**Constraints:**"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:36
 msgid "两个输入张量必须具有可以广播到相同形状的形状和数据类型"
-msgstr ""
+msgstr "Both input tensors must have shapes and data types that can be broadcast to the same shape"
 "Both input tensors must have shapes and data types that can be broadcast to "
 "the same shape"
 

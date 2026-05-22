@@ -115,7 +115,7 @@ msgstr ""
 
 #: ../../zh/programming_guide/index.md:41
 msgid "参考示例代码，先固定核数，再通过内部循环分批处理任务分块："
-msgstr ""
+msgstr "Refer to the example code: first fix the number of cores, then process task blocks in batches through an inner loop."
 "According to the sample code, fix the number of cores, and then process"
 "task blocks in batches through an internal loop."
 
@@ -188,13 +188,13 @@ msgstr "Example"
 
 #: ../../zh/programming_guide/index.md:133
 msgid "先将数据搬运到UB上，再从UB中select目标值"
-msgstr ""
+msgstr "First move the data to UB, then select the target value from UB."
 "Transferring Data to the UB and Then Selecting the Target Value from"
 "the UB"
 
 #: ../../zh/programming_guide/index.md:135
 msgid "【描述】在NPU的离散场景下，可以先将数据搬运到UB，再从share中select目标值。"
-msgstr ""
+msgstr "[Description] In NPU discrete scenarios, data can first be moved to UB, then the target value selected from share."
 "[Description] In the discrete scenario of the NPU, data can be"
 "transferred to the UB and then the target value can be selected from"
 "**share**."
@@ -205,7 +205,7 @@ msgstr "Performance analysis and comparison before and after optimization"
 
 #: ../../zh/programming_guide/index.md:169
 msgid "通过msprof工具执行用例可得到PROF_*文件夹，里面包含了op_summary_\\*.csv文件，该文件可以帮助分析流水情况。注：“\\*”表示时间戳，[性能数据采集参考方法](../debug_guide/profiling.md)。"
-msgstr ""
+msgstr "Running the test case with the msprof tool produces a PROF_* folder containing op_summary_\\*.csv files, which help analyze pipeline status. Note: “\\*” represents a timestamp. [Refer to performance data collection methods](../debug_guide/profiling.md)."
 "You can use the msProf tool to execute the test case to obtain the"
 "**PROF_***\\** folder, which contains the **op_summary_***\\****.csv**"
 "file. This file can be used to analyze the pipeline. Note: *\\**"
@@ -254,7 +254,7 @@ msgstr "0.066"
 
 #: ../../zh/programming_guide/index.md:176
 msgid "通过分析表格中的数据可以发现，优化前后的aiv_mte2_time(us)和aiv_mte2_ratio差距较大，优化方案通过先将大部分数据搬运到UB上，减少小批量数据通过L2搬运到UB的次数，减少了L2搬运到UB上的总时间。"
-msgstr ""
+msgstr "By analyzing the data in the table, it can be seen that there is a significant difference in aiv_mte2_time(us) and aiv_mte2_ratio before and after optimization. The optimization reduces the total time for L2-to-UB transfers by first moving most data to UB, thereby reducing the number of small-batch data transfers through L2 to UB."
 "According to the data in the table, the values of **aiv_mte2_time(us)**"
 "and **aiv_mte2_ratio** before and after the optimization are greatly"
 "different. The optimization solution first transfers most of the data to"
@@ -272,7 +272,7 @@ msgstr "Triton-Ascend supports two data processing modes: serial storage and com
 
 #: ../../zh/programming_guide/index.md:182
 msgid "存算串行：先从全局内存搬运数据到片上内存，完成计算后，再搬运下一批数据。这种方式存在明显的空闲等待时间，效率较低。"
-msgstr ""
+msgstr "Memory-compute serial: Data is first moved from global memory to on-chip memory, computation is completed, and then the next batch of data is moved. This approach has obvious idle waiting time and low efficiency."
 "Serial storage and computation: Data is first transferred from the"
 "global memory to the on-chip memory, and then the next batch of data is"
 "transferred after the computation is complete. This mode has a"
@@ -280,7 +280,7 @@ msgstr ""
 
 #: ../../zh/programming_guide/index.md:184
 msgid "存算并行：在搬运第一批数据至片上内存的同时，已开始对其执行计算；随后继续搬运第二批数据，形成“搬运+计算”重叠的流水线式操作，显著提升整体吞吐率。"
-msgstr ""
+msgstr "Memory-compute parallel: While the first batch of data is being moved to on-chip memory, computation on it has already begun; then the second batch is moved, forming a pipeline of overlapping “move+compute” operations, significantly improving overall throughput."
 "Parallel storage and computation: Computing is performed when the first"
 "batch of data is transferred to the on-chip memory. Then, the second"
 "batch of data is transferred, and the \"transfer + compute\" pipeline"
@@ -366,7 +366,7 @@ msgstr "Simple example"
 
 #: ../../zh/programming_guide/index.md:265
 msgid "注：设置以下环境变量，便可打印出最优参数信息。"
-msgstr ""
+msgstr "Note: Setting the following environment variable will print the optimal parameter information."
 "Note: You can set the following environment variables to print the"
 "optimal parameter information."
 
@@ -376,7 +376,7 @@ msgstr "How Do I Avoid UB Overflow on the NPU?"
 
 #: ../../zh/programming_guide/index.md:273
 msgid "【描述】在NPU上，UB或者L1 Size存在上限，当出现该错误时，需要减少单次搬运的数据量，以for循环的方式处理长序列场景。"
-msgstr ""
+msgstr "[Description] On NPU, there is an upper limit on UB or L1 Size. When this error occurs, reduce the amount of data moved in a single transfer and process long sequences using a for-loop approach."
 "[Description] On the NPU, the UB or L1 size has an upper limit. When"
 "this error occurs, reduce the amount of data transferred at a time and"
 "use the for loop to process long sequences."
@@ -395,7 +395,7 @@ msgstr "R&D Goals"
 
 #: ../../zh/programming_guide/index.md:291
 msgid "在昇腾NPU单核上实现基础数据运算算子（如加减乘除、激活函数、简单矩阵元素运算）。保证算子在单核内高效执行，为后续多核并行和分布式扩展打下基础。"
-msgstr ""
+msgstr "Implement basic data operation operators (such as addition, subtraction, multiplication, division, activation functions, and simple matrix element operations) on a single Ascend NPU core. Ensure efficient execution of operators within a single core, laying the foundation for subsequent multi-core parallel and distributed scaling."
 "Implement basic data operation operators (such as addition, subtraction,"
 "multiplication, division, activation functions, and simple matrix"
 "element operations) on the Ascend NPU single core. Ensure that operators"
@@ -408,7 +408,7 @@ msgstr "Development Procedure"
 
 #: ../../zh/programming_guide/index.md:295
 msgid "1.确定算子功能   -明确输入/输出张量的形状、数据类型（float16/float32/int32 等）。   -确认是否需要广播、边界处理。"
-msgstr ""
+msgstr "1. Determine operator functionality - Clarify input/output tensor shapes and data types (float16/float32/int32, etc.). - Confirm whether broadcasting or boundary handling is needed."
 "1.Determine the operator function. "
 "-Determine the shapes and data types (such as float16, float32, and"
 "int32) of the input and output tensors."
@@ -416,7 +416,7 @@ msgstr ""
 
 #: ../../zh/programming_guide/index.md:299
 msgid "2.编写核函数（kernel）   单核运算通常对应块级的数据处理。     单核数据运算示例：向量加法"
-msgstr ""
+msgstr "2. Write the kernel function - Single-core operations typically correspond to block-level data processing. Example of single-core data operation: vector addition."
 "2.Write kernel functions. "
 "Single-kernel computation corresponds to block-level data processing.   "
 "Single-kernel data computation example: vector addition "
@@ -427,20 +427,20 @@ msgstr "Calling:"
 
 #: ../../zh/programming_guide/index.md:334
 msgid "使用上述函数计算两个 torch.tensor 对象的 element-wise sum，并测试其正确性"
-msgstr ""
+msgstr "Use the above function to compute the element-wise sum of two torch.tensor objects and verify its correctness."
 "Use the above function to compute **element-wise sum** of two"
 "torch.tensor objects and test its correctness."
 
 #: ../../zh/programming_guide/index.md:353
 msgid "3.单核运算的关键点"
-msgstr ""
+msgstr "3. Key Points of Single-Core Operations"
 "3.Key points of single-kernel computation"
 "-Block-level data processing: Each computing block is responsible for a"
 "small segment of data, ensuring parallelism."
 
 #: ../../zh/programming_guide/index.md:355
 msgid "-块级数据处理：每个计算块负责一小段数据，保证并行性。"
-msgstr ""
+msgstr "- Block-level data processing: each compute block is responsible for a small segment of data, ensuring parallelism."
 "-Boundary check: Use **mask** or **if (tid < N)** to avoid out-of-bounds"
 "access."
 

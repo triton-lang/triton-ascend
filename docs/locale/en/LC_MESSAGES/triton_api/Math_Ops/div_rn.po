@@ -68,7 +68,7 @@ msgstr "Reserved parameter; external invocation is not supported yet"
 
 #: ../../zh/triton_api/Math_Ops/div_rn.md:21
 msgid "返回值： `x`：输出张量的shape与输入x的shape相同"
-msgstr ""
+msgstr "Return value: `x`: The output tensor has the same shape as the input tensor `x`."
 "Return value: `x`: the output tensor has the same shape as the input x"
 
 #: ../../zh/triton_api/Math_Ops/div_rn.md:24
@@ -149,7 +149,7 @@ msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Math_Ops/div_rn.md:33
 msgid "结论：Ascend 相比 GPU 额外支持 fp16、bf16。 torch 对 uint8 支持。"
-msgstr ""
+msgstr "Conclusion: Ascend additionally supports fp16 and bf16 compared to GPU. torch supports uint8."
 "Conclusion: Ascend additionally supports fp16 and bf16 compared to GPU. "
 "torch supports uint8."
 
@@ -171,7 +171,7 @@ msgstr "Ascend"
 
 #: ../../zh/triton_api/Math_Ops/div_rn.md:43
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support; both support 1 to 5 dimensional tensors."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms; both support 1 to 5 dimensional tensors."
 
@@ -181,7 +181,7 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Math_Ops/div_rn.md:47
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
@@ -195,6 +195,6 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Math_Ops/div_rn.md:53
 msgid "以下示例实现了对输入张量 `x` 和`y`的逐元素精确除法："
-msgstr ""
+msgstr "The following example performs an element-wise exact division on the input tensors `x` and `y`:"
 "The following example demonstrates element-wise exact division on input "
 "tensors `x` and `y`:"

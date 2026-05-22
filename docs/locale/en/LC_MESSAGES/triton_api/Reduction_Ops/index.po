@@ -24,7 +24,7 @@ msgstr "[argmax](./argmax.md)"
 
 #: ../../zh/triton_api/Reduction_Ops/index.md
 msgid "返回沿指定 axis 轴上 input 张量中所有元素的最大索引"
-msgstr ""
+msgstr "Returns the maximum index of all elements in the input tensor along the specified axis"
 "Returns the index of the maximum value of all elements in the input tensor "
 "along the specified axis"
 
@@ -34,7 +34,7 @@ msgstr "[argmin](./argmin.md)"
 
 #: ../../zh/triton_api/Reduction_Ops/index.md
 msgid "返回沿指定 axis 轴上 input 张量中所有元素的最小索引"
-msgstr ""
+msgstr "Returns the minimum index of all elements in the input tensor along the specified axis"
 "Returns the index of the minimum value of all elements in the input tensor "
 "along the specified axis"
 
@@ -44,7 +44,7 @@ msgstr "[max](./max.md)"
 
 #: ../../zh/triton_api/Reduction_Ops/index.md
 msgid "返回沿指定 axis 轴上 input 张量中所有元素的最大值"
-msgstr ""
+msgstr "Returns the maximum value of all elements in the input tensor along the specified axis"
 "Returns the maximum value of all elements in the input tensor along the "
 "specified axis"
 
@@ -54,7 +54,7 @@ msgstr "[min](./min.md)"
 
 #: ../../zh/triton_api/Reduction_Ops/index.md
 msgid "返回沿指定 axis 轴上 input 张量中所有元素的最小值"
-msgstr ""
+msgstr "Returns the minimum value of all elements in the input tensor along the specified axis"
 "Returns the minimum value of all elements in the input tensor along the "
 "specified axis"
 
@@ -64,7 +64,7 @@ msgstr "[reduce](./reduce.md)"
 
 #: ../../zh/triton_api/Reduction_Ops/index.md
 msgid "将 combine_fn 应用于沿指定 axis 的 input 张量中的所有元素"
-msgstr ""
+msgstr "Applies combine_fn to all elements in the input tensor along the specified axis"
 "Applies combine_fn to all elements of the input tensor along the specified "
 "axis"
 
@@ -74,7 +74,7 @@ msgstr "[sum](./sum.md)"
 
 #: ../../zh/triton_api/Reduction_Ops/index.md
 msgid "返回 input 张量中，沿指定 axis 的所有元素的总和"
-msgstr ""
+msgstr "Returns the sum of all elements in the input tensor along the specified axis"
 "Returns the sum of all elements in the input tensor along the specified axis"
 
 #: ../../zh/triton_api/Reduction_Ops/index.md
@@ -83,6 +83,6 @@ msgstr "[xor_sum](./xor_sum.md)"
 
 #: ../../zh/triton_api/Reduction_Ops/index.md
 msgid "返回 input 张量中，沿指定 axis 的所有元素的异或和"
-msgstr ""
+msgstr "Returns the XOR sum of all elements in the input tensor along the specified axis"
 "Returns the XOR sum of all elements in the input tensor along the specified "
 "axis"

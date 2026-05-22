@@ -160,7 +160,7 @@ msgstr "Ascend"
 
 #: ../../zh/triton_api/Math_Ops/ceil.md:39
 msgid "结论：在 Shape 方面, GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 
@@ -170,13 +170,13 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Math_Ops/ceil.md:43
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
 #: ../../zh/triton_api/Math_Ops/ceil.md:45
 msgid "Ascend 对比 GPU 缺失fp64的支持能力, 但多了fp16、bf16的支持能力, 支持整型输入。"
-msgstr ""
+msgstr "Ascend lacks fp64 support compared to GPU, but adds support for fp16 and bf16, and supports integer input."
 "Ascend lacks fp64 support compared to GPU but adds fp16 and bf16 support, "
 "and supports integer input."
 

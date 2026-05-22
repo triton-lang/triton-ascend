@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:5
 msgid "简介：将`tl.make_block_ptr`的offset增加一个偏移量 原型："
-msgstr ""
+msgstr "Description: Adds an offset to the offset of `tl.make_block_ptr`. Prototype:"
 "Description: Adds an offset to the offset of `tl.make_block_ptr`. Prototype:"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:16
@@ -61,7 +61,7 @@ msgstr "`tuple(int | constexpr)`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
 msgid "张量各维度的基址偏移量列表，`len(offsets)`需要与`len(base.offsets)`相等"
-msgstr ""
+msgstr "List of base offsets for each dimension of the tensor, `len(offsets)` must equal `len(base.offsets)`"
 "List of base address offsets for each tensor dim. `len(offsets)` must equal "
 "`len(base.offsets)`"
 
@@ -79,7 +79,7 @@ msgstr "Reserved parameter, external calls not supported yet"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:26
 msgid "返回值：`pointer_type<blocked<shape, element_type>>`： 指向tensor的指针"
-msgstr ""
+msgstr "Return value: `pointer_type<blocked<shape, element_type>>`: Pointer to the tensor"
 "Return value: `pointer_type<blocked<shape, element_type>>`: Pointer to a "
 "tensor"
 
@@ -161,7 +161,7 @@ msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:37
 msgid "结论：Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。"
-msgstr ""
+msgstr "Conclusion: Ascend lacks support for uint8, uint16, uint32, uint64, fp64 compared to GPU (hardware limitation)."
 "Ascend lacks uint8, uint16, uint32, uint64, fp64 support vs GPU (hw "
 "limitation)."
 
@@ -179,7 +179,7 @@ msgstr "Only supports 1~5D tensors"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:46
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms; both support 1 to 5 dimensional tensors."
 "Shape: No difference between GPU and Ascend. Both support 1~5D tensors."
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:48
@@ -192,18 +192,18 @@ msgstr "Not supported vs. community version and cannot be implemented"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:52
 msgid "Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。"
-msgstr ""
+msgstr "Ascend lacks support for uint8, uint16, uint32, uint64, fp64 compared to GPU (hardware limitation)."
 "Ascend lacks uint8, uint16, uint32, uint64, fp64 vs GPU (hw limitation)."
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:53
 msgid "Ascend只允许通过调整`order`参数的顺序来表达转置语义，不能通过调整`stride`参数的顺序实现转置语义。"
-msgstr ""
+msgstr "Ascend only allows expressing transpose semantics by adjusting the order of the `order` parameter, not by adjusting the order of the `stride` parameter."
 "Ascend only supports transpose via `order` parameter order, not via `stride`"
 " order."
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:54
 msgid "当前`tl.make_tensor_ptr`，如果与较复杂的循环和分支语句搭配使用，可能会出现编译问题"
-msgstr ""
+msgstr "Currently, `tl.make_tensor_ptr` may encounter compilation issues when used with complex loop and branch statements."
 "`tl.make_tensor_ptr` may have compilation issues with complex loops/branches"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:56

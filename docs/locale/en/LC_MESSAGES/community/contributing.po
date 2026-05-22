@@ -281,7 +281,7 @@ msgstr "3\. Upload `.pt` files to the OBS bucket: `https://triton-ascend-artifac
 
 #: ../../zh/community/contributing.md:172
 msgid "详细说明参见 `third_party/ascend/unittest/kernels/README.md`。"
-msgstr ""
+msgstr "For detailed instructions, see `third_party/ascend/unittest/kernels/README.md`."
 "For detailed instructions, see `third_party/ascend/unittest/kernels/READ"
 "ME.md`."
 

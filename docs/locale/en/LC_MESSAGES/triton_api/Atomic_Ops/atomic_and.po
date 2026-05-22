@@ -16,13 +16,13 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Atomic_Ops/atomic_and.md:5
 msgid "简介：原子性逻辑与操作，在指定的内存位置执行逻辑与 原型："
-msgstr ""
+msgstr "Description: Atomic logical AND operation, performs logical AND at the specified memory location. Prototype:"
 "Description: Atomic logical AND operation, performs logical AND at the "
 "specified memory location. Prototype:"
 
 #: ../../zh/triton_api/Atomic_Ops/atomic_and.md:19
 msgid "可以作为tensor的成员函数调用，如`x.atomic_and(...)`，与`atomic_and(x, ...)`等效。"
-msgstr ""
+msgstr "Can be called as a tensor member function, e.g., `x.atomic_and(...)`, equivalent to `atomic_and(x, ...)`."
 "Can be called as a tensor member function, e.g., `x.atomic_and(...)`, "
 "equivalent to `atomic_and(x, ...)`."
 
@@ -56,7 +56,7 @@ msgstr "`triton.PointerDType`"
 
 #: ../../zh/triton_api/Atomic_Ops/atomic_and.md
 msgid "要操作的内存位置，执行 *pointer & val 计算后的结果写回到该内存"
-msgstr ""
+msgstr "The memory location to operate on; the result of *pointer & val is written back to this memory."
 "The memory location to operate on; the result of *pointer & val is written "
 "back to this memory"
 
@@ -229,7 +229,7 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Atomic_Ops/atomic_and.md:52
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 

@@ -16,7 +16,7 @@ msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md:5
 msgid "`static_print` 用于在编译时打印信息，类似于Python的`print()`函数，但它在内核编译期间执行而不是运行时执行。"
-msgstr ""
+msgstr "`static_print` is used to print information at compile time, similar to Python's `print()` function, but it executes during kernel compilation rather than at runtime."
 "`static_print` is used to print information at compile time, similar to "
 "Python's `print()` function, but it executes during kernel compilation "
 "rather than at runtime."
@@ -219,7 +219,7 @@ msgstr "Ascend"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md:40
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support; both support 1 to 5 dimensional tensors."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms; both support 1 to 5 dimensional tensors."
 
@@ -229,13 +229,13 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md:44
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md:46
 msgid "Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。"
-msgstr ""
+msgstr "Ascend lacks support for uint8, uint16, uint32, uint64, and fp64 compared to GPU (hardware limitation)."
 "Ascend lacks support for uint8, uint16, uint32, uint64, and fp64 compared to"
 " GPU (hardware limitation)."
 

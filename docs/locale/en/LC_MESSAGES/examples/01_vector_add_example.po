@@ -12,7 +12,7 @@ msgstr "Vector Addition"
 
 #: ../../zh/examples/01_vector_add_example.md:3
 msgid "在本节中，我们将使用 Triton 编写一个简单的向量相加的程序。 在此过程中，你会学习到："
-msgstr ""
+msgstr "In this section, we will write a simple vector addition program using Triton. In the process, you will learn:"
 "In this section, we will use Triton to write a simple vector addition "
 "program. In this process, you will learn:"
 
@@ -42,7 +42,7 @@ msgstr "Enqueue the above kernel with the appropriate grid/block sizes."
 
 #: ../../zh/examples/01_vector_add_example.md:67
 msgid "使用上述函数计算两个 `torch.tensor` 对象的 element-wise sum，并测试其正确性："
-msgstr ""
+msgstr "Use the above function to compute the element-wise sum of two `torch.tensor` objects and verify its correctness."
 "Use the above function to compute the element-wise sum of two"
 "`torch.tensor` objects and test its correctness:"
 

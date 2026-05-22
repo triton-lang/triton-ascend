@@ -16,7 +16,7 @@ msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:5
 msgid "将张量广播到目标形状，自动处理维度对齐。广播操作不会复制数据，而是通过改变张量的形状和步长来实现。"
-msgstr ""
+msgstr "Broadcasts a tensor to the target shape, automatically handling dimension alignment. The broadcast operation does not copy data; it changes the tensor's shape and strides."
 "Broadcasts the tensor to the target shape, automatically handling dimension "
 "alignment. The broadcast operation does not copy data; it is achieved by "
 "changing the tensor's shape and stride."
@@ -39,13 +39,13 @@ msgstr "**Function:**"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:14
 msgid "自动处理维度对齐，将大小为1的维度扩展到目标形状中对应维度的大小"
-msgstr ""
+msgstr "Automatically handles dimension alignment, expanding dimensions of size 1 to the corresponding size in the target shape"
 "Automatically handles dimension alignment, expanding dimensions of size 1 to"
 " match the corresponding dimension size in the target shape"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:15
 msgid "保持数据不变，仅改变张量的形状信息"
-msgstr ""
+msgstr "Keeps the data unchanged, only modifies the shape information of the tensor"
 "Keeps the data unchanged, only modifies the shape information of the tensor"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:17
@@ -110,7 +110,7 @@ msgstr "**Type:** tensor"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:29
 msgid "**形状：** 与shape参数指定的目标形状相同"
-msgstr ""
+msgstr "**Shape:** Same as the target shape specified by the shape parameter"
 "**Shape:** Same as the target shape specified by the `shape` parameter"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:30
@@ -119,7 +119,7 @@ msgstr "**Data Type:** Same as the input tensor"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:31
 msgid "**内存布局：** 通过改变步长信息实现广播，无数据拷贝"
-msgstr ""
+msgstr "**Memory layout:** Broadcast achieved by changing stride information, no data copy"
 "**Memory Layout:** Broadcasting implemented by changing stride information, "
 "no data copy"
 
@@ -129,7 +129,7 @@ msgstr "**Constraints:**"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:35
 msgid "输入张量的维度数必须等于目标形状的维度数"
-msgstr ""
+msgstr "The number of dimensions of the input tensor must equal the number of dimensions of the target shape"
 "The number of dimensions of the input tensor must equal the number of "
 "dimensions of the target shape"
 
@@ -235,7 +235,7 @@ msgstr "2.4 Special Limitations"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:51
 msgid "与broadcast不同，Triton社区实现的broadcast_to必须保证tensor的shape和目标shape的rank一致"
-msgstr ""
+msgstr "Unlike broadcast, the Triton community implementation of broadcast_to requires the rank of the tensor shape to match the rank of the target shape"
 "Unlike broadcast, the Triton community's broadcast_to implementation "
 "requires the rank of the tensor's shape and the target shape to be identical"
 

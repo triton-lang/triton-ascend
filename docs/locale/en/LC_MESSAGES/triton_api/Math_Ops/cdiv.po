@@ -16,13 +16,13 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Math_Ops/cdiv.md:5
 msgid "简介：计算张量的向上取整除法 函数原型："
-msgstr ""
+msgstr "Description: Computes the ceiling division of tensors. Function prototype:"
 "Description: Computes the ceiling division of the tensor. Function "
 "prototype:"
 
 #: ../../zh/triton_api/Math_Ops/cdiv.md:12
 msgid "可以作为张量的成员函数调用, 如`x.cdiv(...)`, 与`cdiv(x, ...)`等效。"
-msgstr ""
+msgstr "Can be called as a tensor member function, e.g., `x.cdiv(...)`, equivalent to `cdiv(x, ...)`."
 "Can be called as a tensor member function, e.g., `x.cdiv(...)`, equivalent "
 "to `cdiv(x, ...)`."
 
@@ -148,7 +148,7 @@ msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Math_Ops/cdiv.md:35
 msgid "结论：Ascend 对比 GPU , 不支持uint, bool输入。"
-msgstr ""
+msgstr "Conclusion: Ascend does not support uint or bool inputs compared to GPU."
 "Conclusion: Ascend does not support uint or bool input compared to GPU."
 
 #: ../../zh/triton_api/Math_Ops/cdiv.md:37
@@ -169,7 +169,7 @@ msgstr "Ascend"
 
 #: ../../zh/triton_api/Math_Ops/cdiv.md:44
 msgid "结论：在 Shape 方面, GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 
@@ -179,7 +179,7 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Math_Ops/cdiv.md:48
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
@@ -193,6 +193,6 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Math_Ops/cdiv.md:54
 msgid "以下示例实现了对输入张量 `x` 和`y`做向上取整除法运算："
-msgstr ""
+msgstr "The following example performs a ceiling division operation on the input tensors `x` and `y`:"
 "The following example demonstrates ceiling division on input tensors `x` and"
 " `y`:"

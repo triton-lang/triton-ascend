@@ -377,7 +377,7 @@ def vec_add_kernel(X, Y, Z, N,
     # Calculate the index range for the current block
     offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
 
-    # mask 防止越界
+    # mask to prevent out-of-bounds access
     mask = offsets < N
 
     # Contiguous memory access: offsets are contiguous
@@ -397,7 +397,7 @@ def vec_add(x, y):
     # Allocate aligned memory (PyTorch is already aligned to 64 bytes by default)
     z = torch.empty_like(x)
 
-    # grid：每个 block 处理 BLOCK_SIZE 个元素
+    # grid: each block processes BLOCK_SIZE elements
     grid = lambda meta: (triton.cdiv(N, meta['BLOCK_SIZE']),)
 
     vec_add_kernel[grid](x, y, z, N, BLOCK_SIZE=BLOCK_SIZE)

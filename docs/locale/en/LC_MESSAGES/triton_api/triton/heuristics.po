@@ -12,7 +12,7 @@ msgstr "triton.heuristics"
 
 #: ../../zh/triton_api/triton/heuristics.md:7
 msgid "用于指定如何计算某些元参数值的装饰器。这在自动调优成本过高或不适用的情况下非常有用。"
-msgstr ""
+msgstr "A decorator used to specify how certain meta-parameter values are computed. Useful when autotuning is too expensive or not applicable."
 "A decorator for specifying how to compute certain meta-parameter values. "
 "This is useful when autotuning is too expensive or not applicable."
 

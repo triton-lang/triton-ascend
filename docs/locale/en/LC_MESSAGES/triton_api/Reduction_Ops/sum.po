@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Reduction_Ops/sum.md:5
 msgid "简介：`triton.language.sum` 计算输入tensor沿指定轴的元素和，返回求和结果。"
-msgstr ""
+msgstr "Description: `triton.language.sum` computes the sum of elements of the input tensor along the specified axis."
 "Description: `triton.language.sum` computes the sum of elements along the "
 "specified axis of the input tensor, returning the summation result."
 
@@ -78,7 +78,7 @@ msgstr "If True, keep summed dim as length 1"
 
 #: ../../zh/triton_api/Reduction_Ops/sum.md:21
 msgid "返回值： `tensor`：计算输入tensor沿指定轴的元素和，返回求和结果。"
-msgstr ""
+msgstr "Return value: `tensor`: Computes the sum of elements of the input tensor along the specified axis."
 "Return value: `tensor`: Computes the sum of elements along the specified "
 "axis of the input tensor."
 

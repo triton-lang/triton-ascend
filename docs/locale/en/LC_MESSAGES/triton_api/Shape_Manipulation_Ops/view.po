@@ -16,7 +16,7 @@ msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md:5
 msgid "创建张量的视图，改变形状但不复制数据，类似于reshape，但更强调视图的概念，保持数据在内存中的连续性。"
-msgstr ""
+msgstr "Creates a view of the tensor, changing the shape without copying data. Similar to reshape but emphasizes the view concept, maintaining data contiguity in memory."
 "Creates a tensor view, changing shape without copying data. Similar to "
 "reshape but emphasizes the view concept, maintaining data contiguity in "
 "memory."
@@ -111,7 +111,7 @@ msgstr "**Type:** tensor"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md:30
 msgid "**形状：** 与shape参数指定的目标形状相同"
-msgstr ""
+msgstr "**Shape:** Same as the target shape specified by the shape parameter"
 "**Shape:** Same as the target shape specified by the `shape` parameter"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md:31

@@ -77,7 +77,7 @@ msgstr "`Callable`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "用于组合两个标量tensor组的函数（必须用@triton.jit标记）"
-msgstr ""
+msgstr "Function for combining two groups of scalar tensors (must be decorated with @triton.jit)"
 "The function for combining two sets of scalar tensors (must be decorated "
 "with @triton.jit)"
 
@@ -91,7 +91,7 @@ msgstr "`bool`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "是否沿轴的反方向应用关联扫描"
-msgstr ""
+msgstr "Whether to apply the associative scan in reverse direction along the axis"
 "Whether to apply the associative scan in the reverse direction along the "
 "axis"
 
@@ -117,7 +117,7 @@ msgstr "`Optional[Generator]`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md:24
 msgid "返回值： `tensor`：对输入tensor沿指定轴应用关联扫描操作，使用combine_fn函数组合元素并更新进位值之后的tensor。"
-msgstr ""
+msgstr "Return value: `tensor`: The result of applying associative scan along the specified axis using combine_fn to combine elements and update carry values."
 "Return value: `tensor`: the tensor after applying the associative scan along"
 " the specified axis using combine_fn to combine elements and update the "
 "carry value."
@@ -200,7 +200,7 @@ msgstr "2.2.2 Shape Support"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md:38
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 

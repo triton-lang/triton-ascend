@@ -20,7 +20,7 @@ msgstr "Prototype:"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:19
 msgid "简介：将一个Tensor/Scalar从UnifiedBuffer按照`pointer`所指的地址存回GlobalMemory"
-msgstr ""
+msgstr "Description: Stores a Tensor/Scalar from UnifiedBuffer back to GlobalMemory at the address pointed to by `pointer`."
 "Description: Stores a Tensor/Scalar from UnifiedBuffer back to Global Memory"
 " at the address pointed to by `pointer`."
 
@@ -101,7 +101,7 @@ msgstr "`tuple(int)`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "可选参数，当且仅当`pointer`来源于`tl.make_block_ptr`时可传入<br>整数元组，指示需要做边界检查的维度"
-msgstr ""
+msgstr "Optional parameter, only applicable when `pointer` originates from `tl.make_block_ptr`.<br>Integer tuple indicating which dimensions need boundary checking."
 "Optional. Only when `pointer` is from `tl.make_block_ptr`.<br>Integer tuple "
 "indicating which dims need boundary checks."
 
@@ -115,7 +115,7 @@ msgstr "`\"\"` or `\"ca\"` or `\"cg\"`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "可选参数，控制NVIDIA PTX上的cache选项，对Ascend硬件无效"
-msgstr ""
+msgstr "Optional parameter, controls cache options on NVIDIA PTX. Not effective on Ascend hardware."
 "Optional parameter that controls cache options for NVIDIA PTX. Has no effect"
 " on Ascend hardware."
 
@@ -129,7 +129,7 @@ msgstr "`str`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "控制NVIDIA PTX的eviction策略， 对Ascend硬件无效"
-msgstr ""
+msgstr "Controls the eviction policy on NVIDIA PTX. Not effective on Ascend hardware."
 "Controls the eviction policy for NVIDIA PTX. Has no effect on Ascend "
 "hardware."
 
@@ -251,7 +251,7 @@ msgstr "Ascend"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:56
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms; both support 1 to 5 dimensional tensors."
 "Shape: No difference between GPU and Ascend. Both support 1~5D tensors."
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:58
@@ -339,7 +339,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "大量泛化测试暴露问题，迭代解决"
-msgstr ""
+msgstr "Issues exposed by extensive generalization testing, being resolved iteratively."
 "Issues found via extensive generalization testing; resolved iteratively"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
@@ -348,7 +348,7 @@ msgstr "Generalization issues with branch/loop usage"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "当前tl.load的`pointer`和`mask`的计算过程，如果涉及较复杂的循环和分支语句，可能会出现编译问题"
-msgstr ""
+msgstr "Currently, the computation of `pointer` and `mask` in tl.load may encounter compilation issues when involving complex loop and branch statements."
 "`pointer`/`mask` in tl.load may cause compilation issues with complex "
 "loops/branches"
 

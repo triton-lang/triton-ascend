@@ -168,7 +168,7 @@ msgstr "Ascend"
 
 #: ../../zh/triton_api/Logical_Ops/and.md:46
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support; both support 1 to 5 dimensional tensors."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms; both support 1 to 5 dimensional tensors."
 
@@ -178,7 +178,7 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Logical_Ops/and.md:50
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
@@ -192,5 +192,5 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Logical_Ops/and.md:56
 msgid "以下示例计算两个输入张量的逐元素与运算："
-msgstr ""
+msgstr "The following example computes the element-wise AND operation on two input tensors:"
 "The following example computes the element-wise AND of two input tensors:"

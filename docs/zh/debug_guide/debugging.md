@@ -37,7 +37,7 @@
 | **MLIR 编译与代码生成** | `ttadapter.mlir` | `.o` (可执行对象文件) | 毕昇编译器 (`bishengir-compile`) | 将适配器IR进一步编译并优化，生成可在NPU上执行的二进制代码。 |
 
 ```bash
-# Triton-Ascend 编译流程示意
+# Triton-Ascend compilation workflow diagram
 [Python Kernel]
      ↓ (triton.compile)
 [ttir.mlir]
@@ -149,7 +149,7 @@ TRITON_DEBUG=1 TRITON_DISABLE_CACHE=1 python 01-vector-add.py
 
 ```text
 Dumping intermediate results to ~/.triton/dump/xxx 
-# xxx是一串hash的唯一标识符
+# xxx is the unique identifier of a hash string
 ```
 
 进入该dump路径，查看 kernel.ttir.mlir 和 kernel.ttadapter.mlir 

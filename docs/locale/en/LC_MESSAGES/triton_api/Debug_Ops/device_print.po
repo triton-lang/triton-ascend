@@ -202,13 +202,13 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Debug_Ops/device_print.md:40
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
 #: ../../zh/triton_api/Debug_Ops/device_print.md:42
 msgid "Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。"
-msgstr ""
+msgstr "Ascend lacks support for uint8, uint16, uint32, uint64, and fp64 compared to GPU (hardware limitation)."
 "Ascend lacks support for uint8, uint16, uint32, uint64, fp64 compared to GPU"
 " (hardware limitation)."
 
@@ -218,14 +218,14 @@ msgstr "**DevicePrint Feature Limitations**"
 
 #: ../../zh/triton_api/Debug_Ops/device_print.md:46
 msgid "**现象描述：** device_print 只能打印参与运算的结果值，无法打印纯粹用于访存的 offset 变量。"
-msgstr ""
+msgstr "**Phenomenon Description:** device_print can only print result values involved in computations, and cannot print offset variables used purely for memory access."
 "**Phenomenon Description:** device_print can only print result values "
 "involved in computation, but cannot print offset variables used purely for "
 "memory access."
 
 #: ../../zh/triton_api/Debug_Ops/device_print.md:49
 msgid "**根本原因：** 在访存分析优化阶段，编译器会将仅用于地址计算的 offset 优化掉，这些中间变量不会保留到最终的执行代码中。"
-msgstr ""
+msgstr "**Root Cause:** During the memory access analysis and optimization phase, the compiler optimizes away offsets used solely for address calculation, and these intermediate variables are not retained in the final execution code."
 "**Root Cause:** During the memory access analysis optimization phase, the "
 "compiler eliminates offsets used only for address calculation; these "
 "intermediate variables are not retained in the final execution code."
@@ -236,7 +236,7 @@ msgstr "**Example Scenarios:**"
 
 #: ../../zh/triton_api/Debug_Ops/device_print.md:71
 msgid "另外在特定情况下，`device_print`会展开一些辅助dma代码，导致底层报错，相关功能还在优化中"
-msgstr ""
+msgstr "Additionally, in specific cases, `device_print` may expand some auxiliary DMA code, causing low-level errors. This feature is still being optimized."
 "Additionally, in certain cases, `device_print` may expand some auxiliary DMA"
 " code, causing underlying errors. This feature is still being optimized."
 
@@ -246,6 +246,6 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Debug_Ops/device_print.md:75
 msgid "**注意**：`prefix`字符串前缀在使用`device_print`时是必须加上的，否则会导致编译错误。"
-msgstr ""
+msgstr "**Note:** The `prefix` string prefix must be specified when using `device_print`; otherwise, it will cause a compilation error."
 "**Note:** The `prefix` string prefix must be added when using "
 "`device_print`, otherwise a compilation error will occur."

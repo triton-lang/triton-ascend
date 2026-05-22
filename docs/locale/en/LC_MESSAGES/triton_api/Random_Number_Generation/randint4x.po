@@ -181,6 +181,6 @@ msgstr "Example: calling randint4x with scalar offset."
 
 #: ../../zh/triton_api/Random_Number_Generation/randint4x.md:68
 msgid "以下例子实现了offset非标量时对randint4x的调用，其中存储所用的tensor大小是offset的4倍："
-msgstr ""
+msgstr "The following example demonstrates calling randint4x when offset is non-scalar, where the storage tensor size is 4 times the offset:"
 "Example: calling randint4x with non-scalar offset; storage tensor is 4x the "
 "offset size."

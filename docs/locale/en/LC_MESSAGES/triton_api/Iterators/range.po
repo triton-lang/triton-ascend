@@ -16,7 +16,7 @@ msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Iterators/range.md:5
 msgid "`range` 是一个向上计数的迭代器，类似于 Python 的 `range()` 函数，但是允许传入更多的参数。"
-msgstr ""
+msgstr "`range` is an iterator that counts upward, similar to Python's `range()` function, but allows more parameters to be passed."
 "`range` is a forward-counting iterator, similar to Python's `range()` "
 "function, but allows more parameters."
 
@@ -58,7 +58,7 @@ msgstr "Required"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "起始值（单参数时作为结束值，从0开始）"
-msgstr ""
+msgstr "The starting value (when a single argument, it serves as the end value, starting from 0)."
 "Start value (when used as a single parameter, serves as the end value, "
 "starting from 0)"
 
@@ -240,7 +240,7 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Iterators/range.md:39
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 

@@ -24,7 +24,7 @@ msgstr "2.1 Parameters"
 
 #: ../../zh/triton_api_extension/al/debug_barrier.md:15
 msgid "sync_mode:指定barrier的类型，为al.SYNC_IN_VF 枚举"
-msgstr ""
+msgstr "sync_mode: Specifies the barrier type, using the al.SYNC_IN_VF enum"
 "`sync_mode`: specifies the barrier type; this is an `al.SYNC_IN_VF`"
 "enum."
 
@@ -34,7 +34,7 @@ msgstr "3\. Constraints"
 
 #: ../../zh/triton_api_extension/al/debug_barrier.md:74
 msgid "仅可在scope中使用（目前未拦截）"
-msgstr ""
+msgstr "Can only be used within scope (currently not blocked)"
 "Can only be used inside a `scope` (currently not blocked by"
 "validation)."
 

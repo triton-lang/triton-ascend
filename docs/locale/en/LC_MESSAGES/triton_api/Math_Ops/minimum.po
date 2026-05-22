@@ -176,7 +176,7 @@ msgstr "Only supports 1~5D tensors"
 
 #: ../../zh/triton_api/Math_Ops/minimum.md:43
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms; both support 1 to 5 dimensional tensors."
 "Shape: No difference between GPU and Ascend. Both support 1~5D tensors."
 
 #: ../../zh/triton_api/Math_Ops/minimum.md:45

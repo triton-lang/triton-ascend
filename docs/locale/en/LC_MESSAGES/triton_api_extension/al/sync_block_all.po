@@ -12,7 +12,7 @@ msgstr "1\. Hardware Background"
 
 #: ../../zh/triton_api_extension/al/sync_block_all.md:3
 msgid "当不同核之间操作同一块全局内存且可能存在读后写、写后读以及写后写等数据依赖问题时，通过调用该函数来插入同步语句来避免上述数据依赖时可能出现的数据读写错误问题。"
-msgstr ""
+msgstr "When different cores operate on the same block of global memory and there may be data dependencies such as read-after-write, write-after-read, and write-after-write, call this function to insert synchronization statements to avoid data read/write errors caused by these dependencies."
 "When different cores operate on the same block of global memory and"
 "there may be data dependencies such as read-after-write,"
 "write-after-read, or write-after-write, this function can be used to"
@@ -41,7 +41,7 @@ msgstr "3\. Constraints"
 
 #: ../../zh/triton_api_extension/al/sync_block_all.md:42
 msgid "mode可选字符串:all_cube/all_vector/all/all_sub_vector"
-msgstr ""
+msgstr "mode optional values: all_cube/all_vector/all/all_sub_vector"
 "`mode` accepts the strings: `all_cube` / `all_vector` / `all` /"
 "`all_sub_vector`"
 

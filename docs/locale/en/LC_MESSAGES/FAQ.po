@@ -5,19 +5,33 @@
 # FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
 #
 msgid ""
-msgstr ""#: ../../zh/FAQ.md:1
+msgstr ""
+"Project-Id-Version: PROJECT VERSION\n"
+"Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
+"POT-Creation-Date: 2026-05-22 11:54+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/FAQ.md:1
 msgid "Triton-Ascend FAQ"
 msgstr "Triton-Ascend FAQ"
 
 #: ../../zh/FAQ.md:3
 msgid "1. 安装与环境配置"
-msgstr "1\. Installation and Environment Configuration"
+msgstr "1\\. Installation and Environment Configuration"
 
 #: ../../zh/FAQ.md:5
-msgid "**Q: 如何正确安装 Triton-Ascend？是否支持 pip 直接安装？**"
-msgstr ""
-"**Q: How can I correctly install Triton-Ascend? Is it possible to"
-"install it directly using pip?**"
+#, fuzzy
+msgid "**Q**: 如何正确安装 Triton-Ascend？是否支持 pip 直接安装？"
+msgstr "**Q**: How to correctly install Triton-Ascend? Is pip direct installation supported?"
+"**Q: How to properly install Triton-Ascend? Does it support direct pip "
+"installation?****Q: How can I correctly install Triton-Ascend? Is it "
+"possible toinstall it directly using pip?**"
 
 #: ../../zh/FAQ.md:7
 msgid "A: 可以直接使用pip 安装"
@@ -35,53 +49,56 @@ msgid ""
 "的软件包时再次安装 Triton 而覆盖 Triton-Ascend。 x86 与 arm 使用不同版本的社区 Triton 安装包的原因是社区从"
 " 3.5 版本开始才提供 arm 版本安装包：x86 依赖 triton==3.2.0，arm 依赖 triton==3.5.0。"
 msgstr ""
-"A: For Triton-Ascend 3.2.0 and earlier versions.You need to uninstall"
-"the community Triton first before installing Triton-Ascend.<br>"
-" For Triton-Ascend 3.2.1 and later versions.Triton-Ascend declares"
-"Triton as an installation dependency to mitigate the installation"
-"overwriting issue.When installing"
-"Triton-Ascend,the community Triton is installed first,and the"
-"Triton-Ascend overwrites the directory with the same name."
-"This prevents the installation of triton from overwriting Triton-Ascend"
-"when other software packages that depend on Triton are installed."
-"The reason why x86 and arm use different versions of the community"
-"Triton installation package is that the community provides the arm"
-"installation package only form version 3.2.1 onwards."
-"Specifically,x86 depends on triton==3.2.0,and arm depends on"
-"triton==3.5.0."
+"A: For Triton-Ascend 3.2.0 and earlier versions.You need to uninstallthe "
+"community Triton first before installing Triton-Ascend.<br> For Triton-"
+"Ascend 3.2.1 and later versions.Triton-Ascend declaresTriton as an "
+"installation dependency to mitigate the installationoverwriting "
+"issue.When installingTriton-Ascend,the community Triton is installed "
+"first,and theTriton-Ascend overwrites the directory with the same "
+"name.This prevents the installation of triton from overwriting Triton-"
+"Ascendwhen other software packages that depend on Triton are "
+"installed.The reason why x86 and arm use different versions of the "
+"communityTriton installation package is that the community provides the "
+"arminstallation package only form version 3.2.1 onwards.Specifically,x86 "
+"depends on triton==3.2.0,and arm depends ontriton==3.5.0."
 
 #: ../../zh/FAQ.md:20
 msgid ""
 "注：若安装triton-ascend后，在安装依赖triton的三方件或者triton本身，将覆盖掉已安装的 Triton-Ascend 目录。 "
 "此时需要先卸载社区 Triton 和 Triton-Ascend，再安装 Triton-Ascend。"
 msgstr ""
-"Note: If you install a third-party software or triton itself that"
-"depends on Triton after installing Triton-Ascend,the installed"
-"Triton-Ascend directory will be overwritten."
-"In this case, you also need to uninstall the community Triton and"
-"Triton-Ascend first before installing Triton-Ascend."
+"Note: If you install a third-party software or triton itself thatdepends "
+"on Triton after installing Triton-Ascend,the installedTriton-Ascend "
+"directory will be overwritten.In this case, you also need to uninstall "
+"the community Triton andTriton-Ascend first before installing Triton-"
+"Ascend."
 
 #: ../../zh/FAQ.md:29
-msgid "**Q: 能否在非 Ascend 硬件（如 CUDA AMD）上使用 Triton-Ascend？**"
-msgstr ""
-"**Q: Can Triton-Ascend be used on non-Ascend hardware (such as CUDA"
-"AMD)?**"
+#, fuzzy
+msgid "**Q**: 能否在非 Ascend 硬件（如 CUDA AMD）上使用 Triton-Ascend？"
+msgstr "**Q**: Can Triton-Ascend be used on non-Ascend hardware (such as CUDA or AMD)?"
+"**Q: Can Triton-Ascend be used on non-Ascend hardware (such as CUDA "
+"AMD)?****Q: Can Triton-Ascend be used on non-Ascend hardware (such as "
+"CUDAAMD)?**"
 
 #: ../../zh/FAQ.md:31
 msgid "A: 不可以，只能在 Ascend NPU 硬件环境使用 Triton-Ascend"
-msgstr ""
-"A: No. Triton-Ascend can be used only in the Ascend NPU hardware"
-"environment."
+msgstr "A: No, Triton-Ascend can only be used in the Ascend NPU hardware environment."
+"A: No, Triton-Ascend can only be used in an Ascend NPU hardware "
+"environmentA: No. Triton-Ascend can be used only in the Ascend NPU "
+"hardwareenvironment."
 
 #: ../../zh/FAQ.md:33
 msgid "2. 精度与数值一致性问题"
-msgstr "2\. Accuracy and Numerical Consistency Issues"
+msgstr "2\\. Accuracy and Numerical Consistency Issues"
 
 #: ../../zh/FAQ.md:35
-msgid "**Q: NPU 运行结果和 PyTorch/CPU/GPU 参考结果不一致，如何排查？**"
-msgstr ""
-"**Q: How can I troubleshoot the inconsistency between the NPU running"
-"result and the PyTorch/CPU/GPU reference result?**"
+#, fuzzy
+msgid "**Q**: NPU 运行结果和 PyTorch/CPU/GPU 参考结果不一致，如何排查？"
+msgstr "**Q**: NPU results differ from PyTorch/CPU/GPU reference results. How to investigate?"
+"**Q: The NPU results differ from PyTorch/CPU/GPU reference results; how "
+"to debug?****Q: How can I troubleshoot the inconsistency between the NPU "
+"runningresult and the PyTorch/CPU/GPU reference result?**"
 
 #: ../../zh/FAQ.md:37
 msgid ""
@@ -89,64 +106,73 @@ msgid ""
 "[07_accuracy_comparison_example.md](examples/07_accuracy_comparison_example.md)"
 " 调试方法请参考 [解释器模式调试方法](./debug_guide/debugging.md#4-解释器模式)"
 msgstr ""
-"A: For details, see [07_accuracy_comparison_example.md](examples/07_accu"
-"racy_comparison_example.md)."
-"For details about the debugging method, see [Debugging in Interpreter"
-"Mode](./debug_guide/debugging.md#4-interpreter-mode)."
+"A: For details, see "
+"[07_accuracy_comparison_example.md](examples/07_accuracy_comparison_example.md).For"
+" details about the debugging method, see [Debugging in "
+"InterpreterMode](./debug_guide/debugging.md#4-interpreter-mode)."
 
 #: ../../zh/FAQ.md:40
 msgid "3. 错误代码与异常处理"
-msgstr "3\. Error Code and Exception Handling"
+msgstr "3\\. Error Code and Exception Handling"
 
 #: ../../zh/FAQ.md:42
-msgid "**Q: 为什么 kernel 编译时报 MLIRCompilationError？如何定位具体失败的 Pass？**"
-msgstr ""
-"**Q: Why is the error message \"MLIRCompilationError\" displayed during"
-"kernel compilation? How can I locate the failed pass?**"
+#, fuzzy
+msgid "**Q**: 为什么 kernel 编译时报 MLIRCompilationError？如何定位具体失败的 Pass？"
+msgstr "**Q**: Why does MLIRCompilationError occur during kernel compilation? How to locate the specific failed Pass?"
+"**Q: Why does kernel compilation report MLIRCompilationError? How to "
+"locate the specific failing Pass?****Q: Why is the error message "
+"\"MLIRCompilationError\" displayed duringkernel compilation? How can I "
+"locate the failed pass?**"
 
 #: ../../zh/FAQ.md:44
 msgid "A: 请参考 [编译错误调试方法](./debug_guide/debugging.md#52-编译错误调试方法)"
-msgstr ""
-"A: For details, see [Compilation Error Debugging](./debug_guide/debuggin"
-"g.md#52-compilation-error-debugging)."
+msgstr "A: Please refer to [Compilation Error Debugging Methods](./debug_guide/debugging.md#52-编译错误调试方法)."
+"A: Please refer to [Compilation Error Debugging "
+"Methods](./debug_guide/debugging.md#52-compilation-error-debugging-"
+"methods)A: For details, see [Compilation Error "
+"Debugging](./debug_guide/debugging.md#52-compilation-error-debugging)."
 
 #: ../../zh/FAQ.md:46
 msgid "4. 调试与日志"
-msgstr "4\. Debugging and Logging"
+msgstr "4\\. Debugging and Logging"
 
 #: ../../zh/FAQ.md:48
-msgid "**Q: 如何开启详细日志输出？TRITON_DEBUG=1 输出在哪？**"
-msgstr ""
-"**Q: How can I enable detailed log output? Where is the output of"
-"TRITON_DEBUG=1?**"
+#, fuzzy
+msgid "**Q**: 如何开启详细日志输出？TRITON_DEBUG=1 输出在哪？"
+msgstr "**Q**: How to enable detailed log output? Where is the TRITON_DEBUG=1 output?"
+"**Q: How to enable verbose log output? Where is the TRITON_DEBUG=1 "
+"output?****Q: How can I enable detailed log output? Where is the output "
+"ofTRITON_DEBUG=1?**"
 
 #: ../../zh/FAQ.md:50
 msgid ""
 "A: 可以使用 TRITON_DEBUG=1 获取详细的调试转储文件，请参考 [调试转储文件（Dump "
 "Files）](./debug_guide/debugging.md#32-调试转储文件dump-files)"
 msgstr ""
-"A: You can use **TRITON_DEBUG=1** to obtain detailed dump files for"
-"debugging. For details, see [Dump Files](./debug_guide/debugging.md#32-d"
-"ump-files)."
+"A: You can use **TRITON_DEBUG=1** to obtain detailed dump files "
+"fordebugging. For details, see [Dump Files](./debug_guide/debugging.md#32"
+"-dump-files)."
 
 #: ../../zh/FAQ.md:52
-msgid "**Q: 能否在 kernel 中打印中间张量值？tl.device_print 是否可用？**"
-msgstr ""
-"**Q: Can I print the intermediate tensor value in the kernel? Is"
-"tl.device_print available?**"
+#, fuzzy
+msgid "**Q**: 能否在 kernel 中打印中间张量值？tl.device_print 是否可用？"
+msgstr "**Q**: Can intermediate tensor values be printed in the kernel? Is tl.device_print available?"
+"**Q: Can intermediate tensor values be printed inside a kernel? Is "
+"tl.device_print available?****Q: Can I print the intermediate tensor "
+"value in the kernel? Istl.device_print available?**"
 
 #: ../../zh/FAQ.md:54
 msgid ""
 "A: 可以使用 tl.device_print 打印 kernel 中的张量，请参考 "
 "[打印调试方法](debug_guide/debugging.md#51-打印调试方法)"
 msgstr ""
-"A: You can use tl.device_print to print the tensor in the kernel. For"
-"details, see [Debugging by Printing](./debug_guide/debugging.md#51-debug"
-"ging-by-printing)."
+"A: You can use tl.device_print to print the tensor in the kernel. "
+"Fordetails, see [Debugging by Printing](./debug_guide/debugging.md#51"
+"-debugging-by-printing)."
 
 #: ../../zh/FAQ.md:56
 msgid "5. 开发与贡献"
-msgstr "5\. Development and Contributions"
+msgstr "5\\. Development and Contributions"
 
 #: ../../zh/FAQ.md:58
 msgid "**Q: 如何本地构建并测试 Triton-Ascend？**"
@@ -157,9 +183,9 @@ msgid ""
 "A: 本地构建和测试方法，请参考 [通过源码安装Triton-Ascend](./installation_guide.md"
 "#通过源码安装triton-ascend)"
 msgstr ""
-"A: For details about the local build and test methods, see [Installing"
-"Triton-Ascend Using the Source Code](./installation_guide.md#installing-"
-"triton-ascend-using-the-source-code)."
+"A: For details about the local build and test methods, see "
+"[InstallingTriton-Ascend Using the Source Code](./installation_guide.md"
+"#installing-triton-ascend-using-the-source-code)."
 
 #: ../../zh/FAQ.md:62
 msgid "**Q: 提交 PR 需要通过哪些 CI 检查？**"
@@ -167,14 +193,16 @@ msgstr "**Q: What CI checks are required for submitting a PR?**"
 
 #: ../../zh/FAQ.md:64
 msgid "A: PR 的 CI 检查包括：编码安全与规范检查、开源片段检查、恶意代码检查、编译构建、开发者测试"
-msgstr ""
-"A: The CI checks for a PR include: coding security and specifications"
-"check, open-source code check, malicious code check, compilation and"
-"building, and developer testing."
+msgstr "A: The PR CI checks include: coding security and specification checks, open-source snippet checks, malicious code checks, compilation builds, and developer tests."
+"A: PR CI checks include: coding security and standards check, open-source"
+" snippet check, malicious code check, compilation and build, developer "
+"testsA: The CI checks for a PR include: coding security and "
+"specificationscheck, open-source code check, malicious code check, "
+"compilation andbuilding, and developer testing."
 
 #: ../../zh/FAQ.md:66
 msgid "6. 性能调优"
-msgstr "6\. Performance Optimization"
+msgstr "6\\. Performance Optimization"
 
 #: ../../zh/FAQ.md:68
 msgid "**Q: 有没有性能分析工具（profiler）可以使用？**"
@@ -182,8 +210,10 @@ msgstr "**Q: Is there any performance analysis tool (profiler) available?**"
 
 #: ../../zh/FAQ.md:70
 msgid "A: 有集成性能分析工具（profiler），请参考 [算子性能调优方法](./debug_guide/profiling.md)"
-msgstr ""
-"A: There is an integrated performance analysis tool (profiler). For"
-"details, see [Operator Performance Optimization"
-"Methods](./debug_guide/profiling.md)."
+msgstr "A: There is an integrated performance analysis tool (profiler). Please refer to [Operator Performance Tuning Methods](./debug_guide/profiling.md)."
+"A: An integrated performance analysis tool (profiler) is available. "
+"Please refer to [Operator Performance Tuning "
+"Methods](./debug_guide/profiling.md)A: There is an integrated performance"
+" analysis tool (profiler). Fordetails, see [Operator Performance "
+"OptimizationMethods](./debug_guide/profiling.md)."
 

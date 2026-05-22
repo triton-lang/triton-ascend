@@ -46,13 +46,13 @@ msgstr "3\. Constraints"
 
 #: ../../zh/triton_api_extension/al/copy_from_ub_to_l1.md:44
 msgid "src 和 dst 必须同时为 tensor 或者 buffer ，tensor 暂时不支持"
-msgstr ""
+msgstr "src and dst must both be tensors or buffers; tensor is not supported yet"
 "`src` and `dst` must both be `tensor` or `buffer`; `tensor` is not"
 "supported for now"
 
 #: ../../zh/triton_api_extension/al/copy_from_ub_to_l1.md:46
 msgid "src 的address space 必须为UB， dst 的address space 必须为L1"
-msgstr ""
+msgstr "src's address space must be UB, dst's address space must be L1"
 "The address space of `src` must be UB, and the address space of `dst`"
 "must be L1"
 

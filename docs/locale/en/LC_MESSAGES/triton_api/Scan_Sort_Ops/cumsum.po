@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:5
 msgid "简介：`triton.language.cumsum` 计算输入tensor沿指定轴的累积和，返回累积求和结果。"
-msgstr ""
+msgstr "Description: `triton.language.cumsum` computes the cumulative sum of the input tensor along the specified axis."
 "Description: `triton.language.cumsum` computes the cumulative sum of the "
 "input tensor along the specified axis, returning the cumulative sum result."
 
@@ -87,13 +87,13 @@ msgstr ""
 
 #: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:23
 msgid "当 `reverse=True` 时，计算反向累积和：`[a+b+c+d, b+c+d, c+d, d]`。"
-msgstr ""
+msgstr "When `reverse=True`, computes the reverse cumulative sum: `[a+b+c+d, b+c+d, c+d, d]`."
 "When `reverse=True`, computes the reverse cumulative sum: `[a+b+c+d, b+c+d, "
 "c+d, d]`."
 
 #: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:25
 msgid "返回值： `tensor`：计算输入tensor沿指定轴的累积和，返回累积求和结果。"
-msgstr ""
+msgstr "Return value: `tensor`: Computes the cumulative sum of the input tensor along the specified axis."
 "Return value: `tensor`: computes the cumulative sum of the input tensor "
 "along the specified axis, returning the cumulative sum result."
 
@@ -175,7 +175,7 @@ msgstr "2.2.2 Shape Support"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:39
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 

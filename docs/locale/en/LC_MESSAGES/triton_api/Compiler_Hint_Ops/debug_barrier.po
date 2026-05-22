@@ -134,7 +134,7 @@ msgstr "2.3 Usage"
 
 #: ../../zh/triton_api/Compiler_Hint_Ops/debug_barrier.md:54
 msgid "**注意：** `debug_barrier` 主要用于调试，通常不应在性能关键的生产代码中使用，因为它可能会因同步而引入开销。"
-msgstr ""
+msgstr "**Note:** `debug_barrier` is primarily used for debugging and should generally not be used in performance-critical production code, as it may introduce overhead due to synchronization."
 "**Note:** `debug_barrier` is mainly used for debugging and should generally "
 "not be used in performance-critical production code, as it may introduce "
 "overhead due to synchronization."

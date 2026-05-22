@@ -16,7 +16,7 @@ msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/sort.md:5
 msgid "简介：对输入张量`x`按维度进行升序或者降序的排序。"
-msgstr ""
+msgstr "Description: Sorts the input tensor `x` along the specified dimension in ascending or descending order."
 "Description: Sorts the input tensor `x` along a dimension in ascending or "
 "descending order."
 
@@ -78,7 +78,7 @@ msgstr "Whether to sort in descending order"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/sort.md:21
 msgid "返回值： `x`：输出张量的shape与输入x的shape相同"
-msgstr ""
+msgstr "Return value: `x`: output tensor has the same shape as input tensor `x`"
 "Return value: `x`: The output tensor has the same shape as the input x"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/sort.md:24
@@ -178,7 +178,7 @@ msgstr "Only supports 1~5D tensors"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/sort.md:43
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms; both support 1 to 5 dimensional tensors."
 "Shape: No difference between GPU and Ascend. Both support 1~5D tensors."
 
 #: ../../zh/triton_api/Scan_Sort_Ops/sort.md:45
@@ -191,7 +191,7 @@ msgstr "Not supported vs. community version and cannot be implemented"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/sort.md:49
 msgid "毕升编译器限制，int32、uint8、int64、float64、bool 无法实现。"
-msgstr ""
+msgstr "Due to Bisheng compiler limitations, int32, uint8, int64, float64, and bool cannot be implemented."
 "Bisheng compiler limitation: int32, uint8, int64, float64, bool not "
 "implementable."
 

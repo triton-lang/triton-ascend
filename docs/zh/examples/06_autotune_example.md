@@ -45,7 +45,7 @@ def test_triton_autotune():
             tmp2 = tl.math.exp(tmp0) + tmp1 + i                # Compute
             tl.store(out_ptr0 + idx, tmp2, mask=msk)           # Store to output
 
-    # Triton 调用函数，自动使用 autotuned kernel
+    # Triton calls the function and automatically uses the autotuned kernel
     def triton_calc_func(x0, x1):
         n = x0.numel()
         y0 = torch.empty_like(x0)

@@ -16,7 +16,7 @@ msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Math_Ops/umulhi.md:5
 msgid "简介：计算x和y的2N位乘积中每个元素的最显著N位。"
-msgstr ""
+msgstr "Description: Computes the most significant N bits of each element in the 2N-bit product of x and y."
 "Description: Computes the most significant N bits of the 2N-bit product of x"
 " and y for each element."
 
@@ -70,7 +70,7 @@ msgstr "Reserved parameter, external calls not supported yet"
 
 #: ../../zh/triton_api/Math_Ops/umulhi.md:21
 msgid "返回值： `x`：输出张量的shape与输入x的shape相同"
-msgstr ""
+msgstr "Return value: `x`: output tensor has the same shape as input tensor `x`"
 "Return value: `x`: The output tensor has the same shape as the input x"
 
 #: ../../zh/triton_api/Math_Ops/umulhi.md:24
@@ -167,7 +167,7 @@ msgstr "Only supports 1~5D tensors"
 
 #: ../../zh/triton_api/Math_Ops/umulhi.md:43
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms; both support 1 to 5 dimensional tensors."
 "Shape: No difference between GPU and Ascend. Both support 1~5D tensors."
 
 #: ../../zh/triton_api/Math_Ops/umulhi.md:45

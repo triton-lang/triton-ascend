@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md:5
 msgid "简介：`triton.language.arange`函数用于生成一个从`start`到`end`（不包括`end`）的连续整数序列。"
-msgstr ""
+msgstr "Description: The `triton.language.arange` function generates a contiguous integer sequence from `start` to `end` (excluding `end`)."
 "Description: The `triton.language.arange` function generates a contiguous "
 "integer sequence from `start` to `end` (exclusive)."
 
@@ -50,7 +50,7 @@ msgstr "`scalar`"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "创建连续整数序列的起始数值，必须是编译时常量（tl.constexpr）"
-msgstr ""
+msgstr "The starting value for creating the contiguous integer sequence; must be a compile-time constant (tl.constexpr)."
 "The start value of the contiguous integer sequence, must be a compile-time "
 "constant (tl.constexpr)"
 
@@ -156,7 +156,7 @@ msgstr "0 =< (end - start) <1048576 end >= 0,  start  >= 0"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md:39
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 
@@ -166,7 +166,7 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md:43
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
@@ -191,5 +191,5 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md:52
 msgid "以下示例实现了生成一个[0, 128) 的连续整数序列："
-msgstr ""
+msgstr "The following example generates a contiguous integer sequence from [0, 128):"
 "The following example generates a contiguous integer sequence from 0 to 128:"

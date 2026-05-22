@@ -16,7 +16,7 @@ msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/interleave.md:5
 msgid "将两个相同形状的输入张量在最后一个维度上交错排列，输出张量的最后一个维度大小为输入张量的2倍，其他维度保持不变。"
-msgstr ""
+msgstr "Interleaves two input tensors of the same shape along the last dimension. The output tensor's last dimension size is 2x the input, while other dimensions remain unchanged."
 "Interleaves two input tensors of the same shape along the last dimension. "
 "The last dimension of the output tensor is twice the size of the input "
 "tensors, with other dimensions unchanged."
@@ -39,12 +39,12 @@ msgstr "**Function:**"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/interleave.md:14
 msgid "将两个相同形状的输入张量在最后一个维度上交错排列"
-msgstr ""
+msgstr "Interleaves two input tensors of the same shape along the last dimension"
 "Interleaves two input tensors of the same shape along the last dimension"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/interleave.md:15
 msgid "输出张量的最后一个维度大小为输入张量的2倍"
-msgstr ""
+msgstr "The last dimension size of the output tensor is 2x that of the input tensor"
 "The last dimension of the output tensor is twice the size of the input "
 "tensor"
 
@@ -130,7 +130,7 @@ msgstr "Both input tensors must have the same shape and data type"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/interleave.md:37
 msgid "输出张量的形状为输入形状的最后一个维度乘以2"
-msgstr ""
+msgstr "The output tensor's last dimension is the input's last dimension multiplied by 2"
 "The shape of the output tensor is the input shape with the last dimension "
 "multiplied by 2"
 

@@ -173,7 +173,7 @@ msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Indexing_Ops/gather.md:40
 msgid "结论：Ascend 对比 GPU 缺失fp64的支持能力（硬件限制）。"
-msgstr ""
+msgstr "Conclusion: Ascend lacks fp64 support compared to GPU (hardware limitation)."
 "Conclusion: Ascend lacks support for fp64 compared to GPU (hardware "
 "limitation)."
 
@@ -191,7 +191,7 @@ msgstr "Only supports 1D to 5D tensors"
 
 #: ../../zh/triton_api/Indexing_Ops/gather.md:49
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support; both support 1 to 5 dimensional tensors."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms; both support 1 to 5 dimensional tensors."
 
@@ -201,7 +201,7 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Indexing_Ops/gather.md:53
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 

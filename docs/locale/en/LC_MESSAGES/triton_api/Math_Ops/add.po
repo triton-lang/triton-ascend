@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Math_Ops/add.md:5
 msgid "简介：加法  ，与四则运算 ‘+’等价 原型："
-msgstr ""
+msgstr "Description: Addition, equivalent to the arithmetic operator ‘+’. Prototype:"
 "Description: Addition, equivalent to the arithmetic operator '+'. Prototype:"
 
 #: ../../zh/triton_api/Math_Ops/add.md:12
@@ -69,7 +69,7 @@ msgstr "`bool`"
 
 #: ../../zh/triton_api/Math_Ops/add.md
 msgid "是否对整数加法做溢出检查，默认值为True,无需显示指定"
-msgstr ""
+msgstr "Whether to perform overflow checking on integer addition. Default value is True; does not need to be explicitly specified."
 "Whether to perform overflow checking for integer addition, default is True, "
 "no need to specify explicitly"
 
@@ -175,7 +175,7 @@ msgstr "Ascend"
 
 #: ../../zh/triton_api/Math_Ops/add.md:42
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 
@@ -185,7 +185,7 @@ msgstr "2.3 Usage"
 
 #: ../../zh/triton_api/Math_Ops/add.md:46
 msgid "以下示例实现了对输入张量 `x_ptr, y_ptr` 做加法计算："
-msgstr ""
+msgstr "The following example performs addition on the input tensors `x_ptr` and `y_ptr`:"
 "The following example demonstrates addition on input tensors `x_ptr, y_ptr`:"
 
 #: ../../zh/triton_api/Math_Ops/add.md:67

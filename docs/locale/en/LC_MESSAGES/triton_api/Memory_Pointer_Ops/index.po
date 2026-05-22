@@ -24,7 +24,7 @@ msgstr "[load](./tl.load.md)"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "返回一个张量，其值从由指针定义的内存位置加载"
-msgstr ""
+msgstr "Returns a tensor whose values are loaded from the memory location defined by the pointer"
 "Returns a tensor whose values are loaded from the memory location defined by"
 " the pointer"
 

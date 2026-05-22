@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Creation_Ops/full.md:5
 msgid "简介：`triton.language.full`返回一个填充了给定形状和数据类型的标量值的张量"
-msgstr ""
+msgstr "Description: `triton.language.full` returns a tensor filled with a scalar value of the given shape and data type."
 "Description: `triton.language.full` returns a tensor filled with a scalar "
 "value of the given shape and data type"
 
@@ -170,7 +170,7 @@ msgstr "2.2.2 Shape Support"
 
 #: ../../zh/triton_api/Creation_Ops/full.md:36
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 
@@ -180,7 +180,7 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Creation_Ops/full.md:40
 msgid "相对社区能力缺失且无法实现 无"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented. None."
 "Missing capability compared to the community version and cannot be "
 "implemented. None."
 
@@ -190,6 +190,6 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Creation_Ops/full.md:45
 msgid "以下示例实现了返回填充了100数值的(XB,YB,ZB)shape的tensor："
-msgstr ""
+msgstr "The following example returns a tensor of shape (XB, YB, ZB) filled with the value 100:"
 "The following example returns a tensor with shape (XB, YB, ZB) filled with "
 "the value 100:"

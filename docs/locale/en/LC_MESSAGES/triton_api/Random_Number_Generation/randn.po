@@ -76,7 +76,7 @@ msgstr "Number of Philox algorithm iterations"
 
 #: ../../zh/triton_api/Random_Number_Generation/randn.md:26
 msgid "返回值： 1 个 float32 类型的随机块，shape与offset的相同，其值服从标准正态分布 `N(0, 1)`"
-msgstr ""
+msgstr "Return value: 1 float32 random block with shape matching offset, following standard normal distribution `N(0, 1)`"
 "Return: 1 float32 random block with same shape as offset, following `N(0, "
 "1)` standard normal distribution"
 

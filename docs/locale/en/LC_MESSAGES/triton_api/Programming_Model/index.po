@@ -32,7 +32,7 @@ msgstr "[program_id](./program_id.md)"
 
 #: ../../zh/triton_api/Programming_Model/index.md
 msgid "沿指定轴返回当前程序实例的 id"
-msgstr ""
+msgstr "Returns the id of the current program instance along the specified axis"
 "Returns the id of the current program instance along the specified axis"
 
 #: ../../zh/triton_api/Programming_Model/index.md
@@ -41,5 +41,5 @@ msgstr "[num_programs](./num_programs.md)"
 
 #: ../../zh/triton_api/Programming_Model/index.md
 msgid "沿指定轴返回当前程序实例的数量"
-msgstr ""
+msgstr "Returns the number of current program instances along the specified axis"
 "Returns the number of current program instances along the specified axis"

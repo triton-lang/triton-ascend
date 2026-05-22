@@ -2,7 +2,7 @@
 
 ## 1. 安装与环境配置
 
-**Q: 如何正确安装 Triton-Ascend？是否支持 pip 直接安装？**
+**Q**: 如何正确安装 Triton-Ascend？是否支持 pip 直接安装？
 
 A: 可以直接使用pip 安装
 
@@ -26,30 +26,30 @@ pip uninstall triton-ascend
 pip install triton-ascend
 ```
 
-**Q: 能否在非 Ascend 硬件（如 CUDA AMD）上使用 Triton-Ascend？**
+**Q**: 能否在非 Ascend 硬件（如 CUDA AMD）上使用 Triton-Ascend？
 
 A: 不可以，只能在 Ascend NPU 硬件环境使用 Triton-Ascend
 
 ## 2. 精度与数值一致性问题
 
-**Q: NPU 运行结果和 PyTorch/CPU/GPU 参考结果不一致，如何排查？**
+**Q**: NPU 运行结果和 PyTorch/CPU/GPU 参考结果不一致，如何排查？
 
 A: 用例请参考 [07_accuracy_comparison_example.md](examples/07_accuracy_comparison_example.md)
 调试方法请参考 [解释器模式调试方法](./debug_guide/debugging.md#4-解释器模式)
 
 ## 3. 错误代码与异常处理
 
-**Q: 为什么 kernel 编译时报 MLIRCompilationError？如何定位具体失败的 Pass？**
+**Q**: 为什么 kernel 编译时报 MLIRCompilationError？如何定位具体失败的 Pass？
 
 A: 请参考 [编译错误调试方法](./debug_guide/debugging.md#52-编译错误调试方法)
 
 ## 4. 调试与日志
 
-**Q: 如何开启详细日志输出？TRITON_DEBUG=1 输出在哪？**
+**Q**: 如何开启详细日志输出？TRITON_DEBUG=1 输出在哪？
 
 A: 可以使用 TRITON_DEBUG=1 获取详细的调试转储文件，请参考 [调试转储文件（Dump Files）](./debug_guide/debugging.md#32-调试转储文件dump-files)
 
-**Q: 能否在 kernel 中打印中间张量值？tl.device_print 是否可用？**
+**Q**: 能否在 kernel 中打印中间张量值？tl.device_print 是否可用？
 
 A: 可以使用 tl.device_print 打印 kernel 中的张量，请参考 [打印调试方法](debug_guide/debugging.md#51-打印调试方法)
 

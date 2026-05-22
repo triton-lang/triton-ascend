@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md:5
 msgid "简介：`triton.language.xor_sum` 计算输入tensor沿指定轴的异或和，返回异或操作结果。"
-msgstr ""
+msgstr "Description: `triton.language.xor_sum` computes the XOR sum of the input tensor along the specified axis."
 "Description: `triton.language.xor_sum` computes the XOR sum along the "
 "specified axis of the input tensor, returning the XOR operation result."
 
@@ -78,7 +78,7 @@ msgstr "If True, keep operated dim as length 1"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md:21
 msgid "返回值： `tensor`：输入tensor沿指定轴的异或和，返回异或操作结果"
-msgstr ""
+msgstr "Return value: `tensor`: XOR sum of the input tensor along the specified axis"
 "Return value: `tensor`: The XOR sum of the input tensor along the specified "
 "axis."
 

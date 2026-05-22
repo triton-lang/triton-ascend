@@ -28,7 +28,7 @@ msgstr ""
 
 #: ../../zh/triton_api_extension/al/sub_vec_id.md:7
 msgid "sub_vec_id编程接口返回N个Vector核的sub id，允许算子开发者根据vector核sub id决定每个核处理哪些数据。"
-msgstr ""
+msgstr "The sub_vec_id programming interface returns the sub ids of N Vector cores, allowing operator developers to decide which data each core processes based on the vector core sub id."
 "The `sub_vec_id` programming interface returns the sub ID of N Vector"
 "cores, allowing operator developers to decide which data each core"
 "processes based on the Vector-core sub ID."
@@ -39,7 +39,7 @@ msgstr "2\. Interface Description"
 
 #: ../../zh/triton_api_extension/al/sub_vec_id.md:17
 msgid "返回值：返回范围为 [0, N) 的 Sub Vector ID，算子开发者可根据该ID决定N个并行Vector核中每个核处理的数据分片"
-msgstr ""
+msgstr "Return value: Returns Sub Vector IDs in the range [0, N). Developers can determine the data slice processed by each of the N parallel Vector cores based on this ID."
 "Return value: a Sub Vector ID in the range [0, N). Operator developers"
 "can use this ID to decide which data shard each of the N parallel Vector"
 "cores should process."
@@ -54,7 +54,7 @@ msgstr "3\. Constraints"
 
 #: ../../zh/triton_api_extension/al/sub_vec_id.md:23
 msgid "仅在AIC和AIV核混合使用场景中有效，不可在纯Cube类算子或者纯Vector类算子中使用，否则会触发编译报错。"
-msgstr ""
+msgstr "Only effective in mixed AIC and AIV core scenarios. Cannot be used in pure Cube-type or pure Vector-type operators, otherwise compilation errors will occur."
 "This is only valid in scenarios where AIC and AIV cores are used"
 "together. It cannot be used in pure Cube operators or pure Vector"
 "operators; otherwise, compilation will fail."

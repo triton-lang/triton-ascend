@@ -16,13 +16,13 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md:5
 msgid "简介：根据给定的索引，从输入张量中读取单个元素。 原型："
-msgstr ""
+msgstr "Description: Reads a single element from the input tensor according to the given index. Prototype:"
 "Description: Reads a single element from the input tensor according to the "
 "given index. Prototype:"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md:17
 msgid "可以作为tensor的成员函数调用，如`x.get_element(...)`，与`get_element(x, ...)`等效。"
-msgstr ""
+msgstr "Can be called as a tensor member function, e.g., `x.get_element(...)`, equivalent to `get_element(x, ...)`."
 "Can be called as a tensor member function, e.g., `x.get_element(...)`, "
 "equivalent to `get_element(x, ...)`."
 
@@ -88,7 +88,7 @@ msgstr "`_generator`"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md:30
 msgid "返回值： `scalar`：与 `src` 张量元素类型相同的标量值"
-msgstr ""
+msgstr "Return value: `scalar`: A scalar value with the same element type as the `src` tensor."
 "Return value: `scalar`: a scalar value with the same element type as the "
 "`src` tensor"
 
@@ -166,7 +166,7 @@ msgstr "2.2.2 Shape Support"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md:43
 msgid "支持任意形状的张量，但需满足： `indice` 的长度必须与 `src` 张量的维度数相同。"
-msgstr ""
+msgstr "Supports tensors of arbitrary shapes, with the condition that the length of `indice` must equal the number of dimensions of the `src` tensor."
 "Supports tensors of arbitrary shape, with the requirement that the length of"
 " `indice` must equal the number of dimensions of the `src` tensor."
 

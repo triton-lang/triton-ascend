@@ -134,9 +134,9 @@ for i in range(len(indices)):
     idx = tl.load(indices_ptr + i)
     offsets = idx * stride + tl.arange(0, size)
     data = tl.load(src_ptr + offsets)
-    # ... 处理 data
+    # ... process data
 
-## index_select 方式（高效）
+## index_select method (efficient)
 indices = tl.load(indices_ptr + tl.arange(0, len(indices)))
 data = libdevice.index_select_simd(
     src=src_ptr,

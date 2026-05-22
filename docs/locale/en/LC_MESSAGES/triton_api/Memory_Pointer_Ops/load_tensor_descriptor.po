@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/load_tensor_descriptor.md:5
 msgid "简介：该函数用于从张量描述符加载数据块"
-msgstr ""
+msgstr "Description: This function loads a data block from a tensor descriptor."
 "Description: This function loads a data block from a tensor descriptor"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/load_tensor_descriptor.md:15
@@ -49,7 +49,7 @@ msgstr "`tensor_descriptor_base`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/load_tensor_descriptor.md
 msgid "张量描述符对象，由 `make_tensor_descriptor` 创建，定义了内存布局（形状、步长、块大小等）。"
-msgstr ""
+msgstr "Tensor descriptor object created by `make_tensor_descriptor`, defining memory layout (shape, stride, block size, etc.)."
 "Tensor descriptor object, created by `make_tensor_descriptor`, defining the "
 "memory layout (shape, stride, block size, etc.)."
 
@@ -63,7 +63,7 @@ msgstr "`Sequence[constexpr | tensor]`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/load_tensor_descriptor.md
 msgid "数据加载的起始偏移量序列，用于指定当前线程块要加载的数据位置"
-msgstr ""
+msgstr "Sequence of starting offsets for data loading, specifying the data location to load for the current thread block."
 "The starting offset sequence for data loading, specifying the data positions"
 " to be loaded by the current thread block"
 
@@ -81,7 +81,7 @@ msgstr "Reserved parameter; external invocation is not supported yet"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/load_tensor_descriptor.md:25
 msgid "返回值：`tensor` - 根据张量描述符内存布局信息，从指定偏移量处加载的数据块"
-msgstr ""
+msgstr "Return value: `tensor` - The data block loaded from the specified offsets according to the tensor descriptor memory layout."
 "Return value: `tensor` - a data block loaded from the specified offset "
 "according to the tensor descriptor memory layout"
 
@@ -175,7 +175,7 @@ msgstr "Ascend"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/load_tensor_descriptor.md:43
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms; both support 1 to 5 dimensional tensors."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms; both support 1 to 5 dimensional tensors."
 
@@ -185,13 +185,13 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/load_tensor_descriptor.md:47
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing relative to the community version and cannot be implemented"
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/load_tensor_descriptor.md:49
 msgid "结论：Ascend 对比 GPU 缺失uint16、uint32、uint64的支持能力（硬件限制）。"
-msgstr ""
+msgstr "Conclusion: Ascend lacks support for uint16, uint32, uint64 compared to GPU (hardware limitation)."
 "Conclusion: Ascend lacks support for uint16, uint32, uint64 compared to GPU "
 "(hardware limitation)."
 
@@ -222,7 +222,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/load_tensor_descriptor.md
 msgid "升级至 Triton 3.4.0 版本同步上游函数（如 `cast`）可解决"
-msgstr ""
+msgstr "Upgrading to Triton 3.4.0 to synchronize upstream functions (such as `cast`) can resolve this."
 "Upgrading to Triton 3.4.0 to synchronize upstream functions (e.g., `cast`) "
 "can resolve this"
 
@@ -232,7 +232,7 @@ msgstr "Triton Version Compatibility"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/load_tensor_descriptor.md
 msgid "Triton 3.2.0 存在部分函数（如 `cast`）的兼容性问题。建议升级 Triton版本至 3.4.0 来修复绑定限制。"
-msgstr ""
+msgstr "Triton 3.2.0 has compatibility issues with some functions (such as `cast`). It is recommended to upgrade Triton to version 3.4.0 to fix binding limitations."
 "Triton 3.2.0 has compatibility issues with some functions (e.g., `cast`). It"
 " is recommended to upgrade to Triton 3.4.0 to fix binding limitations."
 
@@ -258,6 +258,6 @@ msgstr "Functional interface call"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/load_tensor_descriptor.md:72
 msgid "以下示例实现了对输入张量 `x` 做就地绝对值计算："
-msgstr ""
+msgstr "The following example implements in-place absolute value computation on input tensor `x`:"
 "The following example demonstrates in-place absolute value computation on "
 "input tensor `x`:"

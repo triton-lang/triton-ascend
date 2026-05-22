@@ -16,7 +16,7 @@ msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Compiler_Hint_Ops/multiple_of.md:5
 msgid "`multiple_of` 用于向编译器声明输入张量中的第一个值是某个数的倍数。"
-msgstr ""
+msgstr "`multiple_of` is used to declare to the compiler that the first value of the input tensor is a multiple of a given number."
 "`multiple_of` is used to declare to the compiler that the first value in the"
 " input tensor is a multiple of a given number."
 
@@ -70,7 +70,7 @@ msgstr "`constexpr[int]` or `list[constexpr[int]]`"
 
 #: ../../zh/triton_api/Compiler_Hint_Ops/multiple_of.md
 msgid "声明输入值是这些数的倍数（单个整数或按维度的整数序列）"
-msgstr ""
+msgstr "Declares that the input value is a multiple of these numbers (a single integer or a sequence of integers per dimension)."
 "Declares that input values are multiples of these numbers (a single integer "
 "or a sequence of integers by dimension)"
 
@@ -98,7 +98,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Compiler_Hint_Ops/multiple_of.md:24
 msgid "如：二维 `input`对应通用`values`入参为`[1,1]`。"
-msgstr ""
+msgstr "E.g., for a 2D `input`, the corresponding `values` parameter is `[1,1]`."
 "For example: a 2D `input` corresponds to the general `values` parameter "
 "`[1,1]`."
 
@@ -184,13 +184,13 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Compiler_Hint_Ops/multiple_of.md:37
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
 #: ../../zh/triton_api/Compiler_Hint_Ops/multiple_of.md:39
 msgid "Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。"
-msgstr ""
+msgstr "Ascend lacks support for uint8, uint16, uint32, uint64, and fp64 compared to GPU (hardware limitation)."
 "Ascend lacks support for uint8, uint16, uint32, uint64, and fp64 compared to"
 " GPU (hardware limitation)."
 

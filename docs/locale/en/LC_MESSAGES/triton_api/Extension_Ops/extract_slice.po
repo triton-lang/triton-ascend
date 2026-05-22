@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md:5
 msgid "简介：从输入张量中按照操作指定的偏移量、大小和步幅参数提取一个张量。 原型："
-msgstr ""
+msgstr "Description: Extracts a tensor from the input tensor according to the operation's specified offset, size, and stride parameters. Prototype:"
 "Description: Extracts a slice from the input tensor according to the "
 "specified offset, size, and stride parameters. Prototype:"
 
@@ -174,7 +174,7 @@ msgstr "2.2.2 Shape Support"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md:45
 msgid "支持任意形状的张量，但切片尺寸不能超过源张量对应维度的尺寸"
-msgstr ""
+msgstr "Supports tensors of arbitrary shapes, but the slice size must not exceed the size of the corresponding dimension in the source tensor."
 "Supports tensors of arbitrary shape, but the slice size must not exceed the "
 "size of the corresponding dimension of the source tensor"
 
@@ -192,6 +192,6 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md:53
 msgid "以下示例实现了从计算结果中提取前32个元素："
-msgstr ""
+msgstr "The following example extracts the first 32 elements from the computation result:"
 "The following example demonstrates extracting the first 32 elements from the"
 " computation result:"

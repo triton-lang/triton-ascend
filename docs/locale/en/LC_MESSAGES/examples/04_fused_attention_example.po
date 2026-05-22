@@ -47,7 +47,7 @@ msgstr ""
 
 #: ../../zh/examples/04_fused_attention_example.md:12
 msgid "`_attn_fwd`：调度所有 query blocks，并管理 block 指针、accumulator 和归一化"
-msgstr ""
+msgstr "`_attn_fwd`: Schedules all query blocks and manages block pointers, accumulators, and normalization."
 "1. `_attn_fwd_inner`: performs attention computation between a single"
 "query block and key/value blocks (causal masks are processed in phases)."
 "2. `_attn_fwd`: schedules all query blocks and manages the block"
@@ -68,6 +68,6 @@ msgstr "Out:"
 
 #: ../../zh/examples/04_fused_attention_example.md:361
 msgid "上面输出日志表明Triton和PyTorch上的输出结果完全一致。"
-msgstr ""
+msgstr "The output log above indicates that the results from Triton and PyTorch are exactly identical."
 "The preceding logs indicate that the output on Triton is the same as"
 "that on PyTorch."

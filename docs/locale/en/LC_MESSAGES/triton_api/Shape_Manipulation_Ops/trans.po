@@ -16,7 +16,7 @@ msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:5
 msgid "根据dims参数转置张量的维度，不改变张量的数据，仅改变维度的顺序。专门优化的转置操作。"
-msgstr ""
+msgstr "Transposes the dimensions of a tensor according to the dims parameter without changing the tensor's data, only the order of dimensions. A specially optimized transpose operation."
 "Transposes tensor dims per `dims` without changing data. Specially optimized"
 " transpose."
 
@@ -118,7 +118,7 @@ msgstr "**Data Type:** Same as the input tensor"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:32
 msgid "**内存布局：** 通过改变步长信息实现转置，无数据拷贝"
-msgstr ""
+msgstr "**Memory layout:** Transpose achieved by changing stride information, no data copy"
 "**Memory Layout:** Transposition achieved by modifying stride information, "
 "no data copy"
 

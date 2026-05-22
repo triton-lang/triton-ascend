@@ -12,7 +12,7 @@ msgstr "triton.language.device_assert"
 
 #: ../../zh/triton_api/Debug_Ops/device_assert.md:3
 msgid "**使用`device_assert`需要将环境变量`TRITON_DEBUG`的值设置为非`0`才能生效。**"
-msgstr ""
+msgstr "**Using `device_assert` requires setting the environment variable `TRITON_DEBUG` to a non-`0` value to take effect.**"
 "**Using `device_assert` requires setting the environment variable "
 "`TRITON_DEBUG` to a non-zero value to take effect.**"
 
@@ -22,7 +22,7 @@ msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Debug_Ops/device_assert.md:7
 msgid "`device_assert` 用于在GPU运行时从设备端进行断言检查，如果条件不满足则输出错误信息。"
-msgstr ""
+msgstr "`device_assert` is used to perform device-side assertion checks during GPU runtime, outputting an error message if the condition is not met."
 "`device_assert` is used to perform assertion checks on the device during GPU"
 " runtime, outputting error information if the condition is not met."
 

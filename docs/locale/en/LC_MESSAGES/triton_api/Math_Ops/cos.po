@@ -16,7 +16,7 @@ msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Math_Ops/cos.md:5
 msgid "简介：对输入x计算的逐元素余弦。 函数原型（Triton3.4.0版本）："
-msgstr ""
+msgstr "Description: Computes the element-wise cosine of input `x`. Function prototype (Triton 3.4.0 version):"
 "Description: Computes the element-wise cosine of input x. Function prototype"
 " (Triton 3.4.0):"
 
@@ -66,7 +66,7 @@ msgstr "Reserved parameter; external invocation is not supported yet"
 
 #: ../../zh/triton_api/Math_Ops/cos.md:21
 msgid "返回值： `x`：输出张量的shape与输入x的shape相同"
-msgstr ""
+msgstr "Return value: `x`: The output tensor has the same shape as the input tensor `x`."
 "Return value: `x`: the output tensor has the same shape as the input x"
 
 #: ../../zh/triton_api/Math_Ops/cos.md:24
@@ -147,7 +147,7 @@ msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Math_Ops/cos.md:33
 msgid "结论：Ascend 比 GPU 少了对fp64的支持，但多了fp16和fp32的支持。 torch_npu支持uint8。"
-msgstr ""
+msgstr "Conclusion: Ascend lacks fp64 support compared to GPU, but adds support for fp16 and fp32. torch_npu supports uint8."
 "Conclusion: Ascend lacks fp64 support compared to GPU but adds fp16 and fp32"
 " support. torch_npu supports uint8."
 
@@ -165,7 +165,7 @@ msgstr "Only supports 1D to 5D tensors"
 
 #: ../../zh/triton_api/Math_Ops/cos.md:43
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support; both support 1 to 5 dimensional tensors."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms; both support 1 to 5 dimensional tensors."
 
@@ -175,7 +175,7 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Math_Ops/cos.md:47
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
@@ -189,5 +189,5 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Math_Ops/cos.md:53
 msgid "以下示例实现了对输入张量 `x` 做逐元素余弦计算："
-msgstr ""
+msgstr "The following example computes the element-wise cosine of the input tensor `x`:"
 "The following example demonstrates element-wise cosine on input tensor `x`:"

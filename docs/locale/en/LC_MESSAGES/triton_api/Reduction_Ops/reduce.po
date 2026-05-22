@@ -113,13 +113,13 @@ msgstr "`Optional[Generator]`"
 
 #: ../../zh/triton_api/Reduction_Ops/reduce.md:24
 msgid "**注意**：此函数也可以作为tensor的成员函数调用，如 `x.reduce(...)` 而不是 `reduce(x, ...)`"
-msgstr ""
+msgstr "**Note**: This function can also be called as a member function of a tensor, e.g., `x.reduce(...)` instead of `reduce(x, ...)`"
 "**Note:** This function can also be called as a member function of a tensor,"
 " e.g., `x.reduce(...)` instead of `reduce(x, ...)`"
 
 #: ../../zh/triton_api/Reduction_Ops/reduce.md:26
 msgid "返回值： `tensor`：沿指定轴 `axis` 规约后的结果张量。"
-msgstr ""
+msgstr "Return value: `tensor`: the resulting tensor after reduction along the specified `axis`."
 "Return value: `tensor`: The result tensor reduced along the specified "
 "`axis`."
 

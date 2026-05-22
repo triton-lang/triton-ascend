@@ -24,7 +24,7 @@ msgstr "[associative_scan](./associative_scan.md)"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/index.md
 msgid "沿指定 axis 将 combine_fn 应用于 input 张量的每个元素和携带的值，并更新携带的值"
-msgstr ""
+msgstr "Applies combine_fn to each element of the input tensor and the carried value along the specified axis, updating the carried value"
 "Applies combine_fn to each element and carry value along axis, updating "
 "carry"
 
@@ -50,7 +50,7 @@ msgstr "[histogram](./histogram.md)"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/index.md
 msgid "基于 input 张量计算 1 个具有 num_bins 个 bin 的直方图，每个 bin 宽度为 1，起始于 0"
-msgstr ""
+msgstr "Computes a histogram with num_bins bins based on the input tensor, each bin has width 1 and starts at 0"
 "Computes a histogram of input with num_bins bins of width 1 starting at 0"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/index.md

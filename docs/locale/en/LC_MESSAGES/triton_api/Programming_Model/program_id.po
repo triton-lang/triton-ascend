@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md:5
 msgid "简介：返回当前程序实例沿给定 axis 的 ID。 函数原型："
-msgstr ""
+msgstr "Description: Returns the ID of the current program instance along the given axis. Function prototype:"
 "Description: Returns the ID of the current program instance along the given "
 "axis. Function prototype:"
 

@@ -60,7 +60,7 @@ msgstr "`int`"
 
 #: ../../zh/triton_api/Reduction_Ops/max.md
 msgid "指定在哪个维度上进行规约； axis = none时在所有轴进行规约"
-msgstr ""
+msgstr "Specifies the dimension along which to reduce; when axis=None, reduces over all axes"
 "Specifies the axis along which to perform reduction; when axis = none, "
 "reduction is performed over all axes"
 
@@ -248,7 +248,7 @@ msgstr "No restrictions (default up to 8 dimensions)"
 
 #: ../../zh/triton_api/Reduction_Ops/max.md:64
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 
@@ -269,5 +269,5 @@ msgstr "2.4 Special Limitations"
 
 #: ../../zh/triton_api/Reduction_Ops/max.md:80
 msgid "Ascend A3 对比 GPU 不支持uint16、uint32、uint64、fp64"
-msgstr ""
+msgstr "Ascend A3 does not support uint16, uint32, uint64, fp64 compared to GPU"
 "Ascend A3 does not support uint16, uint32, uint64, fp64 compared to GPU"

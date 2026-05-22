@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Math_Ops/floordiv.md:5
 msgid "简介：取整除法，返回向零取整后的除法结果，四则运算 ‘//’，无tl.floordiv方法"
-msgstr ""
+msgstr "Description: Floor division, returns the division result rounded toward zero. Use the `//` arithmetic operator; there is no tl.floordiv method."
 "Description: Floor division, returns the division result rounded toward "
 "zero, equivalent to the arithmetic operator '//'. No tl.floordiv method."
 
@@ -146,7 +146,7 @@ msgstr "No restrictions"
 
 #: ../../zh/triton_api/Math_Ops/floordiv.md:32
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 
@@ -156,7 +156,7 @@ msgstr "2.3 Usage"
 
 #: ../../zh/triton_api/Math_Ops/floordiv.md:36
 msgid "以下示例实现了对输入张量 `in_ptr0, in_ptr1` 做整除计算："
-msgstr ""
+msgstr "The following example implements floor division on input tensors `in_ptr0, in_ptr1`:"
 "The following example demonstrates floor division on input tensors `in_ptr0,"
 " in_ptr1`:"
 
@@ -166,5 +166,5 @@ msgstr "2.4 Special Limitations"
 
 #: ../../zh/triton_api/Math_Ops/floordiv.md:50
 msgid "Ascend A3 相比 GPU 缺失uint8、uint16、uint32、uint64的支持"
-msgstr ""
+msgstr "Ascend A3 lacks support for uint8, uint16, uint32, uint64 compared to GPU"
 "Ascend A3 lacks support for uint8, uint16, uint32, uint64 compared to GPU"

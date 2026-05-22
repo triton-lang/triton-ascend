@@ -16,7 +16,7 @@ msgstr "1\. Background"
 
 #: ../../zh/triton_api_extension/al/al.ascend_address_space.md:5
 msgid "为了支持Ascend级编程的需要，需要支持用户手动创建指定地址空间上的内存(buffer)，对接hivm::AddressSpace枚举。"
-msgstr ""
+msgstr "To support Ascend-level programming, users need to be able to manually create memory (buffers) in specified address spaces, interfacing with the hivm::AddressSpace enumeration."
 "To support Ascend-level programming, users need to be able to manually"
 "create memory (buffers) in a specified address space. This interface"
 "maps to the `hivm::AddressSpace` enum."

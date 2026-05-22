@@ -16,7 +16,7 @@ msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Math_Ops/sqrt_rn.md:5
 msgid "简介：计算x的逐元素精确平方根（根据IEEE标准四舍五入）。"
-msgstr ""
+msgstr "Description: Computes the element-wise precise square root of x (rounded according to IEEE standard)."
 "Description: Computes the element-wise exact square root of x (rounded to "
 "nearest according to IEEE standard)."
 
@@ -66,7 +66,7 @@ msgstr "Reserved parameter, external calls not supported yet"
 
 #: ../../zh/triton_api/Math_Ops/sqrt_rn.md:20
 msgid "返回值： `x`：输出张量的shape与输入x的shape相同"
-msgstr ""
+msgstr "Return value: `x`: output tensor has the same shape as input tensor `x`"
 "Return value: `x`: The output tensor has the same shape as the input x"
 
 #: ../../zh/triton_api/Math_Ops/sqrt_rn.md:23
@@ -163,7 +163,7 @@ msgstr "Only supports 1~5D tensors"
 
 #: ../../zh/triton_api/Math_Ops/sqrt_rn.md:42
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms; both support 1 to 5 dimensional tensors."
 "Shape: No difference between GPU and Ascend. Both support 1~5D tensors."
 
 #: ../../zh/triton_api/Math_Ops/sqrt_rn.md:44

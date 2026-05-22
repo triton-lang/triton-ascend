@@ -32,7 +32,7 @@ msgstr "3\. Constraints"
 
 #: ../../zh/triton_api_extension/bl/to_tensor.md:46
 msgid "该接口约束同bl.allocate_local_buffer"
-msgstr ""
+msgstr "This interface has the same constraints as bl.allocate_local_buffer"
 "This interface follows the same constraints as"
 "`bl.allocate_local_buffer`."
 

@@ -31,7 +31,7 @@ msgstr "Principles"
 
 #: ../../zh/community/governance.md:9
 msgid "**开放透明**：所有技术决策和社区讨论均在公开渠道进行"
-msgstr ""
+msgstr "**Open and Transparent**: All technical decisions and community discussions are conducted in public channels."
 "**Open and Transparent**: All technical decisions and community"
 "discussions are conducted through public channels"
 "- **Contribution-Oriented**: Membership is based on individual"
@@ -41,7 +41,7 @@ msgstr ""
 
 #: ../../zh/community/governance.md:10
 msgid "**贡献导向**：成员资格基于个人能力和贡献，不与雇主绑定"
-msgstr ""
+msgstr "**Meritocracy**: Membership is based on individual capabilities and contributions, not tied to employers."
 "**Open and Transparent**: All technical decisions and community"
 "discussions are conducted through public channels"
 "- **Contribution-Oriented**: Membership is based on individual"
@@ -51,7 +51,7 @@ msgstr ""
 
 #: ../../zh/community/governance.md:11
 msgid "**社区驱动**：鼓励广泛参与，尊重不同观点，通过讨论和投票达成共识"
-msgstr ""
+msgstr "**Community-Driven**: Encourages broad participation, respects diverse viewpoints, and reaches consensus through discussion and voting."
 "**Open and Transparent**: All technical decisions and community"
 "discussions are conducted through public channels"
 "- **Contribution-Oriented**: Membership is based on individual"
@@ -65,7 +65,7 @@ msgstr "Governance Mechanism"
 
 #: ../../zh/community/governance.md:15
 msgid "Triton-Ascend 是 Triton 社区下的开源项目，角色任命最终决定权归 Triton 社区。项目采用分层技术治理结构："
-msgstr ""
+msgstr "Triton-Ascend is an open-source project under the Triton community. The final decision on role appointments rests with the Triton community. The project adopts a layered technical governance structure."
 "Triton-Ascend is an open-source project under the Triton community, with"
 "role appointments ultimately decided by the Triton community. The"
 "project adopts a layered technical governance structure:"
@@ -174,7 +174,7 @@ msgstr ""
 
 #: ../../zh/community/governance.md:52
 msgid "晋升由现有 Maintainer 集体评审，综合考虑贡献质量、持续性和社区参与度。"
-msgstr ""
+msgstr "Promotions are collectively reviewed by existing Maintainers, taking into account contribution quality, consistency, and community engagement."
 "Promotion is collectively reviewed by existing `Maintainers`,"
 "considering contribution quality, continuity, and community engagement."
 
@@ -2512,7 +2512,7 @@ msgstr "[#1](https://gitee.com/ascend/triton-ascend/pulls/1)"
 
 #: ../../zh/community/governance.md:249
 msgid "*由于Triton-Ascend经历了代码库搬迁，上述贡献者以贡献者ID为维度统计（不同平台的ID视为多个贡献者）。*"
-msgstr ""
+msgstr "*Since Triton-Ascend underwent a codebase migration, the above contributors are counted by contributor ID (IDs from different platforms are treated as separate contributors).*"
 "*Due to repository migration, contributors listed above are counted by"
 "contributor ID (IDs from different platforms are treated as separate"
 "contributors).*"

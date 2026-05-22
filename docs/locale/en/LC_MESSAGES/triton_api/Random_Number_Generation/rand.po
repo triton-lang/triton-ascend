@@ -76,7 +76,7 @@ msgstr "Number of iterations for the Philox algorithm"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md:26
 msgid "返回值： 1 个 float32 类型的随机块，其shape与offset的shape相同，其值在 `[0.0, 1.0)` 区间内均匀分布"
-msgstr ""
+msgstr "Return value: 1 float32 random block with shape matching offset, uniformly distributed in the range `[0.0, 1.0)`"
 "Return value: 1 random block of type float32, with the same shape as offset,"
 " uniformly distributed in the range `[0.0, 1.0)`"
 

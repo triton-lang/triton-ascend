@@ -16,7 +16,7 @@ msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:5
 msgid "将张量转换为指定的数据类型，支持数值类型转换、位级别重解释（bitcast）、浮点降精度舍入模式，以及Ascend扩展的整数溢出处理模式。"
-msgstr ""
+msgstr "Converts a tensor to a specified data type, supporting numeric type conversion, bit-level reinterpretation (bitcast), floating-point precision reduction rounding modes, and Ascend-extended integer overflow handling modes."
 "Converts the tensor to the specified data type, supporting numeric type "
 "conversion, bit-level reinterpretation (bitcast), floating-point downcast "
 "rounding mode, and Ascend extension integer overflow handling mode."
@@ -47,24 +47,24 @@ msgstr "**Function:**"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:14
 msgid "数值类型转换：整型<->整型、浮点<->浮点、整型<->浮点"
-msgstr ""
+msgstr "Numeric type conversion: integer<->integer, float<->float, integer<->float."
 "Numeric type conversion: integer<->integer, float<->float, integer<->float"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:15
 msgid "位级别重解释（bitcast）：不改变比特，只改变解释类型"
-msgstr ""
+msgstr "Bit-level reinterpretation (bitcast): does not change the bits, only the interpretation type."
 "Bit-level reinterpretation (bitcast): does not change bits, only changes the"
 " interpretation type"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:16
 msgid "浮点降精度支持舍入模式：`rtne`（默认，四舍六入五成双）、`rtz`（向零）"
-msgstr ""
+msgstr "Floating-point precision reduction supports rounding modes: `rtne` (default, round-to-nearest-even), `rtz` (toward zero)."
 "Floating-point downcast supports rounding modes: `rtne` (default, round to "
 "nearest even), `rtz` (toward zero)"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:17
 msgid "整数转换（Ascend 扩展）支持溢出模式：`trunc`（截断，默认）、`saturate`（饱和）"
-msgstr ""
+msgstr "Integer conversion (Ascend extension) supports overflow modes: `trunc` (truncation, default), `saturate` (saturation)."
 "Integer conversion (Ascend extension) supports overflow modes: `trunc` "
 "(truncate, default), `saturate` (saturate)"
 
@@ -170,12 +170,12 @@ msgstr "**Shape:** Same as the input tensor"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:35
 msgid "**数据类型：** 与dtype参数指定的目标类型相同"
-msgstr ""
+msgstr "**Data type:** Same as the target type specified by the dtype parameter."
 "**Data Type:** Same as the target type specified by the dtype parameter"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:36
 msgid "**内存布局：** 根据bitcast参数决定是否进行位级别重解释"
-msgstr ""
+msgstr "**Memory layout:** Determines whether to perform bit-level reinterpretation based on the bitcast parameter."
 "**Memory Layout:** Determines whether to perform bit-level reinterpretation "
 "based on the bitcast parameter"
 
@@ -185,19 +185,19 @@ msgstr "**Constraints:**"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:40
 msgid "`fp_downcast_rounding` 仅在浮点降精度时可设置，否则将报错"
-msgstr ""
+msgstr "`fp_downcast_rounding` can only be set when reducing floating-point precision; otherwise, an error will be reported."
 "`fp_downcast_rounding` can only be set for floating-point downcast; "
 "otherwise an error will be reported"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:41
 msgid "`bitcast=True` 时不进行数值转换，忽略舍入/溢出模式"
-msgstr ""
+msgstr "When `bitcast=True`, no numerical conversion is performed; rounding/overflow modes are ignored."
 "When `bitcast=True`, no numerical conversion is performed; rounding/overflow"
 " modes are ignored"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:42
 msgid "`overflow_mode` 仅对整型有意义（Ascend 扩展）"
-msgstr ""
+msgstr "`overflow_mode` is only meaningful for integer types (Ascend extension)."
 "`overflow_mode` is only meaningful for integer types (Ascend extension)"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:44

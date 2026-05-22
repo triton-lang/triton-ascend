@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:5
 msgid "简介：创建张量描述符对象 原型（Triton3.4.0版本）："
-msgstr ""
+msgstr "Description: Creates a tensor descriptor object. Prototype (Triton 3.4.0):"
 "Description: Creates a tensor descriptor object. Prototype (Triton 3.4.0):"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:18
@@ -69,7 +69,7 @@ msgstr "`strides`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
 msgid "张量各维度的步长列表，约束如下：- 前面的维度必须是 16 字节的整数倍- 最后一维必须是连续存储的"
-msgstr ""
+msgstr "Stride list for each dimension of the tensor, with constraints: - Leading dimensions must be multiples of 16 bytes - The last dimension must be contiguous in memory"
 "The stride list for each dimension of the tensor, with the following "
 "constraints: - Leading dimensions must be multiples of 16 bytes - The last "
 "dimension must be contiguous in memory"
@@ -100,7 +100,7 @@ msgstr "Reserved parameter; external invocation is not supported yet"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:30
 msgid "返回值： `tensor_descriptor`：张量描述符对象（不可直接进行算术运算，需配合 `load` / `store` 使用）"
-msgstr ""
+msgstr "Return value: `tensor_descriptor`: A tensor descriptor object (cannot be used directly for arithmetic; must be used with `load`/`store`)"
 "Return value: `tensor_descriptor`: tensor descriptor object (cannot be used "
 "directly for arithmetic operations; must be used with `load` / `store`)"
 
@@ -190,7 +190,7 @@ msgstr "Only supports 1D to 5D tensors"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:49
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms; both support 1 to 5 dimensional tensors."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms; both support 1 to 5 dimensional tensors."
 
@@ -200,13 +200,13 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:53
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing relative to the community version and cannot be implemented"
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:55
 msgid "结论：Ascend 对比 GPU 缺失uint16、uint32、uint64的支持能力（硬件限制）。"
-msgstr ""
+msgstr "Conclusion: Ascend lacks support for uint16, uint32, uint64 compared to GPU (hardware limitation)."
 "Conclusion: Ascend lacks support for uint16, uint32, uint64 compared to GPU "
 "(hardware limitation)."
 
@@ -237,7 +237,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
 msgid "升级至 Triton 3.4.0 版本同步上游函数(如 `cast` )可解决"
-msgstr ""
+msgstr "Upgrading to Triton 3.4.0 to synchronize upstream functions (such as `cast`) can resolve this."
 "Upgrading to Triton 3.4.0 to synchronize upstream functions (e.g., `cast`) "
 "can resolve this"
 
@@ -247,7 +247,7 @@ msgstr "The `padding_option` parameter is not supported"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
 msgid "当前社区主线分支新增`padding_option`入参，用于越界元素填充策略。"
-msgstr ""
+msgstr "The current community main branch has added a `padding_option` parameter for out-of-bounds element padding strategies."
 "The current community main branch has added the `padding_option` parameter "
 "for out-of-bounds element padding strategy."
 
@@ -261,7 +261,7 @@ msgstr "Triton Version Compatibility"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
 msgid "Triton 3.2.0 存在部分函数（如 `cast` ）的兼容性问题。建议升级 Triton版本至 3.4.0 来修复绑定限制。"
-msgstr ""
+msgstr "Triton 3.2.0 has compatibility issues with some functions (such as `cast`). It is recommended to upgrade Triton to version 3.4.0 to fix binding limitations."
 "Triton 3.2.0 has compatibility issues with some functions (e.g., `cast`). It"
 " is recommended to upgrade to Triton 3.4.0 to fix binding limitations."
 
@@ -275,6 +275,6 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:65
 msgid "以下示例实现了对输入张量 `x` 做就地绝对值计算："
-msgstr ""
+msgstr "The following example implements in-place absolute value computation on input tensor `x`:"
 "The following example demonstrates in-place absolute value computation on "
 "input tensor `x`:"

@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:5
 msgid "简介：**计算以缩放格式表示两个矩阵块的矩阵乘积**"
-msgstr ""
+msgstr "Description: **Computes the matrix product of two matrix blocks represented in scaled format.**"
 "Description: **Computes the matrix product of two matrix blocks represented "
 "in scaled format**"
 
@@ -138,7 +138,7 @@ msgstr "Reserved parameter, external calls not supported yet"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:30
 msgid "返回值： `out`：tensor类型，计算缩放矩阵乘后输出的值"
-msgstr ""
+msgstr "Return value: `out`: tensor type, the output value after computing the scaled matrix multiplication."
 "Return value: `out`: tensor type, the output value after computing the "
 "scaled matrix multiplication"
 
@@ -184,7 +184,7 @@ msgstr "×"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:42
 msgid "结论： 1、Ascend 对比 GPU 缺失fp4、fp8的支持能力（硬件限制）。 2、缩放张量的值为int8，GPU上为uint8。"
-msgstr ""
+msgstr "Conclusion: 1. Ascend lacks fp4 and fp8 support compared to GPU (hardware limitation). 2. The scale tensor values are int8 on Ascend, whereas they are uint8 on GPU."
 "Conclusion: 1. Ascend lacks support for fp4 and fp8 compared to GPU "
 "(hardware limitation). 2. The scale tensor value is int8 on Ascend, while it"
 " is uint8 on GPU."
@@ -207,7 +207,7 @@ msgstr "Ascend"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:53
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，lhs/rhs矩阵均支持 2 至 3 维张量，但scale矩阵只支持2维。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support; both lhs/rhs matrices support 2 to 3 dimensional tensors, but the scale matrix only supports 2 dimensions."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms. Both lhs/rhs matrices support 2-3D tensors, but the scale matrix"
 " only supports 2D."
@@ -232,7 +232,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:61
 msgid "4、当前支持的缩放矩阵格式为int8，社区为uint8"
-msgstr ""
+msgstr "4. The currently supported scale matrix format is int8 on Ascend, while the community version uses uint8."
 "4. The currently supported scale matrix format is int8 on Ascend, while it "
 "is uint8 in the community."
 
@@ -242,6 +242,6 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:65
 msgid "以下示例实现了对输入张量 `x` 做就地绝对值计算："
-msgstr ""
+msgstr "The following example performs an in-place absolute value calculation on the input tensor `x`:"
 "The following example demonstrates computing the in-place absolute value of "
 "the input tensor `x`:"

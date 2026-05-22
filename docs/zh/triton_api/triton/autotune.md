@@ -12,7 +12,7 @@ triton.autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore
     triton.Config(kwargs={'BLOCK_SIZE': 1024}, num_warps=8),
   ],
   key=['x_size'] # the two above configs will be evaluated anytime  每当 x_size 的值发生变化时，
-                 # the value of x_size changes                      上述两个配置都会被评估。
+                 # the value of x_size changes; the above two configurations will both be evaluated.
 )
 @triton.jit
 def kernel(x_ptr, x_size, **META):

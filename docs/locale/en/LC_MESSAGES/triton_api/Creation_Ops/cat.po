@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Creation_Ops/cat.md:5
 msgid "简介：`triton.language.cat`函数用于将指定的tensor进行拼接。"
-msgstr ""
+msgstr "Description: The `triton.language.cat` function concatenates the specified tensors."
 "Description: The `triton.language.cat` function concatenates the specified "
 "tensors."
 
@@ -70,7 +70,7 @@ msgstr "`Bool`"
 
 #: ../../zh/triton_api/Creation_Ops/cat.md
 msgid "重新排序 – 编译器提示。如果为真，编译器在连接输入时允许重新排序元素。仅支持can_reorder=True。"
-msgstr ""
+msgstr "Reordering - compiler hint. If true, the compiler allows reordering elements when concatenating inputs. Only supports can_reorder=True."
 "Reorder – Compiler hint. If true, the compiler allows reordering elements "
 "when concatenating inputs. Only supports can_reorder=True."
 
@@ -168,7 +168,7 @@ msgstr "2.2.2 Shape Support"
 
 #: ../../zh/triton_api/Creation_Ops/cat.md:36
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。cat 只支持1D shape 的拼接。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support. cat only supports concatenation of 1D shapes."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms. cat only supports 1D shape concatenation."
 
@@ -178,7 +178,7 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Creation_Ops/cat.md:40
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 

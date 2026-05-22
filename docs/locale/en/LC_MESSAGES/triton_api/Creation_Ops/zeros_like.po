@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Creation_Ops/zeros_like.md:5
 msgid "简介：`triton.language.zeros_like`返回与给定张量具有相同形状和类型的零的张量。"
-msgstr ""
+msgstr "Description: `triton.language.zeros_like` returns a tensor of zeros with the same shape and type as the given tensor."
 "Description: `triton.language.zeros_like` returns a tensor of zeros with the"
 " same shape and type as the given tensor."
 
@@ -54,7 +54,7 @@ msgstr "Input tensor"
 
 #: ../../zh/triton_api/Creation_Ops/zeros_like.md:19
 msgid "返回值： `tensor`：返回与给定张量具有相同形状和类型的零的张量。"
-msgstr ""
+msgstr "Return value: `tensor`: Returns a tensor of zeros with the same shape and type as the given tensor."
 "Return value: `tensor`: returns a tensor of zeros with the same shape and "
 "type as the given tensor."
 
@@ -136,7 +136,7 @@ msgstr "2.2.2 Shape Support"
 
 #: ../../zh/triton_api/Creation_Ops/zeros_like.md:33
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 
@@ -146,7 +146,7 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Creation_Ops/zeros_like.md:37
 msgid "相对社区能力缺失且无法实现 无"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented. None."
 "Missing capability compared to the community version and cannot be "
 "implemented. None."
 
@@ -156,6 +156,6 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Creation_Ops/zeros_like.md:42
 msgid "以下示例实现了返回与给定张量具有相同形状和类型的零的张量。："
-msgstr ""
+msgstr "The following example returns a tensor of zeros with the same shape and type as the given tensor."
 "The following example returns a tensor of zeros with the same shape and type"
 " as the given tensor:"

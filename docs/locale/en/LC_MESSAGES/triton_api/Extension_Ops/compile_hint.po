@@ -180,26 +180,26 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md:32
 msgid "**hint_name 必须为字符串类型**：不能传入其他类型作为提示名称"
-msgstr ""
+msgstr "**hint_name must be a string type**: Other types cannot be passed as the hint name."
 "**hint_name must be a string type:** Other types cannot be passed as hint "
 "names"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md:33
 msgid "**list 参数仅支持整数数组**：元素须为整数（`int` 或 `constexpr` 整数），不支持浮点数或混合类型的列表"
-msgstr ""
+msgstr "**list parameter only supports integer arrays**: Elements must be integers (`int` or `constexpr` integers); floating-point numbers or mixed-type lists are not supported."
 "**list parameter only supports integer arrays:** Elements must be integers "
 "(`int` or `constexpr` integers); floating-point or mixed-type lists are not "
 "supported"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md:34
 msgid "**非侵入式设计**：`compile_hint` 不改变计算语义，仅添加元数据"
-msgstr ""
+msgstr "**Non-intrusive Design**: `compile_hint` does not change computation semantics; it only adds metadata."
 "**Non-intrusive Design:** `compile_hint` does not change computation "
 "semantics; it only adds metadata"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md:35
 msgid "**同一张量可多次标注**：同一个张量可以附加多个不同名称的提示"
-msgstr ""
+msgstr "**Same tensor can be annotated multiple times**: The same tensor can have multiple hints with different names attached."
 "**Same tensor can be annotated multiple times:** The same tensor can have "
 "multiple hints with different names attached"
 

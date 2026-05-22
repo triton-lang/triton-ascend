@@ -20,7 +20,7 @@ msgstr "**Variables:**"
 
 #: ../../zh/triton_api/triton/Config.md:11
 msgid "kwargs – 1 个元参数字典，用于作为关键字参数传递给内核。"
-msgstr ""
+msgstr "kwargs – A dictionary of meta-parameters to be passed as keyword arguments to the kernel."
 "kwargs – A dictionary of meta-parameters to be passed as keyword arguments "
 "to the kernel."
 
@@ -35,7 +35,7 @@ msgstr ""
 
 #: ../../zh/triton_api/triton/Config.md:15
 msgid "num_stages – 编译器在软件流水线循环时应使用的阶段数。对于 SM80+ GPU 上的矩阵乘法工作负载非常有用。"
-msgstr ""
+msgstr "num_stages – The number of stages the compiler should use for software pipelining. Useful for matrix multiplication workloads on SM80+ GPUs."
 "num_stages – The number of stages the compiler should use when software-"
 "pipelining a loop. Useful for matrix multiplication workloads on SM80+ GPUs."
 
@@ -45,13 +45,13 @@ msgstr "num_ctas - Number of CTAs in a CTA cluster. Only applies to SM90+."
 
 #: ../../zh/triton_api/triton/Config.md:19
 msgid "maxnreg - 单个线程可以使用的最大寄存器数。对应于 ptx 的 .maxnreg 指令。并非所有平台都支持。"
-msgstr ""
+msgstr "maxnreg - The maximum number of registers a single thread can use. Corresponds to the PTX .maxnreg directive. Not supported on all platforms."
 "maxnreg - Maximum number of registers a single thread can use. Corresponds "
 "to the ptx .maxnreg directive. Not supported on all platforms."
 
 #: ../../zh/triton_api/triton/Config.md:21
 msgid "pre_hook – 在调用内核之前将被调用的函数。该函数的参数是 args。"
-msgstr ""
+msgstr "pre_hook – A function to be called before invoking the kernel. Its arguments are args."
 "pre_hook – A function to be called before invoking the kernel. The "
 "function's argument is args."
 

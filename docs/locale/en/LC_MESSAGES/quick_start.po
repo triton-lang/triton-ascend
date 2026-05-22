@@ -61,7 +61,7 @@ msgstr "Supported Ascend products: Atlas A2/A3 series"
 
 #: ../../zh/quick_start.md:20
 msgid "最小硬件配置: 单卡 32GB 显存（推荐）"
-msgstr ""
+msgstr "Minimum hardware configuration: Single card with 32GB memory (recommended)."
 "Minimum hardware configuration: single-device 32 GB graphics memory"
 "(recommended)"
 
@@ -93,7 +93,7 @@ msgstr ""
 #: ../../zh/quick_start.md:28
 #, python-brace-format
 msgid "在安装过程中，CANN 版本“**{version}**”请选择如下版本之一。建议下载安装 9.0.0 版本:"
-msgstr ""
+msgstr "During installation, choose one of the following CANN versions “**{version}**”. It is recommended to download and install version 9.0.0."
 "You need to select the required version (9.0.0 is recommended) based on"
 "the Ascend card model you use. The CANN installation takes about 5 to 10"
 "minutes. Wait until the installation is complete."
@@ -101,7 +101,7 @@ msgstr ""
 #: ../../zh/quick_start.md:30
 #, python-brace-format
 msgid "注：如果用户未指定安装路径，则软件会安装到默认路径下，默认安装路径如下。root用户：`/usr/local/Ascend`，非root用户：`${HOME}/Ascend`，`${HOME}`为当前用户目录。"
-msgstr ""
+msgstr "Note: If the user does not specify an installation path, the software will be installed to the default path. Default installation paths are as follows: Root user: `/usr/local/Ascend`, non-root user: `${HOME}/Ascend`, where `${HOME}` is the current user's home directory."
 "Note: If the user does not specify an installation path, the software"
 "will be installed to the default path as follows."
 "For root user: `/usr/local/Ascend`"
@@ -119,7 +119,7 @@ msgstr ""
 
 #: ../../zh/quick_start.md:34
 msgid "需要根据您实际使用的昇腾卡型号选择对应的配套版本（建议9.0.0版本），并且安装CANN的时间大概在5-10分钟，请耐心等待安装完成。"
-msgstr ""
+msgstr "Select the corresponding compatible version based on your actual Ascend card model (version 9.0.0 is recommended). Installing CANN takes approximately 5-10 minutes, please wait patiently for the installation to complete."
 "Users can add the command source `${HOME}/Ascend/ascend-toolkit/set_env."
 "sh` to an environment variable configuration file (such as .bashrc) as"
 "needed."
@@ -134,7 +134,7 @@ msgstr "Environment Setup"
 
 #: ../../zh/quick_start.md:44
 msgid "用户可根据[安装指南](installation_guide.md)的环境准备章节步骤搭建Triton-Ascend环境。"
-msgstr ""
+msgstr "Users can set up the Triton-Ascend environment by following the environment preparation steps in the [Installation Guide](installation_guide.md)."
 "You can set up the Triton-Ascend environment by referring to section"
 "\"Preparing the Environment\" in [Installation"
 "Guide](installation_guide.md)."
@@ -199,7 +199,7 @@ msgstr ""
 
 #: ../../zh/quick_start.md:60
 msgid "注意3：nightly是每日构建的包，开发者提交MR频繁，没有经过稳定的测试，可能存在功能上的bug，请知悉。"
-msgstr ""
+msgstr "Note 3: The nightly build is a daily build package. Developers submit MRs frequently, and it has not undergone stable testing, so there may be functional bugs. Please be aware."
 "Note 3: Nightly is a daily build package. Developers submit MRs"
 "frequently. It has not undergone stable testing and may have functional"
 "bugs. Please be aware."
@@ -210,7 +210,7 @@ msgstr "Quick Environment Setup with Docker"
 
 #: ../../zh/quick_start.md:64
 msgid "我们提供了Dockerfile帮助您安装Docker环境镜像。构建过程使用`quay.io/ascend/cann`预构建镜像作为基础镜像，跳过CANN安装步骤，显著加快构建速度。"
-msgstr ""
+msgstr "We provide a Dockerfile to help you install the Docker environment image. The build process uses the `quay.io/ascend/cann` pre-built image as the base image, skipping the CANN installation step and significantly accelerating the build."
 "We provide a Dockerfile to help you build a Docker environment image."
 "The build uses pre-built CANN images from `quay.io/ascend/cann` as the"
 "base, which significantly speeds up the build process by skipping the"
@@ -304,7 +304,7 @@ msgstr "You can check the NPU model on your system using the `npu-smi` command."
 
 #: ../../zh/quick_start.md:81
 msgid "不同芯片类型对应的机器可参考："
-msgstr ""
+msgstr "Machines corresponding to different chip types can be referenced as follows:"
 "For the machines corresponding to different chip types, refer to the"
 "table below:"
 
@@ -350,7 +350,7 @@ msgstr "Atlas800T A2"
 
 #: ../../zh/quick_start.md:95
 msgid "根据该镜像启动容器，可以参考下面的命令："
-msgstr ""
+msgstr "To start a container from this image, refer to the following command:"
 "To start a container from this image, you can use the following command"
 "as a reference:"
 
@@ -368,7 +368,7 @@ msgstr ""
 
 #: ../../zh/quick_start.md:137
 msgid "观察到类似的输出即说明环境配置正确。"
-msgstr ""
+msgstr "Observing similar output indicates that the environment is correctly configured."
 "Output similar to the following indicates that your environment is"
 "correctly configured."
 
@@ -393,7 +393,7 @@ msgstr "The GPU version example file `test_add.py` is as follows:"
 
 #: ../../zh/quick_start.md:199
 msgid "迁移只需将 GPU 相关 API 替换为对应的 NPU 版本，对照关系如下："
-msgstr ""
+msgstr "Migration simply requires replacing GPU-related APIs with corresponding NPU versions. The mapping is as follows:"
 "To migrate, simply replace the GPU-related APIs with their corresponding"
 "NPU versions. The mapping is as follows:"
 
@@ -452,13 +452,13 @@ msgstr "The core changes are shown in diff format:"
 
 #: ../../zh/quick_start.md:244
 msgid "修改完后，可用`pytest`运行用例，执行成功即表明迁移成功。"
-msgstr ""
+msgstr "After making the changes, you can run the test case with `pytest`. Successful execution indicates successful migration."
 "After making the modifications, run the test case with `pytest`."
 "Successful execution indicates a successful migration."
 
 #: ../../zh/quick_start.md:248
 msgid "若未安装`pytest`组件，可使用`pip install pytest`进行安装。"
-msgstr ""
+msgstr "If the `pytest` package is not installed, you can install it using `pip install pytest`."
 "If the `pytest` component is not installed, you can install it using"
 "`pip install pytest`."
 

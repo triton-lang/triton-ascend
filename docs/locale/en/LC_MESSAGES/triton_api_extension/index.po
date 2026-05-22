@@ -12,7 +12,7 @@ msgstr "Ascend Extension API Reference"
 
 #: ../../zh/triton_api_extension/index.md:3
 msgid "本目录包含昇腾扩展 API 的接口说明文档。"
-msgstr ""
+msgstr "This directory contains the interface documentation for Ascend extension APIs."
 "This directory contains the reference documentation for Ascend extension"
 "APIs."
 

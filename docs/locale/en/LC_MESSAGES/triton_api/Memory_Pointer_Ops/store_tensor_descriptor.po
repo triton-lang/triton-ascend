@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/store_tensor_descriptor.md:5
 msgid "简介：将数据块存储到张量描述符指定内存位置"
-msgstr ""
+msgstr "Description: Stores a data block to the memory location specified by the tensor descriptor."
 "Description: Stores a data block to the memory location specified by the "
 "tensor descriptor"
 
@@ -50,7 +50,7 @@ msgstr "`tensor_descriptor_base`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/store_tensor_descriptor.md
 msgid "张量描述符对象，由 `make_tensor_descriptor` 创建，定义了内存布局（形状、步长、块大小等）。"
-msgstr ""
+msgstr "Tensor descriptor object created by `make_tensor_descriptor`, defining memory layout (shape, stride, block size, etc.)."
 "Tensor descriptor object, created by `make_tensor_descriptor`, defining the "
 "memory layout (shape, stride, block size, etc.)."
 
@@ -64,7 +64,7 @@ msgstr "`Sequence[constexpr | tensor]`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/store_tensor_descriptor.md
 msgid "数据存储的起始偏移量序列，用于指定当前线程块要存储的数据位置"
-msgstr ""
+msgstr "Sequence of starting offsets for data storage, specifying the data location to store for the current thread block."
 "The starting offset sequence for data storage, specifying the data positions"
 " to be stored by the current thread block"
 
@@ -186,7 +186,7 @@ msgstr "Ascend"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/store_tensor_descriptor.md:45
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms; both support 1 to 5 dimensional tensors."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms; both support 1 to 5 dimensional tensors."
 
@@ -196,13 +196,13 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/store_tensor_descriptor.md:49
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing relative to the community version and cannot be implemented"
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/store_tensor_descriptor.md:51
 msgid "结论：Ascend 对比 GPU 缺失uint16、uint32、uint64的支持能力（硬件限制）。"
-msgstr ""
+msgstr "Conclusion: Ascend lacks support for uint16, uint32, uint64 compared to GPU (hardware limitation)."
 "Conclusion: Ascend lacks support for uint16, uint32, uint64 compared to GPU "
 "(hardware limitation)."
 
@@ -224,6 +224,6 @@ msgstr "Functional interface call"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/store_tensor_descriptor.md:69
 msgid "以下示例实现了对输入张量 `x` 做就地绝对值计算："
-msgstr ""
+msgstr "The following example implements in-place absolute value computation on input tensor `x`:"
 "The following example demonstrates in-place absolute value computation on "
 "input tensor `x`:"

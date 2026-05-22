@@ -16,7 +16,7 @@ msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Math_Ops/fma.md:5
 msgid "简介：计算x、y和z的逐元素融合乘加操作。"
-msgstr ""
+msgstr "Description: Computes the element-wise fused multiply-add of x, y, and z."
 "Description: Computes the element-wise fused multiply-add operation of x, y,"
 " and z."
 
@@ -154,7 +154,7 @@ msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Math_Ops/fma.md:34
 msgid "结论：Ascend 相比 GPU 缺失 fp64 支持。 torch 对 uint8 支持。"
-msgstr ""
+msgstr "Conclusion: Ascend lacks fp64 support compared to GPU. torch supports uint8."
 "Conclusion: Ascend lacks fp64 support compared to GPU. torch supports uint8."
 
 #: ../../zh/triton_api/Math_Ops/fma.md:37
@@ -171,7 +171,7 @@ msgstr "Only supports 1D to 5D tensors"
 
 #: ../../zh/triton_api/Math_Ops/fma.md:44
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms; both support 1 to 5 dimensional tensors."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms; both support 1 to 5 dimensional tensors."
 
@@ -181,7 +181,7 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Math_Ops/fma.md:48
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing relative to the community version and cannot be implemented"
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
@@ -195,6 +195,6 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Math_Ops/fma.md:54
 msgid "以下示例实现了对输入张量 `x` ,`y`，`z`做逐元素融合乘加操作："
-msgstr ""
+msgstr "The following example implements element-wise fused multiply-add on input tensors `x`, `y`, and `z`:"
 "The following example demonstrates element-wise fused multiply-add on input "
 "tensors `x`, `y`, `z`:"

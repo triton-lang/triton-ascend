@@ -104,7 +104,7 @@ msgstr "[div_rn](./div_rn.md)"
 
 #: ../../zh/triton_api/Math_Ops/index.md
 msgid "计算 x 和 y 的逐元素精确除法（根据 IEEE 标准四舍五入到最近的值）"
-msgstr ""
+msgstr "Computes the element-wise precise division of x and y (rounded to the nearest value according to IEEE standard)"
 "Computes the element-wise exact division of x and y (rounded to the nearest "
 "value according to IEEE standard)"
 
@@ -242,7 +242,7 @@ msgstr "[sqrt_rn](./sqrt_rn.md)"
 
 #: ../../zh/triton_api/Math_Ops/index.md
 msgid "计算 x 的逐元素精确平方根（根据 IEEE 标准四舍五入到最近的值）"
-msgstr ""
+msgstr "Computes the element-wise precise square root of x (rounded to the nearest value according to IEEE standard)"
 "Computes the element-wise precise square root of x (rounded to the nearest "
 "value according to IEEE standard)"
 
@@ -252,6 +252,6 @@ msgstr "[umulhi](./umulhi.md)"
 
 #: ../../zh/triton_api/Math_Ops/index.md
 msgid "计算 x 和 y 的 2N 位乘积的逐元素最高有效 N 位"
-msgstr ""
+msgstr "Computes the element-wise most significant N bits of the 2N-bit product of x and y"
 "Computes the element-wise most significant N bits of the 2N-bit product of x"
 " and y"

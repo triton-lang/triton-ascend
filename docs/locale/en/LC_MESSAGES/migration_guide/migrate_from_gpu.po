@@ -279,7 +279,7 @@ msgstr "Case: Data scale `N = 1073741824`; original `BLOCK_SIZE = 4096`; calcula
 
 #: ../../zh/migration_guide/migrate_from_gpu.md:250
 msgid "解决思路：   引入 BLOCK_SIZE_SUB 参数，将大块进一步细分，在保持合理 coreDim 的同时控制内存使用。   优化前代码："
-msgstr ""
+msgstr "Solution: Introduce the BLOCK_SIZE_SUB parameter to further subdivide large blocks, controlling memory usage while maintaining a reasonable coreDim. Code before optimization:"
 "Solution: "
 "Introduce the **BLOCK_SIZE_SUB** parameter to further subdivide large"
 "blocks, thereby controlling memory usage while maintaining a reasonable"

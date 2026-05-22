@@ -16,7 +16,7 @@ msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Compiler_Hint_Ops/max_constancy.md:5
 msgid "`max_constancy` 用于向编译器声明输入张量中值的常量性模式，告知编译器输入数据中每组连续的值都是相等的。"
-msgstr ""
+msgstr "`max_constancy` is used to declare the constancy pattern of values in the input tensor to the compiler, informing the compiler that each group of consecutive values in the input data is equal."
 "`max_constancy` is used to declare the constancy pattern of values in the "
 "input tensor to the compiler, informing the compiler that each group of "
 "consecutive values in the input data is equal."
@@ -71,7 +71,7 @@ msgstr "`constexpr[int]` or `list[constexpr[int]]`"
 
 #: ../../zh/triton_api/Compiler_Hint_Ops/max_constancy.md
 msgid "描述常量性模式的编译时常量整数（或整数序列）"
-msgstr ""
+msgstr "A compile-time constant integer (or sequence of integers) describing the constancy pattern."
 "A compile-time constant integer (or sequence of integers) describing the "
 "constancy pattern"
 
@@ -99,7 +99,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Compiler_Hint_Ops/max_constancy.md:24
 msgid "如：二维 `input`对应通用`values`入参为`[1,1]`。"
-msgstr ""
+msgstr "E.g., for a 2D `input`, the corresponding `values` parameter is `[1,1]`."
 "For example: for a 2D `input`, the corresponding `values` parameter is "
 "`[1,1]`."
 
@@ -185,13 +185,13 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Compiler_Hint_Ops/max_constancy.md:37
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing compared to the community version and cannot be implemented."
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
 #: ../../zh/triton_api/Compiler_Hint_Ops/max_constancy.md:39
 msgid "Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。"
-msgstr ""
+msgstr "Ascend lacks support for uint8, uint16, uint32, uint64, and fp64 compared to GPU (hardware limitation)."
 "Ascend lacks support for uint8, uint16, uint32, uint64, fp64 compared to GPU"
 " (hardware limitation)."
 

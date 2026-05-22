@@ -16,7 +16,7 @@ msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:5
 msgid "根据dims参数重新排列张量的维度，不改变张量的数据，仅改变维度的顺序。支持任意维度的重新排列。"
-msgstr ""
+msgstr "Rearranges the dimensions of a tensor according to the dims parameter without changing the tensor's data, only the order of dimensions. Supports arbitrary dimension permutation."
 "Rearranges the dimensions of the tensor according to the dims parameter, "
 "without changing the data, only changing the order of dimensions. Supports "
 "arbitrary dimension rearrangement."
@@ -39,12 +39,12 @@ msgstr "**Function:**"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:14
 msgid "根据dims参数重新排列张量的维度"
-msgstr ""
+msgstr "Rearranges the dimensions of a tensor according to the dims parameter"
 "Rearranges the dimensions of the tensor according to the dims parameter"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:15
 msgid "不改变张量的数据，仅改变维度的顺序"
-msgstr ""
+msgstr "Does not change the tensor's data, only changes the order of dimensions"
 "Does not change the tensor's data, only changes the order of dimensions"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:16
@@ -121,7 +121,7 @@ msgstr "**Data Type:** Same as the input tensor"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:32
 msgid "**内存布局：** 通过改变步长信息实现转置，无数据拷贝"
-msgstr ""
+msgstr "**Memory layout:** Transpose achieved by changing stride information, no data copy"
 "**Memory Layout:** Transpose implemented by changing stride information, no "
 "data copy"
 

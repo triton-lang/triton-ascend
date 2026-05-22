@@ -16,7 +16,7 @@ msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/ravel.md:5
 msgid "将输入张量展平为一维张量，保持元素在内存中的顺序，输出张量的总元素数与输入张量相同。"
-msgstr ""
+msgstr "Flattens the input tensor into a 1D tensor, preserving element order in memory. The total number of elements in the output tensor is the same as the input."
 "Flattens the input tensor to 1D, preserving element order in memory. Output "
 "has same total elements as input."
 

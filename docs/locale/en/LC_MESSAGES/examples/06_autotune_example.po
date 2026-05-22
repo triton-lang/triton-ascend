@@ -99,7 +99,7 @@ msgstr "Automatic Parameter Parsing"
 
 #: ../../zh/examples/06_autotune_example.md:162
 msgid "执行参数自动解析前首先会获取`kernel`函数调用时未传入的参数，**将未传入的参数作为切分轴和分块轴参数的候选项**。"
-msgstr ""
+msgstr "Before automatic parameter parsing, the parameters not passed during the `kernel` function call are first collected, **using the unpassed parameters as candidates for split axis and block axis parameters**."
 "Before automatically parsing parameters, the system obtains theparameters"
 " that are not passed during the `kernel` function call. **Theparameters "
 "that are not passed are used as the candidate parameters forthe split "
@@ -125,7 +125,7 @@ msgstr ""
 
 #: ../../zh/examples/06_autotune_example.md:187
 msgid "最后通过掩码比较和 `autotune` 中传入的 `key` 确认当前参数对应的切分轴。"
-msgstr ""
+msgstr "Finally, the split axis corresponding to the current parameter is confirmed through mask comparison and the `key` passed to `autotune`."
 "Finally, the split axis corresponding to the current parameters "
 "isidentified through mask comparison and the `key` passed in `autotune`."
 
@@ -165,7 +165,7 @@ msgstr ""
 
 #: ../../zh/examples/06_autotune_example.md:222
 msgid "最后通过掩码比较和 `autotune` 中传入的 `key` 确认当前参数对应的分块轴。"
-msgstr ""
+msgstr "Finally, the block axis corresponding to the current parameter is confirmed through mask comparison and the `key` passed to `autotune`."
 "Finally, the split axis corresponding to the current parameter "
 "isidentified through mask comparison with the `key` passed in `autotune`."
 
@@ -207,7 +207,7 @@ msgstr ""
 
 #: ../../zh/examples/06_autotune_example.md:258
 msgid "最后通过掩码比较和 `autotune` 中传入的 `key` 确认当前kernel的低维轴。"
-msgstr ""
+msgstr "Finally, the low-dimensional axis of the current kernel is confirmed through mask comparison and the `key` passed to `autotune`."
 "Finally, the low-dimensional axis of the current kernel is determined "
 "bycomparing the mask with the `key` passed in `autotune`."
 
@@ -228,13 +228,13 @@ msgstr "Parameter Pointer Parsing"
 
 #: ../../zh/examples/06_autotune_example.md:283
 msgid "指针类型的参数解析依据该参数是否参与 `tl.load()` 和 `tl.store()` 的访存类语句来确定。"
-msgstr ""
+msgstr "Pointer-type parameter parsing is determined by whether the parameter participates in memory access statements such as `tl.load()` and `tl.store()`."
 "The pointer-type parameters are parsed based on whether the parametersare"
 " involved in the memory access statements of `tl.load()` and`tl.store()`."
 
 #: ../../zh/examples/06_autotune_example.md:285
 msgid "首先解析出kernel函数中的所有参数，之后递归寻找每一个参数参与计算的所有变量。"
-msgstr ""
+msgstr "First, all parameters in the kernel function are resolved, then every variable involved in computations for each parameter is recursively searched."
 "First, all parameters in the kernel function are parsed, and then "
 "allvariables involved in the computation of each parameter are "
 "recursivelysearched."

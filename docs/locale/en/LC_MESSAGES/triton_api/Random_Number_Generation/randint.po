@@ -16,13 +16,13 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Random_Number_Generation/randint.md:5
 msgid "简介：给定 1 个 seed 标量和 1 个 offset 块，返回 1 个 int32 类型的随机块。 原型："
-msgstr ""
+msgstr "Description: Given 1 seed scalar and 1 offset block, returns 1 int32 random block. Prototype:"
 "Description: Given 1 seed scalar and 1 offset block, returns 1 random block "
 "of type int32. Prototype:"
 
 #: ../../zh/triton_api/Random_Number_Generation/randint.md:16
 msgid "如果需要多个随机数流，使用 randint4x 可能比连续调用 4 次 randint 更快。"
-msgstr ""
+msgstr "If multiple random number streams are needed, using randint4x may be faster than calling randint 4 times consecutively."
 "If multiple random number streams are needed, using randint4x may be faster "
 "than calling randint 4 times in succession."
 
@@ -80,7 +80,7 @@ msgstr "Number of iterations for the Philox algorithm"
 
 #: ../../zh/triton_api/Random_Number_Generation/randint.md:28
 msgid "返回值： 1 个 int32 类型的随机块，shape与offset相同"
-msgstr ""
+msgstr "Return value: 1 int32 random block, shape matches offset"
 "Return value: 1 random block of type int32, with the same shape as offset"
 
 #: ../../zh/triton_api/Random_Number_Generation/randint.md:31
@@ -173,7 +173,7 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Random_Number_Generation/randint.md:47
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing relative to the community version and cannot be implemented"
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
@@ -183,6 +183,6 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Random_Number_Generation/randint.md:51
 msgid "以下示例实现了对randint的调用（调用时生成单个随机数）："
-msgstr ""
+msgstr "The following example demonstrates a call to randint (generating a single random number):"
 "The following example demonstrates calling randint (generating a single "
 "random number):"

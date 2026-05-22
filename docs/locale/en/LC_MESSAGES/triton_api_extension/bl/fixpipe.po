@@ -16,7 +16,7 @@ msgstr "1\. Hardware Background"
 
 #: ../../zh/triton_api_extension/bl/fixpipe.md:5
 msgid "A5增加了L0C到UB的数据通路，为实现此通路，临时方案在前端显式调用此通路"
-msgstr ""
+msgstr "A5 adds a data path from L0C to UB. To implement this path, a temporary solution explicitly calls this path at the frontend."
 "A5 adds a data path from L0C to UB. To enable this path, the temporary"
 "solution is to expose it through an explicit front-end call."
 

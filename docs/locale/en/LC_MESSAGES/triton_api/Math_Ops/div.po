@@ -16,13 +16,13 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Math_Ops/div.md:5
 msgid "简介：除法，四则运算 ‘/’，无tl.div方法"
-msgstr ""
+msgstr "Description: Division, arithmetic operator ‘/’. There is no tl.div method."
 "Description: Division, equivalent to the arithmetic operator '/'. No tl.div "
 "method."
 
 #: ../../zh/triton_api/Math_Ops/div.md:7
 msgid "底层实现与fdiv算子相同，只不过fdiv明确限制入参必须是float类型，‘/’无此限制，它会把非浮点型转换为浮点型再做计算"
-msgstr ""
+msgstr "The underlying implementation is the same as the fdiv operator, except that fdiv explicitly requires float-type inputs, whereas ‘/’ has no such restriction and converts non-float types to float before computation."
 "The underlying implementation is the same as the fdiv operator, except that "
 "fdiv explicitly requires the input to be float type, while '/' has no such "
 "restriction and converts non-floating-point types to floating point before "
@@ -70,7 +70,7 @@ msgstr "Second input parameter, divisor"
 
 #: ../../zh/triton_api/Math_Ops/div.md:18
 msgid "返回值： `tl.tensor`：除法结果 返回结果类型：总是返回浮点型"
-msgstr ""
+msgstr "Return value: `tl.tensor`: The division result. Return type: Always returns a floating-point type."
 "Return value: `tl.tensor`: division result. Result type: always returns "
 "floating-point type"
 
@@ -212,7 +212,7 @@ msgstr "No restrictions"
 
 #: ../../zh/triton_api/Math_Ops/div.md:45
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 
@@ -222,7 +222,7 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Math_Ops/div.md:49
 msgid "Ascend A3 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持"
-msgstr ""
+msgstr "Ascend A3 lacks support for uint8, uint16, uint32, uint64, and fp64 compared to GPU."
 "Ascend A3 lacks support for uint8, uint16, uint32, uint64, fp64 compared to "
 "GPU"
 
@@ -232,6 +232,6 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Math_Ops/div.md:53
 msgid "以下示例实现了对输入张量 `in_ptr0, in_ptr1` 做除法计算："
-msgstr ""
+msgstr "The following example performs division on the input tensors `in_ptr0` and `in_ptr1`:"
 "The following example demonstrates division on input tensors `in_ptr0, "
 "in_ptr1`:"

@@ -16,7 +16,7 @@ msgstr "Decorator for JIT-compiling functions with the Triton compiler."
 
 #: ../../zh/triton_api/triton/jit.md:10
 msgid "注：当调用 JIT 编译的函数时，如果参数具有 `.data_ptr()` 方法和 `.dtype` 属性，则会隐式转换为指针。"
-msgstr ""
+msgstr "Note: When calling a JIT-compiled function, parameters with `.data_ptr()` methods and `.dtype` attributes are implicitly converted to pointers."
 "Note: If a JIT-compiled function argument has `.data_ptr()` and `.dtype`, "
 "it's implicitly converted to a pointer."
 

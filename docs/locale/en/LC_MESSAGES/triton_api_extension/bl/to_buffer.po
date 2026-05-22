@@ -16,7 +16,7 @@ msgstr "1\. Hardware Background"
 
 #: ../../zh/triton_api_extension/bl/to_buffer.md:5
 msgid "用于将 tl.tensor 张量对象 转换为昇腾硬件专用的 bl.buffer 缓冲区对象，是张量与硬件内存缓冲区的核心转换接口。"
-msgstr ""
+msgstr "Used to convert a tl.tensor tensor object to an Ascend hardware-specific bl.buffer buffer object. It is the core conversion interface between tensors and hardware memory buffers."
 "Used to convert a `tl.tensor` object into a `bl.buffer` object specific"
 "to Ascend hardware. It is the core conversion interface between tensors"
 "and hardware memory buffers."
@@ -39,7 +39,7 @@ msgstr "Returns the `bl.buffer` object corresponding to the input tensor."
 
 #: ../../zh/triton_api_extension/bl/to_buffer.md:54
 msgid "若传入 bind_buffer 参数，直接返回该绑定缓冲区本身"
-msgstr ""
+msgstr "If the bind_buffer parameter is passed, directly returns the bound buffer itself"
 "If a `bind_buffer` parameter is provided, the function returns that"
 "bound buffer directly."
 
@@ -49,13 +49,13 @@ msgstr "5\. Constraints"
 
 #: ../../zh/triton_api_extension/bl/to_buffer.md:58
 msgid "接口约束规则与 bl.allocate_local_buffer 保持一致"
-msgstr ""
+msgstr "Interface constraint rules are consistent with bl.allocate_local_buffer"
 "The interface follows the same constraint rules as"
 "`bl.allocate_local_buffer`."
 
 #: ../../zh/triton_api_extension/bl/to_buffer.md:60
 msgid "地址空间参数需严格匹配昇腾硬件支持的内存区域（UB/L1/L0A/L0B/L0C）"
-msgstr ""
+msgstr "Address space parameters must strictly match the memory regions supported by Ascend hardware (UB/L1/L0A/L0B/L0C)"
 "The address-space parameter must strictly match memory regions"
 "supported by Ascend hardware (UB/L1/L0A/L0B/L0C)."
 
@@ -77,19 +77,19 @@ msgstr "7\. Key Notes"
 
 #: ../../zh/triton_api_extension/bl/to_buffer.md:82
 msgid "该接口是 张量 ↔ 硬件缓冲区 的核心转换入口"
-msgstr ""
+msgstr "This interface is the core conversion entry point between tensors and hardware buffers"
 "This interface is the core entry point for converting between tensors"
 "and hardware buffers."
 
 #: ../../zh/triton_api_extension/bl/to_buffer.md:84
 msgid "支持手动指定昇腾全系列硬件地址空间（UB/L1/L0）"
-msgstr ""
+msgstr "Supports manually specifying the full range of Ascend hardware address spaces (UB/L1/L0)"
 "Supports manual selection of the full set of Ascend hardware address"
 "spaces (UB/L1/L0)."
 
 #: ../../zh/triton_api_extension/bl/to_buffer.md:86
 msgid "支持绑定现有缓冲区，满足精细化内存管理需求"
-msgstr ""
+msgstr "Supports binding existing buffers to meet fine-grained memory management needs"
 "Supports binding to existing buffers to satisfy fine-grained memory"
 "management requirements."
 

@@ -202,7 +202,7 @@ msgstr "Computes the inverse cosine (arccos) of the input parameter."
 
 #: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:62
 msgid "返回值: `tl.tensor`, 返回输入参数的反余弦值，取值范围 \\[0, π] 弧度。"
-msgstr ""
+msgstr "Return value: `tl.tensor`, returns the arccosine of the input parameter, in the range \\[0, π] radians."
 "Return Value: `tl.tensor`, containing the inverse cosine of the input"
 "parameter, in the range [0, π] radians."
 
@@ -286,7 +286,7 @@ msgstr "Computes the inverse hyperbolic cosine of the input parameter."
 
 #: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:78
 msgid "返回值: `tl.tensor`, 返回输入参数的反双曲余弦值，取值范围 \\[0, +∞]。"
-msgstr ""
+msgstr "Return value: `tl.tensor`, returns the inverse hyperbolic cosine of the input parameter, range \\[0, +∞]."
 "Return Value: `tl.tensor`, containing the inverse hyperbolic cosine of"
 "the input parameter, in the range [0, +∞]."
 
@@ -348,7 +348,7 @@ msgstr "Computes the inverse sine (arcsin) of the input parameter."
 
 #: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:158
 msgid "返回值: `tl.tensor`, 返回输入参数的反正弦值，取值范围 \\[-π/2, π/2] 弧度。"
-msgstr ""
+msgstr "Return value: `tl.tensor`, returns the arcsine of the input parameter, in the range \\[-π/2, π/2] radians."
 "Return Value: `tl.tensor`, containing the inverse sine of the input"
 "parameter, in the range [-π/2, π/2] radians."
 
@@ -374,7 +374,7 @@ msgstr "Computes the inverse tangent (arctan) of the input parameter."
 
 #: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:190
 msgid "返回值: `tl.tensor`, 返回输入参数的反正切值，取值范围 \\[-π/2, π/2] 弧度。"
-msgstr ""
+msgstr "Return value: `tl.tensor`, returns the arctangent of the input parameter, in the range \\[-π/2, π/2] radians."
 "Return Value: `tl.tensor`, containing the inverse tangent of the input"
 "parameter, in the range [-π/2, π/2] radians."
 
@@ -388,7 +388,7 @@ msgstr "Two-argument inverse tangent function, computes the arctangent of x / y.
 
 #: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:206
 msgid "返回值: `tl.tensor`, 返回 x / y 的反正切值，取值范围 \\[-π, π] 弧度。"
-msgstr ""
+msgstr "Return value: `tl.tensor`, returns the arctangent of x / y, in the range \\[-π, π] radians."
 "Return Value: `tl.tensor`, containing the arctangent of x / y, in the"
 "range [-π, π] radians."
 
@@ -402,7 +402,7 @@ msgstr "Inverse hyperbolic tangent function, computes the inverse hyperbolic tan
 
 #: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:222
 msgid "返回值: `tl.tensor`, 返回输入参数的反双曲正切值，取值范围 \\[-1, 1]。"
-msgstr ""
+msgstr "Return value: `tl.tensor`, returns the inverse hyperbolic tangent of the input parameter, range \\[-1, 1]."
 "Return Value: `tl.tensor`, containing the inverse hyperbolic tangent of"
 "the input parameter, in the range [-1, 1]."
 
@@ -470,7 +470,7 @@ msgstr "Counts the number of leading zeros in a 32-bit integer."
 
 #: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:300
 msgid "返回值: `tl.tensor`, 返回输入参数的前导零数量。范围 \\[0, 32]。"
-msgstr ""
+msgstr "Return value: `tl.tensor`, returns the number of leading zeros of the input parameter. Range \\[0, 32]."
 "Return Value: `tl.tensor`, containing the number of leading zeros in the"
 "input parameter. Range: [0, 32]."
 

@@ -16,7 +16,7 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Reduction_Ops/argmax.md:5
 msgid "简介：在指定维度上返回最大值所在的下标"
-msgstr ""
+msgstr "Description: Returns the index of the maximum value along the specified dimension"
 "Description: Returns the index of the maximum value along the specified axis"
 
 #: ../../zh/triton_api/Reduction_Ops/argmax.md:11
@@ -81,7 +81,7 @@ msgstr "`tie_break_left`"
 
 #: ../../zh/triton_api/Reduction_Ops/argmax.md
 msgid "如果多个元素有相同的最大值，返回最左侧最大值的下标"
-msgstr ""
+msgstr "If multiple elements have the same maximum value, returns the index of the leftmost maximum value"
 "If multiple elements have the same maximum value, returns the index of the "
 "leftmost maximum"
 
@@ -179,7 +179,7 @@ msgstr "Ascend"
 
 #: ../../zh/triton_api/Reduction_Ops/argmax.md:41
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: In terms of Shape, there is no difference between GPU and Ascend platforms."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 
@@ -189,13 +189,13 @@ msgstr "2.3 Special Limitations"
 
 #: ../../zh/triton_api/Reduction_Ops/argmax.md:45
 msgid "相对社区能力缺失且无法实现"
-msgstr ""
+msgstr "Capability missing relative to the community version and cannot be implemented"
 "Missing capability compared to the community version and cannot be "
 "implemented"
 
 #: ../../zh/triton_api/Reduction_Ops/argmax.md:47
 msgid "Ascend A3 对比 GPU 缺失uint16、uint32、uint64、fp64的支持"
-msgstr ""
+msgstr "Ascend A3 lacks support for uint16, uint32, uint64, fp64 compared to GPU"
 "Ascend A3 lacks support for uint16, uint32, uint64, fp64 compared to GPU"
 
 #: ../../zh/triton_api/Reduction_Ops/argmax.md:49

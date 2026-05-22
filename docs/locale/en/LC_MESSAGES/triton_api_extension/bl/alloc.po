@@ -16,7 +16,7 @@ msgstr "1\. Background"
 
 #: ../../zh/triton_api_extension/bl/alloc.md:5
 msgid "为了支持Ascend级编程的需要，需要支持用户手动创建指定地址空间上的内存(buffer)，本接口是硬件无关的接口，对接memref.alloc。"
-msgstr ""
+msgstr "To support Ascend-level programming, users need to be able to manually create memory (buffers) in specified address spaces. This interface is hardware-independent and interfaces with memref.alloc."
 "To support Ascend-level programming, users need to be able to manually"
 "create memory (buffers) in a specified address space. This interface is"
 "hardware-agnostic and maps to `memref.alloc`."
@@ -63,13 +63,13 @@ msgstr "Every element in `shape` must be a positive integer"
 
 #: ../../zh/triton_api_extension/bl/alloc.md:97
 msgid "需自行保证符合指定的地址空间上的大小限制"
-msgstr ""
+msgstr "The user must ensure compliance with the size limits of the specified address space."
 "You must ensure that the size limits of the specified address space"
 "are respected"
 
 #: ../../zh/triton_api_extension/bl/alloc.md:99
 msgid "address_space参数默认为空，表示不携带任何地址空间信息"
-msgstr ""
+msgstr "The address_space parameter defaults to empty, indicating no address space information is carried."
 "The `address_space` parameter is empty by default, meaning no"
 "address-space information is attached"
 

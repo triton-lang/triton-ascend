@@ -12,7 +12,7 @@ msgstr "Layer Normalization"
 
 #: ../../zh/examples/03_layer_norm_example.md:3
 msgid "在本节中，我们将使用 Triton 编写一个比 PyTorch 实现运行更快的高性能层标准化 (Layer Normalization) 内核。"
-msgstr ""
+msgstr "In this section, we will write a high-performance Layer Normalization kernel using Triton that runs faster than the PyTorch implementation."
 "In this section, you will use Triton to write a high-performance "
 "layernormalization kernel that runs faster than the PyTorch "
 "implementation."

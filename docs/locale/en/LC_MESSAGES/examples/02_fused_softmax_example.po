@@ -12,7 +12,7 @@ msgstr "Fused Softmax"
 
 #: ../../zh/examples/02_fused_softmax_example.md:3
 msgid "在本节中，我们将使用 Triton 编写一个融合的 softmax 操作的程序。 在此过程中，你会学习到："
-msgstr ""
+msgstr "In this section, we will write a fused softmax operation program using Triton. In the process, you will learn:"
 "In this section, we will use Triton to write a program for the fused "
 "softmax operation. In this process, you will learn:"
 
@@ -51,7 +51,7 @@ msgstr ""
 #: ../../zh/examples/02_fused_softmax_example.md:41
 #, fuzzy
 msgid "`torch.jit.script`旨在自动执行这种“内核融合”，但它仍然远未达到理想状态。"
-msgstr ""
+msgstr "`torch.jit.script` aims to automatically perform this kind of “kernel fusion,” but it is still far from ideal."
 "`torch.jit.script` is designed to automatically perform this kind "
 "of\"kernel fusion\", but it is still far from ideal."
 
@@ -76,7 +76,7 @@ msgstr ""
 
 #: ../../zh/examples/02_fused_softmax_example.md:76
 msgid "我们可以创建一个辅助函数，该函数能够将核函数及其元参数加入执行队列，以处理任意给定的输入张量。"
-msgstr ""
+msgstr "We can create a helper function that enqueues the kernel function and its meta-parameters to process any given input tensor."
 "Create a helper function. This function can add the kernel function "
 "andits meta-parameters to the execution queue to process any given "
 "inputtensor."
@@ -87,7 +87,7 @@ msgstr "Unit Test"
 
 #: ../../zh/examples/02_fused_softmax_example.md:112
 msgid "需要在一个具有不规则行和列数的矩阵上测试处理好的内核，此举可以验证Padding机制是否起作用"
-msgstr ""
+msgstr "It is necessary to test the processed kernel on a matrix with irregular row and column counts to verify whether the padding mechanism works."
 "The processed kernel needs to be tested on a matrix with irregularnumbers"
 " of rows and columns. This can verify that the padding mechanismworks."
 

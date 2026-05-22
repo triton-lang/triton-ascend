@@ -24,7 +24,7 @@ msgstr "**Syntax:**"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/reshape.md:9
 msgid "`triton.language.reshape(input, shape, can_reorder=False)` - 函数调用形式"
-msgstr ""
+msgstr "`triton.language.reshape(input, shape, can_reorder=False)` - Function call form"
 "`triton.language.reshape(input, shape, can_reorder=False)` - function call "
 "form"
 
@@ -118,7 +118,7 @@ msgstr "**Type:** tensor"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/reshape.md:29
 msgid "**形状：** 与shape参数指定的目标形状相同"
-msgstr ""
+msgstr "**Shape:** Same as the target shape specified by the shape parameter"
 "**Shape:** Same as the target shape specified by the `shape` parameter"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/reshape.md:30

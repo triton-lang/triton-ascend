@@ -44,19 +44,19 @@ msgstr "`configs (list[triton.Config])` - A list of `triton.Config` objects."
 
 #: ../../zh/triton_api/triton/autotune.md:28
 msgid "`key (list[str])` - 参数名列表，当值发生改变时将触发对所有配置的解析。"
-msgstr ""
+msgstr "`key (list[str])` - List of parameter names whose value changes will trigger re-evaluation of all configurations."
 "`key (list[str])` - A list of parameter names; when their values change, all"
 " configurations will be evaluated."
 
 #: ../../zh/triton_api/triton/autotune.md:29
 msgid "`prune_configs_by (dict)` - 修剪配置的函数字典。包含以下字段："
-msgstr ""
+msgstr "`prune_configs_by (dict)` - A dictionary of functions for pruning configurations. Contains the following fields:"
 "`prune_configs_by (dict)` - A dictionary of functions for pruning "
 "configurations. Contains the following fields:"
 
 #: ../../zh/triton_api/triton/autotune.md:30
 msgid "`'perf_model'`: 性能模型，用于预测不同配置的运行时间，返回运行时间"
-msgstr ""
+msgstr "`'perf_model'`: Performance model for predicting the runtime of different configurations, returns runtime"
 "`'perf_model'`: A performance model for predicting the runtime of different "
 "configurations, returns the runtime"
 
@@ -75,13 +75,13 @@ msgstr ""
 
 #: ../../zh/triton_api/triton/autotune.md:33
 msgid "`reset_to_zero (list[str])` - 参数名称列表，将在任何配置解析之前被重置为零。"
-msgstr ""
+msgstr "`reset_to_zero (list[str])` - List of parameter names to be reset to zero before any configuration is evaluated."
 "`reset_to_zero (list[str])` - A list of parameter names that will be reset "
 "to zero before any configuration is evaluated."
 
 #: ../../zh/triton_api/triton/autotune.md:34
 msgid "`restore_value (list[str])` - 参数名称列表，这些参数的值将在解析任何配置之后恢复。"
-msgstr ""
+msgstr "`restore_value (list[str])` - List of parameter names whose values will be restored after evaluating any configuration."
 "`restore_value (list[str])` - A list of parameter names whose values will be"
 " restored after any configuration is evaluated."
 
@@ -101,7 +101,7 @@ msgstr "`args`: list of arguments passed to the kernel"
 
 #: ../../zh/triton_api/triton/autotune.md:37
 msgid "`reset_only`：一个布尔值，表示 `pre_hook` 是否仅用于重置值，而没有对应的 `post_hook`"
-msgstr ""
+msgstr "`reset_only`: A boolean indicating whether `pre_hook` is only for resetting values without a corresponding `post_hook`"
 "`reset_only`: A boolean indicating whether `pre_hook` is only used to reset "
 "values without a corresponding `post_hook`"
 
@@ -116,24 +116,24 @@ msgstr ""
 
 #: ../../zh/triton_api/triton/autotune.md:40
 msgid "`exception`：在出现编译或运行时错误情况下，由内核引发的异常"
-msgstr ""
+msgstr "`exception`: The exception raised by the kernel in case of compilation or runtime errors"
 "`exception`: The exception raised by the kernel in case of compilation or "
 "runtime errors"
 
 #: ../../zh/triton_api/triton/autotune.md:41
 msgid "`warmup (int)` - 传递给基准测试的预热时间（以毫秒为单位），默认值为 25。"
-msgstr ""
+msgstr "`warmup (int)` - The warmup time passed to the benchmark (in milliseconds), default is 25."
 "`warmup (int)` - The warmup time passed to the benchmark (in milliseconds), "
 "default is 25."
 
 #: ../../zh/triton_api/triton/autotune.md:42
 msgid "`rep (int)` - 传递给基准测试的重复时间（以毫秒为单位），默认值为 100。"
-msgstr ""
+msgstr "`rep (int)` - The repetition time passed to the benchmark (in milliseconds), default is 100."
 "`rep (int)` - The repetition time passed to the benchmark (in milliseconds),"
 " default is 100."
 
 #: ../../zh/triton_api/triton/autotune.md:43
 msgid "`use_cuda_graph (bool)` - 是否使用 CUDA Graph 进行性能测量（默认为 `False`）。"
-msgstr ""
+msgstr "`use_cuda_graph (bool)` - Whether to use CUDA Graph for performance measurement (default `False`)."
 "`use_cuda_graph (bool)` - Whether to use CUDA Graph for performance "
 "measurement (default is `False`)."

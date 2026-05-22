@@ -251,7 +251,7 @@ msgstr "Scope of enabling double buffer for cube operators."
 
 #: ../../zh/migration_guide/architecture_difference.md
 msgid "默认None；[\"no-limit\", \"no-l0c\"]， autotune中可配置"
-msgstr ""
+msgstr "Default None; [\"no-limit\", \"no-l0c\"], configurable in autotune."
 "Default: None. Value range: [\"no-limit\",\"no-l0c\"]. It is"
 "configurable during autotune."
 
@@ -261,7 +261,7 @@ msgstr "set_workspace_multibuffer"
 
 #: ../../zh/migration_guide/architecture_difference.md
 msgid "只有在limit_auto_multi_buffer_only_for_local_buffer=false场景下生效"
-msgstr ""
+msgstr "Only takes effect when limit_auto_multi_buffer_only_for_local_buffer=false."
 "It takes effect only when **limit_auto_multi_buffer_only_for_local_buffe"
 "r** is set to **false**."
 

@@ -16,7 +16,7 @@ msgstr "1\. Hardware Background"
 
 #: ../../zh/triton_api_extension/al/sync_block_set.md:5
 msgid "面向分离模式的核间同步控制接口。"
-msgstr ""
+msgstr "Inter-core synchronization control interface for decoupled mode."
 "An inter-core synchronization control interface for split-mode"
 "execution."
 

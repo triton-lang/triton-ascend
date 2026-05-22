@@ -16,13 +16,13 @@ msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Math_Ops/abs.md:5
 msgid "简介：计算张量中每个元素的绝对值 函数原型："
-msgstr ""
+msgstr "Description: Computes the absolute value of each element in the tensor. Function prototype:"
 "Description: Computes the absolute value of each element in the tensor. "
 "Function prototype:"
 
 #: ../../zh/triton_api/Math_Ops/abs.md:12
 msgid "可以作为张量的成员函数调用, 如`x.abs()`, 与`abs(x)`等效。"
-msgstr ""
+msgstr "Can be called as a tensor member function, e.g., `x.abs()`, equivalent to `abs(x)`."
 "Can be called as a tensor member function, e.g., `x.abs()`, equivalent to "
 "`abs(x)`."
 
@@ -168,7 +168,7 @@ msgstr "Ascend"
 
 #: ../../zh/triton_api/Math_Ops/abs.md:42
 msgid "结论：在 Shape 方面, GPU 与 Ascend 平台无差异。"
-msgstr ""
+msgstr "Conclusion: GPU and Ascend platforms have no differences in Shape support."
 "Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
 " platforms."
 
@@ -186,5 +186,5 @@ msgstr "2.4 Usage"
 
 #: ../../zh/triton_api/Math_Ops/abs.md:50
 msgid "以下示例实现了对输入张量 `x` 做绝对值运算："
-msgstr ""
+msgstr "The following example performs an absolute value operation on the input tensor `x`:"
 "The following example demonstrates absolute value on input tensor `x`:"

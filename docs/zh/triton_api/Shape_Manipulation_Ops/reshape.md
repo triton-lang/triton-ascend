@@ -62,7 +62,7 @@ def reshape_example(out_ptr):
     # Create a 2x3x4 tensor
     x = tl.zeros([2, 3, 4], dtype=tl.float32)
 
-    # reshape为6x4
+    # reshape to 6x4
     y = tl.reshape(x, [6, 4])
 
     # Write the result back to the external tensor

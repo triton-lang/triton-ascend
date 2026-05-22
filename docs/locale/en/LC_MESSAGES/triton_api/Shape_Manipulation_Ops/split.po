@@ -16,7 +16,7 @@ msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/split.md:5
 msgid "将输入张量沿着最后一个维度分割成两个张量，输出张量的最后一个维度大小为输入张量的一半，其他维度保持不变。"
-msgstr ""
+msgstr "Splits the input tensor into two tensors along the last dimension. The output tensors' last dimension size is half of the input, with other dimensions unchanged."
 "Splits input tensor into two along the last dim. Output's last dim is half "
 "the input's; other dims unchanged."
 
@@ -98,7 +98,7 @@ msgstr "**Type:** Tuple[tensor, tensor]"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/split.md:29
 msgid "**形状：** 两个张量，形状相同，最后一个维度为输入的一半"
-msgstr ""
+msgstr "**Shape:** Two tensors with the same shape, the last dimension is half of the input"
 "**Shape:** Two tensors with the same shape, the last dimension half that of "
 "the input"
 
@@ -108,7 +108,7 @@ msgstr "**Data Type:** Same as the input tensor"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/split.md:31
 msgid "**内存布局：** 分别包含输入张量的奇数和偶数位置元素"
-msgstr ""
+msgstr "**Memory layout:** Contains the odd and even position elements of the input tensor respectively"
 "**Memory Layout:** Contains elements at odd and even positions of the input "
 "tensor respectively"
 

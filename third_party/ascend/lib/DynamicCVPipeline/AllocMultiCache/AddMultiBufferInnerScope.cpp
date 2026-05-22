@@ -31,7 +31,6 @@
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
@@ -324,10 +323,6 @@ SmallVector<Value> collectBufferValues(DenseMap<Value, SmallVector<Value>> &depV
             if (!shapedType)
                 continue;
 
-            // Skip tensor::EmptyOp - it should only get dep_mark, not buffer allocation
-            if (isa<tensor::EmptyOp>(op))
-                continue;
-
             valueList.push_back(depVal);
         }
     }
@@ -349,15 +344,8 @@ SmallVector<Value> collectScalarDeps(DenseMap<Value, SmallVector<Value>> &depVal
             if (!depDefinedOp)
                 continue;
 
-            if (isa<ShapedType>(depVal.getType())) {
-                // tensor::EmptyOp should be treated like scalar, add dep_mark
-                if (!isa<tensor::EmptyOp>(depDefinedOp))
+            if (isa<ShapedType>(depVal.getType()))
                 continue;
-                // Check if definingOp's parentOp is a main_loop forOp
-                auto *parentOp = depDefinedOp->getParentOp();
-                if (!parentOp || !parentOp->hasAttr(kAttrMainLoop))
-                    continue;
-            }
 
             auto userIt = depUserMap.find(depVal);
             if (userIt == depUserMap.end())
@@ -894,15 +882,6 @@ static int processTensorDependencies(mlir::scf::ForOp mainLoopForOp, DenseMap<Va
 
             // Validate dependency value (skip BlockArgument, null definingOp, non-ShapedType)
             if (isa<BlockArgument>(depVal) || !depVal.getDefiningOp() || !isa<ShapedType>(depVal.getType()))
-                continue;
-
-            // Skip tensor::EmptyOp - it should only get dep_mark, not buffer allocation
-            if (isa<tensor::EmptyOp>(depVal.getDefiningOp()))
-                continue;
-
-            // Check if definingOp's parentOp is the main_loop forOp
-            auto *parentOp = depVal.getDefiningOp()->getParentOp();
-            if (parentOp != mainLoopForOp.getOperation())
                 continue;
 
             auto userIt = depUserMap.find(depVal);

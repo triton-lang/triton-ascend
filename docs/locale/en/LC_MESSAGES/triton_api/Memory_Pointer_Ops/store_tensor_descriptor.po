@@ -12,7 +12,7 @@ msgstr "triton.language.store_tensor_descriptor"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/store_tensor_descriptor.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/store_tensor_descriptor.md:5
 msgid "简介：将数据块存储到张量描述符指定内存位置"
@@ -22,7 +22,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/store_tensor_descriptor.md:16
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/store_tensor_descriptor.md:18
 msgid "2.1 参数说明"

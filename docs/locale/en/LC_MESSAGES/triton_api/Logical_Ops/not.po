@@ -12,7 +12,7 @@ msgstr "triton.language.tensor.__not__"
 
 #: ../../zh/triton_api/Logical_Ops/not.md:3
 msgid "1. 函数概述"
-msgstr "1. Function Overview"
+msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Logical_Ops/not.md:5
 msgid ""
@@ -28,7 +28,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Logical_Ops/not.md:15
 msgid "2. 规格"
-msgstr "2. Specifications"
+msgstr "2\. Specifications"
 
 #: ../../zh/triton_api/Logical_Ops/not.md:17
 msgid "2.1 参数说明"

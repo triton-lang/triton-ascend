@@ -12,7 +12,7 @@ msgstr "triton.language.fdiv"
 
 #: ../../zh/triton_api/Math_Ops/fdiv.md:3
 msgid "1. 函数概述"
-msgstr "1. Function Overview"
+msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Math_Ops/fdiv.md:5
 msgid "简介：计算x和y的逐元素快速除法。"
@@ -20,7 +20,7 @@ msgstr "Description: Computes the element-wise fast division of x and y."
 
 #: ../../zh/triton_api/Math_Ops/fdiv.md:11
 msgid "2. 规格"
-msgstr "2. Specifications"
+msgstr "2\. Specifications"
 
 #: ../../zh/triton_api/Math_Ops/fdiv.md:13
 msgid "2.1 参数说明"

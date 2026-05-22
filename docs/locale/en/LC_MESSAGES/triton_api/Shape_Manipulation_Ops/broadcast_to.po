@@ -12,7 +12,7 @@ msgstr "triton.language.broadcast_to"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:3
 msgid "1 功能作用说明"
-msgstr "1. Function Description"
+msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:5
 msgid "将张量广播到目标形状，自动处理维度对齐。广播操作不会复制数据，而是通过改变张量的形状和步长来实现。"
@@ -50,7 +50,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:17
 msgid "2 参数规格"
-msgstr "2. Parameter Specifications"
+msgstr "2\. Parameter Specifications"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:19
 msgid "2.1 参数说明"

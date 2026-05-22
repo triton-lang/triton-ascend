@@ -70,7 +70,7 @@ msgstr ""
 
 #: ../../zh/autotune_guide.md:43
 msgid "1. 先启用 Ascend 对 autotune 的扩展"
-msgstr "1. Enable Ascend's extension for autotune first"
+msgstr "1\. Enable Ascend's extension for autotune first"
 
 #: ../../zh/autotune_guide.md:45
 msgid "只有导入下面这行后，才会进入 Triton-Ascend 的 autotune 扩展路径："
@@ -88,7 +88,7 @@ msgstr ""
 
 #: ../../zh/autotune_guide.md:53
 msgid "2. `@triton.autotune` 必须直接包在 `@triton.jit` 外层"
-msgstr "2. `@triton.autotune` must wrap `@triton.jit` directly"
+msgstr "2\. `@triton.autotune` must wrap `@triton.jit` directly"
 
 #: ../../zh/autotune_guide.md:55
 msgid "必须写成下面这种顺序："
@@ -106,7 +106,7 @@ msgstr ""
 
 #: ../../zh/autotune_guide.md:66
 msgid "3. `key` 的含义与社区一致"
-msgstr "3. `key` has the same meaning as in community Triton"
+msgstr "3\. `key` has the same meaning as in community Triton"
 
 #: ../../zh/autotune_guide.md:68
 msgid "`key` 的本质是 autotune 的 cache key。凡是填入 `key` 的参数，只要取值发生变化，就会触发重新 autotune。"
@@ -263,7 +263,7 @@ msgstr ""
 
 #: ../../zh/autotune_guide.md:144
 msgid "2. 支持多个 config 的并行编译"
-msgstr "2. Parallel compilation of multiple candidates"
+msgstr "2\. Parallel compilation of multiple candidates"
 
 #: ../../zh/autotune_guide.md:146
 msgid "当 autotune 需要评估多个候选配置时，Triton-Ascend 默认会并行编译这些候选配置，以缩短首次调优时延。"
@@ -280,7 +280,7 @@ msgstr ""
 
 #: ../../zh/autotune_guide.md:150
 msgid "3. 支持使用 profiler 采集 kernel 性能"
-msgstr "3. Support for profiler-based performance collection"
+msgstr "3\. Support for profiler-based performance collection"
 
 #: ../../zh/autotune_guide.md:152
 msgid ""
@@ -309,7 +309,7 @@ msgstr ""
 
 #: ../../zh/autotune_guide.md:158
 msgid "1. 自动生成范围聚焦在 Tiling 参数"
-msgstr "1. Automatic generation focuses on tiling parameters"
+msgstr "1\. Automatic generation focuses on tiling parameters"
 
 #: ../../zh/autotune_guide.md:160
 msgid ""
@@ -429,7 +429,7 @@ msgstr ""
 
 #: ../../zh/autotune_guide.md:205
 msgid "1. 社区 autotune：手工枚举全部调优参数"
-msgstr "1. Community autotune: enumerate all tunable parameters manually"
+msgstr "1\. Community autotune: enumerate all tunable parameters manually"
 
 #: ../../zh/autotune_guide.md:207
 msgid "社区标准写法是由用户手工枚举所有候选配置："

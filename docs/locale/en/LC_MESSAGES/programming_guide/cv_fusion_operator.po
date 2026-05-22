@@ -31,21 +31,21 @@ msgstr "For simple CV fusion, start with matmul plus activation in `third_party/
 
 #: ../../zh/programming_guide/cv_fusion_operator.md:9
 msgid "先实现稳定的 Cube 主计算，例如 `acc = tl.dot(a, b, acc)`。"
-msgstr "1. Implement a stable Cube main computation such as `acc = tl.dot(a, b, acc)`."
+msgstr "1\. Implement a stable Cube main computation such as `acc = tl.dot(a, b, acc)`."
 
 #: ../../zh/programming_guide/cv_fusion_operator.md:10
 msgid "在 accumulator 写回前融合轻量 Vector 后处理，例如 bias、scale、activation 或 dtype cast。"
-msgstr "2. Fuse lightweight Vector post-processing before storing the accumulator, such as bias, scale, activation, or dtype cast."
+msgstr "2\. Fuse lightweight Vector post-processing before storing the accumulator, such as bias, scale, activation, or dtype cast."
 
 #: ../../zh/programming_guide/cv_fusion_operator.md:11
 msgid "对较大的 accumulator 使用子块切分，避免 Vector 后处理阶段 UB overflow。"
-msgstr "3. Split large accumulators into sub-blocks to avoid UB overflow in the Vector post-processing stage."
+msgstr "3\. Split large accumulators into sub-blocks to avoid UB overflow in the Vector post-processing stage."
 
 #: ../../zh/programming_guide/cv_fusion_operator.md:12
 msgid ""
 "如果需要让一个 Cube 输出块拆给多个 Vector 子块处理，可使用 Ascend 扩展中的 `extension.parallel(...,"
 " bind_sub_block=True)` 和 `extension.extract_slice`。"
-msgstr "4. If one Cube output block needs to be split across Vector sub-blocks, use `extension.parallel(..., bind_sub_block=True)` and `extension.extract_slice`."
+msgstr "4\. If one Cube output block needs to be split across Vector sub-blocks, use `extension.parallel(..., bind_sub_block=True)` and `extension.extract_slice`."
 
 #: ../../zh/programming_guide/cv_fusion_operator.md:14
 msgid "示例结构："
@@ -90,33 +90,33 @@ msgstr "Complex CV fusion is recommended to be organized by data flow layers:"
 
 #: ../../zh/programming_guide/cv_fusion_operator.md:38
 msgid "**主计算层**：识别哪些步骤必须走 Cube，例如 QK、PV、GEMM、batched matmul。"
-msgstr "1. **Main compute layer**: Identify the steps that must use Cube, such as QK, PV, GEMM, or batched matmul."
+msgstr "1\. **Main compute layer**: Identify the steps that must use Cube, such as QK, PV, GEMM, or batched matmul."
 
 #: ../../zh/programming_guide/cv_fusion_operator.md:39
 msgid ""
 "**Vector 后处理层**：识别 "
 "softmax、activation、mask、scale、normalization、cat/slice、layout transform "
 "等是否能在同一 tile 内完成。"
-msgstr "2. **Vector post-processing layer**: Identify softmax, activation, mask, scale, normalization, cat/slice, and layout transforms that can finish within the same tile."
+msgstr "2\. **Vector post-processing layer**: Identify softmax, activation, mask, scale, normalization, cat/slice, and layout transforms that can finish within the same tile."
 
 #: ../../zh/programming_guide/cv_fusion_operator.md:40
 msgid ""
 "**访存重排层**：对离散 KV cache、MoE token 重排、短尾轴 tensor，优先在 UB 中用 "
 "`insert_slice`、`extract_slice`、转置或借轴转置形成硬件友好的连续访问。"
-msgstr "3. **Memory reorganization layer**: For discrete KV cache, MoE token reordering, or short tail-axis tensors, use `insert_slice`, `extract_slice`, transpose, or axis borrowing in UB to form hardware-friendly continuous access."
+msgstr "3\. **Memory reorganization layer**: For discrete KV cache, MoE token reordering, or short tail-axis tensors, use `insert_slice`, `extract_slice`, transpose, or axis borrowing in UB to form hardware-friendly continuous access."
 
 #: ../../zh/programming_guide/cv_fusion_operator.md:41
 msgid ""
 "**流水和同步层**：通过 "
 "`multibuffer`、`set_workspace_multibuffer`、`tile_mix_vector_loop`、`tile_mix_cube_loop`"
 " 等编译选项探索 Cube 与 Vector 的重叠执行。"
-msgstr "4. **Pipeline and synchronization layer**: Explore Cube/Vector overlap with options such as `multibuffer`, `set_workspace_multibuffer`, `tile_mix_vector_loop`, and `tile_mix_cube_loop`."
+msgstr "4\. **Pipeline and synchronization layer**: Explore Cube/Vector overlap with options such as `multibuffer`, `set_workspace_multibuffer`, `tile_mix_vector_loop`, and `tile_mix_cube_loop`."
 
 #: ../../zh/programming_guide/cv_fusion_operator.md:42
 msgid ""
 "**分核层**：CV 融合算子通常按 Cube Core 数量发射 grid；运行时会以约 1:2 的比例协同 Vector "
 "Core。不要简单沿用 GPU 上的大 grid。"
-msgstr "5. **Core allocation layer**: CV fusion operators usually launch by Cube Core count, while Vector Cores cooperate at roughly a 1:2 ratio. Do not directly reuse large GPU grids."
+msgstr "5\. **Core allocation layer**: CV fusion operators usually launch by Cube Core count, while Vector Cores cooperate at roughly a 1:2 ratio. Do not directly reuse large GPU grids."
 
 #: ../../zh/programming_guide/cv_fusion_operator.md:44
 msgid "对于 attention 类 CV 融合，推荐先让非 causal、短序列、小 head_dim 的 case 跑通，再逐步加入："

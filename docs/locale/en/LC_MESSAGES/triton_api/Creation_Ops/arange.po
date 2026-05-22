@@ -12,7 +12,7 @@ msgstr "triton.language.arange"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md:5
 msgid "简介：`triton.language.arange`函数用于生成一个从`start`到`end`（不包括`end`）的连续整数序列。"
@@ -22,7 +22,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Creation_Ops/arange.md:11
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md:13
 msgid "2.1 参数说明"

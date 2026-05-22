@@ -12,7 +12,7 @@ msgstr "triton.language.program_id"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md:5
 msgid "简介：返回当前程序实例沿给定 axis 的 ID。 函数原型："
@@ -22,7 +22,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Programming_Model/program_id.md:12
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md:14
 msgid "2.1 参数说明"

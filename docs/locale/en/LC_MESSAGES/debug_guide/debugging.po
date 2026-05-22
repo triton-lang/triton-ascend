@@ -114,7 +114,7 @@ msgstr "The NPU running result is different from the benchmark reference result 
 
 #: ../../zh/debug_guide/debugging.md
 msgid "4. 解释器模式 <br> 5.1 打印调试方法"
-msgstr "4. Interpreter mode<br>5.1 Debugging by printing"
+msgstr "4\. Interpreter mode<br>5.1 Debugging by printing"
 
 #: ../../zh/debug_guide/debugging.md
 msgid "**编译错误 (MLIRCompileError)**"

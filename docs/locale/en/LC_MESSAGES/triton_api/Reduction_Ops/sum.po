@@ -12,7 +12,7 @@ msgstr "triton.language.sum"
 
 #: ../../zh/triton_api/Reduction_Ops/sum.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Reduction_Ops/sum.md:5
 msgid "简介：`triton.language.sum` 计算输入tensor沿指定轴的元素和，返回求和结果。"
@@ -22,7 +22,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Reduction_Ops/sum.md:11
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Reduction_Ops/sum.md:13
 msgid "2.1 参数说明"

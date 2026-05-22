@@ -12,7 +12,7 @@ msgstr "triton.language.add"
 
 #: ../../zh/triton_api/Math_Ops/add.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Math_Ops/add.md:5
 msgid "简介：加法  ，与四则运算 ‘+’等价 原型："
@@ -21,7 +21,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Math_Ops/add.md:12
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Math_Ops/add.md:14
 msgid "2.1 参数说明"
@@ -190,7 +190,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Math_Ops/add.md:67
 msgid "3. 特殊说明"
-msgstr "3. Special Notes"
+msgstr "3\. Special Notes"
 
 #: ../../zh/triton_api/Math_Ops/add.md:69
 msgid "Ascend A3 对比 GPU 不支持fp64"

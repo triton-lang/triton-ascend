@@ -12,7 +12,7 @@ msgstr "triton.language.expand_dims"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/expand_dims.md:3
 msgid "1 功能作用说明"
-msgstr "1. Function Description"
+msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/expand_dims.md:5
 msgid "在指定轴位置插入大小为1的维度，不改变张量的数据，仅增加维度数。支持负索引，从右向左计数。"
@@ -52,7 +52,7 @@ msgstr "Supports negative indexing, counting from right to left"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/expand_dims.md:18
 msgid "2 参数规格"
-msgstr "2. Parameter Specifications"
+msgstr "2\. Parameter Specifications"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/expand_dims.md:20
 msgid "2.1 参数说明"

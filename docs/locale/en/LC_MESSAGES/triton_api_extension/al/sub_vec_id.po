@@ -12,7 +12,7 @@ msgstr "sub_vec_id"
 
 #: ../../zh/triton_api_extension/al/sub_vec_id.md:3
 msgid "1. 硬件背景"
-msgstr "1. Hardware Background"
+msgstr "1\. Hardware Background"
 
 #: ../../zh/triton_api_extension/al/sub_vec_id.md:5
 msgid ""
@@ -35,7 +35,7 @@ msgstr ""
 
 #: ../../zh/triton_api_extension/al/sub_vec_id.md:9
 msgid "2. 接口说明"
-msgstr "2. Interface Description"
+msgstr "2\. Interface Description"
 
 #: ../../zh/triton_api_extension/al/sub_vec_id.md:17
 msgid "返回值：返回范围为 [0, N) 的 Sub Vector ID，算子开发者可根据该ID决定N个并行Vector核中每个核处理的数据分片"
@@ -50,7 +50,7 @@ msgstr "Parameters: none"
 
 #: ../../zh/triton_api_extension/al/sub_vec_id.md:21
 msgid "3. 约束说明"
-msgstr "3. Constraints"
+msgstr "3\. Constraints"
 
 #: ../../zh/triton_api_extension/al/sub_vec_id.md:23
 msgid "仅在AIC和AIV核混合使用场景中有效，不可在纯Cube类算子或者纯Vector类算子中使用，否则会触发编译报错。"
@@ -61,7 +61,7 @@ msgstr ""
 
 #: ../../zh/triton_api_extension/al/sub_vec_id.md:25
 msgid "4. 用例示例"
-msgstr "4. Example Usage"
+msgstr "4\. Example Usage"
 
 #: ../../zh/triton_api_extension/al/sub_vec_id.md:33
 msgid "输出："

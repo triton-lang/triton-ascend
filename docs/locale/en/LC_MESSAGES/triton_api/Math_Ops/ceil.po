@@ -12,7 +12,7 @@ msgstr "triton.language.ceil"
 
 #: ../../zh/triton_api/Math_Ops/ceil.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Math_Ops/ceil.md:5
 msgid "简介：计算张量中每个元素的向上取整值"
@@ -20,7 +20,7 @@ msgstr "Description: Computes the ceiling of each element in the tensor"
 
 #: ../../zh/triton_api/Math_Ops/ceil.md:11
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Math_Ops/ceil.md:13
 msgid "2.1 参数说明"

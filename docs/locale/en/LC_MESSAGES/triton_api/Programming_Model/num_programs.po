@@ -12,7 +12,7 @@ msgstr "triton.language.num_programs"
 
 #: ../../zh/triton_api/Programming_Model/num_programs.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Programming_Model/num_programs.md:5
 msgid "简介：返回沿给定 axis 启动的程序实例数量 函数原型："
@@ -22,7 +22,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Programming_Model/num_programs.md:12
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Programming_Model/num_programs.md:14
 msgid "2.1 参数说明"

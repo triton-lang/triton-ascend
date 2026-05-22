@@ -12,7 +12,7 @@ msgstr "triton.language.reduce"
 
 #: ../../zh/triton_api/Reduction_Ops/reduce.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Reduction_Ops/reduce.md:5
 msgid ""
@@ -25,7 +25,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Reduction_Ops/reduce.md:11
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Reduction_Ops/reduce.md:13
 msgid "2.1 参数说明"

@@ -12,7 +12,7 @@ msgstr "triton.language.abs"
 
 #: ../../zh/triton_api/Math_Ops/abs.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Math_Ops/abs.md:5
 msgid "简介：计算张量中每个元素的绝对值 函数原型："
@@ -28,7 +28,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Math_Ops/abs.md:14
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Math_Ops/abs.md:16
 msgid "2.1 参数说明"

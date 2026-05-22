@@ -12,7 +12,7 @@ msgstr "bl.alloc API Documentation"
 
 #: ../../zh/triton_api_extension/bl/alloc.md:3
 msgid "1. 背景"
-msgstr "1. Background"
+msgstr "1\. Background"
 
 #: ../../zh/triton_api_extension/bl/alloc.md:5
 msgid "为了支持Ascend级编程的需要，需要支持用户手动创建指定地址空间上的内存(buffer)，本接口是硬件无关的接口，对接memref.alloc。"
@@ -23,11 +23,11 @@ msgstr ""
 
 #: ../../zh/triton_api_extension/bl/alloc.md:7
 msgid "2. 接口说明"
-msgstr "2. Interface Description"
+msgstr "2\. Interface Description"
 
 #: ../../zh/triton_api_extension/bl/alloc.md:15
 msgid "3. 返回值"
-msgstr "3. Return Value"
+msgstr "3\. Return Value"
 
 #: ../../zh/triton_api_extension/bl/alloc.md:17
 msgid ""
@@ -43,15 +43,15 @@ msgstr ""
 
 #: ../../zh/triton_api_extension/bl/alloc.md:19
 msgid "4. 入参"
-msgstr "4. Parameters"
+msgstr "4\. Parameters"
 
 #: ../../zh/triton_api_extension/bl/alloc.md:54
 msgid "5. 昇腾平台数据类型支持"
-msgstr "5. Data Type Support on the Ascend Platform"
+msgstr "5\. Data Type Support on the Ascend Platform"
 
 #: ../../zh/triton_api_extension/bl/alloc.md:91
 msgid "6. 约束说明"
-msgstr "6. Constraints"
+msgstr "6\. Constraints"
 
 #: ../../zh/triton_api_extension/bl/alloc.md:93
 msgid "dtype不支持tl.void"
@@ -75,9 +75,9 @@ msgstr ""
 
 #: ../../zh/triton_api_extension/bl/alloc.md:101
 msgid "7. 用例示例"
-msgstr "7. Example Usage"
+msgstr "7\. Example Usage"
 
 #: ../../zh/triton_api_extension/bl/alloc.md:109
 msgid "8. 编译输出结果"
-msgstr "8. Compilation Output"
+msgstr "8\. Compilation Output"
 

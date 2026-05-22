@@ -12,7 +12,7 @@ msgstr "triton.language.static_assert"
 
 #: ../../zh/triton_api/Debug_Ops/static_assert.md:3
 msgid "1. 函数概述"
-msgstr "1. Function Overview"
+msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Debug_Ops/static_assert.md:5
 msgid "`static_assert` 用于在编译时断言条件是否成立，如果条件不满足则编译失败。这是一个编译时检查工具，不需要设置调试环境变量。"
@@ -23,7 +23,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Debug_Ops/static_assert.md:11
 msgid "2. 规格"
-msgstr "2. Specifications"
+msgstr "2\. Specifications"
 
 #: ../../zh/triton_api/Debug_Ops/static_assert.md:13
 msgid "2.1 参数说明"

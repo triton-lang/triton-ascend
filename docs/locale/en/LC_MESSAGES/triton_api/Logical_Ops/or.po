@@ -12,7 +12,7 @@ msgstr "triton.language.tensor.__or__"
 
 #: ../../zh/triton_api/Logical_Ops/or.md:3
 msgid "1. 函数概述"
-msgstr "1. Function Overview"
+msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Logical_Ops/or.md:5
 msgid "简介：计算两个元素的或运算。"
@@ -20,7 +20,7 @@ msgstr "Description: Computes the element-wise OR of two tensors."
 
 #: ../../zh/triton_api/Logical_Ops/or.md:15
 msgid "2. 规格"
-msgstr "2. Specifications"
+msgstr "2\. Specifications"
 
 #: ../../zh/triton_api/Logical_Ops/or.md:17
 msgid "2.1 参数说明"

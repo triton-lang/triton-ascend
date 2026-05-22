@@ -12,7 +12,7 @@ msgstr "triton.language.view"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md:3
 msgid "1 功能作用说明"
-msgstr "1. Function Description"
+msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md:5
 msgid "创建张量的视图，改变形状但不复制数据，类似于reshape，但更强调视图的概念，保持数据在内存中的连续性。"
@@ -51,7 +51,7 @@ msgstr "Preserves data contiguity in memory"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md:18
 msgid "2 参数规格"
-msgstr "2. Parameter Specifications"
+msgstr "2\. Parameter Specifications"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md:20
 msgid "2.1 参数说明"

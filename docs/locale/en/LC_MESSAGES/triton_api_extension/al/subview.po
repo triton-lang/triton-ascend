@@ -12,7 +12,7 @@ msgstr "subview"
 
 #: ../../zh/triton_api_extension/al/subview.md:3
 msgid "1. 硬件背景"
-msgstr "1. Hardware Background"
+msgstr "1\. Hardware Background"
 
 #: ../../zh/triton_api_extension/al/subview.md:5
 msgid "昇腾硬件 A5 支持了定义新视图，仅通过偏移、大小和步幅实现，不复制底层数据。"
@@ -22,7 +22,7 @@ msgstr ""
 
 #: ../../zh/triton_api_extension/al/subview.md:7
 msgid "2. 接口说明"
-msgstr "2. Interface Description"
+msgstr "2\. Interface Description"
 
 #: ../../zh/triton_api_extension/al/subview.md:9
 msgid "接口一"
@@ -38,7 +38,7 @@ msgstr "Return value: `bl.buffer`"
 
 #: ../../zh/triton_api_extension/al/subview.md:27
 msgid "3. 入参说明"
-msgstr "3. Parameter Description"
+msgstr "3\. Parameter Description"
 
 #: ../../zh/triton_api_extension/al/subview.md:29
 msgid "src: buffer -> 源buffer"
@@ -58,7 +58,7 @@ msgstr "`strides`: `List[tl.constexpr]` -> strides"
 
 #: ../../zh/triton_api_extension/al/subview.md:37
 msgid "4. 约束说明"
-msgstr "4. Constraints"
+msgstr "4\. Constraints"
 
 #: ../../zh/triton_api_extension/al/subview.md:39
 msgid "输入的参数size、offset、stride必须大于0（offset可以是0），不能为负值。"
@@ -110,7 +110,7 @@ msgstr ""
 
 #: ../../zh/triton_api_extension/al/subview.md:55
 msgid "5. 用例示例"
-msgstr "5. Example Usage"
+msgstr "5\. Example Usage"
 
 #: ../../zh/triton_api_extension/al/subview.md:63
 msgid "输出："

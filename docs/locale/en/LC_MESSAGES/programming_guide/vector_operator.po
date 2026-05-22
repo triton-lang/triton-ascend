@@ -29,21 +29,21 @@ msgstr "For a simple Vector operator, start with the [Vector Addition example](.
 
 #: ../../zh/programming_guide/vector_operator.md:9
 msgid "用 `tl.arange` 构造当前 tile 的连续偏移。"
-msgstr "1. Build contiguous offsets for the current tile with `tl.arange`."
+msgstr "1\. Build contiguous offsets for the current tile with `tl.arange`."
 
 #: ../../zh/programming_guide/vector_operator.md:10
 msgid "用 `mask` 保护尾块，避免越界 load/store。"
-msgstr "2. Use a tail mask to guard load/store."
+msgstr "2\. Use a tail mask to guard load/store."
 
 #: ../../zh/programming_guide/vector_operator.md:11
 msgid "完成逐元素计算后写回结果。"
-msgstr "3. Compute the element-wise expression and store the result."
+msgstr "3\. Compute the element-wise expression and store the result."
 
 #: ../../zh/programming_guide/vector_operator.md:12
 msgid ""
 "当 grid 数远大于物理核数时，将 grid 固定为 `num_vectorcore`，在 kernel 内用 `range(pid, "
 "num_blocks, num_core)` 分批处理。"
-msgstr "4. If the grid is much larger than the physical core count, set the grid to `num_vectorcore` and process tiles with `range(pid, num_blocks, num_core)` inside the kernel."
+msgstr "4\. If the grid is much larger than the physical core count, set the grid to `num_vectorcore` and process tiles with `range(pid, num_blocks, num_core)` inside the kernel."
 
 #: ../../zh/programming_guide/vector_operator.md:14
 msgid "基础 kernel 结构如下："
@@ -113,31 +113,31 @@ msgstr "Complex Vector operators are typically organized as follows:"
 
 #: ../../zh/programming_guide/vector_operator.md:47
 msgid "**按物理核切分外层任务**：用 `num_vectorcore` 作为 grid，每个 program 负责一段 indices 或 token。"
-msgstr "1. **Split outer tasks by physical Vector Core count**: Use `num_vectorcore` as the grid, with each program responsible for a range of indices or tokens."
+msgstr "1\. **Split outer tasks by physical Vector Core count**: Use `num_vectorcore` as the grid, with each program responsible for a range of indices or tokens."
 
 #: ../../zh/programming_guide/vector_operator.md:48
 msgid ""
 "**按 UB 容量切分 hidden 维**：对 `NUM_COLUMNS` 使用 `BLOCK_X` 分块，并预留 double "
 "buffer、索引和临时张量的空间。"
-msgstr "2. **Split the hidden dimension by UB capacity**: Use `BLOCK_X` for `NUM_COLUMNS` and reserve space for double buffers, indices, and temporary tensors."
+msgstr "2\. **Split the hidden dimension by UB capacity**: Use `BLOCK_X` for `NUM_COLUMNS` and reserve space for double buffers, indices, and temporary tensors."
 
 #: ../../zh/programming_guide/vector_operator.md:49
 msgid ""
 "**用 `SUB_BLOCK_SIZE` 合并小粒度离散任务**：一次加载一组 indices，在 UB 中组织成连续临时块，减少 GM "
 "标量访存和多次 store。"
-msgstr "3. **Use `SUB_BLOCK_SIZE` to batch small irregular tasks**: Load a group of indices at once, organize them into contiguous temporary blocks in UB, reducing GM scalar access and multiple stores."
+msgstr "3\. **Use `SUB_BLOCK_SIZE` to batch small irregular tasks**: Load a group of indices at once, organize them into contiguous temporary blocks in UB, reducing GM scalar access and multiple stores."
 
 #: ../../zh/programming_guide/vector_operator.md:50
 msgid ""
 "**用扩展语义管理 UB 内局部数据**：使用 `tl.insert_slice` 合并多行数据，使用 `tl.extract_slice` "
 "取出子块后再分散写回。"
-msgstr "4. **Use extended semantics for UB-local data management**: Use `tl.insert_slice` to assemble multiple rows and `tl.extract_slice` to extract sub-blocks before scattering writes."
+msgstr "4\. **Use extended semantics for UB-local data management**: Use `tl.insert_slice` to assemble multiple rows and `tl.extract_slice` to extract sub-blocks before scattering writes."
 
 #: ../../zh/programming_guide/vector_operator.md:51
 msgid ""
 "**为尾块保留统一 mask**：复杂 gather/scatter 中同时存在 index mask、column mask 和 "
 "expert/bin 边界，建议分别命名并只在 load/store 处组合。"
-msgstr "5. **Keep unified masks for tail blocks**: In complex gather/scatter, index masks, column masks, and expert/bin boundary masks may coexist. Name them separately and combine only at load/store sites."
+msgstr "5\. **Keep unified masks for tail blocks**: In complex gather/scatter, index masks, column masks, and expert/bin boundary masks may coexist. Name them separately and combine only at load/store sites."
 
 #: ../../zh/programming_guide/vector_operator.md:53
 msgid "典型的 UB 预算思路如下："

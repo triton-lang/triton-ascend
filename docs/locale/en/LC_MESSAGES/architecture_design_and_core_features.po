@@ -11,7 +11,7 @@ msgstr "Architecture Design and Core Features"
 
 #: ../../zh/architecture_design_and_core_features.md:3
 msgid "1.逻辑架构"
-msgstr "1. Logical Architecture"
+msgstr "1\. Logical Architecture"
 
 #: ../../zh/architecture_design_and_core_features.md:5
 msgid "![图像](./figures/architectural_diagram.png) **Triton-Ascend 架构说明**"
@@ -81,7 +81,7 @@ msgstr ""
 
 #: ../../zh/architecture_design_and_core_features.md:31
 msgid "2.代码结构"
-msgstr "2. Code Structure"
+msgstr "2\. Code Structure"
 
 #: ../../zh/architecture_design_and_core_features.md:33
 msgid "2.1 代码结构原则"
@@ -173,7 +173,7 @@ msgstr ""
 
 #: ../../zh/architecture_design_and_core_features.md:62
 msgid "3. Modules"
-msgstr "3. Modules"
+msgstr "3\. Modules"
 
 #: ../../zh/architecture_design_and_core_features.md:64
 msgid "3.1 Triton core Enhancement"

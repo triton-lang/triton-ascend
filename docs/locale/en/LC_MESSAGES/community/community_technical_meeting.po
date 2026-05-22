@@ -139,12 +139,12 @@ msgstr "Major decision process:"
 
 #: ../../zh/community/community_technical_meeting.md:45
 msgid "提交 `RFC`（Request for Comments），描述变更内容、影响范围和实施方案"
-msgstr "1. Submit an RFC (Request for Comments), describing the change content, impact scope, and implementation plan"
+msgstr "1\. Submit an RFC (Request for Comments), describing the change content, impact scope, and implementation plan"
 
 #: ../../zh/community/community_technical_meeting.md:46
 msgid "在技术会议上进行讨论"
-msgstr "2. Discuss at the technical meeting"
+msgstr "2\. Discuss at the technical meeting"
 
 #: ../../zh/community/community_technical_meeting.md:47
 msgid "`Maintainer` 共同决策"
-msgstr "3. Maintainers make a joint decision"
+msgstr "3\. Maintainers make a joint decision"

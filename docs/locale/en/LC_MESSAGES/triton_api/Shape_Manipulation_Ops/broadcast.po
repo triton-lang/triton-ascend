@@ -12,7 +12,7 @@ msgstr "triton.language.broadcast"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:3
 msgid "1 功能作用说明"
-msgstr "1. Function Description"
+msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:5
 msgid "将两个张量广播到共同兼容的形状，使它们可以进行逐元素操作。"
@@ -45,7 +45,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:16
 msgid "2 参数规格"
-msgstr "2. Parameter Specifications"
+msgstr "2\. Parameter Specifications"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:18
 msgid "2.1 参数说明"

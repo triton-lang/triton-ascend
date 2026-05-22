@@ -265,19 +265,19 @@ msgstr "Process for adding new third-party kernel test cases:"
 
 #: ../../zh/community/contributing.md:168
 msgid "在 GPU 上准备 golden 数据（输入和期望输出），保存为 `.pt` 文件"
-msgstr "1. Prepare golden data (inputs and expected outputs) on GPU and save as `.pt` files"
+msgstr "1\. Prepare golden data (inputs and expected outputs) on GPU and save as `.pt` files"
 
 #: ../../zh/community/contributing.md:169
 #, python-brace-format
 msgid "在 `third_party/ascend/unittest/kernels/{library}/` 下新增 kernel 算子文件"
-msgstr "2. Add kernel operator files under `third_party/ascend/unittest/kernels/{library}/`"
+msgstr "2\. Add kernel operator files under `third_party/ascend/unittest/kernels/{library}/`"
 
 #: ../../zh/community/contributing.md:170
 #, python-brace-format
 msgid ""
 "将 `.pt` 文件上传至 OBS 桶：`https://triton-ascend-artifacts.obs.cn-"
 "southwest-2.myhuaweicloud.com/test/kernels/{library}_pt/{kernel_name}.pt`"
-msgstr "3. Upload `.pt` files to the OBS bucket: `https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/test/kernels/{library}_pt/{kernel_name}.pt`"
+msgstr "3\. Upload `.pt` files to the OBS bucket: `https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/test/kernels/{library}_pt/{kernel_name}.pt`"
 
 #: ../../zh/community/contributing.md:172
 msgid "详细说明参见 `third_party/ascend/unittest/kernels/README.md`。"
@@ -291,7 +291,7 @@ msgstr "Fork-Pull Development Model"
 
 #: ../../zh/community/contributing.md:176
 msgid "1. Fork 仓库"
-msgstr "1. Fork the Repository"
+msgstr "1\. Fork the Repository"
 
 #: ../../zh/community/contributing.md:178
 msgid ""
@@ -303,15 +303,15 @@ msgstr ""
 
 #: ../../zh/community/contributing.md:180
 msgid "2. 克隆并配置远程仓库"
-msgstr "2. Clone and Configure Remote Repository"
+msgstr "2\. Clone and Configure Remote Repository"
 
 #: ../../zh/community/contributing.md:189
 msgid "3. 创建开发分支"
-msgstr "3. Create Development Branch"
+msgstr "3\. Create Development Branch"
 
 #: ../../zh/community/contributing.md:197
 msgid "4. 开发与自测"
-msgstr "4. Development and Self-Testing"
+msgstr "4\. Development and Self-Testing"
 
 #: ../../zh/community/contributing.md:199
 msgid "开发完成后，请确保："
@@ -335,7 +335,7 @@ msgstr "If operator implementations are modified, it's recommended to run Induct
 
 #: ../../zh/community/contributing.md:205
 msgid "5. 提交代码"
-msgstr "5. Commit Code"
+msgstr "5\. Commit Code"
 
 #: ../../zh/community/contributing.md:213
 msgid ""
@@ -345,7 +345,7 @@ msgstr "Please follow the [How to Write a Git Commit Message](https://cbea.ms/gi
 
 #: ../../zh/community/contributing.md:215
 msgid "6. 创建 Pull Request"
-msgstr "6. Create Pull Request"
+msgstr "6\. Create Pull Request"
 
 #: ../../zh/community/contributing.md:217
 msgid ""

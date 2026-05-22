@@ -25,6 +25,7 @@
 #   -c docs/en   : use this file as config (language='en')
 #   docs/zh      : source directory (same as zh build, shared content)
 #   docs/_build/en: output directory
+#
 
 # General information about the project.
 project = 'Triton Ascend'
@@ -34,21 +35,21 @@ version = ''
 release = ''
 
 extensions = [
-    'sphinx.ext.intersphinx',
-    'sphinx.ext.napoleon',
     'sphinx.ext.autosectionlabel',
-    'sphinx.builders.gettext',   # gettext 翻译支持 — PO 工作流核心 (Sphinx 9.x 中从 sphinx.ext 移到 sphinx.builders)
+    'sphinx.ext.napoleon',
+    'sphinx.ext.intersphinx',
+    'sphinx.builders.gettext',
     'myst_parser',
 ]
 
 autosectionlabel_prefix_document = True
 
-# --- 关键配置：英文构建 ---
-language = 'en'                    # 目标语言：英文
-locale_dirs = ['../locale/']       # 指向 docs/locale/（相对于 en/conf.py）
-gettext_compact = False            # 与 zh 保持一致
+# Key configs for English build
+language = 'en'
+locale_dirs = ['../locale/']
+gettext_compact = False
 
-templates_path = []
+templates_path = ['_templates']
 
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
@@ -56,4 +57,4 @@ pygments_style = 'sphinx'
 
 html_theme = "sphinx_rtd_theme"
 html_theme_options = {}
-html_static_path = []
+html_static_path = ["_static"]

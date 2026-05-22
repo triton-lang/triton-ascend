@@ -30,7 +30,7 @@ msgstr "Before modifying a specific Triton kernel, migrate the Python-side devic
 
 #: ../../zh/migration_guide/migrate_from_gpu.md:11
 msgid "在 Python 文件中增加 `import torch_npu`。"
-msgstr "1. Add `import torch_npu` to the Python file."
+msgstr "1\. Add `import torch_npu` to the Python file."
 
 #: ../../zh/migration_guide/migrate_from_gpu.md:12
 msgid ""
@@ -54,17 +54,17 @@ msgstr ""
 msgid ""
 "查找 `torch.cuda.*`、CUDA stream、CUDA event、CUDA synchronize 等 GPU 专属接口，改为 "
 "NPU 对应接口或删除不必要的同步逻辑。"
-msgstr "3. Find GPU-specific APIs such as `torch.cuda.*`, CUDA streams, CUDA events, and CUDA synchronization, then replace them with NPU counterparts or remove unnecessary synchronization logic."
+msgstr "3\. Find GPU-specific APIs such as `torch.cuda.*`, CUDA streams, CUDA events, and CUDA synchronization, then replace them with NPU counterparts or remove unnecessary synchronization logic."
 
 #: ../../zh/migration_guide/migrate_from_gpu.md:14
 msgid ""
 "删除只为 GPU 设备发现服务的逻辑，例如 "
 "`triton.runtime.driver.active.get_active_torch_device()` 相关设备断言。"
-msgstr "4. Remove logic that exists only for GPU device discovery, such as assertions around `triton.runtime.driver.active.get_active_torch_device()`."
+msgstr "4\. Remove logic that exists only for GPU device discovery, such as assertions around `triton.runtime.driver.active.get_active_torch_device()`."
 
 #: ../../zh/migration_guide/migrate_from_gpu.md:15
 msgid "保持 Triton kernel 主体逻辑不变，先用 NPU Tensor 完成编译和正确性验证。"
-msgstr "5. Keep the Triton kernel body unchanged at first, and use NPU tensors to verify compilation and correctness."
+msgstr "5\. Keep the Triton kernel body unchanged at first, and use NPU tensors to verify compilation and correctness."
 
 #: ../../zh/migration_guide/migrate_from_gpu.md:17
 msgid "调整 grid 分核"

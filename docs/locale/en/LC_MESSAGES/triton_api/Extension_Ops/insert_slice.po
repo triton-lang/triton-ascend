@@ -12,7 +12,7 @@ msgstr "triton.language.insert_slice"
 
 #: ../../zh/triton_api/Extension_Ops/insert_slice.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Extension_Ops/insert_slice.md:5
 msgid "简介：将一个张量（子张量）插入到另一个张量的指定位置，即将一个张量按照操作指定的偏移量、大小和步幅参数插入到另一个张量中。 原型："
@@ -20,7 +20,7 @@ msgstr "Description: Inserts a tensor (sub-tensor) into another tensor at specif
 
 #: ../../zh/triton_api/Extension_Ops/insert_slice.md:20
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Extension_Ops/insert_slice.md:22
 msgid "2.1 参数说明"
@@ -212,7 +212,7 @@ msgstr "The following example demonstrates inserting the slice computation resul
 
 #: ../../zh/triton_api/Extension_Ops/insert_slice.md:81
 msgid "3. 语义GAP"
-msgstr "3. Semantic Gap"
+msgstr "3\. Semantic Gap"
 
 #: ../../zh/triton_api/Extension_Ops/insert_slice.md:83
 msgid "无语义差异"

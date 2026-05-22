@@ -12,7 +12,7 @@ msgstr "triton.language.sqrt_rn"
 
 #: ../../zh/triton_api/Math_Ops/sqrt_rn.md:3
 msgid "1. 函数概述"
-msgstr "1. Function Overview"
+msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Math_Ops/sqrt_rn.md:5
 msgid "简介：计算x的逐元素精确平方根（根据IEEE标准四舍五入）。"
@@ -22,7 +22,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Math_Ops/sqrt_rn.md:11
 msgid "2. 规格"
-msgstr "2. Specifications"
+msgstr "2\. Specifications"
 
 #: ../../zh/triton_api/Math_Ops/sqrt_rn.md:13
 msgid "2.1 参数说明"

@@ -12,7 +12,7 @@ msgstr "triton.language.histogram"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/histogram.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/histogram.md:5
 msgid "简介：基于 input 计算 1 个具有 num_bins 个 bin 的直方图，每个 bin 宽度为 1，起始于 0。 原型："
@@ -28,7 +28,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Scan_Sort_Ops/histogram.md:20
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/histogram.md:22
 msgid "2.1 参数说明"
@@ -210,7 +210,7 @@ msgstr "Example: calling histogram."
 
 #: ../../zh/triton_api/Scan_Sort_Ops/histogram.md:71
 msgid "3. 语义GAP"
-msgstr "3. Semantic Gap"
+msgstr "3\. Semantic Gap"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/histogram.md:73
 msgid "相对社区能力缺失但能开发支持"

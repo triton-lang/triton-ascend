@@ -12,7 +12,7 @@ msgstr "triton.language.get_element"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md:5
 msgid "简介：根据给定的索引，从输入张量中读取单个元素。 原型："
@@ -28,7 +28,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md:19
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md:21
 msgid "2.1 参数说明"
@@ -188,7 +188,7 @@ msgstr "The following example demonstrates calling get_element:"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md:85
 msgid "3. 语义GAP"
-msgstr "3. Semantic Gap"
+msgstr "3\. Semantic Gap"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md:87
 msgid "无语义差异"

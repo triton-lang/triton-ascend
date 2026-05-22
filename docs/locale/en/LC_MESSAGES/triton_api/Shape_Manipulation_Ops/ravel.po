@@ -12,7 +12,7 @@ msgstr "triton.language.ravel"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/ravel.md:3
 msgid "1 功能作用说明"
-msgstr "1. Function Description"
+msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/ravel.md:5
 msgid "将输入张量展平为一维张量，保持元素在内存中的顺序，输出张量的总元素数与输入张量相同。"
@@ -50,7 +50,7 @@ msgstr "Output has same total elements as input"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/ravel.md:18
 msgid "2 参数规格"
-msgstr "2. Parameter Specifications"
+msgstr "2\. Parameter Specifications"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/ravel.md:20
 msgid "2.1 参数说明"

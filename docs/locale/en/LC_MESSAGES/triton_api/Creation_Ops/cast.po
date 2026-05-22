@@ -12,7 +12,7 @@ msgstr "triton.language.cast"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:3
 msgid "1 功能作用说明"
-msgstr "1. Function Description"
+msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:5
 msgid "将张量转换为指定的数据类型，支持数值类型转换、位级别重解释（bitcast）、浮点降精度舍入模式，以及Ascend扩展的整数溢出处理模式。"
@@ -70,7 +70,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:19
 msgid "2 参数规格"
-msgstr "2. Parameter Specifications"
+msgstr "2\. Parameter Specifications"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:21
 msgid "2.1 参数说明"

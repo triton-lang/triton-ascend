@@ -12,7 +12,7 @@ msgstr "floordiv"
 
 #: ../../zh/triton_api/Math_Ops/floordiv.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Math_Ops/floordiv.md:5
 msgid "简介：取整除法，返回向零取整后的除法结果，四则运算 ‘//’，无tl.floordiv方法"
@@ -22,7 +22,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Math_Ops/floordiv.md:7
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Math_Ops/floordiv.md:9
 msgid "2.1 参数说明"

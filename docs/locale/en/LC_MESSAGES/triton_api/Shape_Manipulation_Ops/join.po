@@ -12,7 +12,7 @@ msgstr "triton.language.join"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:3
 msgid "1 功能作用说明"
-msgstr "1. Function Description"
+msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:5
 msgid "将两个相同形状的输入张量沿着新的最小维度连接，输出张量比输入张量多一个维度，大小为2，保持其他维度不变。"
@@ -54,7 +54,7 @@ msgstr "Keeps other dimensions unchanged"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:18
 msgid "2 参数规格"
-msgstr "2. Parameter Specifications"
+msgstr "2\. Parameter Specifications"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:20
 msgid "2.1 参数说明"

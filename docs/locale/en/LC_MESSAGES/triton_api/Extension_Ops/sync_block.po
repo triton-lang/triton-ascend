@@ -12,7 +12,7 @@ msgstr "triton.language.sync_block_set"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:3
 msgid "1. 函数概述"
-msgstr "1. Function Overview"
+msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:5
 msgid "显式的核心间同步指令，用于协调 Cube-Vector 架构中不同核心间的执行顺序和数据一致性。"
@@ -23,7 +23,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:7
 msgid "2. `sync_block_set` 操作"
-msgstr "2. `sync_block_set` Operation"
+msgstr "2\. `sync_block_set` Operation"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:9
 msgid "2.1 函数概述"
@@ -127,7 +127,7 @@ msgstr "`event_id` must be in the range 0-15 (16 independent events in total)"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:33
 msgid "3. `sync_block_wait` 操作"
-msgstr "3. `sync_block_wait` Operation"
+msgstr "3\. `sync_block_wait` Operation"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:35
 msgid "3.1 函数概述"
@@ -166,7 +166,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:59
 msgid "4. `sync_block_all` 操作"
-msgstr "4. `sync_block_all` Operation"
+msgstr "4\. `sync_block_all` Operation"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:61
 msgid "4.1 函数概述"
@@ -212,7 +212,7 @@ msgstr "`event_id` must be in the range 0-15"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:84
 msgid "5. 使用方法"
-msgstr "5. Usage"
+msgstr "5\. Usage"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:86
 msgid "5.1 基础使用示例"

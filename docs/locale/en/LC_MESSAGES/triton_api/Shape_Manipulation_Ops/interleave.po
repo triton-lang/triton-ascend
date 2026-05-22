@@ -12,7 +12,7 @@ msgstr "triton.language.interleave"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/interleave.md:3
 msgid "1 功能作用说明"
-msgstr "1. Function Description"
+msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/interleave.md:5
 msgid "将两个相同形状的输入张量在最后一个维度上交错排列，输出张量的最后一个维度大小为输入张量的2倍，其他维度保持不变。"
@@ -54,7 +54,7 @@ msgstr "Other dimensions remain unchanged"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/interleave.md:18
 msgid "2 参数规格"
-msgstr "2. Parameter Specifications"
+msgstr "2\. Parameter Specifications"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/interleave.md:20
 msgid "2.1 参数说明"

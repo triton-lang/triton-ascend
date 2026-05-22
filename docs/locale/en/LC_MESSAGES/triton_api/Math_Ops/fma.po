@@ -12,7 +12,7 @@ msgstr "triton.language.fma"
 
 #: ../../zh/triton_api/Math_Ops/fma.md:3
 msgid "1. 函数概述"
-msgstr "1. Function Overview"
+msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Math_Ops/fma.md:5
 msgid "简介：计算x、y和z的逐元素融合乘加操作。"
@@ -22,7 +22,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Math_Ops/fma.md:11
 msgid "2. 规格"
-msgstr "2. Specifications"
+msgstr "2\. Specifications"
 
 #: ../../zh/triton_api/Math_Ops/fma.md:13
 msgid "2.1 参数说明"

@@ -12,7 +12,7 @@ msgstr "triton.language.reshape"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/reshape.md:3
 msgid "1 功能作用说明"
-msgstr "1. Function Description"
+msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/reshape.md:5
 msgid "将张量重新解释为新的形状。"
@@ -42,7 +42,7 @@ msgstr "Reinterprets the tensor as a new shape"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/reshape.md:16
 msgid "2 参数规格"
-msgstr "2. Parameter Specifications"
+msgstr "2\. Parameter Specifications"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/reshape.md:18
 msgid "2.1 参数说明"

@@ -12,7 +12,7 @@ msgstr "mul"
 
 #: ../../zh/triton_api/Math_Ops/mul.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Math_Ops/mul.md:5
 msgid "简介：四则运算 ‘*’,  无tl.mul调用方法"
@@ -20,7 +20,7 @@ msgstr "Description: Arithmetic multiplication '*', no tl.mul method"
 
 #: ../../zh/triton_api/Math_Ops/mul.md:7
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Math_Ops/mul.md:9
 msgid "2.1 参数说明"
@@ -156,7 +156,7 @@ msgstr "Example: multiply input tensors `in_ptr0` and `in_ptr1`."
 
 #: ../../zh/triton_api/Math_Ops/mul.md:56
 msgid "3.  特殊说明"
-msgstr "3. Special Notes"
+msgstr "3\. Special Notes"
 
 #: ../../zh/triton_api/Math_Ops/mul.md:58
 msgid "Ascend A3 对比 GPU 缺失fp64的支持"

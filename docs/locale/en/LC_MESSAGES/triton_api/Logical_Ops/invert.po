@@ -12,7 +12,7 @@ msgstr "triton.language.tensor.__invert__"
 
 #: ../../zh/triton_api/Logical_Ops/invert.md:3
 msgid "1. 函数概述"
-msgstr "1. Function Overview"
+msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Logical_Ops/invert.md:5
 msgid "简介：将tensor每个值按比特位进行翻转。"
@@ -20,7 +20,7 @@ msgstr "Description: Flips each bit of every value in the tensor."
 
 #: ../../zh/triton_api/Logical_Ops/invert.md:15
 msgid "2. 规格"
-msgstr "2. Specifications"
+msgstr "2\. Specifications"
 
 #: ../../zh/triton_api/Logical_Ops/invert.md:17
 msgid "2.1 参数说明"

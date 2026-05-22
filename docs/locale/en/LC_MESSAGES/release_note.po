@@ -137,7 +137,7 @@ msgstr "Main Features"
 
 #: ../../zh/release_note.md:31
 msgid "**Ascend NPU 全栈支持**"
-msgstr "1. **Full-stack support for Ascend NPU**"
+msgstr "1\. **Full-stack support for Ascend NPU**"
 
 #: ../../zh/release_note.md:32
 msgid "完整的 Triton IR 到 NPU 指令集编译流水线"
@@ -151,7 +151,7 @@ msgstr "   - All Triton Ops are supported."
 
 #: ../../zh/release_note.md:35
 msgid "**性能优化**"
-msgstr "2. **Performance optimization**"
+msgstr "2\. **Performance optimization**"
 
 #: ../../zh/release_note.md:36
 msgid "NPU 特定内核优化"
@@ -163,7 +163,7 @@ msgstr "   - CV compute optimization"
 
 #: ../../zh/release_note.md:39
 msgid "**开发者工具**"
-msgstr "3. **Developer tools**"
+msgstr "3\. **Developer tools**"
 
 #: ../../zh/release_note.md:40
 msgid "支持全面的调试输出"
@@ -179,7 +179,7 @@ msgstr "Known Limitations"
 
 #: ../../zh/release_note.md:45
 msgid "**数据类型**: 部分数据类型支持仍在完善中"
-msgstr "1. **Data type**: Some data types are still being improved."
+msgstr "1\. **Data type**: Some data types are still being improved."
 
 #: ../../zh/release_note.md:46
 msgid "**算子覆盖**: 正在持续扩展支持的算子集合"

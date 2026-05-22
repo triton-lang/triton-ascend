@@ -12,7 +12,7 @@ msgstr "triton.language.semantic.less_than"
 
 #: ../../zh/triton_api/Comparing_Ops/lt.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Comparing_Ops/lt.md:5
 msgid "简介：用于比较两个张量的元素, 与`<`等价。 函数原型："
@@ -26,7 +26,7 @@ msgstr "Used as a built-in operator of `tensor`, e.g., `x<y`."
 
 #: ../../zh/triton_api/Comparing_Ops/lt.md:18
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Comparing_Ops/lt.md:20
 msgid "2.1 参数说明"

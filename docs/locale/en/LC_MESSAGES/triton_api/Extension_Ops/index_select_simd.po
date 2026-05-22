@@ -12,7 +12,7 @@ msgstr "triton.language.extra.ascend.libdevice.index_select_simd"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md:3
 msgid "1 功能作用说明"
-msgstr "1. Function Description"
+msgstr "1\. Function Description"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md:5
 msgid ""
@@ -83,7 +83,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md:24
 msgid "2 参数规格"
-msgstr "2. Parameter Specifications"
+msgstr "2\. Parameter Specifications"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md:26
 msgid "2.1 参数说明"
@@ -447,7 +447,7 @@ msgstr "**Differences from Regular load:**"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md:152
 msgid "3 与GPU差异"
-msgstr "3. Differences from GPU"
+msgstr "3\. Differences from GPU"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md:154
 msgid "新增OP，无差异"
@@ -455,7 +455,7 @@ msgstr "New OP, no differences"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md:156
 msgid "4 测试用例说明"
-msgstr "4. Test Case Description"
+msgstr "4\. Test Case Description"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md:158
 msgid "**测试文件：**"

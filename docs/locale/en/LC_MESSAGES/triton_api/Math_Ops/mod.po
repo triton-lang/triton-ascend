@@ -12,7 +12,7 @@ msgstr "mod"
 
 #: ../../zh/triton_api/Math_Ops/mod.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Math_Ops/mod.md:5
 msgid "简介：取模运算  ，四则运算 ‘%’"
@@ -20,7 +20,7 @@ msgstr "Description: Modulo operation, arithmetic '%'"
 
 #: ../../zh/triton_api/Math_Ops/mod.md:7
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Math_Ops/mod.md:9
 msgid "2.1 参数说明"
@@ -160,7 +160,7 @@ msgstr "Example: modulo of input tensors `in_ptr0` and `in_ptr1`."
 
 #: ../../zh/triton_api/Math_Ops/mod.md:55
 msgid "3. 特殊说明"
-msgstr "3. Special Notes"
+msgstr "3\. Special Notes"
 
 #: ../../zh/triton_api/Math_Ops/mod.md:57
 msgid "Ascend A3 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持"

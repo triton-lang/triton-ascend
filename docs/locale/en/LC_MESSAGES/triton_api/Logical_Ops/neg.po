@@ -12,7 +12,7 @@ msgstr "triton.language.tensor.__neg__"
 
 #: ../../zh/triton_api/Logical_Ops/neg.md:3
 msgid "1. 函数概述"
-msgstr "1. Function Overview"
+msgstr "1\. Function Overview"
 
 #: ../../zh/triton_api/Logical_Ops/neg.md:5
 msgid "简介：将tensor的值取负。"
@@ -20,7 +20,7 @@ msgstr "Description: Negates the values of the tensor."
 
 #: ../../zh/triton_api/Logical_Ops/neg.md:15
 msgid "2. 规格"
-msgstr "2. Specifications"
+msgstr "2\. Specifications"
 
 #: ../../zh/triton_api/Logical_Ops/neg.md:17
 msgid "2.1 参数说明"

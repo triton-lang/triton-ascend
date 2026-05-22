@@ -12,7 +12,7 @@ msgstr "al.ascend_address_space API Documentation"
 
 #: ../../zh/triton_api_extension/al/al.ascend_address_space.md:3
 msgid "1. 背景"
-msgstr "1. Background"
+msgstr "1\. Background"
 
 #: ../../zh/triton_api_extension/al/al.ascend_address_space.md:5
 msgid "为了支持Ascend级编程的需要，需要支持用户手动创建指定地址空间上的内存(buffer)，对接hivm::AddressSpace枚举。"
@@ -23,7 +23,7 @@ msgstr ""
 
 #: ../../zh/triton_api_extension/al/al.ascend_address_space.md:7
 msgid "2. 接口说明"
-msgstr "2. Interface Description"
+msgstr "2\. Interface Description"
 
 #: ../../zh/triton_api_extension/al/al.ascend_address_space.md:15
 msgid "2.1. 返回值"
@@ -40,7 +40,7 @@ msgstr "2.2. Parameters"
 
 #: ../../zh/triton_api_extension/al/al.ascend_address_space.md:23
 msgid "3. 约束说明"
-msgstr "3. Constraints"
+msgstr "3\. Constraints"
 
 #: ../../zh/triton_api_extension/al/al.ascend_address_space.md:25
 msgid "需要配合bl.alloc使用"
@@ -48,9 +48,9 @@ msgstr "Must be used together with `bl.alloc`"
 
 #: ../../zh/triton_api_extension/al/al.ascend_address_space.md:27
 msgid "4. 用例示例"
-msgstr "4. Example Usage"
+msgstr "4\. Example Usage"
 
 #: ../../zh/triton_api_extension/al/al.ascend_address_space.md:35
 msgid "5. 编译输出结果"
-msgstr "5. Compilation Output"
+msgstr "5\. Compilation Output"
 

@@ -12,7 +12,7 @@ msgstr "al.copy"
 
 #: ../../zh/triton_api_extension/al/al.copy.md:3
 msgid "1. 背景"
-msgstr "1. Background"
+msgstr "1\. Background"
 
 #: ../../zh/triton_api_extension/al/al.copy.md:5
 msgid ""
@@ -33,7 +33,7 @@ msgstr ""
 "copy_from_ub_to_l1, it adds support for UB-to-UB copying. The original "
 "copy_from_ub_to_l1 has been updated to include a deprecation warning."#: ../../zh/triton_api_extension/al/al.copy.md:9
 msgid "2. 接口说明"
-msgstr "2. Interface Description"
+msgstr "2\. Interface Description"
 
 #: ../../zh/triton_api_extension/al/al.copy.md:17
 msgid "参数"
@@ -49,7 +49,7 @@ msgstr "None"
 
 #: ../../zh/triton_api_extension/al/al.copy.md:44
 msgid "3. 约束说明"
-msgstr "3. Constraints"
+msgstr "3\. Constraints"
 
 #: ../../zh/triton_api_extension/al/al.copy.md:46
 msgid "src 和 dst 必须同时为 tensor 或者 buffer ，tensor 暂时不支持"
@@ -69,9 +69,9 @@ msgstr "`src` and `dst` must have the same type and shape"
 
 #: ../../zh/triton_api_extension/al/al.copy.md:52
 msgid "4. 用例示例"
-msgstr "4. Example Usage"
+msgstr "4\. Example Usage"
 
 #: ../../zh/triton_api_extension/al/al.copy.md:132
 msgid "5. 编译输出结果"
-msgstr "5. Compilation Output"
+msgstr "5\. Compilation Output"
 

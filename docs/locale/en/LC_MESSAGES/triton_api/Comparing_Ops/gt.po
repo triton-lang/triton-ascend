@@ -12,7 +12,7 @@ msgstr "triton.language.semantic.greater_than"
 
 #: ../../zh/triton_api/Comparing_Ops/gt.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Comparing_Ops/gt.md:5
 msgid "简介：用于比较两个张量的元素，与`>`等价。"
@@ -24,7 +24,7 @@ msgstr "Used as a built-in operator of `tensor`, e.g., `x>y`."
 
 #: ../../zh/triton_api/Comparing_Ops/gt.md:17
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Comparing_Ops/gt.md:19
 msgid "2.1 参数说明"
@@ -205,7 +205,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Comparing_Ops/gt.md:74
 msgid "3. 语义GAP"
-msgstr "3. Semantic Gap"
+msgstr "3\. Semantic Gap"
 
 #: ../../zh/triton_api/Comparing_Ops/gt.md:76
 msgid "相对社区能力缺失但能开发支持"

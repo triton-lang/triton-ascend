@@ -154,14 +154,14 @@ msgstr "Precautions"
 msgid ""
 "内存限制：上述写法中，所有输入数据一次性被加载到内存中进行计算。如果输入张量过大，可能会超出单个内核的片上内存容量，导致内存溢出错误。 "
 "因此，这种简单的写法更适合于小规模张量的计算或用于理解 Triton 内核的基本写法和调用方式。"
-msgstr "1. Memory limit: In the preceding writing, all input data is loaded to memory at a time for computation. If the input tensor is too large, it may exceed the on-chip memory capacity of a single kernel, resulting in a memory overflow error. Therefore, this simple writing is suitable for computing small-scale tensors or for understanding the basic writing and call method of Triton kernels."
+msgstr "1\. Memory limit: In the preceding writing, all input data is loaded to memory at a time for computation. If the input tensor is too large, it may exceed the on-chip memory capacity of a single kernel, resulting in a memory overflow error. Therefore, this simple writing is suitable for computing small-scale tensors or for understanding the basic writing and call method of Triton kernels."
 
 #: ../../zh/migration_guide/architecture_difference.md:88
 msgid ""
 "适用场景：尽管这种方法有助于快速理解和入门 Triton 编程，但对于大规模数据集或高性能要求的应用场景，建议采用更复杂的数据切分策略（如 "
 "Tiling）， 以充分利用硬件资源并避免内存溢出问题。通过这种方式，开发者可以快速上手 Triton 编程，同时了解如何定义、调用以及优化 "
 "Triton 内核函数。"
-msgstr "2. Application scenarios: This method helps developers quickly understand and get started with Triton programming. However, for large-scale data sets or scenarios demanding high performance, developers are advised to use more complex data tiling strategies to fully utilize hardware resources and prevent memory overflow. In this way, developers can quickly get started with Triton programming and understand how to define, call, and optimize Triton kernel functions."
+msgstr "2\. Application scenarios: This method helps developers quickly understand and get started with Triton programming. However, for large-scale data sets or scenarios demanding high performance, developers are advised to use more complex data tiling strategies to fully utilize hardware resources and prevent memory overflow. In this way, developers can quickly get started with Triton programming and understand how to define, call, and optimize Triton kernel functions."
 
 #: ../../zh/migration_guide/architecture_difference.md:91
 msgid "更高效triton写法"

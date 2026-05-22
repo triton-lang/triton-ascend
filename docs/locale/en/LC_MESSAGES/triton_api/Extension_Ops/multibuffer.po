@@ -12,7 +12,7 @@ msgstr "triton.language.multibuffer"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md:3
 msgid "1. OP 概述"
-msgstr "1. OP Overview"
+msgstr "1\. OP Overview"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md:5
 msgid "简介：为张量设置多缓冲，允许编译器对同一张量创建多个副本。 原型："
@@ -20,7 +20,7 @@ msgstr "Description: Sets up multi-buffering for a tensor, allowing the compiler
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md:16
 msgid "2. OP 规格"
-msgstr "2. OP Specifications"
+msgstr "2\. OP Specifications"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md:18
 msgid "2.1 参数说明"

@@ -11,7 +11,7 @@ msgstr "Triton-Ascend FAQ"
 
 #: ../../zh/FAQ.md:3
 msgid "1. 安装与环境配置"
-msgstr "1. Installation and Environment Configuration"
+msgstr "1\. Installation and Environment Configuration"
 
 #: ../../zh/FAQ.md:5
 msgid "**Q: 如何正确安装 Triton-Ascend？是否支持 pip 直接安装？**"
@@ -75,7 +75,7 @@ msgstr ""
 
 #: ../../zh/FAQ.md:33
 msgid "2. 精度与数值一致性问题"
-msgstr "2. Accuracy and Numerical Consistency Issues"
+msgstr "2\. Accuracy and Numerical Consistency Issues"
 
 #: ../../zh/FAQ.md:35
 msgid "**Q: NPU 运行结果和 PyTorch/CPU/GPU 参考结果不一致，如何排查？**"
@@ -96,7 +96,7 @@ msgstr ""
 
 #: ../../zh/FAQ.md:40
 msgid "3. 错误代码与异常处理"
-msgstr "3. Error Code and Exception Handling"
+msgstr "3\. Error Code and Exception Handling"
 
 #: ../../zh/FAQ.md:42
 msgid "**Q: 为什么 kernel 编译时报 MLIRCompilationError？如何定位具体失败的 Pass？**"
@@ -112,7 +112,7 @@ msgstr ""
 
 #: ../../zh/FAQ.md:46
 msgid "4. 调试与日志"
-msgstr "4. Debugging and Logging"
+msgstr "4\. Debugging and Logging"
 
 #: ../../zh/FAQ.md:48
 msgid "**Q: 如何开启详细日志输出？TRITON_DEBUG=1 输出在哪？**"
@@ -146,7 +146,7 @@ msgstr ""
 
 #: ../../zh/FAQ.md:56
 msgid "5. 开发与贡献"
-msgstr "5. Development and Contributions"
+msgstr "5\. Development and Contributions"
 
 #: ../../zh/FAQ.md:58
 msgid "**Q: 如何本地构建并测试 Triton-Ascend？**"
@@ -174,7 +174,7 @@ msgstr ""
 
 #: ../../zh/FAQ.md:66
 msgid "6. 性能调优"
-msgstr "6. Performance Optimization"
+msgstr "6\. Performance Optimization"
 
 #: ../../zh/FAQ.md:68
 msgid "**Q: 有没有性能分析工具（profiler）可以使用？**"

@@ -5,7 +5,7 @@
 简介：对输入x计算的逐元素余弦。
 函数原型（Triton3.4.0版本）：
 
-```python
+```text
 triton.language.cos(x, _semantic=None)
 ```
 

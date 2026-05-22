@@ -4,7 +4,7 @@
 
 `max_constancy` 用于向编译器声明输入张量中值的常量性模式，告知编译器输入数据中每组连续的值都是相等的。
 
-```python
+```text
 triton.language.max_constancy(input, values, _builder=None, _semantic=None)
 ```
 

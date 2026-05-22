@@ -4,7 +4,7 @@
 
 简介：计算x的逐元素指数（以2为底）。
 
-```python
+```text
 triton.language.exp2(x, _semantic=None)
 ```
 

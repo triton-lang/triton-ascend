@@ -4,7 +4,7 @@
 
 简介：计算x和y的逐元素精确除法。
 
-```python
+```text
 triton.language.div_rn(x, y, _semantic=None)
 ```
 

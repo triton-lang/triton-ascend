@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Extension_Ops/get_element.md:1
+msgstr ""#: ../../zh/triton_api/Extension_Ops/get_element.md:1
 msgid "triton.language.get_element"
-msgstr ""
+msgstr "triton.language.get_element"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md:3
 msgid "1. OP 概述"
@@ -62,11 +48,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "`src`"
-msgstr ""
+msgstr "`src`"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "`tensor`"
-msgstr ""
+msgstr "`tensor`"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "要被访问的源张量"
@@ -74,7 +60,7 @@ msgstr "The source tensor to be accessed"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "`indice`"
-msgstr ""
+msgstr "`indice`"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "`tuple of ints` 或 `tuple of tensors`"
@@ -86,11 +72,11 @@ msgstr "The index specifying the element position"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "`_builder`"
-msgstr ""
+msgstr "`_builder`"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "-"
-msgstr ""
+msgstr "-"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "保留参数，暂不支持外部调用"
@@ -98,7 +84,7 @@ msgstr "Reserved parameter; external invocation is not supported yet"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "`_generator`"
-msgstr ""
+msgstr "`_generator`"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md:30
 msgid "返回值： `scalar`：与 `src` 张量元素类型相同的标量值"
@@ -116,63 +102,63 @@ msgstr "2.2.1 DataType Support"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "√"
-msgstr ""
+msgstr "√"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Extension_Ops/get_element.md:41
 msgid "2.2.2 Shape 支持"

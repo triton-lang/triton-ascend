@@ -70,6 +70,8 @@ third_party/nvidia/backend/lib/cupti
 
 # Docs
 docs/_build/
+docs/zh/_build/
+*.mo
 docs/python-api/generated/
 docs/dialects/
 docs/getting-started/tutorials

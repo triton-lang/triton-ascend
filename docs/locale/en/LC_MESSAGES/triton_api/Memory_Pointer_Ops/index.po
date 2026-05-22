@@ -6,27 +6,13 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Memory_Pointer_Ops/index.md:1
+msgstr ""#: ../../zh/triton_api/Memory_Pointer_Ops/index.md:1
 msgid "内存/指针操作"
 msgstr "Memory/Pointer Operations"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "api"
-msgstr "API"
+msgstr "api"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "简要说明"
@@ -34,7 +20,7 @@ msgstr "Brief Description"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "[load](./tl.load.md)"
-msgstr ""
+msgstr "[load](./tl.load.md)"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "返回一个张量，其值从由指针定义的内存位置加载"
@@ -44,7 +30,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "[store](./tl.store.md)"
-msgstr ""
+msgstr "[store](./tl.store.md)"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "将数据张量存储到由指针定义的内存位置"
@@ -52,7 +38,7 @@ msgstr "Stores the data tensor to the memory location defined by the pointer"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "[make_block_ptr](./tl.make_block_ptr.md)"
-msgstr ""
+msgstr "[make_block_ptr](./tl.make_block_ptr.md)"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "返回指向父张量中某个块的指针"
@@ -60,7 +46,7 @@ msgstr "Returns a pointer to a block in the parent tensor"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "[advance](./tl.advance.md)"
-msgstr ""
+msgstr "[advance](./tl.advance.md)"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "推进一个块指针"
@@ -68,7 +54,7 @@ msgstr "Advances a block pointer"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "[load_tensor_descriptor](./load_tensor_descriptor.md)"
-msgstr ""
+msgstr "[load_tensor_descriptor](./load_tensor_descriptor.md)"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "从张量描述符加载数据块"
@@ -76,7 +62,7 @@ msgstr "Loads a data block from a tensor descriptor"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "[make_tensor_descriptor](./make_tensor_descriptor.md)"
-msgstr ""
+msgstr "[make_tensor_descriptor](./make_tensor_descriptor.md)"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/index.md
 msgid "创建张量描述符对象"

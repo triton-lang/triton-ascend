@@ -5,7 +5,7 @@
 简介：原子性取最小值操作，在指定的内存位置执行原子最小值操作
 原型：
 
-```python
+```text
 triton.language.atomic_min(
     pointer,
     val,

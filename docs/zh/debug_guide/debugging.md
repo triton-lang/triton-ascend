@@ -141,13 +141,13 @@ python your_triton_program.py
 
 - 运行用例
 
-```python
+```bash
 TRITON_DEBUG=1 TRITON_DISABLE_CACHE=1 python 01-vector-add.py
 ```
 
 运行用例后会打印dump文件路径，默认是 ~/.triton/dump，显示如下：
 
-```python
+```text
 Dumping intermediate results to ~/.triton/dump/xxx 
 # xxx是一串hash的唯一标识符
 ```
@@ -159,7 +159,7 @@ Dumping intermediate results to ~/.triton/dump/xxx
 - TTIR 样例
 查看 kernel.ttir.mlir 如下：
 
-```python
+```text
 module {
   tt.func public @add_kernel(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg2: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg3: i32 {tt.divisibility = 16 : i32} ) attributes {noinline = false} {
     %cst = arith.constant dense<0.000000e+00> : tensor<1024xf32> loc(#loc1)
@@ -201,7 +201,7 @@ TTIR 层面仍基于 Triton 原生抽象（如 `!tt.ptr<f32>`、`tt.load`/`tt.st
 - TTAdapter IR 样例
 查看 kernel.ttadapter.mlir 如下：
 
-```python
+```text
 module {
   func.func @add_kernel(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32, %arg7: i32, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "aiv", parallel_mode = "simd"} {
     %cst = arith.constant 0.000000e+00 : f32
@@ -264,13 +264,13 @@ TTAdapter IR 已完成从 Triton 抽象到适配昇腾 NPU 的格式。
 1. 设置环境变量`TRITON_INTERPRET=1`并运行程序，使Triton kernel在CPU解释器上执行。
 2. 在Triton kernel源码中需要检查的位置插入Python断点：
 
-    ```python
+    ```text
     breakpoint()  # Python 内置断点函数
     ```
 
 3. 程序执行到此处会暂停并进入Python调试器 (`Pdb`)。可以打印和检查任意中间变量的值：
 
-    ```python
+    ```text
     (Pdb) p tmp0  # Print the value of variable tmp0
     ```
 
@@ -423,7 +423,7 @@ def compile_fn(ttir):
 **示例:**
 假设在 `compiler.py` 的第 123 行设置了断点，程序暂停后：
 
-```python
+```text
 python
 (Pdb) l  # View current code context
 118     def compile_fn(ttir):

@@ -10,7 +10,7 @@
 
 生产者核心完成任务后，向消费者发送同步信号。
 
-```python
+```text
 triton.language.sync_block_set(sender, receiver, event_id, _builder=None)
 ```
 
@@ -36,7 +36,7 @@ triton.language.sync_block_set(sender, receiver, event_id, _builder=None)
 
 消费者核心等待生产者的同步信号。
 
-```python
+```text
 triton.language.sync_block_wait(sender, receiver, event_id, _builder=None)
 ```
 
@@ -62,7 +62,7 @@ triton.language.sync_block_wait(sender, receiver, event_id, _builder=None)
 
 全局屏障同步，让所有指定类型的核心同步到同一点。
 
-```python
+```text
 triton.language.sync_block_all(mode, event_id, _builder=None)
 ```
 

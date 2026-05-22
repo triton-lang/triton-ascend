@@ -5,7 +5,7 @@
 简介：原子性加法操作，在指定的内存位置执行原子加法
 原型：
 
-```python
+```text
 triton.language.atomic_add(
     pointer,
     val,

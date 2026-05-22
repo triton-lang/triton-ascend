@@ -5,7 +5,7 @@
 简介：创建张量描述符对象
 原型（Triton3.4.0版本）：
 
-```python
+```text
 triton.language.make_tensor_descriptor(
     base: tensor,
     shape: List[tensor],

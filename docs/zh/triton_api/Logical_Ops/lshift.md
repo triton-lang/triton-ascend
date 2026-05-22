@@ -4,7 +4,7 @@
 
 简介：根据给定值 将tensor张量进行左移位。
 
-```python
+```text
 triton.language.core.__lshift__(
  input: tl.tensor, 
  other: tl.tensor, 

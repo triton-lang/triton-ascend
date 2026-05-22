@@ -5,7 +5,7 @@
 简介：原子性取最大值操作，在指定的内存位置执行原子最大值操作
 原型：
 
-```python
+```text
 triton.language.atomic_max(
     pointer,
     val,

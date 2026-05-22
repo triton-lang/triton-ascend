@@ -6,27 +6,13 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/triton/index.md:1
+msgstr ""#: ../../zh/triton_api/triton/index.md:1
 msgid "triton"
-msgstr ""
+msgstr "triton"
 
 #: ../../zh/triton_api/triton/index.md
 msgid "API"
-msgstr ""
+msgstr "API"
 
 #: ../../zh/triton_api/triton/index.md
 msgid "简要说明"
@@ -34,7 +20,7 @@ msgstr "Description"
 
 #: ../../zh/triton_api/triton/index.md
 msgid "[jit](./jit.md)"
-msgstr ""
+msgstr "[jit](./jit.md)"
 
 #: ../../zh/triton_api/triton/index.md
 msgid "JIT 装饰器 - 使用 Triton 编译器编译函数"
@@ -42,7 +28,7 @@ msgstr "JIT decorator - Compiles function with Triton compiler"
 
 #: ../../zh/triton_api/triton/index.md
 msgid "[autotune](./autotune.md)"
-msgstr ""
+msgstr "[autotune](./autotune.md)"
 
 #: ../../zh/triton_api/triton/index.md
 msgid "用于自动调优一个经过 `triton.jit` 编译的函数的装饰器"
@@ -50,7 +36,7 @@ msgstr "Decorator for auto-tuning a `triton.jit` compiled function"
 
 #: ../../zh/triton_api/triton/index.md
 msgid "[heuristics](./heuristics.md)"
-msgstr ""
+msgstr "[heuristics](./heuristics.md)"
 
 #: ../../zh/triton_api/triton/index.md
 msgid "用于指定如何计算某些元参数值的装饰器"
@@ -58,7 +44,7 @@ msgstr "Decorator for computing certain meta-parameter values"
 
 #: ../../zh/triton_api/triton/index.md
 msgid "[Config](./Config.md)"
-msgstr ""
+msgstr "[Config](./Config.md)"
 
 #: ../../zh/triton_api/triton/index.md
 msgid "一个表示自动调优器可以尝试的可能内核配置的对象"

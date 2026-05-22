@@ -4,7 +4,7 @@
 
 简介：计算x的逐元素softmax。
 
-```python
+```text
 triton.language.softmax(x, dim=None, keep_dims=False, ieee_rounding=False)
 ```
 

@@ -6,21 +6,7 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend \n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language: en\n"
-"Language-Team: en <LL@li.org>\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/debug_guide/profiling.md:1
+msgstr ""#: ../../zh/debug_guide/profiling.md:1
 msgid "Triton-Ascend 性能分析方法"
 msgstr "Triton-Ascend Performance Analysis Method"
 
@@ -208,11 +194,11 @@ msgstr "Ascend310P5"
 
 #: ../../zh/debug_guide/profiling.md
 msgid "Ascend910B4"
-msgstr "-"
+msgstr "Ascend910B4"
 
 #: ../../zh/debug_guide/profiling.md
 msgid "Ascend310P7"
-msgstr "Ascend910B4"
+msgstr "Ascend310P7"
 
 #: ../../zh/debug_guide/profiling.md:53
 msgid "以下两个文件中保存了获取的性能数据："
@@ -220,16 +206,10 @@ msgstr "The following two files save the obtained performance data:"
 
 #: ../../zh/debug_guide/profiling.md:55
 msgid "trace.json"
-msgstr ""
-"trace.json"
-"- visualize_data.bin"
-
+msgstr "trace.json"
 #: ../../zh/debug_guide/profiling.md:56
 msgid "visualize_data.bin"
-msgstr ""
-"trace.json"
-"- visualize_data.bin"
-
+msgstr "visualize_data.bin"
 #: ../../zh/debug_guide/profiling.md:58
 msgid "trace.json 支持以下两种可视化呈现方式："
 msgstr "The trace.json file supports the following two visualized display modes:"

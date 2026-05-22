@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/triton/Config.md:1
+msgstr ""#: ../../zh/triton_api/triton/Config.md:1
 msgid "triton.Config"
-msgstr ""
+msgstr "triton.Config"
 
 #: ../../zh/triton_api/triton/Config.md:7
 msgid "表示自动调优可能尝试的内核配置的对象"
@@ -75,8 +61,8 @@ msgstr "**Methods:**"
 
 #: ../../zh/triton_api/triton/Config.md
 msgid "init(self, kwargs[, num_warps, ...])"
-msgstr ""
+msgstr "init(self, kwargs[, num_warps, ...])"
 
 #: ../../zh/triton_api/triton/Config.md
 msgid "all_kwargs (self)"
-msgstr ""
+msgstr "all_kwargs (self)"

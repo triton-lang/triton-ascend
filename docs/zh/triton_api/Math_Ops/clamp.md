@@ -4,7 +4,7 @@
 
 简介：限制张量x的范围为[min，max]之间。
 
-```python
+```text
 triton.language.clamp(x, min, max, propagate_nan: constexpr = PropagateNan.NONE, _semantic=None)
 ```
 

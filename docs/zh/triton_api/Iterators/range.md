@@ -4,7 +4,7 @@
 
 `range` 是一个向上计数的迭代器，类似于 Python 的 `range()` 函数，但是允许传入更多的参数。
 
-```python
+```text
 triton.language.range(arg1, arg2=None, step=None, num_stages=None, loop_unroll_factor=None, disallow_acc_multi_buffer=False, flatten=False, warp_specialize=False, disable_licm=False, _semantic=None)
 ```
 

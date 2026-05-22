@@ -4,7 +4,7 @@
 
 简介：`triton.language.associative_scan` 对输入tensor沿指定轴应用关联扫描操作，使用combine_fn函数组合元素并更新进位值。
 
-```python
+```text
 triton.language.associative_scan(input, axis, combine_fn, reverse=False, _semantic=None, _generator=None)
 ```
 

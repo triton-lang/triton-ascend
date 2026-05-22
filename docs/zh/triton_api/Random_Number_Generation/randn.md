@@ -5,7 +5,7 @@
 简介：给定 1 个 seed 标量和 1 个 offset 块，返回 1 个 在 **N**(**0**,**1**)中（服从标准正态分布）的 float32 类型的随机块。
 原型：
 
-```python
+```text
 triton.language.randn(
  seed, 
  offset, 

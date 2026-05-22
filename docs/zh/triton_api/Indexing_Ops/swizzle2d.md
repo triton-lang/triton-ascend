@@ -4,7 +4,7 @@
 
 简介：**将一个大小为 size_i × size_j 的行优先矩阵的索引，按每 size_g 行一组，分别转换为列优先矩阵的索引。**。
 
-```python
+```text
 triton.language.swizzle2d(i, j, size_i, size_j, size_g)
 ```
 

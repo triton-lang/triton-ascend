@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:1
+msgstr ""#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:1
 msgid "triton.language.inline_asm_elementwise"
-msgstr ""
+msgstr "triton.language.inline_asm_elementwise"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:3
 msgid "1. 函数概述"
@@ -60,11 +46,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "`asm`"
-msgstr ""
+msgstr "`asm`"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "`str`"
-msgstr ""
+msgstr "`str`"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "必需"
@@ -78,7 +64,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "`constraints`"
-msgstr ""
+msgstr "`constraints`"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "LLVM格式的汇编约束条件"
@@ -86,11 +72,11 @@ msgstr "Assembly constraints in LLVM format"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "`args`"
-msgstr ""
+msgstr "`args`"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "`tensor`"
-msgstr ""
+msgstr "`tensor`"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "输入张量，其值会传递给汇编块"
@@ -98,11 +84,11 @@ msgstr "Input tensor, its values are passed to the assembly block"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "`dtype`"
-msgstr ""
+msgstr "`dtype`"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "`dtype` / `Sequence[dtype]`"
-msgstr ""
+msgstr "`dtype` / `Sequence[dtype]`"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "返回张量的元素类型（可以是单个类型或类型元组）"
@@ -112,11 +98,11 @@ msgstr ""
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "`is_pure`"
-msgstr ""
+msgstr "`is_pure`"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "`bool`"
-msgstr ""
+msgstr "`bool`"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "如果为True，编译器假设汇编块没有副作用"
@@ -124,11 +110,11 @@ msgstr "If True, the compiler assumes the assembly block has no side effects"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "`pack`"
-msgstr ""
+msgstr "`pack`"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "`int`"
-msgstr ""
+msgstr "`int`"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "每次内联汇编调用处理的元素数量"
@@ -136,11 +122,11 @@ msgstr "The number of elements processed per inline assembly call"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "`_semantic`"
-msgstr ""
+msgstr "`_semantic`"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "-"
-msgstr ""
+msgstr "-"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "保留参数，暂不支持外部调用"
@@ -152,75 +138,75 @@ msgstr "2.2 Type Support"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:27
 msgid "A3:"
-msgstr ""
+msgstr "A3:"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "fp64"
-msgstr ""
+msgstr "fp64"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "GPU"
-msgstr ""
+msgstr "GPU"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "✓"
-msgstr ""
+msgstr "✓"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:34
 msgid ""

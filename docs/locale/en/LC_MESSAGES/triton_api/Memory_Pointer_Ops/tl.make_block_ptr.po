@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:1
+msgstr ""#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:1
 msgid "triton.language.make_block_ptr"
-msgstr ""
+msgstr "triton.language.make_block_ptr"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:3
 msgid "1. OP 概述"
@@ -55,11 +41,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "`base`"
-msgstr ""
+msgstr "`base`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "`triton.PointerType`"
-msgstr ""
+msgstr "`triton.PointerType`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "张量的基指针"
@@ -67,11 +53,11 @@ msgstr "Base pointer of tensor"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "`shape`"
-msgstr ""
+msgstr "`shape`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "`tuple(int | constexpr)`"
-msgstr ""
+msgstr "`tuple(int | constexpr)`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "张量在GM上的形状"
@@ -79,7 +65,7 @@ msgstr "Tensor shape in Global Memory"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "`strides`"
-msgstr ""
+msgstr "`strides`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "张量各维度的步长列表"
@@ -87,7 +73,7 @@ msgstr "List of strides for each tensor dim"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "`offsets`"
-msgstr ""
+msgstr "`offsets`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "张量各维度的基址偏移量列表"
@@ -95,11 +81,11 @@ msgstr "List of base address offsets for each tensor dim"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "`block_shape`"
-msgstr ""
+msgstr "`block_shape`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "`tuple(constexpr)`"
-msgstr ""
+msgstr "`tuple(constexpr)`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "单次从全局内存加载 / 存储的块的形状"
@@ -107,15 +93,15 @@ msgstr "Shape of a single block loaded/stored from/to GM"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "`order`"
-msgstr ""
+msgstr "`order`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "`_semantic`"
-msgstr ""
+msgstr "`_semantic`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "-"
-msgstr ""
+msgstr "-"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "保留参数，暂不支持外部调用"
@@ -137,71 +123,71 @@ msgstr "2.2.1 DataType Support"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "fp64"
-msgstr ""
+msgstr "fp64"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "GPU"
-msgstr ""
+msgstr "GPU"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "√"
-msgstr ""
+msgstr "√"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:45
 msgid "结论：Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。"

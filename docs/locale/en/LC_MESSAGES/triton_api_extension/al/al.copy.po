@@ -6,21 +6,7 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend \n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language: en\n"
-"Language-Team: en <LL@li.org>\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api_extension/al/al.copy.md:1
+msgstr ""#: ../../zh/triton_api_extension/al/al.copy.md:1
 msgid "al.copy"
 msgstr "al.copy"
 
@@ -43,11 +29,9 @@ msgid ""
 "copy_from_ub_to_l1, it adds support for UB-to-UB copying. The original "
 "copy_from_ub_to_l1 has been updated to include a deprecation warning."
 msgstr ""
-"Its functionality is similar to copy_from_ub_to_l1. Based on"
-"copy_from_ub_to_l1, it adds support for UB-to-UB copying. The original"
-"copy_from_ub_to_l1 has been updated to include a deprecation warning."
-
-#: ../../zh/triton_api_extension/al/al.copy.md:9
+"Its functionality is similar to copy_from_ub_to_l1. Based on "
+"copy_from_ub_to_l1, it adds support for UB-to-UB copying. The original "
+"copy_from_ub_to_l1 has been updated to include a deprecation warning."#: ../../zh/triton_api_extension/al/al.copy.md:9
 msgid "2. 接口说明"
 msgstr "2. Interface Description"
 

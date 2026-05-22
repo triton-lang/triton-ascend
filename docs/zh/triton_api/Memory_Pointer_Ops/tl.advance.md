@@ -5,7 +5,7 @@
 简介：将`tl.make_block_ptr`的offset增加一个偏移量
 原型：
 
-```python
+```text
 triton.language.advance(
  base: triton.PointerType,
  offsets: tuple(int | constexpr),

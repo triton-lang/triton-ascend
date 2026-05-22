@@ -5,7 +5,7 @@
 简介：为张量设置多缓冲，允许编译器对同一张量创建多个副本。
 原型：
 
-```python
+```text
 triton.language.multibuffer(
     src,
     size,

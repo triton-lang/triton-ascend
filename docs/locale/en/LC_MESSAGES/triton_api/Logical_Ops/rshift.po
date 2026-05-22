@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend \n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language: en\n"
-"Language-Team: en <LL@li.org>\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Logical_Ops/rshift.md:1
+msgstr ""#: ../../zh/triton_api/Logical_Ops/rshift.md:1
 msgid "triton.language.core.__rshift__"
-msgstr ""
+msgstr "triton.language.core.__rshift__"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md:3
 msgid "1. OP 概述"
@@ -58,11 +44,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "`input`"
-msgstr ""
+msgstr "`input`"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "`tensor`"
-msgstr ""
+msgstr "`tensor`"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "张量数据，左操作数，代表要进行移位的主数据"
@@ -70,11 +56,11 @@ msgstr "Tensor data, the left operand representing the main data to be shifted"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "`other`"
-msgstr ""
+msgstr "`other`"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "`tensor or scalar`"
-msgstr ""
+msgstr "`tensor or scalar`"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "张量数据，右操作数，进行移位的数值"
@@ -82,11 +68,11 @@ msgstr "Tensor data, the right operand representing the shift amount"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "`_builder`"
-msgstr ""
+msgstr "`_builder`"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "-"
-msgstr ""
+msgstr "-"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "保留参数，暂不支持外部调用"
@@ -106,71 +92,71 @@ msgstr "2.2.1 DataType Support"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "fp64"
-msgstr ""
+msgstr "fp64"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "GPU"
-msgstr ""
+msgstr "GPU"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "√"
-msgstr ""
+msgstr "√"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Logical_Ops/rshift.md:39
 msgid "结论：Ascend 对比 GPU 缺失uint的支持能力。"

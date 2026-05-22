@@ -4,7 +4,7 @@
 
 原型：
 
-```python
+```text
 triton.language.store(
  pointer,
  value,

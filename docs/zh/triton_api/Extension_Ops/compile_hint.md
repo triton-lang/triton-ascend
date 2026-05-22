@@ -4,7 +4,7 @@
 
 `compile_hint` 是一个编译器提示（hint）机制，允许用户为张量附加元数据信息，这些信息会被传递到编译器后端，用于指导优化和代码生成。
 
-```python
+```text
 triton.language.compile_hint(ptr, hint_name, hint_val=None, _builder=None)
 ```
 

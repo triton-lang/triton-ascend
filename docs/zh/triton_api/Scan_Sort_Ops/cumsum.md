@@ -4,7 +4,7 @@
 
 简介：`triton.language.cumsum` 计算输入tensor沿指定轴的累积和，返回累积求和结果。
 
-```python
+```text
 triton.language.cumsum(input, axis=0, reverse=False)
 ```
 

@@ -5,7 +5,7 @@
 简介：原子性逻辑与操作，在指定的内存位置执行逻辑与
 原型：
 
-```python
+```text
 triton.language.atomic_and(
     pointer,
     val,

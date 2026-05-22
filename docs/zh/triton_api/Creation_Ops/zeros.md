@@ -4,7 +4,7 @@
 
 简介：`triton.language.zeros`返回用给定形状和dtype的标量值0填充的张量。
 
-```python
+```text
 triton.language.zeros(shape, dtype)
 ```
 

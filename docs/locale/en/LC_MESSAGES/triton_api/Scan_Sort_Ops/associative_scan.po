@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md:1
+msgstr ""#: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md:1
 msgid "triton.language.associative_scan"
-msgstr ""
+msgstr "triton.language.associative_scan"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md:3
 msgid "1. OP 概述"
@@ -59,7 +45,7 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "`input`"
-msgstr ""
+msgstr "`input`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "`Tensor` 或 `tuple of Tensor`"
@@ -71,11 +57,11 @@ msgstr "Input tensor, can be a single tensor or a tuple of tensors"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "`axis`"
-msgstr ""
+msgstr "`axis`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "`int`"
-msgstr ""
+msgstr "`int`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "沿着哪个维度进行关联扫描操作"
@@ -83,11 +69,11 @@ msgstr "The dimension along which to perform the associative scan operation"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "`combine_fn`"
-msgstr ""
+msgstr "`combine_fn`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "`Callable`"
-msgstr ""
+msgstr "`Callable`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "用于组合两个标量tensor组的函数（必须用@triton.jit标记）"
@@ -97,11 +83,11 @@ msgstr ""
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "`reverse`"
-msgstr ""
+msgstr "`reverse`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "`bool`"
-msgstr ""
+msgstr "`bool`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "是否沿轴的反方向应用关联扫描"
@@ -111,11 +97,11 @@ msgstr ""
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "`_semantic`"
-msgstr ""
+msgstr "`_semantic`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "`Optional[str]`"
-msgstr ""
+msgstr "`Optional[str]`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "保留参数，暂不支持外部调用"
@@ -123,11 +109,11 @@ msgstr "Reserved parameter; external invocation is not supported yet"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "`_generator`"
-msgstr ""
+msgstr "`_generator`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "`Optional[Generator]`"
-msgstr ""
+msgstr "`Optional[Generator]`"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md:24
 msgid "返回值： `tensor`：对输入tensor沿指定轴应用关联扫描操作，使用combine_fn函数组合元素并更新进位值之后的tensor。"
@@ -146,51 +132,51 @@ msgstr "2.2.1 DataType Support"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "bool/int1"
-msgstr ""
+msgstr "bool/int1"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "GPU支持"
@@ -198,15 +184,15 @@ msgstr "GPU Support"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "✓"
-msgstr ""
+msgstr "✓"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Scan_Sort_Ops/associative_scan.md:36
 msgid "2.2.2 Shape 支持"

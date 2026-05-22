@@ -4,7 +4,7 @@
 
 `max_contiguous` 用于向编译器声明输入张量中的连续性模式，告知编译器输入张量的前`value`个数是连续的。
 
-```python
+```text
 triton.language.max_contiguous(input, values, _builder=None, _semantic=None)
 ```
 

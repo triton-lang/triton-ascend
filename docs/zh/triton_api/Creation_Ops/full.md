@@ -4,7 +4,7 @@
 
 简介：`triton.language.full`返回一个填充了给定形状和数据类型的标量值的张量
 
-```python
+```text
 triton.language.full(shape, value, dtype, _semantic=None)¶
 ```
 

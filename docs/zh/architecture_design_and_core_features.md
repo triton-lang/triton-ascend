@@ -19,7 +19,7 @@
 - **`compiler`**  
   接收来自上层 Triton compiler 生成的中间表示文件 `TTIR`（Triton IR），执行一系列适配昇腾硬件的转换。
 
-  ```python
+  ```text
   Triton IR → Linalg IR → AscendNPU IR → triton_xxx_kernel.o
   ```
 

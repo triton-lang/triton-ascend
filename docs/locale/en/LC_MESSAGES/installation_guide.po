@@ -6,17 +6,15 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"Project-Id-Version: PROJECT VERSION\n"
+"Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
+"POT-Creation-Date: 2026-05-22 09:10+0800\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=utf-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 "Generated-By: Babel 2.18.0\n"
 
 #: ../../zh/installation_guide.md:1
@@ -43,21 +41,22 @@ msgid ""
 "**基于pip安装**：直接尝试使用TA的pip包选择此项。请先前往下一步<a href=\"#env-"
 "prepare\">环境准备</a>完成前置配置，再进行pip安装操作；"
 msgstr ""
-"**Installation via pip**: Select this option if you want to use the Triton-"
-"Ascend pip package. Go to the next step <a href=\"#env-prepare\">Environment"
-" Preparation</a> for prerequisite configuration, then install via pip."
+"**Installation via pip**: Select this option if you want to use the "
+"Triton-Ascend pip package. Go to the next step <a href=\"#env-"
+"prepare\">Environment Preparation</a> for prerequisite configuration, "
+"then install via pip."
 
 #: ../../zh/installation_guide.md:6
 msgid ""
-"**基于源码安装**：基于TA的开发者选择此项。请先前往下一步<a href=\"#env-prepare\">环境准备</a>完成前置配置，再选择<a"
-" href=\"#auto-code-base\">快速安装</a>或<a href=\"#hand-code-"
-"base\">手动安装</a>其中一种方式操作；"
+"**基于源码安装**：基于TA的开发者选择此项。请先前往下一步<a href=\"#env-"
+"prepare\">环境准备</a>完成前置配置，再选择<a href=\"#auto-code-base\">快速安装</a>或<a href"
+"=\"#hand-code-base\">手动安装</a>其中一种方式操作；"
 msgstr ""
-"**Installation from source**: Select this option if you are a Triton-Ascend "
-"developer. Go to the next step <a href=\"#env-prepare\">Environment "
-"Preparation</a> for prerequisite configuration, then choose either <a "
-"href=\"#auto-code-base\">Quick Installation</a> or <a href=\"#hand-code-"
-"base\">Manual Installation</a>."
+"**Installation from source**: Select this option if you are a Triton-"
+"Ascend developer. Go to the next step <a href=\"#env-"
+"prepare\">Environment Preparation</a> for prerequisite configuration, "
+"then choose either <a href=\"#auto-code-base\">Quick Installation</a> or "
+"<a href=\"#hand-code-base\">Manual Installation</a>."
 
 #: ../../zh/installation_guide.md:7
 msgid ""
@@ -121,8 +120,7 @@ msgstr "950PR Series"
 
 #: ../../zh/installation_guide.md:19
 msgid "说明：更多镜像参见[OVERVIEW.zh.md](../../docker/OVERVIEW.zh.md)"
-msgstr ""
-"Note: For more images, see [OVERVIEW.zh.md](../../docker/OVERVIEW.zh.md)."
+msgstr "Note: For more images, see [OVERVIEW.zh.md](../../docker/OVERVIEW.zh.md)."
 
 #: ../../zh/installation_guide.md:20
 msgid "获取镜像"
@@ -133,8 +131,8 @@ msgid "创建容器"
 msgstr "Create container"
 
 #: ../../zh/installation_guide.md:53
-msgid "进入容器"
-msgstr "Enter container"
+msgid "Enter the container"
+msgstr ""
 
 #: ../../zh/installation_guide.md:59
 msgid ""
@@ -156,7 +154,7 @@ msgstr "Other three setup modes"
 
 #: ../../zh/installation_guide.md:70
 msgid "<a id=\"env-prepare\"></a>"
-msgstr ""
+msgstr "<a id=\"env-prepare\"></a>"
 
 #: ../../zh/installation_guide.md:72
 msgid "环境准备"
@@ -211,17 +209,17 @@ msgid ""
 "异构计算架构CANN（Compute Architecture for Neural Networks）是昇腾针对AI场景推出的异构计算架构， "
 "向上支持多种AI框架，包括MindSpore、PyTorch、TensorFlow等，向下服务AI处理器与编程，发挥承上启下的关键作用，是提升昇腾AI处理器计算效率的关键平台。"
 msgstr ""
-"CANN (Compute Architecture for Neural Networks) is a heterogeneous computing"
-" architecture launched by Ascend for AI scenarios. It supports multiple AI "
-"frameworks upward, including MindSpore, PyTorch, TensorFlow, etc., and "
-"serves AI processors and programming downward, playing a key role in "
-"bridging the upper and lower layers. It is a key platform for improving the "
-"computing efficiency of Ascend AI processors."
+"CANN (Compute Architecture for Neural Networks) is a heterogeneous "
+"computing architecture launched by Ascend for AI scenarios. It supports "
+"multiple AI frameworks upward, including MindSpore, PyTorch, TensorFlow, "
+"etc., and serves AI processors and programming downward, playing a key "
+"role in bridging the upper and lower layers. It is a key platform for "
+"improving the computing efficiency of Ascend AI processors."
 
 #: ../../zh/installation_guide.md:87
 msgid ""
-"您可以访问昇腾社区官网，根据其提供的[社区软件安装指引](https://www.hiascend.com/cann/download)完成 CANN "
-"的安装与配置。开发者选择CANN版本、产品系列、CPU架构、操作系统和安装方式便可找到对应的安装命令。"
+"您可以访问昇腾社区官网，根据其提供的[社区软件安装指引](https://www.hiascend.com/cann/download)完成 "
+"CANN 的安装与配置。开发者选择CANN版本、产品系列、CPU架构、操作系统和安装方式便可找到对应的安装命令。"
 msgstr ""
 "You can visit the Ascend community official website and follow the "
 "[community software installation "
@@ -235,7 +233,8 @@ msgstr ""
 msgid "在安装过程中，CANN 版本“**{version}**”请选择如下版本之一。建议下载安装 8.5.0 版本:"
 msgstr ""
 "During installation, select one of the following CANN versions for "
-"\"**{version}**\". It is recommended to download and install version 8.5.0:"
+"\"**{version}**\". It is recommended to download and install version "
+"8.5.0:"
 
 #: ../../zh/installation_guide.md:91
 #, python-brace-format
@@ -244,13 +243,14 @@ msgid ""
 " 上述环境变量配置只在当前窗口生效，用户可以按需将```source ${HOME}/Ascend/ascend-"
 "toolkit/set_env.sh```命令写入环境变量配置文件（如.bashrc文件）。"
 msgstr ""
-"Note: If the user does not specify an installation path, the software will "
-"be installed to the default path. Default installation paths: root user: "
-"`/usr/local/Ascend`, non-root user: `${HOME}/Ascend`, where `${HOME}` is the"
-" current user directory. The environment variable configuration above only "
-"takes effect in the current terminal window. Users can write the ```source "
-"${HOME}/Ascend/ascend-toolkit/set_env.sh``` command into the environment "
-"variable configuration file (such as .bashrc) as needed."
+"Note: If the user does not specify an installation path, the software "
+"will be installed to the default path. Default installation paths: root "
+"user: `/usr/local/Ascend`, non-root user: `${HOME}/Ascend`, where "
+"`${HOME}` is the current user directory. The environment variable "
+"configuration above only takes effect in the current terminal window. "
+"Users can write the ```source ${HOME}/Ascend/ascend-toolkit/set_env.sh```"
+" command into the environment variable configuration file (such as "
+".bashrc) as needed."
 
 #: ../../zh/installation_guide.md:94
 msgid "**CANN版本：**"
@@ -327,7 +327,7 @@ msgstr ""
 
 #: ../../zh/installation_guide.md:126 ../../zh/installation_guide.md:172
 msgid "<a id=\"code-require\"></a>"
-msgstr ""
+msgstr "<a id=\"code-require\"></a>"
 
 #: ../../zh/installation_guide.md:128
 msgid "通过pip安装Triton-Ascend"
@@ -343,24 +343,25 @@ msgstr "You can install the latest stable version of Triton-Ascend using pip."
 
 #: ../../zh/installation_guide.md:138
 msgid ""
-"注意：triton-ascend 3.2.0 及以下 Triton-Ascend和Triton 不能同时存在。需要先卸载社区 Triton，再安装 "
-"Triton-Ascend。<br> triton-ascend 3.2.1 及以上，Triton-Ascend 通过将 Triton "
+"注意：triton-ascend 3.2.0 及以下 Triton-Ascend和Triton 不能同时存在。需要先卸载社区 Triton，再安装"
+" Triton-Ascend。<br> triton-ascend 3.2.1 及以上，Triton-Ascend 通过将 Triton "
 "声明为安装依赖来缓解安装覆盖问题。 安装 Triton-Ascend 时会先安装社区 Triton，再由 Triton-Ascend "
 "覆盖同名目录，从而避免后续安装其他依赖 Triton 的软件包时再次安装 Triton 而覆盖 Triton-Ascend。 x86 与 arm "
-"使用不同版本的社区 Triton 安装包的原因是社区从 3.5 版本开始才提供 arm 版本安装包：x86 依赖 triton==3.2.0，arm "
-"依赖 triton==3.5.0。"
+"使用不同版本的社区 Triton 安装包的原因是社区从 3.5 版本开始才提供 arm 版本安装包：x86 依赖 "
+"triton==3.2.0，arm 依赖 triton==3.5.0。"
 msgstr ""
-"Note: Triton-Ascend and Triton cannot coexist in versions 3.2.0 and earlier."
-" You need to uninstall the community Triton first before installing Triton-"
-"Ascend.<br> For Triton-Ascend 3.2.1 and later, Triton-Ascend mitigates the "
-"installation overwriting issue by declaring Triton as an installation "
-"dependency. When installing Triton-Ascend, the community Triton is installed"
-" first, and then Triton-Ascend overwrites the directories with the same "
-"name. This prevents subsequent installations of other packages that depend "
-"on Triton from overwriting Triton-Ascend. The reason x86 and ARM use "
-"different community Triton package versions is that the community provides "
-"ARM packages starting from version 3.5: x86 depends on triton==3.2.0, and "
-"ARM depends on triton==3.5.0."
+"Note: Triton-Ascend and Triton cannot coexist in versions 3.2.0 and "
+"earlier. You need to uninstall the community Triton first before "
+"installing Triton-Ascend.<br> For Triton-Ascend 3.2.1 and later, Triton-"
+"Ascend mitigates the installation overwriting issue by declaring Triton "
+"as an installation dependency. When installing Triton-Ascend, the "
+"community Triton is installed first, and then Triton-Ascend overwrites "
+"the directories with the same name. This prevents subsequent "
+"installations of other packages that depend on Triton from overwriting "
+"Triton-Ascend. The reason x86 and ARM use different community Triton "
+"package versions is that the community provides ARM packages starting "
+"from version 3.5: x86 depends on triton==3.2.0, and ARM depends on "
+"triton==3.5.0."
 
 #: ../../zh/installation_guide.md:149
 msgid "历史稳定版本"
@@ -372,13 +373,13 @@ msgstr "Installing Triton-Ascend Using the Source Code"
 
 #: ../../zh/installation_guide.md:157
 msgid ""
-"如果您需要对 Triton-Ascend 进行开发或自定义修改，则应采用源代码编译安装的方法。这种方式允许您根据项目需求调整源代码，并编译安装定制化的 "
-"Triton-Ascend 版本。"
+"如果您需要对 Triton-Ascend "
+"进行开发或自定义修改，则应采用源代码编译安装的方法。这种方式允许您根据项目需求调整源代码，并编译安装定制化的 Triton-Ascend 版本。"
 msgstr ""
-"If you need to develop or customize Triton-Ascend, you should install it by "
-"compiling from source. This method allows you to modify the source code "
-"according to your project requirements and build a customized version of "
-"Triton-Ascend."
+"If you need to develop or customize Triton-Ascend, you should install it "
+"by compiling from source. This method allows you to modify the source "
+"code according to your project requirements and build a customized "
+"version of Triton-Ascend."
 
 #: ../../zh/installation_guide.md:159
 msgid "在构建前，您需要完成相关构建组件的<a href=\"#code-require\">依赖安装</a>。"
@@ -391,10 +392,11 @@ msgid ""
 "我们推荐使用<a href=\"#auto-code-base\">快速安装</a>的方式完成基于源码安装Triton-"
 "Ascend；若您有特殊需求，如目标机器无法联网等原因，可以进行<a href=\"#hand-code-base\">手动安装</a>。"
 msgstr ""
-"We recommend completing the source installation of Triton-Ascend using the "
-"<a href=\"#auto-code-base\">Quick Installation</a> method. If you have "
-"special requirements, such as no network access on the target machine, you "
-"can use <a href=\"#hand-code-base\">Manual Installation</a> instead."
+"We recommend completing the source installation of Triton-Ascend using "
+"the <a href=\"#auto-code-base\">Quick Installation</a> method. If you "
+"have special requirements, such as no network access on the target "
+"machine, you can use <a href=\"#hand-code-base\">Manual Installation</a> "
+"instead."
 
 #: ../../zh/installation_guide.md:163
 msgid "系统推荐"
@@ -451,8 +453,8 @@ msgstr "Install System Library Dependencies"
 #: ../../zh/installation_guide.md:178
 msgid "安装zlib1g-dev/lld/clang，可选择安装ccache包用于加速构建。"
 msgstr ""
-"Install zlib1g-dev, lld, and clang. You can also install the ccache package "
-"to accelerate builds."
+"Install zlib1g-dev, lld, and clang. You can also install the ccache "
+"package to accelerate builds."
 
 #: ../../zh/installation_guide.md:180
 msgid "推荐版本 clang >= 15"
@@ -465,8 +467,8 @@ msgstr "Recommended version: lld >= 15"
 #: ../../zh/installation_guide.md:190
 msgid "Triton-Ascend的构建强依赖zlib1g-dev，如果您使用yum源，请参考如下命令安装："
 msgstr ""
-"Building Triton-Ascend has a strong dependency on zlib1g-dev. If you use the"
-" yum package manager, install it using the following command:"
+"Building Triton-Ascend has a strong dependency on zlib1g-dev. If you use "
+"the yum package manager, install it using the following command:"
 
 #: ../../zh/installation_guide.md:196
 msgid "安装python依赖"
@@ -474,7 +476,7 @@ msgstr "Install Python Dependencies"
 
 #: ../../zh/installation_guide.md:202
 msgid "<a id=\"auto-code-base\"></a>"
-msgstr ""
+msgstr "<a id=\"auto-code-base\"></a>"
 
 #: ../../zh/installation_guide.md:204
 msgid "快速安装"
@@ -482,7 +484,7 @@ msgstr "Quick Installation"
 
 #: ../../zh/installation_guide.md:218
 msgid "<a id=\"hand-code-base\"></a>"
-msgstr ""
+msgstr "<a id=\"hand-code-base\"></a>"
 
 #: ../../zh/installation_guide.md:220
 msgid "手动安装 - 基于LLVM构建"
@@ -490,14 +492,14 @@ msgstr "Manual Installation - Building Based on LLVM"
 
 #: ../../zh/installation_guide.md:222
 msgid ""
-"Triton 使用 LLVM 22 为 GPU 和 CPU 生成代码。同样，昇腾的毕昇编译器也依赖 LLVM 生成 NPU 代码，因此需要编译 LLVM"
-" 源码才能使用。请关注依赖的 LLVM 特定版本。LLVM的构建支持两种构建方式，**以下两种方式二选一即可**，无需重复执行。"
+"Triton 使用 LLVM 22 为 GPU 和 CPU 生成代码。同样，昇腾的毕昇编译器也依赖 LLVM 生成 NPU 代码，因此需要编译 "
+"LLVM 源码才能使用。请关注依赖的 LLVM 特定版本。LLVM的构建支持两种构建方式，**以下两种方式二选一即可**，无需重复执行。"
 msgstr ""
-"Triton uses LLVM 22 to generate code for GPU and CPU. Similarly, Ascend's "
-"Bisheng compiler also relies on LLVM to generate NPU code, so LLVM source "
-"code needs to be compiled. Please pay attention to the specific LLVM version"
-" on which it depends. LLVM supports two build methods. **Choose one of the "
-"following two methods** without repeating."
+"Triton uses LLVM 22 to generate code for GPU and CPU. Similarly, Ascend's"
+" Bisheng compiler also relies on LLVM to generate NPU code, so LLVM "
+"source code needs to be compiled. Please pay attention to the specific "
+"LLVM version on which it depends. LLVM supports two build methods. "
+"**Choose one of the following two methods** without repeating."
 
 #: ../../zh/installation_guide.md:224
 msgid "代码准备: `git checkout` 检出指定版本的LLVM"
@@ -512,9 +514,9 @@ msgid ""
 "步骤1：使用clang安装LLVM，环境上请安装clang、lld，并指定版本（推荐版本clang>=15，lld>=15）， "
 "如未安装，请按下面指令安装clang、lld、ccache："
 msgstr ""
-"Step 1: Install LLVM using clang. Install clang, lld on the environment with"
-" the specified versions (recommended: clang>=15, lld>=15). If not installed,"
-" install clang, lld, and ccache using the following commands:"
+"Step 1: Install LLVM using clang. Install clang, lld on the environment "
+"with the specified versions (recommended: clang>=15, lld>=15). If not "
+"installed, install clang, lld, and ccache using the following commands:"
 
 #: ../../zh/installation_guide.md:243
 msgid "步骤2：设置环境变量 LLVM_INSTALL_PREFIX 为您的目标安装路径："
@@ -543,8 +545,8 @@ msgstr "Build Triton-Ascend"
 msgid "步骤1：请确认已设置 [基于LLVM构建] 章节中，LLVM安装的目标路径 ${LLVM_INSTALL_PREFIX}"
 msgstr ""
 "Step 1: Confirm that the LLVM installation target path "
-"${LLVM_INSTALL_PREFIX} has been set as described in the Building Based on "
-"LLVM section."
+"${LLVM_INSTALL_PREFIX} has been set as described in the Building Based on"
+" LLVM section."
 
 #: ../../zh/installation_guide.md:284
 msgid "步骤2：请确认已安装clang>=15，lld>=15，ccache"
@@ -553,15 +555,15 @@ msgstr "Step 2: Confirm that clang>=15, lld>=15, and ccache are installed."
 #: ../../zh/installation_guide.md:296
 msgid ""
 "注1：推荐GCC版本见前段章节“系统推荐”，如果GCC < 9.4.0，可能报错 “ld.lld: error: unable to find "
-"library -lstdc++fs”，说明链接器无法找到 stdc++fs 库。 该库用于支持 GCC 9 之前版本的文件系统特性。此时需要手动把 "
-"CMake 文件中相关代码片段的注释打开："
+"library -lstdc++fs”，说明链接器无法找到 stdc++fs 库。 该库用于支持 GCC 9 "
+"之前版本的文件系统特性。此时需要手动把 CMake 文件中相关代码片段的注释打开："
 msgstr ""
 "Note 1: See the System Recommendations section for the recommended GCC "
-"version. If GCC < 9.4.0, the error \"ld.lld: error: unable to find library "
-"-lstdc++fs\" may occur, indicating that the linker cannot find the stdc++fs "
-"library. This library supports filesystem features for GCC versions prior to"
-" GCC 9. In this case, manually uncomment the relevant code snippet in the "
-"CMake file:"
+"version. If GCC < 9.4.0, the error \"ld.lld: error: unable to find "
+"library -lstdc++fs\" may occur, indicating that the linker cannot find "
+"the stdc++fs library. This library supports filesystem features for GCC "
+"versions prior to GCC 9. In this case, manually uncomment the relevant "
+"code snippet in the CMake file:"
 
 #: ../../zh/installation_guide.md:299
 msgid "triton-ascend/CMakeLists.txt"
@@ -573,29 +575,28 @@ msgstr "Uncomment the code and rebuild the project to resolve this issue."
 
 #: ../../zh/installation_guide.md:309
 msgid "<a id=\"docker-build\"></a>"
-msgstr ""
+msgstr "<a id=\"docker-build\"></a>"
 
 #: ../../zh/installation_guide.md:311
 msgid "基于Dockerfile安装"
 msgstr "Installation via Dockerfile"
 
 #: ../../zh/installation_guide.md:313
-msgid ""
-"我们提供了Dockerfile帮助您安装Docker环境镜像。构建过程使用`quay.io/ascend/cann`预构建镜像作为基础镜像，跳过CANN安装步骤，显著加快构建速度。"
+msgid "我们提供了Dockerfile帮助您安装Docker环境镜像。构建过程使用`quay.io/ascend/cann`预构建镜像作为基础镜像，跳过CANN安装步骤，显著加快构建速度。"
 msgstr ""
-"We provide a Dockerfile to help you build a Docker environment image. The "
-"build process uses the `quay.io/ascend/cann` pre-built image as the base "
-"image, skipping the CANN installation step and significantly accelerating "
-"the build speed."
+"We provide a Dockerfile to help you build a Docker environment image. The"
+" build process uses the `quay.io/ascend/cann` pre-built image as the base"
+" image, skipping the CANN installation step and significantly "
+"accelerating the build speed."
 
 #: ../../zh/installation_guide.md:315
 msgid ""
 "您需要通过`--build-"
 "arg`指定`CANN_BASE_IMAGE`参数来选择适合您机器的CANN基础镜像。可用的CANN基础镜像标签可在[quay.io/ascend/cann](https://quay.io/repository/ascend/cann?tab=tags)查看。"
 msgstr ""
-"You need to specify the `CANN_BASE_IMAGE` parameter using `--build-arg` to "
-"select the CANN base image suitable for your machine. Available CANN base "
-"image tags can be found at "
+"You need to specify the `CANN_BASE_IMAGE` parameter using `--build-arg` "
+"to select the CANN base image suitable for your machine. Available CANN "
+"base image tags can be found at "
 "[quay.io/ascend/cann](https://quay.io/repository/ascend/cann?tab=tags)."
 
 #: ../../zh/installation_guide.md
@@ -672,8 +673,7 @@ msgstr "`9.0.0-beta.2-a3-ubuntu22.04-py3.11`"
 
 #: ../../zh/installation_guide.md:328
 msgid "您可以通过 npu-smi 命令查看系统上的NPU型号。"
-msgstr ""
-"You can use the npu-smi command to check the NPU model on your system."
+msgstr "You can use the npu-smi command to check the NPU model on your system."
 
 #: ../../zh/installation_guide.md:330
 msgid "不同芯片类型对应的机器可参考："
@@ -744,3 +744,7 @@ msgid "观察到类似的输出即说明环境配置正确。"
 msgstr ""
 "If the output is similar to the following, the environment is correctly "
 "configured:"
+
+#~ msgid "进入容器"
+#~ msgstr "Enter container"
+

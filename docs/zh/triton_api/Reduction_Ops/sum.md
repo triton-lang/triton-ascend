@@ -4,7 +4,7 @@
 
 简介：`triton.language.sum` 计算输入tensor沿指定轴的元素和，返回求和结果。
 
-```python
+```text
 triton.language.sum(input, axis=None, keep_dims=False)
 ```
 

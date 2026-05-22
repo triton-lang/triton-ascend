@@ -5,7 +5,7 @@
 简介：原子性比较和交换操作，将 *pointer 值与 cmp 进行比较，若相等，则将*pointer 更新为 val，否则 *pointer 不变。
 原型：
 
-```python
+```text
 triton.language.atomic_cas(
     pointer,
     cmp,

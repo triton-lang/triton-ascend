@@ -4,7 +4,7 @@
 
 简介：`triton.language.arange`函数用于生成一个从`start`到`end`（不包括`end`）的连续整数序列。
 
-```python
+```text
 triton.language.arange(start, end, _semantic=None)
 ```
 

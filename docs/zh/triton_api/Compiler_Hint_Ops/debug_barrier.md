@@ -4,7 +4,7 @@
 
 `debug_barrier` 插入一条屏障指令，用于在调试时同步块中的所有线程，确保线程间的执行顺序。在同一块中的所有其他线程也到达该点之前，任何线程都不会继续执行该调用。
 
-```python
+```text
 triton.language.debug_barrier(_semantic=None)
 ```
 

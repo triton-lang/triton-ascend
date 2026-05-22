@@ -4,7 +4,7 @@
 
 `device_print` 用于在NPU运行时从设备端打印信息，与`static_print`不同，这是在内核执行时实时输出信息。 **使用`device_print`需要将环境变量`TRITON_DEVICE_PRINT`的值设置为`True`。**
 
-```python
+```text
 triton.language.device_print(prefix, *args, hex=False, _semantic=None)
 ```
 

@@ -4,7 +4,7 @@
 
 简介：该函数用于计算x的逐元素向下取整。
 
-```python
+```text
 triton.language.floor(x, _semantic=None)
 ```
 

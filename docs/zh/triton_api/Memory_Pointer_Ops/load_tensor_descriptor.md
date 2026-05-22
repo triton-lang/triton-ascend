@@ -4,7 +4,7 @@
 
 简介：该函数用于从张量描述符加载数据块
 
-```python
+```text
 triton.language.load_tensor_descriptor(
     desc: tensor_descriptor_base,
     offsets: Sequence[constexpr | tensor],

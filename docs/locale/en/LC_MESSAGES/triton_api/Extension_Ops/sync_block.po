@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Extension_Ops/sync_block.md:1
+msgstr ""#: ../../zh/triton_api/Extension_Ops/sync_block.md:1
 msgid "triton.language.sync_block_set"
-msgstr ""
+msgstr "triton.language.sync_block_set"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md:3
 msgid "1. 函数概述"
@@ -75,11 +61,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md
 msgid "`sender`"
-msgstr ""
+msgstr "`sender`"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md
 msgid "`str`"
-msgstr ""
+msgstr "`str`"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md
 msgid "必需"
@@ -91,7 +77,7 @@ msgstr "Sender core type: \"cube\" or \"vector\""
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md
 msgid "`receiver`"
-msgstr ""
+msgstr "`receiver`"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md
 msgid "接收方核心类型：\"cube\" 或 \"vector\""
@@ -99,11 +85,11 @@ msgstr "Receiver core type: \"cube\" or \"vector\""
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md
 msgid "`event_id`"
-msgstr ""
+msgstr "`event_id`"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md
 msgid "`int`"
-msgstr ""
+msgstr "`int`"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md
 msgid "事件ID，用于区分不同的同步点"
@@ -111,15 +97,15 @@ msgstr "Event ID, used to distinguish different synchronization points"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md
 msgid "`_builder`"
-msgstr ""
+msgstr "`_builder`"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md
 msgid "-"
-msgstr ""
+msgstr "-"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md
 msgid "`None`"
-msgstr ""
+msgstr "`None`"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md
 msgid "保留参数，暂不支持外部调用"
@@ -202,7 +188,7 @@ msgstr "4.2.1 Parameter Description"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md
 msgid "`mode`"
-msgstr ""
+msgstr "`mode`"
 
 #: ../../zh/triton_api/Extension_Ops/sync_block.md
 msgid "同步模式：\"all_cube\"、\"all_vector\" 或 \"all\""

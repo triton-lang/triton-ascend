@@ -12,13 +12,13 @@ msProf工具用于采集和分析运行在昇腾AI处理器上算子的关键性
 
 如下命令行使一个算子上板性能数据采集的示例，可以根据自身的需要灵活组合配置参数。实例中 --output为可选参数，用于指定收集到的性能数据的存放路径；--kernel-name为可选参数，用于指定需要收集的单个kernel的性能数据（若要采集全部算子的可不指定）；$HOME/projects/test_op.py为算子可执行脚本。
 
-```python
+```bash
 msprof op --kernel-name=target_kernel_name --output=$HOME/projects/output python3 $HOME/projects/test_op.py
 ```
 
 以示范测试用例[03-layer-norm.py](../../../third_party/ascend/tutorials/03-layer-norm.py)为例(不指定--output时生成的数据文件保存在当前路径下)：
 
-```python
+```bash
 msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
 ```  
 
@@ -31,7 +31,7 @@ msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
 算子调优工具 msProf 支持仿真环境下的性能数据采集和自动解析。使用msProf工具获取仿真流水图的具体方式请参考[指令流水图](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/optool/atlasopdev_16_0087.html)。
 生成算子仿真流水图的命令与算子上板性能数据采集的命令类似。同样以上述```03-layer-norm.py```为例，```--soc-version```用于指定当前机器的硬件版本，可在终端中输入```npu-smi info```查看：
 
-```python
+```bash
 # Source simulator path
 export LD_LIBRARY_PATH=$HOME/CANN/Install_CANN/Ascend/ascend_toolkit/latest/tools/simulator/{soc-version}/lib:$LD_LIBRARY_PATH
 # Execute operator simulation pipeline graph collection

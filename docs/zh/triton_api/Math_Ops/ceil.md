@@ -4,7 +4,7 @@
 
 简介：计算张量中每个元素的向上取整值
 
-```python
+```text
 triton.language.ceil(x, _semantic=None)
 ```
 

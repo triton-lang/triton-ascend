@@ -5,7 +5,7 @@
 简介：原子性交换操作，在指定的内存位置执行原子交换操作
 原型：
 
-```python
+```text
 triton.language.atomic_xchg(
     pointer,
     val,

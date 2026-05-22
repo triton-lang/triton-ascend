@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Math_Ops/div.md:1
+msgstr ""#: ../../zh/triton_api/Math_Ops/div.md:1
 msgid "div"
-msgstr ""
+msgstr "div"
 
 #: ../../zh/triton_api/Math_Ops/div.md:3
 msgid "1. OP 概述"
@@ -64,11 +50,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "`self`"
-msgstr ""
+msgstr "`self`"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "`tensor or Number`"
-msgstr ""
+msgstr "`tensor or Number`"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "第一个入参 ，被除数"
@@ -76,7 +62,7 @@ msgstr "First input parameter, dividend"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "`other`"
-msgstr ""
+msgstr "`other`"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "第二个入参 ，除数"
@@ -102,7 +88,7 @@ msgstr "Result Type"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "`int / int`"
-msgstr ""
+msgstr "`int / int`"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "两个都转成 `float32`"
@@ -110,11 +96,11 @@ msgstr "Both are converted to `float32`"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "`float32`"
-msgstr ""
+msgstr "`float32`"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "`int / float`"
-msgstr ""
+msgstr "`int / float`"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "int 转 float"
@@ -126,7 +112,7 @@ msgstr "float type"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "`float / float`"
-msgstr ""
+msgstr "`float / float`"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "统一到更高精度 float"
@@ -138,7 +124,7 @@ msgstr "High-precision float"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "`float / int`"
-msgstr ""
+msgstr "`float / int`"
 
 #: ../../zh/triton_api/Math_Ops/div.md:29
 msgid "2.2 支持规格"
@@ -150,67 +136,67 @@ msgstr "2.2.1 DataType Support"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "bool/int1"
-msgstr ""
+msgstr "bool/int1"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "GPU"
-msgstr ""
+msgstr "GPU"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "√"
-msgstr ""
+msgstr "√"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Math_Ops/div.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Math_Ops/div.md:38
 msgid "2.2.2 Shape 支持"

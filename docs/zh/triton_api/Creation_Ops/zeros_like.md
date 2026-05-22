@@ -4,7 +4,7 @@
 
 简介：`triton.language.zeros_like`返回与给定张量具有相同形状和类型的零的张量。
 
-```python
+```text
 triton.language.zeros_like(input)
 ```
 

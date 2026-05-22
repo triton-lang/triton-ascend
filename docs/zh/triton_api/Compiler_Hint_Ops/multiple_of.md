@@ -4,7 +4,7 @@
 
 `multiple_of` 用于向编译器声明输入张量中的第一个值是某个数的倍数。
 
-```python
+```text
 triton.language.multiple_of(input, values, _semantic=None)
 ```
 

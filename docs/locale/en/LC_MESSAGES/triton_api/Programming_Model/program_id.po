@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Programming_Model/program_id.md:1
+msgstr ""#: ../../zh/triton_api/Programming_Model/program_id.md:1
 msgid "triton.language.program_id"
-msgstr ""
+msgstr "triton.language.program_id"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md:3
 msgid "1. OP 概述"
@@ -56,11 +42,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "`axis`"
-msgstr ""
+msgstr "`axis`"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "`int`"
-msgstr ""
+msgstr "`int`"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "3D 启动网格的轴。必须是 0、1 或 2"
@@ -80,71 +66,71 @@ msgstr "2.2.1 DataType Support"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "fp64"
-msgstr ""
+msgstr "fp64"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "GPU"
-msgstr ""
+msgstr "GPU"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "√"
-msgstr ""
+msgstr "√"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Programming_Model/program_id.md:32
 msgid "2.2.2 Shape 支持"

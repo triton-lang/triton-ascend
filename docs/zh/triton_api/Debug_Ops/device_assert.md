@@ -6,7 +6,7 @@
 
 `device_assert` 用于在GPU运行时从设备端进行断言检查，如果条件不满足则输出错误信息。
 
-```python
+```text
 triton.language.device_assert(cond, msg='', _semantic=None)
 ```
 

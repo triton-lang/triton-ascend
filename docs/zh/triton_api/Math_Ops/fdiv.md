@@ -4,7 +4,7 @@
 
 简介：计算x和y的逐元素快速除法。
 
-```python
+```text
 triton.language.fdiv(x, y, ieee_rounding=False, _semantic=None)
 ```
 

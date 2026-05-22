@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Shape_Manipulation_Ops/view.md:1
+msgstr ""#: ../../zh/triton_api/Shape_Manipulation_Ops/view.md:1
 msgid "triton.language.view"
-msgstr ""
+msgstr "triton.language.view"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md:3
 msgid "1 功能作用说明"
@@ -89,11 +75,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "input"
-msgstr ""
+msgstr "input"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "tensor"
-msgstr ""
+msgstr "tensor"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "是"
@@ -105,11 +91,11 @@ msgstr "Input tensor"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "shape"
-msgstr ""
+msgstr "shape"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "List[int]"
-msgstr ""
+msgstr "List[int]"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "目标形状"
@@ -158,75 +144,75 @@ msgstr "Support Status"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "float16"
-msgstr ""
+msgstr "float16"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "float32"
-msgstr ""
+msgstr "float32"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "bfloat16"
-msgstr ""
+msgstr "bfloat16"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "float8e4"
-msgstr ""
+msgstr "float8e4"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "float8e5"
-msgstr ""
+msgstr "float8e5"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "float64"
-msgstr ""
+msgstr "float64"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "✓"
-msgstr ""
+msgstr "✓"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Shape_Manipulation_Ops/view.md
 msgid "GPU支持"

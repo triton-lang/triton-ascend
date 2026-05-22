@@ -5,7 +5,7 @@
 简介：从输入张量中按照操作指定的偏移量、大小和步幅参数提取一个张量。
 原型：
 
-```python
+```text
 triton.language.extract_slice(
     ful,
     offsets,

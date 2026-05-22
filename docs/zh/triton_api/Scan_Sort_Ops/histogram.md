@@ -5,7 +5,7 @@
 简介：基于 input 计算 1 个具有 num_bins 个 bin 的直方图，每个 bin 宽度为 1，起始于 0。
 原型：
 
-```python
+```text
 triton.language.histogram(
  input, 
  num_bins, 

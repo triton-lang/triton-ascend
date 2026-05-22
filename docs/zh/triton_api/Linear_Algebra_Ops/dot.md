@@ -5,7 +5,7 @@
 简介：对两个tensor进行矩阵乘操作。tensor需要是二维或三维并且维度需一致。对于三维块，tl.dot执行批量矩阵乘法，其中每个块的第一维代表批量维度。
 原型：
 
-```python
+```text
 triton.language.dot(input, other, acc=None, input_precision=None, allow_tf32=None, max_num_imprecise_acc=None, out_dtype=triton.language.float32, _semantic=None)
 ```
 

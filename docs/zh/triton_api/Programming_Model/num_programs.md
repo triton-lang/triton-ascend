@@ -5,7 +5,7 @@
 简介：返回沿给定 axis 启动的程序实例数量
 函数原型：
 
-```python
+```text
 triton.language.num_programs(axis)
 ```
 

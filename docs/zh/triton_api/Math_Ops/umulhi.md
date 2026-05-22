@@ -4,7 +4,7 @@
 
 简介：计算x和y的2N位乘积中每个元素的最显著N位。
 
-```python
+```text
 triton.language.umulhi(x, y, _semantic=None)
 ```
 

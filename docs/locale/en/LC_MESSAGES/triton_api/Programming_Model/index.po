@@ -6,27 +6,13 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Programming_Model/index.md:1
+msgstr ""#: ../../zh/triton_api/Programming_Model/index.md:1
 msgid "编程模型"
 msgstr "Programming Model"
 
 #: ../../zh/triton_api/Programming_Model/index.md
 msgid "api"
-msgstr "API"
+msgstr "api"
 
 #: ../../zh/triton_api/Programming_Model/index.md
 msgid "简要说明"
@@ -34,7 +20,7 @@ msgstr "Brief Description"
 
 #: ../../zh/triton_api/Programming_Model/index.md
 msgid "tensor"
-msgstr ""
+msgstr "tensor"
 
 #: ../../zh/triton_api/Programming_Model/index.md
 msgid "表示一个值或指针的 N 维数组"
@@ -42,7 +28,7 @@ msgstr "Represents an N-dimensional array of values or pointers"
 
 #: ../../zh/triton_api/Programming_Model/index.md
 msgid "[program_id](./program_id.md)"
-msgstr ""
+msgstr "[program_id](./program_id.md)"
 
 #: ../../zh/triton_api/Programming_Model/index.md
 msgid "沿指定轴返回当前程序实例的 id"
@@ -51,7 +37,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Programming_Model/index.md
 msgid "[num_programs](./num_programs.md)"
-msgstr ""
+msgstr "[num_programs](./num_programs.md)"
 
 #: ../../zh/triton_api/Programming_Model/index.md
 msgid "沿指定轴返回当前程序实例的数量"

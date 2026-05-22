@@ -5,7 +5,7 @@
 简介：加法  ，与四则运算 ‘+’等价
 原型：
 
-```python
+```text
 triton.language.add(x, y, sanitize_overflow: constexpr = True, _builder=None)
 ```
 

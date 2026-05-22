@@ -4,7 +4,7 @@
 
 简介：`triton.language.reduce` 沿指定轴 `axis` 对输入 tensor 应用 `combine_fn` 进行规约，返回规约后的结果张量。
 
-```python
+```text
 triton.language.reduce(input, axis, combine_fn, keep_dims=False, _semantic=None, _generator=None)
 ```
 

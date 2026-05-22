@@ -4,7 +4,7 @@
 
 简介：计算x的逐元素倒数平方根。
 
-```python
+```text
 triton.language.rsqrt(x, _semantic=None)
 ```
 

@@ -4,7 +4,7 @@
 
 简介：计算x和y的逐元素最小值。
 
-```python
+```text
 triton.language.minimum(x, y, propagate_nan: ~triton.language.core.constexpr = <PROPAGATE_NAN.NONE: 0>, _semantic=None)¶
 ```
 

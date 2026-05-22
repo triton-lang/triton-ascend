@@ -5,7 +5,7 @@
 简介：给定 1 个 seed 标量和 1 个 offset 块，返回 1 个 int32 类型的随机块。
 原型：
 
-```python
+```text
 triton.language.randint(
  seed, 
  offset, 

@@ -4,7 +4,7 @@
 
 简介：`triton.language.cat`函数用于将指定的tensor进行拼接。
 
-```python
+```text
 triton.language.cat(input, other, can_reorder=False, _semantic=None)
 ```
 

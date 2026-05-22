@@ -4,7 +4,7 @@
 
 简介：`triton.language.xor_sum` 计算输入tensor沿指定轴的异或和，返回异或操作结果。
 
-```python
+```text
 triton.language.xor_sum(input, axis=None, keep_dims=False)
 ```
 

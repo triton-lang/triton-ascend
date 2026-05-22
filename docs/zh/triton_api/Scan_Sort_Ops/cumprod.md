@@ -4,7 +4,7 @@
 
 简介：`triton.language.cumprod` 计算输入tensor沿指定轴的累积乘积，返回累积乘积结果。
 
-```python
+```text
 triton.language.cumprod(input, axis=0, reverse=False)
 ```
 

@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:1
+msgstr ""#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:1
 msgid "triton.language.store"
-msgstr ""
+msgstr "triton.language.store"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:3
 msgid "1. OP 概述"
@@ -60,7 +46,7 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "`pointer`"
-msgstr ""
+msgstr "`pointer`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid ""
@@ -76,7 +62,7 @@ msgstr "Pointer to address for storage in Global Memory"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "`value`"
-msgstr ""
+msgstr "`value`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "`tensor` 或 `scalar`"
@@ -88,7 +74,7 @@ msgstr "Value to store, supports implicit broadcasting and type conversion"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "`mask`"
-msgstr ""
+msgstr "`mask`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "`int1`或`tensor<int1>`"
@@ -107,11 +93,11 @@ msgstr ""
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "`boundary_check`"
-msgstr ""
+msgstr "`boundary_check`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "`tuple(int)`"
-msgstr ""
+msgstr "`tuple(int)`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "可选参数，当且仅当`pointer`来源于`tl.make_block_ptr`时可传入<br>整数元组，指示需要做边界检查的维度"
@@ -121,7 +107,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "`cache_modifier`"
-msgstr ""
+msgstr "`cache_modifier`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "`\"\"` 或 `\"ca\"`或`\"cg\"`"
@@ -135,11 +121,11 @@ msgstr ""
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "`eviction_policy`"
-msgstr ""
+msgstr "`eviction_policy`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "`str`"
-msgstr ""
+msgstr "`str`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "控制NVIDIA PTX的eviction策略， 对Ascend硬件无效"
@@ -149,11 +135,11 @@ msgstr ""
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "`_semantic`"
-msgstr ""
+msgstr "`_semantic`"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "-"
-msgstr ""
+msgstr "-"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "保留参数，暂不支持外部调用"
@@ -173,71 +159,71 @@ msgstr "2.2.1 DataType Support"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "fp64"
-msgstr ""
+msgstr "fp64"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "GPU"
-msgstr ""
+msgstr "GPU"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "√"
-msgstr ""
+msgstr "√"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:46
 msgid ""
@@ -261,7 +247,7 @@ msgstr "Supports scalar and 1~5D tensors"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
 msgid "Ascend"
-msgstr ""
+msgstr "Ascend"
 
 #: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:56
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"

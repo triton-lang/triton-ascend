@@ -39,7 +39,7 @@ triton_kernel[ncore, 1, 1](input, output, xblock, xblock_sub, force_simt_only=Tr
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.abs(x, _builder=None)
 ```
 
@@ -55,7 +55,7 @@ triton.language.extra.cann.libdevice.abs(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.acos(x, _builder=None)
 ```
 
@@ -71,7 +71,7 @@ triton.language.extra.cann.libdevice.acos(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.acosh(x, _builder=None)
 ```
 
@@ -87,7 +87,7 @@ triton.language.extra.cann.libdevice.acosh(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.add_rd(x, y, _builder=None)
 ```
 
@@ -103,7 +103,7 @@ triton.language.extra.cann.libdevice.add_rd(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.add_rn(x, y, _builder=None)
 ```
 
@@ -119,7 +119,7 @@ triton.language.extra.cann.libdevice.add_rn(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.add_ru(x, y, _builder=None)
 ```
 
@@ -135,7 +135,7 @@ triton.language.extra.cann.libdevice.add_ru(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.add_rz(x, y, _builder=None)
 ```
 
@@ -151,7 +151,7 @@ triton.language.extra.cann.libdevice.add_rz(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.asin(x, _builder=None)
 ```
 
@@ -167,7 +167,7 @@ triton.language.extra.cann.libdevice.asin(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.asinh(x, _builder=None)
 ```
 
@@ -183,7 +183,7 @@ triton.language.extra.cann.libdevice.asinh(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.atan(x, _builder=None)
 ```
 
@@ -199,7 +199,7 @@ triton.language.extra.cann.libdevice.atan(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.atan2(x, y, _builder=None)
 ```
 
@@ -215,7 +215,7 @@ triton.language.extra.cann.libdevice.atan2(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.atanh(x, _builder=None)
 ```
 
@@ -231,7 +231,7 @@ triton.language.extra.cann.libdevice.atanh(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.brev(x, _builder=None)
 ```
 
@@ -245,7 +245,7 @@ triton.language.extra.cann.libdevice.brev(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.byte_perm(x, y, s, _builder=None)
 ```
 
@@ -277,7 +277,7 @@ selector[2] = s<10:8>   selector[3] = s<14:12>
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.ceil(x, _builder=None)
 ```
 
@@ -293,7 +293,7 @@ triton.language.extra.cann.libdevice.ceil(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.clz(x, _builder=None)
 ```
 
@@ -309,7 +309,7 @@ triton.language.extra.cann.libdevice.clz(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.copysign(x, y, _builder=None)
 ```
 
@@ -325,7 +325,7 @@ triton.language.extra.cann.libdevice.copysign(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.cos(x, _builder=None)
 ```
 
@@ -341,7 +341,7 @@ triton.language.extra.cann.libdevice.cos(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.cosh(x, _builder=None)
 ```
 
@@ -357,7 +357,7 @@ triton.language.extra.cann.libdevice.cosh(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.cyl_bessel_i0(x, _builder=None)
 ```
 
@@ -373,7 +373,7 @@ triton.language.extra.cann.libdevice.cyl_bessel_i0(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.div_rd(x, y, _builder=None)
 ```
 
@@ -389,7 +389,7 @@ triton.language.extra.cann.libdevice.div_rd(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.div_rn(x, y, _builder=None)
 ```
 
@@ -405,7 +405,7 @@ triton.language.extra.cann.libdevice.div_rn(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.div_ru(x, y, _builder=None)
 ```
 
@@ -421,7 +421,7 @@ triton.language.extra.cann.libdevice.div_ru(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.div_rz(x, y, _builder=None)
 ```
 
@@ -437,7 +437,7 @@ triton.language.extra.cann.libdevice.div_rz(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.erfinv(x, _builder=None)
 ```
 
@@ -453,7 +453,7 @@ triton.language.extra.cann.libdevice.erfinv(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.exp10(x, _builder=None)
 ```
 
@@ -469,7 +469,7 @@ triton.language.extra.cann.libdevice.exp10(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.exp2(x, _builder=None)
 ```
 
@@ -485,7 +485,7 @@ triton.language.extra.cann.libdevice.exp2(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.exp(x, _builder=None)
 ```
 
@@ -501,7 +501,7 @@ triton.language.extra.cann.libdevice.exp(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.expm1(x, _builder=None)
 ```
 
@@ -517,7 +517,7 @@ triton.language.extra.cann.libdevice.expm1(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.fast_dividef(x, y, _builder=None)
 ```
 
@@ -533,7 +533,7 @@ triton.language.extra.cann.libdevice.fast_dividef(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.fast_expf(x, _builder=None)
 ```
 
@@ -549,7 +549,7 @@ triton.language.extra.cann.libdevice.fast_expf(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.fdim(x, y, _builder=None)
 ```
 
@@ -565,7 +565,7 @@ triton.language.extra.cann.libdevice.fdim(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.ffs(x, _builder=None)
 ```
 
@@ -581,7 +581,7 @@ triton.language.extra.cann.libdevice.ffs(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.float_as_int(x, _builder=None)
 ```
 
@@ -597,7 +597,7 @@ triton.language.extra.cann.libdevice.float_as_int(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.floor(x, _builder=None)
 ```
 
@@ -613,7 +613,7 @@ triton.language.extra.cann.libdevice.floor(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.fma(x, y, z, _builder=None)
 ```
 
@@ -629,7 +629,7 @@ triton.language.extra.cann.libdevice.fma(x, y, z, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.fma_rd(x, y, z, _builder=None)
 ```
 
@@ -645,7 +645,7 @@ triton.language.extra.cann.libdevice.fma_rd(x, y, z, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.fma_rn(x, y, z, _builder=None)
 ```
 
@@ -661,7 +661,7 @@ triton.language.extra.cann.libdevice.fma_rn(x, y, z, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.fma_ru(x, y, z, _builder=None)
 ```
 
@@ -677,7 +677,7 @@ triton.language.extra.cann.libdevice.fma_ru(x, y, z, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.fma_rz(x, y, z, _builder=None)
 ```
 
@@ -693,7 +693,7 @@ triton.language.extra.cann.libdevice.fma_rz(x, y, z, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.fmod(x, y, _builder=None)
 ```
 
@@ -709,7 +709,7 @@ triton.language.extra.cann.libdevice.fmod(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.hadd(x, y, _builder=None)
 ```
 
@@ -725,7 +725,7 @@ triton.language.extra.cann.libdevice.hadd(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.hypot(x, y, _builder=None)
 ```
 
@@ -741,7 +741,7 @@ triton.language.extra.cann.libdevice.hypot(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.lgamma(x, _builder=None)
 ```
 
@@ -757,7 +757,7 @@ triton.language.extra.cann.libdevice.lgamma(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.log10(x, _builder=None)
 ```
 
@@ -773,7 +773,7 @@ triton.language.extra.cann.libdevice.log10(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.log2(x, _builder=None)
 ```
 
@@ -789,7 +789,7 @@ triton.language.extra.cann.libdevice.log2(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.log(x, _builder=None)
 ```
 
@@ -805,7 +805,7 @@ triton.language.extra.cann.libdevice.log(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.mul24(x, y, _builder=None)
 ```
 
@@ -821,7 +821,7 @@ triton.language.extra.cann.libdevice.mul24(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.mul_rd(x, y, _builder=None)
 ```
 
@@ -837,7 +837,7 @@ triton.language.extra.cann.libdevice.mul_rd(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.mul_rn(x, y, _builder=None)
 ```
 
@@ -853,7 +853,7 @@ triton.language.extra.cann.libdevice.mul_rn(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.mul_ru(x, y, _builder=None)
 ```
 
@@ -869,7 +869,7 @@ triton.language.extra.cann.libdevice.mul_ru(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.mul_rz(x, y, _builder=None)
 ```
 
@@ -885,7 +885,7 @@ triton.language.extra.cann.libdevice.mul_rz(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.mulhi(x, y, _builder=None)
 ```
 
@@ -901,7 +901,7 @@ triton.language.extra.cann.libdevice.mulhi(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.nearbyint(x, _builder=None)
 ```
 
@@ -917,7 +917,7 @@ triton.language.extra.cann.libdevice.nearbyint(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.nextafter(x, y, _builder=None)
 ```
 
@@ -933,7 +933,7 @@ triton.language.extra.cann.libdevice.nextafter(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.popc(x, _builder=None)
 ```
 
@@ -949,7 +949,7 @@ triton.language.extra.cann.libdevice.popc(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.pow(x, y, _builder=None)
 ```
 
@@ -965,7 +965,7 @@ triton.language.extra.cann.libdevice.pow(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.rcp_rd(x, _builder=None)
 ```
 
@@ -981,7 +981,7 @@ triton.language.extra.cann.libdevice.rcp_rd(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.rcp_rn(x, _builder=None)
 ```
 
@@ -997,7 +997,7 @@ triton.language.extra.cann.libdevice.rcp_rn(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.rcp_ru(x, _builder=None)
 ```
 
@@ -1013,7 +1013,7 @@ triton.language.extra.cann.libdevice.rcp_ru(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.rcp_rz(x, _builder=None)
 ```
 
@@ -1029,7 +1029,7 @@ triton.language.extra.cann.libdevice.rcp_rz(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.remainder(x, y, _builder=None)
 ```
 
@@ -1045,7 +1045,7 @@ triton.language.extra.cann.libdevice.remainder(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.rhadd(x, y, _builder=None)
 ```
 
@@ -1061,7 +1061,7 @@ triton.language.extra.cann.libdevice.rhadd(x, y, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.rint(x, _builder=None)
 ```
 
@@ -1077,7 +1077,7 @@ triton.language.extra.cann.libdevice.rint(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.round(x, _builder=None)
 ```
 
@@ -1093,7 +1093,7 @@ triton.language.extra.cann.libdevice.round(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.rsqrt(x, _builder=None)
 ```
 
@@ -1109,7 +1109,7 @@ triton.language.extra.cann.libdevice.rsqrt(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.rsqrt_rn(x, _builder=None)
 ```
 
@@ -1125,7 +1125,7 @@ triton.language.extra.cann.libdevice.rsqrt_rn(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.sad(x, y, z, _builder=None)
 ```
 
@@ -1141,7 +1141,7 @@ triton.language.extra.cann.libdevice.sad(x, y, z, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.saturatef(x, _builder=None)
 ```
 
@@ -1157,7 +1157,7 @@ triton.language.extra.cann.libdevice.saturatef(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.signbit(x, _builder=None)
 ```
 
@@ -1173,7 +1173,7 @@ triton.language.extra.cann.libdevice.signbit(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.sin(x, _builder=None)
 ```
 
@@ -1189,7 +1189,7 @@ triton.language.extra.cann.libdevice.sin(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.sinh(x, _builder=None)
 ```
 
@@ -1205,7 +1205,7 @@ triton.language.extra.cann.libdevice.sinh(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.sqrt(x, _builder=None)
 ```
 
@@ -1221,7 +1221,7 @@ triton.language.extra.cann.libdevice.sqrt(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.tan(x, _builder=None)
 ```
 
@@ -1237,7 +1237,7 @@ triton.language.extra.cann.libdevice.tan(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.tanh(x, _builder=None)
 ```
 
@@ -1253,7 +1253,7 @@ triton.language.extra.cann.libdevice.tanh(x, _builder=None)
 
 原型:
 
-```python
+```text
 triton.language.extra.cann.libdevice.trunc(x, _builder=None)
 ```
 

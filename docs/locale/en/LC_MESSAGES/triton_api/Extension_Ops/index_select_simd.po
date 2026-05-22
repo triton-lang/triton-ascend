@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:1
+msgstr ""#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:1
 msgid "triton.language.extra.ascend.libdevice.index_select_simd"
-msgstr ""
+msgstr "triton.language.extra.ascend.libdevice.index_select_simd"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md:3
 msgid "1 功能作用说明"
@@ -48,8 +34,8 @@ msgid ""
 "`triton.language.extra.ascend.libdevice.index_select_simd(src, dim, index, "
 "src_shape, src_offset, read_shape)`"
 msgstr ""
-
-#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:11
+"`triton.language.extra.ascend.libdevice.index_select_simd(src, dim, index, "
+"src_shape, src_offset, read_shape)`"#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:11
 msgid "**功能：**"
 msgstr "**Function:**"
 
@@ -121,11 +107,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "src"
-msgstr ""
+msgstr "src"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "tensor/pointer"
-msgstr ""
+msgstr "tensor/pointer"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "是"
@@ -137,11 +123,11 @@ msgstr "Source tensor pointer, data located in global memory (GM)"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "dim"
-msgstr ""
+msgstr "dim"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "int"
-msgstr ""
+msgstr "int"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "在哪个维度执行 index_select 操作，取值范围 [0, len(src_shape)-2]，**不支持尾轴**（最后一个维度）"
@@ -151,11 +137,11 @@ msgstr ""
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "index"
-msgstr ""
+msgstr "index"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "tensor"
-msgstr ""
+msgstr "tensor"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "1D 索引数组，位于 UB 上，指定要读取的索引位置"
@@ -163,11 +149,11 @@ msgstr "1D index array, located on UB, specifying the index positions to read"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "src_shape"
-msgstr ""
+msgstr "src_shape"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "Tuple[int]"
-msgstr ""
+msgstr "Tuple[int]"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "源张量的完整形状"
@@ -175,7 +161,7 @@ msgstr "The full shape of the source tensor"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "src_offset"
-msgstr ""
+msgstr "src_offset"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "从哪个位置开始读取，在 dim 维度可设为 -1（该维度由 index 决定）"
@@ -185,7 +171,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "read_shape"
-msgstr ""
+msgstr "read_shape"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "读取数据的大小，在 dim 维度必须设为 -1（该维度由 index 长度决定）"
@@ -231,7 +217,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md:48
 msgid "`len(src_shape) == len(src_offset) == len(read_shape)`"
-msgstr ""
+msgstr "`len(src_shape) == len(src_offset) == len(read_shape)`"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md:49
 msgid "`index` 必须是 1D 张量"
@@ -268,75 +254,75 @@ msgstr "Support Status"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "float16"
-msgstr ""
+msgstr "float16"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "float32"
-msgstr ""
+msgstr "float32"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "bfloat16"
-msgstr ""
+msgstr "bfloat16"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "float8e4"
-msgstr ""
+msgstr "float8e4"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "float8e5"
-msgstr ""
+msgstr "float8e5"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "float64"
-msgstr ""
+msgstr "float64"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "✓"
-msgstr ""
+msgstr "✓"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "GPU支持"
@@ -344,7 +330,7 @@ msgstr "GPU Support"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md
 msgid "N/A"
-msgstr ""
+msgstr "N/A"
 
 #: ../../zh/triton_api/Extension_Ops/index_select_simd.md:62
 msgid "**说明：**"

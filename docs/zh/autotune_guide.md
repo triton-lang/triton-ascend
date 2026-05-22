@@ -79,7 +79,7 @@ def kernel(...):
 
 例如下面这种写法，`BLOCK_M` 会参与自动调优：
 
-```python
+```text
 kernel[grid](
     x,
     y,
@@ -91,7 +91,7 @@ kernel[grid](
 
 如果你在 launch 时显式传入：
 
-```python
+```text
 kernel[grid](
     x,
     y,

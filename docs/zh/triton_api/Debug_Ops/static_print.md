@@ -4,7 +4,7 @@
 
 `static_print` 用于在编译时打印信息，类似于Python的`print()`函数，但它在内核编译期间执行而不是运行时执行。
 
-```python
+```text
 triton.language.static_print(*values, sep: str = ' ', end: str = '\n', file=None, flush=False, _semantic=None)
 ```
 

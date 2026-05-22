@@ -6,7 +6,7 @@
 Triton 的 Philox 伪随机数生成器的最高效入口点。
 原型：
 
-```python
+```text
 triton.language.randint4x(
  seed, 
  offset, 

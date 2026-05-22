@@ -5,7 +5,7 @@
 简介：计算张量的向上取整除法
 函数原型：
 
-```python
+```text
 triton.language.cdiv(x, div)
 ```
 

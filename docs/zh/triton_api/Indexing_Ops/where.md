@@ -4,7 +4,7 @@
 
 简介：根据条件进行判断返回的是张量x还是y的值，条件为真时，返回x的值，否则返回y的值。
 
-```python
+```text
 triton.language.where(condition, x, y, _semantic=None)
 ```
 

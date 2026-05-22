@@ -5,7 +5,7 @@
 简介：计算张量中每个元素的绝对值
 函数原型：
 
-```python
+```text
 triton.language.abs(x, _semantic=None)
 ```
 

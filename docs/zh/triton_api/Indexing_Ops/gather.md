@@ -6,7 +6,7 @@
 ![image](./gather.png)
 原型：
 
-```python
+```text
 triton.language.gather(
  src: tensor,
  index: tensor,

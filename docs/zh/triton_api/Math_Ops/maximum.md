@@ -5,7 +5,7 @@
 简介：计算x和y的逐元素最大值。
 函数原型（Triton3.4.0版本）：
 
-```python
+```text
 triton.language.maximum(x, y, propagate_nan: ~triton.language.core.constexpr = <PROPAGATE_NAN.NONE: 0>, _semantic=None)¶
 ```
 

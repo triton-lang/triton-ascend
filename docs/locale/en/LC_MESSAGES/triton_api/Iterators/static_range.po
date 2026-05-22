@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend \n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language: en\n"
-"Language-Team: en <LL@li.org>\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Iterators/static_range.md:1
+msgstr ""#: ../../zh/triton_api/Iterators/static_range.md:1
 msgid "triton.language.static_range"
-msgstr ""
+msgstr "triton.language.static_range"
 
 #: ../../zh/triton_api/Iterators/static_range.md:3
 msgid "1. 函数概述"
@@ -58,11 +44,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "`arg1`"
-msgstr ""
+msgstr "`arg1`"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "`constexpr`"
-msgstr ""
+msgstr "`constexpr`"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "必需"
@@ -74,11 +60,11 @@ msgstr "Start value (when single parameter, used as the end value, starting from
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "`arg2`"
-msgstr ""
+msgstr "`arg2`"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "-"
-msgstr ""
+msgstr "-"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "结束值（不包含在范围内）"
@@ -86,11 +72,11 @@ msgstr "End value (exclusive)"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "`step`"
-msgstr ""
+msgstr "`step`"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "`1`"
-msgstr ""
+msgstr "`1`"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "每次迭代的步长增量"
@@ -98,7 +84,7 @@ msgstr "Step increment per iteration"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "`_semantic`"
-msgstr ""
+msgstr "`_semantic`"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "保留参数，暂不支持外部调用"
@@ -110,75 +96,75 @@ msgstr "2.2 Type Support"
 
 #: ../../zh/triton_api/Iterators/static_range.md:24
 msgid "A3："
-msgstr "A3:"
+msgstr "A3："
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "fp64"
-msgstr ""
+msgstr "fp64"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "GPU"
-msgstr ""
+msgstr "GPU"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "✓"
-msgstr ""
+msgstr "✓"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Iterators/static_range.md
 msgid "Ascend 910系列"
-msgstr ""
+msgstr "Ascend 910 Series"
 
 #: ../../zh/triton_api/Iterators/static_range.md:31
 msgid "2.3 特殊限制说明"

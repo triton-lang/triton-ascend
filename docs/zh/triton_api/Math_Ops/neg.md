@@ -4,7 +4,7 @@
 
 简介：将tensor的值取负。
 
-```python
+```text
 triton.language.neg(x)
 ```
 

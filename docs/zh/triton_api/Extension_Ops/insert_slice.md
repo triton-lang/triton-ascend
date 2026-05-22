@@ -5,7 +5,7 @@
 简介：将一个张量（子张量）插入到另一个张量的指定位置，即将一个张量按照操作指定的偏移量、大小和步幅参数插入到另一个张量中。
 原型：
 
-```python
+```text
 triton.language.insert_slice(
     ful,
     sub,

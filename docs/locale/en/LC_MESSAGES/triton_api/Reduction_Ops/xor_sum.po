@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Reduction_Ops/xor_sum.md:1
+msgstr ""#: ../../zh/triton_api/Reduction_Ops/xor_sum.md:1
 msgid "triton.language.xor_sum"
-msgstr ""
+msgstr "triton.language.xor_sum"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md:3
 msgid "1. OP 概述"
@@ -56,11 +42,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "`input`"
-msgstr ""
+msgstr "`input`"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "`Tensor`"
-msgstr ""
+msgstr "`Tensor`"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "输入tensor"
@@ -68,7 +54,7 @@ msgstr "Input tensor"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "`axis`"
-msgstr ""
+msgstr "`axis`"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "`int` 或 `None`"
@@ -80,11 +66,11 @@ msgstr "Which dim for XOR sum. None = XOR all dims"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "`keep_dims`"
-msgstr ""
+msgstr "`keep_dims`"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "`bool`"
-msgstr ""
+msgstr "`bool`"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "如果为True，保持被操作的维度为长度1"
@@ -106,63 +92,63 @@ msgstr "2.2.1 DataType Support"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "bool/int1"
-msgstr ""
+msgstr "bool/int1"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "✓"
-msgstr ""
+msgstr "✓"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Reduction_Ops/xor_sum.md
 msgid "GPU支持"

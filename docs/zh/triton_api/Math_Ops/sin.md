@@ -4,7 +4,7 @@
 
 简介：计算x的逐元素正弦值。
 
-```python
+```text
 triton.language.sin(x, _semantic=None)
 ```
 

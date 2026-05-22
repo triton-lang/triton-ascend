@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Creation_Ops/arange.md:1
+msgstr ""#: ../../zh/triton_api/Creation_Ops/arange.md:1
 msgid "triton.language.arange"
-msgstr ""
+msgstr "triton.language.arange"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md:3
 msgid "1. OP 概述"
@@ -56,11 +42,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "`start`"
-msgstr ""
+msgstr "`start`"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "`scalar`"
-msgstr ""
+msgstr "`scalar`"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "创建连续整数序列的起始数值，必须是编译时常量（tl.constexpr）"
@@ -70,7 +56,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "`end`"
-msgstr ""
+msgstr "`end`"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "创建连续整数序列的结束数值"
@@ -98,67 +84,67 @@ msgstr ""
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "bool/int1"
-msgstr ""
+msgstr "bool/int1"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "GPU"
-msgstr ""
+msgstr "GPU"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "√"
-msgstr ""
+msgstr "√"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md
 msgid "Ascend  A2/A3"
-msgstr ""
+msgstr "Ascend  A2/A3"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md:34
 msgid "2.2.2 Shape 支持"
@@ -166,7 +152,7 @@ msgstr "2.2.2 Shape Support"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md:36
 msgid "0 =< (end - start) <1048576 end >= 0,  start  >= 0"
-msgstr ""
+msgstr "0 =< (end - start) <1048576 end >= 0,  start  >= 0"
 
 #: ../../zh/triton_api/Creation_Ops/arange.md:39
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"

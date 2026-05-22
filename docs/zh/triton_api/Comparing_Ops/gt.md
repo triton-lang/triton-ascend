@@ -4,7 +4,7 @@
 
 简介：用于比较两个张量的元素，与`>`等价。
 
-```python
+```text
 triton.language.semantic.greater_than(
  input: tl.tensor, 
  other: tl.tensor, 

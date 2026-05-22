@@ -4,7 +4,7 @@
 
 `static_range` 是一个静态范围的迭代器，与 `range` 类似但会在编译时进行积极的循环展开优化。
 
-```python
+```text
 triton.language.static_range(arg1, arg2=None, step=None, _semantic=None)
 ```
 

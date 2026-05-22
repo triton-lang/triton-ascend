@@ -6,27 +6,13 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Random_Number_Generation/index.md:1
+msgstr ""#: ../../zh/triton_api/Random_Number_Generation/index.md:1
 msgid "随机数生成"
 msgstr "Random Number Generation"
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
 msgid "api"
-msgstr "API"
+msgstr "api"
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
 msgid "简要说明"
@@ -34,7 +20,7 @@ msgstr "Brief Description"
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
 msgid "[randint4x](./randint4x.md)"
-msgstr ""
+msgstr "[randint4x](./randint4x.md)"
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
 msgid "给定 1 个seed 标量和 1 个offset 块，返回 4 个 int32 类型的随机块"
@@ -44,7 +30,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
 msgid "[randint](./randint.md)"
-msgstr ""
+msgstr "[randint](./randint.md)"
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
 msgid "给定 1 个 seed 标量和 1 个 offset 块，返回 1 个 int32 类型的随机块"
@@ -53,7 +39,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
 msgid "[rand](./rand.md)"
-msgstr ""
+msgstr "[rand](./rand.md)"
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
 msgid "给定 1 个 seed 标量和 1 个 offset 块，返回 1 个在 U(0,1) 中的 float32 类型的随机块"
@@ -63,7 +49,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
 msgid "[randn](./randn.md)"
-msgstr ""
+msgstr "[randn](./randn.md)"
 
 #: ../../zh/triton_api/Random_Number_Generation/index.md
 msgid "给定 1 个 seed 标量和 1 个 offset 块，返回 1 个在 N(0,1) 中的 float32 类型的随机块"

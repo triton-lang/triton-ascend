@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Reduction_Ops/min.md:1
+msgstr ""#: ../../zh/triton_api/Reduction_Ops/min.md:1
 msgid "triton.language.min"
-msgstr ""
+msgstr "triton.language.min"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md:3
 msgid "1. OP 概述"
@@ -54,11 +40,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "`input`"
-msgstr ""
+msgstr "`input`"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "`tensor`"
-msgstr ""
+msgstr "`tensor`"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "输入的张量数据"
@@ -66,11 +52,11 @@ msgstr "Input tensor data"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "`axis`"
-msgstr ""
+msgstr "`axis`"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "`int`"
-msgstr ""
+msgstr "`int`"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "指定在哪个维度上进行规约"
@@ -78,11 +64,11 @@ msgstr "Which dim to reduce along"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "`keep_dims`"
-msgstr ""
+msgstr "`keep_dims`"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "`bool`"
-msgstr ""
+msgstr "`bool`"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "如果为True，保留被规约的维度(大小为1)"
@@ -90,7 +76,7 @@ msgstr "If True, keep reduced dim (size 1)"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "`return_indices`"
-msgstr ""
+msgstr "`return_indices`"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "True返回最小值的同时返回最小值相关所在下标"
@@ -98,7 +84,7 @@ msgstr "True: returns min and its index"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "`return_indices_tie_break_left`"
-msgstr ""
+msgstr "`return_indices_tie_break_left`"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "True如果多个元素有相同的最小值，返回最左侧最小值的下标。"
@@ -114,19 +100,19 @@ msgstr "Supported parameter combinations:"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "axis"
-msgstr ""
+msgstr "axis"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "keep_dims"
-msgstr ""
+msgstr "keep_dims"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "return_indices"
-msgstr ""
+msgstr "return_indices"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "return_indices_tie_break_left"
-msgstr ""
+msgstr "return_indices_tie_break_left"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "规格"
@@ -134,11 +120,11 @@ msgstr "Specifications"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "1"
-msgstr ""
+msgstr "1"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "TRUE"
-msgstr ""
+msgstr "TRUE"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "支持"
@@ -146,11 +132,11 @@ msgstr "Supported"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "FALSE"
-msgstr ""
+msgstr "FALSE"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "None"
-msgstr ""
+msgstr "None"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "不支持"
@@ -166,67 +152,67 @@ msgstr "2.2.1 DataType Support"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "bool/int1"
-msgstr ""
+msgstr "bool/int1"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "GPU"
-msgstr ""
+msgstr "GPU"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "√"
-msgstr ""
+msgstr "√"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Reduction_Ops/min.md:56
 msgid "2.2.2 Shape 支持"

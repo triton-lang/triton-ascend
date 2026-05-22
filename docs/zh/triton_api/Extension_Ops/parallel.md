@@ -4,7 +4,7 @@
 
 `parallel` 是一个专门用于多核心并行执行的迭代器，继承自 `range` 类，提供显式的多核心并行语义。
 
-```python
+```text
 triton.language.parallel(arg1, arg2=None, step=None, num_stages=None, 
                          loop_unroll_factor=None, bind_sub_block: bool = False, 
                          _semantic=None)

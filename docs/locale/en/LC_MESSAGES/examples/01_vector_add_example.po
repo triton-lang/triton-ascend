@@ -6,21 +6,7 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend \n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language: en\n"
-"Language-Team: en <LL@li.org>\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/examples/01_vector_add_example.md:1
+msgstr ""#: ../../zh/examples/01_vector_add_example.md:1
 msgid "向量相加 （Vector Addition）"
 msgstr "Vector Addition"
 
@@ -62,7 +48,7 @@ msgstr ""
 
 #: ../../zh/examples/01_vector_add_example.md:82
 msgid "Out:"
-msgstr "Output:"
+msgstr "Out:"
 
 #: ../../zh/examples/01_vector_add_example.md:90
 msgid ""

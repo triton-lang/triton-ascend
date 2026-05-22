@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Linear_Algebra_Ops/dot.md:1
+msgstr ""#: ../../zh/triton_api/Linear_Algebra_Ops/dot.md:1
 msgid "triton.language.dot"
-msgstr ""
+msgstr "triton.language.dot"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md:3
 msgid "1. OP 概述"
@@ -60,11 +46,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "`input`"
-msgstr ""
+msgstr "`input`"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "`int8 fp16 bf16 fp32`"
-msgstr ""
+msgstr "`int8 fp16 bf16 fp32`"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "第一个输入，2D or 3D 张量， 为了避免溢出 取值范围限制为-5-5"
@@ -74,7 +60,7 @@ msgstr ""
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "`other`"
-msgstr ""
+msgstr "`other`"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "第二个输入,  2D or 3D 张量，为了避免溢出 取值范围限制为-5-5"
@@ -84,11 +70,11 @@ msgstr ""
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "`acc`"
-msgstr ""
+msgstr "`acc`"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "`int32  float32`"
-msgstr ""
+msgstr "`int32  float32`"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 #, python-brace-format
@@ -102,11 +88,11 @@ msgstr ""
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "`input_precision`"
-msgstr ""
+msgstr "`input_precision`"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "-"
-msgstr ""
+msgstr "-"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "Available options for NVIDIA 通过选择精度模式来决定是否启用 Tensor Cores 加速"
@@ -116,11 +102,11 @@ msgstr ""
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "`max_num_imprecise_acc`"
-msgstr ""
+msgstr "`max_num_imprecise_acc`"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "`int`"
-msgstr ""
+msgstr "`int`"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "多少次低精度的累加数（当前昇腾不支持低精度累加）"
@@ -130,11 +116,11 @@ msgstr ""
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "`out_dtype`"
-msgstr ""
+msgstr "`out_dtype`"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "`fp32  int32`"
-msgstr ""
+msgstr "`fp32  int32`"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "输出结果类型"
@@ -158,75 +144,75 @@ msgstr "Input Type"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "fp64"
-msgstr ""
+msgstr "fp64"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "GPU"
-msgstr ""
+msgstr "GPU"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "√"
-msgstr ""
+msgstr "√"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md
 msgid "✓"
-msgstr ""
+msgstr "✓"
 
 #: ../../zh/triton_api/Linear_Algebra_Ops/dot.md:37
 msgid "结论：Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。"

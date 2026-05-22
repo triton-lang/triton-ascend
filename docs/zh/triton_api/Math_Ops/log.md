@@ -4,7 +4,7 @@
 
 简介：该函数用于计算x的逐元素自然对数。
 
-```python
+```text
 triton.language.log(x, _semantic=None)
 ```
 

@@ -5,7 +5,7 @@
 简介：根据给定的索引，从输入张量中读取单个元素。
 原型：
 
-```python
+```text
 triton.language.get_element(
     src,
     indice,

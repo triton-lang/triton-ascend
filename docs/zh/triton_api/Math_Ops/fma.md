@@ -4,7 +4,7 @@
 
 简介：计算x、y和z的逐元素融合乘加操作。
 
-```python
+```text
 triton.language.fma(x, y, z, _semantic=None)
 ```
 

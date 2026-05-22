@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend \n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language: en\n"
-"Language-Team: en <LL@li.org>\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Extension_Ops/multibuffer.md:1
+msgstr ""#: ../../zh/triton_api/Extension_Ops/multibuffer.md:1
 msgid "triton.language.multibuffer"
-msgstr ""
+msgstr "triton.language.multibuffer"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md:3
 msgid "1. OP 概述"
@@ -54,11 +40,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "`src`"
-msgstr ""
+msgstr "`src`"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "`tensor`"
-msgstr ""
+msgstr "`tensor`"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "需要进行多缓冲设置的源张量"
@@ -66,11 +52,11 @@ msgstr "The source tensor to be multi-buffered"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "`size`"
-msgstr ""
+msgstr "`size`"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "`int` 或 `constexpr`"
-msgstr ""
+msgstr "`int` or `constexpr`"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "要创建的缓冲区副本数量"
@@ -78,11 +64,11 @@ msgstr "The number of buffer copies to create"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "`_builder`"
-msgstr ""
+msgstr "`_builder`"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "-"
-msgstr ""
+msgstr "-"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "保留参数，暂不支持外部调用"
@@ -102,59 +88,59 @@ msgstr "2.2.1 DataType Support"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md
 msgid "√"
-msgstr ""
+msgstr "√"
 
 #: ../../zh/triton_api/Extension_Ops/multibuffer.md:37
 msgid "2.2.2 Shape 支持"

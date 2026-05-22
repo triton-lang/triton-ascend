@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Debug_Ops/static_print.md:1
+msgstr ""#: ../../zh/triton_api/Debug_Ops/static_print.md:1
 msgid "triton.language.static_print"
-msgstr ""
+msgstr "triton.language.static_print"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md:3
 msgid "1.函数概述"
@@ -61,11 +47,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "`values`"
-msgstr ""
+msgstr "`values`"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "`tensor`/`scalar`"
-msgstr ""
+msgstr "`tensor`/`scalar`"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "必需"
@@ -77,15 +63,15 @@ msgstr "Values to print, supports multiple arguments"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "`sep`"
-msgstr ""
+msgstr "`sep`"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "`str`"
-msgstr ""
+msgstr "`str`"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "`' '`"
-msgstr ""
+msgstr "`' '`"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "值之间的分隔符"
@@ -93,11 +79,11 @@ msgstr "Separator between values"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "`end`"
-msgstr ""
+msgstr "`end`"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "`'\\n'`"
-msgstr ""
+msgstr "`'\\n'`"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "打印结束时的后缀"
@@ -105,11 +91,11 @@ msgstr "Suffix at the end of printing"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "`file`"
-msgstr ""
+msgstr "`file`"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "-"
-msgstr ""
+msgstr "-"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "写入的文件对象"
@@ -117,15 +103,15 @@ msgstr "File object to write to"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "`flush`"
-msgstr ""
+msgstr "`flush`"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "`bool`"
-msgstr ""
+msgstr "`bool`"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "`False`"
-msgstr ""
+msgstr "`False`"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "是否刷新输出缓冲区"
@@ -133,7 +119,7 @@ msgstr "Whether to flush the output buffer"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "`_semantic`"
-msgstr ""
+msgstr "`_semantic`"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "保留参数，暂不支持外部调用"
@@ -145,75 +131,75 @@ msgstr "2.2.1 Data Type Support"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md:26
 msgid "A3："
-msgstr "A3:"
+msgstr "A3："
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "fp64"
-msgstr ""
+msgstr "fp64"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "GPU"
-msgstr ""
+msgstr "GPU"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "✓"
-msgstr ""
+msgstr "✓"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md:33
 msgid "2.2.2 Shape 支持"
@@ -229,7 +215,7 @@ msgstr "Only supports 1-5 dimensional tensors"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md
 msgid "Ascend"
-msgstr ""
+msgstr "Ascend"
 
 #: ../../zh/triton_api/Debug_Ops/static_print.md:40
 msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"

@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Iterators/range.md:1
+msgstr ""#: ../../zh/triton_api/Iterators/range.md:1
 msgid "triton.language.range"
-msgstr ""
+msgstr "triton.language.range"
 
 #: ../../zh/triton_api/Iterators/range.md:3
 msgid "1. 函数概述"
@@ -60,11 +46,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`arg1`"
-msgstr ""
+msgstr "`arg1`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`int` /`constexpr`"
-msgstr ""
+msgstr "`int` /`constexpr`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "必需"
@@ -78,15 +64,15 @@ msgstr ""
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`arg2`"
-msgstr ""
+msgstr "`arg2`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`int`/`constexpr`"
-msgstr ""
+msgstr "`int`/`constexpr`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "-"
-msgstr ""
+msgstr "-"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "结束值（不包含在范围内）"
@@ -94,11 +80,11 @@ msgstr "End value (exclusive)"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`step`"
-msgstr ""
+msgstr "`step`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`1`"
-msgstr ""
+msgstr "`1`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "一个整数，每次迭代的步长增量"
@@ -106,11 +92,11 @@ msgstr "An integer, the step increment for each iteration"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`num_stages`"
-msgstr ""
+msgstr "`num_stages`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`int`"
-msgstr ""
+msgstr "`int`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "流水线阶段数（同时执行的迭代数量）"
@@ -118,7 +104,7 @@ msgstr "Number of pipeline stages (simultaneously executing iterations)"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`loop_unroll_factor`"
-msgstr ""
+msgstr "`loop_unroll_factor`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "循环展开因子（<2表示不展开）"
@@ -126,15 +112,15 @@ msgstr "Loop unroll factor (<2 means no unrolling)"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`disallow_acc_multi_buffer`"
-msgstr ""
+msgstr "`disallow_acc_multi_buffer`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`bool`"
-msgstr ""
+msgstr "`bool`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`False`"
-msgstr ""
+msgstr "`False`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "禁止dot操作累加器的多缓冲优化"
@@ -142,7 +128,7 @@ msgstr "Disables multi-buffer optimization for dot operation accumulators"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`flatten`"
-msgstr ""
+msgstr "`flatten`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "自动展平嵌套循环为单层循环"
@@ -150,7 +136,7 @@ msgstr "Automatically flattens nested loops into a single loop"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`warp_specialize`"
-msgstr ""
+msgstr "`warp_specialize`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "启用warp专业化（仅Blackwell GPU）"
@@ -158,7 +144,7 @@ msgstr "Enables warp specialization (Blackwell GPU only)"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`disable_licm`"
-msgstr ""
+msgstr "`disable_licm`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "禁用循环不变代码外提优化"
@@ -166,7 +152,7 @@ msgstr "Disables loop invariant code motion optimization"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "`_semantic`"
-msgstr ""
+msgstr "`_semantic`"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "保留参数，暂不支持外部调用"
@@ -178,75 +164,75 @@ msgstr "2.2 Type Support"
 
 #: ../../zh/triton_api/Iterators/range.md:30
 msgid "A3："
-msgstr ""
+msgstr "A3："
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "fp64"
-msgstr ""
+msgstr "fp64"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "GPU"
-msgstr ""
+msgstr "GPU"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "✓"
-msgstr ""
+msgstr "✓"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Iterators/range.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Iterators/range.md:37
 msgid "2.3 特殊限制说明"

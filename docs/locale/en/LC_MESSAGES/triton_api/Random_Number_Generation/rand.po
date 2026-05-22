@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Random_Number_Generation/rand.md:1
+msgstr ""#: ../../zh/triton_api/Random_Number_Generation/rand.md:1
 msgid "triton.language.rand"
-msgstr ""
+msgstr "triton.language.rand"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md:3
 msgid "1. OP 概述"
@@ -58,7 +44,7 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "`seed`"
-msgstr ""
+msgstr "`seed`"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "`int`或 `tensor`"
@@ -70,7 +56,7 @@ msgstr "Seed for generating random numbers"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "`offset`"
-msgstr ""
+msgstr "`offset`"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "用于生成随机数的偏移量"
@@ -78,7 +64,7 @@ msgstr "Offset for generating random numbers"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "`n_rounds`"
-msgstr ""
+msgstr "`n_rounds`"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "`constexpr`，默认值为10"
@@ -108,67 +94,67 @@ msgstr "Type of the input seed:"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "fp64"
-msgstr ""
+msgstr "fp64"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "√"
-msgstr ""
+msgstr "√"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Random_Number_Generation/rand.md:39
 msgid "2.2.2 Shape 支持"

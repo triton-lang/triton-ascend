@@ -4,7 +4,7 @@
 
 简介：在指定维度上返回其中最大值
 
-```python
+```text
 triton.language.max(input, axis=None, return_indices=False, return_indices_tie_break_left=True, keep_dims=False)
 ```
 

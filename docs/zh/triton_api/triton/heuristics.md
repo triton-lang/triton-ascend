@@ -1,6 +1,6 @@
 # triton.heuristics
 
-```python
+```text
 triton.heuristics(values)
 ```
 

@@ -4,7 +4,7 @@
 
 简介：将数据块存储到张量描述符指定内存位置
 
-```python
+```text
 triton.language.store_tensor_descriptor(
     desc: tensor_descriptor_base,
     offsets: Sequence[constexpr | tensor],
@@ -62,7 +62,7 @@ desc.store(offsets, value)
 
 * 函数式接口调用
 
-```python
+```text
 triton.language.store_tensor_descriptor(desc, offsets, value)
 ```
 

@@ -5,7 +5,7 @@
 简介：原子性逻辑或操作，在指定的内存位置执行逻辑或（|）操作
 原型：
 
-```python
+```text
 triton.language.atomic_or(
     pointer,
     val,

@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Extension_Ops/compile_hint.md:1
+msgstr ""#: ../../zh/triton_api/Extension_Ops/compile_hint.md:1
 msgid "triton.language.compile_hint"
-msgstr ""
+msgstr "triton.language.compile_hint"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md:3
 msgid "1.函数概述"
@@ -62,11 +48,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "`ptr`"
-msgstr ""
+msgstr "`ptr`"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "`tensor`"
-msgstr ""
+msgstr "`tensor`"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "必需"
@@ -78,11 +64,11 @@ msgstr "The tensor object to which the hint is attached"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "`hint_name`"
-msgstr ""
+msgstr "`hint_name`"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "`str` `constexpr`"
-msgstr ""
+msgstr "`str` `constexpr`"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "提示的名称标识符（必须为字符串）"
@@ -90,15 +76,15 @@ msgstr "The name identifier of the hint (must be a string)"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "`hint_val`"
-msgstr ""
+msgstr "`hint_val`"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "`None` `bool` `int` `constexpr` `list`"
-msgstr ""
+msgstr "`None` `bool` `int` `constexpr` `list`"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "`None`"
-msgstr ""
+msgstr "`None`"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "提示的值，支持多种类型"
@@ -106,11 +92,11 @@ msgstr "The value of the hint, supports multiple types"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "`_builder`"
-msgstr ""
+msgstr "`_builder`"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "-"
-msgstr ""
+msgstr "-"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "保留参数，暂不支持外部调用"
@@ -122,71 +108,71 @@ msgstr "2.2 Type Support"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md:24
 msgid "A3："
-msgstr ""
+msgstr "A3："
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "fp64"
-msgstr ""
+msgstr "fp64"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "✓"
-msgstr ""
+msgstr "✓"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Extension_Ops/compile_hint.md:30
 msgid "2.3 特殊限制说明"

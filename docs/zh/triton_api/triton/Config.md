@@ -1,6 +1,6 @@
 # triton.Config
 
-```python
+```text
 class triton.Config(self, kwargs, num_warps, num_stages, num_ctas, maxnreg, pre_hook)
 ```
 
@@ -20,7 +20,7 @@ class triton.Config(self, kwargs, num_warps, num_stages, num_ctas, maxnreg, pre_
 
 - pre_hook – 在调用内核之前将被调用的函数。该函数的参数是 args。
 
-```python
+```text
 __init__(self, kwargs, num_warps=4, num_stages=2, num_ctas=1, maxnreg=None, pre_hook=None)
 ```
 

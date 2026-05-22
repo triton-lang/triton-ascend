@@ -174,7 +174,7 @@ if __name__ == "__main__":
 
 **输出示例：**
 
-```python
+```text
 Test matmul with dtype=float16, shape=(16,16,16) PASSED!
 ```
 

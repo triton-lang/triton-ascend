@@ -4,7 +4,7 @@
 
 简介：计算x的逐元素sigmoid函数。
 
-```python
+```text
 triton.language.sigmoid(x)
 ```
 

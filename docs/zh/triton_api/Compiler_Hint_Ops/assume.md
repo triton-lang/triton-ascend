@@ -4,7 +4,7 @@
 
 `assume` 用于向编译器提供条件假设信息，允许编译器基于已知为真的条件进行优化。这是一个编译器提示操作，不会在运行时检查条件。
 
-```python
+```text
 triton.language.assume(cond, _semantic=None)
 ```
 

@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Extension_Ops/extract_slice.md:1
+msgstr ""#: ../../zh/triton_api/Extension_Ops/extract_slice.md:1
 msgid "triton.language.extract_slice"
-msgstr ""
+msgstr "triton.language.extract_slice"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md:3
 msgid "1. OP 概述"
@@ -56,11 +42,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "`ful`"
-msgstr ""
+msgstr "`ful`"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "`tensor`"
-msgstr ""
+msgstr "`tensor`"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "要提取切片的源张量"
@@ -68,11 +54,11 @@ msgstr "The source tensor from which to extract the slice"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "`offsets`"
-msgstr ""
+msgstr "`offsets`"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "`tuple of ints`"
-msgstr ""
+msgstr "`tuple of ints`"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "切片在各个维度上的起始偏移量"
@@ -80,7 +66,7 @@ msgstr "The starting offset of the slice in each dimension"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "`sizes`"
-msgstr ""
+msgstr "`sizes`"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "切片在各个维度上的大小"
@@ -88,7 +74,7 @@ msgstr "The size of the slice in each dimension"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "`strides`"
-msgstr ""
+msgstr "`strides`"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "切片在各个维度上的步长"
@@ -96,11 +82,11 @@ msgstr "The stride of the slice in each dimension"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "`_builder`"
-msgstr ""
+msgstr "`_builder`"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "-"
-msgstr ""
+msgstr "-"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "保留参数，暂不支持外部调用"
@@ -108,7 +94,7 @@ msgstr "Reserved parameter; external invocation is not supported yet"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "`_generator`"
-msgstr ""
+msgstr "`_generator`"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md:32
 msgid "返回值： `tensor`：提取的切片张量"
@@ -124,63 +110,63 @@ msgstr "2.2.1 DataType Support"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "fp16"
-msgstr ""
+msgstr "fp16"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "fp32"
-msgstr ""
+msgstr "fp32"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "bf16"
-msgstr ""
+msgstr "bf16"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "√"
-msgstr ""
+msgstr "√"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Extension_Ops/extract_slice.md:43
 msgid "2.2.2 Shape 支持"

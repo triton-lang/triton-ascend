@@ -6,23 +6,9 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: en <LL@li.org>\n"
-"Language: en\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/triton_api/Creation_Ops/cast.md:1
+msgstr ""#: ../../zh/triton_api/Creation_Ops/cast.md:1
 msgid "triton.language.cast"
-msgstr ""
+msgstr "triton.language.cast"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md:3
 msgid "1 功能作用说明"
@@ -108,11 +94,11 @@ msgstr "Description"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "input"
-msgstr ""
+msgstr "input"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "tensor"
-msgstr ""
+msgstr "tensor"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "是"
@@ -124,11 +110,11 @@ msgstr "Input tensor"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "dtype"
-msgstr ""
+msgstr "dtype"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "tl.dtype"
-msgstr ""
+msgstr "tl.dtype"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "目标数据类型"
@@ -136,11 +122,11 @@ msgstr "Target data type"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "fp_downcast_rounding"
-msgstr ""
+msgstr "fp_downcast_rounding"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "str"
-msgstr ""
+msgstr "str"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "否"
@@ -152,11 +138,11 @@ msgstr "Only valid for floating-point downcast, `rtne` or `rtz`"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "bitcast"
-msgstr ""
+msgstr "bitcast"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "bool"
-msgstr ""
+msgstr "bool"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "是否执行位级别重解释，默认 False"
@@ -164,7 +150,7 @@ msgstr "Whether to perform bit-level reinterpretation, default False"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "overflow_mode"
-msgstr ""
+msgstr "overflow_mode"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "Ascend 扩展：整数溢出处理，`trunc` 或 `saturate`"
@@ -224,71 +210,71 @@ msgstr "Support Status"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "int8"
-msgstr ""
+msgstr "int8"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "int16"
-msgstr ""
+msgstr "int16"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "int32"
-msgstr ""
+msgstr "int32"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "int64"
-msgstr ""
+msgstr "int64"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "uint8"
-msgstr ""
+msgstr "uint8"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "uint16"
-msgstr ""
+msgstr "uint16"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "uint32"
-msgstr ""
+msgstr "uint32"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "uint64"
-msgstr ""
+msgstr "uint64"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "float16"
-msgstr ""
+msgstr "float16"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "float32"
-msgstr ""
+msgstr "float32"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "bfloat16"
-msgstr ""
+msgstr "bfloat16"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "float8e4"
-msgstr ""
+msgstr "float8e4"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "float8e5"
-msgstr ""
+msgstr "float8e5"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "float64"
-msgstr ""
+msgstr "float64"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "Ascend A2/A3"
-msgstr ""
+msgstr "Ascend A2/A3"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "✓"
-msgstr ""
+msgstr "✓"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "×"
-msgstr ""
+msgstr "×"
 
 #: ../../zh/triton_api/Creation_Ops/cast.md
 msgid "GPU支持"

@@ -5,7 +5,7 @@
 简介：返回当前程序实例沿给定 axis 的 ID。
 函数原型：
 
-```python
+```text
 triton.language.program_id(axis)
 ```
 

@@ -4,7 +4,7 @@
 
 简介：将tensor沿某一维度进行翻转。
 
-```python
+```text
 triton.language.flip(x, dim=None)
 ```
 

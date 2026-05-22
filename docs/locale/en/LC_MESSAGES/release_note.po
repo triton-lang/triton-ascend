@@ -5,21 +5,7 @@
 # FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
 #
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend \n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language: en\n"
-"Language-Team: en <LL@li.org>\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/release_note.md:1
+msgstr ""#: ../../zh/release_note.md:1
 msgid "Triton-Ascend 版本发布"
 msgstr "Triton-Ascend Release"
 
@@ -71,11 +57,11 @@ msgstr "3.2.0"
 
 #: ../../zh/release_note.md
 msgid ">=3.9, <=3.11"
-msgstr "3.9 to 3.11"
+msgstr ">=3.9, <=3.11"
 
 #: ../../zh/release_note.md
 msgid "glibc 2.27+, x86-64, aarch64"
-msgstr "glibc 2.27+, x86-64, AArch64"
+msgstr "glibc 2.27+, x86-64, aarch64"
 
 #: ../../zh/release_note.md
 msgid "Ascend NPU"

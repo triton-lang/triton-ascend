@@ -6,21 +6,7 @@
 #
 #, fuzzy
 msgid ""
-msgstr ""
-"Project-Id-Version: Triton Ascend \n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-21 20:17+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language: en\n"
-"Language-Team: en <LL@li.org>\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=utf-8\n"
-"Content-Transfer-Encoding: 8bit\n"
-"Generated-By: Babel 2.18.0\n"
-
-#: ../../zh/debug_guide/debugging.md:1
+msgstr ""#: ../../zh/debug_guide/debugging.md:1
 msgid "Triton-Ascend 调试指南"
 msgstr "Triton-Ascend Debugging Guide"
 
@@ -441,7 +427,7 @@ msgstr ""
 
 #: ../../zh/debug_guide/debugging.md:157
 msgid "3.4.1 TTIR（Triton Intermediate Representation）"
-msgstr "3.4.1 Triton Intermediate Representation (TTIR)"
+msgstr "3.4.1 TTIR（Triton Intermediate Representation）"
 
 #: ../../zh/debug_guide/debugging.md:159
 msgid "TTIR 样例 查看 kernel.ttir.mlir 如下："
@@ -580,7 +566,7 @@ msgstr ""
 
 #: ../../zh/debug_guide/debugging.md:199
 msgid "3.4.1 TTAdapter IR（Target-Specific Adapter Representation）"
-msgstr "3.4.1 Target-Specific Adapter Representation (TTAdapter IR)"
+msgstr "3.4.1 TTAdapter IR（Target-Specific Adapter Representation）"
 
 #: ../../zh/debug_guide/debugging.md:201
 msgid "TTAdapter IR 样例 查看 kernel.ttadapter.mlir 如下："

@@ -4,7 +4,7 @@
 
 简介：计算x的逐元素对数（以2为底）。
 
-```python
+```text
 triton.language.log2(x, _semantic=None)
 ```
 

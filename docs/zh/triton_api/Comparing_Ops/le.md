@@ -5,7 +5,7 @@
 简介：用于比较两个张量的元素, 与`<=`等价。
 函数原型：
 
-```python
+```text
 triton.language.semantic.less_equal(
  input: tl.tensor, 
  other: tl.tensor, 

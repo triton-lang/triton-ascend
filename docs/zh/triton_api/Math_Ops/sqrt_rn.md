@@ -4,7 +4,7 @@
 
 简介：计算x的逐元素精确平方根（根据IEEE标准四舍五入）。
 
-```python
+```text
 triton.language.sqrt_rn(x, _semantic=None)
 ```
 

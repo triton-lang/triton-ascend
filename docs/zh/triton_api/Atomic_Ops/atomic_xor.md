@@ -5,7 +5,7 @@
 简介：原子性逻辑异或操作，在指定的内存位置执行逻辑异或
 原型：
 
-```python
+```text
 triton.language.atomic_xor(
     pointer,
     val,

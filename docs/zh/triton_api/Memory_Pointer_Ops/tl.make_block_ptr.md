@@ -5,7 +5,7 @@
 简介：创建指向GM上张量的指针
 原型：
 
-```python
+```text
 triton.language.make_block_ptr(
  base: triton.PointerType,
  shape: List[tensor],

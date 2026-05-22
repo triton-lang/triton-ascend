@@ -4,7 +4,7 @@
 
 简介：该函数用于计算x的逐元素快速平方根。
 
-```python
+```text
 triton.language.sqrt(x, _semantic=None)
 ```
 

@@ -4,7 +4,7 @@
 
 简介：在指定维度上返回最小值所在的下标
 
-```python
+```text
 triton.language.argmin(input, axis, tie_break_left=True, keep_dims=False)
 ```
 

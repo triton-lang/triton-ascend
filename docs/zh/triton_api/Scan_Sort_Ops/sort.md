@@ -4,7 +4,7 @@
 
 简介：对输入张量`x`按维度进行升序或者降序的排序。
 
-```python
+```text
 triton.language.sort(x, dim: constexpr | None = None, descending: constexpr = False)
 ```
 

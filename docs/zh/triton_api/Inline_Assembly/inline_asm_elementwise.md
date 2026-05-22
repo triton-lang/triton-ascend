@@ -4,7 +4,7 @@
 
 `inline_asm_elementwise` 用于在Triton内核中执行内联汇编代码，实现对张量的逐元素操作。
 
-```python
+```text
 triton.language.inline_asm_elementwise(asm, constraints, args, dtype, is_pure, pack, _semantic=None)
 ```
 

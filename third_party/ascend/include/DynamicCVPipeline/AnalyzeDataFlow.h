@@ -90,10 +90,26 @@ public:
   }
 };
 
+// Pass for analyzing CV transfer patterns in VECTOR scopes
+class AnalyzeCVPatternPass : public PassWrapper<AnalyzeCVPatternPass, OperationPass<ModuleOp>> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(AnalyzeCVPatternPass)
+
+  AnalyzeCVPatternPass() = default;
+
+  void runOnOperation() override;
+
+  llvm::StringRef getArgument() const override { return "analyze-cv-pattern"; }
+  llvm::StringRef getDescription() const override {
+    return "Analyze CV transfer patterns and trigger fallback for unsupported cases";
+  }
+};
+
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeArgsPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeFlagPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeDataFlowPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeScopePass();
+std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeCVPatternPass();
 
 void registerAnalyzeDataFlowPasses();
 

@@ -1,0 +1,153 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/triton/autotune.md:1
+msgid "triton.autotune"
+msgstr ""
+
+#: ../../zh/triton_api/triton/autotune.md:7
+msgid "用于自动调优 triton.jit 函数的装饰器。"
+msgstr "A decorator for automatically tuning triton.jit functions."
+
+#: ../../zh/triton_api/triton/autotune.md:22
+msgid ""
+"注：当所有配置都被解析时，内核将运行多次。也就是说内核更新的任何值都会进行多次更新。为了避免这种不希望出现的行为，可以使用 "
+"`reset_to_zero` 参数，该参数会在运行任何配置之前将提供的张量值重置为零。"
+msgstr ""
+"Note: When all configurations are evaluated, the kernel will run multiple "
+"times. This means any values updated by the kernel will be updated multiple "
+"times. To avoid this undesirable behavior, use the `reset_to_zero` "
+"parameter, which resets the provided tensor values to zero before running "
+"any configuration."
+
+#: ../../zh/triton_api/triton/autotune.md:23
+msgid ""
+"注：如果环境变量 `TRITON_PRINT_AUTOTUNING` 设置为 `\"1\"`，Triton 会在每次自动调优内核后向标准输出 "
+"(stdout) 打印一条消息，包括自动调优所花费的时间和最佳配置。"
+msgstr ""
+"Note: If the environment variable `TRITON_PRINT_AUTOTUNING` is set to "
+"`\"1\"`, Triton will print a message to stdout after each autotuning kernel,"
+" including the time spent on autotuning and the best configuration."
+
+#: ../../zh/triton_api/triton/autotune.md:25
+msgid "**参数：**"
+msgstr "**Parameters:**"
+
+#: ../../zh/triton_api/triton/autotune.md:27
+msgid "`configs (list[triton.Config])` - `triton.Config` 对象列表。"
+msgstr "`configs (list[triton.Config])` - A list of `triton.Config` objects."
+
+#: ../../zh/triton_api/triton/autotune.md:28
+msgid "`key (list[str])` - 参数名列表，当值发生改变时将触发对所有配置的解析。"
+msgstr ""
+"`key (list[str])` - A list of parameter names; when their values change, all"
+" configurations will be evaluated."
+
+#: ../../zh/triton_api/triton/autotune.md:29
+msgid "`prune_configs_by (dict)` - 修剪配置的函数字典。包含以下字段："
+msgstr ""
+"`prune_configs_by (dict)` - A dictionary of functions for pruning "
+"configurations. Contains the following fields:"
+
+#: ../../zh/triton_api/triton/autotune.md:30
+msgid "`'perf_model'`: 性能模型，用于预测不同配置的运行时间，返回运行时间"
+msgstr ""
+"`'perf_model'`: A performance model for predicting the runtime of different "
+"configurations, returns the runtime"
+
+#: ../../zh/triton_api/triton/autotune.md:31
+msgid "`'top_k'`: 要进行基准测试的配置数量"
+msgstr "`'top_k'`: The number of configurations to benchmark"
+
+#: ../../zh/triton_api/triton/autotune.md:32
+msgid ""
+"`'early_config_prune'`（可选）: 用于提前修剪配置的函数（例如，`num_stages`）。它接收 `configs: "
+"List[Config]` 作为输入，并返回修剪后的配置"
+msgstr ""
+"`'early_config_prune'` (optional): A function for early pruning of "
+"configurations (e.g., `num_stages`). It takes `configs: List[Config]` as "
+"input and returns the pruned configuration list"
+
+#: ../../zh/triton_api/triton/autotune.md:33
+msgid "`reset_to_zero (list[str])` - 参数名称列表，将在任何配置解析之前被重置为零。"
+msgstr ""
+"`reset_to_zero (list[str])` - A list of parameter names that will be reset "
+"to zero before any configuration is evaluated."
+
+#: ../../zh/triton_api/triton/autotune.md:34
+msgid "`restore_value (list[str])` - 参数名称列表，这些参数的值将在解析任何配置之后恢复。"
+msgstr ""
+"`restore_value (list[str])` - A list of parameter names whose values will be"
+" restored after any configuration is evaluated."
+
+#: ../../zh/triton_api/triton/autotune.md:35
+msgid ""
+"`pre_hook (lambda args, reset_only)` - 一个将在调用内核之前被调用的函数。该参数会覆盖 "
+"`reset_to_zero` 和 `restore_value` 的默认 `pre_hook`。"
+msgstr ""
+"`pre_hook (lambda args, reset_only)` - A function to be called before "
+"invoking the kernel. This parameter overrides the default `pre_hook` of "
+"`reset_to_zero` and `restore_value`."
+
+#: ../../zh/triton_api/triton/autotune.md:36
+#: ../../zh/triton_api/triton/autotune.md:39
+msgid "`args`：传递给内核的参数列表"
+msgstr "`args`: list of arguments passed to the kernel"
+
+#: ../../zh/triton_api/triton/autotune.md:37
+msgid "`reset_only`：一个布尔值，表示 `pre_hook` 是否仅用于重置值，而没有对应的 `post_hook`"
+msgstr ""
+"`reset_only`: A boolean indicating whether `pre_hook` is only used to reset "
+"values without a corresponding `post_hook`"
+
+#: ../../zh/triton_api/triton/autotune.md:38
+msgid ""
+"`post_hook (lambda args, exception)` - 一个将在调用内核之后被调用的函数。该参数会覆盖 "
+"`restore_value` 的默认 `post_hook`。"
+msgstr ""
+"`post_hook (lambda args, exception)` - A function to be called after "
+"invoking the kernel. This parameter overrides the default `post_hook` of "
+"`restore_value`."
+
+#: ../../zh/triton_api/triton/autotune.md:40
+msgid "`exception`：在出现编译或运行时错误情况下，由内核引发的异常"
+msgstr ""
+"`exception`: The exception raised by the kernel in case of compilation or "
+"runtime errors"
+
+#: ../../zh/triton_api/triton/autotune.md:41
+msgid "`warmup (int)` - 传递给基准测试的预热时间（以毫秒为单位），默认值为 25。"
+msgstr ""
+"`warmup (int)` - The warmup time passed to the benchmark (in milliseconds), "
+"default is 25."
+
+#: ../../zh/triton_api/triton/autotune.md:42
+msgid "`rep (int)` - 传递给基准测试的重复时间（以毫秒为单位），默认值为 100。"
+msgstr ""
+"`rep (int)` - The repetition time passed to the benchmark (in milliseconds),"
+" default is 100."
+
+#: ../../zh/triton_api/triton/autotune.md:43
+msgid "`use_cuda_graph (bool)` - 是否使用 CUDA Graph 进行性能测量（默认为 `False`）。"
+msgstr ""
+"`use_cuda_graph (bool)` - Whether to use CUDA Graph for performance "
+"measurement (default is `False`)."

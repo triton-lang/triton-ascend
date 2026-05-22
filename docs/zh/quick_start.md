@@ -117,7 +117,7 @@ docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container --net=host -
 triton-ascend-image:latest \
 /bin/bash
 
-# 进入容器
+# Enter the container
 docker exec -u root -it triton-ascend_container /bin/bash
 ```
 
@@ -126,11 +126,11 @@ docker exec -u root -it triton-ascend_container /bin/bash
 运行实例: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)
 
 ```bash
-# 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
+# Set CANN environment variables (using root default installation path `/usr/local/Ascend` as an example)
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
-# 拉取triton-ascend源码仓及用例（可选，非源码编译安装运行示例时需拉源码仓）
+# Clone the triton-ascend source repository and examples (optional, needed only when running examples without source installation)
 git clone https://gitcode.com/Ascend/triton-ascend.git
-# 运行tutorials示例：
+# Run the tutorials example:
 python3 ./triton-ascend/third_party/ascend/tutorials/01-vector-add.py
 ```
 

@@ -1,0 +1,218 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:1
+msgid "triton.language.softmax"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:3
+msgid "1. 函数概述"
+msgstr "1. Function Overview"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:5
+msgid "简介：计算x的逐元素softmax。"
+msgstr "Description: Computes the element-wise softmax of x."
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:11
+msgid "2. 规格"
+msgstr "2. Specifications"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:13
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "参数名"
+msgstr "Parameter"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "`x`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "`tensor`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "张量数据"
+msgstr "Tensor data"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "`dim`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "`int`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "指定在哪个维度上计算 softmax"
+msgstr "Which dim to compute softmax along"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "`keep_dims`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "`bool`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "控制计算后是否保留原维度的形状"
+msgstr "Controls whether to retain original dim shape"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "`ieee_rounding`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "控制浮点数运算是否遵循 IEEE 754 标准的舍入规则"
+msgstr "Controls whether FP ops follow IEEE 754 rounding"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:22
+msgid "返回值： `x`：与x相同的shape的张量"
+msgstr "Return value: `x`: A tensor with the same shape as x"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:25
+msgid "2.2 OP 规格"
+msgstr "2.2 OP Specifications"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:27
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:34
+msgid "结论：Ascend 相比 GPU 缺失 fp64 支持。 torch_npu 不支持 uint8。"
+msgstr "Ascend lacks fp64 support vs GPU. torch_npu doesn't support uint8."
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:37
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "支持维度范围"
+msgstr "Supported Dimension Range"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md
+msgid "仅支持 1~5维 tensor"
+msgstr "Only supports 1~5D tensors"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:44
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
+msgstr ""
+"Shape: No difference between GPU and Ascend. Both support 1~5D tensors."
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:46
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:48
+msgid "相对社区能力缺失且无法实现"
+msgstr "Not supported vs. community version and cannot be implemented"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:50
+msgid "无。"
+msgstr "None."
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:52
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Math_Ops/softmax.md:54
+msgid "以下示例实现了对输入张量 `x` 做逐元素softmax："
+msgstr "Example: element-wise softmax of input tensor `x`."

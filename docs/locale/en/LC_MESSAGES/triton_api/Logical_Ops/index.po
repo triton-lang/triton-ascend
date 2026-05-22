@@ -1,0 +1,109 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Logical_Ops/index.md:1
+msgid "逻辑操作"
+msgstr "Logical Operations"
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "api"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "简要说明"
+msgstr "Brief Description"
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "[and](./and.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "逻辑与操作"
+msgstr "Logical AND Operation"
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "[or](./or.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "逻辑或操作"
+msgstr "Logical OR Operation"
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "[not](./not.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "逻辑非操作"
+msgstr "Logical NOT Operation"
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "[logical_and](./logical_and.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "用于对两个张量进行逐元素逻辑与运算"
+msgstr "Performs element-wise logical AND on two tensors"
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "[logical_or](./logical_or.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "用于对两个张量进行逐元素逻辑或运算"
+msgstr "Performs element-wise logical OR on two tensors"
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "将tensor的值按位取反。"
+msgstr "Inverts the bits of the tensor values."
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "[invert](./invert.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "将tensor每个值按比特位进行翻转。"
+msgstr "Flips each bit of every value in the tensor."
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "[lshift](./lshift.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "根据给定值 将tensor张量进行左移位。"
+msgstr "Left-shifts the tensor by the given value."
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "[rshift](./rshift.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "根据给定值 将tensor张量进行右移位。"
+msgstr "Right-shifts the tensor by the given value."
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "[xor](./xor.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/index.md
+msgid "计算两个元素的异或值。"
+msgstr "Computes the XOR of two elements."

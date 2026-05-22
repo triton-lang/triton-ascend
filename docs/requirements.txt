@@ -1,11 +1,28 @@
+# Sphinx 核心
+sphinx
+sphinx-rtd-theme
+
+# Markdown 支持
+myst_parser
+
+# 翻译工作流
+sphinx-intl
+babel
+
+# 可视化与示例
+matplotlib
+pandas
+
+# 其他
 tabulate
 cmake
-sphinx
-matplotlib
-myst_parser
-sphinx-rtd-theme
-pandas
 pytest
-sphinx-gallery
-sphinx-multiversion
+
+# 性能分析
 llnl-hatchet
+
+# 多版本支持（保留，但不在 .readthedocs.yaml 中使用）
+sphinx-multiversion
+
+# 画廊（可选，当前未在 conf.py 中使用）
+# sphinx-gallery

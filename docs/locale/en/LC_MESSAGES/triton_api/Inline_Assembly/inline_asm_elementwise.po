@@ -1,0 +1,248 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:1
+msgid "triton.language.inline_asm_elementwise"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:3
+msgid "1. 函数概述"
+msgstr "1. Function Overview"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:5
+msgid "`inline_asm_elementwise` 用于在Triton内核中执行内联汇编代码，实现对张量的逐元素操作。"
+msgstr ""
+"`inline_asm_elementwise` is used to execute inline assembly code within a "
+"Triton kernel, performing element-wise operations on tensors."
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:11
+msgid "2. 规格"
+msgstr "2. Specifications"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:13
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "参数"
+msgstr "Parameters"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "默认值"
+msgstr "Default Value"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "含义说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "`asm`"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "`str`"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "必需"
+msgstr "Required"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "要执行的汇编代码，必须匹配目标平台的汇编格式"
+msgstr ""
+"The assembly code to execute, must match the assembly format of the target "
+"platform"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "`constraints`"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "LLVM格式的汇编约束条件"
+msgstr "Assembly constraints in LLVM format"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "`args`"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "`tensor`"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "输入张量，其值会传递给汇编块"
+msgstr "Input tensor, its values are passed to the assembly block"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "`dtype`"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "`dtype` / `Sequence[dtype]`"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "返回张量的元素类型（可以是单个类型或类型元组）"
+msgstr ""
+"Returns the element type of the tensor (can be a single type or a tuple of "
+"types)"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "`is_pure`"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "`bool`"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "如果为True，编译器假设汇编块没有副作用"
+msgstr "If True, the compiler assumes the assembly block has no side effects"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "`pack`"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "`int`"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "每次内联汇编调用处理的元素数量"
+msgstr "The number of elements processed per inline assembly call"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter; external invocation is not supported yet"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:25
+msgid "2.2 类型支持"
+msgstr "2.2 Type Support"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:27
+msgid "A3:"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:34
+msgid ""
+"Ascend 对比 GPU 的输入张量类型 缺失uint8、uint16、uint32、uint64、fp16、 fp64 、bf16 "
+"、bool的支持能力。"
+msgstr ""
+"Ascend lacks support for uint8, uint16, uint32, uint64, fp16, fp64, bf16, "
+"bool input tensor types compared to GPU."
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:36
+msgid "2.3 使用方法"
+msgstr "2.3 Usage"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:68
+msgid "3. 语义GAP"
+msgstr "3. Semantic Gap"
+
+#: ../../zh/triton_api/Inline_Assembly/inline_asm_elementwise.md:70
+msgid ""
+"1.内联汇编的寄存器仅支持`int64(s64)` 和`float32(f32)`。 2.约束限制仅支持`l`。 "
+"3.目前仅支持输入一维张量，计算高维张量需展开。"
+msgstr ""
+"1. Inline assembly registers only support `int64(s64)` and `float32(f32)`. "
+"2. Constraint restrictions only support `l`. 3. Currently only 1D tensor "
+"input is supported; higher-dimensional tensors need to be flattened."

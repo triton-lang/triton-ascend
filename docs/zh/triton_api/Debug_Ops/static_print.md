@@ -52,10 +52,10 @@ import triton.language as tl
 
 @triton.jit
 def basic_static_print_example(x_ptr, BLOCK_SIZE: tl.constexpr):
-    # 在编译时打印常量的值
+    # Print the value of a constant at compile time
     tl.static_print("BLOCK_SIZE =", BLOCK_SIZE)
     tl.static_print(BLOCK_SIZE)
-    # 支持fstring打印方式
+    # Support fstring printing
     tl.static_print(f"BLOCK_SIZE={BLOCK_SIZE}")
 ```
 
@@ -69,6 +69,6 @@ def basic_static_print_example(x_ptr, BLOCK_SIZE: tl.constexpr):
     idx = tl.arange(0, 4)
     val = tl.load(x_ptr + idx)
     tl.static_print("val:",val)
-    #非常量不支持fstring打印
+    # Non-constants do not support fstring printing
     #tl.static_print(f"val:{val}")
 ```

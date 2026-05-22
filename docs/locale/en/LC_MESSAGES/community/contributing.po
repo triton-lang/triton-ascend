@@ -1,0 +1,607 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/community/contributing.md:1
+msgid "贡献指南"
+msgstr "Contributing Guide"
+
+#: ../../zh/community/contributing.md:3
+msgid "感谢你对 Triton-Ascend 项目的关注！本文档将帮助你了解如何为项目做出贡献。"
+msgstr "Thank you for your interest in the Triton-Ascend project! This document will help you understand how to contribute to the project."
+
+#: ../../zh/community/contributing.md:5
+msgid "开发者来源认证（DCO）"
+msgstr "Developer Certificate of Origin (DCO)"
+
+#: ../../zh/community/contributing.md:7
+msgid "所有提交需包含 `Signed-off-by:` 行，使用 `git commit -s` 自动添加："
+msgstr "All commits must include a `Signed-off-by:` line. Use `git commit -s` to add it automatically:"
+
+#: ../../zh/community/contributing.md:13
+msgid ""
+"这会在提交信息末尾自动添加一行 `Signed-off-by: Your Name "
+"<your.email@example.com>`，表明你确认该贡献的来源和授权。"
+msgstr "This will automatically add a line `Signed-off-by: Your Name <your.email@example.com>` at the end of your commit message, indicating that you certify the origin and authorization of the contribution."
+
+#: ../../zh/community/contributing.md:15
+msgid "开发环境搭建"
+msgstr "Development Environment Setup"
+
+#: ../../zh/community/contributing.md:17
+msgid "不依赖 NPU 的本地环境（代码规范检查）"
+msgstr "Local Environment Without NPU (Code Style Checks)"
+
+#: ../../zh/community/contributing.md:19
+msgid "Triton-Ascend 的构建依赖 `torch_npu`，仅支持 Linux。但代码规范检查和基础测试可以在任意系统上进行："
+msgstr "Triton-Ascend's build depends on `torch_npu` and only supports Linux. However, code style checks and basic tests can be performed on any system:"
+
+#: ../../zh/community/contributing.md:30
+msgid "依赖 NPU 的完整开发环境"
+msgstr "Full Development Environment with NPU"
+
+#: ../../zh/community/contributing.md:32
+msgid "请先按照 [安装指南](installation_guide.md) 完成 Python、CANN 和 torch_npu 的安装配置。"
+msgstr "Please first follow the [Installation Guide](installation_guide.md) to complete the installation and configuration of Python, CANN, and torch_npu."
+
+#: ../../zh/community/contributing.md:34
+msgid "**快速安装**："
+msgstr "**Quick Installation**:"
+
+#: ../../zh/community/contributing.md:48
+msgid "**手动安装**："
+msgstr "**Manual Installation**:"
+
+#: ../../zh/community/contributing.md:50
+#, python-format
+msgid ""
+"前置条件：安装好LLVM 22版本，安装方法请参考：https://github.com/triton-lang/triton-"
+"ascend/blob/main/docs/zh/installation_guide.md#%E6%89%8B%E5%8A%A8%E5%AE%89%E8%A3%85---%E5%9F%BA%E4%BA%8Ellvm%E6%9E%84%E5%BB%BA，LLVM_INSTALL_PREFIX为LLVM的安装路径"
+msgstr ""
+"Prerequisites: LLVM 22 must be installed. For installation instructions,"
+"refer to: https://github.com/triton-lang/triton-ascend/blob/main/docs/en"
+"/installation_guide.md#manual-installation---llvm-based-build, where"
+"LLVM_INSTALL_PREFIX is the LLVM installation path"
+
+#: ../../zh/community/contributing.md:62
+msgid "**Docker 安装**："
+msgstr "**Docker Installation**:"
+
+#: ../../zh/community/contributing.md:70
+msgid "安装开发依赖"
+msgstr "Install Development Dependencies"
+
+#: ../../zh/community/contributing.md:77
+msgid "代码风格"
+msgstr "Code Style"
+
+#: ../../zh/community/contributing.md:79
+msgid "编码规范"
+msgstr "Coding Standards"
+
+#: ../../zh/community/contributing.md:81
+msgid "**Python**：遵循 [PEP 8](https://pep8.org/) 编码风格"
+msgstr "**Python**: Follow [PEP 8](https://pep8.org/) coding style"
+
+#: ../../zh/community/contributing.md:82
+msgid "**C++**：遵循 [LLVM 编码规范](https://llvm.org/docs/CodingStandards.html)"
+msgstr "**C++**: Follow [LLVM Coding Standards](https://llvm.org/docs/CodingStandards.html)"
+
+#: ../../zh/community/contributing.md:84
+msgid "代码检查工具"
+msgstr "Code Checking Tools"
+
+#: ../../zh/community/contributing.md:86
+msgid "项目使用 [pre-commit](https://pre-commit.com/) 管理代码检查，包含以下工具："
+msgstr "The project uses [pre-commit](https://pre-commit.com/) to manage code checks, including the following tools:"
+
+#: ../../zh/community/contributing.md
+msgid "工具"
+msgstr "Tool"
+
+#: ../../zh/community/contributing.md
+msgid "用途"
+msgstr "Purpose"
+
+#: ../../zh/community/contributing.md
+msgid "ruff"
+msgstr "ruff"
+
+#: ../../zh/community/contributing.md
+msgid "Python 代码检查与格式化（行宽 120）"
+msgstr "Python code linting and formatting (line width 120)"
+
+#: ../../zh/community/contributing.md
+msgid "yapf"
+msgstr "yapf"
+
+#: ../../zh/community/contributing.md
+msgid "Python 代码格式化（基于 PEP 8，行宽 120）"
+msgstr "Python code formatting (based on PEP 8, line width 120)"
+
+#: ../../zh/community/contributing.md
+msgid "clang-format"
+msgstr "clang-format"
+
+#: ../../zh/community/contributing.md
+msgid "C/C++ 代码格式化"
+msgstr "C/C++ code formatting"
+
+#: ../../zh/community/contributing.md
+msgid "mypy"
+msgstr "mypy"
+
+#: ../../zh/community/contributing.md
+msgid "Python 类型检查"
+msgstr "Python type checking"
+
+#: ../../zh/community/contributing.md
+msgid "pre-commit hooks"
+msgstr "pre-commit hooks"
+
+#: ../../zh/community/contributing.md
+msgid "尾部空格、文件末尾换行、YAML/TOML 检查、大文件检测、私钥检测等"
+msgstr "Trailing whitespace, end-of-file newline, YAML/TOML checks, large file detection, private key detection, etc."
+
+#: ../../zh/community/contributing.md:96
+msgid "安装并运行 pre-commit"
+msgstr "Install and Run pre-commit"
+
+#: ../../zh/community/contributing.md:104
+msgid "提交 PR 前建议运行："
+msgstr "Before submitting a PR, it's recommended to run:"
+
+#: ../../zh/community/contributing.md:110
+msgid "单元测试规范"
+msgstr "Unit Testing Standards"
+
+#: ../../zh/community/contributing.md:112
+msgid "**Python 测试**：使用 [pytest](https://docs.pytest.org/)"
+msgstr "**Python Tests**: Use [pytest](https://docs.pytest.org/)"
+
+#: ../../zh/community/contributing.md:113
+msgid ""
+"**C++ 测试**：使用 [Google "
+"Test](https://github.com/google/googletest/blob/master/docs/primer.md)"
+msgstr "**C++ Tests**: Use [Google Test](https://github.com/google/googletest/blob/master/docs/primer.md)"
+
+#: ../../zh/community/contributing.md:114
+msgid ""
+"测试用例的设计意图应通过命名清晰反映，测试用例的设计请参考https://github.com/triton-lang/triton-"
+"ascend/blob/main/third_party/ascend/unittest/pytest_ut/test_gather.py"
+msgstr "Test case design intent should be clearly reflected through naming. For test case design, refer to https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/pytest_ut/test_gather.py"
+
+#: ../../zh/community/contributing.md:116
+msgid "运行测试"
+msgstr "Running Tests"
+
+#: ../../zh/community/contributing.md:118
+msgid "测试目录结构"
+msgstr "Test Directory Structure"
+
+#: ../../zh/community/contributing.md
+msgid "目录"
+msgstr "Directory"
+
+#: ../../zh/community/contributing.md
+msgid "内容"
+msgstr "Content"
+
+#: ../../zh/community/contributing.md
+msgid "`third_party/ascend/unittest/pytest_ut/`"
+msgstr "`third_party/ascend/unittest/pytest_ut/`"
+
+#: ../../zh/community/contributing.md
+msgid "Ascend 特有算子单元测试"
+msgstr "Ascend-specific operator unit tests"
+
+#: ../../zh/community/contributing.md
+msgid "`third_party/ascend/unittest/autotune_ut/`"
+msgstr "`third_party/ascend/unittest/autotune_ut/`"
+
+#: ../../zh/community/contributing.md
+msgid "Ascend autotune 测试"
+msgstr "Ascend autotune tests"
+
+#: ../../zh/community/contributing.md
+msgid "`third_party/ascend/unittest/kernels/`"
+msgstr "`third_party/ascend/unittest/kernels/`"
+
+#: ../../zh/community/contributing.md
+msgid "第三方算子库验证（vLLM 等）"
+msgstr "Third-party operator library validation (vLLM, etc.)"
+
+#: ../../zh/community/contributing.md:126
+msgid "使用 pytest"
+msgstr "Using pytest"
+
+#: ../../zh/community/contributing.md:137
+msgid "PyTorch Inductor 验证"
+msgstr "PyTorch Inductor Validation"
+
+#: ../../zh/community/contributing.md:139
+msgid "Triton-Ascend 支持 PyTorch Inductor 后端，可通过以下方式验证 Inductor 集成："
+msgstr "Triton-Ascend supports the PyTorch Inductor backend. You can validate Inductor integration through the following methods:"
+
+#: ../../zh/community/contributing.md:147
+msgid ""
+"也可以编写使用 `torch.compile(..., backend=\"inductor\")` 的测试来验证 Inductor 集成，参考 "
+"`third_party/ascend/tutorials/07-profiler.py` 中的 `test_inductor_add` 示例。"
+msgstr ""
+"You can also write tests using `torch.compile(...,"
+"backend=\"inductor\")` to validate Inductor integration. Refer to the"
+"`test_inductor_add` example in `third_party/ascend/tutorials/07-profiler"
+".py`."
+
+#: ../../zh/community/contributing.md:149
+msgid "第三方算子库验证"
+msgstr "Third-Party Operator Library Validation"
+
+#: ../../zh/community/contributing.md:151
+msgid "Triton-Ascend 提供了第三方算子库的集成验证框架，用于确保基于 Triton 的算子库在 Ascend NPU 上的正确性。"
+msgstr "Triton-Ascend provides an integration validation framework for third-party operator libraries to ensure the correctness of Triton-based operator libraries on Ascend NPU."
+
+#: ../../zh/community/contributing.md:153
+msgid "**vLLM Kernels 验证**："
+msgstr "**vLLM Kernels Validation**:"
+
+#: ../../zh/community/contributing.md:163
+msgid ""
+"当前已覆盖的 vLLM kernel 包括：attention、rope、layer_norm、fused_gdn_gating、l2norm "
+"等，完整列表见 `third_party/ascend/unittest/kernels/vllm/` 目录。"
+msgstr "Currently covered vLLM kernels include: attention, rope, layer_norm, fused_gdn_gating, l2norm, etc. For the complete list, see the `third_party/ascend/unittest/kernels/vllm/` directory."
+
+#: ../../zh/community/contributing.md:165
+msgid "**新增 Kernel 测试用例**："
+msgstr "**Adding New Kernel Test Cases**:"
+
+#: ../../zh/community/contributing.md:167
+msgid "新增第三方 kernel 测试用例的流程："
+msgstr "Process for adding new third-party kernel test cases:"
+
+#: ../../zh/community/contributing.md:168
+msgid "在 GPU 上准备 golden 数据（输入和期望输出），保存为 `.pt` 文件"
+msgstr "1. Prepare golden data (inputs and expected outputs) on GPU and save as `.pt` files"
+
+#: ../../zh/community/contributing.md:169
+#, python-brace-format
+msgid "在 `third_party/ascend/unittest/kernels/{library}/` 下新增 kernel 算子文件"
+msgstr "2. Add kernel operator files under `third_party/ascend/unittest/kernels/{library}/`"
+
+#: ../../zh/community/contributing.md:170
+#, python-brace-format
+msgid ""
+"将 `.pt` 文件上传至 OBS 桶：`https://triton-ascend-artifacts.obs.cn-"
+"southwest-2.myhuaweicloud.com/test/kernels/{library}_pt/{kernel_name}.pt`"
+msgstr "3. Upload `.pt` files to the OBS bucket: `https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/test/kernels/{library}_pt/{kernel_name}.pt`"
+
+#: ../../zh/community/contributing.md:172
+msgid "详细说明参见 `third_party/ascend/unittest/kernels/README.md`。"
+msgstr ""
+"For detailed instructions, see `third_party/ascend/unittest/kernels/READ"
+"ME.md`."
+
+#: ../../zh/community/contributing.md:174
+msgid "Fork-Pull 开发模式"
+msgstr "Fork-Pull Development Model"
+
+#: ../../zh/community/contributing.md:176
+msgid "1. Fork 仓库"
+msgstr "1. Fork the Repository"
+
+#: ../../zh/community/contributing.md:178
+msgid ""
+"在 GitHub 上 Fork [triton-lang/triton-ascend](https://github.com/triton-"
+"lang/triton-ascend) 到自己的账号下。"
+msgstr ""
+"Fork [triton-lang/triton-ascend](https://github.com/triton-lang/triton-a"
+"scend) to your own account on GitHub."
+
+#: ../../zh/community/contributing.md:180
+msgid "2. 克隆并配置远程仓库"
+msgstr "2. Clone and Configure Remote Repository"
+
+#: ../../zh/community/contributing.md:189
+msgid "3. 创建开发分支"
+msgstr "3. Create Development Branch"
+
+#: ../../zh/community/contributing.md:197
+msgid "4. 开发与自测"
+msgstr "4. Development and Self-Testing"
+
+#: ../../zh/community/contributing.md:199
+msgid "开发完成后，请确保："
+msgstr "After completing development, please ensure:"
+
+#: ../../zh/community/contributing.md:200
+msgid "代码通过 pre-commit 检查"
+msgstr "Code passes pre-commit checks"
+
+#: ../../zh/community/contributing.md:201
+msgid "新增代码有对应的测试用例"
+msgstr "New code has corresponding test cases"
+
+#: ../../zh/community/contributing.md:202
+msgid "所有相关测试通过"
+msgstr "All related tests pass"
+
+#: ../../zh/community/contributing.md:203
+msgid "如修改了算子实现，建议运行 Inductor 验证和 kernel 对比测试"
+msgstr "If operator implementations are modified, it's recommended to run Inductor validation and kernel comparison tests"
+
+#: ../../zh/community/contributing.md:205
+msgid "5. 提交代码"
+msgstr "5. Commit Code"
+
+#: ../../zh/community/contributing.md:213
+msgid ""
+"提交信息请遵循 [How to Write a Git Commit Message](https://cbea.ms/git-commit"
+"/#why-not-how) 规范。"
+msgstr "Please follow the [How to Write a Git Commit Message](https://cbea.ms/git-commit/#why-not-how) specification for commit messages."
+
+#: ../../zh/community/contributing.md:215
+msgid "6. 创建 Pull Request"
+msgstr "6. Create Pull Request"
+
+#: ../../zh/community/contributing.md:217
+msgid ""
+"在 GitHub 上从你的 fork 仓库开发分支向 `triton-lang/triton-ascend` 的 `main` 分支创建 Pull"
+" Request。CI 流水线将自动运行。"
+msgstr "Create a Pull Request on GitHub from your fork repository's development branch to the `main` branch of `triton-lang/triton-ascend`. The CI pipeline will run automatically."
+
+#: ../../zh/community/contributing.md:219
+msgid "PR 规范"
+msgstr "PR Guidelines"
+
+#: ../../zh/community/contributing.md:221
+msgid "PR 标题前缀"
+msgstr "PR Title Prefixes"
+
+#: ../../zh/community/contributing.md:223
+msgid "PR 标题建议使用以下前缀标明分类："
+msgstr "PR titles are recommended to use the following prefixes to indicate categories:"
+
+#: ../../zh/community/contributing.md
+msgid "前缀"
+msgstr "Prefix"
+
+#: ../../zh/community/contributing.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/community/contributing.md
+msgid "`[BugFix]`"
+msgstr "`[BugFix]`"
+
+#: ../../zh/community/contributing.md
+msgid "Bug 修复"
+msgstr "Bug fix"
+
+#: ../../zh/community/contributing.md
+msgid "`[Kernel]`"
+msgstr "`[Kernel]`"
+
+#: ../../zh/community/contributing.md
+msgid "算子相关"
+msgstr "Operator related"
+
+#: ../../zh/community/contributing.md
+msgid "`[Core]`"
+msgstr "`[Core]`"
+
+#: ../../zh/community/contributing.md
+msgid "核心模块"
+msgstr "Core module"
+
+#: ../../zh/community/contributing.md
+msgid "`[Feature]`"
+msgstr "`[Feature]`"
+
+#: ../../zh/community/contributing.md
+msgid "新增特性"
+msgstr "New feature"
+
+#: ../../zh/community/contributing.md
+msgid "`[Refactor]`"
+msgstr "`[Refactor]`"
+
+#: ../../zh/community/contributing.md
+msgid "代码重构"
+msgstr "Code refactoring"
+
+#: ../../zh/community/contributing.md
+msgid "`[Revert]`"
+msgstr "`[Revert]`"
+
+#: ../../zh/community/contributing.md
+msgid "代码回滚"
+msgstr "Code revert"
+
+#: ../../zh/community/contributing.md
+msgid "`[Perf]`"
+msgstr "`[Perf]`"
+
+#: ../../zh/community/contributing.md
+msgid "性能优化"
+msgstr "Performance optimization"
+
+#: ../../zh/community/contributing.md
+msgid "`[Doc]`"
+msgstr "`[Doc]`"
+
+#: ../../zh/community/contributing.md
+msgid "文档更新"
+msgstr "Documentation update"
+
+#: ../../zh/community/contributing.md
+msgid "`[Test]`"
+msgstr "`[Test]`"
+
+#: ../../zh/community/contributing.md
+msgid "测试相关"
+msgstr "Test related"
+
+#: ../../zh/community/contributing.md
+msgid "`[CI]`"
+msgstr "`[CI]`"
+
+#: ../../zh/community/contributing.md
+msgid "CI/CD 相关"
+msgstr "CI/CD related"
+
+#: ../../zh/community/contributing.md
+msgid "`[Misc]`"
+msgstr "`[Misc]`"
+
+#: ../../zh/community/contributing.md
+msgid "其他杂项"
+msgstr "Other miscellaneous"
+
+#: ../../zh/community/contributing.md:239
+msgid "PR 检查清单"
+msgstr "PR Checklist"
+
+#: ../../zh/community/contributing.md:241
+msgid "[ ] 非琐碎修改（如非拼写修正）"
+msgstr "[ ] Non-trivial changes (not just typo fixes)"
+
+#: ../../zh/community/contributing.md:242
+msgid "[ ] 遵循 [提交信息规范](https://cbea.ms/git-commit/#why-not-how)"
+msgstr "[ ] Follow [commit message guidelines](https://cbea.ms/git-commit/#why-not-how)"
+
+#: ../../zh/community/contributing.md:243
+msgid "[ ] 已运行 `pre-commit run --from-ref origin/main --to-ref HEAD`"
+msgstr "[ ] Ran `pre-commit run --from-ref origin/main --to-ref HEAD`"
+
+#: ../../zh/community/contributing.md:244
+msgid "[ ] 已添加测试用例，或说明无需测试的原因"
+msgstr "[ ] Added test cases, or explained why tests are not needed"
+
+#: ../../zh/community/contributing.md:245
+msgid ""
+"[ ] 如添加 lit 测试，遵循 [MLIR "
+"测试最佳实践](https://mlir.llvm.org/getting_started/TestingGuide/#filecheck-"
+"best-practices)"
+msgstr "[ ] If adding lit tests, follow [MLIR Testing Best Practices](https://mlir.llvm.org/getting_started/TestingGuide/#filecheck-best-practices)"
+
+#: ../../zh/community/contributing.md:247
+msgid "PR 审核与合并"
+msgstr "PR Review and Merge"
+
+#: ../../zh/community/contributing.md:249
+msgid "PR 需获得至少 2 个 LGTM（Looks Good To Me）和 1 个 Approval 后方可合并"
+msgstr "PRs require at least 2 LGTMs (Looks Good To Me) and 1 Approval before merging"
+
+#: ../../zh/community/contributing.md:250
+msgid "审核人不得在自己的 PR 上添加 LGTM"
+msgstr "Reviewers cannot add LGTM to their own PRs"
+
+#: ../../zh/community/contributing.md:251
+msgid "创建 PR 后请尽快合并，以降低合并冲突风险"
+msgstr "After creating a PR, please merge it promptly to reduce merge conflict risks"
+
+#: ../../zh/community/contributing.md:253
+msgid "Issue 规范"
+msgstr "Issue Guidelines"
+
+#: ../../zh/community/contributing.md:255
+msgid "提交 Issue"
+msgstr "Submitting Issues"
+
+#: ../../zh/community/contributing.md:257
+msgid "报告问题时，请包含以下信息："
+msgstr "When reporting issues, please include the following information:"
+
+#: ../../zh/community/contributing.md:259
+msgid "软件版本（Triton-Ascend、Python、OS 等）"
+msgstr "Software versions (Triton-Ascend, Python, OS, etc.)"
+
+#: ../../zh/community/contributing.md:260
+msgid "问题类型（Bug 报告还是功能请求）"
+msgstr "Issue type (bug report or feature request)"
+
+#: ../../zh/community/contributing.md:261
+msgid "添加对应标签"
+msgstr "Add corresponding labels"
+
+#: ../../zh/community/contributing.md:262
+msgid "问题描述：发生了什么？"
+msgstr "Issue description: What happened?"
+
+#: ../../zh/community/contributing.md:263
+msgid "预期行为：应该发生什么？"
+msgstr "Expected behavior: What should have happened?"
+
+#: ../../zh/community/contributing.md:264
+msgid "复现步骤：尽可能详细"
+msgstr "Reproduction steps: Be as detailed as possible"
+
+#: ../../zh/community/contributing.md:266
+msgid "问题协作"
+msgstr "Issue Collaboration"
+
+#: ../../zh/community/contributing.md:268
+msgid "如发现未解决的 Issue 正是你打算处理的，请先在 Issue 下评论说明"
+msgstr "If you find an open Issue that you plan to work on, please comment on the Issue first"
+
+#: ../../zh/community/contributing.md:269
+msgid "对于打开较久的 Issue，处理前请先确认问题是否仍然存在"
+msgstr "For Issues that have been open for a while, please confirm the issue still exists before working on it"
+
+#: ../../zh/community/contributing.md:270
+msgid "如自行解决了自己报告的 Issue，关闭前请通知其他人"
+msgstr "If you resolve an Issue you reported yourself, please notify others before closing"
+
+#: ../../zh/community/contributing.md:272
+msgid "注意事项"
+msgstr "Notes"
+
+#: ../../zh/community/contributing.md:274
+msgid "避免提交不相关的变更"
+msgstr "Avoid committing unrelated changes"
+
+#: ../../zh/community/contributing.md:275
+msgid "保持提交历史简洁有序"
+msgstr "Keep commit history clean and organized"
+
+#: ../../zh/community/contributing.md:276
+msgid "创建 PR 前请 rebase 上游最新代码"
+msgstr "Please rebase with the latest upstream code before creating a PR"
+
+#: ../../zh/community/contributing.md:277
+msgid "对于 Bug 修复 PR，请链接所有相关 Issue"
+msgstr "For bug fix PRs, please link all related Issues"
+
+#: ../../zh/community/contributing.md:279
+msgid "更多信息"
+msgstr "More Information"
+
+#: ../../zh/community/contributing.md:281
+msgid "[安全须知](../../SECURITYNOTE_zh.md)"
+msgstr "[Security Note](../../SECURITYNOTE.md)"
+
+#: ../../zh/community/contributing.md:282
+msgid "[治理文档](governance.md)"
+msgstr "[Governance](governance.md)"
+
+#: ../../zh/community/contributing.md:283
+msgid "[常见问题](../FAQ.md)"
+msgstr "[FAQ](../FAQ.md)"

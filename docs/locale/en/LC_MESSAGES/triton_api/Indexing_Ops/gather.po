@@ -1,0 +1,232 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:1
+msgid "triton.language.gather"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:5
+msgid ""
+"简介：对`src`tensor沿`axis`维度按照`index`执行gather操作，gather操作含义见下图: "
+"![image](./gather.png) 原型："
+msgstr ""
+"Description: Performs gather operation on `src` tensor along `axis` "
+"dimension according to `index`. See the diagram below for the gather "
+"operation: ![image](./gather.png) Prototype:"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:5
+msgid "image"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:18
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:20
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "`src`"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "`tensor`"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "被执行gather操作的tensor"
+msgstr "The tensor on which the gather operation is performed"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "`index`"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "需要gather的索引"
+msgstr "The index for the gather operation"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "`axis`"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "`int`"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "需要执行gather操作的维度"
+msgstr "The dimension along which to perform the gather operation"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter; external invocation is not supported yet"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:29
+msgid "返回值：`tensor`： gather后的结果"
+msgstr "Return value: `tensor`: result after gather"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:31
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:33
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:40
+msgid "结论：Ascend 对比 GPU 缺失fp64的支持能力（硬件限制）。"
+msgstr ""
+"Conclusion: Ascend lacks support for fp64 compared to GPU (hardware "
+"limitation)."
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:42
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "支持维度范围"
+msgstr "Supported Dimension Range"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md
+msgid "仅支持 1~5维 tensor"
+msgstr "Only supports 1D to 5D tensors"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:49
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
+msgstr ""
+"Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
+" platforms; both support 1 to 5 dimensional tensors."
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:51
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:53
+msgid "相对社区能力缺失且无法实现"
+msgstr ""
+"Missing capability compared to the community version and cannot be "
+"implemented"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:55
+msgid "Ascend 对比 GPU 缺失fp64的支持能力（硬件限制）。"
+msgstr "Ascend lacks fp64 support compared to GPU (hardware limitation)."
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:57
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Indexing_Ops/gather.md:59
+msgid "参考以下示例："
+msgstr "Refer to the following example:"

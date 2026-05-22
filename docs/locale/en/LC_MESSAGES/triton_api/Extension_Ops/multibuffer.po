@@ -1,0 +1,190 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md:1
+msgid "triton.language.multibuffer"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md:5
+msgid "简介：为张量设置多缓冲，允许编译器对同一张量创建多个副本。 原型："
+msgstr "Description: Sets up multi-buffering for a tensor, allowing the compiler to create multiple copies of the same tensor. Prototype:"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md:16
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md:18
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "`src`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "`tensor`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "需要进行多缓冲设置的源张量"
+msgstr "The source tensor to be multi-buffered"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "`size`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "`int` 或 `constexpr`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "要创建的缓冲区副本数量"
+msgstr "The number of buffer copies to create"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "`_builder`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter, external calls not supported yet"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md:26
+msgid "返回值： `None`：此操作为一个编译提示，不会在运行时返回值，仅影响编译器的优化行为。"
+msgstr "Return value: `None`: This operation is a compilation hint that does not return a value at runtime and only affects the compiler's optimization behavior."
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md:29
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md:31
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md:37
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md:39
+msgid "支持任意形状的张量。"
+msgstr "Supports tensors of any shape."
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md:41
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "限制参数"
+msgstr "Limitation Parameter"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "描述"
+msgstr "Description"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md
+msgid "当前实现仅支持 `size` 为 `2`。"
+msgstr "The current implementation only supports `size` of `2`."
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md:47
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Extension_Ops/multibuffer.md:49
+msgid "以下示例展示了如何在 kernel 中为张量 `tmp0` 设置多缓冲，并结合其他编译提示使用："
+msgstr "The following example demonstrates how to set up multi-buffering for tensor `tmp0` in a kernel, combined with other compilation hints:"
+

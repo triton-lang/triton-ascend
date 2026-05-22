@@ -1,0 +1,237 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:1
+msgid "triton.language.broadcast"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:3
+msgid "1 功能作用说明"
+msgstr "1. Function Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:5
+msgid "将两个张量广播到共同兼容的形状，使它们可以进行逐元素操作。"
+msgstr ""
+"Broadcasts two tensors to a mutually compatible shape so that they can "
+"undergo element-wise operations."
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:7
+msgid "**语法：**"
+msgstr "**Syntax:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:9
+msgid "`triton.language.broadcast(input, other)` - 函数调用形式"
+msgstr "`triton.language.broadcast(input, other)` - function call form"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:11
+msgid "**功能：**"
+msgstr "**Function:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:13
+msgid "自动对齐不同秩张量得到目标形状"
+msgstr ""
+"Automatically aligns tensors of different ranks to obtain the target shape"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:14
+msgid "将大小为1的维度扩展到目标形状中对应维度的大小"
+msgstr ""
+"Expands dimensions of size 1 to match the corresponding dimension size in "
+"the target shape"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:16
+msgid "2 参数规格"
+msgstr "2. Parameter Specifications"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:18
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "必需"
+msgstr "Required"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "input"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "tensor"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "是"
+msgstr "Yes"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "第一个输入张量，必须为RankedTensorType"
+msgstr "First input tensor, must be RankedTensorType"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "other"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "第二个输入张量，必须为RankedTensorType"
+msgstr "Second input tensor, must be RankedTensorType"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:25
+msgid "**返回值：**"
+msgstr "**Return Value:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:27
+msgid "**类型：** tensor"
+msgstr "**Type:** tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:28
+msgid "**形状：** 两个tensor共同兼容的目标形状"
+msgstr ""
+"**Shape:** A target shape that is mutually compatible for both tensors"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:29
+msgid "**数据类型：** 每个返回的张量保持其输入的原始数据类型"
+msgstr ""
+"**Data Type:** Each returned tensor retains the original data type of its "
+"input"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:30
+msgid "**内存布局：**返回新创建的张量"
+msgstr "**Memory Layout:** Returns a newly created tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:32
+msgid "2.2 DataType支持表"
+msgstr "2.2 DataType Support Table"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "支持情况"
+msgstr "Support Status"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "float16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "float32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "bfloat16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "float8e4"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "float8e5"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "float64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md
+msgid "GPU支持"
+msgstr "GPU Support"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:39
+msgid "2.3 Shape支持表"
+msgstr "2.3 Shape Support Table"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:41
+msgid "支持任意维度数、任意形状大小。"
+msgstr "Supports any number of dimensions and any shape size."
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:43
+msgid "2.4 特殊限制说明"
+msgstr "2.4 Special Limitations"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:45
+msgid "无"
+msgstr "None"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:47
+msgid "2.5 使用方法"
+msgstr "2.5 Usage"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast.md:49
+msgid "**基本用法：**"
+msgstr "**Basic Usage:**"

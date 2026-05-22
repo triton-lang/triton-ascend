@@ -1,0 +1,62 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api_extension/al/debug_barrier.md:1
+msgid "1. 硬件背景"
+msgstr "1. Hardware Background"
+
+#: ../../zh/triton_api_extension/al/debug_barrier.md:3
+msgid "支持VF手动同步"
+msgstr "Supports manual VF synchronization."
+
+#: ../../zh/triton_api_extension/al/debug_barrier.md:5
+msgid "2.接口说明"
+msgstr "2. Interface Description"
+
+#: ../../zh/triton_api_extension/al/debug_barrier.md:13
+msgid "2.1 入参"
+msgstr "2.1 Parameters"
+
+#: ../../zh/triton_api_extension/al/debug_barrier.md:15
+msgid "sync_mode:指定barrier的类型，为al.SYNC_IN_VF 枚举"
+msgstr ""
+"`sync_mode`: specifies the barrier type; this is an `al.SYNC_IN_VF`"
+"enum."
+
+#: ../../zh/triton_api_extension/al/debug_barrier.md:72
+msgid "3.约束"
+msgstr "3. Constraints"
+
+#: ../../zh/triton_api_extension/al/debug_barrier.md:74
+msgid "仅可在scope中使用（目前未拦截）"
+msgstr ""
+"Can only be used inside a `scope` (currently not blocked by"
+"validation)."
+
+#: ../../zh/triton_api_extension/al/debug_barrier.md:76
+msgid "4.用例说明"
+msgstr "4. Example Description"
+
+#: ../../zh/triton_api_extension/al/debug_barrier.md:84
+msgid "输出："
+msgstr "Output:"
+

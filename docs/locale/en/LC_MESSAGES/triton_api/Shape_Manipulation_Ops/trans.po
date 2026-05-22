@@ -1,0 +1,249 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:1
+msgid "triton.language.trans"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:3
+msgid "1 功能作用说明"
+msgstr "1. Function Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:5
+msgid "根据dims参数转置张量的维度，不改变张量的数据，仅改变维度的顺序。专门优化的转置操作。"
+msgstr ""
+"Transposes tensor dims per `dims` without changing data. Specially optimized"
+" transpose."
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:7
+msgid "**语法：**"
+msgstr "**Syntax:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:9
+msgid "`triton.language.trans(input, dims)` - 函数调用形式"
+msgstr "`triton.language.trans(input, dims)` - function call form"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:10
+msgid "`input.trans(dims)` - 成员函数形式"
+msgstr "`input.trans(dims)` - member function form"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:12
+msgid "**功能：**"
+msgstr "**Function:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:14
+msgid "根据dims参数转置张量的维度"
+msgstr "Transposes tensor dims per `dims`"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:15
+msgid "不改变张量的数据，仅改变维度的顺序"
+msgstr "Doesn't change data, only changes dim order"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:16
+msgid "专门优化的转置操作"
+msgstr "Specially optimized transpose"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:18
+msgid "2 参数规格"
+msgstr "2. Parameter Specifications"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:20
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "参数名"
+msgstr "Parameter"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "必需"
+msgstr "Required"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "input"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "tensor"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "是"
+msgstr "Yes"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "输入张量"
+msgstr "Input tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "dims"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "List[int]"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "转置后的维度顺序"
+msgstr "Transposed dim order"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:27
+msgid "**返回值：**"
+msgstr "**Return Value:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:29
+msgid "**类型：** tensor"
+msgstr "**Type:** tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:30
+msgid "**形状：** 按照dims参数重新排列的维度"
+msgstr "**Shape:** Dimensions rearranged according to the `dims` parameter"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:31
+msgid "**数据类型：** 与输入张量相同"
+msgstr "**Data Type:** Same as the input tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:32
+msgid "**内存布局：** 通过改变步长信息实现转置，无数据拷贝"
+msgstr ""
+"**Memory Layout:** Transposition achieved by modifying stride information, "
+"no data copy"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:34
+msgid "**约束条件：**"
+msgstr "**Constraints:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:36
+msgid "dims必须包含输入张量的所有维度索引"
+msgstr "dims must include all input tensor dim indices"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:38
+msgid "2.2 DataType支持表"
+msgstr "2.2 DataType Support Table"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "支持情况"
+msgstr "Support Status"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "float16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "float32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "bfloat16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "float8e4"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "float8e5"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "float64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md
+msgid "GPU支持"
+msgstr "GPU Support"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:45
+msgid "2.3 Shape支持表"
+msgstr "2.3 Shape Support Table"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:47
+msgid "支持任意维度数、任意形状大小。"
+msgstr "Supports any number of dims and any shape size."
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:49
+msgid "2.4 特殊限制说明"
+msgstr "2.4 Special Limitations"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:51
+msgid "不支持维度高于8的转置"
+msgstr "Transpose for dim > 8 not supported"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/trans.md:53
+msgid "2.5 使用方法"
+msgstr "2.5 Usage"

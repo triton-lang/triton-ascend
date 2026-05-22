@@ -1,0 +1,250 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:1
+msgid "triton.language.join"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:3
+msgid "1 功能作用说明"
+msgstr "1. Function Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:5
+msgid "将两个相同形状的输入张量沿着新的最小维度连接，输出张量比输入张量多一个维度，大小为2，保持其他维度不变。"
+msgstr ""
+"Concatenates two input tensors of the same shape along a new minor "
+"dimension. The output tensor has one more dimension than the input tensors, "
+"with a size of 2, keeping other dimensions unchanged."
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:7
+msgid "**语法：**"
+msgstr "**Syntax:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:9
+msgid "`triton.language.join(x, y)` - 函数调用形式"
+msgstr "`triton.language.join(x, y)` - function call form"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:10
+msgid "`x.join(y)` - 成员函数形式"
+msgstr "`x.join(y)` - member function form"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:12
+msgid "**功能：**"
+msgstr "**Function:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:14
+msgid "将两个相同形状的输入张量沿着新的最小维度连接"
+msgstr ""
+"Concatenates two input tensors of the same shape along a new minor dimension"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:15
+msgid "输出张量比输入张量多一个维度，大小为2"
+msgstr ""
+"The output tensor has one more dimension than the input tensor, with a size "
+"of 2"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:16
+msgid "保持其他维度不变"
+msgstr "Keeps other dimensions unchanged"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:18
+msgid "2 参数规格"
+msgstr "2. Parameter Specifications"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:20
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "必需"
+msgstr "Required"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "x"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "tensor"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "是"
+msgstr "Yes"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "第一个输入张量"
+msgstr "First input tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "y"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "第二个输入张量"
+msgstr "Second input tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:27
+msgid "**返回值：**"
+msgstr "**Return Value:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:29
+msgid "**类型：** tensor"
+msgstr "**Type:** tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:30
+msgid "**形状：** 输入tensor广播后的形状加上一个大小为2的维度"
+msgstr ""
+"**Shape:** Broadcast shape of the input tensor plus a dimension of size 2"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:31
+msgid "**数据类型：** 与输入张量相同"
+msgstr "**Data Type:** Same as the input tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:32
+msgid "**内存布局：** 在新增维度上堆叠x和y"
+msgstr "**Memory Layout:** Stacking x and y on the new dimension"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:34
+msgid "**约束条件：**"
+msgstr "**Constraints:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:36
+msgid "两个输入张量必须具有可以广播到相同形状的形状和数据类型"
+msgstr ""
+"Both input tensors must have shapes and data types that can be broadcast to "
+"the same shape"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:38
+msgid "2.2 DataType支持表"
+msgstr "2.2 DataType Support Table"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "支持情况"
+msgstr "Support Status"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "float16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "float32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "bfloat16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "float8e4"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "float8e5"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "float64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md
+msgid "GPU支持"
+msgstr "GPU Support"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:45
+msgid "2.3 Shape支持表"
+msgstr "2.3 Shape Support Table"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:47
+msgid "支持任意维度数、任意形状大小。"
+msgstr "Supports any number of dimensions and any shape size."
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:49
+msgid "2.4 特殊限制说明"
+msgstr "2.4 Special Limitations"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:51
+msgid "无"
+msgstr "None"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/join.md:53
+msgid "2.5 使用方法"
+msgstr "2.5 Usage"

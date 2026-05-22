@@ -54,12 +54,12 @@
 ```python
 @triton.jit
 def flatten_kernel(x_ptr, output_ptr, M, N, BLOCK_SIZE: tl.constexpr):
-    # 加载2D数据
+    # Load 2D data
     x = tl.load(x_ptr + offsets, mask=mask)
 
-    # 展平为一维
+    # Flatten to 1D
     x_flat = x.ravel()
 
-    # 存储展平结果
+    # Store flattened result
     tl.store(output_ptr + offsets, x_flat, mask=mask)
 ```

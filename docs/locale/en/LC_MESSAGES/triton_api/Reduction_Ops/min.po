@@ -1,0 +1,264 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:1
+msgid "triton.language.min"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:5
+msgid "简介：在指定维度上返回最小值"
+msgstr "Description: Returns the minimum value along the specified dimension"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:11
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:13
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "参数名"
+msgstr "Parameter"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "`input`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "`tensor`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "输入的张量数据"
+msgstr "Input tensor data"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "`axis`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "`int`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "指定在哪个维度上进行规约"
+msgstr "Which dim to reduce along"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "`keep_dims`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "`bool`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "如果为True，保留被规约的维度(大小为1)"
+msgstr "If True, keep reduced dim (size 1)"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "`return_indices`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "True返回最小值的同时返回最小值相关所在下标"
+msgstr "True: returns min and its index"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "`return_indices_tie_break_left`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "True如果多个元素有相同的最小值，返回最左侧最小值的下标。"
+msgstr "True: returns leftmost min index on tie."
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:23
+msgid "返回值： `tl.tensor`：同`input`的shape的张量"
+msgstr "Return value: `tl.tensor`: A tensor with the same shape as `input`"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:26
+msgid "参数组合支持："
+msgstr "Supported parameter combinations:"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "axis"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "keep_dims"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "return_indices"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "return_indices_tie_break_left"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "规格"
+msgstr "Specifications"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "1"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "TRUE"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "支持"
+msgstr "Supported"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "FALSE"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "None"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "不支持"
+msgstr "Not Supported"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:47
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:49
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "bool/int1"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:56
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "支持维度范围"
+msgstr "Supported Dimension Range"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md
+msgid "无限制"
+msgstr "No restrictions"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:63
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
+msgstr "Shape: No difference between GPU and Ascend."
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:65
+msgid "2.3 使用方法"
+msgstr "2.3 Usage"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:67
+msgid ""
+"更多示例参考triton-ascend代码仓，ascend/examples/generalization_cases/test_min.py"
+msgstr ""
+"More examples: triton-ascend repo, "
+"ascend/examples/generalization_cases/test_min.py"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:78
+msgid "2.4. 特殊限制"
+msgstr "2.4 Special Limitations"
+
+#: ../../zh/triton_api/Reduction_Ops/min.md:80
+msgid "Ascend A3对比 GPU 缺失uint16、uint32、uint64、fp64的支持。"
+msgstr "Ascend A3 lacks uint16, uint32, uint64, fp64 vs GPU."

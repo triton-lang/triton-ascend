@@ -1,0 +1,216 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/release_note.md:1
+msgid "Triton-Ascend 版本发布"
+msgstr "Triton-Ascend Release"
+
+#: ../../zh/release_note.md:3
+msgid ""
+"Triton-Ascend 版本提供了一个稳定的代码基础快照，封装成可以通过 PyPI "
+"轻松安装的二进制包。此外，版本发布代表着开发团队可以向社区正式宣布新功能的可用性、已完成的改进以及可能影响用户的变化（例如破坏性变更）。"
+msgstr ""
+"The Triton-Ascend version provides a stable code base snapshot, which is"
+"encapsulated into a binary package that can be easily installed through"
+"PyPI. In addition, the release represents that the development team can"
+"officially announce the availability of new functions, completed"
+"improvements, and changes that may affect users (such as destructive"
+"changes) to the community."
+
+#: ../../zh/release_note.md:5
+msgid "发布兼容性矩阵"
+msgstr "Release Compatibility Matrix"
+
+#: ../../zh/release_note.md:7
+msgid "以下是 Triton-Ascend 版本的发布兼容性矩阵："
+msgstr ""
+"The release compatibility matrix of the Triton-Ascend version is as"
+"follows."
+
+#: ../../zh/release_note.md
+msgid "Triton-Ascend 版本"
+msgstr "Triton-Ascend Version"
+
+#: ../../zh/release_note.md
+msgid "Python 版本"
+msgstr "Python Version"
+
+#: ../../zh/release_note.md
+msgid "Manylinux 版本"
+msgstr "Manylinux Version"
+
+#: ../../zh/release_note.md
+msgid "硬件平台"
+msgstr "Hardware Platform"
+
+#: ../../zh/release_note.md
+msgid "硬件产品"
+msgstr "Hardware Product"
+
+#: ../../zh/release_note.md
+msgid "3.2.0"
+msgstr "3.2.0"
+
+#: ../../zh/release_note.md
+msgid ">=3.9, <=3.11"
+msgstr "3.9 to 3.11"
+
+#: ../../zh/release_note.md
+msgid "glibc 2.27+, x86-64, aarch64"
+msgstr "glibc 2.27+, x86-64, AArch64"
+
+#: ../../zh/release_note.md
+msgid "Ascend NPU"
+msgstr "Ascend NPU"
+
+#: ../../zh/release_note.md
+msgid "Atlas A2/A3"
+msgstr "Atlas A2/A3"
+
+#: ../../zh/release_note.md:13
+msgid "发布计划"
+msgstr "Release Date"
+
+#: ../../zh/release_note.md:15
+msgid "以下是 Triton-Ascend 的发布计划。请注意：补丁版本是可选的。"
+msgstr ""
+"The following is the release plan of Triton-Ascend. Note: The patch"
+"version is optional."
+
+#: ../../zh/release_note.md
+msgid "主版本"
+msgstr "Major Version"
+
+#: ../../zh/release_note.md
+msgid "发布分支切出时间"
+msgstr "Release Branch Cut-Out Time"
+
+#: ../../zh/release_note.md
+msgid "发布日期"
+msgstr "Release Date"
+
+#: ../../zh/release_note.md
+msgid "补丁发布日期"
+msgstr "Patch Release Date"
+
+#: ../../zh/release_note.md
+msgid "2025年12月08日"
+msgstr "2025-12-08"
+
+#: ../../zh/release_note.md
+msgid "2026年1月"
+msgstr "2026-01"
+
+#: ../../zh/release_note.md
+msgid "---"
+msgstr "---"
+
+#: ../../zh/release_note.md:21
+msgid "版本亮点"
+msgstr "Highlights"
+
+#: ../../zh/release_note.md:23
+msgid "Triton-Ascend 3.2.0"
+msgstr "Triton-Ascend 3.2.0"
+
+#: ../../zh/release_note.md:25
+msgid "**首次发布：Ascend NPU 支持**"
+msgstr "**First release: Ascend NPU is supported.**"
+
+#: ../../zh/release_note.md:27
+msgid ""
+"Triton-Ascend 3.2.0 是第一个正式支持华为 Ascend NPU 的 Triton 版本。此版本基于 Triton 3.2.0 "
+"社区版本，专门适配 Ascend NPU 硬件架构。"
+msgstr ""
+"Triton-Ascend 3.2.0 is the first Triton version that officially supports"
+"Huawei Ascend NPU. This version is based on the Triton 3.2.0 community"
+"version and is specially adapted to the Ascend NPU hardware"
+"architecture."
+
+#: ../../zh/release_note.md:29
+msgid "主要特性"
+msgstr "Main Features"
+
+#: ../../zh/release_note.md:31
+msgid "**Ascend NPU 全栈支持**"
+msgstr "1. **Full-stack support for Ascend NPU**"
+
+#: ../../zh/release_note.md:32
+msgid "完整的 Triton IR 到 NPU 指令集编译流水线"
+msgstr ""
+"   - The instruction set compilation pipeline from Triton IR to NPU is"
+"complete."
+
+#: ../../zh/release_note.md:33
+msgid "支持全部 Triton Ops"
+msgstr "   - All Triton Ops are supported."
+
+#: ../../zh/release_note.md:35
+msgid "**性能优化**"
+msgstr "2. **Performance optimization**"
+
+#: ../../zh/release_note.md:36
+msgid "NPU 特定内核优化"
+msgstr "   - NPU-specific kernel optimization"
+
+#: ../../zh/release_note.md:37
+msgid "CV 计算优化"
+msgstr "   - CV compute optimization"
+
+#: ../../zh/release_note.md:39
+msgid "**开发者工具**"
+msgstr "3. **Developer tools**"
+
+#: ../../zh/release_note.md:40
+msgid "支持全面的调试输出"
+msgstr "   - Comprehensive debug output is supported."
+
+#: ../../zh/release_note.md:41
+msgid "编译中间产物转储"
+msgstr "   - Intermediate compilation products are dumped."
+
+#: ../../zh/release_note.md:43
+msgid "已知限制"
+msgstr "Known Limitations"
+
+#: ../../zh/release_note.md:45
+msgid "**数据类型**: 部分数据类型支持仍在完善中"
+msgstr "1. **Data type**: Some data types are still being improved."
+
+#: ../../zh/release_note.md:46
+msgid "**算子覆盖**: 正在持续扩展支持的算子集合"
+msgstr ""
+"2. **Operator coverage**: The supported operator set is being"
+"continuously expanded."
+
+#: ../../zh/release_note.md:48
+msgid "迁移指南"
+msgstr "Migration Guide"
+
+#: ../../zh/release_note.md:50
+msgid ""
+"对于现有 Triton GPU 用户迁移到 Ascend NPU，详见 [GPU "
+"Triton算子迁移](./migration_guide/migrate_from_gpu.md)"
+msgstr ""
+"For details about how to migrate existing Triton GPU users to Ascend"
+"NPU, see [Migrating Triton Operators from"
+"GPUs](./migration_guide/migrate_from_gpu.md)."
+

@@ -1,0 +1,206 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:1
+msgid "triton.language.cumsum"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:5
+msgid "简介：`triton.language.cumsum` 计算输入tensor沿指定轴的累积和，返回累积求和结果。"
+msgstr ""
+"Description: `triton.language.cumsum` computes the cumulative sum of the "
+"input tensor along the specified axis, returning the cumulative sum result."
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:11
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:13
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "`input`"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "`Tensor`"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "输入tensor"
+msgstr "Input tensor"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "`axis`"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "`int`"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "沿着哪个维度进行累积和操作，默认为0"
+msgstr "The dimension along which to perform cumulative sum, defaults to 0"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "`reverse`"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "`bool`"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "如果为True，沿反方向进行累积和操作"
+msgstr "If True, performs cumulative sum in reverse direction"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:21
+msgid ""
+"`cumsum` 函数计算沿指定轴的累积和（前缀和）。例如，对于输入 `[a, b, c, d]`，累积和结果为 `[a, a+b, a+b+c, "
+"a+b+c+d]`。"
+msgstr ""
+"The `cumsum` function computes the cumulative sum (prefix sum) along the "
+"specified axis. For example, for input `[a, b, c, d]`, the cumulative sum "
+"result is `[a, a+b, a+b+c, a+b+c+d]`."
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:23
+msgid "当 `reverse=True` 时，计算反向累积和：`[a+b+c+d, b+c+d, c+d, d]`。"
+msgstr ""
+"When `reverse=True`, computes the reverse cumulative sum: `[a+b+c+d, b+c+d, "
+"c+d, d]`."
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:25
+msgid "返回值： `tensor`：计算输入tensor沿指定轴的累积和，返回累积求和结果。"
+msgstr ""
+"Return value: `tensor`: computes the cumulative sum of the input tensor "
+"along the specified axis, returning the cumulative sum result."
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:28
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:30
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "bool/int1"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md
+msgid "GPU支持"
+msgstr "GPU Support"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:37
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:39
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
+msgstr ""
+"Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
+" platforms."
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:41
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:43
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/cumsum.md:45
+msgid "以下示例实现了对2Dshape的tensor进行cumsum运算："
+msgstr "The following example demonstrates cumsum on a 2D tensor:"

@@ -1,0 +1,251 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Math_Ops/div.md:1
+msgid "div"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Math_Ops/div.md:5
+msgid "简介：除法，四则运算 ‘/’，无tl.div方法"
+msgstr ""
+"Description: Division, equivalent to the arithmetic operator '/'. No tl.div "
+"method."
+
+#: ../../zh/triton_api/Math_Ops/div.md:7
+msgid "底层实现与fdiv算子相同，只不过fdiv明确限制入参必须是float类型，‘/’无此限制，它会把非浮点型转换为浮点型再做计算"
+msgstr ""
+"The underlying implementation is the same as the fdiv operator, except that "
+"fdiv explicitly requires the input to be float type, while '/' has no such "
+"restriction and converts non-floating-point types to floating point before "
+"computation"
+
+#: ../../zh/triton_api/Math_Ops/div.md:9
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Math_Ops/div.md:11
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "`self`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "`tensor or Number`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "第一个入参 ，被除数"
+msgstr "First input parameter, dividend"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "`other`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "第二个入参 ，除数"
+msgstr "Second input parameter, divisor"
+
+#: ../../zh/triton_api/Math_Ops/div.md:18
+msgid "返回值： `tl.tensor`：除法结果 返回结果类型：总是返回浮点型"
+msgstr ""
+"Return value: `tl.tensor`: division result. Result type: always returns "
+"floating-point type"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "输入类型"
+msgstr "Input Type"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "处理方式"
+msgstr "Handling Method"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "结果类型"
+msgstr "Result Type"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "`int / int`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "两个都转成 `float32`"
+msgstr "Both are converted to `float32`"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "`float32`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "`int / float`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "int 转 float"
+msgstr "int to float"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "float 类型"
+msgstr "float type"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "`float / float`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "统一到更高精度 float"
+msgstr "Unified to higher-precision float"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "高精度 float"
+msgstr "High-precision float"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "`float / int`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md:29
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Math_Ops/div.md:31
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "bool/int1"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div.md:38
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "支持维度范围"
+msgstr "Supported Dimension Range"
+
+#: ../../zh/triton_api/Math_Ops/div.md
+msgid "无限制"
+msgstr "No restrictions"
+
+#: ../../zh/triton_api/Math_Ops/div.md:45
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
+msgstr ""
+"Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
+" platforms."
+
+#: ../../zh/triton_api/Math_Ops/div.md:47
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Math_Ops/div.md:49
+msgid "Ascend A3 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持"
+msgstr ""
+"Ascend A3 lacks support for uint8, uint16, uint32, uint64, fp64 compared to "
+"GPU"
+
+#: ../../zh/triton_api/Math_Ops/div.md:51
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Math_Ops/div.md:53
+msgid "以下示例实现了对输入张量 `in_ptr0, in_ptr1` 做除法计算："
+msgstr ""
+"The following example demonstrates division on input tensors `in_ptr0, "
+"in_ptr1`:"

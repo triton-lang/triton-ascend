@@ -1,0 +1,105 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:1
+msgid "矩阵乘法 （Matrix Multiplication）"
+msgstr "Matrix Multiplication"
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:3
+msgid "在本节中，我们展示了使用 Triton 进行矩阵乘法的内核实现。"
+msgstr ""
+"This section describes how to implement a matrix multiplication kernel"
+"using Triton."
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:5
+msgid "计算内核"
+msgstr "Compute Kernel"
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:7
+#, python-brace-format
+msgid ""
+"以下 Triton 内核实现了一个带偏置项的批量矩阵乘法（Batched Matrix Multiplication with Bias）：   "
+"计算公式为：   $$ \\text{output}[b, i, j] = \\sum_k \\text{x}[b, i, k] \\cdot "
+"\\text{y}[k, j] + \\text{z}[b, i, j] $$   其中："
+msgstr ""
+"The following Triton kernel implements batched matrix multiplication"
+"with bias:"
+"The formula is as follows: "
+"$$ \\text{output}[b, i, j] = \\sum_k \\text{x}[b, i, k] \\cdot"
+"\\text{y}[k, j] + \\text{z}[b, i, j] $$"
+"Specifically:"
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:12
+msgid "`x` 的形状为 `(A, B)`"
+msgstr "The shape of `x` is `(A, B)`."
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:13
+msgid "`y` 的形状为 `(B, C)`"
+msgstr "The shape of `y` is `(B, C)`."
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:14
+msgid "`z`（偏置）的形状为 `(A, C)`"
+msgstr "The shape of `z` (bias) is `(A, C)`."
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:15
+msgid "输出 `output` 的形状为 `(A, C)`"
+msgstr "The shape of `output` is `(A, C)`."
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:17
+msgid "该内核假设单个 block 负责整个输出矩阵的计算，适用于小规模矩阵（A、B、C 较小且能被当前程序块完全覆盖）。"
+msgstr ""
+"This kernel assumes that a single block is responsible for computing the"
+"entire output matrix. It is applicable to small-scale matrices (A, B,"
+"and C are small and can be fully covered by the current program block)."
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:64
+msgid "工具方法"
+msgstr "Tools and Methods"
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:66
+msgid "以下辅助函数用于支持 Triton 内核的测试与验证，包括 PyTorch 参考实现、数据类型映射、随机张量生成及结果校验。"
+msgstr ""
+"The following helper functions are used to support the testing and"
+"verification of Triton kernels, including PyTorch reference"
+"implementation, data type mapping, random tensor generation, and result"
+"verification."
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:127
+msgid "参数化测试"
+msgstr "Parameterized Test"
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:129
+msgid "使用 `pytest` 对 `triton_dot_2_Bias` 内核进行参数化功能验证，覆盖不同矩阵维度和数据类型组合。"
+msgstr ""
+"Use `pytest` to verify the parameterization function of the"
+"`triton_dot_2_Bias` kernel, covering different combinations of matrix"
+"dimensions and data types."
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:175
+msgid "**输出示例：**"
+msgstr "**Output example:**"
+
+#: ../../zh/examples/05_matrix_multiplication_example.md:181
+msgid "上面输出日志表明Triton和Pytorch上的输出结果完全一致。"
+msgstr ""
+"The preceding logs indicate that the output on Triton is the same as"
+"that on PyTorch."

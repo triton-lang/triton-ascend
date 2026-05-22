@@ -1,0 +1,77 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/index.rst:8
+msgid "快速开始"
+msgstr "Quick Start"
+
+#: ../../zh/index.rst:14
+msgid "安装指南"
+msgstr "Installation Guide"
+
+#: ../../zh/index.rst:20
+msgid "架构设计与核心特性"
+msgstr "Architecture Design and Core Features"
+
+#: ../../zh/index.rst:26
+msgid "Triton 算子开发指南"
+msgstr "Triton Programming Guide"
+
+#: ../../zh/index.rst:35
+msgid "Triton 算子迁移指南"
+msgstr "Triton Migration Guide"
+
+#: ../../zh/index.rst:42
+msgid "典型算子样例"
+msgstr "Example Kernels"
+
+#: ../../zh/index.rst:48
+msgid "算子调试与调优"
+msgstr "Debugging and Profiling"
+
+#: ../../zh/index.rst:56
+msgid "Triton API 接口说明"
+msgstr "Triton API Reference"
+
+#: ../../zh/index.rst:63
+msgid "Libdevice 开发者手册"
+msgstr "Libdevice Developer Guide"
+
+#: ../../zh/index.rst:69
+msgid "昇腾扩展 API 接口说明"
+msgstr "Ascend Extension API Reference"
+
+#: ../../zh/index.rst:75
+msgid "环境变量和编译选项"
+msgstr "Environment Variables and Compiler Options"
+
+#: ../../zh/index.rst:81
+msgid "常见问题"
+msgstr "FAQ"
+
+#: ../../zh/index.rst:87
+msgid "社区与贡献"
+msgstr "Community and Contributing"
+
+#: ../../zh/index.rst:2
+msgid "Triton Ascend"
+msgstr "Triton Ascend"
+

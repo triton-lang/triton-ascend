@@ -1,0 +1,229 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:1
+msgid "triton.language.advance"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:5
+msgid "简介：将`tl.make_block_ptr`的offset增加一个偏移量 原型："
+msgstr ""
+"Description: Adds an offset to the offset of `tl.make_block_ptr`. Prototype:"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:16
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:18
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "参数名"
+msgstr "Parameter"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "`base`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "`triton.PointerType`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "需要被更新的指针，`tl.make_block_ptr`的结果"
+msgstr "The pointer to be updated, result of `tl.make_block_ptr`"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "`offsets`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "`tuple(int | constexpr)`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "张量各维度的基址偏移量列表，`len(offsets)`需要与`len(base.offsets)`相等"
+msgstr ""
+"List of base address offsets for each tensor dim. `len(offsets)` must equal "
+"`len(base.offsets)`"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter, external calls not supported yet"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:26
+msgid "返回值：`pointer_type<blocked<shape, element_type>>`： 指向tensor的指针"
+msgstr ""
+"Return value: `pointer_type<blocked<shape, element_type>>`: Pointer to a "
+"tensor"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:28
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:30
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:37
+msgid "结论：Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。"
+msgstr ""
+"Ascend lacks uint8, uint16, uint32, uint64, fp64 support vs GPU (hw "
+"limitation)."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:39
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "支持维度范围"
+msgstr "Supported Dimension Range"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md
+msgid "仅支持 1~5维 tensor"
+msgstr "Only supports 1~5D tensors"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:46
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
+msgstr ""
+"Shape: No difference between GPU and Ascend. Both support 1~5D tensors."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:48
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:50
+msgid "相对社区能力缺失且无法实现"
+msgstr "Not supported vs. community version and cannot be implemented"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:52
+msgid "Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。"
+msgstr ""
+"Ascend lacks uint8, uint16, uint32, uint64, fp64 vs GPU (hw limitation)."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:53
+msgid "Ascend只允许通过调整`order`参数的顺序来表达转置语义，不能通过调整`stride`参数的顺序实现转置语义。"
+msgstr ""
+"Ascend only supports transpose via `order` parameter order, not via `stride`"
+" order."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:54
+msgid "当前`tl.make_tensor_ptr`，如果与较复杂的循环和分支语句搭配使用，可能会出现编译问题"
+msgstr ""
+"`tl.make_tensor_ptr` may have compilation issues with complex loops/branches"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:56
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.advance.md:58
+msgid "参考以下示例："
+msgstr "Refer to the following example:"

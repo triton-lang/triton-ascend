@@ -1,0 +1,113 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:1
+msgid "to_buffer"
+msgstr "to_buffer"
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:3
+msgid "1. 硬件背景"
+msgstr "1. Hardware Background"
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:5
+msgid "用于将 tl.tensor 张量对象 转换为昇腾硬件专用的 bl.buffer 缓冲区对象，是张量与硬件内存缓冲区的核心转换接口。"
+msgstr ""
+"Used to convert a `tl.tensor` object into a `bl.buffer` object specific"
+"to Ascend hardware. It is the core conversion interface between tensors"
+"and hardware memory buffers."
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:7
+msgid "2. 接口定义"
+msgstr "2. Interface Definition"
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:15
+msgid "3. 参数说明"
+msgstr "3. Parameter Description"
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:50
+msgid "4. 返回值"
+msgstr "4. Return Value"
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:52
+msgid "返回与输入张量对应的 bl.buffer 对象"
+msgstr "Returns the `bl.buffer` object corresponding to the input tensor."
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:54
+msgid "若传入 bind_buffer 参数，直接返回该绑定缓冲区本身"
+msgstr ""
+"If a `bind_buffer` parameter is provided, the function returns that"
+"bound buffer directly."
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:56
+msgid "5. 约束说明"
+msgstr "5. Constraints"
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:58
+msgid "接口约束规则与 bl.allocate_local_buffer 保持一致"
+msgstr ""
+"The interface follows the same constraint rules as"
+"`bl.allocate_local_buffer`."
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:60
+msgid "地址空间参数需严格匹配昇腾硬件支持的内存区域（UB/L1/L0A/L0B/L0C）"
+msgstr ""
+"The address-space parameter must strictly match memory regions"
+"supported by Ascend hardware (UB/L1/L0A/L0B/L0C)."
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:62
+msgid "6. 完整使用示例"
+msgstr "6. Complete Example"
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:64
+msgid "基础用法（内核定义 + 编译验证）"
+msgstr "Basic Usage (Kernel Definition + Compilation Verification)"
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:72
+msgid "进阶用法（编译 + 打印 IR）"
+msgstr "Advanced Usage (Compilation + IR Printing)"
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:80
+msgid "7. 核心说明"
+msgstr "7. Key Notes"
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:82
+msgid "该接口是 张量 ↔ 硬件缓冲区 的核心转换入口"
+msgstr ""
+"This interface is the core entry point for converting between tensors"
+"and hardware buffers."
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:84
+msgid "支持手动指定昇腾全系列硬件地址空间（UB/L1/L0）"
+msgstr ""
+"Supports manual selection of the full set of Ascend hardware address"
+"spaces (UB/L1/L0)."
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:86
+msgid "支持绑定现有缓冲区，满足精细化内存管理需求"
+msgstr ""
+"Supports binding to existing buffers to satisfy fine-grained memory"
+"management requirements."
+
+#: ../../zh/triton_api_extension/bl/to_buffer.md:88
+msgid "仅可在 @triton.jit 修饰的内核函数中使用"
+msgstr "Can only be used inside kernel functions decorated with `@triton.jit`."
+

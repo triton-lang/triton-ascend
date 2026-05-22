@@ -36,13 +36,13 @@ import triton.language as tl
 
 @triton.jit
 def basic_device_assert_example(x_ptr, BLOCK_SIZE: tl.constexpr):
-    # 基本断言：检查程序ID
+    # Basic assertion: check program ID
     pid = tl.program_id(0)
     tl.device_assert(pid >= 0, "Program ID must be non-negative")
 
     offsets = tl.arange(0, BLOCK_SIZE)
     x = tl.load(x_ptr + offsets)
 
-    # 检查数据有效性（比如检查张量中没有负值）
+    # Check data validity (e.g., check tensor for negative values)
     tl.device_assert(tl.min(x) >= 0, "All values must be non-negative")
 ```

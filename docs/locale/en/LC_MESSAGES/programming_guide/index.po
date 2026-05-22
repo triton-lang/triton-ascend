@@ -1,0 +1,491 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/programming_guide/index.md:1
+msgid "Triton算子开发指南"
+msgstr "Triton Operator Development Guide"
+
+#: ../../zh/programming_guide/index.md:3
+msgid ""
+"概述：本文着重介绍了在NPU上进行Triton算子开发中值得注意的问题，分为三个方面：多核任务并行、单核数据搬运、单核数据运算。首先在多核任务并行中介绍了设置最大硬件核数的依据以及具体的实现。然后在单核数据搬运中具体描述了如何设置合适的循环内数据分块大小，并且介绍了过程中常用的优化手段，还补充了可能面临的UB"
+" OVERFLOW问题的处理方式。最后回归单个算子，在单核数据运算层面着重介绍了如何开发Triton算子，并强调了相关的关键点。"
+msgstr ""
+"This document focuses on the issues that need to be paid attention to"
+"during Triton operator development on NPUs, which are divided into three"
+"aspects: multi-core task parallelism, single-core data transfer, and"
+"single-core data computation. First, section \"Multi-Core Task"
+"Parallelism\" describes the basis for setting the maximum number of"
+"hardware cores and the specific implementation. Then, section"
+"\"Single-Core Data Transfer\" describes how to set the proper data block"
+"size in a loop, introduces the common optimization methods, and"
+"describes how to handle the UB overflow problem that may occur. Finally,"
+"section \"Single-Core Data Computation\" focuses on how to develop"
+"Triton operators and highlights the key points."
+
+#: ../../zh/programming_guide/index.md:5
+msgid "文档组织"
+msgstr "Documentation Structure"
+
+#: ../../zh/programming_guide/index.md:7
+msgid "本指南将通用开发原则和按硬件执行单元划分的算子开发路径分开组织："
+msgstr "This guide separates common development rules from operator-specific development paths:"
+
+#: ../../zh/programming_guide/index.md:9
+msgid "本页介绍所有 Triton-Ascend 算子都需要关注的通用问题，包括分核、片上内存、访存、Tiling 和 Autotune。"
+msgstr "This page covers common Triton-Ascend concerns, including core allocation, on-chip memory, memory access, tiling, and autotune."
+
+#: ../../zh/programming_guide/index.md:10
+msgid ""
+"[Vector 算子开发](./vector_operator.md) 介绍主要由 Vector Core "
+"执行的逐元素、归约、Gather/Scatter 等算子。"
+msgstr "[Vector Operator Development](./vector_operator.md) describes element-wise, reduction, gather/scatter, and other operators mainly executed on Vector Cores."
+
+#: ../../zh/programming_guide/index.md:11
+msgid "[Cube 算子开发](./cube_operator.md) 介绍以 `tl.dot`、矩阵乘、批量矩阵乘为核心的算子。"
+msgstr "[Cube Operator Development](./cube_operator.md) describes operators whose main computation is `tl.dot`, matrix multiplication, or batched matrix multiplication."
+
+#: ../../zh/programming_guide/index.md:12
+msgid ""
+"[CV 融合算子开发](./cv_fusion_operator.md) 介绍同一个算子中同时存在 Cube 计算和 Vector "
+"后处理、归约、Softmax 或跨核协同的场景。"
+msgstr "[CV Fusion Operator Development](./cv_fusion_operator.md) describes operators that combine Cube computation with Vector post-processing, reductions, softmax, or cross-core coordination."
+
+#: ../../zh/programming_guide/index.md:14
+msgid ""
+"简单算子优先参考本仓 `docs/zh/examples/` 和 `third_party/ascend/tutorials/`；复杂算子优先参考"
+" GitHub 上的 [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-"
+"ascend-ops) 中 `tutorial/best_practice/` 的完整优化案例。"
+msgstr ""
+"For simple operators, refer to this repository's `docs/en/examples/` and"
+"`third_party/ascend/tutorials/`. For complex operators, refer to"
+"complete optimization cases in `tutorial/best_practice/` of"
+"[Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops)."
+
+#: ../../zh/programming_guide/index.md:16
+msgid "通用多核任务并行"
+msgstr "Common Multi-Core Task Parallelism"
+
+#: ../../zh/programming_guide/index.md:18
+msgid "设置最大硬件核数"
+msgstr "Setting the Maximum Number of Hardware Cores"
+
+#: ../../zh/programming_guide/index.md:20
+msgid ""
+"在一个Triton算子中，通常使用grid进行分核操作。对于GPU而言，其计算核心SM通常是几十到几百量级。但是对于昇腾 NPU "
+"平台而言，其计算核心AI Core的数量在几十个的量级。 "
+"虽然运行时接口允许下发并发任务数最大为65535，但超过物理核数的部分是通过新一轮的下发来完成的。如果直接将GPU上的Triton算子拿到昇腾平台上运行，这些大量的任务会引入可观的核启动和核初始化时的额外开销，影响到算子性能表现。"
+" 因此，需要针对昇腾平台特性修改分核逻辑。最推荐的做法是**将分核的数量直接固定为硬件的物理核数**，在核内做更为细致的数据分块："
+msgstr ""
+"In a Triton operator, the grid is usually used for core allocation. For"
+"GPUs, it contains dozens or hundreds of core SMs. However, for the"
+"Ascend NPU platform, it contains dozens of AI Cores for computation.\\"
+"Although the runtime interface allows a maximum of 65,535 concurrent"
+"tasks to be delivered, the tasks that exceed the number of physical"
+"cores are delivered in a new round. If the Triton operator on the GPU is"
+"directly executed on the Ascend platform, a large number of tasks will"
+"introduce considerable overhead during core startup and initialization,"
+"affecting the operator performance.\\"
+"Therefore, the core allocation logic needs to be modified based on the"
+"Ascend platform features. The most recommended method is to **fix the"
+"number of cores to the number of physical cores of the hardware** and"
+"perform more detailed data block division within the cores."
+
+#: ../../zh/programming_guide/index.md:24
+msgid "对于纯Vector算子，分核数等于**Vector核数量**"
+msgstr "* For pure vector operators, the number of cores is equal to the **number of vector cores**."
+
+#: ../../zh/programming_guide/index.md:25
+msgid "对于CV融合算子，分核数等于**Cube核数量**（通常为Vector核数量的一半），算子执行时会按1：2的比例调用Vector核"
+msgstr "* For CV fusion operators, the number of cores is equal to the **number of cube cores** (usually half of the number of vector cores). During operator execution, vector cores are called at a ratio of 1:2."
+
+#: ../../zh/programming_guide/index.md:27
+msgid ""
+"一般而言，在NPU卡上，一个计算核心AI "
+"Core含有一个cube核，每个cube核配有两个vector核，因此可以通过以下接口获取**Vector核数(vectorcore_num)**与**Cube核数量(aicore_num)**："
+msgstr ""
+"Generally, on an NPU card, a computing core (AI Core) consists of one"
+"cube core, with each cube core paired with two vector cores. So you can"
+"obtain the **number of vector cores(vectorcore_num)** and **number of"
+"cube cores(aicore_num)** through the following interfaces:"
+
+#: ../../zh/programming_guide/index.md:41
+msgid "参考示例代码，先固定核数，再通过内部循环分批处理任务分块："
+msgstr ""
+"According to the sample code, fix the number of cores, and then process"
+"task blocks in batches through an internal loop."
+
+#: ../../zh/programming_guide/index.md:87
+msgid "通用单核数据搬运"
+msgstr "Common Single-Core Data Transfer"
+
+#: ../../zh/programming_guide/index.md:89
+msgid "设置合适的循环内数据分块大小（BLOCK SIZE）"
+msgstr "Setting the Proper Data Block Size (BLOCK SIZE)"
+
+#: ../../zh/programming_guide/index.md:91
+msgid ""
+"以add_kernel为例，变量和操作共同决定了片上内存空间的占用大，通过修改BLOCK_SIZE大小可以调整循环内数据分块和计算中间结果占用的大小。如果超过上限则算子编译时会提示预期占用大小并报错。要达到最大计算访存比，BLOCK_SIZE需要在不超出片上空间时尽可能大"
+"，这可以通过Triton-"
+"Ascend的[Autotune](../examples/06_autotune_example.md)预先设置不同的BLOCK_SIZE，运行时会自动选取最优设置。"
+msgstr ""
+"Take **add_kernel** as an example. The variables and operations"
+"determine the on-chip memory usage. You can change the value of"
+"**BLOCK_SIZE** to adjust the size of the data block in the loop and the"
+"size of the intermediate result. If the upper limit is exceeded, the"
+"expected usage size is displayed and an error is reported during"
+"operator compilation. To achieve the maximum compute-to-memory ratio,"
+"**BLOCK_SIZE** needs to be as large as possible without exceeding the"
+"on-chip space. You can set different **BLOCK_SIZE** values in advance by"
+"using [autotune](../examples/06_autotune_example.md) of Triton-Ascend."
+"The optimal setting is automatically selected during running."
+
+#: ../../zh/programming_guide/index.md:120
+msgid "尽量保证Tensor的尾轴大小数据对齐"
+msgstr "Aligning the Size of the Tail Axis of the Tensor"
+
+#: ../../zh/programming_guide/index.md:122
+msgid ""
+"【描述】对于VV类算子需要调用Vector核计算时，昇腾硬件的UB要求Tensor的尾轴大小能被32Bytes整除，而对于CV类算子需要调用vector核和Cube核计算时，要求Tensor的尾轴大小能被512Bytes整除，若尾轴长度不足则会自动补齐。在此前提下，对模型中shape为(2048,3)和(2048,1)Tensor的种种操作，都会因为自动补齐导致性能明显恶化，此时可考虑通过转置操作将对齐轴转到低维，直到store时再转置为原始状态，从而规避自动补齐，优化计算速度。同时由于转置操作本身也受自动补齐规则的影响，因此同样需要特殊技巧来规避补齐。这里列出一个\"借轴转置\"的tip，适用于**tensor.numel()"
+" % 256Byte == 0**的场景，具体操作如下："
+msgstr ""
+"[Description] For VV operators, if the Vector core needs to be called"
+"for computation, the UB of the Ascend hardware requires that the size of"
+"the tail axis of the tensor be divisible by 32 bytes. For CV operators,"
+"if the Vector core and Cube core need to be called for computation, the"
+"size of the tail axis of the tensor must be divisible by 512 bytes. If"
+"the tail axis length is insufficient, the tail axis length will be"
+"automatically padded. Under this premise, the performance of operations"
+"with the shape of (2048,3) and (2048,1) tensors in the model"
+"deteriorates significantly due to automatic padding. In this case, you"
+"can perform the transpose operation to convert the alignment axis to a"
+"lower dimension until the store operation is performed, avoiding"
+"automatic padding and optimizing the computing speed. In addition, the"
+"transpose operation is also affected by the automatic padding rule."
+"Therefore, special skills are required to avoid padding. The following"
+"is a tip for \"borrowing axis for transpose\", which is applicable to"
+"the scenario where **tensor.numel() % 256Byte == 0**:"
+
+#: ../../zh/programming_guide/index.md:124
+msgid ""
+"注：VV类算子表示该类算子在运算过程中只使用了Vector Core；CV类算子表示该类算子运算过程中既使用了AI Core又使用了Vector "
+"Core。"
+msgstr ""
+"Note: VV operators indicate that only Vector Core is used during"
+"operator computation. CV operators indicate that both AI Core and Vector"
+"Core are used during operator computation."
+"- Example"
+
+#: ../../zh/programming_guide/index.md:125
+#: ../../zh/programming_guide/index.md:137
+#: ../../zh/programming_guide/index.md:193
+msgid "示例"
+msgstr "Example"
+
+#: ../../zh/programming_guide/index.md:133
+msgid "先将数据搬运到UB上，再从UB中select目标值"
+msgstr ""
+"Transferring Data to the UB and Then Selecting the Target Value from"
+"the UB"
+
+#: ../../zh/programming_guide/index.md:135
+msgid "【描述】在NPU的离散场景下，可以先将数据搬运到UB，再从share中select目标值。"
+msgstr ""
+"[Description] In the discrete scenario of the NPU, data can be"
+"transferred to the UB and then the target value can be selected from"
+"**share**."
+
+#: ../../zh/programming_guide/index.md:167
+msgid "优化前后性能分析和对比"
+msgstr "Performance analysis and comparison before and after optimization"
+
+#: ../../zh/programming_guide/index.md:169
+msgid "通过msprof工具执行用例可得到PROF_*文件夹，里面包含了op_summary_\\*.csv文件，该文件可以帮助分析流水情况。注：“\\*”表示时间戳，[性能数据采集参考方法](../debug_guide/profiling.md)。"
+msgstr ""
+"You can use the msProf tool to execute the test case to obtain the"
+"**PROF_***\\** folder, which contains the **op_summary_***\\****.csv**"
+"file. This file can be used to analyze the pipeline. Note: *\\**"
+"indicates the timestamp. For details, see the [performance data"
+"collection methods](../debug_guide/profiling.md)."
+
+#: ../../zh/programming_guide/index.md
+msgid "Op Name"
+msgstr "Op Name"
+
+#: ../../zh/programming_guide/index.md
+msgid "aiv_mte2_time(us)"
+msgstr "aiv_mte2_time(us)"
+
+#: ../../zh/programming_guide/index.md
+msgid "aiv_mte2_ratio"
+msgstr "aiv_mte2_ratio"
+
+#: ../../zh/programming_guide/index.md
+msgid "未优化"
+msgstr "Unoptimized"
+
+#: ../../zh/programming_guide/index.md
+msgid "pick_kernel"
+msgstr "pick_kernel"
+
+#: ../../zh/programming_guide/index.md
+msgid "0.686"
+msgstr "0.686"
+
+#: ../../zh/programming_guide/index.md
+msgid "0.008"
+msgstr "0.008"
+
+#: ../../zh/programming_guide/index.md
+msgid "优化"
+msgstr "Optimized"
+
+#: ../../zh/programming_guide/index.md
+msgid "1.041"
+msgstr "1.041"
+
+#: ../../zh/programming_guide/index.md
+msgid "0.066"
+msgstr "0.066"
+
+#: ../../zh/programming_guide/index.md:176
+msgid "通过分析表格中的数据可以发现，优化前后的aiv_mte2_time(us)和aiv_mte2_ratio差距较大，优化方案通过先将大部分数据搬运到UB上，减少小批量数据通过L2搬运到UB的次数，减少了L2搬运到UB上的总时间。"
+msgstr ""
+"According to the data in the table, the values of **aiv_mte2_time(us)**"
+"and **aiv_mte2_ratio** before and after the optimization are greatly"
+"different. The optimization solution first transfers most of the data to"
+"the UB, reducing the number of times that small batches of data are"
+"transferred to the UB through the L2 and the total time for transferring"
+"data to the UB through the L2."
+
+#: ../../zh/programming_guide/index.md:178
+msgid "存算并行"
+msgstr "Parallel Storage and Computation"
+
+#: ../../zh/programming_guide/index.md:180
+msgid "Triton-Ascend支持两种数据处理模式：存算串行和存算并行。"
+msgstr "Triton-Ascend supports two data processing modes: serial storage and computation and parallel storage and computation."
+
+#: ../../zh/programming_guide/index.md:182
+msgid "存算串行：先从全局内存搬运数据到片上内存，完成计算后，再搬运下一批数据。这种方式存在明显的空闲等待时间，效率较低。"
+msgstr ""
+"Serial storage and computation: Data is first transferred from the"
+"global memory to the on-chip memory, and then the next batch of data is"
+"transferred after the computation is complete. This mode has a"
+"significant idle waiting time, and the efficiency is low."
+
+#: ../../zh/programming_guide/index.md:184
+msgid "存算并行：在搬运第一批数据至片上内存的同时，已开始对其执行计算；随后继续搬运第二批数据，形成“搬运+计算”重叠的流水线式操作，显著提升整体吞吐率。"
+msgstr ""
+"Parallel storage and computation: Computing is performed when the first"
+"batch of data is transferred to the on-chip memory. Then, the second"
+"batch of data is transferred, and the \"transfer + compute\" pipeline"
+"operation is formed, significantly improving the overall throughput."
+
+#: ../../zh/programming_guide/index.md:186
+msgid ""
+"实现存算并行的关键在于合理设计数据切分（Tiling）策略，使得在当前批次数据计算过程中，能够提前准备下一阶段所需的数据，从而实现数据搬运与计算过程的并"
+" 行化。目前，编译器默认配置multiBuffer=True，默认支持存算并行。"
+msgstr ""
+"The key to implementing parallel storage and computation is to properly"
+"design the data tiling policy so that the data required for the next"
+"phase can be prepared in advance during the compute of the current batch"
+"of data, thereby implementing parallelization of data transfer and"
+"computing."
+" Currently, the compiler is configured with **multiBuffer** set to"
+"**True** by default, and the parallel storage and computation are"
+"supported by default."
+
+#: ../../zh/programming_guide/index.md:189
+msgid "Tiling优化"
+msgstr "Tiling Optimization"
+
+#: ../../zh/programming_guide/index.md:191
+msgid ""
+"AI Core进行计算的时候要先将数据搬运至片上内存，而片上内存的空间通常远小于AI Core要处理的总数据量，以Atlas 800T/I "
+"A2产品为例，片上内存容量为192KB，默认开启doublebuffer特性后容量还会减至原来的一半。因此算子计算时需要对数据进行分块操作，每次只加载处理其中的一小部分数据。"
+msgstr ""
+"Before the AI Core performs computation, data needs to be transferred to"
+"the on-chip memory. The on-chip memory space is usually much smaller"
+"than the total data volume to be processed by the AI Core. For example,"
+"the on-chip memory capacity of Atlas 800T/I A2 is 192 KB. After"
+"doublebuffer is enabled by default, the capacity is reduced to half of"
+"the original capacity. Therefore, data needs to be tiled during operator"
+"computation, and only a small part of the data is loaded and processed"
+"each time."
+
+#: ../../zh/programming_guide/index.md:228
+msgid "Triton Autotune 自动调优"
+msgstr "Triton Autotune"
+
+#: ../../zh/programming_guide/index.md:230
+msgid ""
+"在 Tiling "
+"分块优化中，BLOCK_SIZE、BLOCK_SIZE_SUB等分块参数的取值直接影响算子性能，但手动调试参数组合效率低且难以找到最优值。triton.autotune是Triton框架提供的自动调优工具，能遍历预设的参数配置，通过实际运行对比性能，自动选择最优参数组合，是Tiling优化的核心配套手段。"
+msgstr ""
+"In tiling block optimization, the values of block parameters such as"
+"**BLOCK_SIZE** and **BLOCK_SIZE_SUB** directly affect operator"
+"performance. However, manually trying parameter combinations is"
+"inefficient and makes it difficult to find the best values."
+"`triton.autotune` is the autotuning utility provided by the Triton"
+"framework. It can sweep over preset parameter configurations, compare"
+"their performance, and automatically select the best combination. It is"
+"a core tool for tiling optimization."
+
+#: ../../zh/programming_guide/index.md:232
+msgid ""
+"如果你关注 Triton-Ascend 上 `configs=[]` 的推荐用法、自动 Tiling 的适用边界，可进一步参考 [Triton-"
+"Ascend autotune 使用指南](../autotune_guide.md)。"
+msgstr ""
+"For the recommended Triton-Ascend usage of `configs=[]`, the scope of"
+"automatic tiling, see the [Triton-Ascend Autotune"
+"Guide](../autotune_guide.md)."
+
+#: ../../zh/programming_guide/index.md:234
+msgid ""
+"核心作用   自动遍历参数空间：针对BLOCK_SIZE、BLOCK_SIZE_SUB等 constexpr "
+"类型的分块参数，批量测试不同取值的性能。   性能基准对比：以算子的执行耗时为指标，筛选出适配当前硬件的最优参数。   "
+"缓存调优结果：调优后的最优配置会被缓存，后续调用算子时直接复用，避免重复调优。"
+msgstr ""
+"Core functions "
+"Automatic exploration of the parameter space: Test different values of"
+"constexpr block parameters such as **BLOCK_SIZE** and **BLOCK_SIZE_SUB**"
+"in batches."
+"Benchmark-based comparison: Select the optimal parameters for the"
+"current hardware based on execution time."
+"Caching of tuning results: Cache the best configuration after tuning so"
+"that later calls can reuse it without tuning again."
+
+#: ../../zh/programming_guide/index.md:239
+msgid "简单示例"
+msgstr "Simple example"
+
+#: ../../zh/programming_guide/index.md:265
+msgid "注：设置以下环境变量，便可打印出最优参数信息。"
+msgstr ""
+"Note: You can set the following environment variables to print the"
+"optimal parameter information."
+
+#: ../../zh/programming_guide/index.md:271
+msgid "如何在NPU上避免UB OVERFLOW"
+msgstr "How Do I Avoid UB Overflow on the NPU?"
+
+#: ../../zh/programming_guide/index.md:273
+msgid "【描述】在NPU上，UB或者L1 Size存在上限，当出现该错误时，需要减少单次搬运的数据量，以for循环的方式处理长序列场景。"
+msgstr ""
+"[Description] On the NPU, the UB or L1 size has an upper limit. When"
+"this error occurs, reduce the amount of data transferred at a time and"
+"use the for loop to process long sequences."
+
+#: ../../zh/programming_guide/index.md:285
+msgid "【注意】A2系列产品UB大小为192KB(1572864 bits)。"
+msgstr "[Note] The UB size of the A2 series products is 192 KB (1,572,864 bits)."
+
+#: ../../zh/programming_guide/index.md:287
+msgid "通用单核数据运算"
+msgstr "Common Single-Core Data Computation"
+
+#: ../../zh/programming_guide/index.md:289
+msgid "开发目标"
+msgstr "R&D Goals"
+
+#: ../../zh/programming_guide/index.md:291
+msgid "在昇腾NPU单核上实现基础数据运算算子（如加减乘除、激活函数、简单矩阵元素运算）。保证算子在单核内高效执行，为后续多核并行和分布式扩展打下基础。"
+msgstr ""
+"Implement basic data operation operators (such as addition, subtraction,"
+"multiplication, division, activation functions, and simple matrix"
+"element operations) on the Ascend NPU single core. Ensure that operators"
+"are efficiently executed on a single core, laying a foundation for"
+"subsequent multi-core parallel processing and distributed expansion."
+
+#: ../../zh/programming_guide/index.md:293
+msgid "开发步骤"
+msgstr "Development Procedure"
+
+#: ../../zh/programming_guide/index.md:295
+msgid "1.确定算子功能   -明确输入/输出张量的形状、数据类型（float16/float32/int32 等）。   -确认是否需要广播、边界处理。"
+msgstr ""
+"1.Determine the operator function. "
+"-Determine the shapes and data types (such as float16, float32, and"
+"int32) of the input and output tensors."
+"-Check whether broadcast and boundary processing are required. "
+
+#: ../../zh/programming_guide/index.md:299
+msgid "2.编写核函数（kernel）   单核运算通常对应块级的数据处理。     单核数据运算示例：向量加法"
+msgstr ""
+"2.Write kernel functions. "
+"Single-kernel computation corresponds to block-level data processing.   "
+"Single-kernel data computation example: vector addition "
+
+#: ../../zh/programming_guide/index.md:323
+msgid "调用："
+msgstr "Calling:"
+
+#: ../../zh/programming_guide/index.md:334
+msgid "使用上述函数计算两个 torch.tensor 对象的 element-wise sum，并测试其正确性"
+msgstr ""
+"Use the above function to compute **element-wise sum** of two"
+"torch.tensor objects and test its correctness."
+
+#: ../../zh/programming_guide/index.md:353
+msgid "3.单核运算的关键点"
+msgstr ""
+"3.Key points of single-kernel computation"
+"-Block-level data processing: Each computing block is responsible for a"
+"small segment of data, ensuring parallelism."
+
+#: ../../zh/programming_guide/index.md:355
+msgid "-块级数据处理：每个计算块负责一小段数据，保证并行性。"
+msgstr ""
+"-Boundary check: Use **mask** or **if (tid < N)** to avoid out-of-bounds"
+"access."
+
+#: ../../zh/programming_guide/index.md:357
+msgid "-边界检查：使用 mask 或 if (tid < N) 避免越界。"
+msgstr "-Block size selection: Properly set the block and grid."
+
+#: ../../zh/programming_guide/index.md:359
+msgid "-块大小选择：合理设置 block 和 grid"
+msgstr "-Block size selection: Properly set the block and grid"
+"4.Performance points "
+"(1) Memory access optimization "
+"-Ensure sequential access. "
+"-Use the aligned stride to avoid cross-row/cross-column jump access. "
+"-Align the data block size to the 32-byte boundary. "
+"Ensure that the input and output buffers are aligned during allocation"
+"to avoid memory access performance deterioration."
+"Example: "
+
+#: ../../zh/programming_guide/index.md:361
+msgid ""
+"4.性能要点：   (1)访存优化   -保证连续访问。   -使用对齐的 stride，避免跨行/跨列跳跃式访问。   -尽量让数据块大小对齐到"
+" 32 字节边界。   输入输出 buffer 在分配时保证对齐，避免访存性能下降。   例:"
+msgstr ""
+"(2) Sub-block division "
+"-Divide a large matrix into small blocks. Each block is computed in the"
+"UB."
+"-Sub-block division should ensure both memory access continuity and"
+"computing unit utilization."
+"Example: "
+
+#: ../../zh/programming_guide/index.md:408
+msgid "(2)子块划分   -将大矩阵分解为小block，每个block在 UB 内完成计算。   -子块划分要兼顾访存连续性和计算单元利用率。   例："
+msgstr "(2) Sub-block division - Divide a large matrix into small blocks. Each block is computed in the UB. - Sub-block division should ensure both memory access continuity and computing unit utilization. Example:"

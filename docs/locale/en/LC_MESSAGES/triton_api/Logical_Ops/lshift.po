@@ -1,0 +1,226 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:1
+msgid "triton.language.core.__lshift__"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:5
+msgid "简介：根据给定值 将tensor张量进行左移位。"
+msgstr "Description: Left-shifts the tensor by the given value."
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:15
+msgid "作为`tensor`的内置运算符使用，如`x<<y`。"
+msgstr "Used as a built-in operator of `tensor`, e.g., `x<<y`."
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:17
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:19
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "`input`"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "`tensor`"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "张量数据，左操作数，代表要进行移位的主数据"
+msgstr "Tensor data, left operand, represents the primary data to be shifted"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "`other`"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "`tensor or scalar`"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "张量数据，右操作数，进行移位的数值"
+msgstr "Tensor data, right operand, the shift amount"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "`_builder`"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter; external invocation is not supported yet"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:27
+msgid "返回值： `tl.tensor`：同`input`的shape的张量"
+msgstr "Return value: `tl.tensor`: tensor with the same shape as `input`"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:30
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:32
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:39
+msgid "结论：Ascend 对比 GPU 缺失uint的支持能力。"
+msgstr "Conclusion: Ascend lacks support for uint types compared to GPU."
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:41
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "支持维度范围"
+msgstr "Supported Dimension Range"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md
+msgid "无限制"
+msgstr "No restrictions"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:48
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
+msgstr ""
+"Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
+" platforms."
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:50
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:52
+msgid "相对社区能力缺失且无法实现"
+msgstr ""
+"Missing capability compared to the community version and cannot be "
+"implemented"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:54
+msgid "Ascend 相比 GPU 缺失 uint 类型支持。"
+msgstr "Ascend lacks uint type support compared to GPU."
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:55
+msgid ""
+"右操作数 `other` 仅支持标量，不支持 tensor（即 `x << 2` 合法，`x << y`（`y` 为 tensor）暂不支持）。"
+msgstr ""
+"The right operand `other` only supports scalars, not tensors (i.e., `x << 2`"
+" is valid, `x << y` where `y` is a tensor is currently not supported)."
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:57
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Logical_Ops/lshift.md:59
+msgid "以下示例实现了对三维张量`x0`、`x1`做左移位运算："
+msgstr ""
+"The following example demonstrates left shift operation on 3D tensors `x0` "
+"and `x1`:"

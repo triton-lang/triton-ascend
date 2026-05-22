@@ -1,0 +1,213 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:1
+msgid "triton.language.cat"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:5
+msgid "简介：`triton.language.cat`函数用于将指定的tensor进行拼接。"
+msgstr ""
+"Description: The `triton.language.cat` function concatenates the specified "
+"tensors."
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:11
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:13
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "`input`"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "`Tensor`"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "拼接的第一个tensor"
+msgstr "First tensor to concatenate"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "`other`"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "拼接的第二个tensor"
+msgstr "Second tensor to concatenate"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "`can_reorder`"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "`Bool`"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "重新排序 – 编译器提示。如果为真，编译器在连接输入时允许重新排序元素。仅支持can_reorder=True。"
+msgstr ""
+"Reorder – Compiler hint. If true, the compiler allows reordering elements "
+"when concatenating inputs. Only supports can_reorder=True."
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "`Optional[str]`"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter; external invocation is not supported yet"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:22
+msgid "返回值： `tensor`：完成拼接之后的tensor"
+msgstr "Return value: `tensor`: the tensor after concatenation"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:25
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:27
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "bool/int1"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cat.md
+msgid "GPU支持"
+msgstr "GPU Support"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:34
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:36
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。cat 只支持1D shape 的拼接。"
+msgstr ""
+"Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
+" platforms. cat only supports 1D shape concatenation."
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:38
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:40
+msgid "相对社区能力缺失且无法实现"
+msgstr ""
+"Missing capability compared to the community version and cannot be "
+"implemented"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:42
+msgid ""
+"1.ASCEND和CUDA都只支持 can_reorder=True，即拼接tensor后重新排序。 2.cat 只支持1D shape 的拼接。"
+msgstr ""
+"1. Both ASCEND and CUDA only support can_reorder=True, i.e., reordering "
+"after concatenating tensors. 2. cat only supports concatenation of 1D "
+"shapes."
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:45
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Creation_Ops/cat.md:47
+msgid "以下示例实现了对1D shape的两个tensor进行的拼接："
+msgstr "The following example demonstrates concatenation of two 1D tensors:"

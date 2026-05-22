@@ -32,9 +32,9 @@ msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
 生成算子仿真流水图的命令与算子上板性能数据采集的命令类似。同样以上述```03-layer-norm.py```为例，```--soc-version```用于指定当前机器的硬件版本，可在终端中输入```npu-smi info```查看：
 
 ```python
-# source simulator路径
+# Source simulator path
 export LD_LIBRARY_PATH=$HOME/CANN/Install_CANN/Ascend/ascend_toolkit/latest/tools/simulator/{soc-version}/lib:$LD_LIBRARY_PATH
-# 执行算子仿真流水图采集
+# Execute operator simulation pipeline graph collection
 msprof op simulator --kernel-name=_layer_norm_fwd_fused --soc-version={soc-version} python3 03-layer-norm.py
 ```
 

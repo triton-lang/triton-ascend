@@ -1,0 +1,1165 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1
+msgid "Libdevice 开发者手册"
+msgstr "Libdevice Developer Guide"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:3
+msgid "SIMT 编译示例"
+msgstr "SIMT Compilation Mode Example"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:5
+msgid "使用 SIMT 编译的 triton kernel 示例"
+msgstr "Triton kernel example with SIMT compilation mode"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:34
+msgid "1. triton.language.extra.cann.libdevice.abs"
+msgstr "1. triton.language.extra.cann.abs"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:36
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:52
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:68
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:84
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:100
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:116
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:132
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:148
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:164
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:180
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:196
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:212
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:228
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:244
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:274
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:290
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:306
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:322
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:338
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:354
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:370
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:386
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:402
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:418
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:434
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:450
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:466
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:482
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:498
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:514
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:530
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:546
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:562
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:578
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:594
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:610
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:626
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:642
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:658
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:674
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:690
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:706
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:722
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:738
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:754
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:770
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:786
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:802
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:818
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:834
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:850
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:866
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:882
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:898
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:914
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:930
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:946
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:962
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:978
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:994
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1010
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1026
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1042
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1058
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1074
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1090
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1106
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1122
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1138
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1154
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1170
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1186
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1202
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1218
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1234
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1250
+msgid "OP概述"
+msgstr "OP Overview"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:38
+msgid "计算输入参数的绝对值。"
+msgstr "Computes the absolute value of the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:40
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:56
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:72
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:88
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:104
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:120
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:136
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:152
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:168
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:184
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:200
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:216
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:232
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:246
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:278
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:294
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:310
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:326
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:342
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:358
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:374
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:390
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:406
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:422
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:438
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:454
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:470
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:486
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:502
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:518
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:534
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:550
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:566
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:582
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:598
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:614
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:630
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:646
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:662
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:678
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:694
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:710
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:726
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:742
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:758
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:774
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:790
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:806
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:822
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:838
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:854
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:870
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:886
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:902
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:918
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:934
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:950
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:966
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:982
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:998
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1014
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1030
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1046
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1062
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1078
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1094
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1110
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1126
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1142
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1158
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1174
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1190
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1206
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1222
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1238
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1254
+msgid "原型:"
+msgstr "Prototype:"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:46
+msgid "返回值: `tl.tensor`, 返回输入参数的绝对值。"
+msgstr "Return Value: `tl.tensor`, containing the absolute value of the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:48
+msgid "支持类型：`int32`, `float32`"
+msgstr "Supported Datatypes: `int32`, `float32`"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:50
+msgid "3. triton.language.extra.cann.libdevice.acos"
+msgstr "3. triton.language.extra.cann.acos"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:54
+msgid "计算输入参数的反余弦值。"
+msgstr "Computes the inverse cosine (arccos) of the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:62
+msgid "返回值: `tl.tensor`, 返回输入参数的反余弦值，取值范围 \\[0, π] 弧度。"
+msgstr ""
+"Return Value: `tl.tensor`, containing the inverse cosine of the input"
+"parameter, in the range [0, π] radians."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:64
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:80
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:96
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:112
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:128
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:144
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:160
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:176
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:192
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:208
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:224
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:286
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:318
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:334
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:350
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:366
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:382
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:398
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:430
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:446
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:462
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:478
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:494
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:510
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:526
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:542
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:558
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:590
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:606
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:622
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:638
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:654
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:670
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:686
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:702
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:718
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:734
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:750
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:766
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:782
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:798
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:830
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:846
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:862
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:878
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:910
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:926
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:958
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:974
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:990
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1006
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1022
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1038
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1054
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1070
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1086
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1102
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1118
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1134
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1150
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1166
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1182
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1198
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1214
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1230
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1246
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1262
+msgid "支持类型：`float32`"
+msgstr "Supported Datatypes: `float32`"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:66
+msgid "4. triton.language.extra.cann.libdevice.acosh"
+msgstr "4. triton.language.extra.cann.acosh"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:70
+msgid "计算输入参数的反双曲余弦值。"
+msgstr "Computes the inverse hyperbolic cosine of the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:78
+msgid "返回值: `tl.tensor`, 返回输入参数的反双曲余弦值，取值范围 \\[0, +∞]。"
+msgstr ""
+"Return Value: `tl.tensor`, containing the inverse hyperbolic cosine of"
+"the input parameter, in the range [0, +∞]."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:82
+msgid "5. triton.language.extra.cann.libdevice.add_rd"
+msgstr "5. triton.language.extra.cann.add_rd"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:86
+msgid "向下舍入浮点数加法。"
+msgstr "Floating-point addition with round-down (toward negative infinity) rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:94
+msgid "返回值: `tl.tensor`, 返回向下舍入的加法结果。"
+msgstr "Return Value: `tl.tensor`, containing the addition result rounded down."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:98
+msgid "6. triton.language.extra.cann.libdevice.add_rn"
+msgstr "6. triton.language.extra.cann.add_rn"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:102
+msgid "最近偶数舍入浮点数加法。"
+msgstr "Floating-point addition with round-to-nearest-even rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:110
+msgid "返回值: `tl.tensor`, 返回最近偶数舍入的加法结果。"
+msgstr "Return Value: `tl.tensor`, containing the addition result rounded to the nearest even number."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:114
+msgid "7. triton.language.extra.cann.libdevice.add_ru"
+msgstr "7. triton.language.extra.cann.add_ru"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:118
+msgid "向上舍入浮点数加法。"
+msgstr "Floating-point addition with round-up (toward positive infinity) rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:126
+msgid "返回值: `tl.tensor`, 返回向上舍入的加法结果。"
+msgstr "Return Value: `tl.tensor`, containing the addition result rounded up."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:130
+msgid "8. triton.language.extra.cann.libdevice.add_rz"
+msgstr "8. triton.language.extra.cann.add_rz"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:134
+msgid "向零舍入浮点数加法。"
+msgstr "Floating-point addition with round-toward-zero rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:142
+msgid "返回值: `tl.tensor`, 返回向零舍入的加法结果。"
+msgstr "Return Value: `tl.tensor`, containing the addition result rounded toward zero."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:146
+msgid "9. triton.language.extra.cann.libdevice.asin"
+msgstr "9. triton.language.extra.cann.asin"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:150
+msgid "计算输入参数的反正弦值。"
+msgstr "Computes the inverse sine (arcsin) of the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:158
+msgid "返回值: `tl.tensor`, 返回输入参数的反正弦值，取值范围 \\[-π/2, π/2] 弧度。"
+msgstr ""
+"Return Value: `tl.tensor`, containing the inverse sine of the input"
+"parameter, in the range [-π/2, π/2] radians."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:162
+msgid "10. triton.language.extra.cann.libdevice.asinh"
+msgstr "10. triton.language.extra.cann.asinh"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:166
+msgid "计算输入参数的反双曲正弦值。"
+msgstr "Computes the inverse hyperbolic sine of the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:174
+msgid "返回值: `tl.tensor`, 返回输入参数的反双曲正弦值。"
+msgstr "Return Value: `tl.tensor`, containing the inverse hyperbolic sine of the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:178
+msgid "11. triton.language.extra.cann.libdevice.atan"
+msgstr "11. triton.language.extra.cann.atan"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:182
+msgid "计算输入参数的反正切值。"
+msgstr "Computes the inverse tangent (arctan) of the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:190
+msgid "返回值: `tl.tensor`, 返回输入参数的反正切值，取值范围 \\[-π/2, π/2] 弧度。"
+msgstr ""
+"Return Value: `tl.tensor`, containing the inverse tangent of the input"
+"parameter, in the range [-π/2, π/2] radians."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:194
+msgid "12. triton.language.extra.cann.libdevice.atan2"
+msgstr "12. triton.language.extra.cann.atan2"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:198
+msgid "反正切函数，计算 x / y 的反正切值。"
+msgstr "Two-argument inverse tangent function, computes the arctangent of x / y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:206
+msgid "返回值: `tl.tensor`, 返回 x / y 的反正切值，取值范围 \\[-π, π] 弧度。"
+msgstr ""
+"Return Value: `tl.tensor`, containing the arctangent of x / y, in the"
+"range [-π, π] radians."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:210
+msgid "13. triton.language.extra.cann.libdevice.atanh"
+msgstr "13. triton.language.extra.cann.atanh"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:214
+msgid "反双曲正切函数，计算输入参数的反双曲正切值。"
+msgstr "Inverse hyperbolic tangent function, computes the inverse hyperbolic tangent of the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:222
+msgid "返回值: `tl.tensor`, 返回输入参数的反双曲正切值，取值范围 \\[-1, 1]。"
+msgstr ""
+"Return Value: `tl.tensor`, containing the inverse hyperbolic tangent of"
+"the input parameter, in the range [-1, 1]."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:226
+msgid "14. triton.language.extra.cann.libdevice.brev"
+msgstr "14. triton.language.extra.cann.brev"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:230
+msgid "位反转函数，反转32位整数的位顺序。"
+msgstr "Bit reversal function, reverses the bit order of a 32-bit integer."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:238
+msgid "返回值: `tl.tensor`, 返回位反转后的32位整数。"
+msgstr "Return Value: `tl.tensor`, containing the 32-bit integer with reversed bit order."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:240
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:270
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:302
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:574
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:814
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:894
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:942
+msgid "支持类型：`int32`"
+msgstr "Supported Datatypes: `int32`"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:242
+msgid "15. triton.language.extra.cann.libdevice.byte_perm"
+msgstr "15. triton.language.extra.cann.byte_perm"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:252
+msgid "字节排列操作，从两个32位整数中选择字节组成新整数。输入整数 x 和 y 的字节顺序如下"
+msgstr "Byte permutation operation, selects bytes from two 32-bit integers to form a new integer. The byte order of input integers x and y is as follows:"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:261
+msgid "字节选择参数 s 为32位整数，各比特位与字节选择对应关系如下"
+msgstr "The byte selection parameter s is a 32-bit integer, with each bit group corresponding to byte selection as follows:"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:268
+msgid ""
+"返回值: `tl.tensor`, 返回值 return\\[n] := input\\[selector\\[n]]，n 表示输出整数的第 n "
+"个字节。"
+msgstr ""
+"Return Value: `tl.tensor`, where return[n] := input[selector[n]], where"
+"n represents the n-th byte of the output integer."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:272
+msgid "16. triton.language.extra.cann.libdevice.ceil"
+msgstr "16. triton.language.extra.cann.ceil"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:276
+msgid "向上取整，返回大于或等于 x 的最小整数。"
+msgstr "Ceiling operation, returns the smallest integer greater than or equal to x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:284
+msgid "返回值: `tl.tensor`, 返回向上取整的结果。"
+msgstr "Return Value: `tl.tensor`, containing the ceiling result."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:288
+msgid "17. triton.language.extra.cann.libdevice.clz"
+msgstr "17. triton.language.extra.cann.clz"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:292
+msgid "计算32位整数的前导零数量。"
+msgstr "Counts the number of leading zeros in a 32-bit integer."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:300
+msgid "返回值: `tl.tensor`, 返回输入参数的前导零数量。范围 \\[0, 32]。"
+msgstr ""
+"Return Value: `tl.tensor`, containing the number of leading zeros in the"
+"input parameter. Range: [0, 32]."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:304
+msgid "18. triton.language.extra.cann.libdevice.copysign"
+msgstr "18. triton.language.extra.cann.copysign"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:308
+msgid "生成一个浮点数，其绝对值等于 x 的绝对值，符号与 y 相同。"
+msgstr "Generates a floating-point number with magnitude equal to the magnitude of x and sign equal to the sign of y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:316
+msgid "返回值: `tl.tensor`, 返回一个浮点数，其绝对值等于 x 的绝对值，符号与 y 相同。"
+msgstr "Return Value: `tl.tensor`, containing a floating-point number with magnitude equal to the magnitude of x and sign equal to the sign of y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:320
+msgid "19. triton.language.extra.cann.libdevice.cos"
+msgstr "19. triton.language.extra.cann.cos"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:324
+msgid "计算输入参数（弧度）的余弦值。"
+msgstr "Computes the cosine of the input parameter (in radians)."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:332
+msgid "返回值: `tl.tensor`, 返回输入参数的余弦值。"
+msgstr "Return Value: `tl.tensor`, containing the cosine of the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:336
+msgid "20. triton.language.extra.cann.libdevice.cosh"
+msgstr "20. triton.language.extra.cann.cosh"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:340
+msgid "计算输入参数的双曲余弦值。"
+msgstr "Computes the hyperbolic cosine of the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:348
+msgid "返回值: `tl.tensor`, 返回输入参数的双曲余弦值。"
+msgstr "Return Value: `tl.tensor`, containing the hyperbolic cosine of the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:352
+msgid "21. triton.language.extra.cann.libdevice.cyl_bessel_i0"
+msgstr "21. triton.language.extra.cann.cyl_bessel_i0"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:356
+msgid "计算输入参数的修正零阶贝塞尔函数值。"
+msgstr "Computes the modified Bessel function of the first kind of order zero for the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:364
+msgid "返回值: `tl.tensor`, 返回输入参数的修正零阶贝塞尔函数值。"
+msgstr "Return Value: `tl.tensor`, containing the modified Bessel function of the first kind of order zero for the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:368
+msgid "22. triton.language.extra.cann.libdevice.div_rd"
+msgstr "22. triton.language.extra.cann.div_rd"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:372
+msgid "向下舍入浮点数除法。"
+msgstr "Floating-point division with round-down (toward negative infinity) rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:380
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:396
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:412
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:428
+msgid "返回值: `tl.tensor`, 返回除法结果。"
+msgstr "Return Value: `tl.tensor`, containing the division result."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:384
+msgid "23. triton.language.extra.cann.libdevice.div_rn"
+msgstr "23. triton.language.extra.cann.div_rn"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:388
+msgid "最近偶数舍入浮点数除法。"
+msgstr "Floating-point division with round-to-nearest-even rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:400
+msgid "24. triton.language.extra.cann.libdevice.div_ru"
+msgstr "24. triton.language.extra.cann.div_ru"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:404
+msgid "向上舍入浮点数除法。"
+msgstr "Floating-point division with round-up (toward positive infinity) rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:414
+msgid "支持类型：`float32` |"
+msgstr "Supported Datatypes: `float32`"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:416
+msgid "25. triton.language.extra.cann.libdevice.div_rz"
+msgstr "25. triton.language.extra.cann.div_rz"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:420
+msgid "向零舍入浮点数除法。"
+msgstr "Floating-point division with round-toward-zero rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:432
+msgid "26. triton.language.extra.cann.libdevice.erfinv"
+msgstr "26. triton.language.extra.cann.erfinv"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:436
+msgid "逆误差函数，找到满足 x = erf(y) 的值 y。"
+msgstr "Inverse error function, finds the value y such that x = erf(y)."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:444
+msgid "返回值: `tl.tensor`, 返回输入参数的逆误差函数值。"
+msgstr "Return Value: `tl.tensor`, containing the inverse error function of the input parameter."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:448
+msgid "27. triton.language.extra.cann.libdevice.exp10"
+msgstr "27. triton.language.extra.cann.exp10"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:452
+msgid "以 10 为底的指数函数，计算 10 的 x 次方。"
+msgstr "Base-10 exponential function, computes 10 raised to the power of x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:460
+msgid "返回值: `tl.tensor`, 返回 10 的 x 次方的计算结果。"
+msgstr "Return Value: `tl.tensor`, containing the result of 10 raised to the power of x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:464
+msgid "29. triton.language.extra.cann.libdevice.exp2"
+msgstr "29. triton.language.extra.cann.exp2"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:468
+msgid "以 2 为底的指数函数，计算 2 的 x 次方。"
+msgstr "Base-2 exponential function, computes 2 raised to the power of x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:476
+msgid "返回值: `tl.tensor`, 返回 2 的 x 次方的计算结果。"
+msgstr "Return Value: `tl.tensor`, containing the result of 2 raised to the power of x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:480
+msgid "30. triton.language.extra.cann.libdevice.exp"
+msgstr "30. triton.language.extra.cann.exp"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:484
+msgid "指数函数，计算 e 的 x 次方。"
+msgstr "Exponential function, computes e raised to the power of x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:492
+msgid "返回值: `tl.tensor`, 返回 e 的 x 次方的计算结果。"
+msgstr "Return Value: `tl.tensor`, containing the result of e raised to the power of x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:496
+msgid "30. triton.language.extra.cann.libdevice.expm1"
+msgstr "30. triton.language.extra.cann.expm1"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:500
+msgid "计算 e 的 x 次方减 1 的结果。"
+msgstr "Computes e raised to the power of x, minus 1."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:508
+msgid "返回值: `tl.tensor`, 返回 e 的 x 次方减 1 的计算结果。"
+msgstr "Return Value: `tl.tensor`, containing the result of e raised to the power of x, minus 1."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:512
+msgid "31. triton.language.extra.cann.libdevice.fast_dividef"
+msgstr "31. triton.language.extra.cann.fast_dividef"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:516
+msgid "快速近似除法。"
+msgstr "Fast approximate division."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:524
+msgid "返回值: `tl.tensor`, 返回快速近似除法的结果。"
+msgstr "Return Value: `tl.tensor`, containing the result of the fast approximate division."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:528
+msgid "32. triton.language.extra.cann.libdevice.fast_expf"
+msgstr "32. triton.language.extra.cann.fast_expf"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:532
+msgid "快速近似指数函数。"
+msgstr "Fast approximate exponential function."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:540
+msgid "返回值: `tl.tensor`, 返回快速近似指数函数的结果。"
+msgstr "Return Value: `tl.tensor`, containing the result of the fast approximate exponential function."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:544
+msgid "33. triton.language.extra.cann.libdevice.fdim"
+msgstr "33. triton.language.extra.cann.fdim"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:548
+msgid "计算 x 与 y 的正差。当 x > y 时，返回 x - y，否则返回 0。"
+msgstr "Computes the positive difference between x and y. When x > y, returns x - y; otherwise returns 0."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:556
+msgid "返回值: `tl.tensor`, 返回 x 与 y 之间的正差。"
+msgstr "Return Value: `tl.tensor`, containing the positive difference between x and y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:560
+msgid "34. triton.language.extra.cann.libdevice.ffs"
+msgstr "34. triton.language.extra.cann.ffs"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:564
+msgid "查找第一个被置为1的位，返回最低被置为1的位的索引。"
+msgstr "Finds the first bit set to 1, returns the index of the lowest bit set to 1."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:572
+msgid "返回值: `tl.tensor`, 返回最低被置为1的位的索引，取值范围 \\[0, 32]。"
+msgstr "Return Value: `tl.tensor`, containing the result of fused multiply-add."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:576
+msgid "35. triton.language.extra.cann.libdevice.float_as_int"
+msgstr "35. triton.language.extra.cann.float_as_int"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:580
+msgid "将浮点数的比特位重新解释为32位整数。不进行数值转换。"
+msgstr "Reinterprets the bit pattern of a floating-point number as a 32-bit integer. No numeric conversion is performed."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:588
+msgid "返回值: `tl.tensor`, 返回将浮点数的比特位重新解释为32位整数的结果。"
+msgstr "Return Value: `tl.tensor`, containing the bit pattern of the floating-point number reinterpreted as a 32-bit integer."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:592
+msgid "36. triton.language.extra.cann.libdevice.floor"
+msgstr "36. triton.language.extra.cann.floor"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:596
+msgid "向下取整，返回小于或等于 x 的最大整数。"
+msgstr "Floor operation, returns the largest integer less than or equal to x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:604
+msgid "返回值: `tl.tensor`, 返回向下取整的结果。"
+msgstr "Return Value: `tl.tensor`, containing the floor result."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:608
+msgid "37. triton.language.extra.cann.libdevice.fma"
+msgstr "37. triton.language.extra.cann.fma"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:612
+msgid "融合乘加，计算 x × y + z。"
+msgstr "Fused multiply-add, computes x * y + z."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:620
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:636
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:652
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:668
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:684
+msgid "返回值: `tl.tensor`, 返回融合乘加的结果。"
+msgstr "Return Value: `tl.tensor`, containing the result of fused multiply-add."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:624
+msgid "38. triton.language.extra.cann.libdevice.fma_rd"
+msgstr "38. triton.language.extra.cann.fma_rd"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:628
+msgid "向下舍入模式下的融合乘加操作。"
+msgstr "Fused multiply-add operation with round-down rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:640
+msgid "39. triton.language.extra.cann.libdevice.fma_rn"
+msgstr "39. triton.language.extra.cann.fma_rn"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:644
+msgid "最近偶数舍入模式下的融合乘加操作。"
+msgstr "Fused multiply-add operation with round-to-nearest-even rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:656
+msgid "40. triton.language.extra.cann.libdevice.fma_ru"
+msgstr "40. triton.language.extra.cann.fma_ru"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:660
+msgid "向上舍入模式下的融合乘加操作。"
+msgstr "Fused multiply-add operation with round-up rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:672
+msgid "41. triton.language.extra.cann.libdevice.fma_rz"
+msgstr "41. triton.language.extra.cann.fma_rz"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:676
+msgid "向零舍入模式下的融合乘加操作。"
+msgstr "Fused multiply-add operation with round-toward-zero rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:688
+msgid "42. triton.language.extra.cann.libdevice.fmod"
+msgstr "42. triton.language.extra.cann.fmod"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:692
+msgid "浮点数取模，计算 x / y 的余数，结果与 x 同号。"
+msgstr "Floating-point modulo, computes the remainder of x / y, with the same sign as x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:700
+msgid "返回值: `tl.tensor`, 返回浮点数取模的结果。"
+msgstr "Return Value: `tl.tensor`, containing the result of the floating-point modulo."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:704
+msgid "43. triton.language.extra.cann.libdevice.hadd"
+msgstr "43. triton.language.extra.cann.hadd"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:708
+msgid "计算 x 和 y 的平均值。"
+msgstr "Computes the average of x and y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:716
+msgid "返回值: `tl.tensor`, 返回 x 和 y 的平均值。"
+msgstr "Return Value: `tl.tensor`, containing the average of x and y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:720
+msgid "44. triton.language.extra.cann.libdevice.hypot"
+msgstr "44. triton.language.extra.cann.hypot"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:724
+msgid "计算 x 和 y 之间的欧几里得距离。"
+msgstr "Computes the Euclidean distance between x and y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:732
+msgid "返回值: `tl.tensor`, 返回 x 和 y 之间的欧几里得距离。"
+msgstr "Return Value: `tl.tensor`, containing the Euclidean distance between x and y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:736
+msgid "45. triton.language.extra.cann.libdevice.lgamma"
+msgstr "45. triton.language.extra.cann.lgamma"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:740
+msgid "计算输入为 x 的伽马函数绝对值的自然对数。"
+msgstr "Computes the natural logarithm of the absolute value of the gamma function for input x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:748
+msgid "返回值: `tl.tensor`, 返回输入为 x 的伽马函数绝对值的自然对数。"
+msgstr "Return Value: `tl.tensor`, containing the natural logarithm of the absolute value of the gamma function for input x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:752
+msgid "46. triton.language.extra.cann.libdevice.log10"
+msgstr "46. triton.language.extra.cann.log10"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:756
+msgid "计算输入为 x 的以 10 为底的对数。"
+msgstr "Computes the base-10 logarithm of input x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:764
+msgid "返回值: `tl.tensor`, 返回输入为 x 的以 10 为底的对数。"
+msgstr "Return Value: `tl.tensor`, containing the base-10 logarithm of input x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:768
+msgid "47. triton.language.extra.cann.libdevice.log2"
+msgstr "47. triton.language.extra.cann.log2"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:772
+msgid "计算输入为 x 的以 2 为底的对数。"
+msgstr "Computes the base-2 logarithm of input x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:780
+msgid "返回值: `tl.tensor`, 返回输入为 x 的以 2 为底的对数。"
+msgstr "Return Value: `tl.tensor`, containing the base-2 logarithm of input x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:784
+msgid "48. triton.language.extra.cann.libdevice.log"
+msgstr "48. triton.language.extra.cann.log"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:788
+msgid "计算输入为 x 的以 e 为底的对数。"
+msgstr "Computes the natural (base-e) logarithm of input x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:796
+msgid "返回值: `tl.tensor`, 返回输入为 x 的以 e 为底的对数。"
+msgstr "Return Value: `tl.tensor`, containing the natural logarithm of input x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:800
+msgid "49. triton.language.extra.cann.libdevice.mul24"
+msgstr "49. triton.language.extra.cann.mul24"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:804
+msgid "计算 x 和 y 的低24位乘法结果。"
+msgstr "Computes the lower 24-bit multiplication result of x and y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:812
+msgid "返回值: `tl.tensor`, 返回 x 和 y 的低24位乘法结果。"
+msgstr "Return Value: `tl.tensor`, containing the lower 24-bit multiplication result of x and y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:816
+msgid "50. triton.language.extra.cann.libdevice.mul_rd"
+msgstr "50. triton.language.extra.cann.mul_rd"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:820
+msgid "向下舍入浮点数乘法。"
+msgstr "Floating-point multiplication with round-down rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:828
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:844
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:860
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:876
+msgid "返回值: `tl.tensor`, 返回浮点数乘法的结果。"
+msgstr "Return Value: `tl.tensor`, containing the floating-point multiplication result."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:832
+msgid "51. triton.language.extra.cann.libdevice.mul_rn"
+msgstr "51. triton.language.extra.cann.mul_rn"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:836
+msgid "最近偶数舍入浮点数乘法。"
+msgstr "Floating-point multiplication with round-to-nearest-even rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:848
+msgid "52. triton.language.extra.cann.libdevice.mul_ru"
+msgstr "52. triton.language.extra.cann.mul_ru"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:852
+msgid "向上舍入浮点数乘法。"
+msgstr "Floating-point multiplication with round-up rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:864
+msgid "53. triton.language.extra.cann.libdevice.mul_rz"
+msgstr "53. triton.language.extra.cann.mul_rz"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:868
+msgid "向零舍入浮点数乘法。"
+msgstr "Floating-point multiplication with round-toward-zero rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:880
+msgid "54. triton.language.extra.cann.libdevice.mulhi"
+msgstr "54. triton.language.extra.cann.mulhi"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:884
+msgid "计算 x 和 y 的乘法结果的高 32 位。"
+msgstr "Computes the high 32 bits of the multiplication result of x and y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:892
+msgid "返回值: `tl.tensor`, 返回 x 和 y 的乘法结果的高 32 位。"
+msgstr "Return Value: `tl.tensor`, containing the high 32 bits of the multiplication result of x and y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:896
+msgid "55. triton.language.extra.cann.libdevice.nearbyint"
+msgstr "55. triton.language.extra.cann.nearbyint"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:900
+msgid "将 x 转换为最近邻整数。"
+msgstr "Converts x to the nearest integer."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:908
+msgid "返回值: `tl.tensor`, 返回最近邻整数。"
+msgstr "Return Value: `tl.tensor`, containing the nearest integer to x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:912
+msgid "56. triton.language.extra.cann.libdevice.nextafter"
+msgstr "56. triton.language.extra.cann.nextafter"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:916
+msgid "计算从 x 方向朝 y 的下一个可表示浮点数。"
+msgstr "Computes the next representable floating-point number from x toward y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:924
+msgid "返回值: `tl.tensor`, 返回下一个可表示浮点数。"
+msgstr "Return Value: `tl.tensor`, containing the next representable floating-point number."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:928
+msgid "57. triton.language.extra.cann.libdevice.popc"
+msgstr "57. triton.language.extra.cann.popc"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:932
+msgid "计算 x 中置位为 1 的数量。"
+msgstr "Counts the number of bits set to 1 in x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:940
+msgid "返回值: `tl.tensor`, 返回 x 中置位为 1 的数量， 取值范围 \\[0, 32]。"
+msgstr "Return Value: `tl.tensor`, containing 1 / x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:944
+msgid "58. triton.language.extra.cann.libdevice.pow"
+msgstr "58. triton.language.extra.cann.pow"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:948
+msgid "幂函数，计算 x 的 y 次方。"
+msgstr "Power function, computes x raised to the power of y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:956
+msgid "返回值: `tl.tensor`, 返回 x 的 y 次方。"
+msgstr "Return Value: `tl.tensor`, containing x raised to the power of y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:960
+msgid "59. triton.language.extra.cann.libdevice.rcp_rd"
+msgstr "59. triton.language.extra.cann.rcp_rd"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:964
+msgid "向下舍入浮点数倒数运算。"
+msgstr "Floating-point reciprocal with round-down rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:972
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:988
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1004
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1020
+msgid "返回值: `tl.tensor`, 返回 1 / x。"
+msgstr "Return Value: `tl.tensor`, containing 1 / x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:976
+msgid "60. triton.language.extra.cann.libdevice.rcp_rn"
+msgstr "60. triton.language.extra.cann.rcp_rn"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:980
+msgid "最近偶数舍入浮点数倒数运算。"
+msgstr "Floating-point reciprocal with round-to-nearest-even rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:992
+msgid "61. triton.language.extra.cann.libdevice.rcp_ru"
+msgstr "61. triton.language.extra.cann.rcp_ru"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:996
+msgid "向上舍入浮点数倒数运算。"
+msgstr "Floating-point reciprocal with round-up rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1008
+msgid "62. triton.language.extra.cann.libdevice.rcp_rz"
+msgstr "62. triton.language.extra.cann.rcp_rz"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1012
+msgid "向零舍入浮点数倒数运算。"
+msgstr "Floating-point reciprocal with round-toward-zero rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1024
+msgid "63. triton.language.extra.cann.libdevice.remainder"
+msgstr "63. triton.language.extra.cann.remainder"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1028
+msgid "计算 x 对 y 的余数，满足 r = x - ny，其中 n 是 x / y 的最近邻整数。"
+msgstr "Computes the remainder of x divided by y, where r = x - ny, and n is the nearest integer to x / y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1036
+msgid "返回值: `tl.tensor`, 返回 x 对 y 的余数。"
+msgstr "Return Value: `tl.tensor`, containing the remainder of x divided by y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1040
+msgid "64. triton.language.extra.cann.libdevice.rhadd"
+msgstr "64. triton.language.extra.cann.rhadd"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1044
+msgid "计算 x 和 y 平均值的取整结果。"
+msgstr "Computes the rounded average of x and y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1052
+msgid "返回值: `tl.tensor`, 返回 x 和 y 平均值的取整结果。"
+msgstr "Return Value: `tl.tensor`, containing the rounded average of x and y."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1056
+msgid "65. triton.language.extra.cann.libdevice.rint"
+msgstr "65. triton.language.extra.cann.rint"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1060
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1076
+msgid "按最近偶数舍入模式计算 x 的最近邻整数。"
+msgstr "Computes the nearest integer to x using round-to-nearest-even rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1068
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1084
+msgid "返回值: `tl.tensor`, 返回 x 的最近邻整数。"
+msgstr "Return Value: `tl.tensor`, containing the nearest integer to x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1072
+msgid "66. triton.language.extra.cann.libdevice.round"
+msgstr "66. triton.language.extra.cann.round"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1088
+msgid "67. triton.language.extra.cann.libdevice.rsqrt"
+msgstr "67. triton.language.extra.cann.rsqrt"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1092
+msgid "计算 x 的平方根倒数。"
+msgstr "Computes the reciprocal square root of x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1100
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1116
+msgid "返回值: `tl.tensor`, 返回 x 的平方根倒数。"
+msgstr "Return Value: `tl.tensor`, containing the reciprocal square root of x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1104
+msgid "68. triton.language.extra.cann.libdevice.rsqrt_rn"
+msgstr "68. triton.language.extra.cann.rsqrt_rn"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1108
+msgid "按最近偶数舍入模式计算 x 的平方根倒数。"
+msgstr "Computes the reciprocal square root of x using round-to-nearest-even rounding mode."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1120
+msgid "69. triton.language.extra.cann.libdevice.sad"
+msgstr "69. triton.language.extra.cann.sad"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1124
+msgid "计算 |x-y|+z，其中 x 和 y 是有符号整数，z 是无符号整数。"
+msgstr "Computes |x-y|+z, where x and y are signed integers and z is an unsigned integer."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1132
+msgid "返回值: `tl.tensor`, 返回 |x-y|+z。"
+msgstr "Return Value: `tl.tensor`, containing |x-y|+z."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1136
+msgid "70. triton.language.extra.cann.libdevice.saturatef"
+msgstr "70. triton.language.extra.cann.saturatef"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1140
+msgid "将 x 限制在 \\[+0.0, 1.0] 范围内。"
+msgstr "Computes the hyperbolic sine of input parameter x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1148
+msgid "返回值: `tl.tensor`, 返回 x 的饱和值，取值范围 \\[+0.0, 1.0]。"
+msgstr "Return Value: `tl.tensor`, containing the hyperbolic sine of input x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1152
+msgid "71. triton.language.extra.cann.libdevice.saturatef"
+msgstr "71. triton.language.extra.cann.signbit"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1156
+msgid "获取 x 的符号位。"
+msgstr "Extracts the sign bit of x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1164
+msgid "返回值: `tl.tensor`, 返回 x 的符号位。"
+msgstr "Return Value: `tl.tensor`, containing the sign bit of x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1168
+msgid "72. triton.language.extra.cann.libdevice.sin"
+msgstr "72. triton.language.extra.cann.sin"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1172
+msgid "计算输入参数 x （弧度）的正弦值。"
+msgstr "Computes the sine of the input parameter x (in radians)."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1180
+msgid "返回值: `tl.tensor`, 返回输入 x 的正弦值。"
+msgstr "Return Value: `tl.tensor`, containing the sine of input x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1184
+msgid "72. triton.language.extra.cann.libdevice.sinh"
+msgstr "72. triton.language.extra.cann.sinh"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1188
+msgid "计算输入参数 x 的双曲正弦值。"
+msgstr "Computes the hyperbolic sine of input parameter x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1196
+msgid "返回值: `tl.tensor`, 返回输入 x 的双曲正弦值。"
+msgstr "Return Value: `tl.tensor`, containing the hyperbolic sine of input x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1200
+msgid "74. triton.language.extra.cann.libdevice.sqrt"
+msgstr "74. triton.language.extra.cann.sqrt"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1204
+msgid "计算 x 的平方根值。"
+msgstr "Computes the square root of x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1212
+msgid "返回值: `tl.tensor`, 返回 x 的平方根值。"
+msgstr "Return Value: `tl.tensor`, containing the square root of x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1216
+msgid "75. triton.language.extra.cann.libdevice.tan"
+msgstr "75. triton.language.extra.cann.tan"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1220
+msgid "计算输入参数 x （弧度）的正切值。"
+msgstr "Computes the tangent of input parameter x (in radians)."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1228
+msgid "返回值: `tl.tensor`, 返回输入 x 的正切值。"
+msgstr "Return Value: `tl.tensor`, containing the tangent of input x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1232
+msgid "75. triton.language.extra.cann.libdevice.tanh"
+msgstr "75. triton.language.extra.cann.tanh"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1236
+msgid "计算输入参数 x 的双曲正切值。"
+msgstr "Computes the hyperbolic tangent of input parameter x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1244
+msgid "返回值: `tl.tensor`, 返回输入 x 的双曲正切值。"
+msgstr "Return Value: `tl.tensor`, containing the hyperbolic tangent of input x."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1248
+msgid "77. triton.language.extra.cann.libdevice.trunc"
+msgstr "77. triton.language.extra.cann.trunc"
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1252
+msgid "截断取整，向零舍入到最近邻整数。"
+msgstr "Truncation operation, rounds toward zero to the nearest integer."
+
+#: ../../zh/libdevice/simt/libdevice_simt_developer_guide.md:1260
+msgid "返回值: `tl.tensor`, 返回取整结果。"
+msgstr "Return Value: `tl.tensor`, containing the truncation result."

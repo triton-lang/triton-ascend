@@ -1,0 +1,209 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:1
+msgid "triton.language.get_element"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:5
+msgid "简介：根据给定的索引，从输入张量中读取单个元素。 原型："
+msgstr ""
+"Description: Reads a single element from the input tensor according to the "
+"given index. Prototype:"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:17
+msgid "可以作为tensor的成员函数调用，如`x.get_element(...)`，与`get_element(x, ...)`等效。"
+msgstr ""
+"Can be called as a tensor member function, e.g., `x.get_element(...)`, "
+"equivalent to `get_element(x, ...)`."
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:19
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:21
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "`src`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "`tensor`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "要被访问的源张量"
+msgstr "The source tensor to be accessed"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "`indice`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "`tuple of ints` 或 `tuple of tensors`"
+msgstr "`tuple of ints` or `tuple of tensors`"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "用于指定元素位置的索引"
+msgstr "The index specifying the element position"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "`_builder`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter; external invocation is not supported yet"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "`_generator`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:30
+msgid "返回值： `scalar`：与 `src` 张量元素类型相同的标量值"
+msgstr ""
+"Return value: `scalar`: a scalar value with the same element type as the "
+"`src` tensor"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:33
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:35
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:41
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:43
+msgid "支持任意形状的张量，但需满足： `indice` 的长度必须与 `src` 张量的维度数相同。"
+msgstr ""
+"Supports tensors of arbitrary shape, with the requirement that the length of"
+" `indice` must equal the number of dimensions of the `src` tensor."
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:46
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:48
+msgid "无特殊限制"
+msgstr "No special restrictions"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:50
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:52
+msgid "以下示例实现了get_element的调用："
+msgstr "The following example demonstrates calling get_element:"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:85
+msgid "3. 语义GAP"
+msgstr "3. Semantic Gap"
+
+#: ../../zh/triton_api/Extension_Ops/get_element.md:87
+msgid "无语义差异"
+msgstr "No semantic differences"

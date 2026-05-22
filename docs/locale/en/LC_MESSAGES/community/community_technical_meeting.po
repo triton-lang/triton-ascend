@@ -1,0 +1,164 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/community/community_technical_meeting.md:1
+msgid "社区技术会议"
+msgstr "Community Technical Meeting"
+
+#: ../../zh/community/community_technical_meeting.md:3
+msgid ""
+"Triton-Ascend "
+"定期召开社区技术会议，作为项目治理的核心决策机制。技术方向、大型方案评审、版本发布等重大事项均在技术会议上进行讨论和决策，由所有 "
+"`Maintainer` 投票产生。会议对所有社区成员公开，任何人均可参加讨论，但决策和投票仅由 `Maintainer` 完成。"
+msgstr ""
+"Triton-Ascend holds regular community technical meetings as the core"
+"decision-making mechanism for project governance. Major matters such as"
+"technical direction, large-scale proposal reviews, and version releases"
+"are discussed and decided in technical meetings, with votes cast by all"
+"`Maintainers`. Meetings are open to all community members, and anyone"
+"can participate in discussions, but decisions and voting are done only"
+"by `Maintainers`."
+
+#: ../../zh/community/community_technical_meeting.md:5
+msgid "会议内容"
+msgstr "Meeting Content"
+
+#: ../../zh/community/community_technical_meeting.md:7
+msgid "技术方向讨论与决策"
+msgstr "Technical direction discussion and decision-making"
+
+#: ../../zh/community/community_technical_meeting.md:8
+msgid "大型方案（RFC）评审与投票"
+msgstr "Large-scale proposal (RFC) review and voting"
+
+#: ../../zh/community/community_technical_meeting.md:9
+msgid "版本发布计划与时间线"
+msgstr "Version release planning and timeline"
+
+#: ../../zh/community/community_technical_meeting.md:10
+msgid "社区 Issue 和 PR 的优先级排序"
+msgstr "Community Issue and PR priority ranking"
+
+#: ../../zh/community/community_technical_meeting.md:11
+msgid "贡献者提名与任免讨论"
+msgstr "Contributor nomination and removal discussions"
+
+#: ../../zh/community/community_technical_meeting.md:13
+msgid "会议安排"
+msgstr "Meeting Schedule"
+
+#: ../../zh/community/community_technical_meeting.md:15
+msgid "**例会频率**：双周"
+msgstr "**Meeting Frequency**: Bi-weekly"
+
+#: ../../zh/community/community_technical_meeting.md:16
+msgid "**会议时间**：周五15:00"
+msgstr "**Meeting Time**: Friday 15:00"
+
+#: ../../zh/community/community_technical_meeting.md:17
+msgid "**会议链接**：待公布"
+msgstr "**Meeting Link**: To be announced"
+
+#: ../../zh/community/community_technical_meeting.md:18
+msgid "**会议纪要**：待公布"
+msgstr "**Meeting Minutes**: To be announced"
+
+#: ../../zh/community/community_technical_meeting.md:19
+msgid "**议题提交**：待公布"
+msgstr "**Agenda Submission**: To be announced"
+
+#: ../../zh/community/community_technical_meeting.md:21
+msgid "投票规则"
+msgstr "Voting Rules"
+
+#: ../../zh/community/community_technical_meeting.md:23
+msgid "未参会的 `Maintainer` 需在会议后 3 个工作日内反馈投票意见，逾期未投票视为弃权"
+msgstr "Maintainers who do not attend the meeting must provide their vote within 3 business days after the meeting; failure to vote within the deadline is considered abstention"
+
+#: ../../zh/community/community_technical_meeting.md:24
+msgid "投票以参与投票的 `Maintainer` 过半数同意即为通过（弃权不计入票数）"
+msgstr "A vote is passed when more than half of the participating Maintainers agree (abstentions are not counted in the vote total)"
+
+#: ../../zh/community/community_technical_meeting.md:25
+msgid "投票结果记录在会议纪要中"
+msgstr "Voting results are recorded in the meeting minutes"
+
+#: ../../zh/community/community_technical_meeting.md:27
+msgid "决策流程"
+msgstr "Decision-Making Process"
+
+#: ../../zh/community/community_technical_meeting.md:29
+msgid "常规决策"
+msgstr "Routine Decisions"
+
+#: ../../zh/community/community_technical_meeting.md:31
+msgid ""
+"日常开发中的常规决策（如 `Bug` 修复、小功能改进）由相关模块的 `Maintainer` 在 `Issue` 或 `PR` "
+"中审核决定，无需上会。"
+msgstr ""
+"Routine decisions in daily development (such as `Bug` fixes, minor"
+"feature improvements) are reviewed and decided by the `Maintainer` of"
+"the relevant module in the `Issue` or `PR`, without requiring a meeting."
+
+#: ../../zh/community/community_technical_meeting.md:33
+msgid "重大决策"
+msgstr "Major Decisions"
+
+#: ../../zh/community/community_technical_meeting.md:35
+msgid "以下事项视为重大决策，需在社区技术会议上由 `Maintainer` 集体讨论决定："
+msgstr "The following matters are considered major decisions and require collective discussion by Maintainers at community technical meetings:"
+
+#: ../../zh/community/community_technical_meeting.md:37
+msgid "架构层面的重大变更"
+msgstr "Major architectural changes"
+
+#: ../../zh/community/community_technical_meeting.md:38
+msgid "`API` 的破坏性变更"
+msgstr "Breaking API changes"
+
+#: ../../zh/community/community_technical_meeting.md:39
+msgid "新增核心功能或移除已有功能"
+msgstr "Adding core features or removing existing features"
+
+#: ../../zh/community/community_technical_meeting.md:40
+msgid "第三方依赖的重大升级"
+msgstr "Major upgrades to third-party dependencies"
+
+#: ../../zh/community/community_technical_meeting.md:41
+msgid "版本发布计划"
+msgstr "Version release planning"
+
+#: ../../zh/community/community_technical_meeting.md:43
+msgid "重大决策的流程："
+msgstr "Major decision process:"
+
+#: ../../zh/community/community_technical_meeting.md:45
+msgid "提交 `RFC`（Request for Comments），描述变更内容、影响范围和实施方案"
+msgstr "1. Submit an RFC (Request for Comments), describing the change content, impact scope, and implementation plan"
+
+#: ../../zh/community/community_technical_meeting.md:46
+msgid "在技术会议上进行讨论"
+msgstr "2. Discuss at the technical meeting"
+
+#: ../../zh/community/community_technical_meeting.md:47
+msgid "`Maintainer` 共同决策"
+msgstr "3. Maintainers make a joint decision"

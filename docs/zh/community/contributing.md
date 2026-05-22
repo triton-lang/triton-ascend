@@ -36,10 +36,10 @@ pre-commit run --all-files
 ```bash
 git clone https://github.com/triton-lang/triton-ascend.git
 cd triton-ascend
-#拉取AscendNPU-IR
+# Clone AscendNPU-IR
 git submodule update --init --depth 1
 
-# 可选：使用本地 LLVM 构建
+# Optional: build with local LLVM
 # export LLVM_SYSPATH=/path/to/LLVM
 
 pip install -e .
@@ -97,8 +97,8 @@ pip install -r python/test-requirements.txt
 
 ```bash
 pip install pre-commit
-pre-commit install        # 安装 git hook，提交时自动运行
-pre-commit run --all-files  # 手动检查所有文件
+pre-commit install        # Install git hook, runs automatically on commit
+pre-commit run --all-files  # Manually check all files
 ```
 
 提交 PR 前建议运行：
@@ -127,10 +127,10 @@ pre-commit run --from-ref origin/main --to-ref HEAD
 
 ```bash
 
-# 运行 Ascend 特有算子单元测试
+# Run Ascend-specific operator unit tests
 python -m pytest third_party/ascend/unittest/pytest_ut/ -v -n 8
 
-# 运行指定单个测试文件
+# Run a single specified test file
 python -m pytest third_party/ascend/unittest/pytest_ut/test_index_select_inductor.py -v
 ```
 
@@ -140,7 +140,7 @@ Triton-Ascend 支持 PyTorch Inductor 后端，可通过以下方式验证 Induc
 
 ```bash
 
-# 运行 Inductor 算子测试
+# Run Inductor operator tests
 python -m pytest third_party/ascend/unittest/pytest_ut/test_index_select_inductor.py -v
 ```
 
@@ -153,10 +153,10 @@ Triton-Ascend 提供了第三方算子库的集成验证框架，用于确保基
 **vLLM Kernels 验证**：
 
 ```bash
-# 运行所有 kernel 验证
+# Run all kernel verifications
 python -m pytest third_party/ascend/unittest/kernels/test_triton_kernel.py -v
 
-# 运行指定 kernel 验证
+# Run specified kernel verification
 python -m pytest third_party/ascend/unittest/kernels/test_triton_kernel.py -v --kernel={kernel_name}
 ```
 

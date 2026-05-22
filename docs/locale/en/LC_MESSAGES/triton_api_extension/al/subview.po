@@ -1,0 +1,132 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api_extension/al/subview.md:1
+msgid "subview"
+msgstr "subview"
+
+#: ../../zh/triton_api_extension/al/subview.md:3
+msgid "1. 硬件背景"
+msgstr "1. Hardware Background"
+
+#: ../../zh/triton_api_extension/al/subview.md:5
+msgid "昇腾硬件 A5 支持了定义新视图，仅通过偏移、大小和步幅实现，不复制底层数据。"
+msgstr ""
+"Ascend A5 hardware supports defining new views using only offsets,"
+"sizes, and strides, without copying the underlying data."
+
+#: ../../zh/triton_api_extension/al/subview.md:7
+msgid "2. 接口说明"
+msgstr "2. Interface Description"
+
+#: ../../zh/triton_api_extension/al/subview.md:9
+msgid "接口一"
+msgstr "Interface 1"
+
+#: ../../zh/triton_api_extension/al/subview.md:17
+msgid "接口二"
+msgstr "Interface 2"
+
+#: ../../zh/triton_api_extension/al/subview.md:25
+msgid "返回值：bl.buffer"
+msgstr "Return value: `bl.buffer`"
+
+#: ../../zh/triton_api_extension/al/subview.md:27
+msgid "3. 入参说明"
+msgstr "3. Parameter Description"
+
+#: ../../zh/triton_api_extension/al/subview.md:29
+msgid "src: buffer -> 源buffer"
+msgstr "`src`: buffer -> source buffer"
+
+#: ../../zh/triton_api_extension/al/subview.md:31
+msgid "offsets: List[tl.tensor] -> 偏移"
+msgstr "`offsets`: `List[tl.tensor]` -> offsets"
+
+#: ../../zh/triton_api_extension/al/subview.md:33
+msgid "sizes: List[tl.constexpr] -> 输出的size"
+msgstr "`sizes`: `List[tl.constexpr]` -> output sizes"
+
+#: ../../zh/triton_api_extension/al/subview.md:35
+msgid "strides: List[tl.constexpr] -> 步长"
+msgstr "`strides`: `List[tl.constexpr]` -> strides"
+
+#: ../../zh/triton_api_extension/al/subview.md:37
+msgid "4. 约束说明"
+msgstr "4. Constraints"
+
+#: ../../zh/triton_api_extension/al/subview.md:39
+msgid "输入的参数size、offset、stride必须大于0（offset可以是0），不能为负值。"
+msgstr ""
+"Input parameters `size`, `offset`, and `stride` must be greater than 0"
+"(`offset` may be 0) and cannot be negative."
+
+#: ../../zh/triton_api_extension/al/subview.md:41
+msgid "size的每一个维度的大小不能大于原buffer的大小。"
+msgstr ""
+"The size of each dimension in `size` cannot exceed the size of the"
+"original buffer."
+
+#: ../../zh/triton_api_extension/al/subview.md:43
+msgid "子视图的每一个维度的大小不能超过原buffer的大小。"
+msgstr ""
+"The size of each dimension in the subview cannot exceed the size of"
+"the original buffer."
+
+#: ../../zh/triton_api_extension/al/subview.md:45
+msgid "stride的访问不能超过src的大小，stride所有元素全为1。"
+msgstr ""
+"Stride-based access cannot exceed the size of `src`, and all elements"
+"in `stride` must be 1."
+
+#: ../../zh/triton_api_extension/al/subview.md:47
+msgid "参数的设置要指明每一个维度的值，参数维度应该和输入buffer的维度保持一致。"
+msgstr ""
+"Parameter settings must specify the value for every dimension, and the"
+"parameter dimensions must match those of the input buffer."
+
+#: ../../zh/triton_api_extension/al/subview.md:49
+msgid "offset必须32字节对齐。"
+msgstr "`offset` must be 32-byte aligned."
+
+#: ../../zh/triton_api_extension/al/subview.md:51
+msgid "子视图中最后一个维度的第二行第一个点的偏移必须是32字节对齐。"
+msgstr ""
+"In the subview, the offset of the first element in the second row of"
+"the last dimension must be 32-byte aligned."
+
+#: ../../zh/triton_api_extension/al/subview.md:53
+msgid "解释补充：sizes、strides在使用的时候传入类型：List[tl.constexpr]（注意不要误传tensor，否则会报错-类型不匹配）。offsets补充支持了tensor传入（也可以传入constexpr）"
+msgstr ""
+"Additional explanation: `sizes` and `strides` must be passed as"
+"`List[tl.constexpr]` when used. Do not mistakenly pass tensors, or a"
+"type-mismatch compilation error will occur. `offsets` additionally"
+"supports tensor input (it can also take `constexpr`)."
+
+#: ../../zh/triton_api_extension/al/subview.md:55
+msgid "5. 用例示例"
+msgstr "5. Example Usage"
+
+#: ../../zh/triton_api_extension/al/subview.md:63
+msgid "输出："
+msgstr "Output:"
+

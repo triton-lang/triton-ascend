@@ -1,0 +1,332 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/migration_guide/architecture_difference.md:1
+msgid "昇腾与GPU的开发差异"
+msgstr "Development Differences Between Ascend and GPUs"
+
+#: ../../zh/migration_guide/architecture_difference.md:3
+msgid "多核任务并行策略"
+msgstr "Multi-Core Task Parallelism Strategy"
+
+#: ../../zh/migration_guide/architecture_difference.md:5
+msgid "NPU在Triton多核并行中是物理核强绑定模式，与GPU逻辑维度并行+硬件自动物理映射的模式形成核心差异"
+msgstr "NPUs are strongly bound to physical cores in Triton multi-core parallelism. This represents a core difference from GPUs' logical dimension parallelism + automatic physical mapping in hardware."
+
+#: ../../zh/migration_guide/architecture_difference.md:7
+msgid "核心对比"
+msgstr "Core comparison"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "维度"
+msgstr "Dimension"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "GPU（NVIDIA）"
+msgstr "GPU (NVIDIA)"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "昇腾（Ascend）"
+msgstr "Ascend"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "grid 本质"
+msgstr "Essence of grids"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "逻辑任务维度（和物理核解耦）"
+msgstr "Logical task dimension (decoupled from physical cores)"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "物理核组映射（绑定 AI Core 拓扑）"
+msgstr "Physical core group mapping (bound to the AI core topology)"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "核数 / 维度限制"
+msgstr "Limit on the number of cores/dimensions"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "grid 维度 / 大小无硬限制"
+msgstr "No hard limit on the grid dimensions/sizes"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "grid 大小≤AI Core 总数，2D 需匹配拓扑"
+msgstr "Grid size ≤ Total number of AI cores; topology matching required by 2D"
+
+#: ../../zh/migration_guide/architecture_difference.md:14
+msgid ""
+"GPU:可绑定多个维度轴（三维grid=[n,m,l] 等同于乘积n×m×l个并行线程），每个线程仅对应一次kernel执行，且仅执行一次。 "
+"NPU:Vector核，Cube核属于多个物理核，不同代际硬件核数不同，每个核仅执行一次Block,且支持对该Block重复调度执行。"
+msgstr "GPUs can be bound to multiple dimensions (a 3D grid of `[n, m, l]` is equivalent to `n x m x l` parallel threads). Each thread corresponds to only one kernel execution and executes only once. In NPUs, vector cores and cube cores belong to multiple physical cores. The number of cores varies with the generation of hardware. Each core executes only one block and can schedule the block execution repeatedly."
+
+#: ../../zh/migration_guide/architecture_difference.md:17
+msgid "充分利用核数"
+msgstr "Full Utilization of Cores"
+
+#: ../../zh/migration_guide/architecture_difference.md:19
+msgid ""
+"昇腾NPU具备多个计算核心，合理分配并充分利用所有可用核心，是提升算子性能的关键因素之一。 "
+"在调用Triton内核函数时，通过设置launch参数控制使用的核数量。以GELU算子为例："
+msgstr "Ascend NPUs have multiple computing cores. Properly allocating and fully utilizing all available cores is one of the key factors to improve operator performance. When calling Triton kernel functions, you can set the **launch** parameter to control the number of cores in use. Take the GELU operator as an example:"
+
+#: ../../zh/migration_guide/architecture_difference.md:26
+msgid "通过对核数的调优，可实现对所有计算资源的充分调度和利用，从而最大化并行度与吞吐量。注意，当前版本核数需小于等于65535。"
+msgstr "By optimizing the number of cores, you can fully schedule and utilize all computing resources, thereby maximizing the degree of parallelism (DOP) and throughput. Note that the number of cores in the current version must be less than or equal to 65,535."
+
+#: ../../zh/migration_guide/architecture_difference.md:28
+msgid "单核数据搬运策略"
+msgstr "Single-Core Data Transfer Strategy"
+
+#: ../../zh/migration_guide/architecture_difference.md:30
+msgid "数据切分Tiling"
+msgstr "Data Tiling"
+
+#: ../../zh/migration_guide/architecture_difference.md:32
+msgid "写Triton内核函数时，合理的数据切分策略对性能优化至关重要。通过调整不同的切分粒度参数，可以在不同维度上平衡计算负载与内存访问效率。"
+msgstr "When you write Triton kernel functions, a proper data tiling strategy is essential for performance optimization. By adjusting tiling granularity parameters, you can balance computational workload and memory access efficiency across different dimensions."
+
+#: ../../zh/migration_guide/architecture_difference.md:34
+msgid "常见的切分参数包括："
+msgstr "Common tiling parameters include:"
+
+#: ../../zh/migration_guide/architecture_difference.md:42
+msgid ""
+"开发者可根据实际场景手动选择最优的切分配置，使得每次计算尽可能充分利用片上内存（On-chip Memory），避免频繁访问全局内存（Global"
+" Memory）造成的 性能瓶颈。"
+msgstr "By manually selecting the optimal tiling configurations based on your actual scenario, you can maximize the utilization of on-chip memory during each computation cycle, preventing performance bottlenecks caused by frequent access to the global memory."
+
+#: ../../zh/migration_guide/architecture_difference.md:45
+msgid "以GELU算子为例，通过调整切分参数，可以有效适配片上缓存容量限制，从而提升执行效率。"
+msgstr "Taking the GELU operator as an example, adjusting the tiling parameters helps effectively adapt to the on-chip cache capacity limit, thereby improving execution efficiency."
+
+#: ../../zh/migration_guide/architecture_difference.md:47
+msgid "注：Atlas 800T/I A2产品的片上内存容量为192KB，因此在设计切分策略时需考虑该限制，确保每轮计算的数据量不超过片上内存容量。"
+msgstr "Note: Atlas 800T/I A2 has an on-chip memory capacity of 192 KB. When designing the tiling strategy, ensure that the data volume of each computation cycle does not exceed this capacity."
+
+#: ../../zh/migration_guide/architecture_difference.md:49
+msgid "GELU算子示例"
+msgstr "Example GELU Operator"
+
+#: ../../zh/migration_guide/architecture_difference.md:51
+msgid "GELU算子开发示例，使用3种方式计算结果。"
+msgstr "The following demonstrates the development of an example GELU operator with three result computation methods."
+
+#: ../../zh/migration_guide/architecture_difference.md:53
+msgid "standard_unary      为标准Torch计算。"
+msgstr "`standard_unary` is standard Torch computation."
+
+#: ../../zh/migration_guide/architecture_difference.md:55
+msgid "triton_easy_kernel  为简单Triton实现。"
+msgstr "`triton_easy_kernel` is a simple implementation of Triton."
+
+#: ../../zh/migration_guide/architecture_difference.md:57
+msgid "triton_better_kernel为更高效的Triton实现。"
+msgstr "`triton_better_kernel` is a more efficient implementation of Triton."
+
+#: ../../zh/migration_guide/architecture_difference.md:59
+msgid "标准Torch写法"
+msgstr "Standard Torch Writing"
+
+#: ../../zh/migration_guide/architecture_difference.md:61
+msgid "输入tensor x0，经过torch计算实现 GELU 算子，返回结果值。"
+msgstr "After computing the input `tensor x0`, Torch implements the GELU operator and returns the result value."
+
+#: ../../zh/migration_guide/architecture_difference.md:69
+msgid "简单Triton写法"
+msgstr "Simple Triton Writing"
+
+#: ../../zh/migration_guide/architecture_difference.md:71
+msgid ""
+"以下是一个使用 Triton 编写的简单内核示例，用于展示如何定义和调用一个基本的Triton内核函数。此示例实现了一个简单的数学运算（GELU "
+"激活函数）。"
+msgstr "The following is an example of a simple kernel written in Triton, demonstrating how to define and call a basic Triton kernel function. This example implements a simple mathematical operation (GELU activation function)."
+
+#: ../../zh/migration_guide/architecture_difference.md:83
+msgid "注意事项"
+msgstr "Precautions"
+
+#: ../../zh/migration_guide/architecture_difference.md:85
+msgid ""
+"内存限制：上述写法中，所有输入数据一次性被加载到内存中进行计算。如果输入张量过大，可能会超出单个内核的片上内存容量，导致内存溢出错误。 "
+"因此，这种简单的写法更适合于小规模张量的计算或用于理解 Triton 内核的基本写法和调用方式。"
+msgstr "1. Memory limit: In the preceding writing, all input data is loaded to memory at a time for computation. If the input tensor is too large, it may exceed the on-chip memory capacity of a single kernel, resulting in a memory overflow error. Therefore, this simple writing is suitable for computing small-scale tensors or for understanding the basic writing and call method of Triton kernels."
+
+#: ../../zh/migration_guide/architecture_difference.md:88
+msgid ""
+"适用场景：尽管这种方法有助于快速理解和入门 Triton 编程，但对于大规模数据集或高性能要求的应用场景，建议采用更复杂的数据切分策略（如 "
+"Tiling）， 以充分利用硬件资源并避免内存溢出问题。通过这种方式，开发者可以快速上手 Triton 编程，同时了解如何定义、调用以及优化 "
+"Triton 内核函数。"
+msgstr "2. Application scenarios: This method helps developers quickly understand and get started with Triton programming. However, for large-scale data sets or scenarios demanding high performance, developers are advised to use more complex data tiling strategies to fully utilize hardware resources and prevent memory overflow. In this way, developers can quickly get started with Triton programming and understand how to define, call, and optimize Triton kernel functions."
+
+#: ../../zh/migration_guide/architecture_difference.md:91
+msgid "更高效triton写法"
+msgstr "More Efficient Triton Writing"
+
+#: ../../zh/migration_guide/architecture_difference.md:93
+msgid ""
+"在昇腾 NPU 上使用 Triton "
+"编写高性能算子时，为了充分利用硬件资源、避免内存溢出并提升执行效率，通常需要采用数据切分（Tiling）策略。 下面是一个经过优化的 Triton"
+" 内核实现示例，适用于大规模张量计算。"
+msgstr "When using Triton to write high-performance operators on Ascend NPUs, developers need to use a data tiling strategy to fully utilize hardware resources, prevent memory overflow, and improve execution efficiency. The following is an example of an optimized Triton kernel implementation suitable for large-scale tensor computation."
+
+#: ../../zh/migration_guide/architecture_difference.md:115
+msgid "关键代码解释"
+msgstr "Explanation of key code:"
+
+#: ../../zh/migration_guide/architecture_difference.md:134
+msgid "编译优化能力"
+msgstr "Compilation Optimization"
+
+#: ../../zh/migration_guide/architecture_difference.md:136
+msgid "AscendNPU IR优化"
+msgstr "Ascend NPU IR Optimization"
+
+#: ../../zh/migration_guide/architecture_difference.md:138
+msgid ""
+"针对昇腾软硬件特性，适配了AscendNPU IR优化的编译选项，如下表所示。 **使用方法**：在autotune的配置阶段，传入编译选项的值 "
+"以开启`multibuffer`选项举例，在autotune的配置阶段，即`triton.Config`中，传入`'multibuffer': "
+"True`，详见[autotune示例](../examples/06_autotune_example.md)："
+msgstr "The following table lists the compilation options for Ascend NPU IR optimization, which are adapted to the hardware and software features of Ascend. **Usage**: During the autotune configuration phase, pass the values of the compilation options. For example, to enable the `multibuffer` option, pass `'multibuffer': True` to `triton.Config` during the autotune configuration phase. For details, see [Autotune Example](../examples/06_autotune_example.md)."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "选项"
+msgstr "Option"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "能力"
+msgstr "Capability"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "是否开启"
+msgstr "Enabled or Not"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "multibuffer"
+msgstr "multibuffer"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "开启流水并行数据搬运"
+msgstr "Data transfer through parallel pipelines."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "默认true； true , false。 autotune中可配置"
+msgstr "Default: **true**. Options: **true** and **false**. It is configurable during autotune."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "unit_flag"
+msgstr "unit_flag"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "cube搬出的一个优化项"
+msgstr "Optimization item for cube-out."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "默认None；true , false。  autotune中可配置"
+msgstr "Default: None. Options: **true** and **false**. It is configurable during autotune."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "limit_auto_multi_buffer_only_for_local_buffer"
+msgstr "limit_auto_multi_buffer_only_for_local_buffer"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "CV算子一个优化项，cube搬出的一个优化项"
+msgstr "Optimization item for CV operators and cube-out."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "默认None；true , false。 autotune中可配置"
+msgstr "Default: None. Options: **true** and **false**. It is configurable during autotune."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "limit_auto_multi_buffer_of_local_buffer"
+msgstr "limit_auto_multi_buffer_of_local_buffer"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "cube算子开启double buffer具体的scope"
+msgstr "Scope of enabling double buffer for cube operators."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "默认None；[\"no-limit\", \"no-l0c\"]， autotune中可配置"
+msgstr ""
+"Default: None. Value range: [\"no-limit\",\"no-l0c\"]. It is"
+"configurable during autotune."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "set_workspace_multibuffer"
+msgstr "set_workspace_multibuffer"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "只有在limit_auto_multi_buffer_only_for_local_buffer=false场景下生效"
+msgstr ""
+"It takes effect only when **limit_auto_multi_buffer_only_for_local_buffe"
+"r** is set to **false**."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "默认None；如[2,4]，autotune中可配置"
+msgstr "Default: None. Example: [2,4]. It is configurable during autotune."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "enable_hivm_auto_cv_balance"
+msgstr "enable_hivm_auto_cv_balance"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "set_workspace_multibuffer只有在limit_auto_multi_buffer_only_for_local_buffer=false场景下生效"
+msgstr "**set_workspace_multibuffer** takes effect only when **limit_auto_multi_buffer_only_for_local_buffer** is set to **false**."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "tile_mix_vector_loop"
+msgstr "tile_mix_vector_loop"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "CV算子的一个优化项，当前vector可以切几份"
+msgstr "Optimization item for CV operators. It specifies the number of segments into which the current vector can be split."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "默认None；如 [2,4,8]，autotune中可配置"
+msgstr "Default: None. Example: [2,4,8]. It is configurable during autotune."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "tile_mix_cube_loop"
+msgstr "tile_mix_cube_loop"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "CV算子一个优化项，当前cube可以切几份"
+msgstr "Optimization item for CV operators. It specifies the number of segments into which the current cube can be split."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "auto_blockify_size"
+msgstr "auto_blockify_size"
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "TRITON_ALL_BLOCKS_PARALLEL优化项，用于指定扩展的左起第一个维度的大小。"
+msgstr "Optimization item for TRITON_ALL_BLOCKS_PARALLEL, used to specify the size of the first dimension from the left for expansion."
+
+#: ../../zh/migration_guide/architecture_difference.md
+msgid "默认1；如 [2,4,8]，autotune中可配置"
+msgstr "Default: 1. Example: [2,4,8]. It is configurable during autotune."
+
+#: ../../zh/migration_guide/architecture_difference.md:160
+msgid "注：优化编译选项在ascend/backend/compiler.py代码中。"
+msgstr "Note: The compilation optimization options are located in **ascend/backend/compiler.py**."
+
+#: ../../zh/migration_guide/architecture_difference.md:161
+msgid "注：CV算子表示该算子运算过程中既使用了AI Core又使用了Vector Core。"
+msgstr "Note: CV operators indicate that both AI cores and vector cores are used during operator computation."

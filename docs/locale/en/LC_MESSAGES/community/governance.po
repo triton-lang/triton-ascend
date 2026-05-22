@@ -1,0 +1,2532 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/community/governance.md:1
+msgid "治理"
+msgstr "Governance"
+
+#: ../../zh/community/governance.md:3
+msgid "使命"
+msgstr "Mission"
+
+#: ../../zh/community/governance.md:5
+msgid ""
+"作为 Triton 生态的重要组成部分，Triton-Ascend 项目致力于为所有 Ascend NPU 用户提供高效、易用的 Triton "
+"编译框架，使 Triton 代码能够高效运行于 Ascend 硬件之上，并积极为丰富 Triton 与 Ascend 生态做出贡献。"
+msgstr ""
+"As an important component of the Triton ecosystem, the Triton-Ascend"
+"project is committed to providing an efficient and user-friendly Triton"
+"compilation framework for all Ascend NPU users, enabling Triton code to"
+"run efficiently on Ascend hardware and actively contributing to"
+"enriching the Triton and Ascend ecosystems."
+
+#: ../../zh/community/governance.md:7 ../../zh/community/governance.md:56
+msgid "原则"
+msgstr "Principles"
+
+#: ../../zh/community/governance.md:9
+msgid "**开放透明**：所有技术决策和社区讨论均在公开渠道进行"
+msgstr ""
+"**Open and Transparent**: All technical decisions and community"
+"discussions are conducted through public channels"
+"- **Contribution-Oriented**: Membership is based on individual"
+"capability and contribution, not tied to employers"
+"- **Community-Driven**: Encourage broad participation, respect diverse"
+"viewpoints, and reach consensus through discussion and voting"
+
+#: ../../zh/community/governance.md:10
+msgid "**贡献导向**：成员资格基于个人能力和贡献，不与雇主绑定"
+msgstr ""
+"**Open and Transparent**: All technical decisions and community"
+"discussions are conducted through public channels"
+"- **Contribution-Oriented**: Membership is based on individual"
+"capability and contribution, not tied to employers"
+"- **Community-Driven**: Encourage broad participation, respect diverse"
+"viewpoints, and reach consensus through discussion and voting"
+
+#: ../../zh/community/governance.md:11
+msgid "**社区驱动**：鼓励广泛参与，尊重不同观点，通过讨论和投票达成共识"
+msgstr ""
+"**Open and Transparent**: All technical decisions and community"
+"discussions are conducted through public channels"
+"- **Contribution-Oriented**: Membership is based on individual"
+"capability and contribution, not tied to employers"
+"- **Community-Driven**: Encourage broad participation, respect diverse"
+"viewpoints, and reach consensus through discussion and voting"
+
+#: ../../zh/community/governance.md:13
+msgid "治理机制"
+msgstr "Governance Mechanism"
+
+#: ../../zh/community/governance.md:15
+msgid "Triton-Ascend 是 Triton 社区下的开源项目，角色任命最终决定权归 Triton 社区。项目采用分层技术治理结构："
+msgstr ""
+"Triton-Ascend is an open-source project under the Triton community, with"
+"role appointments ultimately decided by the Triton community. The"
+"project adopts a layered technical governance structure:"
+
+#: ../../zh/community/governance.md:17 ../../zh/community/governance.md:95
+msgid "贡献者（Contributor）"
+msgstr "Contributor"
+
+#: ../../zh/community/governance.md:19 ../../zh/community/governance.md:32
+msgid "**职责**："
+msgstr "**Responsibilities**:"
+
+#: ../../zh/community/governance.md:20
+msgid "协助新贡献者融入项目"
+msgstr "Help new contributors integrate into the project"
+
+#: ../../zh/community/governance.md:21
+msgid "处理并回应社区 Issue"
+msgstr "Handle and respond to community Issues"
+
+#: ../../zh/community/governance.md:22
+msgid "评审 RFC 和代码"
+msgstr "Review RFCs and code"
+
+#: ../../zh/community/governance.md:24 ../../zh/community/governance.md:41
+msgid "**要求**："
+msgstr "**Requirements**:"
+
+#: ../../zh/community/governance.md:25
+msgid "至少完成一次贡献"
+msgstr "Complete at least one contribution"
+
+#: ../../zh/community/governance.md:26
+msgid "持续积极参与项目，参与形式包括提交 Issue、代码评审、提交代码以及参与社区活动"
+msgstr "Continuously and actively participate in the project through submitting Issues, code reviews, code submissions, and participating in community activities"
+
+#: ../../zh/community/governance.md:28
+msgid "**权限**：由 GitHub 仓库 `Triage` 角色授予，包括仓库读取和克隆、Issue 与 PR 提交权限。"
+msgstr "**Permissions**: Granted the GitHub repository `Triage` role, including read and clone access, and permission to submit Issues and PRs."
+
+#: ../../zh/community/governance.md:30 ../../zh/community/governance.md:77
+msgid "维护者（Maintainer）"
+msgstr "Maintainer"
+
+#: ../../zh/community/governance.md:33
+msgid "制定项目的愿景和使命，塑造技术方向，确保长期成功"
+msgstr "Define the project's vision and mission, shape technical direction, and ensure long-term success"
+
+#: ../../zh/community/governance.md:34
+msgid "拥有代码合并权限，主导路线图规划"
+msgstr "Have code merge permissions, lead roadmap planning"
+
+#: ../../zh/community/governance.md:35
+msgid "评审社区贡献，持续改进代码"
+msgstr "Review community contributions and continuously improve code"
+
+#: ../../zh/community/governance.md:36
+msgid "负责核心模块的代码质量与架构决策"
+msgstr "Responsible for code quality and architectural decisions of core modules"
+
+#: ../../zh/community/governance.md:37
+msgid "参与版本发布决策"
+msgstr "Participate in release decisions"
+
+#: ../../zh/community/governance.md:38
+msgid "指导贡献者完成代码贡献"
+msgstr "Guide contributors in completing code contributions"
+
+#: ../../zh/community/governance.md:39
+msgid "参与社区技术会议，对技术方向、大型方案和 Release 等事项进行讨论和投票"
+msgstr "Participate in community technical meetings, discuss and vote on technical direction, large-scale proposals, and Release matters"
+
+#: ../../zh/community/governance.md:42
+msgid "深刻理解 Triton 和 Triton-Ascend 的代码库"
+msgstr "Deep understanding of the Triton and Triton-Ascend codebase"
+
+#: ../../zh/community/governance.md:43
+msgid "承诺持续代码贡献，具备设计、开发和 PR 评审工作流能力"
+msgstr "Commitment to continuous code contribution, with capabilities in design, development, and PR review workflows"
+
+#: ../../zh/community/governance.md:44
+msgid "积极参与社区代码评审，交付至少一项主要功能并保持持续高质量贡献"
+msgstr "Actively participate in community code reviews, deliver at least one major feature, and maintain continuous high-quality contributions"
+
+#: ../../zh/community/governance.md:45
+msgid "积极处理 Issue、回应咨询、参与讨论"
+msgstr "Actively handle Issues, respond to inquiries, and participate in discussions"
+
+#: ../../zh/community/governance.md:46
+msgid "在项目中做出过重大技术贡献（如核心功能开发、架构设计、性能优化等）"
+msgstr "Made significant technical contributions to the project (such as core feature development, architectural design, performance optimization, etc.)"
+
+#: ../../zh/community/governance.md:47
+msgid "展现出良好的技术判断力和社区协作能力"
+msgstr "Demonstrated good technical judgment and community collaboration skills"
+
+#: ../../zh/community/governance.md:49
+msgid ""
+"**权限**：授予 GitHub 仓库写入权限，包括读取、克隆和推送代码至仓库，核心分支保护与合并权限，版本发布执行权限，以及管理 Issue 和"
+" Pull Request。"
+msgstr ""
+"**Permissions**: Granted GitHub repository write permissions, including"
+"read, clone, and push code to the repository, core branch protection and"
+"merge permissions, release execution permissions, and management of"
+"`Issues` and `Pull Requests`."
+
+#: ../../zh/community/governance.md:52
+msgid "晋升由现有 Maintainer 集体评审，综合考虑贡献质量、持续性和社区参与度。"
+msgstr ""
+"Promotion is collectively reviewed by existing `Maintainers`,"
+"considering contribution quality, continuity, and community engagement."
+
+#: ../../zh/community/governance.md:54
+msgid "提名与任免"
+msgstr "Nomination and Removal"
+
+#: ../../zh/community/governance.md:58
+msgid "成员资格基于个人能力，通过贡献、评审和讨论来体现"
+msgstr "Membership is based on individual capability, demonstrated through contributions, reviews, and discussions"
+
+#: ../../zh/community/governance.md:59
+msgid "候选人须认同 Triton-Ascend 的原则并保持行为一致"
+msgstr "Candidates must agree with Triton-Ascend's principles and maintain consistent behavior"
+
+#: ../../zh/community/governance.md:60
+msgid "连续 **6 个月** 未参与项目贡献的 Maintainer 可转为荣誉状态（Emeritus）"
+msgstr "Maintainers who have not contributed to the project for **6 consecutive months** may be transitioned to Emeritus status"
+
+#: ../../zh/community/governance.md:61
+msgid "成员资格授予个人，不与雇主绑定"
+msgstr "Membership is granted to individuals, not tied to employers"
+
+#: ../../zh/community/governance.md:63
+msgid "提名流程"
+msgstr "Nomination Process"
+
+#: ../../zh/community/governance.md:65
+msgid "提名可由任何人发起，包括自我提名，以社区issue的方式进行提名"
+msgstr "Nominations can be initiated by anyone, including self-nominations, through a community Issue"
+
+#: ../../zh/community/governance.md:66
+msgid "提名时需提供候选人的贡献记录和技术能力说明"
+msgstr "Nominations must include the candidate's contribution record and technical capability description"
+
+#: ../../zh/community/governance.md:67
+msgid "现有 Maintainer 审核评估，需**获得当前Maintainer半数及以上同意并无人反对**"
+msgstr "Existing Maintainers review and evaluate, requiring **more than half of current Maintainers to agree with no objections**"
+
+#: ../../zh/community/governance.md:69
+msgid "定期审视"
+msgstr "Regular Review"
+
+#: ../../zh/community/governance.md:71
+msgid "**每月**在技术例会上对所有 Maintainer 的活跃度进行审视"
+msgstr "**Monthly** review of all Maintainers' activity during technical meetings"
+
+#: ../../zh/community/governance.md:72
+msgid "连续**6 个月**未参与项目贡献的 Maintainer，经讨论后可转为荣誉状态（Emeritus）"
+msgstr "Maintainers who have not contributed to the project for **6 consecutive months** may be transitioned to Emeritus status after discussion"
+
+#: ../../zh/community/governance.md:73
+msgid "Emeritus Maintainer 可随时通过重新活跃贡献申请恢复 Maintainer 身份"
+msgstr "Emeritus Maintainers can apply to restore their Maintainer status at any time by resuming active contributions"
+
+#: ../../zh/community/governance.md:75
+msgid "维护者与贡献者"
+msgstr "Maintainers and Contributors"
+
+#: ../../zh/community/governance.md
+msgid "姓名"
+msgstr "Name"
+
+#: ../../zh/community/governance.md
+msgid "ID"
+msgstr "ID"
+
+#: ../../zh/community/governance.md
+msgid "加入时间"
+msgstr "Join Date"
+
+#: ../../zh/community/governance.md
+msgid "Chen Cheng"
+msgstr "Chen Cheng"
+
+#: ../../zh/community/governance.md
+msgid "ccdedreams"
+msgstr "ccdedreams"
+
+#: ../../zh/community/governance.md
+msgid "2025-09-27"
+msgstr "2025-09-27"
+
+#: ../../zh/community/governance.md
+msgid "Lijuan Hai"
+msgstr "Lijuan Hai"
+
+#: ../../zh/community/governance.md
+msgid "HaiLijuan"
+msgstr "HaiLijuan"
+
+#: ../../zh/community/governance.md
+msgid "Tao Wang"
+msgstr "Tao Wang"
+
+#: ../../zh/community/governance.md
+msgid "wangtao489"
+msgstr "wangtao489"
+
+#: ../../zh/community/governance.md
+msgid "Yingcong Liang"
+msgstr "Yingcong Liang"
+
+#: ../../zh/community/governance.md
+msgid "wcleungaj"
+msgstr "wcleungaj"
+
+#: ../../zh/community/governance.md
+msgid "Jingchang Shi"
+msgstr "Jingchang Shi"
+
+#: ../../zh/community/governance.md
+msgid "shijingchang"
+msgstr "shijingchang"
+
+#: ../../zh/community/governance.md
+msgid "Hao Zhou"
+msgstr "Hao Zhou"
+
+#: ../../zh/community/governance.md
+msgid "zhouhao176"
+msgstr "zhouhao176"
+
+#: ../../zh/community/governance.md
+msgid "Kaipeng Xing"
+msgstr "Kaipeng Xing"
+
+#: ../../zh/community/governance.md
+msgid "kpxing"
+msgstr "kpxing"
+
+#: ../../zh/community/governance.md
+msgid "Zhijie Zhao"
+msgstr "Zhijie Zhao"
+
+#: ../../zh/community/governance.md
+msgid "zhaozhijie"
+msgstr "zhaozhijie"
+
+#: ../../zh/community/governance.md
+msgid "Kaixin Yang"
+msgstr "Kaixin Yang"
+
+#: ../../zh/community/governance.md
+msgid "yangkaixin"
+msgstr "yangkaixin"
+
+#: ../../zh/community/governance.md
+msgid "Chunli Zhang"
+msgstr "Chunli Zhang"
+
+#: ../../zh/community/governance.md
+msgid "zhang-chunli01"
+msgstr "zhang-chunli01"
+
+#: ../../zh/community/governance.md
+msgid "Ce Zhu"
+msgstr "Ce Zhu"
+
+#: ../../zh/community/governance.md
+msgid "zhucehw"
+msgstr "zhucehw"
+
+#: ../../zh/community/governance.md
+msgid "2025-12-23"
+msgstr "2025-12-23"
+
+#: ../../zh/community/governance.md
+msgid "Xuan Peng"
+msgstr "Xuan Peng"
+
+#: ../../zh/community/governance.md
+msgid "HinPeng"
+msgstr "HinPeng"
+
+#: ../../zh/community/governance.md
+msgid "Ziqi Hong"
+msgstr "Ziqi Hong"
+
+#: ../../zh/community/governance.md
+msgid "candyhong"
+msgstr "candyhong"
+
+#: ../../zh/community/governance.md
+msgid "2026-03-26"
+msgstr "2026-03-26"
+
+#: ../../zh/community/governance.md
+msgid "需要"
+msgstr "No."
+
+#: ../../zh/community/governance.md
+msgid "贡献者"
+msgstr "Contributor"
+
+#: ../../zh/community/governance.md
+msgid "首次提交日期"
+msgstr "First Contribution Date"
+
+#: ../../zh/community/governance.md
+msgid "PR"
+msgstr "PR"
+
+#: ../../zh/community/governance.md
+msgid "149"
+msgstr "149"
+
+#: ../../zh/community/governance.md
+msgid "[ggppff24](https://gitcode.com/ggppff24)"
+msgstr "[ggppff24](https://gitcode.com/ggppff24)"
+
+#: ../../zh/community/governance.md
+msgid "2026-05-06"
+msgstr "2026-05-06"
+
+#: ../../zh/community/governance.md
+msgid "[#1769](https://gitcode.com/Ascend/triton-ascend/merge_requests/1769)"
+msgstr "[#1769](https://gitcode.com/Ascend/triton-ascend/merge_requests/1769)"
+
+#: ../../zh/community/governance.md
+msgid "148"
+msgstr "148"
+
+#: ../../zh/community/governance.md
+msgid "[wxlong_ustc](https://gitcode.com/wxlong_ustc)"
+msgstr "[wxlong_ustc](https://gitcode.com/wxlong_ustc)"
+
+#: ../../zh/community/governance.md
+msgid "2026-04-29"
+msgstr "2026-04-29"
+
+#: ../../zh/community/governance.md
+msgid "[#1733](https://gitcode.com/Ascend/triton-ascend/merge_requests/1733)"
+msgstr "[#1733](https://gitcode.com/Ascend/triton-ascend/merge_requests/1733)"
+
+#: ../../zh/community/governance.md
+msgid "147"
+msgstr "147"
+
+#: ../../zh/community/governance.md
+msgid "[liwei571](https://gitcode.com/liwei571)"
+msgstr "[liwei571](https://gitcode.com/liwei571)"
+
+#: ../../zh/community/governance.md
+msgid "[#1740](https://gitcode.com/Ascend/triton-ascend/merge_requests/1740)"
+msgstr "[#1740](https://gitcode.com/Ascend/triton-ascend/merge_requests/1740)"
+
+#: ../../zh/community/governance.md
+msgid "146"
+msgstr "146"
+
+#: ../../zh/community/governance.md
+msgid "[WangYiMou](https://gitcode.com/WangYiMou)"
+msgstr "[WangYiMou](https://gitcode.com/WangYiMou)"
+
+#: ../../zh/community/governance.md
+msgid "2026-04-28"
+msgstr "2026-04-28"
+
+#: ../../zh/community/governance.md
+msgid "[#1697](https://gitcode.com/Ascend/triton-ascend/merge_requests/1697)"
+msgstr "[#1697](https://gitcode.com/Ascend/triton-ascend/merge_requests/1697)"
+
+#: ../../zh/community/governance.md
+msgid "145"
+msgstr "145"
+
+#: ../../zh/community/governance.md
+msgid "[Four1er](https://gitcode.com/Four1er)"
+msgstr "[Four1er](https://gitcode.com/Four1er)"
+
+#: ../../zh/community/governance.md
+msgid "[#1742](https://gitcode.com/Ascend/triton-ascend/merge_requests/1742)"
+msgstr "[#1742](https://gitcode.com/Ascend/triton-ascend/merge_requests/1742)"
+
+#: ../../zh/community/governance.md
+msgid "144"
+msgstr "144"
+
+#: ../../zh/community/governance.md
+msgid "[gcw_LcYTzRJy](https://gitcode.com/gcw_LcYTzRJy)"
+msgstr "[gcw_LcYTzRJy](https://gitcode.com/gcw_LcYTzRJy)"
+
+#: ../../zh/community/governance.md
+msgid "2026-04-27"
+msgstr "2026-04-27"
+
+#: ../../zh/community/governance.md
+msgid "[#1690](https://gitcode.com/Ascend/triton-ascend/merge_requests/1690)"
+msgstr "[#1690](https://gitcode.com/Ascend/triton-ascend/merge_requests/1690)"
+
+#: ../../zh/community/governance.md
+msgid "143"
+msgstr "143"
+
+#: ../../zh/community/governance.md
+msgid "[zhaojiqiao](https://gitcode.com/zhaojiqiao)"
+msgstr "[zhaojiqiao](https://gitcode.com/zhaojiqiao)"
+
+#: ../../zh/community/governance.md
+msgid "[#1722](https://gitcode.com/Ascend/triton-ascend/merge_requests/1722)"
+msgstr "[#1722](https://gitcode.com/Ascend/triton-ascend/merge_requests/1722)"
+
+#: ../../zh/community/governance.md
+msgid "142"
+msgstr "142"
+
+#: ../../zh/community/governance.md
+msgid "[andreybokhanko](https://gitcode.com/andreybokhanko)"
+msgstr "[andreybokhanko](https://gitcode.com/andreybokhanko)"
+
+#: ../../zh/community/governance.md
+msgid "[#1675](https://gitcode.com/Ascend/triton-ascend/merge_requests/1675)"
+msgstr "[#1675](https://gitcode.com/Ascend/triton-ascend/merge_requests/1675)"
+
+#: ../../zh/community/governance.md
+msgid "141"
+msgstr "141"
+
+#: ../../zh/community/governance.md
+msgid "[weizhan4](https://gitcode.com/weizhan4)"
+msgstr "[weizhan4](https://gitcode.com/weizhan4)"
+
+#: ../../zh/community/governance.md
+msgid "2026-04-25"
+msgstr "2026-04-25"
+
+#: ../../zh/community/governance.md
+msgid "[#1702](https://gitcode.com/Ascend/triton-ascend/merge_requests/1702)"
+msgstr "[#1702](https://gitcode.com/Ascend/triton-ascend/merge_requests/1702)"
+
+#: ../../zh/community/governance.md
+msgid "140"
+msgstr "140"
+
+#: ../../zh/community/governance.md
+msgid "[Sky_miner](https://gitcode.com/Sky_miner)"
+msgstr "[Sky_miner](https://gitcode.com/Sky_miner)"
+
+#: ../../zh/community/governance.md
+msgid "2026-04-24"
+msgstr "2026-04-24"
+
+#: ../../zh/community/governance.md
+msgid "[#1680](https://gitcode.com/Ascend/triton-ascend/merge_requests/1680)"
+msgstr "[#1680](https://gitcode.com/Ascend/triton-ascend/merge_requests/1680)"
+
+#: ../../zh/community/governance.md
+msgid "139"
+msgstr "139"
+
+#: ../../zh/community/governance.md
+msgid "[zhangchaofan](https://gitcode.com/zhangchaofan)"
+msgstr "[zhangchaofan](https://gitcode.com/zhangchaofan)"
+
+#: ../../zh/community/governance.md
+msgid "2026-04-22"
+msgstr "2026-04-22"
+
+#: ../../zh/community/governance.md
+msgid "[#1265](https://gitcode.com/Ascend/triton-ascend/merge_requests/1265)"
+msgstr "[#1265](https://gitcode.com/Ascend/triton-ascend/merge_requests/1265)"
+
+#: ../../zh/community/governance.md
+msgid "138"
+msgstr "138"
+
+#: ../../zh/community/governance.md
+msgid "[yuanjingya](https://gitcode.com/yuanjingya)"
+msgstr "[yuanjingya](https://gitcode.com/yuanjingya)"
+
+#: ../../zh/community/governance.md
+msgid "[#1638](https://gitcode.com/Ascend/triton-ascend/merge_requests/1638)"
+msgstr "[#1638](https://gitcode.com/Ascend/triton-ascend/merge_requests/1638)"
+
+#: ../../zh/community/governance.md
+msgid "137"
+msgstr "137"
+
+#: ../../zh/community/governance.md
+msgid "[shi-yufeng99](https://gitcode.com/shi-yufeng99)"
+msgstr "[shi-yufeng99](https://gitcode.com/shi-yufeng99)"
+
+#: ../../zh/community/governance.md
+msgid "2026-04-13"
+msgstr "2026-04-13"
+
+#: ../../zh/community/governance.md
+msgid "[#1570](https://gitcode.com/Ascend/triton-ascend/merge_requests/1570)"
+msgstr "[#1570](https://gitcode.com/Ascend/triton-ascend/merge_requests/1570)"
+
+#: ../../zh/community/governance.md
+msgid "136"
+msgstr "136"
+
+#: ../../zh/community/governance.md
+msgid "[zaq15csdn](https://gitcode.com/zaq15csdn)"
+msgstr "[zaq15csdn](https://gitcode.com/zaq15csdn)"
+
+#: ../../zh/community/governance.md
+msgid "2026-04-11"
+msgstr "2026-04-11"
+
+#: ../../zh/community/governance.md
+msgid "[#1593](https://gitcode.com/Ascend/triton-ascend/merge_requests/1593)"
+msgstr "[#1593](https://gitcode.com/Ascend/triton-ascend/merge_requests/1593)"
+
+#: ../../zh/community/governance.md
+msgid "135"
+msgstr "135"
+
+#: ../../zh/community/governance.md
+msgid "[wuyao51511](https://gitcode.com/wuyao51511)"
+msgstr "[wuyao51511](https://gitcode.com/wuyao51511)"
+
+#: ../../zh/community/governance.md
+msgid "2026-04-10"
+msgstr "2026-04-10"
+
+#: ../../zh/community/governance.md
+msgid "[#1592](https://gitcode.com/Ascend/triton-ascend/merge_requests/1592)"
+msgstr "[#1592](https://gitcode.com/Ascend/triton-ascend/merge_requests/1592)"
+
+#: ../../zh/community/governance.md
+msgid "134"
+msgstr "134"
+
+#: ../../zh/community/governance.md
+msgid "[jtaizhang](https://gitcode.com/jtaizhang)"
+msgstr "[jtaizhang](https://gitcode.com/jtaizhang)"
+
+#: ../../zh/community/governance.md
+msgid "2026-04-08"
+msgstr "2026-04-08"
+
+#: ../../zh/community/governance.md
+msgid "[#1575](https://gitcode.com/Ascend/triton-ascend/merge_requests/1575)"
+msgstr "[#1575](https://gitcode.com/Ascend/triton-ascend/merge_requests/1575)"
+
+#: ../../zh/community/governance.md
+msgid "133"
+msgstr "133"
+
+#: ../../zh/community/governance.md
+msgid "[jjin_750629](https://gitcode.com/jjin_750629)"
+msgstr "[jjin_750629](https://gitcode.com/jjin_750629)"
+
+#: ../../zh/community/governance.md
+msgid "2026-04-07"
+msgstr "2026-04-07"
+
+#: ../../zh/community/governance.md
+msgid "[#1498](https://gitcode.com/Ascend/triton-ascend/merge_requests/1498)"
+msgstr "[#1498](https://gitcode.com/Ascend/triton-ascend/merge_requests/1498)"
+
+#: ../../zh/community/governance.md
+msgid "132"
+msgstr "132"
+
+#: ../../zh/community/governance.md
+msgid "[lbqg](https://gitcode.com/lbqg)"
+msgstr "[lbqg](https://gitcode.com/lbqg)"
+
+#: ../../zh/community/governance.md
+msgid "2026-04-02"
+msgstr "2026-04-02"
+
+#: ../../zh/community/governance.md
+msgid "[#1506](https://gitcode.com/Ascend/triton-ascend/merge_requests/1506)"
+msgstr "[#1506](https://gitcode.com/Ascend/triton-ascend/merge_requests/1506)"
+
+#: ../../zh/community/governance.md
+msgid "131"
+msgstr "131"
+
+#: ../../zh/community/governance.md
+msgid "[huangyujun123](https://gitcode.com/huangyujun123)"
+msgstr "[huangyujun123](https://gitcode.com/huangyujun123)"
+
+#: ../../zh/community/governance.md
+msgid "2026-03-31"
+msgstr "2026-03-31"
+
+#: ../../zh/community/governance.md
+msgid "[#1505](https://gitcode.com/Ascend/triton-ascend/merge_requests/1505)"
+msgstr "[#1505](https://gitcode.com/Ascend/triton-ascend/merge_requests/1505)"
+
+#: ../../zh/community/governance.md
+msgid "130"
+msgstr "130"
+
+#: ../../zh/community/governance.md
+msgid "[danielcm585](https://gitcode.com/danielcm585)"
+msgstr "[danielcm585](https://gitcode.com/danielcm585)"
+
+#: ../../zh/community/governance.md
+msgid "[#1444](https://gitcode.com/Ascend/triton-ascend/merge_requests/1444)"
+msgstr "[#1444](https://gitcode.com/Ascend/triton-ascend/merge_requests/1444)"
+
+#: ../../zh/community/governance.md
+msgid "129"
+msgstr "129"
+
+#: ../../zh/community/governance.md
+msgid "[OliverCWY](https://gitcode.com/OliverCWY)"
+msgstr "[OliverCWY](https://gitcode.com/OliverCWY)"
+
+#: ../../zh/community/governance.md
+msgid "[#1441](https://gitcode.com/Ascend/triton-ascend/merge_requests/1441)"
+msgstr "[#1441](https://gitcode.com/Ascend/triton-ascend/merge_requests/1441)"
+
+#: ../../zh/community/governance.md
+msgid "128"
+msgstr "128"
+
+#: ../../zh/community/governance.md
+msgid "[cxtverygood123](https://gitcode.com/cxtverygood123)"
+msgstr "[cxtverygood123](https://gitcode.com/cxtverygood123)"
+
+#: ../../zh/community/governance.md
+msgid "[#1459](https://gitcode.com/Ascend/triton-ascend/merge_requests/1459)"
+msgstr "[#1459](https://gitcode.com/Ascend/triton-ascend/merge_requests/1459)"
+
+#: ../../zh/community/governance.md
+msgid "127"
+msgstr "127"
+
+#: ../../zh/community/governance.md
+msgid "[shaoyiyang](https://gitcode.com/shaoyiyang)"
+msgstr "[shaoyiyang](https://gitcode.com/shaoyiyang)"
+
+#: ../../zh/community/governance.md
+msgid "2026-03-21"
+msgstr "2026-03-21"
+
+#: ../../zh/community/governance.md
+msgid "[#1429](https://gitcode.com/Ascend/triton-ascend/merge_requests/1429)"
+msgstr "[#1429](https://gitcode.com/Ascend/triton-ascend/merge_requests/1429)"
+
+#: ../../zh/community/governance.md
+msgid "126"
+msgstr "126"
+
+#: ../../zh/community/governance.md
+msgid "[xiechenye](https://gitcode.com/xiechenye)"
+msgstr "[xiechenye](https://gitcode.com/xiechenye)"
+
+#: ../../zh/community/governance.md
+msgid "2026-03-20"
+msgstr "2026-03-20"
+
+#: ../../zh/community/governance.md
+msgid "[#1407](https://gitcode.com/Ascend/triton-ascend/merge_requests/1407)"
+msgstr "[#1407](https://gitcode.com/Ascend/triton-ascend/merge_requests/1407)"
+
+#: ../../zh/community/governance.md
+msgid "125"
+msgstr "125"
+
+#: ../../zh/community/governance.md
+msgid "[wuzw_05](https://gitcode.com/wuzw_05)"
+msgstr "[wuzw_05](https://gitcode.com/wuzw_05)"
+
+#: ../../zh/community/governance.md
+msgid "[#1418](https://gitcode.com/Ascend/triton-ascend/merge_requests/1418)"
+msgstr "[#1418](https://gitcode.com/Ascend/triton-ascend/merge_requests/1418)"
+
+#: ../../zh/community/governance.md
+msgid "124"
+msgstr "[OliverCWY](https://gitcode.com/OliverCWY)"
+
+#: ../../zh/community/governance.md
+msgid "[Zackc](https://gitcode.com/Zackc)"
+msgstr "2026-03-26"
+
+#: ../../zh/community/governance.md
+msgid "[#1394](https://gitcode.com/Ascend/triton-ascend/merge_requests/1394)"
+msgstr "[#1441](https://gitcode.com/Ascend/triton-ascend/merge_requests/1441)"
+
+#: ../../zh/community/governance.md
+msgid "123"
+msgstr "128"
+
+#: ../../zh/community/governance.md
+msgid "[Wangxiaoshuai2](https://gitcode.com/Wangxiaoshuai2)"
+msgstr "[cxtverygood123](https://gitcode.com/cxtverygood123)"
+
+#: ../../zh/community/governance.md
+msgid "2026-03-18"
+msgstr "2026-03-26"
+
+#: ../../zh/community/governance.md
+msgid "[#1402](https://gitcode.com/Ascend/triton-ascend/merge_requests/1402)"
+msgstr "[#1459](https://gitcode.com/Ascend/triton-ascend/merge_requests/1459)"
+
+#: ../../zh/community/governance.md
+msgid "122"
+msgstr "127"
+
+#: ../../zh/community/governance.md
+msgid "[Levein](https://gitcode.com/Levein)"
+msgstr "[shaoyiyang](https://gitcode.com/shaoyiyang)"
+
+#: ../../zh/community/governance.md
+msgid "2026-03-16"
+msgstr "2026-03-21"
+
+#: ../../zh/community/governance.md
+msgid "[#1389](https://gitcode.com/Ascend/triton-ascend/merge_requests/1389)"
+msgstr "[#1429](https://gitcode.com/Ascend/triton-ascend/merge_requests/1429)"
+
+#: ../../zh/community/governance.md
+msgid "121"
+msgstr "126"
+
+#: ../../zh/community/governance.md
+msgid "[ciggaco](https://gitcode.com/ciggaco)"
+msgstr "[xiechenye](https://gitcode.com/xiechenye)"
+
+#: ../../zh/community/governance.md
+msgid "2026-03-13"
+msgstr "2026-03-20"
+
+#: ../../zh/community/governance.md
+msgid "[#1375](https://gitcode.com/Ascend/triton-ascend/merge_requests/1375)"
+msgstr "[#1407](https://gitcode.com/Ascend/triton-ascend/merge_requests/1407)"
+
+#: ../../zh/community/governance.md
+msgid "120"
+msgstr "125"
+
+#: ../../zh/community/governance.md
+msgid "[ZhaoWentengZWT](https://gitcode.com/ZhaoWentengZWT)"
+msgstr "[wuzw_05](https://gitcode.com/wuzw_05)"
+
+#: ../../zh/community/governance.md
+msgid "2026-03-10"
+msgstr "2026-03-20"
+
+#: ../../zh/community/governance.md
+msgid "[#1367](https://gitcode.com/Ascend/triton-ascend/merge_requests/1367)"
+msgstr "[#1418](https://gitcode.com/Ascend/triton-ascend/merge_requests/1418)"
+
+#: ../../zh/community/governance.md
+msgid "119"
+msgstr "124"
+
+#: ../../zh/community/governance.md
+msgid "[qq_43310834](https://gitcode.com/qq_43310834)"
+msgstr "[Zackc](https://gitcode.com/Zackc)"
+
+#: ../../zh/community/governance.md
+msgid "2026-03-09"
+msgstr "2026-03-20"
+
+#: ../../zh/community/governance.md
+msgid "[#1362](https://gitcode.com/Ascend/triton-ascend/merge_requests/1362)"
+msgstr "[#1394](https://gitcode.com/Ascend/triton-ascend/merge_requests/1394)"
+
+#: ../../zh/community/governance.md
+msgid "118"
+msgstr "123"
+
+#: ../../zh/community/governance.md
+msgid "[xlinn](https://gitcode.com/xlinn)"
+msgstr "[Wangxiaoshuai2](https://gitcode.com/Wangxiaoshuai2)"
+
+#: ../../zh/community/governance.md
+msgid "2026-02-26"
+msgstr "2026-03-18"
+
+#: ../../zh/community/governance.md
+msgid "[#1300](https://gitcode.com/Ascend/triton-ascend/merge_requests/1300)"
+msgstr "[#1402](https://gitcode.com/Ascend/triton-ascend/merge_requests/1402)"
+
+#: ../../zh/community/governance.md
+msgid "117"
+msgstr "122"
+
+#: ../../zh/community/governance.md
+msgid "[MaxYy](https://gitcode.com/MaxYy)"
+msgstr "[Levein](https://gitcode.com/Levein)"
+
+#: ../../zh/community/governance.md
+msgid "[#1292](https://gitcode.com/Ascend/triton-ascend/merge_requests/1292)"
+msgstr "2026-03-16"
+
+#: ../../zh/community/governance.md
+msgid "116"
+msgstr "[#1389](https://gitcode.com/Ascend/triton-ascend/merge_requests/1389)"
+
+#: ../../zh/community/governance.md
+msgid "[jeanniely](https://gitcode.com/jeanniely)"
+msgstr "121"
+
+#: ../../zh/community/governance.md
+msgid "[#1276](https://gitcode.com/Ascend/triton-ascend/merge_requests/1276)"
+msgstr "[ciggaco](https://gitcode.com/ciggaco)"
+
+#: ../../zh/community/governance.md
+msgid "115"
+msgstr "2026-03-13"
+
+#: ../../zh/community/governance.md
+msgid "[elizavetaV](https://gitcode.com/elizavetaV)"
+msgstr "[#1375](https://gitcode.com/Ascend/triton-ascend/merge_requests/1375)"
+
+#: ../../zh/community/governance.md
+msgid "2026-02-25"
+msgstr "120"
+
+#: ../../zh/community/governance.md
+msgid "[#1255](https://gitcode.com/Ascend/triton-ascend/merge_requests/1255)"
+msgstr "[ZhaoWentengZWT](https://gitcode.com/ZhaoWentengZWT)"
+
+#: ../../zh/community/governance.md
+msgid "114"
+msgstr "2026-03-10"
+
+#: ../../zh/community/governance.md
+msgid "[wuzhenqing](https://gitcode.com/wuzhenqing)"
+msgstr "[#1367](https://gitcode.com/Ascend/triton-ascend/merge_requests/1367)"
+
+#: ../../zh/community/governance.md
+msgid "[#1291](https://gitcode.com/Ascend/triton-ascend/merge_requests/1291)"
+msgstr "119"
+
+#: ../../zh/community/governance.md
+msgid "113"
+msgstr "[qq_43310834](https://gitcode.com/qq_43310834)"
+
+#: ../../zh/community/governance.md
+msgid "[tsczajkowski_2025](https://gitcode.com/tsczajkowski_2025)"
+msgstr "2026-03-09"
+
+#: ../../zh/community/governance.md
+msgid "2026-02-05"
+msgstr "[#1362](https://gitcode.com/Ascend/triton-ascend/merge_requests/1362)"
+
+#: ../../zh/community/governance.md
+msgid "[#1246](https://gitcode.com/Ascend/triton-ascend/merge_requests/1246)"
+msgstr "118"
+
+#: ../../zh/community/governance.md
+msgid "112"
+msgstr "[xlinn](https://gitcode.com/xlinn)"
+
+#: ../../zh/community/governance.md
+msgid "[xuweixin_](https://gitcode.com/xuweixin_)"
+msgstr "2026-02-26"
+
+#: ../../zh/community/governance.md
+msgid "2026-01-27"
+msgstr "[#1300](https://gitcode.com/Ascend/triton-ascend/merge_requests/1300)"
+
+#: ../../zh/community/governance.md
+msgid "[#1160](https://gitcode.com/Ascend/triton-ascend/merge_requests/1160)"
+msgstr "117"
+
+#: ../../zh/community/governance.md
+msgid "111"
+msgstr "[MaxYy](https://gitcode.com/MaxYy)"
+
+#: ../../zh/community/governance.md
+msgid "[Zz_zl](https://gitcode.com/Zz_zl)"
+msgstr "2026-02-26"
+
+#: ../../zh/community/governance.md
+msgid "[#1189](https://gitcode.com/Ascend/triton-ascend/merge_requests/1189)"
+msgstr "[#1292](https://gitcode.com/Ascend/triton-ascend/merge_requests/1292)"
+
+#: ../../zh/community/governance.md
+msgid "110"
+msgstr "116"
+
+#: ../../zh/community/governance.md
+msgid "[Ritsuka314](https://gitcode.com/Ritsuka314)"
+msgstr "[jeanniely](https://gitcode.com/jeanniely)"
+
+#: ../../zh/community/governance.md
+msgid "2026-01-21"
+msgstr "2026-02-26"
+
+#: ../../zh/community/governance.md
+msgid "[#720](https://gitcode.com/Ascend/triton-ascend/merge_requests/720)"
+msgstr "[#1276](https://gitcode.com/Ascend/triton-ascend/merge_requests/1276)"
+
+#: ../../zh/community/governance.md
+msgid "109"
+msgstr "115"
+
+#: ../../zh/community/governance.md
+msgid "[wrq_0425](https://gitcode.com/wrq_0425)"
+msgstr "[elizavetaV](https://gitcode.com/elizavetaV)"
+
+#: ../../zh/community/governance.md
+msgid "[#1129](https://gitcode.com/Ascend/triton-ascend/merge_requests/1129)"
+msgstr "2026-02-25"
+
+#: ../../zh/community/governance.md
+msgid "108"
+msgstr "[#1255](https://gitcode.com/Ascend/triton-ascend/merge_requests/1255)"
+
+#: ../../zh/community/governance.md
+msgid "[hua_yc](https://gitcode.com/hua_yc)"
+msgstr "114"
+
+#: ../../zh/community/governance.md
+msgid "[#1127](https://gitcode.com/Ascend/triton-ascend/merge_requests/1127)"
+msgstr "[wuzhenqing](https://gitcode.com/wuzhenqing)"
+
+#: ../../zh/community/governance.md
+msgid "107"
+msgstr "2026-02-25"
+
+#: ../../zh/community/governance.md
+msgid "[stonexxx](https://gitcode.com/stonexxx)"
+msgstr "[#1291](https://gitcode.com/Ascend/triton-ascend/merge_requests/1291)"
+
+#: ../../zh/community/governance.md
+msgid "[#1151](https://gitcode.com/Ascend/triton-ascend/merge_requests/1151)"
+msgstr "113"
+
+#: ../../zh/community/governance.md
+msgid "106"
+msgstr "[tsczajkowski_2025](https://gitcode.com/tsczajkowski_2025)"
+
+#: ../../zh/community/governance.md
+msgid "[wen_xiang_zou_admin](https://gitcode.com/wen_xiang_zou_admin)"
+msgstr "2026-02-05"
+
+#: ../../zh/community/governance.md
+msgid "2026-01-20"
+msgstr "[#1246](https://gitcode.com/Ascend/triton-ascend/merge_requests/1246)"
+
+#: ../../zh/community/governance.md
+msgid "[#1095](https://gitcode.com/Ascend/triton-ascend/merge_requests/1095)"
+msgstr "112"
+
+#: ../../zh/community/governance.md
+msgid "105"
+msgstr "[xuweixin_](https://gitcode.com/xuweixin_)"
+
+#: ../../zh/community/governance.md
+msgid "[HinPeng](https://gitcode.com/HinPeng)"
+msgstr "2026-01-27"
+
+#: ../../zh/community/governance.md
+msgid "[#1132](https://gitcode.com/Ascend/triton-ascend/merge_requests/1132)"
+msgstr "[#1160](https://gitcode.com/Ascend/triton-ascend/merge_requests/1160)"
+
+#: ../../zh/community/governance.md
+msgid "104"
+msgstr "111"
+
+#: ../../zh/community/governance.md
+msgid "[high-cloud](https://gitcode.com/high-cloud)"
+msgstr "[Zz_zl](https://gitcode.com/Zz_zl)"
+
+#: ../../zh/community/governance.md
+msgid "2026-01-19"
+msgstr "2026-01-27"
+
+#: ../../zh/community/governance.md
+msgid "[#1058](https://gitcode.com/Ascend/triton-ascend/merge_requests/1058)"
+msgstr "[#1189](https://gitcode.com/Ascend/triton-ascend/merge_requests/1189)"
+
+#: ../../zh/community/governance.md
+msgid "103"
+msgstr "110"
+
+#: ../../zh/community/governance.md
+msgid "[szhewei](https://gitcode.com/szhewei)"
+msgstr "[Ritsuka314](https://gitcode.com/Ritsuka314)"
+
+#: ../../zh/community/governance.md
+msgid "2026-01-16"
+msgstr "2026-01-21"
+
+#: ../../zh/community/governance.md
+msgid "[#1084](https://gitcode.com/Ascend/triton-ascend/merge_requests/1084)"
+msgstr "[#720](https://gitcode.com/Ascend/triton-ascend/merge_requests/720)"
+
+#: ../../zh/community/governance.md
+msgid "102"
+msgstr "109"
+
+#: ../../zh/community/governance.md
+msgid "[Alae-eddine](https://gitcode.com/Alae-eddine)"
+msgstr "[wrq_0425](https://gitcode.com/wrq_0425)"
+
+#: ../../zh/community/governance.md
+msgid "2026-01-14"
+msgstr "2026-01-21"
+
+#: ../../zh/community/governance.md
+msgid "[#1097](https://gitcode.com/Ascend/triton-ascend/merge_requests/1097)"
+msgstr "[#1129](https://gitcode.com/Ascend/triton-ascend/merge_requests/1129)"
+
+#: ../../zh/community/governance.md
+msgid "101"
+msgstr "108"
+
+#: ../../zh/community/governance.md
+msgid "[jqran](https://gitcode.com/jqran)"
+msgstr "[hua_yc](https://gitcode.com/hua_yc)"
+
+#: ../../zh/community/governance.md
+msgid "2026-01-13"
+msgstr "2026-01-21"
+
+#: ../../zh/community/governance.md
+msgid "[#1073](https://gitcode.com/Ascend/triton-ascend/merge_requests/1073)"
+msgstr "[#1127](https://gitcode.com/Ascend/triton-ascend/merge_requests/1127)"
+
+#: ../../zh/community/governance.md
+msgid "100"
+msgstr "107"
+
+#: ../../zh/community/governance.md
+msgid "[f42e278](https://gitcode.com/f42e278)"
+msgstr "[stonexxx](https://gitcode.com/stonexxx)"
+
+#: ../../zh/community/governance.md
+msgid "[#1054](https://gitcode.com/Ascend/triton-ascend/merge_requests/1054)"
+msgstr "2026-01-21"
+
+#: ../../zh/community/governance.md
+msgid "99"
+msgstr "[#1151](https://gitcode.com/Ascend/triton-ascend/merge_requests/1151)"
+
+#: ../../zh/community/governance.md
+msgid "[zhengqishui1](https://gitcode.com/zhengqishui1)"
+msgstr "106"
+
+#: ../../zh/community/governance.md
+msgid "[#1081](https://gitcode.com/Ascend/triton-ascend/merge_requests/1081)"
+msgstr "[wen_xiang_zou_admin](https://gitcode.com/wen_xiang_zou_admin)"
+
+#: ../../zh/community/governance.md
+msgid "98"
+msgstr "2026-01-20"
+
+#: ../../zh/community/governance.md
+msgid "[zircon_wang](https://gitcode.com/zircon_wang)"
+msgstr "[#1095](https://gitcode.com/Ascend/triton-ascend/merge_requests/1095)"
+
+#: ../../zh/community/governance.md
+msgid "[#1079](https://gitcode.com/Ascend/triton-ascend/merge_requests/1079)"
+msgstr "105"
+
+#: ../../zh/community/governance.md
+msgid "97"
+msgstr "[HinPeng](https://gitcode.com/HinPeng)"
+
+#: ../../zh/community/governance.md
+msgid "[Jemtaly](https://gitcode.com/Jemtaly)"
+msgstr "2026-01-20"
+
+#: ../../zh/community/governance.md
+msgid "2026-01-12"
+msgstr "[#1132](https://gitcode.com/Ascend/triton-ascend/merge_requests/1132)"
+
+#: ../../zh/community/governance.md
+msgid "[#1076](https://gitcode.com/Ascend/triton-ascend/merge_requests/1076)"
+msgstr "104"
+
+#: ../../zh/community/governance.md
+msgid "96"
+msgstr "[high-cloud](https://gitcode.com/high-cloud)"
+
+#: ../../zh/community/governance.md
+msgid "[nanalin](https://gitcode.com/nanalin)"
+msgstr "2026-01-19"
+
+#: ../../zh/community/governance.md
+msgid "[#1059](https://gitcode.com/Ascend/triton-ascend/merge_requests/1059)"
+msgstr "[#1058](https://gitcode.com/Ascend/triton-ascend/merge_requests/1058)"
+
+#: ../../zh/community/governance.md
+msgid "95"
+msgstr "103"
+
+#: ../../zh/community/governance.md
+msgid "[noodleslx](https://gitcode.com/noodleslx)"
+msgstr "[szhewei](https://gitcode.com/szhewei)"
+
+#: ../../zh/community/governance.md
+msgid "2026-01-10"
+msgstr "2026-01-16"
+
+#: ../../zh/community/governance.md
+msgid "[#1075](https://gitcode.com/Ascend/triton-ascend/merge_requests/1075)"
+msgstr "[#1084](https://gitcode.com/Ascend/triton-ascend/merge_requests/1084)"
+
+#: ../../zh/community/governance.md
+msgid "94"
+msgstr "102"
+
+#: ../../zh/community/governance.md
+msgid "[liheng1234](https://gitcode.com/liheng1234)"
+msgstr "[Alae-eddine](https://gitcode.com/Alae-eddine)"
+
+#: ../../zh/community/governance.md
+msgid "2026-01-09"
+msgstr "2026-01-14"
+
+#: ../../zh/community/governance.md
+msgid "[#1049](https://gitcode.com/Ascend/triton-ascend/merge_requests/1049)"
+msgstr "[#1097](https://gitcode.com/Ascend/triton-ascend/merge_requests/1097)"
+
+#: ../../zh/community/governance.md
+msgid "93"
+msgstr "101"
+
+#: ../../zh/community/governance.md
+msgid "[hocky](https://gitcode.com/hocky)"
+msgstr "[jqran](https://gitcode.com/jqran)"
+
+#: ../../zh/community/governance.md
+msgid "2026-01-07"
+msgstr "2026-01-13"
+
+#: ../../zh/community/governance.md
+msgid "[#1021](https://gitcode.com/Ascend/triton-ascend/merge_requests/1021)"
+msgstr "[#1073](https://gitcode.com/Ascend/triton-ascend/merge_requests/1073)"
+
+#: ../../zh/community/governance.md
+msgid "92"
+msgstr "100"
+
+#: ../../zh/community/governance.md
+msgid "[zhudada](https://gitcode.com/zhudada)"
+msgstr "[f42e278](https://gitcode.com/f42e278)"
+
+#: ../../zh/community/governance.md
+msgid "[#1053](https://gitcode.com/Ascend/triton-ascend/merge_requests/1053)"
+msgstr "2026-01-13"
+
+#: ../../zh/community/governance.md
+msgid "91"
+msgstr "[#1054](https://gitcode.com/Ascend/triton-ascend/merge_requests/1054)"
+
+#: ../../zh/community/governance.md
+msgid "[lipschitz_von](https://gitcode.com/lipschitz_von)"
+msgstr "99"
+
+#: ../../zh/community/governance.md
+msgid "2026-01-06"
+msgstr "[zhengqishui1](https://gitcode.com/zhengqishui1)"
+
+#: ../../zh/community/governance.md
+msgid "[#1041](https://gitcode.com/Ascend/triton-ascend/merge_requests/1041)"
+msgstr "2026-01-13"
+
+#: ../../zh/community/governance.md
+msgid "90"
+msgstr "[#1081](https://gitcode.com/Ascend/triton-ascend/merge_requests/1081)"
+
+#: ../../zh/community/governance.md
+msgid "[hbhu_bin](https://gitcode.com/hbhu_bin)"
+msgstr "98"
+
+#: ../../zh/community/governance.md
+msgid "2026-01-04"
+msgstr "[zircon_wang](https://gitcode.com/zircon_wang)"
+
+#: ../../zh/community/governance.md
+msgid "[#1009](https://gitcode.com/Ascend/triton-ascend/merge_requests/1009)"
+msgstr "2026-01-13"
+
+#: ../../zh/community/governance.md
+msgid "89"
+msgstr "[#1079](https://gitcode.com/Ascend/triton-ascend/merge_requests/1079)"
+
+#: ../../zh/community/governance.md
+msgid "[uladz](https://gitcode.com/uladz)"
+msgstr "97"
+
+#: ../../zh/community/governance.md
+msgid "[#938](https://gitcode.com/Ascend/triton-ascend/merge_requests/938)"
+msgstr "[Jemtaly](https://gitcode.com/Jemtaly)"
+
+#: ../../zh/community/governance.md
+msgid "88"
+msgstr "2026-01-12"
+
+#: ../../zh/community/governance.md
+msgid "[zhaojingkai](https://gitcode.com/zhaojingkai)"
+msgstr "[#1076](https://gitcode.com/Ascend/triton-ascend/merge_requests/1076)"
+
+#: ../../zh/community/governance.md
+msgid "2025-12-22"
+msgstr "96"
+
+#: ../../zh/community/governance.md
+msgid "[#918](https://gitcode.com/Ascend/triton-ascend/merge_requests/918)"
+msgstr "[nanalin](https://gitcode.com/nanalin)"
+
+#: ../../zh/community/governance.md
+msgid "87"
+msgstr "2026-01-12"
+
+#: ../../zh/community/governance.md
+msgid "[ardazishvili](https://gitcode.com/ardazishvili)"
+msgstr "[#1059](https://gitcode.com/Ascend/triton-ascend/merge_requests/1059)"
+
+#: ../../zh/community/governance.md
+msgid "2025-12-19"
+msgstr "95"
+
+#: ../../zh/community/governance.md
+msgid "[#934](https://gitcode.com/Ascend/triton-ascend/merge_requests/934)"
+msgstr "[noodleslx](https://gitcode.com/noodleslx)"
+
+#: ../../zh/community/governance.md
+msgid "86"
+msgstr "2026-01-10"
+
+#: ../../zh/community/governance.md
+msgid "[jeshd](https://gitcode.com/jeshd)"
+msgstr "[#1075](https://gitcode.com/Ascend/triton-ascend/merge_requests/1075)"
+
+#: ../../zh/community/governance.md
+msgid "2025-12-03"
+msgstr "94"
+
+#: ../../zh/community/governance.md
+msgid "[#823](https://gitcode.com/Ascend/triton-ascend/merge_requests/823)"
+msgstr "[liheng1234](https://gitcode.com/liheng1234)"
+
+#: ../../zh/community/governance.md
+msgid "85"
+msgstr "2026-01-09"
+
+#: ../../zh/community/governance.md
+msgid "[chongweizhi](https://gitcode.com/chongweizhi)"
+msgstr "[#1049](https://gitcode.com/Ascend/triton-ascend/merge_requests/1049)"
+
+#: ../../zh/community/governance.md
+msgid "2025-11-27"
+msgstr "93"
+
+#: ../../zh/community/governance.md
+msgid "[#807](https://gitcode.com/Ascend/triton-ascend/merge_requests/807)"
+msgstr "[hocky](https://gitcode.com/hocky)"
+
+#: ../../zh/community/governance.md
+msgid "84"
+msgstr "2026-01-07"
+
+#: ../../zh/community/governance.md
+msgid "[BaiSifan](https://gitcode.com/BaiSifan)"
+msgstr "[#1021](https://gitcode.com/Ascend/triton-ascend/merge_requests/1021)"
+
+#: ../../zh/community/governance.md
+msgid "2025-11-25"
+msgstr "92"
+
+#: ../../zh/community/governance.md
+msgid "[#797](https://gitcode.com/Ascend/triton-ascend/merge_requests/797)"
+msgstr "[zhudada](https://gitcode.com/zhudada)"
+
+#: ../../zh/community/governance.md
+msgid "83"
+msgstr "2026-01-07"
+
+#: ../../zh/community/governance.md
+msgid "[weilinquan](https://gitcode.com/weilinquan)"
+msgstr "[#1053](https://gitcode.com/Ascend/triton-ascend/merge_requests/1053)"
+
+#: ../../zh/community/governance.md
+msgid "2025-11-18"
+msgstr "91"
+
+#: ../../zh/community/governance.md
+msgid "[#739](https://gitcode.com/Ascend/triton-ascend/merge_requests/739)"
+msgstr "[lipschitz_von](https://gitcode.com/lipschitz_von)"
+
+#: ../../zh/community/governance.md
+msgid "82"
+msgstr "2026-01-06"
+
+#: ../../zh/community/governance.md
+msgid "[vgaskov](https://gitcode.com/vgaskov)"
+msgstr "[#1041](https://gitcode.com/Ascend/triton-ascend/merge_requests/1041)"
+
+#: ../../zh/community/governance.md
+msgid "2025-11-17"
+msgstr "90"
+
+#: ../../zh/community/governance.md
+msgid "[#748](https://gitcode.com/Ascend/triton-ascend/merge_requests/748)"
+msgstr "[hbhu_bin](https://gitcode.com/hbhu_bin)"
+
+#: ../../zh/community/governance.md
+msgid "81"
+msgstr "2026-01-04"
+
+#: ../../zh/community/governance.md
+msgid "[LH_123L](https://gitcode.com/LH_123L)"
+msgstr "[#1009](https://gitcode.com/Ascend/triton-ascend/merge_requests/1009)"
+
+#: ../../zh/community/governance.md
+msgid "[#747](https://gitcode.com/Ascend/triton-ascend/merge_requests/747)"
+msgstr "89"
+
+#: ../../zh/community/governance.md
+msgid "80"
+msgstr "[uladz](https://gitcode.com/uladz)"
+
+#: ../../zh/community/governance.md
+msgid "[hongshiyi](https://gitcode.com/hongshiyi)"
+msgstr "2025-12-23"
+
+#: ../../zh/community/governance.md
+msgid "2025-11-11"
+msgstr "[#938](https://gitcode.com/Ascend/triton-ascend/merge_requests/938)"
+
+#: ../../zh/community/governance.md
+msgid "[#715](https://gitcode.com/Ascend/triton-ascend/merge_requests/715)"
+msgstr "88"
+
+#: ../../zh/community/governance.md
+msgid "79"
+msgstr "[zhaojingkai](https://gitcode.com/zhaojingkai)"
+
+#: ../../zh/community/governance.md
+msgid "[wutianyao](https://gitcode.com/wutianyao)"
+msgstr "2025-12-22"
+
+#: ../../zh/community/governance.md
+msgid "2025-11-08"
+msgstr "[#918](https://gitcode.com/Ascend/triton-ascend/merge_requests/918)"
+
+#: ../../zh/community/governance.md
+msgid "[#691](https://gitcode.com/Ascend/triton-ascend/merge_requests/691)"
+msgstr "87"
+
+#: ../../zh/community/governance.md
+msgid "78"
+msgstr "[ardazishvili](https://gitcode.com/ardazishvili)"
+
+#: ../../zh/community/governance.md
+msgid "[luobaiqing](https://gitcode.com/luobaiqing)"
+msgstr "2025-12-19"
+
+#: ../../zh/community/governance.md
+msgid "2025-11-03"
+msgstr "[#934](https://gitcode.com/Ascend/triton-ascend/merge_requests/934)"
+
+#: ../../zh/community/governance.md
+msgid "[#655](https://gitcode.com/Ascend/triton-ascend/merge_requests/655)"
+msgstr "86"
+
+#: ../../zh/community/governance.md
+msgid "77"
+msgstr "[jeshd](https://gitcode.com/jeshd)"
+
+#: ../../zh/community/governance.md
+msgid "[jy834507063](https://gitcode.com/jy834507063)"
+msgstr "2025-12-03"
+
+#: ../../zh/community/governance.md
+msgid "2025-10-30"
+msgstr "[#823](https://gitcode.com/Ascend/triton-ascend/merge_requests/823)"
+
+#: ../../zh/community/governance.md
+msgid "[#647](https://gitcode.com/Ascend/triton-ascend/merge_requests/647)"
+msgstr "85"
+
+#: ../../zh/community/governance.md
+msgid "76"
+msgstr "[chongweizhi](https://gitcode.com/chongweizhi)"
+
+#: ../../zh/community/governance.md
+msgid "[AhmedYaser](https://gitcode.com/AhmedYaser)"
+msgstr "2025-11-27"
+
+#: ../../zh/community/governance.md
+msgid "[#619](https://gitcode.com/Ascend/triton-ascend/merge_requests/619)"
+msgstr "[#807](https://gitcode.com/Ascend/triton-ascend/merge_requests/807)"
+
+#: ../../zh/community/governance.md
+msgid "75"
+msgstr "84"
+
+#: ../../zh/community/governance.md
+msgid "[AmmarDab3an](https://gitcode.com/AmmarDab3an)"
+msgstr "[BaiSifan](https://gitcode.com/BaiSifan)"
+
+#: ../../zh/community/governance.md
+msgid "2025-10-29"
+msgstr "2025-11-25"
+
+#: ../../zh/community/governance.md
+msgid "[#646](https://gitcode.com/Ascend/triton-ascend/merge_requests/646)"
+msgstr "[#797](https://gitcode.com/Ascend/triton-ascend/merge_requests/797)"
+
+#: ../../zh/community/governance.md
+msgid "74"
+msgstr "83"
+
+#: ../../zh/community/governance.md
+msgid "[gymgit1](https://gitcode.com/gymgit1)"
+msgstr "[weilinquan](https://gitcode.com/weilinquan)"
+
+#: ../../zh/community/governance.md
+msgid "2025-10-25"
+msgstr "2025-11-18"
+
+#: ../../zh/community/governance.md
+msgid "[#620](https://gitcode.com/Ascend/triton-ascend/merge_requests/620)"
+msgstr "[#739](https://gitcode.com/Ascend/triton-ascend/merge_requests/739)"
+
+#: ../../zh/community/governance.md
+msgid "73"
+msgstr "82"
+
+#: ../../zh/community/governance.md
+msgid "[alankadiev](https://gitcode.com/alankadiev)"
+msgstr "[vgaskov](https://gitcode.com/vgaskov)"
+
+#: ../../zh/community/governance.md
+msgid "2025-10-23"
+msgstr "2025-11-17"
+
+#: ../../zh/community/governance.md
+msgid "[#583](https://gitcode.com/Ascend/triton-ascend/merge_requests/583)"
+msgstr "[#748](https://gitcode.com/Ascend/triton-ascend/merge_requests/748)"
+
+#: ../../zh/community/governance.md
+msgid "72"
+msgstr "81"
+
+#: ../../zh/community/governance.md
+msgid "[zhaojieshan](https://gitcode.com/zhaojieshan)"
+msgstr "[LH_123L](https://gitcode.com/LH_123L)"
+
+#: ../../zh/community/governance.md
+msgid "2025-10-21"
+msgstr "2025-11-17"
+
+#: ../../zh/community/governance.md
+msgid "[#595](https://gitcode.com/Ascend/triton-ascend/merge_requests/595)"
+msgstr "[#747](https://gitcode.com/Ascend/triton-ascend/merge_requests/747)"
+
+#: ../../zh/community/governance.md
+msgid "71"
+msgstr "80"
+
+#: ../../zh/community/governance.md
+msgid "[dainbow](https://gitcode.com/dainbow)"
+msgstr "[hongshiyi](https://gitcode.com/hongshiyi)"
+
+#: ../../zh/community/governance.md
+msgid "2025-10-14"
+msgstr "2025-11-11"
+
+#: ../../zh/community/governance.md
+msgid "[#541](https://gitcode.com/Ascend/triton-ascend/merge_requests/541)"
+msgstr "[#715](https://gitcode.com/Ascend/triton-ascend/merge_requests/715)"
+
+#: ../../zh/community/governance.md
+msgid "70"
+msgstr "79"
+
+#: ../../zh/community/governance.md
+msgid "[lichengfeng497](https://gitcode.com/lichengfeng497)"
+msgstr "[wutianyao](https://gitcode.com/wutianyao)"
+
+#: ../../zh/community/governance.md
+msgid "[#555](https://gitcode.com/Ascend/triton-ascend/merge_requests/555)"
+msgstr "2025-11-08"
+
+#: ../../zh/community/governance.md
+msgid "69"
+msgstr "[#691](https://gitcode.com/Ascend/triton-ascend/merge_requests/691)"
+
+#: ../../zh/community/governance.md
+msgid "[shenzhaofeng](https://gitcode.com/shenzhaofeng)"
+msgstr "78"
+
+#: ../../zh/community/governance.md
+msgid "2025-10-13"
+msgstr "[luobaiqing](https://gitcode.com/luobaiqing)"
+
+#: ../../zh/community/governance.md
+msgid "[#554](https://gitcode.com/Ascend/triton-ascend/merge_requests/554)"
+msgstr "2025-11-03"
+
+#: ../../zh/community/governance.md
+msgid "68"
+msgstr "[#655](https://gitcode.com/Ascend/triton-ascend/merge_requests/655)"
+
+#: ../../zh/community/governance.md
+msgid "[ccbin1](https://gitcode.com/ccbin1)"
+msgstr "77"
+
+#: ../../zh/community/governance.md
+msgid "2025-10-09"
+msgstr "[jy834507063](https://gitcode.com/jy834507063)"
+
+#: ../../zh/community/governance.md
+msgid "[#514](https://gitcode.com/Ascend/triton-ascend/merge_requests/514)"
+msgstr "2025-10-30"
+
+#: ../../zh/community/governance.md
+msgid "67"
+msgstr "[#647](https://gitcode.com/Ascend/triton-ascend/merge_requests/647)"
+
+#: ../../zh/community/governance.md
+msgid "[fishofnanqi](https://gitcode.com/fishofnanqi)"
+msgstr "76"
+
+#: ../../zh/community/governance.md
+msgid "[#518](https://gitcode.com/Ascend/triton-ascend/merge_requests/518)"
+msgstr "[AhmedYaser](https://gitcode.com/AhmedYaser)"
+
+#: ../../zh/community/governance.md
+msgid "66"
+msgstr "2025-10-30"
+
+#: ../../zh/community/governance.md
+msgid "[lu2038](https://gitcode.com/lu2038)"
+msgstr "[#619](https://gitcode.com/Ascend/triton-ascend/merge_requests/619)"
+
+#: ../../zh/community/governance.md
+msgid "[#507](https://gitcode.com/Ascend/triton-ascend/merge_requests/507)"
+msgstr "75"
+
+#: ../../zh/community/governance.md
+msgid "65"
+msgstr "[AmmarDab3an](https://gitcode.com/AmmarDab3an)"
+
+#: ../../zh/community/governance.md
+msgid "[wdy45](https://gitcode.com/wdy45)"
+msgstr "2025-10-29"
+
+#: ../../zh/community/governance.md
+msgid "[#513](https://gitcode.com/Ascend/triton-ascend/merge_requests/513)"
+msgstr "[#646](https://gitcode.com/Ascend/triton-ascend/merge_requests/646)"
+
+#: ../../zh/community/governance.md
+msgid "64"
+msgstr "74"
+
+#: ../../zh/community/governance.md
+msgid "[Zzyiiii](https://gitcode.com/Zzyiiii)"
+msgstr "[gymgit1](https://gitcode.com/gymgit1)"
+
+#: ../../zh/community/governance.md
+msgid "[#510](https://gitcode.com/Ascend/triton-ascend/merge_requests/510)"
+msgstr "2025-10-25"
+
+#: ../../zh/community/governance.md
+msgid "63"
+msgstr "[#620](https://gitcode.com/Ascend/triton-ascend/merge_requests/620)"
+
+#: ../../zh/community/governance.md
+msgid "[dang_yiwei](https://gitcode.com/dang_yiwei)"
+msgstr "73"
+
+#: ../../zh/community/governance.md
+msgid "[#516](https://gitcode.com/Ascend/triton-ascend/merge_requests/516)"
+msgstr "[alankadiev](https://gitcode.com/alankadiev)"
+
+#: ../../zh/community/governance.md
+msgid "62"
+msgstr "2025-10-23"
+
+#: ../../zh/community/governance.md
+msgid "[maxiaohui2732300406](https://gitcode.com/maxiaohui2732300406)"
+msgstr "[#583](https://gitcode.com/Ascend/triton-ascend/merge_requests/583)"
+
+#: ../../zh/community/governance.md
+msgid "[#509](https://gitcode.com/Ascend/triton-ascend/merge_requests/509)"
+msgstr "72"
+
+#: ../../zh/community/governance.md
+msgid "61"
+msgstr "[zhaojieshan](https://gitcode.com/zhaojieshan)"
+
+#: ../../zh/community/governance.md
+msgid "[dinosaurking](https://gitcode.com/dinosaurking)"
+msgstr "2025-10-21"
+
+#: ../../zh/community/governance.md
+msgid "[#522](https://gitcode.com/Ascend/triton-ascend/merge_requests/522)"
+msgstr "[#595](https://gitcode.com/Ascend/triton-ascend/merge_requests/595)"
+
+#: ../../zh/community/governance.md
+msgid "60"
+msgstr "71"
+
+#: ../../zh/community/governance.md
+msgid "[wodelt](https://gitcode.com/wodelt)"
+msgstr "[dainbow](https://gitcode.com/dainbow)"
+
+#: ../../zh/community/governance.md
+msgid "[#511](https://gitcode.com/Ascend/triton-ascend/merge_requests/511)"
+msgstr "2025-10-14"
+
+#: ../../zh/community/governance.md
+msgid "59"
+msgstr "[#541](https://gitcode.com/Ascend/triton-ascend/merge_requests/541)"
+
+#: ../../zh/community/governance.md
+msgid "[liurufeng25](https://gitcode.com/liurufeng25)"
+msgstr "70"
+
+#: ../../zh/community/governance.md
+msgid "[#517](https://gitcode.com/Ascend/triton-ascend/merge_requests/517)"
+msgstr "[lichengfeng497](https://gitcode.com/lichengfeng497)"
+
+#: ../../zh/community/governance.md
+msgid "58"
+msgstr "2025-10-14"
+
+#: ../../zh/community/governance.md
+msgid "[ma_journey](https://gitcode.com/ma_journey)"
+msgstr "[#555](https://gitcode.com/Ascend/triton-ascend/merge_requests/555)"
+
+#: ../../zh/community/governance.md
+msgid "[#508](https://gitcode.com/Ascend/triton-ascend/merge_requests/508)"
+msgstr "69"
+
+#: ../../zh/community/governance.md
+msgid "57"
+msgstr "[shenzhaofeng](https://gitcode.com/shenzhaofeng)"
+
+#: ../../zh/community/governance.md
+msgid "[jintang_wang](https://gitcode.com/jintang_wang)"
+msgstr "2025-10-13"
+
+#: ../../zh/community/governance.md
+msgid "[#530](https://gitcode.com/Ascend/triton-ascend/merge_requests/530)"
+msgstr "[#554](https://gitcode.com/Ascend/triton-ascend/merge_requests/554)"
+
+#: ../../zh/community/governance.md
+msgid "56"
+msgstr "68"
+
+#: ../../zh/community/governance.md
+msgid "[huchengbei](https://gitcode.com/huchengbei)"
+msgstr "[ccbin1](https://gitcode.com/ccbin1)"
+
+#: ../../zh/community/governance.md
+msgid "[#545](https://gitcode.com/Ascend/triton-ascend/merge_requests/545)"
+msgstr "2025-10-09"
+
+#: ../../zh/community/governance.md
+msgid "55"
+msgstr "[#514](https://gitcode.com/Ascend/triton-ascend/merge_requests/514)"
+
+#: ../../zh/community/governance.md
+msgid "[HallCin](https://gitcode.com/HallCin)"
+msgstr "67"
+
+#: ../../zh/community/governance.md
+msgid "2025-09-29"
+msgstr "[fishofnanqi](https://gitcode.com/fishofnanqi)"
+
+#: ../../zh/community/governance.md
+msgid "[#523](https://gitcode.com/Ascend/triton-ascend/merge_requests/523)"
+msgstr "2025-10-09"
+
+#: ../../zh/community/governance.md
+msgid "54"
+msgstr "[#518](https://gitcode.com/Ascend/triton-ascend/merge_requests/518)"
+
+#: ../../zh/community/governance.md
+msgid "[junelotus](https://gitcode.com/junelotus)"
+msgstr "66"
+
+#: ../../zh/community/governance.md
+msgid "[#531](https://gitcode.com/Ascend/triton-ascend/merge_requests/531)"
+msgstr "[lu2038](https://gitcode.com/lu2038)"
+
+#: ../../zh/community/governance.md
+msgid "53"
+msgstr "2025-10-09"
+
+#: ../../zh/community/governance.md
+msgid "[cc137999](https://gitee.com/cc137999)"
+msgstr "[#507](https://gitcode.com/Ascend/triton-ascend/merge_requests/507)"
+
+#: ../../zh/community/governance.md
+msgid "2025-09-26"
+msgstr "65"
+
+#: ../../zh/community/governance.md
+msgid "[#442](https://gitee.com/ascend/triton-ascend/pulls/442)"
+msgstr "[wdy45](https://gitcode.com/wdy45)"
+
+#: ../../zh/community/governance.md
+msgid "52"
+msgstr "2025-10-09"
+
+#: ../../zh/community/governance.md
+msgid "[kingdinosaur](https://gitee.com/kingdinosaur)"
+msgstr "[#513](https://gitcode.com/Ascend/triton-ascend/merge_requests/513)"
+
+#: ../../zh/community/governance.md
+msgid "[#418](https://gitee.com/ascend/triton-ascend/pulls/418)"
+msgstr "64"
+
+#: ../../zh/community/governance.md
+msgid "51"
+msgstr "[Zzyiiii](https://gitcode.com/Zzyiiii)"
+
+#: ../../zh/community/governance.md
+msgid "[zhaojies](https://gitee.com/zhaojies)"
+msgstr "2025-10-09"
+
+#: ../../zh/community/governance.md
+msgid "2025-09-25"
+msgstr "[#510](https://gitcode.com/Ascend/triton-ascend/merge_requests/510)"
+
+#: ../../zh/community/governance.md
+msgid "[#414](https://gitee.com/ascend/triton-ascend/pulls/414)"
+msgstr "63"
+
+#: ../../zh/community/governance.md
+msgid "50"
+msgstr "[dang_yiwei](https://gitcode.com/dang_yiwei)"
+
+#: ../../zh/community/governance.md
+msgid "[lu2048](https://gitee.com/lu2048)"
+msgstr "2025-10-09"
+
+#: ../../zh/community/governance.md
+msgid "[#421](https://gitee.com/ascend/triton-ascend/pulls/421)"
+msgstr "[#516](https://gitcode.com/Ascend/triton-ascend/merge_requests/516)"
+
+#: ../../zh/community/governance.md
+msgid "49"
+msgstr "62"
+
+#: ../../zh/community/governance.md
+msgid "[kig_35c7](https://gitee.com/kig_35c7)"
+msgstr "[maxiaohui2732300406](https://gitcode.com/maxiaohui2732300406)"
+
+#: ../../zh/community/governance.md
+msgid "2025-09-19"
+msgstr "2025-10-09"
+
+#: ../../zh/community/governance.md
+msgid "[#384](https://gitee.com/ascend/triton-ascend/pulls/384)"
+msgstr "[#509](https://gitcode.com/Ascend/triton-ascend/merge_requests/509)"
+
+#: ../../zh/community/governance.md
+msgid "48"
+msgstr "61"
+
+#: ../../zh/community/governance.md
+msgid "[jiangzheng1123](https://gitee.com/jiangzheng1123)"
+msgstr "[dinosaurking](https://gitcode.com/dinosaurking)"
+
+#: ../../zh/community/governance.md
+msgid "2025-09-18"
+msgstr "2025-10-09"
+
+#: ../../zh/community/governance.md
+msgid "[#379](https://gitee.com/ascend/triton-ascend/pulls/379)"
+msgstr "[#522](https://gitcode.com/Ascend/triton-ascend/merge_requests/522)"
+
+#: ../../zh/community/governance.md
+msgid "47"
+msgstr "60"
+
+#: ../../zh/community/governance.md
+msgid "[chnjz233](https://gitcode.com/chnjz233)"
+msgstr "[wodelt](https://gitcode.com/wodelt)"
+
+#: ../../zh/community/governance.md
+msgid "[#379](https://gitcode.com/Ascend/triton-ascend/merge_requests/379)"
+msgstr "2025-10-09"
+
+#: ../../zh/community/governance.md
+msgid "46"
+msgstr "[#511](https://gitcode.com/Ascend/triton-ascend/merge_requests/511)"
+
+#: ../../zh/community/governance.md
+msgid "[KanuaK](https://gitee.com/KanuaK)"
+msgstr "59"
+
+#: ../../zh/community/governance.md
+msgid "[#380](https://gitee.com/ascend/triton-ascend/pulls/380)"
+msgstr "[liurufeng25](https://gitcode.com/liurufeng25)"
+
+#: ../../zh/community/governance.md
+msgid "45"
+msgstr "2025-10-09"
+
+#: ../../zh/community/governance.md
+msgid "[elstainniles](https://gitee.com/elstainniles)"
+msgstr "[#517](https://gitcode.com/Ascend/triton-ascend/merge_requests/517)"
+
+#: ../../zh/community/governance.md
+msgid "[#331](https://gitee.com/ascend/triton-ascend/pulls/331)"
+msgstr "58"
+
+#: ../../zh/community/governance.md
+msgid "44"
+msgstr "[ma_journey](https://gitcode.com/ma_journey)"
+
+#: ../../zh/community/governance.md
+msgid "[s00504327](https://gitee.com/s00504327)"
+msgstr "2025-10-09"
+
+#: ../../zh/community/governance.md
+msgid "2025-09-15"
+msgstr "[#508](https://gitcode.com/Ascend/triton-ascend/merge_requests/508)"
+
+#: ../../zh/community/governance.md
+msgid "[#366](https://gitee.com/ascend/triton-ascend/pulls/366)"
+msgstr "57"
+
+#: ../../zh/community/governance.md
+msgid "43"
+msgstr "[jintang_wang](https://gitcode.com/jintang_wang)"
+
+#: ../../zh/community/governance.md
+msgid "[SL25](https://gitcode.com/SL25)"
+msgstr "2025-10-09"
+
+#: ../../zh/community/governance.md
+msgid "[#366](https://gitcode.com/Ascend/triton-ascend/merge_requests/366)"
+msgstr "[#530](https://gitcode.com/Ascend/triton-ascend/merge_requests/530)"
+
+#: ../../zh/community/governance.md
+msgid "42"
+msgstr "56"
+
+#: ../../zh/community/governance.md
+msgid "[kang-ingu](https://gitee.com/kang-ingu)"
+msgstr "[huchengbei](https://gitcode.com/huchengbei)"
+
+#: ../../zh/community/governance.md
+msgid "2025-09-10"
+msgstr "2025-10-09"
+
+#: ../../zh/community/governance.md
+msgid "[#355](https://gitee.com/ascend/triton-ascend/pulls/355)"
+msgstr "[#545](https://gitcode.com/Ascend/triton-ascend/merge_requests/545)"
+
+#: ../../zh/community/governance.md
+msgid "41"
+msgstr "55"
+
+#: ../../zh/community/governance.md
+msgid "[zhuxuejie](https://gitee.com/zhuxuejie)"
+msgstr "[HallCin](https://gitcode.com/HallCin)"
+
+#: ../../zh/community/governance.md
+msgid "2025-08-22"
+msgstr "2025-09-29"
+
+#: ../../zh/community/governance.md
+msgid "[#284](https://gitee.com/ascend/triton-ascend/pulls/284)"
+msgstr "[#523](https://gitcode.com/Ascend/triton-ascend/merge_requests/523)"
+
+#: ../../zh/community/governance.md
+msgid "40"
+msgstr "54"
+
+#: ../../zh/community/governance.md
+msgid "[lord_of_ironhill](https://gitee.com/lord_of_ironhill)"
+msgstr "[junelotus](https://gitcode.com/junelotus)"
+
+#: ../../zh/community/governance.md
+msgid "2025-08-21"
+msgstr "2025-09-29"
+
+#: ../../zh/community/governance.md
+msgid "[#278](https://gitee.com/ascend/triton-ascend/pulls/278)"
+msgstr "[#531](https://gitcode.com/Ascend/triton-ascend/merge_requests/531)"
+
+#: ../../zh/community/governance.md
+msgid "39"
+msgstr "53"
+
+#: ../../zh/community/governance.md
+msgid "[wcleungaj](https://gitee.com/wcleungaj)"
+msgstr "[cc137999](https://gitee.com/cc137999)"
+
+#: ../../zh/community/governance.md
+msgid "2025-08-14"
+msgstr "2025-09-26"
+
+#: ../../zh/community/governance.md
+msgid "[#250](https://gitee.com/ascend/triton-ascend/pulls/250)"
+msgstr "[#442](https://gitee.com/ascend/triton-ascend/pulls/442)"
+
+#: ../../zh/community/governance.md
+msgid "38"
+msgstr "52"
+
+#: ../../zh/community/governance.md
+msgid "[huawei-zhangjunbo](https://gitee.com/huawei-zhangjunbo)"
+msgstr "[kingdinosaur](https://gitee.com/kingdinosaur)"
+
+#: ../../zh/community/governance.md
+msgid "[#244](https://gitee.com/ascend/triton-ascend/pulls/244)"
+msgstr "2025-09-26"
+
+#: ../../zh/community/governance.md
+msgid "37"
+msgstr "[#418](https://gitee.com/ascend/triton-ascend/pulls/418)"
+
+#: ../../zh/community/governance.md
+msgid "[AiBoGe](https://gitcode.com/AiBoGe)"
+msgstr "51"
+
+#: ../../zh/community/governance.md
+msgid "[#244](https://gitcode.com/Ascend/triton-ascend/merge_requests/244)"
+msgstr "[zhaojies](https://gitee.com/zhaojies)"
+
+#: ../../zh/community/governance.md
+msgid "36"
+msgstr "2025-09-25"
+
+#: ../../zh/community/governance.md
+msgid "[wangtao489](https://gitee.com/wangtao489)"
+msgstr "[#414](https://gitee.com/ascend/triton-ascend/pulls/414)"
+
+#: ../../zh/community/governance.md
+msgid "2025-08-13"
+msgstr "50"
+
+#: ../../zh/community/governance.md
+msgid "[#247](https://gitee.com/ascend/triton-ascend/pulls/247)"
+msgstr "[lu2048](https://gitee.com/lu2048)"
+
+#: ../../zh/community/governance.md
+msgid "35"
+msgstr "2025-09-25"
+
+#: ../../zh/community/governance.md
+msgid "[mengxuancai](https://gitee.com/mengxuancai)"
+msgstr "[#421](https://gitee.com/ascend/triton-ascend/pulls/421)"
+
+#: ../../zh/community/governance.md
+msgid "2025-08-04"
+msgstr "49"
+
+#: ../../zh/community/governance.md
+msgid "[#213](https://gitee.com/ascend/triton-ascend/pulls/213)"
+msgstr "[kig_35c7](https://gitee.com/kig_35c7)"
+
+#: ../../zh/community/governance.md
+msgid "34"
+msgstr "2025-09-19"
+
+#: ../../zh/community/governance.md
+msgid "[zhangshuolei](https://gitee.com/zhangshuolei)"
+msgstr "[#384](https://gitee.com/ascend/triton-ascend/pulls/384)"
+
+#: ../../zh/community/governance.md
+msgid "2025-07-28"
+msgstr "48"
+
+#: ../../zh/community/governance.md
+msgid "[#208](https://gitee.com/ascend/triton-ascend/pulls/208)"
+msgstr "[jiangzheng1123](https://gitee.com/jiangzheng1123)"
+
+#: ../../zh/community/governance.md
+msgid "33"
+msgstr "2025-09-18"
+
+#: ../../zh/community/governance.md
+msgid "[zhangshuoleiokok](https://gitcode.com/zhangshuoleiokok)"
+msgstr "[#379](https://gitee.com/ascend/triton-ascend/pulls/379)"
+
+#: ../../zh/community/governance.md
+msgid "[#208](https://gitcode.com/Ascend/triton-ascend/merge_requests/208)"
+msgstr "47"
+
+#: ../../zh/community/governance.md
+msgid "32"
+msgstr "[chnjz233](https://gitcode.com/chnjz233)"
+
+#: ../../zh/community/governance.md
+msgid "[cxtjjcz](https://gitee.com/cxtjjcz)"
+msgstr "2025-09-18"
+
+#: ../../zh/community/governance.md
+msgid "2025-07-26"
+msgstr "[#379](https://gitcode.com/Ascend/triton-ascend/merge_requests/379)"
+
+#: ../../zh/community/governance.md
+msgid "[#201](https://gitee.com/ascend/triton-ascend/pulls/201)"
+msgstr "46"
+
+#: ../../zh/community/governance.md
+msgid "31"
+msgstr "[KanuaK](https://gitee.com/KanuaK)"
+
+#: ../../zh/community/governance.md
+msgid "[candyhong](https://gitee.com/candyhong)"
+msgstr "2025-09-18"
+
+#: ../../zh/community/governance.md
+msgid "[#200](https://gitee.com/ascend/triton-ascend/pulls/200)"
+msgstr "[#380](https://gitee.com/ascend/triton-ascend/pulls/380)"
+
+#: ../../zh/community/governance.md
+msgid "30"
+msgstr "45"
+
+#: ../../zh/community/governance.md
+msgid "[dingshuooffice](https://gitee.com/dingshuooffice)"
+msgstr "[elstainniles](https://gitee.com/elstainniles)"
+
+#: ../../zh/community/governance.md
+msgid "[#207](https://gitee.com/ascend/triton-ascend/pulls/207)"
+msgstr "2025-09-18"
+
+#: ../../zh/community/governance.md
+msgid "29"
+msgstr "[#331](https://gitee.com/ascend/triton-ascend/pulls/331)"
+
+#: ../../zh/community/governance.md
+msgid "[fengrui886](https://gitee.com/fengrui886)"
+msgstr "44"
+
+#: ../../zh/community/governance.md
+msgid "[#192](https://gitee.com/ascend/triton-ascend/pulls/192)"
+msgstr "[s00504327](https://gitee.com/s00504327)"
+
+#: ../../zh/community/governance.md
+msgid "28"
+msgstr "2025-09-15"
+
+#: ../../zh/community/governance.md
+msgid "[vince8866](https://gitee.com/vince8866)"
+msgstr "[#366](https://gitee.com/ascend/triton-ascend/pulls/366)"
+
+#: ../../zh/community/governance.md
+msgid "2025-07-19"
+msgstr "43"
+
+#: ../../zh/community/governance.md
+msgid "[#183](https://gitee.com/ascend/triton-ascend/pulls/183)"
+msgstr "[SL25](https://gitcode.com/SL25)"
+
+#: ../../zh/community/governance.md
+msgid "27"
+msgstr "2025-09-15"
+
+#: ../../zh/community/governance.md
+msgid "[saruagithub](https://gitee.com/saruagithub)"
+msgstr "[#366](https://gitcode.com/Ascend/triton-ascend/merge_requests/366)"
+
+#: ../../zh/community/governance.md
+msgid "2025-07-11"
+msgstr "42"
+
+#: ../../zh/community/governance.md
+msgid "[#166](https://gitee.com/ascend/triton-ascend/pulls/166)"
+msgstr "[kang-ingu](https://gitee.com/kang-ingu)"
+
+#: ../../zh/community/governance.md
+msgid "26"
+msgstr "2025-09-10"
+
+#: ../../zh/community/governance.md
+msgid "[junelutus](https://gitee.com/junelutus)"
+msgstr "[#355](https://gitee.com/ascend/triton-ascend/pulls/355)"
+
+#: ../../zh/community/governance.md
+msgid "2025-07-09"
+msgstr "41"
+
+#: ../../zh/community/governance.md
+msgid "[#156](https://gitee.com/ascend/triton-ascend/pulls/156)"
+msgstr "[zhuxuejie](https://gitee.com/zhuxuejie)"
+
+#: ../../zh/community/governance.md
+msgid "25"
+msgstr "2025-08-22"
+
+#: ../../zh/community/governance.md
+msgid "[hipudding](https://gitee.com/hipudding)"
+msgstr "[#284](https://gitee.com/ascend/triton-ascend/pulls/284)"
+
+#: ../../zh/community/governance.md
+msgid "2025-06-28"
+msgstr "40"
+
+#: ../../zh/community/governance.md
+msgid "[#76](https://gitee.com/ascend/triton-ascend/pulls/76)"
+msgstr "[lord_of_ironhill](https://gitee.com/lord_of_ironhill)"
+
+#: ../../zh/community/governance.md
+msgid "24"
+msgstr "2025-08-21"
+
+#: ../../zh/community/governance.md
+msgid "[huafengchun](https://gitcode.com/huafengchun)"
+msgstr "[#278](https://gitee.com/ascend/triton-ascend/pulls/278)"
+
+#: ../../zh/community/governance.md
+msgid "[#76](https://gitcode.com/Ascend/triton-ascend/merge_requests/76)"
+msgstr "39"
+
+#: ../../zh/community/governance.md
+msgid "23"
+msgstr "[wcleungaj](https://gitee.com/wcleungaj)"
+
+#: ../../zh/community/governance.md
+msgid "[waiting_4u](https://gitee.com/waiting_4u)"
+msgstr "2025-08-14"
+
+#: ../../zh/community/governance.md
+msgid "2025-06-26"
+msgstr "[#250](https://gitee.com/ascend/triton-ascend/pulls/250)"
+
+#: ../../zh/community/governance.md
+msgid "[#113](https://gitee.com/ascend/triton-ascend/pulls/113)"
+msgstr "38"
+
+#: ../../zh/community/governance.md
+msgid "22"
+msgstr "[huawei-zhangjunbo](https://gitee.com/huawei-zhangjunbo)"
+
+#: ../../zh/community/governance.md
+msgid "[george_zhanglei](https://gitee.com/george_zhanglei)"
+msgstr "2025-08-14"
+
+#: ../../zh/community/governance.md
+msgid "2025-06-24"
+msgstr "[#244](https://gitee.com/ascend/triton-ascend/pulls/244)"
+
+#: ../../zh/community/governance.md
+msgid "[#92](https://gitee.com/ascend/triton-ascend/pulls/92)"
+msgstr "37"
+
+#: ../../zh/community/governance.md
+msgid "21"
+msgstr "[AiBoGe](https://gitcode.com/AiBoGe)"
+
+#: ../../zh/community/governance.md
+msgid "[zhiliangtang](https://gitee.com/zhiliangtang)"
+msgstr "2025-08-14"
+
+#: ../../zh/community/governance.md
+msgid "[#97](https://gitee.com/ascend/triton-ascend/pulls/97)"
+msgstr "[#244](https://gitcode.com/Ascend/triton-ascend/merge_requests/244)"
+
+#: ../../zh/community/governance.md
+msgid "20"
+msgstr "36"
+
+#: ../../zh/community/governance.md
+msgid "[zhiliangtang0727](https://gitcode.com/zhiliangtang0727)"
+msgstr "[wangtao489](https://gitee.com/wangtao489)"
+
+#: ../../zh/community/governance.md
+msgid "[#97](https://gitcode.com/Ascend/triton-ascend/merge_requests/97)"
+msgstr "2025-08-13"
+
+#: ../../zh/community/governance.md
+msgid "19"
+msgstr "[#247](https://gitee.com/ascend/triton-ascend/pulls/247)"
+
+#: ../../zh/community/governance.md
+msgid "[adamasW](https://gitee.com/adamasW)"
+msgstr "35"
+
+#: ../../zh/community/governance.md
+msgid "[#101](https://gitee.com/ascend/triton-ascend/pulls/101)"
+msgstr "[mengxuancai](https://gitee.com/mengxuancai)"
+
+#: ../../zh/community/governance.md
+msgid "18"
+msgstr "2025-08-04"
+
+#: ../../zh/community/governance.md
+msgid "[kpxing](https://gitee.com/kpxing)"
+msgstr "[#213](https://gitee.com/ascend/triton-ascend/pulls/213)"
+
+#: ../../zh/community/governance.md
+msgid "2025-06-21"
+msgstr "34"
+
+#: ../../zh/community/governance.md
+msgid "[#85](https://gitee.com/ascend/triton-ascend/pulls/85)"
+msgstr "[zhangshuolei](https://gitee.com/zhangshuolei)"
+
+#: ../../zh/community/governance.md
+msgid "17"
+msgstr "2025-07-28"
+
+#: ../../zh/community/governance.md
+msgid "[wszh-01](https://gitee.com/wszh-01)"
+msgstr "[#208](https://gitee.com/ascend/triton-ascend/pulls/208)"
+
+#: ../../zh/community/governance.md
+msgid "2025-06-17"
+msgstr "33"
+
+#: ../../zh/community/governance.md
+msgid "[#62](https://gitee.com/ascend/triton-ascend/pulls/62)"
+msgstr "[zhangshuoleiokok](https://gitcode.com/zhangshuoleiokok)"
+
+#: ../../zh/community/governance.md
+msgid "16"
+msgstr "2025-07-28"
+
+#: ../../zh/community/governance.md
+msgid "[zhucehw](https://gitee.com/zhucehw)"
+msgstr "[#208](https://gitcode.com/Ascend/triton-ascend/merge_requests/208)"
+
+#: ../../zh/community/governance.md
+msgid "2025-06-16"
+msgstr "32"
+
+#: ../../zh/community/governance.md
+msgid "[#45](https://gitee.com/ascend/triton-ascend/pulls/45)"
+msgstr "[cxtjjcz](https://gitee.com/cxtjjcz)"
+
+#: ../../zh/community/governance.md
+msgid "15"
+msgstr "2025-07-26"
+
+#: ../../zh/community/governance.md
+msgid "[w00504335](https://gitee.com/w00504335)"
+msgstr "[#201](https://gitee.com/ascend/triton-ascend/pulls/201)"
+
+#: ../../zh/community/governance.md
+msgid "2025-06-11"
+msgstr "31"
+
+#: ../../zh/community/governance.md
+msgid "[#55](https://gitee.com/ascend/triton-ascend/pulls/55)"
+msgstr "[candyhong](https://gitee.com/candyhong)"
+
+#: ../../zh/community/governance.md
+msgid "14"
+msgstr "2025-07-26"
+
+#: ../../zh/community/governance.md
+msgid "[hin-peng](https://gitee.com/hin-peng)"
+msgstr "[#200](https://gitee.com/ascend/triton-ascend/pulls/200)"
+
+#: ../../zh/community/governance.md
+msgid "[#48](https://gitee.com/ascend/triton-ascend/pulls/48)"
+msgstr "30"
+
+#: ../../zh/community/governance.md
+msgid "13"
+msgstr "[dingshuooffice](https://gitee.com/dingshuooffice)"
+
+#: ../../zh/community/governance.md
+msgid "[meloliu12327](https://gitee.com/meloliu12327)"
+msgstr "2025-07-26"
+
+#: ../../zh/community/governance.md
+msgid "2025-06-04"
+msgstr "[#207](https://gitee.com/ascend/triton-ascend/pulls/207)"
+
+#: ../../zh/community/governance.md
+msgid "[#30](https://gitee.com/ascend/triton-ascend/pulls/30)"
+msgstr "29"
+
+#: ../../zh/community/governance.md
+msgid "12"
+msgstr "[fengrui886](https://gitee.com/fengrui886)"
+
+#: ../../zh/community/governance.md
+msgid "[qhrusty](https://gitee.com/qhrusty)"
+msgstr "2025-07-26"
+
+#: ../../zh/community/governance.md
+msgid "2025-06-03"
+msgstr "[#192](https://gitee.com/ascend/triton-ascend/pulls/192)"
+
+#: ../../zh/community/governance.md
+msgid "[#27](https://gitee.com/ascend/triton-ascend/pulls/27)"
+msgstr "28"
+
+#: ../../zh/community/governance.md
+msgid "11"
+msgstr "[vince8866](https://gitee.com/vince8866)"
+
+#: ../../zh/community/governance.md
+msgid "[leopold0801](https://gitee.com/leopold0801)"
+msgstr "2025-07-19"
+
+#: ../../zh/community/governance.md
+msgid "2025-05-29"
+msgstr "[#183](https://gitee.com/ascend/triton-ascend/pulls/183)"
+
+#: ../../zh/community/governance.md
+msgid "[#26](https://gitee.com/ascend/triton-ascend/pulls/26)"
+msgstr "27"
+
+#: ../../zh/community/governance.md
+msgid "10"
+msgstr "[saruagithub](https://gitee.com/saruagithub)"
+
+#: ../../zh/community/governance.md
+msgid "[shen-zhaofeng](https://gitee.com/shen-zhaofeng)"
+msgstr "2025-07-11"
+
+#: ../../zh/community/governance.md
+msgid "2025-05-28"
+msgstr "[#166](https://gitee.com/ascend/triton-ascend/pulls/166)"
+
+#: ../../zh/community/governance.md
+msgid "[#23](https://gitee.com/ascend/triton-ascend/pulls/23)"
+msgstr "26"
+
+#: ../../zh/community/governance.md
+msgid "9"
+msgstr "[junelutus](https://gitee.com/junelutus)"
+
+#: ../../zh/community/governance.md
+msgid "[ffrog](https://gitee.com/ffrog)"
+msgstr "2025-07-09"
+
+#: ../../zh/community/governance.md
+msgid "[#12](https://gitee.com/ascend/triton-ascend/pulls/12)"
+msgstr "[#156](https://gitee.com/ascend/triton-ascend/pulls/156)"
+
+#: ../../zh/community/governance.md
+msgid "8"
+msgstr "25"
+
+#: ../../zh/community/governance.md
+msgid "[qiuqianjin](https://gitee.com/qiuqianjin)"
+msgstr "[hipudding](https://gitee.com/hipudding)"
+
+#: ../../zh/community/governance.md
+msgid "2025-05-27"
+msgstr "2025-06-28"
+
+#: ../../zh/community/governance.md
+msgid "[#17](https://gitee.com/ascend/triton-ascend/pulls/17)"
+msgstr "[#76](https://gitee.com/ascend/triton-ascend/pulls/76)"
+
+#: ../../zh/community/governance.md
+msgid "7"
+msgstr "24"
+
+#: ../../zh/community/governance.md
+msgid "[qiuqianjin233](https://gitcode.com/qiuqianjin233)"
+msgstr "[huafengchun](https://gitcode.com/huafengchun)"
+
+#: ../../zh/community/governance.md
+msgid "[#17](https://gitcode.com/Ascend/triton-ascend/merge_requests/17)"
+msgstr "2025-06-28"
+
+#: ../../zh/community/governance.md
+msgid "6"
+msgstr "[#76](https://gitcode.com/Ascend/triton-ascend/merge_requests/76)"
+
+#: ../../zh/community/governance.md
+msgid "[wangzhanpeng5](https://gitee.com/wangzhanpeng5)"
+msgstr "23"
+
+#: ../../zh/community/governance.md
+msgid "2025-05-26"
+msgstr "[waiting_4u](https://gitee.com/waiting_4u)"
+
+#: ../../zh/community/governance.md
+msgid "[#5](https://gitee.com/ascend/triton-ascend/pulls/5)"
+msgstr "2025-06-26"
+
+#: ../../zh/community/governance.md
+msgid "5"
+msgstr "[#113](https://gitee.com/ascend/triton-ascend/pulls/113)"
+
+#: ../../zh/community/governance.md
+msgid "[yang-bochu](https://gitee.com/yang-bochu)"
+msgstr "22"
+
+#: ../../zh/community/governance.md
+msgid "[#7](https://gitee.com/ascend/triton-ascend/pulls/7)"
+msgstr "[george_zhanglei](https://gitee.com/george_zhanglei)"
+
+#: ../../zh/community/governance.md
+msgid "4"
+msgstr "2025-06-24"
+
+#: ../../zh/community/governance.md
+msgid "[handsome20](https://gitcode.com/handsome20)"
+msgstr "[#92](https://gitee.com/ascend/triton-ascend/pulls/92)"
+
+#: ../../zh/community/governance.md
+msgid "[#7](https://gitcode.com/Ascend/triton-ascend/merge_requests/7)"
+msgstr "21"
+
+#: ../../zh/community/governance.md
+msgid "3"
+msgstr "[zhiliangtang](https://gitee.com/zhiliangtang)"
+
+#: ../../zh/community/governance.md
+msgid "[zhangyong102](https://gitee.com/zhangyong102)"
+msgstr "2025-06-24"
+
+#: ../../zh/community/governance.md
+msgid "[#8](https://gitee.com/ascend/triton-ascend/pulls/8)"
+msgstr "[#97](https://gitee.com/ascend/triton-ascend/pulls/97)"
+
+#: ../../zh/community/governance.md
+msgid "2"
+msgstr "20"
+
+#: ../../zh/community/governance.md
+msgid "[shijingchang](https://gitee.com/shijingchang)"
+msgstr "[zhiliangtang0727](https://gitcode.com/zhiliangtang0727)"
+
+#: ../../zh/community/governance.md
+msgid "[#9](https://gitee.com/ascend/triton-ascend/pulls/9)"
+msgstr "2025-06-24"
+
+#: ../../zh/community/governance.md
+msgid "1"
+msgstr "[#97](https://gitcode.com/Ascend/triton-ascend/merge_requests/97)"
+
+#: ../../zh/community/governance.md
+msgid "[zhang-chunli01](https://gitee.com/zhang-chunli01)"
+msgstr "19"
+
+#: ../../zh/community/governance.md
+msgid "2025-05-23"
+msgstr "[adamasW](https://gitee.com/adamasW)"
+
+#: ../../zh/community/governance.md
+msgid "[#1](https://gitee.com/ascend/triton-ascend/pulls/1)"
+msgstr "2025-06-24"
+
+#: ../../zh/community/governance.md:249
+msgid "*由于Triton-Ascend经历了代码库搬迁，上述贡献者以贡献者ID为维度统计（不同平台的ID视为多个贡献者）。*"
+msgstr ""
+"*Due to repository migration, contributors listed above are counted by"
+"contributor ID (IDs from different platforms are treated as separate"
+"contributors).*"

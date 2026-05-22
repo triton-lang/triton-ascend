@@ -1,0 +1,214 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:1
+msgid "triton.language.div_rn"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:3
+msgid "1. 函数概述"
+msgstr "1. Function Overview"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:5
+msgid "简介：计算x和y的逐元素精确除法。"
+msgstr "Description: Computes the element-wise exact division of x and y."
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:11
+msgid "2. 规格"
+msgstr "2. Specifications"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:13
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "`x`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "`tensor`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "张量数据"
+msgstr "Tensor data"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "`y`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter; external invocation is not supported yet"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:21
+msgid "返回值： `x`：输出张量的shape与输入x的shape相同"
+msgstr ""
+"Return value: `x`: the output tensor has the same shape as the input x"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:24
+msgid "2.2 OP 规格"
+msgstr "2.2 OP Specifications"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:26
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:33
+msgid "结论：Ascend 相比 GPU 额外支持 fp16、bf16。 torch 对 uint8 支持。"
+msgstr ""
+"Conclusion: Ascend additionally supports fp16 and bf16 compared to GPU. "
+"torch supports uint8."
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:36
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "支持维度范围"
+msgstr "Supported Dimension Range"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "仅支持 1~5维 tensor"
+msgstr "Only supports 1D to 5D tensors"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md
+msgid "Ascend"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:43
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
+msgstr ""
+"Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
+" platforms; both support 1 to 5 dimensional tensors."
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:45
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:47
+msgid "相对社区能力缺失且无法实现"
+msgstr ""
+"Missing capability compared to the community version and cannot be "
+"implemented"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:49
+msgid "无。"
+msgstr "None."
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:51
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Math_Ops/div_rn.md:53
+msgid "以下示例实现了对输入张量 `x` 和`y`的逐元素精确除法："
+msgstr ""
+"The following example demonstrates element-wise exact division on input "
+"tensors `x` and `y`:"

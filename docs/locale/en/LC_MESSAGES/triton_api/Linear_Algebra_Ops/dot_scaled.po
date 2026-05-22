@@ -1,0 +1,261 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:1
+msgid "triton.language.dot_scaled"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:5
+msgid "简介：**计算以缩放格式表示两个矩阵块的矩阵乘积**"
+msgstr ""
+"Description: **Computes the matrix product of two matrix blocks represented "
+"in scaled format**"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:13
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:15
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "`lhs`"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "`tensor`"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "左矩阵张量的基指针（支持bf16、fp16格式）"
+msgstr "Base pointer of the left matrix tensor (supports bf16, fp16 formats)"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "`lhs_scale`"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "左矩阵缩放张量的基指针（支持int8格式）"
+msgstr "Base pointer of the left matrix scale tensor (supports int8 format)"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "`lhs_format`"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "`string`"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "左矩阵张量的存放格式 （支持\"bf16\"和\"fp16\"）"
+msgstr "Storage format of the left matrix tensor (supports \"bf16\" and \"fp16\")"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "`rhs`"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "右矩阵张量的基指针 （支持bf16、fp16格式）"
+msgstr "Base pointer of the right matrix tensor (supports bf16, fp16 formats)"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "`rhs_scale`"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "右矩阵缩放张量的基指针（支持int8格式）"
+msgstr "Base pointer of the right matrix scale tensor (supports int8 format)"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "`rhs_format`"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "右矩阵张量的存放格式 （支持\"bf16\"和\"fp16\"）"
+msgstr "Storage format of the right matrix tensor (supports \"bf16\" and \"fp16\")"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "`acc`"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "累积张量"
+msgstr "Accumulation tensor"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "`lhs_k_pack`"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "`(bool, optional)`"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "true 沿 K 维度打包<br>false 沿 M 维度打包<br>"
+msgstr "true: pack along K dimension<br>false: pack along M dimension<br>"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "`rhs_k_pack`"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "true 沿 K 维度打包<br>false 沿 N 维度打包<br>"
+msgstr "true: pack along K dimension<br>false: pack along N dimension<br>"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter, external calls not supported yet"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:30
+msgid "返回值： `out`：tensor类型，计算缩放矩阵乘后输出的值"
+msgstr ""
+"Return value: `out`: tensor type, the output value after computing the "
+"scaled matrix multiplication"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:33
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:35
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "fp4"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "fp8"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:42
+msgid "结论： 1、Ascend 对比 GPU 缺失fp4、fp8的支持能力（硬件限制）。 2、缩放张量的值为int8，GPU上为uint8。"
+msgstr ""
+"Conclusion: 1. Ascend lacks support for fp4 and fp8 compared to GPU "
+"(hardware limitation). 2. The scale tensor value is int8 on Ascend, while it"
+" is uint8 on GPU."
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:46
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "支持维度范围"
+msgstr "Supported Dimension Range"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "可支持 2~3维 tensor"
+msgstr "Supports 2-3D tensors"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md
+msgid "Ascend"
+msgstr ""
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:53
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，lhs/rhs矩阵均支持 2 至 3 维张量，但scale矩阵只支持2维。"
+msgstr ""
+"Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
+" platforms. Both lhs/rhs matrices support 2-3D tensors, but the scale matrix"
+" only supports 2D."
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:55
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:57
+msgid ""
+"1、由于不支持fp8，左右矩阵不支持fp4、fp8格式，Ascend 对比 GPU "
+"缺失lhs_k_pack、rhs_k_pack的矩阵解压缩支持能力（硬件限制）。 2、输入矩阵lhs、rhs推荐输入范围为[-5, "
+"5]，超过可能会出现极值inf。 3、由于硬件存在对齐要求，需要限制scale矩阵做broadcast的倍数，至少应为16"
+msgstr ""
+"1. Due to the lack of fp4 and fp8 support, the left and right matrices do "
+"not support fp4 and fp8 formats. Ascend lacks matrix decompression support "
+"for lhs_k_pack and rhs_k_pack compared to GPU (hardware limitation). 2. The "
+"recommended input range for lhs and rhs matrices is [-5, 5]. Exceeding this "
+"range may result in extreme values (inf). 3. Due to hardware alignment "
+"requirements, the broadcast multiple of the scale matrix must be limited to "
+"at least 16."
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:61
+msgid "4、当前支持的缩放矩阵格式为int8，社区为uint8"
+msgstr ""
+"4. The currently supported scale matrix format is int8 on Ascend, while it "
+"is uint8 in the community."
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:63
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Linear_Algebra_Ops/dot_scaled.md:65
+msgid "以下示例实现了对输入张量 `x` 做就地绝对值计算："
+msgstr ""
+"The following example demonstrates computing the in-place absolute value of "
+"the input tensor `x`:"

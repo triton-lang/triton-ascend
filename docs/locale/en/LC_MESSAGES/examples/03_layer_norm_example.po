@@ -1,0 +1,58 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 21:54+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/examples/03_layer_norm_example.md:1
+msgid "层标准化 （Layer Normalization）"
+msgstr "Layer Normalization"
+
+#: ../../zh/examples/03_layer_norm_example.md:3
+msgid "在本节中，我们将使用 Triton 编写一个比 PyTorch 实现运行更快的高性能层标准化 (Layer Normalization) 内核。"
+msgstr ""
+"In this section, you will use Triton to write a high-performance "
+"layernormalization kernel that runs faster than the PyTorch "
+"implementation."
+
+#: ../../zh/examples/03_layer_norm_example.md:5
+msgid "计算内核"
+msgstr "Compute Kernel"
+
+#: ../../zh/examples/03_layer_norm_example.md:64
+msgid "使用 Triton 自定义的 LayerNorm 实现方式"
+msgstr "LayerNorm Implementation Defined by Using Triton"
+
+#: ../../zh/examples/03_layer_norm_example.md:115
+msgid "结果"
+msgstr "Result"
+
+#: ../../zh/examples/03_layer_norm_example.md:171
+#, fuzzy
+msgid ""
+"“Layer Normalization 128,128 torch.float16 PASSED!”、 “Layer Normalization"
+" 128,128 torch.bfloat16 PASSED!”、 “Layer Normalization 128,128 "
+"torch.float32 PASSED!” "
+"表明Triton和PyTorch上float16、bfloat16、float32数据类型的输出结果完全一致。"
+msgstr ""
+"\"Layer Normalization 128,128 torch.float16 PASSED!\", \"Layer "
+"Normalization 128,128 torch.bfloat16 PASSED!\", and \"Layer Normalization"
+" 128,128 torch.float32 PASSED!\" indicate that the output of float16, "
+"bfloat16, and float32 data typeson Triton is the same as that on PyTorch."
+

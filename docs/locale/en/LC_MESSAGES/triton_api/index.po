@@ -1,0 +1,1204 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/index.md:1
+msgid "triton.language"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:3
+msgid "昇腾拓展API列表"
+msgstr "Ascend Extension API List"
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:16
+#: ../../zh/triton_api/index.md:43 ../../zh/triton_api/index.md:68
+#: ../../zh/triton_api/index.md:94 ../../zh/triton_api/index.md:120
+#: ../../zh/triton_api/index.md:141 ../../zh/triton_api/index.md:163
+#: ../../zh/triton_api/index.md:181 ../../zh/triton_api/index.md:195
+#: ../../zh/triton_api/index.md:210 ../../zh/triton_api/index.md:233
+#: ../../zh/triton_api/index.md:284 ../../zh/triton_api/index.md:332
+#: ../../zh/triton_api/index.md:353 ../../zh/triton_api/index.md:370
+#: ../../zh/triton_api/index.md:392 ../../zh/triton_api/index.md:415
+msgid "api"
+msgstr "API"
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:16
+#: ../../zh/triton_api/index.md:43 ../../zh/triton_api/index.md:68
+#: ../../zh/triton_api/index.md:94 ../../zh/triton_api/index.md:120
+#: ../../zh/triton_api/index.md:141 ../../zh/triton_api/index.md:163
+#: ../../zh/triton_api/index.md:181 ../../zh/triton_api/index.md:195
+#: ../../zh/triton_api/index.md:210 ../../zh/triton_api/index.md:233
+#: ../../zh/triton_api/index.md:284 ../../zh/triton_api/index.md:332
+#: ../../zh/triton_api/index.md:353 ../../zh/triton_api/index.md:370
+#: ../../zh/triton_api/index.md:392 ../../zh/triton_api/index.md:415
+msgid "简要说明"
+msgstr "Brief Description"
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:415
+msgid "[extract_slice](./Extension_Ops/extract_slice.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:415
+msgid "从输入张量中按照操作指定的偏移量、大小和步幅参数提取一个张量。"
+msgstr ""
+"Extracts a slice from the input tensor according to the specified offset, "
+"size, and stride parameters."
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:415
+msgid "[insert_slice](./Extension_Ops/insert_slice.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:415
+msgid "将一个张量（子张量）插入到另一个张量的指定位置，按照操作指定的偏移量、大小和步幅参数插入到另一个张量中。"
+msgstr ""
+"Inserts one tensor (sub-tensor) into another tensor at the specified "
+"position, according to the offset, size, and stride parameters."
+
+#: ../../zh/triton_api/index.md
+msgid "[sync_block](./Extension_Ops/sync_block.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:68
+msgid "显式的核心间同步指令，用于协调 Cube-Vector 架构中不同核心间的执行顺序和数据一致性。"
+msgstr ""
+"An explicit inter-core synchronization instruction used to coordinate "
+"execution order and data consistency among different cores in the Cube-"
+"Vector architecture."
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:68
+msgid "[compile_hint](./Extension_Ops/compile_hint.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:68
+msgid "一个编译器提示（hint）机制，允许用户为张量附加元数据信息，这些信息会被传递到编译器后端，用于指导优化和代码生成。"
+msgstr ""
+"A compiler hint mechanism that allows users to attach metadata to tensors, "
+"which is then passed to the compiler backend to guide optimization and code "
+"generation."
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:68
+msgid "[multibuffer](./Extension_Ops/multibuffer.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:68
+msgid "为张量设置多缓冲，允许编译器对同一张量创建多个副本。"
+msgstr ""
+"Sets up multi-buffering for a tensor, allowing the compiler to create "
+"multiple copies of the same tensor."
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:68
+msgid "[parallel](./Extension_Ops/parallel.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md
+msgid "`parallel` 是一个专门用于多核心并行执行的迭代器,提供显式的多核心并行语义。"
+msgstr ""
+"`parallel` is an iterator specifically designed for multi-core parallel "
+"execution, providing explicit multi-core parallel semantics."
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:141
+msgid "[get_element](./Extension_Ops/get_element.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:141
+msgid "根据给定的索引，从输入张量中读取单个元素。"
+msgstr ""
+"Reads a single element from the input tensor according to the given index."
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:141
+msgid "[index_select 高性能接口](./Extension_Ops/index_select_simd.md)"
+msgstr ""
+"[index_select High-Performance "
+"Interface](./Extension_Ops/index_select_simd.md)"
+
+#: ../../zh/triton_api/index.md ../../zh/triton_api/index.md:141
+msgid ""
+"在非尾轴维度上并行 gather 多个索引，并以 tile 为单位将数据零拷贝地从全局内存（GM）直接搬运到统一缓冲区（UB）的正确位置。该操作等效于 "
+"`torch.index_select` 的高性能实现，适用于嵌入层查找、稀疏索引访问等场景。"
+msgstr ""
+"Parallel gathers multiple indices on non-trailing dimensions and copies data"
+" zero-copy from global memory (GM) directly to the correct position in the "
+"unified buffer (UB) in tile units. This operation is equivalent to the high-"
+"performance implementation of `torch.index_select`, suitable for embedding "
+"layer lookup, sparse index access, and other scenarios."
+
+#: ../../zh/triton_api/index.md:30
+msgid "原子操作"
+msgstr "Atomic Operations"
+
+#: ../../zh/triton_api/index.md:16
+msgid "[atomic_add](./Atomic_Ops/atomic_add.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:16
+msgid "在由 pointer 指定的内存位置执行原子加法"
+msgstr "Performs atomic addition at the memory location specified by pointer"
+
+#: ../../zh/triton_api/index.md:16
+msgid "[atomic_and](./Atomic_Ops/atomic_and.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:16
+msgid "在由 pointer 指定的内存位置执行原子逻辑与操作"
+msgstr ""
+"Performs atomic logical AND operation at the memory location specified by "
+"pointer"
+
+#: ../../zh/triton_api/index.md:16
+msgid "[atomic_cas](./Atomic_Ops/atomic_cas.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:16
+msgid "在由 pointer 指定的内存位置执行 1 个原子比较并交换操作"
+msgstr ""
+"Performs 1 atomic compare-and-swap operation at the memory location "
+"specified by pointer"
+
+#: ../../zh/triton_api/index.md:16
+msgid "[atomic_max](./Atomic_Ops/atomic_max.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:16
+msgid "在由 pointer 指定的内存位置执行 1 个原子最大值操作"
+msgstr ""
+"Performs 1 atomic maximum operation at the memory location specified by "
+"pointer"
+
+#: ../../zh/triton_api/index.md:16
+msgid "[atomic_min](./Atomic_Ops/atomic_min.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:16
+msgid "在由 pointer 指定的内存位置执行 1 个原子最小值操作"
+msgstr ""
+"Performs 1 atomic minimum operation at the memory location specified by "
+"pointer"
+
+#: ../../zh/triton_api/index.md:16
+msgid "[atomic_or](./Atomic_Ops/atomic_or.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:16
+msgid "在由 pointer 指定的内存位置执行 1 个原子逻辑或操作"
+msgstr ""
+"Performs 1 atomic logical OR operation at the memory location specified by "
+"pointer"
+
+#: ../../zh/triton_api/index.md:16
+msgid "[atomic_xchg](./Atomic_Ops/atomic_xchg.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:16
+msgid "在由 pointer 指定的内存位置执行 1 个原子交换操作"
+msgstr ""
+"Performs 1 atomic exchange operation at the memory location specified by "
+"pointer"
+
+#: ../../zh/triton_api/index.md:16
+msgid "[atomic_xor](./Atomic_Ops/atomic_xor.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:16
+msgid "在由 pointer 指定的内存位置执行原子逻辑异或操作"
+msgstr ""
+"Performs atomic logical XOR operation at the memory location specified by "
+"pointer"
+
+#: ../../zh/triton_api/index.md:57
+msgid "比较操作"
+msgstr "Comparing Operations"
+
+#: ../../zh/triton_api/index.md:43
+msgid "[eq](./Comparing_Ops/eq.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:43
+msgid "用于比较两个张量的元素，与`==`等价"
+msgstr "Compares elements of two tensors, equivalent to `==`."
+
+#: ../../zh/triton_api/index.md:43
+msgid "[le](./Comparing_Ops/le.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:43
+msgid "用于比较两个张量的元素，与`<=`等价。"
+msgstr "Compares elements of two tensors, equivalent to `<=`."
+
+#: ../../zh/triton_api/index.md:43
+msgid "[ge](./Comparing_Ops/ge.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:43
+msgid "用于比较两个张量的元素，与`>=`等价。"
+msgstr "Compares elements of two tensors, equivalent to `>=`."
+
+#: ../../zh/triton_api/index.md:43
+msgid "[lt](./Comparing_Ops/lt.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:43
+msgid "用于比较两个张量的元素，与`<`等价。"
+msgstr "Compares elements of two tensors, equivalent to `<`."
+
+#: ../../zh/triton_api/index.md:43
+msgid "[gt](./Comparing_Ops/gt.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:43
+msgid "用于比较两个张量的元素，与`>`等价。"
+msgstr "Compares elements of two tensors, equivalent to `>`."
+
+#: ../../zh/triton_api/index.md:43
+msgid "[ne](./Comparing_Ops/ne.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:43
+msgid "用于比较两个张量的元素，与`!=`等价。"
+msgstr "Compares elements of two tensors, equivalent to `!=`."
+
+#: ../../zh/triton_api/index.md:80
+msgid "编译器提示操作"
+msgstr "Compiler Hint Operations"
+
+#: ../../zh/triton_api/index.md:68
+msgid "[debug_barrier](./Compiler_Hint_Ops/debug_barrier.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:68
+msgid "插入 1 个屏障以同步 1 个块中的所有线程"
+msgstr "Inserts a barrier to synchronize all threads in a block"
+
+#: ../../zh/triton_api/index.md:68
+msgid "[max_constancy](./Compiler_Hint_Ops/max_constancy.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:68
+msgid "告知编译器 input 中的第 1 个值是常量"
+msgstr "Informs the compiler that the first value in input is constant"
+
+#: ../../zh/triton_api/index.md:68
+msgid "[max_contiguous](./Compiler_Hint_Ops/max_contiguous.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:68
+msgid "告知编译器 input 中的第 1 个值是连续的"
+msgstr "Informs the compiler that the first value in input is contiguous"
+
+#: ../../zh/triton_api/index.md:68
+msgid "[multiple_of](./Compiler_Hint_Ops/multiple_of.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:68
+msgid "告知编译器 input 中的所有值都是 value 的倍数"
+msgstr "Informs the compiler that all values in input are multiples of value"
+
+#: ../../zh/triton_api/index.md:68
+msgid "[assume](./Compiler_Hint_Ops/assume.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:68
+msgid "用于向编译器提供条件假设信息，允许编译器基于已知为真的条件进行优化。"
+msgstr ""
+"Provides conditional assumption information to the compiler, allowing it to "
+"optimize based on conditions known to be true."
+
+#: ../../zh/triton_api/index.md:68
+msgid "`parallel` 是一个专门用于多核心并行执行的迭代器，提供显式的多核心并行语义。"
+msgstr ""
+"`parallel` is an iterator specifically designed for multi-core parallel "
+"execution, providing explicit multi-core parallel semantics."
+
+#: ../../zh/triton_api/index.md:68
+msgid "[sync_block指令](./Extension_Ops/sync_block.md)"
+msgstr "[sync_block Instruction](./Extension_Ops/sync_block.md)"
+
+#: ../../zh/triton_api/index.md:109
+msgid "创建操作"
+msgstr "Creation Operations"
+
+#: ../../zh/triton_api/index.md:94
+msgid "[arange](./Creation_Ops/arange.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:94
+msgid "返回半开区间 [start, end) 内的连续值"
+msgstr "Returns consecutive values within the half-open interval [start, end)"
+
+#: ../../zh/triton_api/index.md:94
+msgid "[cat](./Creation_Ops/cat.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:94
+msgid "连接给定的块"
+msgstr "Concatenates the given blocks"
+
+#: ../../zh/triton_api/index.md:94
+msgid "[full](./Creation_Ops/full.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:94
+msgid "返回一个张量，该张量填充了指定 shape 和 dtype 的标量值"
+msgstr ""
+"Returns a tensor filled with a scalar value of the specified shape and dtype"
+
+#: ../../zh/triton_api/index.md:94
+msgid "[zeros](./Creation_Ops/zeros.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:94
+msgid "返回一个张量，该张量用指定 shape 和 dtype 填充了标量值 0"
+msgstr ""
+"Returns a tensor filled with scalar value 0 of the specified shape and dtype"
+
+#: ../../zh/triton_api/index.md:94
+msgid "[zeros_like](./Creation_Ops/zeros_like.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:94
+msgid "返回一个 shape 和 dtype 与给定张量相同的全零张量"
+msgstr ""
+"Returns a tensor of zeros with the same shape and dtype as the given tensor"
+
+#: ../../zh/triton_api/index.md:94
+msgid "[cast](./Creation_Ops/cast.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:94
+msgid "将张量转换为指定的 dtype"
+msgstr "Converts the tensor to the specified dtype"
+
+#: ../../zh/triton_api/index.md:132
+msgid "调试操作"
+msgstr "Debug Operations"
+
+#: ../../zh/triton_api/index.md:120
+msgid "[static_print](./Debug_Ops/static_print.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:120
+msgid "在编译时打印数值"
+msgstr "Prints a value at compile time"
+
+#: ../../zh/triton_api/index.md:120
+msgid "[static_assert](./Debug_Ops/static_assert.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:120
+msgid "在编译时断言条件"
+msgstr "Asserts a condition at compile time"
+
+#: ../../zh/triton_api/index.md:120
+msgid "[device_print](./Debug_Ops/device_print.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:120
+msgid "在运行时从设备打印数值"
+msgstr "Prints values on the device at runtime"
+
+#: ../../zh/triton_api/index.md:120
+msgid "[device_assert](./Debug_Ops/device_assert.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:120
+msgid "在运行时从设备上断言条件"
+msgstr "Asserts conditions on the device at runtime"
+
+#: ../../zh/triton_api/index.md:152
+msgid "索引与元素操作"
+msgstr "Indexing and Element Operations"
+
+#: ../../zh/triton_api/index.md:141
+msgid "[flip](./Indexing_Ops/flip.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:141
+msgid "沿着维度 dim 翻转张量 x"
+msgstr "Flips tensor x along dimension dim"
+
+#: ../../zh/triton_api/index.md:141
+msgid "[where](./Indexing_Ops/where.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:141
+msgid "根据 condition 返回来自 x 或 y 的元素组成的张量"
+msgstr "Returns a tensor composed of elements from x or y based on condition"
+
+#: ../../zh/triton_api/index.md:141
+msgid "[swizzle2d](./Indexing_Ops/swizzle2d.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:141
+msgid "将行主序排列为 size_i * size_j 的矩阵的索引，转换为每组 size_g 行的列主序矩阵的索引"
+msgstr ""
+"Converts indices of a matrix laid out in row-major order as size_i * size_j "
+"to indices of a column-major matrix with groups of size_g rows"
+
+#: ../../zh/triton_api/index.md:141
+msgid "[gather](./Indexing_Ops/gather.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:141
+msgid "对`src`tensor沿`axis`维度按照`index`执行gather操作"
+msgstr ""
+"Performs gather operation on `src` tensor along `axis` dimension according "
+"to `index`"
+
+#: ../../zh/triton_api/index.md:175
+msgid "内联汇编"
+msgstr "Inline Assembly"
+
+#: ../../zh/triton_api/index.md:163
+msgid "[inline_asm_elementwise](./Inline_Assembly/inline_asm_elementwise.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:163
+msgid "在张量上执行内联汇编"
+msgstr "Executes inline assembly on a tensor"
+
+#: ../../zh/triton_api/index.md:188
+msgid "迭代器"
+msgstr "Iterators"
+
+#: ../../zh/triton_api/index.md:181
+msgid "[range](./Iterators/range.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:181
+msgid "永远向上计数的迭代器"
+msgstr "A forward-counting iterator"
+
+#: ../../zh/triton_api/index.md:181
+msgid "[static_range](./Iterators/static_range.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:203
+msgid "线性代数操作"
+msgstr "Linear Algebra Operations"
+
+#: ../../zh/triton_api/index.md:195
+msgid "[dot](./Linear_Algebra_Ops/dot.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:195
+msgid "返回两个块的矩阵乘积"
+msgstr "Returns the matrix product of two blocks"
+
+#: ../../zh/triton_api/index.md:195
+msgid "[dot_scaled](./Linear_Algebra_Ops/dot_scaled.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:195
+msgid "计算以缩放格式表示两个矩阵块的矩阵乘积"
+msgstr "Computes the matrix product of two matrix blocks in scaled format"
+
+#: ../../zh/triton_api/index.md:218
+msgid "逻辑操作"
+msgstr "Logical Operations"
+
+#: ../../zh/triton_api/index.md:210
+msgid "[and](./Logical_Ops/and.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:210
+msgid "逻辑与操作"
+msgstr "Logical AND Operation"
+
+#: ../../zh/triton_api/index.md:210
+msgid "[or](./Logical_Ops/or.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:210
+msgid "逻辑或操作"
+msgstr "Logical OR Operation"
+
+#: ../../zh/triton_api/index.md:210
+msgid "[not](./Logical_Ops/not.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:210
+msgid "逻辑非操作"
+msgstr "Logical NOT Operation"
+
+#: ../../zh/triton_api/index.md:210
+msgid "[logical_and](./Logical_Ops/logical_and.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:210
+msgid "用于对两个张量进行逐元素逻辑与运算"
+msgstr "Performs element-wise logical AND on two tensors"
+
+#: ../../zh/triton_api/index.md:210
+msgid "[logical_or](./Logical_Ops/logical_or.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:210
+msgid "用于对两个张量进行逐元素逻辑或运算"
+msgstr "Performs element-wise logical OR on two tensors"
+
+#: ../../zh/triton_api/index.md:210
+msgid "将tensor的值按位取反。"
+msgstr "Inverts the bits of the tensor values."
+
+#: ../../zh/triton_api/index.md:210
+msgid "[invert](./Logical_Ops/invert.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:210
+msgid "将tensor每个值按比特位进行翻转。"
+msgstr "Flips each bit of every value in the tensor."
+
+#: ../../zh/triton_api/index.md:210
+msgid "[lshift](./Logical_Ops/lshift.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:210
+msgid "根据给定的位移数将tensor张量进行左移位。"
+msgstr "Left-shifts the tensor by the given shift amount."
+
+#: ../../zh/triton_api/index.md:210
+msgid "[rshift](./Logical_Ops/rshift.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:210
+msgid "根据给定的位移数将tensor张量进行右移位。"
+msgstr "Right-shifts the tensor by the given shift amount."
+
+#: ../../zh/triton_api/index.md:210
+msgid "[xor](./Logical_Ops/xor.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:210
+msgid "计算两个元素的异或值。"
+msgstr "Computes the XOR of two elements."
+
+#: ../../zh/triton_api/index.md:249
+msgid "数学操作"
+msgstr "Math Operations"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[add](./Math_Ops/add.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "四则运算加法 ‘+’"
+msgstr "Arithmetic addition '+'"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[sub](./Math_Ops/sub.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "四则运算减法 ‘-’"
+msgstr "Arithmetic subtraction '-'"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[mul](./Math_Ops/mul.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "四则运算乘法 ‘*’"
+msgstr "Arithmetic multiplication '*'"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[div](./Math_Ops/div.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "四则运算除法 ‘/’"
+msgstr "Arithmetic division '/'"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[floordiv](./Math_Ops/floordiv.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "取整除法，四则运算 ‘//’"
+msgstr "Floor division, arithmetic '//'"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[abs](./Math_Ops/abs.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 的逐元素绝对值"
+msgstr "Computes the element-wise absolute value of x"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[neg](./Math_Ops/neg.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "将tensor的值取负"
+msgstr "Negates the values of the tensor."
+
+#: ../../zh/triton_api/index.md:233
+msgid "[cdiv](./Math_Ops/cdiv.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 除以 div 的向上取整除法"
+msgstr "Computes the ceiling division of x by div"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[ceil](./Math_Ops/ceil.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 的逐元素向上取整值"
+msgstr "Computes the element-wise ceiling of x"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[clamp](./Math_Ops/clamp.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "将输入张量 x 的值限制在 [min, max] 范围内"
+msgstr "Clamps the values of input tensor x to the range [min, max]"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[cos](./Math_Ops/cos.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 的逐元素余弦值"
+msgstr "Computes the element-wise cosine of x"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[div_rn](./Math_Ops/div_rn.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 和 y 的逐元素精确除法（根据 IEEE 标准四舍五入到最近的值）"
+msgstr ""
+"Computes the element-wise exact division of x and y (rounded to the nearest "
+"value according to IEEE standard)"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[erf](./Math_Ops/erf.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 的逐元素误差函数"
+msgstr "Computes the element-wise error function of x"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[exp](./Math_Ops/exp.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 的逐元素指数"
+msgstr "Computes the element-wise exponential of x"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[exp2](./Math_Ops/exp2.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 的逐元素指数（以 2 为底）"
+msgstr "Computes the element-wise exponential (base 2) of x"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[fdiv](./Math_Ops/fdiv.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 和 y 的逐元素快速除法"
+msgstr "Computes the element-wise fast division of x and y"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[floor](./Math_Ops/floor.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 的逐元素向下取整"
+msgstr "Computes the element-wise floor of x"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[fma](./Math_Ops/fma.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x、y 和 z 的逐元素融合乘加运算"
+msgstr "Computes the element-wise fused multiply-add of x, y, and z"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[log](./Math_Ops/log.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 的逐元素自然对数"
+msgstr "Computes the element-wise natural logarithm of x"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[log2](./Math_Ops/log2.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 的逐元素对数（以 2 为底）"
+msgstr "Computes the element-wise logarithm (base 2) of x"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[mod](./Math_Ops/mod.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "取模运算"
+msgstr "Modulo operation"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[maximum](./Math_Ops/maximum.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 和 y 的逐元素最大值"
+msgstr "Computes the element-wise maximum of x and y"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[minimum](./Math_Ops/minimum.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 和 y 的逐元素最小值"
+msgstr "Computes the element-wise minimum of x and y"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[rsqrt](./Math_Ops/rsqrt.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 的逐元素平方根倒数"
+msgstr "Computes the element-wise reciprocal square root of x"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[sigmoid](./Math_Ops/sigmoid.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 的逐元素 sigmoid 函数值"
+msgstr "Computes the element-wise sigmoid of x"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[sin](./Math_Ops/sin.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "Computes the element-wise sine of x. 计算 x 的逐元素正弦值"
+msgstr "Computes the element-wise sine of x."
+
+#: ../../zh/triton_api/index.md:233
+msgid "[softmax](./Math_Ops/softmax.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 的逐元素 softmax 值"
+msgstr "Computes the element-wise softmax of x"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[sqrt](./Math_Ops/sqrt.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 的逐元素快速平方根"
+msgstr "Computes the element-wise fast square root of x"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[sqrt_rn](./Math_Ops/sqrt_rn.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 的逐元素精确平方根（根据 IEEE 标准四舍五入到最近的值）"
+msgstr ""
+"Computes the element-wise precise square root of x (rounded to the nearest "
+"value according to IEEE standard)"
+
+#: ../../zh/triton_api/index.md:233
+msgid "[umulhi](./Math_Ops/umulhi.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:233
+msgid "计算 x 和 y 的 2N 位乘积的逐元素最高有效 N 位"
+msgstr ""
+"Computes the element-wise most significant N bits of the 2N-bit product of x"
+" and y"
+
+#: ../../zh/triton_api/index.md:320
+msgid "内存/指针操作"
+msgstr "Memory/Pointer Operations"
+
+#: ../../zh/triton_api/index.md:284
+msgid "[load](./Memory_Pointer_Ops/tl.load.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:284
+msgid "返回一个张量，其值从由指针定义的内存位置加载"
+msgstr ""
+"Returns a tensor whose values are loaded from the memory location defined by"
+" the pointer"
+
+#: ../../zh/triton_api/index.md:284
+msgid "[store](./Memory_Pointer_Ops/tl.store.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:284
+msgid "将数据张量存储到由指针定义的内存位置"
+msgstr "Stores the data tensor to the memory location defined by the pointer"
+
+#: ../../zh/triton_api/index.md:284
+msgid "[make_block_ptr](./Memory_Pointer_Ops/tl.make_block_ptr.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:284
+msgid "返回指向父张量中某个块的指针"
+msgstr "Returns a pointer to a block in the parent tensor"
+
+#: ../../zh/triton_api/index.md:284
+msgid "[advance](./Memory_Pointer_Ops/tl.advance.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:284
+msgid "推进一个块指针"
+msgstr "Advances a block pointer"
+
+#: ../../zh/triton_api/index.md:284
+msgid ""
+"[load_tensor_descriptor](./Memory_Pointer_Ops/load_tensor_descriptor.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:284
+msgid "从张量描述符加载数据块"
+msgstr "Loads a data block from a tensor descriptor"
+
+#: ../../zh/triton_api/index.md:284
+msgid ""
+"[make_tensor_descriptor](./Memory_Pointer_Ops/make_tensor_descriptor.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:284
+msgid "创建张量描述符对象"
+msgstr "Creates a tensor descriptor object"
+
+#: ../../zh/triton_api/index.md:284
+msgid ""
+"[store_tensor_descriptor](./Memory_Pointer_Ops/store_tensor_descriptor.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:284
+msgid "将数据块存储到张量描述符指定内存位置"
+msgstr ""
+"Stores a data block to the memory location specified by the tensor "
+"descriptor"
+
+#: ../../zh/triton_api/index.md:345
+msgid "编程模型"
+msgstr "Programming Model"
+
+#: ../../zh/triton_api/index.md:332
+msgid "tensor"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:332
+msgid "表示一个值或指针的 N 维数组"
+msgstr "Represents an N-dimensional array of values or pointers"
+
+#: ../../zh/triton_api/index.md:332
+msgid "[program_id](./Programming_Model/program_id.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:332
+msgid "沿指定轴返回当前程序实例的 id"
+msgstr ""
+"Returns the id of the current program instance along the specified axis"
+
+#: ../../zh/triton_api/index.md:332
+msgid "[num_programs](./Programming_Model/num_programs.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:332
+msgid "沿指定轴返回当前程序实例的数量"
+msgstr ""
+"Returns the number of current program instances along the specified axis"
+
+#: ../../zh/triton_api/index.md:361
+msgid "随机数生成"
+msgstr "Random Number Generation"
+
+#: ../../zh/triton_api/index.md:353
+msgid "[randint4x](./Random_Number_Generation/randint4x.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:353
+msgid "给定 1 个seed 标量和 1 个offset 块，返回 4 个 int32 类型的随机块"
+msgstr ""
+"Given 1 seed scalar and 1 offset block, returns 4 random blocks of type "
+"int32"
+
+#: ../../zh/triton_api/index.md:353
+msgid "[randint](./Random_Number_Generation/randint.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:353
+msgid "给定 1 个 seed 标量和 1 个 offset 块，返回 1 个 int32 类型的随机块"
+msgstr ""
+"Given 1 seed scalar and 1 offset block, returns 1 random block of type int32"
+
+#: ../../zh/triton_api/index.md:353
+msgid "[rand](./Random_Number_Generation/rand.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:353
+msgid "给定 1 个 seed 标量和 1 个 offset 块，返回 1 个在 U(0,1) 中的 float32 类型的随机块"
+msgstr ""
+"Given 1 seed scalar and 1 offset block, returns 1 random block of type "
+"float32 in U(0,1)"
+
+#: ../../zh/triton_api/index.md:353
+msgid "[randn](./Random_Number_Generation/randn.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:353
+msgid "给定 1 个 seed 标量和 1 个 offset 块，返回 1 个在 N(0,1) 中的 float32 类型的随机块"
+msgstr ""
+"Given 1 seed scalar and 1 offset block, returns 1 random block of type "
+"float32 in N(0,1)"
+
+#: ../../zh/triton_api/index.md:380
+msgid "归约操作"
+msgstr "Reduction Operations"
+
+#: ../../zh/triton_api/index.md:370
+msgid "[argmax](./Reduction_Ops/argmax.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:370
+msgid "返回沿指定 axis 轴上 input 张量中所有元素的最大索引"
+msgstr ""
+"Returns the index of the maximum value of all elements in the input tensor "
+"along the specified axis"
+
+#: ../../zh/triton_api/index.md:370
+msgid "[argmin](./Reduction_Ops/argmin.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:370
+msgid "返回沿指定 axis 轴上 input 张量中所有元素的最小索引"
+msgstr ""
+"Returns the index of the minimum value of all elements in the input tensor "
+"along the specified axis"
+
+#: ../../zh/triton_api/index.md:370
+msgid "[max](./Reduction_Ops/max.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:370
+msgid "返回沿指定 axis 轴上 input 张量中所有元素的最大值"
+msgstr ""
+"Returns the maximum value of all elements in the input tensor along the "
+"specified axis"
+
+#: ../../zh/triton_api/index.md:370
+msgid "[min](./Reduction_Ops/min.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:370
+msgid "返回沿指定 axis 轴上 input 张量中所有元素的最小值"
+msgstr ""
+"Returns the minimum value of all elements in the input tensor along the "
+"specified axis"
+
+#: ../../zh/triton_api/index.md:370
+msgid "[reduce](./Reduction_Ops/reduce.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:370
+msgid "将 combine_fn 应用于沿指定 axis 的 input 张量中的所有元素"
+msgstr ""
+"Applies combine_fn to all elements of the input tensor along the specified "
+"axis"
+
+#: ../../zh/triton_api/index.md:370
+msgid "[sum](./Reduction_Ops/sum.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:370
+msgid "返回 input 张量中，沿指定 axis 的所有元素的总和"
+msgstr ""
+"Returns the sum of all elements in the input tensor along the specified axis"
+
+#: ../../zh/triton_api/index.md:370
+msgid "[xor_sum](./Reduction_Ops/xor_sum.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:370
+msgid "返回 input 张量中，沿指定 axis 的所有元素的异或和"
+msgstr ""
+"Returns the XOR sum of all elements in the input tensor along the specified "
+"axis"
+
+#: ../../zh/triton_api/index.md:405
+msgid "扫描/排序操作"
+msgstr "Scan/Sort Operations"
+
+#: ../../zh/triton_api/index.md:392
+msgid "[associative_scan](./Scan_Sort_Ops/associative_scan.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:392
+msgid "沿指定 axis 将 combine_fn 应用于 input 张量的每个元素和携带的值，并更新携带的值"
+msgstr ""
+"Applies combine_fn to each element of the input tensor along the specified "
+"axis and the carried value, updating the carried value"
+
+#: ../../zh/triton_api/index.md:392
+msgid "[cumprod](./Scan_Sort_Ops/cumprod.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:392
+msgid "返回沿指定 axis 的 input 张量中所有元素的累积乘积"
+msgstr ""
+"Returns the cumulative product of all elements in the input tensor along the"
+" specified axis"
+
+#: ../../zh/triton_api/index.md:392
+msgid "[cumsum](./Scan_Sort_Ops/cumsum.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:392
+msgid "返回沿指定 axis 的 input 张量中所有元素的累积和"
+msgstr ""
+"Returns the cumulative sum of all elements in the input tensor along the "
+"specified axis"
+
+#: ../../zh/triton_api/index.md:392
+msgid "[histogram](./Scan_Sort_Ops/histogram.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:392
+msgid "基于 input 张量计算 1 个具有 num_bins 个 bin 的直方图，每个 bin 宽度为 1，起始值为0"
+msgstr ""
+"Computes a histogram with num_bins bins based on the input tensor, each bin "
+"has a width of 1, starting from 0"
+
+#: ../../zh/triton_api/index.md:392
+msgid "[sort](./Scan_Sort_Ops/sort.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:392
+msgid "沿着指定维度对张量进行排序"
+msgstr "Sorts the tensor along the specified dimension"
+
+#: ../../zh/triton_api/index.md:426
+msgid "Shape操作"
+msgstr "Shape Operations"
+
+#: ../../zh/triton_api/index.md:415
+msgid "[broadcast](./Shape_Manipulation_Ops/broadcast.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:415
+msgid "尝试将两个给定的块广播到一个共同兼容的 shape"
+msgstr ""
+"Attempts to broadcast the two given blocks to a mutually compatible shape"
+
+#: ../../zh/triton_api/index.md:415
+msgid "[broadcast_to](./Shape_Manipulation_Ops/broadcast_to.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:415
+msgid "尝试将给定的张量广播到新的 shape"
+msgstr "Attempts to broadcast the given tensor to a new shape"
+
+#: ../../zh/triton_api/index.md:415
+msgid "[expand_dims](./Shape_Manipulation_Ops/expand_dims.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:415
+msgid "通过插入新的长度为 1 的维度来扩展张量的形状"
+msgstr ""
+"Expands the shape of the tensor by inserting a new dimension of length 1"
+
+#: ../../zh/triton_api/index.md:415
+msgid "[interleave](./Shape_Manipulation_Ops/interleave.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:415
+msgid "沿着最后一个维度交错两个张量的值"
+msgstr "Interleaves the values of two tensors along the last dimension"
+
+#: ../../zh/triton_api/index.md:415
+msgid "[join](./Shape_Manipulation_Ops/join.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:415
+msgid "在一个新的次要维度中连接给定的张量"
+msgstr "Connects the given tensors in a new minor dimension"
+
+#: ../../zh/triton_api/index.md:415
+msgid "[permute](./Shape_Manipulation_Ops/permute.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:415
+msgid "排列张量的维度"
+msgstr "Permutes the dimensions of the tensor."
+
+#: ../../zh/triton_api/index.md:415
+msgid "[ravel](./Shape_Manipulation_Ops/ravel.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:415
+msgid "返回 x 的连续扁平视图"
+msgstr "Returns a contiguous flattened view of x"
+
+#: ../../zh/triton_api/index.md:415
+msgid "[reshape](./Shape_Manipulation_Ops/reshape.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:415
+msgid "返回一个具有与输入相同元素数但具有提供的形状的张量"
+msgstr ""
+"Returns a tensor with the same number of elements as the input but with the "
+"provided shape"
+
+#: ../../zh/triton_api/index.md:415
+msgid "[split](./Shape_Manipulation_Ops/split.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:415
+msgid "将张量沿其最后一个维度分成两部分，该维度大小必须为 2"
+msgstr ""
+"Splits the tensor into two parts along its last dimension, which must have "
+"size 2"
+
+#: ../../zh/triton_api/index.md:415
+msgid "[trans](./Shape_Manipulation_Ops/trans.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:415
+msgid "将张量转置"
+msgstr "Transposes the tensor"
+
+#: ../../zh/triton_api/index.md:415
+msgid "[view](./Shape_Manipulation_Ops/view.md)"
+msgstr ""
+
+#: ../../zh/triton_api/index.md:415
+msgid "返回具有与输入相同元素但形状不同的张量"
+msgstr ""
+"Returns a tensor with the same elements as the input but a different shape"

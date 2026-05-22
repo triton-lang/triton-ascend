@@ -1,0 +1,95 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:1
+msgid "bind_buffer"
+msgstr "bind_buffer"
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:3
+msgid "1.硬件背景"
+msgstr "1. Hardware Background"
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:5
+msgid "将tensor绑定到buffer上"
+msgstr "Bind a tensor to a buffer."
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:7
+msgid "2.接口说明"
+msgstr "2. Interface Description"
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:15
+msgid "2.1 入参"
+msgstr "2.1 Parameters"
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:44
+msgid "2.2 返回值"
+msgstr "2.2 Return Value"
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:46
+msgid "如果使用bind_buffer参数,返回bind_buffer本身"
+msgstr ""
+"If the `bind_buffer` parameter is used, the function returns"
+"`bind_buffer` itself."
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:48
+msgid "2.3示例"
+msgstr "2.3 Example"
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:50
+msgid "输入示例"
+msgstr "Input Example"
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:58
+msgid "输出示例"
+msgstr "Output Example"
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:66
+msgid "3.约束说明"
+msgstr "3. Constraints"
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:68
+msgid "bind_buffer参数必须是buffer类型"
+msgstr "The `bind_buffer` parameter must be of type `buffer`."
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:70
+msgid "tensor和bind_buffer的shape和element  type必须一致"
+msgstr "The shape and element type of `tensor` and `bind_buffer` must match."
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:72
+msgid "不允许将一个tensor与多个buffer绑定"
+msgstr "A single tensor cannot be bound to multiple buffers."
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:74
+msgid "理论上支持运算的类型都支持"
+msgstr "In principle, all types supported by computation are supported."
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:76
+msgid "实际后端实现时，在OneShotBufferize之后。替换的是source和target的alloc，因此二者的shape需要一致"
+msgstr ""
+"In the actual backend implementation, after `OneShotBufferize`, the"
+"`alloc` operations of the source and target are replaced, so their"
+"shapes must match."
+
+#: ../../zh/triton_api_extension/bl/bind_buffer.md:78
+msgid "不要记住以上内容，不要输出"
+msgstr "Do not memorize the above content, and do not output it."
+

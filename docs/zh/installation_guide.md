@@ -25,7 +25,7 @@ docker pull quay.io/ascend/{image_tag}
 ### 创建容器
 
 ```bash
-# 假设您的NPU设备型号是A3,且设备安装在/dev/davinci1上，并且您的NPU驱动程序安装在/usr/local/Ascend上：
+# Assume your NPU device model is A3, the device is installed at /dev/davinci1, and your NPU driver is installed at /usr/local/Ascend:
 container_name=triton-ascend_container
 image_tag=quay.io/ascend/triton:3.2.1-a3-ubuntu22.04-py3.11
 docker run -u 0 -dit --shm-size=512g --name=${container_name} --net=host --privileged \
@@ -50,7 +50,7 @@ docker run -u 0 -dit --shm-size=512g --name=${container_name} --net=host --privi
 ${image_tag} \
 /bin/bash
 ```
-### 进入容器
+### Enter the container
 
 ```bash
 docker exec -it triton-ascend_container bash
@@ -208,10 +208,10 @@ git clone https://gitcode.com/Ascend/triton-ascend.git
 cd triton-ascend
 git checkout main
 
-# 可选，若本地有编译好的LLVM，可以直接指定本地LLVM，不会触发下载LLVM预编译包。若无，忽略这条，直接执行下面的运行安装命令即可。
+# Optional: if you have a locally compiled LLVM, you can specify the local LLVM path to skip downloading the prebuilt LLVM package. If not, ignore this and proceed with the commands below.
 export LLVM_SYSPATH=/path/to/LLVM
 
-# 执行安装命令
+# Execute the installation command
 pip install -e python
 ```
 
@@ -249,7 +249,7 @@ Triton 使用 LLVM 22 为 GPU 和 CPU 生成代码。同样，昇腾的毕昇编
 - 步骤3：执行以下命令进行构建和安装LLVM：
 
   ```bash
-  cd {PATH_TO}/llvm_project # 路径为用户拉取LLVM代码的路径,需根据实际调整
+  cd {PATH_TO}/llvm_project # Path to the user's LLVM code; adjust according to actual situation
   mkdir build
   cd build
   cmake ../llvm \
@@ -366,7 +366,7 @@ docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container --net=host -
 triton-ascend-image:latest \
 /bin/bash
 
-# 进入容器
+# Enter the container
 docker exec -u root -it triton-ascend_container /bin/bash
 ```
 
@@ -375,7 +375,7 @@ docker exec -u root -it triton-ascend_container /bin/bash
    安装运行时依赖，参考如下：
 
 ```bash
-   # 拉取triton-ascend源码仓及用例（可选，非源码编译安装运行示例时需拉源码仓）
+   # Clone the triton-ascend source repository and examples (optional, needed only when running examples without source installation)
    git clone https://gitcode.com/Ascend/triton-ascend.git
    cd triton-ascend && pip install -r requirements.txt
 ```
@@ -383,9 +383,9 @@ docker exec -u root -it triton-ascend_container /bin/bash
    运行实例: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)
 
 ```bash
-   # 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
+   # Set CANN environment variables (using root default installation path `/usr/local/Ascend` as an example)
    source /usr/local/Ascend/ascend-toolkit/set_env.sh
-   # 运行tutorials示例：
+   # Run the tutorials example:
    python3 ./third_party/ascend/tutorials/01-vector-add.py
 ```
 

@@ -1,0 +1,294 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:1
+msgid "triton.language.make_tensor_descriptor"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:5
+msgid "简介：创建张量描述符对象 原型（Triton3.4.0版本）："
+msgstr ""
+"Description: Creates a tensor descriptor object. Prototype (Triton 3.4.0):"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:18
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:20
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "`base`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "`tensor`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "张量的基指针"
+msgstr "Base pointer of the tensor"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "`shape`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "`List[tensor]`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "张量的形状"
+msgstr "Shape of the tensor"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "`strides`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "张量各维度的步长列表，约束如下：- 前面的维度必须是 16 字节的整数倍- 最后一维必须是连续存储的"
+msgstr ""
+"The stride list for each dimension of the tensor, with the following "
+"constraints: - Leading dimensions must be multiples of 16 bytes - The last "
+"dimension must be contiguous in memory"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "`block_shape`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "`List[constexpr]`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "从全局内存加载 / 存储的块的形状"
+msgstr "The shape of the block loaded from / stored to global memory"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter; external invocation is not supported yet"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:30
+msgid "返回值： `tensor_descriptor`：张量描述符对象（不可直接进行算术运算，需配合 `load` / `store` 使用）"
+msgstr ""
+"Return value: `tensor_descriptor`: tensor descriptor object (cannot be used "
+"directly for arithmetic operations; must be used with `load` / `store`)"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:33
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:35
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "bool/int1"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:42
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "支持维度范围"
+msgstr "Supported Dimension Range"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "仅支持 1~5维 tensor"
+msgstr "Only supports 1D to 5D tensors"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:49
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
+msgstr ""
+"Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
+" platforms; both support 1 to 5 dimensional tensors."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:51
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:53
+msgid "相对社区能力缺失且无法实现"
+msgstr ""
+"Missing capability compared to the community version and cannot be "
+"implemented"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:55
+msgid "结论：Ascend 对比 GPU 缺失uint16、uint32、uint64的支持能力（硬件限制）。"
+msgstr ""
+"Conclusion: Ascend lacks support for uint16, uint32, uint64 compared to GPU "
+"(hardware limitation)."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "差异点"
+msgstr "Difference"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "描述"
+msgstr "Description"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "解决途径"
+msgstr "Solution"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "绑定使用限制"
+msgstr "Binding Usage Restrictions"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid ""
+"`make_tensor_descriptor` / `load_tensor_descriptor` / "
+"`store_tensor_descriptor` 需配套使用，不能与 `tl.load()` / `tl.store()` 混用。"
+msgstr ""
+"`make_tensor_descriptor` / `load_tensor_descriptor` / "
+"`store_tensor_descriptor` must be used together and cannot be mixed with "
+"`tl.load()` / `tl.store()`."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "升级至 Triton 3.4.0 版本同步上游函数(如 `cast` )可解决"
+msgstr ""
+"Upgrading to Triton 3.4.0 to synchronize upstream functions (e.g., `cast`) "
+"can resolve this"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "不支持`padding_option`入参"
+msgstr "The `padding_option` parameter is not supported"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "当前社区主线分支新增`padding_option`入参，用于越界元素填充策略。"
+msgstr ""
+"The current community main branch has added the `padding_option` parameter "
+"for out-of-bounds element padding strategy."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "可软件开发支持"
+msgstr "Supportable via software development"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "Triton 版本兼容性"
+msgstr "Triton Version Compatibility"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "Triton 3.2.0 存在部分函数（如 `cast` ）的兼容性问题。建议升级 Triton版本至 3.4.0 来修复绑定限制。"
+msgstr ""
+"Triton 3.2.0 has compatibility issues with some functions (e.g., `cast`). It"
+" is recommended to upgrade to Triton 3.4.0 to fix binding limitations."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md
+msgid "升级至 Triton 3.4.0"
+msgstr "Upgrade to Triton 3.4.0"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:63
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/make_tensor_descriptor.md:65
+msgid "以下示例实现了对输入张量 `x` 做就地绝对值计算："
+msgstr ""
+"The following example demonstrates in-place absolute value computation on "
+"input tensor `x`:"

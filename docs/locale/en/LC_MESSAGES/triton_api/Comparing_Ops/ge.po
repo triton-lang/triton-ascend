@@ -1,0 +1,221 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:1
+msgid "triton.language.semantic.greater_equal"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:5
+msgid "简介：用于比较两个张量的元素, 与`>=`等价。 函数原型："
+msgstr ""
+"Description: Compares elements of two tensors, equivalent to `>=`. Function "
+"prototype:"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:16
+msgid "作为`tensor`的内置运算符使用, 如`x>=y`。"
+msgstr "Used as a built-in operator of `tensor`, e.g., `x>=y`."
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:18
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:20
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "`input`"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "`tensor`"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "张量数据, 左操作数, 代表要进行比较的主数据"
+msgstr "Tensor data, left operand, represents the primary data for comparison"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "`other`"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "张量数据, 右操作数, 与`input`逐元素进行比较"
+msgstr "Tensor data, right operand, compared element-wise with `input`"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "`_builder`"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter; external invocation is not supported yet"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:28
+msgid "返回值： `tl.tensor`：同`input`的shape的张量"
+msgstr "Return value: `tl.tensor`: tensor with the same shape as `input`"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:31
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:33
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:40
+msgid "结论：Triton-Ascend 对比 GPU 缺失 uint8/uint16/uint32/uint64、fp64 的支持能力。"
+msgstr ""
+"Conclusion: Triton-Ascend lacks support for uint8/uint16/uint32/uint64 and "
+"fp64 compared to GPU."
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:42
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "支持维度范围"
+msgstr "Supported Dimension Range"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md
+msgid "无限制"
+msgstr "No restrictions"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:49
+msgid "结论：在 Shape 方面, GPU 与 Ascend 平台无差异。"
+msgstr ""
+"Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
+" platforms."
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:51
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:53
+msgid "相对社区能力缺失且无法实现"
+msgstr ""
+"Missing capability compared to the community version and cannot be "
+"implemented"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:55
+msgid "Triton-Ascend 对比 GPU 缺失 fp64 的支持能力。uint8/uint16/uint32/uint64 支持开发中。"
+msgstr ""
+"Triton-Ascend lacks fp64 support compared to GPU. Support for "
+"uint8/uint16/uint32/uint64 is under development."
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:57
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Comparing_Ops/ge.md:59
+msgid "以下示例实现了对三维张量`x0`、`x1`做大于等于运算："
+msgstr ""
+"The following example demonstrates greater-than-or-equal operation on 3D "
+"tensors `x0` and `x1`:"

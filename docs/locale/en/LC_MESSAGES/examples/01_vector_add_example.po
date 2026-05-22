@@ -1,0 +1,73 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/examples/01_vector_add_example.md:1
+msgid "向量相加 （Vector Addition）"
+msgstr "Vector Addition"
+
+#: ../../zh/examples/01_vector_add_example.md:3
+msgid "在本节中，我们将使用 Triton 编写一个简单的向量相加的程序。 在此过程中，你会学习到："
+msgstr ""
+"In this section, we will use Triton to write a simple vector addition "
+"program. In this process, you will learn:"
+
+#: ../../zh/examples/01_vector_add_example.md:6
+msgid "Triton 的基本编程模式。"
+msgstr "The basic programming model of Triton."
+
+#: ../../zh/examples/01_vector_add_example.md:7
+msgid "用于定义Triton内核的`triton.jit`装饰器（decorator）。"
+msgstr "The `triton.jit` decorator used to define Triton kernels."
+
+#: ../../zh/examples/01_vector_add_example.md:9
+msgid "计算内核:"
+msgstr "Compute kernel:"
+
+#: ../../zh/examples/01_vector_add_example.md:44
+msgid "创建一个辅助函数用于："
+msgstr "Create a helper function to:"
+
+#: ../../zh/examples/01_vector_add_example.md:46
+msgid "生成 z 张量；"
+msgstr "Generate the z tensor;"
+
+#: ../../zh/examples/01_vector_add_example.md:47
+msgid "用适当的 grid/block sizes 将上述内核加入队列。"
+msgstr "Enqueue the above kernel with the appropriate grid/block sizes."
+
+#: ../../zh/examples/01_vector_add_example.md:67
+msgid "使用上述函数计算两个 `torch.tensor` 对象的 element-wise sum，并测试其正确性："
+msgstr ""
+"Use the above function to compute the element-wise sum of two"
+"`torch.tensor` objects and test its correctness:"
+
+#: ../../zh/examples/01_vector_add_example.md:82
+msgid "Out:"
+msgstr "Output:"
+
+#: ../../zh/examples/01_vector_add_example.md:90
+msgid ""
+"\"The maximum difference between torch and triton is 0.0\" "
+"表示Triton和PyTorch的输出结果一致。"
+msgstr ""
+"\"The maximum difference between torch and triton is 0.0\" indicates"
+"that the output results of Triton and PyTorch are the same."

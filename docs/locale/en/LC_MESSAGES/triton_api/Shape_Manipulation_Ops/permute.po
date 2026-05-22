@@ -1,0 +1,252 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:1
+msgid "triton.language.permute"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:3
+msgid "1 功能作用说明"
+msgstr "1. Function Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:5
+msgid "根据dims参数重新排列张量的维度，不改变张量的数据，仅改变维度的顺序。支持任意维度的重新排列。"
+msgstr ""
+"Rearranges the dimensions of the tensor according to the dims parameter, "
+"without changing the data, only changing the order of dimensions. Supports "
+"arbitrary dimension rearrangement."
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:7
+msgid "**语法：**"
+msgstr "**Syntax:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:9
+msgid "`triton.language.permute(input, dims)` - 函数调用形式"
+msgstr "`triton.language.permute(input, dims)` - function call form"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:10
+msgid "`input.permute(dims)` - 成员函数形式"
+msgstr "`input.permute(dims)` - member function form"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:12
+msgid "**功能：**"
+msgstr "**Function:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:14
+msgid "根据dims参数重新排列张量的维度"
+msgstr ""
+"Rearranges the dimensions of the tensor according to the dims parameter"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:15
+msgid "不改变张量的数据，仅改变维度的顺序"
+msgstr ""
+"Does not change the tensor's data, only changes the order of dimensions"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:16
+msgid "支持任意维度的重新排列"
+msgstr "Supports arbitrary dimension rearrangement"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:18
+msgid "2 参数规格"
+msgstr "2. Parameter Specifications"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:20
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "必需"
+msgstr "Required"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "input"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "tensor"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "是"
+msgstr "Yes"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "输入张量"
+msgstr "Input tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "dims"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "List[int]"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "新的维度顺序"
+msgstr "The new order of dimensions"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:27
+msgid "**返回值：**"
+msgstr "**Return Value:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:29
+msgid "**类型：** tensor"
+msgstr "**Type:** tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:30
+msgid "**形状：** 按照dims参数重新排列的维度"
+msgstr "**Shape:** Dimensions rearranged according to the `dims` parameter"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:31
+msgid "**数据类型：** 与输入张量相同"
+msgstr "**Data Type:** Same as the input tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:32
+msgid "**内存布局：** 通过改变步长信息实现转置，无数据拷贝"
+msgstr ""
+"**Memory Layout:** Transpose implemented by changing stride information, no "
+"data copy"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:34
+msgid "**约束条件：**"
+msgstr "**Constraints:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:36
+msgid "dims必须包含输入张量的所有维度索引"
+msgstr "dims must contain all dimension indices of the input tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:38
+msgid "2.2 DataType支持表"
+msgstr "2.2 DataType Support Table"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "支持情况"
+msgstr "Support Status"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "float16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "float32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "bfloat16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "float8e4"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "float8e5"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "float64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md
+msgid "GPU支持"
+msgstr "GPU Support"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:45
+msgid "2.3 Shape支持表"
+msgstr "2.3 Shape Support Table"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:47
+msgid "支持任意维度数和任意形状大小。"
+msgstr "Supports any number of dimensions and any shape size."
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:49
+msgid "2.4 特殊限制说明"
+msgstr "2.4 Special Limitations"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:51
+msgid "不支持维度高于8的转置"
+msgstr "Transpose for dimensions higher than 8 is not supported"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/permute.md:53
+msgid "2.5 使用方法"
+msgstr "2.5 Usage"

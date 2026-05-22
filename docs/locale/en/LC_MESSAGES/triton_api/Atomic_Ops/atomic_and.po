@@ -1,0 +1,292 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:1
+msgid "triton.language.atomic_and"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:5
+msgid "简介：原子性逻辑与操作，在指定的内存位置执行逻辑与 原型："
+msgstr ""
+"Description: Atomic logical AND operation, performs logical AND at the "
+"specified memory location. Prototype:"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:19
+msgid "可以作为tensor的成员函数调用，如`x.atomic_and(...)`，与`atomic_and(x, ...)`等效。"
+msgstr ""
+"Can be called as a tensor member function, e.g., `x.atomic_and(...)`, "
+"equivalent to `atomic_and(x, ...)`."
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:21
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:23
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "`pointer`"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "`triton.PointerDType`"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "要操作的内存位置，执行 *pointer & val 计算后的结果写回到该内存"
+msgstr ""
+"The memory location to operate on; the result of *pointer & val is written "
+"back to this memory"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "`val`"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "`pointer.dtype.element_ty`"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "执行原子与操作的值（右操作数）"
+msgstr "The value for the atomic AND operation (right operand)"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "`mask`"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "`int1`或`tensor<int1>`，可选"
+msgstr "`int1` or `tensor<int1>`, optional"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "指定数据范围，防止访问越界"
+msgstr "Specifies the data range to prevent out-of-bounds access"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "`sem`"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "`str`，可选"
+msgstr "`str`, optional"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid ""
+"指定操作的内存语义<br>社区官方配置可接受的值为“acquire”、“release”、“acq_rel”（默认，代表“ACQUIRE_RELEASE”）和“relaxed”<br>我们只支持“acq_rel”：<br>-"
+" "
+"acquire：获取锁后，能够看到之前的释放操作（相当于一个“读取”操作，并且这个读取操作会阻塞，直到能够读取到“最新”的数据，也就是其他线程释放后的数据）<br>-"
+" release：在释放锁之前的所有操作，对后续获取锁的线程可见（相当于一个“写入”操作，并且这个写入操作会“同步”所有之前的写操作）"
+msgstr ""
+"Specifies the memory semantics of the operation<br>Acceptable values in the "
+"upstream community configuration are “acquire”, “release”, “acq_rel” "
+"(default, representing “ACQUIRE_RELEASE”) and “relaxed”<br>We only support "
+"“acq_rel”:<br>- acquire: After acquiring the lock, sees all prior release "
+"operations (equivalent to a “read” operation that blocks until the “latest” "
+"data released by other threads is visible)<br>- release: All operations "
+"before releasing the lock are visible to threads that subsequently acquire "
+"the lock (equivalent to a “write” operation that “synchronizes” all prior "
+"writes)"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "`scope`"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid ""
+"观察原子操作同步效果的线程范围<br>可接受的值为“gpu”（默认）、“cta”（协作线程数组、线程块）或“sys”（代表“SYSTEM”） "
+"<br>我们只支持“gpu”"
+msgstr ""
+"The thread scope observing the synchronization effect of the atomic "
+"operation<br>Acceptable values are “gpu” (default), “cta” (cooperative "
+"thread array, thread block), or “sys” (representing “SYSTEM”) <br>We only "
+"support “gpu”"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter; external invocation is not supported yet"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:34
+msgid "返回值： `pointer`：tensor，执行操作之前的旧值"
+msgstr "Return value: `pointer`: tensor, the old value before the operation"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:37
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:39
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:46
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:48
+msgid "无特殊要求"
+msgstr "No special requirements"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:50
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:52
+msgid "相对社区能力缺失且无法实现"
+msgstr ""
+"Missing capability compared to the community version and cannot be "
+"implemented"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "差异点"
+msgstr "Difference"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "描述"
+msgstr "Description"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "解决途径"
+msgstr "Solution"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "sem"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid ""
+"社区官方配置可接受的值为“acquire”、“release”、“acq_rel”（默认，代表“ACQUIRE_RELEASE”）和“relaxed”<br>我们只支持“acq_rel”"
+msgstr ""
+"Acceptable values in the upstream community configuration are “acquire”, "
+"“release”, “acq_rel” (default, representing “ACQUIRE_RELEASE”) and "
+"“relaxed”<br>We only support “acq_rel”"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "待开发"
+msgstr "Pending Development"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "scope"
+msgstr ""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md
+msgid "可接受的值为“gpu”、“cta”、或“sys”、 <br>我们只支持“gpu”"
+msgstr "Acceptable values are \"gpu\", \"cta\", or \"sys\" <br>We only support \"gpu\""
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:59
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Atomic_Ops/atomic_and.md:61
+msgid "以下示例实现了原子与计算："
+msgstr "The following example demonstrates atomic AND:"

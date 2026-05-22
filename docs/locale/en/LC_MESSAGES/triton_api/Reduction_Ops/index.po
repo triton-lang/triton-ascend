@@ -1,0 +1,102 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Reduction_Ops/index.md:1
+msgid "归约操作"
+msgstr "Reduction Operations"
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "api"
+msgstr "API"
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "简要说明"
+msgstr "Brief Description"
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "[argmax](./argmax.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "返回沿指定 axis 轴上 input 张量中所有元素的最大索引"
+msgstr ""
+"Returns the index of the maximum value of all elements in the input tensor "
+"along the specified axis"
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "[argmin](./argmin.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "返回沿指定 axis 轴上 input 张量中所有元素的最小索引"
+msgstr ""
+"Returns the index of the minimum value of all elements in the input tensor "
+"along the specified axis"
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "[max](./max.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "返回沿指定 axis 轴上 input 张量中所有元素的最大值"
+msgstr ""
+"Returns the maximum value of all elements in the input tensor along the "
+"specified axis"
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "[min](./min.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "返回沿指定 axis 轴上 input 张量中所有元素的最小值"
+msgstr ""
+"Returns the minimum value of all elements in the input tensor along the "
+"specified axis"
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "[reduce](./reduce.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "将 combine_fn 应用于沿指定 axis 的 input 张量中的所有元素"
+msgstr ""
+"Applies combine_fn to all elements of the input tensor along the specified "
+"axis"
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "[sum](./sum.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "返回 input 张量中，沿指定 axis 的所有元素的总和"
+msgstr ""
+"Returns the sum of all elements in the input tensor along the specified axis"
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "[xor_sum](./xor_sum.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/index.md
+msgid "返回 input 张量中，沿指定 axis 的所有元素的异或和"
+msgstr ""
+"Returns the XOR sum of all elements in the input tensor along the specified "
+"axis"

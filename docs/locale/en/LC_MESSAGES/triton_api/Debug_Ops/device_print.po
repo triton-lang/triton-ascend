@@ -1,0 +1,265 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:1
+msgid "triton.language.device_print"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:3
+msgid "1. 函数概述"
+msgstr "1. Function Overview"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:5
+msgid ""
+"`device_print` 用于在NPU运行时从设备端打印信息，与`static_print`不同，这是在内核执行时实时输出信息。 "
+"**使用`device_print`需要将环境变量`TRITON_DEVICE_PRINT`的值设置为`True`。**"
+msgstr ""
+"`device_print` is used to print information from the device during NPU "
+"runtime. Unlike `static_print`, this outputs information in real-time during"
+" kernel execution. **Using `device_print` requires setting the environment "
+"variable `TRITON_DEVICE_PRINT` to `True`.**"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:11
+msgid "2. 规格"
+msgstr "2. Specifications"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:13
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "参数"
+msgstr "Parameters"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "默认值"
+msgstr "Default Value"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "含义说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "`prefix`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "`str`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "必需"
+msgstr "Required"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "打印值之前的前缀字符串"
+msgstr "The prefix string before the printed value"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "`args`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "`tensor`/`scalar`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "要打印的值，可以是任意张量或标量"
+msgstr "The value to print, can be any tensor or scalar"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "`hex`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "`bool`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "`False`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "是否以十六进制格式打印所有值"
+msgstr "Whether to print all values in hexadecimal format"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter; external invocation is not supported yet"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:22
+msgid "2.2.1 Data Type支持"
+msgstr "2.2.1 Data Type Support"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:24
+msgid "A3："
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:31
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "支持维度范围"
+msgstr "Supported Dimension Range"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "仅支持 1~5维 tensor"
+msgstr "Only supports 1D to 5D tensors"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md
+msgid "Ascend"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:38
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:40
+msgid "相对社区能力缺失且无法实现"
+msgstr ""
+"Missing capability compared to the community version and cannot be "
+"implemented"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:42
+msgid "Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。"
+msgstr ""
+"Ascend lacks support for uint8, uint16, uint32, uint64, fp64 compared to GPU"
+" (hardware limitation)."
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:44
+msgid "**DevicePrint 功能限制**"
+msgstr "**DevicePrint Feature Limitations**"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:46
+msgid "**现象描述：** device_print 只能打印参与运算的结果值，无法打印纯粹用于访存的 offset 变量。"
+msgstr ""
+"**Phenomenon Description:** device_print can only print result values "
+"involved in computation, but cannot print offset variables used purely for "
+"memory access."
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:49
+msgid "**根本原因：** 在访存分析优化阶段，编译器会将仅用于地址计算的 offset 优化掉，这些中间变量不会保留到最终的执行代码中。"
+msgstr ""
+"**Root Cause:** During the memory access analysis optimization phase, the "
+"compiler eliminates offsets used only for address calculation; these "
+"intermediate variables are not retained in the final execution code."
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:52
+msgid "**示例场景：**"
+msgstr "**Example Scenarios:**"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:71
+msgid "另外在特定情况下，`device_print`会展开一些辅助dma代码，导致底层报错，相关功能还在优化中"
+msgstr ""
+"Additionally, in certain cases, `device_print` may expand some auxiliary DMA"
+" code, causing underlying errors. This feature is still being optimized."
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:73
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Debug_Ops/device_print.md:75
+msgid "**注意**：`prefix`字符串前缀在使用`device_print`时是必须加上的，否则会导致编译错误。"
+msgstr ""
+"**Note:** The `prefix` string prefix must be added when using "
+"`device_print`, otherwise a compilation error will occur."

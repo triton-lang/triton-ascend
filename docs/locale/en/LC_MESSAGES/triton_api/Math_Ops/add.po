@@ -1,0 +1,211 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Math_Ops/add.md:1
+msgid "triton.language.add"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Math_Ops/add.md:5
+msgid "简介：加法  ，与四则运算 ‘+’等价 原型："
+msgstr ""
+"Description: Addition, equivalent to the arithmetic operator '+'. Prototype:"
+
+#: ../../zh/triton_api/Math_Ops/add.md:12
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Math_Ops/add.md:14
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "`x`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "`tensor or Number`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "第一个入参"
+msgstr "First input parameter"
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "`y`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "第二个入参"
+msgstr "Second input parameter"
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "`sanitize_overflow`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "`bool`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "是否对整数加法做溢出检查，默认值为True,无需显示指定"
+msgstr ""
+"Whether to perform overflow checking for integer addition, default is True, "
+"no need to specify explicitly"
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "`_builder`"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter; external invocation is not supported yet"
+
+#: ../../zh/triton_api/Math_Ops/add.md:23
+msgid "返回值： `tl.tensor`：加法结果"
+msgstr "Return value: `tl.tensor`: addition result"
+
+#: ../../zh/triton_api/Math_Ops/add.md:26
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Math_Ops/add.md:28
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "bool/int1"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md:35
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "支持维度范围"
+msgstr "Supported Dimension Range"
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "无限制"
+msgstr "No restrictions"
+
+#: ../../zh/triton_api/Math_Ops/add.md
+msgid "Ascend"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/add.md:42
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
+msgstr ""
+"Conclusion: In terms of Shape, there is no difference between GPU and Ascend"
+" platforms."
+
+#: ../../zh/triton_api/Math_Ops/add.md:44
+msgid "2.3 使用方法"
+msgstr "2.3 Usage"
+
+#: ../../zh/triton_api/Math_Ops/add.md:46
+msgid "以下示例实现了对输入张量 `x_ptr, y_ptr` 做加法计算："
+msgstr ""
+"The following example demonstrates addition on input tensors `x_ptr, y_ptr`:"
+
+#: ../../zh/triton_api/Math_Ops/add.md:67
+msgid "3. 特殊说明"
+msgstr "3. Special Notes"
+
+#: ../../zh/triton_api/Math_Ops/add.md:69
+msgid "Ascend A3 对比 GPU 不支持fp64"
+msgstr "Ascend A3 does not support fp64 compared to GPU"

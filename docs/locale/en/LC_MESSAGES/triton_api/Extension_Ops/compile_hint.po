@@ -1,0 +1,222 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md:1
+msgid "triton.language.compile_hint"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md:3
+msgid "1.函数概述"
+msgstr "1. Function Overview"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md:5
+msgid ""
+"`compile_hint` 是一个编译器提示（hint）机制，允许用户为张量附加元数据信息，这些信息会被传递到编译器后端，用于指导优化和代码生成。"
+msgstr ""
+"`compile_hint` is a compiler hint mechanism that allows users to attach "
+"metadata to tensors, which is then passed to the compiler backend to guide "
+"optimization and code generation."
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md:11
+msgid "2.规格"
+msgstr "2. Specifications"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md:13
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "参数"
+msgstr "Parameters"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "默认值"
+msgstr "Default Value"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "含义说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "`ptr`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "`tensor`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "必需"
+msgstr "Required"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "需要附加提示的张量对象"
+msgstr "The tensor object to which the hint is attached"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "`hint_name`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "`str` `constexpr`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "提示的名称标识符（必须为字符串）"
+msgstr "The name identifier of the hint (must be a string)"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "`hint_val`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "`None` `bool` `int` `constexpr` `list`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "`None`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "提示的值，支持多种类型"
+msgstr "The value of the hint, supports multiple types"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "`_builder`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter; external invocation is not supported yet"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md:22
+msgid "2.2 类型支持"
+msgstr "2.2 Type Support"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md:24
+msgid "A3："
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md:30
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md:32
+msgid "**hint_name 必须为字符串类型**：不能传入其他类型作为提示名称"
+msgstr ""
+"**hint_name must be a string type:** Other types cannot be passed as hint "
+"names"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md:33
+msgid "**list 参数仅支持整数数组**：元素须为整数（`int` 或 `constexpr` 整数），不支持浮点数或混合类型的列表"
+msgstr ""
+"**list parameter only supports integer arrays:** Elements must be integers "
+"(`int` or `constexpr` integers); floating-point or mixed-type lists are not "
+"supported"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md:34
+msgid "**非侵入式设计**：`compile_hint` 不改变计算语义，仅添加元数据"
+msgstr ""
+"**Non-intrusive Design:** `compile_hint` does not change computation "
+"semantics; it only adds metadata"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md:35
+msgid "**同一张量可多次标注**：同一个张量可以附加多个不同名称的提示"
+msgstr ""
+"**Same tensor can be annotated multiple times:** The same tensor can have "
+"multiple hints with different names attached"
+
+#: ../../zh/triton_api/Extension_Ops/compile_hint.md:37
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"

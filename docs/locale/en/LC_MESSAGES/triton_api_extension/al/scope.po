@@ -1,0 +1,109 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api_extension/al/scope.md:1
+msgid "al.scope 接口文档"
+msgstr "al.scope API Documentation"
+
+#: ../../zh/triton_api_extension/al/scope.md:3
+msgid "1. 硬件背景"
+msgstr "1. Hardware Background"
+
+#: ../../zh/triton_api_extension/al/scope.md:5
+msgid ""
+"昇腾处理器包含多种类型的计算单元（例如，用于矩阵运算的 Cube Unit 和用于向量/标量运算的 Vector Unit）。al.scope "
+"允许内核开发者显式地告诉 Triton 编译器，特定代码区域应该目标哪种硬件单元，从而实现更精细的性能调优和资源利用。"
+msgstr ""
+"Ascend processors contain multiple types of compute units, such as the"
+"Cube Unit for matrix operations and the Vector Unit for vector/scalar"
+"operations. `al.scope` allows kernel developers to explicitly tell the"
+"Triton compiler which hardware unit a specific code region should"
+"target, enabling finer-grained performance tuning and resource"
+"utilization."
+
+#: ../../zh/triton_api_extension/al/scope.md:7
+msgid "2. 接口说明"
+msgstr "2. Interface Description"
+
+#: ../../zh/triton_api_extension/al/scope.md:15
+msgid ""
+"al.scope 是 triton.language.extra.ascend 模块中的一个上下文管理器（Context Manager），专为 "
+"Triton 内核中的代码块指定 昇腾硬件的执行模式。"
+msgstr ""
+"`al.scope` is a context manager in the `triton.language.extra.ascend`"
+"module, designed to specify the Ascend hardware execution mode for a"
+"code block inside a Triton kernel."
+
+#: ../../zh/triton_api_extension/al/scope.md:17
+msgid "参数"
+msgstr "Parameters"
+
+#: ../../zh/triton_api_extension/al/scope.md:36
+msgid "常用值说明"
+msgstr "Common Values"
+
+#: ../../zh/triton_api_extension/al/scope.md:66
+msgid "3. 约束说明"
+msgstr "3. Constraints"
+
+#: ../../zh/triton_api_extension/al/scope.md:68
+msgid ""
+"each kernel have 1 scope for cube and vector, inside them they run "
+"parallely and there are other syncing operations that declares the sync "
+"between both of the scope"
+msgstr ""
+"each kernel have 1 scope for cube and vector, inside them they run"
+"parallely and there are other syncing operations that declares the sync"
+"between both of the scope"
+
+#: ../../zh/triton_api_extension/al/scope.md:70
+msgid ""
+"Parallel Execution: Operations within cube and vector scopes execute in "
+"parallel"
+msgstr ""
+"Parallel Execution: Operations within cube and vector scopes execute"
+"in parallel"
+
+#: ../../zh/triton_api_extension/al/scope.md:72
+msgid ""
+"Single Scope per Type: Each kernel supports one cube scope and one vector"
+" scope (?)"
+msgstr ""
+"Single Scope per Type: Each kernel supports one cube scope and one"
+"vector scope (?)"
+
+#: ../../zh/triton_api_extension/al/scope.md:74
+msgid ""
+"Explicit Synchronization: Required for data dependencies between scopes "
+"using sync operations"
+msgstr ""
+"Explicit Synchronization: Required for data dependencies between"
+"scopes using sync operations"
+
+#: ../../zh/triton_api_extension/al/scope.md:76
+msgid "4. 用例示例"
+msgstr "4. Example Usage"
+
+#: ../../zh/triton_api_extension/al/scope.md:84
+msgid "5. 编译输出结果"
+msgstr "5. Compilation Output"
+

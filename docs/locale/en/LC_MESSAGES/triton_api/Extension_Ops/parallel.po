@@ -1,0 +1,254 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:1
+msgid "triton.language.parallel"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:3
+msgid "1. 函数概述"
+msgstr "1. Function Overview"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:5
+msgid "`parallel` 是一个专门用于多核心并行执行的迭代器，继承自 `range` 类，提供显式的多核心并行语义。"
+msgstr "`parallel` is an iterator specifically designed for multi-core parallel execution, inheriting from the `range` class and providing explicit multi-core parallel semantics."
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:13
+msgid "2. 规格"
+msgstr "2. Specifications"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:15
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "参数"
+msgstr "Parameter"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "默认值"
+msgstr "Default Value"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "含义说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "`arg1`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "`int` /`constexpr`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "必需"
+msgstr "Required"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "起始值（单参数时作为结束值，从0开始）"
+msgstr "Start value (when single parameter, used as the end value, starting from 0)"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "`arg2`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "`int`/`constexpr`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "结束值（不包含在范围内）"
+msgstr "End value (exclusive)"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "`step`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "`1`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "每次迭代的步长增量"
+msgstr "Step increment per iteration"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "`num_stages`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "`int`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "流水线阶段数（同时执行的迭代数量）"
+msgstr "Number of pipeline stages (number of iterations executed simultaneously)"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "`loop_unroll_factor`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "循环展开因子（<2表示不展开）"
+msgstr "Loop unroll factor (<2 means no unrolling)"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "`bind_sub_block`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "`bool`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "`False`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "**关键参数**：绑定到子块，启用多核心并行执行"
+msgstr "**Key parameter**: Bind to sub-block, enabling multi-core parallel execution"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter, external calls not supported yet"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:27
+msgid "**注意**：`parallel` 相比于 `range` 移除了以下参数："
+msgstr "**Note**: `parallel` has removed the following parameters compared to `range`:"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:29
+msgid "`disallow_acc_multi_buffer`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:30
+msgid "`flatten`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:31
+msgid "`warp_specialize`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:32
+msgid "`disable_licm`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:34
+msgid "2.2 类型支持"
+msgstr "2.2 Type Support"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:36
+msgid "A3："
+msgstr "A3:"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:43
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:45
+msgid "`bind_sub_block` 为真时在IR中并体现出跟`range`的区别，功能是否实现待验证。"
+msgstr "When `bind_sub_block` is true, the difference from `range` is reflected in the IR. Whether the functionality is fully implemented needs verification."
+
+#: ../../zh/triton_api/Extension_Ops/parallel.md:47
+msgid "3. 使用方法"
+msgstr "3. Usage"
+

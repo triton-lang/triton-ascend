@@ -1,0 +1,327 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:1
+msgid "triton.language.cast"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:3
+msgid "1 功能作用说明"
+msgstr "1. Function Description"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:5
+msgid "将张量转换为指定的数据类型，支持数值类型转换、位级别重解释（bitcast）、浮点降精度舍入模式，以及Ascend扩展的整数溢出处理模式。"
+msgstr ""
+"Converts the tensor to the specified data type, supporting numeric type "
+"conversion, bit-level reinterpretation (bitcast), floating-point downcast "
+"rounding mode, and Ascend extension integer overflow handling mode."
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:7
+msgid "**语法：**"
+msgstr "**Syntax:**"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:9
+msgid ""
+"`triton.language.cast(input, dtype, fp_downcast_rounding=None, "
+"bitcast=False, overflow_mode=None)` - 函数调用形式"
+msgstr ""
+"`triton.language.cast(input, dtype, fp_downcast_rounding=None, "
+"bitcast=False, overflow_mode=None)` - function call form"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:10
+msgid ""
+"`input.cast(dtype, fp_downcast_rounding=None, bitcast=False, "
+"overflow_mode=None)` - 成员函数形式"
+msgstr ""
+"`input.cast(dtype, fp_downcast_rounding=None, bitcast=False, "
+"overflow_mode=None)` - member function form"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:12
+msgid "**功能：**"
+msgstr "**Function:**"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:14
+msgid "数值类型转换：整型<->整型、浮点<->浮点、整型<->浮点"
+msgstr ""
+"Numeric type conversion: integer<->integer, float<->float, integer<->float"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:15
+msgid "位级别重解释（bitcast）：不改变比特，只改变解释类型"
+msgstr ""
+"Bit-level reinterpretation (bitcast): does not change bits, only changes the"
+" interpretation type"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:16
+msgid "浮点降精度支持舍入模式：`rtne`（默认，四舍六入五成双）、`rtz`（向零）"
+msgstr ""
+"Floating-point downcast supports rounding modes: `rtne` (default, round to "
+"nearest even), `rtz` (toward zero)"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:17
+msgid "整数转换（Ascend 扩展）支持溢出模式：`trunc`（截断，默认）、`saturate`（饱和）"
+msgstr ""
+"Integer conversion (Ascend extension) supports overflow modes: `trunc` "
+"(truncate, default), `saturate` (saturate)"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:19
+msgid "2 参数规格"
+msgstr "2. Parameter Specifications"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:21
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "必需"
+msgstr "Required"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "input"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "tensor"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "是"
+msgstr "Yes"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "输入张量"
+msgstr "Input tensor"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "dtype"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "tl.dtype"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "目标数据类型"
+msgstr "Target data type"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "fp_downcast_rounding"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "str"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "否"
+msgstr "No"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "仅对浮点降精度有效，`rtne` 或 `rtz`"
+msgstr "Only valid for floating-point downcast, `rtne` or `rtz`"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "bitcast"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "是否执行位级别重解释，默认 False"
+msgstr "Whether to perform bit-level reinterpretation, default False"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "overflow_mode"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "Ascend 扩展：整数溢出处理，`trunc` 或 `saturate`"
+msgstr "Ascend extension: integer overflow handling, `trunc` or `saturate`"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:31
+msgid "**返回值：**"
+msgstr "**Return Value:**"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:33
+msgid "**类型：** tensor"
+msgstr "**Type:** tensor"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:34
+msgid "**形状：** 与输入张量相同"
+msgstr "**Shape:** Same as the input tensor"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:35
+msgid "**数据类型：** 与dtype参数指定的目标类型相同"
+msgstr ""
+"**Data Type:** Same as the target type specified by the dtype parameter"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:36
+msgid "**内存布局：** 根据bitcast参数决定是否进行位级别重解释"
+msgstr ""
+"**Memory Layout:** Determines whether to perform bit-level reinterpretation "
+"based on the bitcast parameter"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:38
+msgid "**约束条件：**"
+msgstr "**Constraints:**"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:40
+msgid "`fp_downcast_rounding` 仅在浮点降精度时可设置，否则将报错"
+msgstr ""
+"`fp_downcast_rounding` can only be set for floating-point downcast; "
+"otherwise an error will be reported"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:41
+msgid "`bitcast=True` 时不进行数值转换，忽略舍入/溢出模式"
+msgstr ""
+"When `bitcast=True`, no numerical conversion is performed; rounding/overflow"
+" modes are ignored"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:42
+msgid "`overflow_mode` 仅对整型有意义（Ascend 扩展）"
+msgstr ""
+"`overflow_mode` is only meaningful for integer types (Ascend extension)"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:44
+msgid "2.2 DataType支持表"
+msgstr "2.2 DataType Support Table"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "支持情况"
+msgstr "Support Status"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "float16"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "float32"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "bfloat16"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "float8e4"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "float8e5"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "float64"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Creation_Ops/cast.md
+msgid "GPU支持"
+msgstr "GPU Support"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:51
+msgid "2.3 Shape支持表"
+msgstr "2.3 Shape Support Table"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:53
+msgid "支持任意维度数、任意形状大小。"
+msgstr "Supports any number of dimensions and any shape size."
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:55
+msgid "2.4 特殊限制说明"
+msgstr "2.4 Special Limitations"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:57
+msgid "无"
+msgstr "None"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:59
+msgid "2.5 使用方法"
+msgstr "2.5 Usage"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:61
+msgid "**基本用法：**"
+msgstr "**Basic Usage:**"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:82
+msgid "**高级用法：**"
+msgstr "**Advanced Usage:**"
+
+#: ../../zh/triton_api/Creation_Ops/cast.md:102
+msgid "**实际应用场景：**"
+msgstr "**Practical Application Scenarios:**"

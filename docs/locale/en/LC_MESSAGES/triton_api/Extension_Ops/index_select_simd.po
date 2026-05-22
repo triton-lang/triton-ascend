@@ -1,0 +1,484 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:1
+msgid "triton.language.extra.ascend.libdevice.index_select_simd"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:3
+msgid "1 功能作用说明"
+msgstr "1. Function Description"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:5
+msgid ""
+"在非尾轴维度上并行 gather 多个索引，并以 tile 为单位将数据零拷贝地从全局内存（GM）直接搬运到统一缓冲区（UB）的正确位置。该操作等效于 "
+"`torch.index_select` 的高性能实现，适用于嵌入层查找、稀疏索引访问等场景。"
+msgstr ""
+"Parallel gathers multiple indices on non-trailing dimensions and copies data"
+" zero-copy from global memory (GM) directly to the correct position in the "
+"unified buffer (UB) in tile units. This operation is equivalent to the high-"
+"performance implementation of `torch.index_select`, suitable for embedding "
+"layer lookup, sparse index access, and other scenarios."
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:7
+msgid "**语法：**"
+msgstr "**Syntax:**"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:9
+msgid ""
+"`triton.language.extra.ascend.libdevice.index_select_simd(src, dim, index, "
+"src_shape, src_offset, read_shape)`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:11
+msgid "**功能：**"
+msgstr "**Function:**"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:13
+msgid "在源张量的指定维度上，根据索引数组批量读取数据"
+msgstr ""
+"Reads data in batches from the source tensor along the specified dimension "
+"according to the index array"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:14
+msgid "支持指定读取区域的偏移和大小，实现灵活的切片"
+msgstr ""
+"Supports specifying the offset and size of the read region, enabling "
+"flexible slicing"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:15
+msgid "零拷贝高效实现，直接从 GM 搬运到 UB"
+msgstr "Efficient zero-copy implementation, directly transfers from GM to UB"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:16
+msgid "保持元素类型和编码方式不变"
+msgstr "Keeps the element type and encoding unchanged"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:18
+msgid "**典型应用场景：**"
+msgstr "**Typical Application Scenarios:**"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:20
+msgid "嵌入层（Embedding）查找：从大词汇表中根据 token ID 批量读取词向量"
+msgstr ""
+"Embedding layer lookup: Reads word vectors in batches from a large "
+"vocabulary based on token IDs"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:21
+msgid "稀疏张量操作：根据稀疏索引访问密集张量的特定行"
+msgstr ""
+"Sparse tensor operations: Accesses specific rows of a dense tensor based on "
+"sparse indices"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:22
+msgid "动态路由和注意力机制：根据动态计算的索引选择特定特征"
+msgstr ""
+"Dynamic routing and attention mechanisms: Selects specific features based on"
+" dynamically computed indices"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:24
+msgid "2 参数规格"
+msgstr "2. Parameter Specifications"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:26
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "必需"
+msgstr "Required"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "src"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "tensor/pointer"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "是"
+msgstr "Yes"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "源张量指针，位于全局内存（GM）上的数据"
+msgstr "Source tensor pointer, data located in global memory (GM)"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "dim"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "int"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "在哪个维度执行 index_select 操作，取值范围 [0, len(src_shape)-2]，**不支持尾轴**（最后一个维度）"
+msgstr ""
+"The dimension on which to perform index_select, valid range [0, "
+"len(src_shape)-2], **trailing axis (last dimension) is not supported**"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "index"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "tensor"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "1D 索引数组，位于 UB 上，指定要读取的索引位置"
+msgstr "1D index array, located on UB, specifying the index positions to read"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "src_shape"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "Tuple[int]"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "源张量的完整形状"
+msgstr "The full shape of the source tensor"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "src_offset"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "从哪个位置开始读取，在 dim 维度可设为 -1（该维度由 index 决定）"
+msgstr ""
+"The starting position to read from; can be set to -1 for the dim dimension "
+"(which is determined by index)"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "read_shape"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "读取数据的大小，在 dim 维度必须设为 -1（该维度由 index 长度决定）"
+msgstr ""
+"The size of data to read; must be set to -1 for the dim dimension (which is "
+"determined by the length of index)"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:37
+msgid "**返回值：**"
+msgstr "**Return Value:**"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:39
+msgid "**类型：** tensor (位于 UB 上)"
+msgstr "**Type:** tensor (located on UB)"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:40
+msgid "**形状：** 与 read_shape 一致，其中 dim 维度的大小等于 index 的长度"
+msgstr ""
+"**Shape:** Same as read_shape, where the size of the dim dimension equals "
+"the length of index"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:41
+msgid "**数据类型：** 与源张量相同"
+msgstr "**Data Type:** Same as the source tensor"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:42
+msgid "**内存位置：** 统一缓冲区（UB）"
+msgstr "**Memory Location:** Unified Buffer (UB)"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:44
+msgid "**约束条件：**"
+msgstr "**Constraints:**"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:46
+msgid "`read_shape[dim]` 必须为 -1"
+msgstr "`read_shape[dim]` must be -1"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:47
+msgid "`src_offset[dim]` 可以设为 -1（会被忽略，因为该维度由 index 决定）"
+msgstr ""
+"`src_offset[dim]` can be set to -1 (it will be ignored because this "
+"dimension is determined by index)"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:48
+msgid "`len(src_shape) == len(src_offset) == len(read_shape)`"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:49
+msgid "`index` 必须是 1D 张量"
+msgstr "`index` must be a 1D tensor"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:50
+msgid "`dim` 不能是尾轴（最后一个维度），即 `dim < len(src_shape) - 1`"
+msgstr ""
+"`dim` cannot be the trailing axis (last dimension), i.e., `dim < "
+"len(src_shape) - 1`"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:51
+msgid "对于非 dim 维度：`0 <= src_offset[i] < src_shape[i]`"
+msgstr "For non-dim dimensions: `0 <= src_offset[i] < src_shape[i]`"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:52
+msgid "对于非 dim 维度：`src_offset[i] + read_shape[i] <= src_shape[i]`（超出边界自动截断）"
+msgstr ""
+"For non-dim dimensions: `src_offset[i] + read_shape[i] <= src_shape[i]` "
+"(automatically truncated if out of bounds)"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:53
+msgid "index 中的索引值必须在 `[0, src_shape[dim])` 范围内"
+msgstr ""
+"Index values in `index` must be within the range `[0, src_shape[dim])`"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:55
+msgid "2.2 DataType支持表"
+msgstr "2.2 DataType Support Table"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "支持情况"
+msgstr "Support Status"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "float16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "float32"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "bfloat16"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "float8e4"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "float8e5"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "float64"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "GPU支持"
+msgstr "GPU Support"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md
+msgid "N/A"
+msgstr ""
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:62
+msgid "**说明：**"
+msgstr "**Description:**"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:64
+msgid "index 的数据类型必须为 int32 或 int64"
+msgstr "The data type of index must be int32 or int64"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:65
+msgid "GPU 平台不支持此操作（Ascend 专用 intrinsic）"
+msgstr "This operation is not supported on GPU (Ascend-specific intrinsic)"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:67
+msgid "2.3 Shape支持表"
+msgstr "2.3 Shape Support Table"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:69
+msgid "支持任意维度数（1D 到高维张量），但需满足以下条件："
+msgstr ""
+"Supports any number of dimensions (1D to high-dimensional tensors), subject "
+"to the following conditions:"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:71
+msgid "index 必须是 1D 张量"
+msgstr "index must be a 1D tensor"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:72
+msgid "源张量的各维度大小需根据实际硬件内存限制"
+msgstr ""
+"The sizes of each dimension of the source tensor are subject to actual "
+"hardware memory limitations"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:73
+msgid "read_shape 在非 dim 维度上的大小需考虑 UB 空间限制"
+msgstr ""
+"The size of read_shape on non-dim dimensions must account for UB space "
+"limitations"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:75
+msgid "**常见形状组合：**"
+msgstr "**Common Shape Combinations:**"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:77
+msgid "2D 张量：适用于嵌入层查找、稀疏矩阵行选择"
+msgstr ""
+"2D tensor: Suitable for embedding layer lookup and sparse matrix row "
+"selection"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:78
+msgid "3D 张量：适用于批量嵌入查找、序列特征提取"
+msgstr ""
+"3D tensor: Suitable for batch embedding lookup and sequence feature "
+"extraction"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:79
+msgid "高维张量：适用于复杂的多维索引操作"
+msgstr ""
+"High-dimensional tensor: Suitable for complex multi-dimensional index "
+"operations"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:81
+msgid "2.4 特殊限制说明"
+msgstr "2.4 Special Limitations"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:83
+msgid ""
+"**dim 限制：** 不支持在尾轴（最后一个维度）上执行 index_select 操作，dim 必须满足 `dim < len(src_shape)"
+" - 1`"
+msgstr ""
+"**dim Limitation:** index_select operation is not supported on the trailing "
+"axis (last dimension); dim must satisfy `dim < len(src_shape) - 1`"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:84
+msgid "**数据类型限制：** 暂不支持 uint16/uint32/uint64/float8/float64 数据类型"
+msgstr ""
+"**Data Type Limitation:** uint16/uint32/uint64/float8/float64 data types are"
+" not currently supported"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:85
+msgid "**索引越界：** 不检查 index 中的索引是否越界，用户需自行保证索引合法性"
+msgstr ""
+"**Index Out of Bounds:** Does not check whether indices in index are out of "
+"bounds; users must ensure index validity themselves."
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:87
+msgid "2.5 使用方法"
+msgstr "2.5 Usage"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:89
+msgid "**基本用法（2D 嵌入查找）：**"
+msgstr "**Basic Usage (2D Embedding Lookup):**"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:124
+msgid "**与 torch.index_select 的关系：**"
+msgstr "**Relationship with torch.index_select:**"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:126
+msgid "`index_select_simd` 等价于 `torch.index_select(src, dim, index)` 加上切片操作"
+msgstr ""
+"`index_select_simd` is equivalent to `torch.index_select(src, dim, index)` "
+"plus slice operation"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:127
+msgid "但 index_select_simd 在硬件层面实现，性能优于 PyTorch 实现（约 0.6~1.5x AscendC 性能）"
+msgstr ""
+"However, index_select_simd is implemented at the hardware level and "
+"outperforms the PyTorch implementation (approximately 0.6~1.5x AscendC "
+"performance)"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:129
+msgid "**与常规 load 的差异：**"
+msgstr "**Differences from Regular load:**"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:152
+msgid "3 与GPU差异"
+msgstr "3. Differences from GPU"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:154
+msgid "新增OP，无差异"
+msgstr "New OP, no differences"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:156
+msgid "4 测试用例说明"
+msgstr "4. Test Case Description"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:158
+msgid "**测试文件：**"
+msgstr "**Test Files:**"
+
+#: ../../zh/triton_api/Extension_Ops/index_select_simd.md:160
+msgid ""
+"`ascend/examples/pytest_ut/test_index_select.py` - 2D 张量 index_select "
+"测试（多种形状组合）"
+msgstr ""
+"`ascend/examples/pytest_ut/test_index_select.py` - 2D tensor index_select "
+"test (various shape combinations)"

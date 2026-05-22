@@ -1,0 +1,189 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md:1
+msgid "triton.language.device_assert"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md:3
+msgid "**使用`device_assert`需要将环境变量`TRITON_DEBUG`的值设置为非`0`才能生效。**"
+msgstr ""
+"**Using `device_assert` requires setting the environment variable "
+"`TRITON_DEBUG` to a non-zero value to take effect.**"
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md:5
+msgid "1. 函数概述"
+msgstr "1. Function Overview"
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md:7
+msgid "`device_assert` 用于在GPU运行时从设备端进行断言检查，如果条件不满足则输出错误信息。"
+msgstr ""
+"`device_assert` is used to perform assertion checks on the device during GPU"
+" runtime, outputting error information if the condition is not met."
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md:13
+msgid "2. 规格"
+msgstr "2. Specifications"
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md:15
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "参数"
+msgstr "Parameters"
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "默认值"
+msgstr "Default Value"
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "含义说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "`cond`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "`bool`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "必需"
+msgstr "Required"
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "运行时需要断言的条件表达式"
+msgstr "The condition expression to assert at runtime"
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "`msg`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "`str`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "`''`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "断言失败时显示的错误消息"
+msgstr "The error message to display when the assertion fails"
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter; external invocation is not supported yet"
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md:23
+msgid "2.2 类型支持"
+msgstr "2.2 Type Support"
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md:25
+msgid "A3："
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/device_assert.md:32
+msgid "2.3 使用方法"
+msgstr "2.3 Usage"

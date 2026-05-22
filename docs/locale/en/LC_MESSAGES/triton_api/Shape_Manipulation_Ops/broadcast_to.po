@@ -1,0 +1,262 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:1
+msgid "triton.language.broadcast_to"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:3
+msgid "1 功能作用说明"
+msgstr "1. Function Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:5
+msgid "将张量广播到目标形状，自动处理维度对齐。广播操作不会复制数据，而是通过改变张量的形状和步长来实现。"
+msgstr ""
+"Broadcasts the tensor to the target shape, automatically handling dimension "
+"alignment. The broadcast operation does not copy data; it is achieved by "
+"changing the tensor's shape and stride."
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:7
+msgid "**语法：**"
+msgstr "**Syntax:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:9
+msgid "`triton.language.broadcast_to(input, shape)` - 函数调用形式"
+msgstr "`triton.language.broadcast_to(input, shape)` - function call form"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:10
+msgid "`input.broadcast_to(shape)` - 成员函数形式"
+msgstr "`input.broadcast_to(shape)` - member function form"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:12
+msgid "**功能：**"
+msgstr "**Function:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:14
+msgid "自动处理维度对齐，将大小为1的维度扩展到目标形状中对应维度的大小"
+msgstr ""
+"Automatically handles dimension alignment, expanding dimensions of size 1 to"
+" match the corresponding dimension size in the target shape"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:15
+msgid "保持数据不变，仅改变张量的形状信息"
+msgstr ""
+"Keeps the data unchanged, only modifies the shape information of the tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:17
+msgid "2 参数规格"
+msgstr "2. Parameter Specifications"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:19
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "必需"
+msgstr "Required"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "input"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "tensor"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "是"
+msgstr "Yes"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "输入张量"
+msgstr "Input tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "shape"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "List[int]"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "目标形状"
+msgstr "Target shape"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:26
+msgid "**返回值：**"
+msgstr "**Return Value:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:28
+msgid "**类型：** tensor"
+msgstr "**Type:** tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:29
+msgid "**形状：** 与shape参数指定的目标形状相同"
+msgstr ""
+"**Shape:** Same as the target shape specified by the `shape` parameter"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:30
+msgid "**数据类型：** 与输入张量相同"
+msgstr "**Data Type:** Same as the input tensor"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:31
+msgid "**内存布局：** 通过改变步长信息实现广播，无数据拷贝"
+msgstr ""
+"**Memory Layout:** Broadcasting implemented by changing stride information, "
+"no data copy"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:33
+msgid "**约束条件：**"
+msgstr "**Constraints:**"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:35
+msgid "输入张量的维度数必须等于目标形状的维度数"
+msgstr ""
+"The number of dimensions of the input tensor must equal the number of "
+"dimensions of the target shape"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:36
+msgid "所有维度必须满足广播规则"
+msgstr "All dimensions must satisfy the broadcasting rules"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:38
+msgid "2.2 DataType支持表"
+msgstr "2.2 DataType Support Table"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "支持情况"
+msgstr "Support Status"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "float16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "float32"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "bfloat16"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "float8e4"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "float8e5"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "float64"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md
+msgid "GPU支持"
+msgstr "GPU Support"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:45
+msgid "2.3 Shape支持表"
+msgstr "2.3 Shape Support Table"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:47
+msgid "支持任意维度数、任意形状大小。"
+msgstr "Supports any number of dimensions and any shape size."
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:49
+msgid "2.4 特殊限制说明"
+msgstr "2.4 Special Limitations"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:51
+msgid "与broadcast不同，Triton社区实现的broadcast_to必须保证tensor的shape和目标shape的rank一致"
+msgstr ""
+"Unlike broadcast, the Triton community's broadcast_to implementation "
+"requires the rank of the tensor's shape and the target shape to be identical"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:53
+msgid "2.5 使用方法"
+msgstr "2.5 Usage"
+
+#: ../../zh/triton_api/Shape_Manipulation_Ops/broadcast_to.md:55
+msgid "**基本用法：**"
+msgstr "**Basic Usage:**"

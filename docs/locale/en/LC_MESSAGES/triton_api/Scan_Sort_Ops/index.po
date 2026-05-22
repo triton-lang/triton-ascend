@@ -1,0 +1,76 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/index.md:1
+msgid "扫描/排序操作"
+msgstr "Scan/Sort Operations"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/index.md
+msgid "api"
+msgstr "API"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/index.md
+msgid "简要说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/index.md
+msgid "[associative_scan](./associative_scan.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/index.md
+msgid "沿指定 axis 将 combine_fn 应用于 input 张量的每个元素和携带的值，并更新携带的值"
+msgstr ""
+"Applies combine_fn to each element and carry value along axis, updating "
+"carry"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/index.md
+msgid "[cumprod](./cumprod.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/index.md
+msgid "返回沿指定 axis 的 input 张量中所有元素的累积乘积"
+msgstr "Returns cumulative product of input tensor along axis"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/index.md
+msgid "[cumsum](./cumsum.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/index.md
+msgid "返回沿指定 axis 的 input 张量中所有元素的累积和"
+msgstr "Returns cumulative sum of input tensor along axis"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/index.md
+msgid "[histogram](./histogram.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/index.md
+msgid "基于 input 张量计算 1 个具有 num_bins 个 bin 的直方图，每个 bin 宽度为 1，起始于 0"
+msgstr ""
+"Computes a histogram of input with num_bins bins of width 1 starting at 0"
+
+#: ../../zh/triton_api/Scan_Sort_Ops/index.md
+msgid "[sort](./sort.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Scan_Sort_Ops/index.md
+msgid "沿着指定维度对张量进行排序"
+msgstr "Sorts a tensor along the specified dimension."

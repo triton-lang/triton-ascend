@@ -1,0 +1,271 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Math_Ops/index.md:1
+msgid "数学操作"
+msgstr "Math Operations"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "api"
+msgstr "API"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "简要说明"
+msgstr "Brief Description"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[add](./add.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "四则运算加法 ‘+’"
+msgstr "Arithmetic addition '+'"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[sub](./sub.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "四则运算减法 ‘-’"
+msgstr "Arithmetic subtraction '-'"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[mul](./mul.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "四则运算乘法 ‘*’"
+msgstr "Arithmetic multiplication '*'"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[div](./div.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "四则运算除法 ‘/’"
+msgstr "Arithmetic division '/'"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[abs](./abs.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 的逐元素绝对值"
+msgstr "Computes the element-wise absolute value of x"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[neg](./neg.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "将tensor的值取负。"
+msgstr "Negates the values of the tensor."
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[cdiv](./cdiv.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 除以 div 的向上取整除法"
+msgstr "Computes the ceiling division of x by div"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[ceil](./ceil.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 的逐元素向上取整值"
+msgstr "Computes the element-wise ceiling of x"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[clamp](./clamp.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "将输入张量 x 的值限制在 [min, max] 范围内"
+msgstr "Clamps the values of input tensor x to the range [min, max]"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[cos](./cos.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 的逐元素余弦值"
+msgstr "Computes the element-wise cosine of x"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[div_rn](./div_rn.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 和 y 的逐元素精确除法（根据 IEEE 标准四舍五入到最近的值）"
+msgstr ""
+"Computes the element-wise exact division of x and y (rounded to the nearest "
+"value according to IEEE standard)"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[erf](./erf.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 的逐元素误差函数"
+msgstr "Computes the element-wise error function of x"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[exp](./exp.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 的逐元素指数"
+msgstr "Computes the element-wise exponential of x"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[exp2](./exp2.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 的逐元素指数（以 2 为底）"
+msgstr "Computes the element-wise exponential (base 2) of x"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[fdiv](./fdiv.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 和 y 的逐元素快速除法"
+msgstr "Computes the element-wise fast division of x and y"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[floor](./floor.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 的逐元素向下取整"
+msgstr "Computes the element-wise floor of x"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[fma](./fma.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x、y 和 z 的逐元素融合乘加运算"
+msgstr "Computes the element-wise fused multiply-add of x, y, and z"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[log](./log.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 的逐元素自然对数"
+msgstr "Computes the element-wise natural logarithm of x"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[log2](./log2.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 的逐元素对数（以 2 为底）"
+msgstr "Computes the element-wise logarithm (base 2) of x"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[mod](./mod.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "取模运算"
+msgstr "Modulo operation"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[maximum](./maximum.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 和 y 的逐元素最大值"
+msgstr "Computes the element-wise maximum of x and y"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[minimum](./minimum.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 和 y 的逐元素最小值"
+msgstr "Computes the element-wise minimum of x and y"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[rsqrt](./rsqrt.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 的逐元素的平方根倒数"
+msgstr "Computes the element-wise reciprocal square root of x"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[sigmoid](./sigmoid.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 的逐元素 sigmoid 函数值"
+msgstr "Computes the element-wise sigmoid of x"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[sin](./sin.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "Computes the element-wise sine of x. 计算 x 的逐元素正弦值"
+msgstr "Computes the element-wise sine of x."
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[softmax](./softmax.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 的逐元素 softmax 值"
+msgstr "Computes the element-wise softmax of x"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[sqrt](./sqrt.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 的逐元素快速平方根"
+msgstr "Computes the element-wise fast square root of x"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[sqrt_rn](./sqrt_rn.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 的逐元素精确平方根（根据 IEEE 标准四舍五入到最近的值）"
+msgstr ""
+"Computes the element-wise precise square root of x (rounded to the nearest "
+"value according to IEEE standard)"
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "[umulhi](./umulhi.md)"
+msgstr ""
+
+#: ../../zh/triton_api/Math_Ops/index.md
+msgid "计算 x 和 y 的 2N 位乘积的逐元素最高有效 N 位"
+msgstr ""
+"Computes the element-wise most significant N bits of the 2N-bit product of x"
+" and y"

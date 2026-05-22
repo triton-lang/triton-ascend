@@ -1,0 +1,40 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/triton/heuristics.md:1
+msgid "triton.heuristics"
+msgstr ""
+
+#: ../../zh/triton_api/triton/heuristics.md:7
+msgid "用于指定如何计算某些元参数值的装饰器。这在自动调优成本过高或不适用的情况下非常有用。"
+msgstr ""
+"A decorator for specifying how to compute certain meta-parameter values. "
+"This is useful when autotuning is too expensive or not applicable."
+
+#: ../../zh/triton_api/triton/heuristics.md:16
+msgid ""
+"**参数：** `values (dict[str, Callable[[list[Any]], Any]]**)` - "
+"包含元参数名称和计算元参数值的函数的字典。每个这样的函数都接受一个位置参数列表作为输入。"
+msgstr ""
+"**Parameters:** `values (dict[str, Callable[[list[Any]], Any]])` - A "
+"dictionary containing meta-parameter names and functions to compute their "
+"values. Each function accepts a list of positional arguments as input."

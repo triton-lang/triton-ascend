@@ -20,7 +20,7 @@ NPU:Vector核，Cube核属于多个物理核，不同代际硬件核数不同，
 在调用Triton内核函数时，通过设置launch参数控制使用的核数量。以GELU算子为例：
 
 ```Python
-triton_gelu[n, 1, 1](...)  # 第一个参数表示使用的核数，n表示使用n个核
+triton_gelu[n, 1, 1](...)  # First parameter indicates the number of cores used; n means using n cores
 ```
 
 通过对核数的调优，可实现对所有计算资源的充分调度和利用，从而最大化并行度与吞吐量。注意，当前版本核数需小于等于65535。
@@ -71,7 +71,7 @@ def standard_unary(x0):
 以下是一个使用 Triton 编写的简单内核示例，用于展示如何定义和调用一个基本的Triton内核函数。此示例实现了一个简单的数学运算（GELU 激活函数）。
 
 ```Python
-# 定义triton_kernel核函数
+# Define triton_kernel kernel function
 @triton.jit
 def triton_easy_kernel(in_ptr0, out_ptr0, NUMEL: tl.constexpr):
     idx_block = tl.arange(0, NUMEL)
@@ -94,7 +94,7 @@ def triton_easy_kernel(in_ptr0, out_ptr0, NUMEL: tl.constexpr):
 下面是一个经过优化的 Triton 内核实现示例，适用于大规模张量计算。
 
 ```Python
-# 定义triton_kernel核函数
+# Define triton_kernel kernel function
 @triton.jit
 def triton_better_kernel(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
     xoffset = tl.program_id(0) * XBLOCK
@@ -105,7 +105,7 @@ def triton_better_kernel(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK
         ret = x * 0.5 * (1.0 + tl.erf(x / tl.sqrt(2.0)))
         tl.store(out_ptr0 + x_index, ret, xmask)
 
-# 调用triton_kernel核函数
+# Call triton_kernel kernel function
 ncore = 32
 xblock = 32768
 xblock_sub = 8192
@@ -115,19 +115,19 @@ triton_better_kernel[ncore, 1, 1](x0, out1, x0.numel(), xblock, xblock_sub)
 关键代码解释
 
 ```Python
-# 计算当前核处理数据块的起始偏移地址，实现核间切分。每个核仅负责 XBLOCK 大小的数据范围。
+# Calculate the starting offset address of the data block processed by the current core, achieving inter-core splitting. Each core is only responsible for XBLOCK-sized data range.
 xoffset = tl.program_id(0) * XBLOCK
 
-# 在单个核内部进一步细分数据块，每次处理 XBLOCK_SUB 大小的数据，实现核内切分。
+# Further subdivide the data block within a single core, processing XBLOCK_SUB-sized data each time, achieving intra-core splitting.
 for xoffset_sub in range(0, XBLOCK, XBLOCK_SUB):
 
-# 构造当前迭代的数据索引数组，用于访问输入和输出张量。
+# Construct data index array for the current iteration, used to access input and output tensors.
 x_index = xoffset + xoffset_sub + tl.arange(0, XBLOCK_SUB)[:]
 
-# 设置掩码以防止越界访问，确保只处理合法范围内的数据。
+# Set mask to prevent out-of-bounds access, ensuring only data within the valid range is processed.
 xmask = x_index < xnumel
 
-# 分别用于从全局内存加载数据到片上内存，以及将计算结果写回全局内存。
+# Used for loading data from global memory to on-chip memory and writing computation results back to global memory respectively.
 tl.load() 和 tl.store()
 ```
 

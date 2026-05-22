@@ -1,0 +1,189 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md:1
+msgid "triton.language.static_assert"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md:3
+msgid "1. 函数概述"
+msgstr "1. Function Overview"
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md:5
+msgid "`static_assert` 用于在编译时断言条件是否成立，如果条件不满足则编译失败。这是一个编译时检查工具，不需要设置调试环境变量。"
+msgstr ""
+"`static_assert` is used to assert whether a condition holds at compile time;"
+" if the condition is not met, compilation fails. This is a compile-time "
+"checking tool that does not require setting debug environment variables."
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md:11
+msgid "2. 规格"
+msgstr "2. Specifications"
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md:13
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "参数"
+msgstr "Parameter"
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "默认值"
+msgstr "Default Value"
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "含义说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "`cond`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "`bool`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "必需"
+msgstr "Required"
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "编译时需要断言的条件表达式"
+msgstr "Condition expression to assert at compile time"
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "`msg`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "`str`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "`''`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "断言失败时显示的错误消息"
+msgstr "Error message displayed when the assertion fails"
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter; external invocation is not supported yet"
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md:21
+msgid "2.2 类型支持"
+msgstr "2.2 Type Support"
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md:23
+msgid "A3："
+msgstr "A3:"
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md:30
+msgid "**注意：** `cond` 语句中值的类型必须为 `constexpr`。"
+msgstr ""
+"**Note:** The type of the value in the `cond` statement must be `constexpr`."
+
+#: ../../zh/triton_api/Debug_Ops/static_assert.md:32
+msgid "2.3 使用方法"
+msgstr "2.3 Usage"

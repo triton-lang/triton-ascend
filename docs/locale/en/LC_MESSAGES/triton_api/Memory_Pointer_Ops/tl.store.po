@@ -1,0 +1,378 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:1
+msgid "triton.language.store"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:5
+msgid "原型："
+msgstr "Prototype:"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:19
+msgid "简介：将一个Tensor/Scalar从UnifiedBuffer按照`pointer`所指的地址存回GlobalMemory"
+msgstr ""
+"Description: Stores a Tensor/Scalar from UnifiedBuffer back to Global Memory"
+" at the address pointed to by `pointer`."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:21
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:23
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "参数名"
+msgstr "Parameter"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "`pointer`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid ""
+"`triton.PointerType` <br> 或 `tensor<triton.PointerType>` <br> "
+"或`triton.PointerType<tensor>`（来源于`tl.make_block_ptr`）"
+msgstr ""
+"`triton.PointerType` <br> or `tensor<triton.PointerType>` <br> or "
+"`triton.PointerType<tensor>` (from `tl.make_block_ptr`)"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "指向GM上待存储地址的指针"
+msgstr "Pointer to address for storage in Global Memory"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "`value`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "`tensor` 或 `scalar`"
+msgstr "`tensor` or `scalar`"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "要存储的值，支持隐式广播和隐式类型转换"
+msgstr "Value to store, supports implicit broadcasting and type conversion"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "`mask`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "`int1`或`tensor<int1>`"
+msgstr "`int1` or `tensor<int1>`"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid ""
+"可选参数，当且仅当`pointer` 不来源于`tl.make_block_ptr`时可传入<br>若`mask[i]==False` "
+"，则不会将`value[i]`存储到`pointer[i]`指向的地址,是`True`则正常存储 "
+"<br>若`pointer`来源于`tl.make_block_ptr`，则`mask`必须是`None`"
+msgstr ""
+"Optional. Only when `pointer` is not from `tl.make_block_ptr`.<br>If "
+"`mask[i]==False`, `value[i]` not stored to `pointer[i]`; if True, store "
+"normally.<br>If `pointer` is from `tl.make_block_ptr`, `mask` must be "
+"`None`."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "`boundary_check`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "`tuple(int)`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "可选参数，当且仅当`pointer`来源于`tl.make_block_ptr`时可传入<br>整数元组，指示需要做边界检查的维度"
+msgstr ""
+"Optional. Only when `pointer` is from `tl.make_block_ptr`.<br>Integer tuple "
+"indicating which dims need boundary checks."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "`cache_modifier`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "`\"\"` 或 `\"ca\"`或`\"cg\"`"
+msgstr "`\"\"` or `\"ca\"` or `\"cg\"`"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "可选参数，控制NVIDIA PTX上的cache选项，对Ascend硬件无效"
+msgstr ""
+"Optional parameter that controls cache options for NVIDIA PTX. Has no effect"
+" on Ascend hardware."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "`eviction_policy`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "`str`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "控制NVIDIA PTX的eviction策略， 对Ascend硬件无效"
+msgstr ""
+"Controls the eviction policy for NVIDIA PTX. Has no effect on Ascend "
+"hardware."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter, external calls not supported yet"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:35
+msgid "返回值：无返回值"
+msgstr "Return value: No return value"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:37
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:39
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:46
+msgid ""
+"结论：Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。 "
+"专家意见：eviction_policy和cache_modifier参见load"
+msgstr ""
+"Ascend lacks uint8, uint16, uint32, uint64, fp64 vs GPU (hw limitation). "
+"Expert: see load for eviction_policy, cache_modifier."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:49
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "支持维度范围"
+msgstr "Supported Dimension Range"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "支持scalar和1~5维 tensor"
+msgstr "Supports scalar and 1~5D tensors"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "Ascend"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:56
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
+msgstr ""
+"Shape: No difference between GPU and Ascend. Both support 1~5D tensors."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:58
+msgid "2.2.3 社区约束"
+msgstr "2.2.3 Community Constraints"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:60
+msgid "若`pointer`是一个单指针："
+msgstr "When `pointer` is a single pointer:"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:61
+msgid "此时`value`和`mask`必须是一个标量"
+msgstr "`value` and `mask` must be scalars"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:62
+msgid "`other`会隐式类型转换成`pointer.dtype.element_ty`的数据类型"
+msgstr "`other` is implicitly cast to `pointer.dtype.element_ty`"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:63
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:66
+msgid "此时不允许传入`boundary_check`"
+msgstr "`boundary_check` not allowed"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:64
+msgid "若`pointer`是一个N-Dimensional tensor："
+msgstr "When `pointer` is an N-dimensional tensor:"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:65
+msgid "`mask`和`value`会隐式广播到和`pointer`相同的shape"
+msgstr "`mask` and `value` are implicitly broadcast to `pointer`'s shape"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:67
+msgid "若`pointer`来自于`tl.make_block_ptr`:"
+msgstr "When `pointer` originates from `tl.make_block_ptr`:"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:68
+msgid "此时`mask` 必须是None"
+msgstr "`mask` must be None"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:69
+msgid "此时可以通过`boundary_check`设置边界检查"
+msgstr "Can use `boundary_check` for boundary checks"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:71
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:73
+msgid "相对社区能力缺失且无法实现"
+msgstr "Not supported vs. community version and cannot be implemented"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:75
+msgid ""
+"Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）, "
+"eviction_policy和cache_modifier在NPU上功能还不完善。"
+msgstr ""
+"Compared to GPU, Ascend lacks support for uint8, uint16, uint32, uint64, and"
+" fp64 (hardware limitation). eviction_policy and cache_modifier are not yet "
+"fully functional on NPU."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "差异点"
+msgstr "Difference"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "描述"
+msgstr "Description"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "解决途径"
+msgstr "Resolution"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "离散mask的泛化性问题"
+msgstr "Generalization issues with discrete masks"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+#, python-brace-format
+msgid ""
+"当前对于store中离散mask的处理，是将store拆解为atomic {load,select,store}，在corner "
+"case中存在一定泛化性问题"
+msgstr ""
+"Store's discrete mask handling decomposes to atomic {load,select,store}, "
+"with generalization issues in corner cases"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "大量泛化测试暴露问题，迭代解决"
+msgstr ""
+"Issues found via extensive generalization testing; resolved iteratively"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "与分支、循环语句搭配使用时的泛化性问题"
+msgstr "Generalization issues with branch/loop usage"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md
+msgid "当前tl.load的`pointer`和`mask`的计算过程，如果涉及较复杂的循环和分支语句，可能会出现编译问题"
+msgstr ""
+"`pointer`/`mask` in tl.load may cause compilation issues with complex "
+"loops/branches"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:82
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.store.md:84
+msgid ""
+"以下示例中通过`triton_ldst_indirect_08_kernel`和`triton_ldst_indirect_08_func`的配合调用，实现了`torch_ldst_indirect_08_func`的功能："
+msgstr ""
+"Example: demonstrating `torch_ldst_indirect_08_func` via "
+"`triton_ldst_indirect_08_kernel` and `triton_ldst_indirect_08_func`."

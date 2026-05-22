@@ -1,0 +1,93 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api_extension/al/al.copy.md:1
+msgid "al.copy"
+msgstr "al.copy"
+
+#: ../../zh/triton_api_extension/al/al.copy.md:3
+msgid "1. 背景"
+msgstr "1. Background"
+
+#: ../../zh/triton_api_extension/al/al.copy.md:5
+msgid ""
+"功能类似 copy_from_ub_to_l1 , 在 copy_from_ub_to_l1 的基础上增加了 ub 到 ub 的复制，原来的 "
+"copy_from_ub_to_l1 添加废弃警告。"
+msgstr ""
+"Its functionality is similar to `copy_from_ub_to_l1`, with added"
+"UB-to-UB copy support. The original `copy_from_ub_to_l1` now carries a"
+"deprecation warning."
+
+#: ../../zh/triton_api_extension/al/al.copy.md:7
+msgid ""
+"Its functionality is similar to copy_from_ub_to_l1. Based on "
+"copy_from_ub_to_l1, it adds support for UB-to-UB copying. The original "
+"copy_from_ub_to_l1 has been updated to include a deprecation warning."
+msgstr ""
+"Its functionality is similar to copy_from_ub_to_l1. Based on"
+"copy_from_ub_to_l1, it adds support for UB-to-UB copying. The original"
+"copy_from_ub_to_l1 has been updated to include a deprecation warning."
+
+#: ../../zh/triton_api_extension/al/al.copy.md:9
+msgid "2. 接口说明"
+msgstr "2. Interface Description"
+
+#: ../../zh/triton_api_extension/al/al.copy.md:17
+msgid "参数"
+msgstr "Parameters"
+
+#: ../../zh/triton_api_extension/al/al.copy.md:40
+msgid "返回值"
+msgstr "Return Value"
+
+#: ../../zh/triton_api_extension/al/al.copy.md:42
+msgid "无"
+msgstr "None"
+
+#: ../../zh/triton_api_extension/al/al.copy.md:44
+msgid "3. 约束说明"
+msgstr "3. Constraints"
+
+#: ../../zh/triton_api_extension/al/al.copy.md:46
+msgid "src 和 dst 必须同时为 tensor 或者 buffer ，tensor 暂时不支持"
+msgstr ""
+"`src` and `dst` must both be `tensor` or `buffer`; `tensor` is not"
+"supported for now"
+
+#: ../../zh/triton_api_extension/al/al.copy.md:48
+msgid "src 的address space 必须为UB， dst 的address space 必须为L1"
+msgstr ""
+"The address space of `src` must be UB, and the address space of `dst`"
+"must be L1"
+
+#: ../../zh/triton_api_extension/al/al.copy.md:50
+msgid "src 和 dst 类型 ，形状必须相同"
+msgstr "`src` and `dst` must have the same type and shape"
+
+#: ../../zh/triton_api_extension/al/al.copy.md:52
+msgid "4. 用例示例"
+msgstr "4. Example Usage"
+
+#: ../../zh/triton_api_extension/al/al.copy.md:132
+msgid "5. 编译输出结果"
+msgstr "5. Compilation Output"
+

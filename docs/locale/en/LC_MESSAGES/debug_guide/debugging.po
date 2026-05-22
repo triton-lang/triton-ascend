@@ -1,0 +1,1186 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/debug_guide/debugging.md:1
+msgid "Triton-Ascend 调试指南"
+msgstr "Triton-Ascend Debugging Guide"
+
+#: ../../zh/debug_guide/debugging.md:3
+msgid "1 引言"
+msgstr "1 Overview"
+
+#: ../../zh/debug_guide/debugging.md:5
+msgid ""
+"本文档为 **Triton-Ascend 调试指南**，面向参与 Triton 与昇腾（Ascend）NPU 适配开发的工程师，系统性地介绍在 "
+"Triton-Ascend 编译与运行过程中常用的调试方法与工具。"
+msgstr "This document is the **Triton-Ascend Debugging Guide**, which is intended for engineers who participate in adapting Triton to Ascend NPU. It systematically describes the common debugging methods and tools used during Triton-Ascend compilation and running."
+
+#: ../../zh/debug_guide/debugging.md:7
+msgid "全文内容概览如下："
+msgstr "The contents of this document are as follows:"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "章节"
+msgstr "Section"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "主要内容"
+msgstr "Description"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**1. 概述**"
+msgstr "**1. Overview**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "说明调试的核心目标（聚焦 `ttir.mlir` → `ttadapter.mlir` 转换），并对常见问题进行分类指引。"
+msgstr "Describes the core objectives of debugging (focusing on the `ttir.mlir` to `ttadapter.mlir` conversion) and provides guidance on common issues."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**2. 编译流程概览**"
+msgstr "**2. Compilation Process Overview**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "介绍 Triton-Ascend 端到端编译链的关键阶段，为后续调试提供上下文基础。"
+msgstr "Describes the key phases of the Triton-Ascend end-to-end compilation chain, providing a context basis for subsequent debugging."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**3. 临时文件指引**"
+msgstr "**3. Temporary File Guide**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "详解编译过程中生成的中间文件（如 `.mlir`、`.ll`、`.o` 等）的存储位置与用途，便于人工检查。"
+msgstr "Describes the storage locations and functions of intermediate files (such as the `.mlir`, `.ll`, and `.o` files) generated during the compilation, facilitating manual check."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**4. 解释器模式**"
+msgstr "**4. Interpreter Mode**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "介绍如何通过 `TRITON_INTERPRET=1` 在 CPU 上运行 kernel，作为 NPU 计算结果的精度基准。"
+msgstr "Describes how to set `TRITON_INTERPRET` to `1` to run the kernel on the CPU and use the result as the accuracy benchmark of the NPU computing result."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**5. 调试方法**"
+msgstr "**5. Debugging Methods**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "提供多种实用调试手段：<br>• 静态/运行时打印<br>• 编译错误调试方法<br>"
+msgstr "The following practical debugging methods are provided:<br>Static/Runtime printing<br>Compilation error debugging<br>"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**附录 A**"
+msgstr "**Appendix A**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "常用环境变量速查表，提升调试效率。"
+msgstr "Provides a quick reference table of common environment variables to improve debugging efficiency."
+
+#: ../../zh/debug_guide/debugging.md:18
+msgid "建议开发者结合具体问题，按需查阅对应章节，以高效定位并解决 Triton-Ascend 集成中的各类异常。"
+msgstr "You are advised to refer to the corresponding sections as required to efficiently locate and resolve various exceptions in Triton-Ascend integration."
+
+#: ../../zh/debug_guide/debugging.md:20
+msgid "1.1 Triton-Ascend 常见问题分类与调试指引"
+msgstr "1.1 Triton-Ascend Common Issue Classification and Debugging Guide"
+
+#: ../../zh/debug_guide/debugging.md:22
+msgid "在开发过程中，问题通常可归纳为以下几类。下表提供了快速的问题类型辨识与首选调试方法指引。"
+msgstr "During development, issues can be classified into different types. The following table provides guidance for quickly identifying issue types and preferred debugging methods."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "问题类型"
+msgstr "Issue Type"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "典型表现/描述"
+msgstr "Typical Symptom/Description"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "推荐的首要调试方法"
+msgstr "Preferred Debugging Method"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**精度问题**"
+msgstr "**Accuracy issue**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "NPU运行结果与标杆参考结果（如PyTorch或Triton CPU解释器）存在差异。"
+msgstr "The NPU running result is different from the benchmark reference result (such as the PyTorch or Triton CPU interpreter)."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "4. 解释器模式 <br> 5.1 打印调试方法"
+msgstr "4. Interpreter mode<br>5.1 Debugging by printing"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**编译错误 (MLIRCompileError)**"
+msgstr "**Compilation error (MLIRCompileError)**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "在编译转换阶段失败，通常在Python端抛出 `MLIRCompileError`。"
+msgstr "If the compilation fails in the conversion phase, `MLIRCompileError` is thrown on the Python side."
+
+#: ../../zh/debug_guide/debugging.md ../../zh/debug_guide/debugging.md:396
+msgid "5.2 编译错误调试方法"
+msgstr "5.2 Compilation error debugging"
+
+#: ../../zh/debug_guide/debugging.md:29
+msgid "2 Triton-Ascend 编译流程概览"
+msgstr "2 Triton-Ascend Compilation Process Overview"
+
+#: ../../zh/debug_guide/debugging.md:31
+msgid "理解完整的编译链是进行有效调试的基础。Triton-Ascend 的编译过程遵循以下主要阶段："
+msgstr "Understanding the complete compilation chain is the basis for effective debugging. The compilation process of Triton-Ascend consists of the following phases:"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "阶段"
+msgstr "Phase"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "输入"
+msgstr "Input"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "输出"
+msgstr "Output"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "工具/组件"
+msgstr "Tool/Component"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**Python Kernel编译**"
+msgstr "**Python Kernel compilation**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "`triton_kernel.py` (Python)"
+msgstr "`triton_kernel.py` (Python)"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "`ttir.mlir` (MLIR)"
+msgstr "`ttir.mlir` (MLIR)"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "Triton JIT 编译器"
+msgstr "Triton JIT compiler"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "将用户编写的Triton Python kernel编译为标准Triton IR (TTIR)。"
+msgstr "Compiles the Triton Python kernel written by users into the standard Triton IR (TTIR)."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**Triton IR 适配转换**"
+msgstr "**Triton IR adaptation and transformation**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "`ttir.mlir`"
+msgstr "`ttir.mlir`"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "`ttadapter.mlir`"
+msgstr "`ttadapter.mlir`"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "适配Ascend的Triton后端"
+msgstr "Ascend-adapted Triton backend"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**关键调试阶段**。将TTIR转换为面向Ascend NPU后端的适配器IR。"
+msgstr "**Key debugging phase**. Converts TTIR into the adapter IR for the Ascend NPU backend."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**MLIR 编译与代码生成**"
+msgstr "**MLIR compilation and code generation**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "`.o` (可执行对象文件)"
+msgstr "`.o` (executable object file)"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "毕昇编译器 (`bishengir-compile`)"
+msgstr "BiSheng compiler (`bishengir-compile`)"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "将适配器IR进一步编译并优化，生成可在NPU上执行的二进制代码。"
+msgstr "The adapter IR is further compiled and optimized to generate binary code that can be executed on the NPU."
+
+#: ../../zh/debug_guide/debugging.md:50
+msgid ""
+"**本指南的调试重点**集中在第二阶段：`ttir.mlir` → `ttadapter.mlir` 的转换过程，此阶段是 Triton-"
+"Ascend 的主要功能。"
+msgstr "**This guide focuses on** the second phase, that is, the `ttir.mlir` to `ttadapter.mlir` conversion. This phase is the main function of Triton-Ascend."
+
+#: ../../zh/debug_guide/debugging.md:52
+msgid "3 Triton-Ascend 临时文件指引"
+msgstr "3 Triton-Ascend Temporary File Guide"
+
+#: ../../zh/debug_guide/debugging.md:54
+msgid "在 Triton-Ascend 的编译过程中，系统会生成多种临时文件用于缓存和调试。理解这些文件的位置和用途对于高效调试至关重要。"
+msgstr "During the compilation of Triton-Ascend, the system generates multiple temporary files for caching and debugging. Understanding the location and usage of these files is critical for efficient debugging."
+
+#: ../../zh/debug_guide/debugging.md:56
+msgid "3.1 缓存文件（Cache）"
+msgstr "3.1 Cache"
+
+#: ../../zh/debug_guide/debugging.md:58
+msgid "Triton 使用缓存机制来加速重复编译过程。编译过程中生成的中间文件会被缓存在用户目录下，避免重复编译相同的 kernel。"
+msgstr "Triton uses the cache mechanism to accelerate the repeated compilation process. Intermediate files generated during compilation are cached in the user directory to avoid repeated compilation of the same kernel."
+
+#: ../../zh/debug_guide/debugging.md:60
+msgid "缓存目录结构："
+msgstr "Cache directory structure:"
+
+#: ../../zh/debug_guide/debugging.md:62
+msgid "默认路径: ~/.triton/cache/"
+msgstr "Default path: **~/.triton/cache/**"
+
+#: ../../zh/debug_guide/debugging.md:64
+msgid "主要缓存内容:"
+msgstr "Main cache content:"
+
+#: ../../zh/debug_guide/debugging.md:66
+msgid "输入文件缓存: 原始 Triton kernel 生成的 ttir.mlir 文件"
+msgstr "Input file cache: ttir.mlir file generated by the original Triton kernel"
+
+#: ../../zh/debug_guide/debugging.md:68
+msgid "输出文件缓存: 经过适配Ascend转换后的 ttadapter.mlir 文件"
+msgstr "Output file cache: ttadapter.mlir file converted to adapt to Ascend"
+
+#: ../../zh/debug_guide/debugging.md:70
+msgid "编译产物缓存: 最终编译生成的可执行文件"
+msgstr "Compilation product cache: executable file generated after compilation"
+
+#: ../../zh/debug_guide/debugging.md:72
+msgid "缓存文件命名约定： 缓存文件通常以 MD5 哈希值命名，确保相同的 kernel 代码对应相同的缓存文件。"
+msgstr "Naming conventions of cache files: Cache files are usually named using MD5 hash values to ensure that the same kernel code corresponds to the same cache file."
+
+#: ../../zh/debug_guide/debugging.md:75
+msgid "**缓存管理建议：**"
+msgstr "**Recommendations for cache management:**"
+
+#: ../../zh/debug_guide/debugging.md:77
+msgid "定期清理: 缓存可能占用较多磁盘空间，可定期清理："
+msgstr "Periodic clearing: Cache files may occupy a large amount of disk space. You can periodically clear the cache files."
+
+#: ../../zh/debug_guide/debugging.md:83
+msgid "调试时禁用缓存: 在调试编译问题时，建议临时禁用缓存以确保每次都重新编译："
+msgstr "Disabling cache during debugging: You are advised to temporarily disable the cache to ensure that the compilation is performed each time when debugging compilation issues."
+
+#: ../../zh/debug_guide/debugging.md:89
+msgid "缓存验证: 当怀疑缓存导致问题时，可删除相关缓存文件后重新测试。"
+msgstr "Cache verification: If you suspect that the issue is caused by the cache, delete related cache files and perform the test again."
+
+#: ../../zh/debug_guide/debugging.md:91
+msgid "3.2 调试转储文件（Dump Files）"
+msgstr "3.2 Dump Files"
+
+#: ../../zh/debug_guide/debugging.md:93
+msgid "通过设置环境变量 TRITON_DEBUG=1，可以在编译过程中将中间表示文件转储到磁盘，这些文件是调试编译问题的关键资源。"
+msgstr "You can set the environment variable **TRITON_DEBUG** to **1** to dump intermediate representation files to disks during compilation. These files are key resources for debugging compilation issues."
+
+#: ../../zh/debug_guide/debugging.md:95
+msgid "转储目录结构："
+msgstr "Dump directory structure:"
+
+#: ../../zh/debug_guide/debugging.md:97
+msgid "默认路径: ~/.triton/dump/"
+msgstr "Default path: **~/.triton/dump/**"
+
+#: ../../zh/debug_guide/debugging.md:99
+msgid "目录命名: 每个编译会话会生成一个以时间戳或唯一ID命名的子目录"
+msgstr "Directory naming: A subdirectory named by a timestamp or unique ID is generated for each compilation session."
+
+#: ../../zh/debug_guide/debugging.md:101
+msgid "主要转储文件:"
+msgstr "Main dump files:"
+
+#: ../../zh/debug_guide/debugging.md:103
+msgid "kernel.ttir.mlir: Triton IR 文件（编译输入）"
+msgstr "kernel.ttir.mlir: Triton IR file (compilation input)"
+
+#: ../../zh/debug_guide/debugging.md:105
+msgid "kernel.ttadapter.mlir: 适配器 IR 文件（转换输出）"
+msgstr "kernel.ttadapter.mlir: adapter IR file (conversion output)"
+
+#: ../../zh/debug_guide/debugging.md:107
+msgid ""
+"启用调试转储： 即使启用缓存，只要设置了 "
+"TRITON_DEBUG=1，系统仍会在每次运行时重新生成转储文件（覆盖同名目录中的文件）。但若缓存命中且跳过编译，则可能不会触发 IR "
+"转换，导致无新 dump 生成。因此调试时建议同时设置："
+msgstr "Enabling debug dump: Even if the cache is enabled, the system still generates dump files (overriding files in the directory with the same name) each time the system runs as long as **TRITON_DEBUG=1** is set. However, if the cache is hit and compilation is skipped, IR conversion may not be triggered. As a result, no new dump file is generated. Therefore, during debugging, you are advised to set as follows:"
+
+#: ../../zh/debug_guide/debugging.md:119
+msgid "3.3 文件生命周期管理"
+msgstr "3.3 File Lifecycle Management"
+
+#: ../../zh/debug_guide/debugging.md:121
+msgid "了解这些临时文件的生成时机和清理策略有助于更好地管理调试环境："
+msgstr "Understanding when these temporary files are generated and how they are cleared helps you better manage the debugging environment."
+
+#: ../../zh/debug_guide/debugging.md:123
+msgid "文件生成时机表："
+msgstr "File generation time table"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "文件类型"
+msgstr "File Type"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "生成阶段"
+msgstr "Generation Phase"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "触发条件"
+msgstr "Triggering Condition"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "清理建议"
+msgstr "Clearance Suggestion"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "缓存文件"
+msgstr "Cache file"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "每次编译执行时"
+msgstr "During each compilation"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "缓存未命中时生成"
+msgstr "Generated when the cache is not hit"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "定期清理或问题排查时清除"
+msgstr "Periodic clearing or clearing during troubleshooting"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "转储文件"
+msgstr "Dump file"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "设置 TRITON_DEBUG=1 后"
+msgstr "After **TRITON_DEBUG=1** is set"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "每次编译都会生成"
+msgstr "Generated during each compilation"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "调试结束后手动清理"
+msgstr "Manual clearing after debugging"
+
+#: ../../zh/debug_guide/debugging.md:130
+msgid "生产环境中应禁用调试转储（不设置 TRITON_DEBUG=1）"
+msgstr "In the production environment, debug dump should be disabled (that is, **TRITON_DEBUG=1** is not set)."
+
+#: ../../zh/debug_guide/debugging.md:132
+msgid "缓存机制可以显著提升性能，不应轻易禁用"
+msgstr "The cache mechanism can significantly improve performance and should not be disabled."
+
+#: ../../zh/debug_guide/debugging.md:134
+msgid "通过合理利用这些临时文件，开发者可以更高效地定位和解决 Triton-Ascend 在编译过程中遇到的问题。"
+msgstr "By properly using these temporary files, developers can efficiently locate and solve issues encountered during Triton-Ascend compilation."
+
+#: ../../zh/debug_guide/debugging.md:136
+msgid "3.4 IR文件解析"
+msgstr "3.4 IR File Parsing"
+
+#: ../../zh/debug_guide/debugging.md:138
+msgid ""
+"以示范测试用例  [01-vector-add.py](../../../third_party/ascend/tutorials/01"
+"-vector-add.py#) 举例说明编译流程： 这是一个简单的两个tensor的加法计算，计算逻辑请参考示范用例中的注解。 "
+"通过TRITON_DEBUG=1开启dump文件输出，设置TRITON_DISABLE_CACHE=1禁用缓存确保重新编译，可以获取到 "
+"kernel.ttir.mlir 和 kernel.ttadapter.mlir"
+msgstr ""
+"The following uses the [01-vector-add.py](../../../third_party/ascend/tu"
+"torials/01-vector-add.py#) test case as an example to describe the"
+"compilation process:"
+"This is a simple addition calculation of two tensors. For the"
+"calculation logic, see the comments in the sample case."
+"You can enable the dump file output by setting **TRITON_DEBUG=1** to"
+"obtain **kernel.ttir.mlir** and **kernel.ttadapter.mlir**."
+
+#: ../../zh/debug_guide/debugging.md:142
+msgid "运行用例"
+msgstr "Run the test case."
+
+#: ../../zh/debug_guide/debugging.md:148
+msgid "运行用例后会打印dump文件路径，默认是 ~/.triton/dump，显示如下："
+msgstr ""
+"After the test case is executed, the dump file path is displayed. The"
+"default path is **~/.triton/dump**. The following information is"
+"displayed:"
+
+#: ../../zh/debug_guide/debugging.md:155
+msgid "进入该dump路径，查看 kernel.ttir.mlir 和 kernel.ttadapter.mlir"
+msgstr ""
+"Go to the dump path and view **kernel.ttir.mlir** and"
+"**kernel.ttadapter.mlir**."
+
+#: ../../zh/debug_guide/debugging.md:157
+msgid "3.4.1 TTIR（Triton Intermediate Representation）"
+msgstr "3.4.1 Triton Intermediate Representation (TTIR)"
+
+#: ../../zh/debug_guide/debugging.md:159
+msgid "TTIR 样例 查看 kernel.ttir.mlir 如下："
+msgstr ""
+"TTIR example"
+"The **kernel.ttir.mlir** file is as follows:"
+
+#: ../../zh/debug_guide/debugging.md:187
+msgid "TTIR 解析"
+msgstr "TTIR analysis"
+
+#: ../../zh/debug_guide/debugging.md:189
+msgid ""
+"TTIR 是 Triton 编译器前端生成的中间表示（Intermediate Representation），它以 MLIR（Multi-"
+"Level IR）格式表达，保留了原始 Triton Python 内核的语义结构。在 `kernel.ttir.mlir` 中："
+msgstr ""
+"TTIR is an intermediate representation generated by the frontend of the"
+"Triton compiler. It is expressed in the Multi-Level IR (MLIR) format and"
+"retains the semantic structure of the original Triton Python kernel. In"
+"`kernel.ttir.mlir`:"
+
+#: ../../zh/debug_guide/debugging.md:191
+msgid "函数 `@add_kernel` 接收三个指针参数（分别对应输入 A、B 和输出 C 的设备内存地址）以及一个整型参数 `n` 表示向量长度。"
+msgstr ""
+"The `@add_kernel` function receives three pointer parameters"
+"(corresponding to the device memory addresses of input A, input B, and"
+"output C respectively) and an integer parameter `n` indicating the"
+"vector length."
+"- Each triton program (vectorized execution unit) processes 1024"
+"elements (represented by the `%c1024_i32` constant), obtains the ID of"
+"the current block through the `tt.get_program_id x`, and calculates the"
+"global offset."
+"- `tt.make_range` and `tt.splat` are used to construct a SIMD-style"
+"index tensor and they are used together with `arith.addi` to generate"
+"the global address offset processed by each thread."
+"- `tt.addptr` and `tt.load` are used to implement vectorized loading,"
+"and the mask `%6` (generated by `arith.cmpi slt`) is used to prevent"
+"out-of-bounds access."
+"- The element-wise floating-point addition `arith.addf` is executed, and"
+"the result is returned to the global memory by using `tt.store`."
+
+#: ../../zh/debug_guide/debugging.md:192
+#, python-format
+msgid ""
+"每个Triton program (向量化执行单元) 处理 1024 个元素（由 `%c1024_i32` 常量体现），通过 "
+"`tt.get_program_id x` 获取当前 block 的 ID，并计算其全局偏移。"
+msgstr ""
+"The `@add_kernel` function receives three pointer parameters"
+"(corresponding to the device memory addresses of input A, input B, and"
+"output C respectively) and an integer parameter `n` indicating the"
+"vector length."
+"- Each triton program (vectorized execution unit) processes 1024"
+"elements (represented by the `%c1024_i32` constant), obtains the ID of"
+"the current block through the `tt.get_program_id x`, and calculates the"
+"global offset."
+"- `tt.make_range` and `tt.splat` are used to construct a SIMD-style"
+"index tensor and they are used together with `arith.addi` to generate"
+"the global address offset processed by each thread."
+"- `tt.addptr` and `tt.load` are used to implement vectorized loading,"
+"and the mask `%6` (generated by `arith.cmpi slt`) is used to prevent"
+"out-of-bounds access."
+"- The element-wise floating-point addition `arith.addf` is executed, and"
+"the result is returned to the global memory by using `tt.store`."
+
+#: ../../zh/debug_guide/debugging.md:193
+msgid ""
+"使用 `tt.make_range` 与 `tt.splat` 构造 SIMD 风格的索引张量，配合 `arith.addi` "
+"生成每个线程处理的全局地址偏移。"
+msgstr ""
+"The `@add_kernel` function receives three pointer parameters"
+"(corresponding to the device memory addresses of input A, input B, and"
+"output C respectively) and an integer parameter `n` indicating the"
+"vector length."
+"- Each triton program (vectorized execution unit) processes 1024"
+"elements (represented by the `%c1024_i32` constant), obtains the ID of"
+"the current block through the `tt.get_program_id x`, and calculates the"
+"global offset."
+"- `tt.make_range` and `tt.splat` are used to construct a SIMD-style"
+"index tensor and they are used together with `arith.addi` to generate"
+"the global address offset processed by each thread."
+"- `tt.addptr` and `tt.load` are used to implement vectorized loading,"
+"and the mask `%6` (generated by `arith.cmpi slt`) is used to prevent"
+"out-of-bounds access."
+"- The element-wise floating-point addition `arith.addf` is executed, and"
+"the result is returned to the global memory by using `tt.store`."
+
+#: ../../zh/debug_guide/debugging.md:194
+msgid "通过 `tt.addptr` 和 `tt.load` 实现向量化加载，使用掩码 `%6`（由 `arith.cmpi slt` 生成）防止越界访问。"
+msgstr ""
+"The `@add_kernel` function receives three pointer parameters"
+"(corresponding to the device memory addresses of input A, input B, and"
+"output C respectively) and an integer parameter `n` indicating the"
+"vector length."
+"- Each triton program (vectorized execution unit) processes 1024"
+"elements (represented by the `%c1024_i32` constant), obtains the ID of"
+"the current block through the `tt.get_program_id x`, and calculates the"
+"global offset."
+"- `tt.make_range` and `tt.splat` are used to construct a SIMD-style"
+"index tensor and they are used together with `arith.addi` to generate"
+"the global address offset processed by each thread."
+"- `tt.addptr` and `tt.load` are used to implement vectorized loading,"
+"and the mask `%6` (generated by `arith.cmpi slt`) is used to prevent"
+"out-of-bounds access."
+"- The element-wise floating-point addition `arith.addf` is executed, and"
+"the result is returned to the global memory by using `tt.store`."
+
+#: ../../zh/debug_guide/debugging.md:195
+msgid "执行逐元素浮点加法 `arith.addf`，再通过 `tt.store` 将结果写回全局内存。"
+msgstr ""
+"The `@add_kernel` function receives three pointer parameters"
+"(corresponding to the device memory addresses of input A, input B, and"
+"output C respectively) and an integer parameter `n` indicating the"
+"vector length."
+"- Each triton program (vectorized execution unit) processes 1024"
+"elements (represented by the `%c1024_i32` constant), obtains the ID of"
+"the current block through the `tt.get_program_id x`, and calculates the"
+"global offset."
+"- `tt.make_range` and `tt.splat` are used to construct a SIMD-style"
+"index tensor and they are used together with `arith.addi` to generate"
+"the global address offset processed by each thread."
+"- `tt.addptr` and `tt.load` are used to implement vectorized loading,"
+"and the mask `%6` (generated by `arith.cmpi slt`) is used to prevent"
+"out-of-bounds access."
+"- The element-wise floating-point addition `arith.addf` is executed, and"
+"the result is returned to the global memory by using `tt.store`."
+
+#: ../../zh/debug_guide/debugging.md:197
+msgid ""
+"TTIR 层面仍基于 Triton 原生抽象（如 `!tt.ptr<f32>`、`tt.load`/`tt.store` "
+"等），尚未映射到底层硬件的具体内存模型或执行单元，是平台无关的高层次 IR。"
+msgstr ""
+"The TTIR layer is still based on the native abstraction (such as"
+"`!tt.ptr<f32>`, `tt.load`, and `tt.store`) of Triton and has not been"
+"mapped to the specific memory model or execution unit of the underlying"
+"hardware. It is a platform-independent high-level IR."
+
+#: ../../zh/debug_guide/debugging.md:199
+msgid "3.4.1 TTAdapter IR（Target-Specific Adapter Representation）"
+msgstr "3.4.1 Target-Specific Adapter Representation (TTAdapter IR)"
+
+#: ../../zh/debug_guide/debugging.md:201
+msgid "TTAdapter IR 样例 查看 kernel.ttadapter.mlir 如下："
+msgstr ""
+"TTAdapter IR example"
+"The **kernel.ttadapter.mlir** file is as follows:"
+
+#: ../../zh/debug_guide/debugging.md:246
+msgid "TTAdapter IR 解析"
+msgstr "TTAdapter IR parsing"
+
+#: ../../zh/debug_guide/debugging.md:248
+msgid ""
+"TTAdapter IR 是 Triton-Ascend 编译流程中将 TTIR 转换为适配昇腾 NPU 架构的中间表示，采用标准 MLIR "
+"dialect（如 `memref`、`linalg`、`scf` 等），并引入 NPU 特定的约束和优化策略。在 "
+"`kernel.ttadapter.mlir` 中："
+msgstr ""
+"TTIR is converted to TTAdapter IR to adapt to the Ascend NPU"
+"architecture in the Triton-Ascend compilation process. TTAdapter IR uses"
+"standard MLIR dialect (such as `memref`, `linalg`, and `scf`) and"
+"introduces NPU-specific constraints and optimization policies. In"
+"`kernel.ttadapter.mlir`:"
+
+#: ../../zh/debug_guide/debugging.md:250
+msgid ""
+"函数签名已从 Triton 指针类型转换为 `memref<?xi8>` 或带属性的 `memref<?xf32>`，其中 "
+"`tt.divisibility = 16` 表示内存对齐要求，`tt.tensor_kind` 区分输入（0）与输出（1）。"
+msgstr ""
+"The function signature has been converted from the Triton pointer type"
+"to `memref<?xi8>` or `memref<?xf32>` with attributes. `tt.divisibility ="
+"16` indicates the memory alignment requirement, and `tt.tensor_kind`"
+"distinguishes input (marked with **0**) and output (marked with **1**)."
+"- The global offset is reconstructed as a local view of a fixed size"
+"(1024) by using `memref.reinterpret_cast` for subsequent vectorization."
+"- The boundary check logic is introduced to calculate the number of"
+"valid elements `%6` and use `scf.if` to control whether to fill zeros"
+"(`linalg.fill`) at the end to ensure that the SIMD width is aligned and"
+"does not exceed the boundary."
+"- `memref.alloc` is used to allocate a local buffer, `memref.copy` is"
+"used to securely copy the global memory data to the local host, and"
+"`bufferization.to_tensor` is used to convert the data into tensors for"
+"operators."
+"- The addition operation is performed by `arith.addf` on the tensor. The"
+"valid part of the result is truncated by `tensor.extract_slice` and"
+"written back to the target memref by `bufferization.materialize_in_desti"
+"nation`."
+
+#: ../../zh/debug_guide/debugging.md:251
+msgid "全局偏移通过 `memref.reinterpret_cast` 重构为固定大小（1024）的局部视图，便于后续向量化处理。"
+msgstr ""
+"The function signature has been converted from the Triton pointer type"
+"to `memref<?xi8>` or `memref<?xf32>` with attributes. `tt.divisibility ="
+"16` indicates the memory alignment requirement, and `tt.tensor_kind`"
+"distinguishes input (marked with **0**) and output (marked with **1**)."
+"- The global offset is reconstructed as a local view of a fixed size"
+"(1024) by using `memref.reinterpret_cast` for subsequent vectorization."
+"- The boundary check logic is introduced to calculate the number of"
+"valid elements `%6` and use `scf.if` to control whether to fill zeros"
+"(`linalg.fill`) at the end to ensure that the SIMD width is aligned and"
+"does not exceed the boundary."
+"- `memref.alloc` is used to allocate a local buffer, `memref.copy` is"
+"used to securely copy the global memory data to the local host, and"
+"`bufferization.to_tensor` is used to convert the data into tensors for"
+"operators."
+"- The addition operation is performed by `arith.addf` on the tensor. The"
+"valid part of the result is truncated by `tensor.extract_slice` and"
+"written back to the target memref by `bufferization.materialize_in_desti"
+"nation`."
+
+#: ../../zh/debug_guide/debugging.md:252
+msgid ""
+"引入边界检查逻辑：计算有效元素数量 `%6`，并通过 `scf.if` 控制是否对尾部填充零（`linalg.fill`），确保 SIMD "
+"宽度对齐且不越界。"
+msgstr ""
+"The function signature has been converted from the Triton pointer type"
+"to `memref<?xi8>` or `memref<?xf32>` with attributes. `tt.divisibility ="
+"16` indicates the memory alignment requirement, and `tt.tensor_kind`"
+"distinguishes input (marked with **0**) and output (marked with **1**)."
+"- The global offset is reconstructed as a local view of a fixed size"
+"(1024) by using `memref.reinterpret_cast` for subsequent vectorization."
+"- The boundary check logic is introduced to calculate the number of"
+"valid elements `%6` and use `scf.if` to control whether to fill zeros"
+"(`linalg.fill`) at the end to ensure that the SIMD width is aligned and"
+"does not exceed the boundary."
+"- `memref.alloc` is used to allocate a local buffer, `memref.copy` is"
+"used to securely copy the global memory data to the local host, and"
+"`bufferization.to_tensor` is used to convert the data into tensors for"
+"operators."
+"- The addition operation is performed by `arith.addf` on the tensor. The"
+"valid part of the result is truncated by `tensor.extract_slice` and"
+"written back to the target memref by `bufferization.materialize_in_desti"
+"nation`."
+
+#: ../../zh/debug_guide/debugging.md:253
+msgid ""
+"使用 `memref.alloc` 分配本地暂存 buffer，通过 `memref.copy` 将全局内存数据安全拷贝至本地，再经 "
+"`bufferization.to_tensor` 转为 tensor 供算子使用。"
+msgstr ""
+"The function signature has been converted from the Triton pointer type"
+"to `memref<?xi8>` or `memref<?xf32>` with attributes. `tt.divisibility ="
+"16` indicates the memory alignment requirement, and `tt.tensor_kind`"
+"distinguishes input (marked with **0**) and output (marked with **1**)."
+"- The global offset is reconstructed as a local view of a fixed size"
+"(1024) by using `memref.reinterpret_cast` for subsequent vectorization."
+"- The boundary check logic is introduced to calculate the number of"
+"valid elements `%6` and use `scf.if` to control whether to fill zeros"
+"(`linalg.fill`) at the end to ensure that the SIMD width is aligned and"
+"does not exceed the boundary."
+"- `memref.alloc` is used to allocate a local buffer, `memref.copy` is"
+"used to securely copy the global memory data to the local host, and"
+"`bufferization.to_tensor` is used to convert the data into tensors for"
+"operators."
+"- The addition operation is performed by `arith.addf` on the tensor. The"
+"valid part of the result is truncated by `tensor.extract_slice` and"
+"written back to the target memref by `bufferization.materialize_in_desti"
+"nation`."
+
+#: ../../zh/debug_guide/debugging.md:254
+msgid ""
+"加法操作由 `arith.addf` 在 tensor 上执行，结果通过 `tensor.extract_slice` 截取有效部分，并用 "
+"`bufferization.materialize_in_destination` 写回目标 memref。"
+msgstr ""
+"The function signature has been converted from the Triton pointer type"
+"to `memref<?xi8>` or `memref<?xf32>` with attributes. `tt.divisibility ="
+"16` indicates the memory alignment requirement, and `tt.tensor_kind`"
+"distinguishes input (marked with **0**) and output (marked with **1**)."
+"- The global offset is reconstructed as a local view of a fixed size"
+"(1024) by using `memref.reinterpret_cast` for subsequent vectorization."
+"- The boundary check logic is introduced to calculate the number of"
+"valid elements `%6` and use `scf.if` to control whether to fill zeros"
+"(`linalg.fill`) at the end to ensure that the SIMD width is aligned and"
+"does not exceed the boundary."
+"- `memref.alloc` is used to allocate a local buffer, `memref.copy` is"
+"used to securely copy the global memory data to the local host, and"
+"`bufferization.to_tensor` is used to convert the data into tensors for"
+"operators."
+"- The addition operation is performed by `arith.addf` on the tensor. The"
+"valid part of the result is truncated by `tensor.extract_slice` and"
+"written back to the target memref by `bufferization.materialize_in_desti"
+"nation`."
+
+#: ../../zh/debug_guide/debugging.md:256
+msgid "TTAdapter IR 已完成从 Triton 抽象到适配昇腾 NPU 的格式。"
+msgstr ""
+"TTAdapter IR has been abstracted from Triton to adapt to the Ascend NPU"
+"format."
+
+#: ../../zh/debug_guide/debugging.md:258
+msgid "4 解释器模式"
+msgstr "4 Interpreter Mode"
+
+#: ../../zh/debug_guide/debugging.md:260
+msgid ""
+"解释器的核心价值在于**隔离硬件差异**。通过环境变量 `TRITON_INTERPRET=1` "
+"强制Triton在CPU上执行kernel计算，其结果可作为判断NPU计算精度的基准。"
+msgstr ""
+"The core value of the interpreter is to **isolate hardware"
+"differences**. You can set the environment variable `TRITON_INTERPRET`"
+"to `1` to forcibly execute kernel computation on the CPU. The result of"
+"the kernel computation can be used as the benchmark for determining the"
+"NPU computation accuracy."
+
+#: ../../zh/debug_guide/debugging.md:262
+msgid "**使用方法：**"
+msgstr "**Usage:**"
+
+#: ../../zh/debug_guide/debugging.md:264
+msgid "设置环境变量`TRITON_INTERPRET=1`并运行程序，使Triton kernel在CPU解释器上执行。"
+msgstr ""
+"1. Set the environment variable `TRITON_INTERPRET` to `1` and run the"
+"program so that the Triton kernel is executed on the CPU interpreter."
+"2. Insert a Python breakpoint at the position to be checked in the"
+"Triton kernel source code."
+
+#: ../../zh/debug_guide/debugging.md:265
+msgid "在Triton kernel源码中需要检查的位置插入Python断点："
+msgstr ""
+"1. Set the environment variable `TRITON_INTERPRET` to `1` and run the"
+"program so that the Triton kernel is executed on the CPU interpreter."
+"2. Insert a Python breakpoint at the position to be checked in the"
+"Triton kernel source code."
+
+#: ../../zh/debug_guide/debugging.md:271
+msgid "程序执行到此处会暂停并进入Python调试器 (`Pdb`)。可以打印和检查任意中间变量的值："
+msgstr ""
+"3. The program execution is paused and you enter the Python debugger"
+"(`Pdb`). You can print and check the value of any intermediate variable."
+
+#: ../../zh/debug_guide/debugging.md:277
+msgid ""
+"注：解释器模式会在 CPU 上执行所有计算，显著降低运行效率。因此，在完成调试或验证后，务必取消设置环境变量 "
+"TRITON_INTERPRET，或显式将其设为 0，确保系统性能不受影响："
+msgstr ""
+"Note: The interpreter mode performs all computations on the CPU, which"
+"significantly reduces the running efficiency. Therefore, after debugging"
+"or verification, you must cancel the setting of the environment variable"
+"**TRITON_INTERPRET** or explicitly set it to **0** to ensure that the"
+"system performance is not affected."
+
+#: ../../zh/debug_guide/debugging.md:287
+msgid "5 调试方法"
+msgstr "5 Debugging Methods"
+
+#: ../../zh/debug_guide/debugging.md:289
+msgid "5.1 打印调试方法"
+msgstr "5.1 Debugging by Printing"
+
+#: ../../zh/debug_guide/debugging.md:291
+msgid "5.1.1 静态打印调试方法"
+msgstr "5.1.1 Static Printing Debugging"
+
+#: ../../zh/debug_guide/debugging.md:293
+msgid "此方法使用 `tl.static_print` 在编译时打印常量表达式的值，适用于调试编译时已知的配置参数和常量。"
+msgstr ""
+"This method uses `tl.static_print` to print the value of a constant"
+"expression during compilation. It is applicable to debugging"
+"configuration parameters and constants that are known during"
+"compilation."
+
+#: ../../zh/debug_guide/debugging.md:295
+msgid ""
+"设置环境变量 `TRITON_DEVICE_PRINT=1` 可启用 `tl.static_print` 功能。此函数允许在 kernel "
+"编译阶段打印常量值，是验证配置参数和常量表达式的有效方法。"
+msgstr ""
+"Setting the environment variable `TRITON_DEVICE_PRINT` to `1` can enable"
+"the `tl.static_print` function. This function allows constant values to"
+"be printed during kernel compilation. It is an effective method for"
+"verifying configuration parameters and constant expressions."
+
+#: ../../zh/debug_guide/debugging.md:297
+msgid "特性说明："
+msgstr "Features:"
+
+#: ../../zh/debug_guide/debugging.md:299
+msgid "tl.static_print 在 编译时 执行，而不是运行时"
+msgstr "`tl.static_print` is executed during compilation, not during runtime."
+
+#: ../../zh/debug_guide/debugging.md:301
+msgid "只能打印编译时常量（tl.constexpr 参数、常量表达式）"
+msgstr ""
+"Only compilation constants (**tl.constexpr** parameters and constant"
+"expressions) can be printed."
+
+#: ../../zh/debug_guide/debugging.md:303
+msgid "输出显示在编译器的标准输出中"
+msgstr "The output is displayed in the standard output of the compiler."
+
+#: ../../zh/debug_guide/debugging.md:305
+msgid "使用方法："
+msgstr "Usage:"
+
+#: ../../zh/debug_guide/debugging.md:307
+msgid "1.在 Triton kernel 中，为需要调试的常量参数添加 tl.static_print 语句"
+msgstr ""
+"1.In the Triton kernel, add the `tl.static_print` statement for the"
+"constant parameters to be debugged."
+
+#: ../../zh/debug_guide/debugging.md:336
+msgid "2.设置环境变量并运行程序进行编译"
+msgstr "2.Set the environment variable and run the program for compilation."
+
+#: ../../zh/debug_guide/debugging.md:346
+msgid "5.1.2 运行时调试方法"
+msgstr "5.1.2 Runtime Debugging"
+
+#: ../../zh/debug_guide/debugging.md:348
+msgid ""
+"此方法的使用 `tl.device_print` 可以灵活打印需要观察的变量的值。 设置环境变量 `TRITON_DEVICE_PRINT=1` "
+"可启用 `tl.device_print` 功能。此函数允许在kernel内部打印张量值，是分阶段验证计算精度的高效方法。 **使用方法：**"
+msgstr ""
+"You can use `tl.device_print` to flexibly print the values of the"
+"variables to be observed."
+"Setting the environment variable `TRITON_DEVICE_PRINT` to `1` can enable"
+"the `tl.device_print` function. This function allows tensor values to be"
+"printed in the kernel. It is an efficient method for verifying the"
+"computation accuracy by phase."
+
+#: ../../zh/debug_guide/debugging.md:352
+msgid "在Triton kernel中，为需要打印的变量增加 `tl.device_print` 的语句。"
+msgstr "**Usage:**"
+
+#: ../../zh/debug_guide/debugging.md:367
+msgid "2.设置环境变量`TRITON_DEVICE_PRINT=1`并运行程序，窗口将打印出该变量的值。"
+msgstr ""
+"1.In the Triton kernel, add the `tl.device_print` statement for the"
+"variables to be printed."
+
+#: ../../zh/debug_guide/debugging.md:377
+msgid "注：打印长度限制： tl.device_print 在张量打印有长度限制，具体表现为：当张量长度超过一定阈值时，输出会被截断"
+msgstr ""
+"2.Set the environment variable `TRITON_DEVICE_PRINT` to `1` and run the"
+"program. The window displays the value of the variable."
+
+#: ../../zh/debug_guide/debugging.md:380
+msgid "5.1.3 对比两种打印方法"
+msgstr "5.1.3 Comparing the Two Printing Methods"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "特性"
+msgstr "Feature"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "`tl.device_print`"
+msgstr "`tl.device_print`"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "`tl.static_print`"
+msgstr "`tl.static_print`"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**执行时机**"
+msgstr "**Execution time**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "运行时（kernel 执行时）"
+msgstr "Runtime (kernel execution)"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "编译时（kernel 编译时）"
+msgstr "Compilation (kernel compilation)"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**输出位置**"
+msgstr "**Output location**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "运行时标准输出"
+msgstr "Runtime standard output"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "编译器标准输出"
+msgstr "Compiler standard output"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**可打印内容**"
+msgstr "**Print content**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "运行时张量值、变量"
+msgstr "Runtime tensor values and variables"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "编译时常量、常量表达式"
+msgstr "Compilation constants and constant expressions"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**性能影响**"
+msgstr "**Impact on performance**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "有运行时开销"
+msgstr "There is runtime overhead."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "无运行时开销"
+msgstr "No runtime overhead."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "**启用环境变量**"
+msgstr "**Enabling environment variables**"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "`TRITON_DEVICE_PRINT=1`"
+msgstr "`TRITON_DEVICE_PRINT=1`"
+
+#: ../../zh/debug_guide/debugging.md:390
+msgid "环境变量说明："
+msgstr "Description of environment variables:"
+
+#: ../../zh/debug_guide/debugging.md:392
+msgid "TRITON_DEVICE_PRINT=1：启用运行时打印，同时也会启用编译时打印"
+msgstr "**TRITON_DEVICE_PRINT=1**: enables runtime printing and compilation printing."
+
+#: ../../zh/debug_guide/debugging.md:394
+msgid "TRITON_DEBUG=1：启用所有调试输出（包括编译时和运行时打印）"
+msgstr "**TRITON_DEBUG=1**: enables all debugging outputs (including compilation and runtime printing)."
+
+#: ../../zh/debug_guide/debugging.md:398
+msgid ""
+"当 `ttir.mlir` → `ttadapter.mlir` "
+"的转换过程失败，无法生成`ttadapter.mlir`，报错`MLIRCompileError`. 需要进入 Triton-Ascend "
+"代码层面定位问题。Triton-Ascend 包含 Python 和 C++ "
+"代码层，需根据报错日志中的调用栈信息，定位到具体的报错代码片段，并采用相应的调试方法。"
+msgstr ""
+"When the `ttir.mlir` → `ttadapter.mlir` conversion fails, the"
+"`ttadapter.mlir` cannot be generated and the `MLIRCompileError` error is"
+"reported."
+"You need to locate the fault at the Triton-Ascend code layer."
+"Triton-Ascend contains the Python and C++ code layers. You need to"
+"locate the error code segment based on the call stack information in the"
+"error log and use the corresponding debugging method."
+
+#: ../../zh/debug_guide/debugging.md:401
+msgid "5.2.1 Python 代码调试方法"
+msgstr "5.2.1 Debugging Python Code"
+
+#: ../../zh/debug_guide/debugging.md:403
+msgid ""
+"当调用栈信息显示错误源自 Triton-Ascend 的 Python 层代码时，可以使用 Python 内置的调试器 pdb "
+"进行交互式调试。pdb 允许你设置断点、单步执行、检查变量状态，是定位 Python 代码逻辑错误的有效工具。"
+msgstr ""
+"When the call stack information shows that the error is caused by the"
+"Python layer code of Triton-Ascend, you can use the built-in debugger"
+"pdb of Python for interactive debugging. As an effective tool for"
+"locating Python code logic errors, pdb allows you to set breakpoints,"
+"perform step-by-step execution, and check variable status."
+
+#: ../../zh/debug_guide/debugging.md:405
+msgid "使用步骤："
+msgstr "Procedure:"
+
+#: ../../zh/debug_guide/debugging.md:407
+msgid "定位问题入口 在报错日志中找到最接近用户代码的 Python 调用栈信息，通常位于栈顶附近，例如："
+msgstr ""
+"Locating faults"
+"In the error log, find the Python call stack information closest to the"
+"user code, which is usually near the top of the stack. For example:"
+
+#: ../../zh/debug_guide/debugging.md:415
+msgid "插入调试断点 在怀疑出错的 Python 源文件中插入 pdb 断点。"
+msgstr ""
+"Inserting a debugging breakpoint"
+"Insert a pdb breakpoint in the Python source file that is suspected to"
+"be faulty."
+
+#: ../../zh/debug_guide/debugging.md:423
+msgid "**示例:** 假设在 `compiler.py` 的第 123 行设置了断点，程序暂停后："
+msgstr ""
+"**Example:**"
+"Assume that a breakpoint is set in line 123 of `compiler.py`. After the"
+"program is suspended, the following information is displayed:"
+
+#: ../../zh/debug_guide/debugging.md:440
+msgid "5.2.2 环境变量调试方法"
+msgstr "5.2.2 Debugging Environment Variables"
+
+#: ../../zh/debug_guide/debugging.md:442
+msgid "在开发或调试 Triton 算子时，可通过设置以下环境变量启用不同阶段的中间表示（IR）打印，帮助定位问题。以下是两个关键调试开关的详细说明。"
+msgstr ""
+"When developing or debugging Triton operators, you can set the following"
+"environment variables to enable IR printing in different phases, which"
+"helps locate faults. The following describes the two key debugging"
+"switches."
+
+#: ../../zh/debug_guide/debugging.md:444
+msgid "5.2.2.1 `MLIR_ENABLE_DUMP=1`"
+msgstr "5.2.2.1 `MLIR_ENABLE_DUMP=1`"
+
+#: ../../zh/debug_guide/debugging.md:446
+msgid ""
+"**功能** 启用 **MLIR 高层 IR 的自动 dump**。在每个 MLIR Pass 执行前后，将当前函数的 IR 以可读文本形式输出到"
+" `stderr`。"
+msgstr ""
+"**Function:**"
+"Enables **automatic dump of the MLIR high-level IR** and outputs the IR"
+"of the current function in readable text to `stderr` before and after"
+"each MLIR pass is executed."
+
+#: ../../zh/debug_guide/debugging.md:449
+msgid "**特点** 日志量小：通常几十至几百行，易于阅读 聚焦高层逻辑：适用于调试算子转换、内存布局、并行策略等"
+msgstr ""
+"**Feature:**"
+"Small log size: usually dozens to hundreds of lines, which are easy to"
+"read."
+"Focus on high-level logic: applicable to debugging operator conversion,"
+"memory layout, and parallel policies."
+
+#: ../../zh/debug_guide/debugging.md:453
+msgid "**使用建议** 日常调试首选：90% 的 Triton 算子问题可通过此日志定位 配合 `TRITON_DEBUG=1` 可进一步增强信息"
+msgstr ""
+"**Suggestion:**"
+"First choice for routine debugging: This log can be used to locate 90%"
+"of Triton operator issues."
+"It can be used together with `TRITON_DEBUG=1` to further enhance"
+"information."
+
+#: ../../zh/debug_guide/debugging.md:457
+msgid "**启用方式**"
+msgstr "**Enabling method:**"
+
+#: ../../zh/debug_guide/debugging.md:465
+msgid "5.2.2.2 `TRITON_ENABLE_LLVM_DEBUG=1`"
+msgstr "5.2.2.2 `TRITON_ENABLE_LLVM_DEBUG=1`"
+
+#: ../../zh/debug_guide/debugging.md:467
+msgid "**功能** 启用 LLVM 后端 CodeGen 阶段的全量调试日志，包括指令选择、寄存器分配、指令调度、机器码生成等底层过程。"
+msgstr ""
+"**Function:**"
+"Enables full debugging logs in the LLVM backend CodeGen phase, including"
+"instruction selection, register allocation, instruction scheduling, and"
+"machine code generation."
+
+#: ../../zh/debug_guide/debugging.md:470
+msgid ""
+"**特点** 日志量极大：单个 kernel 可产生数万行输出 极底层细节：包含寄存器名、物理/虚拟寄存器映射、栈帧布局等 仅限 LLVM "
+"专家：对普通 Triton 开发者通常为“噪声”"
+msgstr ""
+"**Feature:**"
+"Large log size: A single kernel can generate tens of thousands of lines"
+"of output."
+"Bottom-layer details: Register name, physical/virtual register mapping,"
+"and stack frame layout are included."
+"Only for LLVM experts: For common Triton developers, this is considered"
+"\"noise.\""
+
+#: ../../zh/debug_guide/debugging.md:475
+msgid "**使用建议** 仅在怀疑 LLVM 后端 bug 时启用（如生成非法指令、性能异常） 配合 LLVM_DEBUG_ONLY 限制输出范围"
+msgstr ""
+"**Suggestion:**"
+"Enable this function only when LLVM backend bugs are suspected (for"
+"example, invalid instructions are generated or performance exceptions"
+"occur)."
+"It can be used together with LLVM_DEBUG_ONLY to limit the output scope."
+
+#: ../../zh/debug_guide/debugging.md:479
+msgid ""
+"在启用 `TRITON_ENABLE_LLVM_DEBUG=1` 时，可通过 `LLVM_DEBUG_ONLY` "
+"环境变量指定仅输出特定模块的调试日志。以下是常用 `DEBUG_TYPE` 的简要解释："
+msgstr ""
+"When `TRITON_ENABLE_LLVM_DEBUG=1` is enabled, you can use the"
+"`LLVM_DEBUG_ONLY` environment variable to specify the module for which"
+"the logs will be output. The following is a brief description of the"
+"common `DEBUG_TYPE`:"
+
+#: ../../zh/debug_guide/debugging.md:508
+msgid "**启用方式** 以指定仅输出`isel`为例"
+msgstr ""
+"**Enabling method:**"
+"In the following example, it is specified that only `isel` is output."
+
+#: ../../zh/debug_guide/debugging.md:517
+msgid ""
+"**调试流程推荐** 先启用 `MLIR_ENABLE_DUMP=1` → 验证 MLIR 层转换是否正确（如 ReduceOp → "
+"scf.for） 若 MLIR 正常但结果错误 → 怀疑 LLVM 问题，再启用 `TRITON_ENABLE_LLVM_DEBUG=1 + "
+"LLVM_DEBUG_ONLY` 避免直接开启 `TRITON_ENABLE_LLVM_DEBUG=1` → "
+"日志过大易掩盖关键信息，且严重影响运行速度"
+msgstr ""
+"**Recommended debugging process:**"
+"Enable `MLIR_ENABLE_DUMP=1` first."
+"→ Check whether the conversion at the MLIR layer is correct (for"
+"example, ReduceOp → scf.for)."
+"If the MLIR is normal but the result is incorrect:"
+"→ It is suspected that the LLVM is faulty. Enable"
+"`TRITON_ENABLE_LLVM_DEBUG=1 + LLVM_DEBUG_ONLY`."
+"Do not directly enable `TRITON_ENABLE_LLVM_DEBUG=1`."
+"→ Large log size may mask key information and severely affect the"
+"running speed."
+
+#: ../../zh/debug_guide/debugging.md:525
+msgid "附录 A：常用环境变量速查表"
+msgstr "Appendix A: Quick Reference Table for Common Environment Variables"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "变量"
+msgstr "Variable"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "作用"
+msgstr "Description"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "`TRITON_DEBUG=1`"
+msgstr "`TRITON_DEBUG=1`"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "启用中间 IR 转储"
+msgstr "Enables intermediate IR dump."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "`TRITON_DISABLE_CACHE=1`"
+msgstr "`TRITON_DISABLE_CACHE=1`"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "禁用编译缓存"
+msgstr "Disables compilation cache."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "`TRITON_INTERPRET=1`"
+msgstr "`TRITON_INTERPRET=1`"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "使用 CPU 解释器执行 kernel"
+msgstr "Uses the CPU interpreter to execute the kernel."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "启用运行时打印输出，同时也会启用编译时打印输出"
+msgstr "Enables runtime print output and compilation print output."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "`MLIR_ENABLE_DUMP=1`"
+msgstr "`MLIR_ENABLE_DUMP=1`"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "启用 MLIR 高层 IR 的自动 dump。在每个 MLIR Pass 执行前后，将当前函数的 IR 以可读文本形式输出"
+msgstr "Enables automatic dump of the MLIR high-level IR and outputs the IR of the current function in readable text before and after each MLIR pass is executed."
+
+#: ../../zh/debug_guide/debugging.md
+msgid "`TRITON_ENABLE_LLVM_DEBUG=1`"
+msgstr "`TRITON_ENABLE_LLVM_DEBUG=1`"
+
+#: ../../zh/debug_guide/debugging.md
+msgid "启用 LLVM 后端 CodeGen 阶段的全量调试日志，包括指令选择、寄存器分配、指令调度、机器码生成等底层过程"
+msgstr "Enables full debugging logs in the LLVM backend CodeGen phase, including instruction selection, register allocation, instruction scheduling, and machine code generation."

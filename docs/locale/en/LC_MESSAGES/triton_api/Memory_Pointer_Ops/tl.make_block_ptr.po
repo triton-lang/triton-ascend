@@ -1,0 +1,297 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:1
+msgid "triton.language.make_block_ptr"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:5
+msgid "简介：创建指向GM上张量的指针 原型："
+msgstr ""
+"Description: Creates a pointer to a tensor in Global Memory. Prototype:"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:20
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:22
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "参数名"
+msgstr "Parameter"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "`base`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "`triton.PointerType`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "张量的基指针"
+msgstr "Base pointer of tensor"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "`shape`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "`tuple(int | constexpr)`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "张量在GM上的形状"
+msgstr "Tensor shape in Global Memory"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "`strides`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "张量各维度的步长列表"
+msgstr "List of strides for each tensor dim"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "`offsets`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "张量各维度的基址偏移量列表"
+msgstr "List of base address offsets for each tensor dim"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "`block_shape`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "`tuple(constexpr)`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "单次从全局内存加载 / 存储的块的形状"
+msgstr "Shape of a single block loaded/stored from/to GM"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "`order`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "-"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter, external calls not supported yet"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:34
+msgid "返回值：`pointer_type<blocked<shape, element_type>>`： 指向tensor的指针"
+msgstr ""
+"Return value: `pointer_type<blocked<shape, element_type>>`: Pointer to a "
+"tensor"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:36
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:38
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "GPU"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:45
+msgid "结论：Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。"
+msgstr ""
+"Ascend lacks uint8, uint16, uint32, uint64, fp64 support vs GPU (hw "
+"limitation)."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:47
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "支持维度范围"
+msgstr "Supported Dimension Range"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "仅支持 1~5维 tensor"
+msgstr "Only supports 1~5D tensors"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:54
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。"
+msgstr ""
+"Shape: No difference between GPU and Ascend. Both support 1~5D tensors."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:56
+msgid "2.2.3 社区约束"
+msgstr "2.2.3 Community Constraints"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:58
+msgid "`tl.make_block_ptr`的结果不允许进行算数运算，需要改变偏移量时，可以通过："
+msgstr ""
+"`tl.make_block_ptr` result doesn't support arithmetic. To change offset:"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:60
+msgid "重新调用make_block_ptr，修改`offset`参数:"
+msgstr "Re-call make_block_ptr, modifying `offset`:"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:80
+msgid "调用`tl.advance`调整偏移量:"
+msgstr "Call `tl.advance` to adjust offset:"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:94
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:96
+msgid "相对社区能力缺失且无法实现"
+msgstr "Not supported vs. community version and cannot be implemented"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:98
+msgid "Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。"
+msgstr ""
+"Ascend lacks uint8, uint16, uint32, uint64, fp64 vs GPU (hw limitation)."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:100
+msgid "Ascend只允许通过调整`order`参数的顺序来表达转置语义，不能通过调整`stride`参数的顺序实现转置语义。"
+msgstr ""
+"Ascend only supports transpose via `order` parameter order, not via `stride`"
+" order."
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "差异点"
+msgstr "Difference"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "描述"
+msgstr "Description"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "解决途径"
+msgstr "Resolution"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "与分支、循环语句搭配使用时的泛化性问题"
+msgstr "Generalization issues with branch/loop usage"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "当前`tl.make_block_ptr`，如果与较复杂的循环和分支语句搭配使用，可能会出现编译问题"
+msgstr ""
+"`tl.make_block_ptr` may have compilation issues with complex loops/branches"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md
+msgid "大量泛化测试暴露问题，迭代解决"
+msgstr ""
+"Issues found via extensive generalization testing; resolved iteratively"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:106
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Memory_Pointer_Ops/tl.make_block_ptr.md:108
+msgid "以下示例实现了通过tl.make_block_ptr读取一个tensor并将其转置的功能："
+msgstr "Example: reading a tensor via tl.make_block_ptr and transposing it."

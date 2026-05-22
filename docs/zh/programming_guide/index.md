@@ -56,31 +56,31 @@ def _attn_fwd(Q, K, V, M, Out, acc, scale,
               BLOCK_N: tl.constexpr,
               STAGE: tl.constexpr
               ):
-    # 计算任务总量,将三维任务(Z,H,M)展平为一维总任务数
+    # Calculate total tasks by flattening 3D tasks (Z,H,M) into 1D total task count
     NUM_BLOCKS_M = N_CTX // BLOCK_M
     NUM_BLOCKS = NUM_BLOCKS_M * Z * H
 
-    # 每个核根据自己标识选取要处理的任务
-    pid = tl.program_id(0)  # 当前核的唯一ID
-    NUM_CORE = tl.num_programs(0)  # 获取固定启动的总核数
-    # 循环规则：range(pid, NUM_BLOCKS, NUM_CORE) 实现"跨步分配任务"
-    # - 起始值pid：每个核从自己的ID开始取任务，避免任务重叠
-    # - 步长NUM_CORE：按总核数跨步，确保任务均匀分配到各个核
+    # Each core selects its tasks based on its own ID
+    pid = tl.program_id(0)  # Unique ID of the current core
+    NUM_CORE = tl.num_programs(0)  # Get the total number of fixed launched cores
+    # Loop pattern: range(pid, NUM_BLOCKS, NUM_CORE) implements "strided task distribution"
+    # - Start value pid: each core takes tasks starting from its own ID to avoid overlap
+    # - Step NUM_CORE: stride by total cores to ensure even distribution
     for block_idx in range(pid, NUM_BLOCKS, NUM_CORE):
-        # 计算每次任务的数据偏移
-        # 【核心：一维任务索引反向还原为原始多维索引】
-        # block_idx是展平后的一维任务索引，通过整除/取余拆分回原始维度
-        # 1.拆分Z+H合并轴 & M分块轴：
-        #   - 整除NUM_BLOCKS_M：提取Z+H合并轴的索引（task_hz_idx）
-        #   - 取余NUM_BLOCKS_M：提取M维度的分块索引（task_m_idx）
+        # Calculate the data offset for each task
+        # [Core: reverse 1D task index back to original multi-dimensional index]
+        # block_idx is the flattened 1D task index, split back to original dimensions via division/remainder
+        # 1. Split Z+H merged axis & M tiling axis:
+        #   - Divide by NUM_BLOCKS_M: extract Z+H merged axis index (task_hz_idx)
+        #   - Mod NUM_BLOCKS_M: extract M dimension tiling index (task_m_idx)
         task_hz_idx = block_idx // NUM_BLOCKS_M
         task_m_idx = block_idx % NUM_BLOCKS_M
-        # 2.拆分Z+H合并轴为原始Z轴和H轴：
-        #   - 整除H：还原Z轴索引（off_z）
-        #   - 取余H：还原H轴索引（off_h）
+        # 2. Split Z+H merged axis into original Z axis and H axis:
+        #   - Divide by H: restore Z axis index (off_z)
+        #   - Mod H: restore H axis index (off_h)
         off_z = task_hz_idx // H
         off_h = task_hz_idx % H
-        # 3.计算数据偏移量：根据还原的Z/H索引，定位Q/K/V张量中对应的数据起始位置
+        # 3. Calculate data offset: locate the starting position in Q/K/V tensors based on restored Z/H indices
         qvk_offset = off_z.to(tl.int64) * stride_qz + off_h.to(tl.int64) * stride_qh
 ```
 
@@ -97,18 +97,18 @@ import triton.language as tl
 def add_kernel(x_ptr, 
                y_ptr, 
                out_ptr, 
-               n,  # 元素总数量。
-               BLOCK_SIZE: tl.constexpr,  # 分块元素数量。
+               n,  # Total number of elements
+               BLOCK_SIZE: tl.constexpr,  # Number of elements per block
                ): 
     pid = tl.program_id(0) 
     NUM_CORE = tl.num_programs(0)
     NUM_BLOCKS = tl.cdiv(n, BLOCK_SIZE)
     for block_idx in range(pid, NUM_BLOCKS, NUM_CORE):
         block_start = block_idx * BLOCK_SIZE
-        # 分块大小为 BLOCK_SIZE
+        # Block size is BLOCK_SIZE
         offsets = block_start + tl.arange(0, BLOCK_SIZE)
         mask = offsets < n
-        # 加载 x,y 数据到片上内存
+        # Load x, y data to on-chip memory
         x = tl.load(x_ptr + offsets, mask=mask)
         y = tl.load(y_ptr + offsets, mask=mask)
 
@@ -126,8 +126,8 @@ def add_kernel(x_ptr,
 
 ```python
 # conv_state = tensor([2048, 3], bfloat16)
-conv_state = tl.load(conv_state_ptr + conv_batch_offs * conv_batch_stride + doffs * 3 + tl.arange(0, 2048 * 3)) # 当成1D tensor load，此时由于numel对齐，不会自动补齐。
-conv_state_T = conv_state.reshape(128, 16 * 3).trans().reshape(16, 3 * 128).trans().reshape(3 * 2048,) # 长轴(2048)裂出一根对齐轴(16)借给短轴(3)，从而让两个轴都对齐
+conv_state = tl.load(conv_state_ptr + conv_batch_offs * conv_batch_stride + doffs * 3 + tl.arange(0, 2048 * 3)) # Load as 1D tensor; no auto-padding since numel is aligned
+conv_state_T = conv_state.reshape(128, 16 * 3).trans().reshape(16, 3 * 128).trans().reshape(3 * 2048,) # Split the long axis (2048) to borrow an alignment axis (16) for the short axis (3), so both axes are aligned
 ```
 
 ### 先将数据搬运到UB上，再从UB中select目标值
@@ -154,9 +154,9 @@ def pick_kernel(
     idx = tl.load(idx_ptr + rn * stride_idx)
     mask = idx < M
 
-    # 原先写法
+    # Original approach
     # val = tl.load(x_ptr + idx * stride_x, mask=mask)
-    # 修改后写法
+    # Modified approach
     rm = tl.arange(0, M)
     x_shared = tl.load(x_ptr + rm * stride_x)  # [M]
     val = tl.gather(x_shared, idx, 0)
@@ -201,12 +201,12 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
     pid = tl.program_id(axis=0)
 +   base_offset = pid * BLOCK_SIZE
     
-+   # 计算需要处理的块的总数
++   # Calculate the total number of blocks to process
 +   num_sub_blocks = tl.cdiv(BLOCK_SIZE, BLOCK_SIZE_SUB)
     
-+   # 针对每个子块进行循环处理
++   # Process each sub-block in a loop
 +   for sub_block_idx in range(num_sub_blocks):
-+       # 计算当前子块的偏移量
++       # Calculate the offset of the current sub-block
 +       sub_offset = base_offset + sub_block_idx * BLOCK_SIZE_SUB
 +       offsets = sub_offset + tl.arange(0, BLOCK_SIZE_SUB)
 -       offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
@@ -229,7 +229,7 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
 
 在 Tiling 分块优化中，BLOCK_SIZE、BLOCK_SIZE_SUB等分块参数的取值直接影响算子性能，但手动调试参数组合效率低且难以找到最优值。triton.autotune是Triton框架提供的自动调优工具，能遍历预设的参数配置，通过实际运行对比性能，自动选择最优参数组合，是Tiling优化的核心配套手段。
 
-如果你关注 Triton-Ascend 上 `configs=[]` 的推荐用法、自动 Tiling 的适用边界，可进一步参考 [Triton-Ascend autotune 使用指南](./autotune_guide.md)。
+如果你关注 Triton-Ascend 上 `configs=[]` 的推荐用法、自动 Tiling 的适用边界，可进一步参考 [Triton-Ascend autotune 使用指南](../autotune_guide.md)。
 
 - 核心作用  
 自动遍历参数空间：针对BLOCK_SIZE、BLOCK_SIZE_SUB等 constexpr 类型的分块参数，批量测试不同取值的性能。  
@@ -242,12 +242,12 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
     import triton.language as tl
 
     @triton.autotune(
-    configs=[ # 待测试的参数配置列表,参数候选值需要是2的幂次
+    configs=[ # List of parameter configurations to test; candidate values must be powers of 2
             triton.Config({'BLOCK_SIZE': 128}),
             triton.Config({'BLOCK_SIZE': 256}),
             triton.Config({'BLOCK_SIZE': 512}),
         ],
-        key=['n_elements'], # 调优维度：参数取值依赖的输入维度
+        key=['n_elements'], # Tuning dimension: input dimension that parameter values depend on
     )
     @triton.jit
     def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
@@ -306,9 +306,9 @@ large or block number is more than what user expect due to multi-buffer feature 
 def add_kernel(x_ptr, # Pointer to first input vector.
     y_ptr, # Pointer to second input vector.
     output_ptr, # output 向量的指针.
-    n_elements, # 向量的大小.
-    BLOCK_SIZE: tl.constexpr, # 每个进程需要处理的元素个数.
-    # 注意：constexpr属性表示它可以被用作shape值.
+    n_elements, # Size of the vector
+    BLOCK_SIZE: tl.constexpr, # Number of elements each program should process
+    # Note: constexpr attribute means it can be used as a shape value
 ):
     pid = tl.program_id(axis=0) # We use a 1D launch grid so axis is 0.
     block_start = pid * BLOCK_SIZE
@@ -374,19 +374,19 @@ def vec_add_kernel(X, Y, Z, N,
                    BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(axis=0)
 
-    # 计算当前 block 负责的 index 范围
+    # Calculate the index range for the current block
     offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
 
     # mask 防止越界
     mask = offsets < N
 
-    # 连续访存：offsets 是连续的
+    # Contiguous memory access: offsets are contiguous
     x = tl.load(X + offsets, mask=mask)
     y = tl.load(Y + offsets, mask=mask)
 
     z = x + y
 
-    # 连续写回
+    # Contiguous write-back
     tl.store(Z + offsets, z, mask=mask)
 
 
@@ -394,7 +394,7 @@ def vec_add(x, y):
     assert x.numel() == y.numel()
     N = x.numel()
 
-    # 分配对齐内存（PyTorch 默认已经对齐到 64 字节）
+    # Allocate aligned memory (PyTorch is already aligned to 64 bytes by default)
     z = torch.empty_like(x)
 
     # grid：每个 block 处理 BLOCK_SIZE 个元素
@@ -411,9 +411,9 @@ def vec_add(x, y):
 例：  
 
  ```diff
-BLOCK_M = 64   # 每个 block 处理 64 行
-BLOCK_N = 64   # 每个 block 处理 64 列
-BLOCK_K = 32   # 内部累加维度
+BLOCK_M = 64   # Each block processes 64 rows
+BLOCK_N = 64   # Each block processes 64 columns
+BLOCK_K = 32   # Inner accumulation dimension
 
 @triton.jit
 def matmul_kernel(
@@ -427,15 +427,15 @@ def matmul_kernel(
     pid_m = tl.program_id(0)  # block 在 M 方向的 id
     pid_n = tl.program_id(1)  # block 在 N 方向的 id
 
-    # 当前 block 对应的起始坐标
+    # Starting coordinates for the current block
     offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
     offs_k = tl.arange(0, BLOCK_K)
 
-    # 初始化累加器
+    # Initialize accumulator
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 
-    # 循环分块计算
+    # Loop over tiled computation
     for k in range(0, K, BLOCK_K):
         a = tl.load(
             A + (offs_m[:, None] * stride_am + (offs_k[None, :] + k) * stride_ak),
@@ -449,7 +449,7 @@ def matmul_kernel(
         )
         acc += tl.dot(a, b)
 
-    # 写回结果
+    # Write back the result
     c = C + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
     tl.store(c, acc, mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
 ```

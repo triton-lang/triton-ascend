@@ -1,0 +1,238 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:1
+msgid "triton.language.reduce"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:5
+msgid ""
+"简介：`triton.language.reduce` 沿指定轴 `axis` 对输入 tensor 应用 `combine_fn` "
+"进行规约，返回规约后的结果张量。"
+msgstr ""
+"Description: `triton.language.reduce` applies `combine_fn` along the "
+"specified `axis` of the input tensor to perform reduction, returning the "
+"reduced result tensor."
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:11
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:13
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "参数名"
+msgstr "Parameter"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "`input`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "`Tensor` 或 `tuple of Tensor`"
+msgstr "`Tensor` or `tuple of Tensor`"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "输入tensor，可以是单个tensor或tensor元组"
+msgstr "Input tensor; can be a single tensor or tuple of tensors"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "`axis`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "`int` 或 `None`"
+msgstr "`int` or `None`"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "沿着哪个维度进行reduce操作。如果为None，则reduce所有维度"
+msgstr "Which dim to reduce along. None = reduce all dims"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "`combine_fn`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "`Callable`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "用于组合两个标量tensor组的函数（必须用@triton.jit标记）"
+msgstr "Function combining two scalar tensor groups (must be @triton.jit)"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "`keep_dims`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "`bool`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "如果为True，保持被reduce的维度为长度1"
+msgstr "If True, keep reduced dim as length 1"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "`_semantic`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "`Optional[str]`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "保留参数，暂不支持外部调用"
+msgstr "Reserved parameter, external calls not supported yet"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "`_generator`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "`Optional[Generator]`"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:24
+msgid "**注意**：此函数也可以作为tensor的成员函数调用，如 `x.reduce(...)` 而不是 `reduce(x, ...)`"
+msgstr ""
+"**Note:** This function can also be called as a member function of a tensor,"
+" e.g., `x.reduce(...)` instead of `reduce(x, ...)`"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:26
+msgid "返回值： `tensor`：沿指定轴 `axis` 规约后的结果张量。"
+msgstr ""
+"Return value: `tensor`: The result tensor reduced along the specified "
+"`axis`."
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:29
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:31
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "bool/int1"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "✓"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md
+msgid "GPU支持"
+msgstr "GPU Support"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:38
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:40
+msgid "结论：在 Shape 方面，GPU 与 Ascend 平台无差异。"
+msgstr "Shape: No difference between GPU and Ascend."
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:42
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:44
+msgid ""
+"相对社区能力缺失且无法实现 keep_dims=True需要测试更多规格，来确定是否全面支持。目前已测3D dim=2情况下，支持 "
+"keep_dims=True。"
+msgstr ""
+"Not supported vs community. keep_dims=True needs more testing. Currently "
+"tested with 3D dim=2, keep_dims=True works."
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:47
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Reduction_Ops/reduce.md:49
+msgid "以下示例实现了对2Dshape的tensor进行reduce计算，其中的combine_fn使用简单加法："
+msgstr "Example: reduce a 2D tensor with simple addition as combine_fn."

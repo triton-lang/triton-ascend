@@ -1,0 +1,202 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025, Huawei
+# This file is distributed under the same license as the Triton Ascend
+# package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-05-21 20:17+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: en <LL@li.org>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:1
+msgid "triton.language.randint"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:3
+msgid "1. OP 概述"
+msgstr "1. OP Overview"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:5
+msgid "简介：给定 1 个 seed 标量和 1 个 offset 块，返回 1 个 int32 类型的随机块。 原型："
+msgstr ""
+"Description: Given 1 seed scalar and 1 offset block, returns 1 random block "
+"of type int32. Prototype:"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:16
+msgid "如果需要多个随机数流，使用 randint4x 可能比连续调用 4 次 randint 更快。"
+msgstr ""
+"If multiple random number streams are needed, using randint4x may be faster "
+"than calling randint 4 times in succession."
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:18
+msgid "2. OP 规格"
+msgstr "2. OP Specifications"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:20
+msgid "2.1 参数说明"
+msgstr "2.1 Parameter Description"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "参数名"
+msgstr "Parameter Name"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "类型"
+msgstr "Type"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "说明"
+msgstr "Description"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "`seed`"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "`int`或 `tensor`"
+msgstr "`int` or `tensor`"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "用于生成随机数的种子"
+msgstr "Seed for generating random numbers"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "`offset`"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "用于生成随机数的偏移量"
+msgstr "Offset for generating random numbers"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "`n_rounds`"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "`constexpr`，默认值为10"
+msgstr "`constexpr`, default value is 10"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "Philox 算法的迭代轮数"
+msgstr "Number of iterations for the Philox algorithm"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:28
+msgid "返回值： 1 个 int32 类型的随机块，shape与offset相同"
+msgstr ""
+"Return value: 1 random block of type int32, with the same shape as offset"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:31
+msgid "2.2 支持规格"
+msgstr "2.2 Supported Specifications"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:33
+msgid "2.2.1 DataType 支持"
+msgstr "2.2.1 DataType Support"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:35
+msgid "输入seed的type："
+msgstr "Type of the input seed:"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "int8"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "int16"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "int32"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "uint8"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "uint16"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "uint32"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "uint64"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "int64"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "fp16"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "fp32"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "fp64"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "bf16"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "bool"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "Ascend A2/A3"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "√"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md
+msgid "×"
+msgstr ""
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:41
+msgid "2.2.2 Shape 支持"
+msgstr "2.2.2 Shape Support"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:43
+msgid "无特殊要求"
+msgstr "No special requirements"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:45
+msgid "2.3 特殊限制说明"
+msgstr "2.3 Special Limitations"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:47
+msgid "相对社区能力缺失且无法实现"
+msgstr ""
+"Missing capability compared to the community version and cannot be "
+"implemented"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:49
+msgid "2.4 使用方法"
+msgstr "2.4 Usage"
+
+#: ../../zh/triton_api/Random_Number_Generation/randint.md:51
+msgid "以下示例实现了对randint的调用（调用时生成单个随机数）："
+msgstr ""
+"The following example demonstrates calling randint (generating a single "
+"random number):"

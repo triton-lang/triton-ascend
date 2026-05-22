@@ -1047,6 +1047,10 @@ def ttir_to_npubin(mod, metadata, opt):
                     _compile_option_list += [
                         f"--append-bisheng-options={bisheng_options}"
                     ]
+            if _is_auto_map_parallel_blocks_enabled() and not metadata.get(
+                "has_auto_blockify_blacklist_op", False
+            ):
+                _compile_option_list += ["--enable-auto-blockify-loop"]
 
         npu_compiler_path, env = _get_npucompiler_path()
         cmd_list = (

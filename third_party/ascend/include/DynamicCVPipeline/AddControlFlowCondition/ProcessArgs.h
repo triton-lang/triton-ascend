@@ -30,6 +30,8 @@
 namespace mlir {
 namespace triton {
 
+struct ControlFlowConditionInfo;
+
 // For each shared iter_arg, we need to track:
 // - Which block_ids use it
 // - Who is the owner (first block_id in order)
@@ -54,7 +56,11 @@ class ProcessArgsPass : public PassWrapper<ProcessArgsPass, OperationPass<Module
 
   LogicalResult processSharedIterArgs(ModuleOp module);
 
+  void setConditionInfo(ControlFlowConditionInfo *info_) { info = info_; }
+
   llvm::StringRef getArgument() const override { return "process-args"; }
+
+  ControlFlowConditionInfo *info = nullptr;
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createProcessArgsPass();

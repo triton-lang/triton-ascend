@@ -153,6 +153,26 @@ TritonTypeConverter::TritonTypeConverter() {
     }
     return MemRefType::get(tensorType.getShape(), elemType);
   });
+
+  addSourceMaterialization(
+      [](OpBuilder &builder, Type resultType, ValueRange inputs,
+         Location loc) -> std::optional<Value> {
+        if (inputs.empty())
+          return std::nullopt;
+        return builder
+            .create<UnrealizedConversionCastOp>(loc, resultType, inputs)
+            .getResult(0);
+      });
+
+  addTargetMaterialization(
+      [](OpBuilder &builder, Type resultType, ValueRange inputs,
+         Location loc) -> std::optional<Value> {
+        if (inputs.empty())
+          return std::nullopt;
+        return builder
+            .create<UnrealizedConversionCastOp>(loc, resultType, inputs)
+            .getResult(0);
+      });
 }
 
 void TritonToLinalgPass::addProgramInfo(triton::FuncOp func,
@@ -577,7 +597,6 @@ void TritonToLinalgPass::populateTritonToLinalgCanonicalizationPatterns(RewriteP
         // TTOpConverters::ScalarMathCanonicalizer<arith::ExtFOp>
         // TTOpConverters::ScalarMathCanonicalizer<arith::TruncFOp>
         >(patterns.getContext());
-    patterns.add<TTOpConverters::ReduceSingleCanonicalizer>(patterns.getContext());
     if (this->enableSelectAnalysis) {
       patterns.add<TTOpConverters::SelectCanonicalizer>(patterns.getContext());
     }
@@ -606,6 +625,7 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   // reduce converters
   patterns.add<TTOpConverters::ArgMinConverter>(patterns.getContext());
   patterns.add<TTOpConverters::ArgMaxConverter>(patterns.getContext());
+  patterns.add<TTOpConverters::ReduceSingleCanonicalizer>(patterns.getContext());
   patterns.add<TTOpConverters::ReduceConverter>(patterns.getContext());
   patterns.add<TTOpConverters::ScanConverter>(patterns.getContext());
   patterns.add<TTOpConverters::ReshapeConverter>(patterns.getContext());
@@ -898,7 +918,10 @@ void TritonToLinalgPass::runOnOperation() {
   });
 
   // 7. Convert ops.
-  if (failed(applyPartialConversion(moduleOp, target, std::move(patterns)))) {
+  mlir::ConversionConfig config;
+  config.buildMaterializations = true;
+  if (failed(applyPartialConversion(moduleOp, target, std::move(patterns),
+                                    config))) {
     moduleOp->emitError("failed to apply Conversion Patterns");
     signalPassFailure();
   }

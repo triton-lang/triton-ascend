@@ -213,8 +213,11 @@ void DataDependencyAnalysisPass::collectDepInfo(mlir::Value depvalue, Dependency
     depInfo.iniProducerBlockId = iniProdId;
     depInfo.iniConsumerBlockId = iniConsId;
     std::pair<int, int> commonLevelIds = findCommonLevelBlockIds(info, iniProdId, iniConsId);
-    assert(commonLevelIds.first != -1 && commonLevelIds.second != -1 &&
-        "Could not find common level block IDs for producer and consumer blocks");
+    if (commonLevelIds.first == -1 || commonLevelIds.second == -1) {
+        LOG_DEBUG("Could not find common level block IDs for producer and consumer blocks");
+        signalPassFailure();
+    }
+
     depInfo.producerBlockId = commonLevelIds.first;
     depInfo.consumerBlockId = commonLevelIds.second;
 
@@ -232,7 +235,10 @@ llvm::SmallVector<mlir::Operation *> DataDependencyAnalysisPass::collectDiffCore
         if (isa<scf::YieldOp>(user)) {
             continue;
         }
-        assert(!isControlFlowOp(user) && "warning: cannot process nested iterarg!");
+        if (isControlFlowOp(user)) {
+            LOG_DEBUG("cannot process nested iterarg!");
+            signalPassFailure();
+        }
 
         auto userCoreType = getCoreTypeWithIndex(user, 0);
         if (userCoreType != initCoreType && !userCoreType.empty()) {
@@ -342,7 +348,10 @@ void DataDependencyAnalysisPass::processIterArgDependencies()
             
             // Only process if init and yield have matching core types
             // Mismatch indicates a more complex dependency pattern that requires special handling
-            assert(initCoreType == yieldCoreType && "iterarg init core_type conflicts with yield");
+            if (initCoreType != yieldCoreType) {
+                LOG_DEBUG("iterarg init core_type conflicts with yield");
+                signalPassFailure();
+            }
 
             auto diffUsers = collectDiffCoreTypeUsers(iterArg, initCoreType);
             if (!diffUsers.empty()) {
@@ -488,8 +497,10 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
             int predBlockId = static_cast<int>(*predBlockIdOpt);
 
             auto [producerBlockId, consumerBlockId] = findCommonLevelBlockIds(info, predBlockId, currBlockId);
-            assert(producerBlockId != -1 && consumerBlockId != -1 &&
-                "Could not find common level block IDs for producer and consumer blocks");
+            if (producerBlockId == -1 || consumerBlockId == -1) {
+                LOG_DEBUG("Could not find common level block IDs for producer and consumer blocks");
+                signalPassFailure();
+            }
             if (producerBlockId == consumerBlockId) {
                 continue;
             }

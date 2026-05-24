@@ -1044,23 +1044,38 @@ void UpdateLoopIterTimesPass::runOnOperation()
   DenseMap<int, SmallVector<Operation *>> cmap;
   DenseMap<int, SmallVector<Operation *>> vmap;
   ret = GetMainLoopIdToLoopOpMap(module, cmap, vmap);
-  assert(ret == 0 && "GetMainLoopIdToLoopOpMap Failed!");
+  if (ret != 0) {
+    LDBG("GetMainLoopIdToLoopOpMap Failed!");
+    signalPassFailure();
+  }
 
   // step2: Calculate info for each loop operation, store into the same iterationTimesinfoMap
   DenseMap<Operation *, IterationTimesInfo> infoMap;
   ret = ComputeMainLoopTimes(cmap, infoMap);
-  assert(ret == 0 && "ComputeMainLoopTimes from cube Failed!");
+  if (ret != 0) {
+    LDBG("ComputeMainLoopTimes from cube Failed!");
+    signalPassFailure();
+  }
   ret = ComputeMainLoopTimes(vmap, infoMap);
-  assert(ret == 0 && "ComputeMainLoopTimes from vector Failed!");
+  if (ret != 0) {
+    LDBG("ComputeMainLoopTimes from vector Failed!");
+    signalPassFailure();
+  }
 
   // step3: Update loop iteration count (process loop operations with same id from both cmap and vmap)
   ret = UpdateForLoopIteration(cmap, vmap, infoMap);
-  assert(ret == 0 && "Update ForLoop Iteration Failed!");
+  if (ret != 0) {
+    LDBG("Update ForLoop Iteration Failed!");
+    signalPassFailure();
+  }
   LDBG("after UpdateForLoopIteration:\n" << module);
 
   // step4: Replace loop counter by if blocks' counter
   ret = replaceForOpCounterInIfOps();
-  assert(ret == 0 && "replaceForOpCounterInIfOps Failed!");
+  if (ret != 0) {
+    LDBG("replaceForOpCounterInIfOps Failed!");
+    signalPassFailure();
+  }
 
   LDBG("after updateloopitertimes:\n" << module);
   LDBG("\nExit UpdateLoopIterTimes pass.");

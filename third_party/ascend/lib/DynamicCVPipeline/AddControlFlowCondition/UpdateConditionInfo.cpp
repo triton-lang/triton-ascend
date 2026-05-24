@@ -1291,7 +1291,7 @@ void UpdateConditionInfoPass::runOnOperation()
   // Step2:Update the conditions of ifOp based on the intraCoreDependentMap and crossCoreDependentMap
   int updateResult = updateIfConds(module, ssbufferPtrs);
     
-  if (updateResult != UPDATE_CONDITION_INFO_FAILED) {
+  if (updateResult != UPDATE_CONDITION_INFO_SUCCESS) {
     LDBG("updateIfConds failed!");
     signalPassFailure();
   }

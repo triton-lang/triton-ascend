@@ -44,6 +44,7 @@ static constexpr llvm::StringLiteral interceptrFunc[] {
   "_attn_bwd",
   "_kernel_matmul_fp8_row_non_persistent",
   "bmm_kernel",
+  "sparse_flash_attention_grad_kernel"
 };
 
 static LogicalResult verifyFuncNames(ModuleOp module)

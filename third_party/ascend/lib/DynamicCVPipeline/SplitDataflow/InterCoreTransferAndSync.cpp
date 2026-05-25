@@ -211,7 +211,10 @@ SmallVector<int64_t> InterCoreTransferAndSyncPass::computeExpectedShape(Value va
 {
     auto tensorTy = dyn_cast<TensorType>(value.getType());
     static constexpr int NdShapeLength = 2;
-    assert(tensorTy && tensorTy.getRank() == NdShapeLength && "source shape is not 2-dim!");
+    if (!tensorTy || tensorTy.getRank() != NdShapeLength) {
+        LOG_DEBUG("source shape is not 2-dim!");
+        signalPassFailure();
+    }
 
     int64_t M = tensorTy.getDimSize(0);
     int64_t N = tensorTy.getDimSize(1);
@@ -454,7 +457,10 @@ mlir::Operation *InterCoreTransferAndSyncPass::annotateTightlyCoupledBuffer(OpBu
 Operation *InterCoreTransferAndSyncPass::findMainLoopforTransfer(Operation *endOp, Operation *startOp)
 {
     Operation *lca = endOp->getParentOp();
-    assert(lca == startOp->getParentOp() && "startOp and endOp are not in the same parent block, which is unexpected.");
+    if (lca != startOp->getParentOp()) {
+        LOG_DEBUG("startOp and endOp are not in the same parent block, which is unexpected.");
+        signalPassFailure();
+    }
     Operation *current = lca;
     while (current) {
         if (isa<scf::ForOp>(current)) {

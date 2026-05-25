@@ -1048,6 +1048,12 @@ def ttir_to_npubin(mod, metadata, opt):
                         f"--append-bisheng-options={bisheng_options}"
                     ]
 
+            # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
+            # mirroring the SIMD compile paths. driver.py's runtime block-count
+            # cap keys off the same env switch, so the two stay in sync.
+            if _is_auto_map_parallel_blocks_enabled():
+                _compile_option_list += ["--enable-auto-blockify-loop"]
+
         npu_compiler_path, env = _get_npucompiler_path()
         cmd_list = (
             [npu_compiler_path, src_path]

@@ -40,7 +40,9 @@ jobs:
     if: >-
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
+    runs-on: linux-aarch64-cpu-1
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ascend/triton:github_action
     permissions:
       contents: read
       actions: read
@@ -49,10 +51,7 @@ jobs:
       pr_num: ${{ steps.pr.outputs.num }}
       wheel_name: ${{ steps.wheel.outputs.name }}
     steps:
-      # Sparse checkout: only the composite action is needed; no source tree.
       - uses: actions/checkout@v4
-        with:
-          sparse-checkout: .github/actions/setup-obsutil
 
       - name: Resolve PR number
         id: pr
@@ -87,20 +86,33 @@ jobs:
         # separate manifest to OBS — yellow pipeline reads obs_url directly).
         run: echo "name=$(basename wheelhouse/*.whl)" >> "$GITHUB_OUTPUT"
 
-      - name: Setup obsutil
+      # NOTE: setup-obsutil is inlined here (instead of `uses:
+      # ./.github/actions/setup-obsutil`) because on this self-hosted aarch64
+      # container runner the host-side workspace path the runner uses to
+      # resolve local actions does not point to the same directory the
+      # container mounts as GITHUB_WORKSPACE, so the runner cannot find
+      # action.yml even after a clean checkout. `run:` blocks execute inside
+      # the container and only see /__w/... paths, so they are unaffected.
+      - name: Setup obsutil and upload to OBS
         if: steps.pr.outputs.num != ''
-        uses: ./.github/actions/setup-obsutil
-        with:
-          ak: ${{ secrets.OBS_AK }}
-          sk: ${{ secrets.OBS_SK }}
-
-      - name: Upload to OBS
-        if: steps.pr.outputs.num != ''
+        shell: bash
         env:
+          AK: ${{ secrets.OBS_AK }}
+          SK: ${{ secrets.OBS_SK }}
           PR_NUM: ${{ steps.pr.outputs.num }}
         run: |
-          DEST="obs://triton-ascend-artifacts/triton-ascend/${PR_NUM}/"
-          obsutil/obsutil cp -u wheelhouse/*.whl "$DEST"
+          set -eu
+          if [ -z "${AK}" ] || [ -z "${SK}" ]; then
+            echo "OBS credentials are empty."
+            exit 1
+          fi
+          curl -fL "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_arm64.tar.gz" -o obsutil.tar.gz
+          gzip -t obsutil.tar.gz || { echo "obsutil.tar.gz is not a valid gzip"; exit 1; }
+          tar xzf obsutil.tar.gz
+          rm -f obsutil.tar.gz
+          mv obsutil_linux_* obsutil
+          obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-southwest-2.myhuaweicloud.com
+          obsutil/obsutil cp -u wheelhouse/*.whl "obs://triton-ascend-artifacts/triton-ascend/${PR_NUM}/"
 
   trigger:
     needs: publish
@@ -113,8 +125,9 @@ jobs:
          needs.publish.result == 'success' &&
          needs.publish.outputs.pr_num != '')
       )
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
+    runs-on: linux-aarch64-cpu-1
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ascend/triton:github_action
     permissions:
       pull-requests: write
       statuses: write
@@ -125,6 +138,7 @@ jobs:
 
       - name: Resolve PR context
         id: ctx
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           # workflow_dispatch → input; workflow_run → publish output.
@@ -168,6 +182,7 @@ jobs:
 
       - name: Trigger pipeline
         id: run
+        shell: bash
         env:
           BASE_URL:           ${{ secrets.BLUE_YELLOW_BASE_URL }}
           APP_CODE:           ${{ secrets.BLUE_YELLOW_APP_CODE }}
@@ -202,11 +217,8 @@ jobs:
               "$1" "$2" "$BRI" "${3:-}" > "$STATUS_FILE"
           }
 
-          json_escape(){
-            python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()),end="")'
-          }
-
-          PR_TITLE_J=$(printf '%s' "${PR_TITLE}"   | json_escape)
+          # JSON-escape arbitrary text (PR titles can contain quotes/newlines).
+          PR_TITLE_J=$(printf '%s' "${PR_TITLE}" | jq -Rs .)
 
           # WHEEL_NAME comes from publish job output (workflow_run) or from the
           # workflow_dispatch input. If empty, the upstream produced no wheel

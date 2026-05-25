@@ -45,6 +45,21 @@ public:
   }
 };
 
+// Pass for analyzing function names
+class AnalyzeNamePass : public PassWrapper<AnalyzeNamePass, OperationPass<ModuleOp>> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(AnalyzeNamePass)
+
+  AnalyzeNamePass() = default;
+
+  void runOnOperation() override;
+
+  llvm::StringRef getArgument() const override { return "analyze-name"; }
+  llvm::StringRef getDescription() const override {
+    return "Analyze function names for dynamic CV pipeline";
+  }
+};
+
 // Wrapper pass for AnalyzeDataFlow
 class AnalyzeDataFlowPass : public PassWrapper<AnalyzeDataFlowPass, OperationPass<ModuleOp>> {
 public:
@@ -60,8 +75,58 @@ public:
   }
 };
 
+// Pass for analyzing flag operations
+class AnalyzeFlagPass : public PassWrapper<AnalyzeFlagPass, OperationPass<ModuleOp>> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(AnalyzeFlagPass)
+
+  AnalyzeFlagPass() = default;
+
+  void runOnOperation() override;
+
+  llvm::StringRef getArgument() const override { return "analyze-flag"; }
+  llvm::StringRef getDescription() const override {
+    return "Analyze flag operations for control flow optimization";
+  }
+};
+
+// Pass for analyzing scope-level issues
+class AnalyzeScopePass : public PassWrapper<AnalyzeScopePass, OperationPass<ModuleOp>> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(AnalyzeScopePass)
+
+  AnalyzeScopePass() = default;
+
+  void runOnOperation() override;
+
+  llvm::StringRef getArgument() const override { return "analyze-scope"; }
+  llvm::StringRef getDescription() const override {
+    return "Analyze scope-level issues for control flow";
+  }
+};
+
+// Pass for analyzing cube control flow input chain
+class AnalyzeCubeControlFlowInputChainPass 
+    : public PassWrapper<AnalyzeCubeControlFlowInputChainPass, OperationPass<ModuleOp>> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(AnalyzeCubeControlFlowInputChainPass)
+
+  AnalyzeCubeControlFlowInputChainPass() = default;
+
+  void runOnOperation() override;
+
+  llvm::StringRef getArgument() const override { return "analyze-cube-control-flow-input-chain"; }
+  llvm::StringRef getDescription() const override {
+    return "Analyze cube control flow input chain";
+  }
+};
+
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeArgsPass();
+std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeFlagPass();
+std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeNamePass();
+std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeCubeContolFLowInputChainPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeDataFlowPass();
+std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeScopePass();
 
 void registerAnalyzeDataFlowPasses();
 

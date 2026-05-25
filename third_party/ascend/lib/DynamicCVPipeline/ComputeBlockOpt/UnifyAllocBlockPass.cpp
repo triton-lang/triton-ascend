@@ -65,6 +65,7 @@ struct CycleDfs {
       : block(block), memGraph(memGraph), okSet(okSet), bm(bm) {}
 };
 
+
 bool CycleDfs::operator()(Operation *cur) {
   if (okSet.contains(cur)) {
     return true;
@@ -82,7 +83,7 @@ bool CycleDfs::operator()(Operation *cur) {
     auto *userInBlock = CVPipeline::getAncestorInBlock(user, block);
     if (!userInBlock) continue;
     if (okSet.contains(userInBlock)) {
-      LOG_DEBUG("[CycleDfs] Cycle found, userInBlock in okSet: " << userInBlock->getName());
+      LOG_DEBUG("[CycleDfs] Cycle found, userInBlock in okSet: " << *userInBlock);
       return true;
     }
     int userBlockId = bm.getBlockIdByOp(userInBlock);
@@ -102,45 +103,48 @@ bool CycleDfs::operator()(Operation *cur) {
 }
 
 /**
- * @brief Detect if unifying alloc, fill and parentIf to target block_id would create a cycle
+ * @brief Detect if unifying a list of operations to target block_id would create a cycle
  *
- * This function determines whether merging memref.alloc, linalg.fill inside scf.if,
- * and the corresponding scf.if into the same block_id would break the acyclic property
+ * This function determines whether merging a list of operations (e.g., memref.alloc,
+ * linalg.fill, scf.if) into the same block_id would break the acyclic property
  * of the dependence graph.
  *
- * @param allocOp The memref.alloc operation to detect
- * @param fillInfo Structure containing fillOp and parentIf
+ * @param opsToUnify List of operations to add to the safe set (okSet)
  * @param memGraph Memory dependence graph for RAW/WAW/WAR dependency analysis
  * @param targetBlockId Target block_id after unification
  * @return bool Returns true if unification would create a cycle, false otherwise
  */
-static bool willCreateCycle(memref::AllocOp allocOp, FillInfo &fillInfo,
+static bool willCreateCycle(ArrayRef<Operation *> opsToUnify,
                             const CVPipeline::MemoryDependenceGraph &memGraph,
                             int targetBlockId, CVPipeline::ComputeBlockIdManager &bm) {
-  auto *block = allocOp->getBlock();
+  if (opsToUnify.empty()) {
+    return false;
+  }
 
-  // Build "safe set": contains all ops corresponding to targetBlockId
-  // If DFS can return from some operation to any node in the safe set,
-  // it means unification would create a cycle
+  auto *block = opsToUnify.front()->getBlock();
+
   llvm::DenseSet<Operation *> okSet;
 
 
-  // Add all ops corresponding to targetBlockId to okSet
   for (auto *op : bm.getOpsByBlockId(targetBlockId)) {
     okSet.insert(op);
   }
 
-  // Add three operations to okSet
-  okSet.insert(allocOp.getOperation());
-  okSet.insert(fillInfo.fillOp.getOperation());
-  okSet.insert(fillInfo.parentIf.getOperation());
+  for (auto *op : opsToUnify) {
+    okSet.insert(op);
+  }
+
+  DenseMap<Operation *, int> origBlockIdMap;
+  for (auto *op : opsToUnify) {
+    auto optBlockId = CVPipeline::getOpBlockId(op);
+    origBlockIdMap[op] = optBlockId ? static_cast<int>(*optBlockId) : -1;
+    bm.updateBlockId(op, targetBlockId);
+  }
 
   // Initialize DFS detector
   CycleDfs dfs(block, memGraph, okSet, bm);
   bool hasCycle = false;
 
-  // Traverse each operation in the safe set as starting point,
-  // check if there exists a path back to the safe set
   for (mlir::Operation *okOp : okSet) {
     SmallVector<Operation *> allusers;
     allusers.append(okOp->getUsers().begin(), okOp->getUsers().end());
@@ -161,8 +165,11 @@ static bool willCreateCycle(memref::AllocOp allocOp, FillInfo &fillInfo,
           break;
         }
       } else {
+        LOG_DEBUG("userInBlock: "<<*userInBlock);
+        LOG_DEBUG("okOp: " << *okOp);
         for (auto *userOp : bm.getOpsByBlockId(userBlockId)) {
           dfs.clear();
+          LOG_DEBUG("userOp: "<<*userOp);
           if (dfs(userOp)) {
             hasCycle = true;
             break;
@@ -175,13 +182,15 @@ static bool willCreateCycle(memref::AllocOp allocOp, FillInfo &fillInfo,
     }
   }
 
-  return hasCycle;
-}
+  for (auto &[op, origBlockId] : origBlockIdMap) {
+    if (origBlockId == -1) {
+      op->removeAttr("ssbuffer.block_id");
+    } else {
+      bm.updateBlockId(op, origBlockId);
+    }
+  }
 
-static std::optional<int> lookupOpBlockId(Operation *op) {
-    if (auto attr = op->getAttrOfType<IntegerAttr>("ssbuffer.block_id"))
-        return attr.getInt();
-    return -1;
+  return hasCycle;
 }
 
 /**
@@ -215,30 +224,118 @@ static SmallVector<Operation *> collectDirectUsers(Value allocResult) {
  * Checks whether all operations have the same block_id.
  * If they are the same, returns that block_id; otherwise returns std::nullopt.
  *
+ * Special handling for memref.subview: if direct users include memref.subview,
+ * we look through to memref.copy. If there's exactly one memref.copy reachable,
+ * return its block_id (not the subview's). If multiple copies exist, return error.
+ *
  * @param ops List of operations to check
  * @return std::optional<int> Returns common block_id if all are the same,
  *         otherwise returns std::nullopt
  */
-static std::optional<int> getCommonBlockId(ArrayRef<Operation *> ops) {
+static LogicalResult getCommonBlockId(ArrayRef<Operation *> ops, int &blockId) {
   if (ops.empty()) {
-    return std::nullopt;
+    return failure();
   }
 
-  int commonId = -1;
+  llvm::SmallDenseSet<int, 4> copyBlockIds;
   for (Operation *op : ops) {
-    auto optBlockId = lookupOpBlockId(op);
-    if (!optBlockId.has_value()) {
-      return std::nullopt;
-    }
-    int blockId = *optBlockId;
-
-    if (commonId == -1) {
-      commonId = blockId;
-    } else if (commonId != blockId) {
-      return std::nullopt;
+    if (isa<ViewLikeOpInterface>(op)) {
+      for (auto *user : op->getUsers()) {
+        if (auto copyOp = dyn_cast<memref::CopyOp>(user)) {
+          if (auto blockId = CVPipeline::getOpBlockId(copyOp)) {
+            copyBlockIds.insert(static_cast<int>(*blockId));
+          }
+        }
+      }
     }
   }
-  return commonId;
+
+  if (copyBlockIds.size() > 1) {
+    LOG_DEBUG("[getCommonBlockId] Multiple block_ids found, ops: ");
+    for (Operation *op : ops) {
+      LOG_DEBUG("  " << *op);
+    }
+    return failure();
+  }
+
+  if (copyBlockIds.empty()) {
+    LOG_DEBUG("[getCommonBlockId] There are not CopyOp!");
+    for (Operation *op : ops) {
+      LOG_DEBUG("  " << *op);
+    }
+    return failure();
+  }
+
+  blockId = *copyBlockIds.begin();
+  return success();
+}
+
+/**
+ * @brief Collect predecessor operations in a block for a given value
+ *
+ * This function traces back through SSA dependencies to find all operations
+ * that affect the given startValue within a specific block.
+ *
+ * Special handling for scf.for loop-carried dependencies:
+ * When an operand is a BlockArgument from scf.for iter_arg, we also trace
+ * through the yieldOp to find the operation that provides the yielded value.
+ * This ensures we capture operations that update loop-carried variables
+ * (e.g., %79 that updates %arg19).
+ *
+ * @param startValue The value to trace back from
+ * @param block The block to search within
+ * @return SmallVector<Operation*> List of predecessor operations
+ */
+static SmallVector<Operation *> collectBlockPredecessors(Value startValue, Block *block) {
+  SmallVector<Operation *> result;
+  SmallVector<Operation *> toProcess;
+
+  auto addToProcess = [&](Operation *op) {
+    if (auto *ancestorInBlock = CVPipeline::getAncestorInBlock(op, block)) {
+      if (!llvm::is_contained(result, ancestorInBlock)) {
+        toProcess.push_back(ancestorInBlock);
+      }
+    }
+  };
+
+  if (auto *condDefOp = startValue.getDefiningOp()) {
+    addToProcess(condDefOp);
+  }
+
+  while (!toProcess.empty()) {
+    auto *op = toProcess.pop_back_val();
+    if (llvm::is_contained(result, op)) {
+      continue;
+    }
+    result.push_back(op);
+
+    for (auto operand : op->getOperands()) {
+      if (auto *defOp = operand.getDefiningOp()) {
+        // SSA operand: trace to its defining operation
+        addToProcess(defOp);
+      } else if (auto blockArg = dyn_cast<BlockArgument>(operand)) {
+        // Block argument: check if it's from scf.for iter_arg
+        Operation *parentOp = blockArg.getOwner()->getParentOp();
+        if (auto forOp = dyn_cast<scf::ForOp>(parentOp)) {
+          unsigned argIdx = blockArg.getArgNumber();
+          // argIdx == 0 is the loop variable, not iter_arg; skip invalid indices
+          if (argIdx == 0 || argIdx > forOp.getInitArgs().size()) {
+            continue;
+          }
+          Operation *yieldOp = forOp.getBody()->getTerminator();
+          if (!isa<scf::YieldOp>(yieldOp) || argIdx > yieldOp->getNumOperands()) {
+            continue;
+          }
+          // Get the value yielded for this iter_arg and trace its defining op
+          Value yieldedValue = yieldOp->getOperand(argIdx - 1);
+          if (auto *yieldedDef = yieldedValue.getDefiningOp()) {
+            addToProcess(yieldedDef);
+          }
+        }
+      }
+    }
+  }
+  return result;
 }
 
 /**
@@ -381,30 +478,33 @@ static FillInfo splitSCFIfIfNeeded(FillInfo &info) {
  *
  * @param allocOp The memref.alloc operation to process
  * @param memGraph Memory dependence graph for cycle detection
- * @return bool Returns true if unification was performed, false otherwise
+ * @return LogicalResult Returns success if unification was performed, failure otherwise
  */
-static bool tryUnifyForAlloc(memref::AllocOp allocOp, const CVPipeline::MemoryDependenceGraph &memGraph, CVPipeline::ComputeBlockIdManager &bm) {
+static LogicalResult tryUnifyForAlloc(memref::AllocOp allocOp, 
+                                      const CVPipeline::MemoryDependenceGraph &memGraph, 
+                                      CVPipeline::ComputeBlockIdManager &bm) {
   // Step1: Collect direct users (excluding linalg.fill)
   Value allocResult = allocOp.getResult();
   LOG_DEBUG("[tryUnifyForAlloc] start from allocOp: " << *allocOp);
   SmallVector<Operation *> directUsers = collectDirectUsers(allocResult);
   if (directUsers.empty()) {
-    return false;
+    return success();
   }
 
-  // Step2: Check if all direct users have the same block_id
-  std::optional<int> targetBlockId = getCommonBlockId(directUsers);
-  if (!targetBlockId.has_value()) {
-    return false;
-  }
-
-  // Step3: Find linalg.fill inside scf.if that uses this alloc
+  // Step2: Find linalg.fill inside scf.if that uses this alloc
   FillInfo fillInfo = findFillOpInSCFIf(allocResult);
   if (!fillInfo.fillOp) {
-    return false;
+    return success();
+  }
+  LOG_DEBUG("[tryUnifyForAlloc] Found fillOp in scf.if: " << *fillInfo.parentIf);
+
+  // Step3: Check if all direct users have the same block_id
+  int targetBlockId;
+  if (failed(getCommonBlockId(directUsers, targetBlockId))) {
+    LOG_DEBUG("allocOp has copyOp from different Block");
+    return failure();
   }
   LOG_DEBUG("[getSameBlockId] GetSameBlockId: " << targetBlockId);
-  LOG_DEBUG("[tryUnifyForAlloc] Found fillOp: " << *fillInfo.fillOp << " in scf.if");
 
   // Step4: Split if scf.if contains multiple operations
   if (needsSplitIf(fillInfo)) {
@@ -412,64 +512,40 @@ static bool tryUnifyForAlloc(memref::AllocOp allocOp, const CVPipeline::MemoryDe
     fillInfo = splitSCFIfIfNeeded(fillInfo);
   }
 
-  // Step5: Cycle detection - check if unification would create cycle
-  if (willCreateCycle(allocOp, fillInfo, memGraph, *targetBlockId, bm)) {
-    LOG_DEBUG("[Cycle detection] Find cycle! Did not change block_id: "<< targetBlockId);
-    return false;
+  // Step5: Collect predecessor_ops for scf.if condition
+  SmallVector<Operation *> conditionOps =
+      collectBlockPredecessors(fillInfo.parentIf.getCondition(), fillInfo.parentIf->getBlock());
+
+  // Step6: Cycle detection and block_id assignment with fallback
+  SmallVector<Operation *> coreOps = {
+      allocOp.getOperation(),
+      fillInfo.fillOp.getOperation(),
+      fillInfo.parentIf.getOperation(),
+  };
+  coreOps.append(directUsers);
+  SmallVector<Operation *> allOps = coreOps;
+  // allOps include coreOps and scf.if_condition's predecessor_ops
+  allOps.append(conditionOps);
+
+  if (willCreateCycle(allOps, memGraph, targetBlockId, bm)) {
+    LOG_DEBUG("[Cycle detection] First time: Find cycle with conditionOps, retry without conditionOps");
+    if (willCreateCycle(coreOps, memGraph, targetBlockId, bm)) {
+      LOG_DEBUG("[Cycle detection] Second time: Find Cycle, have unsupport IR! Should Check!!");
+      return success();
+    }
+    for (auto *op : coreOps) {
+      bm.updateBlockId(op, targetBlockId);
+    }
+  } else {
+    for (auto *op : allOps) {
+      bm.updateBlockId(op, targetBlockId);
+    }
   }
-
-  // Step6: Unify block_id of alloc, scf.if, and linalg.fill
-  LOG_DEBUG("[tryUnifyForAlloc] Unifying block_id to " << *targetBlockId << " for:");
-  LOG_DEBUG("  - alloc: " << *allocOp.getOperation());
-  LOG_DEBUG("  - fillOp: " << *fillInfo.fillOp.getOperation());
-  
-  bm.updateBlockId(allocOp, *targetBlockId);
-  bm.updateBlockId(fillInfo.fillOp, *targetBlockId);
-  bm.updateBlockId(fillInfo.parentIf, *targetBlockId);
-
-  return true;
+  return success();
 }
 
 } // anonymous namespace
 
-void forgeFilledAllocInIf(linalg::FillOp fillOp, CVPipeline::ComputeBlockIdManager &bm)
-{
-    Value out = *fillOp.getOutputs().begin();
-    memref::AllocOp allocOp = llvm::dyn_cast_if_present<memref::AllocOp>(out.getDefiningOp());
-    scf::IfOp ifOp = llvm::dyn_cast<scf::IfOp>(fillOp->getParentOp());
-    if (!allocOp) {
-        return;
-    }
-    auto blockId = CVPipeline::getOpBlockId(allocOp).value();
-    bm.updateBlockId(ifOp, blockId);
-    bm.updateBlockId(fillOp, blockId);
-}
-
-void dfsMarkAsBlockId(Operation *op, unsigned blockId, CVPipeline::ComputeBlockIdManager &bm)
-{
-    if (!op) {
-        return;
-    }
-    bm.updateBlockId(op, blockId);
-    llvm::TypeSwitch<Operation *>(op)
-      .Case([&](ViewLikeOpInterface viewOp) {
-          dfsMarkAsBlockId(viewOp.getViewSource().getDefiningOp(), blockId, bm);
-      })
-      .Case([&](CastOpInterface castOp) {
-          dfsMarkAsBlockId(castOp->getOperand(0).getDefiningOp(), blockId, bm);
-      })
-    ;
-}
-
-void forgeCopyOp(memref::CopyOp copyOp, CVPipeline::MemoryDependenceGraph &memGraph, CVPipeline::ComputeBlockIdManager &bm)
-{
-    Value src = copyOp.getSource();
-    Value dst = copyOp.getTarget();
-    auto blockId = CVPipeline::getOpBlockId(copyOp).value();
-
-    dfsMarkAsBlockId(src.getDefiningOp(), blockId, bm);
-    dfsMarkAsBlockId(dst.getDefiningOp(), blockId, bm);
-}
 
 class UnifyAllocBlockPass
     : public PassWrapper<UnifyAllocBlockPass, OperationPass<ModuleOp>> {
@@ -492,33 +568,12 @@ public:
     CVPipeline::MemoryDependenceGraph memGraph(module, aa);
     auto bm = CVPipeline::ComputeBlockIdManager(module);
 
-    module.walk([&](memref::CopyOp copyOp){forgeCopyOp(copyOp, memGraph, bm);});
-
-    module.walk([&](linalg::FillOp fillOp) {
-        auto *parentOp = fillOp->getParentOp();
-        auto ifOp = llvm::dyn_cast_if_present<scf::IfOp>(parentOp);
-        if (!ifOp) {
-            return;
-        }
-        if (!ifOp->hasAttr("hivm.unlikely_condition")) {
-            LOG_DEBUG("Skipped: " << ifOp << "\n");
-            return;
-        }
-        LOG_DEBUG("Processing: " << ifOp << "\n");
-        forgeFilledAllocInIf(fillOp, bm);
-    });
-
-    int processedCount = 0;
-    int successCount = 0;
-
     module.walk([&](memref::AllocOp allocOp) {
-      processedCount++;
-      if (tryUnifyForAlloc(allocOp, memGraph, bm)) {
-        successCount++;
+      if (failed(tryUnifyForAlloc(allocOp, memGraph, bm))) {
+        signalPassFailure();
       }
     });
 
-    LOG_DEBUG("[UnifyAllocBlockPass] Processed: " << processedCount << " allocs, unified: " << successCount);
     LOG_DEBUG("After: " << *module << "\n");
   }
 };

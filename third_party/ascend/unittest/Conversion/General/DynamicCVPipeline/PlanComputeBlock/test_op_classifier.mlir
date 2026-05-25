@@ -26,13 +26,13 @@
 // CHECK: [[DEP_FILL0:%[0-9]+]] = linalg.fill {ssbuffer.block_id = [[TC01_DEP0:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} ins({{.*}} : f32) outs({{.*}} : tensor<4x4xf32>) -> tensor<4x4xf32>
 // CHECK-NEXT: [[DEP_MM0:%[0-9]+]] = linalg.matmul {ssbuffer.block_id = [[TC01_DEP0]] : i32, ssbuffer.core_type = "CUBE"} ins({{.*}}, [[DEP_T0]] : tensor<4x4xf16>, tensor<4x4xf16>) outs([[DEP_FILL0]] : tensor<4x4xf32>)
 // CHECK: linalg.matmul {ssbuffer.block_id = [[TC01_VF0:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} ins({{.*}}, %arg5 : tensor<4x4xf16>, tensor<4x4xf16>) outs({{.*}} : tensor<4x4xf32>)
-// CHECK: arith.addf {{.*}}, %arg7 {ssbuffer.block_id = [[TC01_VF_VEC:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: [[DEP_ADD1:%[0-9]+]] = arith.addf [[DEP_MM0]], {{.*}} {ssbuffer.block_id = [[TC01_VF_VEC]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
+// CHECK: arith.addf {{.*}}, %arg7 {ssbuffer.add_from_matmul, ssbuffer.block_id = [[TC01_VF_VEC:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
+// CHECK: [[DEP_ADD1:%[0-9]+]] = arith.addf [[DEP_MM0]], {{.*}} {ssbuffer.add_from_matmul, ssbuffer.block_id = [[TC01_VF_VEC]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
 // CHECK-NEXT: [[DEP_CAST1:%[0-9]+]] = arith.truncf [[DEP_ADD1]] {ssbuffer.block_id = [[TC01_VF_VEC]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32> to tensor<4x4xf16>
 // CHECK: [[DEP_T1:%[0-9]+]] = bufferization.to_tensor {{.*}} {ssbuffer.block_id = [[TC01_DEP1:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} : memref<4x4xf16>
 // CHECK: [[DEP_FILL1:%[0-9]+]] = linalg.fill {ssbuffer.block_id = [[TC01_DEP1]] : i32, ssbuffer.core_type = "CUBE"} ins({{.*}} : f32) outs({{.*}} : tensor<4x4xf32>) -> tensor<4x4xf32>
 // CHECK-NEXT: [[DEP_MM1_CUBE:%[0-9]+]] = linalg.matmul {ssbuffer.block_id = [[TC01_DEP1]] : i32, ssbuffer.core_type = "CUBE"} ins([[DEP_CAST1]], [[DEP_T1]] : tensor<4x4xf16>, tensor<4x4xf16>) outs([[DEP_FILL1]] : tensor<4x4xf32>)
-// CHECK-NEXT: [[DEP_MM1:%[0-9]+]] = arith.addf [[DEP_MM1_CUBE]], {{.*}} {ssbuffer.block_id = [[TC01_DEP_VEC:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
+// CHECK-NEXT: [[DEP_MM1:%[0-9]+]] = arith.addf [[DEP_MM1_CUBE]], {{.*}} {ssbuffer.add_from_matmul, ssbuffer.block_id = [[TC01_DEP_VEC:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
 // CHECK: [[DEP_SIDE:%[0-9]+]] = arith.addf {{.*}}, [[DEP_MM1]] {ssbuffer.block_id = [[TC01_DEP_VEC]] : i32, ssbuffer.core_type = "VECTOR"}
 // CHECK: [[DEP_MM2:%[0-9]+]] = linalg.matmul {ssbuffer.block_id = [[TC01_DEP2:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} ins({{.*}}) outs({{.*}} : tensor<4x4xf32>)
 // CHECK: [[TR_EMPTY:%[0-9]+]] = tensor.empty() {ssbuffer.block_id = [[TC01_TR:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} : tensor<4x4xf16>
@@ -181,7 +181,7 @@ func.func @tc01_single_block_comprehensive(
 // CHECK-NEXT: [[ZERO:%[A-Za-z0-9_]+]] = arith.constant {ssbuffer.block_id = [[TC02_OUTER]] : i32, ssbuffer.core_type = "CUBE"} 0.000000e+00 : f32
 // CHECK-NEXT: [[OUTER_FILL:%[0-9]+]] = linalg.fill {ssbuffer.block_id = [[TC02_OUTER]] : i32, ssbuffer.core_type = "CUBE"} ins([[ZERO]] : f32) outs([[OUTER_EMPTY]] : tensor<4x4xf32>) -> tensor<4x4xf32>
 // CHECK-NEXT: [[OUTER_MM:%[0-9]+]] = linalg.matmul {ssbuffer.block_id = [[TC02_OUTER]] : i32, ssbuffer.core_type = "CUBE"} ins([[LOAD_A]], [[LOAD_B]] : tensor<4x4xf16>, tensor<4x4xf16>) outs([[OUTER_FILL]] : tensor<4x4xf32>) -> tensor<4x4xf32>
-// CHECK: [[OUTER_ACC:%[0-9]+]] = arith.addf [[OUTER_MM]], {{.*}} {ssbuffer.block_id = [[TC02_AFTER_OUTER:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
+// CHECK: [[OUTER_ACC:%[0-9]+]] = arith.addf [[OUTER_MM]], {{.*}} {ssbuffer.add_from_matmul, ssbuffer.block_id = [[TC02_AFTER_OUTER:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
 // CHECK-NEXT: [[OUTER_VEC:%[0-9]+]] = arith.addf [[OUTER_ACC]], %arg6 {ssbuffer.block_id = [[TC02_AFTER_OUTER]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
 // CHECK-NEXT: [[IF_PRE1:%[0-9]+]] = arith.mulf %arg7, [[OUTER_VEC]] {ssbuffer.block_id = [[TC02_AFTER_OUTER]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
 // CHECK-NEXT: [[REGION:%[0-9]+]] = scf.if %arg5 -> (tensor<4x4xf32>) {
@@ -194,7 +194,7 @@ func.func @tc01_single_block_comprehensive(
 // CHECK-NEXT: [[LOOP:%[0-9]+]]:2 = scf.for {{.*}} = [[C0]] to %arg4 step [[C1]] iter_args({{.*}} = [[OUTER_ACC]], {{.*}} = [[OUTER_VEC]]) -> (tensor<4x4xf32>, tensor<4x4xf32>) {
 // CHECK-NEXT: [[IF2:%[0-9]+]]:2 = scf.if %arg5 -> (tensor<4x4xf32>, tensor<4x4xf32>) {
 // CHECK: [[INNER_MM:%[0-9]+]] = linalg.matmul {ssbuffer.block_id = [[TC02_INNER_CUBE:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} ins(%arg2, %arg3 : tensor<4x4xf16>, tensor<4x4xf16>) outs({{.*}} : tensor<4x4xf32>) -> tensor<4x4xf32>
-// CHECK-NEXT: [[INNER_ACC:%[0-9]+]] = arith.addf [[INNER_MM]], {{.*}} {ssbuffer.block_id = [[TC02_THEN_VEC:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
+// CHECK-NEXT: [[INNER_ACC:%[0-9]+]] = arith.addf [[INNER_MM]], {{.*}} {ssbuffer.add_from_matmul, ssbuffer.block_id = [[TC02_THEN_VEC:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
 // CHECK-NEXT: [[THEN_VEC:%[0-9]+]] = arith.addf {{.*}}, %arg7 {ssbuffer.block_id = [[TC02_THEN_VEC]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
 // CHECK-NEXT: scf.yield {ssbuffer.core_type = "VECTOR, VECTOR"} [[INNER_ACC]], [[THEN_VEC]] : tensor<4x4xf32>, tensor<4x4xf32>
 // CHECK: } else {
@@ -215,7 +215,7 @@ func.func @tc01_single_block_comprehensive(
 // CHECK-NEXT: [[B_FILL:%[0-9]+]] = linalg.fill {ssbuffer.block_id = [[TC02_LOOP_CUBE1]] : i32, ssbuffer.core_type = "CUBE"} ins([[B_ZERO]] : f32) outs([[B_EMPTY]] : tensor<4x4xf32>) -> tensor<4x4xf32>
 // CHECK-NEXT: [[B_MM:%[0-9]+]] = linalg.matmul {ssbuffer.block_id = [[TC02_LOOP_CUBE1]] : i32, ssbuffer.core_type = "CUBE"} ins([[A_CAST]], %arg2 : tensor<4x4xf16>, tensor<4x4xf16>) outs([[B_FILL]] : tensor<4x4xf32>) -> tensor<4x4xf32>
 // CHECK-NEXT: [[B_TMP:%[0-9]+]] = tensor.empty() {ssbuffer.block_id = [[TC02_LOOP_VEC2:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
-// CHECK-NEXT: [[B_ADD0:%[0-9]+]] = arith.addf [[B_MM]], [[B_TMP]] {ssbuffer.block_id = [[TC02_LOOP_VEC2]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
+// CHECK-NEXT: [[B_ADD0:%[0-9]+]] = arith.addf [[B_MM]], [[B_TMP]] {ssbuffer.add_from_matmul, ssbuffer.block_id = [[TC02_LOOP_VEC2]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
 // CHECK-NEXT: [[B_NEXT:%[0-9]+]] = arith.addf [[B_ADD0]], [[DENSE]] {ssbuffer.block_id = [[TC02_LOOP_VEC2]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
 // CHECK: [[E_NEXT:%[0-9]+]] = arith.addf {{.*}}, [[DENSE]] {ssbuffer.block_id = [[TC02_LOOP_VEC2]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
 // CHECK-NEXT: scf.yield {ssbuffer.core_type = "VECTOR, VECTOR"} [[B_NEXT]], [[E_NEXT]] : tensor<4x4xf32>, tensor<4x4xf32>
@@ -326,7 +326,7 @@ func.func @tc03c_empty_loop(%n: index, %init: tensor<4x4xf32>) -> tensor<4x4xf32
 // CHECK-NEXT: [[ZERO:%[A-Za-z0-9_]+]] = arith.constant {ssbuffer.block_id = [[TC03D_CUBE]] : i32, ssbuffer.core_type = "CUBE"} 0.000000e+00 : f32
 // CHECK-NEXT: [[FILL:%[0-9]+]] = linalg.fill {ssbuffer.block_id = [[TC03D_CUBE]] : i32, ssbuffer.core_type = "CUBE"} ins([[ZERO]] : f32) outs([[EMPTY]] : tensor<4x4xf32>) -> tensor<4x4xf32>
 // CHECK-NEXT: [[MM:%[0-9]+]] = linalg.matmul {ssbuffer.block_id = [[TC03D_CUBE]] : i32, ssbuffer.core_type = "CUBE"} ins(%arg0, %arg1 : tensor<4x4xf16>, tensor<4x4xf16>) outs([[FILL]] : tensor<4x4xf32>) -> tensor<4x4xf32>
-// CHECK-NEXT: [[ADD:%[0-9]+]] = arith.addf [[MM]], %arg2 {ssbuffer.block_id = [[TC03D_VEC:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
+// CHECK-NEXT: [[ADD:%[0-9]+]] = arith.addf [[MM]], %arg2 {ssbuffer.add_from_matmul, ssbuffer.block_id = [[TC03D_VEC:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
 // CHECK-NEXT: return [[ADD]] : tensor<4x4xf32>
 func.func @tc03d_all_cube_matmul_only(
     %a: tensor<4x4xf16>,
@@ -345,7 +345,7 @@ func.func @tc03d_all_cube_matmul_only(
 // CHECK-NEXT: [[ACC_ZERO:%[A-Za-z0-9_]+]] = arith.constant {ssbuffer.block_id = [[TC03E_CUBE]] : i32, ssbuffer.core_type = "CUBE"} 0.000000e+00 : f32
 // CHECK-NEXT: [[FILL:%[0-9]+]] = linalg.fill {ssbuffer.block_id = [[TC03E_CUBE]] : i32, ssbuffer.core_type = "CUBE"} ins([[ACC_ZERO]] : f32) outs([[EMPTY]] : tensor<4x4xf32>) -> tensor<4x4xf32>
 // CHECK-NEXT: [[MM:%[0-9]+]] = linalg.matmul {ssbuffer.block_id = [[TC03E_CUBE]] : i32, ssbuffer.core_type = "CUBE"} ins([[T]], %arg0 : tensor<4x4xf32>, tensor<4x4xf32>) outs([[FILL]] : tensor<4x4xf32>) -> tensor<4x4xf32>
-// CHECK-NEXT: [[ADD:%[0-9]+]] = arith.addf [[MM]], %arg1 {ssbuffer.block_id = [[TC03E_ADD:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
+// CHECK-NEXT: [[ADD:%[0-9]+]] = arith.addf [[MM]], %arg1 {ssbuffer.add_from_matmul, ssbuffer.block_id = [[TC03E_ADD:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<4x4xf32>
 // CHECK-NEXT: return [[ADD]] : tensor<4x4xf32>
 func.func @tc03e_memref_fill_no_result(
     %a: tensor<4x4xf32>,

@@ -27,10 +27,14 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/iterator.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "DynamicCVPipeline/Common/Utils.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -525,6 +529,28 @@ static SmallVector<Operation *> collectMatmulOps(Block *block)
     return computeOps;
 }
 
+static void fuseMarkOpToDef(Block *block, ComputeBlockIdManager &bm)
+{
+    for (auto op : llvm::make_pointer_range(block->getOperations())) {
+        if (getOpCoreType(op) != CUBE_ONLY) {
+            continue;
+        }
+        auto markOp = llvm::dyn_cast<annotation::MarkOp>(op);
+        if (!markOp) {
+            continue;
+        }
+        auto defOp = markOp.getSrc().getDefiningOp();
+        if (!defOp) {
+            continue;
+        }
+
+        auto defBlockId = bm.getBlockIdByOp(defOp);
+        if (defBlockId != -1) {
+            bm.updateBlockId(markOp, defBlockId);
+        }
+    }
+}
+
 /**
  * Main entry point: Process a single block by grouping operations into
  * execution blocks using BFS and topological traversal.
@@ -554,7 +580,11 @@ static llvm::LogicalResult processBlockWithCubeBFS(Block *block, const MemoryDep
 
     // Phase 2: Handle remaining Cube Ops following Topo order
     TopologicalPartitionPlanner topoPlanner {block, assigned, memGraph, bm};
-    return topoPlanner.run();
+    if (failed(topoPlanner.run())) {
+        return failure();
+    }
+    fuseMarkOpToDef(block, bm);
+    return llvm::success();
 }
 
 void mlir::triton::PlanCubeBlockPass::runOnOperation()

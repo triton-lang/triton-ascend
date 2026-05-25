@@ -35,6 +35,7 @@
 // all prior writers/readers and become the sole writer for every slot.
 
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
@@ -90,6 +91,12 @@ MemoryEffects::EffectInstance remapEffectValue(const MemoryEffects::EffectInstan
 
     return MemoryEffects::EffectInstance(effect.getEffect(), cast<BlockArgument>(value), effect.getParameters(),
                                          effect.getStage(), effect.getEffectOnFullRegion(), effect.getResource());
+}
+
+bool isKnownNoMemoryEffectCall(Operation *op)
+{
+    auto callOp = dyn_cast<func::CallOp>(op);
+    return callOp && callOp.getCallee().starts_with("triton_indirect_load");
 }
 
 } // namespace
@@ -213,9 +220,16 @@ SmallVector<MemoryEffects::EffectInstance> MemoryDependenceGraph::collectOuterEf
 {
     unknown = false;
 
+    if (auto markOp = dyn_cast<annotation::MarkOp>(op)) {
+        MemoryEffects::EffectInstance scopedWrite(MemoryEffects::Write::get());
+        return {remapEffectValue(scopedWrite, markOp.getSrc())};
+    }
+
     std::optional<SmallVector<MemoryEffects::EffectInstance>> raw = getEffectsRecursively(op);
     if (!raw) {
-        unknown = true;
+        if (!isKnownNoMemoryEffectCall(op)) {
+            unknown = true;
+        }
         return {};
     }
 

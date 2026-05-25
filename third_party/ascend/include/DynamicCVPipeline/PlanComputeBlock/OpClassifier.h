@@ -99,6 +99,12 @@ private:
     // Propagate CUBE core type upstream
     int propagateCubeUpstream();
 
+    // Propagate CUBE upstream for a specific operation
+    void propagateCubeUpstreamForOp(Operation *startOp);
+
+    // Helper: Handle fill op in scf.if - if all ops in scf.if are CUBE, mark scf.if and propagate upstream
+    void handleFillInScfIf(Operation *fillOp);
+
     // Get upstream operations based on both SSA and memory dependencies
     void getUpstreamOpsWithMemoryDeps(Operation *cur, llvm::SmallVectorImpl<Operation *> &upstreamOps);
 

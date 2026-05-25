@@ -58,17 +58,26 @@ class UBUsageOptPass : public PassWrapper<UBUsageOptPass, OperationPass<ModuleOp
     llvm::StringRef getArgument() const final { return "ub-usage-opt"; }
 
   private:
+    const int MAX_EDGE_SIZE = (1 << 30);
     int getValueSizeInBytes(Value value);
     void buildUBUsageGraph(Block *block, DenseMap<Operation *, int> &op2nodeId, DenseMap<int, Operation *> &nodeId2op,
                            SmallVector<SmallVector<int>> &linkOut, SmallVector<SmallVector<int>> &linkIn,
                            SmallVector<int> &linkSize, SmallVector<int> &linkStart, SmallVector<int> &linkEnd,
                            SmallVector<int> &nodeBlockId, SmallVector<int> &nodeCoreType, SmallVector<int> &nodeArgs,
                            const CVPipeline::MemoryDependenceGraph &memGraph, CVPipeline::ComputeBlockIdManager &bm);
-    llvm::LogicalResult UBUsageOptimization(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph, CVPipeline::ComputeBlockIdManager &bm);
+    llvm::LogicalResult UBUsageOptimization(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
+                                            CVPipeline::ComputeBlockIdManager &bm);
 };
 } // namespace triton
 } // namespace mlir
 
+/**
+    The UB occupied by the value is used as the edge weight.
+    The compute block will be partitioned at the location with the smallest edge weight. Where:
+    1. Tensor/Vector: Uses the data size directly.
+    2. Memref: Set to the maximum value, indicating that a compute block should not be partitioned here.
+    3. Isndex/Other: Set to 0, indicating that it does not occupy any UB.
+*/
 int UBUsageOptPass::getValueSizeInBytes(Value value)
 {
     Type type = value.getType();
@@ -95,17 +104,7 @@ int UBUsageOptPass::getValueSizeInBytes(Value value)
     }
     // Memref
     if (auto memRefType = dyn_cast<MemRefType>(type)) {
-        if (!memRefType.hasStaticShape()) {
-            return 1;
-        }
-        int64_t numElements = 1;
-        for (int64_t dim : memRefType.getShape()) {
-            if (dim < 0) {
-                return 1;
-            }
-            numElements *= dim;
-        }
-        return static_cast<int>(std::max<int64_t>(1, numElements * getElemBytes(memRefType.getElementType())));
+        return MAX_EDGE_SIZE;
     }
     // Vector
     if (auto vectorType = dyn_cast<VectorType>(type)) {
@@ -114,11 +113,9 @@ int UBUsageOptPass::getValueSizeInBytes(Value value)
     }
     // Index
     if (auto idxTy = dyn_cast<IndexType>(value.getType())) {
-        DataLayout dataLayout(getOperation());
-        unsigned bitWidth = dataLayout.getTypeSizeInBits(IndexType::get(getOperation()->getContext()));
-        return bitWidth / 8;
+        return 0;
     }
-    return static_cast<int>(getElemBytes(type));
+    return 0;
 }
 
 void UBUsageOptPass::buildUBUsageGraph(Block *block, DenseMap<Operation *, int> &op2nodeId,
@@ -126,7 +123,8 @@ void UBUsageOptPass::buildUBUsageGraph(Block *block, DenseMap<Operation *, int> 
                                        SmallVector<SmallVector<int>> &linkIn, SmallVector<int> &linkSize,
                                        SmallVector<int> &linkStart, SmallVector<int> &linkEnd,
                                        SmallVector<int> &nodeBlockId, SmallVector<int> &nodeCoreType,
-                                       SmallVector<int> &nodeArgs, const CVPipeline::MemoryDependenceGraph &memGraph, CVPipeline::ComputeBlockIdManager &bm)
+                                       SmallVector<int> &nodeArgs, const CVPipeline::MemoryDependenceGraph &memGraph,
+                                       CVPipeline::ComputeBlockIdManager &bm)
 {
     DenseMap<int, int> cubeBlockId2nodeId;
     const int cubeCoreType = static_cast<int>(CVPipeline::CoreType::CUBE_ONLY);
@@ -246,6 +244,10 @@ void UBUsageOptPass::buildUBUsageGraph(Block *block, DenseMap<Operation *, int> 
                 if (fromArgEdge) {
                     edgeSize *= 2;
                 }
+                if (!visited.contains(std::make_pair(srcNode, dstNode))) {
+                    LOG_DEBUG("Add SSA edage from " << *srcInBlock << " to " << blockOp << "\nweight = " << edgeSize
+                                                    << "\n");
+                }
                 addEdge(srcNode, dstNode, edgeSize);
             }
 
@@ -270,6 +272,10 @@ void UBUsageOptPass::buildUBUsageGraph(Block *block, DenseMap<Operation *, int> 
                 }
 
                 int srcNode = getOrCreateNodeId(srcInBlock);
+                if (!visited.contains(std::make_pair(srcNode, dstNode))) {
+                    LOG_DEBUG("Add memory edage from " << *srcInBlock << " to " << blockOp << "\nweight = " << 0
+                                                       << "\n");
+                }
                 addEdge(srcNode, dstNode, 0);
             }
         });
@@ -287,14 +293,12 @@ SmallVector<int> findDependency(int targetNdoe, int preNode, const SmallVector<S
     while (!queue.empty()) {
         int curNode = queue.front();
         queue.pop();
-        LOG_DEBUG("curNode = " << curNode << "\n");
         if (curNode == preNode) {
             continue; // we find other linkin of b in A->B, so pass A.
         }
 
         for (int inEdgeId : linkIn[curNode]) {
             int inStart = linkStart[inEdgeId];
-            LOG_DEBUG("instart = " << inStart << "\n");
             if (visited.insert(inStart).second) {
                 dependNodes.push_back(inStart);
                 queue.push(inStart);
@@ -533,16 +537,17 @@ bool DependencyCycleDetector::operator()(Operation *cur)
 }
 
 /**
-    * Check if adding willaddOps to targetBlockId will create cycle.
-    * Walk from every op in targetBlockId and willaddOps.
-    * if reach other blockid ops and dfs find any targetBlockId op, then there is cycle.
-*/
+ * Check if adding willaddOps to targetBlockId will create cycle.
+ * Walk from every op in targetBlockId and willaddOps.
+ * if reach other blockid ops and dfs find any targetBlockId op, then there is cycle.
+ */
 std::optional<bool> willCreateCycle(llvm::SmallVectorImpl<Operation *> &willaddOps, Block *block,
-                            const CVPipeline::MemoryDependenceGraph &memGraph, int targetBlockId, CVPipeline::ComputeBlockIdManager &bm)
+                                    const CVPipeline::MemoryDependenceGraph &memGraph, int targetBlockId,
+                                    CVPipeline::ComputeBlockIdManager &bm)
 {
     // Step1: Init, Add willaddOps to targetBlockId.
     // OkSet is new block, includes two part: 1. original ops in targetBlockId. 2. willaddOps.
-    llvm::DenseSet<mlir::Operation *> okSet;  
+    llvm::DenseSet<mlir::Operation *> okSet;
     for (auto op : bm.getOpsByBlockId(targetBlockId)) {
         okSet.insert(op);
     }
@@ -586,11 +591,11 @@ std::optional<bool> willCreateCycle(llvm::SmallVectorImpl<Operation *> &willaddO
             }
         }
         if (ret) {
-            //early stop if find cycle.
+            // early stop if find cycle.
             break;
         }
     }
-    
+
     // Step3: Backtrace blockId change.
     for (auto op : willaddOps) {
         bm.updateBlockId(op, originBlockId[op]);
@@ -619,7 +624,7 @@ bool applyRecordChange(DenseMap<int, int> &recordChange, DenseMap<int, Operation
         if (willCreateCycle(willaddOps, willaddOps[0]->getBlock(), memGraph, targetBlockId, bm).value_or(true)) {
             LOG_DEBUG("Find cycle when apply change for blockId: " << targetBlockId << "\n");
             for (auto nodeId : willaddNodes) {
-                LOG_DEBUG("  - " << *nodeId2op[nodeId]<<"\n");
+                LOG_DEBUG("  - " << *nodeId2op[nodeId] << "\n");
             }
             hasError = true;
             continue;
@@ -633,7 +638,8 @@ bool applyRecordChange(DenseMap<int, int> &recordChange, DenseMap<int, Operation
     return hasError;
 }
 
-llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph, CVPipeline::ComputeBlockIdManager &bm)
+llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
+                                                        CVPipeline::ComputeBlockIdManager &bm)
 {
     if (!isa<scf::ForOp>(block->getParentOp())) {
         return llvm::success();
@@ -663,6 +669,10 @@ llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(Block *block, const CVPi
     llvm::DenseMap<int, int> recordChange = collectRecordChange(needUbOpts, linkOut, linkIn, linkSize, linkStart,
                                                                 linkEnd, nodeBlockId, nodeCoreType, nodeId2op);
     LOG_DEBUG("Need change blockId for " << recordChange.size() << " nodes\n");
+    for (auto rec : recordChange) {
+        auto node = nodeId2op[rec.first];
+        LOG_DEBUG("Change " << *node << " TO " << rec.second << "\n");
+    }
 
     if (applyRecordChange(recordChange, nodeId2op, memGraph, bm)) {
         // FIXME: it shouldn't happen....

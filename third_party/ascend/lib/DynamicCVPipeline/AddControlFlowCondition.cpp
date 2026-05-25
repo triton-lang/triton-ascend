@@ -47,63 +47,36 @@ using namespace mlir;
 using namespace triton;
 
 // Check if the module should be skipped for control flow condition processing
-static bool shouldSkipControlFlowCondition(ModuleOp module)
+static LogicalResult verifyControlFlowPrerequisites(ModuleOp module)
 {
-  int cubeScopeCount = 0;
-  int vectorScopeCount = 0;
-
-  module.walk([&](scope::ScopeOp scopeOp) {
-    auto attr = scopeOp->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type");
-    if (!attr) {
-      return;
-    }
-    if (attr.getTcoretype() == hivm::TCoreType::CUBE) {
-      ++cubeScopeCount;
-    } else if (attr.getTcoretype() == hivm::TCoreType::VECTOR) {
-      ++vectorScopeCount;
-    }
-  });
-
-  // If either CUBE or VECTOR scope is missing, skip processing
-  if (cubeScopeCount == 0 || vectorScopeCount == 0) {
-    LDBG("CUBE or VECTOR scope missing, skip processing.");
-    return true;
-  }
-
   // Check if scopeOp has ssbuffer.skip
   bool hasSkipAttr = false;
-  module.walk([&](scope::ScopeOp scopeOp) {
+  module.walk([&](Operation *op) {
+    auto scopeOp = dyn_cast<scope::ScopeOp>(op);
+    if (!scopeOp) {
+      return;
+    }
     if (scopeOp->hasAttr("ssbuffer.skip")) {
       hasSkipAttr = true;
     }
   });
   if (hasSkipAttr) {
     LDBG("scopeOp has ssbuffer.skip, skip processing.");
-    return true;
+    return failure();
   }
 
-  // Only skip if ALL forOps lack main_loop attr
-  bool hasMainLoopForOp = false;
-  module.walk([&](scf::ForOp forOp) {
-    if (forOp->hasAttr("ssbuffer.main_loop")) {
-      hasMainLoopForOp = true;
-    }
-  });
-  if (!hasMainLoopForOp) {
-    LDBG("All forOps lack ssbuffer.main_loop, skip processing.");
-    return true;
-  }
-
-  return false;
+  return success();
 }
 
 void AddControlFlowConditionPass::runOnOperation()
 {
   ModuleOp module = getOperation();
 
-  LDBG("Enter add controlflow condition pass.");
+  LDBG("Enter add controlflow condition pass.\n");
+  LDBG("before AddControlFlowCondition:");
+  LLVM_DEBUG(module.dump());
 
-  if (shouldSkipControlFlowCondition(module)) {
+  if (failed(verifyControlFlowPrerequisites(module))) {
     return;
   }
 
@@ -114,13 +87,13 @@ void AddControlFlowConditionPass::runOnOperation()
   std::unique_ptr<InitDependentMapPass> initDependentMapPass(new InitDependentMapPass());
   initDependentMapPass->setConditionInfo(&info);
   pm.addPass(std::move(initDependentMapPass));
-  
-  // Step1: Process shared iter_args in for ops to eliminate arg sharing across block_ids
-  pm.addPass(createProcessArgsPass());
 
-  // Step2: Clone ops in vector/cube to ensure that each block_id has its own
+  // Step1: Clone ops in vector/cube to ensure that each block_id has its own
   // ops without sharing
   pm.addPass(createCloneOpsPass());
+  
+  // Step2: Process shared iter_args in for ops to eliminate arg sharing across block_ids
+  pm.addPass(createProcessArgsPass());
 
   // Step3: Create if ops based on block_id
   std::unique_ptr<CreateIfOpsPass> createIfOpsPass(new CreateIfOpsPass());

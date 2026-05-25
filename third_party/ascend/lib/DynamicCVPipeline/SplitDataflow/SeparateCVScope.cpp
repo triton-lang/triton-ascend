@@ -28,6 +28,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/IRMapping.h"
@@ -316,6 +317,30 @@ static bool hasLiveUsers(Operation *op)
 
 static bool needsLoopCarryPreserve(Operation *owner, unsigned slotIndex, StringRef scopeType);
 
+static bool hasActiveNestedLoopCarryUse(OpOperand &use, StringRef scopeType)
+{
+    auto loopOp = dyn_cast<LoopLikeOpInterface>(use.getOwner());
+    if (!loopOp) {
+        return false;
+    }
+
+    auto inits = loopOp.getInitsMutable();
+    if (inits.empty()) {
+        return false;
+    }
+
+    unsigned operandIndex = use.getOperandNumber();
+    unsigned initsBegin = inits.front().getOperandNumber();
+    unsigned initsEnd = initsBegin + inits.size();
+    if (operandIndex < initsBegin || operandIndex >= initsEnd) {
+        return false;
+    }
+
+    unsigned resultIndex = operandIndex - initsBegin;
+    return resultIndex < loopOp->getNumResults()
+        && needsLoopCarryPreserve(loopOp.getOperation(), resultIndex, scopeType);
+}
+
 static bool canSkipForwardingUse(OpOperand &use, StringRef scopeType)
 {
     Operation *user = use.getOwner();
@@ -424,6 +449,10 @@ static UseCheckResult checkYieldUse(OpOperand &use, Operation *owner, unsigned s
 static UseCheckResult checkGeneralUse(OpOperand &use, StringRef scopeType, SmallVector<Value> &worklist)
 {
     Operation *user = use.getOwner();
+    if (hasActiveNestedLoopCarryUse(use, scopeType)) {
+        return UseCheckResult::Active;
+    }
+
     if (user->getNumResults() == 0) {
         if (matchesScope(user, scopeType) || isControlFlowOp(user)) {
             return UseCheckResult::Active;

@@ -21,11 +21,11 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
 #include "DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "DynamicCVPipeline/PlanComputeBlock/Passes.h"
 #include "DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
 
 #include "mlir/Pass/PassManager.h"
 
@@ -38,10 +38,16 @@ void ComputeBlockOptPass::runOnOperation()
 
     OpPassManager pm(module.getOperationName());
 
-    pm.addPass(createUBUsageOptPass());
-    pm.addPass(createReorderOpsByBlockIdPass());
+    /**
+        First, perform UnifyAllocBlock to merge load semantic operations into a unified block.
+        Then, use UBUsageOpt to find the smallest UB dependency location and divide the computation blocks.
+     */
     pm.addPass(createUnifyAllocBlockPass());
     pm.addPass(createReorderOpsByBlockIdPass());
+
+    pm.addPass(createUBUsageOptPass());
+    pm.addPass(createReorderOpsByBlockIdPass());
+
     pm.addPass(createFuseAdotBaddCPass());
 
     if (failed(runPipeline(pm, module))) {
@@ -63,6 +69,7 @@ void registerComputeBlockOptPasses()
     registerPass([]() -> std::unique_ptr<mlir::Pass> { return createComputeBlockOptPass(); });
     registerPass(createUBUsageOptPass);
     registerPass(createFuseAdotBaddCPass);
+    registerPass(createUnifyAllocBlockPass);
 }
 
 } // namespace triton

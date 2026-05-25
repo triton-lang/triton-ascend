@@ -47,6 +47,22 @@ namespace triton {
 } // namespace triton
 } // namespace mlir
 
+namespace {
+
+void restoreModuleFromBackup(ModuleOp moduleOp, ModuleOp moduleBackup)
+{
+    Operation *moduleOperation = moduleOp.getOperation();
+    Operation *backupOperation = moduleBackup.getOperation();
+
+    moduleOperation->setLoc(backupOperation->getLoc());
+    moduleOperation->setAttrs(backupOperation->getAttrs());
+    if (moduleOperation->getPropertiesStorageSize() != 0) {
+        moduleOperation->copyProperties(backupOperation->getPropertiesStorage());
+    }
+    moduleOp.getBodyRegion().takeBody(moduleBackup.getBodyRegion());
+}
+
+} // namespace
 
 AddDynamicCVPipelinePass::AddDynamicCVPipelinePass(
     const AddDynamicCVPipelineOptions &options)
@@ -86,8 +102,7 @@ void AddDynamicCVPipelinePass::runOnOperation()
         }
         
         int errCode = errCodeAttr ? static_cast<int>(errCodeAttr.getInt()) : CVPipeline::ERRCODE_FAILED;
-        moduleOp->setAttrs(moduleBackup.getOperation()->getAttrs());
-        moduleOp.getBodyRegion().takeBody(moduleBackup.getBodyRegion());
+        restoreModuleFromBackup(moduleOp, moduleBackup);
         moduleBackup->destroy();
         moduleOp->setAttr(CVPipeline::ERRCODE_ATTR, builder.getI32IntegerAttr(errCode));
         return;

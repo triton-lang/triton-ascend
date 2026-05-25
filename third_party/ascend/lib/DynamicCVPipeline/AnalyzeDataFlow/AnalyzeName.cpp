@@ -22,14 +22,11 @@
 
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/IR/BuiltinTypes.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 
-static constexpr const char *DEBUG_TYPE = "analyze-flag";
+static constexpr const char *DEBUG_TYPE = "analyze-name";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...) \
 LLVM_DEBUG({ \
@@ -38,65 +35,61 @@ LLVM_DEBUG({ \
   llvm::dbgs() << "\n"; \
 })
 
-using namespace llvm;
 using namespace mlir;
 using namespace triton;
-using namespace CVPipeline;
 
 namespace {
 
-static constexpr const char *syncFlagIdAttr = "static_flag_id";
+static constexpr llvm::StringLiteral interceptrFunc[] {
+  "_attn_bwd",
+  "_kernel_matmul_fp8_row_non_persistent",
+  "bmm_kernel",
+};
 
-static bool checkFlagIdValidity(ModuleOp module)
+static LogicalResult verifyFuncNames(ModuleOp module)
 {
-  bool shouldReturn = false;
-  int invalidFlagNum = 0;
+  bool intercepted = false;
 
-  module.walk([&](Operation *op) -> WalkResult {
-    if (!isa<hivm::SyncBlockSetOp>(op) && !isa<hivm::SyncBlockWaitOp>(op)) {
+  module.walk([&](func::FuncOp funcOp) -> WalkResult {
+    if (!llvm::is_contained(interceptrFunc, funcOp.getSymName())) {
       return WalkResult::advance();
     }
 
-    if (auto intAttr = op->getAttrOfType<IntegerAttr>(syncFlagIdAttr)) {
-      int flag = static_cast<int>(intAttr.getInt());
-      if (flag < 0 || flag > 14) {
-        shouldReturn = true;
-        invalidFlagNum++;
-      }
-    }
-
-    return WalkResult::advance();
+    LDBG("[INFO]: DynamicCVPipeline is interrupted by function name: " << funcOp.getSymName());
+    intercepted = true;
+    return WalkResult::interrupt();
   });
-  
-  if (shouldReturn) {
-    LDBG("[warning]: flag_id is not enough for transfer, invalidFlagNum: " << invalidFlagNum << "\n");
+
+  if (!intercepted) {
+    return success();
   }
-  return shouldReturn;
+
+  return failure();
 }
 
 } // namespace
 
-void AnalyzeFlagPass::runOnOperation()
+void AnalyzeNamePass::runOnOperation()
 {
   ModuleOp module = getOperation();
 
-  LDBG("Before AnalyzeFlag:\n" << module << "\n");
+  LDBG("Before AnalyzeName:\n" << module << "\n");
 
-  if (checkFlagIdValidity(module)) {
-    setFallbackAttr(module);
+  if (failed(verifyFuncNames(module))) {
+    CVPipeline::setFallbackAttr(module);
     signalPassFailure();
     return;
   }
 
-  LDBG("After AnalyzeFlag:\n");
+  LDBG("After AnalyzeName:\n" << module << "\n");
 }
 
 namespace mlir {
 namespace triton {
 
-std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeFlagPass()
+std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeNamePass()
 {
-  return std::make_unique<AnalyzeFlagPass>();
+  return std::make_unique<AnalyzeNamePass>();
 }
 
 } // namespace triton

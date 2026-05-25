@@ -26,6 +26,7 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -34,7 +35,9 @@
 #include "mlir/Support/LLVM.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
@@ -272,6 +275,21 @@ static SetVector<Operation *> collectKeepOps(Block *block, SmallVector<Operation
             }
         }
     }
+
+    // special case: annotation.mark always follows the defining op
+    for (auto op : fuseGroup) {
+        auto markOp = llvm::dyn_cast<annotation::MarkOp>(op);
+        if (!markOp) {
+            continue;
+        }
+
+        auto src = markOp.getSrc();
+        auto definingOp = src.getDefiningOp();
+        if (definingOp && keepOps.contains(definingOp)) {
+            keepOps.insert(markOp);
+        }
+    }
+
     return keepOps;
 }
 

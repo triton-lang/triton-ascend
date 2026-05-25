@@ -20,45 +20,39 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ASCEND_SSBUF_PROCESS_ARGS_FOR_CONTROL_FLOW_H
-#define TRITON_ASCEND_SSBUF_PROCESS_ARGS_FOR_CONTROL_FLOW_H
-#include "mlir/Dialect/SCF/IR/SCF.h"
+#ifndef TRITON_ADAPTER_MOVE_UPDATE_OPS_TO_FIRST_USE_H
+#define TRITON_ADAPTER_MOVE_UPDATE_OPS_TO_FIRST_USE_H
+
 #include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/DialectRegistry.h"
 #include "mlir/Pass/Pass.h"
 
 namespace mlir {
 namespace triton {
 
-// For each shared iter_arg, we need to track:
-// - Which block_ids use it
-// - Who is the owner (first block_id in order)
-// - For each non-owner block, what new iter_arg index to use
-struct SharedArgInfo {
-  int argIndex;
-  Value iterArg;
-  int ownerBlockId;
-  int newArgIndex;
-  int nonOwnerBlockId;
+class RefineArgsBlockIdPass : public PassWrapper<RefineArgsBlockIdPass, OperationPass<ModuleOp>> {
+  public:
+    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(RefineArgsBlockIdPass)
 
-  SharedArgInfo(int arg, int owner, int newIdx, int nonOwner)
-      : argIndex(arg), iterArg(Value()), ownerBlockId(owner),
-        newArgIndex(newIdx), nonOwnerBlockId(nonOwner) {}
+    RefineArgsBlockIdPass() = default;
+
+    void runOnOperation() override;
+
+    static constexpr ::llvm::StringRef getArgumentName() { return "refine-args-block-id"; }
+    ::llvm::StringRef getArgument() const override { return "refine-args-block-id"; }
+    ::llvm::StringRef getDescription() const override
+    {
+        return "Move update ops for iteration variables to the first block that uses them in main loops";
+    }
+    ::llvm::StringRef getName() const override { return "RefineArgsBlockIdPass"; }
+
+  private:
 };
 
-class ProcessArgsPass : public PassWrapper<ProcessArgsPass, OperationPass<ModuleOp>> {
- public:
-  ProcessArgsPass() = default;
+std::unique_ptr<OperationPass<ModuleOp>> createRefineArgsBlockIdPass();
 
-  void runOnOperation() override;
-
-  LogicalResult processSharedIterArgs(ModuleOp module);
-
-  llvm::StringRef getArgument() const override { return "process-args"; }
-};
-
-std::unique_ptr<OperationPass<ModuleOp>> createProcessArgsPass();
+void registerRefineArgsBlockIdPasses();
 
 } // namespace triton
 } // namespace mlir
-#endif // TRITON_ASCEND_SSBUF_PROCESS_ARGS_FOR_CONTROL_FLOW_H
+
+#endif // TRITON_ADAPTER_MOVE_UPDATE_OPS_TO_FIRST_USE_H

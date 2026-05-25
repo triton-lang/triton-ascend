@@ -38,12 +38,16 @@ void AnalyzeDataFlowPass::runOnOperation()
   LDBG("Enter AnalyzeDataFlow pass.");
 
   PassManager pm(&getContext(), module.getOperationName());
-  
+
+  pm.addPass(createAnalyzeNamePass());
+
   pm.addPass(createAnalyzeScopePass());
 
   pm.addPass(createAnalyzeArgsPass());
 
   pm.addPass(createAnalyzeFlagPass());
+
+  pm.addPass(createAnalyzeCubeContolFLowInputChainPass());
 
   if (failed(runPipeline(pm, module))) {
     signalPassFailure();
@@ -62,10 +66,12 @@ std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeDataFlowPass()
 
 void registerAnalyzeDataFlowPasses()
 {
-    registerPass(createAnalyzeArgsPass);
-    registerPass(createAnalyzeFlagPass);
-    registerPass(createAnalyzeScopePass);
-    registerPass(createAnalyzeDataFlowPass);
+  registerPass(createAnalyzeNamePass);
+  registerPass(createAnalyzeArgsPass);
+  registerPass(createAnalyzeFlagPass);
+  registerPass(createAnalyzeScopePass);
+  registerPass(createAnalyzeDataFlowPass);
+  registerPass(createAnalyzeCubeContolFLowInputChainPass);
 }
 
 } // namespace triton

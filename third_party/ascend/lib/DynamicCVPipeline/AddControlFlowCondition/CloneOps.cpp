@@ -22,6 +22,7 @@
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CloneOps.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "llvm/ADT/STLExtras.h"
@@ -42,6 +43,9 @@ LLVM_DEBUG({ \
 using namespace mlir;
 using namespace triton;
 using namespace hivm;
+
+using MemDepGraph = std::unique_ptr<CVPipeline::MemoryDependenceGraph>;
+using MemDepGraphT = CVPipeline::MemoryDependenceGraph;
 
 // Update op operands using value mapping, skip yield values of forOp
 static LogicalResult updateCloneMapping(Operation *op,
@@ -180,51 +184,62 @@ LogicalResult CloneOpsPass::cloneOpsInMainLoop(scf::ForOp forOp)
 }
 
 // Check if an op should be erased during cleanup (for cube)
-static bool shouldEraseOpForCube(Operation *op)
+// memGraph: optional pointer to MemoryDependenceGraph for checking exec-after dependencies
+static bool shouldEraseOpForCube(Operation *op, const CVPipeline::MemoryDependenceGraph *memGraph = nullptr)
 {
+  // Rule 1: SyncBlockWaitOp, SyncBlockSetOp, FixpipeOp -> directly erase
   if (isa<SyncBlockWaitOp>(op) || isa<SyncBlockSetOp>(op) ||
       isa<hivm::FixpipeOp>(op)) {
     return true;
   }
 
-   // Copy ops: erase only if operand(1) is not used by other ops
-  // and operand(1)'s defining subview op (if any) has source not used elsewhere
-  if (isa<memref::CopyOp>(op) && op->getNumOperands() > 1) {
-    Value secondOperand = op->getOperand(1);
-    bool usedByOtherOp = llvm::any_of(secondOperand.getUsers(), [&](Operation *user) {
-      return user != op;
-    });
-    if (usedByOtherOp) {
-      return false;
-    }
-    // Check if operand(1)'s defining op is subview and its source operand is used elsewhere
-    if (auto *defOp = secondOperand.getDefiningOp()) {
-      if (auto subviewOp = dyn_cast<memref::SubViewOp>(defOp)) {
-        Value source = subviewOp.getSource();
-        bool sourceUsedByOther = llvm::any_of(source.getUsers(), [&](Operation *user) {
-          return user != subviewOp;
-        });
-        if (sourceUsedByOther) {
-          return false;
-        }
+  auto opBlockId = getForDirectChildBlockId(op);
+
+  // Rule 2: If op has results, check via SSA if result is used by later ops in same block_id
+  // Use for-direct-child block_id (the immediate child of scf.for) for comparison
+  if (op->getNumResults() > 0) {
+    for (auto result : op->getResults()) {
+      if (result.use_empty()) {
+        // Result not used by anyone, can erase
+        continue;
+      }
+      if (!opBlockId) {
+        // No block_id but result is used, be conservative and keep
+        return false;
+      }
+      // Check if any user is in the same for-direct-child block_id
+      bool usedInSameBlockId = llvm::any_of(result.getUsers(), [&](Operation *user) {
+        auto userBlockId = getForDirectChildBlockId(user);
+        return userBlockId && *userBlockId == *opBlockId;
+      });
+      if (usedInSameBlockId) {
+        // Result used in same for-direct-child block, cannot erase
+        return false;
       }
     }
+    // All results are either unused or not used in same for-direct-child block, can erase
     return true;
   }
 
-  // Fill ops: erase if operand not used elsewhere
-  if (isa<linalg::FillOp>(op) && op->getNumResults() == 0 && op->getNumOperands() > 1) {
-    Value secondOperand = op->getOperand(1);
-    bool usedByOtherOp = llvm::any_of(secondOperand.getUsers(), [&](Operation *user) {
-      return user != op;
+  // Rule 3: If op has no results, check getExecAfter for same block_id dependencies
+  if (memGraph) {
+    auto execAfterOps = memGraph->getExecAfter(op);
+    bool hasCloneExecAfterInSameBlockId = llvm::any_of(execAfterOps, [&](Operation *execOp) {
+      // sync_block_wait/sync_block_set ops are not memory side effects in analyzing cleanup ops,
+      // therefore, we need to skip their judgments
+      if (isa<SyncBlockWaitOp>(execOp) || isa<SyncBlockSetOp>(execOp)) {
+        return false;
+      }
+      auto execBlockId = getOpBlockId(execOp);
+      return execBlockId && opBlockId && *execBlockId == *opBlockId;
     });
-    if (!usedByOtherOp) {
-      return true;
+    if (hasCloneExecAfterInSameBlockId) {
+      return false;
     }
   }
 
-  // Erase ops with no used results
-  return llvm::none_of(op->getResults(), [](auto result) { return !result.use_empty(); });
+  // Can erase if no results and no exec-after dependencies in same block
+  return true;
 }
 
 // Check if an op should be erased (for vector)
@@ -235,10 +250,12 @@ static bool shouldEraseOpForVector(Operation *op)
 }
 
 // Cleanup for cloned ops in a forOp
+// memGraphFactory: callable that rebuilds MemoryDependenceGraph for current IR state
 static LogicalResult cleanupClonedOps(scf::ForOp forOp,
     llvm::DenseMap<int, SmallVector<Operation *>> &blockOps,
     const SmallVector<int> &idsInOrder,
-    bool isCube)
+    bool isCube,
+    std::function<MemDepGraph(scf::ForOp)> memGraphFactory)
 {
   for (int i = idsInOrder.size() - 1; i >= 0; --i) {
     auto &curOps = blockOps[idsInOrder[i]];
@@ -258,13 +275,17 @@ static LogicalResult cleanupClonedOps(scf::ForOp forOp,
       continue;
     }
 
-    // Erase cloned ops that are not needed
+    // Erase cloned ops from bottom to top
+    // This ensures that when checking if an op can be erased, its users in same block_id
+    // have already been processed (and erased if applicable)
     for (int j = startIdx; j >= 0; --j) {
       Operation *op = curOps[j];
       if (!op->hasAttr("ssbuffer.clone")) {
         break;
       }
-      bool shouldErase = isCube ? shouldEraseOpForCube(op) : shouldEraseOpForVector(op);
+      // Rebuild memGraph after each erasure to reflect current IR state
+      auto memGraph = memGraphFactory(forOp);
+      bool shouldErase = isCube ? shouldEraseOpForCube(op, memGraph.get()) : shouldEraseOpForVector(op);
       if (shouldErase) {
         op->erase();
       }
@@ -307,7 +328,13 @@ LogicalResult CloneOpsPass::cleanupClonedOpsInMainLoop(scf::ForOp forOp)
   }
 
   SmallVector<int> idsInOrder = getBlockIdsInOrder(forOp);
-  if (failed(cleanupClonedOps(forOp, blockOps, idsInOrder, isCube))) {
+  if (failed(cleanupClonedOps(forOp, blockOps, idsInOrder, isCube, [&](scf::ForOp forOp) -> MemDepGraph {
+    if (!isCube) {
+      return nullptr;
+    }
+    auto &aliasAnalysis = getAnalysis<mlir::AliasAnalysis>();
+    return std::make_unique<MemDepGraphT>(forOp, aliasAnalysis);
+  }))) {
     return failure();
   }
 

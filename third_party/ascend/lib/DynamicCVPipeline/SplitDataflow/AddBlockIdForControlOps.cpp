@@ -22,6 +22,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/AddBlockIdForControlOps.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "llvm/Support/Debug.h"
 
 using namespace mlir;
@@ -38,15 +39,7 @@ void AddBlockIdForControlOpsPass::runOnOperation()
   ModuleOp module = getOperation();
 
   // Step 1: find the max block_id
-  int maxBlockId = -1;
-  module.walk([&](Operation *op) {
-    if (auto attr = op->getAttrOfType<IntegerAttr>("ssbuffer.block_id")) {
-      int currentId = attr.getInt();
-      if (currentId > maxBlockId) {
-        maxBlockId = currentId;
-      }
-    }
-  });
+  int maxBlockId = CVPipeline::getAvailableBlockId(module) - 1;
 
   LOG_DEBUG("maxBlockId: " << maxBlockId << "\n");
 

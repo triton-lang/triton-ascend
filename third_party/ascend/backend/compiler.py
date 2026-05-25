@@ -98,6 +98,7 @@ def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
         metadata["enable_dynamic_cv_pipeline"] = False
         metadata["enable_mixed_cv"] = kwargs["enable_mixed_cv"]
         metadata["disable_auto_inject_block_sync"] = kwargs["disable_auto_inject_block_sync"]
+        metadata["set_workspace_multibuffer"] = kwargs["set_workspace_multibuffer"]
         if opt.debug:
             print(f"SSBUFFER return code={rc}, will fallback to enable_dynamic_cv_pipeline=False")
 
@@ -157,6 +158,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         auto_blockify_size = metadata["auto_blockify_size"]
         enable_mixed_cv = metadata["enable_mixed_cv"]
         disable_auto_inject_block_sync = metadata["disable_auto_inject_block_sync"]
+        set_workspace_multibuffer = metadata["set_workspace_multibuffer"]
         if has_auto_blockify_blacklist_op or not auto_map_parallel_blocks_enabled:
             auto_blockify_size = 1
         pm = ir.pass_manager(mod.context)
@@ -210,10 +212,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             compile_on_910_95
         )
         if metadata["enable_dynamic_cv_pipeline"]:
-            if metadata["set_workspace_multibuffer"] != None:
-                raise ValueError(
-                    "\"enable_dynamic_cv_pipeline\" cannot be used with \"set_workspace_multibuffer\"."
-                )
+            metadata["set_workspace_multibuffer"] = None
             metadata["enable_mixed_cv"] = True
             metadata["disable_auto_inject_block_sync"] = True
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
@@ -233,7 +232,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         pm.run(mod)
         _adjust_metadata_by_module_result(mod, metadata, opt,
                                           enable_mixed_cv=enable_mixed_cv,
-                                          disable_auto_inject_block_sync=disable_auto_inject_block_sync)
+                                          disable_auto_inject_block_sync=disable_auto_inject_block_sync,
+                                          set_workspace_multibuffer=set_workspace_multibuffer)
 
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])

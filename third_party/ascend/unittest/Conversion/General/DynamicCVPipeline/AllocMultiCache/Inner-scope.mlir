@@ -705,49 +705,148 @@ func.func @test_t22_tensor_empty_in_nested_if() {
   }
 
 //===--------------------------------------------------------------------===//
-// T23: scf.if with Else Branch Directly Yielding depVal
+// T23: scf.if with Then Branch Using depVal and Else Branch Yielding depVal
 // Test: Real scenario from if_problem.mlir where:
-//       - block_id = 11: linalg.fill produces depVal
+//       - block_id = 11: func.call produces depVal (%154)
 //       - scf.if with block_id = 20 has then/else branches
-//       - then branch has compute using depVal
-//       - else branch directly yields depVal (no compute)
-// Note: This test verifies that basic functionality still works.
-//       The real scenario with func.call producing depVal is tested separately
-//       in if_problem.mlir which is verified manually.
+//       - then branch: compute op uses %154, then yield
+//       - else branch: directly yield %154
+//       - %154 is used by external ops (arith.select in then branch)
+// Note: This test verifies that depVal is properly handled when used in
+//       scf.if then branch compute, and else branch directly yields it.
 //===--------------------------------------------------------------------===//
   // CHECK-LABEL: func.func @test_t23_scf_if_else_branch_yield
   // CHECK-DAG: memref.alloc
   // CHECK-DAG: memref.memory_space_cast {{.*}} {ssbuffer.intraDeps
-  // CHECK-DAG: scf.if {{.*}} -> (tensor<16x32xf16>) {
-  // CHECK-DAG: arith.addf {{.*}} {ssbuffer.block_id = 20 : i32}
-  // CHECK-DAG: scf.yield
-  // CHECK-DAG: } else {
-  // CHECK-DAG: scf.yield {{.*}} : tensor<16x32xf16>
-  // CHECK-DAG: } {ssbuffer.block_id = 20 : i32}
-  // CHECK-DAG: hivm.hir.copy {{.*}} {ssbuffer.block_id = 20 : i32}
+  // CHECK: scf.if {{.*}} -> (tensor<16x32xf16>) {
+  // CHECK: arith.addf {{.*}} {ssbuffer.block_id = 20 : i32}
+  // CHECK: scf.yield
+  // CHECK: } else {
+  // CHECK: scf.yield {{.*}} : tensor<16x32xf16>
+  // CHECK: } {ssbuffer.block_id = 20 : i32}
+  // CHECK: hivm.hir.copy {{.*}} {ssbuffer.block_id = 20 : i32}
 func.func @test_t23_scf_if_else_branch_yield() {
     %c0_i32 = arith.constant 0 : i32
     %c100_i32 = arith.constant 100 : i32
     %c1_i32 = arith.constant 1 : i32
     %cst = arith.constant 1.0 : f32
     %cst_f16 = arith.constant 1.0 : f16
-    %empty = tensor.empty() : tensor<16x32xf16>
+    %empty_16x32 = tensor.empty() : tensor<16x32xf16>
     scope.scope : () -> () {
       // Producer: linalg.fill with block_id = 11
-      %prod = linalg.fill {ssbuffer.block_id = 11 : i32} ins(%cst_f16 : f16) outs(%empty : tensor<16x32xf16>) -> tensor<16x32xf16>
+      %prod = linalg.fill {ssbuffer.block_id = 11 : i32} ins(%cst_f16 : f16) outs(%empty_16x32 : tensor<16x32xf16>) -> tensor<16x32xf16>
       %loop_result = scf.for %i = %c0_i32 to %c100_i32 step %c1_i32 iter_args(%arg = %prod) -> (tensor<16x32xf16>) : i32 {
         %cond = arith.cmpi eq, %i, %c0_i32 : i32
+        %alloc = memref.alloc() {ssbuffer.block_id = 11 : i32} : memref<16x32xf16>
+        %to_tensor = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 11 : i32} : memref<16x32xf16>
         // scf.if with block_id = 20
-        // then branch: compute using %arg (depVal from block_id 11)
-        // else branch: directly yield %arg (depVal from block_id 11)
+        // then branch: compute op uses %to_tensor (depVal from block_id 11), then yield
+        // else branch: directly yield %to_tensor (depVal from block_id 11)
         %if_result = scf.if %cond -> (tensor<16x32xf16>) {
-          %consumed = arith.addf %arg, %arg {ssbuffer.block_id = 20 : i32} : tensor<16x32xf16>
-          scf.yield %consumed : tensor<16x32xf16>
+          %consumed_then = arith.addf %to_tensor, %arg {ssbuffer.block_id = 20 : i32} : tensor<16x32xf16>
+          scf.yield %consumed_then : tensor<16x32xf16>
         } else {
-          scf.yield %arg : tensor<16x32xf16>
+          scf.yield %to_tensor : tensor<16x32xf16>
         } {ssbuffer.block_id = 20 : i32}
         %new_prod = arith.addf %if_result, %if_result {ssbuffer.block_id = 11 : i32} : tensor<16x32xf16>
         scf.yield %new_prod : tensor<16x32xf16>
+      } {ssbuffer.main_loop = 1 : i64}
+      scope.return
+    } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+    return
+  }
+
+//===--------------------------------------------------------------------===//
+// T24: Same depVal Shared by Multiple Ops in Same block_id
+// Test: When a depVal is used by multiple normal ops in the SAME block_id,
+//       there should be only ONE buffer selection scf.if, shared by all ops.
+//       This tests the fix for duplicate buffer selection generation.
+// Key Check: Only ONE scf.if buffer selection for block_id = 5
+//         : %cons is produced in block_id = 6, used by three ops in block_id = 5
+//         : These three ops should share ONE buffer selection
+//         : The buffer selection result is used by all three ops
+//===--------------------------------------------------------------------===//
+  // CHECK-LABEL: func.func @test_t24_shared_buffer_selection
+  // CHECK-DAG: memref.alloc
+  // CHECK-DAG: memref.memory_space_cast {{.*}} {ssbuffer.intraDeps
+  // Only ONE scf.if buffer selection for block_id = 5 (not two!)
+  // CHECK: scf.if {{.*}} -> (tensor<128xf32>)
+  // CHECK: } {ssbuffer.block_id = 5
+  // CHECK-NOT: scf.if {{.*}} -> (tensor<128xf32>)
+  // CHECK-NOT: } {ssbuffer.block_id = 5
+  // CHECK-DAG: arith.addf %{{.*}}, %{{.*}} {ssbuffer.block_id = 5 : i32}
+  // CHECK-DAG: arith.subf %{{.*}}, %{{.*}} {ssbuffer.block_id = 5 : i32}
+  // CHECK-DAG: arith.mulf %{{.*}}, %{{.*}} {ssbuffer.block_id = 5 : i32}
+  func.func @test_t24_shared_buffer_selection() {
+    %c0_i32 = arith.constant 0 : i32
+    %c100_i32 = arith.constant 100 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %cst = arith.constant 1.0 : f32
+    %empty = tensor.empty() : tensor<128xf32>
+    scope.scope : () -> () {
+      // Producer: block_id = 5
+      %prod = linalg.fill {ssbuffer.block_id = 5 : i32} ins(%cst : f32) outs(%empty : tensor<128xf32>) -> tensor<128xf32>
+      %loop_result = scf.for %i = %c0_i32 to %c100_i32 step %c1_i32 iter_args(%arg = %prod) -> (tensor<128xf32>) : i32 {
+        // %arg is the depVal from previous iteration (block_id = 5)
+        // In block_id = 6, %arg is consumed to produce %cons
+        %cons = arith.addf %arg, %arg {ssbuffer.block_id = 6 : i32} : tensor<128xf32>
+        // In block_id = 5, %cons (the processed depVal) is used by THREE ops
+        // These three ops should share ONE buffer selection
+        %new_prod1 = arith.addf %cons, %cons {ssbuffer.block_id = 5 : i32} : tensor<128xf32>
+        %new_prod2 = arith.subf %cons, %cons {ssbuffer.block_id = 5 : i32} : tensor<128xf32>
+        %new_prod3 = arith.mulf %cons, %cons {ssbuffer.block_id = 5 : i32} : tensor<128xf32>
+        // All three results are yielded out
+        %final = arith.addf %new_prod1, %new_prod2 {ssbuffer.block_id = 5 : i32} : tensor<128xf32>
+        %final2 = arith.addf %final, %new_prod3 {ssbuffer.block_id = 5 : i32} : tensor<128xf32>
+        scf.yield %cons : tensor<128xf32>
+      } {ssbuffer.main_loop = 1 : i64}
+      scope.return
+    } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+    return
+  }
+
+//===--------------------------------------------------------------------===//
+//===--------------------------------------------------------------------===//
+// T25: Same depVal Used in Two Different block_ids
+// Test: When a depVal is used in TWO DIFFERENT block_ids,
+//       there should be buffer selection scf.if in EACH block_id where it's used.
+//       This tests that cross-block dependency generates buffer selection per block.
+// Key Check: Buffer selection scf.ifs for block_id = 5 and block_id = 7
+//         : %cons is produced in block_id = 6, used in block_id = 5 and block_id = 7
+//         : Each block gets its own buffer selection
+//===--------------------------------------------------------------------===//
+  // CHECK-LABEL: func.func @test_t25_depval_in_two_blocks
+  // CHECK-DAG: memref.alloc
+  // CHECK-DAG: memref.memory_space_cast {{.*}} {ssbuffer.intraDeps
+  // Buffer selection scf.if for block_id=5
+  // CHECK: scf.if {{.*}} -> (tensor<128xf32>)
+  // CHECK: } {ssbuffer.block_id = 5
+  // Buffer selection scf.if for block_id=7
+  // CHECK: scf.if {{.*}} -> (tensor<128xf32>)
+  // CHECK: } {ssbuffer.block_id = 7
+  // Verify the ops using %cons in each block
+  // CHECK-DAG: arith.addf {{.*}} {ssbuffer.block_id = 5 : i32}
+  // CHECK-DAG: arith.subf {{.*}} {ssbuffer.block_id = 7 : i32}
+  func.func @test_t25_depval_in_two_blocks() {
+    %c0_i32 = arith.constant 0 : i32
+    %c100_i32 = arith.constant 100 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %cst = arith.constant 1.0 : f32
+    %empty = tensor.empty() : tensor<128xf32>
+    scope.scope : () -> () {
+      // Producer: block_id = 5
+      %prod = linalg.fill {ssbuffer.block_id = 5 : i32} ins(%cst : f32) outs(%empty : tensor<128xf32>) -> tensor<128xf32>
+      %loop_result = scf.for %i = %c0_i32 to %c100_i32 step %c1_i32 iter_args(%arg = %prod) -> (tensor<128xf32>) : i32 {
+        // %arg is the depVal from previous iteration (block_id = 5)
+        // In block_id = 6, %arg is consumed to produce %cons
+        %cons = arith.addf %arg, %arg {ssbuffer.block_id = 6 : i32} : tensor<128xf32>
+        // In block_id = 5, %cons is used by first op
+        %new_prod1 = arith.addf %cons, %cons {ssbuffer.block_id = 5 : i32} : tensor<128xf32>
+        // In block_id = 7, %cons is used by second op
+        %new_prod2 = arith.subf %cons, %cons {ssbuffer.block_id = 7 : i32} : tensor<128xf32>
+        // Final producer in block_id = 5
+        %final = arith.addf %new_prod1, %new_prod2 {ssbuffer.block_id = 5 : i32} : tensor<128xf32>
+        scf.yield %final : tensor<128xf32>
       } {ssbuffer.main_loop = 1 : i64}
       scope.return
     } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}

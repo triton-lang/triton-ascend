@@ -553,3 +553,32 @@ tt.func public @partial_structured_atomic_cas_2d(%arg0: !tt.ptr<i32> {tt.divisib
 	tt.store %23, %21 : tensor<2x16x!tt.ptr<i32>>
 	tt.return
 }
+
+// -----
+
+// CHECK-LABEL: tt.func public @fully_unstructured_atomic_or_cta_2d
+// CHECK: hivm.hir.custom {extra_attr = "operate=or, scope=cta"
+tt.func public @fully_unstructured_atomic_or_cta_2d(%arg0: !tt.ptr<i64>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>, %arg3: !tt.ptr<i32>) {
+	%cst = arith.constant dense<true> : tensor<4x4xi1>
+	%cst_0 = arith.constant dense<4> : tensor<4x1xi32>
+	%0 = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+	%1 = tt.expand_dims %0 {axis = 1 : i32} : tensor<4xi32> -> tensor<4x1xi32>
+	%2 = tt.expand_dims %0 {axis = 0 : i32} : tensor<4xi32> -> tensor<1x4xi32>
+	%3 = arith.muli %1, %cst_0 : tensor<4x1xi32>
+	%4 = tt.broadcast %3 : tensor<4x1xi32> -> tensor<4x4xi32>
+	%5 = tt.broadcast %2 : tensor<1x4xi32> -> tensor<4x4xi32>
+	%6 = arith.addi %4, %5 : tensor<4x4xi32>
+	%7 = tt.splat %arg0 : !tt.ptr<i64> -> tensor<4x4x!tt.ptr<i64>>
+	%8 = tt.addptr %7, %6 : tensor<4x4x!tt.ptr<i64>>, tensor<4x4xi32>
+	%9 = tt.load %8 : tensor<4x4x!tt.ptr<i64>>
+	%10 = tt.splat %arg1 : !tt.ptr<i32> -> tensor<4x4x!tt.ptr<i32>>
+	%11 = tt.addptr %10, %6 : tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>
+	%12 = tt.load %11 : tensor<4x4x!tt.ptr<i32>>
+	%13 = tt.splat %arg2 : !tt.ptr<i32> -> tensor<4x4x!tt.ptr<i32>>
+	%14 = tt.addptr %13, %9 : tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi64>
+	%15 = tt.atomic_rmw or, acq_rel, cta, %14, %12, %cst : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
+	%16 = tt.splat %arg3 : !tt.ptr<i32> -> tensor<4x4x!tt.ptr<i32>>
+	%17 = tt.addptr %16, %6 : tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>
+	tt.store %17, %15 : tensor<4x4x!tt.ptr<i32>>
+	tt.return
+}

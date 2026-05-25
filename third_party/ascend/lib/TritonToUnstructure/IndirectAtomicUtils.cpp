@@ -208,14 +208,18 @@ Value createIndirectAtomicCustom(Location loc,
                                  RankedTensorType customResultType,
                                  ValueRange inputs, ValueRange outputs,
                                  llvm::StringRef operate,
+                                 triton::MemSyncScope scope,
                                  PatternRewriter &rewriter)
 {
   auto custom = rewriter.create<hivm::CustomOp>(
       loc, TypeRange{customResultType}, kIndirectAtomicBuiltin, inputs, outputs,
       ValueRange{});
   custom->setAttr("symbol", rewriter.getStringAttr(kIndirectAtomicBuiltin));
-  custom->setAttr("extra_attr",
-                  rewriter.getStringAttr(("operate=" + operate).str()));
+  std::string extraAttr = ("operate=" + operate).str();
+  if (scope == triton::MemSyncScope::CTA) {
+    extraAttr += ", scope=cta";
+  }
+  custom->setAttr("extra_attr", rewriter.getStringAttr(extraAttr));
   custom->setAttr("hivm.pipe",
                   hivm::PipeAttr::get(rewriter.getContext(), hivm::PIPE::PIPE_V));
   custom->setAttr(
@@ -351,7 +355,7 @@ FailureOr<Value> tryConvertAtomicRmwToIndirectCustom(
 
   Value flatOldValue = createIndirectAtomicCustom(
       op.getLoc(), flatValueTensorType, inputs, ValueRange{*initOutFlatValue},
-      *operate, rewriter);
+      *operate, op.getScope(), rewriter);
   return restoreFlattenedTensorShape(op.getLoc(), flatOldValue,
                                      resultTensorType, rewriter);
 }
@@ -395,7 +399,7 @@ FailureOr<Value> tryConvertAtomicCasToIndirectCustom(
   Value flatOldValue = createIndirectAtomicCustom(
       op.getLoc(), flatValueTensorType,
       ValueRange{srcPtr, *flatOffsetValue, *flatCompareValue, *flatUpdateValue},
-      ValueRange{*initOutFlatValue}, "cas", rewriter);
+      ValueRange{*initOutFlatValue}, "cas", op.getScope(), rewriter);
   return restoreFlattenedTensorShape(op.getLoc(), flatOldValue,
                                      resultTensorType, rewriter);
 }

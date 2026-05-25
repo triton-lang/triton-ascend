@@ -26,6 +26,7 @@
 #include "ascend/include/TritonToLinalg/FunctionConverter.h"
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
 #include "ascend/include/TritonToLinalg/TritonOpConverter.h"
+#include "ascend/include/TritonToLinalg/DevicePrintOffsetRewrite.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/TritonToLinalg/DescriptorConverter.h"
 #include "ascend/include/TritonToLinalg/HoistBroadcast.h"
@@ -911,6 +912,8 @@ void TritonToLinalgPass::runOnOperation() {
   // 8. Convert function prologue/epilogue.
   moduleOp.walk(
       [&](triton::FuncOp func) { this->convertTTFunc(func, existDot, existSIMTOp); });
+
+  rewriteDevicePrintOffsets(moduleOp);
 
   // 9. Clean up dead code and simplify IR.
   PassManager pm(&getContext(), moduleOp.getOperationName());

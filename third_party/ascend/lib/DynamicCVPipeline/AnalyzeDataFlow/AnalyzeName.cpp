@@ -42,7 +42,7 @@ namespace {
 
 static constexpr llvm::StringLiteral interceptrFunc[] {
   "_attn_bwd",
-  "_kernel_matmul_fp8_now_non_persistent",
+  "_kernel_matmul_fp8_row_non_persistent",
   "bmm_kernel",
 };
 

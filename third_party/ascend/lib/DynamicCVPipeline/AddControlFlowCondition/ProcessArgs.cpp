@@ -437,6 +437,10 @@ static LogicalResult processSharedIterArgsInForOp(scf::ForOp forOp)
     return failure();
   }
 
+  if (sharedArgsInfo.empty()) {
+    return success();
+  }
+
   scf::ForOp newForOp = createNewForOp(forOp, sharedArgsInfo);
   Block *oldBlock = forOp.getBody();
   Block *newBlock = newForOp.getBody();

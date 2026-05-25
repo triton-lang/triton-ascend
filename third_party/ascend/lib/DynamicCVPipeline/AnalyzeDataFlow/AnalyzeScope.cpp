@@ -55,9 +55,35 @@ static bool isVectorScope(scope::ScopeOp scopeOp)
     return coreTypeAttr.getTcoretype() == hivm::TCoreType::VECTOR;
 }
 
+static bool checkTransferInteraction(mlir::Operation* op) {
+  bool hasCVInteraction = false;
+  // check v->c data interaction
+  if (isa<hivm::CopyOp>(op)) {
+    hasCVInteraction = true;
+  }
+  // check c->v data interaction
+  // user with "ssbuffer.add_from_matmul" is not a real c->v data interaction
+  if (isa<bufferization::ToTensorOp>(op)) {
+    for (Operation *user : op->getUsers()) {
+      if (!user->hasAttr(CVPipeline::kAddFromMatmul)) {
+        hasCVInteraction = true;
+        break;
+      }
+      for (Operation *userUser : user->getUsers()) {
+        if (!isa<scf::YieldOp>(userUser)) {
+          hasCVInteraction = true;
+          break;
+        }
+      }
+    }
+  }
+
+  return hasCVInteraction;
+}
+
 static bool checkVecScopeMainLoop(ModuleOp module) {
   bool hasMainLoopFor = false;
-  bool allSatisfy = true;
+  bool allForSatisfy = true;
 
   module.walk([&](scope::ScopeOp scopeOp) -> WalkResult {
     if (!isVectorScope(scopeOp)) {
@@ -70,47 +96,42 @@ static bool checkVecScopeMainLoop(ModuleOp module) {
       }
 
       hasMainLoopFor = true;
-      bool forSatisfies = false;
+      bool hasCVInteraction = false;
 
       forOp.walk([&](mlir::Operation *op) -> WalkResult {
         if (op == forOp) {
           return WalkResult::advance();
         }
-        bool hasTensorResult = false;
-        for (Value result : op->getResults()) {
-          if (isa<RankedTensorType>(result.getType())) {
-            hasTensorResult = true;
-            break;
+
+        // ops with "ssbuffer.transfer_id" are injected in SplitDataflowPass for data transfer
+        if (op->hasAttr(CVPipeline::kTransferId)) {
+          hasCVInteraction = checkTransferInteraction(op);
+          if (hasCVInteraction) {
+            return WalkResult::interrupt();
           }
         }
 
-        // Check if all vector calculations are derived from matmul splitting.
-        // Check "ssbuffer.add_from_matmul" for vadd
-        // Check "ssbuffer.transfer_id" for injected bufferization.to_tensor
-        if (hasTensorResult && !op->hasAttr("ssbuffer.add_from_matmul") && !op->hasAttr(CVPipeline::kTransferId)) {
-          forSatisfies = true;
-          return WalkResult::interrupt();
-        }
         return WalkResult::advance();
       });
 
-      // return true only when all mainloop meet the rule
-      if (!forSatisfies) {
-        allSatisfy = false;
+      // As long as there is a forOp with "ssbuffer.main_loop" not a real mainloop, 
+      // the processing conditions are not met, need to skip.
+      if (!hasCVInteraction) {
+        allForSatisfy = false;
         return WalkResult::interrupt();
       }
 
       return WalkResult::advance();
     });
 
-    if (!allSatisfy) {
+    if (!allForSatisfy) {
       return WalkResult::interrupt();
     }
 
     return WalkResult::advance();
   });
 
-  return hasMainLoopFor && allSatisfy;
+  return hasMainLoopFor && allForSatisfy;
 }
 
 static LogicalResult verifyMainLoop(ModuleOp module)

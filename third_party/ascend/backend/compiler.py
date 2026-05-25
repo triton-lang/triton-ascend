@@ -509,9 +509,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 [f"--set-workspace-multibuffer={set_workspace_multibuffer}"]
 
         auto_multi_buffer = metadata["limit_auto_multi_buffer_of_local_buffer"]
-        if auto_multi_buffer is not None:
-            _compile_option_list += \
-                [f"--limit-auto-multi-buffer-of-local-buffer={auto_multi_buffer}"]
+        if auto_multi_buffer is None:
+            auto_multi_buffer = "no-limit"
+        _compile_option_list += \
+            [f"--limit-auto-multi-buffer-of-local-buffer={auto_multi_buffer}"]
         auto_multi_buffer_buffer = metadata["limit_auto_multi_buffer_buffer"]
         if auto_multi_buffer_buffer is not None:
             _compile_option_list += \
@@ -889,7 +890,7 @@ class NPUOptions:
     cluster_dims: tuple = (1, 1, 1)
     num_warps: int = 32
     num_ctas: int = 1
-    num_stages: int = 1 if is_compile_on_910_95 else 2
+    num_stages: int = 2
     warp_size: int = 32
     num_buffers_warp_spec: int = 0
     num_consumer_groups: int = 0
@@ -917,7 +918,7 @@ class NPUOptions:
     extern_libs: dict = None
     bisheng_options: str = "-cce-link-aicore-ll-module " + get_libdevice()
 
-    multibuffer: bool = not is_compile_on_910_95
+    multibuffer: bool = True
     storage_align: bool = None
     ops_reorder: bool = None
     code_motion: bool = None

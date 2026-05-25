@@ -2050,7 +2050,7 @@ def parse_vv_axis_semantic_v2(
         evidence = evidence_by_index[axis_index]
         base_axis_name = axis_name_by_index[axis_index]
         is_reduction = base_axis_name in reduction_base_axes
-        axis_name = "r{}".format(base_axis_name) if is_reduction else base_axis_name
+        axis_name = base_axis_name
 
         split, split_diag = _select_best_split(evidence.split_candidates)
         tiling, tiling_diag = _select_best_tiling(evidence.tiling_candidates, split.param)

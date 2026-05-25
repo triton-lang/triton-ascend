@@ -236,7 +236,7 @@ void OpClassifierPass::matchTransposePattern(Operation *def)
                 !isa<bufferization::AllocTensorOp>(opDef)) ||
                isa<tensor::EmptyOp>(opDef);
     };
-
+    // Test
     // Check input tensor
     auto operands = transposeOp->getOperands();
     for (const auto &op : operands) {

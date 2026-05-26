@@ -22,6 +22,9 @@
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "llvm/ADT/DenseMap.h"
@@ -53,9 +56,256 @@ static int findIfOpIndexInList(Operation *op, SmallVector<scf::IfOp> &ifOps,
   return -1;
 }
 
+static int addEquivalentValues(Value v, SmallVector<Value> &tcbValues, SmallVector<Value> &values)
+{
+  int ret = -1;
+  for (Value equivValue : tcbValues) {
+    if (equivValue != v && !llvm::is_contained(values, equivValue)) {
+      ret = 0;
+      values.push_back(equivValue);
+    }
+  }
+  return ret;
+}
+
+// Extend crossCoreDependentMap to include producer buffers in another scope
+// crossCoreDependentMap only includes producer buffers in one scope: {consumer: [producer_in_current_scope], ...}
+// This function extends it to include producer buffers in another scope: {consumer: [producer_in_current_scope, producer_in_other_scope], ...}
+// The producer buffers in different scopes with the same tightly_coupled_buffer id are equivalent
+static llvm::DenseMap<Value, SmallVector<Value>> extendCrossCoreDependentMap(
+    ModuleOp module, llvm::DenseMap<Value, SmallVector<Value>> &crossCoreDependentMap)
+{
+  // Get all buffers with the same tightly_coupled_buffer id
+  llvm::DenseMap<int, SmallVector<Value>> tightlyCoupledBufferGroups;
+  module.walk([&](Operation *op) -> WalkResult {
+    if (isa<annotation::MarkOp>(op)) {
+      if (auto tcbAttr = op->getAttrOfType<hivm::HIVMTightlyCoupledBufferAttr>("hivm.tightly_coupled_buffer")) {
+        auto id = tcbAttr.getId();
+        if (id.has_value()) {
+          int tcb = id.value();
+          Value markedValue = op->getOperand(0);
+          tightlyCoupledBufferGroups[tcb].push_back(markedValue);
+        }
+      }
+    }
+    return WalkResult::advance();
+  });
+
+  // Extend crossCoreDependentMap to include equivalent values from another scope
+  llvm::DenseMap<Value, SmallVector<Value>> extendedCrossCoreMap;
+  for (auto &entry : crossCoreDependentMap) {
+    Value consumer = entry.first;
+    SmallVector<Value> &producers = entry.second;
+    extendedCrossCoreMap[consumer] = producers;
+
+    for (Value buffer : producers) {
+      int tcbGroupId = triton::findTcbGroupId(buffer, tightlyCoupledBufferGroups);
+      if (tcbGroupId == -1) {
+        LDBG("Can not find tightly_coupled_buffer id for buffer: " << buffer);
+        continue;
+      }
+      int addResult = addEquivalentValues(buffer, tightlyCoupledBufferGroups[tcbGroupId], extendedCrossCoreMap[consumer]);
+      if (addResult == -1) {
+        LDBG("Can not find the crossCore Buffer from another scope for buffer: " << buffer);
+        continue;
+      }
+    }
+  }
+
+  return extendedCrossCoreMap;
+}
+
+// Filter out entries where consumer defOp is not inside the specified forOp
+static llvm::DenseMap<Value, SmallVector<Value>> filterCrossCoreMapByForOp(
+    scf::ForOp forOp, llvm::DenseMap<Value, SmallVector<Value>> &crossCoreMap)
+{
+  llvm::DenseMap<Value, SmallVector<Value>> filteredMap;
+  for (auto &entry : crossCoreMap) {
+    Value consumerResult = entry.first;
+    Operation *consumerDefOp = consumerResult.getDefiningOp();
+    if (!consumerDefOp) {
+      continue;
+    }
+    if (!forOp->isAncestor(consumerDefOp)) {
+      continue;
+    }
+    filteredMap[consumerResult] = entry.second;
+  }
+  return filteredMap;
+}
+
+// Find the other side's mainloop with the same mainloop id in the module
+// currentIsCube/currentIsVector indicates which side is the current scope
+// Returns the forOp of the other side's mainloop, or nullptr if not found
+static scf::ForOp getOtherScopeMainloop(
+    ModuleOp module, bool currentIsCube, bool currentIsVector, int mainLoopId)
+{
+  scf::ForOp otherSideForOp = nullptr;
+  int ret = 1;
+
+  module.walk([&](scope::ScopeOp scopeOp) {
+    // Determine this scope's type
+    bool scopeIsCube = false;
+    bool scopeIsVector = false;
+    if (failed(triton::getScopeType(scopeOp, scopeIsCube, scopeIsVector))) {
+      ret = -1;
+      LDBG("failed to get ScopeOp core type!");
+      return mlir::WalkResult::interrupt();
+    }
+
+    // Only proceed when current is cube and scope is vector, or current is vector and scope is cube
+    bool isOtherSide = (currentIsCube && scopeIsVector) || (currentIsVector && scopeIsCube);
+    if (!isOtherSide) {
+      return WalkResult::advance();
+    }
+
+    // Walk for loops inside this scope to find the one with matching mainloop id
+    scopeOp.walk([&](Operation* op) {
+      if (op->hasAttr(CVPipeline::kMainLoop)) {
+        auto targetForOp = dyn_cast<scf::ForOp>(op);
+        if (!targetForOp) {
+          LDBG("do not support other mainloop op except ForOp");
+          return WalkResult::advance();
+        }
+        auto targetMainLoopId = targetForOp->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
+        if (targetMainLoopId && targetMainLoopId.getInt() == mainLoopId) {
+          otherSideForOp = targetForOp;
+          return WalkResult::interrupt();
+        }
+      }
+      return WalkResult::advance();
+    });
+
+    if (otherSideForOp) {
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+
+  if (ret == -1) {
+    return nullptr;
+  } else {
+    return otherSideForOp;
+  }
+}
+
+// Check if the current compute block runs first by checking if the first ifOp has any consumer defOp
+// Returns true if the current compute block runs first (no consumer in first ifOp)
+// Returns false if the current compute block runs later (has consumer in first ifOp)
+static bool isRunFirst(SmallVector<scf::IfOp> &ifOps, llvm::DenseMap<Value, SmallVector<Value>> &crossDeps)
+{
+  if (ifOps.empty()) {
+    return true;
+  }
+  scf::IfOp firstIfOp = ifOps[0];
+  for (auto &entry : crossDeps) {
+    Value consumerResult = entry.first;
+    Operation *consumerDefOp = consumerResult.getDefiningOp();
+    if (consumerDefOp && firstIfOp->isAncestor(consumerDefOp)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Collect ifOps from forOp that contain sync_block_wait or sync_block_set op
+// Fills ifOps and ifOpIndexMap with the collected ifOps
+// Returns the number of ifOps collected
+static int collectIfOps(
+    scf::ForOp forOp,
+    SmallVector<scf::IfOp> &ifOps,
+    llvm::DenseMap<Operation *, int> &ifOpIndexMap)
+{
+  ifOps.clear();
+  ifOpIndexMap.clear();
+  int index = 1;
+
+  forOp.walk([&](Operation* op) {
+    if (op->hasAttr(CVPipeline::kIf)) {
+      auto ifOp = dyn_cast<scf::IfOp>(op);
+      if (ifOp) {
+        // Check if this ifOp contains sync_block_wait op
+        bool isVaildBlock = false;
+        ifOp.walk([&](Operation *innerOp) {
+          if (isa<hivm::SyncBlockWaitOp>(innerOp) || isa<hivm::SyncBlockSetOp>(innerOp)) {
+            isVaildBlock = true;
+            return WalkResult::interrupt();
+          }
+          return WalkResult::advance();
+        });
+        if (isVaildBlock) {
+          ifOps.push_back(ifOp);
+          ifOpIndexMap[ifOp.getOperation()] = index++;
+        }
+      }
+    }
+    return WalkResult::advance();
+  });
+
+  return ifOps.size();
+}
+
+// Helper function to find the other side's mainloop and collect its ifOps
+// Returns the other side's forOp and fills otherSideIfOps with ifOps from that mainloop
+// Returns nullptr if not found
+static scf::ForOp findOtherSideMainloopAndIfOps(
+    scf::ForOp currentForOp,
+    bool currentIsCube,
+    bool currentIsVector,
+    SmallVector<scf::IfOp> &otherSideIfOps,
+    llvm::DenseMap<Operation *, int> &otherSideIfOpIndexMap)
+{
+  otherSideIfOps.clear();
+  otherSideIfOpIndexMap.clear();
+
+  // Get current forOp's mainloop id
+  auto currentMainLoopId = currentForOp->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
+  if (!currentMainLoopId) {
+    LDBG("Current forOp does not have main_loop id!");
+    return nullptr;
+  }
+  int mainLoopId = currentMainLoopId.getInt();
+
+  // Find the other side's mainloop with the same mainloop id
+  // Traverse up the parent chain to find ModuleOp
+  Operation *currentOp = currentForOp->getParentOp();
+  ModuleOp module = nullptr;
+  while (currentOp) {
+    if (auto mod = dyn_cast<ModuleOp>(currentOp)) {
+      module = mod;
+      break;
+    }
+    currentOp = currentOp->getParentOp();
+  }
+  if (!module) {
+    LDBG("Can not find ModuleOp in parent chain!");
+    return nullptr;
+  }
+
+  // Find other side mainloop with the same mainloop id
+  scf::ForOp otherSideForOp = getOtherScopeMainloop(module, currentIsCube, currentIsVector, mainLoopId);
+
+  if (!otherSideForOp) {
+    LDBG("Can not find the other side's mainloop with id: " << mainLoopId);
+    return nullptr;
+  }
+
+  // Collect ifOps from the other side's mainloop
+  // Only collect ifOps that contain hivm.hir.sync_block_wait op
+  int ifOpsCount = collectIfOps(otherSideForOp, otherSideIfOps, otherSideIfOpIndexMap);
+
+  if (ifOpsCount == 0) {
+    LDBG("Other side mainloop does not contain any ifblocks!");
+    return nullptr;
+  }
+
+  return otherSideForOp;
+}
+
 // calculateFactor computes the buffer factor needed for loop iteration extension
 // Core idea: if producer ifOp (n) and consumer ifOp (m) have dependency,
 // we need (m - n + 1) buffers to support the loop extension
+// This function handles both intra-core and cross-core dependencies
 // Returns {maxRequiredBuffers, x} for computing: ceil(original_iter_count * requiredBuffers / x) + ifCount
 std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp)
 {
@@ -66,61 +316,141 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp)
   // Index represents execution order (smaller index = earlier execution)
   SmallVector<scf::IfOp> ifOps;
   DenseMap<Operation *, int> ifOpIndex;
-  int index = 1;
+  int ifOpsCount = collectIfOps(forOp, ifOps, ifOpIndex);
 
-  int ret = 0;
-  forOp.walk([&](Operation* op) {
-    if (op->hasAttr("ssbuffer.if")) {
-      auto ifOp = dyn_cast<scf::IfOp>(op);
-      if (!ifOp) {
-        ret = 1;
-        LDBG("ssbuffer.if attribute is not allocated on ifOp!");
-        return WalkResult::interrupt();
-      }
-      ifOps.push_back(ifOp);
-      ifOpIndex[ifOp.getOperation()] = index++;
-    }
-    return WalkResult::advance();
-  });
-  if (ret == -1) {
-    return {-1, -1};
-  }
-
-  if (ifOps.empty()) {
+  if (ifOpsCount == 0) {
     LDBG("mainloop do not contains ifblocks!");
     return {-1, -1};
   }
 
-  // No dependency, multiple factor = 1
-  if (!info->intraCoreDependentMap.count(forOp)) {
-    return {1, 1};
-  }
-  auto &deps = info->intraCoreDependentMap[forOp];
-  if (deps.empty()) {
+  // Step2: Calculate factor based on intra-core dependencies
+  bool hasIntraDeps = info->intraCoreDependentMap.count(forOp) &&
+                      !info->intraCoreDependentMap[forOp].empty();
+  bool hasCrossDeps = !info->crossCoreDependentMap.empty();
+
+  // If no dependencies at all, return factor = 1
+  if (!hasIntraDeps && !hasCrossDeps) {
     return {1, 1};
   }
 
-  // Step2: Iterate all dependencies and calculate required buffer count
+  // Calculate intra-core factor
+  if (hasIntraDeps) {
+    auto &intraDeps = info->intraCoreDependentMap[forOp];
+    auto [intraRequiredBuffers, intraX] = calculateIntraDepsFactor(ifOps, ifOpIndex, intraDeps);
+    if (intraRequiredBuffers == -1 || intraX == -1) {
+      LDBG("calculateIntraDepsFactor failed!");
+      return {-1, -1};
+    }
+    maxRequiredBuffers = intraRequiredBuffers;
+    maxX = intraX;
+  }
+
+  // Calculate cross-core factor and merge with intra-core factor
+  if (hasCrossDeps) {
+    // Extend crossCoreDependentMap to include equivalent producer buffers from another scope
+    ModuleOp module = getOperation();
+    llvm::DenseMap<Value, SmallVector<Value>> extendedCrossCoreMap =
+        extendCrossCoreDependentMap(module, info->crossCoreDependentMap);
+
+    // Filter out entries where consumer defOp is not inside current forOp
+    llvm::DenseMap<Value, SmallVector<Value>> filteredCrossCoreMap =
+        filterCrossCoreMapByForOp(forOp, extendedCrossCoreMap);
+
+    auto [crossRequiredBuffers, crossX] = calculateCrossDepsFactor(forOp, ifOps, ifOpIndex, filteredCrossCoreMap);
+    if (crossRequiredBuffers == -1 || crossX == -1) {
+      LDBG("calculateCrossDepsFactor failed!");
+      return {-1, -1};
+    }
+    // Compare crossRequiredBuffers/crossX vs maxRequiredBuffers/maxX
+    // Take the larger fraction
+    if (crossRequiredBuffers * maxX > maxRequiredBuffers * crossX) {
+      maxRequiredBuffers = crossRequiredBuffers;
+      maxX = crossX;
+    }
+  }
+
+  return {maxRequiredBuffers, maxX};
+}
+
+// Get the ifOp index that consumer belongs to
+// Returns the ifOp index (m) where consumer is located, or -1 if not found
+static int getConsumerIfOpIndex(Value consumerResult, SmallVector<scf::IfOp> &ifOps, llvm::DenseMap<Operation *, int> &ifOpIndex)
+{
+  Operation *consumerDefOp = consumerResult.getDefiningOp();
+  if (!consumerDefOp) {
+    LDBG("consumerResult do not have the defOp!");
+    return -1;
+  }
+  int m = findIfOpIndexInList(consumerDefOp, ifOps, ifOpIndex);
+  if (m == -1) {
+    LDBG("Can not find the consumerDefOp in any ifOps!");
+    return -1;
+  }
+  return m;
+}
+
+// Get the producer ifOp index from another scope (otherSide)
+// Returns the ifOp index (n) where producer is located, or -1 if not found
+static int getProducerIfOpIndex(SmallVector<Value> &producerBuffers,
+                                SmallVector<scf::IfOp> &otherSideIfOps,
+                                llvm::DenseMap<Operation *, int> &otherSideIfOpIndexMap)
+{
+  if (producerBuffers.empty()) {
+    LDBG("consumer do not have the producerBuffers!");
+    return -1;
+  }
+
+  int producerIfOpIndex = -1;
+  for (Value buffer : producerBuffers) {
+    for (Operation *user : buffer.getUsers()) {
+      if (isa<hivm::FixpipeOp>(user) || isa<hivm::CopyOp>(user)) {
+        producerIfOpIndex = findIfOpIndexInList(user, otherSideIfOps, otherSideIfOpIndexMap);
+        if (producerIfOpIndex == -1) {
+          LDBG("Can not find the producerBuffers in any ifOps of other side mainloop!");
+          return -1;
+        }
+        break;
+      }
+    }
+    // any producerBuffer found in a ifblock means all producerBuffers in that ifblock
+    if (producerIfOpIndex != -1) {
+      break;
+    }
+  }
+
+  if (producerIfOpIndex == -1) {
+    LDBG("All producerBuffers are not found in any ifOps of other side!");
+    return -1;
+  }
+
+  return producerIfOpIndex;
+}
+
+// calculateIntraDepsFactor computes the buffer factor based on intra-core dependencies
+// Core idea: if producer ifOp (n) and consumer ifOp (m) have dependency,
+// we need (m - n + 1) buffers to support the loop extension
+// This function iterates all dependencies and finds the maximum required buffer count
+std::pair<int, int> UpdateLoopIterTimesPass::calculateIntraDepsFactor(
+    SmallVector<scf::IfOp> &ifOps,
+    DenseMap<Operation *, int> &ifOpIndex,
+    llvm::DenseMap<Value, SmallVector<Value>> &deps)
+{
+  int maxRequiredBuffers = 1;
+  int maxX = 1;
+
+  // Iterate all dependencies and calculate required buffer count
   for (auto &entry : deps) {
     Value consumerResult = entry.first;           // Consumer result value
     SmallVector<Value> producerBuffers = entry.second;  // Producer buffer list
     int x = producerBuffers.size();               // Producer buffer count
 
-    // Get the defining operation of consumer result
-    Operation *consumerDefOp = consumerResult.getDefiningOp();
-    if (!consumerDefOp) {
-      LDBG("consumerResult do not have the defOp!");
-      return {-1, -1};
-    }
-
     // Find the IfOp index that consumer belongs to (m)
-    int m = findIfOpIndexInList(consumerDefOp, ifOps, ifOpIndex);
+    int m = getConsumerIfOpIndex(consumerResult, ifOps, ifOpIndex);
     if (m == -1) {
-      LDBG("Can not find the consumerDefOp in any ifOps!\nconsumerDefOp: " << *consumerDefOp);
       return {-1, -1};
     }
 
-    // Step3: Find the IfOp index that producer belongs to (n)
+    // Find the IfOp index that producer belongs to (n)
     // Producer is the operation that uses producer buffer, i.e., bufferization.materialize_in_destination
     // This op is the production behavior op, with producer buffer as its input
     if (producerBuffers.empty()) {
@@ -134,7 +464,7 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp)
         if (isa<mlir::bufferization::MaterializeInDestinationOp>(user) || isa<hivm::CopyOp>(user)) {
           producerIfOpIndex = findIfOpIndexInList(user, ifOps, ifOpIndex);
           if (producerIfOpIndex == -1) {
-            LDBG("Can not find the producerBuffers in any ifOps\nproducerBuffers: " << *user);
+            LDBG("Can not find the producerBuffers in any ifOps!");
             return {-1, -1};
           }
           break;
@@ -148,21 +478,113 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp)
 
     // If cannot find the IfOp producer belongs to, skip this dependency
     if (producerIfOpIndex == -1) {
-      LDBG("All producerBuffers are not found in any ifOps");
+      LDBG("All producerBuffers are not found in any ifOps!");
       return {-1, -1};
     }
 
     int n = producerIfOpIndex;
 
-    // Step4: If consumer is after producer (m > n), calculate required buffer count
+    // If consumer is after producer (m > n), calculate required buffer count
     // m - n + 1 represents the buffer count needed to cover this distance
     if (m <= n) {
-      LDBG("producer is after the comsumer!");
+      LDBG("producer is after the consumer!");
       return {-1, -1};
     }
     int requiredBuffers = m - n + 1;
 
-    // Step5: Update max value using fraction comparison to avoid precision issues
+    // Update max value using fraction comparison to avoid precision issues
+    // Comparing requiredBuffers/maxX vs maxRequiredBuffers/x is equivalent to
+    // comparing requiredBuffers * maxX vs maxRequiredBuffers * x
+    if (requiredBuffers * maxX > maxRequiredBuffers * x) {
+      maxRequiredBuffers = requiredBuffers;
+      maxX = x;
+    }
+  }
+
+  return {maxRequiredBuffers, maxX};
+}
+
+// calculateCrossDepsFactor computes the buffer factor based on cross-core dependencies
+// For cross-core deps
+// consumer is in current forOp (one side: cube or vector)
+// producer is in another mainloop with the same id but in the other scope
+std::pair<int, int> UpdateLoopIterTimesPass::calculateCrossDepsFactor(
+    scf::ForOp forOp,
+    SmallVector<scf::IfOp> &ifOps,
+    DenseMap<Operation *, int> &ifOpIndex,
+    llvm::DenseMap<Value, SmallVector<Value>> &crossDeps)
+{
+  int maxRequiredBuffers = 1;
+  int maxX = 1;
+
+  // Determine current forOp's scope type (cube or vector)
+  bool currentIsCube = false;
+  bool currentIsVector = false;
+  Operation *currentScope = forOp->getParentOp();
+  while (currentScope) {
+    if (isa<scope::ScopeOp>(currentScope)) {
+      break;
+    }
+    currentScope = currentScope->getParentOp();
+  }
+  if (failed(triton::getScopeType(currentScope, currentIsCube, currentIsVector))) {
+    LDBG("Current forOp is not in a valid cube or vector scope!");
+    return {-1, -1};
+  }
+
+  // Find the other side scope's mainloop and collect its ifOps
+  SmallVector<scf::IfOp> otherSideIfOps;
+  DenseMap<Operation *, int> otherSideIfOpIndexMap;
+  scf::ForOp otherSideForOp = findOtherSideMainloopAndIfOps(
+      forOp, currentIsCube, currentIsVector, otherSideIfOps, otherSideIfOpIndexMap);
+
+  if (!otherSideForOp) {
+    LDBG("Failed to find other side mainloop or its ifOps!");
+    return {-1, -1};
+  }
+
+  // Check if the first ifOp has any consumer defOp in crossDeps
+  // If not, it means the current compute block executes first, need to subtract 1 from requiredBuffers
+  bool runFirst = isRunFirst(ifOps, crossDeps);
+
+  // Iterate all cross-core dependencies
+  for (auto &entry : crossDeps) {
+    Value consumerResult = entry.first;           // Consumer result value
+    SmallVector<Value> producerBuffers = entry.second;  // Producer buffer list
+    int x = producerBuffers.size() / 2;               // Producer buffer count (one buffer has two value in diffenent scope)
+
+    // Find the IfOp index that consumer belongs to (m)
+    int m = getConsumerIfOpIndex(consumerResult, ifOps, ifOpIndex);
+    if (m == -1) {
+      return {-1, -1};
+    }
+
+    // Find producer's position in the other side's ifOps (n)
+    int n = getProducerIfOpIndex(producerBuffers, otherSideIfOps, otherSideIfOpIndexMap);
+    if (n == -1) {
+      return {-1, -1};
+    }
+
+    // If consumer is after producer (m >= n), calculate required buffer count
+    // m - n + 1 represents the buffer count needed to cover this distance
+    // If the current compute block executes first (firstIfOp has no consumer), subtract 1
+    if (m < n) {
+      // case : C1 -> V1V2V3 -> C2
+      // in this case m < n, crossDeps hard to process, do not change the loop iteration times
+      LDBG("there is complex case!");
+      return {1, 1};
+    }
+    int requiredBuffers = m - n + 1;
+    if (runFirst) {
+      requiredBuffers = requiredBuffers - 1;
+    }
+    LDBG("consumer : " << consumerResult);
+    LDBG("consumer m: " << m << ", n: " << n);
+    LDBG("requiredBuffers: " << requiredBuffers);
+    LDBG("buffer: " << x);
+    LDBG("runFirst: " << runFirst);
+
+    // Update max value using fraction comparison to avoid precision issues
     // Comparing requiredBuffers/maxX vs maxRequiredBuffers/x is equivalent to
     // comparing requiredBuffers * maxX vs maxRequiredBuffers * x
     if (requiredBuffers * maxX > maxRequiredBuffers * x) {
@@ -373,7 +795,7 @@ int UpdateLoopIterTimesPass::replaceForOpCounterInIfOps()
   int ret = 0;
   // Traverse all mainloops in the module
   getOperation().walk([&](Operation* op) {
-    if (op->hasAttr("ssbuffer.main_loop")) {
+    if (op->hasAttr(CVPipeline::kMainLoop)) {
       auto forOp = dyn_cast<scf::ForOp>(op);
       if (!forOp) {
         ret = -1;
@@ -385,7 +807,7 @@ int UpdateLoopIterTimesPass::replaceForOpCounterInIfOps()
 
       // Find all ifOps with ssbuffer.if attribute inside this mainloop
       forOp.walk([&](scf::IfOp ifOp) {
-        if (ifOp->hasAttr("ssbuffer.if")) {
+        if (ifOp->hasAttr(CVPipeline::kIf)) {
           if (!info->cntArgs.count(ifOp)) {
             LDBG("ifblock has no counter in cntArgs");
             ret = -1;
@@ -424,18 +846,7 @@ int UpdateLoopIterTimesPass::GetMainLoopIdToLoopOpMap(
     // Determine if it's CUBE or VECTOR
     bool isCube = false;
     bool isVector = false;
-    if (scopeOp->hasAttr("hivm.tcore_type")) {
-      auto attr = scopeOp->getAttr("hivm.tcore_type");
-      auto aiCAttr = hivm::TCoreTypeAttr::get(scopeOp->getContext(), hivm::TCoreType::CUBE);
-      auto aiVAttr = hivm::TCoreTypeAttr::get(scopeOp->getContext(), hivm::TCoreType::VECTOR);
-      if (attr == aiCAttr) {
-        isCube = true;
-      } else if (attr == aiVAttr) {
-        isVector = true;
-      }
-    }
-
-    if (!(isCube || isVector)) {
+    if (failed(triton::getScopeType(scopeOp, isCube, isVector))) {
       ret = -1;
       LDBG("mlir do not processed by split mix kernel!");
       return mlir::WalkResult::interrupt();
@@ -443,7 +854,7 @@ int UpdateLoopIterTimesPass::GetMainLoopIdToLoopOpMap(
 
     // Walk for loops inside the scope
     scopeOp.walk([&](Operation* op) {
-      if (op->hasAttr("ssbuffer.main_loop")) {
+      if (op->hasAttr(CVPipeline::kMainLoop)) {
         auto forOp = dyn_cast<scf::ForOp>(op);
         if (!forOp) {
           ret = -1;
@@ -451,7 +862,7 @@ int UpdateLoopIterTimesPass::GetMainLoopIdToLoopOpMap(
           return mlir::WalkResult::interrupt();
         }
 
-        auto mainLoopId = forOp->getAttrOfType<IntegerAttr>("ssbuffer.main_loop");
+        auto mainLoopId = forOp->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
         if (mainLoopId) {
           int id = mainLoopId.getInt();
           if (isCube) {
@@ -490,9 +901,9 @@ int UpdateLoopIterTimesPass::ComputeMainLoopTimes(
         return -1;
       }
       for (auto &[ifOp, cntVal] : info->cntArgs) {
-        if (ifOp->hasAttr("ssbuffer.if")) {
+        if (ifOp->hasAttr(CVPipeline::kIf)) {
           auto parentOp = ifOp->getParentOp();
-          if (parentOp->hasAttr("ssbuffer.main_loop") && isa<scf::ForOp>(parentOp)) {
+          if (parentOp->hasAttr(CVPipeline::kMainLoop) && isa<scf::ForOp>(parentOp)) {
             if (parentOp == forOp.getOperation()) {
               iterInfo.ifCount++;
               iterInfo.ifOpsInThisFor.push_back(ifOp);
@@ -634,37 +1045,35 @@ void UpdateLoopIterTimesPass::runOnOperation()
   DenseMap<int, SmallVector<Operation *>> vmap;
   ret = GetMainLoopIdToLoopOpMap(module, cmap, vmap);
   if (ret != 0) {
-    LDBG("\nGetMainLoopIdToLoopOpMap Failed!");
+    LDBG("GetMainLoopIdToLoopOpMap Failed!");
     signalPassFailure();
-    return;
   }
 
   // step2: Calculate info for each loop operation, store into the same iterationTimesinfoMap
   DenseMap<Operation *, IterationTimesInfo> infoMap;
   ret = ComputeMainLoopTimes(cmap, infoMap);
   if (ret != 0) {
-    LDBG("\nComputeMainLoopTimes from cube Failed!");
+    LDBG("ComputeMainLoopTimes from cube Failed!");
     signalPassFailure();
-    return;
   }
   ret = ComputeMainLoopTimes(vmap, infoMap);
   if (ret != 0) {
-    LDBG("\nComputeMainLoopTimes from vector Failed!");
+    LDBG("ComputeMainLoopTimes from vector Failed!");
     signalPassFailure();
-    return;
   }
 
   // step3: Update loop iteration count (process loop operations with same id from both cmap and vmap)
   ret = UpdateForLoopIteration(cmap, vmap, infoMap);
   if (ret != 0) {
-    LDBG("Update ForLoop Iteration Failed!\n");
+    LDBG("Update ForLoop Iteration Failed!");
     signalPassFailure();
   }
   LDBG("after UpdateForLoopIteration:\n" << module);
 
   // step4: Replace loop counter by if blocks' counter
-  if (replaceForOpCounterInIfOps() != 0) {
-    LDBG("replaceForOpCounterInIfOps Failed!\n");
+  ret = replaceForOpCounterInIfOps();
+  if (ret != 0) {
+    LDBG("replaceForOpCounterInIfOps Failed!");
     signalPassFailure();
   }
 

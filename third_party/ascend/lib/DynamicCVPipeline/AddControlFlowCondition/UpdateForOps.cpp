@@ -246,19 +246,12 @@ LogicalResult extendForOpWithExtraArgs(scf::ForOp oldForOp, ControlFlowCondition
 // Add block counter and inner dependency condition iter args to for ops
 LogicalResult UpdateForOpsPass::addBlockCountersAndInnerDepConds(ModuleOp module, ControlFlowConditionInfo *info)
 {
-  llvm::DenseSet<scf::ForOp> allForOps;
   for (auto &p : info->blockCounterNums) {
     if (p.second < 0) {
       LDBG("[Error]: invalid blockCounterNum " << p.second << "\n");
       return failure();
     }
-    allForOps.insert(p.first);
-  }
-  for (auto &entry : info->intraCoreDependentMap)
-    allForOps.insert(entry.first);
-
-  for (scf::ForOp oldForOp : allForOps) {
-    if (failed(extendForOpWithExtraArgs(oldForOp, info)))
+    if (failed(extendForOpWithExtraArgs(p.first, info)))
       return failure();
   }
   return success();

@@ -280,9 +280,9 @@ def cdiv(x, div, _builder=None):
         elif isinstance(x, int) and isinstance(div, int):
             res = x // div
             rem = x % div
-            return res + (1 if rem != 0 else 0)
+            return core.constexpr(res + (1 if rem != 0 else 0))
         else:
-            return py_ceil(x / div)
+            return core.constexpr(py_ceil(x / div))
 
     x = semantic.to_tensor(x, _builder)
     div = semantic.to_tensor(div, _builder)

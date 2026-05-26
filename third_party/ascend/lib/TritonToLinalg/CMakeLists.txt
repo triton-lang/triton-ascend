@@ -11,6 +11,7 @@ add_triton_library(TritonToLinalg
         ImplicitPermute.cpp
         DescriptorConverter
         MarkTensorKindPass.cpp
+        DevicePrintOffsetRewrite.cpp
 
   DEPENDS
   TritonToLinalgConversionPassIncGen

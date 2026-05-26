@@ -37,10 +37,10 @@ tt.func @triton_indirect_store(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) {
   tt.return
 }
 
-// CHECK-LABEL: tt.func @partial_structured_loadstore_2d
+// CHECK-LABEL: tt.func @discrete_highrank_and_structured_lowrank_loadstore_2d
 // CHECK: ascend.indirect_load {{.*}} -> tensor<2x16xbf16>
 // CHECK: ascend.indirect_store {{.*}}
-tt.func @partial_structured_loadstore_2d(%arg0: !tt.ptr<bf16> {tt.divisibility = 16 : i32}) attributes {noinline = false} {
+tt.func @discrete_highrank_and_structured_lowrank_loadstore_2d(%arg0: !tt.ptr<bf16> {tt.divisibility = 16 : i32}) attributes {noinline = false} {
   %cst = arith.constant dense<2.000000e+00> : tensor<2x16xbf16>
   %cst_0 = arith.constant dense<16> : tensor<2x1xi32>
   %cst_1 = arith.constant dense<2> : tensor<2x1xi32>
@@ -63,10 +63,10 @@ tt.func @partial_structured_loadstore_2d(%arg0: !tt.ptr<bf16> {tt.divisibility =
   tt.return
 }
 
-// CHECK-LABEL: tt.func @partial_structured_loadstore_3d
+// CHECK-LABEL: tt.func @discrete_highrank_and_structured_lowrank_loadstore_3d
 // CHECK: ascend.indirect_load {{.*}} -> tensor<2x2x8xbf16>
 // CHECK: ascend.indirect_store {{.*}}
-tt.func @partial_structured_loadstore_3d(%arg0: !tt.ptr<bf16> {tt.divisibility = 16 : i32}) attributes {noinline = false} {
+tt.func @discrete_highrank_and_structured_lowrank_loadstore_3d(%arg0: !tt.ptr<bf16> {tt.divisibility = 16 : i32}) attributes {noinline = false} {
   %cst = arith.constant dense<3.000000e+00> : tensor<2x2x8xbf16>
   %cst_0 = arith.constant dense<8> : tensor<2x2x1xi32>
   %cst_1 = arith.constant dense<2> : tensor<2x1xi32>
@@ -96,10 +96,24 @@ tt.func @partial_structured_loadstore_3d(%arg0: !tt.ptr<bf16> {tt.divisibility =
   tt.return
 }
 
-// CHECK-LABEL: tt.func @partial_structured_loadstore_4d
-// CHECK: ascend.indirect_load {{.*}} -> tensor<2x2x2x8xbf16>
-// CHECK: ascend.indirect_store {{.*}}
-tt.func @partial_structured_loadstore_4d(%arg0: !tt.ptr<bf16> {tt.divisibility = 16 : i32}) attributes {noinline = false} {
+// CHECK-LABEL: tt.func @discrete_highrank_and_structured_lowrank_loadstore_4d
+// CHECK: %[[VAL_0:.*]] = scf.for %[[VAL_1:.*]] = %{{.*}} to %{{.*}} step %{{.*}} iter_args(%[[VAL_2:.*]] = %{{.*}}) -> (tensor<2x2x2x8xbf16>) {
+// CHECK:   %[[VAL_3:.*]] = tensor.extract_slice %{{.*}}{{\[}}%[[VAL_1]], 0, 0, 0] [1, 2, 2, 8] [1, 1, 1, 1] {DiscreteMemAccess} : tensor<2x2x2x8xi64> to tensor<1x2x2x8xi64>
+// CHECK:   %[[VAL_4:.*]] = tt.splat %{{.*}} : !tt.ptr<bf16> -> tensor<1x2x2x8x!tt.ptr<bf16>>
+// CHECK:   %[[VAL_5:.*]] = tt.addptr %[[VAL_4]], %[[VAL_3]] : tensor<1x2x2x8x!tt.ptr<bf16>>, tensor<1x2x2x8xi64>
+// CHECK:   %[[VAL_6:.*]] = tt.load %[[VAL_5]] {DiscreteMemAccess} : tensor<1x2x2x8x!tt.ptr<bf16>>
+// CHECK:   %[[VAL_7:.*]] = tensor.insert_slice %[[VAL_6]] into %[[VAL_2]]{{\[}}%[[VAL_1]], 0, 0, 0] [1, 2, 2, 8] [1, 1, 1, 1] : tensor<1x2x2x8xbf16> into tensor<2x2x2x8xbf16>
+// CHECK:   scf.yield {DiscreteMemAccess} %[[VAL_7]] : tensor<2x2x2x8xbf16>
+// CHECK: } {ExtractedLoadOrStore}
+// CHECK: %[[VAL_8:.*]] = arith.addf %[[VAL_0]], %{{.*}} : tensor<2x2x2x8xbf16>
+// CHECK: scf.for %[[VAL_9:.*]] = %{{.*}} to %{{.*}} step %{{.*}} {
+// CHECK:   %[[VAL_10:.*]] = tensor.extract_slice %{{.*}}{{\[}}%[[VAL_9]], 0, 0, 0] [1, 2, 2, 8] [1, 1, 1, 1] {DiscreteMemAccess} : tensor<2x2x2x8xi64> to tensor<1x2x2x8xi64>
+// CHECK:   %[[VAL_11:.*]] = tt.splat %{{.*}} : !tt.ptr<bf16> -> tensor<1x2x2x8x!tt.ptr<bf16>>
+// CHECK:   %[[VAL_12:.*]] = tt.addptr %[[VAL_11]], %[[VAL_10]] : tensor<1x2x2x8x!tt.ptr<bf16>>, tensor<1x2x2x8xi64>
+// CHECK:   %[[VAL_13:.*]] = tensor.extract_slice %[[VAL_8]]{{\[}}%[[VAL_9]], 0, 0, 0] [1, 2, 2, 8] [1, 1, 1, 1] {DiscreteMemAccess} : tensor<2x2x2x8xbf16> to tensor<1x2x2x8xbf16>
+// CHECK:   tt.store %[[VAL_12]], %[[VAL_13]] {DiscreteMemAccess} : tensor<1x2x2x8x!tt.ptr<bf16>>
+// CHECK: } {ExtractedLoadOrStore}
+tt.func @discrete_highrank_and_structured_lowrank_loadstore_4d(%arg0: !tt.ptr<bf16> {tt.divisibility = 16 : i32}) attributes {noinline = false} {
   %cst = arith.constant dense<4.000000e+00> : tensor<2x2x2x8xbf16>
   %cst_0 = arith.constant dense<8> : tensor<2x2x2x1xi32>
   %cst_1 = arith.constant dense<2> : tensor<2x2x1xi32>
@@ -138,10 +152,24 @@ tt.func @partial_structured_loadstore_4d(%arg0: !tt.ptr<bf16> {tt.divisibility =
   tt.return
 }
 
-// CHECK-LABEL: tt.func @partial_structured_loadstore_5d
-// CHECK: ascend.indirect_load {{.*}} -> tensor<2x2x2x2x8xbf16>
-// CHECK: ascend.indirect_store {{.*}}
-tt.func @partial_structured_loadstore_5d(%arg0: !tt.ptr<bf16> {tt.divisibility = 16 : i32}) attributes {noinline = false} {
+// CHECK-LABEL: tt.func @discrete_highrank_and_structured_lowrank_loadstore_5d
+// CHECK: %[[VAL_0:.*]] = scf.for %[[VAL_1:.*]] = %{{.*}} to %{{.*}} step %{{.*}} iter_args(%[[VAL_2:.*]] = %{{.*}}) -> (tensor<2x2x2x2x8xbf16>) {
+// CHECK:   %[[VAL_3:.*]] = tensor.extract_slice %{{.*}}{{\[}}%[[VAL_1]], 0, 0, 0, 0] [1, 2, 2, 2, 8] [1, 1, 1, 1, 1] {DiscreteMemAccess} : tensor<2x2x2x2x8xi64> to tensor<1x2x2x2x8xi64>
+// CHECK:   %[[VAL_4:.*]] = tt.splat %{{.*}} : !tt.ptr<bf16> -> tensor<1x2x2x2x8x!tt.ptr<bf16>>
+// CHECK:   %[[VAL_5:.*]] = tt.addptr %[[VAL_4]], %[[VAL_3]] : tensor<1x2x2x2x8x!tt.ptr<bf16>>, tensor<1x2x2x2x8xi64>
+// CHECK:   %[[VAL_6:.*]] = tt.load %[[VAL_5]] {DiscreteMemAccess} : tensor<1x2x2x2x8x!tt.ptr<bf16>>
+// CHECK:   %[[VAL_7:.*]] = tensor.insert_slice %[[VAL_6]] into %[[VAL_2]]{{\[}}%[[VAL_1]], 0, 0, 0, 0] [1, 2, 2, 2, 8] [1, 1, 1, 1, 1] : tensor<1x2x2x2x8xbf16> into tensor<2x2x2x2x8xbf16>
+// CHECK:   scf.yield {DiscreteMemAccess} %[[VAL_7]] : tensor<2x2x2x2x8xbf16>
+// CHECK: } {ExtractedLoadOrStore}
+// CHECK: %[[VAL_8:.*]] = arith.addf %[[VAL_0]], %{{.*}} : tensor<2x2x2x2x8xbf16>
+// CHECK: scf.for %[[VAL_9:.*]] = %{{.*}} to %{{.*}} step %{{.*}} {
+// CHECK:   %[[VAL_10:.*]] = tensor.extract_slice %{{.*}}{{\[}}%[[VAL_9]], 0, 0, 0, 0] [1, 2, 2, 2, 8] [1, 1, 1, 1, 1] {DiscreteMemAccess} : tensor<2x2x2x2x8xi64> to tensor<1x2x2x2x8xi64>
+// CHECK:   %[[VAL_11:.*]] = tt.splat %{{.*}} : !tt.ptr<bf16> -> tensor<1x2x2x2x8x!tt.ptr<bf16>>
+// CHECK:   %[[VAL_12:.*]] = tt.addptr %[[VAL_11]], %[[VAL_10]] : tensor<1x2x2x2x8x!tt.ptr<bf16>>, tensor<1x2x2x2x8xi64>
+// CHECK:   %[[VAL_13:.*]] = tensor.extract_slice %[[VAL_8]]{{\[}}%[[VAL_9]], 0, 0, 0, 0] [1, 2, 2, 2, 8] [1, 1, 1, 1, 1] {DiscreteMemAccess} : tensor<2x2x2x2x8xbf16> to tensor<1x2x2x2x8xbf16>
+// CHECK:   tt.store %[[VAL_12]], %[[VAL_13]] {DiscreteMemAccess} : tensor<1x2x2x2x8x!tt.ptr<bf16>>
+// CHECK: } {ExtractedLoadOrStore}
+tt.func @discrete_highrank_and_structured_lowrank_loadstore_5d(%arg0: !tt.ptr<bf16> {tt.divisibility = 16 : i32}) attributes {noinline = false} {
   %cst = arith.constant dense<5.000000e+00> : tensor<2x2x2x2x8xbf16>
   %cst_0 = arith.constant dense<8> : tensor<2x2x2x2x1xi32>
   %cst_1 = arith.constant dense<2> : tensor<2x2x2x1xi32>

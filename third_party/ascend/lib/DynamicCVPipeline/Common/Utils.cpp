@@ -57,6 +57,21 @@ std::optional<int64_t> getOpBlockId(Operation *op)
     return blockIdAttr.getInt();
 }
 
+int getAvailableBlockId(ModuleOp module)
+{
+    int maxBlockId = -1;
+    module.walk([&](Operation *op) {
+        auto blockIdOpt = getOpBlockId(op);
+        if (blockIdOpt) {
+            int currentId = static_cast<int>(*blockIdOpt);
+            if (currentId > maxBlockId) {
+                maxBlockId = currentId;
+            }
+        }
+    });
+    return maxBlockId + 1;
+}
+
 void setFallbackAttr(ModuleOp module)
 {
     OpBuilder builder(module.getContext());

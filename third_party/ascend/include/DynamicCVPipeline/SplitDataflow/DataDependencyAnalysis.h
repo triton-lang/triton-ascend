@@ -132,7 +132,16 @@ private:
                                                 int producerBlockId,
                                                 int consumerBlockId);
 
-  bool isControlFlowOp(mlir::Operation *op);
+    bool isControlFlowOp(mlir::Operation *op);
+    bool isValidTensorForDependency(mlir::Value value);
+    bool isOuterOpArg(mlir::Value value);
+    void processIterArgDependencies();
+    llvm::SmallVector<mlir::Operation *> collectDiffCoreTypeUsers(
+        mlir::BlockArgument iterArg, llvm::StringRef initCoreType);
+    void insertProducerAndRecordDeps(scf::ForOp forOp, mlir::BlockArgument iterArg,
+                                     llvm::StringRef initCoreType,
+                                     llvm::SmallVector<mlir::Operation *> &diffUsers,
+                                     DataDependencyInfo &info);
 
   mlir::ModuleOp module;
 };
@@ -140,9 +149,6 @@ private:
 std::unique_ptr<OperationPass<ModuleOp>> createDataDependencyAnalysisPass();
 
 void registerDataDependencyAnalysisPasses();
-
-// Helper: Get BlockId
-int getSsbufferBlockId(Operation* op);
 
 } // namespace triton
 } // namespace mlir

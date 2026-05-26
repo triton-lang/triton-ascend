@@ -495,8 +495,9 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   }
 
   // Force scalarize if memory is not aligned
-  if (sizeInByte % 32 != 0)
+  if (sizeInByte % 32 != 0) {
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
+  }
 
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
@@ -509,7 +510,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   // SIMT Indirect Fast-Path Lowering in 950 seiries
   bool indirectFastPathEnabled =
       compileOn91095Flag && forceSimtTemplateFlag &&
-      (ptrOffsetInfo.isUnstructuredOrScalarlike() || routeDiscreteMaskToSimt);
+      ((!ptrOffsetInfo.isStructured() && sizeInByte < 64) || routeDiscreteMaskToSimt);
   bool rankWithinIndirectLoadStoreFastPathLimit = resultShape.size() <= 5;
   if (indirectFastPathEnabled &&
       succeeded(tryRewriteIndirectFastPath(op, loc, srcPtr, ptrOffset,
@@ -518,6 +519,11 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   }
 
   LLVM_DEBUG({
+    if (sizeInByte >= 64) {
+      auto &os = llvm::dbgs();
+      os << "Skip SIMT indirect fast path because continuous shape product is "
+        << sizeInByte << " (>=64)\n";
+    }
     if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
                   std::is_same_v<MemAccOpTy, triton::StoreOp>) {
       if (indirectFastPathEnabled &&

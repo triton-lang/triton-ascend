@@ -36,6 +36,9 @@ inline constexpr llvm::StringLiteral kBlockId = "ssbuffer.block_id";
 inline constexpr llvm::StringLiteral kTransferId = "ssbuffer.transfer_id";
 inline constexpr llvm::StringLiteral kCubeFirst = "ssbuffer.cube_first";
 inline constexpr llvm::StringLiteral kVectorFirst = "ssbuffer.vector_first";
+inline constexpr llvm::StringLiteral kAddFromMatmul = "ssbuffer.add_from_matmul";
+inline constexpr llvm::StringLiteral kMainLoop = "ssbuffer.main_loop";
+inline constexpr llvm::StringLiteral kIf = "ssbuffer.if";
 inline constexpr const char *ERRCODE_ATTR = "triton_ascend.dynamic_cv_pipeline.rc";
 static constexpr const int ERRCODE_FAILED = 1;
 static constexpr const int ERRCODE_IGNORED = 2;
@@ -63,6 +66,7 @@ inline constexpr CoreType fromStrCoreType(std::string_view s)
 CoreType getOpCoreType(Operation *op);
 std::optional<int64_t> getOpBlockId(Operation *op);
 llvm::LogicalResult verifyOpBlockId(Operation *op);
+int getAvailableBlockId(ModuleOp module);
 void setFallbackAttr(ModuleOp module);
 
 inline bool isCubeOp(Operation *op)

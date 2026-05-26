@@ -72,7 +72,9 @@ void AddControlFlowConditionPass::runOnOperation()
 {
   ModuleOp module = getOperation();
 
-  LDBG("Enter add controlflow condition pass.");
+  LDBG("Enter add controlflow condition pass.\n");
+  LDBG("before AddControlFlowCondition:");
+  LLVM_DEBUG(module.dump());
 
   if (failed(verifyControlFlowPrerequisites(module))) {
     return;
@@ -85,13 +87,13 @@ void AddControlFlowConditionPass::runOnOperation()
   std::unique_ptr<InitDependentMapPass> initDependentMapPass(new InitDependentMapPass());
   initDependentMapPass->setConditionInfo(&info);
   pm.addPass(std::move(initDependentMapPass));
-  
-  // Step1: Process shared iter_args in for ops to eliminate arg sharing across block_ids
-  pm.addPass(createProcessArgsPass());
 
-  // Step2: Clone ops in vector/cube to ensure that each block_id has its own
+  // Step1: Clone ops in vector/cube to ensure that each block_id has its own
   // ops without sharing
   pm.addPass(createCloneOpsPass());
+  
+  // Step2: Process shared iter_args in for ops to eliminate arg sharing across block_ids
+  pm.addPass(createProcessArgsPass());
 
   // Step3: Create if ops based on block_id
   std::unique_ptr<CreateIfOpsPass> createIfOpsPass(new CreateIfOpsPass());

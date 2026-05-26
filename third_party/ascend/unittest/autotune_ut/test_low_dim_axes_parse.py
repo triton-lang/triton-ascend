@@ -27,9 +27,9 @@ import triton.language as tl
 
 
 def _mock_single_reduction_axis(self):
-    self.vector_axes.ensure_axis("rx").length_expr = "n_elements"
-    self.vector_axes.apply_semantic_fields(reduction_axes=["rx"])
-    return ["rx"]
+    self.vector_axes.ensure_axis("x").length_expr = "n_elements"
+    self.vector_axes.apply_semantic_fields(reduction_axes=["x"])
+    return ["x"]
 
 
 def _mock_apply_vv_with_low_dim_axes(orig_apply, low_dim_axes):
@@ -138,7 +138,7 @@ def test_low_dim_axis_parse_empty_no_persistent_reduction_index_error(mock_autot
         act_res = triton_low_dim_axis_parse_guard_case[(1,)]()
 
     assert act_res["low_dim_axes"] == ["x"]
-    assert act_res["reduction_axes"] == ["rx"]
+    assert act_res["reduction_axes"] == ["x"]
 
 
 def test_persistent_reduction_inner_axis_threshold(mock_autotuner):
@@ -166,7 +166,7 @@ def test_persistent_reduction_inner_axis_threshold(mock_autotuner):
     ), mock.patch.object(
         AutoTilingTuner, "_autoparse_reduction_axes", new=_mock_single_reduction_axis
     ), mock.patch.object(
-        AutoTilingTuner, "_autoparse_low_dim_axes", return_value=["rx"]
+        AutoTilingTuner, "_autoparse_low_dim_axes", return_value=["x"]
     ), mock.patch.object(
         AutoTilingTuner, "_autoparse_split_params", return_value={}
     ), mock.patch.object(

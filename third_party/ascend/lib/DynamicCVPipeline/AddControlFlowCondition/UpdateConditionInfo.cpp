@@ -29,6 +29,9 @@
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
+
+#include <string>
 
 static constexpr const char *DEBUG_TYPE = "UpdateConditionInfoPass";
 static constexpr const char *SSBUFFER_Main_LOOP = "ssbuffer.main_loop";
@@ -42,10 +45,38 @@ static constexpr int UPDATE_CONDITION_INFO_SUCCESS = 0;
 static constexpr int UPDATE_CONDITION_INFO_FAILED = -1;
 
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
-#define LDBG(X) LLVM_DEBUG(DBGS() << (X) << "\n")
+#define LDBG(...) \
+  LLVM_DEBUG({ \
+    DBGS(); \
+    llvm::dbgs() << __VA_ARGS__; \
+  })
 using namespace mlir;
 using namespace triton;
 using namespace hivm;
+
+static void logConditionGroupIndices(llvm::StringRef label, llvm::ArrayRef<int> groupIndices)
+{
+  std::string message;
+  llvm::raw_string_ostream os(message);
+  os << label;
+  for (int groupIndex : groupIndices) {
+    os << groupIndex << " ";
+  }
+  os << "\n";
+  LDBG(os.str());
+}
+
+static void logOutputGroupValues(llvm::StringRef label, llvm::ArrayRef<Value> values)
+{
+  std::string message;
+  llvm::raw_string_ostream os(message);
+  os << label;
+  for (Value value : values) {
+    os << value << " ";
+  }
+  os << "\n";
+  LDBG(os.str());
+}
 
 // Allocate the SSBuffer pointer
 SmallVector<SmallVector<Value>> UpdateConditionInfoPass::allocSSBuffer(ModuleOp module)
@@ -63,7 +94,7 @@ SmallVector<SmallVector<Value>> UpdateConditionInfoPass::allocSSBuffer(ModuleOp 
   SmallVector<Value> ssbufferVec1Ptrs;
   int numBuffers = info->crossCoreDependentMap.size();
   if (numBuffers == 0) {
-      LDBG("crossCoreDependentMap is empty!");
+      LDBG("crossCoreDependentMap is empty!" << "\n");
       return ssbufferPtrs;
   }
 
@@ -188,7 +219,7 @@ DenseMap<int, DenseMap<Value, SmallVector<Value>>> UpdateConditionInfoPass::exte
           tightlyCoupledBufferGroups[tcb].push_back(markedValue);
         } else {
           ret = -1;
-          LDBG("hivm.tightly_coupled_buffer Attribute has no id!");
+          LDBG("hivm.tightly_coupled_buffer Attribute has no id!" << "\n");
           return WalkResult::interrupt();
         }
       }
@@ -207,11 +238,11 @@ DenseMap<int, DenseMap<Value, SmallVector<Value>>> UpdateConditionInfoPass::exte
       for (Value buffer : producers) {
         int tcbGroupId = findTcbGroupId(buffer, tightlyCoupledBufferGroups);
         if (tcbGroupId == -1) {
-          LDBG("Can not find tightly_coupled_buffer id");
+          LDBG("Can not find tightly_coupled_buffer id" << "\n");
           return errorMap;
         }
         if (addEquivalentValues(buffer, tightlyCoupledBufferGroups[tcbGroupId], producers) == -1) {
-          LDBG("Can not find the crossCore Buffer from another scope");
+          LDBG("Can not find the crossCore Buffer from another scope" << "\n");
           return errorMap;
         }
       }
@@ -230,8 +261,8 @@ int UpdateConditionInfoPass::buildIdxToVarMap(scf::ForOp forOp,
 
   const auto &innerDepIndices = info->innerDepConds[forOp];
   if (innerDepIndices.size() < intraCoreBuffers.size()) {
-    LLVM_DEBUG(llvm::dbgs() << "Not enough inner dependency condition indices: assigned "
-               << innerDepIndices.size() << ", expected " << intraCoreBuffers.size() << "\n");
+    LDBG("Not enough inner dependency condition indices: assigned "
+         << innerDepIndices.size() << ", expected " << intraCoreBuffers.size() << "\n");
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
@@ -240,17 +271,17 @@ int UpdateConditionInfoPass::buildIdxToVarMap(scf::ForOp forOp,
 
     int argIdx = innerDepIndices[varIdx];
     if (argIdx < 0 || argIdx >= iterArgNum) {
-      LLVM_DEBUG(llvm::dbgs() << "Invalid inner dependency arg index: " << argIdx
-                 << ", iter args " << iterArgNum << "\n");
+      LDBG("Invalid inner dependency arg index: " << argIdx
+           << ", iter args " << iterArgNum << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
     idxToVar[idx] = forOp.getRegionIterArgs()[argIdx];
-    LLVM_DEBUG(llvm::dbgs() << "Assign intraCore buffer group " << idx << " to iter arg index " << argIdx << "\n");
+    LDBG("Assign intraCore buffer group " << idx << " to iter arg index " << argIdx << "\n");
     varIdx++;
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "Assigned " << idxToVar.size() << " intraCore condition variables.\n");
+  LDBG("Assigned " << idxToVar.size() << " intraCore condition variables." << "\n");
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
@@ -364,30 +395,11 @@ int UpdateConditionInfoPass::getInputOutputValues(
   crossCoreOutputValues.assign(crossCoreOutputSet.begin(), crossCoreOutputSet.end());
   intraCoreInputValues.assign(intraCoreInputSet.begin(), intraCoreInputSet.end());
   intraCoreOutputValues.assign(intraCoreOutputSet.begin(), intraCoreOutputSet.end());
-  LDBG("==== Cross Core & Intra Core Values ====");
-  LLVM_DEBUG(llvm::dbgs() << "crossCoreInputValues: ");
-  for (int val : crossCoreInputValues) {
-      LLVM_DEBUG(llvm::dbgs() << val << " ");
-  }
-  LLVM_DEBUG(llvm::dbgs() << "\n");
-
-  LLVM_DEBUG(llvm::dbgs() << "crossCoreOutputValues: ");
-  for (int val : crossCoreOutputValues) {
-      LLVM_DEBUG(llvm::dbgs() << val << " ");
-  }
-  LLVM_DEBUG(llvm::dbgs() << "\n");
-
-  LLVM_DEBUG(llvm::dbgs() << "intraCoreInputValues: ");
-  for (int val : intraCoreInputValues) {
-      LLVM_DEBUG(llvm::dbgs() << val << " ");
-  }
-  LLVM_DEBUG(llvm::dbgs() << "\n");
-
-  LLVM_DEBUG(llvm::dbgs() << "intraCoreOutputValues: ");
-  for (int val : intraCoreOutputValues) {
-      LLVM_DEBUG(llvm::dbgs() << val << " ");
-  }
-  LLVM_DEBUG(llvm::dbgs() << "\n");
+  LDBG("==== Cross Core & Intra Core Values ====" << "\n");
+  logConditionGroupIndices("crossCoreInputValues: ", crossCoreInputValues);
+  logConditionGroupIndices("crossCoreOutputValues: ", crossCoreOutputValues);
+  logConditionGroupIndices("intraCoreInputValues: ", intraCoreInputValues);
+  logConditionGroupIndices("intraCoreOutputValues: ", intraCoreOutputValues);
 
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
@@ -414,15 +426,13 @@ int UpdateConditionInfoPass::buildOutputGroups(
   for (int idx : intraCoreOutputValues) {
     auto bufferIt = intraCoreBuffers.find(idx);
     if (bufferIt == intraCoreBuffers.end()) {
-      LLVM_DEBUG(llvm::dbgs() << "Failed to build output groups: no buffer entry for intraCore output group "
-                               << idx << ".\n");
+      LDBG("Failed to build output groups: no buffer entry for intraCore output group " << idx << "." << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
     auto varIt = idxToVar.find(idx);
     if (varIt == idxToVar.end()) {
-      LLVM_DEBUG(llvm::dbgs() << "Failed to build output groups: no control variable for intraCore output group "
-                               << idx << ".\n");
+      LDBG("Failed to build output groups: no control variable for intraCore output group " << idx << "." << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
     Value var = varIt->second;
@@ -449,21 +459,11 @@ int UpdateConditionInfoPass::buildOutputGroups(
     }
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "Built " << outputGroups.size() << " intraCore output groups.\n");
+  LDBG("Built " << outputGroups.size() << " intraCore output groups." << "\n");
   for (size_t i = 0; i < outputGroups.size(); ++i) {
-      auto &group = outputGroups[i];
-      LLVM_DEBUG(llvm::dbgs() << "buildOutputGroups: Input Vars (Consumer): ");
-      for (Value var : group.inputVars) {
-          LLVM_DEBUG(llvm::dbgs() << var << " ");
-      }
-      LLVM_DEBUG(llvm::dbgs() << "\n");
-      LLVM_DEBUG(llvm::dbgs() << "buildOutputGroups: Output Vars (Producer): ");
-
-      for (Value output : group.outputs) {
-          LLVM_DEBUG(llvm::dbgs() << output << " ");
-      }
-
-      LLVM_DEBUG(llvm::dbgs() << "\n");
+    auto &group = outputGroups[i];
+    logOutputGroupValues("buildOutputGroups: Input Vars (Consumer): ", group.inputVars);
+    logOutputGroupValues("buildOutputGroups: Output Vars (Producer): ", group.outputs);
   }
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
@@ -671,11 +671,11 @@ int UpdateConditionInfoPass::setCrossCoreCondition(
     } else if (attr == aivAttr) {
       isAIV = true;
     } else {
-      LDBG("scope block has invalid tcore_type attribute");
+      LDBG("scope block has invalid tcore_type attribute" << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
   } else {
-    LDBG("ifblock not in a correct scope block");
+    LDBG("ifblock not in a correct scope block" << "\n");
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
@@ -709,7 +709,7 @@ void UpdateConditionInfoPass::collectIntraCoreInputConditions(
     DenseMap<Value, VarUpdateType> &varUpdateTypes)
 {
   if (intraCoreInputValues.empty()) {
-    LLVM_DEBUG(llvm::dbgs() << "No intraCore input conditions to collect.\n");
+    LDBG("No intraCore input conditions to collect." << "\n");
     return;
   }
 
@@ -718,7 +718,7 @@ void UpdateConditionInfoPass::collectIntraCoreInputConditions(
   for (int idx : intraCoreInputValues) {
     auto varIt = idxToVar.find(idx);
     if (varIt == idxToVar.end()) {
-      LLVM_DEBUG(llvm::dbgs() << "Skip intraCore input group " << idx << ": no control variable.\n");
+      LDBG("Skip intraCore input group " << idx << ": no control variable." << "\n");
       continue;
     }
 
@@ -733,10 +733,9 @@ void UpdateConditionInfoPass::collectIntraCoreInputConditions(
     conditions.push_back(cond);
     usedVarsSet.insert(var);
     varUpdateTypes[var] = VarUpdateType::DEC;
-    LLVM_DEBUG(llvm::dbgs() << "Add intraCore input condition for group " << idx << ".\n");
+    LDBG("Add intraCore input condition for group " << idx << "." << "\n");
   }
-  LLVM_DEBUG(llvm::dbgs() << "Collected " << (conditions.size() - beforeConditionNum)
-                           << " intraCore input conditions.\n");
+  LDBG("Collected " << (conditions.size() - beforeConditionNum) << " intraCore input conditions." << "\n");
 }
 
 // Collect the conditions for intra-core producer values.
@@ -746,7 +745,7 @@ int UpdateConditionInfoPass::collectIntraCoreOutputConditions(
     DenseSet<Value> &usedVarsSet, DenseMap<Value, VarUpdateType> &varUpdateTypes)
 {
   if (intraCoreOutputValues.empty()) {
-    LLVM_DEBUG(llvm::dbgs() << "No intraCore output conditions to collect.\n");
+    LDBG("No intraCore output conditions to collect." << "\n");
     return UPDATE_CONDITION_INFO_SUCCESS;
   }
 
@@ -770,11 +769,10 @@ int UpdateConditionInfoPass::collectIntraCoreOutputConditions(
       conditions.push_back(cond);
       usedVarsSet.insert(var);
       varUpdateTypes[var] = VarUpdateType::INC;
-      LLVM_DEBUG(llvm::dbgs() << "Add intraCore output condition with producer limit " << size << ".\n");
+      LDBG("Add intraCore output condition with producer limit " << size << "." << "\n");
     }
   }
-  LLVM_DEBUG(llvm::dbgs() << "Collected " << (conditions.size() - beforeConditionNum)
-                           << " intraCore output conditions.\n");
+  LDBG("Collected " << (conditions.size() - beforeConditionNum) << " intraCore output conditions." << "\n");
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
@@ -784,7 +782,7 @@ int UpdateConditionInfoPass::setIntraCoreCondition(
     SmallVector<int> &intraCoreInputValues, SmallVector<int> &intraCoreOutputValues, DenseMap<int, Value> &idxToVar,
     DenseMap<Value, VarUpdateType> &varUpdateTypes, Value &intraCoreCond)
 {
-  LDBG("Enter set intraCore condition.");
+  LDBG("Enter set intraCore condition." << "\n");
   intraCoreCond = Value();
   OpBuilder builder(ifOp.getContext());
   builder.setInsertionPoint(ifOp);
@@ -792,8 +790,7 @@ int UpdateConditionInfoPass::setIntraCoreCondition(
 
   SmallVector<Value> conditions;
   DenseSet<Value> usedVarsSet;
-  LLVM_DEBUG(llvm::dbgs() << "Collect intraCore conditions: inputs " << intraCoreInputValues.size()
-                           << ", outputs " << intraCoreOutputValues.size() << "\n");
+  LDBG("Collect intraCore conditions: inputs " << intraCoreInputValues.size() << ", outputs " << intraCoreOutputValues.size() << "\n");
   // Collect the conditions for intra-core consumer values.
   collectIntraCoreInputConditions(builder, loc, intraCoreInputValues, idxToVar, conditions, usedVarsSet,
                                   varUpdateTypes);
@@ -814,10 +811,9 @@ int UpdateConditionInfoPass::setIntraCoreCondition(
   for (Value var : usedVarsSet) {
     currentUsedVars.push_back(var);
   }
-  LLVM_DEBUG(llvm::dbgs() << "Built " << conditions.size() << " intraCore conditions using "
-                           << currentUsedVars.size() << " control variables.\n");
+  LDBG("Built " << conditions.size() << " intraCore conditions using " << currentUsedVars.size() << " control variables." << "\n");
 
-  LDBG("Exit set intraCore condition.");
+  LDBG("Exit set intraCore condition." << "\n");
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
@@ -826,7 +822,7 @@ void UpdateConditionInfoPass::updateControlVarToLatestValue(scf::IfOp newIfOp, s
                                                             Value counter)
 {
   if (currentUsedVars.empty() && !hasCounter) {
-    LLVM_DEBUG(llvm::dbgs() << "No control variable latest values to update.\n");
+    LDBG("No control variable latest values to update." << "\n");
     return;
   }
 
@@ -836,29 +832,28 @@ void UpdateConditionInfoPass::updateControlVarToLatestValue(scf::IfOp newIfOp, s
     Value var = currentUsedVars[i];
     Value newValue = newIfOp.getResult(origResultCount + i);
     controlVarToLatestValue[var] = newValue;
-    LLVM_DEBUG(llvm::dbgs() << "Record latest intraCore control value at result index "
-                             << (origResultCount + i) << ".\n");
+    LDBG("Record latest intraCore control value at result index " << (origResultCount + i) << "." << "\n");
   }
 
   if (hasCounter) {
     size_t counterResultIdx = origResultCount + currentUsedVars.size();
     Value newCounterValue = newIfOp.getResult(counterResultIdx);
     controlVarToLatestValue[counter] = newCounterValue;
-    LLVM_DEBUG(llvm::dbgs() << "Record latest counter value at result index " << counterResultIdx << ".\n");
+    LDBG("Record latest counter value at result index " << counterResultIdx << "." << "\n");
   }
-  LLVM_DEBUG(llvm::dbgs() << "[DEBUG] controlVarToLatestValue size: " << controlVarToLatestValue.size() << "\n");
+  LDBG("[DEBUG] controlVarToLatestValue size: " << controlVarToLatestValue.size() << "\n");
 
   for (auto &entry : controlVarToLatestValue) {
-    LLVM_DEBUG(llvm::dbgs() << "[DEBUG]   key = " << entry.first << "  -->  new value = " << entry.second << "\n");
+    LDBG("[DEBUG]   key = " << entry.first << "  -->  new value = " << entry.second << "\n");
   }
 }
 
 // Update the yield in the forOp
 int UpdateConditionInfoPass::updateForOpYield(scf::ForOp forOp)
 {
-  LDBG("Enter update forOp yield ");
+  LDBG("Enter update forOp yield " << "\n");
   if (controlVarToLatestValue.empty()) {
-    LLVM_DEBUG(llvm::dbgs() << "Failed to update forOp yield: no latest control variable values.\n");
+    LDBG("Failed to update forOp yield: no latest control variable values." << "\n");
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
@@ -866,14 +861,13 @@ int UpdateConditionInfoPass::updateForOpYield(scf::ForOp forOp)
   Block *forBody = forOp.getBody();
   auto yieldOp = dyn_cast<scf::YieldOp>(forBody->getTerminator());
   if (!yieldOp) {
-    LLVM_DEBUG(llvm::dbgs() << "Failed to update forOp yield: terminator is not scf.yield.\n");
+    LDBG("Failed to update forOp yield: terminator is not scf.yield." << "\n");
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
   SmallVector<Value> newYieldOperands(yieldOp.getOperands().begin(), yieldOp.getOperands().end());
   if (newYieldOperands.size() != forOp.getNumRegionIterArgs()) {
-    LLVM_DEBUG(llvm::dbgs() << "Failed to update forOp yield: yield operands " << newYieldOperands.size()
-                             << ", iter args " << forOp.getNumRegionIterArgs() << "\n");
+    LDBG("Failed to update forOp yield: yield operands " << newYieldOperands.size() << ", iter args " << forOp.getNumRegionIterArgs() << "\n");
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
@@ -887,19 +881,18 @@ int UpdateConditionInfoPass::updateForOpYield(scf::ForOp forOp)
     Value latestValue = entry.second;
     auto it = iterArgToIndex.find(origVar);
     if (it == iterArgToIndex.end()) {
-      LLVM_DEBUG(llvm::dbgs() << "Failed to update forOp yield: control variable is not a region iter arg.\n");
+      LDBG("Failed to update forOp yield: control variable is not a region iter arg." << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
     newYieldOperands[it->second] = latestValue;
-    LLVM_DEBUG(llvm::dbgs() << "Update forOp yield operand index " << it->second << "\n");
+    LDBG("Update forOp yield operand index " << it->second << "\n");
   }
 
   OpBuilder yieldBuilder(yieldOp);
   yieldBuilder.create<scf::YieldOp>(loc, newYieldOperands);
   yieldOp.erase();
-  LLVM_DEBUG(llvm::dbgs() << "Updated forOp yield with " << controlVarToLatestValue.size()
-                           << " latest control values.\n");
-  LDBG("Exit update forOp yield ");
+  LDBG("Updated forOp yield with " << controlVarToLatestValue.size() << " latest control values." << "\n");
+  LDBG("Exit update forOp yield " << "\n");
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
@@ -915,9 +908,7 @@ SmallVector<Type> UpdateConditionInfoPass::buildNewIfResultTypes(scf::IfOp oldIf
   if (hasCounter) {
     resultTypes.push_back(counter.getType());
   }
-  LLVM_DEBUG(llvm::dbgs() << "Build new if result types: old results " << oldIfOp.getNumResults()
-                           << ", control vars " << currentUsedVars.size()
-                           << ", has counter " << hasCounter << ".\n");
+  LDBG("Build new if result types: old results " << oldIfOp.getNumResults() << ", control vars " << currentUsedVars.size() << ", has counter " << hasCounter << "." << "\n");
   return resultTypes;
 }
 
@@ -927,20 +918,20 @@ void UpdateConditionInfoPass::collectYieldOperands(Block &block, Operation *&yie
   yieldOp = nullptr;
   yieldOperands.clear();
   if (block.empty()) {
-    LLVM_DEBUG(llvm::dbgs() << "Collect yield operands: block is empty.\n");
+    LDBG("Collect yield operands: block is empty." << "\n");
     return;
   }
 
   Operation *lastOp = &block.back();
   if (!isa<scf::YieldOp>(lastOp)) {
-    LLVM_DEBUG(llvm::dbgs() << "Collect yield operands: block terminator is not scf.yield.\n");
+    LDBG("Collect yield operands: block terminator is not scf.yield." << "\n");
     return;
   }
 
   yieldOp = lastOp;
   auto scfYieldOp = cast<scf::YieldOp>(lastOp);
   yieldOperands.assign(scfYieldOp.getOperands().begin(), scfYieldOp.getOperands().end());
-  LLVM_DEBUG(llvm::dbgs() << "Collected " << yieldOperands.size() << " yield operands.\n");
+  LDBG("Collected " << yieldOperands.size() << " yield operands." << "\n");
 }
 
 void UpdateConditionInfoPass::populateNewThenBlock(
@@ -954,8 +945,7 @@ void UpdateConditionInfoPass::populateNewThenBlock(
       op.moveBefore(&newThenBlock, newThenBlock.end());
     }
   }
-  LLVM_DEBUG(llvm::dbgs() << "Populate new then block with " << oldYieldOperands.size()
-                           << " original yield operands.\n");
+  LDBG("Populate new then block with " << oldYieldOperands.size() << " original yield operands." << "\n");
 
   OpBuilder thenBuilder(&newThenBlock, newThenBlock.end());
   SmallVector<Value> thenYieldOperands(oldYieldOperands.begin(), oldYieldOperands.end());
@@ -984,10 +974,10 @@ void UpdateConditionInfoPass::populateNewThenBlock(
   if (hasCounter) {
     Value newCounter = thenBuilder.create<arith::AddIOp>(loc, counter, step);
     thenYieldOperands.push_back(newCounter);
-    LLVM_DEBUG(llvm::dbgs() << "Append updated counter to then yield.\n");
+    LDBG("Append updated counter to then yield." << "\n");
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "Create then yield with " << thenYieldOperands.size() << " operands.\n");
+  LDBG("Create then yield with " << thenYieldOperands.size() << " operands." << "\n");
   thenBuilder.create<scf::YieldOp>(loc, thenYieldOperands);
 }
 
@@ -995,7 +985,7 @@ void UpdateConditionInfoPass::populateNewElseBlock(scf::IfOp newIfOp, scf::IfOp 
                                                    bool oldHasElse, bool hasCounter, Value counter)
 {
   if (!needsYield && !oldHasElse) {
-    LLVM_DEBUG(llvm::dbgs() << "Skip populating else block: no yield needed and old if has no else.\n");
+    LDBG("Skip populating else block: no yield needed and old if has no else." << "\n");
     return;
   }
 
@@ -1012,8 +1002,7 @@ void UpdateConditionInfoPass::populateNewElseBlock(scf::IfOp newIfOp, scf::IfOp 
         op.moveBefore(&newElseBlock, newElseBlock.end());
       }
     }
-    LLVM_DEBUG(llvm::dbgs() << "Moved old else block ops and collected " << oldElseYieldOperands.size()
-                             << " old else yield operands.\n");
+    LDBG("Moved old else block ops and collected " << oldElseYieldOperands.size() << " old else yield operands." << "\n");
   }
 
   if (needsYield) {
@@ -1046,11 +1035,11 @@ void UpdateConditionInfoPass::populateNewElseBlock(scf::IfOp newIfOp, scf::IfOp 
       elseYieldOperands.push_back(counterToUse);
     }
 
-    LLVM_DEBUG(llvm::dbgs() << "Create else yield with " << elseYieldOperands.size() << " operands.\n");
+    LDBG("Create else yield with " << elseYieldOperands.size() << " operands." << "\n");
     elseBuilder.create<scf::YieldOp>(loc, elseYieldOperands);
   } else if (oldElseYieldOp) {
     oldElseYieldOp->erase();
-    LLVM_DEBUG(llvm::dbgs() << "Erase old else yield because new if does not need yield values.\n");
+    LDBG("Erase old else yield because new if does not need yield values." << "\n");
   }
 }
 
@@ -1064,9 +1053,7 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(scf::IfOp oldIfOp, Va
 
   bool needsYield = !currentUsedVars.empty() || hasCounter;
   bool oldHasElse = oldIfOp.getElseRegion().hasOneBlock();
-  LLVM_DEBUG(llvm::dbgs() << "Create replacement if op: needs yield " << needsYield
-                           << ", old has else " << oldHasElse
-                           << ", current used vars " << currentUsedVars.size() << ".\n");
+  LDBG("Create replacement if op: needs yield " << needsYield << ", old has else " << oldHasElse << ", current used vars " << currentUsedVars.size() << "." << "\n");
 
   Block &oldThenBlock = oldIfOp.getThenRegion().front();
   Operation *oldThenYieldOp = nullptr;
@@ -1074,7 +1061,7 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(scf::IfOp oldIfOp, Va
   collectYieldOperands(oldThenBlock, oldThenYieldOp, oldYieldOperands);
   SmallVector<Type> resultTypes = buildNewIfResultTypes(oldIfOp, hasCounter, counter);
   scf::IfOp newIfOp = builder.create<scf::IfOp>(loc, resultTypes, combinedCond, true);
-  LLVM_DEBUG(llvm::dbgs() << "Created replacement if op with " << resultTypes.size() << " results.\n");
+  LDBG("Created replacement if op with " << resultTypes.size() << " results." << "\n");
 
   for (auto &attr : oldIfOp->getAttrs()) {
     newIfOp->setAttr(attr.getName(), attr.getValue());
@@ -1087,7 +1074,7 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(scf::IfOp oldIfOp, Va
   for (size_t i = 0; i < oldIfOp.getNumResults(); ++i) {
     oldIfOp.getResult(i).replaceAllUsesWith(newIfOp.getResult(i));
   }
-  LLVM_DEBUG(llvm::dbgs() << "Replaced " << oldIfOp.getNumResults() << " old if results.\n");
+  LDBG("Replaced " << oldIfOp.getNumResults() << " old if results." << "\n");
 
   return newIfOp;
 }
@@ -1110,7 +1097,7 @@ int UpdateConditionInfoPass::combineConditions(ModuleOp module, Value crossCoreC
   }
 
   if (!info->blockCounters.count(forOp)) {
-    LLVM_DEBUG(llvm::dbgs() << "Missing block counters for forOp.\n");
+    LDBG("Missing block counters for forOp." << "\n");
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
@@ -1121,15 +1108,14 @@ int UpdateConditionInfoPass::combineConditions(ModuleOp module, Value crossCoreC
     hasCounter = true;
   } else {
     if (usedCounterNum >= counterIndices.size()) {
-      LLVM_DEBUG(llvm::dbgs() << "Not enough counters for ssbuffer if ops: used " << usedCounterNum
-                               << ", counters " << counterIndices.size() << "\n");
+      LDBG("Not enough counters for ssbuffer if ops: used " << usedCounterNum << ", counters " << counterIndices.size() << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
     int argIdx = counterIndices[usedCounterNum];
     int iterArgNum = static_cast<int>(forOp.getNumRegionIterArgs());
     if (argIdx < 0 || argIdx >= iterArgNum) {
-      LLVM_DEBUG(llvm::dbgs() << "Invalid counter arg index: " << argIdx << ", iter args " << iterArgNum << "\n");
+      LDBG("Invalid counter arg index: " << argIdx << ", iter args " << iterArgNum << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
@@ -1137,10 +1123,10 @@ int UpdateConditionInfoPass::combineConditions(ModuleOp module, Value crossCoreC
     hasCounter = true;
     info->cntArgs[ifOp] = counter;
     usedCounterNum++;
-    LLVM_DEBUG(llvm::dbgs() << "Assign counter iter arg index " << argIdx << " to ssbuffer if op.\n");
+    LDBG("Assign counter iter arg index " << argIdx << " to ssbuffer if op." << "\n");
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "this ifop used counter is: " << counter << "\n");
+  LDBG("this ifop used counter is: " << counter << "\n");
   if (hasCounter) {
     OpBuilder builder(ifOp);
     Value upperBound = forOp.getUpperBound();
@@ -1154,11 +1140,11 @@ int UpdateConditionInfoPass::combineConditions(ModuleOp module, Value crossCoreC
   }
 
   if (validConditions.empty()) {
-    LLVM_DEBUG(llvm::dbgs() << "Failed to build any condition for ssbuffer if op.\n");
+    LDBG("Failed to build any condition for ssbuffer if op." << "\n");
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
-  LLVM_DEBUG(llvm::dbgs() << "Combine " << validConditions.size() << " conditions for ssbuffer if op.\n");
+  LDBG("Combine " << validConditions.size() << " conditions for ssbuffer if op." << "\n");
   OpBuilder builder(ifOp);
   Value combinedCond = validConditions[0];
   for (size_t i = 1; i < validConditions.size(); ++i) {
@@ -1190,8 +1176,7 @@ int UpdateConditionInfoPass::updateIfConds(ModuleOp module, SmallVector<SmallVec
 
     auto forOp = dyn_cast<scf::ForOp>(op);
     if (!forOp) {
-      LLVM_DEBUG(llvm::dbgs() << "Found unsupported main loop op: "
-                 << op->getName() << "\n");
+      LDBG("Found unsupported main loop op: " << op->getName() << "\n");
       return WalkResult::interrupt();
     }
     mainLoopForOps.push_back(forOp);
@@ -1208,14 +1193,14 @@ int UpdateConditionInfoPass::updateIfConds(ModuleOp module, SmallVector<SmallVec
     // Step1:Collect the dependency buffer info of this forOp
     collectDependencyBuffers(forOp, crossCoreBuffers, intraCoreBuffers);
     if (crossCoreBuffers.empty() && intraCoreBuffers.empty()) {
-      LDBG("crossCoreBuffers and intraCoreBuffers are both empty!");
+      LDBG("crossCoreBuffers and intraCoreBuffers are both empty!" << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
     DenseMap<int, DenseMap<Value, SmallVector<Value> > > extendedCrossCoreBuffers =
         extendCrossCoreBuffersWithEquivalentValues(module, crossCoreBuffers);
     if (extendedCrossCoreBuffers.count(-1)) {
-      LDBG("extendCrossCoreBuffersWithEquivalentValues failed!");
+      LDBG("extendCrossCoreBuffersWithEquivalentValues failed!" << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
     // Step2:Assign a variable to each inputValue of this forOp
@@ -1232,7 +1217,7 @@ int UpdateConditionInfoPass::updateIfConds(ModuleOp module, SmallVector<SmallVec
 
       auto ifOp = dyn_cast<scf::IfOp>(op);
       if (!ifOp) {
-        LLVM_DEBUG(llvm::dbgs() << "Found unsupported ssbuffer if op: " << op->getName() << "\n");
+        LDBG("Found unsupported ssbuffer if op: " << op->getName() << "\n");
         return WalkResult::interrupt();
       }
 
@@ -1244,14 +1229,13 @@ int UpdateConditionInfoPass::updateIfConds(ModuleOp module, SmallVector<SmallVec
     }
     auto counterIt = info->blockCounters.find(forOp);
     if (counterIt == info->blockCounters.end()) {
-      LLVM_DEBUG(llvm::dbgs() << "Failed to assign counters for ssbuffer if ops: no counters for forOp.\n");
+      LDBG("Failed to assign counters for ssbuffer if ops: no counters for forOp." << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
     size_t counterNum = counterIt->second.size();
     if (ifOps.size() > counterNum) {
-      LLVM_DEBUG(llvm::dbgs() << "Failed to assign counters for all ssbuffer if ops: if ops "
-                               << ifOps.size() << ", counters " << counterNum << "\n");
+      LDBG("Failed to assign counters for all ssbuffer if ops: if ops " << ifOps.size() << ", counters " << counterNum << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
     // Update the conditions of ifOp in this forOp.
@@ -1264,7 +1248,7 @@ int UpdateConditionInfoPass::updateIfConds(ModuleOp module, SmallVector<SmallVec
 
       if (getInputOutputValues(ifOp, extendedCrossCoreBuffers, intraCoreBuffers, crossCoreInputValues,
                                crossCoreOutputValues, intraCoreInputValues, intraCoreOutputValues) != 0) {
-        LDBG("getInputOutputValues failed!");
+        LDBG("getInputOutputValues failed!" << "\n");
         return UPDATE_CONDITION_INFO_FAILED;
       }
 
@@ -1272,7 +1256,7 @@ int UpdateConditionInfoPass::updateIfConds(ModuleOp module, SmallVector<SmallVec
       Value crossCoreCond;
       if (setCrossCoreCondition(crossCoreInputValues, crossCoreOutputValues, crossCoreBuffers, ifOp,
                                 ssbufferPtrs, crossCoreCond) != 0) {
-        LDBG("setCrossCoreCondition failed!");
+        LDBG("setCrossCoreCondition failed!" << "\n");
         return UPDATE_CONDITION_INFO_FAILED;
       }
       // Step4:Set the intraCore condition
@@ -1300,17 +1284,19 @@ void UpdateConditionInfoPass::runOnOperation()
 {
   ModuleOp module = getOperation();
 
-  LDBG("Enter UpdateConditionInfo pass.\n");
+  LDBG("Enter UpdateConditionInfo pass." << "\n");
   // Step1:Init the ssbufferPtrs
   SmallVector<SmallVector<Value> > ssbufferPtrs = allocSSBuffer(module);
 
   // Step2:Update the conditions of ifOp based on the intraCoreDependentMap and crossCoreDependentMap
   int updateResult = updateIfConds(module, ssbufferPtrs);
-  if (updateResult == UPDATE_CONDITION_INFO_FAILED) {
+    
+  if (updateResult != UPDATE_CONDITION_INFO_SUCCESS) {
+    LDBG("updateIfConds failed!");
     signalPassFailure();
-    return;
   }
-  LDBG("Exit UpdateConditionInfo pass.\n");
+
+  LDBG("Exit UpdateConditionInfo pass." << "\n");
 }
 
 namespace mlir {

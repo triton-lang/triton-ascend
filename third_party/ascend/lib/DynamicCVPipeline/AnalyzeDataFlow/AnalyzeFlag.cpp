@@ -67,8 +67,10 @@ static bool checkFlagIdValidity(ModuleOp module)
 
     return WalkResult::advance();
   });
-
-  LDBG("[ERROR]: flag_id is not enough for transfer, invalidFlagNum: " << invalidFlagNum << "\n");
+  
+  if (shouldReturn) {
+    LDBG("[warning]: flag_id is not enough for transfer, invalidFlagNum: " << invalidFlagNum << "\n");
+  }
   return shouldReturn;
 }
 

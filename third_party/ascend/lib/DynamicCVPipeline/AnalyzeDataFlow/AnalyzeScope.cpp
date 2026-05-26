@@ -29,6 +29,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 
 static constexpr const char *DEBUG_TYPE = "analyze-scope";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
@@ -42,8 +43,96 @@ LLVM_DEBUG({ \
 using namespace llvm;
 using namespace mlir;
 using namespace triton;
+using namespace CVPipeline;
 
 namespace {
+static bool isVectorScope(scope::ScopeOp scopeOp)
+{
+    auto coreTypeAttr = scopeOp->getAttrOfType<hivm::TCoreTypeAttr>(hivm::TCoreTypeAttr::name);
+    if (!coreTypeAttr) {
+        return false;
+    }
+    return coreTypeAttr.getTcoretype() == hivm::TCoreType::VECTOR;
+}
+
+static bool checkTransferInteraction(mlir::Operation* op) {
+  bool hasCVInteraction = false;
+  // check v->c data interaction
+  if (isa<hivm::CopyOp>(op)) {
+    hasCVInteraction = true;
+  }
+  // check c->v data interaction
+  // user with "ssbuffer.add_from_matmul" is not a real c->v data interaction
+  if (isa<bufferization::ToTensorOp>(op)) {
+    for (Operation *user : op->getUsers()) {
+      if (!user->hasAttr(CVPipeline::kAddFromMatmul)) {
+        hasCVInteraction = true;
+        break;
+      }
+      for (Operation *userUser : user->getUsers()) {
+        if (!isa<scf::YieldOp>(userUser)) {
+          hasCVInteraction = true;
+          break;
+        }
+      }
+    }
+  }
+
+  return hasCVInteraction;
+}
+
+static bool checkVecScopeMainLoop(ModuleOp module) {
+  bool hasMainLoopFor = false;
+  bool allForSatisfy = true;
+
+  module.walk([&](scope::ScopeOp scopeOp) -> WalkResult {
+    if (!isVectorScope(scopeOp)) {
+      return WalkResult::advance();
+    }
+
+    scopeOp.walk([&](scf::ForOp forOp) -> WalkResult {
+      if (!forOp->hasAttr(CVPipeline::kMainLoop)) {
+        return WalkResult::advance();
+      }
+
+      hasMainLoopFor = true;
+      bool hasCVInteraction = false;
+
+      forOp.walk([&](mlir::Operation *op) -> WalkResult {
+        if (op == forOp) {
+          return WalkResult::advance();
+        }
+
+        // ops with "ssbuffer.transfer_id" are injected in SplitDataflowPass for data transfer
+        if (op->hasAttr(CVPipeline::kTransferId)) {
+          hasCVInteraction = checkTransferInteraction(op);
+          if (hasCVInteraction) {
+            return WalkResult::interrupt();
+          }
+        }
+
+        return WalkResult::advance();
+      });
+
+      // As long as there is a forOp with "ssbuffer.main_loop" not a real mainloop, 
+      // the processing conditions are not met, need to skip.
+      if (!hasCVInteraction) {
+        allForSatisfy = false;
+        return WalkResult::interrupt();
+      }
+
+      return WalkResult::advance();
+    });
+
+    if (!allForSatisfy) {
+      return WalkResult::interrupt();
+    }
+
+    return WalkResult::advance();
+  });
+
+  return hasMainLoopFor && allForSatisfy;
+}
 
 static LogicalResult verifyMainLoop(ModuleOp module)
 {
@@ -60,6 +149,12 @@ static LogicalResult verifyMainLoop(ModuleOp module)
     CVPipeline::setFallbackAttr(module);
     return failure();
   }
+
+  if (!checkVecScopeMainLoop(module)) {
+    LDBG("[INFO]: No op beside matmul add in vector main loop.");
+    CVPipeline::setFallbackAttr(module);
+    return failure();
+  };
 
   return success();
 }

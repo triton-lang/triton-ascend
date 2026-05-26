@@ -48,10 +48,10 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         hivm.hir.sync_block_set {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 2 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 3
         %alloc_7 = memref.alloc() : memref<128xf32, #hivm.address_space<ub>>
         %memspacecast = memref.memory_space_cast %alloc_7 {ssbuffer.intraDeps = [0 : i32, 1 : i32]} : memref<128xf32, #hivm.address_space<ub>> to memref<128xf32>
-        %7 = bufferization.to_tensor %memspacecast writable : memref<128xf32> to tensor<128xf32>
+        %7 = bufferization.to_tensor %memspacecast writable : memref<128xf32>
         %alloc_8 = memref.alloc() : memref<128xf32, #hivm.address_space<ub>>
         %memspacecast_9 = memref.memory_space_cast %alloc_8 {ssbuffer.intraDeps = [0 : i32, 1 : i32]} : memref<128xf32, #hivm.address_space<ub>> to memref<128xf32>
-        %8 = bufferization.to_tensor %memspacecast_9 writable : memref<128xf32> to tensor<128xf32>
+        %8 = bufferization.to_tensor %memspacecast_9 writable : memref<128xf32>
         // CHECK:       %{{.+}} = arith.subi %c8192_i32
         // CHECK:       %{{.+}} = arith.ceildivui
         // CHECK:       %{{.+}} = arith.muli
@@ -60,7 +60,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         %9:3 = scf.for %arg17 = %c0_i32 to %c8192_i32 step %c128_i32 iter_args(%arg18 = %6, %arg19 = %2, %arg20 = %5) -> (tensor<128xf32>, tensor<128x128xf32>, tensor<128xf32>)  : i32 {
           hivm.hir.sync_block_wait {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 2
           %memspacecast_11 = memref.memory_space_cast %alloc_5 {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32, ssbuffer.crossDeps = [0 : i32, 0 : i32]} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
-          %33 = bufferization.to_tensor %memspacecast_11 restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32> to tensor<128x128xf32>
+          %33 = bufferization.to_tensor %memspacecast_11 restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32>
           %34 = arith.mulf %33, %3 {ssbuffer.block_id = 5 : i32} : tensor<128x128xf32>
           %reduced = linalg.reduce ins(%34 : tensor<128x128xf32>) outs(%5 : tensor<128xf32>) dimensions = [1]  {ssbuffer.block_id = 5 : i32}
             (%in: f32, %init: f32) {
@@ -104,17 +104,17 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
           hivm.hir.sync_block_set {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 0 : i32}[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 1
           hivm.hir.sync_block_wait {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 3
           %memspacecast_16 = memref.memory_space_cast %alloc_6 {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32, ssbuffer.crossDeps = [1, 0]} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
-          %48 = bufferization.to_tensor %memspacecast_16 restrict writable {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32> to tensor<128x128xf32>
+          %48 = bufferization.to_tensor %memspacecast_16 restrict writable {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32>
           %49 = arith.divui %arg17, %c128_i32 {ssbuffer.block_id = 6 : i32} : i32
           %c2_i32_17 = arith.constant {ssbuffer.block_id = 6 : i32} 2 : i32
           %50 = arith.remsi %49, %c2_i32_17 {ssbuffer.block_id = 6 : i32} : i32
           %c0_i32_18 = arith.constant {ssbuffer.block_id = 6 : i32} 0 : i32
           %51 = arith.cmpi eq, %50, %c0_i32_18 {ssbuffer.block_id = 6 : i32} : i32
           %52 = scf.if %51 -> (tensor<128xf32>) {
-            %55 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 6 : i32} : memref<128xf32> to tensor<128xf32>
+            %55 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 6 : i32} : memref<128xf32>
             scf.yield %55 : tensor<128xf32>
           } else {
-            %55 = bufferization.to_tensor %memspacecast_9 restrict writable {ssbuffer.block_id = 6 : i32} : memref<128xf32> to tensor<128xf32>
+            %55 = bufferization.to_tensor %memspacecast_9 restrict writable {ssbuffer.block_id = 6 : i32} : memref<128xf32>
             scf.yield %55 : tensor<128xf32>
           } {ssbuffer.block_id = 6 : i32, ssbuffer.intraDeps = [0 : i32, 0 : i32]}
           %broadcasted_19 = linalg.broadcast ins(%52 : tensor<128xf32>) outs(%1 : tensor<128x128xf32>) dimensions = [1]  {ssbuffer.block_id = 6 : i32}
@@ -149,9 +149,9 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         %30 = arith.index_cast %20 {ssbuffer.block_id = 7 : i32} : i32 to index
         %31 = arith.addi %29, %30 {ssbuffer.block_id = 7 : i32} : index
         %reinterpret_cast_10 = memref.reinterpret_cast %arg6 to offset: [%31], sizes: [128], strides: [1] {ssbuffer.block_id = 7 : i32} : memref<?xf32> to memref<128xf32, strided<[1], offset: ?>>
-        bufferization.materialize_in_destination %26 in writable %reinterpret_cast_10 {ssbuffer.block_id = 7 : i32} : (tensor<128xf32>, memref<128xf32, strided<[1], offset: ?>>) -> ()
+        hivm.hir.copy ins(%26 : tensor<128xf32>) outs(%reinterpret_cast_10 : memref<128xf32, strided<[1], offset: ?>>) {ssbuffer.block_id = 7 : i32}
         %32 = arith.truncf %27 {ssbuffer.block_id = 7 : i32} : tensor<128x128xf32> to tensor<128x128xf16>
-        bufferization.materialize_in_destination %32 in writable %reinterpret_cast {ssbuffer.block_id = 7 : i32} : (tensor<128x128xf16>, memref<128x128xf16, strided<[128, 1], offset: ?>>) -> ()
+        hivm.hir.copy ins(%32 : tensor<128x128xf16>) outs(%reinterpret_cast : memref<128x128xf16, strided<[128, 1], offset: ?>>) {ssbuffer.block_id = 7 : i32}
       } {ssbuffer.block_id = 10 : i32}
       scope.return
     } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
@@ -162,8 +162,13 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         annotation.mark %alloc_5 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<1>, ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
         %alloc_6 = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
         annotation.mark %alloc_6 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<2>, ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
+        %30:2 = scf.for %arg16 = %c0_i32 to %c8192_i32 step %c128_i32 iter_args(%arg17 = %c0_i32, %arg18 = %c0_i32) -> (i32, i32)  : i32 {
+          hivm.hir.sync_block_wait {ssbuffer.block_id = 2 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
+          %48 = hivm.hir.convert_layout %alloc_5 output_shape [64, 128] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 2 : i32, ssbuffer.crossDeps = [1 : i32, 0 : i32], ssbuffer.transfer_id = 1 : i32} : (memref<128x128xf32, #hivm.address_space<ub>>) -> memref<64x128xf32, #hivm.address_space<ub>>
+          scf.yield %arg17, %arg18 : i32, i32
+        } {ssbuffer.block_id = 9 : i32, ssbuffer.main_loop = 0 : i64}
       scope.return
-    } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+   }{hivm.tcore_type = #hivm.tcore_type<CUBE>}
     return {ssbuffer.core_type = "VECTOR"}
   }
 }

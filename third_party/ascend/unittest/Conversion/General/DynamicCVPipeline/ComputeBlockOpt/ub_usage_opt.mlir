@@ -64,4 +64,32 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     
     return
   }
+  
+  // Test 2: Index type dependency - block ID should NOT be changed
+  // CHECK-LABEL: func.func @test_index_dependency
+  func.func @test_index_dependency(%arg0: memref<?xf32> {tt.divisibility = 16 : i32}, %offset: i64) {
+    %cst = arith.constant {ssbuffer.block_id = 20 : i32, ssbuffer.core_type = "VECTOR"} 1.000000e+00 : f32
+    %c0 = arith.constant {ssbuffer.block_id = 20 : i32, ssbuffer.core_type = "VECTOR"} 0 : i32
+    
+    %empty_1d = tensor.empty() {ssbuffer.block_id = 20 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64xf32>
+    %init_1d = linalg.fill {ssbuffer.block_id = 20 : i32, ssbuffer.core_type = "VECTOR"} ins(%cst : f32) outs(%empty_1d : tensor<64xf32>) -> tensor<64xf32>
+    
+    %result = scf.for %iv = %c0 to %c0 step %c0 iter_args(%arg1 = %init_1d) -> (tensor<64xf32>) : i32 {
+      %c1 = arith.constant {ssbuffer.block_id = 21 : i32, ssbuffer.core_type = "VECTOR"} 1 : i32
+      %c2 = arith.constant {ssbuffer.block_id = 21 : i32, ssbuffer.core_type = "VECTOR"} 1 : i32
+      %idx = arith.index_cast %c1 {ssbuffer.block_id = 21 : i32, ssbuffer.core_type = "VECTOR"} : i32 to index
+      
+      // CHECK: arith.addi {{.*}} {ssbuffer.block_id = 22 : i32, ssbuffer.core_type = "VECTOR"} : i32
+      %idx2 = arith.addi %c1, %c2 {ssbuffer.block_id = 22 : i32, ssbuffer.core_type = "VECTOR"} : i32
+      %t1 = arith.mulf %arg1, %arg1 {ssbuffer.block_id = 24 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64xf32>
+      
+      scf.yield %t1 : tensor<64xf32>
+    } {ssbuffer.core_type = "VECTOR, VECTOR"}
+    
+    %out_offset = arith.index_cast %offset {ssbuffer.block_id = 25 : i32, ssbuffer.core_type = "VECTOR"} : i64 to index
+    %reinterpret = memref.reinterpret_cast %arg0 to offset: [%out_offset], sizes: [64], strides: [1] {ssbuffer.block_id = 25 : i32, ssbuffer.core_type = "VECTOR"} : memref<?xf32> to memref<64xf32, strided<[1], offset: ?>>
+    bufferization.materialize_in_destination %result in writable %reinterpret {ssbuffer.block_id = 25 : i32, ssbuffer.core_type = "VECTOR"} : (tensor<64xf32>, memref<64xf32, strided<[1], offset: ?>>) -> ()
+    
+    return
+  }
 }

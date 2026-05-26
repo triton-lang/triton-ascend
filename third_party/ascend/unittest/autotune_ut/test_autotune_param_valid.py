@@ -67,6 +67,7 @@ def _load_autotuner_methods(*method_names):
         "List": List,
         "Optional": Optional,
         "Sequence": Sequence,
+        "Config": triton.Config,
         "valid_axis_names": VALID_AXIS_NAMES,
         "VectorAxes": _load_vector_axes_module().VectorAxes,
     }
@@ -1361,3 +1362,26 @@ def test_expand_simt_num_warps_configs_default_candidates():
 
     assert len(expanded_configs) == 4
     assert [cfg.num_warps for cfg in expanded_configs] == [8, 16, 32, 64]
+
+
+def test_print_autotuning_config_timings_lists_each_config(capsys):
+    method = _normalize_loaded_method(
+        _load_autotuner_methods("_print_autotuning_config_timings")["_print_autotuning_config_timings"]
+    )
+    tuner = SimpleNamespace(print_autotuning=True)
+    timings = {
+        triton.Config({"BLOCK_SIZE": 256}): 0.25,
+        triton.Config({"BLOCK_SIZE": 512}, num_stages=2): [0.125, 0.1, 0.2],
+    }
+
+    method(tuner, timings)
+
+    output = capsys.readouterr().out
+    lines = [line for line in output.splitlines() if "Triton autotuning config timing" in line]
+    assert len(lines) == 2
+    assert "1/2" in lines[0]
+    assert "cost=[0.1250ms, 0.1000ms, 0.2000ms]" in lines[0]
+    assert "BLOCK_SIZE: 512" in lines[0]
+    assert "2/2" in lines[1]
+    assert "cost=0.2500ms" in lines[1]
+    assert "BLOCK_SIZE: 256" in lines[1]

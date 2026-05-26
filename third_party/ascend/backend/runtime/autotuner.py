@@ -2055,6 +2055,28 @@ class AutoTilingTuner(Autotuner):
 
         return valid_configs
 
+    def _print_autotuning_config_timings(self, timings: Dict[Config, object]) -> None:
+        if not self.print_autotuning:
+            return
+
+        def _sort_key(cost):
+            if isinstance(cost, (list, tuple)) and cost:
+                return float(cost[0])
+            return float(cost)
+
+        def _format_cost(cost):
+            if isinstance(cost, (list, tuple)):
+                return "[" + ", ".join(_format_cost(item) for item in cost) + "]"
+            return f"{float(cost):.4f}ms"
+
+        sorted_timings = sorted(timings.items(), key=lambda item: _sort_key(item[1]))
+        total = len(sorted_timings)
+        for index, (config, cost) in enumerate(sorted_timings, start=1):
+            print(
+                "Triton autotuning config timing "
+                f"{index}/{total}: cost={_format_cost(cost)}, config={config};"
+            )
+
     def generate_key_and_configs(self, *args, **kwargs):
         self.nargs = dict(zip(self.arg_names, args))
         self.is_simt_mode = kwargs.get('force_simt_only', False)
@@ -2146,6 +2168,7 @@ class AutoTilingTuner(Autotuner):
                 full_nargs = {**self.nargs, **kwargs, **self.cache[key].all_kwargs()}
                 self.pre_hook(full_nargs, reset_only=True)
                 self.configs_timings = timings
+                self._print_autotuning_config_timings(timings)
                 config = self.cache[key]
             else:
                 config = pruned_configs[0]

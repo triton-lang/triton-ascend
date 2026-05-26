@@ -32,7 +32,6 @@
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/Interfaces/CastInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
@@ -569,17 +568,11 @@ public:
     CVPipeline::MemoryDependenceGraph memGraph(module, aa);
     auto bm = CVPipeline::ComputeBlockIdManager(module);
 
-    llvm::SmallVector<memref::AllocOp> allocOps;
-
     module.walk([&](memref::AllocOp allocOp) {
-      allocOps.push_back(allocOp);
-    });
-    
-    for (memref::AllocOp allocOp: allocOps) {
       if (failed(tryUnifyForAlloc(allocOp, memGraph, bm))) {
         signalPassFailure();
       }
-    }
+    });
 
     LOG_DEBUG("After: " << *module << "\n");
   }

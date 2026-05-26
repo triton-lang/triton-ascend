@@ -104,24 +104,30 @@ class NPULauncher(object):
     def __init__(self, src, metadata):
         self.compile_only = os.getenv("TRITON_COMPILE_ONLY", 'false').lower() in ('true', '1')
         self.enable_msprof_register_tensor = os.getenv("TRITON_REGISTER_TENSOR_MSPROF", 'false').lower() in ('true', '1')
-        debug_mode = metadata.debug
-        header_src = generate_npu_header_src()
-        constants = src.constants if hasattr(src, "constants") else dict()
-        cst_key = lambda i: src.fn.arg_names.index(i) if isinstance(i, str) else i
-        constants = {cst_key(key): value for key, value in constants.items()}
-        signature = {cst_key(key): value for key, value in src.signature.items()}
-        wrapper_src = generate_npu_wrapper_src(constants, signature, metadata)
-        so_launcher_path = make_npu_launcher_stub(header_src, wrapper_src, metadata.debug)
+        self.src = src
+        self.metadata = metadata
+        so_launcher_path = self._make_launcher_stub_path()
         # setup for remote run
         # TODO: use a var to pack all vars required to run on a remote machine
         self.mix_mode = metadata.mix_mode
         self.shared = metadata.shared
-        # initialize launcher
         import importlib.util
         spec = importlib.util.spec_from_file_location("__triton_launcher", so_launcher_path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self.launch = getattr(mod, "launch")
+
+    def _make_launcher_stub_path(self):
+        header_src = generate_npu_header_src()
+        constants = self.src.constants if hasattr(self.src, "constants") else dict()
+        cst_key = lambda i: self.src.fn.arg_names.index(i) if isinstance(i, str) else i
+        constants = {cst_key(key): value for key, value in constants.items()}
+        signature = {cst_key(key): value for key, value in self.src.signature.items()}
+        wrapper_src = generate_npu_wrapper_src(constants, signature, self.metadata)
+        return make_npu_launcher_stub(header_src, wrapper_src, self.metadata.debug)
+
+    def get_launcher_so_path(self):
+        return self._make_launcher_stub_path()
 
     def __call__(self, *args, **kwargs):
         if self.compile_only:

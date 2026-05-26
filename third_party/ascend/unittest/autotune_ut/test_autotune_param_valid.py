@@ -24,7 +24,7 @@ import os
 from collections.abc import Sequence
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pytest
 import torch
@@ -32,10 +32,12 @@ import torch_npu
 import triton
 import triton.backends.ascend.runtime
 import triton.backends.ascend.runtime.autotuner as ascend_autotuner
+from triton.backends.ascend.runtime.tile_generator import KernelMeta
+from triton.backends.ascend.runtime.utils import is_valid_axis_name
 import triton.language as tl
 
 
-VALID_AXIS_NAMES = ["x", "y", "z", "w", "v", "t", "rx", "ry", "rz", "rw", "rv", "rt"]
+VALID_AXIS_NAMES = ["x", "y", "z", "w", "v", "t"]
 AUTOTUNER_PATH = Path(__file__).resolve().parents[2] / "backend" / "runtime" / "autotuner.py"
 VECTOR_AXES_PATH = Path(__file__).resolve().parents[2] / "backend" / "runtime" / "vector_axes.py"
 
@@ -63,6 +65,7 @@ def _load_autotuner_methods(*method_names):
     extracted_module = ast.Module(body=selected, type_ignores=[])
     ast.fix_missing_locations(extracted_module)
     namespace = {
+        "Any": Any,
         "Dict": Dict,
         "List": List,
         "Optional": Optional,
@@ -95,6 +98,7 @@ def _init_axis_state_for_test(
         "_parse_hints_axes",
         "_get_runtime_arg_names_for_hints_axes",
         "_infer_hints_axes_from_key",
+        "_normalize_axis_name_mapping",
         "_rebuild_vector_axes",
         "_get_parser_axis_arg_names",
         "_is_direct_runtime_length_arg_name",
@@ -117,6 +121,14 @@ def _init_axis_state_for_test(
     rebuild_vector_axes = _normalize_loaded_method(namespace.get("_rebuild_vector_axes"))
     if rebuild_vector_axes is not None:
         tuner._rebuild_vector_axes = rebuild_vector_axes.__get__(tuner, SimpleNamespace)
+    normalize_axis_name_mapping = _normalize_loaded_method(
+        namespace.get("_normalize_axis_name_mapping")
+    )
+    if normalize_axis_name_mapping is not None:
+        tuner._normalize_axis_name_mapping = normalize_axis_name_mapping.__get__(
+            tuner,
+            SimpleNamespace,
+        )
     infer_hints_axes_from_key = _normalize_loaded_method(namespace.get("_infer_hints_axes_from_key"))
     if infer_hints_axes_from_key is not None:
         tuner._infer_hints_axes_from_key = infer_hints_axes_from_key.__get__(tuner, SimpleNamespace)
@@ -416,14 +428,60 @@ def test_resolve_axis_length_arg_name_uses_base_vv_axis_expr_for_reduction_axis(
         namespace["_get_parser_axis_arg_names"]
     ).__get__(tuner, SimpleNamespace)
 
-    result = _normalize_loaded_method(namespace["_resolve_axis_length_arg_name"])(tuner, "rx")
+    result = _normalize_loaded_method(namespace["_resolve_axis_length_arg_name"])(tuner, "x")
 
     assert result == "n_elements"
 
 
+def test_is_valid_axis_name_rejects_reduction_prefix():
+    assert is_valid_axis_name("x") is True
+    assert is_valid_axis_name("rx") is False
+
+
+def test_kernel_meta_marks_reduction_axes_from_explicit_list():
+    kernel_meta = KernelMeta(
+        axis_sizes={"x": 128, "y": 64},
+        split_params={"x": "XBLOCK"},
+        fixed_split_params={},
+        tiling_params={"y": "YBLOCK_SUB"},
+        low_dims=["y"],
+        reduction_axes=["y"],
+        dtype=torch.float16,
+        persistent_reduction=True,
+        dual_reduction=False,
+        num_buffers=1,
+        is_simt_mode=False,
+    )
+
+    axis_by_name = {axis.name: axis for axis in kernel_meta.axis_info}
+    assert axis_by_name["x"].is_reduction is False
+    assert axis_by_name["y"].is_reduction is True
+    assert [axis.name for axis in kernel_meta.low_dims_axis] == ["y"]
+
+
+def test_kernel_meta_rejects_prefixed_reduction_axes():
+    with pytest.raises(ValueError, match="reduction axis"):
+        KernelMeta(
+            axis_sizes={"x": 128, "y": 64},
+            split_params={"x": "XBLOCK"},
+            fixed_split_params={},
+            tiling_params={"y": "YBLOCK_SUB"},
+            low_dims=["y"],
+            reduction_axes=["ry"],
+            dtype=torch.float16,
+            persistent_reduction=True,
+            dual_reduction=False,
+            num_buffers=1,
+            is_simt_mode=False,
+        )
+
+
 def test_apply_vv_axis_semantic_result_promotes_internal_axis_map_only():
     namespace = _load_autotuner_methods(
+        "_normalize_reduction_axis_name",
+        "_normalize_reduction_axes",
         "_normalize_vv_reduction_axes",
+        "_get_axis_base_name",
         "_get_parser_axis_arg_names",
         "_is_direct_runtime_length_arg_name",
         "_promote_axis_arg_name_to_reduction",
@@ -449,9 +507,18 @@ def test_apply_vv_axis_semantic_result_promotes_internal_axis_map_only():
         keys=["n_elements"],
         dual_reduction=False,
     )
+    tuner._normalize_reduction_axis_name = _normalize_loaded_method(
+        namespace["_normalize_reduction_axis_name"]
+    )
+    tuner._normalize_reduction_axes = _normalize_loaded_method(
+        namespace["_normalize_reduction_axes"]
+    ).__get__(tuner, SimpleNamespace)
     tuner._normalize_vv_reduction_axes = _normalize_loaded_method(
         namespace["_normalize_vv_reduction_axes"]
     ).__get__(tuner, SimpleNamespace)
+    tuner._get_axis_base_name = _normalize_loaded_method(
+        namespace["_get_axis_base_name"]
+    )
     tuner._get_parser_axis_arg_names = _normalize_loaded_method(
         namespace["_get_parser_axis_arg_names"]
     ).__get__(tuner, SimpleNamespace)
@@ -469,15 +536,47 @@ def test_apply_vv_axis_semantic_result_promotes_internal_axis_map_only():
 
     assert applied is True
     assert tuner.keys == ["n_elements"]
-    assert tuner.axis_arg_names == {"rx": "n_elements"}
-    assert tuner.reduction_axes == ["rx"]
+    assert tuner.axis_arg_names == {"x": "n_elements"}
+    assert tuner.reduction_axes == ["x"]
+
+
+def test_promote_reduction_axis_rejects_prefixed_axis_name():
+    namespace = _load_autotuner_methods(
+        "_get_axis_base_name",
+        "_get_parser_axis_arg_names",
+        "_is_direct_runtime_length_arg_name",
+        "_promote_axis_arg_name_to_reduction",
+    )
+    vector_axes_module = _load_vector_axes_module()
+    vector_axes = vector_axes_module.VectorAxes.from_hints_axes({"y": "r1_numel"})
+    tuner = SimpleNamespace(
+        vector_axes=vector_axes,
+        axis_arg_names={"y": "r1_numel"},
+    )
+    tuner._get_axis_base_name = _normalize_loaded_method(
+        namespace["_get_axis_base_name"]
+    )
+    tuner._get_parser_axis_arg_names = _normalize_loaded_method(
+        namespace["_get_parser_axis_arg_names"]
+    ).__get__(tuner, SimpleNamespace)
+    tuner._is_direct_runtime_length_arg_name = _normalize_loaded_method(
+        namespace["_is_direct_runtime_length_arg_name"]
+    )
+    tuner._promote_axis_arg_name_to_reduction = _normalize_loaded_method(
+        namespace["_promote_axis_arg_name_to_reduction"]
+    ).__get__(tuner, SimpleNamespace)
+
+    with pytest.raises(ValueError, match="r-prefixed"):
+        tuner._promote_axis_arg_name_to_reduction("ry")
 
 
 def test_generate_key_and_configs_uses_axis_arg_names_for_kv_dict():
     namespace = _load_autotuner_methods(
         "_parse_hints_axes",
         "_get_runtime_arg_names_for_hints_axes",
+        "_normalize_axis_name_mapping",
         "_rebuild_vector_axes",
+        "_get_axis_base_name",
         "_get_parser_axis_arg_names",
         "_is_direct_runtime_length_arg_name",
         "_promote_axis_arg_name_to_reduction",
@@ -522,6 +621,12 @@ def test_generate_key_and_configs_uses_axis_arg_names_for_kv_dict():
     tuner._rebuild_vector_axes = _normalize_loaded_method(
         namespace["_rebuild_vector_axes"]
     ).__get__(tuner, SimpleNamespace)
+    tuner._get_axis_base_name = _normalize_loaded_method(
+        namespace["_get_axis_base_name"]
+    )
+    tuner._normalize_axis_name_mapping = _normalize_loaded_method(
+        namespace["_normalize_axis_name_mapping"]
+    ).__get__(tuner, SimpleNamespace)
     tuner._get_parser_axis_arg_names = _normalize_loaded_method(
         namespace["_get_parser_axis_arg_names"]
     ).__get__(tuner, SimpleNamespace)
@@ -556,7 +661,9 @@ def test_generate_key_and_configs_preserves_promoted_reduction_axis_identity():
     namespace = _load_autotuner_methods(
         "_parse_hints_axes",
         "_get_runtime_arg_names_for_hints_axes",
+        "_normalize_axis_name_mapping",
         "_rebuild_vector_axes",
+        "_get_axis_base_name",
         "_get_parser_axis_arg_names",
         "_is_direct_runtime_length_arg_name",
         "_promote_axis_arg_name_to_reduction",
@@ -595,6 +702,12 @@ def test_generate_key_and_configs_preserves_promoted_reduction_axis_identity():
     tuner._rebuild_vector_axes = _normalize_loaded_method(
         namespace["_rebuild_vector_axes"]
     ).__get__(tuner, SimpleNamespace)
+    tuner._get_axis_base_name = _normalize_loaded_method(
+        namespace["_get_axis_base_name"]
+    )
+    tuner._normalize_axis_name_mapping = _normalize_loaded_method(
+        namespace["_normalize_axis_name_mapping"]
+    ).__get__(tuner, SimpleNamespace)
     tuner._get_parser_axis_arg_names = _normalize_loaded_method(
         namespace["_get_parser_axis_arg_names"]
     ).__get__(tuner, SimpleNamespace)
@@ -623,7 +736,154 @@ def test_generate_key_and_configs_preserves_promoted_reduction_axis_identity():
     )
 
     assert tuner.keys == ["n_elements"]
-    assert captured["kv_dict"] == {"rx": 23}
+    assert captured["kv_dict"] == {"x": 23}
+
+
+def test_refresh_vector_axes_keeps_base_axis_arg_names_without_reduction_aliases():
+    namespace = _load_autotuner_methods(
+        "_parse_hints_axes",
+        "_get_runtime_arg_names_for_hints_axes",
+        "_normalize_axis_name_mapping",
+        "_rebuild_vector_axes",
+        "_get_axis_base_name",
+        "_get_parser_axis_arg_names",
+        "_is_direct_runtime_length_arg_name",
+        "_promote_axis_arg_name_to_reduction",
+        "_refresh_vector_axes",
+        "_init_axis_params",
+        "generate_key_and_configs",
+    )
+    captured = {}
+
+    class FakeArg:
+        dtype = "float16"
+
+    namespace["get_byte_per_numel"] = lambda dtype: 0 if dtype is None else 1
+    namespace["_expand_configs_with_hints"] = lambda fn, configs, config_hints: configs
+
+    tuner = SimpleNamespace(
+        arg_names=["x_ptr", "n_elements"],
+        fn=SimpleNamespace(),
+        _get_constexpr_candidates=lambda: [],
+        cache={},
+        auto_gen_config=True,
+        parser_mode="vector",
+        config_hints={},
+        gen_configs=[],
+        user_configs=[],
+        is_simt_mode=False,
+        user_specified_warps=None,
+        user_specified_multibuffer=None,
+        _autoparse_axis_params=lambda all_args: None,
+        _gen_tile_configs=lambda kv_dict, dtype, all_args: captured.update(kv_dict=dict(kv_dict))
+        or setattr(tuner, "gen_configs", [SimpleNamespace(kwargs={"BLOCK_SIZE": 128})]),
+    )
+    tuner._parse_hints_axes = _normalize_loaded_method(namespace["_parse_hints_axes"]).__get__(tuner, SimpleNamespace)
+    tuner._get_runtime_arg_names_for_hints_axes = _normalize_loaded_method(
+        namespace["_get_runtime_arg_names_for_hints_axes"]
+    ).__get__(tuner, SimpleNamespace)
+    tuner._rebuild_vector_axes = _normalize_loaded_method(
+        namespace["_rebuild_vector_axes"]
+    ).__get__(tuner, SimpleNamespace)
+    tuner._get_axis_base_name = _normalize_loaded_method(
+        namespace["_get_axis_base_name"]
+    )
+    tuner._normalize_axis_name_mapping = _normalize_loaded_method(
+        namespace["_normalize_axis_name_mapping"]
+    ).__get__(tuner, SimpleNamespace)
+    tuner._get_parser_axis_arg_names = _normalize_loaded_method(
+        namespace["_get_parser_axis_arg_names"]
+    ).__get__(tuner, SimpleNamespace)
+    tuner._is_direct_runtime_length_arg_name = _normalize_loaded_method(
+        namespace["_is_direct_runtime_length_arg_name"]
+    )
+    tuner._promote_axis_arg_name_to_reduction = _normalize_loaded_method(
+        namespace["_promote_axis_arg_name_to_reduction"]
+    ).__get__(tuner, SimpleNamespace)
+    tuner._refresh_vector_axes = _normalize_loaded_method(
+        namespace["_refresh_vector_axes"]
+    ).__get__(tuner, SimpleNamespace)
+
+    _normalize_loaded_method(namespace["_init_axis_params"])(
+        tuner,
+        ["n_elements"],
+        None,
+        None,
+        None,
+        None,
+        {"x": "n_elements"},
+    )
+
+    tuner.reduction_axes = []
+    tuner._refresh_vector_axes()
+
+    _normalize_loaded_method(namespace["generate_key_and_configs"])(
+        tuner,
+        FakeArg(),
+        29,
+    )
+
+    assert tuner.axis_arg_names == {"x": "n_elements"}
+    assert captured["kv_dict"] == {"x": 29}
+
+
+def test_legacy_low_dim_and_tiling_parsers_consume_base_axis_names():
+    namespace = _load_autotuner_methods(
+        "_get_axis_base_name",
+        "_normalize_axis_name_mapping",
+        "_autoparse_tiling_params",
+        "_autoparse_low_dim_axes",
+    )
+    parser_inputs = {}
+
+    class StubTilingAxesParser:
+        def __init__(self, func_ast, axis_arg_names, candidates_params):
+            parser_inputs["tiling"] = dict(axis_arg_names)
+
+        def parse(self):
+            return {"x": "X0BLOCK_SUB", "y": "R1BLOCK_SUB"}
+
+    class StubLowDimsAxesParser:
+        def __init__(self, func_ast, axis_arg_names):
+            parser_inputs["low_dim"] = dict(axis_arg_names)
+
+        def parse(self):
+            return ["y"]
+
+    namespace["TilingAxesParser"] = StubTilingAxesParser
+    namespace["LowDimsAxesParser"] = StubLowDimsAxesParser
+
+    refresh_calls = []
+    tuner = SimpleNamespace(
+        fn=SimpleNamespace(parse=lambda: "fake-func-ast"),
+        print_autotuning=False,
+        tiling_params={},
+        low_dim_axes=[],
+        _get_parser_axis_arg_names=lambda: {"x": "x0_numel", "y": "r1_numel"},
+        _refresh_vector_axes=lambda: refresh_calls.append(True),
+    )
+    tuner._get_axis_base_name = _normalize_loaded_method(
+        namespace["_get_axis_base_name"]
+    )
+    tuner._normalize_axis_name_mapping = _normalize_loaded_method(
+        namespace["_normalize_axis_name_mapping"]
+    ).__get__(tuner, SimpleNamespace)
+
+    tiling_params = _normalize_loaded_method(namespace["_autoparse_tiling_params"])(
+        tuner,
+        ["X0BLOCK_SUB", "R1BLOCK_SUB"],
+    )
+    low_dim_axes = _normalize_loaded_method(namespace["_autoparse_low_dim_axes"])(
+        tuner
+    )
+
+    assert parser_inputs["tiling"] == {"x": "x0_numel", "y": "r1_numel"}
+    assert parser_inputs["low_dim"] == {"x": "x0_numel", "y": "r1_numel"}
+    assert tiling_params == {"x": "X0BLOCK_SUB", "y": "R1BLOCK_SUB"}
+    assert tuner.tiling_params == {"x": "X0BLOCK_SUB", "y": "R1BLOCK_SUB"}
+    assert low_dim_axes == ["y"]
+    assert tuner.low_dim_axes == ["y"]
+    assert refresh_calls == [True, True]
 
 
 def test_parse_vv_axis_info_v2_collects_fixed_tiling_expr_for_provided_constexpr():
@@ -1361,3 +1621,75 @@ def test_expand_simt_num_warps_configs_default_candidates():
 
     assert len(expanded_configs) == 4
     assert [cfg.num_warps for cfg in expanded_configs] == [8, 16, 32, 64]
+
+
+@pytest.mark.parametrize(
+    "axis",
+    [
+        "x",
+        "y",
+        "z",
+    ],
+)
+def test_normalize_reduction_axis_name_accepts_base_axes_only(axis):
+    namespace = _load_autotuner_methods("_normalize_reduction_axis_name")
+
+    result = _normalize_loaded_method(namespace["_normalize_reduction_axis_name"])(axis)
+
+    assert result == axis
+
+
+@pytest.mark.parametrize("axis", ["rx", "ry", "rry"])
+def test_normalize_reduction_axis_name_rejects_prefixed_axes(axis):
+    namespace = _load_autotuner_methods("_normalize_reduction_axis_name")
+
+    with pytest.raises(ValueError, match="r-prefixed"):
+        _normalize_loaded_method(namespace["_normalize_reduction_axis_name"])(axis)
+
+
+def test_autoparse_reduction_axes_rejects_prefixed_parser_output():
+    namespace = _load_autotuner_methods(
+        "_normalize_reduction_axis_name",
+        "_normalize_reduction_axes",
+        "_get_axis_base_name",
+        "_autoparse_reduction_axes",
+    )
+
+    class StubReductionAxesParser:
+        def __init__(self, func_ast, axis_arg_names):
+            self.func_ast = func_ast
+            self.axis_arg_names = axis_arg_names
+
+        def parse(self):
+            return ["ry"]
+
+    namespace["ReductionAxesParser"] = StubReductionAxesParser
+
+    promoted_axes = []
+    refresh_calls = []
+
+    tuner = SimpleNamespace(
+        fn=SimpleNamespace(parse=lambda: "fake-func-ast"),
+        axis_arg_names={"x": "seq_len", "y": "dim"},
+        reduction_axes=[],
+        print_autotuning=False,
+        _get_parser_axis_arg_names=lambda: {"x": "seq_len", "y": "dim"},
+        _promote_axis_arg_name_to_reduction=lambda axis: promoted_axes.append(axis),
+        _refresh_vector_axes=lambda: refresh_calls.append(True),
+    )
+    tuner._get_axis_base_name = _normalize_loaded_method(
+        namespace["_get_axis_base_name"]
+    )
+    tuner._normalize_reduction_axis_name = _normalize_loaded_method(
+        namespace["_normalize_reduction_axis_name"]
+    )
+    tuner._normalize_reduction_axes = _normalize_loaded_method(
+        namespace["_normalize_reduction_axes"]
+    ).__get__(tuner, SimpleNamespace)
+
+    with pytest.raises(ValueError, match="r-prefixed"):
+        _normalize_loaded_method(namespace["_autoparse_reduction_axes"])(tuner)
+
+    assert promoted_axes == []
+    assert tuner.reduction_axes == []
+    assert refresh_calls == []

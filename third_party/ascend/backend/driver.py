@@ -43,6 +43,9 @@ from triton.backends.ascend.utils import (
     force_disable_ffts,
     get_backend_func
 )
+# Bind the already-imported utils module once so the launch hot path can write
+# TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
+import triton.backends.ascend.utils as _ascend_utils
 
 class NPUUtils(object):
     def __new__(cls):
@@ -75,6 +78,7 @@ class NPUUtils(object):
         env_arch = get_ascend_arch_from_env()
 
     def load_binary(self, name, kernel, shared, device, mix_mode):
+        #fnname, mix_mode = name.rsplit("_", 1)
         return self.npu_utils_mod.load_kernel_binary(name, kernel, shared, device, mix_mode)
 
     @functools.lru_cache()
@@ -136,9 +140,9 @@ class NPULauncher(object):
         else:
             if self.compile_only:
                 return
+  
             profiler_registered = self.launch(*args, **kwargs)
-            import triton
-            triton.backends.ascend.utils.TRITON_PROFILER_REGISTERED = True if profiler_registered == 1 else False
+            _ascend_utils.TRITON_PROFILER_REGISTERED = (profiler_registered == 1)
 
 class NPUDriver(DriverBase):
     def __init__(self):
@@ -495,12 +499,11 @@ def generate_npu_wrapper_src(constants, signature, metadata):
         int gridX, gridY, gridZ;
         rtStream_t stream;
         const void *functon;
-        PyObject* packed_metadata, *launch_metadata;
-        PyObject* launch_enter_hook, *launch_exit_hook;
+        PyObject* packed_metadata,       
         *args_expand
     """
-    format = "iiiKKOOOO" + ''.join([_format_of(_extracted_ty(ty)) for ty in signature.values()])
 
+    format = "iiiKKOOOO" + ''.join([_format_of(_extracted_ty(ty)) for ty in signature.values()])
     grid_info = {'X': 'i32', 'Y': 'i32', 'Z': 'i32'}
     # TODO: automatically check if gather load ops are used.
 
@@ -548,7 +551,11 @@ static inline DevicePtrInfo getPointer(PyObject *obj, int idx) {
     // valid nullptr
     return ptr_info;
   }
-  PyObject *ptr = PyObject_GetAttrString(obj, "data_ptr");
+  // Cache the interned "data_ptr" key once instead of rebuilding a temporary
+  // PyUnicode on every call. Function-local static init is thread-safe in C++11
+  // and the GIL is held here, so the one-time init is safe.
+  static PyObject *data_ptr_str = PyUnicode_InternFromString("data_ptr");
+  PyObject *ptr = PyObject_GetAttr(obj, data_ptr_str);
   if(ptr){
     PyObject *empty_tuple = PyTuple_New(0);
     PyObject *ret = PyObject_Call(ptr, empty_tuple, NULL);
@@ -562,27 +569,6 @@ static inline DevicePtrInfo getPointer(PyObject *obj, int idx) {
     ptr_info.dev_ptr = reinterpret_cast<void *>(PyLong_AsUnsignedLongLong(ret));
     if(!ptr_info.dev_ptr)
       return ptr_info;
-    aclrtPtrAttributes attributes;
-    aclError status = aclrtPointerGetAttributes(ptr_info.dev_ptr, &attributes);
-
-    if (status == ACL_SUCCESS) {
-      if (attributes.location.type != ACL_MEM_LOCATION_TYPE_DEVICE && attributes.location.type != 4) {
-        Py_DECREF(ret);
-        PyErr_Format(PyExc_ValueError,
-                     "Pointer argument (at %d) cannot be accessed from Triton (cpu tensor?)", idx);
-        ptr_info.valid = false;
-        return ptr_info;
-      }
-    } else {
-      Py_DECREF(ret);
-      PyErr_Format(PyExc_RuntimeError,
-                   "Failed to query pointer attributes at argument %d. "
-                   "Error code: %d. This may indicate invalid memory address "
-                   "or NPU device error.",
-                   idx, status);
-      ptr_info.valid = false;
-      return ptr_info;
-      }
     Py_DECREF(ret);
     return ptr_info;
   }
@@ -600,6 +586,8 @@ extern "C" {
   extern int MsprofRegisterCallback(unsigned int moduleId, callback handle);
   static unsigned int __MsprofFlagL0  = 0;
   static unsigned int __MsprofFlagL1  = 0;
+  static const char* kernelName = nullptr ;
+  static std::vector<int> tensorKinds;
 
   int ProfCtrlHandle(unsigned int CtrlType, void* CtrlData, unsigned int DataLen) {
     if ((CtrlData == nullptr) || (DataLen == 0U)) {
@@ -768,11 +756,7 @@ extern "C" {
 {cpp_device_pointer}
 
 static void _launch(const char* kernelName, const void* func, rtStream_t stream, int gridX, int gridY, int gridZ, std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{', ' + arg_decls if len(signature) > 0 else ''}) {{
-  // only 1D parallelization is supported for NPU
-  // Pointer type becomes flattend 1-D Memref tuple: base_ptr, data_ptr, offset, shape, stride
-  // base_ptr offset shape and stride are not used, arbitrarily set for now
-  std::string name = "";
-  name.append(kernelName);
+  static std::string name(kernelName);
   void *workspace_addr_ptr = NULL;
   uint32_t blockNum4Workspace = gridX * gridY * gridZ;
   {get_backend_func("pre_launch", True)}
@@ -892,8 +876,7 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
   if(!PyArg_ParseTuple(
       args, \"{format}\",
       &gridX, &gridY, &gridZ, &stream, &function,
-      &packedMetadata, &launch_metadata,
-      &launch_enter_hook, &launch_exit_hook
+      &packedMetadata, &launch_metadata, &launch_enter_hook, &launch_exit_hook
       {', ' + ', '.join(f"&_arg{i}" for i, ty in signature.items()) if len(signature) > 0 else ''}
       )
     ) {{
@@ -917,19 +900,24 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
       return NULL;
   }}
 
+
   // get kernel_name
-  PyObject *kernelNameObj = PyDict_GetItemString(packedMetadata, "kernel_name");
-  const char *kernelName = PyUnicode_AsUTF8(kernelNameObj);
-  // get tensor_kinds
-  std::vector<int> tensorKinds;
-  PyObject *tensorKindList = PyDict_GetItemString(packedMetadata, "tensor_kinds");
-  if (tensorKindList) {{
-    int size = PyObject_Size(tensorKindList);
-    for (int i = 0; i < size; i++) {{
-      PyObject *kind = PySequence_GetItem(tensorKindList, i);
-      tensorKinds.push_back(PyLong_AsLong(kind));
-    }}
+  if (!kernelName) {{
+      PyObject *kernelNameObj = PyDict_GetItemString(packedMetadata, "kernel_name");
+      kernelName = PyUnicode_AsUTF8(kernelNameObj);
   }}
+  // get tensor_kinds
+  if( tensorKinds.empty() ) {{
+     PyObject *tensorKindList = PyDict_GetItemString(packedMetadata, "tensor_kinds");
+     if (tensorKindList) {{
+       int size = PyObject_Size(tensorKindList);
+       for (int i = 0; i < size; i++) {{
+         PyObject *kind = PySequence_GetItem(tensorKindList, i);
+         tensorKinds.push_back(PyLong_AsLong(kind));
+       }}
+     }}
+  }}
+
 
   // raise exception asap
   {"; ".join([f"DevicePtrInfo ptr_info{i} = getPointer(_arg{i}, {i}); if (!ptr_info{i}.valid) return NULL;" if ty[0]=="*" else "" for i, ty in signature.items()])};

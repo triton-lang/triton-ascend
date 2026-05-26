@@ -91,7 +91,7 @@ def test_npu_launcher_exposes_launcher_so_path(
 
     launcher = driver.NPULauncher(src, metadata)
 
-    assert launcher.launcher_so_path == "/tmp/fake_launcher.so"
+    assert launcher.so_launcher_path == "/tmp/fake_launcher.so"
     assert mock_launcher_stub.call_count == 1
     assert launcher.get_launcher_so_path() == "/tmp/fake_launcher.so"
     assert mock_header_src.call_count == 1

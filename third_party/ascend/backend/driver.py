@@ -110,13 +110,13 @@ class NPULauncher(object):
         self.enable_msprof_register_tensor = os.getenv("TRITON_REGISTER_TENSOR_MSPROF", 'false').lower() in ('true', '1')
         self.src = src
         self.metadata = metadata
-        self.launcher_so_path = self._make_launcher_stub_path()
+        self.so_launcher_path = self._make_launcher_stub_path()
         # setup for remote run
         # TODO: use a var to pack all vars required to run on a remote machine
         self.mix_mode = metadata.mix_mode
         self.shared = metadata.shared
         import importlib.util
-        spec = importlib.util.spec_from_file_location("__triton_launcher", self.launcher_so_path)
+        spec = importlib.util.spec_from_file_location("__triton_launcher", self.so_launcher_path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self.launch = getattr(mod, "launch")
@@ -131,7 +131,7 @@ class NPULauncher(object):
         return make_npu_launcher_stub(header_src, wrapper_src, self.metadata.debug)
 
     def get_launcher_so_path(self):
-        return self.launcher_so_path
+        return self.so_launcher_path
 
     def __call__(self, *args, **kwargs):
         if self.compile_only:

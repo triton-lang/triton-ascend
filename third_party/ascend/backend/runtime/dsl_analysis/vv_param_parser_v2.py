@@ -1655,14 +1655,12 @@ def _collect_reduction_axis_indices(func_node: ast.AST, axis_count: int) -> List
     return result
 
 
-def _axis_sort_key(axis_name: str) -> Tuple[int, int, str]:
-    is_reduction = axis_name.startswith("r")
-    base = axis_name[1:] if is_reduction else axis_name
+def _axis_sort_key(axis_name: str) -> Tuple[int, str]:
     try:
-        axis_index = _VALID_AXIS_NAMES.index(base)
+        axis_index = _VALID_AXIS_NAMES.index(axis_name)
     except ValueError:
         axis_index = len(_VALID_AXIS_NAMES)
-    return (axis_index, 1 if is_reduction else 0, axis_name)
+    return (axis_index, axis_name)
 
 
 def _choose_best_site_evidence(

@@ -581,52 +581,9 @@ class AutoTilingTuner(Autotuner):
 
     def _refresh_vector_axes(self) -> None:
         self.vector_axes = self._rebuild_vector_axes()
-        self._sync_reduction_axis_arg_aliases()
         self.axis_arg_names = self._get_parser_axis_arg_names()
 
-    def _sync_reduction_axis_arg_aliases(self) -> None:
-        def resolve_base_axis(axis_name):
-            resolver = getattr(self, "_get_axis_base_name", None)
-            if callable(resolver):
-                return resolver(axis_name)
-            if not isinstance(axis_name, str) or not axis_name:
-                return None
-            candidate = axis_name
-            while candidate.startswith("r") and len(candidate) > 1:
-                candidate = candidate[1:]
-            return candidate
-
-        vector_axes = getattr(self, "vector_axes", None)
-        axis_length_exprs = {}
-        if vector_axes is not None:
-            axis_length_exprs = dict(getattr(vector_axes, "axis_length_exprs", {}) or {})
-
-        synced_aliases = {}
-        for reduction_axis in list(getattr(self, "reduction_axes", []) or []):
-            if not isinstance(reduction_axis, str) or not reduction_axis.startswith("r"):
-                continue
-            base_axis = resolve_base_axis(reduction_axis)
-            if not isinstance(base_axis, str) or not base_axis:
-                continue
-            axis_arg_name = axis_length_exprs.get(base_axis, None)
-            if not self._is_direct_runtime_length_arg_name(axis_arg_name):
-                continue
-            synced_aliases[f"r{base_axis}"] = axis_arg_name
-
-        self.reduction_axis_arg_aliases = synced_aliases
-
     def _get_parser_axis_arg_names(self) -> Dict[str, str]:
-        def resolve_base_axis(axis_name):
-            resolver = getattr(self, "_get_axis_base_name", None)
-            if callable(resolver):
-                return resolver(axis_name)
-            if not isinstance(axis_name, str) or not axis_name:
-                return None
-            candidate = axis_name
-            while candidate.startswith("r") and len(candidate) > 1:
-                candidate = candidate[1:]
-            return candidate
-
         axis_arg_names = {}
         if self.vector_axes is not None:
             axis_arg_names.update(
@@ -637,25 +594,6 @@ class AutoTilingTuner(Autotuner):
                 }
             )
 
-            for reduction_axis in self.vector_axes.reduction_axes:
-                if not isinstance(reduction_axis, str) or not reduction_axis.startswith("r"):
-                    continue
-                base_axis = resolve_base_axis(reduction_axis)
-                if not isinstance(base_axis, str) or not base_axis:
-                    continue
-                base_arg_name = axis_arg_names.get(base_axis, None)
-                if base_arg_name is not None:
-                    axis_arg_names.setdefault(f"r{base_axis}", base_arg_name)
-
-        reduction_axis_arg_aliases = getattr(self, "reduction_axis_arg_aliases", {}) or {}
-        axis_arg_names.update(reduction_axis_arg_aliases)
-        for reduction_axis, arg_name in reduction_axis_arg_aliases.items():
-            if not isinstance(reduction_axis, str) or not reduction_axis.startswith("r"):
-                continue
-            base_axis = reduction_axis[1:]
-            if axis_arg_names.get(base_axis, None) == arg_name:
-                axis_arg_names.pop(base_axis, None)
-
         return axis_arg_names
 
     def _promote_axis_arg_name_to_reduction(self, axis):
@@ -664,19 +602,11 @@ class AutoTilingTuner(Autotuner):
             return
         if self.vector_axes is None:
             self.vector_axes = self._rebuild_vector_axes()
-        reduction_axis = "r{}".format(axis)
         axis_arg_name = self.vector_axes.axis_length_exprs.get(axis, None)
-        if axis_arg_name is None:
-            axis_arg_name = self.vector_axes.axis_length_exprs.get(reduction_axis, None)
         self.vector_axes.ensure_axis(axis)
         if axis_arg_name is not None:
             self.vector_axes.ensure_axis(axis).length_expr = axis_arg_name
-            if reduction_axis in self.vector_axes.axes:
-                self.vector_axes.ensure_axis(reduction_axis).length_expr = None
         self.vector_axes.apply_semantic_fields(reduction_axes=[axis])
-        sync_aliases = getattr(self, "_sync_reduction_axis_arg_aliases", None)
-        if callable(sync_aliases):
-            sync_aliases()
         self.axis_arg_names = self._get_parser_axis_arg_names()
 
     def _init_axis_params(self, key, split_params, tiling_params, low_dim_axes, reduction_axes, hints_axes=None):
@@ -741,8 +671,6 @@ class AutoTilingTuner(Autotuner):
         self.vv_adapter_result_v2 = None
         self.vv_gap_fill_report_v2 = None
         self.vector_axes = self._rebuild_vector_axes()
-        self.reduction_axis_arg_aliases = {}
-        self._sync_reduction_axis_arg_aliases()
         self.axis_arg_names = self._get_parser_axis_arg_names()
 
     def _autoparse_axis_params(self, all_args):
@@ -1153,21 +1081,29 @@ class AutoTilingTuner(Autotuner):
             )
 
     @staticmethod
+    def _require_base_axis_name(axis: Optional[str]) -> Optional[str]:
+        if not isinstance(axis, str) or not axis:
+            return None
+        if axis.startswith("r"):
+            raise ValueError(
+                "r-prefixed axis names are not supported; "
+                f"use the base axis name instead of '{axis}'."
+            )
+        if axis not in valid_axis_names:
+            raise ValueError(f"Unsupported axis name '{axis}'.")
+        return axis
+
+    @staticmethod
     def _normalize_reduction_axis_name(axis: Optional[str]) -> Optional[str]:
         if not isinstance(axis, str) or not axis:
             return None
-        base_axis_names = {
-            name
-            for name in valid_axis_names
-            if isinstance(name, str) and name and not name.startswith("r")
-        }
-        if axis in base_axis_names:
-            return axis
-        candidate = axis
-        while candidate.startswith("r") and len(candidate) > 1:
-            candidate = candidate[1:]
-            if candidate in base_axis_names:
-                return candidate
+        if axis.startswith("r"):
+            raise ValueError(
+                "r-prefixed axis names are not supported; "
+                f"use the base axis name instead of '{axis}'."
+            )
+        if axis not in valid_axis_names:
+            raise ValueError(f"Unsupported axis name '{axis}'.")
         return axis
 
     def _normalize_reduction_axes(self, reduction_axes: List[str]) -> List[str]:
@@ -1185,20 +1121,9 @@ class AutoTilingTuner(Autotuner):
         self,
         axis_mapping: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        def resolve_base_axis(axis_name):
-            resolver = getattr(self, "_get_axis_base_name", None)
-            if callable(resolver):
-                return resolver(axis_name)
-            if not isinstance(axis_name, str) or not axis_name:
-                return None
-            candidate = axis_name
-            while candidate.startswith("r") and len(candidate) > 1:
-                candidate = candidate[1:]
-            return candidate
-
         normalized = {}
         for axis, value in dict(axis_mapping or {}).items():
-            base_axis = resolve_base_axis(axis)
+            base_axis = self._get_axis_base_name(axis)
             if not isinstance(base_axis, str) or not base_axis:
                 continue
             normalized.setdefault(base_axis, value)
@@ -1208,20 +1133,9 @@ class AutoTilingTuner(Autotuner):
         self,
         axis_names: Optional[List[str]],
     ) -> List[str]:
-        def resolve_base_axis(axis_name):
-            resolver = getattr(self, "_get_axis_base_name", None)
-            if callable(resolver):
-                return resolver(axis_name)
-            if not isinstance(axis_name, str) or not axis_name:
-                return None
-            candidate = axis_name
-            while candidate.startswith("r") and len(candidate) > 1:
-                candidate = candidate[1:]
-            return candidate
-
         normalized = []
         for axis in list(axis_names or []):
-            base_axis = resolve_base_axis(axis)
+            base_axis = self._get_axis_base_name(axis)
             if not isinstance(base_axis, str) or not base_axis:
                 continue
             if base_axis not in normalized:
@@ -1232,19 +1146,14 @@ class AutoTilingTuner(Autotuner):
     def _get_axis_base_name(axis: Optional[str]) -> Optional[str]:
         if not isinstance(axis, str) or not axis:
             return None
-        base_axis_names = {
-            name
-            for name in valid_axis_names
-            if isinstance(name, str) and name and not name.startswith("r")
-        }
-        if axis in base_axis_names:
-            return axis
-        candidate = axis
-        while candidate.startswith("r") and len(candidate) > 1:
-            candidate = candidate[1:]
-            if candidate in base_axis_names:
-                return candidate
-        return axis[1:] if axis.startswith("r") else axis
+        if axis.startswith("r"):
+            raise ValueError(
+                "r-prefixed axis names are not supported; "
+                f"use the base axis name instead of '{axis}'."
+            )
+        if axis not in valid_axis_names:
+            raise ValueError(f"Unsupported axis name '{axis}'.")
+        return axis
 
     def _apply_vv_axis_semantic_result(self) -> bool:
         def resolve_base_axis(axis_name):
@@ -1253,10 +1162,12 @@ class AutoTilingTuner(Autotuner):
                 return resolver(axis_name)
             if not isinstance(axis_name, str) or not axis_name:
                 return None
-            candidate = axis_name
-            while candidate.startswith("r") and len(candidate) > 1:
-                candidate = candidate[1:]
-            return candidate
+            if axis_name.startswith("r"):
+                raise ValueError(
+                    "r-prefixed axis names are not supported; "
+                    f"use the base axis name instead of '{axis_name}'."
+                )
+            return axis_name
 
         def normalize_axis_name_mapping(axis_mapping):
             normalizer = getattr(self, "_normalize_axis_name_mapping", None)
@@ -1480,8 +1391,6 @@ class AutoTilingTuner(Autotuner):
                 getattr(self.vv_adapter_result_v2, "axis_length_exprs", {}) or {}
             )
         axis_expr = axis_length_exprs.get(axis, None)
-        if axis_expr is None and isinstance(axis, str) and axis.startswith("r"):
-            axis_expr = axis_length_exprs.get(axis[1:], None)
         if self._is_direct_runtime_length_arg_name(axis_expr):
             return axis_expr
         parser_axis_arg_names = self._get_parser_axis_arg_names()
@@ -1550,42 +1459,6 @@ class AutoTilingTuner(Autotuner):
             "reduction_axes": vector_axes.reduction_axes,
             "axis_pid_dims": vector_axes.axis_pid_dims,
             "diagnostics": diagnostics,
-        }
-
-    def _convert_reduction_axes_for_legacy_tile_generator(
-        self,
-        vector_tile_inputs: Dict[str, object],
-    ) -> Dict[str, object]:
-        reduction_base_axes = {
-            self._get_axis_base_name(axis)
-            for axis in list(vector_tile_inputs.get("reduction_axes", []) or [])
-        }
-        reduction_base_axes = {
-            axis for axis in reduction_base_axes
-            if isinstance(axis, str) and axis
-        }
-
-        def legacy_axis_name(axis):
-            base_axis = self._get_axis_base_name(axis)
-            if base_axis in reduction_base_axes:
-                return "r{}".format(base_axis)
-            return axis
-
-        def map_axis_dict(axis_dict):
-            return {
-                legacy_axis_name(axis): value
-                for axis, value in dict(axis_dict or {}).items()
-            }
-
-        return {
-            "axis_sizes": map_axis_dict(vector_tile_inputs.get("axis_sizes", {})),
-            "split_params": map_axis_dict(vector_tile_inputs.get("split_params", {})),
-            "fixed_split_params": map_axis_dict(getattr(self, "fixed_split_params", {})),
-            "tiling_params": map_axis_dict(vector_tile_inputs.get("tiling_params", {})),
-            "low_dim_axes": [
-                legacy_axis_name(axis)
-                for axis in list(vector_tile_inputs.get("low_dim_axes", []) or [])
-            ],
         }
 
     def _apply_fixed_grid_semantics(
@@ -1867,19 +1740,14 @@ class AutoTilingTuner(Autotuner):
         if not param_upper:
             return 0
 
-        axis_lower = axis_name.lower()
-        is_reduction_axis = axis_lower.startswith("r")
-        axis_base = axis_lower[1:] if is_reduction_axis else axis_lower
-        if not axis_base:
+        axis_token = axis_name.upper()
+        if not axis_token:
             return 0
 
-        axis_token = ("R" + axis_base.upper()) if is_reduction_axis else axis_base.upper()
         if param_upper.startswith(axis_token):
             return 100
         if "_{}_".format(axis_token) in "_{}_".format(param_upper):
             return 80
-        if is_reduction_axis and axis_token in param_upper:
-            return 60
         return 0
 
     @staticmethod
@@ -1972,12 +1840,10 @@ class AutoTilingTuner(Autotuner):
                     param_name,
                     anchor_map.get(axis, None),
                 )
-                non_reduction_bonus = 1 if not axis.startswith("r") else 0
                 order_score = -axis_order.get(axis, 0)
                 score = (
                     axis_name_score,
                     anchor_score,
-                    non_reduction_bonus,
                     order_score,
                 )
                 if best_score is None or score > best_score:
@@ -2149,16 +2015,14 @@ class AutoTilingTuner(Autotuner):
         from .tile_generator import KernelMeta, TileGenerator
 
         vector_tile_inputs = self._materialize_vector_tile_inputs(kv_dict, all_args)
-        legacy_tile_inputs = self._convert_reduction_axes_for_legacy_tile_generator(
-            vector_tile_inputs
-        )
 
         kernel_meta = KernelMeta(
-            legacy_tile_inputs["axis_sizes"],
-            legacy_tile_inputs["split_params"],
-            legacy_tile_inputs["fixed_split_params"],
-            legacy_tile_inputs["tiling_params"],
-            legacy_tile_inputs["low_dim_axes"],
+            vector_tile_inputs["axis_sizes"],
+            vector_tile_inputs["split_params"],
+            self.fixed_split_params,
+            vector_tile_inputs["tiling_params"],
+            vector_tile_inputs["low_dim_axes"],
+            vector_tile_inputs["reduction_axes"],
             dtype,
             self.persistent_reduction,
             self.dual_reduction,
@@ -2315,20 +2179,10 @@ class AutoTilingTuner(Autotuner):
         if key not in self.cache:
             if self.auto_gen_config:
                 self.cv_parse_result = self._autoparse_axis_params(all_args)
-                reduction_aliases = {
-                    axis for axis, arg_name in self.axis_arg_names.items()
-                    if isinstance(axis, str)
-                    and axis.startswith("r")
-                    and self.axis_arg_names.get(axis[1:], None) == arg_name
-                }
                 _kv_dict = {
                     axis: _args[arg_name]
                     for axis, arg_name in self.axis_arg_names.items()
                     if arg_name in _args
-                    and axis not in {
-                        reduction_axis[1:]
-                        for reduction_axis in reduction_aliases
-                    }
                 }
                 self._gen_tile_configs(_kv_dict, dtype, all_args)
                 self.gen_configs = _expand_configs_with_hints(
@@ -2839,9 +2693,8 @@ class AutoTilingTuner(Autotuner):
     def _get_persistent_reduction_threshold(self, reduction_axis: str) -> int:
         # Keep this heuristic aligned with inductor-style policy:
         # inner reduction axis uses a larger threshold than other axes.
-        # Compare on base axis name so legacy 'r'-prefixed reduction axes and
-        # unprefixed low-dim axes remain consistent during the transition away
-        # from reduction-axis name prefixes.
+        # Reduction axes are stored as base axis names; compare directly with
+        # the low-dim base axis.
         reduction_axis_base = self._get_axis_base_name(reduction_axis)
         low_dim_axis_base = (
             self._get_axis_base_name(self.low_dim_axes[0])

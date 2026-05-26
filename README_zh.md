@@ -88,6 +88,10 @@ Triton-Ascend 所支持的操作系统与 CANN 一致。请参考 CANN 官方文
 | 3.2.0             | CANN 8.5.0           | 2026/01/16         |
 | 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.5.0.alpha001<br>CANN 8.3.RC1 | 2025/11/20<br>2025/11/12<br>2025/10/30 |
 
+## 访问昇腾NPU
+
+如果您需要访问昇腾NPU算力资源进行开发或测试，请进入华为HiDevLab平台的 [HiDevLab-在线开发](https://hidevlab.huawei.com/online-develop-intro) 页面申请并使用算力。
+
 ## 入门指引
 
 - [在线文档](https://triton-ascend.readthedocs.io/zh-cn/latest/index.html)

@@ -88,6 +88,10 @@ The OSs supported by Triton-Ascend are the same as those supported by CANN. Down
 | 3.2.0             | CANN 8.5.0           | 2026/01/16         |
 | 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.5.0.alpha001<br>CANN 8.3.RC1 | 2025/11/20<br>2025/11/12<br>2025/10/30 |
 
+## Accessing Ascend NPU
+
+If you need to access Ascend NPU computing resources for development or testing, please visit the [HiDevLab - Online Development](https://hidevlab.huawei.com/online-develop-intro) page on the Huawei HiDevLab platform to apply for free access.
+
 ## Getting Started
 
 - [Online Documentation](https://triton-ascend.readthedocs.io/zh-cn/latest/index.html)

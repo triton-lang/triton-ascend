@@ -74,6 +74,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/LogicalResult.h"
 
+#include "triton/Tools/Sys/GetEnv.hpp"
+
 #include <cassert>
 #include <cstdint>
 #include <optional>
@@ -764,8 +766,11 @@ TritonToLinalgPass::processImplicitPermuteOperations(ModuleOp moduleOp) {
   }
 
   mlir::PassManager pm(&getContext(), moduleOp.getOperationName());
-  pm.addPass(createCSEPass());
-  pm.addPass(createCanonicalizerPass());
+  //Disable optimizations for the Debug mode
+  if (!::triton::tools::getBoolEnv("TRITON_DEBUG")) {
+    pm.addPass(createCSEPass());
+    pm.addPass(createCanonicalizerPass());
+  }
   return runPipeline(pm, getOperation());
 }
 
@@ -841,7 +846,10 @@ void TritonToLinalgPass::runOnOperation() {
   // profiling).
   {
     PassManager pm(&getContext(), moduleOp.getOperationName());
-    pm.addPass(triton::createMarkTensorKindPass());
+    //Disable optimizations for the Debug mode
+    if (!::triton::tools::getBoolEnv("TRITON_DEBUG")) {
+      pm.addPass(triton::createMarkTensorKindPass());
+    }
     if (failed(runPipeline(pm, moduleOp))) {
       moduleOp->emitError("failed to run LoopCanonicalizerPass");
       signalPassFailure();
@@ -863,8 +871,12 @@ void TritonToLinalgPass::runOnOperation() {
   // so runUseAnalysis won't walk dead ops with missing lattice states.
   {
     PassManager pm(&getContext(), moduleOp.getOperationName());
-    pm.addPass(createCSEPass());
-    pm.addPass(createCanonicalizerPass());
+    
+    //Disable optimizations for the Debug mode
+    if (!::triton::tools::getBoolEnv("TRITON_DEBUG")) {
+      pm.addPass(createCSEPass());
+      pm.addPass(createCanonicalizerPass());
+    }
     if (failed(runPipeline(pm, moduleOp))) {
       moduleOp->emitError(
           "failed to pre-clean dead control-flow before use analysis");
@@ -946,8 +958,12 @@ void TritonToLinalgPass::runOnOperation() {
 
   // 9. Clean up dead code and simplify IR.
   PassManager pm(&getContext(), moduleOp.getOperationName());
-  pm.addPass(createCSEPass());
-  pm.addPass(createCanonicalizerPass());
+
+  //Disable optimizations for the Debug mode
+  if (!::triton::tools::getBoolEnv("TRITON_DEBUG")) {
+    pm.addPass(createCSEPass());
+    pm.addPass(createCanonicalizerPass());
+  }
   if (failed(runPipeline(pm, getOperation()))) {
     signalPassFailure();
   }

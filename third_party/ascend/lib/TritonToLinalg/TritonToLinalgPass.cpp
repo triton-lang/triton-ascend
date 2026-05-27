@@ -32,7 +32,9 @@
 #include "ascend/include/TritonToLinalg/HoistBroadcast.h"
 #include "ascend/include/TritonToLinalg/UseAnalysis.h"
 #include "ascend/include/TritonToLinalg/ImplicitPermute.h"
+#include "ascend/include/TritonToLinalg/IndirectLoadRewrite.h"
 #include "ascend/include/TritonToLinalg/MarkTensorKindPass.h"
+#include "ascend/include/TritonToUnstructure/UnstructureConversionPass.h"
 #include "ascend/include/TritonToStructured/CannonicalizerConverter.h"
 #include "ascend/include/Utils/InterleaveOptimization.h"
 #include "ascend/include/Utils/Utils.h"
@@ -744,6 +746,26 @@ LogicalResult TritonToLinalgPass::processImplicitPermuteOperations(ModuleOp modu
   return runPipeline(pm, getOperation());
 }
 
+LogicalResult TritonToLinalgPass::processIndirectLoadRewriteOperations(ModuleOp moduleOp)
+{
+  // V1 gate: only enabled in 950 SIMT mode. On other targets we leave the
+  // load to the legacy strided memref.copy lowering.
+  if (!(compileOn91095Flag && forceSimtTemplateFlag)) {
+    return success();
+  }
+
+  mlir::RewritePatternSet patterns(&getContext());
+  patterns.add<IndirectLoadRewrite::LoadConverter>(patterns.getContext());
+
+  if (failed(applyPatternsAndFoldGreedily(moduleOp, std::move(patterns)))) {
+    LLVM_DEBUG({
+      llvm::dbgs() << "IndirectLoadRewrite: pattern application failed\n";
+    });
+    return failure();
+  }
+  return success();
+}
+
 LogicalResult TritonToLinalgPass::processLegalStrideOperations(ModuleOp moduleOp)
 {
   mlir::ConversionTarget target(getContext());
@@ -808,6 +830,16 @@ void TritonToLinalgPass::runOnOperation() {
   if (failed(processImplicitPermuteOperations(moduleOp))) {
     LLVM_DEBUG({
       llvm::dbgs() << "Failed to process implicit permute operations\n";
+    });
+    signalPassFailure();
+  }
+
+  // SIMT IndirectLoad fast-path rewrite (runs after ImplicitPermute so the
+  // permuted access patterns have already been absorbed; this step only
+  // catches non-permuted last-axis stride > 1 loads).
+  if (failed(processIndirectLoadRewriteOperations(moduleOp))) {
+    LLVM_DEBUG({
+      llvm::dbgs() << "Failed to process indirect-load rewrite operations\n";
     });
     signalPassFailure();
   }

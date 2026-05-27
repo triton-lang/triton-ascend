@@ -583,6 +583,15 @@ class AutoTilingTuner(Autotuner):
         self.vector_axes = self._rebuild_vector_axes()
         self.axis_arg_names = self._get_parser_axis_arg_names()
 
+    def _reset_vector_parse_derived_state(self) -> None:
+        self.fixed_split_params = {}
+        self.fixed_grid_dims = set()
+        self.fixed_grid_dim_values = {}
+        self.split_axis_pid_dims = {}
+        self.axis_pid_dims = {}
+        self.dual_reduction = False
+        self.persistent_reduction = False
+
     def _get_parser_axis_arg_names(self) -> Dict[str, str]:
         axis_arg_names = {}
         if self.vector_axes is not None:
@@ -926,6 +935,7 @@ class AutoTilingTuner(Autotuner):
 
     def _autoparse_axis_params_vector(self, all_args):
         self.vv_gap_fill_report_v2 = None
+        self._reset_vector_parse_derived_state()
         # Normalize vector axis containers for vv-assist flow. In list-key mode
         # these fields are initialized as None, and vv may legitimately fill only
         # split/tiling/low_dim without reduction axes.
@@ -2015,6 +2025,19 @@ class AutoTilingTuner(Autotuner):
         from .tile_generator import KernelMeta, TileGenerator
 
         vector_tile_inputs = self._materialize_vector_tile_inputs(kv_dict, all_args)
+        if self.print_autotuning:
+            print(
+                "Ascend autotuning vector tile inputs: "
+                f"axis_sizes={vector_tile_inputs['axis_sizes']}, "
+                f"split_params={vector_tile_inputs['split_params']}, "
+                f"fixed_split_params={self.fixed_split_params}, "
+                f"tiling_params={vector_tile_inputs['tiling_params']}, "
+                f"low_dim_axes={vector_tile_inputs['low_dim_axes']}, "
+                f"reduction_axes={vector_tile_inputs['reduction_axes']}, "
+                f"persistent_reduction={self.persistent_reduction}, "
+                f"dual_reduction={self.dual_reduction}, "
+                f"num_buffers={self.num_buffers}"
+            )
 
         kernel_meta = KernelMeta(
             vector_tile_inputs["axis_sizes"],

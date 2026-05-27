@@ -106,7 +106,8 @@ tt.func public @partial_structured_atomic_add_2d(%arg0: !tt.ptr<i32> {tt.divisib
 // -----
 
 // CHECK-LABEL: tt.func public @fully_unstructured_atomic_and_2d
-// CHECK: hivm.hir.custom {extra_attr = "operate=and"
+// CHECK: hivm.hir.custom {extra_attr = "operate=and", extra_buffers_sizes = [16
+// CHECK-SAME: extra_buffers_types = [i32]
 tt.func public @fully_unstructured_atomic_and_2d(%arg0: !tt.ptr<i64>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>, %arg3: !tt.ptr<i32>) {
 	%cst = arith.constant dense<true> : tensor<4x4xi1>
 	%cst_0 = arith.constant dense<4> : tensor<4x1xi32>
@@ -135,7 +136,8 @@ tt.func public @fully_unstructured_atomic_and_2d(%arg0: !tt.ptr<i64>, %arg1: !tt
 // -----
 
 // CHECK-LABEL: tt.func public @partial_structured_atomic_and_2d
-// CHECK: hivm.hir.custom {extra_attr = "operate=and"
+// CHECK: hivm.hir.custom {extra_attr = "operate=and", extra_buffers_sizes = [32
+// CHECK-SAME: extra_buffers_types = [i32]
 tt.func public @partial_structured_atomic_and_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>) {
 	%cst = arith.constant dense<true> : tensor<2x16xi1>
 	%cst_0 = arith.constant dense<16> : tensor<2x1xi32>
@@ -169,7 +171,8 @@ tt.func public @partial_structured_atomic_and_2d(%arg0: !tt.ptr<i32>, %arg1: !tt
 // -----
 
 // CHECK-LABEL: tt.func public @fully_unstructured_atomic_or_2d
-// CHECK: hivm.hir.custom {extra_attr = "operate=or"
+// CHECK: hivm.hir.custom {extra_attr = "operate=or", extra_buffers_sizes = [16
+// CHECK-SAME: extra_buffers_types = [i32]
 tt.func public @fully_unstructured_atomic_or_2d(%arg0: !tt.ptr<i64>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>, %arg3: !tt.ptr<i32>) {
 	%cst = arith.constant dense<true> : tensor<4x4xi1>
 	%cst_0 = arith.constant dense<4> : tensor<4x1xi32>
@@ -198,7 +201,8 @@ tt.func public @fully_unstructured_atomic_or_2d(%arg0: !tt.ptr<i64>, %arg1: !tt.
 // -----
 
 // CHECK-LABEL: tt.func public @partial_structured_atomic_or_2d
-// CHECK: hivm.hir.custom {extra_attr = "operate=or"
+// CHECK: hivm.hir.custom {extra_attr = "operate=or", extra_buffers_sizes = [32
+// CHECK-SAME: extra_buffers_types = [i32]
 tt.func public @partial_structured_atomic_or_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>) {
 	%cst = arith.constant dense<true> : tensor<2x16xi1>
 	%cst_0 = arith.constant dense<16> : tensor<2x1xi32>
@@ -232,7 +236,8 @@ tt.func public @partial_structured_atomic_or_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.
 // -----
 
 // CHECK-LABEL: tt.func public @fully_unstructured_atomic_xor_2d
-// CHECK: hivm.hir.custom {extra_attr = "operate=xor"
+// CHECK: hivm.hir.custom {extra_attr = "operate=xor", extra_buffers_sizes = [16
+// CHECK-SAME: extra_buffers_types = [i32]
 tt.func public @fully_unstructured_atomic_xor_2d(%arg0: !tt.ptr<i64>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>, %arg3: !tt.ptr<i32>) {
 	%cst = arith.constant dense<true> : tensor<4x4xi1>
 	%cst_0 = arith.constant dense<4> : tensor<4x1xi32>
@@ -261,7 +266,8 @@ tt.func public @fully_unstructured_atomic_xor_2d(%arg0: !tt.ptr<i64>, %arg1: !tt
 // -----
 
 // CHECK-LABEL: tt.func public @partial_structured_atomic_xor_2d
-// CHECK: hivm.hir.custom {extra_attr = "operate=xor"
+// CHECK: hivm.hir.custom {extra_attr = "operate=xor", extra_buffers_sizes = [32
+// CHECK-SAME: extra_buffers_types = [i32]
 tt.func public @partial_structured_atomic_xor_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>) {
 	%cst = arith.constant dense<true> : tensor<2x16xi1>
 	%cst_0 = arith.constant dense<16> : tensor<2x1xi32>
@@ -557,7 +563,8 @@ tt.func public @partial_structured_atomic_cas_2d(%arg0: !tt.ptr<i32> {tt.divisib
 // -----
 
 // CHECK-LABEL: tt.func public @fully_unstructured_atomic_or_cta_2d
-// CHECK: hivm.hir.custom {extra_attr = "operate=or, scope=cta"
+// CHECK: hivm.hir.custom {extra_attr = "operate=or, scope=cta", extra_buffers_sizes = [16
+// CHECK-SAME: extra_buffers_types = [i32]
 tt.func public @fully_unstructured_atomic_or_cta_2d(%arg0: !tt.ptr<i64>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>, %arg3: !tt.ptr<i32>) {
 	%cst = arith.constant dense<true> : tensor<4x4xi1>
 	%cst_0 = arith.constant dense<4> : tensor<4x1xi32>

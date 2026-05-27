@@ -204,6 +204,47 @@ std::optional<llvm::StringRef> normalizeRmwOperate(RMWOp op)
   }
 }
 
+bool needsIndirectAtomicExtraBuffer(llvm::StringRef operate)
+{
+  return operate == "and" || operate == "or" || operate == "xor";
+}
+
+std::optional<int64_t> getStaticElementCount(Value value)
+{
+  if (auto tensorType = dyn_cast<RankedTensorType>(value.getType())) {
+    if (!tensorType.hasStaticShape()) {
+      return std::nullopt;
+    }
+    return tensorType.getNumElements();
+  }
+  return int64_t{1};
+}
+
+void setIndirectAtomicExtraBufferAttrs(hivm::CustomOp custom,
+                                       RankedTensorType customResultType,
+                                       ValueRange inputs,
+                                       llvm::StringRef operate,
+                                       PatternRewriter &rewriter)
+{
+  if (!needsIndirectAtomicExtraBuffer(operate)) {
+    return;
+  }
+  if (inputs.size() < 3) {
+    return;
+  }
+  std::optional<int64_t> offsetElementCount = getStaticElementCount(inputs[1]);
+  if (!offsetElementCount) {
+    return;
+  }
+  custom->setAttr(
+      "extra_buffers_types",
+      rewriter.getArrayAttr(
+          {TypeAttr::get(customResultType.getElementType())}));
+  custom->setAttr(
+      "extra_buffers_sizes",
+      rewriter.getArrayAttr({rewriter.getI64IntegerAttr(*offsetElementCount)}));
+}
+
 Value createIndirectAtomicCustom(Location loc,
                                  RankedTensorType customResultType,
                                  ValueRange inputs, ValueRange outputs,
@@ -220,6 +261,8 @@ Value createIndirectAtomicCustom(Location loc,
     extraAttr += ", scope=cta";
   }
   custom->setAttr("extra_attr", rewriter.getStringAttr(extraAttr));
+  setIndirectAtomicExtraBufferAttrs(custom, customResultType, inputs, operate,
+                                    rewriter);
   custom->setAttr("hivm.pipe",
                   hivm::PipeAttr::get(rewriter.getContext(), hivm::PIPE::PIPE_V));
   custom->setAttr(

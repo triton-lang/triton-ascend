@@ -59,33 +59,46 @@ using namespace mlir;
 using namespace triton;
 
 static const llvm::SmallVector<llvm::StringRef> libdeviceOps = {
-    // Basic operations
-    "__hmf_pow_fp32",
-    "__hmf_div_rz_fp32",
-    "__hmf_fmod_fp32",
-    "__hmf_float_as_int_fp32",
-    "__hmf_trunc_fp32", "__hmf_trunc_fp16",
+    "__hmf_trunc_fp32",
     "__hmf_nearbyint_fp32",
-    "__hmf_signbit_fp32", "__hmf_signbit_fp16",
     "__hmf_copysign_fp32",
     "__hmf_log10_fp32",
-    // Trigonometric operations
-    "__hmf_tanh_fp32",
-    "__hmf_asin_fp32", "__hmf_asin_fp16",
-    "__hmf_acos_fp32", "__hmf_acos_fp16",
-    "__hmf_atan2_fp32", "__hmf_atan2_fp16",
-    "__hmf_sinh_fp32", "__hmf_sinh_fp16",
-    "__hmf_cosh_fp32", "__hmf_cosh_fp16",
-    "__hmf_asinh_fp32", "__hmf_asinh_fp16",
-    "__hmf_acosh_fp32", "__hmf_acosh_fp16",
-    "__hmf_atanh_fp32", "__hmf_atanh_fp16",
-    // Other operations
-    "__hmf_expm1_fp32", "__hmf_expm1_fp16",
-    "__hmf_nextafter_fp32", "__hmf_nextafter_fp16",
-    "__hmf_hypot_fp32", "__hmf_hypot_fp16",
-    "__hmf_cyl_bessel_i0_fp32", "__hmf_cyl_bessel_i0_fp16",
+    "__hmf_asin_fp32",
+    "__hmf_acos_fp32",
+    "__hmf_atan2_fp32",
+    "__hmf_sinh_fp32",
+    "__hmf_cosh_fp32",
+    "__hmf_asinh_fp32",
+    "__hmf_acosh_fp32",
+    "__hmf_atanh_fp32",
+    "__hmf_expm1_fp32",
+    "__hmf_nextafter_fp32",
+    "__hmf_hypot_fp32",
+    "__hmf_cyl_bessel_i0_fp32",
     "__hmf_erfinv_fp32",
     "__hmf_lgamma_fp32",
+    "__hmf_signbit_fp32",
+    "__hmf_rint_fp32",
+    "__hmf_round_fp32",
+    "__hmf_tan_fp32",
+    "__hmf_atan_fp32",
+    "__hmf_tanh_fp32",
+    "__hmf_fast_divide_fp32",
+    "__hmf_div_rz_fp32",
+    "__hmf_fmod_fp32",
+    "__hmf_fast_exp_fp32",
+    "__hmf_erf_fp32",
+    "__hmf_ldexp_fp32",
+    "__hmf_pow_fp32",
+    "__hmf_ilogb_fp32",
+    "__hmf_isnan_fp32",
+    "__hmf_isinf_fp32",
+    "__hmf_finite_fp32",
+    "__hmf_log1p_fp32",
+    "__hmf_relu_fp32",
+    "__hmf_tgamma_fp32",
+    "__hmf_float_as_int_fp32",
+    "__hmf_reciprocal_fp32",
 };
 
 /**
@@ -1538,6 +1551,64 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
     return failure();
   }
   if (op.getSymbol().contains("__hmf_")) {
+    // libdevice -> hivm.hir.custom
+    bool is_libdevice = llvm::is_contained(libdeviceOps, op.getSymbol());
+    if (is_libdevice) {
+      SmallVector<Value> newOuts;
+      SmallVector<Type> originalOutputTypes;
+      for (auto newOut : op->getResults()) {
+        originalOutputTypes.push_back(newOut.getType());
+        auto tensorType = dyn_cast<RankedTensorType>(newOut.getType());
+        Type elemType = tensorType.getElementType();
+        if (elemType.isInteger(1)) {
+          elemType = rewriter.getI32Type();
+        }
+        auto src = rewriter.create<tensor::EmptyOp>(
+              op->getLoc(), tensorType.getShape(), elemType);
+        newOuts.push_back(src);
+      }
+      ValueRange inputs{op->getOperands()};
+      ValueRange outputs{newOuts};
+      ValueRange temp_buffers{};
+      TypeRange res_types{outputs};
+      std::string sym = llvm::join(llvm::split(op.getSymbol().str(), "__hmf_"), "");
+      auto customRes = rewriter.create<hivm::CustomOp>(op.getLoc(), res_types, sym, inputs, outputs, temp_buffers);
+      auto arg_attrs_array = mlir::ArrayAttr::get(customRes->getContext(), {});
+      auto pipeAttr = hivm::PipeAttr::get(customRes->getContext(), hivm::PIPE::PIPE_V);
+      auto tcoreTypeAttr = hivm::TCoreTypeAttr::get(customRes->getContext(), hivm::TCoreType::VECTOR);
+      auto vfModeAttr = hivm::VFModeAttr::get(customRes->getContext(), hivm::VFMode::SIMD);
+      customRes->setAttr("arg_attrs", arg_attrs_array);
+      customRes->setAttr("bitcode", mlir::StringAttr::get(customRes->getContext(), ""));
+      customRes->setAttr("hivm.pipe", pipeAttr);
+      customRes->setAttr("hivm.tcore_type", tcoreTypeAttr);
+      customRes->setAttr("hivm.vf_mode", vfModeAttr);
+      customRes->setAttr("symbol", mlir::StringAttr::get(customRes->getContext(), sym));
+      SmallVector<Value> finalResults;
+      for (auto [customResult, origType] : llvm::zip(customRes.getResults(), originalOutputTypes)) {
+        auto origTensorType = dyn_cast<RankedTensorType>(origType);
+        Type targetElemType = rewriter.getI8Type();
+        Type targetTensorType = RankedTensorType::get(
+          origTensorType.getShape(),
+          targetElemType
+        );
+
+        if (origTensorType.getElementType().isInteger(1)) {
+          auto i32ElemType = rewriter.getI32Type();
+          auto denseZeroAttr = DenseElementsAttr::get(
+              RankedTensorType::get(origTensorType.getShape(), i32ElemType), 0);
+          auto zeroTensor = rewriter.create<arith::ConstantOp>(
+              loc, denseZeroAttr);
+          auto cmp = rewriter.create<arith::CmpIOp>(
+            loc, arith::CmpIPredicate::ne, customResult, zeroTensor);
+
+          finalResults.push_back(cmp);
+        } else {
+          finalResults.push_back(customResult);
+        }
+      }
+      rewriter.replaceOp(op, finalResults);
+      return success();
+    }
     // 1. get or create the declaration of external elementwise function
     Type dstTy = op.getResult().getType();
     bool isDstScalar = !isa<RankedTensorType>(dstTy);
@@ -1561,7 +1632,6 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
     auto extFunc = dyn_cast_or_null<SymbolOpInterface>(
         SymbolTable::lookupSymbolIn(mod, op.getSymbol()));
     // std::string symbol = op.getSymbol().str();
-    bool is_libdevice = llvm::is_contained(libdeviceOps, op.getSymbol());
     if (!extFunc) {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToStart(&mod->getRegion(0).front());
@@ -1571,11 +1641,6 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
       extFunc->setAttr(LLVM::LLVMDialect::getReadnoneAttrName(),
                        UnitAttr::get(rewriter.getContext()));
       // set coreType for external func, otherwise InferFuncCoreTypePass will fail
-      if (is_libdevice) {
-        hivm::TFuncCoreType e = hivm::TFuncCoreType::AIV;
-        extFunc->setAttr(hivm::TFuncCoreTypeAttr::name,
-                         hivm::TFuncCoreTypeAttr::get(extFunc->getContext(), e));
-      }
     }
     assert(isa<FunctionOpInterface>(
         SymbolTable::lookupSymbolIn(mod, op.getSymbol())));
@@ -1595,60 +1660,6 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
     if (!found) {
       output = rewriter.create<tensor::EmptyOp>(
           op.getLoc(), cast<RankedTensorType>(dstTy).getShape(), dstElemTy);
-    }
-
-    if (is_libdevice) {
-      auto srcType = cast<RankedTensorType>(srcs[0].getType());
-      SmallVector<Value> dimSizes;
-      int64_t rank = srcType.getRank();
-      for (int i = 0; i < rank; ++i) {
-        if (srcType.isDynamicDim(i)) {
-          auto dimOp = rewriter.create<tensor::DimOp>(loc, srcs[0], i);
-          dimSizes.push_back(dimOp);
-        } else {
-          auto constOp = rewriter.create<arith::ConstantIndexOp>(loc, srcType.getDimSize(i));
-          dimSizes.push_back(constOp);
-        }
-      }
-      // building nested loops by recursion
-      std::function<Value(OpBuilder&, Location, SmallVector<Value>, Value)> buildLoops = [&](
-          OpBuilder &b, Location loc, SmallVector<Value> indices, Value acc) -> Value {
-        int64_t dim = indices.size();
-        if (dim == rank) {
-          // innermost loop
-          SmallVector<Value> elemVals;
-          for (auto src : srcs) {
-            auto extract = b.create<tensor::ExtractOp>(loc, src, indices);
-            elemVals.push_back(extract);
-          }
-          auto call = b.create<func::CallOp>(loc, op.getSymbol(), dstElemTy, elemVals);
-          auto insert = b.create<tensor::InsertOp>(loc, call.getResult(0), acc, indices);
-          return insert;
-        } else {
-          Value lower = b.create<arith::ConstantIndexOp>(loc, 0);
-          Value upper = dimSizes[dim];
-          Value step = b.create<arith::ConstantIndexOp>(loc, 1);
-          auto loop = b.create<scf::ForOp>(loc, lower, upper, step, ValueRange{acc});
-          Block *body = loop.getBody();
-          OpBuilder innerBuilder = OpBuilder::atBlockBegin(body);
-          SmallVector<Value> newIndices = indices;
-          newIndices.push_back(loop.getInductionVar());
-          Value innerAcc = loop.getRegionIterArgs()[0];
-          Value updatedAcc = buildLoops(innerBuilder, loc, newIndices, innerAcc);
-          innerBuilder.create<scf::YieldOp>(loc, updatedAcc);
-          return loop.getResult(0);
-        }
-      };
-
-      Value result = buildLoops(rewriter, loc, {}, output);
-      if (isDstScalar) {
-        SmallVector<Value> zeroIndices(rank, rewriter.create<arith::ConstantIndexOp>(loc, 0));
-        auto extract = rewriter.create<tensor::ExtractOp>(loc, result, zeroIndices);
-        rewriter.replaceOp(op, extract);
-      } else {
-        rewriter.replaceOp(op, result);
-      }
-      return success();
     }
     // 3. create the linalg.map op
     auto mapOp = rewriter.create<linalg::MapOp>(

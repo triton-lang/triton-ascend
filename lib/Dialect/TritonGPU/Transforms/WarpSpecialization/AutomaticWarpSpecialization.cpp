@@ -42,7 +42,10 @@ void AutomaticWarpSpecialization::runOnOperation() {
   // FIXME: Re-enable integer range analysis once it is fixed.
   // pm.addPass(arith::createIntRangeOptimizationsPass());
   pm.addPass(createSCCPPass());
-  pm.addPass(createCSEPass());
+  //Disable optimizations for the Debug mode
+  if (!triton::tools::getBoolEnv("TRITON_DEBUG")) {
+      pm.addPass(createCSEPass());
+  }
   pm.addPass(createNVWSAssignStagePhase());
   pm.addPass(createNVWSLowerAref());
   pm.addPass(createTritonGPUPartitionLoops());

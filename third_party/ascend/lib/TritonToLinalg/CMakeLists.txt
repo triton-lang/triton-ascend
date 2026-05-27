@@ -9,6 +9,7 @@ add_triton_library(TritonToLinalg
         MaskAnalysis.cpp
         UseAnalysis.cpp
         ImplicitPermute.cpp
+        IndirectLoadRewrite.cpp
         DescriptorConverter
         MarkTensorKindPass.cpp
         DevicePrintOffsetRewrite.cpp

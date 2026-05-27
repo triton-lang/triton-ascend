@@ -73,6 +73,25 @@ _RESERVED_HINT_KEYS = {
     "vv_parser_v2_mode",
 }
 _DEFAULT_HINT_NUM_STAGES = [1, 2]
+_FIXED_COMPILE_META_NAMES = {
+    "num_warps",
+    "num_ctas",
+    "num_stages",
+    "num_buffers_warp_spec",
+    "num_consumer_groups",
+    "reg_dec_producer",
+    "reg_inc_consumer",
+    "maxnreg",
+    "unit_flag",
+    "multibuffer",
+    "limit_auto_multi_buffer_only_for_local_buffer",
+    "limit_auto_multi_buffer_of_local_buffer",
+    "set_workspace_multibuffer",
+    "enable_hivm_auto_cv_balance",
+    "tile_mix_vector_loop",
+    "tile_mix_cube_loop",
+    "enable_ubuf_saving",
+}
 
 
 def _get_constexpr_candidates_from_fn(fn) -> List[str]:
@@ -149,6 +168,120 @@ def _multibuffer_to_num_stages(multibuffer: bool) -> int:
             f"Got: {type(multibuffer)}"
         )
     return 2 if multibuffer else 1
+
+
+def _extract_fixed_compile_meta(meta: Dict[str, object]) -> Dict[str, object]:
+    fixed_meta = {
+        key: value
+        for key, value in meta.items()
+        if key in _FIXED_COMPILE_META_NAMES and value is not None
+    }
+    _validate_fixed_compile_meta(fixed_meta)
+    return fixed_meta
+
+
+def _fixed_compile_meta_cache_entries(
+    fixed_meta: Dict[str, object]
+) -> Tuple[Tuple[str, object], ...]:
+    return tuple(
+        (f"fixed_compile_meta:{key}", fixed_meta[key])
+        for key in sorted(fixed_meta)
+    )
+
+
+def _validate_fixed_compile_meta(fixed_meta: Dict[str, object]) -> None:
+    if not fixed_meta:
+        return
+
+    if (
+        "multibuffer" in fixed_meta
+        and "num_stages" in fixed_meta
+        and fixed_meta["num_stages"] != _multibuffer_to_num_stages(fixed_meta["multibuffer"])
+    ):
+        raise ValueError(
+            "Inconsistent fixed compile meta: "
+            f"multibuffer={fixed_meta['multibuffer']} "
+            f"conflicts with num_stages={fixed_meta['num_stages']}."
+        )
+
+
+def _apply_fixed_compile_meta_to_config(
+    config: Config,
+    fixed_meta: Dict[str, object],
+) -> Config:
+    if not fixed_meta:
+        return config
+
+    _validate_fixed_compile_meta(fixed_meta)
+    new_config = copy.deepcopy(config)
+    compile_meta = dict(fixed_meta)
+    if "num_stages" in compile_meta and "multibuffer" not in compile_meta:
+        compile_meta["multibuffer"] = compile_meta["num_stages"] != 1
+    if "multibuffer" in compile_meta and "num_stages" not in compile_meta:
+        compile_meta["num_stages"] = _multibuffer_to_num_stages(
+            compile_meta["multibuffer"]
+        )
+
+    for key, value in compile_meta.items():
+        if key == "num_warps":
+            new_config.num_warps = value
+        elif key == "num_ctas":
+            new_config.num_ctas = value
+        elif key == "num_stages":
+            new_config.num_stages = value
+        elif key == "num_buffers_warp_spec":
+            new_config.num_buffers_warp_spec = value
+        elif key == "num_consumer_groups":
+            new_config.num_consumer_groups = value
+        elif key == "reg_dec_producer":
+            new_config.reg_dec_producer = value
+        elif key == "reg_inc_consumer":
+            new_config.reg_inc_consumer = value
+        elif key == "maxnreg":
+            new_config.maxnreg = value
+        else:
+            new_config.kwargs[key] = value
+    return new_config
+
+
+def _apply_fixed_compile_meta_to_configs(
+    configs,
+    fixed_meta: Dict[str, object],
+):
+    if not configs or not fixed_meta:
+        return configs
+    return [
+        _apply_fixed_compile_meta_to_config(config, fixed_meta)
+        for config in configs
+    ]
+
+
+def _merge_config_meta(config: Config, meta: Dict[str, object]) -> Dict[str, object]:
+    current = dict(config.all_kwargs())
+    fixed_meta = _extract_fixed_compile_meta(meta)
+    conflicts = []
+
+    for key, value in meta.items():
+        if key in current:
+            if key in fixed_meta and current[key] == value:
+                continue
+            conflicts.append(key)
+            continue
+        current[key] = value
+
+    if conflicts:
+        raise ValueError(
+            f"Conflicting meta-parameters: {', '.join(sorted(conflicts))}."
+            " Make sure that you don't re-define auto-tuned symbols."
+        )
+
+    compile_meta = {}
+    if "multibuffer" in current:
+        compile_meta["multibuffer"] = current["multibuffer"]
+    if "num_stages" in current:
+        compile_meta["num_stages"] = current["num_stages"]
+    _validate_fixed_compile_meta(compile_meta)
+    return current
 
 
 def _normalize_config_hints(
@@ -1930,6 +2063,11 @@ class AutoTilingTuner(Autotuner):
 
         vector_tile_inputs = self._materialize_vector_tile_inputs(kv_dict, all_args)
         axis_sizes = vector_tile_inputs["axis_sizes"]
+        reduction_axes = []
+        for axis in vector_tile_inputs["reduction_axes"]:
+            base_axis = self._get_axis_base_name(axis)
+            if base_axis is not None:
+                reduction_axes.append(base_axis)
 
         kernel_meta = KernelMeta(
             axis_sizes,
@@ -1937,6 +2075,7 @@ class AutoTilingTuner(Autotuner):
             self.fixed_split_params,
             vector_tile_inputs["tiling_params"],
             vector_tile_inputs["low_dim_axes"],
+            reduction_axes,
             dtype,
             self.persistent_reduction,
             self.dual_reduction,
@@ -2058,18 +2197,81 @@ class AutoTilingTuner(Autotuner):
     def generate_key_and_configs(self, *args, **kwargs):
         self.nargs = dict(zip(self.arg_names, args))
         self.is_simt_mode = kwargs.get('force_simt_only', False)
-        if 'num_warps' in kwargs and kwargs['num_warps'] is not None:
-            self.user_specified_warps = kwargs['num_warps']
+        extract_fixed_compile_meta = globals().get("_extract_fixed_compile_meta")
+        fixed_compile_meta_cache_entries = globals().get("_fixed_compile_meta_cache_entries")
+        apply_fixed_compile_meta_to_configs = globals().get("_apply_fixed_compile_meta_to_configs")
+
+        if extract_fixed_compile_meta is None:
+            fixed_compile_meta = {
+                key: value
+                for key, value in kwargs.items()
+                if key in _FIXED_COMPILE_META_NAMES and value is not None
+            }
+            if (
+                "multibuffer" in fixed_compile_meta
+                and "num_stages" in fixed_compile_meta
+                and fixed_compile_meta["num_stages"] != _multibuffer_to_num_stages(
+                    fixed_compile_meta["multibuffer"]
+                )
+            ):
+                raise ValueError(
+                    "Inconsistent fixed compile meta: "
+                    f"multibuffer={fixed_compile_meta['multibuffer']} "
+                    f"conflicts with num_stages={fixed_compile_meta['num_stages']}."
+                )
         else:
-            self.user_specified_warps = None
-        if 'num_stages' in kwargs and kwargs['num_stages'] is not None:
-            self.user_specified_num_stages = kwargs['num_stages']
+            fixed_compile_meta = extract_fixed_compile_meta(kwargs)
+
+        if fixed_compile_meta_cache_entries is None:
+            cache_entries = tuple(
+                (f"fixed_compile_meta:{key}", fixed_compile_meta[key])
+                for key in sorted(fixed_compile_meta)
+            )
         else:
-            self.user_specified_num_stages = None
-        if 'multibuffer' in kwargs and kwargs['multibuffer'] is not None:
-            self.user_specified_multibuffer = kwargs['multibuffer']
-        else:
-            self.user_specified_multibuffer = None
+            cache_entries = fixed_compile_meta_cache_entries(fixed_compile_meta)
+
+        if apply_fixed_compile_meta_to_configs is None:
+            def apply_fixed_compile_meta_to_configs(configs, fixed_meta):
+                if not configs or not fixed_meta:
+                    return configs
+
+                def apply_fixed_meta_to_config(config):
+                    new_config = copy.deepcopy(config)
+                    compile_meta = dict(fixed_meta)
+                    if "num_stages" in compile_meta and "multibuffer" not in compile_meta:
+                        compile_meta["multibuffer"] = compile_meta["num_stages"] != 1
+                    if "multibuffer" in compile_meta and "num_stages" not in compile_meta:
+                        compile_meta["num_stages"] = _multibuffer_to_num_stages(
+                            compile_meta["multibuffer"]
+                        )
+
+                    for key, value in compile_meta.items():
+                        if key == "num_warps":
+                            new_config.num_warps = value
+                        elif key == "num_ctas":
+                            new_config.num_ctas = value
+                        elif key == "num_stages":
+                            new_config.num_stages = value
+                        elif key == "num_buffers_warp_spec":
+                            new_config.num_buffers_warp_spec = value
+                        elif key == "num_consumer_groups":
+                            new_config.num_consumer_groups = value
+                        elif key == "reg_dec_producer":
+                            new_config.reg_dec_producer = value
+                        elif key == "reg_inc_consumer":
+                            new_config.reg_inc_consumer = value
+                        elif key == "maxnreg":
+                            new_config.maxnreg = value
+                        else:
+                            new_config.kwargs[key] = value
+                    return new_config
+
+                return [apply_fixed_meta_to_config(config) for config in configs]
+
+        self.fixed_compile_meta = fixed_compile_meta
+        self.user_specified_warps = fixed_compile_meta.get("num_warps")
+        self.user_specified_num_stages = fixed_compile_meta.get("num_stages")
+        self.user_specified_multibuffer = fixed_compile_meta.get("multibuffer")
 
         # generate key
         all_args = {**self.nargs, **kwargs}
@@ -2089,6 +2291,7 @@ class AutoTilingTuner(Autotuner):
         if dtype is None:
             raise NotImplementedError("Not support for non-Tensor inputs")
 
+        key.extend(cache_entries)
         key = tuple(key)
         if key not in self.cache:
             if self.auto_gen_config:
@@ -2104,10 +2307,18 @@ class AutoTilingTuner(Autotuner):
                     self.gen_configs,
                     self.config_hints,
                 )
+                self.gen_configs = apply_fixed_compile_meta_to_configs(
+                    self.gen_configs,
+                    fixed_compile_meta,
+                )
             expanded_user_configs = _expand_configs_with_hints(
                 self.fn,
                 self.user_configs,
                 self.config_hints,
+            )
+            expanded_user_configs = apply_fixed_compile_meta_to_configs(
+                expanded_user_configs,
+                fixed_compile_meta,
             )
             if len(self.gen_configs) == 0 and len(self.user_configs) == 0:
                 self.configs = [
@@ -2122,6 +2333,10 @@ class AutoTilingTuner(Autotuner):
                         reg_inc_consumer=0,
                     )
                 ]
+                self.configs = apply_fixed_compile_meta_to_configs(
+                    self.configs,
+                    fixed_compile_meta,
+                )
             else:
                 self.configs = self.gen_configs + expanded_user_configs
         return key
@@ -2143,7 +2358,8 @@ class AutoTilingTuner(Autotuner):
                 bench_end = time.time()
                 self.bench_time = bench_end - bench_start
                 self.cache[key] = builtins.min(timings, key=timings.get)
-                full_nargs = {**self.nargs, **kwargs, **self.cache[key].all_kwargs()}
+                merged_kwargs = _merge_config_meta(self.cache[key], kwargs)
+                full_nargs = {**self.nargs, **merged_kwargs}
                 self.pre_hook(full_nargs, reset_only=True)
                 self.configs_timings = timings
                 config = self.cache[key]
@@ -2163,11 +2379,12 @@ class AutoTilingTuner(Autotuner):
         if not used_cached_result and self.auto_profile_dir is not None:
             self._profile(*args, config=self.best_config, **kwargs)
         ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
+        merged_kwargs = _merge_config_meta(config, kwargs)
         if config.pre_hook is not None:
-            full_nargs = {**self.nargs, **kwargs, **config.all_kwargs()}
+            full_nargs = {**self.nargs, **merged_kwargs}
             full_nargs.update(ub_cfg)
             config.pre_hook(full_nargs)
-        final_kwargs = dict(config.all_kwargs(), **kwargs)
+        final_kwargs = dict(merged_kwargs)
         final_kwargs.update(ub_cfg)
         ret = self.fn.run(
             *args,
@@ -2298,14 +2515,7 @@ class AutoTilingTuner(Autotuner):
         return None
 
     def _make_kernel_call(self, *args, config, **meta):
-        # check for conflicts, i.e. meta-parameters both provided
-        # as kwargs and by the autotuner
-        conflicts = meta.keys() & config.kwargs.keys()
-        if conflicts:
-            raise ValueError(f"Conflicting meta-parameters: {', '.join(conflicts)}."
-                             " Make sure that you don't re-define auto-tuned symbols.")
-        # augment meta-parameters with tunable ones
-        current = dict(meta, **config.all_kwargs())
+        current = _merge_config_meta(config, meta)
         ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
         if ub_cfg:
             current.update(ub_cfg)
@@ -2350,17 +2560,17 @@ class AutoTilingTuner(Autotuner):
                 triton.AsyncCompileMode(executor),
             ):
                 for config in pruned_configs:
+                    merged_kwargs = _merge_config_meta(config, kwargs)
                     ret.append(self.fn.warmup(
                         *args,
-                        **kwargs,
-                        **config.all_kwargs()
+                        **merged_kwargs,
                     ))
         else:
             for config in pruned_configs:
+                merged_kwargs = _merge_config_meta(config, kwargs)
                 ret.append(self.fn.warmup(
                     *args,
-                    **kwargs,
-                    **config.all_kwargs()
+                    **merged_kwargs,
                 ))
         self.nargs = None
         return ret

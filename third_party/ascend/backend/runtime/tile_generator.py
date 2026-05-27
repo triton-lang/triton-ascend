@@ -69,11 +69,12 @@ class KernelMeta:
         fixed_split_params: Dict[str, int],
         tiling_params: Dict[str, str],
         low_dims: List[str],
-        dtype: torch.dtype,
-        persistent_reduction: bool,
-        dual_reduction: bool,
-        num_buffers: int,
-        is_simt_mode: bool,
+        reduction_axes=None,
+        dtype: torch.dtype = None,
+        persistent_reduction: bool = None,
+        dual_reduction: bool = None,
+        num_buffers: int = None,
+        is_simt_mode: bool = None,
     ):
         """
         :param split_params: a dict of axis name: argument name, the argument is an adjustable parameter in a split axis, such as 'XBLOCK'.
@@ -92,15 +93,45 @@ class KernelMeta:
         :param dual_reduction: performing reduction on more than one axis.
         :param persistent_reduction: there is no splitting in reduction axis.
         """
+        if is_simt_mode is None and isinstance(reduction_axes, torch.dtype):
+            reduction_axes, dtype, persistent_reduction, dual_reduction, num_buffers, is_simt_mode = (
+                [],
+                reduction_axes,
+                dtype,
+                persistent_reduction,
+                dual_reduction,
+                num_buffers,
+            )
+        elif reduction_axes is None:
+            reduction_axes = []
+
+        if None in (
+            dtype,
+            persistent_reduction,
+            dual_reduction,
+            num_buffers,
+            is_simt_mode,
+        ):
+            raise TypeError(
+                "KernelMeta expects either the legacy signature "
+                "(low_dims, dtype, persistent_reduction, dual_reduction, num_buffers, is_simt_mode) "
+                "or the new signature with explicit reduction_axes before dtype."
+            )
+
         self._validate_axis(
             axis_sizes, split_params, fixed_split_params, tiling_params, low_dims
         )
 
         axis_dict = {}
         idx = 0
+        reduction_axis_names = set(reduction_axes or [])
         for name, length in axis_sizes.items():
             prefix = ""
-            if name.startswith("r"):
+            if (
+                name.startswith("r")
+                or name in reduction_axis_names
+                or ("r" + name) in reduction_axis_names
+            ):
                 prefix = "r"
 
             is_tunable_split_axis = name in split_params

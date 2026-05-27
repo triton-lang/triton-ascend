@@ -2166,6 +2166,17 @@ void BlockDataParser::rewriteLoopOp(
 void BlockDataParser::rewriteAddPtrToUnstrucMemAcc(
     triton::AddPtrOp op, triton::AddPtrOp::Adaptor &adaptor,
     ConversionPatternRewriter &rewriter, BlockData &data) {
+  // VERIFICATION PROBE (temporary): this path is hypothesised to be dead
+  // after TritonToUnstructurePass took over all unstructured load handling.
+  // If this fires during the test suite, the hypothesis is wrong: BlockData
+  // is judging this AddPtr as UnstrucMemAcc even though TritonToUnstructure
+  // let it through as structured. Capture the offending kernel and
+  // reconcile the two analyses.
+  op->emitError(
+      "rewriteAddPtrToUnstrucMemAcc reached -- supposed dead path; "
+      "TritonToUnstructurePass should have rewritten this AddPtr's load");
+  llvm::report_fatal_error(
+      "rewriteAddPtrToUnstrucMemAcc reached -- see emitted error above");
   auto loc = op.getLoc();
   auto &offsets = data.getOffsetsRef();
   auto &blockSizes = data.getSizesRef();

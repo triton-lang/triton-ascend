@@ -1,2 +1,2 @@
-ascendnpu-ir_1.0.0_linux-0402-aarch64.run
-sha256:b22ce64098ba89ddbeff03fd6151b83df4466402330d97c10d57cc3b053c63eb
+ascendnpu-ir_1.1.0_linux-0514-aarch64.run
+sha256:c82e0fb3a459c80069047bfc9d3c505bb45c8f2c100cb3f68319425808e7890d

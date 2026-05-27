@@ -26,11 +26,24 @@ import triton.language as tl
 
 
 def assert_outward_semantic_axes_state(act_res, ref_res):
+    def normalize_axes(axis_names, keys):
+        normalized = []
+        for axis in axis_names:
+            if axis in keys:
+                normalized.append(axis)
+            elif isinstance(axis, str) and axis.startswith("r") and axis[1:] in keys:
+                normalized.append(axis[1:])
+            else:
+                normalized.append(axis)
+        return normalized
+
     assert act_res["keys"] == ref_res["keys"]
     assert act_res["split_params"] == ref_res["split_params"]
     assert act_res["tiling_params"] == ref_res["tiling_params"]
     assert act_res["low_dim_axes"] == ref_res["low_dim_axes"]
-    assert act_res["reduction_axes"] == ref_res["reduction_axes"]
+    assert normalize_axes(act_res["reduction_axes"], act_res["keys"]) == normalize_axes(
+        ref_res["reduction_axes"], ref_res["keys"]
+    )
 
 
 def assert_vv_parser_semantic_axes_state(act_res, ref_res):

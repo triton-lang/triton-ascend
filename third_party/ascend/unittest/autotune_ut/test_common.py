@@ -106,10 +106,20 @@ def check_axes_parse_res(act: dict, ref: dict):
 
     assert set(ref_axis_lengths.values()) == set(act_axis_lengths.values()), \
         f"Semantic dimensions mismatch: ref={set(ref_axis_lengths.values())}, act={set(act_axis_lengths.values())}"
-    
+
+    def resolve_symbol(sym: str, sym_to_sem: dict) -> str:
+        if sym in sym_to_sem:
+            return sym
+        if isinstance(sym, str) and sym.startswith("r") and sym[1:] in sym_to_sem:
+            return sym[1:]
+        raise KeyError(sym)
+
     def normalize_param_dict(param_dict: dict, sym_to_sem: dict) -> dict:
         """Convert {symbol: value} -> {semantic: value}"""
-        return {sym_to_sem[sym]: value for sym, value in param_dict.items()}
+        return {
+            sym_to_sem[resolve_symbol(sym, sym_to_sem)]: value
+            for sym, value in param_dict.items()
+        }
 
     ref_split = normalize_param_dict(ref_state["split_params"], ref_axis_lengths)
     act_split = normalize_param_dict(act_state["split_params"], act_axis_lengths)
@@ -118,14 +128,14 @@ def check_axes_parse_res(act: dict, ref: dict):
     act_tiling = normalize_param_dict(act_state["tiling_params"], act_axis_lengths)
 
     def normalize_axis_list(axis_list: list, sym_to_sem: dict) -> list:
-        return sorted(sym_to_sem[sym] for sym in axis_list)
+        return sorted(sym_to_sem[resolve_symbol(sym, sym_to_sem)] for sym in axis_list)
 
     ref_low = normalize_axis_list(ref_state["low_dim_axes"], ref_axis_lengths)
     act_low = normalize_axis_list(act_state["low_dim_axes"], act_axis_lengths)
 
     ref_red = normalize_axis_list(ref_state["reduction_axes"], ref_axis_lengths)
     act_red = normalize_axis_list(act_state["reduction_axes"], act_axis_lengths)
-    
+
     # Compare normalized structures
     assert ref_split == act_split, f"split_params mismatch: {ref_split} vs {act_split}"
     assert ref_tiling == act_tiling, f"tiling_params mismatch: {ref_tiling} vs {act_tiling}"

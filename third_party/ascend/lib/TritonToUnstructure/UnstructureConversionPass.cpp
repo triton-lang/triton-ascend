@@ -25,6 +25,7 @@
 #include "TritonToStructured/CannonicalizerConverter.h"
 #include "Utils/Utils.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
@@ -726,8 +727,11 @@ void TritonToUnstructurePass::runOnOperation() {
   }
 
   PassManager pm(&getContext(), moduleOp.getOperationName());
-  pm.addPass(createCSEPass());
-  pm.addPass(createCanonicalizerPass());
+  //Disable optimizations for the Debug mode
+  if (!::triton::tools::getBoolEnv("TRITON_DEBUG")) {
+    pm.addPass(createCSEPass());
+    pm.addPass(createCanonicalizerPass());
+  }
   if (failed(runPipeline(pm, getOperation()))) {
     signalPassFailure();
   }

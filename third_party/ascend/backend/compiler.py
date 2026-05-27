@@ -80,9 +80,13 @@ def make_ttir(mod, metadata, opt):
     pm.enable_debug()
     passes.common.add_inliner(pm)
     passes.ttir.add_combine(pm)
-    passes.common.add_canonicalizer(pm)
+    #Disable optimizations for the Debug mode
+    if not opt.debug:
+        passes.common.add_canonicalizer(pm)
     passes.ttir.add_reorder_broadcast(pm)
-    passes.common.add_cse(pm)
+    #Disable optimizations for the Debug mode
+    if not opt.debug:
+        passes.common.add_cse(pm)
     passes.common.add_licm(pm)
     passes.common.add_symbol_dce(pm)
     passes.ttir.add_loop_unroll(pm)
@@ -121,11 +125,15 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         if (metadata["add_auto_scheduling"]):
             ascend.passes.ttir.add_dag_sync(pm)
             ascend.passes.ttir.add_dag_scope(pm)
-            passes.common.add_cse(pm)
-            passes.common.add_canonicalizer(pm)
+            #Disable optimizations for the Debug mode
+            if not opt.debug: 
+                passes.common.add_cse(pm)
+                passes.common.add_canonicalizer(pm)
             ascend.passes.ttir.add_dag_ssbuffer(pm)
-            passes.common.add_cse(pm)
-            passes.common.add_canonicalizer(pm)
+            #Disable optimizations for the Debug mode
+            if not opt.debug: 
+                passes.common.add_cse(pm)
+                passes.common.add_canonicalizer(pm)
 
         ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
         ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, force_simt_template,

@@ -32,6 +32,8 @@
 
 #include "llvm/Support/Debug.h"
 
+#include "triton/Tools/Sys/GetEnv.hpp"
+
 #define DEBUG_TYPE "auto-blockify"
 
 using namespace mlir;
@@ -350,8 +352,11 @@ void AutoBlockifyPass::runOnOperation() {
   });
 
   PassManager pm(&getContext(), moduleOp.getOperationName());
-  pm.addPass(createCSEPass());
-  pm.addPass(createCanonicalizerPass());
+  //Disable optimizations for the Debug mode
+  if (!::triton::tools::getBoolEnv("TRITON_DEBUG")) {
+    pm.addPass(createCSEPass());
+    pm.addPass(createCanonicalizerPass());
+  }
   if (failed(runPipeline(pm, moduleOp))) {
     signalPassFailure();
   }

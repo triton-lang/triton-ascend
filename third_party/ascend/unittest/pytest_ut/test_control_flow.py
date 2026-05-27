@@ -439,6 +439,213 @@ def test_control_flow_stress_while_if_else_block_ptr_advance():
 
 
 @triton.jit
+def _for_if_else_block_ptr_load_after_post_advance_kernel(
+    in_ptr,
+    out_ptr,
+    flag,
+    n_elements,
+    block: tl.constexpr,
+    n_loops: tl.constexpr,
+):
+    bp = tl.make_block_ptr(
+        base=in_ptr,
+        shape=(n_elements,),
+        strides=(1,),
+        offsets=(0,),
+        block_shape=(block,),
+        order=(0,),
+    )
+    acc = tl.zeros([block], tl.float32)
+    for _ in range(0, n_loops):
+        if flag != 0:
+            bp = tl.advance(bp, (1,))
+        else:
+            bp = tl.advance(bp, (3,))
+        bp = tl.advance(bp, (2,))
+        acc += tl.load(bp)
+    tl.store(out_ptr + tl.arange(0, block), acc)
+
+
+def test_control_flow_stress_for_if_else_block_ptr_load_after_post_advance():
+    block, n_loops = 16, 4
+    n_elements = block + n_loops * 5
+    x = torch.randn((n_elements,), dtype=torch.float32, device="npu")
+
+    for flag in [1, 0]:
+        out = torch.empty((block,), dtype=torch.float32, device="npu")
+        _for_if_else_block_ptr_load_after_post_advance_kernel[(1,)](
+            x, out, flag, n_elements, block, n_loops
+        )
+
+        pos = 0
+        expected = torch.zeros((block,), dtype=torch.float32, device="npu")
+        for _ in range(n_loops):
+            pos += 1 if flag != 0 else 3
+            pos += 2
+            expected += x[pos:pos + block]
+        _assert_close(out, expected)
+
+
+@triton.jit
+def _for_if_else_tensor_ptr_load_after_post_addptr_kernel(
+    in_ptr,
+    out_ptr,
+    flag,
+    block: tl.constexpr,
+    n_loops: tl.constexpr,
+):
+    offs = tl.arange(0, block)
+    step_then = tl.zeros([block], tl.int32) + 1
+    step_else = tl.zeros([block], tl.int32) + 3
+    step_after = tl.zeros([block], tl.int32) + 2
+    ptrs = in_ptr + offs
+    acc = tl.zeros([block], tl.float32)
+    for _ in range(0, n_loops):
+        if flag != 0:
+            ptrs = ptrs + step_then
+        else:
+            ptrs = ptrs + step_else
+        ptrs = ptrs + step_after
+        acc += tl.load(ptrs)
+    tl.store(out_ptr + offs, acc)
+
+
+def test_control_flow_stress_for_if_else_tensor_ptr_load_after_post_addptr():
+    block, n_loops = 16, 4
+    n_elements = block + n_loops * 5
+    x = torch.randn((n_elements,), dtype=torch.float32, device="npu")
+
+    for flag in [1, 0]:
+        out = torch.empty((block,), dtype=torch.float32, device="npu")
+        _for_if_else_tensor_ptr_load_after_post_addptr_kernel[(1,)](
+            x, out, flag, block, n_loops
+        )
+
+        pos = 0
+        expected = torch.zeros((block,), dtype=torch.float32, device="npu")
+        for _ in range(n_loops):
+            pos += 1 if flag != 0 else 3
+            pos += 2
+            expected += x[pos:pos + block]
+        _assert_close(out, expected)
+
+
+@triton.jit
+def _for_nested_if_block_ptr_load_after_repeated_advance_kernel(
+    in_ptr,
+    out_ptr,
+    flag0,
+    flag1,
+    n_elements,
+    block: tl.constexpr,
+    n_loops: tl.constexpr,
+):
+    bp = tl.make_block_ptr(
+        base=in_ptr,
+        shape=(n_elements,),
+        strides=(1,),
+        offsets=(0,),
+        block_shape=(block,),
+        order=(0,),
+    )
+    acc = tl.zeros([block], tl.float32)
+    for _ in range(0, n_loops):
+        if flag0 != 0:
+            bp = tl.advance(bp, (1,))
+            if flag1 != 0:
+                bp = tl.advance(bp, (2,))
+            else:
+                bp = tl.advance(bp, (4,))
+        else:
+            bp = tl.advance(bp, (3,))
+            if flag1 != 0:
+                bp = tl.advance(bp, (1,))
+            else:
+                bp = tl.advance(bp, (2,))
+        bp = tl.advance(bp, (1,))
+        acc += tl.load(bp)
+    tl.store(out_ptr + tl.arange(0, block), acc)
+
+
+def test_control_flow_stress_for_nested_if_block_ptr_load_after_repeated_advance():
+    block, n_loops = 16, 4
+    n_elements = block + n_loops * 6
+    x = torch.randn((n_elements,), dtype=torch.float32, device="npu")
+
+    for flag0, flag1 in [(1, 1), (1, 0), (0, 1), (0, 0)]:
+        out = torch.empty((block,), dtype=torch.float32, device="npu")
+        _for_nested_if_block_ptr_load_after_repeated_advance_kernel[(1,)](
+            x, out, flag0, flag1, n_elements, block, n_loops
+        )
+
+        pos = 0
+        expected = torch.zeros((block,), dtype=torch.float32, device="npu")
+        for _ in range(n_loops):
+            if flag0 != 0:
+                pos += 1
+                pos += 2 if flag1 != 0 else 4
+            else:
+                pos += 3
+                pos += 1 if flag1 != 0 else 2
+            pos += 1
+            expected += x[pos:pos + block]
+        _assert_close(out, expected)
+
+
+@triton.jit
+def _for_while_if_block_ptr_load_after_nested_advance_kernel(
+    in_ptr,
+    out_ptr,
+    flag,
+    n_elements,
+    inner_iters,
+    block: tl.constexpr,
+    outer_loops: tl.constexpr,
+):
+    bp = tl.make_block_ptr(
+        base=in_ptr,
+        shape=(n_elements,),
+        strides=(1,),
+        offsets=(0,),
+        block_shape=(block,),
+        order=(0,),
+    )
+    acc = tl.zeros([block], tl.float32)
+    for _ in range(0, outer_loops):
+        j = 0
+        while j < inner_iters:
+            if flag != 0:
+                bp = tl.advance(bp, (1,))
+            else:
+                bp = tl.advance(bp, (2,))
+            j = j + 1
+        bp = tl.advance(bp, (3,))
+        acc += tl.load(bp)
+    tl.store(out_ptr + tl.arange(0, block), acc)
+
+
+def test_control_flow_stress_for_while_if_block_ptr_load_after_nested_advance():
+    block, outer_loops, inner_iters = 16, 3, 2
+    n_elements = block + outer_loops * (inner_iters * 2 + 3)
+    x = torch.randn((n_elements,), dtype=torch.float32, device="npu")
+
+    for flag in [1, 0]:
+        out = torch.empty((block,), dtype=torch.float32, device="npu")
+        _for_while_if_block_ptr_load_after_nested_advance_kernel[(1,)](
+            x, out, flag, n_elements, inner_iters, block, outer_loops
+        )
+
+        pos = 0
+        expected = torch.zeros((block,), dtype=torch.float32, device="npu")
+        for _ in range(outer_loops):
+            for _ in range(inner_iters):
+                pos += 1 if flag != 0 else 2
+            pos += 3
+            expected += x[pos:pos + block]
+        _assert_close(out, expected)
+
+
+@triton.jit
 def _for_2d_multi_advance_kernel(
     in_ptr,
     out_ptr,
@@ -568,3 +775,62 @@ def test_control_flow_while_tensor_ptr_dynamic_step():
         pos += step
         expected += x[pos:pos + block]
     _assert_close(out, expected)
+
+
+@triton.jit
+def _for_nested_if_tensor_ptr_load_after_repeated_addptr_kernel(
+    in_ptr,
+    out_ptr,
+    flag0,
+    flag1,
+    block: tl.constexpr,
+    n_loops: tl.constexpr,
+):
+    offs = tl.arange(0, block)
+    step1 = tl.zeros([block], tl.int32) + 1
+    step2 = tl.zeros([block], tl.int32) + 2
+    step3 = tl.zeros([block], tl.int32) + 3
+    step4 = tl.zeros([block], tl.int32) + 4
+    ptrs = in_ptr + offs
+    acc = tl.zeros([block], tl.float32)
+    for _ in range(0, n_loops):
+        if flag0 != 0:
+            ptrs = ptrs + step1
+            if flag1 != 0:
+                ptrs = ptrs + step2
+            else:
+                ptrs = ptrs + step4
+        else:
+            ptrs = ptrs + step3
+            if flag1 != 0:
+                ptrs = ptrs + step1
+            else:
+                ptrs = ptrs + step2
+        ptrs = ptrs + step1
+        acc += tl.load(ptrs)
+    tl.store(out_ptr + offs, acc)
+
+
+def test_control_flow_stress_for_nested_if_tensor_ptr_load_after_repeated_addptr():
+    block, n_loops = 16, 4
+    n_elements = block + n_loops * 6
+    x = torch.randn((n_elements,), dtype=torch.float32, device="npu")
+
+    for flag0, flag1 in [(1, 1), (1, 0), (0, 1), (0, 0)]:
+        out = torch.empty((block,), dtype=torch.float32, device="npu")
+        _for_nested_if_tensor_ptr_load_after_repeated_addptr_kernel[(1,)](
+            x, out, flag0, flag1, block, n_loops
+        )
+
+        pos = 0
+        expected = torch.zeros((block,), dtype=torch.float32, device="npu")
+        for _ in range(n_loops):
+            if flag0 != 0:
+                pos += 1
+                pos += 2 if flag1 != 0 else 4
+            else:
+                pos += 3
+                pos += 1 if flag1 != 0 else 2
+            pos += 1
+            expected += x[pos:pos + block]
+        _assert_close(out, expected)

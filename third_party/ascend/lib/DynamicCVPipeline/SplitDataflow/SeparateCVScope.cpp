@@ -742,9 +742,15 @@ static LogicalResult executeActions(SmallVector<PendingAction> &actions, StringR
                     }
                 }
                 if (isOpAlive(op) && op->getNumRegions() > 0 && isNormalizedDeadShell(op, scopeType)) {
-                    logDebug("erasing dead shell after normalize: '", op->getName().getStringRef(),
-                             "' in scope ", scopeType);
-                    op->erase();
+                    if (hasLiveUsers(op)) {
+                        logDebug("preserving normalized shell '", op->getName().getStringRef(),
+                                 "' in scope ", scopeType,
+                                 " because it still has structural users");
+                    } else {
+                        logDebug("erasing dead shell after normalize: '", op->getName().getStringRef(),
+                                 "' in scope ", scopeType);
+                        op->erase();
+                    }
                 }
                 break;
         }

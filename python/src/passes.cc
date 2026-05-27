@@ -12,6 +12,7 @@
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Dialect/TritonInstrument/Transforms/Passes.h"
 #include "triton/Target/LLVMIR/Passes.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -27,11 +28,15 @@ void init_triton_analysis(py::module &&m) {
 
 void init_triton_passes_common(py::module &&m) {
   using namespace mlir;
+  using namespace mlir::triton;
   ADD_PASS_WRAPPER_0("add_sccp", createSCCPPass);
   ADD_PASS_WRAPPER_0("add_symbol_dce", createSymbolDCEPass);
   ADD_PASS_WRAPPER_0("add_inliner", createInlinerPass);
-  ADD_PASS_WRAPPER_0("add_canonicalizer", createCanonicalizerPass);
-  ADD_PASS_WRAPPER_0("add_cse", createCSEPass);
+  //Disable optimizations for the Debug mode
+  if (!mlir::triton::tools::getBoolEnv("TRITON_DEBUG")) {
+    ADD_PASS_WRAPPER_0("add_canonicalizer", createCanonicalizerPass);
+    ADD_PASS_WRAPPER_0("add_cse", createCSEPass);
+  }
   ADD_PASS_WRAPPER_0("add_licm", createLoopInvariantCodeMotionPass);
   ADD_PASS_WRAPPER_0("print_ir", createPrintIRPass);
 }
@@ -46,7 +51,10 @@ void init_triton_passes_ttir(py::module &&m) {
                      createTritonRewriteTensorDescriptorToPointer);
   ADD_PASS_WRAPPER_0("add_loop_unroll", createTritonLoopUnroll);
   ADD_PASS_WRAPPER_0("add_triton_licm", createTritonLoopInvariantCodeMotion);
-  ADD_PASS_WRAPPER_0("add_loop_aware_cse", createTritonLoopAwareCSE);
+  //Disable optimizations for the Debug mode
+  if (!mlir::triton::tools::getBoolEnv("TRITON_DEBUG")) {
+    ADD_PASS_WRAPPER_0("add_loop_aware_cse", createTritonLoopAwareCSE);
+  }
   ADD_PASS_OPTION_WRAPPER_4("add_convert_to_ttgpuir",
                             createConvertTritonToTritonGPU, const std::string &,
                             int, int, int);

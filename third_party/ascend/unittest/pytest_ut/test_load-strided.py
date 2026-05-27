@@ -28,6 +28,27 @@ import test_common
 # eg: pytest -v test.py::test_add
 #############################
 
+def validate_strided_cmp(a, b, stride, dtype):
+    # 超过2维时打平成2维: (d0, d1, ..., dn) -> (-1, dn)，保留尾轴不变
+    if a.dim() > 2:
+        a = a.reshape(-1, a.shape[-1])
+    if b.dim() > 2:
+        b = b.reshape(-1, b.shape[-1])
+
+    # a[i, j] 应该等于 b[i, j * stride]
+    # j 的取值范围: 0, 1, 2, ..., (last_dim // stride - 1)
+    j_max = a.shape[-1] // stride
+    a_sliced = a[:, :j_max]
+    b_strided = b[:, 0::stride][:, :j_max]
+
+    if dtype in ('float32', 'float16'):
+        assert torch.allclose(a_sliced, b_strided, atol=1e-2, rtol=1e-3), \
+            f"Strided comparison failed: max diff = {(a_sliced.float() - b_strided.float()).abs().max().item()}"
+    else:
+        assert torch.equal(a_sliced, b_strided), \
+            f"Strided comparison failed: mismatch count = {(a_sliced != b_strided).sum().item()}"
+        
+
 @triton.jit
 def triton_load_store(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr, STRIDE: tl.constexpr):
     xoffset = tl.program_id(0) * XBLOCK
@@ -72,39 +93,39 @@ def triton_load_store_multi_d(
 
 @pytest.mark.parametrize('param_list',
                          [
-                             ['float32', (2, 4096, 8), 2, 32768, 1024],
-                             ['float16', (2, 4096, 8), 2, 32768, 1024],
-                             ['int8', (2, 4096, 8), 2, 32768, 1024],
-                             ['float32', (8, 8, 4), 2, 128, 64],
-                             ['float16', (8, 8, 4), 2, 128, 64],
-                             ['int8', (8, 8, 4), 2, 128, 64],
-                             ['int8', (8, 7, 4), 2, 128, 64],
+                             ['float32', (2, 4096, 8), 2, 32768, 1024, 16],
+                             ['float16', (2, 4096, 8), 2, 32768, 1024, 4],
+                             ['int8', (2, 4096, 8), 2, 32768, 1024, 64],
+                             ['float32', (8, 8, 4), 2, 128, 64, 6],
+                             ['float16', (8, 8, 4), 2, 128, 64, 7],
+                             ['int8', (8, 8, 4), 2, 128, 64,3],
+                             ['int8', (8, 7, 4), 2, 128, 64,2],
 
                          ]
                          )
 def test_load_store(param_list):
-    dtype, shape, ncore, xblock, xblock_sub = param_list
+    dtype, shape, ncore, xblock, xblock_sub, stride  = param_list
     x0 = test_common.generate_tensor(shape, dtype).npu()
     y_ref = x0
     y_cal = test_common.generate_tensor(shape, dtype).npu()
-    triton_load_store[(ncore, )](x0, y_cal, x0.numel(), xblock, xblock_sub, 3)
-    test_common.validate_cmp(dtype, y_cal, y_ref)
+    triton_load_store[(ncore, )](x0, y_cal, x0.numel(), xblock, xblock_sub, stride )
+    validate_strided_cmp(y_cal, y_ref, stride, dtype)
 
 
 @pytest.mark.parametrize('param_list',
                          [
-                             ['float32', (8, 4, 16, 16)],
-                             ['float16', (8, 4, 16, 16)],
-                             ['int8', (8, 4, 16, 16)],
-                             ['float32', (8, 8, 4, 4)],
-                             ['float16', (8, 8, 4, 4)],
-                             ['int8', (8, 8, 4, 4)],
-                             ['float32', (3, 8, 2, 16, 16)],
-                             ['float16', (3, 8, 2, 16, 16)],
-                             ['int8', (9, 8, 8, 16, 16)],
-                             ['float32', (11, 8, 8, 4, 4)],
-                             ['float16', (11, 8, 8, 4, 4)],
-                             ['int8', (11, 8, 8, 4, 4)],
+                             ['float32', (8, 4, 16, 16), 2],
+                             ['float16', (8, 4, 16, 16),3],
+                             ['int8', (8, 4, 16, 16),4],
+                             ['float32', (8, 8, 4, 4),2],
+                             ['float16', (8, 8, 4, 4),1],
+                             ['int8', (8, 8, 4, 4),2],
+                             ['float32', (3, 8, 2, 16, 16),3],
+                             ['float16', (3, 8, 2, 16, 16),2],
+                             ['int8', (9, 8, 8, 16, 16),2],
+                             ['float32', (11, 8, 8, 4, 4),4],
+                             ['float16', (11, 8, 8, 4, 4),1],
+                             ['int8', (11, 8, 8, 4, 4),2],
                          ]
                          )
 def test_load_store_multi_d(param_list):
@@ -121,5 +142,8 @@ def test_load_store_multi_d(param_list):
         blocks.append(1)
         shapes.append(1)
  
-    triton_load_store_multi_d[(1, )](x0, y_actual, *blocks, *sha, *strides)
-    test_common.validate_cmp(dtype, y_actual, y_expect)
+    y_cal = triton_load_store_multi_d[(1, )](x0, y_actual, *blocks, *shapes, *strides)
+    validate_strided_cmp(y_cal, x0, stride, dtype)
+
+param_list = ['float32', (32, ), 1, 32, 32, 2]
+test_load_store(param_list)

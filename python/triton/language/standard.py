@@ -26,18 +26,18 @@ def _is_power_of_two(i: core.constexpr):
 # -----------------------
 
 
-# @core._tensor_member_fn
-# @jit
-# def cdiv(x, div):
-#     """
-#     Computes the ceiling division of :code:`x` by :code:`div`
+@core._tensor_member_fn
+@jit
+def cdiv(x, div):
+    """
+    Computes the ceiling division of :code:`x` by :code:`div`
 
-#     :param x: the input number
-#     :type x: Block
-#     :param div: the divisor
-#     :type div: Block
-#     """
-#     return (x + div - 1) // div
+    :param x: the input number
+    :type x: Block
+    :param div: the divisor
+    :type div: Block
+    """
+    return (x + div - 1) // div
 
 
 @core._tensor_member_fn

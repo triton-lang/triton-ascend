@@ -25,6 +25,24 @@ import triton
 import triton.language as tl
 
 
+def assert_outward_semantic_axes_state(act_res, ref_res):
+    assert act_res["keys"] == ref_res["keys"]
+    assert act_res["split_params"] == ref_res["split_params"]
+    assert act_res["tiling_params"] == ref_res["tiling_params"]
+    assert act_res["low_dim_axes"] == ref_res["low_dim_axes"]
+    assert act_res["reduction_axes"] == ref_res["reduction_axes"]
+
+
+def assert_vv_parser_semantic_axes_state(act_res, ref_res):
+    vv_parse_result = act_res["vv_parse_result_v2"]
+    assert vv_parse_result is not None
+    assert vv_parse_result.axis_length_exprs == ref_res["keys"]
+    assert vv_parse_result.split_params == ref_res["split_params"]
+    assert vv_parse_result.tiling_params == ref_res["tiling_params"]
+    assert vv_parse_result.low_dim_axes == ref_res["low_dim_axes"]
+    assert vv_parse_result.reduction_axes == ref_res["reduction_axes"]
+
+
 def test_triton_max_last_dim_case1(mock_autotuner):
     import triton.backends.ascend.runtime
 
@@ -61,15 +79,17 @@ def test_triton_max_last_dim_case1(mock_autotuner):
             tl.store(out_ptr0 + x0, block_res, x0_mask)
 
     ref_res = {
-        "keys": {"x": "x0_numel", "ry": "r1_numel"},
+        "keys": {"x": "x0_numel", "y": "r1_numel"},
         "split_params": {"x": "X0BLOCK"},
-        "tiling_params": {"x": "X0BLOCK_SUB", "ry": "R1BLOCK_SUB"},
-        "low_dim_axes": ["ry"],
-        "reduction_axes": ["ry"],
+        "tiling_params": {"x": "X0BLOCK_SUB", "y": "R1BLOCK_SUB"},
+        "low_dim_axes": ["y"],
+        "reduction_axes": ["y"],
     }
     grid = lambda meta: (meta["X0BLOCK"],)
     act_res = triton_max_last_dim1[grid]()
 
+    assert_outward_semantic_axes_state(act_res, ref_res)
+    assert_vv_parser_semantic_axes_state(act_res, ref_res)
     check_axes_parse_res(act_res, ref_res)
 
 
@@ -109,15 +129,17 @@ def test_triton_max_last_dim_case2(mock_autotuner):
             tl.store(out_ptr0 + x0, block_res, x0_mask)
 
     ref_res = {
-        "keys": {"x": "x0_numel", "ry": "r1_numel"},
+        "keys": {"x": "x0_numel", "y": "r1_numel"},
         "split_params": {"x": "X0BLOCK"},
-        "tiling_params": {"x": "X0BLOCK_SUB", "ry": "R1BLOCK_SUB"},
-        "low_dim_axes": ["ry"],
-        "reduction_axes": ["ry"],
+        "tiling_params": {"x": "X0BLOCK_SUB", "y": "R1BLOCK_SUB"},
+        "low_dim_axes": ["y"],
+        "reduction_axes": ["y"],
     }
     grid = lambda meta: (meta["X0BLOCK"],)
     act_res = triton_max_last_dim2[grid]()
 
+    assert_outward_semantic_axes_state(act_res, ref_res)
+    assert_vv_parser_semantic_axes_state(act_res, ref_res)
     check_axes_parse_res(act_res, ref_res)
 
 
@@ -157,15 +179,17 @@ def test_triton_max_last_dim_case3(mock_autotuner):
             tl.store(out_ptr0 + x0, block_res, x0_mask)
 
     ref_res = {
-        "keys": {"x": "x0_numel", "ry": "r1_numel"},
+        "keys": {"x": "x0_numel", "y": "r1_numel"},
         "split_params": {"x": "X0BLOCK"},
-        "tiling_params": {"x": "X0BLOCK_SUB", "ry": "R1BLOCK_SUB"},
-        "low_dim_axes": ["ry"],
-        "reduction_axes": ["ry"],
+        "tiling_params": {"x": "X0BLOCK_SUB", "y": "R1BLOCK_SUB"},
+        "low_dim_axes": ["y"],
+        "reduction_axes": ["y"],
     }
     grid = lambda meta: (meta["X0BLOCK"],)
     act_res = triton_max_last_dim3[grid]()
 
+    assert_outward_semantic_axes_state(act_res, ref_res)
+    assert_vv_parser_semantic_axes_state(act_res, ref_res)
     check_axes_parse_res(act_res, ref_res)
 
 
@@ -206,12 +230,14 @@ def test_reduction_axes_parse_kernel_type_vector_auto_consistency(mock_autotuner
             tl.store(out_ptr0 + x0, block_res, x0_mask)
 
     ref_res = {
-        "keys": {"x": "x0_numel", "ry": "r1_numel"},
+        "keys": {"x": "x0_numel", "y": "r1_numel"},
         "split_params": {"x": "X0BLOCK"},
-        "tiling_params": {"x": "X0BLOCK_SUB", "ry": "R1BLOCK_SUB"},
-        "low_dim_axes": ["ry"],
-        "reduction_axes": ["ry"],
+        "tiling_params": {"x": "X0BLOCK_SUB", "y": "R1BLOCK_SUB"},
+        "low_dim_axes": ["y"],
+        "reduction_axes": ["y"],
     }
     grid = lambda meta: (meta["X0BLOCK"],)
     act_res = triton_reduction_axes_parse_kernel_type_vector_auto_consistency[grid]()
+    assert_outward_semantic_axes_state(act_res, ref_res)
+    assert_vv_parser_semantic_axes_state(act_res, ref_res)
     check_axes_parse_res(act_res, ref_res)

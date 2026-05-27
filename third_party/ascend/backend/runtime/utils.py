@@ -113,8 +113,6 @@ def get_byte_per_numel(dtype: torch.dtype) -> int:
 
 
 def is_valid_axis_name(name: str) -> bool:
-    if name.startswith("r"):
-        return name[1:] in valid_axis_names
     return name in valid_axis_names
 
 

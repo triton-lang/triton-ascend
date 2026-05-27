@@ -139,16 +139,10 @@ void LoadConverter::propagateWasBoolToInt8Attr(Operation *srcLoadOp, Operation *
 LogicalResult LoadConverter::continueModifyFromAddPtrConverter(
     triton::LoadOp &op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
-  // VERIFICATION PROBE (temporary): this path is hypothesised to be dead
-  // after TritonToUnstructurePass took over all unstructured load handling
-  // (tt.indirect_load / scf.for + discreteAttrName). If this fires during
-  // the test suite, the hypothesis is wrong: capture the offending kernel
-  // and investigate which unstructured pattern TritonToUnstructure missed.
-  op->emitError(
-      "continueModifyFromAddPtrConverter reached -- supposed dead path; "
-      "TritonToUnstructurePass should have rewritten this unstructured load");
-  llvm::report_fatal_error(
-      "continueModifyFromAddPtrConverter reached -- see emitted error above");
+  // VERIFICATION PROBE (temporary, disabled): see comment in
+  // BlockPtrAnalysis::rewriteAddPtrToUnstrucMemAcc.
+  // op->emitError("continueModifyFromAddPtrConverter reached -- supposed dead");
+  // llvm::report_fatal_error("continueModifyFromAddPtrConverter reached");
   auto loc = op.getLoc();
   auto forOp = op->getParentOfType<scf::ForOp>();
   Operation *firstOp = &forOp.getBody()->front();

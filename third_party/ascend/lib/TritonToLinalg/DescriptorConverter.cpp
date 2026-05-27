@@ -98,6 +98,150 @@ DenseI32ArrayAttr getFullBoundaryCheckAttr(ConversionPatternRewriter &rewriter,
   return rewriter.getDenseI32ArrayAttr(boundaryCheck);
 }
 
+Value expandOffsets(OpBuilder &builder, Location loc,
+                    ArrayRef<int64_t> blockShape, Value offsets, unsigned dim) {
+  Value expandedResult = offsets;
+  for (size_t j = 0; j < blockShape.size(); ++j) {
+    if (j == dim) {
+      continue;
+    }
+    expandedResult =
+        builder.create<triton::ExpandDimsOp>(loc, expandedResult, j);
+  }
+
+  return expandedResult;
+}
+
+Value getExpandedOffsetWithRange(OpBuilder &builder, const Location &loc,
+                                 ArrayRef<std::int64_t> blockShape,
+                                 Value offset, unsigned dim) {
+  // Add range
+  auto indexI32RowType =
+      RankedTensorType::get({blockShape[dim]}, builder.getI32Type());
+  auto indexRowType =
+      RankedTensorType::get({blockShape[dim]}, builder.getI64Type());
+  Value splatOffset =
+      builder.create<triton::SplatOp>(loc, indexRowType, offset);
+  Value range = builder.create<triton::MakeRangeOp>(loc, indexI32RowType, 0,
+                                                    blockShape[dim]);
+  Value i64Range = builder.create<arith::ExtSIOp>(loc, indexRowType, range);
+
+  Value offsets = builder.create<arith::AddIOp>(loc, splatOffset, i64Range);
+  return expandOffsets(builder, loc, blockShape, offsets, dim);
+}
+
+Value generatePtrFromOffsetRanges(OpBuilder &builder, Location loc,
+                                  ArrayRef<int64_t> blockShape,
+                                  Descriptor &desc, ValueRange offsets) {
+  assert(blockShape.size() == desc.shape.size());
+  assert(blockShape.size() == offsets.size());
+  auto indexTensorType =
+      RankedTensorType::get(blockShape, builder.getI64Type());
+  auto ptrType = cast<triton::PointerType>(desc.base.getType());
+  auto ptrTensorType = RankedTensorType::get(blockShape, ptrType);
+
+  // Generate offsets per dimension
+  Value ptr = builder.create<triton::SplatOp>(loc, ptrTensorType, desc.base);
+  for (unsigned i = 0; i < blockShape.size(); ++i) {
+    // We must splat strides into the expanded shape not a row for retaining
+    // the divisibility information given by strides
+    Value splatStride = builder.create<triton::SplatOp>(
+        loc, offsets[i].getType(), desc.strides[i]);
+    Value offsetWithStride =
+        builder.create<arith::MulIOp>(loc, offsets[i], splatStride);
+    Value broadcasted = builder.create<triton::BroadcastOp>(
+        loc, indexTensorType, offsetWithStride);
+
+    // Add to the pointer
+    ptr =
+        builder.create<triton::AddPtrOp>(loc, ptrTensorType, ptr, broadcasted);
+  }
+
+  return ptr;
+}
+
+Value generatePtr(OpBuilder &builder, const Location &loc,
+                  ArrayRef<std::int64_t> blockShape, Descriptor &desc,
+                  ValueRange offsets) {
+  assert(blockShape.size() == desc.shape.size());
+  assert(blockShape.size() == offsets.size());
+  SmallVector<Value> offsetRanges;
+  for (unsigned i = 0; i < blockShape.size(); ++i) {
+    auto offsetWithRange =
+        getExpandedOffsetWithRange(builder, loc, blockShape, offsets[i], i);
+    offsetRanges.push_back(offsetWithRange);
+  }
+
+  return generatePtrFromOffsetRanges(builder, loc, blockShape, desc,
+                                     offsetRanges);
+}
+
+Value generateMaskFromOffsetRanges(OpBuilder &builder, const Location &loc,
+                                   ArrayRef<std::int64_t> blockShape,
+                                   Descriptor &desc, ValueRange offsetRanges) {
+  assert(blockShape.size() == desc.shape.size());
+  assert(blockShape.size() == offsetRanges.size());
+
+  // Generate mask per dimension
+  auto maskTensorType = RankedTensorType::get(blockShape, builder.getI1Type());
+  Value mask;
+  for (std::size_t i = 0; i < blockShape.size(); ++i) {
+    auto offsetWithRange = offsetRanges[i];
+
+    // Compare with lower bound
+    Value lowerBound = builder.create<mlir::arith::ConstantIntOp>(
+        loc, builder.getI64Type(), 0);
+    Value splatLowerBound = builder.create<triton::SplatOp>(
+        loc, offsetWithRange.getType(), lowerBound);
+    Value cmpLower = builder.create<arith::CmpIOp>(
+        loc, arith::CmpIPredicate::sge, offsetWithRange, splatLowerBound);
+
+    // Compare with upper bound
+    Value splatUpperBound = builder.create<triton::SplatOp>(
+        loc, offsetWithRange.getType(), desc.shape[i]);
+    Value cmpUpper = builder.create<arith::CmpIOp>(
+        loc, arith::CmpIPredicate::slt, offsetWithRange, splatUpperBound);
+
+    // And and broadcast
+    Value andResult = builder.create<arith::AndIOp>(loc, cmpLower, cmpUpper);
+    Value broadcasted =
+        builder.create<triton::BroadcastOp>(loc, maskTensorType, andResult);
+
+    // And up all results
+    if (!mask) {
+      mask = broadcasted;
+    } else {
+      mask = builder.create<arith::AndIOp>(loc, mask, broadcasted);
+    }
+  }
+
+  return mask;
+}
+
+Value generateMask(OpBuilder &builder, const Location &loc,
+                   ArrayRef<std::int64_t> blockShape, Descriptor &desc,
+                   ValueRange offsets) {
+  assert(blockShape.size() == desc.shape.size());
+  assert(blockShape.size() == offsets.size());
+  SmallVector<Value> offsetRanges;
+  for (unsigned i = 0; i < blockShape.size(); ++i) {
+    auto offsetWithRange =
+        getExpandedOffsetWithRange(builder, loc, blockShape, offsets[i], i);
+    offsetRanges.push_back(offsetWithRange);
+  }
+
+  return generateMaskFromOffsetRanges(builder, loc, blockShape, desc,
+                                      offsetRanges);
+}
+
+SmallVector<mlir::Value> castToI64(OpBuilder &builder,
+                                   mlir::ValueRange values) {
+  auto i64Type = builder.getI64Type();
+  return llvm::map_to_vector(values, [&](mlir::Value v) {
+    return builder.createOrFold<arith::ExtSIOp>(v.getLoc(), i64Type, v);
+  });
+}
+
 LogicalResult DescriptorLoadConverter::matchAndRewrite(
     triton::DescriptorLoadOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
@@ -358,6 +502,64 @@ LogicalResult DescriptorGatherConverter::matchAndRewrite(
   loop->setAttr("ExtractedLoadOrStore", rewriter.getUnitAttr());
 
   rewriter.replaceOp(op, loop.getResult(0));
+  return success();
+}
+
+std::optional<RMWOp> translateReduceKind(DescriptorReduceKind kind,
+                                         TensorDescType ty) {
+  auto scalarTy = ty.getBlockType().getElementType();
+  switch (kind) {
+  case DescriptorReduceKind::ADD:
+    return scalarTy.isInteger() ? RMWOp::ADD : RMWOp::FADD;
+  case DescriptorReduceKind::MIN:
+    if (scalarTy.isUnsignedInteger()) {
+      return RMWOp::UMIN;
+    } else if (scalarTy.isSignedInteger()) {
+      return RMWOp::MIN;
+    }
+    return {};
+  case DescriptorReduceKind::MAX:
+    if (scalarTy.isUnsignedInteger()) {
+      return RMWOp::UMAX;
+    } else if (scalarTy.isSignedInteger()) {
+      return RMWOp::MAX;
+    }
+    return {};
+  case DescriptorReduceKind::AND:
+    return RMWOp::AND;
+  case DescriptorReduceKind::OR:
+    return RMWOp::OR;
+  case DescriptorReduceKind::XOR:
+    return RMWOp::XOR;
+  default:
+    break;
+  }
+  return {};
+}
+
+LogicalResult DescriptorReduceConverter::matchAndRewrite(
+    triton::DescriptorReduceOp op, OpAdaptor adaptor,
+    ConversionPatternRewriter &rewriter) const {
+  auto loc = op.getLoc();
+  auto descTy = op.getDesc().getType();
+  const auto blockShape = descTy.getBlockType().getShape();
+  auto desc = unpackDescriptor(descTy, adaptor.getDesc(), rewriter);
+  auto offsets = castToI64(rewriter, op.getIndices());
+  auto rmwOp = translateReduceKind(op.getKind(), descTy);
+  if (!rmwOp) {
+    std::string msgstring;
+    llvm::raw_string_ostream msg(msgstring);
+    msg << "Cannot fallback on descriptor atomic op, unsupported for type "
+        << descTy.getBlockType().getElementType();
+    return op->emitError(msgstring);
+  }
+
+  rewriter.create<triton::AtomicRMWOp>(
+      loc, descTy.getSignlessBlockType(), *rmwOp,
+      generatePtr(rewriter, loc, blockShape, desc, offsets), op.getSrc(),
+      generateMask(rewriter, loc, blockShape, desc, offsets),
+      MemSemantic::ACQUIRE_RELEASE, MemSyncScope::GPU);
+  op.erase();
   return success();
 }
 

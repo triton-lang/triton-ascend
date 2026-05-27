@@ -532,17 +532,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--append-bisheng-options=-mllvm --cce-vf-remove-membar={enable_cce_vf_remove_membar}"]
 
-        # TEMP: Allow TRITON_ENABLE_VF_FUSION env var to override metadata configuration
-        enable_vf_env = os.getenv("TRITON_ENABLE_VF_FUSION")
-        if enable_vf_env is not None:
-            enable_vf_fusion = enable_vf_env.lower() in ("true", "1", "yes")
-        elif "enable_vf_fusion" in metadata:
-            enable_vf_fusion = metadata["enable_vf_fusion"]
-        else:
-            enable_vf_fusion = None
-
+        enable_vf_fusion = metadata["enable_vf_fusion"]
         if enable_vf_fusion is not None:
-            _compile_option_list += [f"--enable-vf-fusion={enable_vf_fusion}"]
+            _compile_option_list += \
+                [f"--enable-vf-fusion={enable_vf_fusion}"]
 
         enable_drop_unit_dims = metadata["enable_drop_unit_dims"]
         if enable_drop_unit_dims is not None:

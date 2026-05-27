@@ -261,4 +261,104 @@ LogicalResult DescriptorScatterConverter::matchAndRewrite(
   return success();
 }
 
+SmallVector<NamedAttribute> filterSegmentSizes(ArrayRef<NamedAttribute> attrs) {
+  SmallVector<NamedAttribute> filteredAttrs;
+  llvm::copy_if(attrs, std::back_inserter(filteredAttrs),
+                [](const NamedAttribute &attr) {
+                  return attr.getName().getValue() != "operandSegmentSizes";
+                });
+  return filteredAttrs;
+}
+
+LogicalResult DescriptorGatherConverter::matchAndRewrite(
+    triton::DescriptorGatherOp op, OpAdaptor adaptor,
+    ConversionPatternRewriter &rewriter) const {
+  auto loc = op.getLoc();
+  auto descTy = cast<TensorDescType>(op.getDesc().getType());
+  auto resultType = cast<RankedTensorType>(op.getResult().getType());
+  const auto blockShape = resultType.getShape();
+  const auto rowBlockShape = descTy.getSignlessBlockType().getShape();
+
+  auto desc = unpackDescriptor(descTy, adaptor.getDesc(), rewriter);
+  SmallVector<int32_t> tensorShapeValues;
+  tensorShapeValues.reserve(rowBlockShape.size());
+  for (auto dim : rowBlockShape) {
+    tensorShapeValues.push_back(static_cast<int32_t>(dim));
+  }
+
+  auto zeroIndex = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+  auto oneIndex = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+  Value rowUpperBound =
+      rewriter.create<tensor::DimOp>(loc, adaptor.getXOffsets(), zeroIndex);
+  auto rowBoundaryCheck = getFullBoundaryCheckAttr(rewriter, rowBlockShape);
+  auto cache = triton::CacheModifierAttr::get(rewriter.getContext(),
+                                              triton::CacheModifier::NONE);
+  auto evict = triton::EvictionPolicyAttr::get(rewriter.getContext(),
+                                               triton::EvictionPolicy::NORMAL);
+  auto isVolatile = rewriter.getBoolAttr(false);
+
+  if (auto attr = op->getAttrOfType<triton::CacheModifierAttr>("cache"))
+    cache = attr;
+  if (auto attr = op->getAttrOfType<triton::EvictionPolicyAttr>("evict"))
+    evict = attr;
+  if (auto attr = op->getAttrOfType<BoolAttr>("isVolatile"))
+    isVolatile = attr;
+
+  SmallVector<Value> dynamicResultSizes;
+  dynamicResultSizes.reserve(resultType.getNumDynamicDims());
+  for (const auto &[dim, size] : llvm::enumerate(blockShape)) {
+    if (!ShapedType::isDynamic(size))
+      continue;
+    if (dim == 0) {
+      dynamicResultSizes.push_back(rowUpperBound);
+      continue;
+    }
+    dynamicResultSizes.push_back(
+        rewriter.create<arith::ConstantIndexOp>(loc, rowBlockShape[dim]));
+  }
+
+  auto initialTensor = rewriter.create<tensor::EmptyOp>(
+      loc, blockShape, resultType.getElementType(), dynamicResultSizes);
+  auto loop = rewriter.create<scf::ForOp>(
+      loc, zeroIndex, rowUpperBound, oneIndex,
+      ValueRange{initialTensor.getResult()},
+      [&](OpBuilder &nestedBuilder, Location nestedLoc, Value rowIv,
+          ValueRange iterArgs) {
+        Value xOffset = nestedBuilder.create<tensor::ExtractOp>(
+            nestedLoc, adaptor.getXOffsets(), ValueRange{rowIv});
+        Value tensorPtr = nestedBuilder.create<triton::MakeTensorPtrOp>(
+            nestedLoc, desc.base, desc.shape, desc.strides,
+            ValueRange{xOffset, adaptor.getYOffset()}, tensorShapeValues,
+            computeOrder(rowBlockShape));
+        auto rowLoad = nestedBuilder.create<triton::LoadOp>(
+            nestedLoc, descTy.getSignlessBlockType(), tensorPtr,
+            Value(), // mask
+            Value(), // other
+            rowBoundaryCheck, desc.padding, cache, evict, isVolatile);
+        for (const auto &attr : filterSegmentSizes(op->getAttrs())) {
+          if (!rowLoad->hasAttr(attr.getName())) {
+            rowLoad->setAttr(attr.getName(), attr.getValue());
+          }
+        }
+        rowLoad->setAttr(ConverterUtils::discreteAttrName,
+                         nestedBuilder.getUnitAttr());
+
+        auto insertSlice = nestedBuilder.create<tensor::InsertSliceOp>(
+            nestedLoc, rowLoad.getResult(), iterArgs[0],
+            SmallVector<OpFoldResult>{rowIv, nestedBuilder.getIndexAttr(0)},
+            SmallVector<OpFoldResult>{
+                nestedBuilder.getIndexAttr(rowBlockShape[0]),
+                nestedBuilder.getIndexAttr(rowBlockShape[1])},
+            SmallVector<OpFoldResult>{nestedBuilder.getIndexAttr(1),
+                                      nestedBuilder.getIndexAttr(1)});
+        insertSlice->setAttr(ConverterUtils::discreteAttrName,
+                             nestedBuilder.getUnitAttr());
+        nestedBuilder.create<scf::YieldOp>(nestedLoc, insertSlice.getResult());
+      });
+  loop->setAttr("ExtractedLoadOrStore", rewriter.getUnitAttr());
+
+  rewriter.replaceOp(op, loop.getResult(0));
+  return success();
+}
+
 } // namespace DescriptorConverter

@@ -702,8 +702,9 @@ TritonToLinalgPass::processDescriptorOperations(ModuleOp moduleOp) {
                funcOp.getFunctionType().getResults());
   });
   target.addLegalOp<triton::MakeTensorDescOp>();
-  target.addIllegalOp<triton::DescriptorLoadOp, triton::DescriptorStoreOp,
-                      triton::DescriptorScatterOp>();
+  target
+      .addIllegalOp<triton::DescriptorLoadOp, triton::DescriptorStoreOp,
+                    triton::DescriptorScatterOp, triton::DescriptorGatherOp>();
 
   // --- Patterns ---
   mlir::RewritePatternSet patterns(&getContext());
@@ -712,6 +713,8 @@ TritonToLinalgPass::processDescriptorOperations(ModuleOp moduleOp) {
   patterns.add<DescriptorConverter::DescriptorStoreConverter>(
       patterns.getContext());
   patterns.add<DescriptorConverter::DescriptorScatterConverter>(
+      patterns.getContext());
+  patterns.add<DescriptorConverter::DescriptorGatherConverter>(
       patterns.getContext());
 
   mlir::ConversionConfig config;

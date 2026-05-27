@@ -70,6 +70,16 @@ public:
                   ConversionPatternRewriter &rewriter) const override;
 };
 
+class DescriptorGatherConverter
+    : public OpConversionPattern<triton::DescriptorGatherOp> {
+public:
+  using OpConversionPattern<triton::DescriptorGatherOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::DescriptorGatherOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
 class DescriptorScatterConverter
     : public OpConversionPattern<triton::DescriptorScatterOp> {
 public:

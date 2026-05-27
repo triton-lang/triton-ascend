@@ -265,3 +265,42 @@ def test_tensor_descriptor_scatter(X, Y, BLOCK_X, BLOCK_Y, dtype, y):
 
     ref = torch_scatter_rows(input_tensor, idx, y, BLOCK_Y, X, Y)
     torch.testing.assert_close(ref, output, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("X, Y", [(128, 128), (64, 256)])
+@pytest.mark.parametrize("BLOCK_X, BLOCK_Y", [(32, 32), (64, 128), (16, 128), (512, 16)])
+@pytest.mark.parametrize("dtype", ['float32', 'float16', 'bfloat16', 'int32', 'int16'])
+@pytest.mark.parametrize("y", [0, 32, 48])
+def test_tensor_descriptor_gather(X, Y, BLOCK_X, BLOCK_Y, dtype, y):
+
+    @triton.jit
+    def tensor_descriptor_gather_rows_kernel(out_ptr, in_ptr, idx_ptr, y, X: tl.constexpr, Y: tl.constexpr,
+                                             BLOCK_X: tl.constexpr, BLOCK_Y: tl.constexpr):
+        idx = tl.load(idx_ptr + tl.arange(0, BLOCK_X))
+        desc = tl.make_tensor_descriptor(in_ptr, [X, Y], [Y, 1], [1, BLOCK_Y])
+        out = desc.gather(idx, y)
+        tl.store(out_ptr + tl.arange(0, BLOCK_X)[:, None] * BLOCK_Y + tl.arange(0, BLOCK_Y)[None, :], out)
+
+    def torch_gather_rows(input, idx, y, block_y):
+        return input[idx.long(), y:y + block_y]
+
+    device = 'npu'
+    if BLOCK_X > X or y + BLOCK_Y > Y:
+        pytest.skip()
+
+    torch.manual_seed(42)
+    torch_dtype = getattr(torch, dtype)
+    input_tensor = test_common.generate_tensor((X, Y), dtype).npu()
+    output = torch.empty((BLOCK_X, BLOCK_Y), dtype=torch_dtype, device=device)
+
+    idx = torch.randint(BLOCK_X, (BLOCK_X, ), dtype=torch.int32, device=device)
+
+    def alloc_fn(size: int, align: int, steam):
+        return torch.empty(size, dtype=torch.int8, device=device)
+
+    triton.set_allocator(alloc_fn)
+
+    tensor_descriptor_gather_rows_kernel[(1, )](output, input_tensor, idx, y, X, Y, BLOCK_X, BLOCK_Y)
+
+    ref = torch_gather_rows(input_tensor, idx, y, BLOCK_Y)
+    torch.testing.assert_close(ref, output, atol=0, rtol=0)

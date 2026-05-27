@@ -3,7 +3,7 @@ import itertools
 import os
 import shutil
 import pathlib
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 
 import pytest
 import torch
@@ -669,6 +669,106 @@ def test_within_2gb(device, fresh_triton_cache) -> None:
         os.environ["AMDGCN_USE_BUFFER_OPS"] = default_buffer_ops
 
 
+def test_function_arguments(device):
+
+    @triton.jit
+    def func1():
+        return 1
+
+    @triton.jit
+    def func2():
+        return 2
+
+    @triton.jit
+    def func3(x):
+        return x
+
+    @triton.jit
+    def func4(x, y):
+        return x + y
+
+    @triton.jit
+    def kernel(Y, fn: tl.constexpr, fn_args):
+        tl.store(Y, fn(*fn_args))
+
+    y = torch.zeros((5, ), dtype=torch.int32, device=device)
+    kernel[(1, )](y[0], func1, tuple())
+    kernel[(1, )](y[1], func2, tuple())
+    kernel[(1, )](y[2], func3, (3, ))
+    kernel[(1, )](y[3], func4, (3, 4))
+    kernel[(1, )](y[4], func1, tuple())
+    assert len(kernel.device_caches[0][0]) == 4
+    assert y.tolist() == [1, 2, 3, 7, 1]
+
+
+class MockThreadPool(Executor):
+
+    def __init__(self):
+        self.work_queue = []
+
+    def submit(self, fn, *args, **kwargs):
+        future = Future()
+
+        def task():
+            if not future.set_running_or_notify_cancel():
+                return
+
+            try:
+                result = fn(*args, **kwargs)
+                future.set_result(result)
+            except Exception as e:
+                future.set_exception(e)
+
+        self.work_queue.append(task)
+        return future
+
+    def run_one(self):
+        task = self.work_queue.pop(0)
+        task()
+
+    def run_all(self):
+        while self.work_queue:
+            self.run_one()
+
+    def shutdown(self, wait=True, *, cancel_futures=False):
+        self.run_all()
+
+
+def test_async_compile_mock(device, fresh_triton_cache):
+
+    @triton.jit
+    def kernel(Y, a: tl.constexpr):
+        tl.store(Y, a)
+
+    with (
+            MockThreadPool() as pool,
+            triton.AsyncCompileMode(pool),
+    ):
+        a = torch.empty((16, 16), device=device)
+        b = torch.empty((16, 16), dtype=torch.int32, device=device)
+        kernel.warmup(a, 0, grid=(1, ))
+        kernel.warmup(a, 1, grid=(1, ))
+        kernel.warmup(b, 0, grid=(1, ))
+        kernel.warmup(b, 1, grid=(1, ))
+
+        # Nothing has actually compiled yet
+        assert len(kernel.device_caches[0][0]) == 0
+        assert len(pool.work_queue) == 4
+
+        # Duplicates are only submitted once
+        kernel.warmup(a, 0, grid=(1, ))
+        kernel.warmup(a, 1, grid=(1, ))
+        assert len(kernel.device_caches[0][0]) == 0
+        assert len(pool.work_queue) == 4
+
+        pool.run_one()
+        kernel[(1, )](a, 0)
+        assert len(kernel.device_caches[0][0]) == 1
+        assert a[0, 0] == 0.0
+
+        pool.run_all()
+
+
 def test_async_compile(device, fresh_triton_cache):
 
     @triton.jit
@@ -686,7 +786,7 @@ def test_async_compile(device, fresh_triton_cache):
         kernel.warmup(b, 0, grid=(1, ))
         kernel.warmup(b, 1, grid=(1, ))
 
-        assert len(kernel.cache[device]) == 0
+        assert len(kernel.device_caches[0][0]) == 0
 
         kernel[(1, )](b, 1)
         assert b[0, 0] == 1

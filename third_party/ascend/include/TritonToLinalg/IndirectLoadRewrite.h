@@ -36,6 +36,14 @@ using namespace triton;
 inline constexpr const char *RewrittenByIndirectLoadRewriteTAG =
     "RewrittenByIndirectLoadRewrite";
 
+// Tag stamped on tt.load ops that this sub-step has inspected but chose not
+// to rewrite (e.g. last stride == 1, permuted, deinterleave path). Prevents
+// the greedy pattern driver from re-invoking the pattern on the same op,
+// which would re-run PtrAnalysis and accumulate dead helper IR until the
+// driver gives up with PassManager::run failed.
+inline constexpr const char *InspectedByIndirectLoadRewriteTAG =
+    "InspectedByIndirectLoadRewrite";
+
 // V1 SIMT IndirectLoad fast-path rewrite:
 //   Convert tt.load to tt.indirect_load when the load's effective per-axis
 //   strides have a statically-known last-axis stride > 1 with a non-permuted

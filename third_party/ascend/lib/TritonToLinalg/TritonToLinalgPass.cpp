@@ -843,7 +843,15 @@ LogicalResult TritonToLinalgPass::processIndirectLoadRewriteOperations(ModuleOp 
     });
     return failure();
   }
-  return success();
+
+  // Mirror processImplicitPermuteOperations: clean up dead IR left behind by
+  // PtrAnalysis when the pattern decided not to rewrite (e.g. stride==1 case
+  // returns failure() but PtrAnalysis has already inserted helper ExtSI ops).
+  // Without this, downstream passes may trip on stale uses.
+  mlir::PassManager pm(&getContext(), moduleOp.getOperationName());
+  pm.addPass(createCSEPass());
+  pm.addPass(createCanonicalizerPass());
+  return runPipeline(pm, getOperation());
 }
 
 LogicalResult TritonToLinalgPass::processLegalStrideOperations(ModuleOp moduleOp)

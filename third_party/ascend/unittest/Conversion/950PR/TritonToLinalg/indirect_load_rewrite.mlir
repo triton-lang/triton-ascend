@@ -259,6 +259,44 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 }
 
 // -----
+// V1.5 hit (make_tensor_ptr Load + boundary_check + SCALAR-AddPtr base):
+// kernel pattern `tl.make_block_ptr(s + bos*H + i_h, ...)` -- the base is a
+// chain of scalar AddPtr ops, NOT the raw function-arg ptr. V1.5 must unwrap
+// the chain so the lowered call's src is `memref<?xf32>` (full underlying),
+// NOT `memref<1xf32, strided<[1], offset: ?>>` (size-1 view that would make
+// per-element offsets index out of bounds).
+//
+// Regression test for the chunk_local_cumsum precision bug fixed 2026-05-28.
+// CHECK-LABEL: func.func @mtpt_load_scalar_addptr_base
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<128xi64>, tensor<128xi1>, tensor<128xf32>) -> tensor<128xf32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @mtpt_load_scalar_addptr_base(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                %i_b: i32, %i_h: i32, %i_t: i32) {
+    // base = arg0 + i_b*T*H + i_h, where T=2048, H=8 statically
+    %c0 = arith.constant 0 : i32
+    %c8 = arith.constant 8 : i32
+    %c2048 = arith.constant 2048 : i32
+    %bos = arith.muli %i_b, %c2048 : i32
+    %bosH = arith.muli %bos, %c8 : i32
+    %off1 = arith.addi %bosH, %i_h : i32
+    %base = tt.addptr %arg0, %off1 : !tt.ptr<f32>, i32
+    %t = arith.constant 2048 : i64
+    %h = arith.constant 8 : i64
+    %off_t = arith.muli %i_t, %c8 : i32
+    %0 = tt.make_tensor_ptr %base, [%t], [%h], [%off_t]
+         {order = array<i32: 0>} : <tensor<128xf32>>
+    %1 = tt.load %0 {boundaryCheck = array<i32: 0>, padding = 1 : i32}
+         : !tt.ptr<tensor<128xf32>>
+    %sz1 = arith.constant 1 : i64
+    %2 = tt.make_tensor_ptr %arg1, [%t], [%sz1], [%off_t]
+         {order = array<i32: 0>} : <tensor<128xf32>>
+    tt.store %2, %1 : !tt.ptr<tensor<128xf32>>
+    tt.return
+  }
+}
+
+// -----
 // V1.5 hit (make_tensor_ptr Store + boundary_check, low-dim stride 4):
 // Store with mask but no "other" -- 3 operand call: (src, offset, value, mask).
 // CHECK-LABEL: func.func @mtpt_store_boundary

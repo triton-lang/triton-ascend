@@ -75,7 +75,6 @@
 #include "llvm/Support/LogicalResult.h"
 
 #include "triton/Tools/Sys/GetEnv.hpp"
-
 #include <cassert>
 #include <cstdint>
 #include <optional>
@@ -871,7 +870,6 @@ void TritonToLinalgPass::runOnOperation() {
   // so runUseAnalysis won't walk dead ops with missing lattice states.
   {
     PassManager pm(&getContext(), moduleOp.getOperationName());
-    
     //Disable optimizations for the Debug mode
     if (!::triton::tools::getBoolEnv("TRITON_DEBUG")) {
       pm.addPass(createCSEPass());
@@ -958,7 +956,6 @@ void TritonToLinalgPass::runOnOperation() {
 
   // 9. Clean up dead code and simplify IR.
   PassManager pm(&getContext(), moduleOp.getOperationName());
-
   //Disable optimizations for the Debug mode
   if (!::triton::tools::getBoolEnv("TRITON_DEBUG")) {
     pm.addPass(createCSEPass());

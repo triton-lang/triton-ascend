@@ -441,3 +441,180 @@ def test_block_ptr_strided_scatter(dtype, block_m, block_n, stride_m, stride_n):
     else:
         assert torch.equal(actual, ref), \
             f"mismatch count = {(actual != ref).sum().item()}"
+
+
+# ---------------------------------------------------------------------------
+# V1.5: make_block_ptr Load + boundary_check + strided (low-dim stride > 1).
+#   Block intentionally overflows the parent tensor; OOB lanes should get
+#   the padding value (0 for PAD_ZERO, NaN for PAD_NAN), in-bounds lanes
+#   should get the strided gather data.
+# ---------------------------------------------------------------------------
+
+@triton.jit
+def kernel_block_ptr_boundary_load(
+    in_ptr, out_ptr,
+    PARENT_M: tl.constexpr, PARENT_N: tl.constexpr,
+    STRIDE_M: tl.constexpr, STRIDE_N: tl.constexpr,
+    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+    PAD_NAN: tl.constexpr,
+):
+    in_block_ptr = tl.make_block_ptr(
+        base=in_ptr,
+        shape=(PARENT_M, PARENT_N),
+        strides=(STRIDE_M, STRIDE_N),
+        offsets=(0, 0),
+        block_shape=(BLOCK_M, BLOCK_N),
+        order=(1, 0),
+    )
+    out_block_ptr = tl.make_block_ptr(
+        base=out_ptr,
+        shape=(BLOCK_M, BLOCK_N),
+        strides=(BLOCK_N, 1),
+        offsets=(0, 0),
+        block_shape=(BLOCK_M, BLOCK_N),
+        order=(1, 0),
+    )
+    if PAD_NAN:
+        tile = tl.load(in_block_ptr, boundary_check=(0, 1), padding_option="nan")
+    else:
+        tile = tl.load(in_block_ptr, boundary_check=(0, 1), padding_option="zero")
+    tl.store(out_block_ptr, tile)
+
+
+def _ref_boundary_load(src_cpu_flat, parent_m, parent_n,
+                       stride_m, stride_n, block_m, block_n,
+                       pad_value, dtype):
+    torch_dtype = eval("torch." + dtype)
+    out = torch.full((block_m, block_n), pad_value, dtype=torch_dtype)
+    for i in range(block_m):
+        for j in range(block_n):
+            if i < parent_m and j < parent_n:
+                out[i, j] = src_cpu_flat[i * stride_m + j * stride_n]
+    return out
+
+
+@pytest.mark.parametrize("dtype,parent_m,parent_n,stride_m,stride_n,block_m,block_n,pad_nan", [
+    # V1.5 命中: PAD_ZERO, stride_n=4, block 超出 parent
+    ("float32", 5, 3, 12, 4, 8, 8, False),
+    # V1.5 命中: PAD_ZERO, stride_n=3, block 部分越界
+    ("float32", 7, 5, 15, 3, 8, 8, False),
+    # V1.5 命中: PAD_NAN (float)
+    ("float32", 5, 3, 12, 4, 8, 8, True),
+    # V1.5 命中: float16
+    ("float16", 5, 5, 20, 4, 8, 8, False),
+    # 越界都在尾轴: block 完全装得下 axis 0
+    ("float32", 8, 3, 12, 4, 8, 8, False),
+])
+def test_block_ptr_boundary_load(dtype, parent_m, parent_n, stride_m, stride_n,
+                                  block_m, block_n, pad_nan):
+    # in buffer covers all valid (i, j) where i < parent_m, j < parent_n.
+    in_numel = (parent_m - 1) * stride_m + (parent_n - 1) * stride_n + 1
+    src = test_common.generate_tensor((in_numel,), dtype).npu()
+    dst = test_common.generate_tensor((block_m, block_n), dtype).npu()
+
+    kernel_block_ptr_boundary_load[(1,)](
+        src, dst,
+        parent_m, parent_n, stride_m, stride_n,
+        block_m, block_n, pad_nan,
+    )
+
+    pad_value = float("nan") if pad_nan else 0
+    ref = _ref_boundary_load(src.cpu(), parent_m, parent_n,
+                             stride_m, stride_n, block_m, block_n,
+                             pad_value, dtype)
+    actual = dst.cpu()
+    if pad_nan:
+        # NaN locations both ref and actual; compare ignoring NaN via finite mask.
+        finite_mask = torch.isfinite(ref)
+        # In-bounds positions
+        assert torch.allclose(actual[finite_mask], ref[finite_mask],
+                              atol=1e-2, rtol=1e-3)
+        # OOB positions must be NaN in actual too
+        assert torch.isnan(actual[~finite_mask]).all(), \
+            "expected NaN in OOB positions"
+    else:
+        if dtype in ("float32", "float16"):
+            assert torch.allclose(actual, ref, atol=1e-2, rtol=1e-3), \
+                f"max abs diff = {(actual.float() - ref.float()).abs().max().item()}"
+        else:
+            assert torch.equal(actual, ref)
+
+
+# ---------------------------------------------------------------------------
+# V1.5: make_block_ptr Store + boundary_check + strided.
+#   Block intentionally overflows the parent; OOB positions should NOT be
+#   written; in-bounds positions should receive the strided values.
+# ---------------------------------------------------------------------------
+
+@triton.jit
+def kernel_block_ptr_boundary_store(
+    in_ptr, out_ptr,
+    PARENT_M: tl.constexpr, PARENT_N: tl.constexpr,
+    STRIDE_M: tl.constexpr, STRIDE_N: tl.constexpr,
+    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+):
+    in_block_ptr = tl.make_block_ptr(
+        base=in_ptr,
+        shape=(BLOCK_M, BLOCK_N),
+        strides=(BLOCK_N, 1),
+        offsets=(0, 0),
+        block_shape=(BLOCK_M, BLOCK_N),
+        order=(1, 0),
+    )
+    out_block_ptr = tl.make_block_ptr(
+        base=out_ptr,
+        shape=(PARENT_M, PARENT_N),
+        strides=(STRIDE_M, STRIDE_N),
+        offsets=(0, 0),
+        block_shape=(BLOCK_M, BLOCK_N),
+        order=(1, 0),
+    )
+    tile = tl.load(in_block_ptr)
+    tl.store(out_block_ptr, tile, boundary_check=(0, 1))
+
+
+@pytest.mark.parametrize("dtype,parent_m,parent_n,stride_m,stride_n,block_m,block_n", [
+    ("float32", 5, 3, 12, 4, 8, 8),
+    ("float32", 7, 5, 15, 3, 8, 8),
+    ("float16", 5, 5, 20, 4, 8, 8),
+])
+def test_block_ptr_boundary_store(dtype, parent_m, parent_n, stride_m, stride_n,
+                                   block_m, block_n):
+    src = test_common.generate_tensor((block_m, block_n), dtype).npu()
+    out_numel = (parent_m - 1) * stride_m + (parent_n - 1) * stride_n + 1
+    # Generous round-up to guarantee no OOB writes are possible (even if V1.5
+    # logic regresses we won't segfault).
+    out_numel = max(out_numel, block_m * stride_m + block_n * stride_n)
+    dst = test_common.generate_tensor((out_numel,), dtype).npu()
+    # Pre-fill dst with a sentinel so spurious writes to OOB positions would
+    # be detectable (we only assert in-bounds correctness below; the sentinel
+    # itself is informational for future debug).
+    if dtype in ("float32", "float16"):
+        sentinel = float("inf")
+    elif dtype == "int8":
+        sentinel = -128
+    else:
+        sentinel = 0
+    dst.fill_(sentinel)
+
+    kernel_block_ptr_boundary_store[(1,)](
+        src, dst,
+        parent_m, parent_n, stride_m, stride_n,
+        block_m, block_n,
+    )
+
+    actual_cpu = dst.cpu()
+    src_cpu = src.cpu()
+    # Check in-bounds positions got the strided write.
+    for i in range(parent_m):
+        for j in range(parent_n):
+            idx = i * stride_m + j * stride_n
+            if i < block_m and j < block_n:
+                expected = src_cpu[i, j]
+                got = actual_cpu[idx]
+                if dtype in ("float32", "float16"):
+                    assert torch.isclose(got, expected, atol=1e-2, rtol=1e-3), \
+                        f"mismatch at parent[{i},{j}]: got {got} vs {expected}"
+                else:
+                    assert got == expected, \
+                        f"mismatch at parent[{i},{j}]: got {got} vs {expected}"

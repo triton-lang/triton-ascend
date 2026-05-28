@@ -126,12 +126,12 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             ascend.passes.ttir.add_dag_sync(pm)
             ascend.passes.ttir.add_dag_scope(pm)
             #Disable optimizations for the Debug mode
-            if not opt.debug: 
+            if (not opt.debug): 
                 passes.common.add_cse(pm)
                 passes.common.add_canonicalizer(pm)
             ascend.passes.ttir.add_dag_ssbuffer(pm)
             #Disable optimizations for the Debug mode
-            if not opt.debug: 
+            if (not opt.debug): 
                 passes.common.add_cse(pm)
                 passes.common.add_canonicalizer(pm)
 

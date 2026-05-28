@@ -203,3 +203,83 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     tt.return
   }
 }
+
+// -----
+// V1.5 hit (make_tensor_ptr Load + boundary_check + PAD_ZERO, low-dim stride 4):
+// Block 8x8 covers a 7x5 parent => some lanes OOB. Expected: tt.indirect_load
+// with both mask (tensor<8x8xi1>) and other (tensor<8x8xf32>) zero splat.
+// CHECK-LABEL: func.func @mtpt_load_boundary_pad_zero
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<8x8xi64>, tensor<8x8xi1>, tensor<8x8xf32>) -> tensor<8x8xf32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @mtpt_load_boundary_pad_zero(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                              %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %c0 = arith.constant 0 : i32
+    %parent_m = arith.constant 7 : i64
+    %parent_n = arith.constant 5 : i64
+    %stride_m = arith.constant 20 : i64
+    %stride_n = arith.constant 4 : i64
+    %0 = tt.make_tensor_ptr %arg0, [%parent_m, %parent_n], [%stride_m, %stride_n], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<8x8xf32>>
+    %1 = tt.load %0 {boundaryCheck = array<i32: 0, 1>, padding = 1 : i32}
+         : !tt.ptr<tensor<8x8xf32>>
+    %out_stride_m = arith.constant 8 : i64
+    %out_stride_n = arith.constant 1 : i64
+    %sz8 = arith.constant 8 : i64
+    %2 = tt.make_tensor_ptr %arg1, [%sz8, %sz8], [%out_stride_m, %out_stride_n], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<8x8xf32>>
+    tt.store %2, %1 : !tt.ptr<tensor<8x8xf32>>
+    tt.return
+  }
+}
+
+// -----
+// V1.5 hit (make_tensor_ptr Load + boundary_check + PAD_NAN, low-dim stride 4):
+// CHECK-LABEL: func.func @mtpt_load_boundary_pad_nan
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<8x8xi64>, tensor<8x8xi1>, tensor<8x8xf32>) -> tensor<8x8xf32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @mtpt_load_boundary_pad_nan(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                             %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %c0 = arith.constant 0 : i32
+    %parent_m = arith.constant 7 : i64
+    %parent_n = arith.constant 5 : i64
+    %stride_m = arith.constant 20 : i64
+    %stride_n = arith.constant 4 : i64
+    %0 = tt.make_tensor_ptr %arg0, [%parent_m, %parent_n], [%stride_m, %stride_n], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<8x8xf32>>
+    %1 = tt.load %0 {boundaryCheck = array<i32: 0, 1>, padding = 2 : i32}
+         : !tt.ptr<tensor<8x8xf32>>
+    %out_stride_m = arith.constant 8 : i64
+    %out_stride_n = arith.constant 1 : i64
+    %sz8 = arith.constant 8 : i64
+    %2 = tt.make_tensor_ptr %arg1, [%sz8, %sz8], [%out_stride_m, %out_stride_n], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<8x8xf32>>
+    tt.store %2, %1 : !tt.ptr<tensor<8x8xf32>>
+    tt.return
+  }
+}
+
+// -----
+// V1.5 hit (make_tensor_ptr Store + boundary_check, low-dim stride 4):
+// Store with mask but no "other" -- 3 operand call: (src, offset, value, mask).
+// CHECK-LABEL: func.func @mtpt_store_boundary
+// CHECK: call @triton_indirect_store(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<8x8xi64>, tensor<8x8xf32>, tensor<8x8xi1>) -> ()
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @mtpt_store_boundary(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                      %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %c0 = arith.constant 0 : i32
+    %sz8 = arith.constant 8 : i64
+    %sz1 = arith.constant 1 : i64
+    %in_stride_m = arith.constant 8 : i64
+    %0 = tt.make_tensor_ptr %arg0, [%sz8, %sz8], [%in_stride_m, %sz1], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<8x8xf32>>
+    %1 = tt.load %0 : !tt.ptr<tensor<8x8xf32>>
+    %parent_m = arith.constant 7 : i64
+    %parent_n = arith.constant 5 : i64
+    %stride_m = arith.constant 20 : i64
+    %stride_n = arith.constant 4 : i64
+    %2 = tt.make_tensor_ptr %arg1, [%parent_m, %parent_n], [%stride_m, %stride_n], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<8x8xf32>>
+    tt.store %2, %1 {boundaryCheck = array<i32: 0, 1>} : !tt.ptr<tensor<8x8xf32>>
+    tt.return
+  }
+}

@@ -148,7 +148,7 @@ void TritonToStructuredPass::runOnOperation() {
   }
 
   PassManager pm(&getContext(), moduleOp.getOperationName());
-  //Disable optimizations for the Debug mode
+  // Disable optimizations for the Debug mode
   if (!::triton::tools::getBoolEnv("TRITON_DEBUG")) {
     pm.addPass(createCSEPass());
     pm.addPass(createCanonicalizerPass());

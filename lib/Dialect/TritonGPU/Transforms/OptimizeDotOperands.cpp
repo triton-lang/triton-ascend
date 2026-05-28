@@ -323,7 +323,7 @@ public:
     ModuleOp m = getOperation();
 
     OpPassManager pm;
-    //Disable optimizations for the Debug mode
+    // Disable optimizations for the Debug mode
     if (!triton::tools::getBoolEnv("TRITON_DEBUG")) {
       pm.addPass(mlir::createCanonicalizerPass());
     }

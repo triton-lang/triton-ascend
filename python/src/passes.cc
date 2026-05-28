@@ -32,7 +32,7 @@ void init_triton_passes_common(py::module &&m) {
   ADD_PASS_WRAPPER_0("add_sccp", createSCCPPass);
   ADD_PASS_WRAPPER_0("add_symbol_dce", createSymbolDCEPass);
   ADD_PASS_WRAPPER_0("add_inliner", createInlinerPass);
-  //Disable optimizations for the Debug mode
+  // Disable optimizations for the Debug mode
   if (!mlir::triton::tools::getBoolEnv("TRITON_DEBUG")) {
     ADD_PASS_WRAPPER_0("add_canonicalizer", createCanonicalizerPass);
     ADD_PASS_WRAPPER_0("add_cse", createCSEPass);
@@ -51,7 +51,7 @@ void init_triton_passes_ttir(py::module &&m) {
                      createTritonRewriteTensorDescriptorToPointer);
   ADD_PASS_WRAPPER_0("add_loop_unroll", createTritonLoopUnroll);
   ADD_PASS_WRAPPER_0("add_triton_licm", createTritonLoopInvariantCodeMotion);
-  //Disable optimizations for the Debug mode
+  // Disable optimizations for the Debug mode
   if (!mlir::triton::tools::getBoolEnv("TRITON_DEBUG")) {
     ADD_PASS_WRAPPER_0("add_loop_aware_cse", createTritonLoopAwareCSE);
   }

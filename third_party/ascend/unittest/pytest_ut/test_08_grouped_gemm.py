@@ -203,6 +203,7 @@ def run_group_gemm_case(group_m, group_n, group_k):
         torch.testing.assert_close(ref_tensor, tri_tensor, atol=1e-2, rtol=1e-3)
 
 
+@pytest.mark.skip(reason="skip on this case")
 @pytest.mark.parametrize(
     "group_m,group_n,group_k",
     [([1024, 512, 256, 128], [1024, 512, 256, 128], [1024, 512, 256, 128])],

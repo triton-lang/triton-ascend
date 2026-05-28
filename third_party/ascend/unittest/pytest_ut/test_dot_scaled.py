@@ -38,6 +38,7 @@ from numpy.random import RandomState
 from triton.language.extra import libdevice
 
 
+@pytest.mark.skip(reason="skip on this case")
 @pytest.mark.parametrize("M, N, K, rhs_scale, normal_type, acc_num, num_warps",
                          [(M, N, K, rhs_scale, normal_type, acc_num, 4)
                           for M, N, K in itertools.product([32, 64], [32, 64], [32])

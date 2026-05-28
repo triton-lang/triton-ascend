@@ -573,6 +573,62 @@ def kernel_block_ptr_boundary_store(
     tl.store(out_block_ptr, tile, boundary_check=(0, 1))
 
 
+# ---------------------------------------------------------------------------
+# V1.5 regression: kernel pattern `tl.make_block_ptr(s + bos*H + i_h, ...)`
+# where the base is a scalar AddPtr chain (NOT the raw function-arg ptr).
+# Reproduces the chunk_local_cumsum 10x precision bug fixed 2026-05-28.
+# Before the fix, the scalar AddPtr lowered to a size-1 reinterpret_cast view
+# and per-element offsets indexed out of bounds.
+# ---------------------------------------------------------------------------
+
+@triton.jit
+def kernel_chunk_local_cumsum(
+    s, o,
+    T,
+    H: tl.constexpr, BT: tl.constexpr,
+):
+    i_t, i_bh = tl.program_id(0), tl.program_id(1)
+    i_b, i_h = i_bh // H, i_bh % H
+    bos = i_b * T
+    p_s = tl.make_block_ptr(s + bos * H + i_h, (T,), (H,), (i_t * BT,), (BT,), (0,))
+    p_o = tl.make_block_ptr(o + bos * H + i_h, (T,), (H,), (i_t * BT,), (BT,), (0,))
+    b_s = tl.load(p_s, boundary_check=(0,)).to(tl.float32)
+    b_o = tl.cumsum(b_s, axis=0)
+    tl.store(p_o, b_o.to(p_o.dtype.element_ty), boundary_check=(0,))
+
+
+@pytest.mark.parametrize("dtype,B,T,H,chunk_size", [
+    ("float32", 4, 2048, 8, 128),
+    ("float32", 2, 512,  4, 64),
+    ("float16", 4, 1024, 8, 128),
+])
+def test_chunk_local_cumsum_scalar_base(dtype, B, T, H, chunk_size):
+    """Verify scalar-AddPtr-base make_block_ptr path produces correct results."""
+    torch_dtype = eval("torch." + dtype)
+    torch.manual_seed(42)
+    g = torch.randn(B, T, H, device="npu", dtype=torch_dtype) * 0.1
+    out = torch.empty_like(g, dtype=torch.float32)
+
+    NT = (T + chunk_size - 1) // chunk_size
+    grid = (NT, B * H)
+    kernel_chunk_local_cumsum[grid](g, out, T, H=H, BT=chunk_size)
+
+    # Reference: per-chunk cumsum along the T axis for each (b, h).
+    ref = torch.zeros_like(g, dtype=torch.float32)
+    g_cpu = g.cpu()
+    for b in range(B):
+        for h in range(H):
+            for t_chunk in range(NT):
+                start = t_chunk * chunk_size
+                end = min(start + chunk_size, T)
+                sl = g_cpu[b, start:end, h].to(torch.float32)
+                ref[b, start:end, h] = torch.cumsum(sl, dim=0).to("npu")
+
+    diff = (out - ref).abs().max().item()
+    atol = 1e-3 if dtype == "float16" else 1e-4
+    assert diff < atol, f"max abs diff = {diff:.6e}"
+
+
 @pytest.mark.parametrize("dtype,parent_m,parent_n,stride_m,stride_n,block_m,block_n", [
     ("float32", 5, 3, 12, 4, 8, 8),
     ("float32", 7, 5, 15, 3, 8, 8),

@@ -378,9 +378,31 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
 
     // ---- All checks passed: from here on IR mutation is committed. ----
 
-    // Build the scalar base offset: sum_d (mtpt.offsets[d] + adv.offsets[d]) * strides[d].
-    Value scalarBase = rewriter.create<arith::ConstantOp>(
+    // Unwrap any `tt.addptr` chain on the SCALAR base ptr (e.g. when the
+    // kernel writes `tl.make_block_ptr(s + bos*H + i_h, ...)`). If we left
+    // those scalar AddPtrs in place, the AddPtrConverter would lower each
+    // into a `memref.reinterpret_cast ... sizes: [1]` single-element view,
+    // and our tt.indirect_load would receive a size-1 src that the per-axis
+    // offset tensor indexes way out of bounds. By walking the scalar AddPtr
+    // chain here we (a) fold its scalar offsets into `scalarBaseAdj` and
+    // (b) recover the original underlying `!tt.ptr<T>` to use as our src.
+    Value src = mtpt.getBase();
+    Value scalarBaseAdj = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getI64IntegerAttr(0));
+    while (auto addptr = src.getDefiningOp<triton::AddPtrOp>()) {
+        // Only unwrap scalar AddPtr chains -- tensor-of-ptrs AddPtrs are not
+        // expected here (mtpt.getBase() is always a scalar ptr).
+        if (isa<RankedTensorType>(addptr.getPtr().getType())) break;
+        Value off = addptr.getOffset();
+        Value offI64 = ensureI64Scalar(off, loc, rewriter);
+        if (!offI64) return failure();
+        scalarBaseAdj =
+            rewriter.create<arith::AddIOp>(loc, scalarBaseAdj, offI64);
+        src = addptr.getPtr();
+    }
+
+    // Build the scalar base offset: scalarBaseAdj + sum_d (mtpt.offsets[d] + adv.offsets[d]) * strides[d].
+    Value scalarBase = scalarBaseAdj;
     for (int64_t d = 0; d < rank; ++d) {
         Value baseOff = ensureI64Scalar(mtptOffsets[d], loc, rewriter);
         if (!baseOff) return failure();
@@ -446,7 +468,6 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
     }
 
     // ---- Emit tt.indirect_load ----
-    Value src = mtpt.getBase();
     auto indirectLoad = rewriter.create<triton::ascend::IndirectLoadOp>(
         loc, resultType, src, offsetTensor, mask, other);
     indirectLoad->setAttr(RewrittenByIndirectLoadRewriteTAG,
@@ -560,8 +581,23 @@ static LogicalResult tryRewriteBlockPtrStore(triton::StoreOp op,
 
     // ---- All checks passed: from here on IR mutation is committed. ----
 
-    Value scalarBase = rewriter.create<arith::ConstantOp>(
+    // Unwrap scalar AddPtr chain on the base (see comment in
+    // tryRewriteBlockPtrLoad for why this is required to avoid lowering to a
+    // size-1 reinterpret_cast view).
+    Value src = mtpt.getBase();
+    Value scalarBaseAdj = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getI64IntegerAttr(0));
+    while (auto addptr = src.getDefiningOp<triton::AddPtrOp>()) {
+        if (isa<RankedTensorType>(addptr.getPtr().getType())) break;
+        Value off = addptr.getOffset();
+        Value offI64 = ensureI64Scalar(off, loc, rewriter);
+        if (!offI64) return failure();
+        scalarBaseAdj =
+            rewriter.create<arith::AddIOp>(loc, scalarBaseAdj, offI64);
+        src = addptr.getPtr();
+    }
+
+    Value scalarBase = scalarBaseAdj;
     for (int64_t d = 0; d < rank; ++d) {
         Value baseOff = ensureI64Scalar(mtptOffsets[d], loc, rewriter);
         if (!baseOff) return failure();
@@ -615,7 +651,7 @@ static LogicalResult tryRewriteBlockPtrStore(triton::StoreOp op,
                     : boundaryMask;
     }
 
-    Value src = mtpt.getBase();
+
     auto indirectStore = rewriter.create<triton::ascend::IndirectStoreOp>(
         loc, src, offsetTensor, op.getValue(), mask);
     indirectStore->setAttr(RewrittenByIndirectLoadRewriteTAG,

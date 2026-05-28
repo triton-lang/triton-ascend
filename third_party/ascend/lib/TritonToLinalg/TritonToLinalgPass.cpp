@@ -21,6 +21,8 @@
  * THE SOFTWARE.
  */
 
+#include <cstdlib>
+
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
 #include "ascend/include/TritonToLinalg/ArgMinMaxConverter.h"
 #include "ascend/include/TritonToLinalg/FunctionConverter.h"
@@ -748,6 +750,12 @@ LogicalResult TritonToLinalgPass::processImplicitPermuteOperations(ModuleOp modu
 
 LogicalResult TritonToLinalgPass::processIndirectLoadRewriteOperations(ModuleOp moduleOp)
 {
+  // Diagnostic kill-switch (set DISABLE_INDIRECT_LOAD_REWRITE=1 to force the
+  // legacy strided memref.copy lowering for performance comparison).
+  if (const char *env = std::getenv("DISABLE_INDIRECT_LOAD_REWRITE");
+      env && *env && *env != '0') {
+    return success();
+  }
   // V1 gate: only enabled in 950 SIMT mode. On other targets we leave the
   // load to the legacy strided memref.copy lowering.
   if (!(compileOn91095Flag && forceSimtTemplateFlag)) {

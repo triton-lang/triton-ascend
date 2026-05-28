@@ -243,6 +243,24 @@ def test_scalar_ceil_calc(param_list):
     triton_kernel[1, 1, 1](y_cal, x0, N=N)
     test_common.validate_cmp(dtype, y_cal[0], y_ref)
 
+### ceil meta use
+def test_scalar_ceil_meta_use():
+
+    @triton.jit(do_not_specialize=["T"])
+    def triton_kernel(in_ptr0, out_ptr0, T, BS: tl.constexpr):
+        last = tl.ceil(T / BS).to(tl.int32) * BS - BS
+        tmp0 = tl.load(in_ptr0 + last, mask=last < T, other=0.0)
+        tl.store(out_ptr0, tmp0)
+
+    T = 2000
+    BS = 32
+    N = triton.cdiv(T, BS) * BS
+    x0 = torch.arange(N, dtype=torch.float32).npu()
+    y_ref = x0[triton.cdiv(T, BS) * BS - BS]
+    y_cal = torch.empty((1,), dtype=torch.float32).npu()
+    triton_kernel[1, 1, 1](x0, y_cal, T, BS=BS)
+    test_common.validate_cmp("float32", y_cal[0], y_ref)
+
 ### floor
 @pytest.mark.parametrize('param_list',
                          [

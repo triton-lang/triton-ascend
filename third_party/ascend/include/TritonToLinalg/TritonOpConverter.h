@@ -31,11 +31,13 @@
 
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Transforms/DialectConversion.h"
 
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
@@ -107,6 +109,98 @@ public:
 
 template <typename MathOp>
 class ScalarMathCanonicalizer : public OpRewritePattern<MathOp> {
+  // Keep scalar math scalar when it feeds pointer metadata or control flow.
+  static bool isMetaOrControlOperand(Value value, OpOperand &use) {
+    Operation *user = use.getOwner();
+    if (isa<triton::LoadOp>(user)) {
+      return true;
+    }
+    if (auto store = dyn_cast<triton::StoreOp>(user)) {
+      return value == store.getPtr() || value == store.getMask();
+    }
+    if (auto indirectStore =
+            dyn_cast<triton::ascend::IndirectStoreOp>(user)) {
+      return value == indirectStore.getSrc() ||
+             value == indirectStore.getOffsets() ||
+             value == indirectStore.getMask();
+    }
+    if (auto atomic = dyn_cast<triton::AtomicRMWOp>(user)) {
+      return value == atomic.getPtr() || value == atomic.getMask();
+    }
+    if (auto atomic = dyn_cast<triton::AtomicCASOp>(user)) {
+      return value == atomic.getPtr();
+    }
+    if (auto addPtr = dyn_cast<triton::AddPtrOp>(user)) {
+      return value == addPtr.getOffset();
+    }
+    if (isa<triton::MakeTensorPtrOp>(user)) {
+      return use.getOperandNumber() != 0;
+    }
+    if (auto forOp = dyn_cast<scf::ForOp>(user)) {
+      return value == forOp.getLowerBound() ||
+             value == forOp.getUpperBound() || value == forOp.getStep();
+    }
+    if (auto ifOp = dyn_cast<scf::IfOp>(user)) {
+      return value == ifOp.getCondition();
+    }
+    if (auto conditionOp = dyn_cast<scf::ConditionOp>(user)) {
+      return value == conditionOp.getCondition();
+    }
+    if (auto selectOp = dyn_cast<arith::SelectOp>(user)) {
+      return value == selectOp.getCondition();
+    }
+    return false;
+  }
+
+  static bool isKnownDataOperand(Value value, OpOperand &use) {
+    Operation *user = use.getOwner();
+    if (auto store = dyn_cast<triton::StoreOp>(user)) {
+      return value == store.getValue();
+    }
+    if (auto indirectStore =
+            dyn_cast<triton::ascend::IndirectStoreOp>(user)) {
+      return value == indirectStore.getValue();
+    }
+    if (auto atomic = dyn_cast<triton::AtomicRMWOp>(user)) {
+      return value == atomic.getVal();
+    }
+    if (auto atomic = dyn_cast<triton::AtomicCASOp>(user)) {
+      return value == atomic.getCmp() || value == atomic.getVal();
+    }
+    return false;
+  }
+
+  static bool
+  hasMetaOrControlUse(Value value,
+                      llvm::SmallPtrSetImpl<Operation *> &visitedOps,
+                      unsigned depth = 0) {
+    if (depth > 64) {
+      return true;
+    }
+    for (OpOperand &use : value.getUses()) {
+      if (isMetaOrControlOperand(value, use)) {
+        return true;
+      }
+      if (isKnownDataOperand(value, use)) {
+        continue;
+      }
+
+      Operation *user = use.getOwner();
+      if (!visitedOps.insert(user).second) {
+        continue;
+      }
+      if (user->getNumResults() == 0) {
+        return true;
+      }
+      for (Value result : user->getResults()) {
+        if (hasMetaOrControlUse(result, visitedOps, depth + 1)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
 public:
   using OpRewritePattern<MathOp>::OpRewritePattern;
 
@@ -127,6 +221,11 @@ public:
     if (auto linalgOp = op->template getParentOfType<triton::ScanOp>()) {
       return rewriter.notifyMatchFailure(
           op, "ScalarMathCanonicalizer handles op not within tt.scan.");
+    }
+    llvm::SmallPtrSet<Operation *, 16> visitedOps;
+    if (hasMetaOrControlUse(op->getResult(0), visitedOps)) {
+      return rewriter.notifyMatchFailure(
+          op, "ScalarMathCanonicalizer skips meta or control uses.");
     }
     auto loc = op.getLoc();
     llvm::SmallVector<Value> inputs;

@@ -1,0 +1,205 @@
+// RUN: triton-opt %s --triton-to-unstructure='compile-on-910-95=true force-simt-template=true' \
+// RUN:                --triton-to-linalg='compile-on-910-95=true' --split-input-file \
+// RUN: | FileCheck %s
+
+// -----
+// V1 hit (AddPtr, 1D, static stride > 1):
+// tt.addptr(splat ptr, arange*4) -> should become tt.indirect_load -> call @triton_indirect_load
+// CHECK-LABEL: func.func @addptr_stride4_1d
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<256xi64>) -> tensor<256xf32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @addptr_stride4_1d(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                    %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %c4 = arith.constant dense<4> : tensor<256xi32>
+    %0 = tt.make_range {end = 256 : i32, start = 0 : i32} : tensor<256xi32>
+    %1 = arith.muli %0, %c4 : tensor<256xi32>
+    %2 = tt.splat %arg0 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>>
+    %3 = tt.addptr %2, %1 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
+    %4 = tt.load %3 : tensor<256x!tt.ptr<f32>>
+    %5 = tt.splat %arg1 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>>
+    %6 = tt.addptr %5, %0 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
+    tt.store %6, %4 : tensor<256x!tt.ptr<f32>>
+    tt.return
+  }
+}
+
+// -----
+// V1 miss (AddPtr, 1D, stride == 1):
+// arange + splat (no muli > 1) -> NOT rewritten, normal strided memref.copy
+// CHECK-LABEL: func.func @addptr_stride1_1d
+// CHECK-NOT: call @triton_indirect_load
+// CHECK: memref.copy
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @addptr_stride1_1d(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                    %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %0 = tt.make_range {end = 256 : i32, start = 0 : i32} : tensor<256xi32>
+    %1 = tt.splat %arg0 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>>
+    %2 = tt.addptr %1, %0 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
+    %3 = tt.load %2 : tensor<256x!tt.ptr<f32>>
+    %4 = tt.splat %arg1 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>>
+    %5 = tt.addptr %4, %0 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
+    tt.store %5, %3 : tensor<256x!tt.ptr<f32>>
+    tt.return
+  }
+}
+
+// -----
+// V1 hit (make_tensor_ptr, non-permuted, low-dim stride 4):
+// strides=[256, 4], order=[1,0] -> last-dim stride 4 > 1, non-permuted -> V1 rewrites
+// CHECK-LABEL: func.func @mtpt_low_stride4
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<4x8xi64>) -> tensor<4x8xf32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @mtpt_low_stride4(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                   %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %c0 = arith.constant 0 : i32
+    %size_m = arith.constant 64 : i64
+    %size_n = arith.constant 256 : i64
+    %stride_m = arith.constant 256 : i64
+    %stride_n = arith.constant 4 : i64
+    %0 = tt.make_tensor_ptr %arg0, [%size_m, %size_n], [%stride_m, %stride_n], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<4x8xf32>>
+    %1 = tt.load %0 : !tt.ptr<tensor<4x8xf32>>
+    %sz1 = arith.constant 1 : i64
+    %sz_out_m = arith.constant 4 : i64
+    %sz_out_n = arith.constant 8 : i64
+    %2 = tt.make_tensor_ptr %arg1, [%sz_out_m, %sz_out_n], [%sz_out_n, %sz1], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<4x8xf32>>
+    tt.store %2, %1 : !tt.ptr<tensor<4x8xf32>>
+    tt.return
+  }
+}
+
+// -----
+// V1 miss (make_tensor_ptr, non-permuted, low-dim stride 1):
+// strides=[8, 1] = contiguous -> last-dim stride 1, V1 not hit
+// CHECK-LABEL: func.func @mtpt_low_stride1
+// CHECK-NOT: call @triton_indirect_load
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @mtpt_low_stride1(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                   %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %c0 = arith.constant 0 : i32
+    %size_m = arith.constant 4 : i64
+    %size_n = arith.constant 8 : i64
+    %stride_m = arith.constant 8 : i64
+    %stride_n = arith.constant 1 : i64
+    %0 = tt.make_tensor_ptr %arg0, [%size_m, %size_n], [%stride_m, %stride_n], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<4x8xf32>>
+    %1 = tt.load %0 : !tt.ptr<tensor<4x8xf32>>
+    %2 = tt.make_tensor_ptr %arg1, [%size_m, %size_n], [%stride_m, %stride_n], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<4x8xf32>>
+    tt.store %2, %1 : !tt.ptr<tensor<4x8xf32>>
+    tt.return
+  }
+}
+
+// -----
+// V1 miss (make_tensor_ptr, permuted - ImplicitPermute should handle, V1 must stay out):
+// strides=[1, 8], order=[0,1] -> permuted; ImplicitPermute rewrites with tt.trans,
+// V1 sees ImplicitPermuteHandledTAG and bails.
+// CHECK-LABEL: func.func @mtpt_permuted
+// CHECK-NOT: call @triton_indirect_load
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @mtpt_permuted(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %c0 = arith.constant 0 : i32
+    %size_m = arith.constant 4 : i64
+    %size_n = arith.constant 8 : i64
+    %stride_m = arith.constant 1 : i64
+    %stride_n = arith.constant 8 : i64
+    %0 = tt.make_tensor_ptr %arg0, [%size_m, %size_n], [%stride_m, %stride_n], [%c0, %c0]
+         {order = array<i32: 0, 1>} : <tensor<4x8xf32>>
+    %1 = tt.load %0 : !tt.ptr<tensor<4x8xf32>>
+    %out_stride_m = arith.constant 8 : i64
+    %out_stride_n = arith.constant 1 : i64
+    %2 = tt.make_tensor_ptr %arg1, [%size_m, %size_n], [%out_stride_m, %out_stride_n], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<4x8xf32>>
+    tt.store %2, %1 : !tt.ptr<tensor<4x8xf32>>
+    tt.return
+  }
+}
+
+// -----
+// V2 hit (AddPtr Store, 1D, static stride > 1):
+// tt.store(tt.addptr(splat ptr, arange*4), value) -> tt.indirect_store -> call @triton_indirect_store
+// CHECK-LABEL: func.func @addptr_store_stride4_1d
+// CHECK: call @triton_indirect_store(%{{.*}}, %{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<256xi64>, tensor<256xf32>) -> ()
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @addptr_store_stride4_1d(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                          %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %c4 = arith.constant dense<4> : tensor<256xi32>
+    %0 = tt.make_range {end = 256 : i32, start = 0 : i32} : tensor<256xi32>
+    %1 = arith.muli %0, %c4 : tensor<256xi32>
+    %2 = tt.splat %arg0 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>>
+    %3 = tt.addptr %2, %0 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
+    %4 = tt.load %3 : tensor<256x!tt.ptr<f32>>
+    %5 = tt.splat %arg1 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>>
+    %6 = tt.addptr %5, %1 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
+    tt.store %6, %4 : tensor<256x!tt.ptr<f32>>
+    tt.return
+  }
+}
+
+// -----
+// V2 miss (AddPtr Store, stride == 1):
+// CHECK-LABEL: func.func @addptr_store_stride1_1d
+// CHECK-NOT: call @triton_indirect_store
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @addptr_store_stride1_1d(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                          %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %0 = tt.make_range {end = 256 : i32, start = 0 : i32} : tensor<256xi32>
+    %1 = tt.splat %arg0 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>>
+    %2 = tt.addptr %1, %0 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
+    %3 = tt.load %2 : tensor<256x!tt.ptr<f32>>
+    %4 = tt.splat %arg1 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>>
+    %5 = tt.addptr %4, %0 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
+    tt.store %5, %3 : tensor<256x!tt.ptr<f32>>
+    tt.return
+  }
+}
+
+// -----
+// V2 hit (make_tensor_ptr Store, non-permuted, low-dim stride 4):
+// CHECK-LABEL: func.func @mtpt_store_low_stride4
+// CHECK: call @triton_indirect_store(%{{.*}}, %{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<4x8xi64>, tensor<4x8xf32>) -> ()
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @mtpt_store_low_stride4(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                         %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %c0 = arith.constant 0 : i32
+    %size_m = arith.constant 64 : i64
+    %size_n = arith.constant 256 : i64
+    %stride_m = arith.constant 256 : i64
+    %stride_n = arith.constant 4 : i64
+    %sz1 = arith.constant 1 : i64
+    %sz_in_m = arith.constant 4 : i64
+    %sz_in_n = arith.constant 8 : i64
+    %0 = tt.make_tensor_ptr %arg0, [%sz_in_m, %sz_in_n], [%sz_in_n, %sz1], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<4x8xf32>>
+    %1 = tt.load %0 : !tt.ptr<tensor<4x8xf32>>
+    %2 = tt.make_tensor_ptr %arg1, [%size_m, %size_n], [%stride_m, %stride_n], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<4x8xf32>>
+    tt.store %2, %1 : !tt.ptr<tensor<4x8xf32>>
+    tt.return
+  }
+}
+
+// -----
+// V2 miss (make_tensor_ptr Store, contiguous):
+// CHECK-LABEL: func.func @mtpt_store_low_stride1
+// CHECK-NOT: call @triton_indirect_store
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @mtpt_store_low_stride1(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                         %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %c0 = arith.constant 0 : i32
+    %size_m = arith.constant 4 : i64
+    %size_n = arith.constant 8 : i64
+    %stride_m = arith.constant 8 : i64
+    %stride_n = arith.constant 1 : i64
+    %0 = tt.make_tensor_ptr %arg0, [%size_m, %size_n], [%stride_m, %stride_n], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<4x8xf32>>
+    %1 = tt.load %0 : !tt.ptr<tensor<4x8xf32>>
+    %2 = tt.make_tensor_ptr %arg1, [%size_m, %size_n], [%stride_m, %stride_n], [%c0, %c0]
+         {order = array<i32: 1, 0>} : <tensor<4x8xf32>>
+    tt.store %2, %1 : !tt.ptr<tensor<4x8xf32>>
+    tt.return
+  }
+}

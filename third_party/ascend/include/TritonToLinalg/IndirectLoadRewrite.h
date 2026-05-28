@@ -63,6 +63,21 @@ public:
                                   PatternRewriter &rewriter) const override;
 };
 
+// V2: mirror of LoadConverter for tt.store -> tt.indirect_store. Same trigger
+// condition (non-permuted + static last-axis stride > 1, non-deinterleave),
+// same source-op restrictions (AddPtr / make_tensor_ptr / one-level advance),
+// same MLIR-pattern-contract handling via the Inspected/Rewritten tags.
+class StoreConverter : public OpRewritePattern<triton::StoreOp> {
+public:
+    explicit StoreConverter(MLIRContext *context)
+        : OpRewritePattern<triton::StoreOp>(context) {}
+
+    using OpRewritePattern<triton::StoreOp>::OpRewritePattern;
+
+    LogicalResult matchAndRewrite(triton::StoreOp op,
+                                  PatternRewriter &rewriter) const override;
+};
+
 }  // namespace IndirectLoadRewrite
 
 #endif  // TRITON_ASCEND_INDIRECT_LOAD_REWRITE_H

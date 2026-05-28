@@ -755,7 +755,8 @@ LogicalResult TritonToLinalgPass::processIndirectLoadRewriteOperations(ModuleOp 
   }
 
   mlir::RewritePatternSet patterns(&getContext());
-  patterns.add<IndirectLoadRewrite::LoadConverter>(patterns.getContext());
+  patterns.add<IndirectLoadRewrite::LoadConverter,
+               IndirectLoadRewrite::StoreConverter>(patterns.getContext());
 
   if (failed(applyPatternsAndFoldGreedily(moduleOp, std::move(patterns)))) {
     LLVM_DEBUG({

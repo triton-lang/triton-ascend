@@ -202,3 +202,242 @@ def test_multi_d_gather(dtype, blocks, strides):
     else:
         assert torch.equal(actual, ref), \
             f"mismatch count = {(actual != ref).sum().item()}"
+
+
+# ---------------------------------------------------------------------------
+# make_block_ptr (tt.make_tensor_ptr) strided load:
+#   Build a tl.make_block_ptr with non-default strides such that the low-dim
+#   stride is `stride_n`.  When stride_n > 1 V1 should rewrite the load to
+#   tt.indirect_load; when stride_n == 1 V1 should bail.
+#
+# Sanity: this test verifies value correctness only.  For "did V1 actually
+# trigger?" see the FileCheck test under
+#   third_party/ascend/unittest/Conversion/950PR/TritonToLinalg/
+#     indirect_load_rewrite.mlir
+# ---------------------------------------------------------------------------
+
+@triton.jit
+def kernel_block_ptr_strided(
+    in_ptr, out_ptr,
+    src_shape_m, src_shape_n, src_stride_m, src_stride_n,
+    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+):
+    in_block_ptr = tl.make_block_ptr(
+        base=in_ptr,
+        shape=(src_shape_m, src_shape_n),
+        strides=(src_stride_m, src_stride_n),
+        offsets=(0, 0),
+        block_shape=(BLOCK_M, BLOCK_N),
+        order=(1, 0),
+    )
+    out_block_ptr = tl.make_block_ptr(
+        base=out_ptr,
+        shape=(BLOCK_M, BLOCK_N),
+        strides=(BLOCK_N, 1),
+        offsets=(0, 0),
+        block_shape=(BLOCK_M, BLOCK_N),
+        order=(1, 0),
+    )
+    tile = tl.load(in_block_ptr)
+    tl.store(out_block_ptr, tile)
+
+
+def _ref_block_ptr_strided(src_cpu_flat: torch.Tensor,
+                            block_m: int, block_n: int,
+                            stride_m: int, stride_n: int) -> torch.Tensor:
+    coords_i, coords_j = torch.meshgrid(
+        torch.arange(block_m), torch.arange(block_n), indexing="ij")
+    offsets = (coords_i.to(torch.int64) * int(stride_m) +
+               coords_j.to(torch.int64) * int(stride_n))
+    return src_cpu_flat[offsets]
+
+
+@pytest.mark.parametrize("dtype,block_m,block_n,stride_m,stride_n", [
+    # V1 命中: non-permuted, 低维 stride 静态 > 1
+    ("float32",  4,  8, 32,  4),
+    ("float32",  4,  8, 24,  3),
+    ("float16",  8,  8, 64,  8),
+    ("int8",    16,  8, 56,  7),
+    # Deinterleave 接管 (stride_n == 2, 偶数 last block)
+    ("float32",  4,  8, 16,  2),
+    # V1 不动 (stride_n == 1, contiguous)
+    ("float32",  4,  8,  8,  1),
+    ("float16",  8, 16, 16,  1),
+])
+def test_block_ptr_strided(dtype, block_m, block_n, stride_m, stride_n):
+    max_offset = (block_m - 1) * stride_m + (block_n - 1) * stride_n + 1
+    src = test_common.generate_tensor((max_offset,), dtype).npu()
+    dst = test_common.generate_tensor((block_m, block_n), dtype).npu()
+
+    src_shape_m = block_m * stride_m
+    src_shape_n = stride_n * block_n
+
+    kernel_block_ptr_strided[(1,)](
+        src, dst,
+        src_shape_m, src_shape_n, stride_m, stride_n,
+        block_m, block_n,
+    )
+
+    ref = _ref_block_ptr_strided(src.cpu(), block_m, block_n, stride_m, stride_n)
+    actual = dst.cpu()
+    if dtype in ("float32", "float16"):
+        assert torch.allclose(actual, ref, atol=1e-2, rtol=1e-3), \
+            f"max abs diff = {(actual.float() - ref.float()).abs().max().item()}"
+    else:
+        assert torch.equal(actual, ref), \
+            f"mismatch count = {(actual != ref).sum().item()}"
+
+
+# ---------------------------------------------------------------------------
+# V2: tt.store -> tt.indirect_store fast-path. Mirror of the load tests
+# above, but the strided side is the OUTPUT (scatter) instead of the input.
+#
+#   out[i*stride] = in[i]   (1D AddPtr)
+#   out[i*stride_m + j*stride_n] = in[i, j]   (2D block_ptr)
+# ---------------------------------------------------------------------------
+
+@triton.jit
+def kernel_1d_strided_scatter(
+    in_ptr, out_ptr, in_numel, out_numel,
+    XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr, STRIDE: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    xoffset = pid * XBLOCK
+    for xoffset_sub in range(0, XBLOCK, XBLOCK_SUB):
+        xindex = xoffset + xoffset_sub + tl.arange(0, XBLOCK_SUB)
+        dst_idx = xindex * STRIDE
+        load_mask = xindex < in_numel
+        store_mask = dst_idx < out_numel
+        tmp = tl.load(in_ptr + xindex, load_mask)
+        tl.store(out_ptr + dst_idx, tmp, store_mask)
+
+
+def _ref_1d_scatter(src_cpu: torch.Tensor, stride: int,
+                    out_numel: int, dtype: str) -> torch.Tensor:
+    """out[i*stride] = src[i] for i in [0, src.numel())."""
+    torch_dtype = eval("torch." + dtype)
+    out = torch.zeros(out_numel, dtype=torch_dtype)
+    flat = src_cpu.flatten().contiguous()
+    for i in range(flat.numel()):
+        idx = i * stride
+        if idx < out_numel:
+            out[idx] = flat[i]
+    return out
+
+
+@pytest.mark.parametrize("dtype,in_numel,stride,ncore,xblock,xblock_sub", [
+    # V2 命中: stride > 2 (deinterleave doesn't apply)
+    ("float32", 4096, 16, 2, 2048, 256),
+    ("float32", 4096,  8, 2, 2048, 256),
+    ("float32", 4096,  4, 2, 2048, 256),
+    ("float32", 4096,  3, 2, 2048, 256),
+    ("float16", 4096,  6, 2, 2048, 256),
+    ("int8",    4096,  7, 2, 2048, 256),
+    # Deinterleave 接管 (stride==2, 偶数 last block)
+    ("float32", 4096,  2, 2, 2048, 256),
+    # V2 不动 (stride == 1)
+    ("float32", 4096,  1, 2, 2048, 256),
+])
+def test_1d_strided_scatter(dtype, in_numel, stride, ncore, xblock, xblock_sub):
+    out_numel = in_numel * stride
+    assert xblock % xblock_sub == 0
+    assert ncore * xblock >= in_numel
+    src = test_common.generate_tensor((in_numel,), dtype).npu()
+    dst = test_common.generate_tensor((out_numel,), dtype).npu()
+    # Pre-zero dst so non-written positions are deterministic.
+    dst.zero_()
+
+    kernel_1d_strided_scatter[(ncore,)](
+        src, dst, in_numel, out_numel, xblock, xblock_sub, stride,
+    )
+
+    ref = _ref_1d_scatter(src.cpu(), stride, out_numel, dtype)
+    actual = dst.cpu()
+    if dtype in ("float32", "float16"):
+        assert torch.allclose(actual, ref, atol=1e-2, rtol=1e-3), \
+            f"max abs diff = {(actual.float() - ref.float()).abs().max().item()}"
+    else:
+        assert torch.equal(actual, ref), \
+            f"mismatch count = {(actual != ref).sum().item()}"
+
+
+@triton.jit
+def kernel_block_ptr_strided_scatter(
+    in_ptr, out_ptr,
+    dst_shape_m, dst_shape_n, dst_stride_m, dst_stride_n,
+    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
+):
+    # Contiguous in, strided out.
+    in_block_ptr = tl.make_block_ptr(
+        base=in_ptr,
+        shape=(BLOCK_M, BLOCK_N),
+        strides=(BLOCK_N, 1),
+        offsets=(0, 0),
+        block_shape=(BLOCK_M, BLOCK_N),
+        order=(1, 0),
+    )
+    out_block_ptr = tl.make_block_ptr(
+        base=out_ptr,
+        shape=(dst_shape_m, dst_shape_n),
+        strides=(dst_stride_m, dst_stride_n),
+        offsets=(0, 0),
+        block_shape=(BLOCK_M, BLOCK_N),
+        order=(1, 0),
+    )
+    tile = tl.load(in_block_ptr)
+    tl.store(out_block_ptr, tile)
+
+
+def _ref_block_ptr_scatter(src_cpu: torch.Tensor,
+                            block_m: int, block_n: int,
+                            stride_m: int, stride_n: int,
+                            out_numel: int, dtype: str) -> torch.Tensor:
+    """out_flat[i*stride_m + j*stride_n] = src[i, j]"""
+    torch_dtype = eval("torch." + dtype)
+    out = torch.zeros(out_numel, dtype=torch_dtype)
+    for i in range(block_m):
+        for j in range(block_n):
+            idx = i * stride_m + j * stride_n
+            if idx < out_numel:
+                out[idx] = src_cpu[i, j]
+    return out
+
+
+@pytest.mark.parametrize("dtype,block_m,block_n,stride_m,stride_n", [
+    # V2 命中: non-permuted, 低维 stride 静态 > 1
+    ("float32",  4,  8, 32,  4),
+    ("float32",  4,  8, 24,  3),
+    ("float16",  8,  8, 64,  8),
+    ("int8",    16,  8, 56,  7),
+    # Deinterleave 接管
+    ("float32",  4,  8, 16,  2),
+    # V2 不动 (contiguous)
+    ("float32",  4,  8,  8,  1),
+    ("float16",  8, 16, 16,  1),
+])
+def test_block_ptr_strided_scatter(dtype, block_m, block_n, stride_m, stride_n):
+    src = test_common.generate_tensor((block_m, block_n), dtype).npu()
+    out_numel = (block_m - 1) * stride_m + (block_n - 1) * stride_n + 1
+    # Round up to make a contiguous flat buffer of sufficient size.
+    out_numel = max(out_numel, block_m * stride_m)
+    dst = test_common.generate_tensor((out_numel,), dtype).npu()
+    dst.zero_()
+
+    dst_shape_m = block_m * stride_m
+    dst_shape_n = stride_n * block_n
+
+    kernel_block_ptr_strided_scatter[(1,)](
+        src, dst,
+        dst_shape_m, dst_shape_n, stride_m, stride_n,
+        block_m, block_n,
+    )
+
+    ref = _ref_block_ptr_scatter(src.cpu(), block_m, block_n,
+                                  stride_m, stride_n, out_numel, dtype)
+    actual = dst.cpu()
+    if dtype in ("float32", "float16"):
+        assert torch.allclose(actual, ref, atol=1e-2, rtol=1e-3), \
+            f"max abs diff = {(actual.float() - ref.float()).abs().max().item()}"
+    else:
+        assert torch.equal(actual, ref), \
+            f"mismatch count = {(actual != ref).sum().item()}"

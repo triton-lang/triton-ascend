@@ -144,7 +144,7 @@ RUN pip3 install --no-cache-dir \
     wheel \
     pybind11 \
     --index-url ${PIP_SOURCE}
- 
+
 RUN \
     git config --global http.postBuffer 524288000 && \
     git config --global http.lowSpeedLimit 0 && \
@@ -167,7 +167,7 @@ RUN \
       -DLLVM_ENABLE_LLD=ON \
       -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX} && \
     ninja install
-    
+
 # Stage 5: Copy results from previous stages
 FROM library/debian:12 AS official-debian
 

@@ -703,8 +703,8 @@ TritonToLinalgPass::processDescriptorOperations(ModuleOp moduleOp) {
   });
   target.addLegalOp<triton::MakeTensorDescOp>();
   target.addIllegalOp<triton::DescriptorLoadOp, triton::DescriptorStoreOp,
-                    triton::DescriptorScatterOp, triton::DescriptorGatherOp,
-                    triton::DescriptorReduceOp>();
+                      triton::DescriptorScatterOp, triton::DescriptorGatherOp,
+                      triton::DescriptorReduceOp>();
 
   // --- Patterns ---
   mlir::RewritePatternSet patterns(&getContext());

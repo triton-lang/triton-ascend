@@ -305,6 +305,7 @@ def test_tensor_descriptor_gather(X, Y, BLOCK_X, BLOCK_Y, dtype, y):
     ref = torch_gather_rows(input_tensor, idx, y, BLOCK_Y)
     torch.testing.assert_close(ref, output, atol=0, rtol=0)
 
+
 REDUCE_OP = {
     "add": lambda a, b: a + b,
     "min": lambda a, b: torch.minimum(a, b),
@@ -317,17 +318,18 @@ REDUCE_OP = {
 SKIP_KINDS = {"and", "or", "xor"}
 all_kinds = ["add", "min", "max", "and", "or", "xor"]
 kind_parms = [
-    pytest.param(k, marks=pytest.mask.skip(reason=f"skip for bishengir compile failed on a2")) if k in SKIP_KINDS else k
-    for k in all_kinds
-    ]
+    pytest.param(k, marks=pytest.mark.skip(
+        reason=f"skip for bishengir compile failed on a2,succeed on a5")) if k in SKIP_KINDS else k for k in all_kinds
+]
+
 
 @pytest.mark.parametrize("kind", kind_parms)
 @pytest.mark.parametrize("dtype", ['int32'])
 @pytest.mark.parametrize("M_BLOCK,N_BLOCK", [(2, 16)])
-def test_tensor_descriptor_reduce(kind, dtype, M_BLOCK, N_BLOCK): 
+def test_tensor_descriptor_reduce(kind, dtype, M_BLOCK, N_BLOCK):
 
     @triton.jit(debug=True)
-    def kernel(a_ptr,out_ptr, M, N, M_BLOCK: tl.constexpr, N_BLOCK: tl.constexpr, kind: tl.constexpr):
+    def kernel(a_ptr, out_ptr, M, N, M_BLOCK: tl.constexpr, N_BLOCK: tl.constexpr, kind: tl.constexpr):
         moffset = tl.program_id(0) * M_BLOCK
         noffset = tl.program_id(1) * N_BLOCK
 
@@ -335,14 +337,14 @@ def test_tensor_descriptor_reduce(kind, dtype, M_BLOCK, N_BLOCK):
         nidx = noffset + tl.arange(0, N_BLOCK)[None, :]
         idx = midx * N + nidx
         val = tl.load(a_ptr + idx)
-       
+
         desc = tl.make_tensor_descriptor(
             out_ptr,
             shape=[M, N],
             strides=[N, 1],
             block_shape=[M_BLOCK, N_BLOCK],
         )
-   
+
         if kind == "add":
             desc.atomic_add([moffset, noffset], val)
         elif kind == "min":
@@ -357,7 +359,7 @@ def test_tensor_descriptor_reduce(kind, dtype, M_BLOCK, N_BLOCK):
             tl.static_assert(kind == "xor")
             desc.atomic_xor([moffset, noffset], val)
 
-    M, N = M_BLOCK * 2, N_BLOCK * 2  
+    M, N = M_BLOCK * 2, N_BLOCK * 2
     inp = test_common.generate_tensor((M, N), dtype).npu()
     out = test_common.generate_tensor((M, N), dtype).npu()
 

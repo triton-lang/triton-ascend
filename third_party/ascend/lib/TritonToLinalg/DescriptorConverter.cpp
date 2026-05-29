@@ -153,7 +153,8 @@ Value generatePtrFromOffsetRanges(OpBuilder &builder, Location loc,
         loc, indexTensorType, offsetWithStride);
 
     // Add to the pointer
-    ptr = builder.create<triton::AddPtrOp>(loc, ptrTensorType, ptr, broadcasted);
+    ptr =
+        builder.create<triton::AddPtrOp>(loc, ptrTensorType, ptr, broadcasted);
   }
 
   return ptr;
@@ -537,29 +538,29 @@ std::optional<RMWOp> translateReduceKind(DescriptorReduceKind kind,
 }
 
 LogicalResult DescriptorReduceConverter::matchAndRewrite(
-  triton::DescriptorReduceOp op, OpAdaptor adaptor,
-  ConversionPatternRewriter &rewriter) const {
-    auto loc = op.getLoc();
-    auto descTy = op.getDesc().getType();
-    const auto blockShape = descTy.getBlockType().getShape();
-    auto desc = unpackDescriptor(descTy, adaptor.getDesc(), rewriter);
-    auto offsets = castToI64(rewriter, op.getIndices());
-    auto rmwOp = translateReduceKind(op.getKind(), descTy);
-    if (!rmwOp) {
-      std::string msgstring;
-      llvm::raw_string_ostream msg(msgstring);
-      msg << "Cannot fallback on descriptor atomic op, unsupported for type "
-          << descTy.getBlockType().getElementType();
-      return op->emitError(msgstring);
-    }
+    triton::DescriptorReduceOp op, OpAdaptor adaptor,
+    ConversionPatternRewriter &rewriter) const {
+  auto loc = op.getLoc();
+  auto descTy = op.getDesc().getType();
+  const auto blockShape = descTy.getBlockType().getShape();
+  auto desc = unpackDescriptor(descTy, adaptor.getDesc(), rewriter);
+  auto offsets = castToI64(rewriter, op.getIndices());
+  auto rmwOp = translateReduceKind(op.getKind(), descTy);
+  if (!rmwOp) {
+    std::string msgstring;
+    llvm::raw_string_ostream msg(msgstring);
+    msg << "Cannot fallback on descriptor atomic op, unsupported for type "
+        << descTy.getBlockType().getElementType();
+    return op->emitError(msgstring);
+  }
 
-    rewriter.create<triton::AtomicRMWOp>(
-        loc, descTy.getSignlessBlockType(), *rmwOp,
-        generatePtr(rewriter, loc, blockShape, desc, offsets), op.getSrc(),
-        generateMask(rewriter, loc, blockShape, desc, offsets),
-        MemSemantic::ACQUIRE_RELEASE, MemSyncScope::GPU);
-    op.erase();
-    return success();
+  rewriter.create<triton::AtomicRMWOp>(
+      loc, descTy.getSignlessBlockType(), *rmwOp,
+      generatePtr(rewriter, loc, blockShape, desc, offsets), op.getSrc(),
+      generateMask(rewriter, loc, blockShape, desc, offsets),
+      MemSemantic::ACQUIRE_RELEASE, MemSyncScope::GPU);
+  op.erase();
+  return success();
 }
 
 } // namespace DescriptorConverter

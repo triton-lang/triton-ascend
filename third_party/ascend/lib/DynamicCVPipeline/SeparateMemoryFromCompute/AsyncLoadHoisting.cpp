@@ -212,7 +212,7 @@ static void collectAddressGenerationOps(Operation *op, int64_t expectedBlockId,
           for (auto result : user->getResults()) {
             for (auto *subviewUser : result.getUsers()) {
               if (auto copyOp = llvm::dyn_cast<memref::CopyOp>(subviewUser);
-                  visited.insert(copyOp).second) {
+                  copyOp && visited.insert(copyOp).second) {
                 chain.push_back(copyOp);
                 collectAddressGenerationOps(copyOp, expectedBlockId, visited,
                                             chain);
@@ -224,10 +224,10 @@ static void collectAddressGenerationOps(Operation *op, int64_t expectedBlockId,
       }
     }
 
-    visited.insert(defOp);
-    chain.push_back(defOp);
-
-    collectAddressGenerationOps(defOp, expectedBlockId, visited, chain);
+    if (visited.insert(defOp).second) {
+      chain.push_back(defOp);
+      collectAddressGenerationOps(defOp, expectedBlockId, visited, chain);
+    }
   }
 }
 // Returns full chain and filtered chain (only ops with same block_id)

@@ -823,20 +823,14 @@ void TritonToLinalgPass::runOnOperation() {
     });
   existDotFlag = existDot;
 
+  // NOTE: existSIMTOp is intentionally computed AFTER
+  // processIndirectLoadRewriteOperations below, because that step materializes
+  // triton::ascend::IndirectLoadOp/IndirectStoreOp (which isSIMTOp() counts).
+  // Walking here (before the rewrite) would miss them and mislabel the kernel
+  // parallel_mode as "simd" instead of "mix_simd_simt"; then enable_simt would
+  // be false and the launch would not reserve localMemorySize for the SIMT
+  // templates -> VEC UB out-of-bounds (error 341) at runtime on mix-CV kernels.
   bool existSIMTOp = false;
-  moduleOp.walk([&](Operation *op) {
-    if (isSIMTOp(op)) {
-      existSIMTOp = true;
-      LLVM_DEBUG({
-        auto &os = llvm::dbgs();
-        os << "Found SIMT op in function: ";
-        os << op->getName();
-        os << "\n";
-      });
-      return WalkResult::interrupt();
-    }
-    return WalkResult::advance();
-  });
 
   // Execute tensor descriptor operations conversion
   if (failed(processDescriptorOperations(moduleOp))) {
@@ -860,6 +854,23 @@ void TritonToLinalgPass::runOnOperation() {
     });
     signalPassFailure();
   }
+
+  // Detect SIMT ops AFTER the indirect-load rewrite so the freshly materialized
+  // IndirectLoadOp/IndirectStoreOp are counted (drives parallel_mode ->
+  // "mix_simd_simt" -> enable_simt -> launch reserves localMemorySize).
+  moduleOp.walk([&](Operation *op) {
+    if (isSIMTOp(op)) {
+      existSIMTOp = true;
+      LLVM_DEBUG({
+        auto &os = llvm::dbgs();
+        os << "Found SIMT op in function: ";
+        os << op->getName();
+        os << "\n";
+      });
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
 
   // 0. Annotate Memory-Related Triton FuncOps with tensor_kind (used by profiling).
   {

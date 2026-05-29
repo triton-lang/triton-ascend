@@ -24,6 +24,7 @@
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -35,6 +36,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
+#include "mlir/IR/Matchers.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -56,6 +58,7 @@ class FixpipeOptPass : public PassWrapper<FixpipeOptPass, OperationPass<ModuleOp
     void runOnOperation() override;
 
     llvm::StringRef getArgument() const final { return "fixpipe-opt"; }
+    void getDependentDialects(DialectRegistry &registry) const override;
 
     llvm::StringRef getDescription() const final
     {
@@ -64,10 +67,14 @@ class FixpipeOptPass : public PassWrapper<FixpipeOptPass, OperationPass<ModuleOp
 
   private:
     bool matchFixpipePattern(linalg::MatmulOp matmulOp, SmallVector<Operation *> &matchedOps);
+    bool isFixpipeCastPattern(Operation *op, SmallVector<Operation *> &matchedOps);
+    bool isFixpipeMulfPattern(Operation *op, SmallVector<Operation *> &matchedOps);
+    bool isStoreToGM(Operation *materializeOp, SmallVector<Operation *> &matchedOps);
     bool applyFixpipeOpt(SmallVector<Operation *> &matchedOps, const CVPipeline::MemoryDependenceGraph &memGraph,
                          CVPipeline::ComputeBlockIdManager &bm);
     bool isSubviewFromGlobalMemory(memref::SubViewOp subviewOp, SmallVector<Operation *> &matchedOps);
     bool isValidTrunc(Operation *op);
+    bool isValidMul(Operation *op, Value matmulValue, SmallVector<Operation *> &matchedOps);
 };
 
 namespace {
@@ -208,6 +215,66 @@ bool FixpipeOptPass::isValidTrunc(Operation *op)
     return false;
 }
 
+static bool isScalarLike(Value value)
+{
+    Type type = value.getType();
+    auto shapedType = dyn_cast<ShapedType>(type);
+
+    // 1. scalar
+    if (!shapedType) {
+        return type.isIntOrIndexOrFloat();
+    }
+
+    // 2. tensor<f32> with empty shape is also considered scalar-like
+    ArrayRef<int64_t> shape = shapedType.getShape();
+    if (shape.empty()) {
+        return true;
+    }
+
+    // 3. tensor with constant value
+    Attribute attr;
+    if (matchPattern(value, m_Constant(&attr)))
+    {
+        auto denseAttr = dyn_cast<DenseIntOrFPElementsAttr>(attr);
+        return denseAttr && denseAttr.isSplat() && denseAttr.getElementType().isIntOrIndexOrFloat();
+
+    }
+    
+    // 4. tensor with one element
+    return llvm::all_of(shape, [](int64_t dim) { return dim == 1; });
+}
+
+bool FixpipeOptPass::isValidMul(Operation *op, Value matmulValue, SmallVector<Operation *> &matchedOps)
+{
+    // Just filter: arith.mulf(scalar)
+    if (!isa<arith::MulFOp>(op) && !isa<arith::MulIOp>(op)) {
+        return false;
+    }
+    auto quantScalarValue = op->getOperand(0) == matmulValue ? op->getOperand(1) : op->getOperand(0);
+    if (isScalarLike(quantScalarValue)) {
+        return true;
+    }
+
+    // From one fill op with constant value or args....
+    if(auto defOp = quantScalarValue.getDefiningOp()) {
+        if (auto fillOp = dyn_cast<linalg::FillOp>(defOp)) {
+            auto operands = fillOp->getOperands();
+            if (!operands.empty()) {
+                Value fillValue = operands[0];
+                if (isScalarLike(fillValue)) {
+                    return true;
+                }
+                else {
+                    LOG_DEBUG("Fill operand is not scalar-like, NOT match. fill=" << *fillOp);
+
+                    return false;
+                }
+            }
+        }
+    }   
+    return false;
+}
+
 bool FixpipeOptPass::isSubviewFromGlobalMemory(memref::SubViewOp subviewOp, SmallVector<Operation *> &matchedOps)
 {
     // Subview ops may be nested many layers deep through reinterpretation or other subviews.
@@ -240,6 +307,35 @@ bool FixpipeOptPass::isSubviewFromGlobalMemory(memref::SubViewOp subviewOp, Smal
     return false;
 }
 
+bool FixpipeOptPass::isStoreToGM(Operation* storeOp,
+                                 SmallVector<Operation *> &matchedOps)
+{
+    memref::SubViewOp subviewOp = nullptr;
+    if (auto materializeOp = dyn_cast<bufferization::MaterializeInDestinationOp>(storeOp)) {
+        Value destMemref = materializeOp.getDest();
+        subviewOp = destMemref.getDefiningOp<memref::SubViewOp>();
+    } else if(auto hivmStore = dyn_cast<hivm::StoreOp>(storeOp)) {
+        auto dest = hivmStore.getDst();
+        subviewOp = dest.getDefiningOp<memref::SubViewOp>();
+    } else {
+        LOG_DEBUG("Cannot find store op, NOT match");
+        return false;
+    }
+
+
+    if (!subviewOp) {
+        LOG_DEBUG("store destination is not from memref.subview, NOT match");
+        return false;
+    }
+    matchedOps.push_back(storeOp);
+    matchedOps.push_back(subviewOp);
+    if (!isSubviewFromGlobalMemory(subviewOp, matchedOps)) {
+        LOG_DEBUG("Subview is not from global memory (GM), NOT match.");
+        return false;
+    }
+    return true;
+}
+
 /** To use fixpipe optimization, the pattern should be like below:
     linalg.matmul
         ↓
@@ -250,22 +346,8 @@ bool FixpipeOptPass::isSubviewFromGlobalMemory(memref::SubViewOp subviewOp, Smal
     bufferization.materialize_in_destination memref.subview(gm)
     After optimization, all these ops will be in same block with matmul and set core_type to CUBE.
  */
-bool FixpipeOptPass::matchFixpipePattern(linalg::MatmulOp matmulOp, SmallVector<Operation *> &matchedOps)
+bool FixpipeOptPass::isFixpipeCastPattern(Operation *truncOp, SmallVector<Operation *> &matchedOps)
 {
-    Value matmulResult = matmulOp.getResult(0);
-    if (!matmulResult.hasOneUse()) {
-        LOG_DEBUG("Matmul not only one user, NOT match.");
-        return false;
-    }
-    auto maybeTrunc = *matmulResult.getUsers().begin();
-    Operation *truncOp = nullptr;
-    if (isValidTrunc(maybeTrunc)) {
-        truncOp = maybeTrunc;
-    } else {
-        LOG_DEBUG("Cannot find valid trunc op (f32->bf16/f16 or i32->i8), NOT match.");
-        return false;
-    }
-
     Value truncResult = truncOp->getResult(0);
     if (!truncResult.hasOneUse()) {
         LOG_DEBUG("Trunc not only one user, NOT match.");
@@ -295,24 +377,93 @@ bool FixpipeOptPass::matchFixpipePattern(linalg::MatmulOp matmulOp, SmallVector<
         return false;
     }
 
-    Value destMemref = materializeOp.getDest();
-    auto subviewOp = destMemref.getDefiningOp<memref::SubViewOp>();
-    if (!subviewOp) {
-        LOG_DEBUG("Materialize destination is not from memref.subview, NOT match");
-        return false;
-    }
-
-    matchedOps.push_back(matmulOp);
     matchedOps.push_back(truncOp);
     matchedOps.push_back(extractSliceOp);
-    matchedOps.push_back(materializeOp);
-    matchedOps.push_back(subviewOp);
-
-    if (!isSubviewFromGlobalMemory(subviewOp, matchedOps)) {
-        LOG_DEBUG("Subview is not from global memory (GM), NOT match.");
+    if (!isStoreToGM(materializeOp, matchedOps)) {
+        LOG_DEBUG("Not store to GM pattern, NOT match.");
         return false;
     }
     return true;
+}
+
+/** To use fixpipe optimization, the pattern should be like below:
+    linalg.matmul
+        ↓
+    arith.mulf (mul one scalar-like value for quantization)
+        ↓
+    tensor.extract_slice
+        ↓
+    bufferization.materialize_in_destination memref.subview(gm)
+    After optimization, all these ops will be in same block with matmul and set core_type to CUBE.
+ */
+bool FixpipeOptPass::isFixpipeMulfPattern(Operation *mulfOp, SmallVector<Operation *> &matchedOps)
+{
+    Value mulfResult = mulfOp->getResult(0);
+    if (!mulfResult.hasOneUse()) {
+        LOG_DEBUG("Mulf not only one user, NOT match.");
+        return false;
+    }
+    auto maybeExtract = *mulfResult.getUsers().begin();
+    tensor::ExtractSliceOp extractSliceOp = nullptr;
+    if (auto extract = dyn_cast<tensor::ExtractSliceOp>(maybeExtract)) {
+        extractSliceOp = extract;
+    } else {
+        LOG_DEBUG("Cannot find extract slice op, NOT match");
+        return false;
+    }
+
+    Value extractResult = extractSliceOp.getResult();
+    if (!extractResult.hasOneUse()) {
+        LOG_DEBUG("Extract Slice not only one user, NOT match.");
+        return false;
+    }
+    
+    matchedOps.push_back(mulfOp);
+    matchedOps.push_back(extractSliceOp);
+    if (!isStoreToGM(*extractResult.getUsers().begin(), matchedOps)) {
+        LOG_DEBUG("Not store to GM pattern, NOT match.");
+        return false;
+    }
+    return true;
+}
+
+/** Match fixpipe optimization patterns starting from a matmul operation.
+ Pattern 1 (Cast Pattern):
+   linalg.matmul -> arith.truncf/i -> tensor.extract_slice ->
+   bufferization.materialize_in_destination(memref.subview(gm))
+
+ Pattern 2 (Quantization Pattern):
+   linalg.matmul -> arith.mulf -> tensor.extract_slice ->
+   bufferization.materialize_in_destination(memref.subview(gm))
+ */
+bool FixpipeOptPass::matchFixpipePattern(linalg::MatmulOp matmulOp, SmallVector<Operation *> &matchedOps)
+{
+    LOG_DEBUG("Check matmul op: " << *matmulOp);
+    Value matmulResult = matmulOp.getResult(0);
+    if (!matmulResult.hasOneUse()) {
+        LOG_DEBUG("Matmul not only one user, NOT match.");
+        return false;
+    }
+    matchedOps.push_back(matmulOp);
+
+    auto matmulUser = *matmulResult.getUsers().begin();
+
+    if (isValidTrunc(matmulUser)) {
+        if (isFixpipeCastPattern(matmulUser, matchedOps)) {
+            return true;
+        }
+    }
+    else if (isValidMul(matmulUser, matmulResult, matchedOps))
+    {
+        if (isFixpipeMulfPattern(matmulUser, matchedOps)) {
+            return true;
+        }
+    } else {
+        LOG_DEBUG("Cannot find valid consumer op (trunc or mulf), NOT match.");
+        return false;
+    }
+
+    return false;
 }
 
 bool FixpipeOptPass::applyFixpipeOpt(SmallVector<Operation *> &matchedOps,
@@ -336,6 +487,12 @@ bool FixpipeOptPass::applyFixpipeOpt(SmallVector<Operation *> &matchedOps,
         op->setAttr(CVPipeline::kCoreType, StringAttr::get(op->getContext(), "CUBE"));
     }
     return true;
+}
+
+void FixpipeOptPass::getDependentDialects(DialectRegistry &registry) const
+{
+    registry
+        .insert<hivm::HIVMDialect>();
 }
 
 void FixpipeOptPass::runOnOperation()

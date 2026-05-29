@@ -42,7 +42,6 @@ namespace {
 
 static constexpr llvm::StringLiteral interceptrFunc[] {
   "_attn_fwd",
-  "_attn_bwd",
   "_kernel_matmul_fp8_row_non_persistent",
   "bmm_kernel",
   "lightning_indexer_grad_kernel",
@@ -50,7 +49,6 @@ static constexpr llvm::StringLiteral interceptrFunc[] {
   "backward_dq",
   "backward_sum_o_do",
   "forward_kernel",
-  "bwd_qkv_kernel",
 };
 
 static LogicalResult verifyFuncNames(ModuleOp module)

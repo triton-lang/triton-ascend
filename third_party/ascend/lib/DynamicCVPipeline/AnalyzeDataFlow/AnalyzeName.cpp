@@ -51,6 +51,8 @@ static constexpr llvm::StringLiteral interceptrFunc[] {
   "backward_sum_o_do",
   "forward_kernel",
   "bwd_qkv_kernel",
+  "parallel_rebased_bwd_kernel",
+  "parallel_rebased_fwd_kernel",
 };
 
 static LogicalResult verifyFuncNames(ModuleOp module)

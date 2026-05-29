@@ -414,10 +414,17 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     pm.addPass(mlir::triton::createDAGSSBufferPass());
   });
 
-  m.def("set_buffer_count", [](int type, int count) {
-    auto depType = static_cast<mlir::triton::BufferCountManager::DepType>(type);
-    mlir::triton::BufferCountManager::getInstance().setBufferCount(depType,
-                                                                   count);
+  m.def("set_buffer_count", [](const std::string &type, int count) {
+    if (type == "INTRA") {
+      mlir::triton::BufferCountManager::getInstance().setBufferCount(
+          mlir::triton::BufferCountManager::DepType::IntraCore, count);
+    } else if (type == "INTER") {
+      mlir::triton::BufferCountManager::getInstance().setBufferCount(
+          mlir::triton::BufferCountManager::DepType::InterCore, count);
+    } else if (type == "LOAD") {
+      mlir::triton::BufferCountManager::getInstance().setBufferCount(
+          mlir::triton::BufferCountManager::DepType::LoadStore, count);
+    }
   });
 }
 

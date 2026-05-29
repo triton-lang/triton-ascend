@@ -27,7 +27,11 @@
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Analysis/AliasAnalysis.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -41,131 +45,126 @@ namespace mlir {
 namespace triton {
 
 // Core type enumeration for operations
-enum OpCoreType {
-  OP_UNDETERMINED = 0,
-  OP_CUBE_ONLY = 1,
-  OP_VECTOR_ONLY = 2,
-  OP_CUBE_AND_VECTOR = 3
-};
+enum OpCoreType { OP_UNDETERMINED = 0, OP_CUBE_ONLY = 1, OP_VECTOR_ONLY = 2, OP_CUBE_AND_VECTOR = 3 };
 
 // OpClassifierPass for categorizing operations as CUBE or VECTOR
-class OpClassifierPass
-    : public PassWrapper<OpClassifierPass, OperationPass<ModuleOp>> {
+class OpClassifierPass : public PassWrapper<OpClassifierPass, OperationPass<ModuleOp>> {
 public:
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(OpClassifierPass)
+    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(OpClassifierPass)
 
-  // Constructor
-  OpClassifierPass() = default;
+    // Constructor
+    OpClassifierPass() = default;
 
-  // Run the pass
-  void runOnOperation() override;
+    // Run the pass
+    void runOnOperation() override;
 
-  // Return the pass argument name
-  static constexpr ::llvm::StringRef getArgumentName() {
-    return "op-classifier";
-  }
-  ::llvm::StringRef getArgument() const override { return "op-classifier"; }
-  ::llvm::StringRef getDescription() const override {
-    return "Classify operations as CUBE or VECTOR for dynamic CV pipeline";
-  }
-  ::llvm::StringRef getName() const override { return "OpClassifierPass"; }
+    // Return the pass argument name
+    static constexpr ::llvm::StringRef getArgumentName() { return "op-classifier"; }
+    ::llvm::StringRef getArgument() const override { return "op-classifier"; }
+    ::llvm::StringRef getDescription() const override
+    {
+        return "Classify operations as CUBE or VECTOR for dynamic CV pipeline";
+    }
+    ::llvm::StringRef getName() const override { return "OpClassifierPass"; }
 
 private:
-  // Map from operation to its core type
-  llvm::DenseMap<Operation *, OpCoreType> opCoreTypes;
+    // Map from operation to its core type
+    llvm::DenseMap<Operation *, OpCoreType> opCoreTypes;
 
-  // All operations in the module
-  llvm::SmallVector<Operation *> allOps;
+    // All operations in the module
+    llvm::SmallVector<Operation *> allOps;
 
-  // Seed operations for CUBE upstream propagation
-  llvm::SmallVector<Operation *> cubeSeeds;
+    // Seed operations for CUBE upstream propagation
+    llvm::SmallVector<Operation *> cubeSeeds;
 
-  std::shared_ptr<AliasAnalysis> aliasAnalysis;
-  std::shared_ptr<CVPipeline::MemoryDependenceGraph> memDepGraph;
+    std::shared_ptr<AliasAnalysis> aliasAnalysis;
+    std::shared_ptr<CVPipeline::MemoryDependenceGraph> memDepGraph;
 
-  // Mark an operation as CUBE
-  void markCube(Operation *op);
+    // Mark an operation as CUBE
+    void markCube(Operation *op);
 
-  // Pattern matching for CUBE operations
-  int patternMatchCUBE();
+    // Pattern matching for CUBE operations
+    int patternMatchCUBE();
 
-  // Upstream pattern matching helpers
-  void matchToTensorPattern(Operation *def);
-  void matchTransposePattern(Operation *def);
-  void matchFillPattern(Operation *def);
+    // Upstream pattern matching helpers
+    void matchToTensorPattern(Operation *def);
+    void matchTransposePattern(Operation *def);
+    void matchFillPattern(Operation *def);
 
-  // Downstream pattern matching helpers
-  void matchStorePattern(Operation *user);
-  void matchExtractSlicePattern(Operation *user);
-  void matchMaterializePattern(Operation *user);
+    // Downstream pattern matching helpers
+    void matchStorePattern(Operation *user);
+    void matchExtractSlicePattern(Operation *user);
+    void matchMaterializePattern(Operation *user);
 
-  // Propagate CUBE core type upstream
-  int propagateCubeUpstream();
+    // Propagate CUBE core type upstream
+    int propagateCubeUpstream();
 
-  // Get upstream operations based on both SSA and memory dependencies
-  void
-  getUpstreamOpsWithMemoryDeps(Operation *cur,
-                               llvm::SmallVectorImpl<Operation *> &upstreamOps);
+    // Propagate CUBE upstream for a specific operation
+    void propagateCubeUpstreamForOp(Operation *startOp);
 
-  // Step 3: Mark remaining operations as VECTOR
-  int markRemainingAsVector();
+    // Helper: Handle fill op in scf.if - if all ops in scf.if are CUBE, mark scf.if and propagate upstream
+    void handleFillInScfIf(Operation *fillOp);
 
-  // Step 4: Propagate VECTOR core type upstream
-  int propagateVectorUpstream();
+    // Get upstream operations based on both SSA and memory dependencies
+    void getUpstreamOpsWithMemoryDeps(Operation *cur, llvm::SmallVectorImpl<Operation *> &upstreamOps);
 
-  // Initialize the pass
-  void initializePass(ModuleOp module);
+    // Step 3: Mark remaining operations as VECTOR
+    int markRemainingAsVector();
 
-  // Get the core type of an operation
-  OpCoreType getCoreType(Operation *op) const;
+    void markUpstreamsOfImplicitTranspose();
 
-  // Set the core type of an operation
-  void setCoreType(Operation *op, OpCoreType coreType);
+    // Step 4: Propagate VECTOR core type upstream
+    int propagateVectorUpstream();
 
-  // Helper: join core types into comma-separated string
-  std::string joinCoreTypes(const std::vector<OpCoreType> &coreTypes);
+    // Initialize the pass
+    void initializePass(ModuleOp module);
 
-  // Helper: check if propagation should stop at this operation for yield
-  bool shouldStopPropagationForYield(Operation *op, OpCoreType targetCoreType);
+    // Get the core type of an operation
+    OpCoreType getCoreType(Operation *op) const;
 
-  // Helper: propagate core_type upward for yield operand
-  void propagateCoreTypeUpwardForYield(Operation *startOp,
-                                       OpCoreType targetCoreType);
+    // Set the core type of an operation
+    void setCoreType(Operation *op, OpCoreType coreType);
 
-  // Step 5: Handle else region yield of scf.if by extracting core_type from
-  // then region yield
-  bool handleYieldFromElseRegion(std::vector<OpCoreType> &coreTypes,
-                                 unsigned operandIndex,
-                                 Operation *thenYieldForElse, Value &operand);
+    // Helper: join core types into comma-separated string
+    std::string joinCoreTypes(const std::vector<OpCoreType> &coreTypes);
 
-  // Step 6: Handle CUBE_AND_VECTOR operations
-  int handleCubeAndVector();
+    // Helper: check if propagation should stop at this operation for yield
+    bool shouldStopPropagationForYield(Operation *op, OpCoreType targetCoreType);
 
-  // Helper: split CUBE_AND_VECTOR operation into CUBE and VECTOR versions
-  void splitOperationForCubeAndVector(
-      Operation *op, llvm::DenseSet<Operation *> &processedOps,
-      llvm::DenseMap<Operation *, Operation *> &opToVectorClone);
+    // Helper: propagate core_type upward for yield operand
+    void propagateCoreTypeUpwardForYield(Operation *startOp, OpCoreType targetCoreType);
 
-  // Step 7: Process SCF yield results
-  int handleSCFYield();
+    // Step 5: Handle else region yield of scf.if by extracting core_type from then region yield
+    bool handleYieldFromElseRegion(std::vector<OpCoreType> &coreTypes, unsigned operandIndex,
+                                   Operation *thenYieldForElse, Value &operand);
 
-  // Helper: process a single yield operation
-  void processYieldOperation(Operation *op, Operation *thenYieldForElse);
+    // Step 6: Handle CUBE_AND_VECTOR operations
+    int handleCubeAndVector();
 
-  // Helper: Mark fill operations as CUBE when their output buffer is CUBE
-  void markFillOpsAsCube();
+    // Helper: split CUBE_AND_VECTOR operation into CUBE and VECTOR versions
+    void splitOperationForCubeAndVector(Operation *op, llvm::DenseSet<Operation *> &processedOps,
+                                        llvm::DenseMap<Operation *, Operation *> &opToVectorClone);
 
-  // Step 7: Pre-legalize matmul (before initializePass)
-  int preLegalizeMatmul();
+    // Step 7: Process SCF yield results
+    int handleSCFYield();
 
-  // Helper: bulk delete operations and clean up tracking structures
-  void bulkDeleteOps(llvm::SmallVectorImpl<Operation *> &opsToDelete);
+    // Helper: process a single yield operation
+    void processYieldOperation(Operation *op, Operation *thenYieldForElse);
 
-  // Step 8: Stamp core type info to IR
-  int stampToIR();
+    // Helper: Mark fill operations as CUBE when their output buffer is CUBE
+    void markFillOpsAsCube();
 
-  // Helper: describe operation for logging
-  std::string describeOp(Operation *op) const;
+    // Step 7: Pre-legalize matmul (before initializePass)
+    int preLegalizeMatmul();
+
+    // Helper: bulk delete operations and clean up tracking structures
+    void bulkDeleteOps(llvm::SmallVectorImpl<Operation *> &opsToDelete);
+
+    // Step 8: Stamp core type info to IR
+    int stampToIR();
+
+    // Helper: describe operation for logging
+    std::string describeOp(Operation *op) const;
 };
 
 // Create the pass

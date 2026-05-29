@@ -32,16 +32,27 @@ namespace triton {
 class SeparateCVScopePass
     : public PassWrapper<SeparateCVScopePass, OperationPass<ModuleOp>> {
 public:
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SeparateCVScopePass)
+    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SeparateCVScopePass)
 
-  SeparateCVScopePass() = default;
+    SeparateCVScopePass() = default;
 
-  void getDependentDialects(DialectRegistry &registry) const override;
+    void getDependentDialects(DialectRegistry &registry) const override;
 
-  void runOnOperation() override;
+    void runOnOperation() override;
+
+    // Return the pass argument name
+    static constexpr ::llvm::StringRef getArgumentName() { return "separate-cv-scope"; }
+    ::llvm::StringRef getArgument() const override { return "separate-cv-scope"; }
+    ::llvm::StringRef getDescription() const override
+    {
+        return "separate ops into cv scope";
+    }
+    ::llvm::StringRef getName() const override { return "SeparateCVScopePass"; }
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createSeparateCVScopePass();
+
+void registerSeparateCVScopePasses();
 
 } // namespace triton
 } // namespace mlir

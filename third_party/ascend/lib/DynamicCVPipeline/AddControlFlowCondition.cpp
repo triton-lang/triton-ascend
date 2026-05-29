@@ -23,14 +23,21 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CloneOps.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CreateIfOps.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
+ #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/ProcessArgs.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateForOps.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Pass/PassManager.h"
-#include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateForOps.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
+#include "mlir/Pass/PassManager.h"
 
 static constexpr const char *DEBUG_TYPE = "AddControlFlowCondition";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
@@ -40,61 +47,36 @@ using namespace mlir;
 using namespace triton;
 
 // Check if the module should be skipped for control flow condition processing
-static bool shouldSkipControlFlowCondition(ModuleOp module) {
-  int cubeScopeCount = 0;
-  int vectorScopeCount = 0;
-
-  module.walk([&](scope::ScopeOp scopeOp) {
-    auto attr = scopeOp->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type");
-    if (!attr) {
-      return;
-    }
-    if (attr.getTcoretype() == hivm::TCoreType::CUBE) {
-      ++cubeScopeCount;
-    } else if (attr.getTcoretype() == hivm::TCoreType::VECTOR) {
-      ++vectorScopeCount;
-    }
-  });
-
-  // If either CUBE or VECTOR scope is missing, skip processing
-  if (cubeScopeCount == 0 || vectorScopeCount == 0) {
-    LDBG("CUBE or VECTOR scope missing, skip processing.");
-    return true;
-  }
-
+static LogicalResult verifyControlFlowPrerequisites(ModuleOp module)
+{
   // Check if scopeOp has ssbuffer.skip
   bool hasSkipAttr = false;
-  module.walk([&](scope::ScopeOp scopeOp) {
+  module.walk([&](Operation *op) {
+    auto scopeOp = dyn_cast<scope::ScopeOp>(op);
+    if (!scopeOp) {
+      return;
+    }
     if (scopeOp->hasAttr("ssbuffer.skip")) {
       hasSkipAttr = true;
     }
   });
   if (hasSkipAttr) {
     LDBG("scopeOp has ssbuffer.skip, skip processing.");
-    return true;
+    return failure();
   }
 
-  // Only skip if ALL forOps lack main_loop attr
-  bool hasMainLoopForOp = false;
-  module.walk([&](scf::ForOp forOp) {
-    if (forOp->hasAttr("ssbuffer.main_loop")) {
-      hasMainLoopForOp = true;
-    }
-  });
-  if (!hasMainLoopForOp) {
-    LDBG("All forOps lack ssbuffer.main_loop, skip processing.");
-    return true;
-  }
-
-  return false;
+  return success();
 }
 
-void AddControlFlowConditionPass::runOnOperation() {
+void AddControlFlowConditionPass::runOnOperation()
+{
   ModuleOp module = getOperation();
 
-  LDBG("Enter add controlflow condition pass.");
+  LDBG("Enter add controlflow condition pass.\n");
+  LDBG("before AddControlFlowCondition:");
+  LLVM_DEBUG(module.dump());
 
-  if (shouldSkipControlFlowCondition(module)) {
+  if (failed(verifyControlFlowPrerequisites(module))) {
     return;
   }
 
@@ -102,8 +84,7 @@ void AddControlFlowConditionPass::runOnOperation() {
   ControlFlowConditionInfo info;
 
   // Step0: Initialize crossCoreDependentMap and intraCoreDependentMap
-  std::unique_ptr<InitDependentMapPass> initDependentMapPass(
-      new InitDependentMapPass());
+  std::unique_ptr<InitDependentMapPass> initDependentMapPass(new InitDependentMapPass());
   initDependentMapPass->setConditionInfo(&info);
   pm.addPass(std::move(initDependentMapPass));
 
@@ -111,26 +92,29 @@ void AddControlFlowConditionPass::runOnOperation() {
   // ops without sharing
   pm.addPass(createCloneOpsPass());
 
-  // Step2: Create if ops based on block_id
+  // Step2: Process shared iter_args in for ops to eliminate arg sharing across block_ids
+  std::unique_ptr<ProcessArgsPass> processArgsPass(new ProcessArgsPass());
+  processArgsPass->setConditionInfo(&info);
+  pm.addPass(std::move(processArgsPass));
+
+  // Step3: Create if ops based on block_id
   std::unique_ptr<CreateIfOpsPass> createIfOpsPass(new CreateIfOpsPass());
   createIfOpsPass->setConditionInfo(&info);
   pm.addPass(std::move(createIfOpsPass));
 
-  // Step3: Update for ops with block counters and inner dependency conditions,
+  // Step4: Update for ops with block counters and inner dependency conditions,
   // and insert PIPE_S inter-core synchronization
   std::unique_ptr<UpdateForOpsPass> updateForOpsPass(new UpdateForOpsPass());
   updateForOpsPass->setConditionInfo(&info);
   pm.addPass(std::move(updateForOpsPass));
 
-  // Step4:Update the conditions of ifOp based on the intraCoreDependentMap and
-  // crossCoreDependentMap
+  // Step5:Update the conditions of ifOp based on the intraCoreDependentMap and crossCoreDependentMap
   auto updatePass = std::make_unique<UpdateConditionInfoPass>();
   updatePass->setConditionInfo(&info);
   pm.addPass(std::move(updatePass));
 
-  // Step5: Update for loop iteration times based on intraCoreDependentMap
-  std::unique_ptr<UpdateLoopIterTimesPass> updateLoopIterTimesPass(
-      new UpdateLoopIterTimesPass());
+  // Step6: Update for loop iteration times based on intraCoreDependentMap
+  std::unique_ptr<UpdateLoopIterTimesPass> updateLoopIterTimesPass(new UpdateLoopIterTimesPass());
   updateLoopIterTimesPass->setConditionInfo(&info);
   pm.addPass(std::move(updateLoopIterTimesPass));
 
@@ -145,15 +129,18 @@ void AddControlFlowConditionPass::runOnOperation() {
 namespace mlir {
 namespace triton {
 
-std::unique_ptr<OperationPass<ModuleOp>> createAddControlFlowConditionPass() {
+std::unique_ptr<OperationPass<ModuleOp>> createAddControlFlowConditionPass()
+{
   return std::make_unique<AddControlFlowConditionPass>();
 }
 
-void registerAddControlFlowConditionPasses() {
-  registerPass(createCloneOpsPass);
-  registerPass(createCreateIfOpsPass);
-  registerPass(createUpdateForOpsPass);
-  registerPass(createAddControlFlowConditionPass);
+void registerAddControlFlowConditionPasses()
+{
+    registerPass(createCloneOpsPass);
+    registerPass(createCreateIfOpsPass);
+    registerPass(createProcessArgsPass);
+    registerPass(createUpdateForOpsPass);
+    registerPass(createAddControlFlowConditionPass);
 }
 } // namespace triton
 } // namespace mlir

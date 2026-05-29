@@ -22,31 +22,24 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/AddBlockIdForControlOps.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "llvm/Support/Debug.h"
 
 using namespace mlir;
 
 static constexpr const char *DEBUG_TYPE = "add-block-id-for-control-ops";
-#define LOG_DEBUG(...)                                                         \
-  LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__)
+#define LOG_DEBUG(...) LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__)
 
 using namespace mlir::triton;
 
 // Pass Entry Point
-void AddBlockIdForControlOpsPass::runOnOperation() {
+void AddBlockIdForControlOpsPass::runOnOperation()
+{
   LOG_DEBUG("\n--- enter AddBlockIdForControlOpsPass --->\n");
   ModuleOp module = getOperation();
 
   // Step 1: find the max block_id
-  int maxBlockId = -1;
-  module.walk([&](Operation *op) {
-    if (auto attr = op->getAttrOfType<IntegerAttr>("ssbuffer.block_id")) {
-      int currentId = attr.getInt();
-      if (currentId > maxBlockId) {
-        maxBlockId = currentId;
-      }
-    }
-  });
+  int maxBlockId = CVPipeline::getAvailableBlockId(module) - 1;
 
   LOG_DEBUG("maxBlockId: " << maxBlockId << "\n");
 
@@ -61,9 +54,7 @@ void AddBlockIdForControlOpsPass::runOnOperation() {
       maxBlockId++;
       static constexpr int kIntegerBitWidth = 32;
       op->setAttr("ssbuffer.block_id",
-                  IntegerAttr::get(
-                      IntegerType::get(module.getContext(), kIntegerBitWidth),
-                      maxBlockId));
+                  IntegerAttr::get(IntegerType::get(module.getContext(), kIntegerBitWidth), maxBlockId));
       LOG_DEBUG("Added block_id " << maxBlockId << " to " << *op << "\n");
     }
   });
@@ -75,8 +66,9 @@ void AddBlockIdForControlOpsPass::runOnOperation() {
 namespace mlir {
 namespace triton {
 
-std::unique_ptr<OperationPass<ModuleOp>> createAddBlockIdForControlOpsPass() {
-  return std::make_unique<AddBlockIdForControlOpsPass>();
+std::unique_ptr<OperationPass<ModuleOp>> createAddBlockIdForControlOpsPass()
+{
+    return std::make_unique<AddBlockIdForControlOpsPass>();
 }
 
 } // namespace triton

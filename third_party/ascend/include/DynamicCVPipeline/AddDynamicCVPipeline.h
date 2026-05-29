@@ -23,11 +23,18 @@
 #ifndef TRITON_ADAPTER_ADD_DYNAMIC_CVPIPELINE_PASSES_H
 #define TRITON_ADAPTER_ADD_DYNAMIC_CVPIPELINE_PASSES_H
 
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Pass/Pass.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #define GEN_PASS_DECL_ADDDYNAMICCVPIPELINE
 #include "ascend/include/DynamicCVPipeline/Passes.h.inc"
+
+using namespace mlir;
 
 #define GEN_PASS_DEF_ADDDYNAMICCVPIPELINE
 #include "ascend/include/DynamicCVPipeline/Passes.h.inc"
@@ -36,8 +43,8 @@ extern bool compileOn91095Flag;
 
 namespace mlir {
 namespace triton {
-std::unique_ptr<OperationPass<ModuleOp>>
-createAddDynamicCVPipelinePass(const AddDynamicCVPipelineOptions &options = {});
+std::unique_ptr<OperationPass<ModuleOp>> createAddDynamicCVPipelinePass(
+    const AddDynamicCVPipelineOptions &options = {});
 } // namespace triton
 } // namespace mlir
 
@@ -48,8 +55,8 @@ using namespace triton;
 class AddDynamicCVPipelinePass
     : public ::impl::AddDynamicCVPipelineBase<AddDynamicCVPipelinePass> {
 public:
-  explicit AddDynamicCVPipelinePass(const AddDynamicCVPipelineOptions &options);
-  void runOnOperation() override;
+    explicit AddDynamicCVPipelinePass(const AddDynamicCVPipelineOptions &options);
+    void runOnOperation() override;
 };
 
 } // namespace

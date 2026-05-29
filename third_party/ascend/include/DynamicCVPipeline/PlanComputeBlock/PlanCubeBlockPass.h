@@ -31,13 +31,16 @@
 namespace mlir {
 namespace triton {
 
-class PlanCubeBlockPass
-    : public PassWrapper<PlanCubeBlockPass, OperationPass<ModuleOp>> {
+class PlanCubeBlockPass : public PassWrapper<PlanCubeBlockPass, OperationPass<ModuleOp>> {
 public:
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PlanCubeBlockPass);
+    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PlanCubeBlockPass);
 
-  PlanCubeBlockPass() = default;
-  void runOnOperation() override;
+    PlanCubeBlockPass() = default;
+    void runOnOperation() override;
+
+    llvm::StringRef getArgument() const final {
+      return "plan-cube-block";
+    }
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createPlanCubeBlockPass();

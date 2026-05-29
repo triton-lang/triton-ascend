@@ -23,27 +23,28 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateForOps.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/Support/Debug.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 
 static constexpr const char *DEBUG_TYPE = "UpdateForOps";
 static constexpr int kPipeSFlagId = 15;
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
-#define LDBG(...)                                                              \
-  LLVM_DEBUG({                                                                 \
-    DBGS();                                                                    \
-    llvm::outs() << __VA_ARGS__;                                               \
-    llvm::outs() << "\n";                                                      \
-  })
+#define LDBG(...) \
+LLVM_DEBUG({ \
+  DBGS(); \
+  llvm::outs() << __VA_ARGS__; \
+  llvm::outs() << "\n"; \
+})
 
-using namespace llvm;
+using llvm::SmallVector;
 using namespace mlir;
 using namespace triton;
 using namespace hivm;
 
 // Replace old block arguments with new ones
-static LogicalResult replaceBlockArguments(Block *oldBlock, Block *newBlock) {
+static LogicalResult replaceBlockArguments(Block *oldBlock, Block *newBlock)
+{
   if (!oldBlock || !newBlock) {
     LDBG("[Error]: oldBlock or newBlock is null\n");
     return failure();
@@ -59,9 +60,9 @@ static LogicalResult replaceBlockArguments(Block *oldBlock, Block *newBlock) {
 }
 
 // Collect forOps that need processing based on info
-static SmallVector<scf::ForOp>
-collectForOpsToProcess(ModuleOp module,
-                       const llvm::DenseMap<scf::ForOp, int> &numInfo) {
+static SmallVector<scf::ForOp> collectForOpsToProcess(
+    ModuleOp module, const llvm::DenseMap<scf::ForOp, int> &numInfo)
+{
   SmallVector<scf::ForOp> forOps;
 
   module.walk([&](scf::ForOp forOp) {
@@ -74,10 +75,10 @@ collectForOpsToProcess(ModuleOp module,
 }
 
 // Create new yield operands: original yield ops + extra args from new block
-static SmallVector<Value> createNewYieldOperands(scf::YieldOp oldYield,
-                                                 unsigned oldNumArgs,
-                                                 Block *newBlock,
-                                                 int numExtraArgs) {
+static SmallVector<Value> createNewYieldOperands(
+    scf::YieldOp oldYield, unsigned oldNumArgs,
+    Block *newBlock, int numExtraArgs)
+{
   SmallVector<Value> newYieldOperands;
 
   for (unsigned i = 0; i < oldNumArgs; ++i) {
@@ -91,11 +92,9 @@ static SmallVector<Value> createNewYieldOperands(scf::YieldOp oldYield,
   return newYieldOperands;
 }
 
-// Derive block counters from ssbuffer.if attributes when info is not
-// pre-populated
-LogicalResult
-UpdateForOpsPass::deriveBlockCountersFromIfOps(ModuleOp module,
-                                               ControlFlowConditionInfo *info) {
+// Derive block counters from ssbuffer.if attributes when info is not pre-populated
+LogicalResult UpdateForOpsPass::deriveBlockCountersFromIfOps(ModuleOp module, ControlFlowConditionInfo *info)
+{
   if (!info) {
     LDBG("[Error]: info is null\n");
     return failure();
@@ -130,9 +129,10 @@ UpdateForOpsPass::deriveBlockCountersFromIfOps(ModuleOp module,
 }
 
 // Create new for op with extra iter args and migrate body
-static scf::ForOp
-createForOpAndMigrateBody(scf::ForOp oldForOp, int numExtraArgs,
-                          const SmallVector<Value> &extraInitArgs) {
+static scf::ForOp createForOpAndMigrateBody(
+    scf::ForOp oldForOp, int numExtraArgs,
+    const SmallVector<Value> &extraInitArgs)
+{
   if (numExtraArgs < 0) {
     LDBG("[Error]: invalid numExtraArgs " << numExtraArgs << "\n");
     return scf::ForOp();
@@ -140,9 +140,7 @@ createForOpAndMigrateBody(scf::ForOp oldForOp, int numExtraArgs,
   if (numExtraArgs == 0)
     return oldForOp;
   if ((int)extraInitArgs.size() != numExtraArgs) {
-    LDBG("[Error]: extraInitArgs size " << extraInitArgs.size()
-                                        << " != numExtraArgs " << numExtraArgs
-                                        << "\n");
+    LDBG("[Error]: extraInitArgs size " << extraInitArgs.size() << " != numExtraArgs " << numExtraArgs << "\n");
     return scf::ForOp();
   }
 
@@ -166,8 +164,7 @@ createForOpAndMigrateBody(scf::ForOp oldForOp, int numExtraArgs,
   if (failed(replaceBlockArguments(oldBlock, newBlock)))
     return scf::ForOp();
 
-  for (Operation &op :
-       llvm::make_early_inc_range(oldBlock->without_terminator()))
+  for (Operation &op : llvm::make_early_inc_range(oldBlock->without_terminator()))
     op.moveBefore(newBlock, newBlock->end());
 
   auto oldYield = cast<scf::YieldOp>(oldBlock->getTerminator());
@@ -181,8 +178,8 @@ createForOpAndMigrateBody(scf::ForOp oldForOp, int numExtraArgs,
   return newForOp;
 }
 
-static LogicalResult replaceForOpUsesAndErase(scf::ForOp oldForOp,
-                                              scf::ForOp newForOp) {
+static LogicalResult replaceForOpUsesAndErase(scf::ForOp oldForOp, scf::ForOp newForOp)
+{
   if (oldForOp.getNumResults() > 0) {
     SmallVector<Value> newResults;
     for (unsigned i = 0; i < oldForOp.getNumResults(); ++i) {
@@ -199,8 +196,8 @@ static LogicalResult replaceForOpUsesAndErase(scf::ForOp oldForOp,
   return success();
 }
 
-LogicalResult extendForOpWithExtraArgs(scf::ForOp oldForOp,
-                                       ControlFlowConditionInfo *info) {
+LogicalResult extendForOpWithExtraArgs(scf::ForOp oldForOp, ControlFlowConditionInfo *info)
+{
   int numBlockCounters = info->blockCounterNums[oldForOp];
   int numInnerDepConds = info->intraCoreDependentMap[oldForOp].size();
   int totalExtraArgs = numBlockCounters + numInnerDepConds;
@@ -216,8 +213,7 @@ LogicalResult extendForOpWithExtraArgs(scf::ForOp oldForOp,
     extraInitArgs.push_back(builder.create<arith::ConstantOp>(
         oldForOp.getLoc(), builder.getI32Type(), builder.getI32IntegerAttr(0)));
 
-  scf::ForOp newForOp =
-      createForOpAndMigrateBody(oldForOp, totalExtraArgs, extraInitArgs);
+  scf::ForOp newForOp = createForOpAndMigrateBody(oldForOp, totalExtraArgs, extraInitArgs);
   if (!newForOp) {
     return failure();
   }
@@ -240,8 +236,7 @@ LogicalResult extendForOpWithExtraArgs(scf::ForOp oldForOp,
   }
 
   if (info->intraCoreDependentMap.count(oldForOp)) {
-    info->intraCoreDependentMap[newForOp] =
-        info->intraCoreDependentMap[oldForOp];
+    info->intraCoreDependentMap[newForOp] = info->intraCoreDependentMap[oldForOp];
     info->intraCoreDependentMap.erase(oldForOp);
   }
 
@@ -249,169 +244,152 @@ LogicalResult extendForOpWithExtraArgs(scf::ForOp oldForOp,
 }
 
 // Add block counter and inner dependency condition iter args to for ops
-LogicalResult UpdateForOpsPass::addBlockCountersAndInnerDepConds(
-    ModuleOp module, ControlFlowConditionInfo *info) {
-  llvm::DenseSet<scf::ForOp> allForOps;
+LogicalResult UpdateForOpsPass::addBlockCountersAndInnerDepConds(ModuleOp module, ControlFlowConditionInfo *info)
+{
   for (auto &p : info->blockCounterNums) {
     if (p.second < 0) {
       LDBG("[Error]: invalid blockCounterNum " << p.second << "\n");
       return failure();
     }
-    allForOps.insert(p.first);
-  }
-  for (auto &entry : info->intraCoreDependentMap)
-    allForOps.insert(entry.first);
-
-  for (scf::ForOp oldForOp : allForOps) {
-    if (failed(extendForOpWithExtraArgs(oldForOp, info)))
+    if (failed(extendForOpWithExtraArgs(p.first, info)))
       return failure();
   }
   return success();
 }
 
-// Insert sync ops for a single forOp
-static WalkResult insertSyncOpsForForOp(scf::ForOp forOp, Block *forBody,
-                                        hivm::TCoreTypeAttr coreType,
-                                        PipeAttr setPipe, PipeAttr waitPipe,
-                                        int waitFlagId, int setFlagId) {
+// Insert sync ops inside a forOp: wait at start, set before yield
+static LogicalResult insertSyncOpsInsideForOp(Block *forBody, Location loc,
+                                               hivm::TCoreTypeAttr coreType,
+                                               PipeAttr setPipe, PipeAttr waitPipe,
+                                               int waitFlagId, int setFlagId)
+{
   Operation *forTerminator = forBody->getTerminator();
   if (!forTerminator) {
-    return WalkResult::interrupt();
+    return failure();
   }
-
-  Location loc = forOp.getLoc();
 
   // Insert wait at for loop start
   OpBuilder insertionBuilder(&forBody->front());
-  auto waitFlagAttr = insertionBuilder.getIntegerAttr(
-      insertionBuilder.getI64Type(), waitFlagId);
-  insertionBuilder.create<SyncBlockWaitOp>(loc, coreType, setPipe, waitPipe,
-                                           waitFlagAttr);
+  auto waitFlagAttr = insertionBuilder.getIntegerAttr(insertionBuilder.getI64Type(), waitFlagId);
+  insertionBuilder.create<SyncBlockWaitOp>(loc, coreType, setPipe, waitPipe, waitFlagAttr);
 
   // Insert set before yield
   OpBuilder setBuilder(forTerminator);
-  auto setFlagAttr =
-      setBuilder.getIntegerAttr(setBuilder.getI64Type(), setFlagId);
+  auto setFlagAttr = setBuilder.getIntegerAttr(setBuilder.getI64Type(), setFlagId);
   setBuilder.setInsertionPoint(forTerminator);
-  setBuilder.create<SyncBlockSetOp>(loc, coreType, setPipe, waitPipe,
-                                    setFlagAttr);
-
-  return WalkResult::advance();
-}
-
-// Insert sync ops for a single scopeOp
-static WalkResult insertSyncOpsForCube(scope::ScopeOp scopeOp,
-                                       hivm::TCoreTypeAttr coreType,
-                                       PipeAttr setPipe, PipeAttr waitPipe,
-                                       int waitFlagId, int setFlagId) {
-  Block &scopeBlock = scopeOp.getRegion().front();
-  Operation *scopeTerminator = scopeBlock.getTerminator();
-  if (!scopeTerminator) {
-    return WalkResult::interrupt();
-  }
-
-  OpBuilder scopeBuilder(scopeTerminator);
-  auto scopeFlagAttr =
-      scopeBuilder.getIntegerAttr(scopeBuilder.getI64Type(), waitFlagId);
-  scopeBuilder.setInsertionPoint(scopeTerminator);
-  scopeBuilder.create<SyncBlockWaitOp>(scopeTerminator->getLoc(), coreType,
-                                       setPipe, waitPipe, scopeFlagAttr);
-
-  WalkResult innerResult = scopeOp.walk([&](scf::ForOp forOp) -> WalkResult {
-    if (!forOp->hasAttr("ssbuffer.main_loop")) {
-      return WalkResult::advance();
-    }
-    Block &forBody = forOp.getRegion().front();
-    return insertSyncOpsForForOp(forOp, &forBody, coreType, setPipe, waitPipe,
-                                 waitFlagId, setFlagId);
-  });
-  if (innerResult.wasInterrupted()) {
-    return WalkResult::interrupt();
-  }
-
-  return WalkResult::advance();
-}
-
-// Insert sync ops for a single scopeOp (vector variant: inserts SyncBlockSetOp
-// at scope start)
-static WalkResult insertSyncOpsForVector(scope::ScopeOp scopeOp,
-                                         hivm::TCoreTypeAttr coreType,
-                                         PipeAttr setPipe, PipeAttr waitPipe,
-                                         int waitFlagId, int setFlagId) {
-  Block &scopeBlock = scopeOp.getRegion().front();
-  OpBuilder builder(&scopeBlock, scopeBlock.begin());
-  auto scopeFlagAttr = builder.getIntegerAttr(builder.getI64Type(), setFlagId);
-  builder.create<SyncBlockSetOp>(scopeOp.getLoc(), coreType, setPipe, waitPipe,
-                                 scopeFlagAttr);
-
-  WalkResult innerResult = scopeOp.walk([&](scf::ForOp forOp) -> WalkResult {
-    if (!forOp->hasAttr("ssbuffer.main_loop")) {
-      return WalkResult::advance();
-    }
-    Block &forBody = forOp.getRegion().front();
-    return insertSyncOpsForForOp(forOp, &forBody, coreType, setPipe, waitPipe,
-                                 waitFlagId, setFlagId);
-  });
-  if (innerResult.wasInterrupted()) {
-    return WalkResult::interrupt();
-  }
-
-  return WalkResult::advance();
-}
-
-// Insert inter-core PIPE_S synchronization for cube cores
-static LogicalResult insertInterCorePipeSForCube(ModuleOp module) {
-  auto cubeCoreType =
-      hivm::TCoreTypeAttr::get(module.getContext(), hivm::TCoreType::CUBE);
-  auto setPipeType = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
-  auto waitPipeType = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
-
-  WalkResult result = module.walk([&](scope::ScopeOp scopeOp) -> WalkResult {
-    auto attr = scopeOp->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type");
-    if (!attr || attr != cubeCoreType) {
-      return WalkResult::advance();
-    }
-
-    return insertSyncOpsForCube(scopeOp, cubeCoreType, setPipeType,
-                                waitPipeType, kPipeSFlagId, kPipeSFlagId);
-  });
-
-  return result.wasInterrupted() ? failure() : success();
-}
-
-// Insert inter-core PIPE_S synchronization for vector cores
-static LogicalResult insertInterCorePipeSForVector(ModuleOp module) {
-  auto vectorCoreType =
-      hivm::TCoreTypeAttr::get(module.getContext(), hivm::TCoreType::VECTOR);
-  auto setPipeType = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
-  auto waitPipeType = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
-
-  WalkResult result = module.walk([&](scope::ScopeOp scopeOp) -> WalkResult {
-    auto attr = scopeOp->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type");
-    if (!attr || attr != vectorCoreType) {
-      return WalkResult::advance();
-    }
-
-    return insertSyncOpsForVector(scopeOp, vectorCoreType, setPipeType,
-                                  waitPipeType, kPipeSFlagId, kPipeSFlagId);
-  });
-
-  return result.wasInterrupted() ? failure() : success();
-}
-
-LogicalResult UpdateForOpsPass::insertInterCorePipeS(ModuleOp module) {
-  if (failed(insertInterCorePipeSForCube(module))) {
-    return failure();
-  }
-
-  if (failed(insertInterCorePipeSForVector(module))) {
-    return failure();
-  }
+  setBuilder.create<SyncBlockSetOp>(loc, coreType, setPipe, waitPipe, setFlagAttr);
 
   return success();
 }
 
-void UpdateForOpsPass::runOnOperation() {
+// Insert set before or wait after a forOp
+static LogicalResult insertSetOrWaitForForOp(scf::ForOp forOp, Location loc,
+                                             hivm::TCoreTypeAttr coreType,
+                                             PipeAttr setPipe, PipeAttr waitPipe,
+                                             int flagId, bool isBefore)
+{
+  OpBuilder builder(forOp);
+  auto flagAttr = builder.getIntegerAttr(builder.getI64Type(), flagId);
+  if (isBefore) {
+    builder.create<SyncBlockSetOp>(loc, coreType, setPipe, waitPipe, flagAttr);
+  } else {
+    builder.setInsertionPointAfter(forOp);
+    builder.create<SyncBlockWaitOp>(loc, coreType, setPipe, waitPipe, flagAttr);
+  }
+  return success();
+}
+
+// Insert PIPE_S for a main_loop forOp based on forOp type and scope type
+static LogicalResult insertPipeSForMainLoopForOp(scf::ForOp forOp, scope::ScopeOp scopeOp,
+                                                  bool isScopeCube, bool isScopeVector,
+                                                  PipeAttr setPipe, PipeAttr waitPipe,
+                                                  int flagId)
+{
+  Block *forBody = &forOp.getRegion().front();
+  Location loc = forOp.getLoc();
+  bool isVectorFirst = forOp->hasAttr("ssbuffer.vector_first");
+  auto cubeType = hivm::TCoreTypeAttr::get(forOp.getContext(), hivm::TCoreType::CUBE);
+  auto vectorType = hivm::TCoreTypeAttr::get(forOp.getContext(), hivm::TCoreType::VECTOR);
+
+  if (isVectorFirst) {
+    if (isScopeCube) {
+      // vector_first + CUBE: before forop (SET), inside (WAIT/SET)
+      if (failed(insertSetOrWaitForForOp(forOp, loc, cubeType, setPipe, waitPipe, flagId, true))) {
+        return failure();
+      }
+      if (failed(insertSyncOpsInsideForOp(forBody, loc, cubeType, setPipe, waitPipe, flagId, flagId))) {
+        return failure();
+      }
+    } else if (isScopeVector) {
+      // vector_first + VECTOR: inside (WAIT/SET), after forop (WAIT)
+      if (failed(insertSyncOpsInsideForOp(forBody, loc, vectorType, setPipe, waitPipe, flagId, flagId))) {
+        return failure();
+      }
+      if (failed(insertSetOrWaitForForOp(forOp, loc, vectorType, setPipe, waitPipe, flagId, false))) {
+        return failure();
+      }
+    }
+  } else {
+    // cube_first (including default when neither attribute is present)
+    if (isScopeCube) {
+      // cube_first + CUBE: inside (WAIT/SET), after forop (WAIT)
+      if (failed(insertSyncOpsInsideForOp(forBody, loc, cubeType, setPipe, waitPipe, flagId, flagId))) {
+        return failure();
+      }
+      if (failed(insertSetOrWaitForForOp(forOp, loc, cubeType, setPipe, waitPipe, flagId, false))) {
+        return failure();
+      }
+    } else if (isScopeVector) {
+      // cube_first + VECTOR: before forop (SET), inside (WAIT/SET)
+      if (failed(insertSetOrWaitForForOp(forOp, loc, vectorType, setPipe, waitPipe, flagId, true))) {
+        return failure();
+      }
+      if (failed(insertSyncOpsInsideForOp(forBody, loc, vectorType, setPipe, waitPipe, flagId, flagId))) {
+        return failure();
+      }
+    }
+  }
+  return success();
+}
+
+LogicalResult UpdateForOpsPass::insertInterCorePipeS(ModuleOp module)
+{
+  auto cubeCoreType = hivm::TCoreTypeAttr::get(module.getContext(), hivm::TCoreType::CUBE);
+  auto vectorCoreType = hivm::TCoreTypeAttr::get(module.getContext(), hivm::TCoreType::VECTOR);
+  auto setPipeType = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
+  auto waitPipeType = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
+
+  WalkResult result = module.walk([&](scope::ScopeOp scopeOp) -> WalkResult {
+    auto scopeTypeAttr = scopeOp->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type");
+    if (!scopeTypeAttr) {
+      return WalkResult::advance();
+    }
+
+    bool isScopeCube = (scopeTypeAttr == cubeCoreType);
+    bool isScopeVector = (scopeTypeAttr == vectorCoreType);
+
+    WalkResult innerResult = scopeOp.walk([&](scf::ForOp forOp) -> WalkResult {
+      if (!forOp->hasAttr("ssbuffer.main_loop")) {
+        return WalkResult::advance();
+      }
+      if (failed(insertPipeSForMainLoopForOp(forOp, scopeOp, isScopeCube, isScopeVector,
+                                             setPipeType, waitPipeType, kPipeSFlagId))) {
+        return WalkResult::interrupt();
+      }
+      return WalkResult::advance();
+    });
+
+    if (innerResult.wasInterrupted()) {
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+
+  return result.wasInterrupted() ? failure() : success();
+}
+
+void UpdateForOpsPass::runOnOperation()
+{
   ModuleOp module = getOperation();
 
   LDBG("before updateForOps:\n" << module << "\n");
@@ -429,8 +407,7 @@ void UpdateForOpsPass::runOnOperation() {
   }
 
   // Update for ops iter_args for block counters and inner dependency conditions
-  if (infoToUse && (!infoToUse->blockCounterNums.empty() ||
-                    !infoToUse->intraCoreDependentMap.empty()))
+  if (infoToUse && (!infoToUse->blockCounterNums.empty() || !infoToUse->intraCoreDependentMap.empty()))
     if (failed(addBlockCountersAndInnerDepConds(module, infoToUse))) {
       signalPassFailure();
       return;
@@ -448,7 +425,8 @@ void UpdateForOpsPass::runOnOperation() {
 namespace mlir {
 namespace triton {
 
-std::unique_ptr<OperationPass<ModuleOp>> createUpdateForOpsPass() {
+std::unique_ptr<OperationPass<ModuleOp>> createUpdateForOpsPass()
+{
   return std::make_unique<UpdateForOpsPass>();
 }
 

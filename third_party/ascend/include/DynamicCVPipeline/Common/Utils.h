@@ -22,41 +22,58 @@
 
 #ifndef ADD_AUTO_SCHEDULING_COMMON_UTILS_H
 #define ADD_AUTO_SCHEDULING_COMMON_UTILS_H
+#include <string_view>
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/StringRef.h"
-#include <string_view>
 
 namespace mlir {
 namespace CVPipeline {
 
 inline constexpr llvm::StringLiteral kCoreType = "ssbuffer.core_type";
 inline constexpr llvm::StringLiteral kBlockId = "ssbuffer.block_id";
+inline constexpr llvm::StringLiteral kTransferId = "ssbuffer.transfer_id";
+inline constexpr llvm::StringLiteral kCubeFirst = "ssbuffer.cube_first";
+inline constexpr llvm::StringLiteral kVectorFirst = "ssbuffer.vector_first";
+inline constexpr llvm::StringLiteral kAddFromMatmul = "ssbuffer.add_from_matmul";
+inline constexpr llvm::StringLiteral kMainLoop = "ssbuffer.main_loop";
+inline constexpr llvm::StringLiteral kIf = "ssbuffer.if";
+inline constexpr llvm::StringLiteral kIntraBuffer = "ssbuffer.intra_buffer";
+inline constexpr const char *ERRCODE_ATTR = "triton_ascend.dynamic_cv_pipeline.rc";
+static constexpr const int ERRCODE_FAILED = 1;
+static constexpr const int ERRCODE_IGNORED = 2;
 
 enum CoreType {
-  UNDETERMINED = 0,
-  VECTOR_ONLY = 1 << 0,
-  CUBE_ONLY = 1 << 1,
-  CUBE_AND_VECTOR = VECTOR_ONLY | CUBE_ONLY,
+    UNDETERMINED = 0,
+    VECTOR_ONLY = 1 << 0,
+    CUBE_ONLY = 1 << 1,
+    CUBE_AND_VECTOR = VECTOR_ONLY | CUBE_ONLY,
 };
 
-inline constexpr CoreType fromStrCoreType(std::string_view s) {
-  if (s == "VECTOR") {
-    return CoreType::VECTOR_ONLY;
-  }
-  if (s == "CUBE") {
-    return CoreType::CUBE_ONLY;
-  }
+inline constexpr CoreType fromStrCoreType(std::string_view s)
+{
+    if (s == "VECTOR") {
+        return CoreType::VECTOR_ONLY;
+    }
+    if (s == "CUBE") {
+        return CoreType::CUBE_ONLY;
+    }
 
-  return CoreType::UNDETERMINED;
+    return CoreType::UNDETERMINED;
 }
 
 // Functions for managing core types
 CoreType getOpCoreType(Operation *op);
-
-llvm::LogicalResult verifyOpBlockId(Operation *op);
 std::optional<int64_t> getOpBlockId(Operation *op);
+llvm::LogicalResult verifyOpBlockId(Operation *op);
+int getAvailableBlockId(ModuleOp module);
+void setFallbackAttr(ModuleOp module);
 
+inline bool isCubeOp(Operation *op)
+{
+    return CVPipeline::getOpCoreType(op) == CoreType::CUBE_ONLY;
+}
 } // namespace CVPipeline
 } // namespace mlir
 

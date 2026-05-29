@@ -40,7 +40,10 @@ public:
   LogicalResult cloneOpsInMainLoop(scf::ForOp forOp);
   LogicalResult cleanupClonedOpsInMainLoop(scf::ForOp forOp);
 
-  llvm::StringRef getArgument() const override { return "clone-ops"; }
+  llvm::StringRef getArgument() const override
+  {
+    return "clone-ops";
+  }
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createCloneOpsPass();

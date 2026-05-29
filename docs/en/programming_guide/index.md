@@ -288,7 +288,7 @@ Developers only need to provide a few base configurations (such as BLOCK_SIZE), 
             triton.Config({'BLOCK_SIZE': 256}),
         ],
         key=['n_elements'],
-        kernel_type="vector",           # Operator type, supports cube/mixcv/vector
+        kernel_type="vector",           # Operator type, supports cube/mix/vector
         enable_ubuf_saving=[True, False] # Optional, already included by default
     )
     @triton.jit

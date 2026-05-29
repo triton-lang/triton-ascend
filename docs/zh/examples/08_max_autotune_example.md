@@ -2,7 +2,7 @@
 
 `max_autotune` 是 Triton-Ascend 提供的增强自动调优装饰器，旨在简化多参数调优的代码编写。与社区版 `autotune` 要求用户手动枚举所有 `triton.Config` 不同，`max_autotune` 允许用户仅提供少量基础配置（如分块大小），并自动将相关的编译器选项（如 `num_stages`、`enable_hivm_auto_cv_balance` 等）纳入最优组合的搜索空间。用户也可以通过参数列表显式控制搜索范围。
 
-**适用场景**：Ascend NPU 上的 `cube`、`mixcv`、`vector` 算子，尤其适合需要同时调整多个硬件相关参数的场景。
+**适用场景**：Ascend NPU 上的 `cube`、`mix`、`vector` 算子，尤其适合需要同时调整多个硬件相关参数的场景。
 
 ## 基本使用示例
 
@@ -26,7 +26,7 @@ def test_max_autotune():
     @max_autotune(
         configs=base_configs,
         key=["numel"],
-        kernel_type="vector",          # 算子类型：cube / mixcv / vector, 默认为mixcv
+        kernel_type="vector",          # 算子类型：cube / mix / vector, 默认为mix
     )
     @triton.jit
     def triton_calc_kernel(
@@ -88,7 +88,7 @@ def test_max_autotune():
     @max_autotune(
         configs=base_configs,          # 基础配置列表
         key=["numel"],                 # 当 numel 变化时触发重新调优
-        kernel_type="vector",          # 算子类型：cube / mixcv / vector
+        kernel_type="vector",          # 算子类型：cube / mix / vector
         # 以下参数为可选的调优列表，不提供时使用内置默认值
         num_stages=[1, 2],
         enable_ubuf_saving=[True, False]

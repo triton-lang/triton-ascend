@@ -2,7 +2,7 @@
 
 `max_autotune` is an enhanced autotuning decorator provided by Triton-Ascend, designed to simplify code writing for multi-parameter tuning. Unlike the community version `autotune` which requires users to manually enumerate all `triton.Config` combinations, `max_autotune` allows users to provide only a few base configurations (such as block sizes), and automatically includes related compiler options (such as `num_stages`, `enable_hivm_auto_cv_balance`, etc.) in the optimal combination search space. Users can also explicitly control the search range through parameter lists.
 
-**Applicable Scenarios**: `cube`, `mixcv`, and `vector` operators on Ascend NPU, especially suitable for scenarios requiring simultaneous adjustment of multiple hardware-related parameters.
+**Applicable Scenarios**: `cube`, `mix`, and `vector` operators on Ascend NPU, especially suitable for scenarios requiring simultaneous adjustment of multiple hardware-related parameters.
 
 ## Basic Usage Example
 
@@ -26,7 +26,7 @@ def test_max_autotune():
     @max_autotune(
         configs=base_configs,
         key=["numel"],
-        kernel_type="vector",          # Operator type: cube / mixcv / vector, default is mixcv
+        kernel_type="vector",          # Operator type: cube / mix / vector, default is mix
     )
     @triton.jit
     def triton_calc_kernel(
@@ -88,7 +88,7 @@ def test_max_autotune():
     @max_autotune(
         configs=base_configs,          # Base configuration list
         key=["numel"],                 # Trigger re-tuning when numel changes
-        kernel_type="vector",          # Operator type: cube / mixcv / vector
+        kernel_type="vector",          # Operator type: cube / mix / vector
         # The following parameters are optional tuning lists, built-in default values are used when not provided
         num_stages=[1, 2],
         enable_ubuf_saving=[True, False]

@@ -27,7 +27,7 @@ from triton.backends.ascend.backend.runtime import max_autotune
         triton.Config(kwargs={'BLOCK_M': 64, 'BLOCK_N': 256}),
     ],
     key=["M", "N"],
-    kernel_type="mixcv",
+    kernel_type="mix",
     # 额外的调优参数，每个值必须是列表
     enable_hivm_auto_cv_balance=[True, False],
     tile_mix_vector_loop=[2, 4],
@@ -53,7 +53,7 @@ def kernel(
 
 总配置数量：`2 × 2 × 2 × 2 × 2 = 32` 个配置。
 
-> 注：`kernel_type="mixcv"` 支持的参数较多，未显式提供的参数会使用默认值参与展开。如果希望某个参数不参与展开，可在基础 `Config` 的 `kwargs` 中固定其值。
+> 注：`kernel_type="mix"` 支持的参数较多，未显式提供的参数会使用默认值参与展开。如果希望某个参数不参与展开，可在基础 `Config` 的 `kwargs` 中固定其值。
 
 ### 2. `max_autotune` 与 `@triton.autotune` 的关系
 
@@ -77,8 +77,8 @@ from triton.backends.ascend.backend.runtime import max_autotune
 
 ### 参数支持矩阵
 
-| 参数 | cube | mixcv | vector | 默认值 | 有效值 | 说明 |
-|------|:----:|:-----:|:------:|--------|--------|------|
+| 参数 | cube | mix | vector | 默认值 | 有效值 | 说明 |
+|------|:----:|:---:|:------:|--------|--------|------|
 | `num_stages` | ✅ | ✅ | ✅ | `[2]` | `[1, 2]` | pipeline stages 数量 |
 | `unit_flag` | ✅ | ✅ | ❌ | `[False]` | 布尔列表 | Cube 搬出相关同步优化项 |
 | `limit_auto_multi_buffer_of_local_buffer` | ✅ | ✅ | ❌ | `["no-l0c"]` | `["no-limit", "no-l0c"]` | 配置 local buffer 自动 multi-buffer 的 scope |
@@ -93,7 +93,7 @@ from triton.backends.ascend.backend.runtime import max_autotune
 
 - **cube**：纯 cube（矩阵乘法类）算子，支持最少的调优参数；
 - **vector**：纯向量算子，仅支持 `num_stages` 和 `enable_ubuf_saving`；
-- **mixcv**：混合 cube+vector 算子（默认类型），支持最完整的调优参数集合。
+- **mix**：混合 cube+vector 算子（默认类型），支持最完整的调优参数集合。
 
 ## 参数值优先级与展开逻辑
 
@@ -210,7 +210,7 @@ enable_hivm_auto_cv_balance=True  # 将导致验证错误
 
 ### 1. 结合多个调优参数
 
-对于混合类型算子（`kernel_type="mixcv"`），可以同时调优多个参数：
+对于混合类型算子（`kernel_type="mix"`），可以同时调优多个参数：
 
 ```python
 @max_autotune(
@@ -219,7 +219,7 @@ enable_hivm_auto_cv_balance=True  # 将导致验证错误
         triton.Config(kwargs={'BLOCK_M': 128, 'BLOCK_N': 128}),
     ],
     key=["M", "N", "K"],
-    kernel_type="mixcv",
+    kernel_type="mix",
     num_stages=[1, 2],
     enable_hivm_auto_cv_balance=[True, False],
     tile_mix_vector_loop=[2, 4, 8],

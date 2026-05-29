@@ -27,7 +27,7 @@ from triton.backends.ascend.backend.runtime import max_autotune
         triton.Config(kwargs={'BLOCK_M': 64, 'BLOCK_N': 256}),
     ],
     key=["M", "N"],
-    kernel_type="mixcv",
+    kernel_type="mix",
     # Additional tuning parameters, each value must be a list
     enable_hivm_auto_cv_balance=[True, False],
     tile_mix_vector_loop=[2, 4],
@@ -53,7 +53,7 @@ The equivalent number of configurations after expansion:
 
 Total configuration count: `2 × 2 × 2 × 2 × 2 = 32` configurations.
 
-> Note: `kernel_type="mixcv"` supports many parameters. Parameters not explicitly provided will use default values for expansion. If you want a specific parameter to not participate in expansion, you can fix its value in the base `Config`'s `kwargs`.
+> Note: `kernel_type="mix"` supports many parameters. Parameters not explicitly provided will use default values for expansion. If you want a specific parameter to not participate in expansion, you can fix its value in the base `Config`'s `kwargs`.
 
 ### 2. Relationship between `max_autotune` and `@triton.autotune`
 
@@ -77,8 +77,8 @@ from triton.backends.ascend.backend.runtime import max_autotune
 
 ### Parameter Support Matrix
 
-| Parameter | cube | mixcv | vector | Default Value | Valid Values | Description |
-|------|:----:|:-----:|:------:|--------|--------|------|
+| Parameter | cube | mix | vector | Default Value | Valid Values | Description |
+|------|:----:|:---:|:------:|--------|--------|------|
 | `num_stages` | ✅ | ✅ | ✅ | `[2]` | `[1, 2]` | Number of pipeline stages |
 | `unit_flag` | ✅ | ✅ | ❌ | `[False]` | Boolean list | Cube搬出 related synchronization optimization |
 | `limit_auto_multi_buffer_of_local_buffer` | ✅ | ✅ | ❌ | `["no-l0c"]` | `["no-limit", "no-l0c"]` | Configure the scope of automatic multi-buffer for local buffer |
@@ -93,7 +93,7 @@ from triton.backends.ascend.backend.runtime import max_autotune
 
 - **cube**: Pure cube (matrix multiplication-like) operators, supporting the fewest tuning parameters;
 - **vector**: Pure vector operators, only supporting `num_stages` and `enable_ubuf_saving`;
-- **mixcv**: Mixed cube+vector operators (default type), supporting the most complete set of tuning parameters.
+- **mix**: Mixed cube+vector operators (default type), supporting the most complete set of tuning parameters.
 
 ## Parameter Value Priority and Expansion Logic
 
@@ -210,7 +210,7 @@ Too many configurations will increase the initial tuning time. It is recommended
 
 ### 1. Combining Multiple Tuning Parameters
 
-For mixed type operators (`kernel_type="mixcv"`), you can simultaneously tune multiple parameters:
+For mixed type operators (`kernel_type="mix"`), you can simultaneously tune multiple parameters:
 
 ```python
 @max_autotune(
@@ -219,7 +219,7 @@ For mixed type operators (`kernel_type="mixcv"`), you can simultaneously tune mu
         triton.Config(kwargs={'BLOCK_M': 128, 'BLOCK_N': 128}),
     ],
     key=["M", "N", "K"],
-    kernel_type="mixcv",
+    kernel_type="mix",
     num_stages=[1, 2],
     enable_hivm_auto_cv_balance=[True, False],
     tile_mix_vector_loop=[2, 4, 8],

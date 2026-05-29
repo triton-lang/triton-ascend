@@ -288,7 +288,7 @@ max_autotune 是专为 Ascend NPU 设计的扩展装饰器（位于 triton.backe
             triton.Config({'BLOCK_SIZE': 256}),
         ],
         key=['n_elements'],
-        kernel_type="vector",           # 算子类型，支持 cube/mixcv/vector
+        kernel_type="vector",           # 算子类型，支持 cube/mix/vector
         enable_ubuf_saving=[True, False] # 可选，默认已包含
     )
     @triton.jit

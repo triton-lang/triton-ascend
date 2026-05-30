@@ -606,6 +606,7 @@ void init_triton_ascend(py::module &&m) {
 
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL
   m.def("run_costmodel_inproc", [](const std::string &mlirText, const std::vector<std::string> &extraArgs) {
+    py::gil_scoped_release release;
     return runAscendCostModelInProcess(mlirText, extraArgs);
   }, py::arg("mlir_text"), py::arg("extra_args") = std::vector<std::string>{});
 #else

@@ -229,6 +229,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
     MLIRMathToLLVM
     MLIRROCDLToLLVMIRTranslation
     MLIRGPUDialect
+    MLIRMeshDialect
     MLIRSCFToControlFlow
     MLIRIndexToLLVM
     MLIRGPUToROCDLTransforms
@@ -283,6 +284,11 @@ if(TRITON_BUILD_PYTHON_MODULE)
 
   # Link triton with its dependencies
   target_link_libraries(triton PUBLIC ${TRITON_LIBRARIES})
+  # Force-include Mesh dialect archive to materialize MeshDialect TypeID symbols
+  target_link_options(triton PRIVATE
+    "-Wl,--whole-archive"
+    "${LLVM_LIBRARY_DIR}/libMLIRMeshDialect.a"
+    "-Wl,--no-whole-archive")
   if(WIN32)
     target_link_libraries(triton PRIVATE ${CMAKE_DL_LIBS})
   else()

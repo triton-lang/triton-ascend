@@ -27,9 +27,9 @@
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 
-#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
@@ -41,7 +41,10 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/OperationSupport.h"
+#include "mlir/IR/Types.h"
+#include "mlir/IR/ValueRange.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "triton/Dialect/Triton/IR/Types.h"
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
@@ -421,11 +424,12 @@ void BlockDataParser::parse(
         parseTensorPtr(advanceOp, data, loc, rewriter, known);
       } else if (auto intToPtrOp = dyn_cast<triton::IntToPtrOp>(op)) {
         data.setSource(remappedPtr);
+      } else if (isDistributedTypeCustomOp(op)) {
+        data.setSource(remappedPtr);
       } else {
         LLVM_DEBUG({ llvm::dbgs() << operand << "\n"; });
-        llvm_unreachable(
-            "Unexpected operand defining operation, a scalar "
-            "pointer can only be produced by AddPtrOp or direct block ptr");
+        llvm_unreachable("Unexpected operand defining operation, a scalar "
+                         "pointer can only be produced by AddPtrOp or direct block ptr or hivm CustomOp");
       }
     } else {
       data.setSource(remappedPtr);
@@ -482,12 +486,18 @@ void BlockDataParser::parse(
     parseFill(fillOp, data, loc, rewriter, known);
   } else if (auto selectOp = operand.getDefiningOp<arith::SelectOp>()){
     parseSelect(selectOp, data, loc, rewriter, known);
+  } else if (isDistributedTypeCustomOp(operand.getDefiningOp())) {
+    auto customOp = operand.getDefiningOp<hivm::CustomOp>();
+    auto opResult = dyn_cast<OpResult>(operand);
+    assert(opResult && "Expected operand to be an OpResult");
+    unsigned resultIdx = opResult.getResultNumber();
+    parseCustomOp(customOp, data, loc, rewriter, known, resultIdx);
   } else if (auto genericOp = operand.getDefiningOp<linalg::GenericOp>()) {
     if (genericOp->hasAttr("tt.from_make_range")) {
-      parseLinalgGenericFromMakeRange(genericOp, data, loc, rewriter, known);
+        parseLinalgGenericFromMakeRange(genericOp, data, loc, rewriter, known);
     } else {
-      operand.dump();
-      llvm_unreachable("encountered AddPtrOp produced by unsupported operation");
+        operand.dump();
+        llvm_unreachable("encountered AddPtrOp produced by unsupported operation");
     }
   } else if (auto atomicRMWOp = operand.getDefiningOp<triton::AtomicRMWOp>()) {
     parseAtomicRmw(atomicRMWOp, data, loc, rewriter, known);
@@ -1002,6 +1012,18 @@ void parseIndirectLoad(OpTy op, BlockData &data, const Location &loc,
   data.setSource(opRes);
 }
 
+void BlockDataParser::parseCustomOp(hivm::CustomOp op, BlockData &data, const Location &loc,
+                                  ConversionPatternRewriter &rewriter,
+                                  const llvm::SmallDenseMap<Value, BlockData> &known, unsigned resultIdx)
+{
+  auto srcValArrayAttr = op->getAttrOfType<DenseI32ArrayAttr>(ConverterUtils::customSrcPtrIndexAttrName);
+  assert(srcValArrayAttr && "structure hivm.custom op should present src tensor<tt.ptr>");
+  auto srcValArray = srcValArrayAttr.asArrayRef();
+  assert(srcValArray[resultIdx] != -1 && "tensor<tt.ptr> result should map to src tensor<tt.ptr>");
+  parse(op->getOperand(srcValArray[resultIdx]), data, loc, rewriter, known);
+  data.setSource(rewriter.getRemappedValue(op->getResult(resultIdx)));
+}
+
 void BlockDataParser::parseFill(linalg::FillOp op, BlockData &data,
                                 const Location &loc,
                                 ConversionPatternRewriter &rewriter,
@@ -1225,6 +1247,52 @@ OpFoldResult accumulatePotentialOffsetOnBase(
   }
 
   return offset;
+}
+
+void BlockDataParser::rewriteCustomOp(hivm::CustomOp op, hivm::CustomOp::Adaptor &adaptor,
+                                      ConversionPatternRewriter &rewriter)
+{
+  if (isDistributedTypeCustomOp(op)){
+    auto ip = rewriter.saveInsertionPoint();
+    rewriter.setInsertionPoint(op);
+    auto loc = op.getLoc();
+    llvm::SmallVector<Value> newOutputs;
+    for (auto out : op.getOutputs()) {
+        auto tensorTy = llvm::cast<RankedTensorType>(out.getType());
+        if(llvm::isa<triton::PointerType>(tensorTy.getElementType())){
+          // simd library shouldn't output tensor<tt.ptr>
+          // after rewrite, delete the tensor<tt.ptr> output value
+          continue;
+        }
+        newOutputs.emplace_back(rewriter.getRemappedValue(out));
+    }
+    llvm::SmallVector<Type> resultTypes;
+    for (auto ty : op->getResultTypes()) {
+        if (auto ptrTy = llvm::dyn_cast<triton::PointerType>(ty)) {
+            resultTypes.emplace_back(MemRefType::get({ShapedType::kDynamic}, ptrTy.getPointeeType()));
+            continue;
+        }
+        if (auto tensorTy = llvm::dyn_cast<RankedTensorType>(ty)) {
+            if (auto ptrTy = llvm::dyn_cast<triton::PointerType>(tensorTy.getElementType())) {
+                resultTypes.emplace_back(MemRefType::get(tensorTy.getShape(), ptrTy.getPointeeType()));
+                continue;
+            }
+        }
+        resultTypes.emplace_back(ty);
+    }
+    auto newCustomOp = rewriter.create<hivm::CustomOp>(loc, resultTypes, op.getName(), adaptor.getInputs(), newOutputs,
+                                                       adaptor.getTempBuffers());
+    auto operandSegmentSizesAttr = newCustomOp->getAttr("operandSegmentSizes");
+    newCustomOp->setAttrs(op->getAttrs());
+    newCustomOp->setAttr("operandSegmentSizes", operandSegmentSizesAttr);
+    rewriter.replaceOp(op, newCustomOp.getResults());
+    rewriter.restoreInsertionPoint(ip);
+  } else {
+    auto res_types = adaptor.getOutputs().getTypes();
+    auto new_op = rewriter.create<hivm::CustomOp>(
+      op->getLoc(), res_types, adaptor.getOperands(), op->getAttrs());
+    rewriter.replaceOp(op, new_op);
+  }
 }
 
 // Design for load/store boundary_check.
@@ -2124,7 +2192,11 @@ void BlockDataParser::rewriteLoopOp(
   // in the loop body, so we can take advantage of the states we built up
   for (auto *region : newOp.getLoopRegions()) {
     for (auto &bodyOp : region->getOps()) {
-      if (auto addptrOp = dyn_cast<triton::AddPtrOp>(bodyOp)) {
+      if (isDistributedTypeCustomOp(&bodyOp)) {
+        auto customOp = dyn_cast<hivm::CustomOp>(bodyOp);
+        auto adaptor = hivm::CustomOp::Adaptor(customOp);
+        rewriteCustomOp(customOp, adaptor, rewriter);
+      } else if (auto addptrOp = dyn_cast<triton::AddPtrOp>(bodyOp)) {
         // FIXME: Constructed adaptor here does not hold the transformed op info.
         auto adaptor = triton::AddPtrOp::Adaptor(addptrOp);
         rewriteAddPtr(addptrOp, adaptor, rewriter, known);

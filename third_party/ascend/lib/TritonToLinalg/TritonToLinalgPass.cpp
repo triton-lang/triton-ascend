@@ -22,6 +22,7 @@
  */
 
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
+#include "TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/TritonToLinalg/ArgMinMaxConverter.h"
 #include "ascend/include/TritonToLinalg/FunctionConverter.h"
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
@@ -37,12 +38,14 @@
 #include "ascend/include/Utils/InterleaveOptimization.h"
 #include "ascend/include/Utils/Utils.h"
 
+#include "bishengir/Dialect/HFusion/IR/HFusion.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
-#include "bishengir/Dialect/HFusion/IR/HFusion.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/TypeRange.h"
+#include "mlir/IR/Types.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -98,10 +101,7 @@ public:
   matchAndRewrite(hivm::CustomOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override
   {
-    auto res_types = adaptor.getOutputs().getTypes();
-    auto new_op = rewriter.create<hivm::CustomOp>(
-      op->getLoc(), res_types, adaptor.getOperands(), op->getAttrs());
-    rewriter.replaceOp(op, new_op);
+    BlockDataParser::rewriteCustomOp(op, adaptor, rewriter);
     return success();
   }
 };

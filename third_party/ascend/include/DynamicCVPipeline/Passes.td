@@ -19,6 +19,12 @@ def AddDynamicCVPipeline : Pass<"add_dynamic_cv_pipeline", "mlir::ModuleOp"> {
     let dependentDialects = ["hivm::HIVMDialect", "bufferization::BufferizationDialect", "scope::ScopeDialect", "annotation::AnnotationDialect", "LLVM::LLVMDialect"];
 }
 
+def PreCheckAvailablePass : Pass<"pre-check-dynamic-cv-pipeline-available", "mlir::ModuleOp"> {
+  let summary = "Check whether dynamic cv pipeline can process the input module";
+  let constructor = "triton::createPreCheckAvailablePass()";
+  let dependentDialects = ["scope::ScopeDialect"];
+}
+
 def OpClassifierPass : Pass<"op-classifier", "mlir::ModuleOp"> {
   let summary = "Classify operations as CUBE or VECTOR";
   let constructor = "triton::createOpClassifierPass()";

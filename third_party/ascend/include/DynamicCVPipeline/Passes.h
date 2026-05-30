@@ -24,6 +24,7 @@
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PASSES_H
 
 #include "AddDynamicCVPipeline.h"
+#include "ascend/include/DynamicCVPipeline/PreCheckAvailable.h"
 #include "third_party/ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
 #include "third_party/ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
 #include "third_party/ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"

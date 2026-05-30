@@ -273,8 +273,7 @@ def _is_debug_line_info_disabled() -> bool:
 
 
 def _is_auto_map_parallel_blocks_enabled() -> bool:
-    default_parallel = "true" if is_compile_on_910_95 else "false"
-    return os.getenv("TRITON_ALL_BLOCKS_PARALLEL", default_parallel).lower() in ("true", "1")
+    return os.getenv("TRITON_ALL_BLOCKS_PARALLEL", "true").lower() in ("true", "1")
 
 
 def _get_auto_blockify_blacklist_reasons(ir_text: str):
@@ -315,7 +314,13 @@ def _get_cxx():
     return cxx
 
 
-def _build_npu_ext(obj_name: str, src_path, *, kernel_launcher="torch") -> str:
+def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch", precompile=False) -> str:
+    header_path = None
+    if src_path is None:
+        src_path = header_or_src_path
+    else:
+        header_path = header_or_src_path
+
     suffix = sysconfig.get_config_var("EXT_SUFFIX")
     src_dir = os.path.dirname(src_path)
     so_path = os.path.join(src_dir, f"{obj_name}{suffix}")
@@ -332,6 +337,8 @@ def _build_npu_ext(obj_name: str, src_path, *, kernel_launcher="torch") -> str:
     cc_cmd += [f"-I{py_include_dir}"]
     cc_cmd += [f"-I{os.path.dirname(os.path.realpath(__file__))}"]
     asc_path = _get_ascend_path()
+    if header_path is not None:
+        cc_cmd += [f"-I{os.path.dirname(header_path)}"]
 
     rt_path = os.path.join(asc_path, "include/experiment/runtime/runtime/rt.h")
     if not os.path.exists(rt_path):

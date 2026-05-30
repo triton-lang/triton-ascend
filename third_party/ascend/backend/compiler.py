@@ -212,7 +212,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             compile_on_910_95
         )
         if metadata["enable_dynamic_cv_pipeline"]:
-            metadata["set_workspace_multibuffer"] = None
+            metadata["set_workspace_multibuffer"] = 0
             metadata["enable_mixed_cv"] = True
             metadata["disable_auto_inject_block_sync"] = True
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
@@ -509,9 +509,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 [f"--set-workspace-multibuffer={set_workspace_multibuffer}"]
 
         auto_multi_buffer = metadata["limit_auto_multi_buffer_of_local_buffer"]
-        if auto_multi_buffer is not None:
-            _compile_option_list += \
-                [f"--limit-auto-multi-buffer-of-local-buffer={auto_multi_buffer}"]
+        if auto_multi_buffer is None:
+            auto_multi_buffer = "no-limit"
+        _compile_option_list += \
+            [f"--limit-auto-multi-buffer-of-local-buffer={auto_multi_buffer}"]
         auto_multi_buffer_buffer = metadata["limit_auto_multi_buffer_buffer"]
         if auto_multi_buffer_buffer is not None:
             _compile_option_list += \
@@ -889,7 +890,7 @@ class NPUOptions:
     cluster_dims: tuple = (1, 1, 1)
     num_warps: int = 32
     num_ctas: int = 1
-    num_stages: int = 1 if is_compile_on_910_95 else 2
+    num_stages: int = 2
     warp_size: int = 32
     num_buffers_warp_spec: int = 0
     num_consumer_groups: int = 0
@@ -917,7 +918,7 @@ class NPUOptions:
     extern_libs: dict = None
     bisheng_options: str = "-cce-link-aicore-ll-module " + get_libdevice()
 
-    multibuffer: bool = not is_compile_on_910_95
+    multibuffer: bool = True
     storage_align: bool = None
     ops_reorder: bool = None
     code_motion: bool = None
@@ -951,7 +952,7 @@ class NPUOptions:
     enable_vf_fusion: bool = None
     # todo: this code will be removed in version 530.
     add_auto_scheduling: bool = False
-    enable_dynamic_cv_pipeline: bool = False
+    enable_dynamic_cv_pipeline: bool = True if is_compile_on_910_95 else False
     hfusion_enable_multiple_consumer_fusion: bool = False
     has_auto_blockify_blacklist_op: Optional[bool] = None
     intra_cache_num: int = None
@@ -975,6 +976,7 @@ class NPUOptions:
     simt_stack_limit: int = None
     # take effect on the reorder instruction pattern for SIMT. The pattern is disabled by default.
     enable_simt_reorder_instruction: bool = False
+    enable_costmodel_backend: bool = False
     # disable simt fma optimization to get high precision
     disable_fma: bool = False
 
@@ -1048,6 +1050,12 @@ def ttir_to_npubin(mod, metadata, opt):
                         f"--append-bisheng-options={bisheng_options}"
                     ]
 
+            # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
+            # mirroring the SIMD compile paths. driver.py's runtime block-count
+            # cap keys off the same env switch, so the two stay in sync.
+            if _is_auto_map_parallel_blocks_enabled():
+                _compile_option_list += ["--enable-auto-blockify-loop"]
+
         npu_compiler_path, env = _get_npucompiler_path()
         cmd_list = (
             [npu_compiler_path, src_path]
@@ -1084,6 +1092,10 @@ class AscendBackend(BaseBackend):
             }
             args.setdefault("arch", self.target.arch)
             options = NPUOptions(**args)
+            # Costmodel path should avoid extra BC<->MLIR conversion stages
+            # to keep compile-only autotune routing lightweight and stable.
+            if getattr(options, "enable_costmodel_backend", False):
+                object.__setattr__(options, "use_bytecode", False)
         else:
             raise NotImplementedError(
                 f"Backend '{self.target.backend}' is not supported. "

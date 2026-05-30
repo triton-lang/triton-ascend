@@ -93,7 +93,9 @@ void AddControlFlowConditionPass::runOnOperation()
   pm.addPass(createCloneOpsPass());
   
   // Step2: Process shared iter_args in for ops to eliminate arg sharing across block_ids
-  pm.addPass(createProcessArgsPass());
+  std::unique_ptr<ProcessArgsPass> processArgsPass(new ProcessArgsPass());
+  processArgsPass->setConditionInfo(&info);
+  pm.addPass(std::move(processArgsPass));
 
   // Step3: Create if ops based on block_id
   std::unique_ptr<CreateIfOpsPass> createIfOpsPass(new CreateIfOpsPass());

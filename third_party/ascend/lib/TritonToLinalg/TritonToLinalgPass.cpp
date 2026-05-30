@@ -904,6 +904,22 @@ void TritonToLinalgPass::runOnOperation() {
     signalPassFailure();
   }
 
+// 7.1 Workaround: fold duplicated one-hot reconstruction emitted after
+// ArgMax lowering. The issue is not in triton::ReduceOp semantics themselves;
+// redundant value reconstruction is materialized later and can lower to
+// incorrect code on Ascend, so this is fixed post-conversion on linalg::ReduceOp.
+{
+  RewritePatternSet foldPatterns(&getContext());
+  TTOpConverters::populatePostConversionCanonicalizationPatterns(foldPatterns);
+
+  if (failed(applyPatternsAndFoldGreedily(moduleOp,
+                                          std::move(foldPatterns)))) {
+    moduleOp->emitError("failed to fold one-hot gather after max_with_index");
+    signalPassFailure();
+    return;
+  }
+}
+
   // Execute legal stride operations conversion
   if (failed(processLegalStrideOperations(moduleOp))) {
     signalPassFailure();

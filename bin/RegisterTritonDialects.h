@@ -103,6 +103,7 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
 
   // DynamicCVPipeline passes
   mlir::triton::registerAddDynamicCVPipelinePasses();
+  mlir::triton::registerPreCheckAvailablePasses();
   mlir::triton::registerAddControlFlowConditionPasses();
   mlir::triton::registerAddMultiBufferOuterScopePasses();
   mlir::triton::registerAddMultiBufferInnerScopePasses();

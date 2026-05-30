@@ -21,6 +21,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/Debug.h"
@@ -99,7 +100,7 @@ static bool checkMultiBlockUse(const llvm::DenseMap<unsigned, TensorArgBlockInfo
 {
   for (auto &p : argBlockInfo) {
     if (p.second.blockIds.size() > 1) {
-      LDBG("[ERROR]: Found tensor iter_arg using in multi block_ids!\n");
+      LDBG("[INFO]: Found tensor iter_arg using in multi block_ids!\n");
       return true;
     }
   }
@@ -134,7 +135,7 @@ static bool checkUseUpdateMismatch(scf::ForOp forOp,
     }
 
     if (it->second.firstBlockId != defBlockIdAttr.getInt()) {
-      LDBG("[ERROR]: Found tensor iter_arg using and updating in different block_ids!\n");
+      LDBG("[INFO]: Found tensor iter_arg using and updating in different block_ids!\n");
       return true;
     }
   }
@@ -183,6 +184,7 @@ void AnalyzeArgsPass::runOnOperation()
   LDBG("Before AnalyzeArgs:\n" << module << "\n");
 
   if (checkTensorArgsInMainLoop(module)) {
+    CVPipeline::setFallbackAttr(module);
     signalPassFailure();
     return;
   }

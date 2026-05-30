@@ -90,6 +90,16 @@ public:
                   ConversionPatternRewriter &rewriter) const override;
 };
 
+class DescriptorReduceConverter
+    : public OpConversionPattern<triton::DescriptorReduceOp> {
+public:
+  using OpConversionPattern<triton::DescriptorReduceOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::DescriptorReduceOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
 } // end of namespace DescriptorConverter
 
 #endif // TRITON_ADAPTER_DESCRIPTORCONVERTER_H

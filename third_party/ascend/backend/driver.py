@@ -501,11 +501,12 @@ def generate_npu_wrapper_src(constants, signature, metadata):
         int gridX, gridY, gridZ;
         rtStream_t stream;
         const void *functon;
-        PyObject* packed_metadata,       
+        PyObject* packed_metadata, *launch_metadata;
+        PyObject* launch_enter_hook, *launch_exit_hook;
         *args_expand
     """
-
     format = "iiiKKOOOO" + ''.join([_format_of(_extracted_ty(ty)) for ty in signature.values()])
+
     grid_info = {'X': 'i32', 'Y': 'i32', 'Z': 'i32'}
     # TODO: automatically check if gather load ops are used.
 
@@ -985,7 +986,8 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
   if(!PyArg_ParseTuple(
       args, \"{format}\",
       &gridX, &gridY, &gridZ, &stream, &function,
-      &packedMetadata, &launch_metadata, &launch_enter_hook, &launch_exit_hook
+      &packedMetadata, &launch_metadata,
+      &launch_enter_hook, &launch_exit_hook
       {', ' + ', '.join(f"&_arg{i}" for i, ty in signature.items()) if len(signature) > 0 else ''}
       )
     ) {{

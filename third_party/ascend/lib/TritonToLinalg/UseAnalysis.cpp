@@ -153,6 +153,11 @@ void triton::UseAnalysis::visitOperation(Operation *op,
           propagateUse(operand, UseType::DataUse);
         }
       })
+      .Case<tensor::ExtractOp>([&](auto extractOp) {
+        for (auto operand : operands) {
+          propagateUse(operand, UseType::DataUse);
+        }
+      })
       .Case<hivm::FixpipeOp>([&](auto fixpipeOp) {
         propagateUse(operands[0], UseType::DataUse);
       })

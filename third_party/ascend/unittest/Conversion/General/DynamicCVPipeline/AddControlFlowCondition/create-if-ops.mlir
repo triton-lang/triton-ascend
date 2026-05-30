@@ -39,10 +39,10 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         hivm.hir.sync_block_set {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 2 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 3
         %alloc_7 = memref.alloc() : memref<128xf32, #hivm.address_space<ub>>
         %memspacecast = memref.memory_space_cast %alloc_7 {ssbuffer.intraDeps = [0 : i32, 1 : i32]} : memref<128xf32, #hivm.address_space<ub>> to memref<128xf32>
-        %7 = bufferization.to_tensor %memspacecast writable : memref<128xf32> to tensor<128xf32>
+        %7 = bufferization.to_tensor %memspacecast writable : memref<128xf32>
         %alloc_8 = memref.alloc() : memref<128xf32, #hivm.address_space<ub>>
         %memspacecast_9 = memref.memory_space_cast %alloc_8 {ssbuffer.intraDeps = [0 : i32, 1 : i32]} : memref<128xf32, #hivm.address_space<ub>> to memref<128xf32>
-        %8 = bufferization.to_tensor %memspacecast_9 writable : memref<128xf32> to tensor<128xf32>
+        %8 = bufferization.to_tensor %memspacecast_9 writable : memref<128xf32>
         %9:3 = scf.for %arg17 = %c0_i32 to %c8192_i32 step %c128_i32 iter_args(%arg18 = %6, %arg19 = %2, %arg20 = %5) -> (tensor<128xf32>, tensor<128x128xf32>, tensor<128xf32>)  : i32 {
           // CHECK: %true = arith.constant true
           // CHECK: %{{.*}}:2 = scf.if %true -> (tensor<128xf32>, tensor<128xf32>) {
@@ -62,7 +62,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
           // CHECK: } {ssbuffer.if = 5 : i32}
           hivm.hir.sync_block_wait {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 2
           %memspacecast_11 = memref.memory_space_cast %alloc_5 {ssbuffer.block_id = 5 : i32, ssbuffer.crossDeps = [0 : i32, 0 : i32], ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
-          %33 = bufferization.to_tensor %memspacecast_11 restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32> to tensor<128x128xf32>
+          %33 = bufferization.to_tensor %memspacecast_11 restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32>
           %34 = arith.mulf %33, %3 {ssbuffer.block_id = 5 : i32} : tensor<128x128xf32>
           %reduced = linalg.reduce ins(%34 : tensor<128x128xf32>) outs(%5 : tensor<128xf32>) dimensions = [1]  {ssbuffer.block_id = 5 : i32}
             (%in: f32, %init: f32) {
@@ -119,17 +119,17 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
           // CHECK: } {ssbuffer.if = 6 : i32}
           hivm.hir.sync_block_wait {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 3
           %memspacecast_16 = memref.memory_space_cast %alloc_6 {ssbuffer.block_id = 6 : i32, ssbuffer.crossDeps = [1, 0], ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
-          %48 = bufferization.to_tensor %memspacecast_16 restrict writable {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32> to tensor<128x128xf32>
+          %48 = bufferization.to_tensor %memspacecast_16 restrict writable {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32>
           %49 = arith.divui %arg17, %c128_i32 {ssbuffer.block_id = 6 : i32} : i32
           %c2_i32_17 = arith.constant {ssbuffer.block_id = 6 : i32} 2 : i32
           %50 = arith.remsi %49, %c2_i32_17 {ssbuffer.block_id = 6 : i32} : i32
           %c0_i32_18 = arith.constant {ssbuffer.block_id = 6 : i32} 0 : i32
           %51 = arith.cmpi eq, %50, %c0_i32_18 {ssbuffer.block_id = 6 : i32} : i32
           %52 = scf.if %51 -> (tensor<128xf32>) {
-            %55 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 6 : i32} : memref<128xf32> to tensor<128xf32>
+            %55 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 6 : i32} : memref<128xf32>
             scf.yield %55 : tensor<128xf32>
           } else {
-            %55 = bufferization.to_tensor %memspacecast_9 restrict writable {ssbuffer.block_id = 6 : i32} : memref<128xf32> to tensor<128xf32>
+            %55 = bufferization.to_tensor %memspacecast_9 restrict writable {ssbuffer.block_id = 6 : i32} : memref<128xf32>
             scf.yield %55 : tensor<128xf32>
           } {ssbuffer.block_id = 6 : i32, ssbuffer.intraDeps = [0 : i32, 0 : i32]}
           %broadcasted_19 = linalg.broadcast ins(%52 : tensor<128xf32>) outs(%1 : tensor<128x128xf32>) dimensions = [1]  {ssbuffer.block_id = 6 : i32}

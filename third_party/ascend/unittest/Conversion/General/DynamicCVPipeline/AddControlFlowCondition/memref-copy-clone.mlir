@@ -92,7 +92,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         %subview_14 = memref.subview %reinterpret_cast_12[0, 0] [%83, %88] [1, 1] {ssbuffer.block_id = 3 : i32} : memref<32x32xf16, strided<[256, 1], offset: ?>> to memref<?x?xf16, strided<[256, 1], offset: ?>>
         %subview_15 = memref.subview %alloc_9[%82, %87] [%83, %88] [1, 1] {ssbuffer.block_id = 3 : i32} : memref<32x32xf16> to memref<?x?xf16, strided<[32, 1], offset: ?>>
         memref.copy %subview_14, %subview_15 {ssbuffer.block_id = 3 : i32} : memref<?x?xf16, strided<[256, 1], offset: ?>> to memref<?x?xf16, strided<[32, 1], offset: ?>>
-        %89 = bufferization.to_tensor %alloc_9 restrict writable {gm_load_bufferable, ssbuffer.block_id = 3 : i32} : memref<32x32xf16> to tensor<32x32xf16>
+        %89 = bufferization.to_tensor %alloc_9 restrict writable {gm_load_bufferable, ssbuffer.block_id = 3 : i32} : memref<32x32xf16>
         %90 = arith.subi %69, %16 {ssbuffer.block_id = 3 : i32} : index
         %91 = arith.divsi %90, %c64 {ssbuffer.block_id = 3 : i32} : index
         %92 = arith.subi %c64, %91 {ssbuffer.block_id = 3 : i32} : index
@@ -112,7 +112,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         %subview_16 = memref.subview %reinterpret_cast_13[0, 0] [%100, %105] [1, 1] {ssbuffer.block_id = 3 : i32} : memref<32x32xf16, strided<[64, 1], offset: ?>> to memref<?x?xf16, strided<[64, 1], offset: ?>>
         %subview_17 = memref.subview %alloc_11[%99, %104] [%100, %105] [1, 1] {ssbuffer.block_id = 3 : i32} : memref<32x32xf16> to memref<?x?xf16, strided<[32, 1], offset: ?>>
         memref.copy %subview_16, %subview_17 {ssbuffer.block_id = 3 : i32} : memref<?x?xf16, strided<[64, 1], offset: ?>> to memref<?x?xf16, strided<[32, 1], offset: ?>>
-        %106 = bufferization.to_tensor %alloc_11 restrict writable {gm_load_bufferable, ssbuffer.block_id = 3 : i32} : memref<32x32xf16> to tensor<32x32xf16>
+        %106 = bufferization.to_tensor %alloc_11 restrict writable {gm_load_bufferable, ssbuffer.block_id = 3 : i32} : memref<32x32xf16>
         %107 = tensor.empty() {ssbuffer.block_id = 3 : i32} : tensor<32x32xf32>
         %108 = linalg.fill {ssbuffer.block_id = 3 : i32} ins(%cst_1 : f32) outs(%107 : tensor<32x32xf32>) -> tensor<32x32xf32>
         %109 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 3 : i32} ins(%89, %106 : tensor<32x32xf16>, tensor<32x32xf16>) outs(%108 : tensor<32x32xf32>) -> tensor<32x32xf32>
@@ -138,10 +138,10 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         } {ssbuffer.block_id = 3 : i32, ssbuffer.cross_buffer = 1 : i32}
         // CHECK: %[[ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 4 : i32,
         // CHECK-SAME: ssbuffer.clone = 5 : i32} : memref<32x32xf16>
-        // CHECK: %[[SUBVIEW0:.*]] = memref.subview %reinterpret_cast_19[0, 0] [%98, %103] [1, 1]
+        // CHECK: %[[SUBVIEW0:.*]] = memref.subview %reinterpret_cast_20[0, 0] [{{.*}}, {{.*}}] [1, 1]
         // CHECK-SAME: {ssbuffer.block_id = 4 : i32, ssbuffer.clone = 3 : i32}
         // CHECK-SAME: : memref<32x32xf16, strided<[256, 1], offset: ?>> to memref<?x?xf16, strided<[256, 1], offset: ?>>
-        // CHECK: %[[SUBVIEW1:.*]] = memref.subview %[[ALLOC]][%97, %102] [%98, %103] [1, 1]
+        // CHECK: %[[SUBVIEW1:.*]] = memref.subview %[[ALLOC]]{{.*}} [{{.*}}, {{.*}}] [1, 1]
         // CHECK-SAME: {ssbuffer.block_id = 4 : i32, ssbuffer.clone = 3 : i32}
         // CHECK-SAME: : memref<32x32xf16> to memref<?x?xf16, strided<[32, 1], offset: ?>>
         // CHECK: memref.copy %[[SUBVIEW0]], %[[SUBVIEW1]] {ssbuffer.block_id = 4 : i32,
@@ -149,12 +149,12 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK-SAME: : memref<?x?xf16, strided<[256, 1], offset: ?>> to memref<?x?xf16, strided<[32, 1], offset: ?>>
         // CHECK: %[[TO_TENSOR:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable
         // CHECK-SAME: {gm_load_bufferable, ssbuffer.block_id = 4 : i32, ssbuffer.clone = 3 : i32}
-        // CHECK-SAME: : memref<32x32xf16> to tensor<32x32xf16>
+        // CHECK-SAME: : memref<32x32xf16>
         %reinterpret_cast_20 = memref.reinterpret_cast %arg3 to offset: [%64], sizes: [32, 32], strides: [256, 1] {ssbuffer.block_id = 4 : i32} : memref<?xf16> to memref<32x32xf16, strided<[256, 1], offset: ?>>
         %subview_21 = memref.subview %reinterpret_cast_20[0, 0] [%83, %88] [1, 1] {ssbuffer.block_id = 4 : i32} : memref<32x32xf16, strided<[256, 1], offset: ?>> to memref<?x?xf16, strided<[256, 1], offset: ?>>
         %subview_22 = memref.subview %alloc_10[%82, %87] [%83, %88] [1, 1] {ssbuffer.block_id = 4 : i32} : memref<32x32xf16> to memref<?x?xf16, strided<[32, 1], offset: ?>>
         memref.copy %subview_21, %subview_22 {ssbuffer.block_id = 4 : i32} : memref<?x?xf16, strided<[256, 1], offset: ?>> to memref<?x?xf16, strided<[32, 1], offset: ?>>
-        %113 = bufferization.to_tensor %alloc_10 restrict writable {gm_load_bufferable, ssbuffer.block_id = 4 : i32} : memref<32x32xf16> to tensor<32x32xf16>
+        %113 = bufferization.to_tensor %alloc_10 restrict writable {gm_load_bufferable, ssbuffer.block_id = 4 : i32} : memref<32x32xf16>
         %114 = tensor.empty() {ssbuffer.block_id = 4 : i32} : tensor<32x32xf16>
         %transposed = linalg.transpose ins(%113 : tensor<32x32xf16>) outs(%114 : tensor<32x32xf16>) permutation = [1, 0]  {ssbuffer.block_id = 4 : i32}
         %115 = tensor.empty() {ssbuffer.block_id = 4 : i32} : tensor<32x32xf32>

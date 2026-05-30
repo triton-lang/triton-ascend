@@ -374,26 +374,89 @@ static bool canSkipForwardingUse(OpOperand &use, StringRef scopeType)
     return false;
 }
 
-static Operation *findLiveUser(Value value, StringRef scopeType)
+static Operation *findScopeRelevantUser(Value startValue, StringRef scopeType, bool ignoreTerminators)
 {
-    for (OpOperand &use : value.getUses()) {
-        Operation *user = use.getOwner();
-        if (isOpAlive(user) && !canSkipForwardingUse(use, scopeType)) {
-            return user;
+    SmallVector<Value> worklist {startValue};
+    llvm::SmallPtrSet<void *, kSeenValuesCapacity> seenValues;
+
+    while (!worklist.empty()) {
+        Value value = worklist.pop_back_val();
+        if (!value || !seenValues.insert(value.getAsOpaquePointer()).second) {
+            continue;
+        }
+
+        for (OpOperand &use : value.getUses()) {
+            Operation *user = use.getOwner();
+            if (!isOpAlive(user) || canSkipForwardingUse(use, scopeType)) {
+                continue;
+            }
+
+            if (hasActiveNestedLoopCarryUse(use, scopeType)) {
+                if (!ignoreTerminators || !user->hasTrait<OpTrait::IsTerminator>()) {
+                    return user;
+                }
+                continue;
+            }
+
+            if (auto conditionOp = dyn_cast<scf::ConditionOp>(user)) {
+                Operation *parentOp = conditionOp.getParentOp();
+                if (parentOp && matchesScope(parentOp, scopeType)) {
+                    if (!ignoreTerminators || !parentOp->hasTrait<OpTrait::IsTerminator>()) {
+                        return parentOp;
+                    }
+                }
+                continue;
+            }
+
+            if (auto yieldOp = dyn_cast<scf::YieldOp>(user)) {
+                Operation *yieldOwner = yieldOp->getParentOp();
+                unsigned operandIndex = use.getOperandNumber();
+                if (operandIndex < yieldOwner->getNumResults()) {
+                    if (needsLoopCarryPreserve(yieldOwner, operandIndex, scopeType)) {
+                        return yieldOwner;
+                    }
+                    worklist.push_back(yieldOwner->getResult(operandIndex));
+                    continue;
+                }
+
+                if (matchesScope(yieldOwner, scopeType) || isControlFlowOp(yieldOwner)) {
+                    if (!ignoreTerminators || !yieldOwner->hasTrait<OpTrait::IsTerminator>()) {
+                        return yieldOwner;
+                    }
+                }
+                continue;
+            }
+
+            if (matchesScope(user, scopeType)) {
+                if (!ignoreTerminators || !user->hasTrait<OpTrait::IsTerminator>()) {
+                    return user;
+                }
+                continue;
+            }
+
+            if (user->getNumResults() == 0) {
+                if (isControlFlowOp(user) && (!ignoreTerminators || !user->hasTrait<OpTrait::IsTerminator>())) {
+                    return user;
+                }
+                continue;
+            }
+
+            for (Value result : user->getResults()) {
+                worklist.push_back(result);
+            }
         }
     }
     return nullptr;
 }
 
+static Operation *findLiveUser(Value value, StringRef scopeType)
+{
+    return findScopeRelevantUser(value, scopeType, /*ignoreTerminators=*/false);
+}
+
 static Operation *findNonTermUser(Value value, StringRef scopeType)
 {
-    for (OpOperand &use : value.getUses()) {
-        Operation *user = use.getOwner();
-        if (isOpAlive(user) && !canSkipForwardingUse(use, scopeType) && !user->hasTrait<OpTrait::IsTerminator>()) {
-            return user;
-        }
-    }
-    return nullptr;
+    return findScopeRelevantUser(value, scopeType, /*ignoreTerminators=*/true);
 }
 
 enum class UseCheckResult { Skip, Active, Continue };

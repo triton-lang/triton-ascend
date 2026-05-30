@@ -31,6 +31,7 @@
 #include "mlir/Pass/Pass.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 
@@ -42,7 +43,7 @@ struct BlockInfo {
   int blockId;
   bool isCube;
   bool isControl;
-  llvm::SmallVector<mlir::Value> inputs;
+  llvm::SetVector<mlir::Value> inputs;
   llvm::SmallVector<mlir::Value> outputs;
   llvm::SmallVector<mlir::Operation*> Operations;
 };
@@ -67,7 +68,7 @@ public:
     }
 
   // for MLIR Analysis framework
-  bool isInvalidated(const mlir::AnalysisManager::PreservedAnalyses &pa) 
+  bool isInvalidated(const mlir::AnalysisManager::PreservedAnalyses &pa)
   {
     return false;
   }

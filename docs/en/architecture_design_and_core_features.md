@@ -77,7 +77,7 @@ This project extends the support for Huawei Ascend NPU (using the CANN software 
 
 |No.| NPU Option                                   | Hardware Platform    | Description|
 | --- | --------------------------------------------- | ---------- | ----- |
-| 1   | multibuffer                                   | NPU        | Autotune option. It enables or disables the ping-pong pipeline.|
+| 1   | multibuffer                                   | NPU        | Autotune option. It enables or disables the ping-pong pipeline. Enabled by default.|
 | 2   | enable_auto_bind_sub_block                    | NPU        | Autotune option (CV-fused kernels only). It enables or disables auto-binding of sub-blocks.|
 | 3   | enable_hivm_auto_cv_balance                   | NPU        | Autotune option (CV-fused kernels only). It enables or disables automatic CV balancing.|
 | 4   | sync_solver                                   | NPU        | Autotune option (CV-fused kernels only). It enables or disables the synchronization solver. |

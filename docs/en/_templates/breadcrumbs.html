@@ -1,0 +1,8 @@
+{%- extends "!breadcrumbs.html" -%}
+
+{%- block breadcrumbs_aside %}
+  {{ super() }}
+  <li class="wy-breadcrumbs-aside">
+    <a href="{{ other_lang_prefix }}{{ rtd_version }}/{{ pagename }}.html">{{ other_lang_label }}</a>
+  </li>
+{%- endblock %}

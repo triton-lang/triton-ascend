@@ -18,6 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import os
+
 # General information about the project.
 project = 'Triton Ascend'
 copyright = '2025, Huawei'
@@ -41,8 +43,6 @@ extensions = [
     'sphinx.ext.autosectionlabel',
     'myst_parser',
 ]
-
-myst_heading_anchors = 4
 
 autosummary_generate = True
 
@@ -68,6 +68,15 @@ pygments_style = 'sphinx'
 html_theme = "sphinx_rtd_theme"
 
 html_theme_options = {}
+
+# Passed to Jinja templates (see _templates/breadcrumbs.html) so the language
+# link can target the equivalent page under /en/. RTD injects the version
+# slug via READTHEDOCS_VERSION at build time; defaults to "latest" locally.
+html_context = {
+    "rtd_version": os.environ.get("READTHEDOCS_VERSION", "latest"),
+    "other_lang_prefix": "/en/",
+    "other_lang_label": "English",
+}
 
 html_static_path = ["_static"]
 

@@ -1,9 +1,14 @@
-# Minimal makefile for Sphinx documentation
+# Minimal makefile for Sphinx documentation.
+# Builds one language tree from docs/<lang>/; pick it with LANGUAGE (default zh):
+#   make html               # build docs/zh
+#   make LANGUAGE=en html    # build docs/en
+# Output goes to docs/_build/<lang>/.
 
 SPHINXOPTS    ?= -j auto
 SPHINXBUILD   ?= sphinx-build
-SOURCEDIR     = .
-BUILDDIR      = _build
+LANGUAGE      ?= zh
+SOURCEDIR     = $(LANGUAGE)
+BUILDDIR      = _build/$(LANGUAGE)
 
 help:
 	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)

@@ -1,36 +1,27 @@
 name: Ascend950 Pipeline Tests
-# Combined orchestration after Wheels finishes (or on PR close):
+run-name: >-
+  ${{
+    (github.event_name == 'workflow_run' && github.event.workflow_run.display_title)
+    || format('run {0}', github.run_id)
+  }}
+# Orchestration after Wheels finishes:
 #   publish: download wheel artifact → upload to obs://.../triton-ascend/<N>/
-#   trigger: needs publish; calls blue-yellow /start and polls /query
-#   cleanup: removes obs://.../triton-ascend/<N>/ when the PR closes
+#   trigger: needs publish; calls blue-yellow /start, polls /query, then
+#            removes obs://.../triton-ascend/<N>/ once tests finish.
 #
-# Manually triggerable via workflow_dispatch to re-run the blue-yellow side
-# alone (skips publish; assumes the wheel + manifest already on OBS).
-#
-# All paths run in base-repo context, so secrets are available even for fork
-# PRs. NEVER check out the PR head SHA — fork code must not execute under
-# the secret-bearing token.
+# Runs in base-repo context, so secrets are available even for fork PRs.
+# NEVER check out the PR head SHA — fork code must not execute under the
+# secret-bearing token.
 
 on:
   workflow_run:
     workflows: ["Ascend950 Wheels Build"]
     types: [completed]
-  pull_request_target:
-    types: [closed]
-  workflow_dispatch:
-    inputs:
-      pr_id:
-        description: PR number to (re)trigger blue-yellow against
-        required: true
-      wheel_name:
-        description: Wheel filename on OBS (e.g. triton_ascend-...whl). Required for manual re-trigger; auto-filled by publish job on the workflow_run path.
-        required: false
 
 concurrency:
-  # Pick whichever identifier the active event provides; cancel-in-progress
-  # is false because /start is non-idempotent (a cancelled task can collide
-  # with a follow-up one).
-  group: pr-pipeline-${{ inputs.pr_id || github.event.workflow_run.head_sha || github.event.pull_request.number }}
+  # cancel-in-progress is false because /start is non-idempotent (a cancelled
+  # task can collide with a follow-up one).
+  group: pr-pipeline-${{ github.event.workflow_run.head_sha }}
   cancel-in-progress: false
 
 permissions: {}
@@ -47,26 +38,60 @@ jobs:
       contents: read
       actions: read
       pull-requests: read
+      statuses: write
     outputs:
       pr_num: ${{ steps.pr.outputs.num }}
+      kind: ${{ steps.pr.outputs.kind }}
+      head_branch: ${{ steps.pr.outputs.head_branch }}
       wheel_name: ${{ steps.wheel.outputs.name }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve PR number
+      - name: Mark cascade run on PR head SHA
+        # Writes a pending commit status on the upstream's head SHA so /retry
+        # can locate this cascade run for a given PR (GitHub strips PR linkage
+        # from workflow_run runs; statuses persist on the head commit and
+        # survive the rewrite). The finalize job overwrites this same context
+        # with the terminal state later.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA:      ${{ github.event.workflow_run.head_sha }}
+          TARGET:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api -X POST "repos/${{ github.repository }}/statuses/${SHA}" \
+            -f state=pending \
+            -f context='Ascend950 Pipeline Tests' \
+            -f description='Pipeline starting' \
+            -f target_url="$TARGET"
+
+      - name: Resolve publish identifier
         id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_EVENT: ${{ github.event.workflow_run.event }}
           HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          NUM=$(gh api "/repos/${{ github.repository }}/pulls?state=open&head=${HEAD_OWNER}:${HEAD_BRANCH}" \
-                  --jq 'if length > 0 then .[0].number else empty end')
-          if [ -z "${NUM}" ]; then
-            echo "No open PR found for ${HEAD_OWNER}:${HEAD_BRANCH}; nothing to publish."
-            exit 0
+          # PR runs key on PR number; branch pushes (main, release/**) key on
+          # the head SHA. `num` is the OBS path component for both; `kind`
+          # lets the trigger job decide whether to look up PR metadata or use
+          # the branch/SHA directly. `head_branch` is only meaningful in the
+          # branch-push case.
+          if [ "${UPSTREAM_EVENT}" = "pull_request" ]; then
+            NUM=$(gh api "/repos/${{ github.repository }}/pulls?state=open&head=${HEAD_OWNER}:${HEAD_BRANCH}" \
+                    --jq 'if length > 0 then .[0].number else empty end')
+            if [ -z "${NUM}" ]; then
+              echo "No open PR found for ${HEAD_OWNER}:${HEAD_BRANCH}; nothing to publish."
+              exit 0
+            fi
+            echo "num=${NUM}" >> "$GITHUB_OUTPUT"
+            echo "kind=pr" >> "$GITHUB_OUTPUT"
+          else
+            echo "num=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+            echo "kind=branch" >> "$GITHUB_OUTPUT"
+            echo "head_branch=${HEAD_BRANCH}" >> "$GITHUB_OUTPUT"
           fi
-          echo "num=${NUM}" >> "$GITHUB_OUTPUT"
 
       - name: Download wheel artifact
         if: steps.pr.outputs.num != ''
@@ -116,21 +141,19 @@ jobs:
 
   trigger:
     needs: publish
-    # Run after publish on the workflow_run path, OR alone on workflow_dispatch.
-    # !cancelled() lets us proceed when publish was skipped (workflow_dispatch).
-    if: |
-      !cancelled() && (
-        github.event_name == 'workflow_dispatch' ||
-        (github.event_name == 'workflow_run' &&
-         needs.publish.result == 'success' &&
-         needs.publish.outputs.pr_num != '')
-      )
+    if: >-
+      needs.publish.result == 'success' &&
+      needs.publish.outputs.pr_num != ''
     runs-on: linux-aarch64-cpu-1
     container:
       image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ascend/triton:github_action
     permissions:
       pull-requests: write
-      statuses: write
+    outputs:
+      # Surface BY pipeline outcome so the finalize job can write a meaningful
+      # commit status description without re-reading the by-status file.
+      by_status: ${{ steps.final.outputs.status }}
+      by_msg:    ${{ steps.final.outputs.msg }}
     steps:
       # Default checkout pulls the base repo at the workflow's ref (safe).
       # Do not pass ref: head_sha — that would execute fork code.
@@ -141,18 +164,26 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          # workflow_dispatch → input; workflow_run → publish output.
-          PR_ID: ${{ inputs.pr_id || needs.publish.outputs.pr_num }}
+          PR_ID: ${{ needs.publish.outputs.pr_num }}
+          KIND: ${{ needs.publish.outputs.kind }}
+          HEAD_BRANCH: ${{ needs.publish.outputs.head_branch }}
         run: |
           set -euo pipefail
 
-          # Title/body are mutable by the PR author at any time — same race
-          # the original artifact collector had.
-          P=$(gh pr view "$PR_ID" --repo "${{ github.repository }}" \
-                --json title,baseRefName,headRefOid)
-          PR_TITLE=$(echo "$P" | jq -r .title)
-          BRANCH_B=$(echo "$P" | jq -r .baseRefName)
-          HEAD_SHA=$(echo "$P" | jq -r .headRefOid)
+          if [ "$KIND" = "pr" ]; then
+            # Title/body are mutable by the PR author at any time — same race
+            # the original artifact collector had.
+            P=$(gh pr view "$PR_ID" --repo "${{ github.repository }}" \
+                  --json title,baseRefName,headRefOid)
+            PR_TITLE=$(echo "$P" | jq -r .title)
+            BRANCH_B=$(echo "$P" | jq -r .baseRefName)
+            HEAD_SHA=$(echo "$P" | jq -r .headRefOid)
+          else
+            # Branch push (main / release/**): PR_ID is the head SHA itself.
+            PR_TITLE="${HEAD_BRANCH} @ ${PR_ID:0:8}"
+            BRANCH_B="$HEAD_BRANCH"
+            HEAD_SHA="$PR_ID"
+          fi
 
           {
             echo "pr_id=$PR_ID"
@@ -167,19 +198,6 @@ jobs:
             echo "__EOF__"
           } >> "$GITHUB_ENV"
 
-      - name: Set commit status (pending)
-        if: steps.ctx.outputs.head_sha != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA:      ${{ steps.ctx.outputs.head_sha }}
-          TARGET:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          gh api -X POST "repos/${{ github.repository }}/statuses/${SHA}" \
-            -f state=pending \
-            -f context='Ascend950 Pipeline Tests' \
-            -f description='Pipeline running' \
-            -f target_url="$TARGET"
-
       - name: Trigger pipeline
         id: run
         shell: bash
@@ -193,8 +211,7 @@ jobs:
           PR_ID:              ${{ steps.ctx.outputs.pr_id }}
           URL_B:              ${{ github.server_url }}/${{ github.repository }}
           BRANCH_B:           ${{ steps.ctx.outputs.branch_b }}
-          # workflow_run path: from publish job output. workflow_dispatch: from input.
-          WHEEL_NAME:         ${{ inputs.wheel_name || needs.publish.outputs.wheel_name }}
+          WHEEL_NAME:         ${{ needs.publish.outputs.wheel_name }}
           # PR_TITLE inherited from $GITHUB_ENV (set in Resolve PR context).
           STATUS_FILE:        ${{ runner.temp }}/by-status
         run: |
@@ -220,12 +237,9 @@ jobs:
           # JSON-escape arbitrary text (PR titles can contain quotes/newlines).
           PR_TITLE_J=$(printf '%s' "${PR_TITLE}" | jq -Rs .)
 
-          # WHEEL_NAME comes from publish job output (workflow_run) or from the
-          # workflow_dispatch input. If empty, the upstream produced no wheel
-          # or the operator forgot to provide one for manual re-trigger.
           if [ -z "${WHEEL_NAME:-}" ]; then
             echo "WHEEL_NAME is empty"
-            write_status "START_FAILURE" "wheel filename not provided (publish skipped or workflow_dispatch input empty)"
+            write_status "START_FAILURE" "wheel filename not produced by publish"
             exit 1
           fi
           WHEEL_NAME_ENC=$(printf '%s' "$WHEEL_NAME" | jq -sRr @uri)
@@ -244,7 +258,7 @@ jobs:
             "parameter": {
               "pr": "${PR_ID}",
               "title": ${PR_TITLE_J},
-              "description": ${PR_ID},
+              "description": "${PR_ID}",
               "url_b": "${URL_B}",
               "branch_b": "${BRANCH_B}",
               "obs_url": "${OBS_URL}"
@@ -344,49 +358,70 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Set commit status (final)
-        if: always() && steps.ctx.outputs.head_sha != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA:      ${{ steps.ctx.outputs.head_sha }}
-          STATE:    ${{ steps.run.outcome == 'success' && 'success' || 'failure' }}
-          DESC:     ${{ steps.final.outputs.status }}
-          TARGET:   ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          gh api -X POST "repos/${{ github.repository }}/statuses/${SHA}" \
-            -f state="$STATE" \
-            -f context='Ascend950 Pipeline Tests' \
-            -f description="${DESC:-UNKNOWN}" \
-            -f target_url="$TARGET"
-
-  cleanup:
-    if: github.event_name == 'pull_request_target'
-    runs-on: ubuntu-latest
-    # pull_request_target runs in base-repo context, so secrets are available
-    # even for fork PRs. The default checkout ref under this trigger is the
-    # base branch (never PR head), so we can safely load the local composite
-    # action without executing fork-supplied code.
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: .github/actions/setup-obsutil
-
-      - uses: ./.github/actions/setup-obsutil
-        with:
-          ak: ${{ secrets.OBS_AK }}
-          sk: ${{ secrets.OBS_SK }}
-
       - name: Remove PR wheels from OBS
+        if: always() && steps.ctx.outputs.pr_id != ''
+        shell: bash
         env:
-          PR_NUM: ${{ github.event.pull_request.number }}
+          AK: ${{ secrets.OBS_AK }}
+          SK: ${{ secrets.OBS_SK }}
+          PR_NUM: ${{ steps.ctx.outputs.pr_id }}
         run: |
           # Guard against a missing/malformed PR_NUM: an empty value would
           # collapse the URL to .../triton-ascend/ and `rm -rf` would wipe
-          # every PR's wheels. Require a positive integer before proceeding.
-          if [[ ! "${PR_NUM:-}" =~ ^[1-9][0-9]*$ ]]; then
-            echo "Refusing to delete: PR_NUM='${PR_NUM:-}' is not a positive integer" >&2
+          # every namespace. Accept a positive integer (PR number) or a full
+          # git SHA (main-branch run).
+          if [[ ! "${PR_NUM:-}" =~ ^([1-9][0-9]*|[0-9a-f]{40})$ ]]; then
+            echo "Refusing to delete: PR_NUM='${PR_NUM:-}' is not a PR number or SHA" >&2
             exit 1
           fi
+
+          curl -fL "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_arm64.tar.gz" -o obsutil.tar.gz
+          gzip -t obsutil.tar.gz || { echo "obsutil.tar.gz is not a valid gzip"; exit 1; }
+          tar xzf obsutil.tar.gz
+          rm -f obsutil.tar.gz
+          mv obsutil_linux_* obsutil
+          obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-southwest-2.myhuaweicloud.com
           obsutil/obsutil rm -r -f "obs://triton-ascend-artifacts/triton-ascend/${PR_NUM}/" || true
+
+  # Single source of truth for the final commit status. Runs always() so that
+  # publish-side failures and cancellations don't leave the marker pending
+  # forever. Only runs on the workflow_run cascade path — workflow_dispatch
+  # is a manual operator action and doesn't need a PR-visible status.
+  finalize:
+    needs: [publish, trigger]
+    if: >-
+      always()
+      && github.event_name == 'workflow_run'
+      && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Write final commit status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA:             ${{ github.event.workflow_run.head_sha }}
+          TARGET:          ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PUBLISH_RESULT:  ${{ needs.publish.result }}
+          TRIGGER_RESULT:  ${{ needs.trigger.result }}
+          BY_STATUS:       ${{ needs.trigger.outputs.by_status }}
+          BY_MSG:          ${{ needs.trigger.outputs.by_msg }}
+        run: |
+          set -euo pipefail
+          # Map (publish, trigger) job results → commit status state + desc.
+          # GitHub status API truncates description at 140 chars on its own.
+          if [ "$PUBLISH_RESULT" != "success" ]; then
+            STATE=failure
+            DESC="Publish ${PUBLISH_RESULT}"
+          elif [ "$TRIGGER_RESULT" != "success" ]; then
+            STATE=failure
+            DESC="${BY_STATUS:-Trigger ${TRIGGER_RESULT}}${BY_MSG:+: ${BY_MSG}}"
+          else
+            STATE=success
+            DESC="${BY_STATUS:-OK}"
+          fi
+          gh api -X POST "repos/${{ github.repository }}/statuses/${SHA}" \
+            -f state="$STATE" \
+            -f context='Ascend950 Pipeline Tests' \
+            -f description="$DESC" \
+            -f target_url="$TARGET"

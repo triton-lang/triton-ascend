@@ -50,6 +50,7 @@ Triton Ascend
     :caption: 算子调试与调优
 
     autotune_guide.md
+    max_autotune_guide.md
     debug_guide/debugging.md
     debug_guide/profiling.md
 

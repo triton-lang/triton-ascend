@@ -1,0 +1,357 @@
+name: Rebuild / Retry Tasks
+
+# PR-comment ChatOps. Recognised commands (must appear on the first line):
+#   /rebuild              for the PR's current head commit, full-rerun every
+#                         completed workflow that ran on it (workflow_run
+#                         cascades are skipped — they re-trigger from upstreams
+#                         automatically). Matches by head SHA, not branch name,
+#                         so fork PRs sharing branch names with base never get
+#                         mixed up.
+#   /retry                for every workflow on the PR's current head commit
+#                         whose latest run is failed/cancelled/timed_out, rerun
+#                         the failed jobs. Matches by head SHA — older commits'
+#                         failures are not retried (use /rebuild for a full
+#                         fresh run instead).
+#   /retry <job-name>     in each picked run, rerun any job whose name matches
+#                         <job-name> exactly. Matches across multiple runs are
+#                         all retried.
+#
+# Runs in base-repo context (issue_comment), so secrets are available even for
+# fork PRs. We never check out PR head — only GitHub API calls.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  dispatch:
+    if: >-
+      github.event.issue.pull_request != null &&
+      startsWith(github.event.comment.body, '/')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write          # rerun runs / jobs
+      pull-requests: read     # read PR head ref
+    steps:
+      - name: Parse command
+        id: cmd
+        env:
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+          # Only the first line is treated as the command; the rest is ignored.
+          FIRST=$(printf '%s' "$BODY" | head -n1 | tr -d '\r')
+          NAME=$(printf '%s' "$FIRST" | awk '{print $1}')
+          ARG=$(printf  '%s' "$FIRST" | awk '{$1=""; sub(/^ /, ""); print}')
+          case "$NAME" in
+            /rebuild|/retry) match=true  ;;
+            *)               match=false ;;
+          esac
+          echo "name=$NAME"   >> "$GITHUB_OUTPUT"
+          echo "arg=$ARG"     >> "$GITHUB_OUTPUT"
+          echo "match=$match" >> "$GITHUB_OUTPUT"
+
+      - name: Stop if not a recognised command
+        if: steps.cmd.outputs.match != 'true'
+        run: echo "Not a recognised slash command; exiting." && exit 0
+
+      - name: Check author permission
+        id: perm
+        if: steps.cmd.outputs.match == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ACTOR:    ${{ github.event.comment.user.login }}
+          PR:       ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          LEVEL=$(gh api "repos/${{ github.repository }}/collaborators/${ACTOR}/permission" \
+                    --jq .permission 2>/dev/null || echo none)
+          echo "level=$LEVEL" >> "$GITHUB_OUTPUT"
+          case "$LEVEL" in
+            admin|write|maintain)
+              echo "ok=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              # Fork PR authors lack base-repo write access. Allow them to act
+              # on their own PR — they can already trigger workflows by pushing.
+              PR_AUTHOR=$(gh pr view "$PR" --repo "${{ github.repository }}" \
+                            --json author --jq .author.login)
+              if [ "$ACTOR" = "$PR_AUTHOR" ]; then
+                echo "ok=true" >> "$GITHUB_OUTPUT"
+              else
+                echo "ok=false" >> "$GITHUB_OUTPUT"
+              fi
+              ;;
+          esac
+
+      - name: Stop if no permission
+        if: steps.cmd.outputs.match == 'true' && steps.perm.outputs.ok != 'true'
+        run: exit 1
+
+      # ---------- /rebuild: full rerun every workflow on the PR head SHA ----------
+      # Match by head_sha (precise — branch names can collide across forks).
+      # Skip workflow_run cascades: they re-trigger automatically when their
+      # upstream completes, so rerunning them directly would duplicate work and
+      # lose the upstream linkage. Skip in-progress runs (rerun API rejects).
+      - name: Find all runs for PR head SHA
+        id: rb
+        if: steps.cmd.outputs.name == '/rebuild' && steps.perm.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PR:       ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          HEAD_SHA=$(gh pr view "$PR" --repo "${{ github.repository }}" \
+                       --json headRefOid --jq .headRefOid)
+          echo "PR #${PR} head SHA: ${HEAD_SHA}"
+
+          RUNS=$(gh api \
+            "repos/${{ github.repository }}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
+            --jq '[.workflow_runs[]
+                   | select(.event != "workflow_run")
+                   | select(.status == "completed")
+                   | {id, name, workflow_id, created_at}]')
+
+          # Latest run per workflow (covers prior reruns of the same SHA).
+          PICKS=$(echo "$RUNS" | jq '
+              group_by(.workflow_id)
+              | map(sort_by(.created_at) | last)')
+
+          if [ "$(echo "$PICKS" | jq 'length')" = "0" ]; then
+            echo "No completed runs found for PR head ${HEAD_SHA}." >&2
+            echo "If runs are still in-progress, wait for them to finish." >&2
+            exit 1
+          fi
+
+          echo "Will rerun:"
+          echo "$PICKS" | jq -r '.[] | "  - \(.name) (run_id=\(.id))"'
+
+          echo "rerun_ids=$(echo "$PICKS" | jq -c '[.[].id]')" >> "$GITHUB_OUTPUT"
+
+      - name: Rerun all picked runs
+        if: steps.cmd.outputs.name == '/rebuild' && steps.perm.outputs.ok == 'true'
+        env:
+          GH_TOKEN:  ${{ secrets.BOT_TOKEN }}
+          RERUN_IDS: ${{ steps.rb.outputs.rerun_ids }}
+        run: |
+          set -euo pipefail
+          fail=0
+          while read -r RUN_ID; do
+            [ -n "$RUN_ID" ] || continue
+            echo "::group::full rerun run_id=${RUN_ID}"
+            if ! gh api -X POST \
+                "repos/${{ github.repository }}/actions/runs/${RUN_ID}/rerun"; then
+              echo "Failed to rerun ${RUN_ID}" >&2
+              fail=1
+            fi
+            echo "::endgroup::"
+          done < <(echo "$RERUN_IDS" | jq -r '.[]')
+          exit $fail
+
+      # ---------- /retry: rerun failed (or one specific) job of latest run(s) ----------
+      # Two-source fetch:
+      #   - PR-direct (event=pull_request): matched by head_sha (precise — fork
+      #     branches sharing names with base never get mixed in).
+      #   - Cascades (event=workflow_run): GitHub strips PR linkage and rewrites
+      #     head_sha to the default branch's HEAD, so head_sha lookup can't find
+      #     them. Each downstream workflow writes a commit status on the PR
+      #     head SHA at job start (context = .status_context below) with
+      #     target_url pointing to itself; we read that to recover the run id.
+      #
+      # CASCADE_MAP is a list of triples — upstream/downstream workflow paths
+      # plus the status context the downstream workflow writes. Add an entry
+      # for every workflow_run cascade you wire up. The downstream workflow
+      # MUST write a commit status with the matching context on the upstream
+      # head_sha. Only one cascade level supported.
+      - name: Find all currently-failed runs (PR head SHA + cascades)
+        id: latest
+        if: steps.cmd.outputs.name == '/retry' && steps.perm.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PR:       ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+
+          CASCADE_MAP='[
+            {
+              "upstream_path":   ".github/workflows/Ascend950-wheels-build.yml",
+              "downstream_path": ".github/workflows/Ascend950-pipeline-tests.yml",
+              "status_context":  "Ascend950 Pipeline Tests"
+            }
+          ]'
+
+          HEAD_SHA=$(gh pr view "$PR" --repo "${{ github.repository }}" \
+                       --json headRefOid --jq .headRefOid)
+          echo "PR #${PR} head SHA: ${HEAD_SHA}"
+
+          RUN_FIELDS='{id, name, conclusion, event, path, workflow_id, created_at}'
+
+          # PR-direct runs for this commit. head_sha is precise.
+          PR_RUNS=$(gh api \
+            "repos/${{ github.repository }}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
+            --jq "[.workflow_runs[] | select(.event==\"pull_request\") | ${RUN_FIELDS}]")
+
+          # Cascade runs: read commit statuses on the PR head SHA. Each cascade
+          # writes a status with target_url=.../actions/runs/<id> early in its
+          # job, so we can recover the cascade run id without needing display
+          # title hacks. Take the latest status per context (handles reruns).
+          STATUSES=$(gh api "repos/${{ github.repository }}/commits/${HEAD_SHA}/statuses?per_page=100")
+
+          CASCADE_RUNS='[]'
+          while IFS= read -r entry; do
+            [ -n "$entry" ] || continue
+            CTX=$(echo "$entry" | jq -r '.status_context')
+            TARGET_URL=$(echo "$STATUSES" | jq -r --arg c "$CTX" \
+              '[.[] | select(.context == $c)] | sort_by(.updated_at) | last | .target_url // ""')
+            [ -n "$TARGET_URL" ] && [ "$TARGET_URL" != "null" ] || continue
+            RUN_ID=$(echo "$TARGET_URL" | grep -oE '/runs/[0-9]+' | grep -oE '[0-9]+' | head -1)
+            [ -n "$RUN_ID" ] || continue
+            RUN=$(gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}" \
+                    --jq "${RUN_FIELDS}")
+            CASCADE_RUNS=$(jq -nc --argjson a "$CASCADE_RUNS" --argjson b "$RUN" '$a + [$b]')
+          done < <(echo "$CASCADE_MAP" | jq -c '.[]')
+
+          # Combine PR-direct + cascade candidates.
+          CANDIDATES=$(jq -nc --argjson a "$PR_RUNS" --argjson b "$CASCADE_RUNS" '$a + $b')
+
+          # Group by workflow_id, take latest per workflow, filter failed-state.
+          PICKS=$(echo "$CANDIDATES" | jq '
+              group_by(.workflow_id)
+              | map(sort_by(.created_at) | last
+                    | select(.conclusion=="failure"
+                          or .conclusion=="cancelled"
+                          or .conclusion=="timed_out"))
+              | sort_by(.id) | reverse')
+
+          if [ "$(echo "$PICKS" | jq 'length')" = "0" ]; then
+            echo "No currently-failed runs on PR head ${HEAD_SHA}." >&2
+            echo "If you want a fresh full run, comment /rebuild instead." >&2
+            exit 1
+          fi
+
+          echo "Picked failed runs:"
+          echo "$PICKS" | jq -r '.[]
+            | "  - \(.name) (run_id=\(.id), event=\(.event), conclusion=\(.conclusion))"'
+
+          # Reverse cascade map (downstream_path -> upstream_path) for routing
+          # failed cascades back to their upstream run for a full rerun.
+          REV_CASCADE=$(echo "$CASCADE_MAP" | jq 'map({key:.downstream_path, value:.upstream_path}) | from_entries')
+
+          # Classify: cascade picks → restart upstream (look up by path in PR_RUNS).
+          # Non-cascade picks → rerun-failed-jobs directly.
+          PLAN=$(jq -nc \
+            --argjson picks "$PICKS" \
+            --argjson pr    "$PR_RUNS" \
+            --argjson rev   "$REV_CASCADE" '
+              [ $picks[]
+                | . as $p
+                | if $p.event == "workflow_run" and ($rev[$p.path] // null) != null then
+                    ($rev[$p.path]) as $up_path
+                    | ($pr | map(select(.path == $up_path)) | sort_by(.created_at) | last) as $up
+                    | if $up then
+                        {kind:"upstream", run_id:$up.id, via:$p.name, original_run_id:$p.id}
+                      else
+                        {kind:"direct", run_id:$p.id, name:$p.name}
+                      end
+                  else
+                    {kind:"direct", run_id:$p.id, name:$p.name}
+                  end
+              ]')
+
+          echo "Classification:"
+          echo "$PLAN" | jq -r '.[] |
+            if .kind == "upstream" then
+              "  > \(.via) (run=\(.original_run_id)): restart upstream run=\(.run_id)"
+            else
+              "  - \(.name) (run=\(.run_id)): direct rerun-failed-jobs"
+            end'
+
+          DIRECT_IDS=$(echo "$PLAN"   | jq -c '[.[] | select(.kind=="direct") | .run_id]')
+          UPSTREAM_IDS=$(echo "$PLAN" | jq -c '[.[] | select(.kind=="upstream") | .run_id] | unique')
+          # Upstream full rerun covers any direct id that is the same run.
+          DIRECT_IDS=$(jq -nc --argjson d "$DIRECT_IDS" --argjson u "$UPSTREAM_IDS" '$d - $u')
+
+          echo
+          echo "Plan: direct_ids=${DIRECT_IDS}  upstream_ids=${UPSTREAM_IDS}"
+
+          echo "direct_ids=${DIRECT_IDS}"     >> "$GITHUB_OUTPUT"
+          echo "upstream_ids=${UPSTREAM_IDS}" >> "$GITHUB_OUTPUT"
+          echo "picks=$(echo "$PICKS" | jq -c '.')" >> "$GITHUB_OUTPUT"
+
+      - name: Rerun failed jobs / restart upstream (no arg)
+        if: >-
+          steps.cmd.outputs.name == '/retry' &&
+          steps.perm.outputs.ok == 'true' &&
+          steps.cmd.outputs.arg == ''
+        env:
+          GH_TOKEN:     ${{ secrets.BOT_TOKEN }}
+          DIRECT_IDS:   ${{ steps.latest.outputs.direct_ids }}
+          UPSTREAM_IDS: ${{ steps.latest.outputs.upstream_ids }}
+        run: |
+          set -euo pipefail
+          fail=0
+
+          # 1) rerun-failed-jobs on direct targets (PR-triggered failures).
+          while read -r RUN_ID; do
+            [ -n "$RUN_ID" ] || continue
+            echo "::group::rerun-failed-jobs run_id=${RUN_ID}"
+            if ! gh api -X POST \
+                "repos/${{ github.repository }}/actions/runs/${RUN_ID}/rerun-failed-jobs"; then
+              echo "Failed to rerun run ${RUN_ID}" >&2
+              fail=1
+            fi
+            echo "::endgroup::"
+          done < <(echo "$DIRECT_IDS" | jq -r '.[]')
+
+          # 2) Full rerun upstreams whose workflow_run downstream failed.
+          while read -r RUN_ID; do
+            [ -n "$RUN_ID" ] || continue
+            echo "::group::full rerun (cascade) run_id=${RUN_ID}"
+            if ! gh api -X POST \
+                "repos/${{ github.repository }}/actions/runs/${RUN_ID}/rerun"; then
+              echo "Failed to full-rerun upstream ${RUN_ID}" >&2
+              fail=1
+            fi
+            echo "::endgroup::"
+          done < <(echo "$UPSTREAM_IDS" | jq -r '.[]')
+
+          exit $fail
+
+      - name: Rerun one named job across picked runs
+        if: >-
+          steps.cmd.outputs.name == '/retry' &&
+          steps.perm.outputs.ok == 'true' &&
+          steps.cmd.outputs.arg != ''
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          PICKS:    ${{ steps.latest.outputs.picks }}
+          JOB_NAME: ${{ steps.cmd.outputs.arg }}
+        run: |
+          set -euo pipefail
+          # Scan every picked run for a job matching ${JOB_NAME} exactly, then
+          # rerun each match. The single-job rerun endpoint is reliable on both
+          # PR-triggered and workflow_run-triggered runs.
+          matched=0
+          fail=0
+          while read -r RUN_ID; do
+            [ -n "$RUN_ID" ] || continue
+            JOB_ID=$(gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/jobs?per_page=100" \
+                      --jq ".jobs[] | select(.name==\"${JOB_NAME}\") | .id" | head -n1)
+            [ -n "$JOB_ID" ] || continue
+            echo "::group::rerun job '${JOB_NAME}' (job_id=${JOB_ID}) in run ${RUN_ID}"
+            if ! gh api -X POST \
+                "repos/${{ github.repository }}/actions/jobs/${JOB_ID}/rerun"; then
+              echo "Failed to rerun job ${JOB_ID}" >&2
+              fail=1
+            fi
+            echo "::endgroup::"
+            matched=$((matched+1))
+          done < <(echo "$PICKS" | jq -r '.[].id')
+          if [ "$matched" -eq 0 ]; then
+            echo "No job named '${JOB_NAME}' found in any currently-failed run." >&2
+            exit 1
+          fi
+          echo "Retried ${matched} job(s) named '${JOB_NAME}'."
+          exit $fail

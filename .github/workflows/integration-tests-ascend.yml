@@ -24,6 +24,12 @@ jobs:
     env:
       PROTON_SKIP_PC_SAMPLING_TEST: 1
       PYTHON: "python${{ matrix.python_version }}"
+      UV_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
+      UV_EXTRA_INDEX_URL: "https://repo.huaweicloud.com/ascend/repos/pypi"
+      UV_INSECURE_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
+      UV_HTTP_TIMEOUT: 120
+      UV_NO_CACHE: 1
+      UV_SYSTEM_PYTHON: 1
 
     steps:
       - name: Checkout
@@ -101,8 +107,8 @@ jobs:
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           MAX_JOBS="$NUM_PROCS" \
           ${PYTHON} setup.py bdist_wheel
-          ${PYTHON} -m pip install dist/*.whl \
-            -i https://repo.huaweicloud.com/repository/pypi/simple/
+          ${PYTHON} -m pip install uv
+          uv pip install --python "${PYTHON}" dist/*.whl --no-deps
 
       - name: CCache stats
         run: ccache --print-stats

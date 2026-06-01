@@ -43,6 +43,28 @@ using namespace triton;
 using namespace mlir::triton;
 
 namespace mlir {
+
+    
+static std::vector<std::string> splitStringByComma(llvm::StringRef str) {
+    std::vector<std::string> result;
+    llvm::SmallVector<llvm::StringRef, 8> parts;
+    str.split(parts, ',');
+    for (auto part : parts) {
+        result.push_back(part.trim().str());
+    }
+    return result;
+}
+
+static std::string joinStringsWithComma(const std::vector<std::string> &strs) {
+    std::string result;
+    for (size_t i = 0; i < strs.size(); ++i) {
+        result += strs[i];
+        if (i != strs.size() - 1) {
+            result += ", ";
+        }
+    }
+    return result;
+}
 namespace triton {
 class FuseAdotBaddCPass : public PassWrapper<FuseAdotBaddCPass, OperationPass<ModuleOp>> {
 public:
@@ -87,6 +109,19 @@ private:
         // Get the defining operation of 'other'
         Operation *defOp = fuseInfo.other.getDefiningOp();
         if (!defOp) {
+            if (auto barg = dyn_cast<BlockArgument>(fuseInfo.other)) {
+                unsigned argindex = barg.getArgNumber();
+                auto yieldOp = dyn_cast<scf::YieldOp>(barg.getOwner()->getTerminator());
+                auto forOp = dyn_cast<scf::ForOp>(barg.getOwner()->getParentOp());
+                auto stringCoreType = yieldOp->getAttrOfType<StringAttr>("ssbuffer.core_type");
+                auto vectorCoreType = splitStringByComma(stringCoreType.getValue());
+                vectorCoreType[argindex-1] = "CUBE";
+                yieldOp->setAttr("ssbuffer.core_type", StringAttr::get(yieldOp->getContext(), joinStringsWithComma(vectorCoreType)));
+                llvm::errs() << joinStringsWithComma(vectorCoreType) << "\n";
+                forOp->setAttr(CVPipeline::kCoreType, StringAttr::get(yieldOp->getContext(), joinStringsWithComma(vectorCoreType)));
+                llvm::errs() << joinStringsWithComma(vectorCoreType) << "\n";
+                return true;
+            }
             LOG_DEBUG("Other operand is not defined by any operation, cannot fuse.");
             return false;
         }

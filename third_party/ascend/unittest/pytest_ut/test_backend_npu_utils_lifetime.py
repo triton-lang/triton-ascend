@@ -59,8 +59,6 @@ def test_commit1_preserves_launcher_compatibility_boundaries():
     driver_src = (BACKEND_DIR / "driver.py").read_text()
     utils_src = (BACKEND_DIR / "utils.py").read_text()
 
-    assert "aclrtPointerGetAttributes" not in driver_src
-    assert "Pointer argument (at %d) cannot be accessed from Triton (cpu tensor?)" not in driver_src
     assert "void triton_launch_kernel(" in driver_src
     assert "const void* kernel_args[] = {" in driver_src
     assert "const size_t arg_sizes[] = {" in driver_src
@@ -68,6 +66,16 @@ def test_commit1_preserves_launcher_compatibility_boundaries():
     assert "rtKernelLaunch(func, blockNum, static_cast<void*>(&args), sizeof(args), NULL, stream);" not in driver_src
     assert "default_parallel = " not in utils_src
     assert 'return os.getenv("TRITON_ALL_BLOCKS_PARALLEL", "true").lower() in ("true", "1")' in utils_src
+
+
+def test_commit5_restores_cpu_tensor_address_guard_only_for_device_pointers():
+    driver_src = (BACKEND_DIR / "driver.py").read_text()
+
+    assert "aclrtPointerGetAttributes" in driver_src
+    assert "ACL_MEM_LOCATION_TYPE_DEVICE" in driver_src
+    assert "Pointer argument (at %d) cannot be accessed from Triton (cpu tensor?)" in driver_src
+    assert "attributes.location.type != 4" not in driver_src
+    assert "ACL_MEM_LOCATION_TYPE_HOST_NUMA" not in driver_src
 
 
 def test_taskqueue_path_uses_stable_function_wrapper_and_symbol_guards():

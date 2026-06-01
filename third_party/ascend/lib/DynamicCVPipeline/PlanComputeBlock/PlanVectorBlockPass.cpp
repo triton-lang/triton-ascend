@@ -29,6 +29,7 @@
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Operation.h"
@@ -64,10 +65,47 @@ public:
     }
 };
 
+
+static bool isIfFillOnly(scf::IfOp ifOp) {
+    if(!ifOp) {
+        return false;
+    }
+    if (!ifOp.getResults().empty()) {
+        return false;
+    }
+    int fillCount = 0;
+    bool hasOtherOps = false;
+    for (Region &region : ifOp->getRegions()) {
+        for (Block &innerBlock : region) {
+            for (Operation &innerOp : innerBlock.getOperations()) {
+                if (isa<scf::YieldOp>(innerOp)) {
+                    continue;
+                }
+                if (isa<linalg::FillOp>(innerOp)) {
+                    fillCount++;
+                } else {
+                    hasOtherOps = true;
+                    break;
+                }
+            }
+            if (hasOtherOps) {
+                break;
+            }
+        }
+        if (hasOtherOps) {
+            break;
+        }
+    }
+    return !hasOtherOps && fillCount == 1;
+}
+
+
 bool isFusableOp(Operation *op)
 {
     if (CVPipeline::getOpCoreType(op) == CVPipeline::CoreType::VECTOR_ONLY) {
-        if (isa<RegionBranchOpInterface>(op)) {
+
+
+        if (isa<RegionBranchOpInterface>(op) && !isIfFillOnly(dyn_cast<scf::IfOp>(op))) {
             // pass control ops like scf::ForOp/scf::IfOp/scf::WhileOp
             return false;
         }
@@ -409,6 +447,22 @@ llvm::LogicalResult planVectorBlockId(Block *block, const CVPipeline::MemoryDepe
     return llvm::success();
 }
 
+
+static void markFillOnlyIfOpAsVector(Block *block)
+{
+    block ->walk([&](scf::IfOp ifOp){
+
+        if (isIfFillOnly(ifOp)) {
+            llvm::errs() << "Marking if op as vector: " << *ifOp << "\n";
+            ifOp->setAttr(CVPipeline::kCoreType,
+                          StringAttr::get(ifOp->getContext(), "VECTOR"));
+        } else {
+            llvm::errs() << "Not marking if op as vector: " << *ifOp << "\n";
+        }
+        
+    });
+}
+
 void PlanVectorBlockPass::runOnOperation()
 {
     // 1. Build memory dependence graph
@@ -421,6 +475,7 @@ void PlanVectorBlockPass::runOnOperation()
     // 2. search blocks in topo order and assign block id for each block
     llvm::SmallVector<Block *> blocks;
     moduleOp.walk([&](Block *block) {
+        markFillOnlyIfOpAsVector(block);
         if (llvm::failed(planVectorBlockId(block, memDepGraph, bm))) {
             moduleOp.emitError() << "[" << DEBUG_TYPE << "] Failed to plan vector block id for block";
             signalPassFailure();

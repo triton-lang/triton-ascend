@@ -349,7 +349,10 @@ def _build_npu_ext(obj_name: str, src_path, *, kernel_launcher="torch") -> str:
         "-lascendcl",
     ]
     if kernel_launcher == "torch":
-        cc_cmd += get_backend_func("get_cc_cmd")
+        if obj_name == "npu_utils":
+            cc_cmd += get_backend_func("get_cc_cmd_npu_utils")
+        else:
+            cc_cmd += get_backend_func("get_cc_cmd")
 
     cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-o", so_path]
 

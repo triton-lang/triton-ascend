@@ -43,8 +43,6 @@ from triton.backends.ascend.utils import (
     force_disable_ffts,
     get_backend_func
 )
-# Bind the already-imported utils module once so the launch hot path can write
-# TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils
 
 class NPUUtils(object):
@@ -57,11 +55,12 @@ class NPUUtils(object):
         dirname = os.path.dirname(os.path.realpath(__file__))
         src_path = os.path.join(dirname, "npu_utils.cpp")
         src = Path(src_path).read_text()
-        key = hashlib.md5(src.encode("utf-8")).hexdigest()
+        version_info = get_backend_func("version_hash")
+        key = hashlib.md5((src + "_".join(version_info)).encode("utf-8")).hexdigest()
         cache = get_cache_manager(key)
         fname = "npu_utils.so"
         cache_path = cache.get_file(fname)
-        if cache_path is None:
+        if cache_path is None or not os.path.exists(cache_path):
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_src_path = os.path.join(tmpdir, "npu_utils.cpp")
                 with open(tmp_src_path, "w") as f:
@@ -398,6 +397,7 @@ def generate_npu_header_src():
 #include <assert.h>
 #include <stdbool.h>
 #include <string>
+#include <memory>
 #include <sys/syscall.h>
 #include <vector>
 #include <Python.h>
@@ -413,8 +413,11 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     import os
     workspace_size = int(metadata.workspace_size) \
                           if hasattr(metadata, 'workspace_size') else -1
-    lock_init_value = int(metadata.lock_init_value) \
-                          if hasattr(metadata, 'lock_init_value') else 0
+    lock_init_value = int(
+        metadata.lock_init_value if hasattr(metadata, 'lock_init_value')
+        else metadata.lock_init_val if hasattr(metadata, 'lock_init_val')
+        else 0
+    )
     lock_num = int(metadata.lock_num) \
                           if hasattr(metadata, 'lock_num') else -1
     bs_task_type = metadata.bs_task_type if hasattr(metadata, 'bs_task_type') else 0
@@ -546,6 +549,56 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     launch_arg_sizes = ', '.join(
         f'sizeof({_ty_to_cpp(ty)})' for i, ty in launch_signature_items
     )
+
+    npu_utils_inst = NPUUtils()
+    npu_utils_so_path = getattr(npu_utils_inst.npu_utils_mod, "__file__", "npu_utils.so")
+    cpp_npu_utils_dlopen = f"""
+typedef void* (*triton_allocate_workspace_t)(uint64_t, void**);
+typedef void* (*triton_allocate_sync_block_lock_t)(uint64_t, void*, void**);
+typedef void  (*triton_async_launch_t)(void*, const char*);
+typedef void  (*triton_release_retained_tensor_t)(void*);
+
+static triton_allocate_workspace_t g_allocate_workspace = nullptr;
+static triton_allocate_sync_block_lock_t g_allocate_sync_block_lock = nullptr;
+static triton_async_launch_t g_async_launch = nullptr;
+static triton_release_retained_tensor_t g_release_retained_tensor = nullptr;
+static bool npu_utils_init_attempted = false;
+static bool npu_utils_init_ok = false;
+
+static void init_npu_utils() {{
+  if (npu_utils_init_attempted) return;
+  npu_utils_init_attempted = true;
+  const char* so_path = "{npu_utils_so_path}";
+  void* handle = dlopen(so_path, RTLD_LAZY);
+  if (!handle) {{
+    fprintf(stderr, "Error: dlopen %s failed: %s\\n", so_path, dlerror());
+    return;
+  }}
+  g_allocate_workspace = (triton_allocate_workspace_t)dlsym(handle, "triton_allocate_workspace");
+  g_allocate_sync_block_lock = (triton_allocate_sync_block_lock_t)dlsym(handle, "triton_allocate_sync_block_lock");
+  g_async_launch = (triton_async_launch_t)dlsym(handle, "triton_async_launch");
+  g_release_retained_tensor = (triton_release_retained_tensor_t)dlsym(handle, "triton_release_retained_tensor");
+  if (!g_allocate_workspace || !g_allocate_sync_block_lock || !g_async_launch || !g_release_retained_tensor) {{
+    fprintf(stderr, "Error: required npu_utils symbols are unavailable\\n");
+    g_allocate_workspace = nullptr;
+    g_allocate_sync_block_lock = nullptr;
+    g_async_launch = nullptr;
+    g_release_retained_tensor = nullptr;
+    dlclose(handle);
+    return;
+  }}
+  npu_utils_init_ok = true;
+}}
+
+static void release_npu_tensor_handle(void* handle) {{
+  if (!handle) return;
+  if (!g_release_retained_tensor) {{
+    fprintf(stderr, "Error: triton_release_retained_tensor is unavailable\\n");
+    return;
+  }}
+  g_release_retained_tensor(handle);
+}}
+"""
 
     cpp_device_pointer = """
 typedef struct _DevicePtrInfo {
@@ -767,6 +820,8 @@ extern "C" {
 
 {cpp_msprof_extern}
 
+{cpp_npu_utils_dlopen}
+
 {cpp_device_pointer}
 
 static inline size_t _align_launch_offset(size_t offset, size_t alignment) {{
@@ -814,13 +869,19 @@ void triton_launch_kernel(
   std::string name = "";
   name.append(kernelName);
   void *workspace_addr_ptr = NULL;
+  void *workspace_handle = NULL;
   uint32_t blockNum4Workspace = gridX * gridY * gridZ;
   {get_backend_func("pre_launch", True)}
   {f'''
   uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
   {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
+  std::shared_ptr<void> workspace_handle_guard(workspace_handle, release_npu_tensor_handle);
+  if (!workspace_addr_ptr) {{
+    {workspace_fail_code}
+  }}
   ''' if workspace_size > 0 else ''}
-  {'auto launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
+  {'std::function<rtError_t()> launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
+    {f'(void)workspace_handle_guard;' if workspace_size > 0 else ''}
     {get_backend_func("pre_launch", False)}
     uint32_t blockNum = gridX * gridY * gridZ;
 
@@ -842,10 +903,12 @@ void triton_launch_kernel(
     {'if (ret != RT_ERROR_NONE) return ret;' if (target_support_ffts and enable_taskqueue) else 'if (ret != RT_ERROR_NONE) return;' if (target_support_ffts and (not enable_taskqueue)) else ''}
     // stub argument for workspace
     void *syncBlockLock_ptr = NULL;
+    void *syncBlockLock_handle = NULL;
     uint16_t ModuleId = 0;
     {f'''
     uint64_t syncBlockLockSize = {lock_num} * sizeof(int64_t);
     {get_backend_func("allocate_sync_block_lock", "syncBlockLockSize", "stream")}
+    std::shared_ptr<void> syncBlockLock_handle_guard(syncBlockLock_handle, release_npu_tensor_handle);
     if (!syncBlockLock_ptr) {{
       {alloc_success_code if enable_taskqueue else sync_lock_fail_code}
     }}

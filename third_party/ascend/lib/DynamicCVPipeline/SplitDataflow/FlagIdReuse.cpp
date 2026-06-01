@@ -22,7 +22,9 @@
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/FlagIdReuse.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <optional>
 
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
@@ -62,70 +64,162 @@ DenseMap<int, int> FlagIdReuseManager::reuseInterCoreTransferFlagIds(const llvm:
     }
 
     preworkForAnalyze(syncOps);
-
-    // Step 1: Check reuse flagIds and merge them into groups.
-    for (auto &[lhs, lhsOps]: flagIdToOps) {
-        for (auto &[rhs, rhsOps]: flagIdToOps) {
-            // Check whether can add this remap result : lhs -> rhs
-            if (lhsOps.empty() || rhsOps.empty() || // FlagId which is merged will be empty
-                disjointSet.findRoot(lhs) == disjointSet.findRoot(rhs)) {
-                continue;
-            }
-            if (checkReusable(lhs, rhs)) {
-                merge(lhs, rhs);
-            }
-        }
-    }
-
-    // Step 2: Remap every non-root flagId to its group representative (root).
-    // The root keeps its original flagId, so the whole group converges onto one
-    // existing flagId and never collides with unmerged ids.
-    DenseMap<int, int> compactedId;
-    int newFlagId = 1;
-    for (auto &[flagId, _]: flagIdToOps) {
-        auto root = disjointSet.findRoot(flagId);
-        if (!compactedId.contains(root)) {
-            compactedId[root] = newFlagId++;
-        }
-        remapResult[flagId] = compactedId[root];
-    }
-    return remapResult;
+    return colorInterferenceGraph();
 }
 
 void FlagIdReuseManager::preworkForAnalyze(const llvm::SmallVector<Operation *> &syncOps)
 {
     flagIdToOps.clear();
+    opOrder.clear();
+    // syncOps arrive in module-walk (program) order, so the index is a stable
+    // program-order rank used to pick the earliest set / latest wait of a flag.
+    int order = 0;
     for (auto op: syncOps) {
+        opOrder[op] = order++;
         auto flagId = getFlagId(op);
         if (flagId == -1) {
             continue;
         }
         flagIdToOps[flagId].push_back(op);
     }
-    disjointSet.fa.clear();
 }
 
-// Reusable condition:
-// 1. Operations from [flagId = tobe] all have path to [flagId = asIs]
-// 2. Operations from [flagId = asIs] have no path to [flagId = toBe]
-// Which:
-// 1. Represent asIs is process all after toBe
-// 2. This is not a circle process. (Current scenes does not support circle, is this still necessary?)
-bool FlagIdReuseManager::checkReusable(int asIs, int toBe)
+Operation *FlagIdReuseManager::getEarliestSet(int flagId)
 {
-    LOG_DEBUG("Cheecking reusable for rewritting " << asIs << " to " << toBe << "\n");
+    Operation *earliest = nullptr;
+    for (auto op: flagIdToOps[flagId]) {
+        if (!llvm::isa<SyncBlockSetOp>(op)) {
+            continue;
+        }
+        if (!earliest || opOrder[op] < opOrder[earliest]) {
+            earliest = op;
+        }
+    }
+    return earliest;
+}
+
+Operation *FlagIdReuseManager::getLatestWait(int flagId)
+{
+    Operation *latest = nullptr;
+    for (auto op: flagIdToOps[flagId]) {
+        if (!llvm::isa<SyncBlockWaitOp>(op)) {
+            continue;
+        }
+        if (!latest || opOrder[op] > opOrder[latest]) {
+            latest = op;
+        }
+    }
+    return latest;
+}
+
+bool FlagIdReuseManager::opPrecedes(Operation *p, Operation *q)
+{
+    if (!p || !q) {
+        return false;
+    }
+    if (p == q) {
+        return true;
+    }
+    // Same block: MLIR static program order is an exact, sound ordering and
+    // covers straight-line chains and sibling loops without needing a graph edge.
+    if (p->getBlock() == q->getBlock()) {
+        return p->isBeforeInBlock(q);
+    }
+    // Cross block: only the real happens-before edges (E1 per-pipe FIFO, E2
+    // set->wait, E3 data, E4 read-wait->consumed data) may prove ordering.
     llvm::SmallSet<Operation *, CVPipeline::INIT_SIZE> visited;
-    for (auto fromOp: flagIdToOps[toBe]) {
-        for (auto destOp: flagIdToOps[asIs]) {
-            visited.clear();
-            if (!hasPath(visited, fromOp, destOp)) {
-                LOG_DEBUG("No path from\n" << *fromOp << "\nto\n" << *destOp << ", failed to reuse.\n");
-                return false;
+    return hasPath(visited, p, q);
+}
+
+// `before` is fully released before `after` is acquired iff the latest wait of
+// `before` is ordered before the earliest set of `after`.
+bool FlagIdReuseManager::flagReleasedBefore(int before, int after)
+{
+    Operation *release = getLatestWait(before);
+    Operation *acquire = getEarliestSet(after);
+    if (!release || !acquire) {
+        return false;
+    }
+    return opPrecedes(release, acquire);
+}
+
+// Conservative: two flags interfere unless one is provably released before the
+// other is acquired. Any uncertainty falls back to "interfere" (no reuse), so a
+// reused id is never shared by two concurrently-live transfers.
+bool FlagIdReuseManager::flagsInterfere(int lhs, int rhs)
+{
+    return !flagReleasedBefore(lhs, rhs) && !flagReleasedBefore(rhs, lhs);
+}
+
+DenseMap<int, int> FlagIdReuseManager::colorInterferenceGraph()
+{
+    // Flags ordered by first program appearance, for deterministic coloring and
+    // compact renumbering.
+    llvm::SmallVector<int> flagIds;
+    for (auto &[flagId, ops]: flagIdToOps) {
+        if (!ops.empty()) {
+            flagIds.push_back(flagId);
+        }
+    }
+    auto firstOrder = [&](int flagId) {
+        int best = std::numeric_limits<int>::max();
+        for (auto op: flagIdToOps[flagId]) {
+            best = std::min(best, opOrder[op]);
+        }
+        return best;
+    };
+    llvm::sort(flagIds, [&](int a, int b) { return firstOrder(a) < firstOrder(b); });
+
+    // Build the (undirected) interference graph.
+    DenseMap<int, llvm::SmallVector<int>> adj;
+    for (size_t i = 0; i < flagIds.size(); ++i) {
+        for (size_t j = i + 1; j < flagIds.size(); ++j) {
+            if (flagsInterfere(flagIds[i], flagIds[j])) {
+                adj[flagIds[i]].push_back(flagIds[j]);
+                adj[flagIds[j]].push_back(flagIds[i]);
             }
         }
     }
-    LOG_DEBUG("Reuse successfully.");
-    return true;
+
+    // Welsh-Powell greedy: color highest-degree nodes first (tie: earlier flag),
+    // each takes the smallest color unused by its already-colored neighbours.
+    llvm::SmallVector<int> order(flagIds.begin(), flagIds.end());
+    llvm::sort(order, [&](int a, int b) {
+        if (adj[a].size() != adj[b].size()) {
+            return adj[a].size() > adj[b].size();
+        }
+        return firstOrder(a) < firstOrder(b);
+    });
+
+    DenseMap<int, int> rawColor;
+    for (int flagId: order) {
+        llvm::SmallSet<int, CVPipeline::INIT_SIZE> usedByNeighbours;
+        for (int nb: adj[flagId]) {
+            auto it = rawColor.find(nb);
+            if (it != rawColor.end()) {
+                usedByNeighbours.insert(it->second);
+            }
+        }
+        int color = 1;
+        while (usedByNeighbours.contains(color)) {
+            ++color;
+        }
+        rawColor[flagId] = color;
+    }
+
+    // Compact renumber: walk flags in program order, assign 1,2,3,... to colors
+    // on first use, so output flag ids are minimal and stably ordered.
+    DenseMap<int, int> colorToCompact;
+    int nextCompact = 1;
+    DenseMap<int, int> remapResult;
+    for (int flagId: flagIds) {
+        int color = rawColor[flagId];
+        if (!colorToCompact.contains(color)) {
+            colorToCompact[color] = nextCompact++;
+        }
+        remapResult[flagId] = colorToCompact[color];
+    }
+    return remapResult;
 }
 
 bool FlagIdReuseManager::hasPath(llvm::SmallSet<Operation *, CVPipeline::INIT_SIZE> &visited, Operation *from, Operation *to)
@@ -163,34 +257,4 @@ int FlagIdReuseManager::getFlagId(Operation *op)
     }
     LOG_DEBUG("Warning: failed to get flagId from op: \n" << *op << "\n");
     return -1;
-}
-
-// This function will merge rhs to lhs. Including the flagIdToOps and the disjointSet.
-void FlagIdReuseManager::merge(int lhs, int rhs)
-{
-    flagIdToOps[lhs].append(flagIdToOps[rhs].begin(), flagIdToOps[rhs].end());
-    flagIdToOps[rhs].clear();
-    disjointSet.merge(lhs, rhs);
-}
-
-int FlagIdReuseManager::DisjointSet::findRoot(int flagId)
-{
-    auto it = fa.find(flagId);
-    if (it == fa.end()) {
-        fa[flagId] = flagId;
-        return flagId;
-    }
-    
-    if (it->second == flagId) {
-        return flagId;
-    }
-    it->second = findRoot(it->second);
-    return it->second;
-}
-
-void FlagIdReuseManager::DisjointSet::merge(int lhs, int rhs)
-{
-    auto lhsFa = findRoot(lhs);
-    auto rhsFa = findRoot(rhs);
-    fa[rhsFa] = lhsFa;
 }

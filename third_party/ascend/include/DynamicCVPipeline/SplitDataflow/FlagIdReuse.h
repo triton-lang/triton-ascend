@@ -46,18 +46,25 @@ public:
 
 private:
     static int getFlagId(Operation *op);
-    bool checkReusable(int asIs, int toBe);
     bool hasPath(llvm::SmallSet<Operation *, CVPipeline::INIT_SIZE> &visited, Operation *from, Operation *to);
     void preworkForAnalyze(const llvm::SmallVector<Operation *> &syncOps);
-    void merge(int lhs, int rhs);
+
+    // Lifecycle boundary of a flag group: earliest set (acquire) / latest wait (release).
+    Operation *getEarliestSet(int flagId);
+    Operation *getLatestWait(int flagId);
+    // p is provably ordered before q: same op, same-block program order, or
+    // reachable through the happens-before relations graph.
+    bool opPrecedes(Operation *p, Operation *q);
+    // `before`'s release point precedes `after`'s acquire point.
+    bool flagReleasedBefore(int before, int after);
+    // Two flags interfere iff neither is fully released before the other is acquired.
+    bool flagsInterfere(int lhs, int rhs);
+    // Greedy interference-graph coloring + compact renumber. Returns origFlagId -> newFlagId.
+    DenseMap<int, int> colorInterferenceGraph();
 
     DenseMap<Operation*, llvm::SmallVector<Operation*>> relations;
     DenseMap<int, llvm::SmallVector<Operation*>> flagIdToOps;
-    struct DisjointSet {
-        DenseMap<int, int> fa;
-        int findRoot(int flagId);
-        void merge(int lhs, int rhs);
-    } disjointSet;
+    DenseMap<Operation*, int> opOrder;
 };
 
 } // namespace triton

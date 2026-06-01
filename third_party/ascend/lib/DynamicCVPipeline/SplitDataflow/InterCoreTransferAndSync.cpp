@@ -526,7 +526,7 @@ std::pair<Operation *, Operation *> InterCoreTransferAndSyncPass::createTransfer
 
 Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(OpBuilder &builder, Value srcValue,
     Value normalizedValue, Operation *vectorEndOp, Operation *cubeStartOp, Location loc, int transferIndex,
-    int iniConsumerId)
+    int iniConsumerId, Operation **consumedDataOp)
 {
     LOG_DEBUG("Inserting [Vector->Cube] transfer for value: " << srcValue << "\n");
     // Step 1: Get input information (2D tensor: MxN)
@@ -572,11 +572,15 @@ Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(OpBuilder &b
             user->replaceUsesOfWith(srcValue, toTensorOp.getResult());
         }
     }
+    if (consumedDataOp) {
+        *consumedDataOp = toTensorOp;
+    }
     return copyOp;
 }
 
 Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(OpBuilder &builder, Value srcValue,
-    Operation *cubeEndOp, Operation *vectorStartOp, Location loc, int transferIndex, int iniConsumerId)
+    Operation *cubeEndOp, Operation *vectorStartOp, Location loc, int transferIndex, int iniConsumerId,
+    Operation **consumedDataOp)
 {
     LOG_DEBUG("Inserting [Cube->Vector] transfer for value: " << srcValue << "\n");
     auto srcTensorType = cast<RankedTensorType>(srcValue.getType());
@@ -618,6 +622,9 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(OpBuilder &b
             user->replaceUsesOfWith(srcValue, toTensorOp.getResult());
         }
     }
+    if (consumedDataOp) {
+        *consumedDataOp = toTensorOp;
+    }
     return fixpipeOp;
 }
 
@@ -625,7 +632,8 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
     OpBuilder &builder, Operation *transferOp,
     Operation *consumerStartOp, Operation *consumerEndOp,
     int flag, Location loc, int transferIndex,
-    FlagIdReuseManager &flagIdReuseManager)
+    FlagIdReuseManager &flagIdReuseManager,
+    Operation *consumedDataOp)
 {
     LOG_DEBUG("Inserting inter-core synchronization for transferOp: " << *transferOp << "\n");
     auto cubeCoreAttr = hivm::TCoreTypeAttr::get(builder.getContext(), hivm::TCoreType::CUBE);
@@ -673,12 +681,21 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
             attachAnalyzeFlagIdTag(setOpForWrite);
             attachAnalyzeFlagIdTag(setOpForStart);
             attachAnalyzeFlagIdTag(waitOpForEnd);
+            // E2: register every set->wait pair of this transfer, not just the
+            // loop start/end pair. Each pair is the only proof of cross-core
+            // ordering for the sync ops it connects.
+            flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForRead, waitOpForRead);
+            flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForWrite, waitOpForWrite);
             flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForStart, waitOpForEnd);
+            // E4: link the read-wait to the consumed data it guards so the sync
+            // op is threaded into the downstream dataflow graph.
+            flagIdReuseManager.insertRelationBetweenSetAndWait(waitOpForRead, consumedDataOp);
             return;
         }
         attachAnalyzeFlagIdTag(setOpForRead);
         attachAnalyzeFlagIdTag(waitOpForRead);
         flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForRead, waitOpForRead);
+        flagIdReuseManager.insertRelationBetweenSetAndWait(waitOpForRead, consumedDataOp);
         return;
     } else if (dyn_cast<hivm::CopyOp>(transferOp)) {
         builder.setInsertionPointAfter(transferOp);
@@ -712,12 +729,21 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
             attachAnalyzeFlagIdTag(setOpForWrite);
             attachAnalyzeFlagIdTag(setOpForStart);
             attachAnalyzeFlagIdTag(waitOpForEnd);
+            // E2: register every set->wait pair of this transfer, not just the
+            // loop start/end pair. Each pair is the only proof of cross-core
+            // ordering for the sync ops it connects.
+            flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForRead, waitOpForRead);
+            flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForWrite, waitOpForWrite);
             flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForStart, waitOpForEnd);
+            // E4: link the read-wait to the consumed data it guards so the sync
+            // op is threaded into the downstream dataflow graph.
+            flagIdReuseManager.insertRelationBetweenSetAndWait(waitOpForRead, consumedDataOp);
             return;
         }
         attachAnalyzeFlagIdTag(setOpForRead);
         attachAnalyzeFlagIdTag(waitOpForRead);
         flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForRead, waitOpForRead);
+        flagIdReuseManager.insertRelationBetweenSetAndWait(waitOpForRead, consumedDataOp);
         return;
     }
 }
@@ -857,13 +883,15 @@ LogicalResult InterCoreTransferAndSyncPass::handleVectorToCube(OpBuilder &builde
     auto [prodStart, prodEnd] = getBlockStartEnd(dep.producerBlockId, module);
     auto [consStart, consEnd] = getBlockStartEnd(dep.consumerBlockId, module);
 
+    Operation *consumedDataOp = nullptr;
     Operation *transferOp = insertVectorToCubeTransfer(builder, srcValue, normalizedVal, prodEnd, consStart, loc,
-        transferIndex, dep.iniConsumerBlockId);
+        transferIndex, dep.iniConsumerBlockId, &consumedDataOp);
 
     int flagId = flagManager.acquireId(prodStart);
     auto [newProdStart, newProdEnd] = getBlockStartEnd(dep.producerBlockId, module);
     auto [newConsStart, newConsEnd] = getBlockStartEnd(dep.consumerBlockId, module);
-    insertInterCoreSync(builder, transferOp, newConsStart, newConsEnd, flagId, loc, transferIndex, flagIdReuseManager);
+    insertInterCoreSync(builder, transferOp, newConsStart, newConsEnd, flagId, loc, transferIndex, flagIdReuseManager,
+        consumedDataOp);
 
     transferIndex++;
     LOG_DEBUG("Inserted V->C transfer and sync: block " << dep.producerBlockId << " -> block " << dep.consumerBlockId <<
@@ -888,13 +916,16 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(OpBuilder &builde
     LOG_DEBUG("[newProdEnd]" << *prodEnd << "\n");
     LOG_DEBUG("[newConsStart]" << *consStart << "\n");
     LOG_DEBUG("[newConsEnd]" << *consEnd << "\n");
+    Operation *consumedDataOp = nullptr;
     Operation *transferOp =
-        insertCubeToVectorTransfer(builder, srcValue, prodEnd, consStart, loc, transferIndex, dep.iniConsumerBlockId);
+        insertCubeToVectorTransfer(builder, srcValue, prodEnd, consStart, loc, transferIndex, dep.iniConsumerBlockId,
+            &consumedDataOp);
 
     auto [newProdStart, newProdEnd] = getBlockStartEnd(dep.producerBlockId, module); // C Block
     auto [newConsStart, newConsEnd] = getBlockStartEnd(dep.consumerBlockId, module); // V Block
     int flagId = flagManager.acquireId(newProdStart);
-    insertInterCoreSync(builder, transferOp, newConsStart, newConsEnd, flagId, loc, transferIndex, flagIdReuseManager);
+    insertInterCoreSync(builder, transferOp, newConsStart, newConsEnd, flagId, loc, transferIndex, flagIdReuseManager,
+        consumedDataOp);
 
     transferIndex++;
     LOG_DEBUG("Inserted C->V transfer and sync: block " << dep.producerBlockId << " -> block " << dep.consumerBlockId <<
@@ -947,8 +978,10 @@ llvm::SmallVector<mlir::Operation *> InterCoreTransferAndSyncPass::insertAnalyze
     mlir::ModuleOp module, FlagIdReuseManager &flagIdReuseManager)
 {
     using OpVector = llvm::SmallVector<mlir::Operation *>;
-    llvm::SmallDenseMap<hivm::TCoreType, llvm::SmallDenseMap<hivm::PIPE, OpVector>> sequenceOpMap;
-    llvm::SmallDenseMap<Block *, OpVector> blockSequenceOpMap;
+    
+    // E1 (per-pipe FIFO) is isolated per MLIR block: ops on one (core, pipe)
+    llvm::DenseMap<Block *, llvm::SmallDenseMap<hivm::TCoreType, llvm::SmallDenseMap<hivm::PIPE, OpVector>>>
+        sequenceOpMap;
     llvm::DenseSet<mlir::Operation *> relationOpSet;
     llvm::SmallVector<mlir::Operation *> relationOps;
     llvm::SmallVector<mlir::Operation *> analyzeFlagIdOps;
@@ -965,16 +998,15 @@ llvm::SmallVector<mlir::Operation *> InterCoreTransferAndSyncPass::insertAnalyze
             return;
         }
         relationOps.push_back(op);
-        if (Block *block = op->getBlock()) {
-            blockSequenceOpMap[block].push_back(op);
-        }
     };
 
     auto notePipeOp = [&](Operation *op, hivm::TCoreType coreType, hivm::PIPE pipe) {
         if (!isConcretePipe(pipe)) {
             return;
         }
-        sequenceOpMap[coreType][pipe].push_back(op);
+        if (Block *block = op->getBlock()) {
+            sequenceOpMap[block][coreType][pipe].push_back(op);
+        }
         noteRelationOp(op);
     };
 
@@ -1039,35 +1071,14 @@ llvm::SmallVector<mlir::Operation *> InterCoreTransferAndSyncPass::insertAnalyze
         }
     }
 
-    auto insertNestedRegionExitRelations = [&](Operation *regionOp, Operation *afterRegionOp) {
-        for (Region &region : regionOp->getRegions()) {
-            for (Block &block : region) {
-                Operation *lastRelationOp = nullptr;
-                for (Operation &nestedOp : block) {
-                    nestedOp.walk([&](Operation *candidate) {
-                        if (relationOpSet.contains(candidate)) {
-                            lastRelationOp = candidate;
-                        }
-                    });
+    // E1: per-block, per-(core, pipe) FIFO chain.
+    for (auto &blockEntry : sequenceOpMap) {
+        for (auto &coreEntry : blockEntry.second) {
+            for (auto &pipeEntry : coreEntry.second) {
+                auto &ops = pipeEntry.second;
+                for (size_t i = 0; i + 1 < ops.size(); ++i) {
+                    insertRelation(ops[i], ops[i + 1]);
                 }
-                insertRelation(lastRelationOp, afterRegionOp);
-            }
-        }
-    };
-
-    for (auto &blockEntry : blockSequenceOpMap) {
-        auto &ops = blockEntry.second;
-        for (size_t i = 0; i + 1 < ops.size(); ++i) {
-            insertRelation(ops[i], ops[i + 1]);
-            insertNestedRegionExitRelations(ops[i], ops[i + 1]);
-        }
-    }
-
-    for (auto &coreEntry : sequenceOpMap) {
-        for (auto &pipeEntry : coreEntry.second) {
-            auto &ops = pipeEntry.second;
-            for (size_t i = 0; i + 1 < ops.size(); ++i) {
-                insertRelation(ops[i], ops[i + 1]);
             }
         }
     }

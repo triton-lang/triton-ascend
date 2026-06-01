@@ -125,12 +125,13 @@ private:
     llvm::StringRef consTag, int transferIndex);
   mlir::Operation *insertVectorToCubeTransfer(mlir::OpBuilder &builder, mlir::Value srcValue,
     mlir::Value normalizedValue, mlir::Operation *vectorEndOp, mlir::Operation *cubeStartOp, mlir::Location loc,
-    int transferIndex, int iniConsumerId);
+    int transferIndex, int iniConsumerId, mlir::Operation **consumedDataOp = nullptr);
   mlir::Operation *insertCubeToVectorTransfer(mlir::OpBuilder &builder, mlir::Value srcValue,
     mlir::Operation *cubeEndOp, mlir::Operation *vectorStartOp, mlir::Location loc, int transferIndex,
-    int iniConsumerId);
+    int iniConsumerId, mlir::Operation **consumedDataOp = nullptr);
   void insertInterCoreSync(mlir::OpBuilder &builder, mlir::Operation *transferOp, mlir::Operation *consumerStartOp,
-    mlir::Operation *consumerEndOp, int flag, mlir::Location loc, int transferIndex, FlagIdReuseManager &flagIdReuseManager);
+    mlir::Operation *consumerEndOp, int flag, mlir::Location loc, int transferIndex, FlagIdReuseManager &flagIdReuseManager,
+    mlir::Operation *consumedDataOp = nullptr);
   void insertPipeSSync(mlir::OpBuilder &builder, mlir::Operation *producerOp, mlir::Operation *consumerOp, int flag,
     mlir::Location loc, bool isCubeToVector);
   llvm::SmallVector<mlir::Operation *> insertAnalyzeFlagRelations(mlir::ModuleOp module, FlagIdReuseManager &flagIdReuseManager);

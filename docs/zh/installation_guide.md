@@ -10,11 +10,11 @@
 
 ### 确认设备型号
 
-| 芯片系列     | 产品示例                          |  对应tag               |
-|----------|-------------------------------|---------------------|
-| 昇腾910b   | Atlas 800T A2、Atlas 900 A2 PoD |  3.2.1-910b-ubuntu22.04-py3.11 |
-| 昇腾A3     | Atlas 800T A3                 | 3.2.1-a3-ubuntu22.04-py3.11|
-| 昇腾950    | 950PR系列                       | 3.2.1-a3-ubuntu22.04-py3.11|
+| 芯片系列     | 产品示例                          | 对应tag                         |
+|----------|-------------------------------|-------------------------------|
+| 昇腾910b   | Atlas 800T A2、Atlas 900 A2 PoD | 3.2.1-910b-ubuntu22.04-py3.11 |
+| 昇腾A3     | Atlas 800T A3                 | 3.2.1-a3-ubuntu22.04-py3.11   |
+| 昇腾950    | 950PR系列                       | 3.2.1-950-ubuntu22.04-py3.11  |
 
 说明：更多镜像参见[OVERVIEW.zh.md](../../docker/OVERVIEW.zh.md)
 ### 获取镜像
@@ -56,7 +56,7 @@ ${image_tag} \
 docker exec -it triton-ascend_container bash
 ```
 
-运行实例: [01-vector-add.py](https://gitcode.com/Ascend/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py)
+运行实例: [01-vector-add.py](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py)
 
 观察到类似的输出即说明环境已搭建完成。
 
@@ -204,7 +204,7 @@ pip install ninja cmake wheel pybind11 # build-time dependencies
 #### 快速安装
 
 ```bash
-git clone https://gitcode.com/Ascend/triton-ascend.git
+git clone https://github.com/triton-lang/triton-ascend.git
 cd triton-ascend
 git checkout main
 
@@ -227,7 +227,7 @@ Triton 使用 LLVM 22 为 GPU 和 CPU 生成代码。同样，昇腾的毕昇编
    git clone --no-checkout https://github.com/llvm/llvm-project.git
    cd llvm-project
    git checkout fad3272286528b8a491085183434c5ad4b59ab92
-   wget https://raw.gitcode.com/Ascend/triton-ascend/blobs/2b0a06eb21438359d6d0576b622e3bb5e0292d17/fad3272.patch
+   wget https://raw.githubusercontent.com/triton-lang/triton-ascend/6765b03c81c4e9ecb277e4ef1dde61dea0d044f0/third_party/ascend/llvm_patch/fad3272.patch
    git apply fad3272.patch
    ```
 
@@ -275,7 +275,7 @@ Triton 使用 LLVM 22 为 GPU 和 CPU 生成代码。同样，昇腾的毕昇编
 ##### 克隆 Triton-Ascend
 
 ```bash
-git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend
+git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
 ```
 
 ##### 构建 Triton-Ascend
@@ -335,7 +335,7 @@ triton-ascend/CMakeLists.txt
 | 2 |       `A2`        | Atlas A2 训练系列产品 |            Atlas800T A2             |
 
 ```bash
-git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend
+git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
 docker build \
 --build-arg CANN_BASE_IMAGE=quay.io/ascend/cann:8.5.0-a3-ubuntu22.04-py3.10 \
 -t triton-ascend-image:latest -f ./docker/Dockerfile .
@@ -376,7 +376,7 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
 ```bash
    # 拉取triton-ascend源码仓及用例（可选，非源码编译安装运行示例时需拉源码仓）
-   git clone https://gitcode.com/Ascend/triton-ascend.git
+   git clone https://github.com/triton-lang/triton-ascend.git
    cd triton-ascend && pip install -r requirements.txt
 ```
 

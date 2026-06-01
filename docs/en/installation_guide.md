@@ -11,11 +11,11 @@ Choose the appropriate installation method as needed and proceed to the correspo
 
 ### Confirm Device Model
 
-| Chip Series | Product Example                |  tag               |
-|-------------|--------------------------------|--------------------|
-| Ascend 910b | Atlas 800T A2、Atlas 900 A2 PoD |  3.2.1-910b-ubuntu22.04-py3.11 |
-| Ascend A3   | Atlas 800T A3                  | 3.2.1-a3-ubuntu22.04-py3.11|
-| Ascend 950  | 950PR Series                   | 3.2.1-a3-ubuntu22.04-py3.11|
+| Chip Series | Product Example                | tag                           |
+|-------------|--------------------------------|-------------------------------|
+| Ascend 910b | Atlas 800T A2、Atlas 900 A2 PoD | 3.2.1-910b-ubuntu22.04-py3.11 |
+| Ascend A3   | Atlas 800T A3                  | 3.2.1-a3-ubuntu22.04-py3.11   |
+| Ascend 950  | 950PR Series                   | 3.2.1-950-ubuntu22.04-py3.11  |
 
 Note：For more mirrors,please see [OVERVIEW.zh.md](../../docker/OVERVIEW.zh.md)
 
@@ -60,7 +60,7 @@ ${image_tag} \
 docker exec -it triton-ascend_container bash
 ```
 
-Run the: [01-vector-add.py](https://gitcode.com/Ascend/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py)
+Run the: [01-vector-add.py](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py)
 
 If an output similar to the following is displayed, the environment is correctly configured:
 
@@ -207,7 +207,7 @@ pip install ninja cmake wheel pybind11 # build-time dependencies
 #### Quick Installation
 
 ```bash
-git clone https://gitcode.com/Ascend/triton-ascend.git
+git clone https://github.com/triton-lang/triton-ascend.git
 cd triton-ascend
 git checkout main
 
@@ -231,7 +231,7 @@ Triton uses LLVM 22 to generate code for GPUs and CPUs. Similarly, the BiSheng C
    git clone --no-checkout https://github.com/llvm/llvm-project.git
    cd llvm-project
    git checkout fad3272286528b8a491085183434c5ad4b59ab92
-   wget https://raw.gitcode.com/Ascend/triton-ascend/blobs/2b0a06eb21438359d6d0576b622e3bb5e0292d17/fad3272.patch
+   wget https://raw.githubusercontent.com/triton-lang/triton-ascend/6765b03c81c4e9ecb277e4ef1dde61dea0d044f0/third_party/ascend/llvm_patch/fad3272.patch
    git apply fad3272.patch
    ```
 
@@ -279,7 +279,7 @@ Triton uses LLVM 22 to generate code for GPUs and CPUs. Similarly, the BiSheng C
 ##### Cloning Triton-Ascend
 
 ```bash
-git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend
+git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
 ```
 
 ##### Building Triton-Ascend
@@ -341,7 +341,7 @@ For the machines corresponding to different chip types, refer to the table below
 | 2 | `A2` | Atlas A2 Training Series | Atlas 800T A2 |
 
 ```bash
-git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend
+git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
 docker build \
 --build-arg CANN_BASE_IMAGE=quay.io/ascend/cann:8.5.0-a3-ubuntu22.04-py3.10 \
 -t triton-ascend-image:latest -f ./docker/Dockerfile .
@@ -382,7 +382,7 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
  ```bash
    # Pull the triton-ascend source code repository and examples (optional; required to pull the source code repository when running examples without source code compilation and installation).
-   git clone https://gitcode.com/Ascend/triton-ascend.git
+   git clone https://github.com/triton-lang/triton-ascend.git
    cd triton-ascend && pip install -r requirements_dev.txt
  ```
 

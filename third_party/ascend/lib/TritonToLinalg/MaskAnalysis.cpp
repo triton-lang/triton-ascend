@@ -46,8 +46,8 @@ namespace triton {
 namespace {
 
 template <typename MemAccOpTy>
-std::optional<MaskState> runMaskAnalysisImpl(MemAccOpTy op, OpBuilder &builder)
-{
+std::optional<MaskState> runMaskAnalysisImpl(MemAccOpTy op,
+                                             OpBuilder &builder) {
   auto mask = op.getMask();
   if (!mask) {
     return std::nullopt;
@@ -67,14 +67,14 @@ std::optional<MaskState> runMaskAnalysisImpl(MemAccOpTy op, OpBuilder &builder)
 
 OpFoldResult MaskState::clampToNonNegativeIndex(const OpFoldResult value,
                                                 const Location &loc,
-                                                OpBuilder &builder) const
-{
+                                                OpBuilder &builder) const {
   if (auto cst = getConstantIntValue(value)) {
     return builder.getIndexAttr(std::max<int64_t>(0, *cst));
   }
 
-  // For non-constant value, we could generate max(value, 0) to ensure the value is non-negative.
-  // But this caused error in atomic max/min ut test. We need to investigate more on this.
+  // For non-constant value, we could generate max(value, 0) to ensure the value
+  // is non-negative. But this caused error in atomic max/min ut test. We need
+  // to investigate more on this.
   return value;
 }
 
@@ -144,12 +144,9 @@ tensor::ExtractSliceOp MaskState::getExtractSlice(Value source,
                                                 dims, strides);
 }
 
-tensor::ExtractSliceOp MaskState::getExtractSlice(Value source,
-                                                  const Location &loc,
-                                                  OpBuilder &builder,
-                                                  SmallVector<OpFoldResult> offsets,
-                                                  SmallVector<OpFoldResult> dims) const
-{
+tensor::ExtractSliceOp MaskState::getExtractSlice(
+    Value source, const Location &loc, OpBuilder &builder,
+    SmallVector<OpFoldResult> offsets, SmallVector<OpFoldResult> dims) const {
   auto sourceRType = cast<RankedTensorType>(source.getType());
   SmallVector<OpFoldResult> strides(getRank(), builder.getIndexAttr(1));
 
@@ -168,12 +165,10 @@ tensor::InsertSliceOp MaskState::getInsertSlice(Value source, Value dest,
                                                strides);
 }
 
-tensor::InsertSliceOp MaskState::getInsertSlice(Value source, Value dest,
-                                                const Location &loc,
-                                                OpBuilder &builder,
-                                                SmallVector<OpFoldResult> offsets,
-                                                SmallVector<OpFoldResult> dims) const
-{
+tensor::InsertSliceOp
+MaskState::getInsertSlice(Value source, Value dest, const Location &loc,
+                          OpBuilder &builder, SmallVector<OpFoldResult> offsets,
+                          SmallVector<OpFoldResult> dims) const {
   SmallVector<OpFoldResult> strides(getRank(), builder.getIndexAttr(1));
   return builder.create<tensor::InsertSliceOp>(loc, source, dest, offsets, dims,
                                                strides);
@@ -190,19 +185,19 @@ memref::SubViewOp MaskState::getSubview(Value source, const Location &loc,
   fixedOffsets.resize(rank, builder.getIndexAttr(0));
   fixedDims.resize(rank, builder.getIndexAttr(1));
 
-  auto dstType =
-      memref::SubViewOp::inferResultType(sourceType, fixedOffsets, fixedDims, strides);
-  return builder.create<memref::SubViewOp>(loc, cast<MemRefType>(dstType),
-                                           source, fixedOffsets, fixedDims, strides);
+  auto dstType = memref::SubViewOp::inferResultType(sourceType, fixedOffsets,
+                                                    fixedDims, strides);
+  return builder.create<memref::SubViewOp>(
+      loc, cast<MemRefType>(dstType), source, fixedOffsets, fixedDims, strides);
 }
 
 // In llvm later version, for each dimension, assert that:
 // 0 <= offset < dim_size
 // 0 <= offset + (size - 1) *stride < dim_size
 // To adatpt to this change, add this verification to avoid llvm assert error
-// And currently, in the function calling scenario, the stride coefficient is always 1
-bool MaskState::isMemrefSubviewValid(Value source, OpBuilder &builder) const
-{
+// And currently, in the function calling scenario, the stride coefficient is
+// always 1
+bool MaskState::isMemrefSubviewValid(Value source, OpBuilder &builder) const {
   auto sourceType = cast<MemRefType>(source.getType());
   int64_t rank = sourceType.getRank();
 
@@ -213,22 +208,28 @@ bool MaskState::isMemrefSubviewValid(Value source, OpBuilder &builder) const
 
   for (int64_t i = 0; i < rank; ++i) {
     int64_t sourceSize = sourceType.getDimSize(i);
-    if (ShapedType::isDynamic(sourceSize)) continue;
-    std::optional<int64_t> offsetVal = mlir::getConstantIntValue(fixedOffsets[i]);
+    if (ShapedType::isDynamic(sourceSize))
+      continue;
+    std::optional<int64_t> offsetVal =
+        mlir::getConstantIntValue(fixedOffsets[i]);
     std::optional<int64_t> dimVal = mlir::getConstantIntValue(fixedDims[i]);
     if (offsetVal.has_value() && dimVal.has_value()) {
       if (offsetVal.value() >= sourceSize || offsetVal.value() < 0) {
         LLVM_DEBUG({
-          llvm::dbgs() << "MemrefSubview offset check faied at dim " << i << "sourceSize :"<< sourceSize << "offsetVal :" << offsetVal << "\n";
-      });
+          llvm::dbgs() << "MemrefSubview offset check faied at dim " << i
+                       << "sourceSize :" << sourceSize
+                       << "offsetVal :" << offsetVal << "\n";
+        });
         return false;
       }
 
       int64_t computedEnd = offsetVal.value() + dimVal.value();
       if (computedEnd > sourceSize) {
-         LLVM_DEBUG({
-          llvm::dbgs() << "MemrefSubview offset end check faied at dim " << i << "dimVal :"<< dimVal << "offsetVal :" << offsetVal << "\n";
-      });
+        LLVM_DEBUG({
+          llvm::dbgs() << "MemrefSubview offset end check faied at dim " << i
+                       << "dimVal :" << dimVal << "offsetVal :" << offsetVal
+                       << "\n";
+        });
         return false;
       }
     }
@@ -272,7 +273,8 @@ LogicalResult MaskState::addStates(const MaskState &lhsState,
                                    const Location &loc, OpBuilder &builder) {
   if (lhsState.scalar && rhsState.scalar) {
     InFlightDiagnostic diag =
-        emitWarning(loc) << "Unexpected case where both lhs and rhs are scalars";
+        emitWarning(loc)
+        << "Unexpected case where both lhs and rhs are scalars";
     return failure();
   }
   if (!lhsState.scalar && !rhsState.scalar) {
@@ -359,7 +361,8 @@ LogicalResult MaskState::parseConstant(arith::ConstantOp constOp,
     assert(attr.isSplat() && isa<IntegerType>(elementType) &&
            "All elements must share a single integer constant value");
 
-    if (elementType.isInteger(1) && isa<ShapedType>(constOp.getValue().getType())) {
+    if (elementType.isInteger(1) &&
+        isa<ShapedType>(constOp.getValue().getType())) {
       auto shapedType = cast<ShapedType>(constOp.getValue().getType());
       auto shape = shapedType.getShape();
       for (size_t i = 0; i < shape.size(); i++) {
@@ -459,7 +462,8 @@ LogicalResult MaskState::parseSel(arith::SelectOp selOp, const Location &loc,
   }
 
   MaskState falseState;
-  if (failed(falseState.parse(falseValue, loc, builder)) || !falseState.scalar) {
+  if (failed(falseState.parse(falseValue, loc, builder)) ||
+      !falseState.scalar) {
     return failure();
   }
 
@@ -467,7 +471,7 @@ LogicalResult MaskState::parseSel(arith::SelectOp selOp, const Location &loc,
   auto falseScalar = dyn_cast<IntegerAttr>(cast<Attribute>(falseState.scalar));
 
   if (trueScalar && falseScalar) {
-    if(trueScalar.getInt() == 1 && falseScalar.getInt() == 0) {
+    if (trueScalar.getInt() == 1 && falseScalar.getInt() == 0) {
       start = condState.start;
       end = condState.end;
       dims = condState.dims;
@@ -516,7 +520,7 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
 
   if (!(!lhsState.scalar && rhsState.scalar)) {
     InFlightDiagnostic diag = emitWarning(loc)
-                                << "[MaskState] Unsupported cmpi scenario";
+                              << "[MaskState] Unsupported cmpi scenario";
     return failure();
   }
 
@@ -552,7 +556,8 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
   }
   case arith::CmpIPredicate::sle: {
     // lhs <= rhs  <=>  lhs < rhs + 1
-    auto rhsPlusOne = addOpFoldResult(rhsState.scalar, builder.getIndexAttr(1), loc, builder);
+    auto rhsPlusOne =
+        addOpFoldResult(rhsState.scalar, builder.getIndexAttr(1), loc, builder);
     auto realBound = maxOpFoldResult(lhsState.start, rhsPlusOne, loc, builder);
     auto newEnd = minOpFoldResult(lhsState.end, realBound, loc, builder);
     auto newDim = subOpFoldResult(newEnd, lhsState.start, loc, builder);
@@ -723,15 +728,18 @@ LogicalResult MaskState::parseExpandDims(triton::ExpandDimsOp expandDimsOp,
 }
 
 LogicalResult MaskState::parseInsert(tensor::InsertOp insertOp,
-                                     const Location &loc,
-                                     OpBuilder &builder)
-{
+                                     const Location &loc, OpBuilder &builder) {
   if (auto tensorType = dyn_cast<RankedTensorType>(insertOp.getType())) {
-    if (llvm::all_of(tensorType.getShape(), [](int64_t dim) { return dim == 1; })) {
-      SmallVector<Value> indices(tensorType.getRank(), builder.create<arith::ConstantIndexOp>(loc, 0));
-      auto scalarlizeTensor = builder.create<tensor::ExtractOp>(loc, insertOp, indices).getResult();
-      this->offsets = SmallVector<OpFoldResult>(tensorType.getRank(), builder.getIndexAttr(0));
-      this->dims = SmallVector<OpFoldResult>(tensorType.getRank(), builder.getIndexAttr(1));
+    if (llvm::all_of(tensorType.getShape(),
+                     [](int64_t dim) { return dim == 1; })) {
+      SmallVector<Value> indices(
+          tensorType.getRank(), builder.create<arith::ConstantIndexOp>(loc, 0));
+      auto scalarlizeTensor =
+          builder.create<tensor::ExtractOp>(loc, insertOp, indices).getResult();
+      this->offsets = SmallVector<OpFoldResult>(tensorType.getRank(),
+                                                builder.getIndexAttr(0));
+      this->dims = SmallVector<OpFoldResult>(tensorType.getRank(),
+                                             builder.getIndexAttr(1));
       this->scalar = getOpFoldResultOfLayoutInfo(scalarlizeTensor, builder);
       return success();
     }
@@ -775,8 +783,7 @@ void MaskState::eraseInsertedOps(Operation *rawOp, PatternRewriter &rewriter) {
   }
 }
 
-std::optional<MaskState> runMaskAnalysis(Operation *op, OpBuilder &builder)
-{
+std::optional<MaskState> runMaskAnalysis(Operation *op, OpBuilder &builder) {
   if (auto loadOp = dyn_cast<triton::LoadOp>(op)) {
     return runMaskAnalysisImpl(loadOp, builder);
   }

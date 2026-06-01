@@ -184,11 +184,10 @@ public:
                  ConversionPatternRewriter &rewriter,
                  const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void
-  parseLinalgGenericFromMakeRange(linalg::GenericOp op, BlockData &data,
-                                 const Location &loc,
-                                 ConversionPatternRewriter &rewriter,
-                                 const llvm::SmallDenseMap<Value, BlockData> &known);
+  static void parseLinalgGenericFromMakeRange(
+      linalg::GenericOp op, BlockData &data, const Location &loc,
+      ConversionPatternRewriter &rewriter,
+      const llvm::SmallDenseMap<Value, BlockData> &known);
 
   static void
   parseExpandDims(triton::ExpandDimsOp op, BlockData &data, const Location &loc,
@@ -232,10 +231,10 @@ public:
                           ConversionPatternRewriter &rewriter,
                           const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void parseExtractSlice(tensor::ExtractSliceOp op, BlockData &data,
-                            const Location &loc,
-                            ConversionPatternRewriter &rewriter,
-                            const llvm::SmallDenseMap<Value, BlockData> &known);
+  static void
+  parseExtractSlice(tensor::ExtractSliceOp op, BlockData &data,
+                    const Location &loc, ConversionPatternRewriter &rewriter,
+                    const llvm::SmallDenseMap<Value, BlockData> &known);
 
   static void
   parseReinterpretCast(memref::ReinterpretCastOp op, BlockData &data,
@@ -246,24 +245,25 @@ public:
                           const Location &loc,
                           ConversionPatternRewriter &rewriter,
                           const llvm::SmallDenseMap<Value, BlockData> &known);
-  
-  static void parseAtomicRmw(triton::AtomicRMWOp op, BlockData &data,
-                            const Location &loc,
-                            ConversionPatternRewriter &rewriter,
-                            const llvm::SmallDenseMap<Value, BlockData> &known);
-  
-  static void parseFill(linalg::FillOp op, BlockData &data,
-                        const Location &loc,
+
+  static void
+  parseAtomicRmw(triton::AtomicRMWOp op, BlockData &data, const Location &loc,
+                 ConversionPatternRewriter &rewriter,
+                 const llvm::SmallDenseMap<Value, BlockData> &known);
+
+  static void parseFill(linalg::FillOp op, BlockData &data, const Location &loc,
                         ConversionPatternRewriter &rewriter,
                         const llvm::SmallDenseMap<Value, BlockData> &known);
 
   static void parseSelect(arith::SelectOp op, BlockData &data,
-                        const Location &loc,
-                        ConversionPatternRewriter &rewriter,
-                        const llvm::SmallDenseMap<Value, BlockData> &known);
+                          const Location &loc,
+                          ConversionPatternRewriter &rewriter,
+                          const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void parseCustomOp(hivm::CustomOp op, BlockData &data, const Location &loc,
-                            ConversionPatternRewriter &rewriter, const llvm::SmallDenseMap<Value, BlockData> &known,
+  static void parseCustomOp(hivm::CustomOp op, BlockData &data,
+                            const Location &loc,
+                            ConversionPatternRewriter &rewriter,
+                            const llvm::SmallDenseMap<Value, BlockData> &known,
                             unsigned resultIdx);
 
   static void rewriteAddPtr(triton::AddPtrOp op,
@@ -271,28 +271,32 @@ public:
                             ConversionPatternRewriter &rewriter,
                             llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void rewriteMakeTensorPtrOp(triton::MakeTensorPtrOp op,
-                                     Value base,
-                                     ConversionPatternRewriter &rewriter,
-                                     llvm::SmallDenseMap<Value, BlockData> &known);
+  static void
+  rewriteMakeTensorPtrOp(triton::MakeTensorPtrOp op, Value base,
+                         ConversionPatternRewriter &rewriter,
+                         llvm::SmallDenseMap<Value, BlockData> &known);
 
   static void rewriteAdvanceOp(triton::AdvanceOp op,
                                ConversionPatternRewriter &rewriter,
                                llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void rewriteCustomOp(hivm::CustomOp op, hivm::CustomOp::Adaptor &adaptor, ConversionPatternRewriter &rewriter,
-                              const llvm::SmallDenseMap<Value, BlockData> &known);
+  static void
+  rewriteCustomOp(hivm::CustomOp op, hivm::CustomOp::Adaptor &adaptor,
+                  ConversionPatternRewriter &rewriter,
+                  const llvm::SmallDenseMap<Value, BlockData> &known);
 
   template <typename T>
   static std::enable_if_t<std::is_same_v<T, scf::YieldOp> ||
                           std::is_same_v<T, scf::ConditionOp>>
   rewriteTerminator(T op, ConversionPatternRewriter &rewriter,
-                     const llvm::SmallDenseSet<size_t> &blockArgIdxSet, ArrayRef<int64_t> iterArgIdxMap,
-                     const llvm::SmallDenseMap<Value, BlockData> &known);
+                    const llvm::SmallDenseSet<size_t> &blockArgIdxSet,
+                    ArrayRef<int64_t> iterArgIdxMap,
+                    const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  /// @param known is mainly designed for `rewriteLoop`, and is just non-const in
-  /// `rewriteLoop`, `rewriteAddPtr` and `rewriteAdvance`
-  static void rewriteLoopOp(LoopLikeOpInterface op, ConversionPatternRewriter &rewriter,
+  /// @param known is mainly designed for `rewriteLoop`, and is just non-const
+  /// in `rewriteLoop`, `rewriteAddPtr` and `rewriteAdvance`
+  static void rewriteLoopOp(LoopLikeOpInterface op,
+                            ConversionPatternRewriter &rewriter,
                             llvm::SmallDenseMap<Value, BlockData> &known);
 
   static void rewriteAddPtrToUnstrucMemAcc(triton::AddPtrOp op,

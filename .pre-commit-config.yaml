@@ -71,6 +71,7 @@ exclude: |
     ^third_party/amd/backend/include/hsa/|
     ^third_party/amd/backend/include/roctracer/|
     ^third_party/amd/backend/lib/|
+    ^third_party/ascend/llvm_patch/|
     ^third_party/nvidia/backend/include/cuda.h|
     ^third_party/f2reduce
   )

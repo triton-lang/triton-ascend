@@ -48,7 +48,7 @@ _attn_fwd[grid](Q, K, V, M, Out, acc, scale, ...)
 @triton.jit
 def _attn_fwd(Q, K, V, M, Out, acc, scale,
               ...,
-              stride_qz, stride_qh, 
+              stride_qz, stride_qh,
               Z: tl.constexpr, H: tl.constexpr,
               N_CTX: tl.constexpr,
               HEAD_DIM: tl.constexpr,
@@ -94,13 +94,13 @@ def _attn_fwd(Q, K, V, M, Out, acc, scale,
 import triton.language as tl
 
 @triton.jit
-def add_kernel(x_ptr, 
-               y_ptr, 
-               out_ptr, 
+def add_kernel(x_ptr,
+               y_ptr,
+               out_ptr,
                n,  # 元素总数量。
                BLOCK_SIZE: tl.constexpr,  # 分块元素数量。
-               ): 
-    pid = tl.program_id(0) 
+               ):
+    pid = tl.program_id(0)
     NUM_CORE = tl.num_programs(0)
     NUM_BLOCKS = tl.cdiv(n, BLOCK_SIZE)
     for block_idx in range(pid, NUM_BLOCKS, NUM_CORE):
@@ -200,10 +200,10 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
 + def masked_fill_kernel(inp, expand_mask, value, out, N, BLOCK_SIZE: tl.constexpr, BLOCK_SIZE_SUB: tl.constexpr):
     pid = tl.program_id(axis=0)
 +   base_offset = pid * BLOCK_SIZE
-    
+
 +   # 计算需要处理的块的总数
 +   num_sub_blocks = tl.cdiv(BLOCK_SIZE, BLOCK_SIZE_SUB)
-    
+
 +   # 针对每个子块进行循环处理
 +   for sub_block_idx in range(num_sub_blocks):
 +       # 计算当前子块的偏移量
@@ -214,10 +214,10 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
         # Load input and mask
         input_vals = tl.load(inp + offsets, mask=mask, other=0)
         fill_mask_vals = tl.load(expand_mask + offsets, mask=mask, other=0).to(tl.int1)
-    
+
         # Write the original input first
         tl.store(out + offsets, input_vals, mask=mask)
- 
+
         # Overlay and write value at the position that needs to be filled
 -       value_to_write = tl.full([BLOCK_SIZE], value, dtype=input_vals.dtype)
 +       value_to_write = tl.full([BLOCK_SIZE_SUB], value, dtype=input_vals.dtype)
@@ -231,10 +231,10 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
 
 如果你关注 Triton-Ascend 上 `configs=[]` 的推荐用法、自动 Tiling 的适用边界，可进一步参考 [Triton-Ascend autotune 使用指南](./autotune_guide.md)。
 
-- 核心作用  
-自动遍历参数空间：针对BLOCK_SIZE、BLOCK_SIZE_SUB等 constexpr 类型的分块参数，批量测试不同取值的性能。  
-性能基准对比：以算子的执行耗时为指标，筛选出适配当前硬件的最优参数。  
-缓存调优结果：调优后的最优配置会被缓存，后续调用算子时直接复用，避免重复调优。  
+- 核心作用
+自动遍历参数空间：针对BLOCK_SIZE、BLOCK_SIZE_SUB等 constexpr 类型的分块参数，批量测试不同取值的性能。
+性能基准对比：以算子的执行耗时为指标，筛选出适配当前硬件的最优参数。
+缓存调优结果：调优后的最优配置会被缓存，后续调用算子时直接复用，避免重复调优。
 
 - 简单示例
 
@@ -268,6 +268,41 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
     export TRITON_PRINT_AUTOTUNING=1
     ```
 
+### 进阶：使用 max_autotune 自动调优
+
+对于 Ascend NPU 算子，要想达到最优性能，除BLOCK_SIZE外，还需调优 num_stages、enable_hivm_auto_cv_balance、tile_mix_vector_loop 等多个硬件相关参数。若使用 @triton.autotune 手动枚举所有组合，会导致配置列表爆炸式增长，代码难以维护。
+
+max_autotune 是专为 Ascend NPU 设计的扩展装饰器（位于 triton.backends.ascend.runtime），允许用户仅提供基础配置，其余调优参数以列表形式传入，装饰器自动生成全部组合的 Config 列表。
+
+- 核心作用
+开发者只需提供少量基础配置（如BLOCK_SIZE），所有与该算子类型相关的编译器选项（例如 num_stages、enable_hivm_auto_cv_balance、tile_mix_vector_loop、enable_ubuf_saving 等）都会通过内置的合理默认值自动纳入最优组合的搜索范围，无需开发者显式列举，一次性完成最优 tiling 和编译器选项组合的自动寻优。若开发者希望对某些参数进行限定，也可通过显式传入列表来覆盖默认搜索范围。
+
+- 简单示例
+
+    ```diff
+    from triton.backends.ascend.runtime import max_autotune
+
+    @max_autotune(
+        configs=[
+            triton.Config({'BLOCK_SIZE': 128}),
+            triton.Config({'BLOCK_SIZE': 256}),
+        ],
+        key=['n_elements'],
+        kernel_type="vector",           # 算子类型，支持 cube/mix/vector
+        enable_ubuf_saving=[True, False] # 可选，默认已包含
+    )
+    @triton.jit
+    def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr, **META):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(x_ptr + offsets, mask=mask)
+        y = tl.load(y_ptr + offsets, mask=mask)
+        output = x + y
+        tl.store(output_ptr + offsets, output, mask=mask)
+    ```
+
 ### 如何在NPU上避免UB OVERFLOW
 
 【描述】在NPU上，UB或者L1 Size存在上限，当出现该错误时，需要减少单次搬运的数据量，以for循环的方式处理长序列场景。
@@ -288,17 +323,17 @@ large or block number is more than what user expect due to multi-buffer feature 
 
 ### 开发目标
 
-在昇腾NPU单核上实现基础数据运算算子（如加减乘除、激活函数、简单矩阵元素运算）。保证算子在单核内高效执行，为后续多核并行和分布式扩展打下基础。  
+在昇腾NPU单核上实现基础数据运算算子（如加减乘除、激活函数、简单矩阵元素运算）。保证算子在单核内高效执行，为后续多核并行和分布式扩展打下基础。
 
 ### 开发步骤
 
-1.确定算子功能  
--明确输入/输出张量的形状、数据类型（float16/float32/int32 等）。  
--确认是否需要广播、边界处理。  
- 
-2.编写核函数（kernel）  
-单核运算通常对应块级的数据处理。    
-单核数据运算示例：向量加法  
+1.确定算子功能
+-明确输入/输出张量的形状、数据类型（float16/float32/int32 等）。
+-确认是否需要广播、边界处理。
+
+2.编写核函数（kernel）
+单核运算通常对应块级的数据处理。
+单核数据运算示例：向量加法
 
 ```diff
 
@@ -345,8 +380,8 @@ print(output_triton)
 print(f'The maximum difference between torch and triton is '
 f'{torch.max(torch.abs(output_torch - output_triton))}')
 # Out:
-# tensor([1.3713, 1.3076, 0.4940, ..., 0.6724, 1.2141, 0.9733], device='npu')  
-# tensor([1.3713, 1.3076, 0.4940, ..., 0.6724, 1.2141, 0.9733], device='npu')  
+# tensor([1.3713, 1.3076, 0.4940, ..., 0.6724, 1.2141, 0.9733], device='npu')
+# tensor([1.3713, 1.3076, 0.4940, ..., 0.6724, 1.2141, 0.9733], device='npu')
 # The maximum difference between torch and triton is 0.0
 ```
 
@@ -357,14 +392,14 @@ f'{torch.max(torch.abs(output_torch - output_triton))}')
 -边界检查：使用 mask 或 if (tid < N) 避免越界。
 
 -块大小选择：合理设置 block 和 grid
- 
-4.性能要点：  
-(1)访存优化  
--保证连续访问。  
--使用对齐的 stride，避免跨行/跨列跳跃式访问。  
--尽量让数据块大小对齐到 32 字节边界。  
-输入输出 buffer 在分配时保证对齐，避免访存性能下降。  
-例:  
+
+4.性能要点：
+(1)访存优化
+-保证连续访问。
+-使用对齐的 stride，避免跨行/跨列跳跃式访问。
+-尽量让数据块大小对齐到 32 字节边界。
+输入输出 buffer 在分配时保证对齐，避免访存性能下降。
+例:
 
  ```diff
 BLOCK_SIZE = 256  # 256 * 4 bytes = 1024 bytes，对齐良好
@@ -405,10 +440,10 @@ def vec_add(x, y):
     return z
 ```
 
-(2)子块划分  
--将大矩阵分解为小block，每个block在 UB 内完成计算。  
--子块划分要兼顾访存连续性和计算单元利用率。  
-例：  
+(2)子块划分
+-将大矩阵分解为小block，每个block在 UB 内完成计算。
+-子块划分要兼顾访存连续性和计算单元利用率。
+例：
 
  ```diff
 BLOCK_M = 64   # 每个 block 处理 64 行

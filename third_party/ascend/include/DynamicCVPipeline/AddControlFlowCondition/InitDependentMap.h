@@ -23,9 +23,9 @@
 #ifndef TRITON_ASCEND_SSBUF_INITDEPENDENTMAPFORCONTROLFLOW_H
 #define TRITON_ASCEND_SSBUF_INITDEPENDENTMAPFORCONTROLFLOW_H
 
-#include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
+#include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 
 namespace mlir {
 namespace triton {

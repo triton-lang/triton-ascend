@@ -77,7 +77,7 @@ RUN ARCH=$(case "${TARGETPLATFORM}" in \
     CANN_TOOLKIT_URL=https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%209.0.0/Ascend-cann-toolkit_9.0.0_linux-${ARCH}.run && \
     CANN_OPS_URL=https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%209.0.0/Ascend-cann-A3-ops_9.0.0_linux-${ARCH}.run && \
     wget --quiet --header="Referer: https://www.hiascend.com/" ${CANN_TOOLKIT_URL} -O ~/Ascend-cann-toolkit.run && \
-    wget --quiet --header="Referer: https://www.hiascend.com/" ${CANN_OPS_URL} -O ~/Ascend-cann-ops.run 
+    wget --quiet --header="Referer: https://www.hiascend.com/" ${CANN_OPS_URL} -O ~/Ascend-cann-ops.run
 
 # Note: Install CANN Toolkit Development Kit Package
 RUN chmod +x ~/Ascend-cann-toolkit.run && \
@@ -112,8 +112,58 @@ RUN case "${TARGETPLATFORM}" in \
     esac && \
     pip3 install --no-cache-dir torch-npu==2.7.1.post4 --index-url ${PIP_SOURCE} && \
     pip3 install --no-cache-dir triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
-    
-# Stage 4: Copy results from previous stages
+
+# Stage 4: install llvm
+FROM python-installer AS llvm-installer
+ARG PIP_SOURCE
+RUN yum update -y && \
+    yum install -y \
+        gcc \
+        g++ \
+        make \
+        cmake \
+        zlib-devel \
+        libzstd \
+        libzstd-devel \
+        ccache \
+        clang  \
+        lld \
+        git \
+    && yum clean all \
+    && rm -rf /var/cache/yum \
+    && rm -rf /tmp/*
+
+RUN pip3 install --no-cache-dir \
+    ninja \
+    cmake \
+    wheel \
+    pybind11 \
+    --index-url ${PIP_SOURCE}
+
+RUN \
+    git config --global http.postBuffer 524288000 && \
+    git config --global http.lowSpeedLimit 0 && \
+    git config --global http.lowSpeedTime 1800 && \
+    git clone --no-checkout https://github.com/llvm/llvm-project.git && \
+    cd llvm-project && \
+    git checkout b5cc222d7429fe6f18c787f633d5262fac2e676f && \
+    mkdir build && \
+    cd build && \
+    export LLVM_INSTALL_PREFIX=/usr/local/llvm-install && \
+    cmake ../llvm \
+      -G Ninja \
+      -DCMAKE_C_COMPILER=/usr/bin/clang \
+      -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+      -DCMAKE_LINKER=/usr/bin/lld-15 \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DLLVM_ENABLE_ASSERTIONS=ON \
+      -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
+      -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
+      -DLLVM_ENABLE_LLD=ON \
+      -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX} && \
+    ninja install
+
+# Stage 5: Copy results from previous stages
 FROM openeuler/openeuler:24.03 AS official-openeuler
 
 ARG PIP_SOURCE
@@ -181,6 +231,8 @@ RUN yum update -y && \
         ccache \
         clang  \
         lld \
+        openssl-devel \
+        dos2unix \
     && yum clean all \
     && rm -rf /var/cache/yum \
     && rm -rf /tmp/*
@@ -188,6 +240,7 @@ RUN yum update -y && \
 COPY --from=cann-installer /usr/local/python3.11.15 /usr/local/python3.11.15
 COPY --from=cann-installer /usr/local/Ascend /usr/local/Ascend
 COPY --from=cann-installer /etc/Ascend /etc/Ascend
+COPY --from=llvm-installer /usr/local/llvm-install /usr/local/llvm-install
 COPY --chown=root:root docker/copyright.sh /etc/profile.d/copyright.sh
 
 # Note: Set environment variables
@@ -201,9 +254,10 @@ RUN \
     CANN_TOOLKIT_ENV_FILE="/usr/local/Ascend/ascend-toolkit/set_env.sh" && \
     echo "source ${CANN_TOOLKIT_ENV_FILE}" >> /etc/profile && \
     echo "source ${CANN_TOOLKIT_ENV_FILE}" >> ~/.bashrc && \
+    echo "export LLVM_INSTALL_PREFIX=/usr/local/llvm-install" >> /etc/profile && \
+    echo "export LLVM_INSTALL_PREFIX=/usr/local/llvm-install" >> ~/.bashrc && \
     echo "alias ll='ls -l'" >> ~/.bashrc
 
 ENTRYPOINT ["/bin/bash", "-c", "\
     source /usr/local/Ascend/ascend-toolkit/set_env.sh && \
     exec \"$@\"", "--"]
-

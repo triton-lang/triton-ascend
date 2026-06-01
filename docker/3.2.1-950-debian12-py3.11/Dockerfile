@@ -81,7 +81,7 @@ RUN ARCH=$(case "${TARGETPLATFORM}" in \
     CANN_TOOLKIT_URL=https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%209.0.0/Ascend-cann-toolkit_9.0.0_linux-${ARCH}.run && \
     CANN_OPS_URL=https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%209.0.0/Ascend-cann-950-ops_9.0.0_linux-${ARCH}.run && \
     wget --quiet --header="Referer: https://www.hiascend.com/" ${CANN_TOOLKIT_URL} -O ~/Ascend-cann-toolkit.run && \
-    wget --quiet --header="Referer: https://www.hiascend.com/" ${CANN_OPS_URL} -O ~/Ascend-cann-ops.run 
+    wget --quiet --header="Referer: https://www.hiascend.com/" ${CANN_OPS_URL} -O ~/Ascend-cann-ops.run
 
 # Note: Install CANN Toolkit Development Kit Package
 RUN chmod +x ~/Ascend-cann-toolkit.run && \
@@ -117,7 +117,59 @@ RUN case "${TARGETPLATFORM}" in \
     pip3 install --no-cache-dir torch-npu==2.7.1.post4 --index-url ${PIP_SOURCE} && \
     pip3 install --no-cache-dir triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
 
-# Stage 4: Copy results from previous stages
+# Stage 4: install llvm
+FROM python-installer AS llvm-installer
+ARG PIP_SOURCE
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+        gcc \
+        g++ \
+        make \
+        cmake \
+        zlib1g-dev \
+        libzstd-dev \
+        clang-15  \
+        ccache \
+        lld-15 \
+        git \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /var/tmp/* \
+    && rm -rf /tmp/* \
+    && ln -s /usr/bin/clang-15 /usr/bin/clang \
+    && ln -s /usr/bin/clang++-15 /usr/bin/clang++
+
+RUN pip3 install --no-cache-dir \
+    ninja \
+    cmake \
+    wheel \
+    pybind11 \
+    --index-url ${PIP_SOURCE}
+
+RUN \
+    git config --global http.postBuffer 524288000 && \
+    git config --global http.lowSpeedLimit 0 && \
+    git config --global http.lowSpeedTime 1800 && \
+    git clone --no-checkout https://github.com/llvm/llvm-project.git && \
+    cd llvm-project && \
+    git checkout b5cc222d7429fe6f18c787f633d5262fac2e676f && \
+    mkdir build && \
+    cd build && \
+    export LLVM_INSTALL_PREFIX=/usr/local/llvm-install && \
+    cmake ../llvm \
+      -G Ninja \
+      -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
+      -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
+      -DCMAKE_LINKER=/usr/bin/lld-15 \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DLLVM_ENABLE_ASSERTIONS=ON \
+      -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
+      -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
+      -DLLVM_ENABLE_LLD=ON \
+      -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX} && \
+    ninja install
+
+# Stage 5: Copy results from previous stages
 FROM library/debian:12 AS official-debian
 
 ARG PIP_SOURCE
@@ -189,16 +241,19 @@ RUN apt-get update \
         lld-15 \
         openssh-server \
         openssh-client \
+        libssl-dev \
+        dos2unix \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && rm -rf /var/tmp/* \
     && rm -rf /tmp/* \
     && ln -s /usr/bin/clang-15 /usr/bin/clang \
-    && ln -s /usr/bin/clang++-15 /usr/bin/clang++ 
+    && ln -s /usr/bin/clang++-15 /usr/bin/clang++
 
 COPY --from=cann-installer /usr/local/python3.11.15 /usr/local/python3.11.15
 COPY --from=cann-installer /usr/local/Ascend /usr/local/Ascend
 COPY --from=cann-installer /etc/Ascend /etc/Ascend
+COPY --from=llvm-installer /usr/local/llvm-install /usr/local/llvm-install
 COPY --chown=root:root docker/copyright.sh /etc/profile.d/copyright.sh
 
 # Note: Set environment variables
@@ -208,10 +263,11 @@ RUN \
     echo "source ${CANN_TOOLKIT_ENV_FILE}" >> ~/.bashrc && \
     echo "alias ll='ls -l'" >> ~/.bashrc && \
     echo "bash /etc/profile.d/copyright.sh" >> ~/.bashrc && \
+    echo "export LLVM_INSTALL_PREFIX=/usr/local/llvm-install" >> /etc/profile && \
+    echo "export LLVM_INSTALL_PREFIX=/usr/local/llvm-install" >> ~/.bashrc && \
     chmod 555 /etc/profile.d/copyright.sh
 
 ENTRYPOINT ["/bin/bash", "-c", "\
     source /usr/local/Ascend/ascend-toolkit/set_env.sh && \
     bash /etc/profile.d/copyright.sh && \
     exec \"$@\"", "--"]
-    

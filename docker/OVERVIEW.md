@@ -1,16 +1,16 @@
 # Triton-Ascend
-Triton-Ascend is a Triton compilation framework built for the Ascend platform, aiming to enable Triton code to run efficiently on Ascend hardware. For details: [Triton-Ascend](https://gitcode.com/Ascend/triton-ascend/blob/main/README_zh.md)
+Triton-Ascend is a Triton compilation framework built for the Ascend platform, aiming to enable Triton code to run efficiently on Ascend hardware. For details, see [Triton-Ascend](https://github.com/triton-lang/triton-ascend/blob/main/README.md).
 # Supported Tags and Dockerfile
 ## Tag specifications
 Tag follow the following format：<br/>
 `<triton-ascend version>-<chip series>-<OS>-<python version>`
 
-| Field                 | Example Value             | Description               |
-|-----------------------|---------------------------|---------------------------|
-| triton-ascend version | 3.2.1                     | triton-ascend version     |
-| chip series           | 910b、a3、950               | Target Ascend chip series |
-| OS                    | ubuntu22.04、openeuler24.03 | Basic OS                  |
-| python version        | py3.11                    | Python version            |
+| Field                 | Example Value               | Description               |
+|-----------------------|-----------------------------|---------------------------|
+| triton-ascend version | 3.2.1                       | triton-ascend version     |
+| chip series           | 910b, a3, 950               | Target Ascend chip series |
+| OS                    | ubuntu22.04, openeuler24.03 | Basic OS                  |
+| python version        | py3.11                      | Python version            |
 
 ## triton-ascend 3.2.1
 
@@ -22,7 +22,7 @@ Tag follow the following format：<br/>
 | 3.2.1-a3-debian12-py3.11         | [Dockerfile](3.2.1-a3-debian12-py3.11/Dockerfile) | CANN 9.0.0、Torch-npu 2.7.1、triton-ascend 3.2.1 | docker pull quay.io/ascend/triton:3.2.1-a3-debian12-py3.11         |
 | 3.2.1-a3-ubuntu22.04-py3.11      | [Dockerfile](3.2.1-a3-ubuntu22.04-py3.11/Dockerfile) | CANN 9.0.0、Torch-npu 2.7.1、triton-ascend 3.2.1 | docker pull quay.io/ascend/triton:3.2.1-a3-ubuntu22.04-py3.11      |
 | 3.2.1-a3-openeuler24.03-py3.11   | [Dockerfile](3.2.1-a3-openeuler24.03-py3.11/Dockerfile) | CANN 9.0.0、Torch-npu 2.7.1、triton-ascend 3.2.1 | docker pull quay.io/ascend/triton:3.2.1-a3-openeuler24.03-py3.11   |
-| 3.2.1-950-debian12-py3.11        | [Dockerfile](3.2.1-950-debian12-py3.11/Dockerfile) | CANN 9.0.0、Torch-npu 2.7.1、triton-ascend 3.2.1 | docker pull quay.io/ascend/triton:3.2.1-950-debian12-py3.11        | 
+| 3.2.1-950-debian12-py3.11        | [Dockerfile](3.2.1-950-debian12-py3.11/Dockerfile) | CANN 9.0.0、Torch-npu 2.7.1、triton-ascend 3.2.1 | docker pull quay.io/ascend/triton:3.2.1-950-debian12-py3.11        |
 | 3.2.1-950-ubuntu22.04-py3.11     | [Dockerfile](3.2.1-950-ubuntu22.04-py3.11/Dockerfile) | CANN 9.0.0、Torch-npu 2.7.1、triton-ascend 3.2.1 | docker pull quay.io/ascend/triton:3.2.1-950-ubuntu22.04-py3.11     |
 | 3.2.1-950-openeuler24.03-py3.11  | [Dockerfile](3.2.1-950-openeuler24.03-py3.11/Dockerfile) | CANN 9.0.0、Torch-npu 2.7.1、triton-ascend 3.2.1 | docker pull quay.io/ascend/triton:3.2.1-950-openeuler24.03-py3.11  |
 
@@ -82,12 +82,12 @@ RUN apt update -y && \
     ...
 ```
 # Supported hardware
-| Chip Series | Product Example                | Architecture |
-|-------------|--------------------------------|--------------|
-| Ascend 910b | Atlas 800T A2、Atlas 900 A2 PoD | ARM64、x86_64 |
-| Ascend A3   | Atlas 800T A3                  | ARM64、x86_64 |
-| Ascend 950  | 950PR Series                   | ARM64、x86_64 |
+| Chip Series | Product Example                 | Architecture  |
+|-------------|---------------------------------|---------------|
+| Ascend 910b | Atlas 800T A2, Atlas 900 A2 PoD | ARM64, x86_64 |
+| Ascend A3   | Atlas 800T A3                   | ARM64, x86_64 |
+| Ascend 950  | 950PR Series                    | ARM64, x86_64 |
 
 # License
-View the license information of the CANN, Torch-npu and Triton-Ascend software contained in the image. For details, visit [License](https://www.hiascend.com/en/software/protocol)。<br/>
-As with all container images, the pre-installed software packages ( such as Python and system libraries) may be subject to their own licenses.
+View the license information of the CANN, Torch-npu and Triton-Ascend software contained in the image. For details, visit [License](https://www.hiascend.com/en/software/protocol).<br/>
+As with all container images, the pre-installed software packages (such as Python and system libraries) may be subject to their own licenses.

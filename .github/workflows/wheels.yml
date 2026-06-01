@@ -117,8 +117,8 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: ./.github/actions/setup-obsutil
         with:
-          ak: ${{ secrets.OBS_AK }}
-          sk: ${{ secrets.OBS_SK }}
+          ak: ${{ secrets.NIGHTLY_OBS_AK }}
+          sk: ${{ secrets.NIGHTLY_OBS_SK }}
           arch: ${{ matrix.config.arch == 'x86_64' && 'amd64' || 'arm64' }}
 
       - name: Upload wheels to OBS

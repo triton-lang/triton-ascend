@@ -811,13 +811,15 @@ void parseSelect(arith::SelectOp op, const Location &loc,
   if (!dstType)
     return;
 
-  auto dstIsScalar = trueValueScalarLike && falseValueScalarLike && conditionScalarLike;
+  auto dstIsScalar =
+      trueValueScalarLike && falseValueScalarLike && conditionScalarLike;
   offsetMap[dst].setScalarLike(dstIsScalar);
 
   auto &dstStructured = offsetMap[dst].getStructuredRef();
   dstStructured.resize(trueValueStructured.size());
   for (size_t i = 0; i < dstStructured.size(); i++)
-    dstStructured[i] = (dstIsScalar) ? PtrOffsetInfo::AxisInfo::scalarlike : PtrOffsetInfo::AxisInfo::unstructured;
+    dstStructured[i] = (dstIsScalar) ? PtrOffsetInfo::AxisInfo::scalarlike
+                                     : PtrOffsetInfo::AxisInfo::unstructured;
 }
 
 void parseFPToSI(arith::FPToSIOp op, const Location &loc,
@@ -984,7 +986,8 @@ void parseIf(scf::IfOp op, const Location &loc, RewriterBase &rewriter,
     elseStructured = elseOffsetInfo.getStructuredRef();
     dstIsScalar = dstIsScalar && elseOffsetInfo.isScalarLike();
     if (thenSrcPtr != elseOffsetInfo.getPtr()) {
-      emitError(loc) << "Currently ptr type from different source not supported";
+      emitError(loc)
+          << "Currently ptr type from different source not supported";
     }
   }
 
@@ -996,7 +999,8 @@ void parseIf(scf::IfOp op, const Location &loc, RewriterBase &rewriter,
   dstStructured.resize(thenStructured.size());
   for (size_t i = 0; i < dstStructured.size(); i++)
     if (op.elseBlock())
-      dstStructured[i] = (dstIsScalar) ? PtrOffsetInfo::AxisInfo::scalarlike : PtrOffsetInfo::AxisInfo::unstructured;
+      dstStructured[i] = (dstIsScalar) ? PtrOffsetInfo::AxisInfo::scalarlike
+                                       : PtrOffsetInfo::AxisInfo::unstructured;
     else
       dstStructured[i] = thenStructured[i];
   SmallVector<Value> dstOffsets(thenOffsetInfo.getOffsetsRef().size());
@@ -1152,39 +1156,46 @@ void parseIntToPtr(triton::IntToPtrOp op, const Location &loc,
   offsetMap[dst].setScalarLike(true);
 }
 
-void parseCustomOp(hivm::CustomOp op, const Location &loc, RewriterBase &rewriter,
-                   llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap, unsigned int resultIdx)
-{
-    for (auto operand : op.getInputs()) {
-        parse(operand, op->getLoc(), rewriter, offsetMap);
+void parseCustomOp(hivm::CustomOp op, const Location &loc,
+                   RewriterBase &rewriter,
+                   llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
+                   unsigned int resultIdx) {
+  for (auto operand : op.getInputs()) {
+    parse(operand, op->getLoc(), rewriter, offsetMap);
+  }
+  auto dst = op->getResult(resultIdx);
+  offsetMap[dst] = PtrOffsetInfo();
+  auto tensorType = dyn_cast<RankedTensorType>(dst.getType());
+  if (!tensorType) {
+    if (isa<triton::PointerType>(dst.getType())) {
+      offsetMap[dst].setPtr(dst);
+      offsetMap[dst].setZeroOffset();
+    } else if (isa<IntegerType>(dst.getType())) {
+      offsetMap[dst].setOffset(dst);
+    } else {
+      emitError(loc) << "Unsupported return type for hivm.custom: "
+                     << dst.getType();
     }
-    auto dst = op->getResult(resultIdx);
-    offsetMap[dst] = PtrOffsetInfo();
-    auto tensorType = dyn_cast<RankedTensorType>(dst.getType());
-    if (!tensorType) {
-        if (isa<triton::PointerType>(dst.getType())) {
-            offsetMap[dst].setPtr(dst);
-            offsetMap[dst].setZeroOffset();
-        } else if (isa<IntegerType>(dst.getType())) {
-            offsetMap[dst].setOffset(dst);
-        } else {
-            emitError(loc) << "Unsupported return type for hivm.custom: " << dst.getType();
-        }
-        return;
+    return;
+  }
+  if (llvm::isa<triton::PointerType>(tensorType.getElementType())) {
+    if (checkStructureAnnotated(op, rewriter)) {
+      auto srcValArrayAttr = op->getAttrOfType<DenseI32ArrayAttr>(
+          ConverterUtils::customSrcPtrIndexAttrName);
+      assert(srcValArrayAttr &&
+             "structure hivm.custom op should present src tensor<tt.ptr>");
+      auto srcValArray = srcValArrayAttr.asArrayRef();
+      assert(srcValArray[resultIdx] != -1 &&
+             "tensor<tt.ptr> result should map to src tensor<tt.ptr>");
+      auto srcOffsetInfo = offsetMap[op->getOperand(srcValArray[resultIdx])];
+      offsetMap[dst] = srcOffsetInfo;
+      return;
     }
-    if (llvm::isa<triton::PointerType>(tensorType.getElementType())) {
-      if (checkStructureAnnotated(op, rewriter)) {
-        auto srcValArrayAttr = op->getAttrOfType<DenseI32ArrayAttr>(ConverterUtils::customSrcPtrIndexAttrName);
-        assert(srcValArrayAttr && "structure hivm.custom op should present src tensor<tt.ptr>");
-        auto srcValArray = srcValArrayAttr.asArrayRef();
-        assert(srcValArray[resultIdx] != -1 && "tensor<tt.ptr> result should map to src tensor<tt.ptr>");
-        auto srcOffsetInfo = offsetMap[op->getOperand(srcValArray[resultIdx])];
-        offsetMap[dst] = srcOffsetInfo;
-        return;
-      }
-      emitError(loc) << "Unsupported return unstructure RankedTensor of tt.ptr for hivm.custom: " << dst;
-    }
-    offsetMap[dst].setUnstructured(tensorType.getRank());
+    emitError(loc) << "Unsupported return unstructure RankedTensor of tt.ptr "
+                      "for hivm.custom: "
+                   << dst;
+  }
+  offsetMap[dst].setUnstructured(tensorType.getRank());
 }
 
 } // namespace triton

@@ -8,7 +8,7 @@ from ..backends.compiler import Language
 from ..backends.compiler import BaseBackend, GPUTarget
 from .. import __version__, knobs
 from ..runtime.autotuner import OutOfResources
-from ..runtime.cache import get_cache_manager, get_dump_manager, get_override_manager, get_cache_key, triton_key
+from ..runtime.cache import get_cache_manager, get_dump_manager, get_override_manager, get_cache_key
 from ..runtime.driver import driver
 from ..tools.disasm import get_sass
 from .errors import MLIRCompilationError
@@ -456,7 +456,8 @@ class CompiledKernel:
         binary_ext = backend.binary_ext
         binary_extensions = getattr(backend, 'binary_extensions', {binary_ext})
         self.asm = AsmDict({
-            file.suffix[1:]: file.read_bytes() if file.suffix[1:] in binary_extensions else file.read_text()
+            file.suffix[1:]:
+            file.read_bytes() if file.suffix[1:] in binary_extensions else file.read_text()
             for file in asm_files
         })
         self.metadata_group = metadata_group

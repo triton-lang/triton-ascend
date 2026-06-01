@@ -54,11 +54,11 @@ public:
 
 class LoadConverter : public OpConversionPattern<triton::LoadOp> {
 private:
-  void propagateWasBoolToInt8Attr(Operation *srcLoadOp, Operation *dstOp, PatternRewriter &rewriter) const;
+  void propagateWasBoolToInt8Attr(Operation *srcLoadOp, Operation *dstOp,
+                                  PatternRewriter &rewriter) const;
 
   LogicalResult toTensorAndReplace(triton::LoadOp &op,
-                                   RankedTensorType &tensorType,
-                                   Value localMem,
+                                   RankedTensorType &tensorType, Value localMem,
                                    bool mayImplicitTransposeWithLastAxis,
                                    const Location &loc,
                                    ConversionPatternRewriter &rewriter) const;

@@ -89,7 +89,7 @@ For the machines corresponding to different chip types, refer to the table below
 | 2 | `A2` | Atlas A2 Training Series | Atlas 800T A2 |
 
 ```bash
-git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend
+git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
 docker build \
 --build-arg CANN_BASE_IMAGE=quay.io/ascend/cann:8.5.0-a3-ubuntu22.04-py3.10 \
 -t triton-ascend-image:latest -f ./docker/Dockerfile .
@@ -132,7 +132,7 @@ Run the example: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector
 # Set CANN environment variables (using the default root installation path `/usr/local/Ascend` as an example)
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
 # Clone the triton-ascend repository and examples (optional; required for running examples if not installed from source)
-git clone https://gitcode.com/Ascend/triton-ascend.git
+git clone https://github.com/triton-lang/triton-ascend.git
 # Run the tutorials example:
 python3 ./triton-ascend/third_party/ascend/tutorials/01-vector-add.py
 ```

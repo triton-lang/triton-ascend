@@ -7,10 +7,10 @@ def TritonToStructured : Pass<"triton-to-structured", "mlir::ModuleOp"> {
     let summary = "remove reminder/divider and reproduce addptr/mask expression ";
     let constructor = "triton::createTritonToStructuredPass()";
     let options = [
-        Option<"enableMaskFallbackConversion", "enable-mask-fallback-conversion", 
+        Option<"enableMaskFallbackConversion", "enable-mask-fallback-conversion",
             "bool", /*default*/"false",
             "If enabled, select will perform a fallback conversion when mask matching fails.">,
-        Option<"optimizeDynamicOffset", "optimize-dynamic-offset", 
+        Option<"optimizeDynamicOffset", "optimize-dynamic-offset",
             "bool", /*default*/"false",
             "Enable dynamic offset feature">
     ];

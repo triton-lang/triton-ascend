@@ -366,7 +366,8 @@ void BubbleUpExtract<tensor::ExtractOp>::bubbleUpOperation(
       op.getLoc(), resultType.getElementType(), idx);
   if (start != 0) {
     Value startVal = rewriter.create<arith::ConstantOp>(
-        op.getLoc(), rewriter.getIntegerAttr(resultType.getElementType(), start));
+        op.getLoc(),
+        rewriter.getIntegerAttr(resultType.getElementType(), start));
     result = rewriter.create<arith::AddIOp>(op.getLoc(), result, startVal);
   }
   rewriter.replaceOp(op, result);

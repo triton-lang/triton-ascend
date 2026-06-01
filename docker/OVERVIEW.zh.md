@@ -1,16 +1,16 @@
 # Triton-Ascend
-Triton-Ascend是面向昇腾平台构建的Triton编译框架，旨在让Triton代码能够在昇腾硬件上高效运行。详见[Triton-Ascend](https://gitcode.com/Ascend/triton-ascend/blob/main/README_zh.md)
+Triton-Ascend是面向昇腾平台构建的Triton编译框架，旨在让Triton代码能够在昇腾硬件上高效运行。详见[Triton-Ascend](https://github.com/triton-lang/triton-ascend/blob/main/README_zh.md)。
 # 支持的Tags及Dockerfile链接
 ## Tag 规范
 Tag遵循以下格式：<br/>
 `<triton-ascend版本>-<芯片系列>-<操作系统>-<python版本>`
 
-| 字段              | 示例值                        | 说明|
-|-----------------|----------------------------|----|
-| triton-ascend版本 | 3.2.1                      | triton-ascend版本|
-| 芯片系列 | 910b、a3、950                | 目标昇腾芯片系列|
-| 操作系统| ubuntu22.04、openeuler24.03 | 基础操作系统|
-|python版本| py3.11                     | Python版本|
+| 字段              | 示例值                        | 说明              |
+|-------------------|-------------------------------|-------------------|
+| triton-ascend版本 | 3.2.1                         | triton-ascend版本 |
+| 芯片系列          | 910b、a3、950                 | 目标昇腾芯片系列  |
+| 操作系统          | ubuntu22.04、openeuler24.03   | 基础操作系统      |
+| python版本        | py3.11                        | Python版本        |
 
 ## triton-ascend 3.2.1
 
@@ -81,11 +81,11 @@ RUN apt update -y && \
     ...
 ```
 # 支持的硬件
-| 芯片系列     | 产品示例                           | 架构           |
-|----------|--------------------------------|--------------|
-| 昇腾910b   | Atlas 800T A2、Atlas 900 A2 PoD | ARM64、x86_64 |
-| 昇腾A3     | Atlas 800T A3                  | ARM64、x86_64 |
-| 昇腾950    | 950PR系列                        | ARM64、x86_64 |
+| 芯片系列  | 产品示例                        | 架构          |
+|-----------|---------------------------------|---------------|
+| 昇腾910b  | Atlas 800T A2、Atlas 900 A2 PoD | ARM64、x86_64 |
+| 昇腾A3    | Atlas 800T A3                   | ARM64、x86_64 |
+| 昇腾950   | 950PR系列                       | ARM64、x86_64 |
 
 # 许可证
 查看镜像中包含的CANN、Torch-npu、Triton-Ascend软件的[许可证信息](https://www.hiascend.com/zh/software/protocol)。<br/>

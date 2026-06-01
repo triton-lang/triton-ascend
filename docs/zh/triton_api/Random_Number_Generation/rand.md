@@ -7,8 +7,8 @@
 
 ```python
 triton.language.rand(
- seed, 
- offset, 
+ seed,
+ offset,
  n_rounds: constexpr = 10
 )
 ```
@@ -61,6 +61,6 @@ def kernel_rand(x_ptr, n_rounds: tl.constexpr, N: tl.constexpr, XBLOCK: tl.const
 y_calf = torch.zeros(shape, dtype=eval('torch.float32')).npu()
 numel = y_calf.numel()
 ncore = 1 if numel < 32 else 32
-xblock = math.ceil(numel / ncore) 
+xblock = math.ceil(numel / ncore)
 kernel_rand[ncore, 1, 1](y_calf, 10, numel, xblock)
 ```

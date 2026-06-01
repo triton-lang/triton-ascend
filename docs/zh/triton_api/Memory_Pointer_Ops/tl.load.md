@@ -103,7 +103,7 @@ def triton_ldst_indirect_07_kernel(
     tmp2 = tl.load(in_ptr2 + in_idx2)
     out0_idx = in_idx0[:, None] * RS + in_idx1[None, :]
     tl.store(out_ptr0 + out0_idx, tmp2)
-    
+
 def triton_ldst_indirect_07_func(xr, xc, x2, xs, rs):
     nr = x2.size()[0]
     nc = xc.numel()
@@ -113,7 +113,7 @@ def triton_ldst_indirect_07_func(xr, xc, x2, xs, rs):
     triton_ldst_indirect_07_kernel[nr // xs, 1, 1](
         y0, xr, xc, x2, stride_in_r, XS = xs, RS = rs)
     return y0
-    
+
 def torch_ldst_indirect_07_func(xr, xc, x2):
     flatten_idx = (xr[:, None] * x2.stride()[0] + xc[None, :]).flatten()
     extracted = x2.flatten()[flatten_idx].reshape([xr.numel(), xc.numel()])

@@ -86,7 +86,7 @@ pip install triton-ascend
 | 2 |       `A2`        | Atlas A2 训练系列产品 |            Atlas800T A2             |
 
 ```bash
-git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend
+git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
 docker build \
 --build-arg CANN_BASE_IMAGE=quay.io/ascend/cann:8.5.0-a3-ubuntu22.04-py3.10 \
 -t triton-ascend-image:latest -f ./docker/Dockerfile .
@@ -129,7 +129,7 @@ docker exec -u root -it triton-ascend_container /bin/bash
 # 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
 # 拉取triton-ascend源码仓及用例（可选，非源码编译安装运行示例时需拉源码仓）
-git clone https://gitcode.com/Ascend/triton-ascend.git
+git clone https://github.com/triton-lang/triton-ascend.git
 # 运行tutorials示例：
 python3 ./triton-ascend/third_party/ascend/tutorials/01-vector-add.py
 ```

@@ -92,14 +92,14 @@ private:
                          PatternRewriter &rewriter) const;
   void bubbleUpOperation(ExtractOpTy op, triton::MakeRangeOp parentOp,
                          Location loc, PatternRewriter &rewriter) const;
-  void bubbleUpOperation(ExtractOpTy op, triton::AddPtrOp parentOp, Location loc,
-                         PatternRewriter &rewriter) const;
+  void bubbleUpOperation(ExtractOpTy op, triton::AddPtrOp parentOp,
+                         Location loc, PatternRewriter &rewriter) const;
   void bubbleUpOperation(ExtractOpTy op, math::FloorOp parentOp, Location loc,
                          PatternRewriter &rewriter) const;
   void bubbleUpOperation(ExtractOpTy op, math::CeilOp parentOp, Location loc,
                          PatternRewriter &rewriter) const;
-  void bubbleUpOperation(ExtractOpTy op, tensor::ExtractSliceOp parentOp, Location loc,
-                         PatternRewriter &rewriter) const;
+  void bubbleUpOperation(ExtractOpTy op, tensor::ExtractSliceOp parentOp,
+                         Location loc, PatternRewriter &rewriter) const;
 
   bool enableAggressiveMode;
 };

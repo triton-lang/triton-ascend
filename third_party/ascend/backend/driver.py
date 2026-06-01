@@ -555,6 +555,27 @@ static inline DevicePtrInfo getPointer(PyObject *obj, int idx) {
     ptr_info.dev_ptr = reinterpret_cast<void *>(PyLong_AsUnsignedLongLong(ret));
     if(!ptr_info.dev_ptr)
       return ptr_info;
+        aclrtPtrAttributes attributes;
+        aclError status = aclrtPointerGetAttributes(ptr_info.dev_ptr, &attributes);
+
+        if (status == ACL_SUCCESS) {
+          if (attributes.location.type != ACL_MEM_LOCATION_TYPE_DEVICE && attributes.location.type != 4) {
+            Py_DECREF(ret);
+            PyErr_Format(PyExc_ValueError,
+                         "Pointer argument (at %d) cannot be accessed from Triton (cpu tensor?)", idx);
+            ptr_info.valid = false;
+            return ptr_info;
+          }
+        } else {
+          Py_DECREF(ret);
+          PyErr_Format(PyExc_RuntimeError,
+                       "Failed to query pointer attributes at argument %d. "
+                       "Error code: %d. This may indicate invalid memory address "
+                       "or NPU device error.",
+                       idx, status);
+          ptr_info.valid = false;
+          return ptr_info;
+        }
     Py_DECREF(ret);
     return ptr_info;
   }
@@ -718,6 +739,18 @@ extern "C" {
     rtArgsEx_t argsInfo = {{}};
     argsInfo.args = static_cast<void*>(launch_args.data());
     argsInfo.argsSize = launch_args.size();
+    rtTaskCfgInfo_t cfgInfo = {{}};
+    cfgInfo.localMemorySize = {metadata.shared_mem_dynamic_size};
+    ret = rtKernelLaunchWithFlagV2(func, blockNum, &argsInfo, NULL, stream, 0, &cfgInfo);
+"""
+    cpp_kernel_launch_local = f"""
+    ret = rtKernelLaunch(func, blockNum, static_cast<void*>(&args), sizeof(args), NULL, stream);
+"""
+    if compile_on_910_95 and enable_simt:
+        cpp_kernel_launch_local = f"""
+    rtArgsEx_t argsInfo = {{}};
+    argsInfo.args = static_cast<void*>(&args);
+    argsInfo.argsSize = sizeof(args);
     rtTaskCfgInfo_t cfgInfo = {{}};
     cfgInfo.localMemorySize = {metadata.shared_mem_dynamic_size};
     ret = rtKernelLaunchWithFlagV2(func, blockNum, &argsInfo, NULL, stream, 0, &cfgInfo);
@@ -892,21 +925,87 @@ void triton_launch_kernel(
 }} // extern "C"
 
 static void _launch(const char* kernelName, const void* func, rtStream_t stream, int gridX, int gridY, int gridZ, std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{', ' + arg_decls if len(signature) > 0 else ''}) {{
-  std::vector<int64_t> flat_tensor_shapes;
-  std::vector<int> shape_dims;
-  for (const auto &tensor_shape : tensorShapes) {{
-    shape_dims.push_back(tensor_shape.size());
-    flat_tensor_shapes.insert(flat_tensor_shapes.end(), tensor_shape.begin(), tensor_shape.end());
+  // Keep Python launcher on the stable local packing path.
+  std::string name = "";
+  name.append(kernelName);
+  void *workspace_addr_ptr = NULL;
+  void *workspace_handle = NULL;
+  uint32_t blockNum4Workspace = gridX * gridY * gridZ;
+  {get_backend_func("pre_launch", True)}
+  {f'''
+  uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
+  {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
+  std::shared_ptr<void> workspace_handle_guard(workspace_handle, release_npu_tensor_handle);
+  if (!workspace_addr_ptr) {{
+    {workspace_fail_code}
   }}
-  {'const void* kernel_args[] = {' + launch_arg_ptrs + '};' if launch_arg_count > 0 else 'const void* const* kernel_args = nullptr;'}
-  {'const size_t arg_sizes[] = {' + launch_arg_sizes + '};' if launch_arg_count > 0 else 'const size_t* arg_sizes = nullptr;'}
-  triton_launch_kernel(
-      kernelName, func, stream, gridX, gridY, gridZ,
-      flat_tensor_shapes.empty() ? nullptr : flat_tensor_shapes.data(),
-      shape_dims.empty() ? nullptr : shape_dims.data(),
-      static_cast<int>(tensorShapes.size()),
-      tensorKinds.empty() ? nullptr : tensorKinds.data(),
-      kernel_args, arg_sizes, {launch_arg_count});
+  ''' if workspace_size > 0 else ''}
+  {'std::function<rtError_t()> launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
+    {f'(void)workspace_handle_guard;' if workspace_size > 0 else ''}
+    {get_backend_func("pre_launch", False)}
+    uint32_t blockNum = gridX * gridY * gridZ;
+
+    #ifdef ENABLE_GRID_WARN_PRINT
+      static bool warned = false;
+      if (!warned && blockNum > (uint32_t){num_physical_blocks}) {{
+        printf("WARNING: Grid %u > physical limit {num_physical_blocks}, performance maybe reduced.\\n",blockNum);
+        warned = true;
+    }}
+    #endif
+    {'blockNum = std::min(blockNum, (uint32_t)' + str(num_physical_blocks) + ');' if enable_auto_map_parallel_blocks else ''}
+    uint32_t mixBlockNumRation = {mix_block_dim_ratio};
+    uint32_t nodeBasicBlockDim = (mixBlockNumRation << 16) + blockNum;
+
+    {'cce::internal::DebugTunnelData *DTData = cce::internal::DebugTunnel::Open(blockNum);' if enable_device_print else ''}
+    rtError_t ret = RT_ERROR_NONE;
+    {'void *ffts_addr = NULL; uint32_t ffts_len; ret = rtGetC2cCtrlAddr((uint64_t*)&ffts_addr, &ffts_len);' if target_support_ffts else ''}
+    {'if (ret != RT_ERROR_NONE) return ret;' if (target_support_ffts and enable_taskqueue) else 'if (ret != RT_ERROR_NONE) return;' if (target_support_ffts and (not enable_taskqueue)) else ''}
+    void *syncBlockLock_ptr = NULL;
+    void *syncBlockLock_handle = NULL;
+    uint16_t ModuleId = 0;
+    {f'''
+    uint64_t syncBlockLockSize = {lock_num} * sizeof(int64_t);
+    {get_backend_func("allocate_sync_block_lock", "syncBlockLockSize", "stream")}
+    std::shared_ptr<void> syncBlockLock_handle_guard(syncBlockLock_handle, release_npu_tensor_handle);
+    if (!syncBlockLock_ptr) {{
+      {alloc_success_code if enable_taskqueue else sync_lock_fail_code}
+    }}
+    std::vector<int64_t> lockInitData({lock_num}, {lock_init_value});
+    ret = rtMemcpy(
+        syncBlockLock_ptr, syncBlockLockSize,
+        reinterpret_cast<void *>(lockInitData.data()), syncBlockLockSize,
+        RT_MEMCPY_HOST_TO_DEVICE
+    );
+    if (ret != RT_ERROR_NONE) {{
+      return {'ret' if enable_taskqueue else ''};
+    }}
+    ''' if lock_num > 0 else ''}
+    {'if (ret != RT_ERROR_NONE) return ret;' if (workspace_size > 0 and enable_taskqueue) else 'if (ret != RT_ERROR_NONE) return;' if (workspace_size > 0 and not enable_taskqueue) else ''}
+    struct __attribute__((packed)) {{
+      {'void* ffts_addr __attribute__((aligned(8)));' if target_support_ffts else ''}
+      {'void* syncBlockLock __attribute__((aligned(8)));' if not metadata.force_simt_only else ''}
+      {'void* workspace_addr __attribute__((aligned(8)));' if not metadata.force_simt_only else ''}
+      {' '.join(f'{_ty_to_cpp(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in signature.items() if i not in constants)}
+      {' '.join(f'{_ty_to_cpp(ty)} grid{mark} __attribute__((aligned(4)));' for mark, ty in grid_info.items())}
+      {'void* DTData __attribute__((aligned(8)));' if enable_device_print else ''}
+    }} args = {{
+      {'static_cast<void*>(ffts_addr),' if target_support_ffts else ''}
+      {('static_cast<void*>(syncBlockLock_ptr),' if lock_num > 0 else 'nullptr,') if not metadata.force_simt_only else ''}
+      {('static_cast<void*>(workspace_addr_ptr),' if workspace_size > 0 else 'nullptr,') if not metadata.force_simt_only else ''}
+      {(lambda _rt: (', '.join(_rt) + ',') if _rt else '')(
+        [f'static_cast<{_ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if i not in constants]
+      )}
+      {', '.join(f'static_cast<{_ty_to_cpp(ty)}>(grid{mark})' for mark, ty in grid_info.items())}
+      {', static_cast<void*>(DTData)' if enable_device_print else ''}
+    }};
+    {cpp_msprof_call_before_launch}
+    {cpp_kernel_launch_local}
+    {'void *&stream_ref = const_cast<void*&>(stream);' if enable_device_print else ''}
+    {'cce::internal::DebugTunnel::Close(DTData, stream_ref);' if enable_device_print else ''}
+    {cpp_msprof_call_after_launch}
+    {'return ret;' if enable_taskqueue else 'ret = rtStreamSynchronize(stream);'}
+   }};
+   {f'''{get_backend_func("async_launch", "launch_call") if enable_taskqueue else ''}'''}
   return;
 }}
 

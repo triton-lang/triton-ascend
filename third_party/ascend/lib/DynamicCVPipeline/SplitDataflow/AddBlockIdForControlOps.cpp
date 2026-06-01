@@ -45,8 +45,8 @@ void AddBlockIdForControlOpsPass::runOnOperation()
 
   // Step 2: add block_id for control flow ops
   module.walk([&](Operation *op) {
-    // skip op with block_id
-    if (op->getAttrOfType<IntegerAttr>("ssbuffer.block_id")) {
+    // // skip op with block_id
+    if (!isa<scf::ForOp>(op) && op->getAttrOfType<IntegerAttr>("ssbuffer.block_id")) {
       return;
     }
 

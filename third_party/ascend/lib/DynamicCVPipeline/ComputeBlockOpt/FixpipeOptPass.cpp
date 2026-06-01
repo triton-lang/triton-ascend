@@ -28,6 +28,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -67,6 +68,7 @@ class FixpipeOptPass : public PassWrapper<FixpipeOptPass, OperationPass<ModuleOp
 
   private:
     bool matchFixpipePattern(linalg::MatmulOp matmulOp, SmallVector<Operation *> &matchedOps);
+    bool matchAfterForFixpipePattern(scf::ForOp forOp, SmallVector<Operation *> &matchedOps, CVPipeline::ComputeBlockIdManager &bm);
     bool isFixpipeCastPattern(Operation *op, SmallVector<Operation *> &matchedOps);
     bool isFixpipeMulfPattern(Operation *op, SmallVector<Operation *> &matchedOps);
     bool isStoreToGM(Operation *materializeOp, SmallVector<Operation *> &matchedOps);
@@ -75,9 +77,21 @@ class FixpipeOptPass : public PassWrapper<FixpipeOptPass, OperationPass<ModuleOp
     bool isSubviewFromGlobalMemory(memref::SubViewOp subviewOp, SmallVector<Operation *> &matchedOps);
     bool isValidTrunc(Operation *op);
     bool isValidMul(Operation *op, Value matmulValue, SmallVector<Operation *> &matchedOps);
+    bool hasCubeCoreType(scf::ForOp forOp);
+    bool isCubeResult(scf::ForOp forOp, Value result);
 };
 
 namespace {
+static std::vector<std::string> splitStringByComma(llvm::StringRef str) {
+    std::vector<std::string> result;
+    llvm::SmallVector<llvm::StringRef, 8> parts;
+    str.split(parts, ',');
+    for (auto part : parts) {
+        result.push_back(part.trim().str());
+    }
+    return result;
+}
+
 struct DependencyCycleDetector {
     llvm::DenseSet<mlir::Operation *> &opsInNewBlock;
     llvm::DenseSet<mlir::Operation *> visited;
@@ -466,6 +480,63 @@ bool FixpipeOptPass::matchFixpipePattern(linalg::MatmulOp matmulOp, SmallVector<
     return false;
 }
 
+bool FixpipeOptPass::matchAfterForFixpipePattern(scf::ForOp forOp, SmallVector<Operation *> &matchedOps, CVPipeline::ComputeBlockIdManager &bm)
+{
+    LOG_DEBUG("Check for op: " << *forOp);
+    matchedOps.push_back(forOp);
+    auto ret = false;
+    for (auto result : forOp.getResults()) {
+        if (!isCubeResult(forOp, result)) {
+            continue;
+        }
+        if (!result.hasOneUse()) {
+            continue;
+        }
+        auto matmulUser = *result.getUsers().begin();
+        if (isValidTrunc(matmulUser)) {
+            if (isFixpipeCastPattern(matmulUser, matchedOps)) {
+                ret = true;
+                // add subview's scalar into matchedOps for later use in pattern applying.
+                std::queue<Value> q;
+                DenseSet<Value> visited;
+                for (auto op: matchedOps) {
+                    if( auto viewLikeOp = dyn_cast<ViewLikeOpInterface>(op)) {
+                        for (auto operand : viewLikeOp->getOperands()) {
+                            if (isScalarLike(operand)) {
+                                q.push(operand);
+                                visited.insert(operand);
+                            }
+                        }
+                    }
+                }
+                while(!q.empty()) {
+                    auto val = q.front();
+                    q.pop();
+                    auto defOp = val.getDefiningOp();
+                    if (defOp) {
+
+                        if(defOp->getBlock() == forOp->getBlock() && bm.getBlockIdByOp(defOp) == bm.getBlockIdByOp(matmulUser)) {
+                            matchedOps.push_back(defOp);
+                        }
+                        for (auto operand : defOp->getOperands()) {
+                            if (isScalarLike(operand) && !visited.contains(operand)) {
+                                q.push(operand);
+                                visited.insert(operand);
+                            }
+                        }
+                    }
+                }
+                return true;
+            }
+        } else {
+            LOG_DEBUG("Cannot find valid forop's consumer op (trunc), NOT match.");
+            continue;
+        }
+    }
+    return ret;
+
+}
+
 bool FixpipeOptPass::applyFixpipeOpt(SmallVector<Operation *> &matchedOps,
                                      const CVPipeline::MemoryDependenceGraph &memGraph,
                                      CVPipeline::ComputeBlockIdManager &bm)
@@ -481,12 +552,49 @@ bool FixpipeOptPass::applyFixpipeOpt(SmallVector<Operation *> &matchedOps,
         return false;
     }
     for (Operation *op : matchedOps) {
+        if (isa<scf::ForOp>(matmulOp) && op->isBeforeInBlock(matmulOp)) {
+            continue;
+        }
         bm.updateBlockId(op, targetBlockId);
     }
     for (Operation *op : matchedOps) {
         op->setAttr(CVPipeline::kCoreType, StringAttr::get(op->getContext(), "CUBE"));
     }
     return true;
+}
+
+bool FixpipeOptPass::hasCubeCoreType(scf::ForOp forOp)
+{
+    auto coreTypeAttr = forOp->getAttrOfType<StringAttr>(CVPipeline::kCoreType);
+    if (!coreTypeAttr) {
+        return false;
+    }
+    auto coreTypes = splitStringByComma(coreTypeAttr.getValue());
+    for (const auto &coreType : coreTypes) {
+        if (coreType == "CUBE") {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool FixpipeOptPass::isCubeResult(scf::ForOp forOp, Value result)
+{
+    auto coreTypeAttr = forOp->getAttrOfType<StringAttr>(CVPipeline::kCoreType);
+    if (!coreTypeAttr) {
+        return false;
+    }
+    auto coreTypes = splitStringByComma(coreTypeAttr.getValue());
+    auto results = forOp.getResults();
+    for (size_t i = 0; i < results.size(); ++i) {
+        if (results[i] == result) {
+            if (i < coreTypes.size() && coreTypes[i] == "CUBE") {
+                return true;
+            }
+            return false;
+        }
+    }
+    return false;
 }
 
 void FixpipeOptPass::getDependentDialects(DialectRegistry &registry) const
@@ -504,6 +612,7 @@ void FixpipeOptPass::runOnOperation()
     LOG_DEBUG(module);
 
     SmallVector<SmallVector<Operation *>> allMatchedPatterns;
+    auto bm = CVPipeline::ComputeBlockIdManager(module);
 
     module.walk([&](linalg::MatmulOp matmulOp) {
         SmallVector<Operation *> matchedOps;
@@ -511,9 +620,24 @@ void FixpipeOptPass::runOnOperation()
             allMatchedPatterns.push_back(matchedOps);
         }
     });
+
+    module.walk([&](scf::ForOp forOp) {
+        if (hasCubeCoreType(forOp)) {
+            if(bm.markOpBlockId(forOp).failed()) {
+                LOG_DEBUG("ForOp has been marked with block id, skip. forOp=" << *forOp);
+                return;
+            }
+            SmallVector<Operation *> matchedOps;
+            if (matchAfterForFixpipePattern(forOp, matchedOps, bm)) {
+                allMatchedPatterns.push_back(matchedOps);
+            }
+        }
+    });
+
+    
+
     LOG_DEBUG("== Found " << allMatchedPatterns.size() << " fixpipe patterns ==\n");
 
-    auto bm = CVPipeline::ComputeBlockIdManager(module);
     for (auto &matchedOps : allMatchedPatterns) {
         if (!applyFixpipeOpt(matchedOps, memDepGraph, bm)) {
             for (Operation *op : matchedOps) {
@@ -522,6 +646,20 @@ void FixpipeOptPass::runOnOperation()
             LOG_DEBUG("Cannot set one Block Id, may be because cycle");
         }
     }
+
+    // aaaa
+    module.walk([&](scf::ForOp forOp) {
+        if (hasCubeCoreType(forOp)) {
+            // delete forOp's block_id attr
+            // forOp->removeAttr(CVPipeline::kBlockId);
+            // change forOp's core_type attr to it's yieldOp's core_type attr
+            auto yieldOp = forOp.getBody()->getTerminator();
+            auto yieldCoreTypeAttr = yieldOp->getAttrOfType<StringAttr>(CVPipeline::kCoreType);
+            if (yieldCoreTypeAttr) {
+                forOp->setAttr(CVPipeline::kCoreType, yieldCoreTypeAttr);
+            }
+        }
+    });
 
     LOG_DEBUG("== FixpipeOpt Pass Complete ==\n");
 }

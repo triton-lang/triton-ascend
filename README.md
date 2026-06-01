@@ -108,4 +108,3 @@ The code and documents of this project are released under the [MIT License](./LI
 
 ## Community and Contribution
 You are welcome to participate in the development and code contribution of Triton-Ascend. For details, see [Contribution Guide](./CONTRIBUTING.zh.md).
-

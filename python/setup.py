@@ -21,6 +21,7 @@ from typing import List, NamedTuple, Optional
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
 from setuptools.command.build_py import build_py
+
 from dataclasses import dataclass
 
 from distutils.command.install import install

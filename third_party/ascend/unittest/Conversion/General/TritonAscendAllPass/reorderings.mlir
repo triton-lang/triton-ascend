@@ -46,3 +46,8 @@ module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
 
 // CHECK-LABEL: func.func  @vector_kernel(
 // CHECK: %[[VAL_0:.*]] = tensor.empty() : tensor<1xf32>
+// CHECK-NEXT: %1 = linalg.fill ins(%cst : f32) outs(%0 : tensor<1xf32>) -> tensor<1xf32>
+// CHECK-NEXT: %c0 = arith.constant 0 : index
+// CHECK-NEXT: %c16_i32 = arith.constant 16 : i32
+// CHECK-NEXT: call @triton_print_0(%arg2, %c16_i32) : (f32, i32) -> ()
+// CHECK-NEXT:  %2 = tensor.empty() : tensor<1xf32>

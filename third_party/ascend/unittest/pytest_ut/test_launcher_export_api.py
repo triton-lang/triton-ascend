@@ -64,15 +64,17 @@ def test_generate_npu_wrapper_src_exposes_triton_launch_kernel(
     assert 'std::vector<size_t> launch_arg_sizes;' in src
     assert 'std::vector<char> launch_args(total_size, 0);' in src
     assert 'memcpy(launch_args.data() + grid_offset, &gridX, sizeof(int32_t));' in src
+    assert '#ifndef TRITON_NPU_HEADERS' in src
+    assert '#include <Python.h>' in src
+    assert '#include "runtime/runtime/rt.h"' in src
+    assert '#include "precompiled.h"' not in src
 
 
 @patch("importlib.util.module_from_spec")
 @patch("importlib.util.spec_from_file_location")
 @patch.object(driver, "make_npu_launcher_stub", return_value="/tmp/fake_launcher.so")
 @patch.object(driver, "generate_npu_wrapper_src", return_value="// wrapper src")
-@patch.object(driver, "generate_npu_header_src", return_value="// header src")
 def test_npu_launcher_exposes_launcher_so_path(
-    mock_header_src,
     mock_wrapper_src,
     mock_launcher_stub,
     mock_spec_from_file_location,
@@ -94,7 +96,6 @@ def test_npu_launcher_exposes_launcher_so_path(
     assert launcher.so_launcher_path == "/tmp/fake_launcher.so"
     assert mock_launcher_stub.call_count == 1
     assert launcher.get_launcher_so_path() == "/tmp/fake_launcher.so"
-    assert mock_header_src.call_count == 1
     assert mock_wrapper_src.call_count == 1
     assert mock_launcher_stub.call_count == 1
     mock_wrapper_src.assert_called_with(
@@ -102,4 +103,4 @@ def test_npu_launcher_exposes_launcher_so_path(
         {0: "*fp32", 1: "i32"},
         metadata,
     )
-    mock_launcher_stub.assert_called_with("// header src", "// wrapper src", False)
+    mock_launcher_stub.assert_called_with("// wrapper src", False)

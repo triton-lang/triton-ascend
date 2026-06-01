@@ -41,6 +41,7 @@ using namespace triton;
 namespace {
 
 static constexpr llvm::StringLiteral interceptrFunc[] {
+  "chunk_transform_qk_fwd_kernel",
   "_attn_fwd",
   "_attn_bwd",
   "_kernel_matmul_fp8_row_non_persistent",

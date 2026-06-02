@@ -60,6 +60,7 @@ static constexpr llvm::StringLiteral interceptrFunc[] {
   "chunk_mesa_net_fwd_kernel_h",
   "parallel_simple_gla_bwd_kernel",
   "chunkwise_fwd_kernel",
+  "_parallel_rebased_bwd_dq",
 };
 
 static LogicalResult verifyFuncNames(ModuleOp module)

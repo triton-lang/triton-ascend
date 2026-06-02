@@ -3,16 +3,60 @@
 // RUN: | FileCheck %s
 
 // -----
-// V1 hit (AddPtr, 1D, static stride > 1):
-// tt.addptr(splat ptr, arange*4) -> should become tt.indirect_load -> call @triton_indirect_load
+// V1 rank-1 miss (AddPtr, static power-of-two stride 4):
+// tt.addptr(splat ptr, arange*4) -> should stay on the reinterpret_cast/memref.copy path.
 // CHECK-LABEL: func.func @addptr_stride4_1d
-// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<256xi64>) -> tensor<256xf32>
+// CHECK-NOT: call @triton_indirect_load
+// CHECK: memref.copy
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   tt.func public @addptr_stride4_1d(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
                                     %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
     %c4 = arith.constant dense<4> : tensor<256xi32>
     %0 = tt.make_range {end = 256 : i32, start = 0 : i32} : tensor<256xi32>
     %1 = arith.muli %0, %c4 : tensor<256xi32>
+    %2 = tt.splat %arg0 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>>
+    %3 = tt.addptr %2, %1 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
+    %4 = tt.load %3 : tensor<256x!tt.ptr<f32>>
+    %5 = tt.splat %arg1 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>>
+    %6 = tt.addptr %5, %0 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
+    tt.store %6, %4 : tensor<256x!tt.ptr<f32>>
+    tt.return
+  }
+}
+
+// -----
+// V1 rank-1 hit (AddPtr, static non-power-of-two stride 3):
+// tt.addptr(splat ptr, arange*3) -> should become tt.indirect_load.
+// CHECK-LABEL: func.func @addptr_stride3_1d
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<256xi64>) -> tensor<256xf32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @addptr_stride3_1d(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                    %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %c3 = arith.constant dense<3> : tensor<256xi32>
+    %0 = tt.make_range {end = 256 : i32, start = 0 : i32} : tensor<256xi32>
+    %1 = arith.muli %0, %c3 : tensor<256xi32>
+    %2 = tt.splat %arg0 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>>
+    %3 = tt.addptr %2, %1 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
+    %4 = tt.load %3 : tensor<256x!tt.ptr<f32>>
+    %5 = tt.splat %arg1 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>>
+    %6 = tt.addptr %5, %0 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
+    tt.store %6, %4 : tensor<256x!tt.ptr<f32>>
+    tt.return
+  }
+}
+
+// -----
+// V1 rank-1 hit (AddPtr, dynamic stride):
+// The stride cannot be proven power-of-two, so route to tt.indirect_load.
+// CHECK-LABEL: func.func @addptr_dynamic_stride_1d
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<256xi64>) -> tensor<256xf32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @addptr_dynamic_stride_1d(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                           %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                           %stride: i32) {
+    %0 = tt.make_range {end = 256 : i32, start = 0 : i32} : tensor<256xi32>
+    %stride_splat = tt.splat %stride : i32 -> tensor<256xi32>
+    %1 = arith.muli %0, %stride_splat : tensor<256xi32>
     %2 = tt.splat %arg0 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>>
     %3 = tt.addptr %2, %1 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
     %4 = tt.load %3 : tensor<256x!tt.ptr<f32>>
@@ -44,18 +88,18 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 }
 
 // -----
-// V1 hit (make_tensor_ptr, non-permuted, low-dim stride 4):
-// strides=[256, 4], order=[1,0] -> last-dim stride 4 > 1, non-permuted -> V1 rewrites
-// CHECK-LABEL: func.func @mtpt_low_stride4
+// V1 hit (make_tensor_ptr, non-permuted, low-dim non-power-of-two stride 5):
+// strides=[256, 5], order=[1,0] -> last-dim stride is not power-of-two, non-permuted -> V1 rewrites
+// CHECK-LABEL: func.func @mtpt_low_stride5
 // CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<4x8xi64>) -> tensor<4x8xf32>
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
-  tt.func public @mtpt_low_stride4(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+  tt.func public @mtpt_low_stride5(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
                                    %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
     %c0 = arith.constant 0 : i32
     %size_m = arith.constant 64 : i64
     %size_n = arith.constant 256 : i64
     %stride_m = arith.constant 256 : i64
-    %stride_n = arith.constant 4 : i64
+    %stride_n = arith.constant 5 : i64
     %0 = tt.make_tensor_ptr %arg0, [%size_m, %size_n], [%stride_m, %stride_n], [%c0, %c0]
          {order = array<i32: 1, 0>} : <tensor<4x8xf32>>
     %1 = tt.load %0 : !tt.ptr<tensor<4x8xf32>>
@@ -93,6 +137,70 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 }
 
 // -----
+// V1 rank-1 miss (make_tensor_ptr, static power-of-two stride 8):
+// CHECK-LABEL: func.func @mtpt_1d_stride8_pow2
+// CHECK-NOT: call @triton_indirect_load
+// CHECK: memref.copy
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @mtpt_1d_stride8_pow2(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                       %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %c0 = arith.constant 0 : i32
+    %t = arith.constant 2048 : i64
+    %stride = arith.constant 8 : i64
+    %0 = tt.make_tensor_ptr %arg0, [%t], [%stride], [%c0]
+         {order = array<i32: 0>} : <tensor<128xf32>>
+    %1 = tt.load %0 : !tt.ptr<tensor<128xf32>>
+    %sz1 = arith.constant 1 : i64
+    %2 = tt.make_tensor_ptr %arg1, [%t], [%sz1], [%c0]
+         {order = array<i32: 0>} : <tensor<128xf32>>
+    tt.store %2, %1 : !tt.ptr<tensor<128xf32>>
+    tt.return
+  }
+}
+
+// -----
+// V1 rank-1 hit (make_tensor_ptr, static non-power-of-two stride 7):
+// CHECK-LABEL: func.func @mtpt_1d_stride7
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<128xi64>) -> tensor<128xf32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @mtpt_1d_stride7(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                  %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %c0 = arith.constant 0 : i32
+    %t = arith.constant 2048 : i64
+    %stride = arith.constant 7 : i64
+    %0 = tt.make_tensor_ptr %arg0, [%t], [%stride], [%c0]
+         {order = array<i32: 0>} : <tensor<128xf32>>
+    %1 = tt.load %0 : !tt.ptr<tensor<128xf32>>
+    %sz1 = arith.constant 1 : i64
+    %2 = tt.make_tensor_ptr %arg1, [%t], [%sz1], [%c0]
+         {order = array<i32: 0>} : <tensor<128xf32>>
+    tt.store %2, %1 : !tt.ptr<tensor<128xf32>>
+    tt.return
+  }
+}
+
+// -----
+// V1 rank-1 hit (make_tensor_ptr, dynamic stride):
+// CHECK-LABEL: func.func @mtpt_1d_dynamic_stride
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<128xi64>) -> tensor<128xf32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @mtpt_1d_dynamic_stride(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                         %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                         %stride: i64) {
+    %c0 = arith.constant 0 : i32
+    %t = arith.constant 2048 : i64
+    %0 = tt.make_tensor_ptr %arg0, [%t], [%stride], [%c0]
+         {order = array<i32: 0>} : <tensor<128xf32>>
+    %1 = tt.load %0 : !tt.ptr<tensor<128xf32>>
+    %sz1 = arith.constant 1 : i64
+    %2 = tt.make_tensor_ptr %arg1, [%t], [%sz1], [%c0]
+         {order = array<i32: 0>} : <tensor<128xf32>>
+    tt.store %2, %1 : !tt.ptr<tensor<128xf32>>
+    tt.return
+  }
+}
+
+// -----
 // V1 miss (make_tensor_ptr, permuted - ImplicitPermute should handle, V1 must stay out):
 // strides=[1, 8], order=[0,1] -> permuted; ImplicitPermute rewrites with tt.trans,
 // V1 sees ImplicitPermuteHandledTAG and bails.
@@ -119,16 +227,16 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 }
 
 // -----
-// V2 hit (AddPtr Store, 1D, static stride > 1):
-// tt.store(tt.addptr(splat ptr, arange*4), value) -> tt.indirect_store -> call @triton_indirect_store
-// CHECK-LABEL: func.func @addptr_store_stride4_1d
+// V2 hit (AddPtr Store, 1D, static non-power-of-two stride 3):
+// tt.store(tt.addptr(splat ptr, arange*3), value) -> tt.indirect_store -> call @triton_indirect_store
+// CHECK-LABEL: func.func @addptr_store_stride3_1d
 // CHECK: call @triton_indirect_store(%{{.*}}, %{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<256xi64>, tensor<256xf32>) -> ()
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
-  tt.func public @addptr_store_stride4_1d(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+  tt.func public @addptr_store_stride3_1d(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
                                           %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
-    %c4 = arith.constant dense<4> : tensor<256xi32>
+    %c3 = arith.constant dense<3> : tensor<256xi32>
     %0 = tt.make_range {end = 256 : i32, start = 0 : i32} : tensor<256xi32>
-    %1 = arith.muli %0, %c4 : tensor<256xi32>
+    %1 = arith.muli %0, %c3 : tensor<256xi32>
     %2 = tt.splat %arg0 : !tt.ptr<f32> -> tensor<256x!tt.ptr<f32>>
     %3 = tt.addptr %2, %0 : tensor<256x!tt.ptr<f32>>, tensor<256xi32>
     %4 = tt.load %3 : tensor<256x!tt.ptr<f32>>
@@ -158,17 +266,17 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 }
 
 // -----
-// V2 hit (make_tensor_ptr Store, non-permuted, low-dim stride 4):
-// CHECK-LABEL: func.func @mtpt_store_low_stride4
+// V2 hit (make_tensor_ptr Store, non-permuted, low-dim non-power-of-two stride 5):
+// CHECK-LABEL: func.func @mtpt_store_low_stride5
 // CHECK: call @triton_indirect_store(%{{.*}}, %{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<4x8xi64>, tensor<4x8xf32>) -> ()
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
-  tt.func public @mtpt_store_low_stride4(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+  tt.func public @mtpt_store_low_stride5(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
                                          %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
     %c0 = arith.constant 0 : i32
     %size_m = arith.constant 64 : i64
     %size_n = arith.constant 256 : i64
     %stride_m = arith.constant 256 : i64
-    %stride_n = arith.constant 4 : i64
+    %stride_n = arith.constant 5 : i64
     %sz1 = arith.constant 1 : i64
     %sz_in_m = arith.constant 4 : i64
     %sz_in_n = arith.constant 8 : i64
@@ -205,7 +313,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 }
 
 // -----
-// V1.5 hit (make_tensor_ptr Load + boundary_check + PAD_ZERO, low-dim stride 4):
+// V1.5 hit (make_tensor_ptr Load + boundary_check + PAD_ZERO, low-dim non-power-of-two stride 5):
 // Block 8x8 covers a 7x5 parent => some lanes OOB. Expected: tt.indirect_load
 // with both mask (tensor<8x8xi1>) and other (tensor<8x8xf32>) zero splat.
 // CHECK-LABEL: func.func @mtpt_load_boundary_pad_zero
@@ -217,7 +325,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     %parent_m = arith.constant 7 : i64
     %parent_n = arith.constant 5 : i64
     %stride_m = arith.constant 20 : i64
-    %stride_n = arith.constant 4 : i64
+    %stride_n = arith.constant 5 : i64
     %0 = tt.make_tensor_ptr %arg0, [%parent_m, %parent_n], [%stride_m, %stride_n], [%c0, %c0]
          {order = array<i32: 1, 0>} : <tensor<8x8xf32>>
     %1 = tt.load %0 {boundaryCheck = array<i32: 0, 1>, padding = 1 : i32}
@@ -233,7 +341,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 }
 
 // -----
-// V1.5 hit (make_tensor_ptr Load + boundary_check + PAD_NAN, low-dim stride 4):
+// V1.5 hit (make_tensor_ptr Load + boundary_check + PAD_NAN, low-dim non-power-of-two stride 5):
 // CHECK-LABEL: func.func @mtpt_load_boundary_pad_nan
 // CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<8x8xi64>, tensor<8x8xi1>, tensor<8x8xf32>) -> tensor<8x8xf32>
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
@@ -243,7 +351,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     %parent_m = arith.constant 7 : i64
     %parent_n = arith.constant 5 : i64
     %stride_m = arith.constant 20 : i64
-    %stride_n = arith.constant 4 : i64
+    %stride_n = arith.constant 5 : i64
     %0 = tt.make_tensor_ptr %arg0, [%parent_m, %parent_n], [%stride_m, %stride_n], [%c0, %c0]
          {order = array<i32: 1, 0>} : <tensor<8x8xf32>>
     %1 = tt.load %0 {boundaryCheck = array<i32: 0, 1>, padding = 2 : i32}
@@ -273,17 +381,17 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   tt.func public @mtpt_load_scalar_addptr_base(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
                                                 %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32},
                                                 %i_b: i32, %i_h: i32, %i_t: i32) {
-    // base = arg0 + i_b*T*H + i_h, where T=2048, H=8 statically
+    // base = arg0 + i_b*T*H + i_h, where T=2048, H=7 statically
     %c0 = arith.constant 0 : i32
-    %c8 = arith.constant 8 : i32
+    %c7 = arith.constant 7 : i32
     %c2048 = arith.constant 2048 : i32
     %bos = arith.muli %i_b, %c2048 : i32
-    %bosH = arith.muli %bos, %c8 : i32
+    %bosH = arith.muli %bos, %c7 : i32
     %off1 = arith.addi %bosH, %i_h : i32
     %base = tt.addptr %arg0, %off1 : !tt.ptr<f32>, i32
     %t = arith.constant 2048 : i64
-    %h = arith.constant 8 : i64
-    %off_t = arith.muli %i_t, %c8 : i32
+    %h = arith.constant 7 : i64
+    %off_t = arith.muli %i_t, %c7 : i32
     %0 = tt.make_tensor_ptr %base, [%t], [%h], [%off_t]
          {order = array<i32: 0>} : <tensor<128xf32>>
     %1 = tt.load %0 {boundaryCheck = array<i32: 0>, padding = 1 : i32}
@@ -297,7 +405,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 }
 
 // -----
-// V1.5 hit (make_tensor_ptr Store + boundary_check, low-dim stride 4):
+// V1.5 hit (make_tensor_ptr Store + boundary_check, low-dim non-power-of-two stride 5):
 // Store with mask but no "other" -- 3 operand call: (src, offset, value, mask).
 // CHECK-LABEL: func.func @mtpt_store_boundary
 // CHECK: call @triton_indirect_store(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) : (memref<?xf32>, tensor<8x8xi64>, tensor<8x8xf32>, tensor<8x8xi1>) -> ()
@@ -314,7 +422,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     %parent_m = arith.constant 7 : i64
     %parent_n = arith.constant 5 : i64
     %stride_m = arith.constant 20 : i64
-    %stride_n = arith.constant 4 : i64
+    %stride_n = arith.constant 5 : i64
     %2 = tt.make_tensor_ptr %arg1, [%parent_m, %parent_n], [%stride_m, %stride_n], [%c0, %c0]
          {order = array<i32: 1, 0>} : <tensor<8x8xf32>>
     tt.store %2, %1 {boundaryCheck = array<i32: 0, 1>} : !tt.ptr<tensor<8x8xf32>>

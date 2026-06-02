@@ -67,15 +67,27 @@ static bool isStaticConstAbsGtOne(Value v) {
     return false;
 }
 
+static bool isStaticConst(Value v) {
+    IntegerAttr scalarAttr;
+    if (matchPattern(v, m_Constant(&scalarAttr))) return true;
+    DenseElementsAttr denseAttr;
+    if (matchPattern(v, m_Constant(&denseAttr)) && denseAttr.isSplat() &&
+        denseAttr.getElementType().isInteger())
+        return true;
+    if (auto splatOp = v.getDefiningOp<triton::SplatOp>())
+        return isStaticConst(splatOp.getSrc());
+    return false;
+}
+
 // Lightweight pre-check: walks the offset's defining-op tree (bounded depth,
 // staying within tensor-typed values) looking for any arith.muli whose result
-// is a tensor and one operand is a static constant with |c| > 1. Returns
-// false if no such per-element multiplication exists, in which case the
-// per-element stride must be 1 and we should NOT invoke the heavier
-// PtrAnalysis (which mutates IR via the rewriter; calling it before we
-// commit to rewriting would violate MLIR's pattern contract -- the greedy
-// driver would treat our return-failure() as a real change and loop until
-// max iterations, failing the PassManager).
+// is a tensor and either one operand is a static constant with |c| > 1, or the
+// multiply uses a dynamic scale. Returns false if no such per-element
+// multiplication exists, in which case the per-element stride must be 1 and we
+// should NOT invoke the heavier PtrAnalysis (which mutates IR via the rewriter;
+// calling it before we commit to rewriting would violate MLIR's pattern contract
+// -- the greedy driver would treat our return-failure() as a real change and
+// loop until max iterations, failing the PassManager).
 //
 // Crucially, we do NOT recurse through scalar values: scalar arithmetic
 // (e.g. `xoffset = pid * BLOCK_SIZE`) does not affect per-element stride;
@@ -98,6 +110,8 @@ static bool offsetMayContainStrideGtOne(Value offset, int depthBudget = 16) {
             isStaticConstAbsGtOne(mul.getRhs())) {
             return true;
         }
+        if (!isStaticConst(mul.getLhs()) && !isStaticConst(mul.getRhs()))
+            return true;
         return offsetMayContainStrideGtOne(mul.getLhs(), depthBudget - 1) ||
                offsetMayContainStrideGtOne(mul.getRhs(), depthBudget - 1);
     }
@@ -115,6 +129,7 @@ static bool offsetMayContainStrideGtOne(Value offset, int depthBudget = 16) {
             denseAttr.getSplatValue<llvm::APInt>().getSExtValue() >= 1) {
             return true;
         }
+        if (!isStaticConst(shl.getRhs())) return true;
         return offsetMayContainStrideGtOne(shl.getLhs(), depthBudget - 1);
     }
     for (Value operand : defOp->getOperands()) {

@@ -46,9 +46,9 @@ inline constexpr const char *InspectedByIndirectLoadRewriteTAG =
 
 // V1 SIMT IndirectLoad fast-path rewrite:
 //   Convert tt.load to tt.indirect_load when the load's effective per-axis
-//   strides have a statically-known last-axis stride > 1 with a non-permuted
-//   layout (i.e. ImplicitPermute would not / did not touch it, and it isn't
-//   the stride==2 even-size case handled by DeinterleaveStatusOptimization).
+//   strides have a dynamic or static non-power-of-two last-axis stride with a
+//   non-permuted layout. Static power-of-two strides stay on the legacy
+//   reinterpret_cast/memref.load/copy path.
 //
 //   Runs as a sub-step of TritonToLinalgPass, after processImplicitPermute,
 //   and is gated on `compileOn91095Flag && forceSimtTemplateFlag`.
@@ -63,10 +63,10 @@ public:
                                   PatternRewriter &rewriter) const override;
 };
 
-// V2: mirror of LoadConverter for tt.store -> tt.indirect_store. Same trigger
-// condition (non-permuted + static last-axis stride > 1, non-deinterleave),
-// same source-op restrictions (AddPtr / make_tensor_ptr / one-level advance),
-// same MLIR-pattern-contract handling via the Inspected/Rewritten tags.
+// V2: mirror of LoadConverter for tt.store -> tt.indirect_store. Same stride
+// dispatch policy, same source-op restrictions (AddPtr / make_tensor_ptr /
+// one-level advance), same MLIR-pattern-contract handling via the
+// Inspected/Rewritten tags.
 class StoreConverter : public OpRewritePattern<triton::StoreOp> {
 public:
     explicit StoreConverter(MLIRContext *context)

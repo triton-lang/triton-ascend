@@ -285,6 +285,29 @@ int UpdateConditionInfoPass::buildIdxToVarMap(scf::ForOp forOp,
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
+// Helper function to build buffer dependency mappings
+static int buildBufferDependencyMappings(
+    DenseMap<int, DenseMap<Value, SmallVector<Value>>> &buffers,
+    DenseMap<Operation*, int> &consumerToGroup,
+    DenseMap<Value, SmallVector<int>> &outputToGroups)
+{
+  for (auto &[groupIdx, deps] : buffers) {
+    for (auto &[consumer, producers] : deps) {
+      Operation *defOp = consumer.getDefiningOp();
+      if (!defOp) {
+        LDBG(" consumer has no defining op: " << consumer << "\n");
+        return UPDATE_CONDITION_INFO_FAILED;
+      }
+      consumerToGroup[defOp] = groupIdx;
+
+      for (Value producer : producers) {
+        outputToGroups[producer].push_back(groupIdx);
+      }
+    }
+  }
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
 // getInputOutputValues - Analyze the input/output buffer groups used in a single ifOp
 // This function traverses all operations within ifOp, identifies FixpipeOp, CopyOp and
 // MaterializeInDestinationOp, and extracts cross-core and intra-core buffer group indices
@@ -314,67 +337,59 @@ int UpdateConditionInfoPass::getInputOutputValues(
   DenseSet<int> intraCoreInputSet;
   DenseSet<int> intraCoreOutputSet;
 
-  // Get the crossCoreBufferToGroup: {bufferValue, groupIdx}
-  DenseMap<Value, int> crossCoreBufferToGroup;
-  DenseMap<Value, int> intraCoreInputToGroup;
+  // Build output mappings for cross-core and intra-core
+  // Same producer/output can be used by multiple consumers/inputs, so we need to track all related groups
+  DenseMap<Value, SmallVector<int>> crossCoreOutputToGroups;
   DenseMap<Value, SmallVector<int>> intraCoreOutputToGroups;
 
-  for (auto &entry : crossCoreBuffers) {
-    int groupIdx = entry.first;
-    for (auto &entry2 : entry.second) {
-      for (Value v : entry2.second) {
-        crossCoreBufferToGroup[v] = groupIdx;
-      }
-    }
+  // Add consumer mappings for input dependency identification
+  DenseMap<Operation*, int> crossCoreConsumerToGroup;
+  DenseMap<Operation*, int> intraCoreConsumerToGroup;
+
+  // Build cross-core mappings
+  if (buildBufferDependencyMappings(crossCoreBuffers, crossCoreConsumerToGroup,
+                                     crossCoreOutputToGroups) == UPDATE_CONDITION_INFO_FAILED) {
+    return UPDATE_CONDITION_INFO_FAILED;
   }
 
-  // Get the intraCoreInputToGroup: {bufferValue, groupIdx}
-  for (auto &entry : intraCoreBuffers) {
-    int groupIdx = entry.first;
-    for (auto &entry2 : entry.second) {
-      Value input = entry2.first;
-      SmallVector<Value> outputs = entry2.second;
-      intraCoreInputToGroup[input] = groupIdx;
-      for (Value output : outputs) {
-        intraCoreOutputToGroups[output].push_back(groupIdx);
-      }
-    }
+  // Build intra-core mappings
+  if (buildBufferDependencyMappings(intraCoreBuffers, intraCoreConsumerToGroup,
+                                     intraCoreOutputToGroups) == UPDATE_CONDITION_INFO_FAILED) {
+    return UPDATE_CONDITION_INFO_FAILED;
   }
 
-  // collect input/output groups
+// collect input/output groups
   ifOp.walk([&](Operation *op) {
     if (op == ifOp)
       return WalkResult::advance();
+
+    // Check if this op is a consumer's defining op (for input dependency)
+    if (crossCoreConsumerToGroup.count(op)) {
+      crossCoreInputSet.insert(crossCoreConsumerToGroup[op]);
+    }
+    if (intraCoreConsumerToGroup.count(op)) {
+      intraCoreInputSet.insert(intraCoreConsumerToGroup[op]);
+    }
 
     bool isFixpipeOrCopy = dyn_cast<hivm::FixpipeOp>(op) || dyn_cast<hivm::CopyOp>(op);
     bool isBufferizationWrite = dyn_cast<bufferization::MaterializeInDestinationOp>(op);
     // Op is FixpipeOp/CopyOp/BufferizationWriteOp
     // they have two operand, operand 0(ins) is input, operand 1(outs) is output
     if (isFixpipeOrCopy || isBufferizationWrite) {
-      Value insVal = op->getOperands()[0];
-      if (crossCoreBufferToGroup.count(insVal)) {
-        crossCoreInputSet.insert(crossCoreBufferToGroup[insVal]);
-      } else if (intraCoreInputToGroup.count(insVal)) {
-        intraCoreInputSet.insert(intraCoreInputToGroup[insVal]);
-      }
-
       Value outsVal = op->getOperands()[1];
-      if (crossCoreBufferToGroup.count(outsVal)) {
-        crossCoreOutputSet.insert(crossCoreBufferToGroup[outsVal]);
-      } else if (intraCoreOutputToGroups.count(outsVal)) {
+      // Check if outs is a producer in cross-core dependencies
+      if (crossCoreOutputToGroups.count(outsVal)) {
+        for (int idx : crossCoreOutputToGroups[outsVal]) {
+          crossCoreOutputSet.insert(idx);
+        }
+      }
+      // Check if outs is an output in intra-core dependencies
+      if (intraCoreOutputToGroups.count(outsVal)) {
         for (int idx : intraCoreOutputToGroups[outsVal]) {
           intraCoreOutputSet.insert(idx);
         }
       }
       return WalkResult::advance();
-    } else {
-      // Op is normal, operand is input
-      for (Value operand : op->getOperands()) {
-        if (crossCoreBufferToGroup.count(operand))
-          crossCoreInputSet.insert(crossCoreBufferToGroup[operand]);
-        if (intraCoreInputToGroup.count(operand))
-          intraCoreInputSet.insert(intraCoreInputToGroup[operand]);
-      }
     }
     return WalkResult::advance();
   });
@@ -382,8 +397,13 @@ int UpdateConditionInfoPass::getInputOutputValues(
   // operands in yield op are output
   scf::YieldOp thenYield = ifOp.thenYield();
   for (Value yieldVal : thenYield.getOperands()) {
-    if (crossCoreBufferToGroup.count(yieldVal))
-      crossCoreOutputSet.insert(crossCoreBufferToGroup[yieldVal]);
+    // Check if yield operand is a producer in cross-core dependencies
+    if (crossCoreOutputToGroups.count(yieldVal)) {
+      for (int idx : crossCoreOutputToGroups[yieldVal]) {
+        crossCoreOutputSet.insert(idx);
+      }
+    }
+    // Check if yield operand is an output in intra-core dependencies
     if (intraCoreOutputToGroups.count(yieldVal)) {
       for (int idx : intraCoreOutputToGroups[yieldVal]) {
         intraCoreOutputSet.insert(idx);
@@ -1290,7 +1310,7 @@ void UpdateConditionInfoPass::runOnOperation()
 
   // Step2:Update the conditions of ifOp based on the intraCoreDependentMap and crossCoreDependentMap
   int updateResult = updateIfConds(module, ssbufferPtrs);
-    
+
   if (updateResult != UPDATE_CONDITION_INFO_SUCCESS) {
     LDBG("updateIfConds failed!");
     signalPassFailure();

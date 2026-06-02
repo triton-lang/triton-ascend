@@ -89,7 +89,7 @@ private:
   LogicalResult processDescriptorOperations(ModuleOp moduleOp);
   LogicalResult processPtrBroadcastOperations(ModuleOp moduleOp);
   LogicalResult processImplicitPermuteOperations(ModuleOp moduleOp);
-  LogicalResult processIndirectLoadRewriteOperations(ModuleOp moduleOp);
+  LogicalResult processStridedLoadStoreRewriteOperations(ModuleOp moduleOp);
   LogicalResult processLegalStrideOperations(ModuleOp moduleOp);
 
 public:

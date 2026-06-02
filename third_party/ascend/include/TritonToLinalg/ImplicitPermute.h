@@ -41,7 +41,7 @@ using namespace mlir;
 using namespace triton;
 
 // Tag attached to load/store/atomic ops that this pass rewrote, so downstream
-// sub-steps (e.g. IndirectLoadRewrite) can detect "already handled by
+// sub-steps (e.g. StridedLoadStoreRewrite) can detect "already handled by
 // ImplicitPermute" and avoid double-processing.
 inline constexpr const char *ImplicitPermuteHandledTAG = "ImplicitPermuteHandled";
 

@@ -20,29 +20,29 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ASCEND_INDIRECT_LOAD_REWRITE_H
-#define TRITON_ASCEND_INDIRECT_LOAD_REWRITE_H
+#ifndef TRITON_ASCEND_STRIDED_LOAD_STORE_REWRITE_H
+#define TRITON_ASCEND_STRIDED_LOAD_STORE_REWRITE_H
 
 #include "mlir/IR/PatternMatch.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
-namespace IndirectLoadRewrite {
+namespace StridedLoadStoreRewrite {
 
 using namespace mlir;
 using namespace triton;
 
 // Tag stamped on tt.indirect_load ops that this sub-step emits so the pattern
 // driver does not re-enter on its own output.
-inline constexpr const char *RewrittenByIndirectLoadRewriteTAG =
-    "RewrittenByIndirectLoadRewrite";
+inline constexpr const char *RewrittenByStridedLoadStoreRewriteTAG =
+    "RewrittenByStridedLoadStoreRewrite";
 
 // Tag stamped on tt.load ops that this sub-step has inspected but chose not
 // to rewrite (e.g. last stride == 1, permuted, deinterleave path). Prevents
 // the greedy pattern driver from re-invoking the pattern on the same op,
 // which would re-run PtrAnalysis and accumulate dead helper IR until the
 // driver gives up with PassManager::run failed.
-inline constexpr const char *InspectedByIndirectLoadRewriteTAG =
-    "InspectedByIndirectLoadRewrite";
+inline constexpr const char *InspectedByStridedLoadStoreRewriteTAG =
+    "InspectedByStridedLoadStoreRewrite";
 
 // V1 SIMT IndirectLoad fast-path rewrite:
 //   Convert tt.load to tt.indirect_load when the load's effective per-axis
@@ -78,12 +78,6 @@ public:
                                   PatternRewriter &rewriter) const override;
 };
 
-// Detects the FLA per-head strided base `base + (pid % S)` produced by splitting
-// the H axis. Shared between the IndirectLoad kkt strided-DMA guard and the
-// StridedAxisCoalescing rewrite. Returns the matching AddPtrOp, or a null
-// AddPtrOp if the base is not an ih-split per-head pointer.
-triton::AddPtrOp findIhAddPtr(mlir::Value base, int64_t S);
+}  // namespace StridedLoadStoreRewrite
 
-}  // namespace IndirectLoadRewrite
-
-#endif  // TRITON_ASCEND_INDIRECT_LOAD_REWRITE_H
+#endif  // TRITON_ASCEND_STRIDED_LOAD_STORE_REWRITE_H

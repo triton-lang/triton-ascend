@@ -35,7 +35,8 @@
 #include "ascend/include/TritonToLinalg/HoistBroadcast.h"
 #include "ascend/include/TritonToLinalg/UseAnalysis.h"
 #include "ascend/include/TritonToLinalg/ImplicitPermute.h"
-#include "ascend/include/TritonToLinalg/IndirectLoadRewrite.h"
+#include "ascend/include/TritonToLinalg/StridedLoadStoreRewrite.h"
+#include "ascend/include/TritonToLinalg/StridedAxisCoalescing.h"
 #include "ascend/include/TritonToLinalg/MarkTensorKindPass.h"
 #include "ascend/include/TritonToUnstructure/UnstructureConversionPass.h"
 #include "ascend/include/TritonToStructured/CannonicalizerConverter.h"
@@ -828,27 +829,28 @@ LogicalResult TritonToLinalgPass::processImplicitPermuteOperations(ModuleOp modu
   return runPipeline(pm, getOperation());
 }
 
-LogicalResult TritonToLinalgPass::processIndirectLoadRewriteOperations(ModuleOp moduleOp)
+LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(ModuleOp moduleOp)
 {
-  // Diagnostic kill-switch (set DISABLE_INDIRECT_LOAD_REWRITE=1 to force the
-  // legacy strided memref.copy lowering for performance comparison).
-  if (const char *env = std::getenv("DISABLE_INDIRECT_LOAD_REWRITE");
-      env && *env && *env != '0') {
-    return success();
-  }
-  // V1 gate: only enabled in 950 SIMT mode. On other targets we leave the
-  // load to the legacy strided memref.copy lowering.
+  // The strided-axis rewrites below only apply in 950 SIMT mode. On other
+  // targets we leave strided loads to the legacy strided DMA lowering.
   if (!(compileOn91095Flag && forceSimtTemplateFlag)) {
     return success();
   }
 
+  // StridedAxisCoalescing (default-on): fold the FLA H-axis-split strided
+  // load/store into a 2D contiguous [BT,H] tile (H as a parallel inner lane),
+  // turning the per-element strided access into a contiguous one. Bails per
+  // kernel when the load->store subgraph is not lane-safe (e.g. contains
+  // tt.dot), leaving those loads to the stride dispatch below.
+  StridedAxisCoalescing::rewriteStridedAxisCoalesce(moduleOp);
+
   mlir::RewritePatternSet patterns(&getContext());
-  patterns.add<IndirectLoadRewrite::LoadConverter,
-               IndirectLoadRewrite::StoreConverter>(patterns.getContext());
+  patterns.add<StridedLoadStoreRewrite::LoadConverter,
+               StridedLoadStoreRewrite::StoreConverter>(patterns.getContext());
 
   if (failed(applyPatternsAndFoldGreedily(moduleOp, std::move(patterns)))) {
     LLVM_DEBUG({
-      llvm::dbgs() << "IndirectLoadRewrite: pattern application failed\n";
+      llvm::dbgs() << "StridedLoadStoreRewrite: pattern application failed\n";
     });
     return failure();
   }
@@ -904,7 +906,7 @@ void TritonToLinalgPass::runOnOperation() {
   existDotFlag = existDot;
 
   // NOTE: existSIMTOp is intentionally computed AFTER
-  // processIndirectLoadRewriteOperations below, because that step materializes
+  // processStridedLoadStoreRewriteOperations below, because that step materializes
   // triton::ascend::IndirectLoadOp/IndirectStoreOp (which isSIMTOp() counts).
   // Walking here (before the rewrite) would miss them and mislabel the kernel
   // parallel_mode as "simd" instead of "mix_simd_simt"; then enable_simt would
@@ -928,7 +930,7 @@ void TritonToLinalgPass::runOnOperation() {
   // SIMT IndirectLoad fast-path rewrite (runs after ImplicitPermute so the
   // permuted access patterns have already been absorbed; this step only
   // catches non-permuted last-axis stride > 1 loads).
-  if (failed(processIndirectLoadRewriteOperations(moduleOp))) {
+  if (failed(processStridedLoadStoreRewriteOperations(moduleOp))) {
     LLVM_DEBUG({
       llvm::dbgs() << "Failed to process indirect-load rewrite operations\n";
     });

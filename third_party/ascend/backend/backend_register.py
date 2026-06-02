@@ -224,6 +224,23 @@ def get_cc_cmd(build_pch):
     return cc_cmd
 
 
+@backend_strategy_registry.register("torch_npu", "get_cc_cmd_npu_utils")
+def get_cc_cmd_npu_utils():
+    import torch
+    import torch_npu
+
+    torch_path = os.path.dirname(os.path.realpath(torch.__file__))
+    torch_npu_path = os.path.dirname(os.path.realpath(torch_npu.__file__))
+    return [
+        f"-I{os.path.join(torch_path, 'include')}",
+        f"-I{os.path.join(torch_npu_path, 'include')}",
+        f"-D_GLIBCXX_USE_CXX11_ABI={get_torch_cxx_abi()}",
+        f"-L{os.path.join(torch_npu_path, 'lib')}",
+        f"-ltorch_npu",
+        "-DUSE_TORCH_NPU",
+    ]
+
+
 @backend_strategy_registry.register("mindspore", "get_current_device")
 def get_current_device():
     import mindspore

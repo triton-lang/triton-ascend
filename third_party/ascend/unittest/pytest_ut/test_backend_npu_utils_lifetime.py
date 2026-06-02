@@ -37,10 +37,9 @@ def test_commit1_preserves_launcher_compatibility_boundaries():
     assert "aclrtPointerGetAttributes" not in driver_src
     assert "Pointer argument (at %d) cannot be accessed from Triton (cpu tensor?)" not in driver_src
     assert "void triton_launch_kernel(" in driver_src
-    assert "const void* kernel_args[] = {" in driver_src
-    assert "const size_t arg_sizes[] = {" in driver_src
     assert "rtKernelLaunch(func, blockNum, static_cast<void*>(launch_args.data()), launch_args.size(), NULL, stream);" in driver_src
-    assert "rtKernelLaunch(func, blockNum, static_cast<void*>(&args), sizeof(args), NULL, stream);" not in driver_src
+    assert "rtKernelLaunch(func, blockNum, static_cast<void*>(&args), sizeof(args), NULL, stream);" in driver_src
+    assert "// Keep Python launcher on the stable local packing path." in driver_src
     assert "default_parallel = " not in utils_src
     assert 'return os.getenv("TRITON_ALL_BLOCKS_PARALLEL", "true").lower() in ("true", "1")' in utils_src
 

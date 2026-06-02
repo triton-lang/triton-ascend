@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+import hashlib
 
 
 def _load_driver_module():
@@ -103,3 +104,62 @@ def test_npu_launcher_exposes_launcher_so_path(
         metadata,
     )
     mock_launcher_stub.assert_called_with("// header src", "// wrapper src", False)
+
+
+def test_make_npu_launcher_stub_hashes_header_and_wrapper(monkeypatch):
+    hashed_inputs = []
+
+    class _FakeHash:
+        def __init__(self, payload):
+            hashed_inputs.append(payload)
+
+        def hexdigest(self):
+            return "launcher-cache-key"
+
+    class _FakeCacheManager:
+        cache_dir = "/tmp/fake-cache"
+
+        def get_file(self, _name):
+            return "/tmp/existing_launcher.so"
+
+    monkeypatch.setattr(driver, "_precompile_npu_ext_with_lock", lambda header_src, enable_precompile: "/tmp/precompiled.h")
+    monkeypatch.setattr(driver, "get_cache_manager", lambda _key: _FakeCacheManager())
+    monkeypatch.setattr(driver, "_check_cxx11_abi", lambda: 1)
+    monkeypatch.setattr(driver.sysconfig, "get_config_var", lambda name: ".so")
+    monkeypatch.setattr(driver.hashlib, "sha256", lambda payload: _FakeHash(payload))
+
+    so_path = driver.make_npu_launcher_stub("// header src", "// wrapper src", False)
+
+    assert so_path == "/tmp/existing_launcher.so"
+    assert hashed_inputs == [b"// header src\0// wrapper src"]
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_generate_npu_wrapper_src_uses_local_packed_args_path(
+    _mock_backend_func_patch,
+    _mock_arch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+
+    src = driver.generate_npu_wrapper_src(
+        constants={},
+        signature={0: "*fp32", 1: "*fp32", 2: "i32"},
+        metadata=_make_metadata(),
+    )
+
+    launch_section = src.split("static void _launch", 1)[1].split("// Extract tensor shape", 1)[0]
+
+    assert "struct __attribute__((packed))" in launch_section
+    assert "rtKernelLaunch(func, blockNum, static_cast<void*>(&args), sizeof(args), NULL, stream);" in launch_section
+    assert "const void* kernel_args[] = {" not in launch_section
+    assert "triton_launch_kernel(" not in launch_section

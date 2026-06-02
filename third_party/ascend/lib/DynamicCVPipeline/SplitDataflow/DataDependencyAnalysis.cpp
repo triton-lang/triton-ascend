@@ -472,6 +472,26 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(DataDependencyInfo &info
     LOG_DEBUG("External output analysis complete.\n");
 }
 
+void DataDependencyAnalysisPass::collectMemDepInfo(
+    llvm::StringRef predCoreType,
+    int producerBlockId, int consumerBlockId, int predBlockId, int currBlockId,
+    llvm::SmallVector<DependencyInfo> &memoryDependencies)
+{
+    DependencyInfo depInfo;
+
+    if (predCoreType == ssbufferCoreTypeCubeAttr) {
+        depInfo.type = DependencyType::CubeToVector;
+    } else if (predCoreType == ssbufferCoreTypeVectorAttr) {
+        depInfo.type = DependencyType::VectorToCube;
+    }
+    depInfo.producerBlockId = producerBlockId;
+    depInfo.consumerBlockId = consumerBlockId;
+    depInfo.iniProducerBlockId = predBlockId;
+    depInfo.iniConsumerBlockId = currBlockId;
+
+    memoryDependencies.push_back(depInfo);
+}
+
 void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
 {
     auto &memoryDependencies = info.getMemoryDependencies();
@@ -481,6 +501,9 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
     MemoryDependenceGraph memDepGraph(module, aliasAnalysis);
 
     module.walk([&](mlir::Operation *op) {
+        if (op->getNumRegions() > 0) {
+            return;
+        }
         auto currBlockIdOpt = CVPipeline::getOpBlockId(op);
         llvm::StringRef currCoreType = getSsbufferCoreType(op);
         if (!currBlockIdOpt || currCoreType.empty()) {
@@ -489,6 +512,29 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
         int currBlockId = static_cast<int>(*currBlockIdOpt);
 
         for (mlir::Operation *predOp : memDepGraph.getExecBefore(op)) {
+            //调新接口判断原始op
+            if (predOp->getNumRegions() > 0) {
+                auto realdeps = memDepGraph.getRealDependency(predOp, op);
+                if (realdeps.empty()) {
+                    return;
+                }
+                for (mlir::Operation *realPredOp : realdeps) {
+                    auto realPredBlockIdOpt = CVPipeline::getOpBlockId(realPredOp);
+                    llvm::StringRef realPredCoreType = getSsbufferCoreType(realPredOp);
+                    if (!realPredBlockIdOpt || realPredCoreType == currCoreType || realPredCoreType.empty()) {
+                        continue;
+                    }
+                    int realPredBlockId = static_cast<int>(*realPredBlockIdOpt);
+                    auto [producerBlockId, consumerBlockId] = findCommonLevelBlockIds(info, realPredBlockId, currBlockId);
+                    assert(producerBlockId != -1 && consumerBlockId != -1 &&
+                        "Could not find common level block IDs for producer and consumer blocks");
+                    collectMemDepInfo(realPredCoreType, producerBlockId, consumerBlockId, realPredBlockId, currBlockId, memoryDependencies);
+
+                    LOG_DEBUG("\n=op with region mem dep analysis= "
+                        << "\nproducer Block: " << realPredBlockId << "\nproducer Op: " << *realPredOp
+                        << "\nconsumer Block: " << currBlockId << "\nconsumer Op: " << *op << "\n");
+                }
+            }
             auto predBlockIdOpt = CVPipeline::getOpBlockId(predOp);
             llvm::StringRef predCoreType = getSsbufferCoreType(predOp);
             if (!predBlockIdOpt || predCoreType == currCoreType || predCoreType.empty()) {
@@ -505,21 +551,11 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
                 continue;
             }
 
-            DependencyInfo depInfo;
+            collectMemDepInfo(predCoreType, producerBlockId, consumerBlockId, predBlockId, currBlockId, memoryDependencies);
 
-            if (predCoreType == ssbufferCoreTypeCubeAttr) {
-                depInfo.type = DependencyType::CubeToVector;
-            } else if (predCoreType == ssbufferCoreTypeVectorAttr) {
-                depInfo.type = DependencyType::VectorToCube;
-            }
-            depInfo.producerBlockId = producerBlockId;
-            depInfo.consumerBlockId = consumerBlockId;
-            depInfo.iniProducerBlockId = predBlockId;
-            depInfo.iniConsumerBlockId = currBlockId;
-
-            memoryDependencies.push_back(depInfo);
-            LOG_DEBUG("=mem dep analysis= "
-                << "producer Block: " << predBlockId << "consumer Block: " << currBlockId << "\n");
+            LOG_DEBUG("\n=mem dep analysis= "
+                << "\nproducer Block: " << predBlockId << "\nproducer Op: " << *predOp
+                << "\nconsumer Block: " << currBlockId << "\nconsumer Op: " << *op << "\n");
         }
     });
     LOG_DEBUG("=== mem dep analysis complete ===\n");
@@ -619,7 +655,7 @@ void DataDependencyAnalysisPass::runOnOperation()
     analyzeExternalInputs(info);
     analyzeExternalOutputs(info);
 
-    // Step 4: Analyze memory dependencies (PIPE_S sync)
+    // Step 4: Analyze memory dependencies (memdep sync)
     analyzeMemoryEffect(info);
 
     info.setValid(true);

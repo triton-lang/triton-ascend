@@ -177,6 +177,10 @@ bool InterCoreTransferAndSyncPass::isOuterLayerDependency(size_t depIndex, mlir:
         }
         auto &otherDep = memDependencies[i];
 
+        if (otherDep.type != memDependencies[depIndex].type) {
+            continue;
+        }
+
         auto [otherProdStart, otherProdEnd] = getBlockStartEnd(otherDep.producerBlockId, module);
         auto [otherConsStart, otherConsEnd] = getBlockStartEnd(otherDep.consumerBlockId, module);
 
@@ -689,18 +693,18 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
     }
 }
 
-void InterCoreTransferAndSyncPass::insertPipeSSync(OpBuilder &builder, Operation *producerOp, Operation *consumerOp,
+void InterCoreTransferAndSyncPass::insertMemDepSync(OpBuilder &builder, Operation *producerOp, Operation *consumerOp,
     int flag, Location loc, bool isCubeToVector)
 {
-    LOG_DEBUG("Inserting PIPE_S sync: " << (isCubeToVector ? "CUBE->VECTOR" : "VECTOR->CUBE") << ", flag = " << flag <<
+    LOG_DEBUG("Inserting Memdep sync: " << (isCubeToVector ? "CUBE->VECTOR" : "VECTOR->CUBE") << ", flag = " << flag <<
         "\n");
 
     // CUBE -> VECTOR: srcPipe = PIPE_FIX, srcCoreType = CUBE, dstCoreType = VECTOR
-    // VECTOR -> CUBE: srcPipe = PIPE_MTE2, srcCoreType = VECTOR, dstCoreType = CUBE
-    hivm::PIPE srcPipe = isCubeToVector ? hivm::PIPE::PIPE_FIX : hivm::PIPE::PIPE_MTE2;
+    // VECTOR -> CUBE: srcPipe = PIPE_MTE3, srcCoreType = VECTOR, dstCoreType = CUBE
+    hivm::PIPE srcPipe = isCubeToVector ? hivm::PIPE::PIPE_FIX : hivm::PIPE::PIPE_MTE3;
     hivm::TCoreType srcCoreType = isCubeToVector ? hivm::TCoreType::CUBE : hivm::TCoreType::VECTOR;
     hivm::TCoreType dstCoreType = isCubeToVector ? hivm::TCoreType::VECTOR : hivm::TCoreType::CUBE;
-    hivm::PIPE dstPipe = hivm::PIPE::PIPE_S;
+    hivm::PIPE dstPipe = hivm::PIPE::PIPE_MTE2;
 
     auto srcCoreAttr = hivm::TCoreTypeAttr::get(builder.getContext(), srcCoreType);
     auto dstCoreAttr = hivm::TCoreTypeAttr::get(builder.getContext(), dstCoreType);
@@ -725,8 +729,8 @@ void InterCoreTransferAndSyncPass::insertPipeSSync(OpBuilder &builder, Operation
         attachCommonTags(waitOp, static_cast<int>(*consBlockIdOpt), consCoreType);
     }
 
-    LOG_DEBUG("[PIPE_S setOp]: " << *setOp << "\n");
-    LOG_DEBUG("[PIPE_S waitOp]: " << *waitOp << "\n");
+    LOG_DEBUG("[PIPE_MTE2 setOp]: " << *setOp << "\n");
+    LOG_DEBUG("[PIPE_MTE2 waitOp]: " << *waitOp << "\n");
 }
 
 // V->C Transfer Logic
@@ -791,11 +795,11 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(OpBuilder &builde
     return success();
 }
 
-// PIPE_S Memory Dependency
+// Memory Dependency
 LogicalResult InterCoreTransferAndSyncPass::handleMemoryDependency(OpBuilder &builder, DependencyInfo &dep,
     size_t depIndex, llvm::SmallVector<DependencyInfo> memDependencies, FlagIdManager &flagManager)
 {
-    LOG_DEBUG("Handling PIPE_S memory dependency...\n");
+    LOG_DEBUG("Handling memory dependency...\n");
 
     // Get producer and consumer block start/end operations
     auto [prodStart, prodEnd] = getBlockStartEnd(dep.producerBlockId, module);
@@ -807,7 +811,7 @@ LogicalResult InterCoreTransferAndSyncPass::handleMemoryDependency(OpBuilder &bu
     }
 
     if (isOuterLayerDependency(depIndex, prodEnd, consStart, memDependencies)) {
-        LOG_DEBUG("[PIPE_S] Skipping outer layer dependency: block " << dep.producerBlockId << " -> block " <<
+        LOG_DEBUG("[MEMDEP] Skipping outer layer dependency: block " << dep.producerBlockId << " -> block " <<
             dep.consumerBlockId << "\n");
         return success();
     }
@@ -821,12 +825,12 @@ LogicalResult InterCoreTransferAndSyncPass::handleMemoryDependency(OpBuilder &bu
     // Get location info
     Location loc = prodEnd->getLoc();
 
-    // Insert PIPE_S sync
-    insertPipeSSync(builder, prodEnd, consStart, flagId, loc, isCubeToVector);
+    // Insert Memdep sync
+    insertMemDepSync(builder, prodEnd, consStart, flagId, loc, isCubeToVector);
 
     transferIndex++;
 
-    LOG_DEBUG("Inserted PIPE_S sync: block " << dep.producerBlockId << " -> block " << dep.consumerBlockId <<
+    LOG_DEBUG("Inserted PIPE_MTE2 sync: block " << dep.producerBlockId << " -> block " << dep.consumerBlockId <<
         ", flagId = " << flagId << "\n");
 
     return success();
@@ -883,6 +887,22 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(FlagIdManager &f
         }
     }
     LOG_DEBUG("Completed C->V transfers and syncs.\n");
+
+    llvm::SmallVector<DependencyInfo>& memDependencies = info.getMemoryDependencies();
+    LOG_DEBUG("[DEBUG] MemoryDependencies size: " << memDependencies.size() << "\n");
+
+    for (size_t i = 0; i < memDependencies.size(); ++i) {
+        auto& dep = memDependencies[i];
+        LOG_DEBUG("[MEMDEP] value = " << dep.value
+                    << " producerBlockId = " << dep.producerBlockId
+                    << ", consumerBlockId = " << dep.consumerBlockId << "\n");
+        if (failed(handleMemoryDependency(builder, dep, i, memDependencies, flagManager))) {
+            LOG_DEBUG("[ERROR] Memdep failed! producerBlockId = " << dep.producerBlockId
+                    << ", consumerBlockId = " << dep.consumerBlockId << "\n");
+        return failure();
+        }
+    }
+    LOG_DEBUG("Completed memory syncs.\n");
     LOG_DEBUG("=====================================================\n");
     LOG_DEBUG("InterCoreTransferAndSyncPass success!\n");
 

@@ -36,14 +36,17 @@
 
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/IR/Region.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 
@@ -99,6 +102,27 @@ bool isKnownNoMemoryEffectCall(Operation *op)
     return callOp && callOp.getCallee().starts_with("triton_indirect_load");
 }
 
+bool shouldAnalyzeAsLeaf(Operation *op)
+{
+    return op->getNumRegions() == 0 || isa<linalg::LinalgOp>(op);
+}
+
+void collectLeafOps(Operation *op, SmallVectorImpl<Operation *> &leafOps)
+{
+    if (shouldAnalyzeAsLeaf(op)) {
+        leafOps.push_back(op);
+        return;
+    }
+
+    for (Region &region : op->getRegions()) {
+        for (Block &block : region) {
+            for (Operation &inner : block) {
+                collectLeafOps(&inner, leafOps);
+            }
+        }
+    }
+}
+
 } // namespace
 
 MemoryDependenceGraph::MemoryDependenceGraph(Operation *root, AliasAnalysis &aa) : root(root), aa(aa)
@@ -142,6 +166,47 @@ ArrayRef<Operation *> MemoryDependenceGraph::getExecAfter(Operation *op) const
     if (it == execAfter.end())
         return {};
     return it->second;
+}
+
+SmallVector<Operation *> MemoryDependenceGraph::getRealDependency(Operation *frontOp, Operation *backOp)
+{
+    if (!frontOp || !backOp) {
+        return {};
+    }
+
+    SmallVector<Operation *> leafOps;
+    collectLeafOps(frontOp, leafOps);
+
+    bool unknown = false;
+    SmallVector<MemoryEffects::EffectInstance> backEffects = collectOuterEffects(backOp, unknown, false);
+    bool backUnknown = unknown;
+
+    // Create slots for frontOps, using existing effects logic to process
+    slots.clear();
+    valueToSlot.clear();
+    llvm::SmallSetVector<Operation *, INIT_SIZE> dependencyOps;
+    for (Operation *leafOp : leafOps) {
+        auto effects = collectOuterEffects(leafOp, unknown, false);
+        if (unknown) {
+            if (!isKnownNoMemoryEffectCall(leafOp)) {
+                dependencyOps.insert(leafOp);
+            }
+            continue;
+        }
+        for (const auto &effect : effects) {
+            if (Value v = effect.getValue()) {
+                getOrCreateSlot(getViewSource(v));
+            }
+        }
+        applyEffects(leafOp, effects, unknown);
+    }
+
+    // Analyze denpendence from frontOps to backOp
+    SmallVector<Operation *> defs;
+    SmallVector<Operation *> preds;
+    collectPreds(backEffects, backUnknown, defs, preds);
+    dependencyOps.insert(preds.begin(), preds.end());
+    return {dependencyOps.begin(), dependencyOps.end()};
 }
 
 void MemoryDependenceGraph::analyzeOp(Operation *op)
@@ -216,7 +281,8 @@ void MemoryDependenceGraph::analyzeRegionsOf(Operation *op)
     }
 }
 
-SmallVector<MemoryEffects::EffectInstance> MemoryDependenceGraph::collectOuterEffects(Operation *op, bool &unknown)
+SmallVector<MemoryEffects::EffectInstance> MemoryDependenceGraph::collectOuterEffects(Operation *op, bool &unknown,
+                                                                                      bool recursive)
 {
     unknown = false;
 
@@ -225,7 +291,13 @@ SmallVector<MemoryEffects::EffectInstance> MemoryDependenceGraph::collectOuterEf
         return {remapEffectValue(scopedWrite, markOp.getSrc())};
     }
 
-    std::optional<SmallVector<MemoryEffects::EffectInstance>> raw = getEffectsRecursively(op);
+    std::optional<SmallVector<MemoryEffects::EffectInstance>> raw;
+    if (recursive) {
+        raw = getEffectsRecursively(op);
+    } else if (auto effectInterface = dyn_cast<MemoryEffectOpInterface>(op)) {
+        raw.emplace();
+        effectInterface.getEffects(*raw);
+    }
     if (!raw) {
         if (!isKnownNoMemoryEffectCall(op)) {
             unknown = true;

@@ -124,6 +124,10 @@ private:
     void collectDepInfo(mlir::Value depvalue, DependencyType dependencyType,
                         llvm::SmallVector<DependencyInfo> &dependencies,
                         int iniProdId, int iniConsId, DataDependencyInfo &info);
+    void collectMemDepInfo(
+      llvm::StringRef predCoreType,
+      int producerBlockId, int consumerBlockId, int predBlockId, int currBlockId,
+      llvm::SmallVector<DependencyInfo> &memoryDependencies);
     void analyzeExternalInputs(DataDependencyInfo &info);
     void analyzeExternalOutputs(DataDependencyInfo &info);
 

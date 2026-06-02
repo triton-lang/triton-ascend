@@ -128,7 +128,7 @@ private:
     int iniConsumerId);
   void insertInterCoreSync(mlir::OpBuilder &builder, mlir::Operation *transferOp, mlir::Operation *consumerStartOp,
     mlir::Operation *consumerEndOp, int flag, mlir::Location loc, int transferIndex);
-  void insertPipeSSync(mlir::OpBuilder &builder, mlir::Operation *producerOp, mlir::Operation *consumerOp, int flag,
+  void insertMemDepSync(mlir::OpBuilder &builder, mlir::Operation *producerOp, mlir::Operation *consumerOp, int flag,
     mlir::Location loc, bool isCubeToVector);
 };
 

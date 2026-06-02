@@ -22,6 +22,7 @@
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/ProcessArgs.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/Debug.h"
@@ -38,7 +39,6 @@ LLVM_DEBUG({ \
   llvm::dbgs() << "\n"; \
 })
 
-using namespace llvm;
 using namespace mlir;
 using namespace triton;
 
@@ -411,7 +411,9 @@ static LogicalResult buildNewYieldOp(
 }
 
 // Replaces all uses of old for op with new for op results and erases old for op.
-static LogicalResult replaceForOpAndErase(scf::ForOp oldForOp, scf::ForOp newForOp)
+// Also transfers intraCoreDependentMap entry from oldForOp to newForOp.
+static LogicalResult replaceForOpAndErase(scf::ForOp oldForOp, scf::ForOp newForOp,
+                                          ControlFlowConditionInfo *info)
 {
   if (oldForOp.getNumResults() > 0) {
     SmallVector<Value> newResults;
@@ -420,13 +422,20 @@ static LogicalResult replaceForOpAndErase(scf::ForOp oldForOp, scf::ForOp newFor
     }
     oldForOp.replaceAllUsesWith(newResults);
   }
+
+  // Transfer intraCoreDependentMap entry from oldForOp to newForOp
+  if (info && info->intraCoreDependentMap.count(oldForOp)) {
+    info->intraCoreDependentMap[newForOp] = info->intraCoreDependentMap[oldForOp];
+    info->intraCoreDependentMap.erase(oldForOp);
+  }
+
   oldForOp.erase();
   return success();
 }
 
 // Main entry point for processing shared iter_args in a single for op.
 // Orchestrates data preparation, new for op creation, body migration, and cloning.
-static LogicalResult processSharedIterArgsInForOp(scf::ForOp forOp)
+static LogicalResult processSharedIterArgsInForOp(scf::ForOp forOp, ControlFlowConditionInfo *info)
 {
   SmallVector<SharedArgInfo> sharedArgsInfo;
   llvm::DenseMap<int, Operation*> sharedArgToCompOp;
@@ -463,7 +472,7 @@ static LogicalResult processSharedIterArgsInForOp(scf::ForOp forOp)
     return failure();
   }
 
-  if (failed(replaceForOpAndErase(forOp, newForOp))) {
+  if (failed(replaceForOpAndErase(forOp, newForOp, info))) {
     return failure();
   }
 
@@ -484,7 +493,7 @@ LogicalResult ProcessArgsPass::processSharedIterArgs(ModuleOp module)
       return WalkResult::interrupt();
     }
 
-    if (failed(processSharedIterArgsInForOp(forOp))) {
+    if (failed(processSharedIterArgsInForOp(forOp, info))) {
       return WalkResult::interrupt();
     }
     return WalkResult::advance();

@@ -6,8 +6,8 @@
 #include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
-#include "mlir/Tools/mlir-opt/MlirOptMain.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Parser/Parser.h"
 
 #include "ascend/include/AutoBlockify/Passes.h"
 #include "ascend/include/TritonToStructured/Passes.h"
@@ -30,6 +30,22 @@
 #include "ir.h" // TritonOpBuilder
 
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+
+#if TRITON_ASCEND_HAS_INPROC_COSTMODEL
+#include "AscendModel/IR/AscendModelDialect.h"
+#include "AscendModel/Transforms/Passes.h"
+
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Math/IR/Math.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+
+#include <cstring>
+#include <sstream>
+#include <stdexcept>
+#include <vector>
+#endif
 
 namespace py = pybind11;
 using namespace ir;
@@ -384,6 +400,194 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
   });
 }
 
+#if TRITON_ASCEND_HAS_INPROC_COSTMODEL
+namespace {
+struct AscendCostModelRuntimeOptions {
+  bool allowUnregisteredDialect = false;
+  bool enableCostModelPipeline = false;
+  std::string argBindings;
+  std::string hardwareConfig;
+};
+
+static void parseAscendCostModelOptionString(const std::string &option,
+                                              AscendCostModelRuntimeOptions &opts) {
+  // Parse known keys while allowing commas inside values, e.g.
+  // arg-bindings=arg8=256,arg9=80,arg10=32,pid_x=0
+  auto startsWith = [](const std::string &s, const std::string &p) {
+    return s.rfind(p, 0) == 0;
+  };
+
+  auto trim = [](std::string v) {
+    while (!v.empty() && (v.back() == ' ' || v.back() == ',')) {
+      v.pop_back();
+    }
+    size_t i = 0;
+    while (i < v.size() && v[i] == ' ') {
+      ++i;
+    }
+    return v.substr(i);
+  };
+
+  auto extractValue = [&](const std::string &key) -> std::string {
+    const std::string needle = key + "=";
+    size_t keyPos = option.find(needle);
+    if (keyPos == std::string::npos) {
+      return "";
+    }
+
+    size_t valueStart = keyPos + needle.size();
+    size_t valueEnd = option.size();
+
+    const std::string keys[] = {"arg-bindings", "hardware-config"};
+    for (const auto &otherKey : keys) {
+      if (otherKey == key) {
+        continue;
+      }
+      const std::string otherNeedle = otherKey + "=";
+      const std::string commaBoundary = "," + otherNeedle;
+      const std::string spaceBoundary = " " + otherNeedle;
+
+      size_t p1 = option.find(commaBoundary, valueStart);
+      if (p1 != std::string::npos) {
+        valueEnd = std::min(valueEnd, p1);
+      }
+      size_t p2 = option.find(spaceBoundary, valueStart);
+      if (p2 != std::string::npos) {
+        valueEnd = std::min(valueEnd, p2);
+      }
+    }
+
+    return trim(option.substr(valueStart, valueEnd - valueStart));
+  };
+
+  // Fast path for single-key payloads passed as next argv token.
+  if (startsWith(option, "arg-bindings=")) {
+    opts.argBindings = trim(option.substr(std::string("arg-bindings=").size()));
+    return;
+  }
+  if (startsWith(option, "hardware-config=")) {
+    opts.hardwareConfig = trim(option.substr(std::string("hardware-config=").size()));
+    return;
+  }
+
+  auto argBindings = extractValue("arg-bindings");
+  if (!argBindings.empty()) {
+    opts.argBindings = argBindings;
+  }
+  auto hardwareConfig = extractValue("hardware-config");
+  if (!hardwareConfig.empty()) {
+    opts.hardwareConfig = hardwareConfig;
+  }
+}
+
+static AscendCostModelRuntimeOptions parseAscendCostmodelArgs(const std::vector<std::string> &extraArgs) {
+  AscendCostModelRuntimeOptions opts;
+  for (size_t i = 0; i < extraArgs.size(); ++i) {
+    const auto &arg = extraArgs[i];
+    if (arg.empty()) {
+      continue;
+    }
+    if (arg == "-allow-unregistered-dialect") {
+      opts.allowUnregisteredDialect = true;
+      continue;
+    }
+    if (arg == "-ascend-perf-model" || arg == "--ascend-perf-model") {
+      opts.enableCostModelPipeline = true;
+      if (i + 1 < extraArgs.size() && !extraArgs[i + 1].empty() && extraArgs[i + 1][0] != '-') {
+        parseAscendCostModelOptionString(extraArgs[++i], opts);
+      }
+      continue;
+    }
+    constexpr const char *kShortPrefix = "-ascend-perf-model=";
+    constexpr const char *kLongPrefix = "--ascend-perf-model=";
+    if (arg.rfind(kShortPrefix, 0) == 0) {
+      opts.enableCostModelPipeline = true;
+      parseAscendCostModelOptionString(arg.substr(std::strlen(kShortPrefix)), opts);
+      continue;
+    }
+    if (arg.rfind(kLongPrefix, 0) == 0) {
+      opts.enableCostModelPipeline = true;
+      parseAscendCostModelOptionString(arg.substr(std::strlen(kLongPrefix)), opts);
+      continue;
+    }
+  }
+  return opts;
+}
+
+static double extractEstimatedTimeUs(mlir::ModuleOp module) {
+  constexpr double CYCLES_PER_US = 1850.0;
+  if (auto scheduledCyclesAttr = module->getAttrOfType<mlir::IntegerAttr>("ascend.scheduled_cycles")) {
+    return static_cast<double>(scheduledCyclesAttr.getInt()) / CYCLES_PER_US;
+  }
+
+  int64_t fallbackCycles = 0;
+  module.walk([&](mlir::Operation *op) {
+    if (auto cyclesAttr = op->getAttrOfType<mlir::IntegerAttr>("estimated_cycles")) {
+      fallbackCycles += cyclesAttr.getInt();
+    }
+  });
+  return static_cast<double>(fallbackCycles) / CYCLES_PER_US;
+}
+} // namespace
+
+static std::string runAscendCostModelInProcess(const std::string &mlirText,
+                                               const std::vector<std::string> &extraArgs) {
+  mlir::DialectRegistry registry;
+  registry.insert<mlir::affine::AffineDialect>();
+  registry.insert<mlir::arith::ArithDialect>();
+  registry.insert<mlir::func::FuncDialect>();
+  registry.insert<mlir::math::MathDialect>();
+  registry.insert<mlir::memref::MemRefDialect>();
+  registry.insert<mlir::scf::SCFDialect>();
+  registry.insert<mlir::tensor::TensorDialect>();
+  registry.insert<mlir::ascend::AscendModelDialect>();
+  registry.insert<mlir::triton::TritonDialect>();
+
+  auto opts = parseAscendCostmodelArgs(extraArgs);
+  if (!opts.enableCostModelPipeline) {
+    throw std::runtime_error("in-process costmodel requires '-ascend-perf-model'");
+  }
+
+  mlir::MLIRContext context(registry);
+  if (opts.allowUnregisteredDialect) {
+    context.allowUnregisteredDialects(true);
+  }
+
+  auto module = mlir::parseSourceString<mlir::ModuleOp>(mlirText, &context);
+  if (!module) {
+    throw std::runtime_error("in-process costmodel failed to parse input MLIR module");
+  }
+
+  mlir::PassManager pm(&context);
+  pm.addPass(mlir::ascend::createConvertTritonToAscendPass());
+  pm.addPass(mlir::ascend::createInsertDataTransfersPass());
+  pm.addPass(mlir::ascend::createAssignOpIDsPass());
+  {
+    mlir::ascend::EstimateCyclesPassOptions estimateOpts;
+    estimateOpts.argBindingsStr = opts.argBindings;
+    estimateOpts.hardwareConfigPath = opts.hardwareConfig;
+    pm.addPass(mlir::ascend::createEstimateCyclesPass(estimateOpts));
+  }
+  {
+    mlir::ascend::PipelineAnalysisPassOptions pipelineOpts;
+    pipelineOpts.argBindingsStr = opts.argBindings;
+    pipelineOpts.hardwareConfigPath = opts.hardwareConfig;
+    pm.addPass(mlir::ascend::createPipelineAnalysisPass(pipelineOpts));
+  }
+
+  if (mlir::failed(pm.run(*module))) {
+    throw std::runtime_error("in-process costmodel pass pipeline failed");
+  }
+
+  const double timeUs = extractEstimatedTimeUs(*module);
+  std::ostringstream os;
+  os.setf(std::ios::fixed);
+  os.precision(3);
+  os << "Estimated Time: " << timeUs << " us\n";
+  return os.str();
+}
+#endif
+
 // Forward declaration for ascend_ir bindings (defined in ascend_ir.cc)
 void init_ascend_ir(py::module &&m);
 
@@ -399,7 +603,18 @@ void init_triton_ascend(py::module &&m) {
 
   init_triton_ascend_passes_ttir(passes.def_submodule("ttir"));
   init_triton_ascend_ir(m.def_submodule("ascend_ir"));
-  
+
+#if TRITON_ASCEND_HAS_INPROC_COSTMODEL
+  m.def("run_costmodel_inproc", [](const std::string &mlirText, const std::vector<std::string> &extraArgs) {
+    return runAscendCostModelInProcess(mlirText, extraArgs);
+  }, py::arg("mlir_text"), py::arg("extra_args") = std::vector<std::string>{});
+#else
+  m.def("run_costmodel_inproc", [](const std::string &, const std::vector<std::string> &) {
+    throw std::runtime_error("in-process costmodel bridge is not enabled in this build");
+    return std::string();
+  }, py::arg("mlir_text"), py::arg("extra_args") = std::vector<std::string>{});
+#endif
+
   // Initialize ascend IR bindings (ascendnpu_ir_builder, scope/hivm dialects)
   init_ascend_ir(m.def_submodule("ir"));
 }

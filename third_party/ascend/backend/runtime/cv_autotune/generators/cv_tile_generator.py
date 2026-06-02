@@ -100,6 +100,10 @@ class CVTileGenerator:
     _K_DEFAULT_MAX = 128
     _K_STRIDE = 16
 
+    _STEP_SMALL = 16
+    _STEP_LARGE = 32
+    _STEP_THRESHOLD = 64
+
     def __init__(self,
                 cv_parse_result: CvParseResult,
                 hardware_constraints: Optional[HardwareConstraints] = None,
@@ -176,34 +180,34 @@ class CVTileGenerator:
 
     def _make_param(self, name: str, max_val: int, min_val: int, stride: int) -> ParamSpace:
         """
-        Build a parameter search space and handle non-uniform max values.
+        Build a parameter search space with segmented strides.
 
-        Two irregular cases are supported:
-        1. ``max < stride``: use ``max`` as the only value (ENUM type).
-        2. ``max >= stride`` but ``max % stride != 0``: use the aligned stride
-           sequence and append ``max`` as the tail value.
+        Supports dynamic step sizes:
+        - Step = 16 when current value <= 64.
+        - Step = 32 when current value > 64.
+        Always includes `min_val` and `max_val`. Returns an ENUM ParamSpace.
 
         Args:
             name: Parameter name.
-            max_val: Axis length upper bound.
-            min_val: Minimum tile value.
-            stride: Step size.
+            max_val: Upper bound.
+            min_val: Lower bound.
+            stride: (Ignored, kept for API compatibility.)
 
         Returns:
-            ParamSpace: Search-space definition.
+            ParamSpace: ENUM type containing the generated tile sizes.
         """
         # Case 1: max < stride, so max itself is the only legal value.
-        if max_val < stride:
-            return ParamSpace(name=name, type="ENUM", values=[max_val])
-
-        # Regular case: max is aligned to stride.
-        if max_val % stride == 0:
-            return ParamSpace(name=name, type="NUM", min=min_val, max=max_val, stride=stride)
-
-        # Case 2: max is not stride-aligned, append it after the aligned range.
-        aligned_max = (max_val // stride) * stride
-        base_values = list(range(min_val, aligned_max + 1, stride))
-        values = base_values + [max_val]
+        values = []
+        current = min_val
+        while current <= max_val:
+            values.append(current)
+            if current < self._STEP_THRESHOLD:
+                current += self._STEP_SMALL
+            else:
+                current += self._STEP_LARGE
+        if values[-1] != max_val:
+            values.append(max_val)
+        values = sorted(set(values))
         return ParamSpace(name=name, type="ENUM", values=values)
 
     @staticmethod

@@ -47,8 +47,11 @@ void ComputeBlockOptPass::runOnOperation()
 
     pm.addPass(createUBUsageOptPass());
     pm.addPass(createReorderOpsByBlockIdPass());
-
+    
     pm.addPass(createFuseAdotBaddCPass());
+    
+    pm.addPass(createFixpipeOptPass());
+    pm.addPass(createReorderOpsByBlockIdPass());
 
     if (failed(runPipeline(pm, module))) {
         signalPassFailure();
@@ -68,8 +71,10 @@ void registerComputeBlockOptPasses()
 {
     registerPass([]() -> std::unique_ptr<mlir::Pass> { return createComputeBlockOptPass(); });
     registerPass(createUBUsageOptPass);
+    registerPass(createUnifyAllocBlockPass);
     registerPass(createFuseAdotBaddCPass);
     registerPass(createUnifyAllocBlockPass);
+    registerPass(createFixpipeOptPass);
 }
 
 } // namespace triton

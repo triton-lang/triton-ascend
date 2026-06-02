@@ -32,6 +32,7 @@
 #include "ascend/include/DynamicCVPipeline/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
+#include "ascend/include/DynamicCVPipeline/PreCheckAvailable.h"
 #include "ascend/include/DynamicCVPipeline/SeparateMemoryFromComputePass.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflowPass.h"
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
@@ -85,6 +86,7 @@ void AddDynamicCVPipelinePass::runOnOperation()
     ModuleOp moduleBackup(moduleOp->clone());
     PassManager pm(&getContext(), moduleOp.getOperationName());
 
+    pm.addPass(createPreCheckAvailablePass());
     pm.addPass(createPlanComputeBlockPass());
     pm.addPass(createComputeBlockOptPass());
     pm.addPass(createSplitDataflowPass());

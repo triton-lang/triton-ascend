@@ -116,8 +116,6 @@ private:
     // Step 4: Propagate VECTOR core type upstream
     int propagateVectorUpstream();
 
-    bool checkPureCubeOrVector();
-
     // Initialize the pass
     void initializePass(ModuleOp module);
 

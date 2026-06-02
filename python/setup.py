@@ -70,26 +70,6 @@ class BackendInstaller:
             except FileNotFoundError:
                 pass
 
-            if backend_name == "ascend":
-                backend_dir = Path().resolve().parent / "third_party/ascend"
-                npuir_path = backend_dir / "AscendNPU-IR"
-                patch_dir = backend_dir / "patches"
-                npuir_dirty = subprocess.call([
-                        "git", "diff-index", "--quiet", "HEAD", "--",
-                    ],
-                    cwd=npuir_path
-                )
-                if not npuir_dirty:
-                    print("AscendNPU-IR is clean, applying patch...")
-                    patch_path = patch_dir / "AscendNPU-IR-tightly-coupled-buffer.patch"
-                    try:
-                        subprocess.check_call(
-                            ["git", "apply", patch_path],
-                            cwd=npuir_path
-                        )
-                    except Exception as e:
-                        raise RuntimeError(f"Failed to apply patch: {e}")
-
             backend_src_dir = os.path.join(root_dir, backend_name)
 
         backend_path = os.path.abspath(os.path.join(backend_src_dir, "backend"))

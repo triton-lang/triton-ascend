@@ -1186,8 +1186,8 @@ static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp, OpBuilder &builde
 
     // If memref-type dependency values exist, skip double buffer processing
     if (hasMemrefDepValue(depValueMap)) {
-        vectorScope->setAttr("ssbuffer.skip", builder.getUnitAttr());
-        return 0;
+        LDBG("ERROR: Memref type dependent values found!");
+        return -1;
     }
 
     auto depUserMap = buildDepUserMap(blocks, allOps, depValueMap);

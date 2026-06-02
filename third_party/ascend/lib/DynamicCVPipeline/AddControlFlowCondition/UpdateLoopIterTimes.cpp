@@ -208,41 +208,64 @@ static bool isRunFirst(SmallVector<scf::IfOp> &ifOps, llvm::DenseMap<Value, Smal
   return true;
 }
 
-// Collect ifOps from forOp that contain sync_block_wait or sync_block_set op
+// Type definition for IfOp filter function
+// Returns true if the IfOp should be collected, false otherwise
+using IfOpFilter = std::function<bool(scf::IfOp)>;
+
+// Default filter that accepts all IfOps
+static bool defaultIfOpFilter(scf::IfOp ifOp) {
+  return true;
+}
+
+// Filter that checks if IfOp contains sync_block_wait or sync_block_set op
+static bool syncBlockFilter(scf::IfOp ifOp) {
+  bool containsSyncBlock = false;
+  ifOp.walk([&](Operation *innerOp) {
+    if (isa<hivm::SyncBlockWaitOp>(innerOp) || isa<hivm::SyncBlockSetOp>(innerOp)) {
+      containsSyncBlock = true;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return containsSyncBlock;
+}
+
+// Collect ifOps from forOp based on the provided filter
 // Fills ifOps and ifOpIndexMap with the collected ifOps
-// Returns the number of ifOps collected
-static int collectIfOps(
+// Returns the number of ifOps collected on success, or -1 on error
+int collectIfOps(
     scf::ForOp forOp,
     SmallVector<scf::IfOp> &ifOps,
-    llvm::DenseMap<Operation *, int> &ifOpIndexMap)
+    llvm::DenseMap<Operation *, int> &ifOpIndexMap,
+    IfOpFilter filter = defaultIfOpFilter)
 {
   ifOps.clear();
   ifOpIndexMap.clear();
   int index = 1;
+  int ret = 0;
 
   forOp.walk([&](Operation* op) {
     if (op->hasAttr(CVPipeline::kIf)) {
       auto ifOp = dyn_cast<scf::IfOp>(op);
-      if (ifOp) {
-        // Check if this ifOp contains sync_block_wait op
-        bool isVaildBlock = false;
-        ifOp.walk([&](Operation *innerOp) {
-          if (isa<hivm::SyncBlockWaitOp>(innerOp) || isa<hivm::SyncBlockSetOp>(innerOp)) {
-            isVaildBlock = true;
-            return WalkResult::interrupt();
-          }
-          return WalkResult::advance();
-        });
-        if (isVaildBlock) {
-          ifOps.push_back(ifOp);
-          ifOpIndexMap[ifOp.getOperation()] = index++;
-        }
+      if (!ifOp) {
+        ret = -1;
+        LDBG("ssbuffer.if attribute is not allocated on ifOp!");
+        return WalkResult::interrupt();
+      }
+      // Apply the filter to determine if this IfOp should be collected
+      if (filter(ifOp)) {
+        ifOps.push_back(ifOp);
+        ifOpIndexMap[ifOp.getOperation()] = index++;
       }
     }
     return WalkResult::advance();
   });
 
-  return ifOps.size();
+  if (ret == -1) {
+    return -1;
+  } else {
+    return ifOps.size();
+  }
 }
 
 // Helper function to find the other side's mainloop and collect its ifOps
@@ -292,11 +315,16 @@ static scf::ForOp findOtherSideMainloopAndIfOps(
 
   // Collect ifOps from the other side's mainloop
   // Only collect ifOps that contain hivm.hir.sync_block_wait op
-  int ifOpsCount = collectIfOps(otherSideForOp, otherSideIfOps, otherSideIfOpIndexMap);
-
-  if (ifOpsCount == 0) {
-    LDBG("Other side mainloop does not contain any ifblocks!");
-    return nullptr;
+  int ifOpsCount = collectIfOps(otherSideForOp, otherSideIfOps, otherSideIfOpIndexMap, syncBlockFilter);
+  switch (ifOpsCount) {
+    case -1:
+      LDBG("Failed to collect ifOps from other side mainloop!");
+      return nullptr;
+    case 0:
+      LDBG("Other side mainloop does not contain any ifblocks!");
+      return nullptr;
+    default:
+      break;
   }
 
   return otherSideForOp;
@@ -317,10 +345,15 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp)
   SmallVector<scf::IfOp> ifOps;
   DenseMap<Operation *, int> ifOpIndex;
   int ifOpsCount = collectIfOps(forOp, ifOps, ifOpIndex);
-
-  if (ifOpsCount == 0) {
-    LDBG("mainloop do not contains ifblocks!");
-    return {-1, -1};
+  switch (ifOpsCount) {
+    case -1:
+      LDBG("Failed to collect ifOps!");
+      return {-1, -1};
+    case 0:
+      LDBG("mainloop do not contains ifblocks!");
+      return {-1, -1};
+    default:
+      break;
   }
 
   // Step2: Calculate factor based on intra-core dependencies
@@ -356,7 +389,22 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp)
     llvm::DenseMap<Value, SmallVector<Value>> filteredCrossCoreMap =
         filterCrossCoreMapByForOp(forOp, extendedCrossCoreMap);
 
-    auto [crossRequiredBuffers, crossX] = calculateCrossDepsFactor(forOp, ifOps, ifOpIndex, filteredCrossCoreMap);
+    // for caculating the crossdeps, need to filter ifblocks without sync_wait/sync_set op
+    SmallVector<scf::IfOp> filterIfOps;
+    DenseMap<Operation *, int> filterIfOpIndex;
+    int filterIfOpsCount = collectIfOps(forOp, filterIfOps, filterIfOpIndex, syncBlockFilter);
+    switch (filterIfOpsCount) {
+      case -1:
+        LDBG("Failed to collect filtered ifOps!");
+        return {-1, -1};
+      case 0:
+        LDBG("mainloop do not contains filtered ifblocks!");
+        return {-1, -1};
+      default:
+        break;
+    }
+
+    auto [crossRequiredBuffers, crossX] = calculateCrossDepsFactor(forOp, filterIfOps, filterIfOpIndex, filteredCrossCoreMap);
     if (crossRequiredBuffers == -1 || crossX == -1) {
       LDBG("calculateCrossDepsFactor failed!");
       return {-1, -1};
@@ -406,6 +454,10 @@ static int getProducerIfOpIndex(SmallVector<Value> &producerBuffers,
       if (isa<hivm::FixpipeOp>(user) || isa<hivm::CopyOp>(user)) {
         producerIfOpIndex = findIfOpIndexInList(user, otherSideIfOps, otherSideIfOpIndexMap);
         if (producerIfOpIndex == -1) {
+          LDBG("user : " << *user);
+          for (auto ifop : otherSideIfOps){
+            LDBG("other side ifop: " << ifop);
+          }
           LDBG("Can not find the producerBuffers in any ifOps of other side mainloop!");
           return -1;
         }

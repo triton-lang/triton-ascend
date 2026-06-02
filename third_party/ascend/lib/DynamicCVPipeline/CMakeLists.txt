@@ -27,8 +27,13 @@ file(GLOB ANALYZE_DATAFLOW_SRC_FILES CONFIGURE_DEPENDS
     "AnalyzeDataFlow/*.cpp"
 )
 
+file(GLOB PRE_CHECK_AVAILABLE_SRC_FILES CONFIGURE_DEPENDS
+    "PreCheckAvailable/*.cpp"
+)
+
 add_triton_library(DynamicCVPipeline
   AddDynamicCVPipeline.cpp
+  PreCheckAvailable.cpp
   PlanComputeBlock.cpp
   ComputeBlockOptPass.cpp
   AnalyzeDataFlow.cpp
@@ -36,6 +41,7 @@ add_triton_library(DynamicCVPipeline
   ${COMMON_SRC}
   ${Compute_BLOCK_OPT_SRC_FILES}
   ${ANALYZE_DATAFLOW_SRC_FILES}
+  ${PRE_CHECK_AVAILABLE_SRC_FILES}
   SplitDataflow.cpp
   SeparateMemoryFromComputePass.cpp
   AllocMultiCache.cpp

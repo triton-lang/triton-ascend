@@ -796,24 +796,6 @@ int OpClassifierPass::propagateVectorUpstream()
     return 0;
 }
 
-bool OpClassifierPass::checkPureCubeOrVector()
-{
-    bool hasCube = false;
-    bool hasVector = false;
-    for (auto &[op, type] : opCoreTypes) {
-        if (isInsideNestedLinalgRegion(op)) {
-            continue;
-        }
-        if (type & OP_CUBE_ONLY) {
-            hasCube = true;
-        }
-        if (type & OP_VECTOR_ONLY) {
-            hasVector = true;
-        }
-    }
-    return !hasCube || !hasVector;
-}
-
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -1519,15 +1501,6 @@ void OpClassifierPass::runOnOperation()
 
     // Step 4: VECTOR upstream BFS
     if (propagateVectorUpstream() != 0) {
-        signalPassFailure();
-        return;
-    }
-
-    // Intermedia Check: pure cube or pure vector leads to skipping.
-    if (checkPureCubeOrVector()) {
-        LOG_DEBUG("Non-CV scenarios. "
-                  "The DynamicCVPipeline pass will be interrupted, and resumed to the original workflow.");
-        CVPipeline::setFallbackAttr(module);
         signalPassFailure();
         return;
     }

@@ -43,6 +43,9 @@ from triton.backends.ascend.utils import (
     force_disable_ffts,
     get_backend_func
 )
+# Bind the already-imported utils module once so the launch hot path can write
+# TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
+import triton.backends.ascend.utils as _ascend_utils
 
 class NPUUtils(object):
     def __new__(cls):
@@ -75,6 +78,7 @@ class NPUUtils(object):
         env_arch = get_ascend_arch_from_env()
 
     def load_binary(self, name, kernel, shared, device, mix_mode):
+        #fnname, mix_mode = name.rsplit("_", 1)
         return self.npu_utils_mod.load_kernel_binary(name, kernel, shared, device, mix_mode)
 
     @functools.lru_cache()
@@ -104,24 +108,30 @@ class NPULauncher(object):
     def __init__(self, src, metadata):
         self.compile_only = os.getenv("TRITON_COMPILE_ONLY", 'false').lower() in ('true', '1')
         self.enable_msprof_register_tensor = os.getenv("TRITON_REGISTER_TENSOR_MSPROF", 'false').lower() in ('true', '1')
-        debug_mode = metadata.debug
-        header_src = generate_npu_header_src()
-        constants = src.constants if hasattr(src, "constants") else dict()
-        cst_key = lambda i: src.fn.arg_names.index(i) if isinstance(i, str) else i
-        constants = {cst_key(key): value for key, value in constants.items()}
-        signature = {cst_key(key): value for key, value in src.signature.items()}
-        wrapper_src = generate_npu_wrapper_src(constants, signature, metadata)
-        so_launcher_path = make_npu_launcher_stub(header_src, wrapper_src, metadata.debug)
+        self.src = src
+        self.metadata = metadata
+        self.so_launcher_path = self._make_launcher_stub_path()
         # setup for remote run
         # TODO: use a var to pack all vars required to run on a remote machine
         self.mix_mode = metadata.mix_mode
         self.shared = metadata.shared
-        # initialize launcher
         import importlib.util
-        spec = importlib.util.spec_from_file_location("__triton_launcher", so_launcher_path)
+        spec = importlib.util.spec_from_file_location("__triton_launcher", self.so_launcher_path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self.launch = getattr(mod, "launch")
+
+    def _make_launcher_stub_path(self):
+        header_src = generate_npu_header_src()
+        constants = self.src.constants if hasattr(self.src, "constants") else dict()
+        cst_key = lambda i: self.src.fn.arg_names.index(i) if isinstance(i, str) else i
+        constants = {cst_key(key): value for key, value in constants.items()}
+        signature = {cst_key(key): value for key, value in self.src.signature.items()}
+        wrapper_src = generate_npu_wrapper_src(constants, signature, self.metadata)
+        return make_npu_launcher_stub(header_src, wrapper_src, self.metadata.debug)
+
+    def get_launcher_so_path(self):
+        return self.so_launcher_path
 
     def __call__(self, *args, **kwargs):
         if self.compile_only:
@@ -136,9 +146,9 @@ class NPULauncher(object):
         else:
             if self.compile_only:
                 return
+  
             profiler_registered = self.launch(*args, **kwargs)
-            import triton
-            triton.backends.ascend.utils.TRITON_PROFILER_REGISTERED = True if profiler_registered == 1 else False
+            _ascend_utils.TRITON_PROFILER_REGISTERED = (profiler_registered == 1)
 
 class NPUDriver(DriverBase):
     def __init__(self):
@@ -495,12 +505,11 @@ def generate_npu_wrapper_src(constants, signature, metadata):
         int gridX, gridY, gridZ;
         rtStream_t stream;
         const void *functon;
-        PyObject* packed_metadata, *launch_metadata;
-        PyObject* launch_enter_hook, *launch_exit_hook;
+        PyObject* packed_metadata,       
         *args_expand
     """
-    format = "iiiKKOOOO" + ''.join([_format_of(_extracted_ty(ty)) for ty in signature.values()])
 
+    format = "iiiKKOOOO" + ''.join([_format_of(_extracted_ty(ty)) for ty in signature.values()])
     grid_info = {'X': 'i32', 'Y': 'i32', 'Z': 'i32'}
     # TODO: automatically check if gather load ops are used.
 
@@ -529,6 +538,14 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     alloc_success_code = 'return 1;'
     sync_lock_fail_code = 'fprintf(stderr, "Error: syncBlockLock allocation failed\\n"); return;'
     workspace_fail_code = 'fprintf(stderr, "Error: workspace allocation failed\\n"); return;'
+    launch_signature_items = [(i, ty) for i, ty in signature.items() if i not in constants]
+    launch_arg_count = len(launch_signature_items)
+    launch_arg_ptrs = ', '.join(
+        f'static_cast<const void*>(&arg{i})' for i, ty in launch_signature_items
+    )
+    launch_arg_sizes = ', '.join(
+        f'sizeof({_ty_to_cpp(ty)})' for i, ty in launch_signature_items
+    )
 
     cpp_device_pointer = """
 typedef struct _DevicePtrInfo {
@@ -548,7 +565,11 @@ static inline DevicePtrInfo getPointer(PyObject *obj, int idx) {
     // valid nullptr
     return ptr_info;
   }
-  PyObject *ptr = PyObject_GetAttrString(obj, "data_ptr");
+  // Cache the interned "data_ptr" key once instead of rebuilding a temporary
+  // PyUnicode on every call. Function-local static init is thread-safe in C++11
+  // and the GIL is held here, so the one-time init is safe.
+  static PyObject *data_ptr_str = PyUnicode_InternFromString("data_ptr");
+  PyObject *ptr = PyObject_GetAttr(obj, data_ptr_str);
   if(ptr){
     PyObject *empty_tuple = PyTuple_New(0);
     PyObject *ret = PyObject_Call(ptr, empty_tuple, NULL);
@@ -562,27 +583,6 @@ static inline DevicePtrInfo getPointer(PyObject *obj, int idx) {
     ptr_info.dev_ptr = reinterpret_cast<void *>(PyLong_AsUnsignedLongLong(ret));
     if(!ptr_info.dev_ptr)
       return ptr_info;
-    aclrtPtrAttributes attributes;
-    aclError status = aclrtPointerGetAttributes(ptr_info.dev_ptr, &attributes);
-
-    if (status == ACL_SUCCESS) {
-      if (attributes.location.type != ACL_MEM_LOCATION_TYPE_DEVICE && attributes.location.type != 4) {
-        Py_DECREF(ret);
-        PyErr_Format(PyExc_ValueError,
-                     "Pointer argument (at %d) cannot be accessed from Triton (cpu tensor?)", idx);
-        ptr_info.valid = false;
-        return ptr_info;
-      }
-    } else {
-      Py_DECREF(ret);
-      PyErr_Format(PyExc_RuntimeError,
-                   "Failed to query pointer attributes at argument %d. "
-                   "Error code: %d. This may indicate invalid memory address "
-                   "or NPU device error.",
-                   idx, status);
-      ptr_info.valid = false;
-      return ptr_info;
-      }
     Py_DECREF(ret);
     return ptr_info;
   }
@@ -600,6 +600,8 @@ extern "C" {
   extern int MsprofRegisterCallback(unsigned int moduleId, callback handle);
   static unsigned int __MsprofFlagL0  = 0;
   static unsigned int __MsprofFlagL1  = 0;
+  static const char* kernelName = nullptr ;
+  static std::vector<int> tensorKinds;
 
   int ProfCtrlHandle(unsigned int CtrlType, void* CtrlData, unsigned int DataLen) {
     if ((CtrlData == nullptr) || (DataLen == 0U)) {
@@ -737,13 +739,13 @@ extern "C" {
 """
 
     cpp_kernel_launch = f"""
-    ret = rtKernelLaunch(func, blockNum, static_cast<void*>(&args), sizeof(args), NULL, stream);
+    ret = rtKernelLaunch(func, blockNum, static_cast<void*>(launch_args.data()), launch_args.size(), NULL, stream);
 """
     if compile_on_910_95 and enable_simt:
         cpp_kernel_launch = f"""
     rtArgsEx_t argsInfo = {{}};
-    argsInfo.args = static_cast<void*>(&args);
-    argsInfo.argsSize = sizeof(args);
+    argsInfo.args = static_cast<void*>(launch_args.data());
+    argsInfo.argsSize = launch_args.size();
     rtTaskCfgInfo_t cfgInfo = {{}};
     cfgInfo.localMemorySize = {metadata.shared_mem_dynamic_size};
     ret = rtKernelLaunchWithFlagV2(func, blockNum, &argsInfo, NULL, stream, 0, &cfgInfo);
@@ -767,7 +769,45 @@ extern "C" {
 
 {cpp_device_pointer}
 
-static void _launch(const char* kernelName, const void* func, rtStream_t stream, int gridX, int gridY, int gridZ, std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{', ' + arg_decls if len(signature) > 0 else ''}) {{
+static inline size_t _align_launch_offset(size_t offset, size_t alignment) {{
+  return (offset + alignment - 1) & ~(alignment - 1);
+}}
+
+extern "C" {{
+void triton_launch_kernel(
+    const char* kernelName, const void* func, rtStream_t stream,
+    int gridX, int gridY, int gridZ,
+    const int64_t* shapes_data, const int* shape_dims, int num_tensors,
+    const int* tensor_kinds,
+    const void* const* kernel_args, const size_t* arg_sizes, int num_args) {{
+  std::vector<std::vector<int64_t>> tensorShapes;
+  if (shapes_data != nullptr && shape_dims != nullptr) {{
+    int shapes_idx = 0;
+    for (int tensor_idx = 0; tensor_idx < num_tensors; ++tensor_idx) {{
+      std::vector<int64_t> tensorShape;
+      for (int dim_idx = 0; dim_idx < shape_dims[tensor_idx]; ++dim_idx) {{
+        tensorShape.push_back(shapes_data[shapes_idx++]);
+      }}
+      tensorShapes.push_back(tensorShape);
+    }}
+  }}
+  std::vector<int> tensorKinds;
+  if (tensor_kinds != nullptr && num_tensors > 0) {{
+    tensorKinds.assign(tensor_kinds, tensor_kinds + num_tensors);
+  }}
+  if (num_args > 0 && (kernel_args == nullptr || arg_sizes == nullptr)) {{
+    return;
+  }}
+  std::vector<size_t> launch_arg_sizes;
+  launch_arg_sizes.reserve(num_args);
+  std::vector<std::vector<char>> copied_kernel_args;
+  copied_kernel_args.reserve(num_args);
+  for (int arg_idx = 0; arg_idx < num_args; ++arg_idx) {{
+    launch_arg_sizes.push_back(arg_sizes[arg_idx]);
+    copied_kernel_args.emplace_back(arg_sizes[arg_idx]);
+    memcpy(copied_kernel_args.back().data(), kernel_args[arg_idx], arg_sizes[arg_idx]);
+  }}
+
   // only 1D parallelization is supported for NPU
   // Pointer type becomes flattend 1-D Memref tuple: base_ptr, data_ptr, offset, shape, stride
   // base_ptr offset shape and stride are not used, arbitrarily set for now
@@ -820,23 +860,45 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
     }}
     ''' if lock_num > 0 else ''}
     {'if (ret != RT_ERROR_NONE) return ret;' if (workspace_size > 0 and enable_taskqueue) else 'if (ret != RT_ERROR_NONE) return;' if (workspace_size > 0 and not enable_taskqueue) else ''}
-    struct __attribute__((packed)) {{
-      {'void* ffts_addr __attribute__((aligned(8)));' if target_support_ffts else ''}
-      {'void* syncBlockLock __attribute__((aligned(8)));' if not metadata.force_simt_only else ''}
-      {'void* workspace_addr __attribute__((aligned(8)));' if not metadata.force_simt_only else ''}
-      {' '.join(f'{_ty_to_cpp(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in signature.items() if i not in constants)}
-      {' '.join(f'{_ty_to_cpp(ty)} grid{mark} __attribute__((aligned(4)));' for mark, ty in grid_info.items())}
-      {'void* DTData __attribute__((aligned(8)));' if enable_device_print else ''}
-    }} args = {{
-      {'static_cast<void*>(ffts_addr),' if target_support_ffts else ''}
-      {('static_cast<void*>(syncBlockLock_ptr),' if lock_num > 0 else 'nullptr,') if not metadata.force_simt_only else ''}
-      {('static_cast<void*>(workspace_addr_ptr),' if workspace_size > 0 else 'nullptr,') if not metadata.force_simt_only else ''}
-      {(lambda _rt: (', '.join(_rt) + ',') if _rt else '')(
-        [f'static_cast<{_ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if i not in constants]
-      )}
-      {', '.join(f'static_cast<{_ty_to_cpp(ty)}>(grid{mark})' for mark, ty in grid_info.items())}
-      {', static_cast<void*>(DTData)' if enable_device_print else ''}
+
+    size_t args_offset = 0;
+    auto reserve_slot = [&](size_t size, size_t alignment) -> size_t {{
+      args_offset = _align_launch_offset(args_offset, alignment);
+      size_t current_offset = args_offset;
+      args_offset += size;
+      return current_offset;
     }};
+    {'size_t ffts_offset = reserve_slot(sizeof(void*), 8);' if target_support_ffts else ''}
+    {'size_t sync_block_lock_offset = reserve_slot(sizeof(void*), 8);' if not metadata.force_simt_only else ''}
+    {'size_t workspace_offset = reserve_slot(sizeof(void*), 8);' if not metadata.force_simt_only else ''}
+    size_t kernel_args_offset = args_offset;
+    for (int arg_idx = 0; arg_idx < num_args; ++arg_idx) {{
+      size_t alignment = launch_arg_sizes[arg_idx] >= 8 ? 8 : (launch_arg_sizes[arg_idx] >= 4 ? 4 : 1);
+      args_offset = _align_launch_offset(args_offset, alignment);
+      args_offset += launch_arg_sizes[arg_idx];
+    }}
+    size_t grid_offset = reserve_slot(sizeof(int32_t), 4);
+    reserve_slot(sizeof(int32_t), 4);
+    reserve_slot(sizeof(int32_t), 4);
+    {'size_t dtdata_offset = reserve_slot(sizeof(void*), 8);' if enable_device_print else ''}
+    size_t total_size = args_offset;
+
+    std::vector<char> launch_args(total_size, 0);
+    {'memcpy(launch_args.data() + ffts_offset, &ffts_addr, sizeof(void*));' if target_support_ffts else ''}
+    {f'memcpy(launch_args.data() + sync_block_lock_offset, &syncBlockLock_ptr, sizeof(void*));' if not metadata.force_simt_only else ''}
+    {f'memcpy(launch_args.data() + workspace_offset, &workspace_addr_ptr, sizeof(void*));' if not metadata.force_simt_only else ''}
+    size_t kernel_arg_offset = kernel_args_offset;
+    for (int arg_idx = 0; arg_idx < num_args; ++arg_idx) {{
+      size_t alignment = launch_arg_sizes[arg_idx] >= 8 ? 8 : (launch_arg_sizes[arg_idx] >= 4 ? 4 : 1);
+      kernel_arg_offset = _align_launch_offset(kernel_arg_offset, alignment);
+      memcpy(launch_args.data() + kernel_arg_offset, copied_kernel_args[arg_idx].data(), launch_arg_sizes[arg_idx]);
+      kernel_arg_offset += launch_arg_sizes[arg_idx];
+    }}
+    memcpy(launch_args.data() + grid_offset, &gridX, sizeof(int32_t));
+    memcpy(launch_args.data() + grid_offset + sizeof(int32_t), &gridY, sizeof(int32_t));
+    memcpy(launch_args.data() + grid_offset + 2 * sizeof(int32_t), &gridZ, sizeof(int32_t));
+    {'memcpy(launch_args.data() + dtdata_offset, &DTData, sizeof(void*));' if enable_device_print else ''}
+
     {cpp_msprof_call_before_launch}
     {cpp_kernel_launch}
     {'void *&stream_ref = const_cast<void*&>(stream);' if enable_device_print else ''}
@@ -845,6 +907,26 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
     {'return ret;' if enable_taskqueue else 'ret = rtStreamSynchronize(stream);'}
    }};
    {f'''{get_backend_func("async_launch", "launch_call") if enable_taskqueue else ''}'''}
+  return;
+}}
+}} // extern "C"
+
+static void _launch(const char* kernelName, const void* func, rtStream_t stream, int gridX, int gridY, int gridZ, std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{', ' + arg_decls if len(signature) > 0 else ''}) {{
+  std::vector<int64_t> flat_tensor_shapes;
+  std::vector<int> shape_dims;
+  for (const auto &tensor_shape : tensorShapes) {{
+    shape_dims.push_back(tensor_shape.size());
+    flat_tensor_shapes.insert(flat_tensor_shapes.end(), tensor_shape.begin(), tensor_shape.end());
+  }}
+  {'const void* kernel_args[] = {' + launch_arg_ptrs + '};' if launch_arg_count > 0 else 'const void* const* kernel_args = nullptr;'}
+  {'const size_t arg_sizes[] = {' + launch_arg_sizes + '};' if launch_arg_count > 0 else 'const size_t* arg_sizes = nullptr;'}
+  triton_launch_kernel(
+      kernelName, func, stream, gridX, gridY, gridZ,
+      flat_tensor_shapes.empty() ? nullptr : flat_tensor_shapes.data(),
+      shape_dims.empty() ? nullptr : shape_dims.data(),
+      static_cast<int>(tensorShapes.size()),
+      tensorKinds.empty() ? nullptr : tensorKinds.data(),
+      kernel_args, arg_sizes, {launch_arg_count});
   return;
 }}
 
@@ -892,8 +974,7 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
   if(!PyArg_ParseTuple(
       args, \"{format}\",
       &gridX, &gridY, &gridZ, &stream, &function,
-      &packedMetadata, &launch_metadata,
-      &launch_enter_hook, &launch_exit_hook
+      &packedMetadata, &launch_metadata, &launch_enter_hook, &launch_exit_hook
       {', ' + ', '.join(f"&_arg{i}" for i, ty in signature.items()) if len(signature) > 0 else ''}
       )
     ) {{
@@ -917,19 +998,24 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
       return NULL;
   }}
 
+
   // get kernel_name
-  PyObject *kernelNameObj = PyDict_GetItemString(packedMetadata, "kernel_name");
-  const char *kernelName = PyUnicode_AsUTF8(kernelNameObj);
-  // get tensor_kinds
-  std::vector<int> tensorKinds;
-  PyObject *tensorKindList = PyDict_GetItemString(packedMetadata, "tensor_kinds");
-  if (tensorKindList) {{
-    int size = PyObject_Size(tensorKindList);
-    for (int i = 0; i < size; i++) {{
-      PyObject *kind = PySequence_GetItem(tensorKindList, i);
-      tensorKinds.push_back(PyLong_AsLong(kind));
-    }}
+  if (!kernelName) {{
+      PyObject *kernelNameObj = PyDict_GetItemString(packedMetadata, "kernel_name");
+      kernelName = PyUnicode_AsUTF8(kernelNameObj);
   }}
+  // get tensor_kinds
+  if( tensorKinds.empty() ) {{
+     PyObject *tensorKindList = PyDict_GetItemString(packedMetadata, "tensor_kinds");
+     if (tensorKindList) {{
+       int size = PyObject_Size(tensorKindList);
+       for (int i = 0; i < size; i++) {{
+         PyObject *kind = PySequence_GetItem(tensorKindList, i);
+         tensorKinds.push_back(PyLong_AsLong(kind));
+       }}
+     }}
+  }}
+
 
   // raise exception asap
   {"; ".join([f"DevicePtrInfo ptr_info{i} = getPointer(_arg{i}, {i}); if (!ptr_info{i}.valid) return NULL;" if ty[0]=="*" else "" for i, ty in signature.items()])};

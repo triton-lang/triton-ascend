@@ -2118,20 +2118,15 @@ class AutoTilingTuner(Autotuner):
             )
             return float("inf")
 
-    def _prune_by_time_limit(self, configs: List[Config], *args, **meta) -> List[Config]:
+    def _prune_by_time_limit(self, run_fns: Dict[Config, Any]) -> Dict[Config, Any]:
         time_limit = 200
 
-        if isinstance(configs, dict):
-            configs = list(configs.values())
-        if time_limit is None or len(configs) <= 1:
-            return configs
+        if len(run_fns) <= 1:
+            return run_fns
 
         rough_timings = {}
-
-        for config in configs:
-            kernel_launcher = self._make_kernel_call(*args, config=config, **meta)
-            rough_time = self._rough_bench_once(lambda: kernel_launcher(warmup=False))  # ms
-            rough_timings[config] = rough_time
+        for config, fn in run_fns.items():
+            rough_timings[config] = self._rough_bench_once(fn)
 
         sorted_configs = sorted(rough_timings.keys(), key=lambda c: rough_timings[c])
 
@@ -2155,14 +2150,14 @@ class AutoTilingTuner(Autotuner):
         if self.print_autotuning:
             print(f"Triton autotuning: estimate n_warmup={n_warmup}, n_repeat={n_repeat}, "
                     f"cumulative={cumulative_time:.4f}s/{time_limit}s, "
-                    f"valid={len(valid_configs)}/{len(configs)}")
+                    f"valid={len(valid_configs)}/{len(run_fns)}")
             for config in sorted_configs:
                 is_valid = config in valid_configs
                 status = "valid" if is_valid else "pruned"
                 print(f"Triton autotuning compile debug: "
                         f"[{status}] config={config}, rough_time={rough_timings[config]:.4f}ms")
 
-        return valid_configs
+        return {cfg: run_fns[cfg] for cfg in valid_configs}
 
     def generate_key_and_configs(self, *args, **kwargs):
         self.nargs = dict(zip(self.arg_names, args))
@@ -2243,8 +2238,6 @@ class AutoTilingTuner(Autotuner):
         if key not in self.cache:
             # prune configs
             pruned_configs = self.prune_configs(kwargs)
-            if self.parser_mode in ("cube", "mix") and self.cv_parse_result is not None:
-                pruned_configs = self._prune_by_time_limit(pruned_configs, *args, **kwargs)
             if self.enable_ubtuner or len(pruned_configs) > 1:
                 used_cached_result = False
                 bench_start = time.time()
@@ -2317,7 +2310,7 @@ class AutoTilingTuner(Autotuner):
         if self.compile_parallel:
             import psutil
 
-            max_workers = min(psutil.cpu_count(logical=False) // 2, len(kernels_call))
+            max_workers = min(psutil.cpu_count(logical=False) * 3 // 4, len(kernels_call))
             future_kernels = []
             try:
                 with (
@@ -2363,6 +2356,9 @@ class AutoTilingTuner(Autotuner):
         if len(run_fns) == 1:
             # we ignore expensive profiling method when only single config is left
             return {config: self.do_bench(fn, quantiles=(0.5, 0.2, 0.8)) for config, fn in run_fns.items()}
+
+        if (self.parser_mode in ("cube", "mix") and self.cv_parse_result is not None):
+            run_fns = self._prune_by_time_limit(run_fns)
 
         use_profiling = os.getenv("TRITON_BENCH_METHOD", "default").lower() == "npu"
         # Respect user-provided benchmarkers even when NPU profiling mode is enabled.

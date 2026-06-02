@@ -1,6 +1,4 @@
-// RUN: triton-opt -add-control-flow-condition %s 2>&1| FileCheck %s
-
-// RUN: not triton-opt -add-control-flow-condition %s 2>&1 | FileCheck %s
+// RUN: ! triton-opt -add-control-flow-condition %s 2>&1 | FileCheck %s
 
 // CHECK: Assertion
 // CHECK: updateIfConds failed

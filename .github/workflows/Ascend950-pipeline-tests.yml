@@ -176,7 +176,7 @@ jobs:
         run: |
           gh api -X POST "repos/${{ github.repository }}/statuses/${SHA}" \
             -f state=pending \
-            -f context='A5 Pipeline Tests' \
+            -f context='Ascend950 Pipeline Tests' \
             -f description='Pipeline running' \
             -f target_url="$TARGET"
 
@@ -322,7 +322,7 @@ jobs:
           done
 
           if [ "$DONE" != "true" ]; then
-            write_status "TIMEOUT" "polling exceeded 240 attempts without a terminal status"
+            write_status "TIMEOUT" "polling exceeded 720 attempts without a terminal status"
             exit 1
           fi
           echo "terminal status: ${ST} - ${MSG}"
@@ -355,7 +355,7 @@ jobs:
         run: |
           gh api -X POST "repos/${{ github.repository }}/statuses/${SHA}" \
             -f state="$STATE" \
-            -f context='A5 Pipeline Tests' \
+            -f context='Ascend950 Pipeline Tests' \
             -f description="${DESC:-UNKNOWN}" \
             -f target_url="$TARGET"
 

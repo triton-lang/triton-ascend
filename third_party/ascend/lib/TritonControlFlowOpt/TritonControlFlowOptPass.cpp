@@ -800,14 +800,14 @@ static LogicalResult structureFunctionBody(Operation *funcOp, Region &body) {
 
 enum class PtrKind { Tensor, Block };
 
-struct TensorPtrParts {
+struct TensorPtrInfo {
   Type resultType;
   Value base;
   Value offset;
   bool scalarBase = false;
 };
 
-struct BlockPtrParts {
+struct BlockPtrInfo {
   Type resultType;
   Value base;
   SmallVector<Value> shape;
@@ -816,25 +816,22 @@ struct BlockPtrParts {
   DenseI32ArrayAttr order;
 };
 
-struct PtrParts {
+struct CFPtrInfo {
   PtrKind kind;
-  TensorPtrParts tensor;
-  BlockPtrParts block;
+  TensorPtrInfo tensor;
+  BlockPtrInfo block;
 };
 
-struct ForPointerInfo {
-  unsigned oldIndex = 0;
-  PtrParts initParts;
-  SmallVector<Value> deltaValues;
-  SmallVector<unsigned> newIndices;
+struct RewriteEnv {
+  IRMapping valueMapping;
+  DenseMap<Value, CFPtrInfo> pointerComponents;
 };
 
-struct WhilePointerInfo {
+struct LoopPointerInfo {
   unsigned oldIndex = 0;
-  PtrParts initParts;
-  SmallVector<Value> conditionDeltaValues;
-  SmallVector<Value> yieldDeltaValues;
+  CFPtrInfo initInfo;
   SmallVector<unsigned> newIndices;
+  SmallVector<Value> ivDeltas;
 };
 
 enum class IfComponentKind {
@@ -852,8 +849,8 @@ struct IfComponent {
 
 struct IfPointerInfo {
   unsigned oldIndex = 0;
-  PtrParts thenParts;
-  PtrParts elseParts;
+  CFPtrInfo thenInfo;
+  CFPtrInfo elseInfo;
   SmallVector<IfComponent> components;
 };
 
@@ -869,12 +866,6 @@ static bool isBlockPointerType(Type type) {
 
 static bool isControlFlowPointerType(Type type) {
   return isTensorPointerType(type) || isBlockPointerType(type);
-}
-
-static unsigned getBlockPointerRank(Type type) {
-  auto ptrType = cast<triton::PointerType>(type);
-  auto tensorType = cast<RankedTensorType>(ptrType.getPointeeType());
-  return tensorType.getRank();
 }
 
 static Value createZeroLike(OpBuilder &builder, Location loc, Type type) {
@@ -942,6 +933,44 @@ static Value castIntegerLike(OpBuilder &builder, Location loc, Value value,
   return builder.create<arith::TruncIOp>(loc, targetType, value);
 }
 
+static FailureOr<Type> getWiderIntegerLikeType(Type lhs, Type rhs) {
+  if (lhs == rhs)
+    return lhs;
+
+  if (lhs.isIndex() && rhs.isIndex())
+    return lhs;
+  if (lhs.isIndex() && isa<IntegerType>(rhs))
+    return lhs;
+  if (isa<IntegerType>(lhs) && rhs.isIndex())
+    return rhs;
+
+  auto lhsInt = dyn_cast<IntegerType>(lhs);
+  auto rhsInt = dyn_cast<IntegerType>(rhs);
+  if (lhsInt && rhsInt)
+    return lhsInt.getWidth() >= rhsInt.getWidth() ? lhs : rhs;
+
+  auto lhsTensor = dyn_cast<RankedTensorType>(lhs);
+  auto rhsTensor = dyn_cast<RankedTensorType>(rhs);
+  if (!lhsTensor || !rhsTensor ||
+      lhsTensor.getShape() != rhsTensor.getShape())
+    return failure();
+
+  Type lhsElement = lhsTensor.getElementType();
+  Type rhsElement = rhsTensor.getElementType();
+  if (lhsElement == rhsElement)
+    return lhs;
+  if (lhsElement.isIndex() && isa<IntegerType>(rhsElement))
+    return lhs;
+  if (isa<IntegerType>(lhsElement) && rhsElement.isIndex())
+    return rhs;
+
+  auto lhsElementInt = dyn_cast<IntegerType>(lhsElement);
+  auto rhsElementInt = dyn_cast<IntegerType>(rhsElement);
+  if (!lhsElementInt || !rhsElementInt)
+    return failure();
+  return lhsElementInt.getWidth() >= rhsElementInt.getWidth() ? lhs : rhs;
+}
+
 static Value createAdd(OpBuilder &builder, Location loc, Value lhs,
                        Value rhs) {
   if (!lhs || !rhs)
@@ -954,37 +983,76 @@ static Value createAdd(OpBuilder &builder, Location loc, Value lhs,
   return builder.create<arith::AddIOp>(loc, lhs, rhs);
 }
 
-static FailureOr<TensorPtrParts>
-analyzeTensorPtr(Value value, OpBuilder &builder, Location loc) {
+static Value createAddWithWiderType(OpBuilder &builder, Location loc, Value lhs,
+                                    Value rhs) {
+  if (!lhs || !rhs)
+    return nullptr;
+
+  FailureOr<Type> targetType =
+      getWiderIntegerLikeType(lhs.getType(), rhs.getType());
+  if (failed(targetType))
+    return nullptr;
+
+  lhs = castIntegerLike(builder, loc, lhs, *targetType);
+  rhs = castIntegerLike(builder, loc, rhs, *targetType);
+  if (!lhs || !rhs)
+    return nullptr;
+  return builder.create<arith::AddIOp>(loc, lhs, rhs);
+}
+
+static Value createMul(OpBuilder &builder, Location loc, Value lhs,
+                       Value rhs) {
+  if (!lhs || !rhs)
+    return nullptr;
+  if (lhs.getType() != rhs.getType()) {
+    rhs = castIntegerLike(builder, loc, rhs, lhs.getType());
+    if (!rhs)
+      return nullptr;
+  }
+  return builder.create<arith::MulIOp>(loc, lhs, rhs);
+}
+
+static Value remapValue(Value value, const RewriteEnv &env) {
+  if (Value mapped = env.valueMapping.lookupOrNull(value))
+    return mapped;
+  return value;
+}
+
+static FailureOr<CFPtrInfo> analyzePtr(Value value, const RewriteEnv &env,
+                                       OpBuilder &builder, Location loc);
+
+static FailureOr<TensorPtrInfo>
+analyzeTensorPtr(Value value, const RewriteEnv &env, OpBuilder &builder,
+                 Location loc) {
+  if (auto it = env.pointerComponents.find(value);
+      it != env.pointerComponents.end() && it->second.kind == PtrKind::Tensor)
+    return it->second.tensor;
+
+  value = remapValue(value, env);
+
   if (auto addPtrOp = value.getDefiningOp<triton::AddPtrOp>()) {
-    FailureOr<TensorPtrParts> baseParts =
-        analyzeTensorPtr(addPtrOp.getPtr(), builder, loc);
-    if (failed(baseParts))
+    FailureOr<CFPtrInfo> baseInfo =
+        analyzePtr(addPtrOp.getPtr(), env, builder, loc);
+    if (failed(baseInfo) || (*baseInfo).kind != PtrKind::Tensor)
       return failure();
 
+    TensorPtrInfo tensor = (*baseInfo).tensor;
     OpBuilder::InsertionGuard guard(builder);
     builder.setInsertionPoint(addPtrOp);
     Value offset = addPtrOp.getOffset();
-    if ((*baseParts).offset.getType() != offset.getType()) {
-      (*baseParts).offset =
-          castIntegerLike(builder, addPtrOp.getLoc(), (*baseParts).offset,
-                          offset.getType());
-      if (!(*baseParts).offset)
-        return failure();
-    }
-    Value newOffset =
-        createAdd(builder, addPtrOp.getLoc(), (*baseParts).offset, offset);
+    Value newOffset = createAddWithWiderType(builder, addPtrOp.getLoc(),
+                                             tensor.offset, offset);
     if (!newOffset)
       return failure();
-    (*baseParts).offset = newOffset;
-    (*baseParts).resultType = value.getType();
-    return *baseParts;
+    tensor.offset = newOffset;
+    tensor.resultType = value.getType();
+    return tensor;
   }
 
   if (auto splatOp = value.getDefiningOp<triton::SplatOp>()) {
     if (!isa<triton::PointerType>(splatOp.getSrc().getType()))
       return failure();
-    TensorPtrParts parts;
+    TensorPtrInfo parts;
     parts.resultType = value.getType();
     parts.base = splatOp.getSrc();
     parts.scalarBase = true;
@@ -999,7 +1067,7 @@ analyzeTensorPtr(Value value, OpBuilder &builder, Location loc) {
   if (!isTensorPointerType(value.getType()))
     return failure();
 
-  TensorPtrParts parts;
+  TensorPtrInfo parts;
   parts.resultType = value.getType();
   parts.base = value;
   parts.scalarBase = false;
@@ -1014,10 +1082,17 @@ analyzeTensorPtr(Value value, OpBuilder &builder, Location loc) {
   return parts;
 }
 
-static FailureOr<BlockPtrParts>
-analyzeBlockPtr(Value value, OpBuilder &builder, Location loc) {
+static FailureOr<BlockPtrInfo>
+analyzeBlockPtr(Value value, const RewriteEnv &env, OpBuilder &builder,
+                Location loc) {
+  if (auto it = env.pointerComponents.find(value);
+      it != env.pointerComponents.end() && it->second.kind == PtrKind::Block)
+    return it->second.block;
+
+  value = remapValue(value, env);
+
   if (auto makePtrOp = value.getDefiningOp<triton::MakeTensorPtrOp>()) {
-    BlockPtrParts parts;
+    BlockPtrInfo parts;
     parts.resultType = value.getType();
     parts.base = makePtrOp.getBase();
     parts.shape.assign(makePtrOp.getShape().begin(), makePtrOp.getShape().end());
@@ -1030,55 +1105,61 @@ analyzeBlockPtr(Value value, OpBuilder &builder, Location loc) {
   }
 
   if (auto advanceOp = value.getDefiningOp<triton::AdvanceOp>()) {
-    FailureOr<BlockPtrParts> baseParts =
-        analyzeBlockPtr(advanceOp.getPtr(), builder, loc);
-    if (failed(baseParts))
+    FailureOr<CFPtrInfo> baseInfo =
+        analyzePtr(advanceOp.getPtr(), env, builder, loc);
+    if (failed(baseInfo) || (*baseInfo).kind != PtrKind::Block)
       return failure();
-    if ((*baseParts).offsets.size() != advanceOp.getOffsets().size())
+    BlockPtrInfo block = (*baseInfo).block;
+    if (block.offsets.size() != advanceOp.getOffsets().size())
       return failure();
 
     OpBuilder::InsertionGuard guard(builder);
     builder.setInsertionPoint(advanceOp);
     for (auto [idx, delta] : llvm::enumerate(advanceOp.getOffsets())) {
       Value newOffset =
-          createAdd(builder, advanceOp.getLoc(), (*baseParts).offsets[idx],
-                    delta);
+          createAdd(builder, advanceOp.getLoc(), block.offsets[idx], delta);
       if (!newOffset)
         return failure();
-      (*baseParts).offsets[idx] = newOffset;
+      block.offsets[idx] = newOffset;
     }
-    (*baseParts).resultType = value.getType();
-    return *baseParts;
+    block.resultType = value.getType();
+    return block;
   }
 
   return failure();
 }
 
-static FailureOr<PtrParts> analyzePtr(Value value, OpBuilder &builder,
-                                      Location loc) {
+static FailureOr<CFPtrInfo> analyzePtr(Value value, const RewriteEnv &env,
+                                       OpBuilder &builder, Location loc) {
+  if (auto it = env.pointerComponents.find(value);
+      it != env.pointerComponents.end())
+    return it->second;
+
+  value = remapValue(value, env);
+
   if (isBlockPointerType(value.getType())) {
-    FailureOr<BlockPtrParts> block = analyzeBlockPtr(value, builder, loc);
+    FailureOr<BlockPtrInfo> block = analyzeBlockPtr(value, env, builder, loc);
     if (failed(block))
       return failure();
-    PtrParts parts{PtrKind::Block};
-    parts.block = *block;
-    return parts;
+    CFPtrInfo info{PtrKind::Block};
+    info.block = *block;
+    return info;
   }
 
   if (isTensorPointerType(value.getType())) {
-    FailureOr<TensorPtrParts> tensor = analyzeTensorPtr(value, builder, loc);
+    FailureOr<TensorPtrInfo> tensor = analyzeTensorPtr(value, env, builder, loc);
     if (failed(tensor))
       return failure();
-    PtrParts parts{PtrKind::Tensor};
-    parts.tensor = *tensor;
-    return parts;
+    CFPtrInfo info{PtrKind::Tensor};
+    info.tensor = *tensor;
+    return info;
   }
 
   return failure();
 }
 
 static Value rebuildTensorPtr(OpBuilder &builder, Location loc,
-                              const TensorPtrParts &parts, Value base,
+                              const TensorPtrInfo &parts, Value base,
                               Value offset) {
   Value ptrBase = base;
   if (parts.scalarBase && isTensorPointerType(parts.resultType))
@@ -1088,7 +1169,7 @@ static Value rebuildTensorPtr(OpBuilder &builder, Location loc,
 }
 
 static Value rebuildBlockPtr(OpBuilder &builder, Location loc,
-                             const BlockPtrParts &parts, Value base,
+                             const BlockPtrInfo &parts, Value base,
                              ArrayRef<Value> shape, ArrayRef<Value> strides,
                              ArrayRef<Value> offsets) {
   return builder.create<triton::MakeTensorPtrOp>(
@@ -1096,39 +1177,188 @@ static Value rebuildBlockPtr(OpBuilder &builder, Location loc,
       ValueRange(offsets), parts.order);
 }
 
-static Value rebuildPtr(OpBuilder &builder, Location loc, const PtrParts &parts,
-                        ArrayRef<Value> values) {
-  if (parts.kind == PtrKind::Tensor) {
-    if (values.size() == 1)
-      return rebuildTensorPtr(builder, loc, parts.tensor, parts.tensor.base,
-                              values[0]);
-    if (values.size() == 2)
-      return rebuildTensorPtr(builder, loc, parts.tensor, values[0], values[1]);
-    return nullptr;
+static Value rebuildPtr(OpBuilder &builder, Location loc,
+                        const CFPtrInfo &info) {
+  if (info.kind == PtrKind::Tensor)
+    return rebuildTensorPtr(builder, loc, info.tensor, info.tensor.base,
+                            info.tensor.offset);
+  return rebuildBlockPtr(builder, loc, info.block, info.block.base,
+                         info.block.shape, info.block.strides,
+                         info.block.offsets);
+}
+
+static void recordPointer(Value oldPtr, const CFPtrInfo &info, Value rebuiltPtr,
+                          RewriteEnv &env) {
+  env.pointerComponents[oldPtr] = info;
+  env.valueMapping.map(oldPtr, rebuiltPtr);
+}
+
+static SmallVector<Value> getLoopComponentValues(const CFPtrInfo &info) {
+  if (info.kind == PtrKind::Tensor)
+    return {info.tensor.offset};
+  return info.block.offsets;
+}
+
+static SmallVector<Type> getLoopComponentTypes(const CFPtrInfo &info) {
+  SmallVector<Type> types;
+  for (Value value : getLoopComponentValues(info))
+    types.push_back(value.getType());
+  return types;
+}
+
+static CFPtrInfo withLoopComponentValues(CFPtrInfo info,
+                                         ArrayRef<Value> values) {
+  if (info.kind == PtrKind::Tensor) {
+    if (values.size() != 1)
+      return info;
+    info.tensor.offset = values[0];
+    return info;
   }
 
-  unsigned rank = parts.block.offsets.size();
-  if (values.size() == rank)
-    return rebuildBlockPtr(builder, loc, parts.block, parts.block.base,
-                           parts.block.shape, parts.block.strides, values);
+  if (values.size() == info.block.offsets.size())
+    info.block.offsets.assign(values.begin(), values.end());
+  return info;
+}
 
+static bool areLoopCompatible(const CFPtrInfo &initInfo,
+                              const CFPtrInfo &nextInfo) {
+  if (initInfo.kind != nextInfo.kind)
+    return false;
+  if (initInfo.kind == PtrKind::Tensor)
+    return initInfo.tensor.resultType == nextInfo.tensor.resultType &&
+           initInfo.tensor.base == nextInfo.tensor.base &&
+           initInfo.tensor.scalarBase == nextInfo.tensor.scalarBase &&
+           haveSameTypes(getLoopComponentValues(initInfo),
+                         getLoopComponentValues(nextInfo));
+
+  return initInfo.block.resultType == nextInfo.block.resultType &&
+         initInfo.block.base == nextInfo.block.base &&
+         initInfo.block.order == nextInfo.block.order &&
+         initInfo.block.shape == nextInfo.block.shape &&
+         initInfo.block.strides == nextInfo.block.strides &&
+         initInfo.block.offsets.size() == nextInfo.block.offsets.size() &&
+         haveSameTypes(getLoopComponentValues(initInfo),
+                       getLoopComponentValues(nextInfo));
+}
+
+static bool isScalarIntegerLike(Type type) {
+  return type.isIndex() || isa<IntegerType>(type);
+}
+
+static bool isConstantIndex(Value value, int64_t expected) {
+  auto constOp = value.getDefiningOp<arith::ConstantIndexOp>();
+  return constOp && constOp.value() == expected;
+}
+
+static bool isRangeFromZeroByOne(scf::ForOp forOp) {
+  return isConstantIndex(forOp.getLowerBound(), 0) &&
+         isConstantIndex(forOp.getStep(), 1);
+}
+
+static bool isDefinedOutside(Operation *scope, Value value) {
+  if (Operation *defOp = value.getDefiningOp())
+    return !scope->isAncestor(defOp);
+
+  auto blockArg = dyn_cast<BlockArgument>(value);
+  if (!blockArg)
+    return false;
+
+  Operation *ownerOp = blockArg.getOwner()->getParentOp();
+  return ownerOp != scope && (!ownerOp || !scope->isAncestor(ownerOp));
+}
+
+static FailureOr<SmallVector<Value>>
+matchSimpleForIvDeltas(scf::ForOp forOp, const LoopPointerInfo &info,
+                       Value yieldOperand) {
+  if (!isRangeFromZeroByOne(forOp) || info.initInfo.kind != PtrKind::Block)
+    return failure();
+
+  auto advanceOp = yieldOperand.getDefiningOp<triton::AdvanceOp>();
+  if (!advanceOp ||
+      advanceOp.getPtr() != forOp.getRegionIterArgs()[info.oldIndex])
+    return failure();
+
+  if (advanceOp.getOffsets().size() != info.initInfo.block.offsets.size())
+    return failure();
+
+  SmallVector<Value> deltas;
+  for (auto [initOffset, delta] :
+       llvm::zip(info.initInfo.block.offsets, advanceOp.getOffsets())) {
+    if (!isScalarIntegerLike(initOffset.getType()) ||
+        !isScalarIntegerLike(delta.getType()) ||
+        !isDefinedOutside(forOp, delta))
+      return failure();
+    deltas.push_back(delta);
+  }
+  return deltas;
+}
+
+static FailureOr<CFPtrInfo>
+withForIvClosedFormComponents(const LoopPointerInfo &info, Value iv,
+                              OpBuilder &builder, Location loc,
+                              const RewriteEnv &env) {
+  if (info.ivDeltas.empty())
+    return failure();
+
+  SmallVector<Value> initComponents = getLoopComponentValues(info.initInfo);
+  if (initComponents.size() != info.ivDeltas.size())
+    return failure();
+
+  SmallVector<Value> components;
+  components.reserve(initComponents.size());
+  for (auto [initComponent, delta] :
+       llvm::zip(initComponents, info.ivDeltas)) {
+    Type componentType = initComponent.getType();
+    if (!isScalarIntegerLike(componentType))
+      return failure();
+
+    Value typedIv = castIntegerLike(builder, loc, iv, componentType);
+    Value typedDelta =
+        castIntegerLike(builder, loc, remapValue(delta, env), componentType);
+    if (!typedIv || !typedDelta)
+      return failure();
+
+    Value scaledDelta = createMul(builder, loc, typedIv, typedDelta);
+    Value component = createAdd(builder, loc, initComponent, scaledDelta);
+    if (!scaledDelta || !component)
+      return failure();
+    components.push_back(component);
+  }
+
+  return withLoopComponentValues(info.initInfo, components);
+}
+
+static LoopPointerInfo *findLoopInfo(SmallVectorImpl<LoopPointerInfo> &infos,
+                                     unsigned oldIndex) {
+  for (LoopPointerInfo &info : infos) {
+    if (info.oldIndex == oldIndex)
+      return &info;
+  }
+  return nullptr;
+}
+
+static const LoopPointerInfo *findLoopInfo(ArrayRef<LoopPointerInfo> infos,
+                                           unsigned oldIndex) {
+  for (const LoopPointerInfo &info : infos) {
+    if (info.oldIndex == oldIndex)
+      return &info;
+  }
   return nullptr;
 }
 
 static SmallVector<Value>
-collectForRebuildValues(const ForPointerInfo &info, scf::ForOp forOp,
-                        bool useResults) {
+collectForComponents(const LoopPointerInfo &info, scf::ForOp forOp,
+                     bool useResults) {
   SmallVector<Value> values;
-  for (unsigned newIndex : info.newIndices) {
+  for (unsigned newIndex : info.newIndices)
     values.push_back(useResults ? forOp.getResult(newIndex)
                                 : forOp.getRegionIterArgs()[newIndex]);
-  }
   return values;
 }
 
 static SmallVector<Value>
-collectWhileRebuildValues(const WhilePointerInfo &info, scf::WhileOp whileOp,
-                          bool useResults, bool useAfterArgs) {
+collectWhileComponents(const LoopPointerInfo &info, scf::WhileOp whileOp,
+                       bool useResults, bool useAfterArgs) {
   SmallVector<Value> values;
   for (unsigned newIndex : info.newIndices) {
     if (useResults)
@@ -1141,120 +1371,55 @@ collectWhileRebuildValues(const WhilePointerInfo &info, scf::WhileOp whileOp,
   return values;
 }
 
-static FailureOr<SmallVector<Value>>
-getBlockPtrDelta(Value value, Value iterArg, OpBuilder &builder, Location loc) {
-  unsigned rank = getBlockPointerRank(iterArg.getType());
-  if (value == iterArg) {
-    SmallVector<Value> zeros;
-    zeros.reserve(rank);
-    for (unsigned i = 0; i < rank; ++i)
-      zeros.push_back(createZeroLike(builder, loc, builder.getI32Type()));
-    return zeros;
-  }
+static LogicalResult rewriteControlFlowOp(Operation *op, OpBuilder &builder,
+                                          RewriteEnv &env);
 
-  auto advanceOp = value.getDefiningOp<triton::AdvanceOp>();
-  if (!advanceOp || advanceOp.getOffsets().size() != rank)
-    return failure();
-
-  FailureOr<SmallVector<Value>> baseDelta =
-      getBlockPtrDelta(advanceOp.getPtr(), iterArg, builder, loc);
-  if (failed(baseDelta))
-    return failure();
+static LogicalResult materializePointerResult(Operation &bodyOp,
+                                              Operation *clonedOp,
+                                              OpBuilder &builder,
+                                              RewriteEnv &env) {
+  if (!isa<triton::AddPtrOp, triton::AdvanceOp>(bodyOp))
+    return success();
 
   OpBuilder::InsertionGuard guard(builder);
-  builder.setInsertionPoint(advanceOp);
-  for (auto [idx, step] : llvm::enumerate(advanceOp.getOffsets())) {
-    Value newDelta =
-        createAdd(builder, advanceOp.getLoc(), (*baseDelta)[idx], step);
-    if (!newDelta)
+  builder.setInsertionPointAfter(clonedOp);
+
+  for (auto [oldResult, clonedResult] :
+       llvm::zip(bodyOp.getResults(), clonedOp->getResults())) {
+    if (!isControlFlowPointerType(oldResult.getType()))
+      continue;
+
+    FailureOr<CFPtrInfo> info =
+        analyzePtr(clonedResult, env, builder, oldResult.getLoc());
+    if (failed(info))
+      continue;
+
+    Value rebuilt = rebuildPtr(builder, oldResult.getLoc(), *info);
+    if (!rebuilt)
       return failure();
-    (*baseDelta)[idx] = newDelta;
+    recordPointer(oldResult, *info, rebuilt, env);
   }
-  return *baseDelta;
+
+  return success();
 }
 
-static FailureOr<SmallVector<Value>>
-getTensorPtrDelta(Value value, Value iterArg, OpBuilder &builder,
-                  Location loc) {
-  if (value == iterArg) {
-    Value zero = createZeroOffset(builder, loc, iterArg.getType());
-    if (!zero)
-      return failure();
-    return SmallVector<Value>{zero};
-  }
-
-  auto addPtrOp = value.getDefiningOp<triton::AddPtrOp>();
-  if (!addPtrOp)
-    return failure();
-
-  FailureOr<SmallVector<Value>> baseDelta =
-      getTensorPtrDelta(addPtrOp.getPtr(), iterArg, builder, loc);
-  if (failed(baseDelta) || baseDelta->size() != 1)
-    return failure();
-
-  OpBuilder::InsertionGuard guard(builder);
-  builder.setInsertionPoint(addPtrOp);
-  Value delta = (*baseDelta)[0];
-  Value step = addPtrOp.getOffset();
-  if (delta.getType() != step.getType()) {
-    delta = castIntegerLike(builder, addPtrOp.getLoc(), delta, step.getType());
-    if (!delta)
+static LogicalResult rewriteBodyOps(Block *oldBlock, OpBuilder &builder,
+                                    RewriteEnv &env) {
+  for (Operation &bodyOp : oldBlock->without_terminator()) {
+    if (isa<scf::ForOp, scf::WhileOp, scf::IfOp>(bodyOp) &&
+        succeeded(rewriteControlFlowOp(&bodyOp, builder, env)))
+      continue;
+    Operation *clonedOp = builder.clone(bodyOp, env.valueMapping);
+    if (failed(materializePointerResult(bodyOp, clonedOp, builder, env)))
       return failure();
   }
-  Value newDelta = createAdd(builder, addPtrOp.getLoc(), delta, step);
-  if (!newDelta)
-    return failure();
-  return SmallVector<Value>{newDelta};
+  return success();
 }
 
-static FailureOr<SmallVector<Value>>
-getPointerDelta(Value value, Value iterArg, OpBuilder &builder, Location loc) {
-  if (isBlockPointerType(iterArg.getType()))
-    return getBlockPtrDelta(value, iterArg, builder, loc);
-  if (isTensorPointerType(iterArg.getType()))
-    return getTensorPtrDelta(value, iterArg, builder, loc);
-  return failure();
-}
-
-static ForPointerInfo *findForInfo(SmallVectorImpl<ForPointerInfo> &infos,
-                                   unsigned oldIndex) {
-  for (ForPointerInfo &info : infos) {
-    if (info.oldIndex == oldIndex)
-      return &info;
-  }
-  return nullptr;
-}
-
-static const ForPointerInfo *
-findForInfo(ArrayRef<ForPointerInfo> infos, unsigned oldIndex) {
-  for (const ForPointerInfo &info : infos) {
-    if (info.oldIndex == oldIndex)
-      return &info;
-  }
-  return nullptr;
-}
-
-static WhilePointerInfo *
-findWhileInfo(SmallVectorImpl<WhilePointerInfo> &infos, unsigned oldIndex) {
-  for (WhilePointerInfo &info : infos) {
-    if (info.oldIndex == oldIndex)
-      return &info;
-  }
-  return nullptr;
-}
-
-static const WhilePointerInfo *
-findWhileInfo(ArrayRef<WhilePointerInfo> infos, unsigned oldIndex) {
-  for (const WhilePointerInfo &info : infos) {
-    if (info.oldIndex == oldIndex)
-      return &info;
-  }
-  return nullptr;
-}
-
-static LogicalResult tryDecoupleFor(scf::ForOp forOp, IRRewriter &rewriter) {
+static LogicalResult rewriteForOp(scf::ForOp forOp, OpBuilder &builder,
+                                  RewriteEnv &env) {
   auto yieldOp = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
-  SmallVector<ForPointerInfo, 4> pointerInfos;
+  SmallVector<LoopPointerInfo, 4> pointerInfos;
 
   OpBuilder analysisBuilder(forOp.getContext());
   analysisBuilder.setInsertionPoint(forOp);
@@ -1262,114 +1427,131 @@ static LogicalResult tryDecoupleFor(scf::ForOp forOp, IRRewriter &rewriter) {
   for (auto [idx, iterArg] : llvm::enumerate(forOp.getRegionIterArgs())) {
     if (!isControlFlowPointerType(iterArg.getType()))
       continue;
-    if (idx >= yieldOp.getNumOperands())
+    if (idx >= forOp.getInitArgs().size() || idx >= yieldOp.getNumOperands())
       return failure();
 
-    FailureOr<PtrParts> initParts =
-        analyzePtr(forOp.getInitArgs()[idx], analysisBuilder, forOp.getLoc());
-    if (failed(initParts))
+    FailureOr<CFPtrInfo> initInfo =
+        analyzePtr(forOp.getInitArgs()[idx], env, analysisBuilder,
+                   forOp.getLoc());
+    if (failed(initInfo))
       continue;
-
-    FailureOr<SmallVector<Value>> delta = getPointerDelta(
-        yieldOp.getOperand(idx), iterArg, analysisBuilder, yieldOp.getLoc());
-    if (failed(delta))
-      continue;
-
     pointerInfos.push_back(
-        ForPointerInfo{static_cast<unsigned>(idx), *initParts, *delta, {}});
+        LoopPointerInfo{static_cast<unsigned>(idx), *initInfo, {}});
   }
 
   if (pointerInfos.empty())
     return failure();
 
+  for (LoopPointerInfo &info : pointerInfos) {
+    FailureOr<SmallVector<Value>> deltas =
+        matchSimpleForIvDeltas(forOp, info,
+                               yieldOp.getOperand(info.oldIndex));
+    if (succeeded(deltas))
+      info.ivDeltas = *deltas;
+  }
+
   SmallVector<Value> newInitArgs;
   SmallVector<unsigned> oldToNewStart(forOp.getInitArgs().size(), 0);
   for (auto [idx, initArg] : llvm::enumerate(forOp.getInitArgs())) {
     oldToNewStart[idx] = newInitArgs.size();
-    if (ForPointerInfo *info = findForInfo(pointerInfos, idx)) {
-      if (info->initParts.kind == PtrKind::Tensor) {
+    if (LoopPointerInfo *info = findLoopInfo(pointerInfos, idx)) {
+      for (Value component : getLoopComponentValues(info->initInfo)) {
         info->newIndices.push_back(newInitArgs.size());
-        newInitArgs.push_back(info->initParts.tensor.offset);
-      } else {
-        for (Value offset : info->initParts.block.offsets) {
-          info->newIndices.push_back(newInitArgs.size());
-          newInitArgs.push_back(offset);
-        }
+        newInitArgs.push_back(component);
       }
       continue;
     }
-    newInitArgs.push_back(initArg);
+    newInitArgs.push_back(remapValue(initArg, env));
   }
 
-  rewriter.setInsertionPoint(forOp);
-  auto newForOp = rewriter.create<scf::ForOp>(
-      forOp.getLoc(), forOp.getLowerBound(), forOp.getUpperBound(),
-      forOp.getStep(), newInitArgs,
-      [&](OpBuilder &builder, Location loc, Value iv, ValueRange args) {
-        IRMapping mapping;
-        mapping.map(forOp.getInductionVar(), iv);
+  bool bodyOk = true;
+  auto newForOp = builder.create<scf::ForOp>(
+      forOp.getLoc(), remapValue(forOp.getLowerBound(), env),
+      remapValue(forOp.getUpperBound(), env), remapValue(forOp.getStep(), env),
+      newInitArgs,
+      [&](OpBuilder &bodyBuilder, Location loc, Value iv, ValueRange args) {
+        RewriteEnv bodyEnv = env;
+        bodyEnv.valueMapping.map(forOp.getInductionVar(), iv);
 
         for (auto [idx, oldArg] : llvm::enumerate(forOp.getRegionIterArgs())) {
-          if (const ForPointerInfo *info = findForInfo(pointerInfos, idx)) {
-            SmallVector<Value> rebuildValues;
+          if (const LoopPointerInfo *info = findLoopInfo(pointerInfos, idx)) {
+            SmallVector<Value> values;
             for (unsigned newIndex : info->newIndices)
-              rebuildValues.push_back(args[newIndex]);
-            Value rebuilt = rebuildPtr(builder, loc, info->initParts,
-                                       rebuildValues);
-            mapping.map(oldArg, rebuilt);
+              values.push_back(args[newIndex]);
+            CFPtrInfo argInfo = withLoopComponentValues(info->initInfo, values);
+            FailureOr<CFPtrInfo> closedFormInfo =
+                withForIvClosedFormComponents(*info, iv, bodyBuilder, loc,
+                                              bodyEnv);
+            if (succeeded(closedFormInfo))
+              argInfo = *closedFormInfo;
+            Value rebuilt = rebuildPtr(bodyBuilder, loc, argInfo);
+            if (!rebuilt) {
+              bodyOk = false;
+              continue;
+            }
+            recordPointer(oldArg, argInfo, rebuilt, bodyEnv);
             continue;
           }
-          mapping.map(oldArg, args[oldToNewStart[idx]]);
+          bodyEnv.valueMapping.map(oldArg, args[oldToNewStart[idx]]);
         }
 
-        for (Operation &bodyOp : forOp.getBody()->without_terminator())
-          builder.clone(bodyOp, mapping);
+        if (failed(rewriteBodyOps(forOp.getBody(), bodyBuilder, bodyEnv)))
+          bodyOk = false;
 
         SmallVector<Value> newYieldOperands;
         for (auto [idx, oldOperand] : llvm::enumerate(yieldOp.getOperands())) {
-          if (const ForPointerInfo *info = findForInfo(pointerInfos, idx)) {
-            for (auto [componentIdx, delta] :
-                 llvm::enumerate(info->deltaValues)) {
-              Value current = args[info->newIndices[componentIdx]];
-              Value mappedDelta = mapping.lookupOrDefault(delta);
-              newYieldOperands.push_back(
-                  createAdd(builder, yieldOp.getLoc(), current, mappedDelta));
+          if (const LoopPointerInfo *info = findLoopInfo(pointerInfos, idx)) {
+            FailureOr<CFPtrInfo> nextInfo =
+                analyzePtr(oldOperand, bodyEnv, bodyBuilder,
+                           yieldOp.getLoc());
+            if (failed(nextInfo) ||
+                !areLoopCompatible(info->initInfo, *nextInfo)) {
+              bodyOk = false;
+              for (unsigned newIndex : info->newIndices)
+                newYieldOperands.push_back(args[newIndex]);
+              continue;
             }
+            for (Value component : getLoopComponentValues(*nextInfo))
+              newYieldOperands.push_back(component);
             continue;
           }
-          newYieldOperands.push_back(mapping.lookupOrDefault(oldOperand));
+          newYieldOperands.push_back(remapValue(oldOperand, bodyEnv));
         }
 
-        builder.create<scf::YieldOp>(yieldOp.getLoc(), newYieldOperands);
+        bodyBuilder.create<scf::YieldOp>(yieldOp.getLoc(), newYieldOperands);
       });
   newForOp->setAttrs(forOp->getAttrs());
 
-  rewriter.setInsertionPointAfter(newForOp);
-  SmallVector<Value> replacements;
-  for (auto [idx, oldResult] : llvm::enumerate(forOp.getResults())) {
-    if (const ForPointerInfo *info = findForInfo(pointerInfos, idx)) {
-      SmallVector<Value> rebuildValues =
-          collectForRebuildValues(*info, newForOp, /*useResults=*/true);
-      replacements.push_back(
-          rebuildPtr(rewriter, oldResult.getLoc(), info->initParts,
-                     rebuildValues));
-      continue;
-    }
-    replacements.push_back(newForOp.getResult(oldToNewStart[idx]));
+  if (!bodyOk) {
+    newForOp.erase();
+    return failure();
   }
 
-  if (llvm::any_of(replacements, [](Value value) { return !value; }))
-    return failure();
+  builder.setInsertionPointAfter(newForOp);
+  for (auto [idx, oldResult] : llvm::enumerate(forOp.getResults())) {
+    if (const LoopPointerInfo *info = findLoopInfo(pointerInfos, idx)) {
+      CFPtrInfo resultInfo = withLoopComponentValues(
+          info->initInfo,
+          collectForComponents(*info, newForOp, /*useResults=*/true));
+      Value rebuilt = rebuildPtr(builder, oldResult.getLoc(), resultInfo);
+      if (!rebuilt) {
+        newForOp.erase();
+        return failure();
+      }
+      recordPointer(oldResult, resultInfo, rebuilt, env);
+      continue;
+    }
+    env.valueMapping.map(oldResult, newForOp.getResult(oldToNewStart[idx]));
+  }
 
-  rewriter.replaceOp(forOp, replacements);
   return success();
 }
 
-static LogicalResult tryDecoupleWhile(scf::WhileOp whileOp,
-                                      IRRewriter &rewriter) {
+static LogicalResult rewriteWhileOp(scf::WhileOp whileOp, OpBuilder &builder,
+                                    RewriteEnv &env) {
   scf::ConditionOp conditionOp = whileOp.getConditionOp();
   scf::YieldOp yieldOp = whileOp.getYieldOp();
-  SmallVector<WhilePointerInfo, 4> pointerInfos;
+  SmallVector<LoopPointerInfo, 4> pointerInfos;
 
   OpBuilder analysisBuilder(whileOp.getContext());
   analysisBuilder.setInsertionPoint(whileOp);
@@ -1377,31 +1559,17 @@ static LogicalResult tryDecoupleWhile(scf::WhileOp whileOp,
   for (auto [idx, beforeArg] : llvm::enumerate(whileOp.getBeforeArguments())) {
     if (!isControlFlowPointerType(beforeArg.getType()))
       continue;
-    if (idx >= conditionOp.getArgs().size() || idx >= yieldOp.getNumOperands() ||
-        idx >= whileOp.getInits().size())
+    if (idx >= whileOp.getInits().size() || idx >= conditionOp.getArgs().size()
+        || idx >= yieldOp.getNumOperands())
       return failure();
 
-    FailureOr<PtrParts> initParts =
-        analyzePtr(whileOp.getInits()[idx], analysisBuilder, whileOp.getLoc());
-    if (failed(initParts))
+    FailureOr<CFPtrInfo> initInfo =
+        analyzePtr(whileOp.getInits()[idx], env, analysisBuilder,
+                   whileOp.getLoc());
+    if (failed(initInfo))
       continue;
-
-    FailureOr<SmallVector<Value>> conditionDelta =
-        getPointerDelta(conditionOp.getArgs()[idx], beforeArg, analysisBuilder,
-                        conditionOp.getLoc());
-    if (failed(conditionDelta))
-      continue;
-
-    Value afterArg = whileOp.getAfterArguments()[idx];
-    FailureOr<SmallVector<Value>> yieldDelta =
-        getPointerDelta(yieldOp.getOperand(idx), afterArg, analysisBuilder,
-                        yieldOp.getLoc());
-    if (failed(yieldDelta))
-      continue;
-
-    pointerInfos.push_back(WhilePointerInfo{static_cast<unsigned>(idx),
-                                            *initParts, *conditionDelta,
-                                            *yieldDelta, {}});
+    pointerInfos.push_back(
+        LoopPointerInfo{static_cast<unsigned>(idx), *initInfo, {}});
   }
 
   if (pointerInfos.empty())
@@ -1412,127 +1580,146 @@ static LogicalResult tryDecoupleWhile(scf::WhileOp whileOp,
   SmallVector<unsigned> oldToNewStart(whileOp.getInits().size(), 0);
   for (auto [idx, initArg] : llvm::enumerate(whileOp.getInits())) {
     oldToNewStart[idx] = newInits.size();
-    if (WhilePointerInfo *info = findWhileInfo(pointerInfos, idx)) {
-      if (info->initParts.kind == PtrKind::Tensor) {
+    if (LoopPointerInfo *info = findLoopInfo(pointerInfos, idx)) {
+      for (Value component : getLoopComponentValues(info->initInfo)) {
         info->newIndices.push_back(newInits.size());
-        newInits.push_back(info->initParts.tensor.offset);
-        newResultTypes.push_back(info->initParts.tensor.offset.getType());
-      } else {
-        for (Value offset : info->initParts.block.offsets) {
-          info->newIndices.push_back(newInits.size());
-          newInits.push_back(offset);
-          newResultTypes.push_back(offset.getType());
-        }
+        newInits.push_back(component);
+        newResultTypes.push_back(component.getType());
       }
       continue;
     }
-    newInits.push_back(initArg);
+    newInits.push_back(remapValue(initArg, env));
     newResultTypes.push_back(whileOp.getResult(idx).getType());
   }
 
-  rewriter.setInsertionPoint(whileOp);
-  auto newWhileOp = rewriter.create<scf::WhileOp>(
+  bool bodyOk = true;
+  auto newWhileOp = builder.create<scf::WhileOp>(
       whileOp.getLoc(), newResultTypes, newInits,
-      [&](OpBuilder &builder, Location loc, ValueRange args) {
-        IRMapping mapping;
+      [&](OpBuilder &bodyBuilder, Location loc, ValueRange args) {
+        RewriteEnv beforeEnv = env;
         for (auto [idx, oldArg] :
              llvm::enumerate(whileOp.getBeforeArguments())) {
-          if (const WhilePointerInfo *info = findWhileInfo(pointerInfos, idx)) {
-            SmallVector<Value> rebuildValues;
+          if (const LoopPointerInfo *info = findLoopInfo(pointerInfos, idx)) {
+            SmallVector<Value> values;
             for (unsigned newIndex : info->newIndices)
-              rebuildValues.push_back(args[newIndex]);
-            Value rebuilt = rebuildPtr(builder, loc, info->initParts,
-                                       rebuildValues);
-            mapping.map(oldArg, rebuilt);
+              values.push_back(args[newIndex]);
+            CFPtrInfo argInfo = withLoopComponentValues(info->initInfo, values);
+            Value rebuilt = rebuildPtr(bodyBuilder, loc, argInfo);
+            if (!rebuilt) {
+              bodyOk = false;
+              continue;
+            }
+            recordPointer(oldArg, argInfo, rebuilt, beforeEnv);
             continue;
           }
-          mapping.map(oldArg, args[oldToNewStart[idx]]);
+          beforeEnv.valueMapping.map(oldArg, args[oldToNewStart[idx]]);
         }
 
-        for (Operation &bodyOp : whileOp.getBeforeBody()->without_terminator())
-          builder.clone(bodyOp, mapping);
+        if (failed(rewriteBodyOps(whileOp.getBeforeBody(), bodyBuilder,
+                                  beforeEnv)))
+          bodyOk = false;
 
         SmallVector<Value> newConditionArgs;
         for (auto [idx, oldArg] : llvm::enumerate(conditionOp.getArgs())) {
-          if (const WhilePointerInfo *info = findWhileInfo(pointerInfos, idx)) {
-            for (auto [componentIdx, delta] :
-                 llvm::enumerate(info->conditionDeltaValues)) {
-              Value current = args[info->newIndices[componentIdx]];
-              Value mappedDelta = mapping.lookupOrDefault(delta);
-              newConditionArgs.push_back(createAdd(
-                  builder, conditionOp.getLoc(), current, mappedDelta));
+          if (const LoopPointerInfo *info = findLoopInfo(pointerInfos, idx)) {
+            FailureOr<CFPtrInfo> conditionInfo =
+                analyzePtr(oldArg, beforeEnv, bodyBuilder,
+                           conditionOp.getLoc());
+            if (failed(conditionInfo) ||
+                !areLoopCompatible(info->initInfo, *conditionInfo)) {
+              bodyOk = false;
+              for (unsigned newIndex : info->newIndices)
+                newConditionArgs.push_back(args[newIndex]);
+              continue;
             }
+            for (Value component : getLoopComponentValues(*conditionInfo))
+              newConditionArgs.push_back(component);
             continue;
           }
-          newConditionArgs.push_back(mapping.lookupOrDefault(oldArg));
+          newConditionArgs.push_back(remapValue(oldArg, beforeEnv));
         }
 
-        builder.create<scf::ConditionOp>(
+        bodyBuilder.create<scf::ConditionOp>(
             conditionOp.getLoc(),
-            mapping.lookupOrDefault(conditionOp.getCondition()),
+            remapValue(conditionOp.getCondition(), beforeEnv),
             newConditionArgs);
       },
-      [&](OpBuilder &builder, Location loc, ValueRange args) {
-        IRMapping mapping;
+      [&](OpBuilder &bodyBuilder, Location loc, ValueRange args) {
+        RewriteEnv afterEnv = env;
         for (auto [idx, oldArg] : llvm::enumerate(whileOp.getAfterArguments())) {
-          if (const WhilePointerInfo *info = findWhileInfo(pointerInfos, idx)) {
-            SmallVector<Value> rebuildValues;
+          if (const LoopPointerInfo *info = findLoopInfo(pointerInfos, idx)) {
+            SmallVector<Value> values;
             for (unsigned newIndex : info->newIndices)
-              rebuildValues.push_back(args[newIndex]);
-            Value rebuilt = rebuildPtr(builder, loc, info->initParts,
-                                       rebuildValues);
-            mapping.map(oldArg, rebuilt);
+              values.push_back(args[newIndex]);
+            CFPtrInfo argInfo = withLoopComponentValues(info->initInfo, values);
+            Value rebuilt = rebuildPtr(bodyBuilder, loc, argInfo);
+            if (!rebuilt) {
+              bodyOk = false;
+              continue;
+            }
+            recordPointer(oldArg, argInfo, rebuilt, afterEnv);
             continue;
           }
-          mapping.map(oldArg, args[oldToNewStart[idx]]);
+          afterEnv.valueMapping.map(oldArg, args[oldToNewStart[idx]]);
         }
 
-        for (Operation &bodyOp : whileOp.getAfterBody()->without_terminator())
-          builder.clone(bodyOp, mapping);
+        if (failed(rewriteBodyOps(whileOp.getAfterBody(), bodyBuilder,
+                                  afterEnv)))
+          bodyOk = false;
 
         SmallVector<Value> newYieldOperands;
         for (auto [idx, oldOperand] : llvm::enumerate(yieldOp.getOperands())) {
-          if (const WhilePointerInfo *info = findWhileInfo(pointerInfos, idx)) {
-            for (auto [componentIdx, delta] :
-                 llvm::enumerate(info->yieldDeltaValues)) {
-              Value current = args[info->newIndices[componentIdx]];
-              Value mappedDelta = mapping.lookupOrDefault(delta);
-              newYieldOperands.push_back(
-                  createAdd(builder, yieldOp.getLoc(), current, mappedDelta));
+          if (const LoopPointerInfo *info = findLoopInfo(pointerInfos, idx)) {
+            FailureOr<CFPtrInfo> nextInfo =
+                analyzePtr(oldOperand, afterEnv, bodyBuilder,
+                           yieldOp.getLoc());
+            if (failed(nextInfo) ||
+                !areLoopCompatible(info->initInfo, *nextInfo)) {
+              bodyOk = false;
+              for (unsigned newIndex : info->newIndices)
+                newYieldOperands.push_back(args[newIndex]);
+              continue;
             }
+            for (Value component : getLoopComponentValues(*nextInfo))
+              newYieldOperands.push_back(component);
             continue;
           }
-          newYieldOperands.push_back(mapping.lookupOrDefault(oldOperand));
+          newYieldOperands.push_back(remapValue(oldOperand, afterEnv));
         }
 
-        builder.create<scf::YieldOp>(yieldOp.getLoc(), newYieldOperands);
+        bodyBuilder.create<scf::YieldOp>(yieldOp.getLoc(), newYieldOperands);
       });
   newWhileOp->setAttrs(whileOp->getAttrs());
 
-  rewriter.setInsertionPointAfter(newWhileOp);
-  SmallVector<Value> replacements;
-  for (auto [idx, oldResult] : llvm::enumerate(whileOp.getResults())) {
-    if (const WhilePointerInfo *info = findWhileInfo(pointerInfos, idx)) {
-      SmallVector<Value> rebuildValues = collectWhileRebuildValues(
-          *info, newWhileOp, /*useResults=*/true, /*useAfterArgs=*/false);
-      replacements.push_back(
-          rebuildPtr(rewriter, oldResult.getLoc(), info->initParts,
-                     rebuildValues));
-      continue;
-    }
-    replacements.push_back(newWhileOp.getResult(oldToNewStart[idx]));
+  if (!bodyOk) {
+    newWhileOp.erase();
+    return failure();
   }
 
-  if (llvm::any_of(replacements, [](Value value) { return !value; }))
-    return failure();
+  builder.setInsertionPointAfter(newWhileOp);
+  for (auto [idx, oldResult] : llvm::enumerate(whileOp.getResults())) {
+    if (const LoopPointerInfo *info = findLoopInfo(pointerInfos, idx)) {
+      CFPtrInfo resultInfo = withLoopComponentValues(
+          info->initInfo,
+          collectWhileComponents(*info, newWhileOp, /*useResults=*/true,
+                                 /*useAfterArgs=*/false));
+      Value rebuilt = rebuildPtr(builder, oldResult.getLoc(), resultInfo);
+      if (!rebuilt) {
+        newWhileOp.erase();
+        return failure();
+      }
+      recordPointer(oldResult, resultInfo, rebuilt, env);
+      continue;
+    }
+    env.valueMapping.map(oldResult, newWhileOp.getResult(oldToNewStart[idx]));
+  }
 
-  rewriter.replaceOp(whileOp, replacements);
   return success();
 }
 
 static LogicalResult
-addIfTensorComponents(const TensorPtrParts &thenParts,
-                      const TensorPtrParts &elseParts,
+addIfTensorComponents(const TensorPtrInfo &thenParts,
+                      const TensorPtrInfo &elseParts,
                       SmallVectorImpl<IfComponent> &components) {
   if (thenParts.base != elseParts.base)
     return failure();
@@ -1544,8 +1731,8 @@ addIfTensorComponents(const TensorPtrParts &thenParts,
 }
 
 static LogicalResult
-addIfBlockComponents(const BlockPtrParts &thenParts,
-                     const BlockPtrParts &elseParts,
+addIfBlockComponents(const BlockPtrInfo &thenParts,
+                     const BlockPtrInfo &elseParts,
                      SmallVectorImpl<IfComponent> &components) {
   if (thenParts.resultType != elseParts.resultType ||
       thenParts.order != elseParts.order ||
@@ -1597,41 +1784,82 @@ addIfBlockComponents(const BlockPtrParts &thenParts,
   return success();
 }
 
-static Value getThenComponentValue(const IfPointerInfo &info,
-                                   const IfComponent &component) {
-  if (info.thenParts.kind == PtrKind::Tensor) {
-    if (component.kind == IfComponentKind::TensorOffset)
-      return info.thenParts.tensor.offset;
-    return nullptr;
+static FailureOr<CFPtrInfo>
+analyzePtrForIfPlanning(Value value, const RewriteEnv &env,
+                        OpBuilder &builder, Location loc);
+
+static FailureOr<CFPtrInfo>
+analyzeNestedIfResultForPlanning(scf::IfOp ifOp, unsigned resultIndex,
+                                 const RewriteEnv &env, OpBuilder &builder,
+                                 Location loc) {
+  if (!ifOp.elseBlock() || resultIndex >= ifOp.getNumResults())
+    return failure();
+
+  scf::YieldOp thenYield = ifOp.thenYield();
+  scf::YieldOp elseYield = ifOp.elseYield();
+  if (resultIndex >= thenYield.getNumOperands() ||
+      resultIndex >= elseYield.getNumOperands())
+    return failure();
+
+  FailureOr<CFPtrInfo> thenInfo = analyzePtrForIfPlanning(
+      thenYield.getOperand(resultIndex), env, builder, loc);
+  FailureOr<CFPtrInfo> elseInfo = analyzePtrForIfPlanning(
+      elseYield.getOperand(resultIndex), env, builder, loc);
+  if (failed(thenInfo) || failed(elseInfo) ||
+      thenInfo->kind != elseInfo->kind)
+    return failure();
+
+  SmallVector<IfComponent> components;
+  if (thenInfo->kind == PtrKind::Tensor) {
+    if (thenInfo->tensor.resultType != elseInfo->tensor.resultType ||
+        thenInfo->tensor.scalarBase != elseInfo->tensor.scalarBase)
+      return failure();
+    if (failed(addIfTensorComponents(thenInfo->tensor, elseInfo->tensor,
+                                     components)))
+      return failure();
+  } else if (failed(addIfBlockComponents(thenInfo->block, elseInfo->block,
+                                         components))) {
+    return failure();
   }
 
-  switch (component.kind) {
-  case IfComponentKind::BlockShape:
-    return info.thenParts.block.shape[component.dim];
-  case IfComponentKind::BlockStride:
-    return info.thenParts.block.strides[component.dim];
-  case IfComponentKind::BlockOffset:
-    return info.thenParts.block.offsets[component.dim];
-  default:
-    return nullptr;
-  }
+  return *thenInfo;
 }
 
-static Value getElseComponentValue(const IfPointerInfo &info,
-                                   const IfComponent &component) {
-  if (info.elseParts.kind == PtrKind::Tensor) {
+static FailureOr<CFPtrInfo>
+analyzePtrForIfPlanning(Value value, const RewriteEnv &env,
+                        OpBuilder &builder, Location loc) {
+  if (auto it = env.pointerComponents.find(value);
+      it != env.pointerComponents.end())
+    return it->second;
+
+  Value mapped = remapValue(value, env);
+  if (auto result = dyn_cast<OpResult>(mapped)) {
+    if (auto nestedIf = dyn_cast<scf::IfOp>(result.getOwner())) {
+      FailureOr<CFPtrInfo> nestedInfo = analyzeNestedIfResultForPlanning(
+          nestedIf, result.getResultNumber(), env, builder, loc);
+      if (succeeded(nestedInfo))
+        return nestedInfo;
+    }
+  }
+
+  return analyzePtr(value, env, builder, loc);
+}
+
+static Value getComponentValue(const CFPtrInfo &info,
+                               const IfComponent &component) {
+  if (info.kind == PtrKind::Tensor) {
     if (component.kind == IfComponentKind::TensorOffset)
-      return info.elseParts.tensor.offset;
+      return info.tensor.offset;
     return nullptr;
   }
 
   switch (component.kind) {
   case IfComponentKind::BlockShape:
-    return info.elseParts.block.shape[component.dim];
+    return info.block.shape[component.dim];
   case IfComponentKind::BlockStride:
-    return info.elseParts.block.strides[component.dim];
+    return info.block.strides[component.dim];
   case IfComponentKind::BlockOffset:
-    return info.elseParts.block.offsets[component.dim];
+    return info.block.offsets[component.dim];
   default:
     return nullptr;
   }
@@ -1646,46 +1874,45 @@ findIfInfo(ArrayRef<IfPointerInfo> infos, unsigned oldIndex) {
   return nullptr;
 }
 
-static Value rebuildIfPointer(OpBuilder &builder, Location loc,
-                              const IfPointerInfo &info,
-                              ArrayRef<Value> componentValues) {
+static FailureOr<CFPtrInfo>
+makeIfResultInfo(const IfPointerInfo &info, ArrayRef<Value> componentValues) {
   unsigned componentIndex = 0;
-  if (info.thenParts.kind == PtrKind::Tensor) {
-    Value base = info.thenParts.tensor.base;
-    Value offset = nullptr;
+  CFPtrInfo resultInfo = info.thenInfo;
+  if (info.thenInfo.kind == PtrKind::Tensor) {
     for (const IfComponent &component : info.components) {
       Value value = componentValues[componentIndex++];
-      if (component.kind == IfComponentKind::TensorOffset)
-        offset = value;
+      switch (component.kind) {
+      case IfComponentKind::TensorOffset:
+        resultInfo.tensor.offset = value;
+        break;
+      default:
+        return failure();
+      }
     }
-    return rebuildTensorPtr(builder, loc, info.thenParts.tensor, base, offset);
+    return resultInfo;
   }
 
-  Value base = info.thenParts.block.base;
-  SmallVector<Value> shape = info.thenParts.block.shape;
-  SmallVector<Value> strides = info.thenParts.block.strides;
-  SmallVector<Value> offsets = info.thenParts.block.offsets;
   for (const IfComponent &component : info.components) {
     Value value = componentValues[componentIndex++];
     switch (component.kind) {
     case IfComponentKind::BlockShape:
-      shape[component.dim] = value;
+      resultInfo.block.shape[component.dim] = value;
       break;
     case IfComponentKind::BlockStride:
-      strides[component.dim] = value;
+      resultInfo.block.strides[component.dim] = value;
       break;
     case IfComponentKind::BlockOffset:
-      offsets[component.dim] = value;
+      resultInfo.block.offsets[component.dim] = value;
       break;
     default:
-      return nullptr;
+      return failure();
     }
   }
-  return rebuildBlockPtr(builder, loc, info.thenParts.block, base, shape,
-                         strides, offsets);
+  return resultInfo;
 }
 
-static LogicalResult tryDecoupleIf(scf::IfOp ifOp, IRRewriter &rewriter) {
+static LogicalResult rewriteIfOp(scf::IfOp ifOp, OpBuilder &builder,
+                                 RewriteEnv &env) {
   if (!ifOp.elseBlock() || ifOp->getNumResults() == 0)
     return failure();
 
@@ -1699,30 +1926,32 @@ static LogicalResult tryDecoupleIf(scf::IfOp ifOp, IRRewriter &rewriter) {
   for (auto [idx, result] : llvm::enumerate(ifOp.getResults())) {
     if (!isControlFlowPointerType(result.getType()))
       continue;
+    if (thenYield.getOperand(idx) == elseYield.getOperand(idx))
+      continue;
 
-    FailureOr<PtrParts> thenParts = analyzePtr(
-        thenYield.getOperand(idx), analysisBuilder, thenYield.getLoc());
-    FailureOr<PtrParts> elseParts = analyzePtr(
-        elseYield.getOperand(idx), analysisBuilder, elseYield.getLoc());
-    if (failed(thenParts) || failed(elseParts) ||
-        (*thenParts).kind != (*elseParts).kind)
+    FailureOr<CFPtrInfo> thenInfo = analyzePtrForIfPlanning(
+        thenYield.getOperand(idx), env, analysisBuilder, thenYield.getLoc());
+    FailureOr<CFPtrInfo> elseInfo = analyzePtrForIfPlanning(
+        elseYield.getOperand(idx), env, analysisBuilder, elseYield.getLoc());
+    if (failed(thenInfo) || failed(elseInfo) ||
+        (*thenInfo).kind != (*elseInfo).kind)
       continue;
 
     IfPointerInfo info;
     info.oldIndex = idx;
-    info.thenParts = *thenParts;
-    info.elseParts = *elseParts;
-    if (info.thenParts.kind == PtrKind::Tensor) {
-      if (info.thenParts.tensor.resultType != info.elseParts.tensor.resultType ||
-          info.thenParts.tensor.scalarBase != info.elseParts.tensor.scalarBase)
+    info.thenInfo = *thenInfo;
+    info.elseInfo = *elseInfo;
+    if (info.thenInfo.kind == PtrKind::Tensor) {
+      if (info.thenInfo.tensor.resultType != info.elseInfo.tensor.resultType ||
+          info.thenInfo.tensor.scalarBase != info.elseInfo.tensor.scalarBase)
         continue;
-      if (failed(addIfTensorComponents(info.thenParts.tensor,
-                                       info.elseParts.tensor,
+      if (failed(addIfTensorComponents(info.thenInfo.tensor,
+                                       info.elseInfo.tensor,
                                        info.components)))
         continue;
     } else {
-      if (failed(addIfBlockComponents(info.thenParts.block,
-                                      info.elseParts.block, info.components)))
+      if (failed(addIfBlockComponents(info.thenInfo.block,
+                                      info.elseInfo.block, info.components)))
         continue;
     }
     pointerInfos.push_back(info);
@@ -1741,74 +1970,129 @@ static LogicalResult tryDecoupleIf(scf::IfOp ifOp, IRRewriter &rewriter) {
     newResultTypes.push_back(result.getType());
   }
 
-  auto buildBranch = [&](OpBuilder &builder, Location loc, bool isThen) {
-    IRMapping mapping;
+  bool bodyOk = true;
+  auto buildBranch = [&](OpBuilder &branchBuilder, Location loc,
+                         bool isThen) -> LogicalResult {
+    RewriteEnv branchEnv = env;
     Block *oldBlock = isThen ? ifOp.thenBlock() : ifOp.elseBlock();
     scf::YieldOp oldYield = isThen ? thenYield : elseYield;
-    for (Operation &bodyOp : oldBlock->without_terminator())
-      builder.clone(bodyOp, mapping);
+    if (failed(rewriteBodyOps(oldBlock, branchBuilder, branchEnv)))
+      return failure();
 
     SmallVector<Value> newYieldOperands;
     for (auto [idx, oldOperand] : llvm::enumerate(oldYield.getOperands())) {
       if (const IfPointerInfo *info = findIfInfo(pointerInfos, idx)) {
+        FailureOr<CFPtrInfo> branchInfo =
+            analyzePtr(oldOperand, branchEnv, branchBuilder,
+                       oldYield.getLoc());
+        if (failed(branchInfo) || branchInfo->kind != info->thenInfo.kind)
+          return failure();
         for (const IfComponent &component : info->components) {
-          Value value = isThen ? getThenComponentValue(*info, component)
-                               : getElseComponentValue(*info, component);
-          newYieldOperands.push_back(mapping.lookupOrDefault(value));
+          Value value = getComponentValue(*branchInfo, component);
+          if (!value || value.getType() != component.type)
+            return failure();
+          newYieldOperands.push_back(value);
         }
         continue;
       }
-      newYieldOperands.push_back(mapping.lookupOrDefault(oldOperand));
+      newYieldOperands.push_back(remapValue(oldOperand, branchEnv));
     }
-    builder.create<scf::YieldOp>(oldYield.getLoc(), newYieldOperands);
+    branchBuilder.create<scf::YieldOp>(oldYield.getLoc(), newYieldOperands);
+    return success();
   };
 
-  rewriter.setInsertionPoint(ifOp);
-  auto newIfOp = rewriter.create<scf::IfOp>(
-      ifOp.getLoc(), newResultTypes, ifOp.getCondition(), true);
+  auto newIfOp = builder.create<scf::IfOp>(
+      ifOp.getLoc(), newResultTypes, remapValue(ifOp.getCondition(), env),
+      true);
   newIfOp->setAttrs(ifOp->getAttrs());
 
   {
-    OpBuilder::InsertionGuard guard(rewriter);
+    OpBuilder::InsertionGuard guard(builder);
     if (newResultTypes.empty()) {
       newIfOp.thenBlock()->getTerminator()->erase();
-      rewriter.setInsertionPointToEnd(newIfOp.thenBlock());
+      builder.setInsertionPointToEnd(newIfOp.thenBlock());
     } else {
-      rewriter.setInsertionPointToStart(newIfOp.thenBlock());
+      builder.setInsertionPointToStart(newIfOp.thenBlock());
     }
-    buildBranch(rewriter, ifOp.getLoc(), /*isThen=*/true);
+    if (failed(buildBranch(builder, ifOp.getLoc(), /*isThen=*/true)))
+      bodyOk = false;
   }
   {
-    OpBuilder::InsertionGuard guard(rewriter);
+    OpBuilder::InsertionGuard guard(builder);
     if (newResultTypes.empty()) {
       newIfOp.elseBlock()->getTerminator()->erase();
-      rewriter.setInsertionPointToEnd(newIfOp.elseBlock());
+      builder.setInsertionPointToEnd(newIfOp.elseBlock());
     } else {
-      rewriter.setInsertionPointToStart(newIfOp.elseBlock());
+      builder.setInsertionPointToStart(newIfOp.elseBlock());
     }
-    buildBranch(rewriter, ifOp.getLoc(), /*isThen=*/false);
+    if (failed(buildBranch(builder, ifOp.getLoc(), /*isThen=*/false)))
+      bodyOk = false;
   }
 
-  rewriter.setInsertionPointAfter(newIfOp);
-  SmallVector<Value> replacements;
+  if (!bodyOk) {
+    newIfOp.erase();
+    return failure();
+  }
+
+  builder.setInsertionPointAfter(newIfOp);
   unsigned newResultIndex = 0;
   for (auto [idx, oldResult] : llvm::enumerate(ifOp.getResults())) {
     if (const IfPointerInfo *info = findIfInfo(pointerInfos, idx)) {
       SmallVector<Value> componentValues;
       for (unsigned i = 0; i < info->components.size(); ++i)
         componentValues.push_back(newIfOp.getResult(newResultIndex++));
-      replacements.push_back(
-          rebuildIfPointer(rewriter, oldResult.getLoc(), *info,
-                           componentValues));
+      FailureOr<CFPtrInfo> resultInfo =
+          makeIfResultInfo(*info, componentValues);
+      if (failed(resultInfo)) {
+        newIfOp.erase();
+        return failure();
+      }
+      Value rebuilt = rebuildPtr(builder, oldResult.getLoc(), *resultInfo);
+      if (!rebuilt) {
+        newIfOp.erase();
+        return failure();
+      }
+      recordPointer(oldResult, *resultInfo, rebuilt, env);
       continue;
     }
-    replacements.push_back(newIfOp.getResult(newResultIndex++));
+    env.valueMapping.map(oldResult, newIfOp.getResult(newResultIndex++));
   }
 
-  if (llvm::any_of(replacements, [](Value value) { return !value; }))
+  return success();
+}
+
+static LogicalResult rewriteControlFlowOp(Operation *op, OpBuilder &builder,
+                                          RewriteEnv &env) {
+  if (auto forOp = dyn_cast<scf::ForOp>(op))
+    return rewriteForOp(forOp, builder, env);
+  if (auto whileOp = dyn_cast<scf::WhileOp>(op))
+    return rewriteWhileOp(whileOp, builder, env);
+  if (auto ifOp = dyn_cast<scf::IfOp>(op))
+    return rewriteIfOp(ifOp, builder, env);
+  return failure();
+}
+
+static SmallVector<Value> collectReplacements(Operation *op,
+                                              const RewriteEnv &env) {
+  SmallVector<Value> replacements;
+  replacements.reserve(op->getNumResults());
+  for (Value result : op->getResults())
+    replacements.push_back(remapValue(result, env));
+  return replacements;
+}
+
+static LogicalResult tryDecoupleControlFlowOp(Operation *op,
+                                              IRRewriter &rewriter) {
+  RewriteEnv env;
+  rewriter.setInsertionPoint(op);
+  if (failed(rewriteControlFlowOp(op, rewriter, env)))
     return failure();
 
-  rewriter.replaceOp(ifOp, replacements);
+  SmallVector<Value> replacements = collectReplacements(op, env);
+  if (replacements.size() != op->getNumResults() ||
+      llvm::any_of(replacements, [](Value value) { return !value; }))
+    return failure();
+  rewriter.replaceOp(op, replacements);
   return success();
 }
 
@@ -1868,15 +2152,7 @@ void TritonControlFlowOptPass::runOnOperation() {
     if (op->getParentOp() == nullptr)
       continue;
 
-    LogicalResult result = failure();
-    if (auto forOp = dyn_cast<scf::ForOp>(op))
-      result = tryDecoupleFor(forOp, rewriter);
-    else if (auto whileOp = dyn_cast<scf::WhileOp>(op))
-      result = tryDecoupleWhile(whileOp, rewriter);
-    else if (auto ifOp = dyn_cast<scf::IfOp>(op))
-      result = tryDecoupleIf(ifOp, rewriter);
-
-    (void)result;
+    (void)tryDecoupleControlFlowOp(op, rewriter);
   }
 
   if (failed(verify(moduleOp)))

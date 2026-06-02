@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 #
-# Tests for SIMT IndirectLoad fast-path (TritonToLinalg / IndirectLoadRewrite).
+# Tests for SIMT IndirectLoad fast-path (TritonToLinalg / StridedLoadStoreRewrite).
 #
 # What each parameter row exercises against the V1 trigger condition
 # (compileOn91095 + forceSimtTemplate, last-axis stride statically > 1,

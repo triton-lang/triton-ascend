@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  */
 
-#include "TritonToLinalg/IndirectLoadRewrite.h"
+#include "TritonToLinalg/StridedLoadStoreRewrite.h"
 #include "TritonToLinalg/ImplicitPermute.h"
 #include "TritonToStructured/PtrAnalysis.h"
 #include "Utils/Utils.h"
@@ -32,14 +32,16 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Matchers.h"
+#include "mlir/IR/BuiltinOps.h"
 
 #include "llvm/Support/Debug.h"
 
 #include <cstdlib>
+#include <functional>
 
 #define DEBUG_TYPE "triton-to-linalg-indirect-load-rewrite"
 
-namespace IndirectLoadRewrite {
+namespace StridedLoadStoreRewrite {
 
 using namespace mlir;
 using namespace triton;
@@ -261,7 +263,7 @@ static Value buildPaddingOther(Location loc, PatternRewriter &rewriter,
 
 // AddPtr path: tt.load(tt.addptr(tt.splat(%scalar_ptr), %offsets)).
 // Uses PtrAnalysis (which has IR side effects), so this function must
-// stamp InspectedByIndirectLoadRewriteTAG on every "PtrAnalysis ran but
+// stamp InspectedByStridedLoadStoreRewriteTAG on every "PtrAnalysis ran but
 // don't rewrite" path -- see comment block inside.
 static LogicalResult tryRewriteAddPtrLoad(triton::LoadOp op,
                                           triton::AddPtrOp addPtrOp,
@@ -280,13 +282,13 @@ static LogicalResult tryRewriteAddPtrLoad(triton::LoadOp op,
     }
 
     // From here, PtrAnalysis may insert helper IR. Every early-out path
-    // MUST stamp InspectedByIndirectLoadRewriteTAG and return success() so
+    // MUST stamp InspectedByStridedLoadStoreRewriteTAG and return success() so
     // the greedy driver does not re-walk the same op (which would re-run
     // PtrAnalysis and accumulate dead IR until maxIterations).
     TritonToStructured::PtrAnalysis ptrAnalysis;
     TritonToStructured::PtrState ptrState;
     auto markInspectedAndReturn = [&]() {
-        op->setAttr(InspectedByIndirectLoadRewriteTAG,
+        op->setAttr(InspectedByStridedLoadStoreRewriteTAG,
                     UnitAttr::get(rewriter.getContext()));
         return success();
     };
@@ -296,14 +298,17 @@ static LogicalResult tryRewriteAddPtrLoad(triton::LoadOp op,
     ptrState.analyzePermute();
     if (ptrState.isPermuted) return markInspectedAndReturn();
 
+    // Stride dispatch (mirrors tryRewriteBlockPtrLoad): only DECLINE for static
+    // power-of-two strides (-> strided DMA / deinterleave); non-power-of-two
+    // static and dynamic strides fall through to SIMT indirect.
     auto lastStrideOpt = getConstantIntValue(ptrState.stateInfo.back().stride);
-    if (!lastStrideOpt.has_value()) return markInspectedAndReturn();
-    int64_t lastStride = std::abs(lastStrideOpt.value());
-    if (lastStride <= 1) return markInspectedAndReturn();
-    if (lastStride == 2) {
-        auto lastShapeOpt = getConstantIntValue(ptrState.stateInfo.back().shape);
-        if (lastShapeOpt.has_value() && lastShapeOpt.value() % 2 == 0)
-            return markInspectedAndReturn();
+    int64_t lastStride = -1;  // -1 == dynamic
+    if (lastStrideOpt.has_value()) {
+        lastStride = std::abs(lastStrideOpt.value());
+        if (lastStride <= 1) return markInspectedAndReturn();
+        if (lastStride == 2) return markInspectedAndReturn();  // even -> deinterleave; odd -> strided DMA
+        if ((lastStride & (lastStride - 1)) == 0)
+            return markInspectedAndReturn();  // power-of-two >= 4 -> strided DMA
     }
 
     Value offsetTensor =
@@ -312,12 +317,12 @@ static LogicalResult tryRewriteAddPtrLoad(triton::LoadOp op,
 
     auto indirectLoad = rewriter.create<triton::ascend::IndirectLoadOp>(
         loc, resultType, scalarBase, offsetTensor, op.getMask(), op.getOther());
-    indirectLoad->setAttr(RewrittenByIndirectLoadRewriteTAG,
+    indirectLoad->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
                           UnitAttr::get(rewriter.getContext()));
 
     LLVM_DEBUG({
         llvm::dbgs() << "----------------------------------------------\n";
-        llvm::dbgs() << "IndirectLoadRewrite [AddPtr]: tt.load -> tt.indirect_load\n";
+        llvm::dbgs() << "StridedLoadStoreRewrite [AddPtr]: tt.load -> tt.indirect_load\n";
         llvm::dbgs() << "  last_stride = " << lastStride << "\n";
         llvm::dbgs() << indirectLoad << "\n";
         llvm::dbgs() << "----------------------------------------------\n";
@@ -357,16 +362,23 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
     auto strides = mtpt.getStrides();
     if (strides.empty() || static_cast<int64_t>(strides.size()) != rank)
         return failure();
+    // Stride dispatch: strided DMA on the MTE engine only supports power-of-two
+    // strides; a non-power-of-two stride would degrade to a slow scalar access,
+    // and a dynamic stride cannot be proven to be a power of two -- both are
+    // better served by the SIMT indirect gather. So we only DECLINE the indirect
+    // rewrite (-> strided DMA / deinterleave) for *static power-of-two* strides:
+    //   stride 1 -> contiguous; stride 2 (even dim) -> deinterleave;
+    //   stride >= 4 (power of two) -> (compact) strided DMA.
+    // Everything else (non-power-of-two static, or dynamic) falls through to the
+    // SIMT indirect gather below (the offset tensor is built from the stride
+    // Values, so a dynamic stride is fine).
     APInt lastStrideC;
-    if (!matchPattern(strides.back(), m_ConstantInt(&lastStrideC))) {
-        // Dynamic last-axis stride: Lazy default, do not rewrite.
-        return failure();
-    }
-    int64_t lastStride = std::abs(lastStrideC.getSExtValue());
-    if (lastStride <= 1) return failure();
-    if (lastStride == 2 && shape.back() % 2 == 0) {
-        // Yield priority to DeinterleaveStatusOptimization.
-        return failure();
+    int64_t lastStride = -1;  // -1 == dynamic (not a static constant)
+    if (matchPattern(strides.back(), m_ConstantInt(&lastStrideC))) {
+        lastStride = std::abs(lastStrideC.getSExtValue());
+        if (lastStride <= 1) return failure();
+        if (lastStride == 2) return failure();  // even -> deinterleave; odd -> strided DMA
+        if ((lastStride & (lastStride - 1)) == 0) return failure();  // power-of-two >= 4 -> strided DMA
     }
 
     // ---- Compute per-axis effective base offsets: mtpt.offsets[d] + (advance.offsets[d] if present)
@@ -470,12 +482,12 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
     // ---- Emit tt.indirect_load ----
     auto indirectLoad = rewriter.create<triton::ascend::IndirectLoadOp>(
         loc, resultType, src, offsetTensor, mask, other);
-    indirectLoad->setAttr(RewrittenByIndirectLoadRewriteTAG,
+    indirectLoad->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
                           UnitAttr::get(rewriter.getContext()));
 
     LLVM_DEBUG({
         llvm::dbgs() << "----------------------------------------------\n";
-        llvm::dbgs() << "IndirectLoadRewrite [BlockPtr"
+        llvm::dbgs() << "StridedLoadStoreRewrite [BlockPtr"
                      << (advance ? "+Advance" : "")
                      << (boundaryCheck.empty() ? "" : "+Boundary")
                      << "]: tt.load -> tt.indirect_load\n";
@@ -505,7 +517,7 @@ static LogicalResult tryRewriteAddPtrStore(triton::StoreOp op,
     TritonToStructured::PtrAnalysis ptrAnalysis;
     TritonToStructured::PtrState ptrState;
     auto markInspectedAndReturn = [&]() {
-        op->setAttr(InspectedByIndirectLoadRewriteTAG,
+        op->setAttr(InspectedByStridedLoadStoreRewriteTAG,
                     UnitAttr::get(rewriter.getContext()));
         return success();
     };
@@ -515,14 +527,17 @@ static LogicalResult tryRewriteAddPtrStore(triton::StoreOp op,
     ptrState.analyzePermute();
     if (ptrState.isPermuted) return markInspectedAndReturn();
 
+    // Stride dispatch (mirrors tryRewriteBlockPtrLoad): only DECLINE for static
+    // power-of-two strides (-> strided DMA / deinterleave); non-power-of-two
+    // static and dynamic strides fall through to SIMT indirect.
     auto lastStrideOpt = getConstantIntValue(ptrState.stateInfo.back().stride);
-    if (!lastStrideOpt.has_value()) return markInspectedAndReturn();
-    int64_t lastStride = std::abs(lastStrideOpt.value());
-    if (lastStride <= 1) return markInspectedAndReturn();
-    if (lastStride == 2) {
-        auto lastShapeOpt = getConstantIntValue(ptrState.stateInfo.back().shape);
-        if (lastShapeOpt.has_value() && lastShapeOpt.value() % 2 == 0)
-            return markInspectedAndReturn();
+    int64_t lastStride = -1;  // -1 == dynamic
+    if (lastStrideOpt.has_value()) {
+        lastStride = std::abs(lastStrideOpt.value());
+        if (lastStride <= 1) return markInspectedAndReturn();
+        if (lastStride == 2) return markInspectedAndReturn();  // even -> deinterleave; odd -> strided DMA
+        if ((lastStride & (lastStride - 1)) == 0)
+            return markInspectedAndReturn();  // power-of-two >= 4 -> strided DMA
     }
 
     Value offsetTensor =
@@ -531,12 +546,12 @@ static LogicalResult tryRewriteAddPtrStore(triton::StoreOp op,
 
     auto indirectStore = rewriter.create<triton::ascend::IndirectStoreOp>(
         loc, scalarBase, offsetTensor, op.getValue(), op.getMask());
-    indirectStore->setAttr(RewrittenByIndirectLoadRewriteTAG,
+    indirectStore->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
                            UnitAttr::get(rewriter.getContext()));
 
     LLVM_DEBUG({
         llvm::dbgs() << "----------------------------------------------\n";
-        llvm::dbgs() << "IndirectLoadRewrite [AddPtr/Store]: tt.store -> "
+        llvm::dbgs() << "StridedLoadStoreRewrite [AddPtr/Store]: tt.store -> "
                         "tt.indirect_store\n";
         llvm::dbgs() << "  last_stride = " << lastStride << "\n";
         llvm::dbgs() << indirectStore << "\n";
@@ -566,12 +581,17 @@ static LogicalResult tryRewriteBlockPtrStore(triton::StoreOp op,
     auto strides = mtpt.getStrides();
     if (strides.empty() || static_cast<int64_t>(strides.size()) != rank)
         return failure();
+    // Stride dispatch (mirrors tryRewriteBlockPtrLoad): only DECLINE the indirect
+    // rewrite for static power-of-two strides (-> strided DMA / deinterleave);
+    // non-power-of-two static and dynamic strides fall through to SIMT indirect.
     APInt lastStrideC;
-    if (!matchPattern(strides.back(), m_ConstantInt(&lastStrideC)))
-        return failure();
-    int64_t lastStride = std::abs(lastStrideC.getSExtValue());
-    if (lastStride <= 1) return failure();
-    if (lastStride == 2 && shape.back() % 2 == 0) return failure();
+    int64_t lastStride = -1;  // -1 == dynamic
+    if (matchPattern(strides.back(), m_ConstantInt(&lastStrideC))) {
+        lastStride = std::abs(lastStrideC.getSExtValue());
+        if (lastStride <= 1) return failure();
+        if (lastStride == 2) return failure();  // even -> deinterleave; odd -> strided DMA
+        if ((lastStride & (lastStride - 1)) == 0) return failure();  // power-of-two >= 4 -> strided DMA
+    }
 
     ValueRange mtptOffsets = mtpt.getOffsets();
     ValueRange advOffsets = advance ? advance.getOffsets() : ValueRange{};
@@ -654,12 +674,12 @@ static LogicalResult tryRewriteBlockPtrStore(triton::StoreOp op,
 
     auto indirectStore = rewriter.create<triton::ascend::IndirectStoreOp>(
         loc, src, offsetTensor, op.getValue(), mask);
-    indirectStore->setAttr(RewrittenByIndirectLoadRewriteTAG,
+    indirectStore->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
                            UnitAttr::get(rewriter.getContext()));
 
     LLVM_DEBUG({
         llvm::dbgs() << "----------------------------------------------\n";
-        llvm::dbgs() << "IndirectLoadRewrite [BlockPtr"
+        llvm::dbgs() << "StridedLoadStoreRewrite [BlockPtr"
                      << (advance ? "+Advance" : "")
                      << (boundaryCheck.empty() ? "" : "+Boundary")
                      << "/Store]: tt.store -> tt.indirect_store\n";
@@ -679,8 +699,8 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
     (void)loc;
 
     // ---- Re-entry / cross-step guards ----
-    if (op->hasAttr(InspectedByIndirectLoadRewriteTAG)) return failure();
-    if (op->hasAttr(RewrittenByIndirectLoadRewriteTAG)) return failure();
+    if (op->hasAttr(InspectedByStridedLoadStoreRewriteTAG)) return failure();
+    if (op->hasAttr(RewrittenByStridedLoadStoreRewriteTAG)) return failure();
     if (op->hasAttr(ImplicitPermute::ImplicitPermuteHandledTAG)) return failure();
     if (op->hasAttr(mlir::ConverterUtils::discreteAttrName)) return failure();
 
@@ -718,8 +738,8 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
 LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
                                               PatternRewriter &rewriter) const {
     // ---- Re-entry / cross-step guards (same convention as LoadConverter) ----
-    if (op->hasAttr(InspectedByIndirectLoadRewriteTAG)) return failure();
-    if (op->hasAttr(RewrittenByIndirectLoadRewriteTAG)) return failure();
+    if (op->hasAttr(InspectedByStridedLoadStoreRewriteTAG)) return failure();
+    if (op->hasAttr(RewrittenByStridedLoadStoreRewriteTAG)) return failure();
     if (op->hasAttr(ImplicitPermute::ImplicitPermuteHandledTAG)) return failure();
     if (op->hasAttr(mlir::ConverterUtils::discreteAttrName)) return failure();
 
@@ -750,4 +770,4 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
     return failure();
 }
 
-}  // namespace IndirectLoadRewrite
+}  // namespace StridedLoadStoreRewrite

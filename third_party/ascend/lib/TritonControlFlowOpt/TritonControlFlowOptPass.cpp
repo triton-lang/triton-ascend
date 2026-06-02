@@ -737,6 +737,40 @@ static LogicalResult validateSupportedCfg(Region &body) {
   return success();
 }
 
+static void collectReachableBlocks(Block *block,
+                                   SmallPtrSetImpl<Block *> &reachable) {
+  if (!reachable.insert(block).second)
+    return;
+
+  for (Block *successor : getCfgSuccessors(block)) {
+    if (successor->getParent() == block->getParent())
+      collectReachableBlocks(successor, reachable);
+  }
+}
+
+static void eraseUnreachableBlocks(Region &body) {
+  if (body.empty() || body.hasOneBlock())
+    return;
+
+  SmallPtrSet<Block *, 16> reachable;
+  collectReachableBlocks(&body.front(), reachable);
+
+  SmallVector<Block *> eraseBlocks;
+  for (Block &block : body) {
+    if (!reachable.contains(&block))
+      eraseBlocks.push_back(&block);
+  }
+  if (eraseBlocks.empty())
+    return;
+
+  for (Block *block : eraseBlocks) {
+    for (Operation &op : *block)
+      op.dropAllReferences();
+  }
+  for (Block *block : llvm::reverse(eraseBlocks))
+    block->erase();
+}
+
 static LogicalResult rejectCyclicCfg(Block *block,
                                      SmallPtrSetImpl<Block *> &visiting,
                                      SmallPtrSetImpl<Block *> &visited) {
@@ -759,6 +793,10 @@ static LogicalResult rejectCyclicCfg(Block *block,
 
 static LogicalResult structureFunctionBody(Operation *funcOp, Region &body) {
   if (body.empty() || body.hasOneBlock())
+    return success();
+
+  eraseUnreachableBlocks(body);
+  if (body.hasOneBlock())
     return success();
 
   if (failed(validateSupportedCfg(body)))

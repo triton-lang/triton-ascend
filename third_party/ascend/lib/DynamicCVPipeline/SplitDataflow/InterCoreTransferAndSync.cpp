@@ -566,7 +566,9 @@ Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(OpBuilder &b
     attachTransferTags(toTensorOp, cubeBlockId, "CUBE", transferIndex);
     LOG_DEBUG("[toTensorOp]: " << *toTensorOp << "\n");
 
-    for (Operation *user : srcValue.getUsers()) {
+    llvm::SmallVector<Operation *> users(srcValue.getUsers().begin(), srcValue.getUsers().end());
+    for (Operation *user : users) {
+        LOG_DEBUG("[v->c user]" << *user << "\n");
         auto userBlockIdOpt = CVPipeline::getOpBlockId(user);
         if (userBlockIdOpt && static_cast<int>(*userBlockIdOpt) == iniConsumerId) {
             user->replaceUsesOfWith(srcValue, toTensorOp.getResult());
@@ -616,7 +618,9 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(OpBuilder &b
     attachTransferTags(toTensorOp, vecBlockId, "VECTOR", transferIndex);
     LOG_DEBUG("[toTensorOp]: " << *toTensorOp << "\n");
 
-    for (Operation *user : srcValue.getUsers()) {
+    llvm::SmallVector<Operation *> users(srcValue.getUsers().begin(), srcValue.getUsers().end());
+    for (Operation *user : users) {
+        LOG_DEBUG("[c->v user]" << *user << "\n");
         auto userBlockIdOpt = CVPipeline::getOpBlockId(user);
         if (userBlockIdOpt && static_cast<int>(*userBlockIdOpt) == iniConsumerId) {
             user->replaceUsesOfWith(srcValue, toTensorOp.getResult());

@@ -37,6 +37,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/Value.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/ADT/SmallVector.h"
 
@@ -154,7 +155,7 @@ void DataDependencyAnalysisPass::collectBlockInfo(DataDependencyInfo &info, int 
             mlir::Operation *defOp = operand.getDefiningOp();
             // If defOp is not null and defOp is not in current ops set, it's an external input
             if (!defOp || opSet.find(defOp) == opSet.end()) {
-                blockInfo.inputs.push_back(operand);
+                blockInfo.inputs.insert(operand);
             }
         }
         for (auto result : op->getResults()) {
@@ -345,7 +346,7 @@ void DataDependencyAnalysisPass::processIterArgDependencies()
             auto initDefResult = dyn_cast<mlir::OpResult>(initValue);
             auto initCoreType = getCoreTypeWithIndex(initDefOp, initDefResult ? initDefResult.getResultNumber() : 0);
             auto yieldCoreType = getCoreTypeWithIndex(forOp, iterArgIndex);
-            
+
             // Only process if init and yield have matching core types
             // Mismatch indicates a more complex dependency pattern that requires special handling
             if (initCoreType != yieldCoreType) {
@@ -437,7 +438,9 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(DataDependencyInfo &info
             if (resultCoreType != ssbufferCoreTypeCubeAttr) {
                 continue;
             }
+
             // Check who is using this output
+            llvm::DenseSet<int> handledBlockIds;
             for (mlir::Operation *user : output.getUsers()) {
                 int outputIndex = 0;
                 if (isControlFlowOp(user)) {
@@ -461,8 +464,11 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(DataDependencyInfo &info
                         continue;
                     }
                     int consumerId = static_cast<int>(*consumerIdOpt);
-                    collectDepInfo(output, DependencyType::CubeToVector, c2vDependencies, blockInfo.blockId, consumerId,
-                        info);
+                    auto inserted = handledBlockIds.insert(consumerId).second;
+                    if (inserted) {
+                      collectDepInfo(output, DependencyType::CubeToVector, c2vDependencies, blockInfo.blockId, consumerId,
+                          info);
+                    }
                 }
                 // If user belongs to Cube block, this C->C dependency was handled
                 // in the Input analysis phase, so here we only handle C->V.

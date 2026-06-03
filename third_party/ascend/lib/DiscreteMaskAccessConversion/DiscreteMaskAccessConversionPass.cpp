@@ -415,6 +415,12 @@ struct DiscreteMaskAtomicConversion : OpRewritePattern<mlir::triton::AtomicRMWOp
     if (failed(isDiscreteMask(op, mask, rewriter)))
       return failure();
 
+    if (compileOn91095Flag && forceSimtTemplateFlag &&
+        IndirectAtomicUtils::canUseIndirectAtomicFastPath(op)) {
+      op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
+      return failure();
+    }
+
     const std::map<RMWOp, TypelessValue> initMap = {
         {RMWOp::FADD, TypelessValue::Zero},
         {RMWOp::ADD, TypelessValue::Zero},

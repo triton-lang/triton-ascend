@@ -29,8 +29,8 @@ module {
 
 
 // CHECK-LABEL: func.func @iterarg_dependencies
-
 // CHECK: %[[EXP_2:[a-z0-9_]+]] = math.exp
+// CHECK: tensor.empty()
 // CHECK: %[[FILL_4:[a-z0-9_]+]] = linalg.fill
 // CHECK: %[[ALLOC:[a-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 0 : i32} : memref<4x4x16x8xf32, #hivm.address_space<cbuf>>
 // CHECK: annotation.mark %[[ALLOC]] {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<0>, ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 0 : i32} : memref<4x4x16x8xf32, #hivm.address_space<cbuf>>
@@ -42,7 +42,6 @@ module {
 // CHECK: %[[ALLOC_2:[a-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 1 : i32} : memref<32x32xf32, #hivm.address_space<ub>>
 // CHECK: annotation.mark %[[ALLOC_2]] {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<1>, ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 1 : i32} : memref<32x32xf32, #hivm.address_space<ub>>
 // CHECK: hivm.hir.sync_block_set {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 1 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 2
-
 // CHECK: scf.for {{.*}} iter_args(%[[ARG_2:[a-z0-9_]+]] = %[[EXP_2]])
 // CHECK: arith.constant {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "VECTOR"} 0 : i32
 // CHECK: %[[CST_4:[a-z0-9_]+]] = arith.constant {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "VECTOR"} dense<[64, 4, 8]> : tensor<3xi64>
@@ -54,13 +53,13 @@ module {
 // CHECK: hivm.hir.sync_block_wait {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 0 : i32}[<VECTOR>, <PIPE_M>, <PIPE_MTE3>] flag = 1
 // CHECK: hivm.hir.copy ins(%[[RESHAPE_6]] : tensor<4x4x16x8xf32>) outs(%[[ALLOC]] : memref<4x4x16x8xf32, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 0 : i32}
 // CHECK: hivm.hir.sync_block_set {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 0 : i32}[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 1
-// CHECK: hivm.hir.sync_block_wait {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 1
-// CHECK: %[[MEM_7:[a-z0-9_]+]] = hivm.hir.convert_layout %[[ALLOC_0]] output_shape [64, 32] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : (memref<4x4x16x8xf32, #hivm.address_space<cbuf>>) -> memref<64x32xf32, #hivm.address_space<cbuf>>
-// CHECK: %[[MEMSPACECAST:[a-z0-9_]+]] = memref.memory_space_cast %[[MEM_7]] {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : memref<64x32xf32, #hivm.address_space<cbuf>> to memref<64x32xf32>
-// CHECK: %[[TENSOR_8:[a-z0-9_]+]] = bufferization.to_tensor %[[MEMSPACECAST]] restrict writable {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : memref<64x32xf32>
 // CHECK: memref.alloc()
-// CHECK: %[[TENSOR_9:[a-z0-9_]+]] = bufferization.to_tensor
-// CHECK: %[[MATMUL_10:[a-z0-9_]+]] = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} ins(%[[TENSOR_9]], %[[TENSOR_8]] : tensor<32x64xf32>, tensor<64x32xf32>) outs(%[[FILL_4]] : tensor<32x32xf32>) -> tensor<32x32xf32>
+// CHECK: %[[TENSOR_7:[a-z0-9_]+]] = bufferization.to_tensor
+// CHECK: hivm.hir.sync_block_wait {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 1
+// CHECK: %[[MEM_8:[a-z0-9_]+]] = hivm.hir.convert_layout %[[ALLOC_0]] output_shape [64, 32] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : (memref<4x4x16x8xf32, #hivm.address_space<cbuf>>) -> memref<64x32xf32, #hivm.address_space<cbuf>>
+// CHECK: %[[MEMSPACECAST:[a-z0-9_]+]] = memref.memory_space_cast %[[MEM_8]] {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : memref<64x32xf32, #hivm.address_space<cbuf>> to memref<64x32xf32>
+// CHECK: %[[TENSOR_9:[a-z0-9_]+]] = bufferization.to_tensor %[[MEMSPACECAST]] restrict writable {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : memref<64x32xf32>
+// CHECK: %[[MATMUL_10:[a-z0-9_]+]] = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} ins(%[[TENSOR_7]], %[[TENSOR_9]] : tensor<32x64xf32>, tensor<64x32xf32>) outs(%[[FILL_4]] : tensor<32x32xf32>) -> tensor<32x32xf32>
 // CHECK: hivm.hir.sync_block_set {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32}[<CUBE>, <PIPE_M>, <PIPE_MTE3>] flag = 1
 // CHECK: hivm.hir.sync_block_wait {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 2
 // CHECK: hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 1 : i32} ins(%[[MATMUL_10]] : tensor<32x32xf32>) outs(%[[ALLOC_1]] : memref<32x32xf32, #hivm.address_space<ub>>)
@@ -68,12 +67,14 @@ module {
 // CHECK: hivm.hir.sync_block_wait {ssbuffer.block_id = 4 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 1 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 2
 // CHECK: %[[MEMSPACECAST_8:[a-z0-9_]+]] = memref.memory_space_cast %[[ALLOC_2]] {ssbuffer.block_id = 4 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 1 : i32} : memref<32x32xf32, #hivm.address_space<ub>> to memref<32x32xf32>
 // CHECK: %[[TENSOR_11:[a-z0-9_]+]] = bufferization.to_tensor %[[MEMSPACECAST_8]] restrict writable {ssbuffer.block_id = 4 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 1 : i32} : memref<32x32xf32>
-// CHECK: %[[EXP_12:[a-z0-9_]+]] = math.exp %[[TENSOR_11]]
-// CHECK: %[[INSERTED_SLICE:[a-z0-9_]+]] = tensor.insert_slice %[[EXP_12]]
+// CHECK: math.exp %[[TENSOR_11]] {ssbuffer.block_id = 4 : i32, ssbuffer.core_type = "VECTOR"} : tensor<32x32xf32>
+// CHECK: arith.constant
+// CHECK: tensor.empty()
+// CHECK: linalg.fill
+// CHECK: tensor.insert_slice
 // CHECK: hivm.hir.sync_block_set {ssbuffer.block_id = 4 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 1 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 2
-// CHECK: scf.yield {ssbuffer.core_type = "VECTOR"} %[[INSERTED_SLICE]] : tensor<64x32xf32>
+// CHECK: scf.yield
 // CHECK: } {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.main_loop = 0 : i32}
-
 // CHECK: hivm.hir.sync_block_wait {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 2
 // CHECK: hivm.hir.sync_block_wait {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 0 : i32}[<VECTOR>, <PIPE_M>, <PIPE_MTE3>] flag = 1
 // CHECK: return

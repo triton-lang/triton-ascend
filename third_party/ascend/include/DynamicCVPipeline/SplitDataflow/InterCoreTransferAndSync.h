@@ -123,6 +123,8 @@ private:
     llvm::ArrayRef<int64_t> shape, mlir::Type elemType, hivm::AddressSpace addrSpace, mlir::Operation *prodEndOp,
     mlir::Operation *consStartOp, int prodBlockId, int consBlockId, llvm::StringRef prodTag,
     llvm::StringRef consTag, int transferIndex);
+  mlir::Operation *analyzeConsumerReadInsertPoint(Value srcValue, int iniConsumerId);
+  mlir::Operation *getConsumerWaitPoint(int transferIndex);
   mlir::Operation *insertVectorToCubeTransfer(mlir::OpBuilder &builder, mlir::Value srcValue,
     mlir::Value normalizedValue, mlir::Operation *vectorEndOp, mlir::Operation *cubeStartOp, mlir::Location loc,
     int transferIndex, int iniConsumerId, mlir::Operation **consumedDataOp = nullptr);

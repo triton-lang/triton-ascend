@@ -1,7 +1,7 @@
 // RUN: triton-opt --add-block-id-for-control-ops --data-dependency-analysis --inter-core-transfer-and-sync --mark-main-loop %s | FileCheck %s
 
 module {
-  func.func @tc06_forop_outer_transfer(%arg0: memref<128x128xf16>, %n: index, %init: tensor<128x128xf32>) {
+  func.func @test_forop_outer_transfer(%arg0: memref<128x128xf16>, %n: index, %init: tensor<128x128xf32>) {
     %c0 = arith.constant {ssbuffer.block_id = 0 : i32, ssbuffer.core_type = "VECTOR"} 0 : index
     %c1 = arith.constant {ssbuffer.block_id = 0 : i32, ssbuffer.core_type = "VECTOR"} 1 : index
     %cst = arith.constant {ssbuffer.block_id = 0 : i32, ssbuffer.core_type = "VECTOR"} 1.0 : f16
@@ -20,7 +20,7 @@ module {
   }
 }
 
-// CHECK-LABEL: func.func @tc06_forop_outer_transfer
+// CHECK-LABEL: func.func @test_forop_outer_transfer
 // CHECK: %[[EXP_2:[a-z0-9_]+]] = math.exp
 // CHECK: %[[CST_0:[a-z0-9_]+]] = arith.constant {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "VECTOR"} dense<[128, 8, 16]> : tensor<3xi64>
 // CHECK: %[[RESHAPE:[a-z0-9_]+]] = tensor.reshape %[[EXP_2]](%[[CST_0]]) {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "VECTOR"} : (tensor<128x128xf16>, tensor<3xi64>) -> tensor<128x8x16xf16>

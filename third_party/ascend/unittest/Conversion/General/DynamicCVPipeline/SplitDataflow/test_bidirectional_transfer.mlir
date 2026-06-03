@@ -1,7 +1,7 @@
 // RUN: triton-opt --add-block-id-for-control-ops --data-dependency-analysis --inter-core-transfer-and-sync --mark-main-loop %s | FileCheck %s
 
 module {
-  func.func @tc03_bidirectional_transfer(%arg0: memref<256x256xf16>) {
+  func.func @test_bidirectional_transfer(%arg0: memref<256x256xf16>) {
     %alloc = memref.alloc() {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} : memref<256x256xf16>
     %t0 = bufferization.to_tensor %alloc {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} : memref<256x256xf16>
     %cst = arith.constant {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} 0.0 : f16
@@ -18,7 +18,7 @@ module {
   }
 }
 
-// CHECK-LABEL: func.func @tc03_bidirectional_transfer
+// CHECK-LABEL: func.func @test_bidirectional_transfer
 // CHECK: %[[MATMUL_3:[a-z0-9_]+]] = linalg.matmul
 // CHECK: %[[ALLOC_0:[a-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 1 : i32} : memref<256x256xf32, #hivm.address_space<ub>>
 // CHECK: annotation.mark %[[ALLOC_0]] {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<1>, ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 1 : i32} : memref<256x256xf32, #hivm.address_space<ub>>
@@ -40,9 +40,10 @@ module {
 // CHECK: annotation.mark %[[ALLOC_5]] {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<0>, ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 0 : i32} : memref<32x16x16x8xf32, #hivm.address_space<cbuf>>
 // CHECK: hivm.hir.copy ins(%[[RESHAPE_4]] : tensor<32x16x16x8xf32>) outs(%[[ALLOC_5]] : memref<32x16x16x8xf32, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 0 : i32}
 // CHECK: hivm.hir.sync_block_set {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 0 : i32}[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 1
-// CHECK: hivm.hir.sync_block_wait {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 1
+// CHECK: %[[EMPTY_9:[a-z0-9_]+]] = tensor.empty()
 // CHECK: %[[ALLOC_6:[a-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : memref<32x16x16x8xf32, #hivm.address_space<cbuf>>
 // CHECK: annotation.mark %[[ALLOC_6]] {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<0>, ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : memref<32x16x16x8xf32, #hivm.address_space<cbuf>>
+// CHECK: hivm.hir.sync_block_wait {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 1
 // CHECK: %[[MEM_7:[a-z0-9_]+]] = hivm.hir.convert_layout %[[ALLOC_6]] output_shape [256, 256] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : (memref<32x16x16x8xf32, #hivm.address_space<cbuf>>) -> memref<256x256xf32, #hivm.address_space<cbuf>>
 // CHECK: %[[MEMSPACECAST_7:[a-z0-9_]+]] = memref.memory_space_cast %[[MEM_7]] {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : memref<256x256xf32, #hivm.address_space<cbuf>> to memref<256x256xf32>
 // CHECK: %[[TENSOR_8:[a-z0-9_]+]] = bufferization.to_tensor %[[MEMSPACECAST_7]] restrict writable {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : memref<256x256xf32>

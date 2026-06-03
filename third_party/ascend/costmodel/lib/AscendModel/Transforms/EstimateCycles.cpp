@@ -94,16 +94,14 @@ struct EstimateCyclesPass
   void runOnOperation() override {
     ModuleOp module = getOperation();
     
-    // Load hardware config from file if specified
-    if (!hardwareConfigPath.empty()) {
-      std::string error;
-      if (!loadHardwareConfigFromFile(hardwareConfigPath, error)) {
-        emitError(module.getLoc(), error);
-        return signalPassFailure();
-      }
+    std::string hardwareConfigError;
+    auto hardwareConfig =
+        loadHardwareConfigForAnalysis(hardwareConfigPath, hardwareConfigError);
+    if (!hardwareConfig) {
+      emitError(module.getLoc(), hardwareConfigError);
+      return signalPassFailure();
     }
-    
-    const HardwareConfig &config = getHardwareConfig();
+    const HardwareConfig &config = *hardwareConfig;
     
     // Parse bindings
     llvm::DenseMap<unsigned, int64_t> argBindings;

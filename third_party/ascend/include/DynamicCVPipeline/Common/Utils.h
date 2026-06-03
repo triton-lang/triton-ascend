@@ -75,6 +75,9 @@ inline bool isCubeOp(Operation *op)
 {
     return CVPipeline::getOpCoreType(op) == CoreType::CUBE_ONLY;
 }
+
+bool isVectorOnlyOp(Operation *op);
+
 } // namespace CVPipeline
 } // namespace mlir
 

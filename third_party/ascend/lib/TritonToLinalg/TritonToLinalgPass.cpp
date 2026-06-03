@@ -63,6 +63,7 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Visitors.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -119,6 +120,85 @@ static bool isSIMTOp(Operation *op)
       triton::ascend::IndirectLoadOp,
       triton::ascend::IndirectStoreOp
       >(op);
+}
+
+static bool isZeroSplat(DenseElementsAttr attr) {
+  if (!attr.isSplat())
+    return false;
+
+  if (auto intAttr = dyn_cast<IntegerAttr>(attr.getSplatValue<Attribute>()))
+    return intAttr.getValue().isZero();
+
+  if (auto floatAttr = dyn_cast<FloatAttr>(attr.getSplatValue<Attribute>()))
+    return floatAttr.getValue().isZero();
+
+  return false;
+}
+
+static FailureOr<DenseElementsAttr> getZeroTensorReturn(triton::FuncOp func) {
+  if (!func.isPrivate() || func.getNumArguments() != 0 ||
+      func.getFunctionType().getNumResults() != 1 ||
+      !isa<RankedTensorType>(func.getFunctionType().getResult(0)) ||
+      !func.getBody().hasOneBlock())
+    return failure();
+
+  Block &body = func.getBody().front();
+  auto returnOp = dyn_cast<triton::ReturnOp>(body.getTerminator());
+  if (!returnOp || returnOp->getNumOperands() != 1)
+    return failure();
+
+  Value returnValue = returnOp->getOperand(0);
+  auto constOp = returnValue.getDefiningOp<arith::ConstantOp>();
+  if (!constOp)
+    return failure();
+
+  auto denseAttr = dyn_cast<DenseElementsAttr>(constOp.getValue());
+  if (!denseAttr || !isZeroSplat(denseAttr))
+    return failure();
+
+  return denseAttr;
+}
+
+static LogicalResult inlineZeroTensorHelpers(ModuleOp moduleOp) {
+  DenseMap<StringAttr, DenseElementsAttr> zeroHelpers;
+  SmallVector<triton::FuncOp> eraseFuncs;
+  for (triton::FuncOp func : moduleOp.getOps<triton::FuncOp>()) {
+    FailureOr<DenseElementsAttr> zeroAttr = getZeroTensorReturn(func);
+    if (failed(zeroAttr))
+      continue;
+
+    zeroHelpers[func.getSymNameAttr()] = *zeroAttr;
+    eraseFuncs.push_back(func);
+  }
+
+  if (zeroHelpers.empty())
+    return success();
+
+  SmallVector<triton::CallOp> eraseCalls;
+  moduleOp.walk([&](triton::CallOp callOp) {
+    auto it = zeroHelpers.find(callOp.getCalleeAttr().getRootReference());
+    if (it == zeroHelpers.end())
+      return;
+
+    if (callOp->getNumOperands() != 0 || callOp->getNumResults() != 1)
+      return;
+
+    OpBuilder builder(callOp);
+    Value replacement =
+        builder.create<arith::ConstantOp>(callOp.getLoc(), it->second);
+    callOp.getResult(0).replaceAllUsesWith(replacement);
+    eraseCalls.push_back(callOp);
+  });
+
+  for (triton::CallOp callOp : eraseCalls)
+    callOp.erase();
+
+  for (triton::FuncOp func : eraseFuncs) {
+    if (SymbolTable::symbolKnownUseEmpty(func, moduleOp))
+      func.erase();
+  }
+
+  return success();
 }
 
 TritonTypeConverter::TritonTypeConverter() {
@@ -844,6 +924,12 @@ void TritonToLinalgPass::runOnOperation() {
       signalPassFailure();
       return;
     }
+  }
+
+  if (failed(inlineZeroTensorHelpers(moduleOp))) {
+    moduleOp->emitError("failed to inline zero tensor helper functions");
+    signalPassFailure();
+    return;
   }
 
   // 2. Perform use analysis on FuncOp.

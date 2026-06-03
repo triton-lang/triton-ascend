@@ -71,7 +71,11 @@ from triton.tools.get_ascend_devices import is_compile_on_910_95
 def min_dot_size(target: GPUTarget):
     return lambda lhsType, rhsType: (1, 1, 1)
 
-
+def enable_optimizations() -> bool:
+    # TODO: LLVM_EXTRACT_DI_LOCAL_VARIABLES may be misunderstanding for users
+    env_vf = os.getenv("LLVM_EXTRACT_DI_LOCAL_VARIABLES")
+    return not env_vf.lower() in ("true", "1", "yes")
+    
 def make_ttir(mod, metadata, opt):
     if "hash" not in metadata:
         metadata["hash"] = hashlib.sha256(f"{mod}-{metadata}".encode()).hexdigest()
@@ -81,11 +85,12 @@ def make_ttir(mod, metadata, opt):
     passes.common.add_inliner(pm)
     passes.ttir.add_combine(pm)
     #Disable optimizations for the Debug mode
-    if not opt.debug:
+    enable_optimizations = enable_optimizations()
+    if not enable_optimizations:
         passes.common.add_canonicalizer(pm)
     passes.ttir.add_reorder_broadcast(pm)
     #Disable optimizations for the Debug mode
-    if not opt.debug:
+    if not enable_optimizations:
         passes.common.add_cse(pm)
     passes.common.add_licm(pm)
     passes.common.add_symbol_dce(pm)
@@ -126,12 +131,13 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             ascend.passes.ttir.add_dag_sync(pm)
             ascend.passes.ttir.add_dag_scope(pm)
             #Disable optimizations for the Debug mode
-            if (not opt.debug):
+            enable_optimizations = enable_optimizations()
+            if not enable_optimizations:
                 passes.common.add_cse(pm)
                 passes.common.add_canonicalizer(pm)
             ascend.passes.ttir.add_dag_ssbuffer(pm)
             #Disable optimizations for the Debug mode
-            if (not opt.debug):
+            if not enable_optimizations:
                 passes.common.add_cse(pm)
                 passes.common.add_canonicalizer(pm)
 

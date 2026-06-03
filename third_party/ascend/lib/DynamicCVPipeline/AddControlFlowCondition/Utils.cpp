@@ -21,6 +21,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include <optional>
 
@@ -57,7 +58,7 @@ LogicalResult triton::collectOpsByBlockId(scf::ForOp forOp,
                                           llvm::DenseMap<int, SmallVector<Operation *>> &blockOps)
 {
   for (Operation &op : forOp.getBody()->without_terminator()) {
-    if (auto attr = op.getAttrOfType<IntegerAttr>("ssbuffer.block_id")) {
+    if (auto attr = op.getAttrOfType<IntegerAttr>(CVPipeline::kBlockId)) {
       blockOps[attr.getInt()].push_back(&op);
     } else {
       return failure();
@@ -152,7 +153,7 @@ SmallVector<int> triton::getBlockIdsInOrder(scf::ForOp forOp)
   llvm::DenseSet<int> seenIds;
 
   for (Operation &op : forOp.getBody()->without_terminator()) {
-    if (auto blockIdAttr = op.getAttrOfType<IntegerAttr>("ssbuffer.block_id")) {
+    if (auto blockIdAttr = op.getAttrOfType<IntegerAttr>(CVPipeline::kBlockId)) {
       int id = blockIdAttr.getInt();
       if (seenIds.insert(id).second) {
         idsInOrder.push_back(id);
@@ -164,7 +165,7 @@ SmallVector<int> triton::getBlockIdsInOrder(scf::ForOp forOp)
 
 // Helper to get block_id attribute from op
 std::optional<int64_t> triton::getOpBlockId(Operation *op) {
-  auto blockIdAttr = op->getAttrOfType<IntegerAttr>("ssbuffer.block_id");
+  auto blockIdAttr = op->getAttrOfType<IntegerAttr>(CVPipeline::kBlockId);
   if (!blockIdAttr) {
     return std::nullopt;
   }
@@ -173,20 +174,23 @@ std::optional<int64_t> triton::getOpBlockId(Operation *op) {
 
 // Get the block_id of the immediate child of scf.for that contains op
 // For nested ops inside scf.if/scf.for, returns the block_id of the immediate child of scf.for
+// Only considers scf.for ops that have ssbuffer.main_loop attribute
 std::optional<int64_t> triton::getForDirectChildBlockId(Operation *op) {
-  scf::ForOp forOp = op->getParentOfType<scf::ForOp>();
-  if (!forOp) {
+  if (!op) {
     return std::nullopt;
   }
-
-  // Walk up from op until we reach a direct child of forOp
-  while (op->getParentOp() != forOp.getOperation()) {
-    op = op->getParentOp();
-    if (!op) {
-      return std::nullopt;
+  Operation *parent = op->getParentOp();
+  while (parent) {
+    // Found the main_loop forOp, op is its direct child
+    if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
+      if (forOp->hasAttr(CVPipeline::kMainLoop)) {
+        return getOpBlockId(op);
+      }
     }
+    op = parent;
+    parent = parent->getParentOp();
   }
-  return getOpBlockId(op);
+  return std::nullopt;
 }
 
 // Find the tcb group id that contains value v
@@ -207,11 +211,11 @@ LogicalResult triton::getScopeType(Operation *scopeOp, bool &isCube, bool &isVec
   isCube = false;
   isVector = false;
 
-  if (!scopeOp->hasAttr("hivm.tcore_type")) {
+  if (!scopeOp->hasAttr(CVPipeline::kTcoreType)) {
     return failure();
   }
 
-  auto attr = scopeOp->getAttr("hivm.tcore_type");
+  auto attr = scopeOp->getAttr(CVPipeline::kTcoreType);
   auto aiCAttr = hivm::TCoreTypeAttr::get(scopeOp->getContext(), hivm::TCoreType::CUBE);
   auto aiVAttr = hivm::TCoreTypeAttr::get(scopeOp->getContext(), hivm::TCoreType::VECTOR);
   if (attr == aiCAttr) {

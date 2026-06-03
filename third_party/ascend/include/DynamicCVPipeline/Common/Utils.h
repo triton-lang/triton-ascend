@@ -38,6 +38,7 @@ inline constexpr llvm::StringLiteral kCubeFirst = "ssbuffer.cube_first";
 inline constexpr llvm::StringLiteral kVectorFirst = "ssbuffer.vector_first";
 inline constexpr llvm::StringLiteral kAddFromMatmul = "ssbuffer.add_from_matmul";
 inline constexpr llvm::StringLiteral kMainLoop = "ssbuffer.main_loop";
+inline constexpr llvm::StringLiteral kTcoreType = "hivm.tcore_type";
 inline constexpr llvm::StringLiteral kIf = "ssbuffer.if";
 inline constexpr llvm::StringLiteral kIntraBuffer = "ssbuffer.intra_buffer";
 inline constexpr llvm::StringLiteral kAnalyzeFlagId = "ssbuffer.analyze_flag_id";

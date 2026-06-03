@@ -43,7 +43,7 @@ void AutomaticWarpSpecialization::runOnOperation() {
   // pm.addPass(arith::createIntRangeOptimizationsPass());
   pm.addPass(createSCCPPass());
   // Disable optimizations for the Debug mode
-  if (!triton::tools::getBoolEnv("TRITON_DEBUG")) {
+  if (!triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES")) {
     pm.addPass(createCSEPass());
   }
   pm.addPass(createNVWSAssignStagePhase());

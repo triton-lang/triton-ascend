@@ -639,8 +639,7 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(OpBuilder &b
     auto fixpipeOp = builder.create<hivm::FixpipeOp>(loc, mlir::TypeRange{}, // No return value
         srcValue,                                                            // src
         cubeAllocOp->getResult(0),                                           // dst
-        mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, nullptr, nullptr, mlir::ArrayAttr{},
-        nullptr);
+        mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, nullptr, nullptr, mlir::ArrayAttr{});
     attachTransferTags(fixpipeOp, cubeBlockId, "CUBE", transferIndex);
     LOG_DEBUG("[fixpipeOp]: " << *fixpipeOp << "\n");
 

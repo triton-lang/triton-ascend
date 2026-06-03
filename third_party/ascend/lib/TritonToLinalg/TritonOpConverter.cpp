@@ -2198,9 +2198,7 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
       rhs,
       lhsScale,
       rhsScale,
-      acc,
-      /*lhsFormat(optional)*/nullptr,
-      /*rhsFormat(optional)*/nullptr
+      acc
     );
 
     Value finalResult = matmulMxResult;

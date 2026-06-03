@@ -335,8 +335,7 @@ void DAGSyncPass::insertCubeToVectorDataMovement(mlir::Operation *srcOp, mlir::O
         /*pre_quant=*/nullptr,
         /*pre_relu=*/nullptr,
         /*channel_split=*/nullptr,
-        /*unit_flag_mode=*/mlir::ArrayAttr{},
-        /*quant_scale=*/nullptr);
+        /*unit_flag_mode=*/mlir::ArrayAttr{});
 
     llvm::outs() << "Inserted fixpipe after " << srcOp->getName().getStringRef()
                  << " for CUBE->VECTOR data movement\n";

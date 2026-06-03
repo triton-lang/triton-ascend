@@ -20,21 +20,43 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
-#define TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
+#include "llvm/Support/Debug.h"
 
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
-namespace mlir {
-namespace triton {
+#include "ascend/include/DynamicCVPipeline/StandardizeOp/PatternMatchRewrites.h"
 
-std::unique_ptr<OperationPass<ModuleOp>> createUBUsageOptPass();
-std::unique_ptr<OperationPass<ModuleOp>> createUnifyAllocBlockPass();
-void registerUnifyAllocBlockPass();
-std::unique_ptr<OperationPass<ModuleOp>> createFixpipeOptPass();
+using namespace mlir;
+using namespace triton;
+using namespace CVSplit;
 
-} // namespace triton
-} // namespace mlir
+static constexpr const char *DEBUG_TYPE = "PatternMatchRewrites";
+#define LOG_DEBUG(...) LLVM_DEBUG(llvm::dbgs() << "\n[" << DEBUG_TYPE << "] " << __VA_ARGS__ << "\n")
 
-#endif // TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
+void PatternMatchRewritePass::runOnOperation()
+{
+    auto moduleOp = getOperation();
+    LOG_DEBUG("Input mlir:\n" << moduleOp);
+
+    auto *ctx = &getContext();
+    RewritePatternSet patterns(ctx);
+    patterns.add<SplitMatmulPattern>(ctx);
+
+    if (llvm::failed(applyPatternsAndFoldGreedily(moduleOp, std::move(patterns)))) {
+        LOG_DEBUG("matchAndRewrite does not converge!");
+        signalPassFailure();
+        return;
+    }
+    LOG_DEBUG("Output mlir:\n" << moduleOp);
+}
+
+namespace mlir::triton::CVSplit {
+
+std::unique_ptr<OperationPass<ModuleOp>> createPatternMatchRewritePass()
+{
+    return std::make_unique<PatternMatchRewritePass>();
+}
+
+} // namespace mlir::triton::CVSplit

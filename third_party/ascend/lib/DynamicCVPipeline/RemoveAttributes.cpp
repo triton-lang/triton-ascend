@@ -42,7 +42,7 @@ static constexpr const char *DEBUG_TYPE = "RemoveAttributes";
 
 // if extra attr is needed, add to ut @
 // third_party/ascend/unittest/Conversion/General/DynamicCVPipeline/test-remove-attrs.mlir
-static constexpr llvm::StringLiteral kAttrsToRemove[] {kBlockId, kCoreType, kTransferId, kMainLoop, kCubeFirst, kVectorFirst, kAddFromMatmul, kIntraBuffer};
+static constexpr llvm::StringLiteral kAttrsToRemove[] {kBlockId, kCoreType, kTransferId, kMainLoop, kCubeFirst, kVectorFirst, kAddFromMatmul, kIntraBuffer, kAnalyzeFlagId};
 
 void RemoveSsbufAttrPass::runOnOperation()
 {

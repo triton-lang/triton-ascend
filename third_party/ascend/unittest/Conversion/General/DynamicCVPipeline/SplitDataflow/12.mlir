@@ -9,7 +9,7 @@ module {
     %cst = arith.constant {ssbuffer.block_id = 0 : i32, ssbuffer.core_type = "CUBE"} 0.0 : f16
 
     %alloc = memref.alloc() {ssbuffer.block_id = 0 : i32, ssbuffer.core_type = "CUBE"} : memref<128x128xf16>
-    %t0 = bufferization.to_tensor %alloc {ssbuffer.block_id = 0 : i32, ssbuffer.core_type = "CUBE"} : memref<128x128xf16> to tensor<128x128xf16>
+    %t0 = bufferization.to_tensor %alloc {ssbuffer.block_id = 0 : i32, ssbuffer.core_type = "CUBE"} : memref<128x128xf16>
 
     %empty = tensor.empty() {ssbuffer.block_id = 0 : i32, ssbuffer.core_type = "CUBE"} : tensor<128x128xf16>
     %fill = linalg.fill {ssbuffer.block_id = 0 : i32, ssbuffer.core_type = "CUBE"} ins(%cst : f16) outs(%empty : tensor<128x128xf16>) -> tensor<128x128xf16>

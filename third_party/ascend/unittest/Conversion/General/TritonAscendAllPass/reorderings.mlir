@@ -1,4 +1,4 @@
-// RUN: TRITON_DEBUG=1 triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=False force-simt-template=False' '--triton-to-unstructure=compile-on-910-95=False force-simt-template=False' --triton-to-hivm --triton-to-hfusion --triton-to-llvm --bubble-up-operation --triton-to-structured --triton-to-linalg --split-input-file %s | FileCheck %s
+// RUN: LLVM_EXTRACT_DI_LOCAL_VARIABLES=1 triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=False force-simt-template=False' '--triton-to-unstructure=compile-on-910-95=False force-simt-template=False' --triton-to-hivm --triton-to-hfusion --triton-to-llvm --bubble-up-operation --triton-to-structured --triton-to-linalg --split-input-file %s | FileCheck %s
 
 // CHECK-LABEL: func.func  @vector_kernel(
 #loc = loc("/workspace/story-locations/device_print_3.py":9:0)

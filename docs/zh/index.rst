@@ -57,6 +57,12 @@ Triton Ascend
     triton_api/triton/index.md
 
 .. toctree::
+    :maxdepth: 1
+    :caption: Libdevice 开发者手册
+
+    libdevice/libdevice_simt_developer_guide.md
+
+.. toctree::
     :maxdepth: 2
     :caption: 昇腾扩展 API 接口说明
 

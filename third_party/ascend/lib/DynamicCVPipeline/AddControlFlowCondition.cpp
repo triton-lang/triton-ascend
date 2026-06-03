@@ -119,7 +119,7 @@ void AddControlFlowConditionPass::runOnOperation()
   pm.addPass(std::move(updateLoopIterTimesPass));
 
   if (failed(runPipeline(pm, module))) {
-    module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
+    LDBG("Pass failed!");
     signalPassFailure();
   }
 

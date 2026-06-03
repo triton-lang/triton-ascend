@@ -33,7 +33,7 @@ void init_triton_passes_common(py::module &&m) {
   ADD_PASS_WRAPPER_0("add_symbol_dce", createSymbolDCEPass);
   ADD_PASS_WRAPPER_0("add_inliner", createInlinerPass);
   // Disable optimizations for the Debug mode
-  if (!mlir::triton::tools::getBoolEnv("TRITON_DEBUG")) {
+  if (!mlir::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES")) {
     ADD_PASS_WRAPPER_0("add_canonicalizer", createCanonicalizerPass);
     ADD_PASS_WRAPPER_0("add_cse", createCSEPass);
   }
@@ -52,7 +52,7 @@ void init_triton_passes_ttir(py::module &&m) {
   ADD_PASS_WRAPPER_0("add_loop_unroll", createTritonLoopUnroll);
   ADD_PASS_WRAPPER_0("add_triton_licm", createTritonLoopInvariantCodeMotion);
   // Disable optimizations for the Debug mode
-  if (!mlir::triton::tools::getBoolEnv("TRITON_DEBUG")) {
+  if (!mlir::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES")) {
     ADD_PASS_WRAPPER_0("add_loop_aware_cse", createTritonLoopAwareCSE);
   }
   ADD_PASS_OPTION_WRAPPER_4("add_convert_to_ttgpuir",

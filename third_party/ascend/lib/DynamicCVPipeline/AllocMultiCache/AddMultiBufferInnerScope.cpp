@@ -34,7 +34,11 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/RegionUtils.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/Support/Debug.h"
 
 static constexpr const char *DEBUG_TYPE = "AddMultiBufferInnerScope";
@@ -425,6 +429,188 @@ SmallVector<Value> collectScalarDeps(DenseMap<Value, SmallVector<Value>> &depVal
     }
 
     return scalarValueList;
+}
+
+// ---------------------------------------------------------------------------
+// Rematerialize tensor-rooted cross-block scalar dependencies.
+//
+// Cross-block scalar dependencies are normally handled by tagging the producer
+// and consumer with ssbuffer.dep_mark so a later pass can duplicate the scalar
+// computation into each consumer block. That duplication can only clone scalar
+// (and memref) ops. The tag, however, is decided purely from the result type:
+// when a scalar value is in fact produced from a tensor computation - e.g.
+// %s = tensor.extract %t[] where %t comes from a linalg.reduce - the naive
+// duplication would have to clone tensor ops, which is illegal.
+//
+// To handle this, when a cross-block scalar dependency is found we trace its
+// data sources upward (recursing through nested regions). The trace stops at
+// the first tensor value: that tensor flows through the normal tensor-dependency
+// (double-buffer) path and gets a buffer, while the remaining pure-scalar ops
+// are rematerialized into each consumer block so they are recomputed locally.
+// ---------------------------------------------------------------------------
+
+// True if op is nested strictly inside the main loop.
+static bool isOpInMainLoop(Operation *op, scf::ForOp mainLoop)
+{
+    return op && mainLoop.getOperation()->isProperAncestor(op);
+}
+
+// Collect the values an op depends on: its direct operands plus the values its
+// nested regions capture from above.
+static void collectOpDependencies(Operation *op, SmallVector<Value> &deps)
+{
+    for (Value v : op->getOperands())
+        deps.push_back(v);
+    if (op->getNumRegions() > 0) {
+        llvm::SetVector<Value> above;
+        mlir::getUsedValuesDefinedAbove(op->getRegions(), above);
+        for (Value v : above)
+            deps.push_back(v);
+    }
+}
+
+// Depth-first build of the scalar op slice feeding `root`. Recursion stops at
+// tensor operands (recorded in `boundaryTensors`) and at values defined outside
+// the main loop (loop-invariant constants, block args). `sliceInOrder` is filled
+// in definition-before-use order so it can be cloned directly.
+static void buildScalarSlice(Value root, scf::ForOp mainLoop, SmallVector<Operation *> &sliceInOrder,
+                             DenseSet<Operation *> &visited, llvm::SetVector<Value> &boundaryTensors)
+{
+    Operation *def = root.getDefiningOp();
+    if (!def || !isOpInMainLoop(def, mainLoop))
+        return;
+    if (!visited.insert(def).second)
+        return;
+
+    SmallVector<Value> deps;
+    collectOpDependencies(def, deps);
+    for (Value dep : deps) {
+        if (isa<TensorType>(dep.getType())) {
+            // Tensor boundary: let it travel through the normal tensor path.
+            boundaryTensors.insert(dep);
+            continue;
+        }
+        Operation *depDef = dep.getDefiningOp();
+        if (!depDef || !isOpInMainLoop(depDef, mainLoop))
+            continue; // block arg or loop-invariant value: reference it directly
+        buildScalarSlice(dep, mainLoop, sliceInOrder, visited, boundaryTensors);
+    }
+    sliceInOrder.push_back(def);
+}
+
+// Find the ancestor of `op` that is a direct child of `block`.
+static Operation *getAncestorInBlock(Operation *op, Block *block)
+{
+    while (op && op->getBlock() != block)
+        op = op->getParentOp();
+    return op;
+}
+
+// Rematerialize the scalar slice of `root` into each of its cross-block consumer
+// blocks and rewire those consumers to the local copy. Returns true on rewrite.
+static bool rematerializeScalarDep(Value root, int producerId, scf::ForOp mainLoop,
+                                   const SmallVector<Operation *> &sliceInOrder)
+{
+    Block *body = mainLoop.getBody();
+
+    // Group cross-block users by their block id.
+    llvm::MapVector<int, SmallVector<Operation *>> usersByBlock;
+    for (Operation *user : root.getUsers()) {
+        Operation *bodyAnc = getAncestorInBlock(user, body);
+        if (!bodyAnc)
+            continue;
+        int userId = getSsbufferId(user);
+        if (userId == INT_MIN)
+            userId = getSsbufferId(bodyAnc);
+        if (userId == INT_MIN || userId < 0 || userId == producerId)
+            continue;
+        usersByBlock[userId].push_back(user);
+    }
+    if (usersByBlock.empty())
+        return false;
+
+    bool changed = false;
+    for (auto &entry : usersByBlock) {
+        int userBlockId = entry.first;
+        SmallVector<Operation *> &users = entry.second;
+
+        // Insert the rematerialized slice before the earliest consumer.
+        Operation *insertPt = nullptr;
+        for (Operation *user : users) {
+            Operation *anc = getAncestorInBlock(user, body);
+            if (!anc)
+                continue;
+            if (!insertPt || anc->isBeforeInBlock(insertPt))
+                insertPt = anc;
+        }
+        if (!insertPt)
+            continue;
+
+        OpBuilder builder(insertPt);
+        IRMapping map;
+        for (Operation *op : sliceInOrder) {
+            Operation *cloned = builder.clone(*op, map);
+            cloned->walk([&](Operation *o) { o->setAttr(kBlockId, builder.getI32IntegerAttr(userBlockId)); });
+        }
+
+        Value clonedRoot = map.lookupOrDefault(root);
+        if (clonedRoot == root)
+            continue;
+        for (Operation *user : users)
+            user->replaceUsesOfWith(root, clonedRoot);
+        changed = true;
+    }
+    return changed;
+}
+
+// Scan the main loop for cross-block scalar dependencies whose data originates
+// from a tensor, and rematerialize the scalar portion into each consumer block
+// so the tensor part can use the normal tensor-dependency buffering. Must run
+// before dependency collection so the freed tensor is picked up as a tensor dep.
+static void rematerializeTensorRootedScalarDeps(scf::ForOp mainLoop)
+{
+    Block *body = mainLoop.getBody();
+    if (!body)
+        return;
+
+    SmallVector<Operation *> allOps;
+    collectNestedOps(body, allOps);
+
+    // Collect candidate roots (deduplicated) before mutating the IR.
+    llvm::SetVector<Value> roots;
+    for (Operation *op : allOps) {
+        int userId = getSsbufferId(op);
+        if (userId == INT_MIN || userId < 0)
+            continue;
+        for (Value operand : op->getOperands()) {
+            if (isa<ShapedType>(operand.getType()))
+                continue; // only scalar operands can be cross-block scalar deps
+            Operation *defOp = operand.getDefiningOp();
+            if (!defOp || !isOpInMainLoop(defOp, mainLoop))
+                continue;
+            int producerId = getSsbufferId(defOp);
+            if (producerId == INT_MIN || producerId < 0 || producerId == userId)
+                continue;
+            roots.insert(operand);
+        }
+    }
+
+    for (Value root : roots) {
+        int producerId = getSsbufferId(root.getDefiningOp());
+        if (producerId == INT_MIN || producerId < 0)
+            continue;
+
+        SmallVector<Operation *> sliceInOrder;
+        DenseSet<Operation *> visited;
+        llvm::SetVector<Value> boundaryTensors;
+        buildScalarSlice(root, mainLoop, sliceInOrder, visited, boundaryTensors);
+
+        // Pure scalar/memref chains keep the existing dep_mark handling.
+        if (boundaryTensors.empty())
+            continue;
+
+        rematerializeScalarDep(root, producerId, mainLoop, sliceInOrder);
+    }
 }
 
 // Compute iteration index: (iv - lb) / step, used for buffer selection in double buffering
@@ -1175,6 +1361,12 @@ static bool hasMemrefDepValue(DenseMap<Value, SmallVector<Value>> &depValueMap)
 static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp, OpBuilder &builder, scope::ScopeOp vectorScope,
                                int &groupId)
 {
+    // Break tensor-rooted cross-block scalar dependencies before collecting
+    // deps: rematerialize the scalar tail into consumers so the underlying
+    // tensor is collected as a normal tensor dependency (and gets a buffer)
+    // instead of being mistagged as a duplicable scalar dependency.
+    rematerializeTensorRootedScalarDeps(mainLoopForOp);
+
     DenseMap<Value, InnerBlockInfo> blocks;
     DenseMap<Value, SmallVector<Value>> depValueMap;
     SmallVector<Operation *> allOps;

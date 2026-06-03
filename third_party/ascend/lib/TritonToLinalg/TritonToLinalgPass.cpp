@@ -766,7 +766,7 @@ TritonToLinalgPass::processImplicitPermuteOperations(ModuleOp moduleOp) {
 
   mlir::PassManager pm(&getContext(), moduleOp.getOperationName());
   // Disable optimizations for the Debug mode
-  if (!::triton::tools::getBoolEnv("TRITON_DEBUG")) {
+  if (!::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES")) {
     pm.addPass(createCSEPass());
     pm.addPass(createCanonicalizerPass());
   }
@@ -846,7 +846,7 @@ void TritonToLinalgPass::runOnOperation() {
   {
     PassManager pm(&getContext(), moduleOp.getOperationName());
     // Disable optimizations for the Debug mode
-    if (!::triton::tools::getBoolEnv("TRITON_DEBUG")) {
+    if (!::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES")) {
       pm.addPass(triton::createMarkTensorKindPass());
     }
     if (failed(runPipeline(pm, moduleOp))) {
@@ -871,7 +871,7 @@ void TritonToLinalgPass::runOnOperation() {
   {
     PassManager pm(&getContext(), moduleOp.getOperationName());
     // Disable optimizations for the Debug mode
-    if (!::triton::tools::getBoolEnv("TRITON_DEBUG")) {
+    if (!::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES")) {
       pm.addPass(createCSEPass());
       pm.addPass(createCanonicalizerPass());
     }
@@ -957,7 +957,7 @@ void TritonToLinalgPass::runOnOperation() {
   // 9. Clean up dead code and simplify IR.
   PassManager pm(&getContext(), moduleOp.getOperationName());
   // Disable optimizations for the Debug mode
-  if (!::triton::tools::getBoolEnv("TRITON_DEBUG")) {
+  if (!::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES")) {
     pm.addPass(createCSEPass());
     pm.addPass(createCanonicalizerPass());
   }

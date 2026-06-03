@@ -111,10 +111,11 @@ class AutoTilingTuner(Autotuner):
             self.user_configs = []
         else:
             self.user_configs = configs
-        self.is_simt_mode = False
         self.simt_stack_limit = 8192
         self.user_specified_warps = None
         self.user_specified_multibuffer = None
+        self.user_specified_compile_mode = None
+        self.user_specified_simt_stack_limit = None
         self.default_multibuffer = not is_compile_on_910_95
         self.print_autotuning = os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1"
         # Compile kernels in parallel by default for triton.runtime.JITFunction,
@@ -277,7 +278,8 @@ class AutoTilingTuner(Autotuner):
                              f"These arguments must be explicitly provided and cannot be automatically tuned. "
                              f"Please ensure that these arguments are passed when calling the function.")
 
-    def _gen_tile_configs(self, kv_dict: Dict[str, int], dtype: torch.dtype) -> List[Config]:
+    def _gen_tile_configs(self, kv_dict: Dict[str, int], dtype: torch.dtype,
+                          candidate_modes: List[str]) -> List[Config]:
         from .tile_generator import KernelMeta, TileGenerator
 
         axis_sizes = {}
@@ -288,38 +290,57 @@ class AutoTilingTuner(Autotuner):
                 raise ValueError(f"Not supported dim type: {type(v)}, `int` is the only supported type")
             axis_sizes[k] = v
 
-        kernel_meta = KernelMeta(
-            axis_sizes,
-            self.split_params,
-            self.fixed_split_params,
-            self.tiling_params,
-            self.low_dim_axes,
-            dtype,
-            self.persistent_reduction,
-            self.dual_reduction,
-            self.num_buffers,
-            self.is_simt_mode,
-        )
-        tile_gen = TileGenerator(kernel_meta=kernel_meta)
-        tile_gen.descend_split_tiling()
-
         self.gen_configs.clear()
-        self.gen_configs = tile_gen.configs
+        all_configs = []
+        for mode in candidate_modes:
+            is_simt_mode = (mode == 'simt_only')
+            kernel_meta = KernelMeta(
+                axis_sizes,
+                self.split_params,
+                self.fixed_split_params,
+                self.tiling_params,
+                self.low_dim_axes,
+                dtype,
+                self.persistent_reduction,
+                self.dual_reduction,
+                self.num_buffers,
+                is_simt_mode,
+            )
+            tile_gen = TileGenerator(kernel_meta=kernel_meta)
+            tile_gen.descend_split_tiling()
+            mode_configs = tile_gen.configs
 
-        if self.is_simt_mode:
-            self.gen_configs = self._expand_simt_num_warps_configs(self.gen_configs)
-        else:
-            self.gen_configs = self._expand_simd_multibuffer_configs(self.gen_configs)
+            if is_simt_mode:
+                mode_configs = self._expand_simt_num_warps_configs(mode_configs)
+            else:
+                mode_configs = self._expand_simd_multibuffer_configs(mode_configs)
+
+            # Tag each config with compile_mode so it flows to NPUOptions via
+            # JITFunction.run kwargs. SIMT configs also carry simt_stack_limit:
+            # the user's call-site value if supplied, else the default. It is
+            # marked autotune-managed in _make_kernel_call so a call-site value
+            # does not collide with the per-config tag.
+            simt_stack_limit = (self.user_specified_simt_stack_limit
+                                if self.user_specified_simt_stack_limit is not None else self.simt_stack_limit)
+            for cfg in mode_configs:
+                cfg.kwargs['compile_mode'] = mode
+                if is_simt_mode and 'simt_stack_limit' not in cfg.kwargs:
+                    cfg.kwargs['simt_stack_limit'] = simt_stack_limit
+
+            all_configs.extend(mode_configs)
+
+        self.gen_configs = all_configs
 
         if len(self.gen_configs) == 0:
             print("[WARNING] The generated candidate tiling configs are empty based on provided parameters!")
 
         if self.print_autotuning:
-            print("Generated configs number: {}".format(len(self.gen_configs)))
+            print(f"Generated configs number: {len(self.gen_configs)} "
+                  f"(across modes: {candidate_modes})")
 
     def generate_key_and_configs(self, *args, **kwargs):
         self.nargs = dict(zip(self.arg_names, args))
-        self.is_simt_mode = kwargs.get('force_simt_only', False)
+
         if 'num_warps' in kwargs and kwargs['num_warps'] is not None:
             self.user_specified_warps = kwargs['num_warps']
         else:
@@ -328,6 +349,25 @@ class AutoTilingTuner(Autotuner):
             self.user_specified_multibuffer = kwargs['multibuffer']
         else:
             self.user_specified_multibuffer = None
+        if 'simt_stack_limit' in kwargs and kwargs['simt_stack_limit'] is not None:
+            self.user_specified_simt_stack_limit = kwargs['simt_stack_limit']
+        else:
+            self.user_specified_simt_stack_limit = None
+
+        # Determine the candidate set of compile_mode values to autotune over.
+        # `force_simt_only=True` is treated as an alias for `compile_mode='simt_only'`
+        # for backward compatibility.
+        user_compile_mode = kwargs.get('compile_mode')
+        if user_compile_mode is None and kwargs.get('force_simt_only', False):
+            user_compile_mode = 'simt_only'
+        self.user_specified_compile_mode = user_compile_mode
+
+        if user_compile_mode is not None:
+            candidate_modes = [user_compile_mode]
+        elif is_compile_on_910_95:
+            candidate_modes = ['simd', 'simt_only']
+        else:
+            candidate_modes = ['simd']
 
         # generate key
         all_args = {**self.nargs, **kwargs}
@@ -343,33 +383,24 @@ class AutoTilingTuner(Autotuner):
         if dtype is None:
             raise NotImplementedError("Not support for non-Tensor inputs")
 
+        # The cache key encodes the search-space scope: "auto" means autotune
+        # explored both modes, while a specific mode means the user pinned it.
+        # This prevents cross-contamination between user-pinned and full-search runs.
+        key.append(("compile_mode_constraint", user_compile_mode or "auto"))
         key = tuple(key)
         if key not in self.cache:
             if self.auto_gen_config:
                 self._autoparse_axis_params(all_args)
                 _kv_dict = {k: _args[v] for k, v in self.keys.items() if v in _args}
-                self._gen_tile_configs(_kv_dict, dtype)
+                self._gen_tile_configs(_kv_dict, dtype, candidate_modes)
             if len(self.gen_configs) == 0 and len(self.user_configs) == 0:
-                self.configs = [
-                    Config(
-                        {},
-                        num_warps=4,
-                        num_stages=2,
-                        num_ctas=1,
-                        num_buffers_warp_spec=0,
-                        num_consumer_groups=0,
-                        reg_dec_producer=0,
-                        reg_inc_consumer=0,
-                    )
-                ]
+                self.configs = [Config({}, num_warps=4, num_stages=2, num_ctas=1)]
             else:
                 self.configs = self.gen_configs + self.user_configs
         return key
 
     def run(self, *args, **kwargs):
         key = self.generate_key_and_configs(*args, **kwargs)
-        if self.is_simt_mode and kwargs.get('simt_stack_limit', None) is None:
-            kwargs['simt_stack_limit'] = self.simt_stack_limit
         used_cached_result = True
         if key not in self.cache:
             # prune configs
@@ -400,7 +431,10 @@ class AutoTilingTuner(Autotuner):
         if config.pre_hook is not None:
             full_nargs = {**self.nargs, **kwargs, **config.all_kwargs()}
             config.pre_hook(full_nargs)
-        final_kwargs = dict(config.all_kwargs(), **kwargs)
+        # config wins on overlapping keys (mirrors _make_kernel_call's precedence):
+        # an explicit compile_mode in a user_config beats a call-site pin, and a
+        # per-config tag from _gen_tile_configs flows through unchanged.
+        final_kwargs = dict(kwargs, **config.all_kwargs())
         ret = self.fn.run(
             *args,
             **final_kwargs,
@@ -473,12 +507,17 @@ class AutoTilingTuner(Autotuner):
 
     def _make_kernel_call(self, *args, config, **meta):
         # check for conflicts, i.e. meta-parameters both provided
-        # as kwargs and by the autotuner
-        conflicts = meta.keys() & config.kwargs.keys()
+        # as kwargs and by the autotuner. compile_mode, force_simt_only and
+        # simt_stack_limit are deliberately co-managed by the autotuner (it
+        # tags each Config with these for multi-mode tuning), so collisions
+        # on those keys are expected and resolved by Config.kwargs winning.
+        autotune_managed = {'compile_mode', 'force_simt_only', 'simt_stack_limit'}
+        conflicts = (meta.keys() & config.kwargs.keys()) - autotune_managed
         if conflicts:
             raise ValueError(f"Conflicting meta-parameters: {', '.join(conflicts)}."
                              " Make sure that you don't re-define auto-tuned symbols.")
-        # augment meta-parameters with tunable ones
+        # augment meta-parameters with tunable ones (config.kwargs wins on
+        # autotune_managed keys via the second-position in dict()).
         current = dict(meta, **config.all_kwargs())
         full_nargs = {**self.nargs, **current}
 
@@ -518,10 +557,15 @@ class AutoTilingTuner(Autotuner):
                     triton.AsyncCompileMode(executor),
             ):
                 for config in pruned_configs:
-                    ret.append(self.fn.warmup(*args, **kwargs, **config.all_kwargs()))
+                    # Pre-merge so config wins on overlapping keys (e.g.
+                    # compile_mode); a direct **kwargs/**config.all_kwargs()
+                    # double-unpack would raise on duplicate keys.
+                    merged = dict(kwargs, **config.all_kwargs())
+                    ret.append(self.fn.warmup(*args, **merged))
         else:
             for config in pruned_configs:
-                ret.append(self.fn.warmup(*args, **kwargs, **config.all_kwargs()))
+                merged = dict(kwargs, **config.all_kwargs())
+                ret.append(self.fn.warmup(*args, **merged))
         self.nargs = None
         return ret
 
@@ -1080,9 +1124,7 @@ def get_max_configs(config, kernel_type="mix", **kwargs):
 
         new_config = Config(kwargs=new_kwargs, num_warps=config.num_warps,
                             num_stages=num_stages_val if num_stages_val is not None else config.num_stages,
-                            num_ctas=config.num_ctas, num_buffers_warp_spec=config.num_buffers_warp_spec,
-                            num_consumer_groups=config.num_consumer_groups, reg_dec_producer=config.reg_dec_producer,
-                            reg_inc_consumer=config.reg_inc_consumer, maxnreg=config.maxnreg, pre_hook=config.pre_hook)
+                            num_ctas=config.num_ctas, maxnreg=config.maxnreg, pre_hook=config.pre_hook)
         new_configs.append(new_config)
 
     return new_configs

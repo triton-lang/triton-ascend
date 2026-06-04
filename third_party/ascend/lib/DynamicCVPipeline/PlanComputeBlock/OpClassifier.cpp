@@ -34,6 +34,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Interfaces/CastInterfaces.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
 
@@ -383,6 +384,19 @@ int OpClassifierPass::patternMatchCUBE()
         // ---- Upstream pattern matching ----
         for (Value operand : op->getOperands()) {
             Operation *def = operand.getDefiningOp();
+            // A null defining op means `operand` is a loop iter_arg block argument.
+            // Walk back to its init operand (repeating to also cross nested loops).
+            for (Value cur = operand; !def;) {
+                auto blockArg = dyn_cast<BlockArgument>(cur);
+                auto loopLike = blockArg ?
+                    dyn_cast_or_null<LoopLikeOpInterface>(blockArg.getOwner()->getParentOp()) : nullptr;
+                OpOperand *init = loopLike ? loopLike.getTiedLoopInit(blockArg) : nullptr;
+                if (!init) {
+                    break;
+                }
+                cur = init->get();
+                def = cur.getDefiningOp();
+            }
             if (!def)
                 continue;
 

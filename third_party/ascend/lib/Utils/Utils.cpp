@@ -22,6 +22,8 @@
 
 #include "ascend/include/Utils/Utils.h"
 
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -34,6 +36,7 @@
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Transforms/DialectConversion.h"
 
@@ -1306,5 +1309,21 @@ RankedTensorType getExtractSlicedType(ArrayRef<OpFoldResult> shape,
     }
   }
   return RankedTensorType::get(targetShape, elemType);
+}
+
+bool checkStructureAnnotated(Operation* op, RewriterBase& rewriter) {
+  return llvm::any_of(op->getUsers(), [&rewriter](Operation *user) {
+    auto annotationOp = dyn_cast<annotation::MarkOp>(user);
+    if (annotationOp && annotationOp->hasAttr(ConverterUtils::continuousAttrName)) {
+      rewriter.eraseOp(annotationOp);
+      return true;
+    }
+    return false;
+  });
+}
+
+bool isDistributedTypeCustomOp(Operation* op){
+  return op->hasAttr("hivm.is_distributed") &&
+         llvm::isa<hivm::CustomOp>(op);
 }
 } // namespace mlir

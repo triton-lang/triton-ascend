@@ -1,3 +1,5 @@
+# Triton-Ascend
+
 ## Project Overview and Value Proposition
 
 Triton-Ascend is a Triton compilation framework built for the Ascend platform, aiming to enable Triton code to run efficiently on Ascend hardware.

@@ -44,7 +44,11 @@ void PatternMatchRewritePass::runOnOperation()
     RewritePatternSet patterns(ctx);
     patterns.add<SplitMatmulPattern>(ctx);
 
-    if (llvm::failed(applyPatternsAndFoldGreedily(moduleOp, std::move(patterns)))) {
+    // the way we handle matmul dependencies across for blocks
+    // requres the patternmatching to go top-down
+    GreedyRewriteConfig config = GreedyRewriteConfig();
+    config.useTopDownTraversal = true;
+    if (llvm::failed(applyPatternsAndFoldGreedily(moduleOp, std::move(patterns), config))) {
         LOG_DEBUG("matchAndRewrite does not converge!");
         signalPassFailure();
         return;

@@ -820,6 +820,10 @@ void mlir::triton::SeparateCVScopePass::runOnOperation()
         }
     }
 
+    module.walk([](scope::ScopeOp scopeOp) {
+        scopeOp->setAttr("hivm.matmul_limited_in_cube", UnitAttr::get(scopeOp->getContext()));
+    });
+
     debugDumpOperation("after SeparateCVScopePass", module.getOperation());
 }
 

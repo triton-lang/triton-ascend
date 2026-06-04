@@ -42,6 +42,7 @@ namespace mlir::triton {
 void StandardizeOpPass::runOnOperation()
 {
     auto op = getOperation();
+    LOG_DEBUG("Input mlir:\n" << op);
     OpPassManager pm(op.getOperationName());
     pm.addPass(createPatternMatchRewritePass());
 

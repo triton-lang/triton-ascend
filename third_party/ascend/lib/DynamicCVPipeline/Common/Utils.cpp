@@ -6,6 +6,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Math/IR/Math.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -96,6 +97,11 @@ bool isVectorOnlyOp(Operation *op)
         .Case<arith::SelectOp, math::FloorOp>(
             [](Operation *op) { return isa<RankedTensorType>(op->getResult(0).getType()); })
         .Default([](auto) { return false; });
+}
+
+bool isScfOp(Operation *op)
+{
+  return llvm::isa<scf::SCFDialect>(op->getDialect());
 }
 
 } // namespace CVPipeline

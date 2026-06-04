@@ -31,9 +31,11 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Interfaces/CastInterfaces.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
 
@@ -383,6 +385,19 @@ int OpClassifierPass::patternMatchCUBE()
         // ---- Upstream pattern matching ----
         for (Value operand : op->getOperands()) {
             Operation *def = operand.getDefiningOp();
+            // A null defining op means `operand` is a loop iter_arg block argument.
+            // Walk back to its init operand (repeating to also cross nested loops).
+            for (Value cur = operand; !def;) {
+                auto blockArg = dyn_cast<BlockArgument>(cur);
+                auto loopLike =
+                    blockArg ? dyn_cast_or_null<LoopLikeOpInterface>(blockArg.getOwner()->getParentOp()) : nullptr;
+                OpOperand *init = loopLike ? loopLike.getTiedLoopInit(blockArg) : nullptr;
+                if (!init) {
+                    break;
+                }
+                cur = init->get();
+                def = cur.getDefiningOp();
+            }
             if (!def)
                 continue;
 
@@ -394,9 +409,51 @@ int OpClassifierPass::patternMatchCUBE()
         // ---- Downstream pattern matching ----
         for (Value result : op->getResults()) {
             for (Operation *user : result.getUsers()) {
-                matchStorePattern(user);
-                matchExtractSlicePattern(user);
-                matchMaterializePattern(user);
+                // If user is scf.yield, follow the chain to find real users
+                Operation *curUser = user;
+                while (curUser) {
+                    if (auto yieldOp = dyn_cast<scf::YieldOp>(curUser)) {
+                        if (Operation *scfOp = yieldOp->getParentOp()) {
+                            // Find which operand index the previous result corresponds to in the yield
+                            unsigned yieldOperandIdx = 0;
+                            Value prevResult = result;
+                            for (unsigned i = 0; i < yieldOp->getNumOperands(); ++i) {
+                                if (yieldOp->getOperand(i) == prevResult) {
+                                    yieldOperandIdx = i;
+                                    break;
+                                }
+                            }
+                            // Get the corresponding scf result
+                            if (yieldOperandIdx < scfOp->getNumResults()) {
+                                Value scfResult = scfOp->getResult(yieldOperandIdx);
+                                prevResult = scfResult;
+                                // Find the next user (skipping yield)
+                                curUser = nullptr;
+                                for (Operation *nextUser : scfResult.getUsers()) {
+                                    if (!isa<scf::YieldOp>(nextUser)) {
+                                        curUser = nextUser;
+                                        break;
+                                    }
+                                }
+                                // If no non-yield user found, continue searching from yield
+                                if (!curUser) {
+                                    for (Operation *nextUser : scfResult.getUsers()) {
+                                        if (isa<scf::YieldOp>(nextUser)) {
+                                            curUser = nextUser;
+                                            break;
+                                        }
+                                    }
+                                }
+                                continue;
+                            }
+                        }
+                        break;
+                    }
+                    matchStorePattern(curUser);
+                    matchExtractSlicePattern(curUser);
+                    matchMaterializePattern(curUser);
+                    break;
+                }
             }
         }
     }
@@ -1084,6 +1141,29 @@ int OpClassifierPass::handleSCFYield()
     return 0;
 }
 
+OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const
+{
+    auto forOp = llvm::dyn_cast<scf::ForOp>(operand->getOwner());
+    if (!forOp) {
+        return OP_UNDETERMINED;
+    }
+    auto iterArg = forOp.getTiedLoopRegionIterArg(operand);
+    if (!iterArg) {
+        // the result is used as lower/upper bound or step
+        return OP_UNDETERMINED;
+    }
+    auto sourceOperand = forOp.getTiedLoopYieldedValue(iterArg);
+    if (!sourceOperand) {
+        return OP_UNDETERMINED;
+    }
+    auto defOp = sourceOperand->get().getDefiningOp();
+    if (!defOp) {
+        // might be a blockarg, not necessary for our use-case
+        return OP_UNDETERMINED;
+    }
+    return getCoreType(defOp);
+}
+
 // ============================================================================
 // Step 6: CUBE_AND_VECTOR Operation Handling
 // ============================================================================
@@ -1180,7 +1260,14 @@ void OpClassifierPass::splitOperationForCubeAndVector(Operation *op, llvm::Dense
         llvm::SmallVector<OpOperand *> usesToUpdate;
         for (OpOperand &use : originalResult.getUses()) {
             Operation *user = use.getOwner();
-            if (user && user != vectorOp && getCoreType(user) == OP_VECTOR_ONLY) {
+            if (!user || user == vectorOp) {
+                continue;
+            }
+            OpCoreType coreType = getCoreType(user);
+            if (llvm::isa<scf::ForOp>(user)) {
+                coreType = getForInitCoreType(&use);
+            }
+            if (coreType == OP_VECTOR_ONLY) {
                 usesToUpdate.push_back(&use);
             }
         }

@@ -230,6 +230,10 @@ static void simplifyReverseCumsum1D(ModuleOp moduleOp, int64_t S) {
 void rewriteStridedAxisCoalesce(ModuleOp moduleOp) {
     IRRewriter rw(moduleOp.getContext());
 
+    // This pass has priority over TileChunkCoalescing for the single module-level
+    // hacc.coalesce_factor: it runs first and unconditionally; TileChunk yields
+    // if we claim the factor here.
+
     // Collect the strided ih-base 1D loads (seeds). All must share one stride S
     // (the folded H axis); BT is the per-chunk tile length.
     SmallVector<triton::LoadOp> seeds;

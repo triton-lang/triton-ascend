@@ -37,6 +37,7 @@
 #include "ascend/include/TritonToLinalg/ImplicitPermute.h"
 #include "ascend/include/TritonToLinalg/StridedLoadStoreRewrite.h"
 #include "ascend/include/TritonToLinalg/StridedAxisCoalescing.h"
+#include "ascend/include/TritonToLinalg/TileChunkCoalescing.h"
 #include "ascend/include/TritonToLinalg/MarkTensorKindPass.h"
 #include "ascend/include/TritonToUnstructure/UnstructureConversionPass.h"
 #include "ascend/include/TritonToStructured/CannonicalizerConverter.h"
@@ -837,12 +838,29 @@ LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(Modul
     return success();
   }
 
-  // StridedAxisCoalescing (default-on): fold the FLA H-axis-split strided
-  // load/store into a 2D contiguous [BT,H] tile (H as a parallel inner lane),
-  // turning the per-element strided access into a contiguous one. Bails per
-  // kernel when the load->store subgraph is not lane-safe (e.g. contains
-  // tt.dot), leaving those loads to the stride dispatch below.
+  // Both passes below coalesce by recording a single module-level
+  // hacc.coalesce_factor that bishengir AutoBlockifyParallelLoop divides the
+  // persistent-loop trip count by exactly once, so at most one may claim it per
+  // module. StridedAxisCoalescing has PRIORITY: it runs first and
+  // unconditionally, and TileChunkCoalescing yields (bails) if the factor is
+  // already set.
+
+  // StridedAxisCoalescing (default-on, higher priority): fold the FLA
+  // H-axis-split strided load/store into a 2D contiguous [BT,H] tile (H as a
+  // parallel inner lane), turning the per-element strided access into a
+  // contiguous one. Bails per kernel when the load->store subgraph is not
+  // lane-safe (e.g. contains tt.dot), leaving those loads to the stride dispatch
+  // below.
   StridedAxisCoalescing::rewriteStridedAxisCoalesce(moduleOp);
+
+  // TileChunkCoalescing (default-on, lower priority): when the outermost
+  // program-id axis is a pure tile index over a contiguous problem axis with a
+  // small tile T, fold H adjacent tiles into one program so the per-tile
+  // load/store become a single contiguous H*T DMA (H picked so the block is
+  // >= 512B and within UB). Emits hacc.coalesce_factor = H. Bails when the
+  // pattern / lane-safety do not hold, or when StridedAxisCoalescing above
+  // already claimed the coalesce factor.
+  TileChunkCoalescing::rewriteTileChunkCoalesce(moduleOp);
 
   mlir::RewritePatternSet patterns(&getContext());
   patterns.add<StridedLoadStoreRewrite::LoadConverter,

@@ -67,7 +67,7 @@ constexpr int64_t kMinContigBytes = 512;  // floor: smallest merged-block size
 // a conservative slice that leaves room for double-buffering and alignment.
 constexpr int64_t kUBBytesBudget = 96 * 1024;
 // Absolute ceiling regardless of UB headroom: a very large H shrinks the launch
-// grid (AutoBlockify divides the block count by H) and can starve AI cores, so
+// grid (the host launcher divides grid[axis] by H) and can starve AI cores, so
 // we never coalesce more than this many tiles per program.
 constexpr int64_t kMaxCoalesceTilesCeil = 16;
 
@@ -136,10 +136,11 @@ static bool isLiftable(Operation *op) {
 // recover BOUND (and to drop the provably-all-true mask later); when it is a
 // real partial-tile mask (BOUND % C != 0) we must NOT coalesce, so we bail.
 static std::optional<TileSeed> findSeed(ModuleOp moduleOp) {
-  // The coalesced axis must be the OUTERMOST grid axis: bishengir
-  // AutoBlockifyParallelLoop divides the linear block range by coalesce_factor,
-  // which shrinks the outermost (highest-index) program-id axis. Coalescing an
-  // inner axis would mis-assign work.
+  // The coalesced axis must be the OUTERMOST grid axis: the host launcher
+  // divides grid[axis] by coalesce_factor, and bishengir reconstructs the
+  // outermost (highest-index) program id as the most-significant digit of the
+  // linear block id, so only that axis stays consistent. Coalescing an inner
+  // axis would mis-assign work.
   int32_t maxAxis = -1;
   moduleOp.walk([&](triton::GetProgramIdOp pid) {
     maxAxis = std::max<int32_t>(maxAxis, pid.getAxisAsInt());
@@ -272,14 +273,14 @@ static bool collectRegion(TileSeed &seed, ModuleOp moduleOp,
 // (see kUBBytesBudget); it has already been clamped to kMaxCoalesceTilesCeil.
 //
 //   * numTiles known (masked kernel, bound % T == 0): H must divide numTiles so
-//     bishengir's `logicBlockNum / H` is exact. Pick the LARGEST divisor in
+//     the launcher's `grid[axis] / H` is exact. Pick the LARGEST divisor in
 //     [hMin, maxH] so the already-large transfers get bigger DMAs / fewer loop
 //     iterations.
 //   * numTiles unknown (unmasked kernel): the tile count is a launch param and
 //     absent from the IR. Fall back to the largest power-of-two in [hMin, maxH].
 //     Chunk-axis grids in these (autotuned) kernels are powers of two, so a
 //     power-of-two H divides the grid exactly. (If a launch ever violates that,
-//     AutoBlockify's `logicBlockNum / H` would drop the remainder tiles -- the
+//     the launcher's `grid[axis] / H` would drop the remainder tiles -- the
 //     documented precondition for the unmasked path.)
 static int64_t chooseH(int64_t numTiles, int64_t tileLen, int64_t elemBytes,
                        int64_t maxH) {
@@ -318,11 +319,12 @@ static int64_t chooseH(int64_t numTiles, int64_t tileLen, int64_t elemBytes,
 }
 
 static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
-  // Yield to the higher-priority StridedAxisCoalescing: AutoBlockify divides the
-  // persistent-loop trip count by a single hacc.coalesce_factor exactly once, so
-  // if StridedAxisCoalescing (which runs first) already claimed it, coalescing
-  // again here would shrink the grid twice while only one factor survives ->
-  // wrong block count. Bail and leave our tiles to the strided dispatch.
+  // Yield to the higher-priority StridedAxisCoalescing: the launcher divides
+  // grid[axis] by a single (hacc.coalesce_factor, hacc.coalesce_axis) pair, so
+  // at most one pass may own it per module. If StridedAxisCoalescing (which runs
+  // first) already claimed it, coalescing again here would lift a second set of
+  // tiles while only one (factor, axis) survives -> wrong block count. Bail and
+  // leave our tiles to the strided dispatch.
   if (moduleOp->hasAttr(kCoalesceFactorAttr))
     return;
 
@@ -393,6 +395,23 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
   Value seedMask = seed->mask;  // null for unmasked kernels
   Operation *seedMaskOp = seedMask ? seedMask.getDefiningOp() : nullptr;
 
+  // The all-true tile mask is dropped from the loads/stores it guards and is
+  // never rebuilt (skipped in the loop below). That is only valid if it feeds
+  // *nothing else*: any other consumer (a broadcast before the load mask, a
+  // tt.where, ...) would try to lift the skipped mask and reference a null
+  // value -> invalid IR. Bail in that case (kernel keeps the correct,
+  // uncoalesced path) rather than risk a miscompile.
+  if (seedMask) {
+    for (Operation *u : seedMask.getUsers()) {
+      auto ld = dyn_cast<triton::LoadOp>(u);
+      auto st = dyn_cast<triton::StoreOp>(u);
+      bool okAsLoadMask = ld && ld.getMask() == seedMask;
+      bool okAsStoreMask = st && st.getMask() == seedMask;
+      if (!okAsLoadMask && !okAsStoreMask)
+        return;
+    }
+  }
+
   auto liftTy = [&](Type t) -> RankedTensorType {
     if (auto rt = dyn_cast<RankedTensorType>(t)) {
       SmallVector<int64_t> s;
@@ -422,8 +441,14 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
     if (it != vmap.end())
       return it->second;
     Operation *def = v.getDefiningOp();
-    if (def && region.count(def))
-      return vmap[v];  // rebuilt earlier (IR order guarantees dominance)
+    if (def && region.count(def)) {
+      // Rebuilt earlier (IR order guarantees dominance). The only region op we
+      // never rebuild is the all-true tile mask, and the precondition above
+      // guarantees it is not used here, so the lookup must succeed.
+      auto rebuilt = vmap.find(v);
+      assert(rebuilt != vmap.end() && "region value used before its rebuild");
+      return rebuilt->second;
+    }
     if (!isa<RankedTensorType>(v.getType()))
       return v;  // region-invariant scalar; caller splats if needed
     // region-invariant tensor: prepend a size-1 dim then broadcast over H.

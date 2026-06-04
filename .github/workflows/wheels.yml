@@ -27,6 +27,9 @@ jobs:
         - {runs_on: 'ubuntu-22.04', arch: 'x86_64'}
         - {runs_on: 'ubuntu-22.04-arm', arch: 'aarch64'}
         python: ["cp310", "cp311", "cp312", "cp313"]
+        branch:
+        - {ref: 'main', tag: 'main', local: 'dev'}
+        - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release'}
 
     permissions:
       id-token: write
@@ -43,6 +46,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch.ref }}
 
       - uses: actions/setup-python@v5
         with:
@@ -59,6 +64,7 @@ jobs:
             wheels-${{ matrix.config.arch }}-${{ matrix.python }}-
 
       - name: Build wheels
+        if: github.event_name != 'pull_request' || matrix.branch.ref == github.base_ref
         run: |
           python --version
           # Make sure cibuildwheel is updated to latest, this will enable latest python builds
@@ -87,7 +93,7 @@ jobs:
             TRITON_BUILD_PROTON=OFF \
             TRITON_WHEEL_NAME=triton-ascend \
             TRITON_APPEND_CMAKE_ARGS='-DTRITON_BUILD_UT=OFF' \
-            TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX:-rc3}+dev${BUILD_DATE} \
+            TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX:-rc3}+${{ matrix.branch.local }}${BUILD_DATE} \
             IS_MANYLINUX=TRUE \
             TRITON_HOME=/project/.triton-cache \
             TRITON_BUILD_WITH_CCACHE=true \
@@ -109,8 +115,9 @@ jobs:
           python3 -m cibuildwheel . --output-dir wheelhouse
 
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request' || matrix.branch.ref == github.base_ref
         with:
-          name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-${{ matrix.python }}-wheels-upload
+          name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}-wheels-upload
           path: ./wheelhouse/*.whl
 
       - name: Setup obsutil and upload to OBS

@@ -839,8 +839,10 @@ LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(Modul
   }
 
   // Both passes below coalesce by recording a single module-level
-  // hacc.coalesce_factor that bishengir AutoBlockifyParallelLoop divides the
-  // persistent-loop trip count by exactly once, so at most one may claim it per
+  // (hacc.coalesce_factor, hacc.coalesce_axis) pair. The full-TA path owns the
+  // grid division: compiler.py strips both attrs into host metadata and the
+  // launcher (driver.py) divides grid[axis] by the factor before launch --
+  // bishengir does NOT interpret them. At most one pass may claim the factor per
   // module. StridedAxisCoalescing has PRIORITY: it runs first and
   // unconditionally, and TileChunkCoalescing yields (bails) if the factor is
   // already set.
@@ -857,9 +859,10 @@ LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(Modul
   // program-id axis is a pure tile index over a contiguous problem axis with a
   // small tile T, fold H adjacent tiles into one program so the per-tile
   // load/store become a single contiguous H*T DMA (H picked so the block is
-  // >= 512B and within UB). Emits hacc.coalesce_factor = H. Bails when the
-  // pattern / lane-safety do not hold, or when StridedAxisCoalescing above
-  // already claimed the coalesce factor.
+  // >= 512B and within UB). Emits hacc.coalesce_factor = H and
+  // hacc.coalesce_axis. Bails when the pattern / lane-safety do not hold, when
+  // the kernel reads num_programs(axis) (the launcher changes it), or when
+  // StridedAxisCoalescing above already claimed the coalesce factor.
   TileChunkCoalescing::rewriteTileChunkCoalesce(moduleOp);
 
   mlir::RewritePatternSet patterns(&getContext());

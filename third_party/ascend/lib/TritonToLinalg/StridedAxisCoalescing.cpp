@@ -60,6 +60,32 @@ static triton::AddPtrOp findIhAddPtr(Value base, int64_t S) {
     return triton::AddPtrOp();
 }
 
+// Mirror of findIhAddPtr that returns the program_id axis driving the ih split
+// (i.e. the grid dim the host launcher must divide by S), or -1 if `base` is
+// not such an ih-split ptr. Whenever findIhAddPtr succeeds this does too.
+static int32_t findIhAxis(Value base, int64_t S) {
+    Value src = base;
+    while (auto addptr = src.getDefiningOp<triton::AddPtrOp>()) {
+        if (isa<RankedTensorType>(addptr.getPtr().getType())) break;
+        if (auto rem = addptr.getOffset().getDefiningOp<arith::RemSIOp>()) {
+            APInt cC;
+            if (matchPattern(rem.getRhs(), m_ConstantInt(&cC)) &&
+                std::abs(cC.getSExtValue()) == S) {
+                Value lhs = rem.getLhs();
+                while (true) {
+                    if (auto e = lhs.getDefiningOp<arith::ExtSIOp>()) { lhs = e.getIn(); continue; }
+                    if (auto t = lhs.getDefiningOp<arith::TruncIOp>()) { lhs = t.getIn(); continue; }
+                    break;
+                }
+                if (auto pid = lhs.getDefiningOp<triton::GetProgramIdOp>())
+                    return pid.getAxisAsInt();
+            }
+        }
+        src = addptr.getPtr();
+    }
+    return -1;
+}
+
 static Value build2DBlockPtr(IRRewriter &rw, triton::MakeTensorPtrOp m1d,
                              int64_t S, int64_t BT) {
     triton::AddPtrOp ih = findIhAddPtr(m1d.getBase(), S);
@@ -233,6 +259,9 @@ void rewriteStridedAxisCoalesce(ModuleOp moduleOp) {
     // This pass has priority over TileChunkCoalescing for the single module-level
     // hacc.coalesce_factor: it runs first and unconditionally; TileChunk yields
     // if we claim the factor here.
+    //
+    // Full TA path: we record (hacc.coalesce_factor=S, hacc.coalesce_axis) and the
+    // host launcher divides grid[axis] by S. bishengir does NOT interpret these.
 
     // Collect the strided ih-base 1D loads (seeds). All must share one stride S
     // (the folded H axis); BT is the per-chunk tile length.
@@ -255,6 +284,22 @@ void rewriteStridedAxisCoalesce(ModuleOp moduleOp) {
         seeds.push_back(l);
     });
     if (seeds.empty()) return;
+
+    // The grid axis the launcher will divide by S (the pid feeding `pid % S`).
+    int32_t coalesceAxis = -1;
+    if (auto m0 = seeds.front().getPtr().getDefiningOp<triton::MakeTensorPtrOp>())
+        coalesceAxis = findIhAxis(m0.getBase(), S);
+    if (coalesceAxis < 0) return;  // cannot identify the axis -> do not coalesce
+
+    // Full TA path: the launcher divides grid[coalesceAxis] by S, so the
+    // kernel-visible num_programs(coalesceAxis) becomes grid/S. If the kernel
+    // reads it, coalescing would change that value -> wrong results. Bail (the
+    // kernel keeps its original, correct, uncoalesced path).
+    bool readsAxisNumPrograms = false;
+    moduleOp.walk([&](triton::GetNumProgramsOp np) {
+        if (np.getAxisAsInt() == coalesceAxis) readsAxisNumPrograms = true;
+    });
+    if (readsAxisNumPrograms) return;
 
     // Phase 0: turn any reverse-cumsum idiom into a single reverse scan.
     simplifyReverseCumsum1D(moduleOp, S);
@@ -409,6 +454,7 @@ void rewriteStridedAxisCoalesce(ModuleOp moduleOp) {
 
     auto i32t = IntegerType::get(moduleOp.getContext(), 32);
     moduleOp->setAttr("hacc.coalesce_factor", IntegerAttr::get(i32t, S));
+    moduleOp->setAttr("hacc.coalesce_axis", IntegerAttr::get(i32t, coalesceAxis));
 }
 
 }  // namespace StridedAxisCoalescing

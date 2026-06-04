@@ -91,6 +91,20 @@ def _get_then_remove_rc(mod, attr_name: str) -> int:
     return attr_value
 
 
+def _export_coalesce_metadata(mod, metadata):
+    # Tile/strided coalescing (TritonToLinalg) records the chosen coalesce factor
+    # H and the grid axis it applies to as module attrs hacc.coalesce_factor /
+    # hacc.coalesce_axis. In the full-TA design the *launcher* (driver.py) owns
+    # the grid division: it divides grid[axis] by H before launch, and bishengir
+    # no longer interprets the attrs. Read them into metadata here and strip them
+    # from the module so the hacc.* attrs never reach hivmc (which rejects
+    # unknown module attrs). Absent attrs -> factor 1 (no-op) / axis -1.
+    factor = _get_then_remove_rc(mod, "hacc.coalesce_factor")
+    axis = _get_then_remove_rc(mod, "hacc.coalesce_axis")
+    metadata["coalesce_factor"] = factor if isinstance(factor, int) and factor > 1 else 1
+    metadata["coalesce_axis"] = axis if isinstance(axis, int) and axis >= 0 else -1
+
+
 def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
     rc = _get_then_remove_rc(mod, "triton_ascend.dynamic_cv_pipeline.rc")
     if rc != -1 and rc > 0:
@@ -235,6 +249,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
                                           enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)
+        _export_coalesce_metadata(mod, metadata)
 
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])

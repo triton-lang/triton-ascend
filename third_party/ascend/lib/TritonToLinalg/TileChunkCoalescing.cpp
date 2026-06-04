@@ -72,9 +72,14 @@ constexpr int64_t kUBBytesBudget = 96 * 1024;
 constexpr int64_t kMaxCoalesceTilesCeil = 16;
 
 constexpr llvm::StringLiteral kCoalesceFactorAttr = "hacc.coalesce_factor";
+// The grid axis (= program_id axis) whose launch dimension the host launcher
+// divides by the factor. The full TA path owns the grid division: bishengir no
+// longer interprets either attr (see driver.py / compiler.py).
+constexpr llvm::StringLiteral kCoalesceAxisAttr = "hacc.coalesce_axis";
 
 struct TileSeed {
   triton::GetProgramIdOp pid;  // the (outermost) tile-index program id
+  int32_t axis = 0;            // pid axis == the grid dim the launcher divides
   int64_t tileLen = 0;         // T  (constexpr tile length / CHUNK_SIZE)
   int64_t bound = 0;           // BOUND (constexpr problem length / SEQLEN), or 0
                                // when the kernel carries no boundary mask (the
@@ -140,6 +145,19 @@ static std::optional<TileSeed> findSeed(ModuleOp moduleOp) {
     maxAxis = std::max<int32_t>(maxAxis, pid.getAxisAsInt());
   });
 
+  // Full TA path: the launcher divides grid[maxAxis] by H, so the kernel-visible
+  // num_programs(maxAxis) becomes grid/H instead of grid. If the kernel reads it
+  // (e.g. for its own bound arithmetic) coalescing would silently change that
+  // value -> wrong results. Refuse to coalesce such kernels (they keep the
+  // original, uncoalesced -- but correct -- path).
+  bool readsMaxAxisNumPrograms = false;
+  moduleOp.walk([&](triton::GetNumProgramsOp np) {
+    if (np.getAxisAsInt() == maxAxis)
+      readsMaxAxisNumPrograms = true;
+  });
+  if (readsMaxAxisNumPrograms)
+    return std::nullopt;
+
   std::optional<TileSeed> result;
   moduleOp.walk([&](triton::GetProgramIdOp pid) {
     if (result || pid.getAxisAsInt() != maxAxis)
@@ -193,7 +211,7 @@ static std::optional<TileSeed> findSeed(ModuleOp moduleOp) {
           }
           // Match with or without a mask. Unmasked kernels (bound == 0) have no
           // static tile count; chooseH falls back to a power-of-two factor.
-          result = TileSeed{pid, T, bound, mask};
+          result = TileSeed{pid, maxAxis, T, bound, mask};
           return;
         }
       }
@@ -537,9 +555,11 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
   for (auto it = ordered.rbegin(); it != ordered.rend(); ++it)
     rw.eraseOp(*it);
 
-  moduleOp->setAttr(kCoalesceFactorAttr,
-                    IntegerAttr::get(IntegerType::get(moduleOp.getContext(), 32),
-                                     H));
+  // Record (factor, axis) for the host launcher. compiler.py reads + strips both
+  // attrs; the launcher then divides grid[axis] by H. bishengir is not involved.
+  auto i32Ty = IntegerType::get(moduleOp.getContext(), 32);
+  moduleOp->setAttr(kCoalesceFactorAttr, IntegerAttr::get(i32Ty, H));
+  moduleOp->setAttr(kCoalesceAxisAttr, IntegerAttr::get(i32Ty, seed->axis));
 }
 
 }  // namespace

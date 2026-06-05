@@ -122,7 +122,8 @@ static bool isSIMTOp(Operation *op)
       triton::ascend::GatherOutToUbOp,
       triton::ascend::ScatterUbToOutOp,
       triton::ascend::IndirectLoadOp,
-      triton::ascend::IndirectStoreOp
+      triton::ascend::IndirectStoreOp,
+      triton::ScanOp
       >(op);
 }
 

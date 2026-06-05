@@ -874,6 +874,9 @@ class NPUOptions:
     # disable simt fma optimization to get high precision
     disable_fma: bool = False
 
+    # superblocking factor
+    superblock_factor: int = 0
+
     def __post_init__(self):
         # Parse compile_mode and set related fields
         if self.compile_mode == "simd":
@@ -941,9 +944,11 @@ def ttir_to_npubin(mod, metadata, opt):
             if _is_auto_map_parallel_blocks_enabled():
                 if enable_auto_blockify is None or enable_auto_blockify:
                     _compile_option_list += ["--enable-auto-blockify-loop"]
+                    _compile_option_list += [f"--super-block-factor={opt.superblock_factor}"]
             else:
                 if enable_auto_blockify:
                     _compile_option_list += ["--enable-auto-blockify-loop"]
+                    _compile_option_list += [f"--super-block-factor={opt.superblock_factor}"]
 
         npu_compiler_path, env = _get_npucompiler_path()
         cmd_list = ([npu_compiler_path, src_path] + _compile_option_list + ["-o", bin_file])

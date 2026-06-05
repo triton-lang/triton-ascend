@@ -2,7 +2,7 @@
 
 ## 1. 函数概述
 
-`device_print` 用于在NPU运行时从设备端打印信息，与`static_print`不同，这是在内核执行时实时输出信息。 **使用`device_print`需要将环境变量`TRITON_DEVICE_PRINT`的值设置为`True`。**
+`device_print` 用于在NPU运行时从设备端打印信息，与`static_print`不同，这是在内核执行时实时输出信息。 第一个参数必须为`string`, 后面的参数必须为`scalars`或者`tensors`。 **使用`device_print`需要将环境变量`TRITON_DEVICE_PRINT`的值设置为`True`。**
 
 ```python
 triton.language.device_print(prefix, *args, hex=False, _semantic=None)
@@ -72,7 +72,7 @@ def add_kernel(x_ptr,  # *Pointer* to first input vector.
 
 ### 2.4 使用方法
 
-**注意**：`prefix`字符串前缀在使用`device_print`时是必须加上的，否则会导致编译错误。
+**注意**：`prefix`字符串前缀在使用`device_print`时是必须加上的，否则会导致编译错误。目前不支持单独打印`prefix`字符串。
 
 ```python
 import triton

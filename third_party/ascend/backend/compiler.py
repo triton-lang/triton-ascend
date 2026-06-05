@@ -267,6 +267,10 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
 
     DISABLE_AUTO_TILE_AND_BIND_SUBBLOCK_REGEX = r'hivm.disable_auto_tile_and_bind_subblock'
 
+    # Inserted by DiscreteMaskAccessConversionPass / MemOpConverter when discrete
+    # masked stores need cross-block exclusion (e.g. hivm.sync_block_lock).
+    SYNC_BLOCK_LOCK_REGEX = r'\bsync_block_lock\b'
+
     # Example: mix_mode = "aiv" -> aiv
     MIX_MODE_REGEX = r'mix_mode\s*=\s*"([^"]+)"'
 
@@ -287,6 +291,11 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
     metadata["shared"] = 1
     # Force disable auto tile and bind subblock if attribute is present in module
     metadata["auto_tile_and_bind_subblock"] = not re.search(DISABLE_AUTO_TILE_AND_BIND_SUBBLOCK_REGEX, linalg)
+    # Turn off auto-blockify when sync_block_lock/unlock was inserted: the lock
+    # protects a cross-block read-modify-write and is incompatible with packing
+    # logical blocks into a sequential auto-blockify loop.
+    if re.search(SYNC_BLOCK_LOCK_REGEX, linalg):
+        metadata["has_auto_blockify_blacklist_op"] = True
     # the mix mode is also encoded into metadata['name'] for runtime to distinguish
     metadata["mix_mode"] = re.search(MIX_MODE_REGEX, linalg).group(1)
     metadata["parallel_mode"] = re.search(PARALLEL_MODE_REGEX, linalg).group(1)

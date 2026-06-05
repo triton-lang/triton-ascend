@@ -24,12 +24,16 @@ jobs:
     env:
       PROTON_SKIP_PC_SAMPLING_TEST: 1
       PYTHON: "python${{ matrix.python_version }}"
+      PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
+      PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
+      PIP_EXTRA_INDEX_URL: "https://repo.huaweicloud.com/ascend/repos/pypi"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           submodules: "true"
+          fetch-depth: 1
 
       - name: Add git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -104,8 +108,8 @@ jobs:
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           MAX_JOBS="$NUM_PROCS" ${PYTHON} setup.py bdist_wheel
-          ${PYTHON} -m pip install dist/*.whl \
-            -i https://repo.huaweicloud.com/repository/pypi/simple/ --force-reinstall
+          ${PYTHON} -m pip install -v dist/*.whl --force-reinstall
+
 
       - name: CCache stats
         run: ccache --print-stats

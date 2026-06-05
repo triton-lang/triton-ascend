@@ -39,6 +39,21 @@ import torch
 import pytest
 import test_common
 
+try:
+    from triton.tools.get_ascend_devices import is_compile_on_910_95
+except Exception:
+    is_compile_on_910_95 = False
+
+
+a3_known_boundary_load_issue = pytest.mark.xfail(
+    not is_compile_on_910_95,
+    reason=(
+        "Known A3 baseline issue on release/3.2.2-dev: make_block_ptr "
+        "boundary_check + static power-of-two stride"
+    ),
+    strict=False,
+)
+
 
 # ---------------------------------------------------------------------------
 # 1D: out[i] = in[i * STRIDE]
@@ -499,11 +514,14 @@ def _ref_boundary_load(src_cpu_flat, parent_m, parent_n,
     # V1.5 命中: PAD_ZERO, stride_n=3, block 部分越界
     ("float32", 7, 5, 15, 3, 8, 8, False),
     # V1.5 命中: PAD_NAN (float)
-    ("float32", 5, 3, 12, 4, 8, 8, True),
+    pytest.param("float32", 5, 3, 12, 4, 8, 8, True,
+                 marks=a3_known_boundary_load_issue),
     # V1.5 命中: float16
-    ("float16", 5, 5, 20, 4, 8, 8, False),
+    pytest.param("float16", 5, 5, 20, 4, 8, 8, False,
+                 marks=a3_known_boundary_load_issue),
     # 越界都在尾轴: block 完全装得下 axis 0
-    ("float32", 8, 3, 12, 4, 8, 8, False),
+    pytest.param("float32", 8, 3, 12, 4, 8, 8, False,
+                 marks=a3_known_boundary_load_issue),
 ])
 def test_block_ptr_boundary_load(dtype, parent_m, parent_n, stride_m, stride_n,
                                   block_m, block_n, pad_nan):

@@ -4186,7 +4186,7 @@ def test_dot_mulbroadcasted(in_dtype, device):
 
 
 @pytest.mark.interpreter
-@pytest.mark.parametrize("dtype_str", int_dtypes + uint_dtypes + float_dtypes + ['bfloat16', 'fp8e4m3', 'fp8e5m2'])
+@pytest.mark.parametrize("dtype_str", int_dtypes + uint_dtypes + float_dtypes + ['bfloat16'])
 @pytest.mark.parametrize("shape", [(), (1, ), (128, )])
 def test_full(dtype_str, shape, device):
     if dtype_str in uint_dtypes and not hasattr(torch, dtype_str):

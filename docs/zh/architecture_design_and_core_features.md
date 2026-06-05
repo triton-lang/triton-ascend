@@ -77,7 +77,7 @@
 
 |序号| NPUOptions                                    | 硬件平台     | 用途 |
 | --- | --------------------------------------------- | ---------- | ----- |
-| 1   | multibuffer                                   | NPU        | Autotune Option: Enable or disable ping-pong pipeline. |
+| 1   | multibuffer                                   | NPU        | Autotune Option: Enable or disable ping-pong pipeline. Enabled by default. |
 | 2   | enable_auto_bind_sub_block                    | NPU        | Autotune option (CV-fused kernels only): Enable or disable auto-binding of sub-blocks. |
 | 3   | enable_hivm_auto_cv_balance                   | NPU        | Autotune option (CV-fused kernels only): Enable or disable automatic CV balancing. |
 | 4   | sync_solver                                   | NPU        | Autotune option (CV-fused kernels only): Enable or disable the synchronization solver. |

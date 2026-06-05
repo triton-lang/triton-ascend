@@ -2,7 +2,7 @@ name: Ascend950 Wheels Build
 
 on:
   pull_request:
-    paths-ignore:
+    paths-ignore: &paths-ignore
       - 'docs/**'
       - '**/*.md'
       - 'LICENSE'
@@ -22,9 +22,14 @@ on:
       - '.github/workflows/llvm-build/**'
       - '.github/workflows/pre-commit.yml'
       - '.github/workflows/runner-preparation.yml'
+  push:
+    branches: [main, release/**]
+    paths-ignore: *paths-ignore
 
 concurrency:
-  group: wheels-pr-${{ github.event.pull_request.number }}
+  # PR runs key on PR number (cancel earlier pushes); main-branch runs key on
+  # SHA so distinct merges don't cancel each other.
+  group: wheels-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:

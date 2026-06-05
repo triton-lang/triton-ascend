@@ -970,8 +970,8 @@ class BaseAutotuner:
 CubeAutotuner = BaseAutotuner(operator_name="cube", supported_params=_CUBE_PARAMS, default_params=_DEFAULTS,
                               validation_rules=_VALIDATION_RULES)
 
-MixcvAutotuner = BaseAutotuner(operator_name="mixcv", supported_params=_MIXCV_PARAMS, default_params=_DEFAULTS,
-                               validation_rules=_VALIDATION_RULES)
+MixAutotuner = BaseAutotuner(operator_name="mix", supported_params=_MIXCV_PARAMS, default_params=_DEFAULTS,
+                             validation_rules=_VALIDATION_RULES)
 
 VectorAutotuner = BaseAutotuner(operator_name="vector", supported_params=_VECTOR_PARAMS, default_params=_DEFAULTS,
                                 validation_rules=_VALIDATION_RULES)
@@ -988,13 +988,13 @@ def get_autotune_cube_config(**kwargs: Any) -> List[triton.Config]:
 
 def get_autotune_cv_config(**kwargs: Any) -> List[triton.Config]:
     """
-    Generate autotune configuration for the mixcv operator.
+    Generate autotune configuration for the mix operator.
     Supported parameters: num_stages, unit_flag, limit_auto_multi_buffer_only_for_local_buffer,
                 limit_auto_multi_buffer_of_local_buffer, set_workspace_multibuffer,
                 enable_hivm_auto_cv_balance, tile_mix_vector_loop, tile_mix_cube_loop, enable_ubuf_saving
     """
     import triton
-    return MixcvAutotuner.get_configs(**kwargs)
+    return MixAutotuner.get_configs(**kwargs)
 
 
 def get_autotune_vector_config(**kwargs: Any) -> List[triton.Config]:
@@ -1006,12 +1006,12 @@ def get_autotune_vector_config(**kwargs: Any) -> List[triton.Config]:
     return VectorAutotuner.get_configs(**kwargs)
 
 
-def get_max_configs(config, kernel_type="mixcv", **kwargs):
+def get_max_configs(config, kernel_type="mix", **kwargs):
     """
     Expand a single base Config by combining it with tuning parameters.
 
     :param config: A triton.Config object serving as the base.
-    :param kernel_type: Operator type, one of "cube", "mixcv", "vector". Default "mixcv".
+    :param kernel_type: Operator type, one of "cube", "mix", "vector". Default "mix".
     :param kwargs: Tuning parameters, each provided as a list (e.g., enable_hivm_auto_cv_balance=[True, False]).
                    If a parameter is not provided, its value is taken from the base config (if present)
                    or from the defaults.
@@ -1088,7 +1088,7 @@ def get_max_configs(config, kernel_type="mixcv", **kwargs):
     return new_configs
 
 
-def max_autotune(configs, key, kernel_type="mixcv", prune_configs_by=None, reset_to_zero=None, restore_value=None,
+def max_autotune(configs, key, kernel_type="mix", prune_configs_by=None, reset_to_zero=None, restore_value=None,
                  pre_hook=None, post_hook=None, warmup=None, rep=None, use_cuda_graph=False, do_bench=None,
                  **tuning_params):
     """
@@ -1100,7 +1100,7 @@ def max_autotune(configs, key, kernel_type="mixcv", prune_configs_by=None, reset
 
     :param configs: List of base triton.Config objects.
     :param key: List of argument names whose change triggers re-tuning.
-    :param kernel_type: Operator type, one of "cube", "mixcv", "vector". Default "mixcv".
+    :param kernel_type: Operator type, one of "cube", "mix", "vector". Default "mix".
     :param prune_configs_by: Same as in autotune.
     :param reset_to_zero: Same as in autotune.
     :param restore_value: Same as in autotune.

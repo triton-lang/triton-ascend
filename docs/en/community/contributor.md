@@ -1,0 +1,179 @@
+## Maintainers and Contributors
+
+### Maintainers
+
+| Name | ID | Join Date |
+|---|---|---|
+| Chen Cheng | ccdedreams | 2025-09-27 |
+| Lijuan Hai | HaiLijuan | 2025-09-27 |
+| Tao Wang | wangtao489 | 2025-09-27 |
+| Yingcong Liang | wcleungaj | 2025-09-27 |
+| Jingchang Shi | shijingchang | 2025-09-27 |
+| Hao Zhou | zhouhao176 | 2025-09-27 |
+| Kaipeng Xing | kpxing | 2025-09-27 |
+| Zhijie Zhao | zhaozhijie | 2025-09-27 |
+| Kaixin Yang | yangkaixin | 2025-09-27 |
+| Chunli Zhang | zhang-chunli01 | 2025-09-27 |
+| Ce Zhu | zhucehw | 2025-12-23 |
+| Xuan Peng | HinPeng | 2025-12-23 |
+| Ziqi Hong | candyhong | 2026-03-26 |
+
+### Contributors
+
+Every release of Triton-Ascend would not have been possible without the following contributors:
+
+Updated on 2026-05-06:
+
+| No. | Contributor | First Contribution Date | PR |
+|-----|----------------|------|--------|
+| 149 | [ggppff24](https://gitcode.com/ggppff24) | 2026-05-06 | [#1769](https://gitcode.com/Ascend/triton-ascend/merge_requests/1769) |
+| 148 | [wxlong_ustc](https://gitcode.com/wxlong_ustc) | 2026-04-29 | [#1733](https://gitcode.com/Ascend/triton-ascend/merge_requests/1733) |
+| 147 | [liwei571](https://gitcode.com/liwei571) | 2026-04-29 | [#1740](https://gitcode.com/Ascend/triton-ascend/merge_requests/1740) |
+| 146 | [WangYiMou](https://gitcode.com/WangYiMou) | 2026-04-28 | [#1697](https://gitcode.com/Ascend/triton-ascend/merge_requests/1697) |
+| 145 | [Four1er](https://gitcode.com/Four1er) | 2026-04-28 | [#1742](https://gitcode.com/Ascend/triton-ascend/merge_requests/1742) |
+| 144 | [gcw_LcYTzRJy](https://gitcode.com/gcw_LcYTzRJy) | 2026-04-27 | [#1690](https://gitcode.com/Ascend/triton-ascend/merge_requests/1690) |
+| 143 | [zhaojiqiao](https://gitcode.com/zhaojiqiao) | 2026-04-27 | [#1722](https://gitcode.com/Ascend/triton-ascend/merge_requests/1722) |
+| 142 | [andreybokhanko](https://gitcode.com/andreybokhanko) | 2026-04-27 | [#1675](https://gitcode.com/Ascend/triton-ascend/merge_requests/1675) |
+| 141 | [weizhan4](https://gitcode.com/weizhan4) | 2026-04-25 | [#1702](https://gitcode.com/Ascend/triton-ascend/merge_requests/1702) |
+| 140 | [Sky_miner](https://gitcode.com/Sky_miner) | 2026-04-24 | [#1680](https://gitcode.com/Ascend/triton-ascend/merge_requests/1680) |
+| 139 | [zhangchaofan](https://gitcode.com/zhangchaofan) | 2026-04-22 | [#1265](https://gitcode.com/Ascend/triton-ascend/merge_requests/1265) |
+| 138 | [yuanjingya](https://gitcode.com/yuanjingya) | 2026-04-22 | [#1638](https://gitcode.com/Ascend/triton-ascend/merge_requests/1638) |
+| 137 | [shi-yufeng99](https://gitcode.com/shi-yufeng99) | 2026-04-13 | [#1570](https://gitcode.com/Ascend/triton-ascend/merge_requests/1570) |
+| 136 | [zaq15csdn](https://gitcode.com/zaq15csdn) | 2026-04-11 | [#1593](https://gitcode.com/Ascend/triton-ascend/merge_requests/1593) |
+| 135 | [wuyao51511](https://gitcode.com/wuyao51511) | 2026-04-10 | [#1592](https://gitcode.com/Ascend/triton-ascend/merge_requests/1592) |
+| 134 | [jtaizhang](https://gitcode.com/jtaizhang) | 2026-04-08 | [#1575](https://gitcode.com/Ascend/triton-ascend/merge_requests/1575) |
+| 133 | [jjin_750629](https://gitcode.com/jjin_750629) | 2026-04-07 | [#1498](https://gitcode.com/Ascend/triton-ascend/merge_requests/1498) |
+| 132 | [lbqg](https://gitcode.com/lbqg) | 2026-04-02 | [#1506](https://gitcode.com/Ascend/triton-ascend/merge_requests/1506) |
+| 131 | [huangyujun123](https://gitcode.com/huangyujun123) | 2026-03-31 | [#1505](https://gitcode.com/Ascend/triton-ascend/merge_requests/1505) |
+| 130 | [danielcm585](https://gitcode.com/danielcm585) | 2026-03-26 | [#1444](https://gitcode.com/Ascend/triton-ascend/merge_requests/1444) |
+| 129 | [OliverCWY](https://gitcode.com/OliverCWY) | 2026-03-26 | [#1441](https://gitcode.com/Ascend/triton-ascend/merge_requests/1441) |
+| 128 | [cxtverygood123](https://gitcode.com/cxtverygood123) | 2026-03-26 | [#1459](https://gitcode.com/Ascend/triton-ascend/merge_requests/1459) |
+| 127 | [shaoyiyang](https://gitcode.com/shaoyiyang) | 2026-03-21 | [#1429](https://gitcode.com/Ascend/triton-ascend/merge_requests/1429) |
+| 126 | [xiechenye](https://gitcode.com/xiechenye) | 2026-03-20 | [#1407](https://gitcode.com/Ascend/triton-ascend/merge_requests/1407) |
+| 125 | [wuzw_05](https://gitcode.com/wuzw_05) | 2026-03-20 | [#1418](https://gitcode.com/Ascend/triton-ascend/merge_requests/1418) |
+| 124 | [Zackc](https://gitcode.com/Zackc) | 2026-03-20 | [#1394](https://gitcode.com/Ascend/triton-ascend/merge_requests/1394) |
+| 123 | [Wangxiaoshuai2](https://gitcode.com/Wangxiaoshuai2) | 2026-03-18 | [#1402](https://gitcode.com/Ascend/triton-ascend/merge_requests/1402) |
+| 122 | [Levein](https://gitcode.com/Levein) | 2026-03-16 | [#1389](https://gitcode.com/Ascend/triton-ascend/merge_requests/1389) |
+| 121 | [ciggaco](https://gitcode.com/ciggaco) | 2026-03-13 | [#1375](https://gitcode.com/Ascend/triton-ascend/merge_requests/1375) |
+| 120 | [ZhaoWentengZWT](https://gitcode.com/ZhaoWentengZWT) | 2026-03-10 | [#1367](https://gitcode.com/Ascend/triton-ascend/merge_requests/1367) |
+| 119 | [qq_43310834](https://gitcode.com/qq_43310834) | 2026-03-09 | [#1362](https://gitcode.com/Ascend/triton-ascend/merge_requests/1362) |
+| 118 | [xlinn](https://gitcode.com/xlinn) | 2026-02-26 | [#1300](https://gitcode.com/Ascend/triton-ascend/merge_requests/1300) |
+| 117 | [MaxYy](https://gitcode.com/MaxYy) | 2026-02-26 | [#1292](https://gitcode.com/Ascend/triton-ascend/merge_requests/1292) |
+| 116 | [jeanniely](https://gitcode.com/jeanniely) | 2026-02-26 | [#1276](https://gitcode.com/Ascend/triton-ascend/merge_requests/1276) |
+| 115 | [elizavetaV](https://gitcode.com/elizavetaV) | 2026-02-25 | [#1255](https://gitcode.com/Ascend/triton-ascend/merge_requests/1255) |
+| 114 | [wuzhenqing](https://gitcode.com/wuzhenqing) | 2026-02-25 | [#1291](https://gitcode.com/Ascend/triton-ascend/merge_requests/1291) |
+| 113 | [tsczajkowski_2025](https://gitcode.com/tsczajkowski_2025) | 2026-02-05 | [#1246](https://gitcode.com/Ascend/triton-ascend/merge_requests/1246) |
+| 112 | [xuweixin_](https://gitcode.com/xuweixin_) | 2026-01-27 | [#1160](https://gitcode.com/Ascend/triton-ascend/merge_requests/1160) |
+| 111 | [Zz_zl](https://gitcode.com/Zz_zl) | 2026-01-27 | [#1189](https://gitcode.com/Ascend/triton-ascend/merge_requests/1189) |
+| 110 | [Ritsuka314](https://gitcode.com/Ritsuka314) | 2026-01-21 | [#720](https://gitcode.com/Ascend/triton-ascend/merge_requests/720) |
+| 109 | [wrq_0425](https://gitcode.com/wrq_0425) | 2026-01-21 | [#1129](https://gitcode.com/Ascend/triton-ascend/merge_requests/1129) |
+| 108 | [hua_yc](https://gitcode.com/hua_yc) | 2026-01-21 | [#1127](https://gitcode.com/Ascend/triton-ascend/merge_requests/1127) |
+| 107 | [stonexxx](https://gitcode.com/stonexxx) | 2026-01-21 | [#1151](https://gitcode.com/Ascend/triton-ascend/merge_requests/1151) |
+| 106 | [wen_xiang_zou_admin](https://gitcode.com/wen_xiang_zou_admin) | 2026-01-20 | [#1095](https://gitcode.com/Ascend/triton-ascend/merge_requests/1095) |
+| 105 | [HinPeng](https://gitcode.com/HinPeng) | 2026-01-20 | [#1132](https://gitcode.com/Ascend/triton-ascend/merge_requests/1132) |
+| 104 | [high-cloud](https://gitcode.com/high-cloud) | 2026-01-19 | [#1058](https://gitcode.com/Ascend/triton-ascend/merge_requests/1058) |
+| 103 | [szhewei](https://gitcode.com/szhewei) | 2026-01-16 | [#1084](https://gitcode.com/Ascend/triton-ascend/merge_requests/1084) |
+| 102 | [Alae-eddine](https://gitcode.com/Alae-eddine) | 2026-01-14 | [#1097](https://gitcode.com/Ascend/triton-ascend/merge_requests/1097) |
+| 101 | [jqran](https://gitcode.com/jqran) | 2026-01-13 | [#1073](https://gitcode.com/Ascend/triton-ascend/merge_requests/1073) |
+| 100 | [f42e278](https://gitcode.com/f42e278) | 2026-01-13 | [#1054](https://gitcode.com/Ascend/triton-ascend/merge_requests/1054) |
+| 99 | [zhengqishui1](https://gitcode.com/zhengqishui1) | 2026-01-13 | [#1081](https://gitcode.com/Ascend/triton-ascend/merge_requests/1081) |
+| 98 | [zircon_wang](https://gitcode.com/zircon_wang) | 2026-01-13 | [#1079](https://gitcode.com/Ascend/triton-ascend/merge_requests/1079) |
+| 97 | [Jemtaly](https://gitcode.com/Jemtaly) | 2026-01-12 | [#1076](https://gitcode.com/Ascend/triton-ascend/merge_requests/1076) |
+| 96 | [nanalin](https://gitcode.com/nanalin) | 2026-01-12 | [#1059](https://gitcode.com/Ascend/triton-ascend/merge_requests/1059) |
+| 95 | [noodleslx](https://gitcode.com/noodleslx) | 2026-01-10 | [#1075](https://gitcode.com/Ascend/triton-ascend/merge_requests/1075) |
+| 94 | [liheng1234](https://gitcode.com/liheng1234) | 2026-01-09 | [#1049](https://gitcode.com/Ascend/triton-ascend/merge_requests/1049) |
+| 93 | [hocky](https://gitcode.com/hocky) | 2026-01-07 | [#1021](https://gitcode.com/Ascend/triton-ascend/merge_requests/1021) |
+| 92 | [zhudada](https://gitcode.com/zhudada) | 2026-01-07 | [#1053](https://gitcode.com/Ascend/triton-ascend/merge_requests/1053) |
+| 91 | [lipschitz_von](https://gitcode.com/lipschitz_von) | 2026-01-06 | [#1041](https://gitcode.com/Ascend/triton-ascend/merge_requests/1041) |
+| 90 | [hbhu_bin](https://gitcode.com/hbhu_bin) | 2026-01-04 | [#1009](https://gitcode.com/Ascend/triton-ascend/merge_requests/1009) |
+| 89 | [uladz](https://gitcode.com/uladz) | 2025-12-23 | [#938](https://gitcode.com/Ascend/triton-ascend/merge_requests/938) |
+| 88 | [zhaojingkai](https://gitcode.com/zhaojingkai) | 2025-12-22 | [#918](https://gitcode.com/Ascend/triton-ascend/merge_requests/918) |
+| 87 | [ardazishvili](https://gitcode.com/ardazishvili) | 2025-12-19 | [#934](https://gitcode.com/Ascend/triton-ascend/merge_requests/934) |
+| 86 | [jeshd](https://gitcode.com/jeshd) | 2025-12-03 | [#823](https://gitcode.com/Ascend/triton-ascend/merge_requests/823) |
+| 85 | [chongweizhi](https://gitcode.com/chongweizhi) | 2025-11-27 | [#807](https://gitcode.com/Ascend/triton-ascend/merge_requests/807) |
+| 84 | [BaiSifan](https://gitcode.com/BaiSifan) | 2025-11-25 | [#797](https://gitcode.com/Ascend/triton-ascend/merge_requests/797) |
+| 83 | [weilinquan](https://gitcode.com/weilinquan) | 2025-11-18 | [#739](https://gitcode.com/Ascend/triton-ascend/merge_requests/739) |
+| 82 | [vgaskov](https://gitcode.com/vgaskov) | 2025-11-17 | [#748](https://gitcode.com/Ascend/triton-ascend/merge_requests/748) |
+| 81 | [LH_123L](https://gitcode.com/LH_123L) | 2025-11-17 | [#747](https://gitcode.com/Ascend/triton-ascend/merge_requests/747) |
+| 80 | [hongshiyi](https://gitcode.com/hongshiyi) | 2025-11-11 | [#715](https://gitcode.com/Ascend/triton-ascend/merge_requests/715) |
+| 79 | [wutianyao](https://gitcode.com/wutianyao) | 2025-11-08 | [#691](https://gitcode.com/Ascend/triton-ascend/merge_requests/691) |
+| 78 | [luobaiqing](https://gitcode.com/luobaiqing) | 2025-11-03 | [#655](https://gitcode.com/Ascend/triton-ascend/merge_requests/655) |
+| 77 | [jy834507063](https://gitcode.com/jy834507063) | 2025-10-30 | [#647](https://gitcode.com/Ascend/triton-ascend/merge_requests/647) |
+| 76 | [AhmedYaser](https://gitcode.com/AhmedYaser) | 2025-10-30 | [#619](https://gitcode.com/Ascend/triton-ascend/merge_requests/619) |
+| 75 | [AmmarDab3an](https://gitcode.com/AmmarDab3an) | 2025-10-29 | [#646](https://gitcode.com/Ascend/triton-ascend/merge_requests/646) |
+| 74 | [gymgit1](https://gitcode.com/gymgit1) | 2025-10-25 | [#620](https://gitcode.com/Ascend/triton-ascend/merge_requests/620) |
+| 73 | [alankadiev](https://gitcode.com/alankadiev) | 2025-10-23 | [#583](https://gitcode.com/Ascend/triton-ascend/merge_requests/583) |
+| 72 | [zhaojieshan](https://gitcode.com/zhaojieshan) | 2025-10-21 | [#595](https://gitcode.com/Ascend/triton-ascend/merge_requests/595) |
+| 71 | [dainbow](https://gitcode.com/dainbow) | 2025-10-14 | [#541](https://gitcode.com/Ascend/triton-ascend/merge_requests/541) |
+| 70 | [lichengfeng497](https://gitcode.com/lichengfeng497) | 2025-10-14 | [#555](https://gitcode.com/Ascend/triton-ascend/merge_requests/555) |
+| 69 | [shenzhaofeng](https://gitcode.com/shenzhaofeng) | 2025-10-13 | [#554](https://gitcode.com/Ascend/triton-ascend/merge_requests/554) |
+| 68 | [ccbin1](https://gitcode.com/ccbin1) | 2025-10-09 | [#514](https://gitcode.com/Ascend/triton-ascend/merge_requests/514) |
+| 67 | [fishofnanqi](https://gitcode.com/fishofnanqi) | 2025-10-09 | [#518](https://gitcode.com/Ascend/triton-ascend/merge_requests/518) |
+| 66 | [lu2038](https://gitcode.com/lu2038) | 2025-10-09 | [#507](https://gitcode.com/Ascend/triton-ascend/merge_requests/507) |
+| 65 | [wdy45](https://gitcode.com/wdy45) | 2025-10-09 | [#513](https://gitcode.com/Ascend/triton-ascend/merge_requests/513) |
+| 64 | [Zzyiiii](https://gitcode.com/Zzyiiii) | 2025-10-09 | [#510](https://gitcode.com/Ascend/triton-ascend/merge_requests/510) |
+| 63 | [dang_yiwei](https://gitcode.com/dang_yiwei) | 2025-10-09 | [#516](https://gitcode.com/Ascend/triton-ascend/merge_requests/516) |
+| 62 | [maxiaohui2732300406](https://gitcode.com/maxiaohui2732300406) | 2025-10-09 | [#509](https://gitcode.com/Ascend/triton-ascend/merge_requests/509) |
+| 61 | [dinosaurking](https://gitcode.com/dinosaurking) | 2025-10-09 | [#522](https://gitcode.com/Ascend/triton-ascend/merge_requests/522) |
+| 60 | [wodelt](https://gitcode.com/wodelt) | 2025-10-09 | [#511](https://gitcode.com/Ascend/triton-ascend/merge_requests/511) |
+| 59 | [liurufeng25](https://gitcode.com/liurufeng25) | 2025-10-09 | [#517](https://gitcode.com/Ascend/triton-ascend/merge_requests/517) |
+| 58 | [ma_journey](https://gitcode.com/ma_journey) | 2025-10-09 | [#508](https://gitcode.com/Ascend/triton-ascend/merge_requests/508) |
+| 57 | [jintang_wang](https://gitcode.com/jintang_wang) | 2025-10-09 | [#530](https://gitcode.com/Ascend/triton-ascend/merge_requests/530) |
+| 56 | [huchengbei](https://gitcode.com/huchengbei) | 2025-10-09 | [#545](https://gitcode.com/Ascend/triton-ascend/merge_requests/545) |
+| 55 | [HallCin](https://gitcode.com/HallCin) | 2025-09-29 | [#523](https://gitcode.com/Ascend/triton-ascend/merge_requests/523) |
+| 54 | [junelotus](https://gitcode.com/junelotus) | 2025-09-29 | [#531](https://gitcode.com/Ascend/triton-ascend/merge_requests/531) |
+| 53 | [cc137999](https://gitee.com/cc137999) | 2025-09-26 | [#442](https://gitee.com/ascend/triton-ascend/pulls/442) |
+| 52 | [kingdinosaur](https://gitee.com/kingdinosaur) | 2025-09-26 | [#418](https://gitee.com/ascend/triton-ascend/pulls/418) |
+| 51 | [zhaojies](https://gitee.com/zhaojies) | 2025-09-25 | [#414](https://gitee.com/ascend/triton-ascend/pulls/414) |
+| 50 | [lu2048](https://gitee.com/lu2048) | 2025-09-25 | [#421](https://gitee.com/ascend/triton-ascend/pulls/421) |
+| 49 | [kig_35c7](https://gitee.com/kig_35c7) | 2025-09-19 | [#384](https://gitee.com/ascend/triton-ascend/pulls/384) |
+| 48 | [jiangzheng1123](https://gitee.com/jiangzheng1123) | 2025-09-18 | [#379](https://gitee.com/ascend/triton-ascend/pulls/379) |
+| 47 | [chnjz233](https://gitcode.com/chnjz233) | 2025-09-18 | [#379](https://gitcode.com/Ascend/triton-ascend/merge_requests/379) |
+| 46 | [KanuaK](https://gitee.com/KanuaK) | 2025-09-18 | [#380](https://gitee.com/ascend/triton-ascend/pulls/380) |
+| 45 | [elstainniles](https://gitee.com/elstainniles) | 2025-09-18 | [#331](https://gitee.com/ascend/triton-ascend/pulls/331) |
+| 44 | [s00504327](https://gitee.com/s00504327) | 2025-09-15 | [#366](https://gitee.com/ascend/triton-ascend/pulls/366) |
+| 43 | [SL25](https://gitcode.com/SL25) | 2025-09-15 | [#366](https://gitcode.com/Ascend/triton-ascend/merge_requests/366) |
+| 42 | [kang-ingu](https://gitee.com/kang-ingu) | 2025-09-10 | [#355](https://gitee.com/ascend/triton-ascend/pulls/355) |
+| 41 | [zhuxuejie](https://gitee.com/zhuxuejie) | 2025-08-22 | [#284](https://gitee.com/ascend/triton-ascend/pulls/284) |
+| 40 | [lord_of_ironhill](https://gitee.com/lord_of_ironhill) | 2025-08-21 | [#278](https://gitee.com/ascend/triton-ascend/pulls/278) |
+| 39 | [wcleungaj](https://gitee.com/wcleungaj) | 2025-08-14 | [#250](https://gitee.com/ascend/triton-ascend/pulls/250) |
+| 38 | [huawei-zhangjunbo](https://gitee.com/huawei-zhangjunbo) | 2025-08-14 | [#244](https://gitee.com/ascend/triton-ascend/pulls/244) |
+| 37 | [AiBoGe](https://gitcode.com/AiBoGe) | 2025-08-14 | [#244](https://gitcode.com/Ascend/triton-ascend/merge_requests/244) |
+| 36 | [wangtao489](https://gitee.com/wangtao489) | 2025-08-13 | [#247](https://gitee.com/ascend/triton-ascend/pulls/247) |
+| 35 | [mengxuancai](https://gitee.com/mengxuancai) | 2025-08-04 | [#213](https://gitee.com/ascend/triton-ascend/pulls/213) |
+| 34 | [zhangshuolei](https://gitee.com/zhangshuolei) | 2025-07-28 | [#208](https://gitee.com/ascend/triton-ascend/pulls/208) |
+| 33 | [zhangshuoleiokok](https://gitcode.com/zhangshuoleiokok) | 2025-07-28 | [#208](https://gitcode.com/Ascend/triton-ascend/merge_requests/208) |
+| 32 | [cxtjjcz](https://gitee.com/cxtjjcz) | 2025-07-26 | [#201](https://gitee.com/ascend/triton-ascend/pulls/201) |
+| 31 | [candyhong](https://gitee.com/candyhong) | 2025-07-26 | [#200](https://gitee.com/ascend/triton-ascend/pulls/200) |
+| 30 | [dingshuooffice](https://gitee.com/dingshuooffice) | 2025-07-26 | [#207](https://gitee.com/ascend/triton-ascend/pulls/207) |
+| 29 | [fengrui886](https://gitee.com/fengrui886) | 2025-07-26 | [#192](https://gitee.com/ascend/triton-ascend/pulls/192) |
+| 28 | [vince8866](https://gitee.com/vince8866) | 2025-07-19 | [#183](https://gitee.com/ascend/triton-ascend/pulls/183) |
+| 27 | [saruagithub](https://gitee.com/saruagithub) | 2025-07-11 | [#166](https://gitee.com/ascend/triton-ascend/pulls/166) |
+| 26 | [junelutus](https://gitee.com/junelutus) | 2025-07-09 | [#156](https://gitee.com/ascend/triton-ascend/pulls/156) |
+| 25 | [hipudding](https://gitee.com/hipudding) | 2025-06-28 | [#76](https://gitee.com/ascend/triton-ascend/pulls/76) |
+| 24 | [huafengchun](https://gitcode.com/huafengchun) | 2025-06-28 | [#76](https://gitcode.com/Ascend/triton-ascend/merge_requests/76) |
+| 23 | [waiting_4u](https://gitee.com/waiting_4u) | 2025-06-26 | [#113](https://gitee.com/ascend/triton-ascend/pulls/113) |
+| 22 | [george_zhanglei](https://gitee.com/george_zhanglei) | 2025-06-24 | [#92](https://gitee.com/ascend/triton-ascend/pulls/92) |
+| 21 | [zhiliangtang](https://gitee.com/zhiliangtang) | 2025-06-24 | [#97](https://gitee.com/ascend/triton-ascend/pulls/97) |
+| 20 | [zhiliangtang0727](https://gitcode.com/zhiliangtang0727) | 2025-06-24 | [#97](https://gitcode.com/Ascend/triton-ascend/merge_requests/97) |
+| 19 | [adamasW](https://gitee.com/adamasW) | 2025-06-24 | [#101](https://gitee.com/ascend/triton-ascend/pulls/101) |
+| 18 | [kpxing](https://gitee.com/kpxing) | 2025-06-21 | [#85](https://gitee.com/ascend/triton-ascend/pulls/85) |
+| 17 | [wszh-01](https://gitee.com/wszh-01) | 2025-06-17 | [#62](https://gitee.com/ascend/triton-ascend/pulls/62) |
+| 16 | [zhucehw](https://gitee.com/zhucehw) | 2025-06-16 | [#45](https://gitee.com/ascend/triton-ascend/pulls/45) |
+| 15 | [w00504335](https://gitee.com/w00504335) | 2025-06-11 | [#55](https://gitee.com/ascend/triton-ascend/pulls/55) |
+| 14 | [hin-peng](https://gitee.com/hin-peng) | 2025-06-11 | [#48](https://gitee.com/ascend/triton-ascend/pulls/48) |
+| 13 | [meloliu12327](https://gitee.com/meloliu12327) | 2025-06-04 | [#30](https://gitee.com/ascend/triton-ascend/pulls/30) |
+| 12 | [qhrusty](https://gitee.com/qhrusty) | 2025-06-03 | [#27](https://gitee.com/ascend/triton-ascend/pulls/27) |
+| 11 | [leopold0801](https://gitee.com/leopold0801) | 2025-05-29 | [#26](https://gitee.com/ascend/triton-ascend/pulls/26) |
+| 10 | [shen-zhaofeng](https://gitee.com/shen-zhaofeng) | 2025-05-28 | [#23](https://gitee.com/ascend/triton-ascend/pulls/23) |
+| 9 | [ffrog](https://gitee.com/ffrog) | 2025-05-28 | [#12](https://gitee.com/ascend/triton-ascend/pulls/12) |
+| 8 | [qiuqianjin](https://gitee.com/qiuqianjin) | 2025-05-27 | [#17](https://gitee.com/ascend/triton-ascend/pulls/17) |
+| 7 | [qiuqianjin233](https://gitcode.com/qiuqianjin233) | 2025-05-27 | [#17](https://gitcode.com/Ascend/triton-ascend/merge_requests/17) |
+| 6 | [wangzhanpeng5](https://gitee.com/wangzhanpeng5) | 2025-05-26 | [#5](https://gitee.com/ascend/triton-ascend/pulls/5) |
+| 5 | [yang-bochu](https://gitee.com/yang-bochu) | 2025-05-26 | [#7](https://gitee.com/ascend/triton-ascend/pulls/7) |
+| 4 | [handsome20](https://gitcode.com/handsome20) | 2025-05-26 | [#7](https://gitcode.com/Ascend/triton-ascend/merge_requests/7) |
+| 3 | [zhangyong102](https://gitee.com/zhangyong102) | 2025-05-26 | [#8](https://gitee.com/ascend/triton-ascend/pulls/8) |
+| 2 | [shijingchang](https://gitee.com/shijingchang) | 2025-05-26 | [#9](https://gitee.com/ascend/triton-ascend/pulls/9) |
+| 1 | [zhang-chunli01](https://gitee.com/zhang-chunli01) | 2025-05-23 | [#1](https://gitee.com/ascend/triton-ascend/pulls/1) |
+
+*Due to repository migration, contributors listed above are counted by contributor ID (IDs from different platforms are treated as separate contributors).*

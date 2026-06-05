@@ -77,7 +77,7 @@ kernel[grid](..., BLOCK_SIZE=1024, multibuffer=True)
 
 | 类别 | 编译选项 | 默认值/可选值 | 功能说明 | 配置说明 |
 |------|----------|----------------|----------|----------|
-| **通用流水** | `multibuffer` | `True`、`False`；910_95 编译场景默认关闭 | 启用或禁用 ping-pong/double buffer 流水。 | `triton.Config` 或 launch meta-parameter |
+| **通用流水** | `multibuffer` | `True`（默认）、`False` | 启用或禁用 ping-pong/double buffer 流水。默认开启。 | `triton.Config` 或 launch meta-parameter |
 | **CV 融合** | `enable_auto_bind_sub_block` | `None`、`True`、`False` | 启用或禁用自动绑定 sub-block。 | `triton.Config` 或 launch meta-parameter |
 | **CV 融合** | `enable_hivm_auto_cv_balance` | `None`、`True`、`False` | 启用或禁用自动 CV balance。 | `triton.Config` 或 Autotune 参数 |
 | **CV 融合/同步** | `sync_solver` | `None`、`True`、`False` | 启用或禁用 HIVM 同步求解器。 | `triton.Config` 或 launch meta-parameter |

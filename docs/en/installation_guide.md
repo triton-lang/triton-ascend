@@ -11,11 +11,11 @@ Choose the appropriate installation method as needed and proceed to the correspo
 
 ### Confirm Device Model
 
-| Chip Series | Product Example                |  tag               |
-|-------------|--------------------------------|--------------------|
-| Ascend 910b | Atlas 800T A2、Atlas 900 A2 PoD |  3.2.1-910b-ubuntu22.04-py3.11 |
-| Ascend A3   | Atlas 800T A3                  | 3.2.1-a3-ubuntu22.04-py3.11|
-| Ascend 950  | 950PR Series                   | 3.2.1-a3-ubuntu22.04-py3.11|
+| Chip Series | Product Example                | tag                           |
+|-------------|--------------------------------|-------------------------------|
+| Ascend 910b | Atlas 800T A2、Atlas 900 A2 PoD | 3.2.1-910b-ubuntu22.04-py3.11 |
+| Ascend A3   | Atlas 800T A3                  | 3.2.1-a3-ubuntu22.04-py3.11   |
+| Ascend 950  | 950PR Series                   | 3.2.1-950-ubuntu22.04-py3.11  |
 
 Note：For more mirrors,please see [OVERVIEW.zh.md](../../docker/OVERVIEW.zh.md)
 

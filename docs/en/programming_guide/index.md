@@ -268,6 +268,41 @@ Caching of tuning results: Cache the best configuration after tuning so that lat
     export TRITON_PRINT_AUTOTUNING=1
     ```
 
+### Advanced: Using max_autotune for Autotuning
+
+For Ascend NPU operators, achieving optimal performance requires tuning not only BLOCK_SIZE but also multiple hardware-related parameters such as num_stages, enable_hivm_auto_cv_balance, and tile_mix_vector_loop. Using @triton.autotune to manually enumerate all combinations would lead to an explosive growth in the configuration list, making the code difficult to maintain.
+
+max_autotune is an extension decorator designed specifically for Ascend NPU (located in triton.backends.ascend.runtime), allowing users to provide only base configurations while passing other tuning parameters as lists. The decorator automatically generates a complete Config list of all combinations.
+
+- Core Function
+Developers only need to provide a few base configurations (such as BLOCK_SIZE), and all compiler options related to that operator type (for example, num_stages, enable_hivm_auto_cv_balance, tile_mix_vector_loop, enable_ubuf_saving, etc.) will be automatically included in the optimal combination search range through built-in reasonable default values. Developers don't need to explicitly enumerate them, achieving one-time automatic optimization of both optimal tiling and compiler option combinations. If developers want to constrain certain parameters, they can also override the default search range by explicitly passing lists.
+
+- Simple Example
+
+    ```diff
+    from triton.backends.ascend.runtime import max_autotune
+
+    @max_autotune(
+        configs=[
+            triton.Config({'BLOCK_SIZE': 128}),
+            triton.Config({'BLOCK_SIZE': 256}),
+        ],
+        key=['n_elements'],
+        kernel_type="vector",           # Operator type, supports cube/mix/vector
+        enable_ubuf_saving=[True, False] # Optional, already included by default
+    )
+    @triton.jit
+    def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr, **META):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(x_ptr + offsets, mask=mask)
+        y = tl.load(y_ptr + offsets, mask=mask)
+        output = x + y
+        tl.store(output_ptr + offsets, output, mask=mask)
+    ```
+
 ### How Do I Avoid UB Overflow on the NPU?
 
 [Description] On the NPU, the UB or L1 size has an upper limit. When this error occurs, reduce the amount of data transferred at a time and use the for loop to process long sequences.

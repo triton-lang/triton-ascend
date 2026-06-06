@@ -55,7 +55,6 @@ static constexpr const char *kCoreTypeAttr = "ssbuffer.core_type";
 static constexpr const char *kTransferIdAttr = "ssbuffer.transfer_id";
 static constexpr const char *ssbufferCoreTypeCubeAttr = "CUBE";
 static constexpr const char *ssbufferCoreTypeVectorAttr = "VECTOR";
-static constexpr int ND_SHAPE_LENGTH = 2;
 
 // Helper: ssbuffer.core_type
 llvm::StringRef getSsbufferCoreType(Operation *op)
@@ -91,41 +90,25 @@ bool DataDependencyAnalysisPass::isControlFlowOp(mlir::Operation *op)
     return isa<scf::ForOp>(op) || isa<scf::IfOp>(op) || isa<scf::WhileOp>(op) || isa<scf::YieldOp>(op);
 }
 
-bool DataDependencyAnalysisPass::isCubeOrVectorOp(mlir::Operation *op)
-{
-    if (isa<tensor::EmptyOp, linalg::FillOp>(op)) {
-        return true;
-    }
-    return false;
-}
-
-bool DataDependencyAnalysisPass::isValidShapeForDependency(mlir::Value value)
-{
-    auto tensorTy = dyn_cast<TensorType>(value.getType());
-    if (!tensorTy) {
-        return false;
-    }
-
-    if (tensorTy.getRank() != ND_SHAPE_LENGTH) {
-        return false;
-    }
-    return true;
-}
-
 // Helper: Check if value is a valid tensor for dependency analysis
 // Returns true if value is TensorType and not defined by EmptyOp/FillOp
-bool DataDependencyAnalysisPass::isValidValueForDependency(mlir::Value value)
+bool DataDependencyAnalysisPass::isValidTensorForDependency(mlir::Value value)
 {
-    if (!isValidShapeForDependency(value)) {
+    if (!dyn_cast<mlir::TensorType>(value.getType())) {
         return false;
     }
-
     Operation *defOp = value.getDefiningOp();
-    // Op that can be processed both by CUBE and VECTOR should not be data dependency
-    if (defOp && isCubeOrVectorOp(defOp)) {
+
+    // EmptyOp/FillOp can be processed both by CUBE and VECTOR
+    // so they should not be data dependency
+    if (defOp && isa<tensor::EmptyOp, linalg::FillOp>(defOp)) {
         return false;
     }
-
+    auto tensorTy = dyn_cast<TensorType>(value.getType());
+    static constexpr int NdShapeLength = 2;
+    if (!tensorTy || tensorTy.getRank() != NdShapeLength) {
+        return false;
+    }
     return true;
 }
 
@@ -275,7 +258,6 @@ void DataDependencyAnalysisPass::insertProducerAndRecordDeps(scf::ForOp forOp,
 {
     auto &v2cDependencies = info.getV2CDependencies();
     auto &c2vDependencies = info.getC2VDependencies();
-    auto &blockInfoMap = info.getBlockInfoMap();
 
     int newId = CVPipeline::getAvailableBlockId(module);
     OpBuilder builder(forOp);
@@ -285,13 +267,6 @@ void DataDependencyAnalysisPass::insertProducerAndRecordDeps(scf::ForOp forOp,
     auto constOp = builder.create<arith::ConstantIntOp>(loc, 0, 32);
     constOp->setAttr(kBlockIdAttr, IntegerAttr::get(IntegerType::get(builder.getContext(), 32), newId));
     constOp->setAttr(kCoreTypeAttr, StringAttr::get(builder.getContext(), initCoreType));
-
-    BlockInfo blockInfo;
-    blockInfo.blockId = newId;
-    blockInfo.isCube = (initCoreType == ssbufferCoreTypeCubeAttr);
-    blockInfo.isControl = false;
-    blockInfo.Operations.push_back(constOp);
-    blockInfoMap[newId] = blockInfo;
 
     for (auto &user : diffUsers) {
         auto userBlockIdOpt = CVPipeline::getOpBlockId(user);
@@ -318,10 +293,8 @@ void DataDependencyAnalysisPass::insertProducerAndRecordDeps(scf::ForOp forOp,
         depInfo.value = iterArg;
         depInfo.iniProducerBlockId = newId;
         depInfo.iniConsumerBlockId = userBlockId;
-
-        auto [producerBlockId, consumerBlockId] = findCommonLevelBlockIds(info, newId, userBlockId);
-        depInfo.producerBlockId = producerBlockId;
-        depInfo.consumerBlockId = consumerBlockId;
+        depInfo.producerBlockId = newId;
+        depInfo.consumerBlockId = userBlockId;
 
         if (depType == DependencyType::VectorToCube) {
             v2cDependencies.push_back(depInfo);
@@ -355,26 +328,18 @@ void DataDependencyAnalysisPass::processIterArgDependencies()
 
         for (int iterArgIndex = 0; iterArgIndex < numIterArgs; ++iterArgIndex) {
             mlir::Value initValue = forOp.getInits()[iterArgIndex];
+            // Skip non-tensor values as they don't require inter-core synchronization
+            if (!isValidTensorForDependency(initValue)) {
+                LOG_DEBUG("iterarg: "<< initValue <<"is not valid tensor for dependency!");
+                continue;
+            }
+
             mlir::BlockArgument iterArg = forOp.getRegionIterArg(iterArgIndex);
             mlir::Value yieldedValue = forOp.getYieldedValues()[iterArgIndex];
-            LOG_DEBUG("initValue" << initValue << "\n");
-            LOG_DEBUG("yieldedValue" << yieldedValue << "\n");
-
-            if (!isValidShapeForDependency(initValue) || !isValidShapeForDependency(yieldedValue)) {
-                LOG_DEBUG("iterarg: "<< iterArg <<"is not valid tensor for dependency!");
-                continue;
-            }
 
             Operation *initDefOp = initValue.getDefiningOp();
-            Operation *yieldedDefOp = yieldedValue.getDefiningOp();
             if (!initDefOp) {
                 LOG_DEBUG("warning: nested iterarg!");
-                continue;
-            }
-            if (!yieldedDefOp) {
-                continue;
-            }
-            if (isCubeOrVectorOp(initDefOp) && isCubeOrVectorOp(yieldedDefOp)) {
                 continue;
             }
 
@@ -410,7 +375,7 @@ void DataDependencyAnalysisPass::analyzeExternalInputs(DataDependencyInfo &info)
         LOG_DEBUG("Analyzing external inputs for Cube Block ID: " << id << "\n");
         for (mlir::Value input : blockInfo.inputs) {
             // Check if input is a value which can be produced by CUBE
-            if (!isValidValueForDependency(input)) {
+            if (!isValidTensorForDependency(input)) {
                 LOG_DEBUG("Warning: [v->c] Input value is not a valid tensor for dependency analysis.\n");
                 continue;
             }
@@ -462,7 +427,7 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(DataDependencyInfo &info
 
         for (mlir::Value output : blockInfo.outputs) {
             // Check if output is a value which can be produced by CUBE
-            if (!isValidValueForDependency(output)) {
+            if (!isValidTensorForDependency(output)) {
                 LOG_DEBUG("Warning: [c->v] Output value is not a valid tensor for dependency analysis.\n");
                 continue;
             }

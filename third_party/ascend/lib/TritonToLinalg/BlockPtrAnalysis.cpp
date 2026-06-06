@@ -2238,12 +2238,6 @@ void BlockDataParser::rewriteLoopOp(
 void BlockDataParser::rewriteAddPtrToUnstrucMemAcc(
     triton::AddPtrOp op, triton::AddPtrOp::Adaptor &adaptor,
     ConversionPatternRewriter &rewriter, BlockData &data) {
-  // VERIFICATION PROBE (temporary, disabled): this path was hypothesised to
-  // be dead after TritonToUnstructurePass took over all unstructured load
-  // handling. Probe disabled to test the rest of V1 pipeline; re-enable to
-  // verify the dead-path claim.
-  // op->emitError("rewriteAddPtrToUnstrucMemAcc reached -- supposed dead path");
-  // llvm::report_fatal_error("rewriteAddPtrToUnstrucMemAcc reached");
   auto loc = op.getLoc();
   auto &offsets = data.getOffsetsRef();
   auto &blockSizes = data.getSizesRef();

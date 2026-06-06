@@ -139,10 +139,6 @@ void LoadConverter::propagateWasBoolToInt8Attr(Operation *srcLoadOp, Operation *
 LogicalResult LoadConverter::continueModifyFromAddPtrConverter(
     triton::LoadOp &op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
-  // VERIFICATION PROBE (temporary, disabled): see comment in
-  // BlockPtrAnalysis::rewriteAddPtrToUnstrucMemAcc.
-  // op->emitError("continueModifyFromAddPtrConverter reached -- supposed dead");
-  // llvm::report_fatal_error("continueModifyFromAddPtrConverter reached");
   auto loc = op.getLoc();
   auto forOp = op->getParentOfType<scf::ForOp>();
   Operation *firstOp = &forOp.getBody()->front();

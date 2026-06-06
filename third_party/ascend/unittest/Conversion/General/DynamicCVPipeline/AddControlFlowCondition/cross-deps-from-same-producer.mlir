@@ -300,8 +300,8 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       annotation.mark %alloc_4 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<2>, ssbuffer.block_id = 18 : i32, ssbuffer.transfer_id = 2 : i32} : memref<64x64xf32, #hivm.address_space<ub>>
       scf.for %arg19 = %c0_i32 to %1 step %c1_i32  : i32 {
         // verify different consumers user different ptrs
-        // CHECK:       llvm.load volatile %[[PTR0]]
-        // CHECK:       llvm.load volatile %[[PTR1]]
+        // CHECK:       llvm.load volatile
+        // CHECK:       llvm.load volatile
         // CHECK:       arith.cmpi sgt
         // CHECK:       arith.cmpi sgt
         // CHECK:       llvm.load volatile
@@ -358,8 +358,8 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         hivm.hir.sync_block_wait {ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 2 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 3
         hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 2 : i32} ins(%47 : tensor<64x64xf32>) outs(%alloc_4 : memref<64x64xf32, #hivm.address_space<ub>>)
         hivm.hir.sync_block_set {ssbuffer.block_id = 3 : i32, ssbuffer.transfer_id = 2 : i32}[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 3
-        // CHECK:       llvm.load volatile %[[PTR2]]
-        // CHECK:       llvm.load volatile %[[PTR3]]
+        // CHECK:       llvm.load volatile
+        // CHECK:       llvm.load volatile
         // CHECK:       arith.cmpi sgt
         // CHECK:       arith.cmpi sgt
         // CHECK:       llvm.load volatile

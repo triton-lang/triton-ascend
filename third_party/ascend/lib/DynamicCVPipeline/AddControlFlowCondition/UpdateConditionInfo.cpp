@@ -236,6 +236,11 @@ DenseMap<int, DenseMap<Value, SmallVector<Value>>> UpdateConditionInfoPass::exte
     for (auto &deps : entry.second) {
       SmallVector<Value> &producers = deps.second;
       for (Value buffer : producers) {
+        auto producerDefOp = buffer.getDefiningOp();
+        if (!isa<memref::AllocOp>(producerDefOp)) {
+          // this crossdependency is not the stardard cross dependency
+          continue;
+        }
         int tcbGroupId = findTcbGroupId(buffer, tightlyCoupledBufferGroups);
         if (tcbGroupId == -1) {
           LDBG("Can not find tightly_coupled_buffer id" << "\n");
@@ -373,9 +378,10 @@ int UpdateConditionInfoPass::getInputOutputValues(
 
     bool isFixpipeOrCopy = dyn_cast<hivm::FixpipeOp>(op) || dyn_cast<hivm::CopyOp>(op);
     bool isBufferizationWrite = dyn_cast<bufferization::MaterializeInDestinationOp>(op);
+    bool isSSBufferWrite = dyn_cast<LLVM::StoreOp>(op);
     // Op is FixpipeOp/CopyOp/BufferizationWriteOp
     // they have two operand, operand 0(ins) is input, operand 1(outs) is output
-    if (isFixpipeOrCopy || isBufferizationWrite) {
+    if (isFixpipeOrCopy || isBufferizationWrite || isSSBufferWrite) {
       Value outsVal = op->getOperands()[1];
       // Check if outs is a producer in cross-core dependencies
       if (crossCoreOutputToGroups.count(outsVal)) {

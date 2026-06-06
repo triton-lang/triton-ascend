@@ -417,12 +417,9 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder, Dependency
     auto type3D = RankedTensorType::get(shape3D, elemType);
     auto typeTrans = RankedTensorType::get(shapeTrans, elemType);
     auto typeFinal = RankedTensorType::get(shapeFinal, elemType);
-    if (newValue.getDefiningOp()) {
-        builder.setInsertionPointAfter(newValue.getDefiningOp());
-    } else {
-        auto [newProdStart, newProdEnd] = getBlockStartEnd(originBlockId, module);
-        builder.setInsertionPointAfter(newProdEnd);
-    }
+
+    auto [newProdStart, newProdEnd] = getBlockStartEnd(dep.producerBlockId, module);
+    builder.setInsertionPointAfter(newProdEnd);
     
     auto reshape3Dcst = builder.create<arith::ConstantOp>(loc, builder.getI64TensorAttr(shape3D));
     auto reshape3DOp = builder.create<tensor::ReshapeOp>(loc, type3D, newValue, reshape3Dcst);

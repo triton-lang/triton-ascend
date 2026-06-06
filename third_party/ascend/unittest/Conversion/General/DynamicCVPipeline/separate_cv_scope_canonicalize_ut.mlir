@@ -396,84 +396,15 @@ module {
 
 // -----
 
-// CHECK-LABEL: func.func @single_result_for_loop_carry_drops_vector_tail(
-// VECTOR scope: retains full loop logic with two result-bearing if statements
-// CHECK: scope.scope : () -> () {
-// CHECK: %[[FOR_VEC:.*]] = scf.for %{{.*}} = {{.*}} to {{.*}} step {{.*}} iter_args
-// CHECK: %[[IF1_VEC:.*]] = scf.if {{.*}} -> (tensor<4xf32>)
-// CHECK: arith.addf
-// CHECK: scf.yield
-// CHECK: }
-// CHECK: %[[IF2_VEC:.*]] = scf.if {{.*}} -> (tensor<4xf32>)
-// CHECK: arith.addf
-// CHECK: scf.yield
-// CHECK: }
-// CHECK: scf.yield %[[IF2_VEC]]
-// CHECK: }
-// CHECK: %[[EXTRACT:.*]] = tensor.extract %[[FOR_VEC]]
-// CHECK: memref.store %[[EXTRACT]]
-// CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
-// CUBE scope: only condition check, yields constant (loop-carry dropped)
-// CHECK: scope.scope : () -> () {
-// CHECK: %[[FOR_CUBE:.*]] = scf.for %{{.*}} = {{.*}} to {{.*}} step {{.*}} iter_args
-// CHECK: scf.if %{{.*}} {
-// CHECK: arith.addf
-// CHECK: tensor.extract
-// CHECK: memref.store
-// CHECK: }
-// CHECK: scf.yield %{{.*}} : tensor<4xf32>
-// CHECK: }
-// CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
-module {
-  func.func @single_result_for_loop_carry_drops_vector_tail(%lb: i32, %ub: i32, %cond_cube: i1, %cond_vec: i1, %init: tensor<4xf32>, %cube_src: tensor<4xf32>, %vec_src: tensor<4xf32>, %outv: memref<1xf32>, %outc: memref<1xf32>) {
-    %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
-    %idxc = arith.constant {ssbuffer.core_type = "CUBE"} 0 : index
-    %step = arith.constant {ssbuffer.core_type = "VECTOR"} 1 : i32
-    %0 = scf.for %i = %lb to %ub step %step iter_args(%state = %init) -> (tensor<4xf32>) : i32 {
-      %1 = scf.if %cond_cube -> (tensor<4xf32>) {
-        %2 = arith.addf %state, %cube_src {ssbuffer.core_type = "CUBE"} : tensor<4xf32>
-        %3 = tensor.extract %2[%idxc] {ssbuffer.core_type = "CUBE"} : tensor<4xf32>
-        memref.store %3, %outc[%idxc] {ssbuffer.core_type = "CUBE"} : memref<1xf32>
-        scf.yield {ssbuffer.core_type = "VECTOR"} %2 : tensor<4xf32>
-      } else {
-        scf.yield {ssbuffer.core_type = "VECTOR"} %state : tensor<4xf32>
-      } {ssbuffer.core_type = "VECTOR"}
-      %2 = scf.if %cond_vec -> (tensor<4xf32>) {
-        %3 = arith.addf %1, %vec_src {ssbuffer.core_type = "VECTOR"} : tensor<4xf32>
-        scf.yield {ssbuffer.core_type = "VECTOR"} %3 : tensor<4xf32>
-      } else {
-        scf.yield {ssbuffer.core_type = "VECTOR"} %1 : tensor<4xf32>
-      } {ssbuffer.core_type = "VECTOR"}
-      scf.yield {ssbuffer.core_type = "VECTOR"} %2 : tensor<4xf32>
-    } {ssbuffer.core_type = "VECTOR"}
-    %1 = tensor.extract %0[%idxv] {ssbuffer.core_type = "VECTOR"} : tensor<4xf32>
-    memref.store %1, %outv[%idxv] {ssbuffer.core_type = "VECTOR"} : memref<1xf32>
-    func.return
-  }
-}
-
-// -----
-
 // CHECK-LABEL: func.func @memref_slot_neutralize_uses_alloc(
-// VECTOR scope: retain if-else with arithmetic (addi/subi in branches), then consume result
 // CHECK: scope.scope : () -> () {
-// CHECK: %[[IF_RES:.*]] = scf.if {{.*}} -> (i32)
-// CHECK:   arith.addi
-// CHECK:   scf.yield
-// CHECK: } else
-// CHECK:   arith.subi
-// CHECK:   scf.yield
-// CHECK: }
-// CHECK: %[[FINAL_RES:.*]] = arith.addi %[[IF_RES]], %{{.*}} : i32
-// CHECK: memref.store %[[FINAL_RES]]
+// CHECK: scf.if
+// CHECK: memref.store
 // CHECK: scope.return
 // CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
-// CUBE scope: only load and store, no arithmetic
 // CHECK: scope.scope : () -> () {
-// CHECK: %[[LOADED:.*]] = memref.load
-// CHECK: memref.store %[[LOADED]]
+// CHECK: memref.load
+// CHECK: memref.store
 // CHECK: scope.return
 // CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {

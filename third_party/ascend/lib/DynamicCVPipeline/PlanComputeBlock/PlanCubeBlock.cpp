@@ -163,8 +163,9 @@ bool DependencyCycleDetector::detectCycle()
     llvm::DenseSet<Operation *> externalUsers;
     for (auto *op : group) {
         forEachUser(op, memGraph, [&](Operation *user) {
-            if (!group.contains(user)) {
-                externalUsers.insert(user);
+            auto *userInBlock = getAncestorInBlock(user, block);
+            if (userInBlock && !group.contains(userInBlock)) {
+                externalUsers.insert(userInBlock);
             }
         });
     }

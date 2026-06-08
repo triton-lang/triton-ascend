@@ -1,0 +1,85 @@
+name: Deploy docs to GitHub Pages
+
+# Mirror of the merged docs to GitHub Pages. Read the Docs is the primary
+# host (handles PR previews + versions); this workflow only refreshes the
+# mirror when main moves.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/deploy-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Sphinx dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r docs/zh/requirement.txt
+          pip install -r docs/en/requirement.txt
+
+      - name: Build zh docs
+        run: python -m sphinx -b html docs/zh _site/zh-cn
+
+      - name: Build en docs
+        run: python -m sphinx -b html docs/en _site/en
+
+      - name: Write landing page
+        run: |
+          cat > _site/index.html <<'HTML'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <title>Triton Ascend Documentation</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <script>
+              (function () {
+                var lang = (navigator.language || 'en').toLowerCase().indexOf('zh') === 0 ? 'zh-cn' : 'en';
+                location.replace('./' + lang + '/');
+              })();
+            </script>
+            <noscript>
+              <meta http-equiv="refresh" content="0; url=./en/">
+            </noscript>
+          </head>
+          <body>
+            <p><a href="./en/">English</a> | <a href="./zh-cn/">中文</a></p>
+          </body>
+          </html>
+          HTML
+
+      - uses: actions/configure-pages@v4
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

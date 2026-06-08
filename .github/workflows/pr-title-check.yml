@@ -23,14 +23,14 @@ jobs:
             exit 1
           fi
 
-          # Format check: [type](scope): subject  — scope is optional
-          # Allowed types: feat | fix | docs | style | refactor | test | chore | revert
-          PATTERN='^\[(feat|fix|docs|style|refactor|test|chore|revert)\](\([^)]+\))?: .+$'
+          # Format check: [component](type) subject
+          # Allowed types: feat | fix | NFC | style | test | chore | revert
+          PATTERN='^\[[^]]+\]\((feat|fix|NFC|style|test|chore|revert)\) .+$'
           if ! echo "$PR_TITLE" | grep -qE "$PATTERN"; then
             echo "::error::PR title does not match the required format."
-            echo "Format:   [<type>](<scope>): <subject>"
-            echo "Example:  [feat](user): add login support"
-            echo "Types:    feat | fix | docs | style | refactor | test | chore | revert"
+            echo "Format:   [<component>](<type>) <subject>"
+            echo "Example:  [user](feat) add login support"
+            echo "Types:    feat | fix | NFC | style | test | chore | revert"
             echo "Max len:  $MAX_LEN chars"
             exit 1
           fi

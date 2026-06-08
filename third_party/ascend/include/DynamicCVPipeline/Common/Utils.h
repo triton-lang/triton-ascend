@@ -74,9 +74,16 @@ int getAvailableBlockId(ModuleOp module);
 void setFallbackAttr(ModuleOp module);
 bool isScfOp(Operation *op);
 
-inline bool isCubeOp(Operation *op)
+CoreType getCoreTypeOfSimpleOpOrCf(Operation *op);
+
+inline bool isCubeSimpleOpOrCf(Operation *op)
 {
-    return !isScfOp(op) && CVPipeline::getOpCoreType(op) == CoreType::CUBE_ONLY;
+    return getCoreTypeOfSimpleOpOrCf(op) == CoreType::CUBE_ONLY;
+}
+
+inline bool isVectorSimpleOpOrCf(Operation *op)
+{
+    return getCoreTypeOfSimpleOpOrCf(op) == CoreType::VECTOR_ONLY;
 }
 
 bool isVectorOnlyOp(Operation *op);

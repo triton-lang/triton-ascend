@@ -50,7 +50,9 @@
 
 using namespace mlir;
 static constexpr const char *DEBUG_TYPE = "ReorderOpsByBlockIdPass";
-#define LOG_DEBUG(...) LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__)
+
+#define DBGS(...) LLVM_DEBUG(llvm::dbgs() << __VA_ARGS__)
+#define LOG_DEBUG(...) DBGS("\n[" << DEBUG_TYPE << "] " << __VA_ARGS__)
 
 using namespace triton;
 using namespace CVPipeline;
@@ -110,7 +112,7 @@ template <bool IsMemory> void EdgeHelper::addEdge(Operation *pred, Operation *su
         return;
     }
     if (seen.insert({pred, succ}).second) {
-        LOG_DEBUG("Adding " << (IsMemory ? "memory " : "") << "edge from " << *pred << " to " << *succ << "\n");
+        LOG_DEBUG("Adding " << (IsMemory ? "memory " : "") << "edge from " << *pred << " to " << *succ);
         graph.succs[pred].push_back(succ);
         graph.preds[succ].push_back(pred);
     }
@@ -128,7 +130,7 @@ BlockOpGraph::BlockOpGraph(ArrayRef<Operation *> allOps, Block *block, const Mem
     EdgeHelper edges(*this, block);
 
     for (Operation *op : allOps) {
-        LOG_DEBUG("Processing op: " << *op << "\n");
+        LOG_DEBUG("Processing op: " << *op);
         // Edges from operand defs (including defs nested inside other ops).
         for (Value const operand : op->getOperands()) {
             Operation *defOp = operand.getDefiningOp();
@@ -231,11 +233,11 @@ GroupAdjacencyGraph::GroupAdjacencyGraph(const BlockOpGraph &g, const DenseMap<O
     // Logging the constructed group graph.
     LOG_DEBUG("Group-level edges:\n");
     for (unsigned i = 0; i < n; ++i) {
-        LOG_DEBUG("  Group " << groupIds[i] << " -> ");
+        DBGS("  Group " << groupIds[i] << " -> ");
         for (unsigned succIdx : succs[i]) {
-            LOG_DEBUG(groupIds[succIdx] << " ");
+            DBGS(groupIds[succIdx] << " ");
         }
-        LOG_DEBUG("\n");
+        DBGS("\n");
     }
 }
 
@@ -269,9 +271,8 @@ llvm::FailureOr<SmallVector<int>> GroupAdjacencyGraph::computeTopologicalOrder()
 
     LOG_DEBUG("Group order: ");
     for (int id : result) {
-        LOG_DEBUG(id << " ");
+        DBGS(id << " ");
     }
-    LOG_DEBUG("\n");
 
     if (result.size() == n) {
         return result;
@@ -357,10 +358,11 @@ static llvm::LogicalResult reorderOpsInBlock(Block &block, const MemoryDependenc
 
 void ReorderOpsByBlockIdPass::runOnOperation()
 {
-    LOG_DEBUG("\n=== Pass: TuningOpSeq ===\n");
     OpBuilder const builder(&getContext());
 
     auto moduleOp = getOperation();
+    LOG_DEBUG("Input mlir: \n" << moduleOp << "\n==========\n");
+
     auto &aa = getAnalysis<AliasAnalysis>();
     auto memGraph = MemoryDependenceGraph(moduleOp, aa);
     auto bm = ComputeBlockIdManager(moduleOp);
@@ -377,7 +379,7 @@ void ReorderOpsByBlockIdPass::runOnOperation()
         return WalkResult::advance();
     });
 
-    LOG_DEBUG("=== Pass TuningOpSeq complete ===\n");
+    LOG_DEBUG("Output mlir: \n" << moduleOp << "\n==========\n");
 }
 
 std::unique_ptr<OperationPass<ModuleOp>> mlir::triton::createReorderOpsByBlockIdPass()

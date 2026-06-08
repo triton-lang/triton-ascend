@@ -1,6 +1,8 @@
 #include <optional>
 
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -10,8 +12,16 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/Visitors.h"
+#include "mlir/Interfaces/ControlFlowInterfaces.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+
+static constexpr const char *DEBUG_TYPE = "DynamicCVPipeline/Utils";
+#define DBGS(...) LLVM_DEBUG(llvm::dbgs() << __VA_ARGS__)
+#define LOG_DEBUG(...) DBGS("\n[" << DEBUG_TYPE << "] " << __VA_ARGS__)
+
 namespace mlir {
 namespace CVPipeline {
 
@@ -102,6 +112,54 @@ bool isVectorOnlyOp(Operation *op)
 bool isScfOp(Operation *op)
 {
   return llvm::isa<scf::SCFDialect>(op->getDialect());
+}
+
+CoreType getCoreTypeOfSimpleOpOrCf(Operation *op)
+{
+    if (op == nullptr) {
+        return CoreType::UNDETERMINED;
+    }
+    if (!llvm::isa<RegionBranchOpInterface>(op)) {
+        return getOpCoreType(op);
+    }
+
+    CoreType coreType = CoreType::UNDETERMINED;
+    Operation *failingOp = nullptr;
+
+    // we need to skip sub-op of non-cf ops with regions, hence preorder here
+    op->walk<WalkOrder::PreOrder>([&](Operation *subOp) -> WalkResult {
+        if (llvm::isa<RegionBranchOpInterface>(subOp) || subOp->hasTrait<OpTrait::IsTerminator>()) {
+            return WalkResult::advance();
+        }
+
+        CoreType curr = getOpCoreType(subOp);
+        // we have met a simple op without core type
+        if (curr == CoreType::UNDETERMINED) {
+            coreType = CoreType::UNDETERMINED;
+            failingOp = subOp;
+            return WalkResult::interrupt();
+        }
+
+        if (coreType == CoreType::UNDETERMINED) {
+            coreType = curr;
+        } else if (curr != coreType) {
+            // some ops have different core type
+            coreType = CoreType::UNDETERMINED;
+            failingOp = subOp;
+            return WalkResult::interrupt();
+        }
+
+        // skip sub-op
+        return WalkResult::skip();
+    });
+
+    LOG_DEBUG("CoreType of RegionBranchOp is " << coreType << ": " << *op);
+    LLVM_DEBUG({
+        if (coreType == CoreType::UNDETERMINED && failingOp != nullptr) {
+            llvm::dbgs() << "\nCoreType is UNDETERMINED due to " << *failingOp;
+        }
+    });
+    return coreType;
 }
 
 } // namespace CVPipeline

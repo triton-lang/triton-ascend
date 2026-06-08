@@ -18,7 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-
 import functools
 import hashlib
 import os
@@ -176,9 +175,7 @@ def _get_npucompiler_path() -> str:
         if npu_compiler_path is None:
             npu_compiler_root = os.getenv("TRITON_NPU_COMPILER_PATH", None)
             if npu_compiler_root is None:
-                raise EnvironmentError(
-                    "Couldn't find executable bishengir-compile or TRITON_NPU_COMPILER_PATH."
-                )
+                raise EnvironmentError("Couldn't find executable bishengir-compile or TRITON_NPU_COMPILER_PATH.")
             npu_compiler_path = os.path.join(npu_compiler_root, "npuc")
     return npu_compiler_path, env
 
@@ -188,9 +185,7 @@ def _get_bisheng_path() -> str:
     if bisheng_path is None:
         npu_compiler_root = os.getenv("TRITON_NPU_COMPILER_PATH", None)
         if npu_compiler_root is None:
-            raise EnvironmentError(
-                "Couldn't find executable bisheng or TRITON_NPU_COMPILER_PATH"
-            )
+            raise EnvironmentError("Couldn't find executable bisheng or TRITON_NPU_COMPILER_PATH")
         bisheng_path = os.path.join(npu_compiler_root, "ccec")
     return bisheng_path
 
@@ -258,9 +253,7 @@ def _check_bishengir_is_regbased() -> bool:
 def _get_ascend_path() -> Path:
     path = os.getenv("ASCEND_HOME_PATH", "")
     if path == "":
-        raise EnvironmentError(
-            "ASCEND_HOME_PATH is not set, source <ascend-toolkit>/set_env.sh first"
-        )
+        raise EnvironmentError("ASCEND_HOME_PATH is not set, source <ascend-toolkit>/set_env.sh first")
     return Path(path)
 
 
@@ -272,9 +265,25 @@ def _is_debug_line_info_disabled() -> bool:
     return os.getenv("TRITON_DISABLE_LINE_INFO", "true").lower() in ("true", "1")
 
 
-def _is_auto_map_parallel_blocks_enabled() -> bool:
+def _is_auto_map_parallel_blocks_enabled(metadata) -> bool:
+
+    def metadata_get(metadata, key, default=None):
+        try:
+            return metadata.get(key, default)
+        except AttributeError:
+            return getattr(metadata, key, default)
+
     default_parallel = "true" if is_compile_on_910_95 else "false"
-    return os.getenv("TRITON_ALL_BLOCKS_PARALLEL", default_parallel).lower() in ("true", "1")
+    is_env_set = os.getenv("TRITON_ALL_BLOCKS_PARALLEL", default_parallel).lower() in ("true", "1")
+    is_opt_set = metadata_get(metadata, "enable_auto_blockify", False)
+    flag = False
+    if is_env_set:
+        if (is_opt_set is None or is_opt_set):
+            flag = True
+    else:
+        if is_opt_set:
+            flag = True
+    return flag
 
 
 def _get_auto_blockify_blacklist_reasons(ir_text: str):
@@ -285,11 +294,9 @@ def _warn_auto_blockify_disabled(kernel_name: str, blacklist_reasons) -> None:
     if not blacklist_reasons:
         return
     reasons = ", ".join(blacklist_reasons)
-    print(
-        f"[WARNING] AutoBlockify disabled for kernel '{kernel_name}'. "
-        f"Unsafe ops: {reasons}. Enabling may cause correctness issues. "
-        "To force enable: set has_auto_blockify_blacklist_op=False."
-    )
+    print(f"[WARNING] AutoBlockify disabled for kernel '{kernel_name}'. "
+          f"Unsafe ops: {reasons}. Enabling may cause correctness issues. "
+          "To force enable: set has_auto_blockify_blacklist_op=False.")
 
 
 def _enable_unpublished_feature() -> bool:
@@ -528,6 +535,7 @@ def _check_bishengir_able_save_ir() -> bool:
     except Exception as e:
         print(f"ERROR: {e}")
         return False
+
 
 def get_ascend_arch_from_env():
     arch = os.getenv("TRITON_ASCEND_ARCH", "")

@@ -1,4 +1,4 @@
-﻿# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -54,9 +54,7 @@ from triton.backends.ascend.utils import (
     triton_enable_libdevice_simt,
     get_cann_version_file_hash,
 )
-from triton.backends.ascend.driver import (
-    NPUUtils
-)
+from triton.backends.ascend.driver import (NPUUtils)
 from triton.backends.compiler import (
     AttrsDescriptor,
     BaseBackend,
@@ -72,6 +70,7 @@ from triton.tools.get_ascend_devices import is_compile_on_910_95
 def min_dot_size(target: GPUTarget):
     return lambda lhsType, rhsType: (1, 1, 1)
 
+
 # Get result code saved in module {attr_name = rc}
 def _get_then_remove_rc(mod, attr_name: str) -> int:
     get_int_attr = getattr(ascend.ir, "get_int_attr", None)
@@ -83,7 +82,7 @@ def _get_then_remove_rc(mod, attr_name: str) -> int:
 
     if remove_attr:
         remove_attr(mod, attr_name)
-    
+
     if not isinstance(attr_value, int):
         return -1
 
@@ -130,7 +129,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
     # use triton_adapter to lower Triton-MLIR to linalg
     # Get Triton-MLIR as string
     ttir_code = str(mod)
-    auto_map_parallel_blocks_enabled = _is_auto_map_parallel_blocks_enabled()
+    auto_map_parallel_blocks_enabled = _is_auto_map_parallel_blocks_enabled(metadata)
     blacklist_reasons = []
     has_auto_blockify_blacklist_op = metadata.get("has_auto_blockify_blacklist_op")
     if has_auto_blockify_blacklist_op is None and auto_map_parallel_blocks_enabled:
@@ -163,10 +162,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             auto_blockify_size = 1
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
-        ascend.passes.ttir.add_auto_blockify(
-            pm,
-            auto_blockify_size
-        )
+        ascend.passes.ttir.add_auto_blockify(pm, auto_blockify_size)
         if (metadata["add_auto_scheduling"]):
             ascend.passes.ttir.add_dag_sync(pm)
             ascend.passes.ttir.add_dag_scope(pm)
@@ -177,40 +173,18 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             passes.common.add_canonicalizer(pm)
 
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
-        ascend.passes.ttir.add_triton_to_structure(
-            pm,
-            enable_mask_fallback_conversion,
-            optimize_dynamic_offset
-        )
-        ascend.passes.ttir.add_discrete_mask_access_conversion(
-            pm,
-            compile_on_910_95,
-            force_simt_template,
-            enable_sync_block_lock
-        )
+        ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
+        ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, force_simt_template,
+                                                               enable_sync_block_lock)
         ascend.passes.ttir.add_triton_to_annotation(pm)
-        ascend.passes.ttir.add_triton_to_unstructure(
-            pm,
-            compile_on_910_95,
-            force_simt_template
-        )
+        ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, force_simt_template)
         ascend.passes.ttir.add_triton_to_hivm(pm)
         ascend.passes.ttir.add_triton_to_hfusion(pm)
         ascend.passes.ttir.add_triton_to_llvm(pm)
         ascend.passes.ttir.add_bubble_up_operation(pm)
-        ascend.passes.ttir.add_triton_to_structure(
-            pm,
-            enable_mask_fallback_conversion,
-            optimize_dynamic_offset
-        )
-        ascend.passes.ttir.add_triton_to_linalg(
-            pm,
-            False,
-            named_ops,
-            enable_nd2nz_on_vector,
-            enable_select_analysis,
-            compile_on_910_95
-        )
+        ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
+        ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, enable_nd2nz_on_vector, enable_select_analysis,
+                                                compile_on_910_95)
         if metadata["enable_dynamic_cv_pipeline"]:
             metadata["set_workspace_multibuffer"] = 0
             metadata["enable_mixed_cv"] = True
@@ -230,8 +204,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             ascend.passes.ttir.set_buffer_count("LOAD", _load_val)
 
         pm.run(mod)
-        _adjust_metadata_by_module_result(mod, metadata, opt,
-                                          enable_mixed_cv=enable_mixed_cv,
+        _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)
 
@@ -325,7 +298,7 @@ def _parse_ttir_metadata(ttir: str, metadata: dict):
     metadata["mix_mode"] = "aiv"
     metadata["kernel_name"] = re.search(KERNEL_NAME_REGEX, ttir).group(1)
     metadata["name"] = metadata["kernel_name"]
-    auto_map_parallel_blocks_enabled = _is_auto_map_parallel_blocks_enabled()
+    auto_map_parallel_blocks_enabled = _is_auto_map_parallel_blocks_enabled(metadata)
     has_auto_blockify_blacklist_op = metadata.get("has_auto_blockify_blacklist_op")
     if has_auto_blockify_blacklist_op is None and auto_map_parallel_blocks_enabled:
         has_auto_blockify_blacklist_op = bool(_get_auto_blockify_blacklist_reasons(ttir))
@@ -347,11 +320,8 @@ def get_auto_bind_sub_block_option(metadata):
     # auto_tile_and_bind_subblock is read from the module.
     # enable_auto_bind_sub_block is set by the user and has a higher priority.
     enable_auto_bind_sub_block = metadata["enable_auto_bind_sub_block"]
-    return (
-        metadata["auto_tile_and_bind_subblock"]
-        if enable_auto_bind_sub_block is None
-        else enable_auto_bind_sub_block
-    )
+    return (metadata["auto_tile_and_bind_subblock"]
+            if enable_auto_bind_sub_block is None else enable_auto_bind_sub_block)
 
 
 def _save_npuir_debug_output(stdout_bytes: bytes, stderr_bytes: bytes, tmpdir: str, metadata_hash: str):
@@ -365,11 +335,7 @@ def _save_npuir_debug_output(stdout_bytes: bytes, stderr_bytes: bytes, tmpdir: s
         f.write(combined)
 
     dump_manager = get_dump_manager(metadata_hash)
-    dump_manager.put(
-        Path(output_path).read_text(encoding='utf-8'),
-        "kernel.npuir.mlir",
-        binary=False
-    )
+    dump_manager.put(Path(output_path).read_text(encoding='utf-8'), "kernel.npuir.mlir", binary=False)
 
 
 def try_compile_with_config(linalg: str, ub_config: Dict[str, Any], metadata: dict, opt) -> Tuple[bool, str]:
@@ -579,8 +545,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 _compile_option_list += \
                     [f"--link-aicore-bitcode={bitcode}"]
 
-        if _is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False):
+        if _is_auto_map_parallel_blocks_enabled(metadata) and not metadata.get("has_auto_blockify_blacklist_op", False):
             _compile_option_list += ["--enable-auto-blockify-loop"]
+
         npu_compiler_path, env = _get_npucompiler_path()
         if npu_compiler_path.endswith("bishengir-compile"):
             _compile_option_list += [
@@ -589,9 +556,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             ]
         bisheng_options = metadata["bisheng_options"]
         if bisheng_options is not None:
-            _compile_option_list += [
-                f"--append-bisheng-options={bisheng_options}"
-            ]
+            _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
         mix_mode = opt.mix_mode
         if mix_mode in ["aic"]:
             _compile_option_list += ["--disable-hfusion-vectorize=true"]
@@ -599,11 +564,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if opt.debug:
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
-        cmd_list = (
-            [npu_compiler_path, ttadapter_path]
-            + _compile_option_list
-            + ["-o", bin_file]
-        )
+        cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
         vf_merge_level = metadata["vf_merge_level"]
         if vf_merge_level is not None:
             cmd_list += [f"--enable-vf-merge-level={vf_merge_level}"]
@@ -616,13 +577,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
 
         try:
-            ret = subprocess.run(
-                cmd_list,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=True
-            )
+            ret = subprocess.run(cmd_list, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
         except subprocess.CalledProcessError as e:
             if opt.debug:
                 _save_npuir_debug_output(e.stdout, e.stderr, tmpdir, metadata["hash"])
@@ -816,7 +771,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--disable-size-align-for-cast={disable_size_align_for_cast}"]
 
-        if _is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False):
+        if _is_auto_map_parallel_blocks_enabled(metadata) and not metadata.get("has_auto_blockify_blacklist_op", False):
             _compile_option_list += ["--enable-auto-blockify-loop"]
         npu_compiler_path, env = _get_npucompiler_path()
         if npu_compiler_path.endswith("bishengir-compile"):
@@ -829,22 +784,12 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if opt.debug:
             _compile_option_list += ["--mlir-print-ir-after-failure"]
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
-        cmd_list = (
-            [npu_compiler_path, ttadapter_path]
-            + _compile_option_list
-            + ["-o", bin_file]
-        )
+        cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
         if opt.debug or os.getenv("TRITON_PRINT_UBTUNING", None) == "1":
             print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
 
         try:
-            ret = subprocess.run(
-                cmd_list,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=True
-            )
+            ret = subprocess.run(cmd_list, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
         except subprocess.CalledProcessError as e:
             if opt.debug:
                 _save_npuir_debug_output(e.stdout, e.stderr, tmpdir, metadata["hash"])
@@ -898,6 +843,7 @@ class NPUOptions:
     reg_inc_consumer: int = 0
 
     auto_blockify_size: int = 1
+    enable_auto_blockify: bool = None
     compile_on_910_95: bool = is_compile_on_910_95
     optimize_dynamic_offset: bool = False
     enable_mask_fallback_conversion: bool = False
@@ -908,7 +854,6 @@ class NPUOptions:
     enable_fp_fusion: bool = True
     allow_fp8e4nv: bool = False
     auto_tile_and_bind_subblock: bool = True
-    vf_merge_level: int = 0
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")
     deprecated_fp8_dtypes: Tuple[str] = ()
     vf_merge_level: int = 1
@@ -1032,7 +977,9 @@ def ttir_to_npubin(mod, metadata, opt):
             _compile_option_list += [f"--num-warps={opt.num_warps}"]
             _compile_option_list += [f"--threads-per-warp={opt.warp_size}"]
             if opt.enable_bishengir_simt_optimization != 000:
-                _compile_option_list += [f"--enable-bishengir-simt-optimization={opt.enable_bishengir_simt_optimization}"]
+                _compile_option_list += [
+                    f"--enable-bishengir-simt-optimization={opt.enable_bishengir_simt_optimization}"
+                ]
             if opt.simt_stack_limit:
                 _compile_option_list += [f"--simt-stack-limit={opt.simt_stack_limit}"]
             if opt.shared_mem_dynamic_size is not None:
@@ -1046,23 +993,17 @@ def ttir_to_npubin(mod, metadata, opt):
             if (enable_libdevice_simt):
                 bisheng_options = metadata["bisheng_options"]
                 if bisheng_options is not None:
-                    _compile_option_list += [
-                        f"--append-bisheng-options={bisheng_options}"
-                    ]
+                    _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
 
             # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
             # mirroring the SIMD compile paths. driver.py's runtime block-count
             # cap keys off the same env switch, so the two stay in sync.
-            if _is_auto_map_parallel_blocks_enabled():
+            if _is_auto_map_parallel_blocks_enabled(metadata):
                 _compile_option_list += ["--enable-auto-blockify-loop"]
 
         npu_compiler_path, env = _get_npucompiler_path()
-        cmd_list = (
-            [npu_compiler_path, src_path]
-            + _compile_option_list
-            + ["-o", bin_file]
-        )
-        ret = subprocess.run(cmd_list, env = env, capture_output = True, check = True)
+        cmd_list = ([npu_compiler_path, src_path] + _compile_option_list + ["-o", bin_file])
+        ret = subprocess.run(cmd_list, env=env, capture_output=True, check=True)
         if not Path(bin_path).exists():
             error_msg = ret.stderr.decode('utf-8')
             print(f"[DEBUG] {bin_path} is not found")
@@ -1085,11 +1026,7 @@ class AscendBackend(BaseBackend):
     def parse_options(self, opts) -> Any:
         # TODO: get available targets when building options?
         if self.target.backend == "npu":
-            args = {
-                k: opts[k]
-                for k in NPUOptions.__dataclass_fields__.keys()
-                if k in opts
-            }
+            args = {k: opts[k] for k in NPUOptions.__dataclass_fields__.keys() if k in opts}
             args.setdefault("arch", self.target.arch)
             options = NPUOptions(**args)
             # Costmodel path should avoid extra BC<->MLIR conversion stages
@@ -1097,10 +1034,8 @@ class AscendBackend(BaseBackend):
             if getattr(options, "enable_costmodel_backend", False):
                 object.__setattr__(options, "use_bytecode", False)
         else:
-            raise NotImplementedError(
-                f"Backend '{self.target.backend}' is not supported. "
-                "Please ensure the target backend is set to 'npu'."
-            )
+            raise NotImplementedError(f"Backend '{self.target.backend}' is not supported. "
+                                      "Please ensure the target backend is set to 'npu'.")
         return options
 
     def pack_metadata(self, metadata):
@@ -1141,32 +1076,18 @@ class AscendBackend(BaseBackend):
         if self.target.backend == "npu":
             stages["ttir"] = lambda src, metadata: make_ttir(src, metadata, options)
             if options.force_simt_only:
-                stages["npubin"] = (
-                    lambda src, metadata: ttir_to_npubin(
-                        src, metadata, options
-                    )
-                )
+                stages["npubin"] = (lambda src, metadata: ttir_to_npubin(src, metadata, options))
                 return
-            stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(
-                src, metadata, options, named_ops=True
-            )
+            stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options, named_ops=True)
             if options.compile_on_910_95:
                 stages["npubin"] = (
-                    lambda src, metadata: linalg_to_bin_enable_npu_compile_910_95(
-                        src, metadata, options
-                    )
-                )
+                    lambda src, metadata: linalg_to_bin_enable_npu_compile_910_95(src, metadata, options))
             else:
                 stages["npubin"] = (
-                    lambda src, metadata: linalg_to_bin_enable_npu_compile_A2_A3(
-                        src, metadata, options
-                    )
-                )
+                    lambda src, metadata: linalg_to_bin_enable_npu_compile_A2_A3(src, metadata, options))
         else:
-            raise NotImplementedError(
-                f"Backend '{self.target.backend}' is not supported. "
-                "Please ensure the target backend is set to 'npu'."
-            )
+            raise NotImplementedError(f"Backend '{self.target.backend}' is not supported. "
+                                      "Please ensure the target backend is set to 'npu'.")
 
     @functools.lru_cache()
     def hash(self):

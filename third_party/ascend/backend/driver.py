@@ -48,6 +48,7 @@ from triton.backends.ascend.utils import (
 import triton.backends.ascend.utils as _ascend_utils
 
 class NPUUtils(object):
+
     def __new__(cls):
         if not hasattr(cls, 'instance'):
             cls.instance = super(NPUUtils, cls).__new__(cls)
@@ -105,6 +106,7 @@ class NPUUtils(object):
 
 
 class NPULauncher(object):
+
     def __init__(self, src, metadata):
         self.compile_only = os.getenv("TRITON_COMPILE_ONLY", 'false').lower() in ('true', '1')
         self.enable_msprof_register_tensor = os.getenv("TRITON_REGISTER_TENSOR_MSPROF", 'false').lower() in ('true', '1')
@@ -146,11 +148,13 @@ class NPULauncher(object):
         else:
             if self.compile_only:
                 return
-  
+
             profiler_registered = self.launch(*args, **kwargs)
             _ascend_utils.TRITON_PROFILER_REGISTERED = (profiler_registered == 1)
 
+
 class NPUDriver(DriverBase):
+
     def __init__(self):
         self.utils = NPUUtils()
         self.launcher_cls = NPULauncher
@@ -158,11 +162,13 @@ class NPUDriver(DriverBase):
 
     @classmethod
     def is_active(cls):
+
         def test_npucompiler():
             from triton.backends.ascend.utils import _get_bisheng_path
             npucompiler = _get_bisheng_path()
             targets = subprocess.check_output([npucompiler, "-print-targets"]).decode().strip().split()
             return "hiipu64" in targets
+
         try:
             return test_npucompiler()
         except Exception as e_npucompiler:
@@ -220,7 +226,7 @@ def _precompile_npu_ext_with_lock(header_src, enable_precompile):
     cache = get_cache_manager(precompile_hash)
     gch_path = cache.get_file("precompiled.h.gch")
     header_path = cache.get_file("precompiled.h")
-    if enable_precompile: 
+    if enable_precompile:
         if header_path is not None and gch_path is not None:
             return header_path
     else:
@@ -248,7 +254,7 @@ def _precompile_npu_ext_with_lock(header_src, enable_precompile):
             return header_path
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
-    
+
 
 def make_npu_launcher_stub(header_src, wrapper_src, debug=False):
     """
@@ -258,7 +264,7 @@ def make_npu_launcher_stub(header_src, wrapper_src, debug=False):
     # if precompile header file and its gch file not exist, do precompile
     header_path = _precompile_npu_ext_with_lock(header_src, enable_precompile)
     assert header_path is not None, "the precompiled.h path is empty."
-    
+
     # try to get cached file
     so_cache_key = hashlib.sha256(wrapper_src.encode("utf-8")).hexdigest()
     so_cache_manager = get_cache_manager(so_cache_key)
@@ -275,7 +281,7 @@ def make_npu_launcher_stub(header_src, wrapper_src, debug=False):
             print(f"Dumping precompiled.h to {dump_manager.cache_dir}")
             dump_manager.put(header_src, "precompiled.h", binary=False)
         print(f"Dumping {name}.cxx to {dump_manager.cache_dir}")
-        dump_manager.put(wrapper_src, f"{name}.cxx", binary = False)
+        dump_manager.put(wrapper_src, f"{name}.cxx", binary=False)
 
     cache_path = so_cache_manager.get_file(so_name)
     if cache_path is not None:
@@ -283,12 +289,12 @@ def make_npu_launcher_stub(header_src, wrapper_src, debug=False):
 
     kernel_launcher_type = "torch"
 
-
     with tempfile.TemporaryDirectory() as tmpdir:
         src_path = os.path.join(tmpdir, f"{name}.cxx")
         with open(src_path, "w") as f:
             f.write(wrapper_src)
-        so_path = _build_npu_ext(name, header_path, src_path, kernel_launcher=kernel_launcher_type, precompile=enable_precompile)
+        so_path = _build_npu_ext(name, header_path, src_path, kernel_launcher=kernel_launcher_type,
+                                 precompile=enable_precompile)
         if debug:
             with open(so_path, "rb") as f:
                 dump_manager.put(f.read(), so_name, binary=True)
@@ -366,8 +372,7 @@ def extract_device_print_code_from_cann():
 
 
 def generate_npu_header_src():
-    enable_taskqueue = os.getenv(
-        "TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
+    enable_taskqueue = os.getenv("TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
     return f"""
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
@@ -407,6 +412,7 @@ def generate_npu_header_src():
 
 #endif
 """
+
 
 # the template is from triton-adapter HEAD. Wrapping the generated kernel binary into a python module
 def generate_npu_wrapper_src(constants, signature, metadata):
@@ -505,7 +511,7 @@ def generate_npu_wrapper_src(constants, signature, metadata):
         int gridX, gridY, gridZ;
         rtStream_t stream;
         const void *functon;
-        PyObject* packed_metadata,       
+        PyObject* packed_metadata,
         *args_expand
     """
 
@@ -515,23 +521,18 @@ def generate_npu_wrapper_src(constants, signature, metadata):
 
     arch = get_ascend_arch_from_env()
     target_support_ffts = is_ffts_supported(arch) and (not force_disable_ffts())
-    enable_device_print = os.getenv(
-        "TRITON_DEVICE_PRINT", 'false').lower() in ('true', '1')
-    enable_taskqueue = os.getenv(
-        "TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
-    enable_grid_warn_print = os.getenv(
-        "TRITON_GRID_WARN_PRINT", 'false').lower() in ('true', '1')
+    enable_device_print = os.getenv("TRITON_DEVICE_PRINT", 'false').lower() in ('true', '1')
+    enable_taskqueue = os.getenv("TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
+    enable_grid_warn_print = os.getenv("TRITON_GRID_WARN_PRINT", 'false').lower() in ('true', '1')
     has_auto_blockify_blacklist_op = getattr(
-      metadata,
-      "has_auto_blockify_blacklist_op",
-      False,
+        metadata,
+        "has_auto_blockify_blacklist_op",
+        False,
     )
-    enable_auto_map_parallel_blocks = (
-      _is_auto_map_parallel_blocks_enabled() and not has_auto_blockify_blacklist_op
-    )
+    enable_auto_map_parallel_blocks = (_is_auto_map_parallel_blocks_enabled(metadata)
+                                       and not has_auto_blockify_blacklist_op)
     npu_utils = NPUUtils()
-    num_physical_blocks = npu_utils.get_aivector_core_num(
-    ) if mix_mode == "aiv" else npu_utils.get_aicore_num()
+    num_physical_blocks = npu_utils.get_aivector_core_num() if mix_mode == "aiv" else npu_utils.get_aicore_num()
     task_type, mix_block_dim_ratio = _format_of_msprof_task_type_ratio(bs_task_type, mix_mode)
     is_mix_task_type = "true" if ("MIX" in task_type) else "false"
     LINE_CHANGE_CHAR = chr(10)  # it is \n

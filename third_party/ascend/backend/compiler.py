@@ -130,12 +130,12 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             ascend.passes.ttir.add_dag_sync(pm)
             ascend.passes.ttir.add_dag_scope(pm)
             #Disable optimizations for the Debug mode
-            if enable_optimizations: 
+            if enable_optimizations:
                 passes.common.add_cse(pm)
                 passes.common.add_canonicalizer(pm)
             ascend.passes.ttir.add_dag_ssbuffer(pm)
             #Disable optimizations for the Debug mode
-            if enable_optimizations: 
+            if enable_optimizations:
                 passes.common.add_cse(pm)
                 passes.common.add_canonicalizer(pm)
                 ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)

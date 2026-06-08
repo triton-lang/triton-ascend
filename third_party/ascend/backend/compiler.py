@@ -71,10 +71,12 @@ from triton.tools.get_ascend_devices import is_compile_on_910_95
 def min_dot_size(target: GPUTarget):
     return lambda lhsType, rhsType: (1, 1, 1)
 
+
 def get_enable_optimizations_env_var():
     # TODO: LLVM_EXTRACT_DI_LOCAL_VARIABLES may be misunderstanding for users
     env_vf = os.getenv("LLVM_EXTRACT_DI_LOCAL_VARIABLES")
     return not env_vf.lower() in ("true", "1", "yes")
+
 
 def make_ttir(mod, metadata, opt):
     if "hash" not in metadata:
@@ -140,7 +142,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
                 passes.common.add_canonicalizer(pm)
                 ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
                 ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, force_simt_template,
-                                                               enable_sync_block_lock)
+                                                                       enable_sync_block_lock)
                 ascend.passes.ttir.add_triton_to_annotation(pm)
                 ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, force_simt_template)
         ascend.passes.ttir.add_triton_to_hivm(pm)

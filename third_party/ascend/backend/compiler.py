@@ -785,10 +785,7 @@ class NPUOptions:
     num_ctas: int = 1
     num_stages: int = 1 if is_compile_on_910_95 else 2
     warp_size: int = 32
-    num_buffers_warp_spec: int = 0
-    num_consumer_groups: int = 0
-    reg_dec_producer: int = 0
-    reg_inc_consumer: int = 0
+    ir_override: Optional[str] = None  # filename of a user-defined IR (*.{ttir|ttadapter|mlirbc|bcmlir|npubin})
 
     auto_blockify_size: int = 1
     enable_auto_blockify: bool = None

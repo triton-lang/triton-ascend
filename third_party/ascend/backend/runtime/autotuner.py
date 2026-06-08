@@ -350,18 +350,12 @@ class AutoTilingTuner(Autotuner):
                 _kv_dict = {k: _args[v] for k, v in self.keys.items() if v in _args}
                 self._gen_tile_configs(_kv_dict, dtype)
             if len(self.gen_configs) == 0 and len(self.user_configs) == 0:
-                self.configs = [
-                    Config(
-                        {},
-                        num_warps=4,
-                        num_stages=2,
-                        num_ctas=1,
-                        num_buffers_warp_spec=0,
-                        num_consumer_groups=0,
-                        reg_dec_producer=0,
-                        reg_inc_consumer=0,
-                    )
-                ]
+                self.configs = [Config(
+                    {},
+                    num_warps=4,
+                    num_stages=2,
+                    num_ctas=1,
+                )]
             else:
                 self.configs = self.gen_configs + self.user_configs
         return key
@@ -1080,9 +1074,7 @@ def get_max_configs(config, kernel_type="mix", **kwargs):
 
         new_config = Config(kwargs=new_kwargs, num_warps=config.num_warps,
                             num_stages=num_stages_val if num_stages_val is not None else config.num_stages,
-                            num_ctas=config.num_ctas, num_buffers_warp_spec=config.num_buffers_warp_spec,
-                            num_consumer_groups=config.num_consumer_groups, reg_dec_producer=config.reg_dec_producer,
-                            reg_inc_consumer=config.reg_inc_consumer, maxnreg=config.maxnreg, pre_hook=config.pre_hook)
+                            num_ctas=config.num_ctas, maxnreg=config.maxnreg, pre_hook=config.pre_hook)
         new_configs.append(new_config)
 
     return new_configs

@@ -127,13 +127,13 @@ std::pair<mlir::Operation *, mlir::Operation *> InterCoreTransferAndSyncPass::ge
     mlir::ModuleOp module)
 {
     mlir::Operation *knownOpInBlock = nullptr;
-    module.walk([&](mlir::Operation *op) {
-        if (knownOpInBlock) {
-            return;
-        }
+    module.walk<WalkOrder::PreOrder>([&](mlir::Operation *op) {
         if (CVPipeline::getOpBlockId(op).value_or(-1) == targetId) {
             knownOpInBlock = op;
+            return WalkResult::interrupt();
         }
+
+        return WalkResult::advance();
     });
 
     if (!knownOpInBlock) {
@@ -373,9 +373,9 @@ void InterCoreTransferAndSyncPass::extractMatmulResult(
         MLIRContext *ctx = extractSliceOp->getContext();
         extractSliceOp->setAttr(CVPipeline::kMatmulExtract, UnitAttr::get(ctx));
         originalResult.replaceUsesWithIf(extractSliceOp.getResult(),
-            [&](OpOperand &use) { return use.getOwner() != extractSliceOp.getOperation(); });   
-    
-    
+            [&](OpOperand &use) { return use.getOwner() != extractSliceOp.getOperation(); });
+
+
         LOG_DEBUG("cubeValueMapping[originalResult]" << originalResult << "\n");
         LOG_DEBUG("cubeValueMapping[originalResult]extractSliceOp.getResult()   " << extractSliceOp.getResult() << "\n");
         cubeValueMapping[originalResult] = extractSliceOp.getResult();
@@ -427,7 +427,7 @@ mlir::Value InterCoreTransferAndSyncPass::normalizeIfNeeded(OpBuilder &builder, 
     } else {
         builder.setInsertionPointAfter(origValue.getDefiningOp());
     }
-    
+
     auto floatElemTy = cast<FloatType>(elemType);
     auto zeroConstOp = builder.create<arith::ConstantFloatOp>(
         loc, APFloat::getZero(floatElemTy.getFloatSemantics()), floatElemTy);
@@ -492,7 +492,7 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder, Dependency
 
     if (iniDepMatmulOp) {
         LOG_DEBUG(*iniDepMatmulOp);
-        if (iniDepMatmulOp->hasAttr(CVPipeline::kMatmulADep) 
+        if (iniDepMatmulOp->hasAttr(CVPipeline::kMatmulADep)
             && iniDepMatmulOp->hasAttr(CVPipeline::kMatmulBDep)) {
             isOnlyDepInMatmul = false;
         }
@@ -527,7 +527,7 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder, Dependency
 
     auto [newProdStart, newProdEnd] = getBlockStartEnd(dep.producerBlockId, module);
     builder.setInsertionPointAfter(newProdEnd);
-    
+
     auto reshape3Dcst = builder.create<arith::ConstantOp>(loc, builder.getI64TensorAttr(shape3D));
     auto reshape3DOp = builder.create<tensor::ReshapeOp>(loc, type3D, newValue, reshape3Dcst);
 
@@ -639,13 +639,13 @@ mlir::Operation *InterCoreTransferAndSyncPass::analyzeConsumerReadInsertPoint(
         }
     }
     auto firstConsumerOp = std::min_element(
-        consumerOps.begin(), 
-        consumerOps.end(), 
+        consumerOps.begin(),
+        consumerOps.end(),
         [](mlir::Operation* a, mlir::Operation* b) {
             return a->isBeforeInBlock(b);
         }
     );
-    
+
     return firstConsumerOp != consumerOps.end() ? *firstConsumerOp : nullptr;
 }
 
@@ -1031,7 +1031,7 @@ LogicalResult InterCoreTransferAndSyncPass::handleVectorToCube(OpBuilder &builde
     auto [consStart, consEnd] = getBlockStartEnd(dep.consumerBlockId, module);
 
     Operation *consumedDataOp = nullptr;
-  
+
     if (dep.consumerBlockId == dep.iniConsumerBlockId) {
         auto consumerPoint = analyzeConsumerReadInsertPoint(srcValue, dep.iniConsumerBlockId);
         consStart = consumerPoint;
@@ -1074,6 +1074,12 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(OpBuilder &builde
     LOG_DEBUG("[newProdEnd]" << *prodEnd << "\n");
     LOG_DEBUG("[newConsStart]" << *consStart << "\n");
     LOG_DEBUG("[newConsEnd]" << *consEnd << "\n");
+
+    if (dep.consumerBlockId == dep.iniConsumerBlockId) {
+        auto consumerPoint = analyzeConsumerReadInsertPoint(srcValue, dep.iniConsumerBlockId);
+        consStart = consumerPoint;
+    }
+
     Operation *consumedDataOp = nullptr;
     Operation *transferOp =
         insertCubeToVectorTransfer(builder, srcValue, prodEnd, consStart, loc, transferIndex, dep.iniConsumerBlockId,
@@ -1081,6 +1087,12 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(OpBuilder &builde
 
     auto [newProdStart, newProdEnd] = getBlockStartEnd(dep.producerBlockId, module); // C Block
     auto [newConsStart, newConsEnd] = getBlockStartEnd(dep.consumerBlockId, module); // V Block
+
+    if (dep.consumerBlockId == dep.iniConsumerBlockId) {
+        auto newconsumerPoint = getConsumerWaitPoint(transferIndex);
+        newConsStart = newconsumerPoint;
+    }
+
     int flagId = flagManager.acquireId(newProdStart);
     insertInterCoreSync(builder, transferOp, newConsStart, newConsEnd, flagId, loc, transferIndex, flagIdReuseManager,
         consumedDataOp);
@@ -1136,7 +1148,7 @@ llvm::SmallVector<mlir::Operation *> InterCoreTransferAndSyncPass::insertAnalyze
     mlir::ModuleOp module, FlagIdReuseManager &flagIdReuseManager)
 {
     using OpVector = llvm::SmallVector<mlir::Operation *>;
-    
+
     // E1 (per-pipe FIFO) is isolated per MLIR block: ops on one (core, pipe)
     llvm::DenseMap<Block *, llvm::SmallDenseMap<hivm::TCoreType, llvm::SmallDenseMap<hivm::PIPE, OpVector>>>
         sequenceOpMap;

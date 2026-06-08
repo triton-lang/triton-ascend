@@ -131,74 +131,6 @@ static LogicalResult getCommonBlockId(ArrayRef<Operation *> ops, int &blockId) {
 }
 
 /**
- * @brief Collect predecessor operations in a block for a given value
- *
- * This function traces back through SSA dependencies to find all operations
- * that affect the given startValue within a specific block.
- *
- * Special handling for scf.for loop-carried dependencies:
- * When an operand is a BlockArgument from scf.for iter_arg, we also trace
- * through the yieldOp to find the operation that provides the yielded value.
- * This ensures we capture operations that update loop-carried variables
- * (e.g., %79 that updates %arg19).
- *
- * @param startValue The value to trace back from
- * @param block The block to search within
- * @return SmallVector<Operation*> List of predecessor operations
- */
-static SmallVector<Operation *> collectBlockPredecessors(Value startValue, Block *block) {
-  SmallVector<Operation *> result;
-  SmallVector<Operation *> toProcess;
-
-  auto addToProcess = [&](Operation *op) {
-    if (auto *ancestorInBlock = CVPipeline::getAncestorInBlock(op, block)) {
-      if (!llvm::is_contained(result, ancestorInBlock)) {
-        toProcess.push_back(ancestorInBlock);
-      }
-    }
-  };
-
-  if (auto *condDefOp = startValue.getDefiningOp()) {
-    addToProcess(condDefOp);
-  }
-
-  while (!toProcess.empty()) {
-    auto *op = toProcess.pop_back_val();
-    if (llvm::is_contained(result, op)) {
-      continue;
-    }
-    result.push_back(op);
-
-    for (auto operand : op->getOperands()) {
-      if (auto *defOp = operand.getDefiningOp()) {
-        // SSA operand: trace to its defining operation
-        addToProcess(defOp);
-      } else if (auto blockArg = dyn_cast<BlockArgument>(operand)) {
-        // Block argument: check if it's from scf.for iter_arg
-        Operation *parentOp = blockArg.getOwner()->getParentOp();
-        if (auto forOp = dyn_cast<scf::ForOp>(parentOp)) {
-          unsigned argIdx = blockArg.getArgNumber();
-          // argIdx == 0 is the loop variable, not iter_arg; skip invalid indices
-          if (argIdx == 0 || argIdx > forOp.getInitArgs().size()) {
-            continue;
-          }
-          Operation *yieldOp = forOp.getBody()->getTerminator();
-          if (!isa<scf::YieldOp>(yieldOp) || argIdx > yieldOp->getNumOperands()) {
-            continue;
-          }
-          // Get the value yielded for this iter_arg and trace its defining op
-          Value yieldedValue = yieldOp->getOperand(argIdx - 1);
-          if (auto *yieldedDef = yieldedValue.getDefiningOp()) {
-            addToProcess(yieldedDef);
-          }
-        }
-      }
-    }
-  }
-  return result;
-}
-
-/**
  * @brief Find linalg.fill operation that uses alloc as outs inside scf.if
  *
  * This function searches for linalg.fill operations that satisfy:
@@ -340,7 +272,7 @@ static FillInfo splitSCFIfIfNeeded(FillInfo &info) {
  * @param memGraph Memory dependence graph for cycle detection
  * @return LogicalResult Returns success if unification was performed, failure otherwise
  */
-static LogicalResult tryUnifyForAlloc(memref::AllocOp allocOp, 
+static LogicalResult tryUnifyForAlloc(memref::AllocOp allocOp,
                                       const CVPipeline::MemoryDependenceGraph &memGraph,
                                       CVPipeline::ComputeBlockIdManager &bm) {
   // Step1: Collect direct users (excluding linalg.fill)
@@ -374,9 +306,21 @@ static LogicalResult tryUnifyForAlloc(memref::AllocOp allocOp,
 
   // Step5: Collect predecessor_ops for scf.if condition
   SmallVector<Operation *> conditionOps =
-      collectBlockPredecessors(fillInfo.parentIf.getCondition(), fillInfo.parentIf->getBlock());
+      CVPipeline::collectBlockPredecessors(fillInfo.parentIf.getCondition(), fillInfo.parentIf->getBlock());
 
   // Step6: Cycle detection and block_id assignment with fallback
+
+  // We attempt a two-tier progressive update to maximize optimization while ensuring safety:
+  //
+  // 1. Extended Ops (Core + Upstreams): Unifying upstream condition-calculating operations
+  //    or loop bounds with the core operations is highly preferred. Keeping them in the
+  //    same block reduces inter-block dependencies and synchronization overhead, leading
+  //    to faster execution and a smaller memory/register footprint.
+  //
+  // 2. Core Ops Only (Fallback): Extended operations (like shared loop bounds or conditional
+  //    checks) are often shared among multiple independent structures. Forcing them into
+  //    the same block can create dependency cycles. If that happens, we fall back to
+  //    unifying only the core operations, which is the minimum requirement for correctness.
   SmallVector<Operation *> coreOps = {
       allocOp.getOperation(),
       fillInfo.fillOp.getOperation(),
@@ -433,7 +377,7 @@ public:
     module.walk([&](memref::AllocOp allocOp) {
       allocOps.push_back(allocOp);
     });
-    
+
     for (memref::AllocOp allocOp: allocOps) {
       if (failed(tryUnifyForAlloc(allocOp, memGraph, bm))) {
         signalPassFailure();

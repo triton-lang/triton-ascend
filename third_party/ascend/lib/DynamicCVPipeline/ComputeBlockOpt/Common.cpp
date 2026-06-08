@@ -20,14 +20,21 @@
  * THE SOFTWARE.
  */
 
-#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
-#include "mlir/IR/Operation.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/LogicalResult.h"
+
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/Operation.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
 static constexpr const char *DEBUG_TYPE = "compute-block-opt-common";
 #define LOG_DEBUG(...) LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__ << "\n")
@@ -179,6 +186,70 @@ bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify, const MemoryDepende
     }
 
     return hasCycle;
+}
+
+SmallVector<Operation *> collectBlockPredecessors(ValueRange startValues, Block *block)
+{
+    SmallVector<Operation *> result;
+    SmallVector<Operation *> toProcess;
+
+    auto addToProcess = [&](Operation *op) {
+        if (auto *ancestorInBlock = CVPipeline::getAncestorInBlock(op, block)) {
+            if (!llvm::is_contained(result, ancestorInBlock)) {
+                toProcess.push_back(ancestorInBlock);
+            }
+        }
+    };
+
+    for (auto startValue : startValues) {
+        if (auto *condDefOp = startValue.getDefiningOp()) {
+            addToProcess(condDefOp);
+        }
+    }
+
+    while (!toProcess.empty()) {
+        auto *op = toProcess.pop_back_val();
+        if (llvm::is_contained(result, op)) {
+            continue;
+        }
+        result.push_back(op);
+
+        for (auto operand : op->getOperands()) {
+            if (auto *defOp = operand.getDefiningOp()) {
+                // SSA operand: trace to its defining operation
+                addToProcess(defOp);
+            } else if (auto blockArg = dyn_cast<BlockArgument>(operand)) {
+                // Block argument: check if it's from scf.for iter_arg
+                Operation *parentOp = blockArg.getOwner()->getParentOp();
+                if (auto forOp = dyn_cast<scf::ForOp>(parentOp)) {
+                    auto *tiedOperand = forOp.getTiedLoopYieldedValue(blockArg);
+                    if (!tiedOperand || !tiedOperand->get()) {
+                        continue;
+                    }
+                    auto *defOp = tiedOperand->get().getDefiningOp();
+                    if (defOp) {
+                        addToProcess(defOp);
+                    }
+                }
+            }
+        }
+    }
+    return result;
+}
+
+llvm::LogicalResult tryUpdate(llvm::ArrayRef<Operation *> ops,
+                              const MemoryDependenceGraph &memGraph,
+                              int64_t targetBlockId,
+                              ComputeBlockIdManager &bm)
+{
+    if (CVPipeline::willCreateCycle(ops, memGraph, targetBlockId, bm)) {
+        return llvm::failure();
+    }
+
+    for (auto *op : ops) {
+        bm.updateBlockId(op, targetBlockId);
+    }
+    return llvm::success();
 }
 
 } // namespace CVPipeline

@@ -4,12 +4,17 @@
 #include "llvm/Support/LogicalResult.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Math/IR/Math.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/Interfaces/CastInterfaces.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 namespace mlir {
@@ -102,6 +107,34 @@ bool isVectorOnlyOp(Operation *op)
 bool isScfOp(Operation *op)
 {
   return llvm::isa<scf::SCFDialect>(op->getDialect());
+}
+
+Value getAliasSource(Value value)
+{
+    if (!value) {
+        return nullptr;
+    }
+    auto *defOp = value.getDefiningOp();
+    if (!defOp) {
+        return nullptr;
+    }
+    return llvm::TypeSwitch<Operation *, Value>(defOp)
+        .Case<ViewLikeOpInterface>([](ViewLikeOpInterface viewOp) { return viewOp.getViewSource(); })
+        .Case<CastOpInterface>([](CastOpInterface castOp) -> Value {
+            if (castOp->getOperands().size() == 1) {
+                return castOp->getOperand(0);
+            }
+
+            // Unknown cast op, cowardly avoiding incorrecly finding source
+            return nullptr;
+        })
+        .Case<bufferization::ToMemrefOp>([](bufferization::ToMemrefOp toMemrefOp) { return toMemrefOp.getTensor(); })
+        .Case<bufferization::ToTensorOp>([](bufferization::ToTensorOp toTensorOp) { return toTensorOp.getMemref(); })
+        .Case<tensor::CollapseShapeOp>([](tensor::CollapseShapeOp colOp) { return colOp.getSrc(); })
+        .Case<tensor::ReshapeOp>([](tensor::ReshapeOp reshapeOp) { return reshapeOp.getSource(); })
+        .Case<memref::TransposeOp>([](memref::TransposeOp transOp) { return transOp.getIn(); })
+        .Case<tensor::ExtractSliceOp>([](tensor::ExtractSliceOp extOp) { return extOp.getSource(); })
+        .Default([](auto) { return nullptr; });
 }
 
 } // namespace CVPipeline

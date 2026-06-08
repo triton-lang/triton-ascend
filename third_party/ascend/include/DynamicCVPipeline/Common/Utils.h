@@ -47,8 +47,21 @@ inline constexpr llvm::StringLiteral kIntraBuffer = "ssbuffer.intra_buffer";
 inline constexpr llvm::StringLiteral kAnalyzeFlagId = "ssbuffer.analyze_flag_id";
 inline constexpr llvm::StringLiteral kLoopCarriedL0C = "ssbuffer.loop_carried_l0c";
 inline constexpr const char *ERRCODE_ATTR = "triton_ascend.dynamic_cv_pipeline.rc";
+
 static constexpr const int ERRCODE_FAILED = 1;
 static constexpr const int ERRCODE_IGNORED = 2;
+
+class MoveOnly {
+  protected:
+    MoveOnly() = default;
+    ~MoveOnly() = default;
+
+    MoveOnly(const MoveOnly &) = delete;
+    MoveOnly &operator=(const MoveOnly &) = delete;
+
+    MoveOnly(MoveOnly &&) = default;
+    MoveOnly &operator=(MoveOnly &&) = default;
+};
 
 enum CoreType {
     UNDETERMINED = 0,
@@ -83,6 +96,33 @@ inline bool isCubeOp(Operation *op)
 }
 
 bool isVectorOnlyOp(Operation *op);
+
+// ============================================================================
+// Function Name: mlir::CVPipeline::getAliasSource
+// ============================================================================
+/**
+ * @brief Resolves the immediate source of a value by tracing through alias-introducing operations.
+ *
+ * **Purpose**:
+ * To identify underlying memory buffers or tensors by stripping away view-like transformations,
+ * type casts, and bufferization casts (e.g., to_memref, to_tensor).
+ *
+ * **Inputs & Assumptions**:
+ * - `value` (mlir::Value): The value to analyze.
+ * - Assumptions: If the defining operation implements CastOpInterface, it is assumed to be a
+ *   single-operand cast; otherwise, it is treated as an unknown cast.
+ *
+ * **Outputs & Guarantees**:
+ * - Returns the direct source `mlir::Value` of the alias.
+ * - Returns `nullptr` if the input value is null, has no defining operation, or is defined
+ *   by an operation that does not introduce a recognizable alias.
+ * - Guarantees that only one level of the alias chain is resolved per call.
+ *
+ * **Safety Boundaries & Constraints**:
+ * - Safe against null inputs.
+ * - Returns `nullptr` for multi-operand casts to prevent incorrect tracing assumptions.
+ */
+Value getAliasSource(Value value);
 
 } // namespace CVPipeline
 } // namespace mlir

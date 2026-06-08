@@ -20,14 +20,16 @@
  * THE SOFTWARE.
  */
 
+#include "mlir/Pass/PassManager.h"
+#include "mlir/Pass/PassRegistry.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
+
 #include "DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "DynamicCVPipeline/PlanComputeBlock/Passes.h"
 #include "DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
-
-#include "mlir/Pass/PassManager.h"
 
 using namespace mlir;
 using namespace triton;
@@ -43,6 +45,9 @@ void ComputeBlockOptPass::runOnOperation()
         Then, use UBUsageOpt to find the smallest UB dependency location and divide the computation blocks.
      */
     pm.addPass(createUnifyAllocBlockPass());
+    pm.addPass(createReorderOpsByBlockIdPass());
+
+    pm.addPass(createDiscreteLoadStorePass());
     pm.addPass(createReorderOpsByBlockIdPass());
 
     pm.addPass(createMergeVectorIfBlockPass());
@@ -75,6 +80,7 @@ void registerComputeBlockOptPasses()
     registerPass(createUnifyAllocBlockPass);
     registerPass(createMergeVectorIfBlockPass);
     registerPass(createFixpipeOptPass);
+    registerDiscreteLoadStorePass();
 }
 
 } // namespace triton

@@ -27,7 +27,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
 
-#include "bishengir/Dialect/Utils/Util.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -39,10 +38,12 @@
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
 
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
+#include "bishengir/Dialect/Utils/Util.h"
 
 using namespace mlir;
 static constexpr const char *DEBUG_TYPE = "op-classifier";
@@ -657,6 +658,10 @@ int OpClassifierPass::markRemainingAsVector()
 
         if (opCoreTypes[op] == OP_UNDETERMINED && !isa<scf::YieldOp>(op)) {
             opCoreTypes[op] = OP_VECTOR_ONLY;
+        }
+
+        if (isa<scf::ForOp>(op) && op->hasAttr(hivm::ExtractLoadStoreAttr)) {
+            op->walk([this](Operation *nestedOp) { opCoreTypes[nestedOp] = OP_VECTOR_ONLY; });
         }
     }
 

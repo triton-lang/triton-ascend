@@ -41,7 +41,6 @@ using namespace triton;
 namespace {
 
 static constexpr llvm::StringLiteral interceptrFunc[] {
-  "chunk_transform_qk_fwd_kernel",
   "_attn_fwd",
   "_attn_bwd",
   "_kernel_matmul_fp8_row_non_persistent",
@@ -51,17 +50,11 @@ static constexpr llvm::StringLiteral interceptrFunc[] {
   "backward_dq",
   "backward_sum_o_do",
   "forward_kernel",
-  "bwd_qkv_kernel",
-  "parallel_rebased_bwd_kernel",
-  "parallel_rebased_fwd_kernel",
-  "parallel_path_bwd_dkv_kernel",
-  "parallel_path_bwd_dq_kernel",
-  "chunkwise_bwd_kernel_hdqgl",
-  "chunk_mesa_net_fwd_kernel_h",
-  "parallel_simple_gla_bwd_kernel",
-  "chunkwise_fwd_kernel",
-  "_parallel_rebased_bwd_dq",
-  "parallel_based_bwd_kernel",
+  "bwd_qkv_kernel",                  
+  "parallel_rebased_bwd_kernel",   
+  "parallel_path_bwd_dq_kernel",    
+  "_parallel_rebased_bwd_dq",    
+  "parallel_based_bwd_kernel",    
 };
 
 static LogicalResult verifyFuncNames(ModuleOp module)

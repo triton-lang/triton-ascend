@@ -1,0 +1,91 @@
+# Triton builds
+build/
+build-*/
+
+# Triton Python module builds
+python/build/
+python/dist/
+python/triton*.egg-info/
+
+python/triton/_C/*.pyd
+python/triton/_C/*.so
+python/triton/_C/*.dylib
+
+# Backends copied from submodules
+python/triton/backends/
+!python/triton/backends/__init__.py
+!python/triton/backends/compiler.py
+!python/triton/backends/driver.py
+
+# Language extras
+python/triton/language/extra
+
+# Proton
+python/triton/profiler
+
+# Instrumentation
+python/triton/instrumentation
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache
+
+# Environments
+.venv
+venv/
+venv.bak/
+
+# VS Code project files
+.vscode
+.vs
+
+# JetBrains project files
+.idea
+cmake-build-*
+
+# Third-party binaries
+cuobjdump
+nvdisasm
+ptxas
+
+# Third-party include
+third_party/nvidia/backend/include
+third_party/nvidia/backend/lib/cupti
+
+# Docs
+docs/_build/
+docs/python-api/generated/
+docs/dialects/
+docs/getting-started/tutorials
+docs/sg_execution_times.rst
+!python/tutorials/*.py
+!python/tutorials/*.rst
+
+# clangd index. (".clangd" is a config file now, thus trailing slash)
+.clangd/
+.cache
+/compile_commands.json
+.vscode
+.vs
+.idea/
+
+# Vim
+*.swp
+
+# macOS
+.DS_Store
+triton_ascend.egg-info/
+
+# cann
+fusion_result.json
+kernel_meta/
+
+# compilation
+/triton/
+build/
+
+# artifact
+dist/
+*.egg-info/
+.eggs/

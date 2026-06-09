@@ -1,0 +1,120 @@
+name: Wheels
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/wheels.yml
+  schedule:
+    - cron: "0 8 * * *"
+
+concurrency:
+  group: wheels-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+
+  Build-Wheels:
+    timeout-minutes: 360
+    runs-on: ${{ matrix.config.runs_on }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+        - {runs_on: 'ubuntu-22.04', arch: 'x86_64'}
+        - {runs_on: 'ubuntu-22.04-arm', arch: 'aarch64'}
+        python: ["cp310", "cp311", "cp312", "cp313"]
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+
+      - name: Prune stale docker containers
+        run: |
+          # If cibuildwheel crashes (or, say, is OOM-killed), it leaves behind a
+          # docker container.  Eventually these consume all the disk space on
+          # this machine.
+          docker container prune -f
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache build dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.triton-cache
+            ${{ github.workspace }}/.ccache
+          key: wheels-${{ matrix.config.arch }}-${{ matrix.python }}-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
+          restore-keys: |
+            wheels-${{ matrix.config.arch }}-${{ matrix.python }}-
+
+      - name: Build wheels
+        run: |
+          python --version
+          # Make sure cibuildwheel is updated to latest, this will enable latest python builds
+          python3 -m pip install cibuildwheel --upgrade --user
+          # Pass MAX_JOBS=4 because, at time of writing, the VM "only" has 32GB
+          # of RAM and OOMs while building if we give it the default number of
+          # workers (2 * NUM_CPUs).
+          NUM_PROCS=$(( $(nproc) / 3 ))
+          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+
+          # Pre-create cache dirs on host so cibuildwheel's bind-mount sees them
+          # at /project/.triton-cache and /project/.ccache inside the container.
+          mkdir -p .triton-cache .ccache
+
+          # required to build Python 3.14 with cibuildwheel 2.23.3
+          # todo: Need to update system Python to 3.11 and update cibuildwheel to latest
+
+          export CIBW_ENVIRONMENT="MAX_JOBS=${NUM_PROCS} \
+            TRITON_BUILD_WITH_CLANG_LLD=true \
+            TRITON_BUILD_PROTON=OFF \
+            TRITON_WHEEL_NAME=triton-ascend \
+            TRITON_APPEND_CMAKE_ARGS='-DTRITON_BUILD_UT=OFF' \
+            TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX:-rc3} \
+            TRITON_HOME=/project/.triton-cache \
+            TRITON_BUILD_WITH_CCACHE=true \
+            CCACHE_DIR=/project/.ccache \
+            CCACHE_COMPRESS=true"
+
+          # many_linux_2_28 image comes with GCC 12.2.1, but not clang.
+          # With this install, it gets clang 16.0.6.
+          export CIBW_BEFORE_ALL="dnf install clang lld ccache -y"
+
+          if [[ ${{ matrix.config.arch }} == 'x86_64' ]]; then
+            export CIBW_MANYLINUX_X86_64_IMAGE="quay.io/pypa/manylinux_2_28_${{ matrix.config.arch }}:latest"
+          else
+            export CIBW_MANYLINUX_AARCH64_IMAGE="quay.io/pypa/manylinux_2_28_${{ matrix.config.arch }}:latest"
+          fi
+
+          export CIBW_BUILD="${{ matrix.python }}-manylinux_${{ matrix.config.arch }}"
+
+          python3 -m cibuildwheel python/ --output-dir wheelhouse
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-${{ matrix.python }}-wheels-upload
+          path: ./wheelhouse/*.whl
+
+      - name: Setup obsutil
+        if: github.event_name != 'pull_request'
+        uses: ./.github/actions/setup-obsutil
+        with:
+          ak: ${{ secrets.OBS_AK }}
+          sk: ${{ secrets.OBS_SK }}
+          arch: ${{ matrix.config.arch == 'x86_64' && 'amd64' || 'arm64' }}
+
+      - name: Upload wheels to OBS
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: obsutil/obsutil cp -u wheelhouse/*.whl "obs://triton-ascend-artifacts/triton-ascend/"

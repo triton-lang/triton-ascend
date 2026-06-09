@@ -1,0 +1,80 @@
+name: Release Triton Ascend Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/Dockerfile'
+      - 'Makefile'
+      - 'requirements.txt'
+      - 'requirements_dev.txt'
+      - '.github/workflows/build-docker-image.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docker/Dockerfile'
+      - 'Makefile'
+      - 'requirements.txt'
+      - 'requirements_dev.txt'
+      - '.github/workflows/build-docker-image.yml'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build-images:
+    name: Build ${{ matrix.cann_version }}-${{ matrix.chip_type }}-${{ matrix.os }}-py${{ matrix.python_version }}
+    runs-on: ubuntu-22.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        cann_version: [8.5.0, 9.0.0-beta.2]
+        chip_type: [910b, a3]
+        os: [ubuntu22.04]
+        python_version: ["3.10", "3.11"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Quay.io
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USER }}
+          password: ${{ secrets.QUAY_PASSWD }}
+
+      - name: Generate tags
+        id: tags
+        run: |
+          CANN_TAG="${{ matrix.cann_version }}-${{ matrix.chip_type }}-${{ matrix.os }}-py${{ matrix.python_version }}"
+          GIT_COMMIT_SHORT="$(git rev-parse --short HEAD)"
+          TAG_COMMIT="${CANN_TAG}-${GIT_COMMIT_SHORT}"
+          TAG_LATEST="${CANN_TAG}-latest"
+          echo "cann_tag=${CANN_TAG}" >> $GITHUB_OUTPUT
+          echo "tag_commit=${TAG_COMMIT}" >> $GITHUB_OUTPUT
+          echo "tag_latest=${TAG_LATEST}" >> $GITHUB_OUTPUT
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            quay.io/ascend/triton:${{ steps.tags.outputs.tag_commit }}
+            quay.io/ascend/triton:${{ steps.tags.outputs.tag_latest }}
+          build-args: |
+            CANN_BASE_IMAGE=quay.io/ascend/cann:${{ steps.tags.outputs.cann_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

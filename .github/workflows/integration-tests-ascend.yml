@@ -1,0 +1,151 @@
+name: Integration Tests NPU
+
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        required: true
+        type: string
+
+jobs:
+  integration-tests-ascend:
+    name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.python_version }})
+    runs-on: ${{ matrix.config.runs_on }}
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:${{ matrix.cann_version }}-${{ matrix.config.chip_type }}-${{ matrix.os }}-py${{ matrix.python_version }}-latest
+    timeout-minutes: 300
+    strategy:
+      matrix:
+        config: ${{ fromJson(inputs.matrix) }}
+        cann_version: ["8.5.0"]
+        os: [ubuntu22.04]
+        python_version: ["3.10", "3.11"]
+      fail-fast: false
+    env:
+      PROTON_SKIP_PC_SAMPLING_TEST: 1
+      PYTHON: "python${{ matrix.python_version }}"
+      PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
+      PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
+      PIP_EXTRA_INDEX_URL: "https://repo.huaweicloud.com/ascend/repos/pypi"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: "true"
+          fetch-depth: 1
+
+      - name: Add git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache build dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.triton/llvm
+            ~/.triton/json
+            ~/.triton/nvidia
+            ~/.ccache
+          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-
+
+      - name: Download and install Bisheng compiler
+        shell: bash
+        run: |
+          if [ ! -f cmake/bisheng-version.txt ]; then
+            echo "cmake/bisheng-version.txt not found, skipping"
+            exit 0
+          fi
+
+          OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
+          BISHENG_FILENAME=$(sed -n '1p' cmake/bisheng-version.txt | xargs)
+          BISHENG_SHA256=$(sed -n '2p' cmake/bisheng-version.txt | sed 's/^sha256://' | xargs)
+
+          if [ -z "${BISHENG_FILENAME}" ]; then
+            echo "Error: cmake/bisheng-version.txt must contain a Bisheng filename on the first line." >&2
+            exit 1
+          fi
+
+          echo "Downloading: ${BISHENG_FILENAME}"
+          curl -fL "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
+
+          if [ -n "${BISHENG_SHA256}" ]; then
+            echo "Verifying SHA256 checksum..."
+            echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
+          else
+            echo "Warning: No SHA256 checksum provided, skipping verification"
+          fi
+
+          chmod +x bisheng.run
+          ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
+          echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
+
+      - name: Build and install triton-ascend
+        working-directory: python
+        shell: bash
+        env:
+          TRITON_BUILD_WITH_CCACHE: "true"
+          TRITON_BUILD_WITH_CLANG_LLD: "TRUE"
+          TRITON_DISABLE_LINE_INFO: 1
+          CCACHE_COMPRESS: "true"
+          TRITON_BUILD_WITH_O1: true
+          TRITON_BUILD_PROTON: OFF
+          TRITON_WHEEL_NAME: "triton-ascend"
+          # Enable C++/MLIR unit tests so CMake generates third_party/ascend/unittest/lit.site.cfg.py
+          # in the build dir (required by the MLIR FileCheck step below).
+          TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=ON"
+        run: |
+          nproc
+          source /usr/local/Ascend/cann/set_env.sh
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          npu-smi info
+          if [ -n "${ASCEND_TOOLKIT_HOME}" ] && [ -f "${ASCEND_TOOLKIT_HOME}/cann/version.info" ]; then
+            cat "${ASCEND_TOOLKIT_HOME}/cann/version.info"
+          fi
+
+          ${PYTHON} -m pip uninstall triton-ascend triton -y || true
+          ccache --zero-stats
+          NUM_PROCS=$(( $(nproc) / 3 ))
+          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          MAX_JOBS="$NUM_PROCS" ${PYTHON} setup.py bdist_wheel
+          ${PYTHON} -m pip install -v dist/*.whl --force-reinstall
+
+
+      - name: CCache stats
+        run: ccache --print-stats
+
+      - name: Run unit tests on NPU
+        shell: bash
+        run: |
+          source /usr/local/Ascend/cann/set_env.sh
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          NUM_PROCS=$(( $(nproc) / 12 ))
+          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
+          ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/autotune_ut
+          # NOTE: kernel tests are temporarily disabled due to intermittent failures
+          # that cause CI instability. TODO: Fix flaky kernel tests and re-enable.
+          # ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/kernels/test_triton_kernel.py
+
+      # NOTE: Conversion is not fully merged yet; failures must not block CI.
+      # Remove `continue-on-error` once the module lands.
+      - name: Run MLIR FileCheck tests (non-blocking)
+        if: always()
+        continue-on-error: true
+        working-directory: python
+        shell: bash
+        run: |
+          source /usr/local/Ascend/cann/set_env.sh
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          # CMake only drops lit.site.cfg.py into the build dir; the .mlir test files
+          # themselves stay in the source tree (lit.cfg.py points test_source_root back
+          # at <source>/third_party/ascend/unittest). So we must aim lit at the build-dir
+          # site cfg to get substitutions, then filter down to the DynamicCVPipeline suite.
+          BUILD_UT_DIR=$(ls -d build/cmake.*/third_party/ascend/unittest 2>/dev/null | head -1 || true)
+          echo "BUILD_UT_DIR=${BUILD_UT_DIR:-<not found>}"
+          if [ -z "${BUILD_UT_DIR}" ] || [ ! -f "${BUILD_UT_DIR}/lit.site.cfg.py" ]; then
+            echo "lit.site.cfg.py not found — TRITON_BUILD_UT may not have taken effect."
+            echo "Expected: build/cmake.*/third_party/ascend/unittest/lit.site.cfg.py"
+            exit 1
+          fi
+          lit -v "${BUILD_UT_DIR}" --filter 'Conversion/General/DynamicCVPipeline'

@@ -529,3 +529,167 @@ module {
     func.return
   }
 }
+
+// -----
+
+// CHECK-LABEL: func.func @vector_if_bound_with_cube_loop_side_effect(
+// A VECTOR-only scf.if computes a loop upper bound. The for loop itself is
+// VECTOR-typed (all results are VECTOR), but its body contains a CUBE
+// side-effect (memref.store). Without the fix, the CUBE scope neutralizes
+// the scf.if yields to 0 because findScopeRelevantUser only follows the for's
+// SSA results (all VECTOR, no CUBE users), collapsing the bound to 0 and
+// causing canonicalize to erase the CUBE store entirely.
+// VECTOR scope: scf.if folds to arith.select (no side effects in branches),
+// for loop accumulates with VECTOR result, memref.store to outv
+// CHECK:      scope.scope : () -> () {
+// CHECK-NEXT:   %[[UB_V:.*]] = arith.select
+// CHECK-NEXT:   %[[RES_V:.*]] = scf.for {{.*}} to %[[UB_V]]
+// CHECK-NEXT:     %{{.*}} = arith.addi
+// CHECK-NEXT:     scf.yield
+// CHECK-NEXT:   }
+// CHECK-NEXT:   memref.store %[[RES_V]]
+// CHECK-NEXT:   scope.return
+// CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CUBE scope: scf.if also folds to arith.select (preserved, NOT neutralized
+// to 0); for loop runs the correct number of times with CUBE memref.store
+// CHECK-NEXT: scope.scope : () -> () {
+// CHECK-NEXT:   %[[UB_C:.*]] = arith.select
+// CHECK-NEXT:   scf.for {{.*}} to %[[UB_C]]
+// CHECK-NEXT:     memref.store
+// CHECK-NEXT:   }
+// CHECK-NEXT:   scope.return
+// CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+module {
+  func.func @vector_if_bound_with_cube_loop_side_effect(
+      %cond: i1, %ub_a: i32, %ub_b: i32, %vinit: i32, %cube_val: i32,
+      %outv: memref<1xi32>, %outc: memref<1xi32>) {
+    %c0 = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : i32
+    %c1v = arith.constant {ssbuffer.core_type = "VECTOR"} 1 : i32
+    %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
+    %idxc = arith.constant {ssbuffer.core_type = "CUBE"} 0 : index
+    %ub = scf.if %cond -> (i32) {
+      scf.yield {ssbuffer.core_type = "VECTOR"} %ub_a : i32
+    } else {
+      scf.yield {ssbuffer.core_type = "VECTOR"} %ub_b : i32
+    } {ssbuffer.core_type = "VECTOR"}
+    %res = scf.for %i = %c0 to %ub step %c1v
+            iter_args(%acc = %vinit) -> (i32) : i32 {
+      %nv = arith.addi %acc, %c1v {ssbuffer.core_type = "VECTOR"} : i32
+      memref.store %cube_val, %outc[%idxc] {ssbuffer.core_type = "CUBE"} : memref<1xi32>
+      scf.yield {ssbuffer.core_type = "VECTOR"} %nv : i32
+    } {ssbuffer.core_type = "VECTOR"}
+    memref.store %res, %outv[%idxv] {ssbuffer.core_type = "VECTOR"} : memref<1xi32>
+    func.return
+  }
+}
+
+// -----
+
+// CHECK-LABEL: func.func @vector_if_condition_gates_cube_if_branch(
+// A VECTOR-only inner scf.if produces an i1 used as the condition of an outer
+// resultful scf.if. The inner if's only SSA result is the i1 (VECTOR), so it
+// has no CUBE user; without the gating fix the CUBE scope neutralizes the inner
+// yields, the condition folds to a constant, and canonicalize drops the gated
+// CUBE memref.store. The fix keeps the inner if live in the CUBE scope because
+// the outer if body still holds CUBE content.
+// VECTOR scope: the gated branch holds no VECTOR side effect, so canonicalize
+// drops the whole if and only the trailing VECTOR store remains.
+// CHECK:      scope.scope : () -> () {
+// CHECK-NEXT:   memref.store
+// CHECK-NEXT:   scope.return
+// CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CUBE scope: the inner if folds to arith.select (no side effects in its
+// branches) and feeds the condition of the preserved outer scf.if guarding
+// the CUBE store; the condition is NOT neutralized to a constant.
+// CHECK-NEXT: scope.scope : () -> () {
+// CHECK-NEXT:   %[[CONDC:.*]] = arith.select
+// CHECK-NEXT:   scf.if %[[CONDC]] {
+// CHECK-NEXT:     memref.store
+// CHECK-NEXT:   }
+// CHECK-NEXT:   scope.return
+// CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+module {
+  func.func @vector_if_condition_gates_cube_if_branch(
+      %cond: i1, %va: i1, %vb: i1, %cube_val: i32,
+      %outv: memref<1xi32>, %outc: memref<1xi32>) {
+    %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
+    %idxc = arith.constant {ssbuffer.core_type = "CUBE"} 0 : index
+    %vseed = arith.constant {ssbuffer.core_type = "VECTOR"} 7 : i32
+    %gate = scf.if %cond -> (i1) {
+      scf.yield {ssbuffer.core_type = "VECTOR"} %va : i1
+    } else {
+      scf.yield {ssbuffer.core_type = "VECTOR"} %vb : i1
+    } {ssbuffer.core_type = "VECTOR"}
+    %r = scf.if %gate -> (i32) {
+      memref.store %cube_val, %outc[%idxc] {ssbuffer.core_type = "CUBE"} : memref<1xi32>
+      scf.yield {ssbuffer.core_type = "VECTOR"} %vseed : i32
+    } else {
+      scf.yield {ssbuffer.core_type = "VECTOR"} %vseed : i32
+    } {ssbuffer.core_type = "VECTOR"}
+    memref.store %r, %outv[%idxv] {ssbuffer.core_type = "VECTOR"} : memref<1xi32>
+    func.return
+  }
+}
+
+// -----
+
+// CHECK-LABEL: func.func @vector_if_condition_gates_cube_while_body(
+// A VECTOR-only inner scf.if produces an i1 used as the scf.while condition.
+// The while results are all VECTOR (no CUBE user of the gate), but the while
+// body holds a CUBE memref.store. Without the gating fix the CUBE scope
+// neutralizes the inner if (condition -> false), the while never runs, and
+// canonicalize erases the CUBE store. The fix keeps the inner if live because
+// the while body still holds CUBE content.
+// CHECK:      scope.scope : () -> () {
+// CHECK-NEXT:   scf.while
+// CHECK-NEXT:     arith.cmpi
+// CHECK-NEXT:     arith.select
+// CHECK-NEXT:     scf.condition
+// CHECK-NEXT:   } do {
+// CHECK-NEXT:   ^bb0
+// CHECK-NEXT:     arith.addi
+// CHECK-NEXT:     scf.yield
+// CHECK-NEXT:   }
+// CHECK-NEXT:   memref.store
+// CHECK-NEXT:   scope.return
+// CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CUBE scope: the inner if folds to arith.select feeding scf.condition; the
+// while loop and its CUBE store body are preserved (condition not constant).
+// CHECK-NEXT: scope.scope : () -> () {
+// CHECK-NEXT:   scf.while
+// CHECK-NEXT:     arith.cmpi
+// CHECK-NEXT:     %[[SELC:.*]] = arith.select
+// CHECK-NEXT:     scf.condition(%[[SELC]])
+// CHECK-NEXT:   } do {
+// CHECK-NEXT:     memref.store
+// CHECK-NEXT:     scf.yield
+// CHECK-NEXT:   }
+// CHECK-NEXT:   scope.return
+// CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+module {
+  func.func @vector_if_condition_gates_cube_while_body(
+      %va: i1, %vb: i1, %vec_init: i32, %cube_val: i32,
+      %outv: memref<1xi32>, %outc: memref<1xi32>) {
+    %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
+    %idxc = arith.constant {ssbuffer.core_type = "CUBE"} 0 : index
+    %c1v = arith.constant {ssbuffer.core_type = "VECTOR"} 1 : i32
+    %limit = arith.constant {ssbuffer.core_type = "VECTOR"} 4 : i32
+    %0 = scf.while (%v = %vec_init) : (i32) -> (i32) {
+      %lt = arith.cmpi slt, %v, %limit {ssbuffer.core_type = "VECTOR"} : i32
+      %gate = scf.if %lt -> (i1) {
+        scf.yield {ssbuffer.core_type = "VECTOR"} %va : i1
+      } else {
+        scf.yield {ssbuffer.core_type = "VECTOR"} %vb : i1
+      } {ssbuffer.core_type = "VECTOR"}
+      scf.condition(%gate) %v : i32
+    } do {
+    ^bb0(%v_iter: i32):
+      memref.store %cube_val, %outc[%idxc] {ssbuffer.core_type = "CUBE"} : memref<1xi32>
+      %nv = arith.addi %v_iter, %c1v {ssbuffer.core_type = "VECTOR"} : i32
+      scf.yield {ssbuffer.core_type = "VECTOR"} %nv : i32
+    } attributes {ssbuffer.core_type = "VECTOR"}
+    memref.store %0, %outv[%idxv] {ssbuffer.core_type = "VECTOR"} : memref<1xi32>
+    func.return
+  }
+}
+

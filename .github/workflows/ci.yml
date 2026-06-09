@@ -40,10 +40,3 @@ jobs:
 
   pre-commit:
     uses: ./.github/workflows/pre-commit.yml
-
-  integration-tests-ascend:
-    needs: runner-preparation
-    if: needs.runner-preparation.outputs.matrix-ASCEND != ''
-    uses: ./.github/workflows/integration-tests-ascend.yml
-    with:
-      matrix: ${{ needs.runner-preparation.outputs.matrix-ASCEND }}

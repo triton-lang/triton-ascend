@@ -41,38 +41,9 @@ A3：
 
 Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。
 
-**DevicePrint 功能限制**
-
-**现象描述：**
-device_print 只能打印参与运算的结果值，无法打印纯粹用于访存的 offset 变量。
-
-**根本原因：**
-在访存分析优化阶段，编译器会将仅用于地址计算的 offset 优化掉，这些中间变量不会保留到最终的执行代码中。
-
-**示例场景：**
-
-```python
-@triton.jit
-def add_kernel(x_ptr,  # *Pointer* to first input vector.
-               y_ptr,  # *Pointer* to second input vector.
-               output_ptr,  # *Pointer* to output vector.
-               of_ptr,
-               n_elements,  # Size of the vector.
-               BLOCK_SIZE: tl.constexpr,  # Number of elements each program should process.
-               # NOTE: `constexpr` so it can be used as a shape value.
-               ):
-
-    pid = tl.program_id(axis=0)  # We use a 1D launch grid so axis is 0.
-    block_start = pid * BLOCK_SIZE
-    offsets = block_start + tl.arange(0, BLOCK_SIZE)
-    tl.device_print("offsets:", offsets)// ❌ 无法打印，已被优化
-```
-
-另外在特定情况下，`device_print`会展开一些辅助dma代码，导致底层报错，相关功能还在优化中
-
 ### 2.4 使用方法
 
-**注意**：`prefix`字符串前缀在使用`device_print`时是必须加上的，否则会导致编译错误。目前不支持单独打印`prefix`字符串。
+**注意**：`prefix`字符串前缀在使用`device_print`时是必须加上的，否则会导致编译错误。
 
 ```python
 import triton

@@ -84,8 +84,10 @@ void triton::UseAnalysis::visitOperation(Operation *op,
           propagateUse(operands[2], UseType::MetaUse);
         }
       })
-      .Case<triton::PrintOp>(
-          [&](auto print) { propagateUse(operands[0], UseType::DataUse); })
+      .Case<triton::PrintOp>([&](auto print) {
+        for (auto operand : operands)
+          propagateUse(operand, UseType::DataUse);
+      })
       .Case<triton::AssertOp>(
           [&](auto assert) { propagateUse(operands[0], UseType::DataUse); })
       .Case<triton::StoreOp>([&](auto store) {

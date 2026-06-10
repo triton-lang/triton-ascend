@@ -187,15 +187,23 @@ static bool offsetMayContainStrideGtOne(Value offset, int depthBudget = 16) {
     return false;
 }
 
-// Walk through tt.splat to find the underlying scalar !tt.ptr<T>.
-// Returns null if the base is not a simple splat of a scalar pointer.
-static Value getScalarBasePtr(Value tensorPtr) {
+// Walk through shape-only wrappers to find the underlying scalar !tt.ptr<T>.
+// TileChunkCoalescing lifts invariant pointer tensors as
+// broadcast(expand_dims(splat(ptr))), which is still a scalar base pointer for
+// indirect access construction.
+static Value getScalarBasePtr(Value tensorPtr, int depthBudget = 8) {
+    if (depthBudget <= 0)
+        return Value();
     if (auto splatOp = tensorPtr.getDefiningOp<triton::SplatOp>()) {
         Value src = splatOp.getSrc();
         if (isa<triton::PointerType>(src.getType())) {
             return src;
         }
     }
+    if (auto broadcastOp = tensorPtr.getDefiningOp<triton::BroadcastOp>())
+        return getScalarBasePtr(broadcastOp.getSrc(), depthBudget - 1);
+    if (auto expandDimsOp = tensorPtr.getDefiningOp<triton::ExpandDimsOp>())
+        return getScalarBasePtr(expandDimsOp.getSrc(), depthBudget - 1);
     return Value();
 }
 
@@ -371,7 +379,7 @@ static LogicalResult tryRewriteAddPtrLoad(triton::LoadOp op,
                                           PatternRewriter &rewriter) {
     auto loc = op.getLoc();
 
-    // The base must be a simple tt.splat of a scalar pointer.
+    // The base must resolve to a scalar pointer through shape-only wrappers.
     Value scalarBase = getScalarBasePtr(addPtrOp.getPtr());
     if (!scalarBase) return failure();
 

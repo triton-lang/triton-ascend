@@ -146,6 +146,18 @@ static std::optional<TileSeed> findSeed(ModuleOp moduleOp) {
     maxAxis = std::max<int32_t>(maxAxis, pid.getAxisAsInt());
   });
 
+  // Only one program-id op may read the coalesced axis: we replace the seed
+  // pid by the per-lane tile vector, but a second (non-CSE'd) pid of the same
+  // axis would keep returning the now-divided block id -> its tile indices
+  // would silently address the wrong tiles. Bail unless unique.
+  int32_t maxAxisPids = 0;
+  moduleOp.walk([&](triton::GetProgramIdOp pid) {
+    if (pid.getAxisAsInt() == maxAxis)
+      ++maxAxisPids;
+  });
+  if (maxAxisPids != 1)
+    return std::nullopt;
+
   // Full TA path: the launcher divides grid[maxAxis] by H, so the kernel-visible
   // num_programs(maxAxis) becomes grid/H instead of grid. If the kernel reads it
   // (e.g. for its own bound arithmetic) coalescing would silently change that
@@ -188,28 +200,68 @@ static std::optional<TileSeed> findSeed(ModuleOp moduleOp) {
           if (!range || range.getStart() != 0 || range.getEnd() != T)
             continue;
 
-          // Optional boundary mask: addi -> cmpi slt(offs, BOUND).
+          // Boundary-safety scan: taint everything pid-derived (through
+          // elementwise arith and shape ops) and require that NO tainted value
+          // feeds boundary handling, except the one canonical all-true tile
+          // mask `cmpi slt(offs, BOUND)` directly on offs with constant
+          // BOUND >= T and BOUND % T == 0 (provably all-true, droppable).
+          //
+          // Everything else is real boundary logic on the chunk axis and must
+          // block coalescing:
+          //   * cmpi with a runtime BOUND (kernel arg): a partial last tile may
+          //     exist; the lifted mask `(pid*H+h)*T + t < BOUND` is
+          //     non-separable (MaskAnalysis bails, load stays unconverted) and
+          //     the launcher's grid/H drops remainder tiles -> wrong results.
+          //   * cmpi reached through expand_dims/broadcast/addi/... or with
+          //     other predicates/operand order: same non-separability.
+          //   * min/max clamps and div/rem wraparound on pid-derived offsets:
+          //     the lifted addressing is non-affine across tiles (PtrAnalysis
+          //     bails).
           int64_t bound = 0;
           Value mask;
-          for (Operation *au : add.getResult().getUsers()) {
-            auto cmp = dyn_cast<arith::CmpIOp>(au);
-            if (!cmp || cmp.getPredicate() != arith::CmpIPredicate::slt ||
-                cmp.getLhs() != add.getResult())
-              continue;
-            int64_t b = 0;
-            if (!getConstInt(cmp.getRhs(), b) || b <= 0)
-              return;  // unsafe dynamic/empty mask; abandon this pid entirely
-            // A partial-tile mask (problem axis not a multiple of T) means the
-            // last tile is only partly valid: dropping it would read/write OOB,
-            // and a lifted 2D mask like `(pid*H+h)*T + t < BOUND` is
-            // non-separable (MaskAnalysis bails, load stays unconverted). So we
-            // refuse to coalesce this kernel.
-            if (b % T != 0)
-              return;  // unsafe; abandon this pid entirely
-            bound = b;
-            mask = cmp.getResult();
-            break;
+          bool unsafe = false;
+          DenseSet<Value> taint;
+          SmallVector<Value> twl;
+          taint.insert(pid.getResult());
+          twl.push_back(pid.getResult());
+          while (!twl.empty() && !unsafe) {
+            Value cur = twl.pop_back_val();
+            for (Operation *tu : cur.getUsers()) {
+              if (auto cmp = dyn_cast<arith::CmpIOp>(tu)) {
+                if (mask && cmp.getResult() == mask)
+                  continue;
+                int64_t b = 0;
+                if (!mask && cur == add.getResult() && cmp.getLhs() == cur &&
+                    cmp.getPredicate() == arith::CmpIPredicate::slt &&
+                    getConstInt(cmp.getRhs(), b) && b >= T && b % T == 0) {
+                  bound = b;
+                  mask = cmp.getResult();
+                  continue;
+                }
+                unsafe = true;
+                break;
+              }
+              if (isa<arith::MinSIOp, arith::MaxSIOp, arith::MinUIOp,
+                      arith::MaxUIOp, arith::RemSIOp, arith::RemUIOp,
+                      arith::DivSIOp, arith::DivUIOp, arith::CeilDivSIOp,
+                      arith::FloorDivSIOp>(tu)) {
+                unsafe = true;
+                break;
+              }
+              bool propagates = isa<triton::SplatOp, triton::ExpandDimsOp,
+                                    triton::BroadcastOp, triton::AddPtrOp>(tu);
+              if (auto *d = tu->getDialect())
+                propagates |= d->getNamespace() ==
+                              arith::ArithDialect::getDialectNamespace();
+              if (!propagates)
+                continue;  // load/store/scan/... results carry data, not offsets
+              for (Value r : tu->getResults())
+                if (taint.insert(r).second)
+                  twl.push_back(r);
+            }
           }
+          if (unsafe)
+            return;  // real boundary handling on the chunk axis; abandon pid
           // Match with or without a mask. Unmasked kernels (bound == 0) have no
           // static tile count; chooseH falls back to a power-of-two factor.
           result = TileSeed{pid, maxAxis, T, bound, mask};
@@ -410,6 +462,41 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
       if (!okAsLoadMask && !okAsStoreMask)
         return;
     }
+  }
+
+  // Preflight: from here on we create ops; every op of the region must be
+  // provably rebuildable in lifted form, otherwise the new op would fail the
+  // verifier AFTER the IR is already mutated -- a hard compile error instead
+  // of a silent fallback. Anything we cannot prove safe bails here, while the
+  // IR is still untouched.
+  Block *pidBlock = seed->pid->getBlock();
+  for (Operation *op : ordered) {
+    // Straight-line code only: a region op nested in scf.for/scf.if has
+    // loop-carried/branch semantics the elementwise lift does not model.
+    if (op->getBlock() != pidBlock)
+      return;
+    // Zero-operand ops (constants, make_range) reach the generic rebuild with
+    // a lifted result type but unchanged attributes (e.g. a DenseElementsAttr
+    // of the OLD shape) -> verifier failure.
+    if (!isa<triton::LoadOp, triton::StoreOp>(op) && op->getNumOperands() == 0)
+      return;
+    // arith.select: the lift turns a scalar condition into tensor<Hxi1>, which
+    // no longer matches the lifted tensor operands -> invalid op.
+    if (auto sel = dyn_cast<arith::SelectOp>(op)) {
+      bool condTensor = isa<RankedTensorType>(sel.getCondition().getType());
+      bool valTensor = isa<RankedTensorType>(sel.getTrueValue().getType());
+      if (condTensor != valTensor)
+        return;
+    }
+    // Lifting bumps the boundary-check axes; only block-pointer accesses carry
+    // them and those never reach here, so any non-empty set means an IR shape
+    // we did not anticipate.
+    if (auto ld = dyn_cast<triton::LoadOp>(op))
+      if (!ld.getBoundaryCheck().empty())
+        return;
+    if (auto st = dyn_cast<triton::StoreOp>(op))
+      if (!st.getBoundaryCheck().empty())
+        return;
   }
 
   auto liftTy = [&](Type t) -> RankedTensorType {

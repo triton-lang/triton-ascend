@@ -122,3 +122,58 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     tt.return
   }
 }
+
+// -----
+// A 2-D masked block may contain the tile-index signature on the outer grid
+// axis, but a dynamic boundary mask on that axis means grid/H is not provably
+// exact and the lifted mask is not a single structured slice. Keep the original
+// program shape instead.
+// CHECK-LABEL: module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+// CHECK-NOT: hacc.coalesce_factor
+// CHECK-LABEL: func.func @tile_chunk_skip_2d_dynamic_boundary
+// CHECK-NOT: tensor<2x256x256
+// CHECK: memref.copy
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @tile_chunk_skip_2d_dynamic_boundary(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                      %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                      %m: i32, %n: i32) {
+    %pid_m = tt.get_program_id x : i32
+    %pid_n = tt.get_program_id y : i32
+    %c256 = arith.constant 256 : i32
+    %zero = arith.constant dense<0.000000e+00> : tensor<256x256xf32>
+
+    %row_blk = arith.muli %pid_m, %c256 : i32
+    %row_range = tt.make_range {end = 256 : i32, start = 0 : i32} : tensor<256xi32>
+    %row_splat = tt.splat %row_blk : i32 -> tensor<256xi32>
+    %row = arith.addi %row_splat, %row_range : tensor<256xi32>
+    %row_2d = tt.expand_dims %row {axis = 1 : i32} : tensor<256xi32> -> tensor<256x1xi32>
+
+    %col_blk = arith.muli %pid_n, %c256 : i32
+    %col_range = tt.make_range {end = 256 : i32, start = 0 : i32} : tensor<256xi32>
+    %col_splat = tt.splat %col_blk : i32 -> tensor<256xi32>
+    %col = arith.addi %col_splat, %col_range : tensor<256xi32>
+    %col_2d = tt.expand_dims %col {axis = 0 : i32} : tensor<256xi32> -> tensor<1x256xi32>
+
+    %n_row = tt.splat %n : i32 -> tensor<256x1xi32>
+    %row_offset = arith.muli %row_2d, %n_row : tensor<256x1xi32>
+    %row_offset_bc = tt.broadcast %row_offset : tensor<256x1xi32> -> tensor<256x256xi32>
+    %col_bc = tt.broadcast %col_2d : tensor<1x256xi32> -> tensor<256x256xi32>
+    %offsets = arith.addi %row_offset_bc, %col_bc : tensor<256x256xi32>
+
+    %m_bound = tt.splat %m : i32 -> tensor<256x1xi32>
+    %row_mask = arith.cmpi slt, %row_2d, %m_bound : tensor<256x1xi32>
+    %row_mask_bc = tt.broadcast %row_mask : tensor<256x1xi1> -> tensor<256x256xi1>
+    %n_bound = tt.splat %n : i32 -> tensor<1x256xi32>
+    %col_mask = arith.cmpi slt, %col_2d, %n_bound : tensor<1x256xi32>
+    %col_mask_bc = tt.broadcast %col_mask : tensor<1x256xi1> -> tensor<256x256xi1>
+    %mask = arith.andi %row_mask_bc, %col_mask_bc : tensor<256x256xi1>
+
+    %src_base = tt.splat %arg0 : !tt.ptr<f32> -> tensor<256x256x!tt.ptr<f32>>
+    %src_ptr = tt.addptr %src_base, %offsets : tensor<256x256x!tt.ptr<f32>>, tensor<256x256xi32>
+    %val = tt.load %src_ptr, %mask, %zero : tensor<256x256x!tt.ptr<f32>>
+    %dst_base = tt.splat %arg1 : !tt.ptr<f32> -> tensor<256x256x!tt.ptr<f32>>
+    %dst_ptr = tt.addptr %dst_base, %offsets : tensor<256x256x!tt.ptr<f32>>, tensor<256x256xi32>
+    tt.store %dst_ptr, %val, %mask : tensor<256x256x!tt.ptr<f32>>
+    tt.return
+  }
+}

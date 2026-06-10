@@ -204,14 +204,19 @@ static OpOperand *getOnlyUse(Operation *op, Value value)
  * Returns true if an operation matching the predicate is found in the chain.
  *
  * This function follows the def-use chain through operations that have exactly
- * one user. It traverses through view-like operations and for loops by
- * tracking init args to their corresponding iteration arguments.
+ * one user. It traverses through:
+ * - View-like operations (follows their single result)
+ * - For loops (tracks init args to iteration arguments, then continues from yield to result)
+ * - Yield operations within for/if (maps yield operands to parent operation results)
+ * - Skip-able operations specified by isSkipOp callback
  *
  * @param value The starting value to trace from
  * @param isMatchedOp Callback to check if an operation matches the criteria
+ * @param isSkipOp Callback to check if an operation should be skipped (continue tracing its result)
  * @return True if a matching operation is found, false otherwise
  */
-static bool traceSingleChainUser(Value value, const std::function<bool(Operation *, Value v)> &isMatchedOp)
+static bool traceSingleChainUser(Value value, const std::function<bool(Operation *, Value v)> &isMatchedOp,
+                                 const std::function<bool(Operation *, Value v)> &isSkipOp)
 {
     if (!value) {
         return false;
@@ -223,14 +228,10 @@ static bool traceSingleChainUser(Value value, const std::function<bool(Operation
     }
 
     auto *user = *users.begin();
-    if (isMatchedOp(user, value)) {
-        return true;
+    if (llvm::isa<ViewLikeOpInterface>(user)) {
+        return traceSingleChainUser(user->getResult(0), isMatchedOp, isSkipOp);
     }
 
-    if (llvm::isa<ViewLikeOpInterface>(user)) {
-        return traceSingleChainUser(user->getResult(0), isMatchedOp);
-    }
-    
     if (auto forOp = dyn_cast<scf::ForOp>(user)) {
         auto initArgs = forOp.getInitArgs();
         int initIndx = -1;
@@ -242,9 +243,30 @@ static bool traceSingleChainUser(Value value, const std::function<bool(Operation
             }
         }
         if (useCnt == 1) {
-            return traceSingleChainUser(
-                forOp.getRegionIterArgs()[initIndx], isMatchedOp);
+            return traceSingleChainUser(forOp.getRegionIterArgs()[initIndx], isMatchedOp, isSkipOp);
         }
+        return false;
+    }
+
+    // used in yield, we need find the for/if result;
+    auto parentOp = user->getParentOp();
+    if (parentOp && isa<scf::YieldOp>(user) && llvm::isa_and_present<scf::ForOp, scf::IfOp>(parentOp)) {
+        auto use = getOnlyUse(user, value);
+        if (!use) {
+            return false;
+        }
+        return traceSingleChainUser(parentOp->getResult(use->getOperandNumber()), isMatchedOp, isSkipOp);
+    }
+
+    if (isMatchedOp(user, value)) {
+        return true;
+    }
+
+    if (isSkipOp(user, value)) {
+        if (user && user->getNumResults() == 1) {
+            return traceSingleChainUser(user->getResult(0), isMatchedOp, isSkipOp);
+        }
+        return false;
     }
     return false;
 }
@@ -276,8 +298,15 @@ static bool verifyAndHandleLoopCarriedL0C(linalg::MatmulOp matmulOp, PatternRewr
         LOG_DEBUG("Split because avoiding NPUIR insert fixpipe errors" << matmulOp);
         return true;
     }
+    auto matchFunc = [=](Operation *op, Value value) {
+        if (auto nextMatmulOp = dyn_cast<linalg::MatmulOp>(op)) {
+            auto inputs = parseMatmulInputs(nextMatmulOp);
+            return inputs.a != value && inputs.b != value && inputs.bias == value;
+        }
+        return false;
+    };
 
-    if(traceSingleChainUser(outerValue,[=](Operation *op, Value value) { return isa<linalg::MatmulOp>(op); })) {
+    if (traceSingleChainUser(outerValue, matchFunc, [](Operation *op, Value value) { return false; })) {
         // To one matmul
         LOG_DEBUG("Split because avoiding NPUIR insert fixpipe errors" << matmulOp);
         return true;
@@ -321,9 +350,19 @@ static bool verifyAndHandleLoopCarriedL0C(linalg::MatmulOp matmulOp, PatternRewr
  */
 static bool shouldSplit(linalg::MatmulOp matmulOp, PatternRewriter &rewriter)
 {
+    auto matmulResult = matmulOp->getResult(0);
+    for (auto res : matmulResult.getUsers()) {
+        if (auto nextMatmul = dyn_cast<linalg::MatmulOp>(res)) {
+            auto inputs = parseMatmulInputs(nextMatmul);
+            if (inputs.a == matmulResult || inputs.b == matmulResult) {
+                LOG_DEBUG("Split because the user is matmul's A or B." << matmulOp);
+                return true;
+            }
+        }
+    }
+
     auto bias = parseMatmulInputs(matmulOp).bias;
     auto *biasDefOp = bias.getDefiningOp();
-
     // Rule 1: bias is block arg -> split if result cannot remain in l0c
     if (!biasDefOp) {
         return verifyAndHandleLoopCarriedL0C(matmulOp, rewriter, bias);

@@ -23,6 +23,11 @@ from __future__ import annotations
 import ast
 from typing import Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
+from .load_semantics import (
+    build_assignment_expr_map,
+    collect_axis_candidates,
+    extract_axis_block_symbol_map,
+)
 from .schema import (AXIS_LENGTH_STATE_FIXED_COMPILE_TIME,
                      AXIS_LENGTH_STATE_RUNTIME_NON_TUNABLE,
                      AXIS_LENGTH_STATE_TUNABLE, AxisLengthStateInfo,
@@ -167,36 +172,25 @@ def _extract_axis_length_symbol_map(
     func_ast: ast.AST,
     provided_args: Mapping[str, object],
 ) -> Dict[str, str]:
-    symbol_map = {}
-    for node in ast.walk(func_ast):
-        if not isinstance(node, ast.Assign):
-            continue
-        if len(node.targets) != 1:
-            continue
-        target = node.targets[0]
-        if not isinstance(target, ast.Name):
-            continue
-        if _is_tl_arange_call(node.value):
-            stop_expr = _get_arange_stop_expr(node.value)
-            if stop_expr is None:
-                continue
-            symbol_map[target.id] = _normalize_arange_stop_symbol(stop_expr, provided_args)
-            continue
+    assignment_expr_map = build_assignment_expr_map(
+        func_ast,
+        provided_args=provided_args,
+    )
+    axis_candidates = collect_axis_candidates(func_ast)
+    raw_symbol_map = extract_axis_block_symbol_map(
+        func_ast,
+        axis_candidates,
+        assignment_expr_map=assignment_expr_map,
+    )
 
-        # Support pointer-hoisted / transformed axis symbols such as:
-        #   offs_am = (pid_m * BLOCK_M + tl.arange(0, BLOCK_M)) % M
-        # If a derived symbol contains exactly one distinct arange-stop symbol,
-        # treat it as the same logical axis length.
-        arange_stop_symbols = set()
-        for sub_node in ast.walk(node.value):
-            if not _is_tl_arange_call(sub_node):
-                continue
-            stop_expr = _get_arange_stop_expr(sub_node)
-            if stop_expr is None:
-                continue
-            arange_stop_symbols.add(_normalize_arange_stop_symbol(stop_expr, provided_args))
-        if len(arange_stop_symbols) == 1:
-            symbol_map[target.id] = next(iter(arange_stop_symbols))
+    symbol_map = {}
+    for symbol, raw_value in raw_symbol_map.items():
+        try:
+            raw_node = ast.parse(raw_value, mode="eval").body
+        except Exception:
+            symbol_map[symbol] = raw_value
+            continue
+        symbol_map[symbol] = _normalize_arange_stop_symbol(raw_node, provided_args)
     return symbol_map
 
 

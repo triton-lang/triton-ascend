@@ -75,7 +75,7 @@ def min_dot_size(target: GPUTarget):
 def get_enable_optimizations_env_var():
     # TODO: LLVM_EXTRACT_DI_LOCAL_VARIABLES may be misunderstanding for users
     env_vf = os.getenv("LLVM_EXTRACT_DI_LOCAL_VARIABLES")
-    return not env_vf.lower() in ("true", "1", "yes")
+    return not (env_vf.lower() in ("true", "1", "yes"))
 
 
 def make_ttir(mod, metadata, opt):

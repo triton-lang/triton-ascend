@@ -20,34 +20,49 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PASSES_H
-#define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PASSES_H
+#include "llvm/Support/Debug.h"
 
-#include "AddDynamicCVPipeline.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/Pass/PassManager.h"
+
 #include "ascend/include/DynamicCVPipeline/DynamicCVAutoBlockify.h"
 #include "ascend/include/DynamicCVPipeline/AutoBlockify/AutoBlockifyParallelLoop.h"
 #include "ascend/include/DynamicCVPipeline/AutoBlockify/TritonGridArgsToHIVMOp.h"
-#include "ascend/include/DynamicCVPipeline/PreCheckAvailable.h"
-#include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
-#include "third_party/ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
-#include "third_party/ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
-#include "third_party/ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
-#include "ascend/include/DynamicCVPipeline/SplitDataflow/AddBlockIdForControlOps.h"
-#include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
-#include "ascend/include/DynamicCVPipeline/SplitDataflow/InterCoreTransferAndSync.h"
-#include "ascend/include/DynamicCVPipeline/SplitDataflow/MarkMainLoop.h"
-#include "ascend/include/DynamicCVPipeline/SplitDataflow/PreserveControlAttrsCanonicalize.h"
-#include "ascend/include/DynamicCVPipeline/SplitDataflow/SeparateCVScope.h"
-#include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
 
-namespace mlir {
-namespace triton {
+static constexpr const char *DEBUG_TYPE = "dynamic-cv-auto-blockify";
+#define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
+#define LDBG(X) LLVM_DEBUG(DBGS() << (X) << "\n")
 
 using namespace mlir;
-#define GEN_PASS_REGISTRATION
-#include "ascend/include/DynamicCVPipeline/Passes.h.inc"
+using namespace triton;
 
-} // namespace triton
-} // namespace mlir
+DynamicCVAutoBlockifyPass::DynamicCVAutoBlockifyPass(
+    const DynamicCVAutoBlockifyPassOptions &options)
+    : DynamicCVAutoBlockifyPassBase(options) {}
 
-#endif // TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PASSES_H
+void DynamicCVAutoBlockifyPass::runOnOperation()
+{
+    ModuleOp module = getOperation();
+
+    LDBG("Enter DynamicCVAutoBlockify pass.");
+
+    PassManager pm(&getContext(), module.getOperationName());
+
+    pm.addPass(createTritonGridArgsToHIVMOpPass());
+    
+    AutoBlockifyParallelLoopPassOptions autoBlockifyOptions;
+    autoBlockifyOptions.aicoreNum = this->aicoreNum;
+    pm.addPass(createAutoBlockifyParallelLoopPass(autoBlockifyOptions));
+
+    if (failed(runPipeline(pm, module))) {
+        signalPassFailure();
+    }
+
+    LDBG("Exit DynamicCVAutoBlockify pass.");
+}
+
+std::unique_ptr<OperationPass<ModuleOp>> mlir::triton::createDynamicCVAutoBlockifyPass(
+    const DynamicCVAutoBlockifyPassOptions &options)
+{
+    return std::make_unique<DynamicCVAutoBlockifyPass>(options);
+}

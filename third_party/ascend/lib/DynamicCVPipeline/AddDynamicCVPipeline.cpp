@@ -28,6 +28,7 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache.h"
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
+#include "ascend/include/DynamicCVPipeline/DynamicCVAutoBlockify.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Passes.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
@@ -87,6 +88,9 @@ void AddDynamicCVPipelinePass::runOnOperation()
     ModuleOp moduleBackup(moduleOp->clone());
     PassManager pm(&getContext(), moduleOp.getOperationName());
 
+    DynamicCVAutoBlockifyPassOptions autoBlockifyOptions;
+    autoBlockifyOptions.aicoreNum = this->aicoreNum;
+    pm.addPass(createDynamicCVAutoBlockifyPass(autoBlockifyOptions));
     pm.addPass(createPreCheckAvailablePass());
     pm.addPass(createStandardizeOpPass());
     pm.addPass(createPlanComputeBlockPass());

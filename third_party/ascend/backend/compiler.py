@@ -209,7 +209,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             force_simt_template
         )
         ascend.passes.ttir.add_triton_to_hivm(pm)
-        ascend.passes.ttir.add_triton_to_hfusion(pm)
+        ascend.passes.ttir.add_triton_to_hfusion(
+            pm,
+            compile_on_910_95)
         ascend.passes.ttir.add_triton_to_llvm(pm)
         ascend.passes.ttir.add_bubble_up_operation(pm)
         ascend.passes.ttir.add_triton_to_structure(

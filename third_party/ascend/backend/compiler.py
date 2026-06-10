@@ -22,6 +22,7 @@ import ctypes
 import functools
 import hashlib
 import glob
+import json
 import os
 import re
 import subprocess
@@ -997,7 +998,6 @@ class NPUOptions:
     # When compile_mode is provided, it automatically sets other fields
     compile_mode: str = "unstructured_in_simt"
     mix_mode: str = ""
-    simt_stack_limit: int = None
     # take effect on the reorder instruction pattern for SIMT. The pattern is disabled by default.
     enable_simt_reorder_instruction: bool = False
     enable_costmodel_backend: bool = False
@@ -1057,8 +1057,24 @@ def ttir_to_npubin(mod, metadata, opt):
             _compile_option_list += [f"--threads-per-warp={opt.warp_size}"]
             if opt.enable_bishengir_simt_optimization != 000:
                 _compile_option_list += [f"--enable-bishengir-simt-optimization={opt.enable_bishengir_simt_optimization}"]
-            if opt.simt_stack_limit:
-                _compile_option_list += [f"--simt-stack-limit={opt.simt_stack_limit}"]
+            # simt_stack_limit resolution precedence: 
+            #  1.torch_npu's acl_default.json "StackSize":{"simt_stack_size":N}
+            #    takes precedence and the user-specified value is ignored.
+            #  2.if that config key is absent ,fail back to the kernel-time
+            #    default simt_stack_limit=1152
+            _simt_stack_limit = 1152
+            try:
+                import torch_npu
+                torch_npu_basic_path = os.path.dirname(torch_npu.__file__)
+                _acl_cfg_path = os.path.join(torch_npu_basic_path, "acl_default.json")
+                with open(_acl_cfg_path, "r") as f:
+                    _acl_cfg = json.load(f)
+                _cfg_stack = _acl_cfg.get("StackSize", {}).get("simt_stack_size", None)
+                if _cfg_stack is not None:
+                    _simt_stack_limit = _cfg_stack
+            except Exception as e:
+                print(f"[DEBUG] read acl_default.json failed: {e}")
+            _compile_option_list += [f"--simt-stack-limit={_simt_stack_limit}"]
             if opt.shared_mem_dynamic_size is not None:
                 _compile_option_list += [f"--shared-mem-dynamic-size={opt.shared_mem_dynamic_size}"]
             if opt.enable_simt_reorder_instruction:

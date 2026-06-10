@@ -50,5 +50,28 @@ def _apply_ascend_patch():
         CodeGenerator.__init__ = _patched_cg_init
         CodeGenerator._ascend_patch_applied = True
 
+    # Patch compiler.parse to support Ascend-specific IR extensions
+    # for ir_override and TRITON_KERNEL_OVERRIDE features.
+    from triton.compiler import compiler as _compiler_module
+
+    if not getattr(_compiler_module, "_ascend_parse_patch_applied", False):
+        from pathlib import Path as _Path
+        from triton._C.libtriton import ir as _ir
+
+        # Keep the original community logic intact, adding Ascend extensions
+        # to the existing text/binary branches.
+        def _patched_parse(full_name, ext, context):
+            if ext == "ttir" or ext == "ttgir":
+                module = _ir.parse_mlir_module(full_name, context)
+                module.context = context
+                return module
+            if ext in ("llir", "ptx", "amdgcn", "ttadapter", "bcmlir"):
+                return _Path(full_name).read_text()
+            if ext in ("cubin", "hsaco", "mlirbc", "npubin"):
+                return _Path(full_name).read_bytes()
+
+        _compiler_module.parse = _patched_parse
+        _compiler_module._ascend_parse_patch_applied = True
+
 
 __all__ = ["do_bench_npu"]

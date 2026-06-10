@@ -14,7 +14,10 @@ def AddDynamicCVPipeline : Pass<"add_dynamic_cv_pipeline", "mlir::ModuleOp"> {
     let options = [
         Option<"compileOn91095", "compile-on-910-95",
         "bool", /*default*/"false",
-        "compile on 910_95">
+        "compile on 910_95">,
+        Option<"aicoreNum", "aicore-num",
+        "int", /*default*/"-1",
+        "Number of AI cores (physical block count)">
     ];
     let dependentDialects = ["hivm::HIVMDialect", "bufferization::BufferizationDialect", "scope::ScopeDialect", "annotation::AnnotationDialect", "LLVM::LLVMDialect"];
 }
@@ -76,6 +79,28 @@ def ComputeBlockOptPass : Pass<"compute-block-id-opt", "mlir::ModuleOp"> {
 def RemoveSsbufAttrPass : Pass<"remove-ssbuf-attr", "mlir::ModuleOp"> {
   let summary = "Remove ssbuf attributes";
   let constructor = "triton::createRemoveSsbufAttrPass()";
+}
+
+def AutoBlockifyParallelLoopPass : Pass<"auto-blockify-parallel-loop", "mlir::ModuleOp"> {
+  let summary = "Auto blockify parallel loop when logical block num is larger than physical one";
+  let constructor = "triton::createAutoBlockifyParallelLoopPass()";
+  let options = [
+    Option<"aicoreNum", "aicore-num",
+           "int", /*default*/"-1",
+           "Number of AI cores (physical block count)">
+  ];
+  let dependentDialects = ["arith::ArithDialect", "scf::SCFDialect", "func::FuncDialect", "hivm::HIVMDialect", "annotation::AnnotationDialect", "hacc::HACCDialect"];
+}
+
+def DynamicCVAutoBlockifyPass : Pass<"dynamic-cv-auto-blockify", "mlir::ModuleOp"> {
+  let summary = "Auto blockify for dynamic CV pipeline including auto blockify parallel loop";
+  let constructor = "triton::createDynamicCVAutoBlockifyPass()";
+  let options = [
+    Option<"aicoreNum", "aicore-num",
+           "int", /*default*/"20",
+           "Number of AI cores for physical block count">
+  ];
+  let dependentDialects = ["arith::ArithDialect", "scf::SCFDialect", "func::FuncDialect", "hivm::HIVMDialect", "annotation::AnnotationDialect"];
 }
 
 #endif // TRITON_DYNAMIC_CV_PIPELINE_PASSES

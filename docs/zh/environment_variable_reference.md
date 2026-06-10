@@ -28,6 +28,7 @@
 | **编译控制** | TRITON_ASCEND_COMPILE_SPEED_OPT | 0 或未设置 | 控制JIT编译器在发现内核编译失败后是否跳过后续编译阶段。设为`1`跳过（默认`0`继续尝试）。 | 0：继续尝试<br>1：跳过 | |
 | **编译控制** | TRITON_COMPILE_ONLY | 0 或未设置 | remote_launch时使用，只编译不运行。 | 0：不启用<br>1：启用 | |
 | **编译控制** | TRITON_DISABLE_FFTS | 0 或未设置 | 是否禁用FFTS。 | 0：启用<br>1：禁用 | |
+| **编译控制** | TRITON_DISABLE_PRECOMPILE | 0 或未设置 | 是否禁用预编译。                                                                                                                                                                                                                                                                                  | 0：使能预编译<br>1：禁用预编译                                                                               | |
 | **运行与调度** | TRITON_ALL_BLOCKS_PARALLEL | 0 或未设置 | 启用或禁用自动根据物理核数优化逻辑核数，仅当逻辑核间可并行时方可启动。当逻辑核数大于物理核数时，启动该优化，则编译器自动调整逻辑核数量为物理核数，减少调度开销；使能后允许grid>65535。限制：triton kernel的逻辑必须对执行顺序不敏感才能开启该选项，否则可能会导致死锁。 | 0：不启用<br>1：启用 | |
 | **运行与调度** | TRITON_ENABLE_TASKQUEUE | 0 或未设置 | 是否开启task_queue。 | 0：不启用<br>1：启用 | |
 | **运行与调度** | TRITON_ENABLE_SANITIZER | 0 或未设置 | 是否使能SANITIZER。 | 0：不启用<br>1：启用 | |

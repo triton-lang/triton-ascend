@@ -119,7 +119,7 @@ jobs:
         run: |
           source /usr/local/Ascend/cann/set_env.sh
           export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
-          NUM_PROCS=$(( $(nproc) / 12 ))
+          NUM_PROCS=$(( $(nproc) / 9 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/autotune_ut

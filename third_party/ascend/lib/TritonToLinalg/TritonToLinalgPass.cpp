@@ -118,6 +118,11 @@ static bool isSIMTOp(Operation *op)
     return custom_op.getCoreType() == hivm::TCoreType::VECTOR &&
            custom_op.getVFMode() == hivm::VFMode::SIMT;
   }
+
+  if (isa<triton::HistogramOp>(op) && compileOn91095Flag) {
+    return true;
+  }
+
   return isa<
       triton::ascend::IndexPutOp,
       triton::ascend::GatherOutToUbOp,
@@ -651,6 +656,11 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   patterns.add<TTOpConverters::SortOpConverter>(patterns.getContext());
   patterns.add<TTOpConverters::FlipOpConverter>(patterns.getContext());
   patterns.add<TTOpConverters::GatherConverter>(patterns.getContext());
+  // On 950 (910B4/91095), histogram is lowered via hivm.custom builtin template.
+  // On other targets, histogram is handled by TritonToHFusion pass instead.
+  if (compileOn91095Flag) {
+    patterns.add<TTOpConverters::HistogramConverter>(patterns.getContext());
+  }
 
   // Add convert pattern for CustomOp.
   patterns.add<CustomOpConverter>(patterns.getContext());

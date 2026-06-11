@@ -32,7 +32,10 @@ class ModuleOp;
 namespace triton {
 
 /// Creates a pass to convert Triton dialect to HFusion dialect.
-std::unique_ptr<OperationPass<ModuleOp>> createTritonToHFusionPass();
+/// When compileOn91095 is true (950 target), histogram is handled by
+/// TritonToLinalg pass instead of this pass.
+std::unique_ptr<OperationPass<ModuleOp>> createTritonToHFusionPass(
+  bool compileOn91095 = false);
 
 #define GEN_PASS_REGISTRATION
 #include "ascend/include/TritonToHFusion/Passes.h.inc"

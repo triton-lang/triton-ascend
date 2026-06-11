@@ -709,6 +709,15 @@ public:
                   ConversionPatternRewriter &rewriter) const override;
 };
 
+class HistogramConverter : public OpConversionPattern<triton::HistogramOp> {
+public:
+  using OpConversionPattern<triton::HistogramOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::HistogramOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
 } // end of namespace TTOpConverters
 
 #endif

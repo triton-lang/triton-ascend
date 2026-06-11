@@ -2970,4 +2970,48 @@ IndexSelectSimdConverter::matchAndRewrite(triton::ascend::IndexSelectSimdOp op, 
   return success();
 }
 
+LogicalResult HistogramConverter::matchAndRewrite(
+    triton::HistogramOp op, OpAdaptor adaptor,
+    ConversionPatternRewriter &rewriter) const {
+  auto loc = op.getLoc();
+  Value input = adaptor.getSrc();
+  auto resultType = dyn_cast<RankedTensorType>(op.getResult().getType());
+  if (!resultType || !resultType.hasStaticShape()) {
+    return rewriter.notifyMatchFailure(op, "expected static shaped tensor result");
+  }
+
+  int64_t numBins = resultType.getDimSize(0);
+
+  auto outputTensor = rewriter.create<tensor::EmptyOp>(
+      loc, resultType.getShape(), resultType.getElementType());
+
+  auto zeroVal = rewriter.create<arith::ConstantOp>(
+      loc, rewriter.getIntegerAttr(resultType.getElementType(), 0));
+  auto fillOp = rewriter.create<linalg::FillOp>(
+      loc, ValueRange{zeroVal}, ValueRange{outputTensor});
+
+  Value numBinsVal = rewriter.create<arith::ConstantIntOp>(loc, numBins, 64);
+
+  auto customOp = rewriter.create<hivm::CustomOp>(
+      loc, TypeRange{resultType}, "__builtin_histogram",
+      ValueRange{input, numBinsVal}, ValueRange{fillOp.getResult(0)},
+      ValueRange{});
+  
+  customOp->setAttr("symbol", rewriter.getStringAttr("__builtin_histogram"));
+  customOp->setAttr("hivm.tcore_type",
+                     hivm::TCoreTypeAttr::get(rewriter.getContext(),
+                                              hivm::TCoreType::VECTOR));
+  customOp->setAttr("hivm.vf_mode",
+                     hivm::VFModeAttr::get(rewriter.getContext(),
+                                           hivm::VFMode::SIMT));
+  customOp->setAttr("hivm.pipe",
+                     hivm::PipeAttr::get(rewriter.getContext(),
+                                         hivm::PIPE::PIPE_V));
+  customOp->setAttr("gm_addr_args_indices",
+                     DenseI32ArrayAttr::get(rewriter.getContext(), {}));
+
+  rewriter.replaceOp(op, customOp->getResult(0));
+  return success();
+}
+
 } // namespace TTOpConverters

@@ -349,8 +349,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     opts.forceSimtTemplate = forceSimtTemplate;
     pm.addPass(mlir::triton::createTritonToUnstructurePass(opts));});
 
-  m.def("add_triton_to_hfusion", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::triton::createTritonToHFusionPass());});
+  m.def("add_triton_to_hfusion",
+    [](mlir::PassManager &pm, bool compileOn91095) {
+    pm.addPass(mlir::triton::createTritonToHFusionPass(compileOn91095));
+  });
 
   m.def("add_discrete_mask_access_conversion", [](mlir::PassManager &pm,
     bool compileOn91095, bool forceSimtTemplate, bool enableSyncBlockLock) {

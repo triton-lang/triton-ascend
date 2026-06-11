@@ -1078,7 +1078,7 @@ class TritonSemantic(Generic[TensorTy]):
             self.builder.create_tensor_pointer_load(ptr.handle, boundary_check, padding, cache, eviction, is_volatile),
             dst_ty)
 
-    def _load_legacy(self, ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile, care_padding):
+    def _load_legacy(self, ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile):
         # Load by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
         if not ptr.type.scalar.is_ptr():
             raise ValueError(f"Unsupported ptr type {ptr.type.__repr__()} in `tl.load`")
@@ -1091,12 +1091,6 @@ class TritonSemantic(Generic[TensorTy]):
                              "pointers or loading a scalar. Because the compiler does not know the boundary; please "
                              "use block pointers (defined by `make_block_ptr`) instead")
 
-        if mask is not None and other is None and care_padding:
-            # Get element type to determine default padding value
-            elt_ty = ptr.type.scalar.element_ty
-            # Use 0.0 for floating point types, 0 for integer types
-            default_value = 0.0 if elt_ty.is_floating() else 0
-            other = self.to_tensor(default_value)
         # For a pointer of scalar, check the type of `mask` and `other`
         if not ptr.type.is_block():
             if mask and mask.type.is_block():
@@ -1151,8 +1145,7 @@ class TritonSemantic(Generic[TensorTy]):
         return ret
 
     def load(self, ptr: TensorTy, mask: Optional[TensorTy], other: Optional[TensorTy], boundary_check: Tuple,
-             padding_option: str, cache_modifier: str, eviction_policy: str, is_volatile: bool,
-             care_padding: bool) -> TensorTy:
+             padding_option: str, cache_modifier: str, eviction_policy: str, is_volatile: bool) -> TensorTy:
         # Cache, eviction and padding options
         cache = self._str_to_load_cache_modifier(cache_modifier)
         eviction = self._str_to_eviction_policy(eviction_policy)
@@ -1163,8 +1156,7 @@ class TritonSemantic(Generic[TensorTy]):
             return self._load_block_pointer(ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile)
         else:
             # Load by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
-            return self._load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile,
-                                     care_padding)
+            return self._load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile)
 
     def descriptor_load(self, desc: tl.tensor_descriptor_base, offsets, cache_modifier: str,
                         eviction_policy: str) -> TensorTy:

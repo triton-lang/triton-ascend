@@ -16,74 +16,83 @@
 //   vector->cube, multi-dot partitioning, willCreateCycle, and reorder cases.
 
 // CHECK-LABEL: func.func @tc01_single_block_comprehensive(
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V19:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.extf {{.*}} {ssbuffer.block_id = [[V19]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.truncf {{.*}} {ssbuffer.block_id = [[V19]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C12:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CUBE alloc/to_tensor/matmul chain (block_id = 9)
-// CHECK: memref.alloc() {ssbuffer.block_id = [[C9:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: bufferization.to_tensor {{.*}} {ssbuffer.block_id = [[C9]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C9]] : i32, ssbuffer.core_type = "CUBE"}
-// More CUBE matmuls (block_ids = 8, 6)
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C8:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C6:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// VECTOR addf after matmul (block_id = 20)
-// CHECK: arith.addf {{.*}}, %arg4 {ssbuffer.block_id = [[V20:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-// CUBE alloc/to_tensor/matmul chain (block_id = 10)
-// CHECK: memref.alloc() {ssbuffer.block_id = [[C10:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: bufferization.to_tensor {{.*}} {ssbuffer.block_id = [[C10]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C10]] : i32, ssbuffer.core_type = "CUBE"}
-// VECTOR ops (block_id = 21)
-// CHECK: arith.extf {{.*}} {ssbuffer.block_id = [[V21:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V21]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.truncf {{.*}} {ssbuffer.block_id = [[V21]] : i32, ssbuffer.core_type = "VECTOR"}
-// CUBE matmuls (block_ids = 11, 7, 4, 3, 2, 1, 5)
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C11:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C7:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: tensor.empty() {ssbuffer.block_id = [[C4:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.transpose {{.*}} {ssbuffer.block_id = [[C4]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C4]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C3:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: arith.constant {ssbuffer.block_id = [[C2:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: bufferization.to_tensor {{.*}} {ssbuffer.block_id = [[C2]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.fill {ssbuffer.block_id = [[C2]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C2]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: arith.constant {ssbuffer.block_id = [[C1:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: memref.alloc() {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: memref.alloc() {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: memref.copy {{.*}} {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: memref.copy {{.*}} {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: bufferization.to_tensor {{.*}} {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: bufferization.to_tensor {{.*}} {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: tensor.empty() {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.transpose {{.*}} {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: tensor.empty() {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.fill {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: tensor.extract_slice {{.*}} {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: bufferization.materialize_in_destination {{.*}} {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: hivm.hir.store {{.*}} {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: hivm.hir.store {{.*}} {ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"}
-// VECTOR ops (block_id = 22)
-// CHECK: arith.constant {ssbuffer.block_id = [[V22:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: tensor.extract_slice {{.*}} {ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: hivm.hir.store {{.*}} {ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: hivm.hir.store {{.*}} {ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: linalg.fill {ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.mulf {{.*}} {ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: bufferization.to_tensor {{.*}} {ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"}
-// CUBE alloc/fill/to_tensor/matmul (block_id = 5)
-// CHECK: memref.alloc() {ssbuffer.block_id = [[C5:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.fill {ssbuffer.block_id = [[C5]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: bufferization.to_tensor {{.*}} {ssbuffer.block_id = [[C5]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C5]] : i32, ssbuffer.core_type = "CUBE"}
+// CHECK: arith.truncf{{.*}}ssbuffer.block_id = [[V20:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.extf{{.*}}ssbuffer.block_id = [[V20]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V20]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.truncf{{.*}}ssbuffer.block_id = [[V20]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C12:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: arith.subf{{.*}}ssbuffer.block_id = [[V23:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.mulf{{.*}}ssbuffer.block_id = [[V23]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.truncf{{.*}}ssbuffer.block_id = [[V23]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: memref.alloc{{.*}}ssbuffer.block_id = [[C9:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: bufferization.to_tensor{{.*}}ssbuffer.block_id = [[C9]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C9]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: arith.truncf{{.*}}ssbuffer.block_id = [[V25:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: memref.alloc{{.*}}ssbuffer.block_id = [[C10:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: bufferization.to_tensor{{.*}}ssbuffer.block_id = [[C10]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C10]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: arith.extf{{.*}}ssbuffer.block_id = [[V27:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V27]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.truncf{{.*}}ssbuffer.block_id = [[V27]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C11:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V24:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.mulf{{.*}}ssbuffer.block_id = [[V24]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V24]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.truncf{{.*}}ssbuffer.block_id = [[V24]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C8:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V22:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.mulf{{.*}}ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.truncf{{.*}}ssbuffer.block_id = [[V22]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C6:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V26:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.mulf{{.*}}ssbuffer.block_id = [[V26]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.truncf{{.*}}ssbuffer.block_id = [[V26]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C7:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: arith.extf{{.*}}ssbuffer.block_id = [[V21:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.truncf{{.*}}ssbuffer.block_id = [[V21]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: tensor.empty{{.*}}ssbuffer.block_id = [[C4:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: linalg.transpose{{.*}}ssbuffer.block_id = [[C4]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C4]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V19:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C3:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: arith.constant{{.*}}ssbuffer.block_id = [[C2:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: bufferization.to_tensor{{.*}}ssbuffer.block_id = [[C2]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: linalg.fill{{.*}}ssbuffer.block_id = [[C2]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C2]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: arith.constant{{.*}}ssbuffer.block_id = [[C1:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: memref.alloc{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: memref.alloc{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: memref.copy{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: memref.copy{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: bufferization.to_tensor{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: bufferization.to_tensor{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: tensor.empty{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: linalg.transpose{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: tensor.empty{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: linalg.fill{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: tensor.extract_slice{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: bufferization.materialize_in_destination{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: hivm.hir.store{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: hivm.hir.store{{.*}}ssbuffer.block_id = [[C1]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: arith.constant{{.*}}ssbuffer.block_id = [[V28:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: tensor.extract_slice{{.*}}ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: hivm.hir.store{{.*}}ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: hivm.hir.store{{.*}}ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: linalg.fill{{.*}}ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.mulf{{.*}}ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: bufferization.to_tensor{{.*}}ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: memref.alloc{{.*}}ssbuffer.block_id = [[C5:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: linalg.fill{{.*}}ssbuffer.block_id = [[C5]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: bufferization.to_tensor{{.*}}ssbuffer.block_id = [[C5]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C5]] : i32, ssbuffer.core_type = "CUBE"
 // CHECK: return {{.*}}
 func.func @tc01_single_block_comprehensive(
     %ma: memref<4x4xf16>,
@@ -207,51 +216,45 @@ func.func @tc01_single_block_comprehensive(
 
 // CHECK-LABEL: func.func @tc02_nested_control_flow(
 // CHECK-NOT: call
-// CHECK: arith.constant {ssbuffer.block_id = [[V28:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} 0 : index
-// CHECK: arith.constant {ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"} 1 : index
-// CHECK: arith.addf %arg6, %arg7 {ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.constant {ssbuffer.block_id = [[V28]] : i32, ssbuffer.core_type = "VECTOR"} dense<1.000000e+00>
-// CHECK: arith.constant {ssbuffer.block_id = [[C16:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: memref.alloc() {ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: memref.alloc() {ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: memref.copy {{.*}} {ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: memref.copy {{.*}} {ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: bufferization.to_tensor {{.*}} {ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: bufferization.to_tensor {{.*}} {ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: tensor.empty() {ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.fill {ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V29:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.mulf {{.*}} {ssbuffer.block_id = [[V29]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: scf.if %arg5 -> (tensor<4x4xf32>) {
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V25:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: scf.yield {ssbuffer.core_type = "VECTOR"}
-// CHECK: } else {
-// CHECK: scf.yield {ssbuffer.core_type = "VECTOR"}
-// CHECK: } {ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V30:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: scf.for {{.*}} = {{.*}} to %arg4 step {{.*}} iter_args({{.*}} = {{.*}}, {{.*}} = {{.*}}) -> (tensor<4x4xf32>, tensor<4x4xf32>) {
-// CHECK: scf.if %arg5 -> (tensor<4x4xf32>, tensor<4x4xf32>) {
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V23:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C13:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: scf.yield {ssbuffer.core_type = "CUBE, VECTOR"}
-// CHECK: } else {
-// CHECK: arith.mulf {{.*}} {ssbuffer.block_id = [[V24:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: scf.yield {ssbuffer.core_type = "CUBE, VECTOR"}
-// CHECK: } {ssbuffer.core_type = "CUBE, VECTOR"}
-// CHECK: scf.yield {ssbuffer.core_type = "CUBE, CUBE"}
-// CHECK: } {ssbuffer.core_type = "CUBE, CUBE"}
-// CHECK: scf.for {{.*}} = {{.*}} to %arg4 step {{.*}} iter_args({{.*}} = {{.*}}, {{.*}} = {{.*}}) -> (tensor<4x4xf32>, tensor<4x4xf32>) {
-// CHECK: arith.truncf {{.*}} {ssbuffer.block_id = [[V26:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: tensor.empty() {ssbuffer.block_id = [[V26]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.truncf {{.*}} {ssbuffer.block_id = [[V26]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: tensor.empty() {ssbuffer.block_id = [[V26]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C15:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: linalg.matmul {ssbuffer.block_id = [[C14:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V27:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[V27]] : i32, ssbuffer.core_type = "VECTOR"}
-// CHECK: scf.yield {ssbuffer.core_type = "VECTOR, VECTOR"}
-// CHECK: } {ssbuffer.core_type = "VECTOR, VECTOR"}
+// CHECK: arith.constant{{.*}}ssbuffer.block_id = [[V36:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.constant{{.*}}ssbuffer.block_id = [[V35:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.constant{{.*}}ssbuffer.block_id = [[V35]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V35]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.constant{{.*}}ssbuffer.block_id = [[C16:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: memref.alloc{{.*}}ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: memref.alloc{{.*}}ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: memref.copy{{.*}}ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: memref.copy{{.*}}ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: bufferization.to_tensor{{.*}}ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: bufferization.to_tensor{{.*}}ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: tensor.empty{{.*}}ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: linalg.fill{{.*}}ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C16]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V37:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.mulf{{.*}}ssbuffer.block_id = [[V37]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: scf.if
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V31:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: scf.yield{{.*}}ssbuffer.core_type = "VECTOR"
+// CHECK: scf.yield{{.*}}ssbuffer.core_type = "VECTOR"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V38:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: scf.for
+// CHECK: scf.if
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V29:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C13:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: scf.yield{{.*}}ssbuffer.core_type = "CUBE, VECTOR"
+// CHECK: arith.mulf{{.*}}ssbuffer.block_id = [[V30:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: scf.yield{{.*}}ssbuffer.core_type = "CUBE, VECTOR"
+// CHECK: scf.yield{{.*}}ssbuffer.core_type = "CUBE, CUBE"
+// CHECK: scf.for
+// CHECK: arith.truncf{{.*}}ssbuffer.block_id = [[V33:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: tensor.empty{{.*}}ssbuffer.block_id = [[V33]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C15:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: arith.truncf{{.*}}ssbuffer.block_id = [[V32:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: tensor.empty{{.*}}ssbuffer.block_id = [[V32]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: linalg.matmul{{.*}}ssbuffer.block_id = [[C14:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V34:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: arith.addf{{.*}}ssbuffer.block_id = [[V34]] : i32, ssbuffer.core_type = "VECTOR"
+// CHECK: scf.yield{{.*}}ssbuffer.core_type = "VECTOR, VECTOR"
 // CHECK: return {{.*}}
 func.func @tc02_nested_control_flow(
     %ma: memref<4x4xf16>,

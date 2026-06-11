@@ -5,16 +5,16 @@ module{
     
 // CHECK-LABEL: func.func @test_core_type_deps(
 // CHECK: [[ALLOC_VEC:%[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = [[TC_VEC3:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
-// CHECK-NEXT: [[ALLOC_0_VEC:%[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
+// CHECK-NEXT: [[ALLOC_0_VEC:%[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = [[TC_VECB:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
 // CHECK-NEXT: [[TO_TENSOR0:%[0-9]+]] = bufferization.to_tensor [[ALLOC_VEC]] restrict writable {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
-// CHECK-NEXT: [[TO_TENSOR1:%[0-9]+]] = bufferization.to_tensor [[ALLOC_0_VEC]] restrict writable {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
+// CHECK-NEXT: [[TO_TENSOR1:%[0-9]+]] = bufferization.to_tensor [[ALLOC_0_VEC]] restrict writable {ssbuffer.block_id = [[TC_VECB]] : i32, ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
 // CHECK-NEXT: [[SUBF_VEC:%[0-9]+]] = arith.subf %arg0, %arg1 {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
 // CHECK-NEXT: [[EXP_VEC:%[0-9]+]] = math.exp [[SUBF_VEC]] {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
 // CHECK-NEXT: [[TRUNC_CUBE0:%[0-9]+]] = arith.truncf [[EXP_VEC]] {ssbuffer.block_id = [[TC_CUBE0:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} : tensor<64x64xf32> to tensor<64x64xf16>
 // CHECK-NEXT: [[EMPTY_VEC0:%[0-9]+]] = tensor.empty() {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
 // CHECK-NEXT: [[MATMUL_CUBE0:%[0-9]+]] = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = [[TC_CUBE0]] : i32, ssbuffer.core_type = "CUBE"} ins([[TRUNC_CUBE0]], [[TO_TENSOR0]] : tensor<64x64xf16>, tensor<64x64xf16>) outs([[EMPTY_VEC0]] : tensor<64x64xf32>) -> tensor<64x64xf32>
 // CHECK-NEXT: [[TRUNC_CUBE0_2:%[0-9]+]] = arith.truncf [[MATMUL_CUBE0]] {ssbuffer.block_id = [[TC_CUBE0]] : i32, ssbuffer.core_type = "CUBE"} : tensor<64x64xf32> to tensor<64x64xf16>
-// CHECK-NEXT: [[EMPTY_VEC1:%[0-9]+]] = tensor.empty() {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
+// CHECK-NEXT: [[EMPTY_VEC1:%[0-9]+]] = tensor.empty() {ssbuffer.block_id = [[TC_VECB]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
 // CHECK-NEXT: [[MATMUL_CUBE1:%[0-9]+]] = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = [[TC_CUBE1:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} ins([[TRUNC_CUBE0_2]], [[TO_TENSOR1]] : tensor<64x64xf16>, tensor<64x64xf16>) outs([[EMPTY_VEC1]] : tensor<64x64xf32>) -> tensor<64x64xf32>
 // CHECK-NEXT: [[EXTF_VEC4:%[0-9]+]] = arith.extf [[TRUNC_CUBE0]] {ssbuffer.block_id = [[TC_VEC4:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf16> to tensor<64x64xf32>
 // CHECK-NEXT: [[ADDF_VEC4:%[0-9]+]] = arith.addf [[EXTF_VEC4]], %arg0 {ssbuffer.block_id = [[TC_VEC4]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
@@ -23,7 +23,7 @@ module{
 // CHECK-NEXT: [[SUBF_VEC4:%[0-9]+]] = arith.subf [[MATMUL_CUBE1]], [[BROADCAST_VEC4]] {ssbuffer.block_id = [[TC_VEC4]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
 // CHECK-NEXT: [[MULF_VEC4:%[0-9]+]] = arith.mulf [[ADDF_VEC4]], [[SUBF_VEC4]] {ssbuffer.block_id = [[TC_VEC4]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
 // CHECK-NEXT: [[TRUNC_CUBE2:%[0-9]+]] = arith.truncf [[MULF_VEC4]] {ssbuffer.block_id = [[TC_CUBE2:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"} : tensor<64x64xf32> to tensor<64x64xf16>
-// CHECK-NEXT: [[EMPTY_VEC3:%[0-9]+]] = tensor.empty() {ssbuffer.block_id = [[TC_VEC3]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
+// CHECK-NEXT: [[EMPTY_VEC3:%[0-9]+]] = tensor.empty() {ssbuffer.block_id = [[TC_VECD:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
 // CHECK-NEXT: [[MATMUL_CUBE2:%[0-9]+]] = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = [[TC_CUBE2]] : i32, ssbuffer.core_type = "CUBE"} ins([[TRUNC_CUBE2]], [[TRUNC_CUBE0_2]] : tensor<64x64xf16>, tensor<64x64xf16>) outs([[EMPTY_VEC3]] : tensor<64x64xf32>) -> tensor<64x64xf32>
 // CHECK-NEXT: [[TRUNC_VEC5:%[0-9]+]] = arith.truncf [[MATMUL_CUBE2]] {ssbuffer.block_id = [[TC_VEC5:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32> to tensor<64x64xf16>
 // CHECK-NEXT: return [[TRUNC_VEC5]] : tensor<64x64xf16>

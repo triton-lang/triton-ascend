@@ -180,9 +180,7 @@ void findCandidates(DenseMap<Operation *, int> &indegree, SmallVector<Operation 
                     DenseMap<Operation *, bool> &visited, const CVPipeline::MemoryDependenceGraph &memGraph, ComputeBlockIdManager &bm)
 {
     // 1. if no candidate, try to bypass non-fusable
-    LOG_DEBUG("Finding source ops............\n");
     if (candidates.empty()) {
-        LOG_DEBUG("No candidates available, try bypass\n");
         byPassNonFusable(indegree, candidates, visited, memGraph, bm);
     }
     // 2. find candidates whose indegree is 0 and not visited, add them to candidates and mark visited
@@ -192,7 +190,6 @@ void findCandidates(DenseMap<Operation *, int> &indegree, SmallVector<Operation 
             candidates.push_back(op);
         }
     }
-    LOG_DEBUG("end finding source ops............\n");
 }
 
 static SmallVector<Operation *> findOpsAdjacentToCube(Block *block, const SmallVector<Operation *> &fuseGroup,
@@ -200,6 +197,7 @@ static SmallVector<Operation *> findOpsAdjacentToCube(Block *block, const SmallV
                                                       const CVPipeline::MemoryDependenceGraph &memGraph)
 {
     SmallVector<Operation *> toProcess;
+    std::optional<int> blockId;
     for (Operation *op : fuseGroup) {
         SmallVector<Operation *> allUsers;
         allUsers.append(op->getUsers().begin(), op->getUsers().end());
@@ -213,7 +211,17 @@ static SmallVector<Operation *> findOpsAdjacentToCube(Block *block, const SmallV
                 continue;
             }
             if (!isFusableOp(userInBlock) && !visited[userInBlock]) {
-                toProcess.push_back(op);
+                auto newBlockId = getOpBlockId(user);
+                if (!newBlockId.has_value()) {
+                    newBlockId = getOpBlockId(userInBlock); // Some op will be tagged outside
+                }
+
+                if (!blockId.has_value()) {
+                    blockId = newBlockId;
+                }
+                if (!newBlockId.has_value() || blockId == newBlockId) {
+                    toProcess.push_back(op);
+                }
             }
         }
     }
@@ -349,6 +357,7 @@ void refineFuseGroup(Block *block, SmallVector<Operation *> &nowFuseGroup, Dense
     auto toProcess = findOpsAdjacentToCube(block, nowFuseGroup, visited, memGraph);
     // 2. early return: if cannot find one node which next node is CUBE, need to check if return or not;
     if (toProcess.empty()) {
+        LOG_DEBUG("No Cube adjacent op, no op will be cut.");
         findCandidates(indegree, candidates, visited, memGraph, bm);
         if (candidates.empty()) {
             return;
@@ -394,10 +403,17 @@ llvm::LogicalResult planVectorBlockId(Block *block, const CVPipeline::MemoryDepe
             updateCandidates(nextFused, queue, indegree, visited, memGraph);
         }
         if (queue.empty() || nextFused == nullptr) {
+            LOG_DEBUG("Prepare to check this group: \n");
+            for (auto op: nowFuseGroup) {
+                LOG_DEBUG("fuseing: " << *op << "\n");
+            }
             // finish one group, assign block id and start next iteration
             // Cut error operations before assigning block id
             refineFuseGroup(block, nowFuseGroup, visited, queue, indegree, memGraph, bm);
-
+            LOG_DEBUG("Group after cutting: \n");
+            for (auto op: nowFuseGroup) {
+                LOG_DEBUG("fuseing: " << *op << "\n");
+            }
             if (llvm::failed(bm.markOpsWithNewId(nowFuseGroup))) {
                 return llvm::failure();
             }

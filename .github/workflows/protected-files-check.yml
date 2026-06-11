@@ -2,7 +2,6 @@ name: Restricted Files Labeler
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 permissions:
   contents: read
@@ -26,9 +25,6 @@ jobs:
 
           restricted_files=(
             ".pre-commit-config.yaml"
-            "SECURITYNOTE.md"
-            "SECURITYNOTE_zh.md"
-            "safe_compile.cmake"
           )
 
           allowed_dirs=(
@@ -45,8 +41,11 @@ jobs:
             "README.md"
             "README_zh.md"
             "RELEASE.md"
+            "SECURITYNOTE.md"
+            "SECURITYNOTE_zh.md"
             "requirements.txt"
             "requirements_dev.txt"
+            "safe_compile.cmake"
           )
 
           mapfile -t changed_files < <(
@@ -115,12 +114,6 @@ jobs:
           fi
 
           echo "All changed files are within the allowed repository-construction paths."
-          echo "Restricted files:"
-          printf '  - %s\n' "${restricted_files[@]}"
-          echo "Allowed directories:"
-          printf '  - %s\n' "${allowed_dirs[@]}"
-          echo "Allowed files:"
-          printf '  - %s\n' "${allowed_files[@]}"
 
           mapfile -t current_labels < <(
             gh api \

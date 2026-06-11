@@ -26,6 +26,7 @@ import builtins
 import copy
 import functools
 import ast
+import gc
 import inspect
 import os
 import pprint
@@ -2232,10 +2233,11 @@ class AutoTilingTuner(Autotuner):
 
     def run(self, *args, **kwargs):
         key = self.generate_key_and_configs(*args, **kwargs)
+        cache_miss = key not in self.cache
         if self.is_simt_mode and kwargs.get('simt_stack_limit', None) is None:
             kwargs['simt_stack_limit'] = self.simt_stack_limit
         used_cached_result = True
-        if key not in self.cache:
+        if cache_miss:
             # prune configs
             pruned_configs = self.prune_configs(kwargs)
             if self.enable_ubtuner or len(pruned_configs) > 1:
@@ -2271,12 +2273,17 @@ class AutoTilingTuner(Autotuner):
             config.pre_hook(full_nargs)
         final_kwargs = dict(config.all_kwargs(), **kwargs)
         final_kwargs.update(ub_cfg)
-        ret = self.fn.run(
-            *args,
-            **final_kwargs,
-        )
-        self.nargs = None
-        return ret
+        try:
+            ret = self.fn.run(
+                *args,
+                **final_kwargs,
+            )
+            return ret
+        finally:
+            self.nargs = None
+            if cache_miss:
+                # workaround for memory leak when some configs fail to compile
+                gc.collect()
 
     def _try_ubtuner(self, *args, config, excp, run_fns, **kwargs):
         if not (self.enable_ubtuner and "ub overflow" in str(excp).lower()):

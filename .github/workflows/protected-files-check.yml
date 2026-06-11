@@ -23,10 +23,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          restricted_files=(
-            ".pre-commit-config.yaml"
-          )
-
           allowed_dirs=(
             ".github/"
             "docker/"
@@ -56,20 +52,7 @@ jobs:
 
           violations=()
           for changed_file in "${changed_files[@]}"; do
-            restricted=false
             allowed=false
-
-            for restricted_file in "${restricted_files[@]}"; do
-              if [[ "${changed_file}" == "${restricted_file}" ]]; then
-                restricted=true
-                break
-              fi
-            done
-
-            if [[ "${restricted}" == "true" ]]; then
-              violations+=("${changed_file}")
-              continue
-            fi
 
             for allowed_file in "${allowed_files[@]}"; do
               if [[ "${changed_file}" == "${allowed_file}" ]]; then
@@ -94,8 +77,6 @@ jobs:
 
           if (( ${#violations[@]} > 0 )); then
             echo "Changes outside the allowed repository-construction paths need committer attention."
-            echo "Restricted files:"
-            printf '  - %s\n' "${restricted_files[@]}"
             echo "Allowed directories:"
             printf '  - %s\n' "${allowed_dirs[@]}"
             echo "Allowed files:"

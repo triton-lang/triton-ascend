@@ -163,15 +163,6 @@ SmallVector<int> triton::getBlockIdsInOrder(scf::ForOp forOp)
   return idsInOrder;
 }
 
-// Helper to get block_id attribute from op
-std::optional<int64_t> triton::getOpBlockId(Operation *op) {
-  auto blockIdAttr = op->getAttrOfType<IntegerAttr>(CVPipeline::kBlockId);
-  if (!blockIdAttr) {
-    return std::nullopt;
-  }
-  return blockIdAttr.getInt();
-}
-
 // Get the block_id of the immediate child of scf.for that contains op
 // For nested ops inside scf.if/scf.for, returns the block_id of the immediate child of scf.for
 // Only considers scf.for ops that have ssbuffer.main_loop attribute
@@ -184,7 +175,7 @@ std::optional<int64_t> triton::getForDirectChildBlockId(Operation *op) {
     // Found the main_loop forOp, op is its direct child
     if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
       if (forOp->hasAttr(CVPipeline::kMainLoop)) {
-        return getOpBlockId(op);
+        return CVPipeline::getOpBlockId(op);
       }
     }
     op = parent;

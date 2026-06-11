@@ -23,11 +23,11 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CloneOps.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/IRMapping.h"
 
@@ -230,7 +230,7 @@ static bool shouldEraseOpForCube(Operation *op, const CVPipeline::MemoryDependen
       if (isa<SyncBlockWaitOp>(execOp) || isa<SyncBlockSetOp>(execOp)) {
         return false;
       }
-      auto execBlockId = getOpBlockId(execOp);
+      auto execBlockId = CVPipeline::getOpBlockId(execOp);
       return execBlockId && opBlockId && *execBlockId == *opBlockId;
     });
     if (hasCloneExecAfterInSameBlockId) {

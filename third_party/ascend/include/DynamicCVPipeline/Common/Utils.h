@@ -47,6 +47,7 @@ inline constexpr llvm::StringLiteral kIntraBuffer = "ssbuffer.intra_buffer";
 inline constexpr llvm::StringLiteral kAnalyzeFlagId = "ssbuffer.analyze_flag_id";
 inline constexpr llvm::StringLiteral kLoopCarriedL0C = "ssbuffer.loop_carried_l0c";
 inline constexpr llvm::StringLiteral kCrossDeps = "ssbuffer.crossDeps";
+inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
 inline constexpr const char *ERRCODE_ATTR = "triton_ascend.dynamic_cv_pipeline.rc";
 static constexpr const int ERRCODE_FAILED = 1;
 static constexpr const int ERRCODE_IGNORED = 2;

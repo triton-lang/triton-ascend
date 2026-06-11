@@ -29,6 +29,8 @@
 
 #include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp/PatternMatchRewrites.h"
+#include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
 using namespace mlir;
 using namespace triton;
@@ -48,6 +50,19 @@ void StandardizeOpPass::runOnOperation()
 
     if (llvm::failed(runPipeline(pm, op))) {
         LOG_DEBUG("Pipeline Failed!");
+        signalPassFailure();
+    }
+
+    bool findMayNotExec = false;
+    op->walk([&](linalg::MatmulOp matmulOp) {
+        if (matmulOp->hasAttr(CVPipeline::kMayNotExec)) {
+            findMayNotExec = true;
+        }
+    });
+
+    if (findMayNotExec) {
+        LOG_DEBUG("Matmul may not execute!");
+        CVPipeline::setFallbackAttr(op);
         signalPassFailure();
     }
 }

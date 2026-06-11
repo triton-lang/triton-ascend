@@ -20,15 +20,15 @@
  * THE SOFTWARE.
  */
 
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/iterator.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
+#include <cstddef>
+#include <optional>
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -41,8 +41,10 @@
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
+#include "llvm/ADT/SmallVector.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp/PatternMatchRewrites.h"
@@ -66,6 +68,13 @@ struct MatmulInputs {
     Value bias;
 };
 
+struct SplitInfo {
+    bool mayNotExec;
+    Value outerInValue;
+    Value outerOutValue;
+    bool shouldSplit;
+};
+
 } // namespace
 
 static inline MatmulInputs parseMatmulInputs(linalg::MatmulOp matmulOp)
@@ -76,9 +85,12 @@ static inline MatmulInputs parseMatmulInputs(linalg::MatmulOp matmulOp)
     return {inputs[0], inputs[1], inits[0]};
 }
 
-// the user is responsible for checking biasDefOp is not null
+// The user is responsible for checking biasDefOp is not null.
 static bool operationIsFillZero(Operation *op)
 {
+    if (!op) {
+        return false;
+    }
     auto fillOp = dyn_cast<linalg::FillOp>(op);
     if (!fillOp) {
         return false;
@@ -87,48 +99,32 @@ static bool operationIsFillZero(Operation *op)
     return matchPattern(filledVal, m_Zero()) || matchPattern(filledVal, m_AnyZeroFloat());
 }
 
-// this generally should always be true, but just for safety...
+// This generally should always be true, but just for safety...
 static bool isFloatOrInt(RankedTensorType tensorType)
 {
     auto elmType = tensorType.getElementType();
     return isa<FloatType, IntegerType>(elmType);
 }
 
-// Search outward from args to obtain the following information:
-// 1. Whether args is only used and updated by matmul: bool argsLimitedInMatmul
-// 2. Whether matmul is guaranteed to execute: bool mayNotExec
-// 3. Outermost initial value: Value outerInVal
-// 4. Outermost for or if, i.e., where to insert if/else.
-static Value searchInArgsChain(Value nextValueOfC, bool &argsLimitedInMatmul, bool &mayNotExec, Value &outerInVal)
+/**
+ * Search outward from args to obtain the following information:
+ * 1. Whether args is only used and updated by matmul: bool argsLimitedInMatmul
+ * 2. Whether matmul is guaranteed to execute: bool mayNotExec
+ * 3. Outermost initial value: Value outerInValue
+ * 4. Outermost for or if, i.e., where to insert if/else.
+ */
+static Value searchInArgsChain(Value nextValueOfC, bool &argsLimitedInMatmul, bool &mayNotExec, Value &outerInValue)
 {
-    if (outerInVal.getDefiningOp()) {
-        return nextValueOfC;
-    }
     auto op = nextValueOfC.getDefiningOp();
     auto parentOp = op->getParentOp();
-    Value nextSearchValue = nextValueOfC;
-
-    // update mayNotExec
-    if (auto forOp = dyn_cast<scf::ForOp>(parentOp)) {
-        IntegerAttr ubAttr, lbAttr;
-        if (matchPattern(forOp.getUpperBound(), m_Constant(&ubAttr)) &&
-            matchPattern(forOp.getLowerBound(), m_Constant(&lbAttr)))
-        {
-            if (ubAttr.getValue().sle(lbAttr.getValue())) {
-                mayNotExec = true;
-            }
-        } else {
-            mayNotExec = true;
-        }
-    } else if (auto ifOp = dyn_cast<scf::IfOp>(parentOp)) {
-        if (!matchPattern(ifOp.getCondition(), m_One())) {
-            mayNotExec = true;
-        }
+    if (outerInValue.getDefiningOp()) {
+        return nextValueOfC;
     }
 
     // update argsLimitedInMatmul
+    Value nextSearchValue = nextValueOfC;
     if (auto forOp = dyn_cast<scf::ForOp>(parentOp)) {
-        auto blockArg = dyn_cast_if_present<BlockArgument>(outerInVal);
+        auto blockArg = dyn_cast_if_present<BlockArgument>(outerInValue);
         if (!blockArg || blockArg.getOwner() != forOp.getBody()) {
             argsLimitedInMatmul = false;
             return nextValueOfC;
@@ -148,19 +144,38 @@ static Value searchInArgsChain(Value nextValueOfC, bool &argsLimitedInMatmul, bo
                 break;
             }
         }
-        outerInVal = forOp.getInitArgs()[argIdx];
-        nextSearchValue = forOp->getResult(argIdx);
+        // check res is only used by yield
+        for (auto &use : nextValueOfC.getUses()) {
+            auto user = use.getOwner();
+            auto userInBlock = CVPipeline::getAncestorInBlock(user, op->getBlock());
+            auto yieldOp = dyn_cast<scf::YieldOp>(userInBlock);
+            if (!yieldOp) {
+                argsLimitedInMatmul = false;
+                break;
+            } else if (yieldOp->getBlock() != forOp.getBody()) {
+                argsLimitedInMatmul = false;
+                break;
+            } else if (use.getOperandNumber() != argIdx) {
+                argsLimitedInMatmul = false;
+                break;
+            }
+        }
+
+        if (argsLimitedInMatmul) {
+            outerInValue = forOp.getInitArgs()[argIdx];
+            nextSearchValue = forOp->getResult(argIdx);
+        }
     } else if (auto ifOp = dyn_cast<scf::IfOp>(parentOp)) {
         if (!ifOp.elseBlock()) {
             argsLimitedInMatmul = false;
         }
-        auto otherYieldOp = op->getBlock() == ifOp->getBlock() ? cast<scf::YieldOp>(ifOp.elseBlock()->getTerminator())
+        auto otherYieldOp = op->getBlock() == ifOp.thenBlock() ? cast<scf::YieldOp>(ifOp.elseBlock()->getTerminator())
                                                                : cast<scf::YieldOp>(ifOp.thenBlock()->getTerminator());
-        auto opYieldOp = op->getBlock() == ifOp->getBlock() ? cast<scf::YieldOp>(ifOp.thenBlock()->getTerminator())
+        auto opYieldOp = op->getBlock() == ifOp.thenBlock() ? cast<scf::YieldOp>(ifOp.thenBlock()->getTerminator())
                                                             : cast<scf::YieldOp>(ifOp.elseBlock()->getTerminator());
         int resultIdx = -1;
         for (unsigned i = 0; i < otherYieldOp->getNumOperands(); ++i) {
-            if (otherYieldOp->getOperand(i) == outerInVal && opYieldOp->getOperand(i) == nextSearchValue) {
+            if (otherYieldOp->getOperand(i) == outerInValue && opYieldOp->getOperand(i) == nextSearchValue) {
                 resultIdx = i;
                 break;
             }
@@ -176,318 +191,289 @@ static Value searchInArgsChain(Value nextValueOfC, bool &argsLimitedInMatmul, bo
     }
 
     if (!argsLimitedInMatmul) {
-        return nextValueOfC; // early return
+        return nextValueOfC;
     }
-    return searchInArgsChain(nextSearchValue, argsLimitedInMatmul, mayNotExec, outerInVal);
-}
-
-template <typename Container> static Container filterNonIgnoredOps(const Container &container)
-{
-    auto filteredRange = llvm::make_filter_range(container, [](Operation *op) { return !isa<tensor::DimOp>(op); });
-    return Container(filteredRange.begin(), filteredRange.end());
-}
-
-static OpOperand *getOnlyUse(Operation *op, Value value)
-{
-    auto uses =
-        make_pointer_range(make_filter_range(op->getOpOperands(), [=](OpOperand &use) { return use.get() == value; }));
-    llvm::SmallVector<OpOperand *> usesVec(uses.begin(), uses.end());
-    if (usesVec.size() != 1) {
-        return nullptr;
+    // update mayNotExec
+    if (auto forOp = dyn_cast<scf::ForOp>(parentOp)) {
+        IntegerAttr ubAttr, lbAttr;
+        if (matchPattern(forOp.getUpperBound(), m_Constant(&ubAttr)) &&
+            matchPattern(forOp.getLowerBound(), m_Constant(&lbAttr)))
+        {
+            if (ubAttr.getValue().sle(lbAttr.getValue())) {
+                mayNotExec = true;
+            }
+        } else {
+            mayNotExec = true;
+        }
+    } else if (auto ifOp = dyn_cast<scf::IfOp>(parentOp)) {
+        if (!matchPattern(ifOp.getCondition(), m_One())) {
+            mayNotExec = true;
+        }
     }
-
-    return usesVec[0];
+    return searchInArgsChain(nextSearchValue, argsLimitedInMatmul, mayNotExec, outerInValue);
 }
 
 /**
- * @brief Traces a chain of single-user operations starting from the given value.
- * Returns true if an operation matching the predicate is found in the chain.
+ * Traces the chain of users of a given value to find a matching operation.
+ * This function recursively follows the use-def chain through various operation types
+ * (ViewLikeOpInterface, scf::ForOp, scf::YieldOp) to locate an operation that matches
+ * the specified criteria.
  *
- * This function follows the def-use chain through operations that have exactly
- * one user. It traverses through:
- * - View-like operations (follows their single result)
- * - For loops (tracks init args to iteration arguments, then continues from yield to result)
- * - Yield operations within for/if (maps yield operands to parent operation results)
- * - Skip-able operations specified by isSkipOp callback
+ * Parameters:
+ *   value        - The starting value whose users are to be traced.
+ *   needSingle   - If true, requires that the value has exactly one user in its parent block.
+ *                  If multiple users exist, returns std::nullopt.
+ *   isMatchedOp  - A predicate function that determines if an operation is the target match.
+ *                  Returns true if the operation matches the desired criteria.
+ *   isSkipOp     - A predicate function that determines if an operation should be skipped.
+ *                  If true and the operation has a single result, continues tracing through
+ *                  that result.
  *
- * @param value The starting value to trace from
- * @param isMatchedOp Callback to check if an operation matches the criteria
- * @param isSkipOp Callback to check if an operation should be skipped (continue tracing its result)
- * @return True if a matching operation is found, false otherwise
+ * Returns:
+ *   The matched operation if found, or std::nullopt if no match is found or if
+ *   the single-user requirement is violated.
  */
-static bool traceSingleChainUser(Value value, const std::function<bool(Operation *, Value v)> &isMatchedOp,
-                                 const std::function<bool(Operation *, Value v)> &isSkipOp)
+std::optional<Operation *> traceChainUser(Value value, bool needSingle,
+                                          const std::function<bool(Operation *, Value v)> &isMatchedOp,
+                                          const std::function<bool(Operation *, Value v)> &isSkipOp)
 {
-    if (!value) {
+    Operation *nextUser = nullptr;
+    for (auto &use : value.getUses()) {
+        Operation *user = use.getOwner();
+        auto userInblock = CVPipeline::getAncestorInBlock(user, value.getParentBlock());
+        if (nextUser && userInblock != nextUser && needSingle) {
+            return std::nullopt; // not single user
+        } else if (!nextUser && userInblock) {
+            nextUser = userInblock;
+        }
+    }
+
+    for (auto &use : value.getUses()) {
+        Operation *user = use.getOwner();
+        if (llvm::isa<ViewLikeOpInterface, tensor::ExtractSliceOp>(user)) {
+            return traceChainUser(user->getResult(0), needSingle, isMatchedOp, isSkipOp);
+        }
+
+        if (auto forOp = dyn_cast<scf::ForOp>(user)) {
+            auto initArgs = forOp.getInitArgs();
+            int initIndx = -1;
+            int useCnt = 0;
+            for (auto [i, arg] : llvm::enumerate(initArgs)) {
+                if (arg == value) {
+                    initIndx = i;
+                    useCnt++;
+                }
+            }
+            if (useCnt == 1) {
+                return traceChainUser(forOp.getRegionIterArgs()[initIndx], needSingle, isMatchedOp, isSkipOp);
+            }
+            return std::nullopt;
+        }
+
+        if (auto yieldOp = dyn_cast<scf::YieldOp>(user)) {
+            auto operands = yieldOp.getOperands();
+            auto it = llvm::find(operands, value);
+            if (it == operands.end()) {
+                return std::nullopt;
+            }
+            auto index = std::distance(operands.begin(), it);
+
+            Operation *parentOp = yieldOp->getParentOp();
+            if (!parentOp || static_cast<size_t>(index) >= parentOp->getNumResults()) {
+                return std::nullopt;
+            }
+
+            return traceChainUser(parentOp->getResult(index), needSingle, isMatchedOp, isSkipOp);
+        }
+
+        if (isMatchedOp(user, value)) {
+            return user;
+        }
+        if (isSkipOp(user, value)) {
+            if (user->getNumResults() == 1) {
+                return traceChainUser(user->getResult(0), needSingle, isMatchedOp, isSkipOp);
+            }
+            return std::nullopt;
+        }
+    }
+    return std::nullopt;
+}
+
+static bool isSubviewFromGlobalMemory(ViewLikeOpInterface viewOp)
+{
+    // Subview ops may be nested many layers deep through reinterpretation or other subviews.
+    // like, subview (subview (reinterpret_cast (subview (reinterpret_cast (arg0)))))
+    // so we need Search and only keep same block view-like op.
+    if (!viewOp) {
         return false;
     }
-
-    auto users = filterNonIgnoredOps(llvm::DenseSet<Operation *>(value.user_begin(), value.user_end()));
-    if (users.size() != 1) {
-        return false;
-    }
-
-    auto *user = *users.begin();
-    if (llvm::isa<ViewLikeOpInterface>(user)) {
-        return traceSingleChainUser(user->getResult(0), isMatchedOp, isSkipOp);
-    }
-
-    if (auto forOp = dyn_cast<scf::ForOp>(user)) {
-        auto initArgs = forOp.getInitArgs();
-        int initIndx = -1;
-        int useCnt = 0;
-        for (auto [i, arg] : llvm::enumerate(initArgs)) {
-            if (arg == value) {
-                initIndx = i;
-                useCnt++;
+    Value source = viewOp.getViewSource();
+    while (true) {
+        LOG_DEBUG("Check view source: " << source << "\n");
+        if (auto blockArg = dyn_cast<BlockArgument>(source)) {
+            Operation *parentOp = blockArg.getOwner()->getParentOp();
+            if (isa<func::FuncOp>(parentOp)) {
+                return true;
+            } else if (isa<LoopLikeOpInterface>(parentOp)) {
+                auto argIndex = blockArg.getArgNumber();
+                if (auto forOp = dyn_cast<scf::ForOp>(parentOp)) {
+                    if (argIndex > 0) {
+                        source = forOp.getInitArgs()[argIndex - 1];
+                    }
+                } else if (auto whileOp = dyn_cast<scf::WhileOp>(parentOp)) {
+                    source = whileOp.getInits()[argIndex];
+                } else {
+                    LOG_DEBUG("Subview source block argument is from unknow block.");
+                    return false;
+                }
             }
         }
-        if (useCnt == 1) {
-            return traceSingleChainUser(forOp.getRegionIterArgs()[initIndx], isMatchedOp, isSkipOp);
+        // From other view-like op
+        if (auto viewLike = dyn_cast<ViewLikeOpInterface>(source.getDefiningOp())) {
+            source = viewLike.getViewSource();
+            continue;
         }
-        return false;
-    }
-
-    // used in yield, we need find the for/if result;
-    auto parentOp = user->getParentOp();
-    if (parentOp && isa<scf::YieldOp>(user) && llvm::isa_and_present<scf::ForOp, scf::IfOp>(parentOp)) {
-        auto use = getOnlyUse(user, value);
-        if (!use) {
-            return false;
-        }
-        return traceSingleChainUser(parentOp->getResult(use->getOperandNumber()), isMatchedOp, isSkipOp);
-    }
-
-    if (isMatchedOp(user, value)) {
-        return true;
-    }
-
-    if (isSkipOp(user, value)) {
-        if (user && user->getNumResults() == 1) {
-            return traceSingleChainUser(user->getResult(0), isMatchedOp, isSkipOp);
-        }
+        LOG_DEBUG("Subview source defining op is not ViewLikeOpInterface: " << source);
         return false;
     }
     return false;
 }
 
-static bool verifyAndHandleLoopCarriedL0C(linalg::MatmulOp matmulOp, PatternRewriter &rewriter, Value bias)
+/**
+ * Determines whether a matmul operation should be split based on its output usage.
+ * A split is needed when the matmul output is used in ways that would cause hardware issues:
+ * 1. (Specific scenarios Filter) Output is used by a nested matmul (L0C -> L0C) which causes NPUIR fixpipe errors.
+ * 2. Output is used as input A or B of another matmul (L0C -> L1), which requires
+ *    materialization to global memory.
+ *
+ * Parameters:
+ *   matmulOp     - The matmul operation to check.
+ *   outerOutValue   - The outermost result value in the use-def chain.
+ *   outerInValue - The outermost initial value (bias) in the use-def chain.
+ *
+ * Returns:
+ *   true if the matmul should be split due to output usage, false otherwise.
+ */
+static bool isOutputFilter(linalg::MatmulOp matmulOp, Value &outerOutValue, Value &outerInValue)
 {
-    if (matmulOp->hasAttr(CVPipeline::kLoopCarriedL0C)) {
-        return false;
-    }
-
-    bool argsLimitedInMatmul = true;
-    bool mayNotExec = false;
-    Value outerInVal = bias;
-    auto outerValue = searchInArgsChain(matmulOp.getResult(0), argsLimitedInMatmul, mayNotExec, outerInVal);
-    auto *outerDefOp = outerValue.getDefiningOp();
-    if (!argsLimitedInMatmul) {
-        LOG_DEBUG("Split because bias is not limited in args" << matmulOp);
-        return true;
-    }
-
-    if (!operationIsFillZero(outerInVal.getDefiningOp())) {
-        // From one matmul
-        auto defMatmul =
-            dyn_cast_if_present<linalg::MatmulOp>(hivm::traceDefOp<linalg::MatmulOp>(bias).value_or(nullptr));
-        if (!defMatmul) {
-            LOG_DEBUG("Split because bias may not be zero, and the init value is not from matmul: " << matmulOp);
-            return true;
+    // Specific scenario: used by store and nextUser is nested
+    auto matchStoreGm = [](Operation *op, Value value) {
+        if (auto nextStoreGM = dyn_cast<bufferization::MaterializeInDestinationOp>(op)) {
+            Value dest = nextStoreGM.getDest();
+            auto viewOp = dest.getDefiningOp<ViewLikeOpInterface>();
+            return isSubviewFromGlobalMemory(viewOp);
+        } else if (auto hivmStore = dyn_cast<hivm::StoreOp>(op)) {
+            auto dest = hivmStore.getDst();
+            auto viewOp = dest.getDefiningOp<ViewLikeOpInterface>();
+            return isSubviewFromGlobalMemory(viewOp);
         }
-        LOG_DEBUG("Split because avoiding NPUIR insert fixpipe errors" << matmulOp);
+        return false;
+    };
+    auto storeToGM =
+        traceChainUser(outerOutValue, false, matchStoreGm, [](Operation *op, Value value) { return false; });
+    if (storeToGM.has_value() && storeToGM.value()->getBlock() != outerOutValue.getParentBlock()) {
+        LOG_DEBUG("(store) Split because avoiding NPUIR insert fixpipe errors. " << matmulOp);
         return true;
     }
-    auto matchFunc = [=](Operation *op, Value value) {
+
+    // Specific scenario: used by single L0C and nextUser is nested
+    auto matchMatmulC = [](Operation *op, Value value) {
         if (auto nextMatmulOp = dyn_cast<linalg::MatmulOp>(op)) {
             auto inputs = parseMatmulInputs(nextMatmulOp);
             return inputs.a != value && inputs.b != value && inputs.bias == value;
         }
         return false;
     };
-
-    if (traceSingleChainUser(outerValue, matchFunc, [](Operation *op, Value value) { return false; })) {
-        // To one matmul
-        LOG_DEBUG("Split because avoiding NPUIR insert fixpipe errors" << matmulOp);
+    auto usedByL0C =
+        traceChainUser(outerOutValue, true, matchMatmulC, [](Operation *op, Value value) { return false; });
+    if (usedByL0C.has_value() && usedByL0C.value()->getBlock() != outerOutValue.getParentBlock()) {
+        LOG_DEBUG("(first) Split because avoiding NPUIR insert fixpipe errors. " << matmulOp);
+        return true;
+    }
+    return false;
+}
+static bool shouldSplitByOutput(linalg::MatmulOp matmulOp, Value &outerOutValue, Value &outerInValue)
+{
+    if (isOutputFilter(matmulOp, outerOutValue, outerInValue)) {
+        return true;
+    }
+    // used by any L1
+    auto matchMatmulAB = [](Operation *op, Value value) {
+        if (auto nextMatmulOp = dyn_cast<linalg::MatmulOp>(op)) {
+            auto inputs = parseMatmulInputs(nextMatmulOp);
+            return inputs.a == value || inputs.b == value;
+        }
+        return false;
+    };
+    auto skipCubeop = [=](Operation *op, Value value) { return isa<linalg::TransposeOp>(op); };
+    auto usedByL1 = traceChainUser(outerOutValue, false, matchMatmulAB, skipCubeop);
+    if (usedByL1.has_value()) {
+        LOG_DEBUG("Split avoid L0C -> L1. " << matmulOp); // S01-S08
         return true;
     }
 
-    matmulOp->setAttr(CVPipeline::kLoopCarriedL0C, rewriter.getUnitAttr());
-
-    if (mayNotExec) {
-        LOG_DEBUG("Split because the for loop may not execute" << matmulOp);
-        return true;
-    }
-    LOG_DEBUG("Not Split because bias can remain in L0C" << matmulOp);
     return false;
 }
 
 /**
- * @brief Evaluates whether a Matmul operation is a candidate for splitting.
+ * Determines whether a matmul operation should be split based on its input (bias) source.
+ * The split is avoided when:
+ * 1. The bias is filled with zeros (no need to split).
+ * 2. The bias comes from another matmul output (L0C remaining in the chain).
  *
- * This pattern identifies tensor-based matmul operations where the accumulator (bias) is
- * non-zero or dynamic. Splitting isolates the pure GEMM computation (ideal for CUBE hardware)
- * from the accumulator addition (ideal for VECTOR hardware), preventing hardware execution stalls.
+ * Parameters:
+ *   matmulOp     - The matmul operation to check.
+ *   outerOutValue   - The outermost result value in the use-def chain.
+ *   outerInValue - The outermost initial value (bias) in the use-def chain.
  *
- * Matching Logic and Rules:
- *
- * 1. Validation Checks:
- *    - The matmul must operate on tensors (tensor mode).
- *    - The element type of the output must be an integer or a float type.
- *
- * 2. Rule 1: Dynamic / Block Argument Accumulator
- *    - If the bias tensor is a block argument (i.e., it has no defining operation in the
- *      current block), its compile-time value is unknown. We conservatively assume it is
- *      non-zero and trigger a split.
- *
- * 3. Rule 2: Zero-Accumulator Bypass (Do Not Split)
- *    - If the bias tensor is statically known to be a constant zero (e.g., initialized via
- *      linalg.fill with 0), the split is bypassed. Standard lowerings already optimize
- *      this cleanly without introducing a redundant vector addition.
- *
- * 4. Default Split:
- *    - If the bias is defined, non-zero, and does not fall under Rule 3, split the operation.
+ * Returns:
+ *   true if the matmul should be split due to input source, false otherwise.
  */
-static bool shouldSplit(linalg::MatmulOp matmulOp, PatternRewriter &rewriter)
+static bool isInputFilter(linalg::MatmulOp matmulOp, Value &outerOutValue, Value &outerInValue)
 {
-    auto matmulResult = matmulOp->getResult(0);
-    for (auto res : matmulResult.getUsers()) {
-        if (auto nextMatmul = dyn_cast<linalg::MatmulOp>(res)) {
-            auto inputs = parseMatmulInputs(nextMatmul);
-            if (inputs.a == matmulResult || inputs.b == matmulResult) {
-                LOG_DEBUG("Split because the user is matmul's A or B." << matmulOp);
-                return true;
-            }
+    // Specific scenario: outerInValue from L0C and nextUser is nested
+    auto defMatmul =
+        dyn_cast_if_present<linalg::MatmulOp>(hivm::traceDefOp<linalg::MatmulOp>(outerInValue).value_or(nullptr));
+    if (defMatmul) {
+        auto defInMatmulBlock = CVPipeline::getAncestorInBlock(defMatmul, matmulOp->getBlock());
+        if (!defInMatmulBlock) {
+            LOG_DEBUG("(Second) Split because avoiding NPUIR insert fixpipe errors. " << matmulOp);
+            return true;
         }
     }
-
-    auto bias = parseMatmulInputs(matmulOp).bias;
-    auto *biasDefOp = bias.getDefiningOp();
-    // Rule 1: bias is block arg -> split if result cannot remain in l0c
-    if (!biasDefOp) {
-        return verifyAndHandleLoopCarriedL0C(matmulOp, rewriter, bias);
+    return false;
+}
+static bool shouldSplitByInput(linalg::MatmulOp matmulOp, Value &outerOutValue, Value &outerInValue)
+{
+    if (isInputFilter(matmulOp, outerOutValue, outerInValue)) {
+        return true;
     }
-
-    // Rule 2: matmul a b 0 -> do not split
-    if (operationIsFillZero(biasDefOp)) {
-        LOG_DEBUG("Not split because bias is zero: " << matmulOp);
+    if (operationIsFillZero(outerInValue.getDefiningOp())) {
+        LOG_DEBUG("Not split because bias is zero. " << matmulOp);
         return false;
     }
-
-    // Otherwise split:
-    LOG_DEBUG("Should split: " << matmulOp);
-
+    auto defMatmul =
+        dyn_cast_if_present<linalg::MatmulOp>(hivm::traceDefOp<linalg::MatmulOp>(outerInValue).value_or(nullptr));
+    if (defMatmul) {
+        LOG_DEBUG("Not split because L0C remain. " << matmulOp);
+        return false;
+    }
+    // from broadcast [N]->[M, N] // S11 S12 S19 S20
     return true;
 }
 
 /**
- * @brief Transforms a matmul with a non-zero accumulator into a zero-initialized matmul
- * followed by an elementwise addition.
- *
- * This transformation breaks the combined GEMM-and-accumulation execution down to isolate
- * the high-throughput matrix multiply from vector-based bias additions.
- *
- * =========================================================================================
- * --- [BEFORE] ---
- * %bias = ... : tensor<MxNxf32>
- * %result = linalg.matmul ins(%a, %b : tensor<MxKxf32>, tensor<KxNxf32>)
- *                       outs(%bias : tensor<MxNxf32>) -> tensor<MxNxf32>
- *
- * =========================================================================================
- * --- [AFTER] ---
- * // Step 1: Create a placeholder empty tensor matching the output shape
- * %empty = tensor.empty() : tensor<MxNxf32>
- *
- * // Step 2: Initialize constant zero corresponding to the element type
- * %cst_0 = arith.constant 0.000000e+00 : f32
- *
- * // Step 3: Fill the empty tensor to establish a zero-accumulator
- * %zero_acc = linalg.fill ins(%cst_0 : f32) outs(%empty : tensor<MxNxf32>) -> tensor<MxNxf32>
- *
- * // Step 4: Perform the pure GEMM operation on the zero-accumulator
- * %matmul_res = linalg.matmul ins(%a, %b : tensor<MxKxf32>, tensor<KxNxf32>)
- *                           outs(%zero_acc : tensor<MxNxf32>) -> tensor<MxNxf32>
- *
- * // Step 5: Complete the operation by adding the original bias using an elementwise add
- * %result = arith.addf %matmul_res, %bias : tensor<MxNxf32>
- * =========================================================================================
- *
- * Assumptions:
- * 1. The operation is tensor-based (not buffer-based).
- * 2. The accumulator (bias) is not statically known to be zero.
- * 3. The element type is a primitive float or integer type.
+ * Verifies whether a matmul operation is valid for split transformation.
+ * Returns false if the matmul should be skipped due to:
+ * 1. Already processed matmul (has kLoopCarriedL0C attribute)
+ * 2. Illegal matmul (missing inits or inputs)
+ * 3. Memref-type matmul (not tensor mode)
  */
-static void splitMatmul(linalg::MatmulOp matmulOp, PatternRewriter &rewriter)
-{
-    auto inputs = matmulOp.getDpsInputs();
-    auto a = inputs[0];
-    auto b = inputs[1];
-
-    // this is the accumulator/out operand, not result in tensor mode
-    auto bias = matmulOp.getDpsInits()[0];
-
-    auto outputType = dyn_cast<RankedTensorType>(bias.getType());
-    if (!outputType) {
-        LOG_DEBUG("Not tensor mode: " << matmulOp
-                                      << "; the caller does not ensure the assumption. Cowardly doing nothing");
-        return;
-    }
-    auto elmType = outputType.getElementType();
-
-    Location loc = matmulOp.getLoc();
-
-    // [Step 1] Create tensor.empty for the new accumulator tensor
-    // Same shape and type as original matmul output
-    SmallVector<Value> dynamicSizes;
-    for (int64_t i = 0; i < outputType.getRank(); ++i) {
-        if (outputType.isDynamicDim(i)) {
-            dynamicSizes.push_back(rewriter.create<tensor::DimOp>(loc, bias, i));
-        }
-    }
-    auto emptyOp = rewriter.create<tensor::EmptyOp>(loc, outputType, dynamicSizes);
-
-    // [Step 2] Create zero constant based on element type
-    // Supports both floating-point (arith.constant float) and integer types
-    Value zeroValue;
-    if (auto floatType = dyn_cast<FloatType>(elmType)) {
-        APFloat zeroAPFloat = APFloat::getZero(floatType.getFloatSemantics());
-        zeroValue = rewriter.create<arith::ConstantFloatOp>(loc, zeroAPFloat, floatType).getResult();
-    } else if (auto intType = dyn_cast<IntegerType>(elmType)) {
-        zeroValue = rewriter.create<arith::ConstantIntOp>(loc, 0, intType).getResult();
-    } else {
-        // User does not ensure assumption 3.
-        return;
-    }
-
-    // [Step 3] Use linalg.fill to populate empty tensor with zero -> zero accumulator
-    auto fillOp = rewriter.create<linalg::FillOp>(loc, ValueRange {zeroValue}, ValueRange {emptyOp.getResult()});
-
-    // [Step 5] Create new matmul using zero-filled tensor as accumulator
-    // New matmul runs entirely on CUBE with no VECTOR dependency
-    auto newMatmul = rewriter.create<linalg::MatmulOp>(loc, ValueRange {a, b}, ValueRange {fillOp.getResult(0)});
-    NamedAttrList attrs(matmulOp->getAttrDictionary());
-    constexpr StringLiteral kShouldRemoveAttrs[] = {"operandSegmentSizes", "res_attrs", "arg_attrs"};
-    for (auto attr : kShouldRemoveAttrs) {
-        attrs.erase(attr);
-    }
-    newMatmul->setAttrs(attrs);
-    auto newMatmulRes = newMatmul.getResult(0);
-
-    // [Step 6] Create add: add(new_matmul_result, outs_value)
-    // This is the "c" in a*b+c, added after the matmul result
-    Operation *addOp;
-    if (isa<FloatType>(elmType)) {
-        addOp = rewriter.create<arith::AddFOp>(loc, newMatmulRes, bias).getOperation();
-    } else {
-        addOp = rewriter.create<arith::AddIOp>(loc, newMatmulRes, bias).getOperation();
-    }
-
-    addOp->setAttr(CVPipeline::kAddFromMatmul, rewriter.getUnitAttr());
-    rewriter.replaceOp(matmulOp, addOp);
-}
-
 static bool verifyMatmul(linalg::MatmulOp matmulOp)
 {
+    if (matmulOp->hasAttr(CVPipeline::kLoopCarriedL0C)) {
+        return false;
+    }
     auto inits = matmulOp.getDpsInits();
     auto inputs = matmulOp.getDpsInputs();
     if (inits.empty() || inputs.size() < 2) {
@@ -505,20 +491,132 @@ static bool verifyMatmul(linalg::MatmulOp matmulOp)
         LOG_DEBUG("Not split because not integer or float: " << matmulOp);
         return false;
     }
-
     return true;
+}
+
+/**
+ * Determines whether a matmul operation should be split based on comprehensive analysis.
+ * This function performs a complete analysis of the matmul operation's context, including:
+ * 1. Tracing the use-def chain of the output to find the outermost scope.
+ * 2. Evaluating input-based split criteria via shouldSplitByInput() and shouldSplitByOutput().
+ *
+ * Parameters:
+ *   matmulOp - The matmul operation to analyze.
+ *
+ * Returns:
+ *   An optional SplitInfo structure containing:
+ *   - mayNotExec: Whether the matmul might not execute (e.g., in a conditional or empty loop).
+ *   - outerInValue: The outermost initial value (original bias) in the chain.
+ *   - outerOutValue: The outermost result value in the chain.
+ *   - shouldSplit: Boolean indicating whether the split transformation should be applied.
+ *   Returns std::nullopt if analysis cannot be performed.
+ */
+static std::optional<SplitInfo> shouldSplit(linalg::MatmulOp matmulOp)
+{
+
+    if (!verifyMatmul(matmulOp)) {
+        return std::nullopt;
+    }
+
+    auto matmulInput = parseMatmulInputs(matmulOp);
+    bool argsLimitedInMatmul = true;
+    bool mayNotExec = false;
+    Value outerInValue = matmulInput.bias;
+    auto outerOutValue = searchInArgsChain(matmulOp.getResult(0), argsLimitedInMatmul, mayNotExec, outerInValue);
+    if (!argsLimitedInMatmul) {
+        LOG_DEBUG("Split because bias is not limited in args" << matmulOp); // S25
+        return SplitInfo {mayNotExec, outerInValue, outerOutValue, true};
+    }
+
+    if (!shouldSplitByInput(matmulOp, outerOutValue, outerInValue) &&
+        !shouldSplitByOutput(matmulOp, outerOutValue, outerInValue))
+    {
+        return SplitInfo {mayNotExec, outerInValue, outerOutValue, false};
+    }
+
+    return SplitInfo {mayNotExec, outerInValue, outerOutValue, true};
+}
+
+static void splitMatmul(linalg::MatmulOp matmulOp, PatternRewriter &rewriter, SplitInfo splitInfo)
+{
+    auto outputType = dyn_cast<RankedTensorType>(parseMatmulInputs(matmulOp).bias.getType());
+    if (!outputType) {
+        LOG_DEBUG("Not tensor mode: " << matmulOp
+                                      << "; the caller does not ensure the assumption. Cowardly doing nothing");
+        return;
+    }
+    auto elmType = outputType.getElementType();
+
+    Location loc = matmulOp.getLoc();
+
+    // [Step 1] Create tensor.empty for the new accumulator tensor
+    // Same shape and type as original matmul output
+    auto outerDefOp = splitInfo.outerOutValue.getDefiningOp();
+    rewriter.setInsertionPoint(outerDefOp);
+    SmallVector<Value> dynamicSizes;
+    for (int64_t i = 0; i < outputType.getRank(); ++i) {
+        if (outputType.isDynamicDim(i)) {
+            dynamicSizes.push_back(rewriter.create<tensor::DimOp>(loc, parseMatmulInputs(matmulOp).bias, i));
+        }
+    }
+    auto emptyOp = rewriter.create<tensor::EmptyOp>(loc, outputType, dynamicSizes);
+    splitInfo.outerInValue.replaceUsesWithIf(emptyOp->getResult(0),
+                                             [&](OpOperand &opop) { return opop.getOwner() == outerDefOp; });
+
+    // [Step 2] Create new matmul using zero-filled tensor as accumulator
+    // New matmul runs entirely on CUBE with no VECTOR dependency
+    auto inputs = parseMatmulInputs(matmulOp);
+    auto a = inputs.a;
+    auto b = inputs.b;
+    auto bias = inputs.bias;
+    rewriter.setInsertionPoint(matmulOp);
+    auto newMatmul = rewriter.create<linalg::MatmulOp>(loc, ValueRange {a, b}, ValueRange {bias});
+    NamedAttrList attrs(matmulOp->getAttrDictionary());
+    constexpr StringLiteral kShouldRemoveAttrs[] = {"operandSegmentSizes", "res_attrs", "arg_attrs"};
+    for (auto attr : kShouldRemoveAttrs) {
+        attrs.erase(attr);
+    }
+    newMatmul->setAttrs(attrs);
+
+    // [Step 3] Create add: add(new_matmul_result, outs_value)
+    // This is the "c" in a*b+c, added after the matmul result
+    rewriter.setInsertionPointAfterValue(splitInfo.outerOutValue);
+    Operation *addOp;
+    if (isa<FloatType>(elmType)) {
+        addOp = rewriter.create<arith::AddFOp>(loc, splitInfo.outerOutValue, splitInfo.outerInValue).getOperation();
+    } else {
+        addOp = rewriter.create<arith::AddIOp>(loc, splitInfo.outerOutValue, splitInfo.outerInValue).getOperation();
+    }
+    addOp->setAttr(CVPipeline::kAddFromMatmul, rewriter.getUnitAttr());
+    splitInfo.outerOutValue.replaceUsesWithIf(addOp->getResult(0),
+                                              [&](OpOperand &opop) { return opop.getOwner() != addOp; });
+
+    rewriter.replaceOp(matmulOp, newMatmul);
 }
 
 LogicalResult SplitMatmulPattern::matchAndRewrite(linalg::MatmulOp matmulOp, PatternRewriter &rewriter) const
 {
-    if (!verifyMatmul(matmulOp)) {
+    LOG_DEBUG("check matmulOp = " << matmulOp);
+    auto splitInfoOpt = shouldSplit(matmulOp);
+    if (!splitInfoOpt.has_value()) {
         return failure();
     }
+    auto splitInfo = splitInfoOpt.value();
+    LOG_DEBUG("-------------------");
+    LOG_DEBUG("matmulOp = " << matmulOp);
+    LOG_DEBUG("outerOutValue = " << splitInfo.outerOutValue);
+    LOG_DEBUG("outerInValue = " << splitInfo.outerInValue);
+    LOG_DEBUG("mayNotExec = " << splitInfo.mayNotExec);
+    LOG_DEBUG("shouldSplit = " << splitInfo.shouldSplit);
+    LOG_DEBUG("-------------------");
+    matmulOp->setAttr(CVPipeline::kLoopCarriedL0C, rewriter.getUnitAttr());
 
-    if (!shouldSplit(matmulOp, rewriter)) {
-        return failure();
+    if (splitInfo.shouldSplit) {
+        splitMatmul(matmulOp, rewriter, splitInfo);
     }
 
-    splitMatmul(matmulOp, rewriter);
+    if (splitInfo.mayNotExec) {
+        matmulOp->setAttr(CVPipeline::kMayNotExec, rewriter.getUnitAttr());
+    }
     return success();
 }

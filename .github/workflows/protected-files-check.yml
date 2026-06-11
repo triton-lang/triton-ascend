@@ -1,24 +1,26 @@
-name: Restricted Files Reminder
+name: Restricted Files Labeler
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review, edited]
 
 permissions:
   contents: read
+  issues: write
   pull-requests: read
 
 jobs:
   protected-files:
-    name: restricted files reminder
+    name: restricted files labeler
     runs-on: ubuntu-latest
     steps:
-      - name: Check restricted files reminder
+      - name: Apply restricted files label
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
+          RESTRICTED_FILES_LABEL: restricted-files
         run: |
           set -euo pipefail
 
@@ -72,23 +74,45 @@ jobs:
           done
 
           if (( ${#violations[@]} > 0 )); then
-            {
-              echo "::error title=Restricted file reminder::Changes outside the allowed repository-construction paths need committer attention."
-              echo "This is a non-required reminder check during repository construction."
-              echo "Allowed directories:"
-              printf '  - %s\n' "${allowed_dirs[@]}"
-              echo "Allowed files:"
-              printf '  - %s\n' "${allowed_files[@]}"
-              echo "The following changed file(s) are outside the allowed paths:"
-              printf '  - %s\n' "${violations[@]}"
-            } >&2
-            exit 1
-          fi
-
-          {
-            echo "All changed files are within the allowed repository-construction paths."
+            echo "Changes outside the allowed repository-construction paths need committer attention."
             echo "Allowed directories:"
             printf '  - %s\n' "${allowed_dirs[@]}"
             echo "Allowed files:"
             printf '  - %s\n' "${allowed_files[@]}"
-          }
+            echo "The following changed file(s) are outside the allowed paths:"
+            printf '  - %s\n' "${violations[@]}"
+
+            gh api \
+              --method POST \
+              "repos/${REPOSITORY}/issues/${PR_NUMBER}/labels" \
+              -f "labels[]=${RESTRICTED_FILES_LABEL}" \
+              >/dev/null
+
+            echo "Applied label: ${RESTRICTED_FILES_LABEL}"
+            exit 0
+          fi
+
+          echo "All changed files are within the allowed repository-construction paths."
+          echo "Allowed directories:"
+          printf '  - %s\n' "${allowed_dirs[@]}"
+          echo "Allowed files:"
+          printf '  - %s\n' "${allowed_files[@]}"
+
+          mapfile -t current_labels < <(
+            gh api \
+              "repos/${REPOSITORY}/issues/${PR_NUMBER}/labels" \
+              --jq '.[].name'
+          )
+
+          for label in "${current_labels[@]}"; do
+            if [[ "${label}" == "${RESTRICTED_FILES_LABEL}" ]]; then
+              gh api \
+                --method DELETE \
+                "repos/${REPOSITORY}/issues/${PR_NUMBER}/labels/${RESTRICTED_FILES_LABEL}" \
+                >/dev/null
+              echo "Removed label: ${RESTRICTED_FILES_LABEL}"
+              exit 0
+            fi
+          done
+
+          echo "Label ${RESTRICTED_FILES_LABEL} was not present."

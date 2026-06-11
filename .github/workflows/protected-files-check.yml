@@ -1,4 +1,4 @@
-name: Protected Files Reminder
+name: Restricted Files Reminder
 
 on:
   pull_request:
@@ -10,10 +10,10 @@ permissions:
 
 jobs:
   protected-files:
-    name: protected files reminder
+    name: restricted files reminder
     runs-on: ubuntu-latest
     steps:
-      - name: Check protected files reminder
+      - name: Check restricted files reminder
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -22,8 +22,22 @@ jobs:
         run: |
           set -euo pipefail
 
-          protected_files=(
-            ".pre-commit-config.yaml"
+          allowed_dirs=(
+            ".github/"
+            "docker/"
+            "docs/"
+            "third_party/"
+          )
+
+          allowed_files=(
+            ".readthedocs.yaml"
+            "CONTRIBUTING.md"
+            "CONTRIBUTING_zh.md"
+            "README.md"
+            "README_zh.md"
+            "RELEASE.md"
+            "requirements.txt"
+            "requirements_dev.txt"
           )
 
           mapfile -t changed_files < <(
@@ -33,22 +47,48 @@ jobs:
           )
 
           violations=()
-          for protected_file in "${protected_files[@]}"; do
-            for changed_file in "${changed_files[@]}"; do
-              if [[ "${changed_file}" == "${protected_file}" ]]; then
-                violations+=("${protected_file}")
+          for changed_file in "${changed_files[@]}"; do
+            allowed=false
+
+            for allowed_file in "${allowed_files[@]}"; do
+              if [[ "${changed_file}" == "${allowed_file}" ]]; then
+                allowed=true
+                break
               fi
             done
+
+            if [[ "${allowed}" == "false" ]]; then
+              for allowed_dir in "${allowed_dirs[@]}"; do
+                if [[ "${changed_file}" == "${allowed_dir}"* ]]; then
+                  allowed=true
+                  break
+                fi
+              done
+            fi
+
+            if [[ "${allowed}" == "false" ]]; then
+              violations+=("${changed_file}")
+            fi
           done
 
           if (( ${#violations[@]} > 0 )); then
             {
-              echo "::error title=Protected file reminder::Protected file changes need committer attention."
+              echo "::error title=Restricted file reminder::Changes outside the allowed repository-construction paths need committer attention."
               echo "This is a non-required reminder check during repository construction."
-              echo "The following protected file(s) were modified:"
+              echo "Allowed directories:"
+              printf '  - %s\n' "${allowed_dirs[@]}"
+              echo "Allowed files:"
+              printf '  - %s\n' "${allowed_files[@]}"
+              echo "The following changed file(s) are outside the allowed paths:"
               printf '  - %s\n' "${violations[@]}"
             } >&2
             exit 1
           fi
 
-          echo "No protected files were modified."
+          {
+            echo "All changed files are within the allowed repository-construction paths."
+            echo "Allowed directories:"
+            printf '  - %s\n' "${allowed_dirs[@]}"
+            echo "Allowed files:"
+            printf '  - %s\n' "${allowed_files[@]}"
+          }

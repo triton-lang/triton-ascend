@@ -56,6 +56,11 @@ struct DependencyInfo {
   int consumerBlockId;
   int iniProducerBlockId;
   int iniConsumerBlockId;
+
+  // Optional Items for V2CDependencies
+  mlir::Operation *iniMatmulOp = nullptr;
+  bool isMatmulA = false;
+  bool isMatmulB = false;
 };
 
 class DataDependencyInfo {
@@ -139,6 +144,7 @@ private:
     bool isValidValueForDependency(mlir::Value value);
     bool isOuterOpArg(mlir::Value value);
     void processIterArgDependencies();
+    void analyzeV2CMatmulABType(DataDependencyInfo &info);
     llvm::SmallVector<mlir::Operation *> collectDiffCoreTypeUsers(
         mlir::BlockArgument iterArg, llvm::StringRef initCoreType);
     void insertProducerAndRecordDeps(scf::ForOp forOp, mlir::BlockArgument iterArg,

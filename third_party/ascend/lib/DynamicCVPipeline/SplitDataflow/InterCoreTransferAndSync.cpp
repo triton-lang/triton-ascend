@@ -24,6 +24,7 @@
 
 #include <memory>
 #include <optional>
+#include <algorithm>
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/FlagIdReuse.h"
@@ -215,9 +216,9 @@ bool InterCoreTransferAndSyncPass::isOuterLayerDependency(size_t depIndex, mlir:
 }
 
 // Nd2NzNormalizer
-SmallVector<int64_t> InterCoreTransferAndSyncPass::computeExpectedShape(Value value)
+SmallVector<int64_t> InterCoreTransferAndSyncPass::computeExpectedShape(mlir::Value depValue, bool isMatmulA, bool isMatmulB, bool isOnlyDepInMatmul)
 {
-    auto tensorTy = dyn_cast<TensorType>(value.getType());
+    auto tensorTy = dyn_cast<TensorType>(depValue.getType());
     static constexpr int NdShapeLength = 2;
     if (!tensorTy || tensorTy.getRank() != NdShapeLength) {
         LOG_DEBUG("source shape is not 2-dim!");
@@ -233,27 +234,89 @@ SmallVector<int64_t> InterCoreTransferAndSyncPass::computeExpectedShape(Value va
         LOG_DEBUG("Unsupported element type for 32B alignment.\n");
         return { M, N };
     }
+
+    int mRound = NzDimWidth;
+    int nRound = nWidth;
+    if (isMatmulA && isMatmulB) {
+        mRound = std::max<int64_t>(NzDimWidth, nWidth);
+        nRound = std::max<int64_t>(NzDimWidth, nWidth);
+    }
+    if (!isOnlyDepInMatmul && isMatmulA) {
+        nRound = std::max<int64_t>(NzDimWidth, nWidth);
+    }
+    if (!isOnlyDepInMatmul && isMatmulB) {
+        mRound = std::max<int64_t>(NzDimWidth, nWidth);
+    }
+    LOG_DEBUG("mRound: " << mRound << "\n");
+    LOG_DEBUG("nRound: " << nRound << "\n");
     // Calculate newM / newN using the formula
-    int64_t blM = (M + NzDimWidth - 1) / NzDimWidth;
-    int64_t newM = blM * NzDimWidth;
+    int64_t blM = (M + mRound - 1) / mRound;
+    int64_t newM = blM * mRound;
 
-    int64_t blN = (N + nWidth - 1) / nWidth;
-    int64_t newN = blN * nWidth;
-
+    int64_t blN = (N + nRound - 1) / nRound;
+    int64_t newN = blN * nRound;
+    LOG_DEBUG("newM" << newM << "\n");
+    LOG_DEBUG("newN" << newN << "\n");
     return { newM, newN }; // Return 2D shape
 }
 
-bool InterCoreTransferAndSyncPass::isShapeExpected(Value value, SmallVector<int64_t> &expectedShape)
+std::pair<bool, bool> InterCoreTransferAndSyncPass::isExpectedShape(Value value,
+    SmallVector<int64_t> &expectedShape, bool isMatmulA, bool isMatmulB, bool isOnlyDepInMatmul)
 {
     auto tensorTy = dyn_cast<TensorType>(value.getType());
     ArrayRef<int64_t> currShape = tensorTy.getShape();
-    return currShape.equals(expectedShape);
+    bool isEqualedShape = currShape.equals(expectedShape);
+    bool matmulPadding = false;
+    if (isOnlyDepInMatmul) {
+        if (isMatmulA && currShape[1] != expectedShape[1]) {
+            matmulPadding = true;
+        }
+        if (isMatmulB && currShape[0] != expectedShape[0]) {
+            matmulPadding = true;
+        }
+    }
+    LOG_DEBUG("isEqualedShape" << isEqualedShape << "\n");
+    LOG_DEBUG("matmulPadding" << matmulPadding << "\n");
+    return { isEqualedShape, matmulPadding };
 }
 
-void InterCoreTransferAndSyncPass::rewriteMatmulWithNewShape(OpBuilder &builder, Operation *matmulOp, Location loc)
+void InterCoreTransferAndSyncPass::padMatmulInnerDim(OpBuilder &builder, Operation *matmulOp, Location loc, int matmulIndex, int matmulOpBlockId)
 {
-    int matmulOpBlockId = static_cast<int>(CVPipeline::getOpBlockId(matmulOp).value_or(-1));
+    int paddingDim = 1 - matmulIndex;
+    Value iniValue = matmulOp->getOperands()[matmulIndex];
+    Value transValue = matmulOp->getOperands()[1 - matmulIndex];
+    auto iniValueType = dyn_cast<RankedTensorType>(iniValue.getType());
+    auto transValueType = dyn_cast<RankedTensorType>(transValue.getType());
+    SmallVector<int64_t> paddingShape;
+    if (paddingDim) {
+        paddingShape = { iniValueType.getShape()[0], transValueType.getShape()[0] };
+    } else {
+        paddingShape = { transValueType.getShape()[1], iniValueType.getShape()[1] };
+    }
 
+    builder.setInsertionPoint(matmulOp);
+    auto floatElemTy = cast<FloatType>(iniValueType.getElementType());
+    auto zeroConstOp = builder.create<arith::ConstantFloatOp>(
+        loc, APFloat::getZero(floatElemTy.getFloatSemantics()), floatElemTy);
+    auto tensorEmptyOp = builder.create<tensor::EmptyOp>(loc, paddingShape, iniValueType.getElementType());
+    LOG_DEBUG("[padMatmulInnerDim]" << *tensorEmptyOp << "\n");
+    auto linalgFillOp = builder.create<linalg::FillOp>(loc, zeroConstOp.getResult(), tensorEmptyOp.getResult());
+    SmallVector<OpFoldResult> offsets = { builder.getIndexAttr(0), builder.getIndexAttr(0) };
+    SmallVector<OpFoldResult> insertsizes = { builder.getIndexAttr(iniValueType.getShape()[0]), builder.getIndexAttr(iniValueType.getShape()[1]) };
+    SmallVector<OpFoldResult> strides = { builder.getIndexAttr(1), builder.getIndexAttr(1) };
+    auto tensorInsertSliceOp = builder.create<tensor::InsertSliceOp>(loc, iniValue, linalgFillOp->getResult(0),
+        offsets, insertsizes, strides);
+    matmulOp->setOperand(matmulIndex, tensorInsertSliceOp->getResult(0));
+    attachCommonTags(zeroConstOp, matmulOpBlockId, "CUBE");
+    attachCommonTags(tensorEmptyOp, matmulOpBlockId, "CUBE");
+    attachCommonTags(linalgFillOp, matmulOpBlockId, "CUBE");
+    attachCommonTags(tensorInsertSliceOp, matmulOpBlockId, "CUBE");
+}
+
+void InterCoreTransferAndSyncPass::extractMatmulResult(
+    OpBuilder &builder, Operation *matmulOp, Location loc,
+    int matmulOpBlockId, llvm::DenseMap<mlir::Value, mlir::Value> &cubeValueMapping, bool isOnlyDepInMatmul)
+{
     Value lhs = matmulOp->getOperands()[0];
     Value rhs = matmulOp->getOperands()[1];
     Value acc = matmulOp->getOperands()[2];
@@ -281,25 +344,50 @@ void InterCoreTransferAndSyncPass::rewriteMatmulWithNewShape(OpBuilder &builder,
 
     Value newAccResult = linalgFillOp->getResult(0);
 
-    builder.setInsertionPointAfter(matmulOp);
     static constexpr int accIndex = 2;
     matmulOp->setOperand(accIndex, newAccResult);
     matmulOp->getResult(0).setType(expectedType);
     auto newMatmulOp = dyn_cast<linalg::MatmulOp>(matmulOp);
     Value newMatmulResult = newMatmulOp->getResult(0);
     LOG_DEBUG("newmatmulOp" << newMatmulOp << "\n");
-    SmallVector<OpFoldResult> offsets = { builder.getIndexAttr(0), builder.getIndexAttr(0) };
-    SmallVector<OpFoldResult> strides = { builder.getIndexAttr(1), builder.getIndexAttr(1) };
-    SmallVector<OpFoldResult> sizes = { builder.getIndexAttr(accType.getShape()[0]),
-        builder.getIndexAttr(accType.getShape()[1]) };
-    auto extractSliceOp = builder.create<tensor::ExtractSliceOp>(loc, newMatmulResult, offsets, sizes, strides);
-    attachCommonTags(extractSliceOp, matmulOpBlockId, "CUBE");
 
-    originalResult.replaceUsesWithIf(extractSliceOp.getResult(),
-        [&](OpOperand &use) { return use.getOwner() != extractSliceOp.getOperation(); });
-    LOG_DEBUG("cubeValueMapping[originalResult]" << originalResult << "\n");
-    LOG_DEBUG("cubeValueMapping[originalResult]extractSliceOp.getResult()   " << extractSliceOp.getResult() << "\n");
-    cubeValueMapping[originalResult] = extractSliceOp.getResult();
+    bool hasMatmulExtract = false;
+    for (Operation *user : matmulOp->getUsers()) {
+        if (isa<tensor::ExtractSliceOp>(user) && user->hasAttr(CVPipeline::kMatmulExtract)) {
+            hasMatmulExtract = true;
+        }
+    }
+
+    if (isOnlyDepInMatmul || !hasMatmulExtract) {
+        builder.setInsertionPointAfter(matmulOp);
+        SmallVector<OpFoldResult> offsets = { builder.getIndexAttr(0), builder.getIndexAttr(0) };
+        SmallVector<OpFoldResult> strides = { builder.getIndexAttr(1), builder.getIndexAttr(1) };
+        SmallVector<OpFoldResult> sizes = { builder.getIndexAttr(accType.getShape()[0]),
+            builder.getIndexAttr(accType.getShape()[1]) };
+        auto extractSliceOp = builder.create<tensor::ExtractSliceOp>(loc, newMatmulResult, offsets, sizes, strides);
+        attachCommonTags(extractSliceOp, matmulOpBlockId, "CUBE");
+        MLIRContext *ctx = extractSliceOp->getContext();
+        extractSliceOp->setAttr(CVPipeline::kMatmulExtract, UnitAttr::get(ctx));
+        originalResult.replaceUsesWithIf(extractSliceOp.getResult(),
+            [&](OpOperand &use) { return use.getOwner() != extractSliceOp.getOperation(); });   
+    
+    
+        LOG_DEBUG("cubeValueMapping[originalResult]" << originalResult << "\n");
+        LOG_DEBUG("cubeValueMapping[originalResult]extractSliceOp.getResult()   " << extractSliceOp.getResult() << "\n");
+        cubeValueMapping[originalResult] = extractSliceOp.getResult();
+    }
+}
+
+void InterCoreTransferAndSyncPass::rewriteMatmulWithNewShape(OpBuilder &builder, Operation *matmulOp, Location loc, bool isMatmulA, bool isMatmulB, bool matmulPadding, bool isOnlyDepInMatmul)
+{
+    int matmulOpBlockId = static_cast<int>(CVPipeline::getOpBlockId(matmulOp).value_or(-1));
+
+    if (matmulPadding) {
+        int matmulIndex = isMatmulA ? 1 : 0;
+        padMatmulInnerDim(builder, matmulOp, loc, matmulIndex, matmulOpBlockId);
+    }
+
+    extractMatmulResult(builder, matmulOp, loc, matmulOpBlockId, cubeValueMapping, isOnlyDepInMatmul);
 }
 
 void InterCoreTransferAndSyncPass::rewriteTransposeWithNewShape(OpBuilder &builder, Operation *transposeOp,
@@ -322,7 +410,7 @@ void InterCoreTransferAndSyncPass::rewriteTransposeWithNewShape(OpBuilder &build
 
 // padding v->c tensor
 mlir::Value InterCoreTransferAndSyncPass::normalizeIfNeeded(OpBuilder &builder, DependencyInfo &dep, Location loc,
-    mlir::Value origValue, SmallVector<int64_t> expectedShape, int originBlockId)
+    mlir::Value origValue, SmallVector<int64_t> expectedShape, int originBlockId, bool matmulPadding, bool isOnlyDepInMatmul)
 {
     auto origTensorType = dyn_cast<RankedTensorType>(origValue.getType());
 
@@ -351,6 +439,7 @@ mlir::Value InterCoreTransferAndSyncPass::normalizeIfNeeded(OpBuilder &builder, 
     attachCommonTags(tensorEmptyOp, originBlockId, "VECTOR");
     attachCommonTags(linalgFillOp, originBlockId, "VECTOR");
     attachCommonTags(tensorInsertSliceOp, originBlockId, "VECTOR");
+
     int cId = dep.iniConsumerBlockId;
     LOG_DEBUG("int cId = dep.iniConsumerBlockId;" << cId << "\n");
     for (Operation *user : origValue.getUsers()) {
@@ -361,8 +450,10 @@ mlir::Value InterCoreTransferAndSyncPass::normalizeIfNeeded(OpBuilder &builder, 
             continue;
         }
         user->replaceUsesOfWith(origValue, tensorInsertSliceOp.getResult());
+        bool isMatmulA = dep.isMatmulA;
+        bool isMatmulB = dep.isMatmulB;
         if (auto matmulOp = dyn_cast<linalg::MatmulOp>(user)) {
-            rewriteMatmulWithNewShape(builder, matmulOp, loc);
+            rewriteMatmulWithNewShape(builder, matmulOp, loc, isMatmulA, isMatmulB, matmulPadding, isOnlyDepInMatmul);
             continue;
         }
         if (auto transposeOp = dyn_cast<linalg::TransposeOp>(user)) {
@@ -372,7 +463,7 @@ mlir::Value InterCoreTransferAndSyncPass::normalizeIfNeeded(OpBuilder &builder, 
             for (Operation *transposeuser : transposeOp->getUsers()) {
                 auto matmulOp = dyn_cast<linalg::MatmulOp>(transposeuser);
                 if (matmulOp && CVPipeline::getOpBlockId(matmulOp).value_or(-1) == cId) {
-                    rewriteMatmulWithNewShape(builder, matmulOp, loc);
+                    rewriteMatmulWithNewShape(builder, matmulOp, loc, isMatmulA, isMatmulB, matmulPadding, isOnlyDepInMatmul);
                 }
             }
         }
@@ -390,13 +481,25 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder, Dependency
     if (it != vecValueMapping.end()) {
         return;
     }
+    bool valueIsMatmulA = dep.isMatmulA;
+    bool valueIsMatmulB = dep.isMatmulB;
+    bool isOnlyDepInMatmul = true;
+    auto iniDepMatmulOp = dep.iniMatmulOp;
+
+    if (iniDepMatmulOp) {
+        LOG_DEBUG(*iniDepMatmulOp);
+        if (iniDepMatmulOp->hasAttr(CVPipeline::kMatmulADep) 
+            && iniDepMatmulOp->hasAttr(CVPipeline::kMatmulBDep)) {
+            isOnlyDepInMatmul = false;
+        }
+    }
     // Step 1: Compute expected shape
-    SmallVector<int64_t> expectedShape = computeExpectedShape(origValue);
-    
+    SmallVector<int64_t> expectedShape = computeExpectedShape(origValue, valueIsMatmulA, valueIsMatmulB, isOnlyDepInMatmul);
     int originBlockId = dep.iniProducerBlockId;
     // Step 2: If shapes match, return original value
-    if (!isShapeExpected(origValue, expectedShape)) {
-        newValue = normalizeIfNeeded(builder, dep, loc, origValue, expectedShape, originBlockId);
+    auto [isEqualedShape, matmulPadding] = isExpectedShape(origValue, expectedShape,valueIsMatmulA, valueIsMatmulB, isOnlyDepInMatmul);
+    if (!isEqualedShape) {
+        newValue = normalizeIfNeeded(builder, dep, loc, origValue, expectedShape, originBlockId, matmulPadding, isOnlyDepInMatmul);
     }
     // Step 3: insert nd2nz
     auto srcTensorType = cast<RankedTensorType>(newValue.getType());
@@ -1181,6 +1284,7 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
             dep.consumerBlockId << ", iniProducerBlockId = " << dep.iniProducerBlockId << ", iniConsumerBlockId = " <<
             dep.iniConsumerBlockId << ", value = " << dep.value << "\n");
     }
+    LOG_DEBUG("Step 1: Handle V->C dependencies\n");
     // Step 1: Handle V->C dependencies
     for (auto &dep : V2CDependencies) {
         Location loc = dep.value.getLoc();

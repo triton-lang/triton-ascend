@@ -34,6 +34,9 @@ namespace CVPipeline {
 inline constexpr llvm::StringLiteral kCoreType = "ssbuffer.core_type";
 inline constexpr llvm::StringLiteral kBlockId = "ssbuffer.block_id";
 inline constexpr llvm::StringLiteral kTransferId = "ssbuffer.transfer_id";
+inline constexpr llvm::StringLiteral kMatmulADep = "ssbuffer.adep";
+inline constexpr llvm::StringLiteral kMatmulBDep = "ssbuffer.bdep";
+inline constexpr llvm::StringLiteral kMatmulExtract = "ssbuffer.matmul_extract";
 inline constexpr llvm::StringLiteral kCubeFirst = "ssbuffer.cube_first";
 inline constexpr llvm::StringLiteral kVectorFirst = "ssbuffer.vector_first";
 inline constexpr llvm::StringLiteral kAddFromMatmul = "ssbuffer.add_from_matmul";

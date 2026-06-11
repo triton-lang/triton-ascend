@@ -34,7 +34,7 @@ module {
 // CHECK: %[[ALLOC:[a-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 0 : i32} : memref<4x7x16x16xf16, #hivm.address_space<cbuf>>
 // CHECK: annotation.mark %[[ALLOC]] {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<0>, ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 0 : i32} : memref<4x7x16x16xf16, #hivm.address_space<cbuf>>
 // CHECK: hivm.hir.copy ins(%[[RESHAPE_4]] : tensor<4x7x16x16xf16>) outs(%[[ALLOC]] : memref<4x7x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 0 : i32}
-// CHECK: hivm.hir.sync_block_set {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 0 : i32}[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 1
+// CHECK: hivm.hir.sync_block_set {ssbuffer.analyze_flag_id, ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.transfer_id = 0 : i32}[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = [[FLAG_1:[0-9]+]]
 // CHECK: %[[ALLOC_5:[a-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xf16>
 // CHECK: %[[TENSOR_6:[a-z0-9_]+]] = bufferization.to_tensor %[[ALLOC_5]] {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : memref<64x64xf16>
 // CHECK: tensor.empty()
@@ -45,10 +45,10 @@ module {
 // CHECK: %[[FILL_10:[a-z0-9_]+]] = linalg.fill {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} ins(%[[CST_7]] : f32) outs(%[[EMPTY_9]] : tensor<112x64xf32>) -> tensor<112x64xf32>
 // CHECK: %[[ALLOC_8:[a-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : memref<4x7x16x16xf16, #hivm.address_space<cbuf>>
 // CHECK: annotation.mark %[[ALLOC_8]] {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<0>, ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : memref<4x7x16x16xf16, #hivm.address_space<cbuf>>
-// CHECK: hivm.hir.sync_block_wait {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 1
+// CHECK: hivm.hir.sync_block_wait {ssbuffer.analyze_flag_id, ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = [[FLAG_1]]
 // CHECK: %[[MEM_11:[a-z0-9_]+]] = hivm.hir.convert_layout %[[ALLOC_8]] output_shape [112, 64] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : (memref<4x7x16x16xf16, #hivm.address_space<cbuf>>) -> memref<112x64xf16, #hivm.address_space<cbuf>>
 // CHECK: %[[MEMSPACECAST:[a-z0-9_]+]] = memref.memory_space_cast %[[MEM_11]] {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : memref<112x64xf16, #hivm.address_space<cbuf>> to memref<112x64xf16>
 // CHECK: %[[TENSOR_12:[a-z0-9_]+]] = bufferization.to_tensor %[[MEMSPACECAST]] restrict writable {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 0 : i32} : memref<112x64xf16>
-// CHECK: %[[MATMUL_13:[a-z0-9_]+]] = linalg.matmul {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} ins(%[[TENSOR_12]], %[[TENSOR_6]] : tensor<112x64xf16>, tensor<64x64xf16>) outs(%[[FILL_10]] : tensor<112x64xf32>) -> tensor<112x64xf32>
-// CHECK: %[[EXTRACTED_SLICE:[a-z0-9_]+]] = tensor.extract_slice %[[MATMUL_13]][0, 0] [100, 64] [1, 1] {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : tensor<112x64xf32> to tensor<100x64xf32>
+// CHECK: %[[MATMUL_13:[a-z0-9_]+]] = linalg.matmul {ssbuffer.adep, ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} ins(%[[TENSOR_12]], %[[TENSOR_6]] : tensor<112x64xf16>, tensor<64x64xf16>) outs(%[[FILL_10]] : tensor<112x64xf32>) -> tensor<112x64xf32>
+// CHECK: %[[EXTRACTED_SLICE:[a-z0-9_]+]] = tensor.extract_slice %[[MATMUL_13]][0, 0] [100, 64] [1, 1] {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE", ssbuffer.matmul_extract} : tensor<112x64xf32> to tensor<100x64xf32>
 // CHECK: return

@@ -92,18 +92,30 @@ private:
                               mlir::Operation *currConsStart,
                               llvm::SmallVector<DependencyInfo> &memDependencies);
 
-  SmallVector<int64_t> computeExpectedShape(mlir::Value value);
-  bool isShapeExpected(mlir::Value value, llvm::SmallVector<int64_t> &expectedShape);
+  SmallVector<int64_t> computeExpectedShape(mlir::Value depValue, bool isMatmulA, bool isMatmulB, bool isOnlyDepInMatmul);
+  std::pair<bool, bool> isExpectedShape(Value value,
+                                        SmallVector<int64_t> &expectedShape,
+                                        bool isMatmulA,
+                                        bool isMatmulB,
+                                        bool isOnlyDepInMatmul);
+  void padMatmulInnerDim(OpBuilder &builder, Operation *matmulOp, Location loc, int matmulIndex, int matmulOpBlockId);
+  void extractMatmulResult(OpBuilder &builder, Operation *matmulOp, Location loc, int matmulOpBlockId, llvm::DenseMap<mlir::Value, mlir::Value> &cubeValueMapping, bool isOnlyDepInMatmul);
   mlir::Value normalizeIfNeeded(mlir::OpBuilder &builder,
                                 DependencyInfo &dep,
                                 mlir::Location loc,
                                 mlir::Value origValue,
                                 llvm::SmallVector<int64_t> expectedShape,
-                                int originBlockId);
+                                int originBlockId,
+                                bool matmulpadding,
+                                bool isOnlyDepInMatmul);
   void Nd2NzNormalize(mlir::OpBuilder &builder, DependencyInfo &dep, mlir::Location loc);
   void rewriteMatmulWithNewShape(mlir::OpBuilder &builder,
                                  mlir::Operation *matmulOp,
-                                 mlir::Location loc);
+                                 mlir::Location loc,
+                                 bool isMatmulA,
+                                 bool isMatmulB,
+                                 bool matmulpadding,
+                                 bool isOnlyDepInMatmul);
   void rewriteTransposeWithNewShape(mlir::OpBuilder &builder,
                                     mlir::Operation *transposeOp,
                                     mlir::Location loc);

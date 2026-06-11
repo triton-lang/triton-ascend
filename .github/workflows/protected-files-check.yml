@@ -1,0 +1,53 @@
+name: Protected Files Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  protected-files:
+    name: protected files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check protected files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          protected_files=(
+            ".pre-commit-config.yaml"
+          )
+
+          mapfile -t changed_files < <(
+            gh api --paginate \
+              "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" \
+              --jq '.[].filename'
+          )
+
+          violations=()
+          for protected_file in "${protected_files[@]}"; do
+            for changed_file in "${changed_files[@]}"; do
+              if [[ "${changed_file}" == "${protected_file}" ]]; then
+                violations+=("${protected_file}")
+              fi
+            done
+          done
+
+          if (( ${#violations[@]} > 0 )); then
+            {
+              echo "::error title=Protected file modified::Protected file changes are not allowed in pull requests."
+              echo "The following protected file(s) cannot be modified:"
+              printf '  - %s\n' "${violations[@]}"
+            } >&2
+            exit 1
+          fi
+
+          echo "No protected files were modified."

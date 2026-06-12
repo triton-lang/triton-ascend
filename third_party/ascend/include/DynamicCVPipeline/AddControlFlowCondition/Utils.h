@@ -53,9 +53,6 @@ LogicalResult topologicalSort(SmallVector<Operation *> &ops);
 // Get block_ids in order of appearance in for loop body
 SmallVector<int> getBlockIdsInOrder(scf::ForOp forOp);
 
-// Helper to get block_id attribute from op
-std::optional<int64_t> getOpBlockId(Operation *op);
-
 // Get the block_id of the immediate child of scf.for that contains op
 std::optional<int64_t> getForDirectChildBlockId(Operation *op);
 

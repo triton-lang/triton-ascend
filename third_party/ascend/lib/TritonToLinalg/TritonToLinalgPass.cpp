@@ -112,6 +112,41 @@ public:
   }
 };
 
+// A tt.scan that is (1) a plain cumsum (combine body is a single add, matching
+// ScanConverter's triton_cumsum selection) and (2) collapses to a 1-D scan after
+// backend lowering, i.e. every dim except the scan axis has extent 1 (e.g.
+// [1,1,128,1] with axis=2). Only this case is routed to the SIMT (Sklansky)
+// cumsum template; cumprod / generic scans and multi-dim cumsum stay on SIMD.
+static bool isSimt1DCumsum(triton::ScanOp op)
+{
+  // (1) Must be a single-add combine body (skip pure type-cast ops, mirroring
+  // ReductionOpBaseConverter::getRealReductionOps).
+  Operation *reduceOp = nullptr;
+  for (Operation &bodyOp : op.getBody()->without_terminator()) {
+    if (isa<arith::ExtFOp, arith::TruncFOp, arith::BitcastOp>(&bodyOp))
+      continue;
+    if (reduceOp)
+      return false; // more than one real op -> not a simple cumsum
+    reduceOp = &bodyOp;
+  }
+  if (!reduceOp || !isa<arith::AddFOp, arith::AddIOp>(reduceOp))
+    return false;
+
+  // (2) Must be the 1-D scenario: all non-scan dims are unit-sized.
+  auto srcTy = dyn_cast<RankedTensorType>(op.getOperand(0).getType());
+  if (!srcTy || !srcTy.hasRank())
+    return false;
+  int64_t axis = op.getAxis();
+  ArrayRef<int64_t> shape = srcTy.getShape();
+  if (axis < 0 || axis >= static_cast<int64_t>(shape.size()))
+    return false;
+  for (int64_t i = 0; i < static_cast<int64_t>(shape.size()); ++i) {
+    if (i != axis && shape[i] != 1)
+      return false;
+  }
+  return true;
+}
+
 static bool isSIMTOp(Operation *op)
 {
   if (auto custom_op = dyn_cast<hivm::CustomOp>(op)) {
@@ -123,6 +158,13 @@ static bool isSIMTOp(Operation *op)
     return true;
   }
 
+  // tt.scan: only a 1-D cumsum is treated as a SIMT op (drives the kernel
+  // parallel_mode -> mix_simd_simt -> enable_simt). Everything else stays SIMD.
+  if (compileOn91095Flag) {
+    if (auto scan = dyn_cast<triton::ScanOp>(op)) {
+      return isSimt1DCumsum(scan);
+    }
+  }
   return isa<
       triton::ascend::IndexPutOp,
       triton::ascend::GatherOutToUbOp,

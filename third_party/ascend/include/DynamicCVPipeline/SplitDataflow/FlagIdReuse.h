@@ -49,6 +49,9 @@ private:
     bool hasPath(llvm::SmallSet<Operation *, CVPipeline::INIT_SIZE> &visited, Operation *from, Operation *to);
     void preworkForAnalyze(const llvm::SmallVector<Operation *> &syncOps);
 
+    enum class SyncDir { VectorToCube, CubeToVector };
+    SyncDir getFlagDirection(int flagId);
+
     // Lifecycle boundary of a flag group: earliest set (acquire) / latest wait (release).
     Operation *getEarliestSet(int flagId);
     Operation *getLatestWait(int flagId);

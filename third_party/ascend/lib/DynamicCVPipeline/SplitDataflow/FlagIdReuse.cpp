@@ -143,11 +143,39 @@ bool FlagIdReuseManager::flagReleasedBefore(int before, int after)
     return opPrecedes(release, acquire);
 }
 
+// A transfer's data-movement direction, read off its sync pipes. Cube->Vector
+// transfers (fixpipe) ride the FIX/V pipes; Vector->Cube transfers (copy) ride
+// the MTE*/M pipes. The two never share a pipe, so a single pipe decides.
+FlagIdReuseManager::SyncDir FlagIdReuseManager::getFlagDirection(int flagId)
+{
+    for (auto *op : flagIdToOps[flagId]) {
+        PipeAttr srcPipe, dstPipe;
+        if (auto setOp = llvm::dyn_cast<SyncBlockSetOp>(op)) {
+            srcPipe = setOp.getTpipeAttr();
+            dstPipe = setOp.getPipeAttr();
+        } else if (auto waitOp = llvm::dyn_cast<SyncBlockWaitOp>(op)) {
+            srcPipe = waitOp.getTpipeAttr();
+            dstPipe = waitOp.getPipeAttr();
+        }
+        for (PipeAttr pipe : {srcPipe, dstPipe}) {
+            if (pipe && (pipe.getPipe() == hivm::PIPE::PIPE_FIX || pipe.getPipe() == hivm::PIPE::PIPE_V)) {
+                return SyncDir::CubeToVector;
+            }
+        }
+    }
+    return SyncDir::VectorToCube;
+}
+
 // Conservative: two flags interfere unless one is provably released before the
 // other is acquired. Any uncertainty falls back to "interfere" (no reuse), so a
 // reused id is never shared by two concurrently-live transfers.
 bool FlagIdReuseManager::flagsInterfere(int lhs, int rhs)
 {
+    // Opposite-direction transfers (Vector->Cube vs Cube->Vector) execute
+    // concurrently on the two cores, so their flag lifetimes always overlap
+    if (getFlagDirection(lhs) != getFlagDirection(rhs)) {
+        return true;
+    }
     return !flagReleasedBefore(lhs, rhs) && !flagReleasedBefore(rhs, lhs);
 }
 

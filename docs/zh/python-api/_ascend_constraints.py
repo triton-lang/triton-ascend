@@ -71,12 +71,11 @@ CONSTRAINTS = {
     },
     "triton.language.advance": {
         "constraints": [
-            "DataType: Ascend does not support fp64, uint16, uint32, uint64, uint8 (hardware limitation).",
-            "仅允许通过调整order参数的顺序来表达转置语义，不能通过调整stride参数的顺序实现转置语义",
-            "与较复杂的循环和分支语句搭配使用可能出现编译问题",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp64, \
+                Ascend 950 does not support fp64 (hardware limitation).",
+            "Compilation issues may arise when used with complex loops and branch statements."
         ],
-        "example":
-        "triton.language.advance",
+        "example": "triton.language.advance",
     },
     "triton.language.arange": {
         "constraints": [
@@ -501,24 +500,25 @@ CONSTRAINTS = {
     },
     "triton.language.load": {
         "constraints": [
-            "DataType: Ascend does not support fp64, uint16, uint32, uint64, uint8 (hardware limitation).",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp64, \
+                Ascend 950 does not support fp64 (hardware limitation).",
             "``cache_modifier``: has no effect on Ascend.",
             "``eviction_policy``: has no effect on Ascend.",
             "``volatile``: has no effect on Ascend.",
-            "``padding_option``: is not supported on Ascend.",
-            "与分支、循环语句搭配使用时的泛化性问题，pointer和mask的计算过程涉及较复杂的循环和分支语句可能出现编译问题",
+            "Compatibility issues with branch and loop statements: \
+                Complex pointer and mask calculations involving branches or loops may cause compilation failures.",
         ],
-        "example":
-        "triton.language.load",
+        "example": "triton.language.load",
     },
     "triton.language.load_tensor_descriptor": {
         "constraints": [
-            "DataType: Ascend does not support uint16, uint32, uint64 (hardware limitation).",
-            "make_tensor_descriptor / load_tensor_descriptor / store_tensor_descriptor 需配套使用，不能与 tl.load() / tl.store() 混用",
-            "Triton 3.2.0 存在部分函数（如cast）的兼容性问题，建议升级至 3.4.0",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp64, \
+                Ascend 950 does not support fp64 (hardware limitation).",
+            "`make_tensor_descriptor`, `load_tensor_descriptor` and `store_tensor_descriptor` \
+                must be used as a suite in Triton 3.2.x. Do not mix them with `tl.load()` or `tl.store()`.",
+            "Compatibility issues exist for certain functions (e.g. cast) in Triton 3.2.x."
         ],
-        "example":
-        "triton.language.load_tensor_descriptor",
+        "example": "triton.language.load_tensor_descriptor",
     },
     "triton.language.log": {
         "constraints": [
@@ -534,23 +534,23 @@ CONSTRAINTS = {
     },
     "triton.language.make_block_ptr": {
         "constraints": [
-            "DataType: Ascend does not support fp64, uint16, uint32, uint64, uint8 (hardware limitation).",
-            "仅允许通过调整order参数的顺序来表达转置语义，不能通过调整stride参数的顺序实现转置语义",
-            "与分支、循环语句搭配使用时的泛化性问题",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp64, \
+                Ascend 950 does not support fp64 (hardware limitation).",
+            "Transpose logic can only be implemented by adjusting the `order` parameter. \
+                Do not reorder strides to achieve transpose.",
+            "Compatibility issues may occur when used together with branch and loop statements."
         ],
-        "example":
-        "triton.language.make_block_ptr",
+        "example": "triton.language.make_block_ptr",
     },
     "triton.language.make_tensor_descriptor": {
         "constraints": [
-            "DataType: Ascend does not support uint16, uint32, uint64 (hardware limitation).",
-            "``strides``: 前面的维度必须是16字节的整数倍，最后一维必须是连续存储的",
-            "make_tensor_descriptor / load_tensor_descriptor / store_tensor_descriptor 需配套使用，不能与 tl.load() / tl.store() 混用",
-            "不支持padding_option入参",
-            "Triton 3.2.0 存在部分函数（如cast）的兼容性问题，建议升级至 3.4.0",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp64, \
+                Ascend 950 does not support fp64 (hardware limitation).",
+            "`make_tensor_descriptor`, `load_tensor_descriptor` and `store_tensor_descriptor` \
+                must be used as a suite in Triton 3.2.x. Do not mix them with `tl.load()` or `tl.store()`.",
+            "Compatibility issues exist for certain functions (e.g. cast) in Triton 3.2.x."
         ],
-        "example":
-        "triton.language.make_tensor_descriptor",
+        "example": "triton.language.make_tensor_descriptor",
     },
     "triton.language.max": {
         "constraints": [
@@ -733,10 +733,22 @@ CONSTRAINTS = {
         ],
         "example": "triton.language.static_range",
     },
-    "triton.language.store": {},
+    "triton.language.store": {
+        "constraints": [
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp64, \
+                Ascend 950 does not support fp64 (hardware limitation).",
+            "Compatibility issues with branch and loop statements: \
+                Complex pointer and mask calculations involving branches or loops may cause compilation failures.",
+        ],
+        "example": "triton.language.store",
+    },
     "triton.language.store_tensor_descriptor": {
         "constraints": [
-            "DataType: Ascend does not support uint16, uint32, uint64 (hardware limitation).",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp64, \
+                Ascend 950 does not support fp64 (hardware limitation).",
+            "`make_tensor_descriptor`, `load_tensor_descriptor` and `store_tensor_descriptor` \
+                must be used as a suite in Triton 3.2.x. Do not mix them with `tl.load()` or `tl.store()`.",
+            "Compatibility issues exist for certain functions (e.g. cast) in Triton 3.2.x."
         ],
         "example": "triton.language.store_tensor_descriptor",
     },

@@ -159,9 +159,12 @@ def compile_hint(ptr, hint_name, hint_val=None, _semantic=None):
 @builtin
 def multibuffer(src: tensor, size, _semantic=None):
     """
-    Set multi_buffer for an existing tensor
-    :src: tensor set to bufferize multiple time
-    :size: number of copies
+    Set multi_buffer for an existing tensor.
+
+    :param src: The tensor set to bufferize multiple time.
+    :type src: tensor
+    :param size: The number of copies.
+    :type size: int or constexpr
     """
     buffer_size = _unwrap_if_constexpr(size)
     assert isinstance(buffer_size, int) and buffer_size == 2, f"only support bufferize equals 2"

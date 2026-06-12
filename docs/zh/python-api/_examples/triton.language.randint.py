@@ -1,3 +1,9 @@
+import triton
+import triton.language as tl
+import torch
+import math
+
+
 @triton.jit
 def kernel_randint(x_ptr, n_rounds: tl.constexpr, N: tl.constexpr, XBLOCK: tl.constexpr):
     block_offset = tl.program_id(0) * XBLOCK
@@ -8,5 +14,15 @@ def kernel_randint(x_ptr, n_rounds: tl.constexpr, N: tl.constexpr, XBLOCK: tl.co
         tl.store(x_ptr + global_offset, rand_vals)  # Store the random number
 
 
-y_cali = torch.zeros(shape, dtype=eval('torch.int32')).npu()
-kernel_randint[ncore, 1, 1](y_cali, 10, numel, xblock)
+def test_randint():
+    shape = (1, 3)
+
+    y_cali = torch.zeros(shape, dtype=eval('torch.int32')).npu()
+    numel = y_cali.numel()
+    ncore = 1 if numel < 32 else 32
+    xblock = math.ceil(numel / ncore)
+    kernel_randint[ncore, 1, 1](y_cali, 10, numel, xblock)
+
+
+if __name__ == "__main__":
+    test_randint()

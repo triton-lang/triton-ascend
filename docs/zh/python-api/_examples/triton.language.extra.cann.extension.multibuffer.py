@@ -1,11 +1,50 @@
+import os
+import triton
+import triton.language as tl
+from triton.compiler.compiler import ASTSource
+from triton.compiler.code_generator import ast_to_ttir
+import triton.extension.buffer.language as bl
+import triton.language.extra.cann.extension as al
+from triton._C.libtriton import ir, buffer_ir
+from triton._C.libtriton.ascend import ir as ascend_ir
+
+os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
+
+
+class Options:
+    num_warps = 4
+    num_stages = 3
+    num_ctas = 1
+    cluster_dims = (1, 1, 1)
+    enable_fp_fusion = True
+    debug = False
+
+
+def compile_kernel(kernel, signature, constants):
+    """Helper to compile a kernel to MLIR."""
+    src = ASTSource(kernel, signature, constants)
+    context = ir.context()
+    ir.load_dialects(context)
+    buffer_ir.load_dialects(context)
+    ascend_ir.load_dialects(context)
+    module = ast_to_ttir(kernel, src, context, Options(), {}, {})
+    return str(module)
+
+
 @triton.jit
-def triton_compile_hint(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
-    xoffset = tl.program_id(0) * XBLOCK
-    for xoffset_sub in range(0, XBLOCK, XBLOCK_SUB):
-        xindex = xoffset + xoffset_sub + tl.arange(0, XBLOCK_SUB)[:]
-        xmask = xindex < xnumel
-        x0 = xindex
-        tmp0 = tl.load(in_ptr0 + (x0), xmask)
-        tl.multibuffer(tmp0, 2)
-        tmp2 = tmp0
-        tl.store(out_ptr0 + (xindex), tmp2, xmask)
+def multibuffer(XBLOCK: tl.constexpr):
+    buf = bl.alloc(tl.float32, [XBLOCK, XBLOCK], al.ascend_address_space.UB)
+    al.multibuffer(buf, 2)
+
+
+def test_multibuffer():
+    print("=" * 60)
+    print("Test 1: test_alloc_ub_multibuffer")
+    print("=" * 60)
+    mlir = compile_kernel(multibuffer, {}, {"XBLOCK": 256})
+    print(f"Generated MLIR ({len(mlir)} chars):\n")
+    print(mlir)
+
+
+if __name__ == "__main__":
+    test_multibuffer()

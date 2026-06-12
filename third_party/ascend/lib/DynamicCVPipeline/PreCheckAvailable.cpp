@@ -34,17 +34,21 @@ using namespace triton;
 
 static constexpr const char *DEBUG_TYPE = "pre-check-dynamic-cv-pipeline-available";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
-#define LDBG(X) LLVM_DEBUG(DBGS() << (X) << "\n")
+#define LDBG(...)\
+  LLVM_DEBUG({\
+    DBGS();\
+    llvm::dbgs() << __VA_ARGS__ << "\n";\
+})
 
 void PreCheckAvailablePass::runOnOperation()
 {
     ModuleOp module = getOperation();
 
     LDBG("Enter PreCheckAvailable pass.");
-
     PassManager pm(&getContext(), module.getOperationName());
 
-    pm.addPass(createPreCheckScopePass());
+    LDBG("Before PreCheck:\n" << module);
+    pm.addPass(createPreCheckBlacklistPass());
     pm.addPass(createPreCheckMatmulPass());
 
     if (failed(runPipeline(pm, module))) {
@@ -65,7 +69,7 @@ std::unique_ptr<OperationPass<ModuleOp>> createPreCheckAvailablePass()
 
 void registerPreCheckAvailablePasses()
 {
-    registerPass(createPreCheckScopePass);
+    registerPass(createPreCheckBlacklistPass);
     registerPass(createPreCheckMatmulPass);
     registerPass(createPreCheckAvailablePass);
 }

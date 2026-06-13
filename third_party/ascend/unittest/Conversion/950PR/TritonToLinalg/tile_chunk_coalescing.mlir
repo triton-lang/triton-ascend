@@ -34,16 +34,17 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 }
 
 // -----
-// Unmasked kernels do not carry a static tile count in the IR. The pass should
-// still coalesce with the power-of-two fallback factor.
-// CHECK-LABEL: module attributes {hacc.coalesce_axis = 0 : i32, hacc.coalesce_factor = 16 : i32
-// CHECK-LABEL: func.func @tile_chunk_coalesce_unmasked
-// CHECK: memref.reinterpret_cast
-// CHECK-SAME: sizes: [16, 16]
+// Unmasked kernels do not carry a static tile count in the IR. The pass cannot
+// prove runtime grid[axis] is >= H and divisible by H, so it must leave the
+// kernel uncoalesced.
+// CHECK-LABEL: module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+// CHECK-NOT: hacc.coalesce_factor
+// CHECK-LABEL: func.func @tile_chunk_skip_unmasked_unknown_grid
+// CHECK-NOT: sizes: [16, 16]
 // CHECK: memref.copy
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
-  tt.func public @tile_chunk_coalesce_unmasked(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
-                                               %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+  tt.func public @tile_chunk_skip_unmasked_unknown_grid(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                        %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
     %pid = tt.get_program_id x : i32
     %c16 = arith.constant 16 : i32
     %blk = arith.muli %pid, %c16 : i32

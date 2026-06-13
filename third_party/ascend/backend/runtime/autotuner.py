@@ -411,9 +411,6 @@ class AutoTilingTuner(Autotuner):
         ):
             normalized_configs = []
             for base_cfg in base_configs:
-                if self.user_specified_multibuffer is not None:
-                    base_cfg.kwargs["multibuffer"] = self.user_specified_multibuffer
-
                 if self.user_specified_num_stages is not None:
                     base_cfg.num_stages = self.user_specified_num_stages
                     # Keep compiler-visible multibuffer consistent when only num_stages is specified.

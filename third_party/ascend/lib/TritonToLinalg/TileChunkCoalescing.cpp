@@ -81,12 +81,8 @@ struct TileSeed {
   triton::GetProgramIdOp pid;  // the (outermost) tile-index program id
   int32_t axis = 0;            // pid axis == the grid dim the launcher divides
   int64_t tileLen = 0;         // T  (constexpr tile length / CHUNK_SIZE)
-  int64_t bound = 0;           // BOUND (constexpr problem length / SEQLEN), or 0
-                               // when the kernel carries no boundary mask (the
-                               // tile count is then a pure launch param, absent
-                               // from the IR -- see chooseH's unknown branch).
-  Value mask;                  // tile OOB mask (cmpi result), or null when the
-                               // kernel is unmasked. When present it is provably
+  int64_t bound = 0;           // BOUND (constexpr problem length / SEQLEN)
+  Value mask;                  // tile OOB mask (cmpi result). It is provably
                                // all-true (we require bound % tileLen == 0) and
                                // is dropped from the coalesced load/store.
 };
@@ -130,11 +126,13 @@ static bool isLiftable(Operation *op) {
 // Detect the tile-index signature:
 //     blk  = muli(program_id_max, C)          (C constexpr, the tile length T)
 //     offs = splat(blk) + make_range[0, C)
-// The boundary mask `cmpi slt(offs, BOUND)` is OPTIONAL: many kernels run with
-// chunk evenly dividing the problem axis, so Triton elides the mask entirely and
-// the IR then has no static tile count. When the mask IS present we use it to
-// recover BOUND (and to drop the provably-all-true mask later); when it is a
-// real partial-tile mask (BOUND % C != 0) we must NOT coalesce, so we bail.
+// The boundary mask `cmpi slt(offs, BOUND)` is required: it gives the pass a
+// static tile count and lets the launcher shrink grid[axis] by an exact divisor.
+// Unmasked kernels carry no tile count in the IR; coalescing them would rely on
+// runtime grid[axis] being both >= H and divisible by H, which is not guaranteed.
+// When the mask is present we use it to recover BOUND (and to drop the
+// provably-all-true mask later); when it is a real partial-tile mask
+// (BOUND % C != 0) we must NOT coalesce, so we bail.
 static std::optional<TileSeed> findSeed(ModuleOp moduleOp) {
   // The coalesced axis must be the OUTERMOST grid axis: the host launcher
   // divides grid[axis] by coalesce_factor, and bishengir reconstructs the
@@ -262,8 +260,9 @@ static std::optional<TileSeed> findSeed(ModuleOp moduleOp) {
           }
           if (unsafe)
             return;  // real boundary handling on the chunk axis; abandon pid
-          // Match with or without a mask. Unmasked kernels (bound == 0) have no
-          // static tile count; chooseH falls back to a power-of-two factor.
+          if (!mask)
+            return;  // unmasked kernel: runtime tile count is absent from IR
+
           result = TileSeed{pid, maxAxis, T, bound, mask};
           return;
         }
@@ -324,16 +323,9 @@ static bool collectRegion(TileSeed &seed, ModuleOp moduleOp,
 // fixes the tiny-DMA pathology. `maxH` is the UB-footprint-derived ceiling
 // (see kUBBytesBudget); it has already been clamped to kMaxCoalesceTilesCeil.
 //
-//   * numTiles known (masked kernel, bound % T == 0): H must divide numTiles so
-//     the launcher's `grid[axis] / H` is exact. Pick the LARGEST divisor in
-//     [hMin, maxH] so the already-large transfers get bigger DMAs / fewer loop
-//     iterations.
-//   * numTiles unknown (unmasked kernel): the tile count is a launch param and
-//     absent from the IR. Fall back to the largest power-of-two in [hMin, maxH].
-//     Chunk-axis grids in these (autotuned) kernels are powers of two, so a
-//     power-of-two H divides the grid exactly. (If a launch ever violates that,
-//     the launcher's `grid[axis] / H` would drop the remainder tiles -- the
-//     documented precondition for the unmasked path.)
+// H must divide the statically known tile count so the launcher's
+// `grid[axis] / H` is exact. Pick the largest divisor in [hMin, maxH] so the
+// already-contiguous transfers get bigger DMAs / fewer loop iterations.
 static int64_t chooseH(int64_t numTiles, int64_t tileLen, int64_t elemBytes,
                        int64_t maxH) {
   int64_t blockBytes = tileLen * elemBytes;
@@ -343,15 +335,8 @@ static int64_t chooseH(int64_t numTiles, int64_t tileLen, int64_t elemBytes,
   if (maxH < hMin)
     return 0;  // UB budget too tight to even reach the contiguity floor
 
-  if (numTiles <= 0) {
-    // Unknown tile count: largest power-of-two H with hMin <= H <= maxH.
-    int64_t H = 1;
-    while (H < hMin)
-      H <<= 1;  // round hMin up to a power of two
-    while ((H << 1) <= maxH)
-      H <<= 1;
-    return H >= hMin ? H : 0;
-  }
+  if (numTiles <= 0)
+    return 0;
 
   int64_t H = 0;
   for (int64_t c = hMin; c <= numTiles; ++c)
@@ -436,7 +421,6 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
   if (maxH < 2)
     maxH = 2;
 
-  // bound == 0 (unmasked kernel) -> numTiles == 0 -> chooseH's unknown branch.
   int64_t numTiles = (seed->bound + seed->tileLen - 1) / seed->tileLen;
   int64_t H = chooseH(numTiles, seed->tileLen, elemBytes, maxH);
   if (H <= 1)
@@ -444,7 +428,7 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
 
   Value pidVal = seed->pid.getResult();
   Location ploc = seed->pid.getLoc();
-  Value seedMask = seed->mask;  // null for unmasked kernels
+  Value seedMask = seed->mask;
   Operation *seedMaskOp = seedMask ? seedMask.getDefiningOp() : nullptr;
 
   // The all-true tile mask is dropped from the loads/stores it guards and is

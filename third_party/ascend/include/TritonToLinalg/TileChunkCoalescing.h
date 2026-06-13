@@ -48,11 +48,11 @@
 // the merged block is >= kMinContigBytes and the lifted footprint stays within
 // the UB budget, and so that H divides the tile count.
 //
-// The pass records `hacc.coalesce_factor = H` on the module; the bishengir
-// AutoBlockifyParallelLoop pass then divides the persistent-loop trip count by
-// H (the coalesced axis is the outermost one, which is exactly what dividing the
-// linear block range shrinks). The pass is a no-op (bails) whenever the pattern
-// or the safety conditions above do not hold.
+// The pass records `hacc.coalesce_factor = H` and `hacc.coalesce_axis = a` on
+// the module; the TA compiler exports them to launch metadata, and the host
+// launcher divides grid[a] by H. The pass is a no-op (bails) whenever the
+// pattern or the safety conditions above do not hold, including unmasked
+// kernels whose runtime tile count cannot be proven from IR.
 namespace TileChunkCoalescing {
 
 void rewriteTileChunkCoalesce(mlir::ModuleOp moduleOp);

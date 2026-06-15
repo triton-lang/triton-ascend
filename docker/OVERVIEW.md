@@ -29,9 +29,9 @@ Tag follow the following format：<br/>
 ## Triton-Ascend Images
 ### Release 3.2.1
 #### Key Image Components
-| Components      | Version     | 
+| Components      | Version     |
 |-----------------|-------------|
-| Triton-Ascend   | 3.2.1       | 
+| Triton-Ascend   | 3.2.1       |
 | CANN            | 9.0.0       |
 | Torch-npu       | 2.7.1.post4 |
 

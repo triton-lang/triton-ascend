@@ -8,6 +8,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 
@@ -642,6 +643,8 @@ LogicalResult MapElementwiseOp::verifyRegions() {
 
 //-- SplatOp --
 OpFoldResult SplatOp::fold(FoldAdaptor adaptor) {
+  if (mlir::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES"))
+    return {};
   auto value = adaptor.getSrc();
   if (!value)
     return {};
@@ -939,6 +942,8 @@ void BroadcastOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OpFoldResult BroadcastOp::fold(FoldAdaptor adaptor) {
+  if (mlir::triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES"))
+    return {};
   if (getType() == getSrc().getType()) {
     // no-op
     return getSrc();

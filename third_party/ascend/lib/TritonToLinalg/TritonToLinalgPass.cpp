@@ -24,6 +24,8 @@
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/TritonToLinalg/ArgMinMaxConverter.h"
+#include "ascend/include/TritonToLinalg/CanonicalizeDebugLocationsPass.h"
+#include "ascend/include/TritonToLinalg/DeduplicateDebugNopsPass.h"
 #include "ascend/include/TritonToLinalg/DescriptorConverter.h"
 #include "ascend/include/TritonToLinalg/FunctionConverter.h"
 #include "ascend/include/TritonToLinalg/HoistBroadcast.h"
@@ -674,11 +676,12 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
 }
 
 void TritonToLinalgPass::getDependentDialects(DialectRegistry &registry) const {
-  registry.insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
-                  linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
-                  tensor::TensorDialect, bufferization::BufferizationDialect,
-                  memref::MemRefDialect, hfusion::HFusionDialect,
-                  hivm::HIVMDialect, annotation::AnnotationDialect>();
+  registry
+      .insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
+              linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
+              tensor::TensorDialect, bufferization::BufferizationDialect,
+              memref::MemRefDialect, hfusion::HFusionDialect, hivm::HIVMDialect,
+              annotation::AnnotationDialect, LLVM::LLVMDialect>();
 }
 
 LogicalResult
@@ -965,6 +968,28 @@ void TritonToLinalgPass::runOnOperation() {
   pm.addPass(createCanonicalizerPass());
   if (failed(runPipeline(pm, getOperation()))) {
     signalPassFailure();
+  }
+
+  // 10. Collapses call-site locations whose callee is an inlined Triton stdlib
+  // helper (under site-packages) down to their caller (user-file) frame
+  //     Opt-in via LLVM_EXTRACT_DI_LOCAL_VARIABLES=1.
+  {
+    PassManager pm(&getContext(), moduleOp.getOperationName());
+    pm.addPass(triton::createCanonicalizeDebugLocationsPass());
+    if (failed(runPipeline(pm, moduleOp))) {
+      moduleOp->emitWarning("CanonicalizeDebugLocationsPass pass failed");
+    }
+  }
+
+  // 11. Deduplicate debug NOPs inserted by converters.
+  //     Opt-in via LLVM_EXTRACT_DI_LOCAL_VARIABLES=1.
+  {
+    PassManager pm(&getContext(), moduleOp.getOperationName());
+    pm.addPass(triton::createDeduplicateDebugNopsPass());
+    if (failed(runPipeline(pm, moduleOp))) {
+      moduleOp->emitWarning("DeduplicateDebugNops pass failed");
+      // Non-fatal: dedup is a quality improvement, not a correctness pass.
+    }
   }
 
   // Calculate size of PointerCastOp precisely

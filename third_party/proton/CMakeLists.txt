@@ -1,5 +1,5 @@
 # =============================================================================
-# Proton CMakeLists.txt - PURE CMAKE SOLUTION 
+# Proton CMakeLists.txt - PURE CMAKE SOLUTION
 # Fixed error: undefined symbol _ZN6proton4cuda9getDeviceEm
 # · Added dummy implementations of cuda::getDevice and hip::getDevice (target_sources)
 # · RoctracerProfiler dummy remains

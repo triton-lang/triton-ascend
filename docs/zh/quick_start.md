@@ -5,6 +5,8 @@
 Triton-Ascend 是适配华为 Ascend 昇腾芯片的 Triton 优化版本，提供高效的核函数自动调优、算子编译及部署能力，支持 Ascend Atlas A2/A3 等系列产品，
 兼容 Triton 核心语法的同时，针对昇腾 NPU 特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。
 
+当前文档版本从test-branch分支构建，并非官方正式文档。
+
 ## 在线文档
 
 我们提供了完整的在线文档与网络资料，涵盖环境搭建、算子开发、调优实践以及常见问题说明，方便用户快速上手与深入使用，详情请参考 [在线文档](https://triton-ascend.readthedocs.io/zh-cn/latest/index.html)

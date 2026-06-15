@@ -839,4 +839,44 @@ CONSTRAINTS = {
         ],
         "example": "triton.language.zeros_like",
     },
+    "triton.language.extra.cann.extension.index_put": {
+        "constraints": [
+            "Only supported on Ascend 950.",
+            "``ptr.dtype``: only supports float16, bfloat16, float32.",
+            "``ptr`` and ``value`` must have the same rank.",
+            "``index``: must be an integer tensor. If ``index.rank`` != 1, it will be reshaped to 1D.",
+            "``index.numel``: must equal ``value.shape[dim]``.",
+            "``value``: supports 2~5D tensors.",
+            "``dim``: must satisfy 0 <= dim < rank(value) - 1.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.index_put",
+    },
+    "triton.language.extra.cann.extension.gather_out_to_ub": {
+        "constraints": [
+            "Only supported on Ascend 950.",
+            "``src.dtype``: only supports float16, bfloat16, float32.",
+            "``src`` and ``index`` must have the same rank.",
+            "``index``: must be an integer tensor, with rank in [1, 5].",
+            "``dim``: must satisfy 0 <= dim < rank(index).",
+            "``other``: must be a scalar value.",
+            "For every dimension ``i`` not equal to ``dim``, ``index.size[i]`` <= ``src.size[i]``.",
+            "The output shape is the same as ``index.shape``.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.gather_out_to_ub",
+    },
+    "triton.language.extra.cann.extension.scatter_ub_to_out": {
+        "constraints": [
+            "Only supported on Ascend 950.",
+            "``ptr.dtype``: only supports float16, bfloat16, float32.",
+            "``ptr``, ``index`` and ``value`` must have the same rank.",
+            "``index``: must be an integer tensor, with rank in [1, 5].",
+            "``dim``: must satisfy 0 <= dim < rank(index).",
+            "For every dimension ``i`` not equal to ``dim``, ``index.size[i]`` <= ``ptr.size[i]``.",
+            "The output shape is the same as ``index.shape``.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.scatter_ub_to_out",
+    },
 }

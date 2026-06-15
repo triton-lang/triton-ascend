@@ -35,6 +35,7 @@
 #include "runtime/runtime/rt.h"
 
 #ifdef USE_TORCH_NPU
+#include <acl/acl.h>
 #include <ATen/ATen.h>
 #include <torch_npu/csrc/core/npu/NPUWorkspaceAllocator.h>
 #include <torch_npu/csrc/framework/OpCommand.h>

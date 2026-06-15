@@ -1,0 +1,481 @@
+{
+  "schema_version": 2,
+  "source_jsonl": "logs/add_rms_norm_random_generalization_20260615.jsonl",
+  "source_log": "logs/add_rms_norm_random_generalization_20260615.log",
+  "random_seed": 20260613,
+  "shape_policy": "seeded_non_public_bsh_v1",
+  "total_cases": 120,
+  "public_cases": 80,
+  "random_generalization_cases": 40,
+  "accuracy": {
+    "public": {
+      "triton_passed": 80,
+      "torch_passed": 80,
+      "torch_npu_passed": 61,
+      "total": 80
+    },
+    "random_generalization": {
+      "triton_passed": 40,
+      "torch_passed": 40,
+      "torch_npu_passed": 25,
+      "total": 40,
+      "max_mere": 1.5943868221579802e-07,
+      "max_mare": 0.007812499218750078,
+      "max_diff": 0.015625,
+      "total_mismatch_count": 0
+    }
+  },
+  "random_category_counts": {
+    "near_hidden": 12,
+    "contract_shape": 8,
+    "small_tail": 9,
+    "wide_hidden": 11
+  },
+  "random_shapes": [
+    {
+      "case": 81,
+      "case_id": "custom/add_rms_norm_random_001",
+      "shape": [
+        64,
+        8,
+        3200
+      ],
+      "case_seed": 605294706,
+      "category": "near_hidden"
+    },
+    {
+      "case": 82,
+      "case_id": "custom/add_rms_norm_random_002",
+      "shape": [
+        8,
+        32,
+        7876
+      ],
+      "case_seed": 776602979,
+      "category": "contract_shape"
+    },
+    {
+      "case": 83,
+      "case_id": "custom/add_rms_norm_random_003",
+      "shape": [
+        3,
+        17,
+        804
+      ],
+      "case_seed": 1610810472,
+      "category": "small_tail"
+    },
+    {
+      "case": 84,
+      "case_id": "custom/add_rms_norm_random_004",
+      "shape": [
+        5,
+        2,
+        371
+      ],
+      "case_seed": 523483389,
+      "category": "small_tail"
+    },
+    {
+      "case": 85,
+      "case_id": "custom/add_rms_norm_random_005",
+      "shape": [
+        16,
+        8,
+        12204
+      ],
+      "case_seed": 608003707,
+      "category": "wide_hidden"
+    },
+    {
+      "case": 86,
+      "case_id": "custom/add_rms_norm_random_006",
+      "shape": [
+        4,
+        32,
+        10811
+      ],
+      "case_seed": 957215991,
+      "category": "wide_hidden"
+    },
+    {
+      "case": 87,
+      "case_id": "custom/add_rms_norm_random_007",
+      "shape": [
+        1,
+        32,
+        3968
+      ],
+      "case_seed": 1728411603,
+      "category": "near_hidden"
+    },
+    {
+      "case": 88,
+      "case_id": "custom/add_rms_norm_random_008",
+      "shape": [
+        4,
+        3,
+        6007
+      ],
+      "case_seed": 628828860,
+      "category": "contract_shape"
+    },
+    {
+      "case": 89,
+      "case_id": "custom/add_rms_norm_random_009",
+      "shape": [
+        4,
+        16,
+        8774
+      ],
+      "case_seed": 1608803918,
+      "category": "wide_hidden"
+    },
+    {
+      "case": 90,
+      "case_id": "custom/add_rms_norm_random_010",
+      "shape": [
+        3,
+        5,
+        850
+      ],
+      "case_seed": 1599198054,
+      "category": "small_tail"
+    },
+    {
+      "case": 91,
+      "case_id": "custom/add_rms_norm_random_011",
+      "shape": [
+        8,
+        1,
+        4480
+      ],
+      "case_seed": 313083522,
+      "category": "near_hidden"
+    },
+    {
+      "case": 92,
+      "case_id": "custom/add_rms_norm_random_012",
+      "shape": [
+        24,
+        128,
+        265
+      ],
+      "case_seed": 1421982534,
+      "category": "contract_shape"
+    },
+    {
+      "case": 93,
+      "case_id": "custom/add_rms_norm_random_013",
+      "shape": [
+        8,
+        1,
+        8128
+      ],
+      "case_seed": 213516464,
+      "category": "near_hidden"
+    },
+    {
+      "case": 94,
+      "case_id": "custom/add_rms_norm_random_014",
+      "shape": [
+        24,
+        8,
+        1685
+      ],
+      "case_seed": 37829643,
+      "category": "contract_shape"
+    },
+    {
+      "case": 95,
+      "case_id": "custom/add_rms_norm_random_015",
+      "shape": [
+        2,
+        8,
+        9539
+      ],
+      "case_seed": 309758314,
+      "category": "wide_hidden"
+    },
+    {
+      "case": 96,
+      "case_id": "custom/add_rms_norm_random_016",
+      "shape": [
+        1,
+        8,
+        10263
+      ],
+      "case_seed": 848680703,
+      "category": "wide_hidden"
+    },
+    {
+      "case": 97,
+      "case_id": "custom/add_rms_norm_random_017",
+      "shape": [
+        5,
+        17,
+        290
+      ],
+      "case_seed": 1928669891,
+      "category": "small_tail"
+    },
+    {
+      "case": 98,
+      "case_id": "custom/add_rms_norm_random_018",
+      "shape": [
+        4,
+        1,
+        8968
+      ],
+      "case_seed": 1516450686,
+      "category": "wide_hidden"
+    },
+    {
+      "case": 99,
+      "case_id": "custom/add_rms_norm_random_019",
+      "shape": [
+        3,
+        33,
+        384
+      ],
+      "case_seed": 123132269,
+      "category": "small_tail"
+    },
+    {
+      "case": 100,
+      "case_id": "custom/add_rms_norm_random_020",
+      "shape": [
+        4,
+        32,
+        10387
+      ],
+      "case_seed": 993302822,
+      "category": "wide_hidden"
+    },
+    {
+      "case": 101,
+      "case_id": "custom/add_rms_norm_random_021",
+      "shape": [
+        32,
+        8,
+        8064
+      ],
+      "case_seed": 1155435423,
+      "category": "near_hidden"
+    },
+    {
+      "case": 102,
+      "case_id": "custom/add_rms_norm_random_022",
+      "shape": [
+        5,
+        17,
+        386
+      ],
+      "case_seed": 385055200,
+      "category": "small_tail"
+    },
+    {
+      "case": 103,
+      "case_id": "custom/add_rms_norm_random_023",
+      "shape": [
+        32,
+        8,
+        8384
+      ],
+      "case_seed": 1000357303,
+      "category": "near_hidden"
+    },
+    {
+      "case": 104,
+      "case_id": "custom/add_rms_norm_random_024",
+      "shape": [
+        12,
+        8,
+        535
+      ],
+      "case_seed": 1263814717,
+      "category": "contract_shape"
+    },
+    {
+      "case": 105,
+      "case_id": "custom/add_rms_norm_random_025",
+      "shape": [
+        1,
+        31,
+        15
+      ],
+      "case_seed": 1696919022,
+      "category": "small_tail"
+    },
+    {
+      "case": 106,
+      "case_id": "custom/add_rms_norm_random_026",
+      "shape": [
+        16,
+        2,
+        10668
+      ],
+      "case_seed": 549151188,
+      "category": "wide_hidden"
+    },
+    {
+      "case": 107,
+      "case_id": "custom/add_rms_norm_random_027",
+      "shape": [
+        5,
+        128,
+        5298
+      ],
+      "case_seed": 884061470,
+      "category": "contract_shape"
+    },
+    {
+      "case": 108,
+      "case_id": "custom/add_rms_norm_random_028",
+      "shape": [
+        1,
+        8,
+        10057
+      ],
+      "case_seed": 562746875,
+      "category": "wide_hidden"
+    },
+    {
+      "case": 109,
+      "case_id": "custom/add_rms_norm_random_029",
+      "shape": [
+        64,
+        32,
+        3839
+      ],
+      "case_seed": 1716956553,
+      "category": "near_hidden"
+    },
+    {
+      "case": 110,
+      "case_id": "custom/add_rms_norm_random_030",
+      "shape": [
+        64,
+        1,
+        4863
+      ],
+      "case_seed": 1653950118,
+      "category": "near_hidden"
+    },
+    {
+      "case": 111,
+      "case_id": "custom/add_rms_norm_random_031",
+      "shape": [
+        8,
+        8,
+        4352
+      ],
+      "case_seed": 1437109909,
+      "category": "near_hidden"
+    },
+    {
+      "case": 112,
+      "case_id": "custom/add_rms_norm_random_032",
+      "shape": [
+        1,
+        31,
+        623
+      ],
+      "case_seed": 33695092,
+      "category": "small_tail"
+    },
+    {
+      "case": 113,
+      "case_id": "custom/add_rms_norm_random_033",
+      "shape": [
+        1,
+        1,
+        4223
+      ],
+      "case_seed": 1947097670,
+      "category": "near_hidden"
+    },
+    {
+      "case": 114,
+      "case_id": "custom/add_rms_norm_random_034",
+      "shape": [
+        8,
+        31,
+        4415
+      ],
+      "case_seed": 118644070,
+      "category": "contract_shape"
+    },
+    {
+      "case": 115,
+      "case_id": "custom/add_rms_norm_random_035",
+      "shape": [
+        16,
+        1,
+        8448
+      ],
+      "case_seed": 1439727298,
+      "category": "near_hidden"
+    },
+    {
+      "case": 116,
+      "case_id": "custom/add_rms_norm_random_036",
+      "shape": [
+        4,
+        4,
+        10823
+      ],
+      "case_seed": 105776654,
+      "category": "wide_hidden"
+    },
+    {
+      "case": 117,
+      "case_id": "custom/add_rms_norm_random_037",
+      "shape": [
+        64,
+        32,
+        3840
+      ],
+      "case_seed": 1446628988,
+      "category": "near_hidden"
+    },
+    {
+      "case": 118,
+      "case_id": "custom/add_rms_norm_random_038",
+      "shape": [
+        8,
+        8,
+        10000
+      ],
+      "case_seed": 1304375406,
+      "category": "wide_hidden"
+    },
+    {
+      "case": 119,
+      "case_id": "custom/add_rms_norm_random_039",
+      "shape": [
+        7,
+        31,
+        6989
+      ],
+      "case_seed": 1992472482,
+      "category": "contract_shape"
+    },
+    {
+      "case": 120,
+      "case_id": "custom/add_rms_norm_random_040",
+      "shape": [
+        16,
+        5,
+        935
+      ],
+      "case_seed": 344353821,
+      "category": "small_tail"
+    }
+  ],
+  "notes": [
+    "Correctness-only validation intentionally records active/kernel timings as N/A.",
+    "Random generalization cases are fixed-seed reproducible non-public shape samples.",
+    "They are correctness evidence only; OpForge eval_20260615_154048 is the canonical performance source."
+  ]
+}

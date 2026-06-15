@@ -46,7 +46,7 @@ namespace TTOpConverters {
 using namespace mlir;
 using namespace triton;
 
-static constexpr unsigned kFuncNameCap = 128;
+using triton::ascend::kFuncNameCap;
 
 /*
 Convert `tt.precise_div` operation to `arith.divf` operation.
@@ -670,7 +670,7 @@ public:
 class IndexPutConverter
     : public OpConversionPattern<triton::ascend::IndexPutOp> {
 public:
-  using OpConversionPattern<triton::ascend::IndexPutOp>::OpConversionPattern;
+  using OpConversionPattern::OpConversionPattern;
   LogicalResult
   matchAndRewrite(triton::ascend::IndexPutOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
@@ -705,26 +705,26 @@ private:
   static constexpr llvm::StringRef funcNameBase = "triton_scatter_ub_to_out";
 };
 
-class IndirectLoadConverter
-    : public OpConversionPattern<triton::ascend::IndirectLoadOp> {
+class UnstructuredLoadConverter
+    : public OpConversionPattern<triton::ascend::UnstructuredLoadOp> {
 public:
   using OpConversionPattern<
-      triton::ascend::IndirectLoadOp>::OpConversionPattern;
+      triton::ascend::UnstructuredLoadOp>::OpConversionPattern;
   LogicalResult
-  matchAndRewrite(triton::ascend::IndirectLoadOp op, OpAdaptor adaptor,
+  matchAndRewrite(triton::ascend::UnstructuredLoadOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_indirect_load";
 };
 
-class IndirectStoreConverter
-    : public OpConversionPattern<triton::ascend::IndirectStoreOp> {
+class UnstructuredStoreConverter
+    : public OpConversionPattern<triton::ascend::UnstructuredStoreOp> {
 public:
   using OpConversionPattern<
-      triton::ascend::IndirectStoreOp>::OpConversionPattern;
+      triton::ascend::UnstructuredStoreOp>::OpConversionPattern;
   LogicalResult
-  matchAndRewrite(triton::ascend::IndirectStoreOp op, OpAdaptor adaptor,
+  matchAndRewrite(triton::ascend::UnstructuredStoreOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 
 private:

@@ -8,6 +8,10 @@
 triton.language.sum(input, axis=None, keep_dims=False)
 ```
 
+> **版本差异说明**
+>
+> `dtype` 参数为社区 Triton 3.5.0 引入的功能。当前发布的 Triton-Ascend 基于社区 Triton 3.2.0 开发，没有`dtype` 参数。后续升级至社区 Triton 3.5.0 版本时，将完整支持 `dtype` 参数的功能。
+
 ## 2. OP 规格
 
 ### 2.1 参数说明
@@ -38,6 +42,8 @@ triton.language.sum(input, axis=None, keep_dims=False)
 
 > 相对社区能力缺失且无法实现
 > keep_dims=True需要测试更多规格，来确定是否全面支持。目前已测3D dim=2情况下，支持 keep_dims=True。
+
+> `dtype` 参数当前版本暂未支持。社区 Triton 3.5.0 中，`dtype` 参数用于控制求和运算的累加数据类型：未指定时，位宽小于 32 的整数类型会自动提升为 `int32`/`uint32` 以避免溢出；显式指定时，输入会先转换为指定类型再执行求和。当前 Triton-Ascend 基于社区 Triton 3.2.0，该类型提升逻辑尚未支持，将在后续升级至 3.5.0 版本时完整支持。
 
 ### 2.4 使用方法
 

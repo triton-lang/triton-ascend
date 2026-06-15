@@ -150,10 +150,29 @@ Case: Optimizing the `zeros_like` function
 
 Solution 1:
 To address the **coreDim** limit in the Ascend compiler, one solution is to set the environment variable *'TRITON_ALL_BLOCKS_PARALLEL'* to **1** by running this command:
+
+```bash
 export TRITON_ALL_BLOCKS_PARALLEL=1
+```
+
 Solution 2:
 Another solution is to increase **BLOCK_SIZE** to reduce the number of required cores and ensure that **coreDim** remains within the limit.
-The calculation follows: `coreDim = ceil(N / BLOCK_SIZE)`. → It needs to satisfy `ceil(N / BLOCK_SIZE) <= 65535 => BLOCK_SIZE >= ceil(N / 65535)`. Given `N = 1073741824`, we have `BLOCK_SIZE >= triton.next_power_of_2(triton.cdiv(1073741824, 65535)) = 32768`. Therefore, **32768** is the minimum safe value.
+The calculation is:
+
+```text
+coreDim = ceil(N / BLOCK_SIZE)
+ceil(N / BLOCK_SIZE) <= 65535
+BLOCK_SIZE >= ceil(N / 65535)
+```
+
+Given `N = 1073741824`:
+
+```text
+ceil(1073741824 / 65535) = 16385
+triton.next_power_of_2(16385) = 32768
+```
+
+Therefore, if `BLOCK_SIZE` is selected as a power of 2, it should be at least `32768`.
 
 Code before optimization:
 

@@ -93,6 +93,14 @@ def index_put(ptr: tensor, index: tensor, value: tensor, dim: int, index_boundar
         print("IndexPut result:", dst) # ref:[[3.,4.], [0.,0.], [1.,2.], [0.,0.]]
     """
 
+    import warnings
+    warnings.warn(
+        "index_put() is deprecated and will be removed in a future release. "
+        "Use al.custom('__builtin_index_put', ...) or tl.store() with compile_mode='simd_simt' instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     def index_put_impl(ptr: tl.tensor, index: tl.tensor, value: tl.tensor, dim: int, index_boundary: int,
                        end_offset: Tuple, start_offset: Tuple, dst_stride: Tuple, _builder: ir.builder):
         assert index.dtype.is_int(), "index must be an integer tensor"

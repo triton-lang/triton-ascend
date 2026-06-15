@@ -146,6 +146,16 @@ def get_element(src, indice, _semantic=None, _generator=None):
 
 @builtin
 def flip(ptr, dim=-1, _semantic=None, _generator=None):
+    """Flips a tensor along the specified dimension.
+
+    Reverses the order of elements along the given axis. This is an Ascend-specific
+    implementation that supports both SIMD and non-SIMD execution modes.
+
+    :param ptr: The input tensor to flip.
+    :type ptr: tensor
+    :param dim: The dimension along which to flip. Defaults to -1 (last dimension).
+    :type dim: int
+    """
 
     def flip_impl(ptr: tensor, dim: int, builder: ir.builder, generator=None):
         """

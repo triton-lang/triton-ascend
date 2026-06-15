@@ -134,6 +134,20 @@ class ascend_address_space_base(bl.address_space):
 
 
 class ascend_address_space_group:
+    """Ascend hardware address space constants for buffer allocation.
+
+    Provides named address space specifiers that map to Ascend NPU memory regions:
+
+    - ``UB`` — Unified Buffer (on-chip shared memory)
+    - ``L1`` — L1 cache buffer
+    - ``L0A`` — L0 buffer A (Cube unit input)
+    - ``L0B`` — L0 buffer B (Cube unit input)
+    - ``L0C`` — L0 buffer C (Cube unit output)
+
+    Usage with :func:`bl.alloc() <triton.extension.buffer.language.alloc>`::
+
+        buf = bl.alloc(dtype, shape, al.ascend_address_space.UB)
+    """
 
     def __init__(self):
         for k, v in {k: v
@@ -208,16 +222,72 @@ def create_sync_block(sender, receiver, event_id, is_set: bool, sender_pipe=None
 
 @builtin
 def sync_block_set(sender, receiver, event_id, sender_pipe=None, receiver_pipe=None, _semantic=None):
+    """Sets a cross-core synchronization flag for producer-consumer sync between Cube and Vector cores.
+
+    Pairs with :func:`sync_block_wait` to coordinate execution between different core types.
+    Each call increments a per-event counter that the corresponding ``sync_block_wait`` will
+    decrement (semaphore-like behavior).
+
+    Must be used within an :func:`scope` context matching the sender's core type.
+
+    :param sender: Sending core type. Must be ``"cube"`` or ``"vector"`` (must differ from ``receiver``).
+    :type sender: str
+    :param receiver: Receiving core type. Must be ``"cube"`` or ``"vector"``.
+    :type receiver: str
+    :param event_id: Sync flag identifier in range [0, 15]. Each ID maps to an independent counter.
+    :type event_id: int
+    :param sender_pipe: Sender-side pipeline type (e.g., ``PIPE_MTE1``, ``PIPE_V``).
+        Defaults to ``PIPE_FIX`` if sender is cube, ``PIPE_MTE3`` if sender is vector.
+    :type sender_pipe: PIPE
+    :param receiver_pipe: Receiver-side pipeline type. Defaults to ``PIPE_MTE2``.
+    :type receiver_pipe: PIPE
+    """
     return create_sync_block(sender, receiver, event_id, True, sender_pipe, receiver_pipe, _semantic)
 
 
 @builtin
 def sync_block_wait(sender, receiver, event_id, sender_pipe=None, receiver_pipe=None, _semantic=None):
+    """Waits on a cross-core synchronization flag set by :func:`sync_block_set`.
+
+    Blocks execution until the corresponding event counter is positive (signaling the
+    producer has completed), then decrements it by 1. Pairs with ``sync_block_set``
+    for producer-consumer synchronization between Cube and Vector cores.
+
+    Must be used within an :func:`scope` context matching the receiver's core type.
+
+    :param sender: Sending core type. Must be ``"cube"`` or ``"vector"`` (must differ from ``receiver``).
+    :type sender: str
+    :param receiver: Receiving core type. Must be ``"cube"`` or ``"vector"``.
+    :type receiver: str
+    :param event_id: Sync flag identifier in range [0, 15]. Must match the ID used by the
+        corresponding ``sync_block_set``.
+    :type event_id: int
+    :param sender_pipe: Sender-side pipeline type. Defaults to ``PIPE_FIX`` if sender is cube,
+        ``PIPE_MTE3`` if sender is vector.
+    :type sender_pipe: PIPE
+    :param receiver_pipe: Receiver-side pipeline type. Defaults to ``PIPE_MTE2``.
+    :type receiver_pipe: PIPE
+    """
     return create_sync_block(sender, receiver, event_id, False, sender_pipe, receiver_pipe, _semantic)
 
 
 @builtin
 def sync_block_all(mode, event_id, _semantic=None):
+    """Performs global synchronization across all cores of a specified type.
+
+    Inserts a sync barrier to resolve RAW, WAR, and WAW data hazards on shared global
+    memory across Cube cores, Vector cores, or both. Also supports sub-vector-level
+    synchronization within Vector cores.
+
+    :param mode: Synchronization scope. One of:
+        ``"all_cube"`` — sync all Cube cores;
+        ``"all_vector"`` — sync all Vector cores;
+        ``"all"`` — sync all Cube and Vector cores;
+        ``"all_sub_vector"`` — sync between Vector sub-blocks.
+    :type mode: str
+    :param event_id: Event marker ID in range [0, 15].
+    :type event_id: int
+    """
     mode = _unwrap_if_constexpr(mode)
     event_id = _unwrap_if_constexpr(event_id)
     assert isinstance(mode, str), f"mode: {mode} is not string"
@@ -322,6 +392,15 @@ def fixpipe(
 
 
 class SYNC_IN_VF(enum.Enum):
+    """Synchronization barrier modes for fine-grained vector/scalar instruction ordering.
+
+    Each value specifies which instruction types are blocked until previous
+    instructions complete. The name follows the pattern ``{blocked}_{awaited}``:
+    e.g., ``VST_VLD`` blocks vector stores (VST) until vector loads (VLD) complete.
+
+    Intended for use within an :func:`scope` context.
+    """
+
     VV_ALL = enum.auto()
     VST_VLD = enum.auto()
     VLD_VST = enum.auto()
@@ -341,6 +420,14 @@ def debug_barrier(
     sync_mode: SYNC_IN_VF,
     _semantic=None,
 ) -> None:
+    """Inserts a synchronization barrier between vector/scalar load/store instructions.
+
+    Provides fine-grained control over which instruction types are blocked until
+    prior instructions complete. Intended for use within an :func:`scope` context.
+
+    :param sync_mode: Barrier type specifying which instruction classes to synchronize.
+    :type sync_mode: SYNC_IN_VF
+    """
     return semantic.debug_barrier(sync_mode.name, _semantic)
 
 

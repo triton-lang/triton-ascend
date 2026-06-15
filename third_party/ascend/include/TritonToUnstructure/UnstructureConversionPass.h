@@ -28,6 +28,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
+#include "ascend/include/Utils/Utils.h"
 #include "mlir/IR/PatternMatch.h"
 
 #define GEN_PASS_DECL_TRITONTOUNSTRUCTURE
@@ -35,9 +36,6 @@
 
 #define GEN_PASS_DEF_TRITONTOUNSTRUCTURE
 #include "ascend/include/TritonToUnstructure/Passes.h.inc"
-
-extern bool compileOn91095Flag;
-extern bool forceSimtTemplateFlag;
 
 namespace mlir {
 namespace triton {

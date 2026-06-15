@@ -54,6 +54,7 @@ def comprehensive_print_kernel(
     n_elements,
     BLOCK_SIZE: tl.constexpr,
 ):
+    tl.device_print("=====debug=====")
     pid = tl.program_id(0)
     block_start = pid * BLOCK_SIZE
 
@@ -102,7 +103,7 @@ def test_comprehensive_print():
     expected = x * 2.0 + 1.0
     torch.testing.assert_close(y, expected, rtol=1e-5, atol=1e-5)
 
-    for i in range(11):
+    for i in range(12):
         opStr = "call @triton_print_" + str(i)
         assert opStr in h.asm["ttadapter"]
 

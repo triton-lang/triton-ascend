@@ -111,13 +111,6 @@ jobs:
         # separate manifest to OBS — yellow pipeline reads obs_url directly).
         run: echo "name=$(basename wheelhouse/*.whl)" >> "$GITHUB_OUTPUT"
 
-      # NOTE: setup-obsutil is inlined here (instead of `uses:
-      # ./.github/actions/setup-obsutil`) because on this self-hosted aarch64
-      # container runner the host-side workspace path the runner uses to
-      # resolve local actions does not point to the same directory the
-      # container mounts as GITHUB_WORKSPACE, so the runner cannot find
-      # action.yml even after a clean checkout. `run:` blocks execute inside
-      # the container and only see /__w/... paths, so they are unaffected.
       - name: Setup obsutil and upload to OBS
         if: steps.pr.outputs.num != ''
         shell: bash

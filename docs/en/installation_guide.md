@@ -19,18 +19,13 @@ Choose the appropriate installation method as needed and proceed to the correspo
 
 Note：For more mirrors,please see [OVERVIEW.zh.md](../../docker/OVERVIEW.zh.md)
 
-### Get Image
-
-```bash
-docker pull quay.io/ascend/{image_tag}
-```
-
 ### Create container
 
 ```bash
 # Assume that your NPU device model is A3, the device is installed in /dev/davinci1, and the NPU driver is installed in /usr/local/Ascend:
+# For example,pulling the image_tag triton:3.2.1-a3-ubuntu22.04-py3.11：
+image_tag=3.2.1-a3-ubuntu22.04-py3.11
 container_name=triton-ascend_container
-image_tag=quay.io/ascend/triton:3.2.1-a3-ubuntu22.04-py3.11
 docker run -u 0 -dit --shm-size=512g --name=${container_name} --net=host --privileged \
 --security-opt seccomp=unconfined \
 --device=/dev/davinci0 \
@@ -50,7 +45,7 @@ docker run -u 0 -dit --shm-size=512g --name=${container_name} --net=host --privi
 -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
 -v /etc/ascend_install.info:/etc/ascend_install.info \
 -v /home:/home \
-${image_tag} \
+quay.io/ascend/triton:${image_tag} \
 /bin/bash
 ```
 
@@ -216,7 +211,7 @@ git checkout main
 export LLVM_SYSPATH=/path/to/LLVM
 
 # Run the installation command
-pip install -e python
+pip install -e .
 ```
 
 <a id="hand-code-base"></a>

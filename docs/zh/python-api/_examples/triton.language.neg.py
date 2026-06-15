@@ -1,0 +1,1 @@
+triton.language.neg(x)

@@ -70,6 +70,7 @@ third_party/nvidia/backend/lib/cupti
 
 # Docs
 docs/_build/
+docs/**/_build/
 docs/python-api/generated/
 docs/dialects/
 docs/getting-started/tutorials
@@ -104,3 +105,4 @@ build/
 dist/
 *.egg-info/
 .eggs/
+docs/zh/python-api/generated/

@@ -1,7 +1,7 @@
 # Triton Ascend贡献指南
 
-- [贡献者许可协议](#贡献者许可协议.md)
 - [入门](#入门.md)
+- [开发者来源认证（DCO）](#开发者来源认证.md)
 - [开发指导](#开发指导.md)
   - [代码风格](#代码风格.md)
   - [Fork-Pull开发模式](#Fork-Pull开发模式.md)
@@ -9,20 +9,20 @@
   - [ISSUE规范](#ISSUE规范.md)
   - [提出PR](#提出PR.md)
 
-<h2 id="贡献者许可协议.md">
-    贡献者许可协议
-</h2>
-
-在您第一次向Triton Ascend社区提交代码之前，需要签署CLA。
-
-对于个人贡献者，签署CLA详细信息参考 [cla使用指南](https://gitcode.com/Ascend/infrastructure/blob/master/docs/cla/cla使用指南.md#faq)
-
-CLA签署地址 [sign](https://clasign.osinfra.cn/sign/690ca9ddf91c03dee6082ab1)
-
 <h2 id="入门.md">入门</h2>
 
 - 在[GitHub](https://github.com/triton-lang/triton-ascend)上fork Triton-Ascend代码库。
 - 阅读[README.md](https://github.com/triton-lang/triton-ascend/blob/main/README.md)获取项目信息和构建开发环境。
+
+<h2 id="开发者来源认证.md">开发者来源认证（DCO）</h2>
+
+所有提交需包含 `Signed-off-by:` 行，使用 `git commit -s` 自动添加：
+
+```bash
+git commit -s -m "your commit message"
+```
+
+这会在提交信息末尾自动添加一行 `Signed-off-by: Your Name <your.email@example.com>`，表明你确认该贡献的来源和授权。
 
 <h2 id="开发指导.md">开发指导</h2>
 
@@ -90,36 +90,13 @@ git rebase upstream/main # Rebase onto the latest upstream trunk
 ```shell
 git add .
 git status #Check the updated files
-git commit -m "Your commit title"
-git commit -s --amend #Add the concrete description of your commit
+git commit -s -m "your commit message"
 git push origin {your_new_branch_name}
 ```
 
 6、向Triton Ascend主仓创建拉取请求
 
 代码推送至您的远程仓库后，您需要在您的新分支和Triton Ascend main分支之间新建Pull Request。完成新建合并请求后，“Jenkins CI“将自动设置为您构建流水线测试。您的Pull Request请尽快合并到上游main分支，以降低合并风险。
-
-提交PR后流水线执行命令流程
-
-- 如果PR的标签显示ascend-cla/no，签署cla后评论/check-cla检查cla签署状态，cla签署成功后获得标签 ascend-cla/yes。
-
-  ```shell
-  /check-cla
-  ```
-
-- 评论/compile启动流水线测试，如果未通过测试，根据提示修改后再次评论/compile触发流水线测试，通过后获得标签 ci-pipeline-passed。
-
-  ```shell
-  /compile
-  ```
-
-- 如果SC-FAIL，检查修改后可评论compile#openlibing手动触发检查，检查通过后获得标签 SC-SUCC。
-
-  ```shell
-  compile#openlibing
-  ```
-
-- 流水线pass之后（收到ci-pipeline-passed、ascend-cla/yes、SC-SUCC标签），根据提示@committers进行代码review，以便快速合入。
 
 <h2 id="代码门禁异常处理.md">代码门禁异常处理</h2>
 

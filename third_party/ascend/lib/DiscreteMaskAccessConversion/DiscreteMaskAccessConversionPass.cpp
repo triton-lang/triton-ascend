@@ -54,7 +54,8 @@ using namespace hivm;
 // before pattern application, so that OpRewritePattern subclasses can read
 // them.
 static bool compileOn91095Flag = false;
-static bool forceSimtTemplateFlag = false;
+static mlir::triton::ascend::CompileMode compileModeFlag =
+    mlir::triton::ascend::CompileMode::Simd;
 static bool enableSyncBlockLockFlag = true;
 
 LogicalResult isDiscreteMask(Operation *op, Value mask,
@@ -153,6 +154,10 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
 
   LogicalResult matchAndRewrite(triton::StoreOp op,
                                 PatternRewriter &rewriter) const final {
+    if (op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName)) {
+      return failure();
+    }
+
     auto mask = op.getMask();
     auto loc = op.getLoc();
     auto dst = op.getPtr();
@@ -161,27 +166,20 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
     if (failed(isDiscreteMask(op, mask, rewriter)))
       return failure();
 
-    if (compileOn91095Flag && forceSimtTemplateFlag) {
-      llvm::DenseMap<Value, PtrOffsetInfo> offsetMap;
-      mlir::triton::parse(dst, loc, rewriter, offsetMap);
-
-      if (!offsetMap.contains(dst)) {
-        return failure();
-      }
-
-      auto &info = offsetMap[dst];
-      Value basePtr = info.getPtr();
-      Value totalOffset = info.getOffset();
-
-      rewriter.create<triton::ascend::IndirectStoreOp>(loc, basePtr,
-                                                       totalOffset, src, mask);
-      rewriter.eraseOp(op);
+    // Mix compile: tag and let UnstructurePass convert to UnstructuredStoreOp;
+    // hfusion scatter_store mask operand handles per-element guarding natively.
+    if (compileOn91095Flag && ascend::isMixCompileMode(compileModeFlag)) {
+      rewriter.modifyOpInPlace(op, [&]() {
+        op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
+                    UnitAttr::get(rewriter.getContext()));
+      });
       return success();
     }
 
-    // When mask = contMask & discMask, use contMask to bound GM accesses and
-    // discMask to select the final per-element value. This prevents the
-    // unguarded full-load from reading past the tail-block boundary.
+    // SIMD path: when mask = contMask & discMask, use contMask to bound GM
+    // accesses and discMask to select the final per-element value. This
+    // prevents the unguarded full-load from reading past the tail-block
+    // boundary.
     auto [contMask, discMask] = decomposeAndMask(op, mask, loc, rewriter);
     if (contMask && discMask) {
       // insert sync_block_lock
@@ -204,8 +202,9 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
       return success();
     }
 
-    // Fallback: original full load + select (contMask absent, pure discrete).
-    // insert sync_block_lock
+    // SIMD fallback: original full load + select (contMask absent, pure
+    // discrete). Has DDR OOB risk but no better option in pure simd mode.
+    // insert sync_block_lock to serialize the read-modify-write window.
     auto lockVar = MemOpConverter::createSyncBlockLockVar(rewriter, loc);
     if (enableSyncBlockLockFlag) {
       rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar);
@@ -231,6 +230,10 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
 
   LogicalResult matchAndRewrite(triton::LoadOp op,
                                 PatternRewriter &rewriter) const final {
+    if (op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName)) {
+      return failure();
+    }
+
     auto loc = op.getLoc();
     auto other = op.getOther();
     auto mask = op.getMask();
@@ -239,14 +242,19 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
     if (failed(isDiscreteMask(op, mask, rewriter)))
       return failure();
 
-    const std::string isDiscreteMaskTag = "is_discrete_mask";
-    op->setAttr(isDiscreteMaskTag, rewriter.getUnitAttr());
+    // Mix compile: tag and let UnstructurePass convert to UnstructuredLoadOp;
+    // hfusion gather_load mask operand handles per-element guarding natively.
+    if (compileOn91095Flag && ascend::isMixCompileMode(compileModeFlag)) {
+      rewriter.modifyOpInPlace(op, [&]() {
+        op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
+                    UnitAttr::get(rewriter.getContext()));
+      });
+      return success();
+    }
 
-    if (compileOn91095Flag && forceSimtTemplateFlag)
-      return failure();
-
-    // When mask = contMask & discMask, load only the safe range defined by
-    // contMask and use discMask for the per-element select, avoiding OOB reads.
+    // SIMD path: when mask = contMask & discMask, load only the safe range
+    // defined by contMask and use discMask for the per-element select,
+    // avoiding OOB reads.
     auto [contMask, discMask] = decomposeAndMask(op, mask, loc, rewriter);
     if (contMask && discMask) {
       if (!other) {
@@ -269,7 +277,6 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
       return success();
     }
 
-    // Fallback: original full load + select (contMask absent, pure discrete).
     if (!other) {
       FailureOr<Value> constant = specializeTypelessValueToConstant(
           TypelessValue::Zero, ptr.getType(), loc, rewriter);
@@ -343,8 +350,10 @@ DiscreteMaskAccessConversionPass::DiscreteMaskAccessConversionPass(
 
 void DiscreteMaskAccessConversionPass::runOnOperation() {
   compileOn91095Flag = this->compileOn91095;
-  forceSimtTemplateFlag = this->forceSimtTemplate;
+  compileModeFlag =
+      ascend::resolveCompileMode(this->compileMode, this->forceSimtTemplate);
   enableSyncBlockLockFlag = this->enableSyncBlockLock;
+
   auto moduleOp = getOperation();
 
   RewritePatternSet patterns(&getContext());

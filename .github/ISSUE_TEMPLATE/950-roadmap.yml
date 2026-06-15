@@ -1,0 +1,39 @@
+name: 🎯 Roadmap
+description: Project planning within a release cycle (for core maintainers only)
+title: "[Roadmap] <Project Name> Roadmap <Time Range>"
+labels: ["roadmap"]
+body:
+- type: textarea
+  attributes:
+    value: |
+      ```
+      # <Project Name> Roadmap <Time Range>
+
+      This cycle focuses on <Direction 1>, <Direction 2>, <Direction 3>, continuously improving <Performance / Compatibility / Usability / Quality>.
+
+      ## Focus
+
+      - <Focus 1 description>
+      - <Focus 2 description>
+
+      ## <Module Name 1>
+
+      - [ ] **<Work Item Name 1>**
+      Goal: <Goal description>
+      Issue: <Issue link> (optional, recommended)
+      Owner: @<GitHubID> (optional)
+      PR: <PR link> (optional)
+
+      - [ ] **<Work Item Name 2> [🙋 Help Wanted]** (optional)
+      Goal: <Goal description>
+      Issue: <Issue link> (optional, recommended)
+      Owner: @<GitHubID> (optional)
+      PR: <PR link> (optional)
+
+      ## Sub-issues (optional)
+
+      <Previous cycle Roadmap> <Issue link>
+      <Large work item breakdown> <Issue link>
+      ```
+  validations:
+    required: true

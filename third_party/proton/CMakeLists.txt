@@ -30,6 +30,7 @@ message(STATUS "===================================")
 # -----------------------------------------------------------------------------
 #STUB-MECHANISM (the very first)
 # -----------------------------------------------------------------------------
+
 set(PROTON_STUBS_DIR "${CMAKE_CURRENT_BINARY_DIR}/proton_stubs")
 include_directories(BEFORE ${PROTON_STUBS_DIR})
 

@@ -11,6 +11,7 @@ add_subdirectory(TritonToUnstructure)
 add_subdirectory(TritonToLLVM)
 add_subdirectory(TritonToStructured)
 add_subdirectory(DynamicCVPipeline)
+add_subdirectory(AnnotateUserCasts)
 # todo: this code will be removed in version 530.
 add_subdirectory(TritonAffinityOpt)
 
@@ -30,6 +31,7 @@ if(TRITON_ENABLE_COVERAGE_HITEST)
       TritonStructuredIR           # from Dialect/TritonStructured/IR
       AutoBlockify
       TritonAffinityOpt
+      AnnotateUserCasts
   )
 
   foreach(_target ${_instrument_targets})

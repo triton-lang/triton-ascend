@@ -23,6 +23,7 @@
 #include "ascend/include/TritonToLinalg/UseAnalysis.h"
 #include "ascend/include/Utils/Utils.h"
 
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 

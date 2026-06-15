@@ -1323,7 +1323,6 @@ bool checkStructureAnnotated(Operation* op, RewriterBase& rewriter) {
 }
 
 bool isDistributedTypeCustomOp(Operation* op){
-  return op->hasAttr("hivm.is_distributed") &&
-         llvm::isa<hivm::CustomOp>(op);
+    return op->hasAttr("hivm.is_distributed") && (llvm::isa<hivm::CustomOp>(op) || llvm::isa<hivm::CustomMacroOp>(op));
 }
 } // namespace mlir

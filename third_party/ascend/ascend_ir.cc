@@ -435,6 +435,23 @@ void init_ascend_ir(py::module &&m) {
       .value("PIPE_FIX", hivm::PIPE::PIPE_FIX)
       .export_values();
 
+  py::enum_<hivm::SyncEventSlotMacroSync>(m, "SYNC_HINT", py::module_local())
+      .value("wait", hivm::SyncEventSlotMacroSync::wait)
+      .value("set", hivm::SyncEventSlotMacroSync::set)
+      .value("internal", hivm::SyncEventSlotMacroSync::internal)
+      .export_values();
+
+  py::enum_<hivm::EVENT>(m, "EVENT", py::module_local())
+      .value("EVENT_ID0", hivm::EVENT::EVENT_ID0)
+      .value("EVENT_ID1", hivm::EVENT::EVENT_ID1)
+      .value("EVENT_ID2", hivm::EVENT::EVENT_ID2)
+      .value("EVENT_ID3", hivm::EVENT::EVENT_ID3)
+      .value("EVENT_ID4", hivm::EVENT::EVENT_ID4)
+      .value("EVENT_ID5", hivm::EVENT::EVENT_ID5)
+      .value("EVENT_ID6", hivm::EVENT::EVENT_ID6)
+      .value("EVENT_ID7", hivm::EVENT::EVENT_ID7)
+      .export_values();
+
   py::enum_<hivm::VFMode>(m, "MODE", py::module_local())
     .value("SIMD", hivm::VFMode::SIMD)
     .value("SIMT", hivm::VFMode::SIMT)
@@ -510,247 +527,272 @@ void init_ascend_ir(py::module &&m) {
           op->removeAttr(name);
         });
 
-  py::class_<AscendNPUIROpBuilder, TritonOpBuilder>(
-      m, "ascendnpu_ir_builder", py::module_local(), py::dynamic_attr())
-      .def(py::init<MLIRContext *, std::string>(), py::arg("context"),
-           py::arg("target") = "")
+  py::class_<AscendNPUIROpBuilder, TritonOpBuilder>(m, "ascendnpu_ir_builder", py::module_local(), py::dynamic_attr())
+      .def(py::init<MLIRContext *, std::string>(), py::arg("context"), py::arg("target") = "")
       .def("get_int_attr",
            [](AscendNPUIROpBuilder &self, int64_t value) -> Attribute {
-             return IntegerAttr::get(self.getBuilder().getI64Type(), value);
+               return IntegerAttr::get(self.getBuilder().getI64Type(), value);
            })
       .def("get_core_type_attr",
            [](AscendNPUIROpBuilder &self, hivm::TCoreType core_type) -> Attribute {
-             return self.getBuilder().getAttr<hivm::TCoreTypeAttr>(core_type);
+               return self.getBuilder().getAttr<hivm::TCoreTypeAttr>(core_type);
            })
       .def("get_pipe_attr",
            [](AscendNPUIROpBuilder &self, hivm::PIPE pipe) -> Attribute {
-             return self.getBuilder().getAttr<hivm::PipeAttr>(pipe);
+               return self.getBuilder().getAttr<hivm::PipeAttr>(pipe);
            })
+      .def("get_event_attr",
+           [](AscendNPUIROpBuilder &self, hivm::EVENT event) -> Attribute {
+               return hivm::EventAttr::get(self.getBuilder().getContext(), event);
+           })
+      .def(
+          "get_sync_event_slot_attr",
+          [](AscendNPUIROpBuilder &self, py::object setPipe, py::object waitPipe,
+             hivm::SyncEventSlotMacroSync macroSync, py::object event) -> Attribute {
+              auto *ctx = self.getBuilder().getContext();
+              hivm::PipeAttr setPipeAttr;
+              hivm::PipeAttr waitPipeAttr;
+              hivm::EventAttr eventAttr;
+              if (!setPipe.is_none())
+                  setPipeAttr = hivm::PipeAttr::get(ctx, py::cast<hivm::PIPE>(setPipe));
+              if (!waitPipe.is_none())
+                  waitPipeAttr = hivm::PipeAttr::get(ctx, py::cast<hivm::PIPE>(waitPipe));
+              if (!event.is_none())
+                  eventAttr = hivm::EventAttr::get(ctx, py::cast<hivm::EVENT>(event));
+              return hivm::SyncEventSlotAttr::get(ctx, setPipeAttr, waitPipeAttr, macroSync, eventAttr);
+          },
+          py::arg("set_pipe") = py::none(), py::arg("wait_pipe") = py::none(),
+          py::arg("macro_sync") = hivm::SyncEventSlotMacroSync::wait, py::arg("event") = py::none())
       .def("get_vf_mode_attr",
            [](AscendNPUIROpBuilder &self, hivm::VFMode mode) -> Attribute {
-             return self.getBuilder().getAttr<hivm::VFModeAttr>(mode);
+               return self.getBuilder().getAttr<hivm::VFModeAttr>(mode);
            })
       .def("get_iterator_types_attr",
-          [](AscendNPUIROpBuilder &self, const std::vector<hivm::IteratorType>& array) {
-          auto attrs = llvm::to_vector(llvm::map_range(array, [&self](hivm::IteratorType type) {
-                return cast<Attribute>(self.getBuilder().getAttr<hivm::IteratorTypeAttr>(type));
-          }));
-          return self.getBuilder().getArrayAttr(attrs);
-          })
-      .def("get_t_core_type_attr_name",
-           [](AscendNPUIROpBuilder &self) -> std::string {
-             return hivm::TCoreTypeAttr::name.str();
+           [](AscendNPUIROpBuilder &self, const std::vector<hivm::IteratorType> &array) {
+               auto attrs = llvm::to_vector(llvm::map_range(array, [&self](hivm::IteratorType type) {
+                   return cast<Attribute>(self.getBuilder().getAttr<hivm::IteratorTypeAttr>(type));
+               }));
+               return self.getBuilder().getArrayAttr(attrs);
            })
+      .def("get_array_attr",
+           [](AscendNPUIROpBuilder &self, const std::vector<Attribute> &attrs) -> Attribute {
+               return self.getBuilder().getArrayAttr(attrs);
+           })
+      .def("get_t_core_type_attr_name",
+           [](AscendNPUIROpBuilder &self) -> std::string { return hivm::TCoreTypeAttr::name.str(); })
       .def("get_t_core_type_cube_attr",
            [](AscendNPUIROpBuilder &self) -> Attribute {
-             return hivm::TCoreTypeAttr::get(self.getBuilder().getContext(),
-                                             hivm::TCoreType::CUBE);
+               return hivm::TCoreTypeAttr::get(self.getBuilder().getContext(), hivm::TCoreType::CUBE);
            })
       .def("get_t_core_type_vector_attr",
            [](AscendNPUIROpBuilder &self) -> Attribute {
-             return hivm::TCoreTypeAttr::get(self.getBuilder().getContext(),
-                                             hivm::TCoreType::VECTOR);
+               return hivm::TCoreTypeAttr::get(self.getBuilder().getContext(), hivm::TCoreType::VECTOR);
            })
       .def("parse_attr",
            [](TritonOpBuilder &self, std::string value) -> Attribute {
-             auto *ctx = self.getBuilder().getContext();
-             // Enable parsing of HACC attributes by allowing unregistered dialects.
-             ctx->allowUnregisteredDialects();
-             return mlir::parseAttribute(value, ctx);
+               auto *ctx = self.getBuilder().getContext();
+               // Enable parsing of HACC attributes by allowing unregistered dialects.
+               ctx->allowUnregisteredDialects();
+               return mlir::parseAttribute(value, ctx);
            })
       .def("get_affine_map_attr",
-           [](AscendNPUIROpBuilder &self, AffineMap affineMap) -> Attribute {
-             return AffineMapAttr::get(affineMap);
-           })
+           [](AscendNPUIROpBuilder &self, AffineMap affineMap) -> Attribute { return AffineMapAttr::get(affineMap); })
       .def("get_affine_map_array_attr",
-           [](AscendNPUIROpBuilder &self,
-              const std::vector<AffineMap> &affineMaps) -> Attribute {
-             auto *ctx = self.getBuilder().getContext();
-             llvm::SmallVector<Attribute> attrs;
-             attrs.reserve(affineMaps.size());
-             for (const auto &map : affineMaps) {
-               attrs.push_back(AffineMapAttr::get(map));
-             }
-             return ArrayAttr::get(ctx, attrs);
+           [](AscendNPUIROpBuilder &self, const std::vector<AffineMap> &affineMaps) -> Attribute {
+               auto *ctx = self.getBuilder().getContext();
+               llvm::SmallVector<Attribute> attrs;
+               attrs.reserve(affineMaps.size());
+               for (const auto &map : affineMaps) {
+                   attrs.push_back(AffineMapAttr::get(map));
+               }
+               return ArrayAttr::get(ctx, attrs);
            })
       .def("get_buffer_ty_with_affine_map",
-           [](AscendNPUIROpBuilder &self, std::vector<int64_t> &shape,
-              Type &elementType, AffineMap affineMap,
+           [](AscendNPUIROpBuilder &self, std::vector<int64_t> &shape, Type &elementType, AffineMap affineMap,
               const Attribute &memorySpace) -> Type {
-             auto layout = AffineMapAttr::get(affineMap);
-             return MemRefType::get(shape, elementType, layout, memorySpace);
+               auto layout = AffineMapAttr::get(affineMap);
+               return MemRefType::get(shape, elementType, layout, memorySpace);
            })
       .def("create_fixpipe",
-           [](AscendNPUIROpBuilder &self, Value src, Value dst,
-              hivm::FixpipeDMAMode dma_mode,
-              hivm::FixpipeDualDstMode dual_dst_mode,
-              hivm::FixpipePreQuantMode pre_quant_mode,
+           [](AscendNPUIROpBuilder &self, Value src, Value dst, hivm::FixpipeDMAMode dma_mode,
+              hivm::FixpipeDualDstMode dual_dst_mode, hivm::FixpipePreQuantMode pre_quant_mode,
               hivm::FixpipePreReluMode pre_relu_mode) -> void {
-             if (!dyn_cast<RankedTensorType>(src.getType())) {
-               llvm_unreachable("src is not of RankedTensorType");
-             }
-             if (!dyn_cast<MemRefType>(dst.getType())) {
-               llvm_unreachable("dst is not of MemRefType");
-             }
-             auto *ctx = self.getBuilder().getContext();
-             auto dma_mode_attr =
-                 mlir::hivm::FixpipeDMAModeAttr::get(ctx, dma_mode);
-             auto dual_dst_mode_attr =
-                 mlir::hivm::FixpipeDualDstModeAttr::get(ctx, dual_dst_mode);
-             auto pre_quant_mode_attr =
-                 mlir::hivm::FixpipePreQuantModeAttr::get(ctx, pre_quant_mode);
-             auto pre_relu_mode_attr =
-                 mlir::hivm::FixpipePreReluModeAttr::get(ctx, pre_relu_mode);
-             auto channel_split = BoolAttr::get(ctx, false);
-             auto op = self.create<hivm::FixpipeOp>(
-                 mlir::TypeRange{}, src, dst, dma_mode_attr, dual_dst_mode_attr,
-                 pre_quant_mode_attr, pre_relu_mode_attr, channel_split);
+               if (!dyn_cast<RankedTensorType>(src.getType())) {
+                   llvm_unreachable("src is not of RankedTensorType");
+               }
+               if (!dyn_cast<MemRefType>(dst.getType())) {
+                   llvm_unreachable("dst is not of MemRefType");
+               }
+               auto *ctx = self.getBuilder().getContext();
+               auto dma_mode_attr = mlir::hivm::FixpipeDMAModeAttr::get(ctx, dma_mode);
+               auto dual_dst_mode_attr = mlir::hivm::FixpipeDualDstModeAttr::get(ctx, dual_dst_mode);
+               auto pre_quant_mode_attr = mlir::hivm::FixpipePreQuantModeAttr::get(ctx, pre_quant_mode);
+               auto pre_relu_mode_attr = mlir::hivm::FixpipePreReluModeAttr::get(ctx, pre_relu_mode);
+               auto channel_split = BoolAttr::get(ctx, false);
+               auto op = self.create<hivm::FixpipeOp>(mlir::TypeRange {}, src, dst, dma_mode_attr, dual_dst_mode_attr,
+                                                      pre_quant_mode_attr, pre_relu_mode_attr, channel_split);
            })
       .def("create_annotation_mark",
-           [](TritonOpBuilder &self, Value &ptr, const std::string &attrKey,
-              Attribute &attrVal) {
-             auto annotationOp = self.create<annotation::MarkOp>(ptr);
-             annotationOp->setAttr(self.getBuilder().getStringAttr(attrKey),
-                                   attrVal);
+           [](TritonOpBuilder &self, Value &ptr, const std::string &attrKey, Attribute &attrVal) {
+               auto annotationOp = self.create<annotation::MarkOp>(ptr);
+               annotationOp->setAttr(self.getBuilder().getStringAttr(attrKey), attrVal);
            })
       .def("create_bind_buffer",
            [](TritonOpBuilder &self, Value &src, Value &alloc) -> void {
-             auto ctx = self.getBuilder().getContext();
-             auto bind = StringAttr::get(ctx, "bind_buffer");
-             self.create<annotation::MarkOp>(src, ValueRange{alloc},
-                                             ArrayAttr::get(ctx, bind));
+               auto ctx = self.getBuilder().getContext();
+               auto bind = StringAttr::get(ctx, "bind_buffer");
+               self.create<annotation::MarkOp>(src, ValueRange {alloc}, ArrayAttr::get(ctx, bind));
            })
       .def("create_debug_barrier",
-           [](TritonOpBuilder &self, Value &ptr, const std::string &attrKey,
-              Attribute &attrVal) {
-             auto annotationOp = self.create<annotation::MarkOp>(ptr);
-             annotationOp->setAttr(self.getBuilder().getStringAttr(attrKey),
-                                   attrVal);
+           [](TritonOpBuilder &self, Value &ptr, const std::string &attrKey, Attribute &attrVal) {
+               auto annotationOp = self.create<annotation::MarkOp>(ptr);
+               annotationOp->setAttr(self.getBuilder().getStringAttr(attrKey), attrVal);
            })
       .def("create_custom_op",
-           [](AscendNPUIROpBuilder &self,
-               const std::string &name,
-               const py::dict &attrs,
-               const std::vector<Value> &ins,
-               const std::vector<Value> &outs,
-               const std::vector<py::dict> &arg_attrs) -> std::vector<Value> {
-             ValueRange inputs{ins};
-             ValueRange outputs{outs};
-             ValueRange temp_buffers{};
-             TypeRange res_types{outputs};
-             auto op = self.create<hivm::CustomOp>(res_types, name, inputs, outputs, temp_buffers);
-             for (auto &attr : attrs) {
-               std::string attr_name = py::cast<std::string>(attr.first);
-               Attribute attr_value = py::cast<Attribute>(attr.second);
-               op->setAttr(attr_name, attr_value);
-             }
-
-             SmallVector<Attribute> dictAttrs(arg_attrs.size());
-             Attribute emptyDict = self.getBuilder().getDictionaryAttr({});
-             for (const auto &[idx, attrs] : llvm::enumerate(arg_attrs)) {
-               if (idx >= op.getNumOperands())
-                 continue;
-
-               if (attrs.is_none()) {
-                 dictAttrs[idx] = emptyDict;
-                 continue;
+           [](AscendNPUIROpBuilder &self, const std::string &name, const py::dict &attrs, const std::vector<Value> &ins,
+              const std::vector<Value> &outs, const std::vector<py::dict> &arg_attrs) -> std::vector<Value> {
+               ValueRange inputs {ins};
+               ValueRange outputs {outs};
+               ValueRange temp_buffers {};
+               TypeRange res_types {outputs};
+               auto op = self.create<hivm::CustomOp>(res_types, name, inputs, outputs, temp_buffers);
+               for (auto &attr : attrs) {
+                   std::string attr_name = py::cast<std::string>(attr.first);
+                   Attribute attr_value = py::cast<Attribute>(attr.second);
+                   op->setAttr(attr_name, attr_value);
                }
 
-               llvm::SmallVector<NamedAttribute> namedAttrs;
-               for (const auto &attr : attrs) {
-                 std::string attr_name = py::cast<std::string>(attr.first);
-                 Attribute attr_value = py::cast<Attribute>(attr.second);
-                 namedAttrs.push_back(
-                    NamedAttribute(self.getBuilder().getStringAttr(attr_name), attr_value));
+               SmallVector<Attribute> dictAttrs(arg_attrs.size());
+               Attribute emptyDict = self.getBuilder().getDictionaryAttr({});
+               for (const auto &[idx, attrs] : llvm::enumerate(arg_attrs)) {
+                   if (idx >= op.getNumOperands())
+                       continue;
+
+                   if (attrs.is_none()) {
+                       dictAttrs[idx] = emptyDict;
+                       continue;
+                   }
+
+                   llvm::SmallVector<NamedAttribute> namedAttrs;
+                   for (const auto &attr : attrs) {
+                       std::string attr_name = py::cast<std::string>(attr.first);
+                       Attribute attr_value = py::cast<Attribute>(attr.second);
+                       namedAttrs.push_back(NamedAttribute(self.getBuilder().getStringAttr(attr_name), attr_value));
+                   }
+
+                   dictAttrs[idx] = self.getBuilder().getDictionaryAttr(namedAttrs);
                }
 
-               dictAttrs[idx] = self.getBuilder().getDictionaryAttr(namedAttrs);
-             }
+               ArrayAttr arg_attrs_array = self.getBuilder().getArrayAttr(dictAttrs);
+               op->setAttr("arg_attrs", arg_attrs_array);
 
-             ArrayAttr arg_attrs_array = self.getBuilder().getArrayAttr(dictAttrs);
-             op->setAttr("arg_attrs", arg_attrs_array);
+               auto results = op->getResults();
+               return std::vector<Value>(results.begin(), results.end());
+           })
+      .def("create_custom_macro_op",
+           [](AscendNPUIROpBuilder &self, const std::string &name, const py::dict &attrs, const std::vector<Value> &ins,
+              const std::vector<Value> &outs, const std::vector<py::dict> &arg_attrs) -> std::vector<Value> {
+               ValueRange inputs {ins};
+               ValueRange outputs {outs};
+               ValueRange temp_buffers {};
+               ValueRange syncArgs {};
+               TypeRange res_types {outputs};
+               auto op = self.create<hivm::CustomMacroOp>(res_types, name, inputs, outputs, temp_buffers, syncArgs);
+               for (auto &attr : attrs) {
+                   std::string attr_name = py::cast<std::string>(attr.first);
+                   Attribute attr_value = py::cast<Attribute>(attr.second);
+                   op->setAttr(attr_name, attr_value);
+               }
 
-             auto results = op->getResults();
-             return std::vector<Value>(results.begin(), results.end());
+               SmallVector<Attribute> dictAttrs(arg_attrs.size());
+               Attribute emptyDict = self.getBuilder().getDictionaryAttr({});
+               for (const auto &[idx, attrs] : llvm::enumerate(arg_attrs)) {
+                   if (idx >= op.getNumOperands())
+                       continue;
+
+                   if (attrs.is_none()) {
+                       dictAttrs[idx] = emptyDict;
+                       continue;
+                   }
+
+                   llvm::SmallVector<NamedAttribute> namedAttrs;
+                   for (const auto &attr : attrs) {
+                       std::string attr_name = py::cast<std::string>(attr.first);
+                       Attribute attr_value = py::cast<Attribute>(attr.second);
+                       namedAttrs.push_back(NamedAttribute(self.getBuilder().getStringAttr(attr_name), attr_value));
+                   }
+
+                   dictAttrs[idx] = self.getBuilder().getDictionaryAttr(namedAttrs);
+               }
+
+               ArrayAttr arg_attrs_array = self.getBuilder().getArrayAttr(dictAttrs);
+               op->setAttr("arg_attrs", arg_attrs_array);
+
+               auto results = op->getResults();
+               return std::vector<Value>(results.begin(), results.end());
            })
       .def("create_scope_op",
-           [](AscendNPUIROpBuilder &self, py::dict &scopeAttrs,
-              std::vector<Type> resultTypes) -> OpState {
-             llvm::SmallVector<NamedAttribute> attrs;
-             for (auto item : scopeAttrs) {
-               std::string key = py::cast<std::string>(item.first);
-               Attribute value = py::cast<Attribute>(item.second);
-               attrs.push_back(
-                   NamedAttribute(self.getBuilder().getStringAttr(key), value));
-             }
-             auto scopeOp = self.create<scope::ScopeOp>(TypeRange(resultTypes));
-             scopeOp->setAttrs(attrs);
-             return OpState(scopeOp);
+           [](AscendNPUIROpBuilder &self, py::dict &scopeAttrs, std::vector<Type> resultTypes) -> OpState {
+               llvm::SmallVector<NamedAttribute> attrs;
+               for (auto item : scopeAttrs) {
+                   std::string key = py::cast<std::string>(item.first);
+                   Attribute value = py::cast<Attribute>(item.second);
+                   attrs.push_back(NamedAttribute(self.getBuilder().getStringAttr(key), value));
+               }
+               auto scopeOp = self.create<scope::ScopeOp>(TypeRange(resultTypes));
+               scopeOp->setAttrs(attrs);
+               return OpState(scopeOp);
            })
       .def("scope_return",
-           [](AscendNPUIROpBuilder &self,
-              std::vector<Value> operands) -> OpState {
-             return self.create<scope::ReturnOp>(ValueRange(operands));
+           [](AscendNPUIROpBuilder &self, std::vector<Value> operands) -> OpState {
+               return self.create<scope::ReturnOp>(ValueRange(operands));
            })
       .def("sync_block_set",
-           [](AscendNPUIROpBuilder &self, std::string &sender,
-              std::string &receiver, Value id, hivm::PIPE senderPipe,
+           [](AscendNPUIROpBuilder &self, std::string &sender, std::string &receiver, Value id, hivm::PIPE senderPipe,
               hivm::PIPE receiverPipe) -> void {
-             buildSyncBlockOp(self, "sync_block_set", sender, receiver, id,
-                              senderPipe, receiverPipe);
+               buildSyncBlockOp(self, "sync_block_set", sender, receiver, id, senderPipe, receiverPipe);
            })
       .def("sync_block_wait",
-           [](AscendNPUIROpBuilder &self, std::string &sender,
-              std::string &receiver, Value id, hivm::PIPE senderPipe,
+           [](AscendNPUIROpBuilder &self, std::string &sender, std::string &receiver, Value id, hivm::PIPE senderPipe,
               hivm::PIPE receiverPipe) -> void {
-             buildSyncBlockOp(self, "sync_block_wait", sender, receiver, id,
-                              senderPipe, receiverPipe);
+               buildSyncBlockOp(self, "sync_block_wait", sender, receiver, id, senderPipe, receiverPipe);
            })
       .def("get_target_attribute",
-           [](AscendNPUIROpBuilder &self,
-              hivm::AddressSpace &addressSpace) -> Attribute {
-             return hivm::AddressSpaceAttr::get(self.getBuilder().getContext(),
-                                                addressSpace);
+           [](AscendNPUIROpBuilder &self, hivm::AddressSpace &addressSpace) -> Attribute {
+               return hivm::AddressSpaceAttr::get(self.getBuilder().getContext(), addressSpace);
            })
       .def("create_get_sub_vec_id",
            [](AscendNPUIROpBuilder &self) -> Value {
-             auto subBlockIdxOp = self.create<hivm::GetSubBlockIdxOp>();
-             auto moduleOp = subBlockIdxOp->getParentOfType<ModuleOp>();
-             auto *ctx = self.getBuilder().getContext();
-             // If user explicitly uses sub.block idx, add attribute to module.
-             // NPU compiler will parse this attribute and disable auto tile and bind subblock pass.
-             moduleOp->setAttr("hivm.disable_auto_tile_and_bind_subblock", mlir::UnitAttr::get(ctx));
-             return subBlockIdxOp;
+               auto subBlockIdxOp = self.create<hivm::GetSubBlockIdxOp>();
+               auto moduleOp = subBlockIdxOp->getParentOfType<ModuleOp>();
+               auto *ctx = self.getBuilder().getContext();
+               // If user explicitly uses sub.block idx, add attribute to module.
+               // NPU compiler will parse this attribute and disable auto tile and bind subblock pass.
+               moduleOp->setAttr("hivm.disable_auto_tile_and_bind_subblock", mlir::UnitAttr::get(ctx));
+               return subBlockIdxOp;
            })
       .def("sync_block_all",
            [](AscendNPUIROpBuilder &self, std::string &mode, int id) -> void {
-             auto *ctx = self.getBuilder().getContext();
-             auto [modeAttr, cubePipe, vectorPipe] =
-                 GetSyncBlockModeAndPipes(ctx, mode);
-             mlir::IndexType indexType = mlir::IndexType::get(ctx);
-             mlir::IntegerAttr indexAttribute =
-                 mlir::IntegerAttr::get(indexType, static_cast<int64_t>(id));
-             self.create<hivm::SyncBlockOp>(
-                 modeAttr, indexAttribute, mlir::Value{}, cubePipe, vectorPipe);
+               auto *ctx = self.getBuilder().getContext();
+               auto [modeAttr, cubePipe, vectorPipe] = GetSyncBlockModeAndPipes(ctx, mode);
+               mlir::IndexType indexType = mlir::IndexType::get(ctx);
+               mlir::IntegerAttr indexAttribute = mlir::IntegerAttr::get(indexType, static_cast<int64_t>(id));
+               self.create<hivm::SyncBlockOp>(modeAttr, indexAttribute, mlir::Value {}, cubePipe, vectorPipe);
            })
-      .def("is_910_95",
-           [](AscendNPUIROpBuilder &self) -> bool { return self.is_910_95(); })
-      .def("create_copy_buffer",
-           [](AscendNPUIROpBuilder &self, Value src, Value dst) {
-             self.create<hivm::CopyOp>(mlir::TypeRange{}, src, dst);
-           })
+      .def("is_910_95", [](AscendNPUIROpBuilder &self) -> bool { return self.is_910_95(); })
+      .def("create_copy_buffer", [](AscendNPUIROpBuilder &self, Value src,
+                                    Value dst) { self.create<hivm::CopyOp>(mlir::TypeRange {}, src, dst); })
       .def("create_copy_tensor",
            [](AscendNPUIROpBuilder &self, Value src, Value dst) {
-             return self.create<hivm::CopyOp>(mlir::TypeRange{dst.getType()}, src, dst).getResult(0);
+               return self.create<hivm::CopyOp>(mlir::TypeRange {dst.getType()}, src, dst).getResult(0);
            })
-      .def("create_convert_layout",
-           [](AscendNPUIROpBuilder &self, Value src, Type memrefType) -> Value {
-             // src is a memref
-             // the layout is incorrect (temporarily)
-             auto *ctx = self.getBuilder().getContext();
-             return self.create<hivm::ConvertLayoutOp>(
-                 memrefType, src,
-                 hivm::DataLayoutAttr::get(ctx, hivm::DataLayout::ND),
-                 hivm::DataLayoutAttr::get(ctx, hivm::DataLayout::ND)).getResult();
-           });
+      .def("create_convert_layout", [](AscendNPUIROpBuilder &self, Value src, Type memrefType) -> Value {
+          // src is a memref
+          // the layout is incorrect (temporarily)
+          auto *ctx = self.getBuilder().getContext();
+          return self
+              .create<hivm::ConvertLayoutOp>(memrefType, src, hivm::DataLayoutAttr::get(ctx, hivm::DataLayout::ND),
+                                             hivm::DataLayoutAttr::get(ctx, hivm::DataLayout::ND))
+              .getResult();
+      });
 }

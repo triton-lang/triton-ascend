@@ -73,109 +73,105 @@ void triton::UseAnalysis::visitOperation(Operation *op,
 
   TypeSwitch<Operation *>(op)
       .Case<triton::LoadOp>([&](auto load) {
-        propagateUse(operands[0], UseType::MetaUse);
-        auto mask = load.getMask();
-        auto other = load.getOther();
-        if (mask) {
-          assert(mask != other && "mask and other cannot be the same");
-          propagateUse(operands[1], UseType::MetaUse);
-        }
-        if (other) {
-          propagateUse(operands[2], UseType::MetaUse);
-        }
+          propagateUse(operands[0], UseType::MetaUse);
+          auto mask = load.getMask();
+          auto other = load.getOther();
+          if (mask) {
+              assert(mask != other && "mask and other cannot be the same");
+              propagateUse(operands[1], UseType::MetaUse);
+          }
+          if (other) {
+              propagateUse(operands[2], UseType::MetaUse);
+          }
       })
-      .Case<triton::PrintOp>([&](auto print){
-        for (auto operand : operands)
-          propagateUse(operand, UseType::DataUse);
+      .Case<triton::PrintOp>([&](auto print) {
+          for (auto operand : operands)
+              propagateUse(operand, UseType::DataUse);
       })
-      .Case<triton::AssertOp>(
-          [&](auto assert) { propagateUse(operands[0], UseType::DataUse); })
+      .Case<triton::AssertOp>([&](auto assert) { propagateUse(operands[0], UseType::DataUse); })
       .Case<triton::StoreOp>([&](auto store) {
-        propagateUse(operands[0], UseType::MetaUse);
-        propagateUse(operands[1], UseType::DataUse);
-        auto value = store.getValue();
-        auto mask = store.getMask();
-        if (mask) {
-          assert(mask != value && "mask and data cannot be the same");
-          propagateUse(operands[2], UseType::MetaUse);
-        }
+          propagateUse(operands[0], UseType::MetaUse);
+          propagateUse(operands[1], UseType::DataUse);
+          auto value = store.getValue();
+          auto mask = store.getMask();
+          if (mask) {
+              assert(mask != value && "mask and data cannot be the same");
+              propagateUse(operands[2], UseType::MetaUse);
+          }
       })
       .Case<triton::ascend::IndirectStoreOp>([&](auto store) {
-        propagateUse(operands[0], UseType::MetaUse);
-        propagateUse(operands[1], UseType::MetaUse);
-        propagateUse(operands[2], UseType::DataUse);
-        auto value = store.getValue();
-        auto mask = store.getMask();
-        if (mask) {
-          assert(mask != value && "mask and data cannot be the same");
-          propagateUse(operands[3], UseType::MetaUse);
-        }
+          propagateUse(operands[0], UseType::MetaUse);
+          propagateUse(operands[1], UseType::MetaUse);
+          propagateUse(operands[2], UseType::DataUse);
+          auto value = store.getValue();
+          auto mask = store.getMask();
+          if (mask) {
+              assert(mask != value && "mask and data cannot be the same");
+              propagateUse(operands[3], UseType::MetaUse);
+          }
       })
       // Consider triton::AtomicRMWOp as store operation
       .Case<triton::AtomicRMWOp>([&](auto atomicOp) {
-        propagateUse(operands[0], UseType::MixUse);
-        propagateUse(operands[1], UseType::DataUse);
-        auto value = atomicOp.getVal();
-        auto mask = atomicOp.getMask();
-        if (mask) {
-          assert(mask != value && "mask and data cannot be the same");
-          propagateUse(operands[2], UseType::MetaUse);
-        }
+          propagateUse(operands[0], UseType::MixUse);
+          propagateUse(operands[1], UseType::DataUse);
+          auto value = atomicOp.getVal();
+          auto mask = atomicOp.getMask();
+          if (mask) {
+              assert(mask != value && "mask and data cannot be the same");
+              propagateUse(operands[2], UseType::MetaUse);
+          }
       })
       .Case<triton::AtomicCASOp>([&](auto atomicOp) {
-        propagateUse(operands[0], UseType::MetaUse);
-        propagateUse(operands[1], UseType::DataUse);
-        propagateUse(operands[2], UseType::DataUse);
-        auto value = atomicOp.getVal();
+          propagateUse(operands[0], UseType::MetaUse);
+          propagateUse(operands[1], UseType::DataUse);
+          propagateUse(operands[2], UseType::DataUse);
+          auto value = atomicOp.getVal();
       })
       .Case<triton::DotOp>([&](auto dot) {
-        propagateResults(operands[0], results);
-        propagateResults(operands[1], results);
+          propagateResults(operands[0], results);
+          propagateResults(operands[1], results);
 
-        auto opc = dot.getC();
-        triton::SplatOp splat;
-        if (opc) {
-          splat = opc.template getDefiningOp<triton::SplatOp>();
-        }
+          auto opc = dot.getC();
+          triton::SplatOp splat;
+          if (opc) {
+              splat = opc.template getDefiningOp<triton::SplatOp>();
+          }
 
-        if (opc && splat && splat.getSrc().getDefiningOp<arith::ConstantOp>()) {
-          propagateUse(operands[2], UseType::MetaUse);
-        } else {
-          propagateUse(operands[2], UseType::DataUse);
-        }
+          if (opc && splat && splat.getSrc().getDefiningOp<arith::ConstantOp>()) {
+              propagateUse(operands[2], UseType::MetaUse);
+          } else {
+              propagateUse(operands[2], UseType::DataUse);
+          }
       })
       .Case<LoopLikeOpInterface>([&](auto loopOp) {
-        for (const auto &[yield, init, result]: llvm::zip_equal(loopOp.getYieldedValues(), loopOp.getInits(), results)) {
-          propagateResults(getLatticeElement(yield), {result});
-          propagateResults(getLatticeElement(init), {result});
-        }
+          for (const auto &[yield, init, result] :
+               llvm::zip_equal(loopOp.getYieldedValues(), loopOp.getInits(), results)) {
+              propagateResults(getLatticeElement(yield), {result});
+              propagateResults(getLatticeElement(init), {result});
+          }
       })
       .Case<triton::ReduceOp>([&](auto reduceOp) {
-        for (auto operand : operands) {
-          propagateUse(operand, UseType::DataUse);
-        }
+          for (auto operand : operands) {
+              propagateUse(operand, UseType::DataUse);
+          }
       })
       .Case<tensor::ExtractOp>([&](auto extractOp) {
-        for (auto operand : operands) {
-          propagateUse(operand, UseType::DataUse);
-        }
+          for (auto operand : operands) {
+              propagateUse(operand, UseType::DataUse);
+          }
       })
-      .Case<hivm::FixpipeOp>([&](auto fixpipeOp) {
-        propagateUse(operands[0], UseType::DataUse);
-      })
-      .Case<hivm::CopyOp>([&](auto copyOp) {
-        propagateUse(operands[0], UseType::DataUse);
-      })
-      .Case<hivm::CustomOp>([&](auto customOp) {
-        for (auto operand : operands) {
-          propagateUse(operand, UseType::MixUse);
-        }
+      .Case<hivm::FixpipeOp>([&](auto fixpipeOp) { propagateUse(operands[0], UseType::DataUse); })
+      .Case<hivm::CopyOp>([&](auto copyOp) { propagateUse(operands[0], UseType::DataUse); })
+      .Case<hivm::CustomOp, hivm::CustomMacroOp>([&](auto) {
+          for (auto operand : operands) {
+              propagateUse(operand, UseType::MixUse);
+          }
       })
       .Default([&](Operation *op) {
-        // this condition account for tt.addptr
-        for (auto operand : operands) {
-          propagateResults(operand, results);
-        }
+          // this condition account for tt.addptr
+          for (auto operand : operands) {
+              propagateResults(operand, results);
+          }
       });
 #if LLVM_VERSION_MAJOR >= 20
   return success();
@@ -556,11 +552,11 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
       op->removeAttr("MetaUse");
     }
   });
-  // hivm.custom present library call, shouldn't be metause
-  funcOp.walk([&](hivm::CustomOp op) {
-    if (isMetaUse(op)) {
-      op->removeAttr("MetaUse");
-    }
+  // hivm custom ops present library call, shouldn't be metause
+  funcOp.walk([&](Operation *op) {
+      if (isa<hivm::CustomOp, hivm::CustomMacroOp>(op) && isMetaUse(op)) {
+          op->removeAttr("MetaUse");
+      }
   });
   LLVM_DEBUG({
     os << "[UseAnalysis] After post-process, funcOp is " << *funcOp << "\n";

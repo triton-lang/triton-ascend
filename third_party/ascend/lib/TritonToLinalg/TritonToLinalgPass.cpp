@@ -97,19 +97,18 @@ int nd2nzFlag = 0;
 bool compileOn91095Flag = false;
 bool existDotFlag = false;
 
-// Convert CustomOp after operand type converted,
+// Convert structured custom ops after operand type converted,
 // for example tt.ptr converted to memref.
-class CustomOpConverter : public OpConversionPattern<hivm::CustomOp> {
-public:
-  using OpConversionPattern<hivm::CustomOp>::OpConversionPattern;
+template <typename CustomOpT> class StructuredCustomOpConverter : public OpConversionPattern<CustomOpT> {
+  public:
+    using OpConversionPattern<CustomOpT>::OpConversionPattern;
 
-  LogicalResult
-  matchAndRewrite(hivm::CustomOp op, OpAdaptor adaptor,
-                  ConversionPatternRewriter &rewriter) const override
-  {
-    BlockDataParser::rewriteCustomOp(op, adaptor, rewriter);
-    return success();
-  }
+    LogicalResult matchAndRewrite(CustomOpT op, typename CustomOpT::Adaptor adaptor,
+                                  ConversionPatternRewriter &rewriter) const override
+    {
+        BlockDataParser::rewriteStructuredCustomOp(op, adaptor, rewriter);
+        return success();
+    }
 };
 
 // A tt.scan that is (1) a plain cumsum (combine body is a single add, matching
@@ -176,6 +175,19 @@ static bool isGatherSIMT(triton::GatherOp gatherOp) {
     }
   }
   return false;
+}
+
+static bool isCustomOpOperandTypesLegal(TypeRange types)
+{
+    return llvm::all_of(types, [](Type t) {
+        if (isa<triton::PointerType>(t)) {
+            return false;
+        }
+        if (auto shapedType = dyn_cast<ShapedType>(t)) {
+            return !isa<triton::PointerType>(shapedType.getElementType());
+        }
+        return true;
+    });
 }
 
 static bool isSIMTOp(Operation *op)
@@ -553,18 +565,11 @@ void TritonToLinalgPass::addDynamicLegal(
     return tritonTypeConverter.isSignatureLegal(op.getFunctionType());
   });
 
-  // For CustomOp, tt.ptr should be converted to memref.
-  target.addDynamicallyLegalOp<hivm::CustomOp>([&](hivm::CustomOp op) {
-    return all_of(op->getOperandTypes(), [](Type t) {
-      if (isa<triton::PointerType>(t)) {
-        return false;
-      }
-      if (auto shapedType = dyn_cast<ShapedType>(t)) {
-        return !isa<triton::PointerType>(shapedType.getElementType());
-      }
-      return true;
-    });
-  });
+  // For CustomOp/CustomMacroOp, tt.ptr should be converted to memref.
+  target.addDynamicallyLegalOp<hivm::CustomOp>(
+      [&](hivm::CustomOp op) { return isCustomOpOperandTypesLegal(op->getOperandTypes()); });
+  target.addDynamicallyLegalOp<hivm::CustomMacroOp>(
+      [&](hivm::CustomMacroOp op) { return isCustomOpOperandTypesLegal(op->getOperandTypes()); });
 
   target.addDynamicallyLegalOp<arith::ConstantOp>([](arith::ConstantOp op) {
     auto res = op.getResult();
@@ -743,8 +748,9 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
     patterns.add<TTOpConverters::HistogramConverter>(patterns.getContext());
   }
 
-  // Add convert pattern for CustomOp.
-  patterns.add<CustomOpConverter>(patterns.getContext());
+  // Add convert pattern for structured custom ops.
+  patterns.add<StructuredCustomOpConverter<hivm::CustomOp>, StructuredCustomOpConverter<hivm::CustomMacroOp>>(
+      patterns.getContext());
 
   if (!this->namedOps) {
     linalg::populateElementwiseToLinalgConversionPatterns(patterns);

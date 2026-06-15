@@ -36,6 +36,8 @@ __all__ = [
     "is_builtin",
     "MODE",
     "PIPE",
+    "SYNC_HINT",
+    "EVENT_ID",
     "IteratorType",
     "sub_vec_id",
     "sub_vec_num",
@@ -57,8 +59,8 @@ import triton.extension.buffer.language as bl
 from triton.language.core import _constexpr_to_value
 from triton.backends.ascend.driver import NPUUtils
 
-from . import semantic as semantic
-PIPE = semantic.PIPE
+from . import semantic
+from .semantic import PIPE, SYNC_HINT, EVENT_ID
 
 
 T = TypeVar("T")

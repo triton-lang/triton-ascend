@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-__all__ = ["custom", "custom_semantic", "register_custom_op"]
+__all__ = ["custom", "custom_semantic", "register_custom_op", "SyncEventSlot"]
 
 import inspect
 import types
@@ -32,6 +32,74 @@ from . import core
 
 # Registry for custom op, mapping name to its configuration.
 _custom_op_registry = {}
+
+
+class SyncEventSlot:
+    """One sync_event_slots entry for custom macro ops."""
+
+    def __init__(self, set_pipe=None, wait_pipe=None, sync=None, event=None):
+        self.set_pipe = set_pipe
+        self.wait_pipe = wait_pipe
+        self.sync = sync if sync is not None else core.SYNC_HINT.WAIT
+        self.event = event
+
+
+def _validate_pipe(pipe):
+    if isinstance(pipe, core.PIPE):
+        return
+    if isinstance(pipe, (list, tuple)) and len(pipe) == 2:
+        assert all(isinstance(p, core.PIPE) for p in pipe), \
+            "macro custom op pipe sequence must contain PIPE values"
+        return
+    assert False, (
+        "Invalid 'pipe' field: single PIPE lowers to hivm.hir.custom; "
+        "a sequence of two PIPE values lowers to hivm.hir.custom_macro"
+    )
+
+
+def _is_macro_pipe(pipe):
+    return isinstance(pipe, (list, tuple)) and len(pipe) == 2
+
+
+def _sync_hint_value(sync):
+    if isinstance(sync, core.SYNC_HINT):
+        return sync.value
+    if isinstance(sync, str):
+        return getattr(core.SYNC_HINT, sync.upper()).value
+    return sync
+
+
+def _event_id_value(event):
+    if isinstance(event, core.EVENT_ID):
+        return event.value
+    if isinstance(event, str):
+        return getattr(core.EVENT_ID, event).value
+    return event
+
+
+def _build_sync_event_slot_attr(slot, builder):
+    if isinstance(slot, SyncEventSlot):
+        set_pipe = slot.set_pipe.value if slot.set_pipe is not None else None
+        wait_pipe = slot.wait_pipe.value if slot.wait_pipe is not None else None
+        macro_sync = _sync_hint_value(slot.sync)
+        event = _event_id_value(slot.event) if slot.event is not None else None
+    elif isinstance(slot, (list, tuple)):
+        if len(slot) == 1 and slot[0] == 'internal':
+            set_pipe = wait_pipe = event = None
+            macro_sync = core.SYNC_HINT.INTERNAL.value
+        elif len(slot) >= 2:
+            set_pipe = slot[0].value
+            wait_pipe = slot[1].value
+            macro_sync = _sync_hint_value(slot[2]) if len(slot) > 2 else core.SYNC_HINT.WAIT.value
+            event = _event_id_value(slot[3]) if len(slot) > 3 else None
+        else:
+            assert False, "invalid sync_event_slots entry"
+    else:
+        assert False, "sync_event_slots entries must be SyncEventSlot or tuple"
+
+    return builder.get_sync_event_slot_attr(
+        set_pipe, wait_pipe, macro_sync, event,
+    )
 
 
 def _get_op_class(name):
@@ -242,12 +310,31 @@ def _add_optional_iterator_types_attr(op, builder, attrs):
     attrs[name] = builder.get_iterator_types_attr([iterator_type.value for iterator_type in getattr(op, name)])
 
 
-def _make_attrs(op, builder):
+def _add_sync_event_slots_attr(op, builder, attrs):
+    if not hasattr(op, 'sync_event_slots'):
+        return
+    slots = getattr(op, 'sync_event_slots')
+    if isinstance(slots, tuple):
+        slots = list(slots)
+    attrs['sync_event_slots'] = builder.get_array_attr(
+        [_build_sync_event_slot_attr(slot, builder) for slot in slots]
+    )
+
+
+def _make_attrs(op, builder, is_macro):
     attrs = {
         'hivm.tcore_type': builder.get_core_type_attr(op.core.value),
-        'hivm.pipe': builder.get_pipe_attr(op.pipe.value),
-        'hivm.vf_mode': builder.get_vf_mode_attr(op.mode.value),
     }
+    # VF mode is only required for non-CUBE custom ops (see HIVM requiresVFMode()).
+    if op.core != core.CORE.CUBE:
+        attrs['hivm.vf_mode'] = builder.get_vf_mode_attr(op.mode.value)
+    if is_macro:
+        pipe_in, pipe_out = op.pipe
+        attrs['hivm.pipe_in'] = builder.get_pipe_attr(pipe_in.value)
+        attrs['hivm.pipe_out'] = builder.get_pipe_attr(pipe_out.value)
+        _add_sync_event_slots_attr(op, builder, attrs)
+    else:
+        attrs['hivm.pipe'] = builder.get_pipe_attr(op.pipe.value)
 
     if not op.name.startswith('__builtin_'):
         assert hasattr(op, 'symbol'), f"Non builtin custom op, symbol is required."
@@ -298,18 +385,26 @@ def custom_semantic(name: str, *args, _builder=None, **kwargs):
     # Convert constexpr to value in arguments.
     args = _unwrap_constexpr(args)
     kwargs = _unwrap_constexpr(kwargs)
+    kwargs.pop('sync_related_args', None)
     # Create op instance from op class with the arguments.
     op = _init_op(op_class, *args, **kwargs)
+    is_macro = _is_macro_pipe(op.pipe)
+    if hasattr(op, 'sync_event_slots'):
+        assert is_macro, "sync_event_slots is only supported for macro custom ops"
     # Prepare inputs and outputs operands.
     out = kwargs.pop('out', [])
     outs = out if isinstance(out, (list, tuple)) else [out]
     outputs = _to_operands(outs, _builder)
     inputs = _args_to_operands(op, _builder, args, kwargs)
     # Setup attributes.
-    attrs = _make_attrs(op, _builder)
+    attrs = _make_attrs(op, _builder, is_macro)
     arg_attrs = _make_arg_attrs(op, _builder)
     # Build IR for the custom op.
-    res = _builder.create_custom_op(name, attrs, inputs, outputs, arg_attrs)
+    if is_macro:
+        res = _builder.create_custom_macro_op(
+            name, attrs, inputs, outputs, arg_attrs)
+    else:
+        res = _builder.create_custom_op(name, attrs, inputs, outputs, arg_attrs)
     # Results with same types as outputs.
     res_types = [out.type for out in outs]
     return _to_result(res, res_types)
@@ -330,13 +425,16 @@ def register_custom_op(op):
     # The op name should not be used.
     assert op.name not in _custom_op_registry, f"Custom op name '{op.name}' already used."
 
-    # Check required core, pipe, mode fields.
+    # Check required core, pipe fields; mode is required for non-CUBE ops only.
     assert hasattr(op, 'core'), "'core' field is required."
     assert hasattr(op, 'pipe'), "'pipe' field is required."
-    assert hasattr(op, 'mode'), "'mode' field is required."
     assert isinstance(op.core, core.CORE), "Invalid 'core' field, CORE type is required."
-    assert isinstance(op.pipe, core.PIPE), "Invalid 'pipe' field, PIPE type is required."
-    assert isinstance(op.mode, core.MODE), "Invalid 'mode' field, MODE type is required."
+    _validate_pipe(op.pipe)
+    if op.core != core.CORE.CUBE:
+        assert hasattr(op, 'mode'), "'mode' field is required for non-CUBE custom ops."
+        assert isinstance(op.mode, core.MODE), "Invalid 'mode' field, MODE type is required."
+    if hasattr(op, 'sync_event_slots'):
+        assert _is_macro_pipe(op.pipe), "sync_event_slots requires a two-pipe macro custom op"
     # Retrieve arguments signature from __init__ method and save it.
     signature = inspect.signature(op)
     setattr(op, 'signature', signature)

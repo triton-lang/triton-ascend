@@ -59,6 +59,23 @@ class PIPE(enum.Enum):
     PIPE_FIX = ascend_ir.PIPE.PIPE_FIX
 
 
+class SYNC_HINT(enum.Enum):
+    WAIT = ascend_ir.SYNC_HINT.wait
+    SET = ascend_ir.SYNC_HINT.set
+    INTERNAL = ascend_ir.SYNC_HINT.internal
+
+
+class EVENT_ID(enum.Enum):
+    EVENT_ID0 = ascend_ir.EVENT.EVENT_ID0
+    EVENT_ID1 = ascend_ir.EVENT.EVENT_ID1
+    EVENT_ID2 = ascend_ir.EVENT.EVENT_ID2
+    EVENT_ID3 = ascend_ir.EVENT.EVENT_ID3
+    EVENT_ID4 = ascend_ir.EVENT.EVENT_ID4
+    EVENT_ID5 = ascend_ir.EVENT.EVENT_ID5
+    EVENT_ID6 = ascend_ir.EVENT.EVENT_ID6
+    EVENT_ID7 = ascend_ir.EVENT.EVENT_ID7
+
+
 def create_sync_block_set(sender, receiver, event_id, sender_pipe: PIPE, receiver_pipe: PIPE, _builder=None):
     if isinstance(event_id, int):
         _builder.sync_block_set(sender, receiver,

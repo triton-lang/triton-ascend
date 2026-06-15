@@ -384,7 +384,6 @@ def ref_paged_attn(
     return torch.cat(outputs, dim=0)
 
 
-@pytest.mark.skip(reason="skip on this case")
 @pytest.mark.perf(repeat=17)
 @pytest.mark.parametrize("seq_lens",
                          [[(1, 1328), (5, 18),

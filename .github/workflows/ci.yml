@@ -27,7 +27,7 @@ on:
     branches: [main, 'dev-**']
     types: [checks_requested]
   push:
-    branches: [main]
+    branches: [main, 'release/**']
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}

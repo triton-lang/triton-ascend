@@ -45,11 +45,12 @@ void ComputeBlockOptPass::runOnOperation()
     pm.addPass(createUnifyAllocBlockPass());
     pm.addPass(createReorderOpsByBlockIdPass());
 
+    pm.addPass(createMergeVectorIfBlockPass());
+    pm.addPass(createReorderOpsByBlockIdPass());
+
     pm.addPass(createUBUsageOptPass());
     pm.addPass(createReorderOpsByBlockIdPass());
-    
-    pm.addPass(createFuseAdotBaddCPass());
-    
+
     pm.addPass(createFixpipeOptPass());
     pm.addPass(createReorderOpsByBlockIdPass());
 
@@ -72,8 +73,7 @@ void registerComputeBlockOptPasses()
     registerPass([]() -> std::unique_ptr<mlir::Pass> { return createComputeBlockOptPass(); });
     registerPass(createUBUsageOptPass);
     registerPass(createUnifyAllocBlockPass);
-    registerPass(createFuseAdotBaddCPass);
-    registerPass(createUnifyAllocBlockPass);
+    registerPass(createMergeVectorIfBlockPass);
     registerPass(createFixpipeOptPass);
 }
 

@@ -1,5 +1,8 @@
 import importlib.util
+import builtins
 import json
+import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -95,6 +98,10 @@ class CostmodelRuntimeTest(unittest.TestCase):
             payload = mgr.storage[f"{cache_key}.json"]
             self.assertAlmostEqual(float(json.loads(payload)["latency"]), 7.5)
 
+            mgr.storage[f"{cache_key}.json"] = json.dumps({"latency": "bad-float"})
+            self.cm._COSTMODEL_MEM_CACHE.clear()
+            self.assertIsNone(self.cm.load_costmodel_latency(cache_key))
+
     def test_make_key_and_extra_args(self):
         k1 = self.cm.make_costmodel_cache_key("ttir_a", ["-ascend-perf-model"])
         k2 = self.cm.make_costmodel_cache_key("ttir_a", ["-ascend-perf-model", "arg-bindings=a=1"])
@@ -109,6 +116,51 @@ class CostmodelRuntimeTest(unittest.TestCase):
                 self.cm._build_costmodel_extra_args("", ""),
                 ["-ascend-perf-model", "hardware-config=/tmp/ascend_910b.json"],
             )
+        with patch.object(self.cm, "_resolve_default_hardware_config", lambda: ""):
+            self.assertEqual(self.cm._build_costmodel_extra_args("", ""), ["-ascend-perf-model"])
+
+    def test_run_costmodel_reads_file_and_adds_allow_unregistered_dialect(self):
+        calls = []
+
+        class AscendCapi:
+            @staticmethod
+            def run_costmodel_inproc(mlir_text, args):
+                calls.append((mlir_text, tuple(args)))
+                return "Estimated Time: 1.0 us"
+
+        fake_libtriton = types.SimpleNamespace(ascend=AscendCapi)
+        real_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "triton._C.libtriton":
+                return fake_libtriton
+            return real_import(name, globals, locals, fromlist, level)
+
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as f:
+            f.write("module-from-file")
+            f.flush()
+            with patch("builtins.__import__", fake_import):
+                self.assertEqual(self.cm.run_costmodel(f.name, ["-ascend-perf-model"]), "Estimated Time: 1.0 us")
+
+        self.assertEqual(calls[0][0], "module-from-file")
+        self.assertIn("-allow-unregistered-dialect", calls[0][1])
+
+    def test_run_costmodel_exception_paths(self):
+        class GenericFailingCapi:
+            @staticmethod
+            def run_costmodel_inproc(_mlir_text, _args):
+                raise RuntimeError("failed to parse input MLIR module")
+
+        fake_libtriton = types.SimpleNamespace(ascend=GenericFailingCapi)
+        real_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "triton._C.libtriton":
+                return fake_libtriton
+            return real_import(name, globals, locals, fromlist, level)
+
+        with patch("builtins.__import__", fake_import):
+            self.assertIsNone(self.cm.run_costmodel("module-text", ["-ascend-perf-model"]))
 
     def test_normalize_items_and_eval_item(self):
         cfg1 = object()
@@ -157,6 +209,11 @@ class CostmodelRuntimeTest(unittest.TestCase):
         self.assertAlmostEqual(lat[cfg1], 9.9)
         self.assertEqual(lat[cfg2], float("inf"))
         self.assertEqual(len(calls), 2)
+
+    def test_evaluate_pending_empty(self):
+        lat = {}
+        self.cm._evaluate_pending_items([], lat)
+        self.assertEqual(lat, {})
 
     def test_evaluate_pending_parallel_exception_tolerated(self):
         cfg1, cfg2 = object(), object()

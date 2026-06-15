@@ -24,6 +24,7 @@
 #define TRITON_ADAPTER_INTER_CORE_TRANSFER_AND_SYNC_H
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/FlagIdReuse.h"
 #include "ascend/include/DynamicCVPipeline/Common/FlagIdManager.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -67,16 +68,18 @@ private:
   llvm::DenseMap<mlir::Value, mlir::Value> vecValueMapping;
   llvm::DenseMap<mlir::Value, mlir::Value> cubeValueMapping;
 
-  mlir::LogicalResult processDependencies(FlagIdManager &flagManager);
+  mlir::LogicalResult processDependencies(FlagIdManager &flagManager, FlagIdReuseManager &flagIdReuseManager);
   mlir::LogicalResult handleVectorToCube(mlir::OpBuilder &builder,
                                          DependencyInfo &dep,
                                          llvm::DenseMap<mlir::Value, mlir::Value> vecvalueMapping,
                                          llvm::DenseMap<mlir::Value, mlir::Value> cubeValueMapping,
-                                         FlagIdManager &flagManager);
+                                         FlagIdManager &flagManager,
+                                         FlagIdReuseManager &flagIdReuseManager);
   mlir::LogicalResult handleCubeToVector(mlir::OpBuilder &builder,
                                          DependencyInfo &dep,
                                          llvm::DenseMap<mlir::Value, mlir::Value> cubeValueMapping,
-                                         FlagIdManager &flagManager);
+                                         FlagIdManager &flagManager,
+                                         FlagIdReuseManager &flagIdReuseManager);
   mlir::LogicalResult handleMemoryDependency(mlir::OpBuilder &builder,
                                              DependencyInfo &dep,
                                              size_t depIndex,
@@ -89,18 +92,30 @@ private:
                               mlir::Operation *currConsStart,
                               llvm::SmallVector<DependencyInfo> &memDependencies);
 
-  SmallVector<int64_t> computeExpectedShape(mlir::Value value);
-  bool isShapeExpected(mlir::Value value, llvm::SmallVector<int64_t> &expectedShape);
+  SmallVector<int64_t> computeExpectedShape(mlir::Value depValue, bool isMatmulA, bool isMatmulB, bool isOnlyDepInMatmul);
+  std::pair<bool, bool> isExpectedShape(Value value,
+                                        SmallVector<int64_t> &expectedShape,
+                                        bool isMatmulA,
+                                        bool isMatmulB,
+                                        bool isOnlyDepInMatmul);
+  void padMatmulInnerDim(OpBuilder &builder, Operation *matmulOp, Location loc, int matmulIndex, int matmulOpBlockId);
+  void extractMatmulResult(OpBuilder &builder, Operation *matmulOp, Location loc, int matmulOpBlockId, llvm::DenseMap<mlir::Value, mlir::Value> &cubeValueMapping, bool isOnlyDepInMatmul);
   mlir::Value normalizeIfNeeded(mlir::OpBuilder &builder,
                                 DependencyInfo &dep,
                                 mlir::Location loc,
                                 mlir::Value origValue,
                                 llvm::SmallVector<int64_t> expectedShape,
-                                int originBlockId);
+                                int originBlockId,
+                                bool matmulpadding,
+                                bool isOnlyDepInMatmul);
   void Nd2NzNormalize(mlir::OpBuilder &builder, DependencyInfo &dep, mlir::Location loc);
   void rewriteMatmulWithNewShape(mlir::OpBuilder &builder,
                                  mlir::Operation *matmulOp,
-                                 mlir::Location loc);
+                                 mlir::Location loc,
+                                 bool isMatmulA,
+                                 bool isMatmulB,
+                                 bool matmulpadding,
+                                 bool isOnlyDepInMatmul);
   void rewriteTransposeWithNewShape(mlir::OpBuilder &builder,
                                     mlir::Operation *transposeOp,
                                     mlir::Location loc);
@@ -120,16 +135,21 @@ private:
     llvm::ArrayRef<int64_t> shape, mlir::Type elemType, hivm::AddressSpace addrSpace, mlir::Operation *prodEndOp,
     mlir::Operation *consStartOp, int prodBlockId, int consBlockId, llvm::StringRef prodTag,
     llvm::StringRef consTag, int transferIndex);
+  mlir::Operation *analyzeConsumerReadInsertPoint(Value srcValue, int iniConsumerId);
+  mlir::Operation *getConsumerWaitPoint(int transferIndex);
   mlir::Operation *insertVectorToCubeTransfer(mlir::OpBuilder &builder, mlir::Value srcValue,
     mlir::Value normalizedValue, mlir::Operation *vectorEndOp, mlir::Operation *cubeStartOp, mlir::Location loc,
-    int transferIndex, int iniConsumerId);
+    int transferIndex, int iniConsumerId, mlir::Operation **consumedDataOp = nullptr);
   mlir::Operation *insertCubeToVectorTransfer(mlir::OpBuilder &builder, mlir::Value srcValue,
     mlir::Operation *cubeEndOp, mlir::Operation *vectorStartOp, mlir::Location loc, int transferIndex,
-    int iniConsumerId);
+    int iniConsumerId, mlir::Operation **consumedDataOp = nullptr);
   void insertInterCoreSync(mlir::OpBuilder &builder, mlir::Operation *transferOp, mlir::Operation *consumerStartOp,
-    mlir::Operation *consumerEndOp, int flag, mlir::Location loc, int transferIndex);
+    mlir::Operation *consumerEndOp, int flag, mlir::Location loc, int transferIndex, FlagIdReuseManager &flagIdReuseManager,
+    mlir::Operation *consumedDataOp = nullptr);
   void insertPipeSSync(mlir::OpBuilder &builder, mlir::Operation *producerOp, mlir::Operation *consumerOp, int flag,
     mlir::Location loc, bool isCubeToVector);
+  llvm::SmallVector<mlir::Operation *> insertAnalyzeFlagRelations(mlir::ModuleOp module, FlagIdReuseManager &flagIdReuseManager);
+  void remapInterCoreTransferFlagIds(llvm::DenseMap<int, int> &remapResult);
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createInterCoreTransferAndSyncPass();

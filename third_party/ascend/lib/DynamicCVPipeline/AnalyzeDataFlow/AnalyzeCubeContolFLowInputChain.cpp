@@ -20,16 +20,24 @@
  * THE SOFTWARE.
  */
 
-#include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "bishengir/Dialect/Scope/IR/Scope.h"
+
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/ValueRange.h"
+#include "mlir/Support/LLVM.h"
+
+#include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 static constexpr const char *DEBUG_TYPE = "analyze-cube-control-flow-input-chain";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
@@ -58,11 +66,17 @@ static bool isCubeScope(scope::ScopeOp scopeOp)
 
 static bool isControlFlowOp(Operation *op)
 {
-    return isa<scf::IfOp>(op) || isa<scf::ForOp>(op) || isa<scf::WhileOp>(op);
+    return llvm::isa<scf::SCFDialect>(op->getDialect());
 }
 
-static bool hasDefiningChainWithReduceOrTensorSelect(Value val,
-                                                     llvm::DenseSet<Value> &visited)
+static bool hasIncompatibleOpForCondition(Value val, llvm::DenseSet<Value> &visited);
+
+static inline bool hasIncompatibleUpstream(ValueRange operands, llvm::DenseSet<Value> &visited)
+{
+    return llvm::any_of(operands, [&](Value operand) { return hasIncompatibleOpForCondition(operand, visited); });
+}
+
+static bool hasIncompatibleOpForCondition(Value val, llvm::DenseSet<Value> &visited)
 {
     if (visited.contains(val)) {
         return false;
@@ -70,54 +84,38 @@ static bool hasDefiningChainWithReduceOrTensorSelect(Value val,
     visited.insert(val);
 
     Operation *defOp = val.getDefiningOp();
-    while (defOp) {
-
-        if (isa<linalg::ReduceOp>(defOp)) {
-            LDBG("Found linalg.reduce in defining chain");
-            return true;
-        }
-
-        if (auto selectOp = dyn_cast<arith::SelectOp>(defOp)) {
-            if (isa<RankedTensorType>(selectOp.getType())) {
-                LDBG("Found arith.select with tensor result in defining chain");
-                return true;
-            }
-        }
-
-        if (defOp->getNumOperands() == 0) {
-            break;
-        }
-
-        for (Value operand : defOp->getOperands()) {
-            if (hasDefiningChainWithReduceOrTensorSelect(operand, visited)) {
-                return true;
-            }
-        }
-        
-        break;
+    if (!defOp) {
+        return false;
     }
-
-    return false;
+    if (isVectorOnlyOp(defOp)) {
+        LDBG("Fallback reason: incompatible upstream op for control flow: " << *defOp);
+        return true;
+    }
+    return hasIncompatibleUpstream(defOp->getOperands(), visited);
 }
 
 static bool checkControlFlowOpInputs(Operation *cfOp)
 {
+    llvm::SmallVector<Value> scalarOperands;
+    llvm::TypeSwitch<Operation *>(cfOp)
+        .Case([&](scf::IfOp ifOp) { scalarOperands.push_back(ifOp.getCondition()); })
+        .Case([&](scf::ForOp forOp) {
+            scalarOperands.append({forOp.getLowerBound(), forOp.getUpperBound(), forOp.getStep()});
+        })
+        .Case([&](scf::WhileOp whileOp) {
+            // while op is very complicated, all loop-carried vars may influence conditions, conservatively take all
+            // args
+            auto operands = whileOp->getOperands();
+            scalarOperands.append(operands.begin(), operands.end());
+        })
+        .Default([&](Operation *op) {
+            // user passed in unknown op, conservatively take all operands
+            auto operands = op->getOperands();
+            scalarOperands.append(operands.begin(), operands.end());
+        });
+
     llvm::DenseSet<Value> visited;
-
-    auto checkOperands = [&](ValueRange operands) {
-        for (Value operand : operands) {
-            if (hasDefiningChainWithReduceOrTensorSelect(operand, visited)) {
-                return true;
-            }
-        }
-        return false;
-    };
-
-    if (checkOperands(cfOp->getOperands())) {
-        return true;
-    }
-
-    return false;
+    return hasIncompatibleUpstream(scalarOperands, visited);
 }
 
 bool checkCubeControlFlowInputChain(ModuleOp module)

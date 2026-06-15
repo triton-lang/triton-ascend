@@ -26,6 +26,11 @@ from triton.backends.ascend.utils import get_ascend_arch_from_env, triton_enable
 
 @core.extern
 def reciprocal(arg0, _builder=None):
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("fp32"),): ("__hmf_reciprocal_fp32", core.dtype("fp32")),
+            }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"),): ("__hmf_recipf", core.dtype("fp32")),
@@ -34,6 +39,11 @@ def reciprocal(arg0, _builder=None):
 
 @core.extern
 def log1p(arg0, _builder=None):
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("fp32"),): ("__hmf_log1p_fp32", core.dtype("fp32")),
+            }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"),): ("__hmf_log1pf", core.dtype("fp32")),
@@ -43,6 +53,11 @@ def log1p(arg0, _builder=None):
 
 @core.extern
 def relu(arg0, _builder=None):
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("fp32"),): ("__hmf_relu_fp32", core.dtype("fp32")),
+            }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"),): ("__hmf_reluf", core.dtype("fp32")),
@@ -52,6 +67,11 @@ def relu(arg0, _builder=None):
 
 @core.extern
 def isinf(arg0, _builder=None):
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("fp32"),): ("__hmf_isinf_fp32", core.dtype("int1")),
+            }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"),): ("__hmf_isinf", core.dtype("int1")),
@@ -62,6 +82,11 @@ def isinf(arg0, _builder=None):
 
 @core.extern
 def tan(arg0, _builder=None):
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("fp32"),): ("__hmf_tan_fp32", core.dtype("fp32")),
+            }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"),): ("__hmf_tanf", core.dtype("fp32")),
@@ -71,6 +96,11 @@ def tan(arg0, _builder=None):
 
 @core.extern
 def atan(arg0, _builder=None):
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("fp32"),): ("__hmf_atan_fp32", core.dtype("fp32")),
+            }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"),): ("__hmf_atanf", core.dtype("fp32")),
@@ -79,6 +109,11 @@ def atan(arg0, _builder=None):
 
 @core.extern
 def tanh(arg0, _builder=None):
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("fp32"),): ("__hmf_tanh_fp32", core.dtype("fp32")),
+            }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_tanhf", core.dtype("fp32")),
@@ -87,6 +122,11 @@ def tanh(arg0, _builder=None):
 
 @core.extern
 def ilogb(arg0, _builder=None):
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("fp32"),): ("__hmf_ilogb_fp32", core.dtype("fp32")),
+            }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"),): ("__hmf_ilogbf", core.dtype("fp32")),
@@ -105,6 +145,11 @@ def logb(arg0, _builder=None):
 
 @core.extern
 def ldexp(arg0, arg1, _builder=None):
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0, arg1], {
+                (core.dtype("fp32"), core.dtype("int32")): ("__hmf_ldexp_fp32", core.dtype("fp32")),
+            }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("int32")): ("__hmf_ldexpf", core.dtype("fp32")),
@@ -123,6 +168,11 @@ def scalbn(arg0, arg1, _builder=None):
 
 @core.extern
 def pow(arg0, arg1, _builder=None):
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+        "", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_pow_fp32", core.dtype("fp32")),
+        }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_powf", core.dtype("fp32")),
@@ -132,9 +182,11 @@ def pow(arg0, arg1, _builder=None):
 
 @core.extern
 def finitef(arg0, _builder=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.finitef for simd is unspported for now.")
-        core.static_assert(False)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("fp32"),): ("__hmf_finite_fp32", core.dtype("int1")),
+            }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"),): ("__hmf_finitef", core.dtype("int1")),
@@ -142,6 +194,11 @@ def finitef(arg0, _builder=None):
 
 @core.extern
 def isnan(arg0, _builder=None):
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("fp32"),): ("__hmf_isnan_fp32", core.dtype("int1")),
+            }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"),): ("__hmf_isnan", core.dtype("int1")),
@@ -565,6 +622,11 @@ def fma_ru(arg0, arg1, arg2, _builder=None):
 
 @core.builtin
 def fast_dividef(arg0, arg1, _builder=None):
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0, arg1], {
+                (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fast_divide_fp32", core.dtype("fp32")),
+            }, is_pure=True, _builder=_builder)
     arg0 = semantic.to_tensor(arg0, _builder)
     arg1 = semantic.to_tensor(arg1, _builder)
     ret = semantic.fdiv(arg0, arg1, False, _builder)
@@ -572,6 +634,11 @@ def fast_dividef(arg0, arg1, _builder=None):
 
 @core.builtin
 def fast_expf(arg0, _builder=None):
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("fp32"),): ("__hmf_fast_exp_fp32", core.dtype("fp32")),
+            }, is_pure=True, _builder=_builder)
     arg0 = semantic.to_tensor(arg0, _builder)
     ret = core.tensor(_builder.create_exp(arg0.handle), arg0.type)
     return ret
@@ -1076,6 +1143,11 @@ def trunc(arg0, _builder=None):
 
 @core.extern
 def round(arg0, _builder=None):
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("fp32"),): ("__hmf_round_fp32", core.dtype("fp32")),
+            }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_roundf", core.dtype("fp32")),
@@ -2107,6 +2179,11 @@ else:
     @math._check_dtype(dtypes=["fp16", "fp32", "bf16"])
     @math._add_math_1arg_docstr("rint")
     def rint(arg0: core.tensor, _builder: ir.builder):
+        if triton_enable_libdevice_simt():
+            return core.extern_elementwise(
+                "", "", [arg0,], {
+                    (core.dtype("fp32"),): ("__hmf_rint_fp32", core.dtype("fp32")),
+                }, is_pure=True, _builder=_builder)
         arg0 = semantic.to_tensor(arg0, _builder)
 
         floor_x = math.floor(arg0, _builder=_builder)

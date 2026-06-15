@@ -32,19 +32,19 @@
 namespace mlir {
 namespace triton {
 
-class PreCheckScopePass : public PassWrapper<PreCheckScopePass, OperationPass<ModuleOp>> {
+class PreCheckBlacklistPass : public PassWrapper<PreCheckBlacklistPass, OperationPass<ModuleOp>> {
 public:
-    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PreCheckScopePass)
+    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PreCheckBlacklistPass)
 
-    PreCheckScopePass() = default;
+    PreCheckBlacklistPass() = default;
 
     void runOnOperation() override;
     void getDependentDialects(DialectRegistry &registry) const override;
 
-    ::llvm::StringRef getArgument() const override { return "pre-check-scope"; }
+    ::llvm::StringRef getArgument() const override { return "pre-check-blacklist"; }
     ::llvm::StringRef getDescription() const override
     {
-        return "Check whether the input module already contains scope operations";
+        return "Check whether the input module contains any blacklist operations";
     }
 };
 
@@ -80,7 +80,7 @@ public:
     ::llvm::StringRef getName() const override { return "PreCheckAvailablePass"; }
 };
 
-std::unique_ptr<OperationPass<ModuleOp>> createPreCheckScopePass();
+std::unique_ptr<OperationPass<ModuleOp>> createPreCheckBlacklistPass();
 std::unique_ptr<OperationPass<ModuleOp>> createPreCheckMatmulPass();
 std::unique_ptr<OperationPass<ModuleOp>> createPreCheckAvailablePass();
 void registerPreCheckAvailablePasses();

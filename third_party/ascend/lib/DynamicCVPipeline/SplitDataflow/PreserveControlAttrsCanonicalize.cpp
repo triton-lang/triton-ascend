@@ -86,6 +86,7 @@ private:
         if (!isTrackedControlFlowOp(oldOp))
             return nullptr;
 
+        // Prefer direct replacement from definingOps
         for (Value value : replacements) {
             if (!value)
                 continue;
@@ -94,9 +95,17 @@ private:
                 return defOp;
         }
 
+        // Fallback: search recentInserts in reverse, skip nested candidates
         for (Operation *candidate : llvm::reverse(recentInserts.getArrayRef())) {
-            if (canTransferAttrs(oldOp, candidate))
-                return candidate;
+            if (!canTransferAttrs(oldOp, candidate))
+                continue;
+
+            // Skip candidates nested inside another new control flow op
+            Operation *parent = candidate->getParentOp();
+            if (parent && recentInserts.contains(parent) && isTrackedControlFlowOp(parent))
+                continue;
+
+            return candidate;
         }
         return nullptr;
     }

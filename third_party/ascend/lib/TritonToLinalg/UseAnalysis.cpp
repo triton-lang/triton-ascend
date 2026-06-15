@@ -84,8 +84,10 @@ void triton::UseAnalysis::visitOperation(Operation *op,
           propagateUse(operands[2], UseType::MetaUse);
         }
       })
-      .Case<triton::PrintOp>(
-          [&](auto print) { propagateUse(operands[0], UseType::DataUse); })
+      .Case<triton::PrintOp>([&](auto print){
+        for (auto operand : operands)
+          propagateUse(operand, UseType::DataUse);
+      })
       .Case<triton::AssertOp>(
           [&](auto assert) { propagateUse(operands[0], UseType::DataUse); })
       .Case<triton::StoreOp>([&](auto store) {
@@ -551,6 +553,12 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
   // Remove MetaUse in case of MixUse existing in the op
   funcOp.walk([&](Operation *op) {
     if (isMetaUse(op) && isMixUse(op)) {
+      op->removeAttr("MetaUse");
+    }
+  });
+  // hivm.custom present library call, shouldn't be metause
+  funcOp.walk([&](hivm::CustomOp op) {
+    if (isMetaUse(op)) {
       op->removeAttr("MetaUse");
     }
   });

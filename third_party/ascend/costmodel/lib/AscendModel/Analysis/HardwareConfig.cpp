@@ -12,6 +12,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <cmath>
 #include <cstdlib>
+#include <mutex>
 
 using namespace mlir::ascend;
 
@@ -44,6 +45,39 @@ bool mlir::ascend::loadHardwareConfigFromFile(llvm::StringRef path,
   }
   setHardwareConfig(std::move(config));
   return true;
+}
+
+std::shared_ptr<const HardwareConfig>
+mlir::ascend::loadHardwareConfigForAnalysis(llvm::StringRef path,
+                                             std::string &error) {
+  if (path.empty()) {
+    static std::once_flag defaultConfigOnce;
+    static std::shared_ptr<const HardwareConfig> defaultConfig;
+    static std::string defaultConfigError;
+    std::call_once(defaultConfigOnce, []() {
+      auto config = HardwareConfig::getDefault910B();
+      if (!config) {
+        defaultConfigError = "Failed to load default hardware config";
+        return;
+      }
+      if (!config->validate(defaultConfigError)) {
+        return;
+      }
+      defaultConfig = std::move(config);
+    });
+    error = defaultConfigError;
+    return defaultConfig;
+  }
+
+  auto config = HardwareConfig::loadFromFile(path);
+  if (!config) {
+    error = "Failed to load hardware config from: " + path.str();
+    return nullptr;
+  }
+  if (!config->validate(error)) {
+    return nullptr;
+  }
+  return std::shared_ptr<const HardwareConfig>(std::move(config));
 }
 
 //===----------------------------------------------------------------------===//
@@ -963,4 +997,3 @@ bool HardwareConfig::validate(std::string &error) const {
 
   return true;
 }
-

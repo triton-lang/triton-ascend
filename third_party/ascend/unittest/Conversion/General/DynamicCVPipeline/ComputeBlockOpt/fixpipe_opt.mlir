@@ -201,4 +201,105 @@ module {
     bufferization.materialize_in_destination %extract2 in writable %subview2 {ssbuffer.block_id = 104 : i32, ssbuffer.core_type = "VECTOR"} : (tensor<64x64xf16>, memref<64x64xf16, strided<[64, 1], offset: ?>>) -> ()
     return
   }
+
+  // Test 12: mulf with splat constant tensor - should match (scalar-like via constant splat)
+  // CHECK-LABEL: func @test_mulf_with_scalar_constant
+  func.func @test_mulf_with_scalar_constant(%arg0: memref<128x64xf32> {tt.divisibility = 16 : i32}, %A: tensor<64x64xf16>, %B: tensor<64x64xf16>, %init: tensor<64x64xf32>) {
+    %c0 = arith.constant 0 : index
+    // CHECK: linalg.matmul {ssbuffer.block_id = 111 : i32, ssbuffer.core_type = "CUBE"}
+    %matmul = linalg.matmul {ssbuffer.block_id = 111 : i32, ssbuffer.core_type = "CUBE"} ins(%A, %B : tensor<64x64xf16>, tensor<64x64xf16>) outs(%init : tensor<64x64xf32>) -> tensor<64x64xf32>
+    // CHECK: arith.mulf %{{.*}} {ssbuffer.block_id = 111 : i32, ssbuffer.core_type = "CUBE"}
+    %scale_tensor = arith.constant dense<0.003921568627> : tensor<64x64xf32>
+    %mulf = arith.mulf %matmul, %scale_tensor {ssbuffer.block_id = 112 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
+    // CHECK: tensor.extract_slice %{{.*}} {ssbuffer.block_id = 111 : i32, ssbuffer.core_type = "CUBE"}
+    %extract = tensor.extract_slice %mulf[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 113 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32> to tensor<64x64xf32>
+    // CHECK: memref.subview %{{.*}} {ssbuffer.block_id = 111 : i32, ssbuffer.core_type = "CUBE"}
+    %subview = memref.subview %arg0[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 114 : i32, ssbuffer.core_type = "VECTOR"} : memref<128x64xf32> to memref<64x64xf32, strided<[64, 1]>>
+    // CHECK: bufferization.materialize_in_destination %{{.*}} {ssbuffer.block_id = 111 : i32, ssbuffer.core_type = "CUBE"}
+    bufferization.materialize_in_destination %extract in writable %subview {ssbuffer.block_id = 115 : i32, ssbuffer.core_type = "VECTOR"} : (tensor<64x64xf32>, memref<64x64xf32, strided<[64, 1]>>) -> ()
+    return
+  }
+
+  // Test 13: mulf with splat constant tensor (reversed order) - should match
+  // CHECK-LABEL: func @test_mulf_with_scalar_constant_reversed
+  func.func @test_mulf_with_scalar_constant_reversed(%arg0: memref<128x64xf32> {tt.divisibility = 16 : i32}, %A: tensor<64x64xf16>, %B: tensor<64x64xf16>, %init: tensor<64x64xf32>) {
+    // CHECK: linalg.matmul {ssbuffer.block_id = 121 : i32, ssbuffer.core_type = "CUBE"}
+    %matmul = linalg.matmul {ssbuffer.block_id = 121 : i32, ssbuffer.core_type = "CUBE"} ins(%A, %B : tensor<64x64xf16>, tensor<64x64xf16>) outs(%init : tensor<64x64xf32>) -> tensor<64x64xf32>
+    // CHECK: arith.mulf %{{.*}} {ssbuffer.block_id = 121 : i32, ssbuffer.core_type = "CUBE"}
+    %scale_tensor = arith.constant dense<0.003921568627> : tensor<64x64xf32>
+    %mulf = arith.mulf %scale_tensor, %matmul {ssbuffer.block_id = 122 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>  // scale first, matmul second
+    // CHECK: tensor.extract_slice %{{.*}} {ssbuffer.block_id = 121 : i32, ssbuffer.core_type = "CUBE"}
+    %extract = tensor.extract_slice %mulf[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 123 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32> to tensor<64x64xf32>
+    // CHECK: memref.subview %{{.*}} {ssbuffer.block_id = 121 : i32, ssbuffer.core_type = "CUBE"}
+    %subview = memref.subview %arg0[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 124 : i32, ssbuffer.core_type = "VECTOR"} : memref<128x64xf32> to memref<64x64xf32, strided<[64, 1]>>
+    // CHECK: bufferization.materialize_in_destination %{{.*}} {ssbuffer.block_id = 121 : i32, ssbuffer.core_type = "CUBE"}
+    bufferization.materialize_in_destination %extract in writable %subview {ssbuffer.block_id = 125 : i32, ssbuffer.core_type = "VECTOR"} : (tensor<64x64xf32>, memref<64x64xf32, strided<[64, 1]>>) -> ()
+    return
+  }
+
+  // Test 14: mulf with tensor (NOT scalar) - should NOT match (false positive protection)
+  // CHECK-LABEL: func @test_mulf_with_tensor_not_scalar
+  func.func @test_mulf_with_tensor_not_scalar(%arg0: memref<128x64xf32> {tt.divisibility = 16 : i32}, %A: tensor<64x64xf16>, %B: tensor<64x64xf16>, %init: tensor<64x64xf32>, %other_tensor: tensor<64x64xf32>) {
+    // CHECK: linalg.matmul {ssbuffer.block_id = 141 : i32, ssbuffer.core_type = "CUBE"}
+    %matmul = linalg.matmul {ssbuffer.block_id = 141 : i32, ssbuffer.core_type = "CUBE"} ins(%A, %B : tensor<64x64xf16>, tensor<64x64xf16>) outs(%init : tensor<64x64xf32>) -> tensor<64x64xf32>
+    // CHECK: arith.mulf %{{.*}} {ssbuffer.block_id = 142 : i32, ssbuffer.core_type = "VECTOR"}
+    %mulf = arith.mulf %matmul, %other_tensor {ssbuffer.block_id = 142 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>  // NOT scalar
+    // CHECK: tensor.extract_slice %{{.*}} {ssbuffer.block_id = 143 : i32, ssbuffer.core_type = "VECTOR"}
+    %extract = tensor.extract_slice %mulf[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 143 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32> to tensor<64x64xf32>
+    // CHECK: memref.subview %{{.*}} {ssbuffer.block_id = 144 : i32, ssbuffer.core_type = "VECTOR"}
+    %subview = memref.subview %arg0[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 144 : i32, ssbuffer.core_type = "VECTOR"} : memref<128x64xf32> to memref<64x64xf32, strided<[64, 1]>>
+    // CHECK: bufferization.materialize_in_destination %{{.*}} {ssbuffer.block_id = 145 : i32, ssbuffer.core_type = "VECTOR"}
+    bufferization.materialize_in_destination %extract in writable %subview {ssbuffer.block_id = 145 : i32, ssbuffer.core_type = "VECTOR"} : (tensor<64x64xf32>, memref<64x64xf32, strided<[64, 1]>>) -> ()
+    return
+  }
+
+
+  // Test 15: mulf result with multiple users - should NOT match
+  // CHECK-LABEL: func @test_mulf_multiple_users
+  func.func @test_mulf_multiple_users(%arg0: memref<128x64xf32> {tt.divisibility = 16 : i32}, %A: tensor<64x64xf16>, %B: tensor<64x64xf16>, %init: tensor<64x64xf32>) {
+    // CHECK: linalg.matmul {ssbuffer.block_id = 171 : i32, ssbuffer.core_type = "CUBE"}
+    %matmul = linalg.matmul {ssbuffer.block_id = 171 : i32, ssbuffer.core_type = "CUBE"} ins(%A, %B : tensor<64x64xf16>, tensor<64x64xf16>) outs(%init : tensor<64x64xf32>) -> tensor<64x64xf32>
+    // CHECK: arith.mulf %{{.*}} {ssbuffer.block_id = 172 : i32, ssbuffer.core_type = "VECTOR"}
+    %scale_tensor = arith.constant dense<0.003921568627> : tensor<64x64xf32>
+    %mulf = arith.mulf %matmul, %scale_tensor {ssbuffer.block_id = 172 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
+    // mulf has multiple users
+    %extract1 = tensor.extract_slice %mulf[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 173 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32> to tensor<64x64xf32>
+    %extract2 = tensor.extract_slice %mulf[0, 0] [32, 32] [1, 1] {ssbuffer.block_id = 174 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32> to tensor<32x32xf32>
+    return
+  }
+
+  // Test 16: muli with integer dense constant tensor - should match
+  // CHECK-LABEL: func @test_mulf_with_int_scalar
+  func.func @test_mulf_with_int_scalar(%arg0: memref<128x64xi32> {tt.divisibility = 16 : i32}, %A: tensor<64x64xi16>, %B: tensor<64x64xi16>, %init: tensor<64x64xi32>) {
+    // CHECK: linalg.matmul {ssbuffer.block_id = 181 : i32, ssbuffer.core_type = "CUBE"}
+    %matmul = linalg.matmul {ssbuffer.block_id = 181 : i32, ssbuffer.core_type = "CUBE"} ins(%A, %B : tensor<64x64xi16>, tensor<64x64xi16>) outs(%init : tensor<64x64xi32>) -> tensor<64x64xi32>
+    // CHECK: arith.muli %{{.*}} {ssbuffer.block_id = 181 : i32, ssbuffer.core_type = "CUBE"}
+    %scale_tensor = arith.constant dense<255> : tensor<64x64xi32>
+    %mulf = arith.muli %matmul, %scale_tensor {ssbuffer.block_id = 182 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xi32>
+    // CHECK: tensor.extract_slice %{{.*}} {ssbuffer.block_id = 181 : i32, ssbuffer.core_type = "CUBE"}
+    %extract = tensor.extract_slice %mulf[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 183 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xi32> to tensor<64x64xi32>
+    // CHECK: memref.subview %{{.*}} {ssbuffer.block_id = 181 : i32, ssbuffer.core_type = "CUBE"}
+    %subview = memref.subview %arg0[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 184 : i32, ssbuffer.core_type = "VECTOR"} : memref<128x64xi32> to memref<64x64xi32, strided<[64, 1]>>
+    // CHECK: bufferization.materialize_in_destination %{{.*}} {ssbuffer.block_id = 181 : i32, ssbuffer.core_type = "CUBE"}
+    bufferization.materialize_in_destination %extract in writable %subview {ssbuffer.block_id = 185 : i32, ssbuffer.core_type = "VECTOR"} : (tensor<64x64xi32>, memref<64x64xi32, strided<[64, 1]>>) -> ()
+    return
+  }
+
+  // Test 17: mulf with scale from linalg.fill with scalar arg - should match
+  // CHECK-LABEL: func @test_mulf_with_fill_scalar_arg
+  func.func @test_mulf_with_fill_scalar_arg(%arg0: memref<128x64xf32> {tt.divisibility = 16 : i32}, %scale: f32, %A: tensor<64x64xf16>, %B: tensor<64x64xf16>, %init: tensor<64x64xf32>, %fill_init: tensor<64x64xf32>) {
+    // CHECK: linalg.fill {ssbuffer.block_id = 190 : i32, ssbuffer.core_type = "VECTOR"} ins(%{{.*}} : f32) outs(%{{.*}} : tensor<64x64xf32>) {{.*}}
+    %fill = linalg.fill {ssbuffer.block_id = 190 : i32, ssbuffer.core_type = "VECTOR"} ins(%scale : f32) outs(%fill_init : tensor<64x64xf32>) -> tensor<64x64xf32>
+    // CHECK: linalg.matmul {ssbuffer.block_id = 191 : i32, ssbuffer.core_type = "CUBE"}
+    %matmul = linalg.matmul {ssbuffer.block_id = 191 : i32, ssbuffer.core_type = "CUBE"} ins(%A, %B : tensor<64x64xf16>, tensor<64x64xf16>) outs(%init : tensor<64x64xf32>) -> tensor<64x64xf32>
+    // CHECK: arith.mulf %{{.*}} {ssbuffer.block_id = 191 : i32, ssbuffer.core_type = "CUBE"}
+    %mulf = arith.mulf %matmul, %fill {ssbuffer.block_id = 192 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
+    // CHECK: tensor.extract_slice %{{.*}} {ssbuffer.block_id = 191 : i32, ssbuffer.core_type = "CUBE"}
+    %extract = tensor.extract_slice %mulf[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 193 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32> to tensor<64x64xf32>
+    // CHECK: memref.subview %{{.*}} {ssbuffer.block_id = 191 : i32, ssbuffer.core_type = "CUBE"}
+    %subview = memref.subview %arg0[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 194 : i32, ssbuffer.core_type = "VECTOR"} : memref<128x64xf32> to memref<64x64xf32, strided<[64, 1]>>
+    // CHECK: bufferization.materialize_in_destination %{{.*}} {ssbuffer.block_id = 191 : i32, ssbuffer.core_type = "CUBE"}
+    bufferization.materialize_in_destination %extract in writable %subview {ssbuffer.block_id = 195 : i32, ssbuffer.core_type = "VECTOR"} : (tensor<64x64xf32>, memref<64x64xf32, strided<[64, 1]>>) -> ()
+    return
+  }
 }

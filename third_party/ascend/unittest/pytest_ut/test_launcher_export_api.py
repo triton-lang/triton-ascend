@@ -1,5 +1,4 @@
 import importlib.util
-import pytest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -37,7 +36,7 @@ def _make_metadata():
         coalesce_axis=-1,
     )
 
-@pytest.mark.skip(reason="skip this case")
+
 @patch.object(driver, "NPUUtils")
 @patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
 @patch.object(driver, "force_disable_ffts", return_value=False)
@@ -68,7 +67,7 @@ def test_generate_npu_wrapper_src_exposes_triton_launch_kernel(
     assert 'std::vector<char> launch_args(total_size, 0);' in src
     assert 'memcpy(launch_args.data() + grid_offset, &gridX, sizeof(int32_t));' in src
 
-@pytest.mark.skip(reason="skip this case")
+
 @patch.object(driver, "NPUUtils")
 @patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
 @patch.object(driver, "force_disable_ffts", return_value=False)

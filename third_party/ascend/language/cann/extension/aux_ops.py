@@ -113,6 +113,20 @@ def compile_hint_impl(ptr: tensor, hint_name: str, hint_val, builder: ir.builder
 
 @builtin
 def compile_hint(ptr, hint_name, hint_val=None, _semantic=None):
+    """Attaches a compiler hint annotation to a tensor, guiding Ascend code generation.
+
+    Hints influence how the compiler handles memory layout, buffering, and other
+    optimization decisions. The hint is attached to ``ptr`` and serialized as an
+    MLIR annotation in the generated code.
+
+    :param ptr: The tensor to annotate with the compiler hint.
+    :type ptr: tensor
+    :param hint_name: Hint identifier string (e.g., ``"hivm.multi_buffer"``).
+    :type hint_name: str
+    :param hint_val: Hint value. Can be a bool, int, constexpr string, or list of
+        integers (serialized as an i64 array attribute).
+    :type hint_val: bool | int | constexpr | list[int] | None
+    """
     # simt mode does not support hint annotations
     if _semantic.builder.is_simt_mode():
         return

@@ -230,19 +230,42 @@ void init_ascend_ir(py::module &&m) {
           },
           py::arg("pos"), py::arg("context") = py::none());
 
+  affineExprClass.attr("__doc__") =
+      "An MLIR affine expression representing a linear combination of "
+      "dimensions and symbols with a constant offset.\n\n"
+      "Affine expressions model loop bounds, array indices, and memory "
+      "access patterns in the Ascend NPU compiler. They support addition, "
+      "subtraction, multiplication by constants, floor division, ceiling "
+      "division, and modulo operations.\n\n"
+      "Create via static methods: get_constant(value), get_dim(pos), "
+      "get_symbol(pos).";
+
   py::class_<AffineConstantExpr, AffineExpr>(m, "affine_constant_expr",
                                              py::module_local())
-      .def("get_value", &AffineConstantExpr::getValue);
+      .def("get_value", &AffineConstantExpr::getValue)
+      .attr("__doc__") =
+      "An affine expression that is a constant integer value. "
+      "This is the simplest form of an affine expression, "
+      "representing just a numeric constant.";
   py::class_<AffineDimExpr, AffineExpr>(m, "affine_dim_expr",
                                         py::module_local())
-      .def("get_position", &AffineDimExpr::getPosition);
+      .def("get_position", &AffineDimExpr::getPosition)
+      .attr("__doc__") =
+      "An affine expression representing a single dimension variable. "
+      "Dimensions typically correspond to loop induction variables.";
   py::class_<AffineSymbolExpr, AffineExpr>(m, "affine_symbol_expr",
                                            py::module_local())
-      .def("get_position", &AffineSymbolExpr::getPosition);
+      .def("get_position", &AffineSymbolExpr::getPosition)
+      .attr("__doc__") =
+      "An affine expression representing a single symbol variable. "
+      "Symbols represent unknown but constant values (e.g., tile sizes).";
   py::class_<AffineBinaryOpExpr, AffineExpr>(m, "affine_binary_op_expr",
                                              py::module_local())
       .def("get_lhs", &AffineBinaryOpExpr::getLHS)
-      .def("get_rhs", &AffineBinaryOpExpr::getRHS);
+      .def("get_rhs", &AffineBinaryOpExpr::getRHS)
+      .attr("__doc__") =
+      "An affine expression composed of two sub-expressions combined by "
+      "an operator (add, sub, mul, mod, floordiv, ceildiv).";
 
   auto affineMapClass =
       py::class_<AffineMap>(m, "affine_map", py::module_local());
@@ -426,6 +449,14 @@ void init_ascend_ir(py::module &&m) {
             return AffineMap::getConstantMap(value, context);
           },
           py::arg("value"), py::arg("context") = py::none());
+
+  affineMapClass.attr("__doc__") =
+      "An MLIR affine map representing a mapping from a set of "
+      "dimensions and symbols to a list of affine expressions.\n\n"
+      "Affine maps encode transformations like indexing, layout "
+      "permutations, and memory access patterns. They are the "
+      "fundamental abstraction for describing data movement and "
+      "computation placement in the Ascend NPU compiler.";
 
   py::enum_<hivm::AddressSpace>(m, "AddressSpace", py::module_local())
       .value("L1", hivm::AddressSpace::L1)

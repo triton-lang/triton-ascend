@@ -39,25 +39,18 @@
 
 ### 2.2 目录结构与功能说明
 
-**`include/` 和 `lib/`**
-
-- **内容**：包含针对 Ascend NPU 的 **MLIR Passes**、**Dialects**（方言）以及相关工具。
-- **作用**：用于在 MLIR 编译流程中表达和优化 Ascend 特定的计算图。
-
-**`libdevice.py`**
-
-- **内容**：适配 Ascend NPU 的 `libdevice` 接口。
-- **作用**：提供适配 Ascend NPU 硬件的底层实现支持，供 Triton 算子调用。
-
-**`backend/compiler.py`**
-
-- **内容**：`triton-ascend` 编译器主入口。
-- **作用**：将 Triton 高层 DSL 代码编译为可在 Ascend NPU 上执行的**可执行二进制文件**（如 `.o`文件）。
-
-**`backend/driver.py`**
-
-- **内容**：`triton-ascend` 驱动模块。
-- **作用**：加载并启动已编译的可执行二进制。
+| 目录或文件 | 对应架构层级 | 功能说明 |
+| --- | --- | --- |
+| `python/` | Triton core | 保留标准 Triton 的 Python 侧通用实现，包括 `triton.language`、JIT、运行时、缓存、工具链入口等。与硬件无关的通用能力优先放在该目录。 |
+| `include/` 和 `lib/` | Triton core | 保留标准 Triton 的通用 C++/MLIR 基础设施、Dialect、Pass 和转换逻辑。这里不承载 Ascend 专属后端实现。 |
+| `third_party/ascend/` | Triton-Ascend | Ascend 后端的根目录，集中放置与 Ascend NPU、CANN、BiSheng Compiler 强相关的语言扩展、编译后端、运行时驱动、MLIR Pass、示例和测试。 |
+| `third_party/ascend/language/` | Ascend language extension | Ascend 语言扩展目录，安装后会链接到 `triton.language.extra` 下，供 Triton kernel 通过 `triton.language.extra.cann` 使用。 |
+| `third_party/ascend/language/cann/libdevice.py` | Ascend language extension | 适配 Ascend NPU 的 `libdevice` Python 接口，提供数学函数和底层算子封装，供 Triton 算子调用。 |
+| `third_party/ascend/backend/compiler.py` | compiler | Ascend 编译器后端主入口，负责注册编译选项、组织 TTIR 到 Ascend 适配 IR、Linalg/LLVM 等阶段的转换，并调用后续工具链生成可执行二进制文件。 |
+| `third_party/ascend/backend/driver.py` | driver | Ascend 运行时驱动模块，负责与 CANN/torch_npu 等运行时环境对接，加载并启动已编译的设备侧可执行文件。 |
+| `third_party/ascend/include/` 和 `third_party/ascend/lib/` | compiler | Ascend 专属 MLIR Dialect、Pass 和转换实现，例如 `TritonToLinalg`、`TritonToStructured`、`DynamicCVPipeline`、`AutoBlockify` 等。 |
+| `third_party/ascend/AscendNPU-IR/` | compiler | Ascend NPU 相关 IR 与 BiSheng 编译链适配内容，是从 Triton-Ascend 编译流程继续下沉到硬件侧代码生成的重要组成部分。 |
+| `third_party/ascend/tutorials/` 和 `third_party/ascend/unittest/` | 示例与测试 | 提供 Ascend 平台上的 Triton 示例、迁移样例、Python 单元测试和 MLIR 转换测试，用于验证 Ascend 后端能力。 |
 
 ## 3. Modules
 

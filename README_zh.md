@@ -96,6 +96,8 @@ Triton-Ascend 所支持的操作系统与 CANN 一致。请参考 CANN 官方文
 
 - [安装指南](./docs/zh/installation_guide.md)
 
+- [教程示例](./docs/zh/examples/index.md)
+
 - [架构设计与核心特性](./docs/zh/architecture_design_and_core_features.md)
 
 - [算子开发指南](./docs/zh/programming_guide/index.md)

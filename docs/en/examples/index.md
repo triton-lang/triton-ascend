@@ -1,4 +1,4 @@
-# Examples
+# Tutorials
 
 ## Triton Examples
 

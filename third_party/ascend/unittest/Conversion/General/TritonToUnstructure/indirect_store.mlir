@@ -1,6 +1,6 @@
-// RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=True force-simt-template=True' '--triton-to-unstructure=compile-on-910-95=True force-simt-template=True' %s --split-input-file | FileCheck %s
+// RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=True compile-mode=simt_template' '--triton-to-unstructure=compile-on-910-95=True compile-mode=simt_template' %s --split-input-file | FileCheck %s
 
-// tt.store -> ascend.indirect_store
+// tt.store -> ascend.unstructured_store
 tt.func public @triton_indirect_store_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<i64>, %arg2: !tt.ptr<f32>, %arg3: i32) attributes {noinline = false} {
   %cst = arith.constant dense<32> : tensor<8x1xi32>
   %c8_i32 = arith.constant 8 : i32
@@ -37,6 +37,6 @@ tt.func public @triton_indirect_store_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr
 }
 
 // CHECK-LABEL:     tt.func public @triton_indirect_store_kernel(
-// CHECK:           ascend.indirect_store %[[VAL_0:.*]] : <f32>, %[[VAL_29:.*]] : tensor<8x32xi64>, %[[VAL_24:.*]] : tensor<8x32xf32>
+// CHECK:           ascend.unstructured_store {{.*}} : <f32>, {{.*}} : tensor<8x32xi64>, {{.*}} : tensor<8x32xf32> unstructured_dims = [0, 1]
 // CHECK:           tt.return
 // CHECK:         }

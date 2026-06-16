@@ -1,0 +1,36 @@
+name: 🛠️ Installation
+description: Report an issue here when you hit errors during installation.
+title: "[Installation]: "
+labels: ["installation"]
+
+body:
+- type: markdown
+  attributes:
+    value: >
+      #### Before submitting an issue, please make sure the issue hasn't been already addressed by searching through [the existing and past issues](https://github.com/triton-lang/triton-ascend/issues?q=is%3Aissue+sort%3Acreated-desc+).
+- type: textarea
+  attributes:
+    label: Your current environment
+    description: |
+      Please show your current environment details here.
+    value: |
+      ```text
+      Triton-Ascend==3.2.0
+      CANN==8.5.0
+      torch_npu==2.7.1
+      ```
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: How you are installing triton-ascend
+    description: |
+      Paste the full command you are trying to execute.
+    value: |
+      ```sh
+      pip install triton-ascend
+      ```
+- type: markdown
+  attributes:
+    value: >
+      Thanks for contributing 🎉!

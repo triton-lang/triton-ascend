@@ -1,6 +1,7 @@
 # Triton Ascend Contribution Guide
 
 - [Getting Started](#getting-started.md)
+- [Developer Certificate of Origin (DCO)](#DCO.md)
 - [Developer Guide](#developer-guide.md)
   - [Coding Style](#coding-style.md)
   - [Fork-Pull Mode](#fork-pull-mode.md)
@@ -12,6 +13,17 @@
 
 - Fork the Triton Ascend repository on [GitHub](https://github.com/triton-lang/triton-ascend).
 - Check the [README.md](https://github.com/triton-lang/triton-ascend/blob/main/README.md) file to obtain the project information and build the development environment.
+
+<h2 id="DCO.md">Developer Certificate of Origin (DCO)</h2>
+
+All commits must include a `Signed-off-by:` line. Use `git commit -s` to add it automatically:
+
+```bash
+git commit -s -m "your commit message"
+```
+
+This will automatically add a line `Signed-off-by: Your Name <your.email@example.com>` at the end of your commit message, indicating that you certify the origin and authorization of the contribution.
+
 
 <h2 id="developer-guide.md">Developer Guide</h2>
 
@@ -79,30 +91,13 @@ After updating and testing the code, push your commit to the remote repository.
 ```shell
 git add .
 git status #Check the updated files
-git commit -m "Your commit title"
-git commit -s --amend #Add the concrete description of your commit
+git commit -s -m "your commit message"
 git push origin {your_new_branch_name}
 ```
 
 6.Create a pull request to the Triton Ascend main repository.
 
 After pushing code to your remote repository, create a pull request between your new branch and the Triton Ascend main branch. After the merge request is created, Jenkins CI will be automatically set to build your pipeline test. You are advised to merge your pull request to the upstream main branch as soon as possible to reduce the merge risk.
-
-The pipeline execution process after a PR is committed is as follows:
-
-- Comment /compile to start the pipeline test. If the test fails, modify the code as prompted and comment /compile again to trigger the pipeline test. After the test is passed, the tag ci-pipeline-passed is added.
-
-  ```shell
-  /compile
-  ```
-
-- If SC-FAIL is displayed, check the modification and comment compile#openlibing to manually trigger the check. After the check is passed, the tag SC-SUCC is added.
-
-  ```shell
-  compile#openlibing
-  ```
-
-- After the pipeline passes the test (the ci-pipeline-passed and SC-SUCC tags are added), comment @committers as prompted to review the code so that the code can be quickly merged.
 
 <h2 id="troubleshooting-gated-commit.md">Troubleshooting Gated Commit</h2>
 

@@ -116,6 +116,9 @@ public:
   bool isUnstructured() const;
   bool isUnstructuredOrScalarlike() const;
 
+  SmallVector<int64_t> getUnstructuredDims() const;
+  bool hasUnstructuredDim() const;
+
   void setZeroOffset();
 
 private:

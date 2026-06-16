@@ -17,17 +17,14 @@
 | 昇腾950    | 950PR系列                       | 3.2.1-950-ubuntu22.04-py3.11  |
 
 说明：更多镜像参见[OVERVIEW.zh.md](../../docker/OVERVIEW.zh.md)
-### 获取镜像
 
-```bash
-docker pull quay.io/ascend/{image_tag}
-```
 ### 创建容器
 
 ```bash
 # 假设您的NPU设备型号是A3,且设备安装在/dev/davinci1上，并且您的NPU驱动程序安装在/usr/local/Ascend上：
+# 以image_tag：3.2.1-a3-ubuntu22.04-py3.11为例：
 container_name=triton-ascend_container
-image_tag=quay.io/ascend/triton:3.2.1-a3-ubuntu22.04-py3.11
+image_tag=3.2.1-a3-ubuntu22.04-py3.11
 docker run -u 0 -dit --shm-size=512g --name=${container_name} --net=host --privileged \
 --security-opt seccomp=unconfined \
 --device=/dev/davinci0 \
@@ -47,7 +44,7 @@ docker run -u 0 -dit --shm-size=512g --name=${container_name} --net=host --privi
 -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
 -v /etc/ascend_install.info:/etc/ascend_install.info \
 -v /home:/home \
-${image_tag} \
+quay.io/ascend/triton:${image_tag} \
 /bin/bash
 ```
 ### 进入容器
@@ -212,7 +209,7 @@ git checkout main
 export LLVM_SYSPATH=/path/to/LLVM
 
 # 执行安装命令
-pip install -e python
+pip install -e .
 ```
 
 <a id="hand-code-base"></a>

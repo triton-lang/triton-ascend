@@ -133,17 +133,6 @@ bool getEnvBool(const char *envVar, bool defaultValue) {
   return true;
 }
 
-static llvm::SmallString<kFuncNameCap>
-generateUniqueFuncName(ModuleOp moduleOp, llvm::StringRef funcNameBase) {
-  llvm::SmallString<kFuncNameCap> funcName = funcNameBase;
-  int uniqueId = 0;
-  while (SymbolTable::lookupSymbolIn(moduleOp, funcName)) {
-    funcName = funcNameBase;
-    funcName += ("_" + std::to_string(uniqueId++));
-  }
-  return funcName;
-}
-
 LogicalResult
 BitcastConverter::matchAndRewrite(triton::BitcastOp op, OpAdaptor adaptor,
                                   ConversionPatternRewriter &rewriter) const {
@@ -2734,12 +2723,6 @@ IndexPutConverter::matchAndRewrite(triton::ascend::IndexPutOp op,
                                    ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
 
-  auto moduleOp = op->getParentOfType<ModuleOp>();
-  rewriter.setInsertionPoint(moduleOp.getBody(),
-                             std::prev(moduleOp.getBody()->end()));
-
-  auto funcName = generateUniqueFuncName(moduleOp, funcNameBase);
-
   auto ptr = adaptor.getPtr();
   auto index = op.getIndex();
   auto value = op.getValue();
@@ -2754,6 +2737,63 @@ IndexPutConverter::matchAndRewrite(triton::ascend::IndexPutOp op,
   if (!ptrTy) {
     return rewriter.notifyMatchFailure(op, "expected MemRefType for ptr");
   }
+
+  bool isSimdSimtMode = (compileModeFlag == ascend::CompileMode::SimdSimt);
+
+  // Check if dim is a compile-time constant (required for static burstlen
+  // derivation). If not, fall back to template path even in simd_simt mode.
+  auto dimDefOp =
+      isSimdSimtMode ? dim.getDefiningOp<arith::ConstantIntOp>() : nullptr;
+  bool emitScatterStore = isSimdSimtMode && dimDefOp;
+
+  if (emitScatterStore) {
+    // simd_simt mode: generate hfusion.scatter_store with derived burstlen.
+    // burstlen = product of value.shape[j] for j > dim (contiguous elements per
+    // scatter).
+    auto valueTensorType = cast<RankedTensorType>(value.getType());
+    auto valueShape = valueTensorType.getShape();
+    int32_t dimVal = static_cast<int32_t>(dimDefOp.value());
+
+    int32_t burstLenVal = 1;
+    for (int i = dimVal + 1; i < static_cast<int>(valueShape.size()); ++i) {
+      if (valueShape[i] != ShapedType::kDynamic)
+        burstLenVal *= valueShape[i];
+    }
+    auto burstLen = rewriter.create<arith::ConstantIntOp>(loc, burstLenVal, 32);
+
+    // Convert row indices to element offsets: elem_offset[i] = index[i] *
+    // burstlen
+    auto idxTensorType = cast<RankedTensorType>(index.getType());
+    auto idxElemType = idxTensorType.getElementType();
+    Value elemOffsets;
+    if (burstLenVal == 1) {
+      elemOffsets = index;
+    } else {
+      auto burstLenSplat = rewriter.create<tensor::SplatOp>(
+          loc,
+          rewriter.create<arith::IndexCastOp>(
+              loc, idxElemType,
+              rewriter.create<arith::ConstantIndexOp>(loc, burstLenVal)),
+          RankedTensorType::get(idxTensorType.getShape(), idxElemType));
+      elemOffsets = rewriter.create<arith::MulIOp>(loc, index, burstLenSplat);
+    }
+
+    // hfusion.scatter_store(base, indices, data, burst_len)
+    SmallVector<Value> operands = {ptr, elemOffsets, value,
+                                   burstLen.getResult()};
+    rewriter.create<hfusion::ScatterStoreOp>(loc, TypeRange{}, operands,
+                                             SmallVector<NamedAttribute>{});
+    rewriter.eraseOp(op);
+    return success();
+  }
+
+  // simt_template mode: generate a private func::CallOp to the template library
+  auto moduleOp = op->getParentOfType<ModuleOp>();
+  rewriter.setInsertionPoint(moduleOp.getBody(),
+                             std::prev(moduleOp.getBody()->end()));
+
+  auto funcName = generateUniqueFuncName(moduleOp, funcNameBase);
+
   SmallVector<Type> inputTypes({ptrTy, index.getType(), value.getType(),
                                 dim.getType(), indexBoundary.getType()});
   inputTypes.append(endOffset.getTypes().begin(), endOffset.getTypes().end());
@@ -2878,86 +2918,168 @@ LogicalResult ScatterUbToOutConverter::matchAndRewrite(
   return success();
 }
 
-LogicalResult IndirectLoadConverter::matchAndRewrite(
-    triton::ascend::IndirectLoadOp op, OpAdaptor adaptor,
+LogicalResult UnstructuredLoadConverter::matchAndRewrite(
+    triton::ascend::UnstructuredLoadOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
+  // adaptor automatically converts !tt.ptr<T> → memref<?xT>
+  Value baseMem = adaptor.getBase();
+  Value offsets = op.getIndices();
+  Value mask = op.getMask();
+  Value other = op.getOther();
+  auto resTy = op.getResult().getType();
+  auto unstrucDims = op.getUnstructuredDims();
 
-  auto moduleOp = op->getParentOfType<ModuleOp>();
-  rewriter.setInsertionPoint(moduleOp.getBody(),
-                             std::prev(moduleOp.getBody()->end()));
+  auto srcTy = dyn_cast<MemRefType>(baseMem.getType());
+  if (!srcTy)
+    return rewriter.notifyMatchFailure(op, "expected MemRefType for base");
 
-  auto funcName = generateUniqueFuncName(moduleOp, funcNameBase);
-
-  auto src = adaptor.getSrc();
-  auto offsets = op.getOffsets();
-  auto mask = op.getMask();
-  auto other = op.getOther();
-  auto res = op.getResult();
-  auto resTy = res.getType();
-
-  // convert !tt.ptr<f32> to memref<?xf32>
-  auto srcTy = dyn_cast<MemRefType>(src.getType());
-  if (!srcTy) {
-    return rewriter.notifyMatchFailure(op, "expected MemRefType for src");
+  // Compute burstlen from trailing structured dimensions.
+  auto resultShape = cast<RankedTensorType>(resTy).getShape();
+  int64_t burstlen = 1;
+  bool hasDynamicBurstlenDim = false;
+  auto updateBurstlen = [&](int64_t dim) {
+    if (ShapedType::isDynamic(dim)) {
+      hasDynamicBurstlenDim = true;
+      burstlen = 1;
+      return;
+    }
+    if (hasDynamicBurstlenDim)
+      return;
+    burstlen *= dim;
+  };
+  if (unstrucDims.empty()) {
+    for (int64_t dim : resultShape)
+      updateBurstlen(dim);
+  } else {
+    int64_t lastUnstrucDim =
+        *std::max_element(unstrucDims.begin(), unstrucDims.end());
+    for (int64_t j = lastUnstrucDim + 1; j < (int64_t)resultShape.size(); j++)
+      updateBurstlen(resultShape[j]);
   }
-  SmallVector<Type> inputTypes({srcTy, offsets.getType()});
-  if (mask)
-    inputTypes.push_back(mask.getType());
-  if (other)
-    inputTypes.push_back(other.getType());
-  auto libFnType = rewriter.getFunctionType(inputTypes, {resTy});
-  auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
-  SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
 
-  rewriter.setInsertionPoint(op);
-  SmallVector<Value> inputVals({src, offsets});
-  if (mask)
-    inputVals.push_back(mask);
-  if (other)
-    inputVals.push_back(other);
-  auto callOp = rewriter.create<func::CallOp>(loc, funcOp.getSymNameAttr(),
-                                              TypeRange({resTy}), inputVals);
-  rewriter.replaceOp(op, callOp);
+  // Check compile mode: hfusion gather_load vs simt_template func.call
+  bool isSimdSimtMode = compileModeFlag == ascend::CompileMode::SimdSimt;
+  if (isSimdSimtMode) {
+    auto burstLen = rewriter.create<arith::ConstantIntOp>(loc, burstlen, 32);
+
+    Value scalarOther;
+    if (other) {
+      scalarOther = mlir::ConverterUtils::getScalarValue(other, loc, rewriter);
+      assert(scalarOther &&
+             "other value used in masked unstructured_load produced by "
+             "unsupported instruction!");
+    }
+
+    Value dst = rewriter.create<tensor::EmptyOp>(
+        loc, resultShape, cast<RankedTensorType>(resTy).getElementType());
+
+    auto gatherLoadOp = rewriter.create<hfusion::GatherLoadOp>(
+        loc, baseMem, offsets, burstLen, mask, scalarOther, dst,
+        hfusion::CacheModifierAttr{}, hfusion::EvictionPolicyAttr{},
+        mlir::BoolAttr{});
+    rewriter.replaceOp(op, gatherLoadOp.getResult());
+  } else {
+    // simt_template: generate a private func::CallOp
+    auto moduleOp = op->getParentOfType<ModuleOp>();
+    rewriter.setInsertionPoint(moduleOp.getBody(),
+                               std::prev(moduleOp.getBody()->end()));
+    auto funcName = generateUniqueFuncName(moduleOp, funcNameBase);
+
+    SmallVector<Type> inputTypes({srcTy, offsets.getType()});
+    if (mask)
+      inputTypes.push_back(mask.getType());
+    if (other)
+      inputTypes.push_back(other.getType());
+
+    auto libFnType = rewriter.getFunctionType(inputTypes, {resTy});
+    auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
+    SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
+
+    rewriter.setInsertionPoint(op);
+    SmallVector<Value> inputVals({baseMem, offsets});
+    if (mask)
+      inputVals.push_back(mask);
+    if (other)
+      inputVals.push_back(other);
+
+    auto callOp = rewriter.create<func::CallOp>(loc, funcOp.getSymNameAttr(),
+                                                TypeRange({resTy}), inputVals);
+    rewriter.replaceOp(op, callOp);
+  }
   return success();
 }
 
-LogicalResult IndirectStoreConverter::matchAndRewrite(
-    triton::ascend::IndirectStoreOp op, OpAdaptor adaptor,
+LogicalResult UnstructuredStoreConverter::matchAndRewrite(
+    triton::ascend::UnstructuredStoreOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
+  Value baseMem = adaptor.getBase();
+  Value offsets = op.getIndices();
+  Value value = op.getValue();
+  Value mask = op.getMask();
+  auto unstrucDims = op.getUnstructuredDims();
 
-  auto moduleOp = op->getParentOfType<ModuleOp>();
-  rewriter.setInsertionPoint(moduleOp.getBody(),
-                             std::prev(moduleOp.getBody()->end()));
+  auto srcTy = dyn_cast<MemRefType>(baseMem.getType());
+  if (!srcTy)
+    return rewriter.notifyMatchFailure(op, "expected MemRefType for base");
 
-  auto funcName = generateUniqueFuncName(moduleOp, funcNameBase);
-
-  auto src = adaptor.getSrc();
-  auto offsets = op.getOffsets();
-  auto value = op.getValue();
-  auto mask = op.getMask();
-
-  // convert !tt.ptr<f32> to memref<?xf32>
-  auto srcTy = dyn_cast<MemRefType>(src.getType());
-  if (!srcTy) {
-    return rewriter.notifyMatchFailure(op, "expected MemRefType for src");
+  // Compute burstlen from trailing structured dimensions.
+  auto valueShape = cast<RankedTensorType>(value.getType()).getShape();
+  int64_t burstlen = 1;
+  bool hasDynamicBurstlenDim = false;
+  auto updateBurstlen = [&](int64_t dim) {
+    if (ShapedType::isDynamic(dim)) {
+      hasDynamicBurstlenDim = true;
+      burstlen = 1;
+      return;
+    }
+    if (hasDynamicBurstlenDim)
+      return;
+    burstlen *= dim;
+  };
+  if (unstrucDims.empty()) {
+    for (int64_t dim : valueShape)
+      updateBurstlen(dim);
+  } else {
+    int64_t lastUnstrucDim =
+        *std::max_element(unstrucDims.begin(), unstrucDims.end());
+    for (int64_t j = lastUnstrucDim + 1; j < (int64_t)valueShape.size(); j++)
+      updateBurstlen(valueShape[j]);
   }
-  SmallVector<Type> inputTypes({srcTy, offsets.getType(), value.getType()});
-  if (mask)
-    inputTypes.push_back(mask.getType());
 
-  auto libFnType = rewriter.getFunctionType(inputTypes, {});
-  auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
-  SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
+  bool isSimdSimtMode = compileModeFlag == ascend::CompileMode::SimdSimt;
 
-  rewriter.setInsertionPoint(op);
-  SmallVector<Value> inputVals({src, offsets, value});
-  if (mask)
-    inputVals.push_back(mask);
-  rewriter.create<func::CallOp>(loc, funcOp.getSymNameAttr(), TypeRange({}),
-                                inputVals);
-  rewriter.eraseOp(op);
+  if (isSimdSimtMode) {
+    auto burstLen = rewriter.create<arith::ConstantIntOp>(loc, burstlen, 32);
+
+    rewriter.create<hfusion::ScatterStoreOp>(
+        loc, TypeRange{}, offsets, value, burstLen, mask, baseMem,
+        hfusion::CacheModifierAttr{}, hfusion::EvictionPolicyAttr{});
+    rewriter.eraseOp(op);
+  } else {
+    auto moduleOp = op->getParentOfType<ModuleOp>();
+    rewriter.setInsertionPoint(moduleOp.getBody(),
+                               std::prev(moduleOp.getBody()->end()));
+    auto funcName = generateUniqueFuncName(moduleOp, funcNameBase);
+
+    SmallVector<Type> inputTypes({srcTy, offsets.getType(), value.getType()});
+    if (mask)
+      inputTypes.push_back(mask.getType());
+
+    auto libFnType = rewriter.getFunctionType(inputTypes, {});
+    auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
+    SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
+
+    rewriter.setInsertionPoint(op);
+    SmallVector<Value> inputVals({baseMem, offsets, value});
+    if (mask)
+      inputVals.push_back(mask);
+
+    rewriter.create<func::CallOp>(loc, funcOp.getSymNameAttr(), TypeRange{},
+                                  inputVals);
+    rewriter.eraseOp(op);
+  }
   return success();
 }
 
@@ -2979,6 +3101,7 @@ LogicalResult IndexSelectSimdConverter::matchAndRewrite(
 
   // Get result type
   auto resultTensorType = cast<RankedTensorType>(op.getResult().getType());
+
   auto elemType = resultTensorType.getElementType();
   auto resultShape = resultTensorType.getShape();
 

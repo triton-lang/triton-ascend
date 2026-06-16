@@ -44,7 +44,8 @@ using namespace triton;
 
 #include "llvm/Support/Debug.h"
 
-bool forceSimtTemplateFlag = false;
+static bool compileOn91095Flag = false;
+static ascend::CompileMode compileModeFlag = ascend::CompileMode::Simd;
 
 template <typename MemAccOpTy>
 bool UnstructuredMemAccessConverter<MemAccOpTy>::checkUnstructureAnnotated(
@@ -240,7 +241,6 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   auto ptr = op.getPtr();
   auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
-  auto isDiscreteMask = op->hasAttr("is_discrete_mask");
 
   if (auto ptrPtrType = dyn_cast<triton::PointerType>(ptr.getType())) {
     if (auto ptrTensorType =
@@ -258,7 +258,9 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   if (checkUnstructureAnnotated(op, rewriter))
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
 
-  if (ptrOffsetInfo.isStructured() && !isDiscreteMask &&
+  bool hasMixCompileDiscreteMask =
+      op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName);
+  if (!hasMixCompileDiscreteMask && ptrOffsetInfo.isStructured() &&
       (!ptrOffsetInfo.isScalarLike() ||
        llvm::all_of(ptrType.getShape(), [](int64_t dim) { return dim == 1; })))
     return failure();
@@ -350,39 +352,43 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     os << "ptrOffsetInfo.isStructured: " << ptrOffsetInfo.isStructured()
        << "\n";
     os << "compileOn91095Flag: " << compileOn91095Flag << "\n";
-    os << "forceSimtTemplateFlag: " << forceSimtTemplateFlag << "\n";
+    os << "compileModeFlag: " << static_cast<int>(compileModeFlag) << "\n";
   });
 
-  // Fast path on A5: rewrite tt.load/store to tt.indirect_load/store directly.
-  if (compileOn91095Flag && forceSimtTemplateFlag &&
-      (ptrOffsetInfo.isUnstructuredOrScalarlike() || isDiscreteMask)) {
-    if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-      assert(isa<triton::PointerType>(srcPtr.getType()) &&
-             "src must be ptr type");
-      Value mask = op.getMask();
-      Value other = op.getOther();
-      auto resultType = op.getType();
-      auto indirect = rewriter.create<triton::ascend::IndirectLoadOp>(
-          loc, resultType, srcPtr, ptrOffset, mask, other);
-      rewriter.replaceOp(op, indirect.getResult());
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
+                std::is_same_v<MemAccOpTy, triton::StoreOp>) {
+    if (ascend::isMixCompileMode(compileModeFlag) &&
+        (ptrOffsetInfo.hasUnstructuredDim() || hasMixCompileDiscreteMask)) {
+      auto unstructuredDims = ptrOffsetInfo.getUnstructuredDims();
+      Value basePtr = ptrOffsetInfo.getPtr();         // scalar !tt.ptr<T>
+      Value offsetTensor = ptrOffsetInfo.getOffset(); // flat offset tensor
+
+      assert(basePtr && "PtrOffsetInfo must provide a scalar base pointer");
+      assert(offsetTensor && "PtrOffsetInfo must provide an offset tensor");
+
+      if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+        auto resultType = op.getType();
+        auto unstrucLoadOp =
+            rewriter.create<triton::ascend::UnstructuredLoadOp>(
+                loc, resultType, basePtr, offsetTensor,
+                rewriter.getDenseI64ArrayAttr(unstructuredDims), op.getMask(),
+                op.getOther(), op.getCacheAttr(), op.getEvictAttr(),
+                op.getIsVolatileAttr());
+        rewriter.replaceOp(op, unstrucLoadOp.getResult());
+      } else if constexpr (std::is_same_v<MemAccOpTy, triton::StoreOp>) {
+        rewriter.create<triton::ascend::UnstructuredStoreOp>(
+            loc, basePtr, offsetTensor, op.getValue(),
+            rewriter.getDenseI64ArrayAttr(unstructuredDims), op.getMask(),
+            op.getCacheAttr(), op.getEvictAttr());
+        rewriter.eraseOp(op);
+      }
+
       LLVM_DEBUG({
         auto &os = llvm::dbgs();
-        os << "Rewriting tt.load to tt.indirect_load\n";
-        os << indirect << "\n";
-      });
-      return success();
-    } else if constexpr (std::is_same_v<MemAccOpTy, triton::StoreOp>) {
-      assert(isa<triton::PointerType>(srcPtr.getType()) &&
-             "src must be ptr type");
-      Value value = op.getValue();
-      Value mask = op.getMask();
-      auto indirect = rewriter.create<triton::ascend::IndirectStoreOp>(
-          loc, srcPtr, ptrOffset, value, mask);
-      rewriter.eraseOp(op);
-      LLVM_DEBUG({
-        auto &os = llvm::dbgs();
-        os << "Rewriting tt.store to tt.indirect_store\n";
-        os << indirect << "\n";
+        os << "Created UnstructuredLoad/StoreOp with dims: [";
+        for (auto d : unstructuredDims)
+          os << d << " ";
+        os << "]\n";
       });
       return success();
     }
@@ -673,13 +679,15 @@ TritonToUnstructurePass::TritonToUnstructurePass(
 
 void TritonToUnstructurePass::runOnOperation() {
   compileOn91095Flag = this->compileOn91095;
-  forceSimtTemplateFlag = this->forceSimtTemplate;
+  compileModeFlag =
+      ascend::resolveCompileMode(this->compileMode, this->forceSimtTemplate);
 
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
     os << "TritonToUnstructurePass started with options:\n";
     os << "  compileOn91095: " << compileOn91095Flag << "\n";
-    os << "  forceSimtTemplate: " << forceSimtTemplateFlag << "\n";
+    os << "  compileMode: " << this->compileMode << "\n";
+    os << "  forceSimtTemplate: " << this->forceSimtTemplate << "\n";
   });
 
   ModuleOp moduleOp = getOperation();

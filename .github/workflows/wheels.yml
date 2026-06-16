@@ -27,6 +27,9 @@ jobs:
         - {runs_on: 'ubuntu-22.04', arch: 'x86_64'}
         - {runs_on: 'ubuntu-22.04-arm', arch: 'aarch64'}
         python: ["cp310", "cp311", "cp312", "cp313"]
+        branch:
+        - {ref: 'main', tag: 'main', local: 'dev', path: '.'}
+        - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release', path: 'python'}
 
     permissions:
       id-token: write
@@ -43,6 +46,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch.ref }}
 
       - uses: actions/setup-python@v5
         with:
@@ -52,8 +57,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ${{ github.workspace }}/.triton-cache
-            ${{ github.workspace }}/.ccache
+            ${{ github.workspace }}/${{ matrix.branch.path }}/.triton-cache
+            ${{ github.workspace }}/${{ matrix.branch.path }}/.ccache
           key: wheels-${{ matrix.config.arch }}-${{ matrix.python }}-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
           restore-keys: |
             wheels-${{ matrix.config.arch }}-${{ matrix.python }}-
@@ -71,7 +76,7 @@ jobs:
 
           # Pre-create cache dirs on host so cibuildwheel's bind-mount sees them
           # at /project/.triton-cache and /project/.ccache inside the container.
-          mkdir -p .triton-cache .ccache
+          mkdir -p "${{ matrix.branch.path }}/.triton-cache" "${{ matrix.branch.path }}/.ccache"
 
           # Wheel version: <base>rc3+devYYYYMMDD. Compute the build date once on
           # the host (UTC) so all matrix cells agree even if they straddle
@@ -87,7 +92,7 @@ jobs:
             TRITON_BUILD_PROTON=OFF \
             TRITON_WHEEL_NAME=triton-ascend \
             TRITON_APPEND_CMAKE_ARGS='-DTRITON_BUILD_UT=OFF' \
-            TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX:-rc3}+dev${BUILD_DATE} \
+            TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX:-rc3}+${{ matrix.branch.local }}${BUILD_DATE} \
             IS_MANYLINUX=TRUE \
             TRITON_HOME=/project/.triton-cache \
             TRITON_BUILD_WITH_CCACHE=true \
@@ -106,22 +111,31 @@ jobs:
 
           export CIBW_BUILD="${{ matrix.python }}-manylinux_${{ matrix.config.arch }}"
 
-          python3 -m cibuildwheel . --output-dir wheelhouse
+          python3 -m cibuildwheel "${{ matrix.branch.path }}" --output-dir wheelhouse
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-${{ matrix.python }}-wheels-upload
+          name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}-wheels-upload
           path: ./wheelhouse/*.whl
 
-      - name: Setup obsutil
-        if: github.event_name != 'pull_request'
-        uses: ./.github/actions/setup-obsutil
-        with:
-          ak: ${{ secrets.NIGHTLY_OBS_AK }}
-          sk: ${{ secrets.NIGHTLY_OBS_SK }}
-          arch: ${{ matrix.config.arch == 'x86_64' && 'amd64' || 'arm64' }}
-
-      - name: Upload wheels to OBS
+      - name: Setup obsutil and upload to OBS
         if: github.event_name != 'pull_request'
         shell: bash
-        run: obsutil/obsutil cp -u wheelhouse/*.whl "obs://ascend-artifcat-packages/pypi/packages/ascend/repos/pypi/triton-ascend/nightly/"
+        env:
+          AK: ${{ secrets.NIGHTLY_OBS_AK }}
+          SK: ${{ secrets.NIGHTLY_OBS_SK }}
+          ARCH: ${{ matrix.config.arch == 'x86_64' && 'amd64' || 'arm64' }}
+        run: |
+          set -eu
+          if [ -z "${AK}" ] || [ -z "${SK}" ]; then
+            echo "OBS credentials are empty."
+            exit 1
+          fi
+          curl -fL "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${ARCH}.tar.gz" -o obsutil.tar.gz
+          gzip -t obsutil.tar.gz || { echo "obsutil.tar.gz is not a valid gzip"; exit 1; }
+          tar xzf obsutil.tar.gz
+          rm -f obsutil.tar.gz
+          mv obsutil_linux_* obsutil
+
+          obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-north-4.myhuaweicloud.com
+          obsutil/obsutil cp -u wheelhouse/*.whl "obs://ascend-artifcat-packages/pypi/packages/ascend/repos/pypi/nightly/triton-ascend/"

@@ -96,6 +96,8 @@ The OSs supported by Triton-Ascend are the same as those supported by CANN. Down
 
 - [Installation Guide](./docs/en/installation_guide.md)
 
+- [Tutorials](./docs/en/examples/index.md)
+
 - [Architecture Design and Core Features](./docs/en/architecture_design_and_core_features.md)
 
 - [Operator Development Guide](./docs/en/programming_guide/index.md)

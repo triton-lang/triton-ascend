@@ -65,7 +65,7 @@ Triton Ascend
     :maxdepth: 1
     :caption: Libdevice 开发者手册
 
-    libdevice/simt/libdevice_simt_developer_guide.md
+    libdevice/libdevice_developer_guide.md
 
 .. toctree::
     :maxdepth: 2

@@ -1,4 +1,4 @@
-// RUN: triton-opt --pass-pipeline="builtin.module(triton-to-unstructure{compile-on-910-95=true force-simt-template=false},triton-to-linalg{compile-on-910-95=true enable-nd2nz-on-vector=false global-kernel=false named-ops=true})" --split-input-file %s | FileCheck %s
+// RUN: triton-opt --pass-pipeline="builtin.module(triton-to-unstructure{compile-on-910-95=true compile-mode=simd},triton-to-linalg{compile-on-910-95=true enable-nd2nz-on-vector=false global-kernel=false named-ops=true})" --split-input-file %s | FileCheck %s
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_957c">} {
   tt.func public @dot_scale_fp8_kernel(%a_base: !tt.ptr<i8> {tt.divisibility = 16 : i32}, %stride_a1: i32 {tt.divisibility = 16 : i32}, %a_scale: !tt.ptr<i8> {tt.divisibility = 16 : i32}, %b_base: !tt.ptr<i8> {tt.divisibility = 16 : i32}, %stride_b0: i32 {tt.divisibility = 16 : i32}, %out: !tt.ptr<bf16> {tt.divisibility = 16 : i32}) attributes {noinline = false} {

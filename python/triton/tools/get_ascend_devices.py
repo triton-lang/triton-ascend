@@ -38,6 +38,11 @@ def check_npu_smi_device():
             output = result.stdout.lower()
             return "ascend910_95" in output or "ascend950" in output or "910_958b" in output
         return False
+    except FileNotFoundError:
+        # No npu-smi simply means no NPU on this machine (e.g. doc builds);
+        # not worth a warning on import.
+        logger.debug("npu-smi not found; assuming no Ascend devices")
+        return False
     except Exception:
         logger.warning("can not use command: npu-smi info")
         return False

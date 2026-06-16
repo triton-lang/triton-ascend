@@ -13,13 +13,13 @@ jobs:
     name: restricted files labeler
     runs-on: ubuntu-latest
     steps:
-      - name: Apply restricted files label
+      - name: Find files outside allowed paths
+        id: scan-files
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
-          RESTRICTED_FILES_LABEL: restricted-files
         run: |
           set -euo pipefail
 
@@ -84,17 +84,51 @@ jobs:
             echo "The following changed file(s) are outside the allowed paths:"
             printf '  - %s\n' "${violations[@]}"
 
-            gh api \
-              --method POST \
-              "repos/${REPOSITORY}/issues/${PR_NUMBER}/labels" \
-              -f "labels[]=${RESTRICTED_FILES_LABEL}" \
-              >/dev/null
-
-            echo "Applied label: ${RESTRICTED_FILES_LABEL}"
+            {
+              echo "has_restricted_files=true"
+              echo "restricted_files<<EOF"
+              printf '%s\n' "${violations[@]}"
+              echo "EOF"
+            } >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
           echo "All changed files are within the allowed repository-construction paths."
+          echo "has_restricted_files=false" >> "${GITHUB_OUTPUT}"
+
+      - name: Apply restricted files label
+        if: steps.scan-files.outputs.has_restricted_files == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          RESTRICTED_FILES: ${{ steps.scan-files.outputs.restricted_files }}
+          RESTRICTED_FILES_LABEL: restricted-files
+        run: |
+          set -euo pipefail
+
+          echo "Applying label ${RESTRICTED_FILES_LABEL} for files:"
+          printf '%s\n' "${RESTRICTED_FILES}"
+
+          gh api \
+            --method POST \
+            "repos/${REPOSITORY}/issues/${PR_NUMBER}/labels" \
+            -f "labels[]=${RESTRICTED_FILES_LABEL}" \
+            >/dev/null
+
+          echo "Applied label: ${RESTRICTED_FILES_LABEL}"
+
+      - name: Remove restricted files label
+        if: steps.scan-files.outputs.has_restricted_files == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          RESTRICTED_FILES_LABEL: restricted-files
+        run: |
+          set -euo pipefail
 
           mapfile -t current_labels < <(
             gh api \

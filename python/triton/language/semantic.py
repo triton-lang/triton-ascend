@@ -1499,9 +1499,9 @@ class TritonSemantic(Generic[TensorTy]):
             # All combinations of supported fp8 x fp8 are permitted
             pass
         else:
-            assert lhs.dtype in (tl.int1, tl.int8, tl.uint8, tl.float16, tl.bfloat16, tl.float32,
+            assert lhs.dtype in (tl.int8, tl.uint8, tl.float16, tl.bfloat16, tl.float32,
                                  tl.float64), f"Unsupported lhs dtype {lhs.dtype}"
-            assert rhs.dtype in (tl.int1, tl.int8, tl.uint8, tl.float16, tl.bfloat16, tl.float32,
+            assert rhs.dtype in (tl.int8, tl.uint8, tl.float16, tl.bfloat16, tl.float32,
                                  tl.float64), f"Unsupported rhs dtype {rhs.dtype}"
             assert lhs.dtype == rhs.dtype, f"Both operands must be same dtype. Got {lhs.dtype} and {rhs.dtype}"
 
@@ -1570,14 +1570,16 @@ class TritonSemantic(Generic[TensorTy]):
             acc_handle = acc.handle
             assert acc.type.shape == ret_ty.shape and acc.type.element_ty == out_dtype
 
-        if (input_precision == getattr(ir.INPUT_PRECISION, "HF32")):
-            if (not lhs.dtype.is_fp32() or not rhs.dtype.is_fp32() or not ret_scalar_ty.is_fp32()):
-                # when input and result is not fp32, ignore input_precision (default is ieee)
-                input_precision = self._str_to_dot_input_precision(self.builder.options.default_dot_input_precision)
-
-        if max_num_imprecise_acc is not None:
-            print("max_num_imprecise_acc in tl.dot is not supported on Ascend yet. Thus it is ignored.")
-        max_num_imprecise_acc = 0
+        # max_num_imprecise_acc only applies to fp8 -> fp32 dot on sm_90
+        if max_num_imprecise_acc is None:
+            if lhs.dtype.is_fp8() and rhs.dtype.is_fp8():
+                max_num_imprecise_acc = self.builder.options.max_num_imprecise_acc_default
+            else:
+                max_num_imprecise_acc = 0
+        else:
+            if lhs.dtype.is_fp8() and rhs.dtype.is_fp8() and max_num_imprecise_acc > lhs.shape[-1].value:
+                raise ValueError(
+                    f"max_num_imprecise_acc ({max_num_imprecise_acc}) must be <= K ({lhs.shape[-1].value})")
         return self.tensor(
             self.builder.create_dot(lhs.handle, rhs.handle, acc_handle, input_precision, max_num_imprecise_acc), ret_ty)
 

@@ -73,5 +73,44 @@ def _apply_ascend_patch():
         _compiler_module.parse = _patched_parse
         _compiler_module._ascend_parse_patch_applied = True
 
+    # Patch TritonSemantic.dot for Ascend-specific HF32 guard and
+    # max_num_imprecise_acc warning.
+    from triton.language.semantic import TritonSemantic
+
+    if not getattr(TritonSemantic, "_ascend_dot_patch_applied", False):
+        _original_dot = TritonSemantic.dot
+
+        def _patched_dot(self, lhs, rhs, acc, input_precision, max_num_imprecise_acc, out_dtype):
+            """
+            Monkey Patch for Ascend:
+            - HF32 precision only works for fp32 x fp32.
+              When either input is not fp32, silently fall back
+              to default precision (ieee).
+            - Warn when max_num_imprecise_acc is explicitly set, since
+              Ascend NPU does not support imprecise accumulation.
+            """
+            # HF32 guard: only valid for fp32 x fp32.
+            # When lhs is fp32 ret_scalar_ty is guaranteed fp32 by upstream,
+            # so checking lhs and rhs alone is sufficient.
+            # input_precision is still a string at this point (set by core.py),
+            # so we compare as strings rather than with the MLIR enum.
+            if input_precision is not None and input_precision.lower() == "hf32":
+                if not lhs.dtype.is_fp32() or not rhs.dtype.is_fp32():
+                    input_precision = self.builder.options.default_dot_input_precision
+
+            # Ascend NPU does not support imprecise accumulation.
+            # Force max_num_imprecise_acc to None so the upstream None
+            # branch handles it (via max_num_imprecise_acc_default = 0),
+            # avoiding the fp8 ValueError path which is NVIDIA-only.
+            if max_num_imprecise_acc is not None:
+                print("max_num_imprecise_acc in tl.dot is not supported on Ascend yet. "
+                      "Thus it is ignored.")
+                max_num_imprecise_acc = None
+
+            return _original_dot(self, lhs, rhs, acc, input_precision, max_num_imprecise_acc, out_dtype)
+
+        TritonSemantic.dot = _patched_dot
+        TritonSemantic._ascend_dot_patch_applied = True
+
 
 __all__ = ["do_bench_npu"]

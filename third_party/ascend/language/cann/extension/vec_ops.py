@@ -296,13 +296,13 @@ def sort(ptr, dim=-1, descending=False, _semantic=None):
     """
     sort the input tensor along 'dim'
 
-    param:
-        ptr: tensor, input tensor
-        dim: int or tl.constexpr[int], dimension to sort
-        descending: bool or tl.constexpr[bool], the result is descending or not
-        _builder: ir.builder
-    return:
-        values: tensor, the sorted tensor
+    :param ptr: the tensor to be sorted
+    :type ptr: tensor
+    :param dim: dimension to sort
+    :type dim: int or tl.constexpr[int]
+    :param descending: the result is descending or not
+    :type descending: bool or tl.constexpr[bool]
+
     """
 
     def sort_impl(ptr: tensor, dim: int, descending, builder: ir.builder):

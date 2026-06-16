@@ -697,16 +697,23 @@ CONSTRAINTS = {
     "triton.language.softmax": {
         "constraints": [
             "DataType: Ascend does not support fp64 (hardware limitation).",
-            "``ieee_rounding``: Ascend 不使用 PTX 精确舍入，该参数无效",
+            "``ieee_rounding``: Ascend does not use PTX precise rounding, this parameter is invalid.",
         ],
         "example":
         "triton.language.softmax",
     },
     "triton.language.sort": {
         "constraints": [
+            "Note: tl.sort may have precision problems in big shape or multidimensional shape, more recommendeded to use triton.language.extra.cann.extension.sort."
+        ],
+        "example":
+        "triton.language.sort",
+    },
+    "triton.language.extra.cann.extension.sort": {
+        "constraints": [
             "DataType: Ascend does not support bool, fp64, int32, int64, uint8 (hardware limitation).",
         ],
-        "example": "triton.language.sort",
+        "example": "triton.language.extra.cann.extension.sort",
     },
     "triton.language.split": {
         "constraints": [

@@ -74,7 +74,7 @@ def make_costmodel_cache_key(ttir: str, extra_args: Optional[List[str]]) -> str:
     if extra_args:
         h.update(" ".join(extra_args).encode("utf-8"))
     h.update(b"|")
-    h.update(b"inproc_costmodel_v1")
+    h.update(b"inproc_costmodel_v2_loop_weighted")
     return h.hexdigest()
 
 

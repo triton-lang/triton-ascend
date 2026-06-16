@@ -228,5 +228,82 @@
     "wave_overhead": {
       "description": "Observed aiv_time decreases monotonically with fewer AIV waves: BM=16(3 waves)->BM=32(2 waves)->BM=48(1 wave). BM=64 also 1 wave but with lower program count, making BM=48 and BM=64 near-equal (exception to the monotonic trend). The wave count multiplier N_waves=ceil(N_programs/N_AIV) is applied to per-program cycles to produce kernel-level time."
     }
+  },
+
+  "tilesim": {
+    "description": "Knobs for the tilesim-migrated micro-architecture model (root cause 1/2).",
+    "active_bandwidth_cores": 48,
+    "enable_small_packet_bw": true,
+    "small_packet": {
+      "description": "Global small-packet bandwidth fitting coefficients (tilesim 910B1.yaml pkt_param). Applied to EVERY mover when enable_small_packet_bw is on, mirroring tilesim's single global pkt_param dict; a per-table bandwidth_tables[*].small_packet entry overrides these. Bucket selection: <64B -> 64B, <128B -> 128B, <256B -> 256B; formula bw = b/(a*b + pktBytes/(1024^3)).",
+      "threshold_bytes": 256,
+      "64B": [0.295, 12.061],
+      "128B": [0.272, 16.820],
+      "256B": [0.322, 24.004]
+    },
+    "mutex_groups": {
+      "description": "Hardware units that share a physical pipeline and cannot execute in parallel (tilesim MutexComponents / pipe_exclusive_config). Each clique is an array of costmodel unit names (cube/cube_mte2/fixpipe/vector/vec_mte2/mte3/scalar). 910B: AIV MTE2 (vec load) and MTE3 (vec store) share one pipeline -> they serialize, so the vector-path roofline uses max(vector, vec_mte2 + mte3) instead of max(vector, vec_mte2, mte3).",
+      "cliques": [["vec_mte2", "mte3"]]
+    }
+  },
+
+  "cube_model": {
+    "description": "Cube (GEMM) L1-pipe roofline parameters (tilesim 910B1 cube_config).",
+    "throughput": [16, 32, 16],
+    "repeat_cycles": {"fp32": 2, "fp16": 1, "bf16": 1, "int8": 1},
+    "l0_tile_limit_kb": 32
+  },
+
+  "bandwidth_tables": {
+    "description": "Per-(src:dst[,corenum,pkt]) bandwidth in GB/s, migrated from tilesim bandwidth_910B1.csv (GM->hbm, SHM->l2). Costmodel space names: hbm/l2/l1/l0a/l0b/l0c/ub. Core-dependent movers carry per_core_gbps (1..48); others use bandwidth_gbps.",
+    "hbm:ub": {
+      "per_core_gbps": {"1": 100.9, "2": 64.5, "3": 88.29666667, "4": 77.945, "5": 84.852, "6": 80.82666667, "7": 73.31571429, "8": 68.93375, "9": 73.22888889, "10": 67.586, "11": 71.13727273, "12": 68.08833333, "13": 69.14615385, "14": 72.60785714, "15": 74.99866667, "16": 73.26375, "17": 72.05058824, "18": 70.66833333, "19": 73.27, "20": 68.7705, "21": 68.72190476, "22": 66.07909091, "23": 66.33826087, "24": 65.08041667, "25": 65.3448, "26": 62.61884615, "27": 62.15148148, "28": 58.95964286, "29": 58.23, "30": 56.146, "31": 56.48, "32": 53.3059375, "33": 51.55151515, "34": 49.97264706, "35": 48.51342857, "36": 46.525, "37": 46.06621622, "38": 43.74315789, "39": 42.97435897, "40": 41.5595, "41": 40.44609756, "42": 39.31904762, "43": 38.47302326, "44": 37.03886364, "45": 36.33777778, "46": 35.40717391, "47": 34.83446809, "48": 33.68666667}
+    },
+    "ub:hbm": {
+      "per_core_gbps": {"1": 188.46, "2": 210.53, "3": 117.2733333, "4": 130.295, "5": 108.964, "6": 119.54, "7": 117.280446425, "8": 115.02089285, "9": 112.761339275, "10": 110.5017857, "11": 108.242232125, "12": 105.98267855, "13": 103.723124975, "14": 101.4635714, "15": 100.0593333, "16": 100.373125, "17": 96.81470588, "18": 98.78555556, "19": 90.44578947, "20": 88.896, "21": 83.38571429, "22": 83.77727273, "23": 77.92608696, "24": 76.65166667, "25": 71.0792, "26": 70.58615385, "27": 66.58407407, "28": 66.42357143, "29": 61.56655172, "30": 59.854, "31": 56.1083871, "32": 55.9315625, "33": 53.0, "34": 51.53, "35": 49.45828571, "36": 48.11111111, "37": 46.14540541, "38": 45.26947368, "39": 43.51512821, "40": 42.56075, "41": 40.9797561, "42": 40.19857143, "43": 38.46488372, "44": 38.07454545, "45": 36.684, "46": 36.17608696, "47": 34.70893617, "48": 34.34291667}
+    },
+    "hbm:l1": {"bandwidth_gbps": 135},
+    "hbm:l2": {"bandwidth_gbps": 33.68666667},
+    "l2:hbm": {"bandwidth_gbps": 34.34291667},
+    "l2:ub": {"bandwidth_gbps": 137},
+    "ub:l2": {"bandwidth_gbps": 93},
+    "l2:l1": {"bandwidth_gbps": 221},
+    "l1:l2": {"bandwidth_gbps": 221},
+    "l1:l0a": {"bandwidth_gbps": 441},
+    "l1:l0b": {"bandwidth_gbps": 220.5},
+    "hbm:l0b": {"bandwidth_gbps": 104.5},
+    "l0c:hbm": {"bandwidth_gbps": 70},
+    "l0c:l2": {"bandwidth_gbps": 70},
+    "l0c:l1": {"bandwidth_gbps": 70},
+    "hbm:l2_agg": {"bandwidth_gbps": 1638.4}
+  },
+
+  "vec_cycle_tables": {
+    "description": "Per-(intrinsic,dtype) vector cycle triplets {compute,head,interval}, migrated from tilesim vec_cycle_910B1.csv. dtype keys fp16 (covers fp16/bf16) and fp32. cycles = compute * repeats + startup, repeats = ceil(numElems*elemBytes/256).",
+    "VADD":      {"fp16": {"compute": 2, "head": 13, "interval": 18}, "fp32": {"compute": 2, "head": 13, "interval": 18}},
+    "VSUB":      {"fp16": {"compute": 2, "head": 13, "interval": 18}, "fp32": {"compute": 2, "head": 13, "interval": 18}},
+    "VMUL":      {"fp16": {"compute": 2, "head": 13, "interval": 19}, "fp32": {"compute": 2, "head": 13, "interval": 19}},
+    "VDIV":      {"fp16": {"compute": 8, "head": 13, "interval": 25}, "fp32": {"compute": 4, "head": 13, "interval": 25}},
+    "VMAX":      {"fp16": {"compute": 2, "head": 14, "interval": 16}, "fp32": {"compute": 2, "head": 14, "interval": 16}},
+    "VMIN":      {"fp16": {"compute": 2, "head": 14, "interval": 16}, "fp32": {"compute": 2, "head": 14, "interval": 16}},
+    "VEXP":      {"fp16": {"compute": 4, "head": 13, "interval": 24}, "fp32": {"compute": 2, "head": 13, "interval": 24}},
+    "VSQRT":     {"fp16": {"compute": 2, "head": 14, "interval": 25}, "fp32": {"compute": 2, "head": 14, "interval": 25}},
+    "VABS":      {"fp16": {"compute": 1, "head": 13, "interval": 16}, "fp32": {"compute": 1, "head": 14, "interval": 16}},
+    "RELU":      {"fp16": {"compute": 1, "head": 14, "interval": 16}, "fp32": {"compute": 1, "head": 14, "interval": 16}},
+    "LOG":       {"fp16": {"compute": 2, "head": 26, "interval": 14}, "fp32": {"compute": 2, "head": 26, "interval": 14}},
+    "VSEL":      {"fp16": {"compute": 2, "head": 13, "interval": 13}, "fp32": {"compute": 2, "head": 13, "interval": 14}},
+    "VBRCB":     {"fp16": {"compute": 0, "head": 0, "interval": 18}, "fp32": {"compute": 0, "head": 0, "interval": 18}},
+    "VCMPV_NE":  {"fp16": {"compute": 2, "head": 14, "interval": 22}, "fp32": {"compute": 2, "head": 14, "interval": 22}},
+    "VCMPV_GE":  {"fp16": {"compute": 2, "head": 14, "interval": 22}, "fp32": {"compute": 2, "head": 14, "interval": 22}},
+    "CMPV_EQ":   {"fp16": {"compute": 2, "head": 13, "interval": 22}, "fp32": {"compute": 2, "head": 13, "interval": 22}},
+    "VCGADD":    {"fp32": {"compute": 1, "head": 14, "interval": 24}},
+    "VCGMAX":    {"fp32": {"compute": 1, "head": 14, "interval": 17}},
+    "VCGMIN":    {"fp32": {"compute": 1, "head": 14, "interval": 17}},
+    "VREDUCEV2": {"fp32": {"compute": 14, "head": 14, "interval": 20}},
+    "VCOPY":     {"fp16": {"compute": 1, "head": 11, "interval": 13}, "fp32": {"compute": 1, "head": 11, "interval": 13}},
+    "CONV_F322F16": {"fp32": {"compute": 1, "head": 16, "interval": 14}},
+    "CONV_F162F32": {"fp16": {"compute": 2, "head": 13, "interval": 15}},
+    "CONV_F322BF16": {"fp32": {"compute": 1, "head": 14, "interval": 16}},
+    "CONV_BF162F32": {"fp16": {"compute": 2, "head": 14, "interval": 18}}
   }
 }

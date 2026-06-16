@@ -85,6 +85,37 @@ def EstimateCyclesOpInterface : OpInterface<"EstimateCyclesOpInterface"> {
       /*args=*/(ins),
       /*methodBody=*/"",
       /*defaultImplementation=*/"return 1;"
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Get the source memory space for a transfer operation, used to select
+        the per-(src,dst,corenum) bandwidth (tilesim migration, root cause 1).
+        Transfer ops override this from their optional ``src_space`` attribute;
+        the default ("hbm") preserves legacy behaviour when absent. Named
+        ``getSrcMemSpace`` (not ``getSrcSpace``) to avoid colliding with the
+        MLIR auto-generated ``StrAttr`` value accessor ``getSrcSpace()``.
+      }],
+      /*retTy=*/"llvm::StringRef",
+      /*methodName=*/"getSrcMemSpace",
+      /*args=*/(ins),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        return "hbm";
+      }]
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Get the destination memory space for a transfer operation.
+        Transfer ops override this; default "ub" preserves legacy behaviour.
+        Named ``getDstMemSpace`` to avoid the ``getDstSpace()`` attr collision.
+      }],
+      /*retTy=*/"llvm::StringRef",
+      /*methodName=*/"getDstMemSpace",
+      /*args=*/(ins),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        return "ub";
+      }]
     >
   ];
   

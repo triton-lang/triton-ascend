@@ -1244,8 +1244,13 @@ LogicalResult ReduceConverter::convertToTargetOpExtended(
 }
 
 bool ScanConverter::isReductionOpSupported(Operation *reductionOp) const {
-  return isa<arith::AddFOp, arith::AddIOp, arith::MulFOp, arith::MulIOp>(
-      reductionOp);
+  // cummax/cummin: float max/min (both NaN-propagation variants) and signed
+  // integer max/min map to the named template path. Unsigned integer max/min
+  // (MaxUIOp/MinUIOp) are intentionally excluded so they fall back to the
+  // generic scalar scan (the template treats integers as signed).
+  return isa<arith::AddFOp, arith::AddIOp, arith::MulFOp, arith::MulIOp,
+             arith::MaximumFOp, arith::MaxNumFOp, arith::MinimumFOp,
+             arith::MinNumFOp, arith::MaxSIOp, arith::MinSIOp>(reductionOp);
 }
 
 LogicalResult
@@ -1261,10 +1266,23 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
   llvm::SmallString<64> funcName;
   auto rop = reductionOps.front();
   if (this->isReductionOpSupported(reductionOps.front())) {
+    // For cummax/cummin, propagateNan distinguishes the NaN semantics: the
+    // *imum variants (Maximum/Minimum) propagate NaN like torch; the *num
+    // variants (MaxNum/MinNum) ignore it. Integer max/min are NaN-free.
+    bool propagateNan = true;
+    bool isMinMax = false;
     if (isa<arith::AddFOp, arith::AddIOp>(rop)) {
       funcName = "triton_cumsum";
     } else if (isa<arith::MulFOp, arith::MulIOp>(rop)) {
       funcName = "triton_cumprod";
+    } else if (isa<arith::MaximumFOp, arith::MaxNumFOp, arith::MaxSIOp>(rop)) {
+      funcName = "triton_cummax";
+      propagateNan = isa<arith::MaximumFOp>(rop);
+      isMinMax = true;
+    } else if (isa<arith::MinimumFOp, arith::MinNumFOp, arith::MinSIOp>(rop)) {
+      funcName = "triton_cummin";
+      propagateNan = isa<arith::MinimumFOp>(rop);
+      isMinMax = true;
     }
 
     auto moduleOp = op->getParentOfType<ModuleOp>();
@@ -1274,8 +1292,13 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
     auto loc = op.getLoc();
     auto src = adaptor.getOperands().front();
     auto resTy = op.getResult().front().getType();
-    auto libFnType = rewriter.getFunctionType(
-        {src.getType(), rewriter.getI32Type(), rewriter.getI1Type()}, {resTy});
+    // cummax/cummin take a trailing propagateNan flag; cumsum/cumprod do not.
+    SmallVector<Type> argTypes{src.getType(), rewriter.getI32Type(),
+                               rewriter.getI1Type()};
+    if (isMinMax) {
+      argTypes.push_back(rewriter.getI1Type());
+    }
+    auto libFnType = rewriter.getFunctionType(argTypes, {resTy});
     auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
 
     SymbolTable symTab(moduleOp);
@@ -1292,9 +1315,13 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
     Value axis = rewriter.create<arith::ConstantIntOp>(loc, scanAxis, 32);
     Value reverseVal =
         rewriter.create<arith::ConstantIntOp>(loc, scanReverse, 1);
+    SmallVector<Value> callOperands{src, axis, reverseVal};
+    if (isMinMax) {
+      callOperands.push_back(
+          rewriter.create<arith::ConstantIntOp>(loc, propagateNan, 1));
+    }
     auto callOp = rewriter.create<func::CallOp>(
-        loc, funcOp.getSymNameAttr(), TypeRange({resTy}),
-        ValueRange({src, axis, reverseVal}));
+        loc, funcOp.getSymNameAttr(), TypeRange({resTy}), callOperands);
 
     rewriter.replaceOp(op, callOp);
 

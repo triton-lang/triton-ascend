@@ -1,4 +1,4 @@
-# Governance
+# Governance Mechanism
 
 ## Mission
 
@@ -10,7 +10,7 @@ As an important component of the Triton ecosystem, the Triton-Ascend project is 
 - **Contribution-Oriented**: Membership is based on individual capability and contribution, not tied to employers
 - **Community-Driven**: Encourage broad participation, respect diverse viewpoints, and reach consensus through discussion and voting
 
-## Governance Mechanism
+## Governance Structure
 
 Triton-Ascend is an open-source project under the Triton community, with role appointments ultimately decided by the Triton community. The project adopts a layered technical governance structure:
 

@@ -1,4 +1,4 @@
-# Triton Ascend Contribution Guide
+# Contribution Guide
 
 - [Getting Started](#getting-started.md)
 - [Developer Certificate of Origin (DCO)](#DCO.md)

@@ -1,0 +1,55 @@
+name: "Stale issue & PR cleanup"
+
+on:
+  schedule:
+    - cron: "37 3 * * *" # Runs daily at UTC 3:37
+  workflow_dispatch:       # Manual trigger supported
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          # Issues
+          days-before-issue-stale: 30
+          days-before-issue-close: 14
+          stale-issue-label: "stale"
+          stale-issue-message: >
+            This issue has been automatically marked as **stale** because it has not had
+            recent activity in the past 30 days. It will be closed in 14 days if no further
+            activity occurs. To keep it open, simply leave a comment and the stale label
+            will be removed automatically.
+          close-issue-message: >
+            This issue has been automatically closed due to prolonged inactivity.
+            If the problem still exists, feel free to reopen or create a new issue.
+
+          # PRs
+          days-before-pr-stale: 45
+          days-before-pr-close: 14
+          stale-pr-label: "stale"
+          stale-pr-message: >
+            This PR has been automatically marked as **stale** because it has not had
+            recent activity in the past 45 days. It will be closed in 14 days if no further
+            activity occurs. To keep it open, rebase or leave a comment and the stale label
+            will be removed automatically.
+          close-pr-message: >
+            This PR has been automatically closed due to prolonged inactivity.
+            If it still needs to be merged, feel free to reopen.
+
+          # Labels to exempt from stale checks
+          exempt-issue-labels: "P0,bug,enhancement,community-task"
+          exempt-pr-labels: "P0,WIP"
+
+          # Auto-remove stale label when activity occurs
+          remove-stale-when-updated: true
+
+          # Use last-update time instead of creation time
+          days-before-stale-override: true
+
+          # Per-run limit to avoid closing too many at once
+          operations-per-run: 30

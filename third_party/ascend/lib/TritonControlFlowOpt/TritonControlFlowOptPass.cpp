@@ -1967,6 +1967,48 @@ addIfBlockComponents(const BlockPtrInfo &thenParts,
   return success();
 }
 
+static bool hasIfComponent(ArrayRef<IfComponent> components,
+                           IfComponentKind kind, unsigned dim = 0) {
+  return llvm::any_of(components, [&](const IfComponent &component) {
+    return component.kind == kind && component.dim == dim;
+  });
+}
+
+static void addIfComponentIfMissing(SmallVectorImpl<IfComponent> &components,
+                                    IfComponent component) {
+  if (!hasIfComponent(components, component.kind, component.dim))
+    components.push_back(component);
+}
+
+static LogicalResult
+addLoopCarriedIfComponents(const CFPtrInfo &info,
+                           SmallVectorImpl<IfComponent> &components) {
+  if (info.kind == PtrKind::Tensor) {
+    Type offsetType = hasStructuredScalarOffset(info.tensor)
+                          ? info.tensor.scalarOffset.getType()
+                          : info.tensor.offset.getType();
+    addIfComponentIfMissing(
+        components, {IfComponentKind::TensorOffset, 0, offsetType});
+    return success();
+  }
+
+  for (auto [idx, offset] : llvm::enumerate(info.block.offsets)) {
+    addIfComponentIfMissing(
+        components,
+        {IfComponentKind::BlockOffset, static_cast<unsigned>(idx),
+         offset.getType()});
+  }
+  return success();
+}
+
+// Nested loop results may look like their init pointer during planning, but
+// the real result is produced by the loop-carried components after rewriting.
+static bool isNestedForResult(Value value, const RewriteEnv &env) {
+  Value mapped = remapValue(value, env);
+  auto result = dyn_cast<OpResult>(mapped);
+  return result && isa<scf::ForOp>(result.getOwner());
+}
+
 static FailureOr<CFPtrInfo>
 analyzePtrForIfPlanning(Value value, const RewriteEnv &env,
                         OpBuilder &builder, Location loc);
@@ -2180,6 +2222,11 @@ static LogicalResult rewriteIfOp(scf::IfOp ifOp, OpBuilder &builder,
     } else {
       if (failed(addIfBlockComponents(info.thenInfo.block,
                                       info.elseInfo.block, info.components)))
+        continue;
+    }
+    if (isNestedForResult(thenYield.getOperand(idx), env) ||
+        isNestedForResult(elseYield.getOperand(idx), env)) {
+      if (failed(addLoopCarriedIfComponents(info.thenInfo, info.components)))
         continue;
     }
     pointerInfos.push_back(info);

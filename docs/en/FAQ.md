@@ -76,3 +76,23 @@ A: There is an integrated performance analysis tool (profiler). For details, see
 **Q: How to resolve "UB Overflow" errors during compilation?**
 
 A: UB Overflow is a common issue in Triton-Ascend development. For details, see [UB Overflow Troubleshooting Guide](./debug_guide/ub_overflow.md).
+
+## 8. Triton Usage Constraints
+
+**Q: What are the usage constraints for pointer parameters in Triton kernels?**
+
+A: The Triton-Ascend compiler assumes that all externally input pointer parameters essentially point to different memory regions and cannot identify pointer alias scenarios. When multiple pointer parameters actually point to the same memory at runtime but this fact cannot be known at compile time, it may result in optimization failures or abnormal runtime results. For example:
+
+```Python
+@triton.jit
+def func(ptr0, ptr1):
+    # load from ptr0 and do something
+    # store to ptr0
+    # load from ptr1 and do something
+    # store to ptr1
+
+in_out_tensor = torch.randn(shape)
+func[grid](in_out_tensor, in_out_tensor)
+```
+
+In the above code, `ptr0` and `ptr1` actually point to the same memory (i.e., the same `in_out_tensor`), but the compiler cannot identify this pointer alias relationship. Therefore, passing the same tensor as multiple pointer parameters is not supported, and the corresponding kernel will not be able to enable related optimizations.

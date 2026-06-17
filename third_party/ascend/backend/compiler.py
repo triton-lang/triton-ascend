@@ -27,6 +27,7 @@ import re
 import shlex
 import subprocess
 import tempfile
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -63,13 +64,25 @@ from triton.backends.compiler import (
     GPUTarget,
 )
 from triton.runtime import driver
-from triton.runtime.cache import get_dump_manager
+from triton.runtime.cache import _base32, get_dump_manager
 from triton.tools.get_ascend_devices import is_compile_on_910_95
 
 
 # TODO: materialize the concrete min shape
 def min_dot_size(target: GPUTarget):
     return lambda lhsType, rhsType: (1, 1, 1)
+
+
+def _get_dump_paths(hash_key: str, src_path: str, dst_path: str) -> Tuple[str, str]:
+    """
+    If TRITON_DUMP_DIR is set, return paths under that directory.
+    Otherwise, return the original src_path and dst_path.
+    """
+    dump_dir_env = os.getenv("TRITON_DUMP_DIR")
+    if dump_dir_env:
+        dump_dir = os.path.join(dump_dir_env, _base32(hash_key))
+        return (os.path.join(dump_dir, os.path.basename(src_path)), os.path.join(dump_dir, os.path.basename(dst_path)))
+    return (src_path, dst_path)
 
 
 def make_ttir(mod, metadata, opt):
@@ -108,7 +121,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         enable_nd2nz_on_vector = metadata["enable_nd2nz_on_vector"]
         enable_select_analysis = metadata["enable_select_analysis"]
         compile_on_910_95 = metadata["compile_on_910_95"]
-        force_simt_template = metadata["force_simt_template"]
+        compile_mode = _validate_compile_mode(metadata.get("compile_mode", "simd"))
         enable_sync_block_lock = metadata["enable_sync_block_lock"]
         enable_mask_fallback_conversion = metadata["enable_mask_fallback_conversion"]
         optimize_dynamic_offset = metadata["optimize_dynamic_offset"]
@@ -128,17 +141,17 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             passes.common.add_canonicalizer(pm)
 
         ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
-        ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, force_simt_template,
+        ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, compile_mode,
                                                                enable_sync_block_lock)
         ascend.passes.ttir.add_triton_to_annotation(pm)
-        ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, force_simt_template)
+        ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, compile_mode)
         ascend.passes.ttir.add_triton_to_hivm(pm)
         ascend.passes.ttir.add_triton_to_hfusion(pm)
         ascend.passes.ttir.add_triton_to_llvm(pm)
         ascend.passes.ttir.add_bubble_up_operation(pm)
         ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
         ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, enable_nd2nz_on_vector, enable_select_analysis,
-                                                compile_on_910_95)
+                                                compile_on_910_95, compile_mode)
         if metadata["enable_dynamic_cv_pipeline"]:
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
 
@@ -157,9 +170,10 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         if opt.debug:
             # Print the equivalent triton-opt command line so the pass
             # pipeline can be reproduced and debugged outside of Python.
+            print_src_path, print_dst_path = _get_dump_paths(metadata["hash"], src_path, dst_path)
             cmd = [
-                _get_triton_opt_path(), src_path, f"--pass-pipeline={pm.get_pipeline_str()}", "--mlir-print-debuginfo",
-                "-o", dst_path
+                _get_triton_opt_path(), print_src_path, f"--pass-pipeline={pm.get_pipeline_str()}",
+                "--mlir-print-debuginfo", "-o", print_dst_path
             ]
             print(f"[DEBUG] cmd list: {shlex.join(cmd)}")
 
@@ -528,6 +542,14 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if opt.debug:
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
+        compile_mode = _validate_compile_mode(metadata.get("compile_mode", "simd"))
+        if compile_mode == "simd_simt":
+            _compile_option_list += ["--enable-simd-simt-mix-compile"]
+            num_warps = metadata.get("num_warps", opt.num_warps)
+            _compile_option_list += [f"--num-warps={num_warps}"]
+            warp_size = metadata.get("warp_size", opt.warp_size)
+            _compile_option_list += [f"--threads-per-warp={warp_size}"]
+
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
         vf_merge_level = metadata["vf_merge_level"]
         if vf_merge_level is not None and vf_merge_level != 1:
@@ -538,7 +560,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             cmd_list += [f"--hfusion-enable-multiple-consumer-fusion={hfusion_enable_multiple_consumer_fusion}"]
 
         if opt.debug:
-            print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
+            print_cmd_list = cmd_list.copy()
+            print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
+            print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
         try:
             ret = subprocess.run(cmd_list, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
@@ -732,9 +756,13 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if opt.debug:
             _compile_option_list += ["--mlir-print-ir-after-failure"]
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
+
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
+
         if opt.debug:
-            print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
+            print_cmd_list = cmd_list.copy()
+            print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
+            print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
         try:
             ret = subprocess.run(cmd_list, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
@@ -770,6 +798,16 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
 def get_libdevice():
     current = os.path.dirname(__file__)
     return os.path.join(current, "lib/libdevice.10.bc")
+
+
+VALID_COMPILE_MODES = ("simd", "simd_simt", "simt_template", "unstructured_in_simt", "simt_only")
+
+
+def _validate_compile_mode(compile_mode):
+    if compile_mode not in VALID_COMPILE_MODES:
+        valid_modes = ", ".join(VALID_COMPILE_MODES)
+        raise ValueError(f"Invalid compile_mode={compile_mode!r}. Expected one of: {valid_modes}.")
+    return compile_mode
 
 
 @dataclass(frozen=True)
@@ -844,6 +882,7 @@ class NPUOptions:
 
     stream: int = None
     parallel_mode: str = "simd"
+    # Deprecated: use compile_mode="simt_template" instead.
     force_simt_only: bool = False
     force_simt_template: bool = False
     enable_sync_block_lock: bool = False
@@ -852,8 +891,13 @@ class NPUOptions:
     # enable_bishengir_simt_optimization is passed as
     # -enable-bishengir-simt-optimization flag to bishengir-compile.
     enable_bishengir_simt_optimization: int = 000
-    # compile_mode: "simd" (default), "unstructured_in_simt", "simt_only"
-    # When compile_mode is provided, it automatically sets other fields
+    # compile_mode: "simd" (default), "simd_simt", "simt_template", "simt_only"
+    #   - "simd":          pure SIMD path (default)
+    #   - "simd_simt":     unstructured access → attr marking → hfusion.gather_load/scatter_store
+    #   - "simt_template": unstructured access → attr marking → SIMT template call
+    #   - "simt_only":     pure SIMT path
+    # "unstructured_in_simt" is kept as an alias for "simt_template" for backward compatibility.
+    # compile_mode is passed directly to UnstructurePass and LinalgPass as --compile-mode.
     compile_mode: str = "simd"
     mix_mode: str = ""
     simt_stack_limit: int = None
@@ -872,21 +916,55 @@ class NPUOptions:
     disable_fma: bool = False
 
     def __post_init__(self):
+        # Backward compatibility: force_simt_template / force_simt_only overrides compile_mode
+        if self.force_simt_template:
+            warnings.warn(
+                "force_simt_template is deprecated, use compile_mode='simt_template' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            object.__setattr__(self, "compile_mode", "simt_template")
+
+        if self.force_simt_only:
+            warnings.warn(
+                "force_simt_only is deprecated, use compile_mode='simt_only' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            object.__setattr__(self, "compile_mode", "simt_only")
+
+        _validate_compile_mode(self.compile_mode)
+
         # Parse compile_mode and set related fields
         if self.compile_mode == "simd":
             object.__setattr__(self, "parallel_mode", "simd")
-        elif self.compile_mode == "unstructured_in_simt":
-            # For historical compatibility reasons, force_simt_template will still be used.
-            object.__setattr__(self, "force_simt_template", True)
+            if self.shared_mem_dynamic_size is None:
+                object.__setattr__(self, "shared_mem_dynamic_size", 221184)
+        elif self.compile_mode == "simd_simt":
+            if not self.compile_on_910_95:
+                raise ValueError(f"compile_mode='{self.compile_mode}' is only supported on 910_95. "
+                                 "A2/A3 targets do not support SIMT mix compile.")
+            object.__setattr__(self, "parallel_mode", "mix_simd_simt")
+            if self.shared_mem_dynamic_size is None:
+                object.__setattr__(self, "shared_mem_dynamic_size", 221184)
+        elif self.compile_mode in ("simt_template", "unstructured_in_simt"):
+            if self.compile_mode == "unstructured_in_simt":
+                warnings.warn(
+                    "compile_mode='unstructured_in_simt' is deprecated, use compile_mode='simt_template' instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                object.__setattr__(self, "compile_mode", "simt_template")
+            if not self.compile_on_910_95:
+                raise ValueError(f"compile_mode='{self.compile_mode}' is only supported on 910_95. "
+                                 "A2/A3 targets do not support SIMT mix compile.")
+            if self.shared_mem_dynamic_size is None:
+                object.__setattr__(self, "shared_mem_dynamic_size", 221184)
         elif self.compile_mode == "simt_only":
             object.__setattr__(self, "force_simt_only", True)
             object.__setattr__(self, "parallel_mode", "simt")
-
-        if self.force_simt_only:
             if self.shared_mem_dynamic_size is None:
                 object.__setattr__(self, "shared_mem_dynamic_size", 122880)
-        else:
-            object.__setattr__(self, "shared_mem_dynamic_size", 221184)
 
     def hash(self):
         key = "_".join([f"{name}-{val}" for name, val in self.__dict__.items()])

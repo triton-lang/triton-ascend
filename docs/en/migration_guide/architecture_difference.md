@@ -23,7 +23,24 @@ When calling Triton kernel functions, you can set the **launch** parameter to co
 triton_gelu[n, 1, 1](...)  # The first parameter indicates the number of cores in use. n indicates that n cores are in use.
 ```
 
-By optimizing the number of cores, you can fully schedule and utilize all computing resources, thereby maximizing the degree of parallelism (DOP) and throughput. Note that the number of cores in the current version must be less than or equal to 65,535.
+By optimizing the number of cores, you can fully schedule and utilize all computing resources, thereby maximizing the degree of parallelism (DOP) and throughput. Without `auto-blockify` (see below), the number of cores in the launched grid must be less than or equal to 65,535.
+
+### Auto-Blockify: lifting the 65,535 logical-block limit
+
+Upstream Triton on NVIDIA GPUs treats the grid as a pure logical dimension — `n` logical blocks map 1:1 to `n` hardware blocks, and the runtime expands the work across SMs without any per-block iteration. On Ascend, the strict physical-core binding above caps the launchable grid at 65,535, which is restrictive for kernels with millions of logical work items (autotuned reduce/scan, megablocks-style sparse kernels, etc.).
+
+`auto-blockify` (the `SIMTAutoBlockify` compiler pass plus a matching runtime cap) removes that limit by treating the grid as logical at compile time and folding it onto the physical cores at launch:
+
+- **Compile time**: a Triton pass wraps the kernel body in an `scf.for` over per-block work, indexed by `gpu.linear_block_id`. The chunk size is `ceildiv(logical_block_count, physical_core_count)`, so each physical block iterates through `chunk` logical block IDs.
+- **Runtime**: the block-count argument passed to the launcher is clamped from the logical grid down to `physical_core_count`, mirroring the compile-time fold.
+
+The two sides share the same gating metadata (`enable_auto_blockify` on `NPUOptions`, falling back to `TRITON_ALL_BLOCKS_PARALLEL`), so the compile-time loop wrap and the runtime cap are always in sync — a kernel never compiles for one mode and launches for another.
+
+Practical implications when porting a GPU Triton kernel:
+
+- A grid larger than 65,535 just works; no need to manually fold the outer dimension into the kernel body.
+- Logical blocks must remain order-independent (the loop visits them in chunk order). Kernels that assume strict logical block-id ordering within a single launch (e.g., explicit cross-block synchronization on a particular order) need to be rewritten.
+- Per-block workspace allocations become `O(physical_core_count)` rather than `O(logical_block_count)`, because workspace is reused across iterations of the inner `scf.for`.
 
 ## Single-Core Data Transfer Strategy
 

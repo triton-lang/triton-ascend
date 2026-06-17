@@ -1,0 +1,150 @@
+name: Restricted Files Labeler
+
+on:
+  pull_request_target:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  protected-files:
+    name: restricted files labeler
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find files outside allowed paths
+        id: scan-files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          allowed_dirs=(
+            ".github/"
+            "docker/"
+            "docs/"
+            "third_party/"
+          )
+
+          allowed_files=(
+            ".readthedocs.yaml"
+            "CONTRIBUTING.md"
+            "CONTRIBUTING_zh.md"
+            "README.md"
+            "README_zh.md"
+            "RELEASE.md"
+            "SECURITYNOTE.md"
+            "SECURITYNOTE_zh.md"
+            "requirements.txt"
+            "requirements_dev.txt"
+            "safe_compile.cmake"
+          )
+
+          mapfile -t changed_files < <(
+            gh api --paginate \
+              "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" \
+              --jq '.[].filename'
+          )
+
+          violations=()
+          for changed_file in "${changed_files[@]}"; do
+            allowed=false
+
+            for allowed_file in "${allowed_files[@]}"; do
+              if [[ "${changed_file}" == "${allowed_file}" ]]; then
+                allowed=true
+                break
+              fi
+            done
+
+            if [[ "${allowed}" == "false" ]]; then
+              for allowed_dir in "${allowed_dirs[@]}"; do
+                if [[ "${changed_file}" == "${allowed_dir}"* ]]; then
+                  allowed=true
+                  break
+                fi
+              done
+            fi
+
+            if [[ "${allowed}" == "false" ]]; then
+              violations+=("${changed_file}")
+            fi
+          done
+
+          if (( ${#violations[@]} > 0 )); then
+            echo "Changes outside the allowed repository-construction paths need committer attention."
+            echo "Allowed directories:"
+            printf '  - %s\n' "${allowed_dirs[@]}"
+            echo "Allowed files:"
+            printf '  - %s\n' "${allowed_files[@]}"
+            echo "The following changed file(s) are outside the allowed paths:"
+            printf '  - %s\n' "${violations[@]}"
+
+            {
+              echo "has_restricted_files=true"
+              echo "restricted_files<<EOF"
+              printf '%s\n' "${violations[@]}"
+              echo "EOF"
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "All changed files are within the allowed repository-construction paths."
+          echo "has_restricted_files=false" >> "${GITHUB_OUTPUT}"
+
+      - name: Apply restricted files label
+        if: steps.scan-files.outputs.has_restricted_files == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          RESTRICTED_FILES: ${{ steps.scan-files.outputs.restricted_files }}
+          RESTRICTED_FILES_LABEL: restricted-files
+        run: |
+          set -euo pipefail
+
+          echo "Applying label ${RESTRICTED_FILES_LABEL} for files:"
+          printf '%s\n' "${RESTRICTED_FILES}"
+
+          gh api \
+            --method POST \
+            "repos/${REPOSITORY}/issues/${PR_NUMBER}/labels" \
+            -f "labels[]=${RESTRICTED_FILES_LABEL}" \
+            >/dev/null
+
+          echo "Applied label: ${RESTRICTED_FILES_LABEL}"
+
+      - name: Remove restricted files label
+        if: steps.scan-files.outputs.has_restricted_files == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+          RESTRICTED_FILES_LABEL: restricted-files
+        run: |
+          set -euo pipefail
+
+          mapfile -t current_labels < <(
+            gh api \
+              "repos/${REPOSITORY}/issues/${PR_NUMBER}/labels" \
+              --jq '.[].name'
+          )
+
+          for label in "${current_labels[@]}"; do
+            if [[ "${label}" == "${RESTRICTED_FILES_LABEL}" ]]; then
+              gh api \
+                --method DELETE \
+                "repos/${REPOSITORY}/issues/${PR_NUMBER}/labels/${RESTRICTED_FILES_LABEL}" \
+                >/dev/null
+              echo "Removed label: ${RESTRICTED_FILES_LABEL}"
+              exit 0
+            fi
+          done
+
+          echo "Label ${RESTRICTED_FILES_LABEL} was not present."

@@ -1,4 +1,4 @@
-# Community Roadmap Writing and Publishing Guide
+# Roadmap Guide
 Use GitHub Issues to track and manage each organization's plans and mid-to-long-term goals. This document provides references and specifications for community projects on writing Roadmap-type Issues, to help create and maintain high-quality Roadmaps.
 
 Below is a complete Roadmap Issue example demonstrating the practical application of all recommended elements. It is recommended to review this example first for an overall impression, then read the detailed specification instructions that follow.

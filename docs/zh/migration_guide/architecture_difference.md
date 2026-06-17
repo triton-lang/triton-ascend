@@ -23,7 +23,24 @@ NPU:Vector核，Cube核属于多个物理核，不同代际硬件核数不同，
 triton_gelu[n, 1, 1](...)  # 第一个参数表示使用的核数，n表示使用n个核
 ```
 
-通过对核数的调优，可实现对所有计算资源的充分调度和利用，从而最大化并行度与吞吐量。注意，当前版本核数需小于等于65535。
+通过对核数的调优，可实现对所有计算资源的充分调度和利用，从而最大化并行度与吞吐量。未启用 `auto-blockify`（见下节）时，发射 grid 的核数需小于等于 65,535。
+
+### auto-blockify：突破 65,535 逻辑块上限
+
+社区 Triton 在 NVIDIA GPU 上把 grid 视为纯逻辑维度 —— `n` 个逻辑块按 1:1 映射到 `n` 个硬件块，运行时由硬件分发到各 SM，每个块不需要内部循环。昇腾上由于上节描述的物理核强绑定，可启动的 grid 上限被卡在 65,535，对含百万级逻辑工作项的 kernel（autotune 后的 reduce/scan、megablocks 风格的稀疏 kernel 等）过于严苛。
+
+`auto-blockify`（`SIMTAutoBlockify` 编译期 pass + 配套的运行期 cap）通过"编译期视为逻辑、启动期折叠到物理核"消除该限制：
+
+- **编译期**：Triton pass 把 kernel 函数体包进一层 `scf.for`，迭代变量由 `gpu.linear_block_id` 提供。chunk 大小 = `ceildiv(logical_block_count, physical_core_count)`，每个物理块依次跑 `chunk` 个逻辑 block id。
+- **运行期**：传给 launcher 的 block-count 参数从逻辑 grid clamp 到 `physical_core_count`，与编译期的折叠保持一致。
+
+两侧共享同一份 gating 元数据（`NPUOptions` 上的 `enable_auto_blockify`，未传时回落到 `TRITON_ALL_BLOCKS_PARALLEL`），编译期循环包与运行期 cap 永远同步 —— 不存在 kernel 按一种模式编译却按另一种模式启动的情形。
+
+从 GPU Triton kernel 移植时的注意事项：
+
+- grid 大于 65,535 可直接运行，无需手动把外层维度折叠进 kernel 函数体。
+- 逻辑块之间必须保持顺序无关（循环按 chunk 顺序访问）。依赖严格逻辑 block id 顺序的 kernel（如基于特定顺序的跨块同步）需要改写。
+- per-block workspace 分配从 `O(logical_block_count)` 降到 `O(physical_core_count)`，因为 workspace 在内层 `scf.for` 各次迭代间复用。
 
 ## 单核数据搬运策略
 

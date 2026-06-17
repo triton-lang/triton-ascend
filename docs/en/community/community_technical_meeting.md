@@ -1,4 +1,4 @@
-# Community Technical Meeting
+# Technical Meeting
 
 Triton-Ascend holds regular community technical meetings as the core decision-making mechanism for project governance. Major matters such as technical direction, large-scale proposal reviews, and version releases are discussed and decided in technical meetings, with votes cast by all `Maintainers`. Meetings are open to all community members, and anyone can participate in discussions, but decisions and voting are done only by `Maintainers`.
 

@@ -1,4 +1,4 @@
-# Release Policy
+# Version Release Policy
 
 ## Version Numbering
 

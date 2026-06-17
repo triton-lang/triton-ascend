@@ -104,6 +104,9 @@ def _build_mlir_attrs_from_scope_attrs(builder, scope_attrs):
     for k, v in scope_attrs.items():
         if k == "core_mode":
             mlir_attrs.update(_handle_core_mode_attr(builder, v))
+        elif k == "vec_mode":
+            if v is not None:
+                mlir_attrs["vec_mode"] = builder.get_string_attr(v)
         elif k == "noinline":
             if not v:
                 mlir_attrs.pop("noinline")

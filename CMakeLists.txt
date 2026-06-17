@@ -299,6 +299,13 @@ if(TRITON_BUILD_PYTHON_MODULE)
   else()
     target_link_libraries(triton PRIVATE z)
   endif()
+  # Force-include HIVM utils archive (static linker is single-pass).
+  if(TARGET BiShengIRHIVMUtils)
+    target_link_libraries(triton PRIVATE
+      "-Wl,--whole-archive"
+      BiShengIRHIVMUtils
+      "-Wl,--no-whole-archive")
+  endif()
   target_link_options(triton PRIVATE ${LLVM_LDFLAGS})
   add_library(entryC SHARED ${PROJECT_SOURCE_DIR}/lib/runtime/libentry/libentry.cpp)
 endif()

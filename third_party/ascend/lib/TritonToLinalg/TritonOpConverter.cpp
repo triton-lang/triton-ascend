@@ -2732,6 +2732,8 @@ IndirectLoadConverter::matchAndRewrite(triton::ascend::IndirectLoadOp op, OpAdap
   auto libFnType = rewriter.getFunctionType(inputTypes, {resTy});
   auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
   SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
+  auto isVolatileAttr = rewriter.getBoolAttr(op.getIsVolatile());
+  funcOp->setAttr("isVolatile", isVolatileAttr);
 
   rewriter.setInsertionPoint(op);
   SmallVector<Value> inputVals({src, offsets});
@@ -2740,6 +2742,7 @@ IndirectLoadConverter::matchAndRewrite(triton::ascend::IndirectLoadOp op, OpAdap
   auto callOp = rewriter.create<func::CallOp>(loc, funcOp.getSymNameAttr(),
                                               TypeRange({resTy}),
                                               inputVals);
+  callOp->setAttr("isVolatile", isVolatileAttr);
   rewriter.replaceOp(op, callOp);
   return success();
 }

@@ -82,6 +82,8 @@ SmallVector<OpFoldResult>
 getBoundarySizes(llvm::ArrayRef<int32_t> boundaryCheck, Value ptr,
                  const Location &loc, ConversionPatternRewriter &rewriter);
 
+bool requiresVolatileIndirectLoad(Value srcPtr, Operation *loadOp);
+
 SmallVector<int64_t> getBroadcastDims(RankedTensorType src,
                                       RankedTensorType dst);
 

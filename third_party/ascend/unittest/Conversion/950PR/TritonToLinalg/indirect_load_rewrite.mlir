@@ -29,7 +29,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // The structured strided-copy route would create a dynamic boundary size that
 // can become zero for over-launched programs. Route to indirect_load instead.
 // CHECK-LABEL: func.func @addptr_stride4_masked_single_tile
-// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) : (memref<?xf16>, tensor<1024xi64>, tensor<1024xi1>, tensor<1024xf16>) -> tensor<1024xf16>
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}){{.*}} : (memref<?xf16>, tensor<1024xi64>, tensor<1024xi1>, tensor<1024xf16>) -> tensor<1024xf16>
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   tt.func public @addptr_stride4_masked_single_tile(%arg0: !tt.ptr<f16> {tt.divisibility = 16 : i32},
                                                     %arg1: !tt.ptr<f16> {tt.divisibility = 16 : i32}) {
@@ -659,6 +659,223 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     %2 = tt.make_tensor_ptr %arg1, [%parent_m, %parent_n], [%stride_m, %stride_n], [%c0, %c0]
          {order = array<i32: 1, 0>} : <tensor<8x8xf32>>
     tt.store %2, %1 {boundaryCheck = array<i32: 0, 1>} : !tt.ptr<tensor<8x8xf32>>
+    tt.return
+  }
+}
+
+// -----
+// CHECK-LABEL: func.func @indirect_load_without_prior_same_ptr_store
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = false} : (memref<?xi32>, tensor<128xi64>, tensor<128xi1>, tensor<128xi32>) -> tensor<128xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_without_prior_same_ptr_store(%arg0: !tt.ptr<i32>,
+                                                             %arg1: !tt.ptr<i32>) {
+    %zero = arith.constant dense<0> : tensor<128xi32>
+    %range = tt.make_range {end = 128 : i32, start = 0 : i32} : tensor<128xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<128xi32>
+    %src_splat = tt.splat %arg0 : !tt.ptr<i32> -> tensor<128x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_splat, %range : tensor<128x!tt.ptr<i32>>, tensor<128xi32>
+    %dst_splat = tt.splat %arg1 : !tt.ptr<i32> -> tensor<128x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_splat, %range : tensor<128x!tt.ptr<i32>>, tensor<128xi32>
+    %value = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<128x!tt.ptr<i32>>
+    tt.store %dst_ptr, %value, %mask {route_discrete_mask_to_simt} : tensor<128x!tt.ptr<i32>>
+    tt.return
+  }
+}
+
+// -----
+// CHECK-LABEL: func.func @indirect_load_after_prior_same_ptr_store
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = true} : (memref<?xi32>, tensor<128xi64>, tensor<128xi1>, tensor<128xi32>) -> tensor<128xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_after_prior_same_ptr_store(%arg0: !tt.ptr<i32>,
+                                                           %arg1: !tt.ptr<i32>) {
+    %one = arith.constant dense<1> : tensor<128xi32>
+    %zero = arith.constant dense<0> : tensor<128xi32>
+    %range = tt.make_range {end = 128 : i32, start = 0 : i32} : tensor<128xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<128xi32>
+    %src_splat = tt.splat %arg0 : !tt.ptr<i32> -> tensor<128x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_splat, %range : tensor<128x!tt.ptr<i32>>, tensor<128xi32>
+    %dst_splat = tt.splat %arg1 : !tt.ptr<i32> -> tensor<128x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_splat, %range : tensor<128x!tt.ptr<i32>>, tensor<128xi32>
+    tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<128x!tt.ptr<i32>>
+    %value = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<128x!tt.ptr<i32>>
+    tt.store %dst_ptr, %value, %mask {route_discrete_mask_to_simt} : tensor<128x!tt.ptr<i32>>
+    tt.return
+  }
+}
+
+// -----
+// CHECK-LABEL: func.func @indirect_load_unknown_root_int_to_ptr
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = true} : (memref<1xi32, strided<[1]>>, tensor<128xi64>, tensor<128xi1>, tensor<128xi32>) -> tensor<128xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_unknown_root_int_to_ptr(%arg0: !tt.ptr<i32>) {
+    %base_i64 = arith.constant 1024 : i64
+    %base = tt.int_to_ptr %base_i64 : i64 -> !tt.ptr<i32>
+    %zero = arith.constant dense<0> : tensor<128xi32>
+    %range = tt.make_range {end = 128 : i32, start = 0 : i32} : tensor<128xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<128xi32>
+    %src_splat = tt.splat %base : !tt.ptr<i32> -> tensor<128x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_splat, %range : tensor<128x!tt.ptr<i32>>, tensor<128xi32>
+    %dst_splat = tt.splat %arg0 : !tt.ptr<i32> -> tensor<128x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_splat, %range : tensor<128x!tt.ptr<i32>>, tensor<128xi32>
+    %value = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<128x!tt.ptr<i32>>
+    tt.store %dst_ptr, %value, %mask {route_discrete_mask_to_simt} : tensor<128x!tt.ptr<i32>>
+    tt.return
+  }
+}
+
+// -----
+// CHECK-LABEL: func.func @indirect_load_store_in_preceding_scf_if
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = true} : (memref<?xi32>, tensor<16xi64>, tensor<16xi1>, tensor<16xi32>) -> tensor<16xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_store_in_preceding_scf_if(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                          %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                          %cond1: i1,
+                                                          %cond2: i1) {
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %c3 = arith.constant dense<3> : tensor<16xi32>
+    %offsets = arith.muli %range, %c3 : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_base, %offsets : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    %dst_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    scf.if %cond1 {
+      %one = arith.constant dense<1> : tensor<16xi32>
+      tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    }
+    %value = scf.if %cond2 -> tensor<16xi32> {
+      %loaded = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+      scf.yield %loaded : tensor<16xi32>
+    } else {
+      scf.yield %zero : tensor<16xi32>
+    }
+    tt.store %dst_ptr, %value, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.return
+  }
+}
+
+// -----
+// CHECK-LABEL: func.func @indirect_load_no_store_in_preceding_scf_if
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = false} : (memref<?xi32>, tensor<16xi64>, tensor<16xi1>, tensor<16xi32>) -> tensor<16xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_no_store_in_preceding_scf_if(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                              %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                              %cond1: i1,
+                                                              %cond2: i1) {
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %c3 = arith.constant dense<3> : tensor<16xi32>
+    %offsets = arith.muli %range, %c3 : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_base, %offsets : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    %other_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %other_ptr = tt.addptr %other_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %dst_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    scf.if %cond1 {
+      %one = arith.constant dense<1> : tensor<16xi32>
+      tt.store %other_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    }
+    %value = scf.if %cond2 -> tensor<16xi32> {
+      %loaded = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+      scf.yield %loaded : tensor<16xi32>
+    } else {
+      scf.yield %zero : tensor<16xi32>
+    }
+    tt.store %dst_ptr, %value, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.return
+  }
+}
+
+// -----
+// CHECK-LABEL: func.func @indirect_load_store_in_preceding_scf_for
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = true} : (memref<?xi32>, tensor<16xi64>, tensor<16xi1>, tensor<16xi32>) -> tensor<16xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_store_in_preceding_scf_for(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                           %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                           %trip: i32) {
+    %c0_i32 = arith.constant 0 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %one = arith.constant dense<1> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %dst_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    scf.for %i = %c0_i32 to %trip step %c1_i32 : i32 {
+      tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    }
+    scf.for %j = %c0_i32 to %trip step %c1_i32 : i32 {
+      %loaded = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+      tt.store %dst_ptr, %loaded, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    }
+    tt.return
+  }
+}
+
+// -----
+// CHECK-LABEL: func.func @indirect_load_nested_loop_carried_store
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = true} : (memref<?xi32>, tensor<16xi64>, tensor<16xi1>, tensor<16xi32>) -> tensor<16xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_nested_loop_carried_store(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                          %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                          %outer: i32,
+                                                          %inner: i32) {
+    %c0_i32 = arith.constant 0 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %one = arith.constant dense<1> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %dst_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    scf.for %i = %c0_i32 to %outer step %c1_i32 : i32 {
+      scf.for %j = %c0_i32 to %inner step %c1_i32 : i32 {
+        %loaded = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+        tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+        tt.store %dst_ptr, %loaded, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+      }
+    }
+    tt.return
+  }
+}
+
+// -----
+// CHECK-LABEL: func.func @indirect_load_ignores_loop_store_to_different_memref_root
+// CHECK: call @triton_indirect_load_0(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = false} : (memref<?xf32>, tensor<16xi64>, tensor<16xi1>, tensor<16xf32>) -> tensor<16xf32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_ignores_loop_store_to_different_memref_root(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                                            %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                                            %arg2: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                                            %trip: i32) {
+    %c0_i32 = arith.constant 0 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %zero_f = arith.constant dense<0.000000e+00> : tensor<16xf32>
+    %c3 = arith.constant dense<3> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    %gm_base = tt.splat %arg0 : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+    %gm_ptr = tt.addptr %gm_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+    %src_base = tt.splat %arg1 : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+    %src_offsets = arith.muli %range, %c3 : tensor<16xi32>
+    %src_ptr = tt.addptr %src_base, %src_offsets : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+    %dst_base = tt.splat %arg2 : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+    scf.for %i = %c0_i32 to %trip step %c1_i32 : i32 {
+      %local = tt.load %gm_ptr, %mask, %zero_f {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<f32>>
+      tt.assert %mask, "mask must be true" : tensor<16xi1>
+      %indirect = tt.load %src_ptr, %mask, %zero_f {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<f32>>
+      %sum = arith.addf %local, %indirect : tensor<16xf32>
+      tt.store %gm_ptr, %sum, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<f32>>
+      tt.store %dst_ptr, %indirect, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<f32>>
+    }
     tt.return
   }
 }

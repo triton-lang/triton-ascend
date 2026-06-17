@@ -314,13 +314,16 @@ def IndirectLoadOp : TT_Ascend_Op<"indirect_load", [
     - offsets: Tensor of per-element offsets (relative to `src`) for accessing source memory
     - mask (optional):  if mask[idx] is false, do not load the data at address pointer[idx]
     - other (optional): if mask[idx] is false, return other[idx]
+    - isVolatile: defaults to true. Set to false only when analysis proves
+      the source pointer has no prior possible writes.
   }];
 
   let arguments = (
     ins TT_Ptr:$src,
         TT_IntTensor:$offsets,
         Optional<TT_BoolLike>:$mask,
-        Optional<TT_Type>:$other
+        Optional<TT_Type>:$other,
+        DefaultValuedAttr<BoolAttr, "true">:$isVolatile
   );
 
   let results = (outs TT_Tensor:$result);

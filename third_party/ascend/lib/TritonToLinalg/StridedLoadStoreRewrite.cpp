@@ -770,7 +770,8 @@ static LogicalResult tryRewriteAddPtrLoad(triton::LoadOp op,
         addScalarOffsetToTensor(offsetTensor, scalarOffset, loc, rewriter);
 
     auto indirectLoad = rewriter.create<triton::ascend::IndirectLoadOp>(
-        loc, resultType, src, offsetTensor, op.getMask(), op.getOther());
+        loc, resultType, src, offsetTensor, op.getMask(), op.getOther(),
+        ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op));
     indirectLoad->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
                           UnitAttr::get(rewriter.getContext()));
 
@@ -971,7 +972,8 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
 
     // ---- Emit tt.indirect_load ----
     auto indirectLoad = rewriter.create<triton::ascend::IndirectLoadOp>(
-        loc, resultType, src, offsetTensor, mask, other);
+        loc, resultType, src, offsetTensor, mask, other,
+        ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op));
     indirectLoad->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
                           UnitAttr::get(rewriter.getContext()));
 

@@ -772,16 +772,6 @@ CONSTRAINTS = {
             "``note`` (Ascend extension): Ascend Cube-Vector 架构同步原语，上游 Triton 不存在",
         ],
     },
-    "triton.language.tensor.__invert__": {
-        "constraints": [
-            "DataType: Ascend does not support uint16, uint32, uint64 (hardware limitation).",
-        ],
-    },
-    "triton.language.tensor.__neg__": {
-        "constraints": [
-            "DataType: Ascend does not support bool, fp64, uint16, uint32, uint64 (hardware limitation).",
-        ],
-    },
     "triton.language.tensor.logical_and": {
         "constraints": [
             "DataType: Ascend does not support fp64 (hardware limitation).",

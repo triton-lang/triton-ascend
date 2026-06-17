@@ -1,3 +1,10 @@
+import pytest
+import torch
+import torch_npu
+import triton
+import triton.language as tl
+
+
 @triton.jit
 def dot_scale_kernel(a_base, stride_a0: tl.constexpr, stride_a1: tl.constexpr, a_scale, b_base, stride_b0: tl.constexpr,
                      stride_b1: tl.constexpr, b_scale, out, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
@@ -24,10 +31,20 @@ def dot_scale_kernel(a_base, stride_a0: tl.constexpr, stride_a1: tl.constexpr, a
     tl.store(out_ptr, accumulator.to(a.dtype))
 
 
-x = torch.randn(shape, dtype=torch.bfloat16, device="npu")
-y = torch.randn(shape, dtype=torch.bfloat16, device="npu")
-M, K = shape[0], shape[1]
-scale_x = torch.randint(min_scale - 128, max_scale - 127, (M, K // 32), dtype=torch.int8, device="npu")
-scale_y = torch.randint(min_scale - 128, max_scale - 127, (N, K // 32), dtype=torch.int8, device="npu")
-type_a, type_b = "bf16", "bf16"
-pgm = dot_scale_kernel[(1, )](x, *x.stride(), scale_x, y, *y.stride(), scale_y, z, M, N, K, type_a, type_b)
+def test_dot_scaled():
+    shape = (16, 32)
+    dtype = 'float32'
+    x = torch.randn(shape, dtype=torch.bfloat16, device="npu")
+    y = torch.randn(shape, dtype=torch.bfloat16, device="npu")
+    M, K, N = shape[0], shape[1], shape[0]
+    type_a, type_b = "bf16", "bf16"
+    min_scale, max_scale = (0, 142) if type_a == torch.bfloat16 else (124, 131)
+    scale_x = torch.randint(min_scale - 128, max_scale - 127, (M, K // 32), dtype=torch.int8, device="npu")
+    min_scale, max_scale = (0, 142) if type_b == torch.bfloat16 else (124, 131)
+    scale_y = torch.randint(min_scale - 128, max_scale - 127, (N, K // 32), dtype=torch.int8, device="npu")
+    z = x.new_empty((M, N), dtype=x.dtype)
+    pgm = dot_scale_kernel[(1, )](x, *x.stride(), scale_x, y, *y.stride(), scale_y, z, M, N, K, type_a, type_b)
+
+
+if __name__ == "main":
+    test_dot_scaled()

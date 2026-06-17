@@ -1,11 +1,30 @@
+import pytest
+import torch
+import torch_npu
+import triton
+import triton.language as tl
+
+
 @triton.jit
-def kernel(output_ptr, x_ptr, XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr, XNUMEL: tl.constexpr,
-           YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):
-    xidx = tl.arange(0, XB) + tl.program_id(0) * XB
-    yidx = tl.arange(0, YB) + tl.program_id(1) * YB
-    zidx = tl.arange(0, ZB) + tl.program_id(2) * ZB
-    idx = xidx[:, None, None] * YNUMEL * ZNUMEL + yidx[None, :, None] * ZNUMEL + zidx[None, None, :]
-    X = tl.load(x_ptr + idx)
-    ret = tl.flip(X, 2)
-    oidx = xidx[:, None, None] * YNUMEL * ZNUMEL + yidx[None, :, None] * ZNUMEL + zidx[None, None, :]
-    tl.store(output_ptr + oidx, ret)
+def flip_kernel(X, Z, M: tl.constexpr, N: tl.constexpr, dim: tl.constexpr):
+    offx = tl.arange(0, M) * N
+    offy = tl.arange(0, N)
+    off2d = offx[:, None] + offy[None, :]
+    x = tl.load(X + off2d)
+    x = tl.flip(x, dim)
+    tl.store(Z + off2d, x)
+
+
+def test_flip():
+    M, N = 8, 64
+    dtype_str = 'int32'
+    dim = 1
+    x = torch.randint(low=0, high=256, size=(M, N), dtype=eval(f'torch.{dtype_str}')).npu()
+    y = torch.flip(x, (dim, ))
+    z = torch.empty_like(x, device='npu')
+    flip_kernel[(1, )](x, z, M, N, dim, num_warps=8)
+    assert (y == z).all(), (y, z)
+
+
+if __name__ == "main":
+    test_flip()

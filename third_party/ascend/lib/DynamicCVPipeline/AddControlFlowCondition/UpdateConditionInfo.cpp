@@ -805,6 +805,9 @@ int UpdateConditionInfoPass::collectIntraCoreOutputConditions(
 // Build the ifOp variable mapping for the tensor iter_args
 int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(scf::ForOp forOp)
 {
+  // Clear any previous data
+  tensorIterArgIfOpVars.clear();
+  
   if (!info->tensorIterArgDepsMap.count(forOp) || !info->tensorIterArgIndicesMap.count(forOp)) {
     LDBG("Skip buildTensorIterArgIfOpVarMap: no tensor iter_args info for this forOp\n");
     return UPDATE_CONDITION_INFO_SUCCESS;
@@ -839,10 +842,10 @@ int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(scf::ForOp forOp)
       consumerToVar[consumer] = var;
     }
     
-    // Add all the variables of the consumers that depend on each producer
-    for (scf::IfOp producer : relation.producers) {
+    // Add all the variables of the consumers that depend on the producer
+    if (relation.producer) {
       for (auto &[consumer, var] : consumerToVar) {
-        producerVars[producer].insert(var);
+        producerVars[relation.producer].insert(var);
       }
     }
     
@@ -854,14 +857,14 @@ int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(scf::ForOp forOp)
   
   // Convert the temporary data structure to tensorIfOpVarMap
   for (auto &[producer, vars] : producerVars) {
-    auto &ifOpVars = info->tensorIterArgIfOpVars[producer];
+    auto &ifOpVars = tensorIterArgIfOpVars[producer];
     for (Value var : vars) {
       ifOpVars.producerVars.push_back(var);
     }
   }
   
   for (auto &[consumer, vars] : consumerVars) {
-    auto &ifOpVars = info->tensorIterArgIfOpVars[consumer];
+    auto &ifOpVars = tensorIterArgIfOpVars[consumer];
     for (Value var : vars) {
       ifOpVars.consumerVars.push_back(var);
     }
@@ -875,11 +878,11 @@ void UpdateConditionInfoPass::collectTensorIterArgInputConditions(
     SmallVector<Value> &conditions, DenseSet<Value> &usedVarsSet,
     DenseMap<Value, VarUpdateType> &varUpdateTypes)
 {
-  if (!info->tensorIterArgIfOpVars.count(ifOp)) {
+  if (!tensorIterArgIfOpVars.count(ifOp)) {
     return;
   }
 
-  auto &ifOpVars = info->tensorIterArgIfOpVars[ifOp];
+  auto &ifOpVars = tensorIterArgIfOpVars[ifOp];
   for (Value var : ifOpVars.consumerVars) {
     Value varToUse = var;
     auto latestIt = controlVarToLatestValue.find(var);
@@ -902,11 +905,11 @@ void UpdateConditionInfoPass::collectTensorIterArgOutputConditions(
     SmallVector<Value> &conditions, DenseSet<Value> &usedVarsSet,
     DenseMap<Value, VarUpdateType> &varUpdateTypes)
 {
-  if (!info->tensorIterArgIfOpVars.count(ifOp)) {
+  if (!tensorIterArgIfOpVars.count(ifOp)) {
     return;
   }
 
-  auto &ifOpVars = info->tensorIterArgIfOpVars[ifOp];
+  auto &ifOpVars = tensorIterArgIfOpVars[ifOp];
   for (Value var : ifOpVars.producerVars) {
     Value varToUse = var;
     auto latestIt = controlVarToLatestValue.find(var);
@@ -1308,11 +1311,29 @@ int UpdateConditionInfoPass::combineConditions(ModuleOp module, Value crossCoreC
     info->cntArgs[newIfOp] = counter;
   }
 
+  // Update all mappings that refer to the old ifOp BEFORE erasing it
   // Update the tensorIterArgIfOpVars mapping
-  if (info->tensorIterArgIfOpVars.count(ifOp)) {
-    auto ifOpVars = info->tensorIterArgIfOpVars[ifOp];
-    info->tensorIterArgIfOpVars.erase(ifOp);
-    info->tensorIterArgIfOpVars[newIfOp] = ifOpVars;
+  if (tensorIterArgIfOpVars.count(ifOp)) {
+    auto ifOpVars = tensorIterArgIfOpVars[ifOp];
+    tensorIterArgIfOpVars.erase(ifOp);
+    tensorIterArgIfOpVars[newIfOp] = ifOpVars;
+  }
+  
+  // Update tensorIterArgDepsMap with new ifOp
+  if (info->tensorIterArgDepsMap.count(forOp)) {
+    auto &depsVec = info->tensorIterArgDepsMap[forOp];
+    for (auto &relation : depsVec) {
+      // Update producer ifOp - use pointer comparison
+      if (relation.producer.getOperation() == ifOp.getOperation()) {
+        relation.producer = newIfOp;
+      }
+      // Update consumer ifOps
+      for (auto &consumerIfOp : relation.consumers) {
+        if (consumerIfOp.getOperation() == ifOp.getOperation()) {
+          consumerIfOp = newIfOp;
+        }
+      }
+    }
   }
 
   updateControlVarToLatestValue(newIfOp, ifOp, hasCounter, counter);
@@ -1457,6 +1478,69 @@ void UpdateConditionInfoPass::runOnOperation()
     LDBG("updateIfConds failed!");
     signalPassFailure();
   }
+
+  // Print tensorIterArgDepsMap and tensorIterArgIndicesMap for verification - SAFELY
+  LDBG("\n=== Final tensorIterArgDepsMap (before UpdateLoopIterTimesPass) ===\n");
+  for (auto &entry : info->tensorIterArgDepsMap) {
+    scf::ForOp forOp = entry.first;
+    // Check if forOp is valid
+    if (!forOp || !forOp.getOperation()) {
+      LDBG("  ForOp: (invalid)\n");
+      continue;
+    }
+    
+    auto &depsVec = entry.second;
+    LDBG("  ForOp: " << forOp << "\n");
+    
+    for (size_t relIdx = 0; relIdx < depsVec.size(); ++relIdx) {
+      auto &relation = depsVec[relIdx];
+      LDBG("  -- Relation [" << relIdx << "]\n");
+      
+      // Check producer validity
+      if (relation.producer && relation.producer.getOperation()) {
+        LDBG("     Producer: " << relation.producer << "\n");
+      } else {
+        LDBG("     Producer: (null or invalid)\n");
+      }
+      
+      LDBG("     Consumers: [ ");
+      for (size_t i = 0; i < relation.consumers.size(); ++i) {
+        if (i > 0) LDBG(", ");
+        if (relation.consumers[i] && relation.consumers[i].getOperation()) {
+          LDBG(relation.consumers[i]);
+        } else {
+          LDBG("(invalid)");
+        }
+      }
+      LDBG(" ]\n");
+    }
+  }
+  
+  LDBG("\n=== Final tensorIterArgIndicesMap (before UpdateLoopIterTimesPass) ===\n");
+  for (auto &entry : info->tensorIterArgIndicesMap) {
+    scf::ForOp forOp = entry.first;
+    // Check if forOp is valid
+    if (!forOp || !forOp.getOperation()) {
+      LDBG("  ForOp: (invalid)\n");
+      continue;
+    }
+    
+    auto &indicesMap = entry.second;
+    LDBG("  ForOp: " << forOp << "\n");
+    
+    size_t idx = 0;
+    for (auto &idxEntry : indicesMap) {
+      auto &indices = idxEntry.second;
+      LDBG("  -- Indices Entry [" << idx << "] → [ ");
+      for (size_t i = 0; i < indices.size(); ++i) {
+        if (i > 0) LDBG(", ");
+        LDBG(indices[i]);
+      }
+      LDBG(" ]\n");
+      idx++;
+    }
+  }
+  LDBG("\n");
 
   LDBG("Exit UpdateConditionInfo pass." << "\n");
 }

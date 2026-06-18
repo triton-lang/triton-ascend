@@ -94,7 +94,7 @@ def get_torch_typename(dtype):
     return tyname
 
 def generate_tensor(shape, dtype):
-     """根据指定形状和数据类型生成随机张量，适配不同数值类型的取值范围。"""
+    """根据指定形状和数据类型生成随机张量，适配不同数值类型的取值范围。"""
     if dtype == 'float32' or dtype == 'float16' or dtype == 'bfloat16':
         return torch.randn(size=shape, dtype=eval('torch.' + dtype))
     elif dtype == 'int32' or dtype == 'int64' or dtype == 'int16':

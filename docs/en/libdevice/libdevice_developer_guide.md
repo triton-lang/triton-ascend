@@ -5,10 +5,6 @@
 Triton kernel example with SIMT compilation mode
 
 ```python
-# Enable libdevice SIMT compilation
-import os
-os.environ['TRITON_ENABLE_LIBDEVICE_SIMT'] = '1'
-
 import triton
 import triton.language as tl
 import triton.language.extra.cann.libdevice as libdevice
@@ -26,8 +22,9 @@ def triton_kernel(input, output, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr)
         tl.store(output + (x0), y, None)
 
 dtype, shape, ncore, xblock, xblock_sub = ['int32', (128, 4096), 512, 1024, 1024]
-input = torch.randn(shape, dtype=dtype).npu()
-output = torch.randn(shape, dtype=dtype).npu()
+input = torch.randn(shape, dtype=eval('torch.' + dtype)).npu()
+output = torch.zeros_like(input)
+# Enable SIMT compilaiton with option "force_simt_only=True"
 triton_kernel[ncore, 1, 1](input, output, xblock, xblock_sub, force_simt_only=True)
 ```
 

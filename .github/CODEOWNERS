@@ -47,7 +47,7 @@ lib/Dialect/TritonGPU/Transforms/TritonGPUConversion.cpp @TecJesh
 # -----------
 third_party/amd/ @TecJesh
 third_party/proton/ @TecJesh
-third_party/ascend/ @HEX1A0A
+third_party/ascend/ @KanuaK @WuTYSFG @hongziqi
 
 # -----------
 # gluon

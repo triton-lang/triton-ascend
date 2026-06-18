@@ -44,11 +44,6 @@ namespace mlir {
 
 namespace ConverterUtils {
 
-struct TensorPtrAxisInfo {
-  SmallVector<Value> shape;
-  SmallVector<Value> offsets;
-};
-
 const std::string GeneratedByMakeTensorPtrTAG = "GeneratedByMakeTensorPtr";
 const std::string discreteMaskAttrName = "DiscreteMask";
 const std::string discreteAttrName = "DiscreteMemAccess";
@@ -82,24 +77,6 @@ tensor::ExtractSliceOp makeExtractSliceOp(Value src,
 
 std::optional<Operation *> getFullShapeOp(Value val,
                                           ConversionPatternRewriter &rewriter);
-
-std::optional<TensorPtrAxisInfo>
-traceTensorPtrAxisInfo(Value ptr, ConversionPatternRewriter &rewriter,
-             Location loc);
-
-SmallVector<OpFoldResult>
-getBoundarySizesForTensorPtrInfo(llvm::ArrayRef<Value> shape,
-                                 llvm::ArrayRef<Value> offsets,
-                                 llvm::ArrayRef<int32_t> boundaryCheck,
-                                 Value ptr, const Location &loc,
-                                 ConversionPatternRewriter &rewriter);
-
-SmallVector<OpFoldResult>
-getBoundarySizesFromTensorPtrInfoOrFallback(
-  Value originalPtr, Value loweredPtr,
-  llvm::ArrayRef<int32_t> boundaryCheck, const Location &loc,
-  ConversionPatternRewriter &rewriter,
-  std::optional<TensorPtrAxisInfo> &tensorPtrInfo);
 
 SmallVector<OpFoldResult>
 getBoundarySizes(llvm::ArrayRef<int32_t> boundaryCheck, Value ptr,

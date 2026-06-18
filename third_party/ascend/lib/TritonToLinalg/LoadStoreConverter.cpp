@@ -344,16 +344,16 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   // boundary check
   auto boundaryCheck = op.getBoundaryCheck();
   if (!boundaryCheck.empty()) {
-    std::optional<mlir::ConverterUtils::TensorPtrAxisInfo> tensorPtrInfo;
-    auto boundarySizes = mlir::ConverterUtils::getBoundarySizesFromTensorPtrInfoOrFallback(
-        op.getPtr(), ptr, boundaryCheck, loc, rewriter, tensorPtrInfo);
+    auto makeTensorPtrOp = op.getPtr().getDefiningOp<triton::MakeTensorPtrOp>();
+    auto boundarySizes = mlir::ConverterUtils::getBoundarySizes(
+        boundaryCheck, /*remapped*/ ptr, loc, rewriter);
     // handle the padding
     auto padding = op.getPadding();
     SmallVector<OpFoldResult> srcOffsets(boundarySizes.size(), rewriter.getIndexAttr(0));
     SmallVector<OpFoldResult> dstOffsets;
-    if (tensorPtrInfo) {
+    if (makeTensorPtrOp) {
       auto zeroVal = rewriter.createOrFold<arith::ConstantOp>(loc, rewriter.getI32IntegerAttr(0));
-      for (auto [idx, offVal] : llvm::enumerate(tensorPtrInfo->offsets)) {
+      for (auto [idx, offVal] : llvm::enumerate(makeTensorPtrOp.getOffsets())) {
         if (llvm::find(boundaryCheck, idx) == boundaryCheck.end()) {
           dstOffsets.push_back(srcOffsets[idx]);
           continue;
@@ -1043,14 +1043,14 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
   // 1. boundary size check
   auto boundaryCheck = op.getBoundaryCheck();
   if (!boundaryCheck.empty()) {
-    std::optional<mlir::ConverterUtils::TensorPtrAxisInfo> tensorPtrInfo;
-    auto boundarySizes = mlir::ConverterUtils::getBoundarySizesFromTensorPtrInfoOrFallback(
-        op.getPtr(), ptr, boundaryCheck, loc, rewriter, tensorPtrInfo);
+    auto makeTensorPtrOp = op.getPtr().getDefiningOp<triton::MakeTensorPtrOp>();
+    auto boundarySizes = mlir::ConverterUtils::getBoundarySizes(
+        boundaryCheck, /*remapped*/ ptr, loc, rewriter);
     SmallVector<OpFoldResult> srcOffsets;
     SmallVector<OpFoldResult> dstOffsets(boundarySizes.size(), rewriter.getIndexAttr(0));
-    if (tensorPtrInfo) {
+    if (makeTensorPtrOp) {
       auto zeroVal = rewriter.createOrFold<arith::ConstantOp>(loc, rewriter.getI32IntegerAttr(0));
-      for (auto [idx, offVal] : llvm::enumerate(tensorPtrInfo->offsets)) {
+      for (auto [idx, offVal] : llvm::enumerate(makeTensorPtrOp.getOffsets())) {
         if (llvm::find(boundaryCheck, idx) == boundaryCheck.end()) {
           srcOffsets.push_back(dstOffsets[idx]);
           continue;

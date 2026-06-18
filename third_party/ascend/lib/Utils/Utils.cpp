@@ -320,142 +320,6 @@ std::optional<Operation *> getFullShapeOp(Value val,
   }
 }
 
-// Trace tensor-ptr axis metadata from the current SSA value back to its
-// logical source. The goal is to recover per-axis `shape` and `offsets`
-// so boundary sizes can be computed directly in logical-axis space.
-//
-// Control flow:
-//
-//   ptr
-//    |
-//    +-- MakeTensorPtrOp --------> return {shape, offsets}
-//    |
-//    +-- AdvanceOp --------------> trace(base)
-//    |                               then offsets := baseOffsets + advance
-//    |
-//    +-- scf.for BlockArgument --> trace(tied loop init)
-//    |
-//    +-- otherwise --------------> std::nullopt
-//
-// Why AdvanceOp matters:
-//   advance does not destroy logical-axis meaning; it only adds a per-axis
-//   delta to the existing tensor-ptr offsets, so we accumulate that delta.
-//
-// Why scf.for BlockArgument matters:
-//   loop-carried tensor pointers lose their direct defining op in the loop
-//   body, but their source is still recoverable through the tied init value.
-std::optional<TensorPtrAxisInfo>
-traceTensorPtrAxisInfo(Value ptr, ConversionPatternRewriter &rewriter,
-                       Location loc) {
-  if (auto makeTensorPtrOp = ptr.getDefiningOp<triton::MakeTensorPtrOp>()) {
-    TensorPtrAxisInfo info;
-    info.shape.assign(makeTensorPtrOp.getShape().begin(),
-                      makeTensorPtrOp.getShape().end());
-    info.offsets.assign(makeTensorPtrOp.getOffsets().begin(),
-                        makeTensorPtrOp.getOffsets().end());
-    return info;
-  }
-
-  if (auto advanceOp = ptr.getDefiningOp<triton::AdvanceOp>()) {
-    auto baseInfo = traceTensorPtrAxisInfo(advanceOp.getPtr(), rewriter, loc);
-    if (!baseInfo || baseInfo->offsets.size() != advanceOp.getOffsets().size())
-      return std::nullopt;
-
-    TensorPtrAxisInfo info;
-    info.shape = baseInfo->shape;
-    info.offsets.reserve(baseInfo->offsets.size());
-    for (auto [baseOffset, advanceOffset] :
-         llvm::zip(baseInfo->offsets, advanceOp.getOffsets())) {
-      info.offsets.push_back(
-          rewriter.createOrFold<arith::AddIOp>(loc, baseOffset, advanceOffset));
-    }
-    return info;
-  }
-
-  if (auto blockArg = dyn_cast<BlockArgument>(ptr)) {
-    if (auto forOp = dyn_cast_or_null<scf::ForOp>(
-            blockArg.getOwner()->getParentOp())) {
-      auto init = forOp.getTiedLoopInit(blockArg);
-      if (!init)
-        return std::nullopt;
-      return traceTensorPtrAxisInfo(init->get(), rewriter, loc);
-    }
-  }
-
-  return std::nullopt;
-}
-
-// Compute boundary sizes directly from logical tensor-ptr metadata instead
-// of reconstructing offsets from a flattened linear address.
-//
-// For every axis `i` listed in boundary_check:
-//   leftSize_i     = max(shape_i - offset_i, 0)
-//   boundarySize_i = min(blockShape_i, leftSize_i)
-//
-// Meanings:
-//   shape_i      : full logical extent of axis i
-//   offset_i     : current block start offset on axis i
-//   blockShape_i : current lowered block size on axis i
-//   leftSize_i   : remaining valid elements from offset_i to the boundary
-//
-// Example make_block_ptr state:
-//   shape       = (17, 13, 11)
-//   offsets     = (12, 10, 9)
-//   block_shape = (8, 4, 4)
-//   boundary_check = (0, 1, 2)
-// Then:
-//   axis0: leftSize = max(17 - 12, 0) = 5  -> boundarySize = min(8, 5) = 5
-//   axis1: leftSize = max(13 - 10, 0) = 3  -> boundarySize = min(4, 3) = 3
-//   axis2: leftSize = max(11 - 9, 0) = 2   -> boundarySize = min(4, 2) = 2
-// So the final per-axis boundary size array is [5, 3, 2].
-SmallVector<OpFoldResult>
-getBoundarySizesForTensorPtrInfo(llvm::ArrayRef<Value> shape,
-                                 llvm::ArrayRef<Value> offsets,
-                                 llvm::ArrayRef<int32_t> boundaryCheck,
-                                 Value ptr, const Location &loc,
-                                 ConversionPatternRewriter &rewriter) {
-  auto shapedType = cast<ShapedType>(ptr.getType());
-  auto boundarySizes =
-      getAsIndexOpFoldResult(rewriter.getContext(), shapedType.getShape());
-
-  for (int32_t axis : boundaryCheck) {
-    if (axis < 0 || axis >= static_cast<int32_t>(shapedType.getRank()) ||
-        axis >= static_cast<int32_t>(shape.size()) ||
-        axis >= static_cast<int32_t>(offsets.size()))
-      continue;
-
-    OpFoldResult fullShape =
-        getOpFoldResultOfLayoutInfo(shape[axis], rewriter);
-    OpFoldResult curOffset =
-        getOpFoldResultOfLayoutInfo(offsets[axis], rewriter);
-    curOffset =
-        maxOpFoldResult(curOffset, rewriter.getIndexAttr(0), loc, rewriter);
-    OpFoldResult curLeftSize = maxOpFoldResult(
-        subOpFoldResult(fullShape, curOffset, loc, rewriter),
-        rewriter.getIndexAttr(0), loc, rewriter);
-    boundarySizes[axis] =
-        minOpFoldResult(boundarySizes[axis], curLeftSize, loc, rewriter);
-  }
-
-  return boundarySizes;
-}
-
-SmallVector<OpFoldResult>
-getBoundarySizesFromTensorPtrInfoOrFallback(
-    Value originalPtr, Value loweredPtr, llvm::ArrayRef<int32_t> boundaryCheck,
-    const Location &loc, ConversionPatternRewriter &rewriter,
-    std::optional<TensorPtrAxisInfo> &tensorPtrInfo) {
-  tensorPtrInfo = traceTensorPtrAxisInfo(originalPtr, rewriter, loc);
-  if (tensorPtrInfo) {
-    return getBoundarySizesForTensorPtrInfo(tensorPtrInfo->shape,
-                                            tensorPtrInfo->offsets,
-                                            boundaryCheck, loweredPtr, loc,
-                                            rewriter);
-  }
-
-  return getBoundarySizes(boundaryCheck, loweredPtr, loc, rewriter);
-}
-
 SmallVector<OpFoldResult>
 getBoundarySizes(llvm::ArrayRef<int32_t> boundaryCheck, Value ptr,
                  const Location &loc, ConversionPatternRewriter &rewriter) {
@@ -531,29 +395,22 @@ getBoundarySizes(llvm::ArrayRef<int32_t> boundaryCheck, Value ptr,
       curPtrOffset, fullShapeReCast.getConstifiedMixedOffset(), loc, rewriter);
 
   for (int i = 0; i < shapedType.getRank(); ++i) {
-    OpFoldResult curStride = fullShapeReCast.getConstifiedMixedStrides()[i];
     if (llvm::find(boundaryCheck, i) != boundaryCheck.end()) {
-      if (isZero(curStride)) {
-        emitWarning(loc)
-            << "getBoundarySizes() cannot reconstruct boundary on checked "
-               "zero-stride axis "
-            << i << "; keep current block size for this axis";
-        continue;
-      }
-
-      OpFoldResult curOffset = divOpFoldResult(offsetShift, curStride, loc,
-                                               rewriter);
       auto fullShape = fullShapeReCast.getConstifiedMixedSizes()[i];
+
+      OpFoldResult curOffset = divOpFoldResult(
+          offsetShift, fullShapeReCast.getConstifiedMixedStrides()[i], loc,
+          rewriter);
       OpFoldResult curLeftSize =
           maxOpFoldResult(subOpFoldResult(fullShape, curOffset, loc, rewriter),
                           rewriter.getIndexAttr(0), loc, rewriter);
 
       boundarySize[i] =
           minOpFoldResult(boundarySize[i], curLeftSize, loc, rewriter);
-    }
 
-    if (!isZero(curStride)) {
-      offsetShift = remOpFoldResult(offsetShift, curStride, loc, rewriter);
+      offsetShift = remOpFoldResult(
+          offsetShift, fullShapeReCast.getConstifiedMixedStrides()[i], loc,
+          rewriter);
     }
   }
 

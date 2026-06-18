@@ -1,15 +1,31 @@
-@triton.jit
-def optimized_kernel(x_ptr, y_ptr, BLOCK_SIZE: tl.constexpr):
-    # Use static_range for small-scale loop unrolling, eliminating loop overhead
-    for i in tl.static_range(BLOCK_SIZE):
-        # When BLOCK_SIZE is a compile-time constant, the entire loop is unrolled
-        x = tl.load(x_ptr + i)
-        y = x * x
-        tl.store(y_ptr + i, y)
+import pytest
+import torch
+import torch_npu
+from torch.testing import assert_close
 
-    # Comparison: using range incurs loop control overhead
-    for i in tl.range(BLOCK_SIZE):
-        # This loop has runtime loop control logic
+import triton
+import triton.language as tl
+
+
+@triton.jit
+def static_range_kernel(x_ptr, out_ptr, BLOCK_SIZE: tl.constexpr):
+    # static_range unrolls the loop at compile time (BLOCK_SIZE must be constexpr)
+    for i in tl.static_range(BLOCK_SIZE):
         x = tl.load(x_ptr + i)
-        y = x * x
-        tl.store(y_ptr + i, y)
+        tl.store(out_ptr + i, x * x)
+
+
+def test_static_range():
+    BLOCK_SIZE = 128
+    x = torch.randn(BLOCK_SIZE, device="npu", dtype=torch.float32)
+    out = torch.empty(BLOCK_SIZE, device="npu", dtype=torch.float32)
+
+    static_range_kernel[(1, )](x, out, BLOCK_SIZE=BLOCK_SIZE)
+    torch.npu.synchronize()
+
+    assert_close(out, x * x, rtol=1e-3, atol=1e-3)
+
+
+if __name__ == "__main__":
+    test_static_range()
+    print("test_static_range PASSED!")

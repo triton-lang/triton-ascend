@@ -299,7 +299,22 @@ SmallVector<MemoryEffects::EffectInstance> MemoryDependenceGraph::collectOuterEf
 
     std::optional<SmallVector<MemoryEffects::EffectInstance>> raw;
     if (recursive) {
-        raw = getEffectsRecursively(op);
+        SmallVector<Operation *> leafOps;
+        collectLeafOps(op, leafOps);
+        raw.emplace();
+        for (Operation *leaf : leafOps) {
+            bool leafUnknown = false;
+            SmallVector<MemoryEffects::EffectInstance> leafEffects =
+                collectOuterEffects(leaf, leafUnknown, /*recursive=*/false);
+            if (leafUnknown) {
+                if (leaf != op) {
+                    LOG_DEBUG("Op " << *op << " is unknown due to nested op " << *leaf << "\n");
+                }
+                unknown = true;
+                return {};
+            }
+            raw->append(leafEffects.begin(), leafEffects.end());
+        }
     } else if (auto effectInterface = dyn_cast<MemoryEffectOpInterface>(op)) {
         raw.emplace();
         effectInterface.getEffects(*raw);

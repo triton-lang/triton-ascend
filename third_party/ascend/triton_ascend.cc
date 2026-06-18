@@ -23,6 +23,11 @@
 
 #include "ascend/include/DynamicCVPipeline/Passes.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/AllocMultiCache.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "ascend/include/DynamicCVPipeline/SplitDataflowPass.h"
+#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromComputePass.h"
+#include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 // todo: this code will be removed in version 530.
 #include "ascend/include/TritonAffinityOpt/Passes.h"
 
@@ -400,6 +405,27 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
           mlir::triton::BufferCountManager::DepType::LoadStore, count);
     }
   });
+
+  m.def("pre_check_available", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createPreCheckAvailablePass());});
+  m.def("standardize_op", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createStandardizeOpPass());});
+  m.def("plan_compute_block", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createPlanComputeBlockPass());});
+  m.def("compute_block_opt", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createComputeBlockOptPass());});
+  m.def("split_dataflow", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createSplitDataflowPass());});
+  m.def("analyze_data_flow", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createAnalyzeDataFlowPass());});
+  m.def("separate_memory_from_compute", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createSeparateMemoryFromComputePass());});
+  m.def("alloc_multi_cache", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createAllocMultiCachePass());});
+  m.def("add_control_flow_condition", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createAddControlFlowConditionPass());});
+  m.def("remove_ssbuf_attr", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createRemoveSsbufAttrPass());});
 }
 
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL

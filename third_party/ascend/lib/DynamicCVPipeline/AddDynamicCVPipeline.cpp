@@ -23,6 +23,7 @@
 #include "llvm/Support/Debug.h"
 
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
@@ -50,6 +51,23 @@ namespace triton {
 } // namespace mlir
 
 namespace {
+
+class DCVPDumpIRPass : public PassWrapper<DCVPDumpIRPass, OperationPass<ModuleOp>> {
+    std::string label;
+public:
+    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(DCVPDumpIRPass)
+    DCVPDumpIRPass(StringRef l) : label(l.str()) {}
+    StringRef getArgument() const override { return "dcvp-dump-ir"; }
+    void runOnOperation() override {
+        llvm::errs() << "\n// [DCVP] ===== " << label << " =====\n";
+        getOperation().print(llvm::errs());
+        llvm::errs() << "\n// [DCVP] ===== END " << label << " =====\n\n";
+    }
+};
+
+static std::unique_ptr<Pass> createDCVPDumpIRPass(StringRef label) {
+    return std::make_unique<DCVPDumpIRPass>(label);
+}
 
 void restoreModuleFromBackup(ModuleOp moduleOp, ModuleOp moduleBackup)
 {
@@ -80,32 +98,52 @@ void AddDynamicCVPipelinePass::runOnOperation()
     moduleOp->removeAttr(CVPipeline::ERRCODE_ATTR);
 
     if (!compileOn91095Flag) {
-        llvm::errs() << "Add-dynamic-cv-pipeline is only supported on 91095 now.\n";
+        llvm::errs() << "[DCVP] SKIPPED: compileOn91095Flag is false!\n";
         return;
     }
+
+    llvm::errs() << "\n// ===== BEFORE DynamicCVPipeline =====\n";
+    moduleOp.print(llvm::errs());
+    llvm::errs() << "\n// ===== END BEFORE DynamicCVPipeline =====\n\n";
 
     ModuleOp moduleBackup(moduleOp->clone());
     PassManager pm(&getContext(), moduleOp.getOperationName());
 
+    auto addDump = [&](const char *label) {
+        pm.addPass(createDCVPDumpIRPass(label));
+    };
+
+    addDump("BEFORE PreCheckAvailable");
     pm.addPass(createPreCheckAvailablePass());
+    addDump("AFTER PreCheckAvailable");
     pm.addPass(createStandardizeOpPass());
+    addDump("AFTER StandardizeOp");
     pm.addPass(createPlanComputeBlockPass());
+    addDump("AFTER PlanComputeBlock");
     pm.addPass(createComputeBlockOptPass());
+    addDump("AFTER ComputeBlockOpt");
     pm.addPass(createSplitDataflowPass());
+    addDump("AFTER SplitDataflow");
     pm.addPass(createAnalyzeDataFlowPass());
+    addDump("AFTER AnalyzeDataFlow");
     pm.addPass(createSeparateMemoryFromComputePass());
+    addDump("AFTER SeparateMemoryFromCompute");
     pm.addPass(createAllocMultiCachePass());
+    addDump("AFTER AllocMultiCache");
     pm.addPass(createAddControlFlowConditionPass());
+    addDump("AFTER AddControlFlowCondition");
     pm.addPass(createRemoveSsbufAttrPass());
 
     if (failed(runPipeline(pm, moduleOp))) {
         auto errCodeAttr = moduleOp->getAttrOfType<IntegerAttr>(CVPipeline::ERRCODE_ATTR);
+        int errCode = errCodeAttr ? static_cast<int>(errCodeAttr.getInt()) : CVPipeline::ERRCODE_FAILED;
+        llvm::errs() << "[DCVP] Pipeline FAILED (errCode=" << errCode << "). "
+                     << "Falling back to compilation without DCVP.\n";
         if (!errCodeAttr) {
             moduleOp->emitWarning() << "[" << DEBUG_TYPE << "] "
                 << "Pass failed; fallback to compilation without dynamic CV pipeline.";
         }
 
-        int errCode = errCodeAttr ? static_cast<int>(errCodeAttr.getInt()) : CVPipeline::ERRCODE_FAILED;
         restoreModuleFromBackup(moduleOp, moduleBackup);
         moduleBackup->destroy();
         moduleOp->setAttr(CVPipeline::ERRCODE_ATTR, builder.getI32IntegerAttr(errCode));
@@ -113,6 +151,11 @@ void AddDynamicCVPipelinePass::runOnOperation()
     }
 
     moduleBackup->destroy();
+
+    llvm::errs() << "\n// ===== AFTER DynamicCVPipeline =====\n";
+    moduleOp.print(llvm::errs());
+    llvm::errs() << "\n// ===== END AFTER DynamicCVPipeline =====\n\n";
+
     LDBG("Process successfully");
 }
 

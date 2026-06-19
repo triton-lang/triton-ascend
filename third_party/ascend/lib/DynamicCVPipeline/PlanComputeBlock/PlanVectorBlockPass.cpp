@@ -427,6 +427,7 @@ llvm::LogicalResult planVectorBlockId(Block *block, const CVPipeline::MemoryDepe
 
 void PlanVectorBlockPass::runOnOperation()
 {
+    LOG_DEBUG("\n---PlanVectorBlockPass start---\n");
     // 1. Build memory dependence graph
     auto moduleOp = getOperation();
     auto &aa = getAnalysis<AliasAnalysis>();

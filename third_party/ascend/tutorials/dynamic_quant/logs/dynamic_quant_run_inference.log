@@ -1,0 +1,2 @@
+[PASS] 080/080 custom/dynamic_quant_random_040 shape=(64, 1, 3584) dst_type=int4 triton_active=4.750 us torch_npu_active=5.500 us selected=torch_npu output_max_diff=1 rmse=0.696522 torch_npu_accuracy=PASS torch_npu_error=
+SUMMARY total=80 passed=80 failed=0 public=40 random_generalization=40 torch_npu_runnable=80 torch_npu_accuracy_passed=80 torch_timed=80 torch_speedup_sample=80 torch_semantic_speedup=56.44629568402954 torch_npu_runnable_all_speedup=1.2178567858402316 torch_npu_runnable_all_gate=PASS max_rmse=0.715618

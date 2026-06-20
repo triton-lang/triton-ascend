@@ -1,0 +1,14 @@
+[PASS] 060/060 random_generalization id=custom/kv_rms_norm_rope_cache_random_040 shape=B16,N32,Skv3,Scache9,Dk80,Dv48 triton_active=203.750 us torch_npu_active=N/A selected=torch mismatches=0 max_diff=0.00390625 MARE=0.00588235 RMSE=5.08626e-06 torch_npu_accuracy=FAIL torch_npu_error=RuntimeError: npu_kv_rmsnorm_rope_cache_v2:../third_party/op-plugin/op_plugin/ops/opapi/KvRmsNormRopeCacheNpuOpApi.cpp:163 NPU function error: call aclnnKvRmsNormRopeCache failed, error code is 561002
+[ERROR] 2026-06-20-11:52:19 (PID:1554627, Device:0, RankID:-1) ERR00100 PTA call acl api failed.
+EZ9999: Inner Error!
+EZ9999[PID: 1554627] 2026-06-20-11:52:19.325.675 (EZ9999):  numHead should == 1.[FUNC:GetShapeAttrsInfo][FILE:kv_rms_norm_rope_cache_base_tiling.cpp][LINE:348]
+        TraceBack (most recent call last):
+       KvRmsNormRopeCache do tiling failed, ret is -1.
+       Check NnopbaseExecutorDoTiling(executor) failed
+       Check NnopbaseExecutorTilingAndUpdateBinInfo(executor) failed
+       Check NnopbaseExecutorMatchCache(executor) failed
+       Check NnopbaseRunForWorkspace(*executor, workspaceSize) failed
+
+SUMMARY total=60 passed=60 failed=0 public=20 random=40 torch_npu_runnable=0 torch_npu_accuracy_passed=0 torch_timed=57 torch_speedup_sample=54 torch_semantic_speedup=32.08236845931078 torch_npu_runnable_all_speedup=None torch_npu_runnable_all_gate=N/A max_rmse=1.9895e-05
+CANONICAL_JSONL path=logs/kv_rms_norm_rope_cache_validation.jsonl
+CANONICAL_JSONL_SUMMARY path=logs/kv_rms_norm_rope_cache_validation.summary.json

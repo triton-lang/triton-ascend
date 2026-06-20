@@ -1,0 +1,41 @@
+{
+  "benchmark": true,
+  "benchmark_torch": true,
+  "candidate_active_geomean_us": 107.53598240317142,
+  "failed": 0,
+  "main_speed_active_speedup_geomean": null,
+  "main_speed_candidate_active_geomean_us": null,
+  "main_speed_case_count": 0,
+  "main_speed_gate": "N/A",
+  "main_speed_sample": "torch_npu_runnable_all",
+  "main_speed_torch_npu_active_geomean_us": null,
+  "max_rmse": 1.9895026871345974e-05,
+  "notes": [
+    "Torch and torch_npu baselines are generated inside this operator directory.",
+    "Torch semantic timing is collected only when --benchmark-torch is set and remains an auxiliary comparison.",
+    "RMSE/MERE/MARE are emitted by validate_kv_rms_norm_rope_cache.py.",
+    "No external historical evaluation CSV/JSON is used by this self-validation flow."
+  ],
+  "passed": 60,
+  "public_cases": 20,
+  "random_generalization_cases": 40,
+  "random_seed": 20260617,
+  "schema_version": 4,
+  "selected_active_speedup_geomean": 32.08236845931078,
+  "selected_baseline_counts": {
+    "torch": 60,
+    "torch_npu": 0
+  },
+  "source_jsonl": "logs/kv_rms_norm_rope_cache_validation.jsonl",
+  "timing_source": "kernel_details.csv.active_window_median",
+  "torch_npu_accuracy_passed": 0,
+  "torch_npu_runnable": 0,
+  "torch_npu_runnable_all_active_speedup_geomean": null,
+  "torch_npu_runnable_all_speed_gate": "N/A",
+  "torch_semantic_active_speedup_geomean": 32.08236845931078,
+  "torch_semantic_baseline_active_geomean_us": 3519.4941419821685,
+  "torch_semantic_candidate_active_geomean_us": 105.83560491656768,
+  "torch_speedup_sample": 54,
+  "torch_timed": 57,
+  "total_cases": 60
+}

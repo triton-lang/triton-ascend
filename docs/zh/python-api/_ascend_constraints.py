@@ -75,7 +75,8 @@ CONSTRAINTS = {
                 Ascend 950 does not support fp64 (hardware limitation).",
             "Compilation issues may arise when used with complex loops and branch statements."
         ],
-        "example": "triton.language.advance",
+        "example":
+        "triton.language.advance",
     },
     "triton.language.arange": {
         "constraints": [
@@ -528,7 +529,8 @@ CONSTRAINTS = {
             "Compatibility issues with branch and loop statements: \
                 Complex pointer and mask calculations involving branches or loops may cause compilation failures.",
         ],
-        "example": "triton.language.load",
+        "example":
+        "triton.language.load",
     },
     "triton.language.load_tensor_descriptor": {
         "constraints": [
@@ -538,7 +540,8 @@ CONSTRAINTS = {
                 must be used as a suite in Triton 3.2.x. Do not mix them with `tl.load()` or `tl.store()`.",
             "Compatibility issues exist for certain functions (e.g. cast) in Triton 3.2.x."
         ],
-        "example": "triton.language.load_tensor_descriptor",
+        "example":
+        "triton.language.load_tensor_descriptor",
     },
     "triton.language.log": {
         "constraints": [
@@ -560,7 +563,8 @@ CONSTRAINTS = {
                 Do not reorder strides to achieve transpose.",
             "Compatibility issues may occur when used together with branch and loop statements."
         ],
-        "example": "triton.language.make_block_ptr",
+        "example":
+        "triton.language.make_block_ptr",
     },
     "triton.language.make_tensor_descriptor": {
         "constraints": [
@@ -570,7 +574,8 @@ CONSTRAINTS = {
                 must be used as a suite in Triton 3.2.x. Do not mix them with `tl.load()` or `tl.store()`.",
             "Compatibility issues exist for certain functions (e.g. cast) in Triton 3.2.x."
         ],
-        "example": "triton.language.make_tensor_descriptor",
+        "example":
+        "triton.language.make_tensor_descriptor",
     },
     "triton.language.max": {
         "constraints": [
@@ -778,7 +783,8 @@ CONSTRAINTS = {
             "Compatibility issues with branch and loop statements: \
                 Complex pointer and mask calculations involving branches or loops may cause compilation failures.",
         ],
-        "example": "triton.language.store",
+        "example":
+        "triton.language.store",
     },
     "triton.language.store_tensor_descriptor": {
         "constraints": [
@@ -788,7 +794,8 @@ CONSTRAINTS = {
                 must be used as a suite in Triton 3.2.x. Do not mix them with `tl.load()` or `tl.store()`.",
             "Compatibility issues exist for certain functions (e.g. cast) in Triton 3.2.x."
         ],
-        "example": "triton.language.store_tensor_descriptor",
+        "example":
+        "triton.language.store_tensor_descriptor",
     },
     "triton.language.sub": {
         "constraints": [

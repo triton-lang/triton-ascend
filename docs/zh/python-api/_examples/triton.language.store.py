@@ -23,7 +23,7 @@ def test_load_store():
     output = torch.zeros_like(x)
 
     # Run Triton kernel
-    kernel[(4,)](output, x, N)
+    kernel[(4, )](output, x, N)
 
     assert torch.allclose(output.cpu(), x.cpu())
 

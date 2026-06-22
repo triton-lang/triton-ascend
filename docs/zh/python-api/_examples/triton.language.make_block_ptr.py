@@ -40,7 +40,7 @@ def test_make_block_ptr():
     x = torch.arange(XB * YB * ZB, dtype=torch.float32).reshape(XB, YB, ZB).npu()
     output = torch.zeros_like(x)
 
-    kernel[(1,)](output, x, XB, YB, ZB)
+    kernel[(1, )](output, x, XB, YB, ZB)
 
     ref = torch.zeros((2, 2, 2), dtype=torch.float32).npu()
     ref[:, :, :1] = x[1:3, 2:4, 3:4]

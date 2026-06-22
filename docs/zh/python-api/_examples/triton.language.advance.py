@@ -42,7 +42,7 @@ def test_advance():
     output = torch.zeros_like(x)
 
     # Run Triton kernel
-    kernel[(1,)](output, x, XB, YB, ZB)
+    kernel[(1, )](output, x, XB, YB, ZB)
 
     assert torch.all(output.cpu() == x.cpu())
 

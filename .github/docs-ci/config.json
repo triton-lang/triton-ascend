@@ -1,0 +1,27 @@
+{
+  "name": "triton-ascend docs check config",
+  "config": {
+    "base": {
+      "docPath": "^(?!.*menu).*$",
+      "markdownlintRemoteConfigUrl": ".github/docs-ci/markdownlint.config.json",
+      "linkValidityCheckRemoteWhitelistUrl": ".github/docs-ci/url.whitelist.json",
+      "resourceExistenceCheckRemoteWhitelistUrl": ".github/docs-ci/url.whitelist.json",
+      "codespellCheckRemoteWhitelistUrl": ".github/docs-ci/codespell.whitelist.json",
+      "ci": [
+        "markdownlint",
+        "tag-closed-check",
+        "link-validity-check",
+        "resource-existence-check",
+        "codespell-check"
+      ]
+    }
+  },
+  "repo": {
+    "triton-lang/triton-ascend": {
+      "extendConfig": "base"
+    },
+    "all": {
+      "extendConfig": "base"
+    }
+  }
+}

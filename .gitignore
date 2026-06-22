@@ -110,3 +110,8 @@ dist/
 *.egg-info/
 .eggs/
 docs/zh/python-api/generated/
+
+# Docs PR gate: checker bundle is fetched at run time, not vendored;
+# output.md / result.json are generated reports.
+/output.md
+/result.json

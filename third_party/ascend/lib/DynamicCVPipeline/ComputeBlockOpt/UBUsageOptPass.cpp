@@ -65,6 +65,15 @@ class UBUsageOptPass : public PassWrapper<UBUsageOptPass, OperationPass<ModuleOp
                            SmallVector<int> &linkSize, SmallVector<int> &linkStart, SmallVector<int> &linkEnd,
                            SmallVector<int> &nodeBlockId, SmallVector<int> &nodeCoreType, SmallVector<int> &nodeArgs,
                            const CVPipeline::MemoryDependenceGraph &memGraph, CVPipeline::ComputeBlockIdManager &bm);
+    DenseMap<int, int> collectRecordChange(const SmallVector<SmallVector<int>> &needUbOpts,
+                                           const SmallVector<SmallVector<int>> &linkOut,
+                                           const SmallVector<SmallVector<int>> &linkIn,
+                                           const SmallVector<int> &linkSize, const SmallVector<int> &linkStart,
+                                           const SmallVector<int> &linkEnd, const SmallVector<int> &nodeBlockId,
+                                           const SmallVector<int> &nodeCoreType, DenseMap<int, Operation *> nodeId2op);
+    int sumIncomingLinkSize(int nodeId, const SmallVector<SmallVector<int>> &linkIn, const SmallVector<int> &linkSize,
+                            const SmallVector<int> &linkStart, const SmallVector<int> &linkEnd,
+                            const SmallVector<int> &nodeBlockId);
     llvm::LogicalResult UBUsageOptimization(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
                                             CVPipeline::ComputeBlockIdManager &bm);
 };
@@ -91,7 +100,7 @@ int UBUsageOptPass::getValueSizeInBytes(Value value)
     // Tensor
     if (auto rankedTensorType = dyn_cast<RankedTensorType>(type)) {
         if (!rankedTensorType.hasStaticShape()) {
-            return 1;
+            return MAX_EDGE_SIZE;
         }
         int64_t numElements = 1;
         for (int64_t dim : rankedTensorType.getShape()) {
@@ -374,20 +383,27 @@ collectNeedUbOpts(const SmallVector<SmallVector<int>> &linkOut, const SmallVecto
     return needUbOpts;
 }
 
-static int sumIncomingLinkSize(int nodeId, const SmallVector<SmallVector<int>> &linkIn,
-                               const SmallVector<int> &linkSize)
+int UBUsageOptPass::sumIncomingLinkSize(int nodeId, const SmallVector<SmallVector<int>> &linkIn,
+                                        const SmallVector<int> &linkSize, const SmallVector<int> &linkStart,
+                                        const SmallVector<int> &linkEnd, const SmallVector<int> &nodeBlockId)
 {
     int totalSize = 0;
     for (int edgeId : linkIn[nodeId]) {
-        totalSize += linkSize[edgeId];
+        if (nodeBlockId[linkStart[edgeId]] != nodeBlockId[linkEnd[edgeId]]) {
+            if (linkSize[edgeId] == MAX_EDGE_SIZE) {
+                totalSize = MAX_EDGE_SIZE;
+            } else {
+                totalSize += linkSize[edgeId];
+            }
+        }
     }
     return totalSize;
 }
 
-bool findUniqueDependentNode(int curNode, int optBlockId, const SmallVector<SmallVector<int>> &linkOut,
-                             const SmallVector<SmallVector<int>> &linkIn, const SmallVector<int> &linkStart,
-                             const SmallVector<int> &linkEnd, const SmallVector<int> &linkSize,
-                             const SmallVector<int> &nodeBlockId, int &uniqueNextNode)
+static bool findUniqueDependentNode(int curNode, int optBlockId, const SmallVector<SmallVector<int>> &linkOut,
+                                    const SmallVector<SmallVector<int>> &linkIn, const SmallVector<int> &linkStart,
+                                    const SmallVector<int> &linkEnd, const SmallVector<int> &nodeBlockId,
+                                    int &uniqueNextNode)
 {
     // only find A link single chain.
     if (linkOut[curNode].size() != 1)
@@ -409,13 +425,11 @@ bool findUniqueDependentNode(int curNode, int optBlockId, const SmallVector<Smal
     return true;
 }
 
-static DenseMap<int, int> collectRecordChange(const SmallVector<SmallVector<int>> &needUbOpts,
-                                              const SmallVector<SmallVector<int>> &linkOut,
-                                              const SmallVector<SmallVector<int>> &linkIn,
-                                              const SmallVector<int> &linkSize, const SmallVector<int> &linkStart,
-                                              const SmallVector<int> &linkEnd, const SmallVector<int> &nodeBlockId,
-                                              const SmallVector<int> &nodeCoreType,
-                                              DenseMap<int, Operation *> nodeId2op)
+DenseMap<int, int> UBUsageOptPass::collectRecordChange(
+    const SmallVector<SmallVector<int>> &needUbOpts, const SmallVector<SmallVector<int>> &linkOut,
+    const SmallVector<SmallVector<int>> &linkIn, const SmallVector<int> &linkSize, const SmallVector<int> &linkStart,
+    const SmallVector<int> &linkEnd, const SmallVector<int> &nodeBlockId, const SmallVector<int> &nodeCoreType,
+    DenseMap<int, Operation *> nodeId2op)
 {
     DenseMap<int, int> recordChange;
     int nodeNum = static_cast<int>(nodeBlockId.size());
@@ -434,7 +448,9 @@ static DenseMap<int, int> collectRecordChange(const SmallVector<SmallVector<int>
             LOG_DEBUG("activateSet Size:" << activateSet.size() << "\n");
 
             for (int activateNode : activateSet) {
-                int originUBSize = sumIncomingLinkSize(activateNode, linkIn, linkSize);
+                int originUBSize = sumIncomingLinkSize(activateNode, linkIn, linkSize, linkStart, linkEnd, nodeBlockId);
+                LOG_DEBUG("activateNode:" << *nodeId2op.at(activateNode) << "\n");
+                LOG_DEBUG("originUBSize:" << originUBSize << "\n");
                 int minUBSize = originUBSize;
                 SmallVector<int> chain;
                 chain.push_back(activateNode);
@@ -444,9 +460,8 @@ static DenseMap<int, int> collectRecordChange(const SmallVector<SmallVector<int>
                 while (true) {
                     int curNode = chain.back();
                     int uniqueNextNode = -1;
-                    if (!findUniqueDependentNode(curNode, optBlockId, linkOut, linkIn, linkStart, linkEnd, linkSize,
-                                                 nodeBlockId, uniqueNextNode))
-                    {
+                    if (!findUniqueDependentNode(curNode, optBlockId, linkOut, linkIn, linkStart, linkEnd, nodeBlockId,
+                                                 uniqueNextNode)) {
                         break;
                     }
 
@@ -456,8 +471,12 @@ static DenseMap<int, int> collectRecordChange(const SmallVector<SmallVector<int>
                     auto nowUBSize = 0;
                     LOG_DEBUG("now chain op = " << *nodeId2op.at(chain[i]) << "\n");
                     for (auto cutEdgeId : linkOut[chain[i]]) {
-
-                        nowUBSize += linkSize[cutEdgeId];
+                        if (linkSize[cutEdgeId] == MAX_EDGE_SIZE) {
+                            nowUBSize = MAX_EDGE_SIZE;
+                            break;
+                        } else {
+                            nowUBSize += linkSize[cutEdgeId];
+                        }
                     }
                     if (nowUBSize < minUBSize) {
                         bestCutPointIdx = i + 1;

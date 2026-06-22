@@ -544,8 +544,11 @@ SmallVector<Operation*> PlanCubeBlockPass::matchSeed(Operation* dotOp, ComputeBl
         Operation *def = operand.getDefiningOp();
         if (!def)
             continue;
-        if (checkValidInputSeed(def) && isCubeOp(def) && dotOp->getBlock() == def->getBlock() && bm.getBlockIdByOp(def) == -1) {
-            ret.push_back(def);
+        if (checkValidInputSeed(def) && isCubeOp(def) && dotOp->getBlock() == def->getBlock() &&
+            bm.getBlockIdByOp(def) == -1) {
+            if (def->hasOneUse()) {
+                ret.push_back(def);
+            }
         }
     }
     // match outputs
@@ -583,6 +586,9 @@ llvm::LogicalResult PlanCubeBlockPass::processBlockWithCubeBFS(Block *block, con
         llvm::SmallVector<Operation*> dotSeeds = matchSeed(dot, bm);
         if (willCreateCycle(dotSeeds, memGraph, temBlockId, bm)) {
             LOG_DEBUG("Cube Seed already have a cycle!!");
+            for(auto seed: dotSeeds) {
+                LOG_DEBUG("Seed: " << *seed << "\n");
+            }
             return llvm::failure();
         }
         llvm::SmallVector<Operation *> newGroup;

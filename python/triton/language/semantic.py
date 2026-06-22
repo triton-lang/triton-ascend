@@ -847,8 +847,7 @@ class TritonSemantic(Generic[TensorTy]):
                              "data-type of size " + str(dst_bits))
         return self.tensor(self.builder.create_bitcast(input.handle, dst_ty.to_ir(self.builder)), dst_ty)
 
-    def cast(self, input: TensorTy, dst_ty: tl.dtype, fp_downcast_rounding: Optional[str] = None,
-             overflow_mode: Optional[str] = None) -> TensorTy:
+    def cast(self, input: TensorTy, dst_ty: tl.dtype, fp_downcast_rounding: Optional[str] = None) -> TensorTy:
         src_ty = input.type
         src_sca_ty = src_ty.scalar
         dst_sca_ty = dst_ty.scalar
@@ -915,10 +914,6 @@ class TritonSemantic(Generic[TensorTy]):
                 ty = input.dtype.to_ir(self.builder)
                 _0 = self.tensor(self.builder.get_null_value(ty), input.dtype)
                 return self.not_equal(input, _0)
-            elif overflow_mode == "saturate" and \
-                (src_sca_ty.is_int_unsigned() or dst_sca_ty.is_int_unsigned()) and \
-                src_sca_ty.int_bitwidth >= dst_sca_ty.int_bitwidth:
-                return self.cast(self.cast(input, tl.float32), dst_sca_ty)
             else:
                 return self.tensor(self.builder.create_int_cast(input.handle, dst_ty.to_ir(self.builder), sign_extend),
                                    dst_ty)

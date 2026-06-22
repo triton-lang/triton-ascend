@@ -42,16 +42,8 @@ namespace {
 
 static constexpr llvm::StringLiteral interceptrFunc[] {
   "chunk_transform_qk_fwd_kernel",
-  "_attn_fwd",
   "_attn_bwd",
   "_kernel_matmul_fp8_row_non_persistent",
-  "bmm_kernel",
-  "lightning_indexer_grad_kernel",
-  "backward_dkdv",
-  "backward_dq",
-  "backward_sum_o_do",
-  "forward_kernel",
-  "bwd_qkv_kernel",
   "parallel_path_bwd_dq_kernel",
   "parallel_nsa_compression_fwd_kernel",
   "parallel_nsa_compression_bwd_kernel_dq",

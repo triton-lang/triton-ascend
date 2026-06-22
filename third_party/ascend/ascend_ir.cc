@@ -40,6 +40,7 @@
 #include "mlir/IR/Types.h"
 #include "mlir/Support/LLVM.h"
 #include "llvm/IR/Instructions.h"
+#include <Python.h>
 
 using namespace mlir;
 namespace py = pybind11;
@@ -165,6 +166,40 @@ ModeAndPipes GetSyncBlockModeAndPipes(MLIRContext *ctx,
   }
   return {modeAttr, cubePipe, vectorPipe};
 }
+// Extend triton.ir.context with a context manager protocol for ascend tests
+// and examples, without modifying upstream python/src/ir.cc.
+void installTritonContextManager()
+{
+  static bool installed = false;
+  if (installed) {
+    return;
+  }
+  installed = true;
+
+  py::module_ tritonIr = py::module_::import("triton._C.libtriton.ir");
+  py::object ctxClass = tritonIr.attr("context");
+  if (py::hasattr(ctxClass, "__enter__")) {
+    return;
+  }
+
+  const char *patch = R"PY(
+import triton._C.libtriton.ir as _triton_ir
+if not hasattr(_triton_ir.context, '__enter__'):
+    def _mlir_context_enter(self):
+        return self
+    def _mlir_context_exit(self, exc_type, exc_val, exc_tb):
+        return False
+    _triton_ir.context.__enter__ = _mlir_context_enter
+    _triton_ir.context.__exit__ = _mlir_context_exit
+)PY";
+  PyGILState_STATE gil = PyGILState_Ensure();
+  if (PyRun_SimpleString(patch) != 0) {
+    PyGILState_Release(gil);
+    throw std::runtime_error("failed to install MLIRContext context manager");
+  }
+  PyGILState_Release(gil);
+}
+
 } // namespace
 
 void init_ascend_ir(py::module &&m) {
@@ -533,6 +568,10 @@ void init_ascend_ir(py::module &&m) {
            [](AscendNPUIROpBuilder &self, int64_t value) -> Attribute {
                return IntegerAttr::get(self.getBuilder().getI64Type(), value);
            })
+      .def("get_type_array_attr",
+           [](AscendNPUIROpBuilder &self, const std::vector<Type> &array) -> Attribute {
+               return self.getBuilder().getTypeArrayAttr(array);
+           })
       .def("get_core_type_attr",
            [](AscendNPUIROpBuilder &self, hivm::TCoreType core_type) -> Attribute {
                return self.getBuilder().getAttr<hivm::TCoreTypeAttr>(core_type);
@@ -795,4 +834,6 @@ void init_ascend_ir(py::module &&m) {
                                              hivm::DataLayoutAttr::get(ctx, hivm::DataLayout::ND))
               .getResult();
       });
+
+  installTritonContextManager();
 }

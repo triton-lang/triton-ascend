@@ -2744,6 +2744,95 @@ IndirectLoadConverter::matchAndRewrite(triton::ascend::IndirectLoadOp op, OpAdap
   return success();
 }
 
+LogicalResult StrideLoadConverter::matchAndRewrite(
+    triton::ascend::StrideLoadOp op, OpAdaptor adaptor,
+    ConversionPatternRewriter &rewriter) const {
+  auto loc = op.getLoc();
+
+  auto moduleOp = op->getParentOfType<ModuleOp>();
+  rewriter.setInsertionPoint(moduleOp.getBody(),
+                             std::prev(moduleOp.getBody()->end()));
+
+  auto funcName = generateUniqueFuncName(moduleOp, funcNameBase);
+
+  auto src = adaptor.getSrc();
+  auto offset = adaptor.getOffset();
+  auto other = adaptor.getOther();
+  auto strides = adaptor.getStride();
+  auto numels = adaptor.getNumel();
+  auto resTy = op.getResult().getType();
+
+  auto srcTy = dyn_cast<MemRefType>(src.getType());
+  if (!srcTy) {
+    return rewriter.notifyMatchFailure(op, "expected MemRefType for src");
+  }
+
+  SmallVector<Type> inputTypes({srcTy});
+  inputTypes.push_back(offset.getType());
+  inputTypes.push_back(other.getType());
+  for (Value stride : strides)
+    inputTypes.push_back(stride.getType());
+  for (Value numel : numels)
+    inputTypes.push_back(numel.getType());
+  auto libFnType = rewriter.getFunctionType(inputTypes, {resTy});
+  auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
+  SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
+
+  SmallVector<Value> inputVals({src});
+  inputVals.push_back(offset);
+  inputVals.push_back(other);
+  inputVals.append(strides.begin(), strides.end());
+  inputVals.append(numels.begin(), numels.end());
+
+  rewriter.setInsertionPoint(op);
+  auto callOp = rewriter.create<func::CallOp>(
+      loc, funcOp.getSymNameAttr(), TypeRange({resTy}), inputVals);
+  rewriter.replaceOp(op, callOp);
+  return success();
+}
+
+LogicalResult StrideStoreConverter::matchAndRewrite(
+    triton::ascend::StrideStoreOp op, OpAdaptor adaptor,
+    ConversionPatternRewriter &rewriter) const {
+  auto loc = op.getLoc();
+
+  auto moduleOp = op->getParentOfType<ModuleOp>();
+  rewriter.setInsertionPoint(moduleOp.getBody(),
+                             std::prev(moduleOp.getBody()->end()));
+
+  auto funcName = generateUniqueFuncName(moduleOp, funcNameBase);
+
+  auto dst = adaptor.getDst();
+  auto src = adaptor.getSrc();
+  auto offset = adaptor.getOffset();
+  auto strides = adaptor.getStride();
+  auto numels = adaptor.getNumel();
+
+  auto dstTy = dyn_cast<MemRefType>(dst.getType());
+  if (!dstTy) {
+    return rewriter.notifyMatchFailure(op, "expected MemRefType for dst");
+  }
+
+  SmallVector<Type> inputTypes({dstTy, src.getType(), offset.getType()});
+  for (Value stride : strides)
+    inputTypes.push_back(stride.getType());
+  for (Value numel : numels)
+    inputTypes.push_back(numel.getType());
+  auto libFnType = rewriter.getFunctionType(inputTypes, {});
+  auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
+  SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
+
+  SmallVector<Value> inputVals({dst, src, offset});
+  inputVals.append(strides.begin(), strides.end());
+  inputVals.append(numels.begin(), numels.end());
+
+  rewriter.setInsertionPoint(op);
+  rewriter.create<func::CallOp>(loc, funcOp.getSymNameAttr(), TypeRange({}),
+                                inputVals);
+  rewriter.eraseOp(op);
+  return success();
+}
+
 LogicalResult
 IndirectStoreConverter::matchAndRewrite(triton::ascend::IndirectStoreOp op, OpAdaptor adaptor,
                                         ConversionPatternRewriter &rewriter) const

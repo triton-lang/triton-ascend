@@ -46,6 +46,7 @@ namespace {
 
 static constexpr llvm::StringLiteral containedFunc[] {
   "chunk_gated_delta_rule_bwd_kernel_dhu_k128_blockdim128",
+  "fused_chunk_fwd_kernel",
 };
 
 static LogicalResult isInterceptedModule(ModuleOp module)

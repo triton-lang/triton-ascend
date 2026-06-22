@@ -43,7 +43,7 @@ void AnalyzeDataFlowPass::runOnOperation()
 
   pm.addPass(createAnalyzeScopePass());
 
-  pm.addPass(createAnalyzeArgsPass());
+  //pm.addPass(createAnalyzeArgsPass());
 
   pm.addPass(createAnalyzeFlagPass());
 

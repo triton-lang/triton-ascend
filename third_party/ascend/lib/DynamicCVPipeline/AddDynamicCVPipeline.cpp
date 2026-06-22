@@ -41,6 +41,7 @@
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache.h"
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/DynamicCVAutoBlockify.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
@@ -73,6 +74,9 @@ static std::optional<int64_t> getErrorCode(ModuleOp moduleOp) {
 }
 
 static inline void addPasses(OpPassManager &pm) {
+  DynamicCVAutoBlockifyPassOptions autoBlockifyOptions;
+  autoBlockifyOptions.aicoreNum = this->aicoreNum;
+  pm.addPass(createDynamicCVAutoBlockifyPass(autoBlockifyOptions));
   pm.addPass(createPreCheckAvailablePass());
   pm.addPass(createStandardizeOpPass());
   pm.addPass(createPlanComputeBlockPass());

@@ -610,13 +610,14 @@ LogicalResult SplitMatmulPattern::matchAndRewrite(linalg::MatmulOp matmulOp, Pat
     LOG_DEBUG("shouldSplit = " << splitInfo.shouldSplit);
     LOG_DEBUG("-------------------");
     matmulOp->setAttr(CVPipeline::kLoopCarriedL0C, rewriter.getUnitAttr());
-
+    
+    if (splitInfo.mayNotExec) {
+        matmulOp->setAttr(CVPipeline::kMayNotExec, rewriter.getUnitAttr());
+    }
+    
     if (splitInfo.shouldSplit) {
         splitMatmul(matmulOp, rewriter, splitInfo);
     }
 
-    if (splitInfo.mayNotExec) {
-        matmulOp->setAttr(CVPipeline::kMayNotExec, rewriter.getUnitAttr());
-    }
     return success();
 }

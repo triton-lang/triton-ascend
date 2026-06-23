@@ -98,7 +98,7 @@ docker build \
 -f Dockerfile .
 ```
 
-**x86_64架构**
+**amd64架构**
 
 ```bash
 docker build \
@@ -122,9 +122,9 @@ RUN apt update -y && \
 
 | 芯片系列  | 产品示例                        | 架构          |
 |-----------|---------------------------------|---------------|
-| 昇腾910b  | Atlas 800T A2、Atlas 900 A2 PoD | ARM64、x86_64 |
-| 昇腾A3    | Atlas 800T A3                   | ARM64、x86_64 |
-| 昇腾950   | 950PR系列                       | ARM64、x86_64 |
+| 昇腾910b  | Atlas 800T A2、Atlas 900 A2 PoD | arm64、amd64 |
+| 昇腾A3    | Atlas 800T A3                   | arm64、amd64 |
+| 昇腾950   | 950PR系列                       | arm64、amd64 |
 
 # 许可证
 

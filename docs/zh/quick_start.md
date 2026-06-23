@@ -12,21 +12,21 @@ Triton-Ascend 是适配华为 Ascend 昇腾芯片的 Triton 优化版本，用�
 
 支持的操作系统: linux(aarch64/x86_64)
 
-支持的 Ascend 产品: Atlas A2/A3 系列
+支持的 Ascend 产品: Atlas A2/A3/A5 系列
 
-最小硬件配置: 单卡 32GB 显存（推荐）
+最小硬件配置: 单卡 32GB 内存（推荐）
 
 #### 软件依赖
 
 确定 Python、CANN 和 torch_npu 软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。
 -   Python 版本选择：py3.9-py3.11 均可。
 
--   CANN 版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成 CANN 的安装与配置。建议下载安装 8.5.0 版本。
+-   CANN 版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成 CANN 的安装与配置。建议下载安装 9.0.0 版本。
 
 -   torch_npu 版本选择：当前配套的 torch_npu 版本为 2.7.1.post4。
-  
-### 具体实施（以whl包安装为例） 
-```
+
+### 具体实施（以whl包安装为例）
+```bash
 # 以安装 triton-ascend 3.2.1 为例
 pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
 ```
@@ -157,7 +157,7 @@ def test_add(SIZE, BLOCK_SIZE):
     assert_close(output, output_torch, rtol=1e-3, atol=1e-3)
 ```
 修改完后，可用`pytest`运行用例，执行成功即表明迁移成功。
-```
+```bash
 pytest test_add.py
 ```
 若未安装`pytest`组件，可使用`pip install pytest`进行安装。

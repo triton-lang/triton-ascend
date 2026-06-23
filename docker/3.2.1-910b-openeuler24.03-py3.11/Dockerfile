@@ -98,6 +98,7 @@ RUN pip3 install --no-cache-dir \
     ninja \
     cmake \
     wheel \
+    tabulate \
     --index-url ${PIP_SOURCE}
 
 # Note: Install torch_npu and triton-ascend

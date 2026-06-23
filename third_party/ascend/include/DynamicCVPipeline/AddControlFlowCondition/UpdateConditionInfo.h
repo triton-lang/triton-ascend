@@ -99,6 +99,21 @@ private:
                                          SmallVector<Value> &conditions, DenseSet<Value> &usedVarsSet,
                                          DenseMap<Value, VarUpdateType> &varUpdateTypes);
 
+    // Build the ifOp variable mapping for the tensor iter_args
+    int buildTensorIterArgIfOpVarMap(scf::ForOp forOp);
+
+    // Collect the consumption conditions of the tensor iter_args consumer
+    void collectTensorIterArgInputConditions(OpBuilder &builder, Location loc,
+                                             scf::IfOp ifOp, SmallVector<Value> &conditions,
+                                             DenseSet<Value> &usedVarsSet,
+                                             DenseMap<Value, VarUpdateType> &varUpdateTypes);
+
+    // Collect tensor iter_args producer conditions
+    void collectTensorIterArgOutputConditions(OpBuilder &builder, Location loc,
+                                              scf::IfOp ifOp, SmallVector<Value> &conditions,
+                                              DenseSet<Value> &usedVarsSet,
+                                              DenseMap<Value, VarUpdateType> &varUpdateTypes);
+
     SmallVector<Type> buildNewIfResultTypes(scf::IfOp oldIfOp, bool hasCounter, Value counter);
 
     void collectYieldOperands(Block &block, Operation *&yieldOp, SmallVector<Value> &yieldOperands);

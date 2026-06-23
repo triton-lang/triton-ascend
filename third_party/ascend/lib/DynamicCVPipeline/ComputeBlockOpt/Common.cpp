@@ -171,11 +171,7 @@ bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify, const MemoryDepende
     }
 
     for (auto &[op, origBlockId] : origBlockIdMap) {
-        if (origBlockId == -1) {
-            op->removeAttr(kBlockId);
-        } else {
-            bm.updateBlockId(op, origBlockId);
-        }
+        bm.updateBlockId(op, origBlockId);
     }
 
     return hasCycle;

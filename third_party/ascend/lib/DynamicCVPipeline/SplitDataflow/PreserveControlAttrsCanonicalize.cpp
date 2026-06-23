@@ -95,16 +95,17 @@ private:
                 return defOp;
         }
 
-        // Fallback: search recentInserts in reverse, skip nested candidates
+        Block *oldBlock = oldOp->getBlock();
+        if (!oldBlock)
+            return nullptr;
+
+        // Fallback: search recentInserts in reverse, but only accept same-block candidates.
         for (Operation *candidate : llvm::reverse(recentInserts.getArrayRef())) {
             if (!canTransferAttrs(oldOp, candidate))
                 continue;
 
-            // Skip candidates nested inside another new control flow op
-            Operation *parent = candidate->getParentOp();
-            if (parent && recentInserts.contains(parent) && isTrackedControlFlowOp(parent))
+            if (candidate->getBlock() != oldBlock)
                 continue;
-
             return candidate;
         }
         return nullptr;

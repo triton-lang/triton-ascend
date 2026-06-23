@@ -1208,10 +1208,8 @@ void BlockDataParser::rewriteAddPtr(
                        << constVal.value() << " at dim " << i << "\n";
         });
 
-        Value zero = rewriter.create<arith::ConstantIndexOp>(op.getLoc(), 0);
         Value negOffsetVal = rewriter.create<arith::ConstantIndexOp>(op.getLoc(), constVal.value());
-        Value newOffset = rewriter.create<arith::SubIOp>(op.getLoc(), zero, negOffsetVal);
-        offsets[i] = newOffset;
+        offsets[i] = negOffsetVal;
       }
     }
   }

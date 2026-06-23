@@ -31,8 +31,8 @@ namespace StridedLoadStoreRewrite {
 using namespace mlir;
 using namespace triton;
 
-// Tag stamped on tt.indirect_load ops that this sub-step emits so the pattern
-// driver does not re-enter on its own output.
+// Tag stamped on ttasc ops that this sub-step emits so the pattern driver does
+// not re-enter on its own output.
 inline constexpr const char *RewrittenByStridedLoadStoreRewriteTAG =
     "RewrittenByStridedLoadStoreRewrite";
 
@@ -44,8 +44,8 @@ inline constexpr const char *RewrittenByStridedLoadStoreRewriteTAG =
 inline constexpr const char *InspectedByStridedLoadStoreRewriteTAG =
     "InspectedByStridedLoadStoreRewrite";
 
-// V1 SIMT IndirectLoad fast-path rewrite:
-//   Convert tt.load to tt.indirect_load when the load's effective per-axis
+// V1 SIMT StrideLoad fast-path rewrite:
+//   Convert tt.load to tt.stride_load when the load's effective per-axis
 //   strides have a statically-known last-axis stride > 1 with a non-permuted
 //   layout (i.e. ImplicitPermute would not / did not touch it, and it isn't
 //   the stride==2 even-size case handled by DeinterleaveStatusOptimization).
@@ -63,7 +63,7 @@ public:
                                   PatternRewriter &rewriter) const override;
 };
 
-// V2: mirror of LoadConverter for tt.store -> tt.indirect_store. Same trigger
+// V2: mirror of LoadConverter for tt.store -> tt.stride_store. Same trigger
 // condition (non-permuted + static last-axis stride > 1, non-deinterleave),
 // same source-op restrictions (AddPtr / make_tensor_ptr / one-level advance),
 // same MLIR-pattern-contract handling via the Inspected/Rewritten tags.

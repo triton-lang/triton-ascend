@@ -83,7 +83,11 @@ void ComputeBlockIdManager::updateBlockId(Operation *op, int blockId)
 {
     // Force Update.
     MLIRContext *ctx = op->getContext();
-    op->setAttr(kBlockId, IntegerAttr::get(IntegerType::get(ctx, blockIdWidth), blockId));
+    if (blockId == -1) {
+        op->removeAttr(kBlockId);
+    } else {
+        op->setAttr(kBlockId, IntegerAttr::get(IntegerType::get(ctx, blockIdWidth), blockId));
+    }
     auto it = opToBlockId.find(op);
     if (it != opToBlockId.end()) {
         int preBlockId = it->second;
@@ -127,7 +131,7 @@ llvm::LogicalResult ComputeBlockIdManager::markAndRecord(Operation *op, int bloc
     MLIRContext *ctx = op->getContext();
     op->setAttr(kBlockId, IntegerAttr::get(IntegerType::get(ctx, blockIdWidth), blockId));
     auto itOld = opToBlockId.find(op);
-    if (itOld != opToBlockId.end()) {
+    if (itOld != opToBlockId.end() && itOld->second != -1) {
         llvm::errs() << "Error: Operation already has a block id. Op: " << *op << ", old block id: " << itOld->second
                      << ", new block id: " << blockId << "\n";
         return llvm::failure();

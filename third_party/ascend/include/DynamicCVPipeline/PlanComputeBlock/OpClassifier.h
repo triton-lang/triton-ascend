@@ -46,7 +46,7 @@ enum OpCoreType { OP_UNDETERMINED = 0, OP_CUBE_ONLY = 1, OP_VECTOR_ONLY = 2, OP_
 
 // OpClassifierPass for categorizing operations as CUBE or VECTOR
 class OpClassifierPass : public PassWrapper<OpClassifierPass, OperationPass<ModuleOp>> {
-public:
+  public:
     MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(OpClassifierPass)
 
     // Constructor
@@ -64,7 +64,9 @@ public:
     }
     ::llvm::StringRef getName() const override { return "OpClassifierPass"; }
 
-private:
+  private:
+    llvm::DenseMap<Operation *, Operation *> CloneOpMap;
+
     // Map from operation to its core type
     llvm::DenseMap<Operation *, OpCoreType> opCoreTypes;
 
@@ -87,6 +89,7 @@ private:
     void matchToTensorPattern(Operation *def);
     void matchTransposePattern(Operation *def);
     void matchFillPattern(Operation *def);
+    void matchEmptyPattern(Operation *def);
 
     // Downstream pattern matching helpers
     void matchStorePattern(Operation *user);
@@ -134,7 +137,7 @@ private:
 
     // Step 5: Handle else region yield of scf.if by extracting core_type from then region yield
     bool handleYieldFromElseRegion(std::vector<OpCoreType> &coreTypes, unsigned operandIndex,
-                                   Operation *thenYieldForElse, Value &operand);
+                                   Operation *thenYieldForElse, Value &operand, Operation *elseYieldOp);
 
     // Step 6: Handle CUBE_AND_VECTOR operations
     int handleCubeAndVector();

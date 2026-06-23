@@ -62,6 +62,36 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 }
 
 // -----
+// A one-tile mask has BOUND == tileLen. It is provably all true for the only
+// tile, but the static tile count is one, so there is nothing to coalesce.
+// CHECK-LABEL: module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+// CHECK-NOT: hacc.coalesce_factor
+// CHECK-LABEL: func.func @tile_chunk_single_full_tile
+// CHECK-NOT: sizes: [16, 16]
+// CHECK: sizes: [16]
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @tile_chunk_single_full_tile(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                              %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
+    %pid = tt.get_program_id x : i32
+    %c16 = arith.constant 16 : i32
+    %c16_tensor = arith.constant dense<16> : tensor<16xi32>
+    %zero = arith.constant dense<0.000000e+00> : tensor<16xf32>
+    %blk = arith.muli %pid, %c16 : i32
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %blk_splat = tt.splat %blk : i32 -> tensor<16xi32>
+    %offs = arith.addi %blk_splat, %range : tensor<16xi32>
+    %mask = arith.cmpi slt, %offs, %c16_tensor : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+    %src_ptr = tt.addptr %src_base, %offs : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+    %val = tt.load %src_ptr, %mask, %zero : tensor<16x!tt.ptr<f32>>
+    %dst_base = tt.splat %arg1 : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+    %dst_ptr = tt.addptr %dst_base, %offs : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+    tt.store %dst_ptr, %val, %mask : tensor<16x!tt.ptr<f32>>
+    tt.return
+  }
+}
+
+// -----
 // Reading num_programs on the coalesced axis is unsafe because the host launcher
 // divides that grid dimension by H. The pass must leave the kernel uncoalesced.
 // CHECK-LABEL: module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {

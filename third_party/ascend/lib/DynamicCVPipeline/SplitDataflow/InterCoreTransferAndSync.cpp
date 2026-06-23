@@ -40,6 +40,7 @@
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Dominance.h"
@@ -185,6 +186,10 @@ bool InterCoreTransferAndSyncPass::isOuterLayerDependency(size_t depIndex, mlir:
             continue;
         }
         auto &otherDep = memDependencies[i];
+
+        if (otherDep.type != memDependencies[depIndex].type) {
+            continue;
+        }
 
         auto [otherProdStart, otherProdEnd] = getBlockStartEnd(otherDep.producerBlockId, module);
         auto [otherConsStart, otherConsEnd] = getBlockStartEnd(otherDep.consumerBlockId, module);
@@ -627,22 +632,25 @@ std::pair<Operation *, Operation *> InterCoreTransferAndSyncPass::createTransfer
 mlir::Operation *InterCoreTransferAndSyncPass::analyzeConsumerReadInsertPoint(
     Value srcValue, int iniConsumerId)
 {
-    llvm::SmallVector<mlir::Operation *> consumerOps;
+    llvm::DenseSet<mlir::Operation *> consumerOps;
     for (Operation *user : srcValue.getUsers()) {
         auto userBlockIdOpt = CVPipeline::getOpBlockId(user);
         if (userBlockIdOpt && static_cast<int>(*userBlockIdOpt) == iniConsumerId) {
-            consumerOps.push_back(user);
+            consumerOps.insert(user);
         }
     }
-    auto firstConsumerOp = std::min_element(
-        consumerOps.begin(), 
-        consumerOps.end(), 
-        [](mlir::Operation* a, mlir::Operation* b) {
-            return a->isBeforeInBlock(b);
+
+    mlir::Operation* firstFoundOp = nullptr;
+
+    module->walk([&](mlir::Operation* op) {
+        if (consumerOps.contains(op)) {
+            firstFoundOp = op;
+            return mlir::WalkResult::interrupt(); 
         }
-    );
-    
-    return firstConsumerOp != consumerOps.end() ? *firstConsumerOp : nullptr;
+        return mlir::WalkResult::advance();
+    });
+
+    return firstFoundOp;
 }
 
 mlir::Operation *InterCoreTransferAndSyncPass::getConsumerWaitPoint(int transferIndex)
@@ -652,7 +660,8 @@ mlir::Operation *InterCoreTransferAndSyncPass::getConsumerWaitPoint(int transfer
         if (consumerWaitPoint) {
             return;
         }
-        if (!isa<hivm::ConvertLayoutOp>(op) && !isa<memref::MemorySpaceCastOp>(op)) {
+        if (!isa<hivm::ConvertLayoutOp>(op) && !isa<memref::MemorySpaceCastOp>(op)
+            && !isa<LLVM::LoadOp>(op)) {
             return;
         }
         auto transferIdAttr = op->getAttrOfType<IntegerAttr>(kTransferIdAttr);
@@ -665,58 +674,105 @@ mlir::Operation *InterCoreTransferAndSyncPass::getConsumerWaitPoint(int transfer
 
 Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(OpBuilder &builder, Value srcValue,
     Value normalizedValue, Operation *vectorEndOp, Operation *cubeStartOp, Location loc, int transferIndex,
-    int iniConsumerId, Operation **consumedDataOp)
+    int iniConsumerId, bool isScaler, Operation **consumedDataOp)
 {
-    LOG_DEBUG("Inserting [Vector->Cube] transfer for value: " << srcValue << "\n");
-    // Step 1: Get input information (2D tensor: MxN)
-    auto srcTensorType = cast<RankedTensorType>(srcValue.getType());
-    auto normalizedTensorType = cast<RankedTensorType>(normalizedValue.getType());
-    Type elemType = srcTensorType.getElementType();
+    mlir::Operation *sendOp = nullptr;
+    mlir::Operation *receiveOp = nullptr;
+    Value receiveValue;
 
     int vecBlockId = static_cast<int>(CVPipeline::getOpBlockId(vectorEndOp).value_or(-1));
     int cubeBlockId = static_cast<int>(CVPipeline::getOpBlockId(cubeStartOp).value_or(-1));
+    LOG_DEBUG("Inserting [Vector->Cube] transfer for value: " << srcValue << "\n");
 
-    auto [vecAllocOp, cubeAllocOp] = createTransferAllocs(builder, loc, normalizedTensorType.getShape(), elemType,
-        hivm::AddressSpace::L1, vectorEndOp, cubeStartOp, vecBlockId, cubeBlockId, "VECTOR", "CUBE", transferIndex);
+    if (isScaler) {
+        builder.setInsertionPointAfter(vectorEndOp);
+        SmallVector<Operation *> writeOps;
+        LOG_DEBUG("before writeToSSBuffer\n");
+        auto addrOpt = ssbufferManager.writeToSSBuffer(srcValue, builder, writeOps);
+        if (!addrOpt) {
+            LOG_DEBUG("[v->c] Failed to write scalar value to SSBuffer\n");
+            return nullptr;
+        }
+        int64_t addr = *addrOpt;
+        LOG_DEBUG("after writeToSSBuffer\n");
+        Operation *storeOp = nullptr;
+        for (Operation *op : writeOps) {
+            attachTransferTags(op, vecBlockId, "VECTOR", transferIndex);
+            if (isa<LLVM::StoreOp>(op)) {
+                storeOp = op;
+            }
+        }
+        sendOp = storeOp;
+        LOG_DEBUG("before readFromSSBuffer\n");
+        builder.setInsertionPoint(cubeStartOp);
+        SmallVector<Operation *> readOps;
+        auto loadedValueOpt = ssbufferManager.readFromSSBuffer(addr, builder, readOps);
+        if (!loadedValueOpt) {
+            LOG_DEBUG("[v->c] Failed to read scalar value from SSBuffer\n");
+            return nullptr;
+        }
+        receiveValue = *loadedValueOpt;
+        LOG_DEBUG("after readFromSSBuffer\n");
+        Operation *loadOp = nullptr;
+        for (Operation *op : readOps) {
+            attachTransferTags(op, cubeBlockId, "CUBE", transferIndex);
+            if (isa<LLVM::LoadOp>(op)) {
+                loadOp = op;
+            }
+        }
+        receiveOp = loadOp;
 
-    auto copyOp = builder.create<hivm::CopyOp>(loc, mlir::TypeRange{}, normalizedValue, vecAllocOp->getResult(0));
+    } else {
+        // Step 1: Get input information (2D tensor: MxN)
+        auto srcTensorType = cast<RankedTensorType>(srcValue.getType());
+        auto normalizedTensorType = cast<RankedTensorType>(normalizedValue.getType());
+        Type elemType = srcTensorType.getElementType();
 
-    attachTransferTags(copyOp, vecBlockId, "VECTOR", transferIndex);
+        auto [vecAllocOp, cubeAllocOp] = createTransferAllocs(builder, loc, normalizedTensorType.getShape(), elemType,
+            hivm::AddressSpace::L1, vectorEndOp, cubeStartOp, vecBlockId, cubeBlockId, "VECTOR", "CUBE", transferIndex);
 
-    LOG_DEBUG("[copyOp]: " << *copyOp << "\n");
+        auto copyOp = builder.create<hivm::CopyOp>(loc, mlir::TypeRange{}, normalizedValue, vecAllocOp->getResult(0));
 
-    builder.setInsertionPoint(cubeStartOp);
+        attachTransferTags(copyOp, vecBlockId, "VECTOR", transferIndex);
 
-    auto nzLayout = hivm::DataLayoutAttr::get(builder.getContext(), hivm::DataLayout::nZ);
-    auto ndLayout = hivm::DataLayoutAttr::get(builder.getContext(), hivm::DataLayout::ND);
-    auto cbufaddressSpaceAttr = builder.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::L1);
-    auto newAllocType = MemRefType::get(srcTensorType.getShape(), elemType, nullptr, cbufaddressSpaceAttr);
-    auto convertLayoutOp = builder.create<hivm::ConvertLayoutOp>(loc, newAllocType, cubeAllocOp->getResult(0),
-        nzLayout, // srcLayout
-        ndLayout  // dstLayout
-    );
-    auto plainMemrefType = MemRefType::get(srcTensorType.getShape(), elemType);
-    auto memspaceCastOp = builder.create<memref::MemorySpaceCastOp>(loc, plainMemrefType, convertLayoutOp.getResult());
-    auto toTensorOp =
-        builder.create<bufferization::ToTensorOp>(loc, srcTensorType, memspaceCastOp.getResult(), true, true);
+        LOG_DEBUG("[copyOp]: " << *copyOp << "\n");
 
-    attachTransferTags(convertLayoutOp, cubeBlockId, "CUBE", transferIndex);
-    attachTransferTags(memspaceCastOp, cubeBlockId, "CUBE", transferIndex);
-    attachTransferTags(toTensorOp, cubeBlockId, "CUBE", transferIndex);
-    LOG_DEBUG("[toTensorOp]: " << *toTensorOp << "\n");
+        builder.setInsertionPoint(cubeStartOp);
+
+        auto nzLayout = hivm::DataLayoutAttr::get(builder.getContext(), hivm::DataLayout::nZ);
+        auto ndLayout = hivm::DataLayoutAttr::get(builder.getContext(), hivm::DataLayout::ND);
+        auto cbufaddressSpaceAttr = builder.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::L1);
+        auto newAllocType = MemRefType::get(srcTensorType.getShape(), elemType, nullptr, cbufaddressSpaceAttr);
+        auto convertLayoutOp = builder.create<hivm::ConvertLayoutOp>(loc, newAllocType, cubeAllocOp->getResult(0),
+            nzLayout, // srcLayout
+            ndLayout  // dstLayout
+        );
+        auto plainMemrefType = MemRefType::get(srcTensorType.getShape(), elemType);
+        auto memspaceCastOp = builder.create<memref::MemorySpaceCastOp>(loc, plainMemrefType, convertLayoutOp.getResult());
+        auto toTensorOp =
+            builder.create<bufferization::ToTensorOp>(loc, srcTensorType, memspaceCastOp.getResult(), true, true);
+
+        attachTransferTags(convertLayoutOp, cubeBlockId, "CUBE", transferIndex);
+        attachTransferTags(memspaceCastOp, cubeBlockId, "CUBE", transferIndex);
+        attachTransferTags(toTensorOp, cubeBlockId, "CUBE", transferIndex);
+        LOG_DEBUG("[toTensorOp]: " << *toTensorOp << "\n");
+        sendOp = copyOp;
+        receiveOp = toTensorOp;
+        receiveValue = toTensorOp.getResult();
+    }
 
     llvm::SmallVector<Operation *> users(srcValue.getUsers().begin(), srcValue.getUsers().end());
     for (Operation *user : users) {
         LOG_DEBUG("[v->c user]" << *user << "\n");
         auto userBlockIdOpt = CVPipeline::getOpBlockId(user);
         if (userBlockIdOpt && static_cast<int>(*userBlockIdOpt) == iniConsumerId) {
-            user->replaceUsesOfWith(srcValue, toTensorOp.getResult());
+            user->replaceUsesOfWith(srcValue, receiveValue);
         }
     }
     if (consumedDataOp) {
-        *consumedDataOp = toTensorOp;
+        *consumedDataOp = receiveOp;
     }
-    return copyOp;
+    return sendOp;
 }
 
 Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(OpBuilder &builder, Value srcValue,
@@ -771,6 +827,49 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(OpBuilder &b
     return fixpipeOp;
 }
 
+TransferPipeConfig InterCoreTransferAndSyncPass::getTransferPipeConfig(Operation *transferOp)
+{
+    auto cubeCoreAttr = hivm::TCoreTypeAttr::get(module.getContext(), hivm::TCoreType::CUBE);
+    auto vecCoreAttr = hivm::TCoreTypeAttr::get(module.getContext(), hivm::TCoreType::VECTOR);
+    auto pipeFixAttr = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_FIX);
+    auto pipeVAttr = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_V);
+    auto pipeMte3Attr = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_MTE3);
+    auto pipeMte1Attr = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_MTE1);
+    auto pipeMAttr = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_M);
+    auto pipeSAttr = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
+    TransferPipeConfig config;
+    if (isa<hivm::FixpipeOp>(transferOp)) {
+        config.forReadTPipe = pipeFixAttr;
+        config.forReadPipe = pipeVAttr;
+        config.forWriteTPipe = pipeVAttr;
+        config.forWritePipe = pipeFixAttr;
+        config.srcCoreAttr = cubeCoreAttr;
+        config.dstCoreAttr = vecCoreAttr;
+        config.srcCoreType = "CUBE";
+        config.dstCoreType = "VECTOR";
+    } else if (isa<hivm::CopyOp>(transferOp)) {
+        config.forReadTPipe = pipeMte3Attr;
+        config.forReadPipe = pipeMte1Attr;
+        config.forWriteTPipe = pipeMAttr;
+        config.forWritePipe = pipeMte3Attr;
+        config.srcCoreAttr = vecCoreAttr;
+        config.dstCoreAttr = cubeCoreAttr;
+        config.srcCoreType = "VECTOR";
+        config.dstCoreType = "CUBE";
+    } else if (isa<LLVM::StoreOp>(transferOp)) {
+        config.forReadTPipe = pipeVAttr;
+        config.forReadPipe = pipeFixAttr;
+        config.forWriteTPipe = pipeFixAttr;
+        config.forWritePipe = pipeVAttr;
+        config.srcCoreAttr = vecCoreAttr;
+        config.dstCoreAttr = cubeCoreAttr;
+        config.srcCoreType = "VECTOR";
+        config.dstCoreType = "CUBE";
+    }
+    return config;
+}
+
+
 void InterCoreTransferAndSyncPass::insertInterCoreSync(
     OpBuilder &builder, Operation *transferOp,
     Operation *consumerStartOp, Operation *consumerEndOp,
@@ -779,13 +878,7 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
     Operation *consumedDataOp)
 {
     LOG_DEBUG("Inserting inter-core synchronization for transferOp: " << *transferOp << "\n");
-    auto cubeCoreAttr = hivm::TCoreTypeAttr::get(builder.getContext(), hivm::TCoreType::CUBE);
-    auto vecCoreAttr = hivm::TCoreTypeAttr::get(builder.getContext(), hivm::TCoreType::VECTOR);
-    auto pipeFixAttr = PipeAttr::get(builder.getContext(), hivm::PIPE::PIPE_FIX);
-    auto pipeVAttr = PipeAttr::get(builder.getContext(), hivm::PIPE::PIPE_V);
-    auto pipeMte3Attr = PipeAttr::get(builder.getContext(), hivm::PIPE::PIPE_MTE3);
-    auto pipeMte1Attr = PipeAttr::get(builder.getContext(), hivm::PIPE::PIPE_MTE1);
-    auto pipeMAttr = PipeAttr::get(builder.getContext(), hivm::PIPE::PIPE_M);
+
     auto flagId = builder.getIntegerAttr(builder.getI64Type(), flag);
 
     int producerBlockId = static_cast<int>(CVPipeline::getOpBlockId(transferOp).value_or(-1));
@@ -793,116 +886,70 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
 
     Operation *mainLoopOp = findMainLoopforTransfer(transferOp, consumerStartOp);
 
-    if (dyn_cast<hivm::FixpipeOp>(transferOp)) {
-        builder.setInsertionPointAfter(transferOp);
-        auto setOpForRead = builder.create<SyncBlockSetOp>(loc, cubeCoreAttr, pipeFixAttr, pipeVAttr, flagId);
-        attachTransferTags(setOpForRead, producerBlockId, "CUBE", transferIndex);
-        builder.setInsertionPoint(consumerStartOp);
-        auto waitOpForRead = builder.create<SyncBlockWaitOp>(loc, vecCoreAttr, pipeFixAttr, pipeVAttr, flagId);
-        attachTransferTags(waitOpForRead, consumerBlockId, "VECTOR", transferIndex);
+    auto config = getTransferPipeConfig(transferOp);
 
-        if (mainLoopOp) {
-            builder.setInsertionPoint(transferOp);
-            auto waitOpForWrite = builder.create<SyncBlockWaitOp>(loc, cubeCoreAttr, pipeVAttr, pipeFixAttr, flagId);
-            attachTransferTags(waitOpForWrite, producerBlockId, "CUBE", transferIndex);
-            builder.setInsertionPointAfter(consumerEndOp);
-            auto setOpForWrite = builder.create<SyncBlockSetOp>(loc, vecCoreAttr, pipeVAttr, pipeFixAttr, flagId);
-            attachTransferTags(setOpForWrite, consumerBlockId, "VECTOR", transferIndex);
+    builder.setInsertionPointAfter(transferOp);
+    auto setOpForRead = builder.create<SyncBlockSetOp>(loc, config.srcCoreAttr, config.forReadTPipe, config.forReadPipe, flagId);
+    attachTransferTags(setOpForRead, producerBlockId, config.srcCoreType, transferIndex);
+    builder.setInsertionPoint(consumerStartOp);
+    auto waitOpForRead = builder.create<SyncBlockWaitOp>(loc, config.dstCoreAttr, config.forReadTPipe, config.forReadPipe, flagId);
+    attachTransferTags(waitOpForRead, consumerBlockId, config.dstCoreType, transferIndex);
 
-            builder.setInsertionPoint(mainLoopOp);
-            auto setOpForStart = builder.create<SyncBlockSetOp>(loc, vecCoreAttr, pipeVAttr, pipeFixAttr, flagId);
-            builder.setInsertionPointAfter(mainLoopOp);
-            auto waitOpForEnd = builder.create<SyncBlockWaitOp>(loc, cubeCoreAttr, pipeVAttr, pipeFixAttr, flagId);
+    if (mainLoopOp) {
+        builder.setInsertionPoint(transferOp);
+        auto waitOpForWrite = builder.create<SyncBlockWaitOp>(loc, config.srcCoreAttr, config.forWriteTPipe, config.forWritePipe, flagId);
+        attachTransferTags(waitOpForWrite, producerBlockId, config.srcCoreType, transferIndex);
 
-            int startEndBlockId = static_cast<int>(CVPipeline::getOpBlockId(mainLoopOp).value_or(-1));
-            attachTransferTags(setOpForStart, startEndBlockId, "VECTOR", transferIndex);
-            attachTransferTags(waitOpForEnd, startEndBlockId, "CUBE", transferIndex);
+        builder.setInsertionPointAfter(consumerEndOp);
+        auto setOpForWrite = builder.create<SyncBlockSetOp>(loc, config.dstCoreAttr, config.forWriteTPipe, config.forWritePipe, flagId);
+        attachTransferTags(setOpForWrite, consumerBlockId, config.dstCoreType, transferIndex);
 
-            attachAnalyzeFlagIdTag(setOpForRead);
-            attachAnalyzeFlagIdTag(waitOpForRead);
-            attachAnalyzeFlagIdTag(waitOpForWrite);
-            attachAnalyzeFlagIdTag(setOpForWrite);
-            attachAnalyzeFlagIdTag(setOpForStart);
-            attachAnalyzeFlagIdTag(waitOpForEnd);
-            // E2: register every set->wait pair of this transfer, not just the
-            // loop start/end pair. Each pair is the only proof of cross-core
-            // ordering for the sync ops it connects.
-            flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForRead, waitOpForRead);
-            flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForWrite, waitOpForWrite);
-            flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForStart, waitOpForEnd);
-            // E4: link the read-wait to the consumed data it guards so the sync
-            // op is threaded into the downstream dataflow graph.
-            flagIdReuseManager.insertRelationBetweenSetAndWait(waitOpForRead, consumedDataOp);
-            return;
-        }
+        builder.setInsertionPoint(mainLoopOp);
+        auto setOpForStart = builder.create<SyncBlockSetOp>(loc, config.dstCoreAttr, config.forWriteTPipe, config.forWritePipe, flagId);
+        builder.setInsertionPointAfter(mainLoopOp);
+        auto waitOpForEnd = builder.create<SyncBlockWaitOp>(loc, config.srcCoreAttr, config.forWriteTPipe, config.forWritePipe, flagId);
+
+        int startEndBlockId = static_cast<int>(CVPipeline::getOpBlockId(mainLoopOp).value_or(-1));
+        attachTransferTags(setOpForStart, startEndBlockId, config.dstCoreType, transferIndex);
+        attachTransferTags(waitOpForEnd, startEndBlockId, config.srcCoreType, transferIndex);
+
         attachAnalyzeFlagIdTag(setOpForRead);
         attachAnalyzeFlagIdTag(waitOpForRead);
+        attachAnalyzeFlagIdTag(waitOpForWrite);
+        attachAnalyzeFlagIdTag(setOpForWrite);
+        attachAnalyzeFlagIdTag(setOpForStart);
+        attachAnalyzeFlagIdTag(waitOpForEnd);
+        // E2: register every set->wait pair of this transfer, not just the
+        // loop start/end pair. Each pair is the only proof of cross-core
+        // ordering for the sync ops it connects.
         flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForRead, waitOpForRead);
-        flagIdReuseManager.insertRelationBetweenSetAndWait(waitOpForRead, consumedDataOp);
-        return;
-    } else if (dyn_cast<hivm::CopyOp>(transferOp)) {
-        builder.setInsertionPointAfter(transferOp);
-        auto setOpForRead = builder.create<SyncBlockSetOp>(loc, vecCoreAttr, pipeMte3Attr, pipeMte1Attr, flagId);
-        attachTransferTags(setOpForRead, producerBlockId, "VECTOR", transferIndex);
-        builder.setInsertionPoint(consumerStartOp);
-        auto waitOpForRead = builder.create<SyncBlockWaitOp>(loc, cubeCoreAttr, pipeMte3Attr, pipeMte1Attr, flagId);
-        attachTransferTags(waitOpForRead, consumerBlockId, "CUBE", transferIndex);
-
-        if (mainLoopOp) {
-            builder.setInsertionPoint(transferOp);
-            auto waitOpForWrite = builder.create<SyncBlockWaitOp>(loc, vecCoreAttr, pipeMAttr, pipeMte3Attr, flagId);
-            attachTransferTags(waitOpForWrite, producerBlockId, "VECTOR", transferIndex);
-
-            builder.setInsertionPointAfter(consumerEndOp);
-            auto setOpForWrite = builder.create<SyncBlockSetOp>(loc, cubeCoreAttr, pipeMAttr, pipeMte3Attr, flagId);
-            attachTransferTags(setOpForWrite, consumerBlockId, "CUBE", transferIndex);
-
-            builder.setInsertionPoint(mainLoopOp);
-            auto setOpForStart = builder.create<SyncBlockSetOp>(loc, cubeCoreAttr, pipeMAttr, pipeMte3Attr, flagId);
-            builder.setInsertionPointAfter(mainLoopOp);
-            auto waitOpForEnd = builder.create<SyncBlockWaitOp>(loc, vecCoreAttr, pipeMAttr, pipeMte3Attr, flagId);
-
-            int startEndBlockId = static_cast<int>(CVPipeline::getOpBlockId(mainLoopOp).value_or(-1));
-            attachTransferTags(setOpForStart, startEndBlockId, "CUBE", transferIndex);
-            attachTransferTags(waitOpForEnd, startEndBlockId, "VECTOR", transferIndex);
-
-            attachAnalyzeFlagIdTag(setOpForRead);
-            attachAnalyzeFlagIdTag(waitOpForRead);
-            attachAnalyzeFlagIdTag(waitOpForWrite);
-            attachAnalyzeFlagIdTag(setOpForWrite);
-            attachAnalyzeFlagIdTag(setOpForStart);
-            attachAnalyzeFlagIdTag(waitOpForEnd);
-            // E2: register every set->wait pair of this transfer, not just the
-            // loop start/end pair. Each pair is the only proof of cross-core
-            // ordering for the sync ops it connects.
-            flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForRead, waitOpForRead);
-            flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForWrite, waitOpForWrite);
-            flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForStart, waitOpForEnd);
-            // E4: link the read-wait to the consumed data it guards so the sync
-            // op is threaded into the downstream dataflow graph.
-            flagIdReuseManager.insertRelationBetweenSetAndWait(waitOpForRead, consumedDataOp);
-            return;
-        }
-        attachAnalyzeFlagIdTag(setOpForRead);
-        attachAnalyzeFlagIdTag(waitOpForRead);
-        flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForRead, waitOpForRead);
+        flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForWrite, waitOpForWrite);
+        flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForStart, waitOpForEnd);
+        // E4: link the read-wait to the consumed data it guards so the sync
+        // op is threaded into the downstream dataflow graph.
         flagIdReuseManager.insertRelationBetweenSetAndWait(waitOpForRead, consumedDataOp);
         return;
     }
+    attachAnalyzeFlagIdTag(setOpForRead);
+    attachAnalyzeFlagIdTag(waitOpForRead);
+    flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForRead, waitOpForRead);
+    flagIdReuseManager.insertRelationBetweenSetAndWait(waitOpForRead, consumedDataOp);
+    return;
+    
 }
 
-void InterCoreTransferAndSyncPass::insertPipeSSync(OpBuilder &builder, Operation *producerOp, Operation *consumerOp,
-    int flag, Location loc, bool isCubeToVector)
+void InterCoreTransferAndSyncPass::insertMemDepSync(OpBuilder &builder, Operation *producerOp, Operation *consumerOp,
+    int flag, Location loc, bool isCubeToVector, FlagIdReuseManager &flagIdReuseManager)
 {
-    LOG_DEBUG("Inserting PIPE_S sync: " << (isCubeToVector ? "CUBE->VECTOR" : "VECTOR->CUBE") << ", flag = " << flag <<
+    LOG_DEBUG("Inserting Memdep sync: " << (isCubeToVector ? "CUBE->VECTOR" : "VECTOR->CUBE") << ", flag = " << flag <<
         "\n");
 
     // CUBE -> VECTOR: srcPipe = PIPE_FIX, srcCoreType = CUBE, dstCoreType = VECTOR
-    // VECTOR -> CUBE: srcPipe = PIPE_MTE2, srcCoreType = VECTOR, dstCoreType = CUBE
-    hivm::PIPE srcPipe = isCubeToVector ? hivm::PIPE::PIPE_FIX : hivm::PIPE::PIPE_MTE2;
+    // VECTOR -> CUBE: srcPipe = PIPE_MTE3, srcCoreType = VECTOR, dstCoreType = CUBE
+    hivm::PIPE srcPipe = isCubeToVector ? hivm::PIPE::PIPE_FIX : hivm::PIPE::PIPE_MTE3;
     hivm::TCoreType srcCoreType = isCubeToVector ? hivm::TCoreType::CUBE : hivm::TCoreType::VECTOR;
     hivm::TCoreType dstCoreType = isCubeToVector ? hivm::TCoreType::VECTOR : hivm::TCoreType::CUBE;
-    hivm::PIPE dstPipe = hivm::PIPE::PIPE_S;
+    hivm::PIPE dstPipe = hivm::PIPE::PIPE_MTE2;
 
     auto srcCoreAttr = hivm::TCoreTypeAttr::get(builder.getContext(), srcCoreType);
     auto dstCoreAttr = hivm::TCoreTypeAttr::get(builder.getContext(), dstCoreType);
@@ -926,9 +973,11 @@ void InterCoreTransferAndSyncPass::insertPipeSSync(OpBuilder &builder, Operation
         StringRef consCoreType = isCubeToVector ? "VECTOR" : "CUBE";
         attachCommonTags(waitOp, static_cast<int>(*consBlockIdOpt), consCoreType);
     }
-
-    LOG_DEBUG("[PIPE_S setOp]: " << *setOp << "\n");
-    LOG_DEBUG("[PIPE_S waitOp]: " << *waitOp << "\n");
+    attachAnalyzeFlagIdTag(setOp);
+    attachAnalyzeFlagIdTag(waitOp);
+    flagIdReuseManager.insertRelationBetweenSetAndWait(setOp, waitOp);
+    LOG_DEBUG("[PIPE_MTE2 setOp]: " << *setOp << "\n");
+    LOG_DEBUG("[PIPE_MTE2 waitOp]: " << *waitOp << "\n");
 }
 
 static bool isConcretePipe(hivm::PIPE pipe)
@@ -1027,13 +1076,13 @@ LogicalResult InterCoreTransferAndSyncPass::handleVectorToCube(OpBuilder &builde
     auto [consStart, consEnd] = getBlockStartEnd(dep.consumerBlockId, module);
 
     Operation *consumedDataOp = nullptr;
-  
     if (dep.consumerBlockId == dep.iniConsumerBlockId) {
         auto consumerPoint = analyzeConsumerReadInsertPoint(srcValue, dep.iniConsumerBlockId);
         consStart = consumerPoint;
     }
+    LOG_DEBUG("after analyzeConsumerReadInsertPoint\n");
     Operation *transferOp = insertVectorToCubeTransfer(builder, srcValue, normalizedVal, prodEnd, consStart, loc,
-        transferIndex, dep.iniConsumerBlockId, &consumedDataOp);
+        transferIndex, dep.iniConsumerBlockId, dep.isScaler, &consumedDataOp);
 
     int flagId = flagManager.acquireId(prodStart);
     auto [newProdStart, newProdEnd] = getBlockStartEnd(dep.producerBlockId, module);
@@ -1070,12 +1119,6 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(OpBuilder &builde
     LOG_DEBUG("[newProdEnd]" << *prodEnd << "\n");
     LOG_DEBUG("[newConsStart]" << *consStart << "\n");
     LOG_DEBUG("[newConsEnd]" << *consEnd << "\n");
-
-    if (dep.consumerBlockId == dep.iniConsumerBlockId) {
-        auto consumerPoint = analyzeConsumerReadInsertPoint(srcValue, dep.iniConsumerBlockId);
-        consStart = consumerPoint;
-    }
-
     Operation *consumedDataOp = nullptr;
     Operation *transferOp =
         insertCubeToVectorTransfer(builder, srcValue, prodEnd, consStart, loc, transferIndex, dep.iniConsumerBlockId,
@@ -1083,12 +1126,6 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(OpBuilder &builde
 
     auto [newProdStart, newProdEnd] = getBlockStartEnd(dep.producerBlockId, module); // C Block
     auto [newConsStart, newConsEnd] = getBlockStartEnd(dep.consumerBlockId, module); // V Block
-
-    if (dep.consumerBlockId == dep.iniConsumerBlockId) {
-        auto newconsumerPoint = getConsumerWaitPoint(transferIndex);
-        newConsStart = newconsumerPoint;
-    }
-
     int flagId = flagManager.acquireId(newProdStart);
     insertInterCoreSync(builder, transferOp, newConsStart, newConsEnd, flagId, loc, transferIndex, flagIdReuseManager,
         consumedDataOp);
@@ -1099,11 +1136,11 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(OpBuilder &builde
     return success();
 }
 
-// PIPE_S Memory Dependency
+// Memory Dependency
 LogicalResult InterCoreTransferAndSyncPass::handleMemoryDependency(OpBuilder &builder, DependencyInfo &dep,
-    size_t depIndex, llvm::SmallVector<DependencyInfo> memDependencies, FlagIdManager &flagManager)
+    size_t depIndex, llvm::SmallVector<DependencyInfo> memDependencies, FlagIdManager &flagManager, FlagIdReuseManager &flagIdReuseManager)
 {
-    LOG_DEBUG("Handling PIPE_S memory dependency...\n");
+    LOG_DEBUG("Handling memory dependency...\n");
 
     // Get producer and consumer block start/end operations
     auto [prodStart, prodEnd] = getBlockStartEnd(dep.producerBlockId, module);
@@ -1115,7 +1152,7 @@ LogicalResult InterCoreTransferAndSyncPass::handleMemoryDependency(OpBuilder &bu
     }
 
     if (isOuterLayerDependency(depIndex, prodEnd, consStart, memDependencies)) {
-        LOG_DEBUG("[PIPE_S] Skipping outer layer dependency: block " << dep.producerBlockId << " -> block " <<
+        LOG_DEBUG("[MEMDEP] Skipping outer layer dependency: block " << dep.producerBlockId << " -> block " <<
             dep.consumerBlockId << "\n");
         return success();
     }
@@ -1129,12 +1166,12 @@ LogicalResult InterCoreTransferAndSyncPass::handleMemoryDependency(OpBuilder &bu
     // Get location info
     Location loc = prodEnd->getLoc();
 
-    // Insert PIPE_S sync
-    insertPipeSSync(builder, prodEnd, consStart, flagId, loc, isCubeToVector);
+    // Insert Memdep sync
+    insertMemDepSync(builder, prodEnd, consStart, flagId, loc, isCubeToVector, flagIdReuseManager);
 
     transferIndex++;
 
-    LOG_DEBUG("Inserted PIPE_S sync: block " << dep.producerBlockId << " -> block " << dep.consumerBlockId <<
+    LOG_DEBUG("Inserted PIPE_MTE2 sync: block " << dep.producerBlockId << " -> block " << dep.consumerBlockId <<
         ", flagId = " << flagId << "\n");
 
     return success();
@@ -1275,6 +1312,54 @@ void InterCoreTransferAndSyncPass::remapInterCoreTransferFlagIds(
     });
 }
 
+void InterCoreTransferAndSyncPass::sortDependencies(llvm::SmallVector<DependencyInfo> &dependencies, mlir::ModuleOp module)
+{
+    if (dependencies.size() <= 1) {
+        return;
+    }
+
+    // Step 1: Walk the entire module and assign a monotonically increasing order
+    //         to each operation, representing its position in the IR.
+    llvm::DenseMap<mlir::Operation *, unsigned> opOrder;
+    unsigned order = 0;
+    module.walk([&](mlir::Operation *op) {
+        opOrder[op] = order++;
+    });
+
+    // Step 2: Helper lambda — get the earliest user op of dep.value within the
+    //         consumer compute block.
+    auto getFirstConsumerOp = [&](const DependencyInfo &dep) -> mlir::Operation * {
+        mlir::Operation *firstConsumer = nullptr;
+        unsigned firstOrder = std::numeric_limits<unsigned>::max();
+        for (auto *user : dep.value.getUsers()) {
+            auto userBlockIdOpt = CVPipeline::getOpBlockId(user);
+            if (userBlockIdOpt && static_cast<int>(*userBlockIdOpt) == dep.consumerBlockId) {
+                auto it = opOrder.find(user);
+                if (it != opOrder.end() && it->second < firstOrder) {
+                    firstOrder = it->second;
+                    firstConsumer = user;
+                }
+            }
+        }
+        return firstConsumer;
+    };
+
+    // Step 3: Sort
+    std::sort(dependencies.begin(), dependencies.end(), [&](const DependencyInfo &a, const DependencyInfo &b) {
+        // the dependency whose consumer op appears earlier comes first.
+        auto *aConsOp = getFirstConsumerOp(a);
+        auto *bConsOp = getFirstConsumerOp(b);
+        if (aConsOp && bConsOp) {
+            unsigned aConsOpOrder = opOrder.lookup(aConsOp);
+            unsigned bConsOpOrder = opOrder.lookup(bConsOp);
+            if (aConsOpOrder != bConsOpOrder) {
+                return aConsOpOrder < bConsOpOrder;
+            }
+        }
+        return false;
+    });
+}
+
 // Main Processing
 LogicalResult InterCoreTransferAndSyncPass::processDependencies(
     FlagIdManager &flagManager, FlagIdReuseManager &flagIdReuseManager)
@@ -1289,6 +1374,7 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
     }
 
     llvm::SmallVector<DependencyInfo> &V2CDependencies = info.getV2CDependencies();
+    sortDependencies(V2CDependencies, module);
     LOG_DEBUG("[DEBUG] V2CDependencies size: " << V2CDependencies.size() << "\n");
     for (size_t i = 0; i < V2CDependencies.size(); ++i) {
         auto &dep = V2CDependencies[i];
@@ -1299,8 +1385,10 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
     LOG_DEBUG("Step 1: Handle V->C dependencies\n");
     // Step 1: Handle V->C dependencies
     for (auto &dep : V2CDependencies) {
-        Location loc = dep.value.getLoc();
-        Nd2NzNormalize(builder, dep, loc);
+        if (!dep.isScaler) {
+            Location loc = dep.value.getLoc();
+            Nd2NzNormalize(builder, dep, loc);
+        }
     }
     llvm::DenseMap<mlir::Value, mlir::Value> vecvalueMapping = getVecValueMapping();
     llvm::DenseMap<mlir::Value, mlir::Value> cubevalueMapping = getCubeValueMapping();
@@ -1316,6 +1404,7 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
     LOG_DEBUG("Completed V->C transfers and syncs.\n");
 
     llvm::SmallVector<DependencyInfo> &C2VDependencies = info.getC2VDependencies();
+    sortDependencies(C2VDependencies, module);
     LOG_DEBUG("[DEBUG] C2VDependencies size: " << C2VDependencies.size() << "\n");
     // Step 2: Handle C->V dependencies
     for (auto &dep : C2VDependencies) {
@@ -1328,6 +1417,22 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
         }
     }
     LOG_DEBUG("Completed C->V transfers and syncs.\n");
+
+    llvm::SmallVector<DependencyInfo>& memDependencies = info.getMemoryDependencies();
+    LOG_DEBUG("[DEBUG] MemoryDependencies size: " << memDependencies.size() << "\n");
+
+    for (size_t i = 0; i < memDependencies.size(); ++i) {
+        auto& dep = memDependencies[i];
+        LOG_DEBUG("[MEMDEP] value = " << dep.value
+                    << " producerBlockId = " << dep.producerBlockId
+                    << ", consumerBlockId = " << dep.consumerBlockId << "\n");
+        if (failed(handleMemoryDependency(builder, dep, i, memDependencies, flagManager, flagIdReuseManager))) {
+            LOG_DEBUG("[ERROR] Memdep failed! producerBlockId = " << dep.producerBlockId
+                    << ", consumerBlockId = " << dep.consumerBlockId << "\n");
+        return failure();
+        }
+    }
+    LOG_DEBUG("Completed memory syncs.\n");
     LOG_DEBUG("=====================================================\n");
 
     if (!flagManager.checkCurrentId()) {
@@ -1347,7 +1452,7 @@ void InterCoreTransferAndSyncPass::getDependentDialects(DialectRegistry &registr
 {
     registry
         .insert<func::FuncDialect, arith::ArithDialect, linalg::LinalgDialect, scf::SCFDialect, tensor::TensorDialect,
-        bufferization::BufferizationDialect, memref::MemRefDialect, hivm::HIVMDialect, annotation::AnnotationDialect>();
+        bufferization::BufferizationDialect, memref::MemRefDialect, hivm::HIVMDialect, LLVM::LLVMDialect, annotation::AnnotationDialect>();
 }
 
 // Pass Entry Point

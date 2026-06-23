@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+﻿# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +51,6 @@ from triton.backends.ascend.utils import (
     _warn_auto_blockify_disabled,
     downgrade_llir,
     force_disable_ffts,
-    triton_enable_libdevice_simt,
     get_cann_version_file_hash,
 )
 from triton.backends.ascend.driver import (
@@ -181,14 +180,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             pm,
             auto_blockify_size
         )
-        if (metadata["add_auto_scheduling"]):
-            ascend.passes.ttir.add_dag_sync(pm)
-            ascend.passes.ttir.add_dag_scope(pm)
-            passes.common.add_cse(pm)
-            passes.common.add_canonicalizer(pm)
-            ascend.passes.ttir.add_dag_ssbuffer(pm)
-            passes.common.add_cse(pm)
-            passes.common.add_canonicalizer(pm)
 
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
         ascend.passes.ttir.add_triton_to_structure(
@@ -560,17 +551,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--append-bisheng-options=-mllvm --cce-vf-remove-membar={enable_cce_vf_remove_membar}"]
 
-        # TEMP: Allow TRITON_ENABLE_VF_FUSION env var to override metadata configuration
-        enable_vf_env = os.getenv("TRITON_ENABLE_VF_FUSION")
-        if enable_vf_env is not None:
-            enable_vf_fusion = enable_vf_env.lower() in ("true", "1", "yes")
-        elif "enable_vf_fusion" in metadata:
-            enable_vf_fusion = metadata["enable_vf_fusion"]
-        else:
-            enable_vf_fusion = None
-
+        enable_vf_fusion = metadata["enable_vf_fusion"]
         if enable_vf_fusion is not None:
-            _compile_option_list += [f"--enable-vf-fusion={enable_vf_fusion}"]
+            _compile_option_list += \
+                [f"--enable-vf-fusion={enable_vf_fusion}"]
 
         enable_drop_unit_dims = metadata["enable_drop_unit_dims"]
         if enable_drop_unit_dims is not None:
@@ -977,8 +961,6 @@ class NPUOptions:
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
     enable_vf_fusion: bool = None
-    # todo: this code will be removed in version 530.
-    add_auto_scheduling: bool = False
     enable_dynamic_cv_pipeline: bool = True if is_compile_on_910_95 else False
     hfusion_enable_multiple_consumer_fusion: bool = False
     has_auto_blockify_blacklist_op: Optional[bool] = None
@@ -1072,13 +1054,11 @@ def ttir_to_npubin(mod, metadata, opt):
             if opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
 
-            enable_libdevice_simt = triton_enable_libdevice_simt()
-            if (enable_libdevice_simt):
-                bisheng_options = metadata["bisheng_options"]
-                if bisheng_options is not None:
-                    _compile_option_list += [
-                        f"--append-bisheng-options={bisheng_options}"
-                    ]
+            bisheng_options = metadata["bisheng_options"]
+            if bisheng_options is not None:
+                _compile_option_list += [
+                    f"--append-bisheng-options={bisheng_options}"
+                ]
 
             # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
             # mirroring the SIMD compile paths. driver.py's runtime block-count

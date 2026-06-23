@@ -24,9 +24,11 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/IR/Builders.h"
@@ -112,10 +114,25 @@ bool DataDependencyAnalysisPass::isValidShapeForDependency(mlir::Value value)
     return true;
 }
 
+bool DataDependencyAnalysisPass::isValidScalarDependency(mlir::Value value)
+{
+    if (isa<mlir::IntegerType, mlir::FloatType>(value.getType())) {
+        auto defOp = value.getDefiningOp();
+        if (defOp && isa<tensor::ExtractOp>(defOp)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Helper: Check if value is a valid tensor for dependency analysis
 // Returns true if value is TensorType and not defined by EmptyOp/FillOp
 bool DataDependencyAnalysisPass::isValidValueForDependency(mlir::Value value)
 {
+    if (isValidScalarDependency(value)) {
+        return true;
+    }
+
     if (!isValidShapeForDependency(value)) {
         return false;
     }
@@ -238,7 +255,9 @@ void DataDependencyAnalysisPass::collectDepInfo(mlir::Value depvalue, Dependency
 
     depInfo.producerBlockId = commonLevelIds.first;
     depInfo.consumerBlockId = commonLevelIds.second;
-
+    if (isValidScalarDependency(depvalue)) {
+        depInfo.isScaler = true;
+    }
     dependencies.push_back(depInfo);
 }
 
@@ -385,6 +404,11 @@ void DataDependencyAnalysisPass::processIterArgDependencies()
             // Only process if init and yield have matching core types
             // Mismatch indicates a more complex dependency pattern that requires special handling
             if (initCoreType != yieldCoreType) {
+                if (!isValidValueForDependency(initValue)) {
+                    if (collectDiffCoreTypeUsers(iterArg, yieldCoreType).empty()) {
+                        continue;
+                    }
+                }
                 LOG_DEBUG("iterarg init core_type conflicts with yield");
                 signalPassFailure();
             }
@@ -466,6 +490,10 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(DataDependencyInfo &info
                 LOG_DEBUG("Warning: [c->v] Output value is not a valid tensor for dependency analysis.\n");
                 continue;
             }
+            if (isa<mlir::IntegerType, mlir::FloatType>(output.getType())) {
+                LOG_DEBUG("Warning: [c->v] Output value is a scalar, not a valid tensor for dependency analysis.\n");
+                continue;
+            }
 
             auto opResult = dyn_cast<OpResult>(output);
             unsigned resultIndex = opResult.getResultNumber();
@@ -513,6 +541,26 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(DataDependencyInfo &info
     LOG_DEBUG("External output analysis complete.\n");
 }
 
+void DataDependencyAnalysisPass::collectMemDepInfo(
+    llvm::StringRef predCoreType,
+    int producerBlockId, int consumerBlockId, int predBlockId, int currBlockId,
+    llvm::SmallVector<DependencyInfo> &memoryDependencies)
+{
+    DependencyInfo depInfo;
+
+    if (predCoreType == ssbufferCoreTypeCubeAttr) {
+        depInfo.type = DependencyType::CubeToVector;
+    } else if (predCoreType == ssbufferCoreTypeVectorAttr) {
+        depInfo.type = DependencyType::VectorToCube;
+    }
+    depInfo.producerBlockId = producerBlockId;
+    depInfo.consumerBlockId = consumerBlockId;
+    depInfo.iniProducerBlockId = predBlockId;
+    depInfo.iniConsumerBlockId = currBlockId;
+
+    memoryDependencies.push_back(depInfo);
+}
+
 void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
 {
     auto &memoryDependencies = info.getMemoryDependencies();
@@ -522,6 +570,12 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
     MemoryDependenceGraph memDepGraph(module, aliasAnalysis);
 
     module.walk([&](mlir::Operation *op) {
+        if (op->getNumRegions() > 0) {
+            return;
+        }
+        if (isa<annotation::MarkOp, gpu::BarrierOp>(op)) {
+            return;
+        }
         auto currBlockIdOpt = CVPipeline::getOpBlockId(op);
         llvm::StringRef currCoreType = getSsbufferCoreType(op);
         if (!currBlockIdOpt || currCoreType.empty()) {
@@ -530,6 +584,38 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
         int currBlockId = static_cast<int>(*currBlockIdOpt);
 
         for (mlir::Operation *predOp : memDepGraph.getExecBefore(op)) {
+            if (isa<annotation::MarkOp, gpu::BarrierOp>(predOp)) {
+                continue;
+            }
+            if (predOp->getNumRegions() > 0) {
+                auto realdeps = memDepGraph.getRealDependency(predOp, op);
+                if (realdeps.empty()) {
+                    return;
+                }
+                for (mlir::Operation *realPredOp : realdeps) {
+                    if (isa<annotation::MarkOp, gpu::BarrierOp>(realPredOp)) {
+                        continue;
+                    }
+                    auto realPredBlockIdOpt = CVPipeline::getOpBlockId(realPredOp);
+                    llvm::StringRef realPredCoreType = getSsbufferCoreType(realPredOp);
+                    if (!realPredBlockIdOpt || realPredCoreType == currCoreType || realPredCoreType.empty()) {
+                        continue;
+                    }
+                    int realPredBlockId = static_cast<int>(*realPredBlockIdOpt);
+                    auto [producerBlockId, consumerBlockId] = findCommonLevelBlockIds(info, realPredBlockId, currBlockId);
+                    if (producerBlockId == -1 || consumerBlockId == -1) {
+                        LOG_DEBUG("Could not find common level block IDs for producer and consumer blocks");
+                        signalPassFailure();
+                    }
+                    collectMemDepInfo(realPredCoreType, producerBlockId, consumerBlockId, realPredBlockId, currBlockId, memoryDependencies);
+
+                    LOG_DEBUG("\n=op with region mem dep analysis= "
+                        << "\nrealpredcoretype" << realPredCoreType
+                        << "\nproducer Block: " << realPredBlockId << "\nproducer Op: " << *realPredOp
+                        << "\nconsumer Block: " << currBlockId << "\nconsumer Op: " << *op << "\n");
+                }
+                continue;
+            }
             auto predBlockIdOpt = CVPipeline::getOpBlockId(predOp);
             llvm::StringRef predCoreType = getSsbufferCoreType(predOp);
             if (!predBlockIdOpt || predCoreType == currCoreType || predCoreType.empty()) {
@@ -546,21 +632,12 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
                 continue;
             }
 
-            DependencyInfo depInfo;
+            collectMemDepInfo(predCoreType, producerBlockId, consumerBlockId, predBlockId, currBlockId, memoryDependencies);
 
-            if (predCoreType == ssbufferCoreTypeCubeAttr) {
-                depInfo.type = DependencyType::CubeToVector;
-            } else if (predCoreType == ssbufferCoreTypeVectorAttr) {
-                depInfo.type = DependencyType::VectorToCube;
-            }
-            depInfo.producerBlockId = producerBlockId;
-            depInfo.consumerBlockId = consumerBlockId;
-            depInfo.iniProducerBlockId = predBlockId;
-            depInfo.iniConsumerBlockId = currBlockId;
-
-            memoryDependencies.push_back(depInfo);
-            LOG_DEBUG("=mem dep analysis= "
-                << "producer Block: " << predBlockId << "consumer Block: " << currBlockId << "\n");
+            LOG_DEBUG("\n=mem dep analysis= "
+                << "\npredcoretype" << predCoreType
+                << "\nproducer Block: " << predBlockId << "\nproducer Op: " << *predOp
+                << "\nconsumer Block: " << currBlockId << "\nconsumer Op: " << *op << "\n");
         }
     });
     LOG_DEBUG("=== mem dep analysis complete ===\n");
@@ -714,7 +791,7 @@ void DataDependencyAnalysisPass::runOnOperation()
 
     analyzeExternalOutputs(info);
 
-    // Step 4: Analyze memory dependencies (PIPE_S sync)
+    // Step 4: Analyze memory dependencies (memdep sync)
     analyzeMemoryEffect(info);
 
     info.setValid(true);

@@ -112,6 +112,72 @@ public:
   }
 };
 
+// A tt.scan that is (1) a plain cumsum (combine body is a single add, matching
+// ScanConverter's triton_cumsum selection) and (2) collapses to a 1-D scan after
+// backend lowering, i.e. every dim except the scan axis has extent 1 (e.g.
+// [1,1,128,1] with axis=2). Only this case is routed to the SIMT (Sklansky)
+// cumsum template; cumprod / generic scans and multi-dim cumsum stay on SIMD.
+static bool isSimt1DCumsum(triton::ScanOp op)
+{
+  // (1) Must be a single-add combine body (skip pure type-cast ops, mirroring
+  // ReductionOpBaseConverter::getRealReductionOps).
+  Operation *reduceOp = nullptr;
+  for (Operation &bodyOp : op.getBody()->without_terminator()) {
+    if (isa<arith::ExtFOp, arith::TruncFOp, arith::BitcastOp>(&bodyOp))
+      continue;
+    if (reduceOp)
+      return false; // more than one real op -> not a simple cumsum
+    reduceOp = &bodyOp;
+  }
+  if (!reduceOp || !isa<arith::AddFOp, arith::AddIOp>(reduceOp))
+    return false;
+
+  // (2) Must be the 1-D scenario: all non-scan dims are unit-sized.
+  auto srcTy = dyn_cast<RankedTensorType>(op.getOperand(0).getType());
+  if (!srcTy || !srcTy.hasRank())
+    return false;
+  int64_t axis = op.getAxis();
+  ArrayRef<int64_t> shape = srcTy.getShape();
+  if (axis < 0 || axis >= static_cast<int64_t>(shape.size()))
+    return false;
+  for (int64_t i = 0; i < static_cast<int64_t>(shape.size()); ++i) {
+    if (i != axis && shape[i] != 1)
+      return false;
+  }
+  return true;
+}
+
+/// Returns true if a GatherOp requires SIMT lowering.
+/// Non-A5 devices always use SIMD. On A5, only non-tail-axis gather with
+/// non-trivial trailing dimensions needs SIMT (SIMTGatherUBToUB template).
+static bool isGatherSIMT(triton::GatherOp gatherOp) {
+  // Non-A5 devices always use SIMD for gather.
+  if (!compileOn91095Flag) {
+    return false;
+  }
+
+  auto axis = gatherOp.getAxis();
+  auto srcType = dyn_cast<RankedTensorType>(gatherOp.getSrc().getType());
+  if (!srcType) {
+    return true;
+  }
+
+  int64_t rank = srcType.getRank();
+  // Tail-axis gather uses SIMD (Gather1D template).
+  if (axis == rank - 1) {
+    return false;
+  }
+
+  // If all sizes after the gather axis are 1, treat as SIMD.
+  // E.g. shape [4,16,1,1] with axis=1 is equivalent to tail-axis gather.
+  for (int64_t d = axis + 1; d < rank; ++d) {
+    if (srcType.getShape()[d] != 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool isSIMTOp(Operation *op)
 {
   if (auto custom_op = dyn_cast<hivm::CustomOp>(op)) {
@@ -119,15 +185,28 @@ static bool isSIMTOp(Operation *op)
            custom_op.getVFMode() == hivm::VFMode::SIMT;
   }
 
+  if (auto gatherOp = dyn_cast<triton::GatherOp>(op)) {
+    return isGatherSIMT(gatherOp);
+  }
+
   if (isa<triton::HistogramOp>(op) && compileOn91095Flag) {
     return true;
   }
 
+  // tt.scan: only a 1-D cumsum is treated as a SIMT op (drives the kernel
+  // parallel_mode -> mix_simd_simt -> enable_simt). Everything else stays SIMD.
+  if (compileOn91095Flag) {
+    if (auto scan = dyn_cast<triton::ScanOp>(op)) {
+      return isSimt1DCumsum(scan);
+    }
+  }
   return isa<
       triton::ascend::IndexPutOp,
       triton::ascend::GatherOutToUbOp,
       triton::ascend::ScatterUbToOutOp,
       triton::ascend::IndirectLoadOp,
+      triton::ascend::StrideLoadOp,
+      triton::ascend::StrideStoreOp,
       triton::ascend::IndirectStoreOp
       >(op);
 }
@@ -648,6 +727,8 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   patterns.add<TTOpConverters::PtrToIntConverter>(patterns.getContext());
 
   patterns.add<TTOpConverters::IndirectLoadConverter>(patterns.getContext());
+  patterns.add<TTOpConverters::StrideLoadConverter>(patterns.getContext());
+  patterns.add<TTOpConverters::StrideStoreConverter>(patterns.getContext());
   patterns.add<TTOpConverters::IndirectStoreConverter>(patterns.getContext());
   patterns.add<TTOpConverters::GatherOutToUbConverter>(patterns.getContext());
   patterns.add<TTOpConverters::ScatterUbToOutConverter>(patterns.getContext());
@@ -768,21 +849,10 @@ LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(Modul
     return success();
   }
 
-  // Both passes below coalesce by recording a single module-level
-  // (hacc.coalesce_factor, hacc.coalesce_axis) pair. The full-TA path owns the
-  // grid division: compiler.py strips both attrs into host metadata and the
-  // launcher (driver.py) divides grid[axis] by the factor before launch --
-  // bishengir does NOT interpret them. At most one pass may claim the factor per
-  // module. StridedAxisCoalescing has PRIORITY: it runs first and
-  // unconditionally, and TileChunkCoalescing yields (bails) if the factor is
-  // already set.
 
-  // StridedAxisCoalescing (default-on, higher priority): fold the FLA
-  // H-axis-split strided load/store into a 2D contiguous [BT,H] tile (H as a
-  // parallel inner lane), turning the per-element strided access into a
-  // contiguous one. Bails per kernel when the load->store subgraph is not
-  // lane-safe (e.g. contains tt.dot), leaving those loads to the stride dispatch
-  // below.
+
+  // coalesce adjacent strided axes into one  so that to convert discrete memory asccess
+  // into continuous memory access .
   StridedAxisCoalescing::rewriteStridedAxisCoalesce(moduleOp);
 
   // TileChunkCoalescing (default-on, lower priority): when the outermost

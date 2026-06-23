@@ -32,6 +32,7 @@
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Interfaces/CastInterfaces.h"
@@ -287,6 +288,30 @@ void OpClassifierPass::matchFillPattern(Operation *def)
 }
 
 // ============================================================================
+// Pattern: tensor.empty → matmul (Upstream)
+// ============================================================================
+// Matches cases where matmul's output initial value comes from tensor.empty.
+// empty initializes the output matrix (typically to 0).
+// IR Example
+//   %value = arith.constant 0.0 : f32
+//   %out = tensor.empty() : tensor<1024x1024xf32>
+//   %result = linalg.matmul ins(%a, %b) outs(%out)
+// Matching Logic
+//   1. Check if matmul's operand defining op is tensor.empty
+//   2. If matched, mark empty as CUBE and add to cubeSeeds
+// Purpose: empty operation initializes matmul's output buffer;
+// ============================================================================
+void OpClassifierPass::matchEmptyPattern(Operation *def)
+{
+    auto emptyOp = dyn_cast<tensor::EmptyOp>(def);
+    if (!emptyOp)
+        return;
+
+    markCube(emptyOp);
+    cubeSeeds.push_back(emptyOp);
+}
+
+// ============================================================================
 // Pattern: matmul → hivm.hir.store (Downstream)
 // ============================================================================
 // Matches cases where matmul's output is directly stored to memory.
@@ -404,6 +429,7 @@ int OpClassifierPass::patternMatchCUBE()
             matchToTensorPattern(def);
             matchTransposePattern(def);
             matchFillPattern(def);
+            matchEmptyPattern(def);
         }
 
         // ---- Downstream pattern matching ----
@@ -982,7 +1008,7 @@ void OpClassifierPass::propagateCoreTypeUpwardForYield(Operation *startOp, OpCor
 //   - operand: The current operand value from the else region's yield
 // Returns: true if core_type was successfully extracted and propagated, false otherwise.
 bool OpClassifierPass::handleYieldFromElseRegion(std::vector<OpCoreType> &coreTypes, unsigned operandIndex,
-                                                 Operation *thenYieldForElse, Value &operand)
+                                                 Operation *thenYieldForElse, Value &operand, Operation *elseYieldOp)
 {
     // Only handle if thenYieldForElse is provided and is a scf.yield
     if (!thenYieldForElse || !isa<scf::YieldOp>(thenYieldForElse)) {
@@ -1007,6 +1033,17 @@ bool OpClassifierPass::handleYieldFromElseRegion(std::vector<OpCoreType> &coreTy
 
     // Propagate the determined core_type upstream to the defining operation
     if (Operation *defOp = operand.getDefiningOp()) {
+        if (CloneOpMap.count(defOp) && opCoreTypes.count(defOp) && opCoreTypes[defOp] != coreTypeToUse) {
+            Operation *cloneOp = CloneOpMap[defOp];
+            // Replace the operand in else yield with the cloneOp's result
+            for (unsigned i = 0; i < defOp->getNumResults(); ++i) {
+                if (defOp->getResult(i) == operand) {
+                    elseYieldOp->setOperand(operandIndex, cloneOp->getResult(i));
+                    defOp = cloneOp;
+                    break;
+                }
+            }
+        }
         propagateCoreTypeUpwardForYield(defOp, coreTypeToUse);
     }
 
@@ -1043,8 +1080,23 @@ void OpClassifierPass::processYieldOperation(Operation *op, Operation *thenYield
             // Use then region yield's core_type attribute to determine type.
             // If then yield has a comma-separated multi-value type string (e.g.
             // "CUBE,VECTOR"), extract the i-th component for this operand.
-            if (handleYieldFromElseRegion(coreTypes, i, thenYieldForElse, operand)) {
+            if (handleYieldFromElseRegion(coreTypes, i, thenYieldForElse, operand, op)) {
                 continue;
+            }
+
+            if (Operation *defOp = operand.getDefiningOp()) {
+                if (CloneOpMap.count(defOp) && opCoreTypes.count(defOp) && opCoreTypes[defOp] == OP_CUBE_ONLY) {
+                    Operation *cloneOp = CloneOpMap[defOp];
+                    // Replace the operand in else yield with the cloneOp's result
+                    for (unsigned j = 0; j < defOp->getNumResults(); ++j) {
+                        if (defOp->getResult(j) == operand && j < cloneOp->getNumResults()) {
+                            op->setOperand(i, cloneOp->getResult(j));
+                            defOp = cloneOp;
+                            operand = op->getOperand(i);
+                            break;
+                        }
+                    }
+                }
             }
 
             // ---------------------------------------------------------------
@@ -1246,6 +1298,8 @@ void OpClassifierPass::splitOperationForCubeAndVector(Operation *op, llvm::Dense
     opCoreTypes[vectorOp] = OP_VECTOR_ONLY;
     opToVectorClone[op] = vectorOp; // record for callers' operand mapping
     allOps.push_back(vectorOp);     // track new op so it gets core_type stamped
+    CloneOpMap[op] = vectorOp;      // record for laterClone map
+    CloneOpMap[vectorOp] = op;      // record for laterClone map
 
     // ------------------------------------------------------------------
     // Phase 4: Redirect VECTOR-only users to the cloned result

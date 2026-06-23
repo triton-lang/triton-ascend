@@ -14,12 +14,12 @@
 // CHECK: arith.addi
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: arith.muli
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @basic_scope_split_and_cleanup(%vec_in: i32, %cube_in: i32, %outv: memref<1xi32>, %outc: memref<1xi32>) {
     %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
@@ -43,12 +43,12 @@ module {
 // CHECK: scf.if
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: scf.if
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @container_if_without_core_type(%cond: i1, %vec_in: i32, %cube_in: i32, %outv: memref<1xi32>, %outc: memref<1xi32>) {
     %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
@@ -78,13 +78,13 @@ module {
 // CHECK: scf.yield
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: scf.if
 // CHECK: scf.yield
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @mixed_if_yield_neutralize_scalar(%cond: i1, %vec_in: i32, %cube_in: i32, %outv: memref<1xi32>, %outc: memref<1xi32>) {
     %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
@@ -115,12 +115,12 @@ module {
 // CHECK: scf.for
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: scf.for
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @mixed_for_iter_args_index_neutralize(%lb: i32, %ub: i32, %vec_init: i32, %cube_init: index, %outv: memref<1xi32>, %outc: memref<1xindex>) {
     %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
@@ -147,12 +147,12 @@ module {
 // CHECK: scf.for
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: scf.for
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @for_forwarding_use_can_be_ignored(%lb: i32, %ub: i32, %vec_init: i32, %cube_init: i32, %outv: memref<1xi32>, %outc: memref<1xi32>) {
     %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
@@ -184,13 +184,13 @@ module {
 // CHECK: arith.addf
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: scf.for
 // CHECK-NOT: arith.addf
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @for_cross_slot_yield_use_does_not_preserve_source(%lb: i32, %ub: i32, %vec_src: f32, %vec_dst: f32, %cube_init: i32, %outv: memref<1xf32>, %outc: memref<1xi32>) {
     %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
@@ -219,13 +219,13 @@ module {
 // CHECK: scf.if
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: scf.if
 // CHECK: scf.while
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @while_dependency_preserved_for_cube(%cond: i1, %vec_init: i64, %cube_init: i64, %limit: i64, %outv: memref<1xi64>, %outc: memref<1xi64>) {
     %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
@@ -264,13 +264,13 @@ module {
 // CHECK: scf.if
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: scf.while
 // CHECK: scf.if
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @while_inner_if_terminator_use_blocks_dead_shell_erase(%if_cond: i1, %vec_init: i32, %cube_init: i32, %limit: i32, %outv: memref<1xi32>, %outc: memref<1xi32>) {
     %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
@@ -306,12 +306,12 @@ module {
 // CHECK: scf.while
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: scf.while
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @while_forwarding_use_can_be_ignored(%vec_init: i64, %cube_init: i64, %limit: i64, %outv: memref<1xi64>, %outc: memref<1xi64>) {
     %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
@@ -351,7 +351,7 @@ module {
 // CHECK: scf.while
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: %[[FOR:.*]]:2 = scf.for
 // CHECK: %[[IF:.*]]:2 = scf.if
@@ -361,7 +361,7 @@ module {
 // CHECK: scf.yield %[[IF]]#0, %[[IF]]#1 : i32, i64
 // CHECK: memref.store %[[FOR]]#1
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @for_same_slot_loop_carry_preserved(%lb: i32, %ub: i32, %cond: i1, %vec_init: i32, %cube_init: i64, %outv: memref<1xi32>, %outc: memref<1xi64>) {
     %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
@@ -401,12 +401,12 @@ module {
 // CHECK: scf.if
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: memref.load
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @memref_slot_neutralize_uses_alloc(%cond: i1, %src: memref<4xi32>, %vec_seed: i32, %outv: memref<1xi32>, %outc: memref<1xi32>) {
     %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
@@ -435,12 +435,12 @@ module {
 // CHECK: arith.addf
 // CHECK: bufferization.materialize_in_destination
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: scf.if
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @static_tensor_slot_neutralize_uses_dense_zero(%cond: i1, %src: tensor<4xf32>, %cube_seed: i32, %outv: memref<4xf32>, %outc: memref<1xi32>) {
     %idxc = arith.constant {ssbuffer.core_type = "CUBE"} 0 : index
@@ -469,13 +469,13 @@ module {
 // CHECK: arith.addi
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: arith.muli
 // CHECK-NOT: arith.addi
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @cross_scope_live_user_keeps_producer(%cube_seed: i32, %vec_seed: i32, %outv: memref<1xi32>, %outc: memref<1xi32>) {
     %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
@@ -496,14 +496,14 @@ module {
 // CHECK-NOT: scf.if
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: scf.if
 // CHECK: scf.yield
 // CHECK: memref.store
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @short_core_type_list_falls_back_to_first(%cond: i1, %vec_seed: i32, %cube_seed0: i32, %cube_seed1: i32, %outv: memref<1xi32>, %outc0: memref<1xi32>, %outc1: memref<1xi32>) {
     %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
@@ -549,7 +549,7 @@ module {
 // CHECK-NEXT:   }
 // CHECK-NEXT:   memref.store %[[RES_V]]
 // CHECK-NEXT:   scope.return
-// CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK-NEXT: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CUBE scope: scf.if also folds to arith.select (preserved, NOT neutralized
 // to 0); for loop runs the correct number of times with CUBE memref.store
 // CHECK-NEXT: scope.scope : () -> () {
@@ -558,7 +558,7 @@ module {
 // CHECK-NEXT:     memref.store
 // CHECK-NEXT:   }
 // CHECK-NEXT:   scope.return
-// CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK-NEXT: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @vector_if_bound_with_cube_loop_side_effect(
       %cond: i1, %ub_a: i32, %ub_b: i32, %vinit: i32, %cube_val: i32,
@@ -597,7 +597,7 @@ module {
 // CHECK:      scope.scope : () -> () {
 // CHECK-NEXT:   memref.store
 // CHECK-NEXT:   scope.return
-// CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK-NEXT: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CUBE scope: the inner if folds to arith.select (no side effects in its
 // branches) and feeds the condition of the preserved outer scf.if guarding
 // the CUBE store; the condition is NOT neutralized to a constant.
@@ -607,7 +607,7 @@ module {
 // CHECK-NEXT:     memref.store
 // CHECK-NEXT:   }
 // CHECK-NEXT:   scope.return
-// CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK-NEXT: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @vector_if_condition_gates_cube_if_branch(
       %cond: i1, %va: i1, %vb: i1, %cube_val: i32,
@@ -652,7 +652,7 @@ module {
 // CHECK-NEXT:   }
 // CHECK-NEXT:   memref.store
 // CHECK-NEXT:   scope.return
-// CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK-NEXT: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CUBE scope: the inner if folds to arith.select feeding scf.condition; the
 // while loop and its CUBE store body are preserved (condition not constant).
 // CHECK-NEXT: scope.scope : () -> () {
@@ -665,7 +665,7 @@ module {
 // CHECK-NEXT:     scf.yield
 // CHECK-NEXT:   }
 // CHECK-NEXT:   scope.return
-// CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK-NEXT: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @vector_if_condition_gates_cube_while_body(
       %va: i1, %vb: i1, %vec_init: i32, %cube_val: i32,

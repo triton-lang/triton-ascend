@@ -51,7 +51,7 @@ struct BlockInfo {
 struct DependencyInfo {
   DependencyType type;
   mlir::Value value;
-
+  bool isScaler = false;
   int producerBlockId;
   int consumerBlockId;
   int iniProducerBlockId;
@@ -130,6 +130,10 @@ private:
     void collectDepInfo(mlir::Value depvalue, DependencyType dependencyType,
                         llvm::SmallVector<DependencyInfo> &dependencies,
                         int iniProdId, int iniConsId, DataDependencyInfo &info);
+    void collectMemDepInfo(
+      llvm::StringRef predCoreType,
+      int producerBlockId, int consumerBlockId, int predBlockId, int currBlockId,
+      llvm::SmallVector<DependencyInfo> &memoryDependencies);
     void analyzeExternalInputs(DataDependencyInfo &info);
     void analyzeExternalOutputs(DataDependencyInfo &info);
 
@@ -142,6 +146,7 @@ private:
     bool isCubeOrVectorOp(mlir::Operation *op);
     bool isValidShapeForDependency(mlir::Value value);
     bool isValidValueForDependency(mlir::Value value);
+    bool isValidScalarDependency(mlir::Value value);
     bool isOuterOpArg(mlir::Value value);
     void processIterArgDependencies();
     void analyzeV2CMatmulABType(DataDependencyInfo &info);

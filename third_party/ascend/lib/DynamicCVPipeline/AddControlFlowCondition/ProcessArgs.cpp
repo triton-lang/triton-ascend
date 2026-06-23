@@ -29,6 +29,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/IRMapping.h"
+#include "mlir/IR/TypeUtilities.h"
 
 static constexpr const char *DEBUG_TYPE = "ProcessArgs";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
@@ -62,7 +63,12 @@ static LogicalResult collectArgIndexToBlockIds(
     for (OpOperand &operand : op.getOpOperands()) {
       Value v = operand.get();
       for (unsigned i = 0; i < forOp.getNumRegionIterArgs(); ++i) {
-        if (v == forOp.getRegionIterArgs()[i]) {
+        Value iterArg = forOp.getRegionIterArgs()[i];
+        // Skip tensor-type iter_args, only process scalar and index types
+        if (mlir::isa<TensorType>(iterArg.getType())) {
+          continue;
+        }
+        if (v == iterArg) {
           argIndexToBlockIds[i].insert(blockId);
         }
       }

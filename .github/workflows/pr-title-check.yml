@@ -1,0 +1,38 @@
+name: PR Title Check
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  check-pr-title:
+    name: Check PR title format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          MAX_LEN: 72
+        run: |
+          echo "PR title: $PR_TITLE"
+
+          # Length check
+          TITLE_LEN=${#PR_TITLE}
+          if [ "$TITLE_LEN" -gt "$MAX_LEN" ]; then
+            echo "::error::PR title is $TITLE_LEN chars, exceeds max length $MAX_LEN."
+            exit 1
+          fi
+
+          # Format check: [component](type) subject
+          # Allowed types: feat | fix | NFC | style | test | chore | revert
+          PATTERN='^\[[^]]+\]\((feat|fix|NFC|style|test|chore|revert)\) .+$'
+          if ! echo "$PR_TITLE" | grep -qE "$PATTERN"; then
+            echo "::error::PR title does not match the required format."
+            echo "Format:   [<component>](<type>) <subject>"
+            echo "Example:  [user](feat) add login support"
+            echo "Types:    feat | fix | NFC | style | test | chore | revert"
+            echo "Max len:  $MAX_LEN chars"
+            exit 1
+          fi
+
+          echo "PR title complies with the specifications."

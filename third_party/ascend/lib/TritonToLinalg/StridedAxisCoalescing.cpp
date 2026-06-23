@@ -23,6 +23,7 @@
 #include "TritonToLinalg/StridedAxisCoalescing.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -86,6 +87,25 @@ static int32_t findIhAxis(Value base, int64_t S) {
     return -1;
 }
 
+// Returns the i_h value `pid % S` (the per-head index feeding the ih split), or
+// null. Mirror of findIhAddPtr but yields the RemSIOp result itself, used to
+// check whether i_h also feeds a per-head scalar load (which coalescing cannot
+// lane-expand -- see the correctness guard in rewriteStridedAxisCoalesce).
+static Value findIhRem(Value base, int64_t S) {
+    Value src = base;
+    while (auto addptr = src.getDefiningOp<triton::AddPtrOp>()) {
+        if (isa<RankedTensorType>(addptr.getPtr().getType())) break;
+        if (auto rem = addptr.getOffset().getDefiningOp<arith::RemSIOp>()) {
+            APInt cC;
+            if (matchPattern(rem.getRhs(), m_ConstantInt(&cC)) &&
+                std::abs(cC.getSExtValue()) == S)
+                return rem.getResult();
+        }
+        src = addptr.getPtr();
+    }
+    return Value();
+}
+
 static Value build2DBlockPtr(IRRewriter &rw, triton::MakeTensorPtrOp m1d,
                              int64_t S, int64_t BT) {
     triton::AddPtrOp ih = findIhAddPtr(m1d.getBase(), S);
@@ -106,84 +126,6 @@ static Value build2DBlockPtr(IRRewriter &rw, triton::MakeTensorPtrOp m1d,
     return p.getResult();
 }
 
-// Returns true if `op` (a tt.scan or tt.reduce) combines its two block args
-// with a single floating-point add (i.e. it is a sum / cumsum).
-static bool isPlusCombiner(Operation *op) {
-    if (op->getNumRegions() != 1) return false;
-    Region &r = op->getRegion(0);
-    if (!r.hasOneBlock()) return false;
-    Block &b = r.front();
-    if (b.getNumArguments() != 2) return false;
-    Operation *term = b.getTerminator();
-    if (!term || term->getNumOperands() != 1) return false;
-    auto add = term->getOperand(0).getDefiningOp<arith::AddFOp>();
-    if (!add) return false;
-    Value a0 = b.getArgument(0), a1 = b.getArgument(1);
-    return (add.getLhs() == a0 && add.getRhs() == a1) ||
-           (add.getLhs() == a1 && add.getRhs() == a0);
-}
-
-// Detect the FLA reverse-cumsum idiom built on top of a forward cumsum:
-//   b_o = cumsum(v);  b_z = sum(v);  store(-b_o + b_z + v)
-// which is algebraically the inclusive reverse cumsum of v. `v` is the f32
-// value the scan operates on (the load, or extf(load) for fp16). On success
-// returns the forward ScanOp, sets `storeOut`, and fills `eraseList` with the
-// intermediate ops to remove (in use-before-def order).
-static triton::ScanOp matchReverseCumsum(Value v, triton::StoreOp &storeOut,
-                                         SmallVectorImpl<Operation *> &eraseList) {
-    triton::ScanOp scan;
-    triton::ReduceOp reduce;
-    arith::AddFOp a2;
-    for (Operation *u : v.getUsers()) {
-        if (auto s = dyn_cast<triton::ScanOp>(u)) { if (scan) return {}; scan = s; }
-        else if (auto rd = dyn_cast<triton::ReduceOp>(u)) { if (reduce) return {}; reduce = rd; }
-        else if (auto a = dyn_cast<arith::AddFOp>(u)) { if (a2) return {}; a2 = a; }
-        else return {};
-    }
-    if (!scan || !reduce || !a2) return {};
-    if (scan.getReverse() || scan->getNumResults() != 1 || reduce->getNumResults() != 1)
-        return {};
-    if (!isPlusCombiner(scan) || !isPlusCombiner(reduce)) return {};
-
-    // scan -> subf(0, scan) -> a1
-    Value scanRes = scan->getResult(0);
-    if (!scanRes.hasOneUse()) return {};
-    auto sub = dyn_cast<arith::SubFOp>(*scanRes.user_begin());
-    if (!sub || sub.getRhs() != scanRes) return {};
-    DenseElementsAttr zeroAttr;
-    if (!matchPattern(sub.getLhs(), m_Constant(&zeroAttr)) || !zeroAttr.isSplat() ||
-        !zeroAttr.getSplatValue<APFloat>().isZero())
-        return {};
-    if (!sub.getResult().hasOneUse()) return {};
-    auto a1 = dyn_cast<arith::AddFOp>(*sub.getResult().user_begin());
-    if (!a1) return {};
-
-    // reduce -> splat -> a1
-    Value redRes = reduce->getResult(0);
-    if (!redRes.hasOneUse()) return {};
-    auto splat = dyn_cast<triton::SplatOp>(*redRes.user_begin());
-    if (!splat || !splat.getResult().hasOneUse()) return {};
-    if (*splat.getResult().user_begin() != a1.getOperation()) return {};
-
-    bool a1ok = (a1.getLhs() == sub.getResult() && a1.getRhs() == splat.getResult()) ||
-                (a1.getRhs() == sub.getResult() && a1.getLhs() == splat.getResult());
-    if (!a1ok || !a1.getResult().hasOneUse()) return {};
-    if (*a1.getResult().user_begin() != a2.getOperation()) return {};
-
-    bool a2ok = (a2.getLhs() == a1.getResult() && a2.getRhs() == v) ||
-                (a2.getRhs() == a1.getResult() && a2.getLhs() == v);
-    if (!a2ok) return {};
-
-    // a2 (the idiom output, = reverse cumsum of v) may feed further elementwise
-    // ops (e.g. * scale) before the store, so do NOT require it to feed a store
-    // directly. The caller RAUWs a2's uses to a single reverse scan; multiple
-    // uses are fine. Only a2 itself is erased after the RAUW.
-    storeOut = nullptr;
-    eraseList.assign({a2.getOperation(), a1.getOperation(), sub.getOperation(),
-                      splat.getOperation(), reduce.getOperation(), scan.getOperation()});
-    return scan;
-}
-
 // Lift a rank-1 tensor type tensor<BTxe> to tensor<BTxSxe> (append the folded
 // H axis as the inner lane). Scalars / non-rank-1 types pass through unchanged.
 static Type lift2D(Type t, int64_t S) {
@@ -192,10 +134,14 @@ static Type lift2D(Type t, int64_t S) {
     return RankedTensorType::get({rt.getShape()[0], S}, rt.getElementType());
 }
 
-// An op is safe to 2D-ify (lane-parallel over the appended H axis) iff it is a
-// pure elementwise arith op, a cast, a splat, or a scan along the T axis. Ops
-// that mix or move the lane (tt.reduce, transpose, tt.dot, reshape, ...) are
-// NOT here, so the caller bails and keeps the original (indirect) path.
+// An op is safe to 2D-ify (lane-parallel over the appended H axis) iff every
+// lane s computes independently: a pure elementwise arith/math op, a cast, a
+// splat, or a scan/reduce ALONG THE T axis (axis 0). On the 2D tile [BT,S] a
+// T-axis reduce is per-lane (the S lanes stay independent, output [S]) and a
+// T-axis scan likewise, so both lift directly -- no need to pre-collapse the
+// reverse-cumsum idiom into a single scan. Ops that mix or move the lane
+// (transpose, tt.dot, reshape, reduce/scan along the lane) are NOT here, so the
+// caller bails and keeps the original (indirect) path.
 static bool is2DSafe(Operation *op) {
     if (isa<arith::AddFOp, arith::SubFOp, arith::MulFOp, arith::DivFOp,
             arith::NegFOp, arith::MaximumFOp, arith::MinimumFOp,
@@ -203,65 +149,22 @@ static bool is2DSafe(Operation *op) {
             arith::ExtFOp, arith::TruncFOp, arith::SIToFPOp, arith::UIToFPOp,
             arith::FPToSIOp, arith::FPToUIOp>(op))
         return true;
+    // Every math dialect op (exp/log/sqrt/tanh/erf/...) is a per-lane scalar
+    // elementwise map -> 2D-safe. This covers gate activations expressed as
+    // tensor math (softplus = log(1+exp), silu, gelu, ...) without enumerating
+    // each op, so such cumsum kernels coalesce without per-idiom pattern match.
+    if (isa<math::MathDialect>(op->getDialect()))
+        return true;
     if (isa<triton::SplatOp>(op)) return true;
     if (auto scan = dyn_cast<triton::ScanOp>(op))
         return scan.getAxis() == 0 && scan->getNumResults() == 1;
+    if (auto reduce = dyn_cast<triton::ReduceOp>(op))
+        return reduce.getAxis() == 0 && reduce->getNumResults() == 1;
     return false;
-}
-
-// Phase 0: collapse the FLA reverse-cumsum idiom (forward scan + reduce + the
-// `-b_o + b_z + b_s` fixup, see matchReverseCumsum) into a single 1D reverse
-// scan. This removes the only shape-changing op (tt.reduce) so the remaining
-// load->store subgraph is pure elementwise/scan and Phase 1 can lift it
-// uniformly. Operates on 1D IR only.
-static void simplifyReverseCumsum1D(ModuleOp moduleOp, int64_t S) {
-    IRRewriter rw(moduleOp.getContext());
-    SmallVector<triton::LoadOp> loads;
-    moduleOp.walk([&](triton::LoadOp l) { loads.push_back(l); });
-    for (triton::LoadOp loadOp : loads) {
-        auto m1d = loadOp.getPtr().getDefiningOp<triton::MakeTensorPtrOp>();
-        if (!m1d) continue;
-        auto rt = dyn_cast<RankedTensorType>(loadOp.getResult().getType());
-        if (!rt || rt.getRank() != 1) continue;
-        auto strides = m1d.getStrides();
-        if (strides.empty()) continue;
-        APInt sC;
-        if (!matchPattern(strides.back(), m_ConstantInt(&sC))) continue;
-        if (std::abs(sC.getSExtValue()) != S) continue;
-        if (!findIhAddPtr(m1d.getBase(), S)) continue;
-
-        Value v = loadOp.getResult();
-        if (v.hasOneUse())
-            if (auto e = dyn_cast<arith::ExtFOp>(*v.user_begin())) v = e.getResult();
-
-        triton::StoreOp st;
-        SmallVector<Operation *> el;  // {a2, a1, sub, splat, reduce, scan}
-        triton::ScanOp fwd = matchReverseCumsum(v, st, el);
-        if (!fwd) continue;
-
-        rw.setInsertionPoint(fwd);
-        auto rev = rw.create<triton::ScanOp>(fwd.getLoc(), ValueRange{v},
-                                             static_cast<int>(fwd.getAxis()),
-                                             /*reverse=*/true);
-        rw.cloneRegionBefore(fwd.getCombineOp(), rev.getCombineOp(),
-                             rev.getCombineOp().end());
-        rw.replaceAllUsesWith(el.front()->getResult(0), rev->getResult(0));
-        for (Operation *o : el) {
-            assert(o->use_empty() && "reverse simplify: op still has uses");
-            rw.eraseOp(o);
-        }
-    }
 }
 
 void rewriteStridedAxisCoalesce(ModuleOp moduleOp) {
     IRRewriter rw(moduleOp.getContext());
-
-    // This pass has priority over TileChunkCoalescing for the single module-level
-    // hacc.coalesce_factor: it runs first and unconditionally; TileChunk yields
-    // if we claim the factor here.
-    //
-    // Full TA path: we record (hacc.coalesce_factor=S, hacc.coalesce_axis) and the
-    // host launcher divides grid[axis] by S. bishengir does NOT interpret these.
 
     // Collect the strided ih-base 1D loads (seeds). All must share one stride S
     // (the folded H axis); BT is the per-chunk tile length.
@@ -301,11 +204,46 @@ void rewriteStridedAxisCoalesce(ModuleOp moduleOp) {
     });
     if (readsAxisNumPrograms) return;
 
-    // Phase 0: turn any reverse-cumsum idiom into a single reverse scan.
-    simplifyReverseCumsum1D(moduleOp, S);
+    // The H axis is folded into the inner lane, so every per-head value must be
+    // expanded across the S lanes. Block-ptr loads are lane-expanded by
+    // build2DBlockPtr; a per-head SCALAR load (A_log[i_h] / dt_bias[i_h] in
+    // gdn-style gates) is collected here and later lifted to an [S] per-lane
+    // vector load (lane s -> base[s], matching the folded i_h = s). The scalar
+    // chain on top of it (exp/neg/...) is lifted to [S] by get2D, and the splat
+    // that feeds it into the tile becomes an [S]->[BT,S] broadcast. Bail only if
+    // i_h reaches something we cannot lane-expand: a scalar load feeding an
+    // address (indirect gather), or a tensor load not via make_tensor_ptr.
+    SmallVector<triton::LoadOp> headLoads;
+    if (auto m0 = seeds.front().getPtr().getDefiningOp<triton::MakeTensorPtrOp>()) {
+        if (Value ihRem = findIhRem(m0.getBase(), S)) {
+            SmallVector<Operation *> wl2(ihRem.getUsers().begin(),
+                                         ihRem.getUsers().end());
+            DenseSet<Operation *> seen2;
+            while (!wl2.empty()) {
+                Operation *u = wl2.pop_back_val();
+                if (!seen2.insert(u).second) continue;
+                if (isa<triton::MakeTensorPtrOp>(u)) continue;  // block-ptr path: fine
+                if (auto ld = dyn_cast<triton::LoadOp>(u)) {
+                    // per-head scalar load: must be scalar and must not itself feed
+                    // an address (indirect gather). Then it is liftable to [S].
+                    if (isa<RankedTensorType>(ld.getResult().getType())) return;
+                    for (Operation *ru : ld.getResult().getUsers())
+                        if (isa<triton::AddPtrOp>(ru)) return;  // indirect -> bail
+                    headLoads.push_back(ld);
+                    continue;
+                }
+                if (isa<triton::AddPtrOp, arith::ExtSIOp, arith::TruncIOp,
+                        arith::RemSIOp, arith::AddIOp, arith::MulIOp>(u))
+                    for (Operation *uu : u->getResult(0).getUsers())
+                        wl2.push_back(uu);
+            }
+        }
+    }
 
-    // Phase 1: discover the load->store subgraph by forward reachability from
-    // the seeds. Every op on the way must be 2D-safe; stores are the sinks.
+    // Discover the load->store subgraph by forward reachability from the seeds.
+    // Every op on the way must be 2D-safe (elementwise / cast / splat / T-axis
+    // scan or reduce); stores are the sinks. A T-axis reduce is kept as-is and
+    // lifted in place (no idiom-specific pre-collapse) -- see is2DSafe.
     // Any unsafe op (or a value escaping to one) aborts the whole rewrite.
     DenseSet<Operation *> region;
     SmallVector<triton::StoreOp> sinks;
@@ -342,11 +280,67 @@ void rewriteStridedAxisCoalesce(ModuleOp moduleOp) {
     std::function<Value(Value)> get2D = [&](Value v) -> Value {
         auto it = vmap.find(v);
         if (it != vmap.end()) return it->second;
-        if (!isa<RankedTensorType>(v.getType())) return v;  // scalar, unchanged
+        if (!isa<RankedTensorType>(v.getType())) {
+            // Scalar: if it derives from a per-head load (whose [S] lane vector is
+            // already in vmap), lift the elementwise scalar chain to [S] so each
+            // lane gets its own value. i_h-independent scalars stay scalar (they
+            // splat uniformly across lanes, which is correct).
+            Operation *def = v.getDefiningOp();
+            bool liftable = def && (isa<math::MathDialect>(def->getDialect()) ||
+                isa<arith::AddFOp, arith::SubFOp, arith::MulFOp, arith::DivFOp,
+                    arith::NegFOp, arith::MaximumFOp, arith::MinimumFOp,
+                    arith::MaxNumFOp, arith::MinNumFOp, arith::ExtFOp,
+                    arith::TruncFOp>(def));
+            if (liftable) {
+                SmallVector<Value> ops2;
+                bool anyLane = false;
+                for (Value o : def->getOperands()) {
+                    Value n = get2D(o);
+                    if (!n) return Value();
+                    if (isa<RankedTensorType>(n.getType())) anyLane = true;
+                    ops2.push_back(n);
+                }
+                if (anyLane) {
+                    OpBuilder::InsertionGuard g(rw);
+                    rw.setInsertionPointAfter(def);
+                    for (Value &o : ops2)
+                        if (!isa<RankedTensorType>(o.getType()))
+                            o = rw.create<triton::SplatOp>(
+                                def->getLoc(), RankedTensorType::get({S}, o.getType()), o);
+                    OperationState st(def->getLoc(), def->getName());
+                    st.addOperands(ops2);
+                    st.addAttributes(def->getAttrs());
+                    for (Value r : def->getResults())
+                        st.addTypes(RankedTensorType::get({S}, r.getType()));
+                    Operation *nu = rw.create(st);
+                    vmap[v] = nu->getResult(0);
+                    return nu->getResult(0);
+                }
+            }
+            return v;  // i_h-independent scalar, splats uniformly
+        }
+        // Save/restore the insertion point: the materializers below move it next
+        // to the original splat/constant (which may sit at the top of the func).
+        // Without this the caller's `rw.setInsertionPoint(op)` would be clobbered
+        // and the rebuilt op emitted before its operands -> dominance violation.
+        OpBuilder::InsertionGuard guard(rw);
         if (auto sp = v.getDefiningOp<triton::SplatOp>()) {
+            Value src2 = get2D(sp.getSrc());
+            if (!src2) return Value();
             rw.setInsertionPointAfter(sp);
-            Value n = rw.create<triton::SplatOp>(sp.getLoc(),
-                                                 lift2D(sp.getType(), S), sp.getSrc());
+            Value n;
+            if (isa<RankedTensorType>(src2.getType())) {
+                // src2 is the per-lane reduce result [S] (the 1D scalar source
+                // became a vector once the reduce was 2D-ified). Broadcast it
+                // across T: [S] -> expand_dims(0) -> [1,S] -> broadcast [BT,S].
+                Value ex = rw.create<triton::ExpandDimsOp>(sp.getLoc(), src2, 0);
+                n = rw.create<triton::BroadcastOp>(sp.getLoc(),
+                                                   lift2D(sp.getType(), S), ex);
+            } else {
+                // True scalar splat: lift to a 2D splat over [BT,S].
+                n = rw.create<triton::SplatOp>(sp.getLoc(),
+                                               lift2D(sp.getType(), S), src2);
+            }
             vmap[v] = n;
             return n;
         }
@@ -378,6 +372,34 @@ void rewriteStridedAxisCoalesce(ModuleOp moduleOp) {
         vmap[l.getResult()] = nl.getResult();
     }
 
+    // Lift each per-head scalar load to an [S] per-lane vector load: base[0:S]
+    // (lane s = base[s], matching the folded i_h = s). The offset must be exactly
+    // i_h = pid % S so that lane s maps to base[s]; otherwise bail.
+    for (auto ld : headLoads) {
+        auto ap = ld.getPtr().getDefiningOp<triton::AddPtrOp>();
+        if (!ap) return;
+        Value off = ap.getOffset();
+        while (auto e = off.getDefiningOp<arith::ExtSIOp>()) off = e.getIn();
+        while (auto t = off.getDefiningOp<arith::TruncIOp>()) off = t.getIn();
+        if (!off.getDefiningOp<arith::RemSIOp>()) return;  // offset not pure i_h
+        Value base = ap.getPtr();
+        Type elemTy = ld.getResult().getType();
+        rw.setInsertionPoint(ld);
+        auto loc = ld.getLoc();
+        Value cS = rw.create<arith::ConstantOp>(loc, rw.getI64IntegerAttr(S));
+        Value c1 = rw.create<arith::ConstantOp>(loc, rw.getI64IntegerAttr(1));
+        Value c0 = rw.create<arith::ConstantOp>(loc, rw.getI32IntegerAttr(0));
+        SmallVector<Value, 1> shape{cS}, strides{c1}, offsets{c0};
+        SmallVector<int32_t, 1> blockShape{static_cast<int32_t>(S)}, order{0};
+        auto p = rw.create<triton::MakeTensorPtrOp>(loc, base, shape, strides,
+                                                    offsets, blockShape, order);
+        auto vl = rw.create<triton::LoadOp>(
+            loc, p.getResult(), ArrayRef<int32_t>{0}, triton::PaddingOption::PAD_ZERO,
+            triton::CacheModifier::NONE, triton::EvictionPolicy::NORMAL, false);
+        (void)elemTy;
+        vmap[ld.getResult()] = vl.getResult();
+    }
+
     // Rebuild the region ops in IR (topological) order as 2D.
     SmallVector<Operation *> ordered;
     moduleOp.walk([&](Operation *op) { if (region.count(op)) ordered.push_back(op); });
@@ -394,6 +416,24 @@ void rewriteStridedAxisCoalesce(ModuleOp moduleOp) {
             vmap[scan->getResult(0)] = ns->getResult(0);
             continue;
         }
+        if (auto reduce = dyn_cast<triton::ReduceOp>(op)) {
+            Value in = get2D(reduce.getOperand(0));
+            if (!in) return;
+            // T-axis reduce on the 2D tile [BT,S] -> [S]: one independent
+            // reduction per lane (the S lanes do not mix). The 1D result was a
+            // scalar; its 2D counterpart is the per-lane vector [S], which a
+            // downstream splat turns into an expand_dims+broadcast (see get2D).
+            auto nr = rw.create<triton::ReduceOp>(reduce.getLoc(), ValueRange{in},
+                                                  static_cast<int>(reduce.getAxis()));
+            rw.cloneRegionBefore(reduce.getCombineOp(), nr.getCombineOp(),
+                                 nr.getCombineOp().end());
+            vmap[reduce->getResult(0)] = nr->getResult(0);
+            continue;
+        }
+        // Splats are materialized on demand by get2D (which lifts a scalar splat
+        // to a 2D splat, and a per-lane reduce result [S] to expand_dims +
+        // broadcast). Skip here so it is not rebuilt as an invalid 2D splat.
+        if (isa<triton::SplatOp>(op)) continue;
         SmallVector<Value> operands;
         for (Value o : op->getOperands()) {
             Value n = get2D(o);

@@ -22,6 +22,7 @@
 
 #include "TritonToLinalg/StridedLoadStoreRewrite.h"
 #include "TritonToLinalg/ImplicitPermute.h"
+#include "TritonToLinalg/MaskAnalysis.h"
 #include "TritonToStructured/PtrAnalysis.h"
 #include "Utils/Utils.h"
 
@@ -64,18 +65,6 @@ static bool isStaticConstAbsGtOne(Value v) {
     // Transparently see through tt.splat of a scalar constant.
     if (auto splatOp = v.getDefiningOp<triton::SplatOp>())
         return isStaticConstAbsGtOne(splatOp.getSrc());
-    return false;
-}
-
-static bool isStaticConst(Value v) {
-    IntegerAttr scalarAttr;
-    if (matchPattern(v, m_Constant(&scalarAttr))) return true;
-    DenseElementsAttr denseAttr;
-    if (matchPattern(v, m_Constant(&denseAttr)) && denseAttr.isSplat() &&
-        denseAttr.getElementType().isInteger())
-        return true;
-    if (auto splatOp = v.getDefiningOp<triton::SplatOp>())
-        return isStaticConst(splatOp.getSrc());
     return false;
 }
 
@@ -126,21 +115,9 @@ static bool shouldRouteMaskedSingleTilePow2ToIndirect(
     return upperBound && *upperBound <= blockSize;
 }
 
-// Lightweight pre-check: walks the offset's defining-op tree (bounded depth,
-// staying within tensor-typed values) looking for any arith.muli whose result
-// is a tensor and either one operand is a static constant with |c| > 1, or the
-// multiply uses a dynamic scale. Returns false if no such per-element
-// multiplication exists, in which case the per-element stride must be 1 and we
-// should NOT invoke the heavier PtrAnalysis (which mutates IR via the rewriter;
-// calling it before we commit to rewriting would violate MLIR's pattern contract
-// -- the greedy driver would treat our return-failure() as a real change and
-// loop until max iterations, failing the PassManager).
-//
-// Crucially, we do NOT recurse through scalar values: scalar arithmetic
-// (e.g. `xoffset = pid * BLOCK_SIZE`) does not affect per-element stride;
-// only tensor-level multiplications do. Without this restriction, kernels
-// that compute a scalar block offset by multiplying by the block size would
-// be incorrectly flagged as "possibly stride>1".
+// Cheaply detect tensor-level static stride > 1 before running PtrAnalysis,
+// which mutates IR. Dynamic stride stays on the structured SIMD path, and
+// scalar offset arithmetic does not affect per-element stride.
 static bool offsetMayContainStrideGtOne(Value offset, int depthBudget = 16) {
     if (depthBudget <= 0) {
         return true;  // Give up cheaply and let PtrAnalysis decide downstream.
@@ -157,8 +134,6 @@ static bool offsetMayContainStrideGtOne(Value offset, int depthBudget = 16) {
             isStaticConstAbsGtOne(mul.getRhs())) {
             return true;
         }
-        if (!isStaticConst(mul.getLhs()) && !isStaticConst(mul.getRhs()))
-            return true;
         return offsetMayContainStrideGtOne(mul.getLhs(), depthBudget - 1) ||
                offsetMayContainStrideGtOne(mul.getRhs(), depthBudget - 1);
     }
@@ -176,7 +151,6 @@ static bool offsetMayContainStrideGtOne(Value offset, int depthBudget = 16) {
             denseAttr.getSplatValue<llvm::APInt>().getSExtValue() >= 1) {
             return true;
         }
-        if (!isStaticConst(shl.getRhs())) return true;
         return offsetMayContainStrideGtOne(shl.getLhs(), depthBudget - 1);
     }
     for (Value operand : defOp->getOperands()) {
@@ -270,6 +244,307 @@ static Value addScalarOffsetToTensor(Value offsetTensor, Value scalarOffset,
         rewriter.create<triton::SplatOp>(loc, tensorType, scalarOffset);
     return rewriter.create<arith::AddIOp>(loc, offsetTensor,
                                           scalarOffsetTensor);
+}
+
+static Value getStrideLoadOtherScalar(triton::LoadOp op,
+                                      RankedTensorType resultType,
+                                      PatternRewriter &rewriter) {
+    auto loc = op.getLoc();
+    Type elementType = resultType.getElementType();
+    if (Value other = op.getOther()) {
+        if (auto splatOp = other.getDefiningOp<triton::SplatOp>())
+            return splatOp.getSrc();
+
+        DenseElementsAttr denseAttr;
+        if (matchPattern(other, m_Constant(&denseAttr)) && denseAttr.isSplat()) {
+            if (auto floatType = dyn_cast<FloatType>(elementType)) {
+                return rewriter.create<arith::ConstantOp>(
+                    loc, rewriter.getFloatAttr(
+                             elementType,
+                             denseAttr.getSplatValue<APFloat>()));
+            }
+            if (isa<IntegerType>(elementType)) {
+                return rewriter.create<arith::ConstantOp>(
+                    loc, rewriter.getIntegerAttr(
+                             elementType,
+                             denseAttr.getSplatValue<APInt>()));
+            }
+        }
+        return Value();
+    }
+
+    if (op.getPadding().has_value() &&
+        op.getPadding().value() == triton::PaddingOption::PAD_NAN) {
+        auto floatTy = dyn_cast<FloatType>(elementType);
+        if (!floatTy) return Value();
+        return rewriter.create<arith::ConstantOp>(
+            loc, rewriter.getFloatAttr(
+                     elementType,
+                     APFloat::getNaN(floatTy.getFloatSemantics())));
+    }
+    return rewriter.create<arith::ConstantOp>(loc,
+                                              rewriter.getZeroAttr(elementType));
+}
+
+static Value createStrideLoadOp(Location loc, RankedTensorType resultType,
+                                Value src, Value offset, Value other,
+                                ArrayRef<Value> strides,
+                                ArrayRef<Value> numels,
+                                PatternRewriter &rewriter) {
+    int64_t rank = resultType.getRank();
+    if (static_cast<int64_t>(strides.size()) != rank ||
+        static_cast<int64_t>(numels.size()) != rank) {
+        return Value();
+    }
+
+    Type indexType = rewriter.getI32Type();
+    auto chooseIndexType = [&](Value value) -> bool {
+        Type type = value.getType();
+        if (isa<IndexType>(type) || type.isInteger(64)) {
+            indexType = rewriter.getI64Type();
+            return true;
+        }
+        return type.isInteger(32);
+    };
+    auto castToIndexType = [&](Value value) -> Value {
+        Type type = value.getType();
+        if (type == indexType) return value;
+        if (isa<IndexType>(type))
+            return rewriter.create<arith::IndexCastOp>(loc, indexType, value);
+        if (type.isInteger(32) && indexType.isInteger(64))
+            return rewriter.create<arith::ExtSIOp>(loc, indexType, value);
+        return Value();
+    };
+    auto chooseAll = [&](ArrayRef<Value> values) -> bool {
+        for (Value value : values) {
+            if (!chooseIndexType(value)) return false;
+        }
+        return true;
+    };
+
+    if (!chooseIndexType(offset) || !chooseAll(strides) ||
+        !chooseAll(numels))
+        return Value();
+    offset = castToIndexType(offset);
+    if (!offset) return Value();
+    SmallVector<Value> castStrides;
+    SmallVector<Value> castNumels;
+    castStrides.reserve(rank);
+    castNumels.reserve(rank);
+    for (Value stride : strides) {
+        stride = castToIndexType(stride);
+        if (!stride) return Value();
+        castStrides.push_back(stride);
+    }
+    for (Value numel : numels) {
+        numel = castToIndexType(numel);
+        if (!numel) return Value();
+        castNumels.push_back(numel);
+    }
+
+    auto strideLoad = rewriter.create<triton::ascend::StrideLoadOp>(
+        loc, resultType, src, offset, other, castStrides, castNumels);
+    strideLoad->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
+                        UnitAttr::get(rewriter.getContext()));
+    return strideLoad->getResult(0);
+}
+
+static Operation *createStrideStoreOp(Location loc, RankedTensorType valueType,
+                                      Value dst, Value src, Value offset,
+                                      ArrayRef<Value> strides,
+                                      ArrayRef<Value> numels,
+                                      PatternRewriter &rewriter) {
+    int64_t rank = valueType.getRank();
+    if (static_cast<int64_t>(strides.size()) != rank ||
+        static_cast<int64_t>(numels.size()) != rank) {
+        return nullptr;
+    }
+
+    Type indexType = rewriter.getI32Type();
+    auto chooseIndexType = [&](Value value) -> bool {
+        Type type = value.getType();
+        if (isa<IndexType>(type) || type.isInteger(64)) {
+            indexType = rewriter.getI64Type();
+            return true;
+        }
+        return type.isInteger(32);
+    };
+    auto castToIndexType = [&](Value value) -> Value {
+        Type type = value.getType();
+        if (type == indexType) return value;
+        if (isa<IndexType>(type))
+            return rewriter.create<arith::IndexCastOp>(loc, indexType, value);
+        if (type.isInteger(32) && indexType.isInteger(64))
+            return rewriter.create<arith::ExtSIOp>(loc, indexType, value);
+        return Value();
+    };
+    auto chooseAll = [&](ArrayRef<Value> values) -> bool {
+        for (Value value : values) {
+            if (!chooseIndexType(value)) return false;
+        }
+        return true;
+    };
+
+    if (!chooseIndexType(offset) || !chooseAll(strides) ||
+        !chooseAll(numels))
+        return nullptr;
+    offset = castToIndexType(offset);
+    if (!offset) return nullptr;
+    SmallVector<Value> castStrides;
+    SmallVector<Value> castNumels;
+    castStrides.reserve(rank);
+    castNumels.reserve(rank);
+    for (Value stride : strides) {
+        stride = castToIndexType(stride);
+        if (!stride) return nullptr;
+        castStrides.push_back(stride);
+    }
+    for (Value numel : numels) {
+        numel = castToIndexType(numel);
+        if (!numel) return nullptr;
+        castNumels.push_back(numel);
+    }
+
+    auto strideStore = rewriter.create<triton::ascend::StrideStoreOp>(
+        loc, dst, src, offset, castStrides, castNumels);
+    strideStore->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
+                         UnitAttr::get(rewriter.getContext()));
+    return strideStore.getOperation();
+}
+
+static Value materializeI64(OpFoldResult ofr, Location loc,
+                            PatternRewriter &rewriter) {
+    if (auto attr = ofr.dyn_cast<Attribute>()) {
+        int64_t value = cast<IntegerAttr>(attr).getInt();
+        return rewriter.create<arith::ConstantOp>(
+            loc, rewriter.getI64IntegerAttr(value));
+    }
+    return ensureI64Scalar(ofr.get<Value>(), loc, rewriter);
+}
+
+static Value clampI64(Value value, Value lower, Value upper, Location loc,
+                      PatternRewriter &rewriter) {
+    value = rewriter.create<arith::MaxSIOp>(loc, value, lower);
+    return rewriter.create<arith::MinSIOp>(loc, value, upper);
+}
+
+static Value getPrefixMaskNumel(Operation *op, Value mask,
+                                RankedTensorType resultType,
+                                PatternRewriter &rewriter) {
+    if (!mask) {
+        return rewriter.create<arith::ConstantOp>(
+            op->getLoc(),
+            rewriter.getI64IntegerAttr(resultType.getShape().front()));
+    }
+
+    auto maskState = triton::runMaskAnalysis(op, rewriter);
+    if (!maskState || maskState->getRank() != 1) return Value();
+
+    auto offset = getConstantIntValue(maskState->offsets.front());
+    if (!offset.has_value() || offset.value() != 0) return Value();
+
+    auto loc = op->getLoc();
+    Value zero = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getI64IntegerAttr(0));
+    Value block = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getI64IntegerAttr(resultType.getShape().front()));
+    Value numel = materializeI64(maskState->dims.front(), loc, rewriter);
+    if (!numel) return Value();
+    return clampI64(numel, zero, block, loc, rewriter);
+}
+
+static FailureOr<SmallVector<Value>> getAddPtrStrideNumels(
+    Operation *op, Value mask, RankedTensorType resultType,
+    PatternRewriter &rewriter) {
+    auto loc = op->getLoc();
+    int64_t rank = resultType.getRank();
+    ArrayRef<int64_t> shape = resultType.getShape();
+
+    if (!mask) {
+        SmallVector<Value> numels;
+        for (int64_t d = 0; d < rank; ++d)
+            numels.push_back(rewriter.create<arith::ConstantOp>(
+                loc, rewriter.getI64IntegerAttr(shape[d])));
+        return numels;
+    }
+
+    if (rank == 1) {
+        Value numel = getPrefixMaskNumel(op, mask, resultType, rewriter);
+        if (!numel) return failure();
+        return SmallVector<Value>{numel};
+    }
+
+    auto maskState = triton::runMaskAnalysis(op, rewriter);
+    if (!maskState || maskState->getRank() != rank) return failure();
+
+    for (int64_t d = 0; d < rank; ++d) {
+        auto offsetVal = getConstantIntValue(maskState->offsets[d]);
+        if (!offsetVal.has_value() || offsetVal.value() != 0)
+            return failure();
+    }
+
+    Value zero = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getI64IntegerAttr(0));
+    SmallVector<Value> numels;
+    numels.reserve(rank);
+    for (int64_t d = 0; d < rank; ++d) {
+        Value block = rewriter.create<arith::ConstantOp>(
+            loc, rewriter.getI64IntegerAttr(shape[d]));
+        Value numel = materializeI64(maskState->dims[d], loc, rewriter);
+        if (!numel) return failure();
+        numel = clampI64(numel, zero, block, loc, rewriter);
+        numels.push_back(numel);
+    }
+    return numels;
+}
+
+static FailureOr<SmallVector<Value>> getBlockPtrStrideNumels(
+    Operation *op, Value mask, ArrayRef<int32_t> boundaryCheck,
+    triton::MakeTensorPtrOp mtpt,
+    RankedTensorType resultType, ArrayRef<Value> logicalOffsets,
+    PatternRewriter &rewriter) {
+    auto loc = op->getLoc();
+    Value zero = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getI64IntegerAttr(0));
+    ArrayRef<int64_t> shape = resultType.getShape();
+    int64_t rank = resultType.getRank();
+    SmallVector<Value> numels;
+    numels.reserve(rank);
+
+    if (mask && rank != 1) return failure();
+    Value prefixMaskNumel;
+    if (mask) {
+        prefixMaskNumel = getPrefixMaskNumel(op, mask, resultType, rewriter);
+        if (!prefixMaskNumel) return failure();
+    }
+
+    for (int64_t d = 0; d < rank; ++d) {
+        Value block = rewriter.create<arith::ConstantOp>(
+            loc, rewriter.getI64IntegerAttr(shape[d]));
+        Value numel = (d == 0 && prefixMaskNumel) ? prefixMaskNumel : block;
+
+        bool hasBoundaryCheck = false;
+        for (int32_t axis : boundaryCheck) {
+            if (axis == static_cast<int32_t>(d)) {
+                hasBoundaryCheck = true;
+                break;
+            }
+        }
+        if (hasBoundaryCheck) {
+            Value parentSize = ensureI64Scalar(mtpt.getShape()[d], loc,
+                                               rewriter);
+            if (!parentSize) return failure();
+            Value remaining =
+                rewriter.create<arith::SubIOp>(loc, parentSize,
+                                               logicalOffsets[d]);
+            Value boundaryNumel =
+                clampI64(remaining, zero, block, loc, rewriter);
+            numel = rewriter.create<arith::MinSIOp>(loc, numel, boundaryNumel);
+        }
+        numels.push_back(numel);
+    }
+
+    return numels;
 }
 
 // Expand a 1D tensor `v` of length `targetShape[axis]` into a rank-N tensor
@@ -406,23 +681,81 @@ static LogicalResult tryRewriteAddPtrLoad(triton::LoadOp op,
     ptrState.analyzePermute();
     if (ptrState.isPermuted) return markInspectedAndReturn();
 
-    // Stride dispatch (mirrors tryRewriteBlockPtrLoad): DECLINE for most static
-    // power-of-two strides (-> strided DMA / deinterleave); non-power-of-two
-    // static, dynamic, and masked single-tile pow2 strides fall through to SIMT
-    // indirect.
+    // Use SIMT indirect only for static non-pow2 or masked single-tile pow2
+    // strides; keep dynamic strides on the structured SIMD path.
     auto lastStrideOpt = getConstantIntValue(ptrState.stateInfo.back().stride);
-    int64_t lastStride = -1;  // -1 == dynamic
-    if (lastStrideOpt.has_value()) {
-        lastStride = std::abs(lastStrideOpt.value());
-        if (lastStride <= 1) return markInspectedAndReturn();
-        bool routeMaskedPow2ToIndirect =
-            shouldRouteMaskedSingleTilePow2ToIndirect(op.getMask(), resultType);
-        if (lastStride == 2 && !routeMaskedPow2ToIndirect)
-            return markInspectedAndReturn();  // even -> deinterleave; odd -> strided DMA
-        if ((lastStride & (lastStride - 1)) == 0 &&
-            !routeMaskedPow2ToIndirect)
-            return markInspectedAndReturn();  // power-of-two >= 4 -> strided DMA
+    if (!lastStrideOpt.has_value()) return markInspectedAndReturn();
+    int64_t lastStride = std::abs(lastStrideOpt.value());
+    if (lastStride <= 1) return markInspectedAndReturn();
+    bool routeMaskedPow2ToIndirect =
+        shouldRouteMaskedSingleTilePow2ToIndirect(op.getMask(), resultType);
+    if (lastStride == 2 && !routeMaskedPow2ToIndirect)
+        return markInspectedAndReturn();  // even -> deinterleave; odd -> strided DMA
+    if ((lastStride & (lastStride - 1)) == 0 &&
+        !routeMaskedPow2ToIndirect)
+        return markInspectedAndReturn();  // power-of-two >= 4 -> strided DMA
+
+    bool useStrideLoad = !routeMaskedPow2ToIndirect;
+    if (useStrideLoad && resultType.getRank() >= 1 &&
+        resultType.getRank() <= 3 &&
+        resultType.hasStaticShape() &&
+        static_cast<int64_t>(ptrState.stateInfo.size()) ==
+            resultType.getRank()) {
+        Value src = ptrState.source;
+        SmallVector<Value> strides;
+        SmallVector<Value> numels;
+        strides.reserve(resultType.getRank());
+
+        Value baseOffset = materializeI64(ptrState.offset, loc, rewriter);
+        bool operandsReady = src && baseOffset;
+        for (int64_t d = 0; operandsReady && d < resultType.getRank(); ++d) {
+            Value stride =
+                materializeI64(ptrState.stateInfo[d].stride, loc, rewriter);
+            if (!stride) {
+                operandsReady = false;
+                break;
+            }
+            strides.push_back(stride);
+        }
+
+        if (operandsReady) {
+            auto numelsResult =
+                getAddPtrStrideNumels(op.getOperation(), op.getMask(),
+                                      resultType, rewriter);
+            if (succeeded(numelsResult)) {
+                numels = *numelsResult;
+            } else {
+                operandsReady = false;
+            }
+        }
+        Value other = operandsReady
+                          ? getStrideLoadOtherScalar(op, resultType, rewriter)
+                          : Value();
+        operandsReady = operandsReady && other;
+
+        if (operandsReady) {
+            Value strideLoadResult = createStrideLoadOp(
+                loc, resultType, src, baseOffset, other, strides, numels,
+                rewriter);
+            if (!strideLoadResult) return markInspectedAndReturn();
+
+            LLVM_DEBUG({
+                llvm::dbgs()
+                    << "----------------------------------------------\n";
+                llvm::dbgs() << "StridedLoadStoreRewrite [AddPtr]: tt.load -> "
+                                "ttasc.stride_load\n";
+                llvm::dbgs() << "  last_stride = " << lastStride << "\n";
+                llvm::dbgs() << strideLoadResult.getDefiningOp() << "\n";
+                llvm::dbgs()
+                    << "----------------------------------------------\n";
+            });
+            rewriter.replaceOp(op, strideLoadResult);
+            return success();
+        }
     }
+
+    if (useStrideLoad && resultType.getRank() <= 3)
+        return markInspectedAndReturn();
 
     Value offsetTensor =
         ensureI64OffsetTensor(addPtrOp.getOffset(), loc, rewriter);
@@ -443,7 +776,8 @@ static LogicalResult tryRewriteAddPtrLoad(triton::LoadOp op,
 
     LLVM_DEBUG({
         llvm::dbgs() << "----------------------------------------------\n";
-        llvm::dbgs() << "StridedLoadStoreRewrite [AddPtr]: tt.load -> tt.indirect_load\n";
+        llvm::dbgs() << "StridedLoadStoreRewrite [AddPtr]: tt.load -> "
+                        "tt.indirect_load\n";
         llvm::dbgs() << "  last_stride = " << lastStride << "\n";
         llvm::dbgs() << indirectLoad << "\n";
         llvm::dbgs() << "----------------------------------------------\n";
@@ -484,23 +818,19 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
     if (strides.empty() || static_cast<int64_t>(strides.size()) != rank)
         return failure();
     // Stride dispatch: strided DMA on the MTE engine only supports power-of-two
-    // strides; a non-power-of-two stride would degrade to a slow scalar access,
-    // and a dynamic stride cannot be proven to be a power of two -- both are
-    // better served by the SIMT indirect gather. So we only DECLINE the indirect
-    // rewrite (-> strided DMA / deinterleave) for *static power-of-two* strides:
+    // strides; a non-power-of-two stride would degrade to a slow scalar access.
+    // Dynamic strides stay on the structured SIMD path because they may be
+    // runtime stride 1 or power-of-two, where SIMT stride is slower. So we
+    // only rewrite to SIMT stride for *static non-power-of-two* strides:
     //   stride 1 -> contiguous; stride 2 (even dim) -> deinterleave;
     //   stride >= 4 (power of two) -> (compact) strided DMA.
-    // Everything else (non-power-of-two static, or dynamic) falls through to the
-    // SIMT indirect gather below (the offset tensor is built from the stride
-    // Values, so a dynamic stride is fine).
     APInt lastStrideC;
-    int64_t lastStride = -1;  // -1 == dynamic (not a static constant)
-    if (matchPattern(strides.back(), m_ConstantInt(&lastStrideC))) {
-        lastStride = std::abs(lastStrideC.getSExtValue());
-        if (lastStride <= 1) return failure();
-        if (lastStride == 2) return failure();  // even -> deinterleave; odd -> strided DMA
-        if ((lastStride & (lastStride - 1)) == 0) return failure();  // power-of-two >= 4 -> strided DMA
-    }
+    if (!matchPattern(strides.back(), m_ConstantInt(&lastStrideC)))
+        return failure();
+    int64_t lastStride = std::abs(lastStrideC.getSExtValue());
+    if (lastStride <= 1) return failure();
+    if (lastStride == 2) return failure();  // even -> deinterleave; odd -> strided DMA
+    if ((lastStride & (lastStride - 1)) == 0) return failure();  // power-of-two >= 4 -> strided DMA
 
     // ---- Compute per-axis effective base offsets: mtpt.offsets[d] + (advance.offsets[d] if present)
     ValueRange mtptOffsets = mtpt.getOffsets();
@@ -514,11 +844,10 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
     // Unwrap any `tt.addptr` chain on the SCALAR base ptr (e.g. when the
     // kernel writes `tl.make_block_ptr(s + bos*H + i_h, ...)`). If we left
     // those scalar AddPtrs in place, the AddPtrConverter would lower each
-    // into a `memref.reinterpret_cast ... sizes: [1]` single-element view,
-    // and our tt.indirect_load would receive a size-1 src that the per-axis
-    // offset tensor indexes way out of bounds. By walking the scalar AddPtr
-    // chain here we (a) fold its scalar offsets into `scalarBaseAdj` and
-    // (b) recover the original underlying `!tt.ptr<T>` to use as our src.
+    // into a `memref.reinterpret_cast ... sizes: [1]` single-element view. By
+    // walking the scalar AddPtr chain here we (a) fold its scalar offsets into
+    // `scalarBaseAdj` and (b) recover the original underlying `!tt.ptr<T>` to
+    // use as our src.
     Value src = mtpt.getBase();
     Value scalarBaseAdj = rewriter.create<arith::ConstantOp>(
         loc, rewriter.getI64IntegerAttr(0));
@@ -534,8 +863,16 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
         src = addptr.getPtr();
     }
 
-    // Build the scalar base offset: scalarBaseAdj + sum_d (mtpt.offsets[d] + adv.offsets[d]) * strides[d].
+    // Build the scalar base offset:
+    //   scalarBaseAdj + sum_d (mtpt.offsets[d] + adv.offsets[d]) * strides[d].
+    // Boundary checks are expressed in logical make_tensor_ptr coordinates, so
+    // numels must use the unstrided per-axis offsets rather than this physical
+    // GM offset.
     Value scalarBase = scalarBaseAdj;
+    SmallVector<Value> logicalOffsets;
+    SmallVector<Value> strideOperands;
+    logicalOffsets.reserve(rank);
+    strideOperands.reserve(rank);
     for (int64_t d = 0; d < rank; ++d) {
         Value baseOff = ensureI64Scalar(mtptOffsets[d], loc, rewriter);
         if (!baseOff) return failure();
@@ -544,13 +881,45 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
             if (!advStep) return failure();
             baseOff = rewriter.create<arith::AddIOp>(loc, baseOff, advStep);
         }
+        logicalOffsets.push_back(baseOff);
         Value strI64 = ensureI64Scalar(strides[d], loc, rewriter);
         if (!strI64) return failure();
+        strideOperands.push_back(strI64);
         Value prod = rewriter.create<arith::MulIOp>(loc, baseOff, strI64);
         scalarBase = rewriter.create<arith::AddIOp>(loc, scalarBase, prod);
     }
 
-    // offset_tensor = splat(scalarBase) + sum_d broadcast(arange(0,B_d) * strides[d])
+    if (resultType.getRank() >= 1 &&
+        resultType.getRank() <= 3 && resultType.hasStaticShape()) {
+        FailureOr<SmallVector<Value>> numels = getBlockPtrStrideNumels(
+            op.getOperation(), op.getMask(), op.getBoundaryCheck(), mtpt,
+            resultType, logicalOffsets, rewriter);
+        if (succeeded(numels)) {
+            Value other = getStrideLoadOtherScalar(op, resultType, rewriter);
+            if (!other) return failure();
+            Value strideLoadResult = createStrideLoadOp(
+                loc, resultType, src, scalarBase, other, strideOperands, *numels,
+                rewriter);
+            if (!strideLoadResult) return failure();
+
+            LLVM_DEBUG({
+                llvm::dbgs()
+                    << "----------------------------------------------\n";
+                llvm::dbgs() << "StridedLoadStoreRewrite [BlockPtr"
+                             << (advance ? "+Advance" : "")
+                             << "]: tt.load -> ttasc.stride_load\n";
+                llvm::dbgs() << "  last_stride = " << lastStride << "\n";
+                llvm::dbgs() << strideLoadResult.getDefiningOp() << "\n";
+                llvm::dbgs()
+                    << "----------------------------------------------\n";
+            });
+            rewriter.replaceOp(op, strideLoadResult);
+            return success();
+        }
+    }
+
+    if (rank <= 3) return failure();
+
     auto i64TensorTy = RankedTensorType::get(shape, i64Ty);
     Value offsetTensor =
         rewriter.create<triton::SplatOp>(loc, i64TensorTy, scalarBase);
@@ -623,7 +992,8 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
 // V2 (Store) helpers ----------------------------------------------------------
 
 // AddPtr path for tt.store. Mirrors tryRewriteAddPtrLoad but emits
-// triton::ascend::IndirectStoreOp and eraseOp's the original tt.store.
+// triton::ascend::StrideStoreOp when the mask can be represented by per-axis
+// numel bounds.
 static LogicalResult tryRewriteAddPtrStore(triton::StoreOp op,
                                             triton::AddPtrOp addPtrOp,
                                             RankedTensorType valueType,
@@ -648,23 +1018,76 @@ static LogicalResult tryRewriteAddPtrStore(triton::StoreOp op,
     ptrState.analyzePermute();
     if (ptrState.isPermuted) return markInspectedAndReturn();
 
-    // Stride dispatch (mirrors tryRewriteBlockPtrLoad): DECLINE for most static
-    // power-of-two strides (-> strided DMA / deinterleave); non-power-of-two
-    // static, dynamic, and masked single-tile pow2 strides fall through to SIMT
-    // indirect.
+    // Use SIMT indirect only for static non-pow2 or masked single-tile pow2
+    // strides; keep dynamic strides on the structured SIMD path.
     auto lastStrideOpt = getConstantIntValue(ptrState.stateInfo.back().stride);
-    int64_t lastStride = -1;  // -1 == dynamic
-    if (lastStrideOpt.has_value()) {
-        lastStride = std::abs(lastStrideOpt.value());
-        if (lastStride <= 1) return markInspectedAndReturn();
-        bool routeMaskedPow2ToIndirect =
-            shouldRouteMaskedSingleTilePow2ToIndirect(op.getMask(), valueType);
-        if (lastStride == 2 && !routeMaskedPow2ToIndirect)
-            return markInspectedAndReturn();  // even -> deinterleave; odd -> strided DMA
-        if ((lastStride & (lastStride - 1)) == 0 &&
-            !routeMaskedPow2ToIndirect)
-            return markInspectedAndReturn();  // power-of-two >= 4 -> strided DMA
+    if (!lastStrideOpt.has_value()) return markInspectedAndReturn();
+    int64_t lastStride = std::abs(lastStrideOpt.value());
+    if (lastStride <= 1) return markInspectedAndReturn();
+    bool routeMaskedPow2ToIndirect =
+        shouldRouteMaskedSingleTilePow2ToIndirect(op.getMask(), valueType);
+    if (lastStride == 2 && !routeMaskedPow2ToIndirect)
+        return markInspectedAndReturn();  // even -> deinterleave; odd -> strided DMA
+    if ((lastStride & (lastStride - 1)) == 0 &&
+        !routeMaskedPow2ToIndirect)
+        return markInspectedAndReturn();  // power-of-two >= 4 -> strided DMA
+
+    bool useStrideStore = !routeMaskedPow2ToIndirect;
+    if (useStrideStore && valueType.getRank() >= 1 &&
+        valueType.getRank() <= 3 &&
+        valueType.hasStaticShape() &&
+        static_cast<int64_t>(ptrState.stateInfo.size()) ==
+            valueType.getRank()) {
+        Value dst = ptrState.source;
+        SmallVector<Value> strides;
+        SmallVector<Value> numels;
+        strides.reserve(valueType.getRank());
+
+        Value baseOffset = materializeI64(ptrState.offset, loc, rewriter);
+        bool operandsReady = dst && baseOffset;
+        for (int64_t d = 0; operandsReady && d < valueType.getRank(); ++d) {
+            Value stride =
+                materializeI64(ptrState.stateInfo[d].stride, loc, rewriter);
+            if (!stride) {
+                operandsReady = false;
+                break;
+            }
+            strides.push_back(stride);
+        }
+
+        if (operandsReady) {
+            auto numelsResult = getAddPtrStrideNumels(
+                op.getOperation(), op.getMask(), valueType, rewriter);
+            if (succeeded(numelsResult)) {
+                numels = *numelsResult;
+            } else {
+                operandsReady = false;
+            }
+        }
+
+        if (operandsReady) {
+            Operation *strideStore = createStrideStoreOp(
+                loc, valueType, dst, op.getValue(), baseOffset, strides, numels,
+                rewriter);
+            if (!strideStore) return markInspectedAndReturn();
+
+            LLVM_DEBUG({
+                llvm::dbgs()
+                    << "----------------------------------------------\n";
+                llvm::dbgs() << "StridedLoadStoreRewrite [AddPtr/Store]: "
+                                "tt.store -> ttasc.stride_store\n";
+                llvm::dbgs() << "  last_stride = " << lastStride << "\n";
+                llvm::dbgs() << *strideStore << "\n";
+                llvm::dbgs()
+                    << "----------------------------------------------\n";
+            });
+            rewriter.eraseOp(op);
+            return success();
+        }
     }
+
+    if (useStrideStore && valueType.getRank() <= 3)
+        return markInspectedAndReturn();
 
     Value offsetTensor =
         ensureI64OffsetTensor(addPtrOp.getOffset(), loc, rewriter);
@@ -715,17 +1138,16 @@ static LogicalResult tryRewriteBlockPtrStore(triton::StoreOp op,
     auto strides = mtpt.getStrides();
     if (strides.empty() || static_cast<int64_t>(strides.size()) != rank)
         return failure();
-    // Stride dispatch (mirrors tryRewriteBlockPtrLoad): only DECLINE the indirect
-    // rewrite for static power-of-two strides (-> strided DMA / deinterleave);
-    // non-power-of-two static and dynamic strides fall through to SIMT indirect.
+    // Stride dispatch (mirrors tryRewriteBlockPtrLoad): dynamic strides stay on
+    // the structured SIMD path; only static non-power-of-two strides fall
+    // through to SIMT stride_store.
     APInt lastStrideC;
-    int64_t lastStride = -1;  // -1 == dynamic
-    if (matchPattern(strides.back(), m_ConstantInt(&lastStrideC))) {
-        lastStride = std::abs(lastStrideC.getSExtValue());
-        if (lastStride <= 1) return failure();
-        if (lastStride == 2) return failure();  // even -> deinterleave; odd -> strided DMA
-        if ((lastStride & (lastStride - 1)) == 0) return failure();  // power-of-two >= 4 -> strided DMA
-    }
+    if (!matchPattern(strides.back(), m_ConstantInt(&lastStrideC)))
+        return failure();
+    int64_t lastStride = std::abs(lastStrideC.getSExtValue());
+    if (lastStride <= 1) return failure();
+    if (lastStride == 2) return failure();  // even -> deinterleave; odd -> strided DMA
+    if ((lastStride & (lastStride - 1)) == 0) return failure();  // power-of-two >= 4 -> strided DMA
 
     ValueRange mtptOffsets = mtpt.getOffsets();
     ValueRange advOffsets = advance ? advance.getOffsets() : ValueRange{};
@@ -752,6 +1174,10 @@ static LogicalResult tryRewriteBlockPtrStore(triton::StoreOp op,
     }
 
     Value scalarBase = scalarBaseAdj;
+    SmallVector<Value> logicalOffsets;
+    SmallVector<Value> strideOperands;
+    logicalOffsets.reserve(rank);
+    strideOperands.reserve(rank);
     for (int64_t d = 0; d < rank; ++d) {
         Value baseOff = ensureI64Scalar(mtptOffsets[d], loc, rewriter);
         if (!baseOff) return failure();
@@ -760,11 +1186,44 @@ static LogicalResult tryRewriteBlockPtrStore(triton::StoreOp op,
             if (!advStep) return failure();
             baseOff = rewriter.create<arith::AddIOp>(loc, baseOff, advStep);
         }
+        logicalOffsets.push_back(baseOff);
         Value strI64 = ensureI64Scalar(strides[d], loc, rewriter);
         if (!strI64) return failure();
+        strideOperands.push_back(strI64);
         Value prod = rewriter.create<arith::MulIOp>(loc, baseOff, strI64);
         scalarBase = rewriter.create<arith::AddIOp>(loc, scalarBase, prod);
     }
+
+    auto boundaryCheck = op.getBoundaryCheck();
+    if (valueType.getRank() >= 1 &&
+        valueType.getRank() <= 3 && valueType.hasStaticShape()) {
+        FailureOr<SmallVector<Value>> numels = getBlockPtrStrideNumels(
+            op.getOperation(), op.getMask(), boundaryCheck, mtpt, valueType,
+            logicalOffsets, rewriter);
+        if (succeeded(numels)) {
+            Operation *strideStore = createStrideStoreOp(
+                loc, valueType, src, op.getValue(), scalarBase, strideOperands,
+                *numels, rewriter);
+            if (strideStore) {
+                LLVM_DEBUG({
+                    llvm::dbgs()
+                        << "----------------------------------------------\n";
+                    llvm::dbgs() << "StridedLoadStoreRewrite [BlockPtr"
+                                 << (advance ? "+Advance" : "")
+                                 << (boundaryCheck.empty() ? "" : "+Boundary")
+                                 << "/Store]: tt.store -> ttasc.stride_store\n";
+                    llvm::dbgs() << "  last_stride = " << lastStride << "\n";
+                    llvm::dbgs() << *strideStore << "\n";
+                    llvm::dbgs()
+                        << "----------------------------------------------\n";
+                });
+                rewriter.eraseOp(op);
+                return success();
+            }
+        }
+    }
+
+    if (rank <= 3) return failure();
 
     auto i64TensorTy = RankedTensorType::get(shape, i64Ty);
     Value offsetTensor =
@@ -788,7 +1247,6 @@ static LogicalResult tryRewriteBlockPtrStore(triton::StoreOp op,
 
     // ---- boundary_check: build OOB mask (store has no "other") ----
     Value mask = op.getMask();
-    auto boundaryCheck = op.getBoundaryCheck();
     if (!boundaryCheck.empty()) {
         SmallVector<Value> effOffsets;
         for (int64_t d = 0; d < rank; ++d) {

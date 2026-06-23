@@ -611,8 +611,6 @@ extern "C" {
   extern int MsprofRegisterCallback(unsigned int moduleId, callback handle);
   static unsigned int __MsprofFlagL0  = 0;
   static unsigned int __MsprofFlagL1  = 0;
-  static const char* kernelName = nullptr ;
-  static std::vector<int> tensorKinds;
 
   int ProfCtrlHandle(unsigned int CtrlType, void* CtrlData, unsigned int DataLen) {
     if ((CtrlData == nullptr) || (DataLen == 0U)) {
@@ -1099,20 +1097,17 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
 
 
   // get kernel_name
-  if (!kernelName) {{
-      PyObject *kernelNameObj = PyDict_GetItemString(packedMetadata, "kernel_name");
-      kernelName = PyUnicode_AsUTF8(kernelNameObj);
-  }}
+  PyObject *kernelNameObj = PyDict_GetItemString(packedMetadata, "kernel_name");
+  const char *kernelName = PyUnicode_AsUTF8(kernelNameObj);
   // get tensor_kinds
-  if( tensorKinds.empty() ) {{
-     PyObject *tensorKindList = PyDict_GetItemString(packedMetadata, "tensor_kinds");
-     if (tensorKindList) {{
-       int size = PyObject_Size(tensorKindList);
-       for (int i = 0; i < size; i++) {{
-         PyObject *kind = PySequence_GetItem(tensorKindList, i);
-         tensorKinds.push_back(PyLong_AsLong(kind));
-       }}
-     }}
+  std::vector<int> tensorKinds;
+  PyObject *tensorKindList = PyDict_GetItemString(packedMetadata, "tensor_kinds");
+  if (tensorKindList) {{
+    int size = PyObject_Size(tensorKindList);
+    for (int i = 0; i < size; i++) {{
+      PyObject *kind = PySequence_GetItem(tensorKindList, i);
+      tensorKinds.push_back(PyLong_AsLong(kind));
+    }}
   }}
 
 

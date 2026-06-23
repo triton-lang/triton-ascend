@@ -1770,8 +1770,6 @@ class TritonSemantic(Generic[TensorTy]):
 
     def gather(self, src: TensorTy, index: TensorTy, axis: int) -> TensorTy:
         assert index.dtype.is_int(), "index must be an integer tensor"
-        if not (src.dtype.is_floating() or src.dtype.is_int8()):
-            raise ValueError(f"Expected dtype fp16/fp32/bf16/f8E5M2/f8E4M3FN/int8, but got {src.dtype}")
 
         rank = len(src.type.shape)
         assert len(index.type.shape) == rank, "source and index tensors must have the same rank"

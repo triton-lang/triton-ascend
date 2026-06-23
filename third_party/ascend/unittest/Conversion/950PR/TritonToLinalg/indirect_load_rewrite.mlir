@@ -29,7 +29,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // The structured strided-copy route would create a dynamic boundary size that
 // can become zero for over-launched programs. Route to indirect_load instead.
 // CHECK-LABEL: func.func @addptr_stride4_masked_single_tile
-// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}){{.*}} : (memref<?xf16>, tensor<1024xi64>, tensor<1024xi1>, tensor<1024xf16>) -> tensor<1024xf16>
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = false} : (memref<?xf16>, tensor<1024xi64>, tensor<1024xi1>, tensor<1024xf16>) -> tensor<1024xf16>
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   tt.func public @addptr_stride4_masked_single_tile(%arg0: !tt.ptr<f16> {tt.divisibility = 16 : i32},
                                                     %arg1: !tt.ptr<f16> {tt.divisibility = 16 : i32}) {

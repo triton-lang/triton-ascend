@@ -537,7 +537,7 @@ static bool isLocalMemRef(Value value) {
 static bool mayWriteRoot(Operation *op, Value loadRootPtr) {
   auto effectOp = dyn_cast<MemoryEffectOpInterface>(op);
   if (!effectOp) {
-    return false;
+    return !mlir::isMemoryEffectFree(op);
   }
 
   SmallVector<SideEffects::EffectInstance<MemoryEffects::Effect>> effects;
@@ -552,7 +552,7 @@ static bool mayWriteRoot(Operation *op, Value loadRootPtr) {
       return true;
     }
     if (!isa<BaseMemRefType>(value.getType())) {
-      continue;
+      return true;
     }
 
     auto rootPtr = getRootPointer(value);

@@ -146,37 +146,6 @@ static bool isSimt1DCumsum(triton::ScanOp op)
   return true;
 }
 
-/// Returns true if a GatherOp requires SIMT lowering.
-/// Non-A5 devices always use SIMD. On A5, only non-tail-axis gather with
-/// non-trivial trailing dimensions needs SIMT (SIMTGatherUBToUB template).
-static bool isGatherSIMT(triton::GatherOp gatherOp) {
-  // Non-A5 devices always use SIMD for gather.
-  if (!compileOn91095Flag) {
-    return false;
-  }
-
-  auto axis = gatherOp.getAxis();
-  auto srcType = dyn_cast<RankedTensorType>(gatherOp.getSrc().getType());
-  if (!srcType) {
-    return true;
-  }
-
-  int64_t rank = srcType.getRank();
-  // Tail-axis gather uses SIMD (Gather1D template).
-  if (axis == rank - 1) {
-    return false;
-  }
-
-  // If all sizes after the gather axis are 1, treat as SIMD.
-  // E.g. shape [4,16,1,1] with axis=1 is equivalent to tail-axis gather.
-  for (int64_t d = axis + 1; d < rank; ++d) {
-    if (srcType.getShape()[d] != 1) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static bool isCustomOpOperandTypesLegal(TypeRange types)
 {
     return llvm::all_of(types, [](Type t) {
@@ -197,8 +166,8 @@ static bool isSIMTOp(Operation *op)
            custom_op.getVFMode() == hivm::VFMode::SIMT;
   }
 
-  if (auto gatherOp = dyn_cast<triton::GatherOp>(op)) {
-    return isGatherSIMT(gatherOp);
+  if (isa<triton::GatherOp>(op) && compileOn91095Flag) {
+    return true;
   }
 
   if (isa<triton::HistogramOp>(op) && compileOn91095Flag) {

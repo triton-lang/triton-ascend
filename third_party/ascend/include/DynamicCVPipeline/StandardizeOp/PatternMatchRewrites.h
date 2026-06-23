@@ -32,10 +32,13 @@
 namespace mlir::triton::CVSplit {
 
 class SplitMatmulPattern : public mlir::OpRewritePattern<linalg::MatmulOp> {
-    using OpRewritePattern<linalg::MatmulOp>::OpRewritePattern;
-
   public:
+    explicit SplitMatmulPattern(mlir::MLIRContext *context, bool needSplitAll)
+        : OpRewritePattern<linalg::MatmulOp>(context), needSplitAll(needSplitAll) {}
     llvm::LogicalResult matchAndRewrite(linalg::MatmulOp matmulOp, PatternRewriter &rewriter) const override;
+
+  private:
+    bool needSplitAll;
 };
 
 class PatternMatchRewritePass : public PassWrapper<PatternMatchRewritePass, OperationPass<ModuleOp>> {

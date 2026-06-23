@@ -43,6 +43,7 @@
 #include "mlir/IR/Value.h"
 #include "mlir/Interfaces/LoopLikeInterface.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Support/LLVM.h"
 #include "llvm/ADT/SmallVector.h"
 
@@ -511,7 +512,7 @@ static bool verifyMatmul(linalg::MatmulOp matmulOp)
  *   - shouldSplit: Boolean indicating whether the split transformation should be applied.
  *   Returns std::nullopt if analysis cannot be performed.
  */
-static std::optional<SplitInfo> shouldSplit(linalg::MatmulOp matmulOp)
+static std::optional<SplitInfo> shouldSplit(linalg::MatmulOp matmulOp, bool needSplitAll)
 {
 
     if (!verifyMatmul(matmulOp)) {
@@ -519,6 +520,11 @@ static std::optional<SplitInfo> shouldSplit(linalg::MatmulOp matmulOp)
     }
 
     auto matmulInput = parseMatmulInputs(matmulOp);
+    if (needSplitAll) {
+        LOG_DEBUG("Split because needSplitAll is true. " << matmulOp);
+        return SplitInfo {false, matmulInput.bias, matmulOp.getResult(0), true};
+    }
+
     bool argsLimitedInMatmul = true;
     bool mayNotExec = false;
     Value outerInValue = matmulInput.bias;
@@ -597,7 +603,7 @@ static void splitMatmul(linalg::MatmulOp matmulOp, PatternRewriter &rewriter, Sp
 LogicalResult SplitMatmulPattern::matchAndRewrite(linalg::MatmulOp matmulOp, PatternRewriter &rewriter) const
 {
     LOG_DEBUG("check matmulOp = " << matmulOp);
-    auto splitInfoOpt = shouldSplit(matmulOp);
+    auto splitInfoOpt = shouldSplit(matmulOp, needSplitAll);
     if (!splitInfoOpt.has_value()) {
         return failure();
     }

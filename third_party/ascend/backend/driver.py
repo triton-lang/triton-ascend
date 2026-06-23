@@ -486,17 +486,27 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     npu_utils_so_path = getattr(npu_utils_mod, "__file__", "")
     cpp_npu_utils_dlopen = f"""
 typedef void* (*triton_allocate_workspace_t)(uint64_t, void**);
+typedef void* (*triton_allocate_workspace_legacy_t)(uint64_t);
 typedef void* (*triton_allocate_sync_block_lock_t)(uint64_t, void*, void**);
 typedef void  (*triton_async_launch_t)(void*, const char*);
 typedef void  (*triton_release_retained_tensor_t)(void*);
 
 static triton_allocate_workspace_t g_allocate_workspace = nullptr;
+static triton_allocate_workspace_legacy_t g_allocate_workspace_legacy = nullptr;
 static triton_allocate_sync_block_lock_t g_allocate_sync_block_lock = nullptr;
 static triton_async_launch_t g_async_launch = nullptr;
 static triton_release_retained_tensor_t g_release_retained_tensor = nullptr;
 
+static bool npu_utils_ready() {{
+    return g_allocate_workspace &&
+           g_allocate_workspace_legacy &&
+           g_allocate_sync_block_lock &&
+           g_async_launch &&
+           g_release_retained_tensor;
+}}
+
 static void init_npu_utils() {{
-    if (g_allocate_workspace) return;
+    if (npu_utils_ready()) return;
     const char* so_path = "{npu_utils_so_path}";
     void* handle = dlopen(so_path, RTLD_LAZY);
     if (!handle) {{
@@ -504,6 +514,7 @@ static void init_npu_utils() {{
         return;
     }}
     g_allocate_workspace = (triton_allocate_workspace_t)dlsym(handle, "triton_allocate_workspace");
+    g_allocate_workspace_legacy = (triton_allocate_workspace_legacy_t)dlsym(handle, "triton_allocate_workspace_legacy");
     g_allocate_sync_block_lock = (triton_allocate_sync_block_lock_t)dlsym(handle, "triton_allocate_sync_block_lock");
     g_async_launch = (triton_async_launch_t)dlsym(handle, "triton_async_launch");
     g_release_retained_tensor = (triton_release_retained_tensor_t)dlsym(handle, "triton_release_retained_tensor");
@@ -837,20 +848,17 @@ void triton_launch_kernel(
   std::string name = "";
   name.append(kernelName);
   void *workspace_addr_ptr = NULL;
-  void *workspace_handle = NULL;
   {coalesce_grid_div}
   uint32_t blockNum4Workspace = gridX * gridY * gridZ;
   {get_backend_func("pre_launch", True)}
   {f'''
   uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
   {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
-  std::shared_ptr<void> workspace_handle_guard(workspace_handle, release_npu_tensor_handle);
   if (!workspace_addr_ptr) {{
     {workspace_fail_code}
   }}
   ''' if workspace_size > 0 else ''}
   {'std::function<rtError_t()> launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
-    {f'(void)workspace_handle_guard;' if workspace_size > 0 else ''}
     {get_backend_func("pre_launch", False)}
     uint32_t blockNum = gridX * gridY * gridZ;
 
@@ -948,20 +956,17 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
   std::string name = "";
   name.append(kernelName);
   void *workspace_addr_ptr = NULL;
-  void *workspace_handle = NULL;
   {coalesce_grid_div}
   uint32_t blockNum4Workspace = gridX * gridY * gridZ;
   {get_backend_func("pre_launch", True)}
   {f'''
   uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
   {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
-  std::shared_ptr<void> workspace_handle_guard(workspace_handle, release_npu_tensor_handle);
   if (!workspace_addr_ptr) {{
     {workspace_fail_code}
   }}
   ''' if workspace_size > 0 else ''}
   {'std::function<rtError_t()> launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
-    {f'(void)workspace_handle_guard;' if workspace_size > 0 else ''}
     {get_backend_func("pre_launch", False)}
     uint32_t blockNum = gridX * gridY * gridZ;
 

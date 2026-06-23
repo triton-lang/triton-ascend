@@ -349,6 +349,14 @@ static void *retainTensor(at::Tensor tensor, void **handle, const char *kind, ui
   return retained->data;
 }
 
+extern "C" void* triton_allocate_workspace_legacy(uint64_t size)
+{
+  return const_cast<void*>(
+      at::empty(size, at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte))
+          .storage()
+          .data());
+}
+
 extern "C" void* triton_allocate_workspace(uint64_t size, void **handle)
 {
   if (handle == nullptr) {

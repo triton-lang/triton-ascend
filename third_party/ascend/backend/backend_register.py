@@ -298,7 +298,13 @@ def allocate_memory(size, stream):
 
 @backend_strategy_registry.register("torch_npu", "allocate_memory")
 def allocate_memory(size, stream):
-    return f"init_npu_utils(); workspace_addr_ptr = g_allocate_workspace({size}, &workspace_handle);"
+    return f'''init_npu_utils();
+    if (!g_allocate_workspace_legacy) {{
+      fprintf(stderr, "Error: triton_allocate_workspace_legacy is unavailable\\n");
+      workspace_addr_ptr = nullptr;
+    }} else {{
+      workspace_addr_ptr = g_allocate_workspace_legacy({size});
+    }}'''
 
 
 @backend_strategy_registry.register("mindspore", "allocate_sync_block_lock")
@@ -309,7 +315,13 @@ def allocate_sync_block_lock(size, stream):
 
 @backend_strategy_registry.register("torch_npu", "allocate_sync_block_lock")
 def allocate_sync_block_lock(size, stream):
-    return f"init_npu_utils(); syncBlockLock_ptr = g_allocate_sync_block_lock({size}, {stream}, &syncBlockLock_handle);"
+    return f'''init_npu_utils();
+    if (!g_allocate_sync_block_lock) {{
+      fprintf(stderr, "Error: triton_allocate_sync_block_lock is unavailable\\n");
+      syncBlockLock_ptr = nullptr;
+    }} else {{
+      syncBlockLock_ptr = g_allocate_sync_block_lock({size}, {stream}, &syncBlockLock_handle);
+    }}'''
 
 
 @backend_strategy_registry.register("mindspore", "pre_launch")
@@ -333,4 +345,9 @@ def async_launch(func):
 
 @backend_strategy_registry.register("torch_npu", "async_launch")
 def async_launch(func):
-    return f"init_npu_utils(); g_async_launch(static_cast<void*>(&{func}), name.c_str());"
+    return f'''init_npu_utils();
+   if (!g_async_launch) {{
+     fprintf(stderr, "Error: triton_async_launch is unavailable\\n");
+     return;
+   }}
+   g_async_launch(static_cast<void*>(&{func}), name.c_str());'''

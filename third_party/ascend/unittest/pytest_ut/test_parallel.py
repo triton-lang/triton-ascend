@@ -81,7 +81,6 @@ def get_torch_typename(dtype):
 typelist = ['int8', 'int16', 'int32', 'int64']
 
 
-@pytest.mark.skip(reason="not supported after the NPUIR is updated in April, and will be fixed later")
 @pytest.mark.parametrize('L, M, N', testlist)
 @pytest.mark.parametrize('sigtype', typelist)
 def test_add_bind_false(sigtype, L, M, N):

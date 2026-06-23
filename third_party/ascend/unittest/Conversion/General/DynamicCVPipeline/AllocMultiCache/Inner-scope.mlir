@@ -1524,4 +1524,57 @@ func.func @test_t23_scf_if_else_branch_yield() {
     } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
     return
   }
+
+//===--------------------------------------------------------------------===//
+// T42: Dynamic-Shape Tensor Dep - Clone to Consumer Block
+// Test: A tensor dep with dynamic dimensions (e.g. tensor.extract_slice
+//       producing tensor<?xf16>) crosses block boundaries. The dep can't
+//       be multi-buffered because insertBuffersBeforeFor builds
+//       memref.alloc with the static shape. Instead, the producer op
+//       is cloned into each consumer's block and the consumer is
+//       rewired to use the local clone.
+// Key Check: the producer op is preserved in the original block
+//         : a cloned copy appears in the consumer block
+//         : the consumer uses the cloned result
+//         : NO memref.alloc / bufferization.to_tensor / hivm.hir.copy
+//         : NO ssbuffer.intraDeps / intra_buffer
+//===--------------------------------------------------------------------===//
+  // CHECK-LABEL: func.func @test_t42_dyn_shape_clone_to_consumer
+  // Original producer in block 11
+  // CHECK: tensor.extract_slice {{.*}} {ssbuffer.block_id = 11 : i32}
+  // Cloned into consumer block 12
+  // CHECK: tensor.extract_slice {{.*}} {ssbuffer.block_id = 12 : i32}
+  // The no-result op uses the cloned dep
+  // CHECK: bufferization.materialize_in_destination {{.*}} {ssbuffer.block_id = 12 : i32}
+  // No multi-buffer path taken
+  // CHECK-NOT: memref.alloc
+  // CHECK-NOT: memref.memory_space_cast
+  // CHECK-NOT: bufferization.to_tensor
+  // CHECK-NOT: hivm.hir.copy
+  // CHECK-NOT: ssbuffer.intra_buffer
+  func.func @test_t42_dyn_shape_clone_to_consumer() {
+    %c0_i32 = arith.constant 0 : i32
+    %c100_i32 = arith.constant 100 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %c0 = arith.constant 0 : index
+    %c8 = arith.constant 8 : index
+    %c1 = arith.constant 1 : index
+    %cst = arith.constant 0.0 : f16
+    %empty_16 = tensor.empty() : tensor<16xf16>
+    %mem_8 = memref.alloc() : memref<8xf16>
+    scope.scope : () -> () {
+      // Producer in block 11: tensor<16xf16> (static) and a dynamic-shape
+      // extract_slice that produces tensor<?xf16>
+      %filled = linalg.fill {ssbuffer.block_id = 11 : i32} ins(%cst : f16) outs(%empty_16 : tensor<16xf16>) -> tensor<16xf16>
+      scf.for %i = %c0_i32 to %c100_i32 step %c1_i32 iter_args(%arg = %filled) -> (tensor<16xf16>) : i32 {
+        %extracted = tensor.extract_slice %arg[0] [%c8] [1] {ssbuffer.block_id = 11 : i32} : tensor<16xf16> to tensor<?xf16>
+        %subview = memref.subview %mem_8[0] [%c8] [1] {ssbuffer.block_id = 12 : i32} : memref<8xf16> to memref<?xf16, strided<[1]>>
+        // No-result op (materialize) in block 12 consumes the dynamic-shape dep
+        bufferization.materialize_in_destination %extracted in writable %subview {ssbuffer.block_id = 12 : i32} : (tensor<?xf16>, memref<?xf16, strided<[1]>>) -> ()
+        scf.yield %arg : tensor<16xf16>
+      } {ssbuffer.main_loop = 1 : i64}
+      scope.return
+    } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+    return
+  }
 }

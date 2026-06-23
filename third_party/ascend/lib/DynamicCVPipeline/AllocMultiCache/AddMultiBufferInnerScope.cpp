@@ -295,6 +295,25 @@ static int groupOpsBySsbufferId(SmallVector<Operation *> &allOps,
         }
         opsById[*id].push_back(op);
     }
+
+    // Second pass: include result-less ops (e.g.
+    // bufferization.materialize_in_destination, memref.copy,
+    // hivm.hir.sync_block_*). Their tensor/memref operands can be
+    // cross-block deps that would otherwise be silently missed: opsByValue
+    // keys on op->getResult() so they don't enter outputToBlockId, and the
+    // consumer's operands never enter collectDepValue — leaving
+    // cross-block deps unmarked. Appending them to opsById after the
+    // result-having ops keeps the existing intra-block ordering.
+    for (Operation *op : allOps) {
+        if (op->getNumResults() != 0)
+            continue;
+        if (!seen.insert(op).second)
+            continue;
+        auto id = getOpBlockId(op);
+        if (!id.has_value())
+            continue;
+        opsById[*id].push_back(op);
+    }
     return 0;
 }
 
@@ -362,7 +381,32 @@ static int collectInnerBlockInfo(scf::ForOp forOp, DenseMap<Value, InnerBlockInf
     // (e.g. scf.if) are included so their scalar deps get tracked; cross-block
     // judgment still attributes them to the ifOp via getOutermostSsbufferId.
     for (auto &p : opsById) {
-        Value groupKey = p.second.front()->getResult(0);
+        // The map key must be a Value. A block may now contain ops with no
+        // results (e.g. bufferization.materialize_in_destination). Prefer an
+        // op with a result as the key; if the block has no such op (every op
+        // is result-less), fall back to the first operand of the first op —
+        // the key only needs to be unique per block for depValueMap and
+        // blocks lookups.
+        Operation *keyOp = p.second.front();
+        if (keyOp->getNumResults() == 0) {
+            auto it = llvm::find_if(p.second, [](Operation *op) { return op->getNumResults() > 0; });
+            if (it == p.second.end()) {
+                // No result-having op in this block — find any operand to
+                // use as the key. If even that fails (block is empty), skip.
+                Operation *firstOp = p.second.front();
+                if (firstOp->getNumOperands() == 0)
+                    continue;
+                keyOp = firstOp;
+            } else {
+                keyOp = *it;
+            }
+        }
+        Value groupKey;
+        if (keyOp->getNumResults() > 0) {
+            groupKey = keyOp->getResult(0);
+        } else {
+            groupKey = keyOp->getOperand(0);
+        }
         InnerBlockInfo bi;
         bi.blockId = groupKey;
         bi.ops = p.second;
@@ -1553,15 +1597,45 @@ static BufferMap insertBuffersBeforeFor(mlir::scf::ForOp forOp, SmallVector<Valu
     return bufferMap;
 }
 
-static bool hasMemrefDepValue(DenseMap<Value, SmallVector<Value>> &depValueMap)
+// Scan every cross-block dep value for types the multi-buffer path can't
+// handle, log each one, and return true if any were found. Two unsupported
+// categories are reported:
+//   - Memref-type deps: the buffer-insertion path only operates on tensor
+//     values. A cross-block memref dep means a downstream pass is asking for
+//     synchronization on a buffer that this pass can't allocate.
+//   - Dynamic-shape tensor deps: memref.alloc needs a static shape and the
+//     producer's dynamic dims come from operands that aren't available at
+//     allocation site.
+//
+// All matches are reported (not just the first) so the user sees every
+// problematic dep in a single run.
+static bool reportUnsupportedCrossBlockDeps(DenseMap<Value, SmallVector<Value>> &depValueMap)
 {
+    bool found = false;
     for (auto &p : depValueMap) {
         for (Value depVal : p.second) {
-            if (isa<MemRefType>(depVal.getType()))
-                return true;
+            Operation *defOp = depVal.getDefiningOp();
+            StringRef defOpName = defOp ? defOp->getName().getStringRef() : StringRef("<block-arg>");
+
+            if (isa<MemRefType>(depVal.getType())) {
+                llvm::errs() << "[AddMultiBufferInnerScope] ERROR: Memref type cross-block dep "
+                             << "is unsupported. Value defined by " << defOpName
+                             << " has type " << depVal.getType() << ".\n";
+                found = true;
+                continue;
+            }
+
+            auto shapedType = dyn_cast<ShapedType>(depVal.getType());
+            if (shapedType && llvm::any_of(shapedType.getShape(),
+                                           [](int64_t d) { return d == ShapedType::kDynamic; })) {
+                llvm::errs() << "[AddMultiBufferInnerScope] ERROR: Dynamic-shape tensor cross-block dep "
+                             << "is unsupported. Value defined by " << defOpName
+                             << " has type " << depVal.getType() << ".\n";
+                found = true;
+            }
         }
     }
-    return false;
+    return found;
 }
 
 static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp, OpBuilder &builder, scope::ScopeOp vectorScope,
@@ -1579,10 +1653,13 @@ static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp, OpBuilder &builde
     if (blocks.empty())
         return -1;
 
-    // Memref-type dep values are not supported here; fail loudly so downstream
-    // passes don't see an unmarked-but-skipped scope.
-    if (hasMemrefDepValue(depValueMap)) {
-        LDBG("ERROR: Memref type dependent values found!");
+    // Memref-type and dynamic-shape tensor cross-block deps are not supported
+    // here. reportUnsupportedCrossBlockDeps logs every offending dep (memref
+    // and dynamic-shape tensor) in a single pass, then returns true if any
+    // were found. Fail loudly so downstream passes don't see an
+    // unmarked-but-skipped scope.
+    if (reportUnsupportedCrossBlockDeps(depValueMap)) {
+        LDBG("ERROR: Unsupported cross-block deps found (see errors above).");
         return -1;
     }
 
@@ -1624,10 +1701,10 @@ void AddMultiBufferInnerScopePass::runOnOperation()
         if (!coreTypeAttr)
             return WalkResult::advance();
 
-        // Step 2: Check if core type is VECTOR
+        // Step 2: Check if core type is VECTOR or CUBE
         hivm::TCoreType coreType = coreTypeAttr.getTcoretype();
-        if (coreType != hivm::TCoreType::VECTOR) {
-            LDBG("Not vector scope");
+        if (coreType != hivm::TCoreType::VECTOR && coreType != hivm::TCoreType::CUBE) {
+            LDBG("Not vector or cube scope");
             return WalkResult::advance();
         }
 

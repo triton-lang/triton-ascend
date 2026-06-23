@@ -895,17 +895,23 @@ func.func @test_t23_scf_if_else_branch_yield() {
   }
 
 //===--------------------------------------------------------------------===//
-// T27: ifOp inner ops - same-block producer, no dep_mark
+// T27: ifOp inner ops - same-block producer, no dep_mark on inner ops
 // Test: When the ifOp is at the SAME block as the producer (both block 11),
 //       the cross-block dep judgment should treat them as same-block
-//       (11 vs 11), so NO dep_mark should be added.
-//       This is the inverse case of T26.
-// Key Check: NO dep_mark on producer or inner ops
+//       (11 vs 11), so NO dep_mark should be added on the inner ifOp ops
+//       (muli/divsi at blocks 8/9 — outermost is the ifOp at block 11).
+//
+//       The memref.store at block 12 IS a separate cross-block consumer
+//       (block 11 -> block 12), so producer arith.addi and memref.store
+//       both correctly receive a dep_mark.
+// Key Check: NO dep_mark on inner ifOp ops (muli/divsi); arith.addi
+//         and memref.store DO have dep_mark (real cross-block consumer)
 //===--------------------------------------------------------------------===//
 // CHECK-LABEL: func.func @test_t27_ifop_same_block_no_dep_mark
-// CHECK-NOT: arith.addi {{.*}} ssbuffer.dep_mark
 // CHECK-NOT: arith.muli {{.*}} ssbuffer.dep_mark
 // CHECK-NOT: arith.divsi {{.*}} ssbuffer.dep_mark
+// CHECK: arith.addi {{.*}} {ssbuffer.block_id = 11 : i32, ssbuffer.dep_mark
+// CHECK: memref.store {{.*}} {ssbuffer.block_id = 12 : i32, ssbuffer.dep_mark
   func.func @test_t27_ifop_same_block_no_dep_mark() {
     %true = arith.constant true
     %c0_i64 = arith.constant 0 : i64
@@ -1108,7 +1114,7 @@ func.func @test_t23_scf_if_else_branch_yield() {
   }
 
 //===--------------------------------------------------------------------===//
-// T32: forOp with same block as producer - NO dep_mark
+// T32: forOp inner ops - same-block producer, no dep_mark on inner ops
 // Same scenario as T27 but uses scf.for instead of scf.if.
 //   - producer addi at block 11, produces %compute
 //   - forOp at block 11 (SAME block as producer), inner muli at block 8
@@ -1117,12 +1123,18 @@ func.func @test_t23_scf_if_else_branch_yield() {
 // non-main_loop forOp's block_id, so the inner muli's outermost id is
 // the enclosing forOp's block_id (11), matching the producer (11).
 // The cross-block dep judgment should treat them as same-block (11 vs 11),
-// so NO dep_mark should be added.
-// Key Check: NO dep_mark on producer or inner ops
+// so NO dep_mark should be added on the inner forOp op (muli).
+//
+// The memref.store at block 12 IS a separate cross-block consumer
+// (block 11 -> block 12), so producer arith.addi and memref.store
+// both correctly receive a dep_mark.
+// Key Check: NO dep_mark on inner forOp op (muli); arith.addi
+//         and memref.store DO have dep_mark
 //===--------------------------------------------------------------------===//
 // CHECK-LABEL: func.func @test_t32_forop_same_block_no_dep_mark
-// CHECK-NOT: arith.addi {{.*}} ssbuffer.dep_mark
 // CHECK-NOT: arith.muli {{.*}} ssbuffer.dep_mark
+// CHECK: arith.addi {{.*}} {ssbuffer.block_id = 11 : i32, ssbuffer.dep_mark
+// CHECK: memref.store {{.*}} {ssbuffer.block_id = 12 : i32, ssbuffer.dep_mark
   func.func @test_t32_forop_same_block_no_dep_mark() {
     %c0_i64 = arith.constant 0 : i64
     %c100_i64 = arith.constant 100 : i64

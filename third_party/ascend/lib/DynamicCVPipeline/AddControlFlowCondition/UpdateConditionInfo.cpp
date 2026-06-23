@@ -54,6 +54,289 @@ using namespace mlir;
 using namespace triton;
 using namespace hivm;
 
+/*
+ * ========== SSBufferManager 使用示例 ==========
+ * 
+ * 在 AddControlFlowCondition Pass 中使用 SSBufferManager 的完整示例
+ * 
+ * 示例场景：在处理控制流时，需要将某些条件变量写入 SSBuffer，
+ *          然后在其他地方读取这些变量进行条件判断
+ * 
+ * ========== 示例 1: 在 UpdateConditionInfoPass 中使用 ==========
+ * 
+ * void UpdateConditionInfoPass::someProcessingFunction() {
+ *   // 获取 ControlFlowConditionInfo（包含 SSBufferManager）
+ *   ControlFlowConditionInfo *info = getConditionInfo();
+ *   
+ *   // 创建 OpBuilder 用于生成 LLVM IR 操作
+ *   OpBuilder builder(context);
+ *   Location loc = builder.getUnknownLoc();
+ *   
+ *   // ========== 写入场景 1: 将控制变量写入 SSBuffer ==========
+ *   
+ *   // 创建一个 i32 类型的控制变量（例如：迭代计数器）
+ *   Value counterValue = builder.create<arith::ConstantIntOp>(
+ *       loc, 42, builder.getI32Type()
+ *   );
+ *   
+ *   // 将控制变量写入 SSBuffer
+ *   // writeToSSBuffer 会：
+ *   // 1. 检查 counterValue 是否为标量类型（i32 是标量，通过）
+ *   // 2. 分配 SSBuffer 地址（如 2048）
+ *   // 3. 生成 LLVM StoreOp 将值写入 SSBuffer
+ *   // 4. 返回分配的地址值
+ *   auto addrResult = info->ssbufferManager.writeToSSBuffer(counterValue, builder);
+ *   
+ *   if (addrResult) {
+ *     // 成功写入，获取 SSBuffer 地址
+ *     int64_t ssbufferAddr = addrResult.value();
+ *     // ssbufferAddr = 2048（第一个分配的地址）
+ *     
+ *     // 可以将地址存储到其他数据结构中，供后续使用
+ *     // 例如：存储到映射表中
+ *     someAddressMap[counterValue] = ssbufferAddr;
+ *     
+ *     // ========== 写入场景 2: 写入另一个控制变量 ==========
+ *     
+ *     // 创建另一个控制变量（例如：条件标志）
+ *     Value flagValue = builder.create<arith::ConstantIntOp>(
+ *         loc, 1, builder.getI32Type()
+ *     );
+ *     
+ *     // 写入第二个变量
+ *     auto addr2Result = info->ssbufferManager.writeToSSBuffer(flagValue, builder);
+ *     if (addr2Result) {
+ *       int64_t ssbufferAddr2 = addr2Result.value();
+ *       // ssbufferAddr2 = 2056（第二个分配的地址，偏移 8）
+ *       
+ *       // 注意：如果写入同一个 Value，会复用地址
+ *       auto addr3Result = info->ssbufferManager.writeToSSBuffer(counterValue, builder);
+ *       if (addr3Result) {
+ *         int64_t ssbufferAddr3 = addr3Result.value();
+ *         // ssbufferAddr3 = 2048（复用第一个地址，因为 Value 相同）
+ *       }
+ *     }
+ *   } else {
+ *     // 写入失败，可能原因：
+ *     // 1. value 不是标量类型（如 tensor 类型）
+ *     // 2. SSBuffer 地址超出范围（超过 6072）
+ *     LDBG("Failed to write value to SSBuffer");
+ *   }
+ *   
+ *   // ========== 读取场景：从 SSBuffer 读取控制变量 ==========
+ *   
+ *   // 假设我们之前写入了一个值到地址 2048
+ *   int64_t knownAddr = 2048;
+ *   
+ *   // 从 SSBuffer 读取值
+ *   // readFromSSBuffer 会：
+ *   // 1. 在映射表中查找地址 2048 对应的 Value
+ *   // 2. 获取该 Value 的类型（i32）
+ *   // 3. 生成 LLVM LoadOp 从 SSBuffer 读取值
+ *   // 4. 返回读取的 Value
+ *   auto readResult = info->ssbufferManager.readFromSSBuffer(knownAddr, builder);
+ *   
+ *   if (readResult) {
+ *     // 成功读取，获取 Value
+ *     Value loadedValue = readResult.value();
+ *     // loadedValue 的类型为 i32（从映射表中自动获取）
+ *     
+ *     // 使用读取的值进行条件判断
+ *     Value zeroConst = builder.create<arith::ConstantIntOp>(loc, 0, builder.getI32Type());
+ *     Value condition = builder.create<arith::CmpIOp>(
+ *         loc, arith::CmpIPredicate::sgt, loadedValue, zeroConst
+ *     );
+ *     
+ *     // 使用条件创建 IfOp
+ *     auto ifOp = builder.create<scf::IfOp>(loc, condition, true);
+ *     
+ *     // 在 then block 中使用 loadedValue
+ *     OpBuilder thenBuilder(&ifOp.getThenRegion().front(), ifOp.getThenRegion().front().end());
+ *     // ... 其他使用 loadedValue 的操作
+ *   } else {
+ *     // 读取失败，可能原因：
+ *     // 1. 地址未在映射表中找到（未分配）
+ *     // 2. 地址无效
+ *     LDBG("Failed to read value from SSBuffer at address " << knownAddr);
+ *   }
+ *   
+ *   // ========== 查询场景：查询已分配的地址数量 ==========
+ *   
+ *   size_t allocatedCount = info->ssbufferManager.getAllocatedCount();
+ *   LDBG("Total allocated SSBuffer addresses: " << allocatedCount);
+ *   // 例如：allocatedCount = 2（两个不同的 Value）
+ *   
+ *   // ========== 错误处理场景：尝试写入非标量类型 ==========
+ *   
+ *   // 创建一个 tensor 类型（非标量）
+ *   Type tensorType = RankedTensorType::get({2, 3}, builder.getF32Type());
+ *   Value tensorValue = ...; // 某个 tensor 类型的 Value
+ *   
+ *   // 尝试写入 tensor 会失败
+ *   auto tensorAddrResult = info->ssbufferManager.writeToSSBuffer(tensorValue, builder);
+ *   if (!tensorAddrResult) {
+ *     // 失败：tensor 不是标量类型
+ *     LDBG("Cannot write tensor type to SSBuffer (only scalar types allowed)");
+ *   }
+ *   
+ *   // ========== 地址超限场景：分配过多地址 ==========
+ *   
+ *   // 如果已经分配了 504 个地址（达到上限）
+ *   // 再尝试分配新地址会失败
+ *   if (info->ssbufferManager.getAllocatedCount() >= 504) {
+ *     LDBG("SSBuffer address limit reached (max 6072)");
+ *     // 无法再分配新地址
+ *   }
+ * }
+ * 
+ * ========== 示例 2: 跨 Pass 共享 SSBufferManager ==========
+ * 
+ * // InitDependentMapPass 中写入控制变量
+ * void InitDependentMapPass::initializeDependencies() {
+ *   ControlFlowConditionInfo *info = getConditionInfo();
+ *   OpBuilder builder(context);
+ *   
+ *   // 写入跨核依赖的控制变量
+ *   Value crossCoreCond = ...;
+ *   auto addrResult = info->ssbufferManager.writeToSSBuffer(crossCoreCond, builder);
+ *   
+ *   if (addrResult) {
+ *     // 将地址存储到 info 的其他字段中
+ *     // 其他 Pass 可以通过 info 访问同一个 SSBufferManager
+ *     crossCoreAddressMap[crossCoreCond] = addrResult.value();
+ *   }
+ * }
+ * 
+ * // UpdateConditionInfoPass 中读取控制变量
+ * void UpdateConditionInfoPass::updateConditions() {
+ *   ControlFlowConditionInfo *info = getConditionInfo();
+ *   OpBuilder builder(context);
+ *   
+ *   // 读取之前写入的控制变量
+ *   // 注意：这里使用的是同一个 info->ssbufferManager
+ *   // 所以可以找到之前写入的地址和类型信息
+ *   for (auto &entry : crossCoreAddressMap) {
+ *     int64_t addr = entry.second;
+ *     auto readValue = info->ssbufferManager.readFromSSBuffer(addr, builder);
+ *     
+ *     if (readValue) {
+ *       // 使用读取的值更新条件
+ *       Value loadedCond = readValue.value();
+ *       // ... 其他使用 loadedCond 的操作
+ *     }
+ *   }
+ * }
+ * 
+ * ========== 示例 3: 在实际 Pass 流程中的使用 ==========
+ * 
+ * void AddControlFlowConditionPass::runOnOperation() {
+ *   ModuleOp module = getOperation();
+ *   
+ *   // 创建 ControlFlowConditionInfo（包含 SSBufferManager）
+ *   ControlFlowConditionInfo info;
+ *   
+ *   PassManager pm(&getContext(), module.getOperationName());
+ *   
+ *   // Step 1: 初始化依赖映射（需要写入 SSBuffer）
+ *   std::unique_ptr<InitDependentMapPass> initPass = createInitDependentMapPass();
+ *   initPass->setConditionInfo(&info);  // 传递 info（包含 SSBufferManager）
+ *   pm.addPass(std::move(initPass));
+ *   
+ *   // Step 2: 处理参数（可能需要读写 SSBuffer）
+ *   std::unique_ptr<ProcessArgsPass> processPass = createProcessArgsPass();
+ *   processPass->setConditionInfo(&info);  // 传递同一个 info
+ *   pm.addPass(std::move(processPass));
+ *   
+ *   // Step 3: 更新条件信息（需要读取 SSBuffer）
+ *   std::unique_ptr<UpdateConditionInfoPass> updatePass = createUpdateConditionInfoPass();
+ *   updatePass->setConditionInfo(&info);  // 传递同一个 info
+ *   pm.addPass(std::move(updatePass));
+ *   
+ *   // 运行所有 Pass
+ *   if (failed(pm.run())) {
+ *     signalPassFailure();
+ *     return;
+ *   }
+ *   
+ *   // 所有 Pass 共享同一个 SSBufferManager
+ *   // 可以查询最终状态
+ *   LDBG("Total SSBuffer addresses allocated: " 
+ *        << info.ssbufferManager.getAllocatedCount());
+ * }
+ * 
+ * ========== 示例 4: 完整的工作流程说明 ==========
+ * 
+ * 完整的 SSBuffer 使用流程：
+ * 
+ * 1. Pass 初始化阶段：
+ *    - 创建 ControlFlowConditionInfo，包含 SSBufferManager
+ *    - SSBufferManager 初始化为空（映射表为空）
+ * 
+ * 2. 第一个 Pass（InitDependentMapPass）：
+ *    - 分析依赖关系
+ *    - 需要存储某些控制变量
+ *    - 调用 writeToSSBuffer(value1, builder)
+ *      -> 分配地址 2048，存储 value1（类型 i32）
+ *    - 调用 writeToSSBuffer(value2, builder)
+ *      -> 分配地址 2056，存储 value2（类型 f32）
+ *    - 映射表：{value1: 2048, value2: 2056}
+ * 
+ * 3. 第二个 Pass（ProcessArgsPass）：
+ *    - 处理参数时需要读取之前存储的变量
+ *    - 调用 readFromSSBuffer(2048, builder)
+ *      -> 查找映射表，找到 value1，类型 i32
+ *      -> 生成 LoadOp，返回读取的 Value（类型 i32）
+ *    - 调用 writeToSSBuffer(value3, builder)
+ *      -> 分配地址 2064，存储 value3（类型 i64）
+ *    - 映射表：{value1: 2048, value2: 2056, value3: 2064}
+ * 
+ * 4. 第三个 Pass（UpdateConditionInfoPass）：
+ *    - 更新条件时需要读取所有变量
+ *    - 调用 readFromSSBuffer(2048, builder) -> 读取 value1
+ *    - 调用 readFromSSBuffer(2056, builder) -> 读取 value2
+ *    - 调用 readFromSSBuffer(2064, builder) -> 读取 value3
+ *    - 使用读取的值更新控制流条件
+ * 
+ * 5. Pass 结束：
+ *    - SSBufferManager 包含 3 个映射
+ *    - 所有 Pass 共享同一个映射表
+ *    - 类型信息自动管理，无需手动传递
+ * 
+ * 关键特性：
+ * - 所有 Pass 通过 ControlFlowConditionInfo 共享同一个 SSBufferManager
+ * - 写入时自动分配地址和记录类型
+ * - 读取时自动获取类型，无需传递类型参数
+ * - 地址复用：同一个 Value 多次写入使用同一个地址
+ * - 类型安全：只允许标量类型（i32, f32, i64, etc）
+ * - 地址限制：最多 504 个地址（2048 到 6072）
+ * 
+ * ========== SSBufferManager API 总结 ==========
+ * 
+ * class SSBufferManager {
+ * public:
+ *   // 写入值到 SSBuffer，返回地址
+ *   std::optional<int64_t> writeToSSBuffer(Value value, OpBuilder &builder);
+ *   
+ *   // 从地址读取值，自动获取类型
+ *   std::optional<Value> readFromSSBuffer(int64_t addr, OpBuilder &builder);
+ *   
+ *   // 分配地址（内部使用）
+ *   std::optional<int64_t> allocateAddr(Value value);
+ *   
+ *   // 查找地址对应的 Value 和类型（内部使用）
+ *   std::optional<std::pair<Value, Type>> findValueByAddr(int64_t addr);
+ *   
+ *   // 查询已分配数量
+ *   size_t getAllocatedCount() const;
+ *   
+ *   // 清空映射表
+ *   void clear();
+ * };
+ * 
+ * 所有操作都通过 info->ssbufferManager 进行，
+ * 确保整个 Pass pipeline 共享同一个映射表！
+ */
+
 static void logConditionGroupIndices(llvm::StringRef label, llvm::ArrayRef<int> groupIndices)
 {
   std::string message;

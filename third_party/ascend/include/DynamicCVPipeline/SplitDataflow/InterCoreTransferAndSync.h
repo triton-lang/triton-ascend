@@ -26,6 +26,7 @@
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/FlagIdReuse.h"
 #include "ascend/include/DynamicCVPipeline/Common/FlagIdManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -67,6 +68,7 @@ private:
 
   llvm::DenseMap<mlir::Value, mlir::Value> vecValueMapping;
   llvm::DenseMap<mlir::Value, mlir::Value> cubeValueMapping;
+  SSBufferManager ssbufferManager;
 
   mlir::LogicalResult processDependencies(FlagIdManager &flagManager, FlagIdReuseManager &flagIdReuseManager);
   mlir::LogicalResult handleVectorToCube(mlir::OpBuilder &builder,
@@ -140,7 +142,7 @@ private:
   mlir::Operation *getConsumerWaitPoint(int transferIndex);
   mlir::Operation *insertVectorToCubeTransfer(mlir::OpBuilder &builder, mlir::Value srcValue,
     mlir::Value normalizedValue, mlir::Operation *vectorEndOp, mlir::Operation *cubeStartOp, mlir::Location loc,
-    int transferIndex, int iniConsumerId, mlir::Operation **consumedDataOp = nullptr);
+    int transferIndex, int iniConsumerId, bool isScaler, mlir::Operation **consumedDataOp = nullptr);
   mlir::Operation *insertCubeToVectorTransfer(mlir::OpBuilder &builder, mlir::Value srcValue,
     mlir::Operation *cubeEndOp, mlir::Operation *vectorStartOp, mlir::Location loc, int transferIndex,
     int iniConsumerId, mlir::Operation **consumedDataOp = nullptr);

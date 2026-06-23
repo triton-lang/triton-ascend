@@ -114,10 +114,25 @@ bool DataDependencyAnalysisPass::isValidShapeForDependency(mlir::Value value)
     return true;
 }
 
+bool DataDependencyAnalysisPass::isValidScalarDependency(mlir::Value value)
+{
+    if (isa<mlir::IntegerType, mlir::FloatType>(value.getType())) {
+        auto defOp = value.getDefiningOp();
+        if (defOp && isa<tensor::ExtractOp>(defOp)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Helper: Check if value is a valid tensor for dependency analysis
 // Returns true if value is TensorType and not defined by EmptyOp/FillOp
 bool DataDependencyAnalysisPass::isValidValueForDependency(mlir::Value value)
 {
+    if (isValidScalarDependency(value)) {
+        return true;
+    }
+
     if (!isValidShapeForDependency(value)) {
         return false;
     }
@@ -240,7 +255,9 @@ void DataDependencyAnalysisPass::collectDepInfo(mlir::Value depvalue, Dependency
 
     depInfo.producerBlockId = commonLevelIds.first;
     depInfo.consumerBlockId = commonLevelIds.second;
-
+    if (isValidScalarDependency(depvalue)) {
+        depInfo.isScaler = true;
+    }
     dependencies.push_back(depInfo);
 }
 
@@ -387,6 +404,9 @@ void DataDependencyAnalysisPass::processIterArgDependencies()
             // Only process if init and yield have matching core types
             // Mismatch indicates a more complex dependency pattern that requires special handling
             if (initCoreType != yieldCoreType) {
+                if (!isValidValueForDependency(initValue) || !isValidValueForDependency(yieldedValue)) {
+                    continue;
+                }
                 LOG_DEBUG("iterarg init core_type conflicts with yield");
                 signalPassFailure();
             }
@@ -466,6 +486,10 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(DataDependencyInfo &info
             // Check if output is a value which can be produced by CUBE
             if (!isValidValueForDependency(output)) {
                 LOG_DEBUG("Warning: [c->v] Output value is not a valid tensor for dependency analysis.\n");
+                continue;
+            }
+            if (isa<mlir::IntegerType, mlir::FloatType>(output.getType())) {
+                LOG_DEBUG("Warning: [c->v] Output value is a scalar, not a valid tensor for dependency analysis.\n");
                 continue;
             }
 

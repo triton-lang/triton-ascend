@@ -59,8 +59,10 @@ import triton.extension.buffer.language as bl
 from triton.language.core import _constexpr_to_value
 from triton.backends.ascend.driver import NPUUtils
 
-from . import semantic
-from .semantic import PIPE, SYNC_HINT, EVENT_ID
+from . import semantic as semantic
+PIPE = semantic.PIPE
+SYNC_HINT = semantic.SYNC_HINT
+EVENT_ID = semantic.EVENT_ID
 
 
 T = TypeVar("T")

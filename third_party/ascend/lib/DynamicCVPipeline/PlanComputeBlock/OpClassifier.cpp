@@ -434,10 +434,16 @@ int OpClassifierPass::patternMatchCUBE()
 
         // ---- Downstream pattern matching ----
         for (Value result : op->getResults()) {
+            if (!op->hasOneUse()) {
+                continue;
+            }
             for (Operation *user : result.getUsers()) {
                 // If user is scf.yield, follow the chain to find real users
                 Operation *curUser = user;
                 while (curUser) {
+                    if (!curUser->hasOneUse()) {
+                        break;
+                    }
                     if (auto yieldOp = dyn_cast<scf::YieldOp>(curUser)) {
                         if (Operation *scfOp = yieldOp->getParentOp()) {
                             // Find which operand index the previous result corresponds to in the yield

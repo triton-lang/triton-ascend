@@ -195,6 +195,11 @@ public:
                   ConversionPatternRewriter &rewriter,
                   const llvm::SmallDenseMap<Value, BlockData> &known);
 
+  static void
+  parseExpandShape(tensor::ExpandShapeOp op, BlockData &data,
+                   const Location &loc, ConversionPatternRewriter &rewriter,
+                   const llvm::SmallDenseMap<Value, BlockData> &known);
+
   static void parseBitcast(triton::BitcastOp op, BlockData &data,
                            const Location &loc,
                            ConversionPatternRewriter &rewriter,

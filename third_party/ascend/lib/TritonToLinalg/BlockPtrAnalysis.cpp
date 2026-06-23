@@ -474,6 +474,12 @@ void BlockDataParser::parse(
   } else if (auto extractSliceOp =
                  operand.getDefiningOp<tensor::ExtractSliceOp>()) {
     parseExtractSlice(extractSliceOp, data, loc, rewriter, known);
+  } else if (auto expandShapeOp =
+                 operand.getDefiningOp<tensor::ExpandShapeOp>()) {
+    // tt.expand_dims is lowered to tensor.expand_shape inside TritonToLinalg;
+    // parse it as a structured unit-dim insertion instead of falling through
+    // to the unstructured fallback below.
+    parseExpandShape(expandShapeOp, data, loc, rewriter, known);
   } else if (auto forOp = operand.getDefiningOp<scf::ForOp>()) {
     auto opResult = dyn_cast<OpResult>(operand);
     assert(opResult && "expected OpResult for scf.for result");
@@ -650,6 +656,89 @@ void BlockDataParser::parseExpandDims(
                             rewriter.getIndexAttr(1));
   data.getStridesRef().insert(data.getStridesRef().begin() + axis,
                               rewriter.getIndexAttr(0));
+}
+
+// `tt.expand_dims` is lowered to `tensor.expand_shape` *inside* TritonToLinalg
+// (see ExpandDimsConverter in TritonOpConverter.cpp), so by the time
+// BlockPtrAnalysis walks an AddPtr offset chain the expand has already become a
+// `tensor.expand_shape`.  Without this parser it falls through to the
+// unstructured fallback, which both misclassifies an otherwise affine access
+// and, on a read-modify-write addptr (one tt.load + one tt.store on the same
+// pointer), trips the single-use assertion in rewriteAddPtrToUnstrucMemAcc.
+//
+// An expand_dims-derived expand_shape only inserts unit (size-1) dimensions, so
+// the access stays structured.  We mirror parseExpandDims: parse the source,
+// then for each reassociation group inherit the source dim's
+// (offset,size,stride) on its single non-unit (carrier) result dim and emit
+// (0,1,0) for every inserted unit dim.
+void BlockDataParser::parseExpandShape(
+    tensor::ExpandShapeOp op, BlockData &data, const Location &loc,
+    ConversionPatternRewriter &rewriter,
+    const llvm::SmallDenseMap<Value, BlockData> &known) {
+  assert(data.isEmpty());
+
+  // Parse the source first; this fills per-source-dim offset/size/stride and
+  // the mem-acc classification (which stays Struc for an affine source).
+  BlockData srcData;
+  parse(op.getSrc(), srcData, loc, rewriter, known);
+
+  auto resShape = cast<ShapedType>(op.getResult().getType()).getShape();
+  auto srcShape = cast<ShapedType>(op.getSrc().getType()).getShape();
+  auto reassociation = op.getReassociationIndices();
+
+  // Each reassociation group corresponds to exactly one source dim, and the
+  // parsed source block must expose one (offset,size,stride) triple per source
+  // dim.  Anything else cannot come from an expand_dims lowering and must not be
+  // silently miscompiled.
+  assert(reassociation.size() == srcShape.size() &&
+         srcData.getStridesRef().size() == srcShape.size() &&
+         srcData.getSizesRef().size() == srcShape.size() &&
+         srcData.getOffsetsRef().size() == srcShape.size() &&
+         "parseExpandShape: source rank does not match reassociation");
+
+  // Carry over source bookkeeping (source ptr / result elem ty / mem-acc).
+  if (srcData.hasSource())
+    data.setSource(srcData.getSourceRef());
+  if (srcData.hasResElemTy())
+    data.setResElemTy(srcData.getResElemTyRef());
+  data.setMemAccTy(srcData.getMemAccType());
+
+  // Walk every reassociation group.  For a unit-dim insertion exactly one dim
+  // in the group is non-unit (the carrier); when the source dim itself is
+  // size-1 the whole group is unit and we keep the source layout on the first
+  // result dim so its (folded) base offset is not dropped.
+  for (size_t s = 0; s < reassociation.size(); ++s) {
+    const auto &group = reassociation[s];
+    assert(!group.empty() && "empty reassociation group");
+
+    int carrier = -1;
+    for (int64_t r : group) {
+      if (resShape[r] != 1) {
+        // More than one non-unit dim is a genuine split, which ExpandDimsConverter
+        // never emits and which is not expressible as a simple per-dim stride.
+        assert(carrier == -1 &&
+               "parseExpandShape: genuine dim split is unsupported");
+        carrier = static_cast<int>(r);
+      }
+    }
+    // The dim that inherits the source layout: the carrier, or (for an all-unit
+    // group from a size-1 source dim) the first dim of the group.
+    int inheritDim = carrier == -1 ? static_cast<int>(group.front()) : carrier;
+
+    for (int64_t r : group) {
+      if (static_cast<int>(r) == inheritDim) {
+        data.getOffsetsRef().push_back(srcData.getOffsetsRef()[s]);
+        data.getSizesRef().push_back(srcData.getSizesRef()[s]);
+        data.getStridesRef().push_back(srcData.getStridesRef()[s]);
+      } else {
+        // Inserted unit dim (size 1): offset 0, size 1, stride 0 — identical to
+        // how parseExpandDims handles tt.expand_dims.
+        data.getOffsetsRef().push_back(rewriter.getIndexAttr(0));
+        data.getSizesRef().push_back(rewriter.getIndexAttr(1));
+        data.getStridesRef().push_back(rewriter.getIndexAttr(0));
+      }
+    }
+  }
 }
 
 void BlockDataParser::parseExtractSlice(

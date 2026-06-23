@@ -23,10 +23,13 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMPUTE_BLOCK_OPT_COMMON_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMPUTE_BLOCK_OPT_COMMON_H
 
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/Support/LogicalResult.h"
+
+#include "mlir/IR/Operation.h"
+
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
-#include "mlir/IR/Operation.h"
-#include "llvm/ADT/ArrayRef.h"
 
 namespace mlir {
 namespace CVPipeline {
@@ -52,6 +55,53 @@ namespace CVPipeline {
 bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify,
                      const MemoryDependenceGraph &memGraph, int targetBlockId,
                      ComputeBlockIdManager &bm);
+
+/**
+ * @brief Collect predecessor operations in a block for the given values
+ *
+ * This function traces back through SSA dependencies to find all operations
+ * that affect the given startValue within a specific block.
+ *
+ * Special handling for scf.for loop-carried dependencies:
+ * When an operand is a BlockArgument from scf.for iter_arg, we also trace
+ * through the yieldOp to find the operation that provides the yielded value.
+ * This ensures we capture operations that update loop-carried variables
+ * (e.g., %79 that updates %arg19).
+ *
+ * @param startValue The value to trace back from
+ * @param block The block to search within
+ * @return SmallVector<Operation*> List of predecessor operations
+ */
+SmallVector<Operation *> collectBlockPredecessors(ValueRange startValues, Block *block);
+
+// ============================================================================
+// Function Name: mlir::CVPipeline::tryUpdate
+// ============================================================================
+/**
+ * @brief Safely updates the block ID for a collection of operations after cycle verification.
+ *
+ * **Purpose**:
+ * To assign a new scheduling block ID to a set of operations, ensuring that the assignment
+ * does not introduce any invalid cyclical dependencies in the block-level execution graph.
+ *
+ * **Inputs & Assumptions**:
+ * - `ops` (llvm::ArrayRef<Operation *>): The operations to be updated.
+ * - `memGraph` (const MemoryDependenceGraph &): The memory dependence graph for safety verification.
+ * - `targetBlockId` (int64_t): The destination block ID.
+ * - `bm` (ComputeBlockIdManager &): The block ID manager handling the state updates.
+ *
+ * **Outputs & Guarantees**:
+ * - Returns `llvm::success()` if the updates were verified as cycle-free and successfully applied.
+ * - Returns `llvm::failure()` if the update would introduce a cycle.
+ * - Guarantees transactional behavior: if validation fails, the system state remains unmodified.
+ *
+ * **Safety Boundaries & Constraints**:
+ * - Relies on `willCreateCycle` to perform speculative validation and roll back changes on failure.
+ */
+llvm::LogicalResult tryUpdate(llvm::ArrayRef<Operation *> ops,
+                              const MemoryDependenceGraph &memGraph,
+                              int64_t targetBlockId,
+                              ComputeBlockIdManager &bm);
 
 } // namespace CVPipeline
 } // namespace mlir

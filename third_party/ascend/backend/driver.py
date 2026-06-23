@@ -485,21 +485,18 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     npu_utils_mod = getattr(npu_utils_inst, "npu_utils_mod", None)
     npu_utils_so_path = getattr(npu_utils_mod, "__file__", "")
     cpp_npu_utils_dlopen = f"""
-typedef void* (*triton_allocate_workspace_t)(uint64_t, void**);
 typedef void* (*triton_allocate_workspace_legacy_t)(uint64_t);
 typedef void* (*triton_allocate_sync_block_lock_t)(uint64_t, void*, void**);
 typedef void  (*triton_async_launch_t)(void*, const char*);
 typedef void  (*triton_release_retained_tensor_t)(void*);
 
-static triton_allocate_workspace_t g_allocate_workspace = nullptr;
 static triton_allocate_workspace_legacy_t g_allocate_workspace_legacy = nullptr;
 static triton_allocate_sync_block_lock_t g_allocate_sync_block_lock = nullptr;
 static triton_async_launch_t g_async_launch = nullptr;
 static triton_release_retained_tensor_t g_release_retained_tensor = nullptr;
 
 static bool npu_utils_ready() {{
-    return g_allocate_workspace &&
-           g_allocate_workspace_legacy &&
+    return g_allocate_workspace_legacy &&
            g_allocate_sync_block_lock &&
            g_async_launch &&
            g_release_retained_tensor;
@@ -513,7 +510,6 @@ static void init_npu_utils() {{
         fprintf(stderr, "Error: dlopen %s failed: %s\\n", so_path, dlerror());
         return;
     }}
-    g_allocate_workspace = (triton_allocate_workspace_t)dlsym(handle, "triton_allocate_workspace");
     g_allocate_workspace_legacy = (triton_allocate_workspace_legacy_t)dlsym(handle, "triton_allocate_workspace_legacy");
     g_allocate_sync_block_lock = (triton_allocate_sync_block_lock_t)dlsym(handle, "triton_allocate_sync_block_lock");
     g_async_launch = (triton_async_launch_t)dlsym(handle, "triton_async_launch");

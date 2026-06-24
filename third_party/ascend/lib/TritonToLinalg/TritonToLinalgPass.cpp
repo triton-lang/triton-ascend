@@ -28,6 +28,7 @@
 #include "ascend/include/TritonToLinalg/ArgMinMaxConverter.h"
 #include "ascend/include/TritonToLinalg/DescriptorConverter.h"
 #include "ascend/include/TritonToLinalg/DevicePrintOffsetRewrite.h"
+#include "ascend/include/TritonToLinalg/DiagonalShiftFolding.h"
 #include "ascend/include/TritonToLinalg/FunctionConverter.h"
 #include "ascend/include/TritonToLinalg/HoistBroadcast.h"
 #include "ascend/include/TritonToLinalg/ImplicitPermute.h"
@@ -872,6 +873,11 @@ LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(
   // coalesce adjacent strided axes into one  so that to convert discrete memory
   // asccess into continuous memory access .
   StridedAxisCoalescing::rewriteStridedAxisCoalesce(moduleOp);
+
+  // DiagonalShiftFolding: replace O(N^2) diagonal-select-reduce patterns with
+  // O(N) arith.subf using the cumulative sum identity. Runs before TileChunk
+  // so the eliminated NxN intermediates no longer inflate the UB footprint.
+  DiagonalShiftFolding::rewriteDiagonalShiftFold(moduleOp);
 
   // TileChunkCoalescing (default-on, lower priority): when the outermost
   // program-id axis is a pure tile index over a contiguous problem axis with a

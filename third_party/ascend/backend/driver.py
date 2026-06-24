@@ -611,9 +611,13 @@ static void release_npu_tensor_handle(void* handle) {{
     coalesce_axis = int(getattr(metadata, "coalesce_axis", -1))
     if coalesce_factor > 1 and coalesce_axis in (0, 1, 2):
         _coalesce_grid_var = {0: "gridX", 1: "gridY", 2: "gridZ"}[coalesce_axis]
-        coalesce_grid_div = (f"// coalescing: each program covers {coalesce_factor} tiles along "
-                             f"axis {coalesce_axis}; shrink that grid dim.\n"
-                             f"  {_coalesce_grid_var} = {_coalesce_grid_var} / {coalesce_factor};")
+        coalesce_grid_div = (
+            f"// coalescing: each program covers {coalesce_factor} tiles along "
+            f"axis {coalesce_axis}; shrink that grid dim.\n"
+            f"  assert({_coalesce_grid_var} % {coalesce_factor} == 0 && "
+            f"\"TileChunkCoalescing: grid[{coalesce_axis}] not divisible by coalesce_factor {coalesce_factor}\");\n"
+            f"  {_coalesce_grid_var} = {_coalesce_grid_var} / {coalesce_factor};"
+        )
     else:
         coalesce_grid_div = ""
 

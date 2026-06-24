@@ -29,10 +29,11 @@ from triton.tools.get_ascend_devices import is_compile_on_910_95
 def reciprocal(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_reciprocal_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_reciprocal_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
@@ -44,10 +45,11 @@ def reciprocal(arg0, _builder=None):
 def log1p(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_log1p_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_log1p_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
@@ -59,10 +61,11 @@ def log1p(arg0, _builder=None):
 def relu(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_relu_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_relu_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
@@ -74,10 +77,11 @@ def relu(arg0, _builder=None):
 def isinf(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_isinf_fp32", core.dtype("int1")),
+                (core.dtype("fp16"),): ("__hmf_isinf_fp16", core.dtype("int1")),
             }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
@@ -90,10 +94,11 @@ def isinf(arg0, _builder=None):
 def tan(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_tan_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_tan_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
@@ -105,10 +110,11 @@ def tan(arg0, _builder=None):
 def atan(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_atan_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_atan_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
@@ -120,10 +126,11 @@ def atan(arg0, _builder=None):
 def tanh(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_tanh_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_tanh_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
@@ -135,10 +142,11 @@ def tanh(arg0, _builder=None):
 def ilogb(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_ilogb_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_ilogb_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
@@ -150,10 +158,11 @@ def ilogb(arg0, _builder=None):
 def logb(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_logb_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_logb_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.logb for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -162,10 +171,11 @@ def logb(arg0, _builder=None):
 def ldexp(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("int32")): ("__hmf_ldexp_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("int32")): ("__hmf_ldexp_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0, arg1], {
@@ -177,10 +187,11 @@ def ldexp(arg0, arg1, _builder=None):
 def scalbn(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("int32")): ("__hmf_scalbn_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("int32")): ("__hmf_scalbn_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.scalbn for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -189,10 +200,11 @@ def scalbn(arg0, arg1, _builder=None):
 def pow(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
         "", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_pow_fp32", core.dtype("fp32")),
+            (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_pow_fp16", core.dtype("fp16")),
         }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0, arg1], {
@@ -205,10 +217,11 @@ def pow(arg0, arg1, _builder=None):
 def finitef(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_finite_fp32", core.dtype("int1")),
+                (core.dtype("fp16"),): ("__hmf_finite_fp16", core.dtype("int1")),
             }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
@@ -219,10 +232,11 @@ def finitef(arg0, _builder=None):
 def isnan(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_isnan_fp32", core.dtype("int1")),
+                (core.dtype("fp16"),): ("__hmf_isnan_fp16", core.dtype("int1")),
             }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
@@ -331,10 +345,11 @@ def ffs(arg0, _builder=None):
 def saturatef(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_saturate_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_saturate_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.saturatef for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -367,10 +382,11 @@ def rhadd(arg0, arg1, _builder=None):
 def fdim(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], { 
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fdim_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_fdim_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.fdim for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -379,10 +395,11 @@ def fdim(arg0, arg1, _builder=None):
 def exp10(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], { 
                 (core.dtype("fp32"),): ("__hmf_exp10_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_exp10_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.exp10 for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -392,10 +409,11 @@ def exp10(arg0, _builder=None):
 def add_rn(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_add_rn_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_add_rn_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.add_rn for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -404,10 +422,11 @@ def add_rn(arg0, arg1, _builder=None):
 def add_rz(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_add_rz_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_add_rz_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.add_rz for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -416,10 +435,11 @@ def add_rz(arg0, arg1, _builder=None):
 def add_rd(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_add_rd_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_add_rd_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.add_rd for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -428,10 +448,11 @@ def add_rd(arg0, arg1, _builder=None):
 def add_ru(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_add_ru_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_add_ru_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.add_ru for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -440,10 +461,11 @@ def add_ru(arg0, arg1, _builder=None):
 def sub_rn(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_sub_rn_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_sub_rn_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.sub_rn for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -452,10 +474,11 @@ def sub_rn(arg0, arg1, _builder=None):
 def sub_rz(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_sub_rz_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_sub_rz_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.sub_rz for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -464,10 +487,11 @@ def sub_rz(arg0, arg1, _builder=None):
 def sub_rd(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_sub_rd_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_sub_rd_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.sub_rd for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -476,10 +500,11 @@ def sub_rd(arg0, arg1, _builder=None):
 def sub_ru(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_sub_ru_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_sub_ru_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.sub_ru for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -488,10 +513,11 @@ def sub_ru(arg0, arg1, _builder=None):
 def mul_rn(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_mul_rn_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_mul_rn_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.mul_rn for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -500,10 +526,11 @@ def mul_rn(arg0, arg1, _builder=None):
 def mul_rz(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_mul_rz_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_mul_rz_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.mul_rz for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -512,10 +539,11 @@ def mul_rz(arg0, arg1, _builder=None):
 def mul_ru(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_mul_ru_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_mul_ru_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.mul_ru for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -524,10 +552,11 @@ def mul_ru(arg0, arg1, _builder=None):
 def mul_rd(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_mul_rd_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_mul_rd_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.mul_rd for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -536,10 +565,11 @@ def mul_rd(arg0, arg1, _builder=None):
 def div_rd(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_div_rd_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_div_rd_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.div_rd for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -548,10 +578,11 @@ def div_rd(arg0, arg1, _builder=None):
 def div_ru(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_div_ru_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_div_ru_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.div_ru for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -560,10 +591,11 @@ def div_ru(arg0, arg1, _builder=None):
 def div_rz(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_div_rz_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_div_rz_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     arg0 = semantic.to_tensor(arg0, _builder)
     arg1 = semantic.to_tensor(arg1, _builder)
@@ -574,10 +606,11 @@ def div_rz(arg0, arg1, _builder=None):
 def rcp_rn(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_rcp_rn_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_rcp_rn_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.rcp_rn for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -586,10 +619,11 @@ def rcp_rn(arg0, _builder=None):
 def rcp_rz(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_rcp_rz_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_rcp_rz_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.rcp_rz for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -598,10 +632,11 @@ def rcp_rz(arg0, _builder=None):
 def rcp_rd(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_rcp_rd_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_rcp_rd_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.rcp_rd for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -610,10 +645,11 @@ def rcp_rd(arg0, _builder=None):
 def rcp_ru(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_rcp_ru_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_rcp_ru_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.rcp_ru for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -622,10 +658,11 @@ def rcp_ru(arg0, _builder=None):
 def sqrt_rn(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_sqrt_rn_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_sqrt_rn_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.sqrt_rn for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -634,10 +671,11 @@ def sqrt_rn(arg0, _builder=None):
 def sqrt_rz(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_sqrt_rz_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_sqrt_rz_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.sqrt_rz for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -646,10 +684,11 @@ def sqrt_rz(arg0, _builder=None):
 def sqrt_rd(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_sqrt_rd_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_sqrt_rd_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.sqrt_rd for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -658,10 +697,11 @@ def sqrt_rd(arg0, _builder=None):
 def sqrt_ru(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_sqrt_ru_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_sqrt_ru_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.sqrt_ru for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -670,10 +710,11 @@ def sqrt_ru(arg0, _builder=None):
 def rsqrt_rn(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_rsqrt_rn_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_rsqrt_rn_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.rsqrt_rn for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -682,10 +723,11 @@ def rsqrt_rn(arg0, _builder=None):
 def fma_rn(arg0, arg1, arg2, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1, arg2], {
                 (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fma_rn_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16"), core.dtype("fp16")): ("__hmf_fma_rn_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.fma_rn for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -694,10 +736,11 @@ def fma_rn(arg0, arg1, arg2, _builder=None):
 def fma_rz(arg0, arg1, arg2, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1, arg2], {
                 (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fma_rz_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16"), core.dtype("fp16")): ("__hmf_fma_rz_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.fma_rz for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -706,10 +749,11 @@ def fma_rz(arg0, arg1, arg2, _builder=None):
 def fma_rd(arg0, arg1, arg2, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1, arg2], {
                 (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fma_rd_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16"), core.dtype("fp16")): ("__hmf_fma_rd_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.fma_rd for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -718,10 +762,11 @@ def fma_rd(arg0, arg1, arg2, _builder=None):
 def fma_ru(arg0, arg1, arg2, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1, arg2], {
                 (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fma_ru_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16"), core.dtype("fp16")): ("__hmf_fma_ru_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.fma_ru for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -730,10 +775,11 @@ def fma_ru(arg0, arg1, arg2, _builder=None):
 def fast_dividef(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fast_divide_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_fast_divide_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     arg0 = semantic.to_tensor(arg0, _builder)
     arg1 = semantic.to_tensor(arg1, _builder)
@@ -744,10 +790,11 @@ def fast_dividef(arg0, arg1, _builder=None):
 def fast_expf(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_fast_exp_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_fast_exp_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     arg0 = semantic.to_tensor(arg0, _builder)
     ret = core.tensor(_builder.create_exp(arg0.handle), arg0.type)
@@ -757,10 +804,11 @@ def fast_expf(arg0, _builder=None):
 def fast_exp10f(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_fast_exp10_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_fast_exp10_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.fast_exp10f for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -769,10 +817,11 @@ def fast_exp10f(arg0, _builder=None):
 def fast_sinf(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_fast_sin_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_fast_sin_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.fast_sinf for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -781,10 +830,11 @@ def fast_sinf(arg0, _builder=None):
 def fast_cosf(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_fast_cos_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_fast_cos_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.fast_cosf for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -793,10 +843,11 @@ def fast_cosf(arg0, _builder=None):
 def fast_tanf(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_fast_tan_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_fast_tan_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.fast_tanf for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -805,10 +856,11 @@ def fast_tanf(arg0, _builder=None):
 def fast_log2f(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_fast_log2_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_fast_log2_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.fast_log2f for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -817,10 +869,11 @@ def fast_log2f(arg0, _builder=None):
 def fast_logf(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_fast_log_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_fast_log_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.fast_logf for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -829,10 +882,11 @@ def fast_logf(arg0, _builder=None):
 def fast_log10f(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_fast_log10_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_fast_log10_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.fast_log10f for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -841,10 +895,11 @@ def fast_log10f(arg0, _builder=None):
 def fast_powf(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fast_pow_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_fast_pow_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.fast_powf for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -853,10 +908,11 @@ def fast_powf(arg0, arg1, _builder=None):
 def fmod(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
         "", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fmod_fp32", core.dtype("fp32")),
+            (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_fmod_fp16", core.dtype("fp16")),
         }, is_pure=True, _builder=_builder)
     arg0 = semantic.to_tensor(arg0, _builder)
     arg1 = semantic.to_tensor(arg1, _builder)
@@ -867,10 +923,11 @@ def fmod(arg0, arg1, _builder=None):
 def remainder(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_remainder_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_remainder_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.remainder for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1312,10 +1369,11 @@ def ull2float_ru(arg0, _builder=None):
 def atan2(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_atan2_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_atan2_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         arg1 = semantic.to_tensor(arg1, _builder)
@@ -1353,10 +1411,11 @@ def atan2(arg0, arg1, _builder=None):
 def trunc(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_trunc_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_trunc_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         arg0 = semantic.to_tensor(arg0, _builder) 
@@ -1376,10 +1435,11 @@ def trunc(arg0, _builder=None):
 def round(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_round_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_round_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     return core.extern_elementwise(
         "", "", [arg0], {
@@ -1392,10 +1452,11 @@ def round(arg0, _builder=None):
 def acos(arg0: core.tensor, _builder: ir.builder):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_acos_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_acos_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         pi = 3.1415926536
@@ -1450,10 +1511,11 @@ def acos(arg0: core.tensor, _builder: ir.builder):
 def sinh(arg0: core.tensor, _builder: ir.builder):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_sinh_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_sinh_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         arg0 = semantic.to_tensor(arg0, _builder)
@@ -1469,10 +1531,11 @@ def sinh(arg0: core.tensor, _builder: ir.builder):
 def cosh(arg0: core.tensor, _builder: ir.builder):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_cosh_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_cosh_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         arg0 = semantic.to_tensor(arg0, _builder)
@@ -1488,10 +1551,11 @@ def cosh(arg0: core.tensor, _builder: ir.builder):
 def acosh(arg0: core.tensor, _builder: ir.builder):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"), ): ("__hmf_acosh_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), ): ("__hmf_acosh_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         arg0 = semantic.to_tensor(arg0, _builder)
@@ -1506,10 +1570,11 @@ def acosh(arg0: core.tensor, _builder: ir.builder):
 def asinh(arg0: core.tensor, _builder: ir.builder):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"), ): ("__hmf_asinh_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), ): ("__hmf_asinh_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         arg0 = semantic.to_tensor(arg0, _builder)
@@ -1524,10 +1589,11 @@ def asinh(arg0: core.tensor, _builder: ir.builder):
 def atanh(arg0: core.tensor, _builder: ir.builder):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"), ): ("__hmf_atanh_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), ): ("__hmf_atanh_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         arg0 = semantic.to_tensor(arg0, _builder)
@@ -1544,10 +1610,11 @@ def atanh(arg0: core.tensor, _builder: ir.builder):
 def expm1(arg0: core.tensor, _builder: ir.builder):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_expm1_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_expm1_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         arg0 = semantic.to_tensor(arg0, _builder)
@@ -1560,10 +1627,11 @@ def expm1(arg0: core.tensor, _builder: ir.builder):
 def nextafter(arg0: core.tensor, arg1: core.tensor, _builder: ir.builder):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_nextafter_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_nextafter_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         x = semantic.to_tensor(arg0, _builder)
@@ -1616,10 +1684,11 @@ def nextafter(arg0: core.tensor, arg1: core.tensor, _builder: ir.builder):
 def hypot(arg0: core.tensor, arg1: core.tensor, _builder: ir.builder):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_hypot_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_hypot_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         arg0 = semantic.to_tensor(arg0, _builder)
@@ -1633,10 +1702,11 @@ def hypot(arg0: core.tensor, arg1: core.tensor, _builder: ir.builder):
 def cbrt(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_cbrt_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_cbrt_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.cbrt for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1645,10 +1715,11 @@ def cbrt(arg0, _builder=None):
 def rcbrt(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_rcbrt_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_rcbrt_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.rcbrt for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1657,10 +1728,11 @@ def rcbrt(arg0, _builder=None):
 def rhypot(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_rhypot_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_rhypot_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.rhypot for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1669,10 +1741,11 @@ def rhypot(arg0, arg1, _builder=None):
 def norm3d(arg0, arg1, arg2, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1, arg2], {
                 (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")): ("__hmf_norm3d_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16"), core.dtype("fp16")): ("__hmf_norm3d_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.norm3d for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1681,10 +1754,11 @@ def norm3d(arg0, arg1, arg2, _builder=None):
 def rnorm3d(arg0, arg1, arg2, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1, arg2], {
                 (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")): ("__hmf_rnorm3d_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16"), core.dtype("fp16")): ("__hmf_rnorm3d_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.rnorm3d for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1693,10 +1767,11 @@ def rnorm3d(arg0, arg1, arg2, _builder=None):
 def norm4d(arg0, arg1, arg2, arg3, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1, arg2, arg3], {
                 (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")): ("__hmf_norm4d_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16"), core.dtype("fp16"), core.dtype("fp16")): ("__hmf_norm4d_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.norm4d for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1705,10 +1780,11 @@ def norm4d(arg0, arg1, arg2, arg3, _builder=None):
 def rnorm4d(arg0, arg1, arg2, arg3, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1, arg2, arg3], {
                 (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")): ("__hmf_rnorm4d_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16"), core.dtype("fp16"), core.dtype("fp16")): ("__hmf_rnorm4d_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.rnorm4d for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1717,10 +1793,11 @@ def rnorm4d(arg0, arg1, arg2, arg3, _builder=None):
 def j0(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_j0_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_j0_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.j0 for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1729,10 +1806,11 @@ def j0(arg0, _builder=None):
 def j1(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_j1_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_j1_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.j1 for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1740,11 +1818,15 @@ def j1(arg0, _builder=None):
 @core.extern
 def jn(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
+    arg1 = semantic.to_tensor(arg1, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("int32") and is_compile_on_910_95):
+    arg1_dtype = arg1.dtype
+    if (dtype == core.dtype("int32") and
+            (arg1_dtype == core.dtype("fp32") or arg1_dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("int32"), core.dtype("fp32")): ("__hmf_jn_fp32", core.dtype("fp32")),
+                (core.dtype("int32"), core.dtype("fp16")): ("__hmf_jn_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.jn for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1753,10 +1835,11 @@ def jn(arg0, arg1, _builder=None):
 def y0(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_y0_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_y0_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.y0 for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1765,10 +1848,11 @@ def y0(arg0, _builder=None):
 def y1(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_y1_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_y1_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.y1 for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1776,11 +1860,15 @@ def y1(arg0, _builder=None):
 @core.extern
 def yn(arg0, arg1, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
+    arg1 = semantic.to_tensor(arg1, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("int32") and is_compile_on_910_95):
+    arg1_dtype = arg1.dtype
+    if (dtype == core.dtype("int32") and
+            (arg1_dtype == core.dtype("fp32") or arg1_dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("int32"), core.dtype("fp32")): ("__hmf_yn_fp32", core.dtype("fp32")),
+                (core.dtype("int32"), core.dtype("fp16")): ("__hmf_yn_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.yn for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1795,10 +1883,11 @@ def yn(arg0, arg1, _builder=None):
 def cyl_bessel_i0(arg0: core.tensor, _builder: ir.builder):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"), ): ("__hmf_cyl_bessel_i0_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), ): ("__hmf_cyl_bessel_i0_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         param1 = [
@@ -1895,10 +1984,11 @@ def cyl_bessel_i0(arg0: core.tensor, _builder: ir.builder):
 def cyl_bessel_i1(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_cyl_bessel_i1_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_cyl_bessel_i1_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.cyl_bessel_i1 for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1908,10 +1998,11 @@ def cyl_bessel_i1(arg0, _builder=None):
 def signbit(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_signbit_fp32", core.dtype("int32")),
+                (core.dtype("fp16"),): ("__hmf_signbit_fp16", core.dtype("int32")),
             }, is_pure=True, _builder=_builder)
     else:
         arg0_scalar_ty = arg0.type.scalar
@@ -1937,10 +2028,11 @@ def signbit(arg0, _builder=None):
 def erf(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_erf_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_erf_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.erf for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1949,10 +2041,11 @@ def erf(arg0, _builder=None):
 def erfc(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_erfc_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_erfc_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.erfc for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1961,10 +2054,11 @@ def erfc(arg0, _builder=None):
 def erfcx(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_erfcx_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_erfcx_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.erfcx for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1973,10 +2067,11 @@ def erfcx(arg0, _builder=None):
 def erfcinv(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_erfcinv_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_erfcinv_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.erfcxinv for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -1992,10 +2087,11 @@ def erfcinv(arg0, _builder=None):
 def erfinv(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"), ): ("__hmf_erfinv_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), ): ("__hmf_erfinv_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         arg0_scalar_ty = arg0.type.scalar
@@ -2126,10 +2222,11 @@ def erfinv(arg0, _builder=None):
 def normcdf(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_normcdf_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_normcdf_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.normcdf for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -2138,10 +2235,11 @@ def normcdf(arg0, _builder=None):
 def normcdfinv(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_normcdfinv_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_normcdfinv_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.normcdfinv for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -2158,10 +2256,11 @@ def normcdfinv(arg0, _builder=None):
 def gamma(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_tgamma_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_tgamma_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         arg0_scalar_ty = arg0.type.scalar
@@ -2233,10 +2332,11 @@ def gamma(arg0, _builder=None):
 def tgamma(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_tgamma_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_tgamma_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.tgamma for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -2254,10 +2354,11 @@ def tgamma(arg0, _builder=None):
 def lgamma(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"), ): ("__hmf_lgamma_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), ): ("__hmf_lgamma_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         arg0_scalar_ty = arg0.type.scalar
@@ -2279,10 +2380,11 @@ def lgamma(arg0, _builder=None):
 def nearbyint(arg0: core.tensor, _builder: ir.builder):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_nearbyint_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_nearbyint_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         """
@@ -2334,10 +2436,11 @@ def nearbyint(arg0: core.tensor, _builder: ir.builder):
 def sinpi(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_sinpi_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_sinpi_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.sinpi for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -2346,10 +2449,11 @@ def sinpi(arg0, _builder=None):
 def cospi(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_cospi_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_cospi_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.cospi for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -2360,10 +2464,11 @@ def cospi(arg0, _builder=None):
 def asin(arg0: core.tensor, _builder: ir.builder):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_asin_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_asin_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         """
@@ -2385,10 +2490,11 @@ def asin(arg0: core.tensor, _builder: ir.builder):
 def log10(arg0: core.tensor, _builder: ir.builder):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_log10_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"),): ("__hmf_log10_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         """
@@ -2410,10 +2516,11 @@ def log10(arg0: core.tensor, _builder: ir.builder):
 def copysign(arg0: core.tensor, arg1: core.tensor, _builder: ir.builder):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
                 (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_copysign_fp32", core.dtype("fp32")),
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_copysign_fp16", core.dtype("fp16")),
             }, is_pure=True, _builder=_builder)
     else:
         """
@@ -2457,10 +2564,11 @@ else:
     def rint(arg0: core.tensor, _builder: ir.builder):
         arg0 = semantic.to_tensor(arg0, _builder)
         dtype = arg0.dtype
-        if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+        if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
             return core.extern_elementwise(
                 "", "", [arg0,], {
                     (core.dtype("fp32"),): ("__hmf_rint_fp32", core.dtype("fp32")),
+                    (core.dtype("fp16"),): ("__hmf_rint_fp16", core.dtype("fp16")),
                 }, is_pure=True, _builder=_builder)
         arg0 = semantic.to_tensor(arg0, _builder)
 
@@ -2490,10 +2598,11 @@ else:
 def llrint(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_llrint_fp32", core.dtype("int64")),
+                (core.dtype("fp16"),): ("__hmf_llrint_fp16", core.dtype("int64")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.llrint for {dtype} is unspported for now.")
     core.static_assert(False)
@@ -2502,10 +2611,11 @@ def llrint(arg0, _builder=None):
 def llround(arg0, _builder=None):
     arg0 = semantic.to_tensor(arg0, _builder)
     dtype = arg0.dtype
-    if (dtype == core.dtype("fp32") and is_compile_on_910_95):
+    if ((dtype == core.dtype("fp32") or dtype == core.dtype("fp16")) and is_compile_on_910_95):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"),): ("__hmf_llround_fp32", core.dtype("int64")),
+                (core.dtype("fp16"),): ("__hmf_llround_fp16", core.dtype("int64")),
             }, is_pure=True, _builder=_builder)
     core.static_print(f"libdevice.llround for {dtype} is unspported for now.")
     core.static_assert(False)

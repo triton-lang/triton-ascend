@@ -109,6 +109,9 @@ OpCoreType parseCoreTypeFromString(const std::string &coreTypeStr, size_t index 
     llvm::StringRef ref(coreTypeStr);
     llvm::SmallVector<llvm::StringRef, kMaxCoreTypeParts> parts;
     ref.split(parts, ',');
+    if(parts.size() <= 0) {
+        return OP_UNDETERMINED;
+    }
     if (parts.size() > 1 && index < parts.size()) {
         // Multi-value: pick i-th component
         return parseCoreTypeFromString(parts[index].str());

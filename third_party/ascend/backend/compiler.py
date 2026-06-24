@@ -192,6 +192,19 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         set_workspace_multibuffer = metadata.get("set_workspace_multibuffer")
         if has_auto_blockify_blacklist_op or not auto_map_parallel_blocks_enabled:
             auto_blockify_size = 1
+
+        # Inject grid tile-count hint for TileChunkCoalescing. When the kernel
+        # has no boundary mask but grid[axis] is known at compile time (e.g.
+        # from constexpr nchunks), the pass uses this to safely choose H.
+        grid_num_tiles = metadata.get("grid_num_tiles")
+        if isinstance(grid_num_tiles, int) and grid_num_tiles > 0:
+            try:
+                _builder = ascend.ir.ascendnpu_ir_builder(mod.context, opt.arch)
+                mod.set_attr("hacc.grid_num_tiles",
+                             _builder.parse_attr(f"{grid_num_tiles} : i32"))
+            except Exception:
+                pass  # graceful fallback: pass runs without hint
+
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
         if distributed is not None:
@@ -208,6 +221,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             passes.common.add_cse(pm)
             passes.common.add_canonicalizer(pm)
         ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
+        ascend.passes.ttir.add_convert_modulo_to_mask(pm)
         ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, force_simt_template,
                                                                enable_sync_block_lock)
         ascend.passes.ttir.add_triton_to_annotation(pm)
@@ -1114,6 +1128,11 @@ class NPUOptions:
 
     # superblocking factor
     superblock_factor: int = 0
+
+    # TileChunkCoalescing: number of tiles along the outermost grid axis.
+    # Auto-injected from static grid tuples; enables safe coalescing for
+    # unmasked kernels whose grid dims are compile-time known.
+    grid_num_tiles: int = None
 
     def __post_init__(self):
         from triton.backends.ascend import _apply_ascend_patch

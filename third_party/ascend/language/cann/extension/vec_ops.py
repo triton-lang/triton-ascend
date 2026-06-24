@@ -21,17 +21,17 @@ from triton._C.libtriton import ir
 @builtin
 def insert_slice(ful, sub, offsets, sizes, strides, _semantic=None, _generator=None) -> tensor:
     """
-    Insert a tensor to another tensor as specified by the operation’s offsets, sizes and strides arguments.
+    Insert a tensor to another tensor as specified by the offsets, sizes and strides arguments.
 
     :param ful: The tensor to receive tensor.
     :type ful: Tensor
     :param sub: The tensor to be inserted.
     :type sub: Tensor
-    :param offsets:
-    :type offsets: tuple of ints
-    :param sizes:
+    :param offsets: The starting element indices in `ful` where the slice `sub` should be inserted.
+    :type offsets: tuple of ints or tuple of tensors
+    :param sizes: The dimensions of the slice to be inserted.
     :type sizes: tuple of ints
-    :param strides:
+    :param strides: The element strides for each dimension of the insertion.
     :type strides: tuple of ints
     """
 
@@ -67,15 +67,15 @@ def insert_slice(ful, sub, offsets, sizes, strides, _semantic=None, _generator=N
 @builtin
 def extract_slice(ful, offsets, sizes, strides, _semantic=None, _generator=None) -> tensor:
     """
-    Extract a tensor from another tensor as specified by the operation’s offsets, sizes and strides arguments.
+    Extract a tensor from another tensor as specified by the offsets, sizes and strides arguments.
 
     :param ful: The tensor to split.
     :type ful: Tensor
-    :param offsets:
-    :type offsets: tuple of ints
-    :param sizes:
+    :param offsets: The starting element indices in `ful` from where the slice should be extracted.
+    :type offsets: tuple of ints or tuple of tensors
+    :param sizes: The dimensions of the slice to be extracted.
     :type sizes: tuple of ints
-    :param strides:
+    :param strides: The element strides for each dimension of the extraction.
     :type strides: tuple of ints
     """
 
@@ -116,8 +116,8 @@ def get_element(src, indice, _semantic=None, _generator=None):
 
     :param src: The tensor to be accessed.
     :type src: Tensor
-    :param indice:
-    :type indice: tuple of ints
+    :param indice: The indices specifying the position of the element to extract.
+    :type indice: tuple of ints or tuple of tensors
     """
 
     def get_element_impl(src: tensor, indice: List[tensor], builder: ir.builder):

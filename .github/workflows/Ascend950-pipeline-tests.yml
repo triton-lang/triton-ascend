@@ -246,7 +246,7 @@ jobs:
             "blueRecordTaskName": "PR-${PR_ID}-CI",
             "yellowPipelineId": "${YELLOW_PIPELINE_ID}",
             "yellowGroupId": "${YELLOW_GROUP_ID}",
-            "starter": "z00856207",
+            "starter": "p_TritonCI",
             "branch": "main",
             "parameter": {
               "pr": "${PR_ID}",

@@ -487,3 +487,84 @@ def matmul_kernel(
     c = C + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
     tl.store(c, acc, mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
 ```
+
+## General Multi-Dimensional Tensor Tiling
+
+When processing multi-dimensional tensors in Triton operators, the core idea is to map high-dimensional data to the hardware's Blocks, Cores, and hardware units. This section provides typical examples for processing two-dimensional and three-dimensional tensors.
+
+### Two-Dimensional Tensor Tiling: A Matrix Multiplication (GEMM) Example
+
+For two-dimensional matrix multiplication, two-dimensional tiling is typically performed along the height (M) and width (N) dimensions, with iterative looping along the depth (K) dimension.
+
+```python
+@triton.jit
+def matmul_kernel(a_ptr, b_ptr, c_ptr, M, N, K,
+                  BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):
+    # 1. Task division: compute the coordinates of the current Block in the M and N dimensions.
+    pid_m = tl.program_id(0)
+    pid_n = tl.program_id(1)
+
+    # 2. Define Block Pointers to handle multi-dimensional strides.
+    offs_am = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_bn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    offs_k = tl.arange(0, BLOCK_K)
+
+    a_ptrs = a_ptr + offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak
+    b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn
+
+    # 3. Loop over the K dimension to perform accumulation.
+    accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float16)
+    for k in range(0, K, BLOCK_K):
+        a = tl.load(a_ptrs, mask=(offs_am[:, None] < M) & (offs_k[None, :] < K))
+        b = tl.load(b_ptrs, mask=(offs_k[:, None] < K) & (offs_bn[None, :] < N))
+        accumulator += tl.dot(a, b)
+
+        a_ptrs += BLOCK_K * stride_ak
+        b_ptrs += BLOCK_K * stride_bk
+
+    tl.store(c_ptr + offs_am[:, None] * stride_cm + offs_bn[None, :] * stride_cn, accumulator)
+```
+
+**Key Points**:
+
+- `pid_m` / `pid_n` correspond to the block indices in the M and N dimensions respectively.
+
+- `stride_*` explicitly handles multi-dimensional strides, avoiding assumptions about contiguous memory.
+
+- The K dimension is accumulated through loop-based block tiling.
+
+### Three-Dimensional and Higher Tensor Tiling: A Batched GEMM Example
+
+When processing a three-dimensional tensor (e.g. `[Batch, M, N]`), the `Batch` dimension (B) can be mapped directly to a Triton `Grid` dimension, or it can be flattened together with the M/N dimensions and remapped.
+
+#### Adding a `Batch` dimension to the Grid launch
+
+```python
+grid = lambda meta: (triton.cdiv(M, meta['BLOCK_M']), triton.cdiv(N, meta['BLOCK_N']), B)
+```
+
+#### Kernel implementation
+
+```python
+@triton.jit
+def batched_matmul_kernel(a_ptr, b_ptr, c_ptr, M, N, K, B, ...):
+    # Obtain the index of the current Batch.
+    pid_b = tl.program_id(2)
+
+    # Compute the base address offset in global memory based on the Batch index.
+    a_batch_ptr = a_ptr + pid_b * M * K
+    b_batch_ptr = b_ptr + pid_b * K * N
+    c_batch_ptr = c_ptr + pid_b * M * N
+
+    # Subsequent tiling of the M, N, and K dimensions is identical to the 2D GEMM;
+    # only the base pointers need to be replaced.
+    # ...
+```
+
+**Key Points**:
+
+- `tl.program_id(2)` obtains the index of the Batch dimension.
+
+- Each Batch independently computes its own `a_batch_ptr`, `b_batch_ptr`, and `c_batch_ptr`.
+
+- Subsequent tiling logic for the M / N / K dimensions is consistent with the 2D GEMM.

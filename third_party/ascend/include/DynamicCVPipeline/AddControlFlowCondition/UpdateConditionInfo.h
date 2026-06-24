@@ -177,6 +177,8 @@ private:
     DenseMap<Value, Value> controlVarToLatestValue;
     SmallVector<Value> currentUsedVars;
     ControlFlowConditionInfo *info = nullptr;
+    // Record each ifOp as the variables that need to be controlled when it acts as a consumer or a producer
+    llvm::DenseMap<scf::IfOp, TensorIterArgIfOpVars> tensorIterArgIfOpVars;
 };
 
 std::unique_ptr<OperationPass<ModuleOp> > createUpdateConditionInfoPass();

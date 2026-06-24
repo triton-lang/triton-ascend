@@ -2,7 +2,7 @@
 
 // CHECK-LABEL: module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">}
 // CHECK-LABEL: func.func @_attn_fwd(
-// CHECK-DAG: [[C3:%[^ ]+]] = arith.constant 3 : i32
+// CHECK-DAG: [[C3:%[^ ]+]] = arith.constant 2 : i32
 
 // CHECK-DAG: arith.cmpi slt
 // CHECK-DAG: arith.cmpi slt
@@ -133,7 +133,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
           %c0_i32_18 = arith.constant {ssbuffer.block_id = 6 : i32} 0 : i32
           %51 = arith.cmpi eq, %50, %c0_i32_18 {ssbuffer.block_id = 6 : i32} : i32
           %producer_buf = memref.alloc() {ssbuffer.block_id = 6 : i32} : memref<128xf32, #hivm.address_space<ub>>
-          %producer_cast = memref.memory_space_cast %producer_buf {ssbuffer.block_id = 6 : i32, ssbuffer.intraDeps = [0 : i32, 1 : i32]} : memref<128xf32, #hivm.address_space<ub>> to memref<128xf32>
+          %producer_cast = memref.memory_space_cast %producer_buf {ssbuffer.block_id = 6 : i32} : memref<128xf32, #hivm.address_space<ub>> to memref<128xf32>
           %producer_tensor = bufferization.to_tensor %producer_cast writable {ssbuffer.block_id = 6 : i32} : memref<128xf32>
 
           %c1_buf = memref.alloc() {ssbuffer.block_id = 6 : i32} : memref<128xf32, #hivm.address_space<ub>>

@@ -9,6 +9,9 @@ add_triton_library(TritonToLinalg
         MaskAnalysis.cpp
         UseAnalysis.cpp
         ImplicitPermute.cpp
+        StridedLoadStoreRewrite.cpp
+        StridedAxisCoalescing.cpp
+        TileChunkCoalescing.cpp
         DescriptorConverter
         MarkTensorKindPass.cpp
         DevicePrintOffsetRewrite.cpp
@@ -25,6 +28,7 @@ add_triton_library(TritonToLinalg
   MLIRTensorDialect
   MLIRTransforms
   MLIRSupport
+  BiShengIRHIVMDialect
   TritonIR
   TritonTransforms
   TritonAnalysis

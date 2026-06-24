@@ -31,9 +31,12 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Interfaces/CastInterfaces.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
 
@@ -285,6 +288,30 @@ void OpClassifierPass::matchFillPattern(Operation *def)
 }
 
 // ============================================================================
+// Pattern: tensor.empty → matmul (Upstream)
+// ============================================================================
+// Matches cases where matmul's output initial value comes from tensor.empty.
+// empty initializes the output matrix (typically to 0).
+// IR Example
+//   %value = arith.constant 0.0 : f32
+//   %out = tensor.empty() : tensor<1024x1024xf32>
+//   %result = linalg.matmul ins(%a, %b) outs(%out)
+// Matching Logic
+//   1. Check if matmul's operand defining op is tensor.empty
+//   2. If matched, mark empty as CUBE and add to cubeSeeds
+// Purpose: empty operation initializes matmul's output buffer;
+// ============================================================================
+void OpClassifierPass::matchEmptyPattern(Operation *def)
+{
+    auto emptyOp = dyn_cast<tensor::EmptyOp>(def);
+    if (!emptyOp)
+        return;
+
+    markCube(emptyOp);
+    cubeSeeds.push_back(emptyOp);
+}
+
+// ============================================================================
 // Pattern: matmul → hivm.hir.store (Downstream)
 // ============================================================================
 // Matches cases where matmul's output is directly stored to memory.
@@ -334,7 +361,7 @@ void OpClassifierPass::matchExtractSlicePattern(Operation *user)
     cubeSeeds.push_back(extractSliceOp);
     // Also mark downstream hivm.hir.store as CUBE
     for (Operation *sliceUser : extractSliceOp->getUsers()) {
-        if (isa<hivm::StoreOp>(sliceUser)) {
+        if (isa<hivm::StoreOp>(sliceUser) || isa<bufferization::MaterializeInDestinationOp>(sliceUser)) {
             markCube(sliceUser);
             cubeSeeds.push_back(sliceUser);
         }
@@ -383,20 +410,82 @@ int OpClassifierPass::patternMatchCUBE()
         // ---- Upstream pattern matching ----
         for (Value operand : op->getOperands()) {
             Operation *def = operand.getDefiningOp();
+            // A null defining op means `operand` is a loop iter_arg block argument.
+            // Walk back to its init operand (repeating to also cross nested loops).
+            for (Value cur = operand; !def;) {
+                auto blockArg = dyn_cast<BlockArgument>(cur);
+                auto loopLike =
+                    blockArg ? dyn_cast_or_null<LoopLikeOpInterface>(blockArg.getOwner()->getParentOp()) : nullptr;
+                OpOperand *init = loopLike ? loopLike.getTiedLoopInit(blockArg) : nullptr;
+                if (!init) {
+                    break;
+                }
+                cur = init->get();
+                def = cur.getDefiningOp();
+            }
             if (!def)
                 continue;
 
             matchToTensorPattern(def);
             matchTransposePattern(def);
             matchFillPattern(def);
+            matchEmptyPattern(def);
         }
 
         // ---- Downstream pattern matching ----
         for (Value result : op->getResults()) {
+            if (!op->hasOneUse()) {
+                continue;
+            }
             for (Operation *user : result.getUsers()) {
-                matchStorePattern(user);
-                matchExtractSlicePattern(user);
-                matchMaterializePattern(user);
+                // If user is scf.yield, follow the chain to find real users
+                Operation *curUser = user;
+                while (curUser) {
+                    if (!curUser->hasOneUse()) {
+                        break;
+                    }
+                    if (auto yieldOp = dyn_cast<scf::YieldOp>(curUser)) {
+                        if (Operation *scfOp = yieldOp->getParentOp()) {
+                            // Find which operand index the previous result corresponds to in the yield
+                            unsigned yieldOperandIdx = 0;
+                            Value prevResult = result;
+                            for (unsigned i = 0; i < yieldOp->getNumOperands(); ++i) {
+                                if (yieldOp->getOperand(i) == prevResult) {
+                                    yieldOperandIdx = i;
+                                    break;
+                                }
+                            }
+                            // Get the corresponding scf result
+                            if (yieldOperandIdx < scfOp->getNumResults()) {
+                                Value scfResult = scfOp->getResult(yieldOperandIdx);
+                                prevResult = scfResult;
+                                // Find the next user (skipping yield)
+                                curUser = nullptr;
+                                for (Operation *nextUser : scfResult.getUsers()) {
+                                    if (!isa<scf::YieldOp>(nextUser)) {
+                                        curUser = nextUser;
+                                        break;
+                                    }
+                                }
+                                // If no non-yield user found, continue searching from yield
+                                if (!curUser) {
+                                    for (Operation *nextUser : scfResult.getUsers()) {
+                                        if (isa<scf::YieldOp>(nextUser)) {
+                                            curUser = nextUser;
+                                            break;
+                                        }
+                                    }
+                                }
+                                continue;
+                            }
+                        }
+                        break;
+                    }
+                    matchStorePattern(curUser);
+                    matchExtractSlicePattern(curUser);
+                    matchMaterializePattern(curUser);
+                    break;
+                }
             }
         }
     }
@@ -925,7 +1014,7 @@ void OpClassifierPass::propagateCoreTypeUpwardForYield(Operation *startOp, OpCor
 //   - operand: The current operand value from the else region's yield
 // Returns: true if core_type was successfully extracted and propagated, false otherwise.
 bool OpClassifierPass::handleYieldFromElseRegion(std::vector<OpCoreType> &coreTypes, unsigned operandIndex,
-                                                 Operation *thenYieldForElse, Value &operand)
+                                                 Operation *thenYieldForElse, Value &operand, Operation *elseYieldOp)
 {
     // Only handle if thenYieldForElse is provided and is a scf.yield
     if (!thenYieldForElse || !isa<scf::YieldOp>(thenYieldForElse)) {
@@ -950,6 +1039,17 @@ bool OpClassifierPass::handleYieldFromElseRegion(std::vector<OpCoreType> &coreTy
 
     // Propagate the determined core_type upstream to the defining operation
     if (Operation *defOp = operand.getDefiningOp()) {
+        if (CloneOpMap.count(defOp) && opCoreTypes.count(defOp) && opCoreTypes[defOp] != coreTypeToUse) {
+            Operation *cloneOp = CloneOpMap[defOp];
+            // Replace the operand in else yield with the cloneOp's result
+            for (unsigned i = 0; i < defOp->getNumResults(); ++i) {
+                if (defOp->getResult(i) == operand) {
+                    elseYieldOp->setOperand(operandIndex, cloneOp->getResult(i));
+                    defOp = cloneOp;
+                    break;
+                }
+            }
+        }
         propagateCoreTypeUpwardForYield(defOp, coreTypeToUse);
     }
 
@@ -986,8 +1086,23 @@ void OpClassifierPass::processYieldOperation(Operation *op, Operation *thenYield
             // Use then region yield's core_type attribute to determine type.
             // If then yield has a comma-separated multi-value type string (e.g.
             // "CUBE,VECTOR"), extract the i-th component for this operand.
-            if (handleYieldFromElseRegion(coreTypes, i, thenYieldForElse, operand)) {
+            if (handleYieldFromElseRegion(coreTypes, i, thenYieldForElse, operand, op)) {
                 continue;
+            }
+
+            if (Operation *defOp = operand.getDefiningOp()) {
+                if (CloneOpMap.count(defOp) && opCoreTypes.count(defOp) && opCoreTypes[defOp] == OP_CUBE_ONLY) {
+                    Operation *cloneOp = CloneOpMap[defOp];
+                    // Replace the operand in else yield with the cloneOp's result
+                    for (unsigned j = 0; j < defOp->getNumResults(); ++j) {
+                        if (defOp->getResult(j) == operand && j < cloneOp->getNumResults()) {
+                            op->setOperand(i, cloneOp->getResult(j));
+                            defOp = cloneOp;
+                            operand = op->getOperand(i);
+                            break;
+                        }
+                    }
+                }
             }
 
             // ---------------------------------------------------------------
@@ -1084,6 +1199,29 @@ int OpClassifierPass::handleSCFYield()
     return 0;
 }
 
+OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const
+{
+    auto forOp = llvm::dyn_cast<scf::ForOp>(operand->getOwner());
+    if (!forOp) {
+        return OP_UNDETERMINED;
+    }
+    auto iterArg = forOp.getTiedLoopRegionIterArg(operand);
+    if (!iterArg) {
+        // the result is used as lower/upper bound or step
+        return OP_UNDETERMINED;
+    }
+    auto sourceOperand = forOp.getTiedLoopYieldedValue(iterArg);
+    if (!sourceOperand) {
+        return OP_UNDETERMINED;
+    }
+    auto defOp = sourceOperand->get().getDefiningOp();
+    if (!defOp) {
+        // might be a blockarg, not necessary for our use-case
+        return OP_UNDETERMINED;
+    }
+    return getCoreType(defOp);
+}
+
 // ============================================================================
 // Step 6: CUBE_AND_VECTOR Operation Handling
 // ============================================================================
@@ -1166,6 +1304,8 @@ void OpClassifierPass::splitOperationForCubeAndVector(Operation *op, llvm::Dense
     opCoreTypes[vectorOp] = OP_VECTOR_ONLY;
     opToVectorClone[op] = vectorOp; // record for callers' operand mapping
     allOps.push_back(vectorOp);     // track new op so it gets core_type stamped
+    CloneOpMap[op] = vectorOp;      // record for laterClone map
+    CloneOpMap[vectorOp] = op;      // record for laterClone map
 
     // ------------------------------------------------------------------
     // Phase 4: Redirect VECTOR-only users to the cloned result
@@ -1180,7 +1320,14 @@ void OpClassifierPass::splitOperationForCubeAndVector(Operation *op, llvm::Dense
         llvm::SmallVector<OpOperand *> usesToUpdate;
         for (OpOperand &use : originalResult.getUses()) {
             Operation *user = use.getOwner();
-            if (user && user != vectorOp && getCoreType(user) == OP_VECTOR_ONLY) {
+            if (!user || user == vectorOp) {
+                continue;
+            }
+            OpCoreType coreType = getCoreType(user);
+            if (llvm::isa<scf::ForOp>(user)) {
+                coreType = getForInitCoreType(&use);
+            }
+            if (coreType == OP_VECTOR_ONLY) {
                 usesToUpdate.push_back(&use);
             }
         }
@@ -1274,186 +1421,6 @@ int OpClassifierPass::stampToIR()
     return 0;
 }
 
-// ============================================================================
-// Pre-legalize matmul: Replace matmul with zero-filled accumulator + add
-// ============================================================================
-//   matmul(A, B, C) -> matmul(A, B, zero) + add(result, C)
-//   - zero = linalg.fill(tensor.empty(const 0), const 0)
-//   - add(result, C) adds the original outs value to the matmul result
-// This effectively changes a*b+c to result=a*b+0, add(result, c)
-// This must be done before initializePass so that the classification pass
-// sees the modified IR structure.
-// ============================================================================
-
-// Helper: bulk delete operations and clean up tracking structures
-void OpClassifierPass::bulkDeleteOps(llvm::SmallVectorImpl<Operation *> &opsToDelete)
-{
-    llvm::DenseSet<Operation *> deletedOps(opsToDelete.begin(), opsToDelete.end());
-    for (Operation *op : opsToDelete) {
-        if (!op || !op->getBlock()) {
-            continue;
-        }
-        if (op->use_empty()) {
-            auto it = std::find(allOps.begin(), allOps.end(), op);
-            if (it != allOps.end()) {
-                allOps.erase(it);
-            }
-            opCoreTypes.erase(op);
-            op->erase();
-        }
-    }
-
-    // Remove any stale references from the classifier map
-    for (Operation *op : deletedOps) {
-        opCoreTypes.erase(op);
-    }
-}
-
-int OpClassifierPass::preLegalizeMatmul()
-{
-    LLVM_DEBUG(DBGS() << "--- Pre-legalizing matmul operations --->\n");
-
-    // Collect all linalg::MatmulOp from the module
-    llvm::SmallVector<linalg::MatmulOp> matmulOps;
-    getOperation().walk([&](linalg::MatmulOp matmulOp) { matmulOps.push_back(matmulOp); });
-
-    if (matmulOps.empty()) {
-        LLVM_DEBUG(DBGS() << "\tNo matmul operations found\n");
-        return 0;
-    }
-
-    LLVM_DEBUG(DBGS() << "\tFound " << matmulOps.size() << " matmul operations\n");
-
-    // deferredDelete pattern: collect ops to delete, erase after iteration completes
-    // avoids iterator invalidation when erasing during the loop
-    llvm::SmallVector<Operation *> opsToDelete;
-
-    for (linalg::MatmulOp matmulOp : matmulOps) {
-        if (!matmulOp || !matmulOp->getBlock()) {
-            continue;
-        }
-
-        if (matmulOp.getNumResults() == 0) {
-            continue;
-        }
-
-        auto outputs = matmulOp.getDpsInits();
-        if (outputs.empty()) {
-            continue;
-        }
-        Value outsValue = outputs[0];
-        if (!outsValue) {
-            continue;
-        }
-
-        Value matmulResult = matmulOp.getResult(0);
-
-        // Get element type from result tensor
-        auto rankedTensorType = dyn_cast<RankedTensorType>(matmulResult.getType());
-        if (!rankedTensorType) {
-            LLVM_DEBUG(DBGS() << "matmul result is not a ranked tensor, skipping\n");
-            continue;
-        }
-        Type elemType = rankedTensorType.getElementType();
-
-        mlir::OpBuilder builder(matmulOp);
-        Location loc = matmulOp.getLoc();
-
-        // [Step 1] Create tensor.empty for the new accumulator tensor
-        // Same shape and type as original matmul output
-        SmallVector<Value> dynamicSizes;
-        for (int64_t i = 0; i < rankedTensorType.getRank(); ++i) {
-            if (rankedTensorType.isDynamicDim(i)) {
-                dynamicSizes.push_back(builder.create<tensor::DimOp>(loc, outsValue, i));
-            }
-        }
-        auto emptyOp = builder.create<tensor::EmptyOp>(loc, rankedTensorType.getShape(),
-                                                       rankedTensorType.getElementType(), dynamicSizes);
-
-        // [Step 2] Create zero constant based on element type
-        // Supports both floating-point (arith.constant float) and integer types
-        Value zeroValue;
-        if (auto floatType = dyn_cast<FloatType>(elemType)) {
-            APFloat zeroAPFloat = APFloat::getZero(floatType.getFloatSemantics());
-            zeroValue = builder.create<arith::ConstantFloatOp>(loc, zeroAPFloat, floatType).getResult();
-        } else if (auto intType = dyn_cast<IntegerType>(elemType)) {
-            zeroValue = builder.create<arith::ConstantIntOp>(loc, 0, intType).getResult();
-        } else {
-            LLVM_DEBUG(DBGS() << "matmul element type is not float or int, skipping\n");
-            continue;
-        }
-
-        // [Step 3] Use linalg.fill to populate empty tensor with zero -> zero accumulator
-        auto fillOp = builder.create<linalg::FillOp>(loc, ValueRange {zeroValue}, ValueRange {emptyOp.getResult()});
-
-        // [Step 4] Get matmul's two input matrices A and B
-        auto inputs = matmulOp.getDpsInputs();
-        if (inputs.size() < kMinMatmulInputs) {
-            LLVM_DEBUG(DBGS() << "matmul has insufficient inputs, skipping\n");
-            continue;
-        }
-        Value a = inputs[0];
-        Value b = inputs[1];
-
-        // [Step 5] Create new matmul using zero-filled tensor as accumulator
-        // New matmul runs entirely on CUBE with no VECTOR dependency
-        auto newMatmul = builder.create<linalg::MatmulOp>(loc, ValueRange {a, b}, ValueRange {fillOp.getResult(0)});
-
-        // Copy attributes from original matmul to new matmul (skipping internal attrs)
-        for (auto attr : matmulOp->getAttrs()) {
-            StringRef attrName = attr.getName().getValue();
-            if (attrName == "operandSegmentSizes" || attrName == "res_attrs" || attrName == "arg_attrs") {
-                continue;
-            }
-            newMatmul->setAttr(attr.getName(), attr.getValue());
-        }
-
-        // [Step 6] Create add: add(new_matmul_result, outs_value)
-        // This is the "c" in a*b+c, added after the matmul result
-        Operation *addOp;
-        if (isa<FloatType>(elemType)) {
-            addOp = builder.create<arith::AddFOp>(loc, newMatmul.getResult(0), outsValue).getOperation();
-        } else {
-            addOp = builder.create<arith::AddIOp>(loc, newMatmul.getResult(0), outsValue).getOperation();
-        }
-
-        // Move addOp to right after newMatmul
-        addOp->moveAfter(newMatmul.getOperation());
-
-        // [Step 7] Get add result and replace uses of original matmul result
-        Value addResult = addOp->getResult(0);
-
-        // Replace all uses of original matmulResult with addResult, EXCEPT addOp's own operand
-        for (auto &use : llvm::make_early_inc_range(matmulResult.getUses())) {
-            if (use.getOwner() == addOp) {
-                continue;
-            }
-            use.set(addResult);
-        }
-
-        // This tag is useful for later work
-        addOp->setAttr(CVPipeline::kAddFromMatmul, builder.getUnitAttr());
-
-        // [Step 8] Mark new operations as CUBE_ONLY
-        opCoreTypes[newMatmul.getOperation()] = OP_CUBE_ONLY;
-        opCoreTypes[emptyOp.getOperation()] = OP_CUBE_ONLY;
-        opCoreTypes[zeroValue.getDefiningOp()] = OP_CUBE_ONLY;
-        opCoreTypes[fillOp.getOperation()] = OP_CUBE_ONLY;
-        opCoreTypes[addOp] = OP_CUBE_ONLY;
-
-        // [Step 9] Mark original matmul for deferred deletion
-        opsToDelete.push_back(matmulOp.getOperation());
-
-        LLVM_DEBUG(DBGS() << "[OpClassifier] Transformed matmul to zero-filled accumulator + add\n");
-    }
-
-    // Step 10: Delete all marked original matmuls in bulk
-    bulkDeleteOps(opsToDelete);
-
-    LLVM_DEBUG(DBGS() << "--- Pre-legalize matmul complete --->\n");
-    return 0;
-}
-
 // Run the pass
 void OpClassifierPass::runOnOperation()
 {
@@ -1464,17 +1431,7 @@ void OpClassifierPass::runOnOperation()
 
     LLVM_DEBUG(DBGS() << "\n--- Running OpClassifierPass --->\n");
 
-    // Pre-legalize matmul: transform matmul to zero-filled accumulator + add BEFORE initializePass
-    // This transforms: matmul(A, B, C) -> matmul(A, B, zero) + add(result, C)
-    // where zero = linalg.fill(tensor.empty(const 0), const 0)
-    // This effectively changes a*b+c to result=a*b+0, add(result, c)
-    if (preLegalizeMatmul() != 0) {
-        signalPassFailure();
-        return;
-    }
-
     // Initialize memory dependence graph for tracking memory side effects
-
     aliasAnalysis = std::make_shared<AliasAnalysis>(module);
     memDepGraph = std::make_shared<CVPipeline::MemoryDependenceGraph>(module, *aliasAnalysis);
 

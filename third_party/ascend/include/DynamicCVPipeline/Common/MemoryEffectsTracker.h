@@ -24,6 +24,7 @@
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_MEMORY_EFFECTS_TRACKER_H
 
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
@@ -42,6 +43,10 @@ public:
     ArrayRef<Operation *> getExecBefore(Operation *op) const;
     ArrayRef<Operation *> getExecAfter(Operation *op) const;
 
+    // Refine a frontOp -> backOp memory edge to the leaf front ops that cause it.
+    // Returns empty when no dependency is found.
+    SmallVector<Operation *> getRealDependency(Operation *frontOp, Operation *backOp);
+
 private:
     struct MemSlot {
         Value memref;
@@ -58,7 +63,7 @@ private:
     void analyzeOp(Operation *op);
     void analyzeRegionsOf(Operation *op);
 
-    SmallVector<MemoryEffects::EffectInstance> collectOuterEffects(Operation *op, bool &unknown);
+    SmallVector<MemoryEffects::EffectInstance> collectOuterEffects(Operation *op, bool &unknown, bool recursive = true);
 
     SmallVector<MemSlot *> findAliasSlots(Value v);
     ArrayRef<MemSlot *> resolveAliasSlots(Value v,

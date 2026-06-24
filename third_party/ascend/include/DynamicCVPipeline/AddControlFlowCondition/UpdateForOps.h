@@ -54,6 +54,9 @@ private:
 
   LogicalResult insertInterCorePipeS(ModuleOp module);
 
+  // Analyze the dependencies of the tensor type iter_args in the main_loop with the ssbuffer.if ops
+  LogicalResult analyzeTensorIterArgDependencies(ModuleOp module, ControlFlowConditionInfo *info);
+
   ControlFlowConditionInfo *info = nullptr;
 };
 

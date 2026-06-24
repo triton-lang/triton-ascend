@@ -13,12 +13,12 @@
 // CHECK: tensor.extract
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
 // CHECK: scope.scope : () -> () {
 // CHECK: scf.for
 // CHECK: memref.store
 // CHECK: scope.return
-// CHECK: } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+// CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
 module {
   func.func @if_results_feed_followup_loop_structural_user_repro(
       %lb: i32,

@@ -1099,6 +1099,63 @@ def matmul_kernel(
     assert parse_result.dot_sites[0].n.tunable_param == "BLOCK_SIZE_N"
 
 
+def test_parse_cv_params_resolves_multi_level_k_alias_for_dot_operands():
+    from triton.backends.ascend.runtime.dsl_analysis.cv_param_parser import (
+        parse_cv_params,
+    )
+
+    func_ast = ast.parse(
+        """
+def matmul_kernel(
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
+):
+    offs_m = tl.arange(0, BLOCK_M)
+    offs_n = tl.arange(0, BLOCK_N)
+    offs_k = tl.arange(0, BLOCK_K)
+    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+    for k in range(0, K, BLOCK_K):
+        current_k = k + offs_k
+        a = tl.load(
+            a_ptr + offs_m[:, None] * stride_am + current_k[None, :] * stride_ak,
+            mask=current_k[None, :] < K,
+            other=0.0,
+        )
+        b = tl.load(
+            b_ptr + current_k[:, None] * stride_bk + offs_n[None, :] * stride_bn,
+            mask=current_k[:, None] < K,
+            other=0.0,
+        )
+        acc += tl.dot(a, b)
+"""
+    ).body[0]
+
+    arg_names = [arg.arg for arg in func_ast.args.args]
+    parse_result = parse_cv_params(
+        func_ast,
+        parser_mode="mix",
+        arg_names=arg_names,
+        provided_args={},
+    )
+
+    assert parse_result.dot_sites
+    assert parse_result.dot_sites[0].k.axis_symbol == "current_k"
+    assert parse_result.dot_sites[0].k.tunable_param == "BLOCK_K"
+    assert parse_result.dot_sites[0].k.length_expr == "K"
+    assert parse_result.dot_sites[0].k.state == "tunable"
+
+
 @triton.autotune(
     configs=[],
     key=["n_elements"],

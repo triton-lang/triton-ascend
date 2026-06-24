@@ -24,9 +24,11 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/IR/Builders.h"
@@ -55,6 +57,7 @@ static constexpr const char *kCoreTypeAttr = "ssbuffer.core_type";
 static constexpr const char *kTransferIdAttr = "ssbuffer.transfer_id";
 static constexpr const char *ssbufferCoreTypeCubeAttr = "CUBE";
 static constexpr const char *ssbufferCoreTypeVectorAttr = "VECTOR";
+static constexpr int ND_SHAPE_LENGTH = 2;
 
 // Helper: ssbuffer.core_type
 llvm::StringRef getSsbufferCoreType(Operation *op)
@@ -90,25 +93,56 @@ bool DataDependencyAnalysisPass::isControlFlowOp(mlir::Operation *op)
     return isa<scf::ForOp>(op) || isa<scf::IfOp>(op) || isa<scf::WhileOp>(op) || isa<scf::YieldOp>(op);
 }
 
+bool DataDependencyAnalysisPass::isCubeOrVectorOp(mlir::Operation *op)
+{
+    if (isa<tensor::EmptyOp, linalg::FillOp>(op)) {
+        return true;
+    }
+    return false;
+}
+
+bool DataDependencyAnalysisPass::isValidShapeForDependency(mlir::Value value)
+{
+    auto tensorTy = dyn_cast<TensorType>(value.getType());
+    if (!tensorTy) {
+        return false;
+    }
+
+    if (tensorTy.getRank() != ND_SHAPE_LENGTH) {
+        return false;
+    }
+    return true;
+}
+
+bool DataDependencyAnalysisPass::isValidScalarDependency(mlir::Value value)
+{
+    if (isa<mlir::IntegerType, mlir::FloatType>(value.getType())) {
+        auto defOp = value.getDefiningOp();
+        if (defOp && isa<tensor::ExtractOp>(defOp)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Helper: Check if value is a valid tensor for dependency analysis
 // Returns true if value is TensorType and not defined by EmptyOp/FillOp
-bool DataDependencyAnalysisPass::isValidTensorForDependency(mlir::Value value)
+bool DataDependencyAnalysisPass::isValidValueForDependency(mlir::Value value)
 {
-    if (!dyn_cast<mlir::TensorType>(value.getType())) {
-        return false;
+    if (isValidScalarDependency(value)) {
+        return true;
     }
-    Operation *defOp = value.getDefiningOp();
 
-    // EmptyOp/FillOp can be processed both by CUBE and VECTOR
-    // so they should not be data dependency
-    if (defOp && isa<tensor::EmptyOp, linalg::FillOp>(defOp)) {
+    if (!isValidShapeForDependency(value)) {
         return false;
     }
-    auto tensorTy = dyn_cast<TensorType>(value.getType());
-    static constexpr int NdShapeLength = 2;
-    if (!tensorTy || tensorTy.getRank() != NdShapeLength) {
+
+    Operation *defOp = value.getDefiningOp();
+    // Op that can be processed both by CUBE and VECTOR should not be data dependency
+    if (defOp && isCubeOrVectorOp(defOp)) {
         return false;
     }
+
     return true;
 }
 
@@ -221,7 +255,9 @@ void DataDependencyAnalysisPass::collectDepInfo(mlir::Value depvalue, Dependency
 
     depInfo.producerBlockId = commonLevelIds.first;
     depInfo.consumerBlockId = commonLevelIds.second;
-
+    if (isValidScalarDependency(depvalue)) {
+        depInfo.isScaler = true;
+    }
     dependencies.push_back(depInfo);
 }
 
@@ -238,7 +274,7 @@ llvm::SmallVector<mlir::Operation *> DataDependencyAnalysisPass::collectDiffCore
         }
         if (isControlFlowOp(user)) {
             LOG_DEBUG("cannot process nested iterarg!");
-            signalPassFailure();
+            continue;
         }
 
         auto userCoreType = getCoreTypeWithIndex(user, 0);
@@ -258,6 +294,7 @@ void DataDependencyAnalysisPass::insertProducerAndRecordDeps(scf::ForOp forOp,
 {
     auto &v2cDependencies = info.getV2CDependencies();
     auto &c2vDependencies = info.getC2VDependencies();
+    auto &blockInfoMap = info.getBlockInfoMap();
 
     int newId = CVPipeline::getAvailableBlockId(module);
     OpBuilder builder(forOp);
@@ -267,6 +304,13 @@ void DataDependencyAnalysisPass::insertProducerAndRecordDeps(scf::ForOp forOp,
     auto constOp = builder.create<arith::ConstantIntOp>(loc, 0, 32);
     constOp->setAttr(kBlockIdAttr, IntegerAttr::get(IntegerType::get(builder.getContext(), 32), newId));
     constOp->setAttr(kCoreTypeAttr, StringAttr::get(builder.getContext(), initCoreType));
+
+    BlockInfo blockInfo;
+    blockInfo.blockId = newId;
+    blockInfo.isCube = (initCoreType == ssbufferCoreTypeCubeAttr);
+    blockInfo.isControl = false;
+    blockInfo.Operations.push_back(constOp);
+    blockInfoMap[newId] = blockInfo;
 
     for (auto &user : diffUsers) {
         auto userBlockIdOpt = CVPipeline::getOpBlockId(user);
@@ -293,8 +337,10 @@ void DataDependencyAnalysisPass::insertProducerAndRecordDeps(scf::ForOp forOp,
         depInfo.value = iterArg;
         depInfo.iniProducerBlockId = newId;
         depInfo.iniConsumerBlockId = userBlockId;
-        depInfo.producerBlockId = newId;
-        depInfo.consumerBlockId = userBlockId;
+
+        auto [producerBlockId, consumerBlockId] = findCommonLevelBlockIds(info, newId, userBlockId);
+        depInfo.producerBlockId = producerBlockId;
+        depInfo.consumerBlockId = consumerBlockId;
 
         if (depType == DependencyType::VectorToCube) {
             v2cDependencies.push_back(depInfo);
@@ -328,18 +374,26 @@ void DataDependencyAnalysisPass::processIterArgDependencies()
 
         for (int iterArgIndex = 0; iterArgIndex < numIterArgs; ++iterArgIndex) {
             mlir::Value initValue = forOp.getInits()[iterArgIndex];
-            // Skip non-tensor values as they don't require inter-core synchronization
-            if (!isValidTensorForDependency(initValue)) {
-                LOG_DEBUG("iterarg: "<< initValue <<"is not valid tensor for dependency!");
+            mlir::BlockArgument iterArg = forOp.getRegionIterArg(iterArgIndex);
+            mlir::Value yieldedValue = forOp.getYieldedValues()[iterArgIndex];
+            LOG_DEBUG("initValue" << initValue << "\n");
+            LOG_DEBUG("yieldedValue" << yieldedValue << "\n");
+
+            if (!isValidShapeForDependency(initValue) || !isValidShapeForDependency(yieldedValue)) {
+                LOG_DEBUG("iterarg: "<< iterArg <<"is not valid tensor for dependency!");
                 continue;
             }
 
-            mlir::BlockArgument iterArg = forOp.getRegionIterArg(iterArgIndex);
-            mlir::Value yieldedValue = forOp.getYieldedValues()[iterArgIndex];
-
             Operation *initDefOp = initValue.getDefiningOp();
+            Operation *yieldedDefOp = yieldedValue.getDefiningOp();
             if (!initDefOp) {
                 LOG_DEBUG("warning: nested iterarg!");
+                continue;
+            }
+            if (!yieldedDefOp) {
+                continue;
+            }
+            if (isCubeOrVectorOp(initDefOp) && isCubeOrVectorOp(yieldedDefOp)) {
                 continue;
             }
 
@@ -350,6 +404,11 @@ void DataDependencyAnalysisPass::processIterArgDependencies()
             // Only process if init and yield have matching core types
             // Mismatch indicates a more complex dependency pattern that requires special handling
             if (initCoreType != yieldCoreType) {
+                if (!isValidValueForDependency(initValue)) {
+                    if (collectDiffCoreTypeUsers(iterArg, yieldCoreType).empty()) {
+                        continue;
+                    }
+                }
                 LOG_DEBUG("iterarg init core_type conflicts with yield");
                 signalPassFailure();
             }
@@ -375,7 +434,7 @@ void DataDependencyAnalysisPass::analyzeExternalInputs(DataDependencyInfo &info)
         LOG_DEBUG("Analyzing external inputs for Cube Block ID: " << id << "\n");
         for (mlir::Value input : blockInfo.inputs) {
             // Check if input is a value which can be produced by CUBE
-            if (!isValidTensorForDependency(input)) {
+            if (!isValidValueForDependency(input)) {
                 LOG_DEBUG("Warning: [v->c] Input value is not a valid tensor for dependency analysis.\n");
                 continue;
             }
@@ -427,8 +486,12 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(DataDependencyInfo &info
 
         for (mlir::Value output : blockInfo.outputs) {
             // Check if output is a value which can be produced by CUBE
-            if (!isValidTensorForDependency(output)) {
+            if (!isValidValueForDependency(output)) {
                 LOG_DEBUG("Warning: [c->v] Output value is not a valid tensor for dependency analysis.\n");
+                continue;
+            }
+            if (isa<mlir::IntegerType, mlir::FloatType>(output.getType())) {
+                LOG_DEBUG("Warning: [c->v] Output value is a scalar, not a valid tensor for dependency analysis.\n");
                 continue;
             }
 
@@ -478,6 +541,26 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(DataDependencyInfo &info
     LOG_DEBUG("External output analysis complete.\n");
 }
 
+void DataDependencyAnalysisPass::collectMemDepInfo(
+    llvm::StringRef predCoreType,
+    int producerBlockId, int consumerBlockId, int predBlockId, int currBlockId,
+    llvm::SmallVector<DependencyInfo> &memoryDependencies)
+{
+    DependencyInfo depInfo;
+
+    if (predCoreType == ssbufferCoreTypeCubeAttr) {
+        depInfo.type = DependencyType::CubeToVector;
+    } else if (predCoreType == ssbufferCoreTypeVectorAttr) {
+        depInfo.type = DependencyType::VectorToCube;
+    }
+    depInfo.producerBlockId = producerBlockId;
+    depInfo.consumerBlockId = consumerBlockId;
+    depInfo.iniProducerBlockId = predBlockId;
+    depInfo.iniConsumerBlockId = currBlockId;
+
+    memoryDependencies.push_back(depInfo);
+}
+
 void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
 {
     auto &memoryDependencies = info.getMemoryDependencies();
@@ -487,6 +570,12 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
     MemoryDependenceGraph memDepGraph(module, aliasAnalysis);
 
     module.walk([&](mlir::Operation *op) {
+        if (op->getNumRegions() > 0) {
+            return;
+        }
+        if (isa<annotation::MarkOp, gpu::BarrierOp>(op)) {
+            return;
+        }
         auto currBlockIdOpt = CVPipeline::getOpBlockId(op);
         llvm::StringRef currCoreType = getSsbufferCoreType(op);
         if (!currBlockIdOpt || currCoreType.empty()) {
@@ -495,6 +584,38 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
         int currBlockId = static_cast<int>(*currBlockIdOpt);
 
         for (mlir::Operation *predOp : memDepGraph.getExecBefore(op)) {
+            if (isa<annotation::MarkOp, gpu::BarrierOp>(predOp)) {
+                continue;
+            }
+            if (predOp->getNumRegions() > 0) {
+                auto realdeps = memDepGraph.getRealDependency(predOp, op);
+                if (realdeps.empty()) {
+                    return;
+                }
+                for (mlir::Operation *realPredOp : realdeps) {
+                    if (isa<annotation::MarkOp, gpu::BarrierOp>(realPredOp)) {
+                        continue;
+                    }
+                    auto realPredBlockIdOpt = CVPipeline::getOpBlockId(realPredOp);
+                    llvm::StringRef realPredCoreType = getSsbufferCoreType(realPredOp);
+                    if (!realPredBlockIdOpt || realPredCoreType == currCoreType || realPredCoreType.empty()) {
+                        continue;
+                    }
+                    int realPredBlockId = static_cast<int>(*realPredBlockIdOpt);
+                    auto [producerBlockId, consumerBlockId] = findCommonLevelBlockIds(info, realPredBlockId, currBlockId);
+                    if (producerBlockId == -1 || consumerBlockId == -1) {
+                        LOG_DEBUG("Could not find common level block IDs for producer and consumer blocks");
+                        signalPassFailure();
+                    }
+                    collectMemDepInfo(realPredCoreType, producerBlockId, consumerBlockId, realPredBlockId, currBlockId, memoryDependencies);
+
+                    LOG_DEBUG("\n=op with region mem dep analysis= "
+                        << "\nrealpredcoretype" << realPredCoreType
+                        << "\nproducer Block: " << realPredBlockId << "\nproducer Op: " << *realPredOp
+                        << "\nconsumer Block: " << currBlockId << "\nconsumer Op: " << *op << "\n");
+                }
+                continue;
+            }
             auto predBlockIdOpt = CVPipeline::getOpBlockId(predOp);
             llvm::StringRef predCoreType = getSsbufferCoreType(predOp);
             if (!predBlockIdOpt || predCoreType == currCoreType || predCoreType.empty()) {
@@ -511,24 +632,67 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
                 continue;
             }
 
-            DependencyInfo depInfo;
+            collectMemDepInfo(predCoreType, producerBlockId, consumerBlockId, predBlockId, currBlockId, memoryDependencies);
 
-            if (predCoreType == ssbufferCoreTypeCubeAttr) {
-                depInfo.type = DependencyType::CubeToVector;
-            } else if (predCoreType == ssbufferCoreTypeVectorAttr) {
-                depInfo.type = DependencyType::VectorToCube;
-            }
-            depInfo.producerBlockId = producerBlockId;
-            depInfo.consumerBlockId = consumerBlockId;
-            depInfo.iniProducerBlockId = predBlockId;
-            depInfo.iniConsumerBlockId = currBlockId;
-
-            memoryDependencies.push_back(depInfo);
-            LOG_DEBUG("=mem dep analysis= "
-                << "producer Block: " << predBlockId << "consumer Block: " << currBlockId << "\n");
+            LOG_DEBUG("\n=mem dep analysis= "
+                << "\npredcoretype" << predCoreType
+                << "\nproducer Block: " << predBlockId << "\nproducer Op: " << *predOp
+                << "\nconsumer Block: " << currBlockId << "\nconsumer Op: " << *op << "\n");
         }
     });
     LOG_DEBUG("=== mem dep analysis complete ===\n");
+}
+
+void DataDependencyAnalysisPass::analyzeV2CMatmulABType(DataDependencyInfo &info)
+{
+    auto &v2cDependencies = info.getV2CDependencies();
+    for (DependencyInfo &dep : v2cDependencies) {
+        mlir::Value depValue = dep.value;
+        llvm::DenseSet<mlir::Value> visitedValues;
+        llvm::SmallVector<mlir::Value> worklist;
+        visitedValues.insert(depValue);
+        worklist.push_back(depValue);
+        bool foundMatmul = false;
+
+        while (!worklist.empty() && !foundMatmul) {
+            mlir::Value currentValue = worklist.pop_back_val();
+            for (mlir::Operation *userOp : currentValue.getUsers()) {
+                if (!userOp) {
+                    continue;
+                }
+
+                auto userBlockIdOpt = CVPipeline::getOpBlockId(userOp);
+                if (!userBlockIdOpt || *userBlockIdOpt != dep.iniConsumerBlockId) {
+                    continue;
+                }
+
+                if (auto matmulOp = dyn_cast<linalg::MatmulOp>(userOp)) {
+                    MLIRContext *ctx = matmulOp->getContext();
+                    if (matmulOp.getOperand(0) == currentValue) {
+                        dep.isMatmulA = true;
+                        matmulOp->setAttr(CVPipeline::kMatmulADep, UnitAttr::get(ctx));
+                    }
+                    if (matmulOp.getOperand(1) == currentValue) {
+                        dep.isMatmulB = true;
+                        matmulOp->setAttr(CVPipeline::kMatmulBDep, UnitAttr::get(ctx));
+                    } else {
+                        LOG_DEBUG("[warning]: invalid matmul c dep!\n");
+                    }
+                    foundMatmul = true;
+                    dep.iniMatmulOp = matmulOp;
+                    break;
+                }
+
+                for (mlir::Value result : userOp->getResults()) {
+                    if (!visitedValues.contains(result)) {
+                        visitedValues.insert(result);
+                        worklist.push_back(result);
+                    }
+                }
+            }
+
+        }
+    }
 }
 
 // Producer/Consumer Hierarchy Analysis
@@ -623,9 +787,11 @@ void DataDependencyAnalysisPass::runOnOperation()
 
     // Step 3: Analyze dependencies (populate v2c, c2v lists)
     analyzeExternalInputs(info);
+    analyzeV2CMatmulABType(info);
+
     analyzeExternalOutputs(info);
 
-    // Step 4: Analyze memory dependencies (PIPE_S sync)
+    // Step 4: Analyze memory dependencies (memdep sync)
     analyzeMemoryEffect(info);
 
     info.setValid(true);

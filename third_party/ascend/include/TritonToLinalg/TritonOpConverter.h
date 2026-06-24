@@ -689,6 +689,30 @@ private:
   static constexpr llvm::StringRef funcNameBase = "triton_indirect_load";
 };
 
+class StrideLoadConverter
+    : public OpConversionPattern<triton::ascend::StrideLoadOp> {
+public:
+  using OpConversionPattern<triton::ascend::StrideLoadOp>::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(triton::ascend::StrideLoadOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+
+private:
+  static constexpr llvm::StringRef funcNameBase = "triton_stride_load";
+};
+
+class StrideStoreConverter
+    : public OpConversionPattern<triton::ascend::StrideStoreOp> {
+public:
+  using OpConversionPattern<triton::ascend::StrideStoreOp>::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(triton::ascend::StrideStoreOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+
+private:
+  static constexpr llvm::StringRef funcNameBase = "triton_stride_store";
+};
+
 class IndirectStoreConverter : public OpConversionPattern<triton::ascend::IndirectStoreOp> {
 public:
   using OpConversionPattern<triton::ascend::IndirectStoreOp>::OpConversionPattern;
@@ -706,6 +730,15 @@ public:
 
   LogicalResult
   matchAndRewrite(triton::ascend::IndexSelectSimdOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
+class HistogramConverter : public OpConversionPattern<triton::HistogramOp> {
+public:
+  using OpConversionPattern<triton::HistogramOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::HistogramOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 };
 

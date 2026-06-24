@@ -32,6 +32,10 @@
 namespace mlir {
 namespace triton {
 
+// Attribute names for DynamicCV pipeline
+inline constexpr llvm::StringLiteral kSSBufferIfAttr = "ssbuffer.if";
+inline constexpr llvm::StringLiteral kHIVMMatmulLimitedInCubeAttr = "hivm.matmul_limited_in_cube";
+
 // Collect all nested ops within an operation's regions
 LogicalResult collectAllNestedOps(Operation *op, llvm::DenseSet<Operation *> &regionOps);
 
@@ -48,9 +52,6 @@ LogicalResult topologicalSort(SmallVector<Operation *> &ops);
 
 // Get block_ids in order of appearance in for loop body
 SmallVector<int> getBlockIdsInOrder(scf::ForOp forOp);
-
-// Helper to get block_id attribute from op
-std::optional<int64_t> getOpBlockId(Operation *op);
 
 // Get the block_id of the immediate child of scf.for that contains op
 std::optional<int64_t> getForDirectChildBlockId(Operation *op);

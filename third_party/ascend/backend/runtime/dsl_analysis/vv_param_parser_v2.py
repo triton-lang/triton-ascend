@@ -28,6 +28,17 @@ from .axis_length_resolver import classify_length_symbol
 from .axis_semantic_schema import (AxisExtent, AxisSemanticInfo,
                                    AxisSemanticResult, AxisSplit, AxisTiling)
 from .dynamic_source_utils import resolve_dynamic_source
+from .load_semantics import (
+    build_assignment_expr_map,
+    build_symbol_user_expr_map,
+    collect_axis_candidates,
+    extract_axis_block_symbol_map,
+    extract_axis_total_symbol_map,
+    extract_name_depths_transitive,
+    extract_name_ids,
+    extract_name_ids_transitive,
+    pick_param_candidate,
+)
 from .load_dependency_analyzer import collect_load_derived_symbols
 from .schema import (AXIS_LENGTH_STATE_FIXED_COMPILE_TIME,
                      AXIS_LENGTH_STATE_TUNABLE)
@@ -447,26 +458,6 @@ def _visit_stmt_for_assignment_map(
         return
 
 
-def _build_assignment_expr_map(
-    func_node: ast.AST,
-    provided_args: Optional[Mapping[str, object]] = None,
-) -> Dict[str, List[ast.AST]]:
-    known_values: Dict[str, object] = {}
-    for name, value in (provided_args or {}).items():
-        if isinstance(value, (bool, int, float)):
-            known_values[name] = value
-
-    result: Dict[str, List[ast.AST]] = {}
-    body = getattr(func_node, "body", None)
-    if not isinstance(body, list):
-        return result
-    for stmt in body:
-        if not isinstance(stmt, ast.stmt):
-            continue
-        _visit_stmt_for_assignment_map(stmt, result, known_values)
-    return result
-
-
 def _build_axis_symbol_to_length_map(func_node: ast.AST) -> Dict[str, str]:
     symbol_to_length: Dict[str, str] = {}
     assignment_expr: Dict[str, ast.AST] = {}
@@ -810,7 +801,7 @@ def _normalize_mask_extent_candidate_expr(
     dependency_names = _collect_symbol_dependency_names(symbol, assignment_expr_map)
     preferred_args: List[ast.AST] = []
     for arg in args:
-        arg_names = _extract_name_ids_transitive(arg, assignment_expr_map)
+        arg_names = extract_name_ids_transitive(arg, assignment_expr_map)
         if arg_names.intersection(dependency_names):
             continue
         preferred_args.append(arg)
@@ -953,10 +944,6 @@ def _extract_param_names(func_node: ast.AST) -> Set[str]:
     return {arg.arg for arg in ordered_args if isinstance(arg, ast.arg)}
 
 
-def _extract_name_ids(expr: ast.AST) -> Set[str]:
-    return {node.id for node in ast.walk(expr) if isinstance(node, ast.Name)}
-
-
 def _expr_uses_symbols(expr: ast.AST, symbols: Set[str]) -> bool:
     if not symbols:
         return False
@@ -966,85 +953,14 @@ def _expr_uses_symbols(expr: ast.AST, symbols: Set[str]) -> bool:
     return False
 
 
-def _extract_name_depths_transitive(
-    expr: ast.AST,
-    assignment_expr_map: Mapping[str, Sequence[ast.AST]],
-) -> Dict[str, int]:
-    name_depths = {name: 0 for name in _extract_name_ids(expr)}
-    queue = list(name_depths.keys())
-    while queue:
-        name = queue.pop()
-        base_depth = name_depths[name]
-        for assigned_expr in assignment_expr_map.get(name, ()):
-            for sub_name in _extract_name_ids(assigned_expr):
-                next_depth = base_depth + 1
-                cur_depth = name_depths.get(sub_name, None)
-                if cur_depth is not None and cur_depth <= next_depth:
-                    continue
-                name_depths[sub_name] = next_depth
-                queue.append(sub_name)
-    return name_depths
-
-
-def _extract_name_ids_transitive(
-    expr: ast.AST,
-    assignment_expr_map: Mapping[str, Sequence[ast.AST]],
-) -> Set[str]:
-    return set(_extract_name_depths_transitive(expr, assignment_expr_map).keys())
-
-
 def _collect_symbol_dependency_names(
     symbol: str,
     assignment_expr_map: Mapping[str, Sequence[ast.AST]],
 ) -> Set[str]:
     names = {symbol}
     for expr in assignment_expr_map.get(symbol, ()):
-        names.update(_extract_name_ids_transitive(expr, assignment_expr_map))
+        names.update(extract_name_ids_transitive(expr, assignment_expr_map))
     return names
-
-
-def _build_symbol_user_expr_map(
-    assignment_expr_map: Mapping[str, Sequence[ast.AST]],
-) -> Dict[str, List[ast.AST]]:
-    result: Dict[str, List[ast.AST]] = {}
-    for exprs in assignment_expr_map.values():
-        for expr in exprs:
-            seen = set()
-            for node in ast.walk(expr):
-                if not isinstance(node, ast.Subscript):
-                    continue
-                axis_info = _extract_subscript_axis_info(node)
-                if axis_info is None:
-                    continue
-                _, symbol, _ = axis_info
-                if symbol in seen:
-                    continue
-                seen.add(symbol)
-                result.setdefault(symbol, []).append(expr)
-    return result
-
-
-def _pick_param_candidate(
-    expr: ast.AST,
-    *,
-    param_names: Set[str],
-    exclude: Set[str],
-    assignment_expr_map: Mapping[str, Sequence[ast.AST]],
-) -> Optional[str]:
-    name_depths = _extract_name_depths_transitive(expr, assignment_expr_map)
-    candidates = [
-        name
-        for name, depth in name_depths.items()
-        if name in param_names and name not in exclude
-    ]
-    if not candidates:
-        return None
-    min_depth = min(name_depths[name] for name in candidates)
-    candidates = sorted(name for name in candidates if name_depths[name] == min_depth)
-    for preferred in ("M", "N", "K"):
-        if preferred in candidates:
-            return preferred
-    return candidates[0]
 
 
 def _extract_axis_symbols_from_expr(expr: ast.AST, axis_candidates: Set[str]) -> Set[str]:
@@ -1062,160 +978,6 @@ def _extract_axis_symbols_from_expr(expr: ast.AST, axis_candidates: Set[str]) ->
         if symbol in axis_candidates:
             symbols.add(symbol)
     return symbols
-
-
-def _collect_axis_candidates(func_node: ast.AST, param_names: Optional[Set[str]] = None) -> Set[str]:
-    axis_candidates: Set[str] = set()
-    for node in ast.walk(func_node):
-        if not isinstance(node, ast.Assign):
-            continue
-        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-            continue
-        target_name = node.targets[0].id
-        if _is_tl_call(node.value, "arange"):
-            axis_candidates.add(target_name)
-            continue
-        arange_lengths = _collect_arange_stop_texts(node.value)
-        if len(arange_lengths) == 1:
-            axis_candidates.add(target_name)
-            continue
-        if isinstance(node.value, ast.BinOp) and isinstance(node.value.op, ast.Mod):
-            axis_candidates.add(target_name)
-            continue
-        for sub_node in ast.walk(node.value):
-            if not isinstance(sub_node, ast.Subscript):
-                continue
-            axis_info = _extract_subscript_axis_info(sub_node)
-            if axis_info is None:
-                continue
-            axis_candidates.add(target_name)
-            break
-
-    if param_names:
-        for node in ast.walk(func_node):
-            if not isinstance(node, ast.Subscript):
-                continue
-            axis_info = _extract_subscript_axis_info(node)
-            if axis_info is None:
-                continue
-            _, symbol, _ = axis_info
-            if symbol in param_names:
-                axis_candidates.add(symbol)
-    return axis_candidates
-
-
-def _extract_axis_block_symbol_map(
-    func_node: ast.AST,
-    axis_candidates: Set[str],
-) -> Dict[str, str]:
-    axis_block_symbol_map: Dict[str, str] = {}
-    for node in ast.walk(func_node):
-        if not isinstance(node, ast.Assign):
-            continue
-        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-            continue
-        target_name = node.targets[0].id
-        if target_name not in axis_candidates:
-            continue
-        arange_lengths = _collect_arange_stop_texts(node.value)
-        if len(arange_lengths) == 1:
-            axis_block_symbol_map[target_name] = arange_lengths[0]
-    return axis_block_symbol_map
-
-
-def _extract_axis_total_symbol_map(
-    func_node: ast.AST,
-    *,
-    assignment_expr_map: Mapping[str, Sequence[ast.AST]],
-    axis_candidates: Set[str],
-    param_names: Set[str],
-) -> Dict[str, str]:
-    axis_block_symbol_map = _extract_axis_block_symbol_map(func_node, axis_candidates)
-    axis_total_symbol_map: Dict[str, str] = {}
-
-    # Pass-1: modulo-derived total symbols, e.g. offs_m = (...) % M
-    for node in ast.walk(func_node):
-        if not isinstance(node, ast.Assign):
-            continue
-        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-            continue
-        target_name = node.targets[0].id
-        if target_name not in axis_candidates:
-            continue
-        if not isinstance(node.value, ast.BinOp) or not isinstance(node.value.op, ast.Mod):
-            continue
-        candidate = _pick_param_candidate(
-            node.value.right,
-            param_names=param_names,
-            exclude={target_name},
-            assignment_expr_map=assignment_expr_map,
-        )
-        if candidate is not None:
-            axis_total_symbol_map[target_name] = candidate
-        else:
-            axis_total_symbol_map[target_name] = _ast_to_text(node.value.right)
-
-    # Pass-2: mask comparisons, e.g. offs_x < N
-    for node in ast.walk(func_node):
-        if not isinstance(node, ast.Compare):
-            continue
-        if len(node.ops) != 1 or len(node.comparators) != 1:
-            continue
-        left_expr = node.left
-        right_expr = node.comparators[0]
-
-        left_axes = _extract_axis_symbols_from_expr(left_expr, axis_candidates=axis_candidates)
-        right_axes = _extract_axis_symbols_from_expr(right_expr, axis_candidates=axis_candidates)
-
-        left_only = left_axes - right_axes
-        if left_only:
-            candidate = _pick_param_candidate(
-                right_expr,
-                param_names=param_names,
-                exclude=set(left_only),
-                assignment_expr_map=assignment_expr_map,
-            )
-            if candidate is not None:
-                for axis_name in left_only:
-                    axis_total_symbol_map.setdefault(axis_name, candidate)
-
-        right_only = right_axes - left_axes
-        if right_only:
-            candidate = _pick_param_candidate(
-                left_expr,
-                param_names=param_names,
-                exclude=set(right_only),
-                assignment_expr_map=assignment_expr_map,
-            )
-            if candidate is not None:
-                for axis_name in right_only:
-                    axis_total_symbol_map.setdefault(axis_name, candidate)
-
-    # Pass-3: loop stop symbols, e.g. for _ in range(0, K // BLOCK_K)
-    for node in ast.walk(func_node):
-        if not isinstance(node, ast.For):
-            continue
-        stop_expr, _ = _extract_range_stop_and_step(node)
-        if stop_expr is None:
-            continue
-        total_candidate = _pick_param_candidate(
-            stop_expr,
-            param_names=param_names,
-            exclude=set(),
-            assignment_expr_map=assignment_expr_map,
-        )
-        if total_candidate is None:
-            continue
-        stop_names = _extract_name_ids_transitive(stop_expr, assignment_expr_map)
-        if not stop_names:
-            continue
-        for axis_name, block_symbol in axis_block_symbol_map.items():
-            if axis_name in axis_total_symbol_map:
-                continue
-            if block_symbol not in stop_names:
-                continue
-            axis_total_symbol_map[axis_name] = total_candidate
-    return axis_total_symbol_map
 
 
 def _extract_split_candidates_for_symbol(
@@ -1758,16 +1520,16 @@ def parse_vv_axis_semantic_v2(
     param_names = _extract_param_names(func_node)
 
     make_block_ptr_specs = _collect_make_block_ptr_specs(func_node)
-    assignment_expr_map = _build_assignment_expr_map(
+    assignment_expr_map = build_assignment_expr_map(
         func_node,
         provided_args=provided_args,
     )
-    symbol_user_expr_map = _build_symbol_user_expr_map(assignment_expr_map)
+    symbol_user_expr_map = build_symbol_user_expr_map(assignment_expr_map)
     symbol_to_length = _build_axis_symbol_to_length_map(func_node)
     program_id_var_dims = _build_program_id_var_dims(func_node)
     loop_steps = _collect_loop_steps(func_node)
-    axis_candidates = _collect_axis_candidates(func_node, param_names=param_names)
-    axis_total_symbol_map = _extract_axis_total_symbol_map(
+    axis_candidates = collect_axis_candidates(func_node, param_names=param_names)
+    axis_total_symbol_map = extract_axis_total_symbol_map(
         func_node,
         assignment_expr_map=assignment_expr_map,
         axis_candidates=axis_candidates,

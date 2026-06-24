@@ -11,3 +11,4 @@
 | [05_matrix_multiplication_example](./05_matrix_multiplication_example.md)| Example of efficient matrix multiplication|
 | [06_autotune_example](./06_autotune_example.md)| Example of using Autotune on kernels|
 | [07_accuracy_comparison_example](./07_accuracy_comparison_example.md)| Accuracy comparison example|
+| [08_costmodel_example](./08_costmodel_example.md)| End-to-end costmodel prediction example|

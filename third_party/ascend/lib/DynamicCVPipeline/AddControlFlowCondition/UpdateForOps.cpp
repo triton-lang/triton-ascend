@@ -24,11 +24,15 @@
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/BuiltinTypes.h"
 
 static constexpr const char *DEBUG_TYPE = "UpdateForOps";
 static constexpr int kPipeSFlagId = 15;
+static constexpr const char *kSsbufferMainLoop = "ssbuffer.main_loop";
+static constexpr const char *kSsbufferIf = "ssbuffer.if";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...) \
 LLVM_DEBUG({ \
@@ -201,6 +205,24 @@ LogicalResult extendForOpWithExtraArgs(scf::ForOp oldForOp, ControlFlowCondition
   int numBlockCounters = info->blockCounterNums[oldForOp];
   int numInnerDepConds = info->intraCoreDependentMap[oldForOp].size();
   int totalExtraArgs = numBlockCounters + numInnerDepConds;
+
+  int numTensorIterArgs = 0;
+  // Record the number of consumers for each tensor iter_args (the number of parameters to be created)
+  llvm::DenseMap<Value, int> tensorIterArgNumConsumers;
+  // First, copy the depsVec out to avoid iterator invalidation later
+  llvm::SmallVector<TensorIterArgIfOpRelation> depsVecCopy;
+  auto tensorIterArgDepsIt = info->tensorIterArgDepsMap.find(oldForOp);
+  if (tensorIterArgDepsIt != info->tensorIterArgDepsMap.end()) {
+    depsVecCopy = tensorIterArgDepsIt->second;  // Make a copy
+    for (auto &entry : depsVecCopy) {
+      Value iterArg = entry.iterArg;
+      int numConsumers = entry.consumers.size();
+      tensorIterArgNumConsumers[iterArg] = numConsumers;
+      numTensorIterArgs += numConsumers;
+    }
+  }
+  
+  totalExtraArgs += numTensorIterArgs;
   if (totalExtraArgs == 0) {
     return success();
   }
@@ -212,6 +234,10 @@ LogicalResult extendForOpWithExtraArgs(scf::ForOp oldForOp, ControlFlowCondition
   for (int i = 0; i < numInnerDepConds; ++i)
     extraInitArgs.push_back(builder.create<arith::ConstantOp>(
         oldForOp.getLoc(), builder.getI32Type(), builder.getI32IntegerAttr(0)));
+  // Add an initial value (1) for the new parameter iter_arg of tensor
+  for (int i = 0; i < numTensorIterArgs; ++i)
+    extraInitArgs.push_back(builder.create<arith::ConstantOp>(
+        oldForOp.getLoc(), builder.getI32Type(), builder.getI32IntegerAttr(1)));
 
   scf::ForOp newForOp = createForOpAndMigrateBody(oldForOp, totalExtraArgs, extraInitArgs);
   if (!newForOp) {
@@ -235,6 +261,27 @@ LogicalResult extendForOpWithExtraArgs(scf::ForOp oldForOp, ControlFlowCondition
     info->innerDepConds[newForOp] = indices;
   }
 
+  // Record the index of the new parameter iter_arg for the tensor and update the corresponding map
+  if (numTensorIterArgs > 0) {
+    unsigned tensorBaseIdx = baseIdx + numBlockCounters + numInnerDepConds;
+    auto &newIndicesMap = info->tensorIterArgIndicesMap[newForOp];
+    
+    unsigned currentIdx = tensorBaseIdx;
+    for (auto &entry : depsVecCopy) {
+      Value iterArg = entry.iterArg;
+      int numConsumers = entry.consumers.size();
+      SmallVector<int> indices;
+      for (int j = 0; j < numConsumers; ++j) {
+        indices.push_back(currentIdx++);
+      }
+      newIndicesMap[iterArg] = indices;
+    }
+    
+    info->tensorIterArgIndicesMap.erase(oldForOp);
+    info->tensorIterArgDepsMap[newForOp] = std::move(depsVecCopy);
+    info->tensorIterArgDepsMap.erase(oldForOp);
+  }
+
   if (info->intraCoreDependentMap.count(oldForOp)) {
     info->intraCoreDependentMap[newForOp] = info->intraCoreDependentMap[oldForOp];
     info->intraCoreDependentMap.erase(oldForOp);
@@ -246,14 +293,24 @@ LogicalResult extendForOpWithExtraArgs(scf::ForOp oldForOp, ControlFlowCondition
 // Add block counter and inner dependency condition iter args to for ops
 LogicalResult UpdateForOpsPass::addBlockCountersAndInnerDepConds(ModuleOp module, ControlFlowConditionInfo *info)
 {
+  llvm::DenseSet<scf::ForOp> forOpsToProcess;
+
   for (auto &p : info->blockCounterNums) {
     if (p.second < 0) {
       LDBG("[Error]: invalid blockCounterNum " << p.second << "\n");
       return failure();
     }
-    if (failed(extendForOpWithExtraArgs(p.first, info)))
+    forOpsToProcess.insert(p.first);
+  }
+  for (auto &p : info->tensorIterArgDepsMap) {
+    forOpsToProcess.insert(p.first);
+  }
+
+  for (scf::ForOp forOp : forOpsToProcess) {
+    if (failed(extendForOpWithExtraArgs(forOp, info)))
       return failure();
   }
+  
   return success();
 }
 
@@ -388,8 +445,105 @@ LogicalResult UpdateForOpsPass::insertInterCorePipeS(ModuleOp module)
   return result.wasInterrupted() ? failure() : success();
 }
 
-void UpdateForOpsPass::runOnOperation()
+// Analyze the producer/consumer relationship between the tensor type iter_args in the main_loop and ssbuffer.if
+LogicalResult UpdateForOpsPass::analyzeTensorIterArgDependencies(ModuleOp module, ControlFlowConditionInfo *info)
 {
+  module.walk([&](Operation *op) -> WalkResult {
+    if (!op->hasAttr(kSsbufferMainLoop)) {
+      return WalkResult::advance();
+    }
+    auto forOp = dyn_cast<scf::ForOp>(op);
+    if (!forOp) {
+      LDBG("[Error]: op with ssbuffer.main_loop is not a scf::ForOp\n");
+      return WalkResult::interrupt();
+    }
+
+    LDBG("Analyzing main_loop forOp: " << forOp << "\n");
+
+    for (auto iterArg : forOp.getRegionIterArgs()) {
+      if (!mlir::isa<TensorType>(iterArg.getType())) {
+        continue;
+      }
+
+      LDBG("Found tensor type iter_arg: " << iterArg << "\n");
+      llvm::SmallVector<scf::IfOp> producerIfOps;
+      llvm::SmallVector<scf::IfOp> consumerIfOps;
+
+      for (auto &use : iterArg.getUses()) {
+        Operation *user = use.getOwner();
+        scf::IfOp ifOp = nullptr;
+        Operation *curr = user;
+        while (curr && curr != forOp.getOperation()) {
+          if (auto currIf = dyn_cast<scf::IfOp>(curr)) {
+            if (currIf->hasAttr(kSsbufferIf)) {
+              ifOp = currIf;
+              break;
+            }
+          }
+          curr = curr->getParentOp();
+        }
+
+        if (!ifOp) {
+          LDBG("Use of tensor iter_arg " << iterArg << " is not inside any ssbuffer.if op." << "\n");
+          continue;
+        }
+
+        bool isProducer = false;
+        if (isa<scf::YieldOp>(user)) {
+          auto yieldOp = cast<scf::YieldOp>(user);
+          Operation *parentOp = yieldOp->getParentOp();
+          while (parentOp && parentOp != ifOp.getOperation()) {
+            parentOp = parentOp->getParentOp();
+          }
+          if (parentOp == ifOp.getOperation()) {
+            isProducer = true;
+          }
+        }
+
+        // Check current status of ifOp
+        bool inProducer = llvm::is_contained(producerIfOps, ifOp);
+        bool inConsumer = llvm::is_contained(consumerIfOps, ifOp);
+
+        if (!inProducer && !inConsumer) {
+          // First time seeing this ifOp
+          if (isProducer) {
+            producerIfOps.push_back(ifOp);
+            LDBG("  Found producer ifOp (first time): " << ifOp << "\n");
+          } else {
+            consumerIfOps.push_back(ifOp);
+            LDBG("  Found consumer ifOp (first time): " << ifOp << "\n");
+          }
+        } else if (inConsumer && isProducer) {
+          // Was consumer, now need to upgrade to producer (this is the only update case)
+          consumerIfOps.erase(llvm::find(consumerIfOps, ifOp));
+          producerIfOps.push_back(ifOp);
+          LDBG("  ifOp was consumer, now updated to producer: " << ifOp << "\n");
+        }
+        // Note: if already in producer, do nothing even if current use is consumer
+      }
+      // Check: must have both producers AND consumers
+      if (producerIfOps.empty() || consumerIfOps.empty()) {
+        LDBG("[Warning]: tensor iter_arg " << iterArg << " has only "
+                                           << (producerIfOps.empty() ? "consumers" : "producers") << ", skipped\n");
+        continue;
+      }
+      TensorIterArgIfOpRelation relation;
+      relation.iterArg = iterArg;
+      relation.producers = producerIfOps;
+      relation.consumers = consumerIfOps;
+
+      info->tensorIterArgDepsMap[forOp].push_back(relation);
+      LDBG("Recorded tensor iter_arg dependency: " << iterArg << " has " << relation.producers.size() << " producers, "
+                                                   << relation.consumers.size() << " consumers\n");
+    }
+
+    return WalkResult::advance();
+  });
+
+  return success();
+}
+
+void UpdateForOpsPass::runOnOperation() {
   ModuleOp module = getOperation();
 
   LDBG("before updateForOps:\n" << module << "\n");
@@ -397,6 +551,12 @@ void UpdateForOpsPass::runOnOperation()
   // Use provided info, or create a local one if not available
   ControlFlowConditionInfo localInfo;
   ControlFlowConditionInfo *infoToUse = info ? info : &localInfo;
+
+  // Analyze the dependencies of the tensor type iter_args in the main_loop with the ssbuffer.if ops
+  if (failed(analyzeTensorIterArgDependencies(module, infoToUse))) {
+    signalPassFailure();
+    return;
+  }
 
   // Derive block counters from ssbuffer.if if blockCounterNums is empty
   if (infoToUse->blockCounterNums.empty()) {
@@ -407,7 +567,7 @@ void UpdateForOpsPass::runOnOperation()
   }
 
   // Update for ops iter_args for block counters and inner dependency conditions
-  if (infoToUse && (!infoToUse->blockCounterNums.empty() || !infoToUse->intraCoreDependentMap.empty()))
+  if (infoToUse && (!infoToUse->blockCounterNums.empty() || !infoToUse->intraCoreDependentMap.empty() || !infoToUse->tensorIterArgDepsMap.empty()))
     if (failed(addBlockCountersAndInnerDepConds(module, infoToUse))) {
       signalPassFailure();
       return;

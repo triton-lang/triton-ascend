@@ -99,6 +99,11 @@ static llvm::DenseMap<Value, SmallVector<Value>> extendCrossCoreDependentMap(
     extendedCrossCoreMap[consumer] = producers;
 
     for (Value buffer : producers) {
+      auto producerDefOp = buffer.getDefiningOp();
+      if (!isa<memref::AllocOp>(producerDefOp)) {
+        // this crossdependency is not the stardard cross dependency
+        continue;
+      }
       int tcbGroupId = triton::findTcbGroupId(buffer, tightlyCoupledBufferGroups);
       if (tcbGroupId == -1) {
         LDBG("Can not find tightly_coupled_buffer id for buffer: " << buffer);
@@ -451,7 +456,7 @@ static int getProducerIfOpIndex(SmallVector<Value> &producerBuffers,
   int producerIfOpIndex = -1;
   for (Value buffer : producerBuffers) {
     for (Operation *user : buffer.getUsers()) {
-      if (isa<hivm::FixpipeOp>(user) || isa<hivm::CopyOp>(user)) {
+      if (isa<hivm::FixpipeOp>(user) || isa<hivm::CopyOp>(user) || isa<LLVM::StoreOp>(user)) {
         producerIfOpIndex = findIfOpIndexInList(user, otherSideIfOps, otherSideIfOpIndexMap);
         if (producerIfOpIndex == -1) {
           LDBG("user : " << *user);
@@ -604,6 +609,10 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateCrossDepsFactor(
     Value consumerResult = entry.first;           // Consumer result value
     SmallVector<Value> producerBuffers = entry.second;  // Producer buffer list
     int x = producerBuffers.size() / 2;               // Producer buffer count (one buffer has two value in diffenent scope)
+    // some special buffer is not Symmetrical
+    if (producerBuffers.size() == 1) {
+      x = 1;
+    }
 
     // Find the IfOp index that consumer belongs to (m)
     int m = getConsumerIfOpIndex(consumerResult, ifOps, ifOpIndex);

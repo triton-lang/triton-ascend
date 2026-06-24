@@ -22,6 +22,9 @@
 
 #include "ascend/include/Utils/Utils.h"
 
+#include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -34,7 +37,11 @@
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Transforms/DialectConversion.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -42,6 +49,7 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
@@ -412,6 +420,260 @@ getBoundarySizes(llvm::ArrayRef<int32_t> boundaryCheck, Value ptr,
   }
 
   return boundarySize;
+}
+
+static std::optional<Value> getRootPointer(Value ptr) {
+  llvm::SmallPtrSet<Value, 8> visited;
+  while (true) {
+    if (!visited.insert(ptr).second) {
+      return std::nullopt;
+    }
+
+    if (auto blockArg = dyn_cast<BlockArgument>(ptr)) {
+      // A loop-carried pointer block argument is still rooted at its init
+      // value unless the loop updates it through an unsupported cycle.
+      Operation *parentOp = blockArg.getOwner()->getParentOp();
+      if (auto whileOp = dyn_cast_or_null<scf::WhileOp>(parentOp);
+          whileOp && whileOp.getAfterBody() == blockArg.getOwner()) {
+        auto argNum = blockArg.getArgNumber();
+        auto conditionArgs = whileOp.getConditionOp().getArgs();
+        if (argNum < conditionArgs.size()) {
+          ptr = conditionArgs[argNum];
+          continue;
+        }
+      }
+
+      if (auto loopOp = dyn_cast_or_null<LoopLikeOpInterface>(parentOp)) {
+        if (OpOperand *initArgOperand = loopOp.getTiedLoopInit(blockArg)) {
+          ptr = initArgOperand->get();
+          continue;
+        }
+      }
+
+      return ptr;
+    }
+
+    auto *defOp = ptr.getDefiningOp();
+    if (!defOp) {
+      return ptr;
+    }
+
+    auto nextPtr =
+        llvm::TypeSwitch<Operation *, std::optional<Value>>(defOp)
+            .Case<triton::AddPtrOp>(
+                [](auto op) -> std::optional<Value> { return op.getPtr(); })
+            .Case<triton::SplatOp>(
+                [](auto op) -> std::optional<Value> { return op.getSrc(); })
+            .Case<triton::MakeTensorPtrOp>(
+                [](auto op) -> std::optional<Value> { return op.getBase(); })
+            .Case<triton::AdvanceOp>(
+                [](auto op) -> std::optional<Value> { return op.getPtr(); })
+            .Case<memref::ReinterpretCastOp>(
+                [](auto op) -> std::optional<Value> { return op.getSource(); })
+            .Case<memref::SubViewOp>(
+                [](auto op) -> std::optional<Value> { return op.getSource(); })
+            .Case<memref::CastOp>(
+                [](auto op) -> std::optional<Value> { return op.getSource(); })
+            .Case<UnrealizedConversionCastOp>([](auto op)
+                                                  -> std::optional<Value> {
+              if (op.getInputs().size() != 1) {
+                return std::nullopt;
+              }
+              return op.getInputs().front();
+            })
+            .Default([](Operation *) -> std::optional<Value> {
+              return std::nullopt;
+            });
+    if (!nextPtr) {
+      return std::nullopt;
+    }
+    ptr = *nextPtr;
+  }
+}
+
+struct WritePointerInfo {
+  bool isWrite = false;
+  std::optional<Value> rootPtr;
+};
+
+static WritePointerInfo getKnownWritePointer(Operation *op) {
+  return llvm::TypeSwitch<Operation *, WritePointerInfo>(op)
+      .Case<triton::StoreOp>([](auto storeOp) {
+        return WritePointerInfo{true, getRootPointer(storeOp.getPtr())};
+      })
+      .Case<triton::AtomicRMWOp>([](auto atomicOp) {
+        return WritePointerInfo{true, getRootPointer(atomicOp.getPtr())};
+      })
+      .Case<triton::AtomicCASOp>([](auto atomicOp) {
+        return WritePointerInfo{true, getRootPointer(atomicOp.getPtr())};
+      })
+      .Case<triton::ascend::IndirectStoreOp>([](auto storeOp) {
+        return WritePointerInfo{true, getRootPointer(storeOp.getSrc())};
+      })
+      .Default([](Operation *) { return WritePointerInfo{}; });
+}
+
+static bool isLocalMemRef(Value value) {
+  while (auto *defOp = value.getDefiningOp()) {
+    if (isa<memref::AllocOp, memref::AllocaOp>(defOp)) {
+      return true;
+    }
+    auto source = llvm::TypeSwitch<Operation *, Value>(defOp)
+                      .Case<memref::ReinterpretCastOp>(
+                          [](auto op) { return op.getSource(); })
+                      .Case<memref::SubViewOp>(
+                          [](auto op) { return op.getSource(); })
+                      .Case<memref::CastOp>(
+                          [](auto op) { return op.getSource(); })
+                      .Default([](Operation *) { return Value(); });
+    if (!source) {
+      return false;
+    }
+    value = source;
+  }
+  return false;
+}
+
+static bool mayWriteRoot(Operation *op, Value loadRootPtr) {
+  auto effectOp = dyn_cast<MemoryEffectOpInterface>(op);
+  if (!effectOp) {
+    return !mlir::isMemoryEffectFree(op);
+  }
+
+  SmallVector<SideEffects::EffectInstance<MemoryEffects::Effect>> effects;
+  effectOp.getEffects(effects);
+  for (auto &effect : effects) {
+    if (!isa<MemoryEffects::Write>(effect.getEffect())) {
+      continue;
+    }
+
+    Value value = effect.getValue();
+    if (!value) {
+      return true;
+    }
+    if (!isa<BaseMemRefType>(value.getType())) {
+      return true;
+    }
+
+    auto rootPtr = getRootPointer(value);
+    if (rootPtr) {
+      if (*rootPtr == loadRootPtr) {
+        return true;
+      }
+      continue;
+    }
+    if (!isLocalMemRef(value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Keep an indirect load volatile unless its root pointer is proven to have no
+// possible prior write. The analysis scans ordered predecessors in the same
+// and enclosing blocks, nested writes in predecessor structured-control-flow
+// ops, and loop-carried writes where a later store in the loop body may feed a
+// following iteration.
+bool requiresVolatileIndirectLoad(Value srcPtr, Operation *loadOp) {
+  auto loadRootPtr = getRootPointer(srcPtr);
+  if (!loadRootPtr) {
+    return true;
+  }
+
+  auto opMayWriteRoot = [&](Operation *op) {
+    // Device-side diagnostics are modeled as GlobalMemory writes in Triton,
+    // but they do not write through user GM pointers and must not affect the
+    // indirect-load source/root analysis.
+    if (isa<triton::AssertOp, triton::PrintOp>(op)) {
+      return false;
+    }
+
+    auto memRefWriteTarget =
+        llvm::TypeSwitch<Operation *, Value>(op)
+            .Case<memref::CopyOp>([](auto copyOp) {
+              return copyOp.getTarget();
+            })
+            .Case<memref::StoreOp>([](auto storeOp) {
+              return storeOp.getMemRef();
+            })
+            .Default([](Operation *) { return Value(); });
+    if (memRefWriteTarget) {
+      auto rootPtr = getRootPointer(memRefWriteTarget);
+      if (rootPtr) {
+        return *rootPtr == *loadRootPtr;
+      }
+      return !isLocalMemRef(memRefWriteTarget);
+    }
+
+    auto writePtr = getKnownWritePointer(op);
+    if (writePtr.isWrite) {
+      return !writePtr.rootPtr || *writePtr.rootPtr == *loadRootPtr;
+    }
+
+    // For structured control flow, look through regions instead of using the
+    // op-level MemoryEffect summary, otherwise unrelated nested writes would
+    // make this load volatile.
+    if (isa<scf::IfOp>(op) || isa<LoopLikeOpInterface>(op)) {
+      return false;
+    }
+
+    // Unknown side-effecting ops are conservative: they may write through an
+    // alias that is no longer recoverable as a Triton root.
+    return mayWriteRoot(op, *loadRootPtr);
+  };
+
+  auto nestedMayWriteRoot = [&](Operation *container) {
+    bool found = false;
+    container->walk<WalkOrder::PreOrder>([&](Operation *nested) {
+      if (nested == container) {
+        return WalkResult::advance();
+      }
+      if (opMayWriteRoot(nested)) {
+        found = true;
+        return WalkResult::interrupt();
+      }
+      return WalkResult::advance();
+    });
+    return found;
+  };
+
+  Operation *current = loadOp;
+
+  while (current) {
+    Block *block = current->getBlock();
+    if (!block) {
+      return true;
+    }
+
+    // First scan operations that are ordered before the current op in this
+    // block. When such an operation owns regions, its nested writes are also
+    // considered ordered before this load.
+    for (auto it = Block::iterator(current); it != block->begin();) {
+      --it;
+      Operation *op = &*it;
+      if ((op->getNumRegions() > 0 && nestedMayWriteRoot(op)) ||
+          opMayWriteRoot(op)) {
+        return true;
+      }
+    }
+
+    Operation *parentOp = block->getParentOp();
+    if (!parentOp || isa<ModuleOp>(parentOp) ||
+        isa<FunctionOpInterface>(parentOp)) {
+      return false;
+    }
+
+    // If the load is inside a loop, a store that is textually after the load
+    // may still execute before the load in a later iteration. Scan the whole
+    // loop body before climbing further out.
+    if (isa<LoopLikeOpInterface>(parentOp) && nestedMayWriteRoot(parentOp)) {
+      return true;
+    }
+
+    current = parentOp;
+  }
+
+  return false;
 }
 
 SmallVector<int64_t> getBroadcastDims(RankedTensorType src,
@@ -1306,5 +1568,20 @@ RankedTensorType getExtractSlicedType(ArrayRef<OpFoldResult> shape,
     }
   }
   return RankedTensorType::get(targetShape, elemType);
+}
+
+bool checkStructureAnnotated(Operation* op, RewriterBase& rewriter) {
+  return llvm::any_of(op->getUsers(), [&rewriter](Operation *user) {
+    auto annotationOp = dyn_cast<annotation::MarkOp>(user);
+    if (annotationOp && annotationOp->hasAttr(ConverterUtils::continuousAttrName)) {
+      rewriter.eraseOp(annotationOp);
+      return true;
+    }
+    return false;
+  });
+}
+
+bool isDistributedTypeCustomOp(Operation* op){
+    return op->hasAttr("hivm.is_distributed") && (llvm::isa<hivm::CustomOp>(op) || llvm::isa<hivm::CustomMacroOp>(op));
 }
 } // namespace mlir

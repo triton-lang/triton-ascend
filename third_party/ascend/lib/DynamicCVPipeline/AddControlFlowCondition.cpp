@@ -83,14 +83,14 @@ void AddControlFlowConditionPass::runOnOperation()
   PassManager pm(&getContext(), module.getOperationName());
   ControlFlowConditionInfo info;
 
-  // Step0: Initialize crossCoreDependentMap and intraCoreDependentMap
+  // Step0: Clone ops in vector/cube to ensure that each block_id has its own
+  // ops without sharing
+  pm.addPass(createCloneOpsPass());
+
+  // Step1: Initialize crossCoreDependentMap and intraCoreDependentMap
   std::unique_ptr<InitDependentMapPass> initDependentMapPass(new InitDependentMapPass());
   initDependentMapPass->setConditionInfo(&info);
   pm.addPass(std::move(initDependentMapPass));
-
-  // Step1: Clone ops in vector/cube to ensure that each block_id has its own
-  // ops without sharing
-  pm.addPass(createCloneOpsPass());
   
   // Step2: Process shared iter_args in for ops to eliminate arg sharing across block_ids
   std::unique_ptr<ProcessArgsPass> processArgsPass(new ProcessArgsPass());

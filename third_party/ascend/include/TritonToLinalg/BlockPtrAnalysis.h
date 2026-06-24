@@ -22,11 +22,11 @@
 
 #ifndef TRITON_ANALYSIS_BLOCKPTRANALYSIS_H
 #define TRITON_ANALYSIS_BLOCKPTRANALYSIS_H
-
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -261,6 +261,18 @@ public:
                         const Location &loc,
                         ConversionPatternRewriter &rewriter,
                         const llvm::SmallDenseMap<Value, BlockData> &known);
+
+  static void parseStructuredCustomOp(Operation *op, BlockData &data, const Location &loc,
+                                      ConversionPatternRewriter &rewriter,
+                                      const llvm::SmallDenseMap<Value, BlockData> &known, unsigned resultIdx);
+
+  static void rewriteStructuredCustomOp(hivm::CustomOp op, hivm::CustomOp::Adaptor &adaptor,
+                                        ConversionPatternRewriter &rewriter);
+
+  static void rewriteStructuredCustomOp(hivm::CustomMacroOp op, hivm::CustomMacroOp::Adaptor &adaptor,
+                                        ConversionPatternRewriter &rewriter);
+
+  static void rewriteStructuredCustomOp(Operation *op, ConversionPatternRewriter &rewriter);
 
   static void rewriteAddPtr(triton::AddPtrOp op,
                             triton::AddPtrOp::Adaptor &adaptor,

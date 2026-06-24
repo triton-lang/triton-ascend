@@ -42,6 +42,57 @@ func.func @tc_tag_01_ctov() {
   return
 }
 
+// TC-03: llvm.store volatile (producer) and llvm.load volatile (consumer)
+// Producer: crossDeps should be on the defining op of store's ptr operand (llvm.inttoptr)
+// Consumer: crossDeps should be on the load op itself
+// CHECK-LABEL: func.func @tc_tag_03_store_load_volatile
+// Producer llvm.inttoptr should have crossDeps = [3, 1]
+// CHECK: llvm.inttoptr{{.*}}ssbuffer.crossDeps = [3 : i32, 1 : i32]
+// llvm.store volatile should NOT have crossDeps
+// CHECK-NOT: llvm.store volatile{{.*}}ssbuffer.crossDeps
+// llvm.load volatile should have crossDeps = [3, 0]
+// CHECK: llvm.load volatile{{.*}}ssbuffer.crossDeps = [3 : i32, 0 : i32]
+// Consumer llvm.inttoptr should NOT have crossDeps
+// CHECK-NOT: llvm.inttoptr{{.*}}ssbuffer.crossDeps
+func.func @tc_tag_03_store_load_volatile() {
+  %c0_i32 = arith.constant 0 : i32
+  %c128_i32 = arith.constant 128 : i32
+  %c1_i32 = arith.constant 1 : i32
+  %cst = arith.constant 0.000000e+00 : f32
+  %cst_1 = arith.constant 1.000000e+00 : f32
+  %cst_2 = arith.constant 9.99999997E-7 : f32
+  %c64_i64 = llvm.mlir.constant(64 : i64) : i64
+
+  // Producer block (VECTOR)
+  scope.scope : () -> () {
+    %0 = llvm.mlir.constant(0 : i64) : i64
+    %extracted = arith.constant {ssbuffer.block_id = 11 : i32} 1.000000e+00 : f32
+    %ptr = llvm.inttoptr %0 {ssbuffer.block_id = 11 : i32, ssbuffer.transfer_id = 3 : i32} : i64 to !llvm.ptr<11>
+    hivm.hir.sync_block_wait {ssbuffer.block_id = 11 : i32, ssbuffer.transfer_id = 3 : i32}[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 2
+    llvm.store volatile %extracted, %ptr {ssbuffer.block_id = 11 : i32, ssbuffer.transfer_id = 3 : i32} : f32, !llvm.ptr<11>
+    hivm.hir.sync_block_set {ssbuffer.block_id = 11 : i32, ssbuffer.transfer_id = 3 : i32}[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 2
+    scope.return
+  } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+
+  // Consumer block (CUBE)
+  scope.scope : () -> () {
+    %1 = llvm.mlir.constant(0 : i64) : i64
+    %ptr_consumer = llvm.inttoptr %1 {ssbuffer.block_id = 4 : i32, ssbuffer.transfer_id = 3 : i32} : i64 to !llvm.ptr<11>
+    hivm.hir.sync_block_wait {ssbuffer.block_id = 4 : i32, ssbuffer.transfer_id = 3 : i32}[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 2
+    %loaded = llvm.load volatile %ptr_consumer {ssbuffer.block_id = 4 : i32, ssbuffer.transfer_id = 3 : i32} : !llvm.ptr<11> -> f32
+    %cmp = arith.cmpf ogt, %loaded, %cst_2 {ssbuffer.block_id = 4 : i32} : f32
+    %result = scf.if %cmp -> (f32) {
+      %div = arith.divf %cst_1, %loaded {ssbuffer.block_id = 4 : i32} : f32
+      scf.yield %div : f32
+    } else {
+      scf.yield %cst_1 : f32
+    }
+    scope.return
+  } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+
+  return
+}
+
 // TC-02: V→C
 // CHECK-LABEL: func.func @tc_tag_02_vtoc
 // CHECK: ssbuffer.crossDeps = [2 : i32, 1 : i32]

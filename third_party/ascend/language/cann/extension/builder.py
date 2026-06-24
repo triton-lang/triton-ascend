@@ -82,5 +82,18 @@ def setup_unified_builder(main_builder, ascend_builder):
         "sync_block_wait",
         "create_convert_layout",
         'sync_block_all',
+        'create_custom_op',
+        'create_custom_macro_op',
+        'get_core_type_attr',
+        'get_pipe_attr',
+        'get_vf_mode_attr',
+        'get_iterator_types_attr',
+        'get_int_attr',
+        'get_type_array_attr',
+        'get_affine_map_attr',
+        'get_affine_map_array_attr',
+        'get_event_attr',
+        'get_sync_event_slot_attr',
+        'get_array_attr',
     ]
     attach_builder_methods(main_builder, ascend_builder, ascend_methods)

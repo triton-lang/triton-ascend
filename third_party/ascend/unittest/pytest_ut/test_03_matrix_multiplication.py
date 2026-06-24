@@ -131,7 +131,7 @@ def matmul_kernel(
     # # Write back the block of the output matrix C with masks.
     # Comment out the following lines to enable split the workload to two vector cores
     SUB_BLK_M: tl.constexpr = BLOCK_SIZE_M // 2
-    for s in extension.parallel(0, 2, bind_sub_block=True):
+    for s in range(0, 2):
         vec_sub_blk = extension.extract_slice(
             accumulator, (s * SUB_BLK_M, 0), (SUB_BLK_M, BLOCK_SIZE_N), (1, 1)
         )
@@ -201,7 +201,6 @@ def matmul(a, b, activation=""):
 # ---------
 #
 # We can test our custom matrix multiplication operation against a native torch implementation.
-@pytest.mark.skip(reason="skip on this case")
 @pytest.mark.parametrize(
     "shape",
     [

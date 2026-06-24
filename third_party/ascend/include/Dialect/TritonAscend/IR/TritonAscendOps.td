@@ -314,13 +314,16 @@ def IndirectLoadOp : TT_Ascend_Op<"indirect_load", [
     - offsets: Tensor of per-element offsets (relative to `src`) for accessing source memory
     - mask (optional):  if mask[idx] is false, do not load the data at address pointer[idx]
     - other (optional): if mask[idx] is false, return other[idx]
+    - isVolatile: defaults to true. Set to false only when analysis proves
+      the source pointer has no prior possible writes.
   }];
 
   let arguments = (
     ins TT_Ptr:$src,
         TT_IntTensor:$offsets,
         Optional<TT_BoolLike>:$mask,
-        Optional<TT_Type>:$other
+        Optional<TT_Type>:$other,
+        DefaultValuedAttr<BoolAttr, "true">:$isVolatile
   );
 
   let results = (outs TT_Tensor:$result);
@@ -341,6 +344,75 @@ def IndirectLoadOp : TT_Ascend_Op<"indirect_load", [
       "Value":$other
     )>
   ];
+}
+
+//
+// Built-in: StrideLoad Op
+//
+def StrideLoadOp : TT_Ascend_Op<"stride_load", [
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+  SameVariadicOperandSize
+]> {
+  let summary = "Built-in: strided load from global memory";
+
+  let description = [{
+    Built-in operation emitted by the compiler for SIMT stride-load templates.
+    It loads a tensor from a scalar source pointer with one i32/i64 linear
+    base offset, per-dimension physical strides and valid element counts.
+    Out-of-bound elements are filled with the scalar `other` value.
+  }];
+
+  let arguments = (
+    ins TT_Ptr:$src,
+        AnyTypeOf<[I32, I64]>:$offset,
+        AnyType:$other,
+        Variadic<AnyTypeOf<[I32, I64]>>:$stride,
+        Variadic<AnyTypeOf<[I32, I64]>>:$numel
+  );
+
+  let results = (outs TT_Tensor:$result);
+
+  let assemblyFormat = [{
+    $src `:` type($src) `,`
+    $offset `:` type($offset) `,`
+    $other `:` type($other) `,`
+    `[` $stride `:` type($stride) `]` `,`
+    `[` $numel `:` type($numel) `]`
+    attr-dict `->` type($result)
+  }];
+}
+
+//
+// Built-in: StrideStore Op
+//
+def StrideStoreOp : TT_Ascend_Op<"stride_store", [
+  MemoryEffects<[MemWrite<GlobalMemory>]>,
+  SameVariadicOperandSize
+]> {
+  let summary = "Built-in: strided store to global memory";
+
+  let description = [{
+    Built-in operation emitted by the compiler for SIMT stride-store templates.
+    It stores a tensor to a scalar destination pointer with one i32/i64 linear
+    base offset, per-dimension physical strides and valid element counts.
+  }];
+
+  let arguments = (
+    ins TT_Ptr:$dst,
+        TT_Type:$src,
+        AnyTypeOf<[I32, I64]>:$offset,
+        Variadic<AnyTypeOf<[I32, I64]>>:$stride,
+        Variadic<AnyTypeOf<[I32, I64]>>:$numel
+  );
+
+  let assemblyFormat = [{
+    $dst `:` type($dst) `,`
+    $src `:` type($src) `,`
+    $offset `:` type($offset) `,`
+    `[` $stride `:` type($stride) `]` `,`
+    `[` $numel `:` type($numel) `]`
+    attr-dict
+  }];
 }
 
 

@@ -34,6 +34,9 @@ namespace CVPipeline {
 inline constexpr llvm::StringLiteral kCoreType = "ssbuffer.core_type";
 inline constexpr llvm::StringLiteral kBlockId = "ssbuffer.block_id";
 inline constexpr llvm::StringLiteral kTransferId = "ssbuffer.transfer_id";
+inline constexpr llvm::StringLiteral kMatmulADep = "ssbuffer.adep";
+inline constexpr llvm::StringLiteral kMatmulBDep = "ssbuffer.bdep";
+inline constexpr llvm::StringLiteral kMatmulExtract = "ssbuffer.matmul_extract";
 inline constexpr llvm::StringLiteral kCubeFirst = "ssbuffer.cube_first";
 inline constexpr llvm::StringLiteral kVectorFirst = "ssbuffer.vector_first";
 inline constexpr llvm::StringLiteral kAddFromMatmul = "ssbuffer.add_from_matmul";
@@ -42,6 +45,10 @@ inline constexpr llvm::StringLiteral kTcoreType = "hivm.tcore_type";
 inline constexpr llvm::StringLiteral kIf = "ssbuffer.if";
 inline constexpr llvm::StringLiteral kIntraBuffer = "ssbuffer.intra_buffer";
 inline constexpr llvm::StringLiteral kAnalyzeFlagId = "ssbuffer.analyze_flag_id";
+inline constexpr llvm::StringLiteral kLoopCarriedL0C = "ssbuffer.loop_carried_l0c";
+inline constexpr llvm::StringLiteral kCrossDeps = "ssbuffer.crossDeps";
+inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
+inline constexpr llvm::StringLiteral kClone = "ssbuffer.clone";
 inline constexpr const char *ERRCODE_ATTR = "triton_ascend.dynamic_cv_pipeline.rc";
 static constexpr const int ERRCODE_FAILED = 1;
 static constexpr const int ERRCODE_IGNORED = 2;
@@ -71,10 +78,11 @@ std::optional<int64_t> getOpBlockId(Operation *op);
 llvm::LogicalResult verifyOpBlockId(Operation *op);
 int getAvailableBlockId(ModuleOp module);
 void setFallbackAttr(ModuleOp module);
+bool isScfOp(Operation *op);
 
 inline bool isCubeOp(Operation *op)
 {
-    return CVPipeline::getOpCoreType(op) == CoreType::CUBE_ONLY;
+    return !isScfOp(op) && CVPipeline::getOpCoreType(op) == CoreType::CUBE_ONLY;
 }
 
 bool isVectorOnlyOp(Operation *op);

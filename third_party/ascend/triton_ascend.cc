@@ -23,8 +23,6 @@
 
 #include "ascend/include/DynamicCVPipeline/Passes.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
-// todo: this code will be removed in version 530.
-#include "ascend/include/TritonAffinityOpt/Passes.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "ir.h" // TritonOpBuilder
@@ -349,8 +347,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     opts.forceSimtTemplate = forceSimtTemplate;
     pm.addPass(mlir::triton::createTritonToUnstructurePass(opts));});
 
-  m.def("add_triton_to_hfusion", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::triton::createTritonToHFusionPass());});
+  m.def("add_triton_to_hfusion",
+    [](mlir::PassManager &pm, bool compileOn91095) {
+    pm.addPass(mlir::triton::createTritonToHFusionPass(compileOn91095));
+  });
 
   m.def("add_discrete_mask_access_conversion", [](mlir::PassManager &pm,
     bool compileOn91095, bool forceSimtTemplate, bool enableSyncBlockLock) {
@@ -375,16 +375,6 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
       opts.compileOn91095 = compileOn91095;
       pm.addPass(mlir::triton::createAddDynamicCVPipelinePass(opts));
     });
-
-  // todo: this code will be removed in version 530.
-  m.def("add_dag_sync", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::triton::createDAGSyncPass());});
- 	   
-  m.def("add_dag_scope", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::triton::createDAGScopePass());});
- 	   
-  m.def("add_dag_ssbuffer", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::triton::createDAGSSBufferPass());});
 
   m.def("set_buffer_count", [](const std::string& type, int count) {
     if (type == "INTRA") {
@@ -606,6 +596,7 @@ void init_triton_ascend(py::module &&m) {
 
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL
   m.def("run_costmodel_inproc", [](const std::string &mlirText, const std::vector<std::string> &extraArgs) {
+    py::gil_scoped_release release;
     return runAscendCostModelInProcess(mlirText, extraArgs);
   }, py::arg("mlir_text"), py::arg("extra_args") = std::vector<std::string>{});
 #else

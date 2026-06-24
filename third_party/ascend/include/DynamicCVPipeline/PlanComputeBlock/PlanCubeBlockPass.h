@@ -26,21 +26,28 @@
 #include <memory>
 
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/Pass/Pass.h"
+
+#include "DynamicCVPipeline/PlanComputeBlock/Common.h"
+#include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
 namespace mlir {
 namespace triton {
 
 class PlanCubeBlockPass : public PassWrapper<PlanCubeBlockPass, OperationPass<ModuleOp>> {
-public:
+  public:
     MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PlanCubeBlockPass);
 
     PlanCubeBlockPass() = default;
     void runOnOperation() override;
 
-    llvm::StringRef getArgument() const final {
-      return "plan-cube-block";
-    }
+    llvm::StringRef getArgument() const final { return "plan-cube-block"; }
+
+  private:
+    SmallVector<Operation *> matchSeed(Operation *dotOp, CVPipeline::ComputeBlockIdManager &bm);
+    llvm::LogicalResult processBlockWithCubeBFS(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
+                                                CVPipeline::ComputeBlockIdManager &bm);
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createPlanCubeBlockPass();

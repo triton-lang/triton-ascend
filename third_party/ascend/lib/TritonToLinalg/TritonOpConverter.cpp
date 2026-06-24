@@ -59,33 +59,46 @@ using namespace mlir;
 using namespace triton;
 
 static const llvm::SmallVector<llvm::StringRef> libdeviceOps = {
-    // Basic operations
-    "__hmf_pow_fp32",
-    "__hmf_div_rz_fp32",
-    "__hmf_fmod_fp32",
-    "__hmf_float_as_int_fp32",
-    "__hmf_trunc_fp32", "__hmf_trunc_fp16",
+    "__hmf_trunc_fp32",
     "__hmf_nearbyint_fp32",
-    "__hmf_signbit_fp32", "__hmf_signbit_fp16",
     "__hmf_copysign_fp32",
     "__hmf_log10_fp32",
-    // Trigonometric operations
-    "__hmf_tanh_fp32",
-    "__hmf_asin_fp32", "__hmf_asin_fp16",
-    "__hmf_acos_fp32", "__hmf_acos_fp16",
-    "__hmf_atan2_fp32", "__hmf_atan2_fp16",
-    "__hmf_sinh_fp32", "__hmf_sinh_fp16",
-    "__hmf_cosh_fp32", "__hmf_cosh_fp16",
-    "__hmf_asinh_fp32", "__hmf_asinh_fp16",
-    "__hmf_acosh_fp32", "__hmf_acosh_fp16",
-    "__hmf_atanh_fp32", "__hmf_atanh_fp16",
-    // Other operations
-    "__hmf_expm1_fp32", "__hmf_expm1_fp16",
-    "__hmf_nextafter_fp32", "__hmf_nextafter_fp16",
-    "__hmf_hypot_fp32", "__hmf_hypot_fp16",
-    "__hmf_cyl_bessel_i0_fp32", "__hmf_cyl_bessel_i0_fp16",
+    "__hmf_asin_fp32",
+    "__hmf_acos_fp32",
+    "__hmf_atan2_fp32",
+    "__hmf_sinh_fp32",
+    "__hmf_cosh_fp32",
+    "__hmf_asinh_fp32",
+    "__hmf_acosh_fp32",
+    "__hmf_atanh_fp32",
+    "__hmf_expm1_fp32",
+    "__hmf_nextafter_fp32",
+    "__hmf_hypot_fp32",
+    "__hmf_cyl_bessel_i0_fp32",
     "__hmf_erfinv_fp32",
     "__hmf_lgamma_fp32",
+    "__hmf_signbit_fp32",
+    "__hmf_rint_fp32",
+    "__hmf_round_fp32",
+    "__hmf_tan_fp32",
+    "__hmf_atan_fp32",
+    "__hmf_tanh_fp32",
+    "__hmf_fast_divide_fp32",
+    "__hmf_div_rz_fp32",
+    "__hmf_fmod_fp32",
+    "__hmf_fast_exp_fp32",
+    "__hmf_erf_fp32",
+    "__hmf_ldexp_fp32",
+    "__hmf_pow_fp32",
+    "__hmf_ilogb_fp32",
+    "__hmf_isnan_fp32",
+    "__hmf_isinf_fp32",
+    "__hmf_finite_fp32",
+    "__hmf_log1p_fp32",
+    "__hmf_relu_fp32",
+    "__hmf_tgamma_fp32",
+    "__hmf_float_as_int_fp32",
+    "__hmf_reciprocal_fp32",
 };
 
 /**
@@ -1168,7 +1181,15 @@ LogicalResult ReduceConverter::convertToTargetOpExtended(
 
 bool ScanConverter::isReductionOpSupported(Operation *reductionOp) const
 {
-  return isa<arith::AddFOp, arith::AddIOp, arith::MulFOp, arith::MulIOp>(reductionOp);
+  if (isa<arith::AddFOp, arith::AddIOp, arith::MulFOp, arith::MulIOp>(reductionOp)) {
+    return true;
+  }
+  if (compileOn91095Flag &&
+      isa<arith::MaximumFOp, arith::MaxNumFOp, arith::MinimumFOp,
+          arith::MinNumFOp, arith::MaxSIOp, arith::MinSIOp>(reductionOp)) {
+    return true;
+  }
+  return false;
 }
 
 LogicalResult ScanConverter::convertToTargetOp(
@@ -1182,21 +1203,36 @@ LogicalResult ScanConverter::convertToTargetOp(
   llvm::SmallString<64> funcName;
   auto rop = reductionOps.front();
   if (this->isReductionOpSupported(reductionOps.front())) {
+    bool propagateNan = true;
+    bool isMinMax = false;
     if (isa<arith::AddFOp, arith::AddIOp>(rop)) {
       funcName = "triton_cumsum";
     } else if (isa<arith::MulFOp, arith::MulIOp>(rop)) {
       funcName = "triton_cumprod";
+    } else if (isa<arith::MaximumFOp, arith::MaxNumFOp, arith::MaxSIOp>(rop)) {
+      funcName = "triton_cummax";
+      propagateNan = isa<arith::MaximumFOp>(rop);
+      isMinMax = true;
+    } else if (isa<arith::MinimumFOp, arith::MinNumFOp, arith::MinSIOp>(rop)) {
+      funcName = "triton_cummin";
+      propagateNan = isa<arith::MinimumFOp>(rop);
+      isMinMax = true;
     }
 
     auto moduleOp = op->getParentOfType<ModuleOp>();
     rewriter.setInsertionPoint(moduleOp.getBody(),
-                              std::prev(moduleOp.getBody()->end()));
+                               std::prev(moduleOp.getBody()->end()));
 
     auto loc = op.getLoc();
     auto src = adaptor.getOperands().front();
     auto resTy = op.getResult().front().getType();
-    auto libFnType = rewriter.getFunctionType(
-      {src.getType(), rewriter.getI32Type(), rewriter.getI1Type()}, {resTy});
+    // cummax/cummin take a trailing propagateNan flag; cumsum/cumprod do not.
+    SmallVector<Type> argTypes{src.getType(), rewriter.getI32Type(),
+                               rewriter.getI1Type()};
+    if (isMinMax) {
+      argTypes.push_back(rewriter.getI1Type());
+    }
+    auto libFnType = rewriter.getFunctionType(argTypes, {resTy});
     auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
 
     SymbolTable symTab(moduleOp);
@@ -1211,10 +1247,15 @@ LogicalResult ScanConverter::convertToTargetOp(
     auto scanAxis = op.getAxis();
     auto scanReverse = op.getReverse();
     Value axis = rewriter.create<arith::ConstantIntOp>(loc, scanAxis, 32);
-    Value reverseVal = rewriter.create<arith::ConstantIntOp>(loc, scanReverse, 1);
-    auto callOp = rewriter.create<func::CallOp>(loc, funcOp.getSymNameAttr(),
-                                                TypeRange({resTy}),
-                                                ValueRange({src, axis, reverseVal}));
+    Value reverseVal =
+        rewriter.create<arith::ConstantIntOp>(loc, scanReverse, 1);
+    SmallVector<Value> callOperands{src, axis, reverseVal};
+    if (isMinMax) {
+      callOperands.push_back(
+          rewriter.create<arith::ConstantIntOp>(loc, propagateNan, 1));
+    }
+    auto callOp = rewriter.create<func::CallOp>(
+        loc, funcOp.getSymNameAttr(), TypeRange({resTy}), callOperands);
 
     rewriter.replaceOp(op, callOp);
 
@@ -1538,6 +1579,68 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
     return failure();
   }
   if (op.getSymbol().contains("__hmf_")) {
+    // libdevice -> hivm.hir.custom
+    bool is_libdevice = llvm::is_contained(libdeviceOps, op.getSymbol());
+    if (is_libdevice) {
+      SmallVector<Value> newOuts;
+      SmallVector<Type> originalOutputTypes;
+      for (auto newOut : op->getResults()) {
+        originalOutputTypes.push_back(newOut.getType());
+        auto tensorType = dyn_cast<RankedTensorType>(newOut.getType());
+        Type elemType = tensorType.getElementType();
+        if (elemType.isInteger(1)) {
+          elemType = rewriter.getI32Type();
+        }
+        auto src = rewriter.create<tensor::EmptyOp>(
+              op->getLoc(), tensorType.getShape(), elemType);
+        newOuts.push_back(src);
+      }
+      ValueRange inputs{op->getOperands()};
+      ValueRange outputs{newOuts};
+      ValueRange temp_buffers{};
+      TypeRange res_types{outputs};
+      std::string sym = llvm::join(llvm::split(op.getSymbol().str(), "__hmf_"), "");
+      auto customRes = rewriter.create<hivm::CustomOp>(op.getLoc(), res_types, sym, inputs, outputs, temp_buffers);
+      auto arg_attrs_array = mlir::ArrayAttr::get(customRes->getContext(), {});
+      auto pipeAttr = hivm::PipeAttr::get(customRes->getContext(), hivm::PIPE::PIPE_V);
+      auto tcoreTypeAttr = hivm::TCoreTypeAttr::get(customRes->getContext(), hivm::TCoreType::VECTOR);
+      auto vfModeAttr = hivm::VFModeAttr::get(customRes->getContext(), hivm::VFMode::SIMD);
+      customRes->setAttr("arg_attrs", arg_attrs_array);
+      customRes->setAttr("bitcode", mlir::StringAttr::get(customRes->getContext(), ""));
+      customRes->setAttr("hivm.pipe", pipeAttr);
+      customRes->setAttr("hivm.tcore_type", tcoreTypeAttr);
+      customRes->setAttr("hivm.vf_mode", vfModeAttr);
+      customRes->setAttr("symbol", mlir::StringAttr::get(customRes->getContext(), sym));
+      SmallVector<Value> finalResults;
+      for (auto [customResult, origType] : llvm::zip(customRes.getResults(), originalOutputTypes)) {
+        auto origTensorType = dyn_cast<RankedTensorType>(origType);
+        Type targetElemType = rewriter.getI8Type();
+        Type targetTensorType = RankedTensorType::get(
+          origTensorType.getShape(),
+          targetElemType
+        );
+
+        if (origTensorType.getElementType().isInteger(1)) {
+          auto i32ElemType = rewriter.getI32Type();
+          auto denseZeroAttr = DenseElementsAttr::get(
+              RankedTensorType::get(origTensorType.getShape(), i32ElemType), 0);
+          auto zeroTensor = rewriter.create<arith::ConstantOp>(
+              loc, denseZeroAttr);
+          auto cmp = rewriter.create<arith::CmpIOp>(
+            loc, arith::CmpIPredicate::ne, customResult, zeroTensor);
+
+          finalResults.push_back(cmp);
+        } else {
+          finalResults.push_back(customResult);
+        }
+      }
+      rewriter.replaceOp(op, finalResults);
+      return success();
+    } else {
+      if (op.getSymbol().contains("fp32") || op.getSymbol().contains("i32")) {
+        llvm::report_fatal_error("unsupported libdevice op symbol: " + op.getSymbol());
+      }
+    }
     // 1. get or create the declaration of external elementwise function
     Type dstTy = op.getResult().getType();
     bool isDstScalar = !isa<RankedTensorType>(dstTy);
@@ -1561,7 +1664,6 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
     auto extFunc = dyn_cast_or_null<SymbolOpInterface>(
         SymbolTable::lookupSymbolIn(mod, op.getSymbol()));
     // std::string symbol = op.getSymbol().str();
-    bool is_libdevice = llvm::is_contained(libdeviceOps, op.getSymbol());
     if (!extFunc) {
       OpBuilder::InsertionGuard guard(rewriter);
       rewriter.setInsertionPointToStart(&mod->getRegion(0).front());
@@ -1571,11 +1673,6 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
       extFunc->setAttr(LLVM::LLVMDialect::getReadnoneAttrName(),
                        UnitAttr::get(rewriter.getContext()));
       // set coreType for external func, otherwise InferFuncCoreTypePass will fail
-      if (is_libdevice) {
-        hivm::TFuncCoreType e = hivm::TFuncCoreType::AIV;
-        extFunc->setAttr(hivm::TFuncCoreTypeAttr::name,
-                         hivm::TFuncCoreTypeAttr::get(extFunc->getContext(), e));
-      }
     }
     assert(isa<FunctionOpInterface>(
         SymbolTable::lookupSymbolIn(mod, op.getSymbol())));
@@ -1595,60 +1692,6 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
     if (!found) {
       output = rewriter.create<tensor::EmptyOp>(
           op.getLoc(), cast<RankedTensorType>(dstTy).getShape(), dstElemTy);
-    }
-
-    if (is_libdevice) {
-      auto srcType = cast<RankedTensorType>(srcs[0].getType());
-      SmallVector<Value> dimSizes;
-      int64_t rank = srcType.getRank();
-      for (int i = 0; i < rank; ++i) {
-        if (srcType.isDynamicDim(i)) {
-          auto dimOp = rewriter.create<tensor::DimOp>(loc, srcs[0], i);
-          dimSizes.push_back(dimOp);
-        } else {
-          auto constOp = rewriter.create<arith::ConstantIndexOp>(loc, srcType.getDimSize(i));
-          dimSizes.push_back(constOp);
-        }
-      }
-      // building nested loops by recursion
-      std::function<Value(OpBuilder&, Location, SmallVector<Value>, Value)> buildLoops = [&](
-          OpBuilder &b, Location loc, SmallVector<Value> indices, Value acc) -> Value {
-        int64_t dim = indices.size();
-        if (dim == rank) {
-          // innermost loop
-          SmallVector<Value> elemVals;
-          for (auto src : srcs) {
-            auto extract = b.create<tensor::ExtractOp>(loc, src, indices);
-            elemVals.push_back(extract);
-          }
-          auto call = b.create<func::CallOp>(loc, op.getSymbol(), dstElemTy, elemVals);
-          auto insert = b.create<tensor::InsertOp>(loc, call.getResult(0), acc, indices);
-          return insert;
-        } else {
-          Value lower = b.create<arith::ConstantIndexOp>(loc, 0);
-          Value upper = dimSizes[dim];
-          Value step = b.create<arith::ConstantIndexOp>(loc, 1);
-          auto loop = b.create<scf::ForOp>(loc, lower, upper, step, ValueRange{acc});
-          Block *body = loop.getBody();
-          OpBuilder innerBuilder = OpBuilder::atBlockBegin(body);
-          SmallVector<Value> newIndices = indices;
-          newIndices.push_back(loop.getInductionVar());
-          Value innerAcc = loop.getRegionIterArgs()[0];
-          Value updatedAcc = buildLoops(innerBuilder, loc, newIndices, innerAcc);
-          innerBuilder.create<scf::YieldOp>(loc, updatedAcc);
-          return loop.getResult(0);
-        }
-      };
-
-      Value result = buildLoops(rewriter, loc, {}, output);
-      if (isDstScalar) {
-        SmallVector<Value> zeroIndices(rank, rewriter.create<arith::ConstantIndexOp>(loc, 0));
-        auto extract = rewriter.create<tensor::ExtractOp>(loc, result, zeroIndices);
-        rewriter.replaceOp(op, extract);
-      } else {
-        rewriter.replaceOp(op, result);
-      }
-      return success();
     }
     // 3. create the linalg.map op
     auto mapOp = rewriter.create<linalg::MapOp>(
@@ -2689,6 +2732,8 @@ IndirectLoadConverter::matchAndRewrite(triton::ascend::IndirectLoadOp op, OpAdap
   auto libFnType = rewriter.getFunctionType(inputTypes, {resTy});
   auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
   SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
+  auto isVolatileAttr = rewriter.getBoolAttr(op.getIsVolatile());
+  funcOp->setAttr("isVolatile", isVolatileAttr);
 
   rewriter.setInsertionPoint(op);
   SmallVector<Value> inputVals({src, offsets});
@@ -2697,7 +2742,97 @@ IndirectLoadConverter::matchAndRewrite(triton::ascend::IndirectLoadOp op, OpAdap
   auto callOp = rewriter.create<func::CallOp>(loc, funcOp.getSymNameAttr(),
                                               TypeRange({resTy}),
                                               inputVals);
+  callOp->setAttr("isVolatile", isVolatileAttr);
   rewriter.replaceOp(op, callOp);
+  return success();
+}
+
+LogicalResult StrideLoadConverter::matchAndRewrite(
+    triton::ascend::StrideLoadOp op, OpAdaptor adaptor,
+    ConversionPatternRewriter &rewriter) const {
+  auto loc = op.getLoc();
+
+  auto moduleOp = op->getParentOfType<ModuleOp>();
+  rewriter.setInsertionPoint(moduleOp.getBody(),
+                             std::prev(moduleOp.getBody()->end()));
+
+  auto funcName = generateUniqueFuncName(moduleOp, funcNameBase);
+
+  auto src = adaptor.getSrc();
+  auto offset = adaptor.getOffset();
+  auto other = adaptor.getOther();
+  auto strides = adaptor.getStride();
+  auto numels = adaptor.getNumel();
+  auto resTy = op.getResult().getType();
+
+  auto srcTy = dyn_cast<MemRefType>(src.getType());
+  if (!srcTy) {
+    return rewriter.notifyMatchFailure(op, "expected MemRefType for src");
+  }
+
+  SmallVector<Type> inputTypes({srcTy});
+  inputTypes.push_back(offset.getType());
+  inputTypes.push_back(other.getType());
+  for (Value stride : strides)
+    inputTypes.push_back(stride.getType());
+  for (Value numel : numels)
+    inputTypes.push_back(numel.getType());
+  auto libFnType = rewriter.getFunctionType(inputTypes, {resTy});
+  auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
+  SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
+
+  SmallVector<Value> inputVals({src});
+  inputVals.push_back(offset);
+  inputVals.push_back(other);
+  inputVals.append(strides.begin(), strides.end());
+  inputVals.append(numels.begin(), numels.end());
+
+  rewriter.setInsertionPoint(op);
+  auto callOp = rewriter.create<func::CallOp>(
+      loc, funcOp.getSymNameAttr(), TypeRange({resTy}), inputVals);
+  rewriter.replaceOp(op, callOp);
+  return success();
+}
+
+LogicalResult StrideStoreConverter::matchAndRewrite(
+    triton::ascend::StrideStoreOp op, OpAdaptor adaptor,
+    ConversionPatternRewriter &rewriter) const {
+  auto loc = op.getLoc();
+
+  auto moduleOp = op->getParentOfType<ModuleOp>();
+  rewriter.setInsertionPoint(moduleOp.getBody(),
+                             std::prev(moduleOp.getBody()->end()));
+
+  auto funcName = generateUniqueFuncName(moduleOp, funcNameBase);
+
+  auto dst = adaptor.getDst();
+  auto src = adaptor.getSrc();
+  auto offset = adaptor.getOffset();
+  auto strides = adaptor.getStride();
+  auto numels = adaptor.getNumel();
+
+  auto dstTy = dyn_cast<MemRefType>(dst.getType());
+  if (!dstTy) {
+    return rewriter.notifyMatchFailure(op, "expected MemRefType for dst");
+  }
+
+  SmallVector<Type> inputTypes({dstTy, src.getType(), offset.getType()});
+  for (Value stride : strides)
+    inputTypes.push_back(stride.getType());
+  for (Value numel : numels)
+    inputTypes.push_back(numel.getType());
+  auto libFnType = rewriter.getFunctionType(inputTypes, {});
+  auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
+  SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
+
+  SmallVector<Value> inputVals({dst, src, offset});
+  inputVals.append(strides.begin(), strides.end());
+  inputVals.append(numels.begin(), numels.end());
+
+  rewriter.setInsertionPoint(op);
+  rewriter.create<func::CallOp>(loc, funcOp.getSymNameAttr(), TypeRange({}),
+                                inputVals);
+  rewriter.eraseOp(op);
   return success();
 }
 
@@ -2956,6 +3091,50 @@ IndexSelectSimdConverter::matchAndRewrite(triton::ascend::IndexSelectSimdOp op, 
   // Replace the original op
   rewriter.replaceOp(op, resultTensor);
 
+  return success();
+}
+
+LogicalResult HistogramConverter::matchAndRewrite(
+    triton::HistogramOp op, OpAdaptor adaptor,
+    ConversionPatternRewriter &rewriter) const {
+  auto loc = op.getLoc();
+  Value input = adaptor.getSrc();
+  auto resultType = dyn_cast<RankedTensorType>(op.getResult().getType());
+  if (!resultType || !resultType.hasStaticShape()) {
+    return rewriter.notifyMatchFailure(op, "expected static shaped tensor result");
+  }
+
+  int64_t numBins = resultType.getDimSize(0);
+
+  auto outputTensor = rewriter.create<tensor::EmptyOp>(
+      loc, resultType.getShape(), resultType.getElementType());
+
+  auto zeroVal = rewriter.create<arith::ConstantOp>(
+      loc, rewriter.getIntegerAttr(resultType.getElementType(), 0));
+  auto fillOp = rewriter.create<linalg::FillOp>(
+      loc, ValueRange{zeroVal}, ValueRange{outputTensor});
+
+  Value numBinsVal = rewriter.create<arith::ConstantIntOp>(loc, numBins, 64);
+
+  auto customOp = rewriter.create<hivm::CustomOp>(
+      loc, TypeRange{resultType}, "__builtin_histogram",
+      ValueRange{input, numBinsVal}, ValueRange{fillOp.getResult(0)},
+      ValueRange{});
+  
+  customOp->setAttr("symbol", rewriter.getStringAttr("__builtin_histogram"));
+  customOp->setAttr("hivm.tcore_type",
+                     hivm::TCoreTypeAttr::get(rewriter.getContext(),
+                                              hivm::TCoreType::VECTOR));
+  customOp->setAttr("hivm.vf_mode",
+                     hivm::VFModeAttr::get(rewriter.getContext(),
+                                           hivm::VFMode::SIMT));
+  customOp->setAttr("hivm.pipe",
+                     hivm::PipeAttr::get(rewriter.getContext(),
+                                         hivm::PIPE::PIPE_V));
+  customOp->setAttr("gm_addr_args_indices",
+                     DenseI32ArrayAttr::get(rewriter.getContext(), {}));
+
+  rewriter.replaceOp(op, customOp->getResult(0));
   return success();
 }
 

@@ -1,4 +1,4 @@
-// RUN: triton-opt --add-block-id-for-control-ops --data-dependency-analysis --inter-core-transfer-and-sync --mark-main-loop %s | FileCheck %s --implicit-check-not="flag = -1" --implicit-check-not="flag = 15"
+// RUN: triton-opt --add-block-id-for-control-ops --data-dependency-analysis --inter-core-transfer-and-sync --mark-main-loop %s | FileCheck %s --implicit-check-not="flag = -1" --implicit-check-not="flag = 15" --implicit-check-not="<PIPE_FIX>, <PIPE_V>] flag = 2" --implicit-check-not="<PIPE_MTE3>, <PIPE_MTE1>] flag = 1"
 
 module {
   func.func @flag_reuse_over_limit() {
@@ -34,7 +34,15 @@ module {
   }
 }
 
+// This is an alternating Cube->Vector / Vector->Cube chain that needs more than
+// MAX_FLAG_ID flags before reuse. Opposite-direction transfers run concurrently
+// on the two cores (a shared counting-flag would let one core's wait steal the
+// other's set), so they must never share a flag id. Same-direction transfers,
+// serialized by their pipe's FIFO, all collapse onto one flag. The result is a
+// strict partition by direction: every Cube->Vector (FIX/V) sync uses one flag
+// and every Vector->Cube (MTE3/MTE1) sync uses a different one (enforced by the
+// implicit-check-not directives in the RUN line).
 // CHECK-LABEL: func.func @flag_reuse_over_limit
-// CHECK: {{flag = }}[[REUSED_FLAG:[0-9]+]]{{$}}
-// CHECK-COUNT-29: {{flag = }}[[REUSED_FLAG]]{{$}}
+// CHECK: <PIPE_FIX>, <PIPE_V>] flag = 1
+// CHECK: <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
 // CHECK: return

@@ -40,6 +40,7 @@
 #include "mlir/IR/Types.h"
 #include "mlir/Support/LLVM.h"
 #include "llvm/IR/Instructions.h"
+#include <Python.h>
 
 using namespace mlir;
 namespace py = pybind11;
@@ -165,6 +166,41 @@ ModeAndPipes GetSyncBlockModeAndPipes(MLIRContext *ctx,
   }
   return {modeAttr, cubePipe, vectorPipe};
 }
+
+// Extend triton.ir.context with a context manager protocol for ascend tests
+// and examples, without modifying upstream python/src/ir.cc.
+void installTritonContextManager()
+{
+  static bool installed = false;
+  if (installed) {
+    return;
+  }
+  installed = true;
+
+  py::module_ tritonIr = py::module_::import("triton._C.libtriton.ir");
+  py::object ctxClass = tritonIr.attr("context");
+  if (py::hasattr(ctxClass, "__enter__")) {
+    return;
+  }
+
+  const char *patch = R"PY(
+import triton._C.libtriton.ir as _triton_ir
+if not hasattr(_triton_ir.context, '__enter__'):
+    def _mlir_context_enter(self):
+        return self
+    def _mlir_context_exit(self, exc_type, exc_val, exc_tb):
+        return False
+    _triton_ir.context.__enter__ = _mlir_context_enter
+    _triton_ir.context.__exit__ = _mlir_context_exit
+)PY";
+  PyGILState_STATE gil = PyGILState_Ensure();
+  if (PyRun_SimpleString(patch) != 0) {
+    PyGILState_Release(gil);
+    throw std::runtime_error("failed to install MLIRContext context manager");
+  }
+  PyGILState_Release(gil);
+}
+
 } // namespace
 
 void init_ascend_ir(py::module &&m) {
@@ -435,6 +471,23 @@ void init_ascend_ir(py::module &&m) {
       .value("PIPE_FIX", hivm::PIPE::PIPE_FIX)
       .export_values();
 
+  py::enum_<hivm::SyncEventSlotMacroSync>(m, "SYNC_HINT", py::module_local())
+      .value("wait", hivm::SyncEventSlotMacroSync::wait)
+      .value("set", hivm::SyncEventSlotMacroSync::set)
+      .value("internal", hivm::SyncEventSlotMacroSync::internal)
+      .export_values();
+
+  py::enum_<hivm::EVENT>(m, "EVENT", py::module_local())
+      .value("EVENT_ID0", hivm::EVENT::EVENT_ID0)
+      .value("EVENT_ID1", hivm::EVENT::EVENT_ID1)
+      .value("EVENT_ID2", hivm::EVENT::EVENT_ID2)
+      .value("EVENT_ID3", hivm::EVENT::EVENT_ID3)
+      .value("EVENT_ID4", hivm::EVENT::EVENT_ID4)
+      .value("EVENT_ID5", hivm::EVENT::EVENT_ID5)
+      .value("EVENT_ID6", hivm::EVENT::EVENT_ID6)
+      .value("EVENT_ID7", hivm::EVENT::EVENT_ID7)
+      .export_values();
+
   py::enum_<hivm::VFMode>(m, "MODE", py::module_local())
     .value("SIMD", hivm::VFMode::SIMD)
     .value("SIMT", hivm::VFMode::SIMT)
@@ -518,6 +571,10 @@ void init_ascend_ir(py::module &&m) {
            [](AscendNPUIROpBuilder &self, int64_t value) -> Attribute {
              return IntegerAttr::get(self.getBuilder().getI64Type(), value);
            })
+      .def("get_type_array_attr",
+           [](AscendNPUIROpBuilder &self, const std::vector<Type> &array) -> Attribute {
+             return self.getBuilder().getTypeArrayAttr(array);
+           })
       .def("get_core_type_attr",
            [](AscendNPUIROpBuilder &self, hivm::TCoreType core_type) -> Attribute {
              return self.getBuilder().getAttr<hivm::TCoreTypeAttr>(core_type);
@@ -526,6 +583,30 @@ void init_ascend_ir(py::module &&m) {
            [](AscendNPUIROpBuilder &self, hivm::PIPE pipe) -> Attribute {
              return self.getBuilder().getAttr<hivm::PipeAttr>(pipe);
            })
+      .def("get_event_attr",
+           [](AscendNPUIROpBuilder &self, hivm::EVENT event) -> Attribute {
+             return hivm::EventAttr::get(self.getBuilder().getContext(), event);
+           })
+      .def(
+          "get_sync_event_slot_attr",
+          [](AscendNPUIROpBuilder &self, py::object setPipe, py::object waitPipe,
+             hivm::SyncEventSlotMacroSync macroSync, py::object event) -> Attribute {
+            auto *ctx = self.getBuilder().getContext();
+            hivm::PipeAttr setPipeAttr;
+            hivm::PipeAttr waitPipeAttr;
+            hivm::EventAttr eventAttr;
+            if (!setPipe.is_none())
+              setPipeAttr = hivm::PipeAttr::get(ctx, py::cast<hivm::PIPE>(setPipe));
+            if (!waitPipe.is_none())
+              waitPipeAttr = hivm::PipeAttr::get(ctx, py::cast<hivm::PIPE>(waitPipe));
+            if (!event.is_none())
+              eventAttr = hivm::EventAttr::get(ctx, py::cast<hivm::EVENT>(event));
+            return hivm::SyncEventSlotAttr::get(ctx, setPipeAttr, waitPipeAttr,
+                                                  macroSync, eventAttr);
+          },
+          py::arg("set_pipe") = py::none(), py::arg("wait_pipe") = py::none(),
+          py::arg("macro_sync") = hivm::SyncEventSlotMacroSync::wait,
+          py::arg("event") = py::none())
       .def("get_vf_mode_attr",
            [](AscendNPUIROpBuilder &self, hivm::VFMode mode) -> Attribute {
              return self.getBuilder().getAttr<hivm::VFModeAttr>(mode);
@@ -537,6 +618,10 @@ void init_ascend_ir(py::module &&m) {
           }));
           return self.getBuilder().getArrayAttr(attrs);
           })
+      .def("get_array_attr",
+           [](AscendNPUIROpBuilder &self, const std::vector<Attribute> &attrs) -> Attribute {
+             return self.getBuilder().getArrayAttr(attrs);
+           })
       .def("get_t_core_type_attr_name",
            [](AscendNPUIROpBuilder &self) -> std::string {
              return hivm::TCoreTypeAttr::name.str();
@@ -673,6 +758,54 @@ void init_ascend_ir(py::module &&m) {
              auto results = op->getResults();
              return std::vector<Value>(results.begin(), results.end());
            })
+      .def("create_custom_macro_op",
+           [](AscendNPUIROpBuilder &self,
+               const std::string &name,
+               const py::dict &attrs,
+               const std::vector<Value> &ins,
+               const std::vector<Value> &outs,
+               const std::vector<py::dict> &arg_attrs) -> std::vector<Value> {
+             ValueRange inputs{ins};
+             ValueRange outputs{outs};
+             ValueRange temp_buffers{};
+             ValueRange syncArgs{};
+             TypeRange res_types{outputs};
+             auto op = self.create<hivm::CustomMacroOp>(
+                 res_types, name, inputs, outputs, temp_buffers, syncArgs);
+             for (auto &attr : attrs) {
+               std::string attr_name = py::cast<std::string>(attr.first);
+               Attribute attr_value = py::cast<Attribute>(attr.second);
+               op->setAttr(attr_name, attr_value);
+             }
+
+             SmallVector<Attribute> dictAttrs(arg_attrs.size());
+             Attribute emptyDict = self.getBuilder().getDictionaryAttr({});
+             for (const auto &[idx, attrs] : llvm::enumerate(arg_attrs)) {
+               if (idx >= op.getNumOperands())
+                 continue;
+
+               if (attrs.is_none()) {
+                 dictAttrs[idx] = emptyDict;
+                 continue;
+               }
+
+               llvm::SmallVector<NamedAttribute> namedAttrs;
+               for (const auto &attr : attrs) {
+                 std::string attr_name = py::cast<std::string>(attr.first);
+                 Attribute attr_value = py::cast<Attribute>(attr.second);
+                 namedAttrs.push_back(
+                    NamedAttribute(self.getBuilder().getStringAttr(attr_name), attr_value));
+               }
+
+               dictAttrs[idx] = self.getBuilder().getDictionaryAttr(namedAttrs);
+             }
+
+             ArrayAttr arg_attrs_array = self.getBuilder().getArrayAttr(dictAttrs);
+             op->setAttr("arg_attrs", arg_attrs_array);
+
+             auto results = op->getResults();
+             return std::vector<Value>(results.begin(), results.end());
+           })
       .def("create_scope_op",
            [](AscendNPUIROpBuilder &self, py::dict &scopeAttrs,
               std::vector<Type> resultTypes) -> OpState {
@@ -753,4 +886,6 @@ void init_ascend_ir(py::module &&m) {
                  hivm::DataLayoutAttr::get(ctx, hivm::DataLayout::ND),
                  hivm::DataLayoutAttr::get(ctx, hivm::DataLayout::ND)).getResult();
            });
+
+  installTritonContextManager();
 }

@@ -26,6 +26,7 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/Debug.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 
 static constexpr const char *DEBUG_TYPE = "analyze-args-in-forOps";
@@ -42,6 +43,30 @@ using namespace mlir;
 using namespace triton;
 
 namespace {
+
+static constexpr llvm::StringLiteral containedFunc[] {
+  "chunk_gated_delta_rule_bwd_kernel_dhu_k128_blockdim128",
+  "fused_chunk_fwd_kernel",
+};
+
+static LogicalResult isInterceptedModule(ModuleOp module)
+{
+  bool intercepted = false;
+
+  module.walk([&](func::FuncOp funcOp) -> WalkResult {
+    if (!llvm::is_contained(containedFunc, funcOp.getSymName())) {
+      return WalkResult::advance();
+    }
+    intercepted = true;
+    return WalkResult::interrupt();
+  });
+
+  if (!intercepted) {
+    return success();
+  }
+
+  return failure();
+}
 
 // Check if a value is a tensor-type iter_arg and return its index, -1 otherwise.
 static int getTensorIterArgIndex(Value v, scf::ForOp forOp)
@@ -182,6 +207,10 @@ void AnalyzeArgsPass::runOnOperation()
   ModuleOp module = getOperation();
 
   LDBG("Before AnalyzeArgs:\n" << module << "\n");
+
+  if (failed(isInterceptedModule(module))) {
+    return;
+  }
 
   if (checkTensorArgsInMainLoop(module)) {
     CVPipeline::setFallbackAttr(module);

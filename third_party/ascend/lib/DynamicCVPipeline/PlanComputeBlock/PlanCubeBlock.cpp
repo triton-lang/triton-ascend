@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include <functional>
 #include <queue>
 #include <utility>
 
@@ -33,10 +34,12 @@
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "DynamicCVPipeline/Common/Utils.h"
-#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -47,8 +50,9 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/PlanCubeBlockPass.h"
 
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "DynamicCVPipeline/PlanComputeBlock/Common.h"
-#include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "DynamicCVPipeline/Common/Utils.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 
 using namespace mlir;
 using namespace triton;
@@ -65,7 +69,7 @@ static bool isMatmulOp(Operation *op)
 namespace {
 
 class SeedRegionPlanner {
-    Operation *seed;
+    SmallVector<Operation*> seeds;
     Block *block;
     const MemoryDependenceGraph &memGraph;
     ComputeBlockIdManager &bm;
@@ -74,19 +78,19 @@ class SeedRegionPlanner {
     bool willCreateCycle(Operation *op);
     bool isEligible(Operation *op);
     bool tryAddToGroup(Operation *op);
-    void addSourcesToGroup();
-    void addUsersToGroup();
 
 public:
-    SeedRegionPlanner(Operation *seed,
+    SeedRegionPlanner(SmallVector<Operation*> seeds,
                       Block *block,
                       const MemoryDependenceGraph &memGraph,
                       llvm::DenseSet<Operation *> &assigned,
                       llvm::SmallVectorImpl<Operation *> &group,
                       ComputeBlockIdManager &bm)
-        : seed(seed), block(block), memGraph(memGraph), assigned(assigned), group(group), bm(bm)
+        : seeds(seeds), block(block), memGraph(memGraph), assigned(assigned), group(group), bm(bm)
     {
-        group.push_back(seed);
+        for(auto sd: seeds) {
+            group.push_back(sd);
+        }
     }
 
     void run();
@@ -97,55 +101,78 @@ public:
 
 namespace {
 
-struct DependencyCycleDetector {
-    llvm::DenseSet<mlir::Operation *> &okSet;
+class DependencyCycleDetector {
+    const llvm::DenseSet<mlir::Operation *> &group;
     llvm::DenseSet<mlir::Operation *> visited;
     const MemoryDependenceGraph &memGraph;
     ComputeBlockIdManager &bm;
-    Block *block;
-    void clear() { visited.clear(); }
-    bool operator()(Operation *cur);
-    bool dfs(Operation *cur) { return (*this)(cur); };
+    Block *const block;
 
+    bool detectCycleFrom(Operation *cur);
+
+  public:
     DependencyCycleDetector(Block *block,
                             const MemoryDependenceGraph &memGraph,
-                            llvm::DenseSet<mlir::Operation *> &okSet,
+                            llvm::DenseSet<mlir::Operation *> &group,
                             ComputeBlockIdManager &bm)
-        : block(block), memGraph(memGraph), okSet(okSet), bm(bm)
+        : block(block), memGraph(memGraph), group(group), bm(bm)
     {}
+
+    bool detectCycle();
 };
 
 } // namespace
 
-bool DependencyCycleDetector::operator()(Operation *cur)
+bool DependencyCycleDetector::detectCycleFrom(Operation *cur)
 {
-    if (okSet.contains(cur)) {
+    if (group.contains(cur)) {
         return true;
     }
     if (!visited.insert(cur).second) {
         return false;
     }
 
-    SmallVector<Operation *> allusers;
-    allusers.append(cur->getUsers().begin(), cur->getUsers().end());
-    for (auto *memUser : memGraph.getExecAfter(cur)) {
-        allusers.push_back(memUser);
-    }
-    for (auto *user : allusers) {
+    auto userCreatesCycle = [this, cur](Operation *user) {
         auto *userInBlock = getAncestorInBlock(user, block);
-        if (bm.getBlockIdByOp(userInBlock) == -1) {
-            if (dfs(userInBlock)) {
-                return true;
-            }
-        } else {
-            for (auto *nx : bm.getOpsByBlockId(bm.getBlockIdByOp(userInBlock))) {
-                if (dfs(nx)) {
-                    return true;
-                }
-            }
+        if (!userInBlock) {
+            return false;
         }
+        auto userBlockId = bm.getBlockIdByOp(userInBlock);
+        if (userBlockId == -1) {
+            return detectCycleFrom(userInBlock);
+        }
+
+        return llvm::any_of(bm.getOpsByBlockId(userBlockId), [this](Operation *user) { return detectCycleFrom(user); });
+    };
+
+    return llvm::any_of(cur->getUsers(), userCreatesCycle) ||
+           llvm::any_of(memGraph.getExecAfter(cur), userCreatesCycle);
+}
+
+static void forEachUser(Operation *op,
+                        const MemoryDependenceGraph &memGraph,
+                        const std::function<void(Operation *op)> &pred)
+{
+    for (auto *user : op->getUsers()) {
+        pred(user);
     }
-    return false;
+    for (auto *user : memGraph.getExecAfter(op)) {
+        pred(user);
+    }
+}
+
+bool DependencyCycleDetector::detectCycle()
+{
+    llvm::DenseSet<Operation *> externalUsers;
+    for (auto *op : group) {
+        forEachUser(op, memGraph, [&](Operation *user) {
+            auto *userInBlock = getAncestorInBlock(user, block);
+            if (userInBlock && !group.contains(userInBlock)) {
+                externalUsers.insert(userInBlock);
+            }
+        });
+    }
+    return llvm::any_of(externalUsers, [this](Operation *op) { return this->detectCycleFrom(op); });
 }
 
 bool SeedRegionPlanner::willCreateCycle(Operation *op)
@@ -155,36 +182,7 @@ bool SeedRegionPlanner::willCreateCycle(Operation *op)
     okSet.insert(op);
 
     DependencyCycleDetector dfs = {block, memGraph, okSet, bm};
-
-    // DFS from every result in okSet
-    for (mlir::Operation *okOp : okSet) {
-        SmallVector<Operation *> allusers;
-        allusers.append(okOp->getUsers().begin(), okOp->getUsers().end());
-        for (auto *memUser : memGraph.getExecAfter(okOp)) {
-            allusers.push_back(memUser);
-        }
-        for (auto *user : allusers) {
-            auto *userInBlock = getAncestorInBlock(user, block);
-            if (okSet.contains(userInBlock)) {
-                continue;
-            }
-            if (bm.getBlockIdByOp(userInBlock) == -1) {
-                dfs.clear();
-                if (dfs(userInBlock)) {
-                    return true;
-                }
-                continue;
-            }
-            auto opsUsedBlockId = bm.getOpsByBlockId(bm.getBlockIdByOp(userInBlock));
-            for (auto *userOp : opsUsedBlockId) {
-                dfs.clear();
-                if (dfs(userOp)) {
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
+    return dfs.detectCycle();
 }
 
 /**
@@ -209,7 +207,7 @@ bool SeedRegionPlanner::tryAddToGroup(Operation *op)
     return true;
 }
 
-void SeedRegionPlanner::addSourcesToGroup()
+void SeedRegionPlanner::run()
 {
     size_t head = 0;
     while (head < group.size()) {
@@ -238,42 +236,6 @@ void SeedRegionPlanner::addSourcesToGroup()
     }
 }
 
-void SeedRegionPlanner::addUsersToGroup()
-{
-    llvm::SmallVector<Operation *> queue {seed};
-    llvm::DenseSet<Operation *> forwardVisited;
-    forwardVisited.insert(seed);
-
-    unsigned qIdx = 0;
-    while (qIdx < queue.size()) {
-        Operation *currOp = queue[qIdx++];
-        SmallVector<Operation *> allUsers;
-        for (auto *u : currOp->getUsers()) {
-            allUsers.push_back(u);
-        }
-
-        for (auto *u : memGraph.getMemUsers(currOp)) {
-            allUsers.push_back(u);
-        }
-
-        for (auto *userOp : allUsers) {
-            auto *userInBlock = getAncestorInBlock(userOp, block);
-            if (tryAddToGroup(userInBlock)) {
-                queue.push_back(userInBlock);
-            }
-        }
-    }
-}
-
-/**
- * Performs a BFS to expand a group from a seed operation (usually a Dot/Compute op).
- * It explores both operands (backward) and users (forward).
- */
-void SeedRegionPlanner::run()
-{
-    addSourcesToGroup();
-    addUsersToGroup();
-}
 
 namespace {
 
@@ -529,9 +491,9 @@ static SmallVector<Operation *> collectMatmulOps(Block *block)
     return computeOps;
 }
 
-static void fuseMarkOpToDef(Block *block, ComputeBlockIdManager &bm)
+static void fuseMarkOpToDef(Block *block, ComputeBlockIdManager &bm, const MemoryDependenceGraph &memGraph)
 {
-    for (auto op : llvm::make_pointer_range(block->getOperations())) {
+    for (auto *op : llvm::make_pointer_range(block->getOperations())) {
         if (getOpCoreType(op) != CUBE_ONLY) {
             continue;
         }
@@ -539,23 +501,78 @@ static void fuseMarkOpToDef(Block *block, ComputeBlockIdManager &bm)
         if (!markOp) {
             continue;
         }
-        auto defOp = markOp.getSrc().getDefiningOp();
+        auto *defOp = markOp.getSrc().getDefiningOp();
         if (!defOp) {
             continue;
         }
 
         auto defBlockId = bm.getBlockIdByOp(defOp);
-        if (defBlockId != -1) {
+        if (defBlockId == -1) {
+            continue;
+        }
+
+        auto currGroup = bm.getOpsByBlockId(defBlockId);
+        llvm::DenseSet<Operation *> newGroup {currGroup.begin(), currGroup.end()};
+
+        if (newGroup.contains(markOp)) {
+            continue;
+        }
+        newGroup.insert(markOp);
+
+        DependencyCycleDetector dfs {block, memGraph, newGroup, bm};
+        if (!dfs.detectCycle()) {
             bm.updateBlockId(markOp, defBlockId);
         }
     }
+}
+
+
+static bool checkValidInputSeed(Operation* op) {
+    // keep unify to OpClassifer
+    return isa<linalg::TransposeOp, bufferization::ToTensorOp, linalg::FillOp, tensor::EmptyOp>(op);
+}
+static bool checkValidUserSeed(Operation* op) {
+    // keep unify to OpClassifer
+    return isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp, ViewLikeOpInterface, tensor::ExtractSliceOp>(op);
+}
+SmallVector<Operation*> PlanCubeBlockPass::matchSeed(Operation* dotOp, ComputeBlockIdManager &bm)
+{
+    // match inputs
+    SmallVector<Operation*> ret;
+    ret.push_back(dotOp);
+    for (Value operand : dotOp->getOperands()) {
+        Operation *def = operand.getDefiningOp();
+        if (!def)
+            continue;
+        if (checkValidInputSeed(def) && isCubeOp(def) && dotOp->getBlock() == def->getBlock() &&
+            bm.getBlockIdByOp(def) == -1) {
+            if (def->hasOneUse()) {
+                ret.push_back(def);
+            }
+        }
+    }
+    // match outputs
+    Operation* nowOp = dotOp;
+    while (nowOp->hasOneUse()) {
+        auto user = *nowOp->getUsers().begin();
+        if(user->getBlock() != dotOp->getBlock() || !isCubeOp(user) || bm.getBlockIdByOp(user) != -1){
+            break;
+        }
+        if (checkValidUserSeed(user)) {
+            nowOp = user;
+            ret.push_back(user);
+        } else {
+            break;
+        }
+    }
+    return ret;
 }
 
 /**
  * Main entry point: Process a single block by grouping operations into
  * execution blocks using BFS and topological traversal.
  */
-static llvm::LogicalResult processBlockWithCubeBFS(Block *block, const MemoryDependenceGraph &memGraph, ComputeBlockIdManager &bm)
+llvm::LogicalResult PlanCubeBlockPass::processBlockWithCubeBFS(Block *block, const MemoryDependenceGraph &memGraph, ComputeBlockIdManager &bm)
 {
     llvm::DenseSet<Operation *> assigned;
     auto allDots = collectMatmulOps(block);
@@ -565,9 +582,17 @@ static llvm::LogicalResult processBlockWithCubeBFS(Block *block, const MemoryDep
         if (assigned.contains(dot)) {
             continue;
         }
-
+        auto temBlockId = bm.getNextId();
+        llvm::SmallVector<Operation*> dotSeeds = matchSeed(dot, bm);
+        if (willCreateCycle(dotSeeds, memGraph, temBlockId, bm)) {
+            LOG_DEBUG("Cube Seed already have a cycle!!");
+            for(auto seed: dotSeeds) {
+                LOG_DEBUG("Seed: " << *seed << "\n");
+            }
+            return llvm::failure();
+        }
         llvm::SmallVector<Operation *> newGroup;
-        SeedRegionPlanner regionPlanner {dot, block, memGraph, assigned, newGroup, bm};
+        SeedRegionPlanner regionPlanner {dotSeeds, block, memGraph, assigned, newGroup, bm};
         regionPlanner.run();
 
         for (auto *op : newGroup) {
@@ -583,7 +608,7 @@ static llvm::LogicalResult processBlockWithCubeBFS(Block *block, const MemoryDep
     if (failed(topoPlanner.run())) {
         return failure();
     }
-    fuseMarkOpToDef(block, bm);
+    fuseMarkOpToDef(block, bm, memGraph);
     return llvm::success();
 }
 

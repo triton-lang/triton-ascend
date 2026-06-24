@@ -30,8 +30,17 @@
 #include <unordered_map>
 #include <fstream>
 #include <algorithm>
+#include <utility>
 
 #include "runtime/runtime/rt.h"
+
+#ifdef USE_TORCH_NPU
+#include <acl/acl.h>
+#include <ATen/ATen.h>
+#include <torch_npu/csrc/core/npu/NPUWorkspaceAllocator.h>
+#include <torch_npu/csrc/framework/OpCommand.h>
+#include <functional>
+#endif
 
 // Use map to differentiate same name functions from different binary
 static std::unordered_map<std::string, size_t> registered_names;
@@ -318,6 +327,57 @@ static PyObject* copyMemory(PyObject* self, PyObject* args) {
 	Py_INCREF(Py_None);
 	return Py_None;
 }
+
+#ifdef USE_TORCH_NPU
+struct RetainedTensorHandle {
+  explicit RetainedTensorHandle(at::Tensor tensor)
+      : tensor(std::move(tensor)),
+        data(const_cast<void*>(this->tensor.storage().data())) {}
+
+  at::Tensor tensor;
+  void *data;
+};
+
+static void *retainTensor(at::Tensor tensor, void **handle) {
+  if (handle == nullptr) {
+    return nullptr;
+  }
+  auto *retained = new RetainedTensorHandle(std::move(tensor));
+  *handle = retained;
+  return retained->data;
+}
+
+extern "C" void* triton_allocate_workspace_legacy(uint64_t size)
+{
+  return const_cast<void*>(
+      at::empty(size, at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte))
+          .storage()
+          .data());
+}
+
+extern "C" void* triton_allocate_sync_block_lock(uint64_t size, void* stream, void **handle)
+{
+  if (handle == nullptr) {
+    return nullptr;
+  }
+  *handle = nullptr;
+  auto tensor = at_npu::native::allocate_workspace(size, reinterpret_cast<rtStream_t>(stream));
+  return retainTensor(std::move(tensor), handle);
+}
+
+extern "C" void triton_release_retained_tensor(void *handle)
+{
+  auto *retained = static_cast<RetainedTensorHandle*>(handle);
+  delete retained;
+}
+
+extern "C" void triton_async_launch(void* func_obj, const char* name)
+{
+  auto& func = *static_cast<std::function<rtError_t()>*>(func_obj);
+  at_npu::native::OpCommand cmd;
+  cmd.Name(name).SetCustomHandler(func).Run();
+}
+#endif
 
 static PyMethodDef NpuUtilsMethods[] = {
     {"load_kernel_binary", loadKernelBinary, METH_VARARGS,

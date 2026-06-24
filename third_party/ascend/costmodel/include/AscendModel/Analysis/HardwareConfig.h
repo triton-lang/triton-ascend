@@ -254,6 +254,11 @@ void setHardwareConfig(std::unique_ptr<HardwareConfig> config);
 /// Load and set hardware config from file.
 bool loadHardwareConfigFromFile(llvm::StringRef path, std::string &error);
 
+/// Load an independent hardware configuration for one analysis invocation.
+/// Returns the default 910B config when path is empty.
+std::shared_ptr<const HardwareConfig>
+loadHardwareConfigForAnalysis(llvm::StringRef path, std::string &error);
+
 } // namespace ascend
 } // namespace mlir
 

@@ -51,7 +51,6 @@ from triton.backends.ascend.utils import (
     _warn_auto_blockify_disabled,
     downgrade_llir,
     force_disable_ffts,
-    triton_enable_libdevice_simt,
     get_cann_version_file_hash,
 )
 from triton.backends.ascend.driver import (
@@ -88,6 +87,20 @@ def _get_then_remove_rc(mod, attr_name: str) -> int:
         return -1
 
     return attr_value
+
+
+def _export_coalesce_metadata(mod, metadata):
+    # Tile/strided coalescing (TritonToLinalg) records the chosen coalesce factor
+    # H and the grid axis it applies to as module attrs hacc.coalesce_factor /
+    # hacc.coalesce_axis. In the full-TA design the *launcher* (driver.py) owns
+    # the grid division: it divides grid[axis] by H before launch, and bishengir
+    # no longer interprets the attrs. Read them into metadata here and strip them
+    # from the module so the hacc.* attrs never reach hivmc (which rejects
+    # unknown module attrs). Absent attrs -> factor 1 (no-op) / axis -1.
+    factor = _get_then_remove_rc(mod, "hacc.coalesce_factor")
+    axis = _get_then_remove_rc(mod, "hacc.coalesce_axis")
+    metadata["coalesce_factor"] = factor if isinstance(factor, int) and factor > 1 else 1
+    metadata["coalesce_axis"] = axis if isinstance(axis, int) and axis >= 0 else -1
 
 
 def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
@@ -167,14 +180,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             pm,
             auto_blockify_size
         )
-        if (metadata["add_auto_scheduling"]):
-            ascend.passes.ttir.add_dag_sync(pm)
-            ascend.passes.ttir.add_dag_scope(pm)
-            passes.common.add_cse(pm)
-            passes.common.add_canonicalizer(pm)
-            ascend.passes.ttir.add_dag_ssbuffer(pm)
-            passes.common.add_cse(pm)
-            passes.common.add_canonicalizer(pm)
 
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
         ascend.passes.ttir.add_triton_to_structure(
@@ -195,7 +200,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             force_simt_template
         )
         ascend.passes.ttir.add_triton_to_hivm(pm)
-        ascend.passes.ttir.add_triton_to_hfusion(pm)
+        ascend.passes.ttir.add_triton_to_hfusion(
+            pm,
+            compile_on_910_95)
         ascend.passes.ttir.add_triton_to_llvm(pm)
         ascend.passes.ttir.add_bubble_up_operation(pm)
         ascend.passes.ttir.add_triton_to_structure(
@@ -234,6 +241,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
                                           enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)
+        _export_coalesce_metadata(mod, metadata)
 
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])
@@ -267,6 +275,10 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
 
     DISABLE_AUTO_TILE_AND_BIND_SUBBLOCK_REGEX = r'hivm.disable_auto_tile_and_bind_subblock'
 
+    # Inserted by DiscreteMaskAccessConversionPass / MemOpConverter when discrete
+    # masked stores need cross-block exclusion (e.g. hivm.sync_block_lock).
+    SYNC_BLOCK_LOCK_REGEX = r'\bsync_block_lock\b'
+
     # Example: mix_mode = "aiv" -> aiv
     MIX_MODE_REGEX = r'mix_mode\s*=\s*"([^"]+)"'
 
@@ -287,6 +299,11 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
     metadata["shared"] = 1
     # Force disable auto tile and bind subblock if attribute is present in module
     metadata["auto_tile_and_bind_subblock"] = not re.search(DISABLE_AUTO_TILE_AND_BIND_SUBBLOCK_REGEX, linalg)
+    # Turn off auto-blockify when sync_block_lock/unlock was inserted: the lock
+    # protects a cross-block read-modify-write and is incompatible with packing
+    # logical blocks into a sequential auto-blockify loop.
+    if re.search(SYNC_BLOCK_LOCK_REGEX, linalg):
+        metadata["has_auto_blockify_blacklist_op"] = True
     # the mix mode is also encoded into metadata['name'] for runtime to distinguish
     metadata["mix_mode"] = re.search(MIX_MODE_REGEX, linalg).group(1)
     metadata["parallel_mode"] = re.search(PARALLEL_MODE_REGEX, linalg).group(1)
@@ -509,9 +526,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 [f"--set-workspace-multibuffer={set_workspace_multibuffer}"]
 
         auto_multi_buffer = metadata["limit_auto_multi_buffer_of_local_buffer"]
-        if auto_multi_buffer is not None:
-            _compile_option_list += \
-                [f"--limit-auto-multi-buffer-of-local-buffer={auto_multi_buffer}"]
+        if auto_multi_buffer is None:
+            auto_multi_buffer = "no-limit"
+        _compile_option_list += \
+            [f"--limit-auto-multi-buffer-of-local-buffer={auto_multi_buffer}"]
         auto_multi_buffer_buffer = metadata["limit_auto_multi_buffer_buffer"]
         if auto_multi_buffer_buffer is not None:
             _compile_option_list += \
@@ -532,17 +550,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--append-bisheng-options=-mllvm --cce-vf-remove-membar={enable_cce_vf_remove_membar}"]
 
-        # TEMP: Allow TRITON_ENABLE_VF_FUSION env var to override metadata configuration
-        enable_vf_env = os.getenv("TRITON_ENABLE_VF_FUSION")
-        if enable_vf_env is not None:
-            enable_vf_fusion = enable_vf_env.lower() in ("true", "1", "yes")
-        elif "enable_vf_fusion" in metadata:
-            enable_vf_fusion = metadata["enable_vf_fusion"]
-        else:
-            enable_vf_fusion = None
-
+        enable_vf_fusion = metadata["enable_vf_fusion"]
         if enable_vf_fusion is not None:
-            _compile_option_list += [f"--enable-vf-fusion={enable_vf_fusion}"]
+            _compile_option_list += \
+                [f"--enable-vf-fusion={enable_vf_fusion}"]
 
         enable_drop_unit_dims = metadata["enable_drop_unit_dims"]
         if enable_drop_unit_dims is not None:
@@ -889,7 +900,7 @@ class NPUOptions:
     cluster_dims: tuple = (1, 1, 1)
     num_warps: int = 32
     num_ctas: int = 1
-    num_stages: int = 1 if is_compile_on_910_95 else 2
+    num_stages: int = 2
     warp_size: int = 32
     num_buffers_warp_spec: int = 0
     num_consumer_groups: int = 0
@@ -917,7 +928,7 @@ class NPUOptions:
     extern_libs: dict = None
     bisheng_options: str = "-cce-link-aicore-ll-module " + get_libdevice()
 
-    multibuffer: bool = not is_compile_on_910_95
+    multibuffer: bool = True
     storage_align: bool = None
     ops_reorder: bool = None
     code_motion: bool = None
@@ -949,8 +960,6 @@ class NPUOptions:
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
     enable_vf_fusion: bool = None
-    # todo: this code will be removed in version 530.
-    add_auto_scheduling: bool = False
     enable_dynamic_cv_pipeline: bool = True if is_compile_on_910_95 else False
     hfusion_enable_multiple_consumer_fusion: bool = False
     has_auto_blockify_blacklist_op: Optional[bool] = None
@@ -978,6 +987,9 @@ class NPUOptions:
     enable_costmodel_backend: bool = False
     # disable simt fma optimization to get high precision
     disable_fma: bool = False
+
+    # superblocking factor
+    superblock_factor: int = 0
 
     def __post_init__(self):
         # Parse compile_mode and set related fields
@@ -1041,19 +1053,19 @@ def ttir_to_npubin(mod, metadata, opt):
             if opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
 
-            enable_libdevice_simt = triton_enable_libdevice_simt()
-            if (enable_libdevice_simt):
-                bisheng_options = metadata["bisheng_options"]
-                if bisheng_options is not None:
-                    _compile_option_list += [
-                        f"--append-bisheng-options={bisheng_options}"
-                    ]
+            bisheng_options = metadata["bisheng_options"]
+            if bisheng_options is not None:
+                _compile_option_list += [
+                    f"--append-bisheng-options={bisheng_options}"
+                ]
 
             # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
             # mirroring the SIMD compile paths. driver.py's runtime block-count
             # cap keys off the same env switch, so the two stay in sync.
             if _is_auto_map_parallel_blocks_enabled():
                 _compile_option_list += ["--enable-auto-blockify-loop"]
+                if opt.superblock_factor > 0:
+                    _compile_option_list += [f"--super-block-factor={opt.superblock_factor}"]
 
         npu_compiler_path, env = _get_npucompiler_path()
         cmd_list = (

@@ -36,6 +36,8 @@ __all__ = [
     "is_builtin",
     "MODE",
     "PIPE",
+    "SYNC_HINT",
+    "EVENT_ID",
     "IteratorType",
     "sub_vec_id",
     "sub_vec_num",
@@ -59,6 +61,8 @@ from triton.backends.ascend.driver import NPUUtils
 
 from . import semantic as semantic
 PIPE = semantic.PIPE
+SYNC_HINT = semantic.SYNC_HINT
+EVENT_ID = semantic.EVENT_ID
 
 
 T = TypeVar("T")

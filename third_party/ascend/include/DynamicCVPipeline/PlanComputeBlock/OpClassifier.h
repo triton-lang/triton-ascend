@@ -27,16 +27,13 @@
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Analysis/AliasAnalysis.h"
-#include "bishengir/Dialect/Annotation/IR/Annotation.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -49,7 +46,7 @@ enum OpCoreType { OP_UNDETERMINED = 0, OP_CUBE_ONLY = 1, OP_VECTOR_ONLY = 2, OP_
 
 // OpClassifierPass for categorizing operations as CUBE or VECTOR
 class OpClassifierPass : public PassWrapper<OpClassifierPass, OperationPass<ModuleOp>> {
-public:
+  public:
     MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(OpClassifierPass)
 
     // Constructor
@@ -67,7 +64,9 @@ public:
     }
     ::llvm::StringRef getName() const override { return "OpClassifierPass"; }
 
-private:
+  private:
+    llvm::DenseMap<Operation *, Operation *> CloneOpMap;
+
     // Map from operation to its core type
     llvm::DenseMap<Operation *, OpCoreType> opCoreTypes;
 
@@ -90,6 +89,7 @@ private:
     void matchToTensorPattern(Operation *def);
     void matchTransposePattern(Operation *def);
     void matchFillPattern(Operation *def);
+    void matchEmptyPattern(Operation *def);
 
     // Downstream pattern matching helpers
     void matchStorePattern(Operation *user);
@@ -121,6 +121,7 @@ private:
 
     // Get the core type of an operation
     OpCoreType getCoreType(Operation *op) const;
+    OpCoreType getForInitCoreType(OpOperand *operand) const;
 
     // Set the core type of an operation
     void setCoreType(Operation *op, OpCoreType coreType);
@@ -136,7 +137,7 @@ private:
 
     // Step 5: Handle else region yield of scf.if by extracting core_type from then region yield
     bool handleYieldFromElseRegion(std::vector<OpCoreType> &coreTypes, unsigned operandIndex,
-                                   Operation *thenYieldForElse, Value &operand);
+                                   Operation *thenYieldForElse, Value &operand, Operation *elseYieldOp);
 
     // Step 6: Handle CUBE_AND_VECTOR operations
     int handleCubeAndVector();
@@ -153,12 +154,6 @@ private:
 
     // Helper: Mark fill operations as CUBE when their output buffer is CUBE
     void markFillOpsAsCube();
-
-    // Step 7: Pre-legalize matmul (before initializePass)
-    int preLegalizeMatmul();
-
-    // Helper: bulk delete operations and clean up tracking structures
-    void bulkDeleteOps(llvm::SmallVectorImpl<Operation *> &opsToDelete);
 
     // Step 8: Stamp core type info to IR
     int stampToIR();

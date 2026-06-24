@@ -291,10 +291,6 @@ def _warn_auto_blockify_disabled(kernel_name: str, blacklist_reasons) -> None:
     )
 
 
-def _enable_unpublished_feature() -> bool:
-    return os.getenv("ENABLE_UNPUBLISHED_FEATURE", "false").lower() in ("true", "1")
-
-
 def _enable_print_ub_bits() -> bool:
     return os.getenv("ENABLE_PRINT_UB_BITS", "false").lower() in ("true", "1")
 

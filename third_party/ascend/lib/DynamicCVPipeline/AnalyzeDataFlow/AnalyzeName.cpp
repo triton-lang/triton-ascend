@@ -46,7 +46,6 @@ static constexpr llvm::StringLiteral interceptrFunc[] {
     "bwd_qkv_kernel",
     "parallel_nsa_compression_fwd_kernel",
     "parallel_nsa_compression_bwd_kernel_dq",
-    "chunk_dplr_fwd_kernel_h",
 };
 
 static LogicalResult verifyFuncNames(ModuleOp module)

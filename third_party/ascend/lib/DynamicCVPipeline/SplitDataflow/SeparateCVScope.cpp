@@ -549,7 +549,7 @@ static UseCheckResult checkConditionUse(OpOperand &use, Operation *owner, unsign
     }
 
     unsigned idx = use.getOperandNumber();
-    if (conditionOp->getParentOp() != owner || idx == 0 || idx - 1 != slotIndex) {
+    if (conditionOp->getParentOp() != owner || idx == 0 || idx != slotIndex + 1) {
         Operation *parentOp = conditionOp->getParentOp();
         if (parentOp && !matchesScope(parentOp, scopeType)) {
             return UseCheckResult::Continue;

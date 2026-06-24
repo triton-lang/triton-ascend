@@ -20,12 +20,12 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ASCEND_DIAGONAL_SHIFT_FOLDING_H
-#define TRITON_ASCEND_DIAGONAL_SHIFT_FOLDING_H
+#ifndef TRITON_ASCEND_DIAGONAL_MASK_REMOVAL_H
+#define TRITON_ASCEND_DIAGONAL_MASK_REMOVAL_H
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
-// DiagonalShiftFolding: replace O(N^2) diagonal-select-reduce patterns with
+// DiagonalMaskRemoval: replace O(N^2) diagonal-select-reduce patterns with
 // O(N) subtraction using the cumulative sum identity.
 //
 // Pattern: a cumsum result is broadcast to an NxN matrix, a diagonal mask
@@ -50,10 +50,10 @@
 // The pass bails (leaves IR untouched) whenever ANY condition is not met:
 // wrong reduce axis/combine, non-diagonal mask, shift != 1, scan direction
 // mismatch, non-square broadcast, non-zero false value, multi-result scan, etc.
-namespace DiagonalShiftFolding {
+namespace DiagonalMaskRemoval {
 
-void rewriteDiagonalShiftFold(mlir::ModuleOp moduleOp);
+void rewriteDiagonalMaskRemoval(mlir::ModuleOp moduleOp);
 
-} // namespace DiagonalShiftFolding
+} // namespace DiagonalMaskRemoval
 
-#endif // TRITON_ASCEND_DIAGONAL_SHIFT_FOLDING_H
+#endif // TRITON_ASCEND_DIAGONAL_MASK_REMOVAL_H

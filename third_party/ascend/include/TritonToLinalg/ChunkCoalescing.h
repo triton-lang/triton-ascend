@@ -20,12 +20,12 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ASCEND_TILE_CHUNK_COALESCING_H
-#define TRITON_ASCEND_TILE_CHUNK_COALESCING_H
+#ifndef TRITON_ASCEND_CHUNK_COALESCING_H
+#define TRITON_ASCEND_CHUNK_COALESCING_H
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
-// TileChunkCoalescing: fix the "tiny per-tile DMA" pathology of kernels that
+// ChunkCoalescing: fix the "tiny per-tile DMA" pathology of kernels that
 // over-decompose a contiguous problem axis onto the (outermost) launch grid.
 //
 // Pattern (the "phenomenon", not a specific kernel): the *last* program-id axis
@@ -53,10 +53,10 @@
 // launcher divides grid[a] by H. The pass is a no-op (bails) whenever the
 // pattern or the safety conditions above do not hold, including unmasked
 // kernels whose runtime tile count cannot be proven from IR.
-namespace TileChunkCoalescing {
+namespace ChunkCoalescing {
 
-void rewriteTileChunkCoalesce(mlir::ModuleOp moduleOp);
+void rewriteChunkCoalesce(mlir::ModuleOp moduleOp);
 
-} // namespace TileChunkCoalescing
+} // namespace ChunkCoalescing
 
-#endif // TRITON_ASCEND_TILE_CHUNK_COALESCING_H
+#endif // TRITON_ASCEND_CHUNK_COALESCING_H

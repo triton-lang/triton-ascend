@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  */
 
-#include "TritonToLinalg/DiagonalShiftFolding.h"
+#include "TritonToLinalg/DiagonalMaskRemoval.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -29,7 +29,7 @@
 #include "mlir/IR/Matchers.h"
 #include "llvm/ADT/SmallVector.h"
 
-namespace DiagonalShiftFolding {
+namespace DiagonalMaskRemoval {
 
 using namespace mlir;
 using namespace triton;
@@ -140,7 +140,7 @@ static int64_t tryMatchDiagonal(Value maybeRow, Value maybeCol) {
 
 } // namespace
 
-void rewriteDiagonalShiftFold(ModuleOp moduleOp) {
+void rewriteDiagonalMaskRemoval(ModuleOp moduleOp) {
   IRRewriter rw(moduleOp.getContext());
 
   SmallVector<triton::ReduceOp> candidates;
@@ -222,4 +222,4 @@ void rewriteDiagonalShiftFold(ModuleOp moduleOp) {
   }
 }
 
-} // namespace DiagonalShiftFolding
+} // namespace DiagonalMaskRemoval

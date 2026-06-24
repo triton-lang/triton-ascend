@@ -198,15 +198,14 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         if has_auto_blockify_blacklist_op or not auto_map_parallel_blocks_enabled:
             auto_blockify_size = 1
 
-        # Inject grid tile-count hint for TileChunkCoalescing. When the kernel
+        # Inject grid tile-count hint for ChunkCoalescing. When the kernel
         # has no boundary mask but grid[axis] is known at compile time (e.g.
         # from constexpr nchunks), the pass uses this to safely choose H.
         grid_num_tiles = metadata.get("grid_num_tiles")
         if isinstance(grid_num_tiles, int) and grid_num_tiles > 0:
             try:
                 _builder = ascend.ir.ascendnpu_ir_builder(mod.context, opt.arch)
-                mod.set_attr("hacc.grid_num_tiles",
-                             _builder.parse_attr(f"{grid_num_tiles} : i32"))
+                mod.set_attr("hacc.grid_num_tiles", _builder.parse_attr(f"{grid_num_tiles} : i32"))
             except Exception:
                 pass  # graceful fallback: pass runs without hint
 
@@ -1134,7 +1133,7 @@ class NPUOptions:
     # superblocking factor
     superblock_factor: int = 0
 
-    # TileChunkCoalescing: number of tiles along the outermost grid axis.
+    # ChunkCoalescing: number of tiles along the outermost grid axis.
     # Auto-injected from static grid tuples; enables safe coalescing for
     # unmasked kernels whose grid dims are compile-time known.
     grid_num_tiles: int = None
@@ -1222,8 +1221,7 @@ def ttir_to_npubin(mod, metadata, opt):
             # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
             # mirroring the SIMD compile paths. driver.py's runtime block-count
             # cap keys off the same env switch, so the two stay in sync.
-            if (_is_auto_map_parallel_blocks_enabled()
-                    and not metadata.get("has_auto_blockify_blacklist_op", False)
+            if (_is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False)
                     and not metadata.get("row_coalescing_applied", False)):
                 _compile_option_list += ["--enable-auto-blockify-loop"]
                 if opt.superblock_factor > 0:

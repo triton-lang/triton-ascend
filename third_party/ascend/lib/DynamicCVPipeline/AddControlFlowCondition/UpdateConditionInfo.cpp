@@ -507,12 +507,17 @@ Value UpdateConditionInfoPass::getSSBufferPtr(bool isAIC, int groupIdx, int ptrS
 }
 
 // Compute pointers for VECTOR core SSBuffer
-DenseMap<int, Value> UpdateConditionInfoPass::computeVectorSSBufferPtrs(
+std::optional<DenseMap<int, Value>> UpdateConditionInfoPass::computeVectorSSBufferPtrs(
     OpBuilder &builder, Location loc,
     Operation *scopeOp,
     SmallVector<int> crossCoreInputValues,
     SmallVector<int> crossCoreOutputValues)
 {
+  if (!scopeOp) {
+    LDBG("Scope Op is null pointer!");
+    return std::nullopt;
+  }
+
   // Collect all unique group indices
   SmallVector<int> allGroupIndices;
   DenseSet<int> uniqueIndices;
@@ -711,7 +716,12 @@ int UpdateConditionInfoPass::setCrossCoreCondition(
   // If ifblock is on vector core, compute the required SSBuffer ptrs for vector side
   DenseMap<int, Value> VectorSSBufferPtrs;
   if (!isAIC) {
-    VectorSSBufferPtrs = computeVectorSSBufferPtrs(builder, loc, scopeOp, crossCoreInputValues, crossCoreOutputValues);
+    auto result = computeVectorSSBufferPtrs(builder, loc, scopeOp, crossCoreInputValues, crossCoreOutputValues);
+    if (!result) {
+      LDBG("computeVectorSSBufferPtrs failed!");
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+    VectorSSBufferPtrs = std::move(*result);
   }
 
   builder.setInsertionPoint(ifOp);

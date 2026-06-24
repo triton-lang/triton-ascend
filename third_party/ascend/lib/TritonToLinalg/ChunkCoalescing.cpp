@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  */
 
-#include "TritonToLinalg/TileChunkCoalescing.h"
+#include "TritonToLinalg/ChunkCoalescing.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Math/IR/Math.h"
@@ -34,13 +34,13 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 
-#define DEBUG_TYPE "tile-chunk-coalescing"
+#define DEBUG_TYPE "chunk-coalescing"
 
 #include <algorithm>
 #include <functional>
 #include <optional>
 
-namespace TileChunkCoalescing {
+namespace ChunkCoalescing {
 
 using namespace mlir;
 using namespace triton;
@@ -317,7 +317,7 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
 
   int64_t numTiles = (seed->bound + seed->tileLen - 1) / seed->tileLen;
   int64_t H = chooseH(numTiles, seed->tileLen, elemBytes, maxH);
-  llvm::errs() << "TileChunkCoalescing: tileLen=" << seed->tileLen
+  llvm::errs() << "ChunkCoalescing: tileLen=" << seed->tileLen
                << " bound=" << seed->bound << " numTiles=" << numTiles
                << " elemBytes=" << elemBytes
                << " footprintUnit=" << footprintUnit << " maxH=" << maxH
@@ -518,10 +518,10 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
 
 } // namespace
 
-void rewriteTileChunkCoalesce(ModuleOp moduleOp) {
+void rewriteChunkCoalesce(ModuleOp moduleOp) {
   IRRewriter rw(moduleOp.getContext());
   rewriteModule(moduleOp, rw);
   moduleOp->removeAttr(kGridNumTilesAttr);
 }
 
-} // namespace TileChunkCoalescing
+} // namespace ChunkCoalescing

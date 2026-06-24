@@ -26,9 +26,10 @@
 #include "TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/TritonToLinalg/ArgMinMaxConverter.h"
+#include "ascend/include/TritonToLinalg/ChunkCoalescing.h"
 #include "ascend/include/TritonToLinalg/DescriptorConverter.h"
 #include "ascend/include/TritonToLinalg/DevicePrintOffsetRewrite.h"
-#include "ascend/include/TritonToLinalg/DiagonalShiftFolding.h"
+#include "ascend/include/TritonToLinalg/DiagonalMaskRemoval.h"
 #include "ascend/include/TritonToLinalg/FunctionConverter.h"
 #include "ascend/include/TritonToLinalg/HoistBroadcast.h"
 #include "ascend/include/TritonToLinalg/ImplicitPermute.h"
@@ -36,7 +37,6 @@
 #include "ascend/include/TritonToLinalg/MarkTensorKindPass.h"
 #include "ascend/include/TritonToLinalg/StridedAxisCoalescing.h"
 #include "ascend/include/TritonToLinalg/StridedLoadStoreRewrite.h"
-#include "ascend/include/TritonToLinalg/TileChunkCoalescing.h"
 #include "ascend/include/TritonToLinalg/TritonOpConverter.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
 #include "ascend/include/TritonToLinalg/UseAnalysis.h"
@@ -874,12 +874,13 @@ LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(
   // asccess into continuous memory access .
   StridedAxisCoalescing::rewriteStridedAxisCoalesce(moduleOp);
 
-  // DiagonalShiftFolding: replace O(N^2) diagonal-select-reduce patterns with
-  // O(N) arith.subf using the cumulative sum identity. Runs before TileChunk
-  // so the eliminated NxN intermediates no longer inflate the UB footprint.
-  DiagonalShiftFolding::rewriteDiagonalShiftFold(moduleOp);
+  // DiagonalMaskRemoval: replace O(N^2) diagonal-select-reduce patterns with
+  // O(N) arith.subf using the cumulative sum identity. Runs before
+  // ChunkCoalesce so the eliminated NxN intermediates no longer inflate the UB
+  // footprint.
+  DiagonalMaskRemoval::rewriteDiagonalMaskRemoval(moduleOp);
 
-  // TileChunkCoalescing (default-on, lower priority): when the outermost
+  // ChunkCoalescing (default-on, lower priority): when the outermost
   // program-id axis is a pure tile index over a contiguous problem axis with a
   // small tile T, fold H adjacent tiles into one program so the per-tile
   // load/store become a single contiguous H*T DMA (H picked so the block is
@@ -887,7 +888,7 @@ LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(
   // hacc.coalesce_axis. Bails when the pattern / lane-safety do not hold, when
   // the kernel reads num_programs(axis) (the launcher changes it), or when
   // StridedAxisCoalescing above already claimed the coalesce factor.
-  TileChunkCoalescing::rewriteTileChunkCoalesce(moduleOp);
+  ChunkCoalescing::rewriteChunkCoalesce(moduleOp);
 
   mlir::RewritePatternSet patterns(&getContext());
   patterns.add<StridedLoadStoreRewrite::LoadConverter,

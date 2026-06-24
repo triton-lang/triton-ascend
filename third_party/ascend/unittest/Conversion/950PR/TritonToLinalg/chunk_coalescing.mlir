@@ -7,12 +7,12 @@
 // 16 tiles per program, drop the all-true tile mask, and record the launch-grid
 // shrink metadata on the tile program-id axis.
 // CHECK-LABEL: module attributes {hacc.coalesce_axis = 0 : i32, hacc.coalesce_factor = 16 : i32
-// CHECK-LABEL: func.func @tile_chunk_coalesce_simple
+// CHECK-LABEL: func.func @chunk_coalesce_simple
 // CHECK: memref.reinterpret_cast
 // CHECK-SAME: sizes: [16, 16]
 // CHECK: memref.copy
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
-  tt.func public @tile_chunk_coalesce_simple(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+  tt.func public @chunk_coalesce_simple(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
                                              %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32}) {
     %pid = tt.get_program_id x : i32
     %c16 = arith.constant 16 : i32

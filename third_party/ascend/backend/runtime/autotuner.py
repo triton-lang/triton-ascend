@@ -2064,7 +2064,7 @@ class AutoTilingTuner(Autotuner):
 
     @staticmethod
     def _inject_grid_num_tiles(kwargs):
-        # TileChunkCoalescing hint: when the launch grid is a static tuple, the
+        # ChunkCoalescing hint: when the launch grid is a static tuple, the
         # outermost grid dim is the tile count along the chunk axis. Exposing it
         # as grid_num_tiles lets the compiler safely coalesce small chunks for
         # unmasked kernels (compile-time known bound). Skipped for callable grids

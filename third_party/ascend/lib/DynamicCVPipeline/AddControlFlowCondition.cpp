@@ -31,13 +31,7 @@
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Pass/PassManager.h"
-#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateForOps.h"
-#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "bishengir/Dialect/Scope/IR/Scope.h"
-#include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
-#include "mlir/Pass/PassManager.h"
 
 static constexpr const char *DEBUG_TYPE = "AddControlFlowCondition";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")

@@ -204,18 +204,65 @@ std::optional<llvm::StringRef> normalizeRmwOperate(RMWOp op)
   }
 }
 
+bool needsIndirectAtomicExtraBuffer(llvm::StringRef operate)
+{
+  return operate == "and" || operate == "or" || operate == "xor";
+}
+
+std::optional<int64_t> getStaticElementCount(Value value)
+{
+  if (auto tensorType = dyn_cast<RankedTensorType>(value.getType())) {
+    if (!tensorType.hasStaticShape()) {
+      return std::nullopt;
+    }
+    return tensorType.getNumElements();
+  }
+  return int64_t{1};
+}
+
+void setIndirectAtomicExtraBufferAttrs(hivm::CustomOp custom,
+                                       RankedTensorType customResultType,
+                                       ValueRange inputs,
+                                       llvm::StringRef operate,
+                                       PatternRewriter &rewriter)
+{
+  if (!needsIndirectAtomicExtraBuffer(operate)) {
+    return;
+  }
+  if (inputs.size() < 3) {
+    return;
+  }
+  std::optional<int64_t> offsetElementCount = getStaticElementCount(inputs[1]);
+  if (!offsetElementCount) {
+    return;
+  }
+  custom->setAttr(
+      "extra_buffers_types",
+      rewriter.getArrayAttr(
+          {TypeAttr::get(customResultType.getElementType())}));
+  custom->setAttr(
+      "extra_buffers_sizes",
+      rewriter.getArrayAttr({rewriter.getI64IntegerAttr(*offsetElementCount)}));
+}
+
 Value createIndirectAtomicCustom(Location loc,
                                  RankedTensorType customResultType,
                                  ValueRange inputs, ValueRange outputs,
                                  llvm::StringRef operate,
+                                 triton::MemSyncScope scope,
                                  PatternRewriter &rewriter)
 {
   auto custom = rewriter.create<hivm::CustomOp>(
       loc, TypeRange{customResultType}, kIndirectAtomicBuiltin, inputs, outputs,
       ValueRange{});
   custom->setAttr("symbol", rewriter.getStringAttr(kIndirectAtomicBuiltin));
-  custom->setAttr("extra_attr",
-                  rewriter.getStringAttr(("operate=" + operate).str()));
+  std::string extraAttr = ("operate=" + operate).str();
+  if (scope == triton::MemSyncScope::CTA) {
+    extraAttr += ", scope=cta";
+  }
+  custom->setAttr("extra_attr", rewriter.getStringAttr(extraAttr));
+  setIndirectAtomicExtraBufferAttrs(custom, customResultType, inputs, operate,
+                                    rewriter);
   custom->setAttr("hivm.pipe",
                   hivm::PipeAttr::get(rewriter.getContext(), hivm::PIPE::PIPE_V));
   custom->setAttr(
@@ -351,7 +398,7 @@ FailureOr<Value> tryConvertAtomicRmwToIndirectCustom(
 
   Value flatOldValue = createIndirectAtomicCustom(
       op.getLoc(), flatValueTensorType, inputs, ValueRange{*initOutFlatValue},
-      *operate, rewriter);
+      *operate, op.getScope(), rewriter);
   return restoreFlattenedTensorShape(op.getLoc(), flatOldValue,
                                      resultTensorType, rewriter);
 }
@@ -395,7 +442,7 @@ FailureOr<Value> tryConvertAtomicCasToIndirectCustom(
   Value flatOldValue = createIndirectAtomicCustom(
       op.getLoc(), flatValueTensorType,
       ValueRange{srcPtr, *flatOffsetValue, *flatCompareValue, *flatUpdateValue},
-      ValueRange{*initOutFlatValue}, "cas", rewriter);
+      ValueRange{*initOutFlatValue}, "cas", op.getScope(), rewriter);
   return restoreFlattenedTensorShape(op.getLoc(), flatOldValue,
                                      resultTensorType, rewriter);
 }

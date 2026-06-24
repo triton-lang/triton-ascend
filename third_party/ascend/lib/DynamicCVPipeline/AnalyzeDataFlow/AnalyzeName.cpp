@@ -58,6 +58,8 @@ static constexpr llvm::StringLiteral interceptrFunc[] {
   "parallel_simple_gla_bwd_kernel",
   "chunk_generalized_iplr_delta_rule_fwd_kernel_h",
   "chunk_dplr_fwd_kernel_h",
+  "dsa_decode_kernel",
+  "flash_mla_attn_kernel",
 };
 
 static LogicalResult verifyFuncNames(ModuleOp module)

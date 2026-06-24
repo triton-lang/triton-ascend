@@ -23,6 +23,7 @@
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
 #include <climits>
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
@@ -273,9 +274,18 @@ static int groupOpsBySsbufferId(SmallVector<Operation *> &allOps,
                                 llvm::MapVector<int, SmallVector<Operation *>> &opsById)
 {
     llvm::MapVector<Value, Operation *> opsByValue;
+    SmallVector<Operation *> resultlessOps;
     for (Operation *op : allOps) {
         auto id = getOpBlockId(op);
         if (!id.has_value()) {
+            continue;
+        }
+        if (op->getNumResults() == 0) {
+            // Result-less ops (bufferization.materialize_in_destination,
+            // hivm.hir.copy, memref.copy, linalg.fill, hivm.sync_block_*, ...)
+            // are not in opsByValue, but their operands can be cross-block
+            // deps so they must still appear in opsById.
+            resultlessOps.push_back(op);
             continue;
         }
         for (auto res : op->getResults()) {
@@ -287,6 +297,15 @@ static int groupOpsBySsbufferId(SmallVector<Operation *> &allOps,
     DenseSet<Operation *> seen;
     for (auto &p : opsByValue) {
         Operation *op = p.second;
+        if (!seen.insert(op).second)
+            continue;
+        auto id = getOpBlockId(op);
+        if (!id.has_value()) {
+            continue;
+        }
+        opsById[*id].push_back(op);
+    }
+    for (Operation *op : resultlessOps) {
         if (!seen.insert(op).second)
             continue;
         auto id = getOpBlockId(op);
@@ -362,7 +381,18 @@ static int collectInnerBlockInfo(scf::ForOp forOp, DenseMap<Value, InnerBlockInf
     // (e.g. scf.if) are included so their scalar deps get tracked; cross-block
     // judgment still attributes them to the ifOp via getOutermostSsbufferId.
     for (auto &p : opsById) {
-        Value groupKey = p.second.front()->getResult(0);
+        // Pick a Value-typed groupKey (need a result). Result-less ops like
+        // bufferization.materialize_in_destination are now included in
+        // p.second, so the first op may have no results.
+        Value groupKey;
+        for (Operation *op : p.second) {
+            if (op->getNumResults() > 0) {
+                groupKey = op->getResult(0);
+                break;
+            }
+        }
+        if (!groupKey)
+            continue;
         InnerBlockInfo bi;
         bi.blockId = groupKey;
         bi.ops = p.second;
@@ -1387,6 +1417,7 @@ static int cloneEmptyFillToConsumers(Value depVal, int producerId,
 {
     auto fillOp = cast<linalg::FillOp>(depVal.getDefiningOp());
     auto origEmpty = cast<tensor::EmptyOp>(fillOp.getOutputs()[0].getDefiningOp());
+    CVPipeline::ComputeBlockIdManager bm(fillOp->getParentOp());
 
     // Collect the `ins` operands whose defining op shares the parentOp with the
     // tensor::EmptyOp. These will be cloned together with empty+fill so the
@@ -1449,7 +1480,7 @@ static int cloneEmptyFillToConsumers(Value depVal, int producerId,
         for (Value insVal : insToClone) {
             Operation *insDef = insVal.getDefiningOp();
             Operation *newIns = builder.clone(*insDef, mapper);
-            newIns->setAttr(kBlockId, builder.getI32IntegerAttr(userBlockId));
+            bm.updateBlockId(newIns, userBlockId);
             mapper.map(insVal, newIns->getResult(0));
         }
 
@@ -1640,9 +1671,6 @@ static bool hasMemrefDepValue(DenseMap<Value, SmallVector<Value>> &depValueMap)
 static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp, OpBuilder &builder, scope::ScopeOp vectorScope,
                                int &groupId)
 {
-    // Break tensor-rooted cross-block scalar dependencies before collecting deps
-    rematerializeTensorRootedScalarDeps(mainLoopForOp);
-
     OpBuilder globalBuilder(mainLoopForOp.getContext());
 
     // First pass: clone tensor::EmptyOp + linalg::FillOp patterns into each
@@ -1669,6 +1697,13 @@ static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp, OpBuilder &builde
     DenseMap<Value, SmallVector<Operation *>> initialDepUserMap = buildDepUserMap(blocks, allOps, depValueMap);
     if (cloneEmptyFillsInBlocks(mainLoopForOp, blocks, depValueMap, initialDepUserMap, globalBuilder) != 0)
         return -1;
+
+    // Break tensor-rooted cross-block scalar dependencies AFTER the empty+fill
+    // clone. The clone can introduce fresh tensor-rooted scalar refs (e.g. a
+    // cloned arith.extf whose operand is a producer-side tensor.extract). These
+    // are not visible if rematerialization runs before the clone, leaving the
+    // cloned ins chain to keep cross-block references that no later pass fixes.
+    rematerializeTensorRootedScalarDeps(mainLoopForOp);
 
     // Phase 2: re-collect deps now that cloned ops have created new
     // cross-block references. depValueMap and allOps are cleared inside

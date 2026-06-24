@@ -101,6 +101,17 @@ private:
       DenseMap<Operation *, int> &ifOpIndex,
       DenseMap<Value, SmallVector<Value>> &crossDeps);
 
+  // Calculate factor based on iteration dependencies (tensor iter_args dependencies)
+  // For iter deps: consumer and producer are IfOps within the same forOp
+  // Returns {maxRequiredBuffers, maxX} where:
+  //   - maxRequiredBuffers: maximum (m - n + 1) across all dependencies
+  //   - maxX: the x value corresponding to maxRequiredBuffers
+  //   - returns {-1, -1} on error
+  std::pair<int, int> calculateIterDepsFactor(
+      scf::ForOp forOp,
+      SmallVector<scf::IfOp> &ifOps,
+      DenseMap<Operation *, int> &ifOpIndex);
+
   // Extend for loop iteration count
   scf::ForOp extendForOpIterationCount(scf::ForOp oldForOp, int ifCount,
                                        int requiredBuffers, int x,

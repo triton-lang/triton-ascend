@@ -113,6 +113,9 @@ bool DependencyCycleDetector::dfs(Operation *cur)
     allusers.append(memGraph.getExecAfter(cur).begin(), memGraph.getExecAfter(cur).end());
     for (auto *user : allusers) {
         auto *userInBlock = CVPipeline::getAncestorInBlock(user, block);
+        if (!userInBlock) {
+            continue;
+        }
         if (bm.getBlockIdByOp(userInBlock) == -1) {
             if (dfs(userInBlock)) {
                 return true;

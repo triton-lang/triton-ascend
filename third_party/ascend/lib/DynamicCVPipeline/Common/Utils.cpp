@@ -10,8 +10,10 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Operation.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+
 namespace mlir {
 namespace CVPipeline {
 
@@ -29,9 +31,6 @@ CoreType getOpCoreType(Operation *op)
 llvm::LogicalResult verifyOpBlockId(Operation *op)
 {
     if (!op) {
-        assert(false && "Op is nullptr, please check calling function");
-
-        // return failure to signal disabling of CV dynamic pipeline in release mode
         return llvm::failure();
     }
 
@@ -57,6 +56,9 @@ llvm::LogicalResult verifyOpBlockId(Operation *op)
 
 std::optional<int64_t> getOpBlockId(Operation *op)
 {
+    if (!op) {
+        return std::nullopt;
+    }
     auto blockIdAttr = op->getAttrOfType<IntegerAttr>(kBlockId);
     if (!blockIdAttr) {
         return std::nullopt;
@@ -102,6 +104,22 @@ bool isVectorOnlyOp(Operation *op)
 bool isScfOp(Operation *op)
 {
   return llvm::isa<scf::SCFDialect>(op->getDialect());
+}
+
+// Check nextOp is only user of preOp
+bool isOnlyDirectlyUse(Operation *preOp, Operation *nextOp, const CVPipeline::MemoryDependenceGraph &memGraph) {
+    if (!preOp || !nextOp) {
+        return false;
+    }
+    SmallVector<Operation *> allusers;
+    allusers.append(preOp->getUsers().begin(), preOp->getUsers().end());
+    for (auto memUser : memGraph.getExecAfter(preOp)) {
+        allusers.push_back(memUser);
+    }
+    if (allusers.size() != 1) {
+        return false;
+    }
+    return (*allusers.begin()) == nextOp;
 }
 
 } // namespace CVPipeline

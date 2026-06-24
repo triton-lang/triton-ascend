@@ -535,7 +535,7 @@ static bool checkValidUserSeed(Operation* op) {
     // keep unify to OpClassifer
     return isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp, ViewLikeOpInterface, tensor::ExtractSliceOp>(op);
 }
-SmallVector<Operation*> PlanCubeBlockPass::matchSeed(Operation* dotOp, ComputeBlockIdManager &bm)
+SmallVector<Operation*> PlanCubeBlockPass::matchSeed(Operation* dotOp, ComputeBlockIdManager &bm, const MemoryDependenceGraph &memGraph)
 {
     // match inputs
     SmallVector<Operation*> ret;
@@ -546,7 +546,7 @@ SmallVector<Operation*> PlanCubeBlockPass::matchSeed(Operation* dotOp, ComputeBl
             continue;
         if (checkValidInputSeed(def) && isCubeOp(def) && dotOp->getBlock() == def->getBlock() &&
             bm.getBlockIdByOp(def) == -1) {
-            if (def->hasOneUse()) {
+            if (CVPipeline::isOnlyDirectlyUse(def, dotOp, memGraph)) {
                 ret.push_back(def);
             }
         }
@@ -583,7 +583,7 @@ llvm::LogicalResult PlanCubeBlockPass::processBlockWithCubeBFS(Block *block, con
             continue;
         }
         auto temBlockId = bm.getNextId();
-        llvm::SmallVector<Operation*> dotSeeds = matchSeed(dot, bm);
+        llvm::SmallVector<Operation*> dotSeeds = matchSeed(dot, bm, memGraph);
         if (willCreateCycle(dotSeeds, memGraph, temBlockId, bm)) {
             LOG_DEBUG("Cube Seed already have a cycle!!");
             for(auto seed: dotSeeds) {

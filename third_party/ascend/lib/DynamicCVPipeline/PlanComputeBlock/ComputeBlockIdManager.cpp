@@ -81,6 +81,9 @@ int ComputeBlockIdManager::getNextId()
 
 void ComputeBlockIdManager::updateBlockId(Operation *op, int blockId)
 {
+    if (!op) {
+        return;
+    }
     // Force Update.
     MLIRContext *ctx = op->getContext();
     if (blockId == -1) {

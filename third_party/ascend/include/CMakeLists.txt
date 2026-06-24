@@ -13,3 +13,4 @@ add_subdirectory(AutoBlockify)
 # todo: this code will be removed in version 530.
 add_subdirectory(TritonAffinityOpt)
 add_subdirectory(DynamicCVPipeline)
+add_subdirectory(CVSplitScheduling)

@@ -226,7 +226,15 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             enable_select_analysis,
             compile_on_910_95
         )
-        if metadata["enable_dynamic_cv_pipeline"]:
+        if metadata.get("enable_cv_split_scheduling") and compile_on_910_95:
+            metadata["enable_dynamic_cv_pipeline"] = False
+            metadata["set_workspace_multibuffer"] = 0
+            metadata["enable_mixed_cv"] = True
+            metadata["disable_auto_inject_block_sync"] = True
+            metadata["has_auto_blockify_blacklist_op"] = True
+            _uf = metadata.get("cv_split_unroll_factor", 2)
+            ascend.passes.ttir.add_cv_split_scheduling(pm, compile_on_910_95, _uf)
+        elif metadata["enable_dynamic_cv_pipeline"]:
             metadata["set_workspace_multibuffer"] = 0
             metadata["enable_mixed_cv"] = True
             metadata["disable_auto_inject_block_sync"] = True
@@ -446,7 +454,14 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         multibuffer = metadata.get("multibuffer")
         num_stages = metadata.get("num_stages")
 
-        if multibuffer is not None or num_stages is not None:
+        # CV-split path: force single-buffer (disable auto multi-buffer). The
+        # runtime FB DMA (dmamov_decode_to_fb) rejects the register-indirect
+        # ("offset mode 2") L1 source addressing that the auto-multi-buffer pass
+        # emits as a runtime version-index select on matmul cbuf operands.
+        if os.getenv("TRITON_CVSPLIT_NO_MULTIBUFFER") == "1" or \
+           os.getenv("TRITON_CVSPLIT_ROWLOOP") == "1":
+            _compile_option_list += ["--enable-auto-multi-buffer=False"]
+        elif multibuffer is not None or num_stages is not None:
             multi_buffer_value = True
             if multibuffer is not None and not multibuffer:
                 multi_buffer_value = False
@@ -469,7 +484,15 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             ]
 
         vf_fusion_mode = metadata["vf_fusion_mode"]
-        if vf_fusion_mode is not None:
+        # TEMP: env override so CVSplit SIMD scopes can be VF-fused via
+        # --vf-fusion-mode=ub-aware-op without baking it into metadata.
+        vf_mode_env = os.getenv("TRITON_VF_FUSION_MODE")
+        # Only override when the env var is non-empty; an empty string (e.g. when
+        # run.sh forwards `-e TRITON_VF_FUSION_MODE=`) must NOT force an empty
+        # `--vf-fusion-mode=` flag, which bishengir-compile rejects.
+        if vf_mode_env:
+            vf_fusion_mode = vf_mode_env
+        if vf_fusion_mode:
             _compile_option_list += [
                 f"--vf-fusion-mode={vf_fusion_mode}",
             ]
@@ -558,10 +581,17 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--append-bisheng-options=-mllvm --cce-vf-remove-membar={enable_cce_vf_remove_membar}"]
 
-        enable_vf_fusion = metadata["enable_vf_fusion"]
+        # TEMP: Allow TRITON_ENABLE_VF_FUSION env var to override metadata configuration
+        enable_vf_env = os.getenv("TRITON_ENABLE_VF_FUSION")
+        if enable_vf_env is not None:
+            enable_vf_fusion = enable_vf_env.lower() in ("true", "1", "yes")
+        elif "enable_vf_fusion" in metadata:
+            enable_vf_fusion = metadata["enable_vf_fusion"]
+        else:
+            enable_vf_fusion = None
+
         if enable_vf_fusion is not None:
-            _compile_option_list += \
-                [f"--enable-vf-fusion={enable_vf_fusion}"]
+            _compile_option_list += [f"--enable-vf-fusion={enable_vf_fusion}"]
 
         enable_drop_unit_dims = metadata["enable_drop_unit_dims"]
         if enable_drop_unit_dims is not None:
@@ -630,8 +660,13 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if hfusion_enable_multiple_consumer_fusion:
             cmd_list += [f"--hfusion-enable-multiple-consumer-fusion={hfusion_enable_multiple_consumer_fusion}"]
 
+        if os.getenv("BISHENGIR_PRINT_IR_AFTER_ALL", None) == "1":
+            cmd_list += ["--mlir-print-ir-after-all"]
+
         if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
             print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
+
+        print(f"[BISHENGIR] cmd: {' '.join(cmd_list)}")
 
         try:
             ret = subprocess.run(
@@ -644,15 +679,34 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         except subprocess.CalledProcessError as e:
             if opt.debug:
                 _save_npuir_debug_output(e.stdout, e.stderr, tmpdir, metadata["hash"])
+            _dump_dir = os.getenv("BISHENGIR_DUMP_DIR", "/tmp/bishengir_dump")
+            if os.getenv("BISHENGIR_PRINT_IR_AFTER_ALL") == "1":
+                os.makedirs(_dump_dir, exist_ok=True)
+                if e.stderr:
+                    with open(os.path.join(_dump_dir, "bishengir_stderr_fail.txt"), "wb") as f:
+                        f.write(e.stderr)
+                if e.stdout:
+                    with open(os.path.join(_dump_dir, "bishengir_stdout_fail.txt"), "wb") as f:
+                        f.write(e.stdout)
+                print(f"[BISHENGIR] FAIL IR dump saved to {_dump_dir}")
             raise
 
         if opt.debug:
             _save_npuir_debug_output(ret.stdout, ret.stderr, tmpdir, metadata["hash"])
+        _dump_dir = os.getenv("BISHENGIR_DUMP_DIR", "/tmp/bishengir_dump")
+        if os.getenv("BISHENGIR_PRINT_IR_AFTER_ALL") == "1":
+            os.makedirs(_dump_dir, exist_ok=True)
+            if ret.stderr:
+                with open(os.path.join(_dump_dir, "bishengir_stderr_ok.txt"), "wb") as f:
+                    f.write(ret.stderr)
+            if ret.stdout:
+                with open(os.path.join(_dump_dir, "bishengir_stdout_ok.txt"), "wb") as f:
+                    f.write(ret.stdout)
+            print(f"[BISHENGIR] OK IR dump saved to {_dump_dir}")
 
         stdout_str = ret.stdout.decode('utf-8') if ret.stdout else ''
         match = re.search(r'UB\s+size\s*=\s*(\d+)\s*bits', stdout_str)
         if match:
-            # get the ub bits of triton kernel from bisheng for inductor autotune using
             metadata["required_ub_bits"] = int(match.group(1))
 
         if not Path(bin_path).exists():
@@ -694,7 +748,11 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         multibuffer = metadata.get("multibuffer")
         num_stages = metadata.get("num_stages")
 
-        if multibuffer is not None or num_stages is not None:
+        # CV-split path: force single-buffer (see note in the other compile path).
+        if os.getenv("TRITON_CVSPLIT_NO_MULTIBUFFER") == "1" or \
+           os.getenv("TRITON_CVSPLIT_ROWLOOP") == "1":
+            _compile_option_list.append("--enable-auto-multi-buffer=False")
+        elif multibuffer is not None or num_stages is not None:
             multi_buffer_value = True
             if multibuffer is not None and not multibuffer:
                 multi_buffer_value = False
@@ -971,6 +1029,8 @@ class NPUOptions:
     # todo: this code will be removed in version 530.
     add_auto_scheduling: bool = False
     enable_dynamic_cv_pipeline: bool = True if is_compile_on_910_95 else False
+    enable_cv_split_scheduling: bool = False
+    cv_split_unroll_factor: int = 2
     hfusion_enable_multiple_consumer_fusion: bool = False
     has_auto_blockify_blacklist_op: Optional[bool] = None
     intra_cache_num: int = None

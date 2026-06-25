@@ -29,7 +29,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 from triton._C.libtriton import ir, passes, ascend
 from triton.backends.ascend.utils import (
@@ -175,6 +175,11 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             auto_blockify_size = 1
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
+
+        # Allow plugins to install extra conversion passes before the Ascend ttir -> linalg lowering.
+        add_pre_ttadapter_passes = getattr(opt, "add_pre_ttadapter_passes", None)
+        if add_pre_ttadapter_passes is not None:
+            add_pre_ttadapter_passes(pm)
         ascend.passes.ttir.add_auto_blockify(
             pm,
             auto_blockify_size
@@ -990,6 +995,13 @@ class NPUOptions:
     # superblocking factor
     superblock_factor: int = 0
 
+    # Plugin hooks (invoked in CodeGenerator/compile()/ttir_to_linalg()) +
+    # a non-callable build key that hash() includes.
+    op_builder_factory: Optional[Callable] = None
+    load_extra_dialects: Optional[Callable] = None
+    add_pre_ttadapter_passes: Optional[Callable] = None
+    plugin_build_key: str = ""
+
     def __post_init__(self):
         # Parse compile_mode and set related fields
         if self.compile_mode == "simd":
@@ -1008,7 +1020,9 @@ class NPUOptions:
             object.__setattr__(self, "shared_mem_dynamic_size", 221184)
 
     def hash(self):
-        key = "_".join([f"{name}-{val}" for name, val in self.__dict__.items()])
+        # Skip callable values (hooks) so the cache key is stable across Python sessions.
+        key = "_".join([f"{name}-{val}" for name, val in self.__dict__.items()
+                        if not callable(val)])
         key = "_".join([key, get_cann_version_file_hash()])
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 

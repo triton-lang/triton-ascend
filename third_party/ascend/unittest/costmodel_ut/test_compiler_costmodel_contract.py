@@ -45,6 +45,7 @@ class CompilerCostmodelContractTest(unittest.TestCase):
             "_warn_auto_blockify_disabled",
             "downgrade_llir",
             "force_disable_ffts",
+            "triton_enable_libdevice_simt",
             "get_cann_version_file_hash",
         ]:
             setattr(utils_mod, name, lambda *args, **kwargs: False)

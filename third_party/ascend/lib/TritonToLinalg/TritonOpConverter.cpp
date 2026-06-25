@@ -1636,10 +1636,6 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
       }
       rewriter.replaceOp(op, finalResults);
       return success();
-    } else {
-      if (op.getSymbol().contains("fp32") || op.getSymbol().contains("i32")) {
-        llvm::report_fatal_error("unsupported libdevice op symbol: " + op.getSymbol());
-      }
     }
     // 1. get or create the declaration of external elementwise function
     Type dstTy = op.getResult().getType();

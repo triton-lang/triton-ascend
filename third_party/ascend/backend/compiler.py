@@ -1,4 +1,4 @@
-﻿# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -50,6 +50,7 @@ from triton.backends.ascend.utils import (
     _warn_auto_blockify_disabled,
     downgrade_llir,
     force_disable_ffts,
+    triton_enable_libdevice_simt,
     get_cann_version_file_hash,
 )
 from triton.backends.ascend.driver import (
@@ -1052,11 +1053,13 @@ def ttir_to_npubin(mod, metadata, opt):
             if opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
 
-            bisheng_options = metadata["bisheng_options"]
-            if bisheng_options is not None:
-                _compile_option_list += [
-                    f"--append-bisheng-options={bisheng_options}"
-                ]
+            enable_libdevice_simt = triton_enable_libdevice_simt()
+            if (enable_libdevice_simt):
+                bisheng_options = metadata["bisheng_options"]
+                if bisheng_options is not None:
+                    _compile_option_list += [
+                        f"--append-bisheng-options={bisheng_options}"
+                    ]
 
             # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
             # mirroring the SIMD compile paths. driver.py's runtime block-count

@@ -1581,67 +1581,6 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
   if (op.getSymbol().contains("__hmf_")) {
     // libdevice -> hivm.hir.custom
     bool is_libdevice = llvm::is_contained(libdeviceOps, op.getSymbol());
-    if (is_libdevice) {
-      SmallVector<Value> newOuts;
-      SmallVector<Type> originalOutputTypes;
-      for (auto newOut : op->getResults()) {
-        originalOutputTypes.push_back(newOut.getType());
-        auto tensorType = dyn_cast<RankedTensorType>(newOut.getType());
-        Type elemType = tensorType.getElementType();
-        if (elemType.isInteger(1)) {
-          elemType = rewriter.getI32Type();
-        }
-        auto src = rewriter.create<tensor::EmptyOp>(
-              op->getLoc(), tensorType.getShape(), elemType);
-        newOuts.push_back(src);
-      }
-      ValueRange inputs{op->getOperands()};
-      ValueRange outputs{newOuts};
-      ValueRange temp_buffers{};
-      TypeRange res_types{outputs};
-      std::string sym = llvm::join(llvm::split(op.getSymbol().str(), "__hmf_"), "");
-      auto customRes = rewriter.create<hivm::CustomOp>(op.getLoc(), res_types, sym, inputs, outputs, temp_buffers);
-      auto arg_attrs_array = mlir::ArrayAttr::get(customRes->getContext(), {});
-      auto pipeAttr = hivm::PipeAttr::get(customRes->getContext(), hivm::PIPE::PIPE_V);
-      auto tcoreTypeAttr = hivm::TCoreTypeAttr::get(customRes->getContext(), hivm::TCoreType::VECTOR);
-      auto vfModeAttr = hivm::VFModeAttr::get(customRes->getContext(), hivm::VFMode::SIMD);
-      customRes->setAttr("arg_attrs", arg_attrs_array);
-      customRes->setAttr("bitcode", mlir::StringAttr::get(customRes->getContext(), ""));
-      customRes->setAttr("hivm.pipe", pipeAttr);
-      customRes->setAttr("hivm.tcore_type", tcoreTypeAttr);
-      customRes->setAttr("hivm.vf_mode", vfModeAttr);
-      customRes->setAttr("symbol", mlir::StringAttr::get(customRes->getContext(), sym));
-      SmallVector<Value> finalResults;
-      for (auto [customResult, origType] : llvm::zip(customRes.getResults(), originalOutputTypes)) {
-        auto origTensorType = dyn_cast<RankedTensorType>(origType);
-        Type targetElemType = rewriter.getI8Type();
-        Type targetTensorType = RankedTensorType::get(
-          origTensorType.getShape(),
-          targetElemType
-        );
-
-        if (origTensorType.getElementType().isInteger(1)) {
-          auto i32ElemType = rewriter.getI32Type();
-          auto denseZeroAttr = DenseElementsAttr::get(
-              RankedTensorType::get(origTensorType.getShape(), i32ElemType), 0);
-          auto zeroTensor = rewriter.create<arith::ConstantOp>(
-              loc, denseZeroAttr);
-          auto cmp = rewriter.create<arith::CmpIOp>(
-            loc, arith::CmpIPredicate::ne, customResult, zeroTensor);
-
-          finalResults.push_back(cmp);
-        } else {
-          finalResults.push_back(customResult);
-        }
-      }
-      rewriter.replaceOp(op, finalResults);
-      return success();
-    } else {
-      if (op.getSymbol().contains("fp32") || op.getSymbol().contains("i32")) {
-        llvm::report_fatal_error("unsupported libdevice op symbol: " + op.getSymbol());
-      }
-    }
-    // 1. get or create the declaration of external elementwise function
     Type dstTy = op.getResult().getType();
     bool isDstScalar = !isa<RankedTensorType>(dstTy);
     Type dstElemTy =
@@ -1658,6 +1597,171 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
       srcElemTys.push_back(
           cast<RankedTensorType>(src.getType()).getElementType());
     }
+    if (is_libdevice) {
+      SmallVector<Value> newOuts;
+      SmallVector<Type> originalOutputTypes;
+      SmallVector<ReassociationIndices> outputReassociation;
+      SmallVector<SmallVector<int64_t>> originalShapes;
+      SmallVector<bool> needsCollapse;
+
+      // ========== Step 1: Preprocess all inputs uniformly, flatten everything to 1D + build mapping ==========
+      SmallVector<Value> collapsedInputs;
+      DenseMap<Value, Value> orig2CollapsedMap;
+      SmallVector<SmallVector<int64_t>> inputOriginalShapes;
+      SmallVector<bool> inputNeedsCollapse;
+      SmallVector<ReassociationIndices> inputReassociation;
+
+      for (Value operand : srcs) {
+        RankedTensorType tensorTy = cast<RankedTensorType>(operand.getType());
+        if (tensorTy.getRank() <= 1) {
+          // Already 1-dimensional, no need for flattening
+          collapsedInputs.push_back(operand);
+          orig2CollapsedMap[operand] = operand;
+          inputNeedsCollapse.push_back(false);
+          inputOriginalShapes.push_back({});
+          inputReassociation.emplace_back();
+          continue;
+        }
+
+        inputNeedsCollapse.push_back(true);
+        inputOriginalShapes.push_back(llvm::to_vector(tensorTy.getShape()));
+
+        int64_t totalSize = 1;
+        for (int64_t dim : tensorTy.getShape()) {
+          if (ShapedType::isDynamic(dim)) {
+            totalSize = ShapedType::kDynamic;
+            break;
+          }
+          totalSize *= dim;
+        }
+
+        ReassociationIndices indices;
+        for (int i = 0; i < tensorTy.getRank(); ++i)
+          indices.push_back(i);
+        inputReassociation.push_back(indices);
+
+        RankedTensorType collapse1DTy = RankedTensorType::get({totalSize}, tensorTy.getElementType());
+        Value collapsedVal = rewriter.create<tensor::CollapseShapeOp>(op.getLoc(), collapse1DTy, operand, indices);
+        collapsedInputs.push_back(collapsedVal);
+        orig2CollapsedMap[operand] = collapsedVal;
+      }
+
+      // ========== Step 2: Iterate over outputs, compute the 1D type for each output individually to match the buffer ==========
+      for (Value newOut : op->getResults()) {
+        originalOutputTypes.push_back(newOut.getType());
+        RankedTensorType tensorType = dyn_cast<RankedTensorType>(newOut.getType());
+        if (!tensorType) {
+          tensorType = RankedTensorType::get({1}, dstElemTy);
+        }
+
+        Type elemType = tensorType.getElementType();
+        originalShapes.push_back(llvm::to_vector(tensorType.getShape()));
+        bool needCollapse = tensorType.getRank() != 1;
+        needsCollapse.push_back(needCollapse);
+
+        if (elemType.isInteger(1)) {
+          elemType = rewriter.getI32Type();
+        }
+
+        // Calculate the 1D type of the current output after flattening (the actual type used for buffer matching, replacing the original global dstTy)
+        int64_t outTotalSize = 1;
+        for (int64_t dim : tensorType.getShape()) {
+          if (ShapedType::isDynamic(dim)) {
+            outTotalSize = ShapedType::kDynamic;
+            break;
+          }
+          outTotalSize *= dim;
+        }
+        RankedTensorType target1DTy = RankedTensorType::get({outTotalSize}, elemType);
+
+        Value outputBuffer = nullptr;
+        // Reuse buffers with the same 1D type from the flattened inputs
+        for (Value src : srcs) {
+          Value collapseSrc = orig2CollapsedMap.lookup(src);
+          if (!collapseSrc) continue;
+          if (collapseSrc.getType() == target1DTy) {
+            outputBuffer = collapseSrc;
+            break;
+          }
+        }
+
+        // No reusable buffer found, create a new 1D Empty tensor
+        if (!outputBuffer) {
+          outputBuffer = rewriter.create<tensor::EmptyOp>(op.getLoc(), target1DTy.getShape(), elemType);
+        }
+
+        newOuts.push_back(outputBuffer);
+        if (needCollapse) {
+          ReassociationIndices indices;
+          for (int i = 0; i < tensorType.getRank(); ++i)
+            indices.push_back(i);
+          outputReassociation.push_back(indices);
+        } else {
+          outputReassociation.emplace_back();
+        }
+      }
+
+      // ========== The subsequent logic for CustomOp creation, shape restoration and i1 type conversion remains unchanged ==========
+      ValueRange inputs{collapsedInputs};
+      ValueRange outputs{newOuts};
+      ValueRange temp_buffers{};
+      TypeRange res_types{outputs};
+
+      std::string sym = llvm::join(llvm::split(op.getSymbol().str(), "__hmf_"), "");
+      auto customRes = rewriter.create<hivm::CustomOp>(
+          op.getLoc(), res_types, sym, inputs, outputs, temp_buffers);
+
+      auto arg_attrs_array = mlir::ArrayAttr::get(customRes->getContext(), {});
+      auto pipeAttr = hivm::PipeAttr::get(customRes->getContext(), hivm::PIPE::PIPE_V);
+      auto tcoreTypeAttr = hivm::TCoreTypeAttr::get(customRes->getContext(), hivm::TCoreType::VECTOR);
+      auto vfModeAttr = hivm::VFModeAttr::get(customRes->getContext(), hivm::VFMode::SIMD);
+
+      customRes->setAttr("arg_attrs", arg_attrs_array);
+      customRes->setAttr("bitcode", mlir::StringAttr::get(customRes->getContext(), ""));
+      customRes->setAttr("hivm.pipe", pipeAttr);
+      customRes->setAttr("hivm.tcore_type", tcoreTypeAttr);
+      customRes->setAttr("hivm.vf_mode", vfModeAttr);
+      customRes->setAttr("symbol", mlir::StringAttr::get(customRes->getContext(), sym));
+      customRes->setAttr("custom_type", mlir::StringAttr::get(customRes->getContext(), "libdevice"));
+
+      SmallVector<Value> finalResults;
+      for (size_t idx = 0; idx < customRes.getResults().size(); ++idx) {
+        auto customResultVal = customRes.getResults()[idx];
+        auto origTypeVal = originalOutputTypes[idx];
+        auto origTensorType = dyn_cast<RankedTensorType>(origTypeVal);
+        auto resultTensorType = dyn_cast<RankedTensorType>(customResultVal.getType());
+
+        Value expandedResult = customResultVal;
+        if (needsCollapse[idx]) {
+          auto expandedType = RankedTensorType::get(
+              originalShapes[idx], resultTensorType.getElementType());
+          expandedResult = rewriter.create<tensor::ExpandShapeOp>(
+              op->getLoc(), expandedType, customResultVal, outputReassociation[idx]);
+        }
+
+        if (origTensorType.getElementType().isInteger(1)) {
+          auto i32ElemType = rewriter.getI32Type();
+          auto shape = needsCollapse[idx] ? originalShapes[idx]
+                                          : llvm::to_vector(resultTensorType.getShape());
+          auto denseZeroAttr = DenseElementsAttr::get(
+              RankedTensorType::get(shape, i32ElemType), 0);
+          auto zeroTensor = rewriter.create<arith::ConstantOp>(op->getLoc(), denseZeroAttr);
+          auto cmp = rewriter.create<arith::CmpIOp>(
+              op->getLoc(), arith::CmpIPredicate::ne, expandedResult, zeroTensor);
+          finalResults.push_back(cmp);
+        } else {
+          finalResults.push_back(expandedResult);
+        }
+      }
+
+      rewriter.replaceOp(op, finalResults);
+      return success();
+    } else {
+      if (op.getSymbol().contains("fp32") || op.getSymbol().contains("i32")) {
+        llvm::report_fatal_error("unsupported libdevice op symbol: " + op.getSymbol());
+      }
+    }
+    // 1. get or create the declaration of external elementwise function
     FunctionType elemFuncType =
         FunctionType::get(rewriter.getContext(), srcElemTys, {dstElemTy});
     auto mod = SymbolTable::getNearestSymbolTable(op);

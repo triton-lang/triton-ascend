@@ -216,6 +216,11 @@ class CodeGenerator(ast.NodeVisitor):
             self.builder = ir.builder(context, compile_mode="simt")
         else:
             self.builder = ir.builder(context, compile_mode="simd")
+
+        # Allow plugins to plug in a custom op builder that extends the default triton builder.
+        op_builder_factory = getattr(options, "op_builder_factory", None)
+        if op_builder_factory is not None:
+            self.builder = op_builder_factory(context)
         self.file_name = file_name
         # node.lineno starts from 1, so we need to subtract 1
         self.begin_line = begin_line - 1

@@ -276,6 +276,12 @@ def compile(src, target=None, options=None, _env_vars=None):
     buffer_ir.load_dialects(context)
     ascend_ir.load_dialects(context)
     backend.load_dialects(context)
+
+    # Allow plugins to register extra dialects into the MLIR context.
+    load_extra_dialects = getattr(options, "load_extra_dialects", None)
+    if load_extra_dialects is not None:
+        load_extra_dialects(context)
+
     codegen_fns = backend.get_codegen_implementation()
     module_map = backend.get_module_map()
     try:

@@ -97,6 +97,7 @@ support_dtypes = [dtype for dtype in _all_dtypes_no_bool if dtype not in not_sup
 @pytest.mark.parametrize("dim", [0, 1])
 @pytest.mark.parametrize("reverse", [False, True])
 def test_cumprod(dtype, shape, dim, reverse):
+    xx
     x0 = cumprod_generate_tensor(shape=shape, dtype=dtype).npu()
     triton_cal = triton_func(x0, dim, reverse)
     torch_ref = torch_func(x0, dim, reverse)

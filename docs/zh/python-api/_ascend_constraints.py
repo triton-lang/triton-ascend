@@ -127,64 +127,69 @@ CONSTRAINTS = {
     "triton.language.atomic_add": {
         "constraints": [
             "DataType: Ascend does not support fp64 (hardware limitation).",
-            "``sem``: only support acq_rel",
-            "``scope``: only support gpu",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
         "example":
         "triton.language.atomic_add",
     },
     "triton.language.atomic_and": {
         "constraints": [
-            "``sem``: only support acq_rel",
-            "``scope``: only support gpu",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
-        "example": "triton.language.atomic_and",
+        "example":
+        "triton.language.atomic_and",
     },
     "triton.language.atomic_cas": {
         "constraints": [
             "DataType: Ascend does not support fp64 (hardware limitation).",
-            "``sem``: only support acq_rel",
-            "``scope``: only support gpu",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
         "example":
         "triton.language.atomic_cas",
     },
     "triton.language.atomic_max": {
         "constraints": [
-            "``sem``: only support acq_rel",
-            "``scope``: only support gpu",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
-        "example": "triton.language.atomic_max",
+        "example":
+        "triton.language.atomic_max",
     },
     "triton.language.atomic_min": {
         "constraints": [
-            "``sem``: only support acq_rel",
-            "``scope``: only support gpu",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
-        "example": "triton.language.atomic_min",
+        "example":
+        "triton.language.atomic_min",
     },
     "triton.language.atomic_or": {
         "constraints": [
-            "``sem``: only support acq_rel",
-            "``scope``: only support gpu",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
-        "example": "triton.language.atomic_or",
+        "example":
+        "triton.language.atomic_or",
     },
     "triton.language.atomic_xchg": {
         "constraints": [
             "DataType: Ascend does not support fp64 (hardware limitation).",
-            "``sem``: only support acq_rel",
-            "``scope``: only support gpu",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
         "example":
         "triton.language.atomic_xchg",
     },
     "triton.language.atomic_xor": {
         "constraints": [
-            "``sem``: only support acq_rel",
-            "``scope``: only support gpu",
+            "``sem``: Ascend does not support \"acquire\",\"release\",\"relaxed\"",
+            "``scope``: Ascend does not support \"cta\",\"sys\"",
         ],
-        "example": "triton.language.atomic_xor",
+        "example":
+        "triton.language.atomic_xor",
     },
     "triton.language.broadcast": {
         "constraints": [

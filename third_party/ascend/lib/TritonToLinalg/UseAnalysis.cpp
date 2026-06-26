@@ -389,11 +389,7 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
             })
             .Case<triton::ascend::UnstructuredLoadOp>([&](auto unstrucLoad) {
               auto base = unstrucLoad.getBase();
-              auto indices = unstrucLoad.getIndices();
-              auto mask = unstrucLoad.getMask();
-              auto other = unstrucLoad.getOther();
-              if (result == base || result == indices || result == mask ||
-                  result == other)
+              if (result == base)
                 metaUsers.insert(user);
             })
             .Case<triton::StoreOp>([&](auto store) {
@@ -405,9 +401,7 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
             })
             .Case<triton::ascend::UnstructuredStoreOp>([&](auto unstrucStore) {
               auto base = unstrucStore.getBase();
-              auto indices = unstrucStore.getIndices();
-              auto mask = unstrucStore.getMask();
-              if (result == base || result == indices || result == mask)
+              if (result == base)
                 metaUsers.insert(user);
             })
             .Case<triton::AtomicRMWOp>([&](auto atomicOp) {

@@ -2963,19 +2963,11 @@ LogicalResult UnstructuredLoadConverter::matchAndRewrite(
   if (isSimdSimtMode) {
     auto burstLen = rewriter.create<arith::ConstantIntOp>(loc, burstlen, 32);
 
-    Value scalarOther;
-    if (other) {
-      scalarOther = mlir::ConverterUtils::getScalarValue(other, loc, rewriter);
-      assert(scalarOther &&
-             "other value used in masked unstructured_load produced by "
-             "unsupported instruction!");
-    }
-
     Value dst = rewriter.create<tensor::EmptyOp>(
         loc, resultShape, cast<RankedTensorType>(resTy).getElementType());
 
     auto gatherLoadOp = rewriter.create<hfusion::GatherLoadOp>(
-        loc, baseMem, offsets, burstLen, mask, scalarOther, dst,
+        loc, baseMem, offsets, burstLen, mask, other, dst,
         hfusion::CacheModifierAttr{}, hfusion::EvictionPolicyAttr{},
         mlir::BoolAttr{});
     rewriter.replaceOp(op, gatherLoadOp.getResult());

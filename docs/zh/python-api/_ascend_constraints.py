@@ -986,4 +986,118 @@ CONSTRAINTS = {
         "example":
         "triton.language.extra.cann.extension.scatter_ub_to_out",
     },
+    "triton.language.extra.cann.libdevice.acos": {
+        "example": "triton.language.extra.cann.libdevice.acos",
+    },
+    "triton.language.extra.cann.libdevice.acosh": {
+        "example": "triton.language.extra.cann.libdevice.acosh",
+    },
+    "triton.language.extra.cann.libdevice.asin": {
+        "example": "triton.language.extra.cann.libdevice.asin",
+    },
+    "triton.language.extra.cann.libdevice.asinh": {
+        "example": "triton.language.extra.cann.libdevice.asinh",
+    },
+    "triton.language.extra.cann.libdevice.atan": {
+        "example": "triton.language.extra.cann.libdevice.atan",
+    },
+    "triton.language.extra.cann.libdevice.atan2": {
+        "example": "triton.language.extra.cann.libdevice.atan2",
+    },
+    "triton.language.extra.cann.libdevice.atanh": {
+        "example": "triton.language.extra.cann.libdevice.atanh",
+    },
+    "triton.language.extra.cann.libdevice.copysign": {
+        "example": "triton.language.extra.cann.libdevice.copysign",
+    },
+    "triton.language.extra.cann.libdevice.cosh": {
+        "example": "triton.language.extra.cann.libdevice.cosh",
+    },
+    "triton.language.extra.cann.libdevice.cyl_bessel_i0": {
+        "example": "triton.language.extra.cann.libdevice.cyl_bessel_i0",
+    },
+    "triton.language.extra.cann.libdevice.div_rz": {
+        "example": "triton.language.extra.cann.libdevice.div_rz",
+    },
+    "triton.language.extra.cann.libdevice.erfinv": {
+        "example": "triton.language.extra.cann.libdevice.erfinv",
+    },
+    "triton.language.extra.cann.libdevice.expm1": {
+        "example": "triton.language.extra.cann.libdevice.expm1",
+    },
+    "triton.language.extra.cann.libdevice.fast_dividef": {
+        "example": "triton.language.extra.cann.libdevice.fast_dividef",
+    },
+    "triton.language.extra.cann.libdevice.fast_expf": {
+        "example": "triton.language.extra.cann.libdevice.fast_expf",
+    },
+    "triton.language.extra.cann.libdevice.float_as_int": {
+        "example": "triton.language.extra.cann.libdevice.float_as_int",
+    },
+    "triton.language.extra.cann.libdevice.fmod": {
+        "example": "triton.language.extra.cann.libdevice.fmod",
+    },
+    "triton.language.extra.cann.libdevice.gamma": {
+        "example": "triton.language.extra.cann.libdevice.gamma",
+    },
+    "triton.language.extra.cann.libdevice.hypot": {
+        "example": "triton.language.extra.cann.libdevice.hypot",
+    },
+    "triton.language.extra.cann.libdevice.ilogb": {
+        "example": "triton.language.extra.cann.libdevice.ilogb",
+    },
+    "triton.language.extra.cann.libdevice.isinf": {
+        "example": "triton.language.extra.cann.libdevice.isinf",
+    },
+    "triton.language.extra.cann.libdevice.isnan": {
+        "example": "triton.language.extra.cann.libdevice.isnan",
+    },
+    "triton.language.extra.cann.libdevice.ldexp": {
+        "example": "triton.language.extra.cann.libdevice.ldexp",
+    },
+    "triton.language.extra.cann.libdevice.lgamma": {
+        "example": "triton.language.extra.cann.libdevice.lgamma",
+    },
+    "triton.language.extra.cann.libdevice.log10": {
+        "example": "triton.language.extra.cann.libdevice.log10",
+    },
+    "triton.language.extra.cann.libdevice.log1p": {
+        "example": "triton.language.extra.cann.libdevice.log1p",
+    },
+    "triton.language.extra.cann.libdevice.nearbyint": {
+        "example": "triton.language.extra.cann.libdevice.nearbyint",
+    },
+    "triton.language.extra.cann.libdevice.nextafter": {
+        "example": "triton.language.extra.cann.libdevice.nextafter",
+    },
+    "triton.language.extra.cann.libdevice.pow": {
+        "example": "triton.language.extra.cann.libdevice.pow",
+    },
+    "triton.language.extra.cann.libdevice.reciprocal": {
+        "example": "triton.language.extra.cann.libdevice.reciprocal",
+    },
+    "triton.language.extra.cann.libdevice.relu": {
+        "example": "triton.language.extra.cann.libdevice.relu",
+    },
+    "triton.language.extra.cann.libdevice.rint": {
+        "example": "triton.language.extra.cann.libdevice.rint",
+    },
+    "triton.language.extra.cann.libdevice.round": {
+        "example": "triton.language.extra.cann.libdevice.round",
+    },
+    "triton.language.extra.cann.libdevice.signbit": {
+        "example": "triton.language.extra.cann.libdevice.signbit",
+    },
+    "triton.language.extra.cann.libdevice.sinh": {
+        "example": "triton.language.extra.cann.libdevice.sinh",
+    },
+    "triton.language.extra.cann.libdevice.tan": {
+        "example": "triton.language.extra.cann.libdevice.tan",
+    },
+    "triton.language.extra.cann.libdevice.tanh": {
+        "example": "triton.language.extra.cann.libdevice.tanh",
+    },
+    "triton.language.extra.cann.libdevice.trunc": {
+        "example": "triton.language.extra.cann.libdevice.trunc",
+    },
 }

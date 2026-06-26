@@ -29,6 +29,12 @@ import triton
 
 @core.extern
 def reciprocal(arg0, _semantic=None):
+    """
+    Computes the element-wise reciprocal (1/x) of the input tensor.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16.
+    :type arg0: tl.tensor
+    """
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_recipf", core.dtype("fp32")),
@@ -38,6 +44,12 @@ def reciprocal(arg0, _semantic=None):
 
 @core.extern
 def log1p(arg0, _semantic=None):
+    """
+    Computes the element-wise natural logarithm of (1 + x).
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16.
+    :type arg0: tl.tensor
+    """
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_log1pf", core.dtype("fp32")),
@@ -47,6 +59,12 @@ def log1p(arg0, _semantic=None):
 
 @core.extern
 def relu(arg0, _semantic=None):
+    """
+    Computes the element-wise ReLU activation: max(0, x).
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16.
+    :type arg0: tl.tensor
+    """
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_reluf", core.dtype("fp32")),
@@ -56,6 +74,12 @@ def relu(arg0, _semantic=None):
 
 @core.extern
 def isinf(arg0, _semantic=None):
+    """
+    Tests whether each element of the input tensor is infinity.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg0: tl.tensor
+    """
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_isinf", core.dtype("int1")),
@@ -66,6 +90,12 @@ def isinf(arg0, _semantic=None):
 
 @core.extern
 def tan(arg0, _semantic=None):
+    """
+    Computes the element-wise tangent of the input tensor.
+
+    :param arg0: The input tensor in radians. Supported dtypes: fp32, fp16.
+    :type arg0: tl.tensor
+    """
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_tanf", core.dtype("fp32")),
@@ -75,6 +105,12 @@ def tan(arg0, _semantic=None):
 
 @core.extern
 def atan(arg0, _semantic=None):
+    """
+    Computes the element-wise arctangent (inverse tangent) of the input tensor.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16.
+    :type arg0: tl.tensor
+    """
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_atanf", core.dtype("fp32")),
@@ -84,6 +120,12 @@ def atan(arg0, _semantic=None):
 
 @core.extern
 def tanh(arg0, _semantic=None):
+    """
+    Computes the element-wise hyperbolic tangent of the input tensor.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg0: tl.tensor
+    """
     arg0 = _semantic.to_tensor(arg0)
     original_dtype = arg0.dtype
     if original_dtype == core.dtype("bf16"):
@@ -107,6 +149,12 @@ def tanh(arg0, _semantic=None):
 
 @core.extern
 def ilogb(arg0, _semantic=None):
+    """
+    Returns the integer binary exponent of the input tensor.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16.
+    :type arg0: tl.tensor
+    """
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_ilogbf", core.dtype("fp32")),
@@ -116,6 +164,14 @@ def ilogb(arg0, _semantic=None):
 
 @core.extern
 def ldexp(arg0, arg1, _semantic=None):
+    """
+    Computes x * 2^exp from a mantissa and an exponent.
+
+    :param arg0: The mantissa tensor. Supported dtypes: fp32, fp16.
+    :type arg0: tl.tensor
+    :param arg1: The exponent tensor. Supported dtype: int32.
+    :type arg1: tl.tensor
+    """
     return core.extern_elementwise(
         "", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("int32")): ("__hmf_ldexpf", core.dtype("fp32")),
@@ -125,6 +181,14 @@ def ldexp(arg0, arg1, _semantic=None):
 
 @core.extern
 def pow(arg0, arg1, _semantic=None):
+    """
+    Computes arg0 raised to the power of arg1.
+
+    :param arg0: The base tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg0: tl.tensor
+    :param arg1: The exponent tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg1: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         return core.extern_elementwise("", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_pow_fp32", core.dtype("fp32")),
@@ -140,6 +204,12 @@ def pow(arg0, arg1, _semantic=None):
 
 @core.extern
 def isnan(arg0, _semantic=None):
+    """
+    Tests whether each element of the input tensor is NaN.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg0: tl.tensor
+    """
     return core.extern_elementwise(
         "", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_isnan", core.dtype("int1")),
@@ -150,6 +220,14 @@ def isnan(arg0, _semantic=None):
 
 @core.extern
 def div_rz(arg0, arg1, _semantic=None):
+    """
+    Computes the division with round-toward-zero mode.
+
+    :param arg0: The dividend tensor. Supported dtype: fp32.
+    :type arg0: tl.tensor
+    :param arg1: The divisor tensor. Supported dtype: fp32.
+    :type arg1: tl.tensor
+    """
     return core.extern_elementwise("", "", [arg0, arg1], {
         (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_div_rz_fp32", core.dtype("fp32")),
     }, is_pure=True, _semantic=_semantic)
@@ -157,6 +235,14 @@ def div_rz(arg0, arg1, _semantic=None):
 
 @core.builtin
 def fast_dividef(arg0, arg1, _semantic=None):
+    """
+    Computes a fast floating-point division.
+
+    :param arg0: The dividend tensor.
+    :type arg0: tl.tensor
+    :param arg1: The divisor tensor.
+    :type arg1: tl.tensor
+    """
     arg0 = _semantic.to_tensor(arg0)
     arg1 = _semantic.to_tensor(arg1)
     ret = _semantic.fdiv(arg0, arg1, False)
@@ -165,6 +251,12 @@ def fast_dividef(arg0, arg1, _semantic=None):
 
 @core.builtin
 def fast_expf(arg0, _semantic=None):
+    """
+    Computes a fast exponential (e^x) of the input tensor.
+
+    :param arg0: The input tensor.
+    :type arg0: tl.tensor
+    """
     arg0 = _semantic.to_tensor(arg0)
     ret = core.tensor(_semantic.builder.create_exp(arg0.handle), arg0.type)
     return ret
@@ -172,6 +264,14 @@ def fast_expf(arg0, _semantic=None):
 
 @core.extern
 def fmod(arg0, arg1, _semantic=None):
+    """
+    Computes the floating-point remainder of arg0 / arg1.
+
+    :param arg0: The dividend tensor. Supported dtype: fp32.
+    :type arg0: tl.tensor
+    :param arg1: The divisor tensor. Supported dtype: fp32.
+    :type arg1: tl.tensor
+    """
     return core.extern_elementwise("", "", [arg0, arg1], {
         (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fmod_fp32", core.dtype("fp32")),
     }, is_pure=True, _semantic=_semantic)
@@ -179,6 +279,12 @@ def fmod(arg0, arg1, _semantic=None):
 
 @core.extern
 def float_as_int(arg0, _semantic=None):
+    """
+    Reinterprets the bits of a float32 value as an int32.
+
+    :param arg0: The input tensor. Supported dtype: fp32.
+    :type arg0: tl.tensor
+    """
     return core.extern_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_float_as_int_fp32", core.dtype("int32")),
     }, is_pure=True, _semantic=_semantic)
@@ -186,6 +292,14 @@ def float_as_int(arg0, _semantic=None):
 
 @core.extern
 def atan2(arg0, arg1, _semantic=None):
+    """
+    Computes the arctangent of arg0/arg1, using signs to determine the quadrant.
+
+    :param arg0: The y-coordinate tensor. Supported dtypes: fp32, fp16.
+    :type arg0: tl.tensor
+    :param arg1: The x-coordinate tensor. Supported dtypes: fp32, fp16.
+    :type arg1: tl.tensor
+    """
     if arg0.dtype == core.dtype("bf16") or arg1.dtype == core.dtype("bf16"):
         core.static_print("extern livdevice.atan2 for dtype bf16 is unspported for now.")
         core.static_assert(False)
@@ -198,6 +312,12 @@ def atan2(arg0, arg1, _semantic=None):
 
 @core.extern
 def round(arg0, _semantic=None):
+    """
+    Rounds the input tensor to the nearest integer.
+
+    :param arg0: The input tensor. Supported dtype: fp32.
+    :type arg0: tl.tensor
+    """
     return core.extern_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_roundf", core.dtype("fp32")),
     }, is_pure=True, _semantic=_semantic)
@@ -205,8 +325,13 @@ def round(arg0, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-@math._add_math_1arg_docstr("acos")
 def acos(arg0: core.tensor, _semantic=None):
+    """
+    Computes the element-wise arccosine (inverse cosine) of the input tensor.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.acos for dtype bf16 is unspported for now.")
@@ -266,8 +391,13 @@ def acos(arg0: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-@math._add_math_1arg_docstr("sinh")
 def sinh(arg0: core.tensor, _semantic=None):
+    """
+    Computes the element-wise hyperbolic sine of the input tensor.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.sinh for dtype bf16 is unspported for now.")
@@ -288,8 +418,13 @@ def sinh(arg0: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-@math._add_math_1arg_docstr("cosh")
 def cosh(arg0: core.tensor, _semantic=None):
+    """
+    Computes the element-wise hyperbolic cosine of the input tensor.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.cosh for dtype bf16 is unspported for now.")
@@ -310,8 +445,13 @@ def cosh(arg0: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-@math._add_math_1arg_docstr("acosh")
 def acosh(arg0: core.tensor, _semantic=None):
+    """
+    Computes the element-wise inverse hyperbolic cosine of the input tensor.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.acosh for dtype bf16 is unspported for now.")
@@ -331,8 +471,13 @@ def acosh(arg0: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-@math._add_math_1arg_docstr("asinh")
 def asinh(arg0: core.tensor, _semantic=None):
+    """
+    Computes the element-wise inverse hyperbolic sine of the input tensor.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.asinh for dtype bf16 is unspported for now.")
@@ -352,8 +497,13 @@ def asinh(arg0: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-@math._add_math_1arg_docstr("atanh")
 def atanh(arg0: core.tensor, _semantic=None):
+    """
+    Computes the element-wise inverse hyperbolic tangent of the input tensor.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.atanh for dtype bf16 is unspported for now.")
@@ -375,8 +525,13 @@ def atanh(arg0: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-@math._add_math_1arg_docstr("expm1")
 def expm1(arg0: core.tensor, _semantic=None):
+    """
+    Computes e^x - 1 with better precision for small x.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.expm1 for dtype bf16 is unspported for now.")
@@ -394,8 +549,15 @@ def expm1(arg0: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["fp16", "fp32"])
-@math._add_math_2arg_docstr("nextafter")
 def nextafter(arg0: core.tensor, arg1: core.tensor, _semantic=None):
+    """
+    Returns the next representable floating-point value after arg0 toward arg1.
+
+    :param arg0: The starting value tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg0: tl.tensor
+    :param arg1: The direction value tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg1: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         return core.extern_elementwise(
             "", "", [arg0, arg1], {
@@ -438,8 +600,15 @@ def nextafter(arg0: core.tensor, arg1: core.tensor, _semantic=None):
 
 @core.builtin
 @math._check_dtype(dtypes=["bf16", "fp16", "fp32"])
-@math._add_math_2arg_docstr("hypot(Euclidean Distance)")
 def hypot(arg0: core.tensor, arg1: core.tensor, _semantic=None):
+    """
+    Computes the Euclidean distance: sqrt(arg0^2 + arg1^2).
+
+    :param arg0: The first input tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg0: tl.tensor
+    :param arg1: The second input tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg1: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.hypot for dtype bf16 is unspported for now.")
@@ -464,8 +633,13 @@ def hypot(arg0: core.tensor, arg1: core.tensor, _semantic=None):
 # All rights reserved.
 @core.builtin
 @math._check_dtype(dtypes=["fp16", "fp32"])
-@math._add_math_2arg_docstr("besseli0 (Modified Bessel function of the first kind, order 0).")
 def cyl_bessel_i0(arg0: core.tensor, _semantic=None):
+    """
+    Computes the modified Bessel function of the first kind, order 0.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         if arg0.dtype == core.dtype("fp16"):
             core.static_print("extern livdevice.cyl_bessel_i0 for dtype bf16 is unspported for now.")
@@ -568,6 +742,12 @@ def cyl_bessel_i0(arg0: core.tensor, _semantic=None):
 @core.extern
 @math._check_dtype(dtypes=["fp16", "fp32"])
 def signbit(arg0, _semantic=None):
+    """
+    Returns the sign bit of the input tensor.
+
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         return core.extern_elementwise(
             "", "", [arg0], {
@@ -603,6 +783,12 @@ def signbit(arg0, _semantic=None):
 @core.extern
 @math._check_dtype(dtypes=["fp32"])
 def erfinv(arg0, _semantic=None):
+    """
+    Computes the inverse error function.
+
+    :param arg0: The input tensor. Supported dtype: fp32.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_erfinv_fp32", core.dtype("fp32")),
@@ -712,6 +898,12 @@ def erfinv(arg0, _semantic=None):
 @core.extern
 @math._check_dtype(dtypes=["fp32"])
 def gamma(arg0, _semantic=None):
+    """
+    Computes the Gamma function using the Lanczos approximation.
+
+    :param arg0: The input tensor. Supported dtype: fp32.
+    :type arg0: tl.tensor
+    """
     arg0_scalar_ty = arg0.type.scalar
     arg0 = _semantic.to_tensor(arg0)
     pi_tensor = _semantic.full(arg0.shape, math_pi, arg0_scalar_ty).handle
@@ -768,6 +960,12 @@ def gamma(arg0, _semantic=None):
 @core.extern
 @math._check_dtype(dtypes=["fp32"])
 def lgamma(arg0, _semantic=None):
+    """
+    Computes the natural logarithm of the absolute value of the Gamma function.
+
+    :param arg0: The input tensor. Supported dtype: fp32.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_lgamma_fp32", core.dtype("fp32")),
@@ -788,8 +986,13 @@ def lgamma(arg0, _semantic=None):
 @math._check_dtype(dtypes=[
     "fp32",
 ])
-@math._add_math_1arg_docstr("trunc")
 def trunc(arg0: core.tensor, _semantic=None):
+    """
+    Truncates the input tensor to the nearest integer toward zero.
+
+    :param arg0: The input tensor. Supported dtype: fp32.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         return core.extern_elementwise(
             "", "", [arg0], {
@@ -797,17 +1000,6 @@ def trunc(arg0: core.tensor, _semantic=None):
                 (core.dtype("fp32"), ): ("__hmf_trunc_fp32", core.dtype("fp32")),
             }, is_pure=True, _semantic=_semantic)
     else:
-        """
-        Truncate the input to the nearest integer toward zero.
-
-        For positive numbers, this is equivalent to floor(x).
-        For negative numbers, this is equivalent to ceil(x).
-
-            Special cases:
-            - trunc(±0) returns ±0.
-            - trunc(±inf) returns ±inf.
-            - trunc(NaN) returns NaN.
-        """
         arg0 = _semantic.to_tensor(arg0)
 
         zero = _semantic.full(arg0.shape, 0.0, arg0.type.scalar)
@@ -823,18 +1015,18 @@ def trunc(arg0: core.tensor, _semantic=None):
 @math._check_dtype(dtypes=[
     "fp32",
 ])
-@math._add_math_1arg_docstr("nearbyint")
 def nearbyint(arg0: core.tensor, _semantic=None):
+    """
+    Rounds the input tensor to the nearest integer using round-to-nearest-even.
+
+    :param arg0: The input tensor. Supported dtype: fp32.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_nearbyint_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
     else:
-        """
-        Round argument x to an integer value in floating-point format.
-
-        Uses the current rounding mode (round-to-nearest-even, aka banker's rounding).
-        """
         arg0 = _semantic.to_tensor(arg0)
 
         half = _semantic.full(arg0.shape, 0.5, arg0.type.scalar)
@@ -879,8 +1071,13 @@ def nearbyint(arg0: core.tensor, _semantic=None):
 @math._check_dtype(dtypes=[
     "fp32",
 ])
-@math._add_math_1arg_docstr("arcsine")
 def asin(arg0: core.tensor, _semantic=None):
+    """
+    Computes the element-wise arcsine (inverse sine) of the input tensor.
+
+    :param arg0: The input tensor. Supported dtype: fp32.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         return core.extern_elementwise(
             "", "", [arg0], {
@@ -888,12 +1085,6 @@ def asin(arg0: core.tensor, _semantic=None):
                 (core.dtype("fp32"), ): ("__hmf_asin_fp32", core.dtype("fp32")),
             }, is_pure=True, _semantic=_semantic)
     else:
-        """
-        Calculate the principal value of the arc sine of the input argument x.
-
-        Returns result in radians, in the interval [-π/2, +π/2] for x inside [-1, +1].
-        Returns NaN for x outside [-1, +1].
-        """
         arg0 = _semantic.to_tensor(arg0)
 
         # asin(x) = π/2 - acos(x)
@@ -906,19 +1097,18 @@ def asin(arg0: core.tensor, _semantic=None):
 @math._check_dtype(dtypes=[
     "fp32",
 ])
-@math._add_math_1arg_docstr("base-10 logarithm")
 def log10(arg0: core.tensor, _semantic=None):
+    """
+    Computes the element-wise base-10 logarithm of the input tensor.
+
+    :param arg0: The input tensor. Supported dtype: fp32.
+    :type arg0: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_log10_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
     else:
-        """
-        Calculate the base 10 logarithm of the input argument x.
-
-        Returns NaN for x < 0, -inf for x = 0, and +0 for x = 1.
-        log10(x) = log(x) / log(10)
-        """
         arg0 = _semantic.to_tensor(arg0)
 
         log_val = math.log(arg0, _semantic=_semantic)
@@ -931,16 +1121,20 @@ def log10(arg0: core.tensor, _semantic=None):
 @math._check_dtype(dtypes=[
     "fp32",
 ])
-@math._add_math_2arg_docstr("copysign")
 def copysign(arg0: core.tensor, arg1: core.tensor, _semantic=None):
+    """
+    Creates a value with the magnitude of arg0 and the sign of arg1.
+
+    :param arg0: The magnitude tensor. Supported dtype: fp32.
+    :type arg0: tl.tensor
+    :param arg1: The sign tensor. Supported dtype: fp32.
+    :type arg1: tl.tensor
+    """
     if triton_enable_libdevice_simt() and is_compile_on_910_95:
         return core.extern_elementwise("", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_copysign_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
     else:
-        """
-        Create a floating-point value with the magnitude of x and the sign of y.
-        """
         x = _semantic.to_tensor(arg0)
         y = _semantic.to_tensor(arg1)
 
@@ -966,6 +1160,12 @@ if get_ascend_arch_from_env() == "Ascend910_9589":
     # if we have hardware support
     @core.extern
     def rint(arg0, _semantic=None):
+        """
+        Rounds the input tensor to the nearest integer using round-to-nearest-even.
+
+        :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
+        :type arg0: tl.tensor
+        """
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"), ): ("__hmf_rint", core.dtype("fp32")),
@@ -976,8 +1176,13 @@ else:
 
     @core.builtin
     @math._check_dtype(dtypes=["fp16", "fp32", "bf16"])
-    @math._add_math_1arg_docstr("rint")
     def rint(arg0: core.tensor, _semantic=None):
+        """
+        Rounds the input tensor to the nearest integer using round-to-nearest-even.
+
+        :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
+        :type arg0: tl.tensor
+        """
         arg0 = _semantic.to_tensor(arg0)
 
         floor_x = math.floor(arg0, _semantic=_semantic)

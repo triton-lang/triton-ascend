@@ -879,3 +879,360 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     tt.return
   }
 }
+
+// -----
+// A synchronizing barrier between a same-root store and the indirect load is a
+// memory fence: the prior write is already visible, so the load does not need
+// volatile semantics.
+// CHECK-LABEL: func.func @indirect_load_after_store_with_barrier
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = false} : (memref<?xi32>, tensor<128xi64>, tensor<128xi1>, tensor<128xi32>) -> tensor<128xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_after_store_with_barrier(%arg0: !tt.ptr<i32>,
+                                                         %arg1: !tt.ptr<i32>) {
+    %one = arith.constant dense<1> : tensor<128xi32>
+    %zero = arith.constant dense<0> : tensor<128xi32>
+    %range = tt.make_range {end = 128 : i32, start = 0 : i32} : tensor<128xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<128xi32>
+    %src_splat = tt.splat %arg0 : !tt.ptr<i32> -> tensor<128x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_splat, %range : tensor<128x!tt.ptr<i32>>, tensor<128xi32>
+    %dst_splat = tt.splat %arg1 : !tt.ptr<i32> -> tensor<128x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_splat, %range : tensor<128x!tt.ptr<i32>>, tensor<128xi32>
+    tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<128x!tt.ptr<i32>>
+    gpu.barrier
+    %value = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<128x!tt.ptr<i32>>
+    tt.store %dst_ptr, %value, %mask {route_discrete_mask_to_simt} : tensor<128x!tt.ptr<i32>>
+    tt.return
+  }
+}
+
+// -----
+// A same-root store AFTER the barrier (between barrier and load) is not shielded
+// by the barrier, so the load stays volatile.
+// CHECK-LABEL: func.func @indirect_load_store_after_barrier
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = true} : (memref<?xi32>, tensor<128xi64>, tensor<128xi1>, tensor<128xi32>) -> tensor<128xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_store_after_barrier(%arg0: !tt.ptr<i32>,
+                                                    %arg1: !tt.ptr<i32>) {
+    %one = arith.constant dense<1> : tensor<128xi32>
+    %zero = arith.constant dense<0> : tensor<128xi32>
+    %range = tt.make_range {end = 128 : i32, start = 0 : i32} : tensor<128xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<128xi32>
+    %src_splat = tt.splat %arg0 : !tt.ptr<i32> -> tensor<128x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_splat, %range : tensor<128x!tt.ptr<i32>>, tensor<128xi32>
+    %dst_splat = tt.splat %arg1 : !tt.ptr<i32> -> tensor<128x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_splat, %range : tensor<128x!tt.ptr<i32>>, tensor<128xi32>
+    gpu.barrier
+    tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<128x!tt.ptr<i32>>
+    %value = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<128x!tt.ptr<i32>>
+    tt.store %dst_ptr, %value, %mask {route_discrete_mask_to_simt} : tensor<128x!tt.ptr<i32>>
+    tt.return
+  }
+}
+
+// -----
+// Store loop, then a barrier, then a load loop (mirrors the
+// "write cumsum -> tl.debug_barrier() -> binary search read" pattern):
+// the barrier separates the producing stores from the load, so non-volatile.
+// CHECK-LABEL: func.func @indirect_load_after_store_loop_with_barrier
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = false} : (memref<?xi32>, tensor<16xi64>, tensor<16xi1>, tensor<16xi32>) -> tensor<16xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_after_store_loop_with_barrier(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                              %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                              %trip: i32) {
+    %c0_i32 = arith.constant 0 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %one = arith.constant dense<1> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %dst_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    scf.for %i = %c0_i32 to %trip step %c1_i32 : i32 {
+      tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    }
+    gpu.barrier
+    scf.for %j = %c0_i32 to %trip step %c1_i32 : i32 {
+      %loaded = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+      tt.store %dst_ptr, %loaded, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    }
+    tt.return
+  }
+}
+
+// -----
+// A barrier OUTSIDE the loop does not shield a loop-carried same-root store:
+// iteration N's store feeds iteration N+1's load without crossing the barrier,
+// so the load stays volatile.
+// CHECK-LABEL: func.func @indirect_load_loop_carried_store_barrier_outside
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = true} : (memref<?xi32>, tensor<16xi64>, tensor<16xi1>, tensor<16xi32>) -> tensor<16xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_loop_carried_store_barrier_outside(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                                   %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                                   %trip: i32) {
+    %c0_i32 = arith.constant 0 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %one = arith.constant dense<1> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %dst_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    gpu.barrier
+    scf.for %i = %c0_i32 to %trip step %c1_i32 : i32 {
+      %loaded = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+      tt.store %dst_ptr, %loaded, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+      tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    }
+    tt.return
+  }
+}
+
+// -----
+// store, then a barrier on BOTH branches of scf.if, then load: every path
+// crosses a barrier after the write -> non-volatile.
+// CHECK-LABEL: func.func @indirect_load_if_both_branches_barrier
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = false} : (memref<?xi32>, tensor<16xi64>, tensor<16xi1>, tensor<16xi32>) -> tensor<16xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_if_both_branches_barrier(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                         %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                         %cond: i1) {
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %one = arith.constant dense<1> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %dst_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    scf.if %cond {
+      gpu.barrier
+    } else {
+      gpu.barrier
+    }
+    %loaded = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.store %dst_ptr, %loaded, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.return
+  }
+}
+
+// -----
+// store, then a barrier on only ONE branch of scf.if, then load: the other path
+// has no barrier -> volatile.
+// CHECK-LABEL: func.func @indirect_load_store_then_if_single_barrier
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = true} : (memref<?xi32>, tensor<16xi64>, tensor<16xi1>, tensor<16xi32>) -> tensor<16xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_store_then_if_single_barrier(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                             %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                             %cond: i1) {
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %one = arith.constant dense<1> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %dst_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    scf.if %cond {
+      gpu.barrier
+    }
+    %loaded = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.store %dst_ptr, %loaded, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.return
+  }
+}
+
+// -----
+// scf.for body store-then-barrier, load after the loop: the in-body barrier
+// orders after the store on every path -> non-volatile.
+// CHECK-LABEL: func.func @indirect_load_for_store_then_barrier
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = false} : (memref<?xi32>, tensor<16xi64>, tensor<16xi1>, tensor<16xi32>) -> tensor<16xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_for_store_then_barrier(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                       %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                       %trip: i32) {
+    %c0_i32 = arith.constant 0 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %one = arith.constant dense<1> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %dst_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    scf.for %i = %c0_i32 to %trip step %c1_i32 : i32 {
+      tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+      gpu.barrier
+    }
+    %loaded = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.store %dst_ptr, %loaded, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.return
+  }
+}
+
+// -----
+// scf.for body barrier-then-store, load after the loop: the store is after the
+// barrier and reaches the load (next iteration / exit) unshielded -> volatile.
+// CHECK-LABEL: func.func @indirect_load_for_barrier_then_store
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = true} : (memref<?xi32>, tensor<16xi64>, tensor<16xi1>, tensor<16xi32>) -> tensor<16xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_for_barrier_then_store(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                       %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                       %trip: i32) {
+    %c0_i32 = arith.constant 0 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %one = arith.constant dense<1> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %dst_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    scf.for %i = %c0_i32 to %trip step %c1_i32 : i32 {
+      gpu.barrier
+      tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    }
+    %loaded = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.store %dst_ptr, %loaded, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.return
+  }
+}
+
+// -----
+// scf.while body store-then-barrier, load after the loop: in-body barrier
+// shields the loop-carried store -> non-volatile.
+// CHECK-LABEL: func.func @indirect_load_while_store_then_barrier
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = false} : (memref<?xi32>, tensor<16xi64>, tensor<16xi1>, tensor<16xi32>) -> tensor<16xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_while_store_then_barrier(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                         %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                         %trip: i32) {
+    %c0_i32 = arith.constant 0 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %one = arith.constant dense<1> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %dst_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    %r = scf.while (%a = %c0_i32) : (i32) -> i32 {
+      %cond = arith.cmpi slt, %a, %trip : i32
+      scf.condition(%cond) %a : i32
+    } do {
+    ^bb0(%x: i32):
+      tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+      gpu.barrier
+      %next = arith.addi %x, %c1_i32 : i32
+      scf.yield %next : i32
+    }
+    %loaded = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.store %dst_ptr, %loaded, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.return
+  }
+}
+
+// -----
+// scf.while body barrier-then-store, load after the loop: store after barrier
+// escapes to the next iteration / exit unshielded -> volatile.
+// CHECK-LABEL: func.func @indirect_load_while_barrier_then_store
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = true} : (memref<?xi32>, tensor<16xi64>, tensor<16xi1>, tensor<16xi32>) -> tensor<16xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_while_barrier_then_store(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                         %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                         %trip: i32) {
+    %c0_i32 = arith.constant 0 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %one = arith.constant dense<1> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %dst_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    %r = scf.while (%a = %c0_i32) : (i32) -> i32 {
+      %cond = arith.cmpi slt, %a, %trip : i32
+      scf.condition(%cond) %a : i32
+    } do {
+    ^bb0(%x: i32):
+      gpu.barrier
+      tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+      %next = arith.addi %x, %c1_i32 : i32
+      scf.yield %next : i32
+    }
+    %loaded = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.store %dst_ptr, %loaded, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.return
+  }
+}
+
+// -----
+// Same-root store, then a barrier, then a load in doubly-nested scf.for:
+// the barrier shields the prior write even across loop nesting -> non-volatile.
+// CHECK-LABEL: func.func @indirect_load_after_barrier_in_nested_for
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = false} : (memref<?xi32>, tensor<16xi64>, tensor<16xi1>, tensor<16xi32>) -> tensor<16xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_after_barrier_in_nested_for(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                            %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                            %outer: i32,
+                                                            %inner: i32) {
+    %c0_i32 = arith.constant 0 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %one = arith.constant dense<1> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %dst_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    gpu.barrier
+    scf.for %i = %c0_i32 to %outer step %c1_i32 : i32 {
+      scf.for %j = %c0_i32 to %inner step %c1_i32 : i32 {
+        %loaded = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+        tt.store %dst_ptr, %loaded, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+      }
+    }
+    tt.return
+  }
+}
+
+// -----
+// store -> barrier -> scf.if { store(same root) } -> load:
+// the conditional store sits AFTER the barrier (between barrier and load), so it
+// is NOT shielded and the load must stay volatile. Guards against a naive
+// "saw a barrier -> non-volatile" rewrite that would miss the post-barrier write.
+// CHECK-LABEL: func.func @indirect_load_store_in_if_after_barrier
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = true} : (memref<?xi32>, tensor<16xi64>, tensor<16xi1>, tensor<16xi32>) -> tensor<16xi32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_store_in_if_after_barrier(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                          %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32},
+                                                          %cond: i1) {
+    %zero = arith.constant dense<0> : tensor<16xi32>
+    %one = arith.constant dense<1> : tensor<16xi32>
+    %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %dst_base = tt.splat %arg1 : !tt.ptr<i32> -> tensor<16x!tt.ptr<i32>>
+    %dst_ptr = tt.addptr %dst_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
+    %mask = arith.cmpi sge, %range, %zero : tensor<16xi32>
+    tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    gpu.barrier
+    scf.if %cond {
+      tt.store %src_ptr, %one, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    }
+    %loaded = tt.load %src_ptr, %mask, %zero {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.store %dst_ptr, %loaded, %mask {route_discrete_mask_to_simt} : tensor<16x!tt.ptr<i32>>
+    tt.return
+  }
+}

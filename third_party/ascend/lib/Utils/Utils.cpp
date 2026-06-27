@@ -26,6 +26,7 @@
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -569,74 +570,146 @@ static bool mayWriteRoot(Operation *op, Value loadRootPtr) {
   return false;
 }
 
+// A synchronizing barrier (e.g. gpu.barrier, lowered from tl.debug_barrier)
+// acts as a memory fence: every write ordered before it is made globally visible
+// to any access ordered after it. An indirect load placed after such a barrier
+// therefore does not need volatile semantics to observe earlier same-root
+// writes, because the fence already guarantees their visibility.
+static bool isSynchronizingBarrier(Operation *op) {
+  return isa<mlir::gpu::BarrierOp>(op);
+}
+
+// Does `op` itself write through (an alias of) the load's root pointer?
+static bool opMayWriteRoot(Operation *op, Value loadRootPtr) {
+  // Device-side diagnostics are modeled as GlobalMemory writes in Triton, but
+  // they do not write through user GM pointers; ignore them.
+  if (isa<triton::AssertOp, triton::PrintOp>(op)) {
+    return false;
+  }
+
+  auto memRefWriteTarget =
+      llvm::TypeSwitch<Operation *, Value>(op)
+          .Case<memref::CopyOp>([](auto copyOp) { return copyOp.getTarget(); })
+          .Case<memref::StoreOp>(
+              [](auto storeOp) { return storeOp.getMemRef(); })
+          .Default([](Operation *) { return Value(); });
+  if (memRefWriteTarget) {
+    auto rootPtr = getRootPointer(memRefWriteTarget);
+    if (rootPtr) {
+      return *rootPtr == loadRootPtr;
+    }
+    return !isLocalMemRef(memRefWriteTarget);
+  }
+
+  auto writePtr = getKnownWritePointer(op);
+  if (writePtr.isWrite) {
+    return !writePtr.rootPtr || *writePtr.rootPtr == loadRootPtr;
+  }
+
+  // Structured control flow is looked through by the recursive classifier
+  // below, not summarized here.
+  if (isa<scf::IfOp>(op) || isa<LoopLikeOpInterface>(op)) {
+    return false;
+  }
+
+  // Unknown side-effecting ops are conservative.
+  return mayWriteRoot(op, loadRootPtr);
+}
+
+// Any same-root write anywhere inside `container`'s regions.
+static bool anyNestedWrite(Operation *container, Value root) {
+  bool found = false;
+  container->walk<WalkOrder::PreOrder>([&](Operation *nested) {
+    if (nested == container) {
+      return WalkResult::advance();
+    }
+    if (opMayWriteRoot(nested, root)) {
+      found = true;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return found;
+}
+
+// How an op/block affects the load's shielding from earlier same-root writes,
+// when scanning a block from its exit backward:
+//   - WriteEscapes : a same-root write reaches the exit with no barrier after it
+//   - Shielded     : a barrier is reached first (covers writes before it)
+//   - None         : neither (neutral; keep scanning outward)
+enum class BarrierState { None, Shielded, WriteEscapes };
+
+static BarrierState classifyOp(Operation *op, Value root);
+
+// Scan a block from its terminator backward; the first decisive op wins.
+static BarrierState classifyBlock(Block *blk, Value root) {
+  if (!blk || blk->empty()) {
+    return BarrierState::None;
+  }
+  for (Operation *op = blk->getTerminator()->getPrevNode(); op;
+       op = op->getPrevNode()) {
+    BarrierState r = classifyOp(op, root);
+    if (r != BarrierState::None) {
+      return r;
+    }
+  }
+  return BarrierState::None;
+}
+
+static BarrierState classifyOp(Operation *op, Value root) {
+  if (isSynchronizingBarrier(op)) {
+    return BarrierState::Shielded;
+  }
+  if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
+    BarrierState t = classifyBlock(ifOp.thenBlock(), root);
+    BarrierState e = ifOp.elseBlock() ? classifyBlock(ifOp.elseBlock(), root)
+                                      : BarrierState::None;
+    // A write escaping either branch forces volatile; a barrier shields only if
+    // present on both branches.
+    if (t == BarrierState::WriteEscapes || e == BarrierState::WriteEscapes) {
+      return BarrierState::WriteEscapes;
+    }
+    if (t == BarrierState::Shielded && e == BarrierState::Shielded) {
+      return BarrierState::Shielded;
+    }
+    return BarrierState::None;
+  }
+  if (auto forOp = dyn_cast<scf::ForOp>(op)) {
+    // The loop may run zero times, so an in-body barrier cannot shield outer
+    // writes; an in-body same-root write is loop-carried -> escapes.
+    return classifyBlock(forOp.getBody(), root) == BarrierState::WriteEscapes
+               ? BarrierState::WriteEscapes
+               : BarrierState::None;
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
+    BarrierState b = classifyBlock(whileOp.getBeforeBody(), root);
+    BarrierState a = classifyBlock(whileOp.getAfterBody(), root);
+    return (b == BarrierState::WriteEscapes || a == BarrierState::WriteEscapes)
+               ? BarrierState::WriteEscapes
+               : BarrierState::None;
+  }
+  if (opMayWriteRoot(op, root)) {
+    return BarrierState::WriteEscapes;
+  }
+  if (op->getNumRegions() > 0 && anyNestedWrite(op, root)) {
+    return BarrierState::WriteEscapes;
+  }
+  return BarrierState::None;
+}
+
 // Keep an indirect load volatile unless its root pointer is proven to have no
 // possible prior write. The analysis scans ordered predecessors in the same
 // and enclosing blocks, nested writes in predecessor structured-control-flow
 // ops, and loop-carried writes where a later store in the loop body may feed a
-// following iteration.
+// following iteration. A synchronizing barrier ordered before the load shields
+// any write ordered before that barrier (see isSynchronizingBarrier).
 bool requiresVolatileIndirectLoad(Value srcPtr, Operation *loadOp) {
   auto loadRootPtr = getRootPointer(srcPtr);
   if (!loadRootPtr) {
     return true;
   }
 
-  auto opMayWriteRoot = [&](Operation *op) {
-    // Device-side diagnostics are modeled as GlobalMemory writes in Triton,
-    // but they do not write through user GM pointers and must not affect the
-    // indirect-load source/root analysis.
-    if (isa<triton::AssertOp, triton::PrintOp>(op)) {
-      return false;
-    }
-
-    auto memRefWriteTarget =
-        llvm::TypeSwitch<Operation *, Value>(op)
-            .Case<memref::CopyOp>([](auto copyOp) {
-              return copyOp.getTarget();
-            })
-            .Case<memref::StoreOp>([](auto storeOp) {
-              return storeOp.getMemRef();
-            })
-            .Default([](Operation *) { return Value(); });
-    if (memRefWriteTarget) {
-      auto rootPtr = getRootPointer(memRefWriteTarget);
-      if (rootPtr) {
-        return *rootPtr == *loadRootPtr;
-      }
-      return !isLocalMemRef(memRefWriteTarget);
-    }
-
-    auto writePtr = getKnownWritePointer(op);
-    if (writePtr.isWrite) {
-      return !writePtr.rootPtr || *writePtr.rootPtr == *loadRootPtr;
-    }
-
-    // For structured control flow, look through regions instead of using the
-    // op-level MemoryEffect summary, otherwise unrelated nested writes would
-    // make this load volatile.
-    if (isa<scf::IfOp>(op) || isa<LoopLikeOpInterface>(op)) {
-      return false;
-    }
-
-    // Unknown side-effecting ops are conservative: they may write through an
-    // alias that is no longer recoverable as a Triton root.
-    return mayWriteRoot(op, *loadRootPtr);
-  };
-
-  auto nestedMayWriteRoot = [&](Operation *container) {
-    bool found = false;
-    container->walk<WalkOrder::PreOrder>([&](Operation *nested) {
-      if (nested == container) {
-        return WalkResult::advance();
-      }
-      if (opMayWriteRoot(nested)) {
-        found = true;
-        return WalkResult::interrupt();
-      }
-      return WalkResult::advance();
-    });
-    return found;
-  };
-
+  Value root = *loadRootPtr;
   Operation *current = loadOp;
 
   while (current) {
@@ -648,12 +721,20 @@ bool requiresVolatileIndirectLoad(Value srcPtr, Operation *loadOp) {
     // First scan operations that are ordered before the current op in this
     // block. When such an operation owns regions, its nested writes are also
     // considered ordered before this load.
+    // Scan predecessors in this block from the load backward. classifyOp
+    // recurses into structured control flow (scf.if/for/while): the first
+    // decisive op wins -- a same-root write reaching the load (WriteEscapes)
+    // forces volatile; a guaranteed barrier (Shielded) covers all earlier
+    // writes. "Shielded" includes a barrier on *both* branches of an scf.if.
     for (auto it = Block::iterator(current); it != block->begin();) {
       --it;
-      Operation *op = &*it;
-      if ((op->getNumRegions() > 0 && nestedMayWriteRoot(op)) ||
-          opMayWriteRoot(op)) {
+      switch (classifyOp(&*it, root)) {
+      case BarrierState::WriteEscapes:
         return true;
+      case BarrierState::Shielded:
+        return false;
+      case BarrierState::None:
+        break;
       }
     }
 
@@ -663,10 +744,15 @@ bool requiresVolatileIndirectLoad(Value srcPtr, Operation *loadOp) {
       return false;
     }
 
-    // If the load is inside a loop, a store that is textually after the load
-    // may still execute before the load in a later iteration. Scan the whole
-    // loop body before climbing further out.
-    if (isa<LoopLikeOpInterface>(parentOp) && nestedMayWriteRoot(parentOp)) {
+    // If the load is inside a loop, a store textually after the load may still
+    // execute before it in a later iteration. classifyOp scans the whole loop
+    // body (and never reports a loop as Shielded, since it may run zero times).
+    if (isa<scf::ForOp, scf::WhileOp>(parentOp)) {
+      if (classifyOp(parentOp, root) == BarrierState::WriteEscapes) {
+        return true;
+      }
+    } else if (isa<LoopLikeOpInterface>(parentOp) &&
+               anyNestedWrite(parentOp, root)) {
       return true;
     }
 

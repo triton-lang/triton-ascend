@@ -19,16 +19,14 @@
 # THE SOFTWARE.
 
 """
-Dispatch table for Ascend-specific 'with' statement context managers.
+Compatibility module for older imports.
 """
 
-from .scope import scope
-from .code_generator import handle_scope_with, mangle_ty
+from .code_generator import mangle_ty
 
 __all__ = ["ASCEND_WITH_DISPATCH"]
 
-# Registry of 'with' statement handlers for Ascend extension
+# `with` lowering is handled by context managers directly.
 ASCEND_WITH_DISPATCH = {
-    scope: handle_scope_with,
     "mangle_ty": mangle_ty,
 }

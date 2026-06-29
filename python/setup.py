@@ -565,6 +565,11 @@ class CMakeBuild(build_ext):
         else:
             cmake_args += ["-DTRITON_BUILD_PROTON=OFF"]
 
+        if check_env_flag("TRITON_EXT_ENABLED"):
+            cmake_args += ["-DTRITON_EXT_ENABLED=1"]
+        else:
+            cmake_args += ["-DTRITON_EXT_ENABLED=0"]
+
         if is_offline_build():
             # unit test builds fetch googletests from GitHub
             cmake_args += ["-DTRITON_BUILD_UT=OFF"]

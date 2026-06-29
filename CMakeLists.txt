@@ -27,6 +27,7 @@ option(TRITON_BUILD_TUTORIALS "Build C++ Triton tutorials" ON)
 option(TRITON_BUILD_PYTHON_MODULE "Build Python Triton bindings" OFF)
 option(TRITON_BUILD_PROTON "Build the Triton Proton profiler" ON)
 option(TRITON_BUILD_UT "Build C++ Triton Unit Tests" ON)
+option(TRITON_EXT_ENABLED "Build with default visibility for Triton+LLVM symbol exposure to plugin extensions" OFF)
 set(TRITON_CODEGEN_BACKENDS "" CACHE STRING "Enable different codegen backends")
 
 # Ensure Python3 vars are set correctly
@@ -123,7 +124,11 @@ endfunction()
 
 
 # Disable warnings that show up in external code (gtest;pybind11)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -fvisibility=hidden")
+if(NOT TRITON_EXT_ENABLED)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -fvisibility=hidden")
+else()
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -DTRITON_EXT_ENABLED=1")
+endif()
 
 include_directories(".")
 include_directories(${MLIR_INCLUDE_DIRS})
@@ -303,7 +308,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
   add_library(entryC SHARED ${PROJECT_SOURCE_DIR}/lib/runtime/libentry/libentry.cpp)
 endif()
 
-if (UNIX AND NOT APPLE)
+if (UNIX AND NOT APPLE AND NOT TRITON_EXT_ENABLED)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--exclude-libs,ALL")
 endif()
 

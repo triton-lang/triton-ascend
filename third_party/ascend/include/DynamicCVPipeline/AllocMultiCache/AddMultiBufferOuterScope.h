@@ -102,6 +102,29 @@ public:
     // Constructor
     AddMultiBufferOuterScopePass() = default;
 
+    // Copy constructor (required by MLIR pass cloning)
+    AddMultiBufferOuterScopePass(const AddMultiBufferOuterScopePass &other) {
+        outerDirection = other.outerDirection;
+    }
+
+    // Copy assignment (required by MLIR pass cloning)
+    AddMultiBufferOuterScopePass &operator=(const AddMultiBufferOuterScopePass &other) {
+        if (this != &other) {
+            outerDirection = other.outerDirection;
+        }
+        return *this;
+    }
+
+    // Pass option: control which transfer direction(s) to enable double buffering
+    // "ctov"  — C→V only (fixpipe), default
+    // "vtoc"  — V→C only (hir.copy)
+    // "both"  — all directions
+    // "none"  — disabled (tags only)
+    Option<std::string> outerDirection{
+        *this, "outer-direction",
+        llvm::cl::desc("Enable double buffer by direction: ctov / vtoc / both / none"),
+        llvm::cl::init("ctov")};
+
     // Pass argument
     StringRef getArgument() const override { return "add_multi_buffer_outer_scope"; }
 

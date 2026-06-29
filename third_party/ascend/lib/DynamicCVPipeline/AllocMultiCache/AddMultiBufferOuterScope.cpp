@@ -16,6 +16,8 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 
+#include <cstdlib>
+
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/FlagIdManager.h"
 
@@ -83,16 +85,39 @@ static bool forOpHasMainLoopAttr(scf::ForOp forOp)
     return terminator && terminator->hasAttr("ssbuffer.main_loop");
 }
 
-/// Check if a sync op's direct parent has ssbuffer.main_loop attribute
+/// Check if a sync op's ancestor chain contains a scf::ForOp with ssbuffer.main_loop attribute
 static bool parentOpHasMainLoopAttr(Operation *syncOp)
 {
     if (!syncOp) { return false; }
-    Operation *parent = syncOp->getParentOp();
-    if (!parent) { return false; }
-    if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
-        return forOpHasMainLoopAttr(forOp);
+    for (Operation *parent = syncOp->getParentOp(); parent; parent = parent->getParentOp()) {
+        if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
+            return forOpHasMainLoopAttr(forOp);
+        }
     }
     return false;
+}
+
+/// Walk up the ancestor chain to find the nearest enclosing scf::ForOp
+static scf::ForOp findEnclosingForOp(Operation *op)
+{
+    for (Operation *parent = op->getParentOp(); parent; parent = parent->getParentOp()) {
+        if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
+            return forOp;
+        }
+    }
+    return nullptr;
+}
+
+/// Walk up to find the first ancestor op that lives directly in the forOp body,
+/// to get a safe insertion point for condition computation.
+static Operation *findAnchorInForBody(Operation *op, scf::ForOp forOp)
+{
+    for (Operation *parent = op->getParentOp(); parent && parent != forOp.getOperation();
+         parent = parent->getParentOp()) {
+        if (parent->getParentOp() == forOp.getOperation())
+            return parent;
+    }
+    return op; // fallback: op itself is directly in forOp body
 }
 
 // --- Operation search helpers ---
@@ -729,6 +754,7 @@ static Operation *wrapTransferOpWithScfIfYield(Operation *transferOp, Value cond
             inputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1), inputBuffer);
         }
         Operation *cloned = thenBuilder.clone(*transferOp, inputMap);
+        cloned->removeAttr("ssbuffer.crossDeps");
         thenBuilder.create<scf::YieldOp>(loc, cloned->getResults());
     }
 
@@ -740,6 +766,7 @@ static Operation *wrapTransferOpWithScfIfYield(Operation *transferOp, Value cond
             outputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1), outputBuffer);
         }
         Operation *cloned = elseBuilder.clone(*transferOp, outputMap);
+        cloned->removeAttr("ssbuffer.crossDeps");
         elseBuilder.create<scf::YieldOp>(loc, cloned->getResults());
     }
 
@@ -775,7 +802,8 @@ static Operation *wrapTransferOpWithScfIfSimple(Operation *transferOp, Value con
     // then branch: clone directly
     {
         auto thenBuilder = ifOp.getThenBodyBuilder();
-        thenBuilder.clone(*transferOp);
+        Operation *cloned = thenBuilder.clone(*transferOp);
+        cloned->removeAttr("ssbuffer.crossDeps");
     }
 
     // else branch: use outputBuffer
@@ -785,7 +813,8 @@ static Operation *wrapTransferOpWithScfIfSimple(Operation *transferOp, Value con
         if (transferOp->getNumOperands() > 0) {
             outputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1), outputBuffer);
         }
-        elseBuilder.clone(*transferOp, outputMap);
+        Operation *cloned = elseBuilder.clone(*transferOp, outputMap);
+        cloned->removeAttr("ssbuffer.crossDeps");
     }
 
     // Tag the ifOp
@@ -857,15 +886,17 @@ static int addPollingControlFlow(DenseMap<int, TransferGroupInfo> &groups)
     for (auto &p : groups) {
         TransferGroupInfo &g = p.second;
 
-        // Get sender's scf.for
-        Operation *senderWaitParent = g.senderChain.waitOp->getParentOp();
-        scf::ForOp senderForOp = cast<scf::ForOp>(senderWaitParent);
+        // Get sender's enclosing scf.for (walk up past scf.if wrappers)
+        scf::ForOp senderForOp = findEnclosingForOp(g.senderChain.waitOp);
+        if (!senderForOp) { return -1; }
 
         int senderBid = getBlockId(g.senderChain.waitOp);
         int senderTid = getTransferId(g.senderChain.waitOp);
 
-        // Insert polling condition at sender waitOp's position
-        OpBuilder senderCondBuilderForInsert(senderForOp.getBody(), Block::iterator(g.senderChain.waitOp));
+        // Insert polling condition before the anchor op in forOp body
+        // (walk up past scf.if wrappers to find direct child of forOp body)
+        Operation *senderAnchor = findAnchorInForBody(g.senderChain.waitOp, senderForOp);
+        OpBuilder senderCondBuilderForInsert(senderForOp.getBody(), Block::iterator(senderAnchor));
         Value senderCond = createPollingCondition(senderForOp, senderCondBuilderForInsert, senderBid, senderTid);
         OpBuilder senderBuilder(senderForOp.getBody()->getTerminator());
 
@@ -878,21 +909,21 @@ static int addPollingControlFlow(DenseMap<int, TransferGroupInfo> &groups)
 
         // Process receiver chain (may use different scf.for) (isProducer=false)
         if (g.receiverChain.waitOp) {
-            Operation *receiverWaitParent = g.receiverChain.waitOp->getParentOp();
+            scf::ForOp receiverForOp = findEnclosingForOp(g.receiverChain.waitOp);
 
-            if (receiverWaitParent == senderWaitParent) {
+            if (receiverForOp == senderForOp) {
                 // Use the same cond
                 if (processTransferChain(g.receiverChain, senderCond,
                                          g.receiverInputBuffer, g.receiverOutputBuffer,
                                          g.outputFlag, false, senderBuilder) != 0) {
                     return -1;
                 }
-            } else {
+            } else if (receiverForOp) {
                 // Receiver uses a different scf.for, create new cond
-                scf::ForOp receiverForOp = cast<scf::ForOp>(receiverWaitParent);
                 int receiverBid = getBlockId(g.receiverChain.waitOp);
                 int receiverTid = getTransferId(g.receiverChain.waitOp);
-                OpBuilder receiverCondBuilderForInsert(receiverForOp.getBody(), Block::iterator(g.receiverChain.waitOp));
+                Operation *receiverAnchor = findAnchorInForBody(g.receiverChain.waitOp, receiverForOp);
+                OpBuilder receiverCondBuilderForInsert(receiverForOp.getBody(), Block::iterator(receiverAnchor));
                 Value receiverCond = createPollingCondition(receiverForOp, receiverCondBuilderForInsert, receiverBid, receiverTid);
                 OpBuilder receiverBuilder(receiverForOp.getBody()->getTerminator());
                 if (processTransferChain(g.receiverChain, receiverCond,
@@ -904,6 +935,35 @@ static int addPollingControlFlow(DenseMap<int, TransferGroupInfo> &groups)
         }
     }
     return 0;
+}
+
+// ============================================================================
+// Direction filtering
+// ============================================================================
+
+/// Filter transfer groups by direction, returning a copy of matching entries
+static DenseMap<int, TransferGroupInfo>
+filterGroupsByDirection(const DenseMap<int, TransferGroupInfo> &groups,
+                        const std::string &direction)
+{
+    DenseMap<int, TransferGroupInfo> filtered;
+    for (const auto &p : groups) {
+        const TransferGroupInfo &g = p.second;
+        bool include = false;
+        if (direction == "both") {
+            include = true;
+        } else if (direction == "ctov") {
+            include = g.isCtoV;
+        } else if (direction == "vtoc") {
+            include = !g.isCtoV;
+        }
+        if (include) {
+            filtered[p.first] = g;
+        }
+    }
+    LDBG("Filtered groups by direction=" << direction << ": "
+         << groups.size() << " -> " << filtered.size());
+    return filtered;
 }
 
 // ============================================================================
@@ -930,12 +990,7 @@ void AddMultiBufferOuterScopePass::runOnOperation()
     }
     LDBG("[Step 1/3] Done: " << groups.size() << " transfer groups");
 
-    int interCoreBufNum = BufferCountManager::getInstance()
-        .getBufferCountByType(BufferCountManager::DepType::InterCore);
-    bool isDoubleBuf = (interCoreBufNum > 1);
-    LDBG("[BufferCount] interCoreBufNum=" << interCoreBufNum << " doubleBuf=" << isDoubleBuf);
-
-    // Tag consumer-side alloc and transferOp with crossDeps (both modes)
+    // Tag consumer-side alloc and transferOp with crossDeps (all directions)
     for (auto &p : groups)
         addConsumerCrossDepsTags(p.second, module);
 
@@ -943,6 +998,32 @@ void AddMultiBufferOuterScopePass::runOnOperation()
     DenseMap<int, SmallVector<Operation *>> loadStoreByTid;
     collectLoadStoreOpsByTransferId(module, loadStoreByTid);
     tagLoadStoreOpsWithCrossDeps(loadStoreByTid);
+
+    // Double buffer prerequisite: BufferCountManager must allow inter-core buffering.
+    // Can be overridden by TRITON_INTER_CORE_BUFFER_COUNT environment variable.
+    int interCoreBufNum = BufferCountManager::getInstance()
+        .getBufferCountByType(BufferCountManager::DepType::InterCore);
+    const char *envBufCount = std::getenv("TRITON_INTER_CORE_BUFFER_COUNT");
+    if (envBufCount) {
+        interCoreBufNum = std::atoi(envBufCount);
+    }
+    LDBG("[BufferCount] interCoreBufNum=" << interCoreBufNum);
+
+    // Determine direction: env var overrides pass option, BufferCount gates
+    std::string direction;
+    if (interCoreBufNum <= 1) {
+        direction = "none";
+    } else {
+        const char *envDir = std::getenv("TRITON_OUTER_DOUBLE_BUFFER_DIRECTION");
+        direction = envDir ? std::string(envDir) : outerDirection.getValue();
+    }
+    auto filteredGroups = filterGroupsByDirection(groups, direction);
+    bool enableDoubleBuf = (direction != "none" && !filteredGroups.empty());
+    LDBG("[OuterDirection] direction=" << direction
+         << " (interCoreBufNum=" << interCoreBufNum << ")"
+         << ", totalGroups=" << groups.size()
+         << ", filteredGroups=" << filteredGroups.size()
+         << ", enableDoubleBuf=" << enableDoubleBuf);
 
     // Check flag ID budget: hardware supports 16 flags (0-15).
     // Each cross-core double-buffer group needs 2 flags (input + output).
@@ -963,12 +1044,12 @@ void AddMultiBufferOuterScopePass::runOnOperation()
     }
     if (flagCount > kFlagThresholdSingleBuffer) {
         LDBG("[FlagBudget] flag count " << flagCount << " > " << kFlagThresholdSingleBuffer << ", forcing single-buffer");
-        isDoubleBuf = false;
+        enableDoubleBuf = false;
     }
 
-    if (isDoubleBuf) {
+    if (enableDoubleBuf) {
         LDBG("[Step 2/3] Start: output buffer creation");
-        if (createOutputBuffers(groups, module)) {
+        if (createOutputBuffers(filteredGroups, module)) {
             LDBG("[Step 2/3] FAILED: output buffer creation failed");
             signalPassFailure();
             return;
@@ -976,14 +1057,14 @@ void AddMultiBufferOuterScopePass::runOnOperation()
         LDBG("[Step 2/3] Done");
 
         LDBG("[Step 3/3] Start: polling control flow");
-        if (addPollingControlFlow(groups)) {
+        if (addPollingControlFlow(filteredGroups)) {
             LDBG("[Step 3/3] FAILED: polling control flow failed");
             signalPassFailure();
             return;
         }
         LDBG("[Step 3/3] Done");
     } else {
-        LDBG("[Step 2-3] Skipped (single-buffer mode)");
+        LDBG("[Step 2-3] Skipped (direction=" << direction << ")");
     }
 
     LDBG("============================================================");

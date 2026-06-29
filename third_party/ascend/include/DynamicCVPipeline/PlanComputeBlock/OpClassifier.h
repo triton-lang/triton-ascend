@@ -150,7 +150,7 @@ class OpClassifierPass : public PassWrapper<OpClassifierPass, OperationPass<Modu
     int handleSCFYield();
 
     // Helper: process a single yield operation
-    void processYieldOperation(Operation *op, Operation *thenYieldForElse);
+    LogicalResult processYieldOperation(Operation *op, Operation *thenYieldForElse);
 
     // Helper: Mark fill operations as CUBE when their output buffer is CUBE
     void markFillOpsAsCube();

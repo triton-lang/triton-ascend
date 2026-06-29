@@ -40,8 +40,8 @@
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
 
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 
@@ -1081,7 +1081,7 @@ bool OpClassifierPass::handleYieldFromElseRegion(std::vector<OpCoreType> &coreTy
 //     to VECTOR.
 // After collecting all operand types, set ssbuffer.core_type on both the yield op
 // and its parent scf operation (scf.if or scf.for).
-void OpClassifierPass::processYieldOperation(Operation *op, Operation *thenYieldForElse)
+LogicalResult OpClassifierPass::processYieldOperation(Operation *op, Operation *thenYieldForElse)
 {
     std::vector<OpCoreType> coreTypes;
 
@@ -1127,11 +1127,43 @@ void OpClassifierPass::processYieldOperation(Operation *op, Operation *thenYield
             // iter_arg that is passed through without modification), default to
             // VECTOR since no compute op is associated with it.
             if (Operation *def = operand.getDefiningOp()) {
-                OpCoreType ct = getCoreType(def);
-                if (ct == OP_CUBE_ONLY) {
-                    coreTypes.push_back(OP_CUBE_ONLY);
+                // If def has multiple results, each result may have a different core_type.
+                // We need to find the specific result index and use the corresponding
+                // core_type from the stored multi-value attribute (e.g., "CUBE,VECTOR")
+                if (def->getNumResults() > 1) {
+                    if (!isa<scf::SCFDialect>(def->getDialect())) {
+                        LLVM_DEBUG(DBGS() << "[handleSCFYield] ERROR: def has multiple results but is not scf dialect: "
+                                          << def->getName().getStringRef() << "\n");
+                        signalPassFailure();
+                        return failure();
+                    }
+                    // Find which result index this operand corresponds to in def
+                    unsigned resultIdx = 0;
+                    for (unsigned idx = 0; idx < def->getNumResults(); ++idx) {
+                        if (def->getResult(idx) == operand) {
+                            resultIdx = idx;
+                            break;
+                        }
+                    }
+
+                    // Get core_type from def's attribute (stored as comma-separated multi-value)
+                    auto ctAttr = def->getAttr("ssbuffer.core_type");
+                    if (auto ctStrAttr = dyn_cast<StringAttr>(ctAttr)) {
+                        std::string ctStr = ctStrAttr.getValue().str();
+                        coreTypes.push_back(parseCoreTypeFromString(ctStr, resultIdx));
+                    } else {
+                        // Fallback: use getCoreType(def)
+                        OpCoreType ct = getCoreType(def);
+                        coreTypes.push_back(ct == OP_CUBE_ONLY ? OP_CUBE_ONLY : OP_VECTOR_ONLY);
+                    }
                 } else {
-                    coreTypes.push_back(OP_VECTOR_ONLY);
+                    // Non-scf operation: use getCoreType directly
+                    OpCoreType ct = getCoreType(def);
+                    if (ct == OP_CUBE_ONLY) {
+                        coreTypes.push_back(OP_CUBE_ONLY);
+                    } else {
+                        coreTypes.push_back(OP_VECTOR_ONLY);
+                    }
                 }
             } else {
                 // BlockArgument (e.g., iter_arg passed through scf.for) -> VECTOR
@@ -1153,6 +1185,8 @@ void OpClassifierPass::processYieldOperation(Operation *op, Operation *thenYield
             opCoreTypes[parentOp] = opCt;
         }
     }
+
+    return success();
 }
 
 // ============================================================================
@@ -1169,46 +1203,45 @@ void OpClassifierPass::processYieldOperation(Operation *op, Operation *thenYield
 // values (derived from the defining ops of each yield operand).
 int OpClassifierPass::handleSCFYield()
 {
-    // Collect all scf.if operations
-    llvm::SmallVector<scf::IfOp> ifOps;
-    for (Operation *op : allOps) {
+    // Walk all scf.if and scf.for operations to process their yield terminators
+    ModuleOp module = getOperation();
+    LogicalResult result = success();
+    module.walk([&](Operation *op) {
+        if (result.failed())
+            return;
+
         if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
-            ifOps.push_back(ifOp);
-        }
-    }
+            Operation *thenYield = nullptr;
 
-    // Process scf.if operations: first then region, then else region
-    for (scf::IfOp ifOp : ifOps) {
-        Operation *thenYield = nullptr;
-        if (!ifOp.getThenRegion().empty()) {
-            thenYield = ifOp.getThenRegion().back().getTerminator();
-        }
+            // Process then region yield (no thenYieldForElse)
+            if (!ifOp.getThenRegion().empty()) {
+                thenYield = ifOp.getThenRegion().back().getTerminator();
+                if (isa<scf::YieldOp>(thenYield)) {
+                    result = processYieldOperation(thenYield, nullptr);
+                    if (result.failed())
+                        return;
+                }
+            }
 
-        if (isa<scf::YieldOp>(thenYield)) {
-            processYieldOperation(thenYield, nullptr);
-        }
-
-        if (!ifOp.getElseRegion().empty()) {
-            Operation *elseYield = ifOp.getElseRegion().back().getTerminator();
-            if (isa<scf::YieldOp>(elseYield)) {
-                processYieldOperation(elseYield, thenYield);
+            // Process else region yield (pass thenYieldForElse for type reference)
+            if (!ifOp.getElseRegion().empty()) {
+                Operation *elseYield = ifOp.getElseRegion().back().getTerminator();
+                if (isa<scf::YieldOp>(elseYield)) {
+                    result = processYieldOperation(elseYield, thenYield);
+                    if (result.failed())
+                        return;
+                }
+            }
+        } else if (auto forOp = dyn_cast<scf::ForOp>(op)) {
+            // Process scf.for yield terminator
+            Operation *yield = forOp.getBody()->getTerminator();
+            if (isa<scf::YieldOp>(yield)) {
+                result = processYieldOperation(yield, nullptr);
             }
         }
-    }
+    });
 
-    // Process remaining scf.yield operations (not inside scf.if, e.g. scf.for)
-    for (Operation *op : allOps) {
-        if (!isa<scf::YieldOp>(op))
-            continue;
-
-        Operation *parentOp = op->getParentOp();
-        if (dyn_cast_or_null<scf::IfOp>(parentOp))
-            continue;
-
-        processYieldOperation(op, nullptr);
-    }
-
-    return 0;
+    return result.failed() ? 1 : 0;
 }
 
 OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const

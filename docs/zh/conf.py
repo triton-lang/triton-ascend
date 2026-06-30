@@ -18,6 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import os
+
 # General information about the project.
 project = 'Triton Ascend'
 copyright = '2025, Huawei'
@@ -72,3 +74,7 @@ html_static_path = ["_static"]
 html_css_files = [
     "custom.css",
 ]
+
+readthedocs_version = os.environ.get('READTHEDOCS_VERSION', 'latest')
+version = readthedocs_version.split('.')[0] + '.' + readthedocs_version.split('.')[1] if '.' in readthedocs_version else ''
+release = readthedocs_version

@@ -1,0 +1,15 @@
+auditwheel
+cmake
+einops
+expecttest
+lit
+ninja
+patchelf
+pybind11
+pytest
+pytest-xdist
+twine
+wheel
+pandas
+setuptools
+nanobind>=2.4

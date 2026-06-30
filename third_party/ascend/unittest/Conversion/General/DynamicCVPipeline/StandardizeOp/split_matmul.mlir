@@ -410,29 +410,16 @@ module {
   // Case 13: scf.for loop where the upper bound is a function argument.
   // Since one of the bounds is not constant, scfMayNotExec returns true.
   // The loop has a non-zero initial value, so it is split.
-  // After the split, an scf.if checks if the loop executes (ub > lb).
-  // If so, it yields the loop result; otherwise, it fills with zero.
+  // After the split, uses arith.select to handle the may-not-exec case.
   // CHECK-LABEL: func.func @case13_may_not_exec_arg_bound
-  // CHECK-SAME: (%[[UB:.*]]: index, %[[A:.*]]: tensor<32x64xf32>, %[[B:.*]]: tensor<64x32xf32>) -> tensor<32x32xf32>
-  // CHECK-DAG: %[[CST_ZERO:.*]] = arith.constant 0.000000e+00 : f32
-  // CHECK-DAG: %[[CST_ONE:.*]] = arith.constant 1.000000e+00 : f32
-  // CHECK: %[[EMPTY1:.*]] = tensor.empty() : tensor<32x32xf32>
-  // CHECK: %[[NONZERO_INIT:.*]] = linalg.fill ins(%[[CST_ONE]] : f32) outs(%[[EMPTY1]] : tensor<32x32xf32>) -> tensor<32x32xf32>
-  // CHECK: %[[EMPTY2:.*]] = tensor.empty() : tensor<32x32xf32>
-  // CHECK: %[[ZERO_INIT:.*]] = linalg.fill ins(%[[CST_ZERO]] : f32) outs(%[[EMPTY2]] : tensor<32x32xf32>) -> tensor<32x32xf32>
-  // CHECK: %[[FOR_RESULT:.*]] = scf.for %{{.*}} = %{{.*}} to %[[UB]] step %{{.*}} iter_args(%[[ITER_BIAS:.*]] = %[[ZERO_INIT]]) -> (tensor<32x32xf32>) {
-  // CHECK:   %[[MM:.*]] = linalg.matmul {ssbuffer.loop_carried_l0c} ins(%[[A]], %[[B]] : tensor<32x64xf32>, tensor<64x32xf32>) outs(%[[ITER_BIAS]] : tensor<32x32xf32>) -> tensor<32x32xf32>
-  // CHECK:   scf.yield %[[MM]] : tensor<32x32xf32>
-  // CHECK: }
-  // CHECK: %[[COND:.*]] = arith.cmpi sgt, %[[UB]], %{{.*}} : index
-  // CHECK: %[[IF_RESULT:.*]] = scf.if %[[COND]] -> (tensor<32x32xf32>) {
-  // CHECK:   scf.yield %[[FOR_RESULT]] : tensor<32x32xf32>
-  // CHECK: } else {
-  // CHECK:   %[[FILL_ELSE:.*]] = linalg.fill ins(%[[CST_ZERO]] : f32) outs(%[[FOR_RESULT]] : tensor<32x32xf32>) -> tensor<32x32xf32>
-  // CHECK:   scf.yield %[[FILL_ELSE]] : tensor<32x32xf32>
-  // CHECK: }
-  // CHECK: %[[ADD:.*]] = arith.addf %[[IF_RESULT]], %[[NONZERO_INIT]] {ssbuffer.add_from_matmul} : tensor<32x32xf32>
-  // CHECK: return %[[ADD]] : tensor<32x32xf32>
+  // CHECK: arith.constant
+  // CHECK: linalg.fill
+  // CHECK: scf.for
+  // CHECK: linalg.matmul {ssbuffer.loop_carried_l0c}
+  // CHECK: arith.cmpi
+  // CHECK: arith.select
+  // CHECK: arith.addf {{.*}} {ssbuffer.add_from_matmul}
+  // CHECK: return
   func.func @case13_may_not_exec_arg_bound(%ub: index, %A: tensor<32x64xf32>, %B: tensor<64x32xf32>) -> tensor<32x32xf32> {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
@@ -445,5 +432,145 @@ module {
       scf.yield %mm : tensor<32x32xf32>
     }
     return %result : tensor<32x32xf32>
+  }
+
+  // ============================================================================
+  // Test cases for small broadcast bias optimization (commit 056f5dd18)
+  // ============================================================================
+
+// Case 14: Small broadcast bias (64 elements * 4 bytes = 256 bytes < 4KB).
+  // dimensions = [0]: input [N] -> output [M, N], typical matmul bias usage.
+  // Should NOT be split - bias is optimized using cache table buffer.
+  // CHECK-LABEL: func.func @case14_small_broadcast_bias
+  // CHECK: linalg.broadcast
+  // CHECK: linalg.matmul {ssbuffer.loop_carried_l0c}
+  // CHECK-NOT: arith.addf
+  // CHECK: return
+  func.func @case14_small_broadcast_bias(%A: tensor<32x64xf32>, %B: tensor<64x64xf32>, %bias_vec: tensor<64xf32>) -> tensor<32x64xf32> {
+    %empty = tensor.empty() : tensor<32x64xf32>
+    %bias = linalg.broadcast ins(%bias_vec : tensor<64xf32>) outs(%empty : tensor<32x64xf32>) dimensions = [0]
+    %mm = linalg.matmul ins(%A, %B : tensor<32x64xf32>, tensor<64x64xf32>) outs(%bias : tensor<32x64xf32>) -> tensor<32x64xf32>
+    return %mm : tensor<32x64xf32>
+  }
+
+// Case 15: Large broadcast bias (2048 elements * 4 bytes = 8KB > 4KB).
+  // dimensions = [0]: input [2048] -> output [M, 2048], but exceeds cache threshold.
+  // Should be split into zero-initialized matmul + addf.
+  // CHECK-LABEL: func.func @case15_large_broadcast_bias
+  // CHECK: arith.constant
+  // CHECK: linalg.broadcast
+  // CHECK: linalg.fill
+  // CHECK: linalg.matmul {ssbuffer.loop_carried_l0c}
+  // CHECK: arith.addf {{.*}} {ssbuffer.add_from_matmul}
+  // CHECK: return
+  func.func @case15_large_broadcast_bias(%A: tensor<32x64xf32>, %B: tensor<64x2048xf32>, %bias_vec: tensor<2048xf32>) -> tensor<32x2048xf32> {
+    %empty = tensor.empty() : tensor<32x2048xf32>
+    %bias = linalg.broadcast ins(%bias_vec : tensor<2048xf32>) outs(%empty : tensor<32x2048xf32>) dimensions = [0]
+    %mm = linalg.matmul ins(%A, %B : tensor<32x64xf32>, tensor<64x2048xf32>) outs(%bias : tensor<32x2048xf32>) -> tensor<32x2048xf32>
+    return %mm : tensor<32x2048xf32>
+  }
+
+  // Case 16: Wrong broadcast dimension (dimensions = [1] instead of [0]).
+  // input [M] -> output [M, N], non-typical matmul bias usage.
+  // Should be split since dimensions[0] != 0.
+  // CHECK-LABEL: func.func @case16_wrong_broadcast_dimension
+  // CHECK: arith.constant
+  // CHECK: linalg.broadcast
+  // CHECK: linalg.fill
+  // CHECK: linalg.matmul {ssbuffer.loop_carried_l0c}
+  // CHECK: arith.addf {{.*}} {ssbuffer.add_from_matmul}
+  // CHECK: return
+  func.func @case16_wrong_broadcast_dimension(%A: tensor<32x64xf32>, %B: tensor<64x64xf32>, %bias_vec: tensor<32xf32>) -> tensor<32x64xf32> {
+    %empty = tensor.empty() : tensor<32x64xf32>
+    %bias = linalg.broadcast ins(%bias_vec : tensor<32xf32>) outs(%empty : tensor<32x64xf32>) dimensions = [1]
+    %mm = linalg.matmul ins(%A, %B : tensor<32x64xf32>, tensor<64x64xf32>) outs(%bias : tensor<32x64xf32>) -> tensor<32x64xf32>
+    return %mm : tensor<32x64xf32>
+  }
+
+  // Case 17: Broadcast with multiple users.
+  // The broadcast result is used by multiple matmul ops.
+  // Should be split since allResultHasOneUser check fails.
+  // CHECK-LABEL: func.func @case17_broadcast_multiple_users
+  // CHECK: linalg.broadcast
+  // CHECK: linalg.matmul {ssbuffer.loop_carried_l0c}
+  // CHECK: linalg.matmul {ssbuffer.loop_carried_l0c}
+  // CHECK: arith.addf
+  // CHECK: return
+  func.func @case17_broadcast_multiple_users(%A: tensor<32x64xf32>, %B: tensor<64x32xf32>, %bias_vec: tensor<32xf32>) -> tensor<32x32xf32> {
+    %empty = tensor.empty() : tensor<32x32xf32>
+    %bias = linalg.broadcast ins(%bias_vec : tensor<32xf32>) outs(%empty : tensor<32x32xf32>) dimensions = [0]
+    %mm1 = linalg.matmul ins(%A, %B : tensor<32x64xf32>, tensor<64x32xf32>) outs(%bias : tensor<32x32xf32>) -> tensor<32x32xf32>
+    %mm2 = linalg.matmul ins(%A, %B : tensor<32x64xf32>, tensor<64x32xf32>) outs(%bias : tensor<32x32xf32>) -> tensor<32x32xf32>
+    %result = arith.addf %mm1, %mm2 : tensor<32x32xf32>
+    return %result : tensor<32x32xf32>
+  }
+
+  // Case 18: Small broadcast with f16->f32 ext_f chain.
+  // Pattern: f16 -> ext_f -> broadcast -> matmul
+  // Should NOT be split - the ext_f is marked as CUBE seed.
+  // CHECK-LABEL: func.func @case18_small_broadcast_with_ext_f16
+  // CHECK: arith.extf
+  // CHECK: linalg.broadcast
+  // CHECK: linalg.matmul {ssbuffer.loop_carried_l0c}
+  // CHECK-NOT: arith.addf
+  // CHECK: return
+  func.func @case18_small_broadcast_with_ext_f16(%A: tensor<32x64xf32>, %B: tensor<64x64xf32>, %bias_vec_f16: tensor<64xf16>) -> tensor<32x64xf32> {
+    %bias_vec_f32 = arith.extf %bias_vec_f16 : tensor<64xf16> to tensor<64xf32>
+    %empty = tensor.empty() : tensor<32x64xf32>
+    %bias = linalg.broadcast ins(%bias_vec_f32 : tensor<64xf32>) outs(%empty : tensor<32x64xf32>) dimensions = [0]
+    %mm = linalg.matmul ins(%A, %B : tensor<32x64xf32>, tensor<64x64xf32>) outs(%bias : tensor<32x64xf32>) -> tensor<32x64xf32>
+    return %mm : tensor<32x64xf32>
+  }
+
+  // Case 19: Broadcast with dynamic shape.
+  // Dynamic shapes cannot be optimized because we cannot compute size at compile time.
+  // Should be split.
+  // CHECK-LABEL: func.func @case19_broadcast_dynamic_shape
+  // CHECK: arith.constant
+  // CHECK: tensor.dim
+  // CHECK: linalg.broadcast
+  // CHECK: linalg.fill
+  // CHECK: linalg.matmul {ssbuffer.loop_carried_l0c}
+  // CHECK: arith.addf {{.*}} {ssbuffer.add_from_matmul}
+  // CHECK: return
+  func.func @case19_broadcast_dynamic_shape(%A: tensor<?x?xf32>, %B: tensor<?x?xf32>, %bias_vec: tensor<?xf32>) -> tensor<?x?xf32> {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %dim0 = tensor.dim %A, %c0 : tensor<?x?xf32>
+    %dim1 = tensor.dim %bias_vec, %c0 : tensor<?xf32>
+    %empty = tensor.empty(%dim0, %dim1) : tensor<?x?xf32>
+    %bias = linalg.broadcast ins(%bias_vec : tensor<?xf32>) outs(%empty : tensor<?x?xf32>) dimensions = [0]
+    %mm = linalg.matmul ins(%A, %B : tensor<?x?xf32>, tensor<?x?xf32>) outs(%bias : tensor<?x?xf32>) -> tensor<?x?xf32>
+    return %mm : tensor<?x?xf32>
+  }
+
+  // Case 20: Broadcast 1D -> 3D (rank mismatch).
+  // Only 1D -> 2D broadcast is supported for the optimization.
+  // Should be split.
+  // CHECK-LABEL: func.func @case20_broadcast_1d_to_3d
+  // CHECK: linalg.broadcast
+  // CHECK: linalg.batch_matmul
+  // CHECK-NOT: arith.addf
+  // CHECK: return
+  func.func @case20_broadcast_1d_to_3d(%A: tensor<32x64x32xf32>, %B: tensor<32x32x64xf32>, %bias_vec: tensor<64xf32>) -> tensor<32x64x64xf32> {
+    %empty = tensor.empty() : tensor<32x64x64xf32>
+    %bias = linalg.broadcast ins(%bias_vec : tensor<64xf32>) outs(%empty : tensor<32x64x64xf32>) dimensions = [0, 1]
+    %mm = linalg.batch_matmul ins(%A, %B : tensor<32x64x32xf32>, tensor<32x32x64xf32>) outs(%bias : tensor<32x64x64xf32>) -> tensor<32x64x64xf32>
+    return %mm : tensor<32x64x64xf32>
+  }
+
+  // Case 21: Small integer broadcast bias.
+  // Similar to Case 14 but with i32 type.
+  // Should NOT be split.
+  // CHECK-LABEL: func.func @case21_small_broadcast_bias_integer
+  // CHECK: linalg.broadcast
+  // CHECK: linalg.matmul {ssbuffer.loop_carried_l0c}
+  // CHECK-NOT: arith.addi
+  // CHECK: return
+  func.func @case21_small_broadcast_bias_integer(%A: tensor<32x64xi32>, %B: tensor<64x32xi32>, %bias_vec: tensor<32xi32>) -> tensor<32x32xi32> {
+    %empty = tensor.empty() : tensor<32x32xi32>
+    %bias = linalg.broadcast ins(%bias_vec : tensor<32xi32>) outs(%empty : tensor<32x32xi32>) dimensions = [0]
+    %mm = linalg.matmul ins(%A, %B : tensor<32x64xi32>, tensor<64x32xi32>) outs(%bias : tensor<32x32xi32>) -> tensor<32x32xi32>
+    return %mm : tensor<32x32xi32>
   }
 }

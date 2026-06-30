@@ -294,11 +294,6 @@ void AnalyzeArgsPass::runOnOperation() {
 
   LDBG("Before AnalyzeArgs:\n" << module << "\n");
 
-  if (failed(isInterceptedModule(module))) {
-    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
-    return;
-  }
-
   if (checkTensorArgsInMainLoop(module) &&
       checkSubfBroadcastMismatchInVectorMainLoop(module)) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);

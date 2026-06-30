@@ -22,10 +22,12 @@
 
 #ifndef ADD_AUTO_SCHEDULING_COMMON_UTILS_H
 #define ADD_AUTO_SCHEDULING_COMMON_UTILS_H
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/StringRef.h"
+#include <cstdint>
 #include <string_view>
 
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
@@ -67,11 +69,12 @@ static constexpr llvm::StringLiteral kInlinableQuantScaleAttr =
     "enable_fast_tf32_mul";
 inline constexpr llvm::StringLiteral kHIVMMatmulLimitedInCubeAttr =
     "hivm.matmul_limited_in_cube";
-
 inline constexpr const char *ERRCODE_ATTR =
     "triton_ascend.dynamic_cv_pipeline.rc";
 static constexpr const int ERRCODE_FAILED = 1;
 static constexpr const int ERRCODE_IGNORED = 2;
+constexpr int64_t CACHE_TABLE_BUFFER_SIZE = 4096;
+constexpr int64_t BYTE_SIZE = 8;
 
 enum CoreType {
   UNDETERMINED = 0,
@@ -115,6 +118,9 @@ inline bool isCubeOp(Operation *op) {
 bool isVectorOnlyOp(Operation *op);
 
 bool isScalarLike(Value value);
+bool allResultHasOneUser(Operation *op);
+
+int64_t getBTSizeFromValidBroadcastOp(linalg::BroadcastOp broadcastOp);
 
 } // namespace CVPipeline
 } // namespace mlir

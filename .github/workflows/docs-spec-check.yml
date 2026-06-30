@@ -62,8 +62,6 @@ jobs:
           DOCS_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.event.pull_request.base.ref) || github.ref_name }}
           DOCS_CHECK_ALL: ${{ github.event_name != 'pull_request' }}
         run: |
-          set -euo pipefail
-
           REPO_ROOT="$GITHUB_WORKSPACE"
           BASE_REF="${DOCS_BASE_REF:-origin/main}"
           TARGET_REPO="${DOCS_TARGET_REPO:-all}"

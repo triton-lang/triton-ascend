@@ -74,5 +74,6 @@ exclude: |
     ^third_party/amd/backend/lib/|
     ^third_party/ascend/llvm_patch/|
     ^third_party/nvidia/backend/include/cuda.h|
-    ^third_party/f2reduce
+    ^third_party/f2reduce|
+    ^\.github/docs-ci/docs-ci-v2\.js
   )

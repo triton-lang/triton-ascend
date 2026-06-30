@@ -1,0 +1,140 @@
+name: Docs Specifications Check
+
+on:
+  pull_request:
+    # The config (.github/docs-ci/config.json) checks any changed
+    # .md / .mdx / _toc.yaml, so trigger on those rather than only docs/.
+    # Also run when the gate's own definition (workflow / config / checker)
+    # changes, so those changes get self-validated.
+    paths:
+      - '**/*.md'
+      - '**/*.mdx'
+      - '**/_toc.yaml'
+      - '.github/workflows/docs-spec-check.yml'
+      - '.github/docs-ci/**'
+  # Manual + nightly full scans (checkAll) to surface errors in existing docs
+  # that incremental PR runs never touch. These never block a PR.
+  workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * *'  # 02:00 Asia/Shanghai
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-check-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.ref != 'refs/heads/main' }}
+
+jobs:
+  docs-check:
+    name: Docs gate
+    runs-on: linux-aarch64-cpu-1
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ascend/triton:github_action
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history is required for PR runs: the checker diffs <base>...HEAD
+          # to find the changed docs. (Harmless for full scans.)
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        if: github.event_name == 'pull_request'
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache cspell dictionaries
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: docs-ci-${{ runner.os }}-${{ hashFiles('.github/docs-ci/docs-ci-v2.js', '.github/docs-ci/config.json') }}
+
+      - name: Run docs gate
+        env:
+          DOCS_TARGET_REPO: ${{ github.repository }}
+          # PR: incremental (changed files only). Manual/scheduled: full scan.
+          DOCS_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.event.pull_request.base.ref) || github.ref_name }}
+          DOCS_CHECK_ALL: ${{ github.event_name != 'pull_request' }}
+        run: |
+          set -euo pipefail
+
+          REPO_ROOT="$GITHUB_WORKSPACE"
+          BASE_REF="${DOCS_BASE_REF:-origin/main}"
+          TARGET_REPO="${DOCS_TARGET_REPO:-all}"
+          CI_CONFIG="${DOCS_CI_CONFIG:-$REPO_ROOT/.github/docs-ci/config.json}"
+          OUTPUT_COUNT="${DOCS_OUTPUT_COUNT:-50}"
+          OUTPUT_PATH="${DOCS_OUTPUT_PATH:-$REPO_ROOT/output.md}"
+
+          # The checker is vendored in this repo — no download needed.
+          CLI_PATH="${DOCS_CLI:-$REPO_ROOT/.github/docs-ci/docs-ci-v2.js}"
+          if [ ! -f "$CLI_PATH" ]; then
+            echo "::error::docs checker not found at $CLI_PATH"
+            exit 1
+          fi
+
+          # codespell-check relies on cspell-lib and its dictionaries, which the
+          # bundle resolves from node_modules next to itself. Install them on
+          # demand in .cache (cached across runs) and symlink into the vendored
+          # directory so the bundle can find them.
+          NEED_CSPELL="${DOCS_NEED_CSPELL:-}"
+          if [ -z "$NEED_CSPELL" ] && [ -f "$CI_CONFIG" ] && grep -q "codespell-check" "$CI_CONFIG"; then
+            NEED_CSPELL=1
+          fi
+          if [ -n "$NEED_CSPELL" ]; then
+            CSPELL_DIR="${DOCS_CSPELL_DIR:-$REPO_ROOT/.cache}"
+            if [ ! -d "$CSPELL_DIR/node_modules/cspell-lib" ]; then
+              echo "Installing cspell-lib@${DOCS_CSPELL_VERSION:-9.2.1} for codespell-check"
+              mkdir -p "$CSPELL_DIR"
+              [ -f "$CSPELL_DIR/package.json" ] || printf '{"name":"docs-ci-runtime","private":true}\n' > "$CSPELL_DIR/package.json"
+              ( cd "$CSPELL_DIR" && npm i --no-audit --no-fund --loglevel=error "cspell-lib@${DOCS_CSPELL_VERSION:-9.2.1}" )
+            fi
+            # Symlink node_modules next to the checker so the bundle can resolve cspell-lib.
+            CLI_DIR="$(dirname "$CLI_PATH")"
+            if [ ! -e "$CLI_DIR/node_modules" ]; then
+              ln -s "$CSPELL_DIR/node_modules" "$CLI_DIR/node_modules"
+            fi
+          fi
+
+          ARGS=(
+            --repoPath="$REPO_ROOT"
+            --targetOwnerRepo="$TARGET_REPO"
+            --targetBranch="$BASE_REF"
+            --ciConfigUrl="$CI_CONFIG"
+            --outputCount="$OUTPUT_COUNT"
+            --outputPath="$OUTPUT_PATH"
+          )
+          if [ "${DOCS_CHECK_ALL:-}" = "true" ]; then
+            ARGS+=(--checkAll=true)
+          fi
+
+          rm -f "$OUTPUT_PATH"
+          cd "$REPO_ROOT"
+          node "$CLI_PATH" "${ARGS[@]}"
+
+          if [ ! -f "$OUTPUT_PATH" ]; then
+            echo "::error::docs checker produced no report at $OUTPUT_PATH"
+            exit 1
+          fi
+          if head -n 1 "$OUTPUT_PATH" | grep -q "❌"; then
+            echo "::error::Docs PR gate failed - see report below / job summary."
+            cat "$OUTPUT_PATH"
+            exit 1
+          fi
+          echo "Docs PR gate passed."
+
+      - name: Publish report
+        if: always()
+        run: |
+          if [ -f output.md ]; then
+            {
+              echo "## Docs Check"
+              echo ""
+              cat output.md
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

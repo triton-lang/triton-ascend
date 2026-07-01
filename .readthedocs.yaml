@@ -1,14 +1,24 @@
 # Read the Docs configuration file
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
+#
+# Single config drives both language projects. The project's Admin -> Settings
+# -> Language sets READTHEDOCS_LANGUAGE; readthedocs_checkout.sh maps it to
+# docs/<lang>/ via a docs/active symlink that the declarative sphinx/python
+# blocks below read from. No user-defined env vars required.
+
 version: 2
 
 build:
   os: ubuntu-24.04
   tools:
     python: "3.13"
+  jobs:
+    post_checkout:
+      - bash scripts/readthedocs_checkout.sh
 
 sphinx:
-  configuration: docs/zh/conf.py
+  configuration: docs/active/conf.py
 
 python:
   install:
-  - requirements: docs/zh/requirement.txt
+    - requirements: docs/active/requirement.txt

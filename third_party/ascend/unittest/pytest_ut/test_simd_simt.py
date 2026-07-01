@@ -687,3 +687,100 @@ def test_simple_indirect_store():
         torch.testing.assert_close(dst[p], values[i], rtol=1e-5, atol=1e-5)
 
     return True
+
+
+@triton.jit
+def gather_then_tldot_2d_kernel(
+    a_ptr,          # [M, K_src]
+    b_ptr,          # [K_src, N]
+    indices_ptr,    # [BLOCK_K]
+    out_ptr,        # [M, N]
+    M,
+    N,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_om,
+    stride_on,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_K: tl.constexpr,
+):
+    pid_m = tl.program_id(0)
+    pid_n = tl.program_id(1)
+
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)   # [BLOCK_M]
+    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)   # [BLOCK_N]
+    offs_k = tl.arange(0, BLOCK_K)                     # [BLOCK_K]
+
+    # gather 的 K 下标
+    gather_k = tl.load(indices_ptr + offs_k)           # [BLOCK_K]
+
+    # A: [BLOCK_M, BLOCK_K]
+    # 从 src_a[offs_m, gather_k] 取值
+    a_ptrs = a_ptr + offs_m[:, None] * stride_am + gather_k[None, :] * stride_ak
+    a_mask = offs_m[:, None] < M
+    a = tl.load(a_ptrs, mask=a_mask, other=0.0)
+
+    # B: [BLOCK_K, BLOCK_N]
+    # 从 src_b[gather_k, offs_n] 取值
+    b_ptrs = b_ptr + gather_k[:, None] * stride_bk + offs_n[None, :] * stride_bn
+    b_mask = offs_n[None, :] < N
+    b = tl.load(b_ptrs, mask=b_mask, other=0.0)
+
+    # 2D tl.dot: [BLOCK_M, BLOCK_K] x [BLOCK_K, BLOCK_N] -> [BLOCK_M, BLOCK_N]
+    c = tl.dot(a, b)
+
+    # store 输出
+    out_ptrs = out_ptr + offs_m[:, None] * stride_om + offs_n[None, :] * stride_on
+    out_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
+    tl.store(out_ptrs, c, mask=out_mask)
+
+
+@simd_simt_910_95_only
+def test_gather_then_tldot_2d():
+    device = "npu"
+    # 这里用 float16 更适合 tl.dot
+    # 若你环境里 fp32 的 tl.dot 可用，也可以改回 float32
+    M = 16
+    K_SRC = 256
+    N = 16
+    BLOCK_M = 16
+    BLOCK_N = 16
+    BLOCK_K = 16   # 通常需要 >= 16
+
+    # 源矩阵
+    src_a = torch.arange(M * K_SRC, dtype=torch.float16, device=device).reshape(M, K_SRC)
+    src_b = torch.arange(K_SRC * N, dtype=torch.float16, device=device).reshape(K_SRC, N)
+
+    # 沿 K 维 gather 的索引
+    indices = torch.tensor(
+        [10, 25, 100, 200, 5, 50, 150, 255,
+         1, 2, 3, 4, 6, 7, 8, 9],
+        dtype=torch.int32,
+        device=device
+    )
+
+    output = torch.empty((M, N), dtype=torch.float32, device=device)
+
+    grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(N, BLOCK_N))
+
+    gather_then_tldot_2d_kernel[grid](
+        src_a, src_b, indices, output,
+        M, N,
+        src_a.stride(0), src_a.stride(1),
+        src_b.stride(0), src_b.stride(1),
+        output.stride(0), output.stride(1),
+        BLOCK_M=BLOCK_M,
+        BLOCK_N=BLOCK_N,
+        BLOCK_K=BLOCK_K,
+        compile_mode="simd_simt"
+    )
+
+    # PyTorch 参考结果
+    expected = torch.matmul(src_a[:, indices].to(torch.float32),
+                            src_b[indices, :].to(torch.float32))
+
+    torch.testing.assert_close(output, expected, rtol=1e-2, atol=1e-2)
+    print("\n2D gather + tl.dot test PASSED")

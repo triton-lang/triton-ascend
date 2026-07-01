@@ -181,7 +181,6 @@ def _run_once(BLOCK_N: int, dtype_str: str) -> None:
         C_row_stride=C.stride(0), C_col_stride=C.stride(1),
         BLOCK_N=BLOCK_N,
         HALF=_HALF,
-        enable_sync_block_lock=True,
     )
 
     # Verification

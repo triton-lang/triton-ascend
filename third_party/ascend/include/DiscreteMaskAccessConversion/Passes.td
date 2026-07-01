@@ -17,10 +17,7 @@ def DiscreteMaskAccessConversion : Pass<"discrete-mask-access-conversion", "mlir
         "compile on 910_95">,
     Option<"forceSimtTemplate", "force-simt-template",
         "bool", /*default*/"false",
-        "force to use simt template">,
-    Option<"enableSyncBlockLock", "enable-sync-block-lock",
-        "bool", /*default*/"true",
-        "enable sync block lock/unlock in store">
+        "force to use simt template">
   ];
 }
 

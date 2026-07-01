@@ -1,105 +1,100 @@
-Triton Ascend
-==============
 
-.. contents::
-    :local:
-    :depth: 2
+欢迎查看 Triton Ascend 文档
+============================
 
-.. toctree::
-    :maxdepth: 2
-    :caption: 快速开始
+**Triton-Ascend** 是适配华为 Ascend 昇腾芯片的 Triton 优化版本，提供高效的核函数自动调优、算子编译及部署能力，支持 Ascend Atlas A2/A3 等系列产品， 兼容 Triton 核心语法的同时，针对昇腾 NPU 特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。
 
-    quick_start.md
+.. raw:: html
 
-.. toctree::
-    :maxdepth: 2
-    :caption: 安装指南
+    <ul>
+    <li><a href="https://gitcode.com/Ascend/triton-ascend" target="_blank">GitCode 仓库</a></li>
+    <li><a href="https://github.com/triton-lang/triton-ascend" target="_blank">GitHub 仓库</a></li>
+    <li><a href="https://triton-ascend.readthedocs.io" target="_blank">Triton Ascend 文档</a></li>
+    </ul>
 
-    installation_guide.md
+快速开始
+----------------------
 
-.. toctree::
-    :maxdepth: 2
-    :caption: 架构设计与核心特性
+- :doc:`快速入门 <quick_start>` — 环境要求与环境搭建
+- :doc:`安装指南 <installation_guide>` — 安装方式与安装步骤
+- :doc:`开发教程 <programming_guide/triton_operator_development_guide>` — Triton 算子开发指南
 
-    architecture_design_and_core_features.md
+开发指南
+---------------------
 
-.. toctree::
-    :maxdepth: 2
-    :caption: Triton 算子开发指南
+- :doc:`Triton-Ascend算子开发 <examples/01_vector_add_example>` — 调用新算子开发
+- :doc:`Triton-Ascend算子迁移 <migration_guide/index>` — GPU Triton 算子迁移
+- :doc:`Triton-Ascend算子调试与调优 <debug_guide/index>` — Triton-Ascend autotune 使用指南
 
-    programming_guide/index.md
-    programming_guide/vector_operator.md
-    programming_guide/cube_operator.md
-    programming_guide/cv_fusion_operator.md
+更多
+------------
 
-.. toctree::
-    :maxdepth: 2
-    :caption: Triton 算子迁移指南
+- :doc:`贡献指南 <community/CONTRIBUTING_zh>`
+- :doc:`常见问题 <FAQ>`
 
-    migration_guide/architecture_difference.md
-    migration_guide/migrate_from_gpu.md
+
+.. toctree 驱动侧栏导航。
 
 .. toctree::
-    :maxdepth: 2
-    :caption: 典型算子样例
-
-    examples/index.md
-
-.. toctree::
-    :maxdepth: 2
-    :caption: 算子调试与调优
-
-    autotune_guide.md
-    max_autotune_guide.md
-    debug_guide/debugging.md
-    debug_guide/profiling.md
+   :hidden:
+   :titlesonly:
+   :caption: 快速开始
+   
+   版本说明 <release_note>
+   快速入门 <quick_start>
+   安装指南 <installation_guide>
+   教程 <programming_guide/index>
 
 .. toctree::
-    :maxdepth: 3
-    :caption: Triton API 接口说明
+   :hidden:
+   :titlesonly:
+   :caption: 特性说明
 
-    triton_api/index.md
-    triton_api/triton/index.md
-
-.. toctree::
-    :maxdepth: 1
-    :caption: Libdevice 开发者手册
-
-    libdevice/libdevice_developer_guide.md
+   架构设计与核心特性 <architecture_design_and_core_features>
 
 .. toctree::
-    :maxdepth: 2
-    :caption: 昇腾扩展 API 接口说明
+   :hidden:
+   :titlesonly:
+   :caption: 开发指南
 
-    triton_api_extension/index.md
-
-.. toctree::
-    :maxdepth: 1
-    :caption: 环境变量和编译选项
-
-    environment_variable_and_compiler_options_reference.md
+   调用新开发算子 <examples/01_vector_add_example>
+   Triton-Ascend 算子迁移 <migration_guide/index>
+   Triton-Ascend 算子调试与调优 <debug_guide/index>
+   典型算子样例<examples/index>
 
 .. toctree::
-    :maxdepth: 1
-    :caption: 常见问题
+   :hidden:
+   :titlesonly:
+   :caption: API参考
 
-    FAQ.md
-
-.. toctree::
-    :maxdepth: 1
-    :caption: 贡献指南
-
-    community/CONTRIBUTING_zh.md
-    community/roadmap_guide.md
+   triton.language API <triton_api/index>
+   triton <triton_api/triton/index>
+   libdevice 开发者手册 <libdevice/libdevice_developer_guide>
 
 .. toctree::
-    :maxdepth: 1
-    :caption: 社区治理
+   :hidden:
+   :titlesonly:
+   :caption: 常见问题
 
-    community/CODE_OF_CONDUCT_zh.md
-    community/GOVERNANCE_zh.md
-    community/community_technical_meeting.md
-    community/release_policy.md
-    community/MAINTAINERS.md
-    community/contributor.md
-    community/SECURITYNOTE_zh.md
+   Triton-Ascend FAQ <FAQ>
+
+.. toctree::
+   :hidden:
+   :titlesonly:
+   :caption: 贡献指南
+
+   贡献指南 <community/CONTRIBUTING_zh>
+   RodMap指导 <community/roadmap_guide>
+
+.. toctree::
+   :hidden:
+   :titlesonly:
+   :caption: 社区治理
+
+   贡献者公约 <community/CODE_OF_CONDUCT_zh>
+   治理机制 <community/GOVERNANCE_zh>
+   技术例会 <community/community_technical_meeting>
+   版本发布策略 <community/release_policy>
+   Maintainers <community/MAINTAINERS>
+   Contributors <community/contributor>
+   安全声明 <community/SECURITYNOTE_zh>

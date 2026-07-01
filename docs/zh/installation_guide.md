@@ -3,9 +3,11 @@
 本文主要介绍在 Ubuntu 环境中如何快速完成 **Triton-Ascend** 基础配套的安装，如果需要详细的操作步骤请参考[<u>《安装介绍》</u>](#anzhuangzhinan)。
 
 ## 基于Docker镜像快速搭建
+
 直接使用 Triton-Ascend 发布的开箱即用的镜像，快速构筑开发环境。
 
 ### 确认镜像
+
 **表1** 昇腾芯片与对应产品及镜像 tag 部分对照表。更多镜像参见 [OVERVIEW.zh.md](../../docker/OVERVIEW.zh.md) 文档。
 <table style="table-layout: fixed; width: 100%; border-collapse: collapse;">
   <tr style="height: 50px;">
@@ -31,7 +33,8 @@
 </table>
 
 ### 具体实施
-1.  创建容器
+
+1. 创建容器
 
     ```bash
     # 假设您的NPU设备型号是A3，且设备安装在/dev/davinci1上，并且您的NPU驱动程序安装在/usr/local/Ascend上：
@@ -61,22 +64,29 @@
     /bin/bash
     ```
 
-2.  进入容器
+2. 进入容器
+
     ```bash
     docker exec -it triton-ascend_container bash
     ```
+
 3. 拉取代码
+
 ```bash
 # 拉取triton-ascend源码仓及用例
 git clone https://github.com/triton-lang/triton-ascend.git
 cd triton-ascend
 ```
+
 4. 运行示例：<a href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py" style="text-decoration: none; color: #0066cc;">01-vector-add.py </a>
+
 ```bash
 # 运行tutorials示例：
 python3 ./third_party/ascend/tutorials/01-vector-add.py
 ```
+
 观察到类似的输出即说明环境配置正确：
+
 ```
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')

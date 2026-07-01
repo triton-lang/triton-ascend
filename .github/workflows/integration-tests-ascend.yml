@@ -54,10 +54,10 @@ jobs:
         id: cache-deps
         uses: runs-on/cache/restore@v5
         env:
-          RUNS_ON_S3_BUCKET_CACHE: vllm-ascend
-          RUNS_ON_S3_BUCKET_ENDPOINT: https://obs.cn-north-4.myhuaweicloud.com
+          RUNS_ON_S3_BUCKET_CACHE: triton-ascend-artifacts
+          RUNS_ON_S3_BUCKET_ENDPOINT: https://obs.cn-southwest-2.myhuaweicloud.com
           RUNS_ON_S3_FORCE_PATH_STYLE: "true"
-          RUNS_ON_AWS_REGION: cn-north-4
+          RUNS_ON_AWS_REGION: cn-southwest-2
         with:
           path: |
             ~/.triton/llvm
@@ -167,10 +167,10 @@ jobs:
         if: ${{ steps.cache-deps.outputs.cache-hit != 'true' }}
         uses: runs-on/cache/save@v5
         env:
-          RUNS_ON_S3_BUCKET_CACHE: vllm-ascend
-          RUNS_ON_S3_BUCKET_ENDPOINT: https://obs.cn-north-4.myhuaweicloud.com
+          RUNS_ON_S3_BUCKET_CACHE: triton-ascend-artifacts
+          RUNS_ON_S3_BUCKET_ENDPOINT: https://obs.cn-southwest-2.myhuaweicloud.com
           RUNS_ON_S3_FORCE_PATH_STYLE: "true"
-          RUNS_ON_AWS_REGION: cn-north-4
+          RUNS_ON_AWS_REGION: cn-southwest-2
         with:
           path: |
             ~/.triton/llvm

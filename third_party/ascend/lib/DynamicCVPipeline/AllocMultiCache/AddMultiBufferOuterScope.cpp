@@ -32,9 +32,12 @@ namespace mlir {
 namespace triton {
 
 // Maximum number of flag allocation attempts per transfer group
-static constexpr int kMaxFlagAttempts = 16;
-static constexpr int kMaxTotalFlags = 15;
-static constexpr int kFlagThresholdSingleBuffer = 7;
+static constexpr int K_MAX_FLAG_ATTEMPTS = 16;
+static constexpr int K_MAX_TOTAL_FLAGS = 15;
+static constexpr int K_FLAG_THRESHOLD_SINGLE_BUFFER = 7;
+static constexpr int K_BUILD_GROUP_FAILURE = -1;
+static constexpr int K_BUILD_GROUP_SUCCESS = 0;
+static constexpr int K_BUILD_GROUP_SKIP = 1;
 
 // --- Attribute helpers ---
 
@@ -331,7 +334,7 @@ static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
 
     // 1. Collect buffer alloc/mark pairs
     BufferAllocInfo bufInfo;
-    if (collectBufferAllocs(ops, bufInfo)) { return -1; }
+    if (collectBufferAllocs(ops, bufInfo)) { return K_BUILD_GROUP_FAILURE; }
     info.senderBuf = bufInfo.sender;
     info.receiverBuf = bufInfo.receiver;
     LDBG("Sender buffer: " << (info.senderBuf.allocOp ? "alloc" : "none")
@@ -352,7 +355,7 @@ static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
 
     // 3. Collect extra sync (parent has no main_loop)
     ExtraSyncInfo extraInfo;
-    if (collectExtraSync(ops, info.originalFlag, extraInfo)) { return -1; }
+    if (collectExtraSync(ops, info.originalFlag, extraInfo)) { return K_BUILD_GROUP_FAILURE; }
     info.extraSyncSetOp = extraInfo.setOp;
     info.extraSyncWaitOp = extraInfo.waitOp;
     if (extraInfo.setOp && extraInfo.waitOp) {
@@ -364,9 +367,17 @@ static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
 
     // 4. Collect transfer chain (parent has main_loop)
     TransferChainInfo chainInfo;
-    if (collectTransferChains(ops, info.originalFlag, chainInfo)) { return -1; }
+    if (collectTransferChains(ops, info.originalFlag, chainInfo)) { return K_BUILD_GROUP_FAILURE; }
     info.senderChain = chainInfo.sender;
     info.receiverChain = chainInfo.receiver;
+
+    // Skip incomplete groups that lack a sender waitOp. findSyncOpWithFlag
+    // returned nullptr; without it addPollingControlFlow would crash later.
+    // Must filter here — before acquireId — to avoid wasting flag IDs.
+    if (!info.senderChain.waitOp) {
+        LDBG("Skipping incomplete group tid=" << tid << " (null sender waitOp)");
+        return K_BUILD_GROUP_SKIP;
+    }
 
     // 5. Determine direction
     if (info.senderChain.transferOp) {
@@ -384,7 +395,7 @@ static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
     }
 
     // 6. Acquire output flag
-    for (int attempt = 0; attempt < kMaxFlagAttempts; ++attempt) {
+    for (int attempt = 0; attempt < K_MAX_FLAG_ATTEMPTS; ++attempt) {
         int64_t pf = flagIdMgr.acquireId(nullptr);
         if (pf == FlagIdManager::INVALID_FLAG_ID) { break; }
         if (pf != info.originalFlag) {
@@ -398,7 +409,7 @@ static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
                      << ", flag=" << info.originalFlag << ", outputFlag=" << info.outputFlag);
     }
 
-    return 0;
+    return K_BUILD_GROUP_SUCCESS;
 }
 
 /// Collect TransferGroupInfo for all transfer groups
@@ -409,7 +420,9 @@ static int collectTransferGroupData(
 {
     for (auto &p : opsByTid) {
         TransferGroupInfo info;
-        if (buildTransferGroupData(p.first, p.second, flagIdMgr, info)) { continue; }
+        int buildStatus = buildTransferGroupData(p.first, p.second, flagIdMgr, info);
+        if (buildStatus == K_BUILD_GROUP_SKIP) { continue; }
+        if (buildStatus != K_BUILD_GROUP_SUCCESS) { continue; }
         if (info.senderChain.transferOp || info.receiverChain.transferOp) {
             groups[p.first] = info;
         }
@@ -954,15 +967,15 @@ void AddMultiBufferOuterScopePass::runOnOperation()
         }
     });
     int flagCount = static_cast<int>(usedFlags.size());
-    LDBG("[FlagBudget] used=" << flagCount << " (max=" << (kMaxTotalFlags + 1) << ")");
-    if (flagCount > kMaxTotalFlags) {
-        LDBG("[FlagBudget] FATAL: flag count " << flagCount << " > " << kMaxTotalFlags << ", halting pass");
-        module->emitError() << "[FlagBudget] flag count " << flagCount << " > " << kMaxTotalFlags << ", halting pass";
+    LDBG("[FlagBudget] used=" << flagCount << " (max=" << (K_MAX_TOTAL_FLAGS + 1) << ")");
+    if (flagCount > K_MAX_TOTAL_FLAGS) {
+        LDBG("[FlagBudget] FATAL: flag count " << flagCount << " > " << K_MAX_TOTAL_FLAGS << ", halting pass");
+        module->emitError() << "[FlagBudget] flag count " << flagCount << " > " << K_MAX_TOTAL_FLAGS << ", halting pass";
         signalPassFailure();
         return;
     }
-    if (flagCount > kFlagThresholdSingleBuffer) {
-        LDBG("[FlagBudget] flag count " << flagCount << " > " << kFlagThresholdSingleBuffer << ", forcing single-buffer");
+    if (flagCount > K_FLAG_THRESHOLD_SINGLE_BUFFER) {
+        LDBG("[FlagBudget] flag count " << flagCount << " > " << K_FLAG_THRESHOLD_SINGLE_BUFFER << ", forcing single-buffer");
         isDoubleBuf = false;
     }
 

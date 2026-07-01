@@ -304,11 +304,11 @@ def allocate_memory(size, stream):
 @backend_strategy_registry.register("torch_npu", "allocate_memory")
 def allocate_memory(size, stream):
     return f'''init_npu_utils();
-    if (!g_allocate_workspace_legacy) {{
-      fprintf(stderr, "Error: triton_allocate_workspace_legacy is unavailable\\n");
+    if (!g_allocate_workspace) {{
+      fprintf(stderr, "Error: triton_allocate_workspace is unavailable\\n");
       workspace_addr_ptr = nullptr;
     }} else {{
-      workspace_addr_ptr = g_allocate_workspace_legacy({size});
+      workspace_addr_ptr = g_allocate_workspace({size}, &workspace_handle);
     }}'''
 
 

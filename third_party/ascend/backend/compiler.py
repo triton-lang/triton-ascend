@@ -183,7 +183,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         enable_select_analysis = metadata["enable_select_analysis"]
         compile_on_910_95 = metadata["compile_on_910_95"]
         force_simt_template = metadata["force_simt_template"]
-        enable_sync_block_lock = metadata["enable_sync_block_lock"]
         enable_mask_fallback_conversion = metadata["enable_mask_fallback_conversion"]
         optimize_dynamic_offset = metadata["optimize_dynamic_offset"]
         auto_blockify_size = metadata["auto_blockify_size"]
@@ -208,8 +207,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             passes.common.add_cse(pm)
             passes.common.add_canonicalizer(pm)
         ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
-        ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, force_simt_template,
-                                                               enable_sync_block_lock)
+        ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, force_simt_template)
         ascend.passes.ttir.add_triton_to_annotation(pm)
         ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, force_simt_template)
         ascend.passes.ttir.add_triton_to_hivm(pm)
@@ -396,11 +394,22 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
     metadata["shared"] = 1
     # Force disable auto tile and bind subblock if attribute is present in module
     metadata["auto_tile_and_bind_subblock"] = not re.search(DISABLE_AUTO_TILE_AND_BIND_SUBBLOCK_REGEX, linalg)
-    # Turn off auto-blockify when sync_block_lock/unlock was inserted: the lock
-    # protects a cross-block read-modify-write and is incompatible with packing
-    # logical blocks into a sequential auto-blockify loop.
-    if re.search(SYNC_BLOCK_LOCK_REGEX, linalg):
+    # Turn off auto-blockify only for the ORDERED (token-ring) sync_block_lock:
+    if re.search(SYNC_BLOCK_LOCK_REGEX, linalg) and not re.search(
+            r"sync_block_lock_unordered", linalg):
         metadata["has_auto_blockify_blacklist_op"] = True
+    # The unordered (Bakery) discrete-mask lock cannot coexist with CV sub-tiling
+    # (auto-bind-sub-block)
+    has_unordered_sync_block_lock = re.search(r"sync_block_lock_unordered", linalg) is not None
+    metadata["has_unordered_sync_block_lock"] = has_unordered_sync_block_lock
+    if has_unordered_sync_block_lock:
+        metadata["auto_tile_and_bind_subblock"] = False
+        # One metadata cache line for runtime participant_num, plus one
+        # choosing and one ticket cache line per participant. Each cache line is
+        # 8 i64. This fallback is for one lock; the bishengir callback supplies
+        # the exact total after lowering.
+        metadata["lock_num"] = (1 + 2 * 1024) * 8
+        metadata["lock_init_val"] = 0
     # the mix mode is also encoded into metadata['name'] for runtime to distinguish
     metadata["mix_mode"] = re.search(MIX_MODE_REGEX, linalg).group(1)
     metadata["parallel_mode"] = re.search(PARALLEL_MODE_REGEX, linalg).group(1)
@@ -1086,7 +1095,6 @@ class NPUOptions:
     parallel_mode: str = "simd"
     force_simt_only: bool = False
     force_simt_template: bool = False
-    enable_sync_block_lock: bool = False
     # only take effect on the simt-only & simd-simt-mix scenarios
     shared_mem_dynamic_size: int = None
     # enable_bishengir_simt_optimization is passed as

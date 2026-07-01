@@ -98,12 +98,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
 
   m.def("add_discrete_mask_access_conversion", [](mlir::PassManager &pm,
                                                   bool compileOn91095,
-                                                  bool forceSimtTemplate,
-                                                  bool enableSyncBlockLock) {
+                                                  bool forceSimtTemplate) {
     DiscreteMaskAccessConversionOptions opts;
     opts.compileOn91095 = compileOn91095;
     opts.forceSimtTemplate = forceSimtTemplate;
-    opts.enableSyncBlockLock = enableSyncBlockLock;
     pm.addPass(mlir::triton::createDiscreteMaskAccessConversionPass(opts));
   });
 

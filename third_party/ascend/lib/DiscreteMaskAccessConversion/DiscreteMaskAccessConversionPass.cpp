@@ -20,13 +20,13 @@
  * THE SOFTWARE.
  */
 
+#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 #include "TritonToUnstructure/IndirectAtomicUtils.h"
 #include "Utils/Utils.h"
-#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
-#include "ascend/include/TritonToStructured/MemOpConverter.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "ascend/include/TritonToStructured/MemOpConverter.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
@@ -50,13 +50,17 @@ using namespace mlir;
 using namespace hivm;
 
 // File-scope flags set by DiscreteMaskAccessConversionPass::runOnOperation()
-// before pattern application, so that OpRewritePattern subclasses can read
-// them.
+// before pattern application, so that OpRewritePattern subclasses can read them.
 static bool compileOn91095Flag = false;
 static bool forceSimtTemplateFlag = false;
-static bool enableSyncBlockLockFlag = true;
+static bool useSyncBlockLockFlag = true;
 static constexpr const char *routeDiscreteMaskToSimtAttrName =
     "route_discrete_mask_to_simt";
+
+static void markSyncBlockLockUnordered(Operation *op) {
+  op->setAttr(hivm::SyncBlockLockUnorderedAttr::name,
+              UnitAttr::get(op->getContext()));
+}
 
 static bool traceUserToTargetOp(Value val) {
   llvm::SmallVector<Value, 32> worklist;
@@ -64,112 +68,119 @@ static bool traceUserToTargetOp(Value val) {
   worklist.push_back(val);
 
   while (!worklist.empty()) {
-    Value currVal = worklist.pop_back_val();
-    if (!visited.insert(currVal).second)
-      continue;
-
-    for (Operation *user : currVal.getUsers()) {
-      if (auto mulOp = dyn_cast<arith::MulIOp>(user)) {
-        Value lhs = mulOp.getLhs();
-        Value rhs = mulOp.getRhs();
-        Value constVal;
-        if (lhs.getDefiningOp<arith::ConstantOp>()) {
-          constVal = lhs;
-        } else if (rhs.getDefiningOp<arith::ConstantOp>()) {
-          constVal = rhs;
-        } else {
+      Value currVal = worklist.pop_back_val();
+      if (!visited.insert(currVal).second)
           continue;
-        }
 
-        auto constDef = constVal.getDefiningOp<arith::ConstantOp>();
-        int64_t blockSize = 0;
-        if (auto intAttr = mlir::dyn_cast<IntegerAttr>(constDef.getValue())) {
-          blockSize = intAttr.getInt();
-        }
-
-        llvm::SmallVector<Value, 8> searchQueue;
-        llvm::SmallPtrSet<Value, 8> searchVis;
-        for (Value mulRes : mulOp->getResults()) {
-          searchQueue.push_back(mulRes);
-          searchVis.insert(mulRes);
-        }
-
-        bool findMatch = false;
-        while (!searchQueue.empty()) {
-          Value checkVal = searchQueue.pop_back_val();
-          for (Operation *subUser : checkVal.getUsers()) {
-            if (auto addOp = dyn_cast<arith::AddIOp>(subUser)) {
-              Value otherOperand = (addOp.getLhs() == checkVal)
-                                       ? addOp.getRhs()
-                                       : addOp.getLhs();
-
-              Value curSrc = otherOperand;
-              bool hitRange = false;
-              int depth = 0;
-              while (curSrc.getDefiningOp() && depth < 5) {
-                Operation *defOp = curSrc.getDefiningOp();
-                if (auto rangeOp = dyn_cast<triton::MakeRangeOp>(defOp)) {
-                  if (rangeOp.getEnd() == blockSize) {
-                    hitRange = true;
-                    break;
-                  }
-                }
-
-                if (isa<arith::ExtSIOp, triton::SplatOp, triton::ExpandDimsOp,
-                        triton::BroadcastOp>(defOp)) {
-                  curSrc = defOp->getOperand(0);
-                  depth++;
+      for (Operation* user : currVal.getUsers()) {
+          if (auto mulOp = dyn_cast<arith::MulIOp>(user)) {
+              Value lhs = mulOp.getLhs();
+              Value rhs = mulOp.getRhs();
+              Value constVal;
+              if (lhs.getDefiningOp<arith::ConstantOp>()) {
+                  constVal = lhs;
+              } else if (rhs.getDefiningOp<arith::ConstantOp>()) {
+                  constVal = rhs;
+              } else {
                   continue;
-                }
-                break;
               }
-              if (hitRange) {
-                findMatch = true;
-                break;
+
+              auto constDef = constVal.getDefiningOp<arith::ConstantOp>();
+              int64_t blockSize = 0;
+              if (auto intAttr = mlir::dyn_cast<IntegerAttr>(constDef.getValue())) {
+                  blockSize = intAttr.getInt();
               }
-            }
-            if (isa<arith::ExtSIOp, triton::SplatOp, triton::ExpandDimsOp,
-                    triton::BroadcastOp>(subUser)) {
-              for (Value subRes : subUser->getResults()) {
-                if (!searchVis.count(subRes)) {
-                  searchVis.insert(subRes);
-                  searchQueue.push_back(subRes);
-                }
+
+              llvm::SmallVector<Value, 8> searchQueue;
+              llvm::SmallPtrSet<Value, 8> searchVis;
+              for (Value mulRes : mulOp->getResults()) {
+                  searchQueue.push_back(mulRes);
+                  searchVis.insert(mulRes);
               }
-            }
+              
+              bool findMatch = false;
+              while (!searchQueue.empty()) {
+                  Value checkVal = searchQueue.pop_back_val();
+                  for (Operation* subUser : checkVal.getUsers()) {
+                    if (auto addOp = dyn_cast<arith::AddIOp>(subUser))
+                    {
+                        Value otherOperand = (addOp.getLhs() == checkVal)
+                            ? addOp.getRhs() : addOp.getLhs();
+                    
+                        Value curSrc = otherOperand;
+                        bool hitRange = false;
+                        int depth = 0;
+                        while (curSrc.getDefiningOp() && depth < 5)
+                        {
+                            Operation* defOp = curSrc.getDefiningOp();
+                            if (auto rangeOp = dyn_cast<triton::MakeRangeOp>(defOp))
+                            {
+                                if (rangeOp.getEnd() == blockSize)
+                                {
+                                    hitRange = true;
+                                    break;
+                                }
+                            }
+
+                            if (isa<arith::ExtSIOp, triton::SplatOp,
+                                    triton::ExpandDimsOp, triton::BroadcastOp>(defOp))
+                            {
+                                curSrc = defOp->getOperand(0);
+                                depth++;
+                                continue;
+                            }
+                            break;
+                        }
+                        if (hitRange)
+                        {
+                            findMatch = true;
+                            break;
+                        }
+                    }
+                      if (isa<arith::ExtSIOp, triton::SplatOp,
+                              triton::ExpandDimsOp, triton::BroadcastOp>(subUser)) {
+                          for (Value subRes : subUser->getResults()) {
+                              if (!searchVis.count(subRes)) {
+                                  searchVis.insert(subRes);
+                                  searchQueue.push_back(subRes);
+                              }
+                          }
+                      }
+                  }
+                  if (findMatch) break;
+              }
+              if (findMatch) {
+                  return true;
+              }
+
+              for (Value mulRes : mulOp->getResults()) {
+                  worklist.push_back(mulRes);
+              }
           }
-          if (findMatch)
-            break;
-        }
-        if (findMatch) {
-          return true;
-        }
 
-        for (Value mulRes : mulOp->getResults()) {
-          worklist.push_back(mulRes);
-        }
+          if (isa<arith::ExtSIOp, triton::SplatOp, triton::ExpandDimsOp,
+                  triton::BroadcastOp>(user)) {
+              for (Value res : user->getResults()) {
+                  worklist.push_back(res);
+              }
+          }
       }
-
-      if (isa<arith::ExtSIOp, triton::SplatOp, triton::ExpandDimsOp,
-              triton::BroadcastOp>(user)) {
-        for (Value res : user->getResults()) {
-          worklist.push_back(res);
-        }
-      }
-    }
   }
   return false;
 }
 
-static bool checkAllProgramIdNonOverlap(ModuleOp module) {
+static bool checkAllProgramIdNonOverlap(ModuleOp module)
+{
   bool allNonOverlap = true;
-  module.walk([&](triton::GetProgramIdOp pidOp) {
-    if (!traceUserToTargetOp(pidOp.getResult())) {
+  module.walk([&](triton::GetProgramIdOp pidOp){
+    if(!traceUserToTargetOp(pidOp.getResult()))
+    {
       allNonOverlap = false;
     }
   });
   return allNonOverlap;
 }
+
 
 LogicalResult isDiscreteMask(Operation *op, Value mask,
                              PatternRewriter &rewriter) {
@@ -191,7 +202,8 @@ LogicalResult isDiscreteMask(Operation *op, Value mask,
 //   broadcast(andi(a, b)) = andi(broadcast(a), broadcast(b))
 // so that inner AND operands nested inside a broadcast are still reachable.
 static void collectAndLeaves(Value mask, SmallVectorImpl<Value> &leaves,
-                             Location loc, PatternRewriter &rewriter) {
+                             Location loc, PatternRewriter &rewriter)
+{
   if (auto andOp = mask.getDefiningOp<arith::AndIOp>()) {
     collectAndLeaves(andOp.getLhs(), leaves, loc, rewriter);
     collectAndLeaves(andOp.getRhs(), leaves, loc, rewriter);
@@ -219,8 +231,8 @@ struct MaskDecomposition {
   // AND of all leaves that MaskState::parse() can analyze as a rectangle mask.
   // nullptr when no such leaves exist.
   Value contMask;
-  // AND of all leaves that MaskState::parse() cannot analyze
-  // (discrete/runtime). nullptr when no such leaves exist.
+  // AND of all leaves that MaskState::parse() cannot analyze (discrete/runtime).
+  // nullptr when no such leaves exist.
   Value discMask;
 };
 
@@ -229,7 +241,8 @@ struct MaskDecomposition {
 // the per-element selection.
 static MaskDecomposition decomposeAndMask(Operation *op, Value mask,
                                           const Location &loc,
-                                          PatternRewriter &rewriter) {
+                                          PatternRewriter &rewriter)
+{
   SmallVector<Value> leaves;
   collectAndLeaves(mask, leaves, loc, rewriter);
 
@@ -250,15 +263,15 @@ static MaskDecomposition decomposeAndMask(Operation *op, Value mask,
 
   Value contMask = nullptr;
   for (Value v : contLeaves)
-    contMask =
-        contMask ? rewriter.create<arith::AndIOp>(loc, contMask, v).getResult()
-                 : v;
+    contMask = contMask
+                   ? rewriter.create<arith::AndIOp>(loc, contMask, v).getResult()
+                   : v;
 
   Value discMask = nullptr;
   for (Value v : discLeaves)
-    discMask =
-        discMask ? rewriter.create<arith::AndIOp>(loc, discMask, v).getResult()
-                 : v;
+    discMask = discMask
+                   ? rewriter.create<arith::AndIOp>(loc, discMask, v).getResult()
+                   : v;
 
   return {contMask, discMask};
 }
@@ -276,13 +289,13 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
     if (failed(isDiscreteMask(op, mask, rewriter)))
       return failure();
 
+    op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
+
     auto ptr = op.getPtr();
     auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
-    bool rankWithinIndirectFastPathLimit =
-        ptrType && ptrType.getShape().size() <= 5;
-    if (compileOn91095Flag && forceSimtTemplateFlag &&
+    bool rankWithinIndirectFastPathLimit = ptrType && ptrType.getShape().size() <= 5;
+    if (!useSyncBlockLockFlag && compileOn91095Flag && forceSimtTemplateFlag &&
         rankWithinIndirectFastPathLimit) {
-      op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
       return failure();
     }
 
@@ -291,32 +304,40 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
     // unguarded full-load from reading past the tail-block boundary.
     auto [contMask, discMask] = decomposeAndMask(op, mask, loc, rewriter);
     if (contMask && discMask) {
-      // insert sync_block_lock
+      // insert sync_block_lock (unordered: see markSyncBlockLockUnordered)
       auto lockVar = MemOpConverter::createSyncBlockLockVar(rewriter, loc);
-      if (enableSyncBlockLockFlag) {
-        rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar);
+      markSyncBlockLockUnordered(lockVar.getOperation());
+      if (useSyncBlockLockFlag) {
+        rewriter.create<hivm::PipeBarrierOp>(
+            loc, hivm::PipeAttr::get(rewriter.getContext(), hivm::PIPE::PIPE_ALL));
+        auto lockOp = rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar);
+        markSyncBlockLockUnordered(lockOp.getOperation());
       }
       auto safeLoad = rewriter.create<triton::LoadOp>(
           loc, dst, contMask, op.getCache(), op.getEvict(), false);
-      auto selOp = rewriter.create<arith::SelectOp>(loc, discMask, src,
-                                                    safeLoad.getResult());
+      auto selOp = rewriter.create<arith::SelectOp>(
+          loc, discMask, src, safeLoad.getResult());
       auto newStore = rewriter.create<triton::StoreOp>(
           loc, dst, selOp, contMask, op.getCache(), op.getEvict());
       newStore->setAttr(ConverterUtils::discreteMaskAttrName,
                         UnitAttr::get(rewriter.getContext()));
-      if (enableSyncBlockLockFlag) {
-        rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar);
+      if (useSyncBlockLockFlag) {
+        auto unlockOp = rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar);
+        markSyncBlockLockUnordered(unlockOp.getOperation());
       }
       rewriter.replaceOp(op, newStore);
       return success();
     }
 
-    // SIMD fallback: original full load + select (contMask absent, pure
-    // discrete). Has DDR OOB risk but no better option in pure simd mode.
-    // insert sync_block_lock to serialize the read-modify-write window.
+    // Fallback: original full load + select (contMask absent, pure discrete).
+    // insert sync_block_lock (unordered: see markSyncBlockLockUnordered)
     auto lockVar = MemOpConverter::createSyncBlockLockVar(rewriter, loc);
-    if (enableSyncBlockLockFlag) {
-      rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar);
+    markSyncBlockLockUnordered(lockVar.getOperation());
+    if (useSyncBlockLockFlag) {
+      rewriter.create<hivm::PipeBarrierOp>(
+          loc, hivm::PipeAttr::get(rewriter.getContext(), hivm::PIPE::PIPE_ALL));
+      auto lockOp = rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar);
+      markSyncBlockLockUnordered(lockOp.getOperation());
     }
     auto loadFromDstOp = rewriter.create<triton::LoadOp>(
         loc, dst, op.getCache(), op.getEvict(), false);
@@ -326,8 +347,9 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
         loc, dst, selOp, op.getCache(), op.getEvict());
     newStore->setAttr(ConverterUtils::discreteMaskAttrName,
                       UnitAttr::get(rewriter.getContext()));
-    if (enableSyncBlockLockFlag) {
-      rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar);
+    if (useSyncBlockLockFlag) {
+      auto unlockOp = rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar);
+      markSyncBlockLockUnordered(unlockOp.getOperation());
     }
     rewriter.replaceOp(op, newStore);
     return success();
@@ -347,18 +369,17 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
     if (failed(isDiscreteMask(op, mask, rewriter)))
       return failure();
 
+    op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
+
     auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
-    bool rankWithinIndirectFastPathLimit =
-        ptrType && ptrType.getShape().size() <= 5;
-    if (compileOn91095Flag && forceSimtTemplateFlag &&
+    bool rankWithinIndirectFastPathLimit = ptrType && ptrType.getShape().size() <= 5;
+    if (!useSyncBlockLockFlag && compileOn91095Flag && forceSimtTemplateFlag &&
         rankWithinIndirectFastPathLimit) {
-      op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
       return failure();
     }
 
-    // SIMD path: when mask = contMask & discMask, load only the safe range
-    // defined by contMask and use discMask for the per-element select,
-    // avoiding OOB reads.
+    // When mask = contMask & discMask, load only the safe range defined by
+    // contMask and use discMask for the per-element select, avoiding OOB reads.
     auto [contMask, discMask] = decomposeAndMask(op, mask, loc, rewriter);
     if (contMask && discMask) {
       if (!other) {
@@ -371,16 +392,15 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
       }
       auto safeLoad = rewriter.create<triton::LoadOp>(
           loc, ptr, contMask, op.getCache(), op.getEvict(), op.getIsVolatile());
-      // Use combined mask to select the result, avoid the uninitialized memory
-      // access.
-      auto combinedMask =
-          rewriter.create<arith::AndIOp>(loc, contMask, discMask);
-      auto discreteMaskOp = rewriter.create<arith::SelectOp>(
-          loc, combinedMask, safeLoad.getResult(), other);
+      // Use combined mask to select the result, avoid the uninitialized memory access.
+      auto combinedMask = rewriter.create<arith::AndIOp>(loc, contMask, discMask);
+      auto discreteMaskOp =
+          rewriter.create<arith::SelectOp>(loc, combinedMask, safeLoad.getResult(), other);
       rewriter.replaceOp(op, discreteMaskOp);
       return success();
     }
 
+    // Fallback: original full load + select (contMask absent, pure discrete).
     if (!other) {
       FailureOr<Value> constant = specializeTypelessValueToConstant(
           TypelessValue::Zero, ptr.getType(), loc, rewriter);
@@ -398,8 +418,7 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
   }
 };
 
-struct DiscreteMaskAtomicConversion
-    : OpRewritePattern<mlir::triton::AtomicRMWOp> {
+struct DiscreteMaskAtomicConversion : OpRewritePattern<mlir::triton::AtomicRMWOp> {
   using OpRewritePattern<mlir::triton::AtomicRMWOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(mlir::triton::AtomicRMWOp op,
@@ -438,8 +457,7 @@ struct DiscreteMaskAtomicConversion
         typelessVal, src.getType(), loc, rewriter);
     if (failed(fill)) {
       LLVM_DEBUG({
-        llvm::dbgs() << "Unsupported type for constant creation: "
-                     << src.getType() << "\n";
+        llvm::dbgs() << "Unsupported type for constant creation: " << src.getType() << "\n";
       });
       op->emitError("Unsupported atomic operation.");
       return failure();
@@ -461,14 +479,14 @@ DiscreteMaskAccessConversionPass::DiscreteMaskAccessConversionPass(
 void DiscreteMaskAccessConversionPass::runOnOperation() {
   compileOn91095Flag = this->compileOn91095;
   forceSimtTemplateFlag = this->forceSimtTemplate;
-  bool tileNonOverlap = checkAllProgramIdNonOverlap(getOperation());
-  enableSyncBlockLockFlag = !tileNonOverlap;
   auto moduleOp = getOperation();
+  bool tileNonOverlap = checkAllProgramIdNonOverlap(moduleOp);
+  useSyncBlockLockFlag = !tileNonOverlap;
 
   RewritePatternSet patterns(&getContext());
   patterns.add<DiscreteMaskLoadConversion, DiscreteMaskStoreConversion,
                DiscreteMaskAtomicConversion>(patterns.getContext());
-  if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
+  if (failed(applyPatternsAndFoldGreedily(moduleOp, std::move(patterns)))) {
     moduleOp->emitError("failed to apply discrete mask access patterns");
     signalPassFailure();
   }
@@ -480,8 +498,7 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
   pm.addPass(createCSEPass());
   pm.addPass(createCanonicalizerPass());
   if (failed(runPipeline(pm, getOperation()))) {
-    moduleOp->emitWarning(
-        "DiscreteMaskAccessConversion: dead-code cleanup failed");
+    moduleOp->emitWarning("DiscreteMaskAccessConversion: dead-code cleanup failed");
   }
 
   LLVM_DEBUG({
@@ -492,9 +509,9 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
 }
 
 void DiscreteMaskAccessConversionPass::getDependentDialects(
-    DialectRegistry &registry) const {
-  registry
-      .insert<arith::ArithDialect, triton::TritonDialect, hivm::HIVMDialect>();
+    DialectRegistry &registry) const
+{
+  registry.insert<arith::ArithDialect, triton::TritonDialect, hivm::HIVMDialect>();
 }
 
 std::unique_ptr<OperationPass<ModuleOp>>

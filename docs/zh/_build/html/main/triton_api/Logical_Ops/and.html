@@ -3,10 +3,10 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="Index" href="../../genindex.html"><link rel="search" title="Search" href="../../search.html"><link rel="next" title="triton.language.tensor.or" href="or.html"><link rel="prev" title="triton.language.dot_scaled" href="../Linear_Algebra_Ops/dot_scaled.html">
+<link rel="index" title="Index" href="../../genindex.html"><link rel="search" title="Search" href="../../search.html"><link rel="next" title="triton.language.or" href="or.html"><link rel="prev" title="triton.language.dot_scaled" href="../Linear_Algebra_Ops/dot_scaled.html">
 
     <!-- Generated with Sphinx 9.0.4 and Furo 2025.12.19 -->
-        <title>triton.language.tensor.and - Triton Ascend documentation</title>
+        <title>triton.language.and - Triton Ascend latest documentation</title>
       <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=d75fae25" />
     <link rel="stylesheet" type="text/css" href="../../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../../_static/lang-switcher.css" />
@@ -162,7 +162,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="../../index.html"><div class="brand">Triton Ascend  documentation</div></a>
+      <a href="../../index.html"><div class="brand">Triton Ascend latest documentation</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -183,7 +183,7 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="../../index.html">
   
-  <span class="sidebar-brand-text">Triton Ascend  documentation</span>
+  <span class="sidebar-brand-text">Triton Ascend latest documentation</span>
   
 </a><form class="sidebar-search-container" method="get" action="../../search.html" role="search">
   <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
@@ -193,41 +193,30 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">快速开始</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../../release_note.html">版本说明</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../quick_start.html">快速入门</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../installation_guide.html">安装指南</a></li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="../../programming_guide/index.html">教程</a><input aria-label="Toggle navigation of 教程" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
-<li class="toctree-l2"><a class="reference internal" href="../../programming_guide/triton_operator_development_guide.html">Triton算子开发指南</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../programming_guide/cube_operator.html">Cube 算子开发</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../programming_guide/vector_operator.html">Vector 算子开发</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../programming_guide/cv_fusion_operator.html">CV 融合算子开发</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../autotune_guide.html">Triton-Ascend autotune 使用指南</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../environment_variable_and_compiler_options_reference.html">环境变量与编译选项</a></li>
-</ul>
-</li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">特性说明</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../../architecture_design_and_core_features.html">架构设计与核心特性</a></li>
 </ul>
-<p class="caption" role="heading"><span class="caption-text">开发指南</span></p>
+<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子开发指南</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../../examples/01_vector_add_example.html">调用新开发算子</a></li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="../../migration_guide/index.html">Triton-Ascend算子迁移</a><input aria-label="Toggle navigation of Triton-Ascend算子迁移" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
-<li class="toctree-l2"><a class="reference internal" href="../../migration_guide/architecture_difference.html">昇腾与GPU的开发差异</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../migration_guide/migrate_from_gpu.html">GPU Triton算子迁移</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../programming_guide.html">Triton-Ascend算子开发</a></li>
 </ul>
-</li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="../../debug_guide/index.html">Triton-Ascend算子调试与调优</a><input aria-label="Toggle navigation of Triton-Ascend算子调试与调优" class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
-<li class="toctree-l2"><a class="reference internal" href="../../debug_guide/debugging.html">Triton-Ascend 调试指南</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../../debug_guide/profiling.html">Triton-Ascend 性能分析方法</a></li>
+<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子迁移指南</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../migration_guide/architecture_difference.html">昇腾与GPU的开发差异</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../migration_guide/migrate_from_gpu.html">GPU Triton算子迁移</a></li>
 </ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="../../examples/index.html">典型算子样例</a></li>
+<p class="caption" role="heading"><span class="caption-text">典型算子样例</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../debug_guide/debugging.html">Triton-Ascend 调试指南</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../debug_guide/profiling.html">Triton-Ascend 性能分析方法</a></li>
 </ul>
-<p class="caption" role="heading"><span class="caption-text">API参考</span></p>
+<p class="caption" role="heading"><span class="caption-text">Triton API 接口说明</span></p>
 <ul class="current">
-<li class="toctree-l1 current has-children"><a class="reference internal" href="../index.html">triton.language API</a><input aria-label="Toggle navigation of triton.language API" checked="" class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l1 current has-children"><a class="reference internal" href="../index.html">triton.language API</a><input aria-label="Toggle navigation of triton.language API" checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
 <li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/extract_slice.html">triton.language.extract_slice</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/insert_slice.html">triton.language.insert_slice</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/sync_block.html">triton.language.sync_block_set</a></li>
@@ -274,27 +263,25 @@
 <li class="toctree-l2"><a class="reference internal" href="../Indexing_Ops/swizzle2d.html">triton.language.swizzle2d</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/get_element.html">triton.language.get_element</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/index_select_simd.html">triton.language.extra.ascend.libdevice.index_select_simd</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Indexing_Ops/gather.html">triton.language.gather</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Inline_Assembly/inline_asm_elementwise.html">triton.language.inline_asm_elementwise</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Iterators/range.html">triton.language.range</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Iterators/static_range.html">triton.language.static_range</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Linear_Algebra_Ops/dot.html">triton.language.dot</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Linear_Algebra_Ops/dot_scaled.html">triton.language.dot_scaled</a></li>
-<li class="toctree-l2 current current-page"><a class="current reference internal" href="#">triton.language.tensor.<strong>and</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="or.html">triton.language.tensor.<strong>or</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="not.html">triton.language.tensor.<strong>not</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="logical_and.html">triton.language.tensor.logical_and</a></li>
-<li class="toctree-l2"><a class="reference internal" href="logical_or.html">triton.language.tensor.logical_or</a></li>
-<li class="toctree-l2"><a class="reference internal" href="not.html">triton.language.tensor.<strong>not</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="invert.html">triton.language.tensor.<strong>invert</strong></a></li>
+<li class="toctree-l2 current current-page"><a class="current reference internal" href="#">triton.language.and</a></li>
+<li class="toctree-l2"><a class="reference internal" href="or.html">triton.language.or</a></li>
+<li class="toctree-l2"><a class="reference internal" href="not.html">triton.language.not</a></li>
+<li class="toctree-l2"><a class="reference internal" href="logical_and.html">triton.language.semantic.logical_and</a></li>
+<li class="toctree-l2"><a class="reference internal" href="logical_or.html">triton.language.semantic.logical_or</a></li>
+<li class="toctree-l2"><a class="reference internal" href="not.html">triton.language.not</a></li>
+<li class="toctree-l2"><a class="reference internal" href="invert.html">triton.language.invert</a></li>
 <li class="toctree-l2"><a class="reference internal" href="lshift.html">triton.language.core.<strong>lshift</strong></a></li>
 <li class="toctree-l2"><a class="reference internal" href="rshift.html">triton.language.core.<strong>rshift</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="xor.html">triton.language.tensor.<strong>xor</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="xor.html">triton.language.xor</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Math_Ops/add.html">triton.language.add</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Math_Ops/sub.html">sub</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Math_Ops/mul.html">mul</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Math_Ops/div.html">div</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/floordiv.html">floordiv</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Math_Ops/abs.html">triton.language.abs</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Math_Ops/neg.html">triton.language.neg</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Math_Ops/cdiv.html">triton.language.cdiv</a></li>
@@ -326,7 +313,6 @@
 <li class="toctree-l2"><a class="reference internal" href="../Memory_Pointer_Ops/tl.advance.html">triton.language.advance</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Memory_Pointer_Ops/load_tensor_descriptor.html">triton.language.load_tensor_descriptor</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Memory_Pointer_Ops/make_tensor_descriptor.html">triton.language.make_tensor_descriptor</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Memory_Pointer_Ops/store_tensor_descriptor.html">triton.language.store_tensor_descriptor</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Programming_Model/program_id.html">triton.language.program_id</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Programming_Model/num_programs.html">triton.language.num_programs</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../Random_Number_Generation/randint4x.html">triton.language.randint4x</a></li>
@@ -360,33 +346,18 @@
 <li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/insert_slice.html">triton.language.insert_slice</a></li>
 </ul>
 </li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="../triton/index.html">triton</a><input aria-label="Toggle navigation of triton" class="toctree-checkbox" id="toctree-checkbox-5" name="toctree-checkbox-5" role="switch" type="checkbox"/><label for="toctree-checkbox-5"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../triton/index.html">triton</a><input aria-label="Toggle navigation of triton" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
 <li class="toctree-l2"><a class="reference internal" href="../triton/jit.html">triton.jit</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton/autotune.html">triton.autotune</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton/heuristics.html">triton.heuristics</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton/Config.html">triton.Config</a></li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="../../libdevice/libdevice_developer_guide.html">libdevice开发者手册</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../libdevice/libdevice_developer_guide.html">Libdevice 开发者手册</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">常见问题</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../../FAQ.html">Triton-Ascend FAQ</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">贡献指南</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="../../community/CONTRIBUTING_zh.html">贡献指南</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../community/roadmap_guide.html">RodMap指导</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">社区治理</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="../../community/CODE_OF_CONDUCT.html">贡献者公约</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../community/GOVERNANCE_zh.html">治理机制</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../community/community_technical_meeting.html">技术例会</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../community/release_policy.html">版本发布策略</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../community/MAINTAINERS.html">Maintainers</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../community/contributor.html">Contributors</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../community/SECURITYNOTE_zh.html">安全声明</a></li>
 </ul>
 
 </div>
@@ -425,16 +396,12 @@
           </label>
         </div>
         <article role="main" id="furo-main-content">
-          <section id="triton-language-tensor-and">
-<h1>triton.language.tensor.<strong>and</strong><a class="headerlink" href="#triton-language-tensor-and" title="Link to this heading">¶</a></h1>
+          <section id="triton-language-and">
+<h1>triton.language.and<a class="headerlink" href="#triton-language-and" title="Link to this heading">¶</a></h1>
 <section id="id1">
 <h2>1. 函数概述<a class="headerlink" href="#id1" title="Link to this heading">¶</a></h2>
 <p>简介：计算两个元素的与值。</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># 通过操作符</span>
-<span class="n">x</span> <span class="o">&amp;</span> <span class="n">y</span>
-
-<span class="c1"># 或直接调用 dunder 方法</span>
-<span class="n">x</span><span class="o">.</span><span class="fm">__and__</span><span class="p">(</span><span class="n">y</span><span class="p">)</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">triton</span><span class="o">.</span><span class="n">language</span><span class="o">.</span><span class="ow">and</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">_semantic</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
 </pre></div>
 </div>
 </section>
@@ -526,7 +493,7 @@
 </tbody>
 </table>
 </div>
-<p>结论：Ascend 相比 GPU 缺失 uint 类型支持。</p>
+<p>结论：Ascend 比 GPU 少了uint类型的支持。</p>
 </section>
 <section id="shape">
 <h4>2.2.2 Shape 支持<a class="headerlink" href="#shape" title="Link to this heading">¶</a></h4>
@@ -555,34 +522,33 @@
 <blockquote>
 <div><p>相对社区能力缺失且无法实现</p>
 </div></blockquote>
-<p>Ascend 相比 GPU 缺失 uint 类型支持。</p>
+<p>Ascend 比 GPU 少了uint类型的支持。</p>
 </section>
 <section id="id5">
 <h3>2.4 使用方法<a class="headerlink" href="#id5" title="Link to this heading">¶</a></h3>
-<p>以下示例计算两个输入张量的逐元素与运算：</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@triton</span><span class="o">.</span><span class="n">jit</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">fn_npu_</span><span class="p">(</span><span class="n">output_ptr</span><span class="p">,</span> <span class="n">x_ptr</span><span class="p">,</span> <span class="n">y_ptr</span><span class="p">,</span> <span class="n">z_ptr</span><span class="p">,</span>
-            <span class="n">XB</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span> <span class="n">YB</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span> <span class="n">ZB</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span>
-            <span class="n">XNUMEL</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span> <span class="n">YNUMEL</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span> <span class="n">ZNUMEL</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">):</span>
-    <span class="n">xoffs</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">program_id</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">*</span> <span class="n">XB</span>
-    <span class="n">yoffs</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">program_id</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">YB</span>
-    <span class="n">zoffs</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">program_id</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span> <span class="o">*</span> <span class="n">ZB</span>
+<p>以下示例实现了对输入张量 <code class="docutils literal notranslate"><span class="pre">x</span></code> 做逐元素指数（以2为底）：</p>
+<div class="highlight-python&#64;triton.jit notranslate"><div class="highlight"><pre><span></span>def fn_npu_(output_ptr, x_ptr, y_ptr, z_ptr,
+            XB: tl.constexpr, YB: tl.constexpr, ZB: tl.constexpr,
+            XNUMEL: tl.constexpr, YNUMEL: tl.constexpr, ZNUMEL: tl.constexpr):
+    xoffs = tl.program_id(0) * XB
+    yoffs = tl.program_id(1) * YB
+    zoffs = tl.program_id(2) * ZB
 
-    <span class="n">xidx</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">XB</span><span class="p">)</span> <span class="o">+</span> <span class="n">xoffs</span>
-    <span class="n">yidx</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">YB</span><span class="p">)</span> <span class="o">+</span> <span class="n">yoffs</span>
-    <span class="n">zidx</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">ZB</span><span class="p">)</span> <span class="o">+</span> <span class="n">zoffs</span>
+    xidx = tl.arange(0, XB) + xoffs
+    yidx = tl.arange(0, YB) + yoffs
+    zidx = tl.arange(0, ZB) + zoffs
 
-    <span class="n">idx</span> <span class="o">=</span> <span class="n">xidx</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="n">YNUMEL</span> <span class="o">*</span> <span class="n">ZNUMEL</span> <span class="o">+</span> <span class="n">yidx</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="p">:,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="n">ZNUMEL</span> <span class="o">+</span> <span class="n">zidx</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="p">:]</span>
+    idx = xidx[:, None, None] * YNUMEL * ZNUMEL + yidx[None, :, None] * ZNUMEL + zidx[None, None, :]
 
-    <span class="n">X</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">x_ptr</span> <span class="o">+</span> <span class="n">idx</span><span class="p">)</span>
-    <span class="n">Y</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">y_ptr</span> <span class="o">+</span> <span class="n">idx</span><span class="p">)</span>
+    X = tl.load(x_ptr + idx)
+    Y = tl.load(y_ptr + idx)
 
-    <span class="n">ret</span> <span class="o">=</span> <span class="n">X</span> <span class="o">&amp;</span> <span class="n">Y</span>
+    ret = X &amp; Y
 
-    <span class="n">tl</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="n">output_ptr</span> <span class="o">+</span> <span class="n">idx</span><span class="p">,</span> <span class="n">ret</span><span class="p">)</span>
+    tl.store(output_ptr + idx, ret)
 
-<span class="n">x</span> <span class="o">=</span> <span class="n">test_common</span><span class="o">.</span><span class="n">generate_tensor</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="p">)</span><span class="o">.</span><span class="n">npu</span><span class="p">()</span>
-<span class="n">y</span> <span class="o">=</span> <span class="n">test_common</span><span class="o">.</span><span class="n">generate_tensor</span><span class="p">(</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="p">)</span><span class="o">.</span><span class="n">npu</span><span class="p">()</span>
+x = test_common.generate_tensor(shape, dtype).npu()
+y = test_common.generate_tensor(shape, dtype).npu()
 </pre></div>
 </div>
 </section>
@@ -599,7 +565,7 @@
                 <div class="context">
                   <span>Next</span>
                 </div>
-                <div class="title">triton.language.tensor.<strong>or</strong></div>
+                <div class="title">triton.language.or</div>
               </div>
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
             </a>
@@ -645,7 +611,7 @@
         <div class="toc-tree-container">
           <div class="toc-tree">
             <ul>
-<li><a class="reference internal" href="#">triton.language.tensor.<strong>and</strong></a><ul>
+<li><a class="reference internal" href="#">triton.language.and</a><ul>
 <li><a class="reference internal" href="#id1">1. 函数概述</a></li>
 <li><a class="reference internal" href="#id2">2. 规格</a><ul>
 <li><a class="reference internal" href="#id3">2.1 参数说明</a></li>
@@ -669,7 +635,7 @@
       
     </aside>
   </div>
-</div><script src="../../_static/documentation_options.js?v=5929fcd5"></script>
+</div><script src="../../_static/documentation_options.js?v=c6e86fd7"></script>
     <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../../_static/scripts/furo.js?v=46bd48cc"></script>

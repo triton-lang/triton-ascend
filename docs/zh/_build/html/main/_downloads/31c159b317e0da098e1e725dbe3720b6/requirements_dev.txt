@@ -2,7 +2,6 @@ auditwheel
 cmake
 einops
 expecttest
-lit
 ninja
 patchelf
 pybind11
@@ -12,4 +11,3 @@ twine
 wheel
 pandas
 setuptools
-nanobind>=2.4

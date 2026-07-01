@@ -3,10 +3,10 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="Index" href="genindex.html"><link rel="search" title="Search" href="search.html"><link rel="next" title="向量相加 （Vector Addition）" href="examples/01_vector_add_example.html"><link rel="prev" title="环境变量与编译选项" href="environment_variable_and_compiler_options_reference.html">
+<link rel="index" title="Index" href="genindex.html"><link rel="search" title="Search" href="search.html"><link rel="next" title="Triton算子开发指南" href="programming_guide.html"><link rel="prev" title="安装指南" href="installation_guide.html">
 
     <!-- Generated with Sphinx 9.0.4 and Furo 2025.12.19 -->
-        <title>架构设计与核心特性 - Triton Ascend documentation</title>
+        <title>架构设计与核心特性 - Triton Ascend latest documentation</title>
       <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d75fae25" />
     <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="_static/lang-switcher.css" />
@@ -162,7 +162,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="index.html"><div class="brand">Triton Ascend  documentation</div></a>
+      <a href="index.html"><div class="brand">Triton Ascend latest documentation</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -183,7 +183,7 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="index.html">
   
-  <span class="sidebar-brand-text">Triton Ascend  documentation</span>
+  <span class="sidebar-brand-text">Triton Ascend latest documentation</span>
   
 </a><form class="sidebar-search-container" method="get" action="search.html" role="search">
   <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
@@ -193,41 +193,30 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">快速开始</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="release_note.html">版本说明</a></li>
 <li class="toctree-l1"><a class="reference internal" href="quick_start.html">快速入门</a></li>
 <li class="toctree-l1"><a class="reference internal" href="installation_guide.html">安装指南</a></li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="programming_guide/index.html">教程</a><input aria-label="Toggle navigation of 教程" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
-<li class="toctree-l2"><a class="reference internal" href="programming_guide/triton_operator_development_guide.html">Triton算子开发指南</a></li>
-<li class="toctree-l2"><a class="reference internal" href="programming_guide/cube_operator.html">Cube 算子开发</a></li>
-<li class="toctree-l2"><a class="reference internal" href="programming_guide/vector_operator.html">Vector 算子开发</a></li>
-<li class="toctree-l2"><a class="reference internal" href="programming_guide/cv_fusion_operator.html">CV 融合算子开发</a></li>
-<li class="toctree-l2"><a class="reference internal" href="autotune_guide.html">Triton-Ascend autotune 使用指南</a></li>
-<li class="toctree-l2"><a class="reference internal" href="environment_variable_and_compiler_options_reference.html">环境变量与编译选项</a></li>
-</ul>
-</li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">特性说明</span></p>
 <ul class="current">
 <li class="toctree-l1 current current-page"><a class="current reference internal" href="#">架构设计与核心特性</a></li>
 </ul>
-<p class="caption" role="heading"><span class="caption-text">开发指南</span></p>
+<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子开发指南</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="examples/01_vector_add_example.html">调用新开发算子</a></li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="migration_guide/index.html">Triton-Ascend算子迁移</a><input aria-label="Toggle navigation of Triton-Ascend算子迁移" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
-<li class="toctree-l2"><a class="reference internal" href="migration_guide/architecture_difference.html">昇腾与GPU的开发差异</a></li>
-<li class="toctree-l2"><a class="reference internal" href="migration_guide/migrate_from_gpu.html">GPU Triton算子迁移</a></li>
+<li class="toctree-l1"><a class="reference internal" href="programming_guide.html">Triton-Ascend算子开发</a></li>
 </ul>
-</li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="debug_guide/index.html">Triton-Ascend算子调试与调优</a><input aria-label="Toggle navigation of Triton-Ascend算子调试与调优" class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
-<li class="toctree-l2"><a class="reference internal" href="debug_guide/debugging.html">Triton-Ascend 调试指南</a></li>
-<li class="toctree-l2"><a class="reference internal" href="debug_guide/profiling.html">Triton-Ascend 性能分析方法</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="examples/index.html">典型算子样例</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">API参考</span></p>
+<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子迁移指南</span></p>
 <ul>
-<li class="toctree-l1 has-children"><a class="reference internal" href="triton_api/index.html">triton.language API</a><input aria-label="Toggle navigation of triton.language API" class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l1"><a class="reference internal" href="migration_guide/architecture_difference.html">昇腾与GPU的开发差异</a></li>
+<li class="toctree-l1"><a class="reference internal" href="migration_guide/migrate_from_gpu.html">GPU Triton算子迁移</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">典型算子样例</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="debug_guide/debugging.html">Triton-Ascend 调试指南</a></li>
+<li class="toctree-l1"><a class="reference internal" href="debug_guide/profiling.html">Triton-Ascend 性能分析方法</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Triton API 接口说明</span></p>
+<ul>
+<li class="toctree-l1 has-children"><a class="reference internal" href="triton_api/index.html">triton.language API</a><input aria-label="Toggle navigation of triton.language API" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Extension_Ops/extract_slice.html">triton.language.extract_slice</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Extension_Ops/insert_slice.html">triton.language.insert_slice</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Extension_Ops/sync_block.html">triton.language.sync_block_set</a></li>
@@ -274,27 +263,25 @@
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Indexing_Ops/swizzle2d.html">triton.language.swizzle2d</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Extension_Ops/get_element.html">triton.language.get_element</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Extension_Ops/index_select_simd.html">triton.language.extra.ascend.libdevice.index_select_simd</a></li>
-<li class="toctree-l2"><a class="reference internal" href="triton_api/Indexing_Ops/gather.html">triton.language.gather</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Inline_Assembly/inline_asm_elementwise.html">triton.language.inline_asm_elementwise</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Iterators/range.html">triton.language.range</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Iterators/static_range.html">triton.language.static_range</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Linear_Algebra_Ops/dot.html">triton.language.dot</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Linear_Algebra_Ops/dot_scaled.html">triton.language.dot_scaled</a></li>
-<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/and.html">triton.language.tensor.<strong>and</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/or.html">triton.language.tensor.<strong>or</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/not.html">triton.language.tensor.<strong>not</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/logical_and.html">triton.language.tensor.logical_and</a></li>
-<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/logical_or.html">triton.language.tensor.logical_or</a></li>
-<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/not.html">triton.language.tensor.<strong>not</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/invert.html">triton.language.tensor.<strong>invert</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/and.html">triton.language.and</a></li>
+<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/or.html">triton.language.or</a></li>
+<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/not.html">triton.language.not</a></li>
+<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/logical_and.html">triton.language.semantic.logical_and</a></li>
+<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/logical_or.html">triton.language.semantic.logical_or</a></li>
+<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/not.html">triton.language.not</a></li>
+<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/invert.html">triton.language.invert</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/lshift.html">triton.language.core.<strong>lshift</strong></a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/rshift.html">triton.language.core.<strong>rshift</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/xor.html">triton.language.tensor.<strong>xor</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="triton_api/Logical_Ops/xor.html">triton.language.xor</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Math_Ops/add.html">triton.language.add</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Math_Ops/sub.html">sub</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Math_Ops/mul.html">mul</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Math_Ops/div.html">div</a></li>
-<li class="toctree-l2"><a class="reference internal" href="triton_api/Math_Ops/floordiv.html">floordiv</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Math_Ops/abs.html">triton.language.abs</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Math_Ops/neg.html">triton.language.neg</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Math_Ops/cdiv.html">triton.language.cdiv</a></li>
@@ -326,7 +313,6 @@
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Memory_Pointer_Ops/tl.advance.html">triton.language.advance</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Memory_Pointer_Ops/load_tensor_descriptor.html">triton.language.load_tensor_descriptor</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Memory_Pointer_Ops/make_tensor_descriptor.html">triton.language.make_tensor_descriptor</a></li>
-<li class="toctree-l2"><a class="reference internal" href="triton_api/Memory_Pointer_Ops/store_tensor_descriptor.html">triton.language.store_tensor_descriptor</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Programming_Model/program_id.html">triton.language.program_id</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Programming_Model/num_programs.html">triton.language.num_programs</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Random_Number_Generation/randint4x.html">triton.language.randint4x</a></li>
@@ -360,33 +346,18 @@
 <li class="toctree-l2"><a class="reference internal" href="triton_api/Extension_Ops/insert_slice.html">triton.language.insert_slice</a></li>
 </ul>
 </li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="triton_api/triton/index.html">triton</a><input aria-label="Toggle navigation of triton" class="toctree-checkbox" id="toctree-checkbox-5" name="toctree-checkbox-5" role="switch" type="checkbox"/><label for="toctree-checkbox-5"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l1 has-children"><a class="reference internal" href="triton_api/triton/index.html">triton</a><input aria-label="Toggle navigation of triton" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/triton/jit.html">triton.jit</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/triton/autotune.html">triton.autotune</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/triton/heuristics.html">triton.heuristics</a></li>
 <li class="toctree-l2"><a class="reference internal" href="triton_api/triton/Config.html">triton.Config</a></li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="libdevice/libdevice_developer_guide.html">libdevice开发者手册</a></li>
+<li class="toctree-l1"><a class="reference internal" href="libdevice/libdevice_developer_guide.html">Libdevice 开发者手册</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">常见问题</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="FAQ.html">Triton-Ascend FAQ</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">贡献指南</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="community/CONTRIBUTING_zh.html">贡献指南</a></li>
-<li class="toctree-l1"><a class="reference internal" href="community/roadmap_guide.html">RodMap指导</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">社区治理</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="community/CODE_OF_CONDUCT.html">贡献者公约</a></li>
-<li class="toctree-l1"><a class="reference internal" href="community/GOVERNANCE_zh.html">治理机制</a></li>
-<li class="toctree-l1"><a class="reference internal" href="community/community_technical_meeting.html">技术例会</a></li>
-<li class="toctree-l1"><a class="reference internal" href="community/release_policy.html">版本发布策略</a></li>
-<li class="toctree-l1"><a class="reference internal" href="community/MAINTAINERS.html">Maintainers</a></li>
-<li class="toctree-l1"><a class="reference internal" href="community/contributor.html">Contributors</a></li>
-<li class="toctree-l1"><a class="reference internal" href="community/SECURITYNOTE_zh.html">安全声明</a></li>
 </ul>
 
 </div>
@@ -439,16 +410,16 @@
 </ul>
 <p><strong>组件功能：</strong></p>
 <ul>
-<li><p><strong><code class="docutils literal notranslate"><span class="pre">Ascend</span> <span class="pre">language</span> <span class="pre">extension</span></code></strong>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">Ascend</span> <span class="pre">language</span> <span class="pre">extension</span></code></strong><br />
 在标准 Triton 语言基础上，引入针对 Ascend NPU 架构的语法与语义扩展。</p></li>
-<li><p><strong><code class="docutils literal notranslate"><span class="pre">compiler</span></code></strong>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">compiler</span></code></strong><br />
 接收来自上层 Triton compiler 生成的中间表示文件 <code class="docutils literal notranslate"><span class="pre">TTIR</span></code>（Triton IR），执行一系列适配昇腾硬件的转换。</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">Triton</span> <span class="n">IR</span> <span class="err">→</span> <span class="n">Linalg</span> <span class="n">IR</span> <span class="err">→</span> <span class="n">AscendNPU</span> <span class="n">IR</span> <span class="err">→</span> <span class="n">triton_xxx_kernel</span><span class="o">.</span><span class="n">o</span>
 </pre></div>
 </div>
 <p>Triton IR 转换为 Linalg IR，再经 BiSheng Compiler 生成面向 Ascend NPU 的可执行二进制文件  <code class="docutils literal notranslate"><span class="pre">triton_xxx_kernel.o</span></code>。</p>
 </li>
-<li><p><strong><code class="docutils literal notranslate"><span class="pre">driver</span></code></strong>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">driver</span></code></strong><br />
 提供 Triton 运行时与 Ascend 软件栈（CANN）之间的对接能力， 加载由 BiSheng Compiler 生成的设备侧可执行内核 <code class="docutils literal notranslate"><span class="pre">triton_xxx_kernel.o</span></code> 。</p></li>
 </ul>
 </section>
@@ -466,58 +437,26 @@
 </section>
 <section id="id5">
 <h3>2.2 目录结构与功能说明<a class="headerlink" href="#id5" title="Link to this heading">¶</a></h3>
-<div class="table-wrapper colwidths-auto docutils container">
-<table class="docutils align-default">
-<thead>
-<tr class="row-odd"><th class="head"><p>目录或文件</p></th>
-<th class="head"><p>对应架构层级</p></th>
-<th class="head"><p>功能说明</p></th>
-</tr>
-</thead>
-<tbody>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">python/</span></code></p></td>
-<td><p>Triton core</p></td>
-<td><p>保留标准 Triton 的 Python 侧通用实现，包括 <code class="docutils literal notranslate"><span class="pre">triton.language</span></code>、JIT、运行时、缓存、工具链入口等。与硬件无关的通用能力优先放在该目录。</p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">include/</span></code> 和 <code class="docutils literal notranslate"><span class="pre">lib/</span></code></p></td>
-<td><p>Triton core</p></td>
-<td><p>保留标准 Triton 的通用 C++/MLIR 基础设施、Dialect、Pass 和转换逻辑。这里不承载 Ascend 专属后端实现。</p></td>
-</tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">third_party/ascend/</span></code></p></td>
-<td><p>Triton-Ascend</p></td>
-<td><p>Ascend 后端的根目录，集中放置与 Ascend NPU、CANN、BiSheng Compiler 强相关的语言扩展、编译后端、运行时驱动、MLIR Pass、示例和测试。</p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">third_party/ascend/language/</span></code></p></td>
-<td><p>Ascend language extension</p></td>
-<td><p>Ascend 语言扩展目录，安装后会链接到 <code class="docutils literal notranslate"><span class="pre">triton.language.extra</span></code> 下，供 Triton kernel 通过 <code class="docutils literal notranslate"><span class="pre">triton.language.extra.cann</span></code> 使用。</p></td>
-</tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">third_party/ascend/language/cann/libdevice.py</span></code></p></td>
-<td><p>Ascend language extension</p></td>
-<td><p>适配 Ascend NPU 的 <code class="docutils literal notranslate"><span class="pre">libdevice</span></code> Python 接口，提供数学函数和底层算子封装，供 Triton 算子调用。</p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">third_party/ascend/backend/compiler.py</span></code></p></td>
-<td><p>compiler</p></td>
-<td><p>Ascend 编译器后端主入口，负责注册编译选项、组织 TTIR 到 Ascend 适配 IR、Linalg/LLVM 等阶段的转换，并调用后续工具链生成可执行二进制文件。</p></td>
-</tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">third_party/ascend/backend/driver.py</span></code></p></td>
-<td><p>driver</p></td>
-<td><p>Ascend 运行时驱动模块，负责与 CANN/torch_npu 等运行时环境对接，加载并启动已编译的设备侧可执行文件。</p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">third_party/ascend/include/</span></code> 和 <code class="docutils literal notranslate"><span class="pre">third_party/ascend/lib/</span></code></p></td>
-<td><p>compiler</p></td>
-<td><p>Ascend 专属 MLIR Dialect、Pass 和转换实现，例如 <code class="docutils literal notranslate"><span class="pre">TritonToLinalg</span></code>、<code class="docutils literal notranslate"><span class="pre">TritonToStructured</span></code>、<code class="docutils literal notranslate"><span class="pre">DynamicCVPipeline</span></code>、<code class="docutils literal notranslate"><span class="pre">AutoBlockify</span></code> 等。</p></td>
-</tr>
-<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">third_party/ascend/AscendNPU-IR/</span></code></p></td>
-<td><p>compiler</p></td>
-<td><p>Ascend NPU 相关 IR 与 BiSheng 编译链适配内容，是从 Triton-Ascend 编译流程继续下沉到硬件侧代码生成的重要组成部分。</p></td>
-</tr>
-<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">third_party/ascend/tutorials/</span></code> 和 <code class="docutils literal notranslate"><span class="pre">third_party/ascend/unittest/</span></code></p></td>
-<td><p>示例与测试</p></td>
-<td><p>提供 Ascend 平台上的 Triton 示例、迁移样例、Python 单元测试和 MLIR 转换测试，用于验证 Ascend 后端能力。</p></td>
-</tr>
-</tbody>
-</table>
-</div>
+<p><strong><code class="docutils literal notranslate"><span class="pre">include/</span></code> 和 <code class="docutils literal notranslate"><span class="pre">lib/</span></code></strong></p>
+<ul class="simple">
+<li><p><strong>内容</strong>：包含针对 Ascend NPU 的 <strong>MLIR Passes</strong>、<strong>Dialects</strong>（方言）以及相关工具。</p></li>
+<li><p><strong>作用</strong>：用于在 MLIR 编译流程中表达和优化 Ascend 特定的计算图。</p></li>
+</ul>
+<p><strong><code class="docutils literal notranslate"><span class="pre">libdevice.py</span></code></strong></p>
+<ul class="simple">
+<li><p><strong>内容</strong>：适配 Ascend NPU 的 <code class="docutils literal notranslate"><span class="pre">libdevice</span></code> 接口。</p></li>
+<li><p><strong>作用</strong>：提供适配 Ascend NPU 硬件的底层实现支持，供 Triton 算子调用。</p></li>
+</ul>
+<p><strong><code class="docutils literal notranslate"><span class="pre">backend/compiler.py</span></code></strong></p>
+<ul class="simple">
+<li><p><strong>内容</strong>：<code class="docutils literal notranslate"><span class="pre">triton-ascend</span></code> 编译器主入口。</p></li>
+<li><p><strong>作用</strong>：将 Triton 高层 DSL 代码编译为可在 Ascend NPU 上执行的<strong>可执行二进制文件</strong>（如 <code class="docutils literal notranslate"><span class="pre">.o</span></code>文件）。</p></li>
+</ul>
+<p><strong><code class="docutils literal notranslate"><span class="pre">backend/driver.py</span></code></strong></p>
+<ul class="simple">
+<li><p><strong>内容</strong>：<code class="docutils literal notranslate"><span class="pre">triton-ascend</span></code> 驱动模块。</p></li>
+<li><p><strong>作用</strong>：加载并启动已编译的可执行二进制。</p></li>
+</ul>
 </section>
 </section>
 <section id="modules">
@@ -552,10 +491,11 @@
 </div>
 </section>
 </section>
+</section>
 <section id="triton-ascend">
-<h3>3.2 Triton-Ascend<a class="headerlink" href="#triton-ascend" title="Link to this heading">¶</a></h3>
+<h2>3.2 Triton-Ascend<a class="headerlink" href="#triton-ascend" title="Link to this heading">¶</a></h2>
 <section id="compiler-options">
-<h4>3.2.1 Compiler Options<a class="headerlink" href="#compiler-options" title="Link to this heading">¶</a></h4>
+<h3>3.2.1 Compiler Options<a class="headerlink" href="#compiler-options" title="Link to this heading">¶</a></h3>
 <div class="table-wrapper colwidths-auto docutils container">
 <table class="docutils align-default">
 <thead>
@@ -569,7 +509,7 @@
 <tr class="row-even"><td><p>1</p></td>
 <td><p>multibuffer</p></td>
 <td><p>NPU</p></td>
-<td><p>Autotune Option: Enable or disable ping-pong pipeline. Enabled by default.</p></td>
+<td><p>Autotune Option: Enable or disable ping-pong pipeline.</p></td>
 </tr>
 <tr class="row-odd"><td><p>2</p></td>
 <td><p>enable_auto_bind_sub_block</p></td>
@@ -656,7 +596,7 @@
 </div>
 </section>
 <section id="simd-compiler">
-<h4>3.2.2 SIMD compiler<a class="headerlink" href="#simd-compiler" title="Link to this heading">¶</a></h4>
+<h3>3.2.2 SIMD compiler<a class="headerlink" href="#simd-compiler" title="Link to this heading">¶</a></h3>
 <div class="table-wrapper colwidths-auto docutils container">
 <table class="docutils align-default">
 <thead>
@@ -691,7 +631,7 @@
 </table>
 </div>
 <section id="tritontostructured">
-<h5>3.2.2.1 TritonToStructured<a class="headerlink" href="#tritontostructured" title="Link to this heading">¶</a></h5>
+<h4>3.2.2.1 TritonToStructured<a class="headerlink" href="#tritontostructured" title="Link to this heading">¶</a></h4>
 <p>处理指针表达式和mask表达式中的整除取余，通过升维的方法，去除整除取余后重新生成load/store 等OP。</p>
 <div class="table-wrapper colwidths-auto docutils container">
 <table class="docutils align-default">
@@ -751,7 +691,7 @@
 </div>
 </section>
 <section id="tritontounstructured">
-<h5>3.2.2.2 TritonToUnstructured<a class="headerlink" href="#tritontounstructured" title="Link to this heading">¶</a></h5>
+<h4>3.2.2.2 TritonToUnstructured<a class="headerlink" href="#tritontounstructured" title="Link to this heading">¶</a></h4>
 <div class="table-wrapper colwidths-auto docutils container">
 <table class="docutils align-default">
 <thead>
@@ -777,7 +717,7 @@
 </table>
 </div>
 <section id="discrete-mask-access-conversion">
-<h6>3.2.2.2.1 discrete-mask-access-conversion<a class="headerlink" href="#discrete-mask-access-conversion" title="Link to this heading">¶</a></h6>
+<h5>3.2.2.2.1 discrete-mask-access-conversion<a class="headerlink" href="#discrete-mask-access-conversion" title="Link to this heading">¶</a></h5>
 <div class="table-wrapper colwidths-auto docutils container">
 <table class="docutils align-default">
 <thead>
@@ -800,7 +740,7 @@
 </div>
 </section>
 <section id="triton-to-unstructured">
-<h6>3.2.2.2.2 triton-to-unstructured<a class="headerlink" href="#triton-to-unstructured" title="Link to this heading">¶</a></h6>
+<h5>3.2.2.2.2 triton-to-unstructured<a class="headerlink" href="#triton-to-unstructured" title="Link to this heading">¶</a></h5>
 <div class="table-wrapper colwidths-auto docutils container">
 <table class="docutils align-default">
 <thead>
@@ -826,7 +766,7 @@
 </div>
 </section>
 <section id="bubble-up-operation">
-<h6>3.2.2.2.3 bubble-up-operation<a class="headerlink" href="#bubble-up-operation" title="Link to this heading">¶</a></h6>
+<h5>3.2.2.2.3 bubble-up-operation<a class="headerlink" href="#bubble-up-operation" title="Link to this heading">¶</a></h5>
 <div class="table-wrapper colwidths-auto docutils container">
 <table class="docutils align-default">
 <thead>
@@ -847,9 +787,9 @@
 </section>
 </section>
 <section id="tritontolinalg">
-<h5>3.2.2.3 TritonToLinalg<a class="headerlink" href="#tritontolinalg" title="Link to this heading">¶</a></h5>
+<h4>3.2.2.3 TritonToLinalg<a class="headerlink" href="#tritontolinalg" title="Link to this heading">¶</a></h4>
 <section id="triton-to-linalg">
-<h6>3.2.2.3.1 triton-to-linalg<a class="headerlink" href="#triton-to-linalg" title="Link to this heading">¶</a></h6>
+<h5>3.2.2.3.1 triton-to-linalg<a class="headerlink" href="#triton-to-linalg" title="Link to this heading">¶</a></h5>
 <p>TritonToLinalg converts ttir to linalg ir.</p>
 <div class="table-wrapper colwidths-auto docutils container">
 <table class="docutils align-default">
@@ -863,7 +803,7 @@
 <td><p>triton::StoreOp to memref::copy</p></td>
 </tr>
 <tr class="row-odd"><td><p>AddPtrConverter</p></td>
-<td><p>triton::AddPtrOp to memref::ReinterpretCastOp</p></td>
+<td><p>triton::AddPtrOp to memref::ReinterpretCast</p></td>
 </tr>
 <tr class="row-even"><td><p>GetProgramIDConverter</p></td>
 <td><p>triton::GetProgramIdOp to a param in functionOp</p></td>
@@ -985,7 +925,7 @@
 </section>
 </section>
 <section id="other-passes">
-<h5>3.2.2.4 other passes<a class="headerlink" href="#other-passes" title="Link to this heading">¶</a></h5>
+<h4>3.2.2.4 other passes<a class="headerlink" href="#other-passes" title="Link to this heading">¶</a></h4>
 <div class="table-wrapper colwidths-auto docutils container">
 <table class="docutils align-default">
 <thead>
@@ -1022,7 +962,7 @@
 </section>
 </section>
 <section id="ascend-affinitive-operators">
-<h4>3.2.3 Ascend affinitive Operators<a class="headerlink" href="#ascend-affinitive-operators" title="Link to this heading">¶</a></h4>
+<h3>3.2.3 Ascend affinitive Operators<a class="headerlink" href="#ascend-affinitive-operators" title="Link to this heading">¶</a></h3>
 <div class="table-wrapper colwidths-auto docutils container">
 <table class="docutils align-default">
 <thead>
@@ -1058,30 +998,29 @@
 </section>
 </section>
 </section>
-</section>
 
         </article>
       </div>
       <footer>
         
         <div class="related-pages">
-          <a class="next-page" href="examples/01_vector_add_example.html">
+          <a class="next-page" href="programming_guide.html">
               <div class="page-info">
                 <div class="context">
                   <span>Next</span>
                 </div>
-                <div class="title">向量相加 （Vector Addition）</div>
+                <div class="title">Triton算子开发指南</div>
               </div>
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
             </a>
-          <a class="prev-page" href="environment_variable_and_compiler_options_reference.html">
+          <a class="prev-page" href="installation_guide.html">
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
               <div class="page-info">
                 <div class="context">
                   <span>Previous</span>
                 </div>
                 
-                <div class="title">环境变量与编译选项</div>
+                <div class="title">安装指南</div>
                 
               </div>
             </a>
@@ -1128,6 +1067,8 @@
 <li><a class="reference internal" href="#language-expansion">3.1.1 Language expansion</a></li>
 </ul>
 </li>
+</ul>
+</li>
 <li><a class="reference internal" href="#triton-ascend">3.2 Triton-Ascend</a><ul>
 <li><a class="reference internal" href="#compiler-options">3.2.1 Compiler Options</a></li>
 <li><a class="reference internal" href="#simd-compiler">3.2.2 SIMD compiler</a><ul>
@@ -1151,8 +1092,6 @@
 </ul>
 </li>
 </ul>
-</li>
-</ul>
 
           </div>
         </div>
@@ -1161,7 +1100,7 @@
       
     </aside>
   </div>
-</div><script src="_static/documentation_options.js?v=5929fcd5"></script>
+</div><script src="_static/documentation_options.js?v=c6e86fd7"></script>
     <script src="_static/doctools.js?v=fd6eb6e6"></script>
     <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="_static/scripts/furo.js?v=46bd48cc"></script>

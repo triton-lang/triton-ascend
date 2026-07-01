@@ -19,6 +19,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
+
 """
 Vector Addition
 ===============
@@ -78,7 +79,6 @@ def add_kernel(x_ptr,  # *Pointer* to first input vector.
 # Let's also declare a helper function to (1) allocate the `z` tensor
 # and (2) enqueue the above kernel with appropriate grid/block sizes:
 
-
 def add(x: torch.Tensor, y: torch.Tensor):
     output = torch.empty_like(x)
     n_elements = output.numel()
@@ -89,22 +89,13 @@ def add(x: torch.Tensor, y: torch.Tensor):
 
 # %%
 # We can now use the above function to compute the element-wise sum of two `torch.tensor` objects and test its correctness:
-
-
-def test_vector_addition():
-    torch.manual_seed(0)
-    size = 98432
-    x = torch.rand(size, device='npu')
-    y = torch.rand(size, device='npu')
-    output_torch = x + y
-    output_triton = add(x, y)
-    torch.testing.assert_close(output_triton, output_torch)
-    print("output_torch:", output_torch)
-    print("output_triton:", output_triton)
-    print(f'The maximum difference between torch and triton is '
-          f'{torch.max(torch.abs(output_torch - output_triton))}')
-
-
-if __name__ == "__main__":
-    test_vector_addition()
-    print("======Vector Add Test Passed!======")
+torch.manual_seed(0)
+size = 98432
+x = torch.rand(size, device='npu')
+y = torch.rand(size, device='npu')
+output_torch = x + y
+output_triton = add(x, y)
+print(output_torch)
+print(output_triton)
+print(f'The maximum difference between torch and triton is '
+      f'{torch.max(torch.abs(output_torch - output_triton))}')

@@ -3,10 +3,10 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="GPU Triton算子迁移" href="migrate_from_gpu.html"><link rel="prev" title="Triton-Ascend算子迁移" href="index.html">
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="GPU Triton算子迁移" href="migrate_from_gpu.html"><link rel="prev" title="Triton算子开发指南" href="../programming_guide.html">
 
     <!-- Generated with Sphinx 9.0.4 and Furo 2025.12.19 -->
-        <title>昇腾与GPU的开发差异 - Triton Ascend documentation</title>
+        <title>昇腾与GPU的开发差异 - Triton Ascend latest documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d75fae25" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
     <link rel="stylesheet" type="text/css" href="../_static/lang-switcher.css" />
@@ -162,7 +162,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="../index.html"><div class="brand">Triton Ascend  documentation</div></a>
+      <a href="../index.html"><div class="brand">Triton Ascend latest documentation</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -183,7 +183,7 @@
       
       <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
   
-  <span class="sidebar-brand-text">Triton Ascend  documentation</span>
+  <span class="sidebar-brand-text">Triton Ascend latest documentation</span>
   
 </a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
   <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
@@ -193,41 +193,30 @@
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
   <p class="caption" role="heading"><span class="caption-text">快速开始</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../release_note.html">版本说明</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../quick_start.html">快速入门</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../installation_guide.html">安装指南</a></li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="../programming_guide/index.html">教程</a><input aria-label="Toggle navigation of 教程" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
-<li class="toctree-l2"><a class="reference internal" href="../programming_guide/triton_operator_development_guide.html">Triton算子开发指南</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../programming_guide/cube_operator.html">Cube 算子开发</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../programming_guide/vector_operator.html">Vector 算子开发</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../programming_guide/cv_fusion_operator.html">CV 融合算子开发</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../autotune_guide.html">Triton-Ascend autotune 使用指南</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../environment_variable_and_compiler_options_reference.html">环境变量与编译选项</a></li>
-</ul>
-</li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">特性说明</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../architecture_design_and_core_features.html">架构设计与核心特性</a></li>
 </ul>
-<p class="caption" role="heading"><span class="caption-text">开发指南</span></p>
-<ul class="current">
-<li class="toctree-l1"><a class="reference internal" href="../examples/01_vector_add_example.html">调用新开发算子</a></li>
-<li class="toctree-l1 current has-children"><a class="reference internal" href="index.html">Triton-Ascend算子迁移</a><input aria-label="Toggle navigation of Triton-Ascend算子迁移" checked="" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
-<li class="toctree-l2 current current-page"><a class="current reference internal" href="#">昇腾与GPU的开发差异</a></li>
-<li class="toctree-l2"><a class="reference internal" href="migrate_from_gpu.html">GPU Triton算子迁移</a></li>
-</ul>
-</li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="../debug_guide/index.html">Triton-Ascend算子调试与调优</a><input aria-label="Toggle navigation of Triton-Ascend算子调试与调优" class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
-<li class="toctree-l2"><a class="reference internal" href="../debug_guide/debugging.html">Triton-Ascend 调试指南</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../debug_guide/profiling.html">Triton-Ascend 性能分析方法</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="../examples/index.html">典型算子样例</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">API参考</span></p>
+<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子开发指南</span></p>
 <ul>
-<li class="toctree-l1 has-children"><a class="reference internal" href="../triton_api/index.html">triton.language API</a><input aria-label="Toggle navigation of triton.language API" class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l1"><a class="reference internal" href="../programming_guide.html">Triton-Ascend算子开发</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子迁移指南</span></p>
+<ul class="current">
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">昇腾与GPU的开发差异</a></li>
+<li class="toctree-l1"><a class="reference internal" href="migrate_from_gpu.html">GPU Triton算子迁移</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">典型算子样例</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../debug_guide/debugging.html">Triton-Ascend 调试指南</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../debug_guide/profiling.html">Triton-Ascend 性能分析方法</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Triton API 接口说明</span></p>
+<ul>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../triton_api/index.html">triton.language API</a><input aria-label="Toggle navigation of triton.language API" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/extract_slice.html">triton.language.extract_slice</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/insert_slice.html">triton.language.insert_slice</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/sync_block.html">triton.language.sync_block_set</a></li>
@@ -274,27 +263,25 @@
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Indexing_Ops/swizzle2d.html">triton.language.swizzle2d</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/get_element.html">triton.language.get_element</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/index_select_simd.html">triton.language.extra.ascend.libdevice.index_select_simd</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../triton_api/Indexing_Ops/gather.html">triton.language.gather</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Inline_Assembly/inline_asm_elementwise.html">triton.language.inline_asm_elementwise</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Iterators/range.html">triton.language.range</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Iterators/static_range.html">triton.language.static_range</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Linear_Algebra_Ops/dot.html">triton.language.dot</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Linear_Algebra_Ops/dot_scaled.html">triton.language.dot_scaled</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/and.html">triton.language.tensor.<strong>and</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/or.html">triton.language.tensor.<strong>or</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/not.html">triton.language.tensor.<strong>not</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/logical_and.html">triton.language.tensor.logical_and</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/logical_or.html">triton.language.tensor.logical_or</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/not.html">triton.language.tensor.<strong>not</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/invert.html">triton.language.tensor.<strong>invert</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/and.html">triton.language.and</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/or.html">triton.language.or</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/not.html">triton.language.not</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/logical_and.html">triton.language.semantic.logical_and</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/logical_or.html">triton.language.semantic.logical_or</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/not.html">triton.language.not</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/invert.html">triton.language.invert</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/lshift.html">triton.language.core.<strong>lshift</strong></a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/rshift.html">triton.language.core.<strong>rshift</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/xor.html">triton.language.tensor.<strong>xor</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/xor.html">triton.language.xor</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/add.html">triton.language.add</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sub.html">sub</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/mul.html">mul</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/div.html">div</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/floordiv.html">floordiv</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/abs.html">triton.language.abs</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/neg.html">triton.language.neg</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/cdiv.html">triton.language.cdiv</a></li>
@@ -326,7 +313,6 @@
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/tl.advance.html">triton.language.advance</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/load_tensor_descriptor.html">triton.language.load_tensor_descriptor</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/make_tensor_descriptor.html">triton.language.make_tensor_descriptor</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/store_tensor_descriptor.html">triton.language.store_tensor_descriptor</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Programming_Model/program_id.html">triton.language.program_id</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Programming_Model/num_programs.html">triton.language.num_programs</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Random_Number_Generation/randint4x.html">triton.language.randint4x</a></li>
@@ -360,33 +346,18 @@
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/insert_slice.html">triton.language.insert_slice</a></li>
 </ul>
 </li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="../triton_api/triton/index.html">triton</a><input aria-label="Toggle navigation of triton" class="toctree-checkbox" id="toctree-checkbox-5" name="toctree-checkbox-5" role="switch" type="checkbox"/><label for="toctree-checkbox-5"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../triton_api/triton/index.html">triton</a><input aria-label="Toggle navigation of triton" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/jit.html">triton.jit</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/autotune.html">triton.autotune</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/heuristics.html">triton.heuristics</a></li>
 <li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/Config.html">triton.Config</a></li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="../libdevice/libdevice_developer_guide.html">libdevice开发者手册</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../libdevice/libdevice_developer_guide.html">Libdevice 开发者手册</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">常见问题</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../FAQ.html">Triton-Ascend FAQ</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">贡献指南</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="../community/CONTRIBUTING_zh.html">贡献指南</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../community/roadmap_guide.html">RodMap指导</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">社区治理</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="../community/CODE_OF_CONDUCT.html">贡献者公约</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../community/GOVERNANCE_zh.html">治理机制</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../community/community_technical_meeting.html">技术例会</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../community/release_policy.html">版本发布策略</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../community/MAINTAINERS.html">Maintainers</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../community/contributor.html">Contributors</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../community/SECURITYNOTE_zh.html">安全声明</a></li>
 </ul>
 
 </div>
@@ -463,23 +434,7 @@ NPU:Vector核，Cube核属于多个物理核，不同代际硬件核数不同，
 <div class="highlight-Python notranslate"><div class="highlight"><pre><span></span><span class="n">triton_gelu</span><span class="p">[</span><span class="n">n</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">](</span><span class="o">...</span><span class="p">)</span>  <span class="c1"># 第一个参数表示使用的核数，n表示使用n个核</span>
 </pre></div>
 </div>
-<p>通过对核数的调优，可实现对所有计算资源的充分调度和利用，从而最大化并行度与吞吐量。未启用 <code class="docutils literal notranslate"><span class="pre">auto-blockify</span></code>（见下节）时，发射 grid 的核数需小于等于 65,535。</p>
-</section>
-<section id="auto-blockify-65-535">
-<h3>auto-blockify：突破 65,535 逻辑块上限<a class="headerlink" href="#auto-blockify-65-535" title="Link to this heading">¶</a></h3>
-<p>社区 Triton 在 NVIDIA GPU 上把 grid 视为纯逻辑维度 —— <code class="docutils literal notranslate"><span class="pre">n</span></code> 个逻辑块按 1:1 映射到 <code class="docutils literal notranslate"><span class="pre">n</span></code> 个硬件块，运行时由硬件分发到各 SM，每个块不需要内部循环。昇腾上由于上节描述的物理核强绑定，可启动的 grid 上限被卡在 65,535，对含百万级逻辑工作项的 kernel（autotune 后的 reduce/scan、megablocks 风格的稀疏 kernel 等）过于严苛。</p>
-<p><code class="docutils literal notranslate"><span class="pre">auto-blockify</span></code>（<code class="docutils literal notranslate"><span class="pre">SIMTAutoBlockify</span></code> 编译期 pass + 配套的运行期 cap）通过”编译期视为逻辑、启动期折叠到物理核”消除该限制：</p>
-<ul class="simple">
-<li><p><strong>编译期</strong>：Triton pass 把 kernel 函数体包进一层 <code class="docutils literal notranslate"><span class="pre">scf.for</span></code>，迭代变量由 <code class="docutils literal notranslate"><span class="pre">gpu.linear_block_id</span></code> 提供。chunk 大小 = <code class="docutils literal notranslate"><span class="pre">ceildiv(logical_block_count,</span> <span class="pre">physical_core_count)</span></code>，每个物理块依次跑 <code class="docutils literal notranslate"><span class="pre">chunk</span></code> 个逻辑 block id。</p></li>
-<li><p><strong>运行期</strong>：传给 launcher 的 block-count 参数从逻辑 grid clamp 到 <code class="docutils literal notranslate"><span class="pre">physical_core_count</span></code>，与编译期的折叠保持一致。</p></li>
-</ul>
-<p>两侧共享同一份 gating 元数据（<code class="docutils literal notranslate"><span class="pre">NPUOptions</span></code> 上的 <code class="docutils literal notranslate"><span class="pre">enable_auto_blockify</span></code>，未传时回落到 <code class="docutils literal notranslate"><span class="pre">TRITON_ALL_BLOCKS_PARALLEL</span></code>），编译期循环包与运行期 cap 永远同步 —— 不存在 kernel 按一种模式编译却按另一种模式启动的情形。</p>
-<p>从 GPU Triton kernel 移植时的注意事项：</p>
-<ul class="simple">
-<li><p>grid 大于 65,535 可直接运行，无需手动把外层维度折叠进 kernel 函数体。</p></li>
-<li><p>逻辑块之间必须保持顺序无关（循环按 chunk 顺序访问）。依赖严格逻辑 block id 顺序的 kernel（如基于特定顺序的跨块同步）需要改写。</p></li>
-<li><p>per-block workspace 分配从 <code class="docutils literal notranslate"><span class="pre">O(logical_block_count)</span></code> 降到 <code class="docutils literal notranslate"><span class="pre">O(physical_core_count)</span></code>，因为 workspace 在内层 <code class="docutils literal notranslate"><span class="pre">scf.for</span></code> 各次迭代间复用。</p></li>
-</ul>
+<p>通过对核数的调优，可实现对所有计算资源的充分调度和利用，从而最大化并行度与吞吐量。注意，当前版本核数需小于等于65535。</p>
 </section>
 </section>
 <section id="id3">
@@ -621,20 +576,16 @@ xblock_sub：核内切分粒度（核内细粒度划分）
 <td><p>默认None；true , false。 autotune中可配置</p></td>
 </tr>
 <tr class="row-even"><td><p>tile_mix_vector_loop</p></td>
-<td><p>CV算子的一个优化项，当前vector可以切几份</p></td>
+<td><p>CV算子的一个优化项,当前vector可以切几份</p></td>
 <td><p>默认None；如 [2,4,8]，autotune中可配置</p></td>
 </tr>
 <tr class="row-odd"><td><p>tile_mix_cube_loop</p></td>
-<td><p>CV算子一个优化项，当前cube可以切几份</p></td>
+<td><p>CV算子一个优化项,当前cube可以切几份</p></td>
 <td><p>默认None；如 [2,4,8]，autotune中可配置</p></td>
 </tr>
 <tr class="row-even"><td><p>auto_blockify_size</p></td>
 <td><p>TRITON_ALL_BLOCKS_PARALLEL优化项，用于指定扩展的左起第一个维度的大小。</p></td>
 <td><p>默认1；如 [2,4,8]，autotune中可配置</p></td>
-</tr>
-<tr class="row-odd"><td><p>enable_auto_blockify</p></td>
-<td><p>per-kernel 级别覆盖 <code class="docutils literal notranslate"><span class="pre">TRITON_ALL_BLOCKS_PARALLEL</span></code> 环境变量。显式设为 <strong>true</strong> 或 <strong>false</strong> 时，kernel 按该值生效（忽略环境变量）；未设置（None）时由环境变量决定。优先级：该选项 &gt; 环境变量 &gt; 关。编译期 blockify pass 与运行期 block-count cap 都按此解析后的值生效，二者永远一致。</p></td>
-<td><p>默认 None；可取值 <strong>true</strong> / <strong>false</strong> / None。</p></td>
 </tr>
 </tbody>
 </table>
@@ -661,14 +612,14 @@ xblock_sub：核内切分粒度（核内细粒度划分）
               </div>
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
             </a>
-          <a class="prev-page" href="index.html">
+          <a class="prev-page" href="../programming_guide.html">
               <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
               <div class="page-info">
                 <div class="context">
                   <span>Previous</span>
                 </div>
                 
-                <div class="title">Triton-Ascend算子迁移</div>
+                <div class="title">Triton算子开发指南</div>
                 
               </div>
             </a>
@@ -706,7 +657,6 @@ xblock_sub：核内切分粒度（核内细粒度划分）
 <li><a class="reference internal" href="#">昇腾与GPU的开发差异</a><ul>
 <li><a class="reference internal" href="#id1">多核任务并行策略</a><ul>
 <li><a class="reference internal" href="#id2">充分利用核数</a></li>
-<li><a class="reference internal" href="#auto-blockify-65-535">auto-blockify：突破 65,535 逻辑块上限</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#id3">单核数据搬运策略</a><ul>
@@ -734,7 +684,7 @@ xblock_sub：核内切分粒度（核内细粒度划分）
       
     </aside>
   </div>
-</div><script src="../_static/documentation_options.js?v=5929fcd5"></script>
+</div><script src="../_static/documentation_options.js?v=c6e86fd7"></script>
     <script src="../_static/doctools.js?v=fd6eb6e6"></script>
     <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="../_static/scripts/furo.js?v=46bd48cc"></script>

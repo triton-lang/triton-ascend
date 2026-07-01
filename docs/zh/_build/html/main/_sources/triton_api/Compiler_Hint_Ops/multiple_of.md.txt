@@ -15,7 +15,7 @@ triton.language.multiple_of(input, values, _semantic=None)
 | 参数 | 类型 | 默认值 | 含义说明 |
 |------|------|--------|----------|
 | `input` | `Tensor` | 必需 | 输入张量，其值都是某个数的倍数 |
-| `values` | `constexpr[int]` 或 `list[constexpr[int]]` | 必需 | 声明输入值是这些数的倍数（单个整数或按维度的整数序列） |
+| `values` | `constexpr[int]`  | 必需 | 声明输入值是这些数的倍数 |
 | `_semantic` | - | - | 保留参数，暂不支持外部调用 |
 
 **`values`描述着每个维度第一个值的可除性特征，所以`values` 的维度要与`input` 的维度相同。
@@ -41,11 +41,13 @@ Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力�
 ### 2.4 使用方法
 
 ```python
+import triton.language as tl
+
 @triton.jit
 def basic_multiple_of_example(A, B, BLOCK_SIZE: tl.constexpr):
     offsets = tl.arange(0, BLOCK_SIZE)
     input_data = tl.load(A + offsets)
-
+  
     # 声明输入张量的第一个值是BLOCK_SIZE的倍数
-    input_data = tl.multiple_of(input_data, [BLOCK_SIZE])
+    input_data = tl.multiple_of(input_data, BLOCK_SIZE)
 ```

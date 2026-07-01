@@ -7,9 +7,9 @@
 .. raw:: html
 
     <ul>
-    <li><a href="https://gitcode.com/Ascend/triton-ascend" target="_blank">GitCode 仓库</a></li>
-    <li><a href="https://github.com/triton-lang/triton-ascend" target="_blank">GitHub 仓库</a></li>
-    <li><a href="https://triton-ascend.readthedocs.io" target="_blank">Triton Ascend 文档</a></li>
+    <li><a href="https://gitcode.com/Ascend/triton-ascend" target="_blank">GitCode仓库</a></li>
+    <li><a href="https://github.com/triton-lang/triton-ascend" target="_blank">GitHub仓库</a></li>
+    <li><a href="https://triton-ascend.readthedocs.io" target="_blank">Triton Ascend文档</a></li>
     </ul>
 
 快速开始
@@ -17,19 +17,17 @@
 
 - :doc:`快速入门 <quick_start>` — 环境要求与环境搭建
 - :doc:`安装指南 <installation_guide>` — 安装方式与安装步骤
-- :doc:`开发教程 <programming_guide/triton_operator_development_guide>` — Triton算子开发指南
 
 开发指南
 ---------------------
 
-- :doc:`Triton-Ascend算子开发 <examples/01_vector_add_example>` — 调用新算子开发
-- :doc:`Triton-Ascend算子迁移 <migration_guide/index>` — GPU Triton算子迁移
-- :doc:`Triton-Ascend算子调试与调优 <debug_guide/index>` — Triton-Ascend autotune 使用指南
+- :doc:`Triton-Ascend算子开发 <programming_guide>` — Triton算子开发指南
+- :doc:`Triton-Ascend算子迁移 <migration_guide/migrate_from_gpu>` — GPU Triton算子迁移
+- :doc:`Triton-Ascend算子调试与调优 <debug_guide/debugging>` — Triton-Ascend调试指南
 
 更多
 ------------
 
-- :doc:`贡献指南 <community/CONTRIBUTING_zh>`
 - :doc:`常见问题 <FAQ>`
 
 
@@ -39,11 +37,10 @@
    :hidden:
    :titlesonly:
    :caption: 快速开始
-   
-   版本说明 <release_note>
+
    快速入门 <quick_start>
    安装指南 <installation_guide>
-   教程 <programming_guide/index>
+
 
 .. toctree::
    :hidden:
@@ -55,21 +52,54 @@
 .. toctree::
    :hidden:
    :titlesonly:
-   :caption: 开发指南
+   :caption: Triton-Ascend算子开发指南
 
-   调用新开发算子 <examples/01_vector_add_example>
-   Triton-Ascend算子迁移 <migration_guide/index>
-   Triton-Ascend算子调试与调优 <debug_guide/index>
-   典型算子样例<examples/index>
+   Triton-Ascend算子开发 <programming_guide>
 
 .. toctree::
    :hidden:
    :titlesonly:
-   :caption: API参考
+   :caption: Triton-Ascend算子迁移指南
+
+   昇腾与GPU的开发差异 <migration_guide/architecture_difference>
+   GPU Triton算子迁移 <migration_guide/migrate_from_gpu>
+
+.. toctree::
+   :hidden:
+   :titlesonly:
+   :caption: 典型算子样例
+
+   Tutorials <examples/index>
+
+.. toctree::
+   :hidden:
+   :titlesonly:
+   :caption: Triton-Ascend算子调试与调优
+
+   Triton-Ascend调试指南 <debug_guide/debugging>
+   Triton-Ascend性能分析方法 <debug_guide/profiling>
+
+.. toctree::
+   :hidden:
+   :titlesonly:
+   :caption: Triton API 接口说明
 
    triton.language API <triton_api/index>
    triton <triton_api/triton/index>
-   libdevice开发者手册 <libdevice/libdevice_developer_guide>
+
+.. toctree::
+   :hidden:
+   :titlesonly:
+   :caption: Libdevice 开发者手册
+
+   Libdevice 开发者手册 <libdevice/libdevice_developer_guide>
+
+.. toctree::
+   :hidden:
+   :titlesonly:
+   :caption: 环境变量
+
+   环境变量 <environment_variable_reference>
 
 .. toctree::
    :hidden:
@@ -77,24 +107,3 @@
    :caption: 常见问题
 
    Triton-Ascend FAQ <FAQ>
-
-.. toctree::
-   :hidden:
-   :titlesonly:
-   :caption: 贡献指南
-
-   贡献指南 <community/CONTRIBUTING_zh>
-   RodMap指导 <community/roadmap_guide>
-
-.. toctree::
-   :hidden:
-   :titlesonly:
-   :caption: 社区治理
-
-   贡献者公约 <community/CODE_OF_CONDUCT>
-   治理机制 <community/GOVERNANCE_zh>
-   技术例会 <community/community_technical_meeting>
-   版本发布策略 <community/release_policy>
-   Maintainers <community/MAINTAINERS>
-   Contributors <community/contributor>
-   安全声明 <community/SECURITYNOTE_zh>

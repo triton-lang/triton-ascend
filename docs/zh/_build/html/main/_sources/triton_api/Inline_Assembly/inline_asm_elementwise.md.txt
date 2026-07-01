@@ -24,6 +24,8 @@ triton.language.inline_asm_elementwise(asm, constraints, args, dtype, is_pure, p
 
 ### 2.2 类型支持
 
+A3:
+
 | | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
 |------|-------|-------|-------|-------|--------|--------|--------|-------|------|------|------|------|------|
 | GPU | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -36,13 +38,13 @@ Ascend 对比 GPU 的输入张量类型 缺失uint8、uint16、uint32、uint64�
 ```python
 import triton.language as tl
 @triton.jit
-def triton_asm_add(x_ptr,
+def triton_asm_add(x_ptr, 
                y_ptr,
-               output_ptr,
-               n_elements,
-               BLOCK_SIZE: tl.constexpr,
+               output_ptr,  
+               n_elements,  
+               BLOCK_SIZE: tl.constexpr,  
                ):
-    pid = tl.program_id(axis=0)
+    pid = tl.program_id(axis=0)  
     block_start = pid * BLOCK_SIZE
     offsets = block_start + tl.arange(0, BLOCK_SIZE)
     mask = offsets < n_elements
@@ -52,13 +54,13 @@ def triton_asm_add(x_ptr,
         asm="""
         ADD.s64 $0, $1, $2
         """,
-        constraints=(
+        constraints=(            
             "=l,l,l"
         ),
         args=[x, y],
         dtype=tl.int64,
         is_pure=True,
-        pack=1,
+        pack=1, 
     )
     tl.store(output_ptr + offsets, output, mask=mask)
 ```

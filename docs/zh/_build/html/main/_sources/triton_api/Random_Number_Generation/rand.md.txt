@@ -7,8 +7,8 @@
 
 ```python
 triton.language.rand(
- seed,
- offset,
+ seed, 
+ offset, 
  n_rounds: constexpr = 10
 )
 ```
@@ -24,7 +24,7 @@ triton.language.rand(
 | `n_rounds`     | `constexpr`，默认值为10   | Philox 算法的迭代轮数 |
 
 返回值：
-1 个 float32 类型的随机块，其shape与offset的shape相同，其值在 `[0.0, 1.0)` 区间内均匀分布
+1 个 float32 类型的随机块，shape与offset的相同，其值在 `[0.0, 1.0)` 区间内均匀分布
 
 ### 2.2 支持规格
 
@@ -61,6 +61,6 @@ def kernel_rand(x_ptr, n_rounds: tl.constexpr, N: tl.constexpr, XBLOCK: tl.const
 y_calf = torch.zeros(shape, dtype=eval('torch.float32')).npu()
 numel = y_calf.numel()
 ncore = 1 if numel < 32 else 32
-xblock = math.ceil(numel / ncore)
+xblock = math.ceil(numel / ncore) 
 kernel_rand[ncore, 1, 1](y_calf, 10, numel, xblock)
 ```

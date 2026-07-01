@@ -207,7 +207,8 @@ scf::ForOp findMainloopInScope(scope::ScopeOp scope)
 // same-block producer.
 static void collectDepValue(Value operand, Block *body, Operation *currentOp,
                             DenseMap<Value, int> &outputToBlockId,
-                            DenseMap<Value, SmallVector<Value>> &depValueMap, Value groupKey)
+                            DenseMap<Value, SmallVector<Value>> &depValueMap, Value groupKey,
+                            bool skipMemrefDeps)
 {
     if (auto barg = dyn_cast<BlockArgument>(operand)) {
         if (barg.getOwner() == body && !llvm::is_contained(depValueMap[groupKey], barg))
@@ -217,6 +218,13 @@ static void collectDepValue(Value operand, Block *body, Operation *currentOp,
 
     if (!outputToBlockId.count(operand))
         return;
+
+    // CUBE scope: silently drop memref-typed cross-block deps. The producer
+    // transfer (hivm.hir.copy) only handles tensors; memref deps are not
+    // processable here and are left for downstream passes.
+    if (skipMemrefDeps && isa<MemRefType>(operand.getType()))
+        return;
+
     auto currentOutermost = getOutermostSsbufferId(currentOp);
     auto operandOutermost = getOutermostSsbufferId(operand.getDefiningOp());
     if (currentOutermost.has_value() && currentOutermost == operandOutermost)
@@ -336,7 +344,7 @@ static void forEachYieldedCrossBlockDep(Operation *op,
 // Returns 0=success (including normal skip when blocks empty), -1=invalid negative block ID
 static int collectInnerBlockInfo(scf::ForOp forOp, DenseMap<Value, InnerBlockInfo> &blocks,
                                  DenseMap<Value, SmallVector<Value>> &depValueMap,
-                                 SmallVector<Operation *> &allOps)
+                                 SmallVector<Operation *> &allOps, bool skipMemrefDeps)
 {
     depValueMap.clear();
     Block *body = forOp.getBody();
@@ -370,7 +378,7 @@ static int collectInnerBlockInfo(scf::ForOp forOp, DenseMap<Value, InnerBlockInf
 
         for (Operation *op : bi.ops)
             for (Value operand : op->getOperands())
-                collectDepValue(operand, body, op, outputToBlockId, depValueMap, groupKey);
+                collectDepValue(operand, body, op, outputToBlockId, depValueMap, groupKey, skipMemrefDeps);
     }
 
     // Additional pass: collect deps from yield ops of multi-region consumers
@@ -1638,7 +1646,7 @@ static bool hasMemrefDepValue(DenseMap<Value, SmallVector<Value>> &depValueMap)
 }
 
 static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp, OpBuilder &builder, scope::ScopeOp vectorScope,
-                               int &groupId)
+                               int &groupId, bool skipMemrefDeps)
 {
     OpBuilder globalBuilder(mainLoopForOp.getContext());
 
@@ -1663,7 +1671,7 @@ static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp, OpBuilder &builde
     DenseMap<Value, InnerBlockInfo> blocks;
     DenseMap<Value, SmallVector<Value>> depValueMap;
     SmallVector<Operation *> allOps;
-    if (collectInnerBlockInfo(mainLoopForOp, blocks, depValueMap, allOps) != 0)
+    if (collectInnerBlockInfo(mainLoopForOp, blocks, depValueMap, allOps, skipMemrefDeps) != 0)
         return -1;
 
     if (blocks.empty())
@@ -1690,15 +1698,16 @@ static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp, OpBuilder &builde
     blocks.clear();
     depValueMap.clear();
     allOps.clear();
-    if (collectInnerBlockInfo(mainLoopForOp, blocks, depValueMap, allOps) != 0)
+    if (collectInnerBlockInfo(mainLoopForOp, blocks, depValueMap, allOps, skipMemrefDeps) != 0)
         return -1;
 
     if (blocks.empty())
         return -1;
 
     // Memref-type dep values are not supported here; fail loudly so downstream
-    // passes don't see an unmarked-but-skipped scope.
-    if (hasMemrefDepValue(depValueMap)) {
+    // passes don't see an unmarked-but-skipped scope. CUBE scope opts into
+    // silent memref-skipping via skipMemrefDeps.
+    if (!skipMemrefDeps && hasMemrefDepValue(depValueMap)) {
         LDBG("ERROR: Memref type dependent values found!");
         return -1;
     }
@@ -1740,10 +1749,19 @@ void AddMultiBufferInnerScopePass::runOnOperation()
         if (!coreTypeAttr)
             return WalkResult::advance();
 
-        // Step 2: Check if core type is VECTOR
+        // Step 2: Check if core type is VECTOR or CUBE. CUBE scopes opt into
+        // skipping memref-typed cross-block deps because the producer transfer
+        // (hivm.hir.copy) only handles tensors; memref deps are left for
+        // downstream passes.
         hivm::TCoreType coreType = coreTypeAttr.getTcoretype();
-        if (coreType != hivm::TCoreType::VECTOR) {
-            LDBG("Not vector scope");
+        bool skipMemrefDeps = false;
+        if (coreType == hivm::TCoreType::VECTOR) {
+            skipMemrefDeps = false;
+        } else if (coreType == hivm::TCoreType::CUBE) {
+            LDBG("Processing CUBE scope");
+            skipMemrefDeps = true;
+        } else {
+            LDBG("Unsupported core type");
             return WalkResult::advance();
         }
 
@@ -1767,7 +1785,7 @@ void AddMultiBufferInnerScopePass::runOnOperation()
                 signalPassFailure();
                 return WalkResult::interrupt();
             }
-            if (addInnerMultiBuffer(mainLoopForOp, builder, scope, groupId) != 0) {
+            if (addInnerMultiBuffer(mainLoopForOp, builder, scope, groupId, skipMemrefDeps) != 0) {
                 LDBG("addInnerMultiBuffer failed");
                 signalPassFailure();
                 return WalkResult::interrupt();

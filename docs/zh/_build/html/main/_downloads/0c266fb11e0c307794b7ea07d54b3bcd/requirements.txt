@@ -1,0 +1,17 @@
+torch-npu==2.7.1
+pybind11
+
+#from CANN
+attrs
+cython
+numpy==1.26.4
+decorator
+sympy
+cffi
+pyyaml
+pathlib2
+psutil
+protobuf==3.20
+scipy
+requests
+absl-py

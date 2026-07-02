@@ -177,3 +177,38 @@ def conv1d(input_tensor: tl.tensor, weight_tensor: tl.tensor, bias: Union[tl.ten
     out = _semantic.builder.create_conv1d(input_tensor.handle, weight_tensor.handle, bias_handle, stride, padding_size,
                                           dilation, groups, output_ty.to_ir(_semantic.builder))
     return tl.tensor(out, output_ty)
+
+
+def dot_s4(lhs: tl.tensor, rhs: tl.tensor, acc: tl.tensor, _semantic=None) -> tl.tensor:
+    assert lhs.type.is_block() and rhs.type.is_block()
+    out_dtype = tl.int32
+    lhs_rank = len(lhs.shape)
+    rhs_rank = len(rhs.shape)
+
+    assert lhs_rank == rhs_rank == 2 or lhs_rank == rhs_rank == 3, f"Both inputs must be either 2D or 3D; (lhs: {lhs.shape} vs rhs: {rhs.shape})"
+    assert lhs.type.scalar == tl.int8, "only int8 supported!"
+    assert lhs.shape[-1].value * 2 == rhs.shape[
+        -2].value, f"First input shape ({lhs.shape}) and second input shape {rhs.shape} are not compatible for matmul" \
+        " (doubled second index of first shape ({lhs.shape[-1].value}) must be equal to first index of second shape ({rhs.shape[-2].value})"
+    assert _semantic.builder.codegen_fns.get(
+        "min_dot_size") is not None, "target doesn't provide lower shape bounds for dot."
+    min_dot_size = _semantic.builder.codegen_fns["min_dot_size"](lhs.type, rhs.type)
+    assert lhs.shape[-2].value >= min_dot_size[0] and lhs.shape[-1].value >= min_dot_size[2] \
+        and rhs.shape[-1].value >= min_dot_size[1], \
+        f"Input shapes should have M >= {min_dot_size[0]}, N >= {min_dot_size[1]} and K >= {min_dot_size[2]}"
+
+    _0 = _semantic.builder.get_int32(0)
+    ret_scalar_ty = tl.int32
+
+    M = lhs.type.shape[-2]
+    N = rhs.type.shape[-1]
+    ret_ty = tl.block_type(ret_scalar_ty, [M, 2 * N])
+    if acc is None:
+        acc_handle = _semantic.builder.create_splat(ret_ty.to_ir(_semantic.builder), _0)
+    else:
+        acc_handle = acc.handle
+        assert acc.type.shape == ret_ty.shape and acc.type.element_ty == tl.int32
+
+    res = _semantic.tensor(_semantic.builder._ascend_builder.create_dot_s4(lhs.handle, rhs.handle, acc_handle), ret_ty)
+    al.compile_hint(res, "enable_i4", _semantic=_semantic)
+    return res

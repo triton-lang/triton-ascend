@@ -329,6 +329,40 @@ void init_triton_ascend_ir(py::module &&m) {
              auto annotationOp = self.create<triton::ascend::AnnotationOp>(ptr);
              annotationOp->setAttr(self.getBuilder().getStringAttr(attrKey),
                                    attrVal);
+           })
+      // Add dot_s4
+      .def("create_dot_s4",
+           [](TritonOpBuilder &self, mlir::Value &a, mlir::Value &b,
+              mlir::Value &c) -> mlir::Value {
+             auto ctx = self.getBuilder().getContext();
+             auto aType = mlir::cast<mlir::RankedTensorType>(a.getType());
+             auto bType = mlir::cast<mlir::RankedTensorType>(b.getType());
+             auto cType = mlir::cast<mlir::RankedTensorType>(c.getType());
+
+             int64_t M = aType.getDimSize(0);
+             int64_t Khalf = aType.getDimSize(1);
+             int64_t Nhalf = bType.getDimSize(1);
+             int64_t K = Khalf * 2;
+             int64_t N = Nhalf * 2;
+
+             auto i4Type = mlir::IntegerType::get(ctx, 4);
+             auto i32Type = mlir::IntegerType::get(ctx, 32);
+             auto newVecTypeA = mlir::RankedTensorType::get({M, K}, i4Type);
+             auto newVecTypeB = mlir::RankedTensorType::get({K, N}, i4Type);
+             auto newVecTypeC = mlir::RankedTensorType::get({M, N}, i32Type);
+
+             auto aCast =
+                 self.create<mlir::UnrealizedConversionCastOp>(newVecTypeA, a)
+                     .getResult(0);
+             auto bCast =
+                 self.create<mlir::UnrealizedConversionCastOp>(newVecTypeB, b)
+                     .getResult(0);
+             auto cCast =
+                 self.create<mlir::UnrealizedConversionCastOp>(newVecTypeC, c)
+                     .getResult(0);
+
+             return self.create<DotOp>(cCast.getType(), aCast, bCast, cCast,
+                                       InputPrecision::IEEE, 0);
            });
 }
 

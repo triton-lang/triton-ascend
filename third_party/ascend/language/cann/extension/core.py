@@ -24,7 +24,7 @@ __all__ = [
     "ascend_address_space", "builtin", "CORE", "copy_from_ub_to_l1", "copy", "debug_barrier", "fixpipe",
     "FixpipeDMAMode", "FixpipeDualDstMode", "FixpipePreQuantMode", "FixpipePreReluMode", "int64", "is_builtin", "MODE",
     "PIPE", "IteratorType", "sub_vec_id", "sub_vec_num", "sync_block_all", "sync_block_set", "sync_block_wait",
-    "SYNC_IN_VF", "conv1d"
+    "SYNC_IN_VF", "conv1d", "dot_s4"
 ]
 
 import enum
@@ -563,3 +563,21 @@ def conv1d(input: tl.tensor, weight: tl.tensor, bias: tl.tensor = None, stride=N
         output_shape = [C_out, L_out_val]
 
     return semantic.conv1d(input, weight, bias, stride, padding_size_int, dilation, groups, output_shape, _semantic)
+
+
+@builtin
+def dot_s4(input: tl.tensor, other: tl.tensor, acc: tl.tensor = None, _semantic=None) -> tl.tensor:
+    """
+    Returns the matrix product of two blocks.
+
+    The two blocks must both be two-dimensional and have compatible (for s4) inner dimensions.
+
+    :param input: The first tensor to be multiplied.
+    :type input: 2D tensor of scalar-type in {:code:`int8`}
+    :param other: The second tensor to be multiplied.
+    :type other: 2D tensor of scalar-type in {:code:`int8`}
+    :param acc: The accumulator tensor. If not None, the result is added to this tensor.
+    :type acc: 2D tensor of scalar-type in {:code:`int32`}
+    """
+    acc = _unwrap_if_constexpr(acc)
+    return semantic.dot_s4(input, other, acc, _semantic)

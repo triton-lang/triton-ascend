@@ -40,6 +40,7 @@ from .core import (
     sync_block_wait,
     SYNC_IN_VF,
     conv1d,
+    dot_s4,
 )
 
 from .scope import scope
@@ -98,6 +99,7 @@ __all__ = [
     "sync_block_all",
     "SYNC_IN_VF",
     "conv1d",
+    "dot_s4",
 
     # address space
     "ascend_address_space",

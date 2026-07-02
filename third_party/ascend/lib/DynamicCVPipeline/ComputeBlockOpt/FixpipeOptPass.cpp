@@ -19,14 +19,12 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
- 
+
 #include <optional>
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
-#include "bishengir/Dialect/Annotation/IR/Annotation.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
+
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -42,9 +40,16 @@
 #include "mlir/IR/Value.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+
+#include "DynamicCVPipeline/ComputeBlockOpt/Common.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "triton/Analysis/Utility.h"
-#include "llvm/Support/Debug.h"
-#include "llvm/Support/raw_ostream.h"
 
 #define DEBUG_TYPE "fixpipe-opt"
 #define LOG_DEBUG(msg) LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << msg << "\n")
@@ -81,121 +86,6 @@ class FixpipeOptPass : public PassWrapper<FixpipeOptPass, OperationPass<ModuleOp
     bool isValidTrunc(Operation *op);
     bool isValidMul(Operation *op, Value matmulValues, SetVector<Operation *> &matchedOps);
 };
-
-namespace {
-struct DependencyCycleDetector {
-    llvm::DenseSet<mlir::Operation *> &opsInNewBlock;
-    llvm::DenseSet<mlir::Operation *> visited;
-    const CVPipeline::MemoryDependenceGraph &memGraph;
-    CVPipeline::ComputeBlockIdManager &bm;
-    Block *block;
-    void clear() { visited.clear(); }
-    bool dfs(Operation *cur);
-    DependencyCycleDetector(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
-                            llvm::DenseSet<mlir::Operation *> &opsInNewBlock, CVPipeline::ComputeBlockIdManager &bm)
-        : block(block), memGraph(memGraph), opsInNewBlock(opsInNewBlock), bm(bm)
-    {
-    }
-};
-
-} // namespace
-
-bool DependencyCycleDetector::dfs(Operation *cur)
-{
-    if (opsInNewBlock.contains(cur)) {
-        return true;
-    }
-    if (!visited.insert(cur).second) {
-        return false;
-    }
-
-    SmallVector<Operation *> allusers;
-    allusers.append(cur->getUsers().begin(), cur->getUsers().end());
-    allusers.append(memGraph.getExecAfter(cur).begin(), memGraph.getExecAfter(cur).end());
-    for (auto *user : allusers) {
-        auto *userInBlock = CVPipeline::getAncestorInBlock(user, block);
-        if (!userInBlock) {
-            continue;
-        }
-        if (bm.getBlockIdByOp(userInBlock) == -1) {
-            if (dfs(userInBlock)) {
-                return true;
-            }
-        } else {
-            for (auto *nx : bm.getOpsByBlockId(bm.getBlockIdByOp(userInBlock))) {
-                if (dfs(nx)) {
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
-}
-
-/**
- * Check if adding willaddOps to targetBlockId will create cycle.
- * Walk from every op in targetBlockId and willaddOps.
- * if reach other blockid ops and dfs find any targetBlockId op, then there is cycle.
- */
-static std::optional<bool> willCreateCycle(SetVector<Operation *> &willaddOps, Block *block,
-                                           const CVPipeline::MemoryDependenceGraph &memGraph, int targetBlockId,
-                                           CVPipeline::ComputeBlockIdManager &bm)
-{
-    // Step1: Init, Add willaddOps to targetBlockId.
-    // opsInNewBlock is new block, includes two part: 1. original ops in targetBlockId. 2. willaddOps.
-    llvm::DenseSet<mlir::Operation *> opsInNewBlock;
-    for (auto op : bm.getOpsByBlockId(targetBlockId)) {
-        opsInNewBlock.insert(op);
-    }
-    llvm::DenseMap<mlir::Operation *, int> originBlockId;
-    for (auto op : willaddOps) {
-        opsInNewBlock.insert(op);
-        // For backtracing
-        originBlockId[op] = bm.getBlockIdByOp(op);
-        bm.updateBlockId(op, targetBlockId);
-    }
-    DependencyCycleDetector detector = {block, memGraph, opsInNewBlock, bm};
-
-    // Step2: Walk from every op in opsInNewBlock
-    auto ret = false;
-    for (mlir::Operation *testOp : opsInNewBlock) {
-        SmallVector<Operation *> allusers;
-        allusers.append(testOp->getUsers().begin(), testOp->getUsers().end());
-        allusers.append(memGraph.getExecAfter(testOp).begin(), memGraph.getExecAfter(testOp).end());
-        for (auto *user : allusers) {
-            auto *userInBlock = CVPipeline::getAncestorInBlock(user, block);
-            if (opsInNewBlock.contains(userInBlock)) {
-                continue;
-            }
-            if (bm.getBlockIdByOp(userInBlock) == -1) {
-                detector.clear();
-                if (detector.dfs(userInBlock)) {
-                    ret = true;
-                    break;
-                }
-                continue;
-            }
-            auto opsUsedBlockId = bm.getOpsByBlockId(bm.getBlockIdByOp(userInBlock));
-            for (auto *userOp : opsUsedBlockId) {
-                detector.clear();
-                if (detector.dfs(userOp)) {
-                    ret = true;
-                    break;
-                }
-            }
-        }
-        if (ret) {
-            // early stop if find cycle.
-            break;
-        }
-    }
-
-    // Step3: Backtrace blockId change.
-    for (auto op : willaddOps) {
-        bm.updateBlockId(op, originBlockId[op]);
-    }
-    return ret;
-}
 
 bool FixpipeOptPass::isValidTrunc(Operation *op)
 {
@@ -548,11 +438,11 @@ bool FixpipeOptPass::applyFixpipeOpt(SetVector<Operation *> &matchedOps,
         }
     }
     int targetBlockId = bm.getBlockIdByOp(matmulOp);
-    auto block = matmulOp->getBlock();
 
-    if (willCreateCycle(matchedOps, block, memGraph, targetBlockId, bm).value_or(true)) {
+    if (failed(CVPipeline::tryUpdate(matchedOps.getArrayRef(), memGraph, targetBlockId, bm))) {
         return false;
     }
+
     for (Operation *op : matchedOps) {
         if (isa<scf::SCFDialect>(op->getDialect())) {
             op->walk([&](Operation *nestedOp) {
@@ -560,7 +450,6 @@ bool FixpipeOptPass::applyFixpipeOpt(SetVector<Operation *> &matchedOps,
                 nestedOp->setAttr(CVPipeline::kCoreType, StringAttr::get(op->getContext(), "CUBE"));
             });
         } else {
-            bm.updateBlockId(op, targetBlockId);
             op->setAttr(CVPipeline::kCoreType, StringAttr::get(op->getContext(), "CUBE"));
         }
     }

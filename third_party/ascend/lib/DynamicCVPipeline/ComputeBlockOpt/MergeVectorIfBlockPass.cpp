@@ -123,25 +123,19 @@ static LogicalResult getUpstreamBlockId(scf::IfOp ifOp, CVPipeline::ComputeBlock
     return success();
 }
 
-static void applyMerge(scf::IfOp ifOp, ArrayRef<Operation *> downstreamOps, int target,
-                       CVPipeline::ComputeBlockIdManager &bm)
+static void applyToChildren(scf::IfOp ifOp, int target, CVPipeline::ComputeBlockIdManager &bm)
 {
     bm.updateBlockId(ifOp.getOperation(), target);
     // Rewrite the inner ops so the whole if body shares the upstream block_id.
     for (Region &region : ifOp->getRegions()) {
         for (Block &block : region) {
             for (Operation &op : block) {
-                if (op.hasTrait<OpTrait::IsTerminator>()) {
+                if (op.hasTrait<OpTrait::IsTerminator>() || !CVPipeline::getOpBlockId(&op).has_value()) {
                     continue;
                 }
-                if (CVPipeline::getOpBlockId(&op)) {
-                    bm.updateBlockId(&op, target);
-                }
+                bm.updateBlockId(&op, target);
             }
         }
-    }
-    for (Operation *op : downstreamOps) {
-        bm.updateBlockId(op, target);
     }
 }
 
@@ -200,9 +194,9 @@ static void tryMergeIf(scf::IfOp ifOp, const CVPipeline::MemoryDependenceGraph &
         SmallVector<Operation *> opsToUnify;
         opsToUnify.push_back(ifOp.getOperation());
         opsToUnify.append(downstreamOps.begin(), downstreamOps.end());
-        if (!CVPipeline::willCreateCycle(opsToUnify, memGraph, target, bm)) {
+        if (CVPipeline::tryUpdate(opsToUnify, memGraph, target, bm).succeeded()) {
             LOG_DEBUG("[tryMergeIf] merging if with downstream block_id " << bid << " into " << target);
-            applyMerge(ifOp, downstreamOps, target, bm);
+            applyToChildren(ifOp, target, bm);
             return;
         }
         LOG_DEBUG("[tryMergeIf] downstream block_id " << bid << " would create a cycle, skip");
@@ -210,9 +204,9 @@ static void tryMergeIf(scf::IfOp ifOp, const CVPipeline::MemoryDependenceGraph &
 
     // Fallback: at least fold the if into the upstream block if that is safe.
     SmallVector<Operation *> ifOnly = {ifOp.getOperation()};
-    if (!CVPipeline::willCreateCycle(ifOnly, memGraph, target, bm)) {
+    if (CVPipeline::tryUpdate(ifOnly, memGraph, target, bm).succeeded()) {
         LOG_DEBUG("[tryMergeIf] merging if into upstream " << target << " without downstream");
-        applyMerge(ifOp, {}, target, bm);
+        applyToChildren(ifOp, target, bm);
     }
 }
 
@@ -241,7 +235,7 @@ class MergeVectorIfBlockPass : public PassWrapper<MergeVectorIfBlockPass, Operat
         auto bm = CVPipeline::ComputeBlockIdManager(module);
 
         llvm::SmallVector<scf::IfOp> PureVectorIfOps;
-        module.walk([&](scf::IfOp ifOp) { 
+        module.walk([&](scf::IfOp ifOp) {
             if (isPureVectorIf(ifOp)) {
                 PureVectorIfOps.push_back(ifOp);
             }

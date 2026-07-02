@@ -20,24 +20,28 @@
  * THE SOFTWARE.
  */
 
-#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
-#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
-#include "mlir/Analysis/AliasAnalysis.h"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/IR/OpDefinition.h"
-#include "mlir/Interfaces/CastInterfaces.h"
-#include "mlir/Interfaces/ViewLikeInterface.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/TypeSize.h"
+
+#include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/OpDefinition.h"
+#include "mlir/Interfaces/CastInterfaces.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
+
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+
+#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "DynamicCVPipeline/Common/Utils.h"
 
 static constexpr const char *DEBUG_TYPE = "unify-alloc-block";
 #define LOG_DEBUG(...) LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__ << "\n")
@@ -340,68 +344,67 @@ static FillInfo splitSCFIfIfNeeded(FillInfo &info) {
  * @param memGraph Memory dependence graph for cycle detection
  * @return LogicalResult Returns success if unification was performed, failure otherwise
  */
-static LogicalResult tryUnifyForAlloc(memref::AllocOp allocOp, 
+static LogicalResult tryUnifyForAlloc(memref::AllocOp allocOp,
                                       const CVPipeline::MemoryDependenceGraph &memGraph,
-                                      CVPipeline::ComputeBlockIdManager &bm) {
-  // Step1: Collect direct users (excluding linalg.fill)
-  Value allocResult = allocOp.getResult();
-  LOG_DEBUG("[tryUnifyForAlloc] start from allocOp: " << *allocOp);
-  SmallVector<Operation *> directUsers = collectDirectUsers(allocResult);
-  if (directUsers.empty()) {
+                                      CVPipeline::ComputeBlockIdManager &bm)
+{
+    // Step1: Collect direct users (excluding linalg.fill)
+    Value allocResult = allocOp.getResult();
+    LOG_DEBUG("[tryUnifyForAlloc] start from allocOp: " << *allocOp);
+    SmallVector<Operation *> directUsers = collectDirectUsers(allocResult);
+    if (directUsers.empty()) {
+        return success();
+    }
+
+    // Step2: Find linalg.fill inside scf.if that uses this alloc
+    FillInfo fillInfo = findFillOpInSCFIf(allocResult);
+    if (!fillInfo.fillOp) {
+        return success();
+    }
+    LOG_DEBUG("[tryUnifyForAlloc] Found fillOp in scf.if: " << *fillInfo.parentIf);
+
+    // Step3: Check if all direct users have the same block_id
+    int targetBlockId;
+    if (failed(getCommonBlockId(directUsers, targetBlockId))) {
+        LOG_DEBUG("allocOp has copyOp from different Block");
+        return failure();
+    }
+    LOG_DEBUG("[getSameBlockId] GetSameBlockId: " << targetBlockId);
+
+    // Step4: Split if scf.if contains multiple operations
+    if (needsSplitIf(fillInfo)) {
+        LOG_DEBUG("[needsSplitIf] SCF.IF need split ");
+        fillInfo = splitSCFIfIfNeeded(fillInfo);
+    }
+
+    // Step5: Collect predecessor_ops for scf.if condition
+    SmallVector<Operation *> conditionOps =
+        collectBlockPredecessors(fillInfo.parentIf.getCondition(), fillInfo.parentIf->getBlock());
+
+    // Step6: Cycle detection and block_id assignment with fallback
+    SmallVector<Operation *> coreOps = {
+        allocOp.getOperation(),
+        fillInfo.fillOp.getOperation(),
+        fillInfo.parentIf.getOperation(),
+    };
+    coreOps.append(directUsers);
+    SmallVector<Operation *> allOps = coreOps;
+    // allOps include coreOps and scf.if_condition's predecessor_ops
+    allOps.append(conditionOps);
+
+    if (llvm::succeeded(CVPipeline::tryUpdate(allOps, memGraph, targetBlockId, bm))) {
+        LOG_DEBUG("[Cycle detection] Succeeded on first attempt: unify condition upstreams as well.");
+        return success();
+    }
+
+    LOG_DEBUG("[Cycle detection] First attempt: Find cycle with conditionOps, retry without conditionOps");
+    if (llvm::succeeded(CVPipeline::tryUpdate(coreOps, memGraph, targetBlockId, bm))) {
+        LOG_DEBUG("[Cycle detection] Succeeded on second attempt: only unify essential ops.");
+        return success();
+    }
+
+    LOG_DEBUG("[Cycle detection] Second attempt: Find cycle even for essential ops. The input IR is probably broken.");
     return success();
-  }
-
-  // Step2: Find linalg.fill inside scf.if that uses this alloc
-  FillInfo fillInfo = findFillOpInSCFIf(allocResult);
-  if (!fillInfo.fillOp) {
-    return success();
-  }
-  LOG_DEBUG("[tryUnifyForAlloc] Found fillOp in scf.if: " << *fillInfo.parentIf);
-
-  // Step3: Check if all direct users have the same block_id
-  int targetBlockId;
-  if (failed(getCommonBlockId(directUsers, targetBlockId))) {
-    LOG_DEBUG("allocOp has copyOp from different Block");
-    return failure();
-  }
-  LOG_DEBUG("[getSameBlockId] GetSameBlockId: " << targetBlockId);
-
-  // Step4: Split if scf.if contains multiple operations
-  if (needsSplitIf(fillInfo)) {
-    LOG_DEBUG("[needsSplitIf] SCF.IF need split " );
-    fillInfo = splitSCFIfIfNeeded(fillInfo);
-  }
-
-  // Step5: Collect predecessor_ops for scf.if condition
-  SmallVector<Operation *> conditionOps =
-      collectBlockPredecessors(fillInfo.parentIf.getCondition(), fillInfo.parentIf->getBlock());
-
-  // Step6: Cycle detection and block_id assignment with fallback
-  SmallVector<Operation *> coreOps = {
-      allocOp.getOperation(),
-      fillInfo.fillOp.getOperation(),
-      fillInfo.parentIf.getOperation(),
-  };
-  coreOps.append(directUsers);
-  SmallVector<Operation *> allOps = coreOps;
-  // allOps include coreOps and scf.if_condition's predecessor_ops
-  allOps.append(conditionOps);
-
-  if (CVPipeline::willCreateCycle(allOps, memGraph, targetBlockId, bm)) {
-    LOG_DEBUG("[Cycle detection] First time: Find cycle with conditionOps, retry without conditionOps");
-    if (CVPipeline::willCreateCycle(coreOps, memGraph, targetBlockId, bm)) {
-      LOG_DEBUG("[Cycle detection] Second time: Find Cycle, have unsupport IR! Should Check!!");
-      return success();
-    }
-    for (auto *op : coreOps) {
-      bm.updateBlockId(op, targetBlockId);
-    }
-  } else {
-    for (auto *op : allOps) {
-      bm.updateBlockId(op, targetBlockId);
-    }
-  }
-  return success();
 }
 
 } // anonymous namespace
@@ -433,7 +436,7 @@ public:
     module.walk([&](memref::AllocOp allocOp) {
       allocOps.push_back(allocOp);
     });
-    
+
     for (memref::AllocOp allocOp: allocOps) {
       if (failed(tryUnifyForAlloc(allocOp, memGraph, bm))) {
         signalPassFailure();

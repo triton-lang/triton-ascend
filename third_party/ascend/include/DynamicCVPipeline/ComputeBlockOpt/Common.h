@@ -31,27 +31,31 @@
 namespace mlir {
 namespace CVPipeline {
 
+// ============================================================================
+// Function Name: mlir::CVPipeline::tryUpdate
+// ============================================================================
 /**
- * @brief Detect if unifying a list of operations to target block_id would create a cycle
+ * @brief Safely updates the block ID for a collection of operations after cycle verification.
  *
- * This helper temporarily assigns every op in @p opsToUnify to @p targetBlockId,
- * walks the SSA + memory dependency edges, and reports whether the resulting
- * block-level dependency graph would contain a cycle. The temporary block_id
- * assignments are always rolled back before returning, so the function leaves
- * @p bm in its original state regardless of the result.
+ * **Purpose**:
+ * To assign a new scheduling block ID to a set of operations, ensuring that the assignment
+ * does not introduce any invalid cyclical dependencies in the block-level execution graph.
  *
- * Shared by the ComputeBlockOpt passes (e.g. UnifyAllocBlockPass and
- * MergeVectorIfBlockPass) that merge operations into a common block_id.
+ * **Inputs & Assumptions**:
+ * - `ops` (llvm::ArrayRef<Operation *>): The operations to be updated.
+ * - `memGraph` (const MemoryDependenceGraph &): The memory dependence graph for safety verification.
+ * - `targetBlockId` (int64_t): The destination block ID.
+ * - `bm` (ComputeBlockIdManager &): The block ID manager handling the state updates.
  *
- * @param opsToUnify Block-level operations to add to the safe set (okSet)
- * @param memGraph Memory dependence graph for RAW/WAW/WAR dependency analysis
- * @param targetBlockId Target block_id after unification
- * @param bm Block-id manager used to query/temporarily mutate block ids
- * @return bool Returns true if unification would create a cycle, false otherwise
+ * **Outputs & Guarantees**:
+ * - Returns `llvm::success()` if the updates were verified as cycle-free and successfully applied.
+ * - Returns `llvm::failure()` if the update would introduce a cycle.
+ * - Guarantees transactional behavior: if validation fails, the system state remains unmodified.
  */
-bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify,
-                     const MemoryDependenceGraph &memGraph, int targetBlockId,
-                     ComputeBlockIdManager &bm);
+llvm::LogicalResult tryUpdate(llvm::ArrayRef<Operation *> newOpsForGroup,
+                              const MemoryDependenceGraph &memGraph,
+                              int targetBlockId,
+                              ComputeBlockIdManager &bm);
 
 } // namespace CVPipeline
 } // namespace mlir

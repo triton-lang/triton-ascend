@@ -122,5 +122,54 @@ bool isOnlyDirectlyUse(Operation *preOp, Operation *nextOp, const CVPipeline::Me
     return (*allusers.begin()) == nextOp;
 }
 
+void DependencyHelper::forEachUser(Operation *op, DependencyHelper::PredFn pred) const
+{
+    for (auto *user : op->getUsers()) {
+        pred(user);
+    }
+    for (auto *user : memGraph.getExecAfter(op)) {
+        pred(user);
+    }
+}
+
+bool DependencyCycleDetector::detectCycleFrom(Operation *cur)
+{
+    if (group.contains(cur)) {
+        return true;
+    }
+    if (!visited.insert(cur).second) {
+        return false;
+    }
+
+    bool createsCycle = false;
+
+    depHelper.forEachUserInSameBlock(cur, [&](Operation *user) {
+        auto userBlockId = bm.getBlockIdByOp(user);
+        if (userBlockId == -1) {
+            createsCycle = createsCycle || detectCycleFrom(user);
+            return;
+        }
+
+        createsCycle = createsCycle || llvm::any_of(bm.getOpsByBlockId(userBlockId),
+                                                    [this](Operation *user) { return detectCycleFrom(user); });
+        return;
+    });
+
+    return createsCycle;
+}
+
+bool DependencyCycleDetector::detectCycle()
+{
+    llvm::DenseSet<Operation *> externalUsers;
+    for (auto *op : group) {
+        depHelper.forEachUserInSameBlock(op, [&](Operation *user) {
+            if (!group.contains(user)) {
+                externalUsers.insert(user);
+            }
+        });
+    }
+    return llvm::any_of(externalUsers, [this](Operation *op) { return this->detectCycleFrom(op); });
+}
+
 } // namespace CVPipeline
 } // namespace mlir

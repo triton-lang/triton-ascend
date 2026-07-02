@@ -19,25 +19,30 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
-#include "mlir/Analysis/AliasAnalysis.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/IR/Block.h"
-#include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/BuiltinTypes.h"
+#include <algorithm>
+#include <cstdint>
+#include <queue>
+
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
-#include <algorithm>
-#include <cstdint>
-#include <optional>
-#include <queue>
+
+#include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/Block.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypes.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+
+#include "DynamicCVPipeline/ComputeBlockOpt/Common.h"
 
 #define DEBUG_TYPE "ub-usage-opt"
 #define LOG_DEBUG(msg) LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << msg)
@@ -503,151 +508,38 @@ DenseMap<int, int> UBUsageOptPass::collectRecordChange(
     return recordChange;
 }
 
-namespace {
-
-struct DependencyCycleDetector {
-    llvm::DenseSet<mlir::Operation *> &okSet; // node in okSet will become one compute block;
-    llvm::DenseSet<mlir::Operation *> visited;
-    const CVPipeline::MemoryDependenceGraph &memGraph;
-    CVPipeline::ComputeBlockIdManager &bm;
-    Block *block;
-    void clear() { visited.clear(); }
-    bool operator()(Operation *cur);
-    bool dfs(Operation *cur) { return (*this)(cur); };
-
-    DependencyCycleDetector(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
-                            llvm::DenseSet<mlir::Operation *> &okSet, CVPipeline::ComputeBlockIdManager &bm)
-        : block(block), memGraph(memGraph), okSet(okSet), bm(bm)
-    {
-    }
-};
-
-} // namespace
-
-bool DependencyCycleDetector::operator()(Operation *cur)
+static SmallVector<Operation *> collectQualifiedOps(llvm::ArrayRef<Operation *> ops,
+                                                    CVPipeline::ComputeBlockIdManager &bm)
 {
-    if (okSet.contains(cur)) {
-        return true;
-    }
-    if (!visited.insert(cur).second) {
-        return false;
-    }
+    SmallVector<Operation *> res;
+    for (auto *parentOp : ops) {
+        // If the parentOp's blockId is the same as every op's id in each of its blocks,
+        // we need to change the ops inside its blocks to targetId as well.
+        int parentBlockId = bm.getBlockIdByOp(parentOp);
+        if (parentBlockId == -1) {
+            continue;
+        }
 
-    SmallVector<Operation *> allusers;
-    allusers.append(cur->getUsers().begin(), cur->getUsers().end());
-    for (auto *memUser : memGraph.getExecAfter(cur)) {
-        allusers.push_back(memUser);
-    }
-    for (auto *user : allusers) {
-        auto *userInBlock = CVPipeline::getAncestorInBlock(user, block);
-        if (bm.getBlockIdByOp(userInBlock) == -1) {
-            if (dfs(userInBlock)) {
-                return true;
+        auto walkResult = parentOp->walk([&](Operation *op) {
+            auto innerBlockId = bm.getBlockIdByOp(op);
+            if (innerBlockId != -1 && innerBlockId != parentBlockId) {
+                return WalkResult::interrupt();
             }
-        } else {
-            for (auto *nx : bm.getOpsByBlockId(bm.getBlockIdByOp(userInBlock))) {
-                if (dfs(nx)) {
-                    return true;
-                }
-            }
+            return WalkResult::advance();
+        });
+
+        if (!walkResult.wasInterrupted()) {
+            res.push_back(parentOp);
         }
     }
-    return false;
+
+    return res;
 }
 
-/**
- * Check if adding willaddOps to targetBlockId will create cycle.
- * Walk from every op in targetBlockId and willaddOps.
- * if reach other blockid ops and dfs find any targetBlockId op, then there is cycle.
- */
-std::optional<bool> willCreateCycle(llvm::SmallVectorImpl<Operation *> &willaddOps, Block *block,
-                                    const CVPipeline::MemoryDependenceGraph &memGraph, int targetBlockId,
-                                    CVPipeline::ComputeBlockIdManager &bm)
-{
-    // Step1: Init, Add willaddOps to targetBlockId.
-    // OkSet is new block, includes two part: 1. original ops in targetBlockId. 2. willaddOps.
-    llvm::DenseSet<mlir::Operation *> okSet;
-    for (auto op : bm.getOpsByBlockId(targetBlockId)) {
-        okSet.insert(op);
-    }
-    llvm::DenseMap<mlir::Operation *, int> originBlockId;
-    for (auto op : willaddOps) {
-        okSet.insert(op);
-        // For backtracing
-        originBlockId[op] = bm.getBlockIdByOp(op);
-        bm.updateBlockId(op, targetBlockId);
-    }
-    DependencyCycleDetector dfs = {block, memGraph, okSet, bm};
-
-    // Step2: Walk from every op in okSet
-    auto ret = false;
-    for (mlir::Operation *okOp : okSet) {
-        SmallVector<Operation *> allusers;
-        allusers.append(okOp->getUsers().begin(), okOp->getUsers().end());
-        for (auto *memUser : memGraph.getExecAfter(okOp)) {
-            allusers.push_back(memUser);
-        }
-        for (auto *user : allusers) {
-            auto *userInBlock = CVPipeline::getAncestorInBlock(user, block);
-            if (okSet.contains(userInBlock)) {
-                continue;
-            }
-            if (bm.getBlockIdByOp(userInBlock) == -1) {
-                dfs.clear();
-                if (dfs(userInBlock)) {
-                    ret = true;
-                    break;
-                }
-                continue;
-            }
-            auto opsUsedBlockId = bm.getOpsByBlockId(bm.getBlockIdByOp(userInBlock));
-            for (auto *userOp : opsUsedBlockId) {
-                dfs.clear();
-                if (dfs(userOp)) {
-                    ret = true;
-                    break;
-                }
-            }
-        }
-        if (ret) {
-            // early stop if find cycle.
-            break;
-        }
-    }
-
-    // Step3: Backtrace blockId change.
-    for (auto op : willaddOps) {
-        bm.updateBlockId(op, originBlockId[op]);
-    }
-    return ret;
-}
-
-static void processOpsInblock(Operation *parentOp, int targetId, CVPipeline::ComputeBlockIdManager &bm)
-{
-    // If the parentOp's blockId is the same as every op's id in each of its blocks,
-    // we need to change the ops inside its blocks to targetId as well.
-    int parentBlockId = bm.getBlockIdByOp(parentOp);
-    if (parentBlockId == -1) {
-        return;
-    }
-
-    bool allSame = true;
-    parentOp->walk([&](Operation *op) {
-        auto innerBlockId = bm.getBlockIdByOp(op);
-        if (innerBlockId != -1 && innerBlockId != parentBlockId) {
-            allSame = false;
-            return WalkResult::interrupt();
-        }
-        return WalkResult::advance();
-    });
-
-    if (allSame) {
-        parentOp->walk([&](Operation *op) { bm.updateBlockId(op, targetId); });
-    }
-}
-
-bool applyRecordChange(DenseMap<int, int> &recordChange, DenseMap<int, Operation *> &nodeId2op,
-                       const CVPipeline::MemoryDependenceGraph &memGraph, CVPipeline::ComputeBlockIdManager &bm)
+static LogicalResult applyRecordChange(DenseMap<int, int> &recordChange,
+                                       DenseMap<int, Operation *> &nodeId2op,
+                                       const CVPipeline::MemoryDependenceGraph &memGraph,
+                                       CVPipeline::ComputeBlockIdManager &bm)
 {
     // Get ever blockid should be add which nodeId in recordChange.
     DenseMap<int, SmallVector<int>> blockWilladd;
@@ -657,14 +549,15 @@ bool applyRecordChange(DenseMap<int, int> &recordChange, DenseMap<int, Operation
         blockWilladd[optBlockId].push_back(nodeId);
     }
     bool hasError = false;
-    for (auto it : blockWilladd) {
+    for (const auto &it : blockWilladd) {
         int targetBlockId = it.first;
-        auto willaddNodes = it.second;
+        const auto &willaddNodes = it.second;
         llvm::SmallVector<Operation *> willaddOps;
         for (int nodeId : willaddNodes) {
             willaddOps.push_back(nodeId2op[nodeId]);
         }
-        if (willCreateCycle(willaddOps, willaddOps[0]->getBlock(), memGraph, targetBlockId, bm).value_or(true)) {
+        auto qualifiedOps = collectQualifiedOps(willaddOps, bm);
+        if (llvm::failed(CVPipeline::tryUpdate(willaddOps, memGraph, targetBlockId, bm))) {
             LOG_DEBUG("Find cycle when apply change for blockId: " << targetBlockId << "\n");
             for (auto nodeId : willaddNodes) {
                 LOG_DEBUG("  - " << *nodeId2op[nodeId] << "\n");
@@ -673,13 +566,12 @@ bool applyRecordChange(DenseMap<int, int> &recordChange, DenseMap<int, Operation
             continue;
         }
 
-        for (auto op : willaddOps) {
-            processOpsInblock(op, targetBlockId, bm);
-            bm.updateBlockId(op, targetBlockId);
+        for (auto *op : qualifiedOps) {
+            op->walk([targetBlockId, &bm](Operation *op) { bm.updateBlockId(op, targetBlockId); });
         }
     }
 
-    return hasError;
+    return failure(hasError);
 }
 
 llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
@@ -718,7 +610,7 @@ llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(Block *block, const CVPi
         LOG_DEBUG("Change " << *node << " TO " << rec.second << "\n");
     }
 
-    if (applyRecordChange(recordChange, nodeId2op, memGraph, bm)) {
+    if (llvm::failed(applyRecordChange(recordChange, nodeId2op, memGraph, bm))) {
         // FIXME: it shouldn't happen....
         llvm::errs() << "Some skiped when apply UB usage optimization changes.\n";
     }

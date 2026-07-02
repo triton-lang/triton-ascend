@@ -23,12 +23,15 @@
 #ifndef ADD_AUTO_SCHEDULING_COMMON_UTILS_H
 #define ADD_AUTO_SCHEDULING_COMMON_UTILS_H
 #include <string_view>
+
+#include "llvm/ADT/StringRef.h"
+
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
-#include "llvm/ADT/StringRef.h"
 
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
 namespace mlir {
 namespace CVPipeline {
@@ -92,6 +95,51 @@ inline bool isCubeOp(Operation *op)
 }
 
 bool isVectorOnlyOp(Operation *op);
+
+class DependencyHelper {
+    using PredFn = llvm::function_ref<void(Operation *)>;
+
+    template <typename Fn> static auto mapToAncestorInBlock(Block *block, Fn &&pred)
+    {
+        return [block, pred = std::decay_t<Fn>(std::forward<Fn>(pred))](Operation *op) {
+            if (auto *ancestor = block->findAncestorOpInBlock(*op)) {
+                return pred(ancestor);
+            }
+        };
+    }
+
+  public:
+    const MemoryDependenceGraph &memGraph;
+
+    explicit DependencyHelper(const MemoryDependenceGraph &memGraph) : memGraph(memGraph) {}
+
+    void forEachUser(Operation *op, PredFn pred) const;
+
+    void forEachUserInSameBlock(Operation *op, PredFn pred) const
+    {
+        forEachUser(op, mapToAncestorInBlock(op->getBlock(), pred));
+    }
+};
+
+class DependencyCycleDetector {
+    const llvm::DenseSet<mlir::Operation *> &group;
+    llvm::DenseSet<mlir::Operation *> visited;
+    const DependencyHelper &depHelper;
+    ComputeBlockIdManager &bm;
+    Block *const block;
+
+    bool detectCycleFrom(Operation *cur);
+
+  public:
+    DependencyCycleDetector(Block *block,
+                            const DependencyHelper &depHelper,
+                            llvm::DenseSet<mlir::Operation *> &group,
+                            ComputeBlockIdManager &bm)
+        : block(block), depHelper(depHelper), group(group), bm(bm)
+    {}
+
+    bool detectCycle();
+};
 
 } // namespace CVPipeline
 } // namespace mlir

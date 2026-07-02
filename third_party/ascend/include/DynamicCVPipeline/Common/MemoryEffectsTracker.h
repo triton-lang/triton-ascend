@@ -53,6 +53,9 @@ private:
         Operation *lastWriter = nullptr;
         Operation *dataSource = nullptr;
         SmallPtrSet<Operation *, INIT_SIZE> pendingReads;
+        // True iff memref traces back to a function entry argument; cached so
+        // findAliasSlots can skip func-entry slots without re-walking views.
+        bool isFuncEntryArgSlot = false;
         explicit MemSlot(Value v) : memref(v) {}
     };
 
@@ -69,6 +72,9 @@ private:
     ArrayRef<MemSlot *> resolveAliasSlots(Value v,
                                           DenseMap<Value, SmallVector<MemSlot *>> &cache);
     MemSlot *getOrCreateSlot(Value v);
+
+    // Clears all slot bookkeeping (slots, valueToSlot) in one place
+    void clearSlotState();
 
     void collectPreds(ArrayRef<MemoryEffects::EffectInstance> effects, bool unknown,
                       SmallVectorImpl<Operation *> &defsOut,
@@ -95,6 +101,7 @@ private:
 
     SmallVector<std::unique_ptr<MemSlot>> slots;
     DenseMap<Value, MemSlot *> valueToSlot;
+    DenseMap<std::pair<Value, Value>, AliasResult> aliasCache;
 };
 
 } // namespace CVPipeline

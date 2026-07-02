@@ -19,6 +19,7 @@
 #include "ascend/include/TritonToLLVM/Passes.h"
 #include "ascend/include/TritonToLinalg/ConvertModuloToMask.h"
 #include "ascend/include/TritonToLinalg/Passes.h"
+#include "ascend/include/TritonToLinalg/RowCoalescing.h"
 #include "ascend/include/TritonToStructured/Passes.h"
 #include "ascend/include/TritonToUnstructure/Passes.h"
 
@@ -73,6 +74,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
 
   m.def("add_convert_modulo_to_mask", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::createConvertModuloToMaskPass());
+  });
+
+  m.def("add_row_coalescing", [](mlir::PassManager &pm) {
+    pm.addPass(RowCoalescing::createRowCoalescingPass());
   });
 
   m.def("add_triton_to_annotation", [](mlir::PassManager &pm) {

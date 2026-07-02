@@ -13,6 +13,7 @@ add_triton_library(TritonToLinalg
         StridedAxisCoalescing.cpp
         DiagonalShiftFolding.cpp
         ConvertModuloToMask.cpp
+        RowCoalescing.cpp
         TileChunkCoalescing.cpp
         DescriptorConverter.cpp
         MarkTensorKindPass.cpp

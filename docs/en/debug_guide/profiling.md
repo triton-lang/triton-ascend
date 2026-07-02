@@ -71,6 +71,8 @@ The **visualize_data.bin** file can be visualized on MindStudio Insight.
 
 - In addition to collecting performance data like **trace.json**, **visualize_data.bin** also provides an instruction association dashboard corresponding to the source code (for example, **03-layer-norm.py**).
   **Figure 4** MindStudio Insight-visualize_data.bin instruction association
+  > **Tip**: Figure 4 shows results collected with line-number debug information enabled (`TRITON_DISABLE_LINE_INFO=false`). triton-ascend disables this **by default**; if you collect with the default configuration, the code-correlation dashboard in `visualize_data.bin` will be empty and will not match this figure. To reproduce this figure, first refer to the next section, [Building a Debug Version of a Triton Kernel for Simulation Pipeline Profiling](#building-a-debug-version-of-a-triton-kernel-for-simulation-pipeline-profiling).
+
   - Note: For details about the result data of the following collection items, see [Operator Optimization](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/GUI_baseddevelopmenttool/msascendinsightug/Insight_userguide_0068.html) in *MindStudio Insight*.
   ![alt text](../figures/visualize_data_with_insight.png)
 

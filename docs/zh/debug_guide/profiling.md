@@ -70,7 +70,9 @@ MindStudio Insight工具以时序图方式为用户提供指令在昇腾AI处理
 visualize_data.bin支持在MindStudio Insight可视化呈现：
 
 - 除了与trace.json一样可以采集到性能数据之外，visualize_data.bin还提供了与源代码（如：03-layer-norm.py）对应的指令关联看板。
-  **图4** MindStudio Insight-visualize_data.bin指令关联\
+  **图4** MindStudio Insight-visualize_data.bin指令关联
+  > **提示**：图4 为开启行号调试信息（`TRITON_DISABLE_LINE_INFO=false`）后采集的结果。triton-ascend **默认关闭**该信息，若按默认配置采集，`visualize_data.bin` 的代码关联看板将为空，与本图不符。复现本图效果请先参考下一节[仿真流水图采集Triton算子Debug版本](#仿真流水图采集triton算子debug版本)。
+
   - 注：以下采集项的结果数据含义可参考《MindStudio Insight 工具》的[算子调优](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/GUI_baseddevelopmenttool/msascendinsightug/Insight_userguide_0068.html)章节。
   ![alt text](../figures/visualize_data_with_insight.png)
 

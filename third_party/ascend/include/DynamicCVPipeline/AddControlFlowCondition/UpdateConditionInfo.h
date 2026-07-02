@@ -68,10 +68,10 @@ private:
 
     Value getVarValue(scf::ForOp forOp, int varIndex);
 
-    void collectDependencyBuffers(scf::ForOp forOp,
-                                  DenseMap<int, DenseMap<Value, SmallVector<Value> > > &crossCoreBuffers,
-                                  DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &memCrossCoreBuffers,
-                                  DenseMap<int, DenseMap<Value, SmallVector<Value> > > &intraCoreBuffers);
+void collectDependencyBuffers(ModuleOp module, SmallVector<scf::ForOp> &mainLoopForOps,
+                              DenseMap<int, DenseMap<Value, SmallVector<Value> > > &crossCoreBuffers,
+                              DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &memCrossCoreBuffers,
+                              DenseMap<scf::ForOp, DenseMap<int, DenseMap<Value, SmallVector<Value> > > > &intraCoreBuffersMap);
 
     DenseMap<int, DenseMap<Value, SmallVector<Value> > >
     extendCrossCoreBuffersWithEquivalentValues(ModuleOp module,

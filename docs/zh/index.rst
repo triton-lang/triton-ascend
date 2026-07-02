@@ -36,6 +36,12 @@
    :hidden:
    :titlesonly:
    :caption: 快速开始
+   :hidden:
+   :titlesonly:
+   :caption: 快速开始
+
+   快速入门 <quick_start>
+   安装指南 <installation_guide>
 
    快速入门 <quick_start>
    安装指南 <installation_guide>
@@ -45,21 +51,34 @@
    :hidden:
    :titlesonly:
    :caption: 特性说明
+   :hidden:
+   :titlesonly:
+   :caption: 特性说明
 
+   架构设计与核心特性 <architecture_design_and_core_features>
    架构设计与核心特性 <architecture_design_and_core_features>
 
 .. toctree::
    :hidden:
    :titlesonly:
    :caption: Triton-Ascend算子开发指南
+   :hidden:
+   :titlesonly:
+   :caption: Triton-Ascend算子开发指南
 
+   Triton-Ascend算子开发 <programming_guide>
    Triton-Ascend算子开发 <programming_guide>
 
 .. toctree::
    :hidden:
    :titlesonly:
    :caption: Triton-Ascend算子迁移指南
+   :hidden:
+   :titlesonly:
+   :caption: Triton-Ascend算子迁移指南
 
+   昇腾与GPU的开发差异 <migration_guide/architecture_difference>
+   GPU Triton算子迁移 <migration_guide/migrate_from_gpu>
    昇腾与GPU的开发差异 <migration_guide/architecture_difference>
    GPU Triton算子迁移 <migration_guide/migrate_from_gpu>
 
@@ -67,14 +86,23 @@
    :hidden:
    :titlesonly:
    :caption: 典型算子样例
+   :hidden:
+   :titlesonly:
+   :caption: 典型算子样例
 
+   Tutorials <examples/index>
    Tutorials <examples/index>
 
 .. toctree::
    :hidden:
    :titlesonly:
    :caption: Triton-Ascend算子调试与调优
+   :hidden:
+   :titlesonly:
+   :caption: Triton-Ascend算子调试与调优
 
+   Triton-Ascend调试指南 <debug_guide/debugging>
+   Triton-Ascend性能分析方法 <debug_guide/profiling>
    Triton-Ascend调试指南 <debug_guide/debugging>
    Triton-Ascend性能分析方法 <debug_guide/profiling>
 
@@ -82,7 +110,12 @@
    :hidden:
    :titlesonly:
    :caption: Triton API 接口说明
+   :hidden:
+   :titlesonly:
+   :caption: Triton API 接口说明
 
+   triton.language API <triton_api/index>
+   triton <triton_api/triton/index>
    triton.language API <triton_api/index>
    triton <triton_api/triton/index>
 
@@ -90,19 +123,32 @@
    :hidden:
    :titlesonly:
    :caption: Libdevice 开发者手册
+   :hidden:
+   :titlesonly:
+   :caption: Libdevice 开发者手册
 
+   Libdevice 开发者手册 <libdevice/libdevice_developer_guide>
    Libdevice 开发者手册 <libdevice/libdevice_developer_guide>
 
 .. toctree::
    :hidden:
    :titlesonly:
    :caption: 环境变量
+   :hidden:
+   :titlesonly:
+   :caption: 环境变量
 
+   环境变量 <environment_variable_reference>
    环境变量 <environment_variable_reference>
 
 .. toctree::
    :hidden:
    :titlesonly:
    :caption: 常见问题
+   :hidden:
+   :titlesonly:
+   :caption: 常见问题
+
+   Triton-Ascend FAQ <FAQ>
 
    Triton-Ascend FAQ <FAQ>

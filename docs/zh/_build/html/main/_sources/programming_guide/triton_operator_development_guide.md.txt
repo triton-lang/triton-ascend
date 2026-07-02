@@ -488,6 +488,7 @@ def matmul_kernel(
     c = C + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
     tl.store(c, acc, mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
 ```
+<<<<<<< HEAD
 
 ## 通用多维张量切分
 
@@ -568,3 +569,5 @@ def batched_matmul_kernel(a_ptr, b_ptr, c_ptr, M, N, K, B, ...):
 - 每个 Batch 独立计算自己的 `a_batch_ptr` / `b_batch_ptr` / `c_batch_ptr`
 
 - 后续 M / N / K 维度的切分逻辑与二维 GEMM 一致
+=======
+>>>>>>> 8e27e510975c50d8d5da7a9ddac9fc389a77ab72

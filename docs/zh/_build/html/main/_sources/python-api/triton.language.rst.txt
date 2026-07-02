@@ -145,7 +145,10 @@ Scan/Sort Ops
     cumsum
     histogram
     sort
+<<<<<<< HEAD
     topk
+=======
+>>>>>>> 8e27e510975c50d8d5da7a9ddac9fc389a77ab72
 
 Atomic Ops
 ----------

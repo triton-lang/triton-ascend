@@ -21,3 +21,7 @@ python:
    install:
    - requirements: docs/zh/requirement.txt
         
+# 添加语言配置
+submodules:
+  include: all
+  

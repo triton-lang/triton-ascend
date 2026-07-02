@@ -17,12 +17,11 @@
 
 - :doc:`快速入门 <quick_start>` — 环境要求与环境搭建
 - :doc:`安装指南 <installation_guide>` — 安装方式与安装步骤
-- :doc:`开发教程 <programming_guide/triton_operator_development_guide>` — Triton 算子开发指南
 
 开发指南
 ---------------------
 
-- :doc:`Triton-Ascend算子开发 <examples/01_vector_add_example>` — 调用新算子开发
+- :doc:`Triton-Ascend算子开发 <programming_guide/vector_operator>` — 算子开发指南
 - :doc:`Triton-Ascend算子迁移 <migration_guide/index>` — GPU Triton 算子迁移
 - :doc:`Triton-Ascend算子调试与调优 <debug_guide/index>` — Triton-Ascend autotune 使用指南
 
@@ -38,29 +37,32 @@
 .. toctree::
    :hidden:
    :titlesonly:
-   :caption: 快速开始
+   :caption: 从这里开始
    
    版本说明 <release_note>
    快速入门 <quick_start>
    安装指南 <installation_guide>
-   教程 <programming_guide/index>
 
 .. toctree::
    :hidden:
    :titlesonly:
-   :caption: 特性说明
+   :caption: 教程与样例
 
-   架构设计与核心特性 <architecture_design_and_core_features>
+   Vector算子开发 <programming_guide/vector_operator>
+   cube算子开发 <programming_guide/cube_operator>
+   融合算子开发 <programming_guide/cv_fusion_operator>
+   Triton-Ascend autotune <autotune_guide>
+   典型算子样例<examples/index>
 
 .. toctree::
    :hidden:
    :titlesonly:
    :caption: 开发指南
 
-   调用新开发算子 <examples/01_vector_add_example>
+   Triton-Ascend 算子开发 <programming_guide/triton_operator_development_guide>
    Triton-Ascend 算子迁移 <migration_guide/index>
    Triton-Ascend 算子调试与调优 <debug_guide/index>
-   典型算子样例<examples/index>
+   环境变量与编译选项 <environment_variable_and_compiler_options_reference>
 
 .. toctree::
    :hidden:
@@ -74,6 +76,13 @@
 .. toctree::
    :hidden:
    :titlesonly:
+   :caption: 特性说明
+
+   架构设计与核心特性 <architecture_design_and_core_features>
+
+.. toctree::
+   :hidden:
+   :titlesonly:
    :caption: 常见问题
 
    Triton-Ascend FAQ <FAQ>
@@ -81,20 +90,12 @@
 .. toctree::
    :hidden:
    :titlesonly:
-   :caption: 贡献指南
+   :caption: 社区
 
    贡献指南 <community/CONTRIBUTING_zh>
-   RodMap指导 <community/roadmap_guide>
-
-.. toctree::
-   :hidden:
-   :titlesonly:
-   :caption: 社区治理
-
    贡献者公约 <community/CODE_OF_CONDUCT_zh>
    治理机制 <community/GOVERNANCE_zh>
    技术例会 <community/community_technical_meeting>
-   版本发布策略 <community/release_policy>
    Maintainers <community/MAINTAINERS>
    Contributors <community/contributor>
    安全声明 <community/SECURITYNOTE_zh>

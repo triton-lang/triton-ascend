@@ -211,7 +211,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         pm.enable_debug()
         # ascend.passes.ttir.add_auto_blockify(pm, auto_blockify_size)
 
-        ascend.passes.ttir.add_row_coalescing(pm)
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
         if (metadata["add_auto_scheduling"]):
             ascend.passes.ttir.add_dag_sync(pm)

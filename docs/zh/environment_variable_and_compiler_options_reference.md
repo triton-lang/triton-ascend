@@ -30,7 +30,7 @@ python run_kernel.py
 | **调试与日志** | TRITON_PRINT_AUTOTUNING | 0 或未设置 | 在自动调优完成后，输出每个内核的最佳配置及总耗时。 | 0：不输出<br>1：输出 | |
 | **调试与日志** | MLIR_ENABLE_REMARK | 0 或未设置 | 启用MLIR 编译过程中的备注信息输出，包括以备注形式输出的性能警告。 | 0：不启用<br>1：启用 | |
 | **调试与日志** | TRITON_KERNEL_DUMP | 0 或未设置 | 启用或禁用 Triton 内核的转储功能，当启用时，Triton 会将生成的内核代码（各编译阶段IR及最终PTX）保存到指定目录。 | 0：不启用<br>1：启用 | |
-| **调试与日志** | TRITON_DUMP_DIR | 当前工作目录或未设置 | 指定 Triton 内核转储文件的保存目录。当`TRITON_KERNEL_DUMP=1`时保存IR和PTX的目录。 | "path"：保存路径 | |
+| **调试与日志** | TRITON_DUMP_DIR | ~/.triton/dump | 指定 Triton 内核转储文件的保存目录。当`TRITON_KERNEL_DUMP=1`时保存IR和PTX的目录。 | "path"：保存路径 | |
 | **调试与日志** | TRITON_DEVICE_PRINT | 0 或未设置 | 当设置为`1` 或者 `true`时（`TRUE` 将被转换为 `true`），启用`tl.device_print`功能。 重要说明：该功能使用GM缓冲区（其指针被传递给内核）。 | 0：不启动<br>1：启用`tl.device_print`功能 | 每个线程的GM缓冲区最大为16KB，超限内容将被丢弃。该值目前固定，后续将通过环境变量调整。 |
 | **调试与日志** | TRITON_MEMORY_DISPLAY | 0 或未设置 | 控制是否生成内存使用情况的 json 文件。当`TRITON_MEMORY_DISPLAY=1`时保存 memory_info_aic/aiv.json 文件到当前目录 。 | 0：不启用<br>1：启用 | |
 | **编译控制** | TRITON_ALWAYS_COMPILE | 0 或未设置 | 控制 Triton 是否每次运行都强制重新编译内核，而不是使用已有的缓存版本。 默认情况下，Triton 会对已经编译过的内核进行缓存（基于参数和配置），以提高性能。 设置为 1 后，Triton 将忽略缓存并每次都重新编译内核，这在调试或测试新编译器特性时非常有用。 | 0：不启用<br>1：每次运行都重新编译所有内核 | |
@@ -39,15 +39,16 @@ python run_kernel.py
 | **编译控制** | LLVM_ENABLE_TIMING | 0 或未设置 | 启用或禁用 LLVM 编译过程中的时间统计功能。 | 0：不启用<br>1：启用 | |
 | **编译控制** | TRITON_DEFAULT_FP_FUSION | 1 启用 | 控制是否默认启用浮点运算融合优化，覆盖默认的浮点运算融合行为（如mul+add->fma）。 | 0：不启用<br>1：启用 | |
 | **编译控制** | TRITON_KERNEL_OVERRIDE | 0 或未设置 | 启用或禁用 Triton 内核覆盖功能，允许在每个编译阶段开始时用用户指定的外部文件（IR/PTX等）覆盖默认生成的内核代码。 | 0：不启用<br>1：启用 | |
-| **编译控制** | TRITON_OVERRIDE_DIR | 当前工作目录或未设置 | 指定 Triton 内核覆盖文件的查找目录。当`TRITON_KERNEL_OVERRIDE=1`时加载IR/PTX文件的目录。 | "path"：保存路径 | |
+| **编译控制** | TRITON_OVERRIDE_DIR | ~/.triton/override | 指定 Triton 内核覆盖文件的查找目录。当`TRITON_KERNEL_OVERRIDE=1`时加载IR/PTX文件的目录。 | "path"：保存路径 | |
 | **编译控制** | TRITON_ASCEND_COMPILE_SPEED_OPT | 0 或未设置 | 控制JIT编译器在发现内核编译失败后是否跳过后续编译阶段。设为`1`跳过（默认`0`继续尝试）。 | 0：继续尝试<br>1：跳过 | |
 | **编译控制** | TRITON_COMPILE_ONLY | 0 或未设置 | remote_launch时使用，只编译不运行。 | 0：不启用<br>1：启用 | |
 | **编译控制** | TRITON_DISABLE_FFTS | 0 或未设置 | 是否禁用FFTS。 | 0：启用<br>1：禁用 | |
 | **编译控制** | TRITON_DISABLE_PRECOMPILE | 0 或未设置 | 是否禁用预编译。                                                                                                                                                                                                                                                                                  | 0：启用预编译<br>1：禁用预编译                                                                               | |
 | **运行与调度** | TRITON_ALL_BLOCKS_PARALLEL | 0 或未设置 | 启用或禁用自动根据物理核数优化逻辑核数，仅当逻辑核间可并行时方可启动。当逻辑核数大于物理核数时，启动该优化，则编译器自动调整逻辑核数量为物理核数，减少调度开销；启用后允许grid>65535。限制：triton kernel的逻辑必须对执行顺序不敏感才能开启该选项，否则可能会导致死锁。per-kernel 选项 `enable_auto_blockify`（详见 `architecture_difference.md`）在显式设置时优先于该环境变量；环境变量仅对未设置 `enable_auto_blockify` 的 kernel 起默认值作用。 | 0：不启用<br>1：启用 | |
-| **运行与调度** | TRITON_ENABLE_TASKQUEUE | 0 或未设置 | 是否开启task_queue。 | 0：不启用<br>1：启用 | |
+| **运行与调度** | TRITON_ENABLE_TASKQUEUE | 1 | 是否开启task_queue。 | 0：不启用<br>1：启用 | |
 | **运行与调度** | TRITON_ENABLE_SANITIZER | 0 或未设置 | 是否启用 SANITIZER。 | 0：不启用<br>1：启用 | |
 | **运行与调度** | ENABLE_PRINT_UB_BITS | 0 或未设置 | 打开后可以获取当前UB占用量，给inductor使用。 | 0：不启用<br>1：启用 | |
+| **运行与调度** | NPU_DEVICE_LIMIT | 未设置 | 用户设置算子运行时最大aicore和vector_core,格式要求：数字以,分割。比如：14,28。| 无默认值| |
 | **其他** | TRITON_BENCH_METHOD | 未设置 | 使用昇腾NPU时，将`testing.py`中的`do_bench`切换为`do_bench_npu`（需配合`INDUCTOR_ASCEND_AGGRESSIVE_AUTOTUNE = 1`使用）。设为`default`时即使NPU可用，仍调用原`do_bench`函数。 | "npu"：切换为`do_bench_npu` | |
 | **其他** | TRITON_REMOTE_RUN_CONFIG_PATH | path | 指定远程运行的配置路径。 | 直接给定path | |
 
@@ -60,15 +61,34 @@ python run_kernel.py
 例如，可在 kernel launch 时直接传入 `multibuffer`：
 
 ```python
+import torch
+import torch_npu
 import triton
 import triton.language as tl
 
 @triton.jit
-def kernel(..., BLOCK_SIZE: tl.constexpr):
-    ...
+def add_kernel(x_ptr, y_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+    pid = tl.program_id(0)
+    offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    x = tl.load(x_ptr + offsets, mask=mask)
+    y = tl.load(y_ptr + offsets, mask=mask)
+    tl.store(out_ptr + offsets, x + y, mask=mask)
 
-grid = (triton.cdiv(n_elements, 1024),)
-kernel[grid](..., BLOCK_SIZE=1024, multibuffer=True)
+def add(x, y):
+    out = torch.empty_like(x)
+    n_elements = out.numel()
+    grid = (triton.cdiv(n_elements, 1024),)
+    add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=1024, multibuffer=True)
+    return out
+
+if __name__ == "__main__":
+    torch.manual_seed(0)
+    x = torch.randn((4096,), device="npu", dtype=torch.float32)
+    y = torch.randn((4096,), device="npu", dtype=torch.float32)
+    out = add(x, y)
+    torch.npu.synchronize()
+    print(out[:4])
 ```
 
 ### 编译选项参考表

@@ -2,17 +2,15 @@
 
 ## 多核任务并行策略
 
-NPU在Triton多核并行中是物理核强绑定模式，与GPU逻辑维度并行+硬件自动物理映射的模式形成核心差异
+NPU在Triton多核并行中是物理核强绑定模式，与GPU逻辑维度并行+硬件自动物理映射的模式形成核心差异，核心对比如下表所示：
 
-- 核心对比
+|维度       |GPU（NVIDIA） |昇腾（Ascend）|
+|-----------|--------------|-----------|
+|grid 本质| 逻辑任务维度（和物理核解耦）| 物理核组映射（绑定 AI Core 拓扑）|
+|核数 / 维度限制| grid 维度 / 大小无硬限制| grid 大小≤AI Core 总数，2D 需匹配拓扑|
 
-    |维度       |GPU（NVIDIA） |昇腾（Ascend）|
-    |-----------|--------------|-----------|
-    |grid 本质| 逻辑任务维度（和物理核解耦）| 物理核组映射（绑定 AI Core 拓扑）|
-    |核数 / 维度限制| grid 维度 / 大小无硬限制| grid 大小≤AI Core 总数，2D 需匹配拓扑|
-
-GPU:可绑定多个维度轴（三维grid=[n,m,l] 等同于乘积n×m×l个并行线程），每个线程仅对应一次kernel执行，且仅执行一次。\
-NPU:Vector核，Cube核属于多个物理核，不同代际硬件核数不同，每个核仅执行一次Block,且支持对该Block重复调度执行。
+GPU可绑定多个维度轴（三维grid=[n,m,l] 等同于乘积n×m×l个并行线程），每个线程仅对应一次kernel执行，且仅执行一次。\
+NPU的Vector核、Cube核属于多个物理核，不同代际硬件核数不同，每个核仅执行一次Block,且支持对该Block重复调度执行。
 
 ### 充分利用核数
 
@@ -167,12 +165,12 @@ tl.load() 和 tl.store()
 | multibuffer                                   | 开启流水并行数据搬运  | 默认true； true , false。 autotune中可配置                     |
 | unit_flag                                     | cube搬出的一个优化项                                         | 默认None；true , false。  autotune中可配置                     |
 | limit_auto_multi_buffer_only_for_local_buffer | CV算子一个优化项，cube搬出的一个优化项                         | 默认None；true , false。 autotune中可配置 |
-| limit_auto_multi_buffer_of_local_buffer       | cube算子开启double buffer具体的scope                         | 默认None；["no-limit", "no-l0c"]， autotune中可配置           |
-| set_workspace_multibuffer                     | 只有在limit_auto_multi_buffer_only_for_local_buffer=false场景下生效 | 默认None；如[2,4]，autotune中可配置                            |
-| enable_hivm_auto_cv_balance                   | set_workspace_multibuffer只有在limit_auto_multi_buffer_only_for_local_buffer=false场景下生效 | 默认None；true , false。 autotune中可配置 |
-| tile_mix_vector_loop                          | CV算子的一个优化项，当前vector可以切几份                        | 默认None；如 [2,4,8]，autotune中可配置                       |
-| tile_mix_cube_loop                            | CV算子一个优化项，当前cube可以切几份      | 默认None；如 [2,4,8]，autotune中可配置                      |
-| auto_blockify_size                            | TRITON_ALL_BLOCKS_PARALLEL优化项，用于指定扩展的左起第一个维度的大小。 | 默认1；如 [2,4,8]，autotune中可配置                       |
+| limit_auto_multi_buffer_of_local_buffer       | cube算子开启double buffer具体的scope                         | 默认None；可取值 "no-limit" 或 "no-l0c"，autotune中可配置           |
+| set_workspace_multibuffer                     | 配置 workspace multi-buffer 档位，用于为 workspace 相关数据搬运启用多缓冲。 | 默认None；可取单个值，如 2 或 4；autotune中可配置候选值                            |
+| enable_hivm_auto_cv_balance                   | 启用或禁用自动 CV balance，用于在 CV 融合场景下平衡 Cube 与 Vector 执行。 | 默认None；true , false。 autotune中可配置 |
+| tile_mix_vector_loop                          | CV算子的一个优化项，当前vector可以切几份                        | 默认None；可取单个值，如 2、4 或 8；autotune中可配置候选值                       |
+| tile_mix_cube_loop                            | CV算子一个优化项，当前cube可以切几份      | 默认None；可取单个值，如 2、4 或 8；autotune中可配置候选值                      |
+| auto_blockify_size                            | TRITON_ALL_BLOCKS_PARALLEL优化项，用于指定扩展的左起第一个维度的大小。 | 默认1；可取单个整数值，如 2、4 或 8；autotune中可配置候选值                       |
 | enable_auto_blockify                          | per-kernel 级别覆盖 `TRITON_ALL_BLOCKS_PARALLEL` 环境变量。显式设为 **true** 或 **false** 时，kernel 按该值生效（忽略环境变量）；未设置（None）时由环境变量决定。优先级：该选项 > 环境变量 > 关。编译期 blockify pass 与运行期 block-count cap 都按此解析后的值生效，二者永远一致。 | 默认 None；可取值 **true** / **false** / None。 |
 
 - 注：优化编译选项在ascend/backend/compiler.py代码中。

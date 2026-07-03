@@ -47,7 +47,7 @@ def add_kernel(x_ptr, y_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
 1. **按物理核切分外层任务**：用 `num_vectorcore` 作为 grid，每个 program 负责一段 indices 或 token。
 2. **按 UB 容量切分 hidden 维**：对 `NUM_COLUMNS` 使用 `BLOCK_X` 分块，并预留 double buffer、索引和临时张量的空间。
 3. **用 `SUB_BLOCK_SIZE` 合并小粒度离散任务**：一次加载一组 indices，在 UB 中组织成连续临时块，减少 GM 标量访存和多次 store。
-4. **用扩展语义管理 UB 内局部数据**：使用 `tl.insert_slice` 合并多行数据，使用 `tl.extract_slice` 取出子块后再分散写回。
+4. **用扩展语义管理 UB 内局部数据**：先通过 `import triton.language.extra.cann.extension as extension` 引入扩展模块，再使用 `extension.insert_slice` 合并多行数据，使用 `extension.extract_slice` 取出子块后再分散写回。
 5. **为尾块保留统一 mask**：复杂 gather/scatter 中同时存在 index mask、column mask 和 expert/bin 边界，建议分别命名并只在 load/store 处组合。
 
 典型的 UB 预算思路如下：
@@ -55,7 +55,8 @@ def add_kernel(x_ptr, y_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
 ```python
 num_core = get_npu_properties()["num_vectorcore"]
 block_size = triton.cdiv(indices_length, num_core)
-block_x = round_up(min(num_columns, max_block_x), 16)
+align_elems = 16
+block_x = triton.cdiv(min(num_columns, max_block_x), align_elems) * align_elems
 sub_block_size = max((ub_budget - block_x * element_bytes) //
                      (block_x * element_bytes + index_bytes), 1)
 ```

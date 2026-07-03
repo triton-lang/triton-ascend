@@ -6,8 +6,8 @@
 
 **语法：**
 
-- `triton.language.cast(input, dtype, fp_downcast_rounding=None, bitcast=False, overflow_mode=None)` - 函数调用形式
-- `input.cast(dtype, fp_downcast_rounding=None, bitcast=False, overflow_mode=None)` - 成员函数形式
+- `triton.language.cast(input, dtype, fp_downcast_rounding=None, bitcast=False)` - 函数调用形式
+- `input.cast(dtype, fp_downcast_rounding=None, bitcast=False)` - 成员函数形式
 
 **功能：**
 

@@ -66,8 +66,18 @@ Directly use the out-of-the-box images released by Triton-Ascend to quickly buil
     docker exec -it triton-ascend_container bash
     ```
 
-3.  Run example: <a href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py" style="text-decoration: none; color: #0066cc;">01-vector-add.py </a>
-    Observing similar output indicates that the environment has been set up successfully.
+3.  Pull code
+    ```bash
+    # Pull triton-ascend source code repository and examples
+    git clone https://github.com/triton-lang/triton-ascend.git
+    cd triton-ascend
+    ```
+4.  Run example: <a href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py" style="text-decoration: none; color: #0066cc;">01-vector-add.py </a>
+    ```bash
+    # Run tutorials example:
+    python3 ./third_party/ascend/tutorials/01-vector-add.py
+    ```
+    Observing similar output indicates that the environment has been set up successfully:
     ```text
     tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
     tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
@@ -124,15 +134,9 @@ Quick decision: Most users can directly choose package-based installation; choos
 
 ### Package Installation
 
-#### Check Installation Environment<a id = "env-prepare" ></a>
-Determine and install the CANN, Python, and Torch-NPU software versions. Both package installation and source code compilation installation require this step to be completed first.
--   Recommended CANN version: 9.0.0
--   Recommended Python version: python3.11
--   Recommended PyTorch version: 2.7.1
--   Recommended Torch-NPU version: 2.7.1.post4
+#### Related Product Versions
 
-Triton-Ascend version relationship table:
-    <table style="table-layout: fixed; width: 100%; border-collapse: collapse; font-family: Arial, sans-serif;">
+<table style="table-layout: fixed; width: 100%; border-collapse: collapse; font-family: Arial, sans-serif;">
     <thead>
     <tr>
     <th style="width: 20%; text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd; background-color: #f5f5f5;">
@@ -155,27 +159,34 @@ Triton-Ascend version relationship table:
     <tbody>
     <tr>
     <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">3.2.1</td>
-    <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">python3.9<br>python3.10<br>python3.11<br>python3.12<br>python3.13</td>
+    <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">Python3.9.x<br>Python3.10.x<br>Python3.11.x<br>Python3.12.x<br>Python3.13.x</td>
     <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">9.0.0</td>
-    <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">2.7.1.post4<br>2.8.1.post4<br>2.9.0.post2<br>2.10.0</td>
-    <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">py3.9 does not support aarch64</td>
+    <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">2.7.1.post4<br>2.8.0.post4<br>2.9.0.post2<br>2.10.0</td>
+    <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">Python3.9.x does not support aarch64</td>
     </tr>
     <tr>
     <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">3.2.0</td>
-    <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">python3.9<br>python3.10<br>python3.11</td>
+    <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">Python3.9.x<br>Python3.10.x<br>Python3.11.x</td>
     <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">8.5.0</td>
-    <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">2.7.1</td>
+    <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">2.6.0</td>
     <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">NA</td>
     </tr>
     <tr>
     <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">3.2.0rc4</td>
-    <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">python3.9<br>python3.10<br>python3.11</td>
+    <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">Python3.9.x<br>Python3.10.x<br>Python3.11.x</td>
     <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">8.5.0</td>
-    <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">2.7.1</td>
+    <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">2.6.0</td>
     <td style="text-align: left; vertical-align: middle; padding: 12px; border: 1px solid #ddd;">NA</td>
     </tr>
     </tbody>
     </table>
+
+#### Check Installation Environment<a id = "env-prepare" ></a>
+Determine and install the CANN, Python, and Torch-NPU software versions. Both package installation and source code compilation installation require this step to be completed first.
+-   Recommended CANN version: 9.0.0
+-   Recommended Python version: python3.11
+-   Recommended PyTorch version: 2.7.1
+-   Recommended Torch-NPU version: 2.7.1.post4
 
 #### whl Package Installation
 1.  Check Python version
@@ -243,9 +254,11 @@ Determine and install the CANN, Python, and torch_npu software versions. Both pa
     -   Recommended version clang >= 15
     -   Recommended version lld >= 15
     ```bash
-    sudo apt update
-    sudo apt install zlib1g-dev clang-15 lld-15
-    sudo apt install ccache # optional
+    apt update
+    apt install zlib1g-dev clang-15 lld-15
+    apt install ccache # optional
+    update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 100
+    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-15 100
     ```
 2.  Install Python dependencies
     ```bash
@@ -267,7 +280,7 @@ pip install -e .
 ```
 
 #### Offline Installation - Build Based on LLVM<a id = "manual-install" ></a>
-Triton uses LLVM 22 to generate code for GPU and CPU. Similarly, Ascend's BiSheng compiler also depends on LLVM to generate NPU code, so you need to compile the LLVM source code before using it. Please pay attention to the specific LLVM version of dependencies. LLVM build supports two build methods. **Choose either of the two methods below**, no need to execute both.
+Triton uses LLVM 22 to generate code for GPU and CPU. Similarly, Ascend's BiSheng compiler also depends on LLVM to generate NPU code, so you need to compile the LLVM source code before using it. Please pay attention to the specific LLVM version of dependencies.
 
 ##### Code Preparation
 Check out the specified version of LLVM source code using `git checkout` and apply the patch:
@@ -280,16 +293,12 @@ git apply fad3272.patch
 ```
 
 ##### Build and Install LLVM
--   Step 1: Install LLVM using clang. Please install clang and lld in the environment and specify the versions (recommended versions clang>=15, lld>=15). If not installed, please install clang, lld, and ccache according to the following commands:
-    ```bash
-    apt-get install -y clang-15 lld-15 ccache
-    ```
--   Step 2: Set the environment variable LLVM_INSTALL_PREFIX to your target installation path
+-   Step 1: Set the environment variable LLVM_INSTALL_PREFIX to your target installation path
     ```bash
     # The path is the user-planned LLVM installation path, adjust according to actual situation
     export LLVM_INSTALL_PREFIX=/path/to/llvm-install
     ```
--   Step 3: Execute the following commands to build and install LLVM
+-   Step 2: Execute the following commands to build and install LLVM
     ```bash
     cd {PATH_TO}/llvm_project # The path is where the user pulled the LLVM code, adjust according to actual situation
     mkdir build
@@ -307,7 +316,7 @@ git apply fad3272.patch
         -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
     ninja install
     ```
--   Step 4: Need to copy FILECHECK to the target installation path
+-   Step 3: Need to copy FILECHECK to the target installation path
     ```bash
     cp  {PATH_TO}/llvm_project/build/bin/FileCheck ${LLVM_INSTALL_PREFIX}/bin/FileCheck
     ```
@@ -384,6 +393,12 @@ Install the Docker environment image through Dockerfile. Use the quay.io/ascend/
   </tr>
   <tr style="height: 50px;">
     <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
+    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">950</td>
+    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.11</td>
+    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-950-ubuntu22.04-py3.11</td>
+  </tr>
+  <tr style="height: 50px;">
+    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
     <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A2</td>
     <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.12</td>
     <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-910b-ubuntu22.04-py3.12</td>
@@ -393,6 +408,12 @@ Install the Docker environment image through Dockerfile. Use the quay.io/ascend/
     <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A3</td>
     <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.12</td>
     <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-a3-ubuntu22.04-py3.12</td>
+  </tr>
+  <tr style="height: 50px;">
+    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
+    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">950</td>
+    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.12</td>
+    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-950-ubuntu22.04-py3.12</td>
   </tr>
 </table>
 

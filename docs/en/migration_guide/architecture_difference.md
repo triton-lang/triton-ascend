@@ -2,14 +2,12 @@
 
 ## Multi-Core Task Parallelism Strategy
 
-NPUs are strongly bound to physical cores in Triton multi-core parallelism. This represents a core difference from GPUs' logical dimension parallelism + automatic physical mapping in hardware.
+In Triton multi-core parallelism, NPUs use a strong physical-core binding model, which is a core difference from the GPU model of logical-dimension parallelism with automatic hardware mapping. The core comparison is shown in the following table:
 
-- Core comparison
-
-    |Dimension      |GPU (NVIDIA)|Ascend|
-    |-----------|--------------|-----------|
-    |Essence of grids| Logical task dimension (decoupled from physical cores)| Physical core group mapping (bound to the AI core topology)|
-    |Limit on the number of cores/dimensions| No hard limit on the grid dimensions/sizes| Grid size ≤ Total number of AI cores; topology matching required by 2D|
+|Dimension      |GPU (NVIDIA)|Ascend|
+|-----------|--------------|-----------|
+|Essence of grids| Logical task dimension (decoupled from physical cores)| Physical core group mapping (bound to the AI core topology)|
+|Limit on the number of cores/dimensions| No hard limit on the grid dimensions/sizes| Grid size ≤ Total number of AI cores; topology matching required by 2D|
 
 GPUs can be bound to multiple dimensions (a 3D grid of `[n, m, l]` is equivalent to`n × m × l` parallel threads). Each thread corresponds to only one kernel execution and executes only once.\
 In NPUs, vector cores and cube cores belong to multiple physical cores. The number of cores varies with the generation of hardware. Each core executes only one block and can schedule the block execution repeatedly.
@@ -165,12 +163,12 @@ For example, to enable the `multibuffer` option, pass `'multibuffer': True` to `
 | multibuffer                                   | Data transfer through parallel pipelines. | Default: **true**. Options: **true** and **false**. It is configurable during autotune.                    |
 | unit_flag                                     | Optimization item for cube-out.                                        | Default: None. Options: **true** and **false**.  It is configurable during autotune.                    |
 | limit_auto_multi_buffer_only_for_local_buffer | Optimization item for CV operators and cube-out.                        | Default: None. Options: **true** and **false**. It is configurable during autotune.|
-| limit_auto_multi_buffer_of_local_buffer       | Scope of enabling double buffer for cube operators.                        | Default: None. Value range: ["no-limit","no-l0c"]. It is configurable during autotune.          |
-| set_workspace_multibuffer                     | It takes effect only when **limit_auto_multi_buffer_only_for_local_buffer** is set to **false**.| Default: None. Example: [2,4]. It is configurable during autotune.                           |
-| enable_hivm_auto_cv_balance                   | **set_workspace_multibuffer** takes effect only when **limit_auto_multi_buffer_only_for_local_buffer** is set to **false**.| Default: None. Options: **true** and **false**. It is configurable during autotune.|
-| tile_mix_vector_loop                          | Optimization item for CV operators. It specifies the number of segments into which the current vector can be split.                       | Default: None. Example: [2,4,8]. It is configurable during autotune.                      |
-| tile_mix_cube_loop                            | Optimization item for CV operators. It specifies the number of segments into which the current cube can be split.     | Default: None. Example: [2,4,8]. It is configurable during autotune.                     |
-| auto_blockify_size                            | Optimization item for TRITON_ALL_BLOCKS_PARALLEL. It specifies the size of leftmost dimension to be expanded.     | Default: 1. Example: [2,4,8]. It is configurable during autotune.                     |
+| limit_auto_multi_buffer_of_local_buffer       | Scope of enabling double buffer for cube operators.                        | Default: None. Value: "no-limit" or "no-l0c". It is configurable during autotune.          |
+| set_workspace_multibuffer                     | Configures workspace multi-buffer levels to enable multi-buffering for workspace-related data movement.| Default: None. Use a single value, for example 2 or 4. Candidate values can be configured during autotune.                           |
+| enable_hivm_auto_cv_balance                   | Enables or disables automatic CV balance to balance Cube and Vector execution in CV fusion scenarios.| Default: None. Options: **true** and **false**. It is configurable during autotune.|
+| tile_mix_vector_loop                          | Optimization item for CV operators. It specifies the number of segments into which the current vector can be split.                       | Default: None. Use a single value, for example 2, 4, or 8. Candidate values can be configured during autotune.                      |
+| tile_mix_cube_loop                            | Optimization item for CV operators. It specifies the number of segments into which the current cube can be split.     | Default: None. Use a single value, for example 2, 4, or 8. Candidate values can be configured during autotune.                     |
+| auto_blockify_size                            | Optimization item for TRITON_ALL_BLOCKS_PARALLEL. It specifies the size of leftmost dimension to be expanded.     | Default: 1. Use a single integer value, for example 2, 4, or 8. Candidate values can be configured during autotune.                     |
 | enable_auto_blockify                          | Per-kernel override for the TRITON_ALL_BLOCKS_PARALLEL env var. When set to **true** or **false**, the kernel uses that value regardless of the env var; when left unset (None), the env var decides. Resolution order: this option > env var > off. Both the compile-time blockify pass and the runtime cap on the launched block count follow this resolved value, so they always agree. | Default: None. Options: **true**, **false**, None. |
 
 - Note: The compilation optimization options are located in **ascend/backend/compiler.py**.

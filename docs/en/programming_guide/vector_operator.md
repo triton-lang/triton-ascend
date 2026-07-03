@@ -45,7 +45,7 @@ Use this structure:
 1. Split outer tasks by physical Vector Core count.
 2. Split the hidden dimension by UB capacity with `BLOCK_X`.
 3. Use `SUB_BLOCK_SIZE` to batch small irregular tasks.
-4. Use `tl.insert_slice` to assemble UB-local blocks and `tl.extract_slice` to scatter sub-blocks.
+4. Import the extension module with `import triton.language.extra.cann.extension as extension`, then use `extension.insert_slice` to assemble UB-local blocks and `extension.extract_slice` to scatter sub-blocks.
 5. Keep index masks, column masks, and expert/bin boundary masks separate, and combine them only at load/store sites.
 
 Typical UB budgeting:
@@ -53,7 +53,8 @@ Typical UB budgeting:
 ```python
 num_core = get_npu_properties()["num_vectorcore"]
 block_size = triton.cdiv(indices_length, num_core)
-block_x = round_up(min(num_columns, max_block_x), 16)
+align_elems = 16
+block_x = triton.cdiv(min(num_columns, max_block_x), align_elems) * align_elems
 sub_block_size = max((ub_budget - block_x * element_bytes) //
                      (block_x * element_bytes + index_bytes), 1)
 ```

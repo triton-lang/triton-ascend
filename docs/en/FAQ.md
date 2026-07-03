@@ -37,7 +37,7 @@ A: No. Triton-Ascend can be used only in the Ascend NPU hardware environment.
 **Q: How can I troubleshoot the inconsistency between the NPU running result and the PyTorch/CPU/GPU reference result?**
 
 A: For details, see [07_accuracy_comparison_example.md](../en/examples/07_accuracy_comparison_example.md).
-For details about the debugging method, see [Debugging in Interpreter Mode](./debug_guide/debugging.md#4-interpreter-mode).
+For details about the debugging method, see [Debugging in Interpreter Mode](./debug_guide/debugging.md#5-debugging-methods).
 
 ## 3. Error Code and Exception Handling
 
@@ -59,7 +59,7 @@ A: You can use tl.device_print to print the tensor in the kernel. For details, s
 
 **Q: How can I build and test Triton-Ascend locally?**
 
-A: For details about the local build and test methods, see [Installing Triton-Ascend Using the Source Code](./installation_guide.md#installing-triton-ascend-using-the-source-code).
+A: For details about the local build and test methods, see [Installing Triton-Ascend Using the Source Code](./installation_guide.md#source-code-compilation-installation).
 
 **Q: What CI checks are required for submitting a PR?**
 
@@ -77,13 +77,13 @@ A: There is an integrated performance analysis tool (profiler). For details, see
 
 A: UB Overflow is a common issue in Triton-Ascend development. For details, see [UB Overflow Troubleshooting Guide](./debug_guide/ub_overflow.md) to troubleshoot the issue. If you're unsure how to reduce tiling to lower UB usage, you can use Autotune to automatically select the optimal configuration. For details, see [Triton-Ascend Autotune Guide](./autotune_guide.md).
 
-When migrating operators from 950 to A2/A3, UB size differences may cause UB Overflow. If manual troubleshooting doesn't resolve the issue, Autotune can also be used to automatically select the optimal configuration.
+When migrating operators from A5 to A2/A3, UB size differences may cause UB Overflow. If manual troubleshooting doesn't resolve the issue, Autotune can also be used to automatically select the optimal configuration.
 
 ## 8. Triton Usage Constraints
 
 **Q: What are the usage constraints for pointer parameters in Triton kernels?**
 
-A: The Triton-Ascend compiler assumes that all externally input pointer parameters essentially point to different memory regions and cannot identify pointer alias scenarios. When multiple pointer parameters actually point to the same memory at runtime but this fact cannot be known at compile time, it may result in optimization failures or abnormal runtime results. For example:
+A: The Triton-Ascend compiler assumes at compile time that all externally input pointer parameters essentially point to different memory regions and cannot identify pointer alias scenarios. When multiple pointer parameters actually point to the same memory at runtime but this fact cannot be known at compile time, it may result in optimization failures or abnormal runtime results. For example:
 
 ```Python
 @triton.jit

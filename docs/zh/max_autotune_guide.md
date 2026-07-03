@@ -18,7 +18,7 @@
 ```python
 import triton
 import triton.language as tl
-from triton.backends.ascend.backend.runtime import max_autotune
+from triton.backends.ascend.runtime import max_autotune
 
 
 @max_autotune(
@@ -68,7 +68,7 @@ def kernel(
 与使用 `configs=[]` 自动 Tiling 一样，`max_autotune` 需要 Ascend backend 扩展支持。`max_autotune` 需要从 Ascend backend 模块单独导入：
 
 ```python
-from triton.backends.ascend.backend.runtime import max_autotune
+from triton.backends.ascend.runtime import max_autotune
 ```
 
 ## Kernel 类型与支持的参数

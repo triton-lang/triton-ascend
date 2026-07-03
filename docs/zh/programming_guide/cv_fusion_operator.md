@@ -4,24 +4,28 @@ CV 融合算子指同一个算子中同时使用 Cube Core 和 Vector Core：Cub
 
 ## CV 融合简单算子开发
 
-简单 CV 融合可以从 `third_party/ascend/tutorials/03-matrix-multiplication.py` 中的 matmul + activation 入手，也可以参考 [融合注意力样例](../examples/04_fused_attention_example.md)。最小路径如下：
+简单 CV 融合建议先从本仓 [矩阵乘法样例](../examples/05_matrix_multiplication_example.md) 抽出稳定的 `tl.dot` 主计算，再在写回前加入 Vector 后处理；更复杂的切片更新可参考 [融合注意力样例](../examples/04_fused_attention_example.md)。最小路径如下：
 
 1. 先实现稳定的 Cube 主计算，例如 `acc = tl.dot(a, b, acc)`。
 2. 在 accumulator 写回前融合轻量 Vector 后处理，例如 bias、scale、activation 或 dtype cast。
-3. 对较大的 accumulator 使用子块切分，避免 Vector 后处理阶段 UB overflow。
-4. 如果需要让一个 Cube 输出块拆给多个 Vector 子块处理，可使用 Ascend 扩展中的 `extension.parallel(..., bind_sub_block=True)` 和 `extension.extract_slice`。
+3. 对较大的 accumulator，可使用 `range` 配合 `extension.extract_slice`/`extension.insert_slice` 做普通子块切分，避免 Vector 后处理阶段 UB overflow。
+4. `extension.parallel(..., bind_sub_block=True)` 属于更强的显式多 Vector 子块绑定路径，目标硬件和编译配置存在差异时可能不可用，不建议作为简单示例的默认写法。
 
 示例结构：
 
 ```python
-acc = tl.dot(a, b, acc)
+# 在 matmul kernel 内部，K 循环完成后得到 fp32 accumulator。
+acc = tl.dot(a, b, acc)  # 通常位于 K 维循环内，这里仅展示结构。
 
-SUB_M: tl.constexpr = BLOCK_M // 2
-for s in extension.parallel(0, 2, bind_sub_block=True):
-    acc_sub = extension.extract_slice(acc, (s * SUB_M, 0), (SUB_M, BLOCK_N), (1, 1))
-    acc_sub = tl.where(acc_sub >= 0, acc_sub, 0.01 * acc_sub)
-    c_sub = acc_sub.to(tl.float16)
-    tl.store(c_ptrs_for_sub_block, c_sub, mask=c_mask_for_sub_block)
+# 在写回前融合轻量 Vector 后处理。
+acc = tl.where(acc >= 0, acc, 0.01 * acc)
+c = acc.to(tl.float16)
+
+offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+c_ptrs = c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn
+c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
+tl.store(c_ptrs, c, mask=c_mask)
 ```
 
 简单 CV 融合开发时要保持边界清晰：Cube 负责产生较大的二维 accumulator，Vector 负责同一 tile 内的逐元素或小规模归约。若 Vector 部分需要跨多个 Cube tile 共享状态，就需要引入同步、workspace 或拆分 kernel。
@@ -31,13 +35,13 @@ for s in extension.parallel(0, 2, bind_sub_block=True):
 复杂 CV 融合可参考 [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops) 中的 best practice：
 
 - [`tutorial/best_practice/002-decode_grouped_attention.py`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/best_practice/002-decode_grouped_attention.py)：Decode attention 中 QK/PV 使用 Cube，softmax、mask、指数、归一化和离散 KV 访存重排使用 Vector。
-- [`tutorial/best_practice/003-fused-cat-slice-conv1d.zh.md`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/best_practice/003-fused-cat-slice-conv1d.zh.md)：展示融合 cat、slice、conv1d update 时如何用 `insert_slice`、转置和分核优化减少离散访存与 padding 开销。
+- [`tutorial/best_practice/003-fused-cat-slice-conv1d.zh.md`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/best_practice/003-fused-cat-slice-conv1d.zh.md)：展示融合 cat、slice、conv1d update 时如何用 `extension.insert_slice`、转置和分核优化减少离散访存与 padding 开销。
 
 复杂 CV 融合建议按数据流分层组织：
 
 1. **主计算层**：识别哪些步骤必须走 Cube，例如 QK、PV、GEMM、batched matmul。
 2. **Vector 后处理层**：识别 softmax、activation、mask、scale、normalization、cat/slice、layout transform 等是否能在同一 tile 内完成。
-3. **访存重排层**：对离散 KV cache、MoE token 重排、短尾轴 tensor，优先在 UB 中用 `insert_slice`、`extract_slice`、转置或借轴转置形成硬件友好的连续访问。
+3. **访存重排层**：对离散 KV cache、MoE token 重排、短尾轴 tensor，优先在 UB 中用 `extension.insert_slice`、`extension.extract_slice`、转置或借轴转置形成硬件友好的连续访问。
 4. **流水和同步层**：通过 `multibuffer`、`set_workspace_multibuffer`、`tile_mix_vector_loop`、`tile_mix_cube_loop` 等编译选项探索 Cube 与 Vector 的重叠执行。
 5. **分核层**：CV 融合算子通常按 Cube Core 数量发射 grid；运行时会以约 1:2 的比例协同 Vector Core。不要简单沿用 GPU 上的大 grid。
 

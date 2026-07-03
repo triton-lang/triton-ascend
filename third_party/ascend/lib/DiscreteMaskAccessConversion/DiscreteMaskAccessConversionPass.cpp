@@ -368,8 +368,10 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
   // These are trivially-dead auxiliary ops (constants, arithmetic) with no
   // users that parse() creates as side effects of mask analysis.
   PassManager pm(&getContext(), moduleOp.getOperationName());
-  pm.addPass(createCSEPass());
-  pm.addPass(createCanonicalizerPass());
+  if (isDebugMode()) {
+    pm.addPass(createCSEPass());
+    pm.addPass(createCanonicalizerPass());
+  }
   if (failed(runPipeline(pm, getOperation()))) {
     moduleOp->emitWarning(
         "DiscreteMaskAccessConversion: dead-code cleanup failed");

@@ -13,6 +13,7 @@
 #include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
 #include "triton/Tools/LayoutUtils.h"
 #include "triton/Tools/LinearLayout.h"
+#include "Utils/Utils.h"
 #include <memory>
 
 namespace mlir::triton::gpu {
@@ -322,7 +323,10 @@ public:
     ModuleOp m = getOperation();
 
     OpPassManager pm;
-    pm.addPass(mlir::createCanonicalizerPass());
+
+    if (!isDebugMode()) {
+      pm.addPass(mlir::createCanonicalizerPass());
+    }
     if (failed(runPipeline(pm, m)))
       return signalPassFailure();
 

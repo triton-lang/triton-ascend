@@ -159,6 +159,18 @@ class ConversionPatternRewriter;
 
 namespace triton {
 
+inline bool isDebugMode() {
+    const char *value = std::getenv("TRITON_DEBUG");
+    if (!value)
+      return false;
+  
+    std::string v(value);
+    std::transform(v.begin(), v.end(), v.begin(),
+                  [](unsigned char c) { return std::tolower(c); });
+  
+    return v == "1" || v == "true" || v == "yes" || v == "on";
+}
+
 enum class IndirectLoadInterfaceOpType { Undefined = 0, Load = 1, Calc = 2 };
 
 // Traceback from rootOp to find the targetOp with the specified condition

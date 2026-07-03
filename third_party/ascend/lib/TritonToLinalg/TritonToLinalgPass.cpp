@@ -777,8 +777,10 @@ TritonToLinalgPass::processImplicitPermuteOperations(ModuleOp moduleOp) {
   }
 
   mlir::PassManager pm(&getContext(), moduleOp.getOperationName());
-  pm.addPass(createCSEPass());
-  pm.addPass(createCanonicalizerPass());
+  if (!isDebugMode()) {
+    pm.addPass(createCSEPass());
+    pm.addPass(createCanonicalizerPass());
+  }
   return runPipeline(pm, getOperation());
 }
 
@@ -879,7 +881,9 @@ void TritonToLinalgPass::runOnOperation() {
   {
     PassManager pm(&getContext(), moduleOp.getOperationName());
     pm.addPass(createCSEPass());
-    pm.addPass(createCanonicalizerPass());
+    if (!isDebugMode()) {
+      pm.addPass(createCanonicalizerPass());
+    }
     if (failed(runPipeline(pm, moduleOp))) {
       moduleOp->emitError(
           "failed to pre-clean dead control-flow before use analysis");
@@ -962,7 +966,9 @@ void TritonToLinalgPass::runOnOperation() {
   // 9. Clean up dead code and simplify IR.
   PassManager pm(&getContext(), moduleOp.getOperationName());
   pm.addPass(createCSEPass());
-  pm.addPass(createCanonicalizerPass());
+  if (!isDebugMode()) {
+    pm.addPass(createCanonicalizerPass());
+  }
   if (failed(runPipeline(pm, getOperation()))) {
     signalPassFailure();
   }

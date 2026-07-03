@@ -176,6 +176,7 @@ include_directories(${PROJECT_SOURCE_DIR}/include)
 include_directories(${PROJECT_BINARY_DIR}/include) # Tablegen'd files
 include_directories(${PROJECT_SOURCE_DIR}/third_party)
 include_directories(${PROJECT_BINARY_DIR}/third_party) # Tablegen'd files
+include_directories(${PROJECT_BINARY_DIR}/third_party/ascend/include) 
 
 # link_directories(${LLVM_LIBRARY_DIR})
 add_subdirectory(include)

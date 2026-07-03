@@ -32,6 +32,9 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
+
+#define DEBUG_TYPE "tile-chunk-coalescing"
 
 #include <algorithm>
 #include <functional>
@@ -45,16 +48,12 @@ using namespace triton;
 namespace {
 
 constexpr int64_t kMinContigBytes = 512;
-
-// UB footprint budget: derives maxH so that H * footprintUnit <= budget.
-// UB is ~256 KB/core (dav-c310). Budget is conservative to leave room for
-// double-buffering and alignment overhead.
-constexpr int64_t kUBBytesBudget = 96 * 1024;
-// Large H starves AI cores (grid[axis] / H shrinks the launch grid).
+constexpr int64_t kUBBytesBudget = 128 * 1024;
 constexpr int64_t kMaxCoalesceTilesCeil = 16;
 
 constexpr llvm::StringLiteral kCoalesceFactorAttr = "hacc.coalesce_factor";
 constexpr llvm::StringLiteral kCoalesceAxisAttr = "hacc.coalesce_axis";
+constexpr llvm::StringLiteral kGridNumTilesAttr = "hacc.grid_num_tiles";
 
 struct TileSeed {
   triton::GetProgramIdOp pid;
@@ -79,7 +78,6 @@ static bool getConstInt(Value v, int64_t &out) {
   return false;
 }
 
-// Whitelist arith/math dialects wholesale (side-effect-free, elementwise).
 static bool isLiftable(Operation *op) {
   if (auto *d = op->getDialect()) {
     StringRef ns = d->getNamespace();
@@ -92,21 +90,12 @@ static bool isLiftable(Operation *op) {
              triton::ScanOp, triton::ReduceOp>(op);
 }
 
-// Detect tile-index signature:
-//   blk  = muli(program_id_max, T)
-//   offs = splat(blk) + make_range[0, T)
-//   mask = cmpi slt(offs, BOUND)  with BOUND % T == 0
-// The mask proves all tiles are full (no partial last tile) and provides the
-// compile-time tile count needed for grid division.
 static std::optional<TileSeed> findSeed(ModuleOp moduleOp) {
-  // Only the outermost grid axis can be coalesced: bishengir reconstructs the
-  // highest-index program_id as the MSB of the linear block id.
   int32_t maxAxis = -1;
   moduleOp.walk([&](triton::GetProgramIdOp pid) {
     maxAxis = std::max<int32_t>(maxAxis, pid.getAxisAsInt());
   });
 
-  // Require exactly one pid op on the coalesced axis (CSE should have merged).
   int32_t maxAxisPids = 0;
   moduleOp.walk([&](triton::GetProgramIdOp pid) {
     if (pid.getAxisAsInt() == maxAxis)
@@ -115,7 +104,6 @@ static std::optional<TileSeed> findSeed(ModuleOp moduleOp) {
   if (maxAxisPids != 1)
     return std::nullopt;
 
-  // If kernel reads num_programs(maxAxis), coalescing would silently change it.
   bool readsMaxAxisNumPrograms = false;
   moduleOp.walk([&](triton::GetNumProgramsOp np) {
     if (np.getAxisAsInt() == maxAxis)
@@ -152,8 +140,6 @@ static std::optional<TileSeed> findSeed(ModuleOp moduleOp) {
           if (!range || range.getStart() != 0 || range.getEnd() != T)
             continue;
 
-          // Taint-propagation: ensure no pid-derived value feeds boundary
-          // handling other than the canonical all-true tile mask.
           int64_t bound = 0;
           Value mask;
           bool unsafe = false;
@@ -199,8 +185,18 @@ static std::optional<TileSeed> findSeed(ModuleOp moduleOp) {
           }
           if (unsafe)
             return;
-          if (!mask)
+          if (!mask) {
+            auto hintAttr = moduleOp->getAttrOfType<IntegerAttr>(
+                kGridNumTilesAttr);
+            if (!hintAttr)
+              return;
+            int64_t numTiles = hintAttr.getInt();
+            if (numTiles <= 0)
+              return;
+            bound = numTiles * T;
+            result = TileSeed{pid, maxAxis, T, bound, /*mask=*/Value()};
             return;
+          }
 
           result = TileSeed{pid, maxAxis, T, bound, mask};
           return;
@@ -211,8 +207,6 @@ static std::optional<TileSeed> findSeed(ModuleOp moduleOp) {
   return result;
 }
 
-// Forward slice from the tile pid to stores. Returns false if the slice
-// contains an unliftable op, escapes the region, or has no store sinks.
 static bool collectRegion(TileSeed &seed, ModuleOp moduleOp,
                           DenseSet<Operation *> &region,
                           SmallVectorImpl<Operation *> &ordered) {
@@ -253,8 +247,6 @@ static bool collectRegion(TileSeed &seed, ModuleOp moduleOp,
   return true;
 }
 
-// Pick the largest divisor of numTiles in [hMin, maxH].
-// H must divide numTiles so grid[axis] / H is exact.
 static int64_t chooseH(int64_t numTiles, int64_t tileLen, int64_t elemBytes,
                        int64_t maxH) {
   int64_t blockBytes = tileLen * elemBytes;
@@ -296,8 +288,6 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
   if (elemBytes == 0)
     return;
 
-  // UB footprint at H=1: sum over DMA'd data and float compute tensors.
-  // Pointer/offset/mask tensors fold into memref strides and skip UB.
   auto tensorBytes = [](Type t) -> int64_t {
     auto rt = dyn_cast<RankedTensorType>(t);
     if (!rt)
@@ -323,10 +313,17 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
   if (footprintUnit > 0)
     maxH = std::min<int64_t>(maxH, kUBBytesBudget / footprintUnit);
   if (maxH < 2)
-    return;  // even H=2 would overflow UB
+    return;
 
   int64_t numTiles = (seed->bound + seed->tileLen - 1) / seed->tileLen;
   int64_t H = chooseH(numTiles, seed->tileLen, elemBytes, maxH);
+  llvm::errs() << "TileChunkCoalescing: tileLen=" << seed->tileLen
+               << " bound=" << seed->bound
+               << " numTiles=" << numTiles
+               << " elemBytes=" << elemBytes
+               << " footprintUnit=" << footprintUnit
+               << " maxH=" << maxH
+               << " H=" << H << "\n";
   if (H <= 1)
     return;
 
@@ -335,8 +332,6 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
   Value seedMask = seed->mask;
   Operation *seedMaskOp = seedMask ? seedMask.getDefiningOp() : nullptr;
 
-  // Seed mask must feed only load/store mask slots; other consumers would
-  // reference the skipped (never-rebuilt) mask value -> invalid IR.
   if (seedMask) {
     for (Operation *u : seedMask.getUsers()) {
       auto ld = dyn_cast<triton::LoadOp>(u);
@@ -348,7 +343,6 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
     }
   }
 
-  // Preflight: bail while IR is untouched if any op cannot be lifted safely.
   Block *pidBlock = seed->pid->getBlock();
   for (Operation *op : ordered) {
     if (op->getBlock() != pidBlock)
@@ -528,6 +522,7 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
 void rewriteTileChunkCoalesce(ModuleOp moduleOp) {
   IRRewriter rw(moduleOp.getContext());
   rewriteModule(moduleOp, rw);
+  moduleOp->removeAttr(kGridNumTilesAttr);
 }
 
 }  // namespace TileChunkCoalescing

@@ -2231,7 +2231,27 @@ class AutoTilingTuner(Autotuner):
                 self.configs = self.gen_configs + expanded_user_configs
         return key
 
+    @staticmethod
+    def _inject_grid_num_tiles(kwargs):
+        # TileChunkCoalescing hint: when the launch grid is a static tuple, the
+        # outermost grid dim is the tile count along the chunk axis. Exposing it
+        # as grid_num_tiles lets the compiler safely coalesce small chunks for
+        # unmasked kernels (compile-time known bound). Skipped for callable grids
+        # (dynamic, unknown at compile time) so the pass safely bails.
+        if "grid_num_tiles" in kwargs:
+            return
+        grid = kwargs.get("grid", None)
+        if callable(grid) or not isinstance(grid, (tuple, list)):
+            return
+        glen = min(len(grid), 3)
+        if glen <= 0:
+            return
+        outermost = grid[glen - 1]
+        if isinstance(outermost, int) and outermost > 1:
+            kwargs["grid_num_tiles"] = outermost
+
     def run(self, *args, **kwargs):
+        self._inject_grid_num_tiles(kwargs)
         key = self.generate_key_and_configs(*args, **kwargs)
         cache_miss = key not in self.cache
         if self.is_simt_mode and kwargs.get('simt_stack_limit', None) is None:

@@ -824,7 +824,7 @@ struct ConvertTritonToAscendPass
     patterns.add<ConvertArithSelect>(ctx);
     patterns.add<ConvertArithCast>(ctx);
 
-    if (failed(applyPatternsAndFoldGreedily(module, std::move(patterns)))) {
+    if (failed(applyPatternsGreedily(module, std::move(patterns)))) {
       signalPassFailure();
     }
   }

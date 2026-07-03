@@ -53,7 +53,6 @@ void AllocMultiCachePass::runOnOperation()
     pm.addPass(createAddMultiBufferOuterScopePass());
 
     if (failed(runPipeline(pm, module))) {
-        module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
         signalPassFailure();
     }
     

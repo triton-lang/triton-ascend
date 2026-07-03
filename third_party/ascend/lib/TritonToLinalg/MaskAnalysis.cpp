@@ -67,14 +67,19 @@ std::optional<MaskState> runMaskAnalysisImpl(MemAccOpTy op, OpBuilder &builder)
 
 OpFoldResult MaskState::clampToNonNegativeIndex(const OpFoldResult value,
                                                 const Location &loc,
-                                                OpBuilder &builder) const
+                                                OpBuilder &builder,
+                                                bool clampDynamic) const
 {
   if (auto cst = getConstantIntValue(value)) {
     return builder.getIndexAttr(std::max<int64_t>(0, *cst));
   }
 
-  // For non-constant value, we could generate max(value, 0) to ensure the value is non-negative.
-  // But this caused error in atomic max/min ut test. We need to investigate more on this.
+  // Only minStates needs the dynamic clamp (disjoint intersection -> negative
+  // extent); the cmp paths are already non-negative, and clamping them regressed
+  // the atomic max/min UT.
+  if (clampDynamic) {
+    return maxOpFoldResult(value, builder.getIndexAttr(0), loc, builder);
+  }
   return value;
 }
 
@@ -299,7 +304,8 @@ LogicalResult MaskState::minStates(const MaskState &lhsState,
     auto rhsEnd = addOpFoldResult(rhsOffset, rhsDim, loc, builder);
     auto newEnd = minOpFoldResult(lhsEnd, rhsEnd, loc, builder);
     auto newDim = subOpFoldResult(newEnd, newOffset, loc, builder);
-    auto clampedNewDim = clampToNonNegativeIndex(newDim, loc, builder);
+    auto clampedNewDim =
+        clampToNonNegativeIndex(newDim, loc, builder, /*clampDynamic=*/true);
 
     offsets.push_back(newOffset);
     dims.push_back(clampedNewDim);

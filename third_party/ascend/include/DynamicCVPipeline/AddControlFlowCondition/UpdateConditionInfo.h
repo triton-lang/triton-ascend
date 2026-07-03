@@ -70,6 +70,7 @@ private:
 
     void collectDependencyBuffers(scf::ForOp forOp,
                                   DenseMap<int, DenseMap<Value, SmallVector<Value> > > &crossCoreBuffers,
+                                  DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &memCrossCoreBuffers,
                                   DenseMap<int, DenseMap<Value, SmallVector<Value> > > &intraCoreBuffers);
 
     DenseMap<int, DenseMap<Value, SmallVector<Value> > >
@@ -81,6 +82,7 @@ private:
                          DenseMap<int, Value> &idxToVar);
 
     int getInputOutputValues(scf::IfOp ifOp, DenseMap<int, DenseMap<Value, SmallVector<Value> > > crossCoreBuffers,
+                              DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> memCrossCoreBuffers,
                               DenseMap<int, DenseMap<Value, SmallVector<Value> > > intraCoreBuffers,
                               SmallVector<int> &crossCoreInputValues, SmallVector<int> &crossCoreOutputValues,
                               SmallVector<int> &intraCoreInputValues, SmallVector<int> &intraCoreOutputValues);
@@ -144,8 +146,9 @@ private:
                           size_t &usedCounterNum, DenseMap<Value, VarUpdateType> &varUpdateTypes);
 
     int setCrossCoreCondition(SmallVector<int> crossCoreInputValues, SmallVector<int> crossCoreOutputValues,
-                               DenseMap<int, DenseMap<Value, SmallVector<Value> > > &crossCoreBuffers, scf::IfOp ifOp,
-                               SmallVector<SmallVector<Value> > ssbufferPtrs, Value &crossCoreCond);
+                               DenseMap<int, DenseMap<Value, SmallVector<Value> > > &crossCoreBuffers,
+                               DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &memCrossCoreBuffers,
+                               scf::IfOp ifOp, SmallVector<SmallVector<Value> > ssbufferPtrs, Value &crossCoreCond);
 
     // Helper function to get pointer based on core type
     Value getSSBufferPtr(bool isAIC, int groupIdx, int ptrSetIdx,
@@ -162,6 +165,7 @@ private:
     Value addCrossCoreConditions(OpBuilder &builder, Location loc,
                                  SmallVector<int> crossCoreInputValues, SmallVector<int> crossCoreOutputValues,
                                  DenseMap<int, DenseMap<Value, SmallVector<Value> > > &crossCoreBuffers,
+                                 DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &memCrossCoreBuffers,
                                  bool isAIC, Value zeroConst,
                                  DenseMap<int, Value> &precomputedPtrs,
                                  SmallVector<SmallVector<Value> > ssbufferPtrs);

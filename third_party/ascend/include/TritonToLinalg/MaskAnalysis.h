@@ -149,8 +149,8 @@ private:
                           const Location &loc, OpBuilder &builder);
 
   OpFoldResult clampToNonNegativeIndex(const OpFoldResult value,
-                                       const Location &loc,
-                                       OpBuilder &builder) const;
+                                       const Location &loc, OpBuilder &builder,
+                                       bool clampDynamic = false) const;
 
   // Helper functions to parse values to populate MaskState
 

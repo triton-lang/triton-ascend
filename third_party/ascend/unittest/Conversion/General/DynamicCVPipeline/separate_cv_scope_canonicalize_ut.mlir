@@ -693,3 +693,154 @@ module {
   }
 }
 
+// -----
+
+// Regression: isProducedByForeignScope gate must only apply to loop ops
+// (scf.for/scf.while), never to scf.if. The isLoopOp guard prevents the
+// gate from firing on scf.if. A VECTOR-only scf.if feeding a mixed
+// CUBE/VECTOR scf.while must stay live in the CUBE scope.
+// CHECK-LABEL: func.func @if_into_while_preserved_in_cube(
+// VECTOR scope: if preserved with real branch ops, then mixed while + store.
+// CHECK:      scope.scope : () -> () {
+// CHECK-NEXT:   %[[IF:.*]] = scf.if
+// CHECK-NEXT:     arith.addi
+// CHECK-NEXT:     scf.yield
+// CHECK-NEXT:   } else {
+// CHECK-NEXT:     arith.subi
+// CHECK-NEXT:     scf.yield
+// CHECK-NEXT:   }
+// CHECK-NEXT:   %[[WHILE_SMALL:.*]] = scf.while
+// CHECK-NEXT:     arith.addi
+// CHECK-NEXT:     arith.cmpi
+// CHECK-NEXT:     scf.condition
+// CHECK-NEXT:   } do {
+// CHECK-NEXT:   ^bb0({{.*}}):
+// CHECK-NEXT:     arith.addi
+// CHECK-NEXT:     scf.yield
+// CHECK-NEXT:   }
+// CHECK-NEXT:   memref.store
+// CHECK-NEXT:   scope.return
+// CHECK-NEXT: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CUBE scope: if preserved, mixed while preserved with CUBE arith.addi in body.
+// CHECK-NEXT: scope.scope : () -> () {
+// CHECK-NEXT:   %[[IFC:.*]] = scf.if
+// CHECK-NEXT:     arith.addi
+// CHECK-NEXT:     scf.yield
+// CHECK-NEXT:   } else {
+// CHECK-NEXT:     arith.subi
+// CHECK-NEXT:     scf.yield
+// CHECK-NEXT:   }
+// CHECK-NEXT:   %[[WHILEC:.*]]:{{[0-9]+}} = scf.while
+// CHECK-NEXT:     arith.addi
+// CHECK-NEXT:     arith.cmpi
+// CHECK-NEXT:     scf.condition
+// CHECK-NEXT:   } do {
+// CHECK-NEXT:   ^bb0({{.*}}):
+// CHECK-NEXT:     arith.addi
+// CHECK-NEXT:     arith.addi
+// CHECK-NEXT:     scf.yield
+// CHECK-NEXT:   }
+// CHECK-NEXT:   arith.addi
+// CHECK-NEXT:   memref.store
+// CHECK-NEXT:   scope.return
+// CHECK-NEXT: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
+module {
+  func.func @if_into_while_preserved_in_cube(%cond: i1, %vinit: i64, %cinit: i64, %limit: i64, %outv: memref<1xi64>, %outc: memref<1xi64>) {
+    %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
+    %idxc = arith.constant {ssbuffer.core_type = "CUBE"} 0 : index
+    %c1v = arith.constant {ssbuffer.core_type = "VECTOR"} 1 : i64
+    %c2c = arith.constant {ssbuffer.core_type = "CUBE"} 2 : i64
+    %c1c = arith.constant {ssbuffer.core_type = "CUBE"} 1 : i64
+    %0 = scf.if %cond -> (i64) {
+      %1 = arith.addi %vinit, %c1v {ssbuffer.core_type = "VECTOR"} : i64
+      scf.yield {ssbuffer.core_type = "VECTOR"} %1 : i64
+    } else {
+      %1 = arith.subi %limit, %c1v {ssbuffer.core_type = "VECTOR"} : i64
+      scf.yield {ssbuffer.core_type = "VECTOR"} %1 : i64
+    } {ssbuffer.core_type = "VECTOR"}
+    %1:2 = scf.while (%a = %0, %b = %cinit) : (i64, i64) -> (i64, i64) {
+      %2 = arith.addi %a, %c1v {ssbuffer.core_type = "VECTOR"} : i64
+      %3 = arith.cmpi slt, %2, %limit {ssbuffer.core_type = "VECTOR"} : i64
+      scf.condition(%3) %2, %b : i64, i64
+    } do {
+    ^bb0(%a_iter: i64, %b_iter: i64):
+      %2 = arith.addi %a_iter, %c1v {ssbuffer.core_type = "VECTOR"} : i64
+      %3 = arith.addi %b_iter, %c2c {ssbuffer.core_type = "CUBE"} : i64
+      scf.yield {ssbuffer.core_type = "VECTOR, CUBE"} %2, %3 : i64, i64
+    } attributes {ssbuffer.core_type = "VECTOR, CUBE"}
+    %2 = arith.addi %1#1, %c1c {ssbuffer.core_type = "CUBE"} : i64
+    memref.store %1#0, %outv[%idxv] {ssbuffer.core_type = "VECTOR"} : memref<1xi64>
+    memref.store %2, %outc[%idxc] {ssbuffer.core_type = "CUBE"} : memref<1xi64>
+    func.return
+  }
+}
+
+// -----
+
+// Regression: in a 2-layer nested scf.for where the inner iter_arg flows
+// directly into a CUBE accumulator (arith.mulf), needsLoopCarryPreserve on the
+// inner for cannot find VECTOR users because same-slot yield blocks SSA
+// propagation. The producer-scope gate (guarded by isLoopOp on scf.for) detects
+// the foreign CUBE producer and skips findLiveUser so the slot is neutralized
+// in VECTOR scope, erasing the CUBE op from the VECTOR clone while keeping it
+// in the CUBE clone. An independent CUBE consumer of the outer loop result
+// ensures the CUBE scope is not optimized away.
+// CHECK-LABEL: func.func @nested_for_cube_acc_not_trapped_in_vector(
+// VECTOR scope: outer+inner for survive, arith.addf{VECTOR} present
+//               but arith.mulf{CUBE} absent, scalar CUBE consumer absent.
+// CHECK:      scope.scope : () -> () {
+// CHECK-NEXT:   [[OUTER:%.+]]:2 = scf.for
+// CHECK:        [[INNER:%.+]]:2 = scf.for
+// CHECK:          arith.addf
+// CHECK-NOT:      arith.mulf
+// CHECK:          scf.yield
+// CHECK:        }
+// CHECK:        scf.yield
+// CHECK:        arith.addf
+// CHECK:        tensor.extract
+// CHECK:        memref.store
+// CHECK-NEXT:   scope.return
+// CHECK-NEXT: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+// CUBE scope: outer+inner for survive, arith.mulf{CUBE} present, and
+//             the independent CUBE arith.addf consumer is present.
+// CHECK-NEXT: scope.scope : () -> () {
+// CHECK-NEXT:   [[OUTERC:%.+]]:2 = scf.for
+// CHECK:        [[INNERC:%.+]]:2 = scf.for
+// CHECK:          arith.mulf
+// CHECK:          scf.yield
+// CHECK:        }
+// CHECK:        scf.yield
+// CHECK:        arith.addf
+// CHECK:        tensor.extract
+// CHECK:        memref.store
+// CHECK-NEXT:   scope.return
+// CHECK-NEXT: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
+module {
+  func.func @nested_for_cube_acc_not_trapped_in_vector(
+      %lb: index, %ub: index, %step: index,
+      %acc_init: tensor<4xf32>, %vec_init: tensor<4xf32>,
+      %ck: tensor<4xf32>, %vk: tensor<4xf32>, %cc_init: tensor<4xf32>,
+      %outv: memref<1xf32>, %outc: memref<1xf32>) {
+    %idx = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
+    %idxc = arith.constant {ssbuffer.core_type = "CUBE"} 0 : index
+    %1:2 = scf.for %a = %lb to %ub step %step
+        iter_args(%oa = %acc_init, %ov = %vec_init) -> (tensor<4xf32>, tensor<4xf32>) : index {
+      %2:2 = scf.for %b = %lb to %ub step %step
+          iter_args(%ia = %oa, %iv = %ov) -> (tensor<4xf32>, tensor<4xf32>) : index {
+        %3 = arith.mulf %ia, %ck {ssbuffer.core_type = "CUBE"} : tensor<4xf32>
+        %4 = arith.addf %iv, %vk {ssbuffer.core_type = "VECTOR"} : tensor<4xf32>
+        scf.yield {ssbuffer.core_type = "CUBE, VECTOR"} %3, %4 : tensor<4xf32>, tensor<4xf32>
+      } {ssbuffer.core_type = "CUBE, VECTOR"}
+      scf.yield {ssbuffer.core_type = "CUBE, VECTOR"} %2#0, %2#1 : tensor<4xf32>, tensor<4xf32>
+    } {ssbuffer.core_type = "CUBE, VECTOR"}
+    %sv = arith.addf %1#0, %vk {ssbuffer.core_type = "VECTOR"} : tensor<4xf32>
+    %ev = tensor.extract %sv[%idx] {ssbuffer.core_type = "VECTOR"} : tensor<4xf32>
+    memref.store %ev, %outv[%idx] {ssbuffer.core_type = "VECTOR"} : memref<1xf32>
+    %sc = arith.addf %1#0, %cc_init {ssbuffer.core_type = "CUBE"} : tensor<4xf32>
+    %ec = tensor.extract %sc[%idxc] {ssbuffer.core_type = "CUBE"} : tensor<4xf32>
+    memref.store %ec, %outc[%idxc] {ssbuffer.core_type = "CUBE"} : memref<1xf32>
+    func.return
+  }
+}
+
+

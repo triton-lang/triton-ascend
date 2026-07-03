@@ -8,14 +8,13 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   // - When memref.alloc, linalg.fill (inside scf.if), and memref.copy exist
   //   with different block_ids, the pass should unify them to the same block_id
   // - Target block_id is determined by the memref.copy's block_id
-  // - The scf.if operation itself (including its condition dependencies) will
-  //   also be assigned the target block_id to maintain consistency
+  // - Only coreOps (alloc, fill, scf.if, directUsers) are unified;
+  //   condition dependencies are NOT updated
   // - Two scenarios are tested:
-  //   1. VECTOR core: alloc(block_id=7) + fill(block_id=6) + copy(block_id=8) 
-  //      → unified to block_id=8 (including scf.if condition but exit for create
-  //      cycle)
-  //   2. CUBE core: alloc(block_id=3) + fill(block_id=1) + copy(block_id=2) 
-  //      → unified to block_id=2 (including scf.if condition)
+  //   1. VECTOR core: alloc(block_id=7) + fill(block_id=6) + copy(block_id=8)
+  //      → coreOps unified to block_id=8, conditionOps unchanged
+  //   2. CUBE core: alloc(block_id=3) + fill(block_id=1) + copy(block_id=2)
+  //      → coreOps unified to block_id=2, conditionOps unchanged
   // ============================================
   func.func @_sgemm_lora_a_kernel(%arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32) {
     %cst = arith.constant {ssbuffer.block_id = 12 : i32, ssbuffer.core_type = "VECTOR"} 0.000000e+00 : f16
@@ -65,37 +64,37 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       memref.copy %subview_17, %subview_18 {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "VECTOR"} : memref<?x?xf16, strided<[?, ?], offset: ?>> to memref<?x?xf16, strided<[16, 1]>>
       annotation.mark %alloc {MayImplicitTransposeWithLastAxis, ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "VECTOR"} : memref<256x16xf16>
       %82 = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "VECTOR"} : memref<256x16xf16>
-      // CHECK: %{{.*}} = arith.muli %arg{{.*}}, %c256_i32 {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : i32
+      // CHECK: %{{.*}} = arith.muli %arg{{.*}}, %c256_i32 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : i32
       %83 = arith.muli %arg22, %c256_i32 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : i32
-      // CHECK: %{{.*}} = arith.subi %arg{{.*}}, %{{.*}} {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : i32
+      // CHECK: %{{.*}} = arith.subi %arg{{.*}}, %{{.*}} {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : i32
       %84 = arith.subi %arg6, %83 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : i32
       // CHECK: %{{.*}} = memref.alloc() {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : memref<16x256xf16>
       %alloc_19 = memref.alloc() {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : memref<16x256xf16>
-      // CHECK: %{{.*}} = arith.addi %{{.*}}, %c16 {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : index
+      // CHECK: %{{.*}} = arith.addi %{{.*}}, %c16 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
       %85 = arith.addi %41, %c16 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
-      // CHECK: %{{.*}} = arith.index_cast %{{.*}} {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : i32 to index
+      // CHECK: %{{.*}} = arith.index_cast %{{.*}} {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : i32 to index
       %86 = arith.index_cast %arg5 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : i32 to index
-      // CHECK: %{{.*}} = arith.maxsi %{{.*}}, %{{.*}} {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : index
+      // CHECK: %{{.*}} = arith.maxsi %{{.*}}, %{{.*}} {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
       %87 = arith.maxsi %41, %86 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
-      // CHECK: %{{.*}} = arith.minsi %{{.*}}, %{{.*}} {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : index
+      // CHECK: %{{.*}} = arith.minsi %{{.*}}, %{{.*}} {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
       %88 = arith.minsi %85, %87 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
-      // CHECK: %{{.*}} = arith.subi %{{.*}}, %{{.*}} {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : index
+      // CHECK: %{{.*}} = arith.subi %{{.*}}, %{{.*}} {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
       %89 = arith.subi %88, %41 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
-      // CHECK: %{{.*}} = arith.index_cast %{{.*}} {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : i32 to index
+      // CHECK: %{{.*}} = arith.index_cast %{{.*}} {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : i32 to index
       %90 = arith.index_cast %84 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : i32 to index
-      // CHECK: %{{.*}} = arith.maxsi %{{.*}}, %c0 {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : index
+      // CHECK: %{{.*}} = arith.maxsi %{{.*}}, %c0 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
       %91 = arith.maxsi %90, %c0 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
-      // CHECK: %{{.*}} = arith.minsi %{{.*}}, %c256 {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : index
+      // CHECK: %{{.*}} = arith.minsi %{{.*}}, %c256 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
       %92 = arith.minsi %91, %c256 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
-      // CHECK: %{{.*}} = arith.minsi %{{.*}}, %c16 {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : index
+      // CHECK: %{{.*}} = arith.minsi %{{.*}}, %c16 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
       %93 = arith.minsi %89, %c16 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
-      // CHECK: %{{.*}} = arith.minsi %{{.*}}, %c256 {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : index
+      // CHECK: %{{.*}} = arith.minsi %{{.*}}, %c256 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
       %94 = arith.minsi %92, %c256 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
-      // CHECK: %{{.*}} = arith.cmpi slt, %{{.*}}, %c16 {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : index
+      // CHECK: %{{.*}} = arith.cmpi slt, %{{.*}}, %c16 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
       %95 = arith.cmpi slt, %93, %c16 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
-      // CHECK: %{{.*}} = arith.cmpi slt, %{{.*}}, %c256 {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : index
+      // CHECK: %{{.*}} = arith.cmpi slt, %{{.*}}, %c256 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
       %96 = arith.cmpi slt, %94, %c256 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
-      // CHECK: %{{.*}} = arith.ori %{{.*}}, %{{.*}} {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : i1
+      // CHECK: %{{.*}} = arith.ori %{{.*}}, %{{.*}} {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : i1
       %97 = arith.ori %95, %96 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : i1
 
       // CHECK: scf.if %{{.*}} {
@@ -168,14 +167,14 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     %cst = arith.constant 0.000000e+00 : f16
 
     scf.for %arg17 = %c0 to %c32 step %c1 iter_args(%arg19 = %c0) -> (index) {
-      // CHECK: arith.constant {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} 128 : index
+      // CHECK: arith.constant {ssbuffer.block_id = 4 : i32, ssbuffer.core_type = "CUBE"} 128 : index
       %c128 = arith.constant {ssbuffer.block_id = 4 : i32, ssbuffer.core_type = "CUBE"} 128 : index
-      // CHECK: arith.cmpi {{.*}} {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : index
+      // CHECK: arith.cmpi {{.*}} {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
       %cond = arith.cmpi slt, %arg19, %c32 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
 
       // CHECK: memref.alloc() {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16>
       %alloc = memref.alloc() {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16>
-      // CHECK: arith.addi {{.*}} {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : index
+      // CHECK: arith.addi {{.*}} {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
       %140 = arith.addi %arg19, %c128 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
 
       // CHECK: scf.if %{{.*}} {

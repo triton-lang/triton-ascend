@@ -1,5 +1,5 @@
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">}  {
-func.func @sparse_flash_attention_prefill_kernel(%arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg7: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 2 : i32}, %arg8: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 2 : i32}) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd"} {
+func.func @@test_memref_dependency(%arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg7: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 2 : i32}, %arg8: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 2 : i32}) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd"} {
   %c8_i32 = arith.constant {Undefined, ssbuffer.block_id = 12 : i32, ssbuffer.core_type = "VECTOR"} 8 : i32
   %c0_i32 = arith.constant {Undefined, ssbuffer.block_id = 12 : i32, ssbuffer.core_type = "VECTOR"} 0 : i32
   %c1_i32 = arith.constant {Undefined, ssbuffer.block_id = 12 : i32, ssbuffer.core_type = "VECTOR"} 1 : i32
@@ -43,15 +43,24 @@ func.func @sparse_flash_attention_prefill_kernel(%arg3: memref<?xf16> {tt.divisi
 }
 }
 
-// CHECK-LABEL: func.func @sparse_flash_attention_prefill_kernel
+// CHECK-LABEL: func.func @test_memref_dependency
 // CHECK: scf.for
 // CHECK: scf.for
+// CHECK: bufferization.materialize_in_destination %1 in writable %reinterpret_cast_2 {ssbuffer.block_id = 7 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.memCrossDeps = [0 : i32, 1 : i32]} : (tensor<576xf16>, memref<576xf16, strided<[1], offset: ?>>) -> ()
 // CHECK: } {Undefined, ssbuffer.block_id = 14 : i32}
-// CHECK: hivm.hir.sync_block_set {ssbuffer.block_id = 14 : i32, ssbuffer.core_type = "VECTOR"}[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE2>] flag = [[FLAG_1:[0-9]+]]
-// CHECK: hivm.hir.sync_block_wait {ssbuffer.block_id = 16 : i32, ssbuffer.core_type = "CUBE"}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE2>] flag = [[FLAG_1]]
+
+// CHECK: hivm.hir.sync_block_set {ssbuffer.analyze_flag_id, ssbuffer.block_id = 14 : i32, ssbuffer.core_type = "VECTOR"}[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE2>] flag = [[FLAG_1:[0-9]+]]
+// CHECK: hivm.hir.sync_block_wait {ssbuffer.analyze_flag_id, ssbuffer.block_id = 16 : i32, ssbuffer.core_type = "CUBE"}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE2>] flag = [[FLAG_1]]
+
 // CHECK: scf.for
+// CHECK: memref.copy %reinterpret_cast_0, %alloc_1 {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE", ssbuffer.memCrossDeps = [0 : i32, 0 : i32]} : memref<128x576xf16, strided<[?, 1], offset: ?>> to memref<128x576xf16>
+// CHECK: bufferization.materialize_in_destination %2 in writable %reinterpret_cast_4 {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "CUBE", ssbuffer.memCrossDeps = [1 : i32, 1 : i32]} : (tensor<576xf16>, memref<576xf16, strided<[1], offset: ?>>) -> ()
 // CHECK: } {Undefined, ssbuffer.block_id = 16 : i32}
-// CHECK: hivm.hir.sync_block_set {ssbuffer.block_id = 16 : i32, ssbuffer.core_type = "CUBE"}[<CUBE>, <PIPE_FIX>, <PIPE_MTE2>] flag = [[FLAG_2:[0-9]+]]
-// CHECK: hivm.hir.sync_block_wait {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR"}[<VECTOR>, <PIPE_FIX>, <PIPE_MTE2>] flag = [[FLAG_2]]
-// CHECK: memref.reinterpret_cast 
+
+// CHECK: hivm.hir.sync_block_set {ssbuffer.analyze_flag_id, ssbuffer.block_id = 16 : i32, ssbuffer.core_type = "CUBE"}[<CUBE>, <PIPE_FIX>, <PIPE_MTE2>] flag = [[FLAG_2:[0-9]+]]
+// CHECK: hivm.hir.sync_block_wait {ssbuffer.analyze_flag_id, ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR"}[<VECTOR>, <PIPE_FIX>, <PIPE_MTE2>] flag = [[FLAG_2]]
+
+// CHECK: memref.copy %reinterpret_cast, %alloc {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.memCrossDeps = [1 : i32, 0 : i32]} : memref<128x576xf16, strided<[?, 1], offset: ?>> to memref<128x576xf16>
+// CHECK: } {Undefined, ssbuffer.block_id = 17 : i32}
+// CHECK: return
 

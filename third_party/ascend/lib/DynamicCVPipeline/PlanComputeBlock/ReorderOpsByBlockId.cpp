@@ -225,10 +225,8 @@ struct GroupAdjacencyGraph {
     SmallVector<int> groupIds;
     SmallVector<SmallVector<unsigned>> succs;
     SmallVector<unsigned> inDeg;
-    DenseMap<int, SmallVector<Operation *>> groupOps;
     GroupAdjacencyGraph(const BlockOpGraph &g, const DenseMap<Operation *, int> &opBlockId);
     llvm::FailureOr<SmallVector<int>> computeTopologicalOrder();
-    unsigned selectGroup(SmallVector<unsigned> &ready);
 };
 
 } // namespace
@@ -245,7 +243,6 @@ GroupAdjacencyGraph::GroupAdjacencyGraph(const BlockOpGraph &g, const DenseMap<O
     DenseSet<int> seenIds;
     for (Operation *op : g.ops) {
         int id = opBlockId.at(op);
-        groupOps[id].push_back(op);
         if (seenIds.insert(id).second) {
             groupIds.push_back(id);
         }
@@ -288,36 +285,6 @@ GroupAdjacencyGraph::GroupAdjacencyGraph(const BlockOpGraph &g, const DenseMap<O
 }
 
 /**
- * In order to delay ops that update scf.yield arguments as late as possible, 
- * prioritizing groups whose ops do not have yield users.
- */
-unsigned GroupAdjacencyGraph::selectGroup(SmallVector<unsigned> &ready)
-{
-    for (unsigned i = 0; i < ready.size(); ++i) {
-        int groupId = groupIds[ready[i]];
-        auto &ops = groupOps[groupId];
-        bool allUsersNotYield = true;
-        for (Operation *op : ops) {
-            for (Operation *user : op->getUsers()) {
-                if (isa<scf::YieldOp>(user)) {
-                    allUsersNotYield = false;
-                    break;
-                }
-            }
-            if (!allUsersNotYield) {
-                break;
-            }
-        }
-        if (allUsersNotYield) {
-            unsigned selected = ready[i];
-            ready.erase(ready.begin() + i);
-            return selected;
-        }
-    }
-    return ready.pop_back_val();
-}
-
-/**
  * Step 2: Perform a topological sort (Kahn's Algorithm) on the group graph.
  * Returns the group IDs in an order that satisfies all dependencies.
  */
@@ -334,7 +301,7 @@ llvm::FailureOr<SmallVector<int>> GroupAdjacencyGraph::computeTopologicalOrder()
     }
 
     while (!ready.empty()) {
-        auto cur = selectGroup(ready);
+        auto cur = ready.pop_back_val();
 
         result.push_back(groupIds[cur]);
 

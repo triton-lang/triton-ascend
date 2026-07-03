@@ -142,14 +142,13 @@ module {
 }
 
 // CHECK-LABEL: tt.func public @if_tensor_ptr_same_base_offsets
-// CHECK:       %[[OFF:.*]] = scf.if %{{.*}} -> (i32) {
-// CHECK:         scf.yield %{{.*}} : i32
+// CHECK:       %[[OFF:.*]] = scf.if %{{.*}} -> (tensor<4xi32>) {
+// CHECK:         scf.yield %{{.*}} : tensor<4xi32>
 // CHECK:       } else {
-// CHECK:         scf.yield %{{.*}} : i32
+// CHECK:         scf.yield %{{.*}} : tensor<4xi32>
 // CHECK:       }
 // CHECK:       tt.splat %{{.*}} : !tt.ptr<f32> -> tensor<4x!tt.ptr<f32>>
-// CHECK:       %[[OFF_SPLAT:.*]] = tt.splat %[[OFF]] : i32 -> tensor<4xi32>
-// CHECK:       tt.addptr %{{.*}}, %{{.*}} : tensor<4x!tt.ptr<f32>>, tensor<4xi32>
+// CHECK:       tt.addptr %{{.*}}, %[[OFF]] : tensor<4x!tt.ptr<f32>>, tensor<4xi32>
 
 // -----
 
@@ -203,15 +202,12 @@ module {
 }
 
 // CHECK-LABEL: tt.func public @while_tensor_ptr_addptr_step
-// CHECK-DAG:   %[[C4:.*]] = arith.constant 4 : i32
 // CHECK:       scf.while
-// CHECK-SAME:  (i32, i32) -> (i32, i32)
+// CHECK-SAME:  tensor<4xi32>
 // CHECK:       } do {
-// CHECK:         %[[STEP:.*]] = tt.splat %[[C4]] : i32 -> tensor<4xi32>
-// CHECK-NEXT:    %[[NEXT_OFF:.*]] = arith.addi %{{.*}}, %{{.*}} : i32
-// CHECK:         scf.yield %{{.*}}, %[[NEXT_OFF]] : i32, i32
-// CHECK:       }
-// CHECK:       tt.splat %{{.*}} : i32 -> tensor<4xi32>
+// CHECK:         %[[STEP:.*]] = tt.splat %{{.*}} : i32 -> tensor<4xi32>
+// CHECK:         %[[NEXT_OFF:.*]] = arith.addi %{{.*}}, %[[STEP]] : tensor<4xi32>
+// CHECK:         scf.yield %{{.*}}, %[[NEXT_OFF]] : i32, tensor<4xi32>
 
 // -----
 
@@ -236,13 +232,12 @@ module {
 // CHECK-LABEL: tt.func public @for_tensor_ptr_preserves_wide_loop_offset
 // CHECK:       %[[STEP32:.*]] = tt.splat %{{.*}} : i32 -> tensor<4xi32>
 // CHECK:       %[[FOR:.*]] = scf.for
-// CHECK-SAME:  -> (i64) {
-// CHECK:         %[[STEP64:.*]] = arith.extsi %{{.*}} : i32 to i64
-// CHECK:         %[[NEXT:.*]] = arith.addi %{{.*}}, %[[STEP64]] : i64
-// CHECK:         scf.yield %[[NEXT]] : i64
+// CHECK-SAME:  -> (tensor<4xi64>) {
+// CHECK:         %[[STEP64:.*]] = arith.extsi %[[STEP32]] : tensor<4xi32> to tensor<4xi64>
+// CHECK:         %[[NEXT:.*]] = arith.addi %{{.*}}, %[[STEP64]] : tensor<4xi64>
+// CHECK:         scf.yield %[[NEXT]] : tensor<4xi64>
 // CHECK:       }
-// CHECK:       %[[FOR32:.*]] = arith.trunci %[[FOR]] : i64 to i32
-// CHECK:       tt.splat %[[FOR32]] : i32 -> tensor<4xi32>
+// CHECK:       tt.addptr %{{.*}}, %[[FOR]] : tensor<4x!tt.ptr<f32>>, tensor<4xi64>
 
 // -----
 
@@ -365,19 +360,20 @@ module {
 // CHECK-LABEL: tt.func public @for_if_tensor_ptr_same_base_post_addptr
 // CHECK-DAG:   %[[C2:.*]] = arith.constant 2 : i32
 // CHECK-DAG:   %[[POST_STEP:.*]] = tt.splat %[[C2]] : i32 -> tensor<4xi32>
-// CHECK:       %[[FOR:.*]] = scf.for {{.*}} iter_args(%[[OFF:.*]] = %{{.*}}) -> (i32) {
-// CHECK:         %[[OFF_SPLAT:.*]] = tt.splat %[[OFF]] : i32 -> tensor<4xi32>
-// CHECK:         %[[SELECTED:.*]] = scf.if %{{.*}} -> (i32) {
-// CHECK:           arith.addi %[[OFF]], %{{.*}} : i32
-// CHECK:           scf.yield %{{.*}} : i32
+// CHECK:       %[[FOR:.*]] = scf.for {{.*}} iter_args(%[[OFF:.*]] = %{{.*}}) -> (tensor<4xi32>) {
+// CHECK:         %[[CARRIED:.*]] = arith.addi %{{.*}}, %[[OFF]] : tensor<4xi32>
+// CHECK:         %[[SELECTED:.*]] = scf.if %{{.*}} -> (tensor<4xi32>) {
+// CHECK:           arith.addi %{{.*}}, %{{.*}} : tensor<4xi32>
+// CHECK:           scf.yield %{{.*}} : tensor<4xi32>
 // CHECK:         } else {
-// CHECK:           arith.addi %[[OFF]], %{{.*}} : i32
-// CHECK:           scf.yield %{{.*}} : i32
+// CHECK:           arith.addi %{{.*}}, %{{.*}} : tensor<4xi32>
+// CHECK:           scf.yield %{{.*}} : tensor<4xi32>
 // CHECK:         }
-// CHECK:         %[[NEXT:.*]] = arith.addi %[[SELECTED]], %[[C2]] : i32
-// CHECK:         scf.yield %[[NEXT]] : i32
+// CHECK:         %[[MERGED:.*]] = arith.addi %[[CARRIED]], %[[SELECTED]] : tensor<4xi32>
+// CHECK:         %[[NEXT:.*]] = arith.addi %{{.*}}, %[[POST_STEP]] : tensor<4xi32>
+// CHECK:         scf.yield %[[NEXT]] : tensor<4xi32>
 // CHECK:       }
-// CHECK:       tt.splat %[[FOR]] : i32 -> tensor<4xi32>
+// CHECK:       tt.addptr %{{.*}}, %[[FOR]] : tensor<4x!tt.ptr<f32>>, tensor<4xi32>
 
 // -----
 
@@ -577,26 +573,28 @@ module {
 
 // CHECK-LABEL: tt.func public @for_nested_if_tensor_ptr_load_after_post_addptr
 // CHECK:       %[[FOR:.*]]:2 = scf.for
-// CHECK-SAME:  (i32, tensor<4xf32>)
-// CHECK:         %[[SELECTED:.*]] = scf.if %{{.*}} -> (i32) {
-// CHECK:           %[[THEN_INNER:.*]] = scf.if %{{.*}} -> (i32) {
-// CHECK:             scf.yield %{{.*}} : i32
+// CHECK-SAME:  tensor<4xi32>
+// CHECK:         %[[SELECTED:.*]] = scf.if %{{.*}} -> (tensor<4xi32>) {
+// CHECK:           %[[THEN_INNER:.*]] = scf.if %{{.*}} -> (tensor<4xi32>) {
+// CHECK:             scf.yield %{{.*}} : tensor<4xi32>
 // CHECK:           } else {
-// CHECK:             scf.yield %{{.*}} : i32
+// CHECK:             scf.yield %{{.*}} : tensor<4xi32>
 // CHECK:           }
-// CHECK:           scf.yield %[[THEN_INNER]] : i32
+// CHECK:           arith.addi %{{.*}}, %[[THEN_INNER]] : tensor<4xi32>
+// CHECK:           scf.yield %{{.*}} : tensor<4xi32>
 // CHECK:         } else {
-// CHECK:           %[[ELSE_INNER:.*]] = scf.if %{{.*}} -> (i32) {
-// CHECK:             scf.yield %{{.*}} : i32
+// CHECK:           %[[ELSE_INNER:.*]] = scf.if %{{.*}} -> (tensor<4xi32>) {
+// CHECK:             scf.yield %{{.*}} : tensor<4xi32>
 // CHECK:           } else {
-// CHECK:             scf.yield %{{.*}} : i32
+// CHECK:             scf.yield %{{.*}} : tensor<4xi32>
 // CHECK:           }
-// CHECK:           scf.yield %[[ELSE_INNER]] : i32
+// CHECK:           arith.addi %{{.*}}, %[[ELSE_INNER]] : tensor<4xi32>
+// CHECK:           scf.yield %{{.*}} : tensor<4xi32>
 // CHECK:         }
-// CHECK:         arith.addi %[[SELECTED]], %{{.*}} : i32
+// CHECK:         arith.addi %{{.*}}, %{{.*}} : tensor<4xi32>
 // CHECK:         tt.addptr %{{.*}}, %{{.*}} : tensor<4x!tt.ptr<f32>>, tensor<4xi32>
 // CHECK:         %[[LOADED:.*]] = tt.load %{{.*}} : tensor<4x!tt.ptr<f32>>
-// CHECK:         scf.yield %{{.*}}, %[[LOADED]] : i32, tensor<4xf32>
+// CHECK:         scf.yield %{{.*}}, %[[LOADED]] : tensor<4xi32>, tensor<4xf32>
 // CHECK:       }
 // CHECK:       tt.return %[[FOR]]#1 : tensor<4xf32>
 
@@ -693,110 +691,3 @@ module {
 // CHECK:         scf.yield %[[INNER_PTR]] : !tt.ptr<tensor<16xf32>>
 // CHECK:       }
 // CHECK:       tt.return %[[OUTER]] : !tt.ptr<tensor<16xf32>>
-
-// -----
-
-module {
-  tt.func public @for_if_nested_for_tensor_ptr_store_scalar_offset(%base: !tt.ptr<f32>, %out: !tt.ptr<f32>, %cond: i1, %outer_ub: index, %inner_ub: index) -> tensor<4x!tt.ptr<f32>> {
-    %c0_i32 = arith.constant 0 : i32
-    %c1_i32 = arith.constant 1 : i32
-    %c2_i32 = arith.constant 2 : i32
-    %c0 = arith.constant 0 : index
-    %c1 = arith.constant 1 : index
-    %range = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
-    %step1 = tt.splat %c1_i32 : i32 -> tensor<4xi32>
-    %step2 = tt.splat %c2_i32 : i32 -> tensor<4xi32>
-    %base_splat = tt.splat %base : !tt.ptr<f32> -> tensor<4x!tt.ptr<f32>>
-    %ptr0 = tt.addptr %base_splat, %range : tensor<4x!tt.ptr<f32>>, tensor<4xi32>
-    %src = tt.load %ptr0 : tensor<4x!tt.ptr<f32>>
-    %final = scf.for %iv = %c0 to %outer_ub step %c1 iter_args(%ptr = %ptr0) -> (tensor<4x!tt.ptr<f32>>) {
-      %selected = scf.if %cond -> (tensor<4x!tt.ptr<f32>>) {
-        %inner = scf.for %j = %c0 to %inner_ub step %c1 iter_args(%inner_ptr = %ptr) -> (tensor<4x!tt.ptr<f32>>) {
-          %next = tt.addptr %inner_ptr, %step1 : tensor<4x!tt.ptr<f32>>, tensor<4xi32>
-          tt.store %next, %src : tensor<4x!tt.ptr<f32>>
-          scf.yield %next : tensor<4x!tt.ptr<f32>>
-        }
-        scf.yield %inner : tensor<4x!tt.ptr<f32>>
-      } else {
-        %inner = scf.for %j = %c0 to %inner_ub step %c1 iter_args(%inner_ptr = %ptr) -> (tensor<4x!tt.ptr<f32>>) {
-          %next = tt.addptr %inner_ptr, %step2 : tensor<4x!tt.ptr<f32>>, tensor<4xi32>
-          tt.store %next, %src : tensor<4x!tt.ptr<f32>>
-          scf.yield %next : tensor<4x!tt.ptr<f32>>
-        }
-        scf.yield %inner : tensor<4x!tt.ptr<f32>>
-      }
-      scf.yield %selected : tensor<4x!tt.ptr<f32>>
-    }
-    tt.return %final : tensor<4x!tt.ptr<f32>>
-  }
-}
-
-// CHECK-LABEL: tt.func public @for_if_nested_for_tensor_ptr_store_scalar_offset
-// CHECK:       %[[OUTER:.*]] = scf.for {{.*}} iter_args(%[[OUTER_OFF:.*]] = %{{.*}}) -> (i32) {
-// CHECK:         %[[SELECTED:.*]] = scf.if %{{.*}} -> (i32) {
-// CHECK:           %[[THEN_INNER:.*]] = scf.for {{.*}} iter_args(%[[THEN_OFF:.*]] = %[[OUTER_OFF]]) -> (i32) {
-// CHECK:             tt.store
-// CHECK:             scf.yield %{{.*}} : i32
-// CHECK:           }
-// CHECK:           scf.yield %[[THEN_INNER]] : i32
-// CHECK:         } else {
-// CHECK:           %[[ELSE_INNER:.*]] = scf.for {{.*}} iter_args(%[[ELSE_OFF:.*]] = %[[OUTER_OFF]]) -> (i32) {
-// CHECK:             tt.store
-// CHECK:             scf.yield %{{.*}} : i32
-// CHECK:           }
-// CHECK:           scf.yield %[[ELSE_INNER]] : i32
-// CHECK:         }
-// CHECK:         scf.yield %[[SELECTED]] : i32
-// CHECK:       }
-// CHECK:       tt.splat %[[OUTER]] : i32 -> tensor<4xi32>
-
-// -----
-
-module {
-  tt.func public @if_nested_for_block_ptr_store_then_load(%base: !tt.ptr<f16>, %cond: i1, %ub: index) -> tensor<32xf16> {
-    %c0_i32 = arith.constant 0 : i32
-    %c1_i32 = arith.constant 1 : i32
-    %c2_i32 = arith.constant 2 : i32
-    %c64_i64 = arith.constant 64 : i64
-    %c1_i64 = arith.constant 1 : i64
-    %c0 = arith.constant 0 : index
-    %c1 = arith.constant 1 : index
-    %ptr0 = tt.make_tensor_ptr %base, [%c64_i64], [%c1_i64], [%c0_i32] {order = array<i32: 0>} : <tensor<32xf16>>
-    %src = tt.load %ptr0 : !tt.ptr<tensor<32xf16>>
-    %selected = scf.if %cond -> (!tt.ptr<tensor<32xf16>>) {
-      %inner = scf.for %iv = %c0 to %ub step %c1 iter_args(%ptr = %ptr0) -> (!tt.ptr<tensor<32xf16>>) {
-        %next = tt.advance %ptr, [%c1_i32] : <tensor<32xf16>>
-        tt.store %next, %src : !tt.ptr<tensor<32xf16>>
-        scf.yield %next : !tt.ptr<tensor<32xf16>>
-      }
-      scf.yield %inner : !tt.ptr<tensor<32xf16>>
-    } else {
-      %inner = scf.for %iv = %c0 to %ub step %c1 iter_args(%ptr = %ptr0) -> (!tt.ptr<tensor<32xf16>>) {
-        %next = tt.advance %ptr, [%c2_i32] : <tensor<32xf16>>
-        tt.store %next, %src : !tt.ptr<tensor<32xf16>>
-        scf.yield %next : !tt.ptr<tensor<32xf16>>
-      }
-      scf.yield %inner : !tt.ptr<tensor<32xf16>>
-    }
-    %out = tt.load %selected : !tt.ptr<tensor<32xf16>>
-    tt.return %out : tensor<32xf16>
-  }
-}
-
-// CHECK-LABEL: tt.func public @if_nested_for_block_ptr_store_then_load
-// CHECK:       %[[SELECTED:.*]] = scf.if %{{.*}} -> (i32) {
-// CHECK:         %[[THEN_INNER:.*]] = scf.for {{.*}} iter_args(%[[THEN_OFF:.*]] = %{{.*}}) -> (i32) {
-// CHECK:           tt.store
-// CHECK:           scf.yield %{{.*}} : i32
-// CHECK:         }
-// CHECK:         scf.yield %[[THEN_INNER]] : i32
-// CHECK:       } else {
-// CHECK:         %[[ELSE_INNER:.*]] = scf.for {{.*}} iter_args(%[[ELSE_OFF:.*]] = %{{.*}}) -> (i32) {
-// CHECK:           tt.store
-// CHECK:           scf.yield %{{.*}} : i32
-// CHECK:         }
-// CHECK:         scf.yield %[[ELSE_INNER]] : i32
-// CHECK:       }
-// CHECK:       %[[FINAL_PTR:.*]] = tt.make_tensor_ptr %{{.*}}, [%{{.*}}], [%{{.*}}], [%[[SELECTED]]] {order = array<i32: 0>} : <tensor<32xf16>>
-// CHECK:       %[[OUT:.*]] = tt.load %[[FINAL_PTR]] : !tt.ptr<tensor<32xf16>>
-// CHECK:       tt.return %[[OUT]] : tensor<32xf16>

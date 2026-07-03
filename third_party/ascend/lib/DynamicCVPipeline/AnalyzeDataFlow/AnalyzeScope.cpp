@@ -134,6 +134,65 @@ static bool checkVecScopeMainLoop(ModuleOp module) {
   return hasMainLoopFor && allForSatisfy;
 }
 
+// For every main_loop id, gather all forOps sharing that id and count the
+// hivm.hir.copy and hivm.hir.fixpipe ops within them. Only when ALL main_loop
+// ids have either count equal to zero (every id has only copy or only
+// fixpipe, none has both), the dynamic CV pipeline cannot be applied and we
+// fall back to the original workflow.
+//   - hivm::CopyOp    typically appears in VECTOR scope main_loops
+//   - hivm::FixpipeOp typically appears in CUBE scope main_loops
+// Nested regions inside the main_loop forOp are also walked, and scf.yield
+// terminators are skipped.
+static bool isMainLoopOnlyCopyOrFixpipe(ModuleOp module)
+{
+  // main_loop id -> (countCopy, countFixpipe)
+  llvm::DenseMap<int, std::pair<int, int>> idToCounts;
+
+  module.walk([&](scf::ForOp forOp) -> WalkResult {
+    auto mainLoopAttr = forOp->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
+    if (!mainLoopAttr) {
+      return WalkResult::advance();
+    }
+
+    int id = mainLoopAttr.getInt();
+    auto &counts = idToCounts[id];
+
+    forOp.walk([&](mlir::Operation *op) -> WalkResult {
+      // Skip the forOp itself (the walk visits it first)
+      if (op == forOp) {
+        return WalkResult::advance();
+      }
+      // Skip yield terminators (they are not real ops)
+      if (isa<scf::YieldOp>(op)) {
+        return WalkResult::advance();
+      }
+      if (isa<hivm::CopyOp>(op)) {
+        ++counts.first;
+      } else if (isa<hivm::FixpipeOp>(op)) {
+        ++counts.second;
+      }
+      return WalkResult::advance();
+    });
+
+    return WalkResult::advance();
+  });
+
+  // Only trigger fallback when EVERY main_loop id has only copy or only
+  // fixpipe (one count is zero). If at least one id has both copy and
+  // fixpipe ops, the dynamic CV pipeline still be applicable.
+  if (idToCounts.empty()) {
+    return false;
+  }
+
+  for (const auto &entry : idToCounts) {
+    if (entry.second.first != 0 && entry.second.second != 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 static LogicalResult verifyMainLoop(ModuleOp module)
 {
   // Only skip if ALL forOps lack main_loop attr
@@ -155,6 +214,12 @@ static LogicalResult verifyMainLoop(ModuleOp module)
     CVPipeline::setFallbackAttr(module);
     return failure();
   };
+
+  if (isMainLoopOnlyCopyOrFixpipe(module)) {
+    LDBG("[INFO]: All main_loop only contains hivm.hir.copy or hivm.hir.fixpipe ops.");
+    CVPipeline::setFallbackAttr(module);
+    return failure();
+  }
 
   return success();
 }

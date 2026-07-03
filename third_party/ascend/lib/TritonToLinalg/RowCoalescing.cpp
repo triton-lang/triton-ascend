@@ -74,6 +74,14 @@ static bool readsAxisNumPrograms(ModuleOp moduleOp, int32_t axis) {
   return reads;
 }
 
+static bool isScalarIntegerLike(Value value) {
+  Type type = value.getType();
+  if (isa<IndexType>(type))
+    return true;
+  auto intTy = dyn_cast<IntegerType>(type);
+  return intTy && intTy.getWidth() > 1;
+}
+
 // Match the canonical rowwise guard:
 //
 //   %pid = tt.get_program_id x
@@ -118,6 +126,8 @@ static std::optional<RowSeed> matchRowSeed(ModuleOp moduleOp) {
     if (!trueBlock->mightHaveTerminator())
       continue;
     if (!isa<triton::ReturnOp>(trueBlock->getTerminator()))
+      continue;
+    if (!isScalarIntegerLike(cmp.getRhs()))
       continue;
 
     return RowSeed{pid, axis, cmp.getRhs(), cmp, falseBlock};
@@ -302,12 +312,28 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
         to->setAttr(attr.getName(), attr.getValue());
   };
 
+  auto liftConstant = [&](arith::ConstantOp cst, Location opLoc,
+                          DenseMap<Value, Value> *localMap) -> bool {
+    Operation *nu = rw.clone(*cst.getOperation());
+    Value result = nu->getResult(0);
+    if (isa<RankedTensorType>(cst.getType())) {
+      Value expanded = rw.create<triton::ExpandDimsOp>(opLoc, result, 0);
+      result = rw.create<triton::BroadcastOp>(opLoc, liftTy(cst.getType()),
+                                              expanded);
+    }
+    (*localMap)[cst.getResult()] = result;
+    return true;
+  };
+
   std::function<bool(Operation *, DenseMap<Value, Value> *, bool)> rebuildOp;
   rebuildOp = [&](Operation *op, DenseMap<Value, Value> *localMap,
                   bool resetInsertionPoint) -> bool {
     if (resetInsertionPoint)
       rw.setInsertionPoint(op);
     Location opLoc = op->getLoc();
+
+    if (auto cst = dyn_cast<arith::ConstantOp>(op))
+      return liftConstant(cst, opLoc, localMap);
 
     if (auto range = dyn_cast<triton::MakeRangeOp>(op)) {
       Value oneD = rw.create<triton::MakeRangeOp>(
@@ -431,6 +457,14 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
 
     if (auto forOp = dyn_cast<scf::ForOp>(op)) {
       OpBuilder::InsertionGuard guard(rw);
+      Value lowerBound = lift(forOp.getLowerBound(), localMap);
+      Value upperBound = lift(forOp.getUpperBound(), localMap);
+      Value step = lift(forOp.getStep(), localMap);
+      if (!lowerBound || !upperBound || !step ||
+          isa<RankedTensorType>(lowerBound.getType()) ||
+          isa<RankedTensorType>(upperBound.getType()) ||
+          isa<RankedTensorType>(step.getType()))
+        return false;
       SmallVector<Value> initArgs;
       for (Value init : forOp.getInitArgs()) {
         Value lifted = liftOperand(init, localMap);
@@ -438,9 +472,8 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
           return false;
         initArgs.push_back(lifted);
       }
-      auto newFor = rw.create<scf::ForOp>(opLoc, forOp.getLowerBound(),
-                                          forOp.getUpperBound(), forOp.getStep(),
-                                          initArgs);
+      auto newFor =
+          rw.create<scf::ForOp>(opLoc, lowerBound, upperBound, step, initArgs);
       copyAttrs(forOp, newFor);
 
       DenseMap<Value, Value> loopMap = *localMap;
@@ -488,15 +521,30 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
     }
 
     SmallVector<Value> operands;
+    bool hasTensorOperand = false;
     for (Value operand : op->getOperands()) {
-      Value lifted = liftOperand(operand, localMap);
+      Value lifted = lift(operand, localMap);
       if (!lifted)
         return false;
+      hasTensorOperand |= isa<RankedTensorType>(lifted.getType());
       operands.push_back(lifted);
     }
+    if (hasTensorOperand) {
+      for (size_t idx = 0; idx < operands.size(); ++idx) {
+        if (isa<RankedTensorType>(operands[idx].getType()))
+          continue;
+        Value operand = op->getOperand(idx);
+        operands[idx] = rw.create<triton::SplatOp>(
+            operands[idx].getLoc(), liftTy(operand.getType()), operands[idx]);
+      }
+    }
     SmallVector<Type> resultTypes;
-    for (Type resultTy : op->getResultTypes())
-      resultTypes.push_back(liftTy(resultTy));
+    for (Type resultTy : op->getResultTypes()) {
+      if (hasTensorOperand)
+        resultTypes.push_back(liftTy(resultTy));
+      else
+        resultTypes.push_back(resultTy);
+    }
     Operation *nu =
         rw.create(opLoc, op->getName().getIdentifier(), operands, resultTypes,
                   op->getAttrs());

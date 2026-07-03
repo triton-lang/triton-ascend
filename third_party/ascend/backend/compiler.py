@@ -186,7 +186,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             auto_blockify_size
         )
 
-        ascend.passes.ttir.add_row_coalescing(pm)
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
         ascend.passes.ttir.add_triton_to_structure(
             pm,

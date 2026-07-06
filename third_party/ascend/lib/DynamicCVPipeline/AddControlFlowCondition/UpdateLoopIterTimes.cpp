@@ -83,7 +83,7 @@ static scf::ForOp getOtherScopeMainloop(ModuleOp module, bool currentIsCube,
     // Determine this scope's type
     bool scopeIsCube = false;
     bool scopeIsVector = false;
-    if (failed(triton::getScopeType(scopeOp, scopeIsCube, scopeIsVector))) {
+    if (failed(getScopeType(scopeOp, scopeIsCube, scopeIsVector))) {
       ret = -1;
       LDBG("failed to get ScopeOp core type!");
       return mlir::WalkResult::interrupt();
@@ -479,8 +479,7 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateCrossDepsFactor(
     }
     currentScope = currentScope->getParentOp();
   }
-  if (failed(
-          triton::getScopeType(currentScope, currentIsCube, currentIsVector))) {
+  if (failed(getScopeType(currentScope, currentIsCube, currentIsVector))) {
     LDBG("Current forOp is not in a valid cube or vector scope!");
     return {-1, -1};
   }
@@ -895,7 +894,7 @@ int UpdateLoopIterTimesPass::GetMainLoopIdToLoopOpMap(
     // Determine if it's CUBE or VECTOR
     bool isCube = false;
     bool isVector = false;
-    if (failed(triton::getScopeType(scopeOp, isCube, isVector))) {
+    if (failed(getScopeType(scopeOp, isCube, isVector))) {
       ret = -1;
       LDBG("mlir do not processed by split mix kernel!");
       return mlir::WalkResult::interrupt();

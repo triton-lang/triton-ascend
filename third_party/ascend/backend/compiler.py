@@ -151,7 +151,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
                 passes.common.add_cse(pm)
                 passes.common.add_canonicalizer(pm)
             ascend.passes.ttir.add_dag_ssbuffer(pm)
-
            if enable_optimizations:
                 passes.common.add_cse(pm)
                 passes.common.add_canonicalizer(pm)
@@ -161,7 +160,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
                                                                enable_sync_block_lock)
         ascend.passes.ttir.add_triton_to_annotation(pm)
         ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, compile_mode)
-
         ascend.passes.ttir.add_triton_to_hivm(pm)
         ascend.passes.ttir.add_triton_to_hfusion(pm)
         ascend.passes.ttir.add_triton_to_llvm(pm)

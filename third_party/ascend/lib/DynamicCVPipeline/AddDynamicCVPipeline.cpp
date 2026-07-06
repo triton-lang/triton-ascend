@@ -94,7 +94,7 @@ void AddDynamicCVPipelinePass::runOnOperation()
     pm.addPass(createComputeBlockOptPass());
     pm.addPass(createSplitDataflowPass());
     pm.addPass(createAnalyzeDataFlowPass());
-    pm.addPass(createSplitIfByBlockIdPass());
+    // pm.addPass(createSplitIfByBlockIdPass());
     pm.addPass(createSeparateMemoryFromComputePass());
     pm.addPass(createAllocMultiCachePass());
     pm.addPass(createAddControlFlowConditionPass());

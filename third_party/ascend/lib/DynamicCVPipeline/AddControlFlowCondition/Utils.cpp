@@ -23,15 +23,25 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "llvm/Support/Debug.h"
 #include <optional>
 
-using namespace mlir;
+static constexpr const char *DEBUG_TYPE = "AddControlFlowConditionUtils";
+#define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
+#define LDBG(...)                                                              \
+  LLVM_DEBUG({                                                                 \
+    DBGS();                                                                    \
+    llvm::dbgs() << __VA_ARGS__;                                               \
+    llvm::dbgs() << "\n";                                                      \
+  })
+
+namespace mlir {
 using namespace llvm;
+using namespace CVPipeline;
 
 // Collect all nested ops within an operation's regions
-LogicalResult
-triton::collectAllNestedOps(Operation *op,
-                            llvm::DenseSet<Operation *> &regionOps) {
+LogicalResult collectAllNestedOps(Operation *op,
+                                  llvm::DenseSet<Operation *> &regionOps) {
   if (!op) {
     return failure();
   }
@@ -44,7 +54,7 @@ triton::collectAllNestedOps(Operation *op,
   for (Region &region : op->getRegions()) {
     for (Block &block : region) {
       for (Operation &nestedOp : block) {
-        if (failed(triton::collectAllNestedOps(&nestedOp, regionOps))) {
+        if (failed(collectAllNestedOps(&nestedOp, regionOps))) {
           return failure();
         }
       }
@@ -54,10 +64,17 @@ triton::collectAllNestedOps(Operation *op,
   return success();
 }
 
-// Group operations by their block_id attribute
-LogicalResult triton::collectOpsByBlockId(
-    scf::ForOp forOp, llvm::DenseMap<int, SmallVector<Operation *>> &blockOps) {
-  for (Operation &op : forOp.getBody()->without_terminator()) {
+// Group operations by their block_id attribute. `op` must be scf.for or
+// scf.while (see MainLoop::getBody).
+LogicalResult
+collectOpsByBlockId(Operation *op,
+                    llvm::DenseMap<int, SmallVector<Operation *>> &blockOps) {
+  Block *bodyBlock = MainLoop(op).getBody();
+  if (!bodyBlock) {
+    return failure();
+  }
+
+  for (Operation &op : bodyBlock->without_terminator()) {
     if (auto attr = op.getAttrOfType<IntegerAttr>(CVPipeline::kBlockId)) {
       blockOps[attr.getInt()].push_back(&op);
     } else {
@@ -121,9 +138,9 @@ dfsTopologicalSort(Operation *op, llvm::DenseSet<Operation *> &visited,
 }
 
 // Topological sort of operations based on operand dependencies
-LogicalResult triton::topologicalSort(llvm::DenseSet<Operation *> &ops,
-                                      llvm::DenseMap<Operation *, int> *opOrder,
-                                      SmallVectorImpl<Operation *> &sorted) {
+LogicalResult topologicalSort(llvm::DenseSet<Operation *> &ops,
+                              llvm::DenseMap<Operation *, int> *opOrder,
+                              SmallVectorImpl<Operation *> &sorted) {
   llvm::DenseSet<Operation *> visited;
   llvm::DenseSet<Operation *> inStack;
 
@@ -143,23 +160,29 @@ LogicalResult triton::topologicalSort(llvm::DenseSet<Operation *> &ops,
   return success();
 }
 
-LogicalResult triton::topologicalSort(SmallVector<Operation *> &ops) {
+LogicalResult topologicalSort(SmallVector<Operation *> &ops) {
   llvm::DenseSet<Operation *> opSet(ops.begin(), ops.end());
   SmallVector<Operation *> sorted;
 
-  if (failed(triton::topologicalSort(opSet, nullptr, sorted))) {
-    return failure();
+  if (succeeded(topologicalSort(opSet, nullptr, sorted))) {
+    ops.assign(sorted.begin(), sorted.end());
+    return success();
   }
-  ops.assign(sorted.begin(), sorted.end());
-  return success();
+  return failure();
 }
 
-// Get block_ids in order of appearance in for loop body
-SmallVector<int> triton::getBlockIdsInOrder(scf::ForOp forOp) {
+// Get block_ids in order of appearance in the main-loop body (forOp body
+// or whileOp after-region body). Returns empty if `op` is neither.
+SmallVector<int> getBlockIdsInOrder(Operation *op) {
+  Block *bodyBlock = MainLoop(op).getBody();
+  if (!bodyBlock) {
+    return {};
+  }
+
   SmallVector<int> idsInOrder;
   llvm::DenseSet<int> seenIds;
 
-  for (Operation &op : forOp.getBody()->without_terminator()) {
+  for (Operation &op : bodyBlock->without_terminator()) {
     if (auto blockIdAttr =
             op.getAttrOfType<IntegerAttr>(CVPipeline::kBlockId)) {
       int id = blockIdAttr.getInt();
@@ -171,21 +194,17 @@ SmallVector<int> triton::getBlockIdsInOrder(scf::ForOp forOp) {
   return idsInOrder;
 }
 
-// Get the block_id of the immediate child of scf.for that contains op
-// For nested ops inside scf.if/scf.for, returns the block_id of the immediate
-// child of scf.for Only considers scf.for ops that have ssbuffer.main_loop
-// attribute
-std::optional<int> triton::getForDirectChildBlockId(Operation *op) {
+// Get block_id of the immediate child of main-loop op (scf.for or scf.while
+// carrying ssbuffer.main_loop) containing op. For scf.while "body" is the
+// after-region block.
+std::optional<int> getLoopDirectChildBlockId(Operation *op) {
   if (!op) {
     return std::nullopt;
   }
   Operation *parent = op->getParentOp();
   while (parent) {
-    // Found the main_loop forOp, op is its direct child
-    if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
-      if (forOp->hasAttr(CVPipeline::kMainLoop)) {
-        return CVPipeline::getOpBlockId(op);
-      }
+    if (CVPipeline::isMainLoopOp(parent)) {
+      return CVPipeline::getOpBlockId(op);
     }
     op = parent;
     parent = parent->getParentOp();
@@ -193,8 +212,20 @@ std::optional<int> triton::getForDirectChildBlockId(Operation *op) {
   return std::nullopt;
 }
 
+// Counts unique ssbuffer.if values inside a main-loop op (scf.for or
+// scf.while), walking all nested ops. Returns 0 if none.
+int countUniqueIfBlockIds(Operation *loopOp) {
+  llvm::DenseSet<int> ifBlockIds;
+  loopOp->walk([&](Operation *innerOp) {
+    if (auto ifAttr = innerOp->getAttrOfType<IntegerAttr>(CVPipeline::kIf)) {
+      ifBlockIds.insert(ifAttr.getInt());
+    }
+  });
+  return static_cast<int>(ifBlockIds.size());
+}
+
 // Find the tcb group id that contains value v
-int triton::findTcbGroupId(
+int findTcbGroupId(
     Value v,
     llvm::DenseMap<int, SmallVector<Value>> &tightlyCoupledBufferGroups) {
   for (auto &tcbEntry : tightlyCoupledBufferGroups) {
@@ -205,11 +236,9 @@ int triton::findTcbGroupId(
   return -1;
 }
 
-// Get isCube/isVector based on the scope's tcore_type attribute
-// Returns failure if scopeOp does not have tcore_type attribute or it's not
-// CUBE/VECTOR
-LogicalResult triton::getScopeType(Operation *scopeOp, bool &isCube,
-                                   bool &isVector) {
+// Get isCube/isVector from scopeOp's tcore_type attribute.
+// Returns failure if attribute is missing or not CUBE/VECTOR.
+LogicalResult getScopeType(Operation *scopeOp, bool &isCube, bool &isVector) {
   isCube = false;
   isVector = false;
 
@@ -237,7 +266,7 @@ LogicalResult triton::getScopeType(Operation *scopeOp, bool &isCube,
 
 // Check if op is a scf.if whose body only contains hivm.hir.sync_block_wait,
 // hivm.hir.sync_block_set and hivm.fixpipe ops (excluding terminators).
-bool triton::isIfOpWithOnlySyncOps(Operation *op) {
+bool isIfOpWithOnlySyncOps(Operation *op) {
   auto ifOp = dyn_cast<scf::IfOp>(op);
   if (!ifOp) {
     return false;
@@ -259,3 +288,168 @@ bool triton::isIfOpWithOnlySyncOps(Operation *op) {
 
   return !result.wasInterrupted();
 }
+
+// Migrate ops from oldBlock to newBlock; replaceAllUsesWith on oldBlock's args
+// to newBlock's args (same index).
+void migrateBody(Block *oldBlock, Block *newBlock) {
+  for (unsigned i = 0; i < oldBlock->getNumArguments(); ++i) {
+    oldBlock->getArgument(i).replaceAllUsesWith(newBlock->getArgument(i));
+  }
+
+  for (Operation &op :
+       llvm::make_early_inc_range(oldBlock->without_terminator())) {
+    op.moveBefore(newBlock, newBlock->end());
+  }
+}
+
+// Migrate both before and after regions of a scf.while op. Does not touch
+// terminators (the caller builds new condition/yield in the new regions).
+void migrateWhileBodies(scf::WhileOp oldWhileOp, scf::WhileOp newWhileOp) {
+  migrateBody(oldWhileOp.getBeforeBody(), newWhileOp.getBeforeBody());
+  migrateBody(oldWhileOp.getAfterBody(), newWhileOp.getAfterBody());
+}
+
+// Build new scf.yield at end of `newBlock`: copies oldBlock's yield operands,
+// appends `extraYieldValues`, creates new scf::YieldOp, erases old yield.
+LogicalResult buildNewYieldOp(Block *oldBlock, Block *newBlock,
+                              Operation *newOp,
+                              ArrayRef<Value> extraYieldValues) {
+  auto oldYield = cast<scf::YieldOp>(oldBlock->getTerminator());
+  SmallVector<Value> yieldOperands;
+  for (unsigned i = 0; i < oldYield.getNumOperands(); ++i) {
+    yieldOperands.push_back(oldYield.getOperand(i));
+  }
+  for (Value v : extraYieldValues) {
+    yieldOperands.push_back(v);
+  }
+  OpBuilder builder = OpBuilder::atBlockEnd(newBlock);
+  builder.create<scf::YieldOp>(newOp->getLoc(), yieldOperands);
+  oldYield.erase();
+  return success();
+}
+
+// Replace all uses of `oldOp`'s results with `newOp`'s matching results.
+// No-op when `oldOp` is result-less.
+void replaceOpResultUses(Operation *oldOp, Operation *newOp) {
+  if (oldOp->getNumResults() == 0)
+    return;
+
+  SmallVector<Value> newResults;
+  for (unsigned i = 0; i < oldOp->getNumResults(); ++i) {
+    newResults.push_back(newOp->getResult(i));
+  }
+  oldOp->replaceAllUsesWith(newResults);
+}
+
+// Build new scf.condition in `newWhileOp`'s before region. Condition preserved
+// from `whileOp`; forwarded values = new before-block args (incl. extras).
+void buildNewWhileCondition(scf::WhileOp whileOp, scf::WhileOp newWhileOp) {
+  auto oldCond = whileOp.getConditionOp();
+  Value origCond = oldCond.getCondition();
+
+  OpBuilder beforeBuilder(newWhileOp.getBeforeBody(),
+                          newWhileOp.getBeforeBody()->end());
+  SmallVector<Value> forwardedValues;
+  for (BlockArgument arg : newWhileOp.getBeforeArguments()) {
+    forwardedValues.push_back(arg);
+  }
+  beforeBuilder.create<scf::ConditionOp>(whileOp.getLoc(), origCond,
+                                         forwardedValues);
+  oldCond.erase();
+}
+
+// Creates a new scf.for with `extraInitArgs` appended to the original init
+// args. Returns `oldForOp` unchanged when `extraInitArgs` is empty.
+scf::ForOp createNewForOpWithExtras(scf::ForOp oldForOp,
+                                    ArrayRef<Value> extraInitArgs) {
+  if (extraInitArgs.empty()) {
+    return oldForOp;
+  }
+
+  OpBuilder builder(oldForOp);
+  SmallVector<Value> newInitArgs(oldForOp.getInitArgs().begin(),
+                                 oldForOp.getInitArgs().end());
+  llvm::append_range(newInitArgs, extraInitArgs);
+
+  scf::ForOp newForOp = builder.create<scf::ForOp>(
+      oldForOp.getLoc(), oldForOp.getLowerBound(), oldForOp.getUpperBound(),
+      oldForOp.getStep(), newInitArgs);
+
+  for (auto &attr : oldForOp->getAttrs()) {
+    newForOp->setAttr(attr.getName(), attr.getValue());
+  }
+  return newForOp;
+}
+
+// Creates a new scf.while with `extraInitArgs` appended to the original inits
+// and empty before/after blocks. Returns `oldWhileOp` unchanged when empty.
+scf::WhileOp createNewWhileOpWithExtras(scf::WhileOp oldWhileOp,
+                                        ArrayRef<Value> extraInitArgs) {
+  if (extraInitArgs.empty()) {
+    return oldWhileOp;
+  }
+
+  OpBuilder builder(oldWhileOp);
+
+  SmallVector<Value> newInits(oldWhileOp.getInits().begin(),
+                              oldWhileOp.getInits().end());
+  llvm::append_range(newInits, extraInitArgs);
+
+  SmallVector<Type> newResultTypes(oldWhileOp->getResultTypes().begin(),
+                                   oldWhileOp->getResultTypes().end());
+  for (Value v : extraInitArgs) {
+    newResultTypes.push_back(v.getType());
+  }
+
+  scf::WhileOp newWhileOp = builder.create<scf::WhileOp>(
+      oldWhileOp.getLoc(), newResultTypes, newInits);
+
+  for (auto &attr : oldWhileOp->getAttrs()) {
+    newWhileOp->setAttr(attr.getName(), attr.getValue());
+  }
+
+  SmallVector<Type> argTypes;
+  argTypes.reserve(newInits.size());
+  for (Value v : newInits) {
+    argTypes.push_back(v.getType());
+  }
+  SmallVector<Location> argLocs(newInits.size(), oldWhileOp.getLoc());
+
+  builder.createBlock(&newWhileOp.getBefore(), {}, argTypes, argLocs);
+  builder.createBlock(&newWhileOp.getAfter(), {}, argTypes, argLocs);
+
+  return newWhileOp;
+}
+
+// Dispatches createNewForOpWithExtras / createNewWhileOpWithExtras by op type.
+// Returns nullptr if `oldOp` is neither scf.for nor scf.while.
+Operation *createMainLoopOpWithExtras(Operation *oldOp,
+                                      ArrayRef<Value> extraInitArgs) {
+  if (auto forOp = dyn_cast<scf::ForOp>(oldOp)) {
+    return createNewForOpWithExtras(forOp, extraInitArgs);
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(oldOp)) {
+    return createNewWhileOpWithExtras(whileOp, extraInitArgs);
+  }
+  return nullptr;
+}
+
+// Prints whileBlockArgMap (whileOp -> block_id -> (new_arg_idx ->
+// old_arg_idx)) to the debug stream, gated by LLVM_DEBUG.
+void dumpWhileBlockArgMap(const triton::WhileBlockArgMap &map,
+                          llvm::StringRef header) {
+  LLVM_DEBUG({
+    LDBG("[INFO]: " << header);
+    for (auto &[whileOp, blockArgMap] : map) {
+      LDBG("  whileOp @" << whileOp->getLoc());
+      for (auto &[blockId, argIdxMap] : blockArgMap) {
+        for (auto &[newArgIdx, oldArgIdx] : argIdxMap) {
+          LDBG("    block_id=" << blockId << " new_arg_idx=" << newArgIdx
+                               << " -> old_arg_idx=" << oldArgIdx);
+        }
+      }
+    }
+  });
+}
+
+} // namespace mlir

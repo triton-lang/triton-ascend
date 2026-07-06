@@ -41,6 +41,8 @@ LogicalResult collectAllNestedOps(Operation *op, llvm::DenseSet<Operation *> &re
 // Group operations by their block_id attribute
 LogicalResult collectOpsByBlockId(scf::ForOp forOp,
                                   llvm::DenseMap<int, SmallVector<Operation *>> &blockOps);
+LogicalResult collectOpsByBlockId(scf::WhileOp whileOp,
+                                  llvm::DenseMap<int, SmallVector<Operation *>> &blockOps);
 
 // Topological sort of operations based on operand dependencies
 LogicalResult topologicalSort(llvm::DenseSet<Operation *> &ops,
@@ -51,8 +53,19 @@ LogicalResult topologicalSort(SmallVector<Operation *> &ops);
 
 // Get block_ids in order of appearance in for loop body
 SmallVector<int> getBlockIdsInOrder(scf::ForOp forOp);
+// Get block_ids in order of appearance in scf.while after-region body
+SmallVector<int> getBlockIdsInOrder(scf::WhileOp whileOp);
 
-// Get the block_id of the immediate child of scf.for that contains op
+// Count unique ssbuffer.if values inside a main-loop op (scf.for or scf.while
+// carrying ssbuffer.main_loop). Walks all nested ops, so ssbuffer.if ops
+// inside nested constructs are also counted. Returns 0 if none are found.
+int countUniqueIfBlockIds(Operation *loopOp);
+
+// Get the block_id of the immediate child of the main-loop (scf.for or
+// scf.while carrying ssbuffer.main_loop) that contains op. For nested ops inside
+// scf.if/scf.for within the main-loop body, returns the block_id of the
+// immediate child of that main-loop op. For scf.while, "body" means the after
+// region block.
 std::optional<int> getForDirectChildBlockId(Operation *op);
 
 // Find the tcb group id that contains value v

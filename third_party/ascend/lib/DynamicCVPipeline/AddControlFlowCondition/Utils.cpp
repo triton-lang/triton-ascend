@@ -68,6 +68,23 @@ LogicalResult triton::collectOpsByBlockId(scf::ForOp forOp,
   return success();
 }
 
+// Group operations by their block_id attribute for an scf.while op (uses the
+// after-region body, which is the loop body; the before region holds the
+// condition and is not iterated).
+LogicalResult triton::collectOpsByBlockId(scf::WhileOp whileOp,
+                                          llvm::DenseMap<int, SmallVector<Operation *>> &blockOps)
+{
+  for (Operation &op : whileOp.getAfter().front().without_terminator()) {
+    if (auto attr = op.getAttrOfType<IntegerAttr>(CVPipeline::kBlockId)) {
+      blockOps[attr.getInt()].push_back(&op);
+    } else {
+      return failure();
+    }
+  }
+
+  return success();
+}
+
 // DFS for topological sort - returns failure if cycle detected
 static LogicalResult dfsTopologicalSort(
     Operation *op, llvm::DenseSet<Operation *> &visited,
@@ -170,25 +187,57 @@ SmallVector<int> triton::getBlockIdsInOrder(scf::ForOp forOp)
   return idsInOrder;
 }
 
-// Get the block_id of the immediate child of scf.for that contains op
-// For nested ops inside scf.if/scf.for, returns the block_id of the immediate child of scf.for
-// Only considers scf.for ops that have ssbuffer.main_loop attribute
+// Get block_ids in order of appearance in scf.while after-region body
+SmallVector<int> triton::getBlockIdsInOrder(scf::WhileOp whileOp)
+{
+  SmallVector<int> idsInOrder;
+  llvm::DenseSet<int> seenIds;
+
+  for (Operation &op : whileOp.getAfter().front().without_terminator()) {
+    if (auto blockIdAttr = op.getAttrOfType<IntegerAttr>(CVPipeline::kBlockId)) {
+      int id = blockIdAttr.getInt();
+      if (seenIds.insert(id).second) {
+        idsInOrder.push_back(id);
+      }
+    }
+  }
+  return idsInOrder;
+}
+
+// Get the block_id of the immediate child of a main-loop op (scf.for or
+// scf.while carrying ssbuffer.main_loop) that contains op. For nested ops
+// inside scf.if/scf.for within the main-loop body, returns the block_id of the
+// immediate child of that main-loop op. For scf.while the body is its after
+// region block.
 std::optional<int> triton::getForDirectChildBlockId(Operation *op) {
   if (!op) {
     return std::nullopt;
   }
   Operation *parent = op->getParentOp();
   while (parent) {
-    // Found the main_loop forOp, op is its direct child
-    if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
-      if (forOp->hasAttr(CVPipeline::kMainLoop)) {
-        return CVPipeline::getOpBlockId(op);
-      }
+    // Found the main_loop op (scf.for or scf.while), op is its direct child
+    if (parent->hasAttr(CVPipeline::kMainLoop) &&
+        (isa<scf::ForOp>(parent) || isa<scf::WhileOp>(parent))) {
+      return CVPipeline::getOpBlockId(op);
     }
     op = parent;
     parent = parent->getParentOp();
   }
   return std::nullopt;
+}
+
+// Count unique ssbuffer.if values inside a main-loop op (scf.for or scf.while
+// carrying ssbuffer.main_loop). Walks all nested ops, so ssbuffer.if ops
+// inside nested constructs are also counted. Returns 0 if none are found.
+int triton::countUniqueIfBlockIds(Operation *loopOp)
+{
+  llvm::DenseSet<int> ifBlockIds;
+  loopOp->walk([&](Operation *innerOp) {
+    if (auto ifAttr = innerOp->getAttrOfType<IntegerAttr>(kSSBufferIfAttr)) {
+      ifBlockIds.insert(ifAttr.getInt());
+    }
+  });
+  return static_cast<int>(ifBlockIds.size());
 }
 
 // Find the tcb group id that contains value v

@@ -49,7 +49,9 @@ using namespace hivm;
 using MemDepGraph = std::unique_ptr<CVPipeline::MemoryDependenceGraph>;
 using MemDepGraphT = CVPipeline::MemoryDependenceGraph;
 
-// Update op operands using value mapping, skip yield values of forOp
+// Update op operands using value mapping, skip yield values of the main-loop
+// (scf.for body, or scf.while after-region body). yieldValues is collected
+// once per main-loop by cloneOpsForBlock from the body's terminator.
 static LogicalResult updateCloneMapping(Operation *op,
     llvm::DenseMap<Value, Value> &valueMap,
     const llvm::DenseSet<Value> &yieldValues)
@@ -59,8 +61,8 @@ static LogicalResult updateCloneMapping(Operation *op,
   }
 
   for (OpOperand &operand : op->getOpOperands()) {
-    // Only skip if this operand is a yield value from the main_loop forOp
-    // Nested yield ops (in scf.if/scf.for) should have their operands updated
+    // Only skip if this operand is a yield value from the main_loop body.
+    // Nested yield ops (in scf.if/scf.for) should have their operands updated.
     Value v = operand.get();
     if (yieldValues.contains(v)) {
       continue;
@@ -108,11 +110,31 @@ static Operation *cloneOpWithMapping(Operation *op,
   return cloned;
 }
 
-// Clone ops for a single block in vector/cube mode
+// Get the body block (the single block holding the loop body ops followed by a
+// scf.yield terminator) of the main-loop op. Returns nullptr if `op` is neither
+// a scf::ForOp nor a scf::WhileOp.
+static Block *getMainLoopBodyBlock(Operation *op)
+{
+  if (!op) {
+    return nullptr;
+  }
+  if (auto forOp = dyn_cast<scf::ForOp>(op)) {
+    return forOp.getBody();
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
+    return &whileOp.getAfter().front();
+  }
+  return nullptr;
+}
+
+// Clone ops for a single block in vector/cube mode.
+// `bodyBlock` is the loop body's block: the forOp body, or the whileOp
+// after-region body (both terminate in scf.yield). It is used only to collect
+// the iter-arg yield values that must NOT be remapped.
 static LogicalResult cloneOpsForBlock(int curId, SmallVector<Operation *> &curOps,
     const SmallVector<int> &earlierIds,
     const llvm::DenseMap<int, SmallVector<Operation *>> &blockOps,
-    scf::ForOp forOp)
+    Block *bodyBlock)
 {
   if (curOps.empty() || earlierIds.empty()) {
     return success();
@@ -143,9 +165,11 @@ static LogicalResult cloneOpsForBlock(int curId, SmallVector<Operation *> &curOp
   curOps.insert(curOps.begin(), clonedOps.begin(), clonedOps.end());
 
   llvm::DenseSet<Value> yieldValues;
-  if (auto yieldOp = dyn_cast<scf::YieldOp>(forOp.getBody()->getTerminator())) {
-    for (Value operand : yieldOp.getOperands()) {
-      yieldValues.insert(operand);
+  if (bodyBlock) {
+    if (auto yieldOp = dyn_cast<scf::YieldOp>(bodyBlock->getTerminator())) {
+      for (Value operand : yieldOp.getOperands()) {
+        yieldValues.insert(operand);
+      }
     }
   }
 
@@ -162,21 +186,40 @@ static LogicalResult cloneOpsForBlock(int curId, SmallVector<Operation *> &curOp
   return success();
 }
 
-// Clone ops for all blocks in main loop
-LogicalResult CloneOpsPass::cloneOpsInMainLoop(scf::ForOp forOp)
+// Clone ops for all blocks in the main loop op (scf.for or scf.while).
+// Dispatches on op type for the type-specific collectOpsByBlockId /
+// getBlockIdsInOrder overloads; the body block (where the loop body lives)
+// is extracted via getMainLoopBodyBlock so both forOp (single body) and
+// whileOp (after-region body) are handled uniformly.
+LogicalResult CloneOpsPass::cloneOpsInMainLoop(Operation *op)
 {
-  llvm::DenseMap<int, SmallVector<Operation *>> blockOps;
-  if (failed(collectOpsByBlockId(forOp, blockOps))) {
+  Block *bodyBlock = getMainLoopBodyBlock(op);
+  if (!bodyBlock) {
+    LDBG("[Error]: op with ssbuffer.main_loop is not a scf::ForOp or scf::WhileOp\n");
     return failure();
   }
 
-  SmallVector<int> idsInOrder = getBlockIdsInOrder(forOp);
+  llvm::DenseMap<int, SmallVector<Operation *>> blockOps;
+  SmallVector<int> idsInOrder;
+  if (auto forOp = dyn_cast<scf::ForOp>(op)) {
+    if (failed(collectOpsByBlockId(forOp, blockOps))) {
+      return failure();
+    }
+    idsInOrder = getBlockIdsInOrder(forOp);
+  } else if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
+    if (failed(collectOpsByBlockId(whileOp, blockOps))) {
+      return failure();
+    }
+    idsInOrder = getBlockIdsInOrder(whileOp);
+  } else {
+    return failure();
+  }
 
   for (int i = idsInOrder.size() - 1; i >= 0; --i) {
     int curId = idsInOrder[i];
     SmallVector<int> earlierIds(idsInOrder.begin(), idsInOrder.begin() + i);
 
-    if (failed(cloneOpsForBlock(curId, blockOps[curId], earlierIds, blockOps, forOp))) {
+    if (failed(cloneOpsForBlock(curId, blockOps[curId], earlierIds, blockOps, bodyBlock))) {
       return failure();
     }
   }
@@ -250,13 +293,18 @@ static bool shouldEraseOpForVector(Operation *op)
                        [](auto result) { return !result.use_empty(); });
 }
 
-// Cleanup for cloned ops in a forOp
-// memGraphFactory: callable that rebuilds MemoryDependenceGraph for current IR state
-static LogicalResult cleanupClonedOps(scf::ForOp forOp,
+// Cleanup for cloned ops in a main-loop op.
+// `bodyBlock` is the loop body's block (used only to scan ops after cleanup);
+// `mainLoopOp` is the op passed to `memGraphFactory` so it can rebuild the
+// MemoryDependenceGraph. `memGraphFactory` is a callable that, given the
+// main-loop op, returns a freshly-built MemoryDependenceGraph (or nullptr
+// when not in cube mode).
+static LogicalResult cleanupClonedOps(Operation *mainLoopOp,
+    Block *bodyBlock,
     llvm::DenseMap<int, SmallVector<Operation *>> &blockOps,
     const SmallVector<int> &idsInOrder,
     bool isCube,
-    std::function<MemDepGraph(scf::ForOp)> memGraphFactory)
+    std::function<MemDepGraph(Operation *)> memGraphFactory)
 {
   for (int i = idsInOrder.size() - 1; i >= 0; --i) {
     auto &curOps = blockOps[idsInOrder[i]];
@@ -285,7 +333,7 @@ static LogicalResult cleanupClonedOps(scf::ForOp forOp,
         break;
       }
       // Rebuild memGraph after each erasure to reflect current IR state
-      auto memGraph = memGraphFactory(forOp);
+      auto memGraph = memGraphFactory(mainLoopOp);
       bool shouldErase = isCube ? shouldEraseOpForCube(op, memGraph.get()) : shouldEraseOpForVector(op);
       if (shouldErase) {
         op->erase();
@@ -293,13 +341,15 @@ static LogicalResult cleanupClonedOps(scf::ForOp forOp,
     }
   }
 
-  // Check whether new forOp is valid after cleanup
-  for (Operation &op : forOp.getBody()->without_terminator()) {
-    if (op.hasAttr(CVPipeline::kClone)) {
-      if (isa<SyncBlockWaitOp>(op) || isa<SyncBlockSetOp>(op) ||
-          isa<hivm::FixpipeOp>(op)) {
-        LDBG("[ERROR]: Cloned sync/fixpipe op should have been erased: " << op.getName() << "\n");
-        return failure();
+  // Check whether new main-loop body is valid after cleanup
+  if (bodyBlock) {
+    for (Operation &op : bodyBlock->without_terminator()) {
+      if (op.hasAttr(CVPipeline::kClone)) {
+        if (isa<SyncBlockWaitOp>(op) || isa<SyncBlockSetOp>(op) ||
+            isa<hivm::FixpipeOp>(op)) {
+          LDBG("[ERROR]: Cloned sync/fixpipe op should have been erased: " << op.getName() << "\n");
+          return failure();
+        }
       }
     }
   }
@@ -307,11 +357,22 @@ static LogicalResult cleanupClonedOps(scf::ForOp forOp,
   return success();
 }
 
-// Cleanup cloned ops for a single main loop
-LogicalResult CloneOpsPass::cleanupClonedOpsInMainLoop(scf::ForOp forOp)
+// Cleanup cloned ops for a single main loop op (scf.for or scf.while).
+// The body block (where cleanup scans the body for stray cloned ops) is
+// extracted via getMainLoopBodyBlock. The main loop op itself is passed
+// to the type-specific collectOpsByBlockId / getBlockIdsInOrder overloads
+// and to memGraphFactory so MemoryDependenceGraph is built against the
+// right op type.
+LogicalResult CloneOpsPass::cleanupClonedOpsInMainLoop(Operation *op)
 {
+  Block *bodyBlock = getMainLoopBodyBlock(op);
+  if (!bodyBlock) {
+    LDBG("[Error]: op with ssbuffer.main_loop is not a scf::ForOp or scf::WhileOp\n");
+    return failure();
+  }
+
   ModuleOp module = getOperation();
-  scope::ScopeOp scopeOp = forOp->getParentOfType<scope::ScopeOp>();
+  scope::ScopeOp scopeOp = op->getParentOfType<scope::ScopeOp>();
   if (!scopeOp) {
     return success();
   }
@@ -324,18 +385,29 @@ LogicalResult CloneOpsPass::cleanupClonedOpsInMainLoop(scf::ForOp forOp)
   bool isCube = (attr == hivm::TCoreTypeAttr::get(module.getContext(), hivm::TCoreType::CUBE));
 
   llvm::DenseMap<int, SmallVector<Operation *>> blockOps;
-  if (failed(collectOpsByBlockId(forOp, blockOps))) {
+  SmallVector<int> idsInOrder;
+  if (auto forOp = dyn_cast<scf::ForOp>(op)) {
+    if (failed(collectOpsByBlockId(forOp, blockOps))) {
+      return failure();
+    }
+    idsInOrder = getBlockIdsInOrder(forOp);
+  } else if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
+    if (failed(collectOpsByBlockId(whileOp, blockOps))) {
+      return failure();
+    }
+    idsInOrder = getBlockIdsInOrder(whileOp);
+  } else {
     return failure();
   }
 
-  SmallVector<int> idsInOrder = getBlockIdsInOrder(forOp);
-  if (failed(cleanupClonedOps(forOp, blockOps, idsInOrder, isCube, [&](scf::ForOp forOp) -> MemDepGraph {
-    if (!isCube) {
-      return nullptr;
-    }
-    auto &aliasAnalysis = getAnalysis<mlir::AliasAnalysis>();
-    return std::make_unique<MemDepGraphT>(forOp, aliasAnalysis);
-  }))) {
+  if (failed(cleanupClonedOps(op, bodyBlock, blockOps, idsInOrder, isCube,
+          [&](Operation *loopOp) -> MemDepGraph {
+            if (!isCube) {
+              return nullptr;
+            }
+            auto &aliasAnalysis = getAnalysis<mlir::AliasAnalysis>();
+            return std::make_unique<MemDepGraphT>(loopOp, aliasAnalysis);
+          }))) {
     return failure();
   }
 
@@ -343,11 +415,12 @@ LogicalResult CloneOpsPass::cleanupClonedOpsInMainLoop(scf::ForOp forOp)
 }
 
 // Validate that each block_id's ops form contiguous ranges (not interleaved with other ids)
-// e.g., [1,1,2,2] is valid, but [1,2,1,2] is invalid
-static bool areBlockIdsConsecutive(scf::ForOp forOp)
+// e.g., [1,1,2,2] is valid, but [1,2,1,2] is invalid. Operates on the body block
+// of a main-loop op (scf.for or scf.while).
+static bool areBlockIdsConsecutive(Block *bodyBlock)
 {
   SmallVector<int> idsInOrder;
-  for (Operation &op : forOp.getBody()->without_terminator()) {
+  for (Operation &op : bodyBlock->without_terminator()) {
     auto blockIdOpt = CVPipeline::getOpBlockId(&op);
     if (!blockIdOpt) {
       LDBG("[ERROR]: Op missing ssbuffer.block_id: " << op.getName() << "\n");
@@ -385,12 +458,12 @@ LogicalResult CloneOpsPass::validateBlockIdsConsecutive(ModuleOp module)
     if (!op->hasAttr(CVPipeline::kMainLoop)) {
       return WalkResult::advance();
     }
-    auto forOp = dyn_cast<scf::ForOp>(op);
-    if (!forOp) {
-      LDBG("[Error]: op with ssbuffer.main_loop is not a scf::ForOp\n");
+    Block *bodyBlock = getMainLoopBodyBlock(op);
+    if (!bodyBlock) {
+      LDBG("[Error]: op with ssbuffer.main_loop is not a scf::ForOp or scf::WhileOp\n");
       return WalkResult::interrupt();
     }
-    if (!areBlockIdsConsecutive(forOp)) {
+    if (!areBlockIdsConsecutive(bodyBlock)) {
       return WalkResult::interrupt();
     }
     return WalkResult::advance();
@@ -401,21 +474,21 @@ LogicalResult CloneOpsPass::validateBlockIdsConsecutive(ModuleOp module)
   return success();
 }
 
-// Check that no op in a VECTOR scope's main_loop forOp has a tensor result \
-// carrying the ssbuffer.clone attribute.
+// Check that no op in a VECTOR scope's main_loop op (scf.for or scf.while) has a
+// tensor result carrying the ssbuffer.clone attribute.
 LogicalResult CloneOpsPass::validateClonedOpsInVector(ModuleOp module)
 {
   WalkResult result = module.walk([&](Operation *op) -> WalkResult {
     if (!op->hasAttr(CVPipeline::kMainLoop)) {
       return WalkResult::advance();
     }
-    auto forOp = dyn_cast<scf::ForOp>(op);
-    if (!forOp) {
-      LDBG("[Error]: op with ssbuffer.main_loop is not a scf::ForOp\n");
+    Block *bodyBlock = getMainLoopBodyBlock(op);
+    if (!bodyBlock) {
+      LDBG("[Error]: op with ssbuffer.main_loop is not a scf::ForOp or scf::WhileOp\n");
       return WalkResult::interrupt();
     }
 
-    scope::ScopeOp scopeOp = forOp->getParentOfType<scope::ScopeOp>();
+    scope::ScopeOp scopeOp = op->getParentOfType<scope::ScopeOp>();
     if (!scopeOp) {
       return WalkResult::advance();
     }
@@ -429,7 +502,7 @@ LogicalResult CloneOpsPass::validateClonedOpsInVector(ModuleOp module)
       return WalkResult::advance();
     }
 
-    for (Operation &bodyOp : forOp.getBody()->without_terminator()) {
+    for (Operation &bodyOp : bodyBlock->without_terminator()) {
       if (!bodyOp.hasAttr(CVPipeline::kClone)) {
         continue;
       }
@@ -468,24 +541,17 @@ void CloneOpsPass::runOnOperation()
   }
 
   // Clone ops in vector/cube to ensure that each block_id has its own
-  // ops without sharing
+  // ops without sharing. The entry points accept any main-loop op
+  // (scf.for or scf.while) and dispatch internally.
   module.walk([&](Operation *op) -> WalkResult {
     if (!op->hasAttr(CVPipeline::kMainLoop)) {
       return WalkResult::advance();
     }
-    auto forOp = dyn_cast<scf::ForOp>(op);
-    if (!forOp) {
-      LDBG("[Error]: op with ssbuffer.main_loop is not a scf::ForOp\n");
+    if (failed(cloneOpsInMainLoop(op))) {
       signalPassFailure();
       return WalkResult::interrupt();
     }
-
-    if (failed(cloneOpsInMainLoop(forOp))) {
-      signalPassFailure();
-      return WalkResult::interrupt();
-    }
-
-    if (failed(cleanupClonedOpsInMainLoop(forOp))) {
+    if (failed(cleanupClonedOpsInMainLoop(op))) {
       signalPassFailure();
       return WalkResult::interrupt();
     }

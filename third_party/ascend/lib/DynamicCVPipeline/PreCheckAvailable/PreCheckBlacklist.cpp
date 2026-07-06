@@ -34,7 +34,7 @@ using namespace triton;
 // The blacklist operations that should skip SSBUFFER
 static const llvm::SmallVector<llvm::StringRef> kBlacklistOpNames = {
     "scope.scope",
-    "scf.while",
+    // "scf.while",
 };
 
 static constexpr const char *DEBUG_TYPE = "pre-check-blacklist";

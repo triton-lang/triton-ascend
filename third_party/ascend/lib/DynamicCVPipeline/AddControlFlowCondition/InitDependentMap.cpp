@@ -41,18 +41,18 @@ using namespace triton;
 
 // Function: Check if a consumer op is inside a given mainLoop
 //            but not inside any nested mainloop, and push to consumers if true
-// Input: Consumer operation, target mainLoop forOp, reference to consumers vector
+// Input: Consumer operation, target mainLoop op (scf.for or scf.while), reference to consumers vector
 // Output: consumers - push consumer to this vector if it's inside mainLoop (not in nested mainloop)
 // Return: 0 for success (consumer pushed), -1 for failure (not in mainLoop or in nested mainLoop)
-static int isConsumerInMainLoop(Operation *consumer, scf::ForOp mainLoop,
+static int isConsumerInMainLoop(Operation *consumer, Operation *mainLoop,
                                 SmallVector<Operation *> &consumers)
 {
   Operation *current = consumer->getParentOp();
 
   // Traverse up the parent chain until we reach the top (nullptr)
   while (current != nullptr) {
-    if (auto forOp = dyn_cast<scf::ForOp>(current)) {
-      if (forOp->hasAttr(CVPipeline::kMainLoop) && forOp != mainLoop) {
+    if (isa<scf::ForOp>(current) || isa<scf::WhileOp>(current)) {
+      if (current->hasAttr(CVPipeline::kMainLoop) && current != mainLoop) {
         // comsumer Op not in the current mainloop
         return 0;
       }
@@ -115,7 +115,7 @@ static int collectDepsByGroup(Operation *rootOp, const char *attrName,
 static int buildProducerConsumerMapping(
     llvm::DenseMap<int, SmallVector<std::pair<Operation *, int>>> &depsByGroup,
     llvm::DenseMap<Value, SmallVector<Value>> &result,
-    scf::ForOp mainLoop = nullptr)
+    Operation *mainLoop = nullptr)
 {
   for (auto &groupEntry : depsByGroup) {
     auto &ops = groupEntry.second;
@@ -175,7 +175,7 @@ static int buildProducerConsumerMapping(
 static int buildProducerConsumerMappingForOps(
     llvm::DenseMap<int, SmallVector<std::pair<Operation *, int>>> &depsByGroup,
     llvm::DenseMap<Operation *, SmallVector<Operation *>> &result,
-    scf::ForOp mainLoop = nullptr)
+    Operation *mainLoop = nullptr)
 {
   for (auto &groupEntry : depsByGroup) {
     auto &ops = groupEntry.second;
@@ -218,21 +218,30 @@ static int buildProducerConsumerMappingForOps(
   return 0;
 }
 
-static int collectMainLoopById(ModuleOp module, llvm::DenseMap<int, scf::ForOp> &mainLoopById)
+// Collect every op tagged with CVPipeline::kMainLoop whose underlying op kind is
+// scf.for or scf.while. Both flavors of mainloop are stored uniformly as
+// Operation* so downstream lookups (isAncestor, etc.) don't care which one
+// they got.
+static int collectMainLoopById(ModuleOp module, llvm::DenseMap<int, Operation *> &mainLoopById)
 {
   int ret = 0;
-  module.walk([&](scf::ForOp forOp) {
-    if (!forOp->hasAttr(CVPipeline::kMainLoop))
+  module.walk([&](Operation *op) {
+    if (!op->hasAttr(CVPipeline::kMainLoop))
       return;
-    auto mainLoopIdAttr = forOp->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
+    if (!isa<scf::ForOp>(op) && !isa<scf::WhileOp>(op)) {
+      LDBG("Do not support mainloop op other than scf.for or scf.while: " << op->getName());
+      ret = -1;
+      return;
+    }
+    auto mainLoopIdAttr = op->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
     if (mainLoopIdAttr) {
-      mainLoopById[mainLoopIdAttr.getInt()] = forOp;
+      mainLoopById[mainLoopIdAttr.getInt()] = op;
     }
   });
   return ret;
 }
 
-static int findMainLoopIdContainingOp(Operation *op, llvm::DenseMap<int, scf::ForOp> &mainLoopById)
+static int findMainLoopIdContainingOp(Operation *op, llvm::DenseMap<int, Operation *> &mainLoopById)
 {
   for (auto &idLoopEntry : mainLoopById) {
     if (idLoopEntry.second->isAncestor(op)) {
@@ -249,8 +258,8 @@ static int filterMemCrossCoreDepsByMainLoop(
 {
   LDBG("memCrossCore dependencies before filter: " << initialDepsMap.size());
 
-  // Step 1: Collect all main_loop forOps and their ids
-  llvm::DenseMap<int, scf::ForOp> mainLoopById;
+  // Step 1: Collect all main_loop ops (scf.for or scf.while) and their ids
+  llvm::DenseMap<int, Operation *> mainLoopById;
   if (collectMainLoopById(module, mainLoopById) != 0) {
     LDBG("collectMainLoopById Failed!");
     return -1;
@@ -362,7 +371,7 @@ int initMemCrossCoreDependentMap(ModuleOp module, ControlFlowConditionInfo *info
 }
 
 // Initialize intraCoreDependentMap (intra-core data dependency)
-// Find forOp with ssbuffer.main_loop attribute
+// Find main_loop op (scf.for or scf.while) with ssbuffer.main_loop attribute
 // Collect all intra-core deps from module (producers may be outside the loop)
 // For each mainLoop, filter consumers that are inside it (not in nested mainloops)
 // Return: 0 for success, -1 for failure
@@ -375,20 +384,21 @@ int initIntraCoreDependentMap(ModuleOp module, ControlFlowConditionInfo *info)
     return -1;
   }
 
-  // For each mainLoop, build mapping with consumers inside it
+  // For each mainLoop, build mapping with consumers inside it. Both scf.for
+  // and scf.while can carry ssbuffer.main_loop, so we walk main_loop ops
+  // uniformly here (the map is keyed on Operation*).
   int ret = 0;
   module.walk([&](Operation* op) {
     if (!op->hasAttr(CVPipeline::kMainLoop))
       return;
-    auto forOp = dyn_cast<scf::ForOp>(op);
-    if (!forOp) {
-      LDBG("Do not support other mainloop except forOp!");
+    if (!isa<scf::ForOp>(op) && !isa<scf::WhileOp>(op)) {
+      LDBG("Do not support mainloop op other than scf.for or scf.while: " << op->getName());
       ret = -1;
       return;
     }
 
     llvm::DenseMap<Value, SmallVector<Value>> depMap;
-    if (buildProducerConsumerMapping(allIntraDepsByGroup, depMap, forOp) != 0) {
+    if (buildProducerConsumerMapping(allIntraDepsByGroup, depMap, op) != 0) {
       LDBG("buildProducerConsumerMapping on intraDeps Failed!");
       ret = -1;
       return;
@@ -396,7 +406,7 @@ int initIntraCoreDependentMap(ModuleOp module, ControlFlowConditionInfo *info)
 
     // Only insert if there are dependencies for this mainLoop
     if (!depMap.empty()) {
-      info->intraCoreDependentMap[forOp] = depMap;
+      info->intraCoreDependentMap[op] = depMap;
     }
   });
   return ret;
@@ -433,13 +443,13 @@ static void printDependentMaps(ControlFlowConditionInfo *info)
   LDBG("intraCoreDependentMap size: " << info->intraCoreDependentMap.size());
   LDBG("intraCoreDependentMap contents:");
   for (auto &forEntry : info->intraCoreDependentMap) {
-      scf::ForOp forOp = forEntry.first;
+      Operation *loopOp = forEntry.first;
       auto &depMap = forEntry.second;
-      LDBG("  ForOp (depMap size: " << depMap.size() << "):");
+      LDBG("  MainLoopOp (depMap size: " << depMap.size() << "):");
       LDBG("    ");
       LLVM_DEBUG(
         llvm::dbgs() << '[' << DEBUG_TYPE << "] ";
-        forOp->print(llvm::dbgs(), OpPrintingFlags().skipRegions());
+        loopOp->print(llvm::dbgs(), OpPrintingFlags().skipRegions());
         llvm::dbgs() << "\n";
       );
 

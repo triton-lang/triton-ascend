@@ -42,12 +42,15 @@ public:
     this->info = info;
   }
 
-  LogicalResult computeYieldValues(scf::ForOp forOp,
+  // `op` is the main-loop op (scf.for or scf.while) carrying ssbuffer.main_loop.
+  // Both overloads (scf.for body and scf.while after-region body) are handled
+  // uniformly inside; the type dispatch happens once at entry.
+  LogicalResult computeYieldValues(Operation *op,
                          const llvm::DenseMap<int, SmallVector<Operation *>> &blockOps,
                          llvm::DenseMap<int, SmallVector<Value>> &thenYieldValues,
                          llvm::DenseMap<int, SmallVector<Value>> &elseYieldValues);
 
-  LogicalResult createIfInMainLoop(scf::ForOp forOp,
+  LogicalResult createIfInMainLoop(Operation *op,
                          const llvm::DenseMap<int, SmallVector<Operation *>> &blockOps,
                          const llvm::DenseMap<int, SmallVector<Value>> &thenYieldValues,
                          const llvm::DenseMap<int, SmallVector<Value>> &elseYieldValues);

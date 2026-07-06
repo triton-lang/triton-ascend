@@ -39,14 +39,16 @@ public:
 
   void setConditionInfo(ControlFlowConditionInfo *info) { this->info = info; }
 
+  // `op` is the main-loop op (scf.for or scf.while) carrying
+  // ssbuffer.main_loop.
   LogicalResult computeYieldValues(
-      scf::ForOp forOp,
+      Operation *op,
       const llvm::DenseMap<int, SmallVector<Operation *>> &blockOps,
       llvm::DenseMap<int, SmallVector<Value>> &thenYieldValues,
       llvm::DenseMap<int, SmallVector<Value>> &elseYieldValues);
 
   LogicalResult createIfInMainLoop(
-      scf::ForOp forOp,
+      Operation *op,
       const llvm::DenseMap<int, SmallVector<Operation *>> &blockOps,
       const llvm::DenseMap<int, SmallVector<Value>> &thenYieldValues,
       const llvm::DenseMap<int, SmallVector<Value>> &elseYieldValues);

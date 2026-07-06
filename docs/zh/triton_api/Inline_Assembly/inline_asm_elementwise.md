@@ -24,8 +24,6 @@ triton.language.inline_asm_elementwise(asm, constraints, args, dtype, is_pure, p
 
 ### 2.2 类型支持
 
-A3:
-
 | | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
 |------|-------|-------|-------|-------|--------|--------|--------|-------|------|------|------|------|------|
 | GPU | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |

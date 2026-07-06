@@ -110,5 +110,35 @@ def test_no_debug_print_when_debug_is_false(capsys):
     assert "[DEBUG] cmd list:" not in out
 
 
+def test_invalid_compile_mode_raises():
+    from triton.backends.ascend.compiler import NPUOptions
+
+    with pytest.raises(ValueError, match="Invalid compile_mode='invalid'"):
+        NPUOptions(compile_mode="invalid")
+
+
+def test_debug_print_uses_dump_dir_when_set(capsys, monkeypatch):
+    """When TRITON_DUMP_DIR is set, debug output should show paths under that dir."""
+    from triton.runtime.cache import _base32
+    monkeypatch.setenv("TRITON_DUMP_DIR", "/my/dump/dir")
+    out = _run_ttir_to_linalg(debug=True, capsys=capsys)
+    # The actual hash is "deadbeef" which becomes base32 "32W353Y"
+    hash_dir = _base32("deadbeef")
+    # Should contain the dump dir path with base32-encoded hash, not /tmp
+    assert "/my/dump/dir" in out
+    assert "/tmp" not in out
+    # Should contain the base32-encoded hash-based subdirectory
+    assert hash_dir in out
+    assert "kernel.ttir.mlir" in out
+
+
+def test_debug_print_uses_tmp_when_no_dump_dir(capsys, monkeypatch):
+    """When TRITON_DUMP_DIR is not set, debug output should show /tmp paths."""
+    monkeypatch.delenv("TRITON_DUMP_DIR", raising=False)
+    out = _run_ttir_to_linalg(debug=True, capsys=capsys)
+    # Should contain /tmp since no dump dir is set
+    assert "/tmp" in out
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

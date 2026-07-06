@@ -35,6 +35,7 @@ class Options:
     cluster_dims = (1, 1, 1)
     enable_fp_fusion = True
     debug = False
+    sanitize_overflow = True
 
 
 def compile_kernel(kernel, signature, constants):

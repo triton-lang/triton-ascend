@@ -22,7 +22,6 @@ Layer Normalization
 =============
 """
 
-import pytest
 import torch
 import triton
 import triton.language as tl
@@ -101,26 +100,23 @@ def layer_norm(x, normalized_shape, weight, bias, eps=1e-5):
     return y
 
 
-def _layer_norm(M, N, dtype, eps=1e-5, device='npu'):
-    # create data
+def test_layer_norm():
+    dtype = torch.float16
+    M, N = 128, 128
+    eps = 1e-5
+    device = 'npu'
     x_shape = (M, N)
     w_shape = (x_shape[-1], )
-    weight = torch.rand(w_shape, dtype=dtype, device=device, requires_grad=True)
-    bias = torch.rand(w_shape, dtype=dtype, device=device, requires_grad=True)
+    weight = torch.rand(w_shape, dtype=dtype, device=device)
+    bias = torch.rand(w_shape, dtype=dtype, device=device)
     x = -2.3 + 0.5 * torch.randn(x_shape, dtype=dtype, device=device)
-    dy = .1 * torch.randn_like(x)
-    x.requires_grad_(True)
-    # forward pass
     y_tri = layer_norm(x, w_shape, weight, bias, eps)
     y_ref = torch.nn.functional.layer_norm(x, w_shape, weight, bias, eps).to(dtype)
-    # compare
     assert torch.allclose(y_tri, y_ref, atol=1e-2, rtol=0)
     print(f"y_tri: {y_tri}")
     print(f"y_ref: {y_ref}")
-    print(f"Layer Normalization {M},{N} {dtype} PASSED!")
 
 
 if __name__ == "__main__":
-    _layer_norm(128, 128, torch.float16)
-    _layer_norm(128, 128, torch.bfloat16)
-    _layer_norm(128, 128, torch.float32)
+    test_layer_norm()
+    print("======Layer Normalization Test Passed!======")

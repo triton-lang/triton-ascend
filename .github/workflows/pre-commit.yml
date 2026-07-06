@@ -1,7 +1,19 @@
 name: Pre-Commit Check
 
 on:
-  workflow_call:
+  workflow_dispatch:
+  pull_request:
+  merge_group:
+    branches: [main, 'dev-**']
+    types: [checks_requested]
+  push:
+    branches: [main, 'release/**']
+
+concurrency:
+  group: pre-commit-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions: read-all
 
 jobs:
   pre-commit:

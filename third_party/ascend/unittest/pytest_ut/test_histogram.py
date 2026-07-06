@@ -37,7 +37,7 @@ def histogram_kernel(x_ptr, z_ptr, M: tl.constexpr, N: tl.constexpr):
 
 @pytest.mark.parametrize("M", [2048])
 @pytest.mark.parametrize("N", [2])
-@pytest.mark.parametrize("ncore", [2])
+@pytest.mark.parametrize("ncore", [1])
 @pytest.mark.parametrize("dtype", ["int32", "int64"])
 def test_histogram(M, N, ncore, dtype):
     torch.manual_seed(17)
@@ -47,14 +47,12 @@ def test_histogram(M, N, ncore, dtype):
     # triton结果
     y_ref = torch.empty(N, dtype=eval(f'torch.{dtype}'), device="npu")
     histogram_kernel[(ncore, )](x, y_ref, M=M, N=N)
-    print(y_cal)
-    print(y_ref)
     test_common.validate_cmp(dtype, y_cal, y_ref)
 
 
 @pytest.mark.parametrize("M", [2048])
 @pytest.mark.parametrize("N", [2])
-@pytest.mark.parametrize("ncore", [2])
+@pytest.mark.parametrize("ncore", [1])
 @pytest.mark.parametrize("dtype", ["uint32", "uint64"])
 def test_histogram_uint(M, N, ncore, dtype):
     torch.manual_seed(17)

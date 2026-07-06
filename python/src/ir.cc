@@ -932,16 +932,6 @@ void init_triton_ir(py::module &&m) {
              return self.create<arith::ConstantOp>(
                  self.getBuilder().getF64FloatAttr(v));
            })
-      .def("get_fp8e4nv",
-           [](TritonOpBuilder &self, double v) -> Value {
-             return self.create<arith::ConstantOp>(FloatAttr::get(
-                 Float8E4M3FNType::get((self.getBuilder().getContext())), v));
-           })
-      .def("get_fp8e5",
-           [](TritonOpBuilder &self, double v) -> Value {
-             return self.create<arith::ConstantOp>(FloatAttr::get(
-                 Float8E5M2Type::get(self.getBuilder().getContext()), v));
-           })
       .def("get_null_value",
            [](TritonOpBuilder &self, Type type) -> Value {
              if (auto floatTy = dyn_cast<FloatType>(type))

@@ -107,7 +107,8 @@ invalid_types = [
 @pytest.mark.parametrize("sigtype", invalid_types)
 @pytest.mark.parametrize("N", shapes)
 @test_common.raises_with_match(triton.compiler.errors.CompilationError, "Expected dtype fp16/fp32/bf16, but got")
-def test_isfinited_invalid_dtype(sigtype, N):
+def test_isfinited_invalid_dtype(sigtype, N, monkeypatch):
+    monkeypatch.setenv('TRITON_FRONT_END_DEBUGGING', '1')
 
     def torch_func(x0):
         res = torch.isfinite(x0)

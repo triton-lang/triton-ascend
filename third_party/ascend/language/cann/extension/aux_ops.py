@@ -76,11 +76,23 @@ class parallel(range):
     """
     Iterator that counts upward forever, with parallel execution semantics.
 
-    This is a special iterator used to implement similar semantics to Python's :code:`range` in the context of
-    :code:`triton.jit` functions. In addition, it allows user to pass extra attributes to the compiler.
-    :param bind_sub_block: Tells the compiler if multiple vector cores participate in the loop.
-        This is used in the mixed cube-vector kernel on 910B. The number of vector cores is determined by the number of
-        iteration in this loop. Currently on 910B, max 2 vector cores could be used.
+    This is a special iterator used to implement similar semantics to Python's ``range`` in the context of
+    ``triton.jit`` functions. In addition, it allows the user to pass extra attributes to the compiler.
+
+    :param arg1: If ``arg2`` is not given, the end of the range; otherwise the start of the range.
+    :type arg1: int
+    :param arg2: The end of the range, if given.
+    :type arg2: int
+    :param step: The step size of the iteration. Defaults to 1.
+    :type step: int
+    :param num_stages: Number of pipeline stages for the loop.
+    :type num_stages: int
+    :param loop_unroll_factor: The unroll factor applied to the loop body.
+    :type loop_unroll_factor: int
+    :param bind_sub_block: Tells the compiler whether multiple vector cores participate in the loop.
+        This is used in the mixed cube-vector kernel on 910B. The number of vector cores is determined by the
+        number of iterations in this loop. Currently on 910B, at most 2 vector cores can be used.
+    :type bind_sub_block: bool
     """
 
     def __init__(self, arg1, arg2=None, step=None, num_stages=None, loop_unroll_factor=None,
@@ -113,6 +125,20 @@ def compile_hint_impl(ptr: tensor, hint_name: str, hint_val, builder: ir.builder
 
 @builtin
 def compile_hint(ptr, hint_name, hint_val=None, _semantic=None):
+    """Attaches a compiler hint annotation to a tensor, guiding Ascend code generation.
+
+    Hints influence how the compiler handles memory layout, buffering, and other
+    optimization decisions. The hint is attached to ``ptr`` and serialized as an
+    MLIR annotation in the generated code.
+
+    :param ptr: The tensor to annotate with the compiler hint.
+    :type ptr: tensor
+    :param hint_name: Hint identifier string (e.g., ``"hivm.multi_buffer"``).
+    :type hint_name: str
+    :param hint_val: Hint value. Can be a bool, int, constexpr string, or list of
+        integers (serialized as an i64 array attribute).
+    :type hint_val: bool | int | constexpr | list[int] | None
+    """
     # simt mode does not support hint annotations
     if _semantic.builder.is_simt_mode():
         return
@@ -133,9 +159,12 @@ def compile_hint(ptr, hint_name, hint_val=None, _semantic=None):
 @builtin
 def multibuffer(src: tensor, size, _semantic=None):
     """
-    Set multi_buffer for an existing tensor
-    :src: tensor set to bufferize multiple time
-    :size: number of copies
+    Set multi_buffer for an existing tensor.
+
+    :param src: The tensor set to bufferize multiple time.
+    :type src: tensor
+    :param size: The number of copies.
+    :type size: int or constexpr
     """
     buffer_size = _unwrap_if_constexpr(size)
     assert isinstance(buffer_size, int) and buffer_size == 2, f"only support bufferize equals 2"

@@ -41,6 +41,7 @@ class Options:
     enable_fp_fusion = True
     debug = False
     arch = "Ascend910_95"
+    sanitize_overflow = True
 
 
 def compile_kernel(kernel, signature, constants):

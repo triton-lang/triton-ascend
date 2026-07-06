@@ -33,8 +33,9 @@ DEV = "npu"
 
 def get_autotune_config():
     return [
-        triton.Config({"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 128}),
         triton.Config({"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64}),
+        triton.Config({"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 32}),
+        triton.Config({"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 32}),
     ]
 
 
@@ -103,12 +104,12 @@ def matmul_kernel(
         b_ptrs = b_ptrs_base + k * BLOCK_SIZE_K * stride_bk
         a = tl.load(
             a_ptrs,
-            mask=msk_m[:, None] and (offs_k[None, :] < K - k * BLOCK_SIZE_K),
+            mask=msk_m[:, None] & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
             other=0.0,
         )
         b = tl.load(
             b_ptrs,
-            mask=msk_n[None, :] and (offs_k[:, None] < K - k * BLOCK_SIZE_K),
+            mask=msk_n[None, :] & (offs_k[:, None] < K - k * BLOCK_SIZE_K),
             other=0.0,
         )
         # We accumulate along the K dimension.
@@ -182,18 +183,22 @@ def matmul(a, b, activation=""):
 # ---------
 #
 # We can test our custom matrix multiplication operation against a native torch implementation (i.e., cuBLAS).
-def test():
+
+
+def test_matrix_multiplication():
     activation = "leaky_relu_custom"
+    shape = (512, 512, 512)
+    m, k, n = shape
     torch.manual_seed(0)
-    a = torch.randn((512, 512), device=DEV, dtype=torch.float16)
-    b = torch.randn((512, 512), device=DEV, dtype=torch.float16)
+    a = torch.randn((m, k), device=DEV, dtype=torch.float16)
+    b = torch.randn((k, n), device=DEV, dtype=torch.float16)
     triton_output = matmul(a, b, activation)
     torch_output = torch_matmul(a, b, activation)
-    print(f"triton_output_with_fp16_inputs={triton_output}")
-    print(f"torch_output_with_fp16_inputs={torch_output}")
+    print(f"triton_output(activation={activation}, shape={shape})={triton_output}")
+    print(f"torch_output(activation={activation}, shape={shape})={torch_output}")
     torch.testing.assert_close(triton_output, torch_output, atol=1e-3, rtol=1e-3)
-    print("Passed")
 
 
 if __name__ == "__main__":
-    test()
+    test_matrix_multiplication()
+    print("======Matrix Multiplication Test Passed!======")

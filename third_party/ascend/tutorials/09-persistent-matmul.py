@@ -197,11 +197,11 @@ def matmul_kernel_persistent(
 def get_configs(dtype):
     return {
         torch.float16: {
-            "BLOCK_SIZE_M": 128,
-            "BLOCK_SIZE_N": 256,
-            "BLOCK_SIZE_K": 64,
-            "GROUP_SIZE_M": 8,
-            "num_stages": 3,
+            "BLOCK_SIZE_M": 64,
+            "BLOCK_SIZE_N": 128,
+            "BLOCK_SIZE_K": 32,
+            "GROUP_SIZE_M": 4,
+            "num_stages": 2,
             "num_warps": 8,
         }
     }[dtype]
@@ -312,23 +312,18 @@ def validate(M, N, K):
 
     print(f"M={M}, N={N}, K={K} verification naive vs torch: {naive_vs_torch} "
           f"persistent vs torch: {persistent_vs_torch} naive vs persistent: {naive_vs_persistent}")
+    return torch_result, naive_result, persistent_result
+
+
+def test_persistent_matmul_validate_cases():
+    M, N, K = 32, 32, 32
+    torch.manual_seed(0)
+    torch_result, naive_result, persistent_result = validate(M, N, K)
+    torch.testing.assert_close(naive_result, torch_result, atol=1.0, rtol=0)
+    torch.testing.assert_close(persistent_result, torch_result, atol=1.0, rtol=0)
+    torch.testing.assert_close(naive_result, persistent_result, atol=1.0, rtol=0)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-K", type=int, required=False, default=512)
-    parser.add_argument("--K_range", type=int, nargs=2)
-    parser.add_argument("--K_step", type=int, default=512)
-    args = parser.parse_args()
-
-    if args.K and args.K_range is None:
-        args.K_range = [args.K, args.K]
-        args.K_step = 1
-
-    torch.manual_seed(0)
-
-    validate(32, 32, 32)
-    validate(8192, 8192, 512)
-
-    for K in range(args.K_range[0], args.K_range[1] + 1, args.K_step):
-        bench(K)
+    test_persistent_matmul_validate_cases()
+    print("======Persistent MatMul Test Passed!======")

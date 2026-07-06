@@ -1353,7 +1353,7 @@ class CodeGenerator(ast.NodeVisitor):
                 # Wrap the error in the callee with the location of the call.
                 if knobs.compilation.front_end_debugging:
                     raise
-                raise CompilationError(self.jit_fn.src, self.cur_node, repr(e)) from e
+                raise CompilationError(self.jit_fn.src, self.cur_node, None) from e
 
             callee_ret_type = generator.ret_type
             self.function_ret_types[fn_name] = callee_ret_type
@@ -1409,7 +1409,7 @@ class CodeGenerator(ast.NodeVisitor):
                 # itself).  But when calling a function, we raise as `from e` to
                 # preserve the traceback of the original error, which may e.g.
                 # be in core.py.
-                raise CompilationError(self.jit_fn.src, node, repr(e)) from e
+                raise CompilationError(self.jit_fn.src, node, str(e)) from e
 
         if fn in self.builtin_namespace.values():
             args = map(_unwrap_if_constexpr, args)

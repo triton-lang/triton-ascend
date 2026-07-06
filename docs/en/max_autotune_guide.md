@@ -18,7 +18,7 @@ This document is intended for users already familiar with Triton-Ascend's autotu
 ```python
 import triton
 import triton.language as tl
-from triton.backends.ascend.backend.runtime import max_autotune
+from triton.backends.ascend.runtime import max_autotune
 
 
 @max_autotune(
@@ -68,7 +68,7 @@ Total configuration count: `2 × 2 × 2 × 2 × 2 = 32` configurations.
 Like using `configs=[]` for automatic Tiling, `max_autotune` requires Ascend backend extension support. `max_autotune` must be imported separately from the Ascend backend module:
 
 ```python
-from triton.backends.ascend.backend.runtime import max_autotune
+from triton.backends.ascend.runtime import max_autotune
 ```
 
 ## Kernel Types and Supported Parameters

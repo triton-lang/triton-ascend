@@ -7,7 +7,7 @@
 |[mul](./mul.md) | 四则运算乘法 ‘*’ |
 |[div](./div.md) | 四则运算除法 ‘/’ |
 |[abs](./abs.md) |计算 x 的逐元素绝对值 |
-|[neg](./neg.md) | 将tensor的值取负。 |   x
+|[neg](./neg.md) | 将tensor的值取负。 |
 |[cdiv](./cdiv.md) |计算 x 除以 div 的向上取整除法 |
 |[ceil](./ceil.md) |计算 x 的逐元素向上取整值 |
 |[clamp](./clamp.md) |将输入张量 x 的值限制在 [min, max] 范围内 |

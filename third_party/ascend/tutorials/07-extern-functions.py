@@ -23,17 +23,12 @@
 Libdevice (`tl.extra.libdevice`) function
 ==============================
 """
-import inspect
-import os
-from pathlib import Path
-
 import torch
 import torch_npu
 
 import triton
 import triton.language as tl
 import triton.language.extra.cann.libdevice as libdevice
-from triton.backends.ascend.compiler import get_libdevice
 
 DEV = "npu"
 
@@ -54,36 +49,36 @@ def asin_kernel(
     tl.store(y_ptr + offsets, x, mask=mask)
 
 
-def test():
-    torch.manual_seed(0)
+def test_asin_kernel_matches_torch():
     size = 98432
+    torch.manual_seed(0)
     x = torch.rand(size, device=DEV)
-    output_triton = torch.zeros(size, device=DEV)
+    output_triton = torch.empty_like(x)
     output_torch = torch.asin(x)
-    assert x.device.type == DEV and output_triton.device.type == DEV
     n_elements = output_torch.numel()
 
     def grid(meta):
         return (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
 
     asin_kernel[grid](x, output_triton, n_elements, BLOCK_SIZE=1024)
-    print(output_torch)
-    print(output_triton)
-    print(f'The maximum difference between torch and triton is '
-          f'{torch.max(torch.abs(output_torch - output_triton))}')
-
-    current_file = inspect.getfile(inspect.currentframe())
-    current_dir = Path(os.path.dirname(os.path.abspath(current_file)))
-    extern_libs = {'libdevice': get_libdevice()}
-
-    output_triton = torch.empty_like(x)
-    asin_kernel[grid](x, output_triton, n_elements, BLOCK_SIZE=1024, extern_libs=extern_libs)
     torch.testing.assert_close(output_torch, output_triton, rtol=1e-4, atol=1e-4)
-    print(output_torch)
-    print(output_triton)
+    # Demo-style print
+    torch.manual_seed(0)
+    x_demo = torch.rand(98432, device=DEV)
+    output_triton_demo = torch.empty_like(x_demo)
+    output_torch_demo = torch.asin(x_demo)
+    n_elements = output_torch_demo.numel()
+
+    def grid(meta):
+        return (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
+
+    asin_kernel[grid](x_demo, output_triton_demo, n_elements, BLOCK_SIZE=1024)
+    print(output_torch_demo)
+    print(output_triton_demo)
     print(f'The maximum difference between torch and triton is '
-          f'{torch.max(torch.abs(output_torch - output_triton))}')
+          f'{torch.max(torch.abs(output_torch_demo - output_triton_demo))}')
 
 
 if __name__ == "__main__":
-    test()
+    test_asin_kernel_matches_torch()
+    print("======Extern Functions Test Passed!======")

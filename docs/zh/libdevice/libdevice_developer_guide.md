@@ -6,9 +6,6 @@
 
 ```python
 # Enable libdevice SIMT compilation
-import os
-os.environ['TRITON_ENABLE_LIBDEVICE_SIMT'] = '1'
-
 import triton
 import triton.language as tl
 import triton.language.extra.cann.libdevice as libdevice
@@ -26,8 +23,9 @@ def triton_kernel(input, output, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr)
         tl.store(output + (x0), y, None)
 
 dtype, shape, ncore, xblock, xblock_sub = ['int32', (128, 4096), 512, 1024, 1024]
-input = torch.randn(shape, dtype=dtype).npu()
-output = torch.randn(shape, dtype=dtype).npu()
+input = torch.randn(shape, dtype=eval('torch.' + dtype)).npu()
+output = torch.zeros_like(input)
+# Enable SIMT compilation with option "force_simt_only=True"
 triton_kernel[ncore, 1, 1](input, output, xblock, xblock_sub, force_simt_only=True)
 ```
 
@@ -44,6 +42,7 @@ triton.language.extra.cann.libdevice.abs(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`, `float32`
 
 返回值: `tl.tensor`, 返回输入参数的绝对值。
@@ -65,6 +64,7 @@ triton.language.extra.cann.libdevice.acos(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的反余弦值，取值范围 \[0, π] 弧度。
@@ -86,6 +86,7 @@ triton.language.extra.cann.libdevice.acosh(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的反双曲余弦值，取值范围 \[0, +∞]。
@@ -107,6 +108,7 @@ triton.language.extra.cann.libdevice.add_rd(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -129,6 +131,7 @@ triton.language.extra.cann.libdevice.add_rn(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -151,6 +154,7 @@ triton.language.extra.cann.libdevice.add_ru(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -173,6 +177,7 @@ triton.language.extra.cann.libdevice.add_rz(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -195,6 +200,7 @@ triton.language.extra.cann.libdevice.asin(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的反正弦值，取值范围 \[-π/2, π/2] 弧度。
@@ -216,6 +222,7 @@ triton.language.extra.cann.libdevice.asinh(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的反双曲正弦值。
@@ -237,6 +244,7 @@ triton.language.extra.cann.libdevice.atan(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的反正切值，取值范围 \[-π/2, π/2] 弧度。
@@ -258,6 +266,7 @@ triton.language.extra.cann.libdevice.atan2(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -280,6 +289,7 @@ triton.language.extra.cann.libdevice.atanh(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的反双曲正切值，取值范围 \[-1, 1]。
@@ -301,6 +311,7 @@ triton.language.extra.cann.libdevice.brev(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 
 返回值: `tl.tensor`, 返回位反转后的32位整数。
@@ -336,6 +347,7 @@ triton.language.extra.cann.libdevice.byte_perm(x, y, s, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 - y: `int32`
 - s: `int32`
@@ -359,6 +371,7 @@ triton.language.extra.cann.libdevice.cbrt(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的立方根值。
@@ -380,6 +393,7 @@ triton.language.extra.cann.libdevice.ceil(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回向上取整的结果。
@@ -401,6 +415,7 @@ triton.language.extra.cann.libdevice.clz(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 
 返回值: `tl.tensor`, 返回输入参数的前导零数量。范围 \[0, 32]。
@@ -422,6 +437,7 @@ triton.language.extra.cann.libdevice.copysign(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -444,6 +460,7 @@ triton.language.extra.cann.libdevice.cos(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的余弦值。
@@ -465,6 +482,7 @@ triton.language.extra.cann.libdevice.cosh(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的双曲余弦值。
@@ -486,6 +504,7 @@ triton.language.extra.cann.libdevice.cospi(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 cos(π × x) 的值。
@@ -507,6 +526,7 @@ triton.language.extra.cann.libdevice.cyl_bessel_i0(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的修正零阶贝塞尔函数值。
@@ -528,6 +548,7 @@ triton.language.extra.cann.libdevice.cyl_bessel_i1(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的修正一阶贝塞尔函数值。
@@ -549,6 +570,7 @@ triton.language.extra.cann.libdevice.div_rd(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -571,6 +593,7 @@ triton.language.extra.cann.libdevice.div_rn(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -593,6 +616,7 @@ triton.language.extra.cann.libdevice.div_ru(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -615,6 +639,7 @@ triton.language.extra.cann.libdevice.div_rz(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -637,6 +662,7 @@ triton.language.extra.cann.libdevice.erf(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的误差函数值。
@@ -658,6 +684,7 @@ triton.language.extra.cann.libdevice.erfc(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的互补误差函数值。
@@ -679,6 +706,7 @@ triton.language.extra.cann.libdevice.erfcinv(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的逆互补误差函数值。
@@ -700,6 +728,7 @@ triton.language.extra.cann.libdevice.erfcx(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的缩放互补误差函数值。
@@ -721,6 +750,7 @@ triton.language.extra.cann.libdevice.erfinv(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的逆误差函数值。
@@ -742,6 +772,7 @@ triton.language.extra.cann.libdevice.exp(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 e 的 x 次方的计算结果。
@@ -763,6 +794,7 @@ triton.language.extra.cann.libdevice.exp10(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 10 的 x 次方的计算结果。
@@ -784,6 +816,7 @@ triton.language.extra.cann.libdevice.exp2(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 2 的 x 次方的计算结果。
@@ -805,6 +838,7 @@ triton.language.extra.cann.libdevice.expm1(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 e 的 x 次方减 1 的计算结果。
@@ -826,6 +860,7 @@ triton.language.extra.cann.libdevice.fast_cosf(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回快速近似余弦函数的结果。
@@ -847,6 +882,7 @@ triton.language.extra.cann.libdevice.fast_dividef(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -869,6 +905,7 @@ triton.language.extra.cann.libdevice.fast_exp10f(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回快速近似以 10 为底的指数函数的结果。
@@ -890,6 +927,7 @@ triton.language.extra.cann.libdevice.fast_expf(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回快速近似指数函数的结果。
@@ -911,6 +949,7 @@ triton.language.extra.cann.libdevice.fast_log10f(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回快速近似以 10 为底的对数函数的结果。
@@ -932,6 +971,7 @@ triton.language.extra.cann.libdevice.fast_log2f(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回快速近似以 2 为底的对数函数的结果。
@@ -953,6 +993,7 @@ triton.language.extra.cann.libdevice.fast_logf(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回快速近似自然对数函数的结果。
@@ -974,6 +1015,7 @@ triton.language.extra.cann.libdevice.fast_powf(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -996,6 +1038,7 @@ triton.language.extra.cann.libdevice.fast_sinf(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回快速近似正弦函数的结果。
@@ -1017,6 +1060,7 @@ triton.language.extra.cann.libdevice.fast_tanf(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回快速近似正切函数的结果。
@@ -1038,6 +1082,7 @@ triton.language.extra.cann.libdevice.fdim(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -1060,6 +1105,7 @@ triton.language.extra.cann.libdevice.fdiv(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -1082,6 +1128,7 @@ triton.language.extra.cann.libdevice.ffs(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 
 返回值: `tl.tensor`, 返回最低被置为1的位的索引，取值范围 \[0, 32]。
@@ -1103,6 +1150,7 @@ triton.language.extra.cann.libdevice.finitef(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 若输入为有限值返回 True，否则返回 False。
@@ -1118,6 +1166,7 @@ triton.language.extra.cann.libdevice.finitef(x, _builder=None)
 沿指定维度反转张量元素顺序。
 
 输入类型：
+
 - ptr: `tensor`
 - dim: `int32`
 
@@ -1140,6 +1189,7 @@ triton.language.extra.cann.libdevice.float2int_rd(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的32位整数。
@@ -1161,6 +1211,7 @@ triton.language.extra.cann.libdevice.float2int_rn(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的32位整数。
@@ -1182,6 +1233,7 @@ triton.language.extra.cann.libdevice.float2int_ru(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的32位整数。
@@ -1203,6 +1255,7 @@ triton.language.extra.cann.libdevice.float2int_rz(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的32位整数。
@@ -1224,6 +1277,7 @@ triton.language.extra.cann.libdevice.float2ll_rd(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的64位整数。
@@ -1245,6 +1299,7 @@ triton.language.extra.cann.libdevice.float2ll_rn(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的64位整数。
@@ -1266,6 +1321,7 @@ triton.language.extra.cann.libdevice.float2ll_ru(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的64位整数。
@@ -1287,6 +1343,7 @@ triton.language.extra.cann.libdevice.float2ll_rz(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的64位整数。
@@ -1308,6 +1365,7 @@ triton.language.extra.cann.libdevice.float2uint_rd(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的32位无符号整数。
@@ -1329,6 +1387,7 @@ triton.language.extra.cann.libdevice.float2uint_rn(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的32位无符号整数。
@@ -1350,6 +1409,7 @@ triton.language.extra.cann.libdevice.float2uint_ru(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的32位无符号整数。
@@ -1371,6 +1431,7 @@ triton.language.extra.cann.libdevice.float2uint_rz(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的32位无符号整数。
@@ -1392,6 +1453,7 @@ triton.language.extra.cann.libdevice.float2ull_rd(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的64位无符号整数。
@@ -1413,6 +1475,7 @@ triton.language.extra.cann.libdevice.float2ull_rn(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的64位无符号整数。
@@ -1434,6 +1497,7 @@ triton.language.extra.cann.libdevice.float2ull_ru(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的64位无符号整数。
@@ -1455,6 +1519,7 @@ triton.language.extra.cann.libdevice.float2ull_rz(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回转换后的64位无符号整数。
@@ -1476,6 +1541,7 @@ triton.language.extra.cann.libdevice.float_as_int(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回将浮点数的比特位重新解释为32位整数的结果。
@@ -1497,6 +1563,7 @@ triton.language.extra.cann.libdevice.float_as_uint(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回将浮点数的比特位重新解释为32位无符号整数的结果。
@@ -1518,6 +1585,7 @@ triton.language.extra.cann.libdevice.floor(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回向下取整的结果。
@@ -1539,6 +1607,7 @@ triton.language.extra.cann.libdevice.fma(x, y, z, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 - z: `float32`
@@ -1562,6 +1631,7 @@ triton.language.extra.cann.libdevice.fma_rd(x, y, z, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 - z: `float32`
@@ -1585,6 +1655,7 @@ triton.language.extra.cann.libdevice.fma_rn(x, y, z, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 - z: `float32`
@@ -1608,6 +1679,7 @@ triton.language.extra.cann.libdevice.fma_ru(x, y, z, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 - z: `float32`
@@ -1631,6 +1703,7 @@ triton.language.extra.cann.libdevice.fma_rz(x, y, z, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 - z: `float32`
@@ -1654,6 +1727,7 @@ triton.language.extra.cann.libdevice.fmod(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -1676,6 +1750,7 @@ triton.language.extra.cann.libdevice.gamma(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的伽马函数值。
@@ -1697,6 +1772,7 @@ triton.language.extra.cann.libdevice.hadd(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 - y: `int32`
 
@@ -1719,6 +1795,7 @@ triton.language.extra.cann.libdevice.hypot(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -1741,6 +1818,7 @@ triton.language.extra.cann.libdevice.ilogb(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的无偏指数值。
@@ -1762,6 +1840,7 @@ triton.language.extra.cann.libdevice.int2float_rd(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -1783,6 +1862,7 @@ triton.language.extra.cann.libdevice.int2float_rn(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -1804,6 +1884,7 @@ triton.language.extra.cann.libdevice.int2float_ru(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -1825,6 +1906,7 @@ triton.language.extra.cann.libdevice.int2float_rz(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -1846,6 +1928,7 @@ triton.language.extra.cann.libdevice.int_as_float(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 
 返回值: `tl.tensor`, 返回将32位整数的比特位重新解释为浮点数的结果。
@@ -1867,6 +1950,7 @@ triton.language.extra.cann.libdevice.isfinited(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 若输入为有限值返回 True，否则返回 False。
@@ -1888,6 +1972,7 @@ triton.language.extra.cann.libdevice.isinf(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 若输入为无穷大返回 True，否则返回 False。
@@ -1909,6 +1994,7 @@ triton.language.extra.cann.libdevice.isnan(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 若输入为 NaN 返回 True，否则返回 False。
@@ -1930,6 +2016,7 @@ triton.language.extra.cann.libdevice.j0(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的零阶第一类贝塞尔函数值。
@@ -1951,6 +2038,7 @@ triton.language.extra.cann.libdevice.j1(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的一阶第一类贝塞尔函数值。
@@ -1972,6 +2060,7 @@ triton.language.extra.cann.libdevice.jn(n, x, _builder=None)
 ```
 
 输入类型：
+
 - n: `int32`
 - x: `float32`
 
@@ -1994,6 +2083,7 @@ triton.language.extra.cann.libdevice.ldexp(x, exp, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - exp: `int32`
 
@@ -2016,6 +2106,7 @@ triton.language.extra.cann.libdevice.lgamma(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入为 x 的伽马函数绝对值的自然对数。
@@ -2037,6 +2128,7 @@ triton.language.extra.cann.libdevice.ll2float_rd(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `int64`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -2058,6 +2150,7 @@ triton.language.extra.cann.libdevice.ll2float_rn(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `int64`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -2079,6 +2172,7 @@ triton.language.extra.cann.libdevice.ll2float_ru(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `int64`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -2100,6 +2194,7 @@ triton.language.extra.cann.libdevice.ll2float_rz(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `int64`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -2121,6 +2216,7 @@ triton.language.extra.cann.libdevice.llrint(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回舍入后的64位整数。
@@ -2142,6 +2238,7 @@ triton.language.extra.cann.libdevice.llround(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回舍入后的64位整数。
@@ -2163,6 +2260,7 @@ triton.language.extra.cann.libdevice.log(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入为 x 的以 e 为底的对数。
@@ -2184,6 +2282,7 @@ triton.language.extra.cann.libdevice.log10(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入为 x 的以 10 为底的对数。
@@ -2205,6 +2304,7 @@ triton.language.extra.cann.libdevice.log1p(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 log(1 + x) 的计算结果。
@@ -2226,6 +2326,7 @@ triton.language.extra.cann.libdevice.log2(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入为 x 的以 2 为底的对数。
@@ -2247,6 +2348,7 @@ triton.language.extra.cann.libdevice.logb(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的指数值。
@@ -2268,6 +2370,7 @@ triton.language.extra.cann.libdevice.mul24(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 - y: `int32`
 
@@ -2290,6 +2393,7 @@ triton.language.extra.cann.libdevice.mul_rd(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -2312,6 +2416,7 @@ triton.language.extra.cann.libdevice.mul_rn(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -2334,6 +2439,7 @@ triton.language.extra.cann.libdevice.mul_ru(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -2356,6 +2462,7 @@ triton.language.extra.cann.libdevice.mul_rz(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -2378,6 +2485,7 @@ triton.language.extra.cann.libdevice.mulhi(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 - y: `int32`
 
@@ -2400,6 +2508,7 @@ triton.language.extra.cann.libdevice.nearbyint(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回最近邻整数。
@@ -2421,6 +2530,7 @@ triton.language.extra.cann.libdevice.nextafter(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -2443,6 +2553,7 @@ triton.language.extra.cann.libdevice.norm3d(x, y, z, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 - z: `float32`
@@ -2466,6 +2577,7 @@ triton.language.extra.cann.libdevice.norm4d(x, y, z, w, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 - z: `float32`
@@ -2490,6 +2602,7 @@ triton.language.extra.cann.libdevice.normcdf(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回标准正态分布的累积分布函数值。
@@ -2511,6 +2624,7 @@ triton.language.extra.cann.libdevice.normcdfinv(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回标准正态分布累积分布函数的逆函数值。
@@ -2532,6 +2646,7 @@ triton.language.extra.cann.libdevice.popc(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 
 返回值: `tl.tensor`, 返回 x 中置位为 1 的数量，取值范围 \[0, 32]。
@@ -2553,6 +2668,7 @@ triton.language.extra.cann.libdevice.pow(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -2575,6 +2691,7 @@ triton.language.extra.cann.libdevice.rcbrt(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 x 的立方根倒数。
@@ -2596,6 +2713,7 @@ triton.language.extra.cann.libdevice.rcp_rd(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 1 / x。
@@ -2617,6 +2735,7 @@ triton.language.extra.cann.libdevice.rcp_rn(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 1 / x。
@@ -2638,6 +2757,7 @@ triton.language.extra.cann.libdevice.rcp_ru(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 1 / x。
@@ -2659,6 +2779,7 @@ triton.language.extra.cann.libdevice.rcp_rz(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 1 / x。
@@ -2680,6 +2801,7 @@ triton.language.extra.cann.libdevice.reciprocal(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 1 / x。
@@ -2701,6 +2823,7 @@ triton.language.extra.cann.libdevice.relu(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回修正线性单元的结果。
@@ -2722,6 +2845,7 @@ triton.language.extra.cann.libdevice.remainder(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -2744,6 +2868,7 @@ triton.language.extra.cann.libdevice.rhadd(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 - y: `int32`
 
@@ -2766,6 +2891,7 @@ triton.language.extra.cann.libdevice.rhypot(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -2788,6 +2914,7 @@ triton.language.extra.cann.libdevice.rint(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 x 的最近邻整数。
@@ -2809,6 +2936,7 @@ triton.language.extra.cann.libdevice.rnorm3d(x, y, z, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 - z: `float32`
@@ -2832,6 +2960,7 @@ triton.language.extra.cann.libdevice.rnorm4d(x, y, z, w, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 - z: `float32`
@@ -2856,6 +2985,7 @@ triton.language.extra.cann.libdevice.round(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 x 的最近邻整数。
@@ -2877,6 +3007,7 @@ triton.language.extra.cann.libdevice.rsqrt(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 x 的平方根倒数。
@@ -2898,6 +3029,7 @@ triton.language.extra.cann.libdevice.rsqrt_rn(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 x 的平方根倒数。
@@ -2919,6 +3051,7 @@ triton.language.extra.cann.libdevice.sad(x, y, z, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 - y: `int32`
 - z: `int32`
@@ -2942,6 +3075,7 @@ triton.language.extra.cann.libdevice.saturatef(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 x 的饱和值，取值范围 \[+0.0, 1.0]。
@@ -2963,6 +3097,7 @@ triton.language.extra.cann.libdevice.scalbn(x, n, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - n: `int32`
 
@@ -2985,6 +3120,7 @@ triton.language.extra.cann.libdevice.signbit(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 x 的符号位。
@@ -3006,6 +3142,7 @@ triton.language.extra.cann.libdevice.sin(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入 x 的正弦值。
@@ -3027,6 +3164,7 @@ triton.language.extra.cann.libdevice.sinh(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入 x 的双曲正弦值。
@@ -3048,6 +3186,7 @@ triton.language.extra.cann.libdevice.sinpi(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 sin(π × x) 的值。
@@ -3069,6 +3208,7 @@ triton.language.extra.cann.libdevice.sqrt(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 x 的平方根值。
@@ -3090,6 +3230,7 @@ triton.language.extra.cann.libdevice.sqrt_rd(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 x 的平方根值。
@@ -3111,6 +3252,7 @@ triton.language.extra.cann.libdevice.sqrt_rn(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 x 的平方根值。
@@ -3132,6 +3274,7 @@ triton.language.extra.cann.libdevice.sqrt_ru(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 x 的平方根值。
@@ -3153,6 +3296,7 @@ triton.language.extra.cann.libdevice.sqrt_rz(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回 x 的平方根值。
@@ -3174,6 +3318,7 @@ triton.language.extra.cann.libdevice.sub_rd(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -3196,6 +3341,7 @@ triton.language.extra.cann.libdevice.sub_rn(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -3218,6 +3364,7 @@ triton.language.extra.cann.libdevice.sub_ru(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -3240,6 +3387,7 @@ triton.language.extra.cann.libdevice.sub_rz(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 - y: `float32`
 
@@ -3262,6 +3410,7 @@ triton.language.extra.cann.libdevice.tan(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入 x 的正切值。
@@ -3283,6 +3432,7 @@ triton.language.extra.cann.libdevice.tanh(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入 x 的双曲正切值。
@@ -3304,6 +3454,7 @@ triton.language.extra.cann.libdevice.tgamma(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的伽马函数值。
@@ -3325,6 +3476,7 @@ triton.language.extra.cann.libdevice.trunc(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回取整结果。
@@ -3346,6 +3498,7 @@ triton.language.extra.cann.libdevice.uint2float_rd(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `uint32`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -3367,6 +3520,7 @@ triton.language.extra.cann.libdevice.uint2float_rn(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `uint32`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -3388,6 +3542,7 @@ triton.language.extra.cann.libdevice.uint2float_ru(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `uint32`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -3409,6 +3564,7 @@ triton.language.extra.cann.libdevice.uint2float_rz(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `uint32`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -3430,6 +3586,7 @@ triton.language.extra.cann.libdevice.uint_as_float(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `uint32`
 
 返回值: `tl.tensor`, 返回将32位无符号整数的比特位重新解释为浮点数的结果。
@@ -3451,6 +3608,7 @@ triton.language.extra.cann.libdevice.ull2float_rd(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `uint64`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -3472,6 +3630,7 @@ triton.language.extra.cann.libdevice.ull2float_rn(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `uint64`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -3493,6 +3652,7 @@ triton.language.extra.cann.libdevice.ull2float_ru(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `uint64`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -3514,6 +3674,7 @@ triton.language.extra.cann.libdevice.ull2float_rz(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `uint64`
 
 返回值: `tl.tensor`, 返回转换后的浮点数。
@@ -3535,6 +3696,7 @@ triton.language.extra.cann.libdevice.umulhi(x, y, _builder=None)
 ```
 
 输入类型：
+
 - x: `int32`
 - y: `int32`
 
@@ -3557,6 +3719,7 @@ triton.language.extra.cann.libdevice.y0(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的零阶第二类贝塞尔函数值。
@@ -3578,6 +3741,7 @@ triton.language.extra.cann.libdevice.y1(x, _builder=None)
 ```
 
 输入类型：
+
 - x: `float32`
 
 返回值: `tl.tensor`, 返回输入参数的一阶第二类贝塞尔函数值。
@@ -3599,6 +3763,7 @@ triton.language.extra.cann.libdevice.yn(n, x, _builder=None)
 ```
 
 输入类型：
+
 - n: `int32`
 - x: `float32`
 

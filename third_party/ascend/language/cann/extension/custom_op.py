@@ -291,6 +291,10 @@ def _init_op(op_class, *args, **kwargs):
 
 
 def custom_semantic(name: str, *args, _semantic=None, **kwargs):
+    """Internal semantic handler for custom operations (used by code generator).
+
+    User code should use :func:`custom` instead.
+    """
     name = _unwrap_constexpr(name)
     # Get op class according the name.
     op_class = _get_op_class(name)

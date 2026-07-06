@@ -1,4 +1,4 @@
-// RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=True force-simt-template=True' '--triton-to-unstructure=compile-on-910-95=True force-simt-template=True' %s --split-input-file | FileCheck %s
+// RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=True compile-mode=simt_template' '--triton-to-unstructure=compile-on-910-95=True compile-mode=simt_template' %s --split-input-file | FileCheck %s
 
 // tt.load -> tt.indirect_load
 tt.func public @triton_ldst_indirect_05_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<i64>, %arg2: !tt.ptr<f32>, %arg3: i32) attributes {noinline = false} {
@@ -57,7 +57,7 @@ tt.func public @triton_ldst_indirect_05_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.p
 // CHECK:           %[[VAL_20:.*]] = tt.broadcast %[[VAL_19]] : tensor<8x1xi64> -> tensor<8x16xi64>
 // CHECK:           %[[VAL_21:.*]] = tt.broadcast %[[VAL_18]] : tensor<1x16xi64> -> tensor<8x16xi64>
 // CHECK:           %[[VAL_22:.*]] = arith.addi %[[VAL_20]], %[[VAL_21]] : tensor<8x16xi64>
-// CHECK:           %[[VAL_23:.*]] = ascend.indirect_load %[[VAL_2:.*]] : <f32>, %[[VAL_22]] : tensor<8x16xi64> -> tensor<8x16xf32>
+// CHECK:           %[[VAL_23:.*]] = ascend.unstructured_load %[[VAL_2:.*]] : <f32>, %[[VAL_22]] : tensor<8x16xi64> unstructured_dims = [0, 1] {{.*}}-> tensor<8x16xf32>
 // CHECK:           %[[VAL_24:.*]] = math.exp %[[VAL_23]] : tensor<8x16xf32>
 // CHECK:           %[[VAL_25:.*]] = tt.expand_dims %[[VAL_10]] {axis = 1 : i32} : tensor<8xi32> -> tensor<8x1xi32>
 // CHECK:           %[[VAL_26:.*]] = arith.muli %[[VAL_25]], %[[VAL_4]] : tensor<8x1xi32>
@@ -129,13 +129,13 @@ tt.func public @triton_ldst_indirect_08_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.p
 // CHECK:           %[[VAL_20:.*]] = tt.broadcast %[[VAL_19:.*]] : tensor<8x1xi64> -> tensor<8x16xi64>
 // CHECK:           %[[VAL_21:.*]] = tt.broadcast %[[VAL_18:.*]] : tensor<1x16xi64> -> tensor<8x16xi64>
 // CHECK:           %[[VAL_22:.*]] = arith.addi %[[VAL_20:.*]], %[[VAL_21:.*]] : tensor<8x16xi64>
-// CHECK:           %[[VAL_23:.*]] = ascend.indirect_load %[[VAL_2:.*]] : <f32>, %[[VAL_22:.*]] : tensor<8x16xi64> -> tensor<8x16xf32>
+// CHECK:           %[[VAL_23:.*]] = ascend.unstructured_load %[[VAL_2:.*]] : <f32>, %[[VAL_22:.*]] : tensor<8x16xi64> unstructured_dims = [0, 1] {{.*}}-> tensor<8x16xf32>
 // CHECK:           %[[VAL_24:.*]] = math.exp %[[VAL_23:.*]] : tensor<8x16xf32>
 // CHECK:           %[[VAL_25:.*]] = tt.expand_dims %[[VAL_10:.*]] {axis = 1 : i32} : tensor<8xi32> -> tensor<8x1xi32>
 // CHECK:           %[[VAL_26:.*]] = arith.muli %[[VAL_25:.*]], %[[VAL_4:.*]] : tensor<8x1xi32>
 // CHECK:           %[[VAL_27:.*]] = arith.extsi %[[VAL_26:.*]] : tensor<8x1xi32> to tensor<8x1xi64>
 // CHECK:           %[[VAL_28:.*]] = tt.broadcast %[[VAL_27:.*]] : tensor<8x1xi64> -> tensor<8x16xi64>
 // CHECK:           %[[VAL_29:.*]] = arith.addi %[[VAL_28:.*]], %[[VAL_21:.*]] : tensor<8x16xi64>
-// CHECK:           ascend.indirect_store %[[VAL_0:.*]] : <f32>, %[[VAL_29:.*]] : tensor<8x16xi64>, %[[VAL_24:.*]] : tensor<8x16xf32>
+// CHECK:           ascend.unstructured_store %[[VAL_0:.*]] : <f32>, %[[VAL_29:.*]] : tensor<8x16xi64>, %[[VAL_24:.*]] : tensor<8x16xf32> unstructured_dims = [0, 1]
 // CHECK:           tt.return
 // CHECK:         }

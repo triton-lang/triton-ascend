@@ -16,7 +16,7 @@ msProf工具用于采集和分析运行在昇腾AI处理器上算子的关键性
 msprof op --kernel-name=target_kernel_name --output=$HOME/projects/output python3 $HOME/projects/test_op.py
 ```
 
-以示范测试用例[03-layer-norm.py](../../../third_party/ascend/tutorials/03-layer-norm.py)为例(不指定--output时生成的数据文件保存在当前路径下)：
+以示范测试用例[03-layer-norm.py](../../../third_party/ascend/unittest/autotune_ut/03-layer-norm.py)为例(不指定--output时生成的数据文件保存在当前路径下)：
 
 ```python
 msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
@@ -73,6 +73,24 @@ visualize_data.bin支持在MindStudio Insight可视化呈现：
   **图4** MindStudio Insight-visualize_data.bin指令关联\
   - 注：以下采集项的结果数据含义可参考《MindStudio Insight 工具》的[算子调优](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/GUI_baseddevelopmenttool/msascendinsightug/Insight_userguide_0068.html)章节。
   ![alt text](../figures/visualize_data_with_insight.png)
+
+#### 仿真流水图采集Triton算子Debug版本
+
+仿真流水图（trace.json / visualize_data.bin）默认只包含指令地址与指令名。若希望在MindStudio Insight中使用指令关联看板、查看指令对应的Triton/Python源码行与调用栈（即[查找瓶颈](#查找瓶颈)中的方法四），需要将算子编译为带debug_line调试信息的版本。未开启时，msprof op simulator会输出如下提示，且代码关联文件为空：
+
+```text
+[WARN] Kernel missed debug_line information. If you need code call stack, please recompile kernel with -g option
+[WARN] Code call stack is empty
+[WARN] Lack of code info of files
+```
+
+Triton算子无需手动添加`-g`，triton-ascend后端通过环境变量`TRITON_DISABLE_LINE_INFO`控制是否在`bishengir-compile`命令中追加`--enable-debug-info=true`。注意triton-ascend默认值为`true`（即默认**关闭**行号信息，与社区Triton默认开启相反），需显式置为`False`：
+
+```bash
+export TRITON_DISABLE_LINE_INFO=false
+```
+
+验证是否生效：日志中`[DEBUG] cmd_list:`一行应包含`--enable-debug-info=true`，且`Kernel missed debug_line information`告警消失。随后将`visualize_data.bin`导入MindStudio Insight，即可在指令时序图中查看每条指令关联的源码行与调用栈。
 
 ## 分析性能数据
 

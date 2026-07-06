@@ -294,85 +294,81 @@ def IndexSelectSimdOp : TT_Ascend_Op<"index_select_simd", [
 
 
 //
-// Built-in: IndirectLoad Op
+// Built-in: UnstructuredLoad Op
 //
-def IndirectLoadOp : TT_Ascend_Op<"indirect_load", [
+def UnstructuredLoadOp : TT_Ascend_Op<"unstructured_load", [
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
   AttrSizedOperandSegments
 ]> {
-  let summary = "Built-in: indirect load from global memory using per-element offsets with optional mask/other";
+  let summary = "Unstructured load with explicit base pointer and offset tensor";
 
   let description = [{
-    Built-in operation emitted by the compiler for unstructured (discrete) memory
-    accesses.These are not written directly in the user IR.
+    Intermediate op created by UnstructurePass for non-contiguous memory access.
+    Carries the decomposed base pointer and offset tensor from PtrOffsetInfo
+    analysis, enabling LinalgPass to generate hfusion.gather_load or SIMT
+    template calls without re-analyzing the pointer chain.
 
-    Load values from global memory based on per-element offsets. If `mask`
-    is provided, false lanes return `other`.
-
-    The operation takes:
-    - src: Source pointer
-    - offsets: Tensor of per-element offsets (relative to `src`) for accessing source memory
-    - mask (optional):  if mask[idx] is false, do not load the data at address pointer[idx]
-    - other (optional): if mask[idx] is false, return other[idx]
+    The base pointer is a scalar !tt.ptr<T>, which the LinalgPass TypeConverter
+    automatically converts to memref<?xT>.
   }];
 
   let arguments = (
-    ins TT_Ptr:$src,
-        TT_IntTensor:$offsets,
+    ins TT_Ptr:$base,
+        TT_IntTensor:$indices,
+        DenseI64ArrayAttr:$unstructuredDims,
         Optional<TT_BoolLike>:$mask,
-        Optional<TT_Type>:$other
+        Optional<TT_Type>:$other,
+        OptionalAttr<TT_CacheModifierAttr>:$cache,
+        OptionalAttr<TT_EvictionPolicyAttr>:$evict,
+        OptionalAttr<BoolAttr>:$isVolatile
   );
 
   let results = (outs TT_Tensor:$result);
 
   let assemblyFormat = [{
-    $src `:` type($src) `,`
-    $offsets `:` type($offsets)
+    $base `:` type($base) `,`
+    $indices `:` type($indices)
+    `unstructured_dims` `=` $unstructuredDims
     (`,` $mask^ `:` type($mask))?
     (`,` $other^ `:` type($other))?
     attr-dict `->` type($result)
   }];
-
 }
 
 
 //
-// Built-in: IndirectStore Op
+// Built-in: UnstructuredStore Op
 //
-def IndirectStoreOp : TT_Ascend_Op<"indirect_store", [
+def UnstructuredStoreOp : TT_Ascend_Op<"unstructured_store", [
   MemoryEffects<[MemWrite<GlobalMemory>]>
 ]> {
-  let summary = "Built-in: indirect store from UB using per-element offsets with optional mask/other";
+  let summary = "Unstructured store with explicit base pointer and offset tensor";
 
   let description = [{
-    Built-in operation emitted by the compiler for unstructured (discrete) memory
-    accesses.These are not written directly in the user IR.
-
-    Store values from UB based to GM on per-element offsets.
-
-    The operation takes:
-    - src: Source pointer
-    - offsets: Tensor of per-element offsets (relative to `src`) for accessing source memory
-    - value: The tensor of elements to be stored
-    - mask (optional): If mask[idx] is false, do not store value[idx] at pointer[idx]
+    Intermediate op created by UnstructurePass for non-contiguous store access.
+    Same design as UnstructuredLoadOp but for store operations.
   }];
 
   let arguments = (
-    ins TT_Ptr:$src,
-        TT_IntTensor:$offsets,
+    ins TT_Ptr:$base,
+        TT_IntTensor:$indices,
         TT_Type:$value,
-        Optional<TT_BoolLike>:$mask
+        DenseI64ArrayAttr:$unstructuredDims,
+        Optional<TT_BoolLike>:$mask,
+        OptionalAttr<TT_CacheModifierAttr>:$cache,
+        OptionalAttr<TT_EvictionPolicyAttr>:$evict
   );
 
   let assemblyFormat = [{
-    $src `:` type($src) `,`
-    $offsets `:` type($offsets) `,`
+    $base `:` type($base) `,`
+    $indices `:` type($indices) `,`
     $value `:` type($value)
+    `unstructured_dims` `=` $unstructuredDims
     (`,` $mask^ `:` type($mask))?
     attr-dict
   }];
-
 }
+
 
 //
 // Custom Op

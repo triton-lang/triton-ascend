@@ -847,8 +847,7 @@ class TritonSemantic(Generic[TensorTy]):
                              "data-type of size " + str(dst_bits))
         return self.tensor(self.builder.create_bitcast(input.handle, dst_ty.to_ir(self.builder)), dst_ty)
 
-    def cast(self, input: TensorTy, dst_ty: tl.dtype, fp_downcast_rounding: Optional[str] = None,
-             overflow_mode: Optional[str] = None) -> TensorTy:
+    def cast(self, input: TensorTy, dst_ty: tl.dtype, fp_downcast_rounding: Optional[str] = None) -> TensorTy:
         src_ty = input.type
         src_sca_ty = src_ty.scalar
         dst_sca_ty = dst_ty.scalar
@@ -915,10 +914,6 @@ class TritonSemantic(Generic[TensorTy]):
                 ty = input.dtype.to_ir(self.builder)
                 _0 = self.tensor(self.builder.get_null_value(ty), input.dtype)
                 return self.not_equal(input, _0)
-            elif overflow_mode == "saturate" and \
-                (src_sca_ty.is_int_unsigned() or dst_sca_ty.is_int_unsigned()) and \
-                src_sca_ty.int_bitwidth >= dst_sca_ty.int_bitwidth:
-                return self.cast(self.cast(input, tl.float32), dst_sca_ty)
             else:
                 return self.tensor(self.builder.create_int_cast(input.handle, dst_ty.to_ir(self.builder), sign_extend),
                                    dst_ty)
@@ -1070,15 +1065,12 @@ class TritonSemantic(Generic[TensorTy]):
         # Check `boundary_check` argument
         boundary_check = self._canonicalize_boundary_check(boundary_check, dst_ty.get_block_shapes())
 
-        if boundary_check and padding is None:
-            padding = ir.PADDING_OPTION.PAD_ZERO
-
-    # Build IR
+        # Build IR
         return self.tensor(
             self.builder.create_tensor_pointer_load(ptr.handle, boundary_check, padding, cache, eviction, is_volatile),
             dst_ty)
 
-    def _load_legacy(self, ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile, care_padding):
+    def _load_legacy(self, ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile):
         # Load by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
         if not ptr.type.scalar.is_ptr():
             raise ValueError(f"Unsupported ptr type {ptr.type.__repr__()} in `tl.load`")
@@ -1091,12 +1083,6 @@ class TritonSemantic(Generic[TensorTy]):
                              "pointers or loading a scalar. Because the compiler does not know the boundary; please "
                              "use block pointers (defined by `make_block_ptr`) instead")
 
-        if mask is not None and other is None and care_padding:
-            # Get element type to determine default padding value
-            elt_ty = ptr.type.scalar.element_ty
-            # Use 0.0 for floating point types, 0 for integer types
-            default_value = 0.0 if elt_ty.is_floating() else 0
-            other = self.to_tensor(default_value)
         # For a pointer of scalar, check the type of `mask` and `other`
         if not ptr.type.is_block():
             if mask and mask.type.is_block():
@@ -1151,8 +1137,7 @@ class TritonSemantic(Generic[TensorTy]):
         return ret
 
     def load(self, ptr: TensorTy, mask: Optional[TensorTy], other: Optional[TensorTy], boundary_check: Tuple,
-             padding_option: str, cache_modifier: str, eviction_policy: str, is_volatile: bool,
-             care_padding: bool) -> TensorTy:
+             padding_option: str, cache_modifier: str, eviction_policy: str, is_volatile: bool) -> TensorTy:
         # Cache, eviction and padding options
         cache = self._str_to_load_cache_modifier(cache_modifier)
         eviction = self._str_to_eviction_policy(eviction_policy)
@@ -1163,8 +1148,7 @@ class TritonSemantic(Generic[TensorTy]):
             return self._load_block_pointer(ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile)
         else:
             # Load by a tensor of pointers or a pointer of scalar: `block_type<pointer_type<>>` or `pointer_type<>`
-            return self._load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile,
-                                     care_padding)
+            return self._load_legacy(ptr, mask, other, boundary_check, padding, cache, eviction, is_volatile)
 
     def descriptor_load(self, desc: tl.tensor_descriptor_base, offsets, cache_modifier: str,
                         eviction_policy: str) -> TensorTy:
@@ -1510,9 +1494,9 @@ class TritonSemantic(Generic[TensorTy]):
             # All combinations of supported fp8 x fp8 are permitted
             pass
         else:
-            assert lhs.dtype in (tl.int1, tl.int8, tl.uint8, tl.float16, tl.bfloat16, tl.float32,
+            assert lhs.dtype in (tl.int8, tl.uint8, tl.float16, tl.bfloat16, tl.float32,
                                  tl.float64), f"Unsupported lhs dtype {lhs.dtype}"
-            assert rhs.dtype in (tl.int1, tl.int8, tl.uint8, tl.float16, tl.bfloat16, tl.float32,
+            assert rhs.dtype in (tl.int8, tl.uint8, tl.float16, tl.bfloat16, tl.float32,
                                  tl.float64), f"Unsupported rhs dtype {rhs.dtype}"
             assert lhs.dtype == rhs.dtype, f"Both operands must be same dtype. Got {lhs.dtype} and {rhs.dtype}"
 
@@ -1581,14 +1565,16 @@ class TritonSemantic(Generic[TensorTy]):
             acc_handle = acc.handle
             assert acc.type.shape == ret_ty.shape and acc.type.element_ty == out_dtype
 
-        if (input_precision == getattr(ir.INPUT_PRECISION, "HF32")):
-            if (not lhs.dtype.is_fp32() or not rhs.dtype.is_fp32() or not ret_scalar_ty.is_fp32()):
-                # when input and result is not fp32, ignore input_precision (default is ieee)
-                input_precision = self._str_to_dot_input_precision(self.builder.options.default_dot_input_precision)
-
-        if max_num_imprecise_acc is not None:
-            print("max_num_imprecise_acc in tl.dot is not supported on Ascend yet. Thus it is ignored.")
-        max_num_imprecise_acc = 0
+        # max_num_imprecise_acc only applies to fp8 -> fp32 dot on sm_90
+        if max_num_imprecise_acc is None:
+            if lhs.dtype.is_fp8() and rhs.dtype.is_fp8():
+                max_num_imprecise_acc = self.builder.options.max_num_imprecise_acc_default
+            else:
+                max_num_imprecise_acc = 0
+        else:
+            if lhs.dtype.is_fp8() and rhs.dtype.is_fp8() and max_num_imprecise_acc > lhs.shape[-1].value:
+                raise ValueError(
+                    f"max_num_imprecise_acc ({max_num_imprecise_acc}) must be <= K ({lhs.shape[-1].value})")
         return self.tensor(
             self.builder.create_dot(lhs.handle, rhs.handle, acc_handle, input_precision, max_num_imprecise_acc), ret_ty)
 
@@ -1779,8 +1765,6 @@ class TritonSemantic(Generic[TensorTy]):
 
     def gather(self, src: TensorTy, index: TensorTy, axis: int) -> TensorTy:
         assert index.dtype.is_int(), "index must be an integer tensor"
-        if not (src.dtype.is_floating() or src.dtype.is_int8()):
-            raise ValueError(f"Expected dtype fp16/fp32/bf16/f8E5M2/f8E4M3FN/int8, but got {src.dtype}")
 
         rank = len(src.type.shape)
         assert len(index.type.shape) == rank, "source and index tensors must have the same rank"

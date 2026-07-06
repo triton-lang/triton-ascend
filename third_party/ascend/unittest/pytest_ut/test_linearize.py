@@ -468,11 +468,11 @@ def save_cache_to_buffer_with_mask(buffer_ptr, cache_ptr1, cache_ptr2, mask_int_
     mask_int = tl.load(mask_int_ptr + pid_loc)
     if pid_loc % 2 == 0:
         tmp = tl.load(cache_ptr1 + (2*BLOCK*cache_index_0 + cache_index_1), \
-            ((2*BLOCK*cache_index_0 + cache_index_1) < buffer_offset * 2 + MASK_NUM))
+            ((2*BLOCK*cache_index_0 + cache_index_1) < buffer_offset * 2 + MASK_NUM), other=0.0)
         tl.store(buffer_ptr + index, tmp)
     if pid_loc % 2 == 1:
         tmp = tl.load(cache_ptr2 + (2*BLOCK*cache_index_0 + cache_index_1), \
-            (buffer_index < MASK_NUM) & (buffer_index < mask_int))
+            (buffer_index < MASK_NUM) & (buffer_index < mask_int), other=0.0)
         tl.store(buffer_ptr + index, tmp)
 
 

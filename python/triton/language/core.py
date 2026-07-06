@@ -880,27 +880,27 @@ class tensor(base_value):
 
     @builtin
     def __add__(self, other, _semantic=None):
-        return add(self, other, sanitize_overflow=False, _semantic=_semantic)
+        return add(self, other, sanitize_overflow=True, _semantic=_semantic)
 
     @builtin
     def __radd__(self, other, _semantic=None):
-        return add(other, self, sanitize_overflow=False, _semantic=_semantic)
+        return add(other, self, sanitize_overflow=True, _semantic=_semantic)
 
     @builtin
     def __sub__(self, other, _semantic=None):
-        return sub(self, other, sanitize_overflow=False, _semantic=_semantic)
+        return sub(self, other, sanitize_overflow=True, _semantic=_semantic)
 
     @builtin
     def __rsub__(self, other, _semantic=None):
-        return sub(other, self, sanitize_overflow=False, _semantic=_semantic)
+        return sub(other, self, sanitize_overflow=True, _semantic=_semantic)
 
     @builtin
     def __mul__(self, other, _semantic=None):
-        return mul(self, other, sanitize_overflow=False, _semantic=_semantic)
+        return mul(self, other, sanitize_overflow=True, _semantic=_semantic)
 
     @builtin
     def __rmul__(self, other, _semantic=None):
-        return mul(other, self, sanitize_overflow=False, _semantic=_semantic)
+        return mul(other, self, sanitize_overflow=True, _semantic=_semantic)
 
     @builtin
     def __truediv__(self, other, _semantic=None):
@@ -1107,12 +1107,11 @@ class tensor(base_value):
         assert False, "Transposition must be created by the AST Visitor"
 
     @builtin
-    def to(self, dtype: dtype, fp_downcast_rounding: Optional[str] = None, bitcast: bool = False,
-           overflow_mode: Optional[str] = None, _semantic=None):
+    def to(self, dtype: dtype, fp_downcast_rounding: Optional[str] = None, bitcast: bool = False, _semantic=None):
         """
         Alias for :py:func:`tensor.cast`.
         """
-        return cast(self, dtype, fp_downcast_rounding, bitcast, overflow_mode, _semantic=_semantic)
+        return cast(self, dtype, fp_downcast_rounding, bitcast, _semantic=_semantic)
 
     # Type stubs for functions added by the _tensor_member_fn decorator.
     # (Unfortunately these can't be created automatically.)
@@ -1140,7 +1139,7 @@ class tensor(base_value):
     def expand_dims(self, axis) -> tensor:
         ...
 
-    def cast(self, dtype, fp_downcast_rounding=None, bitcast=False, overflow_mode=None) -> tensor:
+    def cast(self, dtype, fp_downcast_rounding=None, bitcast=False) -> tensor:
         ...
 
     def store(self, value, mask=None, boundary_check=(), cache_modifier="", eviction_policy="") -> tensor:
@@ -1954,8 +1953,7 @@ def expand_dims(input, axis, _semantic=None):
 
 @_tensor_member_fn
 @builtin
-def cast(input, dtype: dtype, fp_downcast_rounding: Optional[str] = None, bitcast: bool = False,
-         overflow_mode: Optional[str] = None, _semantic=None):
+def cast(input, dtype: dtype, fp_downcast_rounding: Optional[str] = None, bitcast: bool = False, _semantic=None):
     """
     Casts a tensor to the given :code:`dtype`.
 
@@ -2031,7 +2029,7 @@ def dot(input, other, acc=None, input_precision=None, allow_tf32=None, max_num_i
 
 
 @builtin
-def dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc=None, fast_math=True, lhs_k_pack=True,
+def dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc=None, fast_math=False, lhs_k_pack=True,
                rhs_k_pack=True, out_dtype=float32, _semantic=None):
     """
     Returns the matrix product of two blocks in microscaling format.
@@ -2077,7 +2075,7 @@ def dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc=None,
 
 @builtin
 def load(pointer, mask=None, other=None, boundary_check=(), padding_option="", cache_modifier="", eviction_policy="",
-         volatile=False, care_padding=True, _semantic=None):
+         volatile=False, _semantic=None):
     """
     Return a tensor of data whose values are loaded from memory at location defined by `pointer`:
 
@@ -2120,11 +2118,6 @@ def load(pointer, mask=None, other=None, boundary_check=(), padding_option="", c
     :type eviction_policy: str, optional
     :param volatile: changes volatile option in NVIDIA PTX
     :type volatile: bool, optional
-    :param care_padding: represents whether user cares about padding value or not, default is True, works as below:
-        1. if 'other' is not None, 'care_padding' takes no effect.
-        2. if 'other' is None and 'care_padding' = True, loaded tensor will fill zeroes on masked places.
-        3. if 'other' is None and 'care_padding' = False, masked places on loaded tensor will be random values, and tl.load may have a better performence.
-    :type care_padding: bool, optional
     """
     # `mask` and `other` can be constexpr
     mask = _unwrap_if_constexpr(mask)
@@ -2137,9 +2130,8 @@ def load(pointer, mask=None, other=None, boundary_check=(), padding_option="", c
     cache_modifier = _unwrap_if_constexpr(cache_modifier)
     eviction_policy = _unwrap_if_constexpr(eviction_policy)
     volatile = _unwrap_if_constexpr(volatile)
-    care_padding = _unwrap_if_constexpr(care_padding)
     return _semantic.load(pointer, mask, other, boundary_check, padding_option, cache_modifier, eviction_policy,
-                          volatile, care_padding)
+                          volatile)
 
 
 @builtin
@@ -2639,9 +2631,9 @@ def reduce(input, axis, combine_fn, keep_dims=False, _semantic=None, _generator=
     ret = _semantic.reduction(input, axis, make_combine_region)
     if keep_dims:
         if axis is not None:
-            ret = builtins.tuple(expand_dims(t, axis, _semantic=_semantic) for t in ret)
+            ret = tuple(expand_dims(t, axis, _semantic=_semantic) for t in ret)
         else:
-            ret = builtins.tuple(expand_ndims(t, len(input[0].shape)) for t in ret)
+            ret = tuple(expand_ndims(t, len(input[0].shape)) for t in ret)
     return ret
 
 

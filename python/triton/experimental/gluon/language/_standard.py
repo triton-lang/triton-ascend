@@ -4,7 +4,6 @@ import triton.language.standard as tl_standard
 from .._runtime import GluonJITFunction, jit
 from triton import knobs
 from . import _core as ttgl
-from triton.language.standard import cdiv as tl_cdiv
 
 T = TypeVar("T")
 
@@ -17,8 +16,7 @@ def _import_from_triton(fn: JITFunction[T]) -> GluonJITFunction[T]:
     return gluon_fn
 
 
-#cdiv = _import_from_triton(tl_standard.cdiv)
-cdiv = _import_from_triton(tl_cdiv)
+cdiv = _import_from_triton(tl_standard.cdiv)
 sum = _import_from_triton(tl_standard.sum)
 max = _import_from_triton(tl_standard.max)
 min = _import_from_triton(tl_standard.min)

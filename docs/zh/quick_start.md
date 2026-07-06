@@ -1,129 +1,43 @@
 # 快速入门
 
-## 项目简介
+## 项目介绍
+Triton-Ascend 是适配华为 Ascend 昇腾芯片的 Triton 优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容 Triton 核心语法并针对昇腾 NPU 特性进行深度优化，能够帮助用户在昇腾平台上快速开发和部署高性能计算任务。
+本文以 Ubuntu 22.04 环境下通过软件包部署方式运行向量加法示例为例，指导用户快速上手使用 Triton-Ascend。
 
-Triton-Ascend 是适配华为 Ascend 昇腾芯片的 Triton 优化版本，提供高效的核函数自动调优、算子编译及部署能力，支持 Ascend Atlas A2/A3 等系列产品，
-兼容 Triton 核心语法的同时，针对昇腾 NPU 特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。
+## 软件包安装
 
-## 在线文档
+### 环境准备
 
-我们提供了完整的在线文档与网络资料，涵盖环境搭建、算子开发、调优实践以及常见问题说明，方便用户快速上手与深入使用，详情请参考 [在线文档](https://triton-ascend.readthedocs.io/zh-cn/latest/index.html)
-
-## 环境要求
-
-### 硬件要求
+#### 硬件要求
 
 支持的操作系统: linux(aarch64/x86_64)
 
-支持的 Ascend 产品: Atlas A2/A3 系列
+支持的 Ascend 产品: Atlas A2/A3/A5 系列
 
-最小硬件配置: 单卡 32GB 显存（推荐）
+最小硬件配置: 单卡 32GB 内存（推荐）
 
-### 软件依赖
+#### 软件依赖
 
-Python（**3.9 - 3.13**,注:py3.9不支持aarch64架构），CANN_TOOLKIT，CANN_OPS，以及[requirements.txt](../../requirements.txt)和[requirements_dev.txt](../../requirements_dev.txt)等。
+确定 Python、CANN 和 torch_npu 软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。
+-   Python 版本选择：py3.9-py3.11 均可。
 
-您可以访问昇腾社区官网，根据其提供的[社区软件安装指引](https://www.hiascend.com/cann/download)完成 CANN 的安装与配置。开发者选择CANN版本、产品系列、CPU架构、操作系统和安装方式便可找到对应的安装命令。
+-   CANN 版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成 CANN 的安装与配置。建议下载安装 9.0.0 版本。
 
-在安装过程中，CANN 版本“**{version}**”请选择如下版本之一。建议下载安装 9.0.0 版本:
+-   torch_npu 版本选择：当前配套的 torch_npu 版本为 2.7.1.post4。
 
-- 注：如果用户未指定安装路径，则软件会安装到默认路径下，默认安装路径如下。root用户：`/usr/local/Ascend`，非root用户：`${HOME}/Ascend`，`${HOME}`为当前用户目录。
-
-上述环境变量配置只在当前窗口生效，用户可以按需将```source ${HOME}/Ascend/ascend-toolkit/set_env.sh```命令写入环境变量配置文件（如.bashrc文件）。
-
-需要根据您实际使用的昇腾卡型号选择对应的配套版本（建议9.0.0版本），并且安装CANN的时间大概在5-10分钟，请耐心等待安装完成。
-
-requirements的安装可以参考如下：
-
-```shell
-pip install -r requirements.txt -r requirements_dev.txt
-```
-
-## 环境搭建
-
-用户可根据[安装指南](installation_guide.md)的环境准备章节步骤搭建Triton-Ascend环境。
-
-### Triton-Ascend 软件包获取
-
-用户可以直接命令行安装最新的稳定版本包。
-
-```shell
-pip install triton-ascend
-```
-
-- 注意：从 3.2.1 版本开始，Triton-Ascend 通过将 Triton 声明为安装依赖来缓解安装覆盖问题。安装 Triton-Ascend 时会先安装社区 Triton，再由 Triton-Ascend 覆盖同名目录，从而避免后续安装其他依赖 Triton 的软件包时再次安装 Triton 而覆盖 Triton-Ascend。x86 与 arm 使用不同版本的社区 Triton 安装包的原因是社区从 3.5 版本开始才提供 arm 版本安装包：x86 依赖 `triton==3.2.0`，arm 依赖 `triton==3.5.0`。
-- 注意1：该方案用于缓解安装覆盖问题，并不能彻底消除社区 Triton 与 Triton-Ascend 共享同名 `triton` 包目录带来的冲突；如果后续安装流程显式重新安装或升级社区 Triton，仍可能影响已安装的 Triton-Ascend，此时请先同时卸载社区 Triton 和 Triton-Ascend，然后重新安装 Triton-Ascend。
-
-也可以在 [下载地址](https://test.pypi.org/project/triton-ascend/#history) 中自行选择nightly包进行下载然后本地安装。
-
-- 注意2：如果您选择自行下载nightly包安装，请在选择Triton-Ascend包时选择对应您服务器的Python版本以及架构(aarch64/x86_64)。
-- 注意3：nightly是每日构建的包，开发者提交MR频繁，没有经过稳定的测试，可能存在功能上的bug，请知悉。
-
-## 快速使用Docker 安装环境
-
-我们提供了Dockerfile帮助您安装Docker环境镜像。构建过程使用`quay.io/ascend/cann`预构建镜像作为基础镜像，跳过CANN安装步骤，显著加快构建速度。
-
-您需要通过`--build-arg`指定`CANN_BASE_IMAGE`参数来选择适合您机器的CANN基础镜像。可用的CANN基础镜像标签可在[quay.io/ascend/cann](https://quay.io/repository/ascend/cann?tab=tags)查看。
-
-| CANN版本 | 芯片类型 | Python版本 | 镜像标签 |
-|---|---|---|---|
-| 8.5.0 | `A2` | 3.10 | `8.5.0-910b-ubuntu22.04-py3.10` |
-| 8.5.0 | `A3` | 3.10 | `8.5.0-a3-ubuntu22.04-py3.10` |
-| 8.5.0 | `A2` | 3.11 | `8.5.0-910b-ubuntu22.04-py3.11` |
-| 8.5.0 | `A3` | 3.11 | `8.5.0-a3-ubuntu22.04-py3.11` |
-| 9.0.0-beta.2 | `A2` | 3.10 | `9.0.0-beta.2-910b-ubuntu22.04-py3.10` |
-| 9.0.0-beta.2 | `A3` | 3.10 | `9.0.0-beta.2-a3-ubuntu22.04-py3.10` |
-| 9.0.0-beta.2 | `A2` | 3.11 | `9.0.0-beta.2-910b-ubuntu22.04-py3.11` |
-| 9.0.0-beta.2 | `A3` | 3.11 | `9.0.0-beta.2-a3-ubuntu22.04-py3.11` |
-
-您可以通过 npu-smi 命令查看系统上的NPU型号。
-
-不同芯片类型对应的机器可参考：
-
-| 选项序号 | **芯片类型** | 对应机器/产品系列 |                 典型整机                 |
-| :---: |:-----------------:| :---: |:-----------------------------------:|
-| 1 |       `A3`        | Atlas A3 训练系列产品 |        Atlas 900 A3 SuperPoD        |
-| 2 |       `A2`        | Atlas A2 训练系列产品 |            Atlas800T A2             |
-
+### 具体实施（以whl包安装为例）
 ```bash
-git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
-docker build \
---build-arg CANN_BASE_IMAGE=quay.io/ascend/cann:8.5.0-a3-ubuntu22.04-py3.10 \
--t triton-ascend-image:latest -f ./docker/Dockerfile .
+# 以安装 triton-ascend 3.2.1 为例
+pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
 ```
+注意：triton-ascend 3.2.1 及以上，Triton-Ascend 通过将 Triton 声明为安装依赖来缓解安装覆盖问题。 安装 Triton-Ascend 时会先安装社区 Triton，再由 Triton-Ascend 覆盖同名目录，从而避免后续安装其他依赖 Triton 的软件包时再次安装 Triton 而覆盖 Triton-Ascend。
 
-根据该镜像启动容器，可以参考下面的命令：
+## 快速开始
 
-```bash
-docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container --net=host --privileged \
---security-opt seccomp=unconfined \
---device=/dev/davinci0 \
---device=/dev/davinci1 \
---device=/dev/davinci2 \
---device=/dev/davinci3 \
---device=/dev/davinci4 \
---device=/dev/davinci5 \
---device=/dev/davinci6 \
---device=/dev/davinci7 \
---device=/dev/davinci_manager \
---device=/dev/devmm_svm \
---device=/dev/hisi_hdc \
--v /usr/local/dcmi:/usr/local/dcmi \
--v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi \
--v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi \
--v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
--v /home:/home \
--v /etc/ascend_install.info:/etc/ascend_install.info \
-triton-ascend-image:latest \
-/bin/bash
+### 示例一：运行 tutorials 中向量加法示例验证结果
 
-# 进入容器
-docker exec -u root -it triton-ascend_container /bin/bash
-```
-
-## 运行Triton示例
-
-运行实例: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)
+向量加法实例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)
+通过对比 Triton 核函数与 PyTorch 原生计算的输出结果进行对比，证明昇腾 NPU 设备可正确调用 Triton 核函数并保证计算精度。
 
 ```bash
 # 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
@@ -142,9 +56,10 @@ tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0
 ```
 
-## 从 GPU 到 NPU：迁移 Triton 示例
+### 示例二：从 GPU 到 NPU：迁移 Triton
 
-Triton-Ascend 在保持与社区 Triton 语法完全兼容的同时，只需在 **张量的设备声明** 和少量 `torch.cuda.*` 接口上做替换，原有 GPU 示例即可在昇腾 NPU 上运行。下面通过一个典型向量加法测试，演示完整的迁移过程。
+Triton-Ascend 在保持与社区 Triton 语法完全兼容的同时，只需在 **张量的设备声明** 和少量 `torch.cuda.*` 接口上做替换，原有 GPU 示例即可在昇腾 NPU 上运行。
+本节提供了一个简单的向量加法测试样例，采用最基础的迁移方法，对原 GPU 代码进行少量修改，演示完整的迁移过程，帮助用户快速体验 GPU 脚本迁移到昇腾 NPU 上的流程。
 
 GPU 版本示例文件`test_add.py`如下:
 
@@ -242,7 +157,7 @@ def test_add(SIZE, BLOCK_SIZE):
     assert_close(output, output_torch, rtol=1e-3, atol=1e-3)
 ```
 修改完后，可用`pytest`运行用例，执行成功即表明迁移成功。
-```
+```bash
 pytest test_add.py
 ```
 若未安装`pytest`组件，可使用`pip install pytest`进行安装。

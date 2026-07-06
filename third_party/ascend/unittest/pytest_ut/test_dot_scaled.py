@@ -71,10 +71,11 @@ def test_scaled_dot(M, N, K, rhs_scale, normal_type, num_warps, acc_num):
             scale_b_ptr = b_scale + tl.arange(0, BLOCK_N)[:, None] * SCALE_BLOCK_K + tl.arange(0,
                                                                                                SCALE_BLOCK_K)[None, :]
             b_scale = tl.load(scale_b_ptr)
-        accumulator = tl.dot_scaled(a, a_scale, type_a, b, b_scale, type_b, acc=accumulator, out_dtype=tl.float32)
+        accumulator = tl.dot_scaled(a, a_scale, type_a, b, b_scale, type_b, acc=accumulator, fast_math=True,
+                                    out_dtype=tl.float32)
         if acc_num is not None:
             for _ in range(acc_num):
-                accumulator = tl.dot_scaled(a, a_scale, type_a, b, b_scale, type_b, acc=accumulator,
+                accumulator = tl.dot_scaled(a, a_scale, type_a, b, b_scale, type_b, acc=accumulator, fast_math=True,
                                             out_dtype=tl.float32)
 
         out_ptr = out + tl.arange(0, BLOCK_M)[:, None] * BLOCK_N + tl.arange(0, BLOCK_N)[None, :]

@@ -1,19 +1,22 @@
-# Agenda:
-1. What are the plans for existing block pointer programming model? (Context: Intel GPU backend relies heavily on it an will need time to fully move to tensor descriptor programming model) - Jianhui Li (Intel)
+# Agenda
+
+1. What are the plans for existing block pointer programming model? (Context: Intel GPU backend relies heavily on it and will need time to fully move to tensor descriptor programming model) - Jianhui Li (Intel)
 2. Infrastructure for Triton performance tests - Sayce Falk (Google)
 3. What talks/tutorials/open discussions would you like to see at the 2025 Triton Developers' Summit? How can we help? Adnan Aziz (Meta)
 
-# Notes:
+# Notes
 
 ## What are the plans for existing block pointer programming model? (Context: Intel GPU backend relies heavily on it an will need time to fully move to tensor descriptor programming model)
+
 Speakers: Jianhui Li (Intel), Keren Zhou (George Mason Univ)
 
 * Glad to see Triton moving toward generic tensor descriptor vs vendor-specific TMA.
 * Intel is still relying on older block pointer programming model. Will take some time to migrate to new tensor descriptor model
 
 ### Questions
+
 * Q> What is timeline for deprecation of block pointer?
-* Q> Looked at code examples. Two flavors of tensor descriptor. We'd prefer keeping one: **CreateTensorDescriptorFromHost** Why are there two flavors?  WHy not just keep the device side one?
+* Q> Looked at code examples. Two flavors of tensor descriptor. We'd prefer keeping one: **CreateTensorDescriptorFromHost** Why are there two flavors?  Why not just keep the device side one?
 * A> You want to know why we have one device side and one host side.
 * Q> Ok to have tensor descriptors in global memory. We want tensor descriptors to reside on the device.
 * A> We have descriptor API on device because when you update the descriptor from the kernel and not from the device.
@@ -22,7 +25,7 @@ Speakers: Jianhui Li (Intel), Keren Zhou (George Mason Univ)
 * Q> No.
 * A> Probably still need to keep 2 APIs.
 * Q> What do other vendors think?
-* A> Try the tutorial 0.9. Exercises differ tensor descriptor APIs demostrating different performance characteristics.
+* A> Try the tutorial 0.9. Exercises differ tensor descriptor APIs demonstrating different performance characteristics.
 * Q> OpenAI support both APIs? on the device and the off-site?
 * A> Yes
 * Q> Removing support for block pointers
@@ -39,6 +42,7 @@ Speakers: Jianhui Li (Intel), Keren Zhou (George Mason Univ)
 * Q> Need a grace period.
 
 ## Infrastructure for Triton performance tests
+
 Speaker: Sayce Falk (Google), Cicie Wang (Meta), Jason Knight (Nvidia), Keren Zhou (George Mason University), Areg Melik-Adamyan (Intel)
 
 * Q> Any near term plans for setting up public benchmarks for Nvidia's newest hardware? Maybe through PyTorch or TorchBench.
@@ -51,7 +55,7 @@ Speaker: Sayce Falk (Google), Cicie Wang (Meta), Jason Knight (Nvidia), Keren Zh
 * A> Yes. But only for internal Meta consumption. Goal is to expose this externally.
 * Q> Maybe we can leverage Intel's backend? (to Jason Knight).
 * A> We currently have OpenAI's hosted triton CI, PyTorch's CI & performance.
-* Q> Intel has its on repo. Interested in contributing data to a shared dashboard.
+* Q> Intel has its own repo. Interested in contributing data to a shared dashboard.
 * A> Maybe talk to the PyTorch folks
 * A> DevOps support not up and running (months out) for B200.
 * Q> Where are the B200s hosted?
@@ -72,9 +76,10 @@ Speaker: Sayce Falk (Google), Cicie Wang (Meta), Jason Knight (Nvidia), Keren Zh
 * Q> Anyone interested in this?
 * A> Maybe first step, identify how much generated code is affected by a pull request (give a signal to say something about the blast radius of a change).
 * Q> Intel had an intern looking at this.
-* Q> Intel<Alexander> - if you're interested reach out over slack.
+* Q> Intel(Alexander) - if you're interested reach out over slack.
 
 ## What talks/tutorials/open discussions would you like to see at the 2025 Triton Developers' Summit? How can we help?
+
 Speaker: Adnan Aziz (Meta)
 
 * Phil, Elena Mithra & Adnan Aziz pulled together last year's Triton Developers' Summit.
@@ -93,5 +98,6 @@ Speaker: Adnan Aziz (Meta)
 * Triton summit will try to colocate with PyTorch conference.  Probably at the Mosconi Center in SF (but still needs to be verified from Microsoft).
 * What is Microsoft's timeline/plans?
 
-##### Minutes:
+### Minutes
+
 Recording link [here](https://youtu.be/W16BrXc5BYE)

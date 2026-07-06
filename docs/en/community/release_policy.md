@@ -1,4 +1,4 @@
-# Release Policy
+# Version Release Policy
 
 ## Version Numbering
 
@@ -12,7 +12,7 @@ Triton-Ascend follows [PEP 440](https://peps.python.org/pep-0440/) version speci
 ## Branching Strategy
 
 - The `main` branch is the latest development branch, tracking the latest upstream Triton version
-- Each release version creates a corresponding release development branch (e.g., `releases/v3.2.x`), which has the same commit id as the community release
+- Each release version creates a corresponding release development branch (e.g., `release/3.2.x`), which has the same commit id as the community release
 - Feature development should be done in fork repositories and merged into the Triton-Ascend repository via `PR`
 
 **`main` Branch Mapping:**
@@ -32,8 +32,8 @@ Maintenance branch statuses include:
 | Branch              | Status     | Triton Version | Triton-Ascend Release              | End of Maintenance |
 | ----------------- | -------- | ---------------- | ----------------------------------- | ------------ |
 | `main`            | `Active`   | `3.5.0`          | /                                   | /            |
-| `releases/v3.2.1` | `Active`   | `3.2.0`          | `3.2.1`                             | /            |
-| `releases/v3.1.x` | `Maintenance`   | `3.2.0`          | `3.2.0rc2`，`3.2.0rc3`，`3.2.0rc4`，`3.2.0` | /            |
+| `release/3.2.1` | `Active`   | `3.2.0`          | `3.2.1`                             | /            |
+| `release/3.2.x` | `Maintenance`   | `3.2.0`          | `3.2.0rc2`，`3.2.0rc3`，`3.2.0rc4`，`3.2.0` | /            |
 
 ## Release Cycle
 

@@ -1,12 +1,15 @@
 name: Wheels
 
+# TEMPORARILY DISABLED — all triggers commented out so this workflow never
+# starts and never occupies a runner. Uncomment to re-enable (restore just
+# `workflow_dispatch:` if you only want manual runs).
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - .github/workflows/wheels.yml
-  schedule:
-    - cron: "0 8 * * *"
+  # pull_request:
+  #   paths:
+  #     - .github/workflows/wheels.yml
+  # schedule:
+  #   - cron: "0 8 * * *"
 
 concurrency:
   group: wheels-${{ github.ref }}
@@ -78,7 +81,7 @@ jobs:
           # at /project/.triton-cache and /project/.ccache inside the container.
           mkdir -p "${{ matrix.branch.path }}/.triton-cache" "${{ matrix.branch.path }}/.ccache"
 
-          # Wheel version: <base>rc3+devYYYYMMDD. Compute the build date once on
+          # Wheel version: <base>+devYYYYMMDD. Compute the build date once on
           # the host (UTC) so all matrix cells agree even if they straddle
           # midnight. IS_MANYLINUX=TRUE suppresses the +git<hash> append in
           # setup.py's get_version() since +dev<date> is our local segment.
@@ -92,7 +95,7 @@ jobs:
             TRITON_BUILD_PROTON=OFF \
             TRITON_WHEEL_NAME=triton-ascend \
             TRITON_APPEND_CMAKE_ARGS='-DTRITON_BUILD_UT=OFF' \
-            TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX:-rc3}+${{ matrix.branch.local }}${BUILD_DATE} \
+            TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX:-}+${{ matrix.branch.local }}${BUILD_DATE} \
             IS_MANYLINUX=TRUE \
             TRITON_HOME=/project/.triton-cache \
             TRITON_BUILD_WITH_CCACHE=true \
@@ -138,4 +141,15 @@ jobs:
           mv obsutil_linux_* obsutil
 
           obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-north-4.myhuaweicloud.com
-          obsutil/obsutil cp -u wheelhouse/*.whl "obs://ascend-artifcat-packages/pypi/packages/ascend/repos/pypi/nightly/triton-ascend/"
+          OBS_DIR="obs://ascend-artifcat-packages/pypi/packages/ascend/repos/pypi/nightly/triton-ascend/"
+          obsutil/obsutil cp -u wheelhouse/*.whl "${OBS_DIR}"
+
+          # Regenerate index.html from every .whl currently in the directory
+          # (non-recursive, short format), keeping only the basenames.
+          obsutil/obsutil ls "${OBS_DIR}" -d -s -limit=0 \
+            | grep -oE '[^/]+\.whl$' \
+            | sort -u > files.txt
+          while IFS= read -r f; do
+            printf "<a href='%s'>%s</a><br />\n" "$f" "$f"
+          done < files.txt > index.html
+          obsutil/obsutil cp index.html "${OBS_DIR}"

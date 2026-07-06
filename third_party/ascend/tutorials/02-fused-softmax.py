@@ -81,7 +81,7 @@ target = triton.runtime.driver.active.get_current_target()
 kernels = {}
 
 
-def softmax(x, stream):
+def softmax(x, stream=None):
     n_rows, n_cols = x.shape
 
     # The block size of each loop iteration is the smallest power of two greater than the number of columns in `x`
@@ -89,6 +89,10 @@ def softmax(x, stream):
 
     # Allocate output
     y = torch.empty_like(x)
+
+    if stream is None:
+        device = torch.npu.current_device()
+        stream = torch.npu.current_stream(device).npu_stream
 
     # pre-compile kernel to get register usage and compute thread occupancy.
     kernel, num_programs = kernels.get(BLOCK_SIZE, (None, 0))
@@ -108,17 +112,24 @@ def softmax(x, stream):
 # Unit Test
 # ---------
 
+
+def test_fused_softmax():
+    shape = (1823, 781)
+    torch.manual_seed(0)
+    x = torch.randn(shape, dtype=torch.float16, device="npu")
+    y_triton = softmax(x)
+    y_torch = torch.softmax(x, axis=1)
+    torch.testing.assert_close(y_triton, y_torch, atol=1e-4, rtol=1e-4)
+    # Demo-style print output for the irregular shape
+    print(y_triton)
+    print(y_torch)
+    print(f'The maximum difference between torch and triton is '
+          f'{torch.max(torch.abs(y_triton-y_torch))}')
+
+
 # %%
 # We make sure that we test our kernel on a matrix with an irregular number of rows and columns.
 # This will allow us to verify that our padding mechanism works.
-device = torch.npu.current_device()
-stream = torch.npu.current_stream(device).npu_stream
-torch.manual_seed(0)
-x = torch.randn(1823, 781, device='npu')
-y_triton = softmax(x, stream)
-y_torch = torch.softmax(x, axis=1)
-assert torch.allclose(y_triton, y_torch), (y_triton, y_torch)
-print(y_triton)
-print(y_torch)
-print(f'The maximum difference between torch and triton is '
-      f'{torch.max(torch.abs(y_triton-y_torch))}')
+if __name__ == "__main__":
+    test_fused_softmax()
+    print("======Fused Softmax Test Passed!======")

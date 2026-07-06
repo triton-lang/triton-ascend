@@ -1,3 +1,5 @@
+# README
+
 ## 项目简介与价值主张
 
 Triton-Ascend是面向昇腾平台构建的Triton编译框架，旨在让Triton代码能够在昇腾硬件上高效运行。
@@ -116,7 +118,7 @@ Triton-Ascend 所支持的操作系统与 CANN 一致。请参考 CANN 官方文
 
 ## 安全声明
 
-我们重视开发者在使用Triton-Ascend时的信息安全，安全防护建议与相关信息请见 [安全声明](./SECURITYNOTE.md)
+我们重视开发者在使用Triton-Ascend时的信息安全，安全防护建议与相关信息请见 [安全声明](./docs/zh/community/SECURITYNOTE_zh.md)
 
 ## 许可证信息
 
@@ -124,4 +126,4 @@ Triton-Ascend 所支持的操作系统与 CANN 一致。请参考 CANN 官方文
 
 ## 社区与贡献
 
-欢迎参与Triton-Ascend的开发及代码贡献，详情请参阅 [贡献指南](./CONTRIBUTING_zh.md)
+欢迎参与Triton-Ascend的开发及代码贡献，详情请参阅 [贡献指南](./docs/zh/community/CONTRIBUTING_zh.md)

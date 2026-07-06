@@ -174,6 +174,20 @@ bool PtrOffsetInfo::isUnstructuredOrScalarlike() const {
   });
 }
 
+SmallVector<int64_t> PtrOffsetInfo::getUnstructuredDims() const {
+  SmallVector<int64_t> dims;
+  for (int64_t i = 0; i < static_cast<int64_t>(structured.size()); i++) {
+    if (structured[i] == AxisInfo::unstructured)
+      dims.push_back(i);
+  }
+  return dims;
+}
+
+bool PtrOffsetInfo::hasUnstructuredDim() const {
+  return llvm::any_of(structured,
+                      [](auto dim) { return dim == AxisInfo::unstructured; });
+}
+
 void PtrOffsetInfo::setZeroOffset() {
   if (!ptr)
     return;

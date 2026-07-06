@@ -29,6 +29,36 @@ import pytest
 from test_common import TestUtils, check_ub_mem_overflow, get_dtype_size
 
 
+def _generate_data(shape, dtype, device):
+    if dtype in (torch.float16, torch.float32, torch.float64, torch.bfloat16):
+        return torch.randn(shape, dtype=dtype, device=device)
+    elif dtype == torch.int8:
+        return torch.randint(-128, 127, shape, dtype=torch.int8, device=device)
+    elif dtype == torch.int16:
+        return torch.randint(-100, 100, shape, dtype=torch.int16, device=device)
+    elif dtype == torch.int32:
+        return torch.randint(-10000, 10000, shape, dtype=torch.int32, device=device)
+    elif dtype == torch.int64:
+        return torch.randint(-10000, 10000, shape, dtype=torch.int64, device=device)
+    elif dtype == torch.uint8:
+        return torch.randint(0, 255, shape, dtype=torch.int32, device=device).to(torch.uint8)
+    elif dtype == torch.bool:
+        return torch.randint(0, 2, shape, dtype=torch.bool, device=device)
+    else:
+        raise ValueError(f"unsupported dtype {dtype}")
+
+
+@pytest.mark.parametrize("src_dtype", [
+    torch.float32,
+    torch.float16,
+    torch.bfloat16,
+    torch.int8,
+    torch.int32,
+    torch.int16,
+    torch.int64,
+    torch.uint8,
+    torch.bool,
+])
 @pytest.mark.parametrize("src_shape, indices_shape, axis", [
     ([2, 2], [4, 2], 0),
     ([3, 3], [1, 3], 0),
@@ -38,7 +68,7 @@ from test_common import TestUtils, check_ub_mem_overflow, get_dtype_size
     ([4, 64], [4, 32], 1),
     ([128, 64], [128, 128], 1),
 ])
-def test_gather(src_shape, indices_shape, axis):
+def test_gather(src_dtype, src_shape, indices_shape, axis):
 
     @triton.jit
     def gather_kernel(src_ptr, idx_ptr, out_ptr, axis: tl.constexpr, src_dim0: tl.constexpr, src_dim1: tl.constexpr,
@@ -65,17 +95,20 @@ def test_gather(src_shape, indices_shape, axis):
         return output
 
     DEV = "npu"
-    src = torch.randn(src_shape, device=DEV)
-    indices = torch.randint(0, src.shape[axis], indices_shape, device=DEV)
+    src = _generate_data(src_shape, src_dtype, DEV)
+    indices = torch.randint(0, src.shape[axis], indices_shape, device=DEV, dtype=torch.int64)
 
-    dtype_size = get_dtype_size('int32')
-    if dtype_size * math.prod(src.shape) >= (TestUtils.ub_size / 8):
-        print(f"dtype:int32 shape:{src.shape} mem overflow")
-        return
+    src_bytes = src.element_size() * math.prod(src.shape)
+    idx_bytes = 4 * math.prod(indices.shape)
+    out_bytes = src.element_size() * math.prod(indices.shape)
+    est_ub_bits = (src_bytes + idx_bytes + out_bytes * 3) * 8
+    if est_ub_bits >= TestUtils.ub_size:
+        pytest.skip(f"dtype:{src_dtype} shape:{src.shape}×{indices.shape}"
+                    f" est_ub:{est_ub_bits}bits > ub:{TestUtils.ub_size}bits")
 
-    ref = torch.gather(src, axis, indices)
+    ref = torch.gather(src.cpu(), axis, indices.cpu())
     result = triton_gather(src, axis, indices)
-    torch.testing.assert_close(result, ref, rtol=0, atol=0)
+    torch.testing.assert_close(result.cpu(), ref, rtol=0, atol=0)
 
 
 @triton.jit

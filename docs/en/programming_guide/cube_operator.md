@@ -4,7 +4,7 @@ Cube operators use matrix multiplication or batched matrix multiplication as the
 
 ## Simple Cube Operator Development
 
-For a simple Cube operator, refer to the [Matrix Multiplication example](../examples/05_matrix_multiplication_example.md) or `third_party/ascend/tutorials/03-matrix-multiplication.py`.
+For a simple Cube operator, refer to the [Matrix Multiplication example](../examples/05_matrix_multiplication_example.md).
 
 1. Define input/output shapes and strides, for example `A[M, K]`, `B[K, N]`, and `C[M, N]`.
 2. Map `tl.program_id` to the output tile `(pid_m, pid_n)`.
@@ -50,7 +50,7 @@ Complex Cube cases often come from attention, batched matmul, grouped matmul, or
 Recommended decomposition:
 
 1. Extract the pure matmul core first and verify tile shapes, dtypes, accumulator dtype, and output shape.
-2. Handle irregular memory access next. If K/V cache access is discrete in a low dimension and contiguous in a high dimension, load along the contiguous dimension and reorganize in UB with transpose or `tl.insert_slice`.
+2. Handle irregular memory access next. If K/V cache access is discrete in a low dimension and contiguous in a high dimension, load along the contiguous dimension and reorganize in UB with transpose or the Ascend extension API `extension.insert_slice`.
 3. Keep reductions and normalization at clear boundaries. If `max/sum/exp` or softmax is fused into the same kernel, follow the [CV Fusion Operator Development](./cv_fusion_operator.md) guidance.
 4. Use inner loops for long K or long sequence dimensions to control on-chip usage.
 5. Use autotune to manage candidate `BLOCK_M/N/K` and `multibuffer` configurations.

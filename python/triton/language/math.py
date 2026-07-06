@@ -1,7 +1,6 @@
 from . import core
 from functools import wraps
 from typing import List
-import numbers
 
 T = core.TypeVar('T')
 
@@ -255,37 +254,3 @@ def fma(x, y, z, _semantic=None):
     z, x = core.binary_op_type_legalization(z, x, _semantic)
     z, y = core.binary_op_type_legalization(z, y, _semantic)
     return core.tensor(_semantic.builder.create_fma(x.handle, y.handle, z.handle), x.type)
-
-
-@core.builtin
-@_add_math_2arg_docstr("cdiv")
-@core._tensor_member_fn
-def cdiv(x, div, _semantic=None):
-    if isinstance(x, core.constexpr):
-        x = x.value
-    if isinstance(div, core.constexpr):
-        div = div.value
-    from math import ceil as py_ceil
-    if isinstance(x, numbers.Number) and isinstance(div, numbers.Number):
-        if isinstance(x, bool) or isinstance(div, bool):
-            raise ValueError("cdiv does not support boolean type")
-        elif isinstance(x, int) and isinstance(div, int):
-            res = x // div
-            rem = x % div
-            return res + (1 if rem != 0 else 0)
-        else:
-            return py_ceil(x / div)
-
-    x = _semantic.to_tensor(x)
-    div = _semantic.to_tensor(div)
-    x_scalar_type = x.type.scalar
-    div_scalar_type = div.type.scalar
-    if x_scalar_type.is_bool() or div_scalar_type.is_bool():
-        raise ValueError("cdiv does not support boolean type")
-    elif x_scalar_type.is_int() and div_scalar_type.is_int():
-        # integer cdiv: (x + div - 1) // div as before
-        return _semantic.floordiv(_semantic.add(x, _semantic.sub(div, 1, True), True), div)
-    else:
-        div_res = _semantic.truediv(x, div)
-        cdiv_res = core.tensor(_semantic.builder.create_ceil(div_res.handle), div_res.type)
-        return _semantic.cast(cdiv_res, x_scalar_type)

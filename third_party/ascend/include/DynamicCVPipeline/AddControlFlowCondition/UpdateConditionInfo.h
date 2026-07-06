@@ -66,9 +66,9 @@ private:
     void replaceForOpCounterInIfOps(SmallVector<scf::IfOp> ifOpsInThisFor, scf::ForOp oldForOp, scf::ForOp newForOp,
                                     IRMapping &mapper);
 
-    Value getVarValue(scf::ForOp forOp, int varIndex);
+    Value getVarValue(Operation *loopOp, int varIndex);
 
-    void collectDependencyBuffers(scf::ForOp forOp,
+    void collectDependencyBuffers(Operation *loopOp,
                                   DenseMap<int, DenseMap<Value, SmallVector<Value> > > &crossCoreBuffers,
                                   DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &memCrossCoreBuffers,
                                   DenseMap<int, DenseMap<Value, SmallVector<Value> > > &intraCoreBuffers);
@@ -77,7 +77,7 @@ private:
     extendCrossCoreBuffersWithEquivalentValues(ModuleOp module,
                                                DenseMap<int, DenseMap<Value, SmallVector<Value> > > crossCoreBuffers);
 
-    int buildIdxToVarMap(scf::ForOp forOp,
+    int buildIdxToVarMap(Operation *loopOp,
                          const DenseMap<int, DenseMap<Value, SmallVector<Value> > > &intraCoreBuffers,
                          DenseMap<int, Value> &idxToVar);
 
@@ -103,7 +103,7 @@ private:
                                          DenseMap<Value, VarUpdateType> &varUpdateTypes);
 
     // Build the ifOp variable mapping for the tensor iter_args
-    int buildTensorIterArgIfOpVarMap(scf::ForOp forOp);
+    int buildTensorIterArgIfOpVarMap(Operation *loopOp);
 
     // Collect the consumption conditions of the tensor iter_args consumer
     void collectTensorIterArgInputConditions(OpBuilder &builder, Location loc,
@@ -140,9 +140,9 @@ private:
 
     void updateControlVarToLatestValue(scf::IfOp newIfOp, scf::IfOp oldIfOp, bool hasCounter, Value counter);
 
-    int updateForOpYield(scf::ForOp forOp);
+    int updateLoopOpYield(Operation *loopOp);
 
-    int combineConditions(ModuleOp module, Value crossCoreCond, Value intraCoreCond, scf::IfOp ifOp, scf::ForOp forOp,
+    int combineConditions(ModuleOp module, Value crossCoreCond, Value intraCoreCond, scf::IfOp ifOp, Operation *loopOp,
                           size_t &usedCounterNum, DenseMap<Value, VarUpdateType> &varUpdateTypes);
 
     int setCrossCoreCondition(SmallVector<int> crossCoreInputValues, SmallVector<int> crossCoreOutputValues,

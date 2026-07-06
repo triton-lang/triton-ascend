@@ -447,40 +447,76 @@ LogicalResult UpdateForOpsPass::insertInterCorePipeS(ModuleOp module)
   return result.wasInterrupted() ? failure() : success();
 }
 
+// Helper function: Get loop iter args for either ForOp or WhileOp
+static Region::BlockArgListType getLoopIterArgs(Operation* loopOp) {
+  LDBG("[DEBUG] getLoopIterArgs called for op: " << loopOp->getName() << "\n");
+  if (auto forOp = dyn_cast<scf::ForOp>(loopOp)) {
+    LDBG("[DEBUG] It's a scf::ForOp, returning getRegionIterArgs()\n");
+    return forOp.getRegionIterArgs();
+  } else if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp)) {
+    LDBG("[DEBUG] It's a scf::WhileOp, returning getAfterArguments()\n");
+    return whileOp.getAfterArguments();
+  }
+  LDBG("[DEBUG] Not a supported loop op, returning empty list\n");
+  return {};
+}
+
+// Helper function: Check if op is a supported loop op (ForOp or WhileOp)
+static bool isSupportedLoopOp(Operation* op) {
+  return isa<scf::ForOp>(op) || isa<scf::WhileOp>(op);
+}
+
 // Analyze the producer/consumer relationship between the tensor type iter_args in the main_loop and ssbuffer.if
 LogicalResult UpdateForOpsPass::analyzeTensorIterArgDependencies(ModuleOp module, ControlFlowConditionInfo *info)
 {
   bool failed = false;
+  LDBG("[DEBUG] Starting analyzeTensorIterArgDependencies\n");
+  
   module.walk([&](Operation *op) -> WalkResult {
+    LDBG("[DEBUG] Visiting op: " << op->getName() << "\n");
+    
     if (!op->hasAttr(kSsbufferMainLoop)) {
+      LDBG("[DEBUG] Op does not have " << kSsbufferMainLoop << " attribute, skipping\n");
       return WalkResult::advance();
     }
-    auto forOp = dyn_cast<scf::ForOp>(op);
-    if (!forOp) {
-      LDBG("[Error]: op with ssbuffer.main_loop is not a scf::ForOp\n");
+    
+    LDBG("[DEBUG] Found op with " << kSsbufferMainLoop << " attribute\n");
+    
+    if (!isSupportedLoopOp(op)) {
+      LDBG("[Error]: op with " << kSsbufferMainLoop << " is not a supported loop op (neither scf::ForOp nor scf::WhileOp)\n");
+      LDBG("[Error] Op type: " << op->getName() << "\n");
       failed = true;
       return WalkResult::interrupt();
     }
+    
+    LDBG("[DEBUG] Analyzing main_loop op: " << op << "\n");
 
-    LDBG("Analyzing main_loop forOp: " << forOp << "\n");
+    auto iterArgs = getLoopIterArgs(op);
+    LDBG("[DEBUG] Got " << iterArgs.size() << " iter args from loop op\n");
 
-    for (auto iterArg : forOp.getRegionIterArgs()) {
+    for (auto iterArg : iterArgs) {
+      LDBG("[DEBUG] Checking iter_arg: " << iterArg << "\n");
+      
       if (!mlir::isa<TensorType>(iterArg.getType())) {
+        LDBG("[DEBUG] iter_arg is not a TensorType, skipping\n");
         continue;
       }
 
-      LDBG("Found tensor type iter_arg: " << iterArg << "\n");
+      LDBG("[DEBUG] Found tensor type iter_arg: " << iterArg << "\n");
       scf::IfOp producerIfOp = nullptr;
       llvm::SmallVector<scf::IfOp> consumerIfOps;
 
       for (auto &use : iterArg.getUses()) {
         Operation *user = use.getOwner();
+        LDBG("[DEBUG] Found use of iter_arg in op: " << user->getName() << "\n");
+        
         scf::IfOp ifOp = nullptr;
         Operation *curr = user;
-        while (curr && curr != forOp.getOperation()) {
+        while (curr && curr != op) {
           if (auto currIf = dyn_cast<scf::IfOp>(curr)) {
             if (currIf->hasAttr(kSsbufferIf)) {
               ifOp = currIf;
+              LDBG("[DEBUG] Found ssbuffer.if ancestor: " << ifOp << "\n");
               break;
             }
           }
@@ -488,20 +524,26 @@ LogicalResult UpdateForOpsPass::analyzeTensorIterArgDependencies(ModuleOp module
         }
 
         if (!ifOp) {
-          LDBG("Use of tensor iter_arg " << iterArg << " is not inside any ssbuffer.if op." << "\n");
+          LDBG("[DEBUG] Use of tensor iter_arg " << iterArg << " is not inside any ssbuffer.if op.\n");
           continue;
         }
 
         bool isProducer = false;
         if (isa<scf::YieldOp>(user)) {
           auto yieldOp = cast<scf::YieldOp>(user);
+          LDBG("[DEBUG] User is a scf::YieldOp, checking if it's inside the ifOp\n");
           Operation *parentOp = yieldOp->getParentOp();
           while (parentOp && parentOp != ifOp.getOperation()) {
             parentOp = parentOp->getParentOp();
           }
           if (parentOp == ifOp.getOperation()) {
             isProducer = true;
+            LDBG("[DEBUG] This use is a PRODUCER (yield inside ifOp)\n");
           }
+        }
+        
+        if (!isProducer) {
+          LDBG("[DEBUG] This use is a CONSUMER\n");
         }
 
         // Check and update status of ifOp
@@ -509,8 +551,8 @@ LogicalResult UpdateForOpsPass::analyzeTensorIterArgDependencies(ModuleOp module
           if (producerIfOp && producerIfOp != ifOp) {
             // Found a different producer ifOp! This is an error.
             LDBG("[Error]: tensor iter_arg " << iterArg << " has multiple different producers!\n");
-            LDBG("Existing producer: " << producerIfOp << "\n");
-            LDBG("New producer: " << ifOp << "\n");
+            LDBG("[Error] Existing producer: " << producerIfOp << "\n");
+            LDBG("[Error] New producer: " << ifOp << "\n");
             failed = true;
             return WalkResult::interrupt();
           }
@@ -519,9 +561,9 @@ LogicalResult UpdateForOpsPass::analyzeTensorIterArgDependencies(ModuleOp module
             auto it = llvm::find(consumerIfOps, ifOp);
             if (it != consumerIfOps.end()) {
               consumerIfOps.erase(it);
-              LDBG("This ifOp was consumer, now updated to producer: " << ifOp << "\n");
+              LDBG("[DEBUG] This ifOp was consumer, now updated to producer: " << ifOp << "\n");
             } else {
-              LDBG("Found producer ifOp (first time): " << ifOp << "\n");
+              LDBG("[DEBUG] Found producer ifOp (first time): " << ifOp << "\n");
             }
             producerIfOp = ifOp;
           }
@@ -530,18 +572,19 @@ LogicalResult UpdateForOpsPass::analyzeTensorIterArgDependencies(ModuleOp module
           // isConsumer
           if (producerIfOp == ifOp) {
             // Already a producer, even if current use is consumer, do nothing
+            LDBG("[DEBUG] This ifOp is already marked as producer, skipping consumer registration\n");
             continue;
           }
           if (!llvm::is_contained(consumerIfOps, ifOp)) {
             consumerIfOps.push_back(ifOp);
-            LDBG("Found consumer ifOp (first time): " << ifOp << "\n");
+            LDBG("[DEBUG] Found consumer ifOp (first time): " << ifOp << "\n");
           }
           // Else: already a consumer, do nothing
         }
       }
       // Check: must have both producers AND consumers
       if (!producerIfOp || consumerIfOps.empty()) {
-        LDBG("tensor iter_arg " << iterArg << " has only "
+        LDBG("[DEBUG] tensor iter_arg " << iterArg << " has only "
                                            << (!producerIfOp ? "consumers" : "producers") << ", skipped\n");
         continue;
       }
@@ -550,14 +593,15 @@ LogicalResult UpdateForOpsPass::analyzeTensorIterArgDependencies(ModuleOp module
       relation.producer = producerIfOp;
       relation.consumers = consumerIfOps;
 
-      info->tensorIterArgDepsMap[forOp].push_back(relation);
-      LDBG("Recorded tensor iter_arg dependency: " << iterArg << " has 1 producer, "
+      info->tensorIterArgDepsMap[op].push_back(relation);
+      LDBG("[DEBUG] Recorded tensor iter_arg dependency: " << iterArg << " has 1 producer, "
                                                    << relation.consumers.size() << " consumers\n");
     }
 
     return WalkResult::advance();
   });
 
+  LDBG("[DEBUG] analyzeTensorIterArgDependencies completed, failed=" << failed << "\n");
   return failed ? failure() : success();
 }
 

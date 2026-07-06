@@ -53,6 +53,7 @@ inline constexpr llvm::StringLiteral kIntraDeps = "ssbuffer.intraDeps";
 inline constexpr llvm::StringLiteral kMemCrossDeps = "ssbuffer.memCrossDeps";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
 inline constexpr llvm::StringLiteral kClone = "ssbuffer.clone";
+inline constexpr llvm::StringLiteral kFlowOpt = "ssbuffer.flowOpt";
 static constexpr llvm::StringLiteral kInlinableQuantScaleAttr = "enable_fast_tf32_mul";
 inline constexpr llvm::StringLiteral kHIVMMatmulLimitedInCubeAttr = "hivm.matmul_limited_in_cube";
 

@@ -22,7 +22,6 @@
 
 #ifndef TRITON_ASCEND_SSBUF_CLONE_OPS_FOR_CONTROL_FLOW_H
 #define TRITON_ASCEND_SSBUF_CLONE_OPS_FOR_CONTROL_FLOW_H
-#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/Pass/Pass.h"
@@ -37,8 +36,8 @@ public:
   void runOnOperation() override;
 
   LogicalResult validateBlockIdsConsecutive(ModuleOp module);
-  LogicalResult cloneOpsInMainLoop(scf::ForOp forOp);
-  LogicalResult cleanupClonedOpsInMainLoop(scf::ForOp forOp);
+  LogicalResult cloneOpsInMainLoop(Operation *op);
+  LogicalResult cleanupClonedOpsInMainLoop(Operation *op);
   LogicalResult validateClonedOpsInVector(ModuleOp module);
 
   llvm::StringRef getArgument() const override { return "clone-ops"; }

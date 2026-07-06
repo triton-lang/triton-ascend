@@ -27,15 +27,15 @@
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/Pass/Pass.h"
 
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+
 namespace mlir {
 namespace triton {
 
 struct ControlFlowConditionInfo;
 
-// For each shared iter_arg, we need to track:
-// - Which block_ids use it
-// - Who is the owner (first block_id in order)
-// - For each non-owner block, what new iter_arg index to use
+// For each shared iter_arg tracks: which block_ids use it, who is owner (first
+// block_id in order), and what new iter_arg index each non-owner block uses
 struct SharedArgInfo {
   int argIndex;
   Value iterArg;
@@ -48,6 +48,21 @@ struct SharedArgInfo {
         newArgIndex(newIdx), nonOwnerBlockId(nonOwner) {}
 };
 
+// Per-whileOp state for cloning cond-used iter_arg update chains into the new
+// scf.while's after body. Populated by planWhileIterArgDescriptors; consumed by
+// cloneWhileBlockChains, buildNewWhileYield, recordWhileBlockArgMap.
+struct WhileIterArgClonePlan {
+  // Per-origIdx metadata, keyed on the original iter_arg index.
+  llvm::DenseMap<unsigned, Operation *> compOp;
+  llvm::DenseMap<unsigned, llvm::DenseSet<Operation *>> chainOps;
+  llvm::DenseMap<unsigned, unsigned> posInClonedVec;
+  // (blockId, newArgIdx, origIdx) triples in planning order, one per (blockId,
+  // cond-used iter_arg) pair
+  SmallVector<std::tuple<int, unsigned, unsigned>> newArgDescriptors;
+  // Output: cloned compOp results per blockId, indexed by posInClonedVec
+  llvm::DenseMap<int, SmallVector<Value>> clonedPerBlock;
+};
+
 class ProcessArgsPass
     : public PassWrapper<ProcessArgsPass, OperationPass<ModuleOp>> {
 public:
@@ -57,11 +72,45 @@ public:
 
   LogicalResult processSharedIterArgs(ModuleOp module);
 
+  // Snapshots whileOp iter_args; clones cond-used update chain per block (same
+  // ssbuffer.block_id run); records (new_arg_idx, old_arg_idx) in
+  // ControlFlowConditionInfo.
+  LogicalResult updateIndependentCondsInWhileBlocks(ModuleOp module);
+
+  // Per-whileOp driver for updateIndependentCondsInWhileBlocks.
+  LogicalResult processWhileIterArgsInWhileOp(scf::WhileOp whileOp,
+                                              ControlFlowConditionInfo *info);
+
+  // Per-op driver for shared-iter_args processing.
+  LogicalResult processSharedIterArgsInLoop(Operation *op,
+                                            ControlFlowConditionInfo *info);
+
+  // Completes the scf.while path: migrate before/after bodies, rebuild
+  // yield/condition, transfer maps.
+  LogicalResult processSharedArgsInWhileOp(
+      scf::WhileOp whileOp, scf::WhileOp newWhileOp,
+      SmallVector<SharedArgInfo> &sharedArgsInfo,
+      const llvm::DenseMap<int, Operation *> &sharedArgToCompOp,
+      const llvm::DenseMap<int, llvm::DenseSet<Operation *>>
+          &sharedArgToChainOps,
+      ControlFlowConditionInfo *info);
+
   void setConditionInfo(ControlFlowConditionInfo *info_) { info = info_; }
 
   llvm::StringRef getArgument() const override { return "process-args"; }
 
   ControlFlowConditionInfo *info = nullptr;
+
+  // Original iter_args of every scf.while op with main_loop attr, captured at
+  // start of ProcessArgs. Used to identify iter_args referenced by
+  // scf.condition.
+  llvm::DenseMap<scf::WhileOp, SmallVector<unsigned>>
+      originalWhileIterArgIndices;
+
+  // Local copy of whileBlockArgMap; also mirrored to info->whileBlockArgMap
+  // when info is set, so the mapping is observable when --process-args runs
+  // standalone (info may be null).
+  WhileBlockArgMap localWhileBlockArgMap;
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createProcessArgsPass();

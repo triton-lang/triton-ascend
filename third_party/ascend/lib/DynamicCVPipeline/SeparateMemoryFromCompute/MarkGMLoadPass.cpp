@@ -179,7 +179,7 @@ static int resolveBufferCount(scope::ScopeOp scopeOp) {
   }
   bool isCube = false;
   bool isVector = false;
-  if (failed(triton::getScopeType(scopeOp, isCube, isVector))) {
+  if (failed(getScopeType(scopeOp, isCube, isVector))) {
     return buffer_num;
   }
   if (isVector) {

@@ -324,7 +324,7 @@ public:
 
     OpPassManager pm;
     // Disable optimizations for the Debug mode
-    if (!triton::tools::getBoolEnv("LLVM_EXTRACT_DI_LOCAL_VARIABLES")) {
+    if (!triton::tools::getBoolEnv("TRITON_DISABLE_OPTIMIZATIONS")) {
       pm.addPass(mlir::createCanonicalizerPass());
     }
     if (failed(runPipeline(pm, m)))

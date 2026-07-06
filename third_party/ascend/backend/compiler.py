@@ -74,7 +74,7 @@ def min_dot_size(target: GPUTarget):
 
 def get_enable_optimizations_env_var():
     # TODO: LLVM_EXTRACT_DI_LOCAL_VARIABLES may be misunderstanding for users
-    env_vf = os.getenv("LLVM_EXTRACT_DI_LOCAL_VARIABLES")
+    env_vf = os.getenv("TRITON_DISABLE_OPTIMIZATIONS")
     if env_vf is None:
         return True
     return not (env_vf.lower() in ("true", "1", "yes"))

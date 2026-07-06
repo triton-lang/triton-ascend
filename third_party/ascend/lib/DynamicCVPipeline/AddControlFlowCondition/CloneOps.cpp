@@ -231,6 +231,11 @@ static bool shouldEraseOpForCube(Operation *op, const CVPipeline::MemoryDependen
       if (isa<SyncBlockWaitOp>(execOp) || isa<SyncBlockSetOp>(execOp)) {
         return false;
       }
+      // scf.if whose body only contains sync_block_wait/sync_block_set ops will be cleaned up
+      // in its own turn; skip it here so it does not block the current op's erasure.
+      if (isIfOpWithOnlySyncOps(execOp)) {
+        return false;
+      }
       auto execBlockId = CVPipeline::getOpBlockId(execOp);
       return execBlockId && opBlockId && *execBlockId == *opBlockId;
     });

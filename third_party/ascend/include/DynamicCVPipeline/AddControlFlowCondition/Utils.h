@@ -62,6 +62,11 @@ int findTcbGroupId(Value v, llvm::DenseMap<int, SmallVector<Value>> &tightlyCoup
 // Returns failure if scopeOp does not have tcore_type attribute
 LogicalResult getScopeType(Operation *scopeOp, bool &isCube, bool &isVector);
 
+// Check if op is a scf.if whose body only contains hivm.hir.sync_block_wait,
+// hivm.hir.sync_block_set and hivm.fixpipe ops (excluding terminators).
+// Returns false if op is not a scf.if or contains any other op.
+bool isIfOpWithOnlySyncOps(Operation *op);
+
 } // namespace triton
 } // namespace mlir
 #endif // TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_UTILS_H

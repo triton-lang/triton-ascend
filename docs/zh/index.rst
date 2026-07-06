@@ -22,8 +22,8 @@
 ---------------------
 
 - :doc:`Triton-Ascend算子开发 <programming_guide/vector_operator>` — 算子开发指南
-- :doc:`Triton-Ascend算子迁移 <migration_guide/index>` — GPU Triton 算子迁移
-- :doc:`Triton-Ascend算子调试与调优 <debug_guide/index>` — Triton-Ascend autotune 使用指南
+- :doc:`Triton-Ascend算子迁移 <migration_guide/index>` — GPU Triton算子迁移
+- :doc:`Triton-Ascend算子调试与调优 <debug_guide/index>` — Triton-Ascend autotune
 
 更多
 ------------
@@ -52,16 +52,16 @@
    cube算子开发 <programming_guide/cube_operator>
    融合算子开发 <programming_guide/cv_fusion_operator>
    Triton-Ascend autotune <autotune_guide>
-   典型算子样例<examples/index>
+   典型算子样例 <examples/index>
 
 .. toctree::
    :hidden:
    :titlesonly:
    :caption: 开发指南
 
-   Triton-Ascend 算子开发 <programming_guide/triton_operator_development_guide>
-   Triton-Ascend 算子迁移 <migration_guide/index>
-   Triton-Ascend 算子调试与调优 <debug_guide/index>
+   Triton-Ascend算子开发 <programming_guide/triton_operator_development_guide>
+   Triton-Ascend算子迁移 <migration_guide/index>
+   Triton-Ascend算子调试与调优 <debug_guide/index>
    环境变量与编译选项 <environment_variable_and_compiler_options_reference>
 
 .. toctree::
@@ -71,7 +71,7 @@
 
    triton.language API <triton_api/index>
    triton <triton_api/triton/index>
-   libdevice 开发者手册 <libdevice/libdevice_developer_guide>
+   libdevice开发者手册 <libdevice/libdevice_developer_guide>
 
 .. toctree::
    :hidden:

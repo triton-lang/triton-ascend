@@ -737,40 +737,6 @@ static LogicalResult validateSupportedCfg(Region &body) {
   return success();
 }
 
-static void collectReachableBlocks(Block *block,
-                                   SmallPtrSetImpl<Block *> &reachable) {
-  if (!reachable.insert(block).second)
-    return;
-
-  for (Block *successor : getCfgSuccessors(block)) {
-    if (successor->getParent() == block->getParent())
-      collectReachableBlocks(successor, reachable);
-  }
-}
-
-static void eraseUnreachableBlocks(Region &body) {
-  if (body.empty() || body.hasOneBlock())
-    return;
-
-  SmallPtrSet<Block *, 16> reachable;
-  collectReachableBlocks(&body.front(), reachable);
-
-  SmallVector<Block *> eraseBlocks;
-  for (Block &block : body) {
-    if (!reachable.contains(&block))
-      eraseBlocks.push_back(&block);
-  }
-  if (eraseBlocks.empty())
-    return;
-
-  for (Block *block : eraseBlocks) {
-    for (Operation &op : *block)
-      op.dropAllReferences();
-  }
-  for (Block *block : llvm::reverse(eraseBlocks))
-    block->erase();
-}
-
 static LogicalResult rejectCyclicCfg(Block *block,
                                      SmallPtrSetImpl<Block *> &visiting,
                                      SmallPtrSetImpl<Block *> &visited) {
@@ -793,10 +759,6 @@ static LogicalResult rejectCyclicCfg(Block *block,
 
 static LogicalResult structureFunctionBody(Operation *funcOp, Region &body) {
   if (body.empty() || body.hasOneBlock())
-    return success();
-
-  eraseUnreachableBlocks(body);
-  if (body.hasOneBlock())
     return success();
 
   if (failed(validateSupportedCfg(body)))
@@ -842,7 +804,6 @@ struct TensorPtrInfo {
   Type resultType;
   Value base;
   Value offset;
-  Value scalarOffset;
   bool scalarBase = false;
 };
 
@@ -932,21 +893,6 @@ static Value createZeroOffset(OpBuilder &builder, Location loc, Type ptrType) {
     return createZeroLike(builder, loc,
                           RankedTensorType::get(tensorType.getShape(), i32));
   return createZeroLike(builder, loc, i32);
-}
-
-static bool isScalarIntegerLike(Type type) {
-  return type.isIndex() || isa<IntegerType>(type);
-}
-
-static Type getTensorElementType(Type type) {
-  if (auto tensorType = dyn_cast<RankedTensorType>(type))
-    return tensorType.getElementType();
-  return type;
-}
-
-static Value createZeroScalarOffset(OpBuilder &builder, Location loc,
-                                    Type offsetType) {
-  return createZeroLike(builder, loc, getTensorElementType(offsetType));
 }
 
 static Value castIntegerLike(OpBuilder &builder, Location loc, Value value,
@@ -1054,75 +1000,6 @@ static Value createAddWithWiderType(OpBuilder &builder, Location loc, Value lhs,
   return builder.create<arith::AddIOp>(loc, lhs, rhs);
 }
 
-static FailureOr<Value>
-getUniformScalarOffset(Value offset, OpBuilder &builder, Location loc) {
-  Type offsetType = offset.getType();
-  if (isScalarIntegerLike(offsetType))
-    return offset;
-
-  auto tensorType = dyn_cast<RankedTensorType>(offsetType);
-  if (!tensorType || !isScalarIntegerLike(tensorType.getElementType()))
-    return failure();
-
-  if (auto splatOp = offset.getDefiningOp<triton::SplatOp>()) {
-    if (splatOp.getSrc().getType() == tensorType.getElementType())
-      return splatOp.getSrc();
-  }
-
-  Attribute constAttr;
-  if (!matchPattern(offset, m_Constant(&constAttr)))
-    return failure();
-
-  auto denseAttr = dyn_cast<DenseElementsAttr>(constAttr);
-  if (!denseAttr || !denseAttr.isSplat())
-    return failure();
-
-  if (auto intAttr =
-          dyn_cast<IntegerAttr>(denseAttr.getSplatValue<Attribute>())) {
-    return builder
-        .create<arith::ConstantIntOp>(
-            loc, intAttr.getValue().getSExtValue(),
-            cast<IntegerType>(tensorType.getElementType()))
-        .getResult();
-  }
-
-  return failure();
-}
-
-static bool hasStructuredScalarOffset(const TensorPtrInfo &parts) {
-  return parts.scalarBase && parts.scalarOffset &&
-         isa<RankedTensorType>(parts.offset.getType());
-}
-
-static bool areEquivalentValues(Value lhs, Value rhs) {
-  if (lhs == rhs)
-    return true;
-
-  Attribute lhsAttr;
-  Attribute rhsAttr;
-  if (!matchPattern(lhs, m_Constant(&lhsAttr)) ||
-      !matchPattern(rhs, m_Constant(&rhsAttr)))
-    return false;
-  return lhsAttr == rhsAttr;
-}
-
-static Value materializeTensorOffset(OpBuilder &builder, Location loc,
-                                     const TensorPtrInfo &parts) {
-  if (!hasStructuredScalarOffset(parts))
-    return parts.offset;
-
-  auto offsetType = cast<RankedTensorType>(parts.offset.getType());
-  Value scalarOffset =
-      castIntegerLike(builder, loc, parts.scalarOffset,
-                      offsetType.getElementType());
-  if (!scalarOffset)
-    return nullptr;
-
-  Value splatOffset =
-      builder.create<triton::SplatOp>(loc, offsetType, scalarOffset);
-  return createAdd(builder, loc, parts.offset, splatOffset);
-}
-
 static Value createMul(OpBuilder &builder, Location loc, Value lhs,
                        Value rhs) {
   if (!lhs || !rhs)
@@ -1163,28 +1040,6 @@ analyzeTensorPtr(Value value, const RewriteEnv &env, OpBuilder &builder,
     OpBuilder::InsertionGuard guard(builder);
     builder.setInsertionPoint(addPtrOp);
     Value offset = addPtrOp.getOffset();
-    if (hasStructuredScalarOffset(tensor)) {
-      FailureOr<Value> scalarDelta =
-          getUniformScalarOffset(offset, builder, addPtrOp.getLoc());
-      if (succeeded(scalarDelta)) {
-        Value newScalarOffset = createAddWithWiderType(
-            builder, addPtrOp.getLoc(), tensor.scalarOffset, *scalarDelta);
-        if (!newScalarOffset)
-          return failure();
-        tensor.scalarOffset = newScalarOffset;
-        tensor.resultType = value.getType();
-        return tensor;
-      }
-
-      Value newLaneOffset = createAddWithWiderType(
-          builder, addPtrOp.getLoc(), tensor.offset, offset);
-      if (!newLaneOffset)
-        return failure();
-      tensor.offset = newLaneOffset;
-      tensor.resultType = value.getType();
-      return tensor;
-    }
-
     Value newOffset = createAddWithWiderType(builder, addPtrOp.getLoc(),
                                              tensor.offset, offset);
     if (!newOffset)
@@ -1205,10 +1060,6 @@ analyzeTensorPtr(Value value, const RewriteEnv &env, OpBuilder &builder,
     builder.setInsertionPoint(splatOp);
     parts.offset = createZeroOffset(builder, splatOp.getLoc(), value.getType());
     if (!parts.offset)
-      return failure();
-    parts.scalarOffset = createZeroScalarOffset(builder, splatOp.getLoc(),
-                                                parts.offset.getType());
-    if (!parts.scalarOffset)
       return failure();
     return parts;
   }
@@ -1313,14 +1164,8 @@ static Value rebuildTensorPtr(OpBuilder &builder, Location loc,
   Value ptrBase = base;
   if (parts.scalarBase && isTensorPointerType(parts.resultType))
     ptrBase = builder.create<triton::SplatOp>(loc, parts.resultType, base);
-  TensorPtrInfo materializedParts = parts;
-  materializedParts.offset = offset;
-  Value materializedOffset =
-      materializeTensorOffset(builder, loc, materializedParts);
-  if (!materializedOffset)
-    return nullptr;
   return builder.create<triton::AddPtrOp>(loc, parts.resultType, ptrBase,
-                                          materializedOffset);
+                                          offset);
 }
 
 static Value rebuildBlockPtr(OpBuilder &builder, Location loc,
@@ -1345,16 +1190,12 @@ static Value rebuildPtr(OpBuilder &builder, Location loc,
 static void recordPointer(Value oldPtr, const CFPtrInfo &info, Value rebuiltPtr,
                           RewriteEnv &env) {
   env.pointerComponents[oldPtr] = info;
-  env.pointerComponents[rebuiltPtr] = info;
   env.valueMapping.map(oldPtr, rebuiltPtr);
 }
 
 static SmallVector<Value> getLoopComponentValues(const CFPtrInfo &info) {
-  if (info.kind == PtrKind::Tensor) {
-    if (hasStructuredScalarOffset(info.tensor))
-      return {info.tensor.scalarOffset};
+  if (info.kind == PtrKind::Tensor)
     return {info.tensor.offset};
-  }
   return info.block.offsets;
 }
 
@@ -1370,10 +1211,6 @@ static CFPtrInfo withLoopComponentValues(CFPtrInfo info,
   if (info.kind == PtrKind::Tensor) {
     if (values.size() != 1)
       return info;
-    if (hasStructuredScalarOffset(info.tensor)) {
-      info.tensor.scalarOffset = values[0];
-      return info;
-    }
     info.tensor.offset = values[0];
     return info;
   }
@@ -1387,20 +1224,12 @@ static bool areLoopCompatible(const CFPtrInfo &initInfo,
                               const CFPtrInfo &nextInfo) {
   if (initInfo.kind != nextInfo.kind)
     return false;
-  if (initInfo.kind == PtrKind::Tensor) {
-    if (initInfo.tensor.resultType != nextInfo.tensor.resultType ||
-        initInfo.tensor.base != nextInfo.tensor.base ||
-        initInfo.tensor.scalarBase != nextInfo.tensor.scalarBase)
-      return false;
-    if (hasStructuredScalarOffset(initInfo.tensor) !=
-        hasStructuredScalarOffset(nextInfo.tensor))
-      return false;
-    if (hasStructuredScalarOffset(initInfo.tensor) &&
-        !areEquivalentValues(initInfo.tensor.offset, nextInfo.tensor.offset))
-      return false;
-    return haveSameTypes(getLoopComponentValues(initInfo),
+  if (initInfo.kind == PtrKind::Tensor)
+    return initInfo.tensor.resultType == nextInfo.tensor.resultType &&
+           initInfo.tensor.base == nextInfo.tensor.base &&
+           initInfo.tensor.scalarBase == nextInfo.tensor.scalarBase &&
+           haveSameTypes(getLoopComponentValues(initInfo),
                          getLoopComponentValues(nextInfo));
-  }
 
   return initInfo.block.resultType == nextInfo.block.resultType &&
          initInfo.block.base == nextInfo.block.base &&
@@ -1410,6 +1239,10 @@ static bool areLoopCompatible(const CFPtrInfo &initInfo,
          initInfo.block.offsets.size() == nextInfo.block.offsets.size() &&
          haveSameTypes(getLoopComponentValues(initInfo),
                        getLoopComponentValues(nextInfo));
+}
+
+static bool isScalarIntegerLike(Type type) {
+  return type.isIndex() || isa<IntegerType>(type);
 }
 
 static bool isConstantIndex(Value value, int64_t expected) {
@@ -1890,22 +1723,6 @@ addIfTensorComponents(const TensorPtrInfo &thenParts,
                       SmallVectorImpl<IfComponent> &components) {
   if (thenParts.base != elseParts.base)
     return failure();
-
-  bool thenStructured = hasStructuredScalarOffset(thenParts);
-  bool elseStructured = hasStructuredScalarOffset(elseParts);
-  if (thenStructured != elseStructured)
-    return failure();
-
-  if (thenStructured) {
-    if (!areEquivalentValues(thenParts.offset, elseParts.offset) ||
-        thenParts.scalarOffset.getType() != elseParts.scalarOffset.getType())
-      return failure();
-    components.push_back(
-        {IfComponentKind::TensorOffset, 0,
-         thenParts.scalarOffset.getType()});
-    return success();
-  }
-
   if (thenParts.offset.getType() != elseParts.offset.getType())
     return failure();
   components.push_back(
@@ -1967,48 +1784,6 @@ addIfBlockComponents(const BlockPtrInfo &thenParts,
   return success();
 }
 
-static bool hasIfComponent(ArrayRef<IfComponent> components,
-                           IfComponentKind kind, unsigned dim = 0) {
-  return llvm::any_of(components, [&](const IfComponent &component) {
-    return component.kind == kind && component.dim == dim;
-  });
-}
-
-static void addIfComponentIfMissing(SmallVectorImpl<IfComponent> &components,
-                                    IfComponent component) {
-  if (!hasIfComponent(components, component.kind, component.dim))
-    components.push_back(component);
-}
-
-static LogicalResult
-addLoopCarriedIfComponents(const CFPtrInfo &info,
-                           SmallVectorImpl<IfComponent> &components) {
-  if (info.kind == PtrKind::Tensor) {
-    Type offsetType = hasStructuredScalarOffset(info.tensor)
-                          ? info.tensor.scalarOffset.getType()
-                          : info.tensor.offset.getType();
-    addIfComponentIfMissing(
-        components, {IfComponentKind::TensorOffset, 0, offsetType});
-    return success();
-  }
-
-  for (auto [idx, offset] : llvm::enumerate(info.block.offsets)) {
-    addIfComponentIfMissing(
-        components,
-        {IfComponentKind::BlockOffset, static_cast<unsigned>(idx),
-         offset.getType()});
-  }
-  return success();
-}
-
-// Nested loop results may look like their init pointer during planning, but
-// the real result is produced by the loop-carried components after rewriting.
-static bool isNestedForResult(Value value, const RewriteEnv &env) {
-  Value mapped = remapValue(value, env);
-  auto result = dyn_cast<OpResult>(mapped);
-  return result && isa<scf::ForOp>(result.getOwner());
-}
-
 static FailureOr<CFPtrInfo>
 analyzePtrForIfPlanning(Value value, const RewriteEnv &env,
                         OpBuilder &builder, Location loc);
@@ -2051,37 +1826,6 @@ analyzeNestedIfResultForPlanning(scf::IfOp ifOp, unsigned resultIndex,
 }
 
 static FailureOr<CFPtrInfo>
-analyzeNestedForResultForPlanning(scf::ForOp forOp, unsigned resultIndex,
-                                  const RewriteEnv &env, OpBuilder &builder,
-                                  Location loc) {
-  if (resultIndex >= forOp.getNumResults() ||
-      resultIndex >= forOp.getInitArgs().size() ||
-      resultIndex >= forOp.getRegionIterArgs().size())
-    return failure();
-
-  scf::YieldOp yieldOp =
-      dyn_cast<scf::YieldOp>(forOp.getBody()->getTerminator());
-  if (!yieldOp || resultIndex >= yieldOp.getNumOperands())
-    return failure();
-
-  FailureOr<CFPtrInfo> initInfo = analyzePtrForIfPlanning(
-      forOp.getInitArgs()[resultIndex], env, builder, loc);
-  if (failed(initInfo))
-    return failure();
-
-  RewriteEnv bodyEnv = env;
-  bodyEnv.pointerComponents[forOp.getRegionIterArgs()[resultIndex]] =
-      *initInfo;
-
-  FailureOr<CFPtrInfo> nextInfo = analyzePtrForIfPlanning(
-      yieldOp.getOperand(resultIndex), bodyEnv, builder, yieldOp.getLoc());
-  if (failed(nextInfo) || !areLoopCompatible(*initInfo, *nextInfo))
-    return failure();
-
-  return *initInfo;
-}
-
-static FailureOr<CFPtrInfo>
 analyzePtrForIfPlanning(Value value, const RewriteEnv &env,
                         OpBuilder &builder, Location loc) {
   if (auto it = env.pointerComponents.find(value);
@@ -2096,12 +1840,6 @@ analyzePtrForIfPlanning(Value value, const RewriteEnv &env,
       if (succeeded(nestedInfo))
         return nestedInfo;
     }
-    if (auto nestedFor = dyn_cast<scf::ForOp>(result.getOwner())) {
-      FailureOr<CFPtrInfo> nestedInfo = analyzeNestedForResultForPlanning(
-          nestedFor, result.getResultNumber(), env, builder, loc);
-      if (succeeded(nestedInfo))
-        return nestedInfo;
-    }
   }
 
   return analyzePtr(value, env, builder, loc);
@@ -2110,12 +1848,8 @@ analyzePtrForIfPlanning(Value value, const RewriteEnv &env,
 static Value getComponentValue(const CFPtrInfo &info,
                                const IfComponent &component) {
   if (info.kind == PtrKind::Tensor) {
-    if (component.kind == IfComponentKind::TensorOffset) {
-      if (hasStructuredScalarOffset(info.tensor) &&
-          info.tensor.scalarOffset.getType() == component.type)
-        return info.tensor.scalarOffset;
+    if (component.kind == IfComponentKind::TensorOffset)
       return info.tensor.offset;
-    }
     return nullptr;
   }
 
@@ -2149,11 +1883,7 @@ makeIfResultInfo(const IfPointerInfo &info, ArrayRef<Value> componentValues) {
       Value value = componentValues[componentIndex++];
       switch (component.kind) {
       case IfComponentKind::TensorOffset:
-        if (hasStructuredScalarOffset(resultInfo.tensor) &&
-            resultInfo.tensor.scalarOffset.getType() == value.getType())
-          resultInfo.tensor.scalarOffset = value;
-        else
-          resultInfo.tensor.offset = value;
+        resultInfo.tensor.offset = value;
         break;
       default:
         return failure();
@@ -2222,11 +1952,6 @@ static LogicalResult rewriteIfOp(scf::IfOp ifOp, OpBuilder &builder,
     } else {
       if (failed(addIfBlockComponents(info.thenInfo.block,
                                       info.elseInfo.block, info.components)))
-        continue;
-    }
-    if (isNestedForResult(thenYield.getOperand(idx), env) ||
-        isNestedForResult(elseYield.getOperand(idx), env)) {
-      if (failed(addLoopCarriedIfComponents(info.thenInfo, info.components)))
         continue;
     }
     pointerInfos.push_back(info);
@@ -2371,21 +2096,6 @@ static LogicalResult tryDecoupleControlFlowOp(Operation *op,
   return success();
 }
 
-static bool decoupleControlFlowTree(Operation *op, IRRewriter &rewriter) {
-  if (isa<scf::ForOp, scf::WhileOp, scf::IfOp>(op) &&
-      succeeded(tryDecoupleControlFlowOp(op, rewriter)))
-    return true;
-
-  bool changed = false;
-  for (Region &region : op->getRegions()) {
-    for (Block &block : region) {
-      for (Operation &nestedOp : llvm::make_early_inc_range(block))
-        changed |= decoupleControlFlowTree(&nestedOp, rewriter);
-    }
-  }
-  return changed;
-}
-
 } // namespace
 
 namespace mlir::triton {
@@ -2426,12 +2136,24 @@ void TritonControlFlowOptPass::runOnOperation() {
     }
   }
 
-  IRRewriter rewriter(moduleOp.getContext());
-  bool changed = decoupleControlFlowTree(moduleOp, rewriter);
-  LLVM_DEBUG({
-    llvm::dbgs() << "TritonControlFlowOpt decoupling changed module: "
-                 << changed << "\n";
+  SmallVector<Operation *> targets;
+  moduleOp.walk<WalkOrder::PostOrder>([&](Operation *op) {
+    if (isa<scf::ForOp, scf::WhileOp, scf::IfOp>(op))
+      targets.push_back(op);
   });
+
+  LLVM_DEBUG({
+    llvm::dbgs() << "TritonControlFlowOpt collected " << targets.size()
+                 << " structured control-flow targets for later decoupling\n";
+  });
+
+  IRRewriter rewriter(moduleOp.getContext());
+  for (Operation *op : targets) {
+    if (op->getParentOp() == nullptr)
+      continue;
+
+    (void)tryDecoupleControlFlowOp(op, rewriter);
+  }
 
   if (failed(verify(moduleOp)))
     signalPassFailure();

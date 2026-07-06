@@ -228,3 +228,29 @@ LogicalResult triton::getScopeType(Operation *scopeOp, bool &isCube, bool &isVec
 
   return success();
 }
+
+// Check if op is a scf.if whose body only contains hivm.hir.sync_block_wait,
+// hivm.hir.sync_block_set and hivm.fixpipe ops (excluding terminators).
+bool triton::isIfOpWithOnlySyncOps(Operation *op)
+{
+  auto ifOp = dyn_cast<scf::IfOp>(op);
+  if (!ifOp) {
+    return false;
+  }
+
+  WalkResult result = ifOp->walk([&](Operation *innerOp) -> WalkResult {
+    if (innerOp == op) {
+      return WalkResult::advance();
+    }
+    if (innerOp->hasTrait<OpTrait::IsTerminator>()) {
+      return WalkResult::advance();
+    }
+    if (!isa<hivm::SyncBlockWaitOp>(innerOp) && !isa<hivm::SyncBlockSetOp>(innerOp) &&
+        !isa<hivm::FixpipeOp>(innerOp)) {
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+
+  return !result.wasInterrupted();
+}

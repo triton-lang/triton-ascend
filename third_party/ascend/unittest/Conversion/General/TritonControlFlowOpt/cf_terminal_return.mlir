@@ -80,22 +80,6 @@ module {
 // -----
 
 module {
-  tt.func private @entry_return_with_unreachable_block() -> tensor<32xf32> {
-    %cst = arith.constant dense<0.000000e+00> : tensor<32xf32>
-    tt.return %cst : tensor<32xf32>
-  ^bb1:
-    %poison = ub.poison : tensor<32xf32>
-    tt.return %poison : tensor<32xf32>
-  }
-}
-
-// CHECK-LABEL: tt.func private @entry_return_with_unreachable_block
-// CHECK:       tt.return
-// CHECK-NOT:   ^bb1
-
-// -----
-
-module {
   tt.func public @terminal_return_branch_args(%cond: i1, %lhs: i32, %rhs: i32, %bias: i32) -> i32 {
     cf.cond_br %cond, ^bb1(%lhs : i32), ^bb2(%rhs : i32)
   ^bb1(%v1: i32):

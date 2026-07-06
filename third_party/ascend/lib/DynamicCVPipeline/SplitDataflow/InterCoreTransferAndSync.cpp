@@ -113,6 +113,14 @@ static void attachTransferTags(Operation *op, int blockId, StringRef coreType, i
     op->setAttr(CVPipeline::kTransferId, IntegerAttr::get(IntegerType::get(ctx, kIntegerBitWidth), transferId));
 }
 
+static void attachMemCrossDeps(Operation *op, int tid, int seqId, OpBuilder &builder)
+{
+    op->setAttr(CVPipeline::kMemCrossDeps, builder.getArrayAttr({
+                    builder.getI32IntegerAttr(tid),
+                    builder.getI32IntegerAttr(seqId)
+                }));
+}
+
 static void attachAnalyzeFlagIdTag(Operation *op)
 {
     MLIRContext *ctx = op->getContext();
@@ -821,7 +829,7 @@ Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(OpBuilder &b
 
 Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(OpBuilder &builder, Value srcValue,
     Operation *cubeEndOp, Operation *vectorStartOp, Location loc, int transferIndex, int iniConsumerId,
-    Operation **consumedDataOp)
+    bool isAllTranspoesd, Operation **consumedDataOp)
 {
     LOG_DEBUG("Inserting [Cube->Vector] transfer for value: " << srcValue << "\n");
     auto srcTensorType = cast<RankedTensorType>(srcValue.getType());
@@ -835,7 +843,12 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(OpBuilder &b
     auto [cubeAllocOp, vecAllocOp] = createTransferAllocs(builder, loc, { M, N }, elemType, hivm::AddressSpace::UB,
         cubeEndOp, vectorStartOp, cubeBlockId, vecBlockId, "CUBE", "VECTOR", transferIndex);
 
-    FixpipeDMAModeAttr dmaModeAttr = FixpipeDMAModeAttr::get(builder.getContext(), FixpipeDMAMode::NZ2ND);
+    FixpipeDMAModeAttr dmaModeAttr;
+    if (isAllTranspoesd) {
+        dmaModeAttr = FixpipeDMAModeAttr::get(builder.getContext(), FixpipeDMAMode::NZ2DN);
+    } else {
+        dmaModeAttr = FixpipeDMAModeAttr::get(builder.getContext(), FixpipeDMAMode::NZ2ND);
+    }
     auto fixpipeOp = builder.create<hivm::FixpipeOp>(loc, mlir::TypeRange{}, // No return value
         srcValue,                                                            // src
         cubeAllocOp->getResult(0),                                           // dst
@@ -1165,7 +1178,7 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(OpBuilder &builde
     LOG_DEBUG("[newConsEnd]" << *consEnd << "\n");
     Operation *consumedDataOp = nullptr;
     Operation *transferOp =
-        insertCubeToVectorTransfer(builder, srcValue, prodEnd, consStart, loc, transferIndex, dep.iniConsumerBlockId,
+        insertCubeToVectorTransfer(builder, srcValue, prodEnd, consStart, loc, transferIndex, dep.iniConsumerBlockId, dep.isAllTranspoesd,
             &consumedDataOp);
 
     auto [newProdStart, newProdEnd] = getBlockStartEnd(dep.producerBlockId, module); // C Block
@@ -1200,7 +1213,10 @@ LogicalResult InterCoreTransferAndSyncPass::handleMemoryDependency(OpBuilder &bu
             dep.consumerBlockId << "\n");
         return success();
     }
-
+    int predId = 1;
+    int nextId = 0;
+    attachMemCrossDeps(dep.predOp, transferIndex, predId, builder);
+    attachMemCrossDeps(dep.nextOp, transferIndex, nextId, builder);
     // Get flag ID
     int flagId = flagManager.acquireId(prodStart);
 

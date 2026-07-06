@@ -157,7 +157,7 @@ private:
     int transferIndex, int iniConsumerId, bool isScaler, mlir::Operation **consumedDataOp = nullptr);
   mlir::Operation *insertCubeToVectorTransfer(mlir::OpBuilder &builder, mlir::Value srcValue,
     mlir::Operation *cubeEndOp, mlir::Operation *vectorStartOp, mlir::Location loc, int transferIndex,
-    int iniConsumerId, mlir::Operation **consumedDataOp = nullptr);
+    int iniConsumerId, bool isAllTranspoesd, mlir::Operation **consumedDataOp = nullptr);
   TransferPipeConfig getTransferPipeConfig(Operation *transferOp);
   void insertInterCoreSync(mlir::OpBuilder &builder, mlir::Operation *transferOp, mlir::Operation *consumerStartOp,
     mlir::Operation *consumerEndOp, int flag, mlir::Location loc, int transferIndex, FlagIdReuseManager &flagIdReuseManager,

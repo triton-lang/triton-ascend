@@ -74,7 +74,7 @@ CONSTRAINTS = {
     },
     "triton.language.add": {
         "constraints": [
-            "Ascend A3 对比 GPU 不支持 fp64",
+            "DataType: Ascend A2/A3/950 does not support fp8/fp64.",
         ],
         "example": "triton.language.add",
     },
@@ -297,11 +297,9 @@ CONSTRAINTS = {
     },
     "triton.language.div": {
         "constraints": [
-            "DataType: Ascend does not support uint16, uint32, uint64, uint8 (hardware limitation).",
-            "Ascend A3 对比 GPU 不支持 fp64",
+            "DataType: Ascend A2/A3/950 does not support uint8/uint16/uint32/uint64/fp8/fp64.",
         ],
-        "example":
-        "triton.language.div",
+        "example": "triton.language.div",
     },
     "triton.language.div_rn": {
         "constraints": [],
@@ -355,15 +353,14 @@ CONSTRAINTS = {
         ],
         "example": "triton.language.fdiv",
     },
-    "triton.language.extra.ascend.libdevice.index_select_simd": {
+    "triton.language.extra.cann.extension.index_select_simd": {
         "constraints": [
-            "DataType: Ascend does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64 (hardware limitation).",
-            "``index``: index 数据类型必须为 int32 或 int64",
-            "``dim``: dim 不能为尾轴（最后一个维度），即 dim < len(src_shape) - 1",
-            "GPU 平台不支持此操作（Ascend 专用 intrinsic）",
-            "dim 不支持在尾轴（最后一个维度）上执行 index_select 操作",
-            "不检查 index 中的索引是否越界，用户需自行保证索引合法性",
-            "index 必须是 1D 张量",
+            "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64 (hardware limitation).",
+            "``index``: The data type of the index must be int32 or int64.",
+            "``dim``: The dimension cannot be the trailing axis (the last dimension), i.e., dim < len(src_shape) - 1.",
+            "The index_select operation is not supported along the trailing axis (the last dimension).",
+            "Out-of-bounds indices are not checked; users must ensure index validity on their own.",
+            "The index must be a 1D tensor.",
         ],
     },
     "triton.language.extra.cann.extension.ascend_address_space": {
@@ -504,7 +501,7 @@ CONSTRAINTS = {
     },
     "triton.language.floordiv": {
         "constraints": [
-            "DataType: Ascend does not support uint16, uint32, uint64, uint8 (hardware limitation).",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64.",
         ],
         "example": "triton.language.floordiv",
     },
@@ -681,8 +678,8 @@ CONSTRAINTS = {
     },
     "triton.language.mod": {
         "constraints": [
-            "DataType: Ascend does not support uint16, uint32, uint64, uint8 (hardware limitation).",
-            "Ascend A3 对比 GPU 不支持 fp64",
+            "DataType: Ascend A2/A3 does not support uint16/uint32/uint64/fp8/fp64, \
+                Ascend 950 does not support fp8/fp64.",
         ],
         "example":
         "triton.language.mod",
@@ -855,7 +852,7 @@ CONSTRAINTS = {
     },
     "triton.language.sub": {
         "constraints": [
-            "Ascend A3 对比 GPU 不支持 fp64",
+            "DataType: Ascend A2/A3/950 does not support fp8/fp64.",
         ],
         "example": "triton.language.sub",
     },

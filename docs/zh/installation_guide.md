@@ -103,12 +103,11 @@ Triton-Ascend 是适配华为 Ascend 昇腾芯片的 Triton 优化版本，主�
 
 ## 硬件和操作系统
 
--   Ascend 产品：支持 Atlas A2/A3/A5 系列。
+- Ascend 产品：支持 Atlas A2/A3/A5 系列。
 
--   NPU 配置：建议至少单卡 32GB 内存。
+- NPU 配置：建议至少单卡 32GB 内存。
 
--   操作系统：需 Linux 系统，具体选择请参考<a href="https://www.hiascend.com/hardware/compatibility" style="text-decoration: none; color: #0066cc;">兼容性查询助手</a>。本文接下来所有操作均以 Ubuntu 环境演示。
-
+- 操作系统：需 Linux 系统，具体选择请参考<a href="https://www.hiascend.com/hardware/compatibility" style="text-decoration: none; color: #0066cc;">兼容性查询助手</a>。本文接下来所有操作均以 Ubuntu 环境演示。
 
 ## 安装方式选择
 
@@ -191,41 +190,43 @@ Triton-Ascend 是适配华为 Ascend 昇腾芯片的 Triton 优化版本，主�
 </table>
 
 #### 检查安装环境<a id = "huanjingzhunbei" ></a>
+
 确定 CANN、Python 和 Torch-NPU 软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。
--   CANN 版本推荐：9.0.0
--   Python 版本推荐：python3.11
--   Pytorch 版本推荐：2.7.1
--   Torch-NPU 版本推荐：2.7.1.post4。
+- CANN 版本推荐：9.0.0
+- Python 版本推荐：python3.11
+- Pytorch 版本推荐：2.7.1
+- Torch-NPU 版本推荐：2.7.1.post4。
 
 #### whl包安装
-1.  检查 Python 版本
+1. 检查 Python 版本
 
     ```bash
     python3 --version
     ```
+
     若命令回显如下所示，则表示 Python 版本为 3.11.15：
+
     ```text
     root@test:/# python3 --version
     Python 3.11.15
     ```
 
-2.  安装 whl 包
-    -    Triton-Ascend 3.2.0 及以下版本，Triton-Ascend 和 Triton 不能同时存在。需要先卸载社区 Triton，再安装 Triton-Ascend。
-    -    Triton-Ascend 3.2.1 及以上版本，Triton-Ascend 通过将 Triton 声明为安装依赖来缓解安装覆盖问题。具体参见[FAQ](#附录faq)
+2. 安装 whl 包
+    - Triton-Ascend 3.2.0 及以下版本，Triton-Ascend 和 Triton 不能同时存在。需要先卸载社区 Triton，再安装 Triton-Ascend。
+    - Triton-Ascend 3.2.1 及以上版本，Triton-Ascend 通过将 Triton 声明为安装依赖来缓解安装覆盖问题。具体参见[FAQ](#附录faq)
 
     ```bash
     # 以安装 triton-ascend 3.2.1 为例
     pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
     ```
 
-
 ### 源码编译安装
+
 如果需要对 **Triton-Ascend** 进行开发或自定义修改，可以采用源代码编译安装的方法。在安装环境和依赖准备好后，推荐使用[<u>在线安装</u>](#kuaisuanzhuang)的方式完成基于源码安装；若有特殊需求，如目标机器无法联网等原因，可以进行[<u>离线安装</u>](#shoudonganzhuang)。
 
-
 #### 检查安装环境
-确定 CANN、Python 和 torch_npu 软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。具体参考软件包安装的[<u>环境准备事项</u>](#huanjingzhunbei)
 
+确定 CANN、Python 和 torch_npu 软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。具体参考软件包安装的[<u>环境准备事项</u>](#huanjingzhunbei)
 
 **系统推荐**
 **表3** PyTorch 兼容性推荐版本表

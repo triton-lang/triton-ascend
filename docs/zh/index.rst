@@ -1,4 +1,3 @@
-
 欢迎查看 Triton Ascend 文档
 ============================
 
@@ -49,7 +48,7 @@
    :caption: 教程与样例
 
    Vector算子开发 <programming_guide/vector_operator>
-   cube算子开发 <programming_guide/cube_operator>
+   Cube算子开发 <programming_guide/cube_operator>
    融合算子开发 <programming_guide/cv_fusion_operator>
    Triton-Ascend autotune <autotune_guide>
    典型算子样例 <examples/index>

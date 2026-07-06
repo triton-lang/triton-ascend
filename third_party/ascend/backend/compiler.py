@@ -151,7 +151,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
                 passes.common.add_cse(pm)
                 passes.common.add_canonicalizer(pm)
             ascend.passes.ttir.add_dag_ssbuffer(pm)
-           if enable_optimizations:
+            if enable_optimizations:
                 passes.common.add_cse(pm)
                 passes.common.add_canonicalizer(pm)
 

@@ -34,6 +34,8 @@ std::unique_ptr<OperationPass<ModuleOp>> createUnifyAllocBlockPass();
 void registerUnifyAllocBlockPass();
 std::unique_ptr<OperationPass<ModuleOp>> createMergeVectorIfBlockPass();
 void registerMergeVectorIfBlockPass();
+std::unique_ptr<OperationPass<ModuleOp>> createMergeCubeForBlockPass();
+void registerMergeCubeForBlockPass();
 std::unique_ptr<OperationPass<ModuleOp>> createFixpipeOptPass();
 
 } // namespace triton

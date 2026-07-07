@@ -17,6 +17,18 @@
 namespace mlir {
 namespace CVPipeline {
 
+static bool g_enableCubeBlockMerge = true;
+
+void setEnableCubeBlockMerge(bool enable)
+{
+    g_enableCubeBlockMerge = enable;
+}
+
+bool isCubeBlockMergeEnabled()
+{
+    return g_enableCubeBlockMerge;
+}
+
 CoreType getOpCoreType(Operation *op)
 {
     if (!op) {

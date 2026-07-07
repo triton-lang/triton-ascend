@@ -1,4 +1,8 @@
-# README
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/vllm-project/vllm-ascend/main/docs/source/logos/vllm-ascend-logo-text-dark.png">
+  </picture>
+</p>
 
 <h3 align="center">
 Triton-Ascend
@@ -131,7 +135,8 @@ TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
 python3 setup.py install
 ```
 
-- #### 兼容性
+</details>
+</div>
 
 ### 镜像使用
 
@@ -188,9 +193,9 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
 - [快速开始](./docs/zh/quick_start.md)
 
-- [安装指南](./docs/zh/installation_guide.md)
+- [在线完整文档（推荐）](https://triton-ascend.readthedocs.io/zh-cn/latest/index.html)
 
-- [教程示例](./docs/zh/examples/index.md)
+- [安装指南](./docs/zh/installation_guide.md)
 
 - [架构设计与核心特性](./docs/zh/architecture_design_and_core_features.md)
 
@@ -202,20 +207,17 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
 - [性能调优指南](./docs/zh/debug_guide/profiling.md#)
 
-- [环境变量和编译选项](docs/zh/environment_variable_and_compiler_options_reference.md)
+- [环境变量参考](./docs/zh/environment_variable_and_compiler_options_reference.md)
 
-## 常见问题
+- [常见问题FAQ](./docs/zh/FAQ.md)
 
-在使用Triton-Ascend时遇到的常见问题，详见 [FAQ](./docs/zh/FAQ.md#)
+## 🏘️ 社区活动信息
 
-## 安全声明
+1. [会议日历](https://meeting.osinfra.cn/ascend)
+2. [会议纪要看板](https://etherpad-ascend.meeting.osinfra.cn/p/sig-AscendNPU-IR)
 
-我们重视开发者在使用Triton-Ascend时的信息安全，安全防护建议与相关信息请见 [安全声明](./docs/zh/community/SECURITYNOTE_zh.md)
+## 🤝 社区与贡献
 
-## 许可证信息
+- 欢迎参与Triton-Ascend的开发及代码贡献，详情请参阅 [贡献指南](./docs/zh/community/CONTRIBUTING_zh.md)
 
-本项目代码与文档均采用 [MIT许可证](./LICENSE)
-
-## 社区与贡献
-
-欢迎参与Triton-Ascend的开发及代码贡献，详情请参阅 [贡献指南](./docs/zh/community/CONTRIBUTING_zh.md)
+- 请通过[Issue](https://github.com/triton-lang/triton-ascend/issues)来告知我们您遇到的任何Bug。

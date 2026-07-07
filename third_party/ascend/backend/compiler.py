@@ -79,8 +79,8 @@ def get_enable_optimizations_env_var():
     if env_vf is None:
         return True
     return not (env_vf.lower() in ("true", "1", "yes"))
-  
-  
+
+
 def _get_dump_paths(hash_key: str, src_path: str, dst_path: str) -> Tuple[str, str]:
     """
     If TRITON_DUMP_DIR is set, return paths under that directory.

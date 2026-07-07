@@ -26,6 +26,7 @@
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
 
 #define DEBUG_TYPE "triton-bubble-up-operation"
 
@@ -520,8 +521,11 @@ void BubbleUpOperationPass::runOnOperation() {
   }
 
   PassManager pm(&getContext(), moduleOp.getOperationName());
-  pm.addPass(createCSEPass());
-  pm.addPass(createCanonicalizerPass());
+  // Disable optimizations for the Debug mode
+  if (!::triton::tools::getBoolEnv("TRITON_DISABLE_OPTIMIZATIONS")) {
+    pm.addPass(createCSEPass());
+    pm.addPass(createCanonicalizerPass());
+  }
   if (failed(runPipeline(pm, getOperation()))) {
     signalPassFailure();
   }

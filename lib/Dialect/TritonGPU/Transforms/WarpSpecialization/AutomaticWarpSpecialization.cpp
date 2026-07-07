@@ -6,6 +6,7 @@
 #include "third_party/nvidia/include/Dialect/NVWS/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Dialect/TritonGPU/Transforms/Utility.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
 
 using namespace mlir;
 using namespace triton;
@@ -41,7 +42,10 @@ void AutomaticWarpSpecialization::runOnOperation() {
   // FIXME: Re-enable integer range analysis once it is fixed.
   // pm.addPass(arith::createIntRangeOptimizationsPass());
   pm.addPass(createSCCPPass());
-  pm.addPass(createCSEPass());
+  // Disable optimizations for the Debug mode
+  if (!triton::tools::getBoolEnv("TRITON_DISABLE_OPTIMIZATIONS")) {
+    pm.addPass(createCSEPass());
+  }
   pm.addPass(createNVWSAssignStagePhase());
   pm.addPass(createNVWSLowerAref());
   pm.addPass(createTritonGPUPartitionLoops());

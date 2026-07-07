@@ -13,6 +13,7 @@
 #include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
 #include "triton/Tools/LayoutUtils.h"
 #include "triton/Tools/LinearLayout.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
 #include <memory>
 
 namespace mlir::triton::gpu {
@@ -322,7 +323,10 @@ public:
     ModuleOp m = getOperation();
 
     OpPassManager pm;
-    pm.addPass(mlir::createCanonicalizerPass());
+    // Disable optimizations for the Debug mode
+    if (!triton::tools::getBoolEnv("TRITON_DISABLE_OPTIMIZATIONS")) {
+      pm.addPass(mlir::createCanonicalizerPass());
+    }
     if (failed(runPipeline(pm, m)))
       return signalPassFailure();
 

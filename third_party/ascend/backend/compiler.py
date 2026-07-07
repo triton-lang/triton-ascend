@@ -73,6 +73,14 @@ def min_dot_size(target: GPUTarget):
     return lambda lhsType, rhsType: (1, 1, 1)
 
 
+def get_enable_optimizations_env_var():
+    # TODO: LLVM_EXTRACT_DI_LOCAL_VARIABLES may be misunderstanding for users
+    env_vf = os.getenv("TRITON_DISABLE_OPTIMIZATIONS")
+    if env_vf is None:
+        return True
+    return not (env_vf.lower() in ("true", "1", "yes"))
+
+
 def _get_dump_paths(hash_key: str, src_path: str, dst_path: str) -> Tuple[str, str]:
     """
     If TRITON_DUMP_DIR is set, return paths under that directory.
@@ -93,9 +101,12 @@ def make_ttir(mod, metadata, opt):
     pm.enable_debug()
     passes.common.add_inliner(pm)
     passes.ttir.add_combine(pm)
-    passes.common.add_canonicalizer(pm)
-    passes.ttir.add_reorder_broadcast(pm)
-    passes.common.add_cse(pm)
+    #Disable optimizations for the Debug mode
+    enable_optimizations = get_enable_optimizations_env_var()
+    if enable_optimizations:
+        passes.common.add_canonicalizer(pm)
+        passes.ttir.add_reorder_broadcast(pm)
+        passes.common.add_cse(pm)
     passes.common.add_licm(pm)
     passes.common.add_symbol_dce(pm)
     passes.ttir.add_loop_unroll(pm)
@@ -131,14 +142,18 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
         ascend.passes.ttir.add_auto_blockify(pm, auto_blockify_size)
+        enable_optimizations = get_enable_optimizations_env_var()
         if (metadata["add_auto_scheduling"]):
             ascend.passes.ttir.add_dag_sync(pm)
             ascend.passes.ttir.add_dag_scope(pm)
-            passes.common.add_cse(pm)
-            passes.common.add_canonicalizer(pm)
+            #Disable optimizations for the Debug mode
+            if enable_optimizations:
+                passes.common.add_cse(pm)
+                passes.common.add_canonicalizer(pm)
             ascend.passes.ttir.add_dag_ssbuffer(pm)
-            passes.common.add_cse(pm)
-            passes.common.add_canonicalizer(pm)
+            if enable_optimizations:
+                passes.common.add_cse(pm)
+                passes.common.add_canonicalizer(pm)
 
         ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
         ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, compile_mode,
@@ -148,7 +163,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         ascend.passes.ttir.add_triton_to_hivm(pm)
         ascend.passes.ttir.add_triton_to_hfusion(pm)
         ascend.passes.ttir.add_triton_to_llvm(pm)
-        ascend.passes.ttir.add_bubble_up_operation(pm)
+        if enable_optimizations:
+            ascend.passes.ttir.add_bubble_up_operation(pm)
         ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
         ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, enable_nd2nz_on_vector, enable_select_analysis,
                                                 compile_on_910_95, compile_mode)

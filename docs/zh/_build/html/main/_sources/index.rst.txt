@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-=======
-
->>>>>>> 8e27e510975c50d8d5da7a9ddac9fc389a77ab72
 欢迎查看 Triton Ascend 文档
 ============================
 
@@ -43,7 +39,6 @@
 
    快速入门 <quick_start>
    安装指南 <installation_guide>
-
 
 .. toctree::
    :hidden:

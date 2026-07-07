@@ -3,7 +3,7 @@
   <head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="index" title="Index" href="../../genindex.html"><link rel="search" title="Search" href="../../search.html"><link rel="next" title="triton.language.split" href="split.html"><link rel="prev" title="triton.language.ravel" href="ravel.html">
+<link rel="index" title="Index" href="../../genindex.html"><link rel="search" title="Search" href="../../search.html">
 
     <!-- Generated with Sphinx 9.0.4 and Furo 2025.12.19 -->
         <title>triton.language.reshape - Triton Ascend latest documentation</title>
@@ -191,196 +191,7 @@
   <input type="hidden" name="area" value="default">
 </form>
 <div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
-  <p class="caption" role="heading"><span class="caption-text">快速开始</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="../../quick_start.html">快速入门</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../installation_guide.html">安装指南</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">特性说明</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="../../architecture_design_and_core_features.html">架构设计与核心特性</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子开发指南</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="../../programming_guide.html">Triton-Ascend算子开发</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子迁移指南</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="../../migration_guide/architecture_difference.html">昇腾与GPU的开发差异</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../migration_guide/migrate_from_gpu.html">GPU Triton算子迁移</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">典型算子样例</span></p>
-<ul>
-<<<<<<< HEAD
-<li class="toctree-l1"><a class="reference internal" href="../../examples/index.html">Tutorials</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子调试与调优</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="../../debug_guide/debugging.html">Triton-Ascend调试指南</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../debug_guide/profiling.html">Triton-Ascend性能分析方法</a></li>
-=======
-<li class="toctree-l1"><a class="reference internal" href="../../debug_guide/debugging.html">Triton-Ascend 调试指南</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../debug_guide/profiling.html">Triton-Ascend 性能分析方法</a></li>
->>>>>>> 8e27e510975c50d8d5da7a9ddac9fc389a77ab72
-</ul>
-<p class="caption" role="heading"><span class="caption-text">Triton API 接口说明</span></p>
-<ul class="current">
-<li class="toctree-l1 current has-children"><a class="reference internal" href="../index.html">triton.language API</a><input aria-label="Toggle navigation of triton.language API" checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/extract_slice.html">triton.language.extract_slice</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/insert_slice.html">triton.language.insert_slice</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/sync_block.html">triton.language.sync_block_set</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/compile_hint.html">triton.language.compile_hint</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/multibuffer.html">triton.language.multibuffer</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/parallel.html">triton.language.parallel</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/get_element.html">triton.language.get_element</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/index_select_simd.html">triton.language.extra.ascend.libdevice.index_select_simd</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Atomic_Ops/atomic_add.html">triton.language.atomic_add</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Atomic_Ops/atomic_and.html">triton.language.atomic_and</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Atomic_Ops/atomic_cas.html">triton.language.atomic_cas</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Atomic_Ops/atomic_max.html">triton.language.atomic_max</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Atomic_Ops/atomic_min.html">triton.language.atomic_min</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Atomic_Ops/atomic_or.html">triton.language.atomic_or</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Atomic_Ops/atomic_xchg.html">triton.language.atomic_xchg</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Atomic_Ops/atomic_xor.html">triton.language.atomic_xor</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Comparing_Ops/eq.html">eq</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Comparing_Ops/le.html">triton.language.semantic.less_equal</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Comparing_Ops/ge.html">triton.language.semantic.greater_equal</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Comparing_Ops/lt.html">triton.language.semantic.less_than</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Comparing_Ops/gt.html">triton.language.semantic.greater_than</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Comparing_Ops/ne.html">ne</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Compiler_Hint_Ops/debug_barrier.html">triton.language.debug_barrier</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Compiler_Hint_Ops/max_constancy.html">triton.language.max_constancy</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Compiler_Hint_Ops/max_contiguous.html">triton.language.max_contiguous</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Compiler_Hint_Ops/multiple_of.html">triton.language.multiple_of</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Compiler_Hint_Ops/assume.html">triton.language.assume</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/compile_hint.html">triton.language.compile_hint</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/multibuffer.html">triton.language.multibuffer</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/parallel.html">triton.language.parallel</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/sync_block.html">triton.language.sync_block_set</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Creation_Ops/arange.html">triton.language.arange</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Creation_Ops/cat.html">triton.language.cat</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Creation_Ops/full.html">triton.language.full</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Creation_Ops/zeros.html">triton.language.zeros</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Creation_Ops/zeros_like.html">triton.language.zeros_like</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Creation_Ops/cast.html">triton.language.cast</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Debug_Ops/static_print.html">triton.language.static_print</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Debug_Ops/static_assert.html">triton.language.static_assert</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Debug_Ops/device_print.html">triton.language.device_print</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Debug_Ops/device_assert.html">triton.language.device_assert</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Indexing_Ops/flip.html">triton.language.flip</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Indexing_Ops/where.html">triton.language.where</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Indexing_Ops/swizzle2d.html">triton.language.swizzle2d</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/get_element.html">triton.language.get_element</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/index_select_simd.html">triton.language.extra.ascend.libdevice.index_select_simd</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Inline_Assembly/inline_asm_elementwise.html">triton.language.inline_asm_elementwise</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Iterators/range.html">triton.language.range</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Iterators/static_range.html">triton.language.static_range</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Linear_Algebra_Ops/dot.html">triton.language.dot</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Linear_Algebra_Ops/dot_scaled.html">triton.language.dot_scaled</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Logical_Ops/and.html">triton.language.and</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Logical_Ops/or.html">triton.language.or</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Logical_Ops/not.html">triton.language.not</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Logical_Ops/logical_and.html">triton.language.semantic.logical_and</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Logical_Ops/logical_or.html">triton.language.semantic.logical_or</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Logical_Ops/not.html">triton.language.not</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Logical_Ops/invert.html">triton.language.invert</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Logical_Ops/lshift.html">triton.language.core.<strong>lshift</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Logical_Ops/rshift.html">triton.language.core.<strong>rshift</strong></a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Logical_Ops/xor.html">triton.language.xor</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/add.html">triton.language.add</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/sub.html">sub</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/mul.html">mul</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/div.html">div</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/abs.html">triton.language.abs</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/neg.html">triton.language.neg</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/cdiv.html">triton.language.cdiv</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/ceil.html">triton.language.ceil</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/clamp.html">triton.language.clamp</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/cos.html">triton.language.cos</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/div_rn.html">triton.language.div_rn</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/erf.html">triton.language.erf</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/exp.html">triton.language.exp</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/exp2.html">triton.language.exp2</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/fdiv.html">triton.language.fdiv</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/floor.html">triton.language.floor</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/fma.html">triton.language.fma</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/log.html">triton.language.log</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/log2.html">triton.language.log2</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/mod.html">mod</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/maximum.html">triton.language.maximum</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/minimum.html">triton.language.minimum</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/rsqrt.html">triton.language.rsqrt</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/sigmoid.html">triton.language.sigmoid</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/sin.html">triton.language.sin</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/softmax.html">triton.language.softmax</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/sqrt.html">triton.language.sqrt</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/sqrt_rn.html">triton.language.sqrt_rn</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Math_Ops/umulhi.html">triton.language.umulhi</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Memory_Pointer_Ops/tl.load.html">triton.language.load</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Memory_Pointer_Ops/tl.store.html">triton.language.store</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Memory_Pointer_Ops/tl.make_block_ptr.html">triton.language.make_block_ptr</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Memory_Pointer_Ops/tl.advance.html">triton.language.advance</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Memory_Pointer_Ops/load_tensor_descriptor.html">triton.language.load_tensor_descriptor</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Memory_Pointer_Ops/make_tensor_descriptor.html">triton.language.make_tensor_descriptor</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Programming_Model/program_id.html">triton.language.program_id</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Programming_Model/num_programs.html">triton.language.num_programs</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Random_Number_Generation/randint4x.html">triton.language.randint4x</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Random_Number_Generation/randint.html">triton.language.randint</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Random_Number_Generation/rand.html">triton.language.rand</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Random_Number_Generation/randn.html">triton.language.randn</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Reduction_Ops/argmax.html">triton.language.argmax</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Reduction_Ops/argmin.html">triton.language.argmin</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Reduction_Ops/max.html">triton.language.max</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Reduction_Ops/min.html">triton.language.min</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Reduction_Ops/reduce.html">triton.language.reduce</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Reduction_Ops/sum.html">triton.language.sum</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Reduction_Ops/xor_sum.html">triton.language.xor_sum</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Scan_Sort_Ops/associative_scan.html">triton.language.associative_scan</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Scan_Sort_Ops/cumprod.html">triton.language.cumprod</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Scan_Sort_Ops/cumsum.html">triton.language.cumsum</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Scan_Sort_Ops/histogram.html">triton.language.histogram</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Scan_Sort_Ops/sort.html">triton.language.sort</a></li>
-<li class="toctree-l2"><a class="reference internal" href="broadcast.html">triton.language.broadcast</a></li>
-<li class="toctree-l2"><a class="reference internal" href="broadcast_to.html">triton.language.broadcast_to</a></li>
-<li class="toctree-l2"><a class="reference internal" href="expand_dims.html">triton.language.expand_dims</a></li>
-<li class="toctree-l2"><a class="reference internal" href="interleave.html">triton.language.interleave</a></li>
-<li class="toctree-l2"><a class="reference internal" href="join.html">triton.language.join</a></li>
-<li class="toctree-l2"><a class="reference internal" href="permute.html">triton.language.permute</a></li>
-<li class="toctree-l2"><a class="reference internal" href="ravel.html">triton.language.ravel</a></li>
-<li class="toctree-l2 current current-page"><a class="current reference internal" href="#">triton.language.reshape</a></li>
-<li class="toctree-l2"><a class="reference internal" href="split.html">triton.language.split</a></li>
-<li class="toctree-l2"><a class="reference internal" href="trans.html">triton.language.trans</a></li>
-<li class="toctree-l2"><a class="reference internal" href="view.html">triton.language.view</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/extract_slice.html">triton.language.extract_slice</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../Extension_Ops/insert_slice.html">triton.language.insert_slice</a></li>
-</ul>
-</li>
-<li class="toctree-l1 has-children"><a class="reference internal" href="../triton/index.html">triton</a><input aria-label="Toggle navigation of triton" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
-<li class="toctree-l2"><a class="reference internal" href="../triton/jit.html">triton.jit</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../triton/autotune.html">triton.autotune</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../triton/heuristics.html">triton.heuristics</a></li>
-<li class="toctree-l2"><a class="reference internal" href="../triton/Config.html">triton.Config</a></li>
-</ul>
-</li>
-<<<<<<< HEAD
-</ul>
-<p class="caption" role="heading"><span class="caption-text">Libdevice 开发者手册</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="../../libdevice/libdevice_developer_guide.html">Libdevice 开发者手册</a></li>
-</ul>
-<p class="caption" role="heading"><span class="caption-text">环境变量</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="../../environment_variable_reference.html">环境变量</a></li>
-</ul>
-=======
-<li class="toctree-l1"><a class="reference internal" href="../../libdevice/libdevice_developer_guide.html">Libdevice 开发者手册</a></li>
-</ul>
->>>>>>> 8e27e510975c50d8d5da7a9ddac9fc389a77ab72
-<p class="caption" role="heading"><span class="caption-text">常见问题</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="../../FAQ.html">Triton-Ascend FAQ</a></li>
-</ul>
-
+  
 </div>
 </div>
 
@@ -578,26 +389,8 @@
       <footer>
         
         <div class="related-pages">
-          <a class="next-page" href="split.html">
-              <div class="page-info">
-                <div class="context">
-                  <span>Next</span>
-                </div>
-                <div class="title">triton.language.split</div>
-              </div>
-              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
-            </a>
-          <a class="prev-page" href="ravel.html">
-              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
-              <div class="page-info">
-                <div class="context">
-                  <span>Previous</span>
-                </div>
-                
-                <div class="title">triton.language.ravel</div>
-                
-              </div>
-            </a>
+          
+          
         </div>
         <div class="bottom-of-page">
           <div class="left-details">
@@ -608,11 +401,7 @@
             
             <a href="https://github.com/pradyunsg/furo">Furo</a>
             <div class="last-updated">
-<<<<<<< HEAD
-              Last updated on Jul 02, 2026</div>
-=======
-              Last updated on Jun 30, 2026</div>
->>>>>>> 8e27e510975c50d8d5da7a9ddac9fc389a77ab72
+              Last updated on Jul 07, 2026</div>
           </div>
           <div class="right-details">
             

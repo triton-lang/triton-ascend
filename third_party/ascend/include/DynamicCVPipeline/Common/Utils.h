@@ -78,6 +78,9 @@ inline constexpr CoreType fromStrCoreType(std::string_view s)
     return CoreType::UNDETERMINED;
 }
 
+void setEnableCubeBlockMerge(bool enable);
+bool isCubeBlockMergeEnabled();
+
 // Functions for managing core types
 CoreType getOpCoreType(Operation *op);
 std::optional<int> getOpBlockId(Operation *op);

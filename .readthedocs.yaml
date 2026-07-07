@@ -1,4 +1,6 @@
 # Read the Docs configuration file
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
+
 version: 2
 
 build:
@@ -12,3 +14,18 @@ sphinx:
 python:
   install:
   - requirements: docs/zh/requirement.txt
+
+submodules:
+  include: all
+
+versions:
+  - name: latest
+    label: latest (main)
+    type: branch
+    branch: main
+    pinned: true
+  - name: "3.2.2"
+    label: "3.2.2"
+    type: tag
+    tag: 3.2.2
+    pinned: false

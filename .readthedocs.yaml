@@ -24,4 +24,15 @@ python:
 # 添加语言配置
 submodules:
   include: all
-  
+
+versions:
+  - name: latest
+    label: latest
+    type: branch
+    branch: main
+    pinned: true
+  - name: stable
+    label: stable
+    type: tag
+    tag: 3.2.2
+    pinned: false

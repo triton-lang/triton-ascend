@@ -1,0 +1,89 @@
+name: DynamicCVPipeline Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'third_party/ascend/include/DynamicCVPipeline/**'
+
+concurrency:
+  group: dynamic-cv-pipeline-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+permissions: read-all
+
+jobs:
+
+  remote-test:
+    name: Run ci.py on remote server
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Skip for fork PRs: secrets (SSH key) are not available there.
+    # Fork contributors must run the workflow from their own fork after pushing
+    # the branch upstream, or maintainers can manually trigger via workflow_dispatch.
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        env:
+          SSH_KEY: ${{ secrets.DYNAMIC_CV_TEST_SSH_KEY }}
+        run: |
+          set -eu
+          if [ -z "${SSH_KEY}" ]; then
+            echo "::error::DYNAMIC_CV_TEST_SSH_KEY secret is empty or missing"
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          # Write key as-is; trailing newline required by ssh.
+          printf '%s\n' "${SSH_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Add host to known_hosts to avoid StrictHostKeyChecking prompt
+          ssh-keyscan -H "${{ secrets.DYNAMIC_CV_TEST_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Run remote test
+        env:
+          SSH_HOST: ${{ secrets.DYNAMIC_CV_TEST_HOST }}
+          SSH_USER: ${{ secrets.DYNAMIC_CV_TEST_USER }}
+          PR_NUM:   ${{ github.event.pull_request.number || 'manual' }}
+        run: |
+          set -eu
+
+          # Legacy SSH algorithms required by the remote server's old sshd.
+          SSH_OPTS="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=30"
+          SSH_OPTS="${SSH_OPTS} -o KexAlgorithms=diffie-hellman-group-exchange-sha1,diffie-hellman-group14-sha1,diffie-hellman-group1-sha1"
+          SSH_OPTS="${SSH_OPTS} -o HostKeyAlgorithms=+ssh-rsa"
+          SSH_OPTS="${SSH_OPTS} -o PubkeyAcceptedAlgorithms=+ssh-rsa"
+          SSH_OPTS="${SSH_OPTS} -o HostKeyAlgorithms=+ssh-rsa,ssh-ed25519"
+
+          REMOTE_TMP="/tmp/dynamic-cv-pr-${PR_NUM}"
+          SSH_CMD="ssh ${SSH_OPTS} ${SSH_USER}@${SSH_HOST}"
+          SCP_CMD="scp ${SSH_OPTS}"
+
+          # Run ci.py inside the remote docker container
+          ${SSH_CMD} "
+            set -eu
+            docker start z00896713
+            docker exec z00896713 bash -c '
+              chmod -R a+rwX /home/z00896713
+              cd /home/z00896713/ci
+              python ci.py
+            '
+            mkdir -p ${REMOTE_TMP}
+            docker cp z00896713:/home/z00896713/ci/hello.txt ${REMOTE_TMP}/hello.txt
+          "
+
+          # Copy hello.txt back
+          ${SCP_CMD} \
+            ${SSH_USER}@${SSH_HOST}:${REMOTE_TMP}/hello.txt ./hello.txt
+
+          # Cleanup remote temp
+          ${SSH_CMD} "rm -rf ${REMOTE_TMP}"
+
+      - name: Upload hello.txt as PR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hello-txt-pr-${{ github.event.pull_request.number || 'manual' }}
+          path: ./hello.txt

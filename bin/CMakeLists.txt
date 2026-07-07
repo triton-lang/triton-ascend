@@ -30,11 +30,6 @@ target_link_libraries(triton-opt PRIVATE
   BiShengIRScopeDialect
   BiShengIRSymbolDialect
   BiShengIRTensorDialect
-  # tests
-  TritonTestAnalysis
-  TritonTestDialect
-  TritonAMDGPUTestAnalysis
-  TritonTestProton
   # MLIR core
   MLIROptLib
   MLIRPass
@@ -70,11 +65,6 @@ target_link_libraries(triton-reduce PRIVATE
   BiShengIRScopeDialect
   BiShengIRSymbolDialect
   BiShengIRTensorDialect
-  # tests
-  TritonTestAnalysis
-  TritonTestDialect
-  TritonAMDGPUTestAnalysis
-  TritonTestProton
   # MLIR core
   MLIRReduceLib
   MLIRPass
@@ -109,11 +99,6 @@ target_link_libraries(triton-lsp PRIVATE
   BiShengIRScopeDialect
   BiShengIRSymbolDialect
   BiShengIRTensorDialect
-  # tests
-  TritonTestAnalysis
-  TritonTestDialect
-  TritonAMDGPUTestAnalysis
-  TritonTestProton
   # MLIR core
   MLIRLspServerLib
   MLIRPass
@@ -167,11 +152,6 @@ target_link_libraries(triton-tensor-layout PRIVATE
   BiShengIRScopeDialect
   BiShengIRSymbolDialect
   BiShengIRTensorDialect
-  # tests
-  TritonTestAnalysis
-  TritonTestDialect
-  TritonTestProton
-  TritonAMDGPUTestAnalysis
   MLIRRegisterAllDialects
   MLIRRegisterAllPasses
   MLIRTransforms

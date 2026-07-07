@@ -20,7 +20,7 @@
 开发指南
 ---------------------
 
-- :doc:`Triton-Ascend算子开发 <programming_guide/vector_operator>` — 算子开发指南
+- :doc:`Triton-Ascend算子开发 <programming_guide/index>` — 算子开发指南
 - :doc:`Triton-Ascend算子迁移 <migration_guide/index>` — GPU Triton算子迁移
 - :doc:`Triton-Ascend算子调试与调优 <debug_guide/index>` — Triton-Ascend autotune
 

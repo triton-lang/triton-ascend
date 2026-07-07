@@ -1,9 +1,9 @@
-if(NOT TARGET NVGPUTableGen)
+if(NOT "nvidia" IN_LIST TRITON_CODEGEN_BACKENDS AND NOT TARGET NVGPUTableGen)
   add_subdirectory(
     ${PROJECT_SOURCE_DIR}/third_party/nvidia/include/Dialect/NVGPU/IR
     ${CMAKE_BINARY_DIR}/third_party/nvidia/include/Dialect/NVGPU/IR)
 endif()
-if(NOT TARGET NVGPUIR)
+if(NOT "nvidia" IN_LIST TRITON_CODEGEN_BACKENDS AND NOT TARGET NVGPUIR)
   add_subdirectory(
     ${PROJECT_SOURCE_DIR}/third_party/nvidia/lib/Dialect/NVGPU/IR
     ${CMAKE_BINARY_DIR}/third_party/nvidia/lib/Dialect/NVGPU/IR)

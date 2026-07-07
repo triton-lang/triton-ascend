@@ -1,4 +1,4 @@
-if(NOT TARGET NVWSIR)
+if(NOT "nvidia" IN_LIST TRITON_CODEGEN_BACKENDS AND NOT TARGET NVWSIR)
   add_subdirectory(
     ${PROJECT_SOURCE_DIR}/third_party/nvidia/include/Dialect/NVWS/IR
     ${CMAKE_BINARY_DIR}/third_party/nvidia/include/Dialect/NVWS/IR)
@@ -7,7 +7,7 @@ if(NOT TARGET NVWSIR)
     ${CMAKE_BINARY_DIR}/third_party/nvidia/lib/Dialect/NVWS/IR)
 endif()
 
-if(NOT TARGET NVWSTransforms)
+if(NOT "nvidia" IN_LIST TRITON_CODEGEN_BACKENDS AND NOT TARGET NVWSTransforms)
   add_subdirectory(
     ${PROJECT_SOURCE_DIR}/third_party/nvidia/include/Dialect/NVWS/Transforms
     ${CMAKE_BINARY_DIR}/third_party/nvidia/include/Dialect/NVWS/Transforms)

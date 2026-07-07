@@ -21,7 +21,7 @@ import os
 # General information about the project.
 
 project = 'Triton Ascend'
-copyright = '2026 Huawei'
+copyright = '2026, Huawei'
 author = 'Huawei'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -59,9 +59,9 @@ language = 'zh_CN' if _is_zh else 'en'
 
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 if _is_zh:
-    exclude_patterns.extend(['source/en'])
+    exclude_patterns.extend(['../en'])
 else:
-    exclude_patterns.extend(['source/zh_cn'])
+    exclude_patterns.extend(['../zh'])
 
 # -- General configuration ---------------------------------------------------
 templates_path = ['_templates']

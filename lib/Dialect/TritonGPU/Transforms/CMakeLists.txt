@@ -1,3 +1,21 @@
+if(NOT TARGET NVWSIR)
+  add_subdirectory(
+    ${PROJECT_SOURCE_DIR}/third_party/nvidia/include/Dialect/NVWS/IR
+    ${CMAKE_BINARY_DIR}/third_party/nvidia/include/Dialect/NVWS/IR)
+  add_subdirectory(
+    ${PROJECT_SOURCE_DIR}/third_party/nvidia/lib/Dialect/NVWS/IR
+    ${CMAKE_BINARY_DIR}/third_party/nvidia/lib/Dialect/NVWS/IR)
+endif()
+
+if(NOT TARGET NVWSTransforms)
+  add_subdirectory(
+    ${PROJECT_SOURCE_DIR}/third_party/nvidia/include/Dialect/NVWS/Transforms
+    ${CMAKE_BINARY_DIR}/third_party/nvidia/include/Dialect/NVWS/Transforms)
+  add_subdirectory(
+    ${PROJECT_SOURCE_DIR}/third_party/nvidia/lib/Dialect/NVWS/Transforms
+    ${CMAKE_BINARY_DIR}/third_party/nvidia/lib/Dialect/NVWS/Transforms)
+endif()
+
 add_triton_library(TritonGPUTransforms
   AccelerateMatmul.cpp
   Coalesce.cpp

@@ -13,5 +13,9 @@ add_triton_library(ProtonGPUToLLVM
     ProtonAnalysis
 )
 
-add_subdirectory(ProtonNvidiaGPUToLLVM)
-add_subdirectory(ProtonAMDGPUToLLVM)
+if("nvidia" IN_LIST TRITON_CODEGEN_BACKENDS)
+  add_subdirectory(ProtonNvidiaGPUToLLVM)
+endif()
+if("amd" IN_LIST TRITON_CODEGEN_BACKENDS)
+  add_subdirectory(ProtonAMDGPUToLLVM)
+endif()

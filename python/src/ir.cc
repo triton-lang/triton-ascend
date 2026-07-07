@@ -1,4 +1,4 @@
-#include "ir.h"
+#include "ir_binding.h"
 
 #include <optional>
 #include <pybind11/cast.h>
@@ -38,10 +38,10 @@
 #include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonNvidiaGPU/Transforms/TMAUtilities.h"
 #include "triton/Tools/Sys/GetEnv.hpp"
+#include "triton/Tools/PluginUtils.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/SourceMgr.h"
 
-#include "ir.h"
 namespace {
 
 namespace py = pybind11;
@@ -385,6 +385,11 @@ void init_triton_ir(py::module &&m) {
     registerBuiltinDialectTranslation(registry);
     registerLLVMDialectTranslation(registry);
     mlir::LLVM::registerInlinerInterface(registry);
+    // Register dialects from plugins.
+    // pull-based: loadPlugins() (TRITON_PLUGIN_PATHS / dlopen)
+    for (const auto &plugin : mlir::triton::plugin::loadPlugins()) {
+      plugin.registerDialects(registry);
+    }
     context.appendDialectRegistry(registry);
     context.loadAllAvailableDialects();
   });
@@ -1992,6 +1997,17 @@ void init_triton_ir(py::module &&m) {
               throw std::runtime_error("PassManager::run failed");
           },
           py::call_guard<py::gil_scoped_release>());
+
+  // Register custom ops from plugins.
+  // pull-based: loadPlugins() (TRITON_PLUGIN_PATHS / dlopen)
+  for (const auto &plugin : mlir::triton::plugin::loadPlugins()) {
+    for (const auto &op : plugin.listOps()) {
+      builderClass.def(
+          op.name, [op](TritonOpBuilder &self, std::vector<Value> args) {
+            op.addOp(self, args);
+          });
+    }
+  }
 }
 
 bool str_eq_ignore_case(const char *s1, const char *s2, int n) {

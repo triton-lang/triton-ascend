@@ -12,6 +12,7 @@
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Dialect/TritonInstrument/Transforms/Passes.h"
 #include "triton/Target/LLVMIR/Passes.h"
+#include "triton/Tools/PluginUtils.h"
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -122,6 +123,20 @@ void init_gluon_passes(py::module &&m) {
                      gluon::createGluonInferCoalescedEncodingsPass);
 }
 
+void init_plugin_passes(py::module &m) {
+  for (const auto &plugin : mlir::triton::plugin::loadPlugins()) {
+    for (const auto &pass : plugin.listPasses()) {
+      std::string wrapped = std::string("add_") + pass.name;
+      m.def(
+          wrapped.c_str(),
+          [pass](mlir::PassManager &pm, std::vector<std::string> args) {
+            pass.addPass(&pm, args);
+          },
+          py::arg("pm"), py::arg("args") = std::vector<std::string>());
+    }
+  }
+}
+
 void init_triton_passes(py::module &&m) {
   init_triton_analysis(m.def_submodule("analysis"));
   init_triton_passes_common(m.def_submodule("common"));
@@ -130,4 +145,7 @@ void init_triton_passes(py::module &&m) {
   init_triton_passes_ttgpuir(m.def_submodule("ttgpuir"));
   init_triton_passes_llvmir(m.def_submodule("llvmir"));
   init_gluon_passes(m.def_submodule("gluon"));
+
+  auto plugin_m = m.def_submodule("plugin");
+  init_plugin_passes(plugin_m);
 }

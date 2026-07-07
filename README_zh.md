@@ -111,16 +111,16 @@ cd {PATH_TO}/llvm_project
 mkdir build
 cd build
 cmake ../llvm \
-  -G Ninja \
-  -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
-  -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
-  -DCMAKE_LINKER=/usr/bin/lld-15 \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DLLVM_ENABLE_ASSERTIONS=ON \
-  -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
-  -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
-  -DLLVM_ENABLE_LLD=ON \
-  -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
+    -G Ninja \
+    -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
+    -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
+    -DCMAKE_LINKER=/usr/bin/lld-15 \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLLVM_ENABLE_ASSERTIONS=ON \
+    -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
+    -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
+    -DLLVM_ENABLE_LLD=ON \
+    -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
 ninja install
 
 # 编译Triton-Ascend

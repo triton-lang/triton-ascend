@@ -59,7 +59,19 @@ static bool isUsedOutsideRegion(Value v, const llvm::DenseSet<Operation *> &regi
   return false;
 }
 
-// Find the iteration argument in main loop that corresponds to the given value
+// Find the iteration argument in main loop that corresponds to the given value.
+// Handles both scf.for and scf.while — in both cases, the operand index in
+// scf.yield matches the iter_arg's position in the body block's argument list:
+//
+//   - scf.for: the yield sits inside the forOp's body block. The iter_args are
+//     body-block args 1..N (arg 0 is the IV). forOp.getRegionIterArgs() gives
+//     exactly those iter_args.
+//
+//   - scf.while: the yield sits inside the after-region body block. The
+//     iter_args are the after-block args (0..N-1; no IV). We must use
+//     whileOp.getAfterArguments() because getRegionIterArgs() (the
+//     LoopLikeOpInterface default) returns the before-block args, which are
+//     not visible from inside the body.
 static Value findIterArgInMainLoop(Value v, mlir::Type t)
 {
   for (Operation *user : v.getUsers()) {
@@ -68,14 +80,23 @@ static Value findIterArgInMainLoop(Value v, mlir::Type t)
       continue;
     }
 
-    auto forOp = dyn_cast<scf::ForOp>(yieldOp->getParentOp());
-    if (!forOp) {
+    ValueRange iterArgs;
+    if (auto forOp = dyn_cast<scf::ForOp>(yieldOp->getParentOp())) {
+      iterArgs = forOp.getRegionIterArgs();
+    } else if (auto whileOp = dyn_cast<scf::WhileOp>(yieldOp->getParentOp())) {
+      iterArgs = whileOp.getAfterArguments();
+    } else {
       continue;
     }
 
     for (auto [idx, operand] : llvm::enumerate(yieldOp.getOperands())) {
       if (operand.getAsOpaquePointer() == v.getAsOpaquePointer()) {
-        Value iterArg = forOp.getRegionIterArgs()[idx];
+        if (idx >= iterArgs.size()) {
+          LDBG("[Error]: yield operand index " << idx
+                << " out of range for iter_args size " << iterArgs.size() << "\n");
+          continue;
+        }
+        Value iterArg = iterArgs[idx];
         if (iterArg.getType() == t) {
           return iterArg;
         }
@@ -83,7 +104,7 @@ static Value findIterArgInMainLoop(Value v, mlir::Type t)
     }
   }
 
-  LDBG("[Error]: else yield value not found in forOp iter_args: " << v << "\n");
+  LDBG("[Error]: else yield value not found in forOp/whileOp iter_args: " << v << "\n");
   return nullptr;
 }
 
@@ -135,12 +156,16 @@ static LogicalResult replaceExternalIfOpUses(scf::IfOp ifOp, ArrayRef<Value> old
   return success();
 }
 
-// Compute yield values for each block: values that need to be yielded from the if
-LogicalResult CreateIfOpsPass::computeYieldValues(scf::ForOp forOp,
+// Compute yield values for each block: values that need to be yielded from the if.
+// `loopOp` is the main-loop op (scf.for or scf.while) carrying ssbuffer.main_loop.
+// The function is op-agnostic: findIterArgInMainLoop dispatches on the yield's
+// parent op (forOp or whileOp) to look up the corresponding iter_arg.
+LogicalResult CreateIfOpsPass::computeYieldValues(Operation *loopOp,
                                                   const llvm::DenseMap<int, SmallVector<Operation *>> &blockOps,
                                                   llvm::DenseMap<int, SmallVector<Value>> &thenYieldValues,
                                                   llvm::DenseMap<int, SmallVector<Value>> &elseYieldValues)
 {
+  (void)loopOp; // unused; findIterArgInMainLoop walks the yield's parent.
   for (auto &p : blockOps) {
     int id = p.first;
     const SmallVector<Operation *> &ops = p.second;
@@ -264,13 +289,24 @@ static LogicalResult moveOpsToThenBranch(scf::IfOp ifOp, SmallVector<Operation *
   return success();
 }
 
-// Create if ops (scf.if %true) for each block_id in the main loop
-LogicalResult CreateIfOpsPass::createIfInMainLoop(scf::ForOp forOp,
+// Create if ops (scf.if %true) for each block_id in the main loop.
+// `op` is the main-loop op (scf.for or scf.while) carrying ssbuffer.main_loop.
+// We dispatch on op type only for getBlockIdsInOrder, which has separate
+// forOp/whileOp overloads.
+LogicalResult CreateIfOpsPass::createIfInMainLoop(Operation *op,
                                                   const llvm::DenseMap<int, SmallVector<Operation *>> &blockOps,
                                                   const llvm::DenseMap<int, SmallVector<Value>> &thenYieldValues,
                                                   const llvm::DenseMap<int, SmallVector<Value>> &elseYieldValues)
 {
-  SmallVector<int> ids = getBlockIdsInOrder(forOp);
+  SmallVector<int> ids;
+  if (auto forOp = dyn_cast<scf::ForOp>(op)) {
+    ids = getBlockIdsInOrder(forOp);
+  } else if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
+    ids = getBlockIdsInOrder(whileOp);
+  } else {
+    LDBG("[Error]: op with ssbuffer.main_loop is neither scf::ForOp nor scf::WhileOp\n");
+    return failure();
+  }
 
   for (int id : ids) {
     const SmallVector<Operation *> &ops = blockOps.lookup(id);
@@ -313,33 +349,42 @@ void CreateIfOpsPass::runOnOperation()
     if (!op->hasAttr("ssbuffer.main_loop")) {
       return WalkResult::advance();
     }
-    auto forOp = dyn_cast<scf::ForOp>(op);
-    if (!forOp) {
-      LDBG("[Error]: op with ssbuffer.main_loop is not a scf::ForOp\n");
-      signalPassFailure();
-      return WalkResult::interrupt();
-    }
 
-    // Create if ops (scf.if %true) by block_id
+    // collectOpsByBlockId has separate forOp/whileOp overloads, so dispatch
+    // on op type here. Both forOp and whileOp carry ssbuffer.main_loop.
     llvm::DenseMap<int, SmallVector<Operation *>> blockOps;
-    if (failed(collectOpsByBlockId(forOp, blockOps))) {
+    if (auto forOp = dyn_cast<scf::ForOp>(op)) {
+      if (failed(collectOpsByBlockId(forOp, blockOps))) {
+        signalPassFailure();
+        return WalkResult::interrupt();
+      }
+    } else if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
+      if (failed(collectOpsByBlockId(whileOp, blockOps))) {
+        signalPassFailure();
+        return WalkResult::interrupt();
+      }
+    } else {
+      LDBG("[Error]: op with ssbuffer.main_loop is neither scf::ForOp nor scf::WhileOp\n");
       signalPassFailure();
       return WalkResult::interrupt();
     }
 
+    // blockCounterNums is keyed on the main-loop op (scf.for or scf.while),
+    // and is consumed by UpdateForOps when extending iter_args. Record it for
+    // both forOp and whileOp so the whileOp path is no longer silently skipped.
     if (info) {
-      info->blockCounterNums[forOp] = blockOps.size();
+      info->blockCounterNums[op] = blockOps.size();
     }
 
     llvm::DenseMap<int, SmallVector<Value>> thenYieldValues;
     llvm::DenseMap<int, SmallVector<Value>> elseYieldValues;
 
-    if (failed(computeYieldValues(forOp, blockOps, thenYieldValues, elseYieldValues))) {
+    if (failed(computeYieldValues(op, blockOps, thenYieldValues, elseYieldValues))) {
       signalPassFailure();
       return WalkResult::interrupt();
     }
 
-    if (failed(createIfInMainLoop(forOp, blockOps, thenYieldValues, elseYieldValues))) {
+    if (failed(createIfInMainLoop(op, blockOps, thenYieldValues, elseYieldValues))) {
       signalPassFailure();
       return WalkResult::interrupt();
     }

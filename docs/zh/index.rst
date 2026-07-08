@@ -37,7 +37,7 @@
    :hidden:
    :titlesonly:
    :caption: 从这里开始
-   
+
    版本说明 <release_note>
    快速入门 <quick_start>
    安装指南 <installation_guide>
@@ -58,7 +58,7 @@
    :titlesonly:
    :caption: 开发指南
 
-   Triton-Ascend算子开发 <programming_guide/triton_operator_development_guide>
+   Triton-Ascend算子开发 <programming_guide/index>
    Triton-Ascend算子迁移 <migration_guide/index>
    Triton-Ascend算子调试与调优 <debug_guide/index>
    环境变量与编译选项 <environment_variable_and_compiler_options_reference>

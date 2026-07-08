@@ -11,9 +11,7 @@
 ```{toctree}
 :maxdepth: 3
 :hidden:
-
 debugging.md
 profiling.md
 precision.md
-
 ```

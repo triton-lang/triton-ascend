@@ -57,7 +57,7 @@ A: 可以使用 tl.device_print 打印 kernel 中的张量，请参考 [打印�
 
 **Q: 如何本地构建并测试 Triton-Ascend？**
 
-A: 本地构建和测试方法，请参考 [通过源码安装Triton-Ascend](./installation_guide.md#源码编译安装)
+A: 本地构建和测试方法，请参考 [通过源码安装Triton-Ascend](./installation_guide.md#源码安装)
 
 **Q: 提交 PR 需要通过哪些 CI 检查？**
 

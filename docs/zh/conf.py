@@ -88,14 +88,15 @@ def setup(app):
     from sphinx.highlighting import lexers
     from pygments.lexers import get_lexer_by_name
     import shutil
+
     lexers['mlir'] = get_lexer_by_name('text')
     lexers['plaintext'] = get_lexer_by_name('text')
- 
     if not _is_build_by_readthedocs:
         app.add_js_file('lang-switcher.js')
         app.add_css_file('lang-switcher.css')
     return {'version': '0.1', 'parallel_read_safe': True}
 
-readthedocs_version = os.environ.get('READTHEDOCS_VERSION','latest')
-version = readthedocs_version.split('.')[0] + '.' + readthedocs_version.split('.')[1] if '.' in readthedocs_version else ''
+readthedocs_version = os.environ.get('READTHEDOCS_VERSION', 'latest')
+version = readthedocs_version.split('.')[0] + '.' + readthedocs_version.split(
+    '.')[1] if '.' in readthedocs_version else ''
 release = readthedocs_version

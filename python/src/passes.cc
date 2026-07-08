@@ -148,4 +148,10 @@ void init_triton_passes(py::module &&m) {
 
   auto plugin_m = m.def_submodule("plugin");
   init_plugin_passes(plugin_m);
+  // Python-facing refresh: re-run init_plugin_passes for plugins injected
+  // after import triton (e.g. a pybind extension via TritonPlugin::registerInfo).
+  // pybind m.def overwrites same-named entries, so re-runs are safe.
+  m.def("refresh_plugin_passes", [](py::module pm) {
+    init_plugin_passes(pm);
+  }, py::arg("plugin_m"));
 }

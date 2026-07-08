@@ -385,8 +385,9 @@ void init_triton_ir(py::module &&m) {
     registerBuiltinDialectTranslation(registry);
     registerLLVMDialectTranslation(registry);
     mlir::LLVM::registerInlinerInterface(registry);
-    // Register dialects from plugins.
-    // pull-based: loadPlugins() (TRITON_PLUGIN_PATHS / dlopen)
+    // Register dialects from plugins. loadPlugins() covers both
+    // TRITON_PLUGIN_PATHS (dlopen) and Python-import plugins (injected via
+    // TritonPlugin::registerInfo by triton_register_plugin).
     for (const auto &plugin : mlir::triton::plugin::loadPlugins()) {
       plugin.registerDialects(registry);
     }

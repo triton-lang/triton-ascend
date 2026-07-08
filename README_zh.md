@@ -39,28 +39,6 @@ Triton-Ascend
 
 ---
 
-## 📌 简介
-
-Triton-Ascend是面向昇腾平台构建的Triton编译框架，旨在让Triton代码能够在昇腾硬件上高效运行。
-
-- ### 核心价值说明
-
-支持的操作系统:linux(arch64/x86_64)
-
-支持的Ascend产品:Atlas A2/A3/950系列
-
-最小硬件配置:单卡32GB显存（推荐）
-
-## 最新动态与里程碑
-
-确定Python、CANN和TorchNPU软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。
-
-- Python版本选择：py3.9-py3.11均可。
-
-- CANN版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成CANN的安装与配置。建议下载安装9.0.0版本。
-
-- TorchNPU版本选择：当前配套的TorchNPU版本为2.7.1.post4。
-
 ### 快速安装
 
 ```bash

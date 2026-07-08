@@ -4,13 +4,14 @@
 
 ## 文档组织
 
-- [调试指南](./debugging.md) — Triton-Ascend 算子调试方法
+- [调试指南](./debugging.md) — Triton-Ascend算子调试方法
 - [性能分析](./profiling.md) — 使用性能分析工具定位性能瓶颈
 - [精度分析](./precision.md) — 算子精度问题分析与解决
  
 ```{toctree}
 :maxdepth: 3
 :hidden:
+
 debugging.md
 profiling.md
 precision.md

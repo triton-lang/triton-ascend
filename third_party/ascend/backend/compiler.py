@@ -222,7 +222,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             metadata["set_workspace_multibuffer"] = 0
             metadata["enable_mixed_cv"] = True
             metadata["disable_auto_inject_block_sync"] = True
-            ascend.passes.ttir.set_enable_dynamic_cv_flow_optimization(metadata["enable_dynamic_cv_flow_opt"])
             ascend.passes.ttir.set_enable_cube_block_merge(metadata["enable_cube_block_merge"])
 
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
@@ -964,7 +963,6 @@ class NPUOptions:
     enable_mixed_cv: bool = None
     enable_vf_fusion: bool = None
     enable_dynamic_cv_pipeline: bool = True if is_compile_on_910_95 else False
-    enable_dynamic_cv_flow_opt: bool = False
     # Gates the cube-loader penetration + cube-for block merge feature. Off by
     # default so existing scenarios are unaffected; opt in per kernel to fuse a
     # matmul's loader for-loop into the matmul's cube compute block.

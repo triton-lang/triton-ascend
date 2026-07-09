@@ -36,6 +36,10 @@
 namespace mlir {
 namespace triton {
 
+// Buffer count thresholds for flowOpt condition
+constexpr int CROSS_CORE_BUFFER_COUNT_THRESHOLD = 1;
+constexpr int INTRA_CORE_BUFFER_COUNT_THRESHOLD = 2;
+
 // Indicates the relationship between a tensor iter_args and ssbuffer.if in the main_loop
 struct TensorIterArgIfOpRelation {
   Value iterArg;
@@ -69,6 +73,14 @@ struct ControlFlowConditionInfo {
   
   // unique counter value for each ifblock
   llvm::DenseMap<scf::IfOp, Value> cntArgs;
+  
+  // DAG for if block cross-core dependencies
+  llvm::DenseMap<scf::IfOp, llvm::SmallVector<scf::IfOp>> ifBlockCrossCoreDAG;
+  llvm::DenseMap<scf::IfOp, scf::IfOp> flowOptIfOpPairs;
+  
+  // Buffer counts for flowOpt condition
+  int intraCoreBufferCount = 0;
+  int crossCoreBufferCount = 0;
 };
 
 class AddControlFlowConditionPass

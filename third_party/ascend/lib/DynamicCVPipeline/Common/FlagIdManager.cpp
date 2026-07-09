@@ -67,7 +67,8 @@ int FlagIdManager::acquireId(Operation* insertionPoint)
 bool FlagIdManager::checkCurrentId()
 {
     BufferCountManager::DepType depType = BufferCountManager::DepType::InterCore;
-    int outerBufferCount = BUFFER_COUNT.getBufferCountByType(depType);
+    BufferCountManager bufferCountMgr(module);
+    int outerBufferCount = bufferCountMgr.getBufferCountByType(depType);
     if (outerBufferCount > 1) {
         return currentMaxId <= MULTI_MAX_FLAG_ID;
     }

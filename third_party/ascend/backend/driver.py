@@ -67,8 +67,13 @@ class NPUUtils(object):
         dirname = os.path.dirname(os.path.realpath(__file__))
         src_path = os.path.join(dirname, "npu_utils.cpp")
         src = Path(src_path).read_text()
-        version_info = get_backend_func("version_hash")
-        key = hashlib.md5((src + "_".join(version_info)).encode("utf-8")).hexdigest()
+        key_parts = [
+            "npu_utils",
+            "torch_npu_wrapper_abi=triton_async_launch_v1",
+            "USE_TORCH_NPU",
+            src,
+        ]
+        key = hashlib.md5("\0".join(key_parts).encode("utf-8")).hexdigest()
         cache = get_cache_manager(key)
         fname = "npu_utils.so"
         cache_path = cache.get_file(fname)

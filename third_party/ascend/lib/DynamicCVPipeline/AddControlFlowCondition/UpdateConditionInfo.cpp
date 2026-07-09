@@ -21,6 +21,7 @@
  */
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMInterfaces.h"
@@ -1056,6 +1057,97 @@ int UpdateConditionInfoPass::setIntraCoreCondition(
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
+// Set the FlowOpt extra condition for the third if block in the DAG
+int UpdateConditionInfoPass::setFlowOptCondition(
+    scf::IfOp currentIfOp,
+    scf::ForOp forOp,
+    Value &flowOptCond)
+{
+    // Check if current ifOp is a target node (third node) in flowOptIfOpPairs
+    if (!info->flowOptIfOpPairs.count(currentIfOp)) {
+        LDBG("Current ifOp is not a flowOpt target node, skip.");
+        flowOptCond = nullptr;
+        return UPDATE_CONDITION_INFO_SUCCESS;
+    }
+
+    // Check if flowOpt condition is needed based on buffer counts
+    // - Cross-core buffer count > CROSS_CORE_BUFFER_COUNT_THRESHOLD
+    // - Intra-core buffer count > INTRA_CORE_BUFFER_COUNT_THRESHOLD
+    if (info->crossCoreBufferCount <= CROSS_CORE_BUFFER_COUNT_THRESHOLD || 
+        info->intraCoreBufferCount <= INTRA_CORE_BUFFER_COUNT_THRESHOLD) {
+        flowOptCond = nullptr;
+        return UPDATE_CONDITION_INFO_SUCCESS;
+    }
+
+    // Get the start node
+    scf::IfOp sourceIfOp = info->flowOptIfOpPairs[currentIfOp];
+    if (!info->cntArgs.count(sourceIfOp)) {
+        LDBG("[Error] Start node has no counter in cntArgs, cannot build flowOpt condition. "
+             << "sourceIfOp: " << *sourceIfOp);
+        return UPDATE_CONDITION_INFO_FAILED;
+    }
+
+    // Create builder and location
+    OpBuilder builder(currentIfOp);
+    Location loc = currentIfOp.getLoc();
+
+    Value counter = info->cntArgs[sourceIfOp];
+    Value lowerBound = forOp.getLowerBound();
+    Value upperBound = forOp.getUpperBound();
+    Value step = forOp.getStep();
+
+    // Build condition: counter >= upperBound
+    Value cond1 = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sge, counter, upperBound);
+
+    // Build condition: counter >= lowerBound + step * opt_num
+    // opt_num = min(intraCoreBufferCount - 1, crossCoreBufferCount)
+    int optInt = std::min(info->intraCoreBufferCount - 1, info->crossCoreBufferCount);
+
+    Value optNum = builder.create<arith::ConstantIntOp>(loc, optInt, CONST_INT_TYPE);
+    Value optOffset = builder.create<arith::MulIOp>(loc, step, optNum);
+    Value lowerPlusOffset = builder.create<arith::AddIOp>(loc, lowerBound, optOffset);
+    Value cond2 = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sge, counter, lowerPlusOffset);
+
+    // Combine: cond1 OR cond2
+    flowOptCond = builder.create<arith::OrIOp>(loc, cond1, cond2);
+
+    return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
+// Update DAG nodes after ifOp replacement
+void UpdateConditionInfoPass::updateDAGAfterIfOpReplacement(
+    scf::IfOp oldIfOp,
+    scf::IfOp newIfOp)
+{
+    // 1. Update ifBlockCrossCoreDAG
+    if (info->ifBlockCrossCoreDAG.count(oldIfOp)) {
+        auto consumers = info->ifBlockCrossCoreDAG[oldIfOp];
+        info->ifBlockCrossCoreDAG.erase(oldIfOp);
+        info->ifBlockCrossCoreDAG[newIfOp] = consumers;
+    }
+
+    for (auto &entry : info->ifBlockCrossCoreDAG) {
+        for (size_t i = 0; i < entry.second.size(); i++) {
+            if (entry.second[i] == oldIfOp) {
+                entry.second[i] = newIfOp;
+            }
+        }
+    }
+
+    // 2. Update flowOptIfOpPairs
+    if (info->flowOptIfOpPairs.count(oldIfOp)) {
+        auto source = info->flowOptIfOpPairs[oldIfOp];
+        info->flowOptIfOpPairs.erase(oldIfOp);
+        info->flowOptIfOpPairs[newIfOp] = source;
+    }
+
+    for (auto &entry : info->flowOptIfOpPairs) {
+        if (entry.second == oldIfOp) {
+            entry.second = newIfOp;
+        }
+    }
+}
+
 // Update the mapping of control variables to their latest values
 void UpdateConditionInfoPass::updateControlVarToLatestValue(scf::IfOp newIfOp, scf::IfOp oldIfOp, bool hasCounter,
                                                             Value counter)
@@ -1318,10 +1410,11 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(scf::IfOp oldIfOp, Va
   return newIfOp;
 }
 
-// Combine the three conditions: crossCore condition + intraCore condition + counter condition
+// Combine the conditions: crossCore condition + intraCore condition + counter condition + flowOpt condition
 int UpdateConditionInfoPass::combineConditions(ModuleOp module, Value crossCoreCond, Value intraCoreCond,
-                                               scf::IfOp ifOp, scf::ForOp forOp, size_t &usedCounterNum,
-                                               DenseMap<Value, VarUpdateType> &varUpdateTypes)
+                                                Value flowOptCond, scf::IfOp ifOp, scf::ForOp forOp,
+                                                size_t &usedCounterNum,
+                                                DenseMap<Value, VarUpdateType> &varUpdateTypes)
 {
   Location loc = ifOp.getLoc();
   SmallVector<Value> validConditions;
@@ -1333,6 +1426,9 @@ int UpdateConditionInfoPass::combineConditions(ModuleOp module, Value crossCoreC
   }
   if (intraCoreCond) {
     validConditions.push_back(intraCoreCond);
+  }
+  if (flowOptCond) {
+    validConditions.push_back(flowOptCond);
   }
 
   if (!info->blockCounters.count(forOp)) {
@@ -1391,6 +1487,9 @@ int UpdateConditionInfoPass::combineConditions(ModuleOp module, Value crossCoreC
   }
 
   scf::IfOp newIfOp = createNewIfOpWithBlocks(ifOp, combinedCond, varUpdateTypes, hasCounter, counter, forOp.getStep());
+
+  // Update DAG nodes
+  updateDAGAfterIfOpReplacement(ifOp, newIfOp);
 
   if (hasCounter) {
     info->cntArgs.erase(ifOp);
@@ -1545,8 +1644,13 @@ int UpdateConditionInfoPass::updateIfConds(ModuleOp module, SmallVector<SmallVec
                                 varUpdateTypes, intraCoreCond) == UPDATE_CONDITION_INFO_FAILED) {
         return UPDATE_CONDITION_INFO_FAILED;
       }
-      // Step5:Combine the three conditions: crossCore condition + intraCore condition + counter condition
-      if (combineConditions(module, crossCoreCond, intraCoreCond, ifOp, forOp, usedCounterNum,
+      // Step5:Set the flowOpt condition
+      Value flowOptCond;
+      if (setFlowOptCondition(ifOp, forOp, flowOptCond) == UPDATE_CONDITION_INFO_FAILED) {
+        return UPDATE_CONDITION_INFO_FAILED;
+      }
+      // Step6:Combine the conditions: crossCore condition + intraCore condition + counter condition + flowOpt condition
+      if (combineConditions(module, crossCoreCond, intraCoreCond, flowOptCond, ifOp, forOp, usedCounterNum,
                             varUpdateTypes) == UPDATE_CONDITION_INFO_FAILED) {
         return UPDATE_CONDITION_INFO_FAILED;
       }

@@ -24,7 +24,6 @@
 #include "ascend/include/DynamicCVPipeline/Passes.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "ir.h" // TritonOpBuilder
@@ -387,10 +386,6 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     } else if (type == "LOAD") {
       mgr.setBufferCount(mlir::triton::BufferCountManager::DepType::LoadStore, count);
     }
-  });
-
-  m.def("set_enable_dynamic_cv_flow_optimization", [](bool enable) {
-    mlir::triton::setEnableDynamicFlowOptimization(enable);
   });
 
   m.def("set_enable_cube_block_merge", [](bool enable) {

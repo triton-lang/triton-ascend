@@ -1594,8 +1594,8 @@ static BufferMap insertBuffersBeforeFor(mlir::scf::ForOp forOp, SmallVector<Valu
     OpBuilder insertedBuffers(builder.getContext());
     insertedBuffers.setInsertionPoint(parentBlock, forOp->getIterator());
 
-    using BufferCountManager = mlir::triton::BufferCountManager;
-    int bufNum = BufferCountManager::getInstance().getBufferCountByType(BufferCountManager::DepType::IntraCore);
+    BufferCountManager bufferCountMgr(forOp);
+    int bufNum = bufferCountMgr.getBufferCountByType(BufferCountManager::DepType::IntraCore);
 
     for (Value depVal : valueList) {
         ShapedType shapedType = cast<ShapedType>(depVal.getType());

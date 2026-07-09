@@ -31,7 +31,7 @@
 #include "mlir/IR/IRMapping.h"
 #include "llvm/Support/Debug.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/ComputeBlockIdManager.h"
 
 static constexpr const char *DEBUG_TYPE = "SplitIfByBlockId";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")

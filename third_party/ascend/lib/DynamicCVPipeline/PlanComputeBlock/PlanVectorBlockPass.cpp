@@ -23,7 +23,7 @@
 #include <algorithm>
 #include <memory>
 #include <optional>
-#include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "DynamicCVPipeline/Common/ComputeBlockIdManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"

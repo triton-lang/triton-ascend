@@ -21,7 +21,7 @@
  */
  
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
-#include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "DynamicCVPipeline/Common/ComputeBlockIdManager.h"
 
 namespace mlir {
 namespace CVPipeline {

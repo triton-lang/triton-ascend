@@ -31,7 +31,7 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
 #include "llvm/Support/Debug.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/ComputeBlockIdManager.h"
 
 using namespace mlir;
 using namespace triton;

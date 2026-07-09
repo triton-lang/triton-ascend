@@ -46,7 +46,7 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
 
 #include "DynamicCVPipeline/Common/Utils.h"
-#include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "DynamicCVPipeline/Common/ComputeBlockIdManager.h"
 #include "TritonToUnstructure/OffsetAnalysis.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 

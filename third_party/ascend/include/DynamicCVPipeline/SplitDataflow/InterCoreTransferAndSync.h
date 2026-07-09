@@ -25,6 +25,7 @@
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/FlagIdReuse.h"
+#include "ascend/include/DynamicCVPipeline/Common/ComputeBlockIdManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/FlagIdManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -81,30 +82,35 @@ private:
   llvm::DenseMap<mlir::Value, mlir::Value> cubeValueMapping;
   SSBufferManager ssbufferManager;
 
-  mlir::LogicalResult processDependencies(FlagIdManager &flagManager, FlagIdReuseManager &flagIdReuseManager);
+  mlir::LogicalResult processDependencies(FlagIdManager &flagManager, 
+                                          FlagIdReuseManager &flagIdReuseManager,
+                                          CVPipeline::ComputeBlockIdManager &bm);
   mlir::LogicalResult handleVectorToCube(mlir::OpBuilder &builder,
                                          DependencyInfo &dep,
-                                         llvm::DenseMap<mlir::Value, mlir::Value> vecvalueMapping,
-                                         llvm::DenseMap<mlir::Value, mlir::Value> cubeValueMapping,
                                          FlagIdManager &flagManager,
-                                         FlagIdReuseManager &flagIdReuseManager);
+                                         FlagIdReuseManager &flagIdReuseManager,
+                                         CVPipeline::ComputeBlockIdManager &bm);
   mlir::LogicalResult handleCubeToVector(mlir::OpBuilder &builder,
                                          DependencyInfo &dep,
-                                         llvm::DenseMap<mlir::Value, mlir::Value> cubeValueMapping,
                                          FlagIdManager &flagManager,
-                                         FlagIdReuseManager &flagIdReuseManager);
+                                         FlagIdReuseManager &flagIdReuseManager,
+                                         CVPipeline::ComputeBlockIdManager &bm);
   mlir::LogicalResult handleMemoryDependency(mlir::OpBuilder &builder,
                                              DependencyInfo &dep,
                                              size_t depIndex,
-                                             llvm::SmallVector<DependencyInfo> memDependencies,
+                                             llvm::SmallVector<DependencyInfo> &memDependencies,
                                              FlagIdManager &flagManager,
-                                             FlagIdReuseManager &flagIdReuseManager);
+                                             FlagIdReuseManager &flagIdReuseManager,
+                                             CVPipeline::ComputeBlockIdManager &bm);
 
-  std::pair<mlir::Operation *, mlir::Operation *> getBlockStartEnd(int blockId, mlir::ModuleOp module);
+  std::pair<mlir::Operation *, mlir::Operation *> getBlockStartEnd(int blockId, 
+                                                                   mlir::ModuleOp module, 
+                                                                   CVPipeline::ComputeBlockIdManager &bm);
   bool isOuterLayerDependency(size_t depIndex,
                               mlir::Operation *currProdEnd,
                               mlir::Operation *currConsStart,
-                              llvm::SmallVector<DependencyInfo> &memDependencies);
+                              llvm::SmallVector<DependencyInfo> &memDependencies,
+                              CVPipeline::ComputeBlockIdManager &bm);
 
   SmallVector<int64_t> computeExpectedShape(mlir::Value depValue, bool isMatmulA, bool isMatmulB, bool isOnlyDepInMatmul);
   std::pair<bool, bool> isExpectedShape(Value value,
@@ -119,11 +125,12 @@ private:
                                 DependencyInfo &dep,
                                 mlir::Location loc,
                                 mlir::Value origValue,
-                                llvm::SmallVector<int64_t> expectedShape,
+                                llvm::SmallVector<int64_t> &expectedShape,
                                 int originBlockId,
                                 bool matmulpadding,
-                                bool isOnlyDepInMatmul);
-  void Nd2NzNormalize(mlir::OpBuilder &builder, DependencyInfo &dep, mlir::Location loc);
+                                bool isOnlyDepInMatmul,
+                                CVPipeline::ComputeBlockIdManager &bm);
+  void Nd2NzNormalize(mlir::OpBuilder &builder, DependencyInfo &dep, mlir::Location loc, CVPipeline::ComputeBlockIdManager &bm);
   void rewriteMatmulWithNewShape(mlir::OpBuilder &builder,
                                  mlir::Operation *matmulOp,
                                  mlir::Location loc,
@@ -134,11 +141,11 @@ private:
   void rewriteTransposeWithNewShape(mlir::OpBuilder &builder,
                                     mlir::Operation *transposeOp,
                                     mlir::Location loc);
-  llvm::DenseMap<mlir::Value, mlir::Value> getVecValueMapping()
+  llvm::DenseMap<mlir::Value, mlir::Value> &getVecValueMapping()
   {
     return vecValueMapping;
   }
-  llvm::DenseMap<mlir::Value, mlir::Value> getCubeValueMapping()
+  llvm::DenseMap<mlir::Value, mlir::Value> &getCubeValueMapping()
   {
     return cubeValueMapping;
   }

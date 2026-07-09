@@ -142,13 +142,20 @@ void collectDependencyBuffers(ModuleOp module, SmallVector<scf::ForOp> &mainLoop
 
     int updateForOpYield(scf::ForOp forOp);
 
-    int combineConditions(ModuleOp module, Value crossCoreCond, Value intraCoreCond, scf::IfOp ifOp, scf::ForOp forOp,
+    int combineConditions(ModuleOp module, Value crossCoreCond, Value intraCoreCond, Value flowOptCond,
+                          scf::IfOp ifOp, scf::ForOp forOp,
                           size_t &usedCounterNum, DenseMap<Value, VarUpdateType> &varUpdateTypes);
 
     int setCrossCoreCondition(SmallVector<int> crossCoreInputValues, SmallVector<int> crossCoreOutputValues,
                                DenseMap<int, DenseMap<Value, SmallVector<Value> > > &crossCoreBuffers,
                                DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &memCrossCoreBuffers,
                                scf::IfOp ifOp, SmallVector<SmallVector<Value> > ssbufferPtrs, Value &crossCoreCond);
+
+    // Set the FlowOpt extra condition for the third if block in the DAG
+    int setFlowOptCondition(scf::IfOp currentIfOp, scf::ForOp forOp, Value &flowOptCond);
+
+    // Update DAG nodes after ifOp replacement
+    void updateDAGAfterIfOpReplacement(scf::IfOp oldIfOp, scf::IfOp newIfOp);
 
     // Helper function to get pointer based on core type
     Value getSSBufferPtr(bool isAIC, int groupIdx, int ptrSetIdx,
@@ -178,11 +185,16 @@ void collectDependencyBuffers(ModuleOp module, SmallVector<scf::ForOp> &mainLoop
                                     DenseMap<int, Value> &precomputedPtrs,
                                     SmallVector<SmallVector<Value> > ssbufferPtrs);
 
+    void computeProducerBufferCount();
+
     DenseMap<Value, Value> controlVarToLatestValue;
     SmallVector<Value> currentUsedVars;
     ControlFlowConditionInfo *info = nullptr;
     // Record each ifOp as the variables that need to be controlled when it acts as a consumer or a producer
     llvm::DenseMap<scf::IfOp, TensorIterArgIfOpVars> tensorIterArgIfOpVars;
+    // Buffer counts for flowOpt condition
+    int intraCoreBufferCount = 0;
+    int crossCoreBufferCount = 0;
 };
 
 std::unique_ptr<OperationPass<ModuleOp> > createUpdateConditionInfoPass();

@@ -67,6 +67,10 @@ struct ControlFlowConditionInfo {
   
   // unique counter value for each ifblock
   llvm::DenseMap<scf::IfOp, Value> cntArgs;
+  
+  // DAG for if block cross-core dependencies
+  llvm::DenseMap<scf::IfOp, llvm::SmallVector<scf::IfOp>> ifBlockCrossCoreDAG;
+  llvm::DenseMap<scf::IfOp, scf::IfOp> flowOptIfOpPairs;
 };
 
 class AddControlFlowConditionPass

@@ -82,20 +82,20 @@ void AddControlFlowConditionPass::runOnOperation()
   // ops without sharing
   pm.addPass(createCloneOpsPass());
 
-  // Step1: Initialize crossCoreDependentMap and intraCoreDependentMap
-  std::unique_ptr<InitDependentMapPass> initDependentMapPass(new InitDependentMapPass());
-  initDependentMapPass->setConditionInfo(&info);
-  pm.addPass(std::move(initDependentMapPass));
-  
-  // Step2: Process shared iter_args in for ops to eliminate arg sharing across block_ids
+  // Step1: Process shared iter_args in for ops to eliminate arg sharing across block_ids
   std::unique_ptr<ProcessArgsPass> processArgsPass(new ProcessArgsPass());
   processArgsPass->setConditionInfo(&info);
   pm.addPass(std::move(processArgsPass));
 
-  // Step3: Create if ops based on block_id
+  // Step2: Create if ops based on block_id
   std::unique_ptr<CreateIfOpsPass> createIfOpsPass(new CreateIfOpsPass());
   createIfOpsPass->setConditionInfo(&info);
   pm.addPass(std::move(createIfOpsPass));
+
+  // Step3: Initialize crossCoreDependentMap, intraCoreDependentMap, and build if block DAG
+  std::unique_ptr<InitDependentMapPass> initDependentMapPass(new InitDependentMapPass());
+  initDependentMapPass->setConditionInfo(&info);
+  pm.addPass(std::move(initDependentMapPass));
 
   // Step4: Update for ops with block counters and inner dependency conditions,
   // and insert PIPE_S inter-core synchronization
@@ -108,10 +108,10 @@ void AddControlFlowConditionPass::runOnOperation()
   updatePass->setConditionInfo(&info);
   pm.addPass(std::move(updatePass));
 
-  // Step6: Apply flow optimization for flow optimization buffers
-  std::unique_ptr<FlowOptPass> flowOptPass(new FlowOptPass());
-  flowOptPass->setConditionInfo(&info);
-  pm.addPass(std::move(flowOptPass));
+  // // Step6: Apply flow optimization for flow optimization buffers (standalone pass)
+  // std::unique_ptr<FlowOptPass> flowOptPass(new FlowOptPass());
+  // flowOptPass->setConditionInfo(&info);
+  // pm.addPass(std::move(flowOptPass));
 
   // Step7: Update for loop iteration times based on intraCoreDependentMap
   std::unique_ptr<UpdateLoopIterTimesPass> updateLoopIterTimesPass(new UpdateLoopIterTimesPass());

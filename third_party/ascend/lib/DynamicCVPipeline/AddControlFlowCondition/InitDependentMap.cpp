@@ -22,6 +22,8 @@
 
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
 #include "third_party/ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
@@ -37,6 +39,7 @@ static constexpr const char *DEBUG_TYPE = "InitDependentMap";
 #define LDBG(...) LLVM_DEBUG(DBGS() << __VA_ARGS__ << "\n")
 
 using namespace mlir;
+using namespace hivm;
 using namespace triton;
 
 // Function: Check if a consumer op is inside a given mainLoop
@@ -454,6 +457,210 @@ static void printDependentMaps(ControlFlowConditionInfo *info)
   }
 }
 
+// Find the IfOp that contains a given operation
+static scf::IfOp findIfOpContainingOp(Operation *op) {
+    if (!op) {
+        return nullptr;
+    }
+    
+    constexpr int maxDepth = 100;
+    int depth = 0;
+    
+    Operation *current = op;
+    while (current && depth < maxDepth) {
+        if (auto ifOp = dyn_cast<scf::IfOp>(current)) {
+            if (ifOp->hasAttr(CVPipeline::kIf)) {
+                LDBG("Found ssbuffer.if at depth " << depth);
+                return ifOp;
+            }
+        }
+        current = current->getParentOp();
+        depth++;
+    }
+    
+    if (depth >= maxDepth) {
+        LDBG("Warning: Max depth " << maxDepth << " exceeded in findIfOpContainingOp");
+    }
+    
+    return nullptr;
+}
+
+// Build if block DAG from crossCoreDependentMap
+// For consumer: its definingOp is inside an if block
+// For producer: its definingOp is NOT inside an if block, need to find userOp (fixpipe/copy) that uses this producer
+static int buildIfBlockCrossCoreDAG(
+    ModuleOp module,
+    ControlFlowConditionInfo *info)
+{
+    // Traverse crossCoreDependentMap to build DAG
+    for (auto &entry : info->crossCoreDependentMap) {
+        Value consumerVal = entry.first;
+        
+        // Step 1: Find consumer IfOp
+        // Consumer's definingOp is inside an if block
+        Operation *consumerDefOp = consumerVal.getDefiningOp();
+        if (!consumerDefOp) {
+            LDBG("Consumer value has no defining op: " << consumerVal);
+            return -1;
+        }
+        scf::IfOp consumerIf = findIfOpContainingOp(consumerDefOp);
+        if (!consumerIf) {
+            LDBG("Consumer defining op not in any ssbuffer.if block: " << *consumerDefOp);
+            return -1;
+        }
+        
+        // Step 2: Find producer IfOps
+        // Producer's definingOp is NOT inside an if block
+        // Need to find the userOp (fixpipe or copy) that uses this producer
+        for (Value producerVal : entry.second) {
+            Operation *producerDefOp = producerVal.getDefiningOp();
+            if (!producerDefOp) {
+                LDBG("Producer value has no defining op: " << producerVal);
+                return -1;
+            }
+            
+            // Find the user operation (fixpipe or copy) that uses this producer
+            scf::IfOp producerIf = nullptr;
+            for (Operation *userOp : producerVal.getUsers()) {
+                if (isa<hivm::FixpipeOp>(userOp) || isa<hivm::CopyOp>(userOp)) {
+                    producerIf = findIfOpContainingOp(userOp);
+                    if (!producerIf) {
+                        LDBG("Producer defining op not in any ssbuffer.if block: " << producerVal);
+                        return -1;
+                    }
+                    break;
+                }
+            }
+            
+            if (!producerIf) {
+                LDBG("Producer value not used by any fixpipe/copy in ssbuffer.if block: " << producerVal);
+                return -1;
+            }
+
+            if (producerIf == consumerIf) {
+                LDBG("Producer and consumer are in the same if block, this is invalid: " << *producerIf);
+                return -1;
+            }
+
+            info->ifBlockCrossCoreDAG[producerIf].push_back(consumerIf);
+        }
+    }
+
+    // Deduplicate edges
+    for (auto &entry : info->ifBlockCrossCoreDAG) {
+        llvm::SmallVector<scf::IfOp> uniqueConsumers;
+        for (scf::IfOp consumer : entry.second) {
+            if (!llvm::is_contained(uniqueConsumers, consumer)) {
+                uniqueConsumers.push_back(consumer);
+            }
+        }
+        entry.second = uniqueConsumers;
+    }
+    return 0;
+}
+
+// DFS helper function to find nodes at target distance from start node
+static void dfsFindNodesAtDistance(
+    scf::IfOp currentNode,
+    int currentDistance,
+    int targetDistance,
+    llvm::DenseSet<scf::IfOp> &visited,
+    llvm::SmallVector<scf::IfOp> &resultNodes,
+    llvm::DenseMap<scf::IfOp, llvm::SmallVector<scf::IfOp>> &dag)
+{
+    // Mark current node as visited
+    visited.insert(currentNode);
+
+    // If we've reached target distance, add to result and stop recursion
+    if (currentDistance == targetDistance) {
+        resultNodes.push_back(currentNode);
+        return;
+    }
+
+    // Get consumers of current node
+    auto it = dag.find(currentNode);
+    if (it == dag.end() || it->second.empty()) {
+        return;
+    }
+    auto &consumers = it->second;
+
+    // Recursively visit all consumers
+    for (scf::IfOp consumer : consumers) {
+        if (!visited.contains(consumer)) {
+            dfsFindNodesAtDistance(consumer, currentDistance + 1, targetDistance, 
+                                   visited, resultNodes, dag);
+        }
+    }
+}
+
+// Collect flowOpt if block pairs from DAG using DFS
+// Find all start nodes (in-degree = 0), then use DFS to find nodes at distance 2
+static int collectFlowOptIfOpPairs(
+    ModuleOp module,
+    ControlFlowConditionInfo *info)
+{
+    // Step 1: Calculate in-degree for each node
+    llvm::DenseMap<scf::IfOp, int> inDegree;
+    for (auto &entry : info->ifBlockCrossCoreDAG) {
+        for (scf::IfOp consumer : entry.second) {
+            inDegree[consumer]++;
+        }
+    }
+    
+    // Step 2: Find all start nodes (in-degree = 0)
+    llvm::SmallVector<scf::IfOp> startNodes;
+    for (auto &entry : info->ifBlockCrossCoreDAG) {
+        if (inDegree.lookup(entry.first) == 0) {
+            startNodes.push_back(entry.first);
+            LDBG("Found start node (in-degree = 0)");
+        }
+    }
+    
+    LDBG("Number of start nodes: " << startNodes.size());
+    
+    // Step 3: For each start node, use DFS to find nodes at distance 2
+    constexpr int targetDistance = 2;
+    
+    for (scf::IfOp start : startNodes) {
+        // DFS data structures
+        llvm::DenseSet<scf::IfOp> visited;
+        llvm::SmallVector<scf::IfOp> thirdNodes;
+        
+        // Start DFS from start node at distance 0
+        dfsFindNodesAtDistance(start, 0, targetDistance, visited, thirdNodes, 
+                               info->ifBlockCrossCoreDAG);
+        
+        // Record all third nodes found
+        for (scf::IfOp thirdNode : thirdNodes) {
+            info->flowOptIfOpPairs[thirdNode] = start;
+        }
+    }
+    
+    LDBG("flowOptIfOpPairs size: " << info->flowOptIfOpPairs.size());
+    
+    return 0;
+}
+
+// Print DAG and flowOpt pairs for verification
+static void printDAGInfo(ControlFlowConditionInfo *info)
+{
+    LDBG("ifBlockCrossCoreDAG contents:");
+    for (auto &entry : info->ifBlockCrossCoreDAG) {
+        scf::IfOp producer = entry.first;
+        LDBG("  Producer IfOp has " << entry.second.size() << " consumers");
+        for (scf::IfOp consumer : entry.second) {
+            LDBG("    -> Consumer IfOp");
+        }
+    }
+    
+    LDBG("flowOptIfOpPairs contents:");
+    for (auto &entry : info->flowOptIfOpPairs) {
+        scf::IfOp target = entry.first;
+        scf::IfOp source = entry.second;
+        LDBG("  Target IfOp (third node) -> Source IfOp (start node)");
+    }
+}
+
 void InitDependentMapPass::runOnOperation()
 {
     ModuleOp module = getOperation();
@@ -482,6 +689,23 @@ void InitDependentMapPass::runOnOperation()
 
     // Print all dependent maps for verification
     LLVM_DEBUG(printDependentMaps(info));
+
+    // Step 4: Build if block DAG from crossCoreDependentMap
+    if (buildIfBlockCrossCoreDAG(module, info) != 0) {
+        LDBG("buildIfBlockCrossCoreDAG failed!");
+        signalPassFailure();
+        return;
+    }
+
+    // Step 5: Collect flowOpt if block pairs from DAG
+    if (collectFlowOptIfOpPairs(module, info) != 0) {
+        LDBG("collectFlowOptIfOpPairs failed!");
+        signalPassFailure();
+        return;
+    }
+
+    // Print DAG info for verification
+    LLVM_DEBUG(printDAGInfo(info));
 
     LDBG("Exit InitDependentMap pass.");
 }

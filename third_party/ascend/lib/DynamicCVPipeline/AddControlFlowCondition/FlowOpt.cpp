@@ -37,6 +37,10 @@ static constexpr const char *DEBUG_TYPE = "FlowOptPass";
 static constexpr int FLOW_OPT_SUCCESS = 0;
 static constexpr int FLOW_OPT_FAILED = -1;
 
+// Thresholds for enabling flow optimization
+static constexpr int INTRA_BUFFER_THRESHOLD = 2;
+static constexpr int INTER_BUFFER_THRESHOLD = 1;
+
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...) \
   LLVM_DEBUG({ \
@@ -46,6 +50,22 @@ static constexpr int FLOW_OPT_FAILED = -1;
 
 using namespace mlir;
 using namespace triton;
+
+// Check if flow optimization should be enabled based on buffer counts
+static bool shouldEnableFlowOpt()
+{
+    using BufferCountManager = mlir::triton::BufferCountManager;
+    int intraBufNum = BufferCountManager::getInstance().getBufferCountByType(BufferCountManager::DepType::IntraCore);
+    int interBufNum = BufferCountManager::getInstance().getBufferCountByType(BufferCountManager::DepType::InterCore);
+    
+    // Enable flow optimization if intra-buffer > 2 and inter-buffer > 1
+    bool enable = (intraBufNum > INTRA_BUFFER_THRESHOLD) && (interBufNum > INTER_BUFFER_THRESHOLD);
+    
+    LDBG("Buffer counts: intra=" << intraBufNum << ", inter=" << interBufNum 
+         << ", enableFlowOpt=" << enable << "\n");
+    
+    return enable;
+}
 
 // Check if IfOp contains sync_block_wait or sync_block_set op
 static bool containsSyncBlockOp(scf::IfOp ifOp) {
@@ -135,8 +155,8 @@ Value FlowOptPass::buildFlowOptCondition(OpBuilder &builder, Location loc,
     // opt_num = min(intra-buffer size - 1, cross-buffer size)
     using BufferCountManager = mlir::triton::BufferCountManager;
     int intraBufNum = BufferCountManager::getInstance().getBufferCountByType(BufferCountManager::DepType::IntraCore);
-    int crossBufNum = BufferCountManager::getInstance().getBufferCountByType(BufferCountManager::DepType::InterCore);
-    int optInt = std::min(intraBufNum - 1, crossBufNum);
+    int interBufNum = BufferCountManager::getInstance().getBufferCountByType(BufferCountManager::DepType::InterCore);
+    int optInt = std::min(intraBufNum - 1, interBufNum);
 
     Value optNum = builder.create<arith::ConstantIntOp>(loc, optInt, step.getType());
     Value optOffset = builder.create<arith::MulIOp>(loc, step, optNum);
@@ -236,6 +256,15 @@ void FlowOptPass::runOnOperation()
     ModuleOp module = getOperation();
 
     LDBG("Enter FlowOpt pass.\n");
+    
+    // Check if flow optimization should be enabled based on buffer counts
+    if (!shouldEnableFlowOpt()) {
+        LDBG("Flow optimization is disabled (buffer counts do not meet threshold).\n");
+        return;
+    }
+    
+    LDBG("Flow optimization is enabled.\n");
+    
     SmallVector<scf::ForOp> mainLoopForOps;
     module.walk([&](scf::ForOp forOp) {
         if (forOp->hasAttr(CVPipeline::kMainLoop)) {
@@ -244,11 +273,7 @@ void FlowOptPass::runOnOperation()
     });
 
     for (scf::ForOp forOp : mainLoopForOps) {
-        // Step 1: Check if this forOp has ssbuffer.flowOpt attribute
-        if (!forOp->hasAttr(CVPipeline::kFlowOpt)) {
-            continue;
-        }
-        // Step 2: Find first and second ssbuffer.if IfOps
+        // Step 1: Find first and second ssbuffer.if IfOps
         scf::IfOp firstIfOp = nullptr;
         scf::IfOp secondIfOp = nullptr;
         if (findIfOpsInForOp(forOp, firstIfOp, secondIfOp) != FLOW_OPT_SUCCESS) {
@@ -257,7 +282,7 @@ void FlowOptPass::runOnOperation()
             return;
         }
 
-        // Step 3: Get the original condition of the second IfOp
+        // Step 2: Get the original condition of the second IfOp
         Value originalCondition = secondIfOp.getCondition();
         if (!originalCondition) {
             LDBG("Second IfOp has no condition.\n");
@@ -265,7 +290,7 @@ void FlowOptPass::runOnOperation()
             return;
         }
 
-        // Step 4: Build the new flow optimization condition
+        // Step 3: Build the new flow optimization condition
         OpBuilder builder(secondIfOp);
         Location loc = secondIfOp.getLoc();
         Value newCondition = buildFlowOptCondition(builder, loc, firstIfOp, 
@@ -276,7 +301,7 @@ void FlowOptPass::runOnOperation()
             return;
         }
 
-        // Step 5: Create new IfOp with the updated condition
+        // Step 4: Create new IfOp with the updated condition
         scf::IfOp newIfOp = createNewIfOpWithFlowOptCondition(secondIfOp, newCondition);
         if (!newIfOp) {
             LDBG("Failed to create new IfOp.\n");
@@ -284,7 +309,7 @@ void FlowOptPass::runOnOperation()
             return;
         }
 
-        // Step 6: Update cntArgs mapping if the second IfOp has a counter
+        // Step 5: Update cntArgs mapping if the second IfOp has a counter
         if (info->cntArgs.count(secondIfOp)) {
             Value counter = info->cntArgs[secondIfOp];
             info->cntArgs.erase(secondIfOp);

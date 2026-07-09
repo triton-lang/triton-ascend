@@ -222,8 +222,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             metadata["set_workspace_multibuffer"] = 0
             metadata["enable_mixed_cv"] = True
             metadata["disable_auto_inject_block_sync"] = True
-            _enable_opt = metadata["enable_dynamic_cv_flow_opt"]
-            ascend.passes.ttir.set_enable_dynamic_cv_flow_optimization(_enable_opt)
 
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
 

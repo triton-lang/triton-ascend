@@ -26,7 +26,7 @@ import os
 import re
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, Optional, Tuple, Union
@@ -64,7 +64,7 @@ from triton.backends.compiler import (
 )
 from triton.runtime import driver
 from triton.runtime.cache import get_dump_manager
-from triton.tools.get_ascend_devices import is_compile_on_910_95
+from triton.tools import get_ascend_devices
 
 
 # TODO: materialize the concrete min shape
@@ -911,7 +911,7 @@ class NPUOptions:
     reg_inc_consumer: int = 0
 
     auto_blockify_size: int = 1
-    compile_on_910_95: bool = is_compile_on_910_95
+    compile_on_910_95: bool = field(default_factory=lambda: get_ascend_devices.is_compile_on_910_95)
     optimize_dynamic_offset: bool = False
     enable_mask_fallback_conversion: bool = False
     enable_warp_specialization: bool = False
@@ -963,12 +963,7 @@ class NPUOptions:
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
     enable_vf_fusion: bool = None
-    enable_dynamic_cv_pipeline: bool = True if is_compile_on_910_95 else False
-    enable_dynamic_cv_flow_opt: bool = False
-    # Gates the cube-loader penetration + cube-for block merge feature. Off by
-    # default so existing scenarios are unaffected; opt in per kernel to fuse a
-    # matmul's loader for-loop into the matmul's cube compute block.
-    enable_cube_block_merge: bool = False
+    enable_dynamic_cv_pipeline: bool = field(default_factory=lambda: get_ascend_devices.is_compile_on_910_95)
     hfusion_enable_multiple_consumer_fusion: bool = False
     has_auto_blockify_blacklist_op: Optional[bool] = None
     intra_cache_num: int = None

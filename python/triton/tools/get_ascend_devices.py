@@ -49,7 +49,27 @@ def check_npu_smi_device():
         return False
 
 
-ascend_devices = get_ascend_devices()
-pci_condition = any("0xd806" in dev for dev in ascend_devices)
-npu_smi_condition = check_npu_smi_device()
-is_compile_on_910_95 = pci_condition or npu_smi_condition
+# Lazy module attribute (PEP 562). `is_compile_on_910_95` is computed on first
+# access and cached, so importing this module is cheap and the slow
+# `npu-smi info` subprocess only runs when the value is actually needed
+# (e.g. at kernel compile time) instead of at import time.
+_lazy_is_compile_on_910_95 = None
+_lazy_computed = False
+
+
+def _compute_is_compile_on_910_95():
+    global _lazy_is_compile_on_910_95, _lazy_computed
+    if _lazy_computed:
+        return
+    ascend_devices = get_ascend_devices()
+    pci_condition = any("0xd806" in dev for dev in ascend_devices)
+    npu_smi_condition = check_npu_smi_device()
+    _lazy_is_compile_on_910_95 = pci_condition or npu_smi_condition
+    _lazy_computed = True
+
+
+def __getattr__(name):
+    if name == 'is_compile_on_910_95':
+        _compute_is_compile_on_910_95()
+        return _lazy_is_compile_on_910_95
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

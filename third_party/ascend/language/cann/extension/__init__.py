@@ -1,4 +1,3 @@
-from triton.tools.get_ascend_devices import is_compile_on_910_95
 from triton._C.libtriton.ascend import ir as _ascend_ir
 
 # MLIR affine bindings (same objects as triton._C.libtriton.ascend.ir).

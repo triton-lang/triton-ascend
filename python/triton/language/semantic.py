@@ -8,7 +8,7 @@ from .._C.libtriton import ir
 from . import core as tl
 from . import math
 
-from . import is_compile_on_910_95
+from triton.tools import get_ascend_devices
 T = TypeVar('T')
 
 
@@ -1349,7 +1349,7 @@ def atomic_cas(ptr: tl.tensor, cmp: tl.tensor, val: tl.tensor, sem: str, scope: 
     sem = _str_to_sem(sem)
     scope = _str_to_scope(scope)
     element_ty = ptr.type.scalar.element_ty
-    if not is_compile_on_910_95:
+    if not get_ascend_devices.is_compile_on_910_95:
         supported_types = [tl.int8, tl.uint8, tl.int16, tl.int32, tl.int64, tl.float16, tl.bfloat16, tl.float32]
         if element_ty not in supported_types:
             raise ValueError(f"atomic_cas does not support {str(element_ty)}. "
@@ -1660,7 +1660,7 @@ def dot_scaled(lhs: tl.tensor, lhs_scale: tl.tensor, lhs_format: str, rhs: tl.te
                rhs_format: str, acc: Union[tl.tensor, None], out_dtype: tl.dtype, lhs_k_pack, rhs_k_pack,
                builder: ir.builder) -> tl.tensor:
     assert lhs.type.is_block() and rhs.type.is_block()
-    if is_compile_on_910_95:
+    if get_ascend_devices.is_compile_on_910_95:
         assert lhs.dtype in [tl.float16, tl.bfloat16, tl.uint8, tl.float8e5, tl.float8e4nv], f"lhs matrix dtype must be in [bf16, fp16, uint8, e5m2, e4m3]"
         assert rhs.dtype in [tl.float16, tl.bfloat16, tl.uint8, tl.float8e5, tl.float8e4nv], f"rhs matrix dtype must be in [bf16, fp16, uint8, e5m2, e4m3]"
     else:
@@ -1674,7 +1674,7 @@ def dot_scaled(lhs: tl.tensor, lhs_scale: tl.tensor, lhs_format: str, rhs: tl.te
     rhs_format: str = rhs_format.value
     lhs_format_enum = _str_to_fp_type(lhs_format)
     rhs_format_enum = _str_to_fp_type(rhs_format)
-    if is_compile_on_910_95:
+    if get_ascend_devices.is_compile_on_910_95:
         allowed_formats = {"bf16", "fp16", "e4m3", "e5m2"}
     else:
         allowed_formats = {"bf16", "fp16"}  # unsupported fp8/4 dtype: "e2m1", "e4m3", "e5m2"

@@ -229,15 +229,15 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
 
         _intra_val = metadata.get("intra_cache_num")
         if _intra_val is not None:
-            ascend.passes.ttir.set_buffer_count("INTRA", _intra_val)
+            ascend.passes.ttir.set_buffer_count(mod, "INTRA", _intra_val)
 
         _inter_val = metadata.get("inter_cache_num")
         if _inter_val is not None:
-            ascend.passes.ttir.set_buffer_count("INTER", _inter_val)
+            ascend.passes.ttir.set_buffer_count(mod, "INTER", _inter_val)
 
         _load_val = metadata.get("load_cache_num")
         if _load_val is not None:
-            ascend.passes.ttir.set_buffer_count("LOAD", _load_val)
+            ascend.passes.ttir.set_buffer_count(mod, "LOAD", _load_val)
 
         pm.run(mod)
         _adjust_metadata_by_module_result(mod, metadata, opt,

@@ -21,6 +21,7 @@
 
 import functools
 import hashlib
+import importlib.util
 import os
 import re
 import shutil
@@ -50,6 +51,10 @@ AUTO_BLOCKIFY_BLACKLIST_RULES = (
 backend_policy = None
 
 
+def _module_is_available(module_name):
+    return importlib.util.find_spec(module_name) is not None
+
+
 def get_backend_func(name, *args, **kwargs):
     global backend_policy
     if backend_policy is None:
@@ -57,11 +62,9 @@ def get_backend_func(name, *args, **kwargs):
         if backend_policy_env == "torch_npu" or backend_policy_env == "mindspore":
             backend_policy = backend_policy_env
         if backend_policy is None:
-            try:
-                import torch
-                import torch_npu
+            if _module_is_available("torch_npu"):
                 backend_policy = "torch_npu"
-            except ImportError:
+            else:
                 backend_policy = "mindspore"
     return backend_strategy_registry.execute_func(backend_policy, name, *args, **kwargs)
 

@@ -26,7 +26,7 @@ jobs:
     outputs:
       release_name: "${{ steps.release_name.outputs.name }}"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           show-progress: false
           submodules: 'recursive'
@@ -43,18 +43,31 @@ jobs:
           tag_or_branch="${tag_or_branch#refs/heads/}"
           # replace directory separators with _ in branch name
           tag_or_branch="${tag_or_branch//\//_}"
+          # setup.py is at repo root on main, under python/ on release branches
+          if [ -f "python/setup.py" ]; then
+            PKG_DIR="python"
+          else
+            PKG_DIR="."
+          fi
+          echo "PKG_DIR=${PKG_DIR}" >> "$GITHUB_ENV"
+          if [ "${PKG_DIR}" = "." ]; then
+            echo "DIST_DIR=dist" >> "$GITHUB_ENV"
+          else
+            echo "DIST_DIR=${PKG_DIR}/dist" >> "$GITHUB_ENV"
+          fi
           if [[ ${tag_or_branch} == v* ]]; then
             # strip trailing v from tag name
             tag_or_branch="${tag_or_branch#v}"
-            # important: version must be fixed in version.txt
-            echo "${tag_or_branch}" > version.txt
+            # important: version must be fixed in setup.py
+            sed -i -e "s:^TRITON_VERSION = .*:TRITON_VERSION = '${tag_or_branch}':" "${PKG_DIR}/setup.py" || exit 1
           fi
           echo "RELEASE_NAME=triton-ascend-$tag_or_branch" >> "$GITHUB_ENV"
       - name: Create source distribution
         run: |
           python -m pip install --upgrade pip || exit 1
           python -m pip install "setuptools<70" wheel build || exit 1
-          python -m build -s python --outdir dist || exit 1
+          cd ${PKG_DIR}
+          python -m build -s || exit 1
           cd dist || exit 1
           release_file=( *.tar.gz )
           echo "RELEASE_FILE=${release_file}" >> "$GITHUB_ENV"
@@ -62,13 +75,13 @@ jobs:
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/${{ env.RELEASE_FILE }}
+          files: ${{ env.DIST_DIR }}/${{ env.RELEASE_FILE }}
       - name: Upload source distribution to GHA artifacts for release tags
         if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
         uses: actions/upload-artifact@v4.4.0
         with:
           name: ${{ env.RELEASE_FILE }}
-          path: dist/${{ env.RELEASE_FILE }}
+          path: ${{ env.DIST_DIR }}/${{ env.RELEASE_FILE }}
       - name: Set output
         id: release_name
         run: echo "name=release_name::${{ env.RELEASE_NAME }}.tar.gz" >> "${GITHUB_OUTPUT}"

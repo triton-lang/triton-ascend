@@ -11,7 +11,7 @@ on:
       - '.github/CODEOWNERS'
       - '.github/dependabot.yml'
       - 'cmake/llvm-hash.txt'
-      - 'third_party/ascend/llvm_patch/**'
+      - 'third_party/ascend/patch/**'
       - 'docker/**'
       - 'requirements.txt'
       - 'requirements_dev.txt'
@@ -37,9 +37,6 @@ jobs:
 
   runner-preparation:
     uses: ./.github/workflows/runner-preparation.yml
-
-  # pre-commit:
-  #   uses: ./.github/workflows/pre-commit.yml
 
   integration-tests-ascend:
     needs: runner-preparation

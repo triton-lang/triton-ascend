@@ -1,0 +1,102 @@
+name: Sync Branches
+
+# Sync code between two branches by opening a PR from the source branch
+# directly into the target branch. No intermediate branch is created; if the
+# merge has conflicts, GitHub surfaces them on the PR for manual resolution.
+# Triggered manually only (workflow_dispatch).
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: 'Source branch (content to sync from)'
+        required: true
+        type: string
+      target_branch:
+        description: 'Target branch (branch to receive the sync)'
+        required: true
+        type: string
+
+concurrency:
+  group: sync-branches-${{ github.event.inputs.source_branch }}-${{ github.event.inputs.target_branch }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history is required to compare the two branches.
+          fetch-depth: 0
+
+      - name: Validate inputs
+        id: prepare
+        env:
+          SRC: ${{ github.event.inputs.source_branch }}
+          DST: ${{ github.event.inputs.target_branch }}
+        run: |
+          set -eu
+          if [ "$SRC" = "$DST" ]; then
+            echo "::error::Source and target branch must differ: $SRC"
+            exit 1
+          fi
+          if ! git show-ref --verify --quiet "refs/remotes/origin/$SRC"; then
+            echo "::error::Source branch does not exist: origin/$SRC"
+            exit 1
+          fi
+          if ! git show-ref --verify --quiet "refs/remotes/origin/$DST"; then
+            echo "::error::Target branch does not exist: origin/$DST"
+            exit 1
+          fi
+
+          # Skip opening a PR if the source has no commits that the target is
+          # missing (nothing to sync).
+          if [ "$(git rev-list --count "origin/$DST..origin/$SRC")" -eq 0 ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "Target branch already contains all commits from the source, nothing to sync."
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Pull Request
+        if: steps.prepare.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SRC: ${{ github.event.inputs.source_branch }}
+          DST: ${{ github.event.inputs.target_branch }}
+        run: |
+          set -eu
+          # Follow the format enforced by pr-title-check.yml:
+          #   [<component>](<type>) <subject>   (max 72 chars)
+          TITLE="[sync](chore) sync ${SRC} into ${DST}"
+          BODY=$(cat <<EOF
+          Automated sync PR: bring \`${SRC}\` into \`${DST}\`.
+
+          - Source branch: \`${SRC}\`
+          - Target branch: \`${DST}\`
+          - Triggered: workflow_dispatch (@${{ github.actor }})
+          - Run: [#${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          > If GitHub reports merge conflicts on this PR, resolve them manually
+          > before merging.
+          EOF
+          )
+
+          # Reuse an existing open PR for the same source -> target pair.
+          EXISTING=$(gh pr list --base "$DST" --head "$SRC" --state open --json number --jq '.[0].number' || true)
+          if [ -n "$EXISTING" ]; then
+            echo "PR already exists: #$EXISTING"
+            exit 0
+          fi
+
+          PR_URL=$(gh pr create \
+            --base "$DST" \
+            --head "$SRC" \
+            --title "$TITLE" \
+            --body "$BODY")
+          echo "Created PR: $PR_URL"

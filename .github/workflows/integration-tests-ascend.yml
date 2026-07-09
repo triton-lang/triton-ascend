@@ -33,7 +33,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: "true"
-          fetch-depth: 1
 
       - name: Add git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -46,7 +45,7 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ~/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-
 
       - name: Download and install Bisheng compiler
@@ -81,7 +80,6 @@ jobs:
           echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
 
       - name: Build and install triton-ascend
-        working-directory: python
         shell: bash
         env:
           TRITON_BUILD_WITH_CCACHE: "true"
@@ -90,9 +88,7 @@ jobs:
           CCACHE_COMPRESS: "true"
           TRITON_BUILD_WITH_O1: true
           TRITON_BUILD_PROTON: OFF
-          TRITON_WHEEL_NAME: "triton-ascend"
-          # Enable C++/MLIR unit tests so CMake generates third_party/ascend/unittest/lit.site.cfg.py
-          # in the build dir (required by the MLIR FileCheck step below).
+          TRITON_WHEEL_NAME: triton-ascend
           TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=ON"
         run: |
           nproc
@@ -103,13 +99,18 @@ jobs:
             cat "${ASCEND_TOOLKIT_HOME}/cann/version.info"
           fi
 
-          ${PYTHON} -m pip uninstall triton-ascend triton -y || true
           ccache --zero-stats
+          # setup.py is at repo root on main, under python/ on release branches
+          if [ -f "python/setup.py" ]; then
+            PKG_DIR="python"
+          else
+            PKG_DIR="."
+          fi
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
-          MAX_JOBS="$NUM_PROCS" ${PYTHON} setup.py bdist_wheel
-          ${PYTHON} -m pip install -v dist/*.whl --force-reinstall
-
+          MAX_JOBS="$NUM_PROCS" \
+          ${PYTHON} ${PKG_DIR}/setup.py bdist_wheel
+          ${PYTHON} -m pip install ${PKG_DIR}/dist/*.whl
 
       - name: CCache stats
         run: ccache --print-stats
@@ -119,7 +120,7 @@ jobs:
         run: |
           source /usr/local/Ascend/cann/set_env.sh
           export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
-          NUM_PROCS=$(( $(nproc) / 12 ))
+          NUM_PROCS=$(( $(nproc) / 9 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/autotune_ut
@@ -127,25 +128,25 @@ jobs:
           # that cause CI instability. TODO: Fix flaky kernel tests and re-enable.
           # ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/kernels/test_triton_kernel.py
 
-      # NOTE: Conversion is not fully merged yet; failures must not block CI.
-      # Remove `continue-on-error` once the module lands.
-      - name: Run MLIR FileCheck tests (non-blocking)
-        if: always()
-        continue-on-error: true
-        working-directory: python
+      - name: Run MLIR FileCheck tests
         shell: bash
+        continue-on-error: true
         run: |
           source /usr/local/Ascend/cann/set_env.sh
           export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
-          # CMake only drops lit.site.cfg.py into the build dir; the .mlir test files
-          # themselves stay in the source tree (lit.cfg.py points test_source_root back
-          # at <source>/third_party/ascend/unittest). So we must aim lit at the build-dir
-          # site cfg to get substitutions, then filter down to the DynamicCVPipeline suite.
-          BUILD_UT_DIR=$(ls -d build/cmake.*/third_party/ascend/unittest 2>/dev/null | head -1 || true)
-          echo "BUILD_UT_DIR=${BUILD_UT_DIR:-<not found>}"
-          if [ -z "${BUILD_UT_DIR}" ] || [ ! -f "${BUILD_UT_DIR}/lit.site.cfg.py" ]; then
-            echo "lit.site.cfg.py not found — TRITON_BUILD_UT may not have taken effect."
-            echo "Expected: build/cmake.*/third_party/ascend/unittest/lit.site.cfg.py"
+          TEST_MLIR_DIR=$(ls -d build/cmake.*/third_party/ascend/unittest 2>/dev/null | head -1 || true)
+          echo "TEST_MLIR_DIR=${TEST_MLIR_DIR:-<not found>}"
+          if [ -n "${TEST_MLIR_DIR}" ] && [ -d "${TEST_MLIR_DIR}" ]; then
+            lit -v "${TEST_MLIR_DIR}"
+          else
+            echo "MLIR test directory not found."
+            echo "Expected to match: build/cmake.*/third_party/ascend/unittest"
+            echo "Working directory: $(pwd)"
+            if [ -d build ]; then
+              echo "Contents of build directory:"
+              find build -maxdepth 4 -print
+            else
+              echo "build directory does not exist"
+            fi
             exit 1
           fi
-          lit -v "${BUILD_UT_DIR}" --filter 'Conversion/General/DynamicCVPipeline'

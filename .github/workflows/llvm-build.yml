@@ -6,11 +6,13 @@ on:
   # push:
   #   paths:
   #     - cmake/llvm-hash.txt
+  #     - third_party/ascend/patch/**
   #     - .github/workflows/llvm-build.yml
   #     - .github/workflows/llvm-build/**
   # pull_request:
   #   paths:
   #     - cmake/llvm-hash.txt
+  #     - third_party/ascend/patch/**
   #     - .github/workflows/llvm-build.yml
   #     - .github/workflows/llvm-build/**
   workflow_dispatch:
@@ -42,7 +44,7 @@ jobs:
     steps:
 
     - name: Checkout Repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         path: llvm-build
 
@@ -57,22 +59,54 @@ jobs:
         echo "Short LLVM commit hash: ${SHORT_LLVM_COMMIT_HASH}"
         echo "short_llvm_commit_hash=${SHORT_LLVM_COMMIT_HASH}" >> ${GITHUB_ENV}
 
-    - name: Compute Install Dir
+    - name: Compute Patch Hash
       shell: bash
       run: |
-        INSTALL_DIR="llvm-${{ env.short_llvm_commit_hash }}-${{ matrix.config.target-os }}-${{ matrix.config.arch }}"
+        PATCH_DIR="llvm-build/third_party/ascend/patch"
+        if [ -d "${PATCH_DIR}" ] && find "${PATCH_DIR}" -maxdepth 1 -type f -name 'llvm_patch_*.patch' -print -quit | grep -q .; then
+          PATCH_HASH=$(
+            LC_ALL=C find "${PATCH_DIR}" -maxdepth 1 -type f -name 'llvm_patch_*.patch' -print0 \
+              | sort -z \
+              | xargs -0 cat \
+              | sha256sum \
+              | cut -d' ' -f1 \
+              | cut -c1-8
+          )
+        else
+          PATCH_HASH="00000000"
+        fi
+        echo "Patch hash: ${PATCH_HASH}"
+        echo "patch_hash=${PATCH_HASH}" >> ${GITHUB_ENV}
+
+        INSTALL_DIR="llvm-${{ env.short_llvm_commit_hash }}-${PATCH_HASH}-${{ matrix.config.target-os }}-${{ matrix.config.arch }}"
         echo "LLVM installation directory name: ${INSTALL_DIR}"
         echo "llvm_install_dir=${INSTALL_DIR}" >> ${GITHUB_ENV}
 
     - name: Checkout LLVM
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         repository: llvm/llvm-project
         path: llvm-project
         ref: ${{ env.llvm_commit_hash }}
 
+    - name: Apply LLVM patches
+      shell: bash
+      run: |
+        LLVM_SHORT="${{ env.short_llvm_commit_hash }}"
+        PATCH_DIR="llvm-build/third_party/ascend/patch"
+        if [ -d "${PATCH_DIR}" ]; then
+          cd llvm-project
+          for patchfile in ${GITHUB_WORKSPACE}/${PATCH_DIR}/llvm_patch_*.patch; do
+            if [ -f "$patchfile" ]; then
+              echo "Applying $patchfile..."
+              git apply "$patchfile"
+            fi
+          done
+          cd ..
+        fi
+
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: 3.11
 
@@ -87,7 +121,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ${{ env.SCCACHE_DIR }}
-        key: ${{ matrix.config.target-os }}-${{ matrix.config.arch }}-${{ env.short_llvm_commit_hash }}
+        key: ${{ matrix.config.target-os }}-${{ matrix.config.arch }}-${{ env.short_llvm_commit_hash }}-${{ env.patch_hash }}
         restore-keys: ${{ matrix.config.target-os }}-${{ matrix.config.arch }}-
 
     - name: Configure, Build, and Install LLVM (Ubuntu)
@@ -104,7 +138,7 @@ jobs:
         -DLLVM_BUILD_UTILS=ON
         -DLLVM_BUILD_TOOLS=ON
         -DLLVM_ENABLE_ASSERTIONS=ON
-        -DMLIR_ENABLE_BINDINGS_PYTHON=ON
+        -DMLIR_ENABLE_BINDINGS_PYTHON=OFF
         -DLLVM_ENABLE_PROJECTS="mlir;lld"
         -DLLVM_INSTALL_UTILS=ON
         -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU"
@@ -171,17 +205,26 @@ jobs:
         path: |
           ${{ github.workspace }}/llvm-*-${{ matrix.config.target-os }}-${{ matrix.config.arch }}.tar.gz
 
-    - name: Setup obsutil
+    - name: Setup obsutil and upload to OBS
       if: github.event_name == 'push' && github.repository == 'triton-lang/triton-ascend'
-      uses: ./llvm-build/.github/actions/setup-obsutil
-      with:
-        ak: ${{ secrets.OBS_AK }}
-        sk: ${{ secrets.OBS_SK }}
-        arch: ${{ matrix.config.arch == 'x64' && 'amd64' || 'arm64' }}
-
-    - name: Upload LLVM Artifacts to OBS
-      if: github.event_name == 'push' && github.repository == 'triton-lang/triton-ascend'
+      shell: bash
+      env:
+        AK: ${{ secrets.OBS_AK }}
+        SK: ${{ secrets.OBS_SK }}
+        ARCH: ${{ matrix.config.arch == 'x64' && 'amd64' || 'arm64' }}
       run: |
+        set -eu
+        if [ -z "${AK}" ] || [ -z "${SK}" ]; then
+          echo "OBS credentials are empty."
+          exit 1
+        fi
+        curl -fL "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${ARCH}.tar.gz" -o obsutil.tar.gz
+        gzip -t obsutil.tar.gz || { echo "obsutil.tar.gz is not a valid gzip"; exit 1; }
+        tar xzf obsutil.tar.gz
+        rm -f obsutil.tar.gz
+        mv obsutil_linux_* obsutil
+
+        obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-southwest-2.myhuaweicloud.com
         obsutil/obsutil cp -u "${{ env.llvm_install_dir }}.tar.gz" obs://triton-ascend-artifacts/llvm-builds/
 
     - name: Dump Sccache Statistics

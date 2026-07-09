@@ -288,8 +288,8 @@ Check out the specified version of LLVM source code using `git checkout` and app
 git clone --no-checkout https://github.com/llvm/llvm-project.git
 cd llvm-project
 git checkout fad3272286528b8a491085183434c5ad4b59ab92
-wget https://raw.githubusercontent.com/triton-lang/triton-ascend/6765b03c81c4e9ecb277e4ef1dde61dea0d044f0/third_party/ascend/llvm_patch/fad3272.patch
-git apply fad3272.patch
+wget https://raw.githubusercontent.com/triton-lang/triton-ascend/refs/heads/main/third_party/ascend/patch/llvm_patch_fad3272.patch
+git apply llvm_patch_fad3272.patch
 ```
 
 ##### Build and Install LLVM

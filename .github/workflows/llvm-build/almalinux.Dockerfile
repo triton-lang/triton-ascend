@@ -2,8 +2,8 @@
 FROM almalinux:8.10-20250411
 ARG llvm_dir=llvm-project
 # Add the cache artifacts and the LLVM source tree to the container
-COPY sccache /sccache
-COPY "${llvm_dir}" /source/llvm-project
+ADD sccache /sccache
+ADD "${llvm_dir}" /source/llvm-project
 ENV SCCACHE_DIR="/sccache"
 ENV SCCACHE_CACHE_SIZE="2G"
 
@@ -16,9 +16,6 @@ RUN python3 -m pip install --upgrade cmake ninja sccache lit nanobind
 
 # Install MLIR's Python Dependencies
 RUN python3 -m pip install -r /source/llvm-project/mlir/python/requirements.txt
-
-RUN sed -i '1i #include <cstdint>' \
-/source/llvm-project/mlir/include/mlir/Target/SPIRV/Deserialization.h
 
 # Configure, Build, Test, and Install LLVM
 RUN cmake -GNinja -Bbuild \
@@ -46,3 +43,5 @@ RUN cmake -GNinja -Bbuild \
   /source/llvm-project/llvm
 
 RUN ninja -C build install
+
+RUN ninja check-mlir -C build

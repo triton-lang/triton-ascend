@@ -5,6 +5,8 @@ name: Wheels
 # `workflow_dispatch:` if you only want manual runs).
 on:
   workflow_dispatch:
+  push:
+    branches: [release/**]
   # pull_request:
   #   paths:
   #     - .github/workflows/wheels.yml
@@ -47,6 +49,23 @@ jobs:
           # this machine.
           docker container prune -f
 
+      - name: Check for new commits
+        if: github.event_name == 'push'
+        id: new-commits
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LAST_SHA=$(gh api \
+            "/repos/${{ github.repository }}/actions/workflows/wheels.yml/runs?branch=${{ github.ref_name }}&status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // empty')
+          if [ "$LAST_SHA" = "${{ github.sha }}" ]; then
+            echo "Current commit already has a successful wheel build. Skipping."
+            echo "has_new_commits=false" >> $GITHUB_OUTPUT
+          else
+            echo "New commits detected. Proceeding with wheel build."
+            echo "has_new_commits=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
@@ -67,6 +86,7 @@ jobs:
             wheels-${{ matrix.config.arch }}-${{ matrix.python }}-
 
       - name: Build wheels
+        if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
         run: |
           python --version
           # Make sure cibuildwheel is updated to latest, this will enable latest python builds
@@ -113,16 +133,18 @@ jobs:
           fi
 
           export CIBW_BUILD="${{ matrix.python }}-manylinux_${{ matrix.config.arch }}"
+          export CIBW_SKIP="cp{35,36,37,38,39}-*"
 
           python3 -m cibuildwheel "${{ matrix.branch.path }}" --output-dir wheelhouse
 
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
         with:
           name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}-wheels-upload
           path: ./wheelhouse/*.whl
 
       - name: Setup obsutil and upload to OBS
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false')
         shell: bash
         env:
           AK: ${{ secrets.NIGHTLY_OBS_AK }}

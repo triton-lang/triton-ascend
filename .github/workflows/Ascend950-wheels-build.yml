@@ -88,8 +88,9 @@ jobs:
           fi
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          cd ${PKG_DIR}
           MAX_JOBS="$NUM_PROCS" \
-          python ${PKG_DIR}/setup.py bdist_wheel --dist-dir=./wheelhouse
+          python setup.py bdist_wheel --dist-dir="${GITHUB_WORKSPACE}/wheelhouse"
 
       - uses: actions/upload-artifact@v4
         with:

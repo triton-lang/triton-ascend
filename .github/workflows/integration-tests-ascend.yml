@@ -108,9 +108,11 @@ jobs:
           fi
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          cd ${PKG_DIR}
           MAX_JOBS="$NUM_PROCS" \
-          ${PYTHON} ${PKG_DIR}/setup.py bdist_wheel
-          ${PYTHON} -m pip install ${PKG_DIR}/dist/*.whl
+          ${PYTHON} setup.py bdist_wheel --dist-dir="${GITHUB_WORKSPACE}/dist"
+          ${PYTHON} -m pip uninstall -y triton || true
+          ${PYTHON} -m pip install --force-reinstall ${GITHUB_WORKSPACE}/dist/*.whl
 
       - name: CCache stats
         run: ccache --print-stats

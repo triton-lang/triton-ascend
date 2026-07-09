@@ -1346,11 +1346,11 @@ func.func @test_t23_scf_if_else_branch_yield() {
   // CHECK-DAG: hivm.hir.copy
   // CHECK-DAG: scf.if
   // Original empty+fill producer in block 14
-  // CHECK: tensor.empty() {ssbuffer.block_id = 14 : i32}
-  // CHECK: linalg.fill {ssbuffer.block_id = 14 : i32}
+  // CHECK-DAG: tensor.empty() {ssbuffer.block_id = 14 : i32}
+  // CHECK-DAG: linalg.fill {ssbuffer.block_id = 14 : i32}
   // Cloned empty+fill in block 15
-  // CHECK: tensor.empty() {ssbuffer.block_id = 15 : i32}
-  // CHECK: linalg.fill {ssbuffer.block_id = 15 : i32}
+  // CHECK-DAG: tensor.empty() {ssbuffer.block_id = 15 : i32}
+  // CHECK-DAG: linalg.fill {ssbuffer.block_id = 15 : i32}
   // No buffer for the 8xi32 depVal (empty+fill pattern, not multi-buffered)
   // CHECK-NOT: memref.alloc() : memref<8xi32, #hivm.address_space<ub>>
   func.func @test_t37_mixed_multi_buffer_and_clone() {

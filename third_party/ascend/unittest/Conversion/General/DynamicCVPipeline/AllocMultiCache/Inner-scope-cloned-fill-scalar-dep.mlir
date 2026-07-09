@@ -41,14 +41,18 @@
 // CHECK-DAG: memref.alloc() : memref<f32, #hivm.address_space<ub>>
 // CHECK-DAG: memref.alloc() : memref<f32, #hivm.address_space<ub>>
 // CHECK-DAG: memref.memory_space_cast {{.*}} {ssbuffer.intraDeps = [0 : i32, 1 : i32]}
+// Original empty+fill remains in producer block (block_id = 13). This
+// fill is the LAST block_id=13 op in the main_loop body, so the
+// producer chain (block_id = 13) is inserted right after it.
+// CHECK: linalg.fill {ssbuffer.block_id = 13 : i32} ins(%extracted : f32) outs({{.*}} : tensor<32x1xf32>) -> tensor<32x1xf32>
 // Producer-side ping-pong into multi-buffer (block_id = 13, intra_buffer).
+// Sits at the end of the block_id=13 region, BEFORE the inner scf.for
+// (block_id=22) opens.
 // CHECK: scf.if {{.*}} {
 // CHECK:   hivm.hir.copy ins({{.*}} : tensor<f32>) outs({{.*}} : memref<f32>) {ssbuffer.block_id = 13 : i32}
 // CHECK: } {ssbuffer.block_id = 13 : i32, ssbuffer.intra_buffer}
-// Original empty+fill remains in producer block (block_id = 13).
-// CHECK: linalg.fill {ssbuffer.block_id = 13 : i32} ins(%extracted : f32) outs({{.*}} : tensor<32x1xf32>) -> tensor<32x1xf32>
 // Consumer-side multi-buffer selection (block_id = 22 = inner loop body).
-// CHECK: scf.if {{.*}} -> (tensor<f32>) {
+// CHECK: %{{.*}} = scf.if {{.*}} -> (tensor<f32>) {
 // CHECK:   bufferization.to_tensor {{.*}} restrict writable : memref<f32>
 // CHECK: } else {
 // CHECK:   bufferization.to_tensor {{.*}} restrict writable : memref<f32>

@@ -52,6 +52,18 @@ class NPUUtils(object):
         return cls.instance
 
     def __init__(self):
+        if getattr(self, "_initialized", False):
+            return
+        self._initialized = True
+        self._cache_path = None
+        self.npu_utils_mod = None
+
+    def get_so_path(self):
+        if self._cache_path is None:
+            self._cache_path = self._build_or_get_cached_so()
+        return self._cache_path
+
+    def _build_or_get_cached_so(self):
         dirname = os.path.dirname(os.path.realpath(__file__))
         src_path = os.path.join(dirname, "npu_utils.cpp")
         src = Path(src_path).read_text()
@@ -68,18 +80,23 @@ class NPUUtils(object):
                 so = _build_npu_ext("npu_utils", tmp_src_path)
                 with open(so, "rb") as f:
                     cache_path = cache.put(f.read(), fname, binary=True)
+        return cache_path
+
+    def _load_mod(self):
+        if self.npu_utils_mod is not None:
+            return self.npu_utils_mod
+
         import importlib.util
-        spec = importlib.util.spec_from_file_location("npu_utils", cache_path)
+        spec = importlib.util.spec_from_file_location("npu_utils", self.get_so_path())
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self.npu_utils_mod = mod
-        # setup for remote run
-        env_arch = get_ascend_arch_from_env()
+        return self.npu_utils_mod
 
     def load_binary(self, name, kernel, shared, device, mix_mode=None):
         if mix_mode is None:
             name, mix_mode = name.rsplit("_", 1)
-        return self.npu_utils_mod.load_kernel_binary(name, kernel, shared, device, mix_mode)
+        return self._load_mod().load_kernel_binary(name, kernel, shared, device, mix_mode)
 
     @functools.lru_cache()
     def get_device_properties(self, device):
@@ -92,12 +109,12 @@ class NPUUtils(object):
     @functools.lru_cache()
     def get_arch(self):
         # temporarily return empty arch descriptor
-        return self.npu_utils_mod.get_arch()
+        return self._load_mod().get_arch()
 
     @functools.lru_cache()
     def get_aicore_num(self):
         # temporarily return empty arch descriptor
-        return self.npu_utils_mod.get_aicore_num()
+        return self._load_mod().get_aicore_num()
 
     @functools.lru_cache()
     def get_aivector_core_num(self):
@@ -481,9 +498,7 @@ def generate_npu_wrapper_src(constants, signature, metadata):
         f'sizeof({_ty_to_cpp(ty)})' for i, ty in launch_signature_items
     )
 
-    npu_utils_inst = NPUUtils()
-    npu_utils_mod = getattr(npu_utils_inst, "npu_utils_mod", None)
-    npu_utils_so_path = getattr(npu_utils_mod, "__file__", "")
+    npu_utils_so_path = NPUUtils().get_so_path()
     cpp_npu_utils_dlopen = f"""
 typedef void* (*triton_allocate_workspace_legacy_t)(uint64_t);
 typedef void* (*triton_allocate_sync_block_lock_t)(uint64_t, void*, void**);

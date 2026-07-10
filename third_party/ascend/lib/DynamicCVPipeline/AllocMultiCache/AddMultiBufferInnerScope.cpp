@@ -57,6 +57,29 @@ using BufferMap = DenseMap<Value, SmallVector<BufferPair>>;
 // Buffer count constants
 constexpr int kBufferCountOne = 1;
 
+// Toggle: when true, producer / consumer buffer chains are inserted at the
+// boundary of the contiguous `ssbuffer.block_id = X` region instead of right
+// after the dep def op / right before the dep user op.
+//
+//   - producer chain: inserted AFTER the last op in depDefinedOp's block that
+//     carries the same `ssbuffer.block_id` as depDefinedOp. If depDefinedOp has
+//     no direct block_id attribute, falls back to "right after depDefinedOp".
+//   - consumer chain: inserted BEFORE the first op in depUser's block that
+//     carries the same `ssbuffer.block_id` as depUser. If depUser has no direct
+//     block_id attribute, falls back to "right before depUser".
+//
+// This keeps the producer/consumer chains grouped with their block_id region
+// rather than interleaved with intermediate compute ops.
+//
+// The toggle is a runtime global (default false). Flipping it does NOT require
+// a rebuild — Python callers go through `setEnableBufferInsertOptimization`,
+// which is exposed via pybind11 in `triton_ascend.cc`.
+namespace mlir {
+namespace triton {
+static bool g_enableBufferInsertOptimization = false;
+} // namespace triton
+} // namespace mlir
+
 namespace mlir {
 namespace triton {
 
@@ -1303,6 +1326,41 @@ static int processMultiRegionAllYields(OpBuilder &consumedBuilder, Value depVal,
     return 0;
 }
 
+// Find the last op in `anchorOp->getBlock()` whose `ssbuffer.block_id` attribute
+// matches `blockId`. Returns nullptr if anchorOp is null or has no block, or if
+// no such op is found.
+static Operation *findLastOpWithBlockIdInBlock(Operation *anchorOp, int blockId)
+{
+    if (!anchorOp)
+        return nullptr;
+    Block *block = anchorOp->getBlock();
+    if (!block)
+        return nullptr;
+    Operation *result = nullptr;
+    for (Operation &op : *block) {
+        if (auto id = getOpBlockId(&op); id.has_value() && *id == blockId)
+            result = &op;
+    }
+    return result;
+}
+
+// Find the first op in `anchorOp->getBlock()` whose `ssbuffer.block_id` attribute
+// matches `blockId`. Returns nullptr if anchorOp is null or has no block, or if
+// no such op is found.
+static Operation *findFirstOpWithBlockIdInBlock(Operation *anchorOp, int blockId)
+{
+    if (!anchorOp)
+        return nullptr;
+    Block *block = anchorOp->getBlock();
+    if (!block)
+        return nullptr;
+    for (Operation &op : *block) {
+        if (auto id = getOpBlockId(&op); id.has_value() && *id == blockId)
+            return &op;
+    }
+    return nullptr;
+}
+
 // Process producer and consumer for a single dependency value
 static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp, BufferMap &bufferMap,
                          DenseMap<Value, SmallVector<Operation *>> &depUserMap, OpBuilder &globalBuilder,
@@ -1321,7 +1379,17 @@ static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp, BufferMap
 
     // Create producer
     OpBuilder producedBuffers(mainLoopForOp.getContext());
-    producedBuffers.setInsertionPointAfter(depDefinedOp);
+    // When enable_buffer_insert_optimization is on, place the producer chain at the end
+    // of depDefinedOp's block_id=X region (after the last op with that
+    // block_id). Otherwise keep the original "right after depDefinedOp" anchor.
+    Operation *producerAnchor = depDefinedOp;
+    if (g_enableBufferInsertOptimization) {
+        if (auto prodId = getOpBlockId(depDefinedOp); prodId.has_value()) {
+            if (Operation *lastInRegion = findLastOpWithBlockIdInBlock(depDefinedOp, *prodId))
+                producerAnchor = lastInRegion;
+        }
+    }
+    producedBuffers.setInsertionPointAfter(producerAnchor);
     SmallVector<Operation *> producerNewOps = insertProducerLogic(producedBuffers, depVal, buffers, mainLoopForOp);
     addBlockAttrForOps(producerNewOps, producerId, globalBuilder);
     if (buffers.size() > kBufferCountOne) {
@@ -1348,7 +1416,17 @@ static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp, BufferMap
         if (isMultiRegionConsumerFromYield(depUser, depVal)) {
             // Multi-region op: process independently
             OpBuilder consumedBuilder(mainLoopForOp.getContext());
-            consumedBuilder.setInsertionPoint(depUser);
+            // When enable_buffer_insert_optimization is on, place the consumer chain at
+            // the start of depUser's block_id=X region (before the first op
+            // with that block_id). Otherwise keep "right before depUser".
+            Operation *consumerAnchor = depUser;
+            if (g_enableBufferInsertOptimization) {
+                if (auto userId = getOpBlockId(depUser); userId.has_value()) {
+                    if (Operation *firstInRegion = findFirstOpWithBlockIdInBlock(depUser, *userId))
+                        consumerAnchor = firstInRegion;
+                }
+            }
+            consumedBuilder.setInsertionPoint(consumerAnchor);
 
             if (int ret = processMultiRegionAllYields(consumedBuilder, depVal, buffers, mainLoopForOp,
                                                      depUser, *userBlockId, groupId))
@@ -1384,7 +1462,17 @@ static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp, BufferMap
 
             Operation *firstOp = opsInRegion.front();
             OpBuilder consumedBuilder(mainLoopForOp.getContext());
-            consumedBuilder.setInsertionPoint(firstOp);
+            // When enable_buffer_insert_optimization is on, place the consumer chain at
+            // the start of the dep user's block_id=X region (before the first
+            // op with that block_id). Otherwise keep "right before firstOp".
+            Operation *consumerAnchor = firstOp;
+            if (g_enableBufferInsertOptimization) {
+                if (auto userId = getOpBlockId(firstOp); userId.has_value()) {
+                    if (Operation *firstInRegion = findFirstOpWithBlockIdInBlock(firstOp, *userId))
+                        consumerAnchor = firstInRegion;
+                }
+            }
+            consumedBuilder.setInsertionPoint(consumerAnchor);
 
             if (int ret = processNormalConsumerBlock(consumedBuilder, depVal, buffers, mainLoopForOp,
                                                    opsInRegion, userBlockId, groupId, globalBuilder))
@@ -1833,6 +1921,19 @@ std::unique_ptr<OperationPass<ModuleOp>> createAddMultiBufferInnerScopePass()
 void registerAddMultiBufferInnerScopePasses()
 {
     registerPass([]() -> std::unique_ptr<mlir::Pass> { return createAddMultiBufferInnerScopePass(); });
+}
+
+// Set the runtime flag that controls producer / consumer buffer-chain insert
+// location inside AddMultiBufferInnerScope. Mirrors
+// `setEnableDynamicFlowOptimization` in AnalyzeFlowOpt.cpp: the value lives in
+// a static global and is read at every `processDepVal` call site, so callers
+// can flip it at runtime without rebuilding.
+void setEnableBufferInsertOptimization(bool enable)
+{
+    g_enableBufferInsertOptimization = enable;
+    LLVM_DEBUG({
+        llvm::dbgs() << "[add-multi-buffer-inner-scope] [INFO]: setEnableBufferInsertOptimization called with value: " << enable << "\n";
+    });
 }
 
 } // namespace triton

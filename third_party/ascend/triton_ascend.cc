@@ -25,6 +25,7 @@
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
+#include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "ir.h" // TritonOpBuilder
@@ -397,6 +398,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
 
   m.def("set_enable_cube_block_merge", [](bool enable) {
     mlir::CVPipeline::setEnableCubeBlockMerge(enable);
+  });
+
+  m.def("set_enable_buffer_insert_optimization", [](bool enable) {
+    mlir::triton::setEnableBufferInsertOptimization(enable);
   });
 }
 

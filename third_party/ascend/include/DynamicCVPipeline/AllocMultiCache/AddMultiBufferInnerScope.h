@@ -54,6 +54,11 @@ std::unique_ptr<OperationPass<ModuleOp>> createAddMultiBufferInnerScopePass();
 // Register the pass
 void registerAddMultiBufferInnerScopePasses();
 
+// Set the runtime toggle for producer / consumer buffer-chain insert
+// placement. Default false (chains anchor on the dep def/user directly).
+// See AddMultiBufferInnerScope.cpp for the semantics.
+void setEnableBufferInsertOptimization(bool enable);
+
 } // namespace triton
 } // namespace mlir
 

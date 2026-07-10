@@ -2382,7 +2382,7 @@ class AutoTilingTuner(Autotuner):
                     list(run_fns.values()),
                     warmup=warmup,
                     active=active,
-                    clear_l2_cache=False,
+                    clear_l2_cache=True,
                     target_kernel_name=target_kernel_name,
                 )
                 assert len(time_cost) == len(run_fns)

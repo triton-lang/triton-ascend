@@ -1,7 +1,7 @@
 name: Documentation
 
 # ── Docs CI pipeline ──────────────────────────────────────────────────
-#  1. docs-spec-check.yml   (this file)  – code / spec gate
+#  1. documentation.yml     (this file)  – code / spec gate
 #  2. docs-rtd-preview.yml               – monitor RTD build → Commit Status
 #
 #  Only changes under docs/ trigger the pipeline (plus self-validation of the
@@ -15,13 +15,12 @@ on:
       - 'docs/**/*.md'
       - 'docs/**/*.mdx'
       - 'docs/**/_toc.yaml'
-      - '.github/workflows/docs-spec-check.yml'
+      - '.github/workflows/documentation.yml'
+      - '.github/workflows/docs-rtd-preview.yml'
       - '.github/docs-ci/**'
-  # Manual + nightly full scans (checkAll) to surface errors in existing docs
+  # Manual full scans (checkAll) to surface errors in existing docs
   # that incremental PR runs never touch. These never block a PR.
   workflow_dispatch:
-  schedule:
-    - cron: '0 18 * * *'  # 02:00 Asia/Shanghai
 
 permissions:
   contents: read

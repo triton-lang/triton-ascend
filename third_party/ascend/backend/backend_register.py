@@ -18,10 +18,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import os
 import ast
 import importlib.metadata
 import importlib.util
+import os
 from typing import Callable, Dict
 
 
@@ -88,7 +88,7 @@ def _read_python_literal_assignment(file_path, name):
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             module = ast.parse(f.read(), filename=file_path)
-    except OSError:
+    except (OSError, SyntaxError):
         return None
 
     for node in module.body:

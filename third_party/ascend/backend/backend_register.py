@@ -223,6 +223,11 @@ def get_cc_cmd_npu_utils():
         f"-L{os.path.join(torch_npu_path, 'lib')}",
         f"-ltorch_npu",
         "-DUSE_TORCH_NPU",
+        # npu_utils is built at runtime. Keep its debug symbols and stack
+        # frames intact so ASan reports can be resolved reliably.
+        "-g",
+        "-O0",
+        "-fno-omit-frame-pointer",
     ]
     return cc_cmd
 

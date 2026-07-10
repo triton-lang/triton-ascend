@@ -2,7 +2,6 @@ import builtins
 import importlib.util
 import os
 import sys
-import types
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,11 +9,6 @@ from types import SimpleNamespace
 DEFAULT_UTILS_PATH = (
     Path(__file__).resolve().parents[2] / "backend" / "utils.py"
 )
-DEFAULT_BACKEND_REGISTER_PATH = (
-    Path(__file__).resolve().parents[2] / "backend" / "backend_register.py"
-)
-
-
 def _get_utils_path():
     override = os.environ.get("TRITON_ASCEND_UTILS_UNDER_TEST")
     if override:
@@ -25,15 +19,6 @@ def _get_utils_path():
 def _load_utils_module():
     utils_path = _get_utils_path()
     spec = importlib.util.spec_from_file_location("repo_backend_utils", utils_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def _load_backend_register_module():
-    spec = importlib.util.spec_from_file_location(
-        "repo_backend_register", DEFAULT_BACKEND_REGISTER_PATH
-    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -121,34 +106,4 @@ def test_get_backend_func_detects_torch_npu_without_import(monkeypatch):
 
     assert utils.get_backend_func("get_cc_cmd_npu_utils") == "ok"
     assert calls == [("torch_npu", "get_cc_cmd_npu_utils", (), {})]
-    assert "torch_npu" not in sys.modules
-
-
-def test_get_cc_cmd_npu_utils_resolves_paths_without_import(monkeypatch, tmp_path):
-    backend_register = _load_backend_register_module()
-    _guard_torch_npu_import(monkeypatch)
-
-    torch_pkg = tmp_path / "torch"
-    torch_pkg.mkdir()
-    fake_torch = types.ModuleType("torch")
-    fake_torch.__file__ = str(torch_pkg / "__init__.py")
-    monkeypatch.setitem(sys.modules, "torch", fake_torch)
-
-    torch_npu_pkg = tmp_path / "torch_npu"
-    torch_npu_pkg.mkdir()
-    monkeypatch.setattr(
-        backend_register,
-        "_get_package_dir",
-        lambda package_name: str(torch_npu_pkg),
-    )
-    monkeypatch.setattr(backend_register, "get_torch_cxx_abi", lambda: 1)
-
-    cc_cmd = backend_register.backend_strategy_registry.execute_func(
-        "torch_npu", "get_cc_cmd_npu_utils"
-    )
-
-    assert f"-I{torch_pkg / 'include'}" in cc_cmd
-    assert f"-I{torch_npu_pkg / 'include'}" in cc_cmd
-    assert f"-L{torch_npu_pkg / 'lib'}" in cc_cmd
-    assert "-ltorch_npu" in cc_cmd
     assert "torch_npu" not in sys.modules

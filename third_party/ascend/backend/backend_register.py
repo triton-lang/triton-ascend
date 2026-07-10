@@ -18,7 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import importlib.util
 import os
 from typing import Callable, Dict
 
@@ -69,17 +68,6 @@ class _LazyBackendStrategyRegister:
         return self._get_instance().execute_func(*args, **kwargs)
 
 backend_strategy_registry = _LazyBackendStrategyRegister()
-
-
-def _get_package_dir(package_name):
-    spec = importlib.util.find_spec(package_name)
-    if spec is None:
-        raise ImportError(f"Cannot find {package_name}")
-    if spec.submodule_search_locations:
-        return os.path.realpath(next(iter(spec.submodule_search_locations)))
-    if spec.origin:
-        return os.path.dirname(os.path.realpath(spec.origin))
-    raise ImportError(f"Cannot resolve package path for {package_name}")
 
 
 @backend_strategy_registry.register("mindspore", "version_hash")
@@ -225,8 +213,9 @@ def get_cc_cmd():
 @backend_strategy_registry.register("torch_npu", "get_cc_cmd_npu_utils")
 def get_cc_cmd_npu_utils():
     import torch
+    import torch_npu
     torch_path = os.path.dirname(os.path.realpath(torch.__file__))
-    torch_npu_path = _get_package_dir("torch_npu")
+    torch_npu_path = os.path.dirname(os.path.realpath(torch_npu.__file__))
     cc_cmd = [
         f"-I{os.path.join(torch_path, 'include')}",
         f"-I{os.path.join(torch_npu_path, 'include')}",

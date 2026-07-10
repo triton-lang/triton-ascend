@@ -119,37 +119,8 @@ def test_get_backend_func_detects_torch_npu_without_import(monkeypatch):
         fake_execute_func,
     )
 
-    assert utils.get_backend_func("version_hash") == "ok"
-    assert calls == [("torch_npu", "version_hash", (), {})]
-    assert "torch_npu" not in sys.modules
-
-
-def test_version_hash_reads_torch_npu_metadata_without_import(monkeypatch, tmp_path):
-    backend_register = _load_backend_register_module()
-    _guard_torch_npu_import(monkeypatch)
-
-    fake_torch = types.ModuleType("torch")
-    fake_torch.__version__ = "2.8.0"
-    fake_torch.version = SimpleNamespace(git_version="torch-git-version")
-    monkeypatch.setitem(sys.modules, "torch", fake_torch)
-
-    torch_npu_pkg = tmp_path / "torch_npu"
-    torch_npu_pkg.mkdir()
-    (torch_npu_pkg / "version.py").write_text(
-        "__version__ = '2.8.0.post2'\n"
-        "git_version = 'torch-npu-git-version'\n"
-    )
-    monkeypatch.setattr(
-        backend_register,
-        "_get_package_dir",
-        lambda package_name: str(torch_npu_pkg),
-    )
-
-    version_hash = backend_register.backend_strategy_registry.execute_func(
-        "torch_npu", "version_hash"
-    )
-
-    assert version_hash == ["torch-git-version", "torch-npu-git-version"]
+    assert utils.get_backend_func("get_cc_cmd_npu_utils") == "ok"
+    assert calls == [("torch_npu", "get_cc_cmd_npu_utils", (), {})]
     assert "torch_npu" not in sys.modules
 
 

@@ -18,8 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import ast
-import importlib.metadata
 import importlib.util
 import os
 from typing import Callable, Dict
@@ -84,53 +82,6 @@ def _get_package_dir(package_name):
     raise ImportError(f"Cannot resolve package path for {package_name}")
 
 
-def _read_python_literal_assignment(file_path, name):
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            module = ast.parse(f.read(), filename=file_path)
-    except (OSError, SyntaxError):
-        return None
-
-    for node in module.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        for target in node.targets:
-            if isinstance(target, ast.Name) and target.id == name:
-                try:
-                    value = ast.literal_eval(node.value)
-                except (ValueError, SyntaxError):
-                    return None
-                return str(value)
-    return None
-
-
-def _get_distribution_version(*names):
-    for name in names:
-        try:
-            return importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            pass
-    return None
-
-
-def _get_torch_npu_version_key():
-    try:
-        torch_npu_path = _get_package_dir("torch_npu")
-    except ImportError:
-        return _get_distribution_version("torch-npu", "torch_npu") or "unknown"
-
-    version_file = os.path.join(torch_npu_path, "version.py")
-    git_version = _read_python_literal_assignment(version_file, "git_version")
-    if git_version:
-        return git_version
-
-    package_version = _read_python_literal_assignment(version_file, "__version__")
-    if package_version:
-        return package_version
-
-    return _get_distribution_version("torch-npu", "torch_npu") or "unknown"
-
-
 @backend_strategy_registry.register("mindspore", "version_hash")
 def version_hash():
     import mindspore
@@ -140,10 +91,8 @@ def version_hash():
 @backend_strategy_registry.register("torch_npu", "version_hash")
 def version_hash():
     import torch
-    return [
-        torch.version.git_version or torch.__version__,
-        _get_torch_npu_version_key(),
-    ]
+    import torch_npu
+    return [torch.version.git_version, torch_npu.version.git_version]
 
 
 @backend_strategy_registry.register("mindspore", "cxx_abi")

@@ -1,9 +1,9 @@
 import builtins
 import importlib.util
 import os
-from pathlib import Path
 import sys
 import types
+from pathlib import Path
 from types import SimpleNamespace
 
 
@@ -40,6 +40,7 @@ def _load_backend_register_module():
 
 
 def _guard_torch_npu_import(monkeypatch):
+    monkeypatch.delitem(sys.modules, "torch_npu", raising=False)
     real_import = builtins.__import__
 
     def guarded_import(name, *args, **kwargs):

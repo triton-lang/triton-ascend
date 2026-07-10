@@ -242,6 +242,11 @@ public:
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
+
+    if (CVPipeline::hasFallbackAttr(module)) {
+      return;
+    }
+
     LOG_DEBUG("Before: " << *module);
     auto &aa = getAnalysis<AliasAnalysis>();
     CVPipeline::MemoryDependenceGraph memGraph(module, aa);

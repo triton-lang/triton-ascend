@@ -23,6 +23,7 @@
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache.h"
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferOuterScope.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
@@ -42,6 +43,11 @@ using namespace triton;
 // Run the pass
 void AllocMultiCachePass::runOnOperation() {
   ModuleOp module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   OpPassManager pm(module.getOperationName());
   LDBG("Enter pass.");
   LDBG("before innerscope:\n" << module << "\n");
@@ -53,7 +59,10 @@ void AllocMultiCachePass::runOnOperation() {
 
   if (failed(runPipeline(pm, module))) {
     module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
-    signalPassFailure();
+    if (!CVPipeline::hasFallbackAttr(module)) {
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    }
+    return;
   }
 
   LDBG("Process successfully");

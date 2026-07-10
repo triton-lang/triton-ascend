@@ -1129,6 +1129,10 @@ int UpdateLoopIterTimesPass::UpdateForLoopIteration(
 void UpdateLoopIterTimesPass::runOnOperation() {
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LDBG("before updateloopitertimes:\n" << module);
   LDBG("\nEnter UpdateLoopIterTimesPass!");
 
@@ -1140,7 +1144,7 @@ void UpdateLoopIterTimesPass::runOnOperation() {
   ret = GetMainLoopIdToLoopOpMap(module, cmap, vmap);
   if (ret != 0) {
     LDBG("GetMainLoopIdToLoopOpMap Failed!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
   }
 
   // step2: Calculate info for each loop operation, store into the same
@@ -1149,12 +1153,12 @@ void UpdateLoopIterTimesPass::runOnOperation() {
   ret = ComputeMainLoopTimes(cmap, infoMap);
   if (ret != 0) {
     LDBG("ComputeMainLoopTimes from cube Failed!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
   }
   ret = ComputeMainLoopTimes(vmap, infoMap);
   if (ret != 0) {
     LDBG("ComputeMainLoopTimes from vector Failed!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
   }
 
   // step3: Update loop iteration count (process loop operations with same id
@@ -1162,7 +1166,7 @@ void UpdateLoopIterTimesPass::runOnOperation() {
   ret = UpdateForLoopIteration(cmap, vmap, infoMap);
   if (ret != 0) {
     LDBG("Update ForLoop Iteration Failed!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
   }
   LDBG("after UpdateForLoopIteration:\n" << module);
 
@@ -1170,7 +1174,7 @@ void UpdateLoopIterTimesPass::runOnOperation() {
   ret = replaceForOpCounterInIfOps();
   if (ret != 0) {
     LDBG("replaceForOpCounterInIfOps Failed!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
   }
 
   LDBG("after updateloopitertimes:\n" << module);

@@ -434,6 +434,11 @@ public:
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
+
+    if (CVPipeline::hasFallbackAttr(module)) {
+      return;
+    }
+
     LOG_DEBUG("Before: " << *module << "\n");
     auto &aa = getAnalysis<AliasAnalysis>();
     CVPipeline::MemoryDependenceGraph memGraph(module, aa);
@@ -445,7 +450,8 @@ public:
 
     for (memref::AllocOp allocOp : allocOps) {
       if (failed(tryUnifyForAlloc(allocOp, memGraph, bm))) {
-        signalPassFailure();
+        CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+        return;
       }
     }
 

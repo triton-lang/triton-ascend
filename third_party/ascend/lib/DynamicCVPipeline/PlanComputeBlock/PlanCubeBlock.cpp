@@ -618,6 +618,11 @@ void mlir::triton::PlanCubeBlockPass::runOnOperation() {
   LOG_DEBUG(
       "\n--- Step 2: Partitioning compute blocks for cube operations --->\n");
   auto moduleOp = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(moduleOp)) {
+    return;
+  }
+
   auto &aa = getAnalysis<AliasAnalysis>();
   auto memGraph = MemoryDependenceGraph(moduleOp, aa);
   auto bm = ComputeBlockIdManager(moduleOp);
@@ -631,7 +636,7 @@ void mlir::triton::PlanCubeBlockPass::runOnOperation() {
     return WalkResult::advance();
   });
   if (result.wasInterrupted()) {
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(moduleOp, CVPipeline::ERRCODE_FAILED);
   }
   LOG_DEBUG("\n--- Step 2: end --->\n");
 }

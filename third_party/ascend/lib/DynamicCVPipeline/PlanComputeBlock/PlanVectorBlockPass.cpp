@@ -456,20 +456,27 @@ void PlanVectorBlockPass::runOnOperation() {
   LOG_DEBUG("\n---PlanVectorBlockPass start---\n");
   // 1. Build memory dependence graph
   auto moduleOp = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(moduleOp)) {
+    return;
+  }
+
   auto &aa = getAnalysis<AliasAnalysis>();
   auto memDepGraph = MemoryDependenceGraph(moduleOp, aa);
   auto bm = ComputeBlockIdManager(moduleOp);
 
   // 2. search blocks in topo order and assign block id for each block
   llvm::SmallVector<Block *> blocks;
-  moduleOp.walk([&](Block *block) {
+  auto result = moduleOp.walk([&](Block *block) {
     if (llvm::failed(planVectorBlockId(block, memDepGraph, bm))) {
-      moduleOp.emitError() << "[" << DEBUG_TYPE
-                           << "] Failed to plan vector block id for block";
-      signalPassFailure();
-      return;
+      return WalkResult::interrupt();
     }
+    return WalkResult::advance();
   });
+  if (result.wasInterrupted()) {
+    LOG_DEBUG("Failed to plan vector block id for block\n");
+    CVPipeline::setFallbackAttr(moduleOp, CVPipeline::ERRCODE_FAILED);
+  }
 }
 
 std::unique_ptr<OperationPass<ModuleOp>> createPlanVectorBlockPass() {

@@ -397,6 +397,11 @@ void ReorderOpsByBlockIdPass::runOnOperation() {
   OpBuilder const builder(&getContext());
 
   auto moduleOp = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(moduleOp)) {
+    return;
+  }
+
   LOG_DEBUG("Input mlir:\n" << moduleOp << "\n");
   llvm::dbgs().flush();
 
@@ -418,7 +423,7 @@ void ReorderOpsByBlockIdPass::runOnOperation() {
   });
 
   if (result.wasInterrupted()) {
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(moduleOp, CVPipeline::ERRCODE_FAILED);
     return;
   }
 

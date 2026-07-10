@@ -18,6 +18,7 @@
 
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/FlagIdManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
 static constexpr const char *DEBUG_TYPE = "AddMultiBufferOuterScope";
 static constexpr const char *kTransferId = "ssbuffer.transfer_id";
@@ -1144,6 +1145,11 @@ static int addPollingControlFlow(DenseMap<int, TransferGroupInfo> &groups) {
 
 void AddMultiBufferOuterScopePass::runOnOperation() {
   ModuleOp module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LDBG("============================================================");
   LDBG("[AddMultiBufferOuterScope] ENTER");
   LDBG("============================================================");
@@ -1156,7 +1162,7 @@ void AddMultiBufferOuterScopePass::runOnOperation() {
   DenseMap<int, TransferGroupInfo> groups;
   if (collectTransferGroupData(module, opsByTid, flagIdMgr, groups)) {
     LDBG("[Step 1/3] FAILED: no valid transfer groups found");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
   LDBG("[Step 1/3] Done: " << groups.size() << " transfer groups");
@@ -1194,7 +1200,7 @@ void AddMultiBufferOuterScopePass::runOnOperation() {
          << flagCount << " > " << kMaxTotalFlags << ", halting pass");
     module->emitError() << "[FlagBudget] flag count " << flagCount << " > "
                         << kMaxTotalFlags << ", halting pass";
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
   if (flagCount > kFlagThresholdSingleBuffer) {
@@ -1208,7 +1214,7 @@ void AddMultiBufferOuterScopePass::runOnOperation() {
     LDBG("[Step 2/3] Start: output buffer creation");
     if (createOutputBuffers(groups, module)) {
       LDBG("[Step 2/3] FAILED: output buffer creation failed");
-      signalPassFailure();
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return;
     }
     LDBG("[Step 2/3] Done");
@@ -1216,7 +1222,7 @@ void AddMultiBufferOuterScopePass::runOnOperation() {
     LDBG("[Step 3/3] Start: polling control flow");
     if (addPollingControlFlow(groups)) {
       LDBG("[Step 3/3] FAILED: polling control flow failed");
-      signalPassFailure();
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return;
     }
     LDBG("[Step 3/3] Done");

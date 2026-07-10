@@ -1556,6 +1556,10 @@ int OpClassifierPass::stampToIR() {
 void OpClassifierPass::runOnOperation() {
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LLVM_DEBUG(DBGS() << "\n--- Before Plan Compute Block  --->\n");
   LLVM_DEBUG(DBGS() << module << "\n");
 
@@ -1571,50 +1575,50 @@ void OpClassifierPass::runOnOperation() {
 
   // Step 1: Pattern match around each linalg.matmul to find CUBE seeds
   if (patternMatchCUBE() != 0) {
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Step 2: CUBE upstream BFS from seed loads
   if (propagateCubeUpstream() != 0) {
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Step 3: Penetrate CUBE coloring into pure loader for-loops.
   if (CVPipeline::isCubeBlockMergeEnabled() &&
       penetrateCubeIntoForLoops() != 0) {
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Step 4: Mark remaining operations as VECTOR
   if (markRemainingAsVector() != 0) {
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Step 5: VECTOR upstream BFS
   if (propagateVectorUpstream() != 0) {
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Step 6: Handle CUBE_AND_VECTOR operations
   if (handleCubeAndVector() != 0) {
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Step 7: Process SCF yield results
   if (handleSCFYield() != 0) {
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Step 8: Stamp to IR
   if (stampToIR() != 0) {
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 

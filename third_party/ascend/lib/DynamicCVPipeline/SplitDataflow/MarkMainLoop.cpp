@@ -39,6 +39,10 @@ void MarkMainLoopPass::runOnOperation() {
   LOG_DEBUG("\n--- enter MarkMainLoopPass --->\n");
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   int mainLoopIdCounter = 0;
   SmallVector<scf::ForOp> mainLoops;
 

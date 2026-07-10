@@ -21,6 +21,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
 
@@ -33,6 +34,10 @@ using namespace triton;
 
 void AnalyzeDataFlowPass::runOnOperation() {
   ModuleOp module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
 
   LDBG("Enter AnalyzeDataFlow pass.");
 
@@ -51,7 +56,10 @@ void AnalyzeDataFlowPass::runOnOperation() {
   pm.addPass(createAnalyzeCubeContolFLowInputChainPass());
 
   if (failed(runPipeline(pm, module))) {
-    signalPassFailure();
+    if (!CVPipeline::hasFallbackAttr(module)) {
+      LDBG("Pass failed; fallback to compilation without dynamic CV pipeline.");
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    }
   }
 
   LDBG("Exit AnalyzeDataFlow pass.");

@@ -1202,16 +1202,12 @@ void TritonToLinalgPass::runOnOperation() {
       markOp->setAttr(hivm::AddressSpaceAttr::getMnemonic(),
                       {hivm::AddressSpaceAttr::get(rewriter.getContext(),
                                                    hivm::AddressSpace::GM)});
-      auto oldMemrefType =
-          cast<MemRefType>(reinterpretCastOp.getResult().getType());
-      auto newMemrefType = MemRefType::get(
-          oldMemrefType.getShape(), oldMemrefType.getElementType(),
-          StridedLayoutAttr::get(&getContext(), ShapedType::kDynamic,
-                                 staticStrides));
       rewriter.replaceOpWithNewOp<memref::ReinterpretCastOp>(
-          reinterpretCastOp, newMemrefType, newCastOp, ValueRange({}),
-          reinterpretCastOp.getSizes(), reinterpretCastOp.getStrides(),
-          SmallVector<int64_t>({0}), reinterpretCastOp.getStaticSizes(),
+          reinterpretCastOp,
+          cast<MemRefType>(reinterpretCastOp.getResult().getType()), newCastOp,
+          ValueRange({}), reinterpretCastOp.getSizes(),
+          reinterpretCastOp.getStrides(), SmallVector<int64_t>({0}),
+          reinterpretCastOp.getStaticSizes(),
           reinterpretCastOp.getStaticStrides());
     }
     rewriter.eraseOp(op);

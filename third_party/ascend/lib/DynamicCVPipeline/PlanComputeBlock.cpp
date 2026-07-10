@@ -43,6 +43,11 @@ static constexpr const char *DEBUG_TYPE = "plan-compute-block";
 // Run the pass
 void PlanComputeBlockPass::runOnOperation() {
   ModuleOp module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   OpPassManager pm(module.getOperationName());
   LOG_DEBUG("Enter pass.\n");
 
@@ -59,14 +64,10 @@ void PlanComputeBlockPass::runOnOperation() {
   pm.addPass(createReorderOpsByBlockIdPass());
 
   if (failed(runPipeline(pm, module))) {
-    auto errCodeAttr =
-        module->getAttrOfType<IntegerAttr>(CVPipeline::ERRCODE_ATTR);
-    int errCode = errCodeAttr ? static_cast<int>(errCodeAttr.getInt())
-                              : CVPipeline::ERRCODE_FAILED;
-    if (errCode != CVPipeline::ERRCODE_IGNORED) {
-      module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
+    if (!CVPipeline::hasFallbackAttr(module)) {
+      LOG_DEBUG("Pass failed!\n");
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     }
-    signalPassFailure();
     return;
   }
 

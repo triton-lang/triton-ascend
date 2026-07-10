@@ -204,6 +204,10 @@ bool checkTensorArgsInMainLoop(ModuleOp module) {
 void AnalyzeArgsPass::runOnOperation() {
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LDBG("Before AnalyzeArgs:\n" << module << "\n");
 
   if (failed(isInterceptedModule(module))) {
@@ -211,8 +215,7 @@ void AnalyzeArgsPass::runOnOperation() {
   }
 
   if (checkTensorArgsInMainLoop(module)) {
-    CVPipeline::setFallbackAttr(module);
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
     return;
   }
 

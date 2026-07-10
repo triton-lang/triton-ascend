@@ -246,7 +246,8 @@ void DataDependencyAnalysisPass::collectDepInfo(
   if (commonLevelIds.first == -1 || commonLevelIds.second == -1) {
     LOG_DEBUG("Could not find common level block IDs for producer and consumer "
               "blocks");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
   }
 
   depInfo.producerBlockId = commonLevelIds.first;
@@ -411,7 +412,8 @@ void DataDependencyAnalysisPass::processIterArgDependencies() {
           }
         }
         LOG_DEBUG("iterarg init core_type conflicts with yield");
-        signalPassFailure();
+        CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+        return;
       }
 
       auto diffUsers = collectDiffCoreTypeUsers(iterArg, initCoreType);
@@ -580,17 +582,17 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
   auto &aliasAnalysis = getAnalysis<mlir::AliasAnalysis>();
   MemoryDependenceGraph memDepGraph(module, aliasAnalysis);
 
-  module.walk([&](mlir::Operation *op) {
+  auto walkResult = module.walk([&](mlir::Operation *op) -> WalkResult {
     if (op->getNumRegions() > 0) {
-      return;
+      return WalkResult::advance();
     }
     if (isa<annotation::MarkOp, gpu::BarrierOp>(op)) {
-      return;
+      return WalkResult::advance();
     }
     auto currBlockIdOpt = CVPipeline::getOpBlockId(op);
     llvm::StringRef currCoreType = getSsbufferCoreType(op);
     if (!currBlockIdOpt || currCoreType.empty()) {
-      return;
+      return WalkResult::advance();
     }
     int currBlockId = static_cast<int>(*currBlockIdOpt);
 
@@ -601,7 +603,7 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
       if (predOp->getNumRegions() > 0) {
         auto realdeps = memDepGraph.getRealDependency(predOp, op);
         if (realdeps.empty()) {
-          return;
+          return WalkResult::advance();
         }
         for (mlir::Operation *realPredOp : realdeps) {
           if (isa<annotation::MarkOp, gpu::BarrierOp>(realPredOp)) {
@@ -619,7 +621,7 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
           if (producerBlockId == -1 || consumerBlockId == -1) {
             LOG_DEBUG("Could not find common level block IDs for producer and "
                       "consumer blocks");
-            signalPassFailure();
+            return WalkResult::interrupt();
           }
           collectMemDepInfo(realPredCoreType, producerBlockId, consumerBlockId,
                             realPredBlockId, currBlockId, memoryDependencies);
@@ -645,7 +647,7 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
       if (producerBlockId == -1 || consumerBlockId == -1) {
         LOG_DEBUG("Could not find common level block IDs for producer and "
                   "consumer blocks");
-        signalPassFailure();
+        return WalkResult::interrupt();
       }
       if (producerBlockId == consumerBlockId) {
         continue;
@@ -660,7 +662,11 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
                                         << "\nconsumer Block: " << currBlockId
                                         << "\nconsumer Op: " << *op << "\n");
     }
+    return WalkResult::advance();
   });
+  if (walkResult.wasInterrupted()) {
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+  }
   LOG_DEBUG("=== mem dep analysis complete ===\n");
 }
 
@@ -798,6 +804,10 @@ std::pair<int, int> DataDependencyAnalysisPass::findCommonLevelBlockIds(
 void DataDependencyAnalysisPass::runOnOperation() {
   LOG_DEBUG("\n--- enter DataDependencyAnalysisPass --->\n");
   module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
 
   auto &info = getAnalysis<DataDependencyInfo>();
 

@@ -476,44 +476,49 @@ LogicalResult CloneOpsPass::validateClonedOpsInVector(ModuleOp module) {
 void CloneOpsPass::runOnOperation() {
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LDBG("before cloneOps:\n" << module << "\n");
 
   // Validate block_ids are consecutive before cloning
   if (failed(validateBlockIdsConsecutive(module))) {
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Clone ops in vector/cube to ensure that each block_id has its own
   // ops without sharing
-  module.walk([&](Operation *op) -> WalkResult {
+  auto walkResult = module.walk([&](Operation *op) -> WalkResult {
     if (!op->hasAttr(CVPipeline::kMainLoop)) {
       return WalkResult::advance();
     }
     auto forOp = dyn_cast<scf::ForOp>(op);
     if (!forOp) {
       LDBG("[Error]: op with ssbuffer.main_loop is not a scf::ForOp\n");
-      signalPassFailure();
       return WalkResult::interrupt();
     }
 
     if (failed(cloneOpsInMainLoop(forOp))) {
-      signalPassFailure();
       return WalkResult::interrupt();
     }
 
     if (failed(cleanupClonedOpsInMainLoop(forOp))) {
-      signalPassFailure();
       return WalkResult::interrupt();
     }
     return WalkResult::advance();
   });
+  if (walkResult.wasInterrupted()) {
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
 
   LDBG("after cloneOps:\n" << module << "\n");
 
   // Validate no cloned tensor ops remaining in VECTOR main_loop forOp
   if (failed(validateClonedOpsInVector(module))) {
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 }

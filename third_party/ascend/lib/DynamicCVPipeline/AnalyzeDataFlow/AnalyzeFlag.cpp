@@ -81,9 +81,12 @@ void AnalyzeFlagPass::runOnOperation() {
 
   LDBG("Before AnalyzeFlag:\n" << module << "\n");
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   if (checkFlagIdValidity(module)) {
-    setFallbackAttr(module);
-    signalPassFailure();
+    setFallbackAttr(module, ERRCODE_IGNORED);
     return;
   }
 

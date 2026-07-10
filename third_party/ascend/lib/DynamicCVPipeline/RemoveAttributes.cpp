@@ -51,6 +51,11 @@ static constexpr llvm::StringLiteral kAttrsToRemove[]{
 
 void RemoveSsbufAttrPass::runOnOperation() {
   auto module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   module->walk([](Operation *op) {
     LOG_DEBUG("Removing ssbuf attrs of " << *op);
     for (auto attrName : kAttrsToRemove) {

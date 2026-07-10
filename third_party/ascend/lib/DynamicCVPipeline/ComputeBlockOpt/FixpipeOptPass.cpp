@@ -604,6 +604,11 @@ void FixpipeOptPass::getDependentDialects(DialectRegistry &registry) const {
 
 void FixpipeOptPass::runOnOperation() {
   ModuleOp module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   auto &aliasAnalysis = getAnalysis<AliasAnalysis>();
   CVPipeline::MemoryDependenceGraph memDepGraph(module, aliasAnalysis);
   LOG_DEBUG("== FixpipeOpt Pass Start ==\n");

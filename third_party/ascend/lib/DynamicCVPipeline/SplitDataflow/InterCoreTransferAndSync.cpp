@@ -228,7 +228,8 @@ SmallVector<int64_t> InterCoreTransferAndSyncPass::computeExpectedShape(
   static constexpr int NdShapeLength = 2;
   if (!tensorTy || tensorTy.getRank() != NdShapeLength) {
     LOG_DEBUG("source shape is not 2-dim!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return {};
   }
 
   int64_t M = tensorTy.getDimSize(0);
@@ -267,8 +268,8 @@ SmallVector<int64_t> InterCoreTransferAndSyncPass::computeExpectedShape(
   if (isOnlyDepInMatmul) {
     if ((isMatmulA && newN != N) || (isMatmulB && newM != M)) {
       LOG_DEBUG("nd2nz shape is unaligned and matmul A/B is from cube");
-      CVPipeline::setFallbackAttr(module);
-      signalPassFailure();
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
+      return {};
     }
   }
 
@@ -404,8 +405,8 @@ void InterCoreTransferAndSyncPass::extractMatmulResult(
   mlir::Operation *paddingAccOp = linalgFillOp;
   if (!matmulCIsEmpty(acc)) {
     LOG_DEBUG("nd2nz shape is unaligned and matmul C is not empty");
-    CVPipeline::setFallbackAttr(module);
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
+    return;
   }
 
   Value newAccResult = paddingAccOp->getResult(0);
@@ -674,7 +675,7 @@ InterCoreTransferAndSyncPass::findMainLoopforTransfer(Operation *endOp,
   if (lca != startOp->getParentOp()) {
     LOG_DEBUG("startOp and endOp are not in the same parent block, which is "
               "unexpected.");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
   }
   Operation *current = lca;
   while (current) {
@@ -1660,14 +1661,18 @@ void InterCoreTransferAndSyncPass::runOnOperation() {
   LOG_DEBUG("\n--- enter InterCoreTransferAndSyncPass --->\n");
   module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   // Phase 1: Initialize FlagIdManager as local variable
   FlagIdManager flagManager(module);
   FlagIdReuseManager flagIdReuseManager;
 
   // Phase 2: Execute transfer and sync insertion
   if (failed(processDependencies(flagManager, flagIdReuseManager))) {
-    signalPassFailure();
     LOG_DEBUG("Error: Inter-core transfer and sync failed.\n");
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 

@@ -44,13 +44,19 @@ namespace mlir::triton {
 
 void StandardizeOpPass::runOnOperation() {
   auto op = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(op)) {
+    return;
+  }
+
   LOG_DEBUG("Input mlir:\n" << op);
   OpPassManager pm(op.getOperationName());
   pm.addPass(createPatternMatchRewritePass());
 
   if (llvm::failed(runPipeline(pm, op))) {
     LOG_DEBUG("Pipeline Failed!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(op, CVPipeline::ERRCODE_FAILED);
+    return;
   }
 
   bool findMayNotExec = false;
@@ -62,8 +68,8 @@ void StandardizeOpPass::runOnOperation() {
 
   if (findMayNotExec) {
     LOG_DEBUG("Matmul may not execute!");
-    CVPipeline::setFallbackAttr(op);
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(op, CVPipeline::ERRCODE_IGNORED);
+    return;
   }
 }
 

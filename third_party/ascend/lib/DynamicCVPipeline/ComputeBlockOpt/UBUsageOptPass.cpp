@@ -776,6 +776,11 @@ void mlir::triton::UBUsageOptPass::runOnOperation() {
   LOG_DEBUG("--- Pass: UBUsageOpt ---\n");
 
   ModuleOp module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   auto &aliasAnalysis = getAnalysis<AliasAnalysis>();
   CVPipeline::MemoryDependenceGraph memDepGraph(module, aliasAnalysis);
   auto bm = CVPipeline::ComputeBlockIdManager(module);

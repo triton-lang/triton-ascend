@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/AsyncLoadHoistingPass.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -346,6 +347,10 @@ static void asyncLoadHoistingImpl(Region &region) {
 
 void AsyncLoadHoistingPass::runOnOperation() {
   auto module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
 
   LLVM_DEBUG({
     llvm::dbgs() << "[async-load-hoisting] Before AsyncLoadHoistingPass:\n"

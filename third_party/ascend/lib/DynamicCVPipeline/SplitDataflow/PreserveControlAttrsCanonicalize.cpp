@@ -136,6 +136,10 @@ static void populateCanonicalizationPatterns(MLIRContext *ctx,
 } // namespace
 
 void mlir::triton::PreserveControlAttrsCanonicalizePass::runOnOperation() {
+  if (CVPipeline::hasFallbackAttr(getOperation())) {
+    return;
+  }
+
   debugDumpIr("before PreserveControlAttrsCanonicalizePass", getOperation());
 
   RewritePatternSet patterns(&getContext());
@@ -149,7 +153,7 @@ void mlir::triton::PreserveControlAttrsCanonicalizePass::runOnOperation() {
                                    FrozenRewritePatternSet(std::move(patterns)),
                                    config))) {
     getOperation()->emitError("PreserveControlAttrsCanonicalizePass failed");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(getOperation(), CVPipeline::ERRCODE_FAILED);
     return;
   }
 

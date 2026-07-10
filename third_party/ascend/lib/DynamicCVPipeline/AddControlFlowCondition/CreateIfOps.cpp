@@ -22,6 +22,11 @@
 
 #include "llvm/Support/Debug.h"
 
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CreateIfOps.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -315,23 +320,25 @@ LogicalResult CreateIfOpsPass::createIfInMainLoop(
 void CreateIfOpsPass::runOnOperation() {
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LDBG("before createIfOps:\n" << module << "\n");
 
-  module.walk([&](Operation *op) -> WalkResult {
+  auto walkResult = module.walk([&](Operation *op) -> WalkResult {
     if (!op->hasAttr("ssbuffer.main_loop")) {
       return WalkResult::advance();
     }
     auto forOp = dyn_cast<scf::ForOp>(op);
     if (!forOp) {
       LDBG("[Error]: op with ssbuffer.main_loop is not a scf::ForOp\n");
-      signalPassFailure();
       return WalkResult::interrupt();
     }
 
     // Create if ops (scf.if %true) by block_id
     llvm::DenseMap<int, SmallVector<Operation *>> blockOps;
     if (failed(collectOpsByBlockId(forOp, blockOps))) {
-      signalPassFailure();
       return WalkResult::interrupt();
     }
 
@@ -344,17 +351,19 @@ void CreateIfOpsPass::runOnOperation() {
 
     if (failed(computeYieldValues(forOp, blockOps, thenYieldValues,
                                   elseYieldValues))) {
-      signalPassFailure();
       return WalkResult::interrupt();
     }
 
     if (failed(createIfInMainLoop(forOp, blockOps, thenYieldValues,
                                   elseYieldValues))) {
-      signalPassFailure();
       return WalkResult::interrupt();
     }
     return WalkResult::advance();
   });
+  if (walkResult.wasInterrupted()) {
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
 
   LDBG("after createIfOps:\n" << module << "\n");
 }

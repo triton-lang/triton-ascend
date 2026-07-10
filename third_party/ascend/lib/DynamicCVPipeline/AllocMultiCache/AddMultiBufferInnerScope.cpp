@@ -1808,11 +1808,16 @@ void AddMultiBufferInnerScopePass::getDependentDialects(
 
 void AddMultiBufferInnerScopePass::runOnOperation() {
   auto module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   OpBuilder builder(module.getContext());
 
   LDBG("Enter pass.");
 
-  module.walk([&](scope::ScopeOp scope) -> WalkResult {
+  auto walkResult = module.walk([&](scope::ScopeOp scope) -> WalkResult {
     // Step 1: Check if scope has coreType attribute
     auto coreTypeAttr =
         scope->getAttrOfType<hivm::TCoreTypeAttr>(hivm::TCoreTypeAttr::name);
@@ -1832,7 +1837,6 @@ void AddMultiBufferInnerScopePass::runOnOperation() {
         collectMainLoopsRecursively(scope.getBodyRegion(), mainLoopForOps);
     if (foundCount < 0) {
       LDBG("collectMainLoopsRecursively failed");
-      signalPassFailure();
       return WalkResult::interrupt();
     }
     if (foundCount == 0)
@@ -1844,18 +1848,20 @@ void AddMultiBufferInnerScopePass::runOnOperation() {
       scf::ForOp nestedMainloop = findNestedMainloopInForOp(mainLoopForOp);
       if (nestedMainloop) {
         LDBG("Nested main_loop found, this is not allowed");
-        signalPassFailure();
         return WalkResult::interrupt();
       }
       if (addInnerMultiBuffer(mainLoopForOp, builder, scope, groupId) != 0) {
         LDBG("addInnerMultiBuffer failed");
-        signalPassFailure();
         return WalkResult::interrupt();
       }
     }
 
     return WalkResult::advance();
   });
+  if (walkResult.wasInterrupted()) {
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
 
   LDBG("Process successfully");
 }

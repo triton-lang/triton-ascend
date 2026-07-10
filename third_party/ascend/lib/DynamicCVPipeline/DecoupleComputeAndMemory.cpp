@@ -56,7 +56,7 @@ void DecoupleComputeAndMemoryPass::runOnOperation() {
 
   if (failed(runPipeline(pm, module))) {
     module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
   }
 
   LDBG("Process successfully");

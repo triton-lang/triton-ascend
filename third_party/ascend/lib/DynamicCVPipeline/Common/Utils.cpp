@@ -85,10 +85,14 @@ int getAvailableBlockId(ModuleOp module) {
   return maxBlockId + 1;
 }
 
-void setFallbackAttr(ModuleOp module) {
+void setFallbackAttr(ModuleOp module, int errorCode) {
   OpBuilder builder(module.getContext());
   module->setAttr(CVPipeline::ERRCODE_ATTR,
-                  builder.getI32IntegerAttr(CVPipeline::ERRCODE_IGNORED));
+                  builder.getI32IntegerAttr(errorCode));
+}
+
+bool hasFallbackAttr(ModuleOp module) {
+  return module->hasAttr(CVPipeline::ERRCODE_ATTR);
 }
 
 bool isVectorOnlyOp(Operation *op) {

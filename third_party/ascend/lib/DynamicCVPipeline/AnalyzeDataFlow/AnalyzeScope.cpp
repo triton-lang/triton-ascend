@@ -147,13 +147,13 @@ static LogicalResult verifyMainLoop(ModuleOp module) {
   if (!hasMainLoopForOp) {
     LDBG("[INFO]: No cycle of multiple iterations, the DynamicCVPipeline pass "
          "will be interrupted, and resumed to the original workflow.");
-    CVPipeline::setFallbackAttr(module);
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
     return failure();
   }
 
   if (!checkVecScopeMainLoop(module)) {
     LDBG("[INFO]: No op beside matmul add in vector main loop.");
-    CVPipeline::setFallbackAttr(module);
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
     return failure();
   };
 
@@ -165,10 +165,13 @@ static LogicalResult verifyMainLoop(ModuleOp module) {
 void AnalyzeScopePass::runOnOperation() {
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LDBG("Before AnalyzeScope:\n" << module << "\n");
 
   if (failed(verifyMainLoop(module))) {
-    signalPassFailure();
     return;
   }
 

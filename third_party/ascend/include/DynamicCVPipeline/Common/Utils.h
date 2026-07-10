@@ -90,7 +90,8 @@ CoreType getOpCoreType(Operation *op);
 std::optional<int> getOpBlockId(Operation *op);
 llvm::LogicalResult verifyOpBlockId(Operation *op);
 int getAvailableBlockId(ModuleOp module);
-void setFallbackAttr(ModuleOp module);
+void setFallbackAttr(ModuleOp module, int errorCode);
+bool hasFallbackAttr(ModuleOp module);
 bool isScfOp(Operation *op);
 bool isOnlyDirectlyUse(Operation *preOp, Operation *nextOp,
                        const CVPipeline::MemoryDependenceGraph &memGraph);

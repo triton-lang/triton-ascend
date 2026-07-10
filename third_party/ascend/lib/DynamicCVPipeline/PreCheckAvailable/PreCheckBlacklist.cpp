@@ -52,6 +52,11 @@ void PreCheckBlacklistPass::getDependentDialects(
 
 void PreCheckBlacklistPass::runOnOperation() {
   ModuleOp module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   Operation *foundBlacklistOp = nullptr;
   llvm::StringRef foundOpName;
 
@@ -75,7 +80,7 @@ void PreCheckBlacklistPass::runOnOperation() {
        << foundOpName
        << " operation was found, which indicates that it has been optimized "
           "for the Ascend.");
-  signalPassFailure();
+  CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
 }
 
 namespace mlir {

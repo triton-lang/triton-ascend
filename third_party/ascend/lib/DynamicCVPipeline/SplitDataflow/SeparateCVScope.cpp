@@ -26,6 +26,9 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -967,6 +970,11 @@ void mlir::triton::SeparateCVScopePass::getDependentDialects(
 
 void mlir::triton::SeparateCVScopePass::runOnOperation() {
   auto module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   SmallVector<func::FuncOp> funcOps;
   module.walk([&](func::FuncOp funcOp) { funcOps.push_back(funcOp); });
 
@@ -978,7 +986,7 @@ void mlir::triton::SeparateCVScopePass::runOnOperation() {
     }
     if (failed(separateScopes(funcOp))) {
       logDebug("SeparateCVScopePass failed on func '", funcOp.getName(), "'");
-      signalPassFailure();
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return;
     }
   }

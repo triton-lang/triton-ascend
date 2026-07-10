@@ -240,6 +240,10 @@ scf::IfOp FlowOptPass::createNewIfOpWithFlowOptCondition(scf::IfOp oldIfOp,
 void FlowOptPass::runOnOperation() {
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LDBG("Enter FlowOpt pass.\n");
   SmallVector<scf::ForOp> mainLoopForOps;
   module.walk([&](scf::ForOp forOp) {
@@ -258,7 +262,7 @@ void FlowOptPass::runOnOperation() {
     scf::IfOp secondIfOp = nullptr;
     if (findIfOpsInForOp(forOp, firstIfOp, secondIfOp) != FLOW_OPT_SUCCESS) {
       LDBG("Failed to find first and second ssbuffer.if IfOps.\n");
-      signalPassFailure();
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return;
     }
 
@@ -266,7 +270,7 @@ void FlowOptPass::runOnOperation() {
     Value originalCondition = secondIfOp.getCondition();
     if (!originalCondition) {
       LDBG("Second IfOp has no condition.\n");
-      signalPassFailure();
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return;
     }
 
@@ -277,7 +281,7 @@ void FlowOptPass::runOnOperation() {
                                                originalCondition);
     if (!newCondition) {
       LDBG("Failed to build flow optimization condition.\n");
-      signalPassFailure();
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return;
     }
 
@@ -286,7 +290,7 @@ void FlowOptPass::runOnOperation() {
         createNewIfOpWithFlowOptCondition(secondIfOp, newCondition);
     if (!newIfOp) {
       LDBG("Failed to create new IfOp.\n");
-      signalPassFailure();
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return;
     }
 

@@ -21,6 +21,7 @@
  */
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMInterfaces.h"
@@ -1638,6 +1639,10 @@ int UpdateConditionInfoPass::updateIfConds(
 void UpdateConditionInfoPass::runOnOperation() {
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LDBG("Enter UpdateConditionInfo pass." << "\n");
   // Step1:Init the ssbufferPtrs
   SmallVector<SmallVector<Value>> ssbufferPtrs = allocSSBuffer(module);
@@ -1648,7 +1653,7 @@ void UpdateConditionInfoPass::runOnOperation() {
 
   if (updateResult != UPDATE_CONDITION_INFO_SUCCESS) {
     LDBG("updateIfConds failed!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
   }
 
   LDBG("Exit UpdateConditionInfo pass." << "\n");

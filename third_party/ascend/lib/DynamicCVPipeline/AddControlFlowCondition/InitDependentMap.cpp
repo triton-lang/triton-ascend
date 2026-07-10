@@ -21,6 +21,7 @@
  */
 
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "llvm/ADT/DenseMap.h"
@@ -272,19 +273,24 @@ static void printDependentMaps(ControlFlowConditionInfo *info) {
 
 void InitDependentMapPass::runOnOperation() {
   ModuleOp module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LDBG("Enter InitDependentMap pass.");
 
   // Step 1: Initialize crossCoreDependentMap
   if (initCrossCoreDependentMap(module, info) != 0) {
     LDBG("initCrossCoreDependentMap failed!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Step 2: Initialize intraCoreDependentMap
   if (initIntraCoreDependentMap(module, info) != 0) {
     LDBG("initIntraCoreDependentMap failed!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 

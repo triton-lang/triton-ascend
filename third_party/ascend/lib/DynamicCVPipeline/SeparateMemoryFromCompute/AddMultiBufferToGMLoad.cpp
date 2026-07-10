@@ -21,6 +21,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/AddMultiBufferToGMLoadInternal.h"
 #include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/AddMultiBufferToGMLoadPass.h"
 
@@ -135,6 +136,11 @@ void AddMultiBufferToGMLoadPass::cleanupTransformedIR() {
 
 void AddMultiBufferToGMLoadPass::runOnOperation() {
   auto module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LOG_DEBUG("Enter add-multi-buffer-to-gm-load pass\n");
   LOG_DEBUG("Before add-multi-buffer-to-gm-load:\n" << module << "\n");
 
@@ -153,7 +159,7 @@ void AddMultiBufferToGMLoadPass::runOnOperation() {
   if (failed(applyMultiBufferToGMLoadLoops())) {
     module.emitError() << "[" << DEBUG_TYPE
                        << "] Step 3 applyMultiBufferToGMLoadLoops failed";
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 

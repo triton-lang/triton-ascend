@@ -21,6 +21,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateForOps.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -579,6 +580,10 @@ LogicalResult UpdateForOpsPass::analyzeTensorIterArgDependencies(
 void UpdateForOpsPass::runOnOperation() {
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LDBG("before updateForOps:\n" << module << "\n");
 
   // Use provided info, or create a local one if not available
@@ -588,14 +593,14 @@ void UpdateForOpsPass::runOnOperation() {
   // Analyze the dependencies of the tensor type iter_args in the main_loop with
   // the ssbuffer.if ops
   if (failed(analyzeTensorIterArgDependencies(module, infoToUse))) {
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Derive block counters from ssbuffer.if if blockCounterNums is empty
   if (infoToUse->blockCounterNums.empty()) {
     if (failed(deriveBlockCountersFromIfOps(module, infoToUse))) {
-      signalPassFailure();
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return;
     }
   }
@@ -605,13 +610,13 @@ void UpdateForOpsPass::runOnOperation() {
                     !infoToUse->intraCoreDependentMap.empty() ||
                     !infoToUse->tensorIterArgDepsMap.empty()))
     if (failed(addBlockCountersAndInnerDepConds(module, infoToUse))) {
-      signalPassFailure();
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return;
     }
 
   // Insert PIPE_S inter-core synchronization
   if (failed(insertInterCorePipeS(module))) {
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 

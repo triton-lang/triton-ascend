@@ -96,12 +96,19 @@ void AddDynamicCVPipelinePass::runOnOperation() {
   pm.addPass(createAddControlFlowConditionPass());
   pm.addPass(createRemoveSsbufAttrPass());
 
-  if (failed(runPipeline(pm, moduleOp))) {
+  if (failed(runPipeline(pm, moduleOp)) ||
+      CVPipeline::hasFallbackAttr(moduleOp)) {
     auto errCodeAttr =
         moduleOp->getAttrOfType<IntegerAttr>(CVPipeline::ERRCODE_ATTR);
     if (!errCodeAttr) {
       moduleOp->emitWarning() << "[" << DEBUG_TYPE << "] "
-                              << "Pass failed; fallback to compilation without "
+                              << "Unexpected pass failure (no fallback attr "
+                                 "set); fallback to compilation without "
+                                 "dynamic CV pipeline.";
+    } else {
+      moduleOp->emitWarning() << "[" << DEBUG_TYPE << "] "
+                              << "Pass failed, "
+                              << "fallback to compilation without "
                                  "dynamic CV pipeline.";
     }
 

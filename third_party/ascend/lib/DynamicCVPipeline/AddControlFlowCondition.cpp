@@ -29,6 +29,7 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateForOps.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Pass/PassManager.h"
@@ -64,6 +65,10 @@ static LogicalResult verifyControlFlowPrerequisites(ModuleOp module) {
 
 void AddControlFlowConditionPass::runOnOperation() {
   ModuleOp module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
 
   LDBG("Enter add controlflow condition pass.\n");
   LDBG("before AddControlFlowCondition:");
@@ -122,7 +127,9 @@ void AddControlFlowConditionPass::runOnOperation() {
 
   if (failed(runPipeline(pm, module))) {
     LDBG("Pass failed!");
-    signalPassFailure();
+    if (!CVPipeline::hasFallbackAttr(module)) {
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    }
   }
 
   LDBG("Exit add controlflow condition pass.");

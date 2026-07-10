@@ -22,6 +22,7 @@
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/RefineArgsBlockId.h"
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -152,6 +153,11 @@ void processOnefor(scf::ForOp forOp, CVPipeline::ComputeBlockIdManager &bm,
 void RefineArgsBlockIdPass::runOnOperation() {
   LOG_DEBUG("\n--- enter RefineArgsBlockIdPass --->\n");
   ModuleOp moduleOp = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(moduleOp)) {
+    return;
+  }
+
   CVPipeline::ComputeBlockIdManager bm(moduleOp);
   auto &aa = getAnalysis<AliasAnalysis>();
   auto memDepGraph = CVPipeline::MemoryDependenceGraph(moduleOp, aa);

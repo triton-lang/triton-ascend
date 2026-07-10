@@ -39,6 +39,10 @@ void AddBlockIdForControlOpsPass::runOnOperation() {
   LOG_DEBUG("\n--- enter AddBlockIdForControlOpsPass --->\n");
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   // Step 1: find the max block_id
   int maxBlockId = CVPipeline::getAvailableBlockId(module) - 1;
 

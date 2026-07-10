@@ -738,6 +738,10 @@ static LogicalResult splitMatmul(linalg::MatmulOp matmulOp,
 LogicalResult
 SplitMatmulPattern::matchAndRewrite(linalg::MatmulOp matmulOp,
                                     PatternRewriter &rewriter) const {
+  if (CVPipeline::hasFallbackAttr(matmulOp->getParentOfType<ModuleOp>())) {
+    return failure();
+  }
+
   LOG_DEBUG("check matmulOp = " << matmulOp);
   auto splitInfoOpt = shouldSplit(matmulOp, needSplitAll);
   if (!splitInfoOpt.has_value()) {

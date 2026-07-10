@@ -43,6 +43,11 @@ static constexpr llvm::StringLiteral needSplitAllFuncNme[]{""};
 
 void PatternMatchRewritePass::runOnOperation() {
   auto moduleOp = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(moduleOp)) {
+    return;
+  }
+
   LOG_DEBUG("Input mlir:\n" << moduleOp);
 
   bool needSplitAll = false;
@@ -65,7 +70,7 @@ void PatternMatchRewritePass::runOnOperation() {
   if (llvm::failed(
           applyPatternsGreedily(moduleOp, std::move(patterns), config))) {
     LOG_DEBUG("matchAndRewrite does not converge!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(moduleOp, CVPipeline::ERRCODE_FAILED);
     return;
   }
   LOG_DEBUG("Output mlir:\n" << moduleOp);

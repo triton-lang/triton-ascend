@@ -44,6 +44,10 @@ static constexpr const char *DEBUG_TYPE =
 void PreCheckAvailablePass::runOnOperation() {
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LDBG("Enter PreCheckAvailable pass.");
   PassManager pm(&getContext(), module.getOperationName());
 
@@ -52,8 +56,8 @@ void PreCheckAvailablePass::runOnOperation() {
   pm.addPass(createPreCheckMatmulPass());
 
   if (failed(runPipeline(pm, module))) {
-    CVPipeline::setFallbackAttr(module);
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
+    return;
   }
 
   LDBG("Exit PreCheckAvailable pass.");

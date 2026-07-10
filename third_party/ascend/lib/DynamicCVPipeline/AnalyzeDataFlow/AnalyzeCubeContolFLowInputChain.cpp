@@ -161,11 +161,14 @@ bool checkCubeControlFlowInputChain(ModuleOp module) {
 void AnalyzeCubeControlFlowInputChainPass::runOnOperation() {
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LDBG("Enter AnalyzeCubeControlFlowInputChainPass.");
 
   if (checkCubeControlFlowInputChain(module)) {
-    setFallbackAttr(module);
-    signalPassFailure();
+    setFallbackAttr(module, ERRCODE_IGNORED);
     return;
   }
 

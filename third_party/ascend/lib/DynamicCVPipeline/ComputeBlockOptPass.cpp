@@ -35,6 +35,10 @@ using namespace triton;
 void ComputeBlockOptPass::runOnOperation() {
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   OpPassManager pm(module.getOperationName());
 
   /**
@@ -58,7 +62,9 @@ void ComputeBlockOptPass::runOnOperation() {
   pm.addPass(createReorderOpsByBlockIdPass());
 
   if (failed(runPipeline(pm, module))) {
-    signalPassFailure();
+    if (!CVPipeline::hasFallbackAttr(module)) {
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    }
     return;
   }
 }

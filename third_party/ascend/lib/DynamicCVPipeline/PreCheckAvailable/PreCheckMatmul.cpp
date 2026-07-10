@@ -37,6 +37,11 @@ static constexpr const char *DEBUG_TYPE = "pre-check-matmul";
 
 void PreCheckMatmul::runOnOperation() {
   ModuleOp module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   linalg::MatmulOp firstMatmulOp = nullptr;
 
   module.walk([&](linalg::MatmulOp matmulOp) -> WalkResult {
@@ -51,7 +56,7 @@ void PreCheckMatmul::runOnOperation() {
 
   LDBG("SSBUFFER will be skipped because no linalg.matmul operation was found, "
        "which indicating that this op is a pure vector computation.");
-  signalPassFailure();
+  CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
 }
 
 namespace mlir {

@@ -12,6 +12,9 @@ DEFAULT_UTILS_PATH = (
 DEFAULT_REGISTER_PATH = (
     Path(__file__).resolve().parents[2] / "backend" / "backend_register.py"
 )
+DEFAULT_DRIVER_PATH = (
+    Path(__file__).resolve().parents[2] / "backend" / "driver.py"
+)
 
 
 def _get_utils_path():
@@ -32,6 +35,15 @@ def _load_utils_module():
 def _load_register_module():
     spec = importlib.util.spec_from_file_location(
         "repo_backend_register", DEFAULT_REGISTER_PATH
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_driver_module():
+    spec = importlib.util.spec_from_file_location(
+        "repo_backend_driver", DEFAULT_DRIVER_PATH
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -154,3 +166,39 @@ def test_get_cc_cmd_npu_utils_resolves_torch_npu_path_without_import(
     assert f"-I{torch_npu_path / 'include'}" in cc_cmd
     assert f"-L{torch_npu_path / 'lib'}" in cc_cmd
     assert "torch_npu" not in sys.modules
+
+
+def test_npu_utils_build_rechecks_cache_after_lock(monkeypatch, tmp_path):
+    driver = _load_driver_module()
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    cached_so = cache_dir / "npu_utils.so"
+    cached_so.write_bytes(b"cached")
+
+    class FakeCache:
+        lock_path = str(cache_dir / "lock")
+
+        def __init__(self):
+            self.get_file_calls = 0
+
+        def get_file(self, filename):
+            self.get_file_calls += 1
+            if self.get_file_calls == 1:
+                return None
+            return str(cached_so)
+
+        def put(self, data, filename, binary=True):
+            raise AssertionError("unexpected cache put")
+
+    fake_cache = FakeCache()
+    monkeypatch.setattr(driver, "get_cache_manager", lambda key: fake_cache)
+    monkeypatch.setattr(
+        driver,
+        "_build_npu_ext",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("unexpected npu_utils build")
+        ),
+    )
+
+    assert driver.NPUUtils()._build_or_get_cached_so() == str(cached_so)
+    assert fake_cache.get_file_calls == 2

@@ -299,6 +299,23 @@ def _enable_dump_memory_info() -> bool:
     return os.getenv("TRITON_MEMORY_DISPLAY", "false").lower() in ("true", "1")
 
 
+def _get_torch_npu_acl_inc_dirs():
+    """torch_npu 2.13 bundles newer ACL headers (aclmdlRICondHandle etc.) under
+    include/third_party/acl/inc/acl/. Angle-bracket <acl/acl.h> lookup is
+    first-(-I)-wins, so this must precede CANN's -I to resolve against the
+    bundled headers instead of CANN 9.1.0-beta.1's older ones (which lack
+    aclmdlRICondHandle). Returns [] when torch_npu/headers are absent."""
+    try:
+        import torch_npu
+    except Exception:
+        return []
+    base = os.path.dirname(os.path.realpath(torch_npu.__file__))
+    acl_inc = os.path.join(base, "include", "third_party", "acl", "inc")
+    if os.path.isdir(os.path.join(acl_inc, "acl")):
+        return [f"-I{acl_inc}"]
+    return []
+
+
 def _get_cxx():
     cxx = os.environ.get("CC")
     if cxx is None:
@@ -332,6 +349,7 @@ def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_l
     py_include_dir = sysconfig.get_paths(scheme=scheme)["include"]
     cc_cmd += [f"-I{py_include_dir}"]
     cc_cmd += [f"-I{os.path.dirname(os.path.realpath(__file__))}"]
+    cc_cmd += _get_torch_npu_acl_inc_dirs()  # torch_npu bundled ACL headers — BEFORE CANN (-I order matters)
     asc_path = _get_ascend_path()
     if header_path is not None:
         cc_cmd += [f"-I{os.path.dirname(header_path)}"]

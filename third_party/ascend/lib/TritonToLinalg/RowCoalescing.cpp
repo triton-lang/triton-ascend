@@ -52,8 +52,7 @@ constexpr llvm::StringLiteral kCoalesceAxisAttr = "hacc.coalesce_axis";
 constexpr llvm::StringLiteral kCoalesceGridCeilDivAttr =
     "hacc.coalesce_grid_ceil_div";
 
-// Start with the empirically best point for the FBGEMM dense-token case. Later
-// revisions should choose H from row footprint, UB budget and launch-grid size.
+// Default to the original FBGEMM dense-token point for very small row tiles.
 constexpr int64_t kDefaultRowsPerProgram = 8;
 constexpr int64_t kMaxBaseElementsPerLift = 1024;
 
@@ -64,6 +63,16 @@ struct RowSeed {
   arith::CmpIOp entryGuard;
   Block *workBlock = nullptr;
 };
+
+static int64_t inferRowsPerProgram(int64_t maxBaseElements) {
+  if (maxBaseElements > kMaxBaseElementsPerLift)
+    return 1;
+  if (maxBaseElements >= 1024)
+    return 2;
+  if (maxBaseElements > 16)
+    return 4;
+  return kDefaultRowsPerProgram;
+}
 
 static bool readsAxisNumPrograms(ModuleOp moduleOp, int32_t axis) {
   bool reads = false;
@@ -201,9 +210,10 @@ static int64_t getMaxStaticTensorElements(ArrayRef<Operation *> ordered) {
 }
 
 static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
-                              ArrayRef<Operation *> ordered, IRRewriter &rw) {
-  constexpr int64_t H = kDefaultRowsPerProgram;
-
+                              ArrayRef<Operation *> ordered, IRRewriter &rw,
+                              int64_t H) {
+  if (H <= 1)
+    return false;
   triton::GetProgramIdOp pid = seed.pid;
   Value pidVal = pid.getResult();
   Location loc = pid.getLoc();
@@ -602,15 +612,17 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
   SmallVector<Operation *> ordered;
   if (!collectRowRegion(*seed, ordered))
     return;
-  if (getMaxStaticTensorElements(ordered) > kMaxBaseElementsPerLift)
+  int64_t maxBaseElements = getMaxStaticTensorElements(ordered);
+  int64_t rowsPerProgram = inferRowsPerProgram(maxBaseElements);
+  if (rowsPerProgram <= 1)
     return;
 
-  if (!rewriteMatchedRow(moduleOp, *seed, ordered, rw))
+  if (!rewriteMatchedRow(moduleOp, *seed, ordered, rw, rowsPerProgram))
     return;
 
   auto i32Ty = IntegerType::get(moduleOp.getContext(), 32);
   moduleOp->setAttr(kCoalesceFactorAttr,
-                    IntegerAttr::get(i32Ty, kDefaultRowsPerProgram));
+                    IntegerAttr::get(i32Ty, rowsPerProgram));
   moduleOp->setAttr(kCoalesceAxisAttr, IntegerAttr::get(i32Ty, seed->axis));
   moduleOp->setAttr(kCoalesceGridCeilDivAttr, IntegerAttr::get(i32Ty, 1));
 }

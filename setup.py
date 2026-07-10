@@ -204,11 +204,12 @@ def is_linux_os(os_id):
 
 
 def get_llvm_patch_hash():
-    """Compute a hash of all LLVM patch files, matching the llvm-build workflow naming."""
-    patch_dir = os.path.join(get_base_dir(), "third_party", "ascend", "llvm_patch")
+    """Compute a hash of LLVM patch files under third_party/ascend/patch."""
+    patch_dir = os.path.join(get_base_dir(), "third_party", "ascend", "patch")
     if os.path.isdir(patch_dir):
-        patch_files = sorted(f for f in os.listdir(patch_dir)
-                             if f.endswith('.patch') and os.path.isfile(os.path.join(patch_dir, f)))
+        patch_files = sorted(
+            f for f in os.listdir(patch_dir)
+            if f.startswith("llvm_patch_") and f.endswith(".patch") and os.path.isfile(os.path.join(patch_dir, f)))
     else:
         patch_files = []
     if not patch_files:

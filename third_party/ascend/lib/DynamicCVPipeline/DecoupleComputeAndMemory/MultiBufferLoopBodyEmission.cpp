@@ -185,28 +185,20 @@ mapProducerLoopPosition(OpBuilder &builder, Location loc, Block *oldBody,
 static LogicalResult
 validateProducerIterArgInputs(scf::ForOp origForOp, Block *oldBody,
                               Block *newBody, ArrayRef<Value> iterArgDeltas) {
-  int numOrig = static_cast<int>(origForOp.getInitArgs().size());
-  if (numOrig < 0) {
-    origForOp.emitError() << "[" << DEBUG_TYPE
-                          << "] original iter_arg count is negative: "
-                          << numOrig;
-    return failure();
-  }
-
-  auto numOrigArgs = static_cast<unsigned>(numOrig);
-  if (iterArgDeltas.size() < numOrigArgs) {
+  size_t numOrig = origForOp.getInitArgs().size();
+  if (iterArgDeltas.size() < numOrig) {
     origForOp.emitError() << "[" << DEBUG_TYPE << "] iter_arg delta count "
                           << iterArgDeltas.size()
                           << " is smaller than original iter_arg count "
-                          << numOrigArgs;
+                          << numOrig;
     return failure();
   }
-  if (oldBody->getNumArguments() < numOrigArgs + kForBodyIterArgOffset ||
-      newBody->getNumArguments() < numOrigArgs + kForBodyIterArgOffset) {
+  if (oldBody->getNumArguments() < numOrig + kForBodyIterArgOffset ||
+      newBody->getNumArguments() < numOrig + kForBodyIterArgOffset) {
     origForOp.emitError()
         << "[" << DEBUG_TYPE
         << "] loop body argument count is smaller than expected "
-        << (numOrigArgs + kForBodyIterArgOffset);
+        << (numOrig + kForBodyIterArgOffset);
     return failure();
   }
   return success();
@@ -544,15 +536,27 @@ static LogicalResult validateGroupEmissionInputs(
     ArrayRef<Value> groupTrueFlagVals, ArrayRef<Value> groupIndexOneVals,
     ArrayRef<Value> allGroupDepthConsts,
     ArrayRef<SmallVector<Value>> allGroupSlotConsts, scf::ForOp origForOp) {
-  if (groupIdx < 0 || static_cast<size_t>(groupIdx) >= groups.size() ||
-      static_cast<size_t>(groupIdx) >= info.groupArgs.size() ||
-      static_cast<size_t>(groupIdx) >= groupTrueFlagVals.size() ||
-      static_cast<size_t>(groupIdx) >= groupIndexOneVals.size() ||
-      static_cast<size_t>(groupIdx) >= allGroupDepthConsts.size() ||
-      static_cast<size_t>(groupIdx) >= allGroupSlotConsts.size()) {
-    origForOp.emitError() << "[" << DEBUG_TYPE << "] load group index "
-                          << groupIdx
-                          << " is out of range for multi-buffer emission";
+  size_t numGroups = groups.size();
+  if (info.groupArgs.size() != numGroups ||
+      groupTrueFlagVals.size() != numGroups ||
+      groupIndexOneVals.size() != numGroups ||
+      allGroupDepthConsts.size() != numGroups ||
+      allGroupSlotConsts.size() != numGroups) {
+    origForOp.emitError()
+        << "[" << DEBUG_TYPE
+        << "] array size mismatch in multi-buffer emission: groups="
+        << numGroups << ", groupArgs=" << info.groupArgs.size()
+        << ", groupTrueFlagVals=" << groupTrueFlagVals.size()
+        << ", groupIndexOneVals=" << groupIndexOneVals.size()
+        << ", allGroupDepthConsts=" << allGroupDepthConsts.size()
+        << ", allGroupSlotConsts=" << allGroupSlotConsts.size();
+    return failure();
+  }
+  if (groupIdx < 0 || static_cast<size_t>(groupIdx) >= numGroups) {
+    origForOp.emitError()
+        << "[" << DEBUG_TYPE << "] load group index " << groupIdx
+        << " is out of range for multi-buffer emission (numGroups=" << numGroups
+        << ")";
     return failure();
   }
   return success();

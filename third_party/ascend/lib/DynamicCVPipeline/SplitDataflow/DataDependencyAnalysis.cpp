@@ -23,6 +23,7 @@
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Analysis/AliasAnalysis.h"
@@ -52,16 +53,13 @@ using namespace mlir::triton;
 using namespace mlir::CVPipeline;
 
 // Attribute name constants
-static constexpr const char *kBlockIdAttr = "ssbuffer.block_id";
-static constexpr const char *kCoreTypeAttr = "ssbuffer.core_type";
-static constexpr const char *kTransferIdAttr = "ssbuffer.transfer_id";
 static constexpr const char *ssbufferCoreTypeCubeAttr = "CUBE";
 static constexpr const char *ssbufferCoreTypeVectorAttr = "VECTOR";
 static constexpr int ND_SHAPE_LENGTH = 2;
 
 // Helper: ssbuffer.core_type
 llvm::StringRef getSsbufferCoreType(Operation *op) {
-  if (auto attr = op->getAttrOfType<mlir::StringAttr>(kCoreTypeAttr)) {
+  if (auto attr = op->getAttrOfType<mlir::StringAttr>(CVPipeline::kCoreType)) {
     return attr.getValue();
   }
   return "";
@@ -298,11 +296,8 @@ void DataDependencyAnalysisPass::insertProducerAndRecordDeps(
   builder.setInsertionPointToStart(&bodyBlock);
   Location loc = forOp.getLoc();
   auto constOp = builder.create<arith::ConstantIntOp>(loc, 0, 32);
-  constOp->setAttr(
-      kBlockIdAttr,
-      IntegerAttr::get(IntegerType::get(builder.getContext(), 32), newId));
-  constOp->setAttr(kCoreTypeAttr,
-                   StringAttr::get(builder.getContext(), initCoreType));
+  setOpBlockId(constOp, newId);
+  setOpCoreType(constOp, initCoreType);
 
   BlockInfo blockInfo;
   blockInfo.blockId = newId;

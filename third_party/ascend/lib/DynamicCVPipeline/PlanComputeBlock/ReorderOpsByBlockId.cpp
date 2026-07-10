@@ -27,11 +27,13 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Block.h"
@@ -170,10 +172,32 @@ collectBlockIds(ArrayRef<Operation *> allOps, ComputeBlockIdManager &bm) {
     if (llvm::failed(verifyOpBlockId(op))) {
       return llvm::failure();
     }
-    auto blockIdAttrRes = getOpBlockId(op);
-    int64_t blockId =
-        blockIdAttrRes.has_value() ? blockIdAttrRes.value() : bm.getNextId();
-    opBlockId[op] = blockId;
+    auto blockIdOpt = getOpBlockId(op);
+    if (blockIdOpt.has_value()) {
+      opBlockId[op] = blockIdOpt.value();
+      continue;
+    }
+
+    auto result = op->walk([&](Operation *nestedOp) {
+      if (nestedOp != op &&
+          !llvm::isa<scf::YieldOp, linalg::FillOp>(nestedOp)) {
+        return WalkResult::interrupt();
+      }
+      auto currBlockIdOpt = getOpBlockId(nestedOp);
+      if (!blockIdOpt.has_value()) {
+        blockIdOpt = getOpBlockId(nestedOp);
+      }
+      if (currBlockIdOpt.has_value() && currBlockIdOpt != blockIdOpt) {
+        return WalkResult::interrupt();
+      }
+      return WalkResult::advance();
+    });
+    if (result.wasInterrupted() || !blockIdOpt.has_value()) {
+      blockIdOpt = bm.getNextId();
+    } else {
+      bm.updateBlockId(op, blockIdOpt.value());
+    }
+    opBlockId[op] = blockIdOpt.value();
   }
   return opBlockId;
 }
@@ -373,10 +397,13 @@ void ReorderOpsByBlockIdPass::runOnOperation() {
   OpBuilder const builder(&getContext());
 
   auto moduleOp = getOperation();
+  LOG_DEBUG("Input mlir:\n" << moduleOp << "\n");
+  llvm::dbgs().flush();
+
   auto &aa = getAnalysis<AliasAnalysis>();
   auto memGraph = MemoryDependenceGraph(moduleOp, aa);
   auto bm = ComputeBlockIdManager(moduleOp);
-  moduleOp.walk([&](Block *block) {
+  auto result = moduleOp.walk([&](Block *block) {
     auto *parentOp = block->getParentOp();
     if (!parentOp ||
         // whitelist ops to reorder
@@ -385,11 +412,17 @@ void ReorderOpsByBlockIdPass::runOnOperation() {
       return WalkResult::skip();
     }
     if (llvm::failed(reorderOpsInBlock(*block, memGraph, bm))) {
-      signalPassFailure();
+      return WalkResult::interrupt();
     }
     return WalkResult::advance();
   });
 
+  if (result.wasInterrupted()) {
+    signalPassFailure();
+    return;
+  }
+
+  LOG_DEBUG("Output mlir:\n" << moduleOp << "\n");
   LOG_DEBUG("=== Pass TuningOpSeq complete ===\n");
 }
 

@@ -93,6 +93,12 @@ collectDepsByGroup(Operation *rootOp, const char *attrName,
       return;
     }
 
+    if (!isa<IntegerAttr>(depsAttr[0]) || !isa<IntegerAttr>(depsAttr[1])) {
+      LDBG("type of dependency attritbute is not Int! error op:" << *op);
+      ret = -1;
+      return;
+    }
+
     int group = cast<IntegerAttr>(depsAttr[0]).getInt();
     int role = cast<IntegerAttr>(depsAttr[1]).getInt();
     depsByGroup[group].push_back({op, role});

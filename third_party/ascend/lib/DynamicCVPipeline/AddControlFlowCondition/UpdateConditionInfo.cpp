@@ -259,7 +259,7 @@ UpdateConditionInfoPass::extendCrossCoreBuffersWithEquivalentValues(
         }
         int tcbGroupId = findTcbGroupId(buffer, tightlyCoupledBufferGroups);
         if (tcbGroupId == -1) {
-          LDBG("Can not find tightly_coupled_buffer id" << "\n");
+          LDBG("Can not find tightly_coupled_buffer id of: " << buffer << "\n");
           return errorMap;
         }
         if (addEquivalentValues(buffer, tightlyCoupledBufferGroups[tcbGroupId],
@@ -546,10 +546,16 @@ Value UpdateConditionInfoPass::getSSBufferPtr(
 }
 
 // Compute pointers for VECTOR core SSBuffer
-DenseMap<int, Value> UpdateConditionInfoPass::computeVectorSSBufferPtrs(
+std::optional<DenseMap<int, Value>>
+UpdateConditionInfoPass::computeVectorSSBufferPtrs(
     OpBuilder &builder, Location loc, Operation *scopeOp,
     SmallVector<int> crossCoreInputValues,
     SmallVector<int> crossCoreOutputValues) {
+  if (!scopeOp) {
+    LDBG("Scope Op is null pointer!");
+    return std::nullopt;
+  }
+
   // Collect all unique group indices
   SmallVector<int> allGroupIndices;
   DenseSet<int> uniqueIndices;
@@ -819,8 +825,13 @@ int UpdateConditionInfoPass::setCrossCoreCondition(
   // side
   DenseMap<int, Value> VectorSSBufferPtrs;
   if (!isAIC) {
-    VectorSSBufferPtrs = computeVectorSSBufferPtrs(
+    auto result = computeVectorSSBufferPtrs(
         builder, loc, scopeOp, crossCoreInputValues, crossCoreOutputValues);
+    if (!result) {
+      LDBG("computeVectorSSBufferPtrs failed!");
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+    VectorSSBufferPtrs = std::move(*result);
   }
 
   builder.setInsertionPoint(ifOp);

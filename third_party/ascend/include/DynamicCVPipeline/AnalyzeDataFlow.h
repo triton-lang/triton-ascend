@@ -130,6 +130,22 @@ public:
   }
 };
 
+// Pass for analyzing flow optimization
+class AnalyzeFlowOptPass
+    : public PassWrapper<AnalyzeFlowOptPass, OperationPass<ModuleOp>> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(AnalyzeFlowOptPass)
+
+  AnalyzeFlowOptPass() = default;
+
+  void runOnOperation() override;
+
+  llvm::StringRef getArgument() const override { return "analyze-flow-opt"; }
+  llvm::StringRef getDescription() const override {
+    return "Analyze and mark flow optimization for main_loop forOps";
+  }
+};
+
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeArgsPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeFlagPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeNamePass();
@@ -137,6 +153,9 @@ std::unique_ptr<OperationPass<ModuleOp>>
 createAnalyzeCubeContolFLowInputChainPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeDataFlowPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeScopePass();
+std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeFlowOptPass();
+
+void setEnableDynamicFlowOptimization(bool enable);
 
 void registerAnalyzeDataFlowPasses();
 

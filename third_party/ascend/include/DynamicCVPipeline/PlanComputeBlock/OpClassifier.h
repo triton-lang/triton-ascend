@@ -126,6 +126,13 @@ private:
   // Step 4: Propagate VECTOR core type upstream
   int propagateVectorUpstream();
 
+  // Step 4.5: Penetrate CUBE coloring into pure loader scf.for loops whose
+  // results are consumed exclusively by CUBE ops.
+  int penetrateCubeIntoForLoops();
+
+  // Helper: decide whether an scf.for is a pure cube-loader loop
+  bool isCubeLoaderForOp(scf::ForOp forOp);
+
   // Initialize the pass
   void initializePass(ModuleOp module);
 

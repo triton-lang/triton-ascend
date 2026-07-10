@@ -287,8 +287,8 @@ Triton 使用 LLVM 22 为 GPU 和 CPU 生成代码。同样，昇腾的毕昇编
 git clone --no-checkout https://github.com/llvm/llvm-project.git
 cd llvm-project
 git checkout fad3272286528b8a491085183434c5ad4b59ab92
-wget https://raw.githubusercontent.com/triton-lang/triton-ascend/6765b03c81c4e9ecb277e4ef1dde61dea0d044f0/third_party/ascend/llvm_patch/fad3272.patch
-git apply fad3272.patch
+wget https://raw.githubusercontent.com/triton-lang/triton-ascend/refs/heads/main/third_party/ascend/patch/llvm_patch_fad3272.patch
+git apply llvm_patch_fad3272.patch
 ```
 
 ##### 构建安装LLVM

@@ -99,7 +99,12 @@ dfsTopologicalSort(Operation *op, llvm::DenseSet<Operation *> &visited,
 
   if (opOrder && !opOrder->empty()) {
     llvm::sort(deps, [&](Operation *a, Operation *b) {
-      return (*opOrder)[a] < (*opOrder)[b];
+      auto itA = opOrder->find(a);
+      auto itB = opOrder->find(b);
+      if (itA == opOrder->end() || itB == opOrder->end()) {
+        return false;
+      }
+      return itA->second < itB->second;
     });
   }
 
@@ -170,7 +175,7 @@ SmallVector<int> triton::getBlockIdsInOrder(scf::ForOp forOp) {
 // For nested ops inside scf.if/scf.for, returns the block_id of the immediate
 // child of scf.for Only considers scf.for ops that have ssbuffer.main_loop
 // attribute
-std::optional<int64_t> triton::getForDirectChildBlockId(Operation *op) {
+std::optional<int> triton::getForDirectChildBlockId(Operation *op) {
   if (!op) {
     return std::nullopt;
   }
@@ -228,4 +233,29 @@ LogicalResult triton::getScopeType(Operation *scopeOp, bool &isCube,
   }
 
   return success();
+}
+
+// Check if op is a scf.if whose body only contains hivm.hir.sync_block_wait,
+// hivm.hir.sync_block_set and hivm.fixpipe ops (excluding terminators).
+bool triton::isIfOpWithOnlySyncOps(Operation *op) {
+  auto ifOp = dyn_cast<scf::IfOp>(op);
+  if (!ifOp) {
+    return false;
+  }
+
+  WalkResult result = ifOp->walk([&](Operation *innerOp) -> WalkResult {
+    if (innerOp == op) {
+      return WalkResult::advance();
+    }
+    if (innerOp->hasTrait<OpTrait::IsTerminator>()) {
+      return WalkResult::advance();
+    }
+    if (!isa<hivm::SyncBlockWaitOp>(innerOp) &&
+        !isa<hivm::SyncBlockSetOp>(innerOp) && !isa<hivm::FixpipeOp>(innerOp)) {
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+
+  return !result.wasInterrupted();
 }

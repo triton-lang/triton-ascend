@@ -40,12 +40,12 @@ func.func @tc_b10_multiple_loads_same_loop(
     %q_src_rc = memref.reinterpret_cast %arg0 to offset: [%row_off], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
     %q_alloc = memref.alloc () : memref<128x128xf16>
     memref.copy %q_src_rc, %q_alloc : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16> to tensor<128x128xf16>
+    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16>
 
     %k_src_rc = memref.reinterpret_cast %arg1 to offset: [%row_off], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
     %k_alloc = memref.alloc () : memref<128x128xf16>
     memref.copy %k_src_rc, %k_alloc : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-    %k_tensor = bufferization.to_tensor %k_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16> to tensor<128x128xf16>
+    %k_tensor = bufferization.to_tensor %k_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16>
 
     %qk = linalg.matmul {input_precision = "ieee"} ins(%q_tensor, %k_tensor : tensor<128x128xf16>, tensor<128x128xf16>) outs(%acc : tensor<128x128xf32>) -> tensor<128x128xf32>
     scf.yield %qk : tensor<128x128xf32>
@@ -89,7 +89,7 @@ func.func @tc_b11_nested_loops_inner_first(
       %q_src_rc = memref.reinterpret_cast %arg0 to offset: [%row_off], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
       %q_alloc = memref.alloc () : memref<128x128xf16>
       memref.copy %q_src_rc, %q_alloc : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-      %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16> to tensor<128x128xf16>
+      %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16>
       %qk = linalg.matmul {input_precision = "ieee"} ins(%q_tensor, %q_tensor : tensor<128x128xf16>, tensor<128x128xf16>) outs(%inner_acc : tensor<128x128xf32>) -> tensor<128x128xf32>
       scf.yield %qk : tensor<128x128xf32>
     }
@@ -126,7 +126,7 @@ func.func @tc_b12_linear_iter_arg_delta(
     %q_src_rc = memref.reinterpret_cast %arg0 to offset: [%row_off], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
     %q_alloc = memref.alloc () : memref<128x128xf16>
     memref.copy %q_src_rc, %q_alloc : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16> to tensor<128x128xf16>
+    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16>
     %acc_dummy = tensor.empty() : tensor<128x128xf32>
     %qk = linalg.matmul {input_precision = "ieee"} ins(%q_tensor, %q_tensor : tensor<128x128xf16>, tensor<128x128xf16>) outs(%acc_dummy : tensor<128x128xf32>) -> tensor<128x128xf32>
 
@@ -141,7 +141,7 @@ func.func @tc_b12_linear_iter_arg_delta(
   %final_view = memref.reinterpret_cast %arg0 to offset: [%final_row], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
   %final_alloc = memref.alloc() : memref<128x128xf16>
   memref.copy %final_view, %final_alloc : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-  %final_tensor = bufferization.to_tensor %final_alloc restrict writable : memref<128x128xf16> to tensor<128x128xf16>
+  %final_tensor = bufferization.to_tensor %final_alloc restrict writable : memref<128x128xf16>
   %ext = arith.extf %final_tensor : tensor<128x128xf16> to tensor<128x128xf32>
   %sum = arith.addf %ext, %arg1 : tensor<128x128xf32>
   return %sum : tensor<128x128xf32>
@@ -185,12 +185,12 @@ func.func @tc_b18_multi_load_with_orig_iter_args(
     %q_src_rc = memref.reinterpret_cast %arg0 to offset: [%row_off], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
     %q_alloc = memref.alloc () : memref<128x128xf16>
     memref.copy %q_src_rc, %q_alloc : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16> to tensor<128x128xf16>
+    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16>
 
     %k_src_rc = memref.reinterpret_cast %arg1 to offset: [%row_off], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
     %k_alloc = memref.alloc () : memref<128x128xf16>
     memref.copy %k_src_rc, %k_alloc : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-    %k_tensor = bufferization.to_tensor %k_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16> to tensor<128x128xf16>
+    %k_tensor = bufferization.to_tensor %k_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16>
 
     %acc_new = linalg.matmul {input_precision = "ieee"} ins(%q_tensor, %k_tensor : tensor<128x128xf16>, tensor<128x128xf16>) outs(%acc : tensor<128x128xf32>) -> tensor<128x128xf32>
     scf.yield %acc_new, %lse : tensor<128x128xf32>, tensor<128xf32>
@@ -226,7 +226,7 @@ func.func @tc_b19_bf16_data_type(
     %q_src_rc = memref.reinterpret_cast %arg0 to offset: [%row_off], sizes: [128, 128], strides: [128, 1] : memref<?xbf16> to memref<128x128xbf16, strided<[128, 1], offset: ?>>
     %q_alloc = memref.alloc () : memref<128x128xbf16>
     memref.copy %q_src_rc, %q_alloc : memref<128x128xbf16, strided<[128, 1], offset: ?>> to memref<128x128xbf16>
-    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xbf16> to tensor<128x128xbf16>
+    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xbf16>
     %qk = linalg.matmul {input_precision = "ieee"} ins(%q_tensor, %q_tensor : tensor<128x128xbf16>, tensor<128x128xbf16>) outs(%acc : tensor<128x128xf32>) -> tensor<128x128xf32>
     scf.yield %qk : tensor<128x128xf32>
   }
@@ -266,7 +266,7 @@ func.func @tc_b20_outer_loop_marked_only(
     %q_src_rc = memref.reinterpret_cast %arg0 to offset: [%row_off], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
     %q_alloc = memref.alloc () : memref<128x128xf16>
     memref.copy %q_src_rc, %q_alloc : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16> to tensor<128x128xf16>
+    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16>
     %qk = linalg.matmul {input_precision = "ieee"} ins(%q_tensor, %q_tensor : tensor<128x128xf16>, tensor<128x128xf16>) outs(%outer_acc : tensor<128x128xf32>) -> tensor<128x128xf32>
 
     // Inner loop with no marked load
@@ -307,7 +307,7 @@ func.func @tc_b21_index_iv_type(
     %q_src_rc = memref.reinterpret_cast %arg0 to offset: [%row_off], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
     %q_alloc = memref.alloc () : memref<128x128xf16>
     memref.copy %q_src_rc, %q_alloc : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16> to tensor<128x128xf16>
+    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16>
     %qk = linalg.matmul {input_precision = "ieee"} ins(%q_tensor, %q_tensor : tensor<128x128xf16>, tensor<128x128xf16>) outs(%acc : tensor<128x128xf32>) -> tensor<128x128xf32>
     scf.yield %qk : tensor<128x128xf32>
   }

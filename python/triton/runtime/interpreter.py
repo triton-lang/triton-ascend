@@ -1220,11 +1220,12 @@ def _patch_lang(fn):
         _patch_lang_tensor(lang.tensor, scope)
         _patch_lang_core(lang, scope)
     _patch_builtin(tl.core.tensor_descriptor_base, interpreter_builder, scope)
-    return scope
 
     # Patch Ascend extensions if using AscendInterpreterBuilder
     if hasattr(interpreter_builder, 'patch_extensions'):
-        interpreter_builder.patch_extensions(fn)
+        interpreter_builder.patch_extensions(fn, scope)
+
+    return scope
 
 
 def _tuple_create(arg, contents):

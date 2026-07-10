@@ -23,6 +23,7 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CloneOps.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CreateIfOps.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/FlowOpt.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/ProcessArgs.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
@@ -108,7 +109,12 @@ void AddControlFlowConditionPass::runOnOperation() {
   updatePass->setConditionInfo(&info);
   pm.addPass(std::move(updatePass));
 
-  // Step6: Update for loop iteration times based on intraCoreDependentMap
+  // Step6: Apply flow optimization for flow optimization buffers
+  std::unique_ptr<FlowOptPass> flowOptPass(new FlowOptPass());
+  flowOptPass->setConditionInfo(&info);
+  pm.addPass(std::move(flowOptPass));
+
+  // Step7: Update for loop iteration times based on intraCoreDependentMap
   std::unique_ptr<UpdateLoopIterTimesPass> updateLoopIterTimesPass(
       new UpdateLoopIterTimesPass());
   updateLoopIterTimesPass->setConditionInfo(&info);
@@ -134,6 +140,7 @@ void registerAddControlFlowConditionPasses() {
   registerPass(createCreateIfOpsPass);
   registerPass(createProcessArgsPass);
   registerPass(createUpdateForOpsPass);
+  registerPass(createFlowOptPass);
   registerPass(createAddControlFlowConditionPass);
 }
 } // namespace triton

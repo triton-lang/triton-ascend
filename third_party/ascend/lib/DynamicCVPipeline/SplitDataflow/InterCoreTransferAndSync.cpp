@@ -21,6 +21,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/InterCoreTransferAndSync.h"
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
 
 #include <algorithm>
 #include <memory>
@@ -61,11 +62,6 @@ static constexpr const char *DEBUG_TYPE = "inter-core-transfer-and-sync";
 using namespace mlir::triton;
 using namespace hivm;
 
-// Attribute name constants
-static constexpr const char *kBlockIdAttr = "ssbuffer.block_id";
-static constexpr const char *kCoreTypeAttr = "ssbuffer.core_type";
-static constexpr const char *kTransferIdAttr = "ssbuffer.transfer_id";
-
 static constexpr int kIntegerBitWidth = 32;
 static constexpr int NzDimWidth = 16;
 
@@ -103,21 +99,17 @@ static uint64_t getBlockElemsFor32BAlign(Type elemType) {
 
 static void attachCommonTags(Operation *op, int blockId, StringRef coreType) {
   MLIRContext *ctx = op->getContext();
-  op->setAttr(
-      kBlockIdAttr,
-      IntegerAttr::get(IntegerType::get(ctx, kIntegerBitWidth), blockId));
-  op->setAttr(kCoreTypeAttr, StringAttr::get(ctx, coreType));
+  setOpBlockId(op, blockId);
+  setOpCoreType(op, coreType);
 }
 
 static void attachTransferTags(Operation *op, int blockId, StringRef coreType,
                                int transferId) {
   MLIRContext *ctx = op->getContext();
+  setOpBlockId(op, blockId);
+  setOpCoreType(op, coreType);
   op->setAttr(
-      kBlockIdAttr,
-      IntegerAttr::get(IntegerType::get(ctx, kIntegerBitWidth), blockId));
-  op->setAttr(kCoreTypeAttr, StringAttr::get(ctx, coreType));
-  op->setAttr(
-      kTransferIdAttr,
+      CVPipeline::kTransferId,
       IntegerAttr::get(IntegerType::get(ctx, kIntegerBitWidth), transferId));
 }
 
@@ -131,7 +123,7 @@ std::pair<mlir::Operation *, mlir::Operation *>
 InterCoreTransferAndSyncPass::getBlockStartEnd(int targetId,
                                                mlir::ModuleOp module) {
   mlir::Operation *knownOpInBlock = nullptr;
-  module.walk([&](mlir::Operation *op) {
+  module.walk<WalkOrder::PreOrder>([&](mlir::Operation *op) {
     if (knownOpInBlock) {
       return;
     }
@@ -271,6 +263,15 @@ SmallVector<int64_t> InterCoreTransferAndSyncPass::computeExpectedShape(
   int64_t newN = blN * nRound;
   LOG_DEBUG("newM" << newM << "\n");
   LOG_DEBUG("newN" << newN << "\n");
+
+  if (isOnlyDepInMatmul) {
+    if ((isMatmulA && newN != N) || (isMatmulB && newM != M)) {
+      LOG_DEBUG("nd2nz shape is unaligned and matmul A/B is from cube");
+      CVPipeline::setFallbackAttr(module);
+      signalPassFailure();
+    }
+  }
+
   return {newM, newN}; // Return 2D shape
 }
 
@@ -278,6 +279,9 @@ std::pair<bool, bool> InterCoreTransferAndSyncPass::isExpectedShape(
     Value value, SmallVector<int64_t> &expectedShape, bool isMatmulA,
     bool isMatmulB, bool isOnlyDepInMatmul) {
   auto tensorTy = dyn_cast<TensorType>(value.getType());
+  if (!tensorTy) {
+    return {true, false};
+  }
   ArrayRef<int64_t> currShape = tensorTy.getShape();
   bool isEqualedShape = currShape.equals(expectedShape);
   bool matmulPadding = false;
@@ -336,6 +340,29 @@ void InterCoreTransferAndSyncPass::padMatmulInnerDim(OpBuilder &builder,
   attachCommonTags(tensorInsertSliceOp, matmulOpBlockId, "CUBE");
 }
 
+bool InterCoreTransferAndSyncPass::matmulCIsEmpty(mlir::Value acc) {
+  auto accDefOp = acc.getDefiningOp();
+  if (accDefOp) {
+    if (isa<tensor::EmptyOp>(accDefOp)) {
+      return true;
+    }
+    if (auto fillOp = dyn_cast<linalg::FillOp>(accDefOp)) {
+      Value fillVal = fillOp.getOperand(0);
+      if (auto constOp = fillVal.getDefiningOp<arith::ConstantOp>()) {
+        Attribute attr = constOp.getValue();
+
+        if ((isa<FloatAttr>(attr) &&
+             cast<FloatAttr>(attr).getValue().isZero()) ||
+            (isa<IntegerAttr>(attr) &&
+             cast<IntegerAttr>(attr).getValue().isZero())) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 void InterCoreTransferAndSyncPass::extractMatmulResult(
     OpBuilder &builder, Operation *matmulOp, Location loc, int matmulOpBlockId,
     llvm::DenseMap<mlir::Value, mlir::Value> &cubeValueMapping,
@@ -344,10 +371,15 @@ void InterCoreTransferAndSyncPass::extractMatmulResult(
   Value rhs = matmulOp->getOperands()[1];
   Value acc = matmulOp->getOperands()[2];
   Value originalResult = matmulOp->getResult(0);
-  auto lhsType = dyn_cast<RankedTensorType>(lhs.getType());
-  auto rhsType = dyn_cast<RankedTensorType>(rhs.getType());
-  auto accType = dyn_cast<RankedTensorType>(acc.getType());
-  auto resType = dyn_cast<RankedTensorType>(originalResult.getType());
+  auto lhsType = cast<RankedTensorType>(lhs.getType());
+  auto rhsType = cast<RankedTensorType>(rhs.getType());
+  auto accType = cast<RankedTensorType>(acc.getType());
+  auto resType = cast<RankedTensorType>(originalResult.getType());
+  if (lhsType.getShape()[0] == accType.getShape()[0] &&
+      rhsType.getShape()[1] == accType.getShape()[1]) {
+    return;
+  }
+
   ArrayRef<int64_t> accshape = accType.getShape();
   ArrayRef<int64_t> resshape = resType.getShape();
   SmallVector<int64_t> expectedShape = {lhsType.getShape()[0],
@@ -369,7 +401,14 @@ void InterCoreTransferAndSyncPass::extractMatmulResult(
   attachCommonTags(tensorEmptyOp, matmulOpBlockId, "CUBE");
   attachCommonTags(linalgFillOp, matmulOpBlockId, "CUBE");
 
-  Value newAccResult = linalgFillOp->getResult(0);
+  mlir::Operation *paddingAccOp = linalgFillOp;
+  if (!matmulCIsEmpty(acc)) {
+    LOG_DEBUG("nd2nz shape is unaligned and matmul C is not empty");
+    CVPipeline::setFallbackAttr(module);
+    signalPassFailure();
+  }
+
+  Value newAccResult = paddingAccOp->getResult(0);
 
   static constexpr int accIndex = 2;
   matmulOp->setOperand(accIndex, newAccResult);
@@ -415,8 +454,7 @@ void InterCoreTransferAndSyncPass::extractMatmulResult(
 void InterCoreTransferAndSyncPass::rewriteMatmulWithNewShape(
     OpBuilder &builder, Operation *matmulOp, Location loc, bool isMatmulA,
     bool isMatmulB, bool matmulPadding, bool isOnlyDepInMatmul) {
-  int matmulOpBlockId =
-      static_cast<int>(CVPipeline::getOpBlockId(matmulOp).value_or(-1));
+  int matmulOpBlockId = CVPipeline::getOpBlockId(matmulOp).value_or(-1);
 
   if (matmulPadding) {
     int matmulIndex = isMatmulA ? 1 : 0;
@@ -440,10 +478,8 @@ void InterCoreTransferAndSyncPass::rewriteTransposeWithNewShape(
   // Create new empty tensor with new shape
   auto tensorEmptyOp =
       builder.create<tensor::EmptyOp>(loc, newOutputShape, elemType);
-  attachCommonTags(
-      tensorEmptyOp,
-      static_cast<int>(CVPipeline::getOpBlockId(transposeOp).value_or(-1)),
-      "CUBE");
+  attachCommonTags(tensorEmptyOp,
+                   CVPipeline::getOpBlockId(transposeOp).value_or(-1), "CUBE");
   Value transposeOpResult = transposeOp->getResult(0);
   transposeOp->setOperand(1, tensorEmptyOp.getResult());
   transposeOp->getResult(0).setType(expectedType);
@@ -455,6 +491,9 @@ mlir::Value InterCoreTransferAndSyncPass::normalizeIfNeeded(
     mlir::Value origValue, SmallVector<int64_t> expectedShape,
     int originBlockId, bool matmulPadding, bool isOnlyDepInMatmul) {
   auto origTensorType = dyn_cast<RankedTensorType>(origValue.getType());
+  if (!origTensorType) {
+    return origValue;
+  }
 
   int64_t iniM = origTensorType.getDimSize(0);
   int64_t iniN = origTensorType.getDimSize(1);
@@ -668,8 +707,7 @@ InterCoreTransferAndSyncPass::createTransferAllocs(
     consAllocOp = builder.create<memref::AllocOp>(loc, allocType);
     auto markConsOp = annotateTightlyCoupledBuffer(builder, consAllocOp, loc);
 
-    int loopBlockId =
-        static_cast<int>(CVPipeline::getOpBlockId(mainLoopOp).value_or(-1));
+    int loopBlockId = CVPipeline::getOpBlockId(mainLoopOp).value_or(-1);
     attachTransferTags(prodAllocOp, loopBlockId, prodTag, transferIndex);
     attachTransferTags(consAllocOp, loopBlockId, consTag, transferIndex);
     attachTransferTags(markProdOp, loopBlockId, prodTag, transferIndex);
@@ -707,7 +745,7 @@ mlir::Operation *InterCoreTransferAndSyncPass::analyzeConsumerReadInsertPoint(
 
   mlir::Operation *firstFoundOp = nullptr;
 
-  module->walk([&](mlir::Operation *op) {
+  module->walk<WalkOrder::PreOrder>([&](mlir::Operation *op) {
     if (consumerOps.contains(op)) {
       firstFoundOp = op;
       return mlir::WalkResult::interrupt();
@@ -721,7 +759,7 @@ mlir::Operation *InterCoreTransferAndSyncPass::analyzeConsumerReadInsertPoint(
 mlir::Operation *
 InterCoreTransferAndSyncPass::getConsumerWaitPoint(int transferIndex) {
   mlir::Operation *consumerWaitPoint = nullptr;
-  module.walk([&](mlir::Operation *op) {
+  module.walk<WalkOrder::PreOrder>([&](mlir::Operation *op) {
     if (consumerWaitPoint) {
       return;
     }
@@ -729,7 +767,8 @@ InterCoreTransferAndSyncPass::getConsumerWaitPoint(int transferIndex) {
         !isa<memref::MemorySpaceCastOp>(op) && !isa<LLVM::LoadOp>(op)) {
       return;
     }
-    auto transferIdAttr = op->getAttrOfType<IntegerAttr>(kTransferIdAttr);
+    auto transferIdAttr =
+        op->getAttrOfType<IntegerAttr>(CVPipeline::kTransferId);
     if (transferIdAttr && transferIdAttr.getInt() == transferIndex) {
       consumerWaitPoint = op;
     }
@@ -1116,7 +1155,7 @@ static std::optional<hivm::TCoreType> getAnalyzeCoreType(Operation *op) {
     }
   }
 
-  auto coreStringAttr = op->getAttrOfType<StringAttr>(kCoreTypeAttr);
+  auto coreStringAttr = op->getAttrOfType<StringAttr>(CVPipeline::kCoreType);
   if (!coreStringAttr) {
     return std::nullopt;
   }

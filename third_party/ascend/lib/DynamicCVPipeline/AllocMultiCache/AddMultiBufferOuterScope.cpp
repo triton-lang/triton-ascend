@@ -379,6 +379,7 @@ static int collectTransferChains(const SmallVector<Operation *> &ops,
           findSyncOpWithFlag(block, op, originalFlag, false, true);
       info.receiver.setOp =
           findSyncOpWithFlag(block, op, originalFlag, true, false);
+      info.receiver.toTensorOp = findToTensorAfter(block, op);
       LDBG("Receiver chain (CUBE): convert_layout, flag=" << originalFlag);
     }
   }
@@ -598,6 +599,7 @@ static int attachSsbufferTags(Operation *op, int blockId, int transferId) {
               IntegerAttr::get(IntegerType::get(ctx, kBits32), blockId));
   op->setAttr("ssbuffer.transfer_id",
               IntegerAttr::get(IntegerType::get(ctx, kBits32), transferId));
+  op->setAttr("ssbuffer.analyze_flag_id", UnitAttr::get(ctx));
   return 0;
 }
 
@@ -803,6 +805,10 @@ static Operation *wrapSyncOpWithScfIf(
     cloned->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
     altOp->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
   }
+  if (op->hasAttr("ssbuffer.analyze_flag_id")) {
+    cloned->setAttr("ssbuffer.analyze_flag_id", builder.getUnitAttr());
+    altOp->setAttr("ssbuffer.analyze_flag_id", builder.getUnitAttr());
+  }
 
   op->replaceAllUsesWith(ifOp.getOperation());
   op->erase();
@@ -909,6 +915,98 @@ static Operation *wrapTransferOpWithScfIfSimple(Operation *transferOp,
   return ifOp.getOperation();
 }
 
+/// Wrap a receiver transfer chain (transferOp + trailing memspace_cast +
+/// to_tensor) in scf.if so that the if returns tensor type directly.
+static Operation *wrapReceiverChainWithScfIf(Operation *transferOp,
+                                             Operation *toTensorOp, Value cond,
+                                             Value inputBuffer,
+                                             Value outputBuffer, int bid,
+                                             int tid, OpBuilder &builder) {
+  OpBuilder::InsertionGuard guard(builder);
+  builder.setInsertionPoint(transferOp);
+  Location loc = transferOp->getLoc();
+
+  // Collect the chain from transferOp to toTensorOp: ops whose result flows
+  // into toTensorOp (e.g. memref.memory_space_cast between convert_layout and
+  // bufferization.to_tensor for V→C transfers).
+  SmallVector<Operation *> trailingOps;
+  Value curVal = transferOp->getResult(0);
+  while (curVal != toTensorOp->getOperand(0)) {
+    bool found = false;
+    for (auto &use : curVal.getUses()) {
+      Operation *user = use.getOwner();
+      if (user->isBeforeInBlock(toTensorOp) || user == toTensorOp) {
+        curVal = user->getResult(0);
+        if (user != toTensorOp)
+          trailingOps.push_back(user);
+        found = true;
+        break;
+      }
+    }
+    if (!found)
+      break;
+  }
+
+  auto tensorType = toTensorOp->getResult(0).getType();
+  auto ifOp = builder.create<scf::IfOp>(loc, tensorType, cond,
+                                        true /* withElseRegion */);
+
+  // then branch: use inputBuffer → clone chain + to_tensor
+  {
+    auto thenBuilder = ifOp.getThenBodyBuilder();
+    IRMapping inputMap;
+    if (transferOp->getNumOperands() > 0)
+      inputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1),
+                   inputBuffer);
+    Operation *clonedTransfer = thenBuilder.clone(*transferOp, inputMap);
+    Value chainResult = clonedTransfer->getResult(0);
+    auto thenMapper = inputMap;
+    thenMapper.map(transferOp->getResult(0), chainResult);
+    for (Operation *op : trailingOps) {
+      Operation *cloned = thenBuilder.clone(*op, thenMapper);
+      thenMapper.map(op->getResult(0), cloned->getResult(0));
+    }
+    Operation *clonedToTensor = thenBuilder.clone(*toTensorOp, thenMapper);
+    thenBuilder.create<scf::YieldOp>(loc, clonedToTensor->getResult(0));
+  }
+
+  // else branch: use outputBuffer → clone chain + to_tensor
+  {
+    auto elseBuilder = ifOp.getElseBodyBuilder();
+    IRMapping outputMap;
+    if (transferOp->getNumOperands() > 0)
+      outputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1),
+                    outputBuffer);
+    Operation *clonedTransfer = elseBuilder.clone(*transferOp, outputMap);
+    Value chainResult = clonedTransfer->getResult(0);
+    auto elseMapper = outputMap;
+    elseMapper.map(transferOp->getResult(0), chainResult);
+    for (Operation *op : trailingOps) {
+      Operation *cloned = elseBuilder.clone(*op, elseMapper);
+      elseMapper.map(op->getResult(0), cloned->getResult(0));
+    }
+    Operation *clonedToTensor = elseBuilder.clone(*toTensorOp, elseMapper);
+    elseBuilder.create<scf::YieldOp>(loc, clonedToTensor->getResult(0));
+  }
+
+  // Tag
+  ifOp->setAttr("ssbuffer.block_id", builder.getI32IntegerAttr(bid));
+  ifOp->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
+  ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
+  ifOp->setAttr("ssbuffer.crossDeps",
+                builder.getArrayAttr({builder.getI32IntegerAttr(tid),
+                                      builder.getI32IntegerAttr(0)}));
+
+  // Replace and erase from outermost to innermost to avoid use-after-free
+  toTensorOp->getResult(0).replaceAllUsesWith(ifOp.getResult(0));
+  toTensorOp->erase();
+  for (Operation *op : llvm::reverse(trailingOps))
+    op->erase();
+  transferOp->erase();
+
+  return ifOp.getOperation();
+}
+
 /// Process polling for a sender or receiver transfer chain
 static int processTransferChain(TransferOpChain &chain, Value cond,
                                 Value inputBuffer, Value outputBuffer,
@@ -937,20 +1035,32 @@ static int processTransferChain(TransferOpChain &chain, Value cond,
   if (chain.transferOp) {
     int bid = getBlockId(chain.transferOp);
     int tid = getTransferId(chain.transferOp);
-    bool hasExternalUses = !chain.transferOp->getResults().empty() &&
-                           !chain.transferOp->getResult(0).getUses().empty();
 
-    LDBG("transferOp: " << chain.transferOp->getName()
-                        << ", hasExternalUses=" << hasExternalUses);
+    // For receiver chains with toTensorOp, wrap the full chain
+    // (transferOp → memspace_cast → to_tensor) so the scf.if returns tensor.
+    if (!isProducer && chain.toTensorOp) {
+      LDBG("transferOp: " << chain.transferOp->getName()
+                          << " (receiver, wrapping to_tensor)");
+      chain.transferOp = wrapReceiverChainWithScfIf(
+          chain.transferOp, chain.toTensorOp, cond, inputBuffer, outputBuffer,
+          bid, tid, builder);
+      chain.toTensorOp = nullptr;
+    } else {
+      bool hasExternalUses = !chain.transferOp->getResults().empty() &&
+                             !chain.transferOp->getResult(0).getUses().empty();
 
-    chain.transferOp =
-        hasExternalUses
-            ? wrapTransferOpWithScfIfYield(chain.transferOp, cond, inputBuffer,
-                                           outputBuffer, bid, tid, isProducer,
-                                           builder)
-            : wrapTransferOpWithScfIfSimple(chain.transferOp, cond, inputBuffer,
-                                            outputBuffer, bid, tid, isProducer,
-                                            builder);
+      LDBG("transferOp: " << chain.transferOp->getName()
+                          << ", hasExternalUses=" << hasExternalUses);
+
+      chain.transferOp =
+          hasExternalUses
+              ? wrapTransferOpWithScfIfYield(chain.transferOp, cond,
+                                             inputBuffer, outputBuffer, bid,
+                                             tid, isProducer, builder)
+              : wrapTransferOpWithScfIfSimple(chain.transferOp, cond,
+                                              inputBuffer, outputBuffer, bid,
+                                              tid, isProducer, builder);
+    }
   }
 
   // 3. Wrap setOp in polling if

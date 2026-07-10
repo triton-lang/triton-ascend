@@ -20,16 +20,20 @@
  * THE SOFTWARE.
  */
 
-#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CreateIfOps.h"
-#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "llvm/Support/Debug.h"
+
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/IRMapping.h"
-#include "llvm/Support/Debug.h"
+
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CreateIfOps.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 static constexpr const char *DEBUG_TYPE = "CreateIfOps";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
@@ -234,7 +238,8 @@ static scf::IfOp createIfOpForBlock(OpBuilder &builder, Location loc,
   ifOp->setAttr(kSSBufferIfAttr, builder.getI32IntegerAttr(blockId));
 
   // notify npuir that of the scenario
-  ifOp->setAttr(kHIVMMatmulLimitedInCubeAttr, builder.getUnitAttr());
+  ifOp->setAttr(CVPipeline::kHIVMMatmulLimitedInCubeAttr,
+                builder.getUnitAttr());
 
   return ifOp;
 }

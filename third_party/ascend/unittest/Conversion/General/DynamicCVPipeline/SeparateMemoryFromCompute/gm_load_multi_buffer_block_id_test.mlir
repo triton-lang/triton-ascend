@@ -160,14 +160,14 @@ func.func @_attn_bwd(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf
       %14:2 = scf.for %arg19 = %c0_i32 to %c128_i32 step %c1_i32 iter_args(%arg20 = %1, %arg21 = %1) -> (tensor<64x128xf32>, tensor<64x128xf32>)  : i32 {
         hivm.hir.sync_block_wait {ssbuffer.block_id = 7 : i32, ssbuffer.transfer_id = 3 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 4
         %memspacecast = memref.memory_space_cast %alloc_4 {ssbuffer.block_id = 7 : i32, ssbuffer.transfer_id = 3 : i32} : memref<64x64xf32, #hivm.address_space<ub>> to memref<64x64xf32>
-        %23 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 7 : i32, ssbuffer.transfer_id = 3 : i32} : memref<64x64xf32> to tensor<64x64xf32>
+        %23 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 7 : i32, ssbuffer.transfer_id = 3 : i32} : memref<64x64xf32>
         %24 = arith.muli %arg19, %c64_i32 {MixUse, ssbuffer.block_id = 7 : i32} : i32
         %25 = arith.index_cast %24 {ssbuffer.block_id = 7 : i32} : i32 to index
         %26 = arith.addi %13, %25 {ssbuffer.block_id = 7 : i32} : index
         %reinterpret_cast_10 = memref.reinterpret_cast %arg9 to offset: [%26], sizes: [64], strides: [1] {ssbuffer.block_id = 7 : i32} : memref<?xf32> to memref<64xf32, strided<[1], offset: ?>>
         %alloc_11 = memref.alloc() {ssbuffer.block_id = 7 : i32} : memref<64xf32>
         memref.copy %reinterpret_cast_10, %alloc_11 {ssbuffer.block_id = 7 : i32} : memref<64xf32, strided<[1], offset: ?>> to memref<64xf32>
-        %27 = bufferization.to_tensor %alloc_11 restrict writable {gm_load_bufferable, ssbuffer.block_id = 7 : i32} : memref<64xf32> to tensor<64xf32>
+        %27 = bufferization.to_tensor %alloc_11 restrict writable {gm_load_bufferable, ssbuffer.block_id = 7 : i32} : memref<64xf32>
         %28 = arith.addf %23, %3 {ssbuffer.block_id = 7 : i32} : tensor<64x64xf32>
         %29 = arith.mulf %28, %4 {DataUse, ssbuffer.block_id = 7 : i32} : tensor<64x64xf32>
         %broadcasted = linalg.broadcast ins(%27 : tensor<64xf32>) outs(%2 : tensor<64x64xf32>) dimensions = [1]  {ssbuffer.block_id = 7 : i32}
@@ -184,11 +184,11 @@ func.func @_attn_bwd(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf
         hivm.hir.sync_block_set {ssbuffer.block_id = 7 : i32, ssbuffer.transfer_id = 3 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 4
         hivm.hir.sync_block_wait {ssbuffer.block_id = 8 : i32, ssbuffer.transfer_id = 4 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 5
         %memspacecast_13 = memref.memory_space_cast %alloc_5 {ssbuffer.block_id = 8 : i32, ssbuffer.transfer_id = 4 : i32} : memref<64x64xf32, #hivm.address_space<ub>> to memref<64x64xf32>
-        %34 = bufferization.to_tensor %memspacecast_13 restrict writable {ssbuffer.block_id = 8 : i32, ssbuffer.transfer_id = 4 : i32} : memref<64x64xf32> to tensor<64x64xf32>
+        %34 = bufferization.to_tensor %memspacecast_13 restrict writable {ssbuffer.block_id = 8 : i32, ssbuffer.transfer_id = 4 : i32} : memref<64x64xf32>
         %reinterpret_cast_14 = memref.reinterpret_cast %arg10 to offset: [%26], sizes: [64], strides: [1] {ssbuffer.block_id = 8 : i32} : memref<?xf32> to memref<64xf32, strided<[1], offset: ?>>
         %alloc_15 = memref.alloc() {ssbuffer.block_id = 8 : i32} : memref<64xf32>
         memref.copy %reinterpret_cast_14, %alloc_15 {ssbuffer.block_id = 8 : i32} : memref<64xf32, strided<[1], offset: ?>> to memref<64xf32>
-        %35 = bufferization.to_tensor %alloc_15 restrict writable {gm_load_bufferable, ssbuffer.block_id = 8 : i32} : memref<64xf32> to tensor<64xf32>
+        %35 = bufferization.to_tensor %alloc_15 restrict writable {gm_load_bufferable, ssbuffer.block_id = 8 : i32} : memref<64xf32>
         %36 = arith.addf %34, %3 {ssbuffer.block_id = 8 : i32} : tensor<64x64xf32>
         %broadcasted_16 = linalg.broadcast ins(%35 : tensor<64xf32>) outs(%2 : tensor<64x64xf32>) dimensions = [1]  {ssbuffer.block_id = 8 : i32}
         %37 = arith.subf %36, %broadcasted_16 {DataUse, ssbuffer.block_id = 8 : i32} : tensor<64x64xf32>
@@ -209,13 +209,13 @@ func.func @_attn_bwd(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf
         hivm.hir.sync_block_set {ssbuffer.block_id = 8 : i32, ssbuffer.transfer_id = 4 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 5
         hivm.hir.sync_block_wait {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 7 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 8
         %memspacecast_20 = memref.memory_space_cast %alloc_8 {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 7 : i32} : memref<64x128xf32, #hivm.address_space<ub>> to memref<64x128xf32>
-        %43 = bufferization.to_tensor %memspacecast_20 restrict writable {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 7 : i32} : memref<64x128xf32> to tensor<64x128xf32>
+        %43 = bufferization.to_tensor %memspacecast_20 restrict writable {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 7 : i32} : memref<64x128xf32>
         hivm.hir.sync_block_wait {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 6 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 7
         %memspacecast_21 = memref.memory_space_cast %alloc_7 {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 6 : i32} : memref<64x128xf32, #hivm.address_space<ub>> to memref<64x128xf32>
-        %44 = bufferization.to_tensor %memspacecast_21 restrict writable {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 6 : i32} : memref<64x128xf32> to tensor<64x128xf32>
+        %44 = bufferization.to_tensor %memspacecast_21 restrict writable {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 6 : i32} : memref<64x128xf32>
         hivm.hir.sync_block_wait {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 5 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 6
         %memspacecast_22 = memref.memory_space_cast %alloc_6 {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 5 : i32} : memref<64x128xf32, #hivm.address_space<ub>> to memref<64x128xf32>
-        %45 = bufferization.to_tensor %memspacecast_22 restrict writable {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 5 : i32} : memref<64x128xf32> to tensor<64x128xf32>
+        %45 = bufferization.to_tensor %memspacecast_22 restrict writable {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 5 : i32} : memref<64x128xf32>
         %46 = arith.muli %25, %c128 {ssbuffer.block_id = 9 : i32} : index
         %47 = arith.addi %12, %46 {ssbuffer.block_id = 9 : i32} : index
         %48 = arith.addf %44, %arg21 {ssbuffer.block_id = 9 : i32} : tensor<64x128xf32>
@@ -487,17 +487,17 @@ func.func @_attn_bwd_complex(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: me
 
         hivm.hir.sync_block_wait {ssbuffer.block_id = 13 : i32, ssbuffer.transfer_id = 7 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 8
         %memspacecast = memref.memory_space_cast %alloc_9 {ssbuffer.block_id = 13 : i32, ssbuffer.transfer_id = 7 : i32} : memref<64x32xf32, #hivm.address_space<ub>> to memref<64x32xf32>
-        %132 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 13 : i32, ssbuffer.transfer_id = 7 : i32} : memref<64x32xf32> to tensor<64x32xf32>
+        %132 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 13 : i32, ssbuffer.transfer_id = 7 : i32} : memref<64x32xf32>
         hivm.hir.sync_block_wait {ssbuffer.block_id = 13 : i32, ssbuffer.transfer_id = 5 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 6
         %memspacecast_25 = memref.memory_space_cast %alloc_7 {ssbuffer.block_id = 13 : i32, ssbuffer.transfer_id = 5 : i32} : memref<64x32xf32, #hivm.address_space<ub>> to memref<64x32xf32>
-        %133 = bufferization.to_tensor %memspacecast_25 restrict writable {ssbuffer.block_id = 13 : i32, ssbuffer.transfer_id = 5 : i32} : memref<64x32xf32> to tensor<64x32xf32>
+        %133 = bufferization.to_tensor %memspacecast_25 restrict writable {ssbuffer.block_id = 13 : i32, ssbuffer.transfer_id = 5 : i32} : memref<64x32xf32>
         %134 = arith.addf %133, %1 {ssbuffer.block_id = 13 : i32} : tensor<64x32xf32>
         %135 = arith.addf %132, %134 {ssbuffer.block_id = 13 : i32} : tensor<64x32xf32>
         %reinterpret_cast_26 = memref.reinterpret_cast %arg3 to offset: [%107], sizes: [64, 32], strides: [4096, 1] {ssbuffer.block_id = 13 : i32} : memref<?xbf16> to memref<64x32xbf16, strided<[4096, 1], offset: ?>>
         %subview_27 = memref.subview %reinterpret_cast_26[0, 0] [%118, %120] [1, 1] {ssbuffer.block_id = 13 : i32} : memref<64x32xbf16, strided<[4096, 1], offset: ?>> to memref<?x?xbf16, strided<[4096, 1], offset: ?>>
         %subview_28 = memref.subview %alloc_23[%117, %119] [%118, %120] [1, 1] {ssbuffer.block_id = 13 : i32} : memref<64x32xbf16> to memref<?x?xbf16, strided<[32, 1], offset: ?>>
         memref.copy %subview_27, %subview_28 {ssbuffer.block_id = 13 : i32} : memref<?x?xbf16, strided<[4096, 1], offset: ?>> to memref<?x?xbf16, strided<[32, 1], offset: ?>>
-        %136 = bufferization.to_tensor %alloc_23 restrict writable {gm_load_bufferable, ssbuffer.block_id = 13 : i32} : memref<64x32xbf16> to tensor<64x32xbf16>
+        %136 = bufferization.to_tensor %alloc_23 restrict writable {gm_load_bufferable, ssbuffer.block_id = 13 : i32} : memref<64x32xbf16>
         %137 = arith.extf %136 {DataUse, ssbuffer.block_id = 13 : i32} : tensor<64x32xbf16> to tensor<64x32xf32>
         %138 = arith.subf %137, %135 {DataUse, ssbuffer.block_id = 13 : i32} : tensor<64x32xf32>
         %reinterpret_cast_29 = memref.reinterpret_cast %arg5 to offset: [%107], sizes: [64, 32], strides: [4096, 1] {ssbuffer.block_id = 13 : i32} : memref<?xbf16> to memref<64x32xbf16, strided<[4096, 1], offset: ?>>
@@ -520,7 +520,7 @@ func.func @_attn_bwd_complex(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: me
         %subview_34 = memref.subview %reinterpret_cast_33[0] [%130] [1] {ssbuffer.block_id = 13 : i32} : memref<64xf32, strided<[32], offset: ?>> to memref<?xf32, strided<[32], offset: ?>>
         %subview_35 = memref.subview %alloc_24[%129] [%130] [1] {ssbuffer.block_id = 13 : i32} : memref<64xf32> to memref<?xf32, strided<[1], offset: ?>>
         memref.copy %subview_34, %subview_35 {ssbuffer.block_id = 13 : i32} : memref<?xf32, strided<[32], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
-        %150 = bufferization.to_tensor %alloc_24 restrict writable {gm_load_bufferable, ssbuffer.block_id = 13 : i32} : memref<64xf32> to tensor<64xf32>
+        %150 = bufferization.to_tensor %alloc_24 restrict writable {gm_load_bufferable, ssbuffer.block_id = 13 : i32} : memref<64xf32>
         %151 = linalg.fill {ssbuffer.block_id = 13 : i32} ins(%148 : f32) outs(%2 : tensor<64xf32>) -> tensor<64xf32>
         %152 = arith.subf %151, %150 {DataUse, ssbuffer.block_id = 13 : i32} : tensor<64xf32>
         %153 = math.exp2 %152 {DataUse, ssbuffer.block_id = 13 : i32} : tensor<64xf32>
@@ -558,10 +558,10 @@ func.func @_attn_bwd_complex(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: me
 
         hivm.hir.sync_block_wait {ssbuffer.block_id = 14 : i32, ssbuffer.transfer_id = 6 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 7
         %memspacecast_40 = memref.memory_space_cast %alloc_8 {ssbuffer.block_id = 14 : i32, ssbuffer.transfer_id = 6 : i32} : memref<64x32xf32, #hivm.address_space<ub>> to memref<64x32xf32>
-        %163 = bufferization.to_tensor %memspacecast_40 restrict writable {ssbuffer.block_id = 14 : i32, ssbuffer.transfer_id = 6 : i32} : memref<64x32xf32> to tensor<64x32xf32>
+        %163 = bufferization.to_tensor %memspacecast_40 restrict writable {ssbuffer.block_id = 14 : i32, ssbuffer.transfer_id = 6 : i32} : memref<64x32xf32>
         hivm.hir.sync_block_wait {ssbuffer.block_id = 14 : i32, ssbuffer.transfer_id = 4 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 5
         %memspacecast_41 = memref.memory_space_cast %alloc_6 {ssbuffer.block_id = 14 : i32, ssbuffer.transfer_id = 4 : i32} : memref<64x32xf32, #hivm.address_space<ub>> to memref<64x32xf32>
-        %164 = bufferization.to_tensor %memspacecast_41 restrict writable {ssbuffer.block_id = 14 : i32, ssbuffer.transfer_id = 4 : i32} : memref<64x32xf32> to tensor<64x32xf32>
+        %164 = bufferization.to_tensor %memspacecast_41 restrict writable {ssbuffer.block_id = 14 : i32, ssbuffer.transfer_id = 4 : i32} : memref<64x32xf32>
         %165 = tensor.empty() {ssbuffer.block_id = 14 : i32} : tensor<1xf32>
         %inserted = tensor.insert %148 into %165[%c0] {ssbuffer.block_id = 14 : i32} : tensor<1xf32>
         %166 = math.exp2 %inserted {DataUse, ssbuffer.block_id = 14 : i32} : tensor<1xf32>
@@ -680,7 +680,7 @@ func.func @_attn_fwd(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf
         %6:5 = scf.for %arg17 = %c0_i32 to %c8192_i32 step %c128_i32 iter_args(%arg18 = %1, %arg19 = %5, %arg20 = %4, %arg21 = %c0_i32, %arg22 = %c0_i32) -> (tensor<128x128xf32>, tensor<128xf32>, tensor<128xf32>, i32, i32)  : i32 {
           hivm.hir.sync_block_wait {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 2
           %memspacecast = memref.memory_space_cast %alloc_5 {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
-          %30 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32> to tensor<128x128xf32>
+          %30 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32>
           %31 = arith.mulf %30, %2 {ssbuffer.block_id = 5 : i32} : tensor<128x128xf32>
           %reduced = linalg.reduce ins(%31 : tensor<128x128xf32>) outs(%4 : tensor<128xf32>) dimensions = [1]  {ssbuffer.block_id = 5 : i32}
             (%in: f32, %init: f32) {
@@ -704,7 +704,7 @@ func.func @_attn_fwd(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf
           hivm.hir.sync_block_set {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 2
           hivm.hir.sync_block_wait {ssbuffer.block_id = 7 : i32, ssbuffer.transfer_id = 2 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 3
           %memspacecast_10 = memref.memory_space_cast %alloc_6 {ssbuffer.block_id = 7 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
-          %37 = bufferization.to_tensor %memspacecast_10 restrict writable {ssbuffer.block_id = 7 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32> to tensor<128x128xf32>
+          %37 = bufferization.to_tensor %memspacecast_10 restrict writable {ssbuffer.block_id = 7 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32>
           %38 = linalg.fill {ssbuffer.block_id = 7 : i32} ins(%cst_1 : f32) outs(%3 : tensor<128xf32>) -> tensor<128xf32>
           %reduced_11 = linalg.reduce ins(%34 : tensor<128x128xf32>) outs(%38 : tensor<128xf32>) dimensions = [1]  {ssbuffer.block_id = 7 : i32}
             (%in: f32, %init: f32) {
@@ -846,7 +846,7 @@ func.func @_attn_fwd(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf
         %22 = arith.index_cast %15 {ssbuffer.block_id = 2 : i32} : i64 to index
         %alloc = memref.alloc() {ssbuffer.block_id = 2 : i32} : memref<128x128xf16>
         memref.copy %reinterpret_cast, %alloc {ssbuffer.block_id = 2 : i32} : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-        %23 = bufferization.to_tensor %alloc restrict writable {gm_load_bufferable, ssbuffer.block_id = 2 : i32} : memref<128x128xf16> to tensor<128x128xf16>
+        %23 = bufferization.to_tensor %alloc restrict writable {gm_load_bufferable, ssbuffer.block_id = 2 : i32} : memref<128x128xf16>
         %alloc_5 = memref.alloc() {ssbuffer.block_id = 11 : i32, ssbuffer.transfer_id = 0 : i32} : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>
         annotation.mark %alloc_5 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<0>, ssbuffer.block_id = 11 : i32, ssbuffer.transfer_id = 0 : i32} : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>
         hivm.hir.sync_block_set {ssbuffer.block_id = 11 : i32, ssbuffer.transfer_id = 0 : i32}[<CUBE>, <PIPE_M>, <PIPE_MTE3>] flag = 1
@@ -861,7 +861,7 @@ func.func @_attn_fwd(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf
           %reinterpret_cast_8 = memref.reinterpret_cast %arg3 to offset: [%27], sizes: [128, 128], strides: [128, 1] {ssbuffer.block_id = 0 : i32} : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
           %alloc_9 = memref.alloc() {ssbuffer.block_id = 0 : i32} : memref<128x128xf16>
           memref.copy %reinterpret_cast_8, %alloc_9 {ssbuffer.block_id = 0 : i32} : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-          %28 = bufferization.to_tensor %alloc_9 restrict writable {gm_load_bufferable, ssbuffer.block_id = 0 : i32} : memref<128x128xf16> to tensor<128x128xf16>
+          %28 = bufferization.to_tensor %alloc_9 restrict writable {gm_load_bufferable, ssbuffer.block_id = 0 : i32} : memref<128x128xf16>
           %29 = tensor.empty() {ssbuffer.block_id = 0 : i32} : tensor<128x128xf16>
           %transposed = linalg.transpose ins(%28 : tensor<128x128xf16>) outs(%29 : tensor<128x128xf16>) permutation = [1, 0]  {ssbuffer.block_id = 0 : i32}
           %30 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 0 : i32} ins(%23, %transposed : tensor<128x128xf16>, tensor<128x128xf16>) outs(%1 : tensor<128x128xf32>) -> tensor<128x128xf32>
@@ -871,14 +871,14 @@ func.func @_attn_fwd(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf
           hivm.hir.sync_block_wait {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 1
           %31 = hivm.hir.convert_layout %alloc_5 output_shape [128, 128] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32} : (memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) -> memref<128x128xf16, #hivm.address_space<cbuf>>
           %memspacecast = memref.memory_space_cast %31 {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32} : memref<128x128xf16, #hivm.address_space<cbuf>> to memref<128x128xf16>
-          %32 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32} : memref<128x128xf16> to tensor<128x128xf16>
+          %32 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32} : memref<128x128xf16>
           %33 = arith.index_cast %arg19 {ssbuffer.block_id = 1 : i32} : i32 to index
           %34 = arith.muli %33, %c128 {ssbuffer.block_id = 1 : i32} : index
           %35 = arith.addi %34, %22 {ssbuffer.block_id = 1 : i32} : index
           %reinterpret_cast_10 = memref.reinterpret_cast %arg4 to offset: [%35], sizes: [128, 128], strides: [128, 1] {ssbuffer.block_id = 1 : i32} : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
           %alloc_11 = memref.alloc() {ssbuffer.block_id = 1 : i32} : memref<128x128xf16>
           memref.copy %reinterpret_cast_10, %alloc_11 {ssbuffer.block_id = 1 : i32} : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-          %36 = bufferization.to_tensor %alloc_11 restrict writable {gm_load_bufferable, ssbuffer.block_id = 1 : i32} : memref<128x128xf16> to tensor<128x128xf16>
+          %36 = bufferization.to_tensor %alloc_11 restrict writable {gm_load_bufferable, ssbuffer.block_id = 1 : i32} : memref<128x128xf16>
           %37 = tensor.empty() {ssbuffer.block_id = 1 : i32} : tensor<128x128xf32>
           %38 = linalg.fill {ssbuffer.block_id = 1 : i32} ins(%cst_1 : f32) outs(%37 : tensor<128x128xf32>) -> tensor<128x128xf32>
           %39 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 1 : i32} ins(%32, %36 : tensor<128x128xf16>, tensor<128x128xf16>) outs(%38 : tensor<128x128xf32>) -> tensor<128x128xf32>

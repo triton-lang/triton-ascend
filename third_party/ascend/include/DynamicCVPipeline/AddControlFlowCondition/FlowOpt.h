@@ -20,43 +20,48 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITION_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_PLAN_CUBE_BLOCK_PASS_H
-#define TRITION_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_PLAN_CUBE_BLOCK_PASS_H
+#ifndef TRITON_ADAPTER_FLOW_OPT_H
+#define TRITON_ADAPTER_FLOW_OPT_H
 
-#include <memory>
-
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Pass/Pass.h"
-
-#include "DynamicCVPipeline/PlanComputeBlock/Common.h"
-#include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
 
 namespace mlir {
 namespace triton {
 
-class PlanCubeBlockPass
-    : public PassWrapper<PlanCubeBlockPass, OperationPass<ModuleOp>> {
+class FlowOptPass : public PassWrapper<FlowOptPass, OperationPass<ModuleOp>> {
 public:
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PlanCubeBlockPass);
+  FlowOptPass() = default;
 
-  PlanCubeBlockPass() = default;
   void runOnOperation() override;
 
-  llvm::StringRef getArgument() const final { return "plan-cube-block"; }
+  void setConditionInfo(ControlFlowConditionInfo *info) { this->info = info; }
+
+  llvm::StringRef getArgument() const override { return "flow-opt"; }
 
 private:
-  SmallVector<Operation *>
-  matchSeed(Operation *dotOp, CVPipeline::ComputeBlockIdManager &bm,
-            const CVPipeline::MemoryDependenceGraph &memGraph);
-  llvm::LogicalResult
-  processBlockWithCubeBFS(Block *block,
-                          const CVPipeline::MemoryDependenceGraph &memGraph,
-                          CVPipeline::ComputeBlockIdManager &bm);
+  // Create new IfOp with updated condition
+  scf::IfOp createNewIfOpWithFlowOptCondition(scf::IfOp oldIfOp,
+                                              Value newCondition);
+
+  // Build the flow optimization condition
+  Value buildFlowOptCondition(OpBuilder &builder, Location loc,
+                              scf::IfOp firstIfOp, scf::ForOp forOp,
+                              Value originalCondition);
+
+  ControlFlowConditionInfo *info = nullptr;
 };
 
-std::unique_ptr<OperationPass<ModuleOp>> createPlanCubeBlockPass();
+std::unique_ptr<OperationPass<ModuleOp>> createFlowOptPass();
+
 } // namespace triton
 } // namespace mlir
 
-#endif // TRITION_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_PLAN_CUBE_BLOCK_PASS_H
+#endif // TRITON_ADAPTER_FLOW_OPT_H

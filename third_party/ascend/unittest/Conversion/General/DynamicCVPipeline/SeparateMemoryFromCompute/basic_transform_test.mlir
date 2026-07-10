@@ -47,7 +47,7 @@ func.func @tc_b01_double_buffer_basic(
     %q_src_rc = memref.reinterpret_cast %arg0 to offset: [%row_off], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
     %q_alloc = memref.alloc () : memref<128x128xf16>
     memref.copy %q_src_rc, %q_alloc : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16> to tensor<128x128xf16>
+    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16>
     %qk = linalg.matmul {input_precision = "ieee"} ins(%q_tensor, %q_tensor : tensor<128x128xf16>, tensor<128x128xf16>) outs(%acc : tensor<128x128xf32>) -> tensor<128x128xf32>
     scf.yield %qk : tensor<128x128xf32>
   }
@@ -83,7 +83,7 @@ func.func @tc_b02_no_marker_pass_through(
     %q_src_rc = memref.reinterpret_cast %arg0 to offset: [%row_off], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
     %q_alloc = memref.alloc () : memref<128x128xf16>
     memref.copy %q_src_rc, %q_alloc : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-    %q_tensor = bufferization.to_tensor %q_alloc restrict writable : memref<128x128xf16> to tensor<128x128xf16>
+    %q_tensor = bufferization.to_tensor %q_alloc restrict writable : memref<128x128xf16>
   }
   return
 }
@@ -114,7 +114,7 @@ func.func @tc_b03_trip_count_too_small(
     %q_src_rc = memref.reinterpret_cast %arg0 to offset: [%row_off], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
     %q_alloc = memref.alloc () : memref<128x128xf16>
     memref.copy %q_src_rc, %q_alloc : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16> to tensor<128x128xf16>
+    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16>
   }
   return
 }
@@ -142,7 +142,7 @@ func.func @tc_b03b_trip_count_minimal_valid(
     %q_src_rc = memref.reinterpret_cast %arg0 to offset: [%row_off], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
     %q_alloc = memref.alloc () : memref<128x128xf16>
     memref.copy %q_src_rc, %q_alloc : memref<128x128xf16, strided<[128, 1], offset: ?>> to memref<128x128xf16>
-    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16> to tensor<128x128xf16>
+    %q_tensor = bufferization.to_tensor %q_alloc restrict writable {gm_load_bufferable} : memref<128x128xf16>
   }
   return
 }
@@ -174,7 +174,7 @@ func.func @tc_b13_no_backing_alloc_skip(
     %row_off = arith.muli %iv_idx, %c128 : index
     // No alloc - direct reinterpret_cast used as to_tensor source
     %q_src_rc = memref.reinterpret_cast %arg0 to offset: [%row_off], sizes: [128, 128], strides: [128, 1] : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
-    %q_tensor = bufferization.to_tensor %q_src_rc restrict writable {gm_load_bufferable} : memref<128x128xf16, strided<[128, 1], offset: ?>> to tensor<128x128xf16>
+    %q_tensor = bufferization.to_tensor %q_src_rc restrict writable {gm_load_bufferable} : memref<128x128xf16, strided<[128, 1], offset: ?>>
   }
   return
 }

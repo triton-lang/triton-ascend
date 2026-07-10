@@ -29,6 +29,7 @@
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -398,6 +399,17 @@ void OpClassifierPass::matchMaterializePattern(Operation *user) {
   cubeSeeds.push_back(user);
 }
 
+static bool allResultHasOneUser(Operation *op) {
+  bool ret = true;
+  for (Value result : op->getResults()) {
+    if (!result.hasOneUse()) {
+      ret = false;
+      break;
+    }
+  }
+  return ret;
+}
+
 // Pattern matching for CUBE operations
 int OpClassifierPass::patternMatchCUBE() {
   LOG_DEBUG("--- Step 1: pattern match --->\n");
@@ -439,10 +451,16 @@ int OpClassifierPass::patternMatchCUBE() {
 
     // ---- Downstream pattern matching ----
     for (Value result : op->getResults()) {
+      if (!result.hasOneUse()) {
+        continue;
+      }
       for (Operation *user : result.getUsers()) {
         // If user is scf.yield, follow the chain to find real users
         Operation *curUser = user;
         while (curUser) {
+          if (!allResultHasOneUser(curUser)) {
+            break;
+          }
           if (auto yieldOp = dyn_cast<scf::YieldOp>(curUser)) {
             if (Operation *scfOp = yieldOp->getParentOp()) {
               // Find which operand index the previous result corresponds to in
@@ -899,6 +917,91 @@ int OpClassifierPass::propagateVectorUpstream() {
           static_cast<OpCoreType>(opCoreTypes[def] | OP_VECTOR_ONLY);
       vecQueue.push(def);
     }
+  }
+
+  return 0;
+}
+
+namespace {
+
+// A loader loop may only contain data-movement and (scalar) index computation.
+// Any tensor-producing compute op means the loop does real vector work and must
+// not be swallowed into the cube pipe.
+bool isDisqualifyingLoaderOp(Operation *op) {
+  if (isa<linalg::MatmulOp, linalg::ReduceOp, linalg::BroadcastOp,
+          linalg::GenericOp, linalg::MapOp>(op)) {
+    return true;
+  }
+  if (isa<math::MathDialect>(op->getDialect())) {
+    return true;
+  }
+  // Elementwise arith on tensors is vector compute; scalar index math is fine.
+  if (isa<arith::ArithDialect>(op->getDialect())) {
+    for (Value result : op->getResults()) {
+      if (isa<RankedTensorType>(result.getType())) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+} // namespace
+
+bool OpClassifierPass::isCubeLoaderForOp(scf::ForOp forOp) {
+  // Every result must be live and used only by CUBE consumers. A single
+  // non-cube (or scf.yield) user disqualifies the loop.
+  bool hasCubeConsumer = false;
+  for (Value result : forOp.getResults()) {
+    for (Operation *user : result.getUsers()) {
+      if (isa<linalg::MatmulOp>(user) || getCoreType(user) == OP_CUBE_ONLY) {
+        hasCubeConsumer = true;
+        continue;
+      }
+      return false;
+    }
+  }
+  if (!hasCubeConsumer) {
+    return false;
+  }
+
+  // The body (including nested regions) must be pure data movement.
+  bool disqualified = false;
+  forOp.getBody()->walk([&](Operation *op) {
+    if (op == forOp.getOperation()) {
+      return WalkResult::advance();
+    }
+    if (isDisqualifyingLoaderOp(op)) {
+      disqualified = true;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return !disqualified;
+}
+
+int OpClassifierPass::penetrateCubeIntoForLoops() {
+  // Collect first so recoloring earlier loops cannot perturb the scan.
+  llvm::SmallVector<scf::ForOp> loaderLoops;
+  getOperation().walk([&](scf::ForOp forOp) {
+    if (isCubeLoaderForOp(forOp)) {
+      loaderLoops.push_back(forOp);
+    }
+  });
+
+  for (scf::ForOp forOp : loaderLoops) {
+    // Set core_type to OP_CUBE_ONLY for scf.for.
+    forOp.getBody()->walk([&](Operation *op) {
+      if (op == forOp.getOperation() ||
+          isa<scf::SCFDialect>(op->getDialect())) {
+        return;
+      }
+      auto it = opCoreTypes.find(op);
+      if (it != opCoreTypes.end()) {
+        it->second = OP_CUBE_ONLY;
+      }
+    });
+    opCoreTypes[forOp] = OP_CUBE_ONLY;
   }
 
   return 0;
@@ -1478,31 +1581,38 @@ void OpClassifierPass::runOnOperation() {
     return;
   }
 
-  // Step 3: Mark remaining operations as VECTOR
+  // Step 3: Penetrate CUBE coloring into pure loader for-loops.
+  if (CVPipeline::isCubeBlockMergeEnabled() &&
+      penetrateCubeIntoForLoops() != 0) {
+    signalPassFailure();
+    return;
+  }
+
+  // Step 4: Mark remaining operations as VECTOR
   if (markRemainingAsVector() != 0) {
     signalPassFailure();
     return;
   }
 
-  // Step 4: VECTOR upstream BFS
+  // Step 5: VECTOR upstream BFS
   if (propagateVectorUpstream() != 0) {
     signalPassFailure();
     return;
   }
 
-  // Step 5: Handle CUBE_AND_VECTOR operations
+  // Step 6: Handle CUBE_AND_VECTOR operations
   if (handleCubeAndVector() != 0) {
     signalPassFailure();
     return;
   }
 
-  // Step 6: Process SCF yield results
+  // Step 7: Process SCF yield results
   if (handleSCFYield() != 0) {
     signalPassFailure();
     return;
   }
 
-  // Step 7: Stamp to IR
+  // Step 8: Stamp to IR
   if (stampToIR() != 0) {
     signalPassFailure();
     return;

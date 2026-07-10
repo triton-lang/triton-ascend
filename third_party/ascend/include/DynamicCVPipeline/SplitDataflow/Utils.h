@@ -20,43 +20,19 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITION_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_PLAN_CUBE_BLOCK_PASS_H
-#define TRITION_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_PLAN_CUBE_BLOCK_PASS_H
+#ifndef TRITON_ADAPTER_SPLIT_DATAFLOW_UTILS_H
+#define TRITON_ADAPTER_SPLIT_DATAFLOW_UTILS_H
 
-#include <memory>
-
-#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
-#include "mlir/Pass/Pass.h"
-
-#include "DynamicCVPipeline/PlanComputeBlock/Common.h"
-#include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "llvm/ADT/StringRef.h"
 
 namespace mlir {
 namespace triton {
 
-class PlanCubeBlockPass
-    : public PassWrapper<PlanCubeBlockPass, OperationPass<ModuleOp>> {
-public:
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PlanCubeBlockPass);
+void setOpBlockId(mlir::Operation *op, int blockId);
+void setOpCoreType(mlir::Operation *op, llvm::StringRef coreType);
 
-  PlanCubeBlockPass() = default;
-  void runOnOperation() override;
-
-  llvm::StringRef getArgument() const final { return "plan-cube-block"; }
-
-private:
-  SmallVector<Operation *>
-  matchSeed(Operation *dotOp, CVPipeline::ComputeBlockIdManager &bm,
-            const CVPipeline::MemoryDependenceGraph &memGraph);
-  llvm::LogicalResult
-  processBlockWithCubeBFS(Block *block,
-                          const CVPipeline::MemoryDependenceGraph &memGraph,
-                          CVPipeline::ComputeBlockIdManager &bm);
-};
-
-std::unique_ptr<OperationPass<ModuleOp>> createPlanCubeBlockPass();
 } // namespace triton
 } // namespace mlir
 
-#endif // TRITION_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_PLAN_CUBE_BLOCK_PASS_H
+#endif // TRITON_ADAPTER_SPLIT_DATAFLOW_UTILS_H

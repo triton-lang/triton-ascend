@@ -105,7 +105,7 @@ static LogicalResult getCommonBlockId(ArrayRef<Operation *> ops, int &blockId) {
       for (auto *user : op->getUsers()) {
         if (auto copyOp = dyn_cast<memref::CopyOp>(user)) {
           if (auto blockId = CVPipeline::getOpBlockId(copyOp)) {
-            copyBlockIds.insert(static_cast<int>(*blockId));
+            copyBlockIds.insert(*blockId);
           }
         }
       }

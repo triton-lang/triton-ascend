@@ -76,6 +76,9 @@ bool ComputeBlockIdManager::isSameBlock(Operation *a, Operation *b) {
 int ComputeBlockIdManager::getNextId() { return cntComputeBlockId++; }
 
 void ComputeBlockIdManager::updateBlockId(Operation *op, int blockId) {
+  if (!op) {
+    return;
+  }
   // Force Update.
   MLIRContext *ctx = op->getContext();
   if (blockId == -1) {

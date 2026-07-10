@@ -27,6 +27,7 @@
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/IRMapping.h"
 #include "llvm/ADT/STLExtras.h"
@@ -238,6 +239,12 @@ static bool shouldEraseOpForCube(
           if (isa<SyncBlockWaitOp>(execOp) || isa<SyncBlockSetOp>(execOp)) {
             return false;
           }
+          // scf.if whose body only contains sync_block_wait/sync_block_set ops
+          // will be cleaned up in its own turn; skip it here so it does not
+          // block the current op's erasure.
+          if (isIfOpWithOnlySyncOps(execOp)) {
+            return false;
+          }
           auto execBlockId = CVPipeline::getOpBlockId(execOp);
           return execBlockId && opBlockId && *execBlockId == *opBlockId;
         });
@@ -442,6 +449,9 @@ LogicalResult CloneOpsPass::validateClonedOpsInVector(ModuleOp module) {
 
     for (Operation &bodyOp : forOp.getBody()->without_terminator()) {
       if (!bodyOp.hasAttr(CVPipeline::kClone)) {
+        continue;
+      }
+      if (isa<tensor::EmptyOp>(bodyOp)) {
         continue;
       }
       bool hasTensorDep = llvm::any_of(bodyOp.getResults(), [](Value result) {

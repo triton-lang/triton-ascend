@@ -1,3 +1,4 @@
+
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
  *
@@ -20,25 +21,24 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
-#define TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
-#include "mlir/IR/BuiltinOps.h"
-#include "mlir/Pass/Pass.h"
+#include "mlir/IR/Operation.h"
+#include "llvm/ADT/StringRef.h"
 
-namespace mlir {
-namespace triton {
+using namespace mlir;
+using namespace llvm;
 
-std::unique_ptr<OperationPass<ModuleOp>> createUBUsageOptPass();
-std::unique_ptr<OperationPass<ModuleOp>> createUnifyAllocBlockPass();
-void registerUnifyAllocBlockPass();
-std::unique_ptr<OperationPass<ModuleOp>> createMergeVectorIfBlockPass();
-void registerMergeVectorIfBlockPass();
-std::unique_ptr<OperationPass<ModuleOp>> createMergeCubeForBlockPass();
-void registerMergeCubeForBlockPass();
-std::unique_ptr<OperationPass<ModuleOp>> createFixpipeOptPass();
+void triton::setOpBlockId(mlir::Operation *op, int blockId) {
+  static constexpr int kIntegerBitWidth = 32;
+  op->setAttr(
+      CVPipeline::kBlockId,
+      IntegerAttr::get(IntegerType::get(op->getContext(), kIntegerBitWidth),
+                       blockId));
+}
 
-} // namespace triton
-} // namespace mlir
-
-#endif // TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
+void triton::setOpCoreType(mlir::Operation *op, llvm::StringRef coreType) {
+  op->setAttr(CVPipeline::kCoreType,
+              StringAttr::get(op->getContext(), coreType));
+}

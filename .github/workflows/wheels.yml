@@ -62,7 +62,7 @@ jobs:
           path: |
             ${{ github.workspace }}/${{ matrix.branch.path }}/.triton-cache
             ${{ github.workspace }}/${{ matrix.branch.path }}/.ccache
-          key: wheels-${{ matrix.config.arch }}-${{ matrix.python }}-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
+          key: wheels-${{ matrix.config.arch }}-${{ matrix.python }}-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
           restore-keys: |
             wheels-${{ matrix.config.arch }}-${{ matrix.python }}-
 

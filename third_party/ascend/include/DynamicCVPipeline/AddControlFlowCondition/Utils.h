@@ -57,7 +57,7 @@ LogicalResult topologicalSort(SmallVector<Operation *> &ops);
 SmallVector<int> getBlockIdsInOrder(scf::ForOp forOp);
 
 // Get the block_id of the immediate child of scf.for that contains op
-std::optional<int64_t> getForDirectChildBlockId(Operation *op);
+std::optional<int> getForDirectChildBlockId(Operation *op);
 
 // Find the tcb group id that contains value v
 int findTcbGroupId(
@@ -67,6 +67,11 @@ int findTcbGroupId(
 // Set isCube/isVector based on the scope's tcore_type attribute
 // Returns failure if scopeOp does not have tcore_type attribute
 LogicalResult getScopeType(Operation *scopeOp, bool &isCube, bool &isVector);
+
+// Check if op is a scf.if whose body only contains hivm.hir.sync_block_wait,
+// hivm.hir.sync_block_set and hivm.fixpipe ops (excluding terminators).
+// Returns false if op is not a scf.if or contains any other op.
+bool isIfOpWithOnlySyncOps(Operation *op);
 
 } // namespace triton
 } // namespace mlir

@@ -39,8 +39,7 @@ static constexpr const char *DEBUG_TYPE = "PatternMatchRewrites";
 #define LOG_DEBUG(...)                                                         \
   LLVM_DEBUG(llvm::dbgs() << "\n[" << DEBUG_TYPE << "] " << __VA_ARGS__ << "\n")
 
-static constexpr llvm::StringLiteral needSplitAllFuncNme[]{
-    "_swa_bwd_dq_kernel", "_swa_bwd_dkdv_kernel"};
+static constexpr llvm::StringLiteral needSplitAllFuncNme[]{""};
 
 void PatternMatchRewritePass::runOnOperation() {
   auto moduleOp = getOperation();

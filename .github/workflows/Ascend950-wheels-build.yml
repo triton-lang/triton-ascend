@@ -11,7 +11,7 @@ on:
       - '.github/CODEOWNERS'
       - '.github/dependabot.yml'
       - 'cmake/llvm-hash.txt'
-      - 'third_party/ascend/llvm_patch/**'
+      - 'third_party/ascend/patch/**'
       - 'docker/**'
       - 'requirements.txt'
       - 'requirements_dev.txt'
@@ -62,7 +62,7 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ${{ github.workspace }}/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-wheels-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-wheels-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-wheels
 
       - name: Build and install triton-ascend

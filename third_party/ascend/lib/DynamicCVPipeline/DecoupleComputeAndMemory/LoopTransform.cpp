@@ -355,15 +355,15 @@ ExtendedForInfo buildExtendedFor(OpBuilder &builder, Location loc,
                                  scf::ForOp forOp, ArrayRef<LoadGroup> groups,
                                  ConstantCache &cache) {
   builder.setInsertionPoint(forOp);
-  int numOrig = static_cast<int>(forOp.getInitArgs().size());
+  size_t numOrig = forOp.getInitArgs().size();
   int depth = groups.empty() ? 0 : groups[0].depth;
 
   Value falseVal = cache.getFalse(builder, loc);
   Value zeroIndex = cache.getIndex(builder, loc, 0);
 
   SmallVector<Value> inits;
-  inits.reserve(numOrig + static_cast<int>(groups.size()) *
-                              (depth + kLoadGroupCounterIterArgCount));
+  inits.reserve(numOrig +
+                groups.size() * (depth + kLoadGroupCounterIterArgCount));
   for (Value initArg : forOp.getInitArgs()) {
     inits.push_back(initArg);
   }
@@ -396,7 +396,7 @@ ExtendedForInfo buildExtendedFor(OpBuilder &builder, Location loc,
   builder.setInsertionPointToEnd(newBody);
 
   SmallVector<GroupIterArgs> groupArgs;
-  int argOffset = numOrig;
+  size_t argOffset = numOrig;
   for (auto &group : groups) {
     GroupIterArgs groupIterArgs;
     for (int slotIdx = 0; slotIdx < group.depth; ++slotIdx) {
@@ -413,8 +413,14 @@ ExtendedForInfo buildExtendedFor(OpBuilder &builder, Location loc,
     groupArgs.push_back(std::move(groupIterArgs));
   }
 
-  return {newFor,   oldBody, newBody, std::move(mapping), std::move(groupArgs),
-          falseVal, numOrig, depth};
+  return {newFor,
+          oldBody,
+          newBody,
+          std::move(mapping),
+          std::move(groupArgs),
+          falseVal,
+          static_cast<int>(numOrig),
+          depth};
 }
 
 // ============================================================================

@@ -191,6 +191,19 @@ LogicalResult tryRewriteIndirectFastPath(MemAccOpTy op, Location loc,
            "src must be ptr type");
     Value value = op.getValue();
     Value mask = op.getMask();
+
+    // For bool store, unwrap ptr<i1> -> ptr<i8> bitcast before creating
+    // indirect_store. Keep ptr<i1> so TypeConverter can map it to memref<?xi8>.
+    if (auto bitcastOp = srcPtr.getDefiningOp<triton::BitcastOp>()) {
+      auto srcPtrTy =
+          dyn_cast<triton::PointerType>(bitcastOp.getSrc().getType());
+      auto dstPtrTy = dyn_cast<triton::PointerType>(bitcastOp.getType());
+
+      if (srcPtrTy && dstPtrTy && srcPtrTy.getPointeeType().isInteger(1) &&
+          dstPtrTy.getPointeeType().isInteger(8)) {
+        srcPtr = bitcastOp.getSrc();
+      }
+    }
     auto indirect = rewriter.create<triton::ascend::IndirectStoreOp>(
         loc, srcPtr, ptrOffset, value, mask);
     rewriter.eraseOp(op);

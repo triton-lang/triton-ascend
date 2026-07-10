@@ -28,6 +28,8 @@
 #include "llvm/ADT/StringRef.h"
 #include <string_view>
 
+#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+
 namespace mlir {
 namespace CVPipeline {
 
@@ -52,6 +54,11 @@ inline constexpr llvm::StringLiteral kLoopCarriedL0C =
 inline constexpr llvm::StringLiteral kCrossDeps = "ssbuffer.crossDeps";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
 inline constexpr llvm::StringLiteral kClone = "ssbuffer.clone";
+inline constexpr llvm::StringLiteral kFlowOpt = "ssbuffer.flowOpt";
+static constexpr llvm::StringLiteral kInlinableQuantScaleAttr =
+    "enable_fast_tf32_mul";
+inline constexpr llvm::StringLiteral kHIVMMatmulLimitedInCubeAttr =
+    "hivm.matmul_limited_in_cube";
 inline constexpr const char *ERRCODE_ATTR =
     "triton_ascend.dynamic_cv_pipeline.rc";
 static constexpr const int ERRCODE_FAILED = 1;
@@ -75,13 +82,18 @@ inline constexpr CoreType fromStrCoreType(std::string_view s) {
   return CoreType::UNDETERMINED;
 }
 
+void setEnableCubeBlockMerge(bool enable);
+bool isCubeBlockMergeEnabled();
+
 // Functions for managing core types
 CoreType getOpCoreType(Operation *op);
-std::optional<int64_t> getOpBlockId(Operation *op);
+std::optional<int> getOpBlockId(Operation *op);
 llvm::LogicalResult verifyOpBlockId(Operation *op);
 int getAvailableBlockId(ModuleOp module);
 void setFallbackAttr(ModuleOp module);
 bool isScfOp(Operation *op);
+bool isOnlyDirectlyUse(Operation *preOp, Operation *nextOp,
+                       const CVPipeline::MemoryDependenceGraph &memGraph);
 
 inline bool isCubeOp(Operation *op) {
   return !isScfOp(op) && CVPipeline::getOpCoreType(op) == CoreType::CUBE_ONLY;

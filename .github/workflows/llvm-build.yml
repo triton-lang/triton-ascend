@@ -6,13 +6,13 @@ on:
   # push:
   #   paths:
   #     - cmake/llvm-hash.txt
-  #     - third_party/ascend/llvm_patch/**
+  #     - third_party/ascend/patch/**
   #     - .github/workflows/llvm-build.yml
   #     - .github/workflows/llvm-build/**
   # pull_request:
   #   paths:
   #     - cmake/llvm-hash.txt
-  #     - third_party/ascend/llvm_patch/**
+  #     - third_party/ascend/patch/**
   #     - .github/workflows/llvm-build.yml
   #     - .github/workflows/llvm-build/**
   workflow_dispatch:
@@ -62,10 +62,10 @@ jobs:
     - name: Compute Patch Hash
       shell: bash
       run: |
-        PATCH_DIR="llvm-build/third_party/ascend/llvm_patch"
-        if [ -d "${PATCH_DIR}" ] && find "${PATCH_DIR}" -maxdepth 1 -type f -name '*.patch' -print -quit | grep -q .; then
+        PATCH_DIR="llvm-build/third_party/ascend/patch"
+        if [ -d "${PATCH_DIR}" ] && find "${PATCH_DIR}" -maxdepth 1 -type f -name 'llvm_patch_*.patch' -print -quit | grep -q .; then
           PATCH_HASH=$(
-            LC_ALL=C find "${PATCH_DIR}" -maxdepth 1 -type f -name '*.patch' -print0 \
+            LC_ALL=C find "${PATCH_DIR}" -maxdepth 1 -type f -name 'llvm_patch_*.patch' -print0 \
               | sort -z \
               | xargs -0 cat \
               | sha256sum \
@@ -93,10 +93,10 @@ jobs:
       shell: bash
       run: |
         LLVM_SHORT="${{ env.short_llvm_commit_hash }}"
-        PATCH_DIR="llvm-build/third_party/ascend/llvm_patch"
+        PATCH_DIR="llvm-build/third_party/ascend/patch"
         if [ -d "${PATCH_DIR}" ]; then
           cd llvm-project
-          for patchfile in ${GITHUB_WORKSPACE}/${PATCH_DIR}/*.patch; do
+          for patchfile in ${GITHUB_WORKSPACE}/${PATCH_DIR}/llvm_patch_*.patch; do
             if [ -f "$patchfile" ]; then
               echo "Applying $patchfile..."
               git apply "$patchfile"

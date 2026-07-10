@@ -1714,20 +1714,26 @@ hasMemrefDepValue(DenseMap<Value, SmallVector<Value>> &depValueMap) {
 static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp,
                                OpBuilder &builder, scope::ScopeOp vectorScope,
                                int &groupId) {
-  // Break tensor-rooted cross-block scalar dependencies before collecting deps
-  rematerializeTensorRootedScalarDeps(mainLoopForOp);
-
   OpBuilder globalBuilder(mainLoopForOp.getContext());
 
-  // First pass: clone tensor::EmptyOp + linalg::FillOp patterns into each
-  // consumer's block. The cloned fill's `ins` chain can introduce fresh
-  // cross-block references (e.g. a producer-side tensor referenced by the
-  // cloned tensor.extract) that need multi-buffering. To avoid missing those
-  // deps, we do dep collection in two phases:
-  //   Phase 1 (initial): collect deps, build user map, then clone.
+  // Two-phase dep collection for empty+fill cloning:
+  //   Phase 1 (initial): collect deps, build user map, then clone the
+  //                      tensor::EmptyOp + linalg::FillOp pattern into each
+  //                      consumer's block. The cloned fill's `ins` chain can
+  //                      introduce fresh cross-block references (e.g. a
+  //                      producer-side tensor referenced by the cloned
+  //                      tensor.extract / arith.extf).
+  //   Scalar rematerialize: trace each cloned fill's `ins` chain. If the
+  //                        chain reaches a producer-side tensor (via
+  //                        tensor.extract / arith.extf), build a fresh
+  //                        block-local chain that reads from a new
+  //                        multi-buffer added in Phase 2.
   //   Phase 2 (re-collect): re-run collectInnerBlockInfo / buildDepUserMap
-  //                        so the new cross-block refs (created by Phase 1's
-  //                        clones) are visible to processTensorDependencies.
+  //                        so the new cross-block refs (from clone + scalar
+  //                        rematerialize) are visible to the multi-buffer
+  //                        pipeline. The multi-buffer transfer structure
+  //                        (allocs, scf.if, intraDeps, intra_buffer) is
+  //                        created here and is not affected by the reorder.
   DenseMap<Value, InnerBlockInfo> blocks;
   DenseMap<Value, SmallVector<Value>> depValueMap;
   SmallVector<Operation *> allOps;
@@ -1746,9 +1752,17 @@ static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp,
                               initialDepUserMap, globalBuilder) != 0)
     return -1;
 
-  // Phase 2: re-collect deps now that cloned ops have created new
-  // cross-block references. depValueMap and allOps are cleared inside
-  // collectInnerBlockInfo, so we re-discover everything from scratch.
+  // Break tensor-rooted cross-block scalar dependencies AFTER the empty+fill
+  // clone. The clone can introduce fresh scalar refs (e.g. a cloned
+  // arith.extf whose operand is a producer-side tensor.extract) that need to
+  // be rematerialized to a block-local chain reading from a Phase-2
+  // multi-buffer. Running this before the clone leaves these refs invisible.
+  rematerializeTensorRootedScalarDeps(mainLoopForOp);
+
+  // Phase 2: re-collect deps now that cloned ops (and rematerialized scalar
+  // chains) have created new cross-block references. depValueMap and allOps
+  // are cleared inside collectInnerBlockInfo, so we re-discover everything
+  // from scratch.
   blocks.clear();
   depValueMap.clear();
   allOps.clear();

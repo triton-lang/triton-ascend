@@ -133,9 +133,9 @@ Value FlowOptPass::buildFlowOptCondition(OpBuilder &builder, Location loc,
 
     // Build condition: counter >= lowerBound + step*(opt_num)
     // opt_num = min(intra-buffer size - 1, cross-buffer size)
-    using BufferCountManager = mlir::triton::BufferCountManager;
-    int intraBufNum = BufferCountManager::getInstance().getBufferCountByType(BufferCountManager::DepType::IntraCore);
-    int crossBufNum = BufferCountManager::getInstance().getBufferCountByType(BufferCountManager::DepType::InterCore);
+    BufferCountManager bufferCountMgr(forOp);
+    int intraBufNum = bufferCountMgr.getBufferCountByType(BufferCountManager::DepType::IntraCore);
+    int crossBufNum = bufferCountMgr.getBufferCountByType(BufferCountManager::DepType::InterCore);
     int optInt = std::min(intraBufNum - 1, crossBufNum);
 
     Value optNum = builder.create<arith::ConstantIntOp>(loc, optInt, step.getType());

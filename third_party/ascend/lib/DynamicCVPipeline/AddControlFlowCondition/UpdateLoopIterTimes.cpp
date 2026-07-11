@@ -70,7 +70,7 @@ static int addEquivalentOps(Operation *op, SmallVector<Operation*> &tcbOps, Smal
 
 // Helper: Find the tcb group id that contains operation op
 // Returns the group id if found, -1 otherwise
-static int findTcbGroupIdForOp(Operation *op, DenseMap<int, SmallVector<Operation*>> &tightlyCoupledBufferGroups)
+static int findTcbGroupIdForOp(Operation *op, llvm::DenseMap<int, SmallVector<Operation*>> &tightlyCoupledBufferGroups)
 {
   for (auto &tcbEntry : tightlyCoupledBufferGroups) {
     if (llvm::is_contained(tcbEntry.second, op)) {

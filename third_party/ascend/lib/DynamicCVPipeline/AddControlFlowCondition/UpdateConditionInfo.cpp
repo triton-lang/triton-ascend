@@ -132,24 +132,23 @@ SmallVector<SmallVector<Value>> UpdateConditionInfoPass::allocSSBuffer(ModuleOp 
 }
 
 // Collect dependency buffer
+// All buffer maps are now Operation* based: key is consumer op, value is list of producer ops
 void UpdateConditionInfoPass::collectDependencyBuffers(
     ModuleOp module, SmallVector<scf::ForOp> &mainLoopForOps,
-    DenseMap<int, DenseMap<Value, SmallVector<Value>>> &crossCoreBuffers,
+    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &crossCoreBuffers,
     DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &memCrossCoreBuffers,
-    DenseMap<scf::ForOp, DenseMap<int, DenseMap<Value, SmallVector<Value>>>> &intraCoreBuffersMap)
+    DenseMap<scf::ForOp, DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>> &intraCoreBuffersMap)
 {
 // Collect crossCoreBuffers and memCrossCoreBuffers by traversing module in deterministic order
   int crossCoreIdx = 0;
   int memCrossCoreIdx = 0;
   int memCrossCoreOffset = info->crossCoreDependentMap.size();
   module.walk([&](Operation *op) {
-    // Collect crossCoreBuffers for this op's results
-    for (Value result : op->getResults()) {
-      auto it = info->crossCoreDependentMap.find(result);
-      if (it != info->crossCoreDependentMap.end()) {
-        crossCoreBuffers[crossCoreIdx][result] = it->second;
-        crossCoreIdx++;
-      }
+    // Collect crossCoreBuffers for this op (directly look up in crossCoreDependentMap, no result iteration needed)
+    auto it = info->crossCoreDependentMap.find(op);
+    if (it != info->crossCoreDependentMap.end()) {
+      crossCoreBuffers[crossCoreIdx][op] = it->second;
+      crossCoreIdx++;
     }
 
     // Collect memCrossCoreBuffers for this op
@@ -167,7 +166,7 @@ void UpdateConditionInfoPass::collectDependencyBuffers(
   for (scf::ForOp forOp : mainLoopForOps) {
     if (info->intraCoreDependentMap.count(forOp)) {
       auto &forOpDeps = info->intraCoreDependentMap[forOp];
-      DenseMap<int, DenseMap<Value, SmallVector<Value>>> intraCoreBuffers;
+      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> intraCoreBuffers;
       int intraCoreIdx = 0;
       for (auto &entry : forOpDeps) {
         intraCoreBuffers[intraCoreIdx][entry.first] = entry.second;
@@ -178,32 +177,32 @@ void UpdateConditionInfoPass::collectDependencyBuffers(
   }
 }
 
-// Helper: Find the tcb group id that contains value v
+// Helper: Find the tcb group id that contains producer op
 // Returns the group id if found, -1 otherwise
-static int findTcbGroupId(Value v, DenseMap<int, SmallVector<Value>> &tightlyCoupledBufferGroups)
+static int findTcbGroupId(Operation *op, DenseMap<int, SmallVector<Operation*>> &tightlyCoupledBufferGroups)
 {
   for (auto &tcbEntry : tightlyCoupledBufferGroups) {
-    if (llvm::is_contained(tcbEntry.second, v)) {
+    if (llvm::is_contained(tcbEntry.second, op)) {
       return tcbEntry.first;
     }
   }
   return UPDATE_CONDITION_INFO_FAILED;
 }
 
-// Helper: Add all equivalent values from tcbValues to values (excluding v itself)
-int addEquivalentValues(Value v, SmallVector<Value> &tcbValues, SmallVector<Value> &values)
+// Helper: Add all equivalent producer ops from tcbOps to producers (excluding op itself)
+int addEquivalentOps(Operation *op, SmallVector<Operation*> &tcbOps, SmallVector<Operation*> &producers)
 {
   int ret = -1;
-  for (Value equivValue : tcbValues) {
-    if (equivValue != v && !llvm::is_contained(values, equivValue)) {
+  for (Operation *equivOp : tcbOps) {
+    if (equivOp != op && !llvm::is_contained(producers, equivOp)) {
       ret = 0;
-      values.push_back(equivValue);
+      producers.push_back(equivOp);
     }
   }
   return ret;
 }
 
-// Buffers in cube/vector scope are different value
+// Buffers in cube/vector scope are different operations but represent the same logical buffer
 // scope {
 //   %alloc_5 = memref.alloc()
 //   annotation.mark %alloc_5 {hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<1>}
@@ -214,18 +213,18 @@ int addEquivalentValues(Value v, SmallVector<Value> &tcbValues, SmallVector<Valu
 //   bufferization.to_tensor %alloc_6
 //   annotation.mark %alloc_6 {hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<1>}
 // } {VECTOR}
-// % alloc_5 and alloc_6 have the same tightly_coupled_buffer id indicates they are the same buffer
-// crossCoreBuffers only include producer buffers in one scope: {cosumer: {%alloc_6}, ...}
-// This function is to extend crossCoreBuffers to include producer buffers in another scope: {cosumer: {%alloc_6, %alloc_5}, ...}
-DenseMap<int, DenseMap<Value, SmallVector<Value>>> UpdateConditionInfoPass::extendCrossCoreBuffersWithEquivalentValues(
-    ModuleOp module, DenseMap<int, DenseMap<Value, SmallVector<Value>>> crossCoreBuffers)
+// alloc_5 and alloc_6 ops have the same tightly_coupled_buffer id indicates they are the same logical buffer
+// crossCoreBuffers only include producer ops in one scope: {consumerOp: {alloc_6}, ...}
+// This function extends crossCoreBuffers to include producer ops in another scope: {consumerOp: {alloc_6, alloc_5}, ...}
+DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> UpdateConditionInfoPass::extendCrossCoreBuffersWithEquivalentValues(
+    ModuleOp module, DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> crossCoreBuffers)
 {
   // Error map to return when error occurs
-  DenseMap<int, DenseMap<Value, SmallVector<Value>>> errorMap;
-  errorMap[-1] = DenseMap<Value, SmallVector<Value>>();
+  DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> errorMap;
+  errorMap[-1] = DenseMap<Operation*, SmallVector<Operation*>>();
 
-  // copy from crossCoreBuffers
-  DenseMap<int, DenseMap<Value, SmallVector<Value>>> extendedCrossCoreBuffers;
+  // copy from crossCoreBuffers (preserve exact original copy behavior)
+  DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> extendedCrossCoreBuffers;
   for (auto &entry : crossCoreBuffers) {
     int groupIdx = entry.first;
     for (auto &entry2 : entry.second) {
@@ -233,9 +232,9 @@ DenseMap<int, DenseMap<Value, SmallVector<Value>>> UpdateConditionInfoPass::exte
     }
   }
 
-  // Get the buffers have the same tightly_coupled_buffer id
+  // Get the buffer ops that have the same tightly_coupled_buffer id (Operation* level)
   int ret = 0;
-  DenseMap<int, SmallVector<Value>> tightlyCoupledBufferGroups;
+  DenseMap<int, SmallVector<Operation*>> tightlyCoupledBufferGroups;
   WalkResult walkResult = module.walk([&](Operation *op) -> WalkResult {
     if (isa<annotation::MarkOp>(op)) {
       if (auto tcbAttr = op->getAttrOfType<hivm::HIVMTightlyCoupledBufferAttr>("hivm.tightly_coupled_buffer")) {
@@ -243,7 +242,10 @@ DenseMap<int, DenseMap<Value, SmallVector<Value>>> UpdateConditionInfoPass::exte
         if (id.has_value()) {
           int tcb = id.value();
           Value markedValue = op->getOperand(0);
-          tightlyCoupledBufferGroups[tcb].push_back(markedValue);
+          Operation *markedOp = markedValue.getDefiningOp();
+          if (markedOp) {
+            tightlyCoupledBufferGroups[tcb].push_back(markedOp);
+          }
         } else {
           ret = -1;
           LDBG("hivm.tightly_coupled_buffer Attribute has no id!" << "\n");
@@ -257,23 +259,25 @@ DenseMap<int, DenseMap<Value, SmallVector<Value>>> UpdateConditionInfoPass::exte
     return errorMap;
   }
 
-  // Extend crossCoreBuffers to include producer buffers in another scope
+  // Extend crossCoreBuffers to include producer ops in another scope
   for (auto &entry : extendedCrossCoreBuffers) {
     int groupIdx = entry.first;
     for (auto &deps : entry.second) {
-      SmallVector<Value> &producers = deps.second;
-      for (Value buffer : producers) {
-        auto producerDefOp = buffer.getDefiningOp();
-        if (!isa<memref::AllocOp>(producerDefOp)) {
-          // this crossdependency is not the stardard cross dependency
+      SmallVector<Operation*> &producers = deps.second;
+      // Make a copy of producers size to iterate over original producers only (not newly added ones)
+      size_t originalProducerCount = producers.size();
+      for (size_t i = 0; i < originalProducerCount; i++) {
+        Operation *producerOp = producers[i];
+        if (!isa<memref::AllocOp>(producerOp)) {
+          // this crossdependency is not the standard cross dependency
           continue;
         }
-        int tcbGroupId = findTcbGroupId(buffer, tightlyCoupledBufferGroups);
+        int tcbGroupId = findTcbGroupId(producerOp, tightlyCoupledBufferGroups);
         if (tcbGroupId == -1) {
-          LDBG("Can not find tightly_coupled_buffer id of: " << buffer << "\n");
+          LDBG("Can not find tightly_coupled_buffer id of op: " << *producerOp << "\n");
           return errorMap;
         }
-        if (addEquivalentValues(buffer, tightlyCoupledBufferGroups[tcbGroupId], producers) == -1) {
+        if (addEquivalentOps(producerOp, tightlyCoupledBufferGroups[tcbGroupId], producers) == -1) {
           LDBG("Can not find the crossCore Buffer from another scope" << "\n");
           return errorMap;
         }
@@ -284,7 +288,7 @@ DenseMap<int, DenseMap<Value, SmallVector<Value>>> UpdateConditionInfoPass::exte
 }
 
 int UpdateConditionInfoPass::buildIdxToVarMap(scf::ForOp forOp,
-                                              const DenseMap<int, DenseMap<Value, SmallVector<Value> > > &
+                                              const DenseMap<int, DenseMap<Operation*, SmallVector<Operation*> > > &
                                               intraCoreBuffers,
                                               DenseMap<int, Value> &idxToVar)
 {
@@ -317,41 +321,23 @@ int UpdateConditionInfoPass::buildIdxToVarMap(scf::ForOp forOp,
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
-// Helper function to build buffer dependency mappings
+// Helper function to build buffer dependency mappings (Operation* based)
+// Builds two reverse mappings:
+//   consumerToGroup: consumer op -> group index (to identify input dependencies when consumer op is encountered)
+//   producerOpToGroup: producer op -> list of group indices (to identify output dependencies)
+// Note: When checking operands (outsVal) in getInputOutputValues, we need outsVal.getDefiningOp() to match against producerOpToGroup
 static int buildBufferDependencyMappings(
-    DenseMap<int, DenseMap<Value, SmallVector<Value>>> &buffers,
-    DenseMap<Operation*, int> &consumerToGroup,
-    DenseMap<Value, SmallVector<int>> &outputToGroups)
-{
-  for (auto &[groupIdx, deps] : buffers) {
-    for (auto &[consumer, producers] : deps) {
-      Operation *defOp = consumer.getDefiningOp();
-      if (!defOp) {
-        LDBG(" consumer has no defining op: " << consumer << "\n");
-        return UPDATE_CONDITION_INFO_FAILED;
-      }
-      consumerToGroup[defOp] = groupIdx;
-
-      for (Value producer : producers) {
-        outputToGroups[producer].push_back(groupIdx);
-      }
-    }
-  }
-  return UPDATE_CONDITION_INFO_SUCCESS;
-}
-
-// Helper function to build buffer dependency mappings for Operation* type (memCrossCore)
-static int buildBufferDependencyMappingsForOps(
     DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &buffers,
     DenseMap<Operation*, int> &consumerToGroup,
-    DenseMap<Operation*, int> &producerToGroup)
+    DenseMap<Operation*, SmallVector<int>> &producerOpToGroups)
 {
   for (auto &[groupIdx, deps] : buffers) {
     for (auto &[consumer, producers] : deps) {
+      // Consumer is already an Operation*, no getDefiningOp needed
       consumerToGroup[consumer] = groupIdx;
 
       for (Operation *producer : producers) {
-        producerToGroup[producer] = groupIdx;
+        producerOpToGroups[producer].push_back(groupIdx);
       }
     }
   }
@@ -377,9 +363,9 @@ static int buildBufferDependencyMappingsForOps(
 //   3. Traverse ifOp.thenYield() operands, collect yield output groups
 //   4. Deduplicate and output four groups of index values
 int UpdateConditionInfoPass::getInputOutputValues(
-    scf::IfOp ifOp, DenseMap<int, DenseMap<Value, SmallVector<Value>>> crossCoreBuffers,
+    scf::IfOp ifOp, DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> crossCoreBuffers,
     DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> memCrossCoreBuffers,
-    DenseMap<int, DenseMap<Value, SmallVector<Value>>> intraCoreBuffers,
+    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> intraCoreBuffers,
     SmallVector<int> &crossCoreInputValues, SmallVector<int> &crossCoreOutputValues,
     SmallVector<int> &intraCoreInputValues, SmallVector<int> &intraCoreOutputValues)
 {
@@ -388,34 +374,28 @@ int UpdateConditionInfoPass::getInputOutputValues(
   DenseSet<int> intraCoreInputSet;
   DenseSet<int> intraCoreOutputSet;
 
-  // Build output mappings for cross-core and intra-core
-  // Same producer/output can be used by multiple consumers/inputs, so we need to track all related groups
-  DenseMap<Value, SmallVector<int>> crossCoreOutputToGroups;
-  DenseMap<Value, SmallVector<int>> intraCoreOutputToGroups;
+  // Build reverse mappings for op -> groups
+  // Same producer op can be used by multiple consumers, so we track all related groups
+  DenseMap<Operation*, SmallVector<int>> crossCoreProducerOpToGroups;
+  DenseMap<Operation*, SmallVector<int>> intraCoreProducerOpToGroups;
+  DenseMap<Operation*, SmallVector<int>> memCrossCoreProducerOpToGroups;
 
-  // Add consumer mappings for input dependency identification
+  // Consumer mappings: consumer op -> group index (directly matches walked op)
   DenseMap<Operation*, int> crossCoreConsumerToGroup;
   DenseMap<Operation*, int> intraCoreConsumerToGroup;
-
-  // Build memCrossCore mappings (Operation* based)
   DenseMap<Operation*, int> memCrossCoreConsumerToGroup;
-  DenseMap<Operation*, int> memCrossCoreProducerToGroup;
 
-  // Build cross-core mappings
+  // Build all reverse mappings using the unified buildBufferDependencyMappings
   if (buildBufferDependencyMappings(crossCoreBuffers, crossCoreConsumerToGroup,
-                                     crossCoreOutputToGroups) == UPDATE_CONDITION_INFO_FAILED) {
+                                     crossCoreProducerOpToGroups) == UPDATE_CONDITION_INFO_FAILED) {
     return UPDATE_CONDITION_INFO_FAILED;
   }
-
-  // Build memCrossCore mappings
-  if (buildBufferDependencyMappingsForOps(memCrossCoreBuffers, memCrossCoreConsumerToGroup,
-                                           memCrossCoreProducerToGroup) == UPDATE_CONDITION_INFO_FAILED) {
+  if (buildBufferDependencyMappings(memCrossCoreBuffers, memCrossCoreConsumerToGroup,
+                                     memCrossCoreProducerOpToGroups) == UPDATE_CONDITION_INFO_FAILED) {
     return UPDATE_CONDITION_INFO_FAILED;
   }
-
-  // Build intra-core mappings
   if (buildBufferDependencyMappings(intraCoreBuffers, intraCoreConsumerToGroup,
-                                     intraCoreOutputToGroups) == UPDATE_CONDITION_INFO_FAILED) {
+                                     intraCoreProducerOpToGroups) == UPDATE_CONDITION_INFO_FAILED) {
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
@@ -424,11 +404,10 @@ int UpdateConditionInfoPass::getInputOutputValues(
     if (op == ifOp)
       return WalkResult::advance();
 
-    // Check if this op is a consumer's defining op (for input dependency)
+    // Input detection: if this walked op *is* a consumer op, add its group to input set
     if (crossCoreConsumerToGroup.count(op)) {
       crossCoreInputSet.insert(crossCoreConsumerToGroup[op]);
     }
-    // Check if this op is a memCrossCore consumer (merge into crossCoreInputSet)
     if (memCrossCoreConsumerToGroup.count(op)) {
       crossCoreInputSet.insert(memCrossCoreConsumerToGroup[op]);
     }
@@ -436,28 +415,50 @@ int UpdateConditionInfoPass::getInputOutputValues(
       intraCoreInputSet.insert(intraCoreConsumerToGroup[op]);
     }
 
-    // Check if this op is a memCrossCore producer (merge into crossCoreOutputSet)
-    if (memCrossCoreProducerToGroup.count(op)) {
-      crossCoreOutputSet.insert(memCrossCoreProducerToGroup[op]);
+    // Output detection (op itself is a producer op: e.g. memref.alloc that doesn't go through fixpipe/copy)
+    if (crossCoreProducerOpToGroups.count(op)) {
+      for (int idx : crossCoreProducerOpToGroups[op]) {
+        crossCoreOutputSet.insert(idx);
+      }
+    }
+    if (memCrossCoreProducerOpToGroups.count(op)) {
+      for (int idx : memCrossCoreProducerOpToGroups[op]) {
+        crossCoreOutputSet.insert(idx);
+      }
+    }
+    if (intraCoreProducerOpToGroups.count(op)) {
+      for (int idx : intraCoreProducerOpToGroups[op]) {
+        intraCoreOutputSet.insert(idx);
+      }
     }
 
     bool isFixpipeOrCopy = dyn_cast<hivm::FixpipeOp>(op) || dyn_cast<hivm::CopyOp>(op);
     bool isBufferizationWrite = dyn_cast<bufferization::MaterializeInDestinationOp>(op);
     bool isSSBufferWrite = dyn_cast<LLVM::StoreOp>(op);
-    // Op is FixpipeOp/CopyOp/BufferizationWriteOp
-    // they have two operand, operand 0(ins) is input, operand 1(outs) is output
+    // Op is FixpipeOp/CopyOp/BufferizationWriteOp/StoreOp
+    // they have two operands: operand 0(ins) is input, operand 1(outs) is output buffer
+    // outsVal is a Value (memref SSA value), we need its defining op to match producerOpToGroups
     if (isFixpipeOrCopy || isBufferizationWrite || isSSBufferWrite) {
       Value outsVal = op->getOperands()[1];
-      // Check if outs is a producer in cross-core dependencies
-      if (crossCoreOutputToGroups.count(outsVal)) {
-        for (int idx : crossCoreOutputToGroups[outsVal]) {
-          crossCoreOutputSet.insert(idx);
+      Operation *outsDefOp = outsVal.getDefiningOp();
+      if (outsDefOp) {
+        // Check if outs's defining op is a producer in cross-core dependencies
+        if (crossCoreProducerOpToGroups.count(outsDefOp)) {
+          for (int idx : crossCoreProducerOpToGroups[outsDefOp]) {
+            crossCoreOutputSet.insert(idx);
+          }
         }
-      }
-      // Check if outs is an output in intra-core dependencies
-      if (intraCoreOutputToGroups.count(outsVal)) {
-        for (int idx : intraCoreOutputToGroups[outsVal]) {
-          intraCoreOutputSet.insert(idx);
+        // Check if outs's defining op is a producer in mem cross-core dependencies
+        if (memCrossCoreProducerOpToGroups.count(outsDefOp)) {
+          for (int idx : memCrossCoreProducerOpToGroups[outsDefOp]) {
+            crossCoreOutputSet.insert(idx);
+          }
+        }
+        // Check if outs's defining op is an output in intra-core dependencies
+        if (intraCoreProducerOpToGroups.count(outsDefOp)) {
+          for (int idx : intraCoreProducerOpToGroups[outsDefOp]) {
+            intraCoreOutputSet.insert(idx);
+          }
         }
       }
       return WalkResult::advance();
@@ -465,19 +466,26 @@ int UpdateConditionInfoPass::getInputOutputValues(
     return WalkResult::advance();
   });
 
-  // operands in yield op are output
+  // Operands in yield op are output
+  // yieldVal is a Value (usually tensor result), get its defining op to match producer groups
   scf::YieldOp thenYield = ifOp.thenYield();
   for (Value yieldVal : thenYield.getOperands()) {
-    // Check if yield operand is a producer in cross-core dependencies
-    if (crossCoreOutputToGroups.count(yieldVal)) {
-      for (int idx : crossCoreOutputToGroups[yieldVal]) {
-        crossCoreOutputSet.insert(idx);
+    Operation *yieldDefOp = yieldVal.getDefiningOp();
+    if (yieldDefOp) {
+      if (crossCoreProducerOpToGroups.count(yieldDefOp)) {
+        for (int idx : crossCoreProducerOpToGroups[yieldDefOp]) {
+          crossCoreOutputSet.insert(idx);
+        }
       }
-    }
-    // Check if yield operand is an output in intra-core dependencies
-    if (intraCoreOutputToGroups.count(yieldVal)) {
-      for (int idx : intraCoreOutputToGroups[yieldVal]) {
-        intraCoreOutputSet.insert(idx);
+      if (memCrossCoreProducerOpToGroups.count(yieldDefOp)) {
+        for (int idx : memCrossCoreProducerOpToGroups[yieldDefOp]) {
+          crossCoreOutputSet.insert(idx);
+        }
+      }
+      if (intraCoreProducerOpToGroups.count(yieldDefOp)) {
+        for (int idx : intraCoreProducerOpToGroups[yieldDefOp]) {
+          intraCoreOutputSet.insert(idx);
+        }
       }
     }
   }
@@ -508,8 +516,10 @@ Value UpdateConditionInfoPass::getVarValue(scf::ForOp forOp, int varIndex)
 }
 
 // Build the information of the producer group.
+// intraCoreBuffers is Operation* based; we extract getResult(0) from producer ops to get buffer Values
+// because subsequent memory operations (Store/Load) require SSA Value operands - this preserves original behavior
 int UpdateConditionInfoPass::buildOutputGroups(
-    SmallVector<int> &intraCoreOutputValues, DenseMap<int, DenseMap<Value, SmallVector<Value>>> &intraCoreBuffers,
+    SmallVector<int> &intraCoreOutputValues, DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &intraCoreBuffers,
     DenseMap<int, Value> &idxToVar, SmallVector<OutputGroupInfo> &outputGroups)
 {
   outputGroups.clear();
@@ -529,7 +539,14 @@ int UpdateConditionInfoPass::buildOutputGroups(
     Value var = varIt->second;
 
     for (auto &entry : bufferIt->second) {
-      SmallVector<Value> &outputs = entry.second;
+      // Convert producer Operation* list to Value list using getResult(0) (memref.alloc always has 1 result)
+      // This is identical to the original producer Value list
+      SmallVector<Value> outputs;
+      for (Operation *producerOp : entry.second) {
+        if (producerOp->getNumResults() > 0) {
+          outputs.push_back(producerOp->getResult(0));
+        }
+      }
       if (outputs.empty())
         continue;
 
@@ -621,7 +638,7 @@ std::optional<DenseMap<int, Value>> UpdateConditionInfoPass::computeVectorSSBuff
 Value UpdateConditionInfoPass::addCrossCoreConditions(
     OpBuilder &builder, Location loc,
     SmallVector<int> crossCoreInputValues, SmallVector<int> crossCoreOutputValues,
-    DenseMap<int, DenseMap<Value, SmallVector<Value>>> &crossCoreBuffers,
+    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &crossCoreBuffers,
     DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &memCrossCoreBuffers,
     bool isAIC, Value zeroConst,
     DenseMap<int, Value> &VectorSSBufferPtrs,
@@ -750,7 +767,7 @@ void UpdateConditionInfoPass::updateCrossCoreControlVars(
 // Set the crossCore condition
 int UpdateConditionInfoPass::setCrossCoreCondition(
     SmallVector<int> crossCoreInputValues, SmallVector<int> crossCoreOutputValues,
-    DenseMap<int, DenseMap<Value, SmallVector<Value>>> &crossCoreBuffers,
+    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &crossCoreBuffers,
     DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &memCrossCoreBuffers,
     scf::IfOp ifOp, SmallVector<SmallVector<Value>> ssbufferPtrs, Value &crossCoreCond)
 {
@@ -853,7 +870,7 @@ void UpdateConditionInfoPass::collectIntraCoreInputConditions(
 
 // Collect the conditions for intra-core producer values.
 int UpdateConditionInfoPass::collectIntraCoreOutputConditions(
-    OpBuilder &builder, Location loc, DenseMap<int, DenseMap<Value, SmallVector<Value>>> &intraCoreBuffers,
+    OpBuilder &builder, Location loc, DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &intraCoreBuffers,
     SmallVector<int> &intraCoreOutputValues, DenseMap<int, Value> &idxToVar, SmallVector<Value> &conditions,
     DenseSet<Value> &usedVarsSet, DenseMap<Value, VarUpdateType> &varUpdateTypes)
 {
@@ -1015,7 +1032,7 @@ void UpdateConditionInfoPass::collectTensorIterArgOutputConditions(
 
 // Set the intraCore condition.
 int UpdateConditionInfoPass::setIntraCoreCondition(
-    ModuleOp module, scf::IfOp ifOp, DenseMap<int, DenseMap<Value, SmallVector<Value>>> &intraCoreBuffers,
+    ModuleOp module, scf::IfOp ifOp, DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &intraCoreBuffers,
     SmallVector<int> &intraCoreInputValues, SmallVector<int> &intraCoreOutputValues, DenseMap<int, Value> &idxToVar,
     DenseMap<Value, VarUpdateType> &varUpdateTypes, Value &intraCoreCond)
 {
@@ -1550,9 +1567,9 @@ int UpdateConditionInfoPass::updateIfConds(ModuleOp module, SmallVector<SmallVec
   }
 
   // Step0: Collect dependency buffers once outside the for loop
-  DenseMap<int, DenseMap<Value, SmallVector<Value>>> crossCoreBuffers;
+  DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> crossCoreBuffers;
   DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> memCrossCoreBuffers;
-  DenseMap<scf::ForOp, DenseMap<int, DenseMap<Value, SmallVector<Value>>>> intraCoreBuffersMap;
+  DenseMap<scf::ForOp, DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>> intraCoreBuffersMap;
   collectDependencyBuffers(module, mainLoopForOps, crossCoreBuffers, memCrossCoreBuffers, intraCoreBuffersMap);
 
   for (scf::ForOp forOp : mainLoopForOps) {
@@ -1564,7 +1581,7 @@ int UpdateConditionInfoPass::updateIfConds(ModuleOp module, SmallVector<SmallVec
     }
 
     // Step1: Get intraCoreBuffers from pre-collected map
-    DenseMap<int, DenseMap<Value, SmallVector<Value>>> intraCoreBuffers;
+    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> intraCoreBuffers;
     if (intraCoreBuffersMap.count(forOp)) {
       intraCoreBuffers = intraCoreBuffersMap[forOp];
     }
@@ -1574,7 +1591,7 @@ int UpdateConditionInfoPass::updateIfConds(ModuleOp module, SmallVector<SmallVec
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
-    DenseMap<int, DenseMap<Value, SmallVector<Value> > > extendedCrossCoreBuffers =
+    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*> > > extendedCrossCoreBuffers =
         extendCrossCoreBuffersWithEquivalentValues(module, crossCoreBuffers);
     if (extendedCrossCoreBuffers.count(-1)) {
       LDBG("extendCrossCoreBuffersWithEquivalentValues failed!" << "\n");

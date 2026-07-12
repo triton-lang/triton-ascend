@@ -224,6 +224,14 @@ def get_cc_cmd(build_pch):
     return cc_cmd
 
 
+@backend_strategy_registry.register("torch_npu", "get_cc_cmd_npu_utils")
+def get_cc_cmd_npu_utils(build_pch=False):
+    # npu_utils 扩展：复用 get_cc_cmd（torch/torch_npu include + ABI + link），加 -DUSE_TORCH_NPU（npu_utils.cpp #ifdef）
+    cc_cmd = get_cc_cmd(build_pch)
+    cc_cmd += ["-DUSE_TORCH_NPU"]
+    return cc_cmd
+
+
 @backend_strategy_registry.register("mindspore", "get_current_device")
 def get_current_device():
     import mindspore

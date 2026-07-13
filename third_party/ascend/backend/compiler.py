@@ -63,6 +63,7 @@ from triton.backends.compiler import (
     GPUTarget,
     register_descriptor,
 )
+from triton import knobs
 from triton.runtime import driver
 from triton.runtime.cache import get_dump_manager
 from triton.tools.get_ascend_devices import is_compile_on_910_95
@@ -1227,6 +1228,11 @@ class AscendBackend(BaseBackend):
                         src, metadata, options
                     )
                 )
+            # Allow plugins to rewrite stage callables (e.g. insert a custom
+            # pass into make_ttir). This is the 3.2.2/3.5 backport of triton
+            # 3.7's knobs.runtime.add_stages_inspection_hook.
+            if knobs.runtime.add_stages_inspection_hook is not None:
+                knobs.runtime.add_stages_inspection_hook(self, stages, options, None, None)
         else:
             raise NotImplementedError(
                 f"Backend '{self.target.backend}' is not supported. "

@@ -1,3 +1,5 @@
+#include "ir_binding.h"
+
 #include <optional>
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
@@ -29,10 +31,12 @@
 #include "triton/Dialect/Triton/IR/Types.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
+#include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
+#include "triton/Tools/PluginUtils.h"
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include "llvm/Support/SourceMgr.h"
+#include <memory>
 
-#include "ir.h"
 namespace {
 
 namespace py = pybind11;
@@ -120,7 +124,8 @@ using namespace triton;
 // private:
 //   std::unique_ptr<OpBuilder> builder;
 //   std::unique_ptr<Location> lastLoc;
-//   bool lineInfoEnabled = !triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO");
+//   bool lineInfoEnabled =
+//   !triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO");
 // };
 
 std::string locationToString(Location loc) {
@@ -151,7 +156,7 @@ namespace ir {
 static py::class_<TritonOpBuilder> *builderClassPtr = nullptr;
 py::class_<TritonOpBuilder> *getBuilderClass() { return builderClassPtr; }
 
-}
+} // namespace ir
 
 void init_triton_ir(py::module &&m) {
   using ret = py::return_value_policy;
@@ -243,6 +248,20 @@ void init_triton_ir(py::module &&m) {
                                          py::module_local())
       .def(py::init<llvm::SourceMgr &, MLIRContext *>());
 
+  static std::vector<mlir::triton::plugin::TritonPlugin> plugins;
+  m.def(
+      "extend_dialects_with",
+      [](const std::string &libPath) {
+        auto pluginOrErr = mlir::triton::plugin::TritonPlugin::load(libPath);
+        if (!pluginOrErr) {
+          std::string errMsg = llvm::toString(pluginOrErr.takeError());
+          throw std::runtime_error(errMsg);
+        }
+        plugins.push_back(std::move(*pluginOrErr));
+      },
+      "Given a path to a Triton extension, register any dialects to be loaded "
+      "in `load_dialects`.");
+
   m.def("load_dialects", [](MLIRContext &context) {
     DialectRegistry registry;
     registry.insert<TritonDialect, ::mlir::triton::gpu::TritonGPUDialect,
@@ -254,6 +273,9 @@ void init_triton_ir(py::module &&m) {
     registerBuiltinDialectTranslation(registry);
     registerLLVMDialectTranslation(registry);
     mlir::LLVM::registerInlinerInterface(registry);
+    for (const auto &plugin : plugins) {
+      plugin.registerDialects(registry);
+    }
     context.appendDialectRegistry(registry);
     context.loadAllAvailableDialects();
   });
@@ -602,11 +624,12 @@ void init_triton_ir(py::module &&m) {
   static py::class_<TritonOpBuilder> builderClass(
       m, "builder", py::module_local(), py::dynamic_attr());
   ir::builderClassPtr = &builderClass;
-  builderClass.def(py::init<MLIRContext *, const std::string &>(),
-                   py::arg("context"),
-                   py::arg("compile_mode") = "simd",
-                   "Create a TritonOpBuilder with optional compile_mode (simt or simd, default: simd)")
- 	    .def("is_simt_mode", &TritonOpBuilder::isSimtMode,
+  builderClass
+      .def(py::init<MLIRContext *, const std::string &>(), py::arg("context"),
+           py::arg("compile_mode") = "simd",
+           "Create a TritonOpBuilder with optional compile_mode (simt or simd, "
+           "default: simd)")
+      .def("is_simt_mode", &TritonOpBuilder::isSimtMode,
            "Check if the compile mode is simt")
       // getters
       .def("create_module",
@@ -653,14 +676,13 @@ void init_triton_ir(py::module &&m) {
            [](TritonOpBuilder &self, std::string value) {
              return self.getBuilder().getStringAttr(value);
            })
-      .def("get_unit_attr",
-          [](TritonOpBuilder &self) {
-            return self.getBuilder().getUnitAttr();
-          })
+      .def(
+          "get_unit_attr",
+          [](TritonOpBuilder &self) { return self.getBuilder().getUnitAttr(); })
       .def("get_i64_array_attr",
-          [](TritonOpBuilder &self, const std::vector<int64_t>& array) {
-            return self.getBuilder().getI64ArrayAttr(array);
-          })
+           [](TritonOpBuilder &self, const std::vector<int64_t> &array) {
+             return self.getBuilder().getI64ArrayAttr(array);
+           })
       // Use arith.ConstantOp to create constants
       // Constants
       .def("get_int1",
@@ -1322,25 +1344,31 @@ void init_triton_ir(py::module &&m) {
            })
       .def("create_tensor_descriptor_type",
            [](TritonOpBuilder &self, Type blockTy, bool isSigned) -> Type {
-               auto ctx = self.getBuilder().getContext();
-               return triton::TensorDescType::get(ctx, cast<RankedTensorType>(blockTy), isSigned);
+             auto ctx = self.getBuilder().getContext();
+             return triton::TensorDescType::get(
+                 ctx, cast<RankedTensorType>(blockTy), isSigned);
            })
       .def("create_descriptor_load",
-           [](TritonOpBuilder &self, Value desc, std::vector<Value> &indices, CacheModifier cacheModifier,
+           [](TritonOpBuilder &self, Value desc, std::vector<Value> &indices,
+              CacheModifier cacheModifier,
               EvictionPolicy evictionPolicy) -> Value {
-                auto descTy = cast<triton::TensorDescType>(desc.getType());
-                auto resTy = descTy.getSignlessBlockType();
-                return self.create<DescriptorLoadOp>(resTy, desc, indices, cacheModifier, evictionPolicy);
+             auto descTy = cast<triton::TensorDescType>(desc.getType());
+             auto resTy = descTy.getSignlessBlockType();
+             return self.create<DescriptorLoadOp>(
+                 resTy, desc, indices, cacheModifier, evictionPolicy);
            })
       .def("create_descriptor_store",
-           [](TritonOpBuilder &self, Value desc, Value value, std::vector<Value> &indices) -> void {
-               self.create<DescriptorStoreOp>(desc, value, indices);
+           [](TritonOpBuilder &self, Value desc, Value value,
+              std::vector<Value> &indices) -> void {
+             self.create<DescriptorStoreOp>(desc, value, indices);
            })
-        // Make a tensor descriptor
+      // Make a tensor descriptor
       .def("create_make_tensor_descriptor",
-           [](TritonOpBuilder &self, Value &base, std::vector<Value> &shape, std::vector<Value> &strides,
-              std::vector<int32_t> &tensorShape, bool isSignedInteger) -> Value {
-                return self.create<MakeTensorDescOp>(base, shape, strides, tensorShape, isSignedInteger);
+           [](TritonOpBuilder &self, Value &base, std::vector<Value> &shape,
+              std::vector<Value> &strides, std::vector<int32_t> &tensorShape,
+              bool isSignedInteger) -> Value {
+             return self.create<MakeTensorDescOp>(base, shape, strides,
+                                                  tensorShape, isSignedInteger);
            })
       .def("create_tensormap_create",
            [](TritonOpBuilder &self, Value desc_ptr, Value global_address,
@@ -1701,58 +1729,87 @@ void init_triton_ir(py::module &&m) {
                    printingFlags);
              }
            })
-      .def("run", [](PassManager &self, ModuleOp &mod) {
-        // TODO: maybe dump module to file and print error for better
-        // diagnostics
+      .def(
+          "run",
+          [](PassManager &self, ModuleOp &mod) {
+            // TODO: maybe dump module to file and print error for better
+            // diagnostics
 
-        auto *context = mod.getContext();
-        if (::triton::tools::getBoolEnv("MLIR_DISABLE_MULTITHREADING"))
-          context->disableMultithreading();
+            auto *context = mod.getContext();
+            if (::triton::tools::getBoolEnv("MLIR_DISABLE_MULTITHREADING"))
+              context->disableMultithreading();
 
-        auto reproducerPath =
-            triton::tools::getStrEnv("TRITON_REPRODUCER_PATH");
-        if (!reproducerPath.empty()) {
-          auto anchorName = self.getOpAnchorName();
-          auto passes = self.getPasses();
-          Operation *op = mod.getOperation();
-          makeReproducer(anchorName, passes, op, reproducerPath);
-          context->disableMultithreading();
+            auto reproducerPath =
+                triton::tools::getStrEnv("TRITON_REPRODUCER_PATH");
+            if (!reproducerPath.empty()) {
+              auto anchorName = self.getOpAnchorName();
+              auto passes = self.getPasses();
+              Operation *op = mod.getOperation();
+              makeReproducer(anchorName, passes, op, reproducerPath);
+              context->disableMultithreading();
+            }
+
+            if (triton::tools::getBoolEnv("TRITON_ENABLE_LLVM_DEBUG")) {
+              ::llvm::DebugFlag = true;
+            }
+
+            if (auto debugOnly =
+                    triton::tools::getStrEnv("TRITON_LLVM_DEBUG_ONLY");
+                !debugOnly.empty()) {
+              llvm::SmallVector<StringRef, 3> split;
+              llvm::SmallVector<std::string, 3> storage;
+              llvm::SmallVector<const char *, 3> debugTypes;
+
+              StringRef(debugOnly.c_str()).split(split, ',');
+              llvm::transform(split, std::back_inserter(debugTypes),
+                              [&storage](StringRef str) {
+                                // StringRefs are not always null-terminated.
+                                // The purpose for this storage pattern is to
+                                // produce a collection of C-strings that are.
+                                storage.push_back(str.str());
+                                return storage.back().c_str();
+                              });
+
+              ::llvm::DebugFlag = true;
+              using namespace llvm;
+              setCurrentDebugTypes(debugTypes.data(), debugTypes.size());
+            }
+
+            bool haveTiming = ::triton::tools::getBoolEnv("MLIR_ENABLE_TIMING");
+            if (haveTiming) {
+              self.enableTiming();
+            }
+
+            if (failed(self.run(mod.getOperation())))
+              throw std::runtime_error("PassManager::run failed");
+          },
+          py::call_guard<py::gil_scoped_release>());
+
+  // Add an `extend_with` static method that dynamically loads a plugin and
+  // registers its custom operations as builder methods.
+  auto builderPtr = std::make_shared<py::class_<TritonOpBuilder>>(builderClass);
+  builderClass.def_static(
+      "extend_with",
+      [builderPtr](const std::string &path) {
+        auto pluginOrErr = mlir::triton::plugin::TritonPlugin::load(path);
+        if (!pluginOrErr) {
+          std::string errMsg = llvm::toString(pluginOrErr.takeError());
+          throw std::runtime_error(errMsg);
         }
-
-        if (triton::tools::getBoolEnv("TRITON_ENABLE_LLVM_DEBUG")) {
-          ::llvm::DebugFlag = true;
-        }
-
-        if (auto debugOnly = triton::tools::getStrEnv("TRITON_LLVM_DEBUG_ONLY");
-            !debugOnly.empty()) {
-          llvm::SmallVector<StringRef, 3> split;
-          llvm::SmallVector<std::string, 3> storage;
-          llvm::SmallVector<const char *, 3> debugTypes;
-
-          StringRef(debugOnly.c_str()).split(split, ',');
-          llvm::transform(split, std::back_inserter(debugTypes),
-                          [&storage](StringRef str) {
-                            // StringRefs are not always null-terminated.
-                            // The purpose for this storage pattern is to
-                            // produce a collection of C-strings that are.
-                            storage.push_back(str.str());
-                            return storage.back().c_str();
+        auto plugin = std::move(*pluginOrErr);
+        py::gil_scoped_acquire acquire;
+        for (const auto &op : plugin.listOps()) {
+          std::string wrapped = std::string("create_") + op.name;
+          builderPtr->def(wrapped.c_str(),
+                          [op](TritonOpBuilder &self, std::vector<Value> args) {
+                            args.insert(args.begin(), Value());
+                            op.addOp(self, args);
+                            return args[0];
                           });
-
-          ::llvm::DebugFlag = true;
-          using namespace llvm;
-          setCurrentDebugTypes(debugTypes.data(), debugTypes.size());
         }
-
-        bool haveTiming = ::triton::tools::getBoolEnv("MLIR_ENABLE_TIMING");
-        if (haveTiming) {
-          self.enableTiming();
-        }
-
-        if (failed(self.run(mod.getOperation())))
-          throw std::runtime_error("PassManager::run failed");
       },
-      py::call_guard<py::gil_scoped_release>());
+      "Given a path to a Triton extension, load it and create builder methods "
+      "for each operation.");
 }
 
 void init_triton_env_vars(py::module &m) {

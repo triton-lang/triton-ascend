@@ -30,7 +30,6 @@ from wheel.bdist_wheel import bdist_wheel
 
 import pybind11
 
-
 triton_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 os.environ.setdefault("TRITON_BUILD_WITH_CCACHE", "true")
@@ -514,6 +513,11 @@ class CMakeBuild(build_ext):
             "-DTRITON_PLUGIN_DIRS=" + ';'.join([b.src_dir for b in backends if b.is_external]),
             "-DLLVM_MAJOR_VERSION_20_COMPATIBLE=ON"
         ]
+        if check_env_flag("TRITON_EXT_ENABLED"):
+            cmake_args += ["-DTRITON_EXT_ENABLED=1"]
+        else:
+            cmake_args += ["-DTRITON_EXT_ENABLED=0"]
+
         if lit_dir is not None:
             cmake_args.append("-DLLVM_EXTERNAL_LIT=" + lit_dir)
         cmake_args.extend(thirdparty_cmake_args)
@@ -584,6 +588,50 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["cmake", "--build", "."] + build_args, cwd=cmake_dir)
         subprocess.check_call(["cmake", "--build", ".", "--target", "mlir-doc"], cwd=cmake_dir)
 
+        # Copy include/ to triton/include/ so downstream packages can compile
+        # against triton's headers without needing the source submodule.
+        # Merge source include/ + build-dir include/ (tablegen output).
+        include_dst = os.path.join(os.path.dirname(extdir), "include")
+        include_src = os.path.join(self.base_dir, "include")
+        if os.path.exists(include_src):
+            shutil.copytree(include_src, include_dst, dirs_exist_ok=True)
+        build_include = os.path.join(cmake_dir, "include")
+        if os.path.exists(build_include):
+            shutil.copytree(build_include, include_dst, dirs_exist_ok=True)
+        # Also copy python/src/ headers (ir.h, ir_binding.h, passes.h) that
+        # downstream packages need at compile time.
+        py_src_dst = os.path.join(include_dst, "python", "src")
+        os.makedirs(py_src_dst, exist_ok=True)
+        for hdr in ["ir.h", "ir_binding.h", "passes.h"]:
+            py_src_hdr = os.path.join(self.base_dir, "python", "src", hdr)
+            if os.path.exists(py_src_hdr):
+                shutil.copy2(py_src_hdr, os.path.join(py_src_dst, hdr))
+        # Also copy third_party/proton/Dialect/include/ so downstream
+        # packages don't need the proton submodule.
+        proton_dialect_src = os.path.join(self.base_dir, "third_party", "proton", "Dialect", "include")
+        if os.path.exists(proton_dialect_src):
+            proton_dialect_dst = os.path.join(include_dst, "third_party", "proton", "Dialect", "include")
+            shutil.copytree(proton_dialect_src, proton_dialect_dst, dirs_exist_ok=True)
+        # Also copy proton tablegen output (.h.inc) from the build dir.
+        proton_build_inc = os.path.join(cmake_dir, "third_party", "proton", "Dialect", "include")
+        if os.path.exists(proton_build_inc):
+            proton_build_dst = os.path.join(include_dst, "third_party", "proton", "Dialect", "include")
+            shutil.copytree(proton_build_inc, proton_build_dst, dirs_exist_ok=True)
+        # Also copy third_party/ascend/include/ (Utils.h, etc.) so downstream
+        # packages don't need the ascend submodule.
+        ascend_include_src = os.path.join(self.base_dir, "third_party", "ascend", "include")
+        if os.path.exists(ascend_include_src):
+            ascend_include_dst = os.path.join(include_dst, "ascend", "include")
+            shutil.copytree(ascend_include_src, ascend_include_dst, dirs_exist_ok=True)
+        print(f"Copied include/ to {include_dst}")
+
+        # Copy cmake/ so downstream packages (triton-dist) can find
+        # llvm-hash.txt, FindLLVM.cmake, etc. without a submodule.
+        cmake_src = os.path.join(self.base_dir, "cmake")
+        cmake_dst = os.path.join(os.path.dirname(extdir), "cmake")
+        if os.path.exists(cmake_src):
+            shutil.copytree(cmake_src, cmake_dst, dirs_exist_ok=True)
+
 
 nvidia_version_path = os.path.join(get_base_dir(), "cmake", "nvidia-toolchain-version.json")
 with open(nvidia_version_path, "r") as nvidia_version_file:
@@ -595,6 +643,7 @@ def get_platform_dependent_src_path(subdir):
     return lambda platform, version: (
         (lambda version_major, version_minor1, version_minor2, : f"targets/{platform}/{subdir}"
          if int(version_major) >= 12 and int(version_minor1) >= 5 else subdir)(*version.split('.')))
+
 
 # FIXME:download&backend
 # download_and_copy(
@@ -727,6 +776,7 @@ class plugin_egginfo(egg_info):
 
 
 class BuildWheel(bdist_wheel):
+
     def run(self):
         add_links()
         bdist_wheel.run(self)
@@ -754,9 +804,17 @@ class BuildWheel(bdist_wheel):
 
 
 package_data = {
-    "triton/tools": ["compile.h", "compile.c"], **{f"triton/backends/{b.name}": b.package_data
-                                                   for b in backends}, "triton/language/extra": sum(
-        (b.language_package_data for b in backends), [])
+    "triton": [
+        "_C/*.so",
+        "_C/*.pyd",
+        "include/triton/**/*",
+        "include/mlir/**/*",
+        "include/llvm/**/*",
+        "include/python/**/*",
+        "include/third_party/**/*",
+    ], "triton/tools": ["compile.h", "compile.c"], **{f"triton/backends/{b.name}": b.package_data
+                                                      for b in backends}, "triton/language/extra":
+    sum((b.language_package_data for b in backends), [])
 }
 
 
@@ -833,8 +891,7 @@ def get_default_version():
 
 def get_version():
     version = os.environ.get("TRITON_VERSION", get_default_version()) + os.environ.get(
-        "TRITON_WHEEL_VERSION_SUFFIX", ""
-    )
+        "TRITON_WHEEL_VERSION_SUFFIX", "")
     if not is_manylinux:
         version += get_git_commit_hash()
 
@@ -896,7 +953,6 @@ if not os.path.exists(readme):
 with open(readme, encoding="utf-8") as fdesc:
     long_description = fdesc.read()
 
-
 setup(
     name=get_package_name(),
     version=get_version(),
@@ -904,7 +960,7 @@ setup(
     author_email="phil@openai.com",
     description="A language and compiler for custom Deep Learning operations",
     long_description=long_description,
-    packages=get_packages(),
+    packages=list(get_packages()),
     entry_points=get_entry_points(),
     package_data=package_data,
     include_package_data=True,

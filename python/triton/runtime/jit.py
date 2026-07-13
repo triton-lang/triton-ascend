@@ -582,6 +582,10 @@ class JITFunction(KernelInterface[T]):
 
         bound_args, sig_and_spec, constexpr_vals, non_constexpr_vals, excess_kwargs = self.binder(*args, **kwargs)
 
+        if knobs.runtime.add_stages_inspection_hook is not None:
+            inspect_stages_key, inspect_stages_hash = knobs.runtime.add_stages_inspection_hook()
+            sig_and_spec = sig_and_spec + (f'("custom_pipeline", {inspect_stages_hash})',)
+
         # compute cache key
         key = ''.join(sig_and_spec) + str((constexpr_vals, excess_kwargs))
         kernel = self.cache[device].get(key, None)

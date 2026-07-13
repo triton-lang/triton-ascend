@@ -92,6 +92,7 @@ def setup(app):
 
     lexers['mlir'] = get_lexer_by_name('text')
     lexers['plaintext'] = get_lexer_by_name('text')
+    app.add_css_file('custom.css')
     if not _is_build_by_readthedocs:
         app.add_js_file('lang-switcher.js')
         app.add_css_file('lang-switcher.css')

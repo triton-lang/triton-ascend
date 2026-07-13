@@ -38,7 +38,7 @@ void SeparateMemoryFromComputePass::runOnOperation()
 {
   ModuleOp module = getOperation();
 
-  int depth = BufferCountManager::getInstance().getBufferCountByType(BufferCountManager::DepType::LoadStore);
+  int depth = BufferCountManager(module).getBufferCountByType(BufferCountManager::DepType::LoadStore);
 
   if (depth <= 1) {
     LDBG("Buffer depth <= 1, skip multi-buffer transformation");

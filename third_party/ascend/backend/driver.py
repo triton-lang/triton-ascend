@@ -19,6 +19,8 @@
 # THE SOFTWARE.
 
 from pathlib import Path
+import contextlib
+import fcntl
 import tempfile
 import os
 import os.path
@@ -45,6 +47,31 @@ from triton.backends.ascend.utils import (
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils
 
+
+def _get_cache_lock_path(cache):
+    lock_path = getattr(cache, "lock_path", None)
+    if lock_path is not None:
+        return lock_path
+    file_cache_manager = getattr(cache, "_file_cache_manager", None)
+    return getattr(file_cache_manager, "lock_path", None)
+
+
+@contextlib.contextmanager
+def _cache_build_lock(cache):
+    lock_path = _get_cache_lock_path(cache)
+    if lock_path is None:
+        yield
+        return
+
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    with open(lock_path, "a") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
 class NPUUtils(object):
     def __new__(cls):
         if not hasattr(cls, 'instance'):
@@ -52,15 +79,39 @@ class NPUUtils(object):
         return cls.instance
 
     def __init__(self):
+        if getattr(self, "_initialized", False):
+            return
+        self._initialized = True
+        self._cache_path = None
+        self.npu_utils_mod = None
+
+    def get_so_path(self):
+        if self._cache_path is None:
+            self._cache_path = self._build_or_get_cached_so()
+        return self._cache_path
+
+    def _build_or_get_cached_so(self):
         dirname = os.path.dirname(os.path.realpath(__file__))
         src_path = os.path.join(dirname, "npu_utils.cpp")
         src = Path(src_path).read_text()
-        version_info = get_backend_func("version_hash")
-        key = hashlib.md5((src + "_".join(version_info)).encode("utf-8")).hexdigest()
+        key_parts = [
+            "npu_utils",
+            "torch_npu_wrapper_abi=triton_async_launch_v1",
+            "USE_TORCH_NPU",
+            src,
+        ]
+        key = hashlib.md5("\0".join(key_parts).encode("utf-8")).hexdigest()
         cache = get_cache_manager(key)
         fname = "npu_utils.so"
         cache_path = cache.get_file(fname)
-        if cache_path is None or not os.path.exists(cache_path):
+        if cache_path is not None and os.path.exists(cache_path):
+            return cache_path
+
+        with _cache_build_lock(cache):
+            cache_path = cache.get_file(fname)
+            if cache_path is not None and os.path.exists(cache_path):
+                return cache_path
+
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_src_path = os.path.join(tmpdir, "npu_utils.cpp")
                 with open(tmp_src_path, "w") as f:
@@ -68,18 +119,23 @@ class NPUUtils(object):
                 so = _build_npu_ext("npu_utils", tmp_src_path)
                 with open(so, "rb") as f:
                     cache_path = cache.put(f.read(), fname, binary=True)
+        return cache_path
+
+    def _load_mod(self):
+        if self.npu_utils_mod is not None:
+            return self.npu_utils_mod
+
         import importlib.util
-        spec = importlib.util.spec_from_file_location("npu_utils", cache_path)
+        spec = importlib.util.spec_from_file_location("npu_utils", self.get_so_path())
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self.npu_utils_mod = mod
-        # setup for remote run
-        env_arch = get_ascend_arch_from_env()
+        return self.npu_utils_mod
 
     def load_binary(self, name, kernel, shared, device, mix_mode=None):
         if mix_mode is None:
             name, mix_mode = name.rsplit("_", 1)
-        return self.npu_utils_mod.load_kernel_binary(name, kernel, shared, device, mix_mode)
+        return self._load_mod().load_kernel_binary(name, kernel, shared, device, mix_mode)
 
     @functools.lru_cache()
     def get_device_properties(self, device):
@@ -92,12 +148,12 @@ class NPUUtils(object):
     @functools.lru_cache()
     def get_arch(self):
         # temporarily return empty arch descriptor
-        return self.npu_utils_mod.get_arch()
+        return self._load_mod().get_arch()
 
     @functools.lru_cache()
     def get_aicore_num(self):
         # temporarily return empty arch descriptor
-        return self.npu_utils_mod.get_aicore_num()
+        return self._load_mod().get_aicore_num()
 
     @functools.lru_cache()
     def get_aivector_core_num(self):
@@ -481,9 +537,7 @@ def generate_npu_wrapper_src(constants, signature, metadata):
         f'sizeof({_ty_to_cpp(ty)})' for i, ty in launch_signature_items
     )
 
-    npu_utils_inst = NPUUtils()
-    npu_utils_mod = getattr(npu_utils_inst, "npu_utils_mod", None)
-    npu_utils_so_path = getattr(npu_utils_mod, "__file__", "")
+    npu_utils_so_path = NPUUtils().get_so_path()
     cpp_npu_utils_dlopen = f"""
 typedef void* (*triton_allocate_workspace_legacy_t)(uint64_t);
 typedef void* (*triton_allocate_sync_block_lock_t)(uint64_t, void*, void**);

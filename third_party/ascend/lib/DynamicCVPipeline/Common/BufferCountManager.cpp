@@ -21,35 +21,77 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 static constexpr const char *DEBUG_TYPE = "BufferCountManager";
 #define LOG_DEBUG(...) LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__)
+
+namespace mlir {
+namespace triton {
+
+namespace {
 
 constexpr int kDefaultIntraBufferCount = 2;
 constexpr int kDefaultInterBufferCount = 1;
 constexpr int kDefaultLoadBufferCount = 1;
 constexpr int kBufferCountWarningThreshold = 3;
 
-namespace mlir {
-namespace triton {
-
-BufferCountManager& BufferCountManager::getInstance()
-{
-    static BufferCountManager instance;
-    return instance;
+inline llvm::StringLiteral getAttrName(BufferCountManager::DepType type) {
+    switch (type) {
+        case BufferCountManager::DepType::IntraCore:
+            return CVPipeline::kIntraBufCount;
+        case BufferCountManager::DepType::InterCore:
+            return CVPipeline::kInterCoreBufCount;
+        case BufferCountManager::DepType::LoadStore:
+            return CVPipeline::kLoadStoreBufCount;
+    }
+    llvm_unreachable("unknown BufferCountManager::DepType");
 }
 
-BufferCountManager::BufferCountManager()
-    : intraBufferCount_(kDefaultIntraBufferCount),
-      interCoreBufferCount_(kDefaultInterBufferCount),
-      loadStoreBufferCount_(kDefaultLoadBufferCount)
+inline int getDefaultCount(BufferCountManager::DepType type) {
+    switch (type) {
+        case BufferCountManager::DepType::IntraCore:   return kDefaultIntraBufferCount;
+        case BufferCountManager::DepType::InterCore:   return kDefaultInterBufferCount;
+        case BufferCountManager::DepType::LoadStore:   return kDefaultLoadBufferCount;
+    }
+    llvm_unreachable("unknown BufferCountManager::DepType");
+}
+
+} // namespace
+
+BufferCountManager::BufferCountManager(Operation *root)
+    : module_(root ? root->getParentOfType<ModuleOp>() : ModuleOp())
 {
-    LOG_DEBUG("Default initialized: "
-          << "IntraBufferCount=" << intraBufferCount_
-          << ", InterBufferCount=" << interCoreBufferCount_
-          << ", LoadBufferCount=" << loadStoreBufferCount_);
+    initFromModule();
+}
+
+BufferCountManager::BufferCountManager(ModuleOp module) : module_(module)
+{
+    initFromModule();
+}
+
+void BufferCountManager::initFromModule()
+{
+    if (!module_) {
+        LOG_DEBUG("initFromModule: module_ is null, skip");
+        return;
+    }
+    OpBuilder builder(module_.getContext());
+    LOG_DEBUG("initFromModule: getContext OK, about to loop");
+    for (auto type : {DepType::IntraCore, DepType::InterCore, DepType::LoadStore}) {
+        if (module_->getAttrOfType<IntegerAttr>(getAttrName(type))) {
+            LOG_DEBUG("initFromModule: type=" << (int)type << " already set, skip");
+            continue;
+        }
+        module_->setAttr(getAttrName(type), builder.getI32IntegerAttr(getDefaultCount(type)));
+        LOG_DEBUG("initFromModule: type=" << (int)type << " set to " << getDefaultCount(type));
+    }
 }
 
 void BufferCountManager::setBufferCount(DepType type, int count)
@@ -60,19 +102,20 @@ void BufferCountManager::setBufferCount(DepType type, int count)
     }
     if (count >= kBufferCountWarningThreshold) {
         LOG_DEBUG("Warning: buffer count " << count << " >= "
-              << kBufferCountWarningThreshold << " is not recommended");
+            << kBufferCountWarningThreshold << " is not recommended");
     }
+    OpBuilder builder(module_.getContext());
     switch (type) {
         case DepType::IntraCore:
-            intraBufferCount_ = count;
+            module_->setAttr(CVPipeline::kIntraBufCount, builder.getI32IntegerAttr(count));
             LOG_DEBUG("IntraBufferCount set to " << count);
             break;
         case DepType::InterCore:
-            interCoreBufferCount_ = count;
+            module_->setAttr(CVPipeline::kInterCoreBufCount, builder.getI32IntegerAttr(count));
             LOG_DEBUG("InterBufferCount set to " << count);
             break;
         case DepType::LoadStore:
-            loadStoreBufferCount_ = count;
+            module_->setAttr(CVPipeline::kLoadStoreBufCount, builder.getI32IntegerAttr(count));
             LOG_DEBUG("LoadBufferCount set to " << count);
             break;
         default:
@@ -99,23 +142,9 @@ void BufferCountManager::buildBufferCountMap(
 
 int BufferCountManager::getBufferCountByType(DepType type) const
 {
-    int count = 1;
-    switch (type) {
-        case DepType::IntraCore:
-            count = intraBufferCount_;
-            break;
-        case DepType::InterCore:
-            count = interCoreBufferCount_;
-            break;
-        case DepType::LoadStore:
-            count = loadStoreBufferCount_;
-            break;
-        default:
-            LOG_DEBUG("Unknown DepType: " << static_cast<int>(type));
-            break;
-    }
-    LOG_DEBUG("getBufferCountByType(" << static_cast<int>(type) << ") = " << count
-          << " (IntraCore=0, InterCore=1, LoadStore=2)");
+    auto attr = module_->getAttrOfType<IntegerAttr>(getAttrName(type));
+    int count = static_cast<int>(attr.getInt());
+    LOG_DEBUG("getBufferCountByType(" << static_cast<int>(type) << ") = " << count);
     return count;
 }
 

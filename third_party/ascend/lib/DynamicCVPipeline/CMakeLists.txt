@@ -37,7 +37,6 @@ file(GLOB PRE_CHECK_AVAILABLE_SRC_FILES CONFIGURE_DEPENDS
 add_triton_library(DynamicCVPipeline
   AddDynamicCVPipeline.cpp
   PreCheckAvailable.cpp
-  SplitIfByBlockId.cpp
 
   StandardizeOp.cpp
   ${STANDARDIZE_OP_PASS_SRC}

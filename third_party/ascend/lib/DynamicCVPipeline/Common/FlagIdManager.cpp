@@ -21,6 +21,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/Common/FlagIdManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "mlir/IR/Operation.h"
 #include "llvm/Support/Debug.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -63,7 +64,13 @@ int FlagIdManager::acquireId(Operation* insertionPoint)
     return ++currentMaxId;
 }
 
-int FlagIdManager::checkCurrentId()
+bool FlagIdManager::checkCurrentId()
 {
+    BufferCountManager::DepType depType = BufferCountManager::DepType::InterCore;
+    BufferCountManager bufferCountMgr(module);
+    int outerBufferCount = bufferCountMgr.getBufferCountByType(depType);
+    if (outerBufferCount > 1) {
+        return currentMaxId <= MULTI_MAX_FLAG_ID;
+    }
     return currentMaxId <= MAX_FLAG_ID;
 }

@@ -355,6 +355,30 @@ void DataDependencyAnalysisPass::insertProducerAndRecordDeps(scf::ForOp forOp,
     }
 }
 
+bool checkYieldCoreType(mlir::Operation *yieldOp)
+{
+    if (!isa<scf::YieldOp>(yieldOp)) {
+        return false;
+    }
+    for (unsigned index = 0; index < yieldOp->getNumOperands(); ++index) {
+        mlir::Value value = yieldOp->getOperand(index);
+        llvm::StringRef yieldCoreType = getCoreTypeWithIndex(yieldOp, index);
+
+        mlir::Operation *definingOp = value.getDefiningOp();
+        if (!definingOp || !isa<scf::ForOp>(definingOp)) {
+            continue;
+        }
+        auto defResult = dyn_cast<mlir::OpResult>(value);
+        int resultIndex = defResult ? defResult.getResultNumber() : 0;
+        llvm::StringRef definingCoreType = getCoreTypeWithIndex(definingOp, resultIndex);
+
+        if (yieldCoreType != definingCoreType) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Process iterArg dependencies for all scf.for operations in the module.
 // This function iterates through all for loops and checks each iterArg to determine
 // if there are cross-core-type data dependencies.
@@ -372,7 +396,11 @@ void DataDependencyAnalysisPass::processIterArgDependencies()
     // Step2: Process each iterArg of each scf.for operation
     for (scf::ForOp forOp : forOps) {
         size_t numIterArgs = forOp.getInitArgs().size();
-
+        mlir::Operation *yieldOp = forOp.getBody()->getTerminator();
+        if (!checkYieldCoreType(yieldOp)) {
+            LOG_DEBUG("[ERROR]: Yield core type mismatch defining op\n");
+            signalPassFailure();
+        }
         for (int iterArgIndex = 0; iterArgIndex < numIterArgs; ++iterArgIndex) {
             mlir::Value initValue = forOp.getInits()[iterArgIndex];
             mlir::BlockArgument iterArg = forOp.getRegionIterArg(iterArgIndex);

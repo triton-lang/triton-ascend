@@ -40,6 +40,7 @@ import torch_npu
 torch_device_fn = torch.npu
 
 from .code_cache import config_cache_dir
+from .kernel_args_dump import dump_kernel_args, suppress_dump
 
 DEVICE_COUNT = torch_device_fn.device_count()
 major_version = int(triton.__version__.split(".")[0])
@@ -217,6 +218,17 @@ class LibEntry(triton.KernelInterface):
         ]
         self.lock = threading.Lock()
 
+    def _get_dump_bound_args(self, args, kwargs):
+        bound_args = {}
+        for param in self.jit_function.params:
+            if param.num < len(args):
+                bound_args[param.name] = args[param.num]
+            elif param.name in kwargs:
+                bound_args[param.name] = kwargs[param.name]
+            elif param.default is not inspect._empty:
+                bound_args[param.name] = param.default
+        return bound_args
+
     def run(self, *args, **kwargs):
         grid = kwargs["grid"]
 
@@ -235,6 +247,7 @@ class LibEntry(triton.KernelInterface):
         )
 
         k_args = arg_processor.get_k_args()
+        dump_kernel_args(self.jit_function.fn.__name__, self._get_dump_bound_args(args, kwargs))
 
         entry_key = arg_processor.generate_key()
         device = torch_device_fn.current_device()
@@ -245,7 +258,8 @@ class LibEntry(triton.KernelInterface):
             with self.lock:
                 if entry_key in cache:
                     break
-                kernel = self.fn.run(*args, **kwargs)
+                with suppress_dump():
+                    kernel = self.fn.run(*args, **kwargs)
                 fn = self.fn
                 # collect constexpr arguments for grid computation
                 constexprs = {}

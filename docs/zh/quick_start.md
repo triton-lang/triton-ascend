@@ -4,7 +4,7 @@
 
 **Triton-Ascend**是适配华为Ascend处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对昇腾NPU特性进行深度优化，能够帮助用户在昇腾平台上快速开发和部署高性能计算任务。
 
-本文以**Ubuntu 22.04**环境下通过软件包部署方式在线安装并运行向量加法示例为例，指导用户快速上手使用**Triton-Ascend**。如需体验更多安装方式请阅读[安装指南](./installation_guide.md)文档。
+本文以**Ubuntu 22.04**环境下通过软件包部署方式在线安装并运行向量加法实例为例，指导用户快速上手使用**Triton-Ascend**。如需体验更多安装方式请阅读[安装指南](./installation_guide.md)文档。
 
 ## 环境准备
 
@@ -30,13 +30,12 @@
 ## 快速安装
 
 ```bash
-# 以安装 triton-ascend 3.2.1 为例
-pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+pip install triton-ascend --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
 ```
 
 ## 快速开始
 
-**运行tutorials中向量加法示例验证结果**
+**运行tutorials中向量加法实例验证结果**
 
 向量加法实例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)
 通过对比Triton算子与PyTorch原生计算的输出结果，证明昇腾NPU设备可正确调用Triton算子并保证计算精度。
@@ -44,9 +43,9 @@ pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra
 ```bash
 # 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
-# 拉取triton-ascend源码仓及用例（可选，非源码编译安装运行示例时需拉源码仓）
+# 拉取triton-ascend源码仓及用例
 git clone https://github.com/triton-lang/triton-ascend.git
-# 运行tutorials示例：
+# 运行tutorials实例
 python3 ./triton-ascend/third_party/ascend/tutorials/01-vector-add.py
 ```
 

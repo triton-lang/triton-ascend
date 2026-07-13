@@ -6,7 +6,7 @@
 
 **硬件要求**
 
-- Ascend产品：支持Atlas A2/A3/950系列。
+- Ascend产品：支持Atlas A2/A3/950系列。 
 
 - NPU配置：建议至少单卡32GB内存。
 
@@ -17,9 +17,9 @@
 确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》
 完成驱动与固件安装。
 
-- CANN版本推荐：9.0.0
-- Python版本推荐：python3.11
-- TorchNPU版本推荐：2.7.1.post4
+- CANN版本：9.0.0
+- Python版本：python3.11
+- TorchNPU版本：2.7.1.post4
 
 **表1** 产品版本配套说明表
 <table style="table-layout: fixed; width: 100%; border-collapse: collapse; font-family: Arial, sans-serif;">
@@ -70,8 +70,7 @@
 ## 快速安装
 
 ```bash
-# 以安装 triton-ascend 3.2.1 为例
-pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+pip install triton-ascend --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
 ```
 
 ## 源码安装
@@ -97,45 +96,55 @@ pip install -e .
 
 ### 自定义LLVM构建（可选）
 
-```bash
-# 如果需要自定义构建LLVM过程的，可以先执行这一步再去编译Triton-Ascend
-# 检出指定版本的LLVM源码并应用补丁
-git clone --no-checkout https://github.com/llvm/llvm-project.git
-cd llvm-project
-git checkout fad3272286528b8a491085183434c5ad4b59ab92
-wget https://raw.githubusercontent.com/triton-lang/triton-ascend/6765b03c81c4e9ecb277e4ef1dde61dea0d044f0/third_party/ascend/llvm_patch/fad3272.patch
-git apply fad3272.patch
+如果需要自定义构建LLVM过程的，可以执行下面的步骤去编译Triton-Ascend。
 
-export LLVM_INSTALL_PREFIX=/path/to/llvm-install
+1. **代码准备**：通过`git checkout`检出指定版本的LLVM源码并应用补丁。
 
-# 构建自定义LLVM版本
-cd {PATH_TO}/llvm-project
-mkdir build
-cd build
-cmake ../llvm \
-    -G Ninja \
-    -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
-    -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
-    -DCMAKE_LINKER=/usr/bin/lld-15 \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DLLVM_ENABLE_ASSERTIONS=ON \
-    -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
-    -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
-    -DLLVM_ENABLE_LLD=ON \
-    -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
-ninja install
+    ```bash
+    git clone --no-checkout https://github.com/llvm/llvm-project.git
+    cd llvm-project
+    git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
+    wget https://raw.githubusercontent.com/triton-lang/triton-ascend/refs/heads/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
+    git apply llvm_patch_f6ded0b.patch
+    ```
 
-# 编译Triton-Ascend
-git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
+2. **构建LLVM**：路径`{PATH_TO}`为用户第一步检出LLVM源码的路径。
 
-LLVM_SYSPATH=${LLVM_INSTALL_PREFIX} \
-TRITON_BUILD_WITH_CCACHE=true \
-TRITON_BUILD_WITH_CLANG_LLD=true \
-TRITON_BUILD_PROTON=OFF \
-TRITON_WHEEL_NAME="triton-ascend" \
-TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
-python3 setup.py install
-```
+    ```bash
+    # /path/to/llvm-install 路径为用户规划的llvm安装路径,需根据实际调整
+    export LLVM_INSTALL_PREFIX=/path/to/llvm-install
+    cd {PATH_TO}/llvm-project
+    mkdir build
+    cd build
+    cmake ../llvm \
+        -G Ninja \
+        -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
+        -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
+        -DCMAKE_LINKER=/usr/bin/lld-15 \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLVM_ENABLE_ASSERTIONS=ON \
+        -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
+        -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
+        -DLLVM_ENABLE_LLD=ON \
+        -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
+    ninja install
+
+    # 拷贝FILECHECK到目标安装路径
+    cp  {PATH_TO}/llvm-project/build/bin/FileCheck ${LLVM_INSTALL_PREFIX}/bin/FileCheck
+    ```
+
+3. **编译Triton-Asecnd**
+
+    ```bash
+    git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
+    LLVM_SYSPATH=${LLVM_INSTALL_PREFIX} \
+    TRITON_BUILD_WITH_CCACHE=true \
+    TRITON_BUILD_WITH_CLANG_LLD=true \
+    TRITON_BUILD_PROTON=OFF \
+    TRITON_WHEEL_NAME="triton-ascend" \
+    TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
+    python3 setup.py install
+    ```
 
 ## 开发镜像
 
@@ -242,12 +251,16 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
 ## 运行样例
 
-运行实例：<a href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py" style="text-decoration: none; color: #0066cc;">01-vector-add.py </a>
+**运行tutorials中向量加法实例验证结果**
+
+向量加法实例：<a href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py" style="text-decoration: none; color: #0066cc;">01-vector-add.py </a>
 
 ```bash
 # 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
-# 运行tutorials示例：
+# 拉取triton-ascend源码仓及用例（可选，非源码编译安装运行示例时需拉源码仓）
+git clone https://github.com/triton-lang/triton-ascend.git
+# 运行tutorials实例
 python3 ./third_party/ascend/tutorials/01-vector-add.py
 ```
 

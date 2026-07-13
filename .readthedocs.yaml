@@ -14,7 +14,7 @@ build:
     python: "3.13"
   jobs:
     post_checkout:
-      - bash scripts/readthedocs_checkout.sh
+      - bash .github/workflows/scripts/readthedocs_checkout.sh
 
 sphinx:
   configuration: docs/active/conf.py

@@ -38,77 +38,75 @@
 namespace mlir::triton::plugin {
 
 // Types for plugin callback functions.
-using AddPassCallback = void (*)(mlir::PassManager *,
-                                 const std::vector<std::string> &);
+using AddPassCallback = void (*)(mlir::PassManager *, const std::vector<std::string> &);
 using RegisterPassCallback = void (*)();
 using RegisterDialectCallback = void (*)(mlir::DialectRegistry *);
 using AddOpCallback = void (*)(TritonOpBuilder &, std::vector<mlir::Value> &);
 
 /// Information provided by a plugin for loading its passes.
 struct PassInfo {
-  const char *name;
-  const char *version;
-  AddPassCallback addPass;
-  RegisterPassCallback registerPass;
+    const char *name;
+    const char *version;
+    AddPassCallback addPass;
+    RegisterPassCallback registerPass;
 };
 
 /// Information provided by a plugin for loading its dialects.
 struct DialectInfo {
-  const char *name;
-  const char *version;
-  RegisterDialectCallback registerDialect;
+    const char *name;
+    const char *version;
+    RegisterDialectCallback registerDialect;
 };
 
 /// Information provided by a plugin for loading its custom ops.
 struct OpInfo {
-  const char *name;
-  AddOpCallback addOp;
+    const char *name;
+    AddOpCallback addOp;
 };
 
 /// Container for all plugin information; this is returned by the plugin
 /// library's public entry point, @ref tritonGetPluginInfo.
 struct PluginInfo {
-  /// The API version used by this plugin, see \c TRITON_PLUGIN_API_VERSION.
-  uint32_t apiVersion;
+    /// The API version used by this plugin, see \c TRITON_PLUGIN_API_VERSION.
+    uint32_t apiVersion;
 
-  /// A meaningful name of the plugin.
-  const char *pluginName;
-  /// The version of the plugin.
-  const char *pluginVersion;
+    /// A meaningful name of the plugin.
+    const char *pluginName;
+    /// The version of the plugin.
+    const char *pluginVersion;
 
-  /// The list of passes.
-  PassInfo *passes;
-  size_t numPasses;
+    /// The list of passes.
+    PassInfo *passes;
+    size_t numPasses;
 
-  /// The list of dialects.
-  DialectInfo *dialects;
-  size_t numDialects;
+    /// The list of dialects.
+    DialectInfo *dialects;
+    size_t numDialects;
 
-  /// The list of custom ops.
-  OpInfo *ops;
-  size_t numOps;
+    /// The list of custom ops.
+    OpInfo *ops;
+    size_t numOps;
 
-  /// Triton Version
-  const char *tritonVersion;
+    /// Triton Version
+    const char *tritonVersion;
 };
 
 /// A helper structure for storing information about a pass registered by a
 /// plugin.
 struct Pass {
-  Pass(const char *name, AddPassCallback addPass)
-      : name(name), addPass(addPass) {}
+    Pass(const char *name, AddPassCallback addPass) : name(name), addPass(addPass) {}
 
-  const char *name;
-  const AddPassCallback addPass;
+    const char *name;
+    const AddPassCallback addPass;
 };
 
 /// A helper structure for storing information about a pass registered by a
 /// plugin.
 struct Op {
-  Op(const char *name, AddOpCallback addOp) : name(name), addOp(addOp) {}
+    Op(const char *name, AddOpCallback addOp) : name(name), addOp(addOp) {}
 
-  const char *name;
-  const AddOpCallback addOp;
+    const char *name;
+    const AddOpCallback addOp;
 };
 
 /// A loaded Triton plugin.
@@ -116,54 +114,55 @@ struct Op {
 /// An instance of this class wraps a loaded dialect plugin and gives access
 /// to its interface defined by the \c PluginInfo it exposes.
 class TritonPlugin {
-public:
-  /// Attempts to load a Triton plugin from a given file.
-  ///
-  /// \returns Returns an error if either the library cannot be found or
-  /// loaded, there is no public entry point, or the plugin implements the
-  /// wrong API version.
-  static llvm::Expected<TritonPlugin> load(const std::string &filename);
+  public:
+    /// Attempts to load a Triton plugin from a given file.
+    ///
+    /// \returns Returns an error if either the library cannot be found or
+    /// loaded, there is no public entry point, or the plugin implements the
+    /// wrong API version.
+    static llvm::Expected<TritonPlugin> load(const std::string &filename);
 
-  /// Get the filename of the loaded plugin.
-  llvm::StringRef getFilename() const { return filename; }
+    /// Get the filename of the loaded plugin.
+    llvm::StringRef getFilename() const { return filename; }
 
-  /// Get the plugin name.
-  llvm::StringRef getPluginName() const { return info->pluginName; }
+    /// Get the plugin name.
+    llvm::StringRef getPluginName() const { return info->pluginName; }
 
-  /// Get the plugin version.
-  llvm::StringRef getPluginVersion() const { return info->pluginVersion; }
+    /// Get the plugin version.
+    llvm::StringRef getPluginVersion() const { return info->pluginVersion; }
 
-  /// Get the plugin API version.
-  uint32_t getAPIVersion() const { return info->apiVersion; }
+    /// Get the plugin API version.
+    uint32_t getAPIVersion() const { return info->apiVersion; }
 
-  /// List the available passes; this allows us invoke the \c AddPassCallback
-  /// while knowing the pass name. This function will crash with an LLVM usage
-  /// error if the plugin provides invalid \c PluginInfo.
-  const std::vector<Pass> listPasses() const;
+    /// List the available passes; this allows us invoke the \c AddPassCallback
+    /// while knowing the pass name. This function will crash with an LLVM usage
+    /// error if the plugin provides invalid \c PluginInfo.
+    const std::vector<Pass> listPasses() const;
 
-  /// Invoke the \c RegisterPassCallback for each pass registered in this
-  /// plugin. This function will crash with an LLVM usage
-  /// error if the plugin provides invalid \c PluginInfo.
-  void registerPasses() const;
+    /// Invoke the \c RegisterPassCallback for each pass registered in this
+    /// plugin. This function will crash with an LLVM usage
+    /// error if the plugin provides invalid \c PluginInfo.
+    void registerPasses() const;
 
-  /// Invoke the \c RegisterDialectCallback for each dialect registered in
-  /// this plugin. This function will crash with an LLVM usage
-  /// error if the plugin provides invalid \c PluginInfo.
-  void registerDialects(DialectRegistry &dialectRegistry) const;
+    /// Invoke the \c RegisterDialectCallback for each dialect registered in
+    /// this plugin. This function will crash with an LLVM usage
+    /// error if the plugin provides invalid \c PluginInfo.
+    void registerDialects(DialectRegistry &dialectRegistry) const;
 
-  /// List the custom operations; this allows us invoke the \c
-  /// AddOpCallback while knowing the operation name. This function will crash
-  /// with an LLVM usage error if the plugin provides invalid \c PluginInfo.
-  const std::vector<Op> listOps() const;
+    /// List the custom operations; this allows us invoke the \c
+    /// AddOpCallback while knowing the operation name. This function will crash
+    /// with an LLVM usage error if the plugin provides invalid \c PluginInfo.
+    const std::vector<Op> listOps() const;
 
-private:
-  TritonPlugin(const std::string &filename,
-               const llvm::sys::DynamicLibrary &library)
-      : filename(filename), library(library), info() {}
+  private:
+    TritonPlugin(const std::string &filename, const llvm::sys::DynamicLibrary &library)
+        : filename(filename), library(library), info()
+    {
+    }
 
-  std::string filename;
-  llvm::sys::DynamicLibrary library;
-  PluginInfo *info;
+    std::string filename;
+    llvm::sys::DynamicLibrary library;
+    PluginInfo *info;
 };
 
 /// Load all plugins specified in the `TRITON_PLUGIN_PATHS` environment
@@ -194,7 +193,6 @@ const std::vector<TritonPlugin> &loadPlugins();
 ///   return &info;
 /// }
 /// ```
-extern "C" mlir::triton::plugin::PluginInfo *LLVM_ATTRIBUTE_WEAK
-tritonGetPluginInfo();
+extern "C" mlir::triton::plugin::PluginInfo *LLVM_ATTRIBUTE_WEAK tritonGetPluginInfo();
 
 #endif // TRITON_PLUGIN_UTILS_H

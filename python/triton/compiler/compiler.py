@@ -5,7 +5,7 @@ from .._C.libtriton import get_cache_invalidating_env_vars, ir, buffer_ir
 from .._C.libtriton.ascend import ir as ascend_ir
 from ..backends import backends
 from ..backends.compiler import GPUTarget, AttrsDescriptor
-from .. import __version__
+from .. import __version__, knobs
 from ..runtime.autotuner import OutOfResources
 from ..runtime.cache import get_cache_manager, get_dump_manager, get_override_manager
 from ..runtime.driver import driver

@@ -12,6 +12,7 @@ from typing import Callable, Generic, Iterable, Optional, TypeVar, Union, overlo
 from types import ModuleType
 
 from triton._C.libtriton import get_cache_invalidating_env_vars
+from triton import knobs
 from .driver import driver
 from . import _async_compile
 
@@ -584,7 +585,7 @@ class JITFunction(KernelInterface[T]):
 
         if knobs.runtime.add_stages_inspection_hook is not None:
             inspect_stages_key, inspect_stages_hash = knobs.runtime.add_stages_inspection_hook()
-            sig_and_spec = sig_and_spec + (f'("custom_pipeline", {inspect_stages_hash})',)
+            sig_and_spec = sig_and_spec + (f'("custom_pipeline", {inspect_stages_hash})', )
 
         # compute cache key
         key = ''.join(sig_and_spec) + str((constexpr_vals, excess_kwargs))

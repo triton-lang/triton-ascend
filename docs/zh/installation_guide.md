@@ -6,7 +6,7 @@
 
 **硬件要求**
 
-- Ascend产品：支持Atlas A2/A3/950系列。 
+- Ascend产品：支持Atlas A2/A3/950系列。
 
 - NPU配置：建议至少单卡32GB内存。
 

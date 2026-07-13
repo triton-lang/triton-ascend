@@ -32,7 +32,7 @@ A: 不可以，只能在 Ascend NPU 硬件环境使用 Triton-Ascend
 
 ## 2. 精度与数值一致性问题
 
-**Q: NPU 运行结果和 PyTorch/CPU/GPU 参考结果不一致，如何排查？**
+**Q: NPU 运行结果和 TorchNPU/CPU/GPU 参考结果不一致，如何排查？**
 
 A: 用例请参考 [07_accuracy_comparison_example.md](../zh/examples/07_accuracy_comparison_example.md)
 调试方法请参考 [解释器模式调试方法](./debug_guide/debugging.md#5-调试方法)

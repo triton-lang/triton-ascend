@@ -39,6 +39,28 @@ Triton-Ascend
 
 ---
 
+## 📖 快速安装
+
+### 环境准备
+
+#### 硬件要求
+
+支持的操作系统: linux(arch64/x86_64)
+
+支持的 Ascend 产品: Atlas A2/A3 系列
+
+最小硬件配置: 单卡 32GB 显存（推荐）
+
+#### 软件依赖
+
+确定 Python、CANN 和 TorchNPU 软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。
+
+- Python 版本选择：py3.9-py3.11 均可。
+
+- CANN 版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成 CANN 的安装与配置。建议下载安装 9.0.0 版本。
+
+- TorchNPU 版本选择：当前配套的 TorchNPU 版本为 2.7.1.post4。
+
 ### 快速安装
 
 ```bash

@@ -11,6 +11,7 @@
 #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 #include "triton/Target/LLVMIR/Passes.h"
 #include "triton/Tools/PluginUtils.h"
+#include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -94,17 +95,29 @@ void init_triton_passes_llvmir(py::module &&m) {
 }
 
 void init_plugin_passes(py::module &m) {
-  for (const auto &plugin : mlir::triton::plugin::loadPlugins()) {
-    for (const auto &pass : plugin.listPasses()) {
-      std::string wrapped = std::string("add_") + pass.name;
-      m.def(
-          wrapped.c_str(),
-          [pass](mlir::PassManager &pm, std::vector<std::string> args) {
-            pass.addPass(&pm, args);
-          },
-          py::arg("pm"), py::arg("args") = std::vector<std::string>());
-    }
-  }
+  auto m_ptr = std::make_shared<py::module>(m);
+  m.def(
+      "extend_with",
+      [m_ptr](const std::string &path) {
+        auto pluginOrErr = mlir::triton::plugin::TritonPlugin::load(path);
+        if (!pluginOrErr) {
+          std::string errMsg = llvm::toString(pluginOrErr.takeError());
+          throw std::runtime_error(errMsg);
+        }
+        auto plugin = std::move(*pluginOrErr);
+        py::gil_scoped_acquire acquire;
+        for (const auto &pass : plugin.listPasses()) {
+          std::string wrapped = std::string("add_") + pass.name;
+          m_ptr->def(
+              wrapped.c_str(),
+              [pass](mlir::PassManager &pm, std::vector<std::string> args) {
+                pass.addPass(&pm, args);
+              },
+              py::arg("pm"), py::arg("args") = std::vector<std::string>());
+        }
+      },
+      "Given a path to a Triton extension, load it and create `add_*` "
+      "functions for each pass.");
 }
 
 void init_triton_passes(py::module &&m) {

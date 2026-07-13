@@ -1,6 +1,6 @@
 add_triton_library(TritonTools
   LinearLayout.cpp
-  PluginUtils.cpp
+  # PluginUtils.cpp is built as TritonPluginUtils STATIC (see below).
 
   DEPENDS
 
@@ -10,7 +10,10 @@ add_triton_library(TritonTools
   f2reduce
 )
 
-# triton-ascend 3.5 lacks triton/Version.h (upstream 3.7 generates it via
-# CMake configure_file). Define TRITON_VERSION here so PluginUtils.cpp's
-# plugin version checks compile.
-target_compile_definitions(TritonTools PRIVATE TRITON_VERSION="3.5.0")
+# STATIC (not OBJECT) so only libtriton.so links it via TRITON_LIBRARIES;
+# plugin .so files include only the header (declarations) and resolve
+# symbols (TritonPlugin::load, loadPlugins, etc.) against libtriton.so
+# at runtime -> single shared plugins list.
+add_library(TritonPluginUtils STATIC PluginUtils.cpp)
+target_link_libraries(TritonPluginUtils PUBLIC MLIRIR MLIRLLVMDialect)
+target_compile_definitions(TritonPluginUtils PRIVATE TRITON_VERSION="3.5.0")

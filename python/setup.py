@@ -30,6 +30,7 @@ from wheel.bdist_wheel import bdist_wheel
 
 import pybind11
 
+
 triton_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 os.environ.setdefault("TRITON_BUILD_WITH_CCACHE", "true")
@@ -588,6 +589,12 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["cmake", "--build", "."] + build_args, cwd=cmake_dir)
         subprocess.check_call(["cmake", "--build", ".", "--target", "mlir-doc"], cwd=cmake_dir)
 
+
+nvidia_version_path = os.path.join(get_base_dir(), "cmake", "nvidia-toolchain-version.json")
+with open(nvidia_version_path, "r") as nvidia_version_file:
+    # parse this json file to get the version of the nvidia toolchain
+    NVIDIA_TOOLCHAIN_VERSION = json.load(nvidia_version_file)
+
         # Copy include/ to triton/include/ so downstream packages can compile
         # against triton's headers without needing the source submodule.
         # Merge source include/ + build-dir include/ (tablegen output).
@@ -625,25 +632,11 @@ class CMakeBuild(build_ext):
             shutil.copytree(ascend_include_src, ascend_include_dst, dirs_exist_ok=True)
         print(f"Copied include/ to {include_dst}")
 
-        # Copy cmake/ so downstream packages (triton-dist) can find
-        # llvm-hash.txt, FindLLVM.cmake, etc. without a submodule.
-        cmake_src = os.path.join(self.base_dir, "cmake")
-        cmake_dst = os.path.join(os.path.dirname(extdir), "cmake")
-        if os.path.exists(cmake_src):
-            shutil.copytree(cmake_src, cmake_dst, dirs_exist_ok=True)
-
-
-nvidia_version_path = os.path.join(get_base_dir(), "cmake", "nvidia-toolchain-version.json")
-with open(nvidia_version_path, "r") as nvidia_version_file:
-    # parse this json file to get the version of the nvidia toolchain
-    NVIDIA_TOOLCHAIN_VERSION = json.load(nvidia_version_file)
-
 
 def get_platform_dependent_src_path(subdir):
     return lambda platform, version: (
         (lambda version_major, version_minor1, version_minor2, : f"targets/{platform}/{subdir}"
          if int(version_major) >= 12 and int(version_minor1) >= 5 else subdir)(*version.split('.')))
-
 
 # FIXME:download&backend
 # download_and_copy(
@@ -776,7 +769,6 @@ class plugin_egginfo(egg_info):
 
 
 class BuildWheel(bdist_wheel):
-
     def run(self):
         add_links()
         bdist_wheel.run(self)
@@ -812,9 +804,10 @@ package_data = {
         "include/llvm/**/*",
         "include/python/**/*",
         "include/third_party/**/*",
-    ], "triton/tools": ["compile.h", "compile.c"], **{f"triton/backends/{b.name}": b.package_data
-                                                      for b in backends}, "triton/language/extra":
-    sum((b.language_package_data for b in backends), [])
+    ],
+    "triton/tools": ["compile.h", "compile.c"], **{f"triton/backends/{b.name}": b.package_data
+                                                   for b in backends}, "triton/language/extra": sum(
+        (b.language_package_data for b in backends), [])
 }
 
 
@@ -891,7 +884,8 @@ def get_default_version():
 
 def get_version():
     version = os.environ.get("TRITON_VERSION", get_default_version()) + os.environ.get(
-        "TRITON_WHEEL_VERSION_SUFFIX", "")
+        "TRITON_WHEEL_VERSION_SUFFIX", ""
+    )
     if not is_manylinux:
         version += get_git_commit_hash()
 
@@ -952,6 +946,7 @@ if not os.path.exists(readme):
     raise FileNotFoundError("Unable to find 'README.md'")
 with open(readme, encoding="utf-8") as fdesc:
     long_description = fdesc.read()
+
 
 setup(
     name=get_package_name(),

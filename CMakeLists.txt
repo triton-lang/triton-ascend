@@ -217,10 +217,9 @@ if(TRITON_BUILD_PYTHON_MODULE)
 
   get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
   get_property(triton_plugins GLOBAL PROPERTY TRITON_PLUGINS)
-  # TritonPluginUtils is a STATIC lib: loadPlugins()/registerInfo() are called
-  # by libtriton.so (ir.cc/passes.cc), so the linker keeps PluginUtils.o.
-  # Plugins inject via TritonPlugin::registerInfo and refresh passes from
-  # Python (passes.refresh_plugin_passes).
+  # TritonPluginUtils is a STATIC lib: loadPlugins()/TritonPlugin::load are
+  # called by libtriton.so (ir.cc/passes.cc extend_with), so the linker
+  # keeps PluginUtils.o. Plugins are loaded via extend_with (dlopen).
   list(APPEND triton_libs TritonPluginUtils)
   set(TRITON_LIBRARIES
     ${triton_libs}
@@ -292,6 +291,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
   add_compile_definitions(TRITON_BACKENDS_TUPLE=${TRITON_BACKENDS_TUPLE})
   add_library(triton SHARED ${PYTHON_SRC_PATH}/main.cc
                   ${PYTHON_SRC_PATH}/ir.cc
+                  ${PYTHON_SRC_PATH}/ir_binding.cc
                   ${PYTHON_SRC_PATH}/../triton/extension/buffer/src/buffer_ir.cc
                   ${PYTHON_SRC_PATH}/passes.cc
                   ${PYTHON_SRC_PATH}/interpreter.cc

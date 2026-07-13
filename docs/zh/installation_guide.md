@@ -278,7 +278,7 @@ The maximum difference between torch and triton is 0.0
 
 **解决措施**
 
-可以尝试手动安装Torch后再安装TorchNPU：
+可以尝试手动安装torch后再安装TorchNPU：
 
 ```bash
 pip install torch==2.7.1+cpu --index-url https://download.pytorch.org/whl/cpu

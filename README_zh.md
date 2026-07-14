@@ -4,18 +4,18 @@
   </picture>
 </p>
 
-<h3 align="center">
+<h3 align="center"><font size="68">
 Triton-Ascend
-</h3>
+</font></h3>
 
 <p align="center">
   <a href="https://deepwiki.com/triton-lang/triton-ascend">
-    <img src="https://img.shields.io/badge/Ask_AI-DeepWiki-0052D9?style=flat&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZD0iTTIwIDJINGEyIDIgMCAwIDAtMiAydjEyYTIgMiAwIDAgMCAyIDJoMTRsNCA0VjRhMiAyIDIgMCAwIDAtMi0yeiIgZmlsbD0id2hpdGUiLz48L3N2Zz4%3D" alt="Ask AI on DeepWiki">
+    <img src="https://deepwiki.com/badge.svg" alt="Ask AI on DeepWiki">
   </a>
 </p>
 
 <p align="center">
-<a href="README.md"><b>English</b></a> | <a><b>中文</b></a>
+<a href="README.md"><b>English</b></a> | <a href="README_zh.md"><b>中文</b></a>
 </p>
 
 <p align="center">
@@ -53,19 +53,19 @@ Triton-Ascend
 
 支持的操作系统: linux(arch64/x86_64)
 
-支持的 Ascend 产品: Atlas A2/A3 系列
+支持的Ascend产品:Atlas A2/A3/950系列
 
-最小硬件配置: 单卡 32GB 显存（推荐）
+最小硬件配置: 单卡32GB显存（推荐）
 
 #### 软件依赖
 
-确定 Python、CANN 和 TorchNPU 软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。
+确定Python、CANN和TorchNPU软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。
 
-- Python 版本选择：py3.9-py3.11 均可。
+- Python版本选择：py3.9-py3.11 均可。
 
-- CANN 版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成 CANN 的安装与配置。建议下载安装 9.0.0 版本。
+- CANN版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成CANN的安装与配置。建议下载安装 9.0.0 版本。
 
-- TorchNPU 版本选择：当前配套的 TorchNPU 版本为 2.7.1.post4。
+- TorchNPU版本选择：当前配套的TorchNPU版本为2.7.1.post4。
 
 ### 快速安装
 

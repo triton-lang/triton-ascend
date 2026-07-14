@@ -9,6 +9,12 @@ Triton-Ascend
 </h3>
 
 <p align="center">
+  <a href="https://deepwiki.com/triton-lang/triton-ascend">
+    <img src="https://img.shields.io/badge/Ask_AI-DeepWiki-0052D9?style=flat&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZD0iTTIwIDJINGEyIDIgMCAwIDAtMiAydjEyYTIgMiAwIDAgMCAyIDJoMTRsNCA0VjRhMiAyIDIgMCAwIDAtMi0yeiIgZmlsbD0id2hpdGUiLz48L3N2Zz4%3D" alt="Ask AI on DeepWiki">
+  </a>
+</p>
+
+<p align="center">
 <a href="README.md"><b>English</b></a> | <a><b>中文</b></a>
 </p>
 

@@ -126,6 +126,22 @@ void traverseForwardUpdateUserChainIf(
     std::function<void(OpBuilder &, Operation *)> actionFn,
     llvm::SmallPtrSet<Operation *, 16> &stopOps);
 
+mlir::Operation *findOperandDefinitionWithCondition(
+    mlir::Value operand, const std::function<bool(Operation *)> &condFn);
+
+mlir::Operation *
+findFirstParentWithCondition(mlir::Operation *op,
+                             const std::function<bool(Operation *)> &condFn);
+
+mlir::Operation *findOperandDefinitionWithCondition(
+    mlir::Value operand, const std::function<bool(Operation *)> &condFn,
+    const std::function<bool(Operation *)> &stopFn);
+
+mlir::Operation *
+findFirstParentWithCondition(mlir::Operation *rootOp,
+                             const std::function<bool(Operation *)> &condFn,
+                             const std::function<bool(Operation *)> &stopFn);
+
 // UseAnalysis will tag operations whose results are used only as meta-data
 // with "MetaUse" tag.
 bool isMetaUse(Operation *op);

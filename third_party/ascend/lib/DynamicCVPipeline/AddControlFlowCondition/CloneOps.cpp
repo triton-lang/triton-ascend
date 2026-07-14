@@ -253,7 +253,7 @@ static bool shouldEraseOpForCube(
     }
   }
 
-  // Can erase if no results and no exec-after dependencies in same block
+  // Can erase if no results and no live exec-after dependencies in same block
   return true;
 }
 

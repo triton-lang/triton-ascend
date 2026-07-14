@@ -146,6 +146,18 @@ void processOnefor(scf::ForOp forOp, CVPipeline::ComputeBlockIdManager &bm,
       LOG_DEBUG("Moving update op from block " << updateBlockId << " to block "
                                                << firstUserBlockId << "\n");
       bm.updateBlockId(yieldDefOp, firstUserBlockId);
+      // Move yieldDefOp to the end of the first user block
+      auto firstUserOps = bm.getOpsByBlockId(firstUserBlockId);
+      Operation *lastOpInFirstUserBlock = nullptr;
+      for (Operation *op : firstUserOps) {
+        if (!lastOpInFirstUserBlock ||
+            op->isBeforeInBlock(lastOpInFirstUserBlock)) {
+          lastOpInFirstUserBlock = op;
+        }
+      }
+      if (lastOpInFirstUserBlock) {
+        yieldDefOp->moveAfter(lastOpInFirstUserBlock);
+      }
     }
   }
 }

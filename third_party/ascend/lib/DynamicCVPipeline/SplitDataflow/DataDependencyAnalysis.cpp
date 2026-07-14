@@ -354,6 +354,30 @@ void DataDependencyAnalysisPass::insertProducerAndRecordDeps(
   }
 }
 
+bool checkYieldCoreType(mlir::Operation *yieldOp) {
+  if (!isa<scf::YieldOp>(yieldOp)) {
+    return false;
+  }
+  for (unsigned index = 0; index < yieldOp->getNumOperands(); ++index) {
+    mlir::Value value = yieldOp->getOperand(index);
+    llvm::StringRef yieldCoreType = getCoreTypeWithIndex(yieldOp, index);
+
+    mlir::Operation *definingOp = value.getDefiningOp();
+    if (!definingOp || !isa<scf::ForOp>(definingOp)) {
+      continue;
+    }
+    auto defResult = dyn_cast<mlir::OpResult>(value);
+    int resultIndex = defResult ? defResult.getResultNumber() : 0;
+    llvm::StringRef definingCoreType =
+        getCoreTypeWithIndex(definingOp, resultIndex);
+
+    if (yieldCoreType != definingCoreType) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Process iterArg dependencies for all scf.for operations in the module.
 // This function iterates through all for loops and checks each iterArg to
 // determine if there are cross-core-type data dependencies.

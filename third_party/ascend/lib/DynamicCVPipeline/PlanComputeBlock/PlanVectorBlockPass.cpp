@@ -41,6 +41,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <memory>
+#include <optional>
 
 static constexpr const char *DEBUG_TYPE = "plan-vector-block";
 #define LOG_DEBUG(...)                                                         \
@@ -210,9 +211,11 @@ void findCandidates(DenseMap<Operation *, int> &indegree,
 static SmallVector<Operation *>
 findOpsAdjacentToCube(Block *block, const SmallVector<Operation *> &fuseGroup,
                       DenseMap<Operation *, bool> &visited,
-                      const CVPipeline::MemoryDependenceGraph &memGraph) {
+                      const CVPipeline::MemoryDependenceGraph &memGraph,
+                      ComputeBlockIdManager &bm) {
   SmallVector<Operation *> toProcess;
-  std::optional<int> blockId;
+  std::optional<int> minBlockId = std::nullopt;
+
   for (Operation *op : fuseGroup) {
     SmallVector<Operation *> allUsers;
     allUsers.append(op->getUsers().begin(), op->getUsers().end());
@@ -227,17 +230,36 @@ findOpsAdjacentToCube(Block *block, const SmallVector<Operation *> &fuseGroup,
         continue;
       }
       if (!isFusableOp(userInBlock) && !visited[userInBlock]) {
-        auto newBlockId = getOpBlockId(user);
-        if (!newBlockId.has_value()) {
-          newBlockId =
-              getOpBlockId(userInBlock); // Some op will be tagged outside
+        auto newBlockId = bm.getBlockIdByOp(userInBlock);
+        if (!minBlockId.has_value() || newBlockId < minBlockId) {
+          minBlockId = newBlockId;
         }
+      }
+    }
+  }
 
-        if (!blockId.has_value()) {
-          blockId = newBlockId;
-        }
-        if (!newBlockId.has_value() || blockId == newBlockId) {
+  if (!minBlockId.has_value()) {
+    return {};
+  }
+
+  for (Operation *op : fuseGroup) {
+    SmallVector<Operation *> allUsers;
+    allUsers.append(op->getUsers().begin(), op->getUsers().end());
+    for (auto memUser : memGraph.getExecAfter(op)) {
+      allUsers.push_back(memUser);
+    }
+
+    for (auto user : allUsers) {
+      auto userInBlock = CVPipeline::getAncestorInBlock(user, block);
+      if (!userInBlock || (block->mightHaveTerminator() &&
+                           userInBlock == block->getTerminator())) {
+        continue;
+      }
+      if (!isFusableOp(userInBlock) && !visited[userInBlock]) {
+        auto newBlockId = bm.getBlockIdByOp(userInBlock);
+        if (newBlockId == minBlockId) {
           toProcess.push_back(op);
+          break;
         }
       }
     }
@@ -376,11 +398,11 @@ void refineFuseGroup(Block *block, SmallVector<Operation *> &nowFuseGroup,
                      ComputeBlockIdManager &bm) {
   // 1.Find ops in fuse group whose next node is a non-fusable (CUBE-only) op
   auto toProcess =
-      findOpsAdjacentToCube(block, nowFuseGroup, visited, memGraph);
+      findOpsAdjacentToCube(block, nowFuseGroup, visited, memGraph, bm);
   // 2. early return: if cannot find one node which next node is CUBE, need to
   // check if return or not;
   if (toProcess.empty()) {
-    LOG_DEBUG("No Cube adjacent op, no op will be cut.");
+    LOG_DEBUG("No Cube adjacent op, no op will be cut.\n");
     findCandidates(indegree, candidates, visited, memGraph, bm);
     if (candidates.empty()) {
       return;
@@ -393,7 +415,8 @@ void refineFuseGroup(Block *block, SmallVector<Operation *> &nowFuseGroup,
   // 4. Remove non-kept ops from fuseGroup and restore BFS state
   evictAndRestoreState(block, keepOps, nowFuseGroup, visited, candidates,
                        indegree, memGraph);
-  LOG_DEBUG("After cutting, kept " << keepOps.size() << "\n");
+  LOG_DEBUG("After cutting, kept " << keepOps.size() << " nowFuseGroup: "
+                                   << nowFuseGroup.size() << "\n");
 }
 
 // Main function to plan vector block id for one block
@@ -431,7 +454,7 @@ planVectorBlockId(Block *block,
     if (queue.empty() || nextFused == nullptr) {
       LOG_DEBUG("Prepare to check this group: \n");
       for (auto op : nowFuseGroup) {
-        LOG_DEBUG("fuseing: " << *op << "\n");
+        LOG_DEBUG("check: " << *op << "\n");
       }
       // finish one group, assign block id and start next iteration
       // Cut error operations before assigning block id

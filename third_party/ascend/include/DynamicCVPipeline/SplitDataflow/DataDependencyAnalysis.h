@@ -57,10 +57,15 @@ struct DependencyInfo {
   int iniProducerBlockId;
   int iniConsumerBlockId;
 
+  bool isAllTranspoesd = false;
   // Optional Items for V2CDependencies
   mlir::Operation *iniMatmulOp = nullptr;
   bool isMatmulA = false;
   bool isMatmulB = false;
+
+  // Optional Items for memDependencies
+  mlir::Operation *predOp;
+  mlir::Operation *nextOp;
 };
 
 class DataDependencyInfo {

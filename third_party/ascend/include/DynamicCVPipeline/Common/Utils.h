@@ -52,6 +52,8 @@ inline constexpr llvm::StringLiteral kAnalyzeFlagId =
 inline constexpr llvm::StringLiteral kLoopCarriedL0C =
     "ssbuffer.loop_carried_l0c";
 inline constexpr llvm::StringLiteral kCrossDeps = "ssbuffer.crossDeps";
+inline constexpr llvm::StringLiteral kIntraDeps = "ssbuffer.intraDeps";
+inline constexpr llvm::StringLiteral kMemCrossDeps = "ssbuffer.memCrossDeps";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
 inline constexpr llvm::StringLiteral kClone = "ssbuffer.clone";
 inline constexpr llvm::StringLiteral kFlowOpt = "ssbuffer.flowOpt";

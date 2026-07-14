@@ -1505,7 +1505,7 @@ void InterCoreTransferAndSyncPass::sortDependencies(
   unsigned order = 0;
   module.walk([&](mlir::Operation *op) { opOrder[op] = order++; });
 
-  // Step 2: Helper lambda â€” get the earliest user op of dep.value within the
+  // Step 2: Helper lambda â€?get the earliest user op of dep.value within the
   //         consumer compute block.
   auto getFirstConsumerOp =
       [&](const DependencyInfo &dep) -> mlir::Operation * {

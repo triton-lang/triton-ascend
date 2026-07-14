@@ -62,4 +62,4 @@ int FlagIdManager::acquireId(Operation *insertionPoint) {
   return ++currentMaxId;
 }
 
-int FlagIdManager::checkCurrentId() { return currentMaxId <= MAX_FLAG_ID; }
+bool FlagIdManager::checkCurrentId() { return currentMaxId <= MAX_FLAG_ID; }

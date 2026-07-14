@@ -153,9 +153,6 @@ std::unique_ptr<OperationPass<ModuleOp>>
 createAnalyzeCubeContolFLowInputChainPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeDataFlowPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeScopePass();
-std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeFlowOptPass();
-
-void setEnableDynamicFlowOptimization(bool enable);
 
 void registerAnalyzeDataFlowPasses();
 

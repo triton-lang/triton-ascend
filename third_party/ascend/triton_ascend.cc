@@ -424,21 +424,19 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
           pm.addPass(mlir::triton::createAddDynamicCVPipelinePass(opts));
         });
 
-  m.def("set_buffer_count", [](const std::string &type, int count) {
+  m.def("set_buffer_count", [](mlir::ModuleOp &module, const std::string &type,
+                               int count) {
+    auto &mgr = mlir::triton::BufferCountManager::getInstance();
     if (type == "INTRA") {
-      mlir::triton::BufferCountManager::getInstance().setBufferCount(
-          mlir::triton::BufferCountManager::DepType::IntraCore, count);
+      mgr.setBufferCount(mlir::triton::BufferCountManager::DepType::IntraCore,
+                         count);
     } else if (type == "INTER") {
-      mlir::triton::BufferCountManager::getInstance().setBufferCount(
-          mlir::triton::BufferCountManager::DepType::InterCore, count);
+      mgr.setBufferCount(mlir::triton::BufferCountManager::DepType::InterCore,
+                         count);
     } else if (type == "LOAD") {
-      mlir::triton::BufferCountManager::getInstance().setBufferCount(
-          mlir::triton::BufferCountManager::DepType::LoadStore, count);
+      mgr.setBufferCount(mlir::triton::BufferCountManager::DepType::LoadStore,
+                         count);
     }
-  });
-
-  m.def("set_enable_dynamic_cv_flow_optimization", [](bool enable) {
-    mlir::triton::setEnableDynamicFlowOptimization(enable);
   });
 
   m.def("set_enable_cube_block_merge",

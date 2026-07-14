@@ -157,7 +157,7 @@ void OpClassifierPass::markCube(Operation *op) {
 }
 
 // ============================================================================
-// Pattern: to_tensor → matmul (Upstream)
+// Pattern: to_tensor -> matmul (Upstream)
 // ============================================================================
 // Matches cases where matmul's input comes from bufferization.to_tensor.
 // to_tensor converts a memref to a tensor, typically used for loading matrix
@@ -201,7 +201,7 @@ void OpClassifierPass::matchToTensorPattern(Operation *def) {
 }
 
 // ============================================================================
-// Pattern: transpose → matmul (Upstream)
+// Pattern: transpose -> matmul (Upstream)
 // ============================================================================
 // Matches cases where matmul's input comes from linalg.transpose.
 // transpose performs matrix transposition, commonly used as preprocessing for
@@ -269,7 +269,7 @@ void OpClassifierPass::matchTransposePattern(Operation *def) {
 }
 
 // ============================================================================
-// Pattern: linalg.fill → matmul (Upstream)
+// Pattern: linalg.fill -> matmul (Upstream)
 // ============================================================================
 // Matches cases where matmul's output initial value comes from linalg.fill.
 // fill initializes the output matrix (typically to 0).
@@ -294,7 +294,7 @@ void OpClassifierPass::matchFillPattern(Operation *def) {
 }
 
 // ============================================================================
-// Pattern: tensor.empty → matmul (Upstream)
+// Pattern: tensor.empty -> matmul (Upstream)
 // ============================================================================
 // Matches cases where matmul's output initial value comes from tensor.empty.
 // empty initializes the output matrix (typically to 0).
@@ -317,7 +317,7 @@ void OpClassifierPass::matchEmptyPattern(Operation *def) {
 }
 
 // ============================================================================
-// Pattern: matmul → hivm.hir.store (Downstream)
+// Pattern: matmul -> hivm.hir.store (Downstream)
 // ============================================================================
 // Matches cases where matmul's output is directly stored to memory.
 // hivm.store is the HIVM dialect's store operation, writing tensor to memory.
@@ -339,7 +339,7 @@ void OpClassifierPass::matchStorePattern(Operation *user) {
 }
 
 // ============================================================================
-// Pattern: matmul → tensor.extract_slice → hivm.store (Downstream)
+// Pattern: matmul -> tensor.extract_slice -> hivm.store (Downstream)
 // ============================================================================
 // Matches cases where matmul's output is sliced before being stored.
 // extract_slice extracts a sub-region (slice) of a tensor, commonly used after
@@ -374,7 +374,7 @@ void OpClassifierPass::matchExtractSlicePattern(Operation *user) {
 }
 
 // ============================================================================
-// Pattern: matmul → materialize_in_destination (Downstream)
+// Pattern: matmul -> materialize_in_destination (Downstream)
 // ============================================================================
 // Matches cases where matmul's output is written to a destination buffer via
 // materialize_in_destination. This operation materializes tensor results into a
@@ -1361,14 +1361,15 @@ OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const {
 // (linalg.matmul) and VECTOR users (arith.addf) simultaneously.
 // Both cores cannot share the same op instance.
 // Solution: clone the op into two versions.
-//   - Original op  → reclassified as OP_CUBE_ONLY  → CUBE users keep using it
-//   - Cloned op    → classified as OP_VECTOR_ONLY → VECTOR users switched to it
+//   - Original op  -> reclassified as OP_CUBE_ONLY  -> CUBE users keep using it
+//   - Cloned op    -> classified as OP_VECTOR_ONLY -> VECTOR users switched to
+//   it
 // Example
 //       shared_fill (CUBE_AND_VECTOR)
-//          ↑              ↑
+//          ->             ->
 //      matmul(CUBE)   arith.addf(VECTOR)
-//       shared_fill (CUBE_ONLY)    → matmul (CUBE)
-//       shared_fill_vector_clone   → arith.addf (VECTOR)
+//       shared_fill (CUBE_ONLY)    -> matmul (CUBE)
+//       shared_fill_vector_clone   -> arith.addf (VECTOR)
 //         (VECTOR_ONLY)
 // This step runs after step 4 (VECTOR propagation) and before step 6
 // (SCF yield processing). The do-while loop handles cases where splitting
@@ -1403,7 +1404,7 @@ void OpClassifierPass::splitOperationForCubeAndVector(
   }
 
   // ------------------------------------------------------------------
-  // Phase 2: Build IRMapping — redirect operands to VECTOR clones
+  // Phase 2: Build IRMapping -> redirect operands to VECTOR clones
   // ------------------------------------------------------------------
   // When cloning this op for VECTOR users, any operand that already has
   // a VECTOR clone (produced by a recursive call above) must be replaced
@@ -1413,7 +1414,7 @@ void OpClassifierPass::splitOperationForCubeAndVector(
     if (Operation *def = operand.getDefiningOp()) {
       auto it = opToVectorClone.find(def);
       if (it != opToVectorClone.end()) {
-        // Operand has a VECTOR clone — use it in the cloned op
+        // Operand has a VECTOR clone -> use it in the cloned op
         Operation *vectorClone = it->second;
         for (unsigned i = 0; i < def->getNumResults(); ++i) {
           if (def->getResult(i) == operand) {
@@ -1431,7 +1432,7 @@ void OpClassifierPass::splitOperationForCubeAndVector(
   OpBuilder builder(op);
   Operation *vectorOp = builder.clone(*op, mapping);
 
-  // Reclassify: original → CUBE_ONLY, clone → VECTOR_ONLY
+  // Reclassify: original -> CUBE_ONLY, clone -> VECTOR_ONLY
   opCoreTypes[op] = OP_CUBE_ONLY;
   opCoreTypes[vectorOp] = OP_VECTOR_ONLY;
   opToVectorClone[op] = vectorOp; // record for callers' operand mapping

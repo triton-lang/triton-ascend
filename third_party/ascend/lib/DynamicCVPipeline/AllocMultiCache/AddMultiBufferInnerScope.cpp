@@ -201,6 +201,12 @@ scf::ForOp findMainloopInScope(scope::ScopeOp scope) {
 // outermost id so inner ops of a multi-region op (e.g. subview at block 3
 // inside ifOp at block 4) are not treated as cross-block consumers of a
 // same-block producer.
+//
+// i1Found is set to true when the operand is a tensor with element type i1,
+// signaling the caller to fall back (set ERRCODE_IGNORED + signalPassFailure)
+// rather than process the dep through the multi-buffer pipeline. The operand
+// is intentionally NOT added to depValueMap in that case.
+// i1 return is done temporarily.
 static void collectDepValue(Value operand, Block *body, Operation *currentOp,
                             DenseMap<Value, int> &outputToBlockId,
                             DenseMap<Value, SmallVector<Value>> &depValueMap,

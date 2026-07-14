@@ -59,7 +59,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
           // CHECK: hivm.hir.sync_block_set {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 2
           // CHECK: hivm.hir.sync_block_wait {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 0 : i32}[<VECTOR>, <PIPE_M>, <PIPE_MTE3>] flag = 1
           // CHECK: hivm.hir.copy ins(%reshape_12 : tensor<8x8x16x16xf16>) outs(%alloc : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 0 : i32}
-          // CHECK: } {ssbuffer.if = 5 : i32}
+          // CHECK: } {{.*}}ssbuffer.if = 5 : i32}
           hivm.hir.sync_block_wait {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 2
           %memspacecast_11 = memref.memory_space_cast %alloc_5 {ssbuffer.block_id = 5 : i32, ssbuffer.crossDeps = [0 : i32, 0 : i32], ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
           %33 = bufferization.to_tensor %memspacecast_11 restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32>
@@ -116,7 +116,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
           // CHECK: %17 = arith.mulf %arg19, %broadcasted {ssbuffer.block_id = 6 : i32}
           // CHECK: %18 = arith.addf %12, %17 {ssbuffer.block_id = 6 : i32}
           // CHECK: hivm.hir.sync_block_set {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 3
-          // CHECK: } {ssbuffer.if = 6 : i32}
+          // CHECK: } {{{.*}}ssbuffer.if = 6 : i32}
           hivm.hir.sync_block_wait {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 3
           %memspacecast_16 = memref.memory_space_cast %alloc_6 {ssbuffer.block_id = 6 : i32, ssbuffer.crossDeps = [1, 0], ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
           %48 = bufferization.to_tensor %memspacecast_16 restrict writable {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32>

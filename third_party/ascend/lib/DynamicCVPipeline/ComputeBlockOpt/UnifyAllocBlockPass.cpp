@@ -31,10 +31,8 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/OpDefinition.h"
-#include "mlir/Interfaces/CastInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/TypeSize.h"
@@ -51,7 +49,6 @@ namespace {
 struct FillInfo {
   linalg::FillOp fillOp;
   scf::IfOp parentIf;
-  bool needsSplit;
 };
 
 /**
@@ -248,16 +245,15 @@ static FillInfo findFillOpInSCFIf(Value allocResult) {
 /**
  * @brief Check if scf.if needs to be split
  *
- * Determines whether the scf.if operation containing linalg.fill needs to be
- * split. Split is needed when the if branch contains multiple operations (not
- * just linalg.fill).
+ * Determines whether the scf.if operation containing linalg.fill needs to be split.
+ * Split is needed when the if branch contains multiple operations
+ * (not just linalg.fill).
  *
  * @param info FillInfo structure containing fillOp and parentIf
  * @return bool Returns true if split is needed, false otherwise
  *
  * @note Split logic:
- *       - If branch only has linalg.fill (+ scf.yield terminator), no split
- * needed
+ *       - If branch only has linalg.fill (+ scf.yield terminator), no split needed
  *       - If branch has other operations besides linalg.fill, split needed
  */
 static bool needsSplitIf(const FillInfo &info) {
@@ -284,22 +280,6 @@ static bool needsSplitIf(const FillInfo &info) {
  *
  * @param info FillInfo structure containing fillOp and parentIf
  * @return FillInfo Updated FillInfo pointing to the new fill-only scf.if
- *
- * @note Split pattern:
- *       Before:
- *         scf.if %cond {
- *           linalg.fill {block_id=8} ins(%v) outs(%alloc)  // keep
- *           arith.addf {block_id=12} %x, %y               // move to new scf.if
- *         } {hivm.unlikely_condition}
- *
- *       After:
- *         scf.if %cond {
- *           linalg.fill {block_id=8} ins(%v) outs(%alloc)  // keep
- *         } {hivm.unlikely_condition}
- *
- *         scf.if %cond {
- *           arith.addf {block_id=12} %x, %y               // new scf.if
- *         } {hivm.unlikely_condition}
  */
 static FillInfo splitSCFIfIfNeeded(FillInfo &info) {
   Block *originalBlock = info.fillOp->getBlock();
@@ -326,8 +306,7 @@ static FillInfo splitSCFIfIfNeeded(FillInfo &info) {
   fillOp->moveBefore(originalIf.getOperation()->getNextNode());
   builder.setInsertionPointAfter(fillOp);
 
-  auto newFillIf =
-      builder.create<scf::IfOp>(loc, cond, /*withElseRegion=*/false);
+  auto newFillIf = builder.create<scf::IfOp>(loc, cond, /*withElseRegion=*/false);
   if (originalAttrs) {
     for (auto attr : originalAttrs) {
       newFillIf->setAttr(attr.getName(), attr.getValue());
@@ -345,13 +324,11 @@ static FillInfo splitSCFIfIfNeeded(FillInfo &info) {
  *
  * @param allocOp The memref.alloc operation to process
  * @param memGraph Memory dependence graph for cycle detection
- * @return LogicalResult Returns success if unification was performed, failure
- * otherwise
+ * @return LogicalResult Returns success if unification was performed, failure otherwise
  */
-static LogicalResult
-tryUnifyForAlloc(memref::AllocOp allocOp,
-                 const CVPipeline::MemoryDependenceGraph &memGraph,
-                 CVPipeline::ComputeBlockIdManager &bm) {
+static LogicalResult tryUnifyForAlloc(memref::AllocOp allocOp,
+                                      const CVPipeline::MemoryDependenceGraph &memGraph,
+                                      CVPipeline::ComputeBlockIdManager &bm) {
   // Step1: Collect direct users (excluding linalg.fill)
   Value allocResult = allocOp.getResult();
   LOG_DEBUG("[tryUnifyForAlloc] start from allocOp: " << *allocOp);
@@ -365,8 +342,7 @@ tryUnifyForAlloc(memref::AllocOp allocOp,
   if (!fillInfo.fillOp) {
     return success();
   }
-  LOG_DEBUG(
-      "[tryUnifyForAlloc] Found fillOp in scf.if: " << *fillInfo.parentIf);
+  LOG_DEBUG("[tryUnifyForAlloc] Found fillOp in scf.if: " << *fillInfo.parentIf);
 
   // Step3: Check if all direct users have the same block_id
   int targetBlockId;
@@ -378,41 +354,26 @@ tryUnifyForAlloc(memref::AllocOp allocOp,
 
   // Step4: Split if scf.if contains multiple operations
   if (needsSplitIf(fillInfo)) {
-    LOG_DEBUG("[needsSplitIf] SCF.IF need split ");
+    LOG_DEBUG("[needsSplitIf] SCF.IF need split " );
     fillInfo = splitSCFIfIfNeeded(fillInfo);
   }
 
-  // Step5: Collect predecessor_ops for scf.if condition
-  SmallVector<Operation *> conditionOps = collectBlockPredecessors(
-      fillInfo.parentIf.getCondition(), fillInfo.parentIf->getBlock());
-
-  // Step6: Cycle detection and block_id assignment with fallback
+  // Step5: Cycle detection and block_id assignment
   SmallVector<Operation *> coreOps = {
       allocOp.getOperation(),
       fillInfo.fillOp.getOperation(),
       fillInfo.parentIf.getOperation(),
   };
   coreOps.append(directUsers);
-  SmallVector<Operation *> allOps = coreOps;
-  // allOps include coreOps and scf.if_condition's predecessor_ops
-  allOps.append(conditionOps);
 
-  if (CVPipeline::willCreateCycle(allOps, memGraph, targetBlockId, bm)) {
-    LOG_DEBUG("[Cycle detection] First time: Find cycle with conditionOps, "
-              "retry without conditionOps");
-    if (CVPipeline::willCreateCycle(coreOps, memGraph, targetBlockId, bm)) {
-      LOG_DEBUG("[Cycle detection] Second time: Find Cycle, have unsupport IR! "
-                "Should Check!!");
-      return success();
-    }
-    for (auto *op : coreOps) {
-      bm.updateBlockId(op, targetBlockId);
-    }
-  } else {
-    for (auto *op : allOps) {
-      bm.updateBlockId(op, targetBlockId);
-    }
+  if (CVPipeline::willCreateCycle(coreOps, memGraph, targetBlockId, bm)) {
+    LOG_DEBUG("[Cycle detection] Find cycle, have unsupport IR! Should Check!!");
+    return success();
   }
+  for (auto *op : coreOps) {
+    bm.updateBlockId(op, targetBlockId);
+  }
+  LOG_DEBUG("[tryUnifyForAlloc] Successfully unify block_id to " << targetBlockId << " for allocOp: " << *allocOp);
   return success();
 }
 

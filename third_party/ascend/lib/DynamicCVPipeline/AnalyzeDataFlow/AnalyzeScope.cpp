@@ -135,6 +135,49 @@ static bool checkVecScopeMainLoop(ModuleOp module) {
   return hasMainLoopFor && allForSatisfy;
 }
 
+// For every main_loop id, gather all forOps sharing that id and count the
+// hivm.hir.copy and hivm.hir.fixpipe ops within them.
+static bool isMainLoopOnlyCopyOrFixpipe(ModuleOp module) {
+  llvm::DenseMap<int, std::pair<int, int>> idToCounts;
+
+  module.walk([&](scf::ForOp forOp) -> WalkResult {
+    auto mainLoopAttr =
+        forOp->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
+    if (!mainLoopAttr) {
+      return WalkResult::advance();
+    }
+
+    int id = mainLoopAttr.getInt();
+    auto &counts = idToCounts[id];
+
+    forOp.walk([&](mlir::Operation *op) -> WalkResult {
+      if (op == forOp || isa<scf::YieldOp>(op)) {
+        return WalkResult::advance();
+      }
+      if (isa<hivm::CopyOp>(op)) {
+        ++counts.first;
+      } else if (isa<hivm::FixpipeOp>(op)) {
+        ++counts.second;
+      }
+      return WalkResult::advance();
+    });
+
+    return WalkResult::advance();
+  });
+
+  if (idToCounts.empty()) {
+    return false;
+  }
+
+  for (const auto &entry : idToCounts) {
+    if (entry.second.first != 0 && entry.second.second != 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 static LogicalResult verifyMainLoop(ModuleOp module) {
   // Only skip if ALL forOps lack main_loop attr
   bool hasMainLoopForOp = false;
@@ -156,6 +199,13 @@ static LogicalResult verifyMainLoop(ModuleOp module) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
     return failure();
   };
+
+  if (isMainLoopOnlyCopyOrFixpipe(module)) {
+    LDBG("[INFO]: All main_loop only contains hivm.hir.copy or "
+         "hivm.hir.fixpipe ops.");
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
+    return failure();
+  }
 
   return success();
 }

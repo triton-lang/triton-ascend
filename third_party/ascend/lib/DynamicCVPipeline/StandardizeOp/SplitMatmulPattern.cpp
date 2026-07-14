@@ -33,6 +33,7 @@
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "bishengir/Dialect/Utils/Util.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -64,6 +65,8 @@ using namespace CVSplit;
 static constexpr const char *DEBUG_TYPE = "SplitMatmul";
 #define LOG_DEBUG(...)                                                         \
   LLVM_DEBUG(llvm::dbgs() << "\n[" << DEBUG_TYPE << "] " << __VA_ARGS__ << "\n")
+
+constexpr llvm::StringLiteral kMatmulAtLeastOnceHint = "matmul_at_least_once";
 
 namespace {
 
@@ -582,6 +585,10 @@ static std::optional<SplitInfo> shouldSplit(linalg::MatmulOp matmulOp,
   Value outerInValue = matmulInput.bias;
   auto outerOutValue = searchInArgsChain(
       matmulOp.getResult(0), argsLimitedInMatmul, mayNotExec, outerInValue);
+  if (utils::getAnnotateOpWithAttr(outerOutValue, kMatmulAtLeastOnceHint)
+          .has_value()) {
+    mayNotExec = false;
+  }
   if (!argsLimitedInMatmul) {
     LOG_DEBUG("Split because bias is not limited in args" << matmulOp); // S25
     return SplitInfo{mayNotExec, outerInValue, outerOutValue, true};
@@ -756,6 +763,18 @@ SplitMatmulPattern::matchAndRewrite(linalg::MatmulOp matmulOp,
   LOG_DEBUG("shouldSplit = " << splitInfo.shouldSplit);
   LOG_DEBUG("-------------------");
   matmulOp->setAttr(CVPipeline::kLoopCarriedL0C, rewriter.getUnitAttr());
+
+  if (auto markOpOpt = utils::getAnnotateOpWithAttr(splitInfo.outerOutValue,
+                                                    kMatmulAtLeastOnceHint);
+      markOpOpt.has_value()) {
+    auto markOp = markOpOpt.value();
+    markOp->removeAttr(kMatmulAtLeastOnceHint);
+    if (markOp->getAttrs().empty()) {
+      rewriter.eraseOp(markOpOpt.value());
+    }
+    matmulOp->getParentOp()->setAttr(CVPipeline::kHIVMMatmulLimitedInCubeAttr,
+                                     rewriter.getUnitAttr());
+  }
 
   if (splitInfo.shouldSplit) {
     return splitMatmul(matmulOp, rewriter, splitInfo);

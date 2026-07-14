@@ -26,9 +26,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -673,6 +670,17 @@ static bool needsLoopCarryPreserve(Operation *owner, unsigned slotIndex,
   return false;
 }
 
+// Returns true when the producer op has no result belonging to scopeType .
+static bool isProducedByForeignScope(Value operand, StringRef scopeType) {
+  Operation *producer = operand.getDefiningOp();
+  if (!producer || !producer->hasAttr(CVPipeline::kCoreType)) {
+    return false;
+  }
+
+  // Only treat as foreign when the producer has NO result in the current scope.
+  return !matchesScope(producer, scopeType);
+}
+
 static LogicalResult neutralizeYieldInRegion(Operation *op,
                                              const CoreTypeInfo &info,
                                              StringRef scopeType,
@@ -697,12 +705,20 @@ static LogicalResult neutralizeYieldInRegion(Operation *op,
         if (info.getResultType(i) == scopeType) {
           continue;
         }
+
+        // First defense: skip neutralization when an in-loop consumer reads the
+        // carried value through an iter_arg.
         if (needsLoopCarryPreserve(op, i, scopeType)) {
           continue;
         }
 
         Value oldOperand = yieldOp.getOperand(i);
-        if (i < op->getNumResults()) {
+
+        // Second defense: skip the result-user check when the value is produced
+        // by a foreign-scope op to prevent it from being trapped.
+        bool isLoopOp = isa<scf::ForOp, scf::WhileOp>(op);
+        if ((!isLoopOp || !isProducedByForeignScope(oldOperand, scopeType)) &&
+            i < op->getNumResults()) {
           if (Operation *resultUser =
                   findLiveUser(op->getResult(i), scopeType)) {
             logDebug("skip neutralizing yield operand #", i, " for scope ",
@@ -970,11 +986,6 @@ void mlir::triton::SeparateCVScopePass::getDependentDialects(
 
 void mlir::triton::SeparateCVScopePass::runOnOperation() {
   auto module = getOperation();
-
-  if (CVPipeline::hasFallbackAttr(module)) {
-    return;
-  }
-
   SmallVector<func::FuncOp> funcOps;
   module.walk([&](func::FuncOp funcOp) { funcOps.push_back(funcOp); });
 
@@ -986,7 +997,7 @@ void mlir::triton::SeparateCVScopePass::runOnOperation() {
     }
     if (failed(separateScopes(funcOp))) {
       logDebug("SeparateCVScopePass failed on func '", funcOp.getName(), "'");
-      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+      signalPassFailure();
       return;
     }
   }

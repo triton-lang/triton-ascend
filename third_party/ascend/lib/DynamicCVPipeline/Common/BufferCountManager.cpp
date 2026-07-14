@@ -21,20 +21,29 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 static constexpr const char *DEBUG_TYPE = "BufferCountManager";
 #define LOG_DEBUG(...)                                                         \
   LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__)
 
+namespace mlir {
+namespace triton {
+
+namespace {
+
 constexpr int kDefaultIntraBufferCount = 2;
 constexpr int kDefaultInterBufferCount = 1;
 constexpr int kDefaultLoadBufferCount = 1;
 constexpr int kBufferCountWarningThreshold = 3;
 
-namespace mlir {
-namespace triton {
+} // namespace
 
 BufferCountManager &BufferCountManager::getInstance() {
   static BufferCountManager instance;

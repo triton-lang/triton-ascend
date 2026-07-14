@@ -973,7 +973,7 @@ def get_triton_version_suffix():
 
 
 # keep it separate for easy substitution
-TRITON_VERSION = "3.6.0" + get_triton_version_suffix()
+TRITON_VERSION = "3.6.0-dev" + get_triton_version_suffix()
 
 # Dynamically define supported Python versions and classifiers
 MIN_PYTHON = (3, 10)
@@ -999,7 +999,7 @@ def get_default_version():
     version_file = Path(__file__).parent / "version.txt"
     if version_file.exists():
         return version_file.read_text().strip()
-    return "3.6.0"
+    return "3.6.0-dev"
 
 
 def get_version():

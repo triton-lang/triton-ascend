@@ -35,15 +35,21 @@
 // all prior writers/readers and become the sole writer for every slot.
 
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/IR/Region.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 
 using namespace mlir;
@@ -71,6 +77,50 @@ bool isDefinedInside(Value v, Operation *op) {
   }
 
   return op->isProperAncestor(defOp);
+}
+
+Value getViewSource(Value val) {
+  while (auto viewLike = val.getDefiningOp<ViewLikeOpInterface>()) {
+    val = viewLike.getViewSource();
+  }
+  return val;
+}
+
+MemoryEffects::EffectInstance
+remapEffectValue(const MemoryEffects::EffectInstance &effect, Value value) {
+  if (auto result = dyn_cast<OpResult>(value)) {
+    return MemoryEffects::EffectInstance(
+        effect.getEffect(), result, effect.getParameters(), effect.getStage(),
+        effect.getEffectOnFullRegion(), effect.getResource());
+  }
+
+  return MemoryEffects::EffectInstance(
+      effect.getEffect(), cast<BlockArgument>(value), effect.getParameters(),
+      effect.getStage(), effect.getEffectOnFullRegion(), effect.getResource());
+}
+
+bool isKnownNoMemoryEffectCall(Operation *op) {
+  auto callOp = dyn_cast<func::CallOp>(op);
+  return callOp && callOp.getCallee().starts_with("triton_indirect_load");
+}
+
+bool shouldAnalyzeAsLeaf(Operation *op) {
+  return op->getNumRegions() == 0 || isa<linalg::LinalgOp>(op);
+}
+
+void collectLeafOps(Operation *op, SmallVectorImpl<Operation *> &leafOps) {
+  if (shouldAnalyzeAsLeaf(op)) {
+    leafOps.push_back(op);
+    return;
+  }
+
+  for (Region &region : op->getRegions()) {
+    for (Block &block : region) {
+      for (Operation &inner : block) {
+        collectLeafOps(&inner, leafOps);
+      }
+    }
+  }
 }
 
 } // namespace
@@ -113,6 +163,49 @@ ArrayRef<Operation *> MemoryDependenceGraph::getExecAfter(Operation *op) const {
   if (it == execAfter.end())
     return {};
   return it->second;
+}
+
+SmallVector<Operation *>
+MemoryDependenceGraph::getRealDependency(Operation *frontOp,
+                                         Operation *backOp) {
+  if (!frontOp || !backOp) {
+    return {};
+  }
+
+  SmallVector<Operation *> leafOps;
+  collectLeafOps(frontOp, leafOps);
+
+  bool unknown = false;
+  SmallVector<MemoryEffects::EffectInstance> backEffects =
+      collectOuterEffects(backOp, unknown, false);
+  bool backUnknown = unknown;
+
+  // Create slots for frontOps, using existing effects logic to process
+  slots.clear();
+  valueToSlot.clear();
+  llvm::SmallSetVector<Operation *, INIT_SIZE> dependencyOps;
+  for (Operation *leafOp : leafOps) {
+    auto effects = collectOuterEffects(leafOp, unknown, false);
+    if (unknown) {
+      if (!isKnownNoMemoryEffectCall(leafOp)) {
+        dependencyOps.insert(leafOp);
+      }
+      continue;
+    }
+    for (const auto &effect : effects) {
+      if (Value v = effect.getValue()) {
+        getOrCreateSlot(getViewSource(v));
+      }
+    }
+    applyEffects(leafOp, effects, unknown);
+  }
+
+  // Analyze denpendence from frontOps to backOp
+  SmallVector<Operation *> defs;
+  SmallVector<Operation *> preds;
+  collectPreds(backEffects, backUnknown, defs, preds);
+  dependencyOps.insert(preds.begin(), preds.end());
+  return {dependencyOps.begin(), dependencyOps.end()};
 }
 
 void MemoryDependenceGraph::analyzeOp(Operation *op) {
@@ -188,23 +281,51 @@ void MemoryDependenceGraph::analyzeRegionsOf(Operation *op) {
 }
 
 SmallVector<MemoryEffects::EffectInstance>
-MemoryDependenceGraph::collectOuterEffects(Operation *op, bool &unknown) {
+MemoryDependenceGraph::collectOuterEffects(Operation *op, bool &unknown,
+                                           bool recursive) {
   unknown = false;
 
-  std::optional<SmallVector<MemoryEffects::EffectInstance>> raw =
-      getEffectsRecursively(op);
+  if (auto markOp = dyn_cast<annotation::MarkOp>(op)) {
+    if (markOp->hasAttr(CVPipeline::kInlinableQuantScaleAttr)) {
+      return {};
+    }
+    MemoryEffects::EffectInstance scopedWrite(MemoryEffects::Write::get());
+    return {remapEffectValue(scopedWrite, markOp.getSrc())};
+  }
+
+  if (auto allocTensorOp = dyn_cast<bufferization::AllocTensorOp>(op)) {
+    MemoryEffects::EffectInstance scopedAlloc(MemoryEffects::Allocate::get());
+    return {remapEffectValue(scopedAlloc, allocTensorOp.getResult())};
+  }
+
+  std::optional<SmallVector<MemoryEffects::EffectInstance>> raw;
+  if (recursive) {
+    raw = getEffectsRecursively(op);
+  } else if (auto effectInterface = dyn_cast<MemoryEffectOpInterface>(op)) {
+    raw.emplace();
+    effectInterface.getEffects(*raw);
+  }
   if (!raw) {
-    unknown = true;
+    if (!isKnownNoMemoryEffectCall(op)) {
+      unknown = true;
+    }
     return {};
   }
 
   SmallVector<MemoryEffects::EffectInstance> filtered;
   filtered.reserve(raw->size());
-  for (auto &e : *raw) {
-    if (isDefinedInside(e.getValue(), op)) {
+  for (const auto &e : *raw) {
+    Value value = e.getValue();
+    if (!value) {
+      filtered.push_back(e);
       continue;
     }
-    filtered.push_back(e);
+
+    Value source = getViewSource(value);
+    if (isDefinedInside(source, op)) {
+      continue;
+    }
+    filtered.push_back(source == value ? e : remapEffectValue(e, source));
   }
   return filtered;
 }
@@ -214,13 +335,8 @@ AliasResult MemoryDependenceGraph::queryAlias(Value lhs, Value rhs) {
     auto arg = llvm::dyn_cast<BlockArgument>(val);
     return arg && arg.getOwner()->isEntryBlock();
   };
-  auto getSource = [](Value val) -> Value {
-    while (auto viewLike = val.getDefiningOp<ViewLikeOpInterface>()) {
-      val = viewLike.getViewSource();
-    }
-    return val;
-  };
-  if (isFuncEntryArg(getSource(lhs)) && isFuncEntryArg(getSource(rhs))) {
+  if (isFuncEntryArg(getViewSource(lhs)) &&
+      isFuncEntryArg(getViewSource(rhs))) {
     return lhs == rhs ? AliasResult::MustAlias : AliasResult::NoAlias;
   }
   return aa.alias(lhs, rhs);

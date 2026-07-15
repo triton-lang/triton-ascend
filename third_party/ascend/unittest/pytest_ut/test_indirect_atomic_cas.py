@@ -43,13 +43,18 @@ import torch
 import torch_npu
 import triton
 import triton.language as tl
+from triton.tools.get_ascend_devices import is_compile_on_910_95
 
 SUPPORTED_DTYPES = [
+    ("int8", torch.int8),
+    ("int16", torch.int16),
     ("int32", torch.int32),
     ("int64", torch.int64),
     ("float16", torch.float16),
     ("float32", torch.float32),
     ("bfloat16", torch.bfloat16),
+    ("uint32", torch.uint32),
+    ("uint64", torch.uint64),
 ]
 
 RANK_SHAPES = {
@@ -314,32 +319,36 @@ def _build_value_tensor(shape, dtype):
 
 
 def _build_output_baseline(output_numel, dtype):
+    if dtype in (torch.uint32, torch.uint64):
+        return torch.arange(output_numel, dtype=torch.int64).to(dtype)
     return torch.arange(output_numel, dtype=dtype)
 
 
 def _build_compare_tensor(offsets, baseline, dtype):
+    compute_dtype = torch.int64 if dtype in (torch.uint32, torch.uint64) else dtype
     flat_offsets = offsets.reshape(-1).to(torch.int64)
-    base_flat = baseline.reshape(-1)
-    compare = torch.empty(flat_offsets.numel(), dtype=dtype)
+    base_flat = baseline.reshape(-1).to(compute_dtype)
+    compare = torch.empty(flat_offsets.numel(), dtype=compute_dtype)
     for idx, offset in enumerate(flat_offsets.tolist()):
         compare[idx] = base_flat[offset] if idx % 2 == 0 else base_flat[offset] + 1
-    return compare.reshape(offsets.shape)
+    return compare.reshape(offsets.shape).to(dtype)
 
 
 def _simulate_atomic_cas(base_output, offsets, compare, values):
-    expected_output = base_output.reshape(-1).clone().cpu()
+    compute_dtype = torch.int64 if base_output.dtype in (torch.uint32, torch.uint64) else base_output.dtype
+    expected_output = base_output.reshape(-1).clone().cpu().to(compute_dtype)
     flat_offsets = offsets.reshape(-1).to(torch.int64).cpu()
-    flat_compare = compare.reshape(-1).cpu()
-    flat_values = values.reshape(-1).cpu()
-    flat_old = torch.zeros(flat_values.shape, dtype=base_output.dtype)
+    flat_compare = compare.reshape(-1).cpu().to(compute_dtype)
+    flat_values = values.reshape(-1).cpu().to(compute_dtype)
+    flat_old = torch.zeros(flat_values.shape, dtype=compute_dtype)
 
     for idx in range(flat_offsets.numel()):
         offset = int(flat_offsets[idx].item())
         flat_old[idx] = expected_output[offset]
-        if expected_output[offset] == flat_compare[idx].to(expected_output.dtype):
-            expected_output[offset] = flat_values[idx].to(expected_output.dtype)
+        if expected_output[offset] == flat_compare[idx]:
+            expected_output[offset] = flat_values[idx]
 
-    return expected_output, flat_old.reshape(values.shape)
+    return expected_output.to(base_output.dtype), flat_old.reshape(values.shape).to(base_output.dtype)
 
 
 def _assert_equal(actual, expected, dtype_name, rank, scenario):
@@ -364,6 +373,10 @@ def _launch_fully_unstructured(rank, offsets, compare, values, output, old, shap
 @pytest.mark.parametrize("dtype_name, torch_dtype", TEST_DTYPE)
 @pytest.mark.parametrize("rank", TEST_RANKS)
 def test_atomic_cas_partially_structured_indirect_offsets(dtype_name, torch_dtype, rank):
+    if rank == 1:
+        pytest.skip("Partially structured test is not applicable to 1-D tensors")
+    if not is_compile_on_910_95 and torch_dtype in (torch.uint32, torch.uint64):
+        pytest.skip("uint32 and uint64 atomics are only supported on 950")
     shape = PARTIAL_STRUCTURED_SHAPES[rank]
     offsets, output_numel = _build_partial_structured_offsets(shape)
     baseline = _build_output_baseline(output_numel, torch_dtype)
@@ -387,6 +400,8 @@ def test_atomic_cas_partially_structured_indirect_offsets(dtype_name, torch_dtyp
 @pytest.mark.parametrize("dtype_name, torch_dtype", TEST_DTYPE)
 @pytest.mark.parametrize("rank", TEST_RANKS)
 def test_atomic_cas_fully_unstructured_indirect_offsets(dtype_name, torch_dtype, rank):
+    if not is_compile_on_910_95 and torch_dtype in (torch.uint32, torch.uint64):
+        pytest.skip("uint32 and uint64 atomics are only supported on 950")
     shape = RANK_SHAPES[rank]
     offsets, output_numel = _build_fully_unstructured_offsets(shape)
     baseline = _build_output_baseline(output_numel, torch_dtype)

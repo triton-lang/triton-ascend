@@ -1,4 +1,4 @@
-﻿# Libdevice Developer Guide
+# Libdevice Developer Guide
 
 ## SIMT Compilation Mode Example
 

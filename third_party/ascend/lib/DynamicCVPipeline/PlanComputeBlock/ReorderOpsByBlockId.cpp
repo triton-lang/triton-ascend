@@ -27,18 +27,19 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/Error.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/Visitors.h"
 #include "mlir/Pass/Pass.h"
-#include "mlir/Support/WalkResult.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
@@ -165,17 +166,38 @@ BlockOpGraph::BlockOpGraph(ArrayRef<Operation *> allOps, Block *block,
 }
 
 static llvm::FailureOr<DenseMap<Operation *, int>>
-collectBlockIds(ArrayRef<Operation *> allOps) {
+collectBlockIds(ArrayRef<Operation *> allOps, ComputeBlockIdManager &bm) {
   DenseMap<Operation *, int> opBlockId;
   for (Operation *op : allOps) {
     if (llvm::failed(verifyOpBlockId(op))) {
       return llvm::failure();
     }
-    auto blockIdAttrRes = getOpBlockId(op);
-    int64_t blockId = blockIdAttrRes.has_value()
-                          ? blockIdAttrRes.value()
-                          : ComputeBlockIdManager::getInstance().getNextId();
-    opBlockId[op] = blockId;
+    auto blockIdOpt = getOpBlockId(op);
+    if (blockIdOpt.has_value()) {
+      opBlockId[op] = blockIdOpt.value();
+      continue;
+    }
+
+    auto result = op->walk([&](Operation *nestedOp) {
+      if (nestedOp != op &&
+          !llvm::isa<scf::YieldOp, linalg::FillOp>(nestedOp)) {
+        return WalkResult::interrupt();
+      }
+      auto currBlockIdOpt = getOpBlockId(nestedOp);
+      if (!blockIdOpt.has_value()) {
+        blockIdOpt = getOpBlockId(nestedOp);
+      }
+      if (currBlockIdOpt.has_value() && currBlockIdOpt != blockIdOpt) {
+        return WalkResult::interrupt();
+      }
+      return WalkResult::advance();
+    });
+    if (result.wasInterrupted() || !blockIdOpt.has_value()) {
+      blockIdOpt = bm.getNextId();
+    } else {
+      bm.updateBlockId(op, blockIdOpt.value());
+    }
+    opBlockId[op] = blockIdOpt.value();
   }
   return opBlockId;
 }
@@ -342,13 +364,14 @@ static void applyReorder(Block &block, ArrayRef<Operation *> reordered) {
 }
 
 static llvm::LogicalResult
-reorderOpsInBlock(Block &block, const MemoryDependenceGraph &memGraph) {
+reorderOpsInBlock(Block &block, const MemoryDependenceGraph &memGraph,
+                  ComputeBlockIdManager &bm) {
   const auto allOps =
       llvm::to_vector(llvm::make_pointer_range(block.without_terminator()));
 
   const BlockOpGraph graph{allOps, &block, memGraph};
   llvm::FailureOr<DenseMap<Operation *, int>> opBlockIdOpt =
-      collectBlockIds(allOps);
+      collectBlockIds(allOps, bm);
   if (failed(opBlockIdOpt)) {
     return failure();
   }
@@ -374,9 +397,18 @@ void ReorderOpsByBlockIdPass::runOnOperation() {
   OpBuilder const builder(&getContext());
 
   auto moduleOp = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(moduleOp)) {
+    return;
+  }
+
+  LOG_DEBUG("Input mlir:\n" << moduleOp << "\n");
+  llvm::dbgs().flush();
+
   auto &aa = getAnalysis<AliasAnalysis>();
   auto memGraph = MemoryDependenceGraph(moduleOp, aa);
-  moduleOp.walk([&](Block *block) {
+  auto bm = ComputeBlockIdManager(moduleOp);
+  auto result = moduleOp.walk([&](Block *block) {
     auto *parentOp = block->getParentOp();
     if (!parentOp ||
         // whitelist ops to reorder
@@ -384,14 +416,19 @@ void ReorderOpsByBlockIdPass::runOnOperation() {
           isa<scf::SCFDialect>(parentOp->getDialect()))) {
       return WalkResult::skip();
     }
-    if (llvm::failed(reorderOpsInBlock(*block, memGraph))) {
-      signalPassFailure();
+    if (llvm::failed(reorderOpsInBlock(*block, memGraph, bm))) {
+      return WalkResult::interrupt();
     }
     return WalkResult::advance();
   });
 
+  if (result.wasInterrupted()) {
+    CVPipeline::setFallbackAttr(moduleOp, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
+
+  LOG_DEBUG("Output mlir:\n" << moduleOp << "\n");
   LOG_DEBUG("=== Pass TuningOpSeq complete ===\n");
-  ComputeBlockIdManager::getInstance().reset();
 }
 
 std::unique_ptr<OperationPass<ModuleOp>>

@@ -38,6 +38,7 @@ def triton_lgamma(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK_SUB: t
         tl.store(out_ptr0 + xindex, y, xmask)
 
 
+@pytest.mark.skip(reason="Wait for AscendNPU-IR support")
 @pytest.mark.parametrize('param_list', [
     ['float32', (2, 4096, 8), 2, 32768, 1024],
 ])
@@ -62,6 +63,7 @@ def test_lgamma_case(param_list):
     test_common.validate_cmp(dtype, y_cal, y_ref)
 
 
+@pytest.mark.skip(reason="Wait for AscendNPU-IR support")
 @pytest.mark.parametrize('param_list', [
     ['float32', (2, 4096, 8), 2, 32768, 1024],
 ])
@@ -88,6 +90,7 @@ def test_all_blocks_parallel(param_list, monkeypatch):
     monkeypatch.delenv("TRITON_ALL_BLOCKS_PARALLEL")
 
 
+@pytest.mark.skip(reason="Wait for AscendNPU-IR support")
 @pytest.mark.parametrize('param_list', [
     ['float32', (2, 2048, 8), 2, 32768, 512],
 ])

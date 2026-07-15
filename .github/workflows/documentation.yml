@@ -1,61 +1,143 @@
 name: Documentation
+
+# ── Docs CI pipeline ──────────────────────────────────────────────────
+#  1. documentation.yml     (this file)  – code / spec gate
+#  2. docs-rtd-preview.yml               – monitor RTD build → Commit Status
+#
+#  Only changes under docs/ trigger the pipeline (plus self-validation of the
+#  gate's own definition).  docs-rtd-preview.yml listens on workflow_run for
+#  this workflow, so if you rename this workflow, update the `workflows:`
+#  filter there as well.
+
 on:
+  pull_request:
+    paths:
+      - 'docs/**/*.md'
+      - 'docs/**/*.mdx'
+      - 'docs/**/_toc.yaml'
+      - '.github/workflows/documentation.yml'
+      - '.github/workflows/docs-rtd-preview.yml'
+      - '.github/docs-ci/**'
+  # Manual full scans (checkAll) to surface errors in existing docs
+  # that incremental PR runs never touch. These never block a PR.
   workflow_dispatch:
-  schedule:
-    - cron: "0 0 * * *"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: docs-check-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.ref != 'refs/heads/main' }}
 
 jobs:
-  Build-Documentation:
-    runs-on: linux-aarch64-a2-1
+  docs-check:
+    name: Docs gate
+    runs-on: linux-amd64-cpu-8-hk
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:8.3.rc1-910b-ubuntu22.04-py3.11
-    timeout-minutes: 30
-    env:
-      PYTHON: "python3"
-
+      image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ascend/triton:github_action
     steps:
-      - name: Checkout branch
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # Full history is required for PR runs: the checker diffs <base>...HEAD
+          # to find the changed docs. (Harmless for full scans.)
           fetch-depth: 0
 
-      - name: Clear docs
+      - name: Fetch base branch
+        if: github.event_name == 'pull_request'
         run: |
-          rm -rf /tmp/triton-docs
-        continue-on-error: true
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
 
-      - name: Install dependent packages
-        run: sudo -E make docs-requirements
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      #- name: Fetch dependent branches
-      #  run: |
-      #    git fetch origin main:main
+      - name: Cache cspell dictionaries
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: docs-ci-${{ runner.os }}-${{ hashFiles('.github/docs-ci/docs-ci-v2.js', '.github/docs-ci/config.json') }}
 
-      - name: Build docs
+      - name: Run docs gate
+        shell: bash
+        env:
+          DOCS_TARGET_REPO: ${{ github.repository }}
+          # PR: incremental (changed files only). Manual/scheduled: full scan.
+          DOCS_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.event.pull_request.base.ref) || github.ref_name }}
+          DOCS_CHECK_ALL: ${{ github.event_name != 'pull_request' }}
         run: |
-          # Limit the number of threads to reduce CPU memory usage
-          # This CI node has 24 cores
-          MAX_JOBS=24 sudo -E make docs-only
+          REPO_ROOT="$GITHUB_WORKSPACE"
+          BASE_REF="${DOCS_BASE_REF:-origin/main}"
+          TARGET_REPO="${DOCS_TARGET_REPO:-all}"
+          CI_CONFIG="${DOCS_CI_CONFIG:-$REPO_ROOT/.github/docs-ci/config.json}"
+          OUTPUT_COUNT="${DOCS_OUTPUT_COUNT:-50}"
+          OUTPUT_PATH="${DOCS_OUTPUT_PATH:-$REPO_ROOT/output.md}"
 
-      - name: Update docs
-        run: |
-          sudo mkdir /tmp/triton-docs/
-          sudo mv docs/_build/html/* /tmp/triton-docs/
-          sudo git checkout gh-pages
-          sudo cp -r CNAME /tmp/triton-docs/
-          sudo cp -r index.html /tmp/triton-docs/
-          sudo cp -r .nojekyll /tmp/triton-docs/
-          sudo rm -rf *
-          sudo cp -r /tmp/triton-docs/* .
-          sudo git add .
-          sudo git config --global user.email "N/A"
-          sudo git config --global user.name "gh-actions-bot"
-          sudo git commit -am "[GH-PAGES] Updated website"
+          # The checker is vendored in this repo — no download needed.
+          CLI_PATH="${DOCS_CLI:-$REPO_ROOT/.github/docs-ci/docs-ci-v2.js}"
+          if [ ! -f "$CLI_PATH" ]; then
+            echo "::error::docs checker not found at $CLI_PATH"
+            exit 1
+          fi
 
-      - name: Publish docs
+          # codespell-check relies on cspell-lib and its dictionaries, which the
+          # bundle resolves from node_modules next to itself. Install them on
+          # demand in .cache (cached across runs) and symlink into the vendored
+          # directory so the bundle can find them.
+          NEED_CSPELL="${DOCS_NEED_CSPELL:-}"
+          if [ -z "$NEED_CSPELL" ] && [ -f "$CI_CONFIG" ] && grep -q "codespell-check" "$CI_CONFIG"; then
+            NEED_CSPELL=1
+          fi
+          if [ -n "$NEED_CSPELL" ]; then
+            CSPELL_DIR="${DOCS_CSPELL_DIR:-$REPO_ROOT/.cache}"
+            if [ ! -d "$CSPELL_DIR/node_modules/cspell-lib" ]; then
+              echo "Installing cspell-lib@${DOCS_CSPELL_VERSION:-9.2.1} for codespell-check"
+              mkdir -p "$CSPELL_DIR"
+              [ -f "$CSPELL_DIR/package.json" ] || printf '{"name":"docs-ci-runtime","private":true}\n' > "$CSPELL_DIR/package.json"
+              ( cd "$CSPELL_DIR" && npm i --no-audit --no-fund --loglevel=error "cspell-lib@${DOCS_CSPELL_VERSION:-9.2.1}" )
+            fi
+            # Symlink node_modules next to the checker so the bundle can resolve cspell-lib.
+            CLI_DIR="$(dirname "$CLI_PATH")"
+            if [ ! -e "$CLI_DIR/node_modules" ]; then
+              ln -s "$CSPELL_DIR/node_modules" "$CLI_DIR/node_modules"
+            fi
+          fi
+
+          ARGS=(
+            --repoPath="$REPO_ROOT"
+            --targetOwnerRepo="$TARGET_REPO"
+            --targetBranch="$BASE_REF"
+            --ciConfigUrl="$CI_CONFIG"
+            --outputCount="$OUTPUT_COUNT"
+            --outputPath="$OUTPUT_PATH"
+          )
+          if [ "${DOCS_CHECK_ALL:-}" = "true" ]; then
+            ARGS+=(--checkAll=true)
+          fi
+
+          rm -f "$OUTPUT_PATH"
+          cd "$REPO_ROOT"
+          node "$CLI_PATH" "${ARGS[@]}"
+
+          if [ ! -f "$OUTPUT_PATH" ]; then
+            echo "::error::docs checker produced no report at $OUTPUT_PATH"
+            exit 1
+          fi
+          if head -n 1 "$OUTPUT_PATH" | grep -q "❌"; then
+            echo "::error::Docs PR gate failed - see report below / job summary."
+            cat "$OUTPUT_PATH"
+            exit 1
+          fi
+          echo "Docs PR gate passed."
+
+      - name: Publish report
+        if: always()
         run: |
-          sudo git push origin gh-pages
+          if [ -f output.md ]; then
+            {
+              echo "## Docs Check"
+              echo ""
+              cat output.md
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

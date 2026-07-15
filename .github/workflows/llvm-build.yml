@@ -6,13 +6,13 @@ on:
   # push:
   #   paths:
   #     - cmake/llvm-hash.txt
-  #     - third_party/ascend/llvm_patch/**
+  #     - third_party/ascend/patch/**
   #     - .github/workflows/llvm-build.yml
   #     - .github/workflows/llvm-build/**
   # pull_request:
   #   paths:
   #     - cmake/llvm-hash.txt
-  #     - third_party/ascend/llvm_patch/**
+  #     - third_party/ascend/patch/**
   #     - .github/workflows/llvm-build.yml
   #     - .github/workflows/llvm-build/**
   workflow_dispatch:
@@ -44,7 +44,7 @@ jobs:
     steps:
 
     - name: Checkout Repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         path: llvm-build
 
@@ -62,10 +62,10 @@ jobs:
     - name: Compute Patch Hash
       shell: bash
       run: |
-        PATCH_DIR="llvm-build/third_party/ascend/llvm_patch"
-        if [ -d "${PATCH_DIR}" ] && find "${PATCH_DIR}" -maxdepth 1 -type f -name '*.patch' -print -quit | grep -q .; then
+        PATCH_DIR="llvm-build/third_party/ascend/patch"
+        if [ -d "${PATCH_DIR}" ] && find "${PATCH_DIR}" -maxdepth 1 -type f -name 'llvm_patch_*.patch' -print -quit | grep -q .; then
           PATCH_HASH=$(
-            LC_ALL=C find "${PATCH_DIR}" -maxdepth 1 -type f -name '*.patch' -print0 \
+            LC_ALL=C find "${PATCH_DIR}" -maxdepth 1 -type f -name 'llvm_patch_*.patch' -print0 \
               | sort -z \
               | xargs -0 cat \
               | sha256sum \
@@ -83,7 +83,7 @@ jobs:
         echo "llvm_install_dir=${INSTALL_DIR}" >> ${GITHUB_ENV}
 
     - name: Checkout LLVM
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         repository: llvm/llvm-project
         path: llvm-project
@@ -93,10 +93,10 @@ jobs:
       shell: bash
       run: |
         LLVM_SHORT="${{ env.short_llvm_commit_hash }}"
-        PATCH_DIR="llvm-build/third_party/ascend/llvm_patch"
+        PATCH_DIR="llvm-build/third_party/ascend/patch"
         if [ -d "${PATCH_DIR}" ]; then
           cd llvm-project
-          for patchfile in ${GITHUB_WORKSPACE}/${PATCH_DIR}/*.patch; do
+          for patchfile in ${GITHUB_WORKSPACE}/${PATCH_DIR}/llvm_patch_*.patch; do
             if [ -f "$patchfile" ]; then
               echo "Applying $patchfile..."
               git apply "$patchfile"
@@ -106,7 +106,7 @@ jobs:
         fi
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: 3.11
 
@@ -138,7 +138,7 @@ jobs:
         -DLLVM_BUILD_UTILS=ON
         -DLLVM_BUILD_TOOLS=ON
         -DLLVM_ENABLE_ASSERTIONS=ON
-        -DMLIR_ENABLE_BINDINGS_PYTHON=ON
+        -DMLIR_ENABLE_BINDINGS_PYTHON=OFF
         -DLLVM_ENABLE_PROJECTS="mlir;lld"
         -DLLVM_INSTALL_UTILS=ON
         -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU"

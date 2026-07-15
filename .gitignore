@@ -27,7 +27,9 @@ python/triton/backends/*
 !python/triton/backends/driver.py
 
 # Language extras
-python/triton/language/extra
+python/triton/language/extra/*
+!python/triton/language/extra/__init__.py
+!python/triton/language/extra/libdevice.py
 
 # Tools extras
 python/triton/tools/extra
@@ -63,6 +65,7 @@ cmake-build-*
 cuobjdump
 nvdisasm
 ptxas
+ptxas-blackwell
 
 # Third-party include
 third_party/nvidia/backend/include
@@ -85,6 +88,7 @@ docs/sg_execution_times.rst
 .vscode
 .vs
 .idea/
+.cursor
 
 # Vim
 *.swp
@@ -106,3 +110,8 @@ dist/
 *.egg-info/
 .eggs/
 docs/zh/python-api/generated/
+
+# Docs PR gate: checker bundle is fetched at run time, not vendored;
+# output.md / result.json are generated reports.
+/output.md
+/result.json

@@ -21,6 +21,8 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/SeparateMemoryFromComputePass.h"
+#include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/AddMultiBufferToGMLoadPass.h"
 #include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/AsyncLoadHoistingPass.h"
 #include "mlir/Pass/PassManager.h"
@@ -33,12 +35,15 @@ static constexpr const char *DEBUG_TYPE = "separate-memory-from-compute";
 using namespace mlir;
 using namespace triton;
 
-static constexpr int kDefaultBufferDepth = 2;
-
 void SeparateMemoryFromComputePass::runOnOperation() {
   ModuleOp module = getOperation();
 
-  int depth = kDefaultBufferDepth;
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
+  int depth = BufferCountManager::getInstance().getBufferCountByType(
+      BufferCountManager::DepType::LoadStore);
 
   if (depth <= 1) {
     LDBG("Buffer depth <= 1, skip multi-buffer transformation");
@@ -56,7 +61,10 @@ void SeparateMemoryFromComputePass::runOnOperation() {
 
   if (failed(runPipeline(pm, module))) {
     module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
-    signalPassFailure();
+    if (!CVPipeline::hasFallbackAttr(module)) {
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    }
+    return;
   }
 
   LDBG("Process successfully");

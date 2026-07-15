@@ -1,5 +1,11 @@
 # Project Overview and Value Proposition
 
+<p align="center">
+  <a href="https://deepwiki.com/triton-lang/triton-ascend">
+    <img src="https://img.shields.io/badge/Ask_AI-DeepWiki-0052D9?style=flat&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZD0iTTIwIDJINGEyIDIgMCAwIDAtMiAydjEyYTIgMiAwIDAgMCAyIDJoMTRsNCA0VjRhMiAyIDIgMCAwIDAtMi0yeiIgZmlsbD0id2hpdGUiLz48L3N2Zz4%3D" alt="Ask AI on DeepWiki">
+  </a>
+</p>
+
 Triton-Ascend is a Triton compilation framework built for the Ascend platform, aiming to enable Triton code to run efficiently on Ascend hardware.
 
 - ## Core Value

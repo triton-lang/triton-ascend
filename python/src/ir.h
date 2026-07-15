@@ -48,7 +48,7 @@ public:
     if (!block.empty())
       setLastLoc(block.begin()->getLoc());
     else
-      setLastLoc(builder->getUnknownLoc());
+      setLastLoc(getLocForBlock(&block));
     builder->setInsertionPointToStart(&block);
   }
 
@@ -56,7 +56,7 @@ public:
     if (!block.empty())
       setLastLoc(block.back().getLoc());
     else
-      setLastLoc(builder->getUnknownLoc());
+      setLastLoc(getLocForBlock(&block));
     builder->setInsertionPointToEnd(&block);
   }
 
@@ -65,17 +65,21 @@ public:
     builder->setInsertionPointAfter(&op);
   }
 
-  void restoreInsertionPoint(OpBuilder::InsertPoint pt) {
-    if (pt.isSet() && pt.getPoint() != pt.getBlock()->end())
-      setLastLoc(pt.getPoint()->getLoc());
-    else
-      setLastLoc(builder->getUnknownLoc());
+  void restoreInsertionPoint(mlir::OpBuilder::InsertPoint pt) {
+    setLastLoc(builder->getUnknownLoc());
+    if (pt.isSet()) {
+      if (pt.getPoint() != pt.getBlock()->end())
+        setLastLoc(pt.getPoint()->getLoc());
+      else
+        setLastLoc(getLocForBlock(pt.getBlock()));
+    }
+
     builder->restoreInsertionPoint(pt);
   }
 
   template <typename OpTy, typename... Args> OpTy create(Args &&...args) {
     auto loc = getLastLoc();
-    return builder->create<OpTy>(loc, std::forward<Args>(args)...);
+    return OpTy::create(*builder, loc, std::forward<Args>(args)...);
   }
 
   // Overload to create or fold a single result operation.
@@ -95,10 +99,17 @@ public:
   }
 
 private:
-  std::unique_ptr<OpBuilder> builder;
-  std::unique_ptr<Location> lastLoc;
-  bool lineInfoEnabled = !triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO");
+  std::unique_ptr<mlir::OpBuilder> builder;
+  std::unique_ptr<mlir::Location> lastLoc;
+  bool lineInfoEnabled =
+      !mlir::triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO");
   std::string compile_mode;
+
+  mlir::Location getLocForBlock(mlir::Block *block) {
+    if (auto parentOp = block->getParentOp())
+      return parentOp->getLoc();
+    return builder->getUnknownLoc();
+  }
 };
 
 namespace ir {

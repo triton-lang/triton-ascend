@@ -1,4 +1,4 @@
-// RUN: triton-opt --discrete-mask-access-conversion="compile-on-910-95=True compile-mode=simd" --triton-to-annotation '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd' --triton-to-hivm --triton-to-hfusion --triton-to-llvm --bubble-up-operation '--triton-to-linalg=global-kernel=false named-ops=True enable-nd2nz-on-vector=False compile-on-910-95=True' --split-input-file %s | FileCheck %s
+// RUN: triton-opt '--discrete-mask-access-conversion=compile-on-910-95=True force-simt-template=False' --triton-to-annotation '--triton-to-unstructure=compile-on-910-95=True force-simt-template=False' --triton-to-hivm --triton-to-hfusion --triton-to-llvm --bubble-up-operation '--triton-to-linalg=global-kernel=false named-ops=True enable-nd2nz-on-vector=False compile-on-910-95=True' --split-input-file %s | FileCheck %s
 
 module {
 		tt.func public @tt_clamp_3d(%arg0: !tt.ptr<f8E4M3FN> {tt.divisibility = 16 : i32}, %arg1: !tt.ptr<f8E4M3FN> {tt.divisibility = 16 : i32}, %arg2: !tt.ptr<f32> {tt.divisibility = 16 : i32}, %arg3: !tt.ptr<f32> {tt.divisibility = 16 : i32}) attributes {noinline = false} {

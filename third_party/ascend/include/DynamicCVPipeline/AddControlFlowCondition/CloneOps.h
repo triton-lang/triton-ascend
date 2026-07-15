@@ -39,6 +39,7 @@ public:
   LogicalResult validateBlockIdsConsecutive(ModuleOp module);
   LogicalResult cloneOpsInMainLoop(scf::ForOp forOp);
   LogicalResult cleanupClonedOpsInMainLoop(scf::ForOp forOp);
+  LogicalResult validateClonedOpsInVector(ModuleOp module);
 
   llvm::StringRef getArgument() const override { return "clone-ops"; }
 };

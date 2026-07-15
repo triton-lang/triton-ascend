@@ -6,7 +6,8 @@ from ..cdna3 import _verify_buffer_ops
 __all__ = [
     "global_load_to_shared",
     "buffer_load_to_shared",
-    "async_wait",
+    "commit_group",
+    "wait_group",
     "load_shared_relaxed",
 ]
 
@@ -17,7 +18,10 @@ def global_load_to_shared(dest, ptr, mask=None, other=None, cache_modifier="", _
     AMD global load to shared operation. This operation loads data directly
     from global memory to shared memory without going through registers. It
     happens asynchronously and requires a subsequent `async_wait` to ensure the
-    data is available in shared memory.
+    data is available in shared memory. Note that this operation does still
+    complete in order with ttgl.loads/stores or buffer_loads/stores on CDNA4,
+    so interleaving with them will hurt performance.
+
     Compared to `buffer_load_to_shared`, it requires a tensor pointer which
     supports 64-bit indexing range for each thread in a block, which gives more
     flexibility, but at the cost of higher register pressure and no hardware
@@ -38,7 +42,7 @@ def global_load_to_shared(dest, ptr, mask=None, other=None, cache_modifier="", _
         dest (shared_memory_descriptor): Destination shared memory descriptor.
         ptr (pointer tensor): Tensor of pointers to global memory to load from.
         mask (tensor, optional): Mask tensor for predicated loads. Defaults to None.
-        other (tensor, optional): Tensor providing default values for masked elements. Defaults to None.
+        other (tensor or scalar, optional): Tensor or scalar providing default values for masked elements. Defaults to None.
         cache_modifier (str): Cache modifier specifier. Defaults to "".
     """
     _check(ptr.type.is_block(), lambda: "expected ptr to be a tensor")
@@ -53,6 +57,8 @@ def global_load_to_shared(dest, ptr, mask=None, other=None, cache_modifier="", _
         ptr, mask = _semantic.broadcast_impl_value(ptr, mask)
     other = _unwrap_if_constexpr(other)
     if other is not None:
+        other = _semantic.to_tensor(other)
+        other = _semantic.cast(other, ptr.dtype.element_ty)
         ptr, other = _semantic.broadcast_impl_value(ptr, other)
 
     cache_modifier = _semantic._str_to_load_cache_modifier(cache_modifier)
@@ -70,7 +76,10 @@ def buffer_load_to_shared(dest, ptr, offsets, mask=None, other=None, cache_modif
     32-bit offsets instead of a tensor of pointers. This operation loads data
     directly from global memory to shared memory without going through
     registers. It happens asynchronously and requires a subsequent `async_wait`
-    to ensure the data is available in shared memory.
+    to ensure thedata is available in shared memory. Note that this operation
+    does still complete in order with ttgl.loads/stores or buffer_loads/stores
+    on CDNA4, so interleaving with them will hurt performance.
+
     Compared to `global_load_to_shared`, it has better performance and also
     supports hardware out-of-bound masking. But it strictly requires a
     32-bit offset instead of a 64-bit tensor pointer.
@@ -90,7 +99,7 @@ def buffer_load_to_shared(dest, ptr, offsets, mask=None, other=None, cache_modif
         ptr (pointer to scalar): Global memory scalar base pointer to load from.
         offsets (tensor): Offsets tensor for the load operation.
         mask (tensor, optional): Mask tensor for predicated loads. Defaults to None.
-        other (tensor, optional): Tensor providing default values for masked elements. Defaults to None.
+        other (tensor or scalar, optional): Tensor or scalar providing default values for masked elements. Defaults to None.
         cache_modifier (str): Cache modifier specifier. Defaults to "".
     """
     _check(isinstance(offsets.type.layout, (BlockedLayout, SliceLayout)),
@@ -102,6 +111,8 @@ def buffer_load_to_shared(dest, ptr, offsets, mask=None, other=None, cache_modif
         offsets, mask = _semantic.broadcast_impl_value(offsets, mask)
     other = _unwrap_if_constexpr(other)
     if other is not None:
+        other = _semantic.to_tensor(other)
+        other = _semantic.cast(other, ptr.type.scalar.element_ty)
         offsets, other = _semantic.broadcast_impl_value(offsets, other)
 
     mask = mask.handle if mask is not None else ir.value()
@@ -114,16 +125,24 @@ def buffer_load_to_shared(dest, ptr, offsets, mask=None, other=None, cache_modif
 
 
 @builtin
-def async_wait(num_outstanding=0, _semantic=None):
+def commit_group(_semantic=None):
     """
-    Wait for outstanding memory operations, this includes normal load like
-    `load` and `buffer_load`, as well as direct load to shared memory
-    like `global_load_to_shared` and `buffer_load_to_shared`.
-    It will block until the number of outstanding memory operations is less than
-    or equal to `num_outstanding`.
+    Commit oustanding async operations.
+
+    This finalizes a set of async copy operations which can be waited upon via `wait_group`.
+    """
+    _semantic.builder.create_async_commit_group()
+
+
+@builtin
+def wait_group(num_outstanding=0, _semantic=None):
+    """
+    Wait for outstanding commit groups. It will block until the number of
+    outstanding commit groups is less than or equal to `num_outstanding`. Note that uncommited
+    async operations will be waited upon even if `num_outstanding` is 0.
 
     Args:
-        num_outstanding (int): The number of outstanding operations to wait for. Defaults to 0.
+        num_outstanding (int): The number of outstanding commit groups to wait for. Defaults to 0.
     """
     num_outstanding = _unwrap_if_constexpr(num_outstanding)
     _semantic.builder.create_async_wait_group(num_outstanding)
@@ -143,7 +162,7 @@ def load_shared_relaxed(smem, layout, _semantic=None):
     Returns:
         tensor: A Gluon tensor containing the loaded data.
     """
-    SYNCED_VIA_WAIT_ATTR_NAME = "ttg.amdgpu.syncedViaAsyncWait"
+    SYNCED_VIA_WAIT_ATTR_NAME = "ttg.amdg.syncedViaAsyncWait"
 
     layout = _unwrap_if_constexpr(layout)
     ret = _semantic.shared_load(smem, layout)

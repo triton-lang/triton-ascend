@@ -19,7 +19,7 @@ Triton-Ascend follows [PEP 440](https://peps.python.org/pep-0440/) version speci
 
 | Triton-Ascend | Triton commit hash                                           | Python    | CANN  | PyTorch | LLVM commit hash                                             | Patch                                                        |
 | ------------- | ------------------------------------------------------------ | --------- | ----- | ------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| `main`        | [cfc0a9d](https://github.com/triton-lang/triton-ascend/commit/cfc0a9d) | `3.9~3.13` | `9.0.0` | `2.7.1`   | [fad3272](https://github.com/llvm/llvm-project/commit/fad3272) | [fad3272.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/llvm_patch/fad3272.patch) |
+| `main`        | [cfc0a9d](https://github.com/triton-lang/triton-ascend/commit/cfc0a9d) | `3.9~3.13` | `9.0.0` | `2.7.1`   | [fad3272](https://github.com/llvm/llvm-project/commit/fad3272) | [llvm_patch_fad3272.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_fad3272.patch) |
 
 ## Maintenance Branches and Lifecycle
 

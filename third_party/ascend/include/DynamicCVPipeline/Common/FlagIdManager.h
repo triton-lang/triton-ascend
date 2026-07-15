@@ -46,6 +46,8 @@ public:
   // comparison in reuse analysis. Can be nullptr.
   int acquireId(Operation *insertionPoint);
 
+  int checkCurrentId();
+
 private:
   // Scan existing Flag IDs
   // Traverse Module to find all existing flag_id to prevent duplicate

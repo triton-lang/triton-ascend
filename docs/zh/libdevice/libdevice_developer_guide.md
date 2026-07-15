@@ -1,4 +1,4 @@
-﻿# Libdevice 开发者手册
+# Libdevice 开发者手册
 
 ## SIMT 编译示例
 

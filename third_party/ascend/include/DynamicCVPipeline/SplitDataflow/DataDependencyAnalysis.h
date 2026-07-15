@@ -31,6 +31,7 @@
 #include "mlir/Pass/Pass.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 
@@ -42,7 +43,7 @@ struct BlockInfo {
   int blockId;
   bool isCube;
   bool isControl;
-  llvm::SmallVector<mlir::Value> inputs;
+  llvm::SetVector<mlir::Value> inputs;
   llvm::SmallVector<mlir::Value> outputs;
   llvm::SmallVector<mlir::Operation *> Operations;
 };
@@ -50,11 +51,16 @@ struct BlockInfo {
 struct DependencyInfo {
   DependencyType type;
   mlir::Value value;
-
+  bool isScaler = false;
   int producerBlockId;
   int consumerBlockId;
   int iniProducerBlockId;
   int iniConsumerBlockId;
+
+  // Optional Items for V2CDependencies
+  mlir::Operation *iniMatmulOp = nullptr;
+  bool isMatmulA = false;
+  bool isMatmulB = false;
 };
 
 class DataDependencyInfo {
@@ -103,7 +109,20 @@ public:
   DataDependencyAnalysisPass() = default;
 
   // Run the pass
-  void runOnOperation();
+  void runOnOperation() override;
+
+  static constexpr ::llvm::StringRef getArgumentName() {
+    return "data-dependency-analysis";
+  }
+  ::llvm::StringRef getArgument() const override {
+    return "data-dependency-analysis";
+  }
+  ::llvm::StringRef getDescription() const override {
+    return "Analyze data dependencies between Vector and Cube blocks";
+  }
+  ::llvm::StringRef getName() const override {
+    return "DataDependencyAnalysisPass";
+  }
 
 private:
   void createBlockInfoMap(DataDependencyInfo &info);
@@ -113,6 +132,9 @@ private:
   void collectDepInfo(mlir::Value depvalue, DependencyType dependencyType,
                       llvm::SmallVector<DependencyInfo> &dependencies,
                       int iniProdId, int iniConsId, DataDependencyInfo &info);
+  void collectMemDepInfo(llvm::StringRef predCoreType, int producerBlockId,
+                         int consumerBlockId, int predBlockId, int currBlockId,
+                         llvm::SmallVector<DependencyInfo> &memoryDependencies);
   void analyzeExternalInputs(DataDependencyInfo &info);
   void analyzeExternalOutputs(DataDependencyInfo &info);
 
@@ -122,14 +144,29 @@ private:
                                               int consumerBlockId);
 
   bool isControlFlowOp(mlir::Operation *op);
+  bool isCubeOrVectorOp(mlir::Operation *op);
+  bool isValidShapeForDependency(mlir::Value value);
+  bool isValidValueForDependency(mlir::Value value);
+  bool isValidScalarDependency(mlir::Value value);
+  bool isOuterOpArg(mlir::Value value);
+  void processIterArgDependencies();
+  void analyzeV2CMatmulABType(DataDependencyInfo &info);
+  llvm::SmallVector<mlir::Operation *>
+  collectDiffCoreTypeUsers(mlir::BlockArgument iterArg,
+                           llvm::StringRef initCoreType);
+  void
+  insertProducerAndRecordDeps(scf::ForOp forOp, mlir::BlockArgument iterArg,
+                              llvm::StringRef initCoreType,
+                              llvm::SmallVector<mlir::Operation *> &diffUsers,
+                              DataDependencyInfo &info);
 
   mlir::ModuleOp module;
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createDataDependencyAnalysisPass();
 
-// Helper: Get BlockId
-int getSsbufferBlockId(Operation *op);
+void registerDataDependencyAnalysisPasses();
+
 } // namespace triton
 } // namespace mlir
 

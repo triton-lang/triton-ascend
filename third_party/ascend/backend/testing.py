@@ -22,16 +22,32 @@ import builtins
 import multiprocessing
 import os
 from datetime import datetime, timezone
-from pathlib import Path
+from typing import Optional
 
 import triton.runtime as runtime
+from triton.knobs import cache
 
 
-def get_home_dir():
-    return os.getenv("TRITON_HOME", Path.home())
+class ProfilerResultMismatchError(RuntimeError):
+
+    def __init__(self, target_kernel_name: str, expected_rows: int, actual_rows: int):
+        self.target_kernel_name = target_kernel_name
+        self.expected_rows = expected_rows
+        self.actual_rows = actual_rows
+        super().__init__(
+            "Profiler rows filtered by target kernel name do not match the expected count. "
+            f"target_kernel_name={target_kernel_name!r}, expected_rows={expected_rows}, actual_rows={actual_rows}")
 
 
-def do_bench_npu(funcs, warmup=5, active=30, clear_l2_cache=False, prof_dir=None, keep_res=False):
+def do_bench_npu(
+    funcs,
+    warmup=5,
+    active=30,
+    clear_l2_cache=False,
+    prof_dir=None,
+    keep_res=False,
+    target_kernel_name: Optional[str] = None,
+):
     import torch
     import torch_npu
 
@@ -57,7 +73,7 @@ def do_bench_npu(funcs, warmup=5, active=30, clear_l2_cache=False, prof_dir=None
         pid = process.pid
         process_name = process.name
         timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
-        base_path = os.path.join(get_home_dir(), ".triton", "profile_results")
+        base_path = cache.get_triton_dir("profile_results")
         torch_path = os.path.join(base_path, f"prof_{timestamp}_{process_name}-{pid}")
 
     if clear_l2_cache:
@@ -87,9 +103,17 @@ def do_bench_npu(funcs, warmup=5, active=30, clear_l2_cache=False, prof_dir=None
     if clear_l2_cache:
         del buffer
 
-    time_cost = _collect_prof_result(torch_path, funcs, warmup, active)
-    _rm_dic(keep_res, torch_path)
-    return time_cost
+    try:
+        return _collect_prof_result(
+            torch_path,
+            funcs,
+            warmup,
+            active,
+            target_kernel_name=target_kernel_name,
+            clear_l2_cache=clear_l2_cache,
+        )
+    finally:
+        _rm_dic(keep_res, torch_path)
 
 
 def _rm_dic(keep_res, torch_path):
@@ -101,7 +125,14 @@ def _rm_dic(keep_res, torch_path):
         shutil.rmtree(torch_path)
 
 
-def _collect_prof_result(base_dir: str, funcs, num_warmup: int, num_active: int, key: str = None):
+def _collect_prof_result(
+    base_dir: str,
+    funcs,
+    num_warmup: int,
+    num_active: int,
+    target_kernel_name: Optional[str] = None,
+    clear_l2_cache: bool = False,
+):
     """
     Collect kernel performance from kernel_details.csv, returned in millisecond.
     The first `num_warmup` rows of each function are warmup data and will be ignored, the next `num_active` rows will be averaged.
@@ -114,8 +145,8 @@ def _collect_prof_result(base_dir: str, funcs, num_warmup: int, num_active: int,
     :type num_warmup: int
     :param num_active: active count in kernel_details.csv of each fn
     :type num_active: int
-    :param key: filter key for kernel name
-    :type key: str
+    :param target_kernel_name: target triton kernel name reported by profiler
+    :type target_kernel_name: Optional[str]
     """
 
     import numpy as np
@@ -136,17 +167,21 @@ def _collect_prof_result(base_dir: str, funcs, num_warmup: int, num_active: int,
 
     df = pd.read_csv(kernel_details_file)
     # filter out l2 cache clearing operation
-    filter_cond = ~df["Type"].str.contains(r"^ReduceSum$", case=False, na=False)
+    filter_cond = (not clear_l2_cache) | ~df["Type"].str.contains(r"^ReduceSum$", case=False, na=False)
     filter_df = df[filter_cond]
-    if key is not None:
-        key_rows = filter_df[filter_df["Name"].str.contains(key, na=False)]
-    else:
-        key_rows = filter_df
+    if target_kernel_name is not None:
+        filter_df = filter_df[filter_df["Name"] == target_kernel_name]
+
+    expected_rows = num_funcs * (num_warmup + num_active)
+    actual_rows = len(filter_df)
+    if target_kernel_name is not None and actual_rows != expected_rows:
+        raise ProfilerResultMismatchError(target_kernel_name, expected_rows, actual_rows)
+
     time_cost = [0] * num_funcs
     for func_idx in np.arange(0, num_funcs):
         for active_index in np.arange(0, num_active):
             row_index = func_idx * (num_warmup + num_active) + num_warmup + active_index
-            time_cost[func_idx] += key_rows.iloc[row_index]["Duration(us)"]
+            time_cost[func_idx] += filter_df.iloc[row_index]["Duration(us)"]
     time_cost = [x / num_active / 1e3 for x in time_cost]
 
     if num_funcs == 1:

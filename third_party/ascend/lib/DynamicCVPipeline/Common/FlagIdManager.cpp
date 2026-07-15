@@ -59,9 +59,7 @@ void FlagIdManager::scanExistingFlags(ModuleOp module) {
 }
 
 int FlagIdManager::acquireId(Operation *insertionPoint) {
-  if (currentMaxId < MAX_FLAG_ID) {
-    return ++currentMaxId;
-  }
-
-  return INVALID_FLAG_ID;
+  return ++currentMaxId;
 }
+
+int FlagIdManager::checkCurrentId() { return currentMaxId <= MAX_FLAG_ID; }

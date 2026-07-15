@@ -22,6 +22,8 @@ def _is_power_of_two(i):
     return (i & (i - 1)) == 0 and i != 0
 
 
+_get_int_dtype = constexpr_function(core.get_int_dtype)
+
 # -----------------------
 # Standard library
 # -----------------------
@@ -38,7 +40,7 @@ def cdiv(x, div):
     :param div: the divisor
     :type div: Block
     """
-    return (x + div - 1) // div
+    return (x + (div - 1)) // div
 
 
 @core._tensor_member_fn
@@ -257,11 +259,7 @@ def min(input, axis=None, return_indices=False, return_indices_tie_break_left=Tr
                 input = input.to(core.float32)
             else:
                 assert input.dtype.is_int(), "Expecting input to be integer type"
-                # FIXME: Skip int8/int16 -> int32 promotion on Ascend.
-                # Converting small integer types (e.g., int8) to int32 consumes excessive UB (Unified Buffer) memory,
-                # which can lead to "UB overflow" errors during kernel execution.
-                # Therefore, we keep the original narrow integer type and rely on backend support.
-                pass  # Do not promote to int32
+                input = input.to(core.int32)
         return core.reduce(input, axis, _elementwise_min, keep_dims=keep_dims)
 
 
@@ -301,11 +299,10 @@ def _pick_sum_dtype(in_dtype, dtype):
 @core._add_reduction_docstr("sum", dtype_arg="dtype")
 def sum(input, axis=None, keep_dims=False, dtype: core.constexpr = None):
     # Pick a default dtype for the reduction if one was not specified.
-    # out_dtype: core.constexpr = _pick_sum_dtype(input.dtype, dtype)
+    out_dtype: core.constexpr = _pick_sum_dtype(input.dtype, dtype)
 
-    # if out_dtype is not None:
-    #     input = input.to(out_dtype)
-    # Triton Ascend not need the type promotion logic of community as commented above, perform the operation normally
+    if out_dtype is not None:
+        input = input.to(out_dtype)
     return core.reduce(input, axis, _sum_combine, keep_dims=keep_dims)
 
 
@@ -392,7 +389,7 @@ def _compare_and_swap(x, flip, i: core.constexpr):
     n_dims: core.constexpr = _log2(x.numel)
 
     # flip along middle dimension (the bitwise XORs will be optimised away):
-    idtype = core.get_int_dtype(bitwidth=x.dtype.primitive_bitwidth, signed=True)
+    idtype = _get_int_dtype(bitwidth=x.dtype.primitive_bitwidth, signed=True)
     ix = x.to(idtype, bitcast=True)
     iy = ix ^ xor_sum(ix, n_dims - 1 - i, True)
     y = iy.to(x.dtype, bitcast=True)
@@ -459,7 +456,7 @@ def sort_impl(x, k: core.constexpr = None, dim: core.constexpr = None, descendin
     n_dims: core.constexpr = _log2(x.numel)
 
     # reshape to hypercube:
-    h = core.reshape(x, [2] * n_dims)
+    h = core.reshape(x, [2] * n_dims if n_dims else [1])
 
     # run first log_k bitonic sort iterations:
     for i in core.static_range(1, log_k + 1):
@@ -521,7 +518,7 @@ def flip(x, dim=None):
     steps: core.constexpr = _log2(x.shape[_dim])
 
     # reshape the swap dimension to (2, 2, ..., 2)
-    idtype = core.get_int_dtype(bitwidth=x.dtype.primitive_bitwidth, signed=True)
+    idtype = _get_int_dtype(bitwidth=x.dtype.primitive_bitwidth, signed=True)
     y = core.reshape(x.to(idtype, bitcast=True), x.shape[:_dim] + [2] * steps + x.shape[_dim + 1:])
     for i in core.static_range(steps):
         y = y ^ xor_sum(y, _dim + i, True)

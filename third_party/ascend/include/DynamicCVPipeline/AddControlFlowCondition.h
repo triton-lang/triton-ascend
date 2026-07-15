@@ -34,6 +34,23 @@
 namespace mlir {
 namespace triton {
 
+// Indicates the relationship between a tensor iter_args and ssbuffer.if in the
+// main_loop
+struct TensorIterArgIfOpRelation {
+  Value iterArg;
+  llvm::SmallVector<scf::IfOp> producers;
+  llvm::SmallVector<scf::IfOp> consumers;
+};
+
+// Indicates the variables that need to be controlled when an ifOp is both a
+// producer and consumer of a tensor iter_args
+struct TensorIterArgIfOpVars {
+  // The variables that need to be controlled as a producer
+  llvm::SmallVector<Value> producerVars;
+  // The variables that need to be controlled as a consumer
+  llvm::SmallVector<Value> consumerVars;
+};
+
 struct ControlFlowConditionInfo {
   llvm::DenseMap<scf::ForOp, SmallVector<int>> blockCounters;
   llvm::DenseMap<scf::ForOp, int> blockCounterNums;
@@ -42,6 +59,19 @@ struct ControlFlowConditionInfo {
   llvm::DenseMap<Value, SmallVector<Value>> crossCoreDependentMap;
   llvm::DenseMap<scf::ForOp, llvm::DenseMap<Value, SmallVector<Value>>>
       intraCoreDependentMap;
+  // Used to store the producer/consumer relationship between the tensor type
+  // iter_args in the main_loop and ssbuffer.if Note: vector index corresponds
+  // to iter arg index in the for op
+  llvm::DenseMap<scf::ForOp, llvm::SmallVector<TensorIterArgIfOpRelation>>
+      tensorIterArgDepsMap;
+  // Used to record the index of the control condition variable for the newly
+  // created iter_args for tensor iter_args
+  llvm::DenseMap<scf::ForOp, llvm::DenseMap<Value, SmallVector<int>>>
+      tensorIterArgIndicesMap;
+
+  // Record each ifOp as the variables that need to be controlled when it acts
+  // as a consumer or a producer
+  llvm::DenseMap<scf::IfOp, TensorIterArgIfOpVars> tensorIterArgIfOpVars;
 
   // unique counter value for each ifblock
   llvm::DenseMap<scf::IfOp, Value> cntArgs;

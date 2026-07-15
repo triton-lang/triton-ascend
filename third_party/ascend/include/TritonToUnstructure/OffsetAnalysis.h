@@ -116,9 +116,6 @@ public:
   bool isUnstructured() const;
   bool isUnstructuredOrScalarlike() const;
 
-  SmallVector<int64_t> getUnstructuredDims() const;
-  bool hasUnstructuredDim() const;
-
   void setZeroOffset();
 
 private:
@@ -270,10 +267,10 @@ void parseIntToPtr(triton::IntToPtrOp op, const Location &loc,
                    RewriterBase &rewriter,
                    llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap);
 
-void parseCustomOp(hivm::CustomOp op, const Location &loc,
-                   RewriterBase &rewriter,
-                   llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
-                   unsigned resultIdx);
+void parseStructuredCustomOp(Operation *op, const Location &loc,
+                             RewriterBase &rewriter,
+                             llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
+                             unsigned resultIdx);
 } // namespace triton
 
 } // namespace mlir

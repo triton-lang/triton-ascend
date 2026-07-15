@@ -116,7 +116,6 @@ def rem_kernel(in_ptr0, in_ptr1, out_ptr, N: tl.constexpr, BLOCK_SIZE: tl.conste
     tmp0 = tl.load(in_ptr0 + base_offset, mask=mask, other=0.0)
     tmp1 = tl.load(in_ptr1 + base_offset, mask=mask, other=0.0)
     tmp2 = tmp0 + tmp1
-
     tl.store(out_ptr + base_offset, tmp2, mask=mask)
 
 

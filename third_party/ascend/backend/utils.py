@@ -33,6 +33,19 @@ from triton.backends.ascend.backend_register import backend_strategy_registry
 
 import pybind11
 
+AUTO_BLOCKIFY_BLACKLIST_RULES = (
+    (re.compile(r"\btt\.atomic_(?:rmw|cas)\b"), "atomic operations"),
+    (re.compile(r"\btt\.elementwise_inline_asm\b"), "inline elementwise assembly"),
+    (
+        re.compile(r"\btt\.load\b[^\n]*\bisVolatile\s*=\s*true\b"),
+        "loads with volatile",
+    ),
+    (
+        re.compile(r"\btt\.(?:load|store)\b[^\n]*\bcacheModifier\s*="),
+        "loads or stores with cache modifiers",
+    ),
+)
+
 backend_policy = None
 
 
@@ -317,11 +330,20 @@ def _is_debug_line_info_disabled() -> bool:
 
 
 def _is_auto_map_parallel_blocks_enabled() -> bool:
-    return os.getenv("TRITON_ALL_BLOCKS_PARALLEL", "false").lower() in ("true", "1")
+    return os.getenv("TRITON_ALL_BLOCKS_PARALLEL", "true").lower() in ("true", "1")
 
 
-def _enable_unpublished_feature() -> bool:
-    return os.getenv("ENABLE_UNPUBLISHED_FEATURE", "false").lower() in ("true", "1")
+def _get_auto_blockify_blacklist_reasons(ir_text: str):
+    return [description for pattern, description in AUTO_BLOCKIFY_BLACKLIST_RULES if pattern.search(ir_text)]
+
+
+def _warn_auto_blockify_disabled(kernel_name: str, blacklist_reasons) -> None:
+    if not blacklist_reasons:
+        return
+    reasons = ", ".join(blacklist_reasons)
+    print(f"[WARNING] AutoBlockify disabled for kernel '{kernel_name}'. "
+          f"Unsafe ops: {reasons}. Enabling may cause correctness issues. "
+          "To force enable: set has_auto_blockify_blacklist_op=False.")
 
 
 def _enable_print_ub_bits() -> bool:
@@ -347,107 +369,29 @@ def _get_cxx():
     return cxx
 
 
-def _get_cxx_precompiled(header_path):
-    cc_cmd = []
-    cxx = os.environ.get("CC")
-    if cxx is None:
-        clangxx = shutil.which("clang++")
-        gxx = shutil.which("g++")
-        if clangxx is not None:
-            cc_cmd += [clangxx, "-include", header_path]
-        elif gxx is not None:
-            cc_cmd += [gxx]
-        else:
-            raise RuntimeError("Failed to find C++ compiler")
+def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch",
+                   precompile=False) -> str:
+    header_path = None
+    if src_path is None:
+        src_path = header_or_src_path
     else:
-        cc_cmd += [cxx]
-    return cc_cmd
+        header_path = header_or_src_path
 
-
-def _precompile_npu_hash(header_src):
-    import sys
-    cxx = _get_cxx()
-    py_version = sys.version
-    asc_path = _get_ascend_path().name
-    version_txt = [header_src, cxx, py_version, asc_path]
-    version_txt += get_backend_func("version_hash")
-    hash_txt = hashlib.sha256("_".join(version_txt).encode("utf-8")).hexdigest()
-    return hash_txt
-
-
-def _precompile_npu_ext(header_path, gch_path):
-    cxx = _get_cxx()
-    cc_cmd = [cxx, "-x", "c++-header", header_path]
-    # disable all warnings
-    cc_cmd += [f"-w"]
-    # find the python library
-    if hasattr(sysconfig, "get_default_scheme"):
-        scheme = sysconfig.get_default_scheme()
-    else:
-        scheme = sysconfig._get_default_scheme()
-    # 'posix_local' is a custom scheme on Debian. However, starting Python 3.10, the default install
-    # path changes to include 'local'. This change is required to use triton with system-wide python.
-    if scheme == "posix_local":
-        scheme = "posix_prefix"
-    py_include_dir = sysconfig.get_paths(scheme=scheme)["include"]
-    cc_cmd += [f"-I{py_include_dir}"]
-    # device_print.h
-    cc_cmd += [f"-I{os.path.dirname(os.path.realpath(__file__))}"]
-    # find the ascend library
-    asc_path = _get_ascend_path()
-
-    rt_path = os.path.join(asc_path, "include/experiment/runtime/runtime/rt.h")
-    if not os.path.exists(rt_path):
-        cc_cmd += [
-            f"-I{os.path.join(asc_path, 'pkg_inc')}",
-            f"-I{os.path.join(asc_path, 'pkg_inc/profiling')}",
-        ]
-
-    cc_cmd += [
-        f"-I{os.path.join(asc_path, 'include')}",
-        f"-I{os.path.join(asc_path, 'include/experiment')}",
-        f"-I{os.path.join(asc_path, 'include/experiment/msprof')}",
-        f"-I{pybind11.get_include()}",
-    ]
-
-    cc_cmd += get_backend_func("get_cc_cmd", build_pch=True)
-
-    cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-o", gch_path]
-
-    result = subprocess.run(cc_cmd, capture_output=True, text=True)
-
-    if result.returncode == 0:
-        return header_path
-    else:
-        raise RuntimeError(f"Failed to compile {gch_path}, error: {result.stderr},cmd={cc_cmd}")
-
-
-def _build_npu_ext(obj_name: str, header_path, src_path, *, kernel_launcher="torch", precompile=False) -> str:
     suffix = sysconfig.get_config_var("EXT_SUFFIX")
     src_dir = os.path.dirname(src_path)
     so_path = os.path.join(src_dir, f"{obj_name}{suffix}")
-    if precompile:
-        cc_cmd = _get_cxx_precompiled(header_path)
-        cc_cmd += [src_path]
-    else:
-        cxx = _get_cxx()
-        cc_cmd = [cxx, src_path]
-    # disable all warnings
+    cxx = _get_cxx()
+    cc_cmd = [cxx, src_path]
     cc_cmd += [f"-w"]
-    # find the python library
     if hasattr(sysconfig, "get_default_scheme"):
         scheme = sysconfig.get_default_scheme()
     else:
         scheme = sysconfig._get_default_scheme()
-    # 'posix_local' is a custom scheme on Debian. However, starting Python 3.10, the default install
-    # path changes to include 'local'. This change is required to use triton with system-wide python.
     if scheme == "posix_local":
         scheme = "posix_prefix"
     py_include_dir = sysconfig.get_paths(scheme=scheme)["include"]
     cc_cmd += [f"-I{py_include_dir}"]
-    # device_print.h
     cc_cmd += [f"-I{os.path.dirname(os.path.realpath(__file__))}"]
-    # find the ascend library
     asc_path = _get_ascend_path()
     if header_path is not None:
         cc_cmd += [f"-I{os.path.dirname(header_path)}"]
@@ -468,22 +412,20 @@ def _build_npu_ext(obj_name: str, header_path, src_path, *, kernel_launcher="tor
         "-lruntime",
         "-lascendcl",
     ]
-    # FIXME: check why this condition works wrong in parall scene
     if kernel_launcher == "torch":
-        cc_cmd += get_backend_func("get_cc_cmd", build_pch=False)
+        if obj_name == "npu_utils":
+            cc_cmd += get_backend_func("get_cc_cmd_npu_utils")
+        else:
+            cc_cmd += get_backend_func("get_cc_cmd")
 
-    cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-Winvalid-pch", "-o", so_path]
+    cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-o", so_path]
 
     result = subprocess.run(cc_cmd, capture_output=True, text=True)
 
     if result.returncode == 0:
         return so_path
     else:
-        if "precompiled.h.gch" in result.stderr:
-            # only for clang++, when precompile invalid, fallback to normal compile
-            return _build_npu_ext(obj_name, header_path, src_path, precompile=False)
-        else:
-            raise RuntimeError(f"Failed to compile {src_path}, error: {result.stderr},cmd={cc_cmd}")
+        raise RuntimeError(f"Failed to compile {src_path}, error: {result.stderr},cmd={cc_cmd}")
 
 
 def _get_kernel_target(metadata: dict):
@@ -629,7 +571,7 @@ def triton_support_ffts():
 
 def triton_enable_libdevice_simt():
     enable_libdevice_simt = os.getenv("TRITON_ENABLE_LIBDEVICE_SIMT", False)
-    return enable_libdevice_simt
+    return enable_libdevice_simt and is_compile_on_910_95
 
 
 def get_cann_version_file_hash():

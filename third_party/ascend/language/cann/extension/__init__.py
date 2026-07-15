@@ -32,6 +32,8 @@ from .core import (
     is_builtin,
     MODE,
     PIPE,
+    SYNC_HINT,
+    EVENT_ID,
     IteratorType,
     sub_vec_id,
     sub_vec_num,
@@ -48,6 +50,7 @@ from .custom_op import (
     custom,
     custom_semantic,
     register_custom_op,
+    SyncEventSlot,
 )
 
 from . import builtin_custom_ops
@@ -92,6 +95,8 @@ __all__ = [
     "is_builtin",
     "MODE",
     "PIPE",
+    "SYNC_HINT",
+    "EVENT_ID",
     "IteratorType",
     "sub_vec_id",
     "sub_vec_num",
@@ -123,6 +128,7 @@ __all__ = [
     "custom",
     "custom_semantic",
     "register_custom_op",
+    "SyncEventSlot",
 
     # math ops
     "atan2",

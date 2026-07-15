@@ -42,75 +42,10 @@
 #include <string>
 
 namespace mlir {
-namespace triton {
-namespace ascend {
-
-enum class CompileMode {
-  Simd,         // Pure SIMD path (default)
-  SimdSimt,     // Unstructured access → hfusion.gather_load/scatter_store
-  SimtTemplate, // Unstructured access → SIMT template call
-  SimtOnly      // Pure SIMT path, skip linalg
-};
-
-/// Convert a string compile_mode option to the enum.
-/// Returns CompileMode::Simd for unrecognized strings.
-inline CompileMode parseCompileMode(llvm::StringRef mode) {
-  return llvm::StringSwitch<CompileMode>(mode)
-      .Case("simd", CompileMode::Simd)
-      .Case("simd_simt", CompileMode::SimdSimt)
-      .Case("simt_template", CompileMode::SimtTemplate)
-      .Case("unstructured_in_simt", CompileMode::SimtTemplate)
-      .Case("simt_only", CompileMode::SimtOnly)
-      .Default(CompileMode::Simd);
-}
-
-/// Backward-compatible handling for the deprecated force-simt-template option.
-inline CompileMode resolveCompileMode(llvm::StringRef mode,
-                                      bool forceSimtTemplate) {
-  return forceSimtTemplate ? CompileMode::SimtTemplate : parseCompileMode(mode);
-}
-
-/// Returns true if the compile mode involves mixed SIMD/SIMT compilation.
-inline bool isMixCompileMode(CompileMode mode) {
-  return mode == CompileMode::SimdSimt || mode == CompileMode::SimtTemplate;
-}
-
-/// Check if an op is inside a scope annotated with the given vec_mode.
-/// Walks up the parent op chain looking for a "vec_mode" StringAttr.
-inline bool hasScopeVecMode(Operation *op, llvm::StringRef mode) {
-  for (Operation *parent = op->getParentOp(); parent;
-       parent = parent->getParentOp()) {
-    if (auto vecModeAttr = parent->getAttrOfType<StringAttr>("vec_mode")) {
-      if (vecModeAttr.getValue() == mode)
-        return true;
-    }
-  }
-  return false;
-}
-
-static constexpr unsigned kFuncNameCap = 128;
-
-} // namespace ascend
-} // namespace triton
-
-/// Generate a unique function name within the given module by appending
-/// a numeric suffix if the base name already exists.
-inline llvm::SmallString<triton::ascend::kFuncNameCap>
-generateUniqueFuncName(ModuleOp moduleOp, llvm::StringRef funcNameBase) {
-  llvm::SmallString<triton::ascend::kFuncNameCap> funcName = funcNameBase;
-  int uniqueId = 0;
-  while (SymbolTable::lookupSymbolIn(moduleOp, funcName)) {
-    funcName = funcNameBase;
-    funcName += ("_" + std::to_string(uniqueId++));
-  }
-  return funcName;
-}
-
 namespace ConverterUtils {
 
 const std::string GeneratedByMakeTensorPtrTAG = "GeneratedByMakeTensorPtr";
 const std::string discreteMaskAttrName = "DiscreteMask";
-const std::string mixCompileDiscreteMaskAttrName = "MixCompileDiscreteMask";
 const std::string discreteAttrName = "DiscreteMemAccess";
 const std::string continuousAttrName = "ContinuousMemAccess";
 const std::string customSrcPtrIndexAttrName = "SrcPtrIndex";
@@ -146,6 +81,8 @@ std::optional<Operation *> getFullShapeOp(Value val,
 SmallVector<OpFoldResult>
 getBoundarySizes(llvm::ArrayRef<int32_t> boundaryCheck, Value ptr,
                  const Location &loc, ConversionPatternRewriter &rewriter);
+
+bool requiresVolatileIndirectLoad(Value srcPtr, Operation *loadOp);
 
 SmallVector<int64_t> getBroadcastDims(RankedTensorType src,
                                       RankedTensorType dst);
@@ -328,6 +265,8 @@ RankedTensorType getExtractSlicedType(ArrayRef<OpFoldResult> shape,
                                       Type elemType);
 
 bool checkStructureAnnotated(Operation *op, RewriterBase &rewriter);
+
+bool isDistributedTypeCustomOp(Operation *op);
 } // namespace mlir
 
 #endif // TRITONNPU_UTILS_UTILS_H

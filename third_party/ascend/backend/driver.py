@@ -138,12 +138,62 @@ class NPUUtils(object):
         return self._load_mod().load_kernel_binary(name, kernel, shared, device, mix_mode)
 
     @functools.lru_cache()
+    def has_device_limit(self):
+        return self.get_aicore_num() < self._load_mod().get_aicore_num()
+
+    @functools.lru_cache()
     def get_device_properties(self, device):
-        # temperoarily added "max_shared_mem" properties to avoid triton-compiler complain
-        # fetch available memory at runtime
-        num_aic = self.get_aicore_num()
-        num_aiv = num_aic * 2
-        return {"max_shared_mem": 1, "num_aicore": num_aic, "num_vectorcore": num_aiv}
+        # Temporarily added "max_shared_mem" to satisfy triton-compiler.
+        original_num_aic = self._load_mod().get_aicore_num()
+        original_num_aiv = original_num_aic * 2
+
+        num_aic = original_num_aic
+        num_aiv = original_num_aiv
+
+        if device_limit := os.getenv("NPU_DEVICE_LIMIT"):
+            try:
+                values = device_limit.split(",")
+                if len(values) != 2:
+                    raise ValueError
+
+                aic_limit, aiv_limit = (
+                    int(value.strip()) for value in values
+                )
+            except ValueError:
+                raise ValueError(
+                    'NPU_DEVICE_LIMIT must have the format "C,V", '
+                    "where C and V are positive integers"
+                ) from None
+
+            if aic_limit <= 0 or aiv_limit <= 0:
+                raise ValueError(
+                    "NPU_DEVICE_LIMIT values must be greater than zero"
+                )
+
+            if aic_limit > original_num_aic:
+                raise ValueError(
+                    f"NPU_DEVICE_LIMIT AIC limit ({aic_limit}) exceeds "
+                    f"the available AIC count ({original_num_aic})"
+                )
+
+            if aiv_limit > original_num_aiv:
+                raise ValueError(
+                    f"NPU_DEVICE_LIMIT AIV limit ({aiv_limit}) exceeds "
+                    f"the available AIV count ({original_num_aiv})"
+                )
+            if aiv_limit // aic_limit != 2:
+                raise ValueError(
+                    f"NPU_DEVICE_LIMIT C:V ratio should be 2:1"
+                )
+
+
+            num_aic = aic_limit
+            num_aiv = aiv_limit
+        return {
+            "max_shared_mem": 1,
+            "num_aicore": num_aic,
+            "num_vectorcore": num_aiv,
+        }
 
     @functools.lru_cache()
     def get_arch(self):
@@ -153,7 +203,7 @@ class NPUUtils(object):
     @functools.lru_cache()
     def get_aicore_num(self):
         # temporarily return empty arch descriptor
-        return self._load_mod().get_aicore_num()
+        return self.get_device_properties("npu")["num_aicore"]
 
     @functools.lru_cache()
     def get_aivector_core_num(self):
@@ -202,7 +252,7 @@ class NPULauncher(object):
         else:
             if self.compile_only:
                 return
-  
+
             profiler_registered = self.launch(*args, **kwargs)
             _ascend_utils.TRITON_PROFILER_REGISTERED = (profiler_registered == 1)
 
@@ -495,7 +545,7 @@ def generate_npu_wrapper_src(constants, signature, metadata):
         int gridX, gridY, gridZ;
         rtStream_t stream;
         const void *functon;
-        PyObject* packed_metadata,       
+        PyObject* packed_metadata,
         *args_expand
     """
 

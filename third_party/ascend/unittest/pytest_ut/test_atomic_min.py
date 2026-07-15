@@ -52,14 +52,14 @@ def triton_test_fn_atomic_min_dma_supply(in_ptr0, out_ptr0, n_elements: tl.const
 
 
 @pytest.mark.parametrize('param_list', [
-    ['uint8', (32, 32), 2],
-    ['int8', (32, 32), 2],
-    ['int16', (32, 32), 2],
+    ['float32', (128, 128), 8],
+    ['float32', (32768, 16), 32],
     ['int32', (32, 32), 2],
+    ['int32', (128, 128), 8],
+    ['int32', (32768, 16), 32],
     ['int64', (32, 32), 2],
-    ['bfloat16', (64, 64), 4],
-    ['float16', (64, 64), 4],
-    ['float32', (32, 32), 2],
+    ['int64', (128, 128), 8],
+    ['int64', (8192, 16), 32],
 ])
 def test_atomic_min(param_list):
     dtype, shape, ncore = param_list

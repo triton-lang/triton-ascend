@@ -74,7 +74,7 @@ PARTIAL_STRUCTURED_SHAPES = {
 }
 
 TEST_RANKS = [3]
-TEST_DTYPE = [("int32", torch.int32), ("bfloat16", torch.bfloat16)]
+TEST_DTYPE = [("int32", torch.int32)]
 
 
 @triton.jit

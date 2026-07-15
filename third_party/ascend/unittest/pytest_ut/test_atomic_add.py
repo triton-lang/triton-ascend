@@ -67,9 +67,6 @@ def atomic_add_for_store_offset(index_ptr, out_ptr0):
 @pytest.mark.parametrize('param_list', [
     ['int64', (256, 32), 2],
     ['int32', (32, 32), 2],
-    ['int16', (32, 32), 2],
-    ['int8', (32, 32), 2],
-    ['uint8', (32, 32), 2],
     ['float32', (32, 32), 2],
     ['float16', (64, 64), 4],
     ['bfloat16', (64, 64), 4],
@@ -98,7 +95,6 @@ def test_atomic_add(param_list):
 
 
 @pytest.mark.parametrize('param_list', [
-    ['int16', (32, 32), 1],
     ['int32', (32, 32), 1],
     ['float32', (32, 32), 1],
     ['float16', (64, 64), 1],

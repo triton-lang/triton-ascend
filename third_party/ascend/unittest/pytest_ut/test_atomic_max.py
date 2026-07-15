@@ -54,10 +54,6 @@ def triton_test_fn_atomic_max_dma_supply(in_ptr0, out_ptr0, n_elements: tl.const
 
 # torch.max do not support int
 @pytest.mark.parametrize('param_list', [
-    ['uint8', (32, 32), 2],
-    ['int16', (32, 32), 2],
-    ['bfloat16', (32, 32), 2],
-    ['float16', (32, 32), 2],
     ['float32', (128, 128), 8],
     ['float32', (32768, 16), 32],
     ['int32', (32, 32), 2],

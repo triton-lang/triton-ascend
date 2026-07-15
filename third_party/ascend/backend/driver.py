@@ -152,8 +152,31 @@ class NPUUtils(object):
 
     @functools.lru_cache()
     def get_aicore_num(self):
-        # temporarily return empty arch descriptor
-        return self._load_mod().get_aicore_num()
+        actual_aicore_num = self._load_mod().get_aicore_num()
+
+        device_limit_str = os.getenv("NPU_DEVICE_LIMIT")
+        if device_limit_str is None:
+            return actual_aicore_num
+
+        try:
+            device_limit = int(device_limit_str)
+        except ValueError as exc:
+            raise ValueError(
+                f"NPU_DEVICE_LIMIT must be a positive integer, got "
+                f"{device_limit_str!r}"
+            ) from exc
+
+        if device_limit <= 0:
+            raise ValueError(
+                f"NPU_DEVICE_LIMIT must be positive, got {device_limit}"
+            )
+
+        if device_limit > actual_aicore_num:
+            raise ValueError(
+                f"NPU_DEVICE_LIMIT ({device_limit}) exceeds the available "
+                f"AI Core count ({actual_aicore_num})"
+            )
+        return device_limit
 
     @functools.lru_cache()
     def get_aivector_core_num(self):
@@ -202,7 +225,7 @@ class NPULauncher(object):
         else:
             if self.compile_only:
                 return
-  
+
             profiler_registered = self.launch(*args, **kwargs)
             _ascend_utils.TRITON_PROFILER_REGISTERED = (profiler_registered == 1)
 
@@ -495,7 +518,7 @@ def generate_npu_wrapper_src(constants, signature, metadata):
         int gridX, gridY, gridZ;
         rtStream_t stream;
         const void *functon;
-        PyObject* packed_metadata,       
+        PyObject* packed_metadata,
         *args_expand
     """
 

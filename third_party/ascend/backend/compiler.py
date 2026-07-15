@@ -83,7 +83,7 @@ def _get_then_remove_rc(mod, attr_name: str) -> int:
 
     if remove_attr:
         remove_attr(mod, attr_name)
-    
+
     if not isinstance(attr_value, int):
         return -1
 
@@ -486,6 +486,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
 
         _compile_option_list += [
             f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
+        ]
+
+        _compile_option_list += [
+            f"--custom-ai-core-number={NPUUtils().get_aicore_num()}",
         ]
 
         if force_disable_ffts():
@@ -1104,7 +1108,7 @@ def ttir_to_npubin(mod, metadata, opt):
 
 
 def get_simt_stack_limit():
-    # simt_stack_limit resolution precedence: 
+    # simt_stack_limit resolution precedence:
     #  1.torch_npu's acl_default.json "StackSize":{"simt_stack_size":N}
     #    takes precedence and the user-specified value is ignored.
     #  2.if that config key is absent ,fail back to the kernel-time

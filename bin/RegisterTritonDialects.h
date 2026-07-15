@@ -2,13 +2,23 @@
 #include "ascend/include/AutoBlockify/Passes.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
+#include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferOuterScope.h"
+#include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
+#include "ascend/include/DynamicCVPipeline/Passes.h"
+#include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
+#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/AddMultiBufferToGMLoadPass.h"
+#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/AsyncLoadHoistingPass.h"
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/RefineArgsBlockId.h"
+#include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
+#include "ascend/include/TritonControlFlowOpt/Passes.h"
 #include "ascend/include/TritonToAnnotation/Passes.h"
+#include "ascend/include/TritonToGraph/Passes.h"
 #include "ascend/include/TritonToHFusion/Passes.h"
 #include "ascend/include/TritonToHIVM/Passes.h"
 #include "ascend/include/TritonToLLVM/Passes.h"
 #include "ascend/include/TritonToLinalg/Passes.h"
-
-#include "ascend/include/TritonToGraph/Passes.h"
 #include "ascend/include/TritonToStructured/Passes.h"
 #include "ascend/include/TritonToUnstructure/Passes.h"
 
@@ -56,7 +66,14 @@
 
 #include "mlir/Dialect/LLVMIR/NVVMDialect.h"
 #include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
+#include "mlir/Dialect/LLVMIR/Transforms/InlinerInterfaceImpl.h"
 #include "mlir/InitAllPasses.h"
+
+#include "mlir/Conversion/ArithToLLVM/ArithToLLVM.h"
+#include "mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h"
+#include "mlir/Conversion/MathToLLVM/MathToLLVM.h"
+#include "mlir/Conversion/NVVMToLLVM/NVVMToLLVM.h"
+#include "mlir/Conversion/UBToLLVM/UBToLLVM.h"
 
 namespace mlir {
 namespace test {
@@ -99,7 +116,7 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
   mlir::triton::registerConvertNVGPUToLLVMPass();
   mlir::triton::registerAllocateSharedMemoryNvPass();
   mlir::triton::registerTritonToLinalgPasses();
-
+  mlir::triton::registerTritonControlFlowOptPasses();
   mlir::triton::registerDiscreteMaskAccessConversion();
   mlir::triton::registerTritonToStructuredPasses();
   mlir::triton::registerTritonToAnnotationPasses();
@@ -112,6 +129,9 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
   mlir::triton::registerBubbleUpOperationPass();
 
   mlir::registerLLVMDIScope();
+  mlir::LLVM::registerInlinerInterface(registry);
+  mlir::NVVM::registerInlinerInterface(registry);
+  mlir::registerLLVMDILocalVariable();
 
   // TritonAMDGPUToLLVM passes
   mlir::triton::registerAllocateAMDGPUSharedMemory();
@@ -119,13 +139,20 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
   mlir::triton::registerConvertBuiltinFuncToLLVM();
   mlir::triton::registerOptimizeAMDLDSUsage();
 
+  mlir::ub::registerConvertUBToLLVMInterface(registry);
+  mlir::registerConvertNVVMToLLVMInterface(registry);
+  mlir::registerConvertMathToLLVMInterface(registry);
+  mlir::cf::registerConvertControlFlowToLLVMInterface(registry);
+  mlir::arith::registerConvertArithToLLVMInterface(registry);
+
   // TritonAMDGPUTransforms passes
   mlir::registerTritonAMDGPUAccelerateMatmul();
   mlir::registerTritonAMDGPUOptimizeEpilogue();
   mlir::registerTritonAMDGPUHoistLayoutConversions();
   mlir::registerTritonAMDGPUReorderInstructions();
   mlir::registerTritonAMDGPUBlockPingpong();
-  mlir::registerTritonAMDGPUStreamPipeline();
+  mlir::registerTritonAMDGPUPipeline();
+  mlir::registerTritonAMDGPUScheduleLoops();
   mlir::registerTritonAMDGPUCanonicalizePointers();
   mlir::registerTritonAMDGPUConvertToBufferOps();
   mlir::registerTritonAMDGPUInThreadTranspose();
@@ -153,7 +180,20 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
   mlir::triton::proton::gpu::registerAddSchedBarriersPass();
 
   // DynamicCVPipeline passes
+  mlir::triton::registerAddDynamicCVPipelinePasses();
+  mlir::triton::registerPreCheckAvailablePasses();
+  mlir::triton::registerStandardizeOpPasses();
   mlir::triton::registerAddControlFlowConditionPasses();
+  mlir::triton::registerAddMultiBufferOuterScopePasses();
+  mlir::triton::registerAddMultiBufferInnerScopePasses();
+  mlir::triton::registerRemoveSsbufAttrPasses();
+  mlir::triton::registerAnalyzeDataFlowPasses();
+  mlir::triton::registerComputeBlockOptPasses();
+  mlir::triton::registerPlanComputeBlockPasses();
+  mlir::triton::registerOpClassifierPass();
+  mlir::triton::registerRefineArgsBlockIdPasses();
+  mlir::triton::registerAsyncLoadHoistingPasses();
+  mlir::triton::registerAddMultiBufferToGMLoadPasses();
 
   registry.insert<
       mlir::triton::TritonDialect, mlir::cf::ControlFlowDialect,

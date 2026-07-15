@@ -44,17 +44,21 @@ void init_triton_interpreter(pybind11::module &&m);
 void init_triton_passes(pybind11::module &&m);
 void init_triton_stacktrace_hook(pybind11::module &m);
 void init_gluon_ir(pybind11::module &&m);
+void init_linear_layout(pybind11::module &&m);
+void init_native_specialize(pybind11::module &m);
 FOR_EACH_P(DECLARE_BACKEND, TRITON_BACKENDS_TUPLE)
 
 PYBIND11_MODULE(libtriton, m) {
   m.doc() = "Python bindings to the C++ Triton API";
   init_triton_stacktrace_hook(m);
   init_triton_env_vars(m);
+  init_native_specialize(m);
   init_triton_ir(m.def_submodule("ir"));
   init_buffer_ir(m.def_submodule("buffer_ir"));
   init_triton_passes(m.def_submodule("passes"));
   init_triton_interpreter(m.def_submodule("interpreter"));
   init_triton_llvm(m.def_submodule("llvm"));
+  init_linear_layout(m.def_submodule("linear_layout"));
   init_gluon_ir(m.def_submodule("gluon_ir"));
   FOR_EACH_P(INIT_BACKEND, TRITON_BACKENDS_TUPLE)
 }

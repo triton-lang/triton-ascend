@@ -266,6 +266,23 @@ public:
                             const llvm::SmallDenseMap<Value, BlockData> &known,
                             unsigned resultIdx);
 
+  static void
+  parseStructuredCustomOp(Operation *op, BlockData &data, const Location &loc,
+                          ConversionPatternRewriter &rewriter,
+                          const llvm::SmallDenseMap<Value, BlockData> &known,
+                          unsigned resultIdx);
+
+  static void rewriteStructuredCustomOp(hivm::CustomOp op,
+                                        hivm::CustomOp::Adaptor &adaptor,
+                                        ConversionPatternRewriter &rewriter);
+
+  static void rewriteStructuredCustomOp(hivm::CustomMacroOp op,
+                                        hivm::CustomMacroOp::Adaptor &adaptor,
+                                        ConversionPatternRewriter &rewriter);
+
+  static void rewriteStructuredCustomOp(Operation *op,
+                                        ConversionPatternRewriter &rewriter);
+
   static void rewriteAddPtr(triton::AddPtrOp op,
                             triton::AddPtrOp::Adaptor &adaptor,
                             ConversionPatternRewriter &rewriter,

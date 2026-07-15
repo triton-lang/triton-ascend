@@ -12,3 +12,4 @@
 | [06_autotune_example](./06_autotune_example.md)| Example of using Autotune on kernels|
 | [07_accuracy_comparison_example](./07_accuracy_comparison_example.md)| Accuracy comparison example|
 | [08_max_autotune_example](./08_max_autotune_example.md)| Example of using max_autotune on Kernels|
+| [09_costmodel_example](./09_costmodel_example.md)| End-to-end costmodel prediction example|

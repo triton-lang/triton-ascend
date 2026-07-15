@@ -21,6 +21,7 @@
  */
 
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "llvm/ADT/DenseMap.h"
@@ -89,6 +90,12 @@ collectDepsByGroup(Operation *rootOp, const char *attrName,
 
     if (depsAttr.size() < depSize) {
       LDBG("format of dependency attribute error!");
+      ret = -1;
+      return;
+    }
+
+    if (!isa<IntegerAttr>(depsAttr[0]) || !isa<IntegerAttr>(depsAttr[1])) {
+      LDBG("type of dependency attritbute is not Int! error op:" << *op);
       ret = -1;
       return;
     }
@@ -248,7 +255,9 @@ static void printDependentMaps(ControlFlowConditionInfo *info) {
     auto &depMap = forEntry.second;
     LDBG("  ForOp (depMap size: " << depMap.size() << "):");
     LDBG("    ");
-    forOp->print(llvm::dbgs(), OpPrintingFlags().skipRegions());
+    LLVM_DEBUG(llvm::dbgs() << '[' << DEBUG_TYPE << "] ";
+               forOp->print(llvm::dbgs(), OpPrintingFlags().skipRegions());
+               llvm::dbgs() << "\n";);
 
     for (auto &entry : depMap) {
       Value consumer = entry.first;
@@ -264,19 +273,24 @@ static void printDependentMaps(ControlFlowConditionInfo *info) {
 
 void InitDependentMapPass::runOnOperation() {
   ModuleOp module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LDBG("Enter InitDependentMap pass.");
 
   // Step 1: Initialize crossCoreDependentMap
   if (initCrossCoreDependentMap(module, info) != 0) {
     LDBG("initCrossCoreDependentMap failed!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Step 2: Initialize intraCoreDependentMap
   if (initIntraCoreDependentMap(module, info) != 0) {
     LDBG("initIntraCoreDependentMap failed!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 

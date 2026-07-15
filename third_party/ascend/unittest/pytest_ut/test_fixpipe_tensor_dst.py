@@ -28,29 +28,38 @@ from triton.compiler.compiler import ASTSource
 from triton.compiler.code_generator import ast_to_ttir
 from triton._C.libtriton import ir
 from triton._C.libtriton.ascend import ir as ascend_ir
-from triton.tools.get_ascend_devices import is_compile_on_910_95
+from triton.backends.ascend import _apply_ascend_patch
 
 os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
+DEFAULT_A5_ARCH = "Ascend910_9589"
+HACC_TARGET_ATTR = f'hacc.target = #hacc.target<"{DEFAULT_A5_ARCH}">'
+
+_apply_ascend_patch()
 
 
-class Options:
-    num_warps = 4
-    num_stages = 3
-    num_ctas = 1
-    cluster_dims = (1, 1, 1)
-    enable_fp_fusion = True
-    debug = False
-    arch = "Ascend910_95"
-    sanitize_overflow = True
+def make_options(arch):
+
+    class Options:
+        num_warps = 4
+        num_stages = 3
+        num_ctas = 1
+        cluster_dims = (1, 1, 1)
+        enable_fp_fusion = True
+        debug = False
+        sanitize_overflow = True
+
+    Options.arch = arch
+    return Options()
 
 
-def compile_kernel(kernel, signature, constants):
-    """Helper to compile a kernel to MLIR."""
+def compile_kernel(kernel, signature, constants, *, arch=None):
+    """Compile to TTIR mlir; mirrors triton.compile frontend + ascend patch."""
+    arch = arch or DEFAULT_A5_ARCH
     src = ASTSource(kernel, signature, constants)
     context = ir.context()
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
-    module = ast_to_ttir(kernel, src, context, Options(), {}, {})
+    module = ast_to_ttir(kernel, src, context, make_options(arch), {}, {})
     return str(module)
 
 
@@ -100,6 +109,9 @@ def test_fixpipe_without_dst(M, K, N):
         {"M": M, "K": K, "N": N},
     )
     assert len(mlir) > 0
+    assert "hivm.hir.fixpipe" in mlir
+    assert HACC_TARGET_ATTR in mlir
+    assert HACC_TARGET_ATTR in mlir
 
 
 @triton.jit
@@ -138,7 +150,6 @@ def fixpipe_column_split(
     result = al.fixpipe(a_vals, dual_dst_mode=al.FixpipeDualDstMode.COLUMN_SPLIT)
 
 
-@pytest.mark.skipif(not is_compile_on_910_95, reason="only support A5")
 @pytest.mark.parametrize("M, K, N", [(32, 16, 16)])
 def test_fixpipe_row_split(M, K, N):
     mlir = compile_kernel(
@@ -147,9 +158,10 @@ def test_fixpipe_row_split(M, K, N):
         {"M": M, "K": K, "N": N},
     )
     assert len(mlir) > 0
+    assert "dual_dst_mode = <ROW_SPLIT>" in mlir
+    assert HACC_TARGET_ATTR in mlir
 
 
-@pytest.mark.skipif(not is_compile_on_910_95, reason="only support A5")
 @pytest.mark.parametrize("M, K, N", [(16, 16, 32)])
 def test_fixpipe_column_split(M, K, N):
     mlir = compile_kernel(
@@ -158,6 +170,8 @@ def test_fixpipe_column_split(M, K, N):
         {"M": M, "K": K, "N": N},
     )
     assert len(mlir) > 0
+    assert "dual_dst_mode = <COLUMN_SPLIT>" in mlir
+    assert HACC_TARGET_ATTR in mlir
 
 
 @pytest.mark.parametrize("M, K, N", [(16, 16, 16)])
@@ -168,3 +182,5 @@ def test_fixpipe_with_buffer_dst(M, K, N):
         {"M": M, "K": K, "N": N},
     )
     assert len(mlir) > 0
+    assert "hivm.hir.fixpipe" in mlir
+    assert HACC_TARGET_ATTR in mlir

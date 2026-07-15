@@ -88,17 +88,6 @@ void triton::UseAnalysis::visitOperation(Operation *op,
         for (auto operand : operands)
           propagateUse(operand, UseType::DataUse);
       })
-      .Case<triton::ascend::UnstructuredLoadOp>([&](auto load) {
-        propagateUse(operands[0], UseType::MetaUse);
-        propagateUse(operands[1], UseType::DataUse);
-        auto mask = load.getMask();
-        if (mask) {
-          propagateUse(operands[2], UseType::DataUse);
-          if (load.getOther()) {
-            propagateUse(operands[3], UseType::DataUse);
-          }
-        }
-      })
       .Case<triton::AssertOp>(
           [&](auto assert) { propagateUse(operands[0], UseType::DataUse); })
       .Case<triton::StoreOp>([&](auto store) {
@@ -111,7 +100,7 @@ void triton::UseAnalysis::visitOperation(Operation *op,
           propagateUse(operands[2], UseType::MetaUse);
         }
       })
-      .Case<triton::ascend::UnstructuredStoreOp>([&](auto store) {
+      .Case<triton::ascend::IndirectStoreOp>([&](auto store) {
         propagateUse(operands[0], UseType::MetaUse);
         propagateUse(operands[1], UseType::DataUse);
         propagateUse(operands[2], UseType::DataUse);
@@ -165,10 +154,20 @@ void triton::UseAnalysis::visitOperation(Operation *op,
           propagateUse(operand, UseType::DataUse);
         }
       })
+      .Case<tensor::ExtractOp>([&](auto extractOp) {
+        for (auto operand : operands) {
+          propagateUse(operand, UseType::DataUse);
+        }
+      })
       .Case<hivm::FixpipeOp>(
           [&](auto fixpipeOp) { propagateUse(operands[0], UseType::DataUse); })
       .Case<hivm::CopyOp>(
           [&](auto copyOp) { propagateUse(operands[0], UseType::DataUse); })
+      .Case<hivm::CustomOp, hivm::CustomMacroOp>([&](auto customOp) {
+        for (auto operand : operands) {
+          propagateUse(operand, UseType::MixUse);
+        }
+      })
       .Default([&](Operation *op) {
         // this condition account for tt.addptr
         for (auto operand : operands) {
@@ -195,9 +194,7 @@ void setMixUseRecursively(Operation *rootOp, bool applyRoot = true) {
       },
       // StopFn
       [rootOp](Operation *curOp) {
-        return (isa<triton::LoadOp>(curOp) ||
-                isa<triton::ascend::UnstructuredLoadOp>(curOp)) &&
-               curOp != rootOp;
+        return isa<triton::LoadOp>(curOp) && curOp != rootOp;
       },
       // ActionFn
       [](OpBuilder &b, Operation *op) {
@@ -387,15 +384,6 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
                 metaUsers.insert(user);
               }
             })
-            .Case<triton::ascend::UnstructuredLoadOp>([&](auto unstrucLoad) {
-              auto base = unstrucLoad.getBase();
-              auto indices = unstrucLoad.getIndices();
-              auto mask = unstrucLoad.getMask();
-              auto other = unstrucLoad.getOther();
-              if (result == base || result == indices || result == mask ||
-                  result == other)
-                metaUsers.insert(user);
-            })
             .Case<triton::StoreOp>([&](auto store) {
               auto ptr = store.getPtr();
               auto mask = store.getMask();
@@ -403,12 +391,13 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
                 metaUsers.insert(user);
               }
             })
-            .Case<triton::ascend::UnstructuredStoreOp>([&](auto unstrucStore) {
-              auto base = unstrucStore.getBase();
-              auto indices = unstrucStore.getIndices();
-              auto mask = unstrucStore.getMask();
-              if (result == base || result == indices || result == mask)
+            .Case<triton::ascend::IndirectStoreOp>([&](auto indirectstore) {
+              auto src = indirectstore.getSrc();
+              // Only src is MetaUse (see visitOperation). offsets/value/mask
+              // are DataUse
+              if (result == src) {
                 metaUsers.insert(user);
+              }
             })
             .Case<triton::AtomicRMWOp>([&](auto atomicOp) {
               auto ptr = atomicOp.getPtr();
@@ -517,8 +506,7 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
             // so that they will be replaced instead of be erased without
             // conversion.
             return (isa<triton::LoadOp>(curOp) || isa<triton::StoreOp>(curOp) ||
-                    isa<triton::ascend::UnstructuredLoadOp>(curOp) ||
-                    isa<triton::ascend::UnstructuredStoreOp>(curOp)) &&
+                    isa<triton::ascend::IndirectStoreOp>(curOp)) &&
                    !isMetaUse(curOp);
           },
           /*actionFn*/
@@ -567,6 +555,11 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
   });
   // hivm.custom present library call, shouldn't be metause
   funcOp.walk([&](hivm::CustomOp op) {
+    if (isMetaUse(op)) {
+      op->removeAttr("MetaUse");
+    }
+  });
+  funcOp.walk([&](hivm::CustomMacroOp op) {
     if (isMetaUse(op)) {
       op->removeAttr("MetaUse");
     }

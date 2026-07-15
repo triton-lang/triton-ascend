@@ -2,6 +2,12 @@
 
 ## 项目简介与价值主张
 
+<p align="center">
+  <a href="https://deepwiki.com/triton-lang/triton-ascend">
+    <img src="https://img.shields.io/badge/Ask_AI-DeepWiki-0052D9?style=flat&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZD0iTTIwIDJINGEyIDIgMCAwIDAtMiAydjEyYTIgMiAwIDAgMCAyIDJoMTRsNCA0VjRhMiAyIDIgMCAwIDAtMi0yeiIgZmlsbD0id2hpdGUiLz48L3N2Zz4%3D" alt="Ask AI on DeepWiki">
+  </a>
+</p>
+
 Triton-Ascend是面向昇腾平台构建的Triton编译框架，旨在让Triton代码能够在昇腾硬件上高效运行。
 
 - ### 核心价值说明

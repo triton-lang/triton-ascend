@@ -20,15 +20,14 @@
  * THE SOFTWARE.
  */
 
+#include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/AddMultiBufferToGMLoadInternal.h"
 #include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/AddMultiBufferToGMLoadPass.h"
 
 using namespace mlir;
 using namespace triton;
 using namespace gmload;
-
-// Default multi-buffer depth for GM load operations.
-static constexpr int kDefaultBufferDepth = 2;
 
 // ============================================================================
 // Step functions
@@ -50,7 +49,8 @@ void AddMultiBufferToGMLoadPass::collectAndGroupMarkedOps() {
 
   // Apply depth policy: skip loops whose compile-time trip count is too small
   // to benefit, then record the slot count on each group.
-  int depth = kDefaultBufferDepth;
+  int depth = BufferCountManager::getInstance().getBufferCountByType(
+      BufferCountManager::DepType::LoadStore);
   llvm::erase_if(contexts_, [depth](const ForBufferCtx &context) {
     if (auto tripCount = getConstantTripCount(context.forOp))
       return *tripCount <= depth;
@@ -136,6 +136,11 @@ void AddMultiBufferToGMLoadPass::cleanupTransformedIR() {
 
 void AddMultiBufferToGMLoadPass::runOnOperation() {
   auto module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LOG_DEBUG("Enter add-multi-buffer-to-gm-load pass\n");
   LOG_DEBUG("Before add-multi-buffer-to-gm-load:\n" << module << "\n");
 
@@ -154,7 +159,7 @@ void AddMultiBufferToGMLoadPass::runOnOperation() {
   if (failed(applyMultiBufferToGMLoadLoops())) {
     module.emitError() << "[" << DEBUG_TYPE
                        << "] Step 3 applyMultiBufferToGMLoadLoops failed";
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
@@ -170,6 +175,12 @@ namespace triton {
 
 std::unique_ptr<OperationPass<ModuleOp>> createAddMultiBufferToGMLoadPass() {
   return std::make_unique<AddMultiBufferToGMLoadPass>();
+}
+
+void registerAddMultiBufferToGMLoadPasses() {
+  registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return createAddMultiBufferToGMLoadPass();
+  });
 }
 
 } // namespace triton

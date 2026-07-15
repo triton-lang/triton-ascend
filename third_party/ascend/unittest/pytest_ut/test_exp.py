@@ -54,3 +54,38 @@ def test_case(param_list):
     y_cal = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
     triton_exp[ncore, 1, 1](x0, y_cal, xblock, xblock_sub)
     test_common.validate_cmp(dtype, y_cal, y_ref)
+
+
+@triton.jit
+def triton_elementwise_unary(in_ptr0, out_ptr0, N: tl.constexpr, NUMEL: tl.constexpr):
+    idx_block = tl.arange(0, NUMEL)
+    x = tl.load(in_ptr0 + idx_block, mask=idx_block < N)
+    ret = tl.exp(x)
+    tl.store(out_ptr0 + idx_block, ret, mask=idx_block < N)
+
+
+shapes = [
+    (3, 32),
+    (-32, 32),
+    (37, 64),
+    (-256, 256),
+    (781, 1024),
+]
+
+
+@pytest.mark.parametrize('dtype, sigtype', [
+    (torch.float32, 'float32'),
+])
+@pytest.mark.parametrize('N, NUMEL', shapes)
+def test_elementwsie_common(dtype, sigtype, N, NUMEL):
+    N = (-N) // torch.tensor(0, dtype=dtype).element_size() if N < 0 else N
+
+    x0 = test_common.generate_tensor(shape=(N, ), dtype=sigtype)
+
+    ans = torch_pointwise(x0)
+    x0 = x0.npu()
+
+    out = torch.zeros((N, ), dtype=dtype).npu()
+    triton_elementwise_unary[1, 1, 1](x0, out, N=N, NUMEL=NUMEL, debug=True)
+
+    test_common.validate_cmp(sigtype, out, ans)

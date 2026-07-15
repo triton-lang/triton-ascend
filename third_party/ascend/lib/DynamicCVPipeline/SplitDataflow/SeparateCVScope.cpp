@@ -20,8 +20,13 @@
  * THE SOFTWARE.
  */
 
-#include "ascend/include/DynamicCVPipeline/SplitDataflow/SeparateCVScope.h"
+#include <optional>
 
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -31,12 +36,14 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/IRMapping.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
 #include "mlir/Pass/Pass.h"
 
-#include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/Support/Debug.h"
-#include <optional>
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/SeparateCVScope.h"
+
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 using namespace mlir;
 
@@ -64,6 +71,10 @@ static void debugDumpOperation(StringRef prefix, Operation *op) {
     llvm::dbgs() << "\n";
   });
 }
+
+static bool needsLoopCarryPreserve(Operation *owner, unsigned slotIndex,
+                                   StringRef scopeType);
+static bool regionHasScopeContent(Region &region, StringRef scopeType);
 
 struct CoreTypeInfo {
   SmallVector<StringRef> resultTypes;
@@ -140,8 +151,6 @@ static ScopeMatchInfo getScopeMatchInfo(Operation *op, StringRef scopeType) {
 static bool matchesScope(Operation *op, StringRef scopeType) {
   return getScopeMatchInfo(op, scopeType).matches;
 }
-
-static bool isOpAlive(Operation *op) { return op && op->getBlock(); }
 
 static Value buildNeutralValue(OpBuilder &builder, Value oldOperand,
                                Location loc, StringRef scopeType) {
@@ -296,7 +305,7 @@ static SmallVector<PendingAction> collectActionsInRegion(Region &region,
 static bool hasLiveUsers(Operation *op) {
   for (Value result : op->getResults()) {
     for (OpOperand &use : result.getUses()) {
-      if (isOpAlive(use.getOwner())) {
+      if (use.getOwner()) {
         return true;
       }
     }
@@ -304,9 +313,32 @@ static bool hasLiveUsers(Operation *op) {
   return false;
 }
 
-static bool needsLoopCarryPreserve(Operation *owner, unsigned slotIndex,
-                                   StringRef scopeType);
+// Check whether this use maps to a loop-carried slot that must stay live in the
+// target scope.
+static bool hasActiveNestedLoopCarryUse(OpOperand &use, StringRef scopeType) {
+  auto loopOp = dyn_cast<LoopLikeOpInterface>(use.getOwner());
+  if (!loopOp) {
+    return false;
+  }
 
+  auto inits = loopOp.getInitsMutable();
+  if (inits.empty()) {
+    return false;
+  }
+
+  unsigned operandIndex = use.getOperandNumber();
+  unsigned initsBegin = inits.front().getOperandNumber();
+  unsigned initsEnd = initsBegin + inits.size();
+  if (operandIndex < initsBegin || operandIndex >= initsEnd) {
+    return false;
+  }
+
+  unsigned resultIndex = operandIndex - initsBegin;
+  return resultIndex < loopOp->getNumResults() &&
+         needsLoopCarryPreserve(loopOp.getOperation(), resultIndex, scopeType);
+}
+
+// Skip pure forwarding uses that only feed out-of-scope loop result slots.
 static bool canSkipForwardingUse(OpOperand &use, StringRef scopeType) {
   Operation *user = use.getOwner();
   auto info = parseCoreTypeInfo(user);
@@ -340,25 +372,175 @@ static bool canSkipForwardingUse(OpOperand &use, StringRef scopeType) {
   return false;
 }
 
-static Operation *findLiveUser(Value value, StringRef scopeType) {
-  for (OpOperand &use : value.getUses()) {
-    Operation *user = use.getOwner();
-    if (isOpAlive(user) && !canSkipForwardingUse(use, scopeType)) {
-      return user;
+// Preserve yield-to-result tracking only when loop-carry evidence and
+// mixed-scope sibling results require it.
+static bool shouldPreserveFromYield(Operation *yieldOwner,
+                                    unsigned operandIndex,
+                                    StringRef scopeType) {
+  bool preserveLoopCarry =
+      needsLoopCarryPreserve(yieldOwner, operandIndex, scopeType);
+  if (!preserveLoopCarry) {
+    return false;
+  }
+
+  auto loopOp = dyn_cast<LoopLikeOpInterface>(yieldOwner);
+  if (!loopOp) {
+    return preserveLoopCarry;
+  }
+
+  auto ownerInfo = parseCoreTypeInfo(yieldOwner);
+  if (!ownerInfo) {
+    return preserveLoopCarry;
+  }
+
+  unsigned numResults = yieldOwner->getNumResults();
+  return llvm::any_of(
+      llvm::seq<unsigned>(0, numResults), [&](unsigned resultIndex) {
+        return resultIndex != operandIndex &&
+               ownerInfo->getResultType(resultIndex) == scopeType;
+      });
+}
+
+// Return `user` as a relevant result, honoring the ignoreTerminators flag.
+static Operation *acceptUser(Operation *user, bool ignoreTerminators) {
+  if (!user || !user->getBlock()) {
+    return nullptr;
+  }
+  if (!ignoreTerminators || !user->hasTrait<OpTrait::IsTerminator>()) {
+    return user;
+  }
+  return nullptr;
+}
+
+// Handle a scf.yield use: follow result slots transitively or mark the owner
+// live.
+static Operation *handleYieldUse(scf::YieldOp yieldOp, OpOperand &use,
+                                 StringRef scopeType, bool ignoreTerminators,
+                                 SmallVector<Value> &worklist) {
+  Operation *yieldOwner = yieldOp->getParentOp();
+  unsigned operandIndex = use.getOperandNumber();
+
+  if (operandIndex < yieldOwner->getNumResults()) {
+    if (shouldPreserveFromYield(yieldOwner, operandIndex, scopeType)) {
+      return yieldOwner;
+    }
+    worklist.push_back(yieldOwner->getResult(operandIndex));
+    return nullptr;
+  }
+
+  if (matchesScope(yieldOwner, scopeType) || isControlFlowOp(yieldOwner)) {
+    return acceptUser(yieldOwner, ignoreTerminators);
+  }
+  return nullptr;
+}
+
+// True when `op` holds scope content in any of its regions.
+static bool controlFlowOpHasScopeContent(Operation *op, StringRef scopeType) {
+  for (Region &region : op->getRegions()) {
+    if (regionHasScopeContent(region, scopeType)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Returns whether a use is a control-flow gating operand (for/parallel bounds
+// or if condition).
+static bool isControlFlowGatingUse(OpOperand &use) {
+  Operation *user = use.getOwner();
+  unsigned operandIndex = use.getOperandNumber();
+
+  if (isa<scf::ForOp>(user)) {
+    return operandIndex < kForOpOperandPrefixCount;
+  }
+  if (auto parallelOp = dyn_cast<scf::ParallelOp>(user)) {
+    return operandIndex < kForOpOperandPrefixCount * parallelOp.getNumLoops();
+  }
+  if (isa<scf::IfOp>(user)) {
+    return operandIndex == 0;
+  }
+  return false;
+}
+
+// Classify a single use: return a scope-relevant user, or enqueue transitive
+// values.
+static Operation *classifyScopeRelevantUse(OpOperand &use, StringRef scopeType,
+                                           bool ignoreTerminators,
+                                           SmallVector<Value> &worklist) {
+  Operation *user = use.getOwner();
+  if (!user || !user->getBlock() || canSkipForwardingUse(use, scopeType)) {
+    return nullptr;
+  }
+
+  if (hasActiveNestedLoopCarryUse(use, scopeType)) {
+    return acceptUser(user, ignoreTerminators);
+  }
+
+  if (auto conditionOp = dyn_cast<scf::ConditionOp>(user)) {
+    Operation *parentOp = conditionOp.getParentOp();
+    if (parentOp && matchesScope(parentOp, scopeType)) {
+      return acceptUser(parentOp, ignoreTerminators);
+    }
+    if (parentOp && use.getOperandNumber() == 0 &&
+        controlFlowOpHasScopeContent(parentOp, scopeType)) {
+      return acceptUser(parentOp, ignoreTerminators);
+    }
+    return nullptr;
+  }
+
+  if (auto yieldOp = dyn_cast<scf::YieldOp>(user)) {
+    return handleYieldUse(yieldOp, use, scopeType, ignoreTerminators, worklist);
+  }
+
+  if (matchesScope(user, scopeType)) {
+    return acceptUser(user, ignoreTerminators);
+  }
+
+  if (user->getNumResults() == 0) {
+    if (isControlFlowOp(user)) {
+      return acceptUser(user, ignoreTerminators);
+    }
+    return nullptr;
+  }
+
+  if (isControlFlowGatingUse(use) &&
+      controlFlowOpHasScopeContent(user, scopeType)) {
+    return acceptUser(user, ignoreTerminators);
+  }
+
+  for (Value result : user->getResults()) {
+    worklist.push_back(result);
+  }
+  return nullptr;
+}
+
+static Operation *findScopeRelevantUser(Value startValue, StringRef scopeType,
+                                        bool ignoreTerminators) {
+  SmallVector<Value> worklist{startValue};
+  llvm::SmallPtrSet<void *, kSeenValuesCapacity> seenValues;
+
+  while (!worklist.empty()) {
+    Value value = worklist.pop_back_val();
+    if (!value || !seenValues.insert(value.getAsOpaquePointer()).second) {
+      continue;
+    }
+
+    for (OpOperand &use : value.getUses()) {
+      if (Operation *found = classifyScopeRelevantUse(
+              use, scopeType, ignoreTerminators, worklist)) {
+        return found;
+      }
     }
   }
   return nullptr;
 }
 
+static Operation *findLiveUser(Value value, StringRef scopeType) {
+  return findScopeRelevantUser(value, scopeType, false);
+}
+
 static Operation *findNonTermUser(Value value, StringRef scopeType) {
-  for (OpOperand &use : value.getUses()) {
-    Operation *user = use.getOwner();
-    if (isOpAlive(user) && !canSkipForwardingUse(use, scopeType) &&
-        !user->hasTrait<OpTrait::IsTerminator>()) {
-      return user;
-    }
-  }
-  return nullptr;
+  return findScopeRelevantUser(value, scopeType, true);
 }
 
 enum class UseCheckResult { Skip, Active, Continue };
@@ -372,7 +554,7 @@ static UseCheckResult checkConditionUse(OpOperand &use, Operation *owner,
   }
 
   unsigned idx = use.getOperandNumber();
-  if (conditionOp->getParentOp() != owner || idx == 0 || idx - 1 != slotIndex) {
+  if (conditionOp->getParentOp() != owner || idx == 0 || idx != slotIndex + 1) {
     Operation *parentOp = conditionOp->getParentOp();
     if (parentOp && !matchesScope(parentOp, scopeType)) {
       return UseCheckResult::Continue;
@@ -414,6 +596,10 @@ static UseCheckResult checkYieldUse(OpOperand &use, Operation *owner,
 static UseCheckResult checkGeneralUse(OpOperand &use, StringRef scopeType,
                                       SmallVector<Value> &worklist) {
   Operation *user = use.getOwner();
+  if (hasActiveNestedLoopCarryUse(use, scopeType)) {
+    return UseCheckResult::Active;
+  }
+
   if (user->getNumResults() == 0) {
     if (matchesScope(user, scopeType) || isControlFlowOp(user)) {
       return UseCheckResult::Active;
@@ -438,7 +624,7 @@ static bool slotHasActiveUse(Value startValue, Operation *owner,
     }
 
     for (OpOperand &use : value.getUses()) {
-      if (!isOpAlive(use.getOwner())) {
+      if (!use.getOwner()) {
         continue;
       }
 
@@ -519,11 +705,10 @@ static LogicalResult neutralizeYieldInRegion(Operation *op,
         if (i < op->getNumResults()) {
           if (Operation *resultUser =
                   findLiveUser(op->getResult(i), scopeType)) {
-            yieldOp.emitWarning()
-                << "skip neutralizing yield operand #" << i << " for scope "
-                << scopeType << " because parent result #" << i
-                << " still has live user '"
-                << resultUser->getName().getStringRef() << "'";
+            logDebug("skip neutralizing yield operand #", i, " for scope ",
+                     scopeType, " because parent result #", i,
+                     " still has live user '",
+                     resultUser->getName().getStringRef(), "'");
             continue;
           }
         }
@@ -553,10 +738,9 @@ static LogicalResult neutralizeTerminatorUses(Operation *op,
 
     Value result = op->getResult(i);
     if (Operation *extraUser = findNonTermUser(result, scopeType)) {
-      op->emitWarning() << "skip neutralizing result #" << i << " for scope "
-                        << scopeType
-                        << " because the value still has live user '"
-                        << extraUser->getName().getStringRef() << "'";
+      logDebug("skip neutralizing result #", i, " for scope ", scopeType,
+               " because the value still has live user '",
+               extraUser->getName().getStringRef(), "'");
       continue;
     }
 
@@ -697,7 +881,7 @@ static LogicalResult executeActions(SmallVector<PendingAction> &actions,
                                     StringRef scopeType) {
   for (auto it = actions.rbegin(); it != actions.rend(); ++it) {
     Operation *op = it->op;
-    if (!isOpAlive(op)) {
+    if (!op) {
       continue;
     }
 
@@ -721,11 +905,17 @@ static LogicalResult executeActions(SmallVector<PendingAction> &actions,
           return failure();
         }
       }
-      if (isOpAlive(op) && op->getNumRegions() > 0 &&
+      if (op && op->getNumRegions() > 0 &&
           isNormalizedDeadShell(op, scopeType)) {
-        logDebug("erasing dead shell after normalize: '",
-                 op->getName().getStringRef(), "' in scope ", scopeType);
-        op->erase();
+        if (hasLiveUsers(op)) {
+          logDebug("preserving normalized shell '",
+                   op->getName().getStringRef(), "' in scope ", scopeType,
+                   " because it still has structural users");
+        } else {
+          logDebug("erasing dead shell after normalize: '",
+                   op->getName().getStringRef(), "' in scope ", scopeType);
+          op->erase();
+        }
       }
       break;
     }
@@ -780,6 +970,11 @@ void mlir::triton::SeparateCVScopePass::getDependentDialects(
 
 void mlir::triton::SeparateCVScopePass::runOnOperation() {
   auto module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   SmallVector<func::FuncOp> funcOps;
   module.walk([&](func::FuncOp funcOp) { funcOps.push_back(funcOp); });
 
@@ -791,10 +986,15 @@ void mlir::triton::SeparateCVScopePass::runOnOperation() {
     }
     if (failed(separateScopes(funcOp))) {
       logDebug("SeparateCVScopePass failed on func '", funcOp.getName(), "'");
-      signalPassFailure();
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return;
     }
   }
+
+  module.walk([](scope::ScopeOp scopeOp) {
+    scopeOp->setAttr(CVPipeline::kHIVMMatmulLimitedInCubeAttr,
+                     UnitAttr::get(scopeOp->getContext()));
+  });
 
   debugDumpOperation("after SeparateCVScopePass", module.getOperation());
 }

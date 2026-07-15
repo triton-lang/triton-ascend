@@ -35,6 +35,10 @@ public:
 
   ReorderOpsByBlockIdPass() = default;
   void runOnOperation() override;
+
+  llvm::StringRef getArgument() const final {
+    return "reorder-ops-by-block-id";
+  }
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createReorderOpsByBlockIdPass();

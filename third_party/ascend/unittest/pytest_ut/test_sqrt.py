@@ -57,12 +57,7 @@ def triton_elementwise_binary(in_ptr0, in_ptr1, out_ptr0, N: tl.constexpr, NUMEL
 
 types = [
     (torch.float32, 'float32'),
-    (torch.float16, 'float16'),
-    # (torch.bfloat16, 'bfloat16'),
-    # (torch.int8, 'int8'),
-    # (torch.int16, 'int16'),
-    # (torch.int32, 'int32'),
-    # (torch.int64, 'int64'),
+    #  float64 is not exercised here: test_common's tensor/compare helpers don't support it.
 ]
 
 shapes = [

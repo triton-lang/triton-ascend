@@ -12,3 +12,4 @@
 | [06_autotune_example](./06_autotune_example.md)| 使用 Autotune 进行内核自动调优示例 |
 | [07_accuracy_comparison_example](./07_accuracy_comparison_example.md)| 精度比对示例 |
 | [08_max_autotune_example](./08_max_autotune_example.md)| 使用 max_autotune 进行内核自动调优示例 |
+| [09_costmodel_example](./08_costmodel_example.md)| Costmodel 端到端预测示例 |

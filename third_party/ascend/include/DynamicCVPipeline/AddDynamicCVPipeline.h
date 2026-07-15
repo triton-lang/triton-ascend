@@ -23,11 +23,18 @@
 #ifndef TRITON_ADAPTER_ADD_DYNAMIC_CVPIPELINE_PASSES_H
 #define TRITON_ADAPTER_ADD_DYNAMIC_CVPIPELINE_PASSES_H
 
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Pass/Pass.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #define GEN_PASS_DECL_ADDDYNAMICCVPIPELINE
 #include "ascend/include/DynamicCVPipeline/Passes.h.inc"
+
+using namespace mlir;
 
 #define GEN_PASS_DEF_ADDDYNAMICCVPIPELINE
 #include "ascend/include/DynamicCVPipeline/Passes.h.inc"

@@ -34,6 +34,7 @@ void TritonAscendDialect::initialize() {
 #define GET_ATTRDEF_LIST
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendOpsAttrDefs.cpp.inc"
       >();
+  addInterfaces<TritonAscendInlinerInterface>();
 }
 
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.cpp.inc"

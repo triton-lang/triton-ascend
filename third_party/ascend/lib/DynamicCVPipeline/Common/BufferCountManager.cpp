@@ -30,7 +30,7 @@ static constexpr const char *DEBUG_TYPE = "BufferCountManager";
 
 constexpr int kDefaultIntraBufferCount = 2;
 constexpr int kDefaultInterBufferCount = 1;
-constexpr int kDefaultLoadBufferCount = 2;
+constexpr int kDefaultLoadBufferCount = 1;
 constexpr int kBufferCountWarningThreshold = 3;
 
 namespace mlir {

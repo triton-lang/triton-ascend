@@ -81,6 +81,9 @@ byte_per_numel = {
     torch.int16: 2,  # torch.int16 or torch.short
     torch.int8: 1,  # torch.int8
     torch.uint8: 1,  # torch.uint8
+    torch.uint16: 2,  # torch.uint16
+    torch.uint32: 4,  # torch.uint32
+    torch.uint64: 8,  # torch.uint64
     torch.bool: 1,  # torch.bool
     torch.complex32: 4,  # torch.complex32 (not yet available in PyTorch as of the latest stable release)
     torch.complex64: 8,  # torch.complex64
@@ -113,8 +116,6 @@ def get_byte_per_numel(dtype: torch.dtype) -> int:
 
 
 def is_valid_axis_name(name: str) -> bool:
-    if name.startswith("r"):
-        return name[1:] in valid_axis_names
     return name in valid_axis_names
 
 

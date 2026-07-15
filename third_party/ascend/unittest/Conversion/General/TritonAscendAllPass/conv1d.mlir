@@ -1,4 +1,4 @@
-// RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=False compile-mode=simd' '--triton-to-unstructure=compile-on-910-95=False compile-mode=simd' --triton-to-hivm --triton-to-hfusion --triton-to-llvm --bubble-up-operation --triton-to-structured --triton-to-linalg --split-input-file %s | FileCheck %s
+// RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=False force-simt-template=False' '--triton-to-unstructure=compile-on-910-95=False force-simt-template=False' --triton-to-hivm --triton-to-hfusion --triton-to-llvm --bubble-up-operation --triton-to-structured --triton-to-linalg --split-input-file %s | FileCheck %s
 
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   tt.func public @triton_conv1d_2d_kernel(%input_ptr: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %weight_ptr: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %bias_ptr: !tt.ptr<f16> {tt.divisibility = 16 : i32}, %output_ptr: !tt.ptr<f16> {tt.divisibility = 16 : i32}) attributes {noinline = false} {

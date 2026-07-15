@@ -20,9 +20,11 @@
  * THE SOFTWARE.
  */
 
+#include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -31,7 +33,9 @@
 #include "mlir/Support/LLVM.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
@@ -44,6 +48,7 @@ static constexpr const char *DEBUG_TYPE = "plan-vector-block";
 
 using namespace mlir;
 using namespace triton;
+using namespace CVPipeline;
 
 namespace mlir {
 namespace triton {
@@ -64,7 +69,8 @@ bool isFusableOp(Operation *op) {
       // pass control ops like scf::ForOp/scf::IfOp/scf::WhileOp
       return false;
     }
-    if (op == op->getBlock()->getTerminator()) {
+    if (op->getBlock()->mightHaveTerminator() &&
+        op == op->getBlock()->getTerminator()) {
       return false;
     }
     return true;
@@ -72,11 +78,12 @@ bool isFusableOp(Operation *op) {
   return false;
 }
 
-void passAndCollectCandidates(
-    Operation *nowOp, DenseMap<Operation *, int> &indegree,
-    SmallVector<Operation *> &candidates, DenseMap<Operation *, bool> &visited,
-    const CVPipeline::MemoryDependenceGraph &memGraph) {
-  auto &bm = CVPipeline::ComputeBlockIdManager::getInstance();
+void passAndCollectCandidates(Operation *nowOp,
+                              DenseMap<Operation *, int> &indegree,
+                              SmallVector<Operation *> &candidates,
+                              DenseMap<Operation *, bool> &visited,
+                              const CVPipeline::MemoryDependenceGraph &memGraph,
+                              ComputeBlockIdManager &bm) {
   LOG_DEBUG("Bypassing non-fusable op " << *nowOp << "\nnow candidates size: "
                                         << candidates.size() << "\n");
   auto block = nowOp->getBlock();
@@ -100,14 +107,14 @@ void passAndCollectCandidates(
           visited[userInBlock] =
               true; // mark as fused to avoid duplicate bypass
           passAndCollectCandidates(userInBlock, indegree, candidates, visited,
-                                   memGraph);
+                                   memGraph, bm);
         } else {
           for (auto cubeop :
                bm.getOpsByBlockId(bm.getBlockIdByOp(userInBlock))) {
             if (!visited[cubeop]) {
               visited[cubeop] = true;
               passAndCollectCandidates(cubeop, indegree, candidates, visited,
-                                       memGraph);
+                                       memGraph, bm);
             }
           }
         }
@@ -124,20 +131,21 @@ void passAndCollectCandidates(
 void byPassNonFusable(DenseMap<Operation *, int> &indegree,
                       SmallVector<Operation *> &candidates,
                       DenseMap<Operation *, bool> &visited,
-                      const CVPipeline::MemoryDependenceGraph &memGraph) {
+                      const CVPipeline::MemoryDependenceGraph &memGraph,
+                      ComputeBlockIdManager &bm) {
   // for every non-fusable candidates, bypass it.
   for (auto &[op, degree] : indegree) {
-    auto &bm = CVPipeline::ComputeBlockIdManager::getInstance();
     if (bm.isWholeCubeReady(op, indegree) && !isFusableOp(op) && !visited[op]) {
       if (bm.getBlockIdByOp(op) == -1) {
         visited[op] = true; // mark as fused to avoid duplicate bypass
-        passAndCollectCandidates(op, indegree, candidates, visited, memGraph);
+        passAndCollectCandidates(op, indegree, candidates, visited, memGraph,
+                                 bm);
       } else {
         for (auto cubeop : bm.getOpsByBlockId(bm.getBlockIdByOp(op))) {
           if (!visited[cubeop]) {
             visited[cubeop] = true;
             passAndCollectCandidates(cubeop, indegree, candidates, visited,
-                                     memGraph);
+                                     memGraph, bm);
           }
         }
       }
@@ -151,7 +159,6 @@ void updateCandidates(Operation *nextFused,
                       DenseMap<Operation *, bool> &visited,
                       const CVPipeline::MemoryDependenceGraph &memGraph) {
   // 1. Already fuse with nextFused, so remove it from candidates
-  auto &bm = CVPipeline::ComputeBlockIdManager::getInstance();
   for (auto it = candidates.begin(); it != candidates.end(); it++) {
     if (*it == nextFused) {
       it = candidates.erase(it);
@@ -184,12 +191,11 @@ void updateCandidates(Operation *nextFused,
 void findCandidates(DenseMap<Operation *, int> &indegree,
                     SmallVector<Operation *> &candidates,
                     DenseMap<Operation *, bool> &visited,
-                    const CVPipeline::MemoryDependenceGraph &memGraph) {
+                    const CVPipeline::MemoryDependenceGraph &memGraph,
+                    ComputeBlockIdManager &bm) {
   // 1. if no candidate, try to bypass non-fusable
-  LOG_DEBUG("Finding source ops............\n");
   if (candidates.empty()) {
-    LOG_DEBUG("No candidates available, try bypass\n");
-    byPassNonFusable(indegree, candidates, visited, memGraph);
+    byPassNonFusable(indegree, candidates, visited, memGraph, bm);
   }
   // 2. find candidates whose indegree is 0 and not visited, add them to
   // candidates and mark visited
@@ -199,7 +205,6 @@ void findCandidates(DenseMap<Operation *, int> &indegree,
       candidates.push_back(op);
     }
   }
-  LOG_DEBUG("end finding source ops............\n");
 }
 
 static SmallVector<Operation *>
@@ -207,6 +212,7 @@ findOpsAdjacentToCube(Block *block, const SmallVector<Operation *> &fuseGroup,
                       DenseMap<Operation *, bool> &visited,
                       const CVPipeline::MemoryDependenceGraph &memGraph) {
   SmallVector<Operation *> toProcess;
+  std::optional<int> blockId;
   for (Operation *op : fuseGroup) {
     SmallVector<Operation *> allUsers;
     allUsers.append(op->getUsers().begin(), op->getUsers().end());
@@ -216,11 +222,23 @@ findOpsAdjacentToCube(Block *block, const SmallVector<Operation *> &fuseGroup,
 
     for (auto user : allUsers) {
       auto userInBlock = CVPipeline::getAncestorInBlock(user, block);
-      if (!userInBlock || userInBlock == block->getTerminator()) {
+      if (!userInBlock || (block->mightHaveTerminator() &&
+                           userInBlock == block->getTerminator())) {
         continue;
       }
       if (!isFusableOp(userInBlock) && !visited[userInBlock]) {
-        toProcess.push_back(op);
+        auto newBlockId = getOpBlockId(user);
+        if (!newBlockId.has_value()) {
+          newBlockId =
+              getOpBlockId(userInBlock); // Some op will be tagged outside
+        }
+
+        if (!blockId.has_value()) {
+          blockId = newBlockId;
+        }
+        if (!newBlockId.has_value() || blockId == newBlockId) {
+          toProcess.push_back(op);
+        }
       }
     }
   }
@@ -283,6 +301,21 @@ collectKeepOps(Block *block, SmallVector<Operation *> toProcess,
       }
     }
   }
+
+  // special case: annotation.mark always follows the defining op
+  for (auto op : fuseGroup) {
+    auto markOp = llvm::dyn_cast<annotation::MarkOp>(op);
+    if (!markOp) {
+      continue;
+    }
+
+    auto src = markOp.getSrc();
+    auto definingOp = src.getDefiningOp();
+    if (definingOp && keepOps.contains(definingOp)) {
+      keepOps.insert(markOp);
+    }
+  }
+
   return keepOps;
 }
 
@@ -339,14 +372,16 @@ void refineFuseGroup(Block *block, SmallVector<Operation *> &nowFuseGroup,
                      DenseMap<Operation *, bool> &visited,
                      SmallVector<Operation *> &candidates,
                      DenseMap<Operation *, int> &indegree,
-                     const CVPipeline::MemoryDependenceGraph &memGraph) {
+                     const CVPipeline::MemoryDependenceGraph &memGraph,
+                     ComputeBlockIdManager &bm) {
   // 1.Find ops in fuse group whose next node is a non-fusable (CUBE-only) op
   auto toProcess =
       findOpsAdjacentToCube(block, nowFuseGroup, visited, memGraph);
   // 2. early return: if cannot find one node which next node is CUBE, need to
   // check if return or not;
   if (toProcess.empty()) {
-    findCandidates(indegree, candidates, visited, memGraph);
+    LOG_DEBUG("No Cube adjacent op, no op will be cut.");
+    findCandidates(indegree, candidates, visited, memGraph, bm);
     if (candidates.empty()) {
       return;
     }
@@ -364,12 +399,13 @@ void refineFuseGroup(Block *block, SmallVector<Operation *> &nowFuseGroup,
 // Main function to plan vector block id for one block
 llvm::LogicalResult
 planVectorBlockId(Block *block,
-                  const CVPipeline::MemoryDependenceGraph &memGraph) {
+                  const CVPipeline::MemoryDependenceGraph &memGraph,
+                  ComputeBlockIdManager &bm) {
   // 1. topo initialize
   llvm::DenseMap<Operation *, int> indegree;
   llvm::SmallVector<Operation *> queue;
   llvm::DenseMap<Operation *, bool> visited; // has been visited in search
-  CVPipeline::initializeIndegreeForBlock(block, indegree, memGraph);
+  initializeIndegreeForBlock(block, indegree, memGraph, bm);
 
   // 2. initialize visited and find initial candidates
   block->walk([&](Operation *op) {
@@ -381,7 +417,7 @@ planVectorBlockId(Block *block,
       }
     }
   });
-  findCandidates(indegree, queue, visited, memGraph);
+  findCandidates(indegree, queue, visited, memGraph, bm);
 
   // 3. find fuse group follow topo order
   llvm::SmallVector<Operation *> nowFuseGroup;
@@ -393,38 +429,54 @@ planVectorBlockId(Block *block,
       updateCandidates(nextFused, queue, indegree, visited, memGraph);
     }
     if (queue.empty() || nextFused == nullptr) {
+      LOG_DEBUG("Prepare to check this group: \n");
+      for (auto op : nowFuseGroup) {
+        LOG_DEBUG("fuseing: " << *op << "\n");
+      }
       // finish one group, assign block id and start next iteration
       // Cut error operations before assigning block id
-      refineFuseGroup(block, nowFuseGroup, visited, queue, indegree, memGraph);
-
-      auto &bm = CVPipeline::ComputeBlockIdManager::getInstance();
+      refineFuseGroup(block, nowFuseGroup, visited, queue, indegree, memGraph,
+                      bm);
+      LOG_DEBUG("Group after cutting: \n");
+      for (auto op : nowFuseGroup) {
+        LOG_DEBUG("fuseing: " << *op << "\n");
+      }
       if (llvm::failed(bm.markOpsWithNewId(nowFuseGroup))) {
         return llvm::failure();
       }
       nowFuseGroup.clear();
       // reset queue
-      findCandidates(indegree, queue, visited, memGraph);
+      findCandidates(indegree, queue, visited, memGraph, bm);
     }
   }
   return llvm::success();
 }
 
 void PlanVectorBlockPass::runOnOperation() {
-  ModuleOp module = getOperation();
+  LOG_DEBUG("\n---PlanVectorBlockPass start---\n");
   // 1. Build memory dependence graph
-  auto &aliasAnalysis = getAnalysis<mlir::AliasAnalysis>();
-  CVPipeline::MemoryDependenceGraph memDepGraph(module, aliasAnalysis);
+  auto moduleOp = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(moduleOp)) {
+    return;
+  }
+
+  auto &aa = getAnalysis<AliasAnalysis>();
+  auto memDepGraph = MemoryDependenceGraph(moduleOp, aa);
+  auto bm = ComputeBlockIdManager(moduleOp);
 
   // 2. search blocks in topo order and assign block id for each block
   llvm::SmallVector<Block *> blocks;
-  module.walk([&](Block *block) {
-    if (llvm::failed(planVectorBlockId(block, memDepGraph))) {
-      module.emitError() << "[" << DEBUG_TYPE
-                         << "] Failed to plan vector block id for block";
-      signalPassFailure();
-      return;
+  auto result = moduleOp.walk([&](Block *block) {
+    if (llvm::failed(planVectorBlockId(block, memDepGraph, bm))) {
+      return WalkResult::interrupt();
     }
+    return WalkResult::advance();
   });
+  if (result.wasInterrupted()) {
+    LOG_DEBUG("Failed to plan vector block id for block\n");
+    CVPipeline::setFallbackAttr(moduleOp, CVPipeline::ERRCODE_FAILED);
+  }
 }
 
 std::unique_ptr<OperationPass<ModuleOp>> createPlanVectorBlockPass() {

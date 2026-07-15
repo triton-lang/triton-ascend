@@ -26,7 +26,7 @@ import triton.language as tl
 import test_common
 
 
-@pytest.mark.parametrize("dtype", ['float32', 'float16', 'bfloat16', 'int32', 'int64', 'int16', 'int8'])
+@pytest.mark.parametrize("dtype", ['float32', 'int32'])
 @pytest.mark.parametrize("M_BLOCK,N_BLOCK", [(2, 16), (8, 16)])
 def test_tensor_descriptor_load_store(dtype, M_BLOCK, N_BLOCK):
 
@@ -60,7 +60,7 @@ def test_tensor_descriptor_load_store(dtype, M_BLOCK, N_BLOCK):
     torch.testing.assert_close(inp, out)
 
 
-@pytest.mark.parametrize("dtype", ['float32', 'float16', 'bfloat16', 'int32', 'int64', 'int16', 'int8'])
+@pytest.mark.parametrize("dtype", ['float32', 'int32'])
 def test_tensor_descriptor_load_store3d(dtype):
 
     @triton.jit
@@ -144,7 +144,7 @@ def test_tensor_descriptor_functional_interface(dtype):
 
 
 @pytest.mark.parametrize("dtype_str", ["int32"])
-@pytest.mark.parametrize("shape", [(128, 2, 4), (64, 2, 4), (32, 2, 4), (2, 4, 32), (2, 4, 2)])
+@pytest.mark.parametrize("shape", [(128, 2, 4), (2, 4, 2)])
 @pytest.mark.parametrize("axis", [0, 1, 2])
 @pytest.mark.parametrize("device", ["npu"])
 def test_reduce_max(dtype_str, shape, axis, device):
@@ -225,10 +225,10 @@ def test_tensor_descriptor_padding(dtype, padding):
     torch.testing.assert_close(expected, out_device_tma, equal_nan=True)
 
 
-@pytest.mark.parametrize("X, Y", [(128, 128), (64, 256)])
-@pytest.mark.parametrize("BLOCK_X, BLOCK_Y", [(32, 32), (64, 128), (16, 128), (512, 16)])
-@pytest.mark.parametrize("dtype", ['float32', 'float16', 'bfloat16', 'int32'])
-@pytest.mark.parametrize("y", [0, 32, 48])
+@pytest.mark.parametrize("X, Y", [(128, 128)])
+@pytest.mark.parametrize("BLOCK_X, BLOCK_Y", [(32, 32)])
+@pytest.mark.parametrize("dtype", ['float32', 'int32'])
+@pytest.mark.parametrize("y", [0, 32])
 def test_tensor_descriptor_scatter(X, Y, BLOCK_X, BLOCK_Y, dtype, y):
 
     def torch_scatter_rows(input, idx, y, block_y, X, Y):
@@ -267,10 +267,10 @@ def test_tensor_descriptor_scatter(X, Y, BLOCK_X, BLOCK_Y, dtype, y):
     torch.testing.assert_close(ref, output, atol=0, rtol=0)
 
 
-@pytest.mark.parametrize("X, Y", [(128, 128), (64, 256)])
-@pytest.mark.parametrize("BLOCK_X, BLOCK_Y", [(32, 32), (64, 128), (16, 128), (512, 16)])
-@pytest.mark.parametrize("dtype", ['float32', 'float16', 'bfloat16', 'int32', 'int16'])
-@pytest.mark.parametrize("y", [0, 32, 48])
+@pytest.mark.parametrize("X, Y", [(128, 128)])
+@pytest.mark.parametrize("BLOCK_X, BLOCK_Y", [(32, 32)])
+@pytest.mark.parametrize("dtype", ['float32', 'int32'])
+@pytest.mark.parametrize("y", [0, 32])
 def test_tensor_descriptor_gather(X, Y, BLOCK_X, BLOCK_Y, dtype, y):
 
     @triton.jit

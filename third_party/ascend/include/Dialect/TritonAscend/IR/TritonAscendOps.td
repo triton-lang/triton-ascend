@@ -294,81 +294,157 @@ def IndexSelectSimdOp : TT_Ascend_Op<"index_select_simd", [
 
 
 //
-// Built-in: UnstructuredLoad Op
+// Built-in: IndirectLoad Op
 //
-def UnstructuredLoadOp : TT_Ascend_Op<"unstructured_load", [
+def IndirectLoadOp : TT_Ascend_Op<"indirect_load", [
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
   AttrSizedOperandSegments
 ]> {
-  let summary = "Unstructured load with explicit base pointer and offset tensor";
+  let summary = "Built-in: indirect load from global memory using per-element offsets with optional mask/other";
 
   let description = [{
-    Intermediate op created by UnstructurePass for non-contiguous memory access.
-    Carries the decomposed base pointer and offset tensor from PtrOffsetInfo
-    analysis, enabling LinalgPass to generate hfusion.gather_load or SIMT
-    template calls without re-analyzing the pointer chain.
+    Built-in operation emitted by the compiler for unstructured (discrete) memory
+    accesses.These are not written directly in the user IR.
 
-    The base pointer is a scalar !tt.ptr<T>, which the LinalgPass TypeConverter
-    automatically converts to memref<?xT>.
+    Load values from global memory based on per-element offsets. If `mask`
+    is provided, false lanes return `other`.
+
+    The operation takes:
+    - src: Source pointer
+    - offsets: Tensor of per-element offsets (relative to `src`) for accessing source memory
+    - mask (optional):  if mask[idx] is false, do not load the data at address pointer[idx]
+    - other (optional): if mask[idx] is false, return other[idx]
+    - isVolatile: defaults to true. Set to false only when analysis proves
+      the source pointer has no prior possible writes.
   }];
 
   let arguments = (
-    ins TT_Ptr:$base,
-        TT_IntTensor:$indices,
-        DenseI64ArrayAttr:$unstructuredDims,
+    ins TT_Ptr:$src,
+        TT_IntTensor:$offsets,
         Optional<TT_BoolLike>:$mask,
         Optional<TT_Type>:$other,
-        OptionalAttr<TT_CacheModifierAttr>:$cache,
-        OptionalAttr<TT_EvictionPolicyAttr>:$evict,
-        OptionalAttr<BoolAttr>:$isVolatile
+        DefaultValuedAttr<BoolAttr, "true">:$isVolatile
   );
 
   let results = (outs TT_Tensor:$result);
 
   let assemblyFormat = [{
-    $base `:` type($base) `,`
-    $indices `:` type($indices)
-    `unstructured_dims` `=` $unstructuredDims
+    $src `:` type($src) `,`
+    $offsets `:` type($offsets)
     (`,` $mask^ `:` type($mask))?
     (`,` $other^ `:` type($other))?
     attr-dict `->` type($result)
   }];
+
 }
 
-
 //
-// Built-in: UnstructuredStore Op
+// Built-in: StrideLoad Op
 //
-def UnstructuredStoreOp : TT_Ascend_Op<"unstructured_store", [
-  MemoryEffects<[MemWrite<GlobalMemory>]>
+def StrideLoadOp : TT_Ascend_Op<"stride_load", [
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+  SameVariadicOperandSize
 ]> {
-  let summary = "Unstructured store with explicit base pointer and offset tensor";
+  let summary = "Built-in: strided load from global memory";
 
   let description = [{
-    Intermediate op created by UnstructurePass for non-contiguous store access.
-    Same design as UnstructuredLoadOp but for store operations.
+    Built-in operation emitted by the compiler for SIMT stride-load templates.
+    It loads a tensor from a scalar source pointer with one i32/i64 linear
+    base offset, per-dimension physical strides and valid element counts.
+    Out-of-bound elements are filled with the scalar `other` value.
   }];
 
   let arguments = (
-    ins TT_Ptr:$base,
-        TT_IntTensor:$indices,
-        TT_Type:$value,
-        DenseI64ArrayAttr:$unstructuredDims,
-        Optional<TT_BoolLike>:$mask,
-        OptionalAttr<TT_CacheModifierAttr>:$cache,
-        OptionalAttr<TT_EvictionPolicyAttr>:$evict
+    ins TT_Ptr:$src,
+        AnyTypeOf<[I32, I64]>:$offset,
+        AnyType:$other,
+        Variadic<AnyTypeOf<[I32, I64]>>:$stride,
+        Variadic<AnyTypeOf<[I32, I64]>>:$numel
+  );
+
+  let results = (outs TT_Tensor:$result);
+
+  let assemblyFormat = [{
+    $src `:` type($src) `,`
+    $offset `:` type($offset) `,`
+    $other `:` type($other) `,`
+    `[` $stride `:` type($stride) `]` `,`
+    `[` $numel `:` type($numel) `]`
+    attr-dict `->` type($result)
+  }];
+}
+
+//
+// Built-in: StrideStore Op
+//
+def StrideStoreOp : TT_Ascend_Op<"stride_store", [
+  MemoryEffects<[MemWrite<GlobalMemory>]>,
+  SameVariadicOperandSize
+]> {
+  let summary = "Built-in: strided store to global memory";
+
+  let description = [{
+    Built-in operation emitted by the compiler for SIMT stride-store templates.
+    It stores a tensor to a scalar destination pointer with one i32/i64 linear
+    base offset, per-dimension physical strides and valid element counts.
+  }];
+
+  let arguments = (
+    ins TT_Ptr:$dst,
+        TT_Type:$src,
+        AnyTypeOf<[I32, I64]>:$offset,
+        Variadic<AnyTypeOf<[I32, I64]>>:$stride,
+        Variadic<AnyTypeOf<[I32, I64]>>:$numel
   );
 
   let assemblyFormat = [{
-    $base `:` type($base) `,`
-    $indices `:` type($indices) `,`
-    $value `:` type($value)
-    `unstructured_dims` `=` $unstructuredDims
-    (`,` $mask^ `:` type($mask))?
+    $dst `:` type($dst) `,`
+    $src `:` type($src) `,`
+    $offset `:` type($offset) `,`
+    `[` $stride `:` type($stride) `]` `,`
+    `[` $numel `:` type($numel) `]`
     attr-dict
   }];
 }
 
+
+//
+// Built-in: IndirectStore Op
+//
+def IndirectStoreOp : TT_Ascend_Op<"indirect_store", [
+  MemoryEffects<[MemWrite<GlobalMemory>]>
+]> {
+  let summary = "Built-in: indirect store from UB using per-element offsets with optional mask/other";
+
+  let description = [{
+    Built-in operation emitted by the compiler for unstructured (discrete) memory
+    accesses.These are not written directly in the user IR.
+
+    Store values from UB based to GM on per-element offsets.
+
+    The operation takes:
+    - src: Source pointer
+    - offsets: Tensor of per-element offsets (relative to `src`) for accessing source memory
+    - value: The tensor of elements to be stored
+    - mask (optional): If mask[idx] is false, do not store value[idx] at pointer[idx]
+  }];
+
+  let arguments = (
+    ins TT_Ptr:$src,
+        TT_IntTensor:$offsets,
+        TT_Type:$value,
+        Optional<TT_BoolLike>:$mask
+  );
+
+  let assemblyFormat = [{
+    $src `:` type($src) `,`
+    $offsets `:` type($offsets) `,`
+    $value `:` type($value)
+    (`,` $mask^ `:` type($mask))?
+    attr-dict
+  }];
+
+}
 
 //
 // Custom Op

@@ -19,15 +19,19 @@
 # THE SOFTWARE.
 
 import pytest
+from test_common import check_axes_parse_res, mock_autotuner
+
 import triton
 import triton.language as tl
-from test_common import check_axes_parse_res, mock_autotuner
 
 
 def test_tiling_axis_parse_base_case1(mock_autotuner):
     import triton.backends.ascend.runtime
 
-    @triton.autotune(configs=[], key=["n_elements"])
+    @triton.autotune(
+        configs=[],
+        key=["n_elements"],
+    )
     @triton.jit
     def triton_tiling_axis_parse_base_case1(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr,
                                             BLOCK_SUB: tl.constexpr):
@@ -54,6 +58,40 @@ def test_tiling_axis_parse_base_case1(mock_autotuner):
     grid = lambda meta: (meta["BLOCK_SIZE"], )
     act_res = triton_tiling_axis_parse_base_case1[grid]()
 
+    check_axes_parse_res(act_res, ref_res)
+
+
+@pytest.mark.parametrize("kernel_type", ["vector", "auto"])
+def test_tiling_axis_parse_kernel_type_vector_auto_consistency(mock_autotuner, kernel_type):
+    import triton.backends.ascend.runtime
+
+    @triton.autotune(
+        configs=[],
+        key=["n_elements"],
+        hints={"kernel_type": kernel_type},
+    )
+    @triton.jit
+    def triton_tiling_axis_parse_kernel_type_vector_auto_consistency(x_ptr, y_ptr, output_ptr, n_elements,
+                                                                     BLOCK_SIZE: tl.constexpr, BLOCK_SUB: tl.constexpr):
+        offset = tl.program_id(axis=0) * BLOCK_SIZE
+        base = tl.arange(0, BLOCK_SUB)
+        loops = (BLOCK_SIZE + BLOCK_SUB - 1) // BLOCK_SUB
+        for loop in range(loops):
+            offsets = offset + (loop * BLOCK_SUB) + base
+            mask = offsets < min(BLOCK_SIZE + offset, n_elements)
+            x = tl.load(x_ptr + offsets, mask=mask)
+            y = tl.load(y_ptr + offsets, mask=mask)
+            tl.store(output_ptr + offsets, x + y, mask=mask)
+
+    ref_res = {
+        "keys": {"x": "n_elements"},
+        "split_params": {"x": "BLOCK_SIZE"},
+        "tiling_params": {"x": "BLOCK_SUB"},
+        "low_dim_axes": ["x"],
+        "reduction_axes": [],
+    }
+    grid = lambda meta: (meta["BLOCK_SIZE"], )
+    act_res = triton_tiling_axis_parse_kernel_type_vector_auto_consistency[grid]()
     check_axes_parse_res(act_res, ref_res)
 
 

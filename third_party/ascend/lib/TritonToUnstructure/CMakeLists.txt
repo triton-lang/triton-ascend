@@ -1,4 +1,5 @@
 add_triton_library(TritonToUnstructure
+        IndirectAtomicUtils.cpp
         UnstructureConversionPass.cpp
         OffsetAnalysis.cpp
         BubbleUpOperation.cpp

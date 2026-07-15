@@ -15,7 +15,7 @@ build:
   jobs:
     post_checkout:
       - bash .github/workflows/scripts/readthedocs_checkout.sh
-      
+
 sphinx:
   configuration: docs/zh/conf.py
 

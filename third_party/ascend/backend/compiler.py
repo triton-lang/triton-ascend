@@ -224,7 +224,10 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             metadata["enable_mixed_cv"] = True
             metadata["disable_auto_inject_block_sync"] = True
             ascend.passes.ttir.set_enable_cube_block_merge(metadata["enable_cube_block_merge"])
-
+            # Must run before add_dynamic_cv_pipeline because the driven
+            # AddMultiBufferInnerScope pass reads the module-level
+            # `ssbuffer.insertionOptimization` attribute (set here) at run time.
+            ascend.passes.ttir.set_enable_buffer_insert_optimization(mod, metadata["enable_buffer_insert_optimization"])
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
 
         _intra_val = metadata.get("intra_cache_num")
@@ -972,6 +975,8 @@ class NPUOptions:
     # default so existing scenarios are unaffected; opt in per kernel to fuse a
     # matmul's loader for-loop into the matmul's cube compute block.
     enable_cube_block_merge: bool = False
+    # Multi-cache insertion optimization: avoid redundant tensor compute in the middle of an `if`.
+    enable_buffer_insert_optimization: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = False
     enable_cross_if_fusion: bool = False
     has_auto_blockify_blacklist_op: Optional[bool] = None

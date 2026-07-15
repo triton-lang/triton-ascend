@@ -748,7 +748,7 @@ func.func @test_t23_scf_if_else_branch_yield() {
         } else {
           scf.yield %to_tensor : tensor<16x32xf16>
         } {ssbuffer.block_id = 20 : i32}
-        %new_prod = arith.addf %if_result, %if_result {ssbuffer.block_id = 11 : i32} : tensor<16x32xf16>
+        %new_prod = arith.addf %if_result, %if_result {ssbuffer.block_id = 12 : i32} : tensor<16x32xf16>
         scf.yield %new_prod : tensor<16x32xf16>
       } {ssbuffer.main_loop = 1 : i64}
       scope.return

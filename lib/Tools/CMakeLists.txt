@@ -18,4 +18,7 @@ add_triton_library(TritonTools
 # at runtime -> single shared plugins list.
 add_library(TritonPluginUtils STATIC PluginUtils.cpp)
 target_link_libraries(TritonPluginUtils PUBLIC MLIRIR MLIRLLVMDialect)
+if(TRITON_BUILD_PYTHON_MODULE)
+  target_link_libraries(TritonPluginUtils PUBLIC pybind11::headers)
+endif()
 target_compile_definitions(TritonPluginUtils PRIVATE TRITON_VERSION="3.5.0")

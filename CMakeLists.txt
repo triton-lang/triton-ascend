@@ -177,6 +177,14 @@ include_directories(${PROJECT_SOURCE_DIR}/third_party)
 include_directories(${PROJECT_BINARY_DIR}/third_party) # Tablegen'd files
 
 # link_directories(${LLVM_LIBRARY_DIR})
+if(TRITON_BUILD_PYTHON_MODULE)
+  # Python Interpreter is used to run lit tests
+  find_package(Python3 REQUIRED COMPONENTS Development.Module Interpreter)
+  find_package(pybind11 CONFIG REQUIRED HINTS "${Python3_SITELIB}")
+  # need to include pybind11
+  include_directories(${Python3_INCLUDE_DIRS})
+  include_directories(${pybind11_INCLUDE_DIR})
+endif()
 add_subdirectory(include)
 add_subdirectory(lib)
 
@@ -211,12 +219,6 @@ if(TRITON_BUILD_PYTHON_MODULE)
   set(PYTHON_SRC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/python/src)
   include_directories(${PYTHON_SRC_PATH})
 
-  # Python Interpreter is used to run lit tests
-  find_package(Python3 REQUIRED COMPONENTS Development.Module Interpreter)
-  find_package(pybind11 CONFIG REQUIRED HINTS "${Python3_SITELIB}")
-  # need to include pybind11
-  include_directories(${Python3_INCLUDE_DIRS})
-  include_directories(${pybind11_INCLUDE_DIR})
   link_directories(${Python3_LIBRARY_DIRS})
   link_libraries(${Python3_LIBRARIES})
   add_link_options(${Python3_LINK_OPTIONS})

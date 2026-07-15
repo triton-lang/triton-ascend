@@ -2026,12 +2026,20 @@ void init_triton_ir(py::module &&m) {
         py::gil_scoped_acquire acquire;
         for (const auto &op : plugin.listOps()) {
           std::string wrapped = std::string("create_") + op.name;
-          builderPtr->def(wrapped.c_str(),
-                          [op](TritonOpBuilder &self, std::vector<Value> args) {
-                            args.insert(args.begin(), Value());
-                            op.addOp(self, args);
-                            return args[0];
-                          });
+          if (op.addOp) {
+            builderPtr->def(wrapped.c_str(),
+                            [op](TritonOpBuilder &self, std::vector<Value> args) {
+                              args.insert(args.begin(), Value());
+                              op.addOp(self, args);
+                              return args[0];
+                            });
+          }
+          if (op.addOpWithPyArg) {
+            builderPtr->def(wrapped.c_str(),
+                            [op](TritonOpBuilder &self, py::args args, py::kwargs kwargs) -> py::object {
+                              return op.addOpWithPyArg(self, args, kwargs);
+                            });
+          }
         }
       },
       "Given a path to a Triton extension, load it and create builder methods "

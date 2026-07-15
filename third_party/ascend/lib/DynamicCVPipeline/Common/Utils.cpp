@@ -18,6 +18,7 @@ namespace mlir {
 namespace CVPipeline {
 
 static bool g_enableCubeBlockMerge = true;
+static bool g_enableUBRefineOpt = false;
 
 void setEnableCubeBlockMerge(bool enable)
 {

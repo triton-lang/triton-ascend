@@ -56,6 +56,8 @@ inline constexpr llvm::StringLiteral kIntraDeps = "ssbuffer.intraDeps";
 inline constexpr llvm::StringLiteral kMemCrossDeps = "ssbuffer.memCrossDeps";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
 inline constexpr llvm::StringLiteral kClone = "ssbuffer.clone";
+inline constexpr llvm::StringLiteral kEnableUbRefineOpt = "ssbuffer.enable_ub_refine_opt";
+inline constexpr llvm::StringLiteral kInsertionOptimization = "ssbuffer.insertionOptimization";
 static constexpr llvm::StringLiteral kInlinableQuantScaleAttr = "enable_fast_tf32_mul";
 inline constexpr llvm::StringLiteral kHIVMMatmulLimitedInCubeAttr = "hivm.matmul_limited_in_cube";
 
@@ -84,6 +86,9 @@ inline constexpr CoreType fromStrCoreType(std::string_view s)
 
 void setEnableCubeBlockMerge(bool enable);
 bool isCubeBlockMergeEnabled();
+
+void setEnableUBRefineOpt(bool enable);
+bool isUBRefineOptEnabled();
 
 // Functions for managing core types
 CoreType getOpCoreType(Operation *op);

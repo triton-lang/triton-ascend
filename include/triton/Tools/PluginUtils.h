@@ -20,7 +20,10 @@
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/Error.h"
 #include <cstdint>
+#include <pybind11/pybind11.h>
 #include <vector>
+
+namespace py = pybind11;
 
 /// Identifies the API version understood by this plugin.
 ///
@@ -42,6 +45,7 @@ using AddPassCallback = void (*)(mlir::PassManager *, const std::vector<std::str
 using RegisterPassCallback = void (*)();
 using RegisterDialectCallback = void (*)(mlir::DialectRegistry *);
 using AddOpCallback = void (*)(TritonOpBuilder &, std::vector<mlir::Value> &);
+using AddOpWithPyArgCallback = py::object (*)(TritonOpBuilder &, py::args args, py::kwargs kwargs);
 
 /// Information provided by a plugin for loading its passes.
 struct PassInfo {
@@ -62,6 +66,7 @@ struct DialectInfo {
 struct OpInfo {
     const char *name;
     AddOpCallback addOp;
+    AddOpWithPyArgCallback addOpWithPyArg = nullptr;
 };
 
 /// Container for all plugin information; this is returned by the plugin
@@ -103,10 +108,14 @@ struct Pass {
 /// A helper structure for storing information about a pass registered by a
 /// plugin.
 struct Op {
-    Op(const char *name, AddOpCallback addOp) : name(name), addOp(addOp) {}
+    Op(const char *name, AddOpCallback addOp, AddOpWithPyArgCallback addOpWithPyArg)
+        : name(name), addOp(addOp), addOpWithPyArg(addOpWithPyArg)
+    {
+    }
 
     const char *name;
     const AddOpCallback addOp;
+    const AddOpWithPyArgCallback addOpWithPyArg;
 };
 
 /// A loaded Triton plugin.

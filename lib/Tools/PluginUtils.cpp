@@ -64,8 +64,9 @@ llvm::Expected<TritonPlugin> TritonPlugin::load(const std::string &filename)
 const std::vector<Pass> TritonPlugin::listPasses() const
 {
     if (!info->passes && info->numPasses > 0)
-        llvm::report_fatal_error(llvm::toString(
-            llvm::createStringError(llvm::Twine("Invalid pass pointer in plugin '") + filename + "'.")).c_str());
+        llvm::report_fatal_error(
+            llvm::toString(llvm::createStringError(llvm::Twine("Invalid pass pointer in plugin '") + filename + "'."))
+                .c_str());
     LLVM_DEBUG(llvm::dbgs() << "Listing " << info->numPasses << " passes for plugin " << info->pluginName << ":"
                             << info->pluginVersion << "\n");
 
@@ -83,8 +84,9 @@ const std::vector<Pass> TritonPlugin::listPasses() const
 void TritonPlugin::registerPasses() const
 {
     if (!info->passes && info->numPasses > 0)
-        llvm::report_fatal_error(llvm::toString(
-            llvm::createStringError(llvm::Twine("Invalid pass pointer in plugin '") + filename + "'.")).c_str());
+        llvm::report_fatal_error(
+            llvm::toString(llvm::createStringError(llvm::Twine("Invalid pass pointer in plugin '") + filename + "'."))
+                .c_str());
     LLVM_DEBUG(llvm::dbgs() << "Registering " << info->numPasses << " passes for plugin " << info->pluginName << ":"
                             << info->pluginVersion << "\n");
 
@@ -100,8 +102,10 @@ void TritonPlugin::registerPasses() const
 void TritonPlugin::registerDialects(DialectRegistry &dialectRegistry) const
 {
     if (!info->dialects && info->numDialects > 0)
-        llvm::report_fatal_error(llvm::toString(
-            llvm::createStringError(llvm::Twine("Invalid dialect pointer in plugin '") + filename + "'.")).c_str());
+        llvm::report_fatal_error(
+            llvm::toString(
+                llvm::createStringError(llvm::Twine("Invalid dialect pointer in plugin '") + filename + "'."))
+                .c_str());
     LLVM_DEBUG(llvm::dbgs() << "Registering " << info->numDialects << " dialects for plugin " << info->pluginName << ":"
                             << info->pluginVersion << "\n");
 
@@ -117,17 +121,19 @@ void TritonPlugin::registerDialects(DialectRegistry &dialectRegistry) const
 const std::vector<Op> TritonPlugin::listOps() const
 {
     if (!info->ops && info->numOps > 0)
-        llvm::report_fatal_error(llvm::toString(
-            llvm::createStringError(llvm::Twine("Invalid custom op pointer in plugin '") + filename + "'.")).c_str());
+        llvm::report_fatal_error(
+            llvm::toString(
+                llvm::createStringError(llvm::Twine("Invalid custom op pointer in plugin '") + filename + "'."))
+                .c_str());
     LLVM_DEBUG(llvm::dbgs() << "Listing " << info->numOps << " custom ops for plugin " << info->pluginName << ":"
                             << info->pluginVersion << "\n");
 
     std::vector<Op> ops;
     for (auto i = 0; i < info->numOps; ++i) {
         const auto op = &info->ops[i];
-        if (op->addOp) {
+        if (op->addOp || op->addOpWithPyArg) {
             LLVM_DEBUG(llvm::dbgs() << "Listing custom op " << op->name << "\n");
-            ops.push_back(Op(op->name, op->addOp));
+            ops.push_back(Op(op->name, op->addOp, op->addOpWithPyArg));
         }
     }
     return ops;

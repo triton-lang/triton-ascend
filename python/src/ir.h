@@ -94,11 +94,11 @@ public:
 private:
   std::unique_ptr<mlir::OpBuilder> builder;
   std::unique_ptr<mlir::Location> lastLoc;
-  bool lineInfoEnabled = !mlir::triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO");
+  bool lineInfoEnabled =
+      !mlir::triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO");
   std::string compile_mode;
 };
 
 namespace ir {
 extern py::class_<TritonOpBuilder> *getBuilderClass();
 } // namespace ir
-

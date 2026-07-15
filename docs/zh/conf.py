@@ -83,6 +83,7 @@ html_static_path = ['_static']
 pygments_style = "friendly"
 html_last_updated_fmt = "%b %d, %Y"
 
+
 def setup(app):
     
     """Register Pygments lexer aliases."""
@@ -97,6 +98,7 @@ def setup(app):
         app.add_js_file('lang-switcher.js')
         app.add_css_file('lang-switcher.css')
     return {'version': '0.1', 'parallel_read_safe': True}
+
 
 readthedocs_version = os.environ.get('READTHEDOCS_VERSION', 'latest')
 version = readthedocs_version.split('.')[0] + '.' + readthedocs_version.split(

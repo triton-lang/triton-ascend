@@ -85,7 +85,6 @@ html_last_updated_fmt = "%b %d, %Y"
 
 
 def setup(app):
-    
     """Register Pygments lexer aliases."""
     from sphinx.highlighting import lexers
     from pygments.lexers import get_lexer_by_name

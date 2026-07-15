@@ -130,7 +130,7 @@ pip install -e .
     ninja install
     ```
 
-3. **编译Triton-Asecnd**
+3. **编译Triton-Ascend**
 
     ```bash
     git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend

@@ -1,14 +1,5 @@
 name: Documentation
 
-# ── Docs CI pipeline ──────────────────────────────────────────────────
-#  1. documentation.yml     (this file)  – code / spec gate
-#  2. docs-rtd-preview.yml               – monitor RTD build → Commit Status
-#
-#  Only changes under docs/ trigger the pipeline (plus self-validation of the
-#  gate's own definition).  docs-rtd-preview.yml listens on workflow_run for
-#  this workflow, so if you rename this workflow, update the `workflows:`
-#  filter there as well.
-
 on:
   pull_request:
     paths:
@@ -16,7 +7,6 @@ on:
       - 'docs/**/*.mdx'
       - 'docs/**/_toc.yaml'
       - '.github/workflows/documentation.yml'
-      - '.github/workflows/docs-rtd-preview.yml'
       - '.github/docs-ci/**'
   # Manual full scans (checkAll) to surface errors in existing docs
   # that incremental PR runs never touch. These never block a PR.

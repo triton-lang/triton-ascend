@@ -83,7 +83,6 @@ html_static_path = ['_static']
 pygments_style = "friendly"
 html_last_updated_fmt = "%b %d, %Y"
 
-
 def setup(app):
     
     """Register Pygments lexer aliases."""

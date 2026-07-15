@@ -87,6 +87,23 @@ class FixpipePreReluMode(enum.Enum):
     P_RELU = 3
 
 
+class SYNC_HINT(enum.Enum):
+    wait = 0
+    set = 1
+    internal = 2
+
+
+class EVENT(enum.Enum):
+    EVENT_ID0 = 0
+    EVENT_ID1 = 1
+    EVENT_ID2 = 2
+    EVENT_ID3 = 3
+    EVENT_ID4 = 4
+    EVENT_ID5 = 5
+    EVENT_ID6 = 6
+    EVENT_ID7 = 7
+
+
 # MLIR affine types are only used as docstring-level references in the RST;
 # keep them as MagicMock so attribute access never raises.
 affine_expr = MagicMock(name="affine_expr")

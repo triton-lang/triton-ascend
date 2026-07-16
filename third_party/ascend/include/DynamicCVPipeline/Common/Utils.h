@@ -91,6 +91,18 @@ constexpr int64_t BYTE_SIZE = 8;
 static constexpr int crossCoreProducerId = 1;
 static constexpr int crossCoreConsumerId = 0;
 
+class MoveOnly {
+protected:
+  MoveOnly() = default;
+  ~MoveOnly() = default;
+
+  MoveOnly(const MoveOnly &) = delete;
+  MoveOnly &operator=(const MoveOnly &) = delete;
+
+  MoveOnly(MoveOnly &&) = default;
+  MoveOnly &operator=(MoveOnly &&) = default;
+};
+
 enum CoreType {
   UNDETERMINED = 0,
   VECTOR_ONLY = 1 << 0,
@@ -164,8 +176,23 @@ inline bool isMainLoopOp(Operation *op) {
   return op && isa<scf::ForOp, scf::WhileOp>(op) && op->hasAttr(kMainLoop);
 }
 
-inline bool isCubeOp(Operation *op) {
-  return !isScfOp(op) && CVPipeline::getOpCoreType(op) == CoreType::CUBE_ONLY;
+CoreType getCoreTypeOfSimpleOpOrCf(Operation *op);
+
+inline bool isCubeSimpleOpOrCf(Operation *op) {
+  return getCoreTypeOfSimpleOpOrCf(op) == CoreType::CUBE_ONLY;
+}
+
+inline bool isVectorSimpleOpOrCf(Operation *op) {
+  return getCoreTypeOfSimpleOpOrCf(op) == CoreType::VECTOR_ONLY;
+}
+
+template <typename RangeT, typename FuncT>
+inline llvm::LogicalResult allSucceededShortCircuit(RangeT &&range,
+                                                    FuncT &&func) {
+  return llvm::success(
+      llvm::all_of(std::forward<RangeT>(range), [&](auto &&item) {
+        return llvm::succeeded(func(std::forward<decltype(item)>(item)));
+      }));
 }
 
 // ============================================================================
@@ -251,8 +278,6 @@ int64_t getBTSizeFromValidBroadcastOp(linalg::BroadcastOp broadcastOp);
 
 int getLoopCarriedArgIndex(Value operand, Block *block);
 
-CoreType getValueCoreType(Value value);
-
 // Helper: convert OpCoreType to string for IR attribute
 inline llvm::StringRef coreTypeToString(CoreType ct) {
   switch (ct) {
@@ -265,6 +290,25 @@ inline llvm::StringRef coreTypeToString(CoreType ct) {
   default:
     return "UNDETERMINED";
   }
+}
+
+CoreType getValueCoreType(Value value);
+
+inline OpOperand *getTiedYieldOperand(Value value, Block *block) {
+  int argIdx = getLoopCarriedArgIndex(value, block);
+  if (argIdx == -1) {
+    return nullptr;
+  }
+  auto *terminator = block->getTerminator();
+  return &terminator->getOpOperand(argIdx);
+}
+
+inline Operation *getLoopCarriedDefOp(Value value, Block *block) {
+  auto *yieldOperand = getTiedYieldOperand(value, block);
+  if (yieldOperand && yieldOperand->get()) {
+    return yieldOperand->get().getDefiningOp();
+  }
+  return nullptr;
 }
 
 } // namespace CVPipeline

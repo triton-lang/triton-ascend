@@ -41,7 +41,8 @@ using namespace triton;
 namespace {
 
 static constexpr llvm::StringLiteral interceptrFunc[]{
-    "_multi_head_jagged_flash_attention_bwd_kernel", "_parallel_hstu_attn_bwd"};
+    "_multi_head_jagged_flash_attention_bwd_kernel", "_parallel_hstu_attn_bwd",
+    "_fwd_kernel_alibi"};
 
 static LogicalResult verifyFuncNames(ModuleOp module) {
   bool intercepted = false;

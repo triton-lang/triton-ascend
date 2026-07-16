@@ -73,26 +73,33 @@ static bool isInVectorScope(Operation *op)
 
 // --- main_loop attribute helpers ---
 
-/// Check if forOp (or its terminator) has ssbuffer.main_loop attribute
-static bool forOpHasMainLoopAttr(scf::ForOp forOp)
+/// Check if op has ssbuffer.main_loop attribute. Op-agnostic: works for
+/// both scf.for (legacy: attr may live on the body terminator) and
+/// scf.while (attr always lives on the op itself per the whileOp support
+/// convention).
+static bool hasMainLoopAttr(Operation *op)
 {
-    if (forOp->hasAttr("ssbuffer.main_loop")) {
+    if (!op) { return false; }
+    if (op->hasAttr("ssbuffer.main_loop")) {
         return true;
     }
-    Operation *terminator = forOp.getBody()->getTerminator();
-    return terminator && terminator->hasAttr("ssbuffer.main_loop");
+    // Legacy: forOp allowed the attribute to live on its body terminator.
+    if (auto forOp = dyn_cast<scf::ForOp>(op)) {
+        Operation *terminator = forOp.getBody()->getTerminator();
+        return terminator && terminator->hasAttr("ssbuffer.main_loop");
+    }
+    return false;
 }
 
-/// Check if a sync op's direct parent has ssbuffer.main_loop attribute
+/// Check if a sync op's direct parent has ssbuffer.main_loop attribute.
+/// Works for both scf.for and scf.while (and any other op that hangs the
+/// attribute on itself).
 static bool parentOpHasMainLoopAttr(Operation *syncOp)
 {
     if (!syncOp) { return false; }
     Operation *parent = syncOp->getParentOp();
     if (!parent) { return false; }
-    if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
-        return forOpHasMainLoopAttr(forOp);
-    }
-    return false;
+    return hasMainLoopAttr(parent);
 }
 
 // --- Operation search helpers ---

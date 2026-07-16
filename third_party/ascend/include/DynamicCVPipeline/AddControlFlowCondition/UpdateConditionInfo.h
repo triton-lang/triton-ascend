@@ -75,28 +75,28 @@ private:
 
   void collectDependencyBuffers(
       ModuleOp module, SmallVector<scf::ForOp> &mainLoopForOps,
-      DenseMap<int, DenseMap<Value, SmallVector<Value>>> &crossCoreBuffers,
-      DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &crossCoreBuffers,
+      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>
           &memCrossCoreBuffers,
-      DenseMap<scf::ForOp, DenseMap<int, DenseMap<Value, SmallVector<Value>>>>
+      DenseMap<scf::ForOp, DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>>
           &intraCoreBuffersMap);
 
-  DenseMap<int, DenseMap<Value, SmallVector<Value>>>
+  DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>
   extendCrossCoreBuffersWithEquivalentValues(
       ModuleOp module,
-      DenseMap<int, DenseMap<Value, SmallVector<Value>>> crossCoreBuffers);
+      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> crossCoreBuffers);
 
   int buildIdxToVarMap(scf::ForOp forOp,
-                       const DenseMap<int, DenseMap<Value, SmallVector<Value>>>
+                       const DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>
                            &intraCoreBuffers,
                        DenseMap<int, Value> &idxToVar);
 
   int getInputOutputValues(
       scf::IfOp ifOp,
-      DenseMap<int, DenseMap<Value, SmallVector<Value>>> crossCoreBuffers,
-      DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> crossCoreBuffers,
+      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>
           memCrossCoreBuffers,
-      DenseMap<int, DenseMap<Value, SmallVector<Value>>> intraCoreBuffers,
+      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> intraCoreBuffers,
       SmallVector<int> &crossCoreInputValues,
       SmallVector<int> &crossCoreOutputValues,
       SmallVector<int> &intraCoreInputValues,
@@ -104,7 +104,7 @@ private:
 
   int buildOutputGroups(
       SmallVector<int> &intraCoreOutputValues,
-      DenseMap<int, DenseMap<Value, SmallVector<Value>>> &intraCoreBuffers,
+      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &intraCoreBuffers,
       DenseMap<int, Value> &idxToVar,
       SmallVector<OutputGroupInfo> &outputGroups);
 
@@ -116,7 +116,7 @@ private:
 
   int collectIntraCoreOutputConditions(
       OpBuilder &builder, Location loc,
-      DenseMap<int, DenseMap<Value, SmallVector<Value>>> &intraCoreBuffers,
+      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &intraCoreBuffers,
       SmallVector<int> &intraCoreOutputValues, DenseMap<int, Value> &idxToVar,
       SmallVector<Value> &conditions, DenseSet<Value> &usedVarsSet,
       DenseMap<Value, VarUpdateType> &varUpdateTypes);
@@ -159,7 +159,7 @@ private:
 
   int setIntraCoreCondition(
       ModuleOp module, scf::IfOp ifOp,
-      DenseMap<int, DenseMap<Value, SmallVector<Value>>> &intraCoreBuffers,
+      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &intraCoreBuffers,
       SmallVector<int> &intraCoreInputIndices,
       SmallVector<int> &intraCoreOutputIndices, DenseMap<int, Value> &idxToVar,
       DenseMap<Value, VarUpdateType> &varUpdateTypes, Value &intraCoreCond);
@@ -177,8 +177,8 @@ private:
   int setCrossCoreCondition(
       SmallVector<int> crossCoreInputValues,
       SmallVector<int> crossCoreOutputValues,
-      DenseMap<int, DenseMap<Value, SmallVector<Value>>> &crossCoreBuffers,
-      DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &crossCoreBuffers,
+      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>
           &memCrossCoreBuffers,
       scf::IfOp ifOp, SmallVector<SmallVector<Value>> ssbufferPtrs,
       Value &crossCoreCond);
@@ -206,8 +206,8 @@ private:
   Value addCrossCoreConditions(
       OpBuilder &builder, Location loc, SmallVector<int> crossCoreInputValues,
       SmallVector<int> crossCoreOutputValues,
-      DenseMap<int, DenseMap<Value, SmallVector<Value>>> &crossCoreBuffers,
-      DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &crossCoreBuffers,
+      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>
           &memCrossCoreBuffers,
       bool isAIC, Value zeroConst, DenseMap<int, Value> &precomputedPtrs,
       SmallVector<SmallVector<Value>> ssbufferPtrs);

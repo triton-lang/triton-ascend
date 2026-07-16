@@ -18,6 +18,7 @@ namespace mlir {
 namespace CVPipeline {
 
 static bool g_enableCubeBlockMerge = true;
+static bool g_enableUBRefineOpt = false;
 
 void setEnableCubeBlockMerge(bool enable) { g_enableCubeBlockMerge = enable; }
 
@@ -68,7 +69,7 @@ std::optional<int> getOpBlockId(Operation *op) {
     return std::nullopt;
   }
 
-  return static_cast<int>(blockIdAttr.getInt());
+  return blockIdAttr.getInt();
 }
 
 int getAvailableBlockId(ModuleOp module) {
@@ -76,7 +77,7 @@ int getAvailableBlockId(ModuleOp module) {
   module.walk([&](Operation *op) {
     auto blockIdOpt = getOpBlockId(op);
     if (blockIdOpt) {
-      int currentId = static_cast<int>(*blockIdOpt);
+      int currentId = *blockIdOpt;
       if (currentId > maxBlockId) {
         maxBlockId = currentId;
       }

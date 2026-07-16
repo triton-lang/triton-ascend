@@ -71,7 +71,6 @@ void SplitDataflowPass::runOnOperation() {
 
   // Step 7: Refine block id for iteration variables in main loops
   pm.addPass(createRefineArgsBlockIdPass());
-  pm.addPass(createReorderOpsByBlockIdPass());
 
   if (failed(runPipeline(pm, module))) {
     if (!CVPipeline::hasFallbackAttr(module)) {

@@ -48,7 +48,7 @@ void AddMultiBufferToGMLoadPass::collectAndGroupMarkedOps() {
 
   // Apply depth policy: skip loops whose compile-time trip count is too small
   // to benefit, then record the slot count on each group.
-  int depth = BufferCountManager::getInstance().getBufferCountByType(
+  int depth = BufferCountManager(module).getBufferCountByType(
       BufferCountManager::DepType::LoadStore);
   llvm::erase_if(contexts_, [depth](const ForBufferCtx &context) {
     if (auto tripCount = getConstantTripCount(context.forOp))

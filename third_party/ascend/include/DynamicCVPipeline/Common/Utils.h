@@ -47,18 +47,30 @@ inline constexpr llvm::StringLiteral kMainLoop = "ssbuffer.main_loop";
 inline constexpr llvm::StringLiteral kTcoreType = "hivm.tcore_type";
 inline constexpr llvm::StringLiteral kIf = "ssbuffer.if";
 inline constexpr llvm::StringLiteral kIntraBuffer = "ssbuffer.intra_buffer";
+inline constexpr llvm::StringLiteral kIntraBufCount =
+    "ssbuffer.intra_buf_count";
+inline constexpr llvm::StringLiteral kInterCoreBufCount =
+    "ssbuffer.inter_core_buf_count";
+inline constexpr llvm::StringLiteral kLoadStoreBufCount =
+    "ssbuffer.load_store_buf_count";
 inline constexpr llvm::StringLiteral kAnalyzeFlagId =
     "ssbuffer.analyze_flag_id";
 inline constexpr llvm::StringLiteral kLoopCarriedL0C =
     "ssbuffer.loop_carried_l0c";
 inline constexpr llvm::StringLiteral kCrossDeps = "ssbuffer.crossDeps";
+inline constexpr llvm::StringLiteral kIntraDeps = "ssbuffer.intraDeps";
+inline constexpr llvm::StringLiteral kMemCrossDeps = "ssbuffer.memCrossDeps";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
 inline constexpr llvm::StringLiteral kClone = "ssbuffer.clone";
-inline constexpr llvm::StringLiteral kFlowOpt = "ssbuffer.flowOpt";
+inline constexpr llvm::StringLiteral kEnableUbRefineOpt =
+    "ssbuffer.enable_ub_refine_opt";
+inline constexpr llvm::StringLiteral kInsertionOptimization =
+    "ssbuffer.insertionOptimization";
 static constexpr llvm::StringLiteral kInlinableQuantScaleAttr =
     "enable_fast_tf32_mul";
 inline constexpr llvm::StringLiteral kHIVMMatmulLimitedInCubeAttr =
     "hivm.matmul_limited_in_cube";
+
 inline constexpr const char *ERRCODE_ATTR =
     "triton_ascend.dynamic_cv_pipeline.rc";
 static constexpr const int ERRCODE_FAILED = 1;
@@ -84,6 +96,9 @@ inline constexpr CoreType fromStrCoreType(std::string_view s) {
 
 void setEnableCubeBlockMerge(bool enable);
 bool isCubeBlockMergeEnabled();
+
+void setEnableUBRefineOpt(bool enable);
+bool isUBRefineOptEnabled();
 
 // Functions for managing core types
 CoreType getOpCoreType(Operation *op);

@@ -186,11 +186,19 @@ LogicalResult CloneOpsPass::cloneOpsInMainLoop(scf::ForOp forOp) {
 }
 
 // Check if an op should be erased during cleanup (for cube)
-// memGraph: optional pointer to MemoryDependenceGraph for checking exec-after
-// dependencies
+// sameBlockIdExecAfter: precomputed map from cloned op to its same-block-id
+// exec-after ops
+//   (already filtered to skip SyncBlockWaitOp/SyncBlockSetOp), built once per
+//   block from a single MemoryDependenceGraph.
+// erasedOps: set of cloned ops already erased in this cleanup pass; an
+// exec-after entry
+//   that has been erased no longer pins the current op (equivalent to the
+//   original per-op graph rebuild reflecting the post-erasure IR).
 static bool shouldEraseOpForCube(
     Operation *op,
-    const CVPipeline::MemoryDependenceGraph *memGraph = nullptr) {
+    const llvm::DenseMap<Operation *, llvm::SmallPtrSet<Operation *, 4>>
+        &sameBlockIdExecAfter,
+    const llvm::DenseSet<Operation *> &erasedOps) {
   // Rule 1: SyncBlockWaitOp, SyncBlockSetOp, FixpipeOp -> directly erase
   if (isa<SyncBlockWaitOp>(op) || isa<SyncBlockSetOp>(op) ||
       isa<hivm::FixpipeOp>(op)) {
@@ -228,32 +236,32 @@ static bool shouldEraseOpForCube(
     return true;
   }
 
-  // Rule 3: If op has no results, check getExecAfter for same block_id
-  // dependencies
-  if (memGraph) {
-    auto execAfterOps = memGraph->getExecAfter(op);
-    bool hasCloneExecAfterInSameBlockId =
-        llvm::any_of(execAfterOps, [&](Operation *execOp) {
-          // sync_block_wait/sync_block_set ops are not memory side effects in
-          // analyzing cleanup ops, therefore, we need to skip their judgments
-          if (isa<SyncBlockWaitOp>(execOp) || isa<SyncBlockSetOp>(execOp)) {
-            return false;
-          }
-          // scf.if whose body only contains sync_block_wait/sync_block_set ops
-          // will be cleaned up in its own turn; skip it here so it does not
-          // block the current op's erasure.
-          if (isIfOpWithOnlySyncOps(execOp)) {
-            return false;
-          }
-          auto execBlockId = CVPipeline::getOpBlockId(execOp);
-          return execBlockId && opBlockId && *execBlockId == *opBlockId;
-        });
-    if (hasCloneExecAfterInSameBlockId) {
-      return false;
+  // Rule 3: If op has no results, consult the precomputed same-block-id
+  // exec-after set. An exec-after op that has already been erased in this pass
+  // is no longer live and does not require keeping this op. This mirrors the
+  // original per-iteration memGraph rebuild, where already-erased ops simply
+  // disappear from getExecAfter().
+  auto it = sameBlockIdExecAfter.find(op);
+  if (it != sameBlockIdExecAfter.end()) {
+    for (Operation *execOp : it->second) {
+      // Already erased in this pass → no longer pins the current op.
+      if (erasedOps.contains(execOp)) {
+        continue;
+      }
+      // scf.if whose body only contains sync_block_wait/sync_block_set ops
+      // will be cleaned up in its own turn; skip it here so it does not
+      // block the current op's erasure.
+      if (isIfOpWithOnlySyncOps(execOp)) {
+        continue;
+      }
+      auto execBlockId = CVPipeline::getOpBlockId(execOp);
+      if (execBlockId && opBlockId && *execBlockId == *opBlockId) {
+        return false;
+      }
     }
   }
 
-  // Can erase if no results and no exec-after dependencies in same block
+  // Can erase if no results and no live exec-after dependencies in same block
   return true;
 }
 
@@ -289,20 +297,81 @@ cleanupClonedOps(scf::ForOp forOp,
       continue;
     }
 
-    // Erase cloned ops from bottom to top
-    // This ensures that when checking if an op can be erased, its users in same
-    // block_id have already been processed (and erased if applicable)
-    for (int j = startIdx; j >= 0; --j) {
-      Operation *op = curOps[j];
-      if (!op->hasAttr(CVPipeline::kClone)) {
+    // Locate the start of the contiguous cloned-op suffix. The original cleanup
+    // loop broke on the first non-cloned op; preserve that behavior so we only
+    // consider ops that the previous implementation would have considered,
+    // regardless of how topologicalSort interleaves cloned and non-cloned ops.
+    int firstClonedIdx = 0;
+    for (int j = startIdx - 1; j >= 0; --j) {
+      if (!curOps[j]->hasAttr(CVPipeline::kClone)) {
+        firstClonedIdx = j + 1;
         break;
       }
-      // Rebuild memGraph after each erasure to reflect current IR state
-      auto memGraph = memGraphFactory(forOp);
-      bool shouldErase = isCube ? shouldEraseOpForCube(op, memGraph.get())
-                                : shouldEraseOpForVector(op);
+    }
+
+    // Collect the cloned ops in the contiguous suffix (in execution order).
+    SmallVector<Operation *> clonedOps;
+    clonedOps.reserve(startIdx - firstClonedIdx + 1);
+    for (int j = firstClonedIdx; j <= startIdx; ++j) {
+      clonedOps.push_back(curOps[j]);
+    }
+
+    // Build the MemoryDependenceGraph at most once per block, and only if at
+    // least one cloned op has no results (Rule 3 is the only path that needs
+    // it; Rule 2 is a pure SSA check and Rule 1 is type-based).
+    std::unique_ptr<MemDepGraphT> memGraph;
+    if (isCube) {
+      bool needsMemGraph = llvm::any_of(
+          clonedOps, [](Operation *o) { return o->getNumResults() == 0; });
+      if (needsMemGraph) {
+        memGraph = memGraphFactory(forOp);
+      }
+    }
+
+    // Precompute, for each cloned op, the set of its exec-after ops that share
+    // its block_id. Building the memGraph was the expensive part; we now do
+    // getExecAfter once per op up front and reuse the result during cleanup.
+    // An erased op is filtered out at check time (see shouldEraseOpForCube),
+    // which reproduces the original "rebuild after each erasure" effect.
+    llvm::DenseMap<Operation *, llvm::SmallPtrSet<Operation *, 4>>
+        sameBlockIdExecAfter;
+    if (memGraph) {
+      for (Operation *op : clonedOps) {
+        if (op->getNumResults() > 0) {
+          // Rule 2 path: memgraph is not consulted.
+          continue;
+        }
+        auto opBlockId = getForDirectChildBlockId(op);
+        if (!opBlockId) {
+          continue;
+        }
+        for (Operation *execOp : memGraph->getExecAfter(op)) {
+          // sync_block_wait/sync_block_set ops are not memory side effects in
+          // analyzing cleanup ops, therefore we skip them.
+          if (isa<SyncBlockWaitOp>(execOp) || isa<SyncBlockSetOp>(execOp)) {
+            continue;
+          }
+          auto execBlockId = CVPipeline::getOpBlockId(execOp);
+          if (execBlockId && *execBlockId == *opBlockId) {
+            sameBlockIdExecAfter[op].insert(execOp);
+          }
+        }
+      }
+    }
+
+    // Erase cloned ops from bottom to top, matching the original ordering.
+    // erasedOps mirrors the effect of the per-iteration graph rebuild: an op
+    // already erased in this pass is treated as absent from the precomputed
+    // exec-after sets.
+    llvm::DenseSet<Operation *> erasedOps;
+    for (int j = startIdx; j >= firstClonedIdx; --j) {
+      Operation *op = curOps[j];
+      bool shouldErase =
+          isCube ? shouldEraseOpForCube(op, sameBlockIdExecAfter, erasedOps)
+                 : shouldEraseOpForVector(op);
       if (shouldErase) {
         op->erase();
+        erasedOps.insert(op);
       }
     }
   }

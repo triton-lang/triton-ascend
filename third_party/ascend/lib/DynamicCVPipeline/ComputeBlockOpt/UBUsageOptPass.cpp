@@ -25,13 +25,16 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Operation.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -61,6 +64,7 @@ public:
 
 private:
   const int MAX_EDGE_SIZE = (1 << 30);
+  const int BLOCK_SMALL_SIZE = 3;
   int getValueSizeInBytes(Value value);
   void buildUBUsageGraph(Block *block, DenseMap<Operation *, int> &op2nodeId,
                          DenseMap<int, Operation *> &nodeId2op,
@@ -91,6 +95,12 @@ private:
   UBUsageOptimization(Block *block,
                       const CVPipeline::MemoryDependenceGraph &memGraph,
                       CVPipeline::ComputeBlockIdManager &bm);
+  llvm::LogicalResult
+  optBroadcast(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
+               CVPipeline::ComputeBlockIdManager &bm);
+  llvm::LogicalResult
+  optSmallBlock(Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
+                CVPipeline::ComputeBlockIdManager &bm);
 };
 } // namespace triton
 } // namespace mlir
@@ -772,6 +782,133 @@ llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(
   return llvm::success();
 }
 
+llvm::LogicalResult
+UBUsageOptPass::optBroadcast(Block *block,
+                             const CVPipeline::MemoryDependenceGraph &memGraph,
+                             CVPipeline::ComputeBlockIdManager &bm) {
+  if (!isa<scf::ForOp>(block->getParentOp())) {
+    return llvm::success();
+  }
+
+  int errcnt = 0;
+  llvm::SmallVector<Operation *> broadcastOps;
+  for (Operation &op : *block) {
+    if (!isa<linalg::BroadcastOp>(op)) {
+      continue;
+    }
+    auto broadcastOp = dyn_cast<linalg::BroadcastOp>(&op);
+    if (CVPipeline::getOpCoreType(broadcastOp) !=
+        CVPipeline::CoreType::VECTOR_ONLY) {
+      continue;
+    }
+    if (!broadcastOp->hasOneUse()) {
+      continue;
+    }
+
+    llvm::SmallVector<std::pair<Operation *, int>> userBlockIds;
+    Operation *user = *broadcastOp->getUsers().begin();
+    Operation *userInBlock = CVPipeline::getAncestorInBlock(user, block);
+    if (!userInBlock || userInBlock->getBlock() != block) {
+      continue;
+    }
+    if (CVPipeline::getOpCoreType(userInBlock) !=
+        CVPipeline::CoreType::VECTOR_ONLY) {
+      continue;
+    }
+    int userBlockId = bm.getBlockIdByOp(userInBlock);
+    int broadcastBlockId = bm.getBlockIdByOp(broadcastOp);
+    if (userBlockId == broadcastBlockId) {
+      continue;
+    }
+    llvm::SmallVector<Operation *> willaddOps{broadcastOp};
+
+    if (!willCreateCycle(willaddOps, block, memGraph, userBlockId, bm)
+             .value_or(true)) {
+      bm.updateBlockId(broadcastOp, userBlockId);
+    } else {
+      LOG_DEBUG("Moved" << *broadcastOp << " to blockId: " << userBlockId
+                        << " err!!!\n");
+      errcnt++;
+    }
+  }
+  if (errcnt > 0) {
+    LOG_DEBUG("Failed to move " << errcnt << " broadcast ops.\n");
+    return llvm::failure();
+  }
+  return llvm::success();
+}
+
+llvm::LogicalResult
+UBUsageOptPass::optSmallBlock(Block *block,
+                              const CVPipeline::MemoryDependenceGraph &memGraph,
+                              CVPipeline::ComputeBlockIdManager &bm) {
+  if (!isa<scf::ForOp>(block->getParentOp())) {
+    return llvm::success();
+  }
+
+  int errcnt = 0;
+  int maxBlockId = -1;
+  for (Operation &op : *block) {
+    int blockId = bm.getBlockIdByOp(&op);
+    if (blockId > maxBlockId) {
+      maxBlockId = blockId;
+    }
+  }
+
+  for (int blockId = 0; blockId <= maxBlockId; ++blockId) {
+    auto opsInSmallBlcok = bm.getOpsByBlockId(blockId);
+    if (opsInSmallBlcok.size() > BLOCK_SMALL_SIZE || opsInSmallBlcok.empty()) {
+      continue;
+    }
+
+    SetVector<int> candidateUserBlockIds;
+    for (Operation *op : opsInSmallBlcok) {
+      for (auto operand : op->getOperands()) {
+        auto defOp = operand.getDefiningOp();
+        if (!defOp) {
+          continue;
+        }
+        Operation *defInBlock = CVPipeline::getAncestorInBlock(defOp, block);
+        if (!defInBlock || defInBlock->getBlock() != block) {
+          continue;
+        }
+        if (CVPipeline::getOpCoreType(defInBlock) !=
+            CVPipeline::CoreType::VECTOR_ONLY) {
+          continue;
+        }
+
+        int candidateBlockId = bm.getBlockIdByOp(defInBlock);
+        if (candidateBlockId != blockId && candidateBlockId != -1) {
+          candidateUserBlockIds.insert(candidateBlockId);
+        }
+      }
+    }
+
+    if (candidateUserBlockIds.size() != 1) {
+      continue;
+    }
+    llvm::SmallVector<Operation *> willaddOps(opsInSmallBlcok.begin(),
+                                              opsInSmallBlcok.end());
+    if (!willCreateCycle(willaddOps, block, memGraph, candidateUserBlockIds[0],
+                         bm)
+             .value_or(true)) {
+      for (Operation *op : opsInSmallBlcok) {
+        bm.updateBlockId(op, candidateUserBlockIds[0]);
+      }
+    } else {
+      LOG_DEBUG("Failed to merge small block "
+                << blockId << " to block " << candidateUserBlockIds[0] << "\n");
+      errcnt++;
+    }
+  }
+
+  if (errcnt > 0) {
+    LOG_DEBUG("Failed to merge " << errcnt << " small blocks.\n");
+    return llvm::failure();
+  }
+  return llvm::success();
+}
+
 void mlir::triton::UBUsageOptPass::runOnOperation() {
   LOG_DEBUG("--- Pass: UBUsageOpt ---\n");
 
@@ -784,13 +921,27 @@ void mlir::triton::UBUsageOptPass::runOnOperation() {
   auto &aliasAnalysis = getAnalysis<AliasAnalysis>();
   CVPipeline::MemoryDependenceGraph memDepGraph(module, aliasAnalysis);
   auto bm = CVPipeline::ComputeBlockIdManager(module);
+  bool isUBRefineOptEnabled = false;
+  auto attr = module->getAttr(CVPipeline::kEnableUbRefineOpt);
+  if (attr) {
+    isUBRefineOptEnabled = true;
+  }
 
   llvm::SmallVector<Block *> blocks;
   module.walk([&](Block *block) { blocks.push_back(block); });
 
   for (Block *block : blocks) {
     if (UBUsageOptimization(block, memDepGraph, bm).failed()) {
-      llvm::errs() << "UB usage optimization failed in block:\n";
+      llvm::errs() << "UB usage optimization failed in block.\n";
+    }
+    if (isUBRefineOptEnabled) {
+      if (optBroadcast(block, memDepGraph, bm).failed()) {
+        llvm::errs() << "Broadcast check failed in block.\n";
+      }
+
+      if (optSmallBlock(block, memDepGraph, bm).failed()) {
+        llvm::errs() << "Small block optimization failed in block.\n";
+      }
     }
   }
 

@@ -288,9 +288,10 @@ MemoryDependenceGraph::collectOuterEffects(Operation *op, bool &unknown,
   if (auto markOp = dyn_cast<annotation::MarkOp>(op)) {
     if (markOp->hasAttr(CVPipeline::kInlinableQuantScaleAttr)) {
       return {};
+    } else {
+      MemoryEffects::EffectInstance scopedWrite(MemoryEffects::Write::get());
+      return {remapEffectValue(scopedWrite, markOp.getSrc())};
     }
-    MemoryEffects::EffectInstance scopedWrite(MemoryEffects::Write::get());
-    return {remapEffectValue(scopedWrite, markOp.getSrc())};
   }
 
   if (auto allocTensorOp = dyn_cast<bufferization::AllocTensorOp>(op)) {

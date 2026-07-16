@@ -123,7 +123,7 @@ bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify,
   DenseMap<Operation *, int> origBlockIdMap;
   for (auto *op : opsToUnify) {
     auto optBlockId = getOpBlockId(op);
-    origBlockIdMap[op] = optBlockId ? static_cast<int>(*optBlockId) : -1;
+    origBlockIdMap[op] = optBlockId ? *optBlockId : -1;
     bm.updateBlockId(op, targetBlockId);
   }
 

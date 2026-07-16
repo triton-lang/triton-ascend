@@ -36,7 +36,6 @@ namespace triton {
 // Maximum number of flag allocation attempts per transfer group
 static constexpr int kMaxFlagAttempts = 16;
 static constexpr int kMaxTotalFlags = 15;
-static constexpr int kFlagThresholdSingleBuffer = 7;
 
 // --- Attribute helpers ---
 
@@ -1167,7 +1166,7 @@ void AddMultiBufferOuterScopePass::runOnOperation() {
   }
   LDBG("[Step 1/3] Done: " << groups.size() << " transfer groups");
 
-  int interCoreBufNum = BufferCountManager::getInstance().getBufferCountByType(
+  int interCoreBufNum = BufferCountManager(module).getBufferCountByType(
       BufferCountManager::DepType::InterCore);
   bool isDoubleBuf = (interCoreBufNum > 1);
   LDBG("[BufferCount] interCoreBufNum=" << interCoreBufNum
@@ -1183,7 +1182,10 @@ void AddMultiBufferOuterScopePass::runOnOperation() {
   tagLoadStoreOpsWithCrossDeps(loadStoreByTid);
 
   // Check flag ID budget: hardware supports 16 flags (0-15).
-  // Each cross-core double-buffer group needs 2 flags (input + output).
+  // Each cross-core double-buffer group needs 1 additional output flag
+  // (in the worst case, ignoring output flag reuse). Module flags that
+  // are unrelated to fixpipe/copy multi-buffer must not trigger a
+  // downgrade, so we compare (maxFlagId + groupCount) against 15.
   std::set<int> usedFlags;
   module.walk([&](Operation *op) {
     if (isa<hivm::SyncBlockSetOp>(op) || isa<hivm::SyncBlockWaitOp>(op)) {
@@ -1203,10 +1205,22 @@ void AddMultiBufferOuterScopePass::runOnOperation() {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
-  if (flagCount > kFlagThresholdSingleBuffer) {
-    LDBG("[FlagBudget] flag count " << flagCount << " > "
-                                    << kFlagThresholdSingleBuffer
-                                    << ", forcing single-buffer");
+  // Soft downgrade: only fixpipe/copy transfer groups consume new
+  // output flags. If (maxFlagId + groupCount) >= kMaxTotalFlags,
+  // the budget cannot accommodate all groups.
+  int maxFlagId = -1;
+  for (int f : usedFlags) {
+    if (f > maxFlagId)
+      maxFlagId = f;
+  }
+  int groupCount = static_cast<int>(groups.size());
+  int sum = maxFlagId + groupCount;
+  LDBG("[FlagBudget] maxFlagId=" << maxFlagId << " groupCount=" << groupCount
+                                 << " sum=" << sum << " (need < "
+                                 << kMaxTotalFlags << ")");
+  if (sum >= kMaxTotalFlags) {
+    LDBG("[FlagBudget] budget exceeded (maxFlagId + groupCount >= "
+         << kMaxTotalFlags << "), forcing single-buffer");
     isDoubleBuf = false;
   }
 

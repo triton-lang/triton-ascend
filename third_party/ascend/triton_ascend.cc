@@ -424,25 +424,38 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
           pm.addPass(mlir::triton::createAddDynamicCVPipelinePass(opts));
         });
 
-  m.def("set_buffer_count", [](const std::string &type, int count) {
+  m.def("set_buffer_count", [](mlir::ModuleOp &module, const std::string &type,
+                               int count) {
+    mlir::triton::BufferCountManager mgr(module);
     if (type == "INTRA") {
-      mlir::triton::BufferCountManager::getInstance().setBufferCount(
-          mlir::triton::BufferCountManager::DepType::IntraCore, count);
+      mgr.setBufferCount(mlir::triton::BufferCountManager::DepType::IntraCore,
+                         count);
     } else if (type == "INTER") {
-      mlir::triton::BufferCountManager::getInstance().setBufferCount(
-          mlir::triton::BufferCountManager::DepType::InterCore, count);
+      mgr.setBufferCount(mlir::triton::BufferCountManager::DepType::InterCore,
+                         count);
     } else if (type == "LOAD") {
-      mlir::triton::BufferCountManager::getInstance().setBufferCount(
-          mlir::triton::BufferCountManager::DepType::LoadStore, count);
+      mgr.setBufferCount(mlir::triton::BufferCountManager::DepType::LoadStore,
+                         count);
     }
-  });
-
-  m.def("set_enable_dynamic_cv_flow_optimization", [](bool enable) {
-    mlir::triton::setEnableDynamicFlowOptimization(enable);
   });
 
   m.def("set_enable_cube_block_merge",
         [](bool enable) { mlir::CVPipeline::setEnableCubeBlockMerge(enable); });
+
+  m.def("set_enable_ub_refine_opt", [](mlir::ModuleOp &moduleop, bool enable) {
+    OpBuilder builder(moduleop.getContext());
+    if (enable) {
+      moduleop->setAttr(CVPipeline::kEnableUbRefineOpt, builder.getUnitAttr());
+    }
+  });
+  m.def("set_enable_buffer_insert_optimization",
+        [](mlir::ModuleOp &moduleop, bool enable) {
+          OpBuilder builder(moduleop.getContext());
+          if (enable) {
+            moduleop->setAttr(CVPipeline::kInsertionOptimization,
+                              builder.getUnitAttr());
+          }
+        });
 }
 
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL

@@ -42,7 +42,7 @@ void SeparateMemoryFromComputePass::runOnOperation() {
     return;
   }
 
-  int depth = BufferCountManager::getInstance().getBufferCountByType(
+  int depth = BufferCountManager(module).getBufferCountByType(
       BufferCountManager::DepType::LoadStore);
 
   if (depth <= 1) {

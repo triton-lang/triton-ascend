@@ -37,7 +37,7 @@ using namespace triton;
 void DecoupleComputeAndMemoryPass::runOnOperation() {
   ModuleOp module = getOperation();
 
-  int depth = BufferCountManager::getInstance().getBufferCountByType(
+  int depth = BufferCountManager(module).getBufferCountByType(
       BufferCountManager::DepType::LoadStore);
 
   if (depth <= 1) {

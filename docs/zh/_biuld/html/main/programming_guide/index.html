@@ -1,0 +1,1091 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html"><link rel="next" title="Triton-Ascend算子迁移" href="../migration_guide/index.html"><link rel="prev" title="Tutorials" href="../examples/index.html">
+
+    <!-- Generated with Sphinx 9.0.4 and Furo 2025.12.19 -->
+        <title>Triton算子开发指南 - Triton Ascend latest documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d75fae25" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=356d010d" />
+    <link rel="stylesheet" type="text/css" href="../_static/lang-switcher.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f0f0f0;
+  --color-code-foreground: black;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../index.html"><div class="brand">Triton Ascend latest documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
+  
+  <span class="sidebar-brand-text">Triton Ascend latest documentation</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">从这里开始</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../release_note.html">版本说明</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../quick_start.html">快速入门</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../installation_guide.html">安装指南</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">教程与样例</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="vector_operator.html">Vector算子开发</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cube_operator.html">Cube算子开发</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cv_fusion_operator.html">融合算子开发</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../autotune_guide.html">Triton-Ascend autotune</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../examples/index.html">典型算子样例</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">开发指南</span></p>
+<ul class="current">
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Triton-Ascend算子开发</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../migration_guide/index.html">Triton-Ascend算子迁移</a><input aria-label="Toggle navigation of Triton-Ascend算子迁移" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../migration_guide/architecture_difference.html">昇腾与GPU的开发差异</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../migration_guide/migrate_from_gpu.html">GPU Triton算子迁移</a></li>
+</ul>
+</li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../debug_guide/index.html">Triton-Ascend算子调试与调优</a><input aria-label="Toggle navigation of Triton-Ascend算子调试与调优" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../debug_guide/debugging.html">Triton-Ascend 调试指南</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../debug_guide/profiling.html">Triton-Ascend 性能分析方法</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../debug_guide/precision.html">精度对比与误差分析</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../environment_variable_and_compiler_options_reference.html">环境变量与编译选项</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API参考</span></p>
+<ul>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../triton_api/index.html">triton.language API</a><input aria-label="Toggle navigation of triton.language API" class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/extract_slice.html">triton.language.extract_slice</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/insert_slice.html">triton.language.insert_slice</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/sync_block.html">triton.language.sync_block_set</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/compile_hint.html">triton.language.compile_hint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/multibuffer.html">triton.language.multibuffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/parallel.html">triton.language.parallel</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/get_element.html">triton.language.get_element</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/index_select_simd.html">triton.language.extra.ascend.libdevice.index_select_simd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_add.html">triton.language.atomic_add</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_and.html">triton.language.atomic_and</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_cas.html">triton.language.atomic_cas</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_max.html">triton.language.atomic_max</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_min.html">triton.language.atomic_min</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_or.html">triton.language.atomic_or</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_xchg.html">triton.language.atomic_xchg</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_xor.html">triton.language.atomic_xor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/eq.html">eq</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/le.html">triton.language.semantic.less_equal</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/ge.html">triton.language.semantic.greater_equal</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/lt.html">triton.language.semantic.less_than</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/gt.html">triton.language.semantic.greater_than</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/ne.html">ne</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/debug_barrier.html">triton.language.debug_barrier</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/max_constancy.html">triton.language.max_constancy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/max_contiguous.html">triton.language.max_contiguous</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/multiple_of.html">triton.language.multiple_of</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/assume.html">triton.language.assume</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/compile_hint.html">triton.language.compile_hint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/multibuffer.html">triton.language.multibuffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/parallel.html">triton.language.parallel</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/sync_block.html">triton.language.sync_block_set</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/arange.html">triton.language.arange</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/cat.html">triton.language.cat</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/full.html">triton.language.full</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/zeros.html">triton.language.zeros</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/zeros_like.html">triton.language.zeros_like</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/cast.html">triton.language.cast</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Debug_Ops/static_print.html">triton.language.static_print</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Debug_Ops/static_assert.html">triton.language.static_assert</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Debug_Ops/device_print.html">triton.language.device_print</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Debug_Ops/device_assert.html">triton.language.device_assert</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Indexing_Ops/flip.html">triton.language.flip</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Indexing_Ops/where.html">triton.language.where</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Indexing_Ops/swizzle2d.html">triton.language.swizzle2d</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/get_element.html">triton.language.get_element</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/index_select_simd.html">triton.language.extra.ascend.libdevice.index_select_simd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Indexing_Ops/gather.html">triton.language.gather</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Inline_Assembly/inline_asm_elementwise.html">triton.language.inline_asm_elementwise</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Iterators/range.html">triton.language.range</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Iterators/static_range.html">triton.language.static_range</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Linear_Algebra_Ops/dot.html">triton.language.dot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Linear_Algebra_Ops/dot_scaled.html">triton.language.dot_scaled</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/and.html">triton.language.tensor.<strong>and</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/or.html">triton.language.tensor.<strong>or</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/not.html">triton.language.tensor.<strong>not</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/logical_and.html">triton.language.tensor.logical_and</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/logical_or.html">triton.language.tensor.logical_or</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/not.html">triton.language.tensor.<strong>not</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/invert.html">triton.language.tensor.<strong>invert</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/lshift.html">triton.language.core.<strong>lshift</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/rshift.html">triton.language.core.<strong>rshift</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/xor.html">triton.language.tensor.<strong>xor</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/add.html">triton.language.add</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sub.html">sub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/mul.html">mul</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/div.html">div</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/floordiv.html">floordiv</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/abs.html">triton.language.abs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/neg.html">triton.language.neg</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/cdiv.html">triton.language.cdiv</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/ceil.html">triton.language.ceil</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/clamp.html">triton.language.clamp</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/cos.html">triton.language.cos</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/div_rn.html">triton.language.div_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/erf.html">triton.language.erf</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/exp.html">triton.language.exp</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/exp2.html">triton.language.exp2</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/fdiv.html">triton.language.fdiv</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/floor.html">triton.language.floor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/fma.html">triton.language.fma</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/log.html">triton.language.log</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/log2.html">triton.language.log2</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/mod.html">mod</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/maximum.html">triton.language.maximum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/minimum.html">triton.language.minimum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/rsqrt.html">triton.language.rsqrt</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sigmoid.html">triton.language.sigmoid</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sin.html">triton.language.sin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/softmax.html">triton.language.softmax</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sqrt.html">triton.language.sqrt</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sqrt_rn.html">triton.language.sqrt_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/umulhi.html">triton.language.umulhi</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/tl.load.html">triton.language.load</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/tl.store.html">triton.language.store</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/tl.make_block_ptr.html">triton.language.make_block_ptr</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/tl.advance.html">triton.language.advance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/load_tensor_descriptor.html">triton.language.load_tensor_descriptor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/make_tensor_descriptor.html">triton.language.make_tensor_descriptor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/store_tensor_descriptor.html">triton.language.store_tensor_descriptor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Programming_Model/program_id.html">triton.language.program_id</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Programming_Model/num_programs.html">triton.language.num_programs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Random_Number_Generation/randint4x.html">triton.language.randint4x</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Random_Number_Generation/randint.html">triton.language.randint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Random_Number_Generation/rand.html">triton.language.rand</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Random_Number_Generation/randn.html">triton.language.randn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/argmax.html">triton.language.argmax</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/argmin.html">triton.language.argmin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/max.html">triton.language.max</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/min.html">triton.language.min</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/reduce.html">triton.language.reduce</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/sum.html">triton.language.sum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/xor_sum.html">triton.language.xor_sum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/associative_scan.html">triton.language.associative_scan</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/cumprod.html">triton.language.cumprod</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/cumsum.html">triton.language.cumsum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/histogram.html">triton.language.histogram</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/sort.html">triton.language.sort</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/broadcast.html">triton.language.broadcast</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/broadcast_to.html">triton.language.broadcast_to</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/expand_dims.html">triton.language.expand_dims</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/interleave.html">triton.language.interleave</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/join.html">triton.language.join</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/permute.html">triton.language.permute</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/ravel.html">triton.language.ravel</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/reshape.html">triton.language.reshape</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/split.html">triton.language.split</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/trans.html">triton.language.trans</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/view.html">triton.language.view</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/extract_slice.html">triton.language.extract_slice</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/insert_slice.html">triton.language.insert_slice</a></li>
+</ul>
+</li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../triton_api/triton/index.html">triton</a><input aria-label="Toggle navigation of triton" class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/jit.html">triton.jit</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/autotune.html">triton.autotune</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/heuristics.html">triton.heuristics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/Config.html">triton.Config</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../libdevice/libdevice_developer_guide.html">libdevice开发者手册</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">特性说明</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../architecture_design_and_core_features.html">架构设计与核心特性</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">常见问题</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../FAQ.html">Triton-Ascend FAQ</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">社区</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../community/CONTRIBUTING_zh.html">贡献指南</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../community/CODE_OF_CONDUCT_zh.html">贡献者公约</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../community/GOVERNANCE_zh.html">治理机制</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../community/community_technical_meeting.html">技术例会</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../community/MAINTAINERS.html">Maintainers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../community/contributor.html">Contributors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../community/SECURITYNOTE_zh.html">安全声明</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="../_sources/programming_guide/index.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="triton">
+<h1>Triton算子开发指南<a class="headerlink" href="#triton" title="Link to this heading">¶</a></h1>
+<p>概述：本文着重介绍了在NPU上进行Triton算子开发中值得注意的问题，分为三个方面：多核任务并行、单核数据搬运、单核数据运算。首先在多核任务并行中介绍了设置最大硬件核数的依据以及具体的实现。然后在单核数据搬运中具体描述了如何设置合适的循环内数据分块大小，并且介绍了过程中常用的优化手段，还补充了可能面临的UB OVERFLOW问题的处理方式。最后回归单个算子，在单核数据运算层面着重介绍了如何开发Triton算子，并强调了相关的关键点。</p>
+<section id="id1">
+<h2>文档组织<a class="headerlink" href="#id1" title="Link to this heading">¶</a></h2>
+<p>本指南将通用开发原则和按硬件执行单元划分的算子开发路径分开组织：</p>
+<ul class="simple">
+<li><p>本页介绍所有 Triton-Ascend 算子都需要关注的通用问题，包括分核、片上内存、访存、Tiling 和 Autotune。</p></li>
+<li><p><a class="reference internal" href="vector_operator.html"><span class="std std-doc">Vector 算子开发</span></a> 介绍主要由 Vector Core 执行的逐元素、归约、Gather/Scatter 等算子。</p></li>
+<li><p><a class="reference internal" href="cube_operator.html"><span class="std std-doc">Cube 算子开发</span></a> 介绍以 <code class="docutils literal notranslate"><span class="pre">tl.dot</span></code>、矩阵乘、批量矩阵乘为核心的算子。</p></li>
+<li><p><a class="reference internal" href="cv_fusion_operator.html"><span class="std std-doc">CV 融合算子开发</span></a> 介绍同一个算子中同时存在 Cube 计算和 Vector 后处理、归约、Softmax 或跨核协同的场景。</p></li>
+</ul>
+<p>简单算子优先参考本仓 <code class="docutils literal notranslate"><span class="pre">docs/zh/examples/</span></code> 和 <code class="docutils literal notranslate"><span class="pre">third_party/ascend/tutorials/</span></code>；复杂算子优先参考 GitHub 上的 <a class="reference external" href="https://github.com/Ascend/triton-ascend-ops">Ascend/triton-ascend-ops</a> 中 <code class="docutils literal notranslate"><span class="pre">tutorial/best_practice/</span></code> 的完整优化案例。</p>
+</section>
+<section id="id2">
+<h2>通用多核任务并行<a class="headerlink" href="#id2" title="Link to this heading">¶</a></h2>
+<section id="id3">
+<h3>设置最大硬件核数<a class="headerlink" href="#id3" title="Link to this heading">¶</a></h3>
+<p>在一个Triton算子中，通常使用grid进行分核操作。对于GPU而言，其计算核心SM通常是几十到几百量级。但是对于昇腾 NPU 平台而言，其计算核心AI Core的数量在几十个的量级。<br />
+虽然运行时接口允许下发并发任务数最大为65535，但超过物理核数的部分是通过新一轮的下发来完成的。如果直接将GPU上的Triton算子拿到昇腾平台上运行，这些大量的任务会引入可观的核启动和核初始化时的额外开销，影响到算子性能表现。<br />
+因此，需要针对昇腾平台特性修改分核逻辑。最推荐的做法是<strong>将分核的数量直接固定为硬件的物理核数</strong>，在核内做更为细致的数据分块：</p>
+<ul class="simple">
+<li><p>对于纯Vector算子，分核数等于<strong>Vector核数量</strong></p></li>
+<li><p>对于CV融合算子，分核数等于<strong>Cube核数量</strong>（通常为Vector核数量的一半），算子执行时会按1：2的比例调用Vector核</p></li>
+</ul>
+<p>一般而言，在NPU卡上，一个计算核心AI Core含有一个cube核，每个cube核配有两个vector核，因此可以通过以下接口获取<strong>Vector核数(vectorcore_num)<strong>与</strong>Cube核数量(aicore_num)</strong>：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">triton.runtime.driver</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">driver</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch_npu</span>
+
+<span class="n">device</span> <span class="o">=</span> <span class="n">torch_npu</span><span class="o">.</span><span class="n">npu</span><span class="o">.</span><span class="n">current_device</span><span class="p">()</span>
+<span class="n">properties</span> <span class="o">=</span> <span class="n">driver</span><span class="o">.</span><span class="n">active</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">get_device_properties</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+<span class="n">vectorcore_num</span> <span class="o">=</span> <span class="n">properties</span><span class="p">[</span><span class="s2">&quot;num_vectorcore&quot;</span><span class="p">]</span>
+<span class="n">aicore_num</span> <span class="o">=</span> <span class="n">properties</span><span class="p">[</span><span class="s2">&quot;num_aicore&quot;</span><span class="p">]</span>
+
+</pre></div>
+</div>
+<p>参考示例代码，先固定核数，再通过内部循环分批处理任务分块：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">NUM_CORE</span> <span class="o">=</span> <span class="n">vectorcore_num</span>
+<span class="n">grid</span> <span class="o">=</span> <span class="p">(</span><span class="n">NUM_CORE</span> <span class="p">,)</span>
+<span class="n">_attn_fwd</span><span class="p">[</span><span class="n">grid</span><span class="p">](</span><span class="n">Q</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span> <span class="n">V</span><span class="p">,</span> <span class="n">M</span><span class="p">,</span> <span class="n">Out</span><span class="p">,</span> <span class="n">acc</span><span class="p">,</span> <span class="n">scale</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+
+<span class="nd">@triton</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">_attn_fwd</span><span class="p">(</span><span class="n">Q</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span> <span class="n">V</span><span class="p">,</span> <span class="n">M</span><span class="p">,</span> <span class="n">Out</span><span class="p">,</span> <span class="n">acc</span><span class="p">,</span> <span class="n">scale</span><span class="p">,</span>
+              <span class="o">...</span><span class="p">,</span>
+              <span class="n">stride_qz</span><span class="p">,</span> <span class="n">stride_qh</span><span class="p">,</span>
+              <span class="n">Z</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span> <span class="n">H</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span>
+              <span class="n">N_CTX</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span>
+              <span class="n">HEAD_DIM</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span>
+              <span class="n">BLOCK_M</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span>
+              <span class="n">BLOCK_N</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span>
+              <span class="n">STAGE</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span>
+              <span class="p">):</span>
+    <span class="c1"># 计算任务总量,将三维任务(Z,H,M)展平为一维总任务数</span>
+    <span class="n">NUM_BLOCKS_M</span> <span class="o">=</span> <span class="n">N_CTX</span> <span class="o">//</span> <span class="n">BLOCK_M</span>
+    <span class="n">NUM_BLOCKS</span> <span class="o">=</span> <span class="n">NUM_BLOCKS_M</span> <span class="o">*</span> <span class="n">Z</span> <span class="o">*</span> <span class="n">H</span>
+
+    <span class="c1"># 每个核根据自己标识选取要处理的任务</span>
+    <span class="n">pid</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">program_id</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>  <span class="c1"># 当前核的唯一ID</span>
+    <span class="n">NUM_CORE</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">num_programs</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>  <span class="c1"># 获取固定启动的总核数</span>
+    <span class="c1"># 循环规则：range(pid, NUM_BLOCKS, NUM_CORE) 实现&quot;跨步分配任务&quot;</span>
+    <span class="c1"># - 起始值pid：每个核从自己的ID开始取任务，避免任务重叠</span>
+    <span class="c1"># - 步长NUM_CORE：按总核数跨步，确保任务均匀分配到各个核</span>
+    <span class="k">for</span> <span class="n">block_idx</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">pid</span><span class="p">,</span> <span class="n">NUM_BLOCKS</span><span class="p">,</span> <span class="n">NUM_CORE</span><span class="p">):</span>
+        <span class="c1"># 计算每次任务的数据偏移</span>
+        <span class="c1"># 【核心：一维任务索引反向还原为原始多维索引】</span>
+        <span class="c1"># block_idx是展平后的一维任务索引，通过整除/取余拆分回原始维度</span>
+        <span class="c1"># 1.拆分Z+H合并轴 &amp; M分块轴：</span>
+        <span class="c1">#   - 整除NUM_BLOCKS_M：提取Z+H合并轴的索引（task_hz_idx）</span>
+        <span class="c1">#   - 取余NUM_BLOCKS_M：提取M维度的分块索引（task_m_idx）</span>
+        <span class="n">task_hz_idx</span> <span class="o">=</span> <span class="n">block_idx</span> <span class="o">//</span> <span class="n">NUM_BLOCKS_M</span>
+        <span class="n">task_m_idx</span> <span class="o">=</span> <span class="n">block_idx</span> <span class="o">%</span> <span class="n">NUM_BLOCKS_M</span>
+        <span class="c1"># 2.拆分Z+H合并轴为原始Z轴和H轴：</span>
+        <span class="c1">#   - 整除H：还原Z轴索引（off_z）</span>
+        <span class="c1">#   - 取余H：还原H轴索引（off_h）</span>
+        <span class="n">off_z</span> <span class="o">=</span> <span class="n">task_hz_idx</span> <span class="o">//</span> <span class="n">H</span>
+        <span class="n">off_h</span> <span class="o">=</span> <span class="n">task_hz_idx</span> <span class="o">%</span> <span class="n">H</span>
+        <span class="c1"># 3.计算数据偏移量：根据还原的Z/H索引，定位Q/K/V张量中对应的数据起始位置</span>
+        <span class="n">qvk_offset</span> <span class="o">=</span> <span class="n">off_z</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">tl</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span> <span class="o">*</span> <span class="n">stride_qz</span> <span class="o">+</span> <span class="n">off_h</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">tl</span><span class="o">.</span><span class="n">int64</span><span class="p">)</span> <span class="o">*</span> <span class="n">stride_qh</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="id4">
+<h2>通用单核数据搬运<a class="headerlink" href="#id4" title="Link to this heading">¶</a></h2>
+<section id="block-size">
+<h3>设置合适的循环内数据分块大小（BLOCK SIZE）<a class="headerlink" href="#block-size" title="Link to this heading">¶</a></h3>
+<p>以add_kernel为例，变量和操作共同决定了片上内存空间的占用大，通过修改BLOCK_SIZE大小可以调整循环内数据分块和计算中间结果占用的大小。如果超过上限则算子编译时会提示预期占用大小并报错。要达到最大计算访存比，BLOCK_SIZE需要在不超出片上空间时尽可能大，这可以通过Triton-Ascend的<a class="reference internal" href="../examples/06_autotune_example.html"><span class="std std-doc">Autotune</span></a>预先设置不同的BLOCK_SIZE，运行时会自动选取最优设置。</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">triton.language</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">tl</span>
+
+<span class="nd">@triton</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">add_kernel</span><span class="p">(</span><span class="n">x_ptr</span><span class="p">,</span>
+               <span class="n">y_ptr</span><span class="p">,</span>
+               <span class="n">out_ptr</span><span class="p">,</span>
+               <span class="n">n</span><span class="p">,</span>  <span class="c1"># 元素总数量。</span>
+               <span class="n">BLOCK_SIZE</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span>  <span class="c1"># 分块元素数量。</span>
+               <span class="p">):</span>
+    <span class="n">pid</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">program_id</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">NUM_CORE</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">num_programs</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">NUM_BLOCKS</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">cdiv</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">BLOCK_SIZE</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">block_idx</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">pid</span><span class="p">,</span> <span class="n">NUM_BLOCKS</span><span class="p">,</span> <span class="n">NUM_CORE</span><span class="p">):</span>
+        <span class="n">block_start</span> <span class="o">=</span> <span class="n">block_idx</span> <span class="o">*</span> <span class="n">BLOCK_SIZE</span>
+        <span class="c1"># 分块大小为 BLOCK_SIZE</span>
+        <span class="n">offsets</span> <span class="o">=</span> <span class="n">block_start</span> <span class="o">+</span> <span class="n">tl</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">BLOCK_SIZE</span><span class="p">)</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="n">offsets</span> <span class="o">&lt;</span> <span class="n">n</span>
+        <span class="c1"># 加载 x,y 数据到片上内存</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">x_ptr</span> <span class="o">+</span> <span class="n">offsets</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">y_ptr</span> <span class="o">+</span> <span class="n">offsets</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+
+        <span class="n">output</span> <span class="o">=</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+
+        <span class="n">tl</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="n">out_ptr</span> <span class="o">+</span> <span class="n">offsets</span><span class="p">,</span> <span class="n">output</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="tensor">
+<h3>尽量保证Tensor的尾轴大小数据对齐<a class="headerlink" href="#tensor" title="Link to this heading">¶</a></h3>
+<p>【描述】对于VV类算子需要调用Vector核计算时，昇腾硬件的UB要求Tensor的尾轴大小能被32Bytes整除，而对于CV类算子需要调用vector核和Cube核计算时，要求Tensor的尾轴大小能被512Bytes整除，若尾轴长度不足则会自动补齐。在此前提下，对模型中shape为(2048,3)和(2048,1)Tensor的种种操作，都会因为自动补齐导致性能明显恶化，此时可考虑通过转置操作将对齐轴转到低维，直到store时再转置为原始状态，从而规避自动补齐，优化计算速度。同时由于转置操作本身也受自动补齐规则的影响，因此同样需要特殊技巧来规避补齐。这里列出一个”借轴转置”的tip，适用于<strong>tensor.numel() % 256Byte == 0</strong>的场景，具体操作如下：</p>
+<ul class="simple">
+<li><p>注：VV类算子表示该类算子在运算过程中只使用了Vector Core；CV类算子表示该类算子运算过程中既使用了AI Core又使用了Vector Core。</p></li>
+<li><p>示例</p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># conv_state = tensor([2048, 3], bfloat16)</span>
+<span class="n">conv_state</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">conv_state_ptr</span> <span class="o">+</span> <span class="n">conv_batch_offs</span> <span class="o">*</span> <span class="n">conv_batch_stride</span> <span class="o">+</span> <span class="n">doffs</span> <span class="o">*</span> <span class="mi">3</span> <span class="o">+</span> <span class="n">tl</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2048</span> <span class="o">*</span> <span class="mi">3</span><span class="p">))</span> <span class="c1"># 当成1D tensor load，此时由于numel对齐，不会自动补齐。</span>
+<span class="n">conv_state_T</span> <span class="o">=</span> <span class="n">conv_state</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">128</span><span class="p">,</span> <span class="mi">16</span> <span class="o">*</span> <span class="mi">3</span><span class="p">)</span><span class="o">.</span><span class="n">trans</span><span class="p">()</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">16</span><span class="p">,</span> <span class="mi">3</span> <span class="o">*</span> <span class="mi">128</span><span class="p">)</span><span class="o">.</span><span class="n">trans</span><span class="p">()</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">3</span> <span class="o">*</span> <span class="mi">2048</span><span class="p">,)</span> <span class="c1"># 长轴(2048)裂出一根对齐轴(16)借给短轴(3)，从而让两个轴都对齐</span>
+</pre></div>
+</div>
+</section>
+<section id="ub-ubselect">
+<h3>先将数据搬运到UB上，再从UB中select目标值<a class="headerlink" href="#ub-ubselect" title="Link to this heading">¶</a></h3>
+<p>【描述】在NPU的离散场景下，可以先将数据搬运到UB，再从share中select目标值。</p>
+<ul class="simple">
+<li><p>示例</p></li>
+</ul>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span><span class="gu">@triton.jit</span>
+def pick_kernel(
+<span class="w"> </span>       x_ptr,
+<span class="w"> </span>       idx_ptr,
+<span class="w"> </span>       y_ptr,
+<span class="w"> </span>       stride_x,
+<span class="w"> </span>       stride_idx,
+<span class="w"> </span>       stride_y,
+<span class="w"> </span>       M: tl.constexpr,
+<span class="w"> </span>       N: tl.constexpr
+):
+<span class="w"> </span>   pid = tl.program_id(0)
+<span class="w"> </span>   rn = tl.arange(0, N)
+
+<span class="w"> </span>   idx = tl.load(idx_ptr + rn * stride_idx)
+<span class="w"> </span>   mask = idx &lt; M
+
+<span class="w"> </span>   # 原先写法
+<span class="w"> </span>   # val = tl.load(x_ptr + idx * stride_x, mask=mask)
+<span class="w"> </span>   # 修改后写法
+<span class="w"> </span>   rm = tl.arange(0, M)
+<span class="w"> </span>   x_shared = tl.load(x_ptr + rm * stride_x)  # [M]
+<span class="w"> </span>   val = tl.gather(x_shared, idx, 0)
+
+<span class="w"> </span>   tl.store(y_ptr + rn * stride_y, val, mask=mask)
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>优化前后性能分析和对比</p></li>
+</ul>
+<p>通过msprof工具执行用例可得到PROF_*文件夹，里面包含了op_summary_*.csv文件，该文件可以帮助分析流水情况。注：“*”表示时间戳，<a class="reference internal" href="../debug_guide/profiling.html"><span class="std std-doc">性能数据采集参考方法</span></a>。</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head text-left"><p></p></th>
+<th class="head text-left"><p>Op Name</p></th>
+<th class="head text-left"><p>aiv_mte2_time(us)</p></th>
+<th class="head text-left"><p>aiv_mte2_ratio</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td class="text-left"><p>未优化</p></td>
+<td class="text-left"><p>pick_kernel</p></td>
+<td class="text-left"><p>0.686</p></td>
+<td class="text-left"><p>0.008</p></td>
+</tr>
+<tr class="row-odd"><td class="text-left"><p>优化</p></td>
+<td class="text-left"><p>pick_kernel</p></td>
+<td class="text-left"><p>1.041</p></td>
+<td class="text-left"><p>0.066</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>通过分析表格中的数据可以发现，优化前后的aiv_mte2_time(us)和aiv_mte2_ratio差距较大，优化方案通过先将大部分数据搬运到UB上，减少小批量数据通过L2搬运到UB的次数，减少了L2搬运到UB上的总时间。</p>
+</section>
+<section id="id5">
+<h3>存算并行<a class="headerlink" href="#id5" title="Link to this heading">¶</a></h3>
+<p>Triton-Ascend支持两种数据处理模式：存算串行和存算并行。</p>
+<p>存算串行：先从全局内存搬运数据到片上内存，完成计算后，再搬运下一批数据。这种方式存在明显的空闲等待时间，效率较低。</p>
+<p>存算并行：在搬运第一批数据至片上内存的同时，已开始对其执行计算；随后继续搬运第二批数据，形成“搬运+计算”重叠的流水线式操作，显著提升整体吞吐率。</p>
+<p>实现存算并行的关键在于合理设计数据切分（Tiling）策略，使得在当前批次数据计算过程中，能够提前准备下一阶段所需的数据，从而实现数据搬运与计算过程的并
+行化。目前，编译器默认配置multiBuffer=True，默认支持存算并行。</p>
+</section>
+<section id="tiling">
+<h3>Tiling优化<a class="headerlink" href="#tiling" title="Link to this heading">¶</a></h3>
+<p>AI Core进行计算的时候要先将数据搬运至片上内存，而片上内存的空间通常远小于AI Core要处理的总数据量，以Atlas 800T/I A2产品为例，片上内存容量为192KB，默认开启doublebuffer特性后容量还会减至原来的一半。因此算子计算时需要对数据进行分块操作，每次只加载处理其中的一小部分数据。</p>
+<ul class="simple">
+<li><p>示例</p></li>
+</ul>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span><span class="gu">@libentry()</span>
+<span class="gu">@triton.autotune(configs=runtime.get_tuned_config(&quot;masked_fill&quot;), key=[&quot;N&quot;])</span>
+<span class="gu">@triton.jit</span>
+<span class="gd">- def masked_fill_kernel(inp, expand_mask, value, out, N, BLOCK_SIZE: tl.constexpr):</span>
+<span class="gi">+ def masked_fill_kernel(inp, expand_mask, value, out, N, BLOCK_SIZE: tl.constexpr, BLOCK_SIZE_SUB: tl.constexpr):</span>
+<span class="w"> </span>   pid = tl.program_id(axis=0)
+<span class="gi">+   base_offset = pid * BLOCK_SIZE</span>
+
+<span class="gi">+   # 计算需要处理的块的总数</span>
+<span class="gi">+   num_sub_blocks = tl.cdiv(BLOCK_SIZE, BLOCK_SIZE_SUB)</span>
+
+<span class="gi">+   # 针对每个子块进行循环处理</span>
+<span class="gi">+   for sub_block_idx in range(num_sub_blocks):</span>
+<span class="gi">+       # 计算当前子块的偏移量</span>
+<span class="gi">+       sub_offset = base_offset + sub_block_idx * BLOCK_SIZE_SUB</span>
+<span class="gi">+       offsets = sub_offset + tl.arange(0, BLOCK_SIZE_SUB)</span>
+<span class="gd">-       offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)</span>
+<span class="w"> </span>       mask = offsets &lt; N
+<span class="w"> </span>       # Load input and mask
+<span class="w"> </span>       input_vals = tl.load(inp + offsets, mask=mask, other=0)
+<span class="w"> </span>       fill_mask_vals = tl.load(expand_mask + offsets, mask=mask, other=0).to(tl.int1)
+
+<span class="w"> </span>       # Write the original input first
+<span class="w"> </span>       tl.store(out + offsets, input_vals, mask=mask)
+
+<span class="w"> </span>       # Overlay and write value at the position that needs to be filled
+<span class="gd">-       value_to_write = tl.full([BLOCK_SIZE], value, dtype=input_vals.dtype)</span>
+<span class="gi">+       value_to_write = tl.full([BLOCK_SIZE_SUB], value, dtype=input_vals.dtype)</span>
+<span class="w"> </span>       overwrite_vals = tl.where(fill_mask_vals, value_to_write, tl.load(out + offsets, mask=mask, other=0))
+<span class="w"> </span>       tl.store(out + offsets, overwrite_vals, mask=mask)
+</pre></div>
+</div>
+</section>
+<section id="triton-autotune">
+<h3>Triton Autotune 自动调优<a class="headerlink" href="#triton-autotune" title="Link to this heading">¶</a></h3>
+<p>在 Tiling 分块优化中，BLOCK_SIZE、BLOCK_SIZE_SUB等分块参数的取值直接影响算子性能，但手动调试参数组合效率低且难以找到最优值。triton.autotune是Triton框架提供的自动调优工具，能遍历预设的参数配置，通过实际运行对比性能，自动选择最优参数组合，是Tiling优化的核心配套手段。</p>
+<p>如果你关注 Triton-Ascend 上 <code class="docutils literal notranslate"><span class="pre">configs=[]</span></code> 的推荐用法、自动 Tiling 的适用边界，可进一步参考 <a class="reference internal" href="../autotune_guide.html"><span class="std std-doc">Triton-Ascend autotune 使用指南</span></a>。</p>
+<ul>
+<li><p>核心作用
+自动遍历参数空间：针对BLOCK_SIZE、BLOCK_SIZE_SUB等 constexpr 类型的分块参数，批量测试不同取值的性能。
+性能基准对比：以算子的执行耗时为指标，筛选出适配当前硬件的最优参数。
+缓存调优结果：调优后的最优配置会被缓存，后续调用算子时直接复用，避免重复调优。</p></li>
+<li><p>简单示例</p>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span>import triton.language as tl
+
+<span class="gu">@triton.autotune(</span>
+configs=[ # 待测试的参数配置列表,参数候选值需要是2的幂次
+<span class="w"> </span>       triton.Config({&#39;BLOCK_SIZE&#39;: 128}),
+<span class="w"> </span>       triton.Config({&#39;BLOCK_SIZE&#39;: 256}),
+<span class="w"> </span>       triton.Config({&#39;BLOCK_SIZE&#39;: 512}),
+<span class="w"> </span>   ],
+<span class="w"> </span>   key=[&#39;n_elements&#39;], # 调优维度：参数取值依赖的输入维度
+)
+<span class="gu">@triton.jit</span>
+def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+<span class="w"> </span>   pid = tl.program_id(axis=0)
+<span class="w"> </span>   block_start = pid * BLOCK_SIZE
+<span class="w"> </span>   offsets = block_start + tl.arange(0, BLOCK_SIZE)
+<span class="w"> </span>   mask = offsets &lt; n_elements
+
+<span class="w"> </span>   x = tl.load(x_ptr + offsets, mask=mask)
+<span class="w"> </span>   y = tl.load(y_ptr + offsets, mask=mask)
+<span class="w"> </span>   output = x + y
+<span class="w"> </span>   tl.store(output_ptr + offsets, output, mask=mask)
+</pre></div>
+</div>
+</li>
+<li><p>注：设置以下环境变量，便可打印出最优参数信息。</p>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span>export TRITON_PRINT_AUTOTUNING=1
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="max-autotune">
+<h3>进阶：使用 max_autotune 自动调优<a class="headerlink" href="#max-autotune" title="Link to this heading">¶</a></h3>
+<p>对于 Ascend NPU 算子，要想达到最优性能，除BLOCK_SIZE外，还需调优 num_stages、enable_hivm_auto_cv_balance、tile_mix_vector_loop 等多个硬件相关参数。若使用 &#64;triton.autotune 手动枚举所有组合，会导致配置列表爆炸式增长，代码难以维护。</p>
+<p>max_autotune 是专为 Ascend NPU 设计的扩展装饰器（位于 triton.backends.ascend.runtime），允许用户仅提供基础配置，其余调优参数以列表形式传入，装饰器自动生成全部组合的 Config 列表。</p>
+<ul>
+<li><p>核心作用
+开发者只需提供少量基础配置（如BLOCK_SIZE），所有与该算子类型相关的编译器选项（例如 num_stages、enable_hivm_auto_cv_balance、tile_mix_vector_loop、enable_ubuf_saving 等）都会通过内置的合理默认值自动纳入最优组合的搜索范围，无需开发者显式列举，一次性完成最优 tiling 和编译器选项组合的自动寻优。若开发者希望对某些参数进行限定，也可通过显式传入列表来覆盖默认搜索范围。</p></li>
+<li><p>简单示例</p>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span>from triton.backends.ascend.runtime import max_autotune
+
+<span class="gu">@max_autotune(</span>
+<span class="w"> </span>   configs=[
+<span class="w"> </span>       triton.Config({&#39;BLOCK_SIZE&#39;: 128}),
+<span class="w"> </span>       triton.Config({&#39;BLOCK_SIZE&#39;: 256}),
+<span class="w"> </span>   ],
+<span class="w"> </span>   key=[&#39;n_elements&#39;],
+<span class="w"> </span>   kernel_type=&quot;vector&quot;,           # 算子类型，支持 cube/mix/vector
+<span class="w"> </span>   enable_ubuf_saving=[True, False] # 可选，默认已包含
+)
+<span class="gu">@triton.jit</span>
+def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr, **META):
+<span class="w"> </span>   pid = tl.program_id(axis=0)
+<span class="w"> </span>   block_start = pid * BLOCK_SIZE
+<span class="w"> </span>   offsets = block_start + tl.arange(0, BLOCK_SIZE)
+<span class="w"> </span>   mask = offsets &lt; n_elements
+<span class="w"> </span>   x = tl.load(x_ptr + offsets, mask=mask)
+<span class="w"> </span>   y = tl.load(y_ptr + offsets, mask=mask)
+<span class="w"> </span>   output = x + y
+<span class="w"> </span>   tl.store(output_ptr + offsets, output, mask=mask)
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="npuub-overflow">
+<h3>如何在NPU上避免UB OVERFLOW<a class="headerlink" href="#npuub-overflow" title="Link to this heading">¶</a></h3>
+<p>【描述】在NPU上，UB或者L1 Size存在上限，当出现该错误时，需要减少单次搬运的数据量，以for循环的方式处理长序列场景。</p>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span>E triton.compiler. errors.MLIRCompilationError:
+E ///--------------------- [ERROR][Triton][BEG]-------------------------
+E [ConvertLinalgRToBinary] encounters error:
+E loc(&quot;/tmp/tmpsb6qkdih/kernel.ttadapter.mlir&quot;:2:1): error: Failed to run BishengHIR pipeline
+E
+E loc(&quot;/tmp/tmpsb6qkdih/kernel.ttadapter.mlir&quot;:3:3): error: ub overflow, requires 3072256 bits while 1572864 bits available! (possible reason
+large or block number is more than what user expect due to multi-buffer feature is enabled and some ops need extra local buffer. )
+</pre></div>
+</div>
+<p>【注意】A2系列产品UB大小为192KB(1572864 bits)。</p>
+</section>
+</section>
+<section id="id6">
+<h2>通用单核数据运算<a class="headerlink" href="#id6" title="Link to this heading">¶</a></h2>
+<section id="id7">
+<h3>开发目标<a class="headerlink" href="#id7" title="Link to this heading">¶</a></h3>
+<p>在昇腾NPU单核上实现基础数据运算算子（如加减乘除、激活函数、简单矩阵元素运算）。保证算子在单核内高效执行，为后续多核并行和分布式扩展打下基础。</p>
+</section>
+<section id="id8">
+<h3>开发步骤<a class="headerlink" href="#id8" title="Link to this heading">¶</a></h3>
+<p>1.确定算子功能
+-明确输入/输出张量的形状、数据类型（float16/float32/int32 等）。
+-确认是否需要广播、边界处理。</p>
+<p>2.编写核函数（kernel）
+单核运算通常对应块级的数据处理。
+单核数据运算示例：向量加法</p>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span><span class="gu">@triton.jit</span>
+def add_kernel(x_ptr, # Pointer to first input vector.
+<span class="w"> </span>   y_ptr, # Pointer to second input vector.
+<span class="w"> </span>   output_ptr, # output 向量的指针.
+<span class="w"> </span>   n_elements, # 向量的大小.
+<span class="w"> </span>   BLOCK_SIZE: tl.constexpr, # 每个进程需要处理的元素个数.
+<span class="w"> </span>   # 注意：constexpr属性表示它可以被用作shape值.
+):
+<span class="w"> </span>   pid = tl.program_id(axis=0) # We use a 1D launch grid so axis is 0.
+<span class="w"> </span>   block_start = pid * BLOCK_SIZE
+<span class="w"> </span>   offsets = block_start + tl.arange(0, BLOCK_SIZE)
+<span class="w"> </span>   mask = offsets &lt; n_elements
+<span class="w"> </span>   x = tl.load(x_ptr + offsets, mask=mask)
+<span class="w"> </span>   y = tl.load(y_ptr + offsets, mask=mask)
+<span class="w"> </span>   output = x + y
+<span class="w"> </span>   tl.store(output_ptr + offsets, output, mask=mask)
+</pre></div>
+</div>
+<p>调用：</p>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span>def add(x: torch.Tensor, y: torch.Tensor):
+<span class="w"> </span>  output = torch.empty_like(x)
+<span class="w"> </span>  n_elements = output.numel()
+<span class="w"> </span>  grid = lambda meta: (triton.cdiv(n_elements, meta[&#39;BLOCK_SIZE&#39;]), )
+<span class="w"> </span>  add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
+<span class="w"> </span>  return output
+</pre></div>
+</div>
+<p>使用上述函数计算两个 torch.tensor 对象的 element-wise sum，并测试其正确性</p>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span>torch.manual_seed(0)
+size = 98432
+x = torch.rand(size, device=&#39;npu&#39;)
+y = torch.rand(size, device=&#39;npu&#39;)
+output_torch = x + y
+output_triton = add(x, y)
+print(output_torch)
+print(output_triton)
+print(f&#39;The maximum difference between torch and triton is &#39;
+f&#39;{torch.max(torch.abs(output_torch - output_triton))}&#39;)
+# Out:
+# tensor([1.3713, 1.3076, 0.4940, ..., 0.6724, 1.2141, 0.9733], device=&#39;npu&#39;)
+# tensor([1.3713, 1.3076, 0.4940, ..., 0.6724, 1.2141, 0.9733], device=&#39;npu&#39;)
+# The maximum difference between torch and triton is 0.0
+</pre></div>
+</div>
+<p>3.单核运算的关键点</p>
+<p>-块级数据处理：每个计算块负责一小段数据，保证并行性。</p>
+<p>-边界检查：使用 mask 或 if (tid &lt; N) 避免越界。</p>
+<p>-块大小选择：合理设置 block 和 grid</p>
+<p>4.性能要点：
+(1)访存优化
+-保证连续访问。
+-使用对齐的 stride，避免跨行/跨列跳跃式访问。
+-尽量让数据块大小对齐到 32 字节边界。
+输入输出 buffer 在分配时保证对齐，避免访存性能下降。
+例:</p>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span>BLOCK_SIZE = 256  # 256 * 4 bytes = 1024 bytes，对齐良好
+
+<span class="gu">@triton.jit</span>
+def vec_add_kernel(X, Y, Z, N,
+<span class="w"> </span>                 BLOCK_SIZE: tl.constexpr):
+<span class="w"> </span>  pid = tl.program_id(axis=0)
+
+<span class="w"> </span>  # 计算当前 block 负责的 index 范围
+<span class="w"> </span>  offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+
+<span class="w"> </span>  # mask 防止越界
+<span class="w"> </span>  mask = offsets &lt; N
+
+<span class="w"> </span>  # 连续访存：offsets 是连续的
+<span class="w"> </span>  x = tl.load(X + offsets, mask=mask)
+<span class="w"> </span>  y = tl.load(Y + offsets, mask=mask)
+
+<span class="w"> </span>  z = x + y
+
+<span class="w"> </span>  # 连续写回
+<span class="w"> </span>  tl.store(Z + offsets, z, mask=mask)
+
+
+def vec_add(x, y):
+<span class="w"> </span>  assert x.numel() == y.numel()
+<span class="w"> </span>  N = x.numel()
+
+<span class="w"> </span>  # 分配对齐内存（PyTorch 默认已经对齐到 64 字节）
+<span class="w"> </span>  z = torch.empty_like(x)
+
+<span class="w"> </span>  # grid：每个 block 处理 BLOCK_SIZE 个元素
+<span class="w"> </span>  grid = lambda meta: (triton.cdiv(N, meta[&#39;BLOCK_SIZE&#39;]),)
+
+<span class="w"> </span>  vec_add_kernel[grid](x, y, z, N, BLOCK_SIZE=BLOCK_SIZE)
+
+<span class="w"> </span>  return z
+</pre></div>
+</div>
+<p>(2)子块划分
+-将大矩阵分解为小block，每个block在 UB 内完成计算。
+-子块划分要兼顾访存连续性和计算单元利用率。
+例：</p>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span>BLOCK_M = 64   # 每个 block 处理 64 行
+BLOCK_N = 64   # 每个 block 处理 64 列
+BLOCK_K = 32   # 内部累加维度
+
+<span class="gu">@triton.jit</span>
+def matmul_kernel(
+<span class="w"> </span>  A, B, C,
+<span class="w"> </span>  M, N, K,
+<span class="w"> </span>  stride_am, stride_ak,
+<span class="w"> </span>  stride_bk, stride_bn,
+<span class="w"> </span>  stride_cm, stride_cn,
+<span class="w"> </span>  BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr
+):
+<span class="w"> </span>  pid_m = tl.program_id(0)  # block 在 M 方向的 id
+<span class="w"> </span>  pid_n = tl.program_id(1)  # block 在 N 方向的 id
+
+<span class="w"> </span>  # 当前 block 对应的起始坐标
+<span class="w"> </span>  offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+<span class="w"> </span>  offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+<span class="w"> </span>  offs_k = tl.arange(0, BLOCK_K)
+
+<span class="w"> </span>  # 初始化累加器
+<span class="w"> </span>  acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+
+<span class="w"> </span>  # 循环分块计算
+<span class="w"> </span>  for k in range(0, K, BLOCK_K):
+<span class="w"> </span>      a = tl.load(
+<span class="w"> </span>          A + (offs_m[:, None] * stride_am + (offs_k[None, :] + k) * stride_ak),
+<span class="w"> </span>          mask=(offs_m[:, None] &lt; M) &amp; (offs_k[None, :] + k &lt; K),
+<span class="w"> </span>          other=0.0
+<span class="w"> </span>      )
+<span class="w"> </span>      b = tl.load(
+<span class="w"> </span>          B + ((offs_k[:, None] + k) * stride_bk + offs_n[None, :] * stride_bn),
+<span class="w"> </span>          mask=(offs_k[:, None] + k &lt; K) &amp; (offs_n[None, :] &lt; N),
+<span class="w"> </span>          other=0.0
+<span class="w"> </span>      )
+<span class="w"> </span>      acc += tl.dot(a, b)
+
+<span class="w"> </span>  # 写回结果
+<span class="w"> </span>  c = C + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+<span class="w"> </span>  tl.store(c, acc, mask=(offs_m[:, None] &lt; M) &amp; (offs_n[None, :] &lt; N))
+</pre></div>
+</div>
+</section>
+</section>
+<section id="id9">
+<h2>通用多维张量切分<a class="headerlink" href="#id9" title="Link to this heading">¶</a></h2>
+<p>Triton 算子处理多维张量时，核心思想是将高维数据映射到硬件的 Block、Core、硬件单元中。本节提供二维与三维张量的典型处理示例。</p>
+<section id="gemm">
+<h3>二维张量切分：以矩阵乘法（GEMM）为例<a class="headerlink" href="#gemm" title="Link to this heading">¶</a></h3>
+<p>对于二维矩阵乘法，通常需要在高度（M）和宽度（N）上进行二维切分，并在深度（K）上进行循环迭代。</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@triton</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">matmul_kernel</span><span class="p">(</span><span class="n">a_ptr</span><span class="p">,</span> <span class="n">b_ptr</span><span class="p">,</span> <span class="n">c_ptr</span><span class="p">,</span> <span class="n">M</span><span class="p">,</span> <span class="n">N</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span>
+                  <span class="n">BLOCK_M</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span> <span class="n">BLOCK_N</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span> <span class="n">BLOCK_K</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">):</span>
+    <span class="c1"># 1. 任务划分：计算当前 Block 在 M 和 N 维度上的坐标</span>
+    <span class="n">pid_m</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">program_id</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">pid_n</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">program_id</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="c1"># 2. 定义块指针（Block Pointers），处理多维步长（Strides）</span>
+    <span class="n">offs_am</span> <span class="o">=</span> <span class="n">pid_m</span> <span class="o">*</span> <span class="n">BLOCK_M</span> <span class="o">+</span> <span class="n">tl</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">BLOCK_M</span><span class="p">)</span>
+    <span class="n">offs_bn</span> <span class="o">=</span> <span class="n">pid_n</span> <span class="o">*</span> <span class="n">BLOCK_N</span> <span class="o">+</span> <span class="n">tl</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">BLOCK_N</span><span class="p">)</span>
+    <span class="n">offs_k</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">BLOCK_K</span><span class="p">)</span>
+
+    <span class="n">a_ptrs</span> <span class="o">=</span> <span class="n">a_ptr</span> <span class="o">+</span> <span class="n">offs_am</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="n">stride_am</span> <span class="o">+</span> <span class="n">offs_k</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="p">:]</span> <span class="o">*</span> <span class="n">stride_ak</span>
+    <span class="n">b_ptrs</span> <span class="o">=</span> <span class="n">b_ptr</span> <span class="o">+</span> <span class="n">offs_k</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="n">stride_bk</span> <span class="o">+</span> <span class="n">offs_bn</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="p">:]</span> <span class="o">*</span> <span class="n">stride_bn</span>
+
+    <span class="c1"># 3. 循环迭代 K 维度进行累加计算</span>
+    <span class="n">accumulator</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">BLOCK_M</span><span class="p">,</span> <span class="n">BLOCK_N</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">tl</span><span class="o">.</span><span class="n">float16</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span> <span class="n">BLOCK_K</span><span class="p">):</span>
+        <span class="n">a</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">a_ptrs</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="p">(</span><span class="n">offs_am</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">M</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">offs_k</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="p">:]</span> <span class="o">&lt;</span> <span class="n">K</span><span class="p">))</span>
+        <span class="n">b</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">b_ptrs</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="p">(</span><span class="n">offs_k</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">K</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">offs_bn</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="p">:]</span> <span class="o">&lt;</span> <span class="n">N</span><span class="p">))</span>
+        <span class="n">accumulator</span> <span class="o">+=</span> <span class="n">tl</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+
+        <span class="n">a_ptrs</span> <span class="o">+=</span> <span class="n">BLOCK_K</span> <span class="o">*</span> <span class="n">stride_ak</span>
+        <span class="n">b_ptrs</span> <span class="o">+=</span> <span class="n">BLOCK_K</span> <span class="o">*</span> <span class="n">stride_bk</span>
+
+    <span class="n">tl</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="n">c_ptr</span> <span class="o">+</span> <span class="n">offs_am</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="n">stride_cm</span> <span class="o">+</span> <span class="n">offs_bn</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="p">:]</span> <span class="o">*</span> <span class="n">stride_cn</span><span class="p">,</span> <span class="n">accumulator</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><strong>要点</strong>：</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">pid_m</span></code> / <code class="docutils literal notranslate"><span class="pre">pid_n</span></code> 分别对应 M / N 维度上的 block 编号</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">stride_*</span></code> 显式处理多维步长，避免假设连续内存</p></li>
+<li><p>K 维度通过循环分块累加</p></li>
+</ul>
+</section>
+<section id="batched-gemm">
+<h3>三维及以上张量切分：以 Batched GEMM 为例<a class="headerlink" href="#batched-gemm" title="Link to this heading">¶</a></h3>
+<p>处理三维张量（如 <code class="docutils literal notranslate"><span class="pre">[Batch,</span> <span class="pre">M,</span> <span class="pre">N]</span></code>）时，可以将 <code class="docutils literal notranslate"><span class="pre">Batch</span></code> 维度（B）直接映射到 Triton 的 <code class="docutils literal notranslate"><span class="pre">Grid</span></code> 维度上，或者将其与 <code class="docutils literal notranslate"><span class="pre">M/N</span></code> 维度展平后重新映射。</p>
+<section id="grid-batch">
+<h4>启动 <code class="docutils literal notranslate"><span class="pre">Grid</span></code> 时增加 <code class="docutils literal notranslate"><span class="pre">Batch</span></code> 维度<a class="headerlink" href="#grid-batch" title="Link to this heading">¶</a></h4>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">grid</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">meta</span><span class="p">:</span> <span class="p">(</span><span class="n">triton</span><span class="o">.</span><span class="n">cdiv</span><span class="p">(</span><span class="n">M</span><span class="p">,</span> <span class="n">meta</span><span class="p">[</span><span class="s1">&#39;BLOCK_M&#39;</span><span class="p">]),</span> <span class="n">triton</span><span class="o">.</span><span class="n">cdiv</span><span class="p">(</span><span class="n">N</span><span class="p">,</span> <span class="n">meta</span><span class="p">[</span><span class="s1">&#39;BLOCK_N&#39;</span><span class="p">]),</span> <span class="n">B</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="id10">
+<h4>核函数实现<a class="headerlink" href="#id10" title="Link to this heading">¶</a></h4>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@triton</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">batched_matmul_kernel</span><span class="p">(</span><span class="n">a_ptr</span><span class="p">,</span> <span class="n">b_ptr</span><span class="p">,</span> <span class="n">c_ptr</span><span class="p">,</span> <span class="n">M</span><span class="p">,</span> <span class="n">N</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span> <span class="n">B</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+    <span class="c1"># 获取当前 Batch 的索引</span>
+    <span class="n">pid_b</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">program_id</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+
+    <span class="c1"># 根据 Batch 索引计算全局内存的基地址偏移</span>
+    <span class="n">a_batch_ptr</span> <span class="o">=</span> <span class="n">a_ptr</span> <span class="o">+</span> <span class="n">pid_b</span> <span class="o">*</span> <span class="n">M</span> <span class="o">*</span> <span class="n">K</span>
+    <span class="n">b_batch_ptr</span> <span class="o">=</span> <span class="n">b_ptr</span> <span class="o">+</span> <span class="n">pid_b</span> <span class="o">*</span> <span class="n">K</span> <span class="o">*</span> <span class="n">N</span>
+    <span class="n">c_batch_ptr</span> <span class="o">=</span> <span class="n">c_ptr</span> <span class="o">+</span> <span class="n">pid_b</span> <span class="o">*</span> <span class="n">M</span> <span class="o">*</span> <span class="n">N</span>
+
+    <span class="c1"># 后续 M、N、K 维度的切分与二维 GEMM 完全一致，只需替换基地址指针即可</span>
+    <span class="c1"># ...</span>
+</pre></div>
+</div>
+<p><strong>要点</strong>：</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">tl.program_id(2)</span></code> 取得 Batch 维度的索引</p></li>
+<li><p>每个 Batch 独立计算自己的 <code class="docutils literal notranslate"><span class="pre">a_batch_ptr</span></code> / <code class="docutils literal notranslate"><span class="pre">b_batch_ptr</span></code> / <code class="docutils literal notranslate"><span class="pre">c_batch_ptr</span></code></p></li>
+<li><p>后续 M / N / K 维度的切分逻辑与二维 GEMM 一致</p></li>
+</ul>
+</section>
+</section>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+    <footer>
+        <div class="related-pages">
+            
+            <a class="prev-page" href="../examples/index.html">
+                <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+                <div class="page-info">
+                    <div class="context">
+                        <span>Previous</span>
+                    </div>
+                    <div class="title">Tutorials</div>
+                </div>
+            </a>
+            
+            
+            <a class="next-page" href="../migration_guide/index.html">
+                <div class="page-info">
+                    <div class="context">
+                        <span>Next</span>
+                    </div>
+                    <div class="title">Triton-Ascend算子迁移</div>
+                </div>
+                <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+            
+        </div>
+        <div class="bottom-of-page">
+            <div class="left-details">
+                <div class="copyright">
+                    Copyright &#169; 2026, Huawei
+                </div>
+                Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and
+                <a href="https://github.com/pradyunsg/furo">Furo</a>
+                <div class="last-updated">
+                    Last updated on Jul 16, 2026
+                </div>
+            </div>
+            <div class="right-details">
+            </div>
+        </div>
+    </footer>
+
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Triton算子开发指南</a><ul>
+<li><a class="reference internal" href="#id1">文档组织</a></li>
+<li><a class="reference internal" href="#id2">通用多核任务并行</a><ul>
+<li><a class="reference internal" href="#id3">设置最大硬件核数</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id4">通用单核数据搬运</a><ul>
+<li><a class="reference internal" href="#block-size">设置合适的循环内数据分块大小（BLOCK SIZE）</a></li>
+<li><a class="reference internal" href="#tensor">尽量保证Tensor的尾轴大小数据对齐</a></li>
+<li><a class="reference internal" href="#ub-ubselect">先将数据搬运到UB上，再从UB中select目标值</a></li>
+<li><a class="reference internal" href="#id5">存算并行</a></li>
+<li><a class="reference internal" href="#tiling">Tiling优化</a></li>
+<li><a class="reference internal" href="#triton-autotune">Triton Autotune 自动调优</a></li>
+<li><a class="reference internal" href="#max-autotune">进阶：使用 max_autotune 自动调优</a></li>
+<li><a class="reference internal" href="#npuub-overflow">如何在NPU上避免UB OVERFLOW</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id6">通用单核数据运算</a><ul>
+<li><a class="reference internal" href="#id7">开发目标</a></li>
+<li><a class="reference internal" href="#id8">开发步骤</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id9">通用多维张量切分</a><ul>
+<li><a class="reference internal" href="#gemm">二维张量切分：以矩阵乘法（GEMM）为例</a></li>
+<li><a class="reference internal" href="#batched-gemm">三维及以上张量切分：以 Batched GEMM 为例</a><ul>
+<li><a class="reference internal" href="#grid-batch">启动 <code class="docutils literal notranslate"><span class="pre">Grid</span></code> 时增加 <code class="docutils literal notranslate"><span class="pre">Batch</span></code> 维度</a></li>
+<li><a class="reference internal" href="#id10">核函数实现</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="../_static/documentation_options.js?v=c6e86fd7"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/scripts/furo.js?v=46bd48cc"></script>
+    <script src="../_static/lang-switcher.js"></script>
+    </body>
+</html>

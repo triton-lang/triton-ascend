@@ -27,8 +27,8 @@
 更多
 ------------
 
-- :doc:`常见问题 <FAQ>`
 - :doc:`贡献指南 <community/CONTRIBUTING_zh>`
+- :doc:`常见问题 <FAQ>`
 
 
 .. toctree 驱动侧栏导航。

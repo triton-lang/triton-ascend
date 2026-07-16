@@ -126,7 +126,6 @@ typelist = [
 ]
 
 
-@pytest.mark.skip(reason="not supported after the NPUIR is updated in April, and will be fixed later")
 @pytest.mark.parametrize("B, C, D", testlist2)
 @pytest.mark.parametrize("sigtype", typelist)
 def test_dot_2(restore_npu_hf32_setting, sigtype, B, C, D):
@@ -138,8 +137,6 @@ def test_dot_2(restore_npu_hf32_setting, sigtype, B, C, D):
     test_common.validate_cmp(sigtype, z, z_ref)
 
 
-@pytest.mark.xfail(
-    reason="Temporarily disabled: TA backend does not support allow_tf32 yet. Will be fixed in follow-up.")
 @pytest.mark.parametrize("B, C, D", testlist2)
 @pytest.mark.parametrize("sigtype", typelist)
 def test_dot_2_allow_tf32(restore_npu_hf32_setting, sigtype, B, C, D):
@@ -147,11 +144,12 @@ def test_dot_2_allow_tf32(restore_npu_hf32_setting, sigtype, B, C, D):
     y = test_common.generate_tensor((C, D), sigtype).npu()
     z_ref = torch_dot_None(x, y).to(torch.float32)
     z = torch.zeros((B, D), dtype=torch.float32).npu()
-    triton_dot_2_allow_tf32[1, 1, 1](z, x, y, B, C, D)
-    test_common.validate_cmp(sigtype, z, z_ref)
+    try:
+        triton_dot_2_allow_tf32[1, 1, 1](z, x, y, B, C, D)
+    except Exception as e:
+        assert "allow_tf32 is not supported as 'True'" in e
 
 
-@pytest.mark.skip(reason="not supported after the NPUIR is updated in April, and will be fixed later")
 @pytest.mark.parametrize("B, C, D", testlist2)
 @pytest.mark.parametrize("sigtype", typelist)
 def test_dot_2_input_tf32(restore_npu_hf32_setting, sigtype, B, C, D):

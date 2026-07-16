@@ -1,0 +1,89 @@
+name: "Auto labeling"
+
+on:
+  issues:
+    types: [opened, edited]
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  # ── Ensure all expected labels exist in the repo ──
+  ensure-labels:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const DESIRED = {
+              'build':           'Changes to build system or configuration',
+              'CICD':            'Changes to CI/CD workflows or actions',
+              'compiler':        'Changes to C/C++ compiler backend (lib/, include/)',
+              'python':          'Changes to Python runtime or bindings',
+              'tests':           'Changes to test files or infrastructure',
+              'ascend-backend':  'Changes to the Ascend NPU backend',
+              'kernels':         'Changes to Triton kernels',
+              'dependencies':    'Changes to project dependencies',
+              'docker':          'Changes to Docker configuration',
+              'documentation':   'Changes to documentation',
+              'scripts':         'Changes to utility scripts or tooling',
+              'release':         'Changes to release process or versioning',
+            };
+
+            // Fetch existing labels
+            const { data: existing } = await github.rest.issues.listLabelsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            const existingNames = new Set(existing.map(l => l.name));
+
+            // Create missing labels
+            for (const [name, desc] of Object.entries(DESIRED)) {
+              if (!existingNames.has(name)) {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name,
+                  description: desc,
+                  color: 'ededed',
+                });
+                console.log(`Created label: ${name}`);
+              }
+            }
+            console.log('All labels present');
+
+  # ── Regex-based issue labeling ──
+  issue:
+    if: github.event_name == 'issues'
+    needs: ensure-labels
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: jimschubert/labeler-action@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          config_path: .github/actions/issue-labeler.yml
+
+  # ── File-path-based PR labeling ──
+  pr:
+    if: github.event_name == 'pull_request_target'
+    needs: ensure-labels
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/labeler@v5
+        with:
+          configuration-path: .github/actions/labeler.yml
+          sync-labels: true

@@ -700,6 +700,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if hfusion_enable_multiple_consumer_fusion:
             cmd_list += [f"--hfusion-enable-multiple-consumer-fusion={hfusion_enable_multiple_consumer_fusion}"]
 
+        plan_memory_strategy = metadata["plan_memory_strategy"]
+        if plan_memory_strategy is not None:
+            cmd_list += [f"--plan-memory-strategy={plan_memory_strategy}"]
+
         if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
             print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
 
@@ -1047,6 +1051,8 @@ class NPUOptions:
     inter_cache_num: int = None
     load_cache_num: int = None
 
+    # plan memory strategy: "default" (default) or "largest-first"
+    plan_memory_strategy: str = None
     stream: int = None
     parallel_mode: str = "simd"
     force_simt_only: bool = False

@@ -534,11 +534,7 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder, Dependency
 {
     Value origValue = dep.value;
     Value newValue = origValue;
-    // Step 0: Check if this Value has already been processed
-    auto it = vecValueMapping.find(origValue);
-    if (it != vecValueMapping.end()) {
-        return;
-    }
+
     bool valueIsMatmulA = dep.isMatmulA;
     bool valueIsMatmulB = dep.isMatmulB;
     bool isOnlyDepInMatmul = true;
@@ -556,6 +552,17 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder, Dependency
     int originBlockId = dep.iniProducerBlockId;
     // Step 2: If shapes match, return original value
     auto [isEqualedShape, matmulPadding] = isExpectedShape(origValue, expectedShape,valueIsMatmulA, valueIsMatmulB, isOnlyDepInMatmul);
+    
+    // Check if this Value has already been processed
+    auto it = vecValueMapping.find(origValue);
+    if (it != vecValueMapping.end() && !isEqualedShape) {
+        LOG_DEBUG("nd2nz shape is unaligned and used by multiple consumers");
+        CVPipeline::setFallbackAttr(module);
+        signalPassFailure();
+    }
+    if (it != vecValueMapping.end()) {
+        return;
+    }
     if (!isEqualedShape) {
         newValue = normalizeIfNeeded(builder, dep, loc, origValue, expectedShape, originBlockId, matmulPadding, isOnlyDepInMatmul);
     }

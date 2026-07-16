@@ -68,7 +68,6 @@ void SplitDataflowPass::runOnOperation()
     pm.addPass(createRefineArgsBlockIdPass());
 
     if (failed(runPipeline(pm, module))) {
-        module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
         signalPassFailure();
     }
 

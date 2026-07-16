@@ -541,6 +541,24 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(DataDependencyInfo &info
                     isAllTranspoesd = false;
                     continue;
                 }
+                // check if the two dimensions of the transposed value are equal)
+                if (user->getNumResults() == 0) {
+                    isAllTranspoesd = false;
+                    break;
+                }
+                auto transposedValue = user->getResults()[0];
+                auto transposedType = dyn_cast<ShapedType>(transposedValue.getType());
+                if (!transposedType || transposedType.getRank() != 2) {
+                    isAllTranspoesd = false;
+                    break;
+                }
+                auto transposedShape = transposedType.getShape();
+                if (transposedShape[0] != transposedShape[1]) {
+                    LOG_DEBUG("[INFO] fixpipe transposed value");
+                    CVPipeline::setFallbackAttr(module);
+                    signalPassFailure();
+                    break;
+                }
                 for (mlir::Operation *transposeOpUser : user->getUsers()) {
                     if (getSsbufferCoreType(transposeOpUser) != ssbufferCoreTypeVectorAttr) {
                         isAllTranspoesd = false;

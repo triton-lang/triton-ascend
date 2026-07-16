@@ -23,6 +23,7 @@
 #include <queue>
 
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
 
@@ -41,6 +42,8 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
+#include "bishengir/Dialect/HIVM/Utils/Utils.h"
 #include "bishengir/Dialect/Utils/Util.h"
 
 using namespace mlir;
@@ -179,9 +182,18 @@ void OpClassifierPass::matchToTensorPattern(Operation *def) {
   if (!toTensorOp)
     return;
 
-  // special case: implicit transpose
+  // special case: implicit transpose -> vector
   if (utils::getAnnotateOpWithAttr(toTensorOp.getResult(),
                                    kMayImplicitTransposeWithLastAxis)) {
+    return;
+  }
+
+  Value memref = toTensorOp.getBuffer();
+  // special case: ExtractLoadStore -> vector
+  if (llvm::any_of(memref.getUsers(), [](Operation *user) {
+        auto forOp = user->getParentOfType<scf::ForOp>();
+        return forOp && forOp->hasAttr(hivm::ExtractLoadStoreAttr);
+      })) {
     return;
   }
 
@@ -189,8 +201,6 @@ void OpClassifierPass::matchToTensorPattern(Operation *def) {
   cubeSeeds.push_back(toTensorOp);
 
   // Also mark the memref allocation as CUBE
-  Value memref = toTensorOp.getBuffer();
-
   if (Operation *memrefDef = memref.getDefiningOp()) {
     markCube(memrefDef);
     cubeSeeds.push_back(memrefDef);
@@ -792,6 +802,24 @@ int OpClassifierPass::markRemainingAsVector() {
 
     if (opCoreTypes[op] == OP_UNDETERMINED && !isa<scf::YieldOp>(op)) {
       opCoreTypes[op] = OP_VECTOR_ONLY;
+    }
+
+    // ExtractLoadStoreAttr -> force on vector
+    if (isa<scf::ForOp>(op) && op->hasAttr(hivm::ExtractLoadStoreAttr)) {
+      op->walk([this](Operation *nestedOp) {
+        opCoreTypes[nestedOp] = OP_VECTOR_ONLY;
+        for (auto operand : nestedOp->getOperands()) {
+          if (auto allocOp = llvm::dyn_cast_if_present<memref::AllocOp>(
+                  operand.getDefiningOp())) {
+            opCoreTypes[allocOp] = OP_VECTOR_ONLY;
+            for (auto *user : allocOp->getUsers()) {
+              if (llvm::isa<bufferization::ToTensorOp>(user)) {
+                opCoreTypes[user] = OP_VECTOR_ONLY;
+              }
+            }
+          }
+        }
+      });
     }
   }
 

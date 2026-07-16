@@ -54,8 +54,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -75,20 +73,49 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # ACF04-TC01: float16, M=128, N=64, K=32
 # ----------------------------------------------------------------------------
 @triton.jit
 def acf04_tc01_many_cubes(
-    a1_ptr, a2_ptr, a3_ptr, a4_ptr, a5_ptr,
-    a6_ptr, a7_ptr, a8_ptr, a9_ptr, a10_ptr,
-    a11_ptr, a12_ptr, a13_ptr, a14_ptr, a15_ptr,
-    b1_ptr, b2_ptr, b3_ptr, b4_ptr, b5_ptr,
-    b6_ptr, b7_ptr, b8_ptr, b9_ptr, b10_ptr,
-    b11_ptr, b12_ptr, b13_ptr, b14_ptr, b15_ptr,
-    c_ptr, out_ptr,
-    M, N, K,
-    stride_am, stride_ak,
+    a1_ptr,
+    a2_ptr,
+    a3_ptr,
+    a4_ptr,
+    a5_ptr,
+    a6_ptr,
+    a7_ptr,
+    a8_ptr,
+    a9_ptr,
+    a10_ptr,
+    a11_ptr,
+    a12_ptr,
+    a13_ptr,
+    a14_ptr,
+    a15_ptr,
+    b1_ptr,
+    b2_ptr,
+    b3_ptr,
+    b4_ptr,
+    b5_ptr,
+    b6_ptr,
+    b7_ptr,
+    b8_ptr,
+    b9_ptr,
+    b10_ptr,
+    b11_ptr,
+    b12_ptr,
+    b13_ptr,
+    b14_ptr,
+    b15_ptr,
+    c_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
     stride_bn,
     stride_c,
     stride_out,
@@ -172,15 +199,43 @@ def acf04_tc01_many_cubes(
 # ----------------------------------------------------------------------------
 @triton.jit
 def acf04_tc02_many_cubes(
-    a1_ptr, a2_ptr, a3_ptr, a4_ptr, a5_ptr,
-    a6_ptr, a7_ptr, a8_ptr, a9_ptr, a10_ptr,
-    a11_ptr, a12_ptr, a13_ptr, a14_ptr, a15_ptr,
-    b1_ptr, b2_ptr, b3_ptr, b4_ptr, b5_ptr,
-    b6_ptr, b7_ptr, b8_ptr, b9_ptr, b10_ptr,
-    b11_ptr, b12_ptr, b13_ptr, b14_ptr, b15_ptr,
-    c_ptr, out_ptr,
-    M, N, K,
-    stride_am, stride_ak,
+    a1_ptr,
+    a2_ptr,
+    a3_ptr,
+    a4_ptr,
+    a5_ptr,
+    a6_ptr,
+    a7_ptr,
+    a8_ptr,
+    a9_ptr,
+    a10_ptr,
+    a11_ptr,
+    a12_ptr,
+    a13_ptr,
+    a14_ptr,
+    a15_ptr,
+    b1_ptr,
+    b2_ptr,
+    b3_ptr,
+    b4_ptr,
+    b5_ptr,
+    b6_ptr,
+    b7_ptr,
+    b8_ptr,
+    b9_ptr,
+    b10_ptr,
+    b11_ptr,
+    b12_ptr,
+    b13_ptr,
+    b14_ptr,
+    b15_ptr,
+    c_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
     stride_bn,
     stride_c,
     stride_out,
@@ -263,6 +318,7 @@ def acf04_tc02_many_cubes(
 # Pytest测试用例
 # ============================================================================
 
+
 def _build_acf04_signature(dtype):
     """构建ACF04 kernel的参数签名。"""
     ptr_type = f"*{dtype}"
@@ -292,6 +348,7 @@ def test_acf04_tc01():
 
     # 将MLIR代码输出到指定路径
 
+
 def test_acf04_tc02():
     """ACF04-TC02: 验证float32 kernel编译生成的MLIR代码正确性。"""
     signature = _build_acf04_signature("fp32")
@@ -306,6 +363,7 @@ def test_acf04_tc02():
     assert "scope" not in mlir, "预期回退场景MLIR代码中包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 if __name__ == "__main__":
     test_acf04_tc01()

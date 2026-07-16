@@ -71,8 +71,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -92,20 +90,34 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # SDF04-TC01: float16, M=128, N=64, K=128
 # 测试目的: 验证float16下C2C依赖 + WAW内存依赖的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf04_tc01_c2c_waw(
-    a_ptr, b_ptr, c_ptr, d_ptr, buf_ptr, out_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_cm, stride_ck,
-    stride_dk, stride_dn,
-    stride_buf_kk, stride_buf_k,
-    stride_out_kk, stride_out_k,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    buf_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_cm,
+    stride_ck,
+    stride_dk,
+    stride_dn,
+    stride_buf_kk,
+    stride_buf_k,
+    stride_out_kk,
+    stride_out_k,
     BLOCK_SIZE_K: tl.constexpr,
 ):
     pid = tl.program_id(0)
@@ -118,14 +130,17 @@ def sdf04_tc01_c2c_waw(
         cube1_result = tl.dot(a[:, None], b[None, :])  # (K,K) = (128,128)
 
         store_mask = (offs_k[:, None] < K) & (offs_k[None, :] < K)
-        tl.store(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_k[None, :] * stride_buf_k, cube1_result, mask=store_mask)
+        tl.store(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_k[None, :] * stride_buf_k, cube1_result,
+                 mask=store_mask)
 
         c = tl.load(c_ptr + k * stride_cm + offs_k * stride_ck, mask=offs_k < K, other=0.0)  # (K,) = (128,)
         d = tl.load(d_ptr + k * stride_dk + offs_k * stride_dn, mask=offs_k < K, other=0.0)  # (K,) = (128,)
         cube2_result = tl.dot(c[:, None], d[None, :])  # (K,K) = (128,128)
 
-        tl.store(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_k[None, :] * stride_buf_k, cube2_result, mask=store_mask)
-        tl.store(out_ptr + offs_k[:, None] * stride_out_kk + offs_k[None, :] * stride_out_k, cube2_result, mask=store_mask)
+        tl.store(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_k[None, :] * stride_buf_k, cube2_result,
+                 mask=store_mask)
+        tl.store(out_ptr + offs_k[:, None] * stride_out_kk + offs_k[None, :] * stride_out_k, cube2_result,
+                 mask=store_mask)
 
 
 # ----------------------------------------------------------------------------
@@ -134,14 +149,27 @@ def sdf04_tc01_c2c_waw(
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf04_tc02_c2c_waw(
-    a_ptr, b_ptr, c_ptr, d_ptr, buf_ptr, out_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_cm, stride_ck,
-    stride_dk, stride_dn,
-    stride_buf_kk, stride_buf_k,
-    stride_out_kk, stride_out_k,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    buf_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_cm,
+    stride_ck,
+    stride_dk,
+    stride_dn,
+    stride_buf_kk,
+    stride_buf_k,
+    stride_out_kk,
+    stride_out_k,
     BLOCK_SIZE_K: tl.constexpr,
 ):
     pid = tl.program_id(0)
@@ -154,19 +182,23 @@ def sdf04_tc02_c2c_waw(
         cube1_result = tl.dot(a[:, None], b[None, :])
 
         store_mask = (offs_k[:, None] < K) & (offs_k[None, :] < K)
-        tl.store(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_k[None, :] * stride_buf_k, cube1_result, mask=store_mask)
+        tl.store(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_k[None, :] * stride_buf_k, cube1_result,
+                 mask=store_mask)
 
         c = tl.load(c_ptr + k * stride_cm + offs_k * stride_ck, mask=offs_k < K, other=0.0)
         d = tl.load(d_ptr + k * stride_dk + offs_k * stride_dn, mask=offs_k < K, other=0.0)
         cube2_result = tl.dot(c[:, None], d[None, :])
 
-        tl.store(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_k[None, :] * stride_buf_k, cube2_result, mask=store_mask)
-        tl.store(out_ptr + offs_k[:, None] * stride_out_kk + offs_k[None, :] * stride_out_k, cube2_result, mask=store_mask)
+        tl.store(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_k[None, :] * stride_buf_k, cube2_result,
+                 mask=store_mask)
+        tl.store(out_ptr + offs_k[:, None] * stride_out_kk + offs_k[None, :] * stride_out_k, cube2_result,
+                 mask=store_mask)
 
 
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_sdf04_signature(dtype_str):
     """构建SDF04 kernel的参数类型签名。"""
@@ -217,6 +249,7 @@ def test_sdf04_tc01():
 
     # 将MLIR代码输出到指定路径
 
+
 def test_sdf04_tc02():
     """SDF04-TC02: 验证float32 kernel编译生成的MLIR代码正确性。
 
@@ -238,6 +271,7 @@ def test_sdf04_tc02():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

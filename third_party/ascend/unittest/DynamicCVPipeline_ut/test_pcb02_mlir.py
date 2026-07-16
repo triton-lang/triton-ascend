@@ -72,8 +72,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -93,23 +91,46 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # PCB02-TC01: float16, M=128, N=64, K=32
 # 测试目的: 验证float16下多个独立CUBE+VECTOR操作的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def pcb02_tc01_multi_cube_vector(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, g_ptr, h_ptr,
-    out1_ptr, out2_ptr, out3_ptr, out4_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_cm, stride_ck,
-    stride_dk, stride_dn,
-    stride_e, stride_f, stride_g, stride_h,
-    stride_out1m, stride_out1n,
-    stride_out2m, stride_out2n,
-    stride_out3, stride_out4,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    g_ptr,
+    h_ptr,
+    out1_ptr,
+    out2_ptr,
+    out3_ptr,
+    out4_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_cm,
+    stride_ck,
+    stride_dk,
+    stride_dn,
+    stride_e,
+    stride_f,
+    stride_g,
+    stride_h,
+    stride_out1m,
+    stride_out1n,
+    stride_out2m,
+    stride_out2n,
+    stride_out3,
+    stride_out4,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
 ):
@@ -152,17 +173,39 @@ def pcb02_tc01_multi_cube_vector(
 # ----------------------------------------------------------------------------
 @triton.jit
 def pcb02_tc02_multi_cube_vector(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, g_ptr, h_ptr,
-    out1_ptr, out2_ptr, out3_ptr, out4_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_cm, stride_ck,
-    stride_dk, stride_dn,
-    stride_e, stride_f, stride_g, stride_h,
-    stride_out1m, stride_out1n,
-    stride_out2m, stride_out2n,
-    stride_out3, stride_out4,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    g_ptr,
+    h_ptr,
+    out1_ptr,
+    out2_ptr,
+    out3_ptr,
+    out4_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_cm,
+    stride_ck,
+    stride_dk,
+    stride_dn,
+    stride_e,
+    stride_f,
+    stride_g,
+    stride_h,
+    stride_out1m,
+    stride_out1n,
+    stride_out2m,
+    stride_out2n,
+    stride_out3,
+    stride_out4,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
 ):
@@ -202,6 +245,7 @@ def pcb02_tc02_multi_cube_vector(
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_pcb02_signature(dtype_str):
     """构建PCB02 kernel的参数类型签名。"""
@@ -264,6 +308,7 @@ def test_pcb02_tc01():
 
     # 将MLIR代码输出到指定路径
 
+
 def test_pcb02_tc02():
     """PCB02-TC02: 验证float32 kernel编译生成的MLIR代码正确性。
 
@@ -285,6 +330,7 @@ def test_pcb02_tc02():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

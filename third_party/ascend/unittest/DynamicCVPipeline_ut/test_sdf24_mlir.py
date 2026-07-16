@@ -67,8 +67,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -88,19 +86,44 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # SDF24: 5-layer independent CV
 # 测试目的: 验证float16下5层嵌套独立CV操作的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf24(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, out_ptr,
-    l5_cube_out_ptr, l4_cube_out_ptr,
-    M, N, K, L, P, Q, R,
-    stride_am, stride_ak, stride_bk, stride_bn, stride_c, stride_d,
-    stride_em, stride_ep, stride_fp, stride_fn, stride_out,
-    stride_l5_cube_row, stride_l5_cube_col,
-    stride_l4_cube_row, stride_l4_cube_col,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    out_ptr,
+    l5_cube_out_ptr,
+    l4_cube_out_ptr,
+    M,
+    N,
+    K,
+    L,
+    P,
+    Q,
+    R,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_em,
+    stride_ep,
+    stride_fp,
+    stride_fn,
+    stride_out,
+    stride_l5_cube_row,
+    stride_l5_cube_col,
+    stride_l4_cube_row,
+    stride_l4_cube_col,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
     BLOCK_SIZE_L: tl.constexpr,
@@ -119,7 +142,8 @@ def sdf24(
                         a = tl.load(a_ptr + l5 * stride_am + offs_k * stride_ak, mask=offs_k < K, other=0.0)
                         b = tl.load(b_ptr + l5 * stride_bk + offs_k * stride_bn, mask=offs_k < K, other=0.0)
                         l5_cube = tl.dot(a[:, None], b[None, :])
-                        l5_cube_ptrs = l5_cube_out_ptr + offs_k[:, None] * stride_l5_cube_row + offs_k[None, :] * stride_l5_cube_col
+                        l5_cube_ptrs = l5_cube_out_ptr + offs_k[:, None] * stride_l5_cube_row + offs_k[
+                            None, :] * stride_l5_cube_col
                         tl.store(l5_cube_ptrs, l5_cube, mask=(offs_k[:, None] < K) & (offs_k[None, :] < K))
                         c = tl.load(c_ptr + offs_n * stride_c, mask=offs_n < N, other=0.0)
                         d = tl.load(d_ptr + offs_n * stride_d, mask=offs_n < N, other=0.0)
@@ -129,13 +153,15 @@ def sdf24(
                     e = tl.load(e_ptr + l4 * stride_em + offs_p * stride_ep, mask=offs_p < P, other=0.0)
                     f = tl.load(f_ptr + l4 * stride_fp + offs_p * stride_fn, mask=offs_p < P, other=0.0)
                     l4_cube = tl.dot(e[:, None], f[None, :])
-                    l4_cube_ptrs = l4_cube_out_ptr + offs_p[:, None] * stride_l4_cube_row + offs_p[None, :] * stride_l4_cube_col
+                    l4_cube_ptrs = l4_cube_out_ptr + offs_p[:, None] * stride_l4_cube_row + offs_p[
+                        None, :] * stride_l4_cube_col
                     tl.store(l4_cube_ptrs, l4_cube, mask=(offs_p[:, None] < P) & (offs_p[None, :] < P))
 
 
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_sdf24_signature(dtype_str):
     """构建SDF24 kernel的参数类型签名。"""
@@ -202,6 +228,7 @@ def test_sdf24():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

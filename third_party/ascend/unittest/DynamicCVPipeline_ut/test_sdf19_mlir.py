@@ -70,8 +70,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -91,25 +89,49 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # SDF19-TC01: float16, M=128, N=64, K=32, L=3, P=2, Q=2
 # 测试目的: 验证float16下4层嵌套纯C/纯V交替的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf19_tc01_alternating_pure(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, g_ptr, h_ptr,
-    out_ptr, out_l1_ptr, out_l2_ptr, out_l3_ptr,
-    M, N, K, L, P, Q,
-    stride_am, stride_aq,
-    stride_bq, stride_bn,
-    stride_c, stride_d,
-    stride_em, stride_ep,
-    stride_fp, stride_fn,
-    stride_g, stride_h,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    g_ptr,
+    h_ptr,
+    out_ptr,
+    out_l1_ptr,
+    out_l2_ptr,
+    out_l3_ptr,
+    M,
+    N,
+    K,
+    L,
+    P,
+    Q,
+    stride_am,
+    stride_aq,
+    stride_bq,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_em,
+    stride_ep,
+    stride_fp,
+    stride_fn,
+    stride_g,
+    stride_h,
     stride_out,
-    stride_l1m, stride_l1n,
+    stride_l1m,
+    stride_l1n,
     stride_l2,
-    stride_l3m, stride_l3n,
+    stride_l3m,
+    stride_l3n,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
     BLOCK_SIZE_L: tl.constexpr,
@@ -160,6 +182,7 @@ def sdf19_tc01_alternating_pure(
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_sdf19_signature(dtype_str):
     """构建SDF19 kernel的参数类型签名。"""
@@ -230,6 +253,7 @@ def test_sdf19_tc01():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

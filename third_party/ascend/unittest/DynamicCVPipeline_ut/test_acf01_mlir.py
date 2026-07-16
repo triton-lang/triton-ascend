@@ -28,11 +28,11 @@ from triton._C.libtriton.ascend import ir as ascend_ir
 from triton.backends.ascend.compiler import NPUOptions, make_ttir, ttir_to_linalg, min_dot_size
 import pytest
 
-
 # ============================================================================
 # 编译辅助函数: 将Triton Kernel编译为MLIR (linalg dialect)
 # 参考: test_custom.py 中的 compile_kernel 实现
 # ============================================================================
+
 
 def compile_kernel(kernel, signature, constants):
     """Helper to compile a kernel function to MLIR in linalg dialect.
@@ -71,8 +71,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -92,15 +90,22 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # ACF01-TC01: float16, M=128, N=64, K=32
 # 测试目的: 验证float16下无for循环独立CV操作的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def acf01_tc01_no_loop_cv(
-    a_ptr, b_ptr, c_ptr, out_ptr,
-    M, N, K,
-    stride_am, stride_ak,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
     stride_bk,
     stride_c,
     stride_out,
@@ -122,8 +127,8 @@ def acf01_tc01_no_loop_cv(
     # outer product: a[:, None] * b_n[None, :] -> (K, N)
     cube_result = a[:, None] * b_n[None, :]  # (K, N)
     vec_result = cube_result + c[None, :]  # (K, N) + (1, N) -> (K, N)
-    tl.store(out_ptr + offs_k[:, None] * stride_out + offs_n[None, :],
-             vec_result, mask=(offs_k[:, None] < K) & (offs_n[None, :] < N))
+    tl.store(out_ptr + offs_k[:, None] * stride_out + offs_n[None, :], vec_result,
+             mask=(offs_k[:, None] < K) & (offs_n[None, :] < N))
 
 
 # ----------------------------------------------------------------------------
@@ -132,9 +137,15 @@ def acf01_tc01_no_loop_cv(
 # ----------------------------------------------------------------------------
 @triton.jit
 def acf01_tc02_no_loop_cv(
-    a_ptr, b_ptr, c_ptr, out_ptr,
-    M, N, K,
-    stride_am, stride_ak,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
     stride_bk,
     stride_c,
     stride_out,
@@ -152,13 +163,14 @@ def acf01_tc02_no_loop_cv(
     b_n = tl.load(b_ptr + offs_n * stride_bk, mask=offs_n < K, other=0.0)
     cube_result = a[:, None] * b_n[None, :]  # (K, N)
     vec_result = cube_result + c[None, :]  # (K, N) + (1, N) -> (K, N)
-    tl.store(out_ptr + offs_k[:, None] * stride_out + offs_n[None, :],
-             vec_result, mask=(offs_k[:, None] < K) & (offs_n[None, :] < N))
+    tl.store(out_ptr + offs_k[:, None] * stride_out + offs_n[None, :], vec_result,
+             mask=(offs_k[:, None] < K) & (offs_n[None, :] < N))
 
 
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def test_acf01_tc01():
     """ACF01-TC01: 验证float16 kernel编译生成的MLIR代码正确性。
@@ -195,6 +207,7 @@ def test_acf01_tc01():
 
     # 将MLIR代码输出到指定路径
 
+
 def test_acf01_tc02():
     """ACF01-TC02: 验证float32 kernel编译生成的MLIR代码正确性。
 
@@ -229,6 +242,7 @@ def test_acf01_tc02():
     assert "scope" not in mlir, "预期回退场景MLIR代码中包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

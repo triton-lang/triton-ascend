@@ -67,8 +67,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -88,17 +86,34 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # SDF21: 4-layer nested, inner C depends on outer C
 # 测试目的: 验证float16下4层嵌套内层C依赖外层C的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf21(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, out_ptr,
-    M, N, L, P, Q,
-    stride_am, stride_aq, stride_bq, stride_bn,
-    stride_c, stride_d,
-    stride_em, stride_ek, stride_fn,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    out_ptr,
+    M,
+    N,
+    L,
+    P,
+    Q,
+    stride_am,
+    stride_aq,
+    stride_bq,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_em,
+    stride_ek,
+    stride_fn,
     stride_out,
     K: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
@@ -130,6 +145,7 @@ def sdf21(
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_sdf21_signature(dtype_str):
     """构建SDF21 kernel的参数类型签名。
@@ -190,6 +206,7 @@ def test_sdf21():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

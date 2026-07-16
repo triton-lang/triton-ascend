@@ -67,8 +67,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -88,6 +86,7 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # SDF25: 5-layer alternating pure C or pure V
 # 测试目的: 验证float16下5层嵌套纯C/纯V交替的MLIR生成
@@ -99,18 +98,51 @@ def _write_mlir_to_file(mlir, filename):
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf25(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, g_ptr, h_ptr, i_ptr, j_ptr,
-    out_ptr, out_l1_ptr, out_l2_ptr, out_l3_ptr, out_l4_ptr,
-    M, N, K, L, P, Q, R,
-    stride_am, stride_ar, stride_br, stride_bn,
-    stride_c, stride_d,
-    stride_em, stride_ek, stride_fk, stride_fn,
-    stride_gm, stride_gl, stride_hl, stride_hn,
-    stride_i, stride_j,
-    stride_outm, stride_outn,
-    stride_l1m, stride_l1n,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    g_ptr,
+    h_ptr,
+    i_ptr,
+    j_ptr,
+    out_ptr,
+    out_l1_ptr,
+    out_l2_ptr,
+    out_l3_ptr,
+    out_l4_ptr,
+    M,
+    N,
+    K,
+    L,
+    P,
+    Q,
+    R,
+    stride_am,
+    stride_ar,
+    stride_br,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_em,
+    stride_ek,
+    stride_fk,
+    stride_fn,
+    stride_gm,
+    stride_gl,
+    stride_hl,
+    stride_hn,
+    stride_i,
+    stride_j,
+    stride_outm,
+    stride_outn,
+    stride_l1m,
+    stride_l1n,
     stride_l2,
-    stride_l3m, stride_l3n,
+    stride_l3m,
+    stride_l3n,
     stride_l4,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
@@ -120,7 +152,8 @@ def sdf25(
     BLOCK_SIZE_R: tl.constexpr,
 ):
     pid = tl.program_id(0)
-    offs_r, offs_q, offs_l, offs_p, offs_k, offs_n = tl.arange(0, BLOCK_SIZE_R), tl.arange(0, BLOCK_SIZE_Q), tl.arange(0, BLOCK_SIZE_L), tl.arange(0, BLOCK_SIZE_P), tl.arange(0, BLOCK_SIZE_K), tl.arange(0, BLOCK_SIZE_N)
+    offs_r, offs_q, offs_l, offs_p, offs_k, offs_n = tl.arange(0, BLOCK_SIZE_R), tl.arange(0, BLOCK_SIZE_Q), tl.arange(
+        0, BLOCK_SIZE_L), tl.arange(0, BLOCK_SIZE_P), tl.arange(0, BLOCK_SIZE_K), tl.arange(0, BLOCK_SIZE_N)
     for l1 in range(R):
         # --- l1: pure C (cube) ---
         a = tl.load(a_ptr + l1 * stride_am + offs_r * stride_ar, mask=offs_r < R, other=0.0)
@@ -161,6 +194,7 @@ def sdf25(
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_sdf25_signature(dtype_str):
     """构建SDF25 kernel的参数类型签名。"""
@@ -242,6 +276,7 @@ def test_sdf25():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

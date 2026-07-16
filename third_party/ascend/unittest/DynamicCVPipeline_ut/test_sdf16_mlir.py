@@ -70,8 +70,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -91,18 +89,33 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # SDF16-TC01: float16, M=128, N=64, K=32, L=3, P=2
 # 测试目的: 验证float16下3层嵌套内层C依赖外层V(V2C跨层)的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf16_tc01_inner_c_dep_outer_v(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, out_ptr,
-    M, N, K, L, P,
-    stride_am, stride_al,
-    stride_bl, stride_bn,
-    stride_c, stride_d,
-    stride_em, stride_ek,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    L,
+    P,
+    stride_am,
+    stride_al,
+    stride_bl,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_em,
+    stride_ek,
     stride_fn,
     stride_out,
     BLOCK_SIZE_N: tl.constexpr,
@@ -139,6 +152,7 @@ def sdf16_tc01_inner_c_dep_outer_v(
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_sdf16_signature(dtype_str):
     """构建SDF16 kernel的参数类型签名。"""
@@ -189,6 +203,7 @@ def test_sdf16_tc01():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

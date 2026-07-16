@@ -67,8 +67,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -88,16 +86,36 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # SDF27: 5-layer inner C depends outer C
 # 测试目的: 验证float16下5层嵌套内层C依赖外层C的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf27(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, out_ptr,
-    M, N, L, P, Q, R,
-    stride_am, stride_ar, stride_br, stride_bn, stride_c, stride_d,
-    stride_em, stride_ek, stride_fn, stride_out,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    out_ptr,
+    M,
+    N,
+    L,
+    P,
+    Q,
+    R,
+    stride_am,
+    stride_ar,
+    stride_br,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_em,
+    stride_ek,
+    stride_fn,
+    stride_out,
     K: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
@@ -130,6 +148,7 @@ def sdf27(
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_sdf27_signature(dtype_str):
     """构建SDF27 kernel的参数类型签名。
@@ -192,6 +211,7 @@ def test_sdf27():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

@@ -73,8 +73,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -94,19 +92,32 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # SDF09-TC01: float16, M=128, N=64, K=32, L=3
 # 测试目的: 验证float16下2层嵌套C2C跨层依赖(外层CV -> 内层CV, iter_args)的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf09_tc01_c2c_iter_args(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, out_ptr,
-    M, N, K, L,
-    stride_am, stride_al,
-    stride_bl, stride_bn,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    L,
+    stride_am,
+    stride_al,
+    stride_bl,
+    stride_bn,
     stride_c,
     stride_d,
-    stride_em, stride_el,
+    stride_em,
+    stride_el,
     stride_f,
     stride_out,
     BLOCK_SIZE_N: tl.constexpr,
@@ -150,13 +161,25 @@ def sdf09_tc01_c2c_iter_args(
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf09_tc02_c2c_iter_args(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, out_ptr,
-    M, N, K, L,
-    stride_am, stride_al,
-    stride_bl, stride_bn,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    L,
+    stride_am,
+    stride_al,
+    stride_bl,
+    stride_bn,
     stride_c,
     stride_d,
-    stride_em, stride_el,
+    stride_em,
+    stride_el,
     stride_f,
     stride_out,
     BLOCK_SIZE_N: tl.constexpr,
@@ -197,6 +220,7 @@ def sdf09_tc02_c2c_iter_args(
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_sdf09_signature(dtype_str):
     """构建SDF09 kernel的参数类型签名。"""
@@ -247,6 +271,7 @@ def test_sdf09_tc01():
 
     # 将MLIR代码输出到指定路径
 
+
 def test_sdf09_tc02():
     """SDF09-TC02: 验证float32 kernel编译生成的MLIR代码正确性。
 
@@ -268,6 +293,7 @@ def test_sdf09_tc02():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

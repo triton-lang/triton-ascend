@@ -54,8 +54,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -75,17 +73,30 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # ACF03-TC01: float16, M=128, N=64, K=32
 # ----------------------------------------------------------------------------
 @triton.jit
 def acf03_tc01_outer_cube_pure_vec(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, out_ptr, out2_ptr,
-    M, N, K,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    out_ptr,
+    out2_ptr,
+    M,
+    N,
+    K,
     stride_ak,
     stride_bk,
-    stride_c, stride_d, stride_e,
-    stride_out0, stride_out1, stride_out2,
+    stride_c,
+    stride_d,
+    stride_e,
+    stride_out0,
+    stride_out1,
+    stride_out2,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
 ):
@@ -114,12 +125,24 @@ def acf03_tc01_outer_cube_pure_vec(
 # ----------------------------------------------------------------------------
 @triton.jit
 def acf03_tc02_outer_cube_pure_vec(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, out_ptr, out2_ptr,
-    M, N, K,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    out_ptr,
+    out2_ptr,
+    M,
+    N,
+    K,
     stride_ak,
     stride_bk,
-    stride_c, stride_d, stride_e,
-    stride_out0, stride_out1, stride_out2,
+    stride_c,
+    stride_d,
+    stride_e,
+    stride_out0,
+    stride_out1,
+    stride_out2,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
 ):
@@ -146,6 +169,7 @@ def acf03_tc02_outer_cube_pure_vec(
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def test_acf03_tc01():
     """ACF03-TC01: 验证float16 kernel编译生成的MLIR代码正确性。"""
@@ -181,6 +205,7 @@ def test_acf03_tc01():
 
     # 将MLIR代码输出到指定路径
 
+
 def test_acf03_tc02():
     """ACF03-TC02: 验证float32 kernel编译生成的MLIR代码正确性。"""
     signature = {
@@ -214,6 +239,7 @@ def test_acf03_tc02():
     assert "scope" not in mlir, "预期回退场景MLIR代码中包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 if __name__ == "__main__":
     test_acf03_tc01()

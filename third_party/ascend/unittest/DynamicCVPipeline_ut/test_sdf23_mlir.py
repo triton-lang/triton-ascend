@@ -67,8 +67,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -88,18 +86,37 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # SDF23: 4-layer nested, outer V depends on inner C
 # 测试目的: 验证float16下4层嵌套外层V依赖内层C累加(C2V跨层)的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf23(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, out_ptr,
-    M, N, K, L, P, Q,
-    stride_am, stride_ak, stride_bk, stride_bn,
-    stride_c, stride_d, stride_e,
-    stride_fm, stride_fq,
-    stride_outm, stride_outn,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    L,
+    P,
+    Q,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_e,
+    stride_fm,
+    stride_fq,
+    stride_outm,
+    stride_outn,
     BLOCK_SIZE_K: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_L: tl.constexpr,
@@ -129,6 +146,7 @@ def sdf23(
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_sdf23_signature(dtype_str):
     """构建SDF23 kernel的参数类型签名。"""
@@ -187,6 +205,7 @@ def test_sdf23():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

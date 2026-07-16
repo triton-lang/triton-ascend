@@ -72,8 +72,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -93,22 +91,41 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # SDF13-TC01: float16, M=128, N=64, K=32, L=3, P=2
 # 测试目的: 验证float16下3层嵌套纯C/纯V交替的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf13_tc01_alternating_pure(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr,
-    out_ptr, out_outer_ptr, out_mid_ptr,
-    M, N, K, L, P,
-    stride_am, stride_al,
-    stride_bl, stride_bn,
-    stride_c, stride_d,
-    stride_em, stride_ek,
-    stride_fk, stride_fn,
-    stride_out_0, stride_out_1,
-    stride_outer_0, stride_outer_1,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    out_ptr,
+    out_outer_ptr,
+    out_mid_ptr,
+    M,
+    N,
+    K,
+    L,
+    P,
+    stride_am,
+    stride_al,
+    stride_bl,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_em,
+    stride_ek,
+    stride_fk,
+    stride_fn,
+    stride_out_0,
+    stride_out_1,
+    stride_outer_0,
+    stride_outer_1,
     stride_mid,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
@@ -153,16 +170,34 @@ def sdf13_tc01_alternating_pure(
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf13_tc02_alternating_pure(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr,
-    out_ptr, out_outer_ptr, out_mid_ptr,
-    M, N, K, L, P,
-    stride_am, stride_al,
-    stride_bl, stride_bn,
-    stride_c, stride_d,
-    stride_em, stride_ek,
-    stride_fk, stride_fn,
-    stride_out_0, stride_out_1,
-    stride_outer_0, stride_outer_1,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    out_ptr,
+    out_outer_ptr,
+    out_mid_ptr,
+    M,
+    N,
+    K,
+    L,
+    P,
+    stride_am,
+    stride_al,
+    stride_bl,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_em,
+    stride_ek,
+    stride_fk,
+    stride_fn,
+    stride_out_0,
+    stride_out_1,
+    stride_outer_0,
+    stride_outer_1,
     stride_mid,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
@@ -204,6 +239,7 @@ def sdf13_tc02_alternating_pure(
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_sdf13_signature(dtype_str):
     """构建SDF13 kernel的参数类型签名。"""
@@ -262,6 +298,7 @@ def test_sdf13_tc01():
 
     # 将MLIR代码输出到指定路径
 
+
 def test_sdf13_tc02():
     """SDF13-TC02: 验证float32 kernel编译生成的MLIR代码正确性。
 
@@ -283,6 +320,7 @@ def test_sdf13_tc02():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

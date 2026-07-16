@@ -73,8 +73,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -94,20 +92,39 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # SDF14-TC01: float16, M=128, N=64, K=32, L=3, P=2
 # 测试目的: 验证float16下3层嵌套C2C跨层依赖的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf14_tc01_outer_c_dep_inner_c(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, g_ptr, h_ptr, out_ptr,
-    M, N, K, L, P,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_c, stride_d,
-    stride_em, stride_ep,
-    stride_fp, stride_fn,
-    stride_gm, stride_gk,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    g_ptr,
+    h_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    L,
+    P,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_em,
+    stride_ep,
+    stride_fp,
+    stride_fn,
+    stride_gm,
+    stride_gk,
     stride_h,
     stride_out,
     BLOCK_SIZE_N: tl.constexpr,
@@ -156,14 +173,32 @@ def sdf14_tc01_outer_c_dep_inner_c(
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf14_tc02_outer_c_dep_inner_c(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, g_ptr, h_ptr, out_ptr,
-    M, N, K, L, P,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_c, stride_d,
-    stride_em, stride_ep,
-    stride_fp, stride_fn,
-    stride_gm, stride_gk,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    g_ptr,
+    h_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    L,
+    P,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_em,
+    stride_ep,
+    stride_fp,
+    stride_fn,
+    stride_gm,
+    stride_gk,
     stride_h,
     stride_out,
     BLOCK_SIZE_N: tl.constexpr,
@@ -208,6 +243,7 @@ def sdf14_tc02_outer_c_dep_inner_c(
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_sdf14_signature(dtype_str):
     """构建SDF14 kernel的参数类型签名。"""
@@ -265,6 +301,7 @@ def test_sdf14_tc01():
 
     # 将MLIR代码输出到指定路径
 
+
 def test_sdf14_tc02():
     """SDF14-TC02: 验证float32 kernel编译生成的MLIR代码正确性。
 
@@ -286,6 +323,7 @@ def test_sdf14_tc02():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

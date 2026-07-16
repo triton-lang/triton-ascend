@@ -71,8 +71,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -92,17 +90,25 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # PCB12-TC01: float16, M=128, N=64, K=32
 # 测试目的: 验证float16下while循环A*B+C(C=0 fill)的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def pcb12_tc01_while_matmul_fill(
-    a_ptr, b_ptr, out_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_outm, stride_outn,
+    a_ptr,
+    b_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_outm,
+    stride_outn,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
 ):
@@ -130,11 +136,18 @@ def pcb12_tc01_while_matmul_fill(
 # ----------------------------------------------------------------------------
 @triton.jit
 def pcb12_tc02_while_matmul_fill(
-    a_ptr, b_ptr, out_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_outm, stride_outn,
+    a_ptr,
+    b_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_outm,
+    stride_outn,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
 ):
@@ -159,6 +172,7 @@ def pcb12_tc02_while_matmul_fill(
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_pcb12_signature(dtype_str):
     """构建PCB12 kernel的参数类型签名。"""
@@ -200,6 +214,7 @@ def test_pcb12_tc01():
 
     # 将MLIR代码输出到指定路径
 
+
 def test_pcb12_tc02():
     """PCB12-TC02: 验证float32 kernel编译生成的MLIR代码正确性。
 
@@ -221,6 +236,7 @@ def test_pcb12_tc02():
     assert "scope" not in mlir, "预期回退场景MLIR代码中包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

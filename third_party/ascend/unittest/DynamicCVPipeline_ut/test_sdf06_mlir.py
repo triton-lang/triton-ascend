@@ -72,8 +72,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -93,16 +91,26 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # SDF06-TC01: float16, M=128, N=64, K=32, L=3
 # 测试目的: 验证float16下2层嵌套内层CV + 外层标量的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf06_tc01_inner_cv_only(
-    a_ptr, b_ptr, c_ptr, d_ptr, out_ptr,
-    M, N, K, L,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    L,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
     stride_c,
     stride_d,
     stride_out,
@@ -137,10 +145,19 @@ def sdf06_tc01_inner_cv_only(
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf06_tc02_inner_cv_only(
-    a_ptr, b_ptr, c_ptr, d_ptr, out_ptr,
-    M, N, K, L,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    L,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
     stride_c,
     stride_d,
     stride_out,
@@ -172,6 +189,7 @@ def sdf06_tc02_inner_cv_only(
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_sdf06_signature(dtype_str):
     """构建SDF06 kernel的参数类型签名。"""
@@ -217,6 +235,7 @@ def test_sdf06_tc01():
 
     # 将MLIR代码输出到指定路径
 
+
 def test_sdf06_tc02():
     """SDF06-TC02: 验证float32 kernel编译生成的MLIR代码正确性。
 
@@ -238,6 +257,7 @@ def test_sdf06_tc02():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

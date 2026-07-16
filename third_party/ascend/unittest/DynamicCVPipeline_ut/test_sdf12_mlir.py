@@ -72,8 +72,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -93,24 +91,49 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # SDF12-TC01: float16, M=128, N=64, K=32, L=3, P=2
 # 测试目的: 验证float16下3层嵌套独立CV的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf12_tc01_three_layer_independent(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, g_ptr, h_ptr, i_ptr, j_ptr,
-    out1_ptr, out2_ptr,
-    M, N, K, L, P,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_c, stride_d,
-    stride_em, stride_ep,
-    stride_fp, stride_fn,
-    stride_g, stride_h,
-    stride_im, stride_il,
-    stride_jl, stride_jn,
-    stride_out1_0, stride_out1_1, stride_out2,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    g_ptr,
+    h_ptr,
+    i_ptr,
+    j_ptr,
+    out1_ptr,
+    out2_ptr,
+    M,
+    N,
+    K,
+    L,
+    P,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_em,
+    stride_ep,
+    stride_fp,
+    stride_fn,
+    stride_g,
+    stride_h,
+    stride_im,
+    stride_il,
+    stride_jl,
+    stride_jn,
+    stride_out1_0,
+    stride_out1_1,
+    stride_out2,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
     BLOCK_SIZE_L: tl.constexpr,
@@ -157,18 +180,42 @@ def sdf12_tc01_three_layer_independent(
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf12_tc02_three_layer_independent(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, g_ptr, h_ptr, i_ptr, j_ptr,
-    out1_ptr, out2_ptr,
-    M, N, K, L, P,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_c, stride_d,
-    stride_em, stride_ep,
-    stride_fp, stride_fn,
-    stride_g, stride_h,
-    stride_im, stride_il,
-    stride_jl, stride_jn,
-    stride_out1_0, stride_out1_1, stride_out2,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    g_ptr,
+    h_ptr,
+    i_ptr,
+    j_ptr,
+    out1_ptr,
+    out2_ptr,
+    M,
+    N,
+    K,
+    L,
+    P,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_em,
+    stride_ep,
+    stride_fp,
+    stride_fn,
+    stride_g,
+    stride_h,
+    stride_im,
+    stride_il,
+    stride_jl,
+    stride_jn,
+    stride_out1_0,
+    stride_out1_1,
+    stride_out2,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
     BLOCK_SIZE_L: tl.constexpr,
@@ -212,6 +259,7 @@ def sdf12_tc02_three_layer_independent(
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_sdf12_signature(dtype_str):
     """构建SDF12 kernel的参数类型签名。"""
@@ -277,6 +325,7 @@ def test_sdf12_tc01():
 
     # 将MLIR代码输出到指定路径
 
+
 def test_sdf12_tc02():
     """SDF12-TC02: 验证float32 kernel编译生成的MLIR代码正确性。
 
@@ -298,6 +347,7 @@ def test_sdf12_tc02():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

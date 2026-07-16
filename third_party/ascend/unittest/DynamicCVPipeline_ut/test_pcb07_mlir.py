@@ -71,8 +71,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -92,21 +90,35 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # PCB07-TC01: float16, M=128, N=64, K=32
 # 测试目的: 验证float16下C2V2C2V2C链依赖的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def pcb07_tc01_c2v2c2v2c_chain(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, out_cube_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    out_cube_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
     stride_c,
-    stride_dm, stride_dk,
+    stride_dm,
+    stride_dk,
     stride_e,
-    stride_fm, stride_fk,
-    stride_out_cube_n, stride_out_cube_k,
+    stride_fm,
+    stride_fk,
+    stride_out_cube_n,
+    stride_out_cube_k,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
 ):
@@ -132,7 +144,8 @@ def pcb07_tc01_c2v2c2v2c_chain(
 
         f = tl.load(f_ptr + k * stride_fm + offs_k * stride_fk, mask=offs_k < K, other=0.0)  # (K,)
         cube3_result = tl.dot(vec2_result[:, None], f[None, :]).to(tl.float16)  # (N,1) dot (1,K) = (N,K)
-        out_cube_ptrs = out_cube_ptr + offs_n[:, None] * stride_out_cube_n + offs_k[None, :] * stride_out_cube_k  # (N,K)
+        out_cube_ptrs = out_cube_ptr + offs_n[:,
+                                              None] * stride_out_cube_n + offs_k[None, :] * stride_out_cube_k  # (N,K)
         tl.store(out_cube_ptrs, cube3_result, mask=(offs_n[:, None] < N) & (offs_k[None, :] < K))
 
 
@@ -142,15 +155,28 @@ def pcb07_tc01_c2v2c2v2c_chain(
 # ----------------------------------------------------------------------------
 @triton.jit
 def pcb07_tc02_c2v2c2v2c_chain(
-    a_ptr, b_ptr, c_ptr, d_ptr, e_ptr, f_ptr, out_cube_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    e_ptr,
+    f_ptr,
+    out_cube_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
     stride_c,
-    stride_dm, stride_dk,
+    stride_dm,
+    stride_dk,
     stride_e,
-    stride_fm, stride_fk,
-    stride_out_cube_n, stride_out_cube_k,
+    stride_fm,
+    stride_fk,
+    stride_out_cube_n,
+    stride_out_cube_k,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
 ):
@@ -176,13 +202,15 @@ def pcb07_tc02_c2v2c2v2c_chain(
 
         f = tl.load(f_ptr + k * stride_fm + offs_k * stride_fk, mask=offs_k < K, other=0.0)  # (K,)
         cube3_result = tl.dot(vec2_result[:, None], f[None, :])  # (N,1) dot (1,K) = (N,K)
-        out_cube_ptrs = out_cube_ptr + offs_n[:, None] * stride_out_cube_n + offs_k[None, :] * stride_out_cube_k  # (N,K)
+        out_cube_ptrs = out_cube_ptr + offs_n[:,
+                                              None] * stride_out_cube_n + offs_k[None, :] * stride_out_cube_k  # (N,K)
         tl.store(out_cube_ptrs, cube3_result, mask=(offs_n[:, None] < N) & (offs_k[None, :] < K))
 
 
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_pcb07_signature(dtype_str):
     """构建PCB07 kernel的参数类型签名。"""
@@ -234,6 +262,7 @@ def test_pcb07_tc01():
 
     # 将MLIR代码输出到指定路径
 
+
 def test_pcb07_tc02():
     """PCB07-TC02: 验证float32 kernel编译生成的MLIR代码正确性。
 
@@ -255,6 +284,7 @@ def test_pcb07_tc02():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

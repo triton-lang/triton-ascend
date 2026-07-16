@@ -71,8 +71,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # MLIR输出配置
 # ============================================================================
@@ -92,19 +90,30 @@ def _write_mlir_to_file(mlir, filename):
 # Kernel定义
 # ============================================================================
 
+
 # ----------------------------------------------------------------------------
 # SDF02-TC01: float16, M=128, N=64, K=128
 # 测试目的: 验证float16下C2V依赖 + WAR内存依赖的MLIR生成
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf02_tc01_c2v_war(
-    a_ptr, b_ptr, c_ptr, buf_ptr, out_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    buf_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
     stride_c,
-    stride_buf_kk, stride_buf_n,
-    stride_out_kk, stride_out_n,
+    stride_buf_kk,
+    stride_buf_n,
+    stride_out_kk,
+    stride_out_n,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
 ):
@@ -118,14 +127,17 @@ def sdf02_tc01_c2v_war(
         b = tl.load(b_ptr + k * stride_bk + offs_n * stride_bn, mask=offs_n < N, other=0.0)  # (N,) = (64,)
         cube_result = tl.dot(a[:, None], b[None, :])  # (K,1)@(1,N) = (K,N) = (128,64)
 
-        old_val = tl.load(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_n[None, :] * stride_buf_n, mask=(offs_k[:, None] < K) & (offs_n[None, :] < N), other=0.0)  # (K,N) = (128,64)
+        old_val = tl.load(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_n[None, :] * stride_buf_n,
+                          mask=(offs_k[:, None] < K) & (offs_n[None, :] < N), other=0.0)  # (K,N) = (128,64)
         c = tl.load(c_ptr + offs_n * stride_c, mask=offs_n < N, other=0.0)  # (N,) = (64,)
 
         vec_result = cube_result + c  # (K,N) + (N,) = (K,N) = (128,64)
 
         store_mask = (offs_k[:, None] < K) & (offs_n[None, :] < N)  # (K,N)
-        tl.store(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_n[None, :] * stride_buf_n, vec_result, mask=store_mask)
-        tl.store(out_ptr + offs_k[:, None] * stride_out_kk + offs_n[None, :] * stride_out_n, vec_result + old_val, mask=store_mask)
+        tl.store(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_n[None, :] * stride_buf_n, vec_result,
+                 mask=store_mask)
+        tl.store(out_ptr + offs_k[:, None] * stride_out_kk + offs_n[None, :] * stride_out_n, vec_result + old_val,
+                 mask=store_mask)
 
 
 # ----------------------------------------------------------------------------
@@ -134,13 +146,23 @@ def sdf02_tc01_c2v_war(
 # ----------------------------------------------------------------------------
 @triton.jit
 def sdf02_tc02_c2v_war(
-    a_ptr, b_ptr, c_ptr, buf_ptr, out_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    buf_ptr,
+    out_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
     stride_c,
-    stride_buf_kk, stride_buf_n,
-    stride_out_kk, stride_out_n,
+    stride_buf_kk,
+    stride_buf_n,
+    stride_out_kk,
+    stride_out_n,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
 ):
@@ -154,19 +176,23 @@ def sdf02_tc02_c2v_war(
         b = tl.load(b_ptr + k * stride_bk + offs_n * stride_bn, mask=offs_n < N, other=0.0)
         cube_result = tl.dot(a[:, None], b[None, :])  # (K,N) = (128,64)
 
-        old_val = tl.load(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_n[None, :] * stride_buf_n, mask=(offs_k[:, None] < K) & (offs_n[None, :] < N), other=0.0)
+        old_val = tl.load(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_n[None, :] * stride_buf_n,
+                          mask=(offs_k[:, None] < K) & (offs_n[None, :] < N), other=0.0)
         c = tl.load(c_ptr + offs_n * stride_c, mask=offs_n < N, other=0.0)
 
         vec_result = cube_result + c  # (K,N) + (N,) = (K,N)
 
         store_mask = (offs_k[:, None] < K) & (offs_n[None, :] < N)
-        tl.store(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_n[None, :] * stride_buf_n, vec_result, mask=store_mask)
-        tl.store(out_ptr + offs_k[:, None] * stride_out_kk + offs_n[None, :] * stride_out_n, vec_result + old_val, mask=store_mask)
+        tl.store(buf_ptr + offs_k[:, None] * stride_buf_kk + offs_n[None, :] * stride_buf_n, vec_result,
+                 mask=store_mask)
+        tl.store(out_ptr + offs_k[:, None] * stride_out_kk + offs_n[None, :] * stride_out_n, vec_result + old_val,
+                 mask=store_mask)
 
 
 # ============================================================================
 # Pytest测试用例
 # ============================================================================
+
 
 def _build_sdf02_signature(dtype_str):
     """构建SDF02 kernel的参数类型签名。"""
@@ -213,6 +239,7 @@ def test_sdf02_tc01():
 
     # 将MLIR代码输出到指定路径
 
+
 def test_sdf02_tc02():
     """SDF02-TC02: 验证float32 kernel编译生成的MLIR代码正确性。
 
@@ -234,6 +261,7 @@ def test_sdf02_tc02():
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
+
 
 # ============================================================================
 # Main用于手动测试

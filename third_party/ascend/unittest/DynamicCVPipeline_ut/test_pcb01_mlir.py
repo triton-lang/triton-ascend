@@ -21,7 +21,6 @@ Test Cases:
   - PCB01-TC02: float32, M=128, N=64, K=32
 """
 
-
 import os
 import subprocess
 import triton
@@ -32,7 +31,6 @@ from triton._C.libtriton import ir
 from triton._C.libtriton.ascend import ir as ascend_ir
 from triton.backends.ascend.compiler import NPUOptions, make_ttir, ttir_to_linalg, min_dot_size
 import pytest
-
 
 # ============================================================================
 # MLIR输出配置
@@ -53,8 +51,6 @@ def _write_mlir_to_file(mlir, filename):
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(mlir)
     print(f"MLIR代码已写入: {output_path}")
-
-
 
 
 # ============================================================================
@@ -107,8 +103,6 @@ def compile_kernel(kernel, signature, constants):
         return None
 
 
-
-
 # ============================================================================
 # Kernel定义
 # ============================================================================
@@ -120,22 +114,31 @@ def compile_kernel(kernel, signature, constants):
 # ----------------------------------------------------------------------------
 @triton.jit
 def pcb01_tc01_single_cube_vector(
-    a_ptr, b_ptr, c_ptr, d_ptr, out1_ptr, out2_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_c, stride_d,
-    stride_out1m, stride_out1n,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    out1_ptr,
+    out2_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_out1m,
+    stride_out1n,
     stride_out2,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
 ):
     pid = tl.program_id(0)
 
-
     offs_k = tl.arange(0, BLOCK_SIZE_K)  # (K,)
     offs_n = tl.arange(0, BLOCK_SIZE_N)  # (N,)
-
 
     for k in range(K):
         a = tl.load(a_ptr + k * stride_am + offs_k * stride_ak, mask=offs_k < K, other=0.0)  # (K,)
@@ -147,14 +150,11 @@ def pcb01_tc01_single_cube_vector(
         out1_mask = (offs_k[:, None] < K) & (offs_k[None, :] < K)
         tl.store(out1_ptrs, cube_result, mask=out1_mask)
 
-
         c = tl.load(c_ptr + offs_n * stride_c, mask=offs_n < N, other=0.0)  # (N,)
         d = tl.load(d_ptr + offs_n * stride_d, mask=offs_n < N, other=0.0)  # (N,)
         vec_result = c + d  # (N,)
         out2_ptrs = out2_ptr + offs_n * stride_out2
         tl.store(out2_ptrs, vec_result, mask=offs_n < N)
-
-
 
 
 # ----------------------------------------------------------------------------
@@ -163,22 +163,31 @@ def pcb01_tc01_single_cube_vector(
 # ----------------------------------------------------------------------------
 @triton.jit
 def pcb01_tc02_single_cube_vector(
-    a_ptr, b_ptr, c_ptr, d_ptr, out1_ptr, out2_ptr,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_c, stride_d,
-    stride_out1m, stride_out1n,
+    a_ptr,
+    b_ptr,
+    c_ptr,
+    d_ptr,
+    out1_ptr,
+    out2_ptr,
+    M,
+    N,
+    K,
+    stride_am,
+    stride_ak,
+    stride_bk,
+    stride_bn,
+    stride_c,
+    stride_d,
+    stride_out1m,
+    stride_out1n,
     stride_out2,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
 ):
     pid = tl.program_id(0)
 
-
     offs_k = tl.arange(0, BLOCK_SIZE_K)  # (K,)
     offs_n = tl.arange(0, BLOCK_SIZE_N)  # (N,)
-
 
     for k in range(K):
         a = tl.load(a_ptr + k * stride_am + offs_k * stride_ak, mask=offs_k < K, other=0.0)  # (K,)
@@ -190,14 +199,11 @@ def pcb01_tc02_single_cube_vector(
         out1_mask = (offs_k[:, None] < K) & (offs_k[None, :] < K)
         tl.store(out1_ptrs, cube_result, mask=out1_mask)
 
-
         c = tl.load(c_ptr + offs_n * stride_c, mask=offs_n < N, other=0.0)  # (N,)
         d = tl.load(d_ptr + offs_n * stride_d, mask=offs_n < N, other=0.0)  # (N,)
         vec_result = c + d  # (N,)
         out2_ptrs = out2_ptr + offs_n * stride_out2
         tl.store(out2_ptrs, vec_result, mask=offs_n < N)
-
-
 
 
 # ============================================================================
@@ -239,7 +245,6 @@ def test_pcb01_tc01():
     # constexpr参数
     constants = {"BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 32}
 
-
     # 编译kernel为MLIR
     mlir = compile_kernel(pcb01_tc01_single_cube_vector, signature, constants)
 
@@ -249,16 +254,12 @@ def test_pcb01_tc01():
     # 校验MLIR成功生成
     assert mlir and len(mlir) > 0, "MLIR代码生成失败或为空"
 
-
     # 校验MLIR中包含函数定义
     assert "func.func @pcb01_tc01_single_cube_vector(" in mlir, \
         "MLIR代码中未找到kernel函数定义"
 
-
     # 校验MLIR代码中包含"scope"关键字
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
-
-
 
 
 def test_pcb01_tc02():
@@ -295,7 +296,6 @@ def test_pcb01_tc02():
     # constexpr参数
     constants = {"BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 32}
 
-
     # 编译kernel为MLIR
     mlir = compile_kernel(pcb01_tc02_single_cube_vector, signature, constants)
 
@@ -305,29 +305,19 @@ def test_pcb01_tc02():
     # 校验MLIR成功生成
     assert mlir and len(mlir) > 0, "MLIR代码生成失败或为空"
 
-
     # 校验MLIR中包含函数定义
     assert "func.func @pcb01_tc02_single_cube_vector(" in mlir, \
         "MLIR代码中未找到kernel函数定义"
 
-
     # 校验MLIR代码中包含"scope"关键字
     assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
-
-
 
 
 # ============================================================================
 # Main用于手动测试
 # ============================================================================
 
-
 if __name__ == "__main__":
     test_pcb01_tc01()
     test_pcb01_tc02()
     print("All PCB01 v3 MLIR validation tests passed!")
-
-
-
-
-

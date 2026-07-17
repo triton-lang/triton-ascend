@@ -20,18 +20,40 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ADAPTER_TRITON_TO_LINALG_CONVERSION_PASSES_H
-#define TRITON_ADAPTER_TRITON_TO_LINALG_CONVERSION_PASSES_H
+#ifndef TRITON_ADAPTER_CONVERSION_CONVERTDESCRIPTOROPSPASS_H
+#define TRITON_ADAPTER_CONVERSION_CONVERTDESCRIPTOROPSPASS_H
 
-#include "ConvertDescriptorOpsPass.h"
-#include "MarkTensorKindPass.h"
-#include "TritonToLinalgPass.h"
+#include "mlir/Pass/Pass.h"
+#include "mlir/Transforms/DialectConversion.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 
-namespace mlir::triton {
-
-#define GEN_PASS_REGISTRATION
+#define GEN_PASS_DEF_CONVERTDESCRIPTOROPS
 #include "ascend/include/TritonToLinalg/Passes.h.inc"
 
-} // namespace mlir::triton
+namespace mlir {
+namespace triton {
 
-#endif // TRITON_ADAPTER_TRITON_TO_LINALG_CONVERSION_PASSES_H
+std::unique_ptr<OperationPass<ModuleOp>> createConvertDescriptorOpsPass();
+
+} // namespace triton
+} // namespace mlir
+
+using namespace mlir;
+using namespace triton;
+
+// Lowers Triton tensor descriptor operations (tt.make_tensor_descriptor and
+// tt.descriptor_load/store/gather/scatter/reduce) to plain Triton
+// block-pointer, tt.load/tt.store, and scf.for based IR. This is a
+// Triton-to-Triton desugaring pass, not a Triton-to-Linalg conversion: it
+// runs as a preparation step before the main TritonToLinalg conversion.
+class ConvertDescriptorOpsPass
+    : public ::impl::ConvertDescriptorOpsBase<ConvertDescriptorOpsPass> {
+public:
+  ConvertDescriptorOpsPass() = default;
+
+  void getDependentDialects(DialectRegistry &registry) const override;
+
+  void runOnOperation() override;
+};
+
+#endif // TRITON_ADAPTER_CONVERSION_CONVERTDESCRIPTOROPSPASS_H

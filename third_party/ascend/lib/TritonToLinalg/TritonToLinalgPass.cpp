@@ -26,7 +26,7 @@
 #include "TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/TritonToLinalg/ArgMinMaxConverter.h"
-#include "ascend/include/TritonToLinalg/DescriptorConverter.h"
+#include "ascend/include/TritonToLinalg/ConvertDescriptorOpsPass.h"
 #include "ascend/include/TritonToLinalg/DevicePrintOffsetRewrite.h"
 #include "ascend/include/TritonToLinalg/FunctionConverter.h"
 #include "ascend/include/TritonToLinalg/HoistBroadcast.h"
@@ -757,59 +757,6 @@ void TritonToLinalgPass::getDependentDialects(DialectRegistry &registry) const {
 }
 
 LogicalResult
-TritonToLinalgPass::processDescriptorOperations(ModuleOp moduleOp) {
-  // --- ConversionTarget: dynamic legality checks ---
-  mlir::ConversionTarget target(getContext());
-  target.addLegalDialect<mlir::tensor::TensorDialect>();
-
-  // Dialect-level dynamic legality: ops are legal if none of their
-  // operands/results use TensorDescType.
-  target.addDynamicallyLegalDialect<
-      mlir::arith::ArithDialect, mlir::scf::SCFDialect, triton::TritonDialect>(
-      [](mlir::Operation *op) {
-        return !DescriptorConverter::hasATensorDescriptorType(
-                   op->getOperandTypes()) &&
-               !DescriptorConverter::hasATensorDescriptorType(
-                   op->getResultTypes());
-      });
-  // Function signature legality: Triton FuncOp is legal if its inputs/outputs
-  // contain no TensorDescType.
-  target.addDynamicallyLegalOp<triton::FuncOp>([](triton::FuncOp funcOp) {
-    return !DescriptorConverter::hasATensorDescriptorType(
-               funcOp.getFunctionType().getInputs()) &&
-           !DescriptorConverter::hasATensorDescriptorType(
-               funcOp.getFunctionType().getResults());
-  });
-  target.addLegalOp<triton::MakeTensorDescOp>();
-  target.addIllegalOp<triton::DescriptorLoadOp, triton::DescriptorStoreOp,
-                      triton::DescriptorScatterOp, triton::DescriptorGatherOp,
-                      triton::DescriptorReduceOp>();
-
-  // --- Patterns ---
-  mlir::RewritePatternSet patterns(&getContext());
-  patterns.add<DescriptorConverter::DescriptorLoadConverter>(
-      patterns.getContext());
-  patterns.add<DescriptorConverter::DescriptorStoreConverter>(
-      patterns.getContext());
-  patterns.add<DescriptorConverter::DescriptorScatterConverter>(
-      patterns.getContext());
-  patterns.add<DescriptorConverter::DescriptorGatherConverter>(
-      patterns.getContext());
-  patterns.add<DescriptorConverter::DescriptorReduceConverter>(
-      patterns.getContext());
-
-  mlir::ConversionConfig config;
-  config.buildMaterializations = true;
-  if (failed(applyPartialConversion(moduleOp, target, std::move(patterns),
-                                    config))) {
-    moduleOp->emitError("failed to convert tensor descriptor operations");
-    return failure();
-  }
-
-  return success();
-}
-
-LogicalResult
 TritonToLinalgPass::processPtrBroadcastOperations(ModuleOp moduleOp) {
   // --- ConversionTarget: dynamic legality checks ---
   mlir::ConversionTarget target(getContext());
@@ -952,8 +899,13 @@ void TritonToLinalgPass::runOnOperation() {
   bool existSIMTOp = false;
 
   // Execute tensor descriptor operations conversion
-  if (failed(processDescriptorOperations(moduleOp))) {
-    signalPassFailure();
+  {
+    PassManager pm(&getContext(), moduleOp.getOperationName());
+    pm.addPass(triton::createConvertDescriptorOpsPass());
+    if (failed(runPipeline(pm, moduleOp))) {
+      signalPassFailure();
+      return;
+    }
   }
 
   // Execute implicit permute

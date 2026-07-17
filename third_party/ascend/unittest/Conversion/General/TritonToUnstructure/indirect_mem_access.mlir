@@ -1,7 +1,7 @@
 // RUN: triton-opt %s --triton-to-unstructure | FileCheck %s
 // RUN: triton-opt %s '--triton-to-unstructure=force-scalarize-mode=True' | FileCheck %s
 // RUN: triton-opt %s '--triton-to-unstructure=compile-on-910-95=True' | FileCheck %s
-// RUN: triton-opt %s '--triton-to-unstructure=compile-mode=simt_template' | FileCheck %s
+// RUN: triton-opt %s '--triton-to-unstructure=force-simt-template=True' | FileCheck %s
 
 
 // CHECK-LABEL: tt.func @triton_indirect_load

@@ -1,21 +1,46 @@
+/*
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
 #ifndef TRITON_DYNAMIC_CV_PIPELINE_ADDMULTIBUFFERCONTROL_BUFFER_COUNT_MANAGER_H
 #define TRITON_DYNAMIC_CV_PIPELINE_ADDMULTIBUFFERCONTROL_BUFFER_COUNT_MANAGER_H
 
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/DenseMap.h"
 #include <vector>
 
 namespace mlir {
-
-class Operation;
-
 namespace triton {
 
 class BufferCountManager {
 public:
-  static BufferCountManager &getInstance();
-
   enum class DepType { IntraCore, InterCore, LoadStore };
+
+  explicit BufferCountManager(Operation *root);
+  explicit BufferCountManager(ModuleOp module);
+
+  BufferCountManager(const BufferCountManager &) = delete;
+  BufferCountManager &operator=(const BufferCountManager &) = delete;
 
   void setBufferCount(DepType type, int count);
 
@@ -26,16 +51,9 @@ public:
   int getBufferCountByType(DepType type) const;
 
 private:
-  BufferCountManager();
-  BufferCountManager(const BufferCountManager &) = delete;
-  BufferCountManager &operator=(const BufferCountManager &) = delete;
-
-  int intraBufferCount_;
-  int interCoreBufferCount_;
-  int loadStoreBufferCount_;
+  void initFromModule();
+  ModuleOp module_;
 };
-
-#define BUFFER_COUNT (BufferCountManager::getInstance())
 
 } // namespace triton
 } // namespace mlir

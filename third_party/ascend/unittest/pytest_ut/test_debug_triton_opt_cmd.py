@@ -110,13 +110,6 @@ def test_no_debug_print_when_debug_is_false(capsys):
     assert "[DEBUG] cmd list:" not in out
 
 
-def test_invalid_compile_mode_raises():
-    from triton.backends.ascend.compiler import NPUOptions
-
-    with pytest.raises(ValueError, match="Invalid compile_mode='invalid'"):
-        NPUOptions(compile_mode="invalid")
-
-
 def test_debug_print_uses_dump_dir_when_set(capsys, monkeypatch):
     """When TRITON_DUMP_DIR is set, debug output should show paths under that dir."""
     from triton.runtime.cache import _base32

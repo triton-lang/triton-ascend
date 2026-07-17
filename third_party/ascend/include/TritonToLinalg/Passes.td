@@ -21,15 +21,7 @@ def TritonToLinalg : Pass<"triton-to-linalg", "mlir::ModuleOp"> {
             "enable select analysis">,
         Option<"compileOn91095", "compile-on-910-95",
             "bool", /*default*/"false",
-            "compile on 910_95">,
-        Option<"compileMode", "compile-mode",
-            "std::string", /*default*/"\"simd\"",
-            "Compilation mode: simd, simd_simt, simt_template. "
-            "simd_simt converts unstructured access to hfusion.gather_load/scatter_store; "
-            "simt_template converts to SIMT template calls">,
-        Option<"forceSimtTemplate", "force-simt-template",
-            "bool", /*default*/"false",
-            "Deprecated alias for compile-mode=simt_template">
+            "compile on 910_95">
     ];
 }
 

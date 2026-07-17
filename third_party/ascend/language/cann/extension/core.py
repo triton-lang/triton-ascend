@@ -23,8 +23,8 @@
 __all__ = [
     "ascend_address_space", "builtin", "CORE", "copy_from_ub_to_l1", "copy", "debug_barrier", "fixpipe",
     "FixpipeDMAMode", "FixpipeDualDstMode", "FixpipePreQuantMode", "FixpipePreReluMode", "int64", "is_builtin", "MODE",
-    "PIPE", "IteratorType", "sub_vec_id", "sub_vec_num", "sync_block_all", "sync_block_set", "sync_block_wait",
-    "SYNC_IN_VF", "conv1d"
+    "PIPE", "SYNC_HINT", "EVENT_ID", "IteratorType", "sub_vec_id", "sub_vec_num", "sync_block_all", "sync_block_set",
+    "sync_block_wait", "SYNC_IN_VF", "conv1d"
 ]
 
 import enum
@@ -40,6 +40,10 @@ from triton.language.core import _unwrap_if_constexpr
 from triton.backends.ascend.driver import NPUUtils
 
 from . import semantic as semantic
+
+PIPE = semantic.PIPE
+SYNC_HINT = semantic.SYNC_HINT
+EVENT_ID = semantic.EVENT_ID
 
 PIPE = semantic.PIPE
 

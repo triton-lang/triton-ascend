@@ -21,14 +21,17 @@ Triton-Ascend是面向昇腾平台构建的Triton编译框架，旨在让Triton�
 ## Tag 规范
 
 Tag遵循以下格式：<br/>
-`<triton-ascend版本>-<芯片系列>-<操作系统>-<python版本>`
+`{triton-ascend版本}-{CANN版本}-{torch_npu版本}-{适用产品}-<操作系统>-<python版本>`
 
-| 字段              | 示例值                        | 说明              |
-|-------------------|-------------------------------|-------------------|
-| triton-ascend版本 | 3.2.1                         | triton-ascend版本 |
-| 芯片系列          | 910b、a3、950                 | 目标昇腾芯片系列  |
-| 操作系统          | ubuntu22.04、openeuler24.03   | 基础操作系统      |
-| python版本        | py3.11                        | Python版本        |
+
+| 字段              | 示例值                        |
+|-----------------|----------------------------|
+| triton-ascend版本 | 3.2.1                      |
+| CANN版本          | cann9.0.0                  |
+| torch_npu版本     | torch_npu2.7.1.post4       |
+| 适用产品            | 910b、a3、950                |
+| 操作系统            | ubuntu22.04、openeuler24.03 |
+| python版本        | py3.11                     |
 
 ## Triton-Ascend 镜像
 
@@ -44,17 +47,17 @@ Tag遵循以下格式：<br/>
 
 #### 镜像列表
 
-| 镜像标签                            | Dockerfile         | 镜像下载命令                                                       |
-|----------------------------------|-------------------|--------------------------------------------------------------------|
-| 3.2.1-910b-debian12-py3.11       | [Dockerfile](3.2.1-910b-debian12-py3.11/Dockerfile) | docker pull quay.io/ascend/triton:3.2.1-910b-debian12-py3.11       |
-| 3.2.1-910b-ubuntu22.04-py3.11    | [Dockerfile](3.2.1-910b-ubuntu22.04-py3.11/Dockerfile) | docker pull quay.io/ascend/triton:3.2.1-910b-ubuntu22.04-py3.11    |
-| 3.2.1-910b-openeuler24.03-py3.11 | [Dockerfile](3.2.1-910b-openeuler24.03-py3.11/Dockerfile) | docker pull quay.io/ascend/triton:3.2.1-910b-openeuler24.03-py3.11 |
-| 3.2.1-a3-debian12-py3.11         | [Dockerfile](3.2.1-a3-debian12-py3.11/Dockerfile) | docker pull quay.io/ascend/triton:3.2.1-a3-debian12-py3.11         |
-| 3.2.1-a3-ubuntu22.04-py3.11      | [Dockerfile](3.2.1-a3-ubuntu22.04-py3.11/Dockerfile) | docker pull quay.io/ascend/triton:3.2.1-a3-ubuntu22.04-py3.11      |
-| 3.2.1-a3-openeuler24.03-py3.11   | [Dockerfile](3.2.1-a3-openeuler24.03-py3.11/Dockerfile) | docker pull quay.io/ascend/triton:3.2.1-a3-openeuler24.03-py3.11   |
-| 3.2.1-950-debian12-py3.11        | [Dockerfile](3.2.1-950-debian12-py3.11/Dockerfile) | docker pull quay.io/ascend/triton:3.2.1-950-debian12-py3.11        |
-| 3.2.1-950-ubuntu22.04-py3.11     | [Dockerfile](3.2.1-950-ubuntu22.04-py3.11/Dockerfile) | docker pull quay.io/ascend/triton:3.2.1-950-ubuntu22.04-py3.11     |
-| 3.2.1-950-openeuler24.03-py3.11  | [Dockerfile](3.2.1-950-openeuler24.03-py3.11/Dockerfile) | docker pull quay.io/ascend/triton:3.2.1-950-openeuler24.03-py3.11  |
+| 镜像标签                                                            | Dockerfile                                                                                                        | 镜像下载命令                                                                                            |
+|-----------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| 3.2.1-cann9.0.0-torch_npu2.7.1.post4-910b-debian12-py3.11       | [Dockerfile](3.2.1-cann9.0.0-torch_npu2.7.1.post4-910b-debian12-py3.11/Dockerfile) | docker pull quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-910b-debian12-py3.11       |
+| 3.2.1-cann9.0.0-torch_npu2.7.1.post4-910b-ubuntu22.04-py3.11    | [Dockerfile](3.2.1-cann9.0.0-torch_npu2.7.1.post4-910b-ubuntu22.04-py3.11/Dockerfile)                             | docker pull quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-910b-ubuntu22.04-py3.11    |
+| 3.2.1-cann9.0.0-torch_npu2.7.1.post4-910b-openeuler24.03-py3.11 | [Dockerfile](3.2.1-cann9.0.0-torch_npu2.7.1.post4-910b-openeuler24.03-py3.11/Dockerfile)                          | docker pull quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-910b-openeuler24.03-py3.11 |
+| 3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-debian12-py3.11         | [Dockerfile](3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-debian12-py3.11/Dockerfile)                                  | docker pull quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-debian12-py3.11         |
+| 3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntu22.04-py3.11      | [Dockerfile](3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntu22.04-py3.11/Dockerfile)                               | docker pull quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntu22.04-py3.11      |
+| 3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-openeuler24.03-py3.11   | [Dockerfile](3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-openeuler24.03-py3.11/Dockerfile)                            | docker pull quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-openeuler24.03-py3.11   |
+| 3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-debian12-py3.11        | [Dockerfile](3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-debian12-py3.11/Dockerfile)                                 | docker pull quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-debian12-py3.11        |
+| 3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-ubuntu22.04-py3.11     | [Dockerfile](3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-ubuntu22.04-py3.11/Dockerfile)                              | docker pull quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-ubuntu22.04-py3.11     |
+| 3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-openeuler24.03-py3.11  | [Dockerfile](3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-openeuler24.03-py3.11/Dockerfile)                           | docker pull quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-950-openeuler24.03-py3.11  |
 
 # 快速开始
 
@@ -81,7 +84,7 @@ docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container --net=host -
 -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
 -v /etc/ascend_install.info:/etc/ascend_install.info \
 -v /home:/home \
-quay.io/ascend/triton:3.2.1-a3-ubuntu22.04-py3.11 \
+quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntu22.04-py3.11 \
 /bin/bash
 
 ```
@@ -94,7 +97,7 @@ quay.io/ascend/triton:3.2.1-a3-ubuntu22.04-py3.11 \
 docker build \
 --network host \
 --build-arg TARGETPLATFORM=linux/arm64 \
--t triton:3.2.1-a3-ubuntun22.04-py3.11-aarch64 \
+-t triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntun22.04-py3.11-aarch64 \
 -f Dockerfile .
 ```
 
@@ -104,7 +107,7 @@ docker build \
 docker build \
 --network host \
 --build-arg TARGETPLATFORM=linux/amd64 \
--t triton:3.2.1-a3-ubuntun22.04-py3.11-x86_64 \
+-t triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntun22.04-py3.11-x86_64 \
 -f Dockerfile .
 ```
 
@@ -112,7 +115,7 @@ docker build \
 
 ```bash
 # 以triton-ascend镜像为基础镜像，叠加用户软件
-FROM quay.io/ascend/triton:3.2.1-a3-ubuntu22.04-py3.11
+FROM quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntu22.04-py3.11
 RUN apt update -y && \
     apt install wget \
     ...

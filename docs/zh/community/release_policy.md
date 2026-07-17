@@ -19,7 +19,7 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
 
 | Triton-Ascend | Triton commit hash                                           | Python    | CANN  | PyTorch | LLVM commit hash                                             | 补丁                                                        |
 | ------------- | ------------------------------------------------------------ | --------- | ----- | ------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| `main`        | [cfc0a9d](https://github.com/triton-lang/triton-ascend/commit/cfc0a9d) | `3.9~3.13` | `9.0.0` | `2.7.1`   | [fad3272](https://github.com/llvm/llvm-project/commit/fad3272) | [fad3272.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/llvm_patch/fad3272.patch) |
+| `main`        | [cfc0a9d](https://github.com/triton-lang/triton-ascend/commit/cfc0a9d) | `3.9~3.13` | `9.0.0` | `2.7.1`   | [f6ded0b](https://github.com/llvm/llvm-project/commit/f6ded0b) | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
 
 ## 维护分支与生命周期
 

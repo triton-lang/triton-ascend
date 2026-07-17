@@ -1,0 +1,171 @@
+name: Docs RTD Preview
+
+#   1. Finding the RTD build for this commit (triggered by webhook).
+#   2. Polling RTD until the build finishes.
+#   3. Posting a GitHub Commit Status (docs/readthedocs) so the preview link
+#      appears in the PR checks list.
+#
+# NOTE: Using `pull_request_target` so fork PRs can access RTD_TOKEN.
+# The workflow only runs trusted inline JavaScript — no PR code is executed.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'docs/**'
+      - '**/*.rst'
+      - '**/*.md'
+      - '**/requirements*.txt'
+      - '**/setup.cfg'
+      - '.readthedocs.yaml'
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: rtd-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  rtd-preview:
+    name: RTD Preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RTD_PROJECT: triton-ascend
+      MAX_WAIT_MIN: '25'
+      POLL_INTERVAL_SEC: '30'
+    steps:
+      - name: Monitor RTD build
+        uses: actions/github-script@v7
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        with:
+          script: |
+            const project    = process.env.RTD_PROJECT;
+            const token      = process.env.RTD_TOKEN;
+            const maxWaitMin = parseInt(process.env.MAX_WAIT_MIN, 10);
+            const pollSec    = parseInt(process.env.POLL_INTERVAL_SEC, 10);
+
+            const prNumber = context.payload.pull_request.number;
+            const sha      = context.payload.pull_request.head.sha;
+
+            const apiBase    = 'https://readthedocs.org/api/v3';
+            const previewUrl = `https://${project}--${prNumber}.org.readthedocs.build/`;
+            const statusCtx  = 'docs/readthedocs';
+
+            // ── helpers ──────────────────────────────────────────────
+
+            async function setStatus(state, description) {
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                sha,
+                state,
+                target_url: previewUrl,
+                description: description.slice(0, 140),
+                context: statusCtx,
+              });
+            }
+
+            // ── Step 1: Validate token ──────────────────────────────
+
+            if (!token) {
+              await setStatus('error', 'RTD_TOKEN secret not configured');
+              core.setFailed('RTD_TOKEN secret is not set.');
+              return;
+            }
+
+            const authHeaders = { headers: { Authorization: `Token ${token}` } };
+
+            // ── Step 2: Find the RTD build for this commit ────────
+            //
+            // The webhook creates the external-{pr} version and triggers the
+            // initial build before this workflow runs, so we just search for
+            // it by commit SHA.
+
+            await setStatus('pending', 'Waiting for RTD build…');
+
+            core.info(`Searching for RTD build for commit ${sha}…`);
+            const searchUrl = `${apiBase}/projects/${project}/builds/?commit=${sha}`;
+            let foundBuild = false;
+
+            // Retry to account for RTD webhook propagation latency:
+            // the PR event may arrive before the RTD build is created.
+            for (let attempt = 0; attempt < 6 && !foundBuild; attempt++) {
+              if (attempt > 0) { await sleep(10000); }
+              try {
+                const pResp = await fetch(searchUrl, authHeaders);
+                if (pResp.ok) {
+                  const pData = await pResp.json();
+                  const recent = (pData.results || [])[0];
+                  if (recent) {
+                    foundBuild = true;
+                    core.info(`Found build #${recent.id} (state=${(recent.state||{}).code}).`);
+                  }
+                }
+              } catch (e) {
+                core.info(`Build search failed (attempt ${attempt + 1}): ${e.message}`);
+              }
+            }
+
+            if (!foundBuild) {
+              await setStatus('error', 'No RTD build found for this commit');
+              core.setFailed(`No RTD build for PR #${prNumber}.`);
+              return;
+            }
+
+            // ── Step 3: Poll RTD until completion ───────────────────
+
+            const buildsUrl = `${apiBase}/projects/${project}/builds/?commit=${sha}`;
+            const deadline  = Date.now() + maxWaitMin * 60 * 1000;
+            const sleep     = ms => new Promise(r => setTimeout(r, ms));
+
+            let lastReportedState = 'pending';
+
+            while (Date.now() < deadline) {
+              let build = null;
+              try {
+                const bResp = await fetch(buildsUrl, authHeaders);
+                if (bResp.ok) {
+                  const bData = await bResp.json();
+                  build = (bData.results || [])[0] || null;
+                } else {
+                  core.warning(`RTD builds API returned ${bResp.status}`);
+                }
+              } catch (e) {
+                core.info(`Builds fetch failed: ${e.message}; retrying.`);
+              }
+
+              if (!build) {
+                await sleep(pollSec * 1000);
+                continue;
+              }
+
+              const state = (build.state && build.state.code) || 'unknown';
+
+              if (state === 'finished') {
+                if (build.success) {
+                  await setStatus('success', 'Preview built successfully');
+                } else {
+                  await setStatus('failure', 'Read the Docs build failed');
+                }
+                return;
+              }
+              if (state === 'cancelled') {
+                await setStatus('failure', 'Read the Docs build was cancelled');
+                return;
+              }
+
+              if (state !== lastReportedState) {
+                await setStatus('pending', `RTD build: ${state}`);
+                lastReportedState = state;
+              }
+              await sleep(pollSec * 1000);
+            }
+
+            // ── Timeout ─────────────────────────────────────────────
+
+            await setStatus('failure', `Build did not finish in ${maxWaitMin} min`);
+            core.setFailed(`RTD build did not finish within ${maxWaitMin} minutes.`);

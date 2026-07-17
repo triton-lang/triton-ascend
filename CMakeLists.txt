@@ -6,8 +6,6 @@ if(POLICY CMP0116)
   cmake_policy(SET CMP0116 OLD)
 endif()
 
-include(ExternalProject)
-
 set(CMAKE_CXX_STANDARD 17)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
@@ -71,10 +69,6 @@ endif()
 if(NOT CMAKE_BUILD_TYPE)
   message(STATUS "Default build type: Release")
   set(CMAKE_BUILD_TYPE "Release")
-endif()
-
-if(NOT WIN32)
-  find_library(TERMINFO_LIBRARY tinfo)
 endif()
 
 if(TRITON_BUILD_UT)
@@ -222,6 +216,17 @@ if(TRITON_BUILD_PYTHON_MODULE)
   link_libraries(${Python3_LIBRARIES})
   add_link_options(${Python3_LINK_OPTIONS})
 
+  foreach(CODEGEN_BACKEND ${TRITON_CODEGEN_BACKENDS})
+    add_subdirectory(third_party/${CODEGEN_BACKEND})
+  endforeach()
+
+  if (TRITON_BUILD_PROTON)
+    add_subdirectory(third_party/proton)
+  endif()
+  # We always build proton dialect
+  list(APPEND TRITON_PLUGIN_NAMES "proton")
+  add_subdirectory(third_party/proton/Dialect)
+
   if (DEFINED TRITON_PLUGIN_DIRS)
     foreach(PLUGIN_DIR ${TRITON_PLUGIN_DIRS})
       # Read the plugin name under dir/backend/name.conf
@@ -238,17 +243,6 @@ if(TRITON_BUILD_PYTHON_MODULE)
       add_subdirectory(${PLUGIN_DIR} ${PLUGIN_DIR_BUILD_OUTPUT})
     endforeach()
   endif()
-
-  foreach(CODEGEN_BACKEND ${TRITON_CODEGEN_BACKENDS})
-    add_subdirectory(third_party/${CODEGEN_BACKEND})
-  endforeach()
-
-  if (TRITON_BUILD_PROTON)
-    add_subdirectory(third_party/proton)
-  endif()
-  # We always build proton dialect
-  list(APPEND TRITON_PLUGIN_NAMES "proton")
-  add_subdirectory(third_party/proton/Dialect)
 
   get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
   get_property(triton_plugins GLOBAL PROPERTY TRITON_PLUGINS)
@@ -326,9 +320,11 @@ if(TRITON_BUILD_PYTHON_MODULE)
                   ${PYTHON_SRC_PATH}/ir.cc
                   ${PYTHON_SRC_PATH}/../triton/extension/buffer/src/buffer_ir.cc
                   ${PYTHON_SRC_PATH}/gluon_ir.cc
+                  ${PYTHON_SRC_PATH}/linear_layout.cc
                   ${PYTHON_SRC_PATH}/passes.cc
                   ${PYTHON_SRC_PATH}/interpreter.cc
-                  ${PYTHON_SRC_PATH}/llvm.cc)
+                  ${PYTHON_SRC_PATH}/llvm.cc
+                  ${PYTHON_SRC_PATH}/specialize.cc)
 
   # Link triton with its dependencies
   target_link_libraries(triton PRIVATE ${TRITON_LIBRARIES})
@@ -367,6 +363,7 @@ if(TRITON_BUILD_PYTHON_MODULE AND NOT WIN32)
   # Check if the platform is MacOS
   if(APPLE)
     set(PYTHON_LDFLAGS "-undefined dynamic_lookup")
+    target_link_libraries(entryC PRIVATE ${PYTHON_LDFLAGS})
   endif()
 
   target_link_options(triton PRIVATE ${PYTHON_LDFLAGS})

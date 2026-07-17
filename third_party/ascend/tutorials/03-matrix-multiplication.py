@@ -33,9 +33,8 @@ DEV = "npu"
 
 def get_autotune_config():
     return [
+        triton.Config({"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 128}),
         triton.Config({"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 64}),
-        triton.Config({"BLOCK_SIZE_M": 64, "BLOCK_SIZE_N": 128, "BLOCK_SIZE_K": 32}),
-        triton.Config({"BLOCK_SIZE_M": 128, "BLOCK_SIZE_N": 64, "BLOCK_SIZE_K": 32}),
     ]
 
 
@@ -104,12 +103,12 @@ def matmul_kernel(
         b_ptrs = b_ptrs_base + k * BLOCK_SIZE_K * stride_bk
         a = tl.load(
             a_ptrs,
-            mask=msk_m[:, None] & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
+            mask=msk_m[:, None] and (offs_k[None, :] < K - k * BLOCK_SIZE_K),
             other=0.0,
         )
         b = tl.load(
             b_ptrs,
-            mask=msk_n[None, :] & (offs_k[:, None] < K - k * BLOCK_SIZE_K),
+            mask=msk_n[None, :] and (offs_k[:, None] < K - k * BLOCK_SIZE_K),
             other=0.0,
         )
         # We accumulate along the K dimension.
@@ -121,7 +120,7 @@ def matmul_kernel(
     # # Write back the block of the output matrix C with masks.
     # Comment out the following lines to enable split the workload to two vector cores
     SUB_BLK_M: tl.constexpr = BLOCK_SIZE_M // 2
-    for s in extension.parallel(0, 2, bind_sub_block=True):
+    for s in range(0, 2):
         vec_sub_blk = extension.extract_slice(accumulator, (s * SUB_BLK_M, 0), (SUB_BLK_M, BLOCK_SIZE_N), (1, 1))
         if ACTIVATION == "leaky_relu_custom":
             vec_sub_blk = leaky_relu_custom(vec_sub_blk)
@@ -186,7 +185,7 @@ def matmul(a, b, activation=""):
 
 
 def test_matrix_multiplication():
-    activation = "leaky_relu_custom"
+    activation = ""
     shape = (512, 512, 512)
     m, k, n = shape
     torch.manual_seed(0)

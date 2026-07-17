@@ -51,7 +51,8 @@ unsigned getElementBitWidth(RankedTensorType type);
 // along an axis with greatest continuity.
 unsigned
 getNumElementsPerThread(Operation *op, SmallVector<unsigned> order,
-                        triton::ModuleAxisInfoAnalysis &axisInfoAnalysis);
+                        triton::ModuleAxisInfoAnalysis &axisInfoAnalysis,
+                        SmallVector<int64_t> &shapePerCTA);
 
 // Returns whether the op is a "view op", i.e. doesn't move any data
 bool isView(Operation *op);
@@ -213,8 +214,9 @@ std::optional<StringRef> getAMDArch(Operation *module);
 std::optional<mlir::triton::gpu::SwizzledSharedEncodingAttr>
 getSharedEncIfAllUsersAreDotEnc(Value val, bool &incompatible);
 
-// Convert \param op operands and results to layout \param encoding.
-void convertOpEncoding(Attribute encoding, Operation *op);
+// Convert \param op to use \param encoding attribute.
+// Skips operands if they're in shared encoding.
+Operation *convertDistributedOpEncoding(Attribute encoding, Operation *op);
 
 // Returns the original memory allocation for a memdesc value
 triton::gpu::LocalAllocOp findShmemAlloc(Value operand);
@@ -279,6 +281,10 @@ bool comesFromLoadOrBlockArg(Value v);
 // For structured control flow ops, returns the values associated with the
 // `resultIdx`th result.
 SmallVector<Value> getTiedArgs(Operation *op, int resultIdx);
+
+// Verifies the provided memory descriptor type used for barrier allocation
+LogicalResult verifyBarrierType(Operation *op,
+                                mlir::triton::gpu::MemDescType barrierType);
 
 } // namespace mlir::triton
 

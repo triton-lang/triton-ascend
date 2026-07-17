@@ -7,11 +7,11 @@ import hashlib
 import json
 from functools import cached_property
 
-from typing import Dict, Tuple, Optional, List
+from typing import Dict, Tuple, List, Optional
 
 from .. import knobs
 from .jit import KernelInterface, JITFunction
-from .errors import OutOfResources
+from .errors import OutOfResources, AutotunerError
 from .driver import driver
 from .cache import get_cache_manager, triton_key
 from triton._C.libtriton import get_cache_invalidating_env_vars
@@ -26,7 +26,9 @@ class Autotuner(KernelInterface):
         :param prune_configs_by: a dict of functions that are used to prune configs, fields:
             'perf_model': performance model used to predicate running time with different configs, returns running time
             'top_k': number of configs to bench
-            'prune_num_stages_by'(optional): a function used to prune num_stages. It takes configs:List[Config] as its input, and returns pruned configs.
+            'early_config_prune': a function used to prune configs. It should have the signature
+                `prune_configs_by( configs: List[triton.Config], named_args: Dict[str, Any], **kwargs: Dict[str, Any]) -> List[triton.Config]:`
+                and return pruned configs. It should return at least one config.
         """
         if not configs:
             self.configs = [Config({}, num_warps=4, num_stages=3, num_ctas=1)]
@@ -35,7 +37,7 @@ class Autotuner(KernelInterface):
         self.keys = key
         self.cache: Dict[Tuple, Config] = {}
         self.arg_names = arg_names
-        self.cache_results = cache_results or (knobs.autotuning.cache and not knobs.runtime.interpret)
+        self.cache_results = (cache_results or knobs.autotuning.cache) and not knobs.runtime.interpret
 
         # Reset to zero or restore values
         self.reset_to_zero = []
@@ -259,6 +261,9 @@ class Autotuner(KernelInterface):
         pruned_configs = self.configs
         if self.early_config_prune:
             pruned_configs = self.early_config_prune(self.configs, self.nargs, **kwargs)
+            if not pruned_configs:
+                raise AutotunerError(
+                    "No valid autotuner configs after pruning. `early_config_prune` should return at least one config.")
         if self.perf_model:
             top_k = self.configs_top_k
             if isinstance(top_k, float) and top_k <= 1.0:
@@ -406,7 +411,9 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore_va
     :param prune_configs_by: a dict of functions that are used to prune configs, fields:
         'perf_model': performance model used to predicate running time with different configs, returns running time
         'top_k': number of configs to bench
-        'early_config_prune'(optional): a function used to do early prune (eg, num_stages). It takes configs:List[Config] as its input, and returns pruned configs.
+        'early_config_prune': a function used to prune configs. It should have the signature
+                `prune_configs_by( configs: List[triton.Config], named_args: Dict[str, Any], **kwargs: Dict[str, Any]) -> List[triton.Config]:`
+                and return pruned configs. It should return at least one config.
     :param reset_to_zero: a list of argument names whose value will be reset to zero before evaluating any configs.
     :type reset_to_zero: list[str]
     :param restore_value: a list of argument names whose value will be restored after evaluating any configs.

@@ -1,4 +1,4 @@
-// RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=True compile-mode=simt_template' '--triton-to-unstructure=compile-on-910-95=True compile-mode=simt_template' %s --split-input-file | FileCheck %s
+// RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=True force-simt-template=True' '--triton-to-unstructure=compile-on-910-95=True force-simt-template=True' %s --split-input-file | FileCheck %s
 
 // tt.load -> tt.indirect_load
 tt.func public @triton_ldst_indirect_05_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<i64>, %arg2: !tt.ptr<f32>, %arg3: i32) attributes {noinline = false} {

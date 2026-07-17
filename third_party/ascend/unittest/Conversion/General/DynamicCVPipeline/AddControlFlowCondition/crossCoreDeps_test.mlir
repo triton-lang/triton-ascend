@@ -18,20 +18,20 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     // CHECK:       %[[ADDR1:.*]] = llvm.mlir.constant(1024 : i64) : i64
     // CHECK:       %[[PTR0:.*]] = llvm.inttoptr %[[ADDR0]] : i64 to !llvm.ptr<11>
     // CHECK:       %[[PTR1:.*]] = llvm.inttoptr %[[ADDR1]] : i64 to !llvm.ptr<11>
-    // CHECK:       llvm.store %[[ZERO]], %[[PTR0]] : i32, !llvm.ptr<11>
-    // CHECK:       llvm.store %[[ZERO]], %[[PTR1]] : i32, !llvm.ptr<11>
+    // CHECK:       llvm.store volatile %[[ZERO]], %[[PTR0]] : i32, !llvm.ptr<11>
+    // CHECK:       llvm.store volatile %[[ZERO]], %[[PTR1]] : i32, !llvm.ptr<11>
     // CHECK:       %[[ADDR2:.*]] = llvm.mlir.constant(4 : i64) : i64
     // CHECK:       %[[ADDR3:.*]] = llvm.mlir.constant(1028 : i64) : i64
     // CHECK:       %[[PTR2:.*]] = llvm.inttoptr %[[ADDR2]] : i64 to !llvm.ptr<11>
     // CHECK:       %[[PTR3:.*]] = llvm.inttoptr %[[ADDR3]] : i64 to !llvm.ptr<11>
-    // CHECK:       llvm.store %[[ZERO]], %[[PTR2]] : i32, !llvm.ptr<11>
-    // CHECK:       llvm.store %[[ZERO]], %[[PTR3]] : i32, !llvm.ptr<11>
+    // CHECK:       llvm.store volatile %[[ZERO]], %[[PTR2]] : i32, !llvm.ptr<11>
+    // CHECK:       llvm.store volatile %[[ZERO]], %[[PTR3]] : i32, !llvm.ptr<11>
     // CHECK:       %[[ADDR4:.*]] = llvm.mlir.constant(8 : i64) : i64
     // CHECK:       %[[ADDR5:.*]] = llvm.mlir.constant(1032 : i64) : i64
     // CHECK:       %[[PTR4:.*]] = llvm.inttoptr %[[ADDR4]] : i64 to !llvm.ptr<11>
     // CHECK:       %[[PTR5:.*]] = llvm.inttoptr %[[ADDR5]] : i64 to !llvm.ptr<11>
-    // CHECK:       llvm.store %[[ZERO]], %[[PTR4]] : i32, !llvm.ptr<11>
-    // CHECK:       llvm.store %[[ZERO]], %[[PTR5]] : i32, !llvm.ptr<11>
+    // CHECK:       llvm.store volatile %[[ZERO]], %[[PTR4]] : i32, !llvm.ptr<11>
+    // CHECK:       llvm.store volatile %[[ZERO]], %[[PTR5]] : i32, !llvm.ptr<11>
     scope.scope : () -> () {
       // Vector scope only process each vector core's ssbuffer ptr
       // CHECK:       arith.constant 1024
@@ -52,6 +52,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       llvm.load
         // CHECK:       arith.cmpi slt
         // CHECK:       scf.if
+        hivm.hir.sync_block_set {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 3 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 4
         %memspacecast_11 = memref.memory_space_cast %alloc_5 {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32, ssbuffer.crossDeps = [0 : i32, 0 : i32]} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
         %reshape_13 = tensor.empty() {ssbuffer.block_id = 5 : i32} : tensor<8x8x16x16xf16>
         hivm.hir.copy ins(%reshape_13 : tensor<8x8x16x16xf16>) outs(%alloc : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 0 : i32}
@@ -67,8 +68,8 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       llvm.load
         // CHECK:       arith.cmpi sgt
         // CHECK:       scf.if
+        hivm.hir.sync_block_set {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 3 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 4
         %memspacecast_16 = memref.memory_space_cast %alloc_6 {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32, ssbuffer.crossDeps = [1, 0]} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
-        %48 = bufferization.to_tensor %memspacecast_16 restrict writable {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32> to tensor<128x128xf32>
         // CHECK:       llvm.load
         // CHECK:       arith.subi
         // CHECK:       llvm.store
@@ -92,6 +93,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       arith.cmpi slt
         // CHECK:       arith.cmpi slt
         // CHECK:       scf.if
+        hivm.hir.sync_block_wait {ssbuffer.block_id = 0 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
         %30 = tensor.empty() {ssbuffer.block_id = 0 : i32} : tensor<128x128xf32>
         hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, ssbuffer.block_id = 0 : i32, ssbuffer.transfer_id = 1 : i32} ins(%30 : tensor<128x128xf32>) outs(%alloc_6 : memref<128x128xf32, #hivm.address_space<ub>>)
         // CHECK:       llvm.load
@@ -112,6 +114,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       arith.cmpi slt
         // CHECK:       arith.cmpi slt
         // CHECK:       scf.if
+        hivm.hir.sync_block_wait {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
         %32 = hivm.hir.convert_layout %alloc_5 output_shape [128, 128] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32, ssbuffer.crossDeps = [2 : i32, 0 : i32]} : (memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) -> memref<128x128xf16, #hivm.address_space<cbuf>>
         %40 = tensor.empty() {ssbuffer.block_id = 1 : i32} : tensor<128x128xf32>
         hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 2 : i32} ins(%40 : tensor<128x128xf32>) outs(%alloc_7 : memref<128x128xf32, #hivm.address_space<ub>>)
@@ -130,9 +133,6 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       } {ssbuffer.if = 1 : i32}
         scf.yield %arg17, %arg18 : i32, i32
       } {ssbuffer.block_id = 9 : i32, ssbuffer.main_loop = 0 : i64}
-      scope.return
-    } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
-    scope.scope : () -> () {
       scope.return
     } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
     return {ssbuffer.core_type = "VECTOR"}

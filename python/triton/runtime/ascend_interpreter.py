@@ -31,7 +31,7 @@ import warnings
 import contextlib
 import numpy as np
 import triton.language as tl
-from .interpreter import InterpreterBuilder, TensorHandle, ReduceOps, _get_np_dtype
+from .interpreter import InterpreterBuilder, TensorHandle, ReduceOps, _get_np_dtype, _patch_builtin, _LangPatchScope
 from .._C.libtriton import interpreter as _interpreter
 
 
@@ -46,9 +46,9 @@ class AscendReduceOps(ReduceOps):
             return self.min_max(input_param[0], val_reduce_op=np.min, idx_reduce_op=np.argmin)
         elif self.combine_fn == tl.standard._argmax_combine_tie_break_left:
             return self.min_max(input_param[0], val_reduce_op=np.max, idx_reduce_op=np.argmax)
-        # Ta has modified the implemention of tl.max
-        elif self.combine_fn == tl.standard._elementwise_max_default:
+        elif self.combine_fn == tl.standard._elementwise_max:
             return self.min_max(input_param[0], val_reduce_op=np.nanmax, idx_reduce_op=None)
+        # TA add function _elementwise_max_propagate_nan
         elif self.combine_fn == tl.standard._elementwise_max_propagate_nan:
             return self.min_max(input_param[0], val_reduce_op=np.max, idx_reduce_op=None)
         elif self.combine_fn == tl.standard._elementwise_min:
@@ -145,7 +145,7 @@ class AscendInterpreterBuilder(InterpreterBuilder):
             # "ascend_option2",
         ]
 
-    def patch_extensions(self, fn):
+    def patch_extensions(self, fn, scope: _LangPatchScope):
         """
         Patch Ascend extension modules for the given function.
 
@@ -154,9 +154,8 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         the function's global namespace.
 
         :param fn: The kernel function to patch extensions for
+        :param scope: The language patch scope to use for patching
         """
-        # Import _patch_builtin from parent module
-        from .interpreter import _patch_builtin
         self._patch_lang_ascend(fn)
 
         # Patch all modules in fn's globals that might be extension modules
@@ -166,12 +165,12 @@ class AscendInterpreterBuilder(InterpreterBuilder):
             try:
                 # Check if it looks like an extension module (has builtin functions)
                 if hasattr(value, '__name__') and 'extension' in str(value.__name__):
-                    _patch_builtin(value, self)
+                    _patch_builtin(value, self, scope)
                 # Also try patching any module-like object that might have builtin functions
                 elif hasattr(value, '__dict__') and not isinstance(value, type):
                     # Try to patch it and ignore if it fails
                     try:
-                        _patch_builtin(value, self)
+                        _patch_builtin(value, self, scope)
                     except Exception:
                         pass
             except Exception:
@@ -180,7 +179,7 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         # Also try importing extension directly as fallback
         try:
             import triton.language.extra.cann.extension as extension
-            _patch_builtin(extension, self)
+            _patch_builtin(extension, self, scope)
         except (ImportError, AttributeError):
             # Extension module not available (e.g., non-Ascend backend)
             pass

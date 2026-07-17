@@ -33,6 +33,26 @@
 
 namespace mlir {
 namespace triton {
+// Buffer count thresholds for flowOpt condition
+constexpr int CROSS_CORE_BUFFER_COUNT_THRESHOLD = 1;
+constexpr int INTRA_CORE_BUFFER_COUNT_THRESHOLD = 2;
+
+// Indicates the relationship between a tensor iter_arg and ssbuffer.if in the
+// main_loop
+struct TensorIterArgIfOpRelation {
+  Value iterArg;
+  scf::IfOp producer;
+  llvm::SmallVector<scf::IfOp> consumers;
+};
+
+// Indicates the variables that need to be controlled when an ifOp is both a
+// producer and consumer of a tensor iter_args
+struct TensorIterArgIfOpVars {
+  // The variables that need to be controlled as a producer
+  llvm::SmallVector<Value> producerVars;
+  // The variables that need to be controlled as a consumer
+  llvm::SmallVector<Value> consumerVars;
+};
 
 struct ControlFlowConditionInfo {
   llvm::DenseMap<scf::ForOp, SmallVector<int>> blockCounters;
@@ -40,11 +60,30 @@ struct ControlFlowConditionInfo {
   llvm::DenseMap<scf::ForOp, SmallVector<int>> innerDepConds;
 
   llvm::DenseMap<Value, SmallVector<Value>> crossCoreDependentMap;
+  llvm::DenseMap<Operation *, SmallVector<Operation *>>
+      memCrossCoreDependentMap;
   llvm::DenseMap<scf::ForOp, llvm::DenseMap<Value, SmallVector<Value>>>
       intraCoreDependentMap;
+  // Used to store the producer/consumer relationship between the tensor type
+  // iter_args in the main_loop and ssbuffer.if Note: vector index corresponds
+  // to iter arg index in the for op
+  llvm::DenseMap<scf::ForOp, llvm::SmallVector<TensorIterArgIfOpRelation>>
+      tensorIterArgDepsMap;
+  // Used to record the index of the control condition variable for the newly
+  // created iter_args for tensor iter_args
+  llvm::DenseMap<scf::ForOp, llvm::DenseMap<Value, SmallVector<int>>>
+      tensorIterArgIndicesMap;
 
   // unique counter value for each ifblock
   llvm::DenseMap<scf::IfOp, Value> cntArgs;
+
+  // DAG for if block cross-core dependencies
+  llvm::DenseMap<scf::IfOp, llvm::SmallVector<scf::IfOp>> ifBlockCrossCoreDAG;
+  llvm::DenseMap<scf::IfOp, scf::IfOp> flowOptIfOpPairs;
+
+  // Buffer counts for flowOpt condition
+  int intraCoreBufferCount = 0;
+  int crossCoreBufferCount = 0;
 };
 
 class AddControlFlowConditionPass

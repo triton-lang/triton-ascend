@@ -10,7 +10,7 @@ def test_max_propagate_nan():
     @triton.jit
     def func(in_ptr, out_ptr):
         a = tl.load(in_ptr + tl.arange(0, 8)[:, None] * 8 + tl.arange(0, 8)[None, :])
-        a = tl.max(a, 0, propagate_nan=True)
+        a = tl.max(a, 0)
         tl.store(out_ptr + tl.arange(0, 8), a)
 
     a = torch.randn((8, 8), device="npu")

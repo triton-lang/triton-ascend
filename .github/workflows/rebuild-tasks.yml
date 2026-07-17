@@ -25,6 +25,20 @@ on:
 
 permissions: {}
 
+# Single source of truth for workflow_run cascades (currently the A5 /
+# Ascend950 pipeline). Each entry maps an upstream workflow to its
+# workflow_run downstream plus the commit-status context that downstream
+# writes on the PR head SHA. Add an entry per cascade you wire up.
+env:
+  CASCADE_MAP: |
+    [
+      {
+        "upstream_path":   ".github/workflows/Ascend950-wheels-build.yml",
+        "downstream_path": ".github/workflows/Ascend950-pipeline-tests.yml",
+        "status_context":  "Ascend950 Pipeline Tests"
+      }
+    ]
+
 jobs:
   dispatch:
     if: >-
@@ -34,6 +48,13 @@ jobs:
     permissions:
       actions: write          # rerun runs / jobs
       pull-requests: read     # read PR head ref
+    outputs:
+      # Cascade downstreams to flip to pending, consumed by mark-cascade-pending.
+      # Only the steps that actually restart an upstream export these, so the
+      # /retry <job-name> path (which reruns a named job, not the upstream)
+      # leaves them empty and no pending status is pre-set.
+      pending:  ${{ steps.rebuild_rerun.outputs.pending || steps.retry_rerun.outputs.pending }}
+      head_sha: ${{ steps.rebuild_rerun.outputs.head_sha || steps.retry_rerun.outputs.head_sha }}
     steps:
       - name: Parse command
         id: cmd
@@ -112,7 +133,7 @@ jobs:
             --jq '[.workflow_runs[]
                    | select(.event != "workflow_run")
                    | select(.status == "completed")
-                   | {id, name, workflow_id, created_at}]')
+                   | {id, name, path, workflow_id, created_at}]')
 
           # Latest run per workflow (covers prior reruns of the same SHA).
           PICKS=$(echo "$RUNS" | jq '
@@ -130,11 +151,25 @@ jobs:
 
           echo "rerun_ids=$(echo "$PICKS" | jq -c '[.[].id]')" >> "$GITHUB_OUTPUT"
 
+          # Any rerun whose path is a cascade upstream will re-fire its
+          # workflow_run downstream, which only posts its own status late. List
+          # the downstream contexts the mark-cascade-pending job will flip.
+          UP_CTX=$(echo "$CASCADE_MAP" | jq 'map({key:.upstream_path, value:.status_context}) | from_entries')
+          PENDING=$(echo "$PICKS" | jq -c --argjson m "$UP_CTX" '
+              [ .[] | select($m[.path] != null) | {context: $m[.path], run_id: .id} ]')
+          echo "Will pre-set pending: ${PENDING}"
+          echo "pending=${PENDING}"   >> "$GITHUB_OUTPUT"
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+
       - name: Rerun all picked runs
+        id: rebuild_rerun
         if: steps.cmd.outputs.name == '/rebuild' && steps.perm.outputs.ok == 'true'
         env:
-          GH_TOKEN:  ${{ secrets.BOT_TOKEN }}
-          RERUN_IDS: ${{ steps.rb.outputs.rerun_ids }}
+          GH_TOKEN:     ${{ secrets.BOT_TOKEN }}
+          RERUN_IDS:    ${{ steps.rb.outputs.rerun_ids }}
+          PENDING_JSON: ${{ steps.rb.outputs.pending }}
+          HEAD_SHA:     ${{ steps.rb.outputs.head_sha }}
+          REPO:         ${{ github.repository }}
         run: |
           set -euo pipefail
           fail=0
@@ -142,12 +177,17 @@ jobs:
             [ -n "$RUN_ID" ] || continue
             echo "::group::full rerun run_id=${RUN_ID}"
             if ! gh api -X POST \
-                "repos/${{ github.repository }}/actions/runs/${RUN_ID}/rerun"; then
+                "repos/${REPO}/actions/runs/${RUN_ID}/rerun"; then
               echo "Failed to rerun ${RUN_ID}" >&2
               fail=1
             fi
             echo "::endgroup::"
           done < <(echo "$RERUN_IDS" | jq -r '.[]')
+
+          # Hand the cascade pending list to the mark-cascade-pending job.
+          echo "pending=${PENDING_JSON:-[]}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${HEAD_SHA}"        >> "$GITHUB_OUTPUT"
+
           exit $fail
 
       # ---------- /retry: rerun failed (or one specific) job of latest run(s) ----------
@@ -173,14 +213,6 @@ jobs:
           PR:       ${{ github.event.issue.number }}
         run: |
           set -euo pipefail
-
-          CASCADE_MAP='[
-            {
-              "upstream_path":   ".github/workflows/Ascend950-wheels-build.yml",
-              "downstream_path": ".github/workflows/Ascend950-pipeline-tests.yml",
-              "status_context":  "Ascend950 Pipeline Tests"
-            }
-          ]'
 
           HEAD_SHA=$(gh pr view "$PR" --repo "${{ github.repository }}" \
                        --json headRefOid --jq .headRefOid)
@@ -239,19 +271,24 @@ jobs:
           # failed cascades back to their upstream run for a full rerun.
           REV_CASCADE=$(echo "$CASCADE_MAP" | jq 'map({key:.downstream_path, value:.upstream_path}) | from_entries')
 
+          # downstream_path -> the commit-status context that cascade writes, so
+          # we can pre-set it to pending when we restart its upstream.
+          FWD_CTX=$(echo "$CASCADE_MAP" | jq 'map({key:.downstream_path, value:.status_context}) | from_entries')
+
           # Classify: cascade picks → restart upstream (look up by path in PR_RUNS).
           # Non-cascade picks → rerun-failed-jobs directly.
           PLAN=$(jq -nc \
             --argjson picks "$PICKS" \
             --argjson pr    "$PR_RUNS" \
-            --argjson rev   "$REV_CASCADE" '
+            --argjson rev   "$REV_CASCADE" \
+            --argjson ctx   "$FWD_CTX" '
               [ $picks[]
                 | . as $p
                 | if $p.event == "workflow_run" and ($rev[$p.path] // null) != null then
                     ($rev[$p.path]) as $up_path
                     | ($pr | map(select(.path == $up_path)) | sort_by(.created_at) | last) as $up
                     | if $up then
-                        {kind:"upstream", run_id:$up.id, via:$p.name, original_run_id:$p.id}
+                        {kind:"upstream", run_id:$up.id, via:$p.name, original_run_id:$p.id, status_context:($ctx[$p.path] // null)}
                       else
                         {kind:"direct", run_id:$p.id, name:$p.name}
                       end
@@ -280,7 +317,17 @@ jobs:
           echo "upstream_ids=${UPSTREAM_IDS}" >> "$GITHUB_OUTPUT"
           echo "picks=$(echo "$PICKS" | jq -c '.')" >> "$GITHUB_OUTPUT"
 
+          # Cascade downstreams whose upstream we're restarting: pre-set their
+          # status to pending so the PR flips off the stale failure immediately.
+          PENDING=$(echo "$PLAN" | jq -c '
+              [ .[] | select(.kind=="upstream" and .status_context != null)
+                    | {context: .status_context, run_id: .run_id} ] | unique')
+          echo "Will pre-set pending: ${PENDING}"
+          echo "pending=${PENDING}"   >> "$GITHUB_OUTPUT"
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+
       - name: Rerun failed jobs / restart upstream (no arg)
+        id: retry_rerun
         if: >-
           steps.cmd.outputs.name == '/retry' &&
           steps.perm.outputs.ok == 'true' &&
@@ -289,6 +336,9 @@ jobs:
           GH_TOKEN:     ${{ secrets.BOT_TOKEN }}
           DIRECT_IDS:   ${{ steps.latest.outputs.direct_ids }}
           UPSTREAM_IDS: ${{ steps.latest.outputs.upstream_ids }}
+          PENDING_JSON: ${{ steps.latest.outputs.pending }}
+          HEAD_SHA:     ${{ steps.latest.outputs.head_sha }}
+          REPO:         ${{ github.repository }}
         run: |
           set -euo pipefail
           fail=0
@@ -298,7 +348,7 @@ jobs:
             [ -n "$RUN_ID" ] || continue
             echo "::group::rerun-failed-jobs run_id=${RUN_ID}"
             if ! gh api -X POST \
-                "repos/${{ github.repository }}/actions/runs/${RUN_ID}/rerun-failed-jobs"; then
+                "repos/${REPO}/actions/runs/${RUN_ID}/rerun-failed-jobs"; then
               echo "Failed to rerun run ${RUN_ID}" >&2
               fail=1
             fi
@@ -310,12 +360,16 @@ jobs:
             [ -n "$RUN_ID" ] || continue
             echo "::group::full rerun (cascade) run_id=${RUN_ID}"
             if ! gh api -X POST \
-                "repos/${{ github.repository }}/actions/runs/${RUN_ID}/rerun"; then
+                "repos/${REPO}/actions/runs/${RUN_ID}/rerun"; then
               echo "Failed to full-rerun upstream ${RUN_ID}" >&2
               fail=1
             fi
             echo "::endgroup::"
           done < <(echo "$UPSTREAM_IDS" | jq -r '.[]')
+
+          # Hand the cascade pending list to the mark-cascade-pending job.
+          echo "pending=${PENDING_JSON:-[]}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${HEAD_SHA}"        >> "$GITHUB_OUTPUT"
 
           exit $fail
 
@@ -355,3 +409,43 @@ jobs:
           fi
           echo "Retried ${matched} job(s) named '${JOB_NAME}'."
           exit $fail
+
+  # All A5/cascade status handling lives here. When dispatch restarts a cascade
+  # upstream, that upstream's workflow_run downstream only posts its own status
+  # late (after the whole rebuild), so the PR would keep showing the stale
+  # failure meanwhile. Flip each downstream's commit status to pending right
+  # away. dispatch only exports `pending` for paths that actually restart an
+  # upstream, so /retry <job-name> and no-op invocations skip this job.
+  mark-cascade-pending:
+    needs: dispatch
+    if: >-
+      needs.dispatch.outputs.pending != '' &&
+      needs.dispatch.outputs.pending != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    env:
+      # Use the built-in token, not BOT_TOKEN: this job's `statuses: write`
+      # permission grants commit-status writes to GITHUB_TOKEN, whereas the PAT
+      # lacks that scope (403 "Resource not accessible by personal access token").
+      GH_TOKEN:     ${{ github.token }}
+      PENDING_JSON: ${{ needs.dispatch.outputs.pending }}
+      HEAD_SHA:     ${{ needs.dispatch.outputs.head_sha }}
+      SERVER_URL:   ${{ github.server_url }}
+      REPO:         ${{ github.repository }}
+    steps:
+      - name: Pre-set cascade downstream statuses to pending
+        run: |
+          set -euo pipefail
+          echo "${PENDING_JSON:-[]}" | jq -c '.[]?' | while read -r E; do
+            CTX=$(echo "$E" | jq -r .context)
+            RID=$(echo "$E" | jq -r .run_id)
+            echo "::group::pre-set pending status '${CTX}'"
+            gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+              -f state=pending \
+              -f context="${CTX}" \
+              -f description='Rebuild queued — waiting for upstream build' \
+              -f target_url="${SERVER_URL}/${REPO}/actions/runs/${RID}" \
+              || echo "Failed to pre-set pending for ${CTX}" >&2
+            echo "::endgroup::"
+          done

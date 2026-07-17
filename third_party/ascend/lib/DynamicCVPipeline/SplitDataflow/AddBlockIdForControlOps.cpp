@@ -22,6 +22,8 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/AddBlockIdForControlOps.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
 #include "llvm/Support/Debug.h"
 
 using namespace mlir;
@@ -37,34 +39,42 @@ void AddBlockIdForControlOpsPass::runOnOperation() {
   LOG_DEBUG("\n--- enter AddBlockIdForControlOpsPass --->\n");
   ModuleOp module = getOperation();
 
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   // Step 1: find the max block_id
-  int maxBlockId = -1;
-  module.walk([&](Operation *op) {
-    if (auto attr = op->getAttrOfType<IntegerAttr>("ssbuffer.block_id")) {
-      int currentId = attr.getInt();
-      if (currentId > maxBlockId) {
-        maxBlockId = currentId;
-      }
-    }
-  });
+  int maxBlockId = CVPipeline::getAvailableBlockId(module) - 1;
 
   LOG_DEBUG("maxBlockId: " << maxBlockId << "\n");
 
   // Step 2: add block_id for control flow ops
   module.walk([&](Operation *op) {
     // skip op with block_id
-    if (op->getAttrOfType<IntegerAttr>("ssbuffer.block_id")) {
+    if (op->getAttrOfType<IntegerAttr>(CVPipeline::kBlockId)) {
       return;
     }
 
-    if (isa<scf::ForOp, scf::IfOp, scf::WhileOp>(op)) {
+    if (isa<scf::ForOp, scf::IfOp>(op)) {
       maxBlockId++;
-      static constexpr int kIntegerBitWidth = 32;
-      op->setAttr("ssbuffer.block_id",
-                  IntegerAttr::get(
-                      IntegerType::get(module.getContext(), kIntegerBitWidth),
-                      maxBlockId));
+      setOpBlockId(op, maxBlockId);
       LOG_DEBUG("Added block_id " << maxBlockId << " to " << *op << "\n");
+    }
+
+    // coretype of scf.yield may not be the same with defining op
+    if (isa<scf::YieldOp>(op) && isa<scf::IfOp>(op->getParentOp())) {
+      Operation *parentOp = op->getParentOp();
+      auto ifBlockIdOpt = CVPipeline::getOpBlockId(parentOp);
+
+      int yieldBlockId;
+      if (ifBlockIdOpt) {
+        yieldBlockId = *ifBlockIdOpt;
+      } else {
+        maxBlockId++;
+        yieldBlockId = maxBlockId;
+      }
+      setOpBlockId(op, yieldBlockId);
+      LOG_DEBUG("Added block_id " << yieldBlockId << " to " << *op << "\n");
     }
   });
 

@@ -99,14 +99,14 @@ func[grid](in_out_tensor, in_out_tensor)
 
 In the above code, `ptr0` and `ptr1` actually point to the same memory (i.e., the same `in_out_tensor`), but the compiler cannot identify this pointer alias relationship. Therefore, passing the same tensor as multiple pointer parameters is not supported, and the corresponding kernel will not be able to enable related optimizations.
 
-**Q: What are the limitations of using `tl.load` / `tl.store` in control flow such as `if` / `for` / `while`?**
+**Q: What are the limitations of using `tl.load` / `tl.store` in control flow such as `if` / `for` / `while` / `scope`?**
 
 A: Triton-Ascend supports memory accesses where pointers from the same source are updated with simple address changes inside control flow.
 It is also valid to place `tl.load` / `tl.store` directly inside control flow.
 However, it is not recommended to merge pointers from different sources or pointers with different block-pointer layouts after control flow and then perform one unified memory access.
 It is also not recommended to repeatedly update pointer state across complex nested control flow while performing store/read-after-write in the same pattern.
 
-Support for combining `if` / `for` / `while` with `tl.load` / `tl.store` is still incomplete in the current version and will continue to improve in later releases.
+Support for combining `if` / `for` / `while` / `scope` with `tl.load` / `tl.store` is still incomplete in the current version and will continue to improve in later releases.
 For now, follow the constraints below.
 
 It is not recommended to merge pointers with different base addresses, or block pointers constructed in different branches, and then access memory after the branch:

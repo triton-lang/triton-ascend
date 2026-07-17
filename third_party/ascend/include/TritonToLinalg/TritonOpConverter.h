@@ -46,7 +46,7 @@ namespace TTOpConverters {
 using namespace mlir;
 using namespace triton;
 
-using triton::ascend::kFuncNameCap;
+static constexpr unsigned kFuncNameCap = 128;
 
 /*
 Convert `tt.precise_div` operation to `arith.divf` operation.
@@ -265,10 +265,30 @@ protected:
   }
 
   llvm::SmallVector<Operation *> getRealReductionOps(OpTy reductionOp) const {
+    auto *body = reductionOp.getBody();
+    auto *terminator = body->getTerminator();
+
+    // Compute the backward slice from yielded values: only ops that
+    // actually contribute to the computation of the reduction result
+    // are considered.
+    llvm::DenseSet<Operation *> liveOps;
+    llvm::SmallVector<Value> worklist(terminator->getOperands());
+    while (!worklist.empty()) {
+      Value val = worklist.pop_back_val();
+      if (auto *defOp = val.getDefiningOp()) {
+        if (defOp->getBlock() == body && liveOps.insert(defOp).second) {
+          for (auto operand : defOp->getOperands())
+            worklist.push_back(operand);
+        }
+      }
+    }
+
+    // Count only live ops, excluding type conversions that serve as
+    // precision promotion or demotion (e.g. bf16 -> f32 -> bf16).
     llvm::SmallVector<Operation *> realOps;
-    for (Operation &bodyOp : reductionOp.getBody()->without_terminator()) {
-      // Skips non-reduce operations, including type conversion operations (this
-      // can be extended as needed).
+    for (Operation &bodyOp : body->without_terminator()) {
+      if (!liveOps.contains(&bodyOp))
+        continue;
       if (isa<arith::ExtFOp, arith::TruncFOp, arith::BitcastOp>(&bodyOp))
         continue;
       realOps.push_back(&bodyOp);
@@ -705,26 +725,50 @@ private:
   static constexpr llvm::StringRef funcNameBase = "triton_scatter_ub_to_out";
 };
 
-class UnstructuredLoadConverter
-    : public OpConversionPattern<triton::ascend::UnstructuredLoadOp> {
+class IndirectLoadConverter
+    : public OpConversionPattern<triton::ascend::IndirectLoadOp> {
 public:
   using OpConversionPattern<
-      triton::ascend::UnstructuredLoadOp>::OpConversionPattern;
+      triton::ascend::IndirectLoadOp>::OpConversionPattern;
   LogicalResult
-  matchAndRewrite(triton::ascend::UnstructuredLoadOp op, OpAdaptor adaptor,
+  matchAndRewrite(triton::ascend::IndirectLoadOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 
 private:
   static constexpr llvm::StringRef funcNameBase = "triton_indirect_load";
 };
 
-class UnstructuredStoreConverter
-    : public OpConversionPattern<triton::ascend::UnstructuredStoreOp> {
+class StrideLoadConverter
+    : public OpConversionPattern<triton::ascend::StrideLoadOp> {
+public:
+  using OpConversionPattern<triton::ascend::StrideLoadOp>::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(triton::ascend::StrideLoadOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+
+private:
+  static constexpr llvm::StringRef funcNameBase = "triton_stride_load";
+};
+
+class StrideStoreConverter
+    : public OpConversionPattern<triton::ascend::StrideStoreOp> {
+public:
+  using OpConversionPattern<triton::ascend::StrideStoreOp>::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(triton::ascend::StrideStoreOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+
+private:
+  static constexpr llvm::StringRef funcNameBase = "triton_stride_store";
+};
+
+class IndirectStoreConverter
+    : public OpConversionPattern<triton::ascend::IndirectStoreOp> {
 public:
   using OpConversionPattern<
-      triton::ascend::UnstructuredStoreOp>::OpConversionPattern;
+      triton::ascend::IndirectStoreOp>::OpConversionPattern;
   LogicalResult
-  matchAndRewrite(triton::ascend::UnstructuredStoreOp op, OpAdaptor adaptor,
+  matchAndRewrite(triton::ascend::IndirectStoreOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 
 private:
@@ -740,6 +784,15 @@ public:
 
   LogicalResult
   matchAndRewrite(triton::ascend::IndexSelectSimdOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
+class HistogramConverter : public OpConversionPattern<triton::HistogramOp> {
+public:
+  using OpConversionPattern<triton::HistogramOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::HistogramOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 };
 

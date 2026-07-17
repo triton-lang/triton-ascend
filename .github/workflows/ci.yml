@@ -11,7 +11,7 @@ on:
       - '.github/CODEOWNERS'
       - '.github/dependabot.yml'
       - 'cmake/llvm-hash.txt'
-      - 'third_party/ascend/llvm_patch/**'
+      - 'third_party/ascend/patch/**'
       - 'docker/**'
       - 'requirements.txt'
       - 'requirements_dev.txt'

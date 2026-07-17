@@ -36,7 +36,6 @@
 extern int nd2nzFlag;
 extern bool compileOn91095Flag;
 extern bool existDotFlag;
-extern mlir::triton::ascend::CompileMode compileModeFlag;
 
 namespace mlir {
 namespace triton {
@@ -44,8 +43,7 @@ namespace triton {
 std::unique_ptr<OperationPass<ModuleOp>> createTritonToLinalgPass();
 
 std::unique_ptr<OperationPass<ModuleOp>>
-createTritonToLinalgPass(bool, bool, bool, bool, bool,
-                         const std::string &compileMode = "simd");
+createTritonToLinalgPass(bool, bool, bool, bool, bool);
 
 } // namespace triton
 } // namespace mlir
@@ -94,20 +92,19 @@ private:
   LogicalResult processDescriptorOperations(ModuleOp moduleOp);
   LogicalResult processPtrBroadcastOperations(ModuleOp moduleOp);
   LogicalResult processImplicitPermuteOperations(ModuleOp moduleOp);
+  LogicalResult processStridedLoadStoreRewriteOperations(ModuleOp moduleOp);
   LogicalResult processLegalStrideOperations(ModuleOp moduleOp);
 
 public:
   TritonToLinalgPass() = default;
 
   TritonToLinalgPass(bool globalKernel, bool namedOps, bool enableNd2nzOnVector,
-                     bool enableSelectAnalysis, bool compileOn91095,
-                     const std::string &compileMode = "simd") {
+                     bool enableSelectAnalysis, bool compileOn91095) {
     this->globalKernel = globalKernel;
     this->namedOps = namedOps;
     this->enableNd2nzOnVector = enableNd2nzOnVector;
     this->enableSelectAnalysis = enableSelectAnalysis;
     this->compileOn91095 = compileOn91095;
-    this->compileMode = compileMode;
   };
 
   void getDependentDialects(DialectRegistry &registry) const override;

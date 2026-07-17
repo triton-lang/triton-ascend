@@ -34,6 +34,3 @@ def test_if_advance():
     torch.matmul(x, y, out=out_std)
     triton_if_advance_kernel[1, 1, 1](x, y, out_tri, 64, 256, 4, 64, 64)
     torch.testing.assert_close(out_std, out_tri, atol=1e-2, rtol=1e-2)
-
-
-test_if_advance()

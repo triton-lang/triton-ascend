@@ -96,12 +96,12 @@ func[grid](in_out_tensor, in_out_tensor)
 
 上述代码中 `ptr0` 和 `ptr1` 实际指向同一块内存（即同一个 `in_out_tensor`），但编译期无法识别这种指针别名关系，因此这种同一个张量同时作为多个指针参数传入的写法是不受支持的，对应的 Kernel 将无法使能相关优化。
 
-**Q: 在 `if` / `for` / `while` 等控制流OP中使用 `tl.load` / `tl.store` 有哪些限制？**
+**Q: 在 `if` / `for` / `while` / `scope` 等控制流OP中使用 `tl.load` / `tl.store` 有哪些限制？**
 
 A: Triton-Ascend 支持同一来源 pointer 在控制流中进行简单地址更新后访存，`tl.load` / `tl.store` 放在控制流内部也是合理写法。
 但不建议让不同来源或不同结构的 pointer 在控制流后合并，再统一执行访存；也不建议在复杂嵌套控制流中反复更新 pointer 状态并同时执行 store/read-after-write。
 
-当前版本对于 `if` / `for` / `while` 与 `tl.load` / `tl.store` 组合使用的场景支持还不完备，后续版本会持续完善。当前建议遵循以下限制。
+当前版本对于 `if` / `for` / `while` / `scope` 与 `tl.load` / `tl.store` 组合使用的场景支持还不完备，后续版本会持续完善。当前建议遵循以下限制。
 
 不推荐让不同基地址的 pointer，或在不同分支中分别构造的 block pointer，在分支后合并再访存：
 

@@ -35,6 +35,7 @@ from triton.runtime.autotuner import Config
 
 from .utils import (
     get_byte_per_numel,
+    is_valid_axis_name,
     next_power_of_2,
     num_vector_core,
     ub_size_in_kbytes,
@@ -48,17 +49,13 @@ class AxisInfo:
     index: int
     length: int
 
-    prefix: str = ""
     split_name: str = ""
     tiling_name: str = ""
     is_split_axis: bool = False
     is_tunable_split_axis: bool = False
     is_tiling_axis: bool = False
+    is_reduction: bool = False
     fixed_split_size: int = 0
-
-    @property
-    def is_reduction(self):
-        return self.prefix == "r"
 
 
 class KernelMeta:
@@ -70,6 +67,7 @@ class KernelMeta:
         fixed_split_params: Dict[str, int],
         tiling_params: Dict[str, str],
         low_dims: List[str],
+        reduction_axes: List[str],
         dtype: torch.dtype,
         persistent_reduction: bool,
         dual_reduction: bool,
@@ -90,22 +88,22 @@ class KernelMeta:
         :param low_dims: a list of axis name in which the corresponding axis is low dim aixs.
             The axis name must be in key's axis names. Do not add prefix 'r' before the axis name.
         :type low_dims: List[str]
+        :param reduction_axes: a list of base axis names that are reduction axes.
+        :type reduction_axes: List[str]
         :param dual_reduction: performing reduction on more than one axis.
         :param persistent_reduction: there is no splitting in reduction axis.
         """
-        self._validate_axis(axis_sizes, split_params, fixed_split_params, tiling_params, low_dims)
+        self._validate_axis(axis_sizes, split_params, fixed_split_params, tiling_params, low_dims, reduction_axes)
 
+        reduction_axis_names = set(reduction_axes or [])
         axis_dict = {}
         idx = 0
         for name, length in axis_sizes.items():
-            prefix = ""
-            if name.startswith("r"):
-                prefix = "r"
-
             is_tunable_split_axis = name in split_params
             fixed_split_size = fixed_split_params.get(name, 0)
             is_split_axis = is_tunable_split_axis or fixed_split_size > 0
             is_tiling_axis = name in tiling_params
+            is_reduction = name in reduction_axis_names
             split_name = "" if not is_tunable_split_axis else split_params[name]
             tiling_name = "" if name not in tiling_params else tiling_params[name]
 
@@ -113,12 +111,12 @@ class KernelMeta:
                 name=name,
                 index=idx,
                 length=length,
-                prefix=prefix,
                 split_name=split_name,
                 tiling_name=tiling_name,
                 is_split_axis=is_split_axis,
                 is_tunable_split_axis=is_tunable_split_axis,
                 is_tiling_axis=is_tiling_axis,
+                is_reduction=is_reduction,
                 fixed_split_size=fixed_split_size,
             )
             idx += 1
@@ -142,20 +140,26 @@ class KernelMeta:
         fixed_split_params: Dict[str, int],
         tiling_params: Dict[str, str],
         low_dims: List[str],
+        reduction_axes: List[str],
     ) -> None:
         for axis_name in axis_sizes.keys():
-            if axis_name.startswith("r") and len(axis_name) == 1:
-                raise ValueError("The name of a reduction axis is empty!")
+            if not is_valid_axis_name(axis_name):
+                raise ValueError(f"Invalid axis name '{axis_name}'. Axis names must be base axes.")
 
         def check_keys(params: List[str], context="parameter"):
             for k in params:
-                if k not in axis_sizes and ("r" + k) not in axis_sizes:
+                if k not in axis_sizes:
                     raise KeyError(f"{context} '{k}' not found in known axes: {axis_sizes.keys()}")
 
         check_keys(split_params.keys(), "split axis")
         check_keys(fixed_split_params.keys(), "fixed split axis")
         check_keys(tiling_params.keys(), "tiling axis")
         check_keys(low_dims, "low dim axis")
+        for axis_name in list(reduction_axes or []):
+            if isinstance(axis_name, str) and axis_name.startswith("r"):
+                raise ValueError(f"r-prefixed reduction axis '{axis_name}' is not supported; "
+                                 "use the base axis name and pass it through reduction_axes.")
+        check_keys(reduction_axes or [], "reduction axis")
 
 
 @dataclass

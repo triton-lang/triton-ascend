@@ -206,11 +206,12 @@ jobs:
           BRANCH_B:           ${{ steps.ctx.outputs.branch_b }}
           WHEEL_NAME:         ${{ needs.publish.outputs.wheel_name }}
           # PR_TITLE inherited from $GITHUB_ENV (set in Resolve PR context).
-          STATUS_FILE:        ${{ runner.temp }}/by-status
         run: |
           # Blue/Yellow cross-region pipeline trigger.
           # Flow: POST /start -> poll /query -> exit on terminal status (SUCCESS=0).
           set -euo pipefail
+
+          STATUS_FILE="$RUNNER_TEMP/by-status"
 
           H_CODE="X-Apig-AppCode: ${APP_CODE}"
           H_KEY="AppKey: ${APP_KEY}"
@@ -339,7 +340,7 @@ jobs:
         if: always() && steps.ctx.outputs.pr_id != ''
         id: final
         run: |
-          F="${{ runner.temp }}/by-status"
+          F="$RUNNER_TEMP/by-status"
           if [ -f "$F" ]; then
             cat "$F" >> "$GITHUB_OUTPUT"
           else
@@ -375,6 +376,43 @@ jobs:
           mv obsutil_linux_* obsutil
           obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-southwest-2.myhuaweicloud.com
           obsutil/obsutil rm -r -f "obs://triton-ascend-artifacts/triton-ascend/${PR_NUM}/" || true
+
+  resolve-failed:
+    # When the upstream build did NOT succeed, publish/trigger are skipped, so
+    # nobody resolves an 'Ascend950 Pipeline Tests' commit status that
+    # rebuild-tasks may have pre-set to pending on restart — it would sit stuck
+    # on a yellow pending forever. Flip it to failure, but only when it is
+    # currently pending, so the normal (no pre-set) path is left untouched.
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion != 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Fail a stuck pending status
+        env:
+          GH_TOKEN:   ${{ github.token }}
+          HEAD_SHA:   ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CONTEXT:    Ascend950 Pipeline Tests
+          REPO:       ${{ github.repository }}
+          TARGET:     ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          # workflow_run.head_sha is the build's head commit — the same PR head
+          # SHA rebuild-tasks wrote the pending status against.
+          STATE=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/statuses?per_page=100" \
+                    --jq "[.[] | select(.context==\"${CONTEXT}\")] | sort_by(.updated_at) | last | .state // \"\"")
+          if [ "$STATE" != "pending" ]; then
+            echo "No pending '${CONTEXT}' status on ${HEAD_SHA} (state='${STATE:-none}'); nothing to resolve."
+            exit 0
+          fi
+          gh api -X POST "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -f state=failure \
+            -f context="${CONTEXT}" \
+            -f description="Upstream Wheels Build ${CONCLUSION}; pipeline not run" \
+            -f target_url="${TARGET}"
 
   # Single source of truth for the final commit status. Runs always() so that
   # publish-side failures and cancellations don't leave the marker pending

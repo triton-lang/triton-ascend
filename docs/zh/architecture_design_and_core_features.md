@@ -87,6 +87,7 @@
 | 15  | enable_linearize                              | NPU        | Autotune option: Enable or disable the linearization pass. |
 | 16  | enable_nd2nz_on_vector                        | NPU        | Autotune option (CV-fused kernels only): Enable or disable the ND (n-dimensional) to NZ (non-zero) layout transformation. |
 | 17  | auto_blockify_size                            | NPU        | Autotune option: Enable or disable AutoBlockify pass. It is ignored when TRITON_ALL_BLOCKS_PARALLEL is not set |
+| 18  | compile_mode                                  | NPU (950)  | Compilation mode: `"unstructured_in_simt"` (default) / `"simd"` / `"simt_only"`. |
 
 #### 3.2.2 SIMD compiler
 
@@ -205,7 +206,86 @@ TritonToLinalg converts ttir to linalg ir.
 | triton-to-hivm | 处理Triton的块同步操作 (`tl.sync_block_all`, `tl.sync_block_set`, `tl.sync_block_wait`)，将其转换为Ascend NPU的`HIVM`方言中的跨核心同步指令。这些指令用于管理多核流水线中的同步与数据依赖，是流水优化的关键。 | TritonCustomOpToHIVMSyncOpConversion | 实现Triton同步指令到HIVM同步指令的转换：<br>• `sync_block_all`：全局块同步<br>• `sync_block_set`：设置同步点<br>• `sync_block_wait`：等待同步点 |
 | triton-to-llvm | 将Triton中的内联汇编操作 (`tl.inline_assembly`) 转换为LLVM方言的内联汇编，并最终映射为Ascend NPU的CCE硬件固有函数（Intrinsics） | ElementwiseInlineAsmOpConversion | 将 `triton::ElementwiseInlineAsmOp` 转换为 `LLVM::InlineAsmOp` |
 
-#### 3.2.3 Ascend affinitive Operators
+### 3.2.3 SIMT Compiler（Ascend 950）
+
+昇腾 950 在 SIMD 路径之外增加 SIMT 能力，用于加速**非结构化 / 离散**访存（如间接索引的 load/store）。  
+开发者通过 `compile_mode` 选择编译路径。
+
+#### 3.2.3.1 `compile_mode` 说明
+
+| `compile_mode` | 含义 | 编译路径 |
+|---|---|---|
+| `"simd"` | 纯 SIMD：结构化访存走 DMA；非结构化走标量循环 | `ttir → ttadapter(linalg) → npubin` |
+| `"unstructured_in_simt"`（**默认**） | 混合：结构化仍走 SIMD；离散 / 非结构化尽量走 SIMT 间接访存 | `ttir → ttadapter(linalg) → npubin` |
+| `"simt_only"` | 纯 SIMT：整段 kernel 交 BiSheng 做纯 SIMT 编译 | `ttir → npubin` |
+
+用法示例：
+
+```python
+# 纯 SIMD
+kernel[grid](..., compile_mode="simd")
+
+# 混合（默认；950 上离散访存优先走 SIMT）
+kernel[grid](..., compile_mode="unstructured_in_simt")
+
+# 纯 SIMT
+kernel[grid](..., compile_mode="simt_only", num_warps=32)
+```
+
+#### 3.2.3.2 三种模式的编译分流
+
+```
+                    compile_mode
+                          │
+          ┌───────────────┼───────────────────┐
+          ▼               ▼                   ▼
+       "simd"   "unstructured_in_simt"    "simt_only"
+          │               │                   │
+          │               │                   └─► 直接交给 NPU IR 纯 SIMT 编译
+          ▼               ▼
+   离散 mask 处理
+          │               │
+   拆成连续/离散         满足条件则标记为
+   后用 SIMD 方式处理     「交给下游走 SIMT」
+          ▼               ▼
+   非结构化访存处理
+          │               │
+   展开为标量循环        尽量转为 间接 load/store simt模板；
+                         无法转换则回退标量循环
+          ▼               ▼
+   TritonToLinalg → npubin
+```
+
+| 阶段 | `"simd"` | `"unstructured_in_simt"` | `"simt_only"` |
+|------|----------|--------------------------|---------------|
+| 离散 mask 处理 | 拆成连续/离散边界，用 load + select / store 处理 | Ascend 950 且张量维数 ≤ 5：标记后交给下游；否则同左 | 不运行 |
+| 非结构化访存 | 展开为标量循环 | 尽量转为 SIMT 间接访存（维数 ≤ 5）；失败则回退标量循环 | 不运行 |
+| TritonToLinalg | 常规 linalg 降级 | 常规 linalg 降级 | 不运行 |
+
+#### 3.2.3.3 混合模式：只对离散访存走 SIMT
+
+混合模式**不会**把整个 kernel 切到 SIMT，只对离散 / 非结构化访存点走 SIMT，其余仍走 SIMD：
+
+1. **离散 mask 处理**  
+   - 若判定为非连续 mask，且满足 Ascend 950、混合模式、维数 ≤ 5：不改写 IR，只标记「下游走 SIMT」。
+   - 否则（纯 SIMD 或不满足条件）：将 mask 拆成连续 / 离散部分，用连续边界限定全局内存访问，再通过 select 合并结果。
+
+2. **非结构化访存处理**  
+   - 在 Ascend 950 混合模式下，对非结构化访存或已标记的离散访存走 SIMT 快速通道：  
+     - `load` / `store` → indirect_load / indirect_store（维数 ≤ 5）
+     - atomic 操作 → hivm.custom(symbol="__builtin_indirect_atomic")
+   - 不满足条件则回退为标量循环（与 `"simd"` 一致）。
+
+3. **TritonToLinalg**  
+   - 常规 linalg 降级。
+
+同阶段还可做跨步访存合并优化（仅 950 混合 / SIMT 场景），生成跨步 load / store。
+
+#### 3.2.3.4 纯 SIMT（`simt_only`）
+
+`"simt_only"` 跳过 linalg 路径，将 TTIR 直接交给 NPUIR 做纯 SIMT 编译。
+
+#### 3.2.4 Ascend affinitive Operators
 
 | 序号 | Operator | 功能描述 |
 |---|---|---|

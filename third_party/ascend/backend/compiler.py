@@ -688,6 +688,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if mix_mode in ["aic"]:
             _compile_option_list += ["--disable-hfusion-vectorize=true"]
 
+        _compile_option_list += ["--mlir-print-ir-after-failure"]
+        _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
@@ -912,8 +914,9 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 "--enable-triton-kernel-compile=true",
             ]
 
+        _compile_option_list += ["--mlir-print-ir-after-failure"]
+        _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:
-            _compile_option_list += ["--mlir-print-ir-after-failure"]
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])

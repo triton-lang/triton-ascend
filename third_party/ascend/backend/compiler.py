@@ -562,6 +562,11 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if enable_vf_fusion is not None:
             _compile_option_list += \
                 [f"--enable-vf-fusion={enable_vf_fusion}"]
+                
+        enable_vf_operand_substitution = metadata["enable_vf_operand_substitution"]
+        if enable_vf_operand_substitution:
+            _compile_option_list += \
+                [f"--enable-vf-operand-substitution"]
 
         enable_drop_unit_dims = metadata["enable_drop_unit_dims"]
         if enable_drop_unit_dims is not None:
@@ -972,6 +977,7 @@ class NPUOptions:
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
     enable_vf_fusion: bool = None
+    enable_vf_operand_substitution: bool = False
     enable_dynamic_cv_pipeline: bool = True if is_compile_on_910_95 else False
     # Gates the cube-loader penetration + cube-for block merge feature. Off by
     # default so existing scenarios are unaffected; opt in per kernel to fuse a

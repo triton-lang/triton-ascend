@@ -79,6 +79,7 @@ static const llvm::SmallVector<llvm::StringRef> libdeviceOps = {
     "__hmf_finite_fp32",       "__hmf_log1p_fp32",
     "__hmf_relu_fp32",         "__hmf_tgamma_fp32",
     "__hmf_float_as_int_fp32", "__hmf_reciprocal_fp32",
+    "",
 };
 
 /**

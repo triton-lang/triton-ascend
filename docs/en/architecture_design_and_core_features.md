@@ -87,6 +87,7 @@ This project extends the support for Huawei Ascend NPU (using the CANN software 
 | 15  | enable_linearize                              | NPU        | Autotune option. It enables or disables the linearization pass.|
 | 16  | enable_nd2nz_on_vector                        | NPU        | Autotune option (CV-fused kernels only). It enables or disables the ND (n-dimensional) to NZ (non-zero) layout transformation.|
 | 17  | auto_blockify_size                            | NPU        | Autotune option. It enables or disables AutoBlockify pass. It is ignored when TRITON_ALL_BLOCKS_PARALLEL is not set |
+| 18  | compile_mode                                  | NPU (950)  | Compilation mode: `"unstructured_in_simt"` (default) / `"simd"` / `"simt_only"`. |
 
 #### 3.2.2 SIMD Compiler
 
@@ -205,7 +206,86 @@ TritonToLinalg converts ttir to linalg ir.
 | triton-to-hivm | Processes the block synchronization operations (`tl.sync_block_all`, `tl.sync_block_set`, and `tl.sync_block_wait`) of Triton and converts them into the cross-core synchronization instruction in the `HIVM` dialect of Ascend NPU. These instructions are used to manage synchronization and data dependencies in the multi-core pipeline, which is the key to pipeline optimization.| TritonCustomOpToHIVMSyncOpConversion | Converts Triton synchronization instructions to HIVM synchronization instructions.<br>• `sync_block_all`: synchronizes blocks globally.<br>• `sync_block_set`: sets a synchronization point.<br>• `sync_block_wait`: waits for a synchronization point.|
 | triton-to-llvm | Converts the inline assembly operation (`tl.inline_assembly`) in Triton to the inline assembly in the LLVM dialect, and finally maps it to a CCE hardware intrinsic function of Ascend NPU.| ElementwiseInlineAsmOpConversion | Converts `triton::ElementwiseInlineAsmOp` to `LLVM::InlineAsmOp`.|
 
-#### 3.2.3 Ascend affinitive Operators
+#### 3.2.3 SIMT Compiler (Ascend 950)
+
+Ascend 950 adds SIMT support alongside the SIMD path to accelerate **unstructured / discrete** memory access (for example, indirect-index load/store).
+Developers choose the compilation path via `compile_mode`.
+
+##### 3.2.3.1 `compile_mode` Overview
+
+| `compile_mode` | Description | Compilation Path |
+|---|---|---|
+| `"simd"` | Pure SIMD: structured access via DMA; unstructured access via scalar loops | `ttir → ttadapter(linalg) → npubin` |
+| `"unstructured_in_simt"` (**default**) | Hybrid: structured access stays on SIMD; discrete / unstructured access prefers SIMT indirect access | `ttir → ttadapter(linalg) → npubin` |
+| `"simt_only"` | Pure SIMT: the entire kernel is compiled as pure SIMT | `ttir → npubin` |
+
+Usage examples:
+
+```python
+# Pure SIMD
+kernel[grid](..., compile_mode="simd")
+
+# Hybrid (default; discrete access on 950 prefers SIMT)
+kernel[grid](..., compile_mode="unstructured_in_simt")
+
+# Pure SIMT
+kernel[grid](..., compile_mode="simt_only", num_warps=32)
+```
+
+##### 3.2.3.2 Compilation Flow by Mode
+
+```text
+                    compile_mode
+                          │
+          ┌───────────────┼───────────────────┐
+          ▼               ▼                   ▼
+       "simd"   "unstructured_in_simt"    "simt_only"
+          │               │                   │
+          │               │                   └─► Direct pure SIMT compilation via NPU IR
+          ▼               ▼
+   Discrete mask handling
+          │               │
+   Split into contiguous/   Mark for downstream
+   discrete parts and       SIMT handling when
+   handle via SIMD          conditions are met
+          ▼               ▼
+   Unstructured access handling
+          │               │
+   Expand to scalar loops   Prefer indirect load/store
+                            SIMT templates; fall back
+                            to scalar loops if needed
+          ▼               ▼
+   TritonToLinalg → npubin
+```
+
+| Stage | `"simd"` | `"unstructured_in_simt"` | `"simt_only"` |
+|------|----------|--------------------------|---------------|
+| Discrete mask handling | Split into contiguous/discrete bounds and handle with load + select / store | On Ascend 950 with tensor rank ≤ 5: mark and defer to downstream; otherwise same as left | Not run |
+| Unstructured access | Expand to scalar loops | Prefer SIMT indirect access (rank ≤ 5); fall back to scalar loops on failure | Not run |
+| TritonToLinalg | Standard linalg lowering | Standard linalg lowering | Not run |
+
+##### 3.2.3.3 Hybrid Mode: SIMT Only for Discrete Access
+
+Hybrid mode does **not** move the entire kernel to SIMT. Only discrete / unstructured access points use SIMT; the rest stays on SIMD:
+
+1. **Discrete mask handling**
+   - If the mask is non-contiguous and Ascend 950, hybrid mode, and rank ≤ 5 are all satisfied: do not rewrite IR; only mark for downstream SIMT handling.
+   - Otherwise (pure SIMD or conditions not met): split the mask into contiguous / discrete parts, bound global memory access with contiguous bounds, and merge results via select.
+
+2. **Unstructured access handling**
+   - In Ascend 950 hybrid mode, unstructured access or marked discrete access uses the SIMT fast path:
+     - `load` / `store` → `indirect_load` / `indirect_store` (rank ≤ 5)
+     - atomic operations → `hivm.custom(symbol="__builtin_indirect_atomic")`
+   - If conditions are not met, fall back to scalar loops (same as `"simd"`).
+
+3. **TritonToLinalg**
+   - Standard linalg lowering.
+
+##### 3.2.3.4 Pure SIMT (`simt_only`)
+
+`"simt_only"` skips the linalg path and sends TTIR directly to NPU IR for pure SIMT compilation.
+
+#### 3.2.4 Ascend affinitive Operators
 
 | No.| Operator | Description|
 |---|---|---|

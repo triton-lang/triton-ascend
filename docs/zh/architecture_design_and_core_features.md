@@ -215,9 +215,9 @@ TritonToLinalg converts ttir to linalg ir.
 
 | `compile_mode` | 含义 | 编译路径 |
 |---|---|---|
-| `"simd"` | 纯 SIMD：结构化访存走 DMA；非结构化走标量循环 | `ttir → ttadapter(linalg) → npubin` |
-| `"unstructured_in_simt"`（**默认**） | 混合：结构化仍走 SIMD；离散 / 非结构化尽量走 SIMT 间接访存 | `ttir → ttadapter(linalg) → npubin` |
-| `"simt_only"` | 纯 SIMT：整段 kernel 交 BiSheng 做纯 SIMT 编译 | `ttir → npubin` |
+| `"simd"` | 纯 SIMD：结构化访存走 DMA；非结构化走标量循环 | `Triton IR → Linalg IR → AscendNPU IR` |
+| `"unstructured_in_simt"`（**默认**） | 混合：结构化仍走 SIMD；离散访存尽量走 SIMT 模板 | `Triton IR → Linalg IR → AscendNPU IR` |
+| `"simt_only"` | 纯 SIMT：直接下发 Triton IR 给NPU IR处理 | `Triton IR → AscendNPU IR` |
 
 用法示例：
 
@@ -234,33 +234,50 @@ kernel[grid](..., compile_mode="simt_only", num_warps=32)
 
 ##### 3.2.3.2 三种模式的编译分流
 
-```text
-                    compile_mode
-                          │
-          ┌───────────────┼───────────────────┐
-          ▼               ▼                   ▼
-       "simd"   "unstructured_in_simt"    "simt_only"
-          │               │                   │
-          │               │                   └─► 直接交给 NPU IR 纯 SIMT 编译
-          ▼               ▼
-   离散 mask 处理
-          │               │
-   拆成连续/离散         满足条件则标记为
-   后用 SIMD 方式处理     「交给下游走 SIMT」
-          ▼               ▼
-   非结构化访存处理
-          │               │
-   展开为标量循环        尽量转为 间接 load/store SIMT 模板；
-                         无法转换则回退标量循环
-          ▼               ▼
-   TritonToLinalg → npubin
+```mermaid
+flowchart TD
+    A[compile_mode] --> B["simd"]
+    A --> C["unstructured_in_simt"]
+    A --> D["simt_only"]
+
+    %% simt_only 分支
+    D --> D1[直接下发 Triton IR，纯SIMT编译，Triton IR → AscendNPU IR]
+
+    %% simd 完整链路
+    B --> B1[discrete-mask-access-conversion]
+    B1 --> B2[拆成连续/离散后用 SIMD 方式处理]
+    B2 --> B3[triton-to-unstructured]
+    B3 --> B4[离散访存展开为标量循环]
+    B4 --> B5[TritonToLinalg]
+    B5 --> B6[AscendNPU IR]
+
+    %% unstructured_in_simt 完整链路
+    C --> C1[discrete-mask-access-conversion]
+    C1 --> C2[满足条件打上标记，下发下层SIMT处理]
+    C2 --> C3[triton-to-unstructured]
+    C3 --> C4{离散访存可转为 indirect_load/store SIMT 模板？}
+    C4 -- 是 --> B5
+    C4 -- 否 --> C5[回退标量循环]
+    C5 --> B5
+
+    %% 样式定义
+    classDef root fill:#e6f7ff,stroke:#1890ff
+    classDef pass fill:#fff7e6,stroke:#fa8c16,stroke-width:2px
+    classDef logic fill:#f0fff4,stroke:#52c41a
+    classDef simtOnly fill:#f0f2f5,stroke:#8c8c8c
+
+    %% 绑定样式
+    class A root
+    class B1,C1,B3,C3,B5,B6 pass
+    class B2,B4,C2,C4,C5 logic
+    class D,D1 simtOnly
 ```
 
 | 阶段 | `"simd"` | `"unstructured_in_simt"` | `"simt_only"` |
 |------|----------|--------------------------|---------------|
 | 离散 mask 处理 | 拆成连续/离散边界，用 load + select / store 处理 | Ascend 950 且张量维数 ≤ 5：标记后交给下游；否则同左 | 不运行 |
 | 非结构化访存 | 展开为标量循环 | 尽量转为 SIMT 间接访存（维数 ≤ 5）；失败则回退标量循环 | 不运行 |
-| TritonToLinalg | 常规 linalg 降级 | 常规 linalg 降级 | 不运行 |
+| TritonToLinalg | 常规 Linalg IR 降级 | 常规 Linalg IR 降级 | 不运行 |
 
 ##### 3.2.3.3 混合模式：只对离散访存走 SIMT
 
@@ -277,11 +294,11 @@ kernel[grid](..., compile_mode="simt_only", num_warps=32)
    - 不满足条件则回退为标量循环（与 `"simd"` 一致）。
 
 3. **TritonToLinalg**
-   - 常规 linalg 降级。
+   - 常规 Linalg IR 降级。
 
 ##### 3.2.3.4 纯 SIMT（`simt_only`）
 
-`"simt_only"` 跳过 linalg 路径，将 TTIR 直接交给 NPU IR 做纯 SIMT 编译。
+`"simt_only"` 直接下发 Triton IR 交给 AscendNPU IR 做纯 SIMT 编译。
 
 #### 3.2.4 Ascend affinitive Operators
 

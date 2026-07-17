@@ -215,9 +215,9 @@ Developers choose the compilation path via `compile_mode`.
 
 | `compile_mode` | Description | Compilation Path |
 |---|---|---|
-| `"simd"` | Pure SIMD: structured access via DMA; unstructured access via scalar loops | `ttir → ttadapter(linalg) → npubin` |
-| `"unstructured_in_simt"` (**default**) | Hybrid: structured access stays on SIMD; discrete / unstructured access prefers SIMT indirect access | `ttir → ttadapter(linalg) → npubin` |
-| `"simt_only"` | Pure SIMT: the entire kernel is compiled as pure SIMT | `ttir → npubin` |
+| `"simd"` | Pure SIMD: structured access via DMA; unstructured access via scalar loops | `Triton IR → Linalg IR → AscendNPU IR` |
+| `"unstructured_in_simt"` (**default**) | Hybrid: structured access stays on SIMD; discrete access prefers SIMT templates | `Triton IR → Linalg IR → AscendNPU IR` |
+| `"simt_only"` | Pure SIMT: send Triton IR directly to AscendNPU IR | `Triton IR → AscendNPU IR` |
 
 Usage examples:
 
@@ -234,35 +234,49 @@ kernel[grid](..., compile_mode="simt_only", num_warps=32)
 
 ##### 3.2.3.2 Compilation Flow by Mode
 
-```text
-                    compile_mode
-                          │
-          ┌───────────────┼───────────────────┐
-          ▼               ▼                   ▼
-       "simd"   "unstructured_in_simt"    "simt_only"
-          │               │                   │
-          │               │                   └─► Direct pure SIMT compilation via NPU IR
-          ▼               ▼
-   Discrete mask handling
-          │               │
-   Split into contiguous/   Mark for downstream
-   discrete parts and       SIMT handling when
-   handle via SIMD          conditions are met
-          ▼               ▼
-   Unstructured access handling
-          │               │
-   Expand to scalar loops   Prefer indirect load/store
-                            SIMT templates; fall back
-                            to scalar loops if needed
-          ▼               ▼
-   TritonToLinalg → npubin
+```mermaid
+flowchart TD
+    A[compile_mode] --> B["simd"]
+    A --> C["unstructured_in_simt"]
+    A --> D["simt_only"]
+
+    %% simt_only branch
+    D --> D1[Send Triton IR directly for pure SIMT compilation, Triton IR → AscendNPU IR]
+
+    %% simd full path
+    B --> B1[discrete-mask-access-conversion]
+    B1 --> B2[Split into contiguous/discrete parts and handle via SIMD]
+    B2 --> B3[triton-to-unstructured]
+    B3 --> B4[Expand discrete access into scalar loops]
+    B4 --> B5[TritonToLinalg]
+    B5 --> B6[AscendNPU IR]
+
+    %% unstructured_in_simt full path
+    C --> C1[discrete-mask-access-conversion]
+    C1 --> C2[Mark when conditions are met and defer to downstream SIMT handling]
+    C2 --> C3[triton-to-unstructured]
+    C3 --> C4{Can discrete access be converted to indirect_load/store SIMT templates?}
+    C4 -- Yes --> B5
+    C4 -- No --> C5[Fall back to scalar loops]
+    C5 --> B5
+
+    %% styling
+    classDef root fill:#e6f7ff,stroke:#1890ff
+    classDef pass fill:#fff7e6,stroke:#fa8c16,stroke-width:2px
+    classDef logic fill:#f0fff4,stroke:#52c41a
+    classDef simtOnly fill:#f0f2f5,stroke:#8c8c8c
+
+    class A root
+    class B1,C1,B3,C3,B5,B6 pass
+    class B2,B4,C2,C4,C5 logic
+    class D,D1 simtOnly
 ```
 
 | Stage | `"simd"` | `"unstructured_in_simt"` | `"simt_only"` |
 |------|----------|--------------------------|---------------|
 | Discrete mask handling | Split into contiguous/discrete bounds and handle with load + select / store | On Ascend 950 with tensor rank ≤ 5: mark and defer to downstream; otherwise same as left | Not run |
 | Unstructured access | Expand to scalar loops | Prefer SIMT indirect access (rank ≤ 5); fall back to scalar loops on failure | Not run |
-| TritonToLinalg | Standard linalg lowering | Standard linalg lowering | Not run |
+| TritonToLinalg | Standard Linalg IR lowering | Standard Linalg IR lowering | Not run |
 
 ##### 3.2.3.3 Hybrid Mode: SIMT Only for Discrete Access
 
@@ -275,15 +289,15 @@ Hybrid mode does **not** move the entire kernel to SIMT. Only discrete / unstruc
 2. **Unstructured access handling**
    - In Ascend 950 hybrid mode, unstructured access or marked discrete access uses the SIMT fast path:
      - `load` / `store` → `indirect_load` / `indirect_store` (rank ≤ 5)
-     - atomic operations → `hivm.custom(symbol="__builtin_indirect_atomic")`
+     - `atomic` operations → `hivm.custom(symbol="__builtin_indirect_atomic")`
    - If conditions are not met, fall back to scalar loops (same as `"simd"`).
 
 3. **TritonToLinalg**
-   - Standard linalg lowering.
+   - Standard Linalg IR lowering.
 
 ##### 3.2.3.4 Pure SIMT (`simt_only`)
 
-`"simt_only"` skips the linalg path and sends TTIR directly to NPU IR for pure SIMT compilation.
+`"simt_only"` sends Triton IR directly to AscendNPU IR for pure SIMT compilation.
 
 #### 3.2.4 Ascend affinitive Operators
 

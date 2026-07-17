@@ -37,3 +37,8 @@
     color: #fff;
     background: #4a5568;
 }
+
+table.docutils {
+    margin-left: 0 !important;
+    margin-right: auto !important;
+}

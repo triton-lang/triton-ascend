@@ -1,4 +1,4 @@
-torch-npu==2.7.1
+torch-npu==2.7.1.post4
 pybind11
 
 #from CANN

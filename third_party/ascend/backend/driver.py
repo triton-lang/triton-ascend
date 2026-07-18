@@ -451,7 +451,8 @@ def make_launcher(constants, signature, metadata):
         int gridX, gridY, gridZ;
         rtStream_t stream;
         const void *functon;
-        PyObject* packed_metadata,
+        PyObject* packed_metadata, *launch_metadata;
+        PyObject* launch_enter_hook, *launch_exit_hook;
         *args_expand
     """
 
@@ -602,27 +603,6 @@ static inline DevicePtrInfo getPointer(PyObject *obj, int idx) {
     ptr_info.dev_ptr = reinterpret_cast<void *>(PyLong_AsUnsignedLongLong(ret));
     if(!ptr_info.dev_ptr)
       return ptr_info;
-        aclrtPtrAttributes attributes;
-        aclError status = aclrtPointerGetAttributes(ptr_info.dev_ptr, &attributes);
-
-        if (status == ACL_SUCCESS) {
-          if (attributes.location.type != ACL_MEM_LOCATION_TYPE_DEVICE && attributes.location.type != 4) {
-            Py_DECREF(ret);
-            PyErr_Format(PyExc_ValueError,
-                         "Pointer argument (at %d) cannot be accessed from Triton (cpu tensor?)", idx);
-            ptr_info.valid = false;
-            return ptr_info;
-          }
-        } else {
-          Py_DECREF(ret);
-          PyErr_Format(PyExc_RuntimeError,
-                       "Failed to query pointer attributes at argument %d. "
-                       "Error code: %d. This may indicate invalid memory address "
-                       "or NPU device error.",
-                       idx, status);
-          ptr_info.valid = false;
-          return ptr_info;
-        }
     Py_DECREF(ret);
     return ptr_info;
   }

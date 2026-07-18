@@ -4,6 +4,10 @@
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include <memory>
 
+#include <pybind11/pybind11.h>
+
+namespace py = pybind11;
+
 // A custom op builder that keeps track of the last location
 class TritonOpBuilder {
 public:
@@ -77,7 +81,7 @@ public:
   // Overload to create or fold a single result operation.
   template <typename OpTy, typename... Args>
   std::enable_if_t<OpTy::template hasTrait<mlir::OpTrait::OneResult>(),
-                    mlir::Value>
+                   mlir::Value>
   createOrFold(Args &&...args) {
     auto loc = getLastLoc();
     return builder->createOrFold<OpTy>(loc, std::forward<Args>(args)...);
@@ -104,3 +108,7 @@ private:
     return builder->getUnknownLoc();
   }
 };
+
+namespace ir {
+extern py::class_<TritonOpBuilder> *getBuilderClass();
+} // namespace ir

@@ -1,4 +1,4 @@
-#include "ir_binding.h"
+#include "ir.h"
 
 #include <optional>
 #include <pybind11/cast.h>
@@ -37,8 +37,8 @@
 #include "triton/Dialect/TritonInstrument/IR/Dialect.h"
 #include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonNvidiaGPU/Transforms/TMAUtilities.h"
-#include "triton/Tools/Sys/GetEnv.hpp"
 #include "triton/Tools/PluginUtils.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/SourceMgr.h"
 #include <memory>
@@ -407,7 +407,7 @@ void init_triton_ir(py::module &&m) {
     context.loadAllAvailableDialects();
   });
 
-  py::class_<Type>(m, "type", py::module_local())
+  py::class_<Type>(m, "type")
       .def("is_integer",
            [](Type &self, unsigned width) { return self.isInteger(width); })
       .def("is_fp16", &Type::isF16)
@@ -449,7 +449,7 @@ void init_triton_ir(py::module &&m) {
         self = dyn_cast<Location>(nameLoc);
       });
 
-  py::class_<Value>(m, "value", py::module_local())
+  py::class_<Value>(m, "value")
       .def(py::init<>())
       .def("set_attr",
            [](Value &self, std::string &name, Attribute &attr) -> void {
@@ -484,9 +484,9 @@ void init_triton_ir(py::module &&m) {
            [](Value &self, Location loc) { return self.setLoc(loc); })
       .def("get_loc", [](Value &self) { return self.getLoc(); });
 
-  py::class_<OpResult, Value>(m, "op_result", py::module_local());
+  py::class_<OpResult, Value>(m, "op_result");
 
-  py::class_<BlockArgument, Value>(m, "block_argument", py::module_local())
+  py::class_<BlockArgument, Value>(m, "block_argument")
       .def("get_loc", &BlockArgument::getLoc)
       .def("set_loc", &BlockArgument::setLoc);
 
@@ -574,7 +574,7 @@ void init_triton_ir(py::module &&m) {
   py::class_<ArrayAttr, Attribute>(m, "array_attr", py::module_local());
 
   // Ops
-  py::class_<OpState>(m, "OpState", py::module_local())
+  py::class_<OpState>(m, "OpState")
       .def("set_attr",
            [](OpState &self, std::string &name, Attribute &attr) -> void {
              self->setAttr(name, attr);
@@ -2027,16 +2027,17 @@ void init_triton_ir(py::module &&m) {
         for (const auto &op : plugin.listOps()) {
           std::string wrapped = std::string("create_") + op.name;
           if (op.addOp) {
-            builderPtr->def(wrapped.c_str(),
-                            [op](TritonOpBuilder &self, std::vector<Value> args) {
-                              args.insert(args.begin(), Value());
-                              op.addOp(self, args);
-                              return args[0];
-                            });
+            builderPtr->def(wrapped.c_str(), [op](TritonOpBuilder &self,
+                                                  std::vector<Value> args) {
+              args.insert(args.begin(), Value());
+              op.addOp(self, args);
+              return args[0];
+            });
           }
           if (op.addOpWithPyArg) {
             builderPtr->def(wrapped.c_str(),
-                            [op](TritonOpBuilder &self, py::args args, py::kwargs kwargs) -> py::object {
+                            [op](TritonOpBuilder &self, py::args args,
+                                 py::kwargs kwargs) -> py::object {
                               return op.addOpWithPyArg(self, args, kwargs);
                             });
           }

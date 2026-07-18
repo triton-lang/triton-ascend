@@ -689,42 +689,31 @@ class CMakeBuild(build_ext):
         build_include = os.path.join(cmake_dir, "include")
         if os.path.exists(build_include):
             shutil.copytree(build_include, include_dst, dirs_exist_ok=True)
-        # Also copy python/src/ headers (ir.h, ir_binding.h, passes.h) that
+        # Also copy python/src/ headers (ir.h, passes.h) that
         # downstream packages need at compile time.
         py_src_dst = os.path.join(include_dst, "python", "src")
         os.makedirs(py_src_dst, exist_ok=True)
-        for hdr in ["ir.h", "ir_binding.h", "passes.h"]:
+        for hdr in ["ir.h", "passes.h"]:
             py_src_hdr = os.path.join(self.base_dir, "python", "src", hdr)
             if os.path.exists(py_src_hdr):
                 shutil.copy2(py_src_hdr, os.path.join(py_src_dst, hdr))
         # Also copy third_party/proton/Dialect/include/ so downstream
         # packages don't need the proton submodule.
-        proton_dialect_src = os.path.join(self.base_dir,
-                                          "third_party", "proton",
-                                          "Dialect", "include")
+        proton_dialect_src = os.path.join(self.base_dir, "third_party", "proton", "Dialect", "include")
         if os.path.exists(proton_dialect_src):
-            proton_dialect_dst = os.path.join(include_dst,
-                                              "third_party", "proton",
-                                              "Dialect", "include")
-            shutil.copytree(proton_dialect_src, proton_dialect_dst,
-                            dirs_exist_ok=True)
+            proton_dialect_dst = os.path.join(include_dst, "third_party", "proton", "Dialect", "include")
+            shutil.copytree(proton_dialect_src, proton_dialect_dst, dirs_exist_ok=True)
         # Also copy proton tablegen output (.h.inc) from the build dir.
-        proton_build_inc = os.path.join(cmake_dir, "third_party", "proton",
-                                        "Dialect", "include")
+        proton_build_inc = os.path.join(cmake_dir, "third_party", "proton", "Dialect", "include")
         if os.path.exists(proton_build_inc):
-            proton_build_dst = os.path.join(include_dst,
-                                            "third_party", "proton",
-                                            "Dialect", "include")
-            shutil.copytree(proton_build_inc, proton_build_dst,
-                            dirs_exist_ok=True)
+            proton_build_dst = os.path.join(include_dst, "third_party", "proton", "Dialect", "include")
+            shutil.copytree(proton_build_inc, proton_build_dst, dirs_exist_ok=True)
         # Also copy third_party/ascend/include/ (Utils.h, etc.) so downstream
         # packages don't need the ascend submodule.
-        ascend_include_src = os.path.join(self.base_dir,
-                                          "third_party", "ascend", "include")
+        ascend_include_src = os.path.join(self.base_dir, "third_party", "ascend", "include")
         if os.path.exists(ascend_include_src):
             ascend_include_dst = os.path.join(include_dst, "ascend", "include")
-            shutil.copytree(ascend_include_src, ascend_include_dst,
-                            dirs_exist_ok=True)
+            shutil.copytree(ascend_include_src, ascend_include_dst, dirs_exist_ok=True)
         print(f"Copied include/ to {include_dst}")
 
         # Copy cmake/ so downstream packages (triton-dist) can find

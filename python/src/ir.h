@@ -4,6 +4,10 @@
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include <memory>
 
+#include <pybind11/pybind11.h>
+
+namespace py = pybind11;
+
 // A custom op builder that keeps track of the last location
 class TritonOpBuilder {
 public:
@@ -93,4 +97,8 @@ private:
   bool lineInfoEnabled = !mlir::triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO");
   std::string compile_mode;
 };
+
+namespace ir {
+extern py::class_<TritonOpBuilder> *getBuilderClass();
+} // namespace ir
 

@@ -26,7 +26,6 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
 #include "ir.h"         // TritonOpBuilder
-#include "ir_binding.h" // ir::getBuilderClass
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include <pybind11/pybind11.h>

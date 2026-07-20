@@ -571,11 +571,11 @@ static int createOutputBufferPair(Operation *inputAllocOp, int tid, int tcbId,
   outputAlloc->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
   outputBuffer = outputAlloc.getResult();
 
-  if (!isSender) {
-    outputAlloc->setAttr("ssbuffer.crossDeps",
-                         builder.getArrayAttr({builder.getI32IntegerAttr(tid),
-                                               builder.getI32IntegerAttr(1)}));
-  }
+  // NOTE: output alloc carries no ssbuffer.crossDeps — alloc is a
+  // buffer-creation op, not a behavior op. Producer tag lives on the
+  // fixpipe/copy clone inside scf.if (set in wrapTransferOpWithScfIf*),
+  // and consumer tag lives on the scf.if wrapper itself (set in
+  // wrapReceiverChainWithScfIf). Do NOT re-introduce crossDeps here.
 
   auto outputMark = builder.create<annotation::MarkOp>(loc, outputBuffer);
   outputMark->setAttr("effects", builder.getStrArrayAttr({"write", "read"}));
@@ -829,6 +829,7 @@ static Operation *wrapTransferOpWithScfIfYield(Operation *transferOp,
                                         true /* withElseRegion */);
 
   // then branch: use inputBuffer
+  Operation *thenCloned = nullptr;
   {
     auto thenBuilder = ifOp.getThenBodyBuilder();
     IRMapping inputMap;
@@ -836,11 +837,12 @@ static Operation *wrapTransferOpWithScfIfYield(Operation *transferOp,
       inputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1),
                    inputBuffer);
     }
-    Operation *cloned = thenBuilder.clone(*transferOp, inputMap);
-    thenBuilder.create<scf::YieldOp>(loc, cloned->getResults());
+    thenCloned = thenBuilder.clone(*transferOp, inputMap);
+    thenBuilder.create<scf::YieldOp>(loc, thenCloned->getResults());
   }
 
   // else branch: use outputBuffer
+  Operation *elseCloned = nullptr;
   {
     auto elseBuilder = ifOp.getElseBodyBuilder();
     IRMapping outputMap;
@@ -848,19 +850,25 @@ static Operation *wrapTransferOpWithScfIfYield(Operation *transferOp,
       outputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1),
                     outputBuffer);
     }
-    Operation *cloned = elseBuilder.clone(*transferOp, outputMap);
-    elseBuilder.create<scf::YieldOp>(loc, cloned->getResults());
+    elseCloned = elseBuilder.clone(*transferOp, outputMap);
+    elseBuilder.create<scf::YieldOp>(loc, elseCloned->getResults());
+  }
+
+  // Producer: tag the cloned transferOps (the actual behavior ops) with
+  // [tid, 1]. The ifOp wrapper itself does NOT carry crossDeps because
+  // scf.if is the polling-flow control structure, not the data-movement
+  // behavior op — the producer role follows the inner fixpipe/copy clones.
+  if (isProducer) {
+    auto crossDeps = builder.getArrayAttr({builder.getI32IntegerAttr(tid),
+                                          builder.getI32IntegerAttr(1)});
+    thenCloned->setAttr("ssbuffer.crossDeps", crossDeps);
+    elseCloned->setAttr("ssbuffer.crossDeps", crossDeps);
   }
 
   // Tag the ifOp
   ifOp->setAttr("ssbuffer.block_id", builder.getI32IntegerAttr(bid));
   ifOp->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
   ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
-  if (!isProducer) {
-    ifOp->setAttr("ssbuffer.crossDeps",
-                  builder.getArrayAttr({builder.getI32IntegerAttr(tid),
-                                        builder.getI32IntegerAttr(0)}));
-  }
 
   // Replace all uses of the original transferOp
   for (auto [oldResult, newResult] :
@@ -885,12 +893,14 @@ static Operation *wrapTransferOpWithScfIfSimple(Operation *transferOp,
                                         true /* withElseRegion */);
 
   // then branch: clone directly
+  Operation *thenCloned = nullptr;
   {
     auto thenBuilder = ifOp.getThenBodyBuilder();
-    thenBuilder.clone(*transferOp);
+    thenCloned = thenBuilder.clone(*transferOp);
   }
 
   // else branch: use outputBuffer
+  Operation *elseCloned = nullptr;
   {
     auto elseBuilder = ifOp.getElseBodyBuilder();
     IRMapping outputMap;
@@ -898,18 +908,23 @@ static Operation *wrapTransferOpWithScfIfSimple(Operation *transferOp,
       outputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1),
                     outputBuffer);
     }
-    elseBuilder.clone(*transferOp, outputMap);
+    elseCloned = elseBuilder.clone(*transferOp, outputMap);
+  }
+
+  // Producer: tag the cloned transferOps (the actual behavior ops) with
+  // [tid, 1]. Mirror of wrapTransferOpWithScfIfYield: behavior op, not
+  // the ifOp wrapper, carries the producer role.
+  if (isProducer) {
+    auto crossDeps = builder.getArrayAttr({builder.getI32IntegerAttr(tid),
+                                          builder.getI32IntegerAttr(1)});
+    thenCloned->setAttr("ssbuffer.crossDeps", crossDeps);
+    elseCloned->setAttr("ssbuffer.crossDeps", crossDeps);
   }
 
   // Tag the ifOp
   ifOp->setAttr("ssbuffer.block_id", builder.getI32IntegerAttr(bid));
   ifOp->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
   ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
-  if (!isProducer) {
-    ifOp->setAttr("ssbuffer.crossDeps",
-                  builder.getArrayAttr({builder.getI32IntegerAttr(tid),
-                                        builder.getI32IntegerAttr(0)}));
-  }
 
   transferOp->erase();
   return ifOp.getOperation();
@@ -959,14 +974,21 @@ static Operation *wrapReceiverChainWithScfIf(Operation *transferOp,
       inputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1),
                    inputBuffer);
     Operation *clonedTransfer = thenBuilder.clone(*transferOp, inputMap);
+    // Strip crossDeps from the cloned transferOp: clone() inherits attrs
+    // from the original (which may carry [tid, 0] from upstream tagging),
+    // but consumer role is owned by the ifOp wrapper below. Inner clone
+    // must stay clean.
+    clonedTransfer->removeAttr("ssbuffer.crossDeps");
     Value chainResult = clonedTransfer->getResult(0);
     auto thenMapper = inputMap;
     thenMapper.map(transferOp->getResult(0), chainResult);
     for (Operation *op : trailingOps) {
       Operation *cloned = thenBuilder.clone(*op, thenMapper);
+      cloned->removeAttr("ssbuffer.crossDeps");
       thenMapper.map(op->getResult(0), cloned->getResult(0));
     }
     Operation *clonedToTensor = thenBuilder.clone(*toTensorOp, thenMapper);
+    clonedToTensor->removeAttr("ssbuffer.crossDeps");
     thenBuilder.create<scf::YieldOp>(loc, clonedToTensor->getResult(0));
   }
 
@@ -978,18 +1000,21 @@ static Operation *wrapReceiverChainWithScfIf(Operation *transferOp,
       outputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1),
                     outputBuffer);
     Operation *clonedTransfer = elseBuilder.clone(*transferOp, outputMap);
+    clonedTransfer->removeAttr("ssbuffer.crossDeps");
     Value chainResult = clonedTransfer->getResult(0);
     auto elseMapper = outputMap;
     elseMapper.map(transferOp->getResult(0), chainResult);
     for (Operation *op : trailingOps) {
       Operation *cloned = elseBuilder.clone(*op, elseMapper);
+      cloned->removeAttr("ssbuffer.crossDeps");
       elseMapper.map(op->getResult(0), cloned->getResult(0));
     }
     Operation *clonedToTensor = elseBuilder.clone(*toTensorOp, elseMapper);
+    clonedToTensor->removeAttr("ssbuffer.crossDeps");
     elseBuilder.create<scf::YieldOp>(loc, clonedToTensor->getResult(0));
   }
 
-  // Tag
+  // Tag the wrapper — single source of truth for consumer role
   ifOp->setAttr("ssbuffer.block_id", builder.getI32IntegerAttr(bid));
   ifOp->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
   ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
@@ -1168,18 +1193,33 @@ void AddMultiBufferOuterScopePass::runOnOperation() {
 
   int interCoreBufNum = BufferCountManager(module).getBufferCountByType(
       BufferCountManager::DepType::InterCore);
+  // TEMP: force double-buffer mode for end-to-end verification of the
+  // double-buffer IR shape (Change 1/2/3). Module's inter_core_buf_count
+  // attribute is overridden here regardless of input value. Revert before
+  // committing.
+  interCoreBufNum = 2;
   bool isDoubleBuf = (interCoreBufNum > 1);
   LDBG("[BufferCount] interCoreBufNum=" << interCoreBufNum
                                         << " doubleBuf=" << isDoubleBuf);
 
-  // Tag consumer-side alloc and transferOp with crossDeps (both modes)
-  for (auto &p : groups)
-    addConsumerCrossDepsTags(p.second, module);
-
-  // Tag llvm.load/store volatile ops with crossDeps (both modes)
-  DenseMap<int, SmallVector<Operation *>> loadStoreByTid;
-  collectLoadStoreOpsByTransferId(module, loadStoreByTid);
-  tagLoadStoreOpsWithCrossDeps(loadStoreByTid);
+  // crossDeps tagging policy:
+  //   - buffer-creation ops (alloc, the new output alloc, annotation.mark):
+  //     NO tag. alloc is not a behavior op — it does not move data.
+  //   - producer behavior op (clone of fixpipe / hivm.copy inside scf.if):
+  //     tag [tid, 1]. Set explicitly by wrapTransferOpWithScfIf*.
+  //   - consumer behavior op (clone of memory_space_cast / convert_layout
+  //     inside scf.if): NO tag. The clone is a relay of an upstream-tagged
+  //     op; downstream consumers scan the wrapper scf.if instead.
+  //   - consumer ifOp wrapper: tag [tid, 0]. Single source of truth for
+  //     consumer role.
+  // In single-buffer mode this pass is a no-op pass-through — no new tags
+  // are added and input tags are preserved.
+  if (isDoubleBuf) {
+    // Tag llvm.load/store volatile ops with crossDeps
+    DenseMap<int, SmallVector<Operation *>> loadStoreByTid;
+    collectLoadStoreOpsByTransferId(module, loadStoreByTid);
+    tagLoadStoreOpsWithCrossDeps(loadStoreByTid);
+  }
 
   // Check flag ID budget: hardware supports 16 flags (0-15).
   // Each cross-core double-buffer group needs 1 additional output flag

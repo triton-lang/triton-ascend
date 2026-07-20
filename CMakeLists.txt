@@ -22,6 +22,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/safe_compile.cmake)
 option(TRITON_BUILD_PYTHON_MODULE "Build Python Triton bindings" OFF)
 option(TRITON_BUILD_PROTON "Build the Triton Proton profiler" ON)
 option(TRITON_BUILD_UT "Build C++ Triton Unit Tests" ON)
+option(TRITON_EXT_ENABLED "Build with default visibility for Triton+LLVM symbol exposure to plugin extensions" OFF)
 option(TRITON_BUILD_WITH_CCACHE "Build with ccache (if available)" ON)
 set(TRITON_CODEGEN_BACKENDS "" CACHE STRING "Enable different codegen backends")
 
@@ -158,7 +159,11 @@ endfunction()
 
 # Disable warnings that show up in external code (gtest;pybind11)
 if(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -fvisibility=hidden")
+  if(NOT TRITON_EXT_ENABLED)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -fvisibility=hidden")
+  else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -DTRITON_EXT_ENABLED=1")
+  endif()
 else()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4244 /wd4624 /wd4715 /wd4530")
 endif()
@@ -172,6 +177,14 @@ include_directories(${PROJECT_SOURCE_DIR}/third_party)
 include_directories(${PROJECT_BINARY_DIR}/third_party) # Tablegen'd files
 
 # link_directories(${LLVM_LIBRARY_DIR})
+if(TRITON_BUILD_PYTHON_MODULE)
+  # Python Interpreter is used to run lit tests
+  find_package(Python3 REQUIRED COMPONENTS Development.Module Interpreter)
+  find_package(pybind11 CONFIG REQUIRED HINTS "${Python3_SITELIB}")
+  # need to include pybind11
+  include_directories(${Python3_INCLUDE_DIRS})
+  include_directories(${pybind11_INCLUDE_DIR})
+endif()
 add_subdirectory(include)
 add_subdirectory(lib)
 
@@ -206,12 +219,6 @@ if(TRITON_BUILD_PYTHON_MODULE)
   set(PYTHON_SRC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/python/src)
   include_directories(${PYTHON_SRC_PATH})
 
-  # Python Interpreter is used to run lit tests
-  find_package(Python3 REQUIRED COMPONENTS Development.Module Interpreter)
-  find_package(pybind11 CONFIG REQUIRED HINTS "${Python3_SITELIB}")
-  # need to include pybind11
-  include_directories(${Python3_INCLUDE_DIRS})
-  include_directories(${pybind11_INCLUDE_DIR})
   link_directories(${Python3_LIBRARY_DIRS})
   link_libraries(${Python3_LIBRARIES})
   add_link_options(${Python3_LINK_OPTIONS})
@@ -246,6 +253,10 @@ if(TRITON_BUILD_PYTHON_MODULE)
 
   get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
   get_property(triton_plugins GLOBAL PROPERTY TRITON_PLUGINS)
+  # TritonPluginUtils is a STATIC lib: loadPlugins()/TritonPlugin::load are
+  # called by libtriton.so (ir.cc/passes.cc extend_with), so the linker
+  # keeps PluginUtils.o. Plugins are loaded via extend_with (dlopen).
+  list(APPEND triton_libs TritonPluginUtils)
   set(TRITON_LIBRARIES
     ${triton_libs}
     ${triton_plugins}
@@ -353,7 +364,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
 
 endif()
 
-if (UNIX AND NOT APPLE)
+if (UNIX AND NOT APPLE AND NOT TRITON_EXT_ENABLED)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--exclude-libs,ALL")
 endif()
 

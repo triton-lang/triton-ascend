@@ -606,13 +606,6 @@ static inline DevicePtrInfo getPointer(PyObject *obj, int idx) {
         aclError status = aclrtPointerGetAttributes(ptr_info.dev_ptr, &attributes);
 
         if (status == ACL_SUCCESS) {
-          if (attributes.location.type != ACL_MEM_LOCATION_TYPE_DEVICE && attributes.location.type != 4) {
-            Py_DECREF(ret);
-            PyErr_Format(PyExc_ValueError,
-                         "Pointer argument (at %d) cannot be accessed from Triton (cpu tensor?)", idx);
-            ptr_info.valid = false;
-            return ptr_info;
-          }
         } else {
           Py_DECREF(ret);
           PyErr_Format(PyExc_RuntimeError,

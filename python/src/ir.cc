@@ -37,11 +37,12 @@
 #include "triton/Dialect/TritonInstrument/IR/Dialect.h"
 #include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonNvidiaGPU/Transforms/TMAUtilities.h"
+#include "triton/Tools/PluginUtils.h"
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/SourceMgr.h"
+#include <memory>
 
-#include "ir.h"
 namespace {
 
 namespace py = pybind11;
@@ -372,6 +373,20 @@ void init_triton_ir(py::module &&m) {
                                          py::module_local())
       .def(py::init<llvm::SourceMgr &, MLIRContext *>());
 
+  static std::vector<mlir::triton::plugin::TritonPlugin> plugins;
+  m.def(
+      "extend_dialects_with",
+      [](const std::string &libPath) {
+        auto pluginOrErr = mlir::triton::plugin::TritonPlugin::load(libPath);
+        if (!pluginOrErr) {
+          std::string errMsg = llvm::toString(pluginOrErr.takeError());
+          throw std::runtime_error(errMsg);
+        }
+        plugins.push_back(std::move(*pluginOrErr));
+      },
+      "Given a path to a Triton extension, register any dialects to be loaded "
+      "in `load_dialects`.");
+
   m.def("load_dialects", [](MLIRContext &context) {
     DialectRegistry registry;
     registry.insert<TritonDialect, ::mlir::triton::gpu::TritonGPUDialect,
@@ -385,11 +400,14 @@ void init_triton_ir(py::module &&m) {
     registerBuiltinDialectTranslation(registry);
     registerLLVMDialectTranslation(registry);
     mlir::LLVM::registerInlinerInterface(registry);
+    for (const auto &plugin : plugins) {
+      plugin.registerDialects(registry);
+    }
     context.appendDialectRegistry(registry);
     context.loadAllAvailableDialects();
   });
 
-  py::class_<Type>(m, "type", py::module_local())
+  py::class_<Type>(m, "type")
       .def("is_integer",
            [](Type &self, unsigned width) { return self.isInteger(width); })
       .def("is_fp16", &Type::isF16)
@@ -431,7 +449,7 @@ void init_triton_ir(py::module &&m) {
         self = dyn_cast<Location>(nameLoc);
       });
 
-  py::class_<Value>(m, "value", py::module_local())
+  py::class_<Value>(m, "value")
       .def(py::init<>())
       .def("set_attr",
            [](Value &self, std::string &name, Attribute &attr) -> void {
@@ -466,9 +484,9 @@ void init_triton_ir(py::module &&m) {
            [](Value &self, Location loc) { return self.setLoc(loc); })
       .def("get_loc", [](Value &self) { return self.getLoc(); });
 
-  py::class_<OpResult, Value>(m, "op_result", py::module_local());
+  py::class_<OpResult, Value>(m, "op_result");
 
-  py::class_<BlockArgument, Value>(m, "block_argument", py::module_local())
+  py::class_<BlockArgument, Value>(m, "block_argument")
       .def("get_loc", &BlockArgument::getLoc)
       .def("set_loc", &BlockArgument::setLoc);
 
@@ -556,7 +574,7 @@ void init_triton_ir(py::module &&m) {
   py::class_<ArrayAttr, Attribute>(m, "array_attr", py::module_local());
 
   // Ops
-  py::class_<OpState>(m, "OpState", py::module_local())
+  py::class_<OpState>(m, "OpState")
       .def("set_attr",
            [](OpState &self, std::string &name, Attribute &attr) -> void {
              self->setAttr(name, attr);
@@ -1992,6 +2010,41 @@ void init_triton_ir(py::module &&m) {
               throw std::runtime_error("PassManager::run failed");
           },
           py::call_guard<py::gil_scoped_release>());
+
+  // Add an `extend_with` static method that dynamically loads a plugin and
+  // registers its custom operations as builder methods.
+  auto builderPtr = std::make_shared<py::class_<TritonOpBuilder>>(builderClass);
+  builderClass.def_static(
+      "extend_with",
+      [builderPtr](const std::string &path) {
+        auto pluginOrErr = mlir::triton::plugin::TritonPlugin::load(path);
+        if (!pluginOrErr) {
+          std::string errMsg = llvm::toString(pluginOrErr.takeError());
+          throw std::runtime_error(errMsg);
+        }
+        auto plugin = std::move(*pluginOrErr);
+        py::gil_scoped_acquire acquire;
+        for (const auto &op : plugin.listOps()) {
+          std::string wrapped = std::string("create_") + op.name;
+          if (op.addOp) {
+            builderPtr->def(wrapped.c_str(), [op](TritonOpBuilder &self,
+                                                  std::vector<Value> args) {
+              args.insert(args.begin(), Value());
+              op.addOp(self, args);
+              return args[0];
+            });
+          }
+          if (op.addOpWithPyArg) {
+            builderPtr->def(wrapped.c_str(),
+                            [op](TritonOpBuilder &self, py::args args,
+                                 py::kwargs kwargs) -> py::object {
+                              return op.addOpWithPyArg(self, args, kwargs);
+                            });
+          }
+        }
+      },
+      "Given a path to a Triton extension, load it and create builder methods "
+      "for each operation.");
 }
 
 bool str_eq_ignore_case(const char *s1, const char *s2, int n) {

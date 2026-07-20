@@ -568,6 +568,11 @@ class CMakeBuild(build_ext):
             "-DTRITON_PLUGIN_DIRS=" + ';'.join([b.src_dir for b in backends if b.is_external]),
             "-DTRITON_WHEEL_DIR=" + wheeldir, "-DLLVM_MAJOR_VERSION_22_COMPATIBLE=ON"
         ]
+        if check_env_flag("TRITON_EXT_ENABLED"):
+            cmake_args += ["-DTRITON_EXT_ENABLED=1"]
+        else:
+            cmake_args += ["-DTRITON_EXT_ENABLED=0"]
+
         if lit_dir is not None:
             cmake_args.append("-DLLVM_EXTERNAL_LIT=" + lit_dir)
         cmake_args.extend(thirdparty_cmake_args)
@@ -673,6 +678,50 @@ class CMakeBuild(build_ext):
                     # strip command not available or failed, continue without stripping
                     pass
             print(f"Copied triton-opt to {triton_opt_dst}")
+
+        # Copy include/ to triton/include/ so downstream packages can compile
+        # against triton's headers without needing the source submodule.
+        # Merge source include/ + build-dir include/ (tablegen output).
+        include_dst = os.path.join(os.path.dirname(extdir), "include")
+        include_src = os.path.join(self.base_dir, "include")
+        if os.path.exists(include_src):
+            shutil.copytree(include_src, include_dst, dirs_exist_ok=True)
+        build_include = os.path.join(cmake_dir, "include")
+        if os.path.exists(build_include):
+            shutil.copytree(build_include, include_dst, dirs_exist_ok=True)
+        # Also copy python/src/ headers (ir.h, passes.h) that
+        # downstream packages need at compile time.
+        py_src_dst = os.path.join(include_dst, "python", "src")
+        os.makedirs(py_src_dst, exist_ok=True)
+        for hdr in ["ir.h", "passes.h"]:
+            py_src_hdr = os.path.join(self.base_dir, "python", "src", hdr)
+            if os.path.exists(py_src_hdr):
+                shutil.copy2(py_src_hdr, os.path.join(py_src_dst, hdr))
+        # Also copy third_party/proton/Dialect/include/ so downstream
+        # packages don't need the proton submodule.
+        proton_dialect_src = os.path.join(self.base_dir, "third_party", "proton", "Dialect", "include")
+        if os.path.exists(proton_dialect_src):
+            proton_dialect_dst = os.path.join(include_dst, "third_party", "proton", "Dialect", "include")
+            shutil.copytree(proton_dialect_src, proton_dialect_dst, dirs_exist_ok=True)
+        # Also copy proton tablegen output (.h.inc) from the build dir.
+        proton_build_inc = os.path.join(cmake_dir, "third_party", "proton", "Dialect", "include")
+        if os.path.exists(proton_build_inc):
+            proton_build_dst = os.path.join(include_dst, "third_party", "proton", "Dialect", "include")
+            shutil.copytree(proton_build_inc, proton_build_dst, dirs_exist_ok=True)
+        # Also copy third_party/ascend/include/ (Utils.h, etc.) so downstream
+        # packages don't need the ascend submodule.
+        ascend_include_src = os.path.join(self.base_dir, "third_party", "ascend", "include")
+        if os.path.exists(ascend_include_src):
+            ascend_include_dst = os.path.join(include_dst, "ascend", "include")
+            shutil.copytree(ascend_include_src, ascend_include_dst, dirs_exist_ok=True)
+        print(f"Copied include/ to {include_dst}")
+
+        # Copy cmake/ so downstream packages (triton-dist) can find
+        # llvm-hash.txt, FindLLVM.cmake, etc. without a submodule.
+        cmake_src = os.path.join(self.base_dir, "cmake")
+        cmake_dst = os.path.join(os.path.dirname(extdir), "cmake")
+        if os.path.exists(cmake_src):
+            shutil.copytree(cmake_src, cmake_dst, dirs_exist_ok=True)
 
 
 def download_and_copy_dependencies():
@@ -1075,6 +1124,17 @@ setup(
     long_description=long_description,
     packages=list(get_packages()),
     package_dir=dict(get_package_dirs()),
+    package_data={
+        "triton": [
+            "_C/*.so",
+            "_C/*.pyd",
+            "include/triton/**/*",
+            "include/mlir/**/*",
+            "include/llvm/**/*",
+            "include/python/**/*",
+            "include/third_party/**/*",
+        ],
+    },
     entry_points=get_entry_points(),
     include_package_data=True,
     ext_modules=[CMakeExtension("triton", "triton/_C/")],

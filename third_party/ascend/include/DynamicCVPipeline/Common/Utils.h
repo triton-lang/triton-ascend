@@ -22,6 +22,7 @@
 
 #ifndef ADD_AUTO_SCHEDULING_COMMON_UTILS_H
 #define ADD_AUTO_SCHEDULING_COMMON_UTILS_H
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
@@ -59,6 +60,7 @@ inline constexpr llvm::StringLiteral kCrossCoreDeps = "ssbuffer.crossCoreDeps";
 inline constexpr llvm::StringLiteral kIntraDeps = "ssbuffer.intraDeps";
 inline constexpr llvm::StringLiteral kMemCrossDeps = "ssbuffer.memCrossDeps";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
+inline constexpr llvm::StringLiteral kIterCounter = "ssbuffer.iterCounter";
 inline constexpr llvm::StringLiteral kClone = "ssbuffer.clone";
 inline constexpr llvm::StringLiteral kEnableUbRefineOpt =
     "ssbuffer.enable_ub_refine_opt";
@@ -117,6 +119,44 @@ bool hasFallbackAttr(ModuleOp module);
 bool isScfOp(Operation *op);
 bool isOnlyDirectlyUse(Operation *preOp, Operation *nextOp,
                        const CVPipeline::MemoryDependenceGraph &memGraph);
+
+// Wrapper around a "main loop" — either scf.for or scf.while carrying the
+// ssbuffer.main_loop attribute. Lets downstream code treat both uniformly.
+class MainLoop {
+public:
+  Operation *op = nullptr;
+  Block *body = nullptr;
+  Value iterCounter;
+
+  Block *getBody() const;
+  Operation *getOperation() const;
+  MLIRContext *getContext() const;
+  Location getLoc() const;
+  Block *getBlock() const;
+  Block::iterator getIterator() const;
+  Operation *operator->() const;
+  bool isWhile() const;
+
+  // Iter args carried across loop iterations, as BlockArguments.
+  // forOp:   getRegionIterArgs().
+  // whileOp: after-body args.
+  SmallVector<Value> getIterArgs() const;
+
+  // Only meaningful for whileOp (before-body args); forOp returns empty.
+  // Same count/types as getIterArgs() on whileOp, distinct Value identity.
+  SmallVector<Value> getBeforeIterArgs() const;
+
+  explicit MainLoop(Operation *loopOp);
+
+  // Returns the scf.yield terminator of a forOp's body / whileOp's after
+  // body. Returns {} if `loopOp` is neither.
+  static scf::YieldOp getLoopYieldOp(Operation *loopOp);
+};
+
+// True when `op` is a main_loop loop op (forOp / whileOp carrying the tag).
+inline bool isMainLoopOp(Operation *op) {
+  return op && isa<scf::ForOp, scf::WhileOp>(op) && op->hasAttr(kMainLoop);
+}
 
 inline bool isCubeOp(Operation *op) {
   return !isScfOp(op) && CVPipeline::getOpCoreType(op) == CoreType::CUBE_ONLY;

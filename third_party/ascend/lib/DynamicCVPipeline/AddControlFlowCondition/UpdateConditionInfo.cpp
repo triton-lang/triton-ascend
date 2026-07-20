@@ -345,19 +345,20 @@ int UpdateConditionInfoPass::buildIdxToVarMap(
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
-// Helper function to build buffer dependency mappings (Operation* based)
+// Helper function to build buffer dependency mappings (fully Operation* based)
+// Outputs two reverse lookup tables for O(1) lookup during IR walk:
+//   - consumerToGroup: consumer Op -> groupIdx
+//   - producerToGroups: producer Op -> [groupIdx]
 static int buildBufferDependencyMappings(
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>> &buffers,
     DenseMap<Operation *, int> &consumerToGroup,
-    DenseMap<Value, SmallVector<int>> &outputToGroups) {
+    DenseMap<Operation *, SmallVector<int>> &producerToGroups) {
   for (auto &[groupIdx, deps] : buffers) {
     for (auto &[consumer, producers] : deps) {
       consumerToGroup[consumer] = groupIdx;
 
       for (Operation *producer : producers) {
-        for (Value result : producer->getResults()) {
-          outputToGroups[result].push_back(groupIdx);
-        }
+        producerToGroups[producer].push_back(groupIdx);
       }
     }
   }
@@ -405,8 +406,8 @@ int UpdateConditionInfoPass::getInputOutputValues(
   // Build output mappings for cross-core and intra-core
   // Same producer/output can be used by multiple consumers/inputs, so we need
   // to track all related groups
-  DenseMap<Value, SmallVector<int>> crossCoreOutputToGroups;
-  DenseMap<Value, SmallVector<int>> intraCoreOutputToGroups;
+  DenseMap<Operation *, SmallVector<int>> crossCoreProducerToGroups;
+  DenseMap<Operation *, SmallVector<int>> intraCoreProducerToGroups;
 
   // Add consumer mappings for input dependency identification
   DenseMap<Operation *, int> crossCoreConsumerToGroup;
@@ -428,13 +429,13 @@ int UpdateConditionInfoPass::getInputOutputValues(
   // Build cross-core mappings (including memCrossCore)
   if (buildBufferDependencyMappings(
           allCrossCoreBuffers, crossCoreConsumerToGroup,
-          crossCoreOutputToGroups) == UPDATE_CONDITION_INFO_FAILED) {
+          crossCoreProducerToGroups) == UPDATE_CONDITION_INFO_FAILED) {
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
   // Build intra-core mappings
   if (buildBufferDependencyMappings(intraCoreBuffers, intraCoreConsumerToGroup,
-                                    intraCoreOutputToGroups) ==
+                                    intraCoreProducerToGroups) ==
       UPDATE_CONDITION_INFO_FAILED) {
     return UPDATE_CONDITION_INFO_FAILED;
   }
@@ -461,34 +462,23 @@ int UpdateConditionInfoPass::getInputOutputValues(
     // they have two operand, operand 0(ins) is input, operand 1(outs) is output
     if (isFixpipeOrCopy || isBufferizationWrite || isSSBufferWrite) {
       Value outsVal = op->getOperands()[1];
-      // Check if outs is a producer result in cross-core dependencies
+      // Check if outs buffer is produced by a tracked producer Op
       Operation *outsDefOp = outsVal.getDefiningOp();
       if (outsDefOp) {
-        for (Value result : outsDefOp->getResults()) {
-          if (crossCoreOutputToGroups.count(result)) {
-            for (int idx : crossCoreOutputToGroups[result]) {
-              crossCoreOutputSet.insert(idx);
-            }
+        if (crossCoreProducerToGroups.count(outsDefOp)) {
+          for (int idx : crossCoreProducerToGroups[outsDefOp]) {
+            crossCoreOutputSet.insert(idx);
           }
-          if (intraCoreOutputToGroups.count(result)) {
-            for (int idx : intraCoreOutputToGroups[result]) {
-              intraCoreOutputSet.insert(idx);
-            }
+        }
+        if (intraCoreProducerToGroups.count(outsDefOp)) {
+          for (int idx : intraCoreProducerToGroups[outsDefOp]) {
+            intraCoreOutputSet.insert(idx);
           }
         }
       }
-      // Also check the value directly (for cases where it's not a defining op
-      // result)
-      if (crossCoreOutputToGroups.count(outsVal)) {
-        for (int idx : crossCoreOutputToGroups[outsVal]) {
-          crossCoreOutputSet.insert(idx);
-        }
-      }
-      if (intraCoreOutputToGroups.count(outsVal)) {
-        for (int idx : intraCoreOutputToGroups[outsVal]) {
-          intraCoreOutputSet.insert(idx);
-        }
-      }
+      // Note: Block arguments (region iter args, function args) are not tracked
+      // as producers in current design - all producer buffers are memref.alloc
+      // ops within the same scope.
       return WalkResult::advance();
     }
     return WalkResult::advance();
@@ -497,16 +487,18 @@ int UpdateConditionInfoPass::getInputOutputValues(
   // operands in yield op are output
   scf::YieldOp thenYield = ifOp.thenYield();
   for (Value yieldVal : thenYield.getOperands()) {
-    // Check if yield operand is a producer in cross-core dependencies
-    if (crossCoreOutputToGroups.count(yieldVal)) {
-      for (int idx : crossCoreOutputToGroups[yieldVal]) {
-        crossCoreOutputSet.insert(idx);
+    // Check if yield value comes from a tracked producer Op
+    Operation *yieldDefOp = yieldVal.getDefiningOp();
+    if (yieldDefOp) {
+      if (crossCoreProducerToGroups.count(yieldDefOp)) {
+        for (int idx : crossCoreProducerToGroups[yieldDefOp]) {
+          crossCoreOutputSet.insert(idx);
+        }
       }
-    }
-    // Check if yield operand is an output in intra-core dependencies
-    if (intraCoreOutputToGroups.count(yieldVal)) {
-      for (int idx : intraCoreOutputToGroups[yieldVal]) {
-        intraCoreOutputSet.insert(idx);
+      if (intraCoreProducerToGroups.count(yieldDefOp)) {
+        for (int idx : intraCoreProducerToGroups[yieldDefOp]) {
+          intraCoreOutputSet.insert(idx);
+        }
       }
     }
   }

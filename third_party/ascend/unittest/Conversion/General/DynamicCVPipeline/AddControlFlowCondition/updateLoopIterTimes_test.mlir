@@ -60,10 +60,10 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         %c0_i32_18 = arith.constant {ssbuffer.block_id = 7 : i32} 0 : i32
         %51 = arith.cmpi eq, %50, %c0_i32_18 {ssbuffer.block_id = 7 : i32} : i32
         %52 = scf.if %51 -> (tensor<128xf32>) {
-          %55 = bufferization.to_tensor %memspacecast restrict writable : memref<128xf32>
+          %55 = bufferization.to_tensor %memspacecast restrict writable : memref<128xf32> to tensor<128xf32>
           scf.yield %55 : tensor<128xf32>
         } else {
-          %55 = bufferization.to_tensor %memspacecast_9 restrict writable : memref<128xf32>
+          %55 = bufferization.to_tensor %memspacecast_9 restrict writable : memref<128xf32> to tensor<128xf32>
           scf.yield %55 : tensor<128xf32>
         } {ssbuffer.block_id = 7 : i32, ssbuffer.intraDeps = [0 : i32, 0 : i32]}
         hivm.hir.sync_block_wait {ssbuffer.block_id = 7 : i32, ssbuffer.transfer_id = 1 : i32}[<VECTOR>, <PIPE_M>, <PIPE_MTE3>] flag = 2

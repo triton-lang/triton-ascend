@@ -65,7 +65,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         hivm.hir.copy ins(%reshape_42 : tensor<4x8x16x16xf16>) outs(%alloc_12 : memref<4x8x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 1 : i32}
 
 
-        %55 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 7 : i32, ssbuffer.intraDeps = [0 : i32, 0 : i32]} : memref<128xf32>
+        %55 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 7 : i32, ssbuffer.intraDeps = [0 : i32, 0 : i32]} : memref<128xf32> to tensor<128xf32>
         %49 = arith.divui %arg16, %c128_i32 {ssbuffer.block_id = 7 : i32} : i32
         %c2_i32_17 = arith.constant {ssbuffer.block_id = 7 : i32} 2 : i32
         %50 = arith.remsi %49, %c2_i32_17 {ssbuffer.block_id = 7 : i32} : i32

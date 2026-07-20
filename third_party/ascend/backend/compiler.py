@@ -556,6 +556,12 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 f"--enable-code-motion={code_motion}",
             ]
 
+        enable_preload = metadata["enable_preload"]
+        if enable_preload is not None:
+            _compile_option_list += [
+                f"--enable-preload={enable_preload}",
+            ]
+
         disable_tightly_coupled_buffer_reuse = metadata["disable_tightly_coupled_buffer_reuse"]
         if disable_tightly_coupled_buffer_reuse:
             _compile_option_list += ["--disable-tightly-coupled-buffer-reuse"]

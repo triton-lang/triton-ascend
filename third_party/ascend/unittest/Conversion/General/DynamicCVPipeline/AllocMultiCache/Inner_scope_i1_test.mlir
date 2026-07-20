@@ -1,5 +1,11 @@
-// RUN: (triton-opt --add_multi_buffer_inner_scope %s 2>&1 || echo "PASS") | FileCheck %s
-// CHECK: PASS
+// RUN: triton-opt --add_multi_buffer_inner_scope %s 2>&1 | FileCheck %s
+// Pass sets triton_ascend.dynamic_cv_pipeline.rc = 1 (ERRCODE_FAILED) to
+// signal fallback; the outer runOnOperation wrapper at
+// AddMultiBufferInnerScope.cpp:2180-2183 overwrites the more specific
+// ERRCODE_IGNORED=2 that addInnerMultiBuffer sets for i1 deps.
+
+// CHECK-LABEL: module attributes
+// CHECK-SAME: triton_ascend.dynamic_cv_pipeline.rc = 1
 
 // T-i1: i1 Tensor Dependency Triggers Fallback
 // Test: When a tensor dep with element type i1 is produced in one block and
@@ -28,7 +34,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       scf.for %i = %c0_i32 to %c100_i32 step %c1_i32  : i32 {
         // Producer: tensor<128xi1> in block 7 (NOT empty+fill pattern)
         %alloc = memref.alloc() {ssbuffer.block_id = 7 : i32} : memref<128xi1>
-        %prod = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 7 : i32} : memref<128xi1>
+        %prod = bufferization.to_tensor %alloc {ssbuffer.block_id = 7 : i32} : memref<128xi1> to tensor<128xi1>
         // Consumer in block 10 (cross-block)
         %consumed = arith.ori %prod, %prod {ssbuffer.block_id = 10 : i32} : tensor<128xi1>
       } {ssbuffer.main_loop = 1 : i64}

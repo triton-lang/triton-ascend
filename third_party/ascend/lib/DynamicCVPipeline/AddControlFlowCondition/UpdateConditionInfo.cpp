@@ -145,10 +145,12 @@ UpdateConditionInfoPass::allocSSBuffer(ModuleOp module) {
 // Collect dependency buffer
 void UpdateConditionInfoPass::collectDependencyBuffers(
     ModuleOp module, SmallVector<scf::ForOp> &mainLoopForOps,
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &crossCoreBuffers,
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+        &crossCoreBuffers,
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         &memCrossCoreBuffers,
-    DenseMap<scf::ForOp, DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>>
+    DenseMap<scf::ForOp,
+             DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>>
         &intraCoreBuffersMap) {
   // Collect crossCoreBuffers and memCrossCoreBuffers by traversing module in
   // deterministic order
@@ -178,7 +180,8 @@ void UpdateConditionInfoPass::collectDependencyBuffers(
   for (scf::ForOp forOp : mainLoopForOps) {
     if (info->intraCoreDependentMap.count(forOp)) {
       auto &forOpDeps = info->intraCoreDependentMap[forOp];
-      DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> intraCoreBuffers;
+      DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+          intraCoreBuffers;
       int intraCoreIdx = 0;
       for (auto &entry : forOpDeps) {
         intraCoreBuffers[intraCoreIdx][entry.first] = entry.second;
@@ -191,9 +194,9 @@ void UpdateConditionInfoPass::collectDependencyBuffers(
 
 // Helper: Find the tcb group id that contains op
 // Returns the group id if found, -1 otherwise
-static int
-findTcbGroupId(Operation* op,
-               DenseMap<int, SmallVector<Operation*>> &tightlyCoupledBufferGroups) {
+static int findTcbGroupId(
+    Operation *op,
+    DenseMap<int, SmallVector<Operation *>> &tightlyCoupledBufferGroups) {
   for (auto &tcbEntry : tightlyCoupledBufferGroups) {
     if (llvm::is_contained(tcbEntry.second, op)) {
       return tcbEntry.first;
@@ -203,10 +206,10 @@ findTcbGroupId(Operation* op,
 }
 
 // Helper: Add all equivalent ops from tcbOps to ops (excluding op itself)
-int addEquivalentOps(Operation* op, SmallVector<Operation*> &tcbOps,
-                     SmallVector<Operation*> &ops) {
+int addEquivalentOps(Operation *op, SmallVector<Operation *> &tcbOps,
+                     SmallVector<Operation *> &ops) {
   int ret = -1;
-  for (Operation* equivOp : tcbOps) {
+  for (Operation *equivOp : tcbOps) {
     if (equivOp != op && !llvm::is_contained(ops, equivOp)) {
       ret = 0;
       ops.push_back(equivOp);
@@ -232,16 +235,18 @@ int addEquivalentOps(Operation* op, SmallVector<Operation*> &tcbOps,
 // scope: {consumer: {alloc_6}, ...} This function is to extend crossCoreBuffers
 // to include producer buffers in another scope: {consumer: {alloc_6, alloc_5},
 // ...}
-DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>
+DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
 UpdateConditionInfoPass::extendCrossCoreBuffersWithEquivalentValues(
     ModuleOp module,
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> crossCoreBuffers) {
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+        crossCoreBuffers) {
   // Error map to return when error occurs
-  DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> errorMap;
-  errorMap[-1] = DenseMap<Operation*, SmallVector<Operation*>>();
+  DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>> errorMap;
+  errorMap[-1] = DenseMap<Operation *, SmallVector<Operation *>>();
 
   // copy from crossCoreBuffers
-  DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> extendedCrossCoreBuffers;
+  DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+      extendedCrossCoreBuffers;
   for (auto &entry : crossCoreBuffers) {
     int groupIdx = entry.first;
     for (auto &entry2 : entry.second) {
@@ -251,7 +256,7 @@ UpdateConditionInfoPass::extendCrossCoreBuffersWithEquivalentValues(
 
   // Get the buffers have the same tightly_coupled_buffer id
   int ret = 0;
-  DenseMap<int, SmallVector<Operation*>> tightlyCoupledBufferGroups;
+  DenseMap<int, SmallVector<Operation *>> tightlyCoupledBufferGroups;
   WalkResult walkResult = module.walk([&](Operation *op) -> WalkResult {
     if (isa<annotation::MarkOp>(op)) {
       if (auto tcbAttr = op->getAttrOfType<hivm::HIVMTightlyCoupledBufferAttr>(
@@ -259,7 +264,7 @@ UpdateConditionInfoPass::extendCrossCoreBuffersWithEquivalentValues(
         auto id = tcbAttr.getId();
         if (id.has_value()) {
           int tcb = id.value();
-          Operation* markedOp = op->getOperand(0).getDefiningOp();
+          Operation *markedOp = op->getOperand(0).getDefiningOp();
           if (markedOp) {
             tightlyCoupledBufferGroups[tcb].push_back(markedOp);
           }
@@ -280,15 +285,16 @@ UpdateConditionInfoPass::extendCrossCoreBuffersWithEquivalentValues(
   for (auto &entry : extendedCrossCoreBuffers) {
     int groupIdx = entry.first;
     for (auto &deps : entry.second) {
-      SmallVector<Operation*> &producers = deps.second;
-      for (Operation* bufferOp : producers) {
+      SmallVector<Operation *> &producers = deps.second;
+      for (Operation *bufferOp : producers) {
         if (!isa<memref::AllocOp>(bufferOp)) {
           // this crossdependency is not the standard cross dependency
           continue;
         }
         int tcbGroupId = findTcbGroupId(bufferOp, tightlyCoupledBufferGroups);
         if (tcbGroupId == -1) {
-          LDBG("Can not find tightly_coupled_buffer id of: " << *bufferOp << "\n");
+          LDBG("Can not find tightly_coupled_buffer id of: " << *bufferOp
+                                                             << "\n");
           return errorMap;
         }
         if (addEquivalentOps(bufferOp, tightlyCoupledBufferGroups[tcbGroupId],
@@ -304,7 +310,8 @@ UpdateConditionInfoPass::extendCrossCoreBuffersWithEquivalentValues(
 
 int UpdateConditionInfoPass::buildIdxToVarMap(
     scf::ForOp forOp,
-    const DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &intraCoreBuffers,
+    const DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+        &intraCoreBuffers,
     DenseMap<int, Value> &idxToVar) {
   int varIdx = 0;
   int iterArgNum = static_cast<int>(forOp.getNumRegionIterArgs());
@@ -340,14 +347,14 @@ int UpdateConditionInfoPass::buildIdxToVarMap(
 
 // Helper function to build buffer dependency mappings (Operation* based)
 static int buildBufferDependencyMappings(
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &buffers,
-    DenseMap<Operation*, int> &consumerToGroup,
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>> &buffers,
+    DenseMap<Operation *, int> &consumerToGroup,
     DenseMap<Value, SmallVector<int>> &outputToGroups) {
   for (auto &[groupIdx, deps] : buffers) {
     for (auto &[consumer, producers] : deps) {
       consumerToGroup[consumer] = groupIdx;
 
-      for (Operation* producer : producers) {
+      for (Operation *producer : producers) {
         for (Value result : producer->getResults()) {
           outputToGroups[result].push_back(groupIdx);
         }
@@ -380,10 +387,12 @@ static int buildBufferDependencyMappings(
 //   4. Deduplicate and output four groups of index values
 int UpdateConditionInfoPass::getInputOutputValues(
     scf::IfOp ifOp,
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> crossCoreBuffers,
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+        crossCoreBuffers,
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         memCrossCoreBuffers,
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> intraCoreBuffers,
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+        intraCoreBuffers,
     SmallVector<int> &crossCoreInputValues,
     SmallVector<int> &crossCoreOutputValues,
     SmallVector<int> &intraCoreInputValues,
@@ -400,14 +409,15 @@ int UpdateConditionInfoPass::getInputOutputValues(
   DenseMap<Value, SmallVector<int>> intraCoreOutputToGroups;
 
   // Add consumer mappings for input dependency identification
-  DenseMap<Operation*, int> crossCoreConsumerToGroup;
-  DenseMap<Operation*, int> intraCoreConsumerToGroup;
+  DenseMap<Operation *, int> crossCoreConsumerToGroup;
+  DenseMap<Operation *, int> intraCoreConsumerToGroup;
 
   // Build memCrossCore mappings (Operation* based)
-  DenseMap<Operation*, int> memCrossCoreConsumerToGroup;
+  DenseMap<Operation *, int> memCrossCoreConsumerToGroup;
 
   // Merge crossCoreBuffers and memCrossCoreBuffers for unified processing
-  DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> allCrossCoreBuffers;
+  DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+      allCrossCoreBuffers;
   for (auto &entry : crossCoreBuffers) {
     allCrossCoreBuffers[entry.first] = entry.second;
   }
@@ -416,9 +426,9 @@ int UpdateConditionInfoPass::getInputOutputValues(
   }
 
   // Build cross-core mappings (including memCrossCore)
-  if (buildBufferDependencyMappings(allCrossCoreBuffers, crossCoreConsumerToGroup,
-                                    crossCoreOutputToGroups) ==
-      UPDATE_CONDITION_INFO_FAILED) {
+  if (buildBufferDependencyMappings(
+          allCrossCoreBuffers, crossCoreConsumerToGroup,
+          crossCoreOutputToGroups) == UPDATE_CONDITION_INFO_FAILED) {
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
@@ -452,7 +462,7 @@ int UpdateConditionInfoPass::getInputOutputValues(
     if (isFixpipeOrCopy || isBufferizationWrite || isSSBufferWrite) {
       Value outsVal = op->getOperands()[1];
       // Check if outs is a producer result in cross-core dependencies
-      Operation* outsDefOp = outsVal.getDefiningOp();
+      Operation *outsDefOp = outsVal.getDefiningOp();
       if (outsDefOp) {
         for (Value result : outsDefOp->getResults()) {
           if (crossCoreOutputToGroups.count(result)) {
@@ -467,7 +477,8 @@ int UpdateConditionInfoPass::getInputOutputValues(
           }
         }
       }
-      // Also check the value directly (for cases where it's not a defining op result)
+      // Also check the value directly (for cases where it's not a defining op
+      // result)
       if (crossCoreOutputToGroups.count(outsVal)) {
         for (int idx : crossCoreOutputToGroups[outsVal]) {
           crossCoreOutputSet.insert(idx);
@@ -531,7 +542,8 @@ Value UpdateConditionInfoPass::getVarValue(scf::ForOp forOp, int varIndex) {
 // Build the information of the producer group.
 int UpdateConditionInfoPass::buildOutputGroups(
     SmallVector<int> &intraCoreOutputValues,
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &intraCoreBuffers,
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+        &intraCoreBuffers,
     DenseMap<int, Value> &idxToVar,
     SmallVector<OutputGroupInfo> &outputGroups) {
   outputGroups.clear();
@@ -556,7 +568,7 @@ int UpdateConditionInfoPass::buildOutputGroups(
 
     for (auto &entry : bufferIt->second) {
       SmallVector<Value> outputValues;
-      for (Operation* producer : entry.second) {
+      for (Operation *producer : entry.second) {
         for (Value result : producer->getResults()) {
           outputValues.push_back(result);
         }
@@ -659,15 +671,17 @@ UpdateConditionInfoPass::computeVectorSSBufferPtrs(
 Value UpdateConditionInfoPass::addCrossCoreConditions(
     OpBuilder &builder, Location loc, SmallVector<int> crossCoreInputValues,
     SmallVector<int> crossCoreOutputValues,
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &crossCoreBuffers,
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+        &crossCoreBuffers,
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         &memCrossCoreBuffers,
     bool isAIC, Value zeroConst, DenseMap<int, Value> &VectorSSBufferPtrs,
     SmallVector<SmallVector<Value>> ssbufferPtrs) {
   Value conditions = nullptr;
 
   // Merge crossCoreBuffers and memCrossCoreBuffers for unified processing
-  DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> allCrossCoreBuffers;
+  DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+      allCrossCoreBuffers;
   for (auto &entry : crossCoreBuffers) {
     allCrossCoreBuffers[entry.first] = entry.second;
   }
@@ -856,8 +870,9 @@ void UpdateConditionInfoPass::updateCrossCoreControlVars(
 int UpdateConditionInfoPass::setCrossCoreCondition(
     SmallVector<int> crossCoreInputValues,
     SmallVector<int> crossCoreOutputValues,
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &crossCoreBuffers,
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+        &crossCoreBuffers,
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         &memCrossCoreBuffers,
     scf::IfOp ifOp, SmallVector<SmallVector<Value>> ssbufferPtrs,
     Value &crossCoreCond) {
@@ -972,7 +987,8 @@ void UpdateConditionInfoPass::collectIntraCoreInputConditions(
 // Collect the conditions for intra-core producer values.
 int UpdateConditionInfoPass::collectIntraCoreOutputConditions(
     OpBuilder &builder, Location loc,
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &intraCoreBuffers,
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+        &intraCoreBuffers,
     SmallVector<int> &intraCoreOutputValues, DenseMap<int, Value> &idxToVar,
     SmallVector<Value> &conditions, DenseSet<Value> &usedVarsSet,
     DenseMap<Value, VarUpdateType> &varUpdateTypes) {
@@ -1144,7 +1160,8 @@ void UpdateConditionInfoPass::collectTensorIterArgOutputConditions(
 // Set the intraCore condition.
 int UpdateConditionInfoPass::setIntraCoreCondition(
     ModuleOp module, scf::IfOp ifOp,
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> &intraCoreBuffers,
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+        &intraCoreBuffers,
     SmallVector<int> &intraCoreInputValues,
     SmallVector<int> &intraCoreOutputValues, DenseMap<int, Value> &idxToVar,
     DenseMap<Value, VarUpdateType> &varUpdateTypes, Value &intraCoreCond) {
@@ -1725,10 +1742,12 @@ int UpdateConditionInfoPass::updateIfConds(
   }
 
   // Step0: Collect dependency buffers once outside the for loop
-  DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> crossCoreBuffers;
-  DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>
+  DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+      crossCoreBuffers;
+  DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
       memCrossCoreBuffers;
-  DenseMap<scf::ForOp, DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>>
+  DenseMap<scf::ForOp,
+           DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>>
       intraCoreBuffersMap;
   collectDependencyBuffers(module, mainLoopForOps, crossCoreBuffers,
                            memCrossCoreBuffers, intraCoreBuffersMap);
@@ -1742,7 +1761,8 @@ int UpdateConditionInfoPass::updateIfConds(
     }
 
     // Step1: Get intraCoreBuffers from pre-collected map
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>> intraCoreBuffers;
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+        intraCoreBuffers;
     if (intraCoreBuffersMap.count(forOp)) {
       intraCoreBuffers = intraCoreBuffersMap[forOp];
     }
@@ -1755,7 +1775,7 @@ int UpdateConditionInfoPass::updateIfConds(
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
-    DenseMap<int, DenseMap<Operation*, SmallVector<Operation*>>>
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         extendedCrossCoreBuffers = extendCrossCoreBuffersWithEquivalentValues(
             module, crossCoreBuffers);
     if (extendedCrossCoreBuffers.count(-1)) {

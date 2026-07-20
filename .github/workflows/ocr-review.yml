@@ -113,6 +113,7 @@ jobs:
             core.setOutput('head_sha', pullRequest.head.sha);
 
       - name: Run OpenCodeReview
+        continue-on-error: true
         uses: alibaba/open-code-review@main
         continue-on-error: true
         with:

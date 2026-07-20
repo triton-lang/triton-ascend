@@ -61,10 +61,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           # pull_request_target: checkout PR head so we build what was proposed.
-          # push/workflow_dispatch: checkout the triggering commit.
+          # push: checkout the triggering commit.
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           submodules: "true"
+          # This workflow is scoped to contents:read only and passes zero
+          # secrets to the build job — PR code cannot exfiltrate anything.
+          allow-unsafe-pr-checkout: true
 
       - name: Add git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"

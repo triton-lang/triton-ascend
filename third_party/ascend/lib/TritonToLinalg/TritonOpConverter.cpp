@@ -1700,11 +1700,11 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
     // extern libdevice ops -> hivm.hir.custom
     static constexpr llvm::StringLiteral simtLibdeviceSuffixes[] = {
         "_fp32", "_fp16", "_bf16", "_i32", "_i64", "_u32", "_u64"};
-    bool isSimtLibdeviceOp =
+    bool isLibdeviceOp =
         llvm::any_of(simtLibdeviceSuffixes, [&](llvm::StringRef suffix) {
           return op.getSymbol().ends_with(suffix);
         });
-    if (isSimtLibdeviceOp) {
+    if (isLibdeviceOp) {
       auto originalTensorType = isDstScalar
                                     ? RankedTensorType::get({1}, dstElemTy)
                                     : cast<RankedTensorType>(dstTy);
@@ -1795,6 +1795,7 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
       auto customOp = rewriter.create<hivm::CustomOp>(
           op.getLoc(), sym, ValueRange{collapsedInputs},
           ValueRange{outputTensor});
+      customOp.setInlineMode(hivm::InlineMode::AlwaysInline);
 
       auto argAttrsArray = mlir::ArrayAttr::get(customOp->getContext(), {});
       auto pipeAttr =

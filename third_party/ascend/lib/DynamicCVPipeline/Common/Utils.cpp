@@ -240,5 +240,57 @@ Value traceBackToMemrefAlloc(Value v) {
   return v;
 }
 
+Block *MainLoop::getBody() const { return body; }
+
+Operation *MainLoop::getOperation() const { return op; }
+
+MLIRContext *MainLoop::getContext() const { return op->getContext(); }
+
+Location MainLoop::getLoc() const { return op->getLoc(); }
+
+Block *MainLoop::getBlock() const { return op->getBlock(); }
+
+Block::iterator MainLoop::getIterator() const { return op->getIterator(); }
+
+Operation *MainLoop::operator->() const { return op; }
+
+bool MainLoop::isWhile() const { return isa<scf::WhileOp>(op); }
+
+SmallVector<Value> MainLoop::getIterArgs() const {
+  SmallVector<Value> result;
+  if (auto f = dyn_cast<scf::ForOp>(op)) {
+    result.append(f.getRegionIterArgs().begin(), f.getRegionIterArgs().end());
+  } else if (auto w = dyn_cast<scf::WhileOp>(op)) {
+    Block::BlockArgListType args = w.getAfterBody()->getArguments();
+    result.append(args.begin(), args.end());
+  }
+  return result;
+}
+
+SmallVector<Value> MainLoop::getBeforeIterArgs() const {
+  SmallVector<Value> result;
+  if (auto w = dyn_cast<scf::WhileOp>(op)) {
+    Block::BlockArgListType args = w.getBeforeBody()->getArguments();
+    result.append(args.begin(), args.end());
+  }
+  return result;
+}
+
+MainLoop::MainLoop(Operation *loopOp) {
+  op = loopOp;
+  if (auto f = dyn_cast<scf::ForOp>(loopOp))
+    body = f.getBody();
+  else if (auto w = dyn_cast<scf::WhileOp>(loopOp))
+    body = w.getAfterBody();
+}
+
+scf::YieldOp MainLoop::getLoopYieldOp(Operation *loopOp) {
+  if (auto forOp = dyn_cast<scf::ForOp>(loopOp))
+    return dyn_cast<scf::YieldOp>(forOp.getBody()->getTerminator());
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp))
+    return dyn_cast<scf::YieldOp>(whileOp.getAfter().front().getTerminator());
+  return {};
+}
+
 } // namespace CVPipeline
 } // namespace mlir

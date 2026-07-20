@@ -21,6 +21,12 @@ on:
   issue_comment:
     types: [created]
 
+# Prevent duplicate runs from rapid-fire /rebuild or /retry comments on the
+# same PR. The workflow runs in seconds so races are rare, but this is cheap.
+concurrency:
+  group: rebuild-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
 permissions: {}
 
 jobs:
@@ -29,6 +35,7 @@ jobs:
       github.event.issue.pull_request != null &&
       startsWith(github.event.comment.body, '/')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       actions: write          # rerun runs / jobs
       pull-requests: read     # read PR head ref
@@ -171,7 +178,7 @@ jobs:
           # All completed runs for this commit, pick latest failed per workflow.
           PICKS=$(gh api \
             "repos/${{ github.repository }}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
-            --jq "[.workflow_runs[] | select(.status==\"completed\" and (.conclusion==\"failure\" or .conclusion==\"cancelled\" or .conclusion==\"timed_out\")) | ${RUN_FIELDS}]" \
+            --jq "[.workflow_runs[] | select(.event==\"pull_request\" or .event==\"pull_request_target\") | select(.status==\"completed\" and (.conclusion==\"failure\" or .conclusion==\"cancelled\" or .conclusion==\"timed_out\")) | ${RUN_FIELDS}]" \
             | jq 'group_by(.workflow_id) | map(sort_by(.created_at) | last) | sort_by(.id) | reverse')
 
           if [ "$(echo "$PICKS" | jq 'length')" = "0" ]; then

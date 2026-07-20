@@ -45,7 +45,7 @@ jobs:
 
   wheels-build:
     name: Wheels Build
-    timeout-minutes: 360
+    timeout-minutes: 120
     runs-on: linux-amd64-cpu-16
     container:
       image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:8.5.0-910b-ubuntu22.04-py3.11-latest
@@ -119,19 +119,16 @@ jobs:
   pipeline-tests:
     name: Pipeline Tests
     needs: wheels-build
+    timeout-minutes: 360
     if: needs.wheels-build.result == 'success'
     runs-on: linux-aarch64-cpu-1
     container:
       image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ascend/triton:github_action
 
     permissions:
-      contents: read
-      actions: read
       pull-requests: read
 
     steps:
-      - uses: actions/checkout@v4
-
       - name: Resolve pipeline context
         id: ctx
         shell: bash

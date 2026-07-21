@@ -50,7 +50,7 @@ static constexpr llvm::StringLiteral kAttrsToRemove[]{
     kAddFromMatmul,     kIntraBuffer,
     kAnalyzeFlagId,     kLoopCarriedL0C,
     kMatmulADep,        kMatmulBDep,
-    kMatmulExtract,     kCrossDeps,
+    kMatmulExtract,     kCrossCoreDeps,
     kMemCrossDeps,      kClone,
     kIntraBufCount,     kInterCoreBufCount,
     kLoadStoreBufCount, kInsertionOptimization,

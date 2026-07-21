@@ -625,6 +625,11 @@ class CMakeBuild(build_ext):
             shutil.copytree(ascend_include_src, ascend_include_dst, dirs_exist_ok=True)
         print(f"Copied include/ to {include_dst}")
 
+        cmake_src = os.path.join(self.base_dir, "cmake")
+        cmake_dst = os.path.join(os.path.dirname(extdir), "cmake")
+        if os.path.exists(cmake_src):
+            shutil.copytree(cmake_src, cmake_dst, dirs_exist_ok=True)
+
 
 nvidia_version_path = os.path.join(get_base_dir(), "cmake", "nvidia-toolchain-version.json")
 with open(nvidia_version_path, "r") as nvidia_version_file:

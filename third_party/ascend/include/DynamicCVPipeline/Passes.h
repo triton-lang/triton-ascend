@@ -35,6 +35,8 @@
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/MarkMainLoop.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/PreserveControlAttrsCanonicalize.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/SeparateCVScope.h"
+#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromComputePass.h"
+#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/MarkVLoadMultiBufferPass.h"
 #include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
 
 namespace mlir {

@@ -21,45 +21,54 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/SeparateMemoryFromComputePass.h"
+#include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/MarkVLoadMultiBufferPass.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
-#include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
-#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/AddMultiBufferToGMLoadPass.h"
-#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/AsyncLoadHoistingPass.h"
 
 static constexpr const char *DEBUG_TYPE = "separate-memory-from-compute";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
-#define LDBG(X) LLVM_DEBUG(DBGS() << (X) << "\n")
+#define LDBG(...) LLVM_DEBUG(DBGS() << __VA_ARGS__ << "\n")
 
 using namespace mlir;
 using namespace triton;
 
 void SeparateMemoryFromComputePass::runOnOperation()
 {
-  ModuleOp module = getOperation();
+    ModuleOp module = getOperation();
 
-  int depth = BufferCountManager(module).getBufferCountByType(BufferCountManager::DepType::LoadStore);
+    int depth = BufferCountManager(module).getBufferCountByType(BufferCountManager::DepType::LoadStore);
 
-  if (depth <= 1) {
-    LDBG("Buffer depth <= 1, skip multi-buffer transformation");
-    return;
-  }
+    if (depth <= 1) {
+        LDBG("Buffer depth <= 1, skip multi-buffer transformation");
+        return;
+    }
 
-  OpPassManager pm(module.getOperationName());
-  LDBG("Enter SeparateMemoryFromCompute pass");
+    LDBG("Enter SeparateMemoryFromCompute pass");
 
-  // Step 1: Hoist memory operations out of compute blocks
-  pm.addPass(createAsyncLoadHoistingPass());
+    if (depth == 3) {
+        LDBG("Buffer depth == 3");
+        OpPassManager markPipeline(module.getOperationName());
+        markPipeline.addPass(createMarkVLoadMultiBufferPass());
+        if (failed(runPipeline(markPipeline, module))) {
+            LDBG("Pass failed!");
+            signalPassFailure();
+        }
+        return;
+    }
 
-  // Step 2: Apply multi-buffering to memory operations
-  pm.addPass(createAddMultiBufferToGMLoadPass());
+    LDBG("Skip SeparateMemoryFromCompute transformation");
+}
 
-  if (failed(runPipeline(pm, module))) {
-    LDBG("Pass failed!");
-    signalPassFailure();
-  }
-
-  LDBG("Process successfully");
+void SeparateMemoryFromComputePass::getDependentDialects(DialectRegistry &registry) const
+{
+    registry.insert<annotation::AnnotationDialect, bufferization::BufferizationDialect, func::FuncDialect,
+                    linalg::LinalgDialect, memref::MemRefDialect>();
 }
 
 namespace mlir {
@@ -67,7 +76,7 @@ namespace triton {
 
 std::unique_ptr<OperationPass<ModuleOp>> createSeparateMemoryFromComputePass()
 {
-  return std::make_unique<SeparateMemoryFromComputePass>();
+    return std::make_unique<SeparateMemoryFromComputePass>();
 }
 
 } // namespace triton

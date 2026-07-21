@@ -94,9 +94,9 @@ void AddDynamicCVPipelinePass::runOnOperation()
     pm.addPass(createComputeBlockOptPass());
     pm.addPass(createSplitDataflowPass());
     pm.addPass(createAnalyzeDataFlowPass());
-    pm.addPass(createSeparateMemoryFromComputePass());
     pm.addPass(createAllocMultiCachePass());
     pm.addPass(createAddControlFlowConditionPass());
+    pm.addPass(createSeparateMemoryFromComputePass());
     pm.addPass(createRemoveSsbufAttrPass());
 
     if (failed(runPipeline(pm, moduleOp))) {

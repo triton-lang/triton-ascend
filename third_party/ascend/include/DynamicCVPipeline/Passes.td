@@ -78,4 +78,18 @@ def RemoveSsbufAttrPass : Pass<"remove-ssbuf-attr", "mlir::ModuleOp"> {
   let constructor = "triton::createRemoveSsbufAttrPass()";
 }
 
+def SeparateMemoryFromComputePass : Pass<"separate-memory-from-compute", "mlir::ModuleOp"> {
+  let summary = "Separate memory from compute operations";
+  let constructor = "triton::createSeparateMemoryFromComputePass()";
+  let dependentDialects = ["annotation::AnnotationDialect", "bufferization::BufferizationDialect", "func::FuncDialect",
+                           "linalg::LinalgDialect", "memref::MemRefDialect"];
+}
+
+def MarkVLoadMultiBufferPass : Pass<"mark-vload-multi-buffer", "mlir::ModuleOp"> {
+  let summary = "Mark flash-attention V GM load allocs for depth-3 multi-buffer";
+  let constructor = "triton::createMarkVLoadMultiBufferPass()";
+  let dependentDialects = ["annotation::AnnotationDialect", "bufferization::BufferizationDialect", "func::FuncDialect",
+                           "linalg::LinalgDialect", "memref::MemRefDialect"];
+}
+
 #endif // TRITON_DYNAMIC_CV_PIPELINE_PASSES

@@ -61,6 +61,7 @@ struct TritonHistogramToHFusionConversion
                                 PatternRewriter &rewriter) const final {
     auto loc = op.getLoc();
     Value input = op.getSrc();
+    Value mask = op.getMask();
     auto resultType = op.getResult().getType();
 
     int64_t numBins = 256; // 256 is default fallback.
@@ -71,7 +72,7 @@ struct TritonHistogramToHFusionConversion
     auto numBinsAttr = rewriter.getI64IntegerAttr(numBins);
 
     auto newOp = rewriter.create<hfusion::HistogramOp>(loc, resultType, input,
-                                                       numBinsAttr, Value());
+                                                       numBinsAttr, mask);
 
     rewriter.replaceOp(op, newOp.getResult());
     return success();

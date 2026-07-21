@@ -82,10 +82,9 @@ private:
   //   - maxRequiredBuffers: maximum (m - n + 1) across all dependencies
   //   - maxX: the x value corresponding to maxRequiredBuffers
   //   - returns {-1, -1} on error
-  std::pair<int, int>
-  calculateIntraDepsFactor(SmallVector<scf::IfOp> &ifOps,
-                           DenseMap<Operation *, int> &ifOpIndex,
-                           DenseMap<Value, SmallVector<Value>> &deps);
+  std::pair<int, int> calculateIntraDepsFactor(
+      SmallVector<scf::IfOp> &ifOps, DenseMap<Operation *, int> &ifOpIndex,
+      DenseMap<Operation *, SmallVector<Operation *>> &deps);
 
   // Calculate factor based on cross-core dependencies
   // For cross-core deps: consumer is in current forOp, producer is in another
@@ -94,10 +93,10 @@ private:
   //   - maxRequiredBuffers: maximum (m - n + 1) across all dependencies
   //   - maxX: the x value corresponding to maxRequiredBuffers
   //   - returns {-1, -1} on error
-  std::pair<int, int>
-  calculateCrossDepsFactor(scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
-                           DenseMap<Operation *, int> &ifOpIndex,
-                           DenseMap<Value, SmallVector<Value>> &crossDeps);
+  std::pair<int, int> calculateCrossDepsFactor(
+      scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
+      DenseMap<Operation *, int> &ifOpIndex,
+      DenseMap<Operation *, SmallVector<Operation *>> &crossDeps);
 
   // Calculate factor based on iteration dependencies (tensor iter_args
   // dependencies) For iter deps: consumer and producer are IfOps within the

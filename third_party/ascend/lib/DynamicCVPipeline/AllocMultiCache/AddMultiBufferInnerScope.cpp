@@ -1055,7 +1055,8 @@ static Value computeBufferIndex(OpBuilder &builder, mlir::scf::ForOp forOp,
 
 static SmallVector<Operation *>
 insertProducerLogic(OpBuilder &builder, Value depVal,
-                    SmallVector<BufferPair> &buffers, mlir::scf::ForOp forOp) {
+                    SmallVector<BufferPair> &buffers, mlir::scf::ForOp forOp,
+                    int groupId = -1) {
   SmallVector<Operation *> newOps;
   int N = buffers.size();
   Location loc = depVal.getLoc();
@@ -1065,19 +1066,33 @@ insertProducerLogic(OpBuilder &builder, Value depVal,
         loc, mlir::TypeRange{}, depVal, buffers[0].second);
     if (!producerOp)
       return newOps;
+    if (groupId >= 0) {
+      producerOp->setAttr("ssbuffer.intraDeps",
+                          builder.getI32ArrayAttr({groupId, 1}));
+    }
     newOps.push_back(producerOp);
     return newOps;
   }
 
   Value bufIdx = computeBufferIndex(builder, forOp, loc, N, &newOps);
-  SmallVector<Operation *> dummyOutIfOps;
+  SmallVector<Operation *> outIfOps;
   if (buildIfChain(
-          builder, loc, bufIdx, buffers, newOps, dummyOutIfOps,
+          builder, loc, bufIdx, buffers, newOps, outIfOps,
           [&](OpBuilder &b, Location l, Value buffer) -> Operation * {
             return b.create<hivm::CopyOp>(l, mlir::TypeRange{}, depVal, buffer);
           },
           nullptr) != 0) {
     return {};
+  }
+  // Multi-buffer: tag each inner-branch hivm.copy with [gid, 1]. The scf.if
+  // wrapper itself is just `remsi % N` dispatch and is not a write op.
+  if (groupId >= 0) {
+    for (Operation *op : newOps) {
+      if (isa<hivm::CopyOp>(op)) {
+        op->setAttr("ssbuffer.intraDeps",
+                    builder.getI32ArrayAttr({groupId, 1}));
+      }
+    }
   }
   return newOps;
 }
@@ -1451,7 +1466,8 @@ static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp,
   }
   producedBuffers.setInsertionPointAfter(producerAnchor);
   SmallVector<Operation *> producerNewOps =
-      insertProducerLogic(producedBuffers, depVal, buffers, mainLoopForOp);
+      insertProducerLogic(producedBuffers, depVal, buffers, mainLoopForOp,
+                          groupId);
   addBlockAttrForOps(producerNewOps, producerId, globalBuilder);
   if (buffers.size() > kBufferCountOne) {
     for (auto *op : producerNewOps) {
@@ -1804,8 +1820,9 @@ static BufferMap insertBuffersBeforeFor(mlir::scf::ForOp forOp,
       auto casted = insertedBuffers.create<memref::MemorySpaceCastOp>(
           forOp.getLoc(), genericType, allocOp.getResult());
 
-      casted->setAttr("ssbuffer.intraDeps",
-                      insertedBuffers.getI32ArrayAttr({groupId, 1}));
+      // Producer tag has moved off the buffer container (cast) to the actual
+      // producer behavior op (hivm.copy / scf-if-internal hivm.copy) inside
+      // insertProducerLogic, see producer_intra_deps_attr_design.md.
 
       buffers.push_back({casted.getResult(), casted.getResult()});
     }

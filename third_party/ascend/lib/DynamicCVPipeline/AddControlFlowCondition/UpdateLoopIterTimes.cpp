@@ -55,92 +55,18 @@ static int findIfOpIndexInList(Operation *op, SmallVector<scf::IfOp> &ifOps,
   return -1;
 }
 
-static int addEquivalentValues(Value v, SmallVector<Value> &tcbValues,
-                               SmallVector<Value> &values) {
-  int ret = -1;
-  for (Value equivValue : tcbValues) {
-    if (equivValue != v && !llvm::is_contained(values, equivValue)) {
-      ret = 0;
-      values.push_back(equivValue);
-    }
-  }
-  return ret;
-}
-
-// Extend crossCoreDependentMap to include producer buffers in another scope
-// crossCoreDependentMap only includes producer buffers in one scope: {consumer:
-// [producer_in_current_scope], ...} This function extends it to include
-// producer buffers in another scope: {consumer: [producer_in_current_scope,
-// producer_in_other_scope], ...} The producer buffers in different scopes with
-// the same tightly_coupled_buffer id are equivalent
-static llvm::DenseMap<Value, SmallVector<Value>> extendCrossCoreDependentMap(
-    ModuleOp module,
-    llvm::DenseMap<Value, SmallVector<Value>> &crossCoreDependentMap) {
-  // Get all buffers with the same tightly_coupled_buffer id
-  llvm::DenseMap<int, SmallVector<Value>> tightlyCoupledBufferGroups;
-  module.walk([&](Operation *op) -> WalkResult {
-    if (isa<annotation::MarkOp>(op)) {
-      if (auto tcbAttr = op->getAttrOfType<hivm::HIVMTightlyCoupledBufferAttr>(
-              "hivm.tightly_coupled_buffer")) {
-        auto id = tcbAttr.getId();
-        if (id.has_value()) {
-          int tcb = id.value();
-          Value markedValue = op->getOperand(0);
-          tightlyCoupledBufferGroups[tcb].push_back(markedValue);
-        }
-      }
-    }
-    return WalkResult::advance();
-  });
-
-  // Extend crossCoreDependentMap to include equivalent values from another
-  // scope
-  llvm::DenseMap<Value, SmallVector<Value>> extendedCrossCoreMap;
-  for (auto &entry : crossCoreDependentMap) {
-    Value consumer = entry.first;
-    SmallVector<Value> &producers = entry.second;
-    extendedCrossCoreMap[consumer] = producers;
-
-    for (Value buffer : producers) {
-      auto producerDefOp = buffer.getDefiningOp();
-      if (!isa<memref::AllocOp>(producerDefOp)) {
-        // this crossdependency is not the stardard cross dependency
-        continue;
-      }
-      int tcbGroupId =
-          triton::findTcbGroupId(buffer, tightlyCoupledBufferGroups);
-      if (tcbGroupId == -1) {
-        LDBG("Can not find tightly_coupled_buffer id for buffer: " << buffer);
-        continue;
-      }
-      int addResult =
-          addEquivalentValues(buffer, tightlyCoupledBufferGroups[tcbGroupId],
-                              extendedCrossCoreMap[consumer]);
-      if (addResult == -1) {
-        LDBG("Can not find the crossCore Buffer from another scope for buffer: "
-             << buffer);
-        continue;
-      }
-    }
-  }
-
-  return extendedCrossCoreMap;
-}
-
-// Filter out entries where consumer defOp is not inside the specified forOp
-static llvm::DenseMap<Value, SmallVector<Value>> filterCrossCoreMapByForOp(
-    scf::ForOp forOp, llvm::DenseMap<Value, SmallVector<Value>> &crossCoreMap) {
-  llvm::DenseMap<Value, SmallVector<Value>> filteredMap;
+// Filter out entries where consumer op is not inside the specified forOp
+static llvm::DenseMap<Operation *, SmallVector<Operation *>>
+filterCrossCoreMapByForOp(
+    scf::ForOp forOp,
+    llvm::DenseMap<Operation *, SmallVector<Operation *>> &crossCoreMap) {
+  llvm::DenseMap<Operation *, SmallVector<Operation *>> filteredMap;
   for (auto &entry : crossCoreMap) {
-    Value consumerResult = entry.first;
-    Operation *consumerDefOp = consumerResult.getDefiningOp();
-    if (!consumerDefOp) {
+    Operation *consumerOp = entry.first;
+    if (!forOp->isAncestor(consumerOp)) {
       continue;
     }
-    if (!forOp->isAncestor(consumerDefOp)) {
-      continue;
-    }
-    filteredMap[consumerResult] = entry.second;
+    filteredMap[consumerOp] = entry.second;
   }
   return filteredMap;
 }
@@ -207,16 +133,16 @@ static scf::ForOp getOtherScopeMainloop(ModuleOp module, bool currentIsCube,
 // has any consumer defOp Returns true if the current compute block runs first
 // (no consumer in first ifOp) Returns false if the current compute block runs
 // later (has consumer in first ifOp)
-static bool isRunFirst(SmallVector<scf::IfOp> &ifOps,
-                       llvm::DenseMap<Value, SmallVector<Value>> &crossDeps) {
+static bool
+isRunFirst(SmallVector<scf::IfOp> &ifOps,
+           llvm::DenseMap<Operation *, SmallVector<Operation *>> &crossDeps) {
   if (ifOps.empty()) {
     return true;
   }
   scf::IfOp firstIfOp = ifOps[0];
   for (auto &entry : crossDeps) {
-    Value consumerResult = entry.first;
-    Operation *consumerDefOp = consumerResult.getDefiningOp();
-    if (consumerDefOp && firstIfOp->isAncestor(consumerDefOp)) {
+    Operation *consumerOp = entry.first;
+    if (consumerOp && firstIfOp->isAncestor(consumerOp)) {
       return false;
     }
   }
@@ -246,10 +172,10 @@ static bool syncBlockFilter(scf::IfOp ifOp) {
 
 // Collect ifOps from forOp based on the provided filter
 // Fills ifOps and ifOpIndexMap with the collected ifOps
-// Returns the number of ifOps collected on success, or -1 on error
-int collectIfOps(scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
-                 llvm::DenseMap<Operation *, int> &ifOpIndexMap,
-                 IfOpFilter filter = defaultIfOpFilter) {
+// Returns true on success, false on error or if no ifOps found
+bool collectIfOps(scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
+                  llvm::DenseMap<Operation *, int> &ifOpIndexMap,
+                  IfOpFilter filter = defaultIfOpFilter) {
   ifOps.clear();
   ifOpIndexMap.clear();
   int index = 1;
@@ -273,10 +199,16 @@ int collectIfOps(scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
   });
 
   if (ret == -1) {
-    return -1;
-  } else {
-    return ifOps.size();
+    LDBG("Failed to collect ifOps!");
+    return false;
   }
+
+  if (ifOps.empty()) {
+    LDBG("mainloop does not contain any ifblocks!");
+    return false;
+  }
+
+  return true;
 }
 
 // Helper function to find the other side's mainloop and collect its ifOps
@@ -325,17 +257,10 @@ static scf::ForOp findOtherSideMainloopAndIfOps(
 
   // Collect ifOps from the other side's mainloop
   // Only collect ifOps that contain hivm.hir.sync_block_wait op
-  int ifOpsCount = collectIfOps(otherSideForOp, otherSideIfOps,
-                                otherSideIfOpIndexMap, syncBlockFilter);
-  switch (ifOpsCount) {
-  case -1:
+  if (!collectIfOps(otherSideForOp, otherSideIfOps, otherSideIfOpIndexMap,
+                    syncBlockFilter)) {
     LDBG("Failed to collect ifOps from other side mainloop!");
     return nullptr;
-  case 0:
-    LDBG("Other side mainloop does not contain any ifblocks!");
-    return nullptr;
-  default:
-    break;
   }
 
   return otherSideForOp;
@@ -351,21 +276,12 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp) {
   int maxRequiredBuffers = 1;
   int maxX = 1;
 
-  // Step1: Collect all IfOps with ssbuffer.if attribute in this for loop and
-  // build index Index represents execution order (smaller index = earlier
-  // execution)
+  // Step1: Collect all IfOps with ssbuffer.if attribute in this for loop
   SmallVector<scf::IfOp> ifOps;
   DenseMap<Operation *, int> ifOpIndex;
-  int ifOpsCount = collectIfOps(forOp, ifOps, ifOpIndex);
-  switch (ifOpsCount) {
-  case -1:
+  if (!collectIfOps(forOp, ifOps, ifOpIndex)) {
     LDBG("Failed to collect ifOps!");
     return {-1, -1};
-  case 0:
-    LDBG("mainloop do not contains ifblocks!");
-    return {-1, -1};
-  default:
-    break;
   }
 
   // Step2: Calculate factor based on intra-core dependencies
@@ -393,31 +309,17 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp) {
 
   // Calculate cross-core factor and merge with intra-core factor
   if (hasCrossDeps) {
-    // Extend crossCoreDependentMap to include equivalent producer buffers from
-    // another scope
-    ModuleOp module = getOperation();
-    llvm::DenseMap<Value, SmallVector<Value>> extendedCrossCoreMap =
-        extendCrossCoreDependentMap(module, info->crossCoreDependentMap);
-
-    // Filter out entries where consumer defOp is not inside current forOp
-    llvm::DenseMap<Value, SmallVector<Value>> filteredCrossCoreMap =
-        filterCrossCoreMapByForOp(forOp, extendedCrossCoreMap);
+    // Filter out entries where consumer op is not inside current forOp
+    llvm::DenseMap<Operation *, SmallVector<Operation *>> filteredCrossCoreMap =
+        filterCrossCoreMapByForOp(forOp, info->crossCoreDependentMap);
 
     // for caculating the crossdeps, need to filter ifblocks without
     // sync_wait/sync_set op
     SmallVector<scf::IfOp> filterIfOps;
     DenseMap<Operation *, int> filterIfOpIndex;
-    int filterIfOpsCount =
-        collectIfOps(forOp, filterIfOps, filterIfOpIndex, syncBlockFilter);
-    switch (filterIfOpsCount) {
-    case -1:
+    if (!collectIfOps(forOp, filterIfOps, filterIfOpIndex, syncBlockFilter)) {
       LDBG("Failed to collect filtered ifOps!");
       return {-1, -1};
-    case 0:
-      LDBG("mainloop do not contains filtered ifblocks!");
-      return {-1, -1};
-    default:
-      break;
     }
 
     auto [crossRequiredBuffers, crossX] = calculateCrossDepsFactor(
@@ -426,8 +328,8 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp) {
       LDBG("calculateCrossDepsFactor failed!");
       return {-1, -1};
     }
-    // Compare crossRequiredBuffers/crossX vs maxRequiredBuffers/maxX
-    // Take the larger fraction
+
+    // Update maxRequiredBuffers/maxX
     if (crossRequiredBuffers * maxX > maxRequiredBuffers * crossX) {
       maxRequiredBuffers = crossRequiredBuffers;
       maxX = crossX;
@@ -459,128 +361,83 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp) {
   return {maxRequiredBuffers, maxX};
 }
 
-// Get the ifOp index that consumer belongs to
-// Returns the ifOp index (m) where consumer is located, or -1 if not found
-static int getConsumerIfOpIndex(Value consumerResult,
+static int getConsumerIfOpIndex(Operation *consumerOp,
                                 SmallVector<scf::IfOp> &ifOps,
                                 llvm::DenseMap<Operation *, int> &ifOpIndex) {
-  Operation *consumerDefOp = consumerResult.getDefiningOp();
-  if (!consumerDefOp) {
-    LDBG("consumerResult do not have the defOp!");
+  if (!consumerOp) {
+    LDBG("consumerOp is null!");
     return -1;
   }
-  int m = findIfOpIndexInList(consumerDefOp, ifOps, ifOpIndex);
+  int m = findIfOpIndexInList(consumerOp, ifOps, ifOpIndex);
   if (m == -1) {
-    LDBG("Can not find the consumerDefOp in any ifOps!");
+    LDBG("Can not find the consumerOp in any ifOps!");
     return -1;
   }
   return m;
 }
 
-// Get the producer ifOp index from another scope (otherSide)
-// Returns the ifOp index (n) where producer is located, or -1 if not found
-static int
-getProducerIfOpIndex(SmallVector<Value> &producerBuffers,
-                     SmallVector<scf::IfOp> &otherSideIfOps,
-                     llvm::DenseMap<Operation *, int> &otherSideIfOpIndexMap) {
-  if (producerBuffers.empty()) {
-    LDBG("consumer do not have the producerBuffers!");
+static int getProducerIfOpIndex(SmallVector<Operation *> &producerOps,
+                                SmallVector<scf::IfOp> &ifOps,
+                                llvm::DenseMap<Operation *, int> &ifOpIndex) {
+  if (producerOps.empty()) {
+    LDBG("consumer do not have the producerOps!");
     return -1;
   }
 
   int producerIfOpIndex = -1;
-  for (Value buffer : producerBuffers) {
-    for (Operation *user : buffer.getUsers()) {
-      if (isa<hivm::FixpipeOp>(user) || isa<hivm::CopyOp>(user) ||
-          isa<LLVM::StoreOp>(user)) {
-        producerIfOpIndex =
-            findIfOpIndexInList(user, otherSideIfOps, otherSideIfOpIndexMap);
-        if (producerIfOpIndex == -1) {
-          LDBG("user : " << *user);
-          for (auto ifop : otherSideIfOps) {
-            LDBG("other side ifop: " << ifop);
-          }
-          LDBG("Can not find the producerBuffers in any ifOps of other side "
-               "mainloop!");
-          return -1;
-        }
-        break;
-      }
+  for (Operation *producerOp : producerOps) {
+    int currentIndex = findIfOpIndexInList(producerOp, ifOps, ifOpIndex);
+
+    if (currentIndex == -1) {
+      LDBG("ProducerOp not found in any ifOps: " << *producerOp);
+      return -1;
     }
-    // any producerBuffer found in a ifblock means all producerBuffers in that
-    // ifblock
-    if (producerIfOpIndex != -1) {
-      break;
+
+    // First producer found
+    if (producerIfOpIndex == -1) {
+      producerIfOpIndex = currentIndex;
+    } else {
+      // Check if all producers are in the same ifOp
+      if (currentIndex != producerIfOpIndex) {
+        LDBG("ProducerOps are not in the same ifOp! "
+             << "First producer ifOp index: " << producerIfOpIndex
+             << ", Current producer ifOp index: " << currentIndex);
+        return -1;
+      }
     }
   }
 
   if (producerIfOpIndex == -1) {
-    LDBG("All producerBuffers are not found in any ifOps of other side!");
+    LDBG("All producerOps are not found in any ifOps!");
     return -1;
   }
 
   return producerIfOpIndex;
 }
 
-// calculateIntraDepsFactor computes the buffer factor based on intra-core
-// dependencies Core idea: if producer ifOp (n) and consumer ifOp (m) have
-// dependency, we need (m - n + 1) buffers to support the loop extension This
-// function iterates all dependencies and finds the maximum required buffer
-// count
 std::pair<int, int> UpdateLoopIterTimesPass::calculateIntraDepsFactor(
     SmallVector<scf::IfOp> &ifOps, DenseMap<Operation *, int> &ifOpIndex,
-    llvm::DenseMap<Value, SmallVector<Value>> &deps) {
+    llvm::DenseMap<Operation *, SmallVector<Operation *>> &deps) {
   int maxRequiredBuffers = 1;
   int maxX = 1;
 
   // Iterate all dependencies and calculate required buffer count
   for (auto &entry : deps) {
-    Value consumerResult = entry.first;                // Consumer result value
-    SmallVector<Value> producerBuffers = entry.second; // Producer buffer list
-    int x = producerBuffers.size();                    // Producer buffer count
+    Operation *consumerOp = entry.first;                 // Consumer operation
+    SmallVector<Operation *> producerOps = entry.second; // Producer op list
+    int x = producerOps.size();                          // Producer op count
 
     // Find the IfOp index that consumer belongs to (m)
-    int m = getConsumerIfOpIndex(consumerResult, ifOps, ifOpIndex);
+    int m = getConsumerIfOpIndex(consumerOp, ifOps, ifOpIndex);
     if (m == -1) {
       return {-1, -1};
     }
 
     // Find the IfOp index that producer belongs to (n)
-    // Producer is the operation that uses producer buffer, i.e.,
-    // bufferization.materialize_in_destination This op is the production
-    // behavior op, with producer buffer as its input
-    if (producerBuffers.empty()) {
-      LDBG("consumer do not have the producerBuffers!");
+    int n = getProducerIfOpIndex(producerOps, ifOps, ifOpIndex);
+    if (n == -1) {
       return {-1, -1};
     }
-
-    int producerIfOpIndex = -1;
-    for (Value buffer : producerBuffers) {
-      for (Operation *user : buffer.getUsers()) {
-        if (isa<mlir::bufferization::MaterializeInDestinationOp>(user) ||
-            isa<hivm::CopyOp>(user)) {
-          producerIfOpIndex = findIfOpIndexInList(user, ifOps, ifOpIndex);
-          if (producerIfOpIndex == -1) {
-            LDBG("Can not find the producerBuffers in any ifOps!");
-            return {-1, -1};
-          }
-          break;
-        }
-      }
-      // any producerBuffer found in a ifblock means all producerBuffers in that
-      // ifblock
-      if (producerIfOpIndex != -1) {
-        break;
-      }
-    }
-
-    // If cannot find the IfOp producer belongs to, skip this dependency
-    if (producerIfOpIndex == -1) {
-      LDBG("All producerBuffers are not found in any ifOps!");
-      return {-1, -1};
-    }
-
-    int n = producerIfOpIndex;
 
     // If consumer is after producer (m > n), calculate required buffer count
     // m - n + 1 represents the buffer count needed to cover this distance
@@ -590,9 +447,7 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateIntraDepsFactor(
     }
     int requiredBuffers = m - n + 1;
 
-    // Update max value using fraction comparison to avoid precision issues
-    // Comparing requiredBuffers/maxX vs maxRequiredBuffers/x is equivalent to
-    // comparing requiredBuffers * maxX vs maxRequiredBuffers * x
+    // Update maxRequiredBuffers/maxX
     if (requiredBuffers * maxX > maxRequiredBuffers * x) {
       maxRequiredBuffers = requiredBuffers;
       maxX = x;
@@ -609,7 +464,7 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateIntraDepsFactor(
 std::pair<int, int> UpdateLoopIterTimesPass::calculateCrossDepsFactor(
     scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
     DenseMap<Operation *, int> &ifOpIndex,
-    llvm::DenseMap<Value, SmallVector<Value>> &crossDeps) {
+    llvm::DenseMap<Operation *, SmallVector<Operation *>> &crossDeps) {
   int maxRequiredBuffers = 1;
   int maxX = 1;
 
@@ -641,30 +496,30 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateCrossDepsFactor(
     return {-1, -1};
   }
 
-  // Check if the first ifOp has any consumer defOp in crossDeps
+  // Check if the first ifOp has any consumer op in crossDeps
   // If not, it means the current compute block executes first, need to subtract
   // 1 from requiredBuffers
   bool runFirst = isRunFirst(ifOps, crossDeps);
 
   // Iterate all cross-core dependencies
   for (auto &entry : crossDeps) {
-    Value consumerResult = entry.first;                // Consumer result value
-    SmallVector<Value> producerBuffers = entry.second; // Producer buffer list
-    int x = producerBuffers.size() / 2; // Producer buffer count (one buffer has
-                                        // two value in diffenent scope)
+    Operation *consumerOp = entry.first;                 // Consumer operation
+    SmallVector<Operation *> producerOps = entry.second; // Producer op list
+    int x = producerOps.size(); // Producer op count (one buffer has
+                                // two ops in different scope)
     // some special buffer is not Symmetrical
-    if (producerBuffers.size() == 1) {
+    if (producerOps.size() == 1) {
       x = 1;
     }
 
     // Find the IfOp index that consumer belongs to (m)
-    int m = getConsumerIfOpIndex(consumerResult, ifOps, ifOpIndex);
+    int m = getConsumerIfOpIndex(consumerOp, ifOps, ifOpIndex);
     if (m == -1) {
       return {-1, -1};
     }
 
     // Find producer's position in the other side's ifOps (n)
-    int n = getProducerIfOpIndex(producerBuffers, otherSideIfOps,
+    int n = getProducerIfOpIndex(producerOps, otherSideIfOps,
                                  otherSideIfOpIndexMap);
     if (n == -1) {
       return {-1, -1};
@@ -685,7 +540,7 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateCrossDepsFactor(
     if (runFirst) {
       requiredBuffers = requiredBuffers - 1;
     }
-    LDBG("consumer : " << consumerResult);
+    LDBG("consumer : " << *consumerOp);
     LDBG("consumer m: " << m << ", n: " << n);
     LDBG("requiredBuffers: " << requiredBuffers);
     LDBG("buffer: " << x);

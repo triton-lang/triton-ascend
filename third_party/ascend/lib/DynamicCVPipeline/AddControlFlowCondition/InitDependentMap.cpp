@@ -116,73 +116,13 @@ collectDepsByGroup(Operation *rootOp, const char *attrName,
   return ret;
 }
 
-// Function: Build mapping from consumer to producer
-// Input: Ops grouped by group ID, format: group -> [(op, role), ...]
-//        role: 1=producer, 0=consumer
-//        mainLoop: if not nullptr, only include consumers inside this mainLoop
-// Output: result - Mapping from consumer Value to list of producer Values
-// Return: 0 for success, -1 for failure
-static int buildProducerConsumerMapping(
-    llvm::DenseMap<int, SmallVector<std::pair<Operation *, int>>> &depsByGroup,
-    llvm::DenseMap<Value, SmallVector<Value>> &result,
-    scf::ForOp mainLoop = nullptr) {
-  for (auto &groupEntry : depsByGroup) {
-    auto &ops = groupEntry.second;
-
-    // Collect all producers and consumers in this group
-    SmallVector<Operation *> producers;
-    SmallVector<Operation *> consumers;
-
-    for (auto &opRole : ops) {
-      Operation *op = opRole.first;
-      int role = opRole.second;
-      if (role == producerId) {
-        producers.push_back(op);
-      } else if (role == consumerId) {
-        // For intra-core mapping, only include consumers inside mainLoop
-        if (mainLoop != nullptr) {
-          if (isConsumerInMainLoop(op, mainLoop, consumers) != 0) {
-            LDBG("isConsumerInMainLoop failed");
-            return -1;
-          }
-        } else {
-          consumers.push_back(op);
-        }
-      } else {
-        LDBG("Get error role id in dependency attribute: OP: "
-             << *op << ", role: " << role);
-        return -1;
-      }
-    }
-
-    // Skip if no consumers (for intra-core mapping with mainLoop filter)
-    if (mainLoop != nullptr && consumers.empty())
-      continue;
-
-    // For each consumer, build mapping to all producers
-    for (Operation *consumer : consumers) {
-      for (Value consumerResult : consumer->getResults()) {
-        SmallVector<Value> producerValues;
-        for (Operation *producer : producers) {
-          for (Value producerResult : producer->getResults()) {
-            producerValues.push_back(producerResult);
-          }
-        }
-        result[consumerResult] = producerValues;
-      }
-    }
-  }
-
-  return 0;
-}
-
 // Function: Build mapping from consumer Operation to producer Operation
 // Input: Ops grouped by group ID, format: group -> [(op, role), ...]
 //        role: 1=producer, 0=consumer
 //        mainLoop: if not nullptr, only include consumers inside this mainLoop
 // Output: result - Mapping from consumer Operation* to list of producer
 // Operation* Return: 0 for success, -1 for failure
-static int buildProducerConsumerMappingForOps(
+static int buildProducerConsumerMapping(
     llvm::DenseMap<int, SmallVector<std::pair<Operation *, int>>> &depsByGroup,
     llvm::DenseMap<Operation *, SmallVector<Operation *>> &result,
     scf::ForOp mainLoop = nullptr) {
@@ -229,7 +169,7 @@ static int buildProducerConsumerMappingForOps(
 }
 
 static int collectMainLoopById(ModuleOp module,
-                               llvm::DenseMap<int, scf::ForOp> &mainLoopById) {
+                               llvm::DenseMap<scf::ForOp, int> &mainLoopById) {
   int ret = 0;
   module.walk([&](scf::ForOp forOp) {
     if (!forOp->hasAttr(CVPipeline::kMainLoop))
@@ -237,7 +177,7 @@ static int collectMainLoopById(ModuleOp module,
     auto mainLoopIdAttr =
         forOp->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
     if (mainLoopIdAttr) {
-      mainLoopById[mainLoopIdAttr.getInt()] = forOp;
+      mainLoopById[forOp] = mainLoopIdAttr.getInt();
     }
   });
   return ret;
@@ -245,10 +185,10 @@ static int collectMainLoopById(ModuleOp module,
 
 static int
 findMainLoopIdContainingOp(Operation *op,
-                           llvm::DenseMap<int, scf::ForOp> &mainLoopById) {
-  for (auto &idLoopEntry : mainLoopById) {
-    if (idLoopEntry.second->isAncestor(op)) {
-      return idLoopEntry.first;
+                           llvm::DenseMap<scf::ForOp, int> &mainLoopById) {
+  for (auto &entry : mainLoopById) {
+    if (entry.first->isAncestor(op)) {
+      return entry.second;
     }
   }
   return -1;
@@ -261,7 +201,7 @@ static int filterMemCrossCoreDepsByMainLoop(
   LDBG("memCrossCore dependencies before filter: " << initialDepsMap.size());
 
   // Step 1: Collect all main_loop forOps and their ids
-  llvm::DenseMap<int, scf::ForOp> mainLoopById;
+  llvm::DenseMap<scf::ForOp, int> mainLoopById;
   if (collectMainLoopById(module, mainLoopById) != 0) {
     LDBG("collectMainLoopById Failed!");
     return -1;
@@ -325,59 +265,35 @@ static int filterMemCrossCoreDepsByMainLoop(
 // Find ops with ssbuffer.crossDeps attribute
 // Attribute value is a list: [group, role], role: 1=producer, 0=consumer
 // Map key is consumer, value is list of all producers in the same group
-// Return: 0 for success, -1 for failure
+// Constraint: consumer and producer must be in the same main_loop (with same
+// id) Return: 0 for success, -1 for failure
 int initCrossCoreDependentMap(ModuleOp module, ControlFlowConditionInfo *info) {
+  // Step 1: Collect all crossDeps by group (including memCrossDeps)
   llvm::DenseMap<int, SmallVector<std::pair<Operation *, int>>>
       crossDepsByGroup;
-  if (collectDepsByGroup(module, CVPipeline::kCrossDeps.data(),
+  if (collectDepsByGroup(module, CVPipeline::kCrossCoreDeps.data(),
                          crossDepsByGroup) != 0) {
     LDBG("collectDepsByGroup on crossDeps Failed!");
     return -1;
   }
 
-  llvm::DenseMap<Value, SmallVector<Value>> crossDepsMap;
-  if (buildProducerConsumerMapping(crossDepsByGroup, crossDepsMap) != 0) {
-    LDBG("buildProducerConsumerMapping on crossDeps Failed!");
-    return -1;
-  }
-  info->crossCoreDependentMap = crossDepsMap;
-  return 0;
-}
-
-// Initialize memCrossCoreDependentMap (memory cross-core data dependency)
-// Find ops with ssbuffer.memCrossDeps attribute
-// Attribute value is a list: [group, role], role: 1=producer, 0=consumer
-// Map key is consumer Operation*, value is list of all producer Operation* in
-// the same group Constraint: consumer and producer must be in the same
-// main_loop (with same id) Return: 0 for success, -1 for failure
-int initMemCrossCoreDependentMap(ModuleOp module,
-                                 ControlFlowConditionInfo *info) {
-  // Step 1: Collect all memcrossDeps by group
-  llvm::DenseMap<int, SmallVector<std::pair<Operation *, int>>>
-      memcrossDepsByGroup;
-  if (collectDepsByGroup(module, CVPipeline::kMemCrossDeps.data(),
-                         memcrossDepsByGroup) != 0) {
-    LDBG("collectDepsByGroup on memcrossDeps Failed!");
-    return -1;
-  }
-
   // Step 2: Build initial mapping (all producers for each consumer)
-  llvm::DenseMap<Operation *, SmallVector<Operation *>> initialMemcrossDepsMap;
-  if (buildProducerConsumerMappingForOps(memcrossDepsByGroup,
-                                         initialMemcrossDepsMap) != 0) {
-    LDBG("buildProducerConsumerMappingForOps on memcrossDeps Failed!");
+  llvm::DenseMap<Operation *, SmallVector<Operation *>> initialCrossDepsMap;
+  if (buildProducerConsumerMapping(crossDepsByGroup, initialCrossDepsMap) !=
+      0) {
+    LDBG("buildProducerConsumerMapping on crossDeps Failed!");
     return -1;
   }
 
   // Step 3: Filter by main_loop constraint
-  llvm::DenseMap<Operation *, SmallVector<Operation *>> filteredMemcrossDepsMap;
-  if (filterMemCrossCoreDepsByMainLoop(module, initialMemcrossDepsMap,
-                                       filteredMemcrossDepsMap) != 0) {
-    LDBG("filterMemCrossCoreDepsByMainLoop Failed!");
+  llvm::DenseMap<Operation *, SmallVector<Operation *>> filteredCrossDepsMap;
+  if (filterMemCrossCoreDepsByMainLoop(module, initialCrossDepsMap,
+                                       filteredCrossDepsMap) != 0) {
+    LDBG("filterCrossCoreDepsByMainLoop Failed!");
     return -1;
   }
 
-  info->memCrossCoreDependentMap = filteredMemcrossDepsMap;
+  info->crossCoreDependentMap = filteredCrossDepsMap;
   return 0;
 }
 
@@ -408,7 +324,7 @@ int initIntraCoreDependentMap(ModuleOp module, ControlFlowConditionInfo *info) {
       return;
     }
 
-    llvm::DenseMap<Value, SmallVector<Value>> depMap;
+    llvm::DenseMap<Operation *, SmallVector<Operation *>> depMap;
     if (buildProducerConsumerMapping(allIntraDepsByGroup, depMap, forOp) != 0) {
       LDBG("buildProducerConsumerMapping on intraDeps Failed!");
       ret = -1;
@@ -429,20 +345,6 @@ static void printDependentMaps(ControlFlowConditionInfo *info) {
   LDBG("crossCoreDependentMap size: " << info->crossCoreDependentMap.size());
   LDBG("crossCoreDependentMap contents:");
   for (auto &entry : info->crossCoreDependentMap) {
-    Value consumer = entry.first;
-    SmallVector<Value> &producers = entry.second;
-    LDBG("    Consumer: " << consumer
-                          << " (producers count: " << producers.size() << ")");
-    for (Value producer : producers) {
-      LDBG("      Producer: " << producer);
-    }
-  }
-
-  // Print memCrossCoreDependentMap
-  LDBG("memCrossCoreDependentMap size: "
-       << info->memCrossCoreDependentMap.size());
-  LDBG("memCrossCoreDependentMap contents:");
-  for (auto &entry : info->memCrossCoreDependentMap) {
     Operation *consumer = entry.first;
     SmallVector<Operation *> &producers = entry.second;
     LDBG("    Consumer: " << *consumer
@@ -465,12 +367,12 @@ static void printDependentMaps(ControlFlowConditionInfo *info) {
                llvm::dbgs() << "\n";);
 
     for (auto &entry : depMap) {
-      Value consumer = entry.first;
-      SmallVector<Value> &producers = entry.second;
-      LDBG("    Consumer: " << consumer << " (producers count: "
+      Operation *consumer = entry.first;
+      SmallVector<Operation *> &producers = entry.second;
+      LDBG("    Consumer: " << *consumer << " (producers count: "
                             << producers.size() << ")");
-      for (Value producer : producers) {
-        LDBG("      Producer: " << producer);
+      for (Operation *producer : producers) {
+        LDBG("      Producer: " << *producer);
       }
     }
   }
@@ -540,136 +442,27 @@ static void computeProducerBufferCount(ControlFlowConditionInfo *info,
   }
 }
 
-// Get the buffers that have the same tightly_coupled_buffer id
-static int buildTightlyCoupledBufferGroups(
-    ModuleOp module,
-    DenseMap<int, SmallVector<Value>> &tightlyCoupledBufferGroups) {
-  int ret = 0;
-  WalkResult walkResult = module.walk([&](Operation *op) -> WalkResult {
-    if (isa<annotation::MarkOp>(op)) {
-      if (auto tcbAttr = op->getAttrOfType<hivm::HIVMTightlyCoupledBufferAttr>(
-              "hivm.tightly_coupled_buffer")) {
-        auto id = tcbAttr.getId();
-        if (id.has_value()) {
-          int tcb = id.value();
-          Value markedValue = op->getOperand(0);
-          tightlyCoupledBufferGroups[tcb].push_back(markedValue);
-        } else {
-          ret = -1;
-          LDBG("hivm.tightly_coupled_buffer Attribute has no id!");
-          return WalkResult::interrupt();
-        }
-      }
-    }
-    return WalkResult::advance();
-  });
-
-  if (ret == -1) {
-    LDBG("Failed to build tightlyCoupledBufferGroups!");
-    return -1;
-  }
-
-  return 0;
-}
-
-// Find producer IfOp for a given producer value
-// The producer value is linked to another equivalent value via
-// tightly_coupled_buffer We need to find the equivalent value and its userOp
-// (fixpipe or copy) to get the producer IfOp
-static scf::IfOp findProducerIfOp(
-    Value producerVal,
-    DenseMap<int, SmallVector<Value>> &tightlyCoupledBufferGroups) {
-  // Check if producerVal has defining op
-  Operation *producerDefOp = producerVal.getDefiningOp();
-  if (!producerDefOp) {
-    LDBG("Producer value has no defining op: " << producerVal);
-    return nullptr;
-  }
-
-  // Find the tightly_coupled_buffer group id for this producer
-  int tcbGroupId = -1;
-  for (auto &tcbEntry : tightlyCoupledBufferGroups) {
-    if (llvm::is_contained(tcbEntry.second, producerVal)) {
-      tcbGroupId = tcbEntry.first;
-      break;
-    }
-  }
-
-  if (tcbGroupId == -1) {
-    LDBG("Producer value not found in any tightly_coupled_buffer group: "
-         << producerVal);
-    return nullptr;
-  }
-
-  // Find the equivalent value (another value in the same tcb group)
-  Value equivalentVal = nullptr;
-  for (Value v : tightlyCoupledBufferGroups[tcbGroupId]) {
-    if (v != producerVal) {
-      equivalentVal = v;
-      break;
-    }
-  }
-
-  if (!equivalentVal) {
-    LDBG("No equivalent value found for producer: " << producerVal);
-    return nullptr;
-  }
-
-  // Find the user operation (fixpipe or copy) that uses this equivalent value
-  for (Operation *userOp : equivalentVal.getUsers()) {
-    if (isa<hivm::FixpipeOp>(userOp) || isa<hivm::CopyOp>(userOp)) {
-      scf::IfOp producerIf = findIfOpContainingOp(userOp);
-      if (!producerIf) {
-        LDBG("Equivalent value's user op not in any ssbuffer.if block: "
-             << *userOp);
-        return nullptr;
-      }
-      return producerIf;
-    }
-  }
-
-  LDBG("Equivalent value not used by any fixpipe/copy: " << equivalentVal);
-  return nullptr;
-}
-
 // Build if block DAG from crossCoreDependentMap
 // For consumer: its definingOp is inside an if block
-// For producer: its definingOp is NOT inside an if block, need to find userOp
-// (fixpipe/copy) that uses this producer
 static int buildIfBlockCrossCoreDAG(ModuleOp module,
                                     ControlFlowConditionInfo *info) {
-  // Step 0: Build tightlyCoupledBufferGroups map
-  DenseMap<int, SmallVector<Value>> tightlyCoupledBufferGroups;
-  if (buildTightlyCoupledBufferGroups(module, tightlyCoupledBufferGroups) !=
-      0) {
-    return -1;
-  }
-
   // Traverse crossCoreDependentMap to build DAG
   for (auto &entry : info->crossCoreDependentMap) {
-    Value consumerVal = entry.first;
+    Operation *consumerOp = entry.first;
 
     // Step 1: Find consumer IfOp
-    // Consumer's definingOp is inside an if block
-    Operation *consumerDefOp = consumerVal.getDefiningOp();
-    if (!consumerDefOp) {
-      LDBG("Consumer value has no defining op: " << consumerVal);
-      return -1;
-    }
-    scf::IfOp consumerIf = findIfOpContainingOp(consumerDefOp);
+    // Consumer op is inside an if block
+    scf::IfOp consumerIf = findIfOpContainingOp(consumerOp);
     if (!consumerIf) {
-      LDBG("Consumer defining op not in any ssbuffer.if block: "
-           << *consumerDefOp);
+      LDBG("Consumer op not in any ssbuffer.if block: " << *consumerOp);
       return -1;
     }
 
     // Step 2: Find producer IfOps
-    // Producer's definingOp is NOT inside an if block
-    // Need to find the userOp (fixpipe or copy) that uses this producer
-    for (Value producerVal : entry.second) {
-      scf::IfOp producerIf =
-          findProducerIfOp(producerVal, tightlyCoupledBufferGroups);
+    for (Operation *producerOp : entry.second) {
+      scf::IfOp producerIf = findIfOpContainingOp(producerOp);
       if (!producerIf) {
+        LDBG("Producer op not in any ssbuffer.if block: " << *producerOp);
         return -1;
       }
 
@@ -809,14 +602,7 @@ void InitDependentMapPass::runOnOperation() {
     return;
   }
 
-  // Step 2: Initialize memCrossCoreDependentMap
-  if (initMemCrossCoreDependentMap(module, info) != 0) {
-    LDBG("initMemCrossCoreDependentMap failed!");
-    signalPassFailure();
-    return;
-  }
-
-  // Step 3: Initialize intraCoreDependentMap
+  // Step 2: Initialize intraCoreDependentMap
   if (initIntraCoreDependentMap(module, info) != 0) {
     LDBG("initIntraCoreDependentMap failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);

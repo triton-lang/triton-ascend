@@ -134,6 +134,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           HEAD_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -144,7 +145,7 @@ jobs:
           if [ "${EVENT_NAME}" = "pull_request_target" ]; then
             # PR context is directly available from the event payload.
             # We still look up the PR for the latest title (it's mutable).
-            P=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" \
+            P=$(gh pr view "$PR_NUMBER" --repo "${REPO}" \
                   --json title,baseRefName,headRefOid)
             PR_TITLE=$(echo "$P" | jq -r .title)
             BRANCH_B=$(echo "$P" | jq -r .baseRefName)
@@ -340,6 +341,7 @@ jobs:
 
       - name: Remove wheels from OBS
         if: always() && steps.ctx.outputs.pr_id != ''
+        continue-on-error: true
         shell: bash
         env:
           AK: ${{ secrets.OBS_AK }}

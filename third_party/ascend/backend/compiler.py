@@ -1070,7 +1070,7 @@ class NPUOptions:
     #
     # If False, the compilation flow is:
     #   Linalg IR → LLIR → Binary (via bishengir-compile directly)
-    use_bytecode: bool = True
+    use_bytecode: bool = False
     # take effect on the reorder instruction pattern for SIMT. The pattern is disabled by default.
     enable_simt_reorder_instruction: bool = False
     enable_costmodel_backend: bool = False

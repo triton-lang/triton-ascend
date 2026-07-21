@@ -23,9 +23,13 @@
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
+#include "mlir/Analysis/TopologicalSortUtils.h"
+#include "mlir/IR/Builders.h"
 #include "mlir/IR/Operation.h"
+#include "triton/Analysis/Utility.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 
@@ -174,6 +178,39 @@ bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify,
   }
 
   return hasCycle;
+}
+
+void cloneScalarOpsForCrossBlockUses(ComputeBlockIdManager &bmOriginal,
+                                     SetVector<Operation *> &matchedOps) {
+  auto sorted = mlir::topologicalSort(matchedOps);
+  for (Operation *op : llvm::reverse(sorted)) {
+    if (op->getNumResults() == 1 &&
+        CVPipeline::isScalarLike(op->getResult(0))) {
+      // replace op not in matchedOps with cloned op, and keep original op for
+      // other pattern.
+      SmallVector<OpOperand *> otherUses;
+      for (auto &use : op->getResult(0).getUses()) {
+        Operation *userOp = use.getOwner();
+        auto userInBlock =
+            CVPipeline::getAncestorInBlock(userOp, op->getBlock());
+        if (!userInBlock)
+          continue;
+        if (llvm::find(matchedOps, userInBlock) == matchedOps.end() &&
+            bmOriginal.getBlockIdByOp(userInBlock) !=
+                bmOriginal.getBlockIdByOp(matchedOps[0])) {
+          otherUses.push_back(&use);
+        }
+      }
+      if (otherUses.size() > 0) {
+        LOG_DEBUG("now cloned: " << *op << "\n");
+        OpBuilder builder(op);
+        auto clonedOp = builder.clone(*op);
+        for (auto use : otherUses) {
+          (*use).set(clonedOp->getResult(0));
+        }
+      }
+    }
+  }
 }
 
 } // namespace CVPipeline

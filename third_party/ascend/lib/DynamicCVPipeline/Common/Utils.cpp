@@ -10,6 +10,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/Operation.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
@@ -128,6 +129,39 @@ bool isOnlyDirectlyUse(Operation *preOp, Operation *nextOp,
     return false;
   }
   return (*allusers.begin()) == nextOp;
+}
+
+/** Determines if a value is "scalar-like" based on the following criteria:
+ 1. True scalar types (integer, index, or float)
+ 2. Tensor types with empty shape (e.g., tensor<f32>)
+ 3. Constant tensors where all elements have the same value (splat constants)
+ 4. Tensors with shape where all dimensions equal 1 (single-element tensors)
+ */
+bool isScalarLike(Value value) {
+  Type type = value.getType();
+  auto shapedType = dyn_cast<ShapedType>(type);
+
+  // 1. true scalar (int / index / float)
+  if (!shapedType) {
+    return type.isIntOrIndexOrFloat();
+  }
+
+  // 2. tensor with empty shape (e.g. tensor<f32>)
+  ArrayRef<int64_t> shape = shapedType.getShape();
+  if (shape.empty()) {
+    return true;
+  }
+
+  // 3. splat constant tensor (all elements identical)
+  Attribute attr;
+  if (matchPattern(value, m_Constant(&attr))) {
+    auto denseAttr = dyn_cast<DenseIntOrFPElementsAttr>(attr);
+    return denseAttr && denseAttr.isSplat() &&
+           denseAttr.getElementType().isIntOrIndexOrFloat();
+  }
+
+  // 4. single-element tensor (all dims == 1)
+  return llvm::all_of(shape, [](int64_t dim) { return dim == 1; });
 }
 
 } // namespace CVPipeline

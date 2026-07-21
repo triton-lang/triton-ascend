@@ -118,6 +118,24 @@ bool DataDependencyAnalysisPass::isValidScalarDependency(mlir::Value value) {
   return false;
 }
 
+// Check if a value is only used by transpose ops whose users are all vector ops
+bool DataDependencyAnalysisPass::isAllTransposedInVector(mlir::Value value) {
+  if (!isa<linalg::MatmulOp>(value.getDefiningOp())) {
+    return false;
+  }
+  if (!llvm::hasSingleElement(value.getUsers())) {
+    return false;
+  }
+  auto *userOp = *value.getUsers().begin();
+  if (!isa<linalg::TransposeOp>(userOp))
+    return false;
+  for (mlir::Operation *transposeOpUser : userOp->getUsers()) {
+    if (getSsbufferCoreType(transposeOpUser) != ssbufferCoreTypeVectorAttr)
+      return false;
+  }
+  return true;
+}
+
 // Helper: Check if value is a valid tensor for dependency analysis
 // Returns true if value is TensorType and not defined by EmptyOp/FillOp
 bool DataDependencyAnalysisPass::isValidValueForDependency(mlir::Value value) {
@@ -548,26 +566,7 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(
 
       // if c->v value will be transposed and then used by vector op, the value
       // can be transposed within fixpipe
-      bool isAllTranspoesd = true;
-      for (mlir::Operation *user : output.getUsers()) {
-        if (!isa<linalg::TransposeOp>(user)) {
-          isAllTranspoesd = false;
-          continue;
-        }
-        for (mlir::Operation *transposeOpUser : user->getUsers()) {
-          if (getSsbufferCoreType(transposeOpUser) !=
-              ssbufferCoreTypeVectorAttr) {
-            isAllTranspoesd = false;
-            continue;
-          }
-        }
-      }
-      if (isAllTranspoesd) {
-        for (mlir::Operation *user : output.getUsers()) {
-          auto transposedValue = user->getResults()[0];
-          transposedValue.replaceAllUsesWith(opResult);
-        }
-      }
+      bool isAllTranspoesd = isAllTransposedInVector(output);
 
       for (mlir::Operation *user : output.getUsers()) {
         int outputIndex = 0;
@@ -730,57 +729,6 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
   LOG_DEBUG("=== mem dep analysis complete ===\n");
 }
 
-void DataDependencyAnalysisPass::analyzeV2CMatmulABType(
-    DataDependencyInfo &info) {
-  auto &v2cDependencies = info.getV2CDependencies();
-  for (DependencyInfo &dep : v2cDependencies) {
-    mlir::Value depValue = dep.value;
-    llvm::DenseSet<mlir::Value> visitedValues;
-    llvm::SmallVector<mlir::Value> worklist;
-    visitedValues.insert(depValue);
-    worklist.push_back(depValue);
-    bool foundMatmul = false;
-
-    while (!worklist.empty() && !foundMatmul) {
-      mlir::Value currentValue = worklist.pop_back_val();
-      for (mlir::Operation *userOp : currentValue.getUsers()) {
-        if (!userOp) {
-          continue;
-        }
-
-        auto userBlockIdOpt = CVPipeline::getOpBlockId(userOp);
-        if (!userBlockIdOpt || *userBlockIdOpt != dep.iniConsumerBlockId) {
-          continue;
-        }
-
-        if (auto matmulOp = dyn_cast<linalg::MatmulOp>(userOp)) {
-          MLIRContext *ctx = matmulOp->getContext();
-          if (matmulOp.getOperand(0) == currentValue) {
-            dep.isMatmulA = true;
-            matmulOp->setAttr(CVPipeline::kMatmulADep, UnitAttr::get(ctx));
-          }
-          if (matmulOp.getOperand(1) == currentValue) {
-            dep.isMatmulB = true;
-            matmulOp->setAttr(CVPipeline::kMatmulBDep, UnitAttr::get(ctx));
-          } else {
-            LOG_DEBUG("[warning]: invalid matmul c dep!\n");
-          }
-          foundMatmul = true;
-          dep.iniMatmulOp = matmulOp;
-          break;
-        }
-
-        for (mlir::Value result : userOp->getResults()) {
-          if (!visitedValues.contains(result)) {
-            visitedValues.insert(result);
-            worklist.push_back(result);
-          }
-        }
-      }
-    }
-  }
-}
-
 // Producer/Consumer Hierarchy Analysis
 std::pair<int, int> DataDependencyAnalysisPass::findCommonLevelBlockIds(
     DataDependencyInfo &info, int producerBlockId, int consumerBlockId) {
@@ -879,7 +827,6 @@ void DataDependencyAnalysisPass::runOnOperation() {
 
   // Step 3: Analyze dependencies (populate v2c, c2v lists)
   analyzeExternalInputs(info);
-  analyzeV2CMatmulABType(info);
 
   analyzeExternalOutputs(info);
 

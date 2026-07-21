@@ -223,7 +223,7 @@ jobs:
           # PR-direct runs for this commit. head_sha is precise.
           PR_RUNS=$(gh api \
             "repos/${{ github.repository }}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
-            --jq "[.workflow_runs[] | select(.event==\"pull_request\") | ${RUN_FIELDS}]")
+            --jq "[.workflow_runs[] | select(.event==\"pull_request\" or .event==\"pull_request_target\") | ${RUN_FIELDS}]")
 
           # Cascade runs: read commit statuses on the PR head SHA. Each cascade
           # writes a status with target_url=.../actions/runs/<id> early in its

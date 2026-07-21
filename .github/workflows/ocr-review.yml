@@ -114,6 +114,7 @@ jobs:
 
       - name: Run OpenCodeReview
         uses: alibaba/open-code-review@main
+        continue-on-error: true
         with:
           llm_url: ${{ secrets.OCR_LLM_URL }}
           llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}

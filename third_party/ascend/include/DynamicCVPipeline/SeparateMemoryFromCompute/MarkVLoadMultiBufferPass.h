@@ -20,8 +20,8 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ADAPTER_SEPARATE_MEMORY_FROM_COMPUTE_PASS_H
-#define TRITON_ADAPTER_SEPARATE_MEMORY_FROM_COMPUTE_PASS_H
+#ifndef TRITON_ADAPTER_MARK_V_LOAD_MULTI_BUFFER_PASS_H
+#define TRITON_ADAPTER_MARK_V_LOAD_MULTI_BUFFER_PASS_H
 
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/DialectRegistry.h"
@@ -30,21 +30,19 @@
 namespace mlir {
 namespace triton {
 
-/// Sub-pipeline pass that separates memory from compute operations.
-class SeparateMemoryFromComputePass : public PassWrapper<SeparateMemoryFromComputePass, OperationPass<ModuleOp>> {
+class MarkVLoadMultiBufferPass : public PassWrapper<MarkVLoadMultiBufferPass, OperationPass<ModuleOp>> {
   public:
-    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SeparateMemoryFromComputePass)
+    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(MarkVLoadMultiBufferPass)
 
-    SeparateMemoryFromComputePass() = default;
-
-    StringRef getArgument() const override { return "separate-memory-from-compute"; }
+    StringRef getArgument() const override { return "mark-vload-multi-buffer"; }
     void getDependentDialects(DialectRegistry &registry) const override;
     void runOnOperation() override;
 };
 
-std::unique_ptr<OperationPass<ModuleOp>> createSeparateMemoryFromComputePass();
+std::unique_ptr<OperationPass<ModuleOp>> createMarkVLoadMultiBufferPass();
+void registerMarkVLoadMultiBufferPasses();
 
 } // namespace triton
 } // namespace mlir
 
-#endif // TRITON_ADAPTER_SEPARATE_MEMORY_FROM_COMPUTE_PASS_H
+#endif // TRITON_ADAPTER_MARK_V_LOAD_MULTI_BUFFER_PASS_H

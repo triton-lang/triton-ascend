@@ -528,7 +528,7 @@ InterCoreTransferAndSyncPass::getConsumerWaitPoint(int transferIndex) {
 Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(
     OpBuilder &builder, Value srcValue, Value normalizedValue,
     Operation *vectorEndOp, Operation *cubeStartOp, Location loc,
-    int transferIndex, int iniConsumerId, bool isScaler,
+    int transferIndex, int iniConsumerId, bool isScaler, bool is1DTensor,
     Operation **consumedDataOp) {
   mlir::Operation *sendOp = nullptr;
   mlir::Operation *receiveOp = nullptr;
@@ -597,26 +597,30 @@ Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(
 
     builder.setInsertionPoint(cubeStartOp);
 
-    auto nzLayout =
-        hivm::DataLayoutAttr::get(builder.getContext(), hivm::DataLayout::nZ);
-    auto ndLayout =
-        hivm::DataLayoutAttr::get(builder.getContext(), hivm::DataLayout::ND);
-    auto cbufaddressSpaceAttr =
-        builder.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::L1);
-    auto newAllocType = MemRefType::get(srcTensorType.getShape(), elemType,
-                                        nullptr, cbufaddressSpaceAttr);
-    auto convertLayoutOp = builder.create<hivm::ConvertLayoutOp>(
-        loc, newAllocType, cubeAllocOp->getResult(0),
-        nzLayout, // srcLayout
-        ndLayout  // dstLayout
-    );
+    Value memValue = cubeAllocOp->getResult(0);
+    if (!is1DTensor) {
+      auto nzLayout =
+          hivm::DataLayoutAttr::get(builder.getContext(), hivm::DataLayout::nZ);
+      auto ndLayout =
+          hivm::DataLayoutAttr::get(builder.getContext(), hivm::DataLayout::ND);
+      auto cbufaddressSpaceAttr =
+          builder.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::L1);
+      auto newAllocType = MemRefType::get(srcTensorType.getShape(), elemType,
+                                          nullptr, cbufaddressSpaceAttr);
+      auto convertLayoutOp =
+          builder.create<hivm::ConvertLayoutOp>(loc, newAllocType, memValue,
+                                                nzLayout, // srcLayout
+                                                ndLayout  // dstLayout
+          );
+      memValue = convertLayoutOp.getResult();
+      attachTransferTags(convertLayoutOp, cubeBlockId, "CUBE", transferIndex);
+    }
     auto plainMemrefType = MemRefType::get(srcTensorType.getShape(), elemType);
     auto memspaceCastOp = builder.create<memref::MemorySpaceCastOp>(
-        loc, plainMemrefType, convertLayoutOp.getResult());
+        loc, plainMemrefType, memValue);
     auto toTensorOp = builder.create<bufferization::ToTensorOp>(
         loc, srcTensorType, memspaceCastOp.getResult(), true, true);
 
-    attachTransferTags(convertLayoutOp, cubeBlockId, "CUBE", transferIndex);
     attachTransferTags(memspaceCastOp, cubeBlockId, "CUBE", transferIndex);
     attachTransferTags(toTensorOp, cubeBlockId, "CUBE", transferIndex);
     LOG_DEBUG("[toTensorOp]: " << *toTensorOp << "\n");
@@ -1003,7 +1007,7 @@ LogicalResult InterCoreTransferAndSyncPass::handleVectorToCube(
   LOG_DEBUG("after analyzeConsumerReadInsertPoint\n");
   Operation *transferOp = insertVectorToCubeTransfer(
       builder, srcValue, normalizedVal, prodEnd, consStart, loc, transferIndex,
-      dep.iniConsumerBlockId, dep.isScaler, &consumedDataOp);
+      dep.iniConsumerBlockId, dep.isScaler, dep.is1DTensor, &consumedDataOp);
 
   int flagId = flagManager.acquireId(prodStart);
   auto [newProdStart, newProdEnd] =
@@ -1326,7 +1330,7 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
   LOG_DEBUG("Step 1: Handle V->C dependencies\n");
   // Step 1: Handle V->C dependencies
   for (auto &dep : V2CDependencies) {
-    if (!dep.isScaler) {
+    if (!dep.isScaler && !dep.is1DTensor) {
       Location loc = dep.value.getLoc();
       Nd2NzNormalize(builder, dep, loc);
     }

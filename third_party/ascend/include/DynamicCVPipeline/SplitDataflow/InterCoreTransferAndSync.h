@@ -140,7 +140,7 @@ private:
       mlir::OpBuilder &builder, mlir::Value srcValue,
       mlir::Value normalizedValue, mlir::Operation *vectorEndOp,
       mlir::Operation *cubeStartOp, mlir::Location loc, int transferIndex,
-      int iniConsumerId, bool isScaler,
+      int iniConsumerId, bool isScaler, bool is1DTensor,
       mlir::Operation **consumedDataOp = nullptr);
   mlir::Operation *insertCubeToVectorTransfer(
       mlir::OpBuilder &builder, mlir::Value srcValue,

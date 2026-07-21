@@ -21,8 +21,6 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
 static constexpr const char *DEBUG_TYPE = "AddMultiBufferOuterScope";
-static constexpr const char *kTransferId = "ssbuffer.transfer_id";
-static constexpr const char *kCrossDeps = "ssbuffer.crossDeps";
 #define LDBG(...)                                                              \
   LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__)
 
@@ -32,6 +30,11 @@ using namespace hivm;
 
 namespace mlir {
 namespace triton {
+// Pull attribute-name constants from CVPipeline::Utils.h so the local
+// shadowed #defines (kTransferId, kCrossCoreDeps) are no longer needed and the
+// canonical name lives in one place.
+using mlir::CVPipeline::kTransferId;
+using mlir::CVPipeline::kCrossCoreDeps;
 
 // Maximum number of flag allocation attempts per transfer group
 static constexpr int kMaxFlagAttempts = 16;
@@ -59,7 +62,7 @@ static int getBlockId(Operation *op) {
 }
 
 static int getTransferId(Operation *op) {
-  if (auto attr = op->getAttrOfType<IntegerAttr>("ssbuffer.transfer_id"))
+  if (auto attr = op->getAttrOfType<IntegerAttr>(kTransferId))
     return attr.getInt();
   return -1;
 }
@@ -174,7 +177,7 @@ static int
 collectOpsByTransferId(ModuleOp module,
                        DenseMap<int, SmallVector<Operation *>> &opsByTid) {
   module.walk([&](Operation *op) {
-    if (!op->hasAttr("ssbuffer.transfer_id")) {
+    if (!op->hasAttr(kTransferId)) {
       return;
     }
     int tid = getTransferId(op);
@@ -267,14 +270,14 @@ static int tagLoadStoreOpsWithCrossDeps(
         Value ptr = storeOp.getOperand(1);
         if (auto *ptrDefOp = ptr.getDefiningOp()) {
           ptrDefOp->setAttr(
-              kCrossDeps, builder.getArrayAttr({builder.getI32IntegerAttr(tid),
+              kCrossCoreDeps, builder.getArrayAttr({builder.getI32IntegerAttr(tid),
                                                 builder.getI32IntegerAttr(1)}));
           LDBG("Tagged ptr-defining-op with crossDeps={tid=" << tid << ", 1}");
         }
       } else if (auto loadOp = dyn_cast<mlir::LLVM::LoadOp>(op)) {
         // consumer: crossDeps = {tid, 0}
         // Tag the load op itself
-        op->setAttr(kCrossDeps,
+        op->setAttr(kCrossCoreDeps,
                     builder.getArrayAttr({builder.getI32IntegerAttr(tid),
                                           builder.getI32IntegerAttr(0)}));
         LDBG("Tagged llvm.load volatile with crossDeps={tid=" << tid << ", 0}");
@@ -568,10 +571,10 @@ static int createOutputBufferPair(Operation *inputAllocOp, int tid, int tcbId,
   auto outputAlloc = builder.create<memref::AllocOp>(loc, memRefType);
   outputAlloc->setAttr("ssbuffer.block_id",
                        builder.getI32IntegerAttr(outputBlockId));
-  outputAlloc->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
+  outputAlloc->setAttr(kTransferId, builder.getI32IntegerAttr(tid));
   outputBuffer = outputAlloc.getResult();
 
-  // NOTE: output alloc carries no ssbuffer.crossDeps — alloc is a
+  // NOTE: output alloc carries no ssbuffer.crossCoreDeps — alloc is a
   // buffer-creation op, not a behavior op. Producer tag lives on the
   // fixpipe/copy clone inside scf.if (set in wrapTransferOpWithScfIf*),
   // and consumer tag lives on the scf.if wrapper itself (set in
@@ -581,7 +584,7 @@ static int createOutputBufferPair(Operation *inputAllocOp, int tid, int tcbId,
   outputMark->setAttr("effects", builder.getStrArrayAttr({"write", "read"}));
   outputMark->setAttr("ssbuffer.block_id",
                       builder.getI32IntegerAttr(outputBlockId));
-  outputMark->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
+  outputMark->setAttr(kTransferId, builder.getI32IntegerAttr(tid));
   outputMark->setAttr(
       "hivm.tightly_coupled_buffer",
       hivm::HIVMTightlyCoupledBufferAttr::get(builder.getContext(), tcbId));
@@ -597,7 +600,7 @@ static int attachSsbufferTags(Operation *op, int blockId, int transferId) {
   MLIRContext *ctx = op->getContext();
   op->setAttr("ssbuffer.block_id",
               IntegerAttr::get(IntegerType::get(ctx, kBits32), blockId));
-  op->setAttr("ssbuffer.transfer_id",
+  op->setAttr(kTransferId,
               IntegerAttr::get(IntegerType::get(ctx, kBits32), transferId));
   op->setAttr("ssbuffer.analyze_flag_id", UnitAttr::get(ctx));
   return 0;
@@ -715,13 +718,13 @@ static int addConsumerCrossDepsTags(TransferGroupInfo &g, ModuleOp module) {
 
   if (consumerBuf.allocOp) {
     consumerBuf.allocOp->setAttr(
-        "ssbuffer.crossDeps",
+        kCrossCoreDeps,
         builder.getArrayAttr(
             {builder.getI32IntegerAttr(g.tid), builder.getI32IntegerAttr(1)}));
   }
   if (consumerChain.transferOp) {
     consumerChain.transferOp->setAttr(
-        "ssbuffer.crossDeps",
+        kCrossCoreDeps,
         builder.getArrayAttr(
             {builder.getI32IntegerAttr(g.tid), builder.getI32IntegerAttr(0)}));
   }
@@ -736,7 +739,7 @@ static int addConsumerCrossDepsTags(TransferGroupInfo &g, ModuleOp module) {
 static int setSsbufferTags(Operation *op, OpBuilder &builder, int blockId,
                            int tid) {
   op->setAttr("ssbuffer.block_id", builder.getI32IntegerAttr(blockId));
-  op->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
+  op->setAttr(kTransferId, builder.getI32IntegerAttr(tid));
   return 0;
 }
 
@@ -802,8 +805,8 @@ static Operation *wrapSyncOpWithScfIf(
     altOp->setAttr("ssbuffer.block_id", builder.getI32IntegerAttr(bid));
   }
   if (tid >= 0) {
-    cloned->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
-    altOp->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
+    cloned->setAttr(kTransferId, builder.getI32IntegerAttr(tid));
+    altOp->setAttr(kTransferId, builder.getI32IntegerAttr(tid));
   }
   if (op->hasAttr("ssbuffer.analyze_flag_id")) {
     cloned->setAttr("ssbuffer.analyze_flag_id", builder.getUnitAttr());
@@ -861,13 +864,13 @@ static Operation *wrapTransferOpWithScfIfYield(Operation *transferOp,
   if (isProducer) {
     auto crossDeps = builder.getArrayAttr({builder.getI32IntegerAttr(tid),
                                           builder.getI32IntegerAttr(1)});
-    thenCloned->setAttr("ssbuffer.crossDeps", crossDeps);
-    elseCloned->setAttr("ssbuffer.crossDeps", crossDeps);
+    thenCloned->setAttr(kCrossCoreDeps, crossDeps);
+    elseCloned->setAttr(kCrossCoreDeps, crossDeps);
   }
 
   // Tag the ifOp
   ifOp->setAttr("ssbuffer.block_id", builder.getI32IntegerAttr(bid));
-  ifOp->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
+  ifOp->setAttr(kTransferId, builder.getI32IntegerAttr(tid));
   ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
 
   // Replace all uses of the original transferOp
@@ -917,13 +920,13 @@ static Operation *wrapTransferOpWithScfIfSimple(Operation *transferOp,
   if (isProducer) {
     auto crossDeps = builder.getArrayAttr({builder.getI32IntegerAttr(tid),
                                           builder.getI32IntegerAttr(1)});
-    thenCloned->setAttr("ssbuffer.crossDeps", crossDeps);
-    elseCloned->setAttr("ssbuffer.crossDeps", crossDeps);
+    thenCloned->setAttr(kCrossCoreDeps, crossDeps);
+    elseCloned->setAttr(kCrossCoreDeps, crossDeps);
   }
 
   // Tag the ifOp
   ifOp->setAttr("ssbuffer.block_id", builder.getI32IntegerAttr(bid));
-  ifOp->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
+  ifOp->setAttr(kTransferId, builder.getI32IntegerAttr(tid));
   ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
 
   transferOp->erase();
@@ -978,17 +981,17 @@ static Operation *wrapReceiverChainWithScfIf(Operation *transferOp,
     // from the original (which may carry [tid, 0] from upstream tagging),
     // but consumer role is owned by the ifOp wrapper below. Inner clone
     // must stay clean.
-    clonedTransfer->removeAttr("ssbuffer.crossDeps");
+    clonedTransfer->removeAttr(kCrossCoreDeps);
     Value chainResult = clonedTransfer->getResult(0);
     auto thenMapper = inputMap;
     thenMapper.map(transferOp->getResult(0), chainResult);
     for (Operation *op : trailingOps) {
       Operation *cloned = thenBuilder.clone(*op, thenMapper);
-      cloned->removeAttr("ssbuffer.crossDeps");
+      cloned->removeAttr(kCrossCoreDeps);
       thenMapper.map(op->getResult(0), cloned->getResult(0));
     }
     Operation *clonedToTensor = thenBuilder.clone(*toTensorOp, thenMapper);
-    clonedToTensor->removeAttr("ssbuffer.crossDeps");
+    clonedToTensor->removeAttr(kCrossCoreDeps);
     thenBuilder.create<scf::YieldOp>(loc, clonedToTensor->getResult(0));
   }
 
@@ -1000,25 +1003,25 @@ static Operation *wrapReceiverChainWithScfIf(Operation *transferOp,
       outputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1),
                     outputBuffer);
     Operation *clonedTransfer = elseBuilder.clone(*transferOp, outputMap);
-    clonedTransfer->removeAttr("ssbuffer.crossDeps");
+    clonedTransfer->removeAttr(kCrossCoreDeps);
     Value chainResult = clonedTransfer->getResult(0);
     auto elseMapper = outputMap;
     elseMapper.map(transferOp->getResult(0), chainResult);
     for (Operation *op : trailingOps) {
       Operation *cloned = elseBuilder.clone(*op, elseMapper);
-      cloned->removeAttr("ssbuffer.crossDeps");
+      cloned->removeAttr(kCrossCoreDeps);
       elseMapper.map(op->getResult(0), cloned->getResult(0));
     }
     Operation *clonedToTensor = elseBuilder.clone(*toTensorOp, elseMapper);
-    clonedToTensor->removeAttr("ssbuffer.crossDeps");
+    clonedToTensor->removeAttr(kCrossCoreDeps);
     elseBuilder.create<scf::YieldOp>(loc, clonedToTensor->getResult(0));
   }
 
   // Tag the wrapper — single source of truth for consumer role
   ifOp->setAttr("ssbuffer.block_id", builder.getI32IntegerAttr(bid));
-  ifOp->setAttr("ssbuffer.transfer_id", builder.getI32IntegerAttr(tid));
+  ifOp->setAttr(kTransferId, builder.getI32IntegerAttr(tid));
   ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
-  ifOp->setAttr("ssbuffer.crossDeps",
+  ifOp->setAttr(kCrossCoreDeps,
                 builder.getArrayAttr({builder.getI32IntegerAttr(tid),
                                       builder.getI32IntegerAttr(0)}));
 
@@ -1197,7 +1200,6 @@ void AddMultiBufferOuterScopePass::runOnOperation() {
   // double-buffer IR shape (Change 1/2/3). Module's inter_core_buf_count
   // attribute is overridden here regardless of input value. Revert before
   // committing.
-  interCoreBufNum = 2;
   bool isDoubleBuf = (interCoreBufNum > 1);
   LDBG("[BufferCount] interCoreBufNum=" << interCoreBufNum
                                         << " doubleBuf=" << isDoubleBuf);

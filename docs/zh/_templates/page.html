@@ -2,7 +2,6 @@
 
 {% block body %}
 {{ super() }}
-{% include "partials/icons.html" %}
 <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
     <symbol id="svg-github" viewBox="0 0 24 24">
         <title>GitHub</title>
@@ -48,7 +47,7 @@
                 <div class="context">
                     <span>{{ _("Previous") }}</span>
                 </div>
-                {% if prev.link == pathto(master_doc) %}
+                {% if prev.link == pathto(root_doc) %}
                 <div class="title">{{ _("Home") }}</div>
                 {% else %}
                 <div class="title">{{ prev.title }}</div>

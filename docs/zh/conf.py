@@ -36,7 +36,6 @@ release = ''
 extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.intersphinx',
-    'sphinx.ext.autosummary',
     'sphinx.ext.coverage',
     'sphinx.ext.napoleon',
     'sphinx.ext.autosectionlabel',
@@ -66,10 +65,6 @@ else:
 # -- General configuration ---------------------------------------------------
 templates_path = ['_templates']
 
-extensions = [
-    "myst_parser",
-]
-
 source_suffix = {
     '.rst': 'restructuredtext',
     '.md': 'markdown',
@@ -88,7 +83,6 @@ def setup(app):
     """Register Pygments lexer aliases."""
     from sphinx.highlighting import lexers
     from pygments.lexers import get_lexer_by_name
-    import shutil
 
     lexers['mlir'] = get_lexer_by_name('text')
     lexers['plaintext'] = get_lexer_by_name('text')
@@ -100,6 +94,6 @@ def setup(app):
 
 
 readthedocs_version = os.environ.get('READTHEDOCS_VERSION', 'latest')
-version = readthedocs_version.split('.')[0] + '.' + readthedocs_version.split(
-    '.')[1] if '.' in readthedocs_version else ''
+parts = readthedocs_version.split('.')
+version = '.'.join(parts[:2]) if len(parts) >= 2 else ''
 release = readthedocs_version

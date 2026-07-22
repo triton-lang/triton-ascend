@@ -20,26 +20,53 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_TO_CFG_PASSES_H
-#define TRITON_TO_CFG_PASSES_H
+#ifndef TRITON_TO_GRAPH_GRAPH_OPTIMIZATION_H
+#define TRITON_TO_GRAPH_GRAPH_OPTIMIZATION_H
 
-#include "TritonToGraph/GraphOptimization.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
+
+#include <cstdint>
+#include <memory>
 
 namespace mlir {
 namespace triton {
 namespace cfg {
 
-// 创建 BuildCFG pass 的工厂函数
-std::unique_ptr<OperationPass<mlir::ModuleOp>> createBuildCFGPass();
+enum class GraphOptimizationRuleId : uint8_t {
+  LoadStoreTranspose = 1,
+  TransposePointwiseReorder = 2,
+  UBPreload = 4,
+};
 
-// 注册所有 CFG 相关的 passes
-#define GEN_PASS_REGISTRATION
-#include "ascend/include/TritonToGraph/Passes.h.inc"
+constexpr uint8_t getGraphOptimizationRuleMask(GraphOptimizationRuleId rule) {
+  return static_cast<uint8_t>(rule);
+}
+
+constexpr uint8_t kAllGraphOptimizationRuleMask =
+    getGraphOptimizationRuleMask(GraphOptimizationRuleId::LoadStoreTranspose) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::TransposePointwiseReorder) |
+    getGraphOptimizationRuleMask(GraphOptimizationRuleId::UBPreload);
+
+constexpr bool isValidGraphOptimizationRuleMask(uint8_t ruleMask) {
+  return (ruleMask & static_cast<uint8_t>(~kAllGraphOptimizationRuleMask)) ==
+         0;
+}
+
+struct GraphOptimizationOptions {
+  // A zero mask intentionally disables every graph optimization rule.
+  uint8_t enabledRuleMask = kAllGraphOptimizationRuleMask;
+  unsigned maxRewritesPerFunction = 64;
+  unsigned ubCapacityBytes = 0;
+  bool emitRemarks = false;
+};
+
+std::unique_ptr<OperationPass<ModuleOp>>
+createGraphOptimizePass(GraphOptimizationOptions options = {});
 
 } // namespace cfg
 } // namespace triton
 } // namespace mlir
 
-#endif // TRITON_TO_CFG_PASSES_H
+#endif // TRITON_TO_GRAPH_GRAPH_OPTIMIZATION_H

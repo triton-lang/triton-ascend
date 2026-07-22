@@ -17,11 +17,10 @@
 #include "ascend/include/TritonToHFusion/Passes.h"
 #include "ascend/include/TritonToHIVM/Passes.h"
 #include "ascend/include/TritonToLLVM/Passes.h"
-#include "ascend/include/TritonToLinalg/ConvertModuloToMask.h"
 #include "ascend/include/TritonToLinalg/Passes.h"
-#include "ascend/include/TritonToLinalg/RowCoalescing.h"
 #include "ascend/include/TritonToStructured/Passes.h"
 #include "ascend/include/TritonToUnstructure/Passes.h"
+#include "ascend/include/TritonToGraph/GraphOptimization.h"
 
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
@@ -33,6 +32,9 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+
+#include <cstdint>
+#include <limits>
 
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL
 #include "AscendModel/IR/AscendModelDialect.h"
@@ -70,14 +72,6 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
 
   m.def("add_triton_control_flow_opt", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::createTritonControlFlowOptPass());
-  });
-
-  m.def("add_convert_modulo_to_mask", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::triton::createConvertModuloToMaskPass());
-  });
-
-  m.def("add_row_coalescing", [](mlir::PassManager &pm) {
-    pm.addPass(RowCoalescing::createRowCoalescingPass());
   });
 
   m.def("add_triton_to_annotation", [](mlir::PassManager &pm) {
@@ -135,6 +129,31 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
           opts.compileOn91095 = compileOn91095;
           pm.addPass(mlir::triton::createAddDynamicCVPipelinePass(opts));
         });
+
+  m.def(
+      "add_graph_optimize",
+      [](mlir::PassManager &pm, std::uint64_t ruleMask,
+         std::uint64_t maxRewritesPerFunction,
+         std::uint64_t ubCapacityBytes, bool emitRemarks) {
+        if (ruleMask > std::numeric_limits<std::uint8_t>::max())
+          throw py::value_error("rule_mask must fit in uint8_t");
+        if (maxRewritesPerFunction > std::numeric_limits<unsigned>::max())
+          throw py::value_error(
+              "max_rewrites_per_function must fit in unsigned");
+        if (ubCapacityBytes > std::numeric_limits<unsigned>::max())
+          throw py::value_error("ub_capacity_bytes must fit in unsigned");
+
+        mlir::triton::cfg::GraphOptimizationOptions options;
+        options.enabledRuleMask = static_cast<std::uint8_t>(ruleMask);
+        options.maxRewritesPerFunction =
+            static_cast<unsigned>(maxRewritesPerFunction);
+        options.ubCapacityBytes = static_cast<unsigned>(ubCapacityBytes);
+        options.emitRemarks = emitRemarks;
+        pm.addPass(mlir::triton::cfg::createGraphOptimizePass(options));
+      },
+      py::arg("pm"), py::arg("rule_mask") = 7,
+      py::arg("max_rewrites_per_function") = 64,
+      py::arg("ub_capacity_bytes") = 0, py::arg("emit_remarks") = false);
 
   m.def("set_buffer_count", [](mlir::ModuleOp &module, const std::string &type,
                                int count) {

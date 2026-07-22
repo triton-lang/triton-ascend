@@ -1,6 +1,6 @@
 // RUN: triton-opt --add_multi_buffer_outer_scope %s | FileCheck %s
 
-module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.inter_core_buf_count = 2 : i32} {
 func.func @tc_v2_01_ctov() {
   %c0 = arith.constant 0 : i32
   %c100 = arith.constant 128 : i32
@@ -68,7 +68,7 @@ func.func @tc_v2_03_cube_receiver_convert() {
 }
 }
 
-// crossDeps on receiver-side alloc [tid,1] and transferOp [tid,0]
-// CHECK: crossDeps = [1 : i32, 0 : i32]
-// CHECK: crossDeps = [3 : i32, 1 : i32]
-// CHECK: crossDeps = [3 : i32, 0 : i32]
+// crossCoreDeps on receiver-side alloc [tid,1] and transferOp [tid,0]
+// CHECK: crossCoreDeps = [1 : i32, 0 : i32]
+// CHECK: crossCoreDeps = [3 : i32, 1 : i32]
+// CHECK: crossCoreDeps = [3 : i32, 0 : i32]

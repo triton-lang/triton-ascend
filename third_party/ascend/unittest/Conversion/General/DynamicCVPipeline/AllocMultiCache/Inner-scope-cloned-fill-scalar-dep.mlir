@@ -40,10 +40,15 @@
 // CHECK-LABEL: func.func @test_clone_introduces_new_dep
 // CHECK-DAG: memref.alloc() : memref<f32, #hivm.address_space<ub>>
 // CHECK-DAG: memref.alloc() : memref<f32, #hivm.address_space<ub>>
-// CHECK-DAG: memref.memory_space_cast {{.*}} {ssbuffer.intraDeps = [0 : i32, 1 : i32]}
+// Producer intraDeps tag moved from memref.memory_space_cast to hivm.hir.copy
+// (refactor innerscope): the cast is just a buffer container, the copy is the
+// actual producer behavior op.
+// CHECK-NOT: memref.memory_space_cast{{.+}}intraDeps
 // Producer-side ping-pong into multi-buffer (block_id = 13, intra_buffer).
-// CHECK: scf.if {{.*}} {
-// CHECK:   hivm.hir.copy ins({{.*}} : tensor<f32>) outs({{.*}} : memref<f32>) {ssbuffer.block_id = 13 : i32}
+// Producer scf.if has no result type (consumer does: -> tensor<f32>).
+// CHECK: scf.if %{{[0-9_a-zA-Z]+}} {
+// Producer-side hivm.hir.copy now carries intraDeps = [0, 1] (refactor innerscope).
+// CHECK:   hivm.hir.copy ins(%{{.+}} : tensor<f32>) outs(%{{.+}} : memref<f32>) {{.+}}intraDeps = [0 : i32, 1 : i32]
 // CHECK: } {ssbuffer.block_id = 13 : i32, ssbuffer.intra_buffer}
 // Original empty+fill remains in producer block (block_id = 13).
 // CHECK: linalg.fill {ssbuffer.block_id = 13 : i32} ins(%extracted : f32) outs({{.*}} : tensor<32x1xf32>) -> tensor<32x1xf32>

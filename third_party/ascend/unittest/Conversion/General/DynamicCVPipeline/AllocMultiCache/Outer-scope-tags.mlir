@@ -1,16 +1,16 @@
-// RUN: triton-opt --add_multi_buffer_outer_scope %s | FileCheck %s --dump-input=fail
+// RUN: triton-opt --add_multi_buffer_outer_scope %s | FileCheck %s
 
-// UT: ssbuffer.crossDeps + ssbuffer.cross_buffer tag verification
+// UT: ssbuffer.crossCoreDeps + ssbuffer.cross_buffer tag verification
 // NOTE: double-buffer ifOp creation requires outer-loop extra_sync structure
-// (ssbuffer.main_loop=0). This UT has single-layer loop, so only crossDeps
+// (ssbuffer.main_loop=0). This UT has single-layer loop, so only crossCoreDeps
 // on allocs and transfer ops are verified.
 
-module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.inter_core_buf_count = 2 : i32} {
 
 // TC-01: C→V
 // CHECK-LABEL: func.func @tc_tag_01_ctov
-// CHECK: ssbuffer.crossDeps = [1 : i32, 1 : i32]
-// CHECK: ssbuffer.crossDeps = [1 : i32, 0 : i32]
+// CHECK: ssbuffer.crossCoreDeps = [1 : i32, 0 : i32]
+// CHECK: ssbuffer.crossCoreDeps = [1 : i32, 1 : i32]
 // CHECK-NOT: transfer_id = -1
 func.func @tc_tag_01_ctov() {
   %c0_i32 = arith.constant 0 : i32
@@ -43,17 +43,17 @@ func.func @tc_tag_01_ctov() {
 }
 
 // TC-03: llvm.store volatile (producer) and llvm.load volatile (consumer)
-// Producer: crossDeps should be on the defining op of store's ptr operand (llvm.inttoptr)
-// Consumer: crossDeps should be on the load op itself
+// Producer: crossCoreDeps should be on the defining op of store's ptr operand (llvm.inttoptr)
+// Consumer: crossCoreDeps should be on the load op itself
 // CHECK-LABEL: func.func @tc_tag_03_store_load_volatile
-// Producer llvm.inttoptr should have crossDeps = [3, 1]
-// CHECK: llvm.inttoptr{{.*}}ssbuffer.crossDeps = [3 : i32, 1 : i32]
-// llvm.store volatile should NOT have crossDeps
-// CHECK-NOT: llvm.store volatile{{.*}}ssbuffer.crossDeps
-// llvm.load volatile should have crossDeps = [3, 0]
-// CHECK: llvm.load volatile{{.*}}ssbuffer.crossDeps = [3 : i32, 0 : i32]
-// Consumer llvm.inttoptr should NOT have crossDeps
-// CHECK-NOT: llvm.inttoptr{{.*}}ssbuffer.crossDeps
+// Producer llvm.inttoptr should have crossCoreDeps = [3, 1]
+// CHECK: llvm.inttoptr{{.*}}ssbuffer.crossCoreDeps = [3 : i32, 1 : i32]
+// llvm.store volatile should NOT have crossCoreDeps
+// CHECK-NOT: llvm.store volatile{{.*}}ssbuffer.crossCoreDeps
+// llvm.load volatile should have crossCoreDeps = [3, 0]
+// CHECK: llvm.load volatile{{.*}}ssbuffer.crossCoreDeps = [3 : i32, 0 : i32]
+// Consumer llvm.inttoptr should NOT have crossCoreDeps
+// CHECK-NOT: llvm.inttoptr{{.*}}ssbuffer.crossCoreDeps
 func.func @tc_tag_03_store_load_volatile() {
   %c0_i32 = arith.constant 0 : i32
   %c128_i32 = arith.constant 128 : i32
@@ -95,8 +95,8 @@ func.func @tc_tag_03_store_load_volatile() {
 
 // TC-02: V→C
 // CHECK-LABEL: func.func @tc_tag_02_vtoc
-// CHECK: ssbuffer.crossDeps = [2 : i32, 1 : i32]
-// CHECK: ssbuffer.crossDeps = [2 : i32, 0 : i32]
+// CHECK: ssbuffer.crossCoreDeps = [2 : i32, 1 : i32]
+// CHECK: ssbuffer.crossCoreDeps = [2 : i32, 0 : i32]
 // CHECK-NOT: transfer_id = -1
 func.func @tc_tag_02_vtoc() {
   %c0_i32 = arith.constant 0 : i32

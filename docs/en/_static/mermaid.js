@@ -1,7 +1,7 @@
 // Render Mermaid diagrams in the ReadTheDocs (sphinx_rtd_theme) output.
-// GitHub renders ```mermaid blocks natively, but the RTD theme needs a
-// client-side renderer.  This script loads mermaid from a CDN and converts
-// every <pre><code class="language-mermaid"> block into an SVG diagram.
+// GitHub renders ```mermaid blocks natively, but Sphinx/MyST wraps them in
+// Pygments highlighting markup.  This script loads mermaid from a CDN and
+// converts every Pygments-highlighted mermaid block into an SVG diagram.
 (function () {
   'use strict';
 
@@ -9,24 +9,29 @@
   if (window.__mermaidRtdLoaded) return;
   window.__mermaidRtdLoaded = true;
 
-  var script = document.createElement('script');
+  const script = document.createElement('script');
   script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
   script.onload = function () {
     mermaid.initialize({ startOnLoad: false, theme: 'default' });
 
-    var blocks = document.querySelectorAll('pre code.language-mermaid');
+    // Sphinx + Pygments wraps code blocks as:
+    //   <div class="highlight-mermaid notranslate">
+    //     <div class="highlight"><pre><span></span>...mermaid src...</pre></div>
+    //   </div>
+    // Note: TextLexer output has no <code> wrapper — the source is directly inside <pre>.
+    const blocks = document.querySelectorAll('div.highlight-mermaid');
     if (!blocks.length) return;
 
-    // Replace each <pre><code> block with a <div class="mermaid"> so
-    // mermaid.run() can render it in-place.
-    for (var i = 0; i < blocks.length; i++) {
-      var code = blocks[i];
-      var pre = code.parentElement;
-      var source = code.textContent;
-      var div = document.createElement('div');
+    for (let i = 0; i < blocks.length; i++) {
+      const wrapper = blocks[i];
+      const pre = wrapper.querySelector('pre');
+      if (!pre) continue;
+      // textContent skips the empty <span></span> that Pygments inserts
+      const source = pre.textContent;
+      const div = document.createElement('div');
       div.className = 'mermaid';
       div.textContent = source;
-      pre.parentNode.replaceChild(div, pre);
+      wrapper.parentNode.replaceChild(div, wrapper);
     }
 
     mermaid.run();

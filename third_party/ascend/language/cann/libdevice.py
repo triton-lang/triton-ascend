@@ -723,17 +723,102 @@ def fast_powf(arg0, arg1, _builder=None):
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fast_pow_fp32", core.dtype("fp32")),
         }, is_pure=True, _builder=_builder)
 
-@core.extern
+@core.builtin
 def fmod(arg0, arg1, _builder=None):
-    if not triton_enable_libdevice_simt():
-        arg0 = semantic.to_tensor(arg0, _builder)
-        arg1 = semantic.to_tensor(arg1, _builder)
-        ret = semantic.mod(arg0, arg1, _builder)
-        return ret
-    return core.extern_elementwise(
-    "", "", [arg0, arg1], {
-        (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fmod_fp32", core.dtype("fp32")),
-    }, is_pure=True, _builder=_builder)
+    arg0 = semantic.to_tensor(arg0, _builder)
+    arg1 = semantic.to_tensor(arg1, _builder)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0, arg1], {
+                (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fmod_fp32", core.dtype("fp32")),
+            }, is_pure=True, _builder=_builder)
+    # Non-simt mode: use accurate double-single arithmetic
+    # splits a fp32 into two non-overlapping fp32 values with 12 bits each
+    # constant 4097 = 2^12 + 1
+    def ds_split(x):
+        c     = semantic.full(x.shape, 4097.0, x.dtype, _builder)  # 2^12 + 1
+        p     = semantic.mul(x, c, True, _builder)
+        x_hi  = semantic.sub(p, semantic.sub(p, x, True, _builder), True, _builder)
+        x_lo  = semantic.sub(x, x_hi, True, _builder)
+        return x_hi, x_lo
+
+    def ds_mul(a_hi, a_lo, b_hi, b_lo):
+        p_hi  = semantic.mul(a_hi, b_hi, True, _builder)
+        p_lo  = semantic.add(
+                    semantic.add(
+                        semantic.add(
+                            semantic.mul(a_hi, b_lo, True, _builder),
+                            semantic.mul(a_lo, b_hi, True, _builder),
+                            True, _builder),
+                        semantic.mul(a_lo, b_lo, True, _builder),
+                        True, _builder),
+                    semantic.sub(
+                        semantic.mul(a_hi, b_hi, True, _builder),
+                        p_hi, True, _builder),
+                    True, _builder)
+        return p_hi, p_lo
+
+    def ds_add(a_hi, a_lo, b_hi, b_lo):
+        s_hi  = semantic.add(a_hi, b_hi, True, _builder)
+        s_lo  = semantic.add(
+                    semantic.add(
+                        semantic.sub(a_hi, s_hi, True, _builder),
+                        b_hi, True, _builder),
+                    semantic.add(a_lo, b_lo, True, _builder),
+                    True, _builder)
+        return s_hi, s_lo
+
+    def ds_sub(a_hi, a_lo, b_hi, b_lo):
+        neg_b_hi = semantic.sub(semantic.full(b_hi.shape, 0.0, b_hi.dtype, _builder), b_hi, True, _builder)
+        neg_b_lo = semantic.sub(semantic.full(b_lo.shape, 0.0, b_lo.dtype, _builder), b_lo, True, _builder)
+        return ds_add(a_hi, a_lo, neg_b_hi, neg_b_lo)
+
+    # split inputs
+    a_hi, a_lo = ds_split(arg0)
+    b_hi, b_lo = ds_split(arg1)
+
+    # q = trunc(a / b) in fp32 - quotient only needs to be an integer, fp32 ok
+    div = semantic.truediv(arg0, arg1, _builder)
+    q   = trunc(div, _builder=_builder)
+
+    # split q
+    q_hi, q_lo = ds_split(q)
+
+    # r = a - q*b  in DS
+    qb_hi, qb_lo = ds_mul(q_hi, q_lo, b_hi, b_lo)
+    r_hi,  r_lo  = ds_sub(a_hi, a_lo, qb_hi, qb_lo)
+
+    # r as single fp32 (hi dominates, lo is the correction)
+    r = semantic.add(r_hi, r_lo, True, _builder)
+
+    abs_r    = math.abs(r, _builder=_builder)
+    abs_b    = math.abs(arg1, _builder=_builder)
+    overshot = semantic.greater_equal(abs_r, abs_b, _builder)
+    r = semantic.where(overshot,
+                       semantic.sub(r, copysign(arg1, r, _builder=_builder), True, _builder),
+                       r, _builder)
+
+    zero          = semantic.full(r.shape, 0.0, r.dtype, _builder)
+    r_nonzero     = semantic.not_equal(r, zero, _builder)
+    a_neg         = semantic.less_than(arg0, semantic.full(arg0.shape, 0.0, arg0.dtype, _builder), _builder)
+    r_neg         = semantic.less_than(r, zero, _builder)
+    sign_mismatch = semantic.not_equal(a_neg, r_neg, _builder)
+    needs_fixup   = semantic.and_(r_nonzero, sign_mismatch, _builder)
+    r = semantic.where(needs_fixup,
+                       semantic.add(r, copysign(arg1, arg0, _builder=_builder), True, _builder),
+                       r, _builder)
+
+    r_hi_zero = semantic.equal(r_hi, zero, _builder)
+    r_lo_zero = semantic.equal(r_lo, zero, _builder)
+    exact_zero = semantic.and_(r_hi_zero, r_lo_zero, _builder)
+    r = semantic.where(exact_zero, zero, r, _builder)
+
+    b_zero = semantic.equal(arg1, semantic.full(arg1.shape, 0.0, arg1.dtype, _builder), _builder)
+    r = semantic.where(b_zero,
+                       semantic.full(r.shape, float('nan'), r.dtype, _builder),
+                       r, _builder)
+
+    return r
 
 @core.extern
 def remainder(arg0, arg1, _builder=None):

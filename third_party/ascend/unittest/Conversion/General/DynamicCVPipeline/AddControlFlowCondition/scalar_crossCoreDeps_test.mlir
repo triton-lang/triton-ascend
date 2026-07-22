@@ -66,7 +66,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       llvm.load
         // CHECK:       arith.addi
         // CHECK:       llvm.store
-        // CHECK:       } {ssbuffer.if = 5 : i32}
+        // CHECK:       } {hivm.matmul_limited_in_cube, ssbuffer.if = 5 : i32}
 
         // This block only contain an input
         // CHECK:       llvm.load
@@ -77,7 +77,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       llvm.load
         // CHECK:       arith.subi
         // CHECK:       llvm.store
-        // CHECK:       } {ssbuffer.if = 6 : i32}
+        // CHECK:       } {hivm.matmul_limited_in_cube, ssbuffer.if = 6 : i32}
         scf.yield %arg17, %arg18 : i32, i32
       } {ssbuffer.block_id = 9 : i32, ssbuffer.main_loop = 0 : i64}
       scope.return
@@ -106,7 +106,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       arith.addi
         // CHECK:       llvm.store
         // CHECK:       llvm.store
-        // CHECK:       } {ssbuffer.if = 0 : i32}
+        // CHECK:       } {hivm.matmul_limited_in_cube, ssbuffer.if = 0 : i32}
 
         // This block contain an input and a output
         // CHECK:       llvm.load
@@ -136,7 +136,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       arith.addi
         // CHECK:       llvm.store
         // CHECK:       llvm.store
-        // CHECK:       } {ssbuffer.if = 1 : i32}
+        // CHECK:       } {hivm.matmul_limited_in_cube, ssbuffer.if = 1 : i32}
         scf.yield %arg17, %arg18 : i32, i32
       } {ssbuffer.block_id = 9 : i32, ssbuffer.main_loop = 0 : i64}
       scope.return

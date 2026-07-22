@@ -45,11 +45,11 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
             hivm.hir.sync_block_wait {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
             %5 = hivm.hir.convert_layout %alloc_3 output_shape [64, 256] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 1 : i32, ssbuffer.crossDeps = [1 : i32, 0 : i32], ssbuffer.transfer_id = 1 : i32} : (memref<8x4x16x32xi8, #hivm.address_space<cbuf>>) -> memref<64x256xi8, #hivm.address_space<cbuf>>
             %memspacecast = memref.memory_space_cast %5 {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 1 : i32} : memref<64x256xi8, #hivm.address_space<cbuf>> to memref<64x256xi8>
-            %6 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 1 : i32} : memref<64x256xi8>
+            %6 = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 1 : i32} : memref<64x256xi8> to tensor<64x256xi8>
             hivm.hir.sync_block_wait {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 1
             %7 = hivm.hir.convert_layout %alloc output_shape [128, 64] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 1 : i32, ssbuffer.crossDeps = [0 : i32, 0 : i32], ssbuffer.transfer_id = 0 : i32} : (memref<2x8x16x32xi8, #hivm.address_space<cbuf>>) -> memref<128x64xi8, #hivm.address_space<cbuf>>
             %memspacecast_5 = memref.memory_space_cast %7 {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32} : memref<128x64xi8, #hivm.address_space<cbuf>> to memref<128x64xi8>
-            %8 = bufferization.to_tensor %memspacecast_5 restrict writable {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32} : memref<128x64xi8>
+            %8 = bufferization.to_tensor %memspacecast_5 restrict writable {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32} : memref<128x64xi8> to tensor<128x64xi8>
             %9 = tensor.empty() {ssbuffer.block_id = 1 : i32} : tensor<128x256xi32>
             %10 = linalg.fill {ssbuffer.block_id = 1 : i32} ins(%c0_i32 : i32) outs(%9 : tensor<128x256xi32>) -> tensor<128x256xi32>
             %11 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 1 : i32} ins(%8, %6 : tensor<128x64xi8>, tensor<64x256xi8>) outs(%10 : tensor<128x256xi32>) -> tensor<128x256xi32>

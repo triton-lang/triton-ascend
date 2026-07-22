@@ -3,46 +3,44 @@
 #include "mlir/IR/Builders.h"
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include <memory>
+
 #include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
-#include <pybind11/stl_bind.h>
 
 namespace py = pybind11;
-
-using namespace mlir;
-using namespace triton;
 
 // A custom op builder that keeps track of the last location
 class TritonOpBuilder {
 public:
-  TritonOpBuilder(mlir::MLIRContext *context, const std::string &compile_mode = "simd") {
-    builder = std::make_unique<OpBuilder>(context);
-    lastLoc = std::make_unique<Location>(builder->getUnknownLoc());
+  TritonOpBuilder(mlir::MLIRContext *context,
+                  const std::string &compile_mode = "simd") {
+    builder = std::make_unique<mlir::OpBuilder>(context);
+    lastLoc = std::make_unique<mlir::Location>(builder->getUnknownLoc());
     this->compile_mode = compile_mode;
   }
 
-  OpBuilder &getBuilder() { return *builder; }
+  mlir::OpBuilder &getBuilder() { return *builder; }
+  mlir::MLIRContext *getContext() { return builder->getContext(); }
 
   bool isLineInfoEnabled() { return lineInfoEnabled; }
 
   bool isSimtMode() const { return compile_mode == "simt"; }
 
-  void setLastLoc(Location loc) {
+  void setLastLoc(mlir::Location loc) {
     if (lineInfoEnabled)
-      lastLoc = std::make_unique<Location>(loc);
+      lastLoc = std::make_unique<mlir::Location>(loc);
   }
 
   void setLastLoc(const std::string &fileName, int line, int column) {
     auto context = builder->getContext();
-    setLastLoc(FileLineColLoc::get(context, fileName, line, column));
+    setLastLoc(mlir::FileLineColLoc::get(context, fileName, line, column));
   }
 
-  Location getLastLoc() {
+  mlir::Location getLastLoc() {
     assert(lastLoc);
     return *lastLoc;
   }
 
-  void setInsertionPointToStart(Block &block) {
+  void setInsertionPointToStart(mlir::Block &block) {
     if (!block.empty())
       setLastLoc(block.begin()->getLoc());
     else
@@ -50,7 +48,7 @@ public:
     builder->setInsertionPointToStart(&block);
   }
 
-  void setInsertionPointToEnd(Block &block) {
+  void setInsertionPointToEnd(mlir::Block &block) {
     if (!block.empty())
       setLastLoc(block.back().getLoc());
     else
@@ -58,12 +56,12 @@ public:
     builder->setInsertionPointToEnd(&block);
   }
 
-  void setInsertionPointAfter(Operation &op) {
+  void setInsertionPointAfter(mlir::Operation &op) {
     setLastLoc(op.getLoc());
     builder->setInsertionPointAfter(&op);
   }
 
-  void restoreInsertionPoint(OpBuilder::InsertPoint pt) {
+  void restoreInsertionPoint(mlir::OpBuilder::InsertPoint pt) {
     if (pt.isSet() && pt.getPoint() != pt.getBlock()->end())
       setLastLoc(pt.getPoint()->getLoc());
     else
@@ -78,7 +76,8 @@ public:
 
   // Overload to create or fold a single result operation.
   template <typename OpTy, typename... Args>
-  std::enable_if_t<OpTy::template hasTrait<OpTrait::OneResult>(), Value>
+  std::enable_if_t<OpTy::template hasTrait<mlir::OpTrait::OneResult>(),
+                   mlir::Value>
   createOrFold(Args &&...args) {
     auto loc = getLastLoc();
     return builder->createOrFold<OpTy>(loc, std::forward<Args>(args)...);
@@ -86,16 +85,17 @@ public:
 
   // Overload to create or fold a zero result operation.
   template <typename OpTy, typename... Args>
-  std::enable_if_t<OpTy::template hasTrait<OpTrait::ZeroResults>(), OpTy>
+  std::enable_if_t<OpTy::template hasTrait<mlir::OpTrait::ZeroResults>(), OpTy>
   createOrFold(Args &&...args) {
     auto loc = getLastLoc();
     return builder->createOrFold<OpTy>(loc, std::forward<Args>(args)...);
   }
 
 private:
-  std::unique_ptr<OpBuilder> builder;
-  std::unique_ptr<Location> lastLoc;
-  bool lineInfoEnabled = !triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO");
+  std::unique_ptr<mlir::OpBuilder> builder;
+  std::unique_ptr<mlir::Location> lastLoc;
+  bool lineInfoEnabled =
+      !mlir::triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO");
   std::string compile_mode;
 };
 

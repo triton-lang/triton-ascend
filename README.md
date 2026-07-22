@@ -19,7 +19,7 @@ Triton-Ascend
 </p>
 
 <p align="center">
-| <a href="https://triton-ascend.readthedocs.io/zh-cn/latest/"><b>Official Documentation</b></a> | <a href="https://www.hiascend.com/developer/operator?tag=triton"><b>Operator Development User Journey</b></a> | <a href="https://etherpad-ascend.meeting.osinfra.cn/p/sig-AscendNPU-IR"><b>Community Meetings</b></a> | <a href="https://www.hiascend.com/"><b>About Ascend</b></a> |
+| <a href="https://triton-ascend.readthedocs.io/zh-cn/latest/"><b>Official Documentation</b></a> | <a href="https://www.hiascend.com/developer/operator?tag=triton"><b>Operator Development User Journey</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>Community Meetings</b></a> | <a href="https://www.hiascend.com/"><b>About Ascend</b></a> |
 </p>
 
 ---
@@ -220,7 +220,7 @@ docker exec -u root -it triton-ascend_container /bin/bash
 ## 🏘️ Community Activities
 
 1. [Meeting Calendar](https://meeting.osinfra.cn/ascend)
-2. [Meeting Minutes Board](https://etherpad-ascend.meeting.osinfra.cn/p/sig-AscendNPU-IR)
+2. [Meeting Minutes Board](https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0)
 
 ## 🤝 Community and Contribution
 

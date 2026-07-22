@@ -349,10 +349,9 @@ static void *retainTensor(at::Tensor tensor, void **handle) {
 
 extern "C" void* triton_allocate_workspace_legacy(uint64_t size)
 {
-  return const_cast<void*>(
-      at::empty(size, at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte))
-          .storage()
-          .data());
+  auto optionsWorkspace = at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte);
+  at::Tensor workspace_tensor = at::empty(size, optionsWorkspace);
+  return const_cast<void*>(workspace_tensor.storage().data());
 }
 
 extern "C" void* triton_allocate_sync_block_lock(uint64_t size, void* stream, void **handle)

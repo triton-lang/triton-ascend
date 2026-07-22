@@ -1,0 +1,608 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html">
+
+    <!-- Generated with Sphinx 9.0.4 and Furo 2025.12.19 -->
+        <title>Costmodel 端到端示例 - Triton Ascend latest documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d75fae25" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="../_static/lang-switcher.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f0f0f0;
+  --color-code-foreground: black;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../index.html"><div class="brand">Triton Ascend latest documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
+  
+  <span class="sidebar-brand-text">Triton Ascend latest documentation</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">快速开始</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../quick_start.html">快速入门</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../installation_guide.html">安装指南</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">特性说明</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../architecture_design_and_core_features.html">架构设计与核心特性</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子开发指南</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../programming_guide.html">Triton-Ascend算子开发</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子迁移指南</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../migration_guide/architecture_difference.html">昇腾与GPU的开发差异</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../migration_guide/migrate_from_gpu.html">GPU Triton算子迁移</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">典型算子样例</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="index.html">Tutorials</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子调试与调优</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../debug_guide/debugging.html">Triton-Ascend调试指南</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../debug_guide/profiling.html">Triton-Ascend性能分析方法</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Triton API 接口说明</span></p>
+<ul>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../triton_api/index.html">triton.language API</a><input aria-label="Toggle navigation of triton.language API" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/extract_slice.html">triton.language.extract_slice</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/insert_slice.html">triton.language.insert_slice</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/sync_block.html">triton.language.sync_block_set</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/compile_hint.html">triton.language.compile_hint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/multibuffer.html">triton.language.multibuffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/parallel.html">triton.language.parallel</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/get_element.html">triton.language.get_element</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/index_select_simd.html">triton.language.extra.ascend.libdevice.index_select_simd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_add.html">triton.language.atomic_add</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_and.html">triton.language.atomic_and</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_cas.html">triton.language.atomic_cas</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_max.html">triton.language.atomic_max</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_min.html">triton.language.atomic_min</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_or.html">triton.language.atomic_or</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_xchg.html">triton.language.atomic_xchg</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_xor.html">triton.language.atomic_xor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/eq.html">eq</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/le.html">triton.language.semantic.less_equal</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/ge.html">triton.language.semantic.greater_equal</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/lt.html">triton.language.semantic.less_than</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/gt.html">triton.language.semantic.greater_than</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/ne.html">ne</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/debug_barrier.html">triton.language.debug_barrier</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/max_constancy.html">triton.language.max_constancy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/max_contiguous.html">triton.language.max_contiguous</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/multiple_of.html">triton.language.multiple_of</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/assume.html">triton.language.assume</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/compile_hint.html">triton.language.compile_hint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/multibuffer.html">triton.language.multibuffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/parallel.html">triton.language.parallel</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/sync_block.html">triton.language.sync_block_set</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/arange.html">triton.language.arange</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/cat.html">triton.language.cat</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/full.html">triton.language.full</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/zeros.html">triton.language.zeros</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/zeros_like.html">triton.language.zeros_like</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/cast.html">triton.language.cast</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Debug_Ops/static_print.html">triton.language.static_print</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Debug_Ops/static_assert.html">triton.language.static_assert</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Debug_Ops/device_print.html">triton.language.device_print</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Debug_Ops/device_assert.html">triton.language.device_assert</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Indexing_Ops/flip.html">triton.language.flip</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Indexing_Ops/where.html">triton.language.where</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Indexing_Ops/swizzle2d.html">triton.language.swizzle2d</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/get_element.html">triton.language.get_element</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/index_select_simd.html">triton.language.extra.ascend.libdevice.index_select_simd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Inline_Assembly/inline_asm_elementwise.html">triton.language.inline_asm_elementwise</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Iterators/range.html">triton.language.range</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Iterators/static_range.html">triton.language.static_range</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Linear_Algebra_Ops/dot.html">triton.language.dot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Linear_Algebra_Ops/dot_scaled.html">triton.language.dot_scaled</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/and.html">triton.language.and</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/or.html">triton.language.or</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/not.html">triton.language.not</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/logical_and.html">triton.language.semantic.logical_and</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/logical_or.html">triton.language.semantic.logical_or</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/not.html">triton.language.not</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/invert.html">triton.language.invert</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/lshift.html">triton.language.core.<strong>lshift</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/rshift.html">triton.language.core.<strong>rshift</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/xor.html">triton.language.xor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/add.html">triton.language.add</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sub.html">sub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/mul.html">mul</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/div.html">div</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/abs.html">triton.language.abs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/neg.html">triton.language.neg</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/cdiv.html">triton.language.cdiv</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/ceil.html">triton.language.ceil</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/clamp.html">triton.language.clamp</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/cos.html">triton.language.cos</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/div_rn.html">triton.language.div_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/erf.html">triton.language.erf</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/exp.html">triton.language.exp</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/exp2.html">triton.language.exp2</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/fdiv.html">triton.language.fdiv</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/floor.html">triton.language.floor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/fma.html">triton.language.fma</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/log.html">triton.language.log</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/log2.html">triton.language.log2</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/mod.html">mod</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/maximum.html">triton.language.maximum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/minimum.html">triton.language.minimum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/rsqrt.html">triton.language.rsqrt</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sigmoid.html">triton.language.sigmoid</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sin.html">triton.language.sin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/softmax.html">triton.language.softmax</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sqrt.html">triton.language.sqrt</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sqrt_rn.html">triton.language.sqrt_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/umulhi.html">triton.language.umulhi</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/tl.load.html">triton.language.load</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/tl.store.html">triton.language.store</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/tl.make_block_ptr.html">triton.language.make_block_ptr</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/tl.advance.html">triton.language.advance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/load_tensor_descriptor.html">triton.language.load_tensor_descriptor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/make_tensor_descriptor.html">triton.language.make_tensor_descriptor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Programming_Model/program_id.html">triton.language.program_id</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Programming_Model/num_programs.html">triton.language.num_programs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Random_Number_Generation/randint4x.html">triton.language.randint4x</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Random_Number_Generation/randint.html">triton.language.randint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Random_Number_Generation/rand.html">triton.language.rand</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Random_Number_Generation/randn.html">triton.language.randn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/argmax.html">triton.language.argmax</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/argmin.html">triton.language.argmin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/max.html">triton.language.max</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/min.html">triton.language.min</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/reduce.html">triton.language.reduce</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/sum.html">triton.language.sum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/xor_sum.html">triton.language.xor_sum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/associative_scan.html">triton.language.associative_scan</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/cumprod.html">triton.language.cumprod</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/cumsum.html">triton.language.cumsum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/histogram.html">triton.language.histogram</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/sort.html">triton.language.sort</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/broadcast.html">triton.language.broadcast</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/broadcast_to.html">triton.language.broadcast_to</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/expand_dims.html">triton.language.expand_dims</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/interleave.html">triton.language.interleave</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/join.html">triton.language.join</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/permute.html">triton.language.permute</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/ravel.html">triton.language.ravel</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/reshape.html">triton.language.reshape</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/split.html">triton.language.split</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/trans.html">triton.language.trans</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/view.html">triton.language.view</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/extract_slice.html">triton.language.extract_slice</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/insert_slice.html">triton.language.insert_slice</a></li>
+</ul>
+</li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../triton_api/triton/index.html">triton</a><input aria-label="Toggle navigation of triton" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/jit.html">triton.jit</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/autotune.html">triton.autotune</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/heuristics.html">triton.heuristics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/Config.html">triton.Config</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Libdevice 开发者手册</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../libdevice/libdevice_developer_guide.html">Libdevice 开发者手册</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">环境变量</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../environment_variable_reference.html">环境变量</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">常见问题</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../FAQ.html">Triton-Ascend FAQ</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="../_sources/examples/08_costmodel_example.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="costmodel">
+<h1>Costmodel 端到端示例<a class="headerlink" href="#costmodel" title="Link to this heading">¶</a></h1>
+<p>本示例展示 costmodel 后端的基本调用流程：</p>
+<ul class="simple">
+<li><p>使用 Triton 前端算子生成 TTIR；</p></li>
+<li><p>为多个候选 config 构造 <code class="docutils literal notranslate"><span class="pre">costmodel_bench</span></code> 输入；</p></li>
+<li><p>调用 <code class="docutils literal notranslate"><span class="pre">costmodel_bench</span></code> 得到每个 config 的预测耗时。</p></li>
+</ul>
+<p>这个流程适合在 autotune 前快速筛掉预计性能较差的 config。示例只使用向量加法 kernel，便于聚焦 costmodel 的输入和返回值。</p>
+<section id="id1">
+<h2>完整示例<a class="headerlink" href="#id1" title="Link to this heading">¶</a></h2>
+<p>将下面的代码保存为 <code class="docutils literal notranslate"><span class="pre">costmodel_example.py</span></code> 后运行：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">triton</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">triton.language</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">tl</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">triton.backends.ascend.runtime.costmodel_runtime</span><span class="w"> </span><span class="kn">import</span> <span class="n">costmodel_bench</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">triton.backends.compiler</span><span class="w"> </span><span class="kn">import</span> <span class="n">GPUTarget</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">triton.compiler</span><span class="w"> </span><span class="kn">import</span> <span class="n">ASTSource</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">triton.compiler.code_generator</span><span class="w"> </span><span class="kn">import</span> <span class="n">ast_to_ttir</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">triton.compiler.compiler</span><span class="w"> </span><span class="kn">import</span> <span class="n">make_backend</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">triton._C.libtriton</span><span class="w"> </span><span class="kn">import</span> <span class="n">ir</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">triton._C.libtriton.ascend</span><span class="w"> </span><span class="kn">import</span> <span class="n">ir</span> <span class="k">as</span> <span class="n">ascend_ir</span>
+
+
+<span class="nd">@triton</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">add_kernel</span><span class="p">(</span><span class="n">x_ptr</span><span class="p">,</span> <span class="n">y_ptr</span><span class="p">,</span> <span class="n">output_ptr</span><span class="p">,</span> <span class="n">n_elements</span><span class="p">,</span> <span class="n">BLOCK_SIZE</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">):</span>
+    <span class="n">pid</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">program_id</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">offsets</span> <span class="o">=</span> <span class="n">pid</span> <span class="o">*</span> <span class="n">BLOCK_SIZE</span> <span class="o">+</span> <span class="n">tl</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">BLOCK_SIZE</span><span class="p">)</span>
+    <span class="n">mask</span> <span class="o">=</span> <span class="n">offsets</span> <span class="o">&lt;</span> <span class="n">n_elements</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">x_ptr</span> <span class="o">+</span> <span class="n">offsets</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+    <span class="n">y</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">y_ptr</span> <span class="o">+</span> <span class="n">offsets</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+    <span class="n">tl</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="n">output_ptr</span> <span class="o">+</span> <span class="n">offsets</span><span class="p">,</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">make_ttir</span><span class="p">(</span><span class="n">kernel</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">constants</span><span class="p">):</span>
+    <span class="n">source</span> <span class="o">=</span> <span class="n">ASTSource</span><span class="p">(</span><span class="n">kernel</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="n">constants</span><span class="p">,</span> <span class="n">attrs</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="n">target</span> <span class="o">=</span> <span class="n">GPUTarget</span><span class="p">(</span><span class="s2">&quot;npu&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="mi">32</span><span class="p">)</span>
+    <span class="n">backend</span> <span class="o">=</span> <span class="n">make_backend</span><span class="p">(</span><span class="n">target</span><span class="p">)</span>
+
+    <span class="n">options</span> <span class="o">=</span> <span class="n">backend</span><span class="o">.</span><span class="n">parse_options</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;num_warps&quot;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>
+            <span class="s2">&quot;num_stages&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+            <span class="s2">&quot;debug&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;multibuffer&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;compile_mode&quot;</span><span class="p">:</span> <span class="s2">&quot;simd&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;enable_costmodel_backend&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="o">**</span><span class="n">source</span><span class="o">.</span><span class="n">parse_options</span><span class="p">(),</span>
+        <span class="p">}</span>
+    <span class="p">)</span>
+
+    <span class="n">context</span> <span class="o">=</span> <span class="n">ir</span><span class="o">.</span><span class="n">context</span><span class="p">()</span>
+    <span class="n">ir</span><span class="o">.</span><span class="n">load_dialects</span><span class="p">(</span><span class="n">context</span><span class="p">)</span>
+    <span class="n">ascend_ir</span><span class="o">.</span><span class="n">load_dialects</span><span class="p">(</span><span class="n">context</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">ast_to_ttir</span><span class="p">(</span><span class="n">kernel</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="n">context</span><span class="p">,</span> <span class="n">options</span><span class="p">,</span> <span class="p">{},</span> <span class="p">{}))</span>
+
+
+<span class="n">signature</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;x_ptr&quot;</span><span class="p">:</span> <span class="s2">&quot;*fp32&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;y_ptr&quot;</span><span class="p">:</span> <span class="s2">&quot;*fp32&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;output_ptr&quot;</span><span class="p">:</span> <span class="s2">&quot;*fp32&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;n_elements&quot;</span><span class="p">:</span> <span class="s2">&quot;i32&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+<span class="n">n_elements</span> <span class="o">=</span> <span class="mi">98432</span>
+<span class="n">configs</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;block256&quot;</span><span class="p">,</span> <span class="s2">&quot;BLOCK_SIZE&quot;</span><span class="p">:</span> <span class="mi">256</span><span class="p">},</span>
+    <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;block1024&quot;</span><span class="p">,</span> <span class="s2">&quot;BLOCK_SIZE&quot;</span><span class="p">:</span> <span class="mi">1024</span><span class="p">},</span>
+    <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;block2048&quot;</span><span class="p">,</span> <span class="s2">&quot;BLOCK_SIZE&quot;</span><span class="p">:</span> <span class="mi">2048</span><span class="p">},</span>
+<span class="p">]</span>
+
+<span class="n">items</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="k">for</span> <span class="n">cfg</span> <span class="ow">in</span> <span class="n">configs</span><span class="p">:</span>
+    <span class="n">ttir</span> <span class="o">=</span> <span class="n">make_ttir</span><span class="p">(</span><span class="n">add_kernel</span><span class="p">,</span> <span class="n">signature</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;BLOCK_SIZE&quot;</span><span class="p">:</span> <span class="n">cfg</span><span class="p">[</span><span class="s2">&quot;BLOCK_SIZE&quot;</span><span class="p">]})</span>
+    <span class="n">items</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+        <span class="p">{</span>
+            <span class="s2">&quot;config&quot;</span><span class="p">:</span> <span class="n">cfg</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">],</span>
+            <span class="s2">&quot;ttir&quot;</span><span class="p">:</span> <span class="n">ttir</span><span class="p">,</span>
+            <span class="c1"># n_elements 是 signature 中的第 4 个参数，对应 TTIR 里的 %arg3。</span>
+            <span class="c1"># pid_x 给 tl.program_id(0) 一个静态估算值。</span>
+            <span class="s2">&quot;arg_bindings&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;arg3=</span><span class="si">{</span><span class="n">n_elements</span><span class="si">}</span><span class="s2">,pid_x=0&quot;</span><span class="p">,</span>
+        <span class="p">}</span>
+    <span class="p">)</span>
+
+<span class="n">latencies</span> <span class="o">=</span> <span class="n">costmodel_bench</span><span class="p">(</span><span class="n">items</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">config</span><span class="p">,</span> <span class="n">latency_us</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">latencies</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">item</span><span class="p">:</span> <span class="n">item</span><span class="p">[</span><span class="mi">1</span><span class="p">]):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">config</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">latency_us</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> us&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="id2">
+<h2>示例输出<a class="headerlink" href="#id2" title="Link to this heading">¶</a></h2>
+<p>不同版本的 costmodel 参数可能会使具体数值略有不同，但输出结构类似：</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>block256: 0.098 us
+block1024: 0.110 us
+block2048: 0.126 us
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">costmodel_bench</span></code> 的返回值是一个字典，key 为传入的 <code class="docutils literal notranslate"><span class="pre">config</span></code>，value 为预测耗时，单位是微秒。上层 autotune 逻辑可以按 value 排序，优先保留预测更快的 config。</p>
+</section>
+<section id="id3">
+<h2>关键点说明<a class="headerlink" href="#id3" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ASTSource</span> <span class="pre">+</span> <span class="pre">ast_to_ttir</span></code> 只生成 TTIR，不会真实编译或启动 kernel。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">config</span></code> 会影响 <code class="docutils literal notranslate"><span class="pre">tl.constexpr</span></code>，例如 <code class="docutils literal notranslate"><span class="pre">BLOCK_SIZE</span></code>，因此每个候选 config 都需要生成各自的 TTIR。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">costmodel_bench</span></code> 接收的每个元素至少包含 <code class="docutils literal notranslate"><span class="pre">config</span></code> 和 <code class="docutils literal notranslate"><span class="pre">ttir</span></code>，也可以附带 <code class="docutils literal notranslate"><span class="pre">arg_bindings</span></code>。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">arg_bindings</span></code> 用于把运行时整数参数绑定到 TTIR 中的 <code class="docutils literal notranslate"><span class="pre">%argN</span></code>。例如本例中 <code class="docutils literal notranslate"><span class="pre">n_elements=98432</span></code> 对应 <code class="docutils literal notranslate"><span class="pre">arg3=98432</span></code>。</p></li>
+<li><p>如果 kernel 中使用 <code class="docutils literal notranslate"><span class="pre">tl.program_id(0)</span></code>，通常需要传入 <code class="docutils literal notranslate"><span class="pre">pid_x=0</span></code>。如果还使用 <code class="docutils literal notranslate"><span class="pre">tl.num_programs(0)</span></code>，可额外传入 <code class="docutils literal notranslate"><span class="pre">num_programs_x=...</span></code>。</p></li>
+</ol>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+<footer>
+    <div class="related-pages">
+        
+        
+    </div>
+    <div class="bottom-of-page">
+        <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Huawei
+            </div><div class="last-updated">
+                Last updated on Jul 22, 2026</div>
+        </div>
+        <div class="right-details">
+        </div>
+    </div>
+</footer>
+
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Costmodel 端到端示例</a><ul>
+<li><a class="reference internal" href="#id1">完整示例</a></li>
+<li><a class="reference internal" href="#id2">示例输出</a></li>
+<li><a class="reference internal" href="#id3">关键点说明</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div>
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-github" viewBox="0 0 24 24">
+    <title>GitHub</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 24 24">
+      <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+    </svg>
+  </symbol>
+</svg>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var iconContainer = document.querySelector('.content-icon-container');
+    if (iconContainer) {
+        var githubLink = document.createElement('div');
+        githubLink.className = 'view-this-page';
+        githubLink.innerHTML = '<a class="muted-link" href="https://github.com/triton-lang/triton-ascend" target="_blank" title="GitHub"><svg><use href="#svg-github"></use></svg><span class="visually-hidden">GitHub</span></a>';
+        var firstChild = iconContainer.firstElementChild;
+        if (firstChild) {
+            iconContainer.insertBefore(githubLink, firstChild);
+        } else {
+            iconContainer.appendChild(githubLink);
+        }
+    }
+    var footerText = document.querySelector('.bottom-of-page .left-details');
+    if (footerText) {
+        footerText.innerHTML = footerText.innerHTML.replace(/Made with[\s\S]*?<a href="https:\/\/github\.com\/pradyunsg\/furo">Furo<\/a>/, '');
+    }
+});
+</script>
+<script src="../_static/documentation_options.js?v=c6e86fd7"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/scripts/furo.js?v=46bd48cc"></script>
+    <script src="../_static/lang-switcher.js"></script>
+    </body>
+</html>

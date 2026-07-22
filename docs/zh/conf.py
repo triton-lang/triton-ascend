@@ -21,7 +21,7 @@ import os
 # General information about the project.
 
 project = 'Triton Ascend'
-copyright = '2025, Huawei'
+copyright = '2026, Huawei'
 author = 'Huawei'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -92,6 +92,7 @@ def setup(app):
     lexers['mlir'] = get_lexer_by_name('text')
     lexers['plaintext'] = get_lexer_by_name('text')
  
+    app.add_css_file('custom.css')
     if not _is_build_by_readthedocs:
         app.add_js_file('lang-switcher.js')
         app.add_css_file('lang-switcher.css')

@@ -6,3 +6,8 @@
     max-width: 100%;;
     height: auto;
 }
+
+table.docutils {
+    margin-left: 0 !important;
+    margin-right: auto !important;
+}

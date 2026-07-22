@@ -1,0 +1,13 @@
+auditwheel
+cmake
+einops
+expecttest
+ninja
+patchelf
+pybind11
+pytest
+pytest-xdist
+twine
+wheel
+pandas
+setuptools

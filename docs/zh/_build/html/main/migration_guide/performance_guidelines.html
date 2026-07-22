@@ -1,0 +1,736 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="../genindex.html"><link rel="search" title="Search" href="../search.html">
+
+    <!-- Generated with Sphinx 9.0.4 and Furo 2025.12.19 -->
+        <title>NPU高性能编程指南 - Triton Ascend latest documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=d75fae25" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="../_static/lang-switcher.css" />
+    <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=8dab3a3b" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f0f0f0;
+  --color-code-foreground: black;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../index.html"><div class="brand">Triton Ascend latest documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
+  
+  <span class="sidebar-brand-text">Triton Ascend latest documentation</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">快速开始</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../quick_start.html">快速入门</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../installation_guide.html">安装指南</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">特性说明</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../architecture_design_and_core_features.html">架构设计与核心特性</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子开发指南</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../programming_guide.html">Triton-Ascend算子开发</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子迁移指南</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="architecture_difference.html">昇腾与GPU的开发差异</a></li>
+<li class="toctree-l1"><a class="reference internal" href="migrate_from_gpu.html">GPU Triton算子迁移</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">典型算子样例</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../examples/index.html">Tutorials</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Triton-Ascend算子调试与调优</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../debug_guide/debugging.html">Triton-Ascend调试指南</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../debug_guide/profiling.html">Triton-Ascend性能分析方法</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Triton API 接口说明</span></p>
+<ul>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../triton_api/index.html">triton.language API</a><input aria-label="Toggle navigation of triton.language API" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/extract_slice.html">triton.language.extract_slice</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/insert_slice.html">triton.language.insert_slice</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/sync_block.html">triton.language.sync_block_set</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/compile_hint.html">triton.language.compile_hint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/multibuffer.html">triton.language.multibuffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/parallel.html">triton.language.parallel</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/get_element.html">triton.language.get_element</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/index_select_simd.html">triton.language.extra.ascend.libdevice.index_select_simd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_add.html">triton.language.atomic_add</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_and.html">triton.language.atomic_and</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_cas.html">triton.language.atomic_cas</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_max.html">triton.language.atomic_max</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_min.html">triton.language.atomic_min</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_or.html">triton.language.atomic_or</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_xchg.html">triton.language.atomic_xchg</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Atomic_Ops/atomic_xor.html">triton.language.atomic_xor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/eq.html">eq</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/le.html">triton.language.semantic.less_equal</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/ge.html">triton.language.semantic.greater_equal</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/lt.html">triton.language.semantic.less_than</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/gt.html">triton.language.semantic.greater_than</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Comparing_Ops/ne.html">ne</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/debug_barrier.html">triton.language.debug_barrier</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/max_constancy.html">triton.language.max_constancy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/max_contiguous.html">triton.language.max_contiguous</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/multiple_of.html">triton.language.multiple_of</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Compiler_Hint_Ops/assume.html">triton.language.assume</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/compile_hint.html">triton.language.compile_hint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/multibuffer.html">triton.language.multibuffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/parallel.html">triton.language.parallel</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/sync_block.html">triton.language.sync_block_set</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/arange.html">triton.language.arange</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/cat.html">triton.language.cat</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/full.html">triton.language.full</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/zeros.html">triton.language.zeros</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/zeros_like.html">triton.language.zeros_like</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Creation_Ops/cast.html">triton.language.cast</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Debug_Ops/static_print.html">triton.language.static_print</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Debug_Ops/static_assert.html">triton.language.static_assert</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Debug_Ops/device_print.html">triton.language.device_print</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Debug_Ops/device_assert.html">triton.language.device_assert</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Indexing_Ops/flip.html">triton.language.flip</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Indexing_Ops/where.html">triton.language.where</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Indexing_Ops/swizzle2d.html">triton.language.swizzle2d</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/get_element.html">triton.language.get_element</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/index_select_simd.html">triton.language.extra.ascend.libdevice.index_select_simd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Inline_Assembly/inline_asm_elementwise.html">triton.language.inline_asm_elementwise</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Iterators/range.html">triton.language.range</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Iterators/static_range.html">triton.language.static_range</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Linear_Algebra_Ops/dot.html">triton.language.dot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Linear_Algebra_Ops/dot_scaled.html">triton.language.dot_scaled</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/and.html">triton.language.and</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/or.html">triton.language.or</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/not.html">triton.language.not</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/logical_and.html">triton.language.semantic.logical_and</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/logical_or.html">triton.language.semantic.logical_or</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/not.html">triton.language.not</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/invert.html">triton.language.invert</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/lshift.html">triton.language.core.<strong>lshift</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/rshift.html">triton.language.core.<strong>rshift</strong></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Logical_Ops/xor.html">triton.language.xor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/add.html">triton.language.add</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sub.html">sub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/mul.html">mul</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/div.html">div</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/abs.html">triton.language.abs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/neg.html">triton.language.neg</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/cdiv.html">triton.language.cdiv</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/ceil.html">triton.language.ceil</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/clamp.html">triton.language.clamp</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/cos.html">triton.language.cos</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/div_rn.html">triton.language.div_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/erf.html">triton.language.erf</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/exp.html">triton.language.exp</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/exp2.html">triton.language.exp2</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/fdiv.html">triton.language.fdiv</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/floor.html">triton.language.floor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/fma.html">triton.language.fma</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/log.html">triton.language.log</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/log2.html">triton.language.log2</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/mod.html">mod</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/maximum.html">triton.language.maximum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/minimum.html">triton.language.minimum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/rsqrt.html">triton.language.rsqrt</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sigmoid.html">triton.language.sigmoid</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sin.html">triton.language.sin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/softmax.html">triton.language.softmax</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sqrt.html">triton.language.sqrt</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/sqrt_rn.html">triton.language.sqrt_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Math_Ops/umulhi.html">triton.language.umulhi</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/tl.load.html">triton.language.load</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/tl.store.html">triton.language.store</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/tl.make_block_ptr.html">triton.language.make_block_ptr</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/tl.advance.html">triton.language.advance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/load_tensor_descriptor.html">triton.language.load_tensor_descriptor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Memory_Pointer_Ops/make_tensor_descriptor.html">triton.language.make_tensor_descriptor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Programming_Model/program_id.html">triton.language.program_id</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Programming_Model/num_programs.html">triton.language.num_programs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Random_Number_Generation/randint4x.html">triton.language.randint4x</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Random_Number_Generation/randint.html">triton.language.randint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Random_Number_Generation/rand.html">triton.language.rand</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Random_Number_Generation/randn.html">triton.language.randn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/argmax.html">triton.language.argmax</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/argmin.html">triton.language.argmin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/max.html">triton.language.max</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/min.html">triton.language.min</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/reduce.html">triton.language.reduce</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/sum.html">triton.language.sum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Reduction_Ops/xor_sum.html">triton.language.xor_sum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/associative_scan.html">triton.language.associative_scan</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/cumprod.html">triton.language.cumprod</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/cumsum.html">triton.language.cumsum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/histogram.html">triton.language.histogram</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Scan_Sort_Ops/sort.html">triton.language.sort</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/broadcast.html">triton.language.broadcast</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/broadcast_to.html">triton.language.broadcast_to</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/expand_dims.html">triton.language.expand_dims</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/interleave.html">triton.language.interleave</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/join.html">triton.language.join</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/permute.html">triton.language.permute</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/ravel.html">triton.language.ravel</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/reshape.html">triton.language.reshape</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/split.html">triton.language.split</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/trans.html">triton.language.trans</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Shape_Manipulation_Ops/view.html">triton.language.view</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/extract_slice.html">triton.language.extract_slice</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/Extension_Ops/insert_slice.html">triton.language.insert_slice</a></li>
+</ul>
+</li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../triton_api/triton/index.html">triton</a><input aria-label="Toggle navigation of triton" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/jit.html">triton.jit</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/autotune.html">triton.autotune</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/heuristics.html">triton.heuristics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../triton_api/triton/Config.html">triton.Config</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Libdevice 开发者手册</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../libdevice/libdevice_developer_guide.html">Libdevice 开发者手册</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">环境变量</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../environment_variable_reference.html">环境变量</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">常见问题</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../FAQ.html">Triton-Ascend FAQ</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="../_sources/migration_guide/performance_guidelines.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section id="npu">
+<h1>NPU高性能编程指南<a class="headerlink" href="#npu" title="Link to this heading">¶</a></h1>
+<section id="grid">
+<h2>合并Grid分核<a class="headerlink" href="#grid" title="Link to this heading">¶</a></h2>
+<section id="id1">
+<h3>一、自动合并Grid分核优化原则<a class="headerlink" href="#id1" title="Link to this heading">¶</a></h3>
+<p>部分场景下，Triton算子从GPU迁移到NPU。由于体系结构的差异，基于GPU开发的Triton算子Grid分核数较多。在NPU上执行时，无法一次全部调度，多轮下发导致下发时延过大，影响算子性能。基于NPU优Triton算子过程中，需要首先检查Grid分核数。当分核数较大时，使用TRITON_ALL_BLOCKS_PARALLEL环境变量提升算子执行性能。</p>
+</section>
+</section>
+<section id="id2">
+<h2>指令并行优化<a class="headerlink" href="#id2" title="Link to this heading">¶</a></h2>
+<section id="id3">
+<h3>一、指令并行优化核心原则<a class="headerlink" href="#id3" title="Link to this heading">¶</a></h3>
+<p>Triton算子在NPU上执行时，为了提升性能，NPU底层提供multi buffer、指令并行等并行机制，将“数据搬入/数据计算/数据搬出”并行起来，以此来提升性能；但是某些场景下存在multi buffer无法使能问题，影响并行度，导致算子执行性能降低；在性能优化过程中，存在此类问题时，可以参考以下几点做排查，并按照代码示例优化：<br />
+1、数据搬运和计算存在数据依赖，产生同步，必须依赖Vector运算后，才能触发MTE搬运，导致并行度低；<br />
+2、算子内，无多个数据加载或者单次执行完成无Tiling切分，该场景下无法使能multi buffer；<br />
+3、multi buffer需要额外增加UB空间的使用，计算过程中UB空间不足，无法使能multi buffer；</p>
+</section>
+<section id="id4">
+<h3>二、代码示例<a class="headerlink" href="#id4" title="Link to this heading">¶</a></h3>
+<ul>
+<li><p>示例1：减少同步，提升并行度</p>
+<p>在算子调优过程中，增加指令并行度是算子调优的重要手段。在如下的tl.load语句中，当N &gt; M时, load加载的数据只能填充部分data指向的tensor内存空间中，剩下未填充的部分，如果用户未指定other值，则GPU默认填充为0，为了减少用户迁移的适配工作，NPU保持行为和GPU一致。NPU会先用Vector核对data指向的全部内存空间设置为指定值(如果用户未指定other值，同样设置为0)，然后在使用MTE2指令搬运数据到data指向的部分内存空间，这样就会导致MTE2和Vector产生依赖，无法高效并行，影响性能：</p>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span><span class="gu">@triton.jit</span>
+def npu_vector_add_kernel(
+<span class="w"> </span>   input,                          # [Tensor] input tensor (1 x col)     
+<span class="w"> </span>   output,                         # [Tensor] output tensor (1 x col)
+<span class="w"> </span>   M: tl.constexpr,                # len of the vector
+<span class="w"> </span>   BLOCK_SIZE: tl.constexpr
+):
+<span class="w"> </span>   N :tl.constexpr = BLOCK_SIZE
+<span class="w"> </span>   idx = tl.arange(0, N)
+<span class="w"> </span>   mask = idx &lt; M
+<span class="w"> </span>   data = tl.load(input + idx, mask = mask) # 或者指定other=-1等值
+</pre></div>
+</div>
+<p>为了提升性能，在load加载数据只能部分填充到指向的内存空间时，如果未填充的部分不影响后续的计算结果，可以在load语句中，添加care_padding=False来去掉默认值的填充，增加并行度，提升性能，上面算子的优化写法如下：</p>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span><span class="gu">@triton.jit</span>
+def npu_vector_add_kernel(
+<span class="w"> </span>   input,                          # [Tensor] input tensor (1 x col)     
+<span class="w"> </span>   output,                         # [Tensor] output tensor (1 x col)
+<span class="w"> </span>   M: tl.constexpr,                # len of the vector
+<span class="w"> </span>   BLOCK_SIZE: tl.constexpr
+):
+<span class="w"> </span>   idx = tl.arange(0, N)
+<span class="w"> </span>   mask = idx &lt; M
+<span class="gd">-   data = tl.load(input + idx, mask = mask) # 或者指定other=-1等值</span>
+<span class="gi">+   data = tl.load(input + idx, mask = mask, care_padding=False) # 或者指定other=-1等值</span>
+</pre></div>
+</div>
+</li>
+<li><p>示例2：在Triton算子内，使用for循环，增加Tiling，提升并行度</p>
+<p>在Triton算子编程中，mask运算经常运用在load/store/where等语法中，在性能优化过程中，需要特别注意这类运算导致的性能下降。当Triton算子内逻辑是单次顺序执行，开始-&gt;数据搬入-&gt;计算-&gt;数据搬出-&gt;结束，指令无法并行，执行效率低;可以通过在算子使用for循环增加tiling，将单次处理量减少，多次处理，能够让”数据搬入/计算/数据搬出”并行起来，减少串行的等待时间，提升整体性能；同时使用for循环增加Tiling，也能降低单次处理消耗的UB空间。
+需要注意：增加数据Tiling也同时需要考虑改变数据切块后的数学是否等价。</p>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span><span class="gu">@triton.jit</span>
+def alloc_extend_kernel(
+<span class="w"> </span>       pre_lens_ptr,
+<span class="w"> </span>       seq_lens_ptr,
+<span class="w"> </span>       free_page_ptr,
+<span class="w"> </span>       out_indices,
+<span class="w"> </span>       bs_upper: tl.constexpr,
+<span class="w"> </span>       page_size: tl.constexpr,
+<span class="w"> </span>       max_num_extend_tokens: tl.constexpr,
+<span class="gi">+       BLOCK_SIZE: tl.constexpr = 1024,</span>
+):
+<span class="w"> </span>   pid = tl.program_id(0)
+
+<span class="w"> </span>   load_offset = tl.arange(0, bs_upper)
+<span class="w"> </span>   seq_lens = tl.load(seq_lens_ptr + load_offset, mask=load_offset &lt;= pid)
+<span class="w"> </span>   pre_lens = tl.load(pre_lens_ptr + load_offset, mask=load_offset &lt;= pid)
+<span class="w"> </span>   extend_lens = seq_lens - pre_lens
+
+<span class="w"> </span>   seq_len = tl.load(seq_lens_ptr + pid)
+<span class="w"> </span>   pre_len = tl.load(pre_lens_ptr + pid)
+<span class="w"> </span>   extend_len = seq_len - pre_len
+
+<span class="w"> </span>   sum_extend_lens = tl.sum(extend_lens)
+<span class="w"> </span>   output_start_loc = sum_extend_lens - extend_len
+
+<span class="w"> </span>   num_pages_after = (seq_lens + page_size - 1) // page_size
+<span class="w"> </span>   num_pages_before = (pre_lens + page_size - 1) // page_size
+<span class="w"> </span>   num_new_pages = num_pages_after - num_pages_before
+
+<span class="w"> </span>   num_page_start_loc_self = (seq_len + page_size - 1) // page_size - (
+<span class="w"> </span>           pre_len + page_size - 1
+<span class="w"> </span>   ) // page_size
+<span class="w"> </span>   sum_num_new_pages = tl.sum(num_new_pages)
+<span class="w"> </span>   new_page_start_loc = sum_num_new_pages - num_page_start_loc_self
+
+<span class="w"> </span>   # Part 2: fill the new full pages
+<span class="w"> </span>   num_part2 = (
+<span class="w"> </span>           seq_len // page_size * page_size
+<span class="w"> </span>           - (pre_len + page_size - 1) // page_size * page_size
+<span class="w"> </span>   )
+
+<span class="gd">-   # load data at once</span>
+<span class="gd">-   offset_many_page = tl.arange(0, max_num_extend_tokens)</span>
+<span class="gd">-   page_start = tl.load(</span>
+<span class="gd">-       free_page_ptr + new_page_start_loc + offset_many_page // page_size,</span>
+<span class="gd">-       mask=offset_many_page &lt; num_part2,</span>
+<span class="gd">-   )</span>
+<span class="gd">-   tl.store(</span>
+<span class="gd">-       out_indices + output_start_loc + offset_many_page,</span>
+<span class="gd">-       page_start * page_size + offset_many_page % page_size,</span>
+<span class="gd">-       mask=offset_many_page &lt; num_part2,</span>
+<span class="gd">-   )</span>
+
+<span class="gi">+   # load data using loop</span>
+<span class="gi">+   num_loop = tl.cdiv(max_num_extend_tokens, BLOCK_SIZE)</span>
+<span class="gi">+   blk_offset = tl.arange(0, BLOCK_SIZE)</span>
+<span class="gi">+   for i in range(num_loop):</span>
+<span class="gi">+       offset_many_page = blk_offset + i * BLOCK_SIZE</span>
+<span class="gi">+       page_start = tl.load(</span>
+<span class="gi">+           free_page_ptr + new_page_start_loc + offset_many_page // page_size,</span>
+<span class="gi">+           mask=offset_many_page &lt; num_part2,</span>
+<span class="gi">+       )</span>
+<span class="gi">+       tl.store(</span>
+<span class="gi">+           out_indices + output_start_loc + offset_many_page,</span>
+<span class="gi">+           page_start * page_size + offset_many_page % page_size,</span>
+<span class="gi">+           mask=offset_many_page &lt; num_part2,</span>
+<span class="gi">+       )</span>
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+</section>
+<section id="id5">
+<h2>数据类型优化<a class="headerlink" href="#id5" title="Link to this heading">¶</a></h2>
+<section id="id6">
+<h3>一、数据类型优化核心原则<a class="headerlink" href="#id6" title="Link to this heading">¶</a></h3>
+<p>A2/A3向量运算单元的部分运算操作不支持某些数据类型，这种场景下，对应的矢量运算会退化为标量运算，影响性能，在确定不影响整体算子精度的情况下，建议使用支持的数据类型，提升性能
+主要涉及以下操作</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p><strong>OP名称</strong></p></th>
+<th class="head"><p><strong>不支持的数据类型</strong></p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Vector ADD</p></td>
+<td><p>int64</p></td>
+</tr>
+<tr class="row-odd"><td><p>Vector CMP</p></td>
+<td><p>int64/int32</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="id7">
+<h3>二、代码示例<a class="headerlink" href="#id7" title="Link to this heading">¶</a></h3>
+<ul>
+<li><p>Vector Add Triton算子示例代码</p>
+<p>如下Triton算子，当x, y input tensor使用的数据类型是int64时，会导致x1+y1运算展开为Scalar运算，降低性能，在不影响精度的情况下，建议使用int32数据类型。</p>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span><span class="gu">@triton.jit</span>
+def npu_vector_add_kernel(
+<span class="w"> </span>   x,                          # [Tensor] input tensor (1 x col)     
+<span class="w"> </span>   y,                          # [Tensor] input tensor (1 x col)
+<span class="w"> </span>   z,                          # [Tensor] output tensor (1 x col)
+<span class="w"> </span>   vector_len: tl.constexpr,   # len of the vector
+<span class="w"> </span>   BLOCK_SIZE: tl.constexpr
+):
+<span class="w"> </span>   pid = tl.program_id(axis=0)
+<span class="w"> </span>   offset = pid * BLOCK_SIZE + tl.arange(BLOCK_SIZE)
+<span class="w"> </span>   len_mask = offset &lt; vector_len
+<span class="w"> </span>   x1 = tl.load(x + offset, mask=len_mask)
+<span class="w"> </span>   y1 = tl.load(y + offset, mask=len_mask)
+<span class="w"> </span>   z1 = x1 + y1
+<span class="w"> </span>   tl.store(z + offset, z1, mask=len_mask)
+</pre></div>
+</div>
+</li>
+<li><p>Vector Cmp Triton算子示例代码</p>
+<p>如下Triton算子，做mask运算时，使用到了Cmp操作，Cmp不支持int64/int32数据类型，会导致cols &lt; N运算展开为Scalar运算，降低性能，在不影响精度的情况下，建议使用fp32数据类型。
+在Triton算子编程中，mask运算经常运用在load/store/where等语法中，在性能优化过程中，需要特别注意这类运算导致的性能下降。</p>
+<div class="highlight-diff notranslate"><div class="highlight"><pre><span></span><span class="gu">@triton.jit</span>
+def npu_vector_cmp_kernel(
+<span class="w"> </span>   X,                 # [Tensor] input tensor (row x col)
+<span class="w"> </span>   Out,               # [Tensor] output tensor (row x col)
+<span class="w"> </span>   Mean,              # [Vector] mean tensor (row, ) of X
+<span class="w"> </span>   Rstd,              # [Vector] std tensor (row, ) of X
+<span class="w"> </span>   stride_x_row,      # [Scalar] stride of row of x
+<span class="w"> </span>   stride_out_row,    # [Scalar] stride of row of out, normally equals to stride_x_row
+<span class="w"> </span>   M,                 # [Scalar] row number
+<span class="w"> </span>   N,                 # [Scalar] col number
+<span class="w"> </span>   eps,               # [Scalar] epsilon to avoid division by zeros
+<span class="w"> </span>   BLOCK_M: tl.constexpr,
+<span class="w"> </span>   BLOCK_N: tl.constexpr
+):
+<span class="w"> </span>   group_m = tl.program_id(0)
+<span class="w"> </span>   group_n = tl.program_id(1)
+<span class="w"> </span>   row = group_m
+
+<span class="w"> </span>   # calculate index &amp; offset
+<span class="w"> </span>   Mean = Mean + group_n * M
+<span class="w"> </span>   Rstd = Rstd + group_n * M
+<span class="w"> </span>   X = X + row * stride_x_row + group_n * N
+<span class="w"> </span>   Out = Out + row * stride_out_row + group_n * N
+
+<span class="w"> </span>   cols = tl.arange(0, BLOCK_N)  # cols is int64
+<span class="w"> </span>   x = tl.load(X + cols, mask=cols &lt; N, other=0.0).to(tl.float32)
+
+<span class="w"> </span>   # calculate mean &amp; rstd
+<span class="w"> </span>   mean = tl.sum(x, axis=0) / N
+<span class="w"> </span>   tl.store(Mean + row, mean)
+<span class="w"> </span>   # [Changed begin]
+<span class="gd">-   xbar = tl.where(cols &lt; N, X - mean, 0.0)</span>
+<span class="gi">+   cols_cmp = cols.to(tl.float32)</span>
+<span class="gi">+   xbar = tl.where(cols_cmp &lt; N, x - mean, 0.0)</span>
+<span class="w"> </span>   # [Changed end]
+
+<span class="w"> </span>   var = tl.sum(xbar * xbar, axis=0) / N
+<span class="w"> </span>   rstd = 1 / tl.sqrt(var + eps)
+<span class="w"> </span>   tl.store(Rstd + row, rstd)
+
+<span class="w"> </span>   # calculate Out
+<span class="w"> </span>   mask = cols &lt; N
+<span class="w"> </span>   out = (x - mean) * rstd
+<span class="w"> </span>   tl.store(Out + cols, out, mask=mask)
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+<footer>
+    <div class="related-pages">
+        
+        
+    </div>
+    <div class="bottom-of-page">
+        <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Huawei
+            </div><div class="last-updated">
+                Last updated on Jul 22, 2026</div>
+        </div>
+        <div class="right-details">
+        </div>
+    </div>
+</footer>
+
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">NPU高性能编程指南</a><ul>
+<li><a class="reference internal" href="#grid">合并Grid分核</a><ul>
+<li><a class="reference internal" href="#id1">一、自动合并Grid分核优化原则</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id2">指令并行优化</a><ul>
+<li><a class="reference internal" href="#id3">一、指令并行优化核心原则</a></li>
+<li><a class="reference internal" href="#id4">二、代码示例</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id5">数据类型优化</a><ul>
+<li><a class="reference internal" href="#id6">一、数据类型优化核心原则</a></li>
+<li><a class="reference internal" href="#id7">二、代码示例</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div>
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-github" viewBox="0 0 24 24">
+    <title>GitHub</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 24 24">
+      <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+    </svg>
+  </symbol>
+</svg>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var iconContainer = document.querySelector('.content-icon-container');
+    if (iconContainer) {
+        var githubLink = document.createElement('div');
+        githubLink.className = 'view-this-page';
+        githubLink.innerHTML = '<a class="muted-link" href="https://github.com/triton-lang/triton-ascend" target="_blank" title="GitHub"><svg><use href="#svg-github"></use></svg><span class="visually-hidden">GitHub</span></a>';
+        var firstChild = iconContainer.firstElementChild;
+        if (firstChild) {
+            iconContainer.insertBefore(githubLink, firstChild);
+        } else {
+            iconContainer.appendChild(githubLink);
+        }
+    }
+    var footerText = document.querySelector('.bottom-of-page .left-details');
+    if (footerText) {
+        footerText.innerHTML = footerText.innerHTML.replace(/Made with[\s\S]*?<a href="https:\/\/github\.com\/pradyunsg\/furo">Furo<\/a>/, '');
+    }
+});
+</script>
+<script src="../_static/documentation_options.js?v=c6e86fd7"></script>
+    <script src="../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../_static/scripts/furo.js?v=46bd48cc"></script>
+    <script src="../_static/lang-switcher.js"></script>
+    </body>
+</html>

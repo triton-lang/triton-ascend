@@ -1,310 +1,298 @@
-# 安装指南
+# Triton-Ascend autotune 使用指南
 
-**Triton-Ascend**是适配华为Ascend处理器的Triton优化版本，主要用于提供高效的核函数自动调优、算子编译及部署能力，支持Ascend Atlas A2/A3/950系列产品，兼容Triton核心语法的同时，针对昇腾NPU特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。
+## 文档定位
 
-## 环境准备
+本文面向已经会写 Triton kernel、也了解社区版 `triton.autotune` 基本概念的用户，重点说明 Triton-Ascend 的推荐用法：
 
-**硬件要求**
+- Triton-Ascend 上的推荐 autotune 写法；
+- `configs=[]` 在 Ascend 后端中的含义；
+- 自动 Tiling 模式的适用边界，以及何时回到手写 `triton.Config`。
 
-- Ascend产品：支持Atlas A2/A3/950系列。
+## 快速上手
 
-- NPU配置：建议至少单卡32GB内存。
+在 Triton-Ascend 上，推荐保留社区版 `@triton.autotune` 的基本写法；当希望系统自动生成并评估候选配置时，将 `configs` 设为 `[]`：
 
-- 操作系统：需Linux系统，具体请参考<a href="https://www.hiascend.com/hardware/compatibility" style="text-decoration: none; color: #0066cc;">兼容性查询助手</a>。本文接下来所有操作均以**Ubuntu**环境演示。
+```python
+import triton
+import triton.language as tl
+import triton.backends.ascend.runtime
 
-**软件依赖**
 
-确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》
-完成驱动与固件安装。
-
-- CANN版本：9.0.0
-- Python版本：python3.11
-- TorchNPU版本：2.7.1.post4
-
-注：更多配套关系请参考[版本说明表](./release_note.md#版本兼容性矩阵)。
-
-## 快速安装
-
-```bash
-pip install triton-ascend --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+@triton.autotune(
+    configs=[],
+    key=["M", "N"],
+)
+@triton.jit
+def kernel(
+    x_ptr,
+    y_ptr,
+    out_ptr,
+    M,
+    N,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
+    ...
 ```
 
-## 源码安装
+这表示：
 
-### 安装依赖
+- `key` 的语义与社区版保持一致，用于决定哪些输入变化会触发重新选择配置；
+- `configs=[]` 在 Triton-Ascend 中表示“由 Ascend backend 自动生成候选配置并完成寻优”，而不是“没有可选配置”。
 
-```bash
-apt update
-apt install zlib1g-dev clang-15 lld-15
-apt install ccache # optional
-update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 100
-update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-15 100
-pip install ninja cmake wheel pybind11 # build-time dependencies
+### 1. 先启用 Ascend 对 autotune 的扩展
+
+只有导入下面这行后，才会进入 Triton-Ascend 的 autotune 扩展路径：
+
+```python
+import triton.backends.ascend.runtime
 ```
 
-### 编译Triton-Ascend
+如果没有这一步，使用的仍然是社区版 `triton.autotune`，`configs=[]` 也不会触发 Ascend 的自动 Tiling 生成。
 
-```bash
-git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
-git checkout main
-pip install -e .
+### 2. `@triton.autotune` 必须直接包在 `@triton.jit` 外层
+
+必须写成下面这种顺序：
+
+```python
+@triton.autotune(configs=[], key=["M", "N"])
+@triton.jit
+def kernel(...):
+    ...
 ```
 
-### 自定义LLVM构建（可选）
+`@triton.autotune` 必须直接包在 `@triton.jit` 外层，不能在两者之间插入其他 decorator。否则会导致无法对 kernel DSL 进行解析，从而无法进入 Triton-Ascend 的自动 Tiling 生成与寻优链路。
 
-如果需要自定义构建LLVM过程的，可以执行下面的步骤去编译Triton-Ascend。
+### 3. `key` 的含义与社区一致
 
-1. **代码准备**：通过`git checkout`检出指定版本的LLVM源码并应用补丁。
+`key` 的本质是 autotune 的 cache key。凡是填入 `key` 的参数，只要取值发生变化，就会触发重新 autotune。
 
-    ```bash
-    git clone --no-checkout https://github.com/llvm/llvm-project.git
-    cd llvm-project
-    git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
-    wget https://raw.githubusercontent.com/triton-lang/triton-ascend/refs/heads/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
-    git apply llvm_patch_f6ded0b.patch
-    ```
+大多数情况下，`key` 里放的是 `M/N/K`、`seq_len`、`hidden_size` 这类 shape 参数，因为它们往往会显著影响最优 Tiling；但 `key` 并不只限于 shape 参数，只要某个参数变化会影响配置选择，也可以放入 `key`。
 
-2. **构建LLVM**：路径`{PATH_TO}`为用户第一步检出LLVM源码的路径。
+### 4. 希望参与自动调优的参数不要被提前固定
 
-    ```bash
-    # /path/to/llvm-install 路径为用户规划的llvm安装路径,需根据实际调整
-    export LLVM_INSTALL_PREFIX=/path/to/llvm-install
-    cd {PATH_TO}/llvm-project
-    mkdir build
-    cd build
-    cmake ../llvm \
-        -G Ninja \
-        -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
-        -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
-        -DCMAKE_LINKER=/usr/bin/lld-15 \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DLLVM_ENABLE_ASSERTIONS=ON \
-        -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
-        -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
-        -DLLVM_ENABLE_LLD=ON \
-        -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
-    ninja install
-    ```
+如果希望某个 `tl.constexpr` 参与自动 Tiling 生成，需要同时满足下面三点：
 
-3. **编译Triton-Ascend**
+- 它本身必须是 Tiling 参数，也就是会影响每个 block（逻辑核）处理的数据规模或 tile 大小的参数；
+- 不要在 launch 时把它显式传值写死；
+- 不要在 kernel 定义里给它设置默认值。
 
-    ```bash
-    git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
-    LLVM_SYSPATH=${LLVM_INSTALL_PREFIX} \
-    TRITON_BUILD_WITH_CCACHE=true \
-    TRITON_BUILD_WITH_CLANG_LLD=true \
-    TRITON_BUILD_PROTON=OFF \
-    TRITON_WHEEL_NAME="triton-ascend" \
-    TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
-    python3 setup.py install
-    ```
+例如下面这种写法，`BLOCK_M` 会参与自动调优：
 
-## 开发镜像
-
-### 检查镜像版本
-
-**表2** CANN版本与镜像标签对照表。
-<table style="table-layout: fixed; width: 100%; border-collapse: collapse;">
-  <tr style="height: 50px;">
-    <th style="width: 20%; border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #f5f5f5;">CANN版本</th>
-    <th style="width: 20%; border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #f5f5f5;">芯片类型</th>
-    <th style="width: 20%; border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #f5f5f5;">Python版本</th>
-    <th style="width: 40%; border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #f5f5f5;">镜像标签</th>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A2</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.10</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0-910b-ubuntu22.04-py3.10</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A3</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.10</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0-a3-ubuntu22.04-py3.10</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A2</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.11</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0-910b-ubuntu22.04-py3.11</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A3</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.11</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0-a3-ubuntu22.04-py3.11</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A2</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.11</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-910b-ubuntu22.04-py3.11</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A3</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.11</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-a3-ubuntu22.04-py3.11</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">950</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.11</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-950-ubuntu22.04-py3.11</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A2</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.12</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-910b-ubuntu22.04-py3.12</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A3</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.12</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-a3-ubuntu22.04-py3.12</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">950</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.12</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-950-ubuntu22.04-py3.12</td>
-  </tr>
-</table>
-
-### 镜像使用
-
-```bash
-# 这里以 9.0.0-a3-ubuntu22.04-py3.11 为例
-docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container \
---security-opt seccomp=unconfined \
---device=/dev/davinci0 \
---device=/dev/davinci1 \
---device=/dev/davinci2 \
---device=/dev/davinci3 \
---device=/dev/davinci4 \
---device=/dev/davinci5 \
---device=/dev/davinci6 \
---device=/dev/davinci7 \
---device=/dev/davinci_manager \
---device=/dev/devmm_svm \
---device=/dev/hisi_hdc \
--v /usr/local/dcmi:/usr/local/dcmi \
--v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi \
--v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi \
--v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
--v /home:/home \
--v /etc/ascend_install.info:/etc/ascend_install.info \
-quay.io/ascend/cann:9.0.0-a3-ubuntu22.04-py3.11 \
-/bin/bash
-
-# 进入容器，可在前面的快速安装和源码安装中任选一种方式安装Triton-Ascend
-docker exec -u root -it triton-ascend_container /bin/bash
+```python
+kernel[grid](
+    x,
+    y,
+    out,
+    M,
+    N,
+)
 ```
 
-## 运行样例
+如果你在 launch 时显式传入：
 
-**运行tutorials中向量加法实例验证结果**
-
-向量加法实例：<a href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py" style="text-decoration: none; color: #0066cc;">01-vector-add.py </a>
-
-```bash
-# 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
-source /usr/local/Ascend/ascend-toolkit/set_env.sh
-# 拉取triton-ascend源码仓及用例（使用源码安装Triton-Ascend的无需重复拉取）
-git clone https://github.com/triton-lang/triton-ascend.git
-# 运行tutorials实例
-python3 ./third_party/ascend/tutorials/01-vector-add.py
+```python
+kernel[grid](
+    x,
+    y,
+    out,
+    M,
+    N,
+    BLOCK_M=128,
+)
 ```
 
-观察到类似的输出即说明环境配置正确：
+那这个参数就已经被固定，不再属于自动生成范围。
 
-```text
-tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
-tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
-The maximum difference between torch and triton is 0.0
+同样，如果在 kernel 定义中给某个调优参数提供了默认值，例如：
+
+```python
+@triton.jit
+def kernel(
+    ...,
+    BLOCK_M: tl.constexpr = 128,
+):
+    ...
 ```
 
-## 安装常见问题
+那么这个参数也不会参与自动调优。对于希望交给框架自动生成和寻优的参数，应该把它保留为“未在 launch 时显式传值、且在 kernel 定义中也没有默认值”的 `tl.constexpr`。
 
-**问题一：安装TorchNPU时出现报错“ERROR: No matching distribution found for torch==2.7.1+cpu”**
+### 5. 如果 Tiling 参数会影响 grid，grid 必须写成 lambda 形式
 
-**解决措施**
+如果某个 Tiling 参数会影响 grid 大小，那么 grid 不能提前写成固定值或只依赖运行时参数的静态表达式，而必须写成依赖 meta 参数的 `lambda` 形式。这一点与社区 autotune 的要求一致。
 
-可以尝试手动安装torch后再安装TorchNPU：
-
-```bash
-pip install torch==2.7.1+cpu --index-url https://download.pytorch.org/whl/cpu
+```python
+grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]),)
 ```
 
-**问题二：编译安装Triton-Ascend时，如果GCC < 9.4.0，可能报错 “ld.lld: error: unable to find library -lstdc++fs”**
+原因是 autotune 在评估不同候选配置时，`BLOCK_M` 这类参数的取值会变化；如果 grid 不随候选配置一起变化，就无法保证每个候选配置都以正确的发射方式执行。
 
-**解决措施**
+## 使用注意事项
 
-一般是链接器无法找到stdc++fs库引起的报错。该库用于支持GCC 9之前版本的文件系统特性。此时需要手动把CMake文件中以下相关代码片段的注释打开。
-文件路径：triton-ascend/CMakeLists.txt
+autotune 的 benchmark 语义与社区一致，会多次执行 kernel。如果 kernel 存在副作用，例如包含原子操作、inplace 写入，或会修改输入/输出 buffer 的累积状态，仍然需要通过社区已有的 hook 机制处理。
 
-```bash
-if (NOT WIN32 AND NOT APPLE)
-link_libraries(stdc++fs)
-endif()
+## Triton-Ascend 相比社区 autotune 的扩展
+
+社区版 `triton.autotune` 的典型模式是：用户手工提供一组 `triton.Config`，框架做 benchmark，然后缓存最优结果。
+
+Triton-Ascend 在保持这套接口习惯不变的前提下，主要扩展了下面几件事。
+
+### 1. 支持 `configs=[]` 自动生成候选配置
+
+这是最核心的扩展。用户不必先手写一组 `triton.Config`，而是可以把 `configs` 留空，让 Ascend backend 根据 kernel DSL 语义和运行时 shape 自动生成候选配置。
+
+### 2. 支持多个 config 的并行编译
+
+当 autotune 需要评估多个候选配置时，Triton-Ascend 默认会并行编译这些候选配置，以缩短首次调优时延。
+
+这一能力默认开启，可通过环境变量 `TRITON_AUTOTUNE_PARALLEL_COMPILE=0` 关闭。
+
+### 3. 支持使用 profiler 采集 kernel 性能
+
+Triton-Ascend 支持在 autotune 做 benchmark 时切换性能采集方式：除了默认 benchmark 模式外，还可以使用 profiler 来采集每个候选 config 的 kernel 性能数据，它只关注 kernel 的片上计算时间，对于执行时间较短的 kernel 比默认性能采集方式更加精确，但会增加一些耗时。这项能力可通过环境变量 `TRITON_BENCH_METHOD='npu'` 开启。
+
+## 自动 Tiling 生成能力的范围与行为
+
+前面的第 1 点说明了 Triton-Ascend 支持 `configs=[]` 自动生成候选配置。对这项能力，进行以下几点说明。
+
+### 1. 自动生成范围聚焦在 Tiling 参数
+
+Ascend 自动生成的重点是 kernel 中与 Tiling 相关的 `tl.constexpr` 参数，也就是影响每个 block（逻辑核）处理的数据规模或 tile 大小的参数。
+
+这套能力不等价于“自动帮你调所有参数”。像 `num_warps`、`num_stages` 这类编译参数，以及 kernel 的非 Tiling 参数，不属于当前自动生成范围。
+
+### 2. 候选配置会带上 Ascend 硬件约束
+
+Ascend backend 在生成候选时，会结合 NPU 的片上存储容量、对齐约束、核数利用等边界做筛选，而不是单纯枚举一批配置再盲目 benchmark。
+
+### 3. 自动 Tiling 模式的目标是方便给出“性能不错”的配置
+
+为了权衡寻优时间和寻优效果，当前自动 Tiling 会对生成配置数量做大量剪枝，因此并不保证自动生成结果一定能达到手工极致调优的性能上限。
+
+这项能力的目标，是在尽量降低用户使用门槛和寻优成本的前提下，方便地给用户提供一个性能还不错的 Tiling 配置。
+
+### 4. 自动 Tiling 生成失败时需要用户手写 `triton.Config`
+
+如果自动 Tiling 模式无法生成任何可用候选配置，这时需要用户改为手写 `triton.Config`。同时也建议对这类场景提 issue，帮助 Triton-Ascend 后续补齐解析和自动生成能力。
+
+## 手写 `triton.Config` 模式
+
+如果自动 Tiling 模式生成失败，或生成的 Tiling 性能未达到预期，直接回到社区标准写法即可。Triton-Ascend 对这部分语义保持兼容：
+
+```python
+@triton.autotune(
+    configs=[
+        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128}),
+        triton.Config({"BLOCK_M": 64, "BLOCK_N": 256}),
+    ],
+    key=["M", "N"],
+)
+@triton.jit
+def kernel(...):
+    ...
 ```
 
-**问题三：执行算子时报错 ModuleNotFoundError: No module named 'triton._C.libtriton.ascend'; 'triton._C.libtriton' is not a package**
+这一模式下：
 
-**根因分析**
+- 配置由用户手工提供；
+- 框架负责 benchmark、选择最优配置和缓存复用；
+- 使用习惯与社区 autotune 保持一致。
 
- triton-ascend目录被triton覆盖,导致triton-ascend功能受损。
+## 进阶用法：自动 Tiling 与其他参数联合调优
 
-**解决措施**
+以下内容属于进阶用法，只有当用户希望在自动 Tiling 模式下，继续联合调优 kernel 的非 Tiling 参数或编译参数时，再考虑使用。
 
- 卸载已损坏的triton-ascend,重新安装即可。以3.2.1 版本为例，可执行如下命令修复：
+### 1. 社区 autotune：手工枚举全部调优参数
 
-```bash
-pip uninstall triton-ascend triton
-pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+社区标准写法是由用户手工枚举所有候选配置：
+
+```python
+@triton.autotune(
+    configs=[
+        triton.Config(
+            {
+                "BLOCK_M": BM,
+                "BLOCK_N": BN,
+                "BLOCK_K": BK,
+                "GROUP_SIZE_M": GS,
+            },
+            num_warps=num_warps,
+        )
+        for BM in [16, 32, 64]
+        for BN in [16, 32, 64]
+        for BK in [16, 32, 64]
+        for GS in [1, 2, 4, 8]
+        for num_warps in [1, 2, 4, 8]
+    ],
+    key=["M", "N", "K"],
+)
+@triton.jit
+def matmul_kernel(a, b, M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, GROUP_SIZE_M):
+    ...
 ```
 
-**问题四：Triton-Ascend 3.2.1版本为何新增依赖triton？**
+### 2. Triton-Ascend：手工枚举 Tiling 参数和 Ascend 编译参数
 
-答复：Triton-Ascend是基于Triton进行的二次开发，与Triton安装目录同名。若用户安装Triton-Ascend之后，在此安装Triton或依赖Triton的三方件，会覆盖Triton目录，导致Triton-Ascend功能受损。
-因此通过增加Triton依赖，当Triton被覆盖安装时会有如下提醒。
+在 Triton-Ascend 中，如果希望继续走手工枚举模式，也可以把 Ascend 侧参数一起放进手工配置空间：
 
-```text
-ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
-triton-ascend 3.2.1 requires triton==3.5.0, but you have triton 3.5.1 which is incompatible.
+```python
+@triton.autotune(
+    configs=[
+        triton.Config(
+            {
+                "BLOCK_M": BM,
+                "BLOCK_N": BN,
+                "BLOCK_K": BK,
+                "GROUP_SIZE_M": GS,
+                "multibuffer": MS,
+            }
+        )
+        for BM in [16, 32, 64]
+        for BN in [16, 32, 64]
+        for BK in [16, 32, 64]
+        for GS in [1, 2, 4, 8]
+        for MS in [False, True]
+    ],
+    key=["M", "N", "K"],
+)
+@triton.jit
+def matmul_kernel(a, b, M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, GROUP_SIZE_M):
+    ...
 ```
 
-若用户遇到且想恢复Triton-Ascend功能，可做如下操作：
+### 3. Triton-Ascend：自动生成 Tiling，同时联合调优其他参数
 
-```bash
-pip uninstall triton-ascend triton
-pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+如果希望 Tiling 参数继续由 `configs=[]` 自动生成，但又希望同时调优其他非 Tiling 参数或编译参数，可以把这些额外搜索维度通过 `hints` 传入：
 
+```python
+@triton.autotune(
+    configs=[],
+    key=["M", "N", "K"],
+    hints={
+        "GROUP_SIZE_M": [1, 2, 4, 8],
+        "multibuffer": [False, True],
+    },
+)
+@triton.jit
+def matmul_kernel(a, b, M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, GROUP_SIZE_M):
+    ...
+
+
+matmul_kernel[grid](a, b, M, N, K)
 ```
 
-**问题五：Triton-Ascend 3.2.1版本依赖的Triton版本为何不一致？**
+这种方式的含义是：
 
-答复：X86与Arm使用不同版本的社区Triton安装包，是因为社区从Triton 3.2版本开始提供X86安装包，而Arm安装包是从Triton 3.5版本开始提供的。
+- Tiling 相关参数仍然由 Triton-Ascend 自动生成；
+- 非 Tiling 参数或编译参数由用户通过 `hints` 显式给出候选集合；
+- autotune 会对两部分组合后的配置空间做评估。
 
-**问题六：如何确认芯片类型**
+## 小结
 
-您可以使用npu-smi命令查看系统上的NPU型号。例如，在npu-smi info命令的输出中，"910B4" 对应芯片类型A2（昇腾910b系列）：
+Triton-Ascend 相比社区 autotune 的关键扩展，不是改变用户接口，而是在社区接口之上增加了“自动生成 Tiling 候选并完成寻优”的能力。对大多数用户来说，最推荐的使用方式就是：
 
-```Text
-root@localhost:/# npu-smi  info
-+------------------------------------------------------------------------------------------------------------------+
-| npu-smi 26.0.rc1                            Version: 26.0.rc1                                                    |
-+---------------------------+---------------+----------------------------------------------------------------------+
-| NPU   Name                | Health        | Power(W)             Temp(C)                 Hugepages-Usage(page)   |
-| Chip                      | Bus-Id        | AICore(%)            Memory-Usage(MB)        HBM-Usage(MB)           |
-+===========================+===============+======================================================================+
-| 0     910B4               | OK            | 82.6                 32                      0    / 0                |
-| 0                         | 0000:C1:00.0  | 0                    0    / 0                2871 / 32768            |
-+===========================+===============+======================================================================+
-+---------------------------+---------------+----------------------------------------------------------------------+
-| NPU     Chip              | Process id    | Process name       | Process memory(MB)    | Process id in container |
-+===========================+===============+======================================================================+
-| No running processes found in NPU 0                                                                              |
-```
+- 保持社区版 `@triton.autotune` 的写法；
+- 将 `configs` 设为 `[]`；
+- 让 Ascend backend 基于 kernel DSL 和运行时 shape 自动完成候选生成、筛选、benchmark 与缓存复用。
+
+如果场景不适合自动 Tiling 模式，再回到手写 `triton.Config` 即可。

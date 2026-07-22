@@ -18,7 +18,7 @@ func.func @test_clone_ops(%arg0: index, %arg1: index, %arg2: tensor<32x128xbf16>
     %subview_52 = memref.subview %reinterpret_cast_51[0, 0] [%arg1, 128] [1, 1] {ssbuffer.block_id = 7 : i32} : memref<32x128xbf16, strided<[640, 1], offset: ?>> to memref<?x128xbf16, strided<[640, 1], offset: ?>>
     %subview_53 = memref.subview %alloc_50[0, 0] [%arg1, 128] [1, 1] {ssbuffer.block_id = 7 : i32} : memref<32x128xbf16> to memref<?x128xbf16, strided<[128, 1]>>
     memref.copy %subview_52, %subview_53 {ssbuffer.block_id = 7 : i32} : memref<?x128xbf16, strided<[640, 1], offset: ?>> to memref<?x128xbf16, strided<[128, 1]>>
-    %92 = bufferization.to_tensor %alloc_50 restrict writable {ssbuffer.block_id = 7 : i32} : memref<32x128xbf16>
+    %92 = bufferization.to_tensor %alloc_50 restrict writable {ssbuffer.block_id = 7 : i32} : memref<32x128xbf16> to tensor<32x128xbf16>
     %alloc_60 = memref.alloc() {ssbuffer.block_id = 8 : i32} : memref<32x128xbf16>
     scf.if %cmp {
       linalg.fill {ssbuffer.block_id = 8 : i32} ins(%cst_7 : bf16) outs(%alloc_60 : memref<32x128xbf16>)
@@ -27,7 +27,7 @@ func.func @test_clone_ops(%arg0: index, %arg1: index, %arg2: tensor<32x128xbf16>
     %subview_62 = memref.subview %reinterpret_cast_61[0, 0] [%arg1, 128] [1, 1] {ssbuffer.block_id = 8 : i32} : memref<32x128xbf16, strided<[640, 1], offset: ?>> to memref<?x128xbf16, strided<[640, 1], offset: ?>>
     %subview_63 = memref.subview %alloc_60[0, 0] [%arg1, 128] [1, 1] {ssbuffer.block_id = 8 : i32} : memref<32x128xbf16> to memref<?x128xbf16, strided<[128, 1]>>
     memref.copy %subview_62, %subview_63 {ssbuffer.block_id = 8 : i32} : memref<?x128xbf16, strided<[640, 1], offset: ?>> to memref<?x128xbf16, strided<[128, 1]>>
-    %93 = bufferization.to_tensor %alloc_60 restrict writable {ssbuffer.block_id = 8 : i32} : memref<32x128xbf16>
+    %93 = bufferization.to_tensor %alloc_60 restrict writable {ssbuffer.block_id = 8 : i32} : memref<32x128xbf16> to tensor<32x128xbf16>
     %empty_transpose = tensor.empty() {ssbuffer.block_id = 8 : i32} : tensor<128x32xbf16>
     // CHECK: scf.if
     // CHECK: } {hivm.unlikely_condition, ssbuffer.block_id = 8 : i32, ssbuffer.clone = 7 : i32}

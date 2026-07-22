@@ -113,12 +113,12 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         %comsumer = scf.if %45 -> (tensor<64x128xf16>) {
           %48 = hivm.hir.convert_layout %alloc_11 output_shape [64, 128] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.transfer_id = 1 : i32} : (memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) -> memref<64x128xf16, #hivm.address_space<cbuf>>
           %memspacecast1 = memref.memory_space_cast %48 : memref<64x128xf16, #hivm.address_space<cbuf>> to memref<64x128xf16>
-          %46 = bufferization.to_tensor %memspacecast1 restrict writable  : memref<64x128xf16>
+          %46 = bufferization.to_tensor %memspacecast1 restrict writable  : memref<64x128xf16> to tensor<64x128xf16>
           scf.yield %46 : tensor<64x128xf16>
         } else {
           %48 = hivm.hir.convert_layout %alloc_15 output_shape [64, 128] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.transfer_id = 1 : i32} : (memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) -> memref<64x128xf16, #hivm.address_space<cbuf>>
           %memspacecast1 = memref.memory_space_cast %48 : memref<64x128xf16, #hivm.address_space<cbuf>> to memref<64x128xf16>
-          %46 = bufferization.to_tensor %memspacecast1 restrict writable  : memref<64x128xf16>
+          %46 = bufferization.to_tensor %memspacecast1 restrict writable  : memref<64x128xf16> to tensor<64x128xf16>
           scf.yield %46 : tensor<64x128xf16>
         } {ssbuffer.block_id = 3 : i32, ssbuffer.crossDeps = [1 : i32, 0 : i32]}
         %55 = hivm.hir.convert_layout %alloc_12 output_shape [128, 64] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 3 : i32, ssbuffer.crossDeps = [2 : i32, 0 : i32], ssbuffer.transfer_id = 2 : i32} : (memref<4x8x16x16xf16, #hivm.address_space<cbuf>>) -> memref<128x64xf16, #hivm.address_space<cbuf>>

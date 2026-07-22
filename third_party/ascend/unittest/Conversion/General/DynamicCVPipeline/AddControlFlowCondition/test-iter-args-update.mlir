@@ -45,7 +45,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910_9589">} {
         linalg.fill {ssbuffer.block_id = 4 : i32} ins(%cst_1 : f32) outs(%alloc_1 : memref<32x32xf32>)
       } {hivm.unlikely_condition, ssbuffer.block_id = 4 : i32}
       %25 = arith.addi %3, %arg38 {ssbuffer.block_id = 4 : i32} : index
-      %26 = bufferization.to_tensor %alloc_1 restrict writable {ssbuffer.block_id = 4 : i32} : memref<32x32xf32>
+      %26 = bufferization.to_tensor %alloc_1 restrict writable {ssbuffer.block_id = 4 : i32} : memref<32x32xf32> to tensor<32x32xf32>
       %27 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 4 : i32} ins(%26, %15 : tensor<32x32xf32>, tensor<32x32xf32>) outs(%16 : tensor<32x32xf32>) -> tensor<32x32xf32>
       %28 = arith.index_cast %8 {ssbuffer.block_id = 4 : i32} : i32 to index
       %29 = arith.addi %arg38, %28 {ssbuffer.block_id = 4 : i32} : index

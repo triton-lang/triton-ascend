@@ -3,8 +3,14 @@ add_triton_library(TritonToGraph
   ControlFlowGraph.cpp
   ControlFlowGraphBuilder.cpp
   DataflowGraph.cpp
+  GraphOptimizationContext.cpp
+  GraphOptimizationPass.cpp
   MemorySsaBuilder.cpp
+  PermutationAnalysis.cpp
   Passes.cpp
+  Rules/LoadStoreTransposeRule.cpp
+  Rules/TransposePointwiseReorderRule.cpp
+  Rules/UBPreloadRule.cpp
 
   DEPENDS
   TritonToGraphPassIncGen

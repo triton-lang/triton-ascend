@@ -27,7 +27,7 @@ import test_common
 
 
 @triton.jit
-def kernel_chunk_coalescing_axis1(src, dst, N: tl.constexpr, BLOCK: tl.constexpr):
+def kernel_tile_chunk_coalescing_axis1(src, dst, N: tl.constexpr, BLOCK: tl.constexpr):
     batch = tl.program_id(0)
     tile = tl.program_id(1)
     offsets = tile * BLOCK + tl.arange(0, BLOCK)
@@ -38,7 +38,7 @@ def kernel_chunk_coalescing_axis1(src, dst, N: tl.constexpr, BLOCK: tl.constexpr
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float16"])
-def test_chunk_coalescing_grid_axis1_e2e(dtype):
+def test_tile_chunk_coalescing_grid_axis1_e2e(dtype):
     batch = 2
     block = 16
     num_tiles = 32
@@ -46,7 +46,7 @@ def test_chunk_coalescing_grid_axis1_e2e(dtype):
     src = test_common.generate_tensor((batch, n), dtype).npu()
     dst = torch.empty_like(src)
 
-    kernel_chunk_coalescing_axis1[(batch, num_tiles)](
+    kernel_tile_chunk_coalescing_axis1[(batch, num_tiles)](
         src,
         dst,
         n,

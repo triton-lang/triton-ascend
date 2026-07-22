@@ -11,10 +11,7 @@ add_triton_library(TritonToLinalg
         ImplicitPermute.cpp
         StridedLoadStoreRewrite.cpp
         StridedAxisCoalescing.cpp
-        DiagonalMaskRemoval.cpp
-        ConvertModuloToMask.cpp
-        RowCoalescing.cpp
-        ChunkCoalescing.cpp
+        TileChunkCoalescing.cpp
         DescriptorConverter.cpp
         MarkTensorKindPass.cpp
         DevicePrintOffsetRewrite.cpp

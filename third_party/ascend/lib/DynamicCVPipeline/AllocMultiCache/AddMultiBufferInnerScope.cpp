@@ -509,14 +509,17 @@ static bool isEmptyFillPattern(Value depVal)
 SmallVector<Value> collectBufferValues(DenseMap<Value, SmallVector<Value>> &depValueMap)
 {
     SmallVector<Value> valueList;
-    SmallVector<Operation *> seenOps;
+    SmallVector<Value> seenVals;
 
     for (auto &p : depValueMap) {
         for (Value depVal : p.second) {
-            Operation *op = depVal.getDefiningOp();
-            if (!op || llvm::is_contained(seenOps, op))
+            if (llvm::is_contained(seenVals, depVal))
                 continue;
-            seenOps.push_back(op);
+            seenVals.push_back(depVal);
+
+            Operation *op = depVal.getDefiningOp();
+            if (!op)
+                continue;
 
             auto shapedType = dyn_cast<ShapedType>(depVal.getType());
             if (!shapedType)
@@ -1275,14 +1278,27 @@ static int processNormalConsumerBlock(OpBuilder &consumedBuilder, Value depVal, 
                 use.set(selectedBuffer);
         }
     }
+
+    // Also replace depVal in the block's terminator (yield op) if present.
+    // This handles multi-result ops whose results flow through scf.yield in
+    // multi-region consumer ops (e.g. the then-branch of an scf.if).
+    if (!opsInBlock.empty()) {
+        Block *blk = opsInBlock.front()->getBlock();
+        if (auto yieldOp = dyn_cast<scf::YieldOp>(blk->getTerminator())) {
+            for (OpOperand &use : yieldOp->getOpOperands()) {
+                if (use.get() == depVal)
+                    use.set(selectedBuffer);
+            }
+        }
+    }
+
     return 0;
 }
 
-// Handle all regions (except region 0) when depVal is used in that region's yield
+// Handle all regions when depVal is used in that region's yield
 // Generic version: supports any op with >= 2 regions (scf.if, scf.while, etc.)
-// For scf.if: handles else region (region index 1)
-// For scf.while: handles after region (region index 1)
-// For any op with 3+ regions: handles all regions from index 1 onwards
+// For scf.if: handles both then (region 0) and else (region 1)
+// For scf.while: handles both before (region 0) and after (region 1)
 static int processMultiRegionAllYields(OpBuilder &consumedBuilder, Value depVal, SmallVector<BufferPair> &buffers,
                                        mlir::scf::ForOp mainLoopForOp, Operation *depUser, int userBlockId,
                                        int groupId)
@@ -1291,8 +1307,8 @@ static int processMultiRegionAllYields(OpBuilder &consumedBuilder, Value depVal,
     if (depUser->getNumRegions() < 2)
         return 0;
 
-    // Iterate through all regions (from region 1 onwards, excluding region 0)
-    for (size_t i = 1; i < depUser->getNumRegions(); ++i) {
+    // Iterate through all regions (including region 0 for then/before branches)
+    for (size_t i = 0; i < depUser->getNumRegions(); ++i) {
         Region &region = depUser->getRegion(i);
         if (region.empty())
             continue;
@@ -1635,7 +1651,7 @@ static int processTensorDependencies(mlir::scf::ForOp mainLoopForOp, DenseMap<Va
                                      DenseMap<Value, SmallVector<Operation *>> &depUserMap, BufferMap &bufferMap,
                                      OpBuilder &globalBuilder, int &groupId)
 {
-    SmallVector<Operation *> seenOps;
+    SmallVector<Value> seenVals;
 
     for (auto &blockPair : blocks) {
         Value blockKey = blockPair.first;
@@ -1646,10 +1662,10 @@ static int processTensorDependencies(mlir::scf::ForOp mainLoopForOp, DenseMap<Va
         SmallVector<Value> &depValues = depIt->second;
 
         for (Value depVal : depValues) {
-            // Skip if already processed
-            if (llvm::is_contained(seenOps, depVal.getDefiningOp()))
+            // Skip if already processed (dedup by Value to handle multi-result ops)
+            if (llvm::is_contained(seenVals, depVal))
                 continue;
-            seenOps.push_back(depVal.getDefiningOp());
+            seenVals.push_back(depVal);
 
             // Validate dependency value (skip BlockArgument, null definingOp, non-ShapedType)
             if (isa<BlockArgument>(depVal) || !depVal.getDefiningOp() || !isa<ShapedType>(depVal.getType()))

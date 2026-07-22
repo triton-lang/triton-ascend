@@ -269,7 +269,7 @@ static int filterMemCrossCoreDepsByMainLoop(
 int initCrossCoreDependentMap(ModuleOp module, ControlFlowConditionInfo *info) {
   llvm::DenseMap<int, SmallVector<std::pair<Operation *, int>>>
       crossDepsByGroup;
-  if (collectDepsByGroup(module, CVPipeline::kCrossDeps.data(),
+  if (collectDepsByGroup(module, CVPipeline::kCrossCoreDeps.data(),
                          crossDepsByGroup) != 0) {
     LDBG("collectDepsByGroup on crossDeps Failed!");
     return -1;

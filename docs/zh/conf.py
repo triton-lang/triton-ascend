@@ -73,6 +73,10 @@ html_css_files = [
     "custom.css",
 ]
 
+html_js_files = [
+    "mermaid.js",
+]
+
 import os as _os
 import sys as _sys
 import importlib.util as _ilu

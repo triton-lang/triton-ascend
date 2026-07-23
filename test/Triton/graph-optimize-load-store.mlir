@@ -1,4 +1,4 @@
-// RUN: triton-opt %s --verify-each -graph-optimize='rule-mask=1' -o - | FileCheck %s --implicit-check-not=tensor.insert_slice
+// RUN: triton-opt %s --verify-each -graph-optimize -o - | FileCheck %s --implicit-check-not=tensor.insert_slice
 
 // CHECK-LABEL: tt.func @transpose_square_load_store(
 // The original destination root is immediately followed by the rebuilt load
@@ -1065,6 +1065,194 @@ tt.func @reject_unary_chain_cross_block(%source: !tt.ptr<f32>, %destination: !tt
   cf.br ^next
 ^next:
   %negated = arith.negf %loaded : tensor<2x2xf32>
+  tt.store %destination_addresses, %negated : tensor<2x2x!tt.ptr<f32>>
+  tt.return
+}
+
+// Same-base intermediate accesses are safe only when their closed offset
+// interval is disjoint from both candidate accesses.
+// CHECK-LABEL: tt.func @transpose_with_disjoint_intervening_store(
+// CHECK: %[[REINDEXED_SOURCE:.*]] = tt.addptr %{{.*}}, %{{.*}} : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+// CHECK-NEXT: %[[REINDEXED_LOAD:.*]] = tt.load %[[REINDEXED_SOURCE]] : tensor<2x2x!tt.ptr<f32>>
+// CHECK-NEXT: %[[REINDEXED_NEG:.*]] = arith.negf %[[REINDEXED_LOAD]] : tensor<2x2xf32>
+// CHECK: tt.store %{{.*}}, %{{.*}} : tensor<4x!tt.ptr<f32>>
+// CHECK: %[[REINDEXED_DESTINATION:.*]] = tt.addptr %{{.*}}, %{{.*}} : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+// CHECK-NEXT: tt.store %[[REINDEXED_DESTINATION]], %[[REINDEXED_NEG]] : tensor<2x2x!tt.ptr<f32>>
+tt.func @transpose_with_disjoint_intervening_store(%base: !tt.ptr<f32>) {
+  %source_row = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %source_column = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %source_row_expanded = tt.expand_dims %source_row {axis = 1 : i32} : tensor<2xi32> -> tensor<2x1xi32>
+  %source_column_expanded = tt.expand_dims %source_column {axis = 0 : i32} : tensor<2xi32> -> tensor<1x2xi32>
+  %two = arith.constant 2 : i32
+  %one = arith.constant 1 : i32
+  %source_row_stride = tt.splat %two : i32 -> tensor<2x1xi32>
+  %source_column_stride = tt.splat %one : i32 -> tensor<1x2xi32>
+  %source_row_offsets = arith.muli %source_row_expanded, %source_row_stride : tensor<2x1xi32>
+  %source_column_offsets = arith.muli %source_column_expanded, %source_column_stride : tensor<1x2xi32>
+  %source_row_broadcast = tt.broadcast %source_row_offsets : tensor<2x1xi32> -> tensor<2x2xi32>
+  %source_column_broadcast = tt.broadcast %source_column_offsets : tensor<1x2xi32> -> tensor<2x2xi32>
+  %source_offsets = arith.addi %source_row_broadcast, %source_column_broadcast : tensor<2x2xi32>
+  %source_base = tt.splat %base : !tt.ptr<f32> -> tensor<2x2x!tt.ptr<f32>>
+  %source_addresses = tt.addptr %source_base, %source_offsets : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+  %destination_row = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %destination_column = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %destination_row_expanded = tt.expand_dims %destination_row {axis = 1 : i32} : tensor<2xi32> -> tensor<2x1xi32>
+  %destination_column_expanded = tt.expand_dims %destination_column {axis = 0 : i32} : tensor<2xi32> -> tensor<1x2xi32>
+  %destination_row_stride = tt.splat %two : i32 -> tensor<2x1xi32>
+  %destination_column_stride = tt.splat %one : i32 -> tensor<1x2xi32>
+  %destination_row_offsets = arith.muli %destination_row_expanded, %destination_row_stride : tensor<2x1xi32>
+  %destination_column_offsets = arith.muli %destination_column_expanded, %destination_column_stride : tensor<1x2xi32>
+  %destination_row_broadcast = tt.broadcast %destination_row_offsets : tensor<2x1xi32> -> tensor<2x2xi32>
+  %destination_column_broadcast = tt.broadcast %destination_column_offsets : tensor<1x2xi32> -> tensor<2x2xi32>
+  %destination_offsets = arith.addi %destination_row_broadcast, %destination_column_broadcast : tensor<2x2xi32>
+  %destination_base = tt.splat %base : !tt.ptr<f32> -> tensor<2x2x!tt.ptr<f32>>
+  %destination_addresses = tt.addptr %destination_base, %destination_offsets : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+  %loaded = tt.load %source_addresses : tensor<2x2x!tt.ptr<f32>>
+  %negated = arith.negf %loaded : tensor<2x2xf32>
+  %side_offsets = tt.make_range {end = 8 : i32, start = 4 : i32} : tensor<4xi32>
+  %side_base = tt.splat %base : !tt.ptr<f32> -> tensor<4x!tt.ptr<f32>>
+  %side_addresses = tt.addptr %side_base, %side_offsets : tensor<4x!tt.ptr<f32>>, tensor<4xi32>
+  %zero = arith.constant 0.0 : f32
+  %side_values = tt.splat %zero : f32 -> tensor<4xf32>
+  tt.store %side_addresses, %side_values : tensor<4x!tt.ptr<f32>>
+  tt.store %destination_addresses, %negated : tensor<2x2x!tt.ptr<f32>>
+  tt.return
+}
+
+// CHECK-LABEL: tt.func @transpose_with_disjoint_intervening_load(
+// CHECK: %[[REINDEXED_SOURCE:.*]] = tt.addptr %{{.*}}, %{{.*}} : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+// CHECK-NEXT: %[[REINDEXED_LOAD:.*]] = tt.load %[[REINDEXED_SOURCE]] : tensor<2x2x!tt.ptr<f32>>
+// CHECK-NEXT: %[[REINDEXED_NEG:.*]] = arith.negf %[[REINDEXED_LOAD]] : tensor<2x2xf32>
+// CHECK: %{{.*}} = tt.load %{{.*}} : tensor<4x!tt.ptr<f32>>
+// CHECK: %[[REINDEXED_DESTINATION:.*]] = tt.addptr %{{.*}}, %{{.*}} : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+// CHECK-NEXT: tt.store %[[REINDEXED_DESTINATION]], %[[REINDEXED_NEG]] : tensor<2x2x!tt.ptr<f32>>
+tt.func @transpose_with_disjoint_intervening_load(%base: !tt.ptr<f32>) {
+  %source_row = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %source_column = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %source_row_expanded = tt.expand_dims %source_row {axis = 1 : i32} : tensor<2xi32> -> tensor<2x1xi32>
+  %source_column_expanded = tt.expand_dims %source_column {axis = 0 : i32} : tensor<2xi32> -> tensor<1x2xi32>
+  %two = arith.constant 2 : i32
+  %one = arith.constant 1 : i32
+  %source_row_stride = tt.splat %two : i32 -> tensor<2x1xi32>
+  %source_column_stride = tt.splat %one : i32 -> tensor<1x2xi32>
+  %source_row_offsets = arith.muli %source_row_expanded, %source_row_stride : tensor<2x1xi32>
+  %source_column_offsets = arith.muli %source_column_expanded, %source_column_stride : tensor<1x2xi32>
+  %source_row_broadcast = tt.broadcast %source_row_offsets : tensor<2x1xi32> -> tensor<2x2xi32>
+  %source_column_broadcast = tt.broadcast %source_column_offsets : tensor<1x2xi32> -> tensor<2x2xi32>
+  %source_offsets = arith.addi %source_row_broadcast, %source_column_broadcast : tensor<2x2xi32>
+  %source_base = tt.splat %base : !tt.ptr<f32> -> tensor<2x2x!tt.ptr<f32>>
+  %source_addresses = tt.addptr %source_base, %source_offsets : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+  %destination_row = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %destination_column = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %destination_row_expanded = tt.expand_dims %destination_row {axis = 1 : i32} : tensor<2xi32> -> tensor<2x1xi32>
+  %destination_column_expanded = tt.expand_dims %destination_column {axis = 0 : i32} : tensor<2xi32> -> tensor<1x2xi32>
+  %destination_row_stride = tt.splat %two : i32 -> tensor<2x1xi32>
+  %destination_column_stride = tt.splat %one : i32 -> tensor<1x2xi32>
+  %destination_row_offsets = arith.muli %destination_row_expanded, %destination_row_stride : tensor<2x1xi32>
+  %destination_column_offsets = arith.muli %destination_column_expanded, %destination_column_stride : tensor<1x2xi32>
+  %destination_row_broadcast = tt.broadcast %destination_row_offsets : tensor<2x1xi32> -> tensor<2x2xi32>
+  %destination_column_broadcast = tt.broadcast %destination_column_offsets : tensor<1x2xi32> -> tensor<2x2xi32>
+  %destination_offsets = arith.addi %destination_row_broadcast, %destination_column_broadcast : tensor<2x2xi32>
+  %destination_base = tt.splat %base : !tt.ptr<f32> -> tensor<2x2x!tt.ptr<f32>>
+  %destination_addresses = tt.addptr %destination_base, %destination_offsets : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+  %loaded = tt.load %source_addresses : tensor<2x2x!tt.ptr<f32>>
+  %negated = arith.negf %loaded : tensor<2x2xf32>
+  %side_offsets = tt.make_range {end = 8 : i32, start = 4 : i32} : tensor<4xi32>
+  %side_base = tt.splat %base : !tt.ptr<f32> -> tensor<4x!tt.ptr<f32>>
+  %side_addresses = tt.addptr %side_base, %side_offsets : tensor<4x!tt.ptr<f32>>, tensor<4xi32>
+  %side_loaded = tt.load %side_addresses : tensor<4x!tt.ptr<f32>>
+  tt.store %destination_addresses, %negated : tensor<2x2x!tt.ptr<f32>>
+  tt.return
+}
+
+// CHECK-LABEL: tt.func @reject_overlapping_intervening_store(
+// CHECK: %[[SOURCE:.*]] = tt.addptr %{{.*}}, %{{.*}} : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+// CHECK: %[[LOADED:.*]] = tt.load %[[SOURCE]] : tensor<2x2x!tt.ptr<f32>>
+// CHECK-NEXT: %[[NEGATED:.*]] = arith.negf %[[LOADED]] : tensor<2x2xf32>
+// CHECK: tt.store %{{.*}}, %{{.*}} : tensor<4x!tt.ptr<f32>>
+// CHECK: tt.store %{{.*}}, %[[NEGATED]] : tensor<2x2x!tt.ptr<f32>>
+tt.func @reject_overlapping_intervening_store(%base: !tt.ptr<f32>) {
+  %source_row = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %source_column = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %source_row_expanded = tt.expand_dims %source_row {axis = 1 : i32} : tensor<2xi32> -> tensor<2x1xi32>
+  %source_column_expanded = tt.expand_dims %source_column {axis = 0 : i32} : tensor<2xi32> -> tensor<1x2xi32>
+  %two = arith.constant 2 : i32
+  %one = arith.constant 1 : i32
+  %source_row_stride = tt.splat %two : i32 -> tensor<2x1xi32>
+  %source_column_stride = tt.splat %one : i32 -> tensor<1x2xi32>
+  %source_row_offsets = arith.muli %source_row_expanded, %source_row_stride : tensor<2x1xi32>
+  %source_column_offsets = arith.muli %source_column_expanded, %source_column_stride : tensor<1x2xi32>
+  %source_row_broadcast = tt.broadcast %source_row_offsets : tensor<2x1xi32> -> tensor<2x2xi32>
+  %source_column_broadcast = tt.broadcast %source_column_offsets : tensor<1x2xi32> -> tensor<2x2xi32>
+  %source_offsets = arith.addi %source_row_broadcast, %source_column_broadcast : tensor<2x2xi32>
+  %source_base = tt.splat %base : !tt.ptr<f32> -> tensor<2x2x!tt.ptr<f32>>
+  %source_addresses = tt.addptr %source_base, %source_offsets : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+  %destination_row = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %destination_column = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %destination_row_expanded = tt.expand_dims %destination_row {axis = 1 : i32} : tensor<2xi32> -> tensor<2x1xi32>
+  %destination_column_expanded = tt.expand_dims %destination_column {axis = 0 : i32} : tensor<2xi32> -> tensor<1x2xi32>
+  %destination_row_stride = tt.splat %two : i32 -> tensor<2x1xi32>
+  %destination_column_stride = tt.splat %one : i32 -> tensor<1x2xi32>
+  %destination_row_offsets = arith.muli %destination_row_expanded, %destination_row_stride : tensor<2x1xi32>
+  %destination_column_offsets = arith.muli %destination_column_expanded, %destination_column_stride : tensor<1x2xi32>
+  %destination_row_broadcast = tt.broadcast %destination_row_offsets : tensor<2x1xi32> -> tensor<2x2xi32>
+  %destination_column_broadcast = tt.broadcast %destination_column_offsets : tensor<1x2xi32> -> tensor<2x2xi32>
+  %destination_offsets = arith.addi %destination_row_broadcast, %destination_column_broadcast : tensor<2x2xi32>
+  %destination_base = tt.splat %base : !tt.ptr<f32> -> tensor<2x2x!tt.ptr<f32>>
+  %destination_addresses = tt.addptr %destination_base, %destination_offsets : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+  %loaded = tt.load %source_addresses : tensor<2x2x!tt.ptr<f32>>
+  %negated = arith.negf %loaded : tensor<2x2xf32>
+  %side_offsets = tt.make_range {end = 6 : i32, start = 2 : i32} : tensor<4xi32>
+  %side_base = tt.splat %base : !tt.ptr<f32> -> tensor<4x!tt.ptr<f32>>
+  %side_addresses = tt.addptr %side_base, %side_offsets : tensor<4x!tt.ptr<f32>>, tensor<4xi32>
+  %zero = arith.constant 0.0 : f32
+  %side_values = tt.splat %zero : f32 -> tensor<4xf32>
+  tt.store %side_addresses, %side_values : tensor<4x!tt.ptr<f32>>
+  tt.store %destination_addresses, %negated : tensor<2x2x!tt.ptr<f32>>
+  tt.return
+}
+
+// CHECK-LABEL: tt.func @reject_different_base_intervening_load(
+// CHECK: %[[SOURCE:.*]] = tt.addptr %{{.*}}, %{{.*}} : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+// CHECK: %[[LOADED:.*]] = tt.load %[[SOURCE]] : tensor<2x2x!tt.ptr<f32>>
+// CHECK-NEXT: %[[NEGATED:.*]] = arith.negf %[[LOADED]] : tensor<2x2xf32>
+// CHECK: %{{.*}} = tt.load %{{.*}} : tensor<4x!tt.ptr<f32>>
+// CHECK: tt.store %{{.*}}, %[[NEGATED]] : tensor<2x2x!tt.ptr<f32>>
+tt.func @reject_different_base_intervening_load(%source: !tt.ptr<f32>, %destination: !tt.ptr<f32>) {
+  %source_row = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %source_column = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %source_row_expanded = tt.expand_dims %source_row {axis = 1 : i32} : tensor<2xi32> -> tensor<2x1xi32>
+  %source_column_expanded = tt.expand_dims %source_column {axis = 0 : i32} : tensor<2xi32> -> tensor<1x2xi32>
+  %two = arith.constant 2 : i32
+  %one = arith.constant 1 : i32
+  %source_row_stride = tt.splat %two : i32 -> tensor<2x1xi32>
+  %source_column_stride = tt.splat %one : i32 -> tensor<1x2xi32>
+  %source_row_offsets = arith.muli %source_row_expanded, %source_row_stride : tensor<2x1xi32>
+  %source_column_offsets = arith.muli %source_column_expanded, %source_column_stride : tensor<1x2xi32>
+  %source_row_broadcast = tt.broadcast %source_row_offsets : tensor<2x1xi32> -> tensor<2x2xi32>
+  %source_column_broadcast = tt.broadcast %source_column_offsets : tensor<1x2xi32> -> tensor<2x2xi32>
+  %source_offsets = arith.addi %source_row_broadcast, %source_column_broadcast : tensor<2x2xi32>
+  %source_base = tt.splat %source : !tt.ptr<f32> -> tensor<2x2x!tt.ptr<f32>>
+  %source_addresses = tt.addptr %source_base, %source_offsets : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+  %destination_row = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %destination_column = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+  %destination_row_expanded = tt.expand_dims %destination_row {axis = 1 : i32} : tensor<2xi32> -> tensor<2x1xi32>
+  %destination_column_expanded = tt.expand_dims %destination_column {axis = 0 : i32} : tensor<2xi32> -> tensor<1x2xi32>
+  %destination_row_stride = tt.splat %two : i32 -> tensor<2x1xi32>
+  %destination_column_stride = tt.splat %one : i32 -> tensor<1x2xi32>
+  %destination_row_offsets = arith.muli %destination_row_expanded, %destination_row_stride : tensor<2x1xi32>
+  %destination_column_offsets = arith.muli %destination_column_expanded, %destination_column_stride : tensor<1x2xi32>
+  %destination_row_broadcast = tt.broadcast %destination_row_offsets : tensor<2x1xi32> -> tensor<2x2xi32>
+  %destination_column_broadcast = tt.broadcast %destination_column_offsets : tensor<1x2xi32> -> tensor<2x2xi32>
+  %destination_offsets = arith.addi %destination_row_broadcast, %destination_column_broadcast : tensor<2x2xi32>
+  %destination_base = tt.splat %destination : !tt.ptr<f32> -> tensor<2x2x!tt.ptr<f32>>
+  %destination_addresses = tt.addptr %destination_base, %destination_offsets : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+  %loaded = tt.load %source_addresses : tensor<2x2x!tt.ptr<f32>>
+  %negated = arith.negf %loaded : tensor<2x2xf32>
+  %side_offsets = tt.make_range {end = 8 : i32, start = 4 : i32} : tensor<4xi32>
+  %side_base = tt.splat %source : !tt.ptr<f32> -> tensor<4x!tt.ptr<f32>>
+  %side_addresses = tt.addptr %side_base, %side_offsets : tensor<4x!tt.ptr<f32>>, tensor<4xi32>
+  %side_loaded = tt.load %side_addresses : tensor<4x!tt.ptr<f32>>
   tt.store %destination_addresses, %negated : tensor<2x2x!tt.ptr<f32>>
   tt.return
 }

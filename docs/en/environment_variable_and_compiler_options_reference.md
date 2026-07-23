@@ -112,3 +112,4 @@ The following table describes the options.
 | **Compiler pass** | `enable_linearize` | Version-dependent | Enables or disables the linearization pass. | `triton.Config` or launch meta-parameter |
 | **CV fusion/layout** | `enable_nd2nz_on_vector` | Default `False` | Enables or disables ND-to-NZ layout transformation on the Vector path. | `triton.Config` or launch meta-parameter |
 | **Large-grid optimization** | `auto_blockify_size` | Default `1` | Enables or disables AutoBlockify pass. Ignored when `TRITON_ALL_BLOCKS_PARALLEL` is not set. | launch meta-parameter or `triton.Config` |
+| **Compilation mode** | `compile_mode` | `"unstructured_in_simt"` (default), `"simd"`, `"simt_only"` | Controls SIMD / SIMT compilation on Ascend 950. `"simd"`: pure SIMD; `"unstructured_in_simt"`: hybrid (structured SIMD, discrete/unstructured access prefers SIMT indirect templates); `"simt_only"`: pure SIMT (`ttir→npubin`). | `triton.Config` or launch meta-parameter |

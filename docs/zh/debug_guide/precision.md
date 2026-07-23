@@ -99,7 +99,7 @@ def compare_precision(cal, ref):
 
 `torch.testing.assert_close` 的内部逻辑：
 
-```
+```python
 |cal - ref| <= atol + rtol * |ref|
 ```
 
@@ -114,7 +114,6 @@ def compare_precision(cal, ref):
 | `bfloat16` | 5e-3 | 5e-3 | 精度较低，适当放宽 |
 | `int8/16/32/64` | — | — | 必须完全一致（`torch.equal`） |
 | `bool` | — | — | 必须完全一致（`torch.equal`） |
-
 
 ## 4. 注意事项
 

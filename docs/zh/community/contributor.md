@@ -1,1 +1,2 @@
-../../en/community/contributor.md
+```{include} ../../en/community/contributor.md
+```

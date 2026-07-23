@@ -1,1 +1,2 @@
-../../../MAINTAINERS.md
+```{include} ../../../MAINTAINERS.md
+```

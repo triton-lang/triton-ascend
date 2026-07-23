@@ -114,3 +114,4 @@ if __name__ == "__main__":
 | **编译 Pass** | `enable_linearize` | 版本相关 | 启用或禁用 linearization pass。 | `triton.Config` 或 launch meta-parameter |
 | **CV 融合/layout** | `enable_nd2nz_on_vector` | 默认 `False` | 启用或禁用 Vector 路径上的 ND 到 NZ 布局转换。 | `triton.Config` 或 launch meta-parameter |
 | **大 grid 优化** | `auto_blockify_size` | 默认 `1` | 启用或禁用 AutoBlockify pass。未设置 `TRITON_ALL_BLOCKS_PARALLEL` 时忽略。 | launch meta-parameter 或 `triton.Config` |
+| **编译模式** | `compile_mode` | `"unstructured_in_simt"`（默认）、`"simd"`、`"simt_only"` | 控制 Ascend 950 上 SIMD / SIMT 编译路径。`"simd"`：纯 SIMD；`"unstructured_in_simt"`：混合（结构化 SIMD，离散/非结构化尽量走 SIMT 间接访存模板）；`"simt_only"`：纯 SIMT （`ttir→npubin`）。| `triton.Config` 或 launch meta-parameter |

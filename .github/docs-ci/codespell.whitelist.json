@@ -319,5 +319,7 @@
   "specitfic",
   "pytorch",
   "vllm",
-  "topk"
+  "topk",
+  "rtol",
+  "atol"
 ]

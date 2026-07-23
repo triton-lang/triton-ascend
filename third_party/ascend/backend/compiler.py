@@ -688,6 +688,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if mix_mode in ["aic"]:
             _compile_option_list += ["--disable-hfusion-vectorize=true"]
 
+        _compile_option_list += ["--mlir-print-ir-after-failure"]
+        _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
@@ -699,6 +701,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         hfusion_enable_multiple_consumer_fusion = metadata["hfusion_enable_multiple_consumer_fusion"]
         if hfusion_enable_multiple_consumer_fusion:
             cmd_list += [f"--hfusion-enable-multiple-consumer-fusion={hfusion_enable_multiple_consumer_fusion}"]
+
+        enable_cross_if_fusion = metadata["enable_cross_if_fusion"]
+        if enable_cross_if_fusion:
+            cmd_list += [f"--hfusion-enable-cross-if-fusion={enable_cross_if_fusion}"]
 
         if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
             print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
@@ -912,8 +918,9 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 "--enable-triton-kernel-compile=true",
             ]
 
+        _compile_option_list += ["--mlir-print-ir-after-failure"]
+        _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:
-            _compile_option_list += ["--mlir-print-ir-after-failure"]
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
@@ -1042,6 +1049,7 @@ class NPUOptions:
     # Multi-cache insertion optimization: avoid redundant tensor compute in the middle of an `if`.
     enable_buffer_insert_optimization: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = False
+    enable_cross_if_fusion: bool = False
     has_auto_blockify_blacklist_op: Optional[bool] = None
     intra_cache_num: int = None
     inter_cache_num: int = None

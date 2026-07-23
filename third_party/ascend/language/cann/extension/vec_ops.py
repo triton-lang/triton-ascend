@@ -10,7 +10,7 @@ from triton.language import semantic, core, standard
 from triton.language.core import (_unwrap_if_constexpr, _tensor_member_fn, _unwrap_iterable, builtin, constexpr, dtype,
                                   tensor, check_bit_width, _unwrap_if_constexpr, range)
 
-from . import is_compile_on_910_95
+from triton.backends.ascend.utils import is_compile_on_910_95
 from .aux_ops import compile_hint_impl
 
 from typing import Optional, Tuple, List, overload
@@ -401,7 +401,7 @@ def ascend_cast_impl(input: tensor, dst_ty: dtype, _semantic=None, fp_downcast_r
         if fp_downcast_rounding is not None:
             raise ValueError("fp_downcast_rounding should be set only for truncating fp conversions. "
                              "Source scalar type is " + str(src_sca_ty) + " and destination type is " + str(dst_sca_ty))
-    if not is_compile_on_910_95:
+    if not is_compile_on_910_95():
         if (src_sca_ty.is_fp8() or dst_sca_ty.is_fp8()) or (src_sca_ty.is_fp64() or dst_sca_ty.is_fp64()):
             raise ValueError("[fp8, fp64] is unsupported on Ascend for now."
                              "Source scalar type is " + str(src_sca_ty) + " and destination type is " + str(dst_sca_ty))
@@ -454,7 +454,7 @@ def ascend_cast_impl(input: tensor, dst_ty: dtype, _semantic=None, fp_downcast_r
         elif overflow_mode == "saturate" and \
              (src_sca_ty.is_int_unsigned() or dst_sca_ty.is_int_unsigned()) and \
              src_sca_ty.int_bitwidth >= dst_sca_ty.int_bitwidth:
-            if is_compile_on_910_95:
+            if is_compile_on_910_95():
                 result = tensor(
                     _semantic.builder.create_int_cast(input.handle, dst_ty.to_ir(_semantic.builder), sign_extend),
                     dst_ty)

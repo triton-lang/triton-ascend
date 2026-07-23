@@ -57,6 +57,7 @@ from triton.backends.ascend.utils import (
     downgrade_llir,
     force_disable_ffts,
     get_cann_version_file_hash,
+    is_compile_on_910_95,
 )
 from triton.backends.ascend.driver import (NPUUtils)
 from triton.backends.compiler import (
@@ -64,7 +65,6 @@ from triton.backends.compiler import (
     GPUTarget,
 )
 from triton.runtime.cache import _base32, get_dump_manager
-from triton.tools.get_ascend_devices import is_compile_on_910_95
 
 
 # TODO: materialize the concrete min shape
@@ -991,7 +991,7 @@ class NPUOptions:
     auto_blockify_size: int = 1
     add_auto_scheduling: bool = False
     enable_auto_blockify: bool = None
-    compile_on_910_95: bool = is_compile_on_910_95
+    compile_on_910_95: bool = None
     optimize_dynamic_offset: bool = False
     enable_mask_fallback_conversion: bool = False
     enable_warp_specialization: bool = False
@@ -1046,7 +1046,7 @@ class NPUOptions:
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
     enable_vf_fusion: bool = None
-    enable_dynamic_cv_pipeline: bool = True if is_compile_on_910_95 else False
+    enable_dynamic_cv_pipeline: bool = None
     # Gates the cube-loader penetration + cube-for block merge feature. Off by
     # default so existing scenarios are unaffected; opt in per kernel to fuse a
     # matmul's loader for-loop into the matmul's cube compute block.
@@ -1203,6 +1203,12 @@ class AscendBackend(BaseBackend):
             args = {k: opts[k] for k in NPUOptions.__dataclass_fields__.keys() if k in opts}
             args.setdefault("arch", self.target.arch)
             options = NPUOptions(**args)
+            # Lazy init compile_on_910_95 if not provided
+            if options.compile_on_910_95 is None:
+                object.__setattr__(options, "compile_on_910_95", is_compile_on_910_95())
+            # Lazy init enable_dynamic_cv_pipeline if not provided
+            if options.enable_dynamic_cv_pipeline is None:
+                object.__setattr__(options, "enable_dynamic_cv_pipeline", is_compile_on_910_95())
             # Costmodel path should avoid extra BC<->MLIR conversion stages
             # to keep compile-only autotune routing lightweight and stable.
             if getattr(options, "enable_costmodel_backend", False):

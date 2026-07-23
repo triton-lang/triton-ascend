@@ -9,7 +9,7 @@ from triton.runtime import driver
 from .._C.libtriton import ir
 from . import core as tl
 
-from . import is_compile_on_910_95
+from triton.backends.ascend.utils import is_compile_on_910_95
 
 T = TypeVar('T')
 TensorTy = TypeVar('TensorTy')
@@ -1636,7 +1636,7 @@ class TritonSemantic(Generic[TensorTy]):
                    rhs_scale: Optional[TensorTy], rhs_format: str, acc: TensorTy | None, fast_math: bool,
                    lhs_k_pack: bool, rhs_k_pack: bool, out_dtype: tl.dtype) -> TensorTy:
         assert lhs.type.is_block() and rhs.type.is_block()
-        if is_compile_on_910_95:
+        if is_compile_on_910_95():
             assert lhs.dtype in [tl.float16, tl.bfloat16, tl.uint8, tl.float8e5,
                                  tl.float8e4nv], "lhs matrix dtype must be in [bf16, fp16, uint8, e5m2, e4m3]"
             assert rhs.dtype in [tl.float16, tl.bfloat16, tl.uint8, tl.float8e5,
@@ -1653,7 +1653,7 @@ class TritonSemantic(Generic[TensorTy]):
         rhs_format: str = rhs_format.value
         lhs_format_enum = self._str_to_fp_type(lhs_format)
         rhs_format_enum = self._str_to_fp_type(rhs_format)
-        if is_compile_on_910_95:
+        if is_compile_on_910_95():
             allowed_formats = {"bf16", "fp16", "e4m3", "e5m2", "e2m1"}
         else:
             allowed_formats = {"bf16", "fp16"}  # unsupported fp8/4 dtype: "e2m1", "e4m3", "e5m2"

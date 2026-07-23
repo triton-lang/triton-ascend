@@ -1,6 +1,6 @@
 """isort:skip_file"""
 # Import order is significant here.
-from triton.tools.get_ascend_devices import is_compile_on_910_95
+from triton.backends.ascend.utils import is_compile_on_910_95
 from . import math
 from . import extra
 from .standard import (
@@ -276,6 +276,7 @@ __all__ = [
     "xor_sum",
     "zeros",
     "zeros_like",
+    "is_compile_on_910_95",
 ]
 
 

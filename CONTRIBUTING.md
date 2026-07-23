@@ -1,151 +1,70 @@
-# Contribution Guide
+# Governance Structure
 
-- [Getting Started](#getting-started.md)
-- [Developer Certificate of Origin (DCO)](#DCO.md)
-- [Developer Guide](#developer-guide.md)
-  - [Coding Style](#coding-style.md)
-  - [Fork-Pull Mode](#fork-pull-mode.md)
-  - [Troubleshooting Gated Commit](#troubleshooting-gated-commit.md)
-  - [Issue Specifications](#issue-specifications.md)
-  - [Pull Request Proposal](#pull-request-proposal.md)
+Triton adopts the following hierarchical technical governance structure:
+* A community of **contributors** who file issues and submit pull requests
+* A group of **module maintainers** who own parts of Triton and drive their development
+* A body of **core maintainers** who own Triton overall and drive its development
+* A **lead core maintainer** who is the catch-all decision maker when consensus cannot be reached by core maintainers
 
-<h2 id="getting-started.md">Getting Started</h2>
+All contributions are expected to follow Triton’s design principles, as enforced by module and core maintainers. While high-quality pull requests are appreciated and encouraged, all maintainers reserve the right to prioritize their own work over code reviews at-will, hence contributors should not expect their work to be reviewed promptly.
 
-- Fork the Triton Ascend repository on [GitHub](https://github.com/triton-lang/triton-ascend).
-- Check the [README.md](https://github.com/triton-lang/triton-ascend/blob/main/README.md) file to obtain the project information and build the development environment.
+Contributors can maximize the chances of their work being accepted by maintainers by meeting a high quality bar before sending a PR to maintainers.  We encourage maintainers who contribute to Triton on behalf of a company to get reviews from senior developers within their company before sending to maintainers.
+Module maintainers
+We aim to make the Triton codebase as modular as possible, such that different components (e.g., subdirectories) can be improved in parallel under the supervision of different module maintainers.
 
-<h2 id="DCO.md">Developer Certificate of Origin (DCO)</h2>
+What constitutes (or not) a module is up to the core maintainers. Core maintainers also reserve the right to decide whether the development of a module should happen – or keep happening – in-tree or not.
 
-All commits must include a `Signed-off-by:` line. Use `git commit -s` to add it automatically:
+**List of in-tree modules (as of 05/12/2024, alphabetical order):**
+* AMD backend (Lei Zhang)
+* Interpreter (Keren Zhou)
+* Profiler (Keren Zhou)
 
-```bash
-git commit -s -m "your commit message"
-```
+Note: Parts of Triton that are not listed above (e.g., Nvidia backend) are assumed to be owned by core maintainers.
 
-This will automatically add a line `Signed-off-by: Your Name <your.email@example.com>` at the end of your commit message, indicating that you certify the origin and authorization of the contribution.
+Note: Some important parts of the Triton eco-system (e.g., Intel XPU backend) may be maintained out-of-tree and advertised in our repository. The governance rules described in this document do not carry over to these modules.
 
-<h2 id="developer-guide.md">Developer Guide</h2>
+__List of out-of-tree modules (as of 05/12/2024, alphabetical order):__
+* CPU backend (Bert Maher, Ilya Enkovich)
+* Intel backend (Ettore Tiotto, Whitney Tsang)
 
-- **[Coding Style](#coding-style.md)**
-- **[Fork-Pull Mode](#fork-pull-mode.md)**
-- **[Troubleshooting Gated Commit](#troubleshooting-gated-commit.md)**
-- **[Issue Specifications](#issue-specifications.md)**
-- **[Pull Request Proposal](#pull-request-proposal.md)**
 
-<h2 id="coding-style.md">Coding Style</h2>
+## Core maintainers
+The core maintainers drive the development of Triton at large and set the roadmap for the project. As such, they have the following responsibilities:
+* Proposing, implementing and reviewing profound changes to user-facing APIs, IR specifications and/or pass infrastructures
+* Enforcing code quality standards and adherence to core design principles
+* Drawing module boundaries and resolving disputes between module maintainers
 
-Follow the coding style below to make Triton Ascend easy to develop, maintain, and review.
 
-- Coding Guide
+The core maintainers as a group have the power to veto any decision made at a Module maintainer level.
 
-  Use the unified coding style of the Triton Ascend community. The recommended coding style for Python is [PEP 8 Coding Style](https://pep8.org/), and that for C++ is [LLVM Coding Standards](https://llvm.org/docs/CodingStandards.html). You can use [clang-tidy](https://github.com/llvm/llvm-project/blob/main/.clang-tidy), [CppLint](https://github.com/cpplint/cpplint), [CppCheck](http://cppcheck.sourceforge.net/), [CMakeLint](https://github.com/cmake-lint/cmake-lint), [CodeSpell](https://github.com/codespell-project/codespell), [ShellCheck](https://github.com/koalaman/shellcheck), and [pylint](https://pylint.org/) to check the code format. You are advised to install these plug-ins in your IDE.
+The core maintainers should publicly articulate their decision-making, and share the reasoning behind their decisions, vetoes, and dispute resolution.
 
-- Unit Test Guide
+__List of core maintainers (as of 01/30/2025, alphabetical order):__
+* Jeff Niu
+* Keren Zhou
+* Mario Lezcano-Casado
+* Pawel Szczerbuk
+* Peter Bell
+* Phil Tillet
+* Thomas Raoux
+* Zahi Moudallal
 
-  Use the unified unit test style of the Triton Ascend community. The recommended unit test style for Python is [pytest](http://www.pytest.org/en/latest/), and that for C++ is [GoogleTest Primer](https://github.com/google/googletest/blob/main/docs/primer.md). The design intent of a test case should be reflected by its annotation name. For details about how to design test cases, see the [gather_load test case](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/custom_op/test_gather_load.py) and [layer_norm test case](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/05-layer-norm.py).
+## Lead core maintainer
+When core maintainers cannot come to a consensus, a publicly declared lead maintainer is expected to settle the debate and make executive decisions.
 
-- Refactoring Guide
+The Lead Core Maintainer should publicly articulate their decision-making, and give a clear reasoning for their decisions.
 
-  We encourage developers to refactor our code to eliminate code smells. The refactored code should also comply with the coding style and testing style requirements. When receiving a warning, refactor the code to be merged.
+The Lead Core Maintainer is also responsible for confirming or removing core maintainers.
 
-<h2 id="fork-pull-mode.md">Fork-Pull Mode</h2>
+**Lead maintainer (as of 05/12/2024)**
+* Phil Tillet
 
-1.Fork the Triton Ascend project.
+# Decision Making
 
-Before committing your code to the Triton Ascend project, ensure that you have forked the Triton Ascend project to your own repository. You will then develop the project in your own forked repository and merge it to the Triton Ascend project through a pull request (PR). This means that there is parallel development between the Triton Ascend repository and your own repository. Be careful to avoid inconsistency between repositories.
+## Uncontroversial Changes
 
-2.Clone a remote repository.
+We are committed to accepting functional bug fixes that meet our quality standards – and include minimized unit tests to avoid future regressions. Performance improvements generally fall under the same category, with the caveat that they may be rejected if the trade-off between usefulness and complexity is deemed unfavorable by core maintainers (e.g., complex swizzling logic to improve the performance of non-tensor-cores matrix multiplications). Design changes that neither fix known functional nor performance issues are automatically considered controversial.
 
-Use git to clone the Triton Ascend project you have forked and add the upstream repository.
+## Controversial Changes
 
-```shell
-git clone https://github.com/{your_forked_repo}/triton-ascend.git && cd triton-ascend && git submodule update --init --depth 1
-git remote add upstream https://github.com/triton-lang/triton-ascend.git
-```
-
-3.Develop code locally.
-
-Before developing your code, you need to set up the development environment according to the [Triton Ascend Installation Guide](https://github.com/triton-lang/triton-ascend/blob/main/docs/en/installation_guide.md).
-
-To avoid inconsistency between branches, create a new local development branch for new features.
-
-```shell
-git checkout -b {new_branch_name} origin/main
-git fetch upstream       # Fetch the latest code from the upstream repository
-git rebase upstream/main # Rebase onto the latest upstream trunk
-```
-
-Taking the main branch as an example, Triton Ascend may create release branches or downstream development branches as required. After creating a branch and synchronizing the upstream main branch, you can start developing your code.
-
-4.Perform a self-test.
-
-After the code is modified, check whether the changes can pass the test.
-
-Write a test script for the developed code in the **ascend/examples/pytest_ut** directory of your local code branch, and verify the test script in the local environment to ensure that the changes can pass the test.
-
-5.Push code to the remote repository.
-
-After updating and testing the code, push your commit to the remote repository.
-
-```shell
-git add .
-git status #Check the updated files
-git commit -s -m "your commit message"
-git push origin {your_new_branch_name}
-```
-
-6.Create a pull request to the Triton Ascend main repository.
-
-After pushing code to your remote repository, create a pull request between your new branch and the Triton Ascend main branch. After the merge request is created, Jenkins CI will be automatically set to build your pipeline test. You are advised to merge your pull request to the upstream main branch as soon as possible to reduce the merge risk.
-
-<h2 id="troubleshooting-gated-commit.md">Troubleshooting Gated Commit</h2>
-
-Gated commit may encounter the following exceptions. Rectify the exceptions according to the related information.
-
-- Compilation failed
-
-  Check the cause of the compilation failure as prompted, and then recompile the code.
-
-- Static check failed
-
-  Find and fix the exception information in the code as prompted.
-
-- CI pipeline failed
-
-  Find the failed test cases of the CI pipeline as prompted, and then check the cause. After the fault is rectified, run the CI pipeline again.
-
-<h2 id="issue-specifications.md">Issue Specifications</h2>
-
-A good way to contribute to the project is to send a detailed report when you encounter a problem. We are always very grateful for detailed and thorough bug reports, and we will be very grateful to you for that!
-
-Please include the following information when you file an issue:
-
-- What is the software version (Triton Ascend, Python, OS, etc.) used in your environment?
-- Is it a bug report or a functional request?
-- What kind of issue are you reporting? Add the corresponding tag to highlight it on the issue dashboard.
-- What's happened?
-- What did you expect to happen?
-- How to reproduce the issue? (As accurately as possible)
-
-You can choose from one of the pre-defined templates when [submitting issues of different categories](https://github.com/triton-lang/triton-ascend/issues/new/choose).
-
-Notes for contributors:
-
-- If you find an unresolved issue that is exactly what you are trying to solve, comment on the issue and tell others that you will be responsible for handling it.
-- If the issue has existed for a period of time, it is recommended that you perform a pre-check before solving the issue.
-- If you have resolved the issue you report, inform others before closing the issue.
-
-<h2 id="pull-request-proposal.md">Pull Request Proposal</h2>
-
-- Propose your ideas as issues.
-- If the new feature to be developed requires a large number of design details, you should also commit the design solution.
-- After reaching a consensus in the issue discussion and design solution review, fork the project and commit a PR.
-- No PR is allowed until you receive 2+LGTM (Looks Good To Me) from the approver. Note that you are not allowed to add LGTM to your own PRs.
-- After the PR is fully discussed, it will be merged, rejected, or abandoned based on the discussion result.
-
-## Notes
-
-- Avoid any irrelevant changes.
-- Ensure that your commit history is concise and orderly.
-- Before creating a PR, please rebase the latest code from the upstream repository.
-- For a bug-fixing PR, ensure that all related issues and PRs are linked.
+More controversial design changes (e.g., changes in our IRs/APIs/Passes) are evaluated on a case-by-case basis under the subjective judgment of core maintainers. While it is possible for contributors to propose and land deep design changes upstream (see https://github.com/triton-lang/triton/pull/1305), the community should expect such occurrences to be relatively rare.

@@ -1241,6 +1241,10 @@ class AscendBackend(BaseBackend):
         return codegen_fns
 
     def load_dialects(self, ctx):
+        from triton._C.libtriton import buffer_ir
+        from triton._C.libtriton.ascend import ir as ascend_ir
+        buffer_ir.load_dialects(ctx)
+        ascend_ir.load_dialects(ctx)
         ascend.load_dialects(ctx)
 
     def add_stages(self, stages, options, language):

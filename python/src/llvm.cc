@@ -394,7 +394,7 @@ void init_triton_llvm(py::module &&m) {
           [](llvm::Module::FunctionListType &s) {
             return py::make_iterator(s.begin(), s.end());
           },
-          py::keep_alive<0, 1>(), py::call_guard<py::gil_scoped_release>());
+          py::keep_alive<0, 1>());
 
   // Module Flag behavior. See
   // https://llvm.org/doxygen/classllvm_1_1Module.html#a0a5c55e12c97b80021330fe82b642293

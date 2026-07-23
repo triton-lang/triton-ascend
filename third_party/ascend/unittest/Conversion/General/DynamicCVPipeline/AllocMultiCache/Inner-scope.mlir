@@ -222,7 +222,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   //===--------------------------------------------------------------------===//
   // CHECK-LABEL: func.func @test_t8_memref_operand
   // CHECK: scope.scope
-  // CHECK: memref.memory_space_cast {{.*}} {ssbuffer.intraDeps
+  // CHECK: hivm.hir.copy {{.*}}intraDeps
   func.func @test_t8_memref_operand() {
     %c0_i32 = arith.constant 0 : i32
     %c100_i32 = arith.constant 100 : i32
@@ -250,8 +250,8 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   //            NOT reset to 0 for each main_loop
   //===--------------------------------------------------------------------===//
   // CHECK-LABEL: func.func @test_t9_multiple_main_loops
-  // CHECK-DAG: memref.memory_space_cast {{.*}} {ssbuffer.intraDeps = [0 : i32, 1 : i32]}
-  // CHECK-DAG: memref.memory_space_cast {{.*}} {ssbuffer.intraDeps = [1 : i32, 1 : i32]}
+  // CHECK-DAG: hivm.hir.copy {{.*}}intraDeps = [0 : i32, 1 : i32]}
+  // CHECK-DAG: hivm.hir.copy {{.*}}intraDeps = [1 : i32, 1 : i32]}
   // CHECK-DAG: arith.remsi {{.*}} {ssbuffer.block_id = 6
   // CHECK-DAG: arith.cmpi eq, {{.*}} {ssbuffer.block_id = 6
   // CHECK-DAG: arith.remsi {{.*}} {ssbuffer.block_id = 5
@@ -299,8 +299,8 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   //       For true single buffer test, need BufferCountManager::setBufferCount(IntraCore, 1)
   //===--------------------------------------------------------------------===//
   // CHECK-LABEL: func.func @test_t10_single_buffer
-  // CHECK-DAG: memref.memory_space_cast {{.*}} {ssbuffer.intraDeps = [0 : i32, 1 : i32]}
-  // CHECK-DAG: memref.memory_space_cast {{.*}} {ssbuffer.intraDeps = [0 : i32, 1 : i32]}
+  // CHECK-DAG: hivm.hir.copy {{.*}}intraDeps = [0 : i32, 1 : i32]}
+  // CHECK-DAG: hivm.hir.copy {{.*}}intraDeps = [0 : i32, 1 : i32]}
   // CHECK-DAG: } {ssbuffer.block_id = 5 : i32, ssbuffer.intraDeps = [0 : i32, 0 : i32], ssbuffer.intra_buffer}
   func.func @test_t10_single_buffer() {
     %c0_i32 = arith.constant 0 : i32
@@ -717,14 +717,13 @@ func.func @test_t22_tensor_empty_in_nested_if() {
 //===--------------------------------------------------------------------===//
   // CHECK-LABEL: func.func @test_t23_scf_if_else_branch_yield
   // CHECK-DAG: memref.alloc
-  // CHECK-DAG: memref.memory_space_cast {{.*}} {ssbuffer.intraDeps
+  // CHECK-DAG: hivm.hir.copy {{.*}}intraDeps
   // CHECK: scf.if {{.*}} -> (tensor<16x32xf16>) {
   // CHECK: arith.addf {{.*}} {ssbuffer.block_id = 20 : i32}
   // CHECK: scf.yield
   // CHECK: } else {
   // CHECK: scf.yield {{.*}} : tensor<16x32xf16>
   // CHECK: } {ssbuffer.block_id = 20 : i32}
-  // CHECK: hivm.hir.copy {{.*}} {ssbuffer.block_id = 20 : i32}
 func.func @test_t23_scf_if_else_branch_yield() {
     %c0_i32 = arith.constant 0 : i32
     %c100_i32 = arith.constant 100 : i32
@@ -738,7 +737,7 @@ func.func @test_t23_scf_if_else_branch_yield() {
       %loop_result = scf.for %i = %c0_i32 to %c100_i32 step %c1_i32 iter_args(%arg = %prod) -> (tensor<16x32xf16>) : i32 {
         %cond = arith.cmpi eq, %i, %c0_i32 : i32
         %alloc = memref.alloc() {ssbuffer.block_id = 11 : i32} : memref<16x32xf16>
-        %to_tensor = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 11 : i32} : memref<16x32xf16>
+        %to_tensor = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 11 : i32} : memref<16x32xf16> to tensor<16x32xf16>
         // scf.if with block_id = 20
         // then branch: compute op uses %to_tensor (depVal from block_id 11), then yield
         // else branch: directly yield %to_tensor (depVal from block_id 11)
@@ -768,7 +767,7 @@ func.func @test_t23_scf_if_else_branch_yield() {
 //===--------------------------------------------------------------------===//
   // CHECK-LABEL: func.func @test_t24_shared_buffer_selection
   // CHECK-DAG: memref.alloc
-  // CHECK-DAG: memref.memory_space_cast {{.*}} {ssbuffer.intraDeps
+  // CHECK-DAG: hivm.hir.copy {{.*}}intraDeps
   // Only ONE scf.if buffer selection for block_id = 5 (not two!)
   // CHECK: scf.if {{.*}} -> (tensor<128xf32>)
   // CHECK: } {ssbuffer.block_id = 5
@@ -817,7 +816,7 @@ func.func @test_t23_scf_if_else_branch_yield() {
 //===--------------------------------------------------------------------===//
   // CHECK-LABEL: func.func @test_t25_depval_in_two_blocks
   // CHECK-DAG: memref.alloc
-  // CHECK-DAG: memref.memory_space_cast {{.*}} {ssbuffer.intraDeps
+  // CHECK-DAG: hivm.hir.copy {{.*}}intraDeps
   // Buffer selection scf.if for block_id=5
   // CHECK: scf.if {{.*}} -> (tensor<128xf32>)
   // CHECK: } {ssbuffer.block_id = 5
@@ -947,7 +946,7 @@ func.func @test_t23_scf_if_else_branch_yield() {
 // The ifOp's producer-side buffer selection scf.if (with intra_buffer at block 18)
 // should appear exactly once. It contains hivm.hir.copy for the ifOp's result.
 // CHECK: scf.if
-// CHECK: hivm.hir.copy {{.*}} outs({{.*}}) {ssbuffer.block_id = 18 : i32}
+// CHECK: hivm.hir.copy {{.*}} outs({{.*}}) {{.*}}ssbuffer.block_id = 18 : i32
 // CHECK: } {ssbuffer.block_id = 18 : i32, ssbuffer.intra_buffer}
 // No duplicate producer-side scf.if would produce another intra_buffer at block 18
 // CHECK-NOT: } {ssbuffer.block_id = 18 : i32, ssbuffer.intra_buffer}
@@ -961,7 +960,7 @@ func.func @test_t23_scf_if_else_branch_yield() {
     scope.scope : () -> () {
       // Transfer producer at block 11
       %memspacecast = memref.memory_space_cast %alloc {ssbuffer.block_id = 11 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128xf32, #hivm.address_space<ub>> to memref<128xf32>
-      %depval = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 11 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128xf32>
+      %depval = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 11 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128xf32> to tensor<128xf32>
       %loop_result = scf.for %i = %c0_i32 to %c100_i32 step %c1_i32 iter_args(%arg = %depval) -> (tensor<128xf32>) : i32 {
         %cond = arith.cmpi eq, %i, %c0_i32 : i32
         // ifOp with 2 results - the duplication bug would manifest here
@@ -992,7 +991,7 @@ func.func @test_t23_scf_if_else_branch_yield() {
 //===--------------------------------------------------------------------===//
 // CHECK-LABEL: func.func @test_t29_ifop_buffer_uses_ifop_block_id
 // CHECK: scf.if
-// CHECK: hivm.hir.copy {{.*}} outs({{.*}}) {ssbuffer.block_id = 18 : i32}
+// CHECK: hivm.hir.copy {{.*}} outs({{.*}}) {{.*}}ssbuffer.block_id = 18 : i32
 // CHECK: } {ssbuffer.block_id = 18 : i32, ssbuffer.intra_buffer}
   func.func @test_t29_ifop_buffer_uses_ifop_block_id() {
     %c0_i32 = arith.constant 0 : i32
@@ -1004,7 +1003,7 @@ func.func @test_t23_scf_if_else_branch_yield() {
     scope.scope : () -> () {
       // Transfer producer at block 11
       %memspacecast = memref.memory_space_cast %alloc {ssbuffer.block_id = 11 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128xf32, #hivm.address_space<ub>> to memref<128xf32>
-      %depval = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 11 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128xf32>
+      %depval = bufferization.to_tensor %memspacecast restrict writable {ssbuffer.block_id = 11 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128xf32> to tensor<128xf32>
       %loop_result = scf.for %i = %c0_i32 to %c100_i32 step %c1_i32 iter_args(%arg = %depval) -> (tensor<128xf32>) : i32 {
         %cond = arith.cmpi eq, %i, %c0_i32 : i32
         // ifOp at block 18 with 2 results, inner ops at block 11
@@ -1056,7 +1055,7 @@ func.func @test_t23_scf_if_else_branch_yield() {
           %subview_17 = memref.subview %alloc_8[%arg23, 0] [1, 64] [1, 1] {ssbuffer.block_id = 3 : i32} : memref<128x64xf16> to memref<1x64xf16, strided<[64, 1], offset: ?>>
         } {ssbuffer.block_id = 4 : i32}
         // %to_tensor at block 4 — also uses %alloc_8, same-block
-        %to_tensor = bufferization.to_tensor %alloc_8 restrict writable {ssbuffer.block_id = 4 : i32} : memref<128x64xf16>
+        %to_tensor = bufferization.to_tensor %alloc_8 restrict writable {ssbuffer.block_id = 4 : i32} : memref<128x64xf16> to tensor<128x64xf16>
         scf.yield %arg20, %arg21, %arg22 : i32, i32, i32
       } {ssbuffer.block_id = 8 : i32, ssbuffer.main_loop = 0 : i32}
       scope.return
@@ -1099,7 +1098,7 @@ func.func @test_t23_scf_if_else_branch_yield() {
           scf.yield %alloc_8, %arg22 : memref<128x64xf16>, i32
         } {ssbuffer.block_id = 4 : i32}
         // %to_tensor at block 4 — uses %alloc_8, same-block
-        %to_tensor = bufferization.to_tensor %alloc_8 restrict writable {ssbuffer.block_id = 4 : i32} : memref<128x64xf16>
+        %to_tensor = bufferization.to_tensor %alloc_8 restrict writable {ssbuffer.block_id = 4 : i32} : memref<128x64xf16> to tensor<128x64xf16>
         scf.yield %arg20, %arg21, %arg22 : i32, i32, i32
       } {ssbuffer.block_id = 8 : i32, ssbuffer.main_loop = 0 : i32}
       scope.return

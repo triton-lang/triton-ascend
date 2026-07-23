@@ -1,0 +1,115 @@
+name: DynamicCVPipeline PreCheck Tests
+
+on:
+  pull_request:
+    paths:
+      - 'third_party/ascend/lib/DynamicCVPipeline/**'
+      - 'third_party/ascend/include/DynamicCVPipeline/**'
+      - 'third_party/ascend/unittest/DynamicCVPipeline_ut/**'
+
+  workflow_dispatch:
+    inputs:
+      pr_id:
+        description: PR number to (re)trigger test against
+        required: true
+
+concurrency:
+  group: dcv-pipeline-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'queue' }}--${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  build-check:
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: linux-amd64-cpu-16
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:8.5.0-910b-ubuntu22.04-py3.11-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - name: Add git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache build dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.triton/llvm
+            ~/.triton/json
+            ~/.triton/nvidia
+            ${{ github.workspace }}/.ccache
+          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-dcv-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-dcv
+
+      - name: Checkout base
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: "true"
+          ref: ${{ github.base_ref }}
+          path: base
+
+      - name: Checkout pr
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: "true"
+          path: pr
+
+      - name: Build triton-ascend base
+        shell: bash
+        env:
+          TRITON_BUILD_WITH_CCACHE: "true"
+          TRITON_BUILD_WITH_CLANG_LLD: "TRUE"
+          TRITON_DISABLE_LINE_INFO: 1
+          CCACHE_COMPRESS: "true"
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          TRITON_BUILD_WITH_O1: true
+          TRITON_BUILD_PROTON: OFF
+          TRITON_WHEEL_NAME: triton-ascend
+          TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=OFF"
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --zero-stats
+          NUM_PROCS=$(( $(nproc) / 3 ))
+          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          cd base
+          MAX_JOBS="$NUM_PROCS" python setup.py bdist_wheel --dist-dir="${GITHUB_WORKSPACE}/base/wheelhouse"
+
+      - name: Build triton-ascend pr
+        shell: bash
+        env:
+          TRITON_BUILD_WITH_CCACHE: "true"
+          TRITON_BUILD_WITH_CLANG_LLD: "TRUE"
+          TRITON_DISABLE_LINE_INFO: 1
+          CCACHE_COMPRESS: "true"
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          TRITON_BUILD_WITH_O1: true
+          TRITON_BUILD_PROTON: OFF
+          TRITON_WHEEL_NAME: triton-ascend
+          TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=OFF"
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --zero-stats
+          NUM_PROCS=$(( $(nproc) / 3 ))
+          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          cd pr
+          MAX_JOBS="$NUM_PROCS" python setup.py bdist_wheel --dist-dir="${GITHUB_WORKSPACE}/pr/wheelhouse"
+
+      - name: generate ttadapter
+        shell: bash
+        env:
+          TRITON_ALWAYS_COMPILE: 1
+          TRITON_COMPILE_ONLY: 1
+        run: |
+          cd pr/third_party/ascend/unittest/DynamicCVPipeline_ut
+          bash dynamic-cv-pipeline-ci.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: run_result
+          path: ${{ github.workspace }}/result/

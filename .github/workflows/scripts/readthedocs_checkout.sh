@@ -33,14 +33,18 @@ echo "Building docs/${lang}/ for project ${READTHEDOCS_PROJECT} (${READTHEDOCS_L
 if [ "${READTHEDOCS_VERSION_TYPE:-}" = "external" ]; then
   echo "PR preview build detected."
 
-  git fetch --depth=100 origin main:refs/remotes/origin/main 2>/dev/null || true
-  base="$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse origin/main 2>/dev/null || true)"
+  # RTD uses shallow clones; fetch with full depth so merge-base is reliable.
+  git fetch --depth=0 origin 2>/dev/null || true
+  base="$(git merge-base origin/HEAD HEAD 2>/dev/null || true)"
 
-  if [ -n "$base" ] && git diff --quiet "$base" HEAD -- "docs/"; then
-    echo "No docs/ changes in this PR; cancelling build."
+  if [ -n "$base" ] && git diff --quiet "$base" HEAD -- \
+      "docs/" \
+      ".readthedocs.yaml" \
+      ".github/workflows/scripts/readthedocs_checkout.sh"; then
+    echo "No docs-affecting changes in this PR; cancelling build."
     exit 183
   fi
-  echo "docs/ changes detected, proceeding with build."
+  echo "docs-affecting changes detected, proceeding with build."
 fi
 
 # ── 3. Symlink docs/active ─────────────────────────────────────────────────

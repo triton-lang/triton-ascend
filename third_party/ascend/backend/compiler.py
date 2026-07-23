@@ -1053,7 +1053,7 @@ class NPUOptions:
     enable_cube_block_merge: bool = False
     enable_ub_refine_opt: bool = False
     # Multi-cache insertion optimization: avoid redundant tensor compute in the middle of an `if`.
-    enable_buffer_insert_optimization: bool = False
+    enable_buffer_insert_optimization: bool = True
     hfusion_enable_multiple_consumer_fusion: bool = False
     has_auto_blockify_blacklist_op: Optional[bool] = None
     intra_cache_num: int = None

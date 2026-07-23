@@ -548,14 +548,15 @@ class UBTuner(KernelInterface):
         os.environ[_Config.ENV_ENABLE_PRINT_UB_BITS] = 'true' if mode == _Config.DEFAULT_MODE else 'false'
         try:
             compiled_kernel = self.fn.run(*args, **kwargs)
-            linalg_ir = compiled_kernel.asm.get('ttadapter') if hasattr(compiled_kernel, 'asm') else None
-            if linalg_ir is None:
-                _log_debug("Could not get linalg IR, using default config")
-                return UBConfig()
-
             metadata = dict(compiled_kernel.metadata._asdict()) if hasattr(compiled_kernel, 'metadata') else {}
             npu_options = self._create_npu_options(metadata)
             if npu_options is None:
+                return UBConfig()
+
+            asm_key = 'bcmlir' if metadata.get('use_bytecode') else 'ttadapter'
+            linalg_ir = compiled_kernel.asm.get(asm_key) if hasattr(compiled_kernel, 'asm') else None
+            if linalg_ir is None:
+                _log_debug("Could not get linalg IR, using default config")
                 return UBConfig()
 
             available_options = list(UB_OPTION_METADATA.keys())

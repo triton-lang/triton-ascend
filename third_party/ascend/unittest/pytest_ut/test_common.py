@@ -67,6 +67,126 @@ def generate_tensor(shape, dtype):
         raise ValueError('Invalid parameter \"dtype\" is found : {}'.format(dtype))
 
 
+def generate_tensor_fp4_fp8(
+        shape, dtype, seed=None, data_range=None,
+        special_ratio=0.05,  # Ratio of inf/-inf/nan values (only takes effect when dtype is float type)
+        precision_ratio=0.35,  # Ratio of precision small floats (only takes effect when dtype is float type)
+        extreme_ratio=0.1,  # Ratio of extreme value region (20% for min~min+10, max-10~max, 80% for min and max themselves) (no effect when dtype is bool)
+        zero_ratio=0,  # Extra ratio of zeros (no effect when dtype is bool)
+        bool_true_ratio=0.5,  # Ratio of True (only takes effect when dtype is bool)
+):
+    middle_range_dict = {
+        'fp8e4m3': [-50, 50],
+        'fp8e5m2': [-500, 500],
+        'fp8e5b16': [-500, 500],
+        'fp4': [-6, 6],
+    }
+
+    float_precision_dict = {
+        'fp8e4m3': [-1, 1],
+        'fp8e5m2': [-1, 1],
+        'fp8e5b16': [-1, 1],
+        'fp4': [-2, 2],
+    }
+
+    extreme_range_dict = {
+        'fp8e4m3': [-448, 448],
+        'fp8e5m2': [-57344, 57344],
+        'fp8e5b16': [-57344, 57344],
+        'fp4': [-6, 6],
+    }
+
+    ddtype_dict = {
+        'fp8e4m3': torch.float8_e4m3fn,
+        'fp8e5m2': torch.float8_e5m2,
+        'fp8e5b16': None,
+        'fp4': None,
+    }
+
+    if seed is not None:
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+
+    if dtype not in ddtype_dict:
+        raise ValueError(f"Unsupported dtype: {dtype}")
+
+    min_val, max_val = extreme_range_dict[dtype]
+    total = np.prod(shape)
+
+    if dtype == 'fp4':
+        left_range = (min_val, min_val + 1)
+        right_range = (max_val - 1, max_val)
+    else:
+        left_range = (min_val, min_val + 10)
+        right_range = (max_val - 10, max_val)
+
+    if data_range == None:
+        mid_range = middle_range_dict[dtype]
+    else:
+        mid_range = data_range
+
+    # Process float types
+    if dtype in ('float16', 'float32', 'bfloat16', 'fp8e4m3', 'fp8e5m2'):
+
+        # Specified distribution probability and handling when exceeding 100%
+        if (extreme_ratio + precision_ratio + zero_ratio + special_ratio > 1):
+            raise ValueError(f"Total ratio over 100%, unable to allocate sampling:{extreme_ratio + precision_ratio}")
+
+        # Read dictionary to get precision small float data range
+        precision_range = float_precision_dict[dtype]
+
+        # Generate initial 1D zero data, float32 to prevent overflow
+        data = np.zeros(total, dtype=np.float32)
+
+        # Calculate counts for each interval (extreme region cumulative: near min, exact min, near max, exact max order)
+        left_count = int(total * extreme_ratio / 10)
+        left_accumulate_count = int(total * extreme_ratio / 2)
+        left_right_count = int(total * extreme_ratio * 3 / 5)
+        left_right_accmulate_count = int(total * extreme_ratio)
+        precision_count = int(total * precision_ratio)
+        zero_count = int(total * zero_ratio)
+        special_count = int(total * special_ratio)
+
+        # Generate shuffled index mapping array
+        indices = np.random.choice(total, size=total, replace=False)
+
+        # Partition interval indices by counts
+        left_idx = indices[:left_count]
+        left_min_idx = indices[left_count:left_accumulate_count]
+        right_idx = indices[left_accumulate_count:left_right_count]
+        right_max_idx = indices[left_right_count:left_right_accmulate_count]
+        precision_idx = indices[left_right_accmulate_count:left_right_accmulate_count + precision_count]
+        zero_idx = indices[left_right_accmulate_count + precision_count:left_right_accmulate_count + precision_count +
+                           zero_count]
+        special_idx = indices[left_right_accmulate_count + precision_count + zero_count:left_right_accmulate_count +
+                              precision_count + zero_count + special_count]
+        mid_idx = indices[left_right_accmulate_count + precision_count + zero_count + special_count:]
+
+        # Generate data by interval indices
+        data[left_idx] = np.random.uniform(left_range[0], left_range[1], size=len(left_idx))
+        data[left_min_idx] = min_val
+        data[right_idx] = np.random.uniform(right_range[0], right_range[1], size=len(right_idx))
+        data[right_max_idx] = max_val
+        data[precision_idx] = np.random.uniform(precision_range[0], precision_range[1], size=len(precision_idx))
+        data[zero_idx] = 0
+        for idx in special_idx:
+            r = np.random.rand()
+            if r < 1 / 3:
+                data[idx] = float('inf')
+            elif r < 2 / 3:
+                data[idx] = float('-inf')
+            else:
+                data[idx] = float('nan')
+        data[mid_idx] = np.random.uniform(mid_range[0], mid_range[1], size=len(mid_idx))
+
+        tensor = torch.from_numpy(data.reshape(shape)).to(ddtype_dict[dtype])
+
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype}")
+
+    return tensor
+
+
 def get_triton_sig_typename(dtype):
     if dtype == 'float32':
         tyname = "*fp32"

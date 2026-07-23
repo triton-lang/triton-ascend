@@ -56,6 +56,7 @@ using namespace mlir::CVPipeline;
 static constexpr const char *ssbufferCoreTypeCubeAttr = "CUBE";
 static constexpr const char *ssbufferCoreTypeVectorAttr = "VECTOR";
 static constexpr int ND_SHAPE_LENGTH = 2;
+static constexpr int SHAPE_1D_LENGTH = 1;
 
 // Helper: ssbuffer.core_type
 llvm::StringRef getSsbufferCoreType(Operation *op) {
@@ -118,6 +119,15 @@ bool DataDependencyAnalysisPass::isValidScalarDependency(mlir::Value value) {
   return false;
 }
 
+bool DataDependencyAnalysisPass::isValid1DValueForDependency(
+    mlir::Value value) {
+  auto tensorTy = dyn_cast<TensorType>(value.getType());
+  if (tensorTy && tensorTy.getRank() == SHAPE_1D_LENGTH) {
+    return true;
+  }
+  return false;
+}
+
 // Check if a value is only used by transpose ops whose users are all vector ops
 bool DataDependencyAnalysisPass::isAllTransposedInVector(mlir::Value value) {
   if (!isa<linalg::MatmulOp>(value.getDefiningOp())) {
@@ -142,7 +152,9 @@ bool DataDependencyAnalysisPass::isValidValueForDependency(mlir::Value value) {
   if (isValidScalarDependency(value)) {
     return true;
   }
-
+  if (isValid1DValueForDependency(value)) {
+    return true;
+  }
   if (!isValidShapeForDependency(value)) {
     return false;
   }
@@ -272,6 +284,9 @@ void DataDependencyAnalysisPass::collectDepInfo(
   if (isValidScalarDependency(depvalue)) {
     depInfo.isScaler = true;
   }
+  if (isValid1DValueForDependency(depvalue)) {
+    depInfo.is1DTensor = true;
+  }
   if (isAllTranspoesd) {
     depInfo.isAllTranspoesd = true;
   }
@@ -357,7 +372,9 @@ void DataDependencyAnalysisPass::insertProducerAndRecordDeps(
         findCommonLevelBlockIds(info, newId, userBlockId);
     depInfo.producerBlockId = producerBlockId;
     depInfo.consumerBlockId = consumerBlockId;
-
+    if (isValid1DValueForDependency(iterArg)) {
+      depInfo.is1DTensor = true;
+    }
     if (depType == DependencyType::VectorToCube) {
       v2cDependencies.push_back(depInfo);
     } else {
@@ -425,10 +442,11 @@ void DataDependencyAnalysisPass::processIterArgDependencies() {
       LOG_DEBUG("initValue" << initValue << "\n");
       LOG_DEBUG("yieldedValue" << yieldedValue << "\n");
 
-      if (!isValidShapeForDependency(initValue) ||
-          !isValidShapeForDependency(yieldedValue)) {
+      if (!isValid1DValueForDependency(iterArg) &&
+          (!isValidShapeForDependency(initValue) ||
+           !isValidShapeForDependency(yieldedValue))) {
         LOG_DEBUG("iterarg: " << iterArg
-                              << "is not valid tensor for dependency!");
+                              << " is not valid tensor for dependency!");
         continue;
       }
 

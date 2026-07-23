@@ -879,11 +879,42 @@ tt.func @transpose_square_absi(%source: !tt.ptr<i32>, %destination: !tt.ptr<i32>
 // CHECK-NEXT: %[[FORK_TAIL:.*]] = math.exp %[[FORK_V0]] : tensor<2x2xf32>
 // CHECK-NOT: tt.make_range
 // CHECK: tt.store %[[REJECT_DESTINATION]], %[[FORK_TAIL]] : tensor<2x2x!tt.ptr<f32>>
-// CHECK-NOT: tt.make_range
-// CHECK: %[[TAN_LOADED:.*]] = tt.load %[[REJECT_SOURCE]] : tensor<2x2x!tt.ptr<f32>>
+// `math.tan` is a single-input Elementwise op.  Its load and store must use
+// complete, newly built transposed pointer DAGs, rather than the original
+// roots above.
+// CHECK-NEXT: %[[TAN_SOURCE_AXIS0:.*]] = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+// CHECK-NEXT: %[[TAN_SOURCE_AXIS0_EXPANDED:.*]] = tt.expand_dims %[[TAN_SOURCE_AXIS0]] {axis = 1 : i32} : tensor<2xi32> -> tensor<2x1xi32>
+// CHECK-NEXT: %[[TAN_SOURCE_STRIDE0:.*]] = arith.constant 1 : i32
+// CHECK-NEXT: %[[TAN_SOURCE_STRIDE0_SPLAT:.*]] = tt.splat %[[TAN_SOURCE_STRIDE0]] : i32 -> tensor<2x1xi32>
+// CHECK-NEXT: %[[TAN_SOURCE_TERM0:.*]] = arith.muli %[[TAN_SOURCE_AXIS0_EXPANDED]], %[[TAN_SOURCE_STRIDE0_SPLAT]] : tensor<2x1xi32>
+// CHECK-NEXT: %[[TAN_SOURCE_TERM0_BROADCAST:.*]] = tt.broadcast %[[TAN_SOURCE_TERM0]] : tensor<2x1xi32> -> tensor<2x2xi32>
+// CHECK-NEXT: %[[TAN_SOURCE_AXIS1:.*]] = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+// CHECK-NEXT: %[[TAN_SOURCE_AXIS1_EXPANDED:.*]] = tt.expand_dims %[[TAN_SOURCE_AXIS1]] {axis = 0 : i32} : tensor<2xi32> -> tensor<1x2xi32>
+// CHECK-NEXT: %[[TAN_SOURCE_STRIDE1:.*]] = arith.constant 2 : i32
+// CHECK-NEXT: %[[TAN_SOURCE_STRIDE1_SPLAT:.*]] = tt.splat %[[TAN_SOURCE_STRIDE1]] : i32 -> tensor<1x2xi32>
+// CHECK-NEXT: %[[TAN_SOURCE_TERM1:.*]] = arith.muli %[[TAN_SOURCE_AXIS1_EXPANDED]], %[[TAN_SOURCE_STRIDE1_SPLAT]] : tensor<1x2xi32>
+// CHECK-NEXT: %[[TAN_SOURCE_TERM1_BROADCAST:.*]] = tt.broadcast %[[TAN_SOURCE_TERM1]] : tensor<1x2xi32> -> tensor<2x2xi32>
+// CHECK-NEXT: %[[TAN_SOURCE_OFFSETS:.*]] = arith.addi %[[TAN_SOURCE_TERM0_BROADCAST]], %[[TAN_SOURCE_TERM1_BROADCAST]] : tensor<2x2xi32>
+// CHECK-NEXT: %[[TAN_SOURCE_BASE:.*]] = tt.splat %arg0 : !tt.ptr<f32> -> tensor<2x2x!tt.ptr<f32>>
+// CHECK-NEXT: %[[TAN_SOURCE:.*]] = tt.addptr %[[TAN_SOURCE_BASE]], %[[TAN_SOURCE_OFFSETS]] : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+// CHECK-NEXT: %[[TAN_LOADED:.*]] = tt.load %[[TAN_SOURCE]] : tensor<2x2x!tt.ptr<f32>>
 // CHECK-NEXT: %[[TAN_RESULT:.*]] = math.tan %[[TAN_LOADED]] : tensor<2x2xf32>
-// CHECK-NOT: tt.make_range
-// CHECK: tt.store %[[REJECT_DESTINATION]], %[[TAN_RESULT]] : tensor<2x2x!tt.ptr<f32>>
+// CHECK-NEXT: %[[TAN_DESTINATION_AXIS0:.*]] = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+// CHECK-NEXT: %[[TAN_DESTINATION_AXIS0_EXPANDED:.*]] = tt.expand_dims %[[TAN_DESTINATION_AXIS0]] {axis = 1 : i32} : tensor<2xi32> -> tensor<2x1xi32>
+// CHECK-NEXT: %[[TAN_DESTINATION_STRIDE0:.*]] = arith.constant 1 : i32
+// CHECK-NEXT: %[[TAN_DESTINATION_STRIDE0_SPLAT:.*]] = tt.splat %[[TAN_DESTINATION_STRIDE0]] : i32 -> tensor<2x1xi32>
+// CHECK-NEXT: %[[TAN_DESTINATION_TERM0:.*]] = arith.muli %[[TAN_DESTINATION_AXIS0_EXPANDED]], %[[TAN_DESTINATION_STRIDE0_SPLAT]] : tensor<2x1xi32>
+// CHECK-NEXT: %[[TAN_DESTINATION_TERM0_BROADCAST:.*]] = tt.broadcast %[[TAN_DESTINATION_TERM0]] : tensor<2x1xi32> -> tensor<2x2xi32>
+// CHECK-NEXT: %[[TAN_DESTINATION_AXIS1:.*]] = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+// CHECK-NEXT: %[[TAN_DESTINATION_AXIS1_EXPANDED:.*]] = tt.expand_dims %[[TAN_DESTINATION_AXIS1]] {axis = 0 : i32} : tensor<2xi32> -> tensor<1x2xi32>
+// CHECK-NEXT: %[[TAN_DESTINATION_STRIDE1:.*]] = arith.constant 2 : i32
+// CHECK-NEXT: %[[TAN_DESTINATION_STRIDE1_SPLAT:.*]] = tt.splat %[[TAN_DESTINATION_STRIDE1]] : i32 -> tensor<1x2xi32>
+// CHECK-NEXT: %[[TAN_DESTINATION_TERM1:.*]] = arith.muli %[[TAN_DESTINATION_AXIS1_EXPANDED]], %[[TAN_DESTINATION_STRIDE1_SPLAT]] : tensor<1x2xi32>
+// CHECK-NEXT: %[[TAN_DESTINATION_TERM1_BROADCAST:.*]] = tt.broadcast %[[TAN_DESTINATION_TERM1]] : tensor<1x2xi32> -> tensor<2x2xi32>
+// CHECK-NEXT: %[[TAN_DESTINATION_OFFSETS:.*]] = arith.addi %[[TAN_DESTINATION_TERM0_BROADCAST]], %[[TAN_DESTINATION_TERM1_BROADCAST]] : tensor<2x2xi32>
+// CHECK-NEXT: %[[TAN_DESTINATION_BASE:.*]] = tt.splat %arg1 : !tt.ptr<f32> -> tensor<2x2x!tt.ptr<f32>>
+// CHECK-NEXT: %[[TAN_DESTINATION:.*]] = tt.addptr %[[TAN_DESTINATION_BASE]], %[[TAN_DESTINATION_OFFSETS]] : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+// CHECK-NEXT: tt.store %[[TAN_DESTINATION]], %[[TAN_RESULT]] : tensor<2x2x!tt.ptr<f32>>
 // CHECK-NOT: tt.make_range
 // CHECK: %[[ADD_LOADED:.*]] = tt.load %[[REJECT_SOURCE]] : tensor<2x2x!tt.ptr<f32>>
 // CHECK-NEXT: %[[ADD_RESULT:.*]] = arith.addf %[[ADD_LOADED]], %{{.*}} : tensor<2x2xf32>

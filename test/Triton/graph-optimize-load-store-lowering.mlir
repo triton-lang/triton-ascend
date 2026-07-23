@@ -1,18 +1,26 @@
 // RUN: triton-opt %s --verify-each -graph-optimize='rule-mask=1' -o - | FileCheck %s --check-prefix=GRAPH
 // RUN: triton-opt %s --verify-each -graph-optimize='rule-mask=1' -triton-to-linalg -o /dev/null
 
-// GRAPH-LABEL: tt.func @lower_math_tanh(
-// GRAPH: %{{.*}} = tt.addptr %{{.*}}, %{{.*}} : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
-// GRAPH: %{{.*}} = tt.addptr %{{.*}}, %{{.*}} : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
-// GRAPH: %{{.*}} = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
-// GRAPH: %[[TANH_SOURCE:.*]] = tt.addptr %{{.*}}, %{{.*}} : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
-// GRAPH: %[[TANH_LOADED:.*]] = tt.load %[[TANH_SOURCE]] : tensor<2x2x!tt.ptr<f32>>
-// GRAPH-NEXT: %[[TANH_RESULT:.*]] = math.tanh %[[TANH_LOADED]] : tensor<2x2xf32>
-// GRAPH: %{{.*}} = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
-// GRAPH: %[[TANH_DESTINATION:.*]] = tt.addptr %{{.*}}, %{{.*}} : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
-// GRAPH: tt.store %[[TANH_DESTINATION]], %[[TANH_RESULT]] : tensor<2x2x!tt.ptr<f32>>
+// GRAPH-LABEL: tt.func @lower_math_tan(
+// GRAPH: %[[TAN_ORIGINAL_SOURCE:.*]] = tt.addptr %{{.*}}, %{{.*}} : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+// GRAPH: %[[TAN_ORIGINAL_DESTINATION:.*]] = tt.addptr %{{.*}}, %{{.*}} : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+// GRAPH-NOT: tt.load %[[TAN_ORIGINAL_SOURCE]]
+// GRAPH-NOT: tt.store %[[TAN_ORIGINAL_DESTINATION]]
+// GRAPH: %[[TAN_SOURCE_OFFSETS:.*]] = arith.addi %{{.*}}, %{{.*}} : tensor<2x2xi32>
+// GRAPH-NEXT: %[[TAN_SOURCE_BASE:.*]] = tt.splat %arg0 : !tt.ptr<f32> -> tensor<2x2x!tt.ptr<f32>>
+// GRAPH-NEXT: %[[TAN_SOURCE:.*]] = tt.addptr %[[TAN_SOURCE_BASE]], %[[TAN_SOURCE_OFFSETS]] : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+// GRAPH-NEXT: %[[TAN_LOADED:.*]] = tt.load %[[TAN_SOURCE]] : tensor<2x2x!tt.ptr<f32>>
+// GRAPH-NEXT: %[[TAN_RESULT:.*]] = math.tan %[[TAN_LOADED]] : tensor<2x2xf32>
+// GRAPH-NOT: tt.load %[[TAN_ORIGINAL_SOURCE]]
+// GRAPH-NOT: tt.store %[[TAN_ORIGINAL_DESTINATION]]
+// GRAPH: %[[TAN_DESTINATION_OFFSETS:.*]] = arith.addi %{{.*}}, %{{.*}} : tensor<2x2xi32>
+// GRAPH-NEXT: %[[TAN_DESTINATION_BASE:.*]] = tt.splat %arg1 : !tt.ptr<f32> -> tensor<2x2x!tt.ptr<f32>>
+// GRAPH-NEXT: %[[TAN_DESTINATION:.*]] = tt.addptr %[[TAN_DESTINATION_BASE]], %[[TAN_DESTINATION_OFFSETS]] : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
+// GRAPH-NEXT: tt.store %[[TAN_DESTINATION]], %[[TAN_RESULT]] : tensor<2x2x!tt.ptr<f32>>
+// GRAPH-NOT: tt.load %[[TAN_ORIGINAL_SOURCE]]
+// GRAPH-NOT: tt.store %[[TAN_ORIGINAL_DESTINATION]]
 
-tt.func @lower_math_tanh(%source: !tt.ptr<f32>, %destination: !tt.ptr<f32>) {
+tt.func @lower_math_tan(%source: !tt.ptr<f32>, %destination: !tt.ptr<f32>) {
   %source_row = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
   %source_column = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
   %source_row_expanded = tt.expand_dims %source_row {axis = 1 : i32} : tensor<2xi32> -> tensor<2x1xi32>
@@ -44,7 +52,7 @@ tt.func @lower_math_tanh(%source: !tt.ptr<f32>, %destination: !tt.ptr<f32>) {
   %destination_addresses = tt.addptr %destination_base_splat, %destination_offsets : tensor<2x2x!tt.ptr<f32>>, tensor<2x2xi32>
 
   %loaded = tt.load %source_addresses : tensor<2x2x!tt.ptr<f32>>
-  %result = math.tanh %loaded : tensor<2x2xf32>
+  %result = math.tan %loaded : tensor<2x2xf32>
   tt.store %destination_addresses, %result : tensor<2x2x!tt.ptr<f32>>
   tt.return
 }

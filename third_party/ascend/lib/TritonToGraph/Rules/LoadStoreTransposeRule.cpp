@@ -28,7 +28,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -75,12 +74,10 @@ bool isUnencodedStaticTensor(Value value) {
   return type && type.hasStaticShape() && !type.getEncoding();
 }
 
-bool isWhitelistedUnary(Operation *operation, Value input) {
+bool isUnaryElementwisePermutationEquivariant(Operation *operation,
+                                              Value input) {
   if (!operation || !input ||
-      !isa<arith::NegFOp, math::AbsFOp, math::AbsIOp, math::CeilOp,
-           math::FloorOp, math::CosOp, math::SinOp, math::ErfOp, math::ExpOp,
-           math::Exp2Op, math::LogOp, math::Log2Op, math::SqrtOp,
-           math::RsqrtOp, math::TanhOp, triton::PreciseSqrtOp>(operation) ||
+      !operation->hasTrait<OpTrait::Elementwise>() ||
       operation->getNumOperands() != 1 || operation->getNumResults() != 1 ||
       operation->getNumRegions() != 0 || operation->getOperand(0) != input ||
       !isMemoryEffectFree(operation))
@@ -212,7 +209,7 @@ std::optional<LoadStoreCandidate> matchCandidate(triton::LoadOp load) {
       break;
     }
 
-    if (!isWhitelistedUnary(user, currentValue))
+    if (!isUnaryElementwisePermutationEquivariant(user, currentValue))
       return std::nullopt;
     unaryChain.push_back(user);
     currentValue = user->getResult(0);

@@ -1,4 +1,4 @@
-// RUN: triton-opt --verify-each %s -graph-optimize -o - | FileCheck %s
+// RUN: triton-opt --verify-each %s -graph-optimize='rule-mask=2' -o - | FileCheck %s
 
 // This is deliberately pre-layout TTIR. A direct tt.trans -> pointwise ->
 // tt.dot chain is valid before GPU layouts are assigned; once GPU encodings
@@ -45,6 +45,92 @@ module {
     tt.return
   }
 
+  // CHECK-LABEL: tt.func @positive_a_mixed_cast_math_chain(
+  // CHECK-SAME: %[[M_SRC:arg[0-9]+]]: tensor<8x16xf32>
+  // CHECK-SAME: %[[M_B:arg[0-9]+]]: tensor<8x16xi16>
+  // CHECK-SAME: %[[M_C:arg[0-9]+]]: tensor<16x16xi32>
+  // CHECK-NOT: tt.trans %[[M_SRC]]
+  // CHECK: %[[M_NEG:.*]] = arith.negf %[[M_SRC]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[M_ABS:.*]] = math.absf %[[M_NEG]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[M_TRUNC:.*]] = arith.truncf %[[M_ABS]] : tensor<8x16xf32> to tensor<8x16xf16>
+  // CHECK-NEXT: %[[M_EXP:.*]] = math.exp %[[M_TRUNC]] : tensor<8x16xf16>
+  // CHECK-NEXT: %[[M_BITS:.*]] = arith.bitcast %[[M_EXP]] : tensor<8x16xf16> to tensor<8x16xi16>
+  // CHECK-NEXT: %[[M_TRANS:.*]] = tt.trans %[[M_BITS]] {order = array<i32: 1, 0>} : tensor<8x16xi16> -> tensor<16x8xi16>
+  // CHECK-NEXT: %{{.*}} = tt.dot %[[M_TRANS]], %[[M_B]], %[[M_C]] : tensor<16x8xi16> * tensor<8x16xi16> -> tensor<16x16xi32>
+  tt.func @positive_a_mixed_cast_math_chain(
+      %a_src: tensor<8x16xf32>,
+      %b: tensor<8x16xi16>,
+      %c: tensor<16x16xi32>) {
+    %trans = tt.trans %a_src {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
+    %neg = arith.negf %trans : tensor<16x8xf32>
+    %abs = math.absf %neg : tensor<16x8xf32>
+    %trunc = arith.truncf %abs : tensor<16x8xf32> to tensor<16x8xf16>
+    %exp = math.exp %trunc : tensor<16x8xf16>
+    %bits = arith.bitcast %exp : tensor<16x8xf16> to tensor<16x8xi16>
+    %dot = tt.dot %bits, %b, %c : tensor<16x8xi16> * tensor<8x16xi16> -> tensor<16x16xi32>
+    tt.return
+  }
+
+  // CHECK-LABEL: tt.func @positive_a_long_float_unary_chain(
+  // CHECK-SAME: %[[L_SRC:arg[0-9]+]]: tensor<8x16xf32>
+  // CHECK-NOT: tt.trans %[[L_SRC]]
+  // CHECK: %[[L0:.*]] = arith.negf %[[L_SRC]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L1:.*]] = math.absf %[[L0]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L2:.*]] = math.ceil %[[L1]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L3:.*]] = math.floor %[[L2]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L4:.*]] = math.cos %[[L3]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L5:.*]] = math.sin %[[L4]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L6:.*]] = math.erf %[[L5]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L7:.*]] = math.exp %[[L6]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L8:.*]] = math.exp2 %[[L7]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L9:.*]] = math.log %[[L8]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L10:.*]] = math.log2 %[[L9]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L11:.*]] = math.sqrt %[[L10]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L12:.*]] = math.rsqrt %[[L11]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L13:.*]] = math.tanh %[[L12]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L14:.*]] = tt.precise_sqrt %[[L13]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[L_TRANS:.*]] = tt.trans %[[L14]] {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
+  // CHECK-NEXT: %{{.*}} = tt.dot %[[L_TRANS]], %{{.*}}, %{{.*}} : tensor<16x8xf32> * tensor<8x16xf32> -> tensor<16x16xf32>
+  tt.func @positive_a_long_float_unary_chain(
+      %a_src: tensor<8x16xf32>,
+      %b: tensor<8x16xf32>,
+      %c: tensor<16x16xf32>) {
+    %trans = tt.trans %a_src {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
+    %v0 = arith.negf %trans : tensor<16x8xf32>
+    %v1 = math.absf %v0 : tensor<16x8xf32>
+    %v2 = math.ceil %v1 : tensor<16x8xf32>
+    %v3 = math.floor %v2 : tensor<16x8xf32>
+    %v4 = math.cos %v3 : tensor<16x8xf32>
+    %v5 = math.sin %v4 : tensor<16x8xf32>
+    %v6 = math.erf %v5 : tensor<16x8xf32>
+    %v7 = math.exp %v6 : tensor<16x8xf32>
+    %v8 = math.exp2 %v7 : tensor<16x8xf32>
+    %v9 = math.log %v8 : tensor<16x8xf32>
+    %v10 = math.log2 %v9 : tensor<16x8xf32>
+    %v11 = math.sqrt %v10 : tensor<16x8xf32>
+    %v12 = math.rsqrt %v11 : tensor<16x8xf32>
+    %v13 = math.tanh %v12 : tensor<16x8xf32>
+    %v14 = tt.precise_sqrt %v13 : tensor<16x8xf32>
+    %dot = tt.dot %v14, %b, %c : tensor<16x8xf32> * tensor<8x16xf32> -> tensor<16x16xf32>
+    tt.return
+  }
+
+  // CHECK-LABEL: tt.func @positive_a_absi(
+  // CHECK-SAME: %[[I_SRC:arg[0-9]+]]: tensor<8x16xi16>
+  // CHECK-NOT: tt.trans %[[I_SRC]]
+  // CHECK: %[[I_ABS:.*]] = math.absi %[[I_SRC]] : tensor<8x16xi16>
+  // CHECK-NEXT: %[[I_TRANS:.*]] = tt.trans %[[I_ABS]] {order = array<i32: 1, 0>} : tensor<8x16xi16> -> tensor<16x8xi16>
+  // CHECK-NEXT: %{{.*}} = tt.dot %[[I_TRANS]], %{{.*}}, %{{.*}} : tensor<16x8xi16> * tensor<8x16xi16> -> tensor<16x16xi32>
+  tt.func @positive_a_absi(
+      %a_src: tensor<8x16xi16>,
+      %b: tensor<8x16xi16>,
+      %c: tensor<16x16xi32>) {
+    %trans = tt.trans %a_src {order = array<i32: 1, 0>} : tensor<8x16xi16> -> tensor<16x8xi16>
+    %abs = math.absi %trans : tensor<16x8xi16>
+    %dot = tt.dot %abs, %b, %c : tensor<16x8xi16> * tensor<8x16xi16> -> tensor<16x16xi32>
+    tt.return
+  }
+
   // CHECK-LABEL: tt.func @reject_external_trans_user(
   // CHECK: %[[EXTERNAL_TRANS:.*]] = tt.trans %{{.*}} {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
   // CHECK-NEXT: %[[EXTERNAL_CAST:.*]] = arith.truncf %[[EXTERNAL_TRANS]] : tensor<16x8xf32> to tensor<16x8xf16>
@@ -73,6 +159,49 @@ module {
     %a_trans = tt.trans %a_src {order = array<i32: 1, 0>} : tensor<8x16xf16> -> tensor<16x8xf16>
     %a_add = arith.addf %a_trans, %zero : tensor<16x8xf16>
     %dot = tt.dot %a_add, %b, %c : tensor<16x8xf16> * tensor<8x16xf16> -> tensor<16x16xf32>
+    tt.return
+  }
+
+  // CHECK-LABEL: tt.func @reject_unapproved_unary(
+  // CHECK-SAME: %[[U_FLOAT_SRC:arg[0-9]+]]: tensor<8x16xf32>
+  // CHECK-SAME: %[[U_INT_SRC:arg[0-9]+]]: tensor<8x16xf32>
+  // CHECK-NOT: math.atan %[[U_FLOAT_SRC]]
+  // CHECK: %[[U_FLOAT_TRANS:.*]] = tt.trans %[[U_FLOAT_SRC]] {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
+  // CHECK-NEXT: %[[U_ATAN:.*]] = math.atan %[[U_FLOAT_TRANS]] : tensor<16x8xf32>
+  // CHECK-NEXT: %{{.*}} = tt.dot %[[U_ATAN]], %{{.*}}, %{{.*}} : tensor<16x8xf32> * tensor<8x16xf32> -> tensor<16x16xf32>
+  // CHECK-NOT: arith.fptosi %[[U_INT_SRC]]
+  // CHECK: %[[U_INT_TRANS:.*]] = tt.trans %[[U_INT_SRC]] {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
+  // CHECK-NEXT: %[[U_CONVERTED:.*]] = arith.fptosi %[[U_INT_TRANS]] : tensor<16x8xf32> to tensor<16x8xi16>
+  // CHECK-NEXT: %{{.*}} = tt.dot %[[U_CONVERTED]], %{{.*}}, %{{.*}} : tensor<16x8xi16> * tensor<8x16xi16> -> tensor<16x16xi32>
+  tt.func @reject_unapproved_unary(
+      %float_src: tensor<8x16xf32>,
+      %float_b: tensor<8x16xf32>,
+      %float_c: tensor<16x16xf32>,
+      %int_src: tensor<8x16xf32>,
+      %int_b: tensor<8x16xi16>,
+      %int_c: tensor<16x16xi32>) {
+    %float_trans = tt.trans %float_src {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
+    %atan = math.atan %float_trans : tensor<16x8xf32>
+    %float_dot = tt.dot %atan, %float_b, %float_c : tensor<16x8xf32> * tensor<8x16xf32> -> tensor<16x16xf32>
+    %int_trans = tt.trans %int_src {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
+    %converted = arith.fptosi %int_trans : tensor<16x8xf32> to tensor<16x8xi16>
+    %int_dot = tt.dot %converted, %int_b, %int_c : tensor<16x8xi16> * tensor<8x16xi16> -> tensor<16x16xi32>
+    tt.return
+  }
+
+  // CHECK-LABEL: tt.func @reject_unary_external_user(
+  // CHECK: %[[E_TRANS:.*]] = tt.trans %{{.*}} {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
+  // CHECK-NEXT: %[[E_EXP:.*]] = math.exp %[[E_TRANS]] : tensor<16x8xf32>
+  // CHECK-NEXT: %{{.*}} = math.cos %[[E_EXP]] : tensor<16x8xf32>
+  // CHECK-NEXT: %{{.*}} = tt.dot %[[E_EXP]], %{{.*}}, %{{.*}} : tensor<16x8xf32> * tensor<8x16xf32> -> tensor<16x16xf32>
+  tt.func @reject_unary_external_user(
+      %a_src: tensor<8x16xf32>,
+      %b: tensor<8x16xf32>,
+      %c: tensor<16x16xf32>) {
+    %trans = tt.trans %a_src {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
+    %exp = math.exp %trans : tensor<16x8xf32>
+    %extra = math.cos %exp : tensor<16x8xf32>
+    %dot = tt.dot %exp, %b, %c : tensor<16x8xf32> * tensor<8x16xf32> -> tensor<16x16xf32>
     tt.return
   }
 

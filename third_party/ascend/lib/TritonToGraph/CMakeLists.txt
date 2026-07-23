@@ -20,6 +20,7 @@ add_triton_library(TritonToGraph
   MLIRControlFlowDialect
   MLIRDialectUtils
   MLIRIR
+  MLIRMathDialect
   MLIRFuncDialect
   MLIRPass
   MLIRSCFDialect

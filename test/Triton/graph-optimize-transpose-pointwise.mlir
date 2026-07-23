@@ -162,30 +162,37 @@ module {
     tt.return
   }
 
-  // CHECK-LABEL: tt.func @reject_unapproved_unary(
-  // CHECK-SAME: %[[U_FLOAT_SRC:arg[0-9]+]]: tensor<8x16xf32>
-  // CHECK-SAME: %[[U_INT_SRC:arg[0-9]+]]: tensor<8x16xf32>
-  // CHECK-NOT: math.atan %[[U_FLOAT_SRC]]
-  // CHECK: %[[U_FLOAT_TRANS:.*]] = tt.trans %[[U_FLOAT_SRC]] {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
-  // CHECK-NEXT: %[[U_ATAN:.*]] = math.atan %[[U_FLOAT_TRANS]] : tensor<16x8xf32>
-  // CHECK-NEXT: %{{.*}} = tt.dot %[[U_ATAN]], %{{.*}}, %{{.*}} : tensor<16x8xf32> * tensor<8x16xf32> -> tensor<16x16xf32>
-  // CHECK-NOT: arith.fptosi %[[U_INT_SRC]]
-  // CHECK: %[[U_INT_TRANS:.*]] = tt.trans %[[U_INT_SRC]] {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
-  // CHECK-NEXT: %[[U_CONVERTED:.*]] = arith.fptosi %[[U_INT_TRANS]] : tensor<16x8xf32> to tensor<16x8xi16>
+  // CHECK-LABEL: tt.func @positive_a_generic_elementwise(
+  // CHECK-SAME: %[[G_SRC:arg[0-9]+]]: tensor<8x16xf32>
+  // CHECK-NOT: tt.trans %[[G_SRC]]
+  // CHECK: %[[G_ATAN:.*]] = math.atan %[[G_SRC]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[G_TAN:.*]] = math.tan %[[G_ATAN]] : tensor<8x16xf32>
+  // CHECK-NEXT: %[[G_TRANS:.*]] = tt.trans %[[G_TAN]] {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
+  // CHECK-NEXT: %{{.*}} = tt.dot %[[G_TRANS]], %{{.*}}, %{{.*}} : tensor<16x8xf32> * tensor<8x16xf32> -> tensor<16x16xf32>
+  tt.func @positive_a_generic_elementwise(
+      %a_src: tensor<8x16xf32>,
+      %b: tensor<8x16xf32>,
+      %c: tensor<16x16xf32>) {
+    %trans = tt.trans %a_src {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
+    %atan = math.atan %trans : tensor<16x8xf32>
+    %tan = math.tan %atan : tensor<16x8xf32>
+    %dot = tt.dot %tan, %b, %c : tensor<16x8xf32> * tensor<8x16xf32> -> tensor<16x16xf32>
+    tt.return
+  }
+
+  // CHECK-LABEL: tt.func @reject_type_changing_unary(
+  // CHECK-SAME: %[[U_SRC:arg[0-9]+]]: tensor<8x16xf32>
+  // CHECK-NOT: arith.fptosi %[[U_SRC]]
+  // CHECK: %[[U_TRANS:.*]] = tt.trans %[[U_SRC]] {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
+  // CHECK-NEXT: %[[U_CONVERTED:.*]] = arith.fptosi %[[U_TRANS]] : tensor<16x8xf32> to tensor<16x8xi16>
   // CHECK-NEXT: %{{.*}} = tt.dot %[[U_CONVERTED]], %{{.*}}, %{{.*}} : tensor<16x8xi16> * tensor<8x16xi16> -> tensor<16x16xi32>
-  tt.func @reject_unapproved_unary(
-      %float_src: tensor<8x16xf32>,
-      %float_b: tensor<8x16xf32>,
-      %float_c: tensor<16x16xf32>,
-      %int_src: tensor<8x16xf32>,
-      %int_b: tensor<8x16xi16>,
-      %int_c: tensor<16x16xi32>) {
-    %float_trans = tt.trans %float_src {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
-    %atan = math.atan %float_trans : tensor<16x8xf32>
-    %float_dot = tt.dot %atan, %float_b, %float_c : tensor<16x8xf32> * tensor<8x16xf32> -> tensor<16x16xf32>
-    %int_trans = tt.trans %int_src {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
-    %converted = arith.fptosi %int_trans : tensor<16x8xf32> to tensor<16x8xi16>
-    %int_dot = tt.dot %converted, %int_b, %int_c : tensor<16x8xi16> * tensor<8x16xi16> -> tensor<16x16xi32>
+  tt.func @reject_type_changing_unary(
+      %a_src: tensor<8x16xf32>,
+      %b: tensor<8x16xi16>,
+      %c: tensor<16x16xi32>) {
+    %trans = tt.trans %a_src {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
+    %converted = arith.fptosi %trans : tensor<16x8xf32> to tensor<16x8xi16>
+    %dot = tt.dot %converted, %b, %c : tensor<16x8xi16> * tensor<8x16xi16> -> tensor<16x16xi32>
     tt.return
   }
 

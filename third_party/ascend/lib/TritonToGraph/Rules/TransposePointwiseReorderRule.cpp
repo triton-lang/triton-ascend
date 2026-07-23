@@ -25,7 +25,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
@@ -72,11 +71,7 @@ std::optional<UnaryMoveKind> classifyTrustedUnary(Operation *operation) {
   if (isa<arith::TruncFOp, arith::ExtFOp, arith::BitcastOp>(operation))
     return UnaryMoveKind::ElementTypeCast;
 
-  if (isa<arith::NegFOp, math::AbsFOp, math::AbsIOp, math::CeilOp,
-          math::FloorOp, math::CosOp, math::SinOp, math::ErfOp,
-          math::ExpOp, math::Exp2Op, math::LogOp, math::Log2Op,
-          math::SqrtOp, math::RsqrtOp, math::TanhOp,
-          triton::PreciseSqrtOp>(operation))
+  if (operation->hasTrait<OpTrait::Elementwise>())
     return UnaryMoveKind::TypePreserving;
 
   return std::nullopt;

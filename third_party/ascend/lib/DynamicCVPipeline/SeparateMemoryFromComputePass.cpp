@@ -23,6 +23,7 @@
 #include "ascend/include/DynamicCVPipeline/SeparateMemoryFromComputePass.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/MarkGMLoadPass.h"
+#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/UBOverflowChecker.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
 
@@ -44,12 +45,9 @@ void SeparateMemoryFromComputePass::runOnOperation() {
   LDBG("Enter SeparateMemoryFromCompute pass");
 
   pm.addPass(createMarkGMLoadPass());
+  pm.addPass(createUBOverflowCheckerPass());
 
   if (failed(runPipeline(pm, module))) {
-    module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
-    if (!CVPipeline::hasFallbackAttr(module)) {
-      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
-    }
     return;
   }
 
@@ -65,6 +63,7 @@ std::unique_ptr<OperationPass<ModuleOp>> createSeparateMemoryFromComputePass() {
 
 void registerSeparateMemoryFromComputePasses() {
   registerPass(createMarkGMLoadPass);
+  registerPass(createUBOverflowCheckerPass);
 }
 
 } // namespace triton

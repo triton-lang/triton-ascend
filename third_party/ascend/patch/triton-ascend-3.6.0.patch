@@ -227,7 +227,7 @@ diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
 index 48049f026..e96284bc2 100644
 --- a/bin/RegisterTritonDialects.h
 +++ b/bin/RegisterTritonDialects.h
-@@ -1,6 +1,35 @@
+@@ -1,6 +1,36 @@
  #pragma once
 +#include "ascend/include/AutoBlockify/Passes.h"
 +#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
@@ -238,6 +238,7 @@ index 48049f026..e96284bc2 100644
 +#include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
 +#include "ascend/include/DynamicCVPipeline/Passes.h"
 +#include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
++#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/UBOverflowChecker.h"
 +#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromComputePass.h"
 +#include "ascend/include/DynamicCVPipeline/SplitDataflow/RefineArgsBlockId.h"
 +#include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
@@ -283,7 +284,7 @@ index 48049f026..e96284bc2 100644
    mlir::registerLLVMDIScope();
    mlir::LLVM::registerInlinerInterface(registry);
    mlir::NVVM::registerInlinerInterface(registry);
-@@ -136,16 +178,38 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -136,16 +178,39 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::proton::gpu::registerScheduleBufferStorePass();
    mlir::triton::proton::gpu::registerAddSchedBarriersPass();
  
@@ -294,6 +295,7 @@ index 48049f026..e96284bc2 100644
 +  mlir::triton::registerAddControlFlowConditionPasses();
 +  mlir::triton::registerAddMultiBufferOuterScopePasses();
 +  mlir::triton::registerAddMultiBufferInnerScopePasses();
++  mlir::triton::registerUBOverflowCheckerPasses();
 +  mlir::triton::registerRemoveSsbufAttrPasses();
 +  mlir::triton::registerAnalyzeDataFlowPasses();
 +  mlir::triton::registerComputeBlockOptPasses();
@@ -331,13 +333,13 @@ index 2d2570771..91ed8b79a 100644
 @@ -1,4 +1,5 @@
  #include "./RegisterTritonDialects.h"
 +#include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
- 
+
  #include "mlir/Tools/mlir-opt/MlirOptMain.h"
- 
+
 @@ -6,6 +7,9 @@ int main(int argc, char **argv) {
    mlir::DialectRegistry registry;
    registerTritonDialects(registry);
- 
+
 +  // Register AddMultiBufferInnerScope pass
 +  mlir::triton::registerAddMultiBufferInnerScopePasses();
 +

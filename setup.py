@@ -676,6 +676,12 @@ class CMakeBuild(build_ext):
 
 
 def download_and_copy_dependencies():
+    # Allow skipping NVIDIA dependency downloads via env var.
+    # Set TRITON_SKIP_NVIDIA_DOWNLOAD=ON (or 1, TRUE, YES) in CI environments
+    # that cannot access developer.download.nvidia.com.
+    if check_env_flag("TRITON_SKIP_NVIDIA_DOWNLOAD"):
+        print("Skipping NVIDIA dependency downloads (TRITON_SKIP_NVIDIA_DOWNLOAD is set)", file=sys.stderr)
+        return
     nvidia_version_path = os.path.join(get_base_dir(), "cmake", "nvidia-toolchain-version.json")
     with open(nvidia_version_path, "r") as nvidia_version_file:
         # parse this json file to get the version of the nvidia toolchain

@@ -52,9 +52,15 @@ struct ParsedRange {
   triton::MakeRangeOp range;
 };
 
-struct ParsedRankTwoAxis {
+struct OffsetBounds {
+  int64_t first = 0;
+  int64_t last = 0;
+};
+
+struct ParsedAffineAxis {
   ProofOutcome outcome;
   StaticAccessAxis axis;
+  OffsetBounds bounds;
 };
 
 bool haveSameShape(RankedTensorType lhs, RankedTensorType rhs) {
@@ -134,6 +140,20 @@ bool addWouldOverflow(int64_t lhs, int64_t rhs) {
   return lhs < kMin - rhs;
 }
 
+bool checkedAddI64(int64_t lhs, int64_t rhs, int64_t &result) {
+  if (addWouldOverflow(lhs, rhs))
+    return false;
+  result = lhs + rhs;
+  return true;
+}
+
+bool checkedMulI64(int64_t lhs, int64_t rhs, int64_t &result) {
+  if (multiplyWouldOverflow(lhs, rhs))
+    return false;
+  result = lhs * rhs;
+  return true;
+}
+
 ParsedRange parseNormalizedRange(Value offset) {
   if (auto range = offset.getDefiningOp<triton::MakeRangeOp>())
     return {ProofOutcome::proven(), range};
@@ -142,8 +162,8 @@ ParsedRange parseNormalizedRange(Value offset) {
           triton::MakeRangeOp()};
 }
 
-ParsedRankTwoAxis parseRankTwoAxis(Value value,
-                                   RankedTensorType fullOffsetType) {
+ParsedAffineAxis parseAffineAxis(Value value,
+                                 RankedTensorType fullOffsetType) {
   auto broadcast = value.getDefiningOp<triton::BroadcastOp>();
   if (!broadcast || broadcast.getResult() != value)
     return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset), {}};
@@ -159,13 +179,12 @@ ParsedRankTwoAxis parseRankTwoAxis(Value value,
   if (multiply.getOverflowFlags() != arith::IntegerOverflowFlags::none)
     return {ProofOutcome::rejected(ProofReason::OverflowFlags), {}};
 
-  auto expanded = multiply.getLhs().getDefiningOp<triton::ExpandDimsOp>();
   auto strideSplat = multiply.getRhs().getDefiningOp<triton::SplatOp>();
-  if (!expanded || !strideSplat || expanded.getResult() != multiply.getLhs() ||
-      strideSplat.getResult() != multiply.getRhs())
+  if (!strideSplat || strideSplat.getResult() != multiply.getRhs())
     return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset), {}};
 
-  auto expandedType = dyn_cast<RankedTensorType>(expanded.getResult().getType());
+  auto expandedType =
+      dyn_cast<RankedTensorType>(multiply.getLhs().getType());
   auto strideType = dyn_cast<RankedTensorType>(strideSplat.getResult().getType());
   if (!expandedType || !strideType || !isUnencodedRankedTensor(expandedType) ||
       !isUnencodedRankedTensor(strideType) || !isI32Tensor(expandedType) ||
@@ -177,13 +196,49 @@ ParsedRankTwoAxis parseRankTwoAxis(Value value,
   if (!getStaticI32Constant(strideSplat.getSrc(), stride))
     return {ProofOutcome::rejected(ProofReason::DynamicStride), {}};
 
-  auto range = expanded.getSrc().getDefiningOp<triton::MakeRangeOp>();
-  if (!range || range.getResult() != expanded.getSrc())
+  Value rangeValue = multiply.getLhs();
+  unsigned outputAxis = 0;
+  bool hasOutputAxis = false;
+  unsigned expectedRank = fullOffsetType.getRank();
+  while (auto expanded = rangeValue.getDefiningOp<triton::ExpandDimsOp>()) {
+    if (expanded.getResult() != rangeValue)
+      return {ProofOutcome::rejected(ProofReason::InvalidExpandDimsChain), {}, {}};
+    auto sourceType = dyn_cast<RankedTensorType>(expanded.getSrc().getType());
+    auto resultType = dyn_cast<RankedTensorType>(expanded.getResult().getType());
+    if (!sourceType || !resultType || !isUnencodedRankedTensor(sourceType) ||
+        !isUnencodedRankedTensor(resultType) || !isI32Tensor(sourceType) ||
+        !isI32Tensor(resultType) ||
+        resultType.getRank() != sourceType.getRank() + 1 ||
+        resultType.getRank() > expectedRank ||
+        expanded.getAxis() >= resultType.getRank())
+      return {ProofOutcome::rejected(ProofReason::InvalidExpandDimsChain), {}, {}};
+    if (hasOutputAxis && expanded.getAxis() <= outputAxis)
+      ++outputAxis;
+    else if (!hasOutputAxis) {
+      outputAxis = 0;
+      hasOutputAxis = true;
+      if (expanded.getAxis() == 0)
+        ++outputAxis;
+    }
+    for (unsigned axis = 0; axis < resultType.getRank(); ++axis) {
+      const int64_t expected = axis == expanded.getAxis()
+                                   ? 1
+                                   : sourceType.getShape()[axis < expanded.getAxis()
+                                                                ? axis
+                                                                : axis - 1];
+      if (resultType.getShape()[axis] != expected)
+        return {ProofOutcome::rejected(ProofReason::InvalidExpandDimsChain), {}, {}};
+    }
+    rangeValue = expanded.getSrc();
+  }
+
+  auto range = rangeValue.getDefiningOp<triton::MakeRangeOp>();
+  if (!range || range.getResult() != rangeValue)
     return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset), {}};
 
   auto rangeType = dyn_cast<RankedTensorType>(range.getResult().getType());
-  if (!rangeType || !isUnencodedRankedTensor(rangeType) || !isI32Tensor(rangeType) ||
-      rangeType.getRank() != 1 || rangeType.getShape().front() <= 1)
+  if (!rangeType || !isUnencodedRankedTensor(rangeType) ||
+      !isI32Tensor(rangeType) || rangeType.getRank() != 1)
     return {ProofOutcome::rejected(ProofReason::UnsupportedRank), {}};
 
   int64_t rangeStart = 0;
@@ -191,22 +246,26 @@ ParsedRankTwoAxis parseRankTwoAxis(Value value,
   if (!getSignedI32RangeBounds(range, rangeStart, rangeEnd))
     return {ProofOutcome::rejected(ProofReason::InvalidMakeRange), {}};
   const int64_t extent = rangeType.getShape().front();
-  // V1 deliberately fixes the lane origin at zero.  This makes the rebuilt
-  // range proof structural and avoids silently folding an affine base term.
-  if (rangeStart != 0 || rangeEnd <= rangeStart || rangeEnd - rangeStart != extent)
+  if (rangeEnd <= rangeStart || rangeEnd - rangeStart != extent)
     return {ProofOutcome::rejected(ProofReason::InvalidMakeRange), {}};
 
-  const unsigned insertedAxis = expanded.getAxis();
-  if (insertedAxis >= 2)
-    return {ProofOutcome::rejected(ProofReason::InvalidAxisProvenance), {}};
-  const unsigned outputAxis = 1 - insertedAxis;
-
-  if (expandedType.getRank() != 2 || expandedType.getShape()[outputAxis] != extent ||
-      expandedType.getShape()[insertedAxis] != 1)
+  if (!hasOutputAxis || expandedType.getRank() != expectedRank ||
+      outputAxis >= expectedRank || expandedType.getShape()[outputAxis] != extent)
     return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset), {}};
+  for (unsigned axis = 0; axis < expectedRank; ++axis) {
+    if (axis != outputAxis && expandedType.getShape()[axis] != 1)
+      return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset), {}, {}};
+  }
+
+  int64_t first = 0;
+  int64_t last = 0;
+  if (!checkedMulI64(rangeStart, stride, first) ||
+      !checkedMulI64(rangeEnd - 1, stride, last))
+    return {ProofOutcome::rejected(ProofReason::OffsetOverflow), {}, {}};
 
   return {ProofOutcome::proven(),
-          StaticAccessAxis{range, rangeStart, rangeEnd, stride, outputAxis}};
+          StaticAccessAxis{range, rangeStart, rangeEnd, stride, outputAxis},
+          OffsetBounds{first, last}};
 }
 
 StaticAccessProof rejectAccess(ProofOutcome outcome) {
@@ -271,10 +330,14 @@ llvm::StringRef cfg::getProofReasonMessage(ProofReason reason) {
     return "multiple access axes reuse the same tt.make_range source";
   case ProofReason::InvalidMakeRange:
     return "tt.make_range does not match its static result shape";
+  case ProofReason::InvalidExpandDimsChain:
+    return "affine axis does not have a valid expand_dims chain";
   case ProofReason::OffsetOverflow:
     return "static affine offset arithmetic overflows";
   case ProofReason::OverflowFlags:
     return "affine arithmetic has overflow flags that V1 cannot preserve";
+  case ProofReason::NonRowMajorContiguous:
+    return "access is not logically row-major contiguous";
   case ProofReason::NonInjectiveLanes:
     return "lane address map is not proven injective";
   case ProofReason::MaskedAccess:
@@ -438,6 +501,24 @@ ProofOutcome StaticAccessAnalysis::proveLaneInjectivity(
   return ProofOutcome::proven();
 }
 
+bool StaticAccess::isLogicalRowMajorContiguous() const {
+  if (!lanesInjective || shape.empty() || shape.size() != strides.size() ||
+      shape.size() != axes.size() || elementCount <= 0)
+    return false;
+
+  int64_t expectedStride = 1;
+  for (size_t index = shape.size(); index != 0; --index) {
+    const size_t axis = index - 1;
+    if (shape[axis] <= 0 || axes[axis].outputAxis != axis ||
+        strides[axis] != expectedStride)
+      return false;
+    if (multiplyWouldOverflow(expectedStride, shape[axis]))
+      return false;
+    expectedStride *= shape[axis];
+  }
+  return expectedStride == elementCount;
+}
+
 StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
   if (!pointer)
     return rejectAccess(ProofOutcome::rejected(ProofReason::NullValue));
@@ -446,7 +527,7 @@ StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
   if (!pointerType)
     return rejectAccess(
         ProofOutcome::rejected(ProofReason::UnsupportedPointerType));
-  if (pointerType.getRank() != 1 && pointerType.getRank() != 2)
+  if (pointerType.getRank() < 1)
     return rejectAccess(ProofOutcome::rejected(ProofReason::UnsupportedRank));
   if (!pointerType.hasStaticShape())
     return rejectAccess(ProofOutcome::rejected(ProofReason::DynamicShape));
@@ -530,6 +611,7 @@ StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
     const int64_t lastRangeValue = rangeEnd - 1;
     access.firstOffset = rangeStart;
     access.lastOffset = lastRangeValue;
+    access.elementCount = rangeType.getShape().front();
     access.lanesInjective = true;
     return {ProofOutcome::proven(), std::move(access)};
   }
@@ -537,42 +619,41 @@ StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
   if (!isI32Tensor(offsetType))
     return rejectAccess(
         ProofOutcome::rejected(ProofReason::UnsupportedIndexElementType));
-  if (pointerType.getShape()[0] <= 1 ||
-      pointerType.getShape()[0] != pointerType.getShape()[1])
-    return rejectAccess(ProofOutcome::rejected(ProofReason::NonSquareShape));
-
-  auto offsetAdd = addPtr.getOffset().getDefiningOp<arith::AddIOp>();
-  if (!offsetAdd || offsetAdd.getResult() != addPtr.getOffset())
+  SmallVector<Value, 4> pendingTerms = {addPtr.getOffset()};
+  SmallVector<Value, 4> affineTerms;
+  while (!pendingTerms.empty()) {
+    Value term = pendingTerms.pop_back_val();
+    if (auto add = term.getDefiningOp<arith::AddIOp>()) {
+      if (add.getResult() != term)
+        return rejectAccess(
+            ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset));
+      if (add.getOverflowFlags() != arith::IntegerOverflowFlags::none)
+        return rejectAccess(ProofOutcome::rejected(ProofReason::OverflowFlags));
+      pendingTerms.push_back(add.getLhs());
+      pendingTerms.push_back(add.getRhs());
+      continue;
+    }
+    affineTerms.push_back(term);
+  }
+  if (affineTerms.size() != pointerType.getRank())
     return rejectAccess(
         ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset));
-  if (offsetAdd.getOverflowFlags() != arith::IntegerOverflowFlags::none)
-    return rejectAccess(ProofOutcome::rejected(ProofReason::OverflowFlags));
 
-  ParsedRankTwoAxis firstAxis =
-      parseRankTwoAxis(offsetAdd.getLhs(), offsetType);
-  ParsedRankTwoAxis secondAxis =
-      parseRankTwoAxis(offsetAdd.getRhs(), offsetType);
-  if (!firstAxis.outcome.isProven())
-    return rejectAccess(firstAxis.outcome);
-  if (!secondAxis.outcome.isProven())
-    return rejectAccess(secondAxis.outcome);
-
-  SmallVector<StaticAccessAxis, 4> axes(2);
-  bool seenOutputAxis[2] = {false, false};
-  for (const StaticAccessAxis &axis : {firstAxis.axis, secondAxis.axis}) {
-    if (axis.outputAxis >= 2 || seenOutputAxis[axis.outputAxis])
+  SmallVector<StaticAccessAxis, 4> axes(pointerType.getRank());
+  SmallVector<OffsetBounds, 4> bounds(pointerType.getRank());
+  SmallVector<bool, 4> seenOutputAxis(pointerType.getRank(), false);
+  for (Value term : affineTerms) {
+    ParsedAffineAxis parsedAxis = parseAffineAxis(term, offsetType);
+    if (!parsedAxis.outcome.isProven())
+      return rejectAccess(parsedAxis.outcome);
+    if (parsedAxis.axis.outputAxis >= pointerType.getRank() ||
+        seenOutputAxis[parsedAxis.axis.outputAxis])
       return rejectAccess(
           ProofOutcome::rejected(ProofReason::DuplicateAxisProvenance));
-    seenOutputAxis[axis.outputAxis] = true;
-    axes[axis.outputAxis] = axis;
+    seenOutputAxis[parsedAxis.axis.outputAxis] = true;
+    axes[parsedAxis.axis.outputAxis] = parsedAxis.axis;
+    bounds[parsedAxis.axis.outputAxis] = parsedAxis.bounds;
   }
-  if (!seenOutputAxis[0] || !seenOutputAxis[1])
-    return rejectAccess(
-        ProofOutcome::rejected(ProofReason::InvalidAxisProvenance));
-  if (!axes[0].range || !axes[1].range ||
-      axes[0].range.getOperation() == axes[1].range.getOperation())
-    return rejectAccess(
-        ProofOutcome::rejected(ProofReason::DuplicateRangeSource));
 
   StaticAccess access;
   access.pointer = pointer;
@@ -580,34 +661,53 @@ StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
   access.base = baseSplat.getSrc();
   access.shape.append(pointerType.getShape().begin(), pointerType.getShape().end());
   access.axes = std::move(axes);
-  for (unsigned axis = 0; axis < 2; ++axis) {
+
+  int64_t firstOffset = 0;
+  int64_t lastOffset = 0;
+  int64_t expectedStride = 1;
+  for (size_t index = access.shape.size(); index != 0; --index) {
+    const unsigned axis = static_cast<unsigned>(index - 1);
     const StaticAccessAxis &parsedAxis = access.axes[axis];
-    if (parsedAxis.rangeEnd != access.shape[axis])
+    if (!seenOutputAxis[axis] || !parsedAxis.range ||
+        parsedAxis.outputAxis != axis || parsedAxis.rangeEnd <= parsedAxis.rangeStart ||
+        parsedAxis.rangeEnd - parsedAxis.rangeStart != access.shape[axis])
       return rejectAccess(
           ProofOutcome::rejected(ProofReason::InvalidMakeRange));
+    if (parsedAxis.stride != expectedStride)
+      return rejectAccess(
+          ProofOutcome::rejected(ProofReason::NonRowMajorContiguous));
+    if (!checkedMulI64(expectedStride, access.shape[axis], expectedStride))
+      return rejectAccess(ProofOutcome::rejected(ProofReason::OffsetOverflow));
+  }
+
+  for (unsigned axis = 0; axis < access.shape.size(); ++axis) {
+    const StaticAccessAxis &parsedAxis = access.axes[axis];
+    for (unsigned prior = 0; prior < axis; ++prior) {
+      if (access.axes[prior].range.operator->() ==
+          parsedAxis.range.operator->())
+        return rejectAccess(
+            ProofOutcome::rejected(ProofReason::DuplicateRangeSource));
+    }
+    if (!checkedAddI64(firstOffset, bounds[axis].first, firstOffset) ||
+        !checkedAddI64(lastOffset, bounds[axis].last, lastOffset))
+      return rejectAccess(ProofOutcome::rejected(ProofReason::OffsetOverflow));
     access.strides.push_back(parsedAxis.stride);
     access.axisProvenance.push_back(axis);
   }
 
-  ProofOutcome injectivity =
-      proveLaneInjectivity(access.shape, access.strides, access.axisProvenance);
-  if (!injectivity.isProven())
-    return rejectAccess(injectivity);
+  if (firstOffset < std::numeric_limits<int32_t>::min() ||
+      firstOffset > std::numeric_limits<int32_t>::max() ||
+      lastOffset < std::numeric_limits<int32_t>::min() ||
+      lastOffset > std::numeric_limits<int32_t>::max())
+    return rejectAccess(ProofOutcome::rejected(ProofReason::OffsetOverflow));
 
-  int64_t lastOffset = 0;
-  for (unsigned axis = 0; axis < 2; ++axis) {
-    const int64_t extent = access.shape[axis] - 1;
-    if (multiplyWouldOverflow(extent, access.strides[axis]))
-      return rejectAccess(ProofOutcome::rejected(ProofReason::OffsetOverflow));
-    const int64_t contribution = extent * access.strides[axis];
-    if (addWouldOverflow(lastOffset, contribution))
-      return rejectAccess(ProofOutcome::rejected(ProofReason::OffsetOverflow));
-    lastOffset += contribution;
-  }
-
-  access.firstOffset = 0;
+  access.firstOffset = firstOffset;
   access.lastOffset = lastOffset;
+  access.elementCount = expectedStride;
   access.lanesInjective = true;
+  if (!access.isLogicalRowMajorContiguous())
+    return rejectAccess(
+        ProofOutcome::rejected(ProofReason::NonRowMajorContiguous));
   return {ProofOutcome::proven(), std::move(access)};
 }
 

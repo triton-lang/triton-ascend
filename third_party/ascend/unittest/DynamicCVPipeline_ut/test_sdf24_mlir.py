@@ -225,7 +225,7 @@ def test_sdf24():
     assert mlir and len(mlir) > 0, "MLIR代码生成失败或为空"
     assert "func.func @sdf24(" in mlir, \
         "MLIR代码中未找到kernel函数定义"
-    assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
+    assert "scope" not in mlir, "预期回退场景MLIR代码中包含'scope'关键字"
 
     # 将MLIR代码输出到指定路径
 

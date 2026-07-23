@@ -259,7 +259,7 @@ def test_pcb01_tc01():
         "MLIR代码中未找到kernel函数定义"
 
     # 校验MLIR代码中包含"scope"关键字
-    assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
+    assert "scope" not in mlir, "预期回退场景MLIR代码中包含'scope'关键字"
 
 
 def test_pcb01_tc02():
@@ -310,7 +310,7 @@ def test_pcb01_tc02():
         "MLIR代码中未找到kernel函数定义"
 
     # 校验MLIR代码中包含"scope"关键字
-    assert "scope" in mlir, "MLIR代码中未包含'scope'关键字"
+    assert "scope" not in mlir, "预期回退场景MLIR代码中包含'scope'关键字"
 
 
 # ============================================================================

@@ -25,9 +25,12 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Math/IR/Math.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Verifier.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include <memory>
@@ -44,8 +47,10 @@ struct MatchedChain {
   triton::DotOp dot;
   unsigned operandIndex;
   triton::TransOp trans;
-  SmallVector<Operation *> casts;
+  SmallVector<Operation *> unaryOps;
 };
+
+enum class UnaryMoveKind { ElementTypeCast, TypePreserving };
 
 bool hasSingleResultAndOperand(Operation *operation, Value expectedResult) {
   return operation && operation->getNumOperands() == 1 &&
@@ -60,11 +65,25 @@ bool hasOnlyExpectedUse(Value value, Operation *expectedUser) {
   return value.use_begin()->getOwner() == expectedUser;
 }
 
-bool isWhitelistedCast(Operation *operation) {
-  return isa<arith::TruncFOp, arith::ExtFOp, arith::BitcastOp>(operation);
+std::optional<UnaryMoveKind> classifyTrustedUnary(Operation *operation) {
+  if (!operation)
+    return std::nullopt;
+
+  if (isa<arith::TruncFOp, arith::ExtFOp, arith::BitcastOp>(operation))
+    return UnaryMoveKind::ElementTypeCast;
+
+  if (isa<arith::NegFOp, math::AbsFOp, math::AbsIOp, math::CeilOp,
+          math::FloorOp, math::CosOp, math::SinOp, math::ErfOp,
+          math::ExpOp, math::Exp2Op, math::LogOp, math::Log2Op,
+          math::SqrtOp, math::RsqrtOp, math::TanhOp,
+          triton::PreciseSqrtOp>(operation))
+    return UnaryMoveKind::TypePreserving;
+
+  return std::nullopt;
 }
 
-bool hasCompatibleCastTensorTypes(Operation *operation) {
+bool hasCompatibleUnaryTensorTypes(Operation *operation,
+                                   UnaryMoveKind kind) {
   if (!operation || operation->getNumOperands() != 1 ||
       operation->getNumResults() != 1)
     return false;
@@ -77,8 +96,18 @@ bool hasCompatibleCastTensorTypes(Operation *operation) {
       !resultType.hasStaticShape())
     return false;
 
-  return operandType.getShape() == resultType.getShape() &&
-         operandType.getEncoding() == resultType.getEncoding();
+  if (operandType.getShape() != resultType.getShape() ||
+      operandType.getEncoding() != resultType.getEncoding())
+    return false;
+
+  return kind != UnaryMoveKind::TypePreserving || operandType == resultType;
+}
+
+bool isTrustedUnary(Operation *operation, Value expectedResult,
+                    UnaryMoveKind kind) {
+  return hasSingleResultAndOperand(operation, expectedResult) &&
+         isMemoryEffectFree(operation) &&
+         hasCompatibleUnaryTensorTypes(operation, kind);
 }
 
 bool hasValidTransposeOrder(triton::TransOp trans,
@@ -140,22 +169,23 @@ std::optional<MatchedChain> matchCandidate(triton::DotOp dot,
     return std::nullopt;
 
   Operation *expectedUser = dot.getOperation();
-  SmallVector<Operation *> reverseCasts;
+  SmallVector<Operation *> reverseUnaryOps;
   while (Operation *operation = value.getDefiningOp()) {
-    if (!isWhitelistedCast(operation))
+    std::optional<UnaryMoveKind> kind = classifyTrustedUnary(operation);
+    if (!kind)
       break;
+
     if (operation->getBlock() != block ||
-        !hasSingleResultAndOperand(operation, value) ||
         !hasOnlyExpectedUse(value, expectedUser) ||
-        !hasCompatibleCastTensorTypes(operation))
+        !isTrustedUnary(operation, value, *kind))
       return std::nullopt;
 
-    reverseCasts.push_back(operation);
+    reverseUnaryOps.push_back(operation);
     value = operation->getOperand(0);
     expectedUser = operation;
   }
 
-  if (reverseCasts.empty())
+  if (reverseUnaryOps.empty())
     return std::nullopt;
 
   triton::TransOp trans = value.getDefiningOp<triton::TransOp>();
@@ -175,31 +205,35 @@ std::optional<MatchedChain> matchCandidate(triton::DotOp dot,
       originalInferredTypes.front() != trans.getResult().getType())
     return std::nullopt;
 
-  SmallVector<Operation *> casts(reverseCasts.rbegin(), reverseCasts.rend());
-  return MatchedChain{dot, operandIndex, trans, std::move(casts)};
+  SmallVector<Operation *> unaryOps(reverseUnaryOps.rbegin(),
+                                    reverseUnaryOps.rend());
+  return MatchedChain{dot, operandIndex, trans, std::move(unaryOps)};
 }
 
-Operation *createMovedCast(IRRewriter &rewriter, Operation *cast,
-                           RankedTensorType resultType, Value input) {
-  Operation *replacement = nullptr;
-  if (isa<arith::TruncFOp>(cast)) {
-    replacement = rewriter
-                      .create<arith::TruncFOp>(cast->getLoc(), resultType,
-                                                input)
-                      .getOperation();
-  } else if (isa<arith::ExtFOp>(cast)) {
-    replacement = rewriter
-                      .create<arith::ExtFOp>(cast->getLoc(), resultType, input)
-                      .getOperation();
-  } else if (isa<arith::BitcastOp>(cast)) {
-    replacement = rewriter
-                      .create<arith::BitcastOp>(cast->getLoc(), resultType,
-                                                 input)
-                      .getOperation();
-  }
+std::optional<RankedTensorType>
+getMovedUnaryResultType(Operation *unary, Value input) {
+  if (!unary || unary->getNumResults() != 1)
+    return std::nullopt;
 
-  if (replacement)
-    replacement->setAttrs(cast->getAttrs());
+  std::optional<UnaryMoveKind> kind = classifyTrustedUnary(unary);
+  auto inputType = dyn_cast<RankedTensorType>(input.getType());
+  auto oldResultType =
+      dyn_cast<RankedTensorType>(unary->getResult(0).getType());
+  if (!kind || !inputType || !oldResultType || !inputType.hasStaticShape() ||
+      !oldResultType.hasStaticShape())
+    return std::nullopt;
+
+  if (*kind == UnaryMoveKind::TypePreserving)
+    return inputType;
+  return inputType.clone(oldResultType.getElementType());
+}
+
+Operation *createMovedUnary(IRRewriter &rewriter, Operation *unary,
+                            Value input, RankedTensorType resultType) {
+  IRMapping mapping;
+  mapping.map(unary->getOperand(0), input);
+  Operation *replacement = rewriter.clone(*unary, mapping);
+  replacement->getResult(0).setType(resultType);
   return replacement;
 }
 
@@ -215,14 +249,14 @@ public:
       : dot(chain.dot), dotOperation(chain.dot.getOperation()),
         operandIndex(chain.operandIndex), trans(chain.trans),
         transOperation(chain.trans.getOperation()),
-        casts(std::move(chain.casts)), epoch(epoch) {}
+        unaryOps(std::move(chain.unaryOps)), epoch(epoch) {}
 
   GraphOptimizationRuleId getRuleId() const override {
     return GraphOptimizationRuleId::TransposePointwiseReorder;
   }
 
   unsigned getBenefit() const override {
-    return static_cast<unsigned>(casts.size());
+    return static_cast<unsigned>(unaryOps.size());
   }
 
   Operation *getAnchor() const override { return dotOperation; }
@@ -240,11 +274,12 @@ public:
 
     std::optional<MatchedChain> current = matchCandidate(dot, operandIndex);
     if (!current || current->trans.getOperation() != transOperation ||
-        current->casts.size() != casts.size())
+        current->unaryOps.size() != unaryOps.size())
       return failure();
 
-    for (auto [currentCast, storedCast] : llvm::zip(current->casts, casts)) {
-      if (currentCast != storedCast)
+    for (auto [currentUnary, storedUnary] :
+         llvm::zip(current->unaryOps, unaryOps)) {
+      if (currentUnary != storedUnary)
         return failure();
     }
     return success();
@@ -258,36 +293,28 @@ public:
     std::optional<MatchedChain> current = matchCandidate(dot, operandIndex);
     if (!block || !current ||
         current->trans.getOperation() != transOperation ||
-        current->casts.size() != casts.size())
+        current->unaryOps.size() != unaryOps.size())
       return failure();
-    for (auto [currentCast, storedCast] : llvm::zip(current->casts, casts)) {
-      if (currentCast != storedCast)
+    for (auto [currentUnary, storedUnary] :
+         llvm::zip(current->unaryOps, unaryOps)) {
+      if (currentUnary != storedUnary)
         return failure();
     }
 
     Value originalDotOperand = operandIndex == 0 ? dot.getA() : dot.getB();
-    auto sourceType = dyn_cast<RankedTensorType>(trans.getSrc().getType());
-    if (!sourceType)
-      return failure();
-
     rewriter.setInsertionPoint(trans);
     Value currentValue = trans.getSrc();
     SmallVector<Operation *> created;
-    for (Operation *cast : casts) {
-      auto oldResultType =
-          dyn_cast<RankedTensorType>(cast->getResult(0).getType());
-      if (!oldResultType) {
+    for (Operation *unary : unaryOps) {
+      std::optional<RankedTensorType> movedResultType =
+          getMovedUnaryResultType(unary, currentValue);
+      if (!movedResultType) {
         eraseCreatedOperations(rewriter, created);
         return failure();
       }
 
-      // Keep the source's shape and encoding while changing only the element
-      // type.  The following tt.trans is intentionally built through its
-      // inferred-type builder, which recomputes its encoding.
-      RankedTensorType movedResultType =
-          sourceType.clone(oldResultType.getElementType());
       Operation *replacement =
-          createMovedCast(rewriter, cast, movedResultType, currentValue);
+          createMovedUnary(rewriter, unary, currentValue, *movedResultType);
       if (!replacement) {
         eraseCreatedOperations(rewriter, created);
         return failure();
@@ -329,8 +356,8 @@ public:
       dot->setOperand(operandIndex, replacementTrans.getResult());
     });
 
-    for (Operation *cast : llvm::reverse(casts))
-      rewriter.eraseOp(cast);
+    for (Operation *unary : llvm::reverse(unaryOps))
+      rewriter.eraseOp(unary);
     rewriter.eraseOp(trans);
     return success();
   }
@@ -341,7 +368,7 @@ private:
   unsigned operandIndex;
   triton::TransOp trans;
   Operation *transOperation;
-  SmallVector<Operation *> casts;
+  SmallVector<Operation *> unaryOps;
   unsigned epoch;
 };
 

@@ -428,6 +428,13 @@ def try_compile_with_config(linalg: str, ub_config: Dict[str, Any], metadata: di
     except Exception as e:
         return (False, str(e))
 
+def print_debug_cmd(cmd_list, metadata):
+    opts = metadata["bisheng_options"]
+    cmd = ' '.join(cmd_list)
+    if opts is not None and opts in cmd:
+        cmd = cmd.replace(opts, f'"{opts}"')
+    print(f"[DEBUG] cmd: {cmd}")
+
 
 def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
@@ -646,7 +653,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             cmd_list += [f"--hfusion-enable-cross-if-fusion={enable_cross_if_fusion}"]
 
         if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
-            print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
+            print_debug_cmd(cmd_list, metadata)
 
         try:
             ret = subprocess.run(
@@ -868,7 +875,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             + ["-o", bin_file]
         )
         if opt.debug or os.getenv("TRITON_PRINT_UBTUNING", None) == "1":
-            print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
+            print_debug_cmd(cmd_list, metadata)
 
         try:
             ret = subprocess.run(

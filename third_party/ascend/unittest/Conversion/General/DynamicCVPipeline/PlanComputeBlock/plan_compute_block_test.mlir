@@ -114,8 +114,8 @@ func.func @tc01_single_block_comprehensive(
   %alloc_b = memref.alloc() : memref<4x4xf16>
   memref.copy %ma, %alloc_a : memref<4x4xf16> to memref<4x4xf16>
   memref.copy %mb, %alloc_b : memref<4x4xf16> to memref<4x4xf16>
-  %load_a = bufferization.to_tensor %alloc_a restrict writable : memref<4x4xf16>
-  %load_b = bufferization.to_tensor %alloc_b restrict writable : memref<4x4xf16>
+  %load_a = bufferization.to_tensor %alloc_a restrict writable : memref<4x4xf16> to tensor<4x4xf16>
+  %load_b = bufferization.to_tensor %alloc_b restrict writable : memref<4x4xf16> to tensor<4x4xf16>
   %tr_init = tensor.empty() : tensor<4x4xf16>
   %load_bt = linalg.transpose ins(%load_b : tensor<4x4xf16>) outs(%tr_init : tensor<4x4xf16>) permutation = [1, 0]
   %mm0_empty = tensor.empty() : tensor<4x4xf32>
@@ -133,7 +133,7 @@ func.func @tc01_single_block_comprehensive(
   %vec_from_cube2 = arith.addf %vec_from_cube1, %store1 : tensor<4x4xf32>
 
   // Same producer has both CUBE and VECTOR consumers.
-  %shared_tensor = bufferization.to_tensor %shared_src restrict writable : memref<4x4xf32>
+  %shared_tensor = bufferization.to_tensor %shared_src restrict writable : memref<4x4xf32> to tensor<4x4xf32>
   %shared_fill = linalg.fill ins(%two : f32) outs(%dst1 : tensor<4x4xf32>) -> tensor<4x4xf32>
   %shared_mm = linalg.matmul ins(%shared_tensor, %fb : tensor<4x4xf32>, tensor<4x4xf32>) outs(%shared_fill : tensor<4x4xf32>) -> tensor<4x4xf32>
   %shared_vec = arith.addf %shared_tensor, %fa : tensor<4x4xf32>
@@ -152,7 +152,7 @@ func.func @tc01_single_block_comprehensive(
   // No-result fill with memref outs must be classified with the downstream CUBE use.
   %scratch = memref.alloc() : memref<4x4xf32>
   linalg.fill ins(%zero : f32) outs(%scratch : memref<4x4xf32>)
-  %scratch_tensor = bufferization.to_tensor %scratch restrict writable : memref<4x4xf32>
+  %scratch_tensor = bufferization.to_tensor %scratch restrict writable : memref<4x4xf32> to tensor<4x4xf32>
   %scratch_mm = linalg.matmul ins(%scratch_tensor, %fa : tensor<4x4xf32>, tensor<4x4xf32>) outs(%dst1 : tensor<4x4xf32>) -> tensor<4x4xf32>
 
   // VF findCandidates/updateCandidates: VECTOR chains are blocked by
@@ -181,8 +181,8 @@ func.func @tc01_single_block_comprehensive(
   // anchors, a cube result feeding another cube dot, and vector side users.
   %dep_alloc0 = memref.alloc() : memref<4x4xf16>
   %dep_alloc1 = memref.alloc() : memref<4x4xf16>
-  %dep_t0 = bufferization.to_tensor %dep_alloc0 restrict writable : memref<4x4xf16>
-  %dep_t1 = bufferization.to_tensor %dep_alloc1 restrict writable : memref<4x4xf16>
+  %dep_t0 = bufferization.to_tensor %dep_alloc0 restrict writable : memref<4x4xf16> to tensor<4x4xf16>
+  %dep_t1 = bufferization.to_tensor %dep_alloc1 restrict writable : memref<4x4xf16> to tensor<4x4xf16>
   %dep_pre0 = arith.subf %fa, %fb : tensor<4x4xf32>
   %dep_pre1 = arith.mulf %dep_pre0, %fa : tensor<4x4xf32>
   %dep_cast0 = arith.truncf %dep_pre1 : tensor<4x4xf32> to tensor<4x4xf16>
@@ -270,8 +270,8 @@ func.func @tc02_nested_control_flow(
   %alloc_b = memref.alloc() : memref<4x4xf16>
   memref.copy %ma, %alloc_a : memref<4x4xf16> to memref<4x4xf16>
   memref.copy %mb, %alloc_b : memref<4x4xf16> to memref<4x4xf16>
-  %load_a = bufferization.to_tensor %alloc_a restrict writable : memref<4x4xf16>
-  %load_b = bufferization.to_tensor %alloc_b restrict writable : memref<4x4xf16>
+  %load_a = bufferization.to_tensor %alloc_a restrict writable : memref<4x4xf16> to tensor<4x4xf16>
+  %load_b = bufferization.to_tensor %alloc_b restrict writable : memref<4x4xf16> to tensor<4x4xf16>
   %empty = tensor.empty() : tensor<4x4xf32>
   %fill = linalg.fill ins(%zero : f32) outs(%empty : tensor<4x4xf32>) -> tensor<4x4xf32>
   %outer_mm = linalg.matmul ins(%load_a, %load_b : tensor<4x4xf16>, tensor<4x4xf16>) outs(%fill : tensor<4x4xf32>) -> tensor<4x4xf32>
@@ -380,7 +380,7 @@ func.func @tc03e_memref_fill_no_result(
   %zero = arith.constant 0.0 : f32
   %scratch = memref.alloc() : memref<4x4xf32>
   linalg.fill ins(%zero : f32) outs(%scratch : memref<4x4xf32>)
-  %t = bufferization.to_tensor %scratch restrict writable : memref<4x4xf32>
+  %t = bufferization.to_tensor %scratch restrict writable : memref<4x4xf32> to tensor<4x4xf32>
   %r = linalg.matmul ins(%t, %a : tensor<4x4xf32>, tensor<4x4xf32>) outs(%dst : tensor<4x4xf32>) -> tensor<4x4xf32>
   return %r : tensor<4x4xf32>
 }

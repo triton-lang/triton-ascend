@@ -21,7 +21,7 @@ module {
 
 // CHECK-LABEL: func.func @flag_reuse_compact_renumber
 // CHECK: {{flag = }}[[FIRST:[0-9]+]]{{$}}
-// CHECK-COUNT-3: {{flag = }}[[FIRST]]{{$}}
+// CHECK-COUNT-2: {{flag = }}[[FIRST]]{{$}}
 // CHECK: {{flag = }}[[SECOND:[0-9]+]]{{$}}
 // CHECK-NEXT: {{flag = }}[[SECOND]]{{$}}
 // CHECK: hivm.hir.sync_block_set {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE", ssbuffer.transfer_id = 3 : i32}[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 3

@@ -25,7 +25,6 @@ func.func @test_gm_load_cube_marked(
   // CHECK: bufferization.to_tensor
   // CHECK-SAME: gm_load_bufferable
   %to_tensor = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 5 : i32} : memref<128x128xf16> to tensor<128x128xf16>
-
   // Load K from GM - feeds linalg.matmul (Cube compute)
   // Complex scene: use subview for copy, similar to real code pattern
   %reinterpret_cast_2 = memref.reinterpret_cast %arg1 to offset: [%c0], sizes: [128, 128], strides: [128, 1] {ssbuffer.block_id = 5 : i32} : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
@@ -37,7 +36,6 @@ func.func @test_gm_load_cube_marked(
   // CHECK: bufferization.to_tensor
   // CHECK-SAME: gm_load_bufferable
   %to_tensor_2 = bufferization.to_tensor %alloc_2 restrict writable {ssbuffer.block_id = 5 : i32} : memref<128x128xf16> to tensor<128x128xf16>
-
   // Cube compute: matmul (128x128) x (128x128) = (128x128)
   %matmul = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 5 : i32} ins(%to_tensor, %to_tensor_2 : tensor<128x128xf16>, tensor<128x128xf16>) outs(%arg2 : tensor<128x128xf32>) -> tensor<128x128xf32>
 
@@ -59,7 +57,6 @@ func.func @test_gm_load_mask_not_marked(
   memref.copy %reinterpret_cast, %alloc {ssbuffer.block_id = 7 : i32} : memref<128xf32, strided<[1], offset: ?>> to memref<128xf32>
   // CHECK-NOT: gm_load_bufferable
   %to_tensor = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 7 : i32} : memref<128xf32> to tensor<128xf32>
-
   // arith.maximumf is a mask operation - result not fed to Cube
   %max = arith.maximumf %to_tensor, %arg1 {ssbuffer.block_id = 7 : i32} : tensor<128xf32>
 
@@ -129,7 +126,6 @@ func.func @test_gm_load_nonlinear_cast_not_marked(
   // Step 7: bufferization.to_tensor - should NOT be marked because offset is non-linear (memref.load)
   // CHECK-NOT: gm_load_bufferable
   %to_tensor = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 8 : i32} : memref<32x128xf16> to tensor<32x128xf16>
-
   // ========== Scene 4b: scf.for iter_arg causes non-linear offset ==========
   %for_result:2 = scf.for %i = %c0 to %c128 step %c1 iter_args(%arg_iter = %arg1, %alloc_iter = %alloc) -> (memref<128x128xf16>, memref<32x128xf16>) {
     %for_offset = arith.index_cast %i {ssbuffer.block_id = 8 : i32} : index to i64
@@ -141,7 +137,6 @@ func.func @test_gm_load_nonlinear_cast_not_marked(
   }
   // CHECK-NOT: gm_load_bufferable
   %to_tensor_for = bufferization.to_tensor %for_result#1 restrict writable {ssbuffer.block_id = 8 : i32} : memref<32x128xf16> to tensor<32x128xf16>
-
   // ========== Scene 4c: scf.while causes non-linear offset ==========
   %while_result:2 = scf.while (%arg_while = %arg1, %arg_while_alloc = %alloc) : (memref<128x128xf16>, memref<32x128xf16>) -> (memref<128x128xf16>, memref<32x128xf16>) {
     %cond = arith.constant {ssbuffer.block_id = 8 : i32} true
@@ -156,7 +151,6 @@ func.func @test_gm_load_nonlinear_cast_not_marked(
   }
   // CHECK-NOT: gm_load_bufferable
   %to_tensor_while = bufferization.to_tensor %while_result#1 restrict writable {ssbuffer.block_id = 8 : i32} : memref<32x128xf16> to tensor<32x128xf16>
-
   // ========== Feeds Cube compute ==========
   %add = arith.addf %to_tensor, %to_tensor {ssbuffer.block_id = 8 : i32} : tensor<32x128xf16>
 
@@ -175,7 +169,6 @@ func.func @test_gm_load_non_gm_source_not_marked(
   // Step 2: bufferization.to_tensor from internal alloc (NOT from GM) - should NOT be marked
   // CHECK-NOT: gm_load_bufferable
   %to_tensor = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 26 : i32} : memref<32x256xf32> to tensor<32x256xf32>
-
   // The loaded data is used in element-wise operations (not Cube compute)
   %broadcasted = linalg.broadcast ins(%to_tensor : tensor<32x256xf32>) outs(%arg0 : tensor<32x256xf32>) dimensions = [] {ssbuffer.block_id = 26 : i32}
 
@@ -207,6 +200,5 @@ func.func @test_gm_load_cross_block_marked(
   // CHECK: bufferization.to_tensor
   // CHECK-SAME: gm_load_bufferable
   %0 = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 11 : i32} : memref<128x128xf16> to tensor<128x128xf16>
-
   return
 }

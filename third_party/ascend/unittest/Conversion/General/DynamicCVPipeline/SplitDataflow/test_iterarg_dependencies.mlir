@@ -13,7 +13,7 @@ module {
     %1 = linalg.fill {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} ins(%cst_0 : f32) outs(%0 : tensor<32x32xf32>) -> tensor<32x32xf32>
     %91 = scf.for %arg20 = %c0_i32 to %c128_i32 step %c1_i32 iter_args(%arg21 = %4) -> (tensor<64x32xf32>)  : i32 {
         %alloc_23 = memref.alloc() {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : memref<32x64xf32>
-        %179 = bufferization.to_tensor %alloc_23 restrict writable {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : memref<32x64xf32>
+        %179 = bufferization.to_tensor %alloc_23 restrict writable {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : memref<32x64xf32> to tensor<32x64xf32>
         %182 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} ins(%179, %arg21 : tensor<32x64xf32>, tensor<64x32xf32>) outs(%1 : tensor<32x32xf32>) -> tensor<32x32xf32>
 
         %201 = math.exp %182 {ssbuffer.block_id = 4 : i32, ssbuffer.core_type = "VECTOR"} : tensor<32x32xf32>

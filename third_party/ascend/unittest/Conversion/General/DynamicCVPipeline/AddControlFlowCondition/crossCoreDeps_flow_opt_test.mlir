@@ -170,9 +170,10 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       llvm.load
         // CHECK:       arith.cmpi slt
         // CHECK:       arith.cmpi slt
-        // CHECK:       arith.cmpi sge
-        // CHECK:       arith.cmpi sge
-        // CHECK:       arith.ori
+        // CHECK:       arith.andi
+        // CHECK:       arith.andi
+        // CHECK:       arith.cmpi slt
+        // CHECK:       arith.andi
         // CHECK:       scf.if
         hivm.hir.sync_block_wait {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
         %32 = hivm.hir.convert_layout %alloc_5 output_shape [128, 128] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32, ssbuffer.crossCoreDeps = [2 : i32, 0 : i32]} : (memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) -> memref<128x128xf16, #hivm.address_space<cbuf>>

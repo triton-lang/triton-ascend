@@ -23,8 +23,7 @@ module {
 
     // Key: bufferization.to_tensor uses %subview but is NOT a CopyOp
     // CHECK: bufferization.to_tensor
-    %tensor = bufferization.to_tensor %subview {ssbuffer.block_id = 10 : i32} : memref<1x32xf16, strided<[32, 1], offset: ?>>
-
+    %tensor = bufferization.to_tensor %subview {ssbuffer.block_id = 10 : i32} : memref<1x32xf16, strided<[32, 1], offset: ?>> to tensor<1x32xf16>
     // annotation.mark uses %alloc — triggers chainContainsBlockArg path
     annotation.mark %alloc {MayImplicitTransposeWithLastAxis, ssbuffer.block_id = 10 : i32} : memref<128x32xf16>
 
@@ -32,8 +31,7 @@ module {
     // CHECK: bufferization.to_tensor
     // CHECK-SAME: gm_load_bufferable
     %subview_2 = memref.subview %alloc[%c0, %c0] [1, 32] [1, 1] {ssbuffer.block_id = 10 : i32} : memref<128x32xf16> to memref<1x32xf16, strided<[32, 1], offset: ?>>
-    %loaded = bufferization.to_tensor %subview_2 {ssbuffer.block_id = 10 : i32} : memref<1x32xf16, strided<[32, 1], offset: ?>>
-
+    %loaded = bufferization.to_tensor %subview_2 {ssbuffer.block_id = 10 : i32} : memref<1x32xf16, strided<[32, 1], offset: ?>> to tensor<1x32xf16>
     return
   }
 }

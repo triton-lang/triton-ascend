@@ -16,7 +16,6 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     %91:2 = scf.for %arg20 = %c0_i32 to %c128_i32 step %c1_i32 iter_args(%arg21 = %1, %arg22 = %4) -> (tensor<32x32xf32>, tensor<32xf32>)  : i32 {
         %alloc_23 = memref.alloc() {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf32>
         %179 = bufferization.to_tensor %alloc_23 restrict writable {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf32> to tensor<32x32xf32>
-
         %broadcasted_26 = linalg.broadcast ins(%arg22 : tensor<32xf32>) outs(%0 : tensor<32x32xf32>) dimensions = [0]  {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.used_in_mmad_bias}
         %182 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} ins(%179, %179 : tensor<32x32xf32>, tensor<32x32xf32>) outs(%broadcasted_26  : tensor<32x32xf32>) -> tensor<32x32xf32>
 

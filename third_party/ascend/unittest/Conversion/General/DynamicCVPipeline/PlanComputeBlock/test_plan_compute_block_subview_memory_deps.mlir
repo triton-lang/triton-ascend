@@ -16,7 +16,7 @@ module {
     memref.copy %src_view, %dst_view {ssbuffer.core_type = "VECTOR"}
       : memref<?x?xf16, strided<[64, 1], offset: ?>> to memref<?x?xf16, strided<[64, 1], offset: ?>>
     %lhs = bufferization.to_tensor %alloc restrict writable {ssbuffer.core_type = "VECTOR"}
-      : memref<64x64xf16>
+      : memref<64x64xf16> to tensor<64x64xf16>
     %out = tensor.empty() {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
     %mm = linalg.matmul {input_precision = "ieee", ssbuffer.core_type = "CUBE"}
       ins(%lhs, %rhs : tensor<64x64xf16>, tensor<64x64xf16>)
@@ -45,7 +45,7 @@ module {
     %lhs_view = memref.subview %lhs_gm[%c0, %c0] [64, 64] [1, 1]
       : memref<64x64xf16> to memref<64x64xf16, strided<[64, 1], offset: ?>>
     %lhs = bufferization.to_tensor %lhs_view restrict writable
-      : memref<64x64xf16, strided<[64, 1], offset: ?>>
+      : memref<64x64xf16, strided<[64, 1], offset: ?>> to tensor<64x64xf16>
     %out = tensor.empty() : tensor<64x64xf32>
     %init = linalg.fill ins(%zero_f32 : f32) outs(%out : tensor<64x64xf32>) -> tensor<64x64xf32>
     %mm = linalg.matmul {input_precision = "ieee"}

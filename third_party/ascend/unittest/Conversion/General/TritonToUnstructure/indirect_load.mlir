@@ -38,5 +38,5 @@ tt.func public @triton_indirect_load_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<
 }
 
 // CHECK-LABEL: tt.func public @triton_indirect_load_kernel
-// CHECK: ascend.unstructured_load{{.*}} : <f32>, {{.*}} : tensor<8x32xi64> unstructured_dims = [0, 1] {{.*}}-> tensor<8x32xf32>
+// CHECK: ascend.indirect_load{{.*}} : <f32>, {{.*}} : tensor<8x32xi64> {{.*}}-> tensor<8x32xf32>
 // CHECK: tt.store

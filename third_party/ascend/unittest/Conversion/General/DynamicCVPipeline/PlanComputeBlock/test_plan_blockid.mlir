@@ -31,8 +31,8 @@ module{
     func.func @test_core_type_deps(%arg0: tensor<64x64xf32>, %arg1: tensor<64x64xf32>, %arg2: tensor<64xf32>, %arg3: tensor<64xf32>) -> tensor<64x64xf16> {
         %alloc_0 = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
         %alloc_1 = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
-        %0 = bufferization.to_tensor %alloc_0 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
-        %1 = bufferization.to_tensor %alloc_1 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
+        %0 = bufferization.to_tensor %alloc_0 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16> to tensor<64x64xf16>
+        %1 = bufferization.to_tensor %alloc_1 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16> to tensor<64x64xf16>
         %2 = arith.subf %arg0, %arg1 {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
         %3 = math.exp %2 {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
         %4 = arith.truncf %3 {ssbuffer.core_type = "CUBE"} : tensor<64x64xf32> to tensor<64x64xf16>
@@ -77,7 +77,7 @@ module{
 
     func.func @test_shrink_cube_block(%arg0: tensor<64x64xf32>, %arg1: tensor<64xf32>, %arg2: tensor<64x128xf32>, %arg3: tensor<128x64xf16>, %arg4: tensor<128x64xf16>, %arg5: tensor<64x64xf32>, %arg6: tensor<64xf32>) -> tensor<64x64xf16> {
         %alloc_8 = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x128xf16>
-        %32 = bufferization.to_tensor %alloc_8 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x128xf16>
+        %32 = bufferization.to_tensor %alloc_8 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x128xf16> to tensor<64x128xf16>
         %37 = arith.subf %arg0, %arg5 {ssbuffer.core_type = "CUBE"} : tensor<64x64xf32>
         %38 = math.exp %37 {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>
         %39 = arith.truncf %38 {ssbuffer.core_type = "CUBE"} : tensor<64x64xf32> to tensor<64x64xf16>
@@ -111,7 +111,7 @@ module{
 
     func.func @test_fusion_cycle_dot(%arg0: tensor<64x64xf32>, %arg1: tensor<64x64xf32>) -> tensor<64x64xf32> {
         %alloc_0 = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
-        %0 = bufferization.to_tensor %alloc_0 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16>
+        %0 = bufferization.to_tensor %alloc_0 restrict writable {ssbuffer.core_type = "VECTOR"} : memref<64x64xf16> to tensor<64x64xf16>
         %a = arith.truncf %arg0 {ssbuffer.core_type = "CUBE"} : tensor<64x64xf32> to tensor<64x64xf16>
         %b0 = arith.extf %a {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf16> to tensor<64x64xf32>
         %b1 = arith.addf %b0, %arg1 {ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32>

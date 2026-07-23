@@ -7,7 +7,7 @@ module {
 
     %result:2 = scf.for %i = %c0 to %n step %c1 iter_args(%acc1 = %init1, %acc2 = %init2) -> (tensor<128x128xf32>, tensor<128x128xf32>) {
       %alloc = memref.alloc() {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} : memref<128x128xf16>
-      %t0 = bufferization.to_tensor %alloc {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} : memref<128x128xf16>
+      %t0 = bufferization.to_tensor %alloc {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} : memref<128x128xf16> to tensor<128x128xf16>
       %mm1 = linalg.matmul {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} ins(%t0, %t0 : tensor<128x128xf16>, tensor<128x128xf16>) outs(%acc1 : tensor<128x128xf32>) -> tensor<128x128xf32>
       %mm2 = linalg.matmul {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} ins(%t0, %t0 : tensor<128x128xf16>, tensor<128x128xf16>) outs(%acc2 : tensor<128x128xf32>) -> tensor<128x128xf32>
       scf.yield {ssbuffer.core_type = "CUBE, CUBE"} %mm1, %mm2 : tensor<128x128xf32>, tensor<128x128xf32>

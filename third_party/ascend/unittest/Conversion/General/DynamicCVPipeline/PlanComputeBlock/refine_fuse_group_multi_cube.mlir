@@ -125,7 +125,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       %subview_3 = memref.subview %reinterpret_cast_2[0] [%75] [1] : memref<64xf32, strided<[32], offset: ?>> to memref<?xf32, strided<[32], offset: ?>>
       %subview_4 = memref.subview %alloc[%74] [%75] [1] : memref<64xf32> to memref<?xf32, strided<[1], offset: ?>>
       memref.copy %subview_3, %subview_4 : memref<?xf32, strided<[32], offset: ?>> to memref<?xf32, strided<[1], offset: ?>>
-      %77 = bufferization.to_tensor %alloc restrict writable : memref<64xf32>
+      %77 = bufferization.to_tensor %alloc restrict writable : memref<64xf32> to tensor<64xf32>
       %78 = tensor.empty() : tensor<1xf32>
       %inserted = tensor.insert %60 into %78[%c0] : tensor<1xf32>
       %79 = math.exp %inserted {DataUse} : tensor<1xf32>
@@ -160,7 +160,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       %subview_9 = memref.subview %reinterpret_cast_7[0, 0] [%94, %96] [1, 1] : memref<64x32xbf16, strided<[4096, 1], offset: ?>> to memref<?x?xbf16, strided<[4096, 1], offset: ?>>
       %subview_10 = memref.subview %alloc_8[%93, %95] [%94, %96] [1, 1] : memref<64x32xbf16> to memref<?x?xbf16, strided<[32, 1], offset: ?>>
       memref.copy %subview_9, %subview_10 : memref<?x?xbf16, strided<[4096, 1], offset: ?>> to memref<?x?xbf16, strided<[32, 1], offset: ?>>
-      %100 = bufferization.to_tensor %alloc_8 restrict writable : memref<64x32xbf16>
+      %100 = bufferization.to_tensor %alloc_8 restrict writable : memref<64x32xbf16> to tensor<64x32xbf16>
       %reinterpret_cast_11 = memref.reinterpret_cast %arg3 to offset: [%82], sizes: [64, 128], strides: [4096, 1] : memref<?xbf16> to memref<64x128xbf16, strided<[4096, 1], offset: ?>>
       %alloc_12 = memref.alloc() : memref<64x128xbf16>
       %101 = arith.divsi %81, %c4096 : index
@@ -184,7 +184,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       %subview_13 = memref.subview %reinterpret_cast_11[0, 0] [%110, %112] [1, 1] : memref<64x128xbf16, strided<[4096, 1], offset: ?>> to memref<?x?xbf16, strided<[4096, 1], offset: ?>>
       %subview_14 = memref.subview %alloc_12[%109, %111] [%110, %112] [1, 1] : memref<64x128xbf16> to memref<?x?xbf16, strided<[128, 1], offset: ?>>
       memref.copy %subview_13, %subview_14 : memref<?x?xbf16, strided<[4096, 1], offset: ?>> to memref<?x?xbf16, strided<[128, 1], offset: ?>>
-      %116 = bufferization.to_tensor %alloc_12 restrict writable : memref<64x128xbf16>
+      %116 = bufferization.to_tensor %alloc_12 restrict writable : memref<64x128xbf16> to tensor<64x128xbf16>
       %117 = linalg.matmul {input_precision = "ieee"} ins(%116, %37 : tensor<64x128xbf16>, tensor<128x32xbf16>) outs(%1 : tensor<64x32xf32>) -> tensor<64x32xf32>
       %118 = linalg.fill ins(%60 : f32) outs(%2 : tensor<64xf32>) -> tensor<64xf32>
       %119 = arith.subf %118, %77 {DataUse} : tensor<64xf32>
@@ -206,7 +206,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       %subview_17 = memref.subview %reinterpret_cast_5[0, 0] [%94, %96] [1, 1] : memref<64x32xbf16, strided<[4096, 1], offset: ?>> to memref<?x?xbf16, strided<[4096, 1], offset: ?>>
       %subview_18 = memref.subview %alloc_16[%93, %95] [%94, %96] [1, 1] : memref<64x32xbf16> to memref<?x?xbf16, strided<[32, 1], offset: ?>>
       memref.copy %subview_17, %subview_18 : memref<?x?xbf16, strided<[4096, 1], offset: ?>> to memref<?x?xbf16, strided<[32, 1], offset: ?>>
-      %128 = bufferization.to_tensor %alloc_16 restrict writable : memref<64x32xbf16>
+      %128 = bufferization.to_tensor %alloc_16 restrict writable : memref<64x32xbf16> to tensor<64x32xbf16>
       %129 = arith.extf %128 {DataUse} : tensor<64x32xbf16> to tensor<64x32xf32>
       %130 = arith.addf %127, %129 {DataUse} : tensor<64x32xf32>
       %131 = arith.truncf %130 {DataUse} : tensor<64x32xf32> to tensor<64x32xbf16>
@@ -221,7 +221,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       %subview_23 = memref.subview %reinterpret_cast_21[0, 0] [%110, %112] [1, 1] : memref<64x128xbf16, strided<[4096, 1], offset: ?>> to memref<?x?xbf16, strided<[4096, 1], offset: ?>>
       %subview_24 = memref.subview %alloc_22[%109, %111] [%110, %112] [1, 1] : memref<64x128xbf16> to memref<?x?xbf16, strided<[128, 1], offset: ?>>
       memref.copy %subview_23, %subview_24 : memref<?x?xbf16, strided<[4096, 1], offset: ?>> to memref<?x?xbf16, strided<[128, 1], offset: ?>>
-      %132 = bufferization.to_tensor %alloc_22 restrict writable : memref<64x128xbf16>
+      %132 = bufferization.to_tensor %alloc_22 restrict writable : memref<64x128xbf16> to tensor<64x128xbf16>
       %133 = tensor.empty() : tensor<128x64xbf16>
       %transposed = linalg.transpose ins(%132 : tensor<64x128xbf16>) outs(%133 : tensor<128x64xbf16>) permutation = [1, 0]
       %reinterpret_cast_25 = memref.reinterpret_cast %arg2 to offset: [%82], sizes: [64, 128], strides: [4096, 1] : memref<?xbf16> to memref<64x128xbf16, strided<[4096, 1], offset: ?>>
@@ -232,7 +232,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       %subview_27 = memref.subview %reinterpret_cast_25[0, 0] [%110, %112] [1, 1] : memref<64x128xbf16, strided<[4096, 1], offset: ?>> to memref<?x?xbf16, strided<[4096, 1], offset: ?>>
       %subview_28 = memref.subview %alloc_26[%109, %111] [%110, %112] [1, 1] : memref<64x128xbf16> to memref<?x?xbf16, strided<[128, 1], offset: ?>>
       memref.copy %subview_27, %subview_28 : memref<?x?xbf16, strided<[4096, 1], offset: ?>> to memref<?x?xbf16, strided<[128, 1], offset: ?>>
-      %134 = bufferization.to_tensor %alloc_26 restrict writable : memref<64x128xbf16>
+      %134 = bufferization.to_tensor %alloc_26 restrict writable : memref<64x128xbf16> to tensor<64x128xbf16>
       %transposed_29 = linalg.transpose ins(%134 : tensor<64x128xbf16>) outs(%133 : tensor<128x64xbf16>) permutation = [1, 0]
       %135 = linalg.fill ins(%extracted : f32) outs(%4 : tensor<128x32xf32>) -> tensor<128x32xf32>
       %136 = arith.mulf %arg19, %135 {DataUse} : tensor<128x32xf32>

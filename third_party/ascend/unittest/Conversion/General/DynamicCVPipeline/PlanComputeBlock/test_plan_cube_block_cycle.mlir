@@ -26,7 +26,7 @@ module {
     }
 
     memref.copy %arg0, %alloc {ssbuffer.core_type = "CUBE"} : memref<32x32xf32> to memref<32x32xf32>
-    %tensor = bufferization.to_tensor %alloc restrict writable {ssbuffer.core_type = "CUBE"} : memref<32x32xf32>
+    %tensor = bufferization.to_tensor %alloc restrict writable {ssbuffer.core_type = "CUBE"} : memref<32x32xf32> to tensor<32x32xf32>
     %out = tensor.empty() {ssbuffer.core_type = "CUBE"} : tensor<32x32xf32>
     %result = linalg.matmul {input_precision = "ieee", ssbuffer.core_type = "CUBE"}
       ins(%tensor, %arg2 : tensor<32x32xf32>, tensor<32x32xf32>)

@@ -22,7 +22,7 @@ module {
     %alloc = memref.alloc() : memref<4x4xf32>
     linalg.fill ins(%zero : f32) outs(%alloc : memref<4x4xf32>)
     annotation.mark %alloc {MayImplicitTransposeWithLastAxis} : memref<4x4xf32>
-    %lhs = bufferization.to_tensor %alloc restrict writable : memref<4x4xf32>
+    %lhs = bufferization.to_tensor %alloc restrict writable : memref<4x4xf32> to tensor<4x4xf32>
     %out = tensor.empty() : tensor<4x4xf32>
     %init = linalg.fill ins(%zero : f32) outs(%out : tensor<4x4xf32>) -> tensor<4x4xf32>
     %mm = linalg.matmul ins(%lhs, %rhs : tensor<4x4xf32>, tensor<4x4xf32>)

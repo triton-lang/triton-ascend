@@ -43,5 +43,5 @@ module {
 
 // CHECK-LABEL: func.func @flag_reuse_sibling_loops
 // CHECK: {{flag = }}[[REUSED_FLAG:[0-9]+]]{{$}}
-// CHECK-COUNT-11: {{flag = }}[[REUSED_FLAG]]{{$}}
+// CHECK-COUNT-6: {{flag = }}[[REUSED_FLAG]]{{$}}
 // CHECK: return

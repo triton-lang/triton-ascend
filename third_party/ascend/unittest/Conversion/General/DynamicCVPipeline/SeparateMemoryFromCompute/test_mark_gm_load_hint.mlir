@@ -17,7 +17,7 @@ func.func @hint_force_on(%arg0: memref<?xf16>) {
       %reinterpret_cast = memref.reinterpret_cast %arg0 to offset: [%c0], sizes: [128], strides: [1] : memref<?xf16> to memref<128xf16, strided<[1], offset: ?>>
       %alloc = memref.alloc() : memref<128xf16>
       // CHECK: memref.alloc() : memref<128xf16>
-      // CHECK-NEXT: annotation.mark %{{.*}} {hivm.multi_buffer = 2 : i32} : memref<128xf16>
+      // CHECK-NEXT: annotation.mark %{{.*}} {gm_load_hint, hivm.multi_buffer = 2 : i32} : memref<128xf16>
       memref.copy %reinterpret_cast, %alloc : memref<128xf16, strided<[1], offset: ?>> to memref<128xf16>
       %tensor = bufferization.to_tensor %alloc restrict writable : memref<128xf16> to tensor<128xf16>
       annotation.mark %tensor {gm_load = 2 : i32} : tensor<128xf16>

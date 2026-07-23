@@ -21,7 +21,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
-#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/IR/BuiltinTypes.h"
 
 using namespace mlir;
@@ -103,23 +103,14 @@ SSBufferManager::writeToSSBuffer(Value value, OpBuilder &builder,
 
   int64_t addrValue = addrResult.value();
   Location loc = builder.getUnknownLoc();
-  auto i64Type = builder.getIntegerType(ADDR_INT_TYPE);
-  auto ptrType =
-      LLVM::LLVMPointerType::get(builder.getContext(), SSBUF_ADDR_SPACE);
-
-  // Create address constant
-  auto addrAttr = builder.getIntegerAttr(i64Type, addrValue);
-  auto addrConst = builder.create<LLVM::ConstantOp>(loc, i64Type, addrAttr);
-  createdOps.push_back(addrConst); // Record the created operation
-
-  // Convert integer address to pointer
-  auto ptr =
-      builder.create<LLVM::IntToPtrOp>(loc, ptrType, addrConst.getResult());
-  createdOps.push_back(ptr); // Record the created operation
+  auto [constOp, pointerCastOp] =
+      getSsbufConstAndPointerCast(builder, loc, addrValue);
+  createdOps.push_back(constOp);
+  createdOps.push_back(pointerCastOp);
 
   // Store the value to SSBuffer
-  auto storeOp = builder.create<LLVM::StoreOp>(loc, value, ptr.getResult(), 0,
-                                               /*volatile=*/true);
+  auto storeOp =
+      builder.create<memref::StoreOp>(loc, value, pointerCastOp.getResult());
   createdOps.push_back(storeOp); // Record the created operation
 
   // Return the address value (int64_t), not the pointer
@@ -137,28 +128,20 @@ SSBufferManager::readFromSSBuffer(int64_t addr, OpBuilder &builder,
     return std::nullopt;
   }
 
-  Value foundValue = findResult.value().first;
-  Type dataType = findResult.value().second;
-
   Location loc = builder.getUnknownLoc();
-  auto i64Type = builder.getIntegerType(ADDR_INT_TYPE);
-  auto ptrType =
-      LLVM::LLVMPointerType::get(builder.getContext(), SSBUF_ADDR_SPACE);
-
-  // Create address constant
-  auto addrAttr = builder.getIntegerAttr(i64Type, addr);
-  auto addrConst = builder.create<LLVM::ConstantOp>(loc, i64Type, addrAttr);
-  createdOps.push_back(addrConst); // Record the created operation
-
-  // Convert integer address to pointer
-  auto ptr =
-      builder.create<LLVM::IntToPtrOp>(loc, ptrType, addrConst.getResult());
-  createdOps.push_back(ptr); // Record the created operation
+  auto [constOp, pointerCastOp] =
+      getSsbufConstAndPointerCast(builder, loc, addr);
+  createdOps.push_back(constOp);
+  createdOps.push_back(pointerCastOp);
 
   // Load the value from SSBuffer address with the retrieved data type
-  auto loadOp = builder.create<LLVM::LoadOp>(loc, dataType, ptr.getResult(), 0,
-                                             /*volatile=*/true);
+  auto loadOp = builder.create<memref::LoadOp>(loc, pointerCastOp.getResult(),
+                                               ValueRange{});
   createdOps.push_back(loadOp); // Record the created operation
+
+  auto markOp = builder.create<annotation::MarkOp>(loc, loadOp.getResult());
+  markOp->setAttr(kMemrefExtVolatile, builder.getUnitAttr());
+  createdOps.push_back(markOp);
 
   return loadOp.getResult();
 }

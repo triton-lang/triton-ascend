@@ -24,7 +24,7 @@ on:
       # CI itself
       - '.github/workflows/Ascend950-ci.yml'
   push:
-    branches: [main, release/**]
+    branches: [main, 'release/**', '**-dev']
     paths: *paths
 
 concurrency:

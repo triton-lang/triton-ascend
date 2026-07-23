@@ -88,6 +88,9 @@ enum class ProofReason : uint8_t {
   BarrierOperation,
   UnknownMemoryEffect,
   InterveningMemoryEffect,
+  DifferentAccessBase,
+  OverlappingAccessRange,
+  UnsupportedInterveningMemoryAccess,
 };
 
 llvm::StringRef getProofReasonMessage(ProofReason reason);
@@ -209,6 +212,11 @@ public:
   StaticAccessProof analyzeLoad(triton::LoadOp load) const;
   StaticAccessProof analyzeStore(triton::StoreOp store) const;
 
+  // Proves that two statically understood accesses use the same SSA base and
+  // have disjoint closed offset intervals.  Any missing proof is rejected.
+  ProofOutcome proveSameBaseDisjoint(const StaticAccess &lhs,
+                                     const StaticAccess &rhs) const;
+
   // Proves a sufficient injectivity condition for a fully static affine lane
   // map.  All dimensions, strides, and provenance entries must have the same
   // non-zero rank.  Dynamic, negative, zero, and duplicate strides fail
@@ -227,6 +235,13 @@ public:
   // no regions, calls, barriers, unknown operations, or memory effects.
   // This method analyzes only; it never changes the IR.
   ProofOutcome proveNoMemoryEffects(Operation *first, Operation *last) const;
+
+  // Proves that the open interval (first, last) has no effects that conflict
+  // with any protected access.  Only statically proven tt.load/tt.store
+  // operations with the same base and disjoint ranges are permitted.
+  ProofOutcome proveNoConflictingLoadStoreEffects(
+      Operation *first, Operation *last,
+      llvm::ArrayRef<StaticAccess> protectedAccesses) const;
 };
 
 } // namespace cfg

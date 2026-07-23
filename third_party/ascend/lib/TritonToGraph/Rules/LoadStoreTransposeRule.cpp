@@ -217,8 +217,14 @@ std::optional<LoadStoreCandidate> matchCandidate(triton::LoadOp load) {
     return std::nullopt;
 
   ProtectedIntervalAnalysis intervalAnalysis;
-  if (!intervalAnalysis.proveNoMemoryEffects(load.getOperation(),
-                                             store.getOperation())
+  std::array<StaticAccess, 2> protectedAccesses = {
+      *loadProof.access,
+      *storeProof.access,
+  };
+  if (!intervalAnalysis
+           .proveNoConflictingLoadStoreEffects(load.getOperation(),
+                                               store.getOperation(),
+                                               protectedAccesses)
            .isProven() ||
       containsExplicitTranspose(load.getOperation(), store.getOperation()))
     return std::nullopt;

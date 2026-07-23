@@ -25,6 +25,7 @@ import glob
 import json
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -71,6 +72,12 @@ from triton.tools.get_ascend_devices import is_compile_on_910_95
 # TODO: materialize the concrete min shape
 def min_dot_size(target: GPUTarget):
     return lambda lhsType, rhsType: (1, 1, 1)
+
+
+def _get_dump_paths(hash_key: str, src_path: str, dst_path: str) -> Tuple[str, str]:
+    dump_manager = get_dump_manager(hash_key)
+    return (dump_manager._make_path(os.path.basename(src_path)), dump_manager._make_path(os.path.basename(dst_path)))
+
 
 # Get result code saved in module {attr_name = rc}
 def _get_then_remove_rc(mod, attr_name: str) -> int:
@@ -625,9 +632,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if mix_mode in ["aic"]:
             _compile_option_list += ["--disable-hfusion-vectorize=true"]
 
-        if opt.debug:
-            _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
-
         cmd_list = (
             [npu_compiler_path, ttadapter_path]
             + _compile_option_list
@@ -646,7 +650,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             cmd_list += [f"--hfusion-enable-cross-if-fusion={enable_cross_if_fusion}"]
 
         if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
-            print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
+            print_cmd_list = cmd_list.copy()
+            print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
+            print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
         try:
             ret = subprocess.run(
@@ -859,16 +865,15 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 "--enable-triton-kernel-compile=true",
             ]
 
-        if opt.debug:
-            _compile_option_list += ["--mlir-print-ir-after-failure"]
-            _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
         cmd_list = (
             [npu_compiler_path, ttadapter_path]
             + _compile_option_list
             + ["-o", bin_file]
         )
         if opt.debug or os.getenv("TRITON_PRINT_UBTUNING", None) == "1":
-            print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
+            print_cmd_list = cmd_list.copy()
+            print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
+            print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
         try:
             ret = subprocess.run(

@@ -29,7 +29,7 @@ include_directories(${ASCENDNPU_IR_BINARY_DIR}/bishengir/include) # Tablegen'd f
 
 add_subdirectory(include)
 add_subdirectory(lib)
-
+add_subdirectory(bin)
 
 option(TRITON_ASCEND_ENABLE_COSTMODEL_INPROC "Enable in-process costmodel C++ bridge" ON)
 if(TRITON_ASCEND_ENABLE_COSTMODEL_INPROC)

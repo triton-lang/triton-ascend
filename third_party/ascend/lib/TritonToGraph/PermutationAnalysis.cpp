@@ -299,6 +299,12 @@ llvm::StringRef cfg::getProofReasonMessage(ProofReason reason) {
     return "protected interval contains an operation with unknown memory effects";
   case ProofReason::InterveningMemoryEffect:
     return "protected interval contains a memory effect";
+  case ProofReason::DifferentAccessBase:
+    return "accesses do not share the same proven SSA base";
+  case ProofReason::OverlappingAccessRange:
+    return "static access ranges overlap";
+  case ProofReason::UnsupportedInterveningMemoryAccess:
+    return "intervening memory access is unsupported or cannot be proven static";
   }
   return "unknown proof reason";
 }
@@ -628,6 +634,19 @@ StaticAccessProof StaticAccessAnalysis::analyzeStore(
   return analyzePointer(store.getPtr());
 }
 
+ProofOutcome StaticAccessAnalysis::proveSameBaseDisjoint(
+    const StaticAccess &lhs, const StaticAccess &rhs) const {
+  if (!lhs.base || !rhs.base || lhs.base != rhs.base)
+    return ProofOutcome::rejected(ProofReason::DifferentAccessBase);
+  if (!lhs.lanesInjective || !rhs.lanesInjective ||
+      lhs.firstOffset > lhs.lastOffset || rhs.firstOffset > rhs.lastOffset)
+    return ProofOutcome::rejected(
+        ProofReason::UnsupportedInterveningMemoryAccess);
+  if (lhs.lastOffset < rhs.firstOffset || rhs.lastOffset < lhs.firstOffset)
+    return ProofOutcome::proven();
+  return ProofOutcome::rejected(ProofReason::OverlappingAccessRange);
+}
+
 ProofOutcome ProtectedIntervalAnalysis::proveNoMemoryEffects(
     Operation *first, Operation *last) const {
   if (!first || !last)
@@ -647,6 +666,70 @@ ProofOutcome ProtectedIntervalAnalysis::proveNoMemoryEffects(
       return ProofOutcome::rejected(ProofReason::CallOperation);
     if (isBarrierLike(operation))
       return ProofOutcome::rejected(ProofReason::BarrierOperation);
+
+    if (auto memoryEffects = dyn_cast<MemoryEffectOpInterface>(operation)) {
+      llvm::SmallVector<
+          SideEffects::EffectInstance<MemoryEffects::Effect>, 4>
+          effects;
+      memoryEffects.getEffects(effects);
+      if (!effects.empty())
+        return ProofOutcome::rejected(ProofReason::InterveningMemoryEffect);
+    }
+    if (!isMemoryEffectFree(operation))
+      return ProofOutcome::rejected(ProofReason::UnknownMemoryEffect);
+  }
+
+  return ProofOutcome::rejected(ProofReason::InvalidProtectedInterval);
+}
+
+ProofOutcome ProtectedIntervalAnalysis::proveNoConflictingLoadStoreEffects(
+    Operation *first, Operation *last,
+    llvm::ArrayRef<StaticAccess> protectedAccesses) const {
+  if (!first || !last)
+    return ProofOutcome::rejected(ProofReason::NullOperation);
+  if (protectedAccesses.empty() || first == last)
+    return ProofOutcome::rejected(ProofReason::InvalidProtectedInterval);
+  if (first->getBlock() != last->getBlock())
+    return ProofOutcome::rejected(ProofReason::DifferentBlocks);
+
+  StaticAccessAnalysis accessAnalysis;
+  auto proveDisjoint = [&](const StaticAccessProof &proof) {
+    if (!proof.isProven())
+      return ProofOutcome::rejected(
+          ProofReason::UnsupportedInterveningMemoryAccess);
+    for (const StaticAccess &protectedAccess : protectedAccesses) {
+      ProofOutcome outcome = accessAnalysis.proveSameBaseDisjoint(
+          *proof.access, protectedAccess);
+      if (!outcome.isProven())
+        return outcome;
+    }
+    return ProofOutcome::proven();
+  };
+
+  for (Operation *operation = first->getNextNode(); operation;
+       operation = operation->getNextNode()) {
+    if (operation == last)
+      return ProofOutcome::proven();
+    if (operation->getNumRegions() != 0)
+      return ProofOutcome::rejected(ProofReason::RegionOperation);
+    if (isa<CallOpInterface>(operation))
+      return ProofOutcome::rejected(ProofReason::CallOperation);
+    if (isBarrierLike(operation))
+      return ProofOutcome::rejected(ProofReason::BarrierOperation);
+
+    if (auto load = dyn_cast<triton::LoadOp>(operation)) {
+      ProofOutcome outcome = proveDisjoint(accessAnalysis.analyzeLoad(load));
+      if (!outcome.isProven())
+        return outcome;
+      continue;
+    }
+    if (auto store = dyn_cast<triton::StoreOp>(operation)) {
+      ProofOutcome outcome =
+          proveDisjoint(accessAnalysis.analyzeStore(store));
+      if (!outcome.isProven())
+        return outcome;
+      continue;
+    }
 
     if (auto memoryEffects = dyn_cast<MemoryEffectOpInterface>(operation)) {
       llvm::SmallVector<

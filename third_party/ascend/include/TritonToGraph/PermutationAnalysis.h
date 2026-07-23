@@ -74,8 +74,10 @@ enum class ProofReason : uint8_t {
   DuplicateAxisProvenance,
   DuplicateRangeSource,
   InvalidMakeRange,
+  InvalidExpandDimsChain,
   OffsetOverflow,
   OverflowFlags,
+  NonRowMajorContiguous,
   NonInjectiveLanes,
   MaskedAccess,
   BoundaryCheck,
@@ -168,13 +170,12 @@ struct StaticAccessAxis {
   unsigned outputAxis = 0;
 };
 
-// A statically understood affine pointer access.  Rank-1 supports the
-// original tt.splat + tt.addptr + tt.make_range form.  Rank-2 additionally
-// supports the deliberately narrow normal form documented in the V1
-// LoadStoreTranspose rule: two independent make_range -> expand_dims ->
-// splat(static i32) -> muli -> broadcast terms joined by addi.  The fields
-// preserve both source operations and axis provenance rather than deriving
-// axes from equal dimension sizes.
+// A statically understood affine pointer access. Rank-1 supports the
+// original tt.splat + tt.addptr + tt.make_range form. Higher ranks support a
+// deliberately narrow row-major normal form: one independent make_range ->
+// expand_dims* -> splat(static i32) -> muli -> broadcast term per logical
+// axis, joined by addi. The fields preserve source operations and axis
+// provenance rather than deriving axes from equal dimension sizes.
 struct StaticAccess {
   Value pointer;
   Value offset;
@@ -185,12 +186,18 @@ struct StaticAccess {
   llvm::SmallVector<StaticAccessAxis, 4> axes;
   int64_t firstOffset = 0;
   int64_t lastOffset = 0;
+  int64_t elementCount = 0;
   bool lanesInjective = false;
 
   bool isRankOneContiguous() const {
     return lanesInjective && shape.size() == 1 && strides.size() == 1 &&
            strides.front() == 1;
   }
+
+  // Proves that flattening the logical tensor in row-major order preserves
+  // its address order. This is intentionally stronger than generic lane
+  // injectivity and is the admission condition for UB store packing.
+  bool isLogicalRowMajorContiguous() const;
 };
 
 struct StaticAccessProof {

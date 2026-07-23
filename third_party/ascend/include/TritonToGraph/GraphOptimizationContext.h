@@ -84,7 +84,7 @@ public:
 
   unsigned getEpoch() const { return epoch; }
   triton::FuncOp getFunction() const {
-    assert(function.getOperation() &&
+    assert(function.operator->() &&
            "GraphOptimizationContext requires a valid tt.func");
     return function;
   }

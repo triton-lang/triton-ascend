@@ -53,6 +53,7 @@ struct StoreCandidate {
   RankedTensorType offsetType;
   Type pointeeType;
   uint64_t elementBytes;
+  int64_t elementCount;
   Value value;
   triton::CacheModifier cache;
   triton::EvictionPolicy evict;
@@ -116,9 +117,28 @@ std::optional<uint64_t> getByteWidth(Type type) {
   return static_cast<uint64_t>(bitWidth / 8);
 }
 
+std::optional<int64_t> getStaticElementCount(RankedTensorType type) {
+  if (!type || !type.hasStaticShape() || type.getEncoding() ||
+      type.getRank() < 1)
+    return std::nullopt;
+
+  int64_t elementCount = 1;
+  for (int64_t dimension : type.getShape()) {
+    if (dimension <= 0 ||
+        (elementCount != 0 &&
+         dimension > std::numeric_limits<int64_t>::max() / elementCount))
+      return std::nullopt;
+    elementCount *= dimension;
+  }
+  return elementCount;
+}
+
+bool isUnencodedStaticTensor(RankedTensorType type) {
+  return getStaticElementCount(type).has_value();
+}
+
 bool isUnencodedStaticRankOneTensor(RankedTensorType type) {
-  return type && type.hasStaticShape() && !type.getEncoding() &&
-         type.getRank() == 1 && type.getShape().front() > 0;
+  return isUnencodedStaticTensor(type) && type.getRank() == 1;
 }
 
 bool isDirectFunctionBodyStore(triton::StoreOp store,
@@ -132,10 +152,10 @@ bool isDirectFunctionBodyStore(triton::StoreOp store,
   return parent && parent.getOperation() == function.getOperation();
 }
 
-bool hasExpectedRankOneStoreTypes(const StoreCandidate &candidate) {
-  if (!isUnencodedStaticRankOneTensor(candidate.pointerType) ||
-      !isUnencodedStaticRankOneTensor(candidate.valueType) ||
-      !isUnencodedStaticRankOneTensor(candidate.offsetType))
+bool hasExpectedStoreTypes(const StoreCandidate &candidate) {
+  if (!isUnencodedStaticTensor(candidate.pointerType) ||
+      !isUnencodedStaticTensor(candidate.valueType) ||
+      !isUnencodedStaticTensor(candidate.offsetType))
     return false;
   if (candidate.pointerType.getShape() != candidate.valueType.getShape() ||
       candidate.pointerType.getShape() != candidate.offsetType.getShape() ||
@@ -154,7 +174,7 @@ bool hasExpectedRankOneStoreTypes(const StoreCandidate &candidate) {
   if (!checkedSubI64(candidate.access.lastOffset,
                      candidate.access.firstOffset, span) ||
       !checkedAddI64(span, 1, span) || span <= 0 ||
-      span != candidate.pointerType.getShape().front())
+      span != candidate.elementCount)
     return false;
   return true;
 }
@@ -167,8 +187,8 @@ matchStore(triton::StoreOp store, triton::FuncOp function, Block *block) {
 
   auto pointerType = dyn_cast<RankedTensorType>(store.getPtr().getType());
   auto valueType = dyn_cast<RankedTensorType>(store.getValue().getType());
-  if (!pointerType || !valueType || !isUnencodedStaticRankOneTensor(pointerType) ||
-      !isUnencodedStaticRankOneTensor(valueType))
+  if (!pointerType || !valueType || !isUnencodedStaticTensor(pointerType) ||
+      !isUnencodedStaticTensor(valueType))
     return std::nullopt;
 
   auto pointerElement =
@@ -183,13 +203,16 @@ matchStore(triton::StoreOp store, triton::FuncOp function, Block *block) {
       getByteWidth(valueType.getElementType());
   if (!elementBytes)
     return std::nullopt;
+  std::optional<int64_t> elementCount = getStaticElementCount(valueType);
+  if (!elementCount)
+    return std::nullopt;
 
   StaticAccessAnalysis accessAnalysis;
   StaticAccessProof proof = accessAnalysis.analyzeStore(store);
-  if (!proof.isProven() || !proof.access->isRankOneContiguous() ||
+  if (!proof.isProven() || !proof.access->isLogicalRowMajorContiguous() ||
       proof.access->pointer != store.getPtr() || !proof.access->base ||
-      proof.access->shape.size() != 1 || proof.access->shape.front() !=
-                                            pointerType.getShape().front())
+      proof.access->shape != pointerType.getShape() ||
+      proof.access->elementCount != *elementCount)
     return std::nullopt;
 
   auto offsetType = dyn_cast<RankedTensorType>(proof.access->offset.getType());
@@ -203,17 +226,17 @@ matchStore(triton::StoreOp store, triton::FuncOp function, Block *block) {
                            offsetType,
                            pointerElement.getPointeeType(),
                            *elementBytes,
+                           *elementCount,
                            store.getValue(),
                            store.getCache(),
                            store.getEvict(),
                            store->getAttrDictionary()};
-  if (!hasExpectedRankOneStoreTypes(candidate))
+  if (!hasExpectedStoreTypes(candidate))
     return std::nullopt;
   return candidate;
 }
 
-bool belongToSameBucket(const StoreCandidate &lhs,
-                        const StoreCandidate &rhs) {
+bool canShareBucket(const StoreCandidate &lhs, const StoreCandidate &rhs) {
   // The base comparison is deliberately SSA identity only.  This rule never
   // consults alias analysis, so two different bases can never be coalesced.
   return lhs.operation->getBlock() == rhs.operation->getBlock() &&
@@ -277,6 +300,16 @@ buildRun(ArrayRef<StoreCandidate> addressOrderStores,
       !checkedSubI64(endExclusive, first.access.firstOffset, totalElements) ||
       totalElements <= 0 || !fitsI32(first.access.firstOffset) ||
       !fitsI32(endExclusive))
+    return std::nullopt;
+
+  int64_t summedElements = 0;
+  for (const StoreCandidate &candidate : addressOrderStores) {
+    if (candidate.elementCount <= 0 ||
+        !checkedAddI64(summedElements, candidate.elementCount,
+                       summedElements))
+      return std::nullopt;
+  }
+  if (summedElements != totalElements)
     return std::nullopt;
 
   uint64_t totalBytes = 0;
@@ -343,7 +376,7 @@ SmallVector<UBPreloadRun, 4> findRuns(triton::FuncOp function,
       auto bucket = std::find_if(
           buckets.begin(), buckets.end(), [&](const auto &existing) {
             return !existing.empty() &&
-                   belongToSameBucket(existing.front(), candidate);
+                   canShareBucket(existing.front(), candidate);
           });
       if (bucket == buckets.end()) {
         buckets.emplace_back();
@@ -443,6 +476,24 @@ bool recordVerifiedOperation(Operation *operation,
   return succeeded(mlir::verify(operation));
 }
 
+std::optional<Value>
+materializeRowMajorFlatValue(IRRewriter &rewriter,
+                             const StoreCandidate &candidate,
+                             SmallVectorImpl<Operation *> &created) {
+  SmallVector<int64_t, 1> flatShape = {candidate.elementCount};
+  RankedTensorType flatType = candidate.valueType.clone(flatShape);
+  if (!isUnencodedStaticRankOneTensor(flatType))
+    return std::nullopt;
+  if (candidate.valueType == flatType)
+    return candidate.value;
+
+  auto reshape = rewriter.create<triton::ReshapeOp>(
+      candidate.operation->getLoc(), flatType, candidate.value);
+  if (!recordVerifiedOperation(reshape.getOperation(), created))
+    return std::nullopt;
+  return reshape.getResult();
+}
+
 LogicalResult applyRun(IRRewriter &rewriter, const UBPreloadRun &run) {
   if (!run.anchor || run.addressOrderStores.size() < 2 ||
       run.programOrderStores.size() != run.addressOrderStores.size() ||
@@ -476,11 +527,15 @@ LogicalResult applyRun(IRRewriter &rewriter, const UBPreloadRun &run) {
   Value packedValue = empty.getResult();
   int64_t packedOffset = 0;
   for (const StoreCandidate &candidate : run.addressOrderStores) {
-    int64_t sliceLength = 0;
-    if (!checkedSubI64(candidate.access.lastOffset,
-                       candidate.access.firstOffset, sliceLength) ||
-        !checkedAddI64(sliceLength, 1, sliceLength) || sliceLength <= 0 ||
-        candidate.valueType.getShape().front() != sliceLength) {
+    const int64_t sliceLength = candidate.elementCount;
+    if (sliceLength <= 0) {
+      eraseCreatedOperations(rewriter, created);
+      return failure();
+    }
+
+    std::optional<Value> flatValue =
+        materializeRowMajorFlatValue(rewriter, candidate, created);
+    if (!flatValue) {
       eraseCreatedOperations(rewriter, created);
       return failure();
     }
@@ -490,7 +545,7 @@ LogicalResult applyRun(IRRewriter &rewriter, const UBPreloadRun &run) {
     SmallVector<OpFoldResult, 1> sizes = {rewriter.getIndexAttr(sliceLength)};
     SmallVector<OpFoldResult, 1> strides = {rewriter.getIndexAttr(1)};
     auto inserted = rewriter.create<tensor::InsertSliceOp>(
-        run.anchor->getLoc(), candidate.value, packedValue, offsets,
+        run.anchor->getLoc(), *flatValue, packedValue, offsets,
         sizes, strides);
     if (!recordVerifiedOperation(inserted.getOperation(), created)) {
       eraseCreatedOperations(rewriter, created);

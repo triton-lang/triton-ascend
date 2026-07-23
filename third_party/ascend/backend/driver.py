@@ -74,25 +74,72 @@ class NPUUtils(object):
     def load_binary(self, name, kernel, shared, device, mix_mode):
         return self.npu_utils_mod.load_kernel_binary(name, kernel, shared, device, mix_mode)
 
+    def _get_npu_device_limit_form_env(self) -> tuple[int, int]:
+        """Read and validate the NPU_DEVICE_LIMIT env var, return the capped AICore and AIVector counts.
+
+        The env var format is ``cube_core_num,vector_core_num`` (e.g. ``"14,28"``),
+        used to reduce the core count visible to Triton in multi-tenant sharding,
+        performance tuning, and resource isolation scenarios.
+        When unset, the hardware actual values are returned (AIVector = AICore x 2).
+
+        Validation rules (any failure raises ValueError):
+        1. Format must match ``^\\d+(,\\d+)$``; leading/trailing whitespace allowed,
+           but no space after the comma;
+        2. Both values must be positive;
+        3. Neither value may exceed the hardware limit (AICore cap = device actual,
+           AIVector cap = AICore x 2).
+
+        Returns:
+            tuple[int, int]: (num_aic, num_aiv) the capped AICore and AIVector counts.
+
+        Raises:
+            ValueError: when the env var is malformed, contains non-positive values,
+                or exceeds the hardware limit; the error message includes the raw
+                input and the hardware actual caps.
+        """
+        npu_device_limit_str = os.getenv("NPU_DEVICE_LIMIT")
+        num_aic = self.get_device_aicore()
+        num_aiv = num_aic * 2
+        if npu_device_limit_str is None:
+            return num_aic, num_aiv
+
+        is_valid = re.match(r'^\d+(,\d+)$', npu_device_limit_str.strip())
+        if is_valid:
+            parts = [part.strip() for part in npu_device_limit_str.split(",")]
+            num_aic_env = int(parts[0])
+            num_aiv_env = int(parts[1])
+            if num_aic_env <= 0 or num_aiv_env <= 0:
+                raise ValueError(f"[ERROR]NPU_DEVICE_LIMIT={npu_device_limit_str}, which has non-positive value,"
+                                 f"both cube_core_num and vector_core_num must be positive.")
+            elif num_aic_env > num_aic or num_aiv_env > num_aiv:
+                raise ValueError(
+                    f"[ERROR]NPU_DEVICE_LIMIT={npu_device_limit_str}, both cube_core_num and vector_core_num "
+                    f"must be less than or equal to device properties ({num_aic},{num_aiv}).")
+            else:
+                print(f"[INFO]NPU_DEVICE_LIMIT from env: cube_core_num={num_aic_env},vector_core_num={num_aic_env}).")
+                return num_aic_env, num_aiv_env
+        else:
+            raise ValueError(f"[ERROR]NPU_DEVICE_LIMIT={npu_device_limit_str}, which has invalid format: "
+                             f"It should be like '14,28' (cube_core_num,vector_core_num).")
+
     @functools.lru_cache()
+    def get_device_aicore(self):
+        return self.npu_utils_mod.get_aicore_num()
+
     def get_device_properties(self, device):
         # temperoarily added "max_shared_mem" properties to avoid triton-compiler complain
         # fetch available memory at runtime
-        num_aic = self.get_aicore_num()
-        num_aiv = num_aic * 2
+        num_aic, num_aiv = self._get_npu_device_limit_form_env()
         return {"max_shared_mem": 1, "num_aicore": num_aic, "num_vectorcore": num_aiv}
 
-    @functools.lru_cache()
     def get_arch(self):
         # temporarily return empty arch descriptor
         return self.npu_utils_mod.get_arch()
 
-    @functools.lru_cache()
     def get_aicore_num(self):
         # temporarily return empty arch descriptor
-        return self.npu_utils_mod.get_aicore_num()
+        return self.get_device_properties("npu")["num_aicore"]
 
-    @functools.lru_cache()
     def get_aivector_core_num(self):
         return self.get_device_properties("npu")["num_vectorcore"]
 

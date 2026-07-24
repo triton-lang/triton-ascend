@@ -59,6 +59,8 @@ def _make_mock_npu_utils():
         ("1,2", 1, 2),
         # leading/trailing spaces are stripped by .strip()
         ("  12,24  ", 12, 24),
+        ("12 , 24  ", 12, 24),
+        ("12, 24", 12, 24),
     ],
 )
 def test_npu_device_limit_env_var_valid(monkeypatch, env_value, expected_aic, expected_aiv):
@@ -88,7 +90,6 @@ def test_npu_device_limit_env_var_valid(monkeypatch, env_value, expected_aic, ex
         "12.5,24",  # float not matched
         "",  # empty string
         "-1,48",  # negative sign not matched
-        "12, 24",  # space after comma breaks regex
     ],
 )
 def test_npu_device_limit_env_var_invalid(monkeypatch, env_value):

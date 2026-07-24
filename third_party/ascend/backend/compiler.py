@@ -569,6 +569,14 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         _compile_option_list += [
             f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
         ]
+        npu_utils = NPUUtils()
+        if npu_utils.has_device_limit():
+            _compile_option_list += [
+                f"--custom-aic-number={npu_utils.get_aicore_num()}",
+            ]
+            _compile_option_list += [
+                f"--custom-aiv-number={npu_utils.get_aivector_core_num()}",
+            ]
 
         if force_disable_ffts():
             _compile_option_list += ["--disable-ffts"]

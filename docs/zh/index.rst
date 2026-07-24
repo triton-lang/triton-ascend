@@ -56,7 +56,7 @@ Triton Ascend
 - :doc:`治理机制 <community/GOVERNANCE_zh>`
 - :doc:`技术例会 <community/community_technical_meeting>`
 - :doc:`Maintainers <community/MAINTAINERS>`
-- :doc:`Contributors <community/contributor>`
+- :doc:`Contributors <community/CONTRIBUTOR>`
 - :doc:`安全声明 <community/SECURITYNOTE_zh>`
 
 
@@ -125,5 +125,5 @@ Triton Ascend
    治理机制 <community/GOVERNANCE_zh>
    技术例会 <community/community_technical_meeting>
    Maintainers <community/MAINTAINERS>
-   Contributors <community/contributor>
+   Contributors <community/CONTRIBUTOR>
    安全声明 <community/SECURITYNOTE_zh>

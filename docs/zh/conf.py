@@ -24,15 +24,6 @@ project = 'Triton Ascend'
 copyright = '2026, Huawei'
 author = 'Huawei'
 
-# The version info for the project you're documenting, acts as replacement for
-# |version| and |release|, also used in various other places throughout the
-# built documents.
-#
-# The short X.Y version.
-version = ''
-# The full version, including alpha/beta/rc tags.
-release = ''
-
 extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.intersphinx',
@@ -42,11 +33,8 @@ extensions = [
     'myst_parser',
 ]
 
-autosummary_generate = True
-
 # -- I18n: detect language and root doc ---------------------------------------
 _readthedocs_lang = os.environ.get('READTHEDOCS_LANGUAGE')
-_is_build_by_readthedocs = _readthedocs_lang is not None
 
 if _readthedocs_lang:
     _build_lang = _readthedocs_lang.strip().lower().replace('_', '-')
@@ -87,9 +75,6 @@ def setup(app):
     lexers['mlir'] = get_lexer_by_name('text')
     lexers['plaintext'] = get_lexer_by_name('text')
     app.add_css_file('custom.css')
-    if not _is_build_by_readthedocs:
-        app.add_js_file('lang-switcher.js')
-        app.add_css_file('lang-switcher.css')
     return {'version': '0.1', 'parallel_read_safe': True}
 
 

@@ -1,32 +1,37 @@
 name: Docs RTD Preview
 
-# Reacts to a successful docs-spec-check run by:
 #   1. Finding the RTD build for this commit (triggered by webhook).
 #   2. Polling RTD until the build finishes.
 #   3. Posting a GitHub Commit Status (docs/readthedocs) so the preview link
 #      appears in the PR checks list.
 #
-# We use `workflow_run` (not `pull_request`) so the workflow runs in the base-repo
-# security context where the RTD_TOKEN secret is available — fork PRs cannot
-# access repo secrets under `pull_request`.
+# NOTE: Using `pull_request_target` so fork PRs can access RTD_TOKEN.
+# The workflow only runs trusted inline JavaScript — no PR code is executed.
 
 on:
-  workflow_run:
-    workflows: ["Documentation"]
-    types: [completed]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'docs/**'
+      - '**/*.rst'
+      - '**/*.md'
+      - '**/requirements*.txt'
+      - '**/setup.cfg'
+      - '.readthedocs.yaml'
 
 permissions:
-  actions: read
+  contents: read
   statuses: write
+
+concurrency:
+  group: rtd-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   rtd-preview:
     name: RTD Preview
-    # Only run for PR gate runs that actually passed.
-    if: >
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       RTD_PROJECT: triton-ascend
       MAX_WAIT_MIN: '25'
@@ -43,17 +48,8 @@ jobs:
             const maxWaitMin = parseInt(process.env.MAX_WAIT_MIN, 10);
             const pollSec    = parseInt(process.env.POLL_INTERVAL_SEC, 10);
 
-            const prList   = context.payload.workflow_run.pull_requests;
-            const pr       = (prList && prList[0]) ? prList[0] : null;
-            const prNumber = pr ? pr.number : null;
-            // Use the PR head SHA so the commit status links to the PR.
-            const sha      = (pr && pr.head && pr.head.sha)
-                              || context.payload.workflow_run.head_sha;
-
-            if (!prNumber) {
-              core.info('No PR number found in workflow_run payload; skipping.');
-              return;
-            }
+            const prNumber = context.payload.pull_request.number;
+            const sha      = context.payload.pull_request.head.sha;
 
             const apiBase    = 'https://readthedocs.org/api/v3';
             const previewUrl = `https://${project}--${prNumber}.org.readthedocs.build/`;
@@ -94,18 +90,24 @@ jobs:
             core.info(`Searching for RTD build for commit ${sha}…`);
             const searchUrl = `${apiBase}/projects/${project}/builds/?commit=${sha}`;
             let foundBuild = false;
-            try {
-              const pResp = await fetch(searchUrl, authHeaders);
-              if (pResp.ok) {
-                const pData = await pResp.json();
-                const recent = (pData.results || [])[0];
-                if (recent) {
-                  foundBuild = true;
-                  core.info(`Found build #${recent.id} (state=${(recent.state||{}).code}).`);
+
+            // Retry to account for RTD webhook propagation latency:
+            // the PR event may arrive before the RTD build is created.
+            for (let attempt = 0; attempt < 6 && !foundBuild; attempt++) {
+              if (attempt > 0) { await sleep(10000); }
+              try {
+                const pResp = await fetch(searchUrl, authHeaders);
+                if (pResp.ok) {
+                  const pData = await pResp.json();
+                  const recent = (pData.results || [])[0];
+                  if (recent) {
+                    foundBuild = true;
+                    core.info(`Found build #${recent.id} (state=${(recent.state||{}).code}).`);
+                  }
                 }
+              } catch (e) {
+                core.info(`Build search failed (attempt ${attempt + 1}): ${e.message}`);
               }
-            } catch (e) {
-              core.info(`Build search failed: ${e.message}`);
             }
 
             if (!foundBuild) {

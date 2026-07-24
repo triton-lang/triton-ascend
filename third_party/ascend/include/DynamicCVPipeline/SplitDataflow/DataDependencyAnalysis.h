@@ -52,16 +52,13 @@ struct DependencyInfo {
   DependencyType type;
   mlir::Value value;
   bool isScaler = false;
+  bool is1DTensor = false;
   int producerBlockId;
   int consumerBlockId;
   int iniProducerBlockId;
   int iniConsumerBlockId;
 
   bool isAllTranspoesd = false;
-  // Optional Items for V2CDependencies
-  mlir::Operation *iniMatmulOp = nullptr;
-  bool isMatmulA = false;
-  bool isMatmulB = false;
 
   // Optional Items for memDependencies
   mlir::Operation *predOp;
@@ -155,9 +152,10 @@ private:
   bool isValidShapeForDependency(mlir::Value value);
   bool isValidValueForDependency(mlir::Value value);
   bool isValidScalarDependency(mlir::Value value);
+  bool isValid1DValueForDependency(mlir::Value value);
+  bool isAllTransposedInVector(mlir::Value value);
   bool isOuterOpArg(mlir::Value value);
   void processIterArgDependencies();
-  void analyzeV2CMatmulABType(DataDependencyInfo &info);
   llvm::SmallVector<mlir::Operation *>
   collectDiffCoreTypeUsers(mlir::BlockArgument iterArg,
                            llvm::StringRef initCoreType);

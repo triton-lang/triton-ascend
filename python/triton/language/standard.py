@@ -180,7 +180,7 @@ def _elementwise_max_propagate_nan(a, b):
 @core._add_reduction_docstr("maximum", return_indices_arg="return_indices",
                             tie_break_arg="return_indices_tie_break_left")
 def max(input, axis=None, return_indices=False, return_indices_tie_break_left=True, keep_dims=False,
-        propagate_nan=False):
+        propagate_nan: core.constexpr = core.PropagateNan.NONE):
     input = core._promote_bfloat16_to_float32(input)
     if return_indices:
         if return_indices_tie_break_left:
@@ -198,7 +198,7 @@ def max(input, axis=None, return_indices=False, return_indices_tie_break_left=Tr
                 # which can lead to "UB overflow" errors during kernel execution.
                 # Therefore, we keep the original narrow integer type and rely on backend support.
                 pass  # Do not promote to int32
-        if not propagate_nan:
+        if propagate_nan == core.PropagateNan.NONE:
             return core.reduce(input, axis, _elementwise_max, keep_dims=keep_dims)
         else:
             return core.reduce(input, axis, _elementwise_max_propagate_nan, keep_dims=keep_dims)

@@ -39,23 +39,45 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       // CHECK:       arith.muli
       // CHECK:       arith.addi
       // CHECK:       llvm.inttoptr
+      %alloc_17 = memref.alloc() : memref<128x128xf32, #hivm.address_space<ub>>
+      %memspacecast = memref.memory_space_cast %alloc_17 {} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
+      %alloc_18 = memref.alloc() : memref<128x128xf32, #hivm.address_space<ub>>
+      %memspacecast_19 = memref.memory_space_cast %alloc_18 {} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
+      %alloc_20 = memref.alloc() : memref<128x128xf32, #hivm.address_space<ub>>
+      %memspacecast_21 = memref.memory_space_cast %alloc_20 {} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
       %alloc = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 0 : i32} : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>
       annotation.mark %alloc {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<0>, ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 0 : i32} : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>
-      %alloc_5 = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 1 : i32, ssbuffer.crossDeps = [0 : i32, 1 : i32]} : memref<128x128xf32, #hivm.address_space<ub>>
+      %alloca = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 0 : i32} : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>
+      annotation.mark %alloca {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<4>, ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 0 : i32} : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>
+      %alloc_5 = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
       annotation.mark %alloc_5 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<1>, ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
-      %alloc_6 = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 2 : i32, ssbuffer.crossDeps = [1 : i32, 1 : i32]} : memref<128x128xf32, #hivm.address_space<ub>>
+      %alloc_5a = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
+      annotation.mark %alloc_5a {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<3>, ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
+      %alloc_6 = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
       annotation.mark %alloc_6 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<2>, ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
       %30:2 = scf.for %arg16 = %c0_i32 to %c8192_i32 step %c128_i32 iter_args(%arg17 = %c0_i32, %arg18 = %c0_i32) -> (i32, i32)  : i32 {
-        // This block contain an input and a output
         // CHECK:       llvm.load
         // CHECK:       arith.cmpi sgt
         // CHECK:       llvm.load
         // CHECK:       arith.cmpi slt
         // CHECK:       scf.if
         hivm.hir.sync_block_set {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 3 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 4
-        %memspacecast_11 = memref.memory_space_cast %alloc_5 {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32, ssbuffer.crossDeps = [0 : i32, 0 : i32]} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
+        %memspacecast_11 = memref.memory_space_cast %alloc_5 {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32, ssbuffer.crossCoreDeps = [0 : i32, 0 : i32]} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
+        %memspacecast_13 = memref.memory_space_cast %alloc_5a {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
+        %254 = tensor.empty() {ssbuffer.block_id = 5 : i32} : tensor<128x128xf32>
+        %258 = arith.constant {ssbuffer.block_id = 5 : i32} 1: i1
+        scf.if %258 {
+          hivm.hir.copy ins(%254 : tensor<128x128xf32>) outs(%memspacecast : memref<128x128xf32>) {ssbuffer.block_id = 5 : i32, ssbuffer.intraDeps = [0 : i32, 1 : i32]}
+        } else {
+          scf.if %258 {
+            hivm.hir.copy ins(%254 : tensor<128x128xf32>) outs(%memspacecast_19 : memref<128x128xf32>) {ssbuffer.block_id = 5 : i32, ssbuffer.intraDeps = [0 : i32, 1 : i32]}
+          } else {
+            hivm.hir.copy ins(%254 : tensor<128x128xf32>) outs(%memspacecast_21 : memref<128x128xf32>) {ssbuffer.block_id = 5 : i32, ssbuffer.intraDeps = [0 : i32, 1 : i32]}
+          } {ssbuffer.block_id = 5 : i32, ssbuffer.intra_buffer}
+        } {ssbuffer.block_id = 5 : i32, ssbuffer.intra_buffer}
         %reshape_13 = tensor.empty() {ssbuffer.block_id = 5 : i32} : tensor<8x8x16x16xf16>
-        hivm.hir.copy ins(%reshape_13 : tensor<8x8x16x16xf16>) outs(%alloc : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 0 : i32}
+        hivm.hir.copy ins(%reshape_13 : tensor<8x8x16x16xf16>) outs(%alloc : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 0 : i32, ssbuffer.crossCoreDeps = [2 : i32, 1 : i32]}
+        hivm.hir.copy ins(%reshape_13 : tensor<8x8x16x16xf16>) outs(%alloca : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 0 : i32, ssbuffer.crossCoreDeps = [4 : i32, 1 : i32]}
         // CHECK:       llvm.load
         // CHECK:       arith.subi
         // CHECK:       llvm.store
@@ -69,7 +91,22 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       arith.cmpi sgt
         // CHECK:       scf.if
         hivm.hir.sync_block_set {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 3 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 4
-        %memspacecast_16 = memref.memory_space_cast %alloc_6 {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32, ssbuffer.crossDeps = [1, 0]} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
+        %memspacecast_16 = memref.memory_space_cast %alloc_6 {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32, ssbuffer.crossCoreDeps = [1, 0]} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
+        %true = arith.constant {ssbuffer.block_id = 6 : i32} 1: i1
+        %216 = scf.if %true -> (tensor<128x128xf32>) {
+          %238 = bufferization.to_tensor %memspacecast restrict writable : memref<128x128xf32> to tensor<128x128xf32>
+          scf.yield %238 : tensor<128x128xf32>
+        } else {
+          %c1_i32_50 = arith.constant {ssbuffer.block_id = 25 : i32} 1 : i32
+          %239 = scf.if %true -> (tensor<128x128xf32>) {
+            %240 = bufferization.to_tensor %memspacecast_19 restrict writable : memref<128x128xf32> to tensor<128x128xf32>
+            scf.yield %240 : tensor<128x128xf32>
+          } else {
+            %240 = bufferization.to_tensor %memspacecast_21 restrict writable : memref<128x128xf32> to tensor<128x128xf32>
+            scf.yield %240 : tensor<128x128xf32>
+          }
+          scf.yield %239 : tensor<128x128xf32>
+        } {ssbuffer.block_id = 6: i32, ssbuffer.intraDeps = [0 : i32, 0 : i32], ssbuffer.intra_buffer}
         // CHECK:       llvm.load
         // CHECK:       arith.subi
         // CHECK:       llvm.store
@@ -79,10 +116,14 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       scope.return
     } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
     scope.scope : () -> () {
-      %alloc_5 = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 0 : i32, ssbuffer.crossDeps = [2 : i32, 1 : i32]} : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>
+      %alloc_5 = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 0 : i32} : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>
       annotation.mark %alloc_5 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<0>, ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 0 : i32} : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>
+      %alloc_5a = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 0 : i32} : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>
+      annotation.mark %alloc_5a {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<4>, ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 0 : i32} : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>
       %alloc_6 = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
       annotation.mark %alloc_6 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<1>, ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
+      %alloc_6a = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
+      annotation.mark %alloc_6a {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<3>, ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
       %alloc_7 = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
       annotation.mark %alloc_7 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<2>, ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
       %20:2 = scf.for %arg16 = %c0_i32 to %c8192_i32 step %c128_i32 iter_args(%arg17 = %c0_i32, %arg18 = %c0_i32) -> (i32, i32)  : i32 {
@@ -95,7 +136,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       scf.if
         hivm.hir.sync_block_wait {ssbuffer.block_id = 0 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
         %30 = tensor.empty() {ssbuffer.block_id = 0 : i32} : tensor<128x128xf32>
-        hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, ssbuffer.block_id = 0 : i32, ssbuffer.transfer_id = 1 : i32} ins(%30 : tensor<128x128xf32>) outs(%alloc_6 : memref<128x128xf32, #hivm.address_space<ub>>)
+        hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, ssbuffer.block_id = 0 : i32, ssbuffer.transfer_id = 1 : i32, ssbuffer.crossCoreDeps = [0 : i32, 1 : i32]} ins(%30 : tensor<128x128xf32>) outs(%alloc_6 : memref<128x128xf32, #hivm.address_space<ub>>)
         // CHECK:       llvm.load
         // CHECK:       llvm.load
         // CHECK:       arith.addi
@@ -103,6 +144,22 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       llvm.store
         // CHECK:       llvm.store
         // CHECK:       } {hivm.matmul_limited_in_cube, ssbuffer.if = 0 : i32}
+
+        // CHECK:       llvm.load
+        // CHECK:       llvm.load
+        // CHECK:       arith.cmpi slt
+        // CHECK:       arith.cmpi slt
+        // CHECK:       scf.if
+        hivm.hir.sync_block_wait {ssbuffer.block_id = 2 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
+        %31 = tensor.empty() {ssbuffer.block_id = 2 : i32} : tensor<128x128xf32>
+        hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, ssbuffer.block_id = 2 : i32, ssbuffer.transfer_id = 1 : i32, ssbuffer.crossCoreDeps = [0 : i32, 1 : i32]} ins(%31 : tensor<128x128xf32>) outs(%alloc_6a : memref<128x128xf32, #hivm.address_space<ub>>)
+        // CHECK:       llvm.load
+        // CHECK:       llvm.load
+        // CHECK:       arith.addi
+        // CHECK:       arith.addi
+        // CHECK:       llvm.store
+        // CHECK:       llvm.store
+        // CHECK:       } {hivm.matmul_limited_in_cube, ssbuffer.if = 2 : i32}
 
         // This block contain an input and a output
         // CHECK:       llvm.load
@@ -118,9 +175,9 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       arith.ori
         // CHECK:       scf.if
         hivm.hir.sync_block_wait {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
-        %32 = hivm.hir.convert_layout %alloc_5 output_shape [128, 128] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32, ssbuffer.crossDeps = [2 : i32, 0 : i32]} : (memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) -> memref<128x128xf16, #hivm.address_space<cbuf>>
+        %32 = hivm.hir.convert_layout %alloc_5 output_shape [128, 128] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32, ssbuffer.crossCoreDeps = [2 : i32, 0 : i32]} : (memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) -> memref<128x128xf16, #hivm.address_space<cbuf>>
         %40 = tensor.empty() {ssbuffer.block_id = 1 : i32} : tensor<128x128xf32>
-        hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 2 : i32} ins(%40 : tensor<128x128xf32>) outs(%alloc_7 : memref<128x128xf32, #hivm.address_space<ub>>)
+        hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 2 : i32, ssbuffer.crossCoreDeps = [1 : i32, 1 : i32]} ins(%40 : tensor<128x128xf32>) outs(%alloc_7 : memref<128x128xf32, #hivm.address_space<ub>>)
         // CHECK:       llvm.load
         // CHECK:       llvm.load
         // CHECK:       arith.subi
@@ -134,6 +191,19 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         // CHECK:       llvm.store
         // CHECK:       llvm.store
         // CHECK:       } {hivm.matmul_limited_in_cube, ssbuffer.if = 1 : i32}
+
+        // CHECK:       llvm.load
+        // CHECK:       llvm.load
+        // CHECK:       arith.cmpi sgt
+        // CHECK:       arith.cmpi sgt
+        // CHECK:       arith.cmpi sge
+        // CHECK:       arith.cmpi sge
+        // CHECK:       arith.ori
+        // CHECK:       scf.if
+        hivm.hir.sync_block_wait {ssbuffer.block_id = 4 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
+        %322 = hivm.hir.convert_layout %alloc_5a output_shape [128, 128] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 4 : i32, ssbuffer.transfer_id = 0 : i32, ssbuffer.crossCoreDeps = [4 : i32, 0 : i32]} : (memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) -> memref<128x128xf16, #hivm.address_space<cbuf>>
+        // CHECK:       } {hivm.matmul_limited_in_cube, ssbuffer.if = 4 : i32}
+
         scf.yield %arg17, %arg18 : i32, i32
       } {ssbuffer.block_id = 9 : i32, ssbuffer.main_loop = 0 : i64, ssbuffer.flowOpt}
       scope.return

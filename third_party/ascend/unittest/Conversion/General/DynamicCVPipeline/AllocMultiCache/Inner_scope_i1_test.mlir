@@ -28,7 +28,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       scf.for %i = %c0_i32 to %c100_i32 step %c1_i32  : i32 {
         // Producer: tensor<128xi1> in block 7 (NOT empty+fill pattern)
         %alloc = memref.alloc() {ssbuffer.block_id = 7 : i32} : memref<128xi1>
-        %prod = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 7 : i32} : memref<128xi1> to tensor<128xi1>
+        %prod = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 7 : i32} : memref<128xi1>
         // Consumer in block 10 (cross-block)
         %consumed = arith.ori %prod, %prod {ssbuffer.block_id = 10 : i32} : tensor<128xi1>
       } {ssbuffer.main_loop = 1 : i64}

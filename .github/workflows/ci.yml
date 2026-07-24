@@ -24,10 +24,10 @@ on:
       - '.github/workflows/runner-preparation.yml'
       - '.github/workflows/wheels.yml'
   merge_group:
-    branches: [main, 'dev-**']
+    branches: [main, 'release/**', '**-dev']
     types: [checks_requested]
   push:
-    branches: [main, 'release/**']
+    branches: [main, 'release/**', '**-dev']
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}

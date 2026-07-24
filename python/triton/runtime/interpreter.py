@@ -30,7 +30,7 @@ AscendInterpreterBuilder = None
 def _try_import_ascend():
     global _has_ascend_support, AscendInterpreterBuilder
     try:
-        from . import ascend_interpreter
+        from third_party.ascend.backend import ascend_interpreter
         AscendInterpreterBuilder = ascend_interpreter.AscendInterpreterBuilder
         _has_ascend_support = True
     except ImportError:

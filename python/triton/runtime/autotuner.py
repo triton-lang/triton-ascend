@@ -6,12 +6,11 @@ import inspect
 import hashlib
 import json
 from functools import cached_property
-
 from typing import Dict, Tuple, List, Optional
 
 from .. import knobs
 from .jit import KernelInterface, JITFunction
-from .errors import OutOfResources, AutotunerError
+from .errors import OutOfResources, PTXASError, AutotunerError
 from .driver import driver
 from .cache import get_cache_manager, triton_key
 from triton._C.libtriton import get_cache_invalidating_env_vars
@@ -110,6 +109,7 @@ class Autotuner(KernelInterface):
                     quantiles=quantiles,
                 )
                 return
+
             import triton.testing
             self._do_bench = lambda kernel_call, quantiles: triton.testing.do_bench(
                 kernel_call,

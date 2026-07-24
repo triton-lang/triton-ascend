@@ -31,8 +31,8 @@ import warnings
 import contextlib
 import numpy as np
 import triton.language as tl
-from .interpreter import InterpreterBuilder, TensorHandle, ReduceOps, _get_np_dtype, _patch_builtin, _LangPatchScope
-from .._C.libtriton import interpreter as _interpreter
+from triton.runtime.interpreter import InterpreterBuilder, TensorHandle, ReduceOps, _get_np_dtype, _patch_builtin, _LangPatchScope
+from triton._C.libtriton import interpreter as _interpreter
 
 
 class AscendReduceOps(ReduceOps):

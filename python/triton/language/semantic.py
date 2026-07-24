@@ -337,7 +337,6 @@ class TritonSemantic(Generic[TensorTy]):
         other_scalar_ty = other.type.scalar
         # float % float
         if scalar_ty.is_floating():
-            # input - input.div(other, rounding_mode="floor") * other
             return self.tensor(self.builder.create_frem(input.handle, other.handle), input.type)
         # % int
         elif scalar_ty.is_int():

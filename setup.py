@@ -640,7 +640,7 @@ class CMakeBuild(build_ext):
 
         # Copy triton-mlir-opt tool to extdir for runtime use
         # This tool is needed for converting MLIR to Bytecode
-        triton_mlir_opt_src = os.path.join(cmake_dir, "bin", "triton-mlir-opt")
+        triton_mlir_opt_src = os.path.join(cmake_dir, "third_party", "ascend", "bin", "triton-mlir-opt")
         if os.path.exists(triton_mlir_opt_src):
             triton_mlir_opt_dst = os.path.join(extdir, "triton-mlir-opt")
             shutil.copy2(triton_mlir_opt_src, triton_mlir_opt_dst)

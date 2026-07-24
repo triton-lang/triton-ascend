@@ -1,6 +1,7 @@
 # Quick Start
 
 ## Project Introduction
+
 Triton-Ascend is an optimized version of Triton adapted for Huawei Ascend chips. It is used for efficient kernel auto-tuning, operator compilation, and deployment. By being compatible with Triton's core syntax and deeply optimized for Ascend NPU characteristics, it helps users quickly develop and deploy high-performance computing tasks on the Ascend platform.
 This article takes running a vector addition example via package deployment in an Ubuntu 22.04 environment as an example to guide users to quickly get started with Triton-Ascend.
 
@@ -17,18 +18,21 @@ Supported Ascend products: Atlas A2/A3/A5 series
 Minimum hardware configuration: Single-card 32GB memory (recommended)
 
 #### Software Dependencies
+
 Determine and install the Python, CANN, and torch_npu software versions. Both package installation and source code compilation installation require this step to be completed first.
--   Python version selection: py3.9-py3.11 are all supported.
+- Python version selection: py3.9-py3.11 are all supported.
 
--   CANN version selection: You can visit the Ascend community official website and follow the <a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">community software installation guide</a> provided there to complete the installation and configuration of CANN. It is recommended to download and install version 9.0.0.
+- CANN version selection: You can visit the Ascend community official website and follow the <a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">community software installation guide</a> provided there to complete the installation and configuration of CANN. It is recommended to download and install version 9.0.0.
 
--   torch_npu version selection: The currently matched torch_npu version is 2.7.1.post4.
+- torch_npu version selection: The currently matched torch_npu version is 2.7.1.post4.
 
 ### Implementation (Taking whl Package Installation as an Example)
+
 ```bash
 # Take installing triton-ascend 3.2.1 as an example
 pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
+
 Note: For triton-ascend 3.2.1 and later, Triton-Ascend mitigates the installation overwriting issue by declaring Triton as an installation dependency. When installing Triton-Ascend, the community Triton is installed first, and then Triton-Ascend overwrites the directory with the same name, thereby avoiding re-installing Triton and overwriting Triton-Ascend when subsequently installing other packages that depend on Triton.
 
 ## Quick Start
@@ -70,7 +74,6 @@ from torch.testing import assert_close
 import triton
 import triton.language as tl
 
-
 @triton.jit
 def add_kernel(
     x_ptr,
@@ -86,7 +89,6 @@ def add_kernel(
     x = tl.load(x_ptr + offsets, mask=mask)
     y = tl.load(y_ptr + offsets, mask=mask)
     tl.store(output_ptr + offsets, x + y, mask=mask)
-
 
 @pytest.mark.parametrize('SIZE,BLOCK_SIZE', [(98432, 1024)])
 def test_add(SIZE, BLOCK_SIZE):
@@ -155,8 +157,11 @@ def test_add(SIZE, BLOCK_SIZE):
     output_torch = x + y
     assert_close(output, output_torch, rtol=1e-3, atol=1e-3)
 ```
+
 After modification, you can run the test case with `pytest`. A successful execution indicates that the migration is successful.
+
 ```bash
 pytest test_add.py
 ```
+
 If the `pytest` component is not installed, you can install it using `pip install pytest`.

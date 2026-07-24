@@ -9,8 +9,6 @@ from triton.runtime import driver
 from .._C.libtriton import ir
 from . import core as tl
 
-from . import is_compile_on_910_95
-
 T = TypeVar('T')
 TensorTy = TypeVar('TensorTy')
 
@@ -1387,6 +1385,13 @@ class TritonSemantic(Generic[TensorTy]):
             raise ValueError("Pointer argument of store instruction is " + ptr.type.__repr__())
         if ptr.type.is_const() or ptr.type.element_ty.is_const():
             raise ValueError("Cannot store to a constant pointer")
+        element_ty = ptr.type.scalar.element_ty
+        if element_ty is tl.float16 and op != 'add':
+            raise ValueError("atomic_" + op + " does not support fp16")
+        if element_ty is tl.bfloat16 and op != 'add':
+            raise ValueError("atomic_" + op + " does not support bf16")
+        if element_ty in [tl.int16, tl.uint16] or element_ty.primitive_bitwidth < 16:
+            raise ValueError("atomic_" + op + " does not support " + str(element_ty))
         if ptr.type.is_block():
             if mask is not None:
                 mask = self.broadcast_impl_shape(mask, ptr.type.get_block_shapes())
@@ -1636,15 +1641,6 @@ class TritonSemantic(Generic[TensorTy]):
                    rhs_scale: Optional[TensorTy], rhs_format: str, acc: TensorTy | None, fast_math: bool,
                    lhs_k_pack: bool, rhs_k_pack: bool, out_dtype: tl.dtype) -> TensorTy:
         assert lhs.type.is_block() and rhs.type.is_block()
-        if is_compile_on_910_95:
-            assert lhs.dtype in [tl.float16, tl.bfloat16, tl.uint8, tl.float8e5,
-                                 tl.float8e4nv], "lhs matrix dtype must be in [bf16, fp16, uint8, e5m2, e4m3]"
-            assert rhs.dtype in [tl.float16, tl.bfloat16, tl.uint8, tl.float8e5,
-                                 tl.float8e4nv], "rhs matrix dtype must be in [bf16, fp16, uint8, e5m2, e4m3]"
-        else:
-            assert lhs.dtype == tl.bfloat16 or lhs.dtype == tl.float16, "lhs matrix dtype must be bf16 or fp16"
-            assert rhs.dtype == tl.bfloat16 or lhs.dtype == tl.float16, "rhs matrix dtype must be bf16 or fp16"
-        assert lhs.dtype == rhs.dtype, "lhs rhs matrix must get same dtype"
         #TODO: validate types.
         lhs_rank = len(lhs.shape)
         rhs_rank = len(rhs.shape)
@@ -1653,40 +1649,13 @@ class TritonSemantic(Generic[TensorTy]):
         rhs_format: str = rhs_format.value
         lhs_format_enum = self._str_to_fp_type(lhs_format)
         rhs_format_enum = self._str_to_fp_type(rhs_format)
-        if is_compile_on_910_95:
-            allowed_formats = {"bf16", "fp16", "e4m3", "e5m2", "e2m1"}
-        else:
-            allowed_formats = {"bf16", "fp16"}  # unsupported fp8/4 dtype: "e2m1", "e4m3", "e5m2"
+        allowed_formats = {"e2m1", "e4m3", "e5m2", "bf16", "fp16"}
         assert lhs_format in allowed_formats, f"NYI: lhs_format {lhs_format}"
         assert rhs_format in allowed_formats, f"NYI: rhs_format {rhs_format}"
         rhs_scale_is_none = rhs_scale is None or (isinstance(rhs_scale, tl.constexpr) and rhs_scale.value is None)
         lhs_scale_is_none = lhs_scale is None or (isinstance(lhs_scale, tl.constexpr) and lhs_scale.value is None)
-        assert isinstance(lhs_scale, tl.tensor) and (lhs_scale.dtype == tl.int8 or lhs_scale.dtype
-                                                     == tl.uint8), "lhs_scale must be int8 or uint8 tensor"
-        if not rhs_scale_is_none:
-            assert isinstance(rhs_scale, tl.tensor) and (rhs_scale.dtype == tl.int8 or rhs_scale.dtype
-                                                         == tl.uint8), "rhs_scale must be int8 or uint8 tensor"
         lhs = self._bitcast_to_fp_type(lhs, lhs_format)
         rhs = self._bitcast_to_fp_type(rhs, rhs_format)
-        assert lhs_k_pack or lhs_format == "e2m1", "only mxfp4 inputs can be packed along a dimension different than K"
-        assert rhs_k_pack or rhs_format == "e2m1", "only mxfp4 inputs can be packed along a dimension different than K"
-
-        lhs_k_pack_v = lhs_k_pack.value if isinstance(lhs_k_pack, tl.constexpr) else lhs_k_pack
-        rhs_k_pack_v = rhs_k_pack.value if isinstance(rhs_k_pack, tl.constexpr) else rhs_k_pack
-
-        if lhs_k_pack_v is False:
-            dims = (1, 0)
-            tmp_lhs = self.permute(lhs, dims)
-            lhs = self.reshape(tmp_lhs, (lhs.shape[0], lhs.shape[1]), True)
-
-        if rhs_k_pack_v is False:
-            dims = (1, 0)
-            tmp_rhs = self.permute(rhs, dims)
-            rhs = self.reshape(tmp_rhs, (rhs.shape[0], rhs.shape[1]), True)
-
-        assert lhs.type.shape[-1] == rhs.type.shape[-2], (
-            f"lhs last dimension (columns) {lhs.shape[-1]} "
-            f"must equal rhs penultimate dimension (rows) {rhs.shape[-2]}")
 
         assert lhs_k_pack or lhs_format == "e2m1", "only mxfp4 inputs can be packed along a dimension different than K"
         assert rhs_k_pack or rhs_format == "e2m1", "only mxfp4 inputs can be packed along a dimension different than K"

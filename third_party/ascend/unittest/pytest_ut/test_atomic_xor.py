@@ -42,8 +42,6 @@ def atomic_xor(in_ptr0, out_ptr0, out_ptr1, n_elements, BLOCK_SIZE: tl.constexpr
 @pytest.mark.parametrize('param_list', [
     ['int64', (32, 32), 2],
     ['int32', (32, 32), 2],
-    ['int16', (32, 32), 7],
-    ['int8', (32, 32), 10],
 ])
 def test_atomic_xor(param_list):
     dtype, shape, ncore = param_list

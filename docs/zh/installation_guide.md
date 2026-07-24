@@ -26,7 +26,7 @@
 ## 快速安装
 
 ```bash
-pip install triton-ascend --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 
 ## 源码安装
@@ -263,7 +263,7 @@ endif()
 
 ```bash
 pip uninstall triton-ascend triton
-pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 
 **问题四：Triton-Ascend 3.2.1版本为何新增依赖triton？**
@@ -280,7 +280,7 @@ triton-ascend 3.2.1 requires triton==3.5.0, but you have triton 3.5.1 which is i
 
 ```bash
 pip uninstall triton-ascend triton
-pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 
 ```
 

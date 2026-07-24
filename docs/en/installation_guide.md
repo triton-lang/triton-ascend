@@ -206,7 +206,7 @@ Determine and install the CANN, Python, and Torch-NPU software versions. Both pa
 
     ```bash
     # Take installing triton-ascend 3.2.1 as an example
-    pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+    pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
     ```
 
 
@@ -507,7 +507,7 @@ The triton-ascend directory is overwritten by triton, causing triton-ascend func
 Uninstall the damaged triton-ascend and reinstall it. Taking version 3.2.1 as an example, you can run the following command to fix it:
 ```bash
 pip uninstall triton-ascend triton
-pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 
 ## Why does Triton-Ascend 3.2.1 add a dependency on triton?
@@ -520,7 +520,7 @@ triton-ascend 3.2.1 requires triton==3.5.0, but you have triton 3.5.1 which is i
 If users encounter this and want to restore triton-ascend functionality, they can do the following:
 ```bash
 pip uninstall triton-ascend triton
-pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 
 ```
 

@@ -30,7 +30,7 @@
 ## 快速安装
 
 ```bash
-pip install triton-ascend --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 
 ## 快速开始

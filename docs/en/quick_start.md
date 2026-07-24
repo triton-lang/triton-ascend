@@ -27,7 +27,7 @@ Determine and install the Python, CANN, and torch_npu software versions. Both pa
 ### Implementation (Taking whl Package Installation as an Example)
 ```bash
 # Take installing triton-ascend 3.2.1 as an example
-pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 Note: For triton-ascend 3.2.1 and later, Triton-Ascend mitigates the installation overwriting issue by declaring Triton as an installation dependency. When installing Triton-Ascend, the community Triton is installed first, and then Triton-Ascend overwrites the directory with the same name, thereby avoiding re-installing Triton and overwriting Triton-Ascend when subsequently installing other packages that depend on Triton.
 

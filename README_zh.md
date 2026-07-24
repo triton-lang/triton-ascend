@@ -75,7 +75,7 @@ Triton-Ascend
 
 ```bash
 #以安装triton-ascend 3.2.1 为例
-pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 
 ### 源码安装

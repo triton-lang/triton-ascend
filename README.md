@@ -75,7 +75,7 @@ If you need to access Ascend NPU computing resources for development or testing,
 
 ```bash
 # Taking the installation of triton-ascend 3.2.1 as an example
-pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 
 ### Source Installation

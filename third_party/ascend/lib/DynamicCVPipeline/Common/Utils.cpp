@@ -4,7 +4,9 @@
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/LogicalResult.h"
 
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -164,6 +166,20 @@ bool isScalarLike(Value value) {
 
   // 4. single-element tensor (all dims == 1)
   return llvm::all_of(shape, [](int64_t dim) { return dim == 1; });
+}
+
+bool isStoreLike(mlir::Operation *op) {
+  if (isa<bufferization::MaterializeInDestinationOp, hivm::StoreOp>(op)) {
+    return true;
+  }
+  return false;
+}
+
+bool isViewLike(mlir::Operation *op) {
+  if (isa<tensor::ExtractSliceOp, ViewLikeOpInterface>(op)) {
+    return true;
+  }
+  return false;
 }
 
 bool allResultHasOneUser(Operation *op) {

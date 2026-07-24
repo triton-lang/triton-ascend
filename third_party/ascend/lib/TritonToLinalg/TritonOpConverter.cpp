@@ -28,6 +28,10 @@
 #include "ascend/include/Utils/Utils.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
+#include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -42,6 +46,7 @@
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -3338,6 +3343,284 @@ HistogramConverter::matchAndRewrite(triton::HistogramOp op, OpAdaptor adaptor,
                     DenseI32ArrayAttr::get(rewriter.getContext(), {}));
 
   rewriter.replaceOp(op, customOp->getResult(0));
+  return success();
+}
+// ===----------------------------------------------------------------------===
+// MapElementwiseDecomposeConverter
+// ===----------------------------------------------------------------------===
+
+// Promote a single scalar op to tensor-level.  Returns the tensor result
+// values after recording them in valueMap.
+SmallVector<Value> MapElementwiseDecomposeConverter::promoteOp(
+    Operation *op, llvm::DenseMap<Value, Value> &valueMap, OpBuilder &builder,
+    Location loc, ArrayRef<int64_t> tensorShape) const {
+
+  // ---- helpers ----
+  auto getTensorType = [&](Type scalarTy) -> RankedTensorType {
+    return RankedTensorType::get(tensorShape, scalarTy);
+  };
+
+  auto createInit = [&](Type scalarTy) -> Value {
+    return builder.create<tensor::EmptyOp>(loc, tensorShape, scalarTy);
+  };
+
+  auto getOperand = [&](Value v) -> Value {
+    auto it = valueMap.find(v);
+    if (it != valueMap.end())
+      return it->second;
+    // External constant defined outside the region — promote on first use
+    if (auto cst = v.getDefiningOp<arith::ConstantOp>()) {
+      auto scalarTy = cst.getResult().getType();
+      Value init = createInit(scalarTy);
+      auto fill = builder.create<linalg::FillOp>(loc, cst.getResult(), init);
+      valueMap[v] = fill.getResult(0);
+      return fill.getResult(0);
+    }
+    llvm_unreachable("operand not in valueMap and not a constant");
+  };
+
+  auto record = [&](Value oldVal, Value newVal) -> SmallVector<Value> {
+    valueMap[oldVal] = newVal;
+    return {newVal};
+  };
+
+  // ---- binary arith: Op(lhs, rhs) → tensor Op(lhs, rhs) ----
+#define PROMOTE_BINARY(OpTy)                                                   \
+  if (auto a = dyn_cast<OpTy>(op)) {                                           \
+    auto r = builder.create<OpTy>(loc, getOperand(a.getLhs()),                 \
+                                  getOperand(a.getRhs()));                     \
+    return record(a.getResult(), r.getResult());                               \
+  }
+
+  PROMOTE_BINARY(arith::AddIOp)
+  PROMOTE_BINARY(arith::SubIOp)
+  PROMOTE_BINARY(arith::MulIOp)
+  PROMOTE_BINARY(arith::DivSIOp)
+  PROMOTE_BINARY(arith::DivUIOp)
+  PROMOTE_BINARY(arith::RemSIOp)
+  PROMOTE_BINARY(arith::RemUIOp)
+  PROMOTE_BINARY(arith::MaxSIOp)
+  PROMOTE_BINARY(arith::MinSIOp)
+  PROMOTE_BINARY(arith::MaxUIOp)
+  PROMOTE_BINARY(arith::MinUIOp)
+  PROMOTE_BINARY(arith::AddFOp)
+  PROMOTE_BINARY(arith::SubFOp)
+  PROMOTE_BINARY(arith::MulFOp)
+  PROMOTE_BINARY(arith::DivFOp)
+  PROMOTE_BINARY(arith::RemFOp)
+  PROMOTE_BINARY(arith::MaxNumFOp)
+  PROMOTE_BINARY(arith::MinNumFOp)
+  PROMOTE_BINARY(arith::MaximumFOp)
+  PROMOTE_BINARY(arith::MinimumFOp)
+  PROMOTE_BINARY(arith::AndIOp)
+  PROMOTE_BINARY(arith::OrIOp)
+  PROMOTE_BINARY(arith::XOrIOp)
+  PROMOTE_BINARY(arith::ShLIOp)
+  PROMOTE_BINARY(arith::ShRSIOp)
+  PROMOTE_BINARY(arith::ShRUIOp)
+#undef PROMOTE_BINARY
+
+  // ---- unary arith: Op(operand) → tensor Op(operand) ----
+  if (auto a = dyn_cast<arith::NegFOp>(op)) {
+    auto r = builder.create<arith::NegFOp>(loc, getOperand(a.getOperand()));
+    return record(a.getResult(), r.getResult());
+  }
+
+  // ---- comparisons: preserve predicate ----
+  if (auto a = dyn_cast<arith::CmpIOp>(op)) {
+    auto r = builder.create<arith::CmpIOp>(
+        loc, a.getPredicate(), getOperand(a.getLhs()), getOperand(a.getRhs()));
+    return record(a.getResult(), r.getResult());
+  }
+  if (auto a = dyn_cast<arith::CmpFOp>(op)) {
+    auto r = builder.create<arith::CmpFOp>(
+        loc, a.getPredicate(), getOperand(a.getLhs()), getOperand(a.getRhs()));
+    return record(a.getResult(), r.getResult());
+  }
+
+  // ---- select ----
+  if (auto a = dyn_cast<arith::SelectOp>(op)) {
+    auto r = builder.create<arith::SelectOp>(loc, getOperand(a.getCondition()),
+                                             getOperand(a.getTrueValue()),
+                                             getOperand(a.getFalseValue()));
+    return record(a.getResult(), r.getResult());
+  }
+
+  // ---- type casts: Op(in) → Op(in) with tensor result type ----
+#define PROMOTE_CAST(OpTy)                                                     \
+  if (auto a = dyn_cast<OpTy>(op)) {                                           \
+    auto r = builder.create<OpTy>(loc, getTensorType(a.getOut().getType()),    \
+                                  getOperand(a.getIn()));                      \
+    return record(a.getResult(), r.getResult());                               \
+  }
+
+  PROMOTE_CAST(arith::SIToFPOp)
+  PROMOTE_CAST(arith::UIToFPOp)
+  PROMOTE_CAST(arith::FPToSIOp)
+  PROMOTE_CAST(arith::FPToUIOp)
+  PROMOTE_CAST(arith::ExtSIOp)
+  PROMOTE_CAST(arith::ExtUIOp)
+  PROMOTE_CAST(arith::ExtFOp)
+  PROMOTE_CAST(arith::TruncIOp)
+  PROMOTE_CAST(arith::TruncFOp)
+#undef PROMOTE_CAST
+
+  // ---- constant: splat via linalg.fill ----
+  if (auto a = dyn_cast<arith::ConstantOp>(op)) {
+    auto scalarTy = a.getResult().getType();
+    Value init = createInit(scalarTy);
+    auto fill = builder.create<linalg::FillOp>(loc, a.getResult(), init);
+    return record(a.getResult(), fill.getResult(0));
+  }
+
+  // ---- math ops: directly on tensors (same as PROMOTE_BINARY) ----
+#define PROMOTE_MATH(OpTy)                                                     \
+  if (auto a = dyn_cast<OpTy>(op)) {                                           \
+    auto r = builder.create<OpTy>(loc, getOperand(a.getOperand()));            \
+    return record(a.getResult(), r.getResult());                               \
+  }
+
+  PROMOTE_MATH(math::ExpOp)
+  PROMOTE_MATH(math::Exp2Op)
+  PROMOTE_MATH(math::SqrtOp)
+  PROMOTE_MATH(math::RsqrtOp)
+  PROMOTE_MATH(math::LogOp)
+  PROMOTE_MATH(math::Log2Op)
+  PROMOTE_MATH(math::SinOp)
+  PROMOTE_MATH(math::CosOp)
+  PROMOTE_MATH(math::ErfOp)
+  PROMOTE_MATH(math::CeilOp)
+  PROMOTE_MATH(math::FloorOp)
+  PROMOTE_MATH(math::AbsFOp)
+  PROMOTE_MATH(math::AbsIOp)
+#undef PROMOTE_MATH
+
+  // ---- scf.if → arith.select ----
+  if (auto a = dyn_cast<scf::IfOp>(op)) {
+    Value cond = getOperand(a.getCondition());
+    // Process then/else regions with inherited valueMap
+    SmallVector<Value> thenResults = promoteRegionBody(
+        a.getThenRegion(), valueMap, builder, loc, tensorShape);
+    SmallVector<Value> elseResults = promoteRegionBody(
+        a.getElseRegion(), valueMap, builder, loc, tensorShape);
+    for (unsigned i = 0; i < thenResults.size(); i++) {
+      auto sel = builder.create<arith::SelectOp>(loc, cond, thenResults[i],
+                                                 elseResults[i]);
+      valueMap[a.getResult(i)] = sel.getResult();
+    }
+    SmallVector<Value> results;
+    for (unsigned i = 0; i < thenResults.size(); i++)
+      results.push_back(valueMap[a.getResult(i)]);
+    return results;
+  }
+
+  // ---- scf.for ----
+  if (auto a = dyn_cast<scf::ForOp>(op)) {
+    SmallVector<Value> tensorInits;
+    for (Value v : a.getInitArgs())
+      tensorInits.push_back(getOperand(v));
+    auto newFor = builder.create<scf::ForOp>(
+        loc, a.getLowerBound(), a.getUpperBound(), a.getStep(), tensorInits,
+        [&](OpBuilder &b, Location l, Value iv, ValueRange iterArgs) {
+          llvm::DenseMap<Value, Value> loopMap = valueMap;
+          loopMap[a.getInductionVar()] = iv;
+          for (auto [oldArg, newArg] :
+               llvm::zip(a.getRegionIterArgs(), iterArgs))
+            loopMap[oldArg] = newArg;
+          SmallVector<Value> yielded =
+              promoteRegionBody(a.getRegion(), loopMap, b, l, tensorShape);
+          b.create<scf::YieldOp>(l, yielded);
+        });
+    for (auto [oldR, newR] : llvm::zip(a.getResults(), newFor.getResults()))
+      valueMap[oldR] = newR;
+    SmallVector<Value> results;
+    for (auto r : newFor.getResults())
+      results.push_back(r);
+    return results;
+  }
+
+  if (isa<scf::WhileOp>(op)) {
+    op->emitError(
+        "scf.while is not supported inside map_elementwise "
+        "(scf.condition requires scalar i1, cannot promote to tensor)");
+    llvm_unreachable("");
+  }
+  op->emitError("MapElementwiseDecomposeConverter: unsupported op");
+  llvm_unreachable("unhandled op in map_elementwise region");
+  llvm_unreachable("unhandled op in map_elementwise region");
+}
+
+SmallVector<Value> MapElementwiseDecomposeConverter::promoteRegionBody(
+    Region &region, llvm::DenseMap<Value, Value> &valueMap, OpBuilder &builder,
+    Location loc, ArrayRef<int64_t> tensorShape) const {
+  llvm::DenseMap<Value, Value> localMap = valueMap;
+  Block &block = region.front();
+  for (Operation &op : block.without_terminator())
+    promoteOp(&op, localMap, builder, loc, tensorShape);
+
+  // Helper to get-or-create a tensor version of any value (external
+  // constants are promoted on first use).
+  auto getTensorValue = [&](Value v) -> Value {
+    auto it = localMap.find(v);
+    if (it != localMap.end())
+      return it->second;
+    // External constant — promote to tensor
+    if (auto cst = v.getDefiningOp<arith::ConstantOp>()) {
+      auto scalarTy = cst.getResult().getType();
+      Value init = builder.create<tensor::EmptyOp>(loc, tensorShape, scalarTy);
+      auto fill = builder.create<linalg::FillOp>(loc, cst.getResult(), init);
+      localMap[v] = fill.getResult(0);
+      return fill.getResult(0);
+    }
+    // External but not a constant — use as-is (e.g., SSA values from
+    // enclosing scope that are already tensors or valid in this context).
+    return v;
+  };
+
+  Operation *term = block.getTerminator();
+  SmallVector<Value> results;
+  for (Value v : term->getOperands())
+    results.push_back(getTensorValue(v));
+  return results;
+}
+
+LogicalResult MapElementwiseDecomposeConverter::matchAndRewrite(
+    triton::MapElementwiseOp op, OpAdaptor adaptor,
+    ConversionPatternRewriter &rewriter) const {
+  Location loc = op.getLoc();
+
+  auto tensorType = cast<RankedTensorType>(op.getOperand(0).getType());
+  auto shape = tensorType.getShape();
+  int64_t rank = shape.size();
+  int64_t pack = op.getPack();
+  int64_t numInputs = op.getNumOperands();
+  int64_t numOutputs = op.getNumResults();
+
+  assert(rank > 0 && "map_elementwise requires ranked tensor inputs");
+
+  Region &region = op.getRegion();
+  assert(region.hasOneBlock() && "expected single-block region");
+  Block &body = region.getBlocks().front();
+  unsigned numRegionArgs = body.getNumArguments();
+
+  // Build initial ValueMap: block_arg[i] → input_tensor[i/pack]
+  llvm::DenseMap<Value, Value> valueMap;
+  for (unsigned i = 0; i < numRegionArgs; i++) {
+    unsigned inputIdx = i / pack;
+    valueMap[body.getArgument(i)] = adaptor.getOperands()[inputIdx];
+  }
+
+  // Promote all non-terminator ops
+  for (Operation &innerOp : body.without_terminator())
+    promoteOp(&innerOp, valueMap, rewriter, loc, shape);
+
+  // Terminator → results
+  Operation *terminator = body.getTerminator();
+  SmallVector<Value> results;
+  for (unsigned i = 0; i < numOutputs; i++)
+    results.push_back(valueMap[terminator->getOperand(i * pack)]);
+
+  rewriter.replaceOp(op, results);
   return success();
 }
 

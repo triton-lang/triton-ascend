@@ -20,8 +20,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "../../../bin/RegisterTritonDialects.h"
-
 // BishengIR includes
 #include "bishengir/InitAllDialects.h"
 

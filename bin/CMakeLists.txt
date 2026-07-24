@@ -176,4 +176,3 @@ target_link_libraries(triton-tensor-layout PRIVATE
   MLIRRegisterAllPasses
   MLIRTransforms
   )
-

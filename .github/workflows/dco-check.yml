@@ -1,7 +1,7 @@
 name: DCO Check
 
 on:
-  pull_request:
+  pull_request_target:
   merge_group:
     branches: [main, 'release/**', '**-dev']
     types: [checks_requested]
@@ -14,6 +14,7 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   dco:
@@ -21,54 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: KineticCafe/actions-dco@v3.1.0
         with:
-          fetch-depth: 0
-
-      - name: Check DCO sign-off
-        shell: bash
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-          BEFORE_SHA: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-
-          # Determine the range of commits to check.
-          # For PRs: everything from the merge base to the PR head.
-          # For pushes / merge_group: the pushed commits.
-          if [ -n "${BASE_REF:-}" ]; then
-            RANGE="${BASE_REF}..HEAD"
-          else
-            # Push event on main/release — check the pushed commits.
-            if [ "${BEFORE_SHA}" = "0000000000000000000000000000000000000000" ]; then
-              # New branch push: check all commits on the branch.
-              RANGE="HEAD"
-            else
-              RANGE="${BEFORE_SHA:-HEAD~1}..HEAD"
-            fi
-          fi
-
-          echo "Checking commits in range: ${RANGE}"
-
-          FAILED=0
-          while IFS= read -r commit; do
-            if ! git log --format="%B" -n 1 "${commit}" | grep -qE '^Signed-off-by: .+ <.+@.+>'; then
-              echo "::error::Commit ${commit} is missing a Signed-off-by line."
-              echo "  Add it with: git commit --amend -s"
-              FAILED=1
-            fi
-          done < <(git rev-list --no-merges "${RANGE}")
-
-          if [ "${FAILED}" -eq 1 ]; then
-            echo ""
-            echo "All commits must include a Signed-off-by: line certifying the"
-            echo "Developer Certificate of Origin (https://developercertificate.org/)."
-            echo ""
-            echo "To sign off your commit, use:"
-            echo "  git commit -s -m \"your message\""
-            echo "  or amend an existing commit: git commit --amend -s"
-            exit 1
-          fi
-
-          echo "All commits have a valid Signed-off-by line."
+          config: |
+            comment = true

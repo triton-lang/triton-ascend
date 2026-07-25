@@ -20,17 +20,19 @@
  * THE SOFTWARE.
  */
 
+#include "TritonToGraph/EntryArgPointerAliasAnalysis.h"
 #include "TritonToGraph/GraphOptimizationRule.h"
 #include "TritonToGraph/PermutationAnalysis.h"
 
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallVector.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Dominance.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Verifier.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -141,8 +143,8 @@ bool isUnencodedStaticRankOneTensor(RankedTensorType type) {
   return isUnencodedStaticTensor(type) && type.getRank() == 1;
 }
 
-bool isDirectFunctionBodyStore(triton::StoreOp store,
-                               triton::FuncOp function, Block *block) {
+bool isDirectFunctionBodyStore(triton::StoreOp store, triton::FuncOp function,
+                               Block *block) {
   if (!store || !function || !block || store->getBlock() != block ||
       store->getNumRegions() != 0)
     return false;
@@ -159,7 +161,8 @@ bool hasExpectedStoreTypes(const StoreCandidate &candidate) {
     return false;
   if (candidate.pointerType.getShape() != candidate.valueType.getShape() ||
       candidate.pointerType.getShape() != candidate.offsetType.getShape() ||
-      candidate.pointerType.getEncoding() != candidate.valueType.getEncoding() ||
+      candidate.pointerType.getEncoding() !=
+          candidate.valueType.getEncoding() ||
       candidate.pointerType.getEncoding() != candidate.offsetType.getEncoding())
     return false;
 
@@ -171,8 +174,8 @@ bool hasExpectedStoreTypes(const StoreCandidate &candidate) {
     return false;
 
   int64_t span = 0;
-  if (!checkedSubI64(candidate.access.lastOffset,
-                     candidate.access.firstOffset, span) ||
+  if (!checkedSubI64(candidate.access.lastOffset, candidate.access.firstOffset,
+                     span) ||
       !checkedAddI64(span, 1, span) || span <= 0 ||
       span != candidate.elementCount)
     return false;
@@ -219,28 +222,24 @@ matchStore(triton::StoreOp store, triton::FuncOp function, Block *block) {
   if (!offsetType)
     return std::nullopt;
 
-  StoreCandidate candidate{store.getOperation(),
-                           std::move(*proof.access),
-                           pointerType,
-                           valueType,
-                           offsetType,
-                           pointerElement.getPointeeType(),
-                           *elementBytes,
-                           *elementCount,
-                           store.getValue(),
-                           store.getCache(),
-                           store.getEvict(),
-                           store->getAttrDictionary()};
+  StoreCandidate candidate{
+      store.getOperation(), std::move(*proof.access),
+      pointerType,          valueType,
+      offsetType,           pointerElement.getPointeeType(),
+      *elementBytes,        *elementCount,
+      store.getValue(),     store.getCache(),
+      store.getEvict(),     store->getAttrDictionary()};
   if (!hasExpectedStoreTypes(candidate))
     return std::nullopt;
   return candidate;
 }
 
 bool canShareBucket(const StoreCandidate &lhs, const StoreCandidate &rhs) {
-  // The base comparison is deliberately SSA identity only.  This rule never
-  // consults alias analysis, so two different bases can never be coalesced.
+  // Base and dynamic-origin comparisons are deliberately SSA identity only.
+  // This rule never consults alias analysis to coalesce output stores.
   return lhs.operation->getBlock() == rhs.operation->getBlock() &&
          lhs.access.base == rhs.access.base &&
+         lhs.access.dynamicOrigin == rhs.access.dynamicOrigin &&
          lhs.pointeeType == rhs.pointeeType &&
          lhs.valueType.getElementType() == rhs.valueType.getElementType() &&
          lhs.pointerType.getEncoding() == rhs.pointerType.getEncoding() &&
@@ -276,16 +275,21 @@ bool valuesDominateAnchor(const UBPreloadRun &run, triton::FuncOp function) {
     if (!candidate.value || !candidate.access.base ||
         !isLocalValueBeforeAnchor(candidate.value, run.anchor, dominance) ||
         !isLocalValueBeforeAnchor(candidate.access.base, run.anchor,
-                                  dominance))
+                                  dominance) ||
+        (candidate.access.dynamicOrigin &&
+         !isLocalValueBeforeAnchor(candidate.access.dynamicOrigin, run.anchor,
+                                   dominance)))
       return false;
   }
   return true;
 }
 
 std::optional<UBPreloadRun>
-buildRun(ArrayRef<StoreCandidate> addressOrderStores,
-         triton::FuncOp function, unsigned ubCapacityBytes) {
-  if (!function || ubCapacityBytes == 0 || addressOrderStores.size() < 2)
+buildRun(ArrayRef<StoreCandidate> addressOrderStores, triton::FuncOp function,
+         unsigned ubCapacityBytes,
+         const EntryArgPointerAliasAnalysis *entryAliases) {
+  if (!function || !entryAliases || ubCapacityBytes == 0 ||
+      addressOrderStores.size() < 2)
     return std::nullopt;
 
   const StoreCandidate &first = addressOrderStores.front();
@@ -305,16 +309,15 @@ buildRun(ArrayRef<StoreCandidate> addressOrderStores,
   int64_t summedElements = 0;
   for (const StoreCandidate &candidate : addressOrderStores) {
     if (candidate.elementCount <= 0 ||
-        !checkedAddI64(summedElements, candidate.elementCount,
-                       summedElements))
+        !checkedAddI64(summedElements, candidate.elementCount, summedElements))
       return std::nullopt;
   }
   if (summedElements != totalElements)
     return std::nullopt;
 
   uint64_t totalBytes = 0;
-  if (!checkedMulU64(static_cast<uint64_t>(totalElements),
-                     first.elementBytes, totalBytes) ||
+  if (!checkedMulU64(static_cast<uint64_t>(totalElements), first.elementBytes,
+                     totalBytes) ||
       totalBytes > static_cast<uint64_t>(ubCapacityBytes))
     return std::nullopt;
 
@@ -334,15 +337,35 @@ buildRun(ArrayRef<StoreCandidate> addressOrderStores,
   if (!valuesDominateAnchor(run, function))
     return std::nullopt;
 
-  // Check adjacent planned stores in program order, not address order.  Thus
-  // another store in this run is always an endpoint of one of these checks,
-  // never a spurious intervening memory effect.  Any non-planned load, store,
-  // call, barrier, or unknown effect remains a rejection.
+  // Keep the StaticAccess descriptions aligned with program order.  Address
+  // order determines packed-value layout, while program order determines which
+  // stores are delayed across a given intervening operation.
+  SmallVector<StaticAccess, 4> programOrderAccesses;
+  programOrderAccesses.reserve(run.programOrderStores.size());
+  for (Operation *operation : run.programOrderStores) {
+    auto candidate = std::find_if(run.addressOrderStores.begin(),
+                                  run.addressOrderStores.end(),
+                                  [operation](const StoreCandidate &store) {
+                                    return store.operation == operation;
+                                  });
+    if (candidate == run.addressOrderStores.end())
+      return std::nullopt;
+    programOrderAccesses.push_back(candidate->access);
+  }
+
+  // The combined store is inserted at the program-order last store.  For the
+  // gap (S[i - 1], S[i]), only S[0] ... S[i - 1] move from before the gap to
+  // after it.  A load/store in the gap may overlap a later planned store whose
+  // relative order is unchanged, but must be statically disjoint from every
+  // delayed prefix store.  All other memory effects remain fail-closed.
   ProtectedIntervalAnalysis intervalAnalysis;
   for (size_t index = 1; index < run.programOrderStores.size(); ++index) {
+    llvm::ArrayRef<StaticAccess> delayedAccesses(programOrderAccesses.data(),
+                                                 index);
     if (!intervalAnalysis
-             .proveNoMemoryEffects(run.programOrderStores[index - 1],
-                                   run.programOrderStores[index])
+             .proveNoConflictingLoadStoreEffects(
+                 run.programOrderStores[index - 1],
+                 run.programOrderStores[index], delayedAccesses, entryAliases)
              .isProven())
       return std::nullopt;
   }
@@ -353,10 +376,11 @@ buildRun(ArrayRef<StoreCandidate> addressOrderStores,
   return run;
 }
 
-SmallVector<UBPreloadRun, 4> findRuns(triton::FuncOp function,
-                                      unsigned ubCapacityBytes) {
+SmallVector<UBPreloadRun, 4>
+findRuns(triton::FuncOp function, unsigned ubCapacityBytes,
+         const EntryArgPointerAliasAnalysis *entryAliases) {
   SmallVector<UBPreloadRun, 4> runs;
-  if (!function || ubCapacityBytes == 0)
+  if (!function || !entryAliases || ubCapacityBytes == 0)
     return runs;
 
   for (Block &block : function.getBody()) {
@@ -390,16 +414,15 @@ SmallVector<UBPreloadRun, 4> findRuns(triton::FuncOp function,
       if (bucket.size() < 2)
         continue;
 
-      std::stable_sort(bucket.begin(), bucket.end(),
-                       [](const StoreCandidate &lhs,
-                          const StoreCandidate &rhs) {
-                         if (lhs.access.firstOffset != rhs.access.firstOffset)
-                           return lhs.access.firstOffset < rhs.access.firstOffset;
-                         if (lhs.access.lastOffset != rhs.access.lastOffset)
-                           return lhs.access.lastOffset < rhs.access.lastOffset;
-                         return isBeforeInProgramOrder(lhs.operation,
-                                                       rhs.operation);
-                       });
+      std::stable_sort(
+          bucket.begin(), bucket.end(),
+          [](const StoreCandidate &lhs, const StoreCandidate &rhs) {
+            if (lhs.access.firstOffset != rhs.access.firstOffset)
+              return lhs.access.firstOffset < rhs.access.firstOffset;
+            if (lhs.access.lastOffset != rhs.access.lastOffset)
+              return lhs.access.lastOffset < rhs.access.lastOffset;
+            return isBeforeInProgramOrder(lhs.operation, rhs.operation);
+          });
 
       // An overlap invalidates every candidate in this bucket.  In particular,
       // do not try to salvage a later non-overlapping sub-run.
@@ -420,7 +443,7 @@ SmallVector<UBPreloadRun, 4> findRuns(triton::FuncOp function,
         if (!endsRun) {
           int64_t expectedNextOffset = 0;
           endsRun = !checkedAddI64(bucket[index - 1].access.lastOffset, 1,
-                                    expectedNextOffset) ||
+                                   expectedNextOffset) ||
                     expectedNextOffset != bucket[index].access.firstOffset;
         }
 
@@ -429,8 +452,8 @@ SmallVector<UBPreloadRun, 4> findRuns(triton::FuncOp function,
         if (index - runBegin >= 2) {
           std::optional<UBPreloadRun> run =
               buildRun(ArrayRef<StoreCandidate>(bucket).slice(runBegin,
-                                                               index - runBegin),
-                       function, ubCapacityBytes);
+                                                              index - runBegin),
+                       function, ubCapacityBytes, entryAliases);
           if (run)
             runs.push_back(std::move(*run));
         }
@@ -454,8 +477,9 @@ bool hasSameAddressOrder(const UBPreloadRun &run,
 
 std::optional<UBPreloadRun>
 findRunByOperations(triton::FuncOp function, unsigned ubCapacityBytes,
+                    const EntryArgPointerAliasAnalysis *entryAliases,
                     ArrayRef<Operation *> operations) {
-  for (UBPreloadRun &run : findRuns(function, ubCapacityBytes)) {
+  for (UBPreloadRun &run : findRuns(function, ubCapacityBytes, entryAliases)) {
     if (hasSameAddressOrder(run, operations))
       return run;
   }
@@ -518,7 +542,7 @@ LogicalResult applyRun(IRRewriter &rewriter, const UBPreloadRun &run) {
   SmallVector<Operation *, 16> created;
   rewriter.setInsertionPoint(run.anchor);
   auto empty = rewriter.create<tensor::EmptyOp>(run.anchor->getLoc(),
-                                                 packedValueType, ValueRange{});
+                                                packedValueType, ValueRange{});
   if (!recordVerifiedOperation(empty.getOperation(), created)) {
     eraseCreatedOperations(rewriter, created);
     return failure();
@@ -545,8 +569,7 @@ LogicalResult applyRun(IRRewriter &rewriter, const UBPreloadRun &run) {
     SmallVector<OpFoldResult, 1> sizes = {rewriter.getIndexAttr(sliceLength)};
     SmallVector<OpFoldResult, 1> strides = {rewriter.getIndexAttr(1)};
     auto inserted = rewriter.create<tensor::InsertSliceOp>(
-        run.anchor->getLoc(), *flatValue, packedValue, offsets,
-        sizes, strides);
+        run.anchor->getLoc(), *flatValue, packedValue, offsets, sizes, strides);
     if (!recordVerifiedOperation(inserted.getOperation(), created)) {
       eraseCreatedOperations(rewriter, created);
       return failure();
@@ -573,6 +596,24 @@ LogicalResult applyRun(IRRewriter &rewriter, const UBPreloadRun &run) {
     eraseCreatedOperations(rewriter, created);
     return failure();
   }
+
+  Value packedPointerOffset = range.getResult();
+  if (exemplar.access.dynamicOrigin) {
+    auto originSplat = rewriter.create<triton::SplatOp>(
+        run.anchor->getLoc(), packedOffsetType, exemplar.access.dynamicOrigin);
+    if (!recordVerifiedOperation(originSplat.getOperation(), created)) {
+      eraseCreatedOperations(rewriter, created);
+      return failure();
+    }
+    auto offsetAdd = rewriter.create<arith::AddIOp>(
+        run.anchor->getLoc(), originSplat.getResult(), range.getResult());
+    if (!recordVerifiedOperation(offsetAdd.getOperation(), created)) {
+      eraseCreatedOperations(rewriter, created);
+      return failure();
+    }
+    packedPointerOffset = offsetAdd.getResult();
+  }
+
   auto baseSplat = rewriter.create<triton::SplatOp>(
       run.anchor->getLoc(), packedPointerType, exemplar.access.base);
   if (!recordVerifiedOperation(baseSplat.getOperation(), created)) {
@@ -581,15 +622,15 @@ LogicalResult applyRun(IRRewriter &rewriter, const UBPreloadRun &run) {
   }
   auto pointer = rewriter.create<triton::AddPtrOp>(
       run.anchor->getLoc(), packedPointerType, baseSplat.getResult(),
-      range.getResult());
+      packedPointerOffset);
   if (!recordVerifiedOperation(pointer.getOperation(), created)) {
     eraseCreatedOperations(rewriter, created);
     return failure();
   }
 
   auto combinedStore = rewriter.create<triton::StoreOp>(
-      run.anchor->getLoc(), pointer.getResult(), packedValue,
-      exemplar.cache, exemplar.evict);
+      run.anchor->getLoc(), pointer.getResult(), packedValue, exemplar.cache,
+      exemplar.evict);
   // Bucket construction required complete attribute equality.  Copying the
   // full dictionary therefore preserves every store property and extra attr.
   combinedStore->setAttrs(exemplar.attributes);
@@ -603,6 +644,7 @@ LogicalResult applyRun(IRRewriter &rewriter, const UBPreloadRun &run) {
       accessAnalysis.analyzePointer(pointer.getResult());
   if (!rebuiltProof.isProven() || !rebuiltProof.access->isRankOneContiguous() ||
       rebuiltProof.access->base != exemplar.access.base ||
+      rebuiltProof.access->dynamicOrigin != exemplar.access.dynamicOrigin ||
       rebuiltProof.access->firstOffset != run.firstOffset ||
       rebuiltProof.access->lastOffset != run.endExclusive - 1) {
     eraseCreatedOperations(rewriter, created);
@@ -619,9 +661,10 @@ LogicalResult applyRun(IRRewriter &rewriter, const UBPreloadRun &run) {
 class UBPreloadPlan final : public RewritePlan {
 public:
   UBPreloadPlan(const UBPreloadRun &run, triton::FuncOp function,
+                const EntryArgPointerAliasAnalysis *entryAliases,
                 unsigned ubCapacityBytes, unsigned epoch)
-      : function(function), anchor(run.anchor), ubCapacityBytes(ubCapacityBytes),
-        epoch(epoch) {
+      : function(function), anchor(run.anchor), entryAliases(entryAliases),
+        ubCapacityBytes(ubCapacityBytes), epoch(epoch) {
     for (const StoreCandidate &candidate : run.addressOrderStores)
       addressOrderStores.push_back(candidate.operation);
   }
@@ -641,22 +684,23 @@ public:
   unsigned getCreationEpoch() const override { return epoch; }
 
   LogicalResult revalidate(GraphOptimizationContext &context) const override {
-    if (context.getEpoch() != epoch || !function || !anchor ||
-        context.getFunction().getOperation() != function.operator->())
+    if (context.getEpoch() != epoch || !function || !anchor || !entryAliases ||
+        context.getFunction().getOperation() != function.operator->() ||
+        &context.getEntryArgPointerAliasAnalysis() != entryAliases)
       return failure();
 
     std::optional<UBPreloadRun> current = findRunByOperations(
-        function, ubCapacityBytes, addressOrderStores);
+        function, ubCapacityBytes, entryAliases, addressOrderStores);
     if (!current || current->anchor != anchor)
       return failure();
     return success();
   }
 
   LogicalResult apply(IRRewriter &rewriter) override {
-    if (!function || !anchor)
+    if (!function || !anchor || !entryAliases)
       return failure();
     std::optional<UBPreloadRun> current = findRunByOperations(
-        function, ubCapacityBytes, addressOrderStores);
+        function, ubCapacityBytes, entryAliases, addressOrderStores);
     if (!current || current->anchor != anchor)
       return failure();
     return applyRun(rewriter, *current);
@@ -666,6 +710,7 @@ private:
   triton::FuncOp function;
   Operation *anchor;
   SmallVector<Operation *, 4> addressOrderStores;
+  const EntryArgPointerAliasAnalysis *entryAliases;
   unsigned ubCapacityBytes;
   unsigned epoch;
 };
@@ -680,16 +725,23 @@ public:
   }
 
   AnalysisRequirement getAnalysisRequirements() const override {
-    return AnalysisRequirement::None;
+    return ubCapacityBytes == 0 ? AnalysisRequirement::None
+                                : AnalysisRequirement::EntryArgPointerAlias;
   }
 
   LogicalResult findCandidates(
       GraphOptimizationContext &context,
       SmallVectorImpl<std::unique_ptr<RewritePlan>> &plans) override {
+    if (ubCapacityBytes == 0)
+      return success();
+
+    const EntryArgPointerAliasAnalysis *entryAliases =
+        &context.getEntryArgPointerAliasAnalysis();
     for (const UBPreloadRun &run :
-         findRuns(context.getFunction(), ubCapacityBytes)) {
+         findRuns(context.getFunction(), ubCapacityBytes, entryAliases)) {
       plans.push_back(std::make_unique<UBPreloadPlan>(
-          run, context.getFunction(), ubCapacityBytes, context.getEpoch()));
+          run, context.getFunction(), entryAliases, ubCapacityBytes,
+          context.getEpoch()));
     }
     return success();
   }

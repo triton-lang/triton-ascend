@@ -23,13 +23,13 @@
 #ifndef TRITON_TO_GRAPH_PERMUTATION_ANALYSIS_H
 #define TRITON_TO_GRAPH_PERMUTATION_ANALYSIS_H
 
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringRef.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LogicalResult.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 
 #include <cstdint>
 #include <optional>
@@ -37,6 +37,8 @@
 namespace mlir {
 namespace triton {
 namespace cfg {
+
+class EntryArgPointerAliasAnalysis;
 
 // Every analysis decision is explicit.  Callers must treat Rejected and
 // Unknown identically for authorization: neither permits an IR rewrite.
@@ -102,9 +104,7 @@ struct ProofOutcome {
   ProofReason reason = ProofReason::UnresolvedPointer;
 
   constexpr bool isProven() const { return result == ProofResult::Proven; }
-  constexpr bool isRejected() const {
-    return result == ProofResult::Rejected;
-  }
+  constexpr bool isRejected() const { return result == ProofResult::Rejected; }
   constexpr bool isUnknown() const { return result == ProofResult::Unknown; }
 
   static constexpr ProofOutcome proven() {
@@ -171,15 +171,20 @@ struct StaticAccessAxis {
 };
 
 // A statically understood affine pointer access. Rank-1 supports the
-// original tt.splat + tt.addptr + tt.make_range form. Higher ranks support a
-// deliberately narrow row-major normal form: one independent make_range ->
-// expand_dims* -> splat(static i32) -> muli -> broadcast term per logical
-// axis, joined by addi. The fields preserve source operations and axis
-// provenance rather than deriving axes from equal dimension sizes.
+// original tt.splat + tt.addptr + tt.make_range form and the narrow dynamic
+// form tt.splat(origin + static_i32) + tt.make_range. In the latter case
+// `dynamicOrigin` is the shared scalar origin (or null for a fully static
+// access), while `firstOffset` and `lastOffset` are the static residual
+// interval relative to it. Higher ranks support a deliberately narrow
+// row-major normal form: one independent make_range -> expand_dims* ->
+// splat(static i32) -> muli -> broadcast term per logical axis, joined by
+// addi. The fields preserve source operations and axis provenance rather
+// than deriving axes from equal dimension sizes.
 struct StaticAccess {
   Value pointer;
   Value offset;
   Value base;
+  Value dynamicOrigin;
   llvm::SmallVector<int64_t, 4> shape;
   llvm::SmallVector<int64_t, 4> strides;
   llvm::SmallVector<unsigned, 4> axisProvenance;
@@ -220,7 +225,8 @@ public:
   StaticAccessProof analyzeStore(triton::StoreOp store) const;
 
   // Proves that two statically understood accesses use the same SSA base and
-  // have disjoint closed offset intervals.  Any missing proof is rejected.
+  // dynamic origin (both absent for static accesses), and have disjoint
+  // closed residual offset intervals. Any missing proof is rejected.
   ProofOutcome proveSameBaseDisjoint(const StaticAccess &lhs,
                                      const StaticAccess &rhs) const;
 
@@ -232,8 +238,8 @@ public:
   // the TTIR access offsets being proven are i32 tensors.
   static ProofOutcome
   proveLaneInjectivity(llvm::ArrayRef<int64_t> shape,
-                        llvm::ArrayRef<int64_t> strides,
-                        llvm::ArrayRef<unsigned> axisProvenance);
+                       llvm::ArrayRef<int64_t> strides,
+                       llvm::ArrayRef<unsigned> axisProvenance);
 };
 
 class ProtectedIntervalAnalysis {
@@ -244,11 +250,15 @@ public:
   ProofOutcome proveNoMemoryEffects(Operation *first, Operation *last) const;
 
   // Proves that the open interval (first, last) has no effects that conflict
-  // with any protected access.  Only statically proven tt.load/tt.store
-  // operations with the same base and disjoint ranges are permitted.
+  // with any protected access. Without entryArgPointerAliases, only statically
+  // proven tt.load/tt.store operations with the same base and disjoint ranges
+  // are permitted. With it, accesses rooted at distinct entry pointers are
+  // additionally permitted under the UBPreload entry-argument ABI contract.
   ProofOutcome proveNoConflictingLoadStoreEffects(
       Operation *first, Operation *last,
-      llvm::ArrayRef<StaticAccess> protectedAccesses) const;
+      llvm::ArrayRef<StaticAccess> protectedAccesses,
+      const EntryArgPointerAliasAnalysis *entryArgPointerAliases =
+          nullptr) const;
 };
 
 } // namespace cfg

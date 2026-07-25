@@ -37,6 +37,7 @@ namespace cfg {
 class AliasAnalysis;
 class ControlFlowGraph;
 class DataFlowGraph;
+class EntryArgPointerAliasAnalysis;
 
 enum class AnalysisRequirement : uint8_t {
   None = 0,
@@ -47,6 +48,7 @@ enum class AnalysisRequirement : uint8_t {
   DataFlow = 1u << 2,
   DataFlowGraph = DataFlow,
   MemorySSA = 1u << 3,
+  EntryArgPointerAlias = 1u << 4,
 };
 
 constexpr AnalysisRequirement operator|(AnalysisRequirement lhs,
@@ -73,8 +75,9 @@ public:
   explicit GraphOptimizationContext(triton::FuncOp function);
   ~GraphOptimizationContext();
 
-  GraphOptimizationContext(const GraphOptimizationContext&) = delete;
-  GraphOptimizationContext& operator=(const GraphOptimizationContext&) = delete;
+  GraphOptimizationContext(const GraphOptimizationContext &) = delete;
+  GraphOptimizationContext &
+  operator=(const GraphOptimizationContext &) = delete;
 
   // Lazily constructs the requested analysis and all of its dependencies.
   LogicalResult ensure(AnalysisRequirement requirements);
@@ -89,19 +92,26 @@ public:
     return function;
   }
 
-  ControlFlowGraph& getCFG() {
+  ControlFlowGraph &getCFG() {
     assert(controlFlowGraph && "call ensure() before accessing the CFG");
     return *controlFlowGraph;
   }
 
-  ControlFlowGraph& getControlFlowGraph() { return getCFG(); }
+  ControlFlowGraph &getControlFlowGraph() { return getCFG(); }
 
-  AliasAnalysis& getAliasAnalysis() {
+  AliasAnalysis &getAliasAnalysis() {
     assert(aliasAnalysis && "call ensure() before accessing alias analysis");
     return *aliasAnalysis;
   }
 
-  DataFlowGraph& getDataFlowGraph() {
+  EntryArgPointerAliasAnalysis &getEntryArgPointerAliasAnalysis() {
+    assert(entryArgPointerAliasAnalysis &&
+           "call ensure() before accessing entry-argument pointer alias "
+           "analysis");
+    return *entryArgPointerAliasAnalysis;
+  }
+
+  DataFlowGraph &getDataFlowGraph() {
     assert(dataFlowGraph &&
            "call ensure() before accessing the data-flow graph");
     return *dataFlowGraph;
@@ -110,15 +120,17 @@ public:
 private:
   LogicalResult ensureControlFlowGraph();
   LogicalResult ensureAliasAnalysis();
+  LogicalResult ensureEntryArgPointerAliasAnalysis();
   LogicalResult ensureDataFlowGraph();
 
   triton::FuncOp function;
   unsigned epoch = 0;
 
   // Declaration order makes normal destruction mirror invalidate(): DFG,
-  // then AliasAnalysis, then CFG.
+  // then entry-argument pointer aliases, AliasAnalysis, then CFG.
   std::unique_ptr<ControlFlowGraph> controlFlowGraph;
   std::unique_ptr<AliasAnalysis> aliasAnalysis;
+  std::unique_ptr<EntryArgPointerAliasAnalysis> entryArgPointerAliasAnalysis;
   std::unique_ptr<DataFlowGraph> dataFlowGraph;
 };
 

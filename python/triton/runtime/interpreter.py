@@ -755,6 +755,9 @@ class InterpreterBuilder:
         # Interpreter's device_assert function has a different format than Triton's device_assert
         assert condition, f"{message}"
 
+    def create_auto_overflow_assert(self, condition, message):
+        self.create_assert(condition, message)
+
     def create_assume(self, condition):
         assert condition, "Assume failed"
 

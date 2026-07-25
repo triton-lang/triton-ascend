@@ -1790,6 +1790,18 @@ void init_triton_ir(py::module &&m) {
                                                 llvm::StringRef(message));
              self.create<AssertOp>(condition, messageAttr);
            })
+      // This is intentionally separate from create_assert: user-authored
+      // device_assert operations must not acquire the internal provenance
+      // marker merely because they happen to use an overflow-like message.
+      .def("create_auto_overflow_assert",
+           [](TritonOpBuilder &self, Value &condition,
+              const std::string &message) -> void {
+             auto messageAttr = StringAttr::get(self.getBuilder().getContext(),
+                                                llvm::StringRef(message));
+             auto assertOp = self.create<AssertOp>(condition, messageAttr);
+             assertOp->setAttr("tt.auto_overflow_assert",
+                               self.getBuilder().getUnitAttr());
+           })
       .def("create_assume",
            [](TritonOpBuilder &self, Value &condition) {
              self.create<LLVM::AssumeOp>(condition);

@@ -126,7 +126,7 @@ class Autotuner(KernelInterface):
         return self._do_bench
 
     def _bench(self, *args, config, **meta):
-        from ..compiler.errors import CompileTimeAssertionFailure, MLIRCompilationError
+        from ..compiler.errors import CompileTimeAssertionFailure
 
         verbose = knobs.autotuning.print
         if verbose:
@@ -162,7 +162,7 @@ class Autotuner(KernelInterface):
 
         try:
             return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
-        except (OutOfResources, CompileTimeAssertionFailure, MLIRCompilationError) as e:
+        except (OutOfResources, CompileTimeAssertionFailure, PTXASError) as e:
             if verbose:
                 print(f"Autotuning failed with {e}")
             return [float("inf"), float("inf"), float("inf")]

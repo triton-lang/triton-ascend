@@ -22,8 +22,6 @@
 
 #include "TritonToGraph/GraphOptimizationRule.h"
 
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
@@ -31,6 +29,9 @@
 #include "mlir/IR/Verifier.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "triton/Dialect/TritonGPU/IR/Dialect.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 
 #include <memory>
 #include <optional>
@@ -77,8 +78,7 @@ std::optional<UnaryMoveKind> classifyTrustedUnary(Operation *operation) {
   return std::nullopt;
 }
 
-bool hasCompatibleUnaryTensorTypes(Operation *operation,
-                                   UnaryMoveKind kind) {
+bool hasCompatibleUnaryTensorTypes(Operation *operation, UnaryMoveKind kind) {
   if (!operation || operation->getNumOperands() != 1 ||
       operation->getNumResults() != 1)
     return false;
@@ -125,29 +125,29 @@ bool hasValidTransposeOrder(triton::TransOp trans,
 
 bool inferTransposeReturnTypes(triton::TransOp trans, Value input,
                                SmallVectorImpl<Type> &inferredTypes) {
-  if (!trans || !input || !isa<TensorOrMemDesc>(input.getType()))
+  if (!trans || !input || !isa<triton::gpu::TensorOrMemDesc>(input.getType()))
     return false;
 
   auto rankedInputType = dyn_cast<RankedTensorType>(input.getType());
   if (!rankedInputType || !hasValidTransposeOrder(trans, rankedInputType))
     return false;
 
-  auto inputType = cast<TensorOrMemDesc>(input.getType());
+  auto inputType = cast<triton::gpu::TensorOrMemDesc>(input.getType());
   if (Attribute encoding = inputType.getEncoding()) {
     Attribute probeEncoding;
-    auto *interface = encoding.getDialect().getRegisteredInterface<
-        triton::DialectInferLayoutInterface>();
-    if (!interface ||
-        failed(interface->inferTransOpEncoding(encoding, trans.getOrder(),
-                                               probeEncoding)))
+    auto *interface =
+        encoding.getDialect()
+            .getRegisteredInterface<triton::DialectInferLayoutInterface>();
+    if (!interface || failed(interface->inferTransOpEncoding(
+                          encoding, rankedInputType.getShape(),
+                          trans.getOrder(), probeEncoding, trans.getLoc())))
       return false;
   }
 
   return succeeded(triton::TransOp::inferReturnTypes(
-                       trans->getContext(), trans.getLoc(), ValueRange{input},
-                       trans->getAttrDictionary(),
-                       trans->getPropertiesStorage(), trans->getRegions(),
-                       inferredTypes)) &&
+             trans->getContext(), trans.getLoc(), ValueRange{input},
+             trans->getAttrDictionary(), trans->getPropertiesStorage(),
+             trans->getRegions(), inferredTypes)) &&
          inferredTypes.size() == 1;
 }
 
@@ -192,11 +192,13 @@ std::optional<MatchedChain> matchCandidate(triton::DotOp dot,
   auto sourceType = dyn_cast<RankedTensorType>(trans.getSrc().getType());
   auto resultType = dyn_cast<RankedTensorType>(trans.getResult().getType());
   if (!sourceType || !resultType || !sourceType.hasStaticShape() ||
-      !resultType.hasStaticShape() || !hasValidTransposeOrder(trans, sourceType))
+      !resultType.hasStaticShape() ||
+      !hasValidTransposeOrder(trans, sourceType))
     return std::nullopt;
 
   SmallVector<Type, 1> originalInferredTypes;
-  if (!inferTransposeReturnTypes(trans, trans.getSrc(), originalInferredTypes) ||
+  if (!inferTransposeReturnTypes(trans, trans.getSrc(),
+                                 originalInferredTypes) ||
       originalInferredTypes.front() != trans.getResult().getType())
     return std::nullopt;
 
@@ -205,8 +207,8 @@ std::optional<MatchedChain> matchCandidate(triton::DotOp dot,
   return MatchedChain{dot, operandIndex, trans, std::move(unaryOps)};
 }
 
-std::optional<RankedTensorType>
-getMovedUnaryResultType(Operation *unary, Value input) {
+std::optional<RankedTensorType> getMovedUnaryResultType(Operation *unary,
+                                                        Value input) {
   if (!unary || unary->getNumResults() != 1)
     return std::nullopt;
 
@@ -223,8 +225,8 @@ getMovedUnaryResultType(Operation *unary, Value input) {
   return inputType.clone(oldResultType.getElementType());
 }
 
-Operation *createMovedUnary(IRRewriter &rewriter, Operation *unary,
-                            Value input, RankedTensorType resultType) {
+Operation *createMovedUnary(IRRewriter &rewriter, Operation *unary, Value input,
+                            RankedTensorType resultType) {
   IRMapping mapping;
   mapping.map(unary->getOperand(0), input);
   Operation *replacement = rewriter.clone(*unary, mapping);
@@ -286,8 +288,7 @@ public:
     // driver's revalidation gate.
     Block *block = dot ? dot->getBlock() : nullptr;
     std::optional<MatchedChain> current = matchCandidate(dot, operandIndex);
-    if (!block || !current ||
-        current->trans.getOperation() != transOperation ||
+    if (!block || !current || current->trans.getOperation() != transOperation ||
         current->unaryOps.size() != unaryOps.size())
       return failure();
     for (auto [currentUnary, storedUnary] :
@@ -342,7 +343,8 @@ public:
         return failure();
       }
     }
-    if (replacementTrans.getResult().getType() != originalDotOperand.getType()) {
+    if (replacementTrans.getResult().getType() !=
+        originalDotOperand.getType()) {
       eraseCreatedOperations(rewriter, created);
       return failure();
     }

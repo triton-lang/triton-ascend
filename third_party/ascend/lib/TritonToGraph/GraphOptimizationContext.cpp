@@ -25,6 +25,7 @@
 #include "TritonToGraph/AliasAnalysis.h"
 #include "TritonToGraph/ControlFlowGraphBuilder.h"
 #include "TritonToGraph/DataflowGraph.h"
+#include "TritonToGraph/EntryArgPointerAliasAnalysis.h"
 
 using namespace mlir;
 using namespace triton;
@@ -38,20 +39,30 @@ GraphOptimizationContext::GraphOptimizationContext(triton::FuncOp function)
 
 GraphOptimizationContext::~GraphOptimizationContext() = default;
 
-LogicalResult GraphOptimizationContext::ensure(
-    AnalysisRequirement requirements) {
+LogicalResult
+GraphOptimizationContext::ensure(AnalysisRequirement requirements) {
   if (hasAnalysisRequirement(requirements, AnalysisRequirement::CFG) ||
       hasAnalysisRequirement(requirements, AnalysisRequirement::Alias) ||
       hasAnalysisRequirement(requirements, AnalysisRequirement::DataFlow) ||
-      hasAnalysisRequirement(requirements, AnalysisRequirement::MemorySSA)) {
+      hasAnalysisRequirement(requirements, AnalysisRequirement::MemorySSA) ||
+      hasAnalysisRequirement(requirements,
+                             AnalysisRequirement::EntryArgPointerAlias)) {
     if (failed(ensureControlFlowGraph()))
       return failure();
   }
 
   if (hasAnalysisRequirement(requirements, AnalysisRequirement::Alias) ||
       hasAnalysisRequirement(requirements, AnalysisRequirement::DataFlow) ||
-      hasAnalysisRequirement(requirements, AnalysisRequirement::MemorySSA)) {
+      hasAnalysisRequirement(requirements, AnalysisRequirement::MemorySSA) ||
+      hasAnalysisRequirement(requirements,
+                             AnalysisRequirement::EntryArgPointerAlias)) {
     if (failed(ensureAliasAnalysis()))
+      return failure();
+  }
+
+  if (hasAnalysisRequirement(requirements,
+                             AnalysisRequirement::EntryArgPointerAlias)) {
+    if (failed(ensureEntryArgPointerAliasAnalysis()))
       return failure();
   }
 
@@ -66,6 +77,7 @@ LogicalResult GraphOptimizationContext::ensure(
 
 void GraphOptimizationContext::invalidate() {
   dataFlowGraph.reset();
+  entryArgPointerAliasAnalysis.reset();
   aliasAnalysis.reset();
   controlFlowGraph.reset();
   ++epoch;
@@ -93,14 +105,25 @@ LogicalResult GraphOptimizationContext::ensureAliasAnalysis() {
   return success();
 }
 
+LogicalResult GraphOptimizationContext::ensureEntryArgPointerAliasAnalysis() {
+  if (failed(ensureAliasAnalysis()))
+    return failure();
+  if (entryArgPointerAliasAnalysis)
+    return success();
+
+  entryArgPointerAliasAnalysis =
+      std::make_unique<EntryArgPointerAliasAnalysis>(function, *aliasAnalysis);
+  return success();
+}
+
 LogicalResult GraphOptimizationContext::ensureDataFlowGraph() {
   if (failed(ensureAliasAnalysis()))
     return failure();
   if (dataFlowGraph)
     return success();
 
-  dataFlowGraph = std::make_unique<DataFlowGraph>(*controlFlowGraph,
-                                                   *aliasAnalysis);
+  dataFlowGraph =
+      std::make_unique<DataFlowGraph>(*controlFlowGraph, *aliasAnalysis);
   dataFlowGraph->build();
   return success();
 }

@@ -1,5 +1,6 @@
 // RUN: triton-opt %s --verify-each -graph-optimize='rule-mask=4 ub-capacity-bytes=64' -o - | FileCheck %s --check-prefix=CHECK
 // RUN: triton-opt %s --verify-each -graph-optimize='rule-mask=4 ub-capacity-bytes=0' -o - | FileCheck %s --check-prefix=CAP0
+// RUN: triton-opt %s --verify-each -graph-optimize='rule-mask=4 ub-capacity-bytes=256' -o - | FileCheck %s --check-prefix=DYNAMIC
 
 // Address order, rather than program order, determines the packed value
 // layout.  The high interval is deliberately stored first.  The replacement
@@ -266,7 +267,145 @@ tt.func @reject_different_base(%first_base: !tt.ptr<i32>, %second_base: !tt.ptr<
   tt.return
 }
 
-// A protected program-order interval cannot contain any memory effect.
+// The middle load touches only the suffix store's interval.  The first store
+// is delayed across the load, but their intervals are disjoint, so packing is
+// legal.  This rejects an implementation that protects the whole run instead
+// of only the delayed program-order prefix.
+// CAP0-LABEL: tt.func @pack_suffix_load_between_stores(
+// CAP0-NOT: tensor.empty
+// CAP0-NOT: tensor.insert_slice
+// CAP0: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+// CAP0: tt.load {{.*}} : tensor<4x!tt.ptr<i32>>
+// CAP0: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK-LABEL: tt.func @pack_suffix_load_between_stores(
+// CHECK-NOT: tt.store
+// CHECK: tt.load %{{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK-NOT: tt.store
+// CHECK: tensor.empty() : tensor<8xi32>
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<8x!tt.ptr<i32>>
+// CHECK-NOT: tt.store
+tt.func @pack_suffix_load_between_stores(%base: !tt.ptr<i32>) {
+  %first_range = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+  %second_range = tt.make_range {end = 8 : i32, start = 4 : i32} : tensor<4xi32>
+  %base_splat = tt.splat %base : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+  %first_addresses = tt.addptr %base_splat, %first_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %second_addresses = tt.addptr %base_splat, %second_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %first_value = arith.constant dense<1> : tensor<4xi32>
+  %second_value = arith.constant dense<2> : tensor<4xi32>
+  tt.store %first_addresses, %first_value : tensor<4x!tt.ptr<i32>>
+  %suffix_load = tt.load %second_addresses : tensor<4x!tt.ptr<i32>>
+  tt.store %second_addresses, %second_value : tensor<4x!tt.ptr<i32>>
+  tt.return
+}
+
+// Address order is low/high, while program order is high/low.  The side store
+// overlaps only the suffix low store and has a different cache attribute so it
+// remains an intervening effect instead of joining the planned-store bucket.
+// CHECK-LABEL: tt.func @pack_reverse_program_order_with_suffix_side_store(
+// CHECK-NOT: tt.store
+// CHECK: tt.store {{.*}}, {{.*}} cacheModifier = ca : tensor<4x!tt.ptr<i32>>
+// CHECK-NOT: tt.store
+// CHECK: tensor.empty() : tensor<8xi32>
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<8x!tt.ptr<i32>>
+// CHECK-NOT: tt.store
+tt.func @pack_reverse_program_order_with_suffix_side_store(%base: !tt.ptr<i32>) {
+  %low_range = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+  %high_range = tt.make_range {end = 8 : i32, start = 4 : i32} : tensor<4xi32>
+  %base_splat = tt.splat %base : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+  %low_addresses = tt.addptr %base_splat, %low_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %high_addresses = tt.addptr %base_splat, %high_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %low_value = arith.constant dense<1> : tensor<4xi32>
+  %high_value = arith.constant dense<2> : tensor<4xi32>
+  %side_value = arith.constant dense<3> : tensor<4xi32>
+  tt.store %high_addresses, %high_value : tensor<4x!tt.ptr<i32>>
+  tt.store %low_addresses, %side_value cacheModifier = ca : tensor<4x!tt.ptr<i32>>
+  tt.store %low_addresses, %low_value : tensor<4x!tt.ptr<i32>>
+  tt.return
+}
+
+// The side store overlaps the delayed prefix store, so packing must remain
+// rejected even though it uses a distinct cache-attribute bucket.
+// CHECK-LABEL: tt.func @reject_prefix_overlapping_side_store(
+// CHECK-NOT: tensor.empty
+// CHECK-NOT: tensor.insert_slice
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK: tt.store {{.*}}, {{.*}} cacheModifier = ca : tensor<4x!tt.ptr<i32>>
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+tt.func @reject_prefix_overlapping_side_store(%base: !tt.ptr<i32>) {
+  %first_range = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+  %second_range = tt.make_range {end = 8 : i32, start = 4 : i32} : tensor<4xi32>
+  %base_splat = tt.splat %base : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+  %first_addresses = tt.addptr %base_splat, %first_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %second_addresses = tt.addptr %base_splat, %second_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %first_value = arith.constant dense<1> : tensor<4xi32>
+  %second_value = arith.constant dense<2> : tensor<4xi32>
+  %side_value = arith.constant dense<3> : tensor<4xi32>
+  tt.store %first_addresses, %first_value : tensor<4x!tt.ptr<i32>>
+  tt.store %first_addresses, %side_value cacheModifier = ca : tensor<4x!tt.ptr<i32>>
+  tt.store %second_addresses, %second_value : tensor<4x!tt.ptr<i32>>
+  tt.return
+}
+
+// Each gap gets its own delayed prefix: both loads touch only future stores,
+// so the three planned stores can be packed together.
+// CHECK-LABEL: tt.func @pack_three_stores_with_suffix_loads(
+// CHECK-NOT: tt.store
+// CHECK: tt.load %{{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK-NOT: tt.store
+// CHECK: tt.load %{{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK-NOT: tt.store
+// CHECK: tensor.empty() : tensor<12xi32>
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<12x!tt.ptr<i32>>
+// CHECK-NOT: tt.store
+tt.func @pack_three_stores_with_suffix_loads(%base: !tt.ptr<i32>) {
+  %first_range = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+  %second_range = tt.make_range {end = 8 : i32, start = 4 : i32} : tensor<4xi32>
+  %third_range = tt.make_range {end = 12 : i32, start = 8 : i32} : tensor<4xi32>
+  %base_splat = tt.splat %base : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+  %first_addresses = tt.addptr %base_splat, %first_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %second_addresses = tt.addptr %base_splat, %second_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %third_addresses = tt.addptr %base_splat, %third_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %first_value = arith.constant dense<1> : tensor<4xi32>
+  %second_value = arith.constant dense<2> : tensor<4xi32>
+  %third_value = arith.constant dense<3> : tensor<4xi32>
+  tt.store %first_addresses, %first_value : tensor<4x!tt.ptr<i32>>
+  %second_load = tt.load %second_addresses : tensor<4x!tt.ptr<i32>>
+  tt.store %second_addresses, %second_value : tensor<4x!tt.ptr<i32>>
+  %third_load = tt.load %third_addresses : tensor<4x!tt.ptr<i32>>
+  tt.store %third_addresses, %third_value : tensor<4x!tt.ptr<i32>>
+  tt.return
+}
+
+// In the second gap, the load overlaps S0 rather than its immediate
+// predecessor S1.  The full delayed prefix must be protected, so no packing
+// is legal.
+// CHECK-LABEL: tt.func @reject_earlier_prefix_overlap_in_three_store_run(
+// CHECK-NOT: tensor.empty
+// CHECK-NOT: tensor.insert_slice
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK: tt.load {{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+tt.func @reject_earlier_prefix_overlap_in_three_store_run(%base: !tt.ptr<i32>) {
+  %first_range = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+  %second_range = tt.make_range {end = 8 : i32, start = 4 : i32} : tensor<4xi32>
+  %third_range = tt.make_range {end = 12 : i32, start = 8 : i32} : tensor<4xi32>
+  %base_splat = tt.splat %base : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+  %first_addresses = tt.addptr %base_splat, %first_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %second_addresses = tt.addptr %base_splat, %second_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %third_addresses = tt.addptr %base_splat, %third_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %first_value = arith.constant dense<1> : tensor<4xi32>
+  %second_value = arith.constant dense<2> : tensor<4xi32>
+  %third_value = arith.constant dense<3> : tensor<4xi32>
+  tt.store %first_addresses, %first_value : tensor<4x!tt.ptr<i32>>
+  tt.store %second_addresses, %second_value : tensor<4x!tt.ptr<i32>>
+  %first_load = tt.load %first_addresses : tensor<4x!tt.ptr<i32>>
+  tt.store %third_addresses, %third_value : tensor<4x!tt.ptr<i32>>
+  tt.return
+}
+
+// This load overlaps the delayed prefix S1, so it cannot be crossed by the
+// packed store.
 // CHECK-LABEL: tt.func @reject_load_between_stores(
 // CHECK-NOT: tensor.empty
 // CHECK-NOT: tensor.insert_slice
@@ -287,13 +426,17 @@ tt.func @reject_load_between_stores(%base: !tt.ptr<i32>) {
   tt.return
 }
 
-// CHECK-LABEL: tt.func @reject_store_between_stores(
-// CHECK-NOT: tensor.empty
-// CHECK-NOT: tensor.insert_slice
+// A distinct entry root does not conflict with the delayed output store under
+// the UBPreload ABI assumption. The side store remains in program order and
+// the two %base stores pack at the final anchor.
+// CHECK-LABEL: tt.func @pack_distinct_root_store_between_stores(
+// CHECK-NOT: tt.store
 // CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
-// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
-// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
-tt.func @reject_store_between_stores(%base: !tt.ptr<i32>, %other_base: !tt.ptr<i32>) {
+// CHECK-NOT: tt.store
+// CHECK: tensor.empty() : tensor<8xi32>
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<8x!tt.ptr<i32>>
+// CHECK-NOT: tt.store
+tt.func @pack_distinct_root_store_between_stores(%base: !tt.ptr<i32>, %other_base: !tt.ptr<i32>) {
   %first_range = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
   %second_range = tt.make_range {end = 8 : i32, start = 4 : i32} : tensor<4xi32>
   %base_splat = tt.splat %base : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
@@ -306,6 +449,61 @@ tt.func @reject_store_between_stores(%base: !tt.ptr<i32>, %other_base: !tt.ptr<i
   %other_value = arith.constant dense<3> : tensor<4xi32>
   tt.store %first_addresses, %first_value : tensor<4x!tt.ptr<i32>>
   tt.store %other_addresses, %other_value : tensor<4x!tt.ptr<i32>>
+  tt.store %second_addresses, %second_value : tensor<4x!tt.ptr<i32>>
+  tt.return
+}
+
+// Distinct roots answer only the alias question. A masked intervening load
+// remains outside the direct, unpredicated access subset and must block the
+// rewrite.
+// CHECK-LABEL: tt.func @reject_distinct_root_masked_load_between_stores(
+// CHECK-NOT: tensor.empty
+// CHECK-NOT: tensor.insert_slice
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK: tt.load {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+tt.func @reject_distinct_root_masked_load_between_stores(
+    %base: !tt.ptr<i32>, %other_base: !tt.ptr<i32>) {
+  %first_range = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+  %second_range = tt.make_range {end = 8 : i32, start = 4 : i32} : tensor<4xi32>
+  %base_splat = tt.splat %base : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+  %other_splat = tt.splat %other_base : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+  %first_addresses = tt.addptr %base_splat, %first_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %second_addresses = tt.addptr %base_splat, %second_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %other_addresses = tt.addptr %other_splat, %first_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %first_value = arith.constant dense<1> : tensor<4xi32>
+  %second_value = arith.constant dense<2> : tensor<4xi32>
+  %mask = arith.constant dense<true> : tensor<4xi1>
+  tt.store %first_addresses, %first_value : tensor<4x!tt.ptr<i32>>
+  %masked_load = tt.load %other_addresses, %mask : tensor<4x!tt.ptr<i32>>
+  tt.store %second_addresses, %second_value : tensor<4x!tt.ptr<i32>>
+  tt.return
+}
+
+// An arbitrary integer-to-pointer conversion has no tracked entry-argument
+// provenance.  It must remain Unknown rather than being treated as a distinct
+// no-alias root, so the intervening load blocks the rewrite.
+// CHECK-LABEL: tt.func @reject_unknown_root_load_between_stores(
+// CHECK-NOT: tensor.empty
+// CHECK-NOT: tensor.insert_slice
+// CHECK: tt.int_to_ptr {{.*}} : i64 -> !tt.ptr<i32>
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK: tt.load {{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+tt.func @reject_unknown_root_load_between_stores(%base: !tt.ptr<i32>,
+                                                 %address: i64) {
+  %first_range = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+  %second_range = tt.make_range {end = 8 : i32, start = 4 : i32} : tensor<4xi32>
+  %base_splat = tt.splat %base : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+  %first_addresses = tt.addptr %base_splat, %first_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %second_addresses = tt.addptr %base_splat, %second_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %unknown_base = tt.int_to_ptr %address : i64 -> !tt.ptr<i32>
+  %unknown_splat = tt.splat %unknown_base : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+  %unknown_addresses = tt.addptr %unknown_splat, %first_range : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %first_value = arith.constant dense<1> : tensor<4xi32>
+  %second_value = arith.constant dense<2> : tensor<4xi32>
+  tt.store %first_addresses, %first_value : tensor<4x!tt.ptr<i32>>
+  %unknown_load = tt.load %unknown_addresses : tensor<4x!tt.ptr<i32>>
   tt.store %second_addresses, %second_value : tensor<4x!tt.ptr<i32>>
   tt.return
 }
@@ -368,6 +566,107 @@ tt.func @reject_capacity_zero(%base: !tt.ptr<i32>) {
   %first_value = arith.constant dense<1> : tensor<4xi32>
   %second_value = arith.constant dense<2> : tensor<4xi32>
   tt.store %first_addresses, %first_value : tensor<4x!tt.ptr<i32>>
+  tt.store %second_addresses, %second_value : tensor<4x!tt.ptr<i32>>
+  tt.return
+}
+
+// The two output stores share one dynamic origin.  Both the scalar scale load
+// and the dynamically indexed input load use distinct entry roots, so they
+// may remain between the delayed K store and final packed store.
+// CAP0-LABEL: tt.func @pack_dynamic_origin_distinct_entry_loads(
+// CAP0-NOT: tensor.empty
+// CAP0-NOT: tensor.insert_slice
+// CAP0: tt.store {{.*}}, {{.*}} : tensor<64x!tt.ptr<bf16>>
+// CAP0: tt.load {{.*}} : !tt.ptr<f32>
+// CAP0: tt.load {{.*}} : tensor<64x!tt.ptr<i8>>
+// CAP0: tt.store {{.*}}, {{.*}} : tensor<64x!tt.ptr<bf16>>
+// DYNAMIC: tt.func @pack_dynamic_origin_distinct_entry_loads(%{{.*}}: !tt.ptr<i8>, %{{.*}}: !tt.ptr<f32>, %[[OUT_ARG:.*]]: !tt.ptr<bf16>, %[[ORIGIN_ARG:.*]]: i32) {
+// DYNAMIC-NOT: tt.store
+// DYNAMIC: tt.load {{.*}} : !tt.ptr<f32>
+// DYNAMIC: tt.load {{.*}} : tensor<64x!tt.ptr<i8>>
+// DYNAMIC-NOT: tt.store
+// DYNAMIC: %[[EMPTY:.*]] = tensor.empty() : tensor<128xbf16>
+// DYNAMIC: %[[FIRST:.*]] = tensor.insert_slice %{{.*}} into %[[EMPTY]][0] [64] [1] : tensor<64xbf16> into tensor<128xbf16>
+// DYNAMIC: %[[PACKED:.*]] = tensor.insert_slice %{{.*}} into %[[FIRST]][64] [64] [1] : tensor<64xbf16> into tensor<128xbf16>
+// DYNAMIC: %[[RANGE:.*]] = tt.make_range {end = 128 : i32, start = 0 : i32} : tensor<128xi32>
+// DYNAMIC: %[[ORIGIN:.*]] = tt.splat %[[ORIGIN_ARG]] : i32 -> tensor<128xi32>
+// DYNAMIC: %[[OFFSET:.*]] = arith.addi %[[ORIGIN]], %[[RANGE]] : tensor<128xi32>
+// DYNAMIC: %[[OUT:.*]] = tt.splat %[[OUT_ARG]] : !tt.ptr<bf16> -> tensor<128x!tt.ptr<bf16>>
+// DYNAMIC: %[[ADDRESSES:.*]] = tt.addptr %[[OUT]], %[[OFFSET]] : tensor<128x!tt.ptr<bf16>>, tensor<128xi32>
+// DYNAMIC: tt.store %[[ADDRESSES]], %[[PACKED]] : tensor<128x!tt.ptr<bf16>>
+// DYNAMIC-NOT: tt.store
+// DYNAMIC: tt.return
+tt.func @pack_dynamic_origin_distinct_entry_loads(
+    %input: !tt.ptr<i8>, %scale: !tt.ptr<f32>, %out: !tt.ptr<bf16>,
+    %origin: i32) {
+  %c64 = arith.constant 64 : i32
+  %range = tt.make_range {end = 64 : i32, start = 0 : i32} : tensor<64xi32>
+  %origin_splat = tt.splat %origin : i32 -> tensor<64xi32>
+  %k_offsets = arith.addi %origin_splat, %range : tensor<64xi32>
+  %v_origin = arith.addi %origin, %c64 : i32
+  %v_origin_splat = tt.splat %v_origin : i32 -> tensor<64xi32>
+  %v_offsets = arith.addi %v_origin_splat, %range : tensor<64xi32>
+  %out_splat = tt.splat %out : !tt.ptr<bf16> -> tensor<64x!tt.ptr<bf16>>
+  %k_addresses = tt.addptr %out_splat, %k_offsets : tensor<64x!tt.ptr<bf16>>, tensor<64xi32>
+  %v_addresses = tt.addptr %out_splat, %v_offsets : tensor<64x!tt.ptr<bf16>>, tensor<64xi32>
+  %k_value = arith.constant dense<1.000000e+00> : tensor<64xbf16>
+  %v_value = arith.constant dense<2.000000e+00> : tensor<64xbf16>
+  tt.store %k_addresses, %k_value : tensor<64x!tt.ptr<bf16>>
+  %scale_value = tt.load %scale : !tt.ptr<f32>
+  %input_splat = tt.splat %input : !tt.ptr<i8> -> tensor<64x!tt.ptr<i8>>
+  %input_offsets = arith.addi %origin_splat, %range : tensor<64xi32>
+  %input_addresses = tt.addptr %input_splat, %input_offsets : tensor<64x!tt.ptr<i8>>, tensor<64xi32>
+  %input_value = tt.load %input_addresses : tensor<64x!tt.ptr<i8>>
+  tt.store %v_addresses, %v_value : tensor<64x!tt.ptr<bf16>>
+  tt.return
+}
+
+// Equal output bases are insufficient when their dynamic origins differ.
+// CHECK-LABEL: tt.func @reject_dynamic_origin_mismatch(
+// CHECK-NOT: tensor.empty
+// CHECK-NOT: tensor.insert_slice
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+tt.func @reject_dynamic_origin_mismatch(
+    %base: !tt.ptr<i32>, %first_origin: i32, %second_origin: i32) {
+  %range = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+  %first_origin_splat = tt.splat %first_origin : i32 -> tensor<4xi32>
+  %second_origin_splat = tt.splat %second_origin : i32 -> tensor<4xi32>
+  %first_offsets = arith.addi %first_origin_splat, %range : tensor<4xi32>
+  %second_offsets = arith.addi %second_origin_splat, %range : tensor<4xi32>
+  %base_splat = tt.splat %base : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+  %first_addresses = tt.addptr %base_splat, %first_offsets : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %second_addresses = tt.addptr %base_splat, %second_offsets : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %first_value = arith.constant dense<1> : tensor<4xi32>
+  %second_value = arith.constant dense<2> : tensor<4xi32>
+  tt.store %first_addresses, %first_value : tensor<4x!tt.ptr<i32>>
+  tt.store %second_addresses, %second_value : tensor<4x!tt.ptr<i32>>
+  tt.return
+}
+
+// Same-root effects still require interval proof. This middle load overlaps
+// the delayed first dynamic-origin store, so it must block packing.
+// CHECK-LABEL: tt.func @reject_dynamic_origin_same_root_load(
+// CHECK-NOT: tensor.empty
+// CHECK-NOT: tensor.insert_slice
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK: tt.load {{.*}} : tensor<4x!tt.ptr<i32>>
+// CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+tt.func @reject_dynamic_origin_same_root_load(%base: !tt.ptr<i32>, %origin: i32) {
+  %c4 = arith.constant 4 : i32
+  %range = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+  %origin_splat = tt.splat %origin : i32 -> tensor<4xi32>
+  %first_offsets = arith.addi %origin_splat, %range : tensor<4xi32>
+  %second_origin = arith.addi %origin, %c4 : i32
+  %second_origin_splat = tt.splat %second_origin : i32 -> tensor<4xi32>
+  %second_offsets = arith.addi %second_origin_splat, %range : tensor<4xi32>
+  %base_splat = tt.splat %base : !tt.ptr<i32> -> tensor<4x!tt.ptr<i32>>
+  %first_addresses = tt.addptr %base_splat, %first_offsets : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %second_addresses = tt.addptr %base_splat, %second_offsets : tensor<4x!tt.ptr<i32>>, tensor<4xi32>
+  %first_value = arith.constant dense<1> : tensor<4xi32>
+  %second_value = arith.constant dense<2> : tensor<4xi32>
+  tt.store %first_addresses, %first_value : tensor<4x!tt.ptr<i32>>
+  %same_root_load = tt.load %first_addresses : tensor<4x!tt.ptr<i32>>
   tt.store %second_addresses, %second_value : tensor<4x!tt.ptr<i32>>
   tt.return
 }

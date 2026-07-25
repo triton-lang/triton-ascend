@@ -22,6 +22,8 @@
 
 #include "TritonToGraph/PermutationAnalysis.h"
 
+#include "TritonToGraph/EntryArgPointerAliasAnalysis.h"
+
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Interfaces/CallInterfaces.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
@@ -47,9 +49,13 @@ static_assert(kComposeBefore[kComposeAfter[0]] == 0 &&
               "Permutation::compose applies the left operand before the "
               "right operand");
 
-struct ParsedRange {
+struct ParsedRankOneOffset {
   ProofOutcome outcome;
   triton::MakeRangeOp range;
+  // Null for a fully static offset. When non-null, `staticOffset` is the
+  // residual to add to this one shared dynamic scalar origin.
+  Value dynamicOrigin;
+  int64_t staticOffset = 0;
 };
 
 struct OffsetBounds {
@@ -92,6 +98,16 @@ bool getStaticI32Constant(Value value, int64_t &result) {
   return true;
 }
 
+bool isSignedI32(int64_t value) {
+  return value >= std::numeric_limits<int32_t>::min() &&
+         value <= std::numeric_limits<int32_t>::max();
+}
+
+bool isScalarI32(Value value) {
+  auto integerType = dyn_cast<IntegerType>(value.getType());
+  return integerType && integerType.getWidth() == 32;
+}
+
 bool getSignedI32RangeBounds(triton::MakeRangeOp range, int64_t &start,
                              int64_t &end) {
   if (!range)
@@ -99,10 +115,10 @@ bool getSignedI32RangeBounds(triton::MakeRangeOp range, int64_t &start,
 
   IntegerAttr startAttr = range.getStartAttr();
   IntegerAttr endAttr = range.getEndAttr();
-  auto startType = startAttr ? dyn_cast<IntegerType>(startAttr.getType())
-                             : IntegerType();
-  auto endType = endAttr ? dyn_cast<IntegerType>(endAttr.getType())
-                         : IntegerType();
+  auto startType =
+      startAttr ? dyn_cast<IntegerType>(startAttr.getType()) : IntegerType();
+  auto endType =
+      endAttr ? dyn_cast<IntegerType>(endAttr.getType()) : IntegerType();
   if (!startAttr || !endAttr || !startType || !endType ||
       startType.getWidth() != 32 || endType.getWidth() != 32)
     return false;
@@ -154,23 +170,136 @@ bool checkedMulI64(int64_t lhs, int64_t rhs, int64_t &result) {
   return true;
 }
 
-ParsedRange parseNormalizedRange(Value offset) {
-  if (auto range = offset.getDefiningOp<triton::MakeRangeOp>())
-    return {ProofOutcome::proven(), range};
+// Decompose the scalar source of a rank-one offset splat into a single
+// dynamic SSA origin and one signed i32 static residual. A non-add scalar is
+// intentionally treated as the opaque origin: the proof relies only on SSA
+// identity, never on algebraic equivalence. Scalar addi is accepted only for
+// an explicit origin + constant (in either order); multiple dynamic terms and
+// flagged arithmetic are rejected rather than normalized speculatively.
+ParsedRankOneOffset parseScalarRankOneOrigin(Value scalar) {
+  if (!isScalarI32(scalar))
+    return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset),
+            {},
+            Value(),
+            0};
 
-  return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset),
-          triton::MakeRangeOp()};
+  int64_t constant = 0;
+  if (getStaticI32Constant(scalar, constant))
+    return {ProofOutcome::proven(), {}, Value(), constant};
+
+  auto add = scalar.getDefiningOp<arith::AddIOp>();
+  if (!add || add.getResult() != scalar)
+    return {ProofOutcome::proven(), {}, scalar, 0};
+  if (add.getOverflowFlags() != arith::IntegerOverflowFlags::none)
+    return {ProofOutcome::rejected(ProofReason::OverflowFlags), {}, Value(), 0};
+
+  int64_t lhsConstant = 0;
+  int64_t rhsConstant = 0;
+  const bool lhsIsConstant = getStaticI32Constant(add.getLhs(), lhsConstant);
+  const bool rhsIsConstant = getStaticI32Constant(add.getRhs(), rhsConstant);
+  if (lhsIsConstant == rhsIsConstant)
+    return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset),
+            {},
+            Value(),
+            0};
+
+  Value origin = lhsIsConstant ? add.getRhs() : add.getLhs();
+  if (!isScalarI32(origin))
+    return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset),
+            {},
+            Value(),
+            0};
+  return {ProofOutcome::proven(),
+          {},
+          origin,
+          lhsIsConstant ? lhsConstant : rhsConstant};
 }
 
-ParsedAffineAxis parseAffineAxis(Value value,
-                                 RankedTensorType fullOffsetType) {
+// Accept the old direct make_range form, or exactly
+//   addi(splat(origin + static_i32), make_range)
+// in either operand order.  The caller supplies the fully checked rank-one
+// offset tensor type so this helper cannot accidentally admit a broadcast or
+// a differently shaped add.
+ParsedRankOneOffset parseNormalizedRankOneOffset(Value offset,
+                                                 RankedTensorType offsetType) {
+  if (!offsetType || !isUnencodedRankedTensor(offsetType) ||
+      offsetType.getRank() != 1 || !isI32Tensor(offsetType) ||
+      offset.getType() != offsetType)
+    return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset),
+            {},
+            Value(),
+            0};
+
+  if (auto range = offset.getDefiningOp<triton::MakeRangeOp>()) {
+    if (range.getResult() != offset ||
+        range.getResult().getType() != offsetType)
+      return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset),
+              {},
+              Value(),
+              0};
+    return {ProofOutcome::proven(), range, Value(), 0};
+  }
+
+  auto add = offset.getDefiningOp<arith::AddIOp>();
+  if (!add || add.getResult() != offset ||
+      add.getOverflowFlags() != arith::IntegerOverflowFlags::none)
+    return {ProofOutcome::rejected(add && add.getResult() == offset
+                                       ? ProofReason::OverflowFlags
+                                       : ProofReason::UnsupportedAffineOffset),
+            {},
+            Value(),
+            0};
+  if (add.getLhs().getType() != offsetType ||
+      add.getRhs().getType() != offsetType)
+    return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset),
+            {},
+            Value(),
+            0};
+
+  auto lhsRange = add.getLhs().getDefiningOp<triton::MakeRangeOp>();
+  auto rhsRange = add.getRhs().getDefiningOp<triton::MakeRangeOp>();
+  if (lhsRange && lhsRange.getResult() != add.getLhs())
+    lhsRange = triton::MakeRangeOp();
+  if (rhsRange && rhsRange.getResult() != add.getRhs())
+    rhsRange = triton::MakeRangeOp();
+  if (static_cast<bool>(lhsRange) == static_cast<bool>(rhsRange))
+    return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset),
+            {},
+            Value(),
+            0};
+
+  triton::MakeRangeOp range = lhsRange ? lhsRange : rhsRange;
+  Value splatValue = lhsRange ? add.getRhs() : add.getLhs();
+  if (range.getResult().getType() != offsetType)
+    return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset),
+            {},
+            Value(),
+            0};
+
+  auto splat = splatValue.getDefiningOp<triton::SplatOp>();
+  if (!splat || splat.getResult() != splatValue ||
+      splat.getResult().getType() != offsetType)
+    return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset),
+            {},
+            Value(),
+            0};
+
+  ParsedRankOneOffset parsedOrigin = parseScalarRankOneOrigin(splat.getSrc());
+  if (!parsedOrigin.outcome.isProven())
+    return parsedOrigin;
+  parsedOrigin.range = range;
+  return parsedOrigin;
+}
+
+ParsedAffineAxis parseAffineAxis(Value value, RankedTensorType fullOffsetType) {
   auto broadcast = value.getDefiningOp<triton::BroadcastOp>();
   if (!broadcast || broadcast.getResult() != value)
     return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset), {}};
 
   auto broadcastType = dyn_cast<RankedTensorType>(value.getType());
   if (!broadcastType || !isUnencodedRankedTensor(broadcastType) ||
-      !isI32Tensor(broadcastType) || !haveSameShape(broadcastType, fullOffsetType))
+      !isI32Tensor(broadcastType) ||
+      !haveSameShape(broadcastType, fullOffsetType))
     return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset), {}};
 
   auto multiply = broadcast.getSrc().getDefiningOp<arith::MulIOp>();
@@ -183,9 +312,9 @@ ParsedAffineAxis parseAffineAxis(Value value,
   if (!strideSplat || strideSplat.getResult() != multiply.getRhs())
     return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset), {}};
 
-  auto expandedType =
-      dyn_cast<RankedTensorType>(multiply.getLhs().getType());
-  auto strideType = dyn_cast<RankedTensorType>(strideSplat.getResult().getType());
+  auto expandedType = dyn_cast<RankedTensorType>(multiply.getLhs().getType());
+  auto strideType =
+      dyn_cast<RankedTensorType>(strideSplat.getResult().getType());
   if (!expandedType || !strideType || !isUnencodedRankedTensor(expandedType) ||
       !isUnencodedRankedTensor(strideType) || !isI32Tensor(expandedType) ||
       !isI32Tensor(strideType) || expandedType != strideType ||
@@ -202,16 +331,19 @@ ParsedAffineAxis parseAffineAxis(Value value,
   unsigned expectedRank = fullOffsetType.getRank();
   while (auto expanded = rangeValue.getDefiningOp<triton::ExpandDimsOp>()) {
     if (expanded.getResult() != rangeValue)
-      return {ProofOutcome::rejected(ProofReason::InvalidExpandDimsChain), {}, {}};
+      return {
+          ProofOutcome::rejected(ProofReason::InvalidExpandDimsChain), {}, {}};
     auto sourceType = dyn_cast<RankedTensorType>(expanded.getSrc().getType());
-    auto resultType = dyn_cast<RankedTensorType>(expanded.getResult().getType());
+    auto resultType =
+        dyn_cast<RankedTensorType>(expanded.getResult().getType());
     if (!sourceType || !resultType || !isUnencodedRankedTensor(sourceType) ||
         !isUnencodedRankedTensor(resultType) || !isI32Tensor(sourceType) ||
         !isI32Tensor(resultType) ||
         resultType.getRank() != sourceType.getRank() + 1 ||
         resultType.getRank() > expectedRank ||
         expanded.getAxis() >= resultType.getRank())
-      return {ProofOutcome::rejected(ProofReason::InvalidExpandDimsChain), {}, {}};
+      return {
+          ProofOutcome::rejected(ProofReason::InvalidExpandDimsChain), {}, {}};
     if (hasOutputAxis && expanded.getAxis() <= outputAxis)
       ++outputAxis;
     else if (!hasOutputAxis) {
@@ -221,13 +353,15 @@ ParsedAffineAxis parseAffineAxis(Value value,
         ++outputAxis;
     }
     for (unsigned axis = 0; axis < resultType.getRank(); ++axis) {
-      const int64_t expected = axis == expanded.getAxis()
-                                   ? 1
-                                   : sourceType.getShape()[axis < expanded.getAxis()
-                                                                ? axis
-                                                                : axis - 1];
+      const int64_t expected =
+          axis == expanded.getAxis()
+              ? 1
+              : sourceType
+                    .getShape()[axis < expanded.getAxis() ? axis : axis - 1];
       if (resultType.getShape()[axis] != expected)
-        return {ProofOutcome::rejected(ProofReason::InvalidExpandDimsChain), {}, {}};
+        return {ProofOutcome::rejected(ProofReason::InvalidExpandDimsChain),
+                {},
+                {}};
     }
     rangeValue = expanded.getSrc();
   }
@@ -250,11 +384,13 @@ ParsedAffineAxis parseAffineAxis(Value value,
     return {ProofOutcome::rejected(ProofReason::InvalidMakeRange), {}};
 
   if (!hasOutputAxis || expandedType.getRank() != expectedRank ||
-      outputAxis >= expectedRank || expandedType.getShape()[outputAxis] != extent)
+      outputAxis >= expectedRank ||
+      expandedType.getShape()[outputAxis] != extent)
     return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset), {}};
   for (unsigned axis = 0; axis < expectedRank; ++axis) {
     if (axis != outputAxis && expandedType.getShape()[axis] != 1)
-      return {ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset), {}, {}};
+      return {
+          ProofOutcome::rejected(ProofReason::UnsupportedAffineOffset), {}, {}};
   }
 
   int64_t first = 0;
@@ -274,6 +410,20 @@ StaticAccessProof rejectAccess(ProofOutcome outcome) {
 
 bool isBarrierLike(Operation *operation) {
   return operation->getName().getStringRef().contains("barrier");
+}
+
+// A distinct entry pointer root removes only the aliasing question. It does
+// not make predicated, boundary-checked, padded, or volatile accesses safe to
+// move across a delayed store, so retain the direct-access subset accepted by
+// StaticAccessAnalysis before taking the ABI no-alias fast path.
+bool isSupportedInterveningLoad(triton::LoadOp load) {
+  return !load.getMask() && !load.getOther() &&
+         load.getBoundaryCheck().empty() && !load.getPadding() &&
+         !load.getIsVolatile();
+}
+
+bool isSupportedInterveningStore(triton::StoreOp store) {
+  return !store.getMask() && store.getBoundaryCheck().empty();
 }
 
 } // namespace
@@ -359,7 +509,8 @@ llvm::StringRef cfg::getProofReasonMessage(ProofReason reason) {
   case ProofReason::BarrierOperation:
     return "protected interval contains a barrier";
   case ProofReason::UnknownMemoryEffect:
-    return "protected interval contains an operation with unknown memory effects";
+    return "protected interval contains an operation with unknown memory "
+           "effects";
   case ProofReason::InterveningMemoryEffect:
     return "protected interval contains a memory effect";
   case ProofReason::DifferentAccessBase:
@@ -367,7 +518,8 @@ llvm::StringRef cfg::getProofReasonMessage(ProofReason reason) {
   case ProofReason::OverlappingAccessRange:
     return "static access ranges overlap";
   case ProofReason::UnsupportedInterveningMemoryAccess:
-    return "intervening memory access is unsupported or cannot be proven static";
+    return "intervening memory access is unsupported or cannot be proven "
+           "static";
   }
   return "unknown proof reason";
 }
@@ -401,8 +553,7 @@ Permutation Permutation::inverse() const {
   return Permutation(oldToNew);
 }
 
-FailureOr<Permutation> Permutation::compose(
-    const Permutation &after) const {
+FailureOr<Permutation> Permutation::compose(const Permutation &after) const {
   if (rank() != after.rank())
     return failure();
 
@@ -459,8 +610,7 @@ ProofOutcome StaticAccessAnalysis::proveLaneInjectivity(
 
     for (unsigned previous = 0; previous < axis; ++previous) {
       if (axisProvenance[previous] == axisProvenance[axis])
-        return ProofOutcome::rejected(
-            ProofReason::DuplicateAxisProvenance);
+        return ProofOutcome::rejected(ProofReason::DuplicateAxisProvenance);
       if (strides[previous] == strides[axis])
         return ProofOutcome::rejected(ProofReason::DuplicateStride);
     }
@@ -535,8 +685,10 @@ StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
     return rejectAccess(
         ProofOutcome::rejected(ProofReason::UnsupportedEncoding));
 
-  auto pointerElement = dyn_cast<triton::PointerType>(pointerType.getElementType());
-  if (!pointerElement || triton::isTensorPointerType(pointerType.getElementType()))
+  auto pointerElement =
+      dyn_cast<triton::PointerType>(pointerType.getElementType());
+  if (!pointerElement ||
+      triton::isTensorPointerType(pointerType.getElementType()))
     return rejectAccess(
         ProofOutcome::rejected(ProofReason::UnsupportedPointerType));
 
@@ -563,7 +715,8 @@ StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
       dyn_cast<RankedTensorType>(baseSplat.getResult().getType());
   auto offsetType = dyn_cast<RankedTensorType>(addPtr.getOffset().getType());
   if (!baseSplatType || !offsetType || !baseSplatType.hasStaticShape() ||
-      !offsetType.hasStaticShape() || !haveSameShape(pointerType, baseSplatType) ||
+      !offsetType.hasStaticShape() ||
+      !haveSameShape(pointerType, baseSplatType) ||
       !haveSameShape(pointerType, offsetType))
     return rejectAccess(
         ProofOutcome::rejected(ProofReason::UnsupportedPointerForm));
@@ -572,7 +725,8 @@ StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
         ProofOutcome::rejected(ProofReason::UnsupportedEncoding));
 
   if (pointerType.getRank() == 1) {
-    ParsedRange parsedOffset = parseNormalizedRange(addPtr.getOffset());
+    ParsedRankOneOffset parsedOffset =
+        parseNormalizedRankOneOffset(addPtr.getOffset(), offsetType);
     if (!parsedOffset.outcome.isProven())
       return rejectAccess(parsedOffset.outcome);
 
@@ -580,8 +734,7 @@ StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
         dyn_cast<RankedTensorType>(parsedOffset.range.getResult().getType());
     if (!rangeType || rangeType.getRank() != 1 || !rangeType.hasStaticShape() ||
         rangeType.getEncoding() || !haveSameShape(pointerType, rangeType))
-      return rejectAccess(
-          ProofOutcome::rejected(ProofReason::UnsupportedRank));
+      return rejectAccess(ProofOutcome::rejected(ProofReason::UnsupportedRank));
 
     int64_t rangeStart = 0;
     int64_t rangeEnd = 0;
@@ -593,10 +746,18 @@ StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
       return rejectAccess(
           ProofOutcome::rejected(ProofReason::InvalidMakeRange));
 
+    int64_t firstOffset = 0;
+    int64_t lastOffset = 0;
+    if (!checkedAddI64(rangeStart, parsedOffset.staticOffset, firstOffset) ||
+        !checkedAddI64(rangeEnd - 1, parsedOffset.staticOffset, lastOffset) ||
+        !isSignedI32(firstOffset) || !isSignedI32(lastOffset))
+      return rejectAccess(ProofOutcome::rejected(ProofReason::OffsetOverflow));
+
     StaticAccess access;
     access.pointer = pointer;
     access.offset = addPtr.getOffset();
     access.base = baseSplat.getSrc();
+    access.dynamicOrigin = parsedOffset.dynamicOrigin;
     access.shape.push_back(rangeType.getShape().front());
     access.strides.push_back(1);
     access.axisProvenance.push_back(0);
@@ -608,9 +769,8 @@ StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
     if (!injectivity.isProven())
       return rejectAccess(injectivity);
 
-    const int64_t lastRangeValue = rangeEnd - 1;
-    access.firstOffset = rangeStart;
-    access.lastOffset = lastRangeValue;
+    access.firstOffset = firstOffset;
+    access.lastOffset = lastOffset;
     access.elementCount = rangeType.getShape().front();
     access.lanesInjective = true;
     return {ProofOutcome::proven(), std::move(access)};
@@ -659,7 +819,8 @@ StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
   access.pointer = pointer;
   access.offset = addPtr.getOffset();
   access.base = baseSplat.getSrc();
-  access.shape.append(pointerType.getShape().begin(), pointerType.getShape().end());
+  access.shape.append(pointerType.getShape().begin(),
+                      pointerType.getShape().end());
   access.axes = std::move(axes);
 
   int64_t firstOffset = 0;
@@ -669,7 +830,8 @@ StaticAccessProof StaticAccessAnalysis::analyzePointer(Value pointer) const {
     const unsigned axis = static_cast<unsigned>(index - 1);
     const StaticAccessAxis &parsedAxis = access.axes[axis];
     if (!seenOutputAxis[axis] || !parsedAxis.range ||
-        parsedAxis.outputAxis != axis || parsedAxis.rangeEnd <= parsedAxis.rangeStart ||
+        parsedAxis.outputAxis != axis ||
+        parsedAxis.rangeEnd <= parsedAxis.rangeStart ||
         parsedAxis.rangeEnd - parsedAxis.rangeStart != access.shape[axis])
       return rejectAccess(
           ProofOutcome::rejected(ProofReason::InvalidMakeRange));
@@ -723,8 +885,8 @@ StaticAccessProof StaticAccessAnalysis::analyzeLoad(triton::LoadOp load) const {
   return analyzePointer(load.getPtr());
 }
 
-StaticAccessProof StaticAccessAnalysis::analyzeStore(
-    triton::StoreOp store) const {
+StaticAccessProof
+StaticAccessAnalysis::analyzeStore(triton::StoreOp store) const {
   if (!store.getOperation())
     return rejectAccess(ProofOutcome::rejected(ProofReason::NullOperation));
   if (store.getMask())
@@ -734,9 +896,11 @@ StaticAccessProof StaticAccessAnalysis::analyzeStore(
   return analyzePointer(store.getPtr());
 }
 
-ProofOutcome StaticAccessAnalysis::proveSameBaseDisjoint(
-    const StaticAccess &lhs, const StaticAccess &rhs) const {
-  if (!lhs.base || !rhs.base || lhs.base != rhs.base)
+ProofOutcome
+StaticAccessAnalysis::proveSameBaseDisjoint(const StaticAccess &lhs,
+                                            const StaticAccess &rhs) const {
+  if (!lhs.base || !rhs.base || lhs.base != rhs.base ||
+      lhs.dynamicOrigin != rhs.dynamicOrigin)
     return ProofOutcome::rejected(ProofReason::DifferentAccessBase);
   if (!lhs.lanesInjective || !rhs.lanesInjective ||
       lhs.firstOffset > lhs.lastOffset || rhs.firstOffset > rhs.lastOffset)
@@ -747,8 +911,9 @@ ProofOutcome StaticAccessAnalysis::proveSameBaseDisjoint(
   return ProofOutcome::rejected(ProofReason::OverlappingAccessRange);
 }
 
-ProofOutcome ProtectedIntervalAnalysis::proveNoMemoryEffects(
-    Operation *first, Operation *last) const {
+ProofOutcome
+ProtectedIntervalAnalysis::proveNoMemoryEffects(Operation *first,
+                                                Operation *last) const {
   if (!first || !last)
     return ProofOutcome::rejected(ProofReason::NullOperation);
   if (first == last)
@@ -768,8 +933,7 @@ ProofOutcome ProtectedIntervalAnalysis::proveNoMemoryEffects(
       return ProofOutcome::rejected(ProofReason::BarrierOperation);
 
     if (auto memoryEffects = dyn_cast<MemoryEffectOpInterface>(operation)) {
-      llvm::SmallVector<
-          SideEffects::EffectInstance<MemoryEffects::Effect>, 4>
+      llvm::SmallVector<SideEffects::EffectInstance<MemoryEffects::Effect>, 4>
           effects;
       memoryEffects.getEffects(effects);
       if (!effects.empty())
@@ -784,7 +948,8 @@ ProofOutcome ProtectedIntervalAnalysis::proveNoMemoryEffects(
 
 ProofOutcome ProtectedIntervalAnalysis::proveNoConflictingLoadStoreEffects(
     Operation *first, Operation *last,
-    llvm::ArrayRef<StaticAccess> protectedAccesses) const {
+    llvm::ArrayRef<StaticAccess> protectedAccesses,
+    const EntryArgPointerAliasAnalysis *entryArgPointerAliases) const {
   if (!first || !last)
     return ProofOutcome::rejected(ProofReason::NullOperation);
   if (protectedAccesses.empty() || first == last)
@@ -793,13 +958,37 @@ ProofOutcome ProtectedIntervalAnalysis::proveNoConflictingLoadStoreEffects(
     return ProofOutcome::rejected(ProofReason::DifferentBlocks);
 
   StaticAccessAnalysis accessAnalysis;
-  auto proveDisjoint = [&](const StaticAccessProof &proof) {
+  auto proveDisjoint = [&](Value effectPointer, auto &&getProof) {
+    SmallVector<const StaticAccess *, 4> sameRootAccesses;
+    for (const StaticAccess &protectedAccess : protectedAccesses) {
+      if (!entryArgPointerAliases) {
+        sameRootAccesses.push_back(&protectedAccess);
+        continue;
+      }
+
+      EntryArgPointerRelation relation =
+          entryArgPointerAliases->classify(effectPointer, protectedAccess.base);
+      if (relation == EntryArgPointerRelation::DistinctEntryRoots)
+        continue;
+      if (relation == EntryArgPointerRelation::Unknown)
+        return ProofOutcome::rejected(
+            ProofReason::UnsupportedInterveningMemoryAccess);
+      sameRootAccesses.push_back(&protectedAccess);
+    }
+
+    // All protected stores are rooted at a distinct entry pointer. This is
+    // sufficient under the UBPreload ABI contract, including scalar or
+    // dynamically indexed accesses that StaticAccessAnalysis cannot parse.
+    if (sameRootAccesses.empty())
+      return ProofOutcome::proven();
+
+    StaticAccessProof proof = getProof();
     if (!proof.isProven())
       return ProofOutcome::rejected(
           ProofReason::UnsupportedInterveningMemoryAccess);
-    for (const StaticAccess &protectedAccess : protectedAccesses) {
-      ProofOutcome outcome = accessAnalysis.proveSameBaseDisjoint(
-          *proof.access, protectedAccess);
+    for (const StaticAccess *protectedAccess : sameRootAccesses) {
+      ProofOutcome outcome =
+          accessAnalysis.proveSameBaseDisjoint(*proof.access, *protectedAccess);
       if (!outcome.isProven())
         return outcome;
     }
@@ -818,22 +1007,28 @@ ProofOutcome ProtectedIntervalAnalysis::proveNoConflictingLoadStoreEffects(
       return ProofOutcome::rejected(ProofReason::BarrierOperation);
 
     if (auto load = dyn_cast<triton::LoadOp>(operation)) {
-      ProofOutcome outcome = proveDisjoint(accessAnalysis.analyzeLoad(load));
+      if (!isSupportedInterveningLoad(load))
+        return ProofOutcome::rejected(
+            ProofReason::UnsupportedInterveningMemoryAccess);
+      ProofOutcome outcome = proveDisjoint(
+          load.getPtr(), [&]() { return accessAnalysis.analyzeLoad(load); });
       if (!outcome.isProven())
         return outcome;
       continue;
     }
     if (auto store = dyn_cast<triton::StoreOp>(operation)) {
-      ProofOutcome outcome =
-          proveDisjoint(accessAnalysis.analyzeStore(store));
+      if (!isSupportedInterveningStore(store))
+        return ProofOutcome::rejected(
+            ProofReason::UnsupportedInterveningMemoryAccess);
+      ProofOutcome outcome = proveDisjoint(
+          store.getPtr(), [&]() { return accessAnalysis.analyzeStore(store); });
       if (!outcome.isProven())
         return outcome;
       continue;
     }
 
     if (auto memoryEffects = dyn_cast<MemoryEffectOpInterface>(operation)) {
-      llvm::SmallVector<
-          SideEffects::EffectInstance<MemoryEffects::Effect>, 4>
+      llvm::SmallVector<SideEffects::EffectInstance<MemoryEffects::Effect>, 4>
           effects;
       memoryEffects.getEffects(effects);
       if (!effects.empty())

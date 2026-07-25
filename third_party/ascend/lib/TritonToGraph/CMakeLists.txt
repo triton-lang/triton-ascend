@@ -3,6 +3,7 @@ add_triton_library(TritonToGraph
   ControlFlowGraph.cpp
   ControlFlowGraphBuilder.cpp
   DataflowGraph.cpp
+  EntryArgPointerAliasAnalysis.cpp
   GraphOptimizationContext.cpp
   GraphOptimizationPass.cpp
   MemorySsaBuilder.cpp

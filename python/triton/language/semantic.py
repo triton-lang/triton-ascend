@@ -1429,9 +1429,28 @@ class TritonSemantic(Generic[TensorTy]):
                 return self.tensor(
                     self.builder.create_atomic_rmw(ir.ATOMIC_OP.UMAX, ptr.handle, val.handle, mask.handle, sem, scope),
                     val.type)
-        # Design for NPU
-        return self.tensor(
-            self.builder.create_atomic_rmw(ir.ATOMIC_OP.MAX, ptr.handle, val.handle, mask.handle, sem, scope), val.type)
+        # for float
+        # return atomic_smax(i_ptr, i_val) if val >= 0
+        # return atomic_umin(i_ptr, i_val) if val < 0
+        if sca_ty not in {tl.float32, tl.float64}:
+            raise TypeError(f"atomic_max not supported for dtype {sca_ty}")
+
+        i_type = tl.int32 if sca_ty == tl.float32 else tl.int64
+        i_val = self.bitcast(val, i_type)
+        i_ptr = self.bitcast(ptr, tl.pointer_type(i_type, 1))
+        ui_type = tl.uint32 if sca_ty == tl.float32 else tl.uint64
+        ui_val = self.bitcast(val, ui_type)
+        ui_ptr = self.bitcast(ptr, tl.pointer_type(ui_type, 1))
+        neg = self._signbit(val)
+        pos = self.not_(neg)
+        pos_ret = self.tensor(
+            self.builder.create_atomic_rmw(ir.ATOMIC_OP.MAX, i_ptr.handle, i_val.handle,
+                                           self.and_(mask, pos).handle, sem, scope), i_val.type)
+        neg_ret = self.tensor(
+            self.builder.create_atomic_rmw(ir.ATOMIC_OP.UMIN, ui_ptr.handle, ui_val.handle,
+                                           self.and_(mask, neg).handle, sem, scope), ui_val.type)
+        ret = self.where(pos, pos_ret, neg_ret)
+        return self.bitcast(ret, sca_ty)
 
     def atomic_min(self, ptr: TensorTy, val: TensorTy, mask: TensorTy, sem: str, scope: str) -> TensorTy:
         ptr, val, mask = self.atom_red_typechecking_impl(ptr, val, mask, 'min')
@@ -1448,9 +1467,28 @@ class TritonSemantic(Generic[TensorTy]):
                 return self.tensor(
                     self.builder.create_atomic_rmw(ir.ATOMIC_OP.UMIN, ptr.handle, val.handle, mask.handle, sem, scope),
                     val.type)
-        # Design for NPU
-        return self.tensor(
-            self.builder.create_atomic_rmw(ir.ATOMIC_OP.MIN, ptr.handle, val.handle, mask.handle, sem, scope), val.type)
+        # for float
+        # return atomic_smin(i_ptr, i_val) if val >= 0
+        # return atomic_umax(i_ptr, i_val) if val < 0
+        if sca_ty not in {tl.float32, tl.float64}:
+            raise TypeError(f"atomic_min not supported for dtype {sca_ty}")
+
+        i_type = tl.int32 if sca_ty == tl.float32 else tl.int64
+        i_val = self.bitcast(val, i_type)
+        i_ptr = self.bitcast(ptr, tl.pointer_type(i_type, 1))
+        ui_type = tl.uint32 if sca_ty == tl.float32 else tl.uint64
+        ui_val = self.bitcast(val, ui_type)
+        ui_ptr = self.bitcast(ptr, tl.pointer_type(ui_type, 1))
+        neg = self._signbit(val)
+        pos = self.not_(neg)
+        pos_ret = self.tensor(
+            self.builder.create_atomic_rmw(ir.ATOMIC_OP.MIN, i_ptr.handle, i_val.handle,
+                                           self.and_(mask, pos).handle, sem, scope), i_val.type)
+        neg_ret = self.tensor(
+            self.builder.create_atomic_rmw(ir.ATOMIC_OP.UMAX, ui_ptr.handle, ui_val.handle,
+                                           self.and_(mask, neg).handle, sem, scope), ui_ptr.type)
+        ret = self.where(pos, pos_ret, neg_ret)
+        return self.bitcast(ret, sca_ty)
 
     def atomic_add(self, ptr: TensorTy, val: TensorTy, mask: TensorTy, sem: str, scope: str) -> TensorTy:
         ptr, val, mask = self.atom_red_typechecking_impl(ptr, val, mask, 'add')

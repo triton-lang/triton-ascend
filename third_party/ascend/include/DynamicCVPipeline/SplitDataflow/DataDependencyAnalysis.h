@@ -51,8 +51,6 @@ struct BlockInfo {
 struct DependencyInfo {
   DependencyType type;
   mlir::Value value;
-  bool isScaler = false;
-  bool is1DTensor = false;
   int producerBlockId;
   int consumerBlockId;
   int iniProducerBlockId;
@@ -63,6 +61,8 @@ struct DependencyInfo {
   // Optional Items for memDependencies
   mlir::Operation *predOp;
   mlir::Operation *nextOp;
+  // Optional Items for iterarg yield dependency
+  mlir::Operation *consumerYieldOp = nullptr;
 };
 
 class DataDependencyInfo {
@@ -130,8 +130,11 @@ private:
   void createBlockInfoMap(DataDependencyInfo &info);
   void collectBlockInfo(DataDependencyInfo &info, int blockId,
                         llvm::SmallVector<mlir::Operation *> &ops);
+  mlir::Operation *createBlockInfoConstOp(OpBuilder &builder, Location loc,
+                                          llvm::StringRef coreType,
+                                          DataDependencyInfo &info);
 
-  void collectDepInfo(mlir::Value depvalue, DependencyType dependencyType,
+  bool collectDepInfo(mlir::Value depvalue, DependencyType dependencyType,
                       llvm::SmallVector<DependencyInfo> &dependencies,
                       int iniProdId, int iniConsId, DataDependencyInfo &info,
                       bool isAllTranspoesd = false);
@@ -155,6 +158,7 @@ private:
   bool isValid1DValueForDependency(mlir::Value value);
   bool isAllTransposedInVector(mlir::Value value);
   bool isOuterOpArg(mlir::Value value);
+  mlir::Value resolveNestedIterArgInitValue(mlir::Value initValue);
   void processIterArgDependencies();
   llvm::SmallVector<mlir::Operation *>
   collectDiffCoreTypeUsers(mlir::BlockArgument iterArg,
@@ -164,7 +168,16 @@ private:
                               llvm::StringRef initCoreType,
                               llvm::SmallVector<mlir::Operation *> &diffUsers,
                               DataDependencyInfo &info);
-
+  void insertConsumerAndRecordDeps(scf::ForOp forOp, mlir::Value yieldedValue,
+                                   int iterArgIndex,
+                                   llvm::StringRef initCoreType,
+                                   DataDependencyInfo &info);
+  void recordInitValueDeps(scf::ForOp forOp, mlir::Value initValue,
+                           llvm::StringRef yieldCoreType,
+                           DataDependencyInfo &info);
+  void updateCoreTypeAtIndex(Operation *op, int index,
+                             llvm::StringRef newCoreType);
+  void deduplicateDependencies(llvm::SmallVector<DependencyInfo> &dependencies);
   mlir::ModuleOp module;
 };
 

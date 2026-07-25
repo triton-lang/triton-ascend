@@ -29,6 +29,7 @@ include_directories(${ASCENDNPU_IR_BINARY_DIR}/bishengir/include) # Tablegen'd f
 
 add_subdirectory(bin)
 add_subdirectory(include)
+add_subdirectory(language/extension/buffer/src)
 add_subdirectory(lib)
 
 
@@ -79,6 +80,7 @@ add_triton_plugin(TritonAscend
   TritonToLinalg
   BiShengIRScopeDialect
   BiShengIRHIVMDialect
+  TritonBufferIR
 )
 
 option(TRITON_ENABLE_COVERAGE_LLVM_COV "Enable code llvm-cov coverage tool for Ascend plugin " OFF)

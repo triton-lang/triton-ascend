@@ -42,3 +42,16 @@ void triton::setOpCoreType(mlir::Operation *op, llvm::StringRef coreType) {
   op->setAttr(CVPipeline::kCoreType,
               StringAttr::get(op->getContext(), coreType));
 }
+
+bool triton::isScalarDependency(mlir::Value depValue) {
+  return isa<FloatType, IntegerType>(depValue.getType());
+}
+
+bool triton::is1DTensorDependency(mlir::Value depValue) {
+  static constexpr int SHAPE_1D_LENGTH = 1;
+  auto tensorTy = dyn_cast<TensorType>(depValue.getType());
+  if (tensorTy && tensorTy.getRank() == SHAPE_1D_LENGTH) {
+    return true;
+  }
+  return false;
+}

@@ -21,7 +21,7 @@
  * THE SOFTWARE.
  */
 
-#include "runtime/libentry/libentry.h"
+#include "ascend/include/LibEntry/libentry.h"
 
 using namespace libentry;
 

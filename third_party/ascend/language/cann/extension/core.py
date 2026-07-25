@@ -148,7 +148,7 @@ class ascend_address_space_group:
     - ``L0B`` — L0 buffer B (Cube unit input)
     - ``L0C`` — L0 buffer C (Cube unit output)
 
-    Usage with :func:`bl.alloc() <triton.extension.buffer.language.alloc>`::
+    Usage with :func:`bl.alloc() <triton.language.extra.extension.buffer.language.alloc>`::
 
         buf = bl.alloc(dtype, shape, al.ascend_address_space.UB)
     """

@@ -103,7 +103,7 @@ class NPUUtils(object):
         if npu_device_limit_str is None:
             return num_aic, num_aiv
 
-        is_valid = re.match(r'^\d+(,\d+)$', npu_device_limit_str.strip())
+        is_valid = re.match(r'^\d+ *, *\d+$', npu_device_limit_str.strip())
         if is_valid:
             parts = [part.strip() for part in npu_device_limit_str.split(",")]
             num_aic_env = int(parts[0])
@@ -116,7 +116,7 @@ class NPUUtils(object):
                     f"[ERROR]NPU_DEVICE_LIMIT={npu_device_limit_str}, both cube_core_num and vector_core_num "
                     f"must be less than or equal to device properties ({num_aic},{num_aiv}).")
             else:
-                print(f"[INFO]NPU_DEVICE_LIMIT from env: cube_core_num={num_aic_env},vector_core_num={num_aic_env}).")
+                print(f"[INFO]NPU_DEVICE_LIMIT from env: cube_core_num={num_aic_env},vector_core_num={num_aiv_env}).")
                 return num_aic_env, num_aiv_env
         else:
             raise ValueError(f"[ERROR]NPU_DEVICE_LIMIT={npu_device_limit_str}, which has invalid format: "
@@ -125,6 +125,9 @@ class NPUUtils(object):
     @functools.lru_cache()
     def get_device_aicore(self):
         return self.npu_utils_mod.get_aicore_num()
+
+    def has_device_limit(self):
+        return self.get_device_aicore() != self.get_aicore_num()
 
     def get_device_properties(self, device):
         # temperoarily added "max_shared_mem" properties to avoid triton-compiler complain

@@ -1,8 +1,7 @@
 from __future__ import annotations
 import hashlib
 import json
-from .._C.libtriton import get_cache_invalidating_env_vars, ir, buffer_ir
-from .._C.libtriton.ascend import ir as ascend_ir
+from .._C.libtriton import get_cache_invalidating_env_vars, ir
 from ..backends import backends
 from ..backends.compiler import Language
 from ..backends.compiler import BaseBackend, GPUTarget
@@ -298,8 +297,6 @@ def compile(src, target=None, options=None, _env_vars=None):
     if not isinstance(src, IRSource):
         context = ir.context()
         ir.load_dialects(context)
-        buffer_ir.load_dialects(context)
-        ascend_ir.load_dialects(context)
         backend.load_dialects(context)
 
     codegen_fns = backend.get_codegen_implementation(options)

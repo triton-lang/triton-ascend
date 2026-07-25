@@ -1280,13 +1280,6 @@ else:
     interpreter_builder = InterpreterBuilder()
 interpreter_semantic = TritonSemantic(interpreter_builder)
 
-# These keywords are not supported by the interpreter
-RESERVED_KWS = ["num_warps", "num_stages", "num_ctas", "enable_fp_fusion", "grid", "maxnreg"]
-
-# Allow Ascend interpreter to extend reserved keywords
-if hasattr(interpreter_builder, 'get_additional_reserved_keywords'):
-    RESERVED_KWS.extend(interpreter_builder.get_additional_reserved_keywords())
-
 
 def _unwrap_tensor(t):
     if isinstance(t, triton.runtime.jit.TensorWrapper):

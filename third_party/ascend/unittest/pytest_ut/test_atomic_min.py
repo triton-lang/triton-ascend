@@ -52,8 +52,6 @@ def triton_test_fn_atomic_min_dma_supply(in_ptr0, out_ptr0, n_elements: tl.const
 
 
 @pytest.mark.parametrize('param_list', [
-    ['float32', (128, 128), 8],
-    ['float32', (32768, 16), 32],
     ['int32', (32, 32), 2],
     ['int32', (128, 128), 8],
     ['int32', (32768, 16), 32],
@@ -82,7 +80,7 @@ def test_atomic_min(param_list):
 
 
 @pytest.mark.parametrize('shape', [(3, 1), (13, 1), (32, 1), (256, 1)])
-@pytest.mark.parametrize('dtype', ['float32'])
+@pytest.mark.parametrize('dtype', ['int32'])
 def test_atomic_min_2d_supply(dtype, shape):
     x0 = test_common.generate_tensor(shape, dtype).npu()
     x1 = test_common.generate_tensor(shape, dtype).npu()

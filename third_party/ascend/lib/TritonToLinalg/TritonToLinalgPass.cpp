@@ -691,6 +691,8 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   patterns.add<TTOpConverters::ArgMaxConverter>(patterns.getContext());
   patterns.add<TTOpConverters::ReduceConverter>(patterns.getContext());
   patterns.add<TTOpConverters::ScanConverter>(patterns.getContext());
+  patterns.add<TTOpConverters::MapElementwiseDecomposeConverter>(
+      patterns.getContext());
   patterns.add<TTOpConverters::ReshapeConverter>(patterns.getContext());
   patterns.add<TTOpConverters::ExpandDimsConverter>(patterns.getContext());
   patterns.add<TTOpConverters::BroadcastConverter>(patterns.getContext());
@@ -1046,6 +1048,7 @@ void TritonToLinalgPass::runOnOperation() {
   };
 
   target.addIllegalOp<triton::ScanOp>();
+  target.addIllegalOp<triton::MapElementwiseOp>();
   target.addDynamicallyLegalOp<scf::ForOp>(loopOpLegalFn);
   target.addDynamicallyLegalOp<scf::WhileOp>(loopOpLegalFn);
 

@@ -49,7 +49,8 @@ using namespace triton;
 namespace {
 
 static bool isSupportedReturn(Operation *op) {
-  return isa<triton::ReturnOp, func::ReturnOp>(op);
+  return isa<triton::ReturnOp, func::ReturnOp, triton::MapElementwiseReturnOp>(
+      op);
 }
 
 static SmallVector<Block *> getCfgSuccessors(Block *block) {
@@ -2097,7 +2098,7 @@ void TritonControlFlowOptPass::runOnOperation() {
   ModuleOp moduleOp = getOperation();
   SmallVector<Operation *> funcs;
   moduleOp.walk([&](Operation *op) {
-    if (isa<triton::FuncOp, func::FuncOp>(op))
+    if (isa<triton::FuncOp, func::FuncOp, triton::MapElementwiseOp>(op))
       funcs.push_back(op);
   });
 
@@ -2116,6 +2117,14 @@ void TritonControlFlowOptPass::runOnOperation() {
     if (auto funcOp = dyn_cast<func::FuncOp>(op)) {
       if (!funcOp.isDeclaration() &&
           failed(structureFunctionBody(funcOp, funcOp.getBody()))) {
+        signalPassFailure();
+        return;
+      }
+      continue;
+    }
+
+    if (auto mapOp = dyn_cast<triton::MapElementwiseOp>(op)) {
+      if (failed(structureFunctionBody(mapOp, mapOp.getRegion()))) {
         signalPassFailure();
         return;
       }

@@ -22,7 +22,11 @@
 
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/DenseMap.h"
@@ -45,8 +49,10 @@ using namespace triton;
 namespace {
 
 static constexpr llvm::StringLiteral containedFunc[]{
-    "chunk_gated_delta_rule_bwd_kernel_dhu_k128_blockdim128",
-    "fused_chunk_fwd_kernel",
+    "chunk_fwd_mesa_cg_dim64_kernel",
+    "pre_process_bwd_kernel_merged",
+    "pre_process_fwd_kernel_merged",
+    "fused_chunk_ttt_linear_bwd_kernel_h",
 };
 
 static LogicalResult isInterceptedModule(ModuleOp module) {
@@ -201,6 +207,87 @@ bool checkTensorArgsInMainLoop(ModuleOp module) {
   return shouldReturn;
 }
 
+// Check VECTOR main_loop forOps: if a tensor arith.subf op has both operands
+// from linalg.broadcast ops sharing the same source, and the subf op's
+// block_id differs from the source op's block_id, fallback.
+static bool checkSubfBroadcastMismatchInVectorMainLoop(ModuleOp module) {
+  bool shouldFallback = false;
+
+  module.walk([&](Operation *op) -> WalkResult {
+    if (!op->hasAttr(CVPipeline::kMainLoop)) {
+      return WalkResult::advance();
+    }
+    auto forOp = dyn_cast<scf::ForOp>(op);
+    if (!forOp) {
+      return WalkResult::advance();
+    }
+
+    scope::ScopeOp scopeOp = forOp->getParentOfType<scope::ScopeOp>();
+    if (!scopeOp) {
+      return WalkResult::advance();
+    }
+    auto tcoreAttr =
+        scopeOp->getAttrOfType<hivm::TCoreTypeAttr>(CVPipeline::kTcoreType);
+    if (!tcoreAttr || tcoreAttr.getTcoretype() != hivm::TCoreType::VECTOR) {
+      return WalkResult::advance();
+    }
+
+    Block *body = forOp.getBody();
+    if (!body) {
+      return WalkResult::advance();
+    }
+
+    for (Operation &bodyOp : body->without_terminator()) {
+      auto subfOp = dyn_cast<arith::SubFOp>(&bodyOp);
+      if (!subfOp || !isa<RankedTensorType>(subfOp.getType())) {
+        continue;
+      }
+
+      Operation *lhsDef = subfOp.getLhs().getDefiningOp();
+      Operation *rhsDef = subfOp.getRhs().getDefiningOp();
+      if (!lhsDef || !rhsDef) {
+        continue;
+      }
+
+      auto lhsBroadcast = dyn_cast<linalg::BroadcastOp>(lhsDef);
+      auto rhsBroadcast = dyn_cast<linalg::BroadcastOp>(rhsDef);
+      if (!lhsBroadcast || !rhsBroadcast) {
+        continue;
+      }
+
+      Value lhsInput = lhsBroadcast.getInput();
+      Value rhsInput = rhsBroadcast.getInput();
+      if (lhsInput != rhsInput) {
+        continue;
+      }
+
+      Operation *sourceOp = lhsInput.getDefiningOp();
+      if (!sourceOp) {
+        continue;
+      }
+
+      auto subfBlockIdAttr =
+          subfOp->getAttrOfType<IntegerAttr>(CVPipeline::kBlockId);
+      auto sourceBlockIdAttr =
+          sourceOp->getAttrOfType<IntegerAttr>(CVPipeline::kBlockId);
+      if (!subfBlockIdAttr || !sourceBlockIdAttr) {
+        continue;
+      }
+
+      if (subfBlockIdAttr.getInt() != sourceBlockIdAttr.getInt()) {
+        LDBG("[INFO]: Found subf and broadcast source with different "
+             "block_ids in VECTOR main_loop!\n");
+        shouldFallback = true;
+        return WalkResult::interrupt();
+      }
+    }
+
+    return WalkResult::advance();
+  });
+
+  return shouldFallback;
+}
+
 void AnalyzeArgsPass::runOnOperation() {
   ModuleOp module = getOperation();
 
@@ -211,10 +298,12 @@ void AnalyzeArgsPass::runOnOperation() {
   LDBG("Before AnalyzeArgs:\n" << module << "\n");
 
   if (failed(isInterceptedModule(module))) {
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
     return;
   }
 
-  if (checkTensorArgsInMainLoop(module)) {
+  if (checkTensorArgsInMainLoop(module) &&
+      checkSubfBroadcastMismatchInVectorMainLoop(module)) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
     return;
   }

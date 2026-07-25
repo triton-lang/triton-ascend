@@ -63,7 +63,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       } {hivm.unlikely_condition}
       memref.copy %subview_17, %subview_18 {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "VECTOR"} : memref<?x?xf16, strided<[?, ?], offset: ?>> to memref<?x?xf16, strided<[16, 1]>>
       annotation.mark %alloc {MayImplicitTransposeWithLastAxis, ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "VECTOR"} : memref<256x16xf16>
-      %82 = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "VECTOR"} : memref<256x16xf16>
+      %82 = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 8 : i32, ssbuffer.core_type = "VECTOR"} : memref<256x16xf16> to tensor<256x16xf16>
       // CHECK: %{{.*}} = arith.muli %arg{{.*}}, %c256_i32 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : i32
       %83 = arith.muli %arg22, %c256_i32 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : i32
       // CHECK: %{{.*}} = arith.subi %arg{{.*}}, %{{.*}} {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : i32
@@ -108,7 +108,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       %subview_21 = memref.subview %reinterpret_cast_20[0, 0] [%93, %94] [1, 1] {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : memref<16x256xf16, strided<[?, ?], offset: ?>> to memref<?x?xf16, strided<[?, ?], offset: ?>>
       %subview_22 = memref.subview %alloc_19[0, 0] [%93, %94] [1, 1] {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : memref<16x256xf16> to memref<?x?xf16, strided<[256, 1]>>
       memref.copy %subview_21, %subview_22 {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : memref<?x?xf16, strided<[?, ?], offset: ?>> to memref<?x?xf16, strided<[256, 1]>>
-      %99 = bufferization.to_tensor %alloc_19 restrict writable {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : memref<16x256xf16>
+      %99 = bufferization.to_tensor %alloc_19 restrict writable {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : memref<16x256xf16> to tensor<16x256xf16>
       %100 = tensor.empty() {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : tensor<16x16xf32>
       %cst_23 = arith.constant {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} 0.000000e+00 : f32
       %101 = linalg.fill {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} ins(%cst_23 : f32) outs(%100 : tensor<16x16xf32>) -> tensor<16x16xf32>

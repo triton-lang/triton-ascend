@@ -12,7 +12,7 @@ module {
   func.func @fuse_mark_with_alloc(%arg0: tensor<4x4xf16>, %arg1: tensor<4x4xf32>) -> tensor<4x4xf32> {
     %alloc = memref.alloc() {ssbuffer.core_type = "CUBE"} : memref<4x4xf16>
     annotation.mark %alloc {ssbuffer.core_type = "CUBE"} : memref<4x4xf16>
-    %0 = bufferization.to_tensor %alloc restrict writable {ssbuffer.core_type = "CUBE"} : memref<4x4xf16>
+    %0 = bufferization.to_tensor %alloc restrict writable {ssbuffer.core_type = "CUBE"} : memref<4x4xf16> to tensor<4x4xf16>
     %1 = linalg.matmul {ssbuffer.core_type = "CUBE"} ins(%0, %arg0 : tensor<4x4xf16>, tensor<4x4xf16>) outs(%arg1 : tensor<4x4xf32>) -> tensor<4x4xf32>
     return %1 : tensor<4x4xf32>
   }
@@ -62,7 +62,7 @@ module {
     %alloc = memref.alloc() {ssbuffer.core_type = "CUBE"} : memref<4x4xf16>
     annotation.mark %alloc {ssbuffer.core_type = "CUBE"} : memref<4x4xf16>
     annotation.mark %alloc {ssbuffer.core_type = "CUBE"} : memref<4x4xf16>
-    %0 = bufferization.to_tensor %alloc restrict writable {ssbuffer.core_type = "CUBE"} : memref<4x4xf16>
+    %0 = bufferization.to_tensor %alloc restrict writable {ssbuffer.core_type = "CUBE"} : memref<4x4xf16> to tensor<4x4xf16>
     %1 = linalg.matmul {ssbuffer.core_type = "CUBE"} ins(%0, %arg0 : tensor<4x4xf16>, tensor<4x4xf16>) outs(%arg1 : tensor<4x4xf32>) -> tensor<4x4xf32>
     return %1 : tensor<4x4xf32>
   }
@@ -81,7 +81,7 @@ module {
   func.func @non_cube_mark_skipped(%arg0: tensor<4x4xf16>, %arg1: tensor<4x4xf32>) -> tensor<4x4xf32> {
     %alloc = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<4x4xf16>
     annotation.mark %alloc {ssbuffer.core_type = "VECTOR"} : memref<4x4xf16>
-    %0 = bufferization.to_tensor %alloc restrict writable {ssbuffer.core_type = "VECTOR"} : memref<4x4xf16>
+    %0 = bufferization.to_tensor %alloc restrict writable {ssbuffer.core_type = "VECTOR"} : memref<4x4xf16> to tensor<4x4xf16>
     %1 = linalg.matmul {ssbuffer.core_type = "CUBE"} ins(%0, %arg0 : tensor<4x4xf16>, tensor<4x4xf16>) outs(%arg1 : tensor<4x4xf32>) -> tensor<4x4xf32>
     return %1 : tensor<4x4xf32>
   }

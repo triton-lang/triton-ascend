@@ -92,8 +92,7 @@ class CompilerCostmodelContractTest(unittest.TestCase):
         dump_mgr = DumpManager()
         cache_mod.get_dump_manager = lambda *args, **kwargs: dump_mgr
 
-        tools_mod = types.ModuleType("triton.tools.get_ascend_devices")
-        tools_mod.is_compile_on_910_95 = lambda: False
+        utils_mod.is_compile_on_910_95 = lambda: False
 
         sys.modules.update({
             "triton": triton_mod,
@@ -104,7 +103,6 @@ class CompilerCostmodelContractTest(unittest.TestCase):
             "triton.backends.compiler": compiler_base_mod,
             "triton.runtime": runtime_mod,
             "triton.runtime.cache": cache_mod,
-            "triton.tools.get_ascend_devices": tools_mod,
         })
 
         module_path = Path(__file__).resolve().parents[2] / "backend" / "compiler.py"

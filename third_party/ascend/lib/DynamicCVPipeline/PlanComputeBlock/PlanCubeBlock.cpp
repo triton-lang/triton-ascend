@@ -525,8 +525,7 @@ static void fuseMarkOpToDef(Block *block, ComputeBlockIdManager &bm,
 static bool checkValidInputSeed(Operation *op) {
   // keep unify to OpClassifer
   return isa<linalg::TransposeOp, bufferization::ToTensorOp, linalg::FillOp,
-             tensor::EmptyOp, linalg::BroadcastOp, tensor::ExpandShapeOp,
-             arith::ExtFOp>(op);
+             tensor::EmptyOp>(op);
 }
 static bool checkValidUserSeed(Operation *op) {
   // keep unify to OpClassifer

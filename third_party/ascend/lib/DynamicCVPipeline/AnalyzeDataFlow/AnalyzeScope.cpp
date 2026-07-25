@@ -217,9 +217,8 @@ static LogicalResult verifyMainLoop(ModuleOp module) {
   };
 
   if (isMainLoopOnlyCopyOrFixpipe(module)) {
-    LDBG("[INFO]: All main_loop only contains hivm.hir.copy or "
-         "hivm.hir.fixpipe ops.");
-    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    LDBG("[INFO]: One-way CV interaction for fallback.");
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
     return failure();
   }
 

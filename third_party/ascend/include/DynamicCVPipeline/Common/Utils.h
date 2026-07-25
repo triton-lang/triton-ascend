@@ -22,12 +22,10 @@
 
 #ifndef ADD_AUTO_SCHEDULING_COMMON_UTILS_H
 #define ADD_AUTO_SCHEDULING_COMMON_UTILS_H
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/StringRef.h"
-#include <cstdint>
 #include <string_view>
 
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
@@ -56,7 +54,7 @@ inline constexpr llvm::StringLiteral kAnalyzeFlagId =
     "ssbuffer.analyze_flag_id";
 inline constexpr llvm::StringLiteral kLoopCarriedL0C =
     "ssbuffer.loop_carried_l0c";
-inline constexpr llvm::StringLiteral kCrossCoreDeps = "ssbuffer.crossCoreDeps";
+inline constexpr llvm::StringLiteral kCrossDeps = "ssbuffer.crossDeps";
 inline constexpr llvm::StringLiteral kIntraDeps = "ssbuffer.intraDeps";
 inline constexpr llvm::StringLiteral kMemCrossDeps = "ssbuffer.memCrossDeps";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
@@ -69,14 +67,15 @@ static constexpr llvm::StringLiteral kInlinableQuantScaleAttr =
     "enable_fast_tf32_mul";
 inline constexpr llvm::StringLiteral kHIVMMatmulLimitedInCubeAttr =
     "hivm.matmul_limited_in_cube";
+
 inline constexpr const char *ERRCODE_ATTR =
     "triton_ascend.dynamic_cv_pipeline.rc";
 static constexpr const int ERRCODE_FAILED = 1;
 static constexpr const int ERRCODE_IGNORED = 2;
-constexpr int64_t CACHE_TABLE_BUFFER_SIZE = 4096;
-constexpr int64_t BYTE_SIZE = 8;
 static constexpr int crossCoreProducerId = 1;
 static constexpr int crossCoreConsumerId = 0;
+constexpr int64_t CACHE_TABLE_BUFFER_SIZE = 4096;
+constexpr int64_t BYTE_SIZE = 8;
 
 enum CoreType {
   UNDETERMINED = 0,
@@ -122,9 +121,6 @@ bool isVectorOnlyOp(Operation *op);
 bool isScalarLike(Value value);
 bool isStoreLike(Operation *op);
 bool isViewLike(Operation *op);
-bool allResultHasOneUser(Operation *op);
-
-int64_t getBTSizeFromValidBroadcastOp(linalg::BroadcastOp broadcastOp);
 
 } // namespace CVPipeline
 } // namespace mlir

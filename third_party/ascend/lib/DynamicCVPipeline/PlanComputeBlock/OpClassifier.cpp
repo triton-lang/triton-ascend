@@ -23,6 +23,7 @@
 #include <queue>
 
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
 
@@ -34,7 +35,9 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/Interfaces/CastInterfaces.h"
 #include "mlir/Interfaces/LoopLikeInterface.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
@@ -314,93 +317,6 @@ void OpClassifierPass::matchEmptyPattern(Operation *def) {
 }
 
 // ============================================================================
-// Pattern: tensor.broadcast → matmul (Upstream)
-// ============================================================================
-// Uses bias table buffer to  optimize A*B+C.
-//   %value = arith.constant 0.0 : f32
-//   %out = linalg.broadcast ins(%value: f32) outs(%out: tensor<1024x1024xf32>)
-//   %result = linalg.matmul ins(%a, %b) outs(%out)
-// Matching Logic
-//   1. Check if matmul's operand defining op is tensor.broadcast
-//   2. If matched, mark broadcast as CUBE and add to cubeSeeds
-// Purpose: broadcast operation initializes matmul's output buffer;
-// ============================================================================
-Value OpClassifierPass::extractMmadBiasFromPotentialUnitDimExpand(Value bias) {
-  // It assumes that there only exists expand op in mmad bias defining chain,
-  // while other reshape op like collapse op seems unlikely
-  if (auto expandShapeOp = bias.getDefiningOp<tensor::ExpandShapeOp>()) {
-    auto reassociation = expandShapeOp.getReassociationIndices();
-    auto expandedShape = expandShapeOp.getResultType().getShape();
-    if (llvm::all_of(reassociation, [&expandedShape](ReassociationIndices cur) {
-          uint32_t nonUnitCount =
-              llvm::count_if(cur, [&expandedShape](int64_t idx) {
-                return expandedShape[idx] != 1;
-              });
-
-          return nonUnitCount <= 1;
-        })) {
-      bias = expandShapeOp.getSrc();
-      markCube(expandShapeOp);
-      cubeSeeds.push_back(expandShapeOp);
-      inBroadcastChain.insert(expandShapeOp);
-    }
-  }
-  return bias;
-}
-void OpClassifierPass::matchBroadcastPattern(Operation *def) {
-  auto broadcastOp = dyn_cast<linalg::BroadcastOp>(def);
-
-  if (!broadcastOp)
-    return;
-  if (!CVPipeline::allResultHasOneUser(def)) {
-    return;
-  }
-  // Only match small broadcast with correct dimensions (1D->2D, dimensions=[1])
-  if (auto btUsage = CVPipeline::getBTSizeFromValidBroadcastOp(broadcastOp)) {
-    if (btUsage == -1 || btUsage > CVPipeline::CACHE_TABLE_BUFFER_SIZE) {
-      return;
-    }
-  }
-
-  // check if the broadcast used by matmul's outs
-  for (Operation *user : broadcastOp->getUsers()) {
-    auto matmulOp = dyn_cast<linalg::MatmulOp>(user);
-    if (!matmulOp)
-      continue;
-
-    auto outs = matmulOp.getDpsInits();
-    for (Value out : outs) {
-      if (out.getDefiningOp() != broadcastOp) {
-        return;
-      }
-    }
-  }
-
-  markCube(broadcastOp);
-  cubeSeeds.push_back(broadcastOp);
-  inBroadcastChain.insert(broadcastOp);
-
-  // Maybe need add some extractShape && cast
-  Value src = broadcastOp.getDpsInputs()[0];
-  if (auto expandShapeOp = src.getDefiningOp<tensor::ExpandShapeOp>()) {
-    src = extractMmadBiasFromPotentialUnitDimExpand(src);
-  }
-
-  if (auto castOp = src.getDefiningOp<arith::ExtFOp>()) {
-    if (getElementTypeOrSelf(castOp.getIn().getType()).isF16() &&
-        getElementTypeOrSelf(castOp.getResult().getType()).isF32()) {
-      src = castOp.getIn();
-      markCube(castOp);
-      cubeSeeds.push_back(castOp);
-      inBroadcastChain.insert(castOp);
-    }
-  }
-  if (auto expandShapeOp = src.getDefiningOp<tensor::ExpandShapeOp>()) {
-    src = extractMmadBiasFromPotentialUnitDimExpand(src);
-  }
-}
-
-// ============================================================================
 // Pattern: matmul → hivm.hir.store (Downstream)
 // ============================================================================
 // Matches cases where matmul's output is directly stored to memory.
@@ -483,6 +399,17 @@ void OpClassifierPass::matchMaterializePattern(Operation *user) {
   cubeSeeds.push_back(user);
 }
 
+static bool allResultHasOneUser(Operation *op) {
+  bool ret = true;
+  for (Value result : op->getResults()) {
+    if (!result.hasOneUse()) {
+      ret = false;
+      break;
+    }
+  }
+  return ret;
+}
+
 // Pattern matching for CUBE operations
 int OpClassifierPass::patternMatchCUBE() {
   LOG_DEBUG("--- Step 1: pattern match --->\n");
@@ -520,7 +447,6 @@ int OpClassifierPass::patternMatchCUBE() {
       matchTransposePattern(def);
       matchFillPattern(def);
       matchEmptyPattern(def);
-      matchBroadcastPattern(def);
     }
 
     // ---- Downstream pattern matching ----
@@ -533,7 +459,7 @@ int OpClassifierPass::patternMatchCUBE() {
         Operation *curUser = user;
         Value prevResult = result;
         while (curUser) {
-          if (!CVPipeline::allResultHasOneUser(curUser)) {
+          if (!allResultHasOneUser(curUser)) {
             break;
           }
           if (auto yieldOp = dyn_cast<scf::YieldOp>(curUser)) {
@@ -718,9 +644,7 @@ int OpClassifierPass::propagateCubeUpstream() {
     Operation *cur = cubeQueue.front();
     cubeQueue.pop();
     LLVM_DEBUG(DBGS() << "cur: " << *cur << "\n");
-    if (inBroadcastChain.contains(cur)) {
-      continue;
-    }
+
     // Get upstream operations considering both SSA and memory dependencies
     llvm::SmallVector<Operation *> upstreamOps;
     getUpstreamOpsWithMemoryDeps(cur, upstreamOps);

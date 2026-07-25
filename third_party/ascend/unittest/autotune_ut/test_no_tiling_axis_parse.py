@@ -25,7 +25,7 @@ import torch_npu
 import triton
 import triton.backends.ascend.runtime
 import triton.language as tl
-from triton.tools.get_ascend_devices import is_compile_on_910_95
+from triton.backends.ascend.utils import is_compile_on_910_95
 
 import test_common
 
@@ -89,7 +89,7 @@ def test_permute(shape, dtype):
     torch.testing.assert_close(torch_output, triton_output, rtol=1e-03, atol=1e-03, equal_nan=True)
 
 
-@pytest.mark.skipif(not is_compile_on_910_95, reason="only support A5")
+@pytest.mark.skipif(not is_compile_on_910_95(), reason="only support A5")
 @pytest.mark.parametrize('shape', [(1024, 32)])
 @pytest.mark.parametrize('dtype', ['bfloat16'])
 def test_permute_simt(shape, dtype):

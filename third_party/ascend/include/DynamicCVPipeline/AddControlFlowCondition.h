@@ -60,6 +60,8 @@ struct ControlFlowConditionInfo {
   llvm::DenseMap<scf::ForOp, SmallVector<int>> innerDepConds;
 
   llvm::DenseMap<Operation *, SmallVector<Operation *>> crossCoreDependentMap;
+  llvm::DenseMap<Operation *, SmallVector<Operation *>>
+      memCrossCoreDependentMap;
   llvm::DenseMap<scf::ForOp,
                  llvm::DenseMap<Operation *, SmallVector<Operation *>>>
       intraCoreDependentMap;

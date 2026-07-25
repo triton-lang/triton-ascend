@@ -24,7 +24,7 @@ import torch_npu
 import triton
 import triton.language as tl
 from triton.runtime.libentry import libentry
-from triton.tools.get_ascend_devices import is_compile_on_910_95
+from triton.backends.ascend.utils import is_compile_on_910_95
 
 from test_common import _all_dtypes_no_bool, _uint_dtypes, validate_cmp
 
@@ -169,7 +169,7 @@ def cumprod_generate_tensor(shape, dtype):
 
 
 not_support_dtype = {'int8', 'bool'}
-support_dtypes = (_all_dtypes_no_bool + _uint_dtypes) if is_compile_on_910_95 else \
+support_dtypes = (_all_dtypes_no_bool + _uint_dtypes) if is_compile_on_910_95() else \
     [dtype for dtype in _all_dtypes_no_bool if dtype not in not_support_dtype]
 
 

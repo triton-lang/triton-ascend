@@ -28,10 +28,27 @@ import sysconfig
 from pathlib import Path
 import logging
 import platform
-from triton.tools.get_ascend_devices import is_compile_on_910_95
 from triton.backends.ascend.backend_register import backend_strategy_registry
 
 import pybind11
+
+# Lazy init for is_compile_on_910_95
+_is_compile_on_910_95 = None
+
+
+def is_compile_on_910_95():
+    global _is_compile_on_910_95
+    if _is_compile_on_910_95 is None:
+        try:
+            import acl
+            name = acl.get_soc_name()
+            name_lower = name.lower()
+            _is_compile_on_910_95 = ("ascend910_95" in name_lower or "ascend950" in name_lower
+                                     or "910_958b" in name_lower)
+        except (ImportError, AttributeError):
+            _is_compile_on_910_95 = False
+    return _is_compile_on_910_95
+
 
 AUTO_BLOCKIFY_BLACKLIST_RULES = (
     (re.compile(r"\btt\.atomic_(?:rmw|cas)\b"), "atomic operations"),
@@ -548,7 +565,7 @@ def is_ffts_supported(arch: str):
     - Ascend910_95*: 910_95 does not support ffts. Return False.
     - Other arch: 910B/910D supports ffts. Return True.
     '''
-    if is_compile_on_910_95:
+    if is_compile_on_910_95():
         return False
     if arch in ["Ascend910A", "Ascend310B4"]:
         return False
@@ -558,7 +575,7 @@ def is_ffts_supported(arch: str):
 def force_disable_ffts():
     '''
     '''
-    if is_compile_on_910_95:
+    if is_compile_on_910_95():
         return True
     disable_ffts = os.getenv("TRITON_DISABLE_FFTS", "false").lower() in ("true", "1")
     return disable_ffts
@@ -571,7 +588,7 @@ def triton_support_ffts():
 
 def triton_enable_libdevice_simt():
     enable_libdevice_simt = os.getenv("TRITON_ENABLE_LIBDEVICE_SIMT", False)
-    return enable_libdevice_simt and is_compile_on_910_95
+    return enable_libdevice_simt and is_compile_on_910_95()
 
 
 def get_cann_version_file_hash():

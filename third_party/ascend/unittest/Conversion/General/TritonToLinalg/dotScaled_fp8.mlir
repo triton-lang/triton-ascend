@@ -38,7 +38,7 @@ module {
     %30 = tt.load %27 : tensor<32x4x!tt.ptr<i8>>
     %31 = tt.bitcast %28 : tensor<32x128xi8> -> tensor<32x128xf8E4M3FN>
     %32 = tt.bitcast %29 : tensor<128x32xi8> -> tensor<128x32xf8E4M3FN>
-    %33 = tt.dot_scaled %31, %32, %cst_0, %30 lhs = e4m3 rhs = e4m3 : tensor<32x128xf8E4M3FN>, tensor<128x32xf8E4M3FN>, tensor<32x32xf32>, tensor<32x4xi8> -> tensor<32x32xf32>
+    %33 = tt.dot_scaled %31 scale %30, %32, %cst_0 lhs = e4m3 rhs = e4m3 {fastMath = false} : tensor<32x128xf8E4M3FN>, tensor<32x4xi8> * tensor<128x32xf8E4M3FN> -> tensor<32x32xf32>
     %34 = arith.muli %1, %cst : tensor<32x1xi32>
     %35 = tt.splat %arg5 : !tt.ptr<bf16> -> tensor<32x1x!tt.ptr<bf16>>
     %36 = tt.addptr %35, %34 : tensor<32x1x!tt.ptr<bf16>>, tensor<32x1xi32>

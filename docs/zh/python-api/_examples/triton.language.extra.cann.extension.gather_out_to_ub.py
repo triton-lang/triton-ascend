@@ -2,7 +2,7 @@ import torch
 import triton
 import triton.language as tl
 from triton.language.extra.cann.extension import gather_out_to_ub
-from triton.tools.get_ascend_devices import is_compile_on_910_95
+from triton.backends.ascend.utils import is_compile_on_910_95
 
 
 @triton.jit
@@ -49,7 +49,7 @@ def test_gather_out_to_ub():
 
 
 if __name__ == "__main__":
-    if not is_compile_on_910_95:
+    if not is_compile_on_910_95():
         print("gather_out_to_ub is only supported on Ascend 950, skipping test.")
     else:
         test_gather_out_to_ub()

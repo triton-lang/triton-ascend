@@ -1,4 +1,4 @@
-from triton.tools.get_ascend_devices import is_compile_on_910_95
+from triton.backends.ascend.utils import is_compile_on_910_95
 from triton._C.libtriton.ascend import ir as _ascend_ir
 
 # MLIR affine bindings (same objects as triton._C.libtriton.ascend.ir).
@@ -155,4 +155,7 @@ __all__ = [
     "gather_out_to_ub",
     "scatter_ub_to_out",
     "index_select_simd",
+
+    # utils
+    "is_compile_on_910_95",
 ]

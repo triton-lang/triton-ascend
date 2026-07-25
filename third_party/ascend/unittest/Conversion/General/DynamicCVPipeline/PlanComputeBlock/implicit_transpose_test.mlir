@@ -20,8 +20,7 @@ module {
     } {hivm.unlikely_condition}
 
     // CHECK: %[[TENSOR:.+]] = bufferization.to_tensor %[[ALLOC]] restrict writable {ssbuffer.block_id = [[B1:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-    %to_tensor = bufferization.to_tensor %alloc restrict writable : memref<64x64xf32>
-
+    %to_tensor = bufferization.to_tensor %alloc restrict writable : memref<64x64xf32> to tensor<64x64xf32>
     // CHECK: annotation.mark %[[TENSOR]] {MayImplicitTransposeWithLastAxis, ssbuffer.block_id = [[B1]] : i32, ssbuffer.core_type = "VECTOR"}
     annotation.mark %to_tensor {MayImplicitTransposeWithLastAxis} : tensor<64x64xf32>
 
@@ -42,8 +41,7 @@ module {
     %alloc = memref.alloc() : memref<64x64xf32>
 
     // CHECK: %[[TENSOR_CUBE:.+]] = bufferization.to_tensor %[[ALLOC_CUBE]] restrict writable {ssbuffer.block_id = [[B3:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
-    %to_tensor = bufferization.to_tensor %alloc restrict writable : memref<64x64xf32>
-
+    %to_tensor = bufferization.to_tensor %alloc restrict writable : memref<64x64xf32> to tensor<64x64xf32>
     %cst = arith.constant 0.000000e+00 : f32
     %empty = tensor.empty() : tensor<64x64xf32>
     %fill = linalg.fill ins(%cst : f32) outs(%empty : tensor<64x64xf32>) -> tensor<64x64xf32>
@@ -62,8 +60,7 @@ module {
     %alloc = memref.alloc() : memref<64x64xf32>
 
     // CHECK: %[[TENSOR_VAL:.+]] = bufferization.to_tensor %{{.+}} restrict writable {ssbuffer.block_id = [[B4:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
-    %to_tensor = bufferization.to_tensor %alloc restrict writable : memref<64x64xf32>
-
+    %to_tensor = bufferization.to_tensor %alloc restrict writable : memref<64x64xf32> to tensor<64x64xf32>
     // CHECK: annotation.mark %[[TENSOR_VAL]] {MayImplicitTransposeWithLastAxis, ssbuffer.block_id = [[B4]] : i32, ssbuffer.core_type = "VECTOR"}
     annotation.mark %to_tensor {MayImplicitTransposeWithLastAxis} : tensor<64x64xf32>
 

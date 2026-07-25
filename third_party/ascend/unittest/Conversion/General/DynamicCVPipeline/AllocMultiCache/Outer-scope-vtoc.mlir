@@ -1,6 +1,6 @@
 // RUN: triton-opt --add_multi_buffer_outer_scope %s | FileCheck %s
 
-module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.inter_core_buf_count = 2 : i32} {
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 func.func @tc_os02_vtoc() {
   %c0_i32 = arith.constant 0 : i32
   %c100_i32 = arith.constant 100 : i32
@@ -34,5 +34,5 @@ func.func @tc_os02_vtoc() {
 }
 }
 
-// CHECK: crossCoreDeps = [2 : i32, 1 : i32]
-// CHECK: crossCoreDeps = [2 : i32, 0 : i32]
+// CHECK: crossDeps = [2 : i32, 1 : i32]
+// CHECK: crossDeps = [2 : i32, 0 : i32]

@@ -24,7 +24,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         %alloc = memref.alloc() {ssbuffer.block_id = 9 : i32} : memref<128xf32>
         // bufferization.to_tensor in block_id = 10 (consumer block, different from 9)
         // This uses %alloc directly, creating a cross-block memref dependency
-        %tensor_from_alloc = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 10 : i32} : memref<128xf32> to tensor<128xf32>
+        %tensor_from_alloc = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 10 : i32} : memref<128xf32>
         // Use the tensor in block_id = 10
         %consumed = arith.addf %tensor_from_alloc, %tensor_from_alloc {ssbuffer.block_id = 10 : i32} : tensor<128xf32>
         // Producer continuation in block_id = 5

@@ -8,19 +8,10 @@ import warnings
 import textwrap
 from dataclasses import dataclass
 from types import ModuleType
-
 from typing import Any, Callable, Dict, Optional, Tuple, Type, Union, Iterable, List
 
-# Import and register Ascend extension dispatch handlers
-import triton.language.extra.cann.extension as extension
-from triton.language.extra.cann.extension.dispatch import ASCEND_WITH_DISPATCH
-from triton.language.extra.cann.extension.builder import setup_unified_builder
-
-from triton.extension.buffer.language.builder import setup_unified_builder_with_buffer_builder
-
 from .. import knobs, language
-from .._C.libtriton import ir, gluon_ir, buffer_ir
-from .._C.libtriton.ascend import ir as ascend_ir
+from .._C.libtriton import ir, gluon_ir
 from ..language import constexpr, str_to_ty, tensor, tuple as tl_tuple
 from ..language.core import _unwrap_if_constexpr, base_value, base_type
 # ideally we wouldn't need any runtime component
@@ -28,10 +19,6 @@ from ..runtime.jit import get_jit_fn_file_line, get_full_name, JITCallable, Boun
 from .._utils import find_paths_if, get_iterable_path, set_iterable_path, is_namedtuple
 
 from .errors import (CompilationError, CompileTimeAssertionFailure, UnsupportedLanguageConstruct)
-
-# Central registry for all 'with' statement handlers
-WITH_DISPATCH = {}
-WITH_DISPATCH.update(ASCEND_WITH_DISPATCH)
 
 
 def check_identifier_legality(name, type):
@@ -313,11 +300,7 @@ class CodeGenerator(ast.NodeVisitor):
             self.semantic = GluonSemantic(self.builder)
         else:
             from triton.language.semantic import TritonSemantic
-            # Only NPUOptions has force_simt_only attribute, so check for NPU backend
-            if hasattr(options, "force_simt_only") and options.force_simt_only:
-                self.builder = ir.builder(context, compile_mode="simt")
-            else:
-                self.builder = ir.builder(context, compile_mode="simd")
+            self.builder = ir.builder(context)
             self.semantic = TritonSemantic(self.builder)
 
         self.name_loc_as_prefix = None
@@ -326,15 +309,6 @@ class CodeGenerator(ast.NodeVisitor):
         self.begin_line = begin_line - 1
         self.builder.set_loc(file_name, begin_line, 0)
         self.builder.options = options
-
-        # Set up unified builder interface with methods from specialized builders
-        self.ascend_builder = ascend_ir.ascendnpu_ir_builder(context, getattr(options, "arch", ""))
-        self.ascend_builder.set_loc(file_name, begin_line, 0)
-        setup_unified_builder(self.builder, self.ascend_builder)
-        self.buffer_builder = buffer_ir.buffer_builder(context)
-        self.buffer_builder.set_loc(file_name, begin_line, 0)
-        setup_unified_builder_with_buffer_builder(self.builder, self.buffer_builder)
-
         # dict of functions provided by the backend. Below are the list of possible functions:
         # Convert custom types not natively supported on HW.
         # convert_custom_types(input_tensor, dtype, fp_downcast_rounding=None, _builder=None)
@@ -477,19 +451,17 @@ class CodeGenerator(ast.NodeVisitor):
         self.lscope[name] = value
         self.local_defs[name] = value
 
-    def _get_insertion_point_and_loc(self, builder=None):
+    def _get_insertion_point_and_loc(self):
         # XXX: this is a hack to get the location of the insertion point.
         # The insertion point's location could be invalid sometimes,
         # so we need to explicitly set the location
-        _builder = self.builder if not builder else builder
-        loc = _builder.get_loc()
-        ip = _builder.get_insertion_point()
+        loc = self.builder.get_loc()
+        ip = self.builder.get_insertion_point()
         return ip, loc
 
-    def _set_insertion_point_and_loc(self, ip, loc, builder=None):
-        _builder = self.builder if not builder else builder
-        _builder.restore_insertion_point(ip)
-        _builder.set_loc(loc)
+    def _set_insertion_point_and_loc(self, ip, loc):
+        self.builder.restore_insertion_point(ip)
+        self.builder.set_loc(loc)
 
     def _find_carries(self, node, liveins, ignore: set[str] = set()):
         # create loop body block
@@ -1008,26 +980,6 @@ class CodeGenerator(ast.NodeVisitor):
                 return self.visit(node.orelse)
 
     def visit_With(self, node):
-        """
-        Handle 'with' statements with dispatch pattern for Ascend extensions,
-        falling back to standard context manager protocol for general cases.
-
-        This implementation:
-        1. First tries dispatch mechanism for Ascend-specific context managers (e.g., scope)
-        2. Falls back to standard Python context manager protocol for general cases
-        """
-        # Try dispatch mechanism for Ascend-specific context managers
-        # Only attempt dispatch for single context manager with Call expression
-        if len(node.items) == 1:
-            context = node.items[0].context_expr
-            if isinstance(context, ast.Call):
-                withitemClass = self.visit(context.func)
-                handler = WITH_DISPATCH.get(withitemClass)
-                if handler:
-                    # Dispatch to registered handler (e.g., handle_scope_with)
-                    return handler(self, node)
-
-        # Fall back to standard context manager protocol (community logic)
         # Lower `with` statements by constructing context managers and calling their enter/exit hooks
         # Instantiate each context manager with builder injection
         cm_list = []
@@ -1195,7 +1147,7 @@ class CodeGenerator(ast.NodeVisitor):
         flatten = False
         warp_specialize = False
         disable_licm = False
-        if IteratorClass in [language.range, extension.parallel]:
+        if IteratorClass is language.range:
             iterator = IteratorClass(*iter_args, **iter_kwargs)
             # visit iterator arguments
             # note: only `range` iterator is supported now
@@ -1272,9 +1224,7 @@ class CodeGenerator(ast.NodeVisitor):
             if warp_specialize:
                 for_op.set_attr("tt.warp_specialize", self.builder.get_unit_attr())
             if disable_licm:
-                for_op.set_attr("tt.disable_licm", self.builder.get_unit_attr())
-            if (IteratorClass is extension.parallel):
-                for_op.set_attr("hivm.parallel_loop", self.builder.get_unit_attr())
+                for_op.set_attr("llvm.loop_annotation", self.builder.get_disable_loop_licm_attr())
 
             self.scf_stack.append(node)
             for_op_body = for_op.get_body(0)
@@ -1336,7 +1286,7 @@ class CodeGenerator(ast.NodeVisitor):
         args = inspect.getcallargs(fn.fn, *args, **kwargs)
         args = [args[name] for name in fn.arg_names]
         for i, arg in enumerate(args):
-            if isinstance(arg, (language.dtype, float, int, bool, JITFunction, language.PropagateNan)):
+            if isinstance(arg, (language.dtype, float, int, bool, JITFunction)):
                 args[i] = language.core.constexpr(arg)
         args_cst = find_paths_if(args, lambda _, x: _is_constexpr(x))
         args_cst = {path: get_iterable_path(args, path) for path in args_cst}
@@ -1390,11 +1340,6 @@ class CodeGenerator(ast.NodeVisitor):
             return self.call_JitFunction(fn, args, kws)
         if (hasattr(fn, '__self__') and _is_triton_value(fn.__self__)) or language.core.is_builtin(fn) or isinstance(
                 fn, ConstexprFunction):
-            # Copy builder's location and insertion point.
-            ip, last_loc = self._get_insertion_point_and_loc()
-            # Use ascend_builder if this function is a builtin extension operation.
-            _builder = self.ascend_builder if extension.is_builtin(fn) else self.builder
-            self._set_insertion_point_and_loc(ip, last_loc, _builder)
             extra_kwargs = dict()
 
             if isinstance(fn, ConstexprFunction):
@@ -1410,9 +1355,6 @@ class CodeGenerator(ast.NodeVisitor):
                 # builtin functions return plain tuples for readability
                 if isinstance(ret, tuple):
                     ret = language.tuple(ret)
-                # Sync the builder's location before return.
-                ip, last_loc = self._get_insertion_point_and_loc(_builder)
-                self._set_insertion_point_and_loc(ip, last_loc)
                 return ret
             except Exception as e:
                 if knobs.compilation.front_end_debugging:
@@ -1652,7 +1594,6 @@ class CodeGenerator(ast.NodeVisitor):
         ttgl.static_print: static_executor(print),
         int: static_executor(int),
         len: static_executor(len),
-        extension.int64: static_executor(extension.int64),
     }
 
 

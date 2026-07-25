@@ -23,9 +23,17 @@ from triton._C.libtriton.ascend import ir as ascend_ir
 
 from .testing import do_bench_npu
 
+from ._backcompat_imports import install as _install_backcompat
+
+_install_backcompat()
+
 
 def _apply_ascend_patch():
+    from triton.compiler import compiler as triton_compiler
     from triton.compiler.code_generator import CodeGenerator
+    from ._patch_code_generator import apply as _apply_cg_patches
+
+    _apply_cg_patches()
 
     if not getattr(CodeGenerator, "_ascend_patch_applied", False):
         _original_cg_init = CodeGenerator.__init__

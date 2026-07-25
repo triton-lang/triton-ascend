@@ -12,7 +12,6 @@
 #include "mlir/Dialect/LLVMIR/LLVMAttrs.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/Transforms/InlinerInterfaceImpl.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/UB/IR/UBOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -41,7 +40,6 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/SourceMgr.h"
 
-#include "ir.h"
 namespace {
 
 namespace py = pybind11;
@@ -260,15 +258,6 @@ py::list getTensorDescMetadata(ModuleOp &mod) {
 /*****************************************************************************/
 /* Python bindings for ir                                                    */
 /*****************************************************************************/
-
-namespace ir {
-
-// Pointer to the TritonOpBuilder class, used to register IR ops for third-party
-// dialects.
-static py::class_<TritonOpBuilder> *builderClassPtr = nullptr;
-py::class_<TritonOpBuilder> *getBuilderClass() { return builderClassPtr; }
-
-} // namespace ir
 
 void init_triton_ir(py::module &&m) {
   using ret = py::return_value_policy;
@@ -552,8 +541,6 @@ void init_triton_ir(py::module &&m) {
   py::class_<IntegerAttr, Attribute>(m, "integer_attr", py::module_local());
   py::class_<BoolAttr, Attribute>(m, "bool_attr", py::module_local());
   py::class_<UnitAttr, Attribute>(m, "unit_attr", py::module_local());
-  py::class_<StringAttr, Attribute>(m, "str_attr", py::module_local());
-  py::class_<ArrayAttr, Attribute>(m, "array_attr", py::module_local());
 
   // Ops
   py::class_<OpState>(m, "OpState", py::module_local())
@@ -813,16 +800,9 @@ void init_triton_ir(py::module &&m) {
 
   py::class_<OpBuilder::InsertPoint>(m, "InsertPoint", py::module_local());
 
-  static py::class_<TritonOpBuilder> builderClass(
-      m, "builder", py::module_local(), py::dynamic_attr());
-  ir::builderClassPtr = &builderClass;
-  builderClass
-      .def(py::init<MLIRContext *, const std::string &>(), py::arg("context"),
-           py::arg("compile_mode") = "simd",
-           "Create a TritonOpBuilder with optional compile_mode (simt or simd, "
-           "default: simd)")
-      .def("is_simt_mode", &TritonOpBuilder::isSimtMode,
-           "Check if the compile mode is simt")
+  py::class_<TritonOpBuilder>(m, "builder", py::module_local(),
+                              py::dynamic_attr())
+      .def(py::init<MLIRContext *>())
       .def("get_op_builder", &TritonOpBuilder::getBuilder, ret::reference)
       // getters
       .def("create_module",
@@ -871,10 +851,6 @@ void init_triton_ir(py::module &&m) {
       .def("get_string_attr",
            [](TritonOpBuilder &self, std::string value) -> Attribute {
              return self.getBuilder().getStringAttr(value);
-           })
-      .def("get_i64_array_attr",
-           [](TritonOpBuilder &self, const std::vector<int64_t> &array) {
-             return self.getBuilder().getI64ArrayAttr(array);
            })
       .def("get_disable_loop_licm_attr",
            [](TritonOpBuilder &self) -> Attribute {
@@ -1044,21 +1020,6 @@ void init_triton_ir(py::module &&m) {
            [](TritonOpBuilder &self, Type &elementType,
               std::vector<int64_t> &shape) -> Type {
              return RankedTensorType::get(shape, elementType);
-           })
-      .def("get_buffer_ty",
-           [](TritonOpBuilder &self, std::vector<int64_t> &shape,
-              Type &elementType, const Attribute &memorySpace) -> Type {
-             return MemRefType::get(shape, elementType,
-                                    MemRefLayoutAttrInterface{}, memorySpace);
-           })
-      .def("get_buffer_ty_with_strides",
-           [](TritonOpBuilder &self, std::vector<int64_t> &shape,
-              Type &elementType, const std::vector<int64_t> &strides,
-              const Attribute &memorySpace) -> Type {
-             // create a layout with strides, using dynamic offset
-             auto layout = StridedLayoutAttr::get(
-                 self.getBuilder().getContext(), ShapedType::kDynamic, strides);
-             return MemRefType::get(shape, elementType, layout, memorySpace);
            })
       .def("get_function_ty",
            [](TritonOpBuilder &self, std::vector<Type> inTypes,

@@ -140,7 +140,7 @@ class buffer(tl.base_value):
 
     :code:`buffer` is the fundamental data structure for Triton programs using
     the buffer language extension. Most functions in
-    :py:mod:`triton.extension.buffer.language` operate on and return buffers.
+    :py:mod:`triton.language.extra.extension.buffer.language` operate on and return buffers.
 
     Most of the named member functions here are duplicates of the free functions
     in :code:`triton.language`.  For example, :code:`triton.language.sqrt(x)` is

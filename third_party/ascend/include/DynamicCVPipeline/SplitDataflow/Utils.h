@@ -31,6 +31,8 @@ namespace triton {
 
 void setOpBlockId(mlir::Operation *op, int blockId);
 void setOpCoreType(mlir::Operation *op, llvm::StringRef coreType);
+bool isScalarDependency(mlir::Value depValue);
+bool is1DTensorDependency(mlir::Value depValue);
 
 } // namespace triton
 } // namespace mlir

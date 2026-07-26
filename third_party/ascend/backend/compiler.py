@@ -1034,6 +1034,11 @@ class NPUOptions:
     launch_cooperative_grid: bool = False
     backend_name: str = 'cann'
     instrumentation_mode: str = ""
+    enable_graph_optimize: bool = True
+    graph_optimize_rule_mask: int = 127
+    graph_optimize_max_rewrites_per_function: int = 64
+    graph_optimize_ub_capacity_bytes: int = 0
+    graph_optimize_emit_remarks: bool = False
     allow_fp8e4nv: bool = False
     auto_tile_and_bind_subblock: bool = True
     vf_merge_level: int = 0
@@ -1167,7 +1172,10 @@ def ttir_to_npubin(mod, metadata, opt):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
         ascend.passes.ttir.add_row_coalescing(pm)
-        pm.run(mod)
+        # Newer libtriton bindings require a pipeline name for diagnostics.
+        # This preserves the 895 scheduling point and pass set; the string is
+        # only the pass-manager execution label.
+        pm.run(mod, "row_coalescing")
         _export_coalesce_metadata(mod, metadata)
         ttir_code = str(mod)
     with tempfile.TemporaryDirectory() as tmpdir:

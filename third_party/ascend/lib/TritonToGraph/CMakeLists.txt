@@ -6,9 +6,14 @@ add_triton_library(TritonToGraph
   EntryArgPointerAliasAnalysis.cpp
   GraphOptimizationContext.cpp
   GraphOptimizationPass.cpp
+  LayoutMemoryCompatibilityPass.cpp
   MemorySsaBuilder.cpp
   PermutationAnalysis.cpp
   Passes.cpp
+  LegacyMemoryAccess/ChunkCoalescing.cpp
+  LegacyMemoryAccess/RowCoalescing.cpp
+  LegacyMemoryAccess/StridedAxisCoalescing.cpp
+  LegacyMemoryAccess/StridedLoadStoreRewrite.cpp
   Rules/LoadStoreTransposeRule.cpp
   Rules/TransposePointwiseReorderRule.cpp
   Rules/UBPreloadRule.cpp
@@ -22,10 +27,16 @@ add_triton_library(TritonToGraph
   MLIRDialectUtils
   MLIRIR
   MLIRFuncDialect
+  MLIRMathDialect
   MLIRPass
   MLIRSCFDialect
   MLIRSupport
+  MLIRTensorDialect
   MLIRTransforms
+  MLIRTritonNPUUtils
+  TritonAscendIR
   TritonIR
+  TritonMemoryAccessAnalysis
+  TritonToStructured
   TritonTransforms
 )

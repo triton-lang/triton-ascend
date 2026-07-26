@@ -20,11 +20,15 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ASCEND_STRIDED_AXIS_COALESCING_H
-#define TRITON_ASCEND_STRIDED_AXIS_COALESCING_H
+#ifndef TRITON_TO_GRAPH_LEGACY_MEMORY_ACCESS_STRIDED_AXIS_COALESCING_H
+#define TRITON_TO_GRAPH_LEGACY_MEMORY_ACCESS_STRIDED_AXIS_COALESCING_H
 
-// Compatibility shim. The implementation is owned by TritonToGraph and is
-// scheduled only through its original T2L compatibility slot.
-#include "TritonToGraph/LegacyMemoryAccess/StridedAxisCoalescing.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 
-#endif // TRITON_ASCEND_STRIDED_AXIS_COALESCING_H
+namespace StridedAxisCoalescing {
+
+void rewriteStridedAxisCoalesce(mlir::ModuleOp moduleOp);
+
+} // namespace StridedAxisCoalescing
+
+#endif // TRITON_TO_GRAPH_LEGACY_MEMORY_ACCESS_STRIDED_AXIS_COALESCING_H

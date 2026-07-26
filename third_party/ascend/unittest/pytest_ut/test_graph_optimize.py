@@ -46,6 +46,19 @@ def graph_optimize_kernel(x_ptr, y_ptr, BLOCK: tl.constexpr):
 
 
 @triton.jit
+def graph_optimize_legacy_memory_isolation_kernel(
+    x_ptr, y_ptr, BLOCK: tl.constexpr
+):
+    # This is deliberately a strided AddPtr load/store shape.  It is eligible
+    # for the legacy T2L StridedLoadStoreRewrite, but must remain untouched by
+    # the early generic graph-optimize pass even when its default mask carries
+    # all seven rule identities.
+    offsets = tl.arange(0, BLOCK) * 3
+    value = tl.load(x_ptr + offsets)
+    tl.store(y_ptr + offsets, value)
+
+
+@triton.jit
 def overflow_assert_provenance_kernel(
     output_ptr, n, BLOCK: tl.constexpr
 ):
@@ -151,6 +164,25 @@ def make_ast_ttir(options):
     return ast_to_ttir(graph_optimize_kernel, source, context, options, {}, {})
 
 
+def make_legacy_memory_isolation_ast_ttir(options):
+    source = ASTSource(
+        graph_optimize_legacy_memory_isolation_kernel,
+        {"x_ptr": "*fp32", "y_ptr": "*fp32"},
+        {"BLOCK": 16},
+    )
+    context = ir.context()
+    ir.load_dialects(context)
+    ascend_ir.load_dialects(context)
+    return ast_to_ttir(
+        graph_optimize_legacy_memory_isolation_kernel,
+        source,
+        context,
+        options,
+        {},
+        {},
+    )
+
+
 def make_fused_swiglu_ttir(options, block_m=256, block_n=32):
     """Compile the original-layout fused-SwiGLU clone only through TTIR.
 
@@ -210,6 +242,92 @@ def test_graph_optimize_pass_accepts_zero_rule_mask(tmp_path):
 
     assert "tt.func" in str(module)
     assert_reparseable(module, tmp_path, "zero-rule-mask")
+
+
+def test_default_generic_graph_mask_excludes_legacy_memory_compatibility(
+    tmp_path,
+):
+    """The 8/16/32/64 identities are enabled by default, not generic rules.
+
+    The generic GraphOptimizePass runs at early TTIR.  Row, Axis, Chunk, and
+    StridedLoadStoreRewrite retain their original compatibility-pass slots, so
+    this strided memory shape must not acquire either coalescing metadata or
+    an indirect-memory op merely because the default mask is 127.
+    """
+    default_options = NPUOptions(arch="Ascend910_95", enable_graph_optimize=True)
+    native_only_options = NPUOptions(
+        arch="Ascend910_95",
+        enable_graph_optimize=True,
+        graph_optimize_rule_mask=7,
+    )
+    assert default_options.graph_optimize_rule_mask == 127
+
+    default_result = make_ttir(
+        make_legacy_memory_isolation_ast_ttir(default_options),
+        {},
+        default_options,
+    )
+    native_only_result = make_ttir(
+        make_legacy_memory_isolation_ast_ttir(native_only_options),
+        {},
+        native_only_options,
+    )
+    text = str(default_result)
+
+    assert "hacc.coalesce_factor" not in text
+    assert "hacc.coalesce_axis" not in text
+    assert "hacc.coalesce_grid_ceil_div" not in text
+    assert "tt.indirect_load" not in text
+    assert "tt.indirect_store" not in text
+    # The native graph-rule bundle is 1|2|4.  Adding the four compatibility
+    # identities to reach 127 must be observationally inert in make_ttir().
+    assert text == str(native_only_result)
+    assert_reparseable(default_result, tmp_path, "generic-legacy-memory-isolation")
+
+
+def test_default_graph_mask_preserves_native_graph_rule_bundle(monkeypatch, tmp_path):
+    """Default 127 retains generic 1|2|4 behavior without running legacy rules.
+
+    This input has the LoadStoreTranspose (bit 1) structural signature.  Compare
+    the public native-only bundle (7) against the default all-identity mask
+    (127): both must apply the same native rewrite.  Together with the legacy
+    isolation test above, this catches either failure mode: accidentally
+    dropping native rules when the default changed, or scheduling compatibility
+    passes from the early generic graph pass.
+    """
+    monkeypatch.setenv("TRITON_DUMP_DIR", str(tmp_path / "dump"))
+
+    native_only_options = NPUOptions(
+        arch="Ascend910_95",
+        enable_graph_optimize=True,
+        graph_optimize_rule_mask=7,
+        debug=True,
+        sanitize_overflow=True,
+    )
+    default_options = NPUOptions(
+        arch="Ascend910_95",
+        enable_graph_optimize=True,
+        debug=True,
+        sanitize_overflow=True,
+    )
+
+    native_only_ttir = str(make_fused_swiglu_ttir(native_only_options))
+    default_ttir = str(make_fused_swiglu_ttir(default_options))
+
+    assert default_options.graph_optimize_rule_mask == 127
+    assert default_ttir == native_only_ttir
+    # A rule-mask=0 control would retain the original [N, M] pointer layout;
+    # the default must still perform the native transpose rewrite to [M, N].
+    assert "tensor<256x32x!tt.ptr<bf16>>" in default_ttir
+    assert "tensor<32x256x!tt.ptr<bf16>>" not in default_ttir
+    assert "hacc.coalesce_factor" not in default_ttir
+    assert "tt.indirect_load" not in default_ttir
+    assert "tt.indirect_store" not in default_ttir
+    assert_ttir_text_reparseable(
+        default_ttir,
+        tmp_path,
+        "default-native-graph-rule-bundle",
+    )
 
 
 def test_make_ttir_supports_graph_optimize_toggle(monkeypatch, tmp_path):

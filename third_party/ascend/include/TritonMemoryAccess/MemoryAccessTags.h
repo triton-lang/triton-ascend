@@ -20,11 +20,18 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ASCEND_STRIDED_AXIS_COALESCING_H
-#define TRITON_ASCEND_STRIDED_AXIS_COALESCING_H
+#ifndef TRITON_MEMORY_ACCESS_TAGS_H
+#define TRITON_MEMORY_ACCESS_TAGS_H
 
-// Compatibility shim. The implementation is owned by TritonToGraph and is
-// scheduled only through its original T2L compatibility slot.
-#include "TritonToGraph/LegacyMemoryAccess/StridedAxisCoalescing.h"
+namespace mlir::triton::memory_access {
 
-#endif // TRITON_ASCEND_STRIDED_AXIS_COALESCING_H
+inline constexpr const char *ImplicitPermuteHandledTAG =
+    "ImplicitPermuteHandled";
+inline constexpr const char *InspectedByStridedLoadStoreRewriteTAG =
+    "InspectedByStridedLoadStoreRewrite";
+inline constexpr const char *RewrittenByStridedLoadStoreRewriteTAG =
+    "RewrittenByStridedLoadStoreRewrite";
+
+} // namespace mlir::triton::memory_access
+
+#endif // TRITON_MEMORY_ACCESS_TAGS_H

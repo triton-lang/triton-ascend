@@ -20,11 +20,36 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ASCEND_STRIDED_AXIS_COALESCING_H
-#define TRITON_ASCEND_STRIDED_AXIS_COALESCING_H
+#ifndef TRITON_TO_GRAPH_LAYOUT_MEMORY_OPTIMIZATION_H
+#define TRITON_TO_GRAPH_LAYOUT_MEMORY_OPTIMIZATION_H
 
-// Compatibility shim. The implementation is owned by TritonToGraph and is
-// scheduled only through its original T2L compatibility slot.
-#include "TritonToGraph/LegacyMemoryAccess/StridedAxisCoalescing.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/Pass/Pass.h"
 
-#endif // TRITON_ASCEND_STRIDED_AXIS_COALESCING_H
+#include <cstdint>
+#include <memory>
+
+namespace mlir {
+namespace triton {
+namespace cfg {
+
+// These phases deliberately preserve the T2L insertion points around the
+// legacy diagonal rewrite.  They are not GraphOptimizationRule phases: the
+// legacy rewrites are module-wide and some of them intentionally mutate IR
+// while doing their analysis.
+enum class LayoutMemoryCompatibilityPhase : uint8_t {
+  BeforeDiagonal,
+  AfterDiagonal,
+};
+
+std::unique_ptr<OperationPass<ModuleOp>>
+createLayoutMemoryCompatibilityPass(LayoutMemoryCompatibilityPhase phase);
+
+std::unique_ptr<OperationPass<ModuleOp>>
+createRowCoalescingCompatibilityPass();
+
+} // namespace cfg
+} // namespace triton
+} // namespace mlir
+
+#endif // TRITON_TO_GRAPH_LAYOUT_MEMORY_OPTIMIZATION_H

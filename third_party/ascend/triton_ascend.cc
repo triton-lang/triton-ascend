@@ -21,6 +21,7 @@
 #include "ascend/include/TritonToStructured/Passes.h"
 #include "ascend/include/TritonToUnstructure/Passes.h"
 #include "ascend/include/TritonToGraph/GraphOptimization.h"
+#include "ascend/include/TritonToGraph/LayoutMemoryOptimization.h"
 
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
@@ -72,6 +73,12 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
 
   m.def("add_triton_control_flow_opt", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::createTritonControlFlowOptPass());
+  });
+
+  // Preserve the historical pure-SIMT Python entry point while moving the
+  // implementation into the Graph module's module-level compatibility pass.
+  m.def("add_row_coalescing", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::cfg::createRowCoalescingCompatibilityPass());
   });
 
   m.def("add_triton_to_annotation", [](mlir::PassManager &pm) {
@@ -151,7 +158,7 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
         options.emitRemarks = emitRemarks;
         pm.addPass(mlir::triton::cfg::createGraphOptimizePass(options));
       },
-      py::arg("pm"), py::arg("rule_mask") = 7,
+      py::arg("pm"), py::arg("rule_mask") = 127,
       py::arg("max_rewrites_per_function") = 64,
       py::arg("ub_capacity_bytes") = 0, py::arg("emit_remarks") = false);
 

@@ -37,6 +37,13 @@ enum class GraphOptimizationRuleId : uint8_t {
   LoadStoreTranspose = 1,
   TransposePointwiseReorder = 2,
   UBPreload = 4,
+  // The following identities are owned by the layout/memory compatibility
+  // passes.  They deliberately are not GraphOptimizationRule candidates and
+  // are not added to GraphOptimizePass's per-function phase loop.
+  RowCoalescing = 8,
+  StridedAxisCoalescing = 16,
+  ChunkCoalescing = 32,
+  StridedLoadStoreRewrite = 64,
 };
 
 constexpr uint8_t getGraphOptimizationRuleMask(GraphOptimizationRuleId rule) {
@@ -47,7 +54,13 @@ constexpr uint8_t kAllGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::LoadStoreTranspose) |
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::TransposePointwiseReorder) |
-    getGraphOptimizationRuleMask(GraphOptimizationRuleId::UBPreload);
+    getGraphOptimizationRuleMask(GraphOptimizationRuleId::UBPreload) |
+    getGraphOptimizationRuleMask(GraphOptimizationRuleId::RowCoalescing) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::StridedAxisCoalescing) |
+    getGraphOptimizationRuleMask(GraphOptimizationRuleId::ChunkCoalescing) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::StridedLoadStoreRewrite);
 
 constexpr bool isValidGraphOptimizationRuleMask(uint8_t ruleMask) {
   return (ruleMask & static_cast<uint8_t>(~kAllGraphOptimizationRuleMask)) ==
@@ -55,7 +68,9 @@ constexpr bool isValidGraphOptimizationRuleMask(uint8_t ruleMask) {
 }
 
 struct GraphOptimizationOptions {
-  // A zero mask intentionally disables every graph optimization rule.
+  // A zero mask intentionally disables every native GraphOptimizationRule.
+  // Layout/memory compatibility stages retain their original fixed scheduling
+  // and do not use this option as a new opt-out.
   uint8_t enabledRuleMask = kAllGraphOptimizationRuleMask;
   unsigned maxRewritesPerFunction = 64;
   unsigned ubCapacityBytes = 0;

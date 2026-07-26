@@ -6,6 +6,13 @@
 // supports Blocked/Shared inputs. The rule keeps its encoded-input preflight
 // fail-closed, but its structural rewrite is exercised here at the pipeline
   // stage where the chain can exist.
+
+// Rule 2 asks the registered TritonGPU TensorOrMemDesc type interface to
+// preflight a moved tt.trans. Keep every test function itself pre-layout
+// TTIR, but instantiate the dialect once so standalone triton-opt has the
+// same interface availability as the compiler pipeline.
+#blocked = #ttg.blocked<{sizePerThread = [1, 1], threadsPerWarp = [32, 1], warpsPerCTA = [1, 1], order = [1, 0]}>
+
 module {
   // CHECK-LABEL: tt.func @positive_a_truncf_bitcast(
   // CHECK-SAME: %[[A_SRC:arg[0-9]+]]: tensor<8x16xf32>

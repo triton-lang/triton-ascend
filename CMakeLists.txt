@@ -15,9 +15,6 @@ include(CTest)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-# Security compilation options settings
-include(${CMAKE_CURRENT_SOURCE_DIR}/safe_compile.cmake)
-
 # Options
 option(TRITON_BUILD_PYTHON_MODULE "Build Python Triton bindings" OFF)
 option(TRITON_BUILD_PROTON "Build the Triton Proton profiler" ON)
@@ -132,21 +129,6 @@ function(add_triton_library name)
   set_property(GLOBAL APPEND PROPERTY TRITON_LIBS ${name})
   add_triton_object(${name} ${ARGN})
   llvm_update_compile_flags(${name})
-
-  # To enable llvm-cov coverage tool, you need to pass the argument TRITON_APPEND_CMAKE_ARGS="-DTRITON_ENABLE_COVERAGE_LLVM_COV=ON" during compilation.
-  if(TRITON_ENABLE_COVERAGE_LLVM_COV)
-    if("${CMAKE_CURRENT_SOURCE_DIR}" MATCHES ".*/third_party/ascend/.*" AND NOT "${CMAKE_CURRENT_SOURCE_DIR}" MATCHES ".*/AscendNPU-IR/.*")
-      message(STATUS "Enabling coverage for target ${name} (in Ascend plugin)")
-      target_compile_options(${name} PRIVATE
-        -fprofile-arcs
-        -ftest-coverage
-        -O0
-        -fprofile-update=atomic
-        -g
-      )
-      target_link_options(${name} PUBLIC --coverage)
-    endif()
-  endif()
 endfunction()
 
 set_property(GLOBAL PROPERTY TRITON_PLUGINS "")
@@ -182,21 +164,6 @@ if (NOT WIN32 AND NOT APPLE AND NOT BSD)
   link_libraries(stdc++fs)
 endif()
 
-# Adapter LLVM VERSION For AscendNPU IR
-option(LLVM_MAJOR_VERSION_21_COMPATIBLE "NPUIR build with LLVM 21 or later" OFF)
-if(LLVM_MAJOR_VERSION_21_COMPATIBLE)
-  message(STATUS "[TA]Building AscendNPU IR with LLVM 21 or later")
-  add_definitions(-D__LLVM_MAJOR_VERSION_21_COMPATIBLE__)
-endif()
-
-# Some compatibility changes for LLVM 21 are also needed on LLVM 22.
-# Therefore __LLVM_MAJOR_VERSION_21_COMPATIBLE__ would be enabled too.
-option(LLVM_MAJOR_VERSION_22_COMPATIBLE "NPUIR build with LLVM 22" OFF)
-if(LLVM_MAJOR_VERSION_22_COMPATIBLE)
-  message(STATUS "[TA]Building AscendNPU IR with LLVM 22 or later")
-  add_definitions(-D__LLVM_MAJOR_VERSION_21_COMPATIBLE__)
-  add_definitions(-D__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
-endif()
 
 # -----
 
@@ -209,12 +176,6 @@ if(TRITON_BUILD_PYTHON_MODULE)
   # Python Interpreter is used to run lit tests
   find_package(Python3 REQUIRED COMPONENTS Development.Module Interpreter)
   find_package(pybind11 CONFIG REQUIRED HINTS "${Python3_SITELIB}")
-  # need to include pybind11
-  include_directories(${Python3_INCLUDE_DIRS})
-  include_directories(${pybind11_INCLUDE_DIR})
-  link_directories(${Python3_LIBRARY_DIRS})
-  link_libraries(${Python3_LIBRARIES})
-  add_link_options(${Python3_LINK_OPTIONS})
 
   foreach(CODEGEN_BACKEND ${TRITON_CODEGEN_BACKENDS})
     add_subdirectory(third_party/${CODEGEN_BACKEND})
@@ -376,12 +337,6 @@ endif()
 find_package(Threads REQUIRED)
 
 add_subdirectory(third_party/f2reduce)
-
-# To enable the hitest coverage tool, you need to set the environment variable TRITON_ENABLE_COVERAGE_HITEST=1
-if(TRITON_ENABLE_COVERAGE_HITEST)
-  set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK hitestwrapper)
-endif()
-
 add_subdirectory(bin)
 add_subdirectory(test)
 

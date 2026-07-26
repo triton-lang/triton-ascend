@@ -96,6 +96,29 @@ int nd2nzFlag = 0;
 bool compileOn91095Flag = false;
 bool existDotFlag = false;
 
+// AscendNPU-IR lowers cos with an asymmetric range-reduction path. Feeding
+// negative inputs through the positive path is valid because cos is even and
+// avoids a one-ULP error around zero that can be amplified by consumers such
+// as floor.
+static void normalizeCosRangeReductionInputs(ModuleOp moduleOp) {
+  SmallVector<math::CosOp> cosOps;
+  moduleOp.walk([&](math::CosOp op) {
+    Value input = op.getOperand();
+    if (isa<RankedTensorType>(input.getType()) &&
+        !input.getDefiningOp<math::AbsFOp>())
+      cosOps.push_back(op);
+  });
+
+  // Keep this a one-shot rewrite. A constant abs may fold while its f16 cos
+  // does not, so a greedy pattern would repeatedly insert and fold abs.
+  for (math::CosOp op : cosOps) {
+    OpBuilder builder(op);
+    Value absInput = builder.create<math::AbsFOp>(op.getLoc(), op.getOperand(),
+                                                  op.getFastmath());
+    op->setOperand(0, absInput);
+  }
+}
+
 // Convert structured custom ops after operand type converted,
 // for example tt.ptr converted to memref.
 template <typename CustomOpT>
@@ -1010,6 +1033,8 @@ void TritonToLinalgPass::runOnOperation() {
     moduleOp->emitError("failed to apply Canonicalizer Patterns");
     signalPassFailure();
   }
+
+  normalizeCosRangeReductionInputs(moduleOp);
 
   // 2.1 Pre-clean dead control-flow before use analysis.
   // This helps remove unreachable branches such as `scf.if %true` else-region,

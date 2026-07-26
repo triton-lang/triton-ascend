@@ -31,9 +31,6 @@ _install_backcompat()
 def _apply_ascend_patch():
     from triton.compiler import compiler as triton_compiler
     from triton.compiler.code_generator import CodeGenerator
-    from ._patch_code_generator import apply as _apply_cg_patches
-
-    _apply_cg_patches()
 
     if not getattr(CodeGenerator, "_ascend_patch_applied", False):
         _original_cg_init = CodeGenerator.__init__

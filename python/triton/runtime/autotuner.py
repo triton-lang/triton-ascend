@@ -6,12 +6,11 @@ import inspect
 import hashlib
 import json
 from functools import cached_property
-
 from typing import Dict, Tuple, List, Optional
 
 from .. import knobs
 from .jit import KernelInterface, JITFunction
-from .errors import OutOfResources, AutotunerError
+from .errors import OutOfResources, PTXASError, AutotunerError
 from .driver import driver
 from .cache import get_cache_manager, triton_key
 from triton._C.libtriton import get_cache_invalidating_env_vars
@@ -110,6 +109,7 @@ class Autotuner(KernelInterface):
                     quantiles=quantiles,
                 )
                 return
+
             import triton.testing
             self._do_bench = lambda kernel_call, quantiles: triton.testing.do_bench(
                 kernel_call,
@@ -126,7 +126,7 @@ class Autotuner(KernelInterface):
         return self._do_bench
 
     def _bench(self, *args, config, **meta):
-        from ..compiler.errors import CompileTimeAssertionFailure, MLIRCompilationError
+        from ..compiler.errors import CompileTimeAssertionFailure
 
         verbose = knobs.autotuning.print
         if verbose:
@@ -162,7 +162,7 @@ class Autotuner(KernelInterface):
 
         try:
             return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
-        except (OutOfResources, CompileTimeAssertionFailure, MLIRCompilationError) as e:
+        except (OutOfResources, CompileTimeAssertionFailure, PTXASError) as e:
             if verbose:
                 print(f"Autotuning failed with {e}")
             return [float("inf"), float("inf"), float("inf")]

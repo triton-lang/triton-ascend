@@ -996,16 +996,15 @@ def apply_triton_ascend_patch():
         "python/triton/language/standard.py",
         "python/triton/runtime/interpreter.py",
         "python/triton/runtime/jit.py",
-    ]
-    dev_patch_files = [
-        "bin/CMakeLists.txt",
         "bin/RegisterTritonDialects.h",
         "bin/triton-opt.cpp",
+        "bin/CMakeLists.txt",
+    ]
+    dev_patch_files = [
         "python/triton/runtime/autotuner.py",
     ]
-    if not bool(is_manylinux):
-        checkout_file(dev_patch_files)
-        apply_patch(dev_patch)
+    checkout_file(dev_patch_files)
+    apply_patch(dev_patch)
     checkout_file(patch_files)
     apply_patch(patch)
 

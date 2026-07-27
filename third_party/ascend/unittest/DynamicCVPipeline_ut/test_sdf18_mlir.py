@@ -50,7 +50,7 @@ def compile_kernel(kernel, signature, constants):
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
     try:
-        options = NPUOptions()
+        options = NPUOptions(compile_on_910_95=True, enable_dynamic_cv_pipeline=True)
         # 注册codegen_fns,包含tl.dot所需的min_dot_size函数。
         codegen_fns = {"min_dot_size": min_dot_size(None)}
         ttir = ast_to_ttir(kernel, src, context, options, codegen_fns, {})

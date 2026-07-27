@@ -80,7 +80,7 @@ def compile_kernel(kernel, signature, constants):
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
     try:
-        options = NPUOptions()
+        options = NPUOptions(compile_on_910_95=True, enable_dynamic_cv_pipeline=True)
         # 注册codegen_fns,包含tl.dot所需的min_dot_size函数。
         # 正常编译路径通过backend.get_codegen_implementation(options)获取,
         # 此处直接从Ascend backend导入min_dot_size并构造。

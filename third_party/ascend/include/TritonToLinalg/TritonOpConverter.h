@@ -603,6 +603,35 @@ private:
   static constexpr llvm::StringRef prefixAttrName = "prefix";
   static constexpr llvm::StringRef hexAttrName = "hex";
 
+  bool isPromotedFromReduceOrMatmul(mlir::Value v) const {
+    mlir::Operation *defOp = v.getDefiningOp();
+    if (!defOp) return false;
+    return mlir::isa<mlir::linalg::ReduceOp,
+                     mlir::linalg::MatmulOp,
+                     mlir::linalg::BatchMatmulOp,
+                     mlir::triton::ReduceOp,
+                     mlir::triton::DotOp>(defOp);
+  }
+
+  mlir::arith::TruncFOp findDownstreamTruncF(mlir::Value v,
+                                             mlir::Block *blk) const {
+    auto srcTy = mlir::dyn_cast<mlir::RankedTensorType>(v.getType());
+    if (!srcTy) return nullptr;
+    unsigned srcW = srcTy.getElementType().getIntOrFloatBitWidth();
+
+    for (mlir::Operation *user : v.getUsers()) {
+      auto truncOp = mlir::dyn_cast<mlir::arith::TruncFOp>(user);
+      if (!truncOp) continue;
+      if (truncOp->getBlock() != blk) continue;
+      auto dstTy = mlir::dyn_cast<mlir::RankedTensorType>(
+          truncOp.getResult().getType());
+      if (!dstTy) continue;
+      if (dstTy.getElementType().getIntOrFloatBitWidth() >= srcW) continue;
+      return truncOp;
+    }
+    return nullptr;
+  }
+
 public:
   LogicalResult
   matchAndRewrite(triton::PrintOp op, OpAdaptor adaptor,

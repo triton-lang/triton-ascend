@@ -1934,11 +1934,26 @@ LogicalResult TritonPreciseSqrtConverter::matchAndRewrite(
 LogicalResult DevicePrintConverter::matchAndRewrite(
     triton::PrintOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
+  //fix: hoist downstream sub-f32 truncf above the print
+  SmallVector<Value> fixedArgs(op.getArgs().begin(), op.getArgs().end());
+  Operation *insertAfter = nullptr;
+  for (auto &arg : fixedArgs) {
+    if (!this->isPromotedFromReduceOrMatmul(arg)) continue;
+    auto truncOp = this->findDownstreamTruncF(arg, op->getBlock());
+    if (!truncOp) continue;
+    arg = truncOp.getResult();
+    if (!truncOp->isBeforeInBlock(op)) {
+      if (!insertAfter || insertAfter->isBeforeInBlock(truncOp)) {
+        insertAfter = truncOp;
+      }
+    }
+  }
+
   auto moduleOp = op->getParentOfType<ModuleOp>();
   rewriter.setInsertionPoint(moduleOp.getBody(),
                              std::prev(moduleOp.getBody()->end()));
   SmallVector<Type, 4> inputTypes;
-  for (auto arg : op.getArgs()) {
+  for (auto arg : fixedArgs) {
     inputTypes.push_back(arg.getType());
   }
   auto libFnType = rewriter.getFunctionType(inputTypes, {});
@@ -1956,12 +1971,16 @@ LogicalResult DevicePrintConverter::matchAndRewrite(
   auto hexAttr = op.getHexAttr();
   funcOp->setAttr(hexAttrName, hexAttr);
 
-  rewriter.setInsertionPoint(op);
-  rewriter.create<func::CallOp>(op.getLoc(), funcOp, op.getArgs());
+  if (insertAfter) {
+    rewriter.setInsertionPointAfter(insertAfter);
+  } else {
+    rewriter.setInsertionPoint(op);
+  }
+  rewriter.create<func::CallOp>(op.getLoc(), funcOp, fixedArgs);
 
   rewriter.eraseOp(op);
   return success();
-}
+} 
 
 LogicalResult DeviceAssertConverter::matchAndRewrite(
     triton::AssertOp op, OpAdaptor adaptor,

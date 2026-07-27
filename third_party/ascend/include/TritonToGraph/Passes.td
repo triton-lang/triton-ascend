@@ -54,6 +54,8 @@ def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
            "Unified-buffer capacity available to graph optimization rules">,
     Option<"emitRemarks", "emit-remarks", "bool", "false",
            "Emit a remark for every applied graph rewrite">,
+    Option<"forceSimtOnly", "force-simt-only", "bool", "false",
+           "Enable pure-SIMT-only graph rules such as RowCoalescing">,
   ];
 }
 

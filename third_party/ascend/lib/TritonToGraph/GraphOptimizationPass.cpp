@@ -92,6 +92,7 @@ public:
     this->maxRewritesPerFunction = options.maxRewritesPerFunction;
     this->ubCapacityBytes = options.ubCapacityBytes;
     this->emitRemarks = options.emitRemarks;
+    this->forceSimtOnly = options.forceSimtOnly;
   }
 
   void getDependentDialects(DialectRegistry &registry) const override {
@@ -137,6 +138,7 @@ LogicalResult GraphOptimizePass::getStableOptions(
   options.maxRewritesPerFunction = static_cast<unsigned>(cliMaxRewrites);
   options.ubCapacityBytes = static_cast<unsigned>(cliUBCapacityBytes);
   options.emitRemarks = this->emitRemarks;
+  options.forceSimtOnly = this->forceSimtOnly;
   return success();
 }
 
@@ -255,6 +257,96 @@ void GraphOptimizePass::runOnOperation() {
       if (rewriteCount == options.maxRewritesPerFunction)
         break;
     }
+
+    // RowCoalescing has the same function-local candidate/rewrite interface
+    // as the native graph rules, but it has distinct launch semantics.  Its
+    // historical pass ran once and was not subject to the generic rewrite
+    // budget, so run it once after phases 1/2/4 even when that budget has
+    // already been exhausted.
+    if (!isRuleEnabled(options.enabledRuleMask,
+                       GraphOptimizationRuleId::RowCoalescing))
+      continue;
+
+    GraphOptimizationRule *rowRule = nullptr;
+    for (GraphOptimizationRule *rule : enabledRules) {
+      if (rule->getId() == GraphOptimizationRuleId::RowCoalescing) {
+        rowRule = rule;
+        break;
+      }
+    }
+    if (!rowRule)
+      continue;
+
+    if (failed(context.ensure(rowRule->getAnalysisRequirements()))) {
+      function.emitError() << "graph-optimize failed to build Row analyses";
+      signalPassFailure();
+      return;
+    }
+
+    SmallVector<std::unique_ptr<RewritePlan>> rowPlans;
+    if (failed(rowRule->findCandidates(context, rowPlans))) {
+      function.emitError() << "graph-optimize failed to discover Row candidate";
+      signalPassFailure();
+      return;
+    }
+    rowPlans.erase(
+        std::remove_if(
+            rowPlans.begin(), rowPlans.end(),
+            [](const std::unique_ptr<RewritePlan> &plan) {
+              return !plan ||
+                     plan->getRuleId() !=
+                         GraphOptimizationRuleId::RowCoalescing;
+            }),
+        rowPlans.end());
+    if (rowPlans.empty())
+      continue;
+
+    ProgramOrderMap programOrder = buildProgramOrderMap(function);
+    std::stable_sort(
+        rowPlans.begin(), rowPlans.end(),
+        [&programOrder](const std::unique_ptr<RewritePlan> &lhs,
+                        const std::unique_ptr<RewritePlan> &rhs) {
+          if (lhs->getBenefit() != rhs->getBenefit())
+            return lhs->getBenefit() > rhs->getBenefit();
+
+          const unsigned lhsOrder = getProgramOrder(*lhs, programOrder);
+          const unsigned rhsOrder = getProgramOrder(*rhs, programOrder);
+          if (lhsOrder != rhsOrder)
+            return lhsOrder < rhsOrder;
+
+          return static_cast<unsigned>(lhs->getRuleId()) <
+                 static_cast<unsigned>(rhs->getRuleId());
+        });
+
+    std::unique_ptr<RewritePlan> selectedRowPlan;
+    for (std::unique_ptr<RewritePlan> &plan : rowPlans) {
+      if (plan->getCreationEpoch() != context.getEpoch())
+        continue;
+      if (failed(plan->revalidate(context)))
+        continue;
+      selectedRowPlan = std::move(plan);
+      break;
+    }
+    if (!selectedRowPlan)
+      continue;
+
+    IRRewriter rewriter(&getContext());
+    if (failed(selectedRowPlan->apply(rewriter))) {
+      selectedRowPlan.reset();
+      rowPlans.clear();
+      function.emitError() << "graph-optimize failed to apply Row rewrite";
+      signalPassFailure();
+      return;
+    }
+
+    if (options.emitRemarks)
+      function.emitRemark()
+          << "applied graph optimization rule "
+          << static_cast<unsigned>(GraphOptimizationRuleId::RowCoalescing);
+
+    selectedRowPlan.reset();
+    rowPlans.clear();
+    context.invalidate();
   }
 }
 
@@ -273,6 +365,11 @@ void populateBuiltinGraphOptimizationRules(
   }
   if (isRuleEnabled(options.enabledRuleMask, GraphOptimizationRuleId::UBPreload)) {
     rules.push_back(createUBPreloadRule(options.ubCapacityBytes));
+  }
+  if (options.forceSimtOnly &&
+      isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::RowCoalescing)) {
+    rules.push_back(createRowCoalescingRule());
   }
 }
 

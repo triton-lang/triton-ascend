@@ -92,7 +92,7 @@ def _get_then_remove_rc(mod, attr_name: str) -> int:
     return attr_value
 
 
-def _export_coalesce_metadata(mod, metadata):
+def _export_coalesce_metadata(mod, metadata, *, require_row_contract=False):
     # Tile/strided coalescing (TritonToLinalg) records the chosen coalesce factor
     # H and the grid axis it applies to as module attrs hacc.coalesce_factor /
     # hacc.coalesce_axis. In the full-TA design the *launcher* (driver.py) owns
@@ -102,12 +102,24 @@ def _export_coalesce_metadata(mod, metadata):
     # unknown module attrs). Absent attrs -> factor 1 (no-op) / axis -1.
     # RowCoalescing also records whether the launcher should use ceil-div when
     # shrinking the grid, because its runtime valid-count guard handles tails.
+    # A Row result is only valid as the complete triple.  The regular T2L
+    # Axis/Chunk ABI predates ceil-div and deliberately remains compatible with
+    # a missing ceil-div attr.
     factor = _get_then_remove_rc(mod, "hacc.coalesce_factor")
     axis = _get_then_remove_rc(mod, "hacc.coalesce_axis")
     ceil_div = _get_then_remove_rc(mod, "hacc.coalesce_grid_ceil_div")
-    metadata["coalesce_factor"] = factor if isinstance(factor, int) and factor > 1 else 1
-    metadata["coalesce_axis"] = axis if isinstance(axis, int) and axis >= 0 else -1
-    metadata["coalesce_grid_ceil_div"] = bool(isinstance(ceil_div, int) and ceil_div > 0)
+    has_any_contract_attr = any(value != -1 for value in (factor, axis, ceil_div))
+    valid_factor = isinstance(factor, int) and factor > 1
+    valid_axis = isinstance(axis, int) and axis in (0, 1, 2)
+    valid_ceil_div = isinstance(ceil_div, int) and ceil_div > 0
+    if has_any_contract_attr and (not valid_factor or not valid_axis):
+        raise RuntimeError("invalid hacc.coalesce launch contract")
+    if require_row_contract and has_any_contract_attr and not valid_ceil_div:
+        raise RuntimeError("RowCoalescing requires hacc.coalesce_grid_ceil_div")
+
+    metadata["coalesce_factor"] = factor if valid_factor else 1
+    metadata["coalesce_axis"] = axis if valid_axis else -1
+    metadata["coalesce_grid_ceil_div"] = valid_ceil_div
     metadata["row_coalescing_applied"] = metadata["coalesce_factor"] > 1
 
 
@@ -150,6 +162,15 @@ def make_ttir(mod, metadata, opt):
     passes.common.add_licm(pm)
     passes.common.add_symbol_dce(pm)
     passes.ttir.add_loop_unroll(pm)
+    if opt.enable_graph_optimize:
+        ascend.passes.ttir.add_graph_optimize(
+            pm,
+            rule_mask=opt.graph_optimize_rule_mask,
+            max_rewrites_per_function=opt.graph_optimize_max_rewrites_per_function,
+            ub_capacity_bytes=opt.graph_optimize_ub_capacity_bytes,
+            emit_remarks=opt.graph_optimize_emit_remarks,
+            force_simt_only=opt.force_simt_only,
+        )
     pm.run(mod, 'make_ttir')
     if opt.debug:
         dump_manager = get_dump_manager(metadata["hash"])
@@ -1169,14 +1190,10 @@ def ttir_to_npubin(mod, metadata, opt):
     ttir_code = str(mod)
     metadata = _parse_ttir_metadata(ttir_code, metadata)
     if opt.force_simt_only:
-        pm = ir.pass_manager(mod.context)
-        pm.enable_debug()
-        ascend.passes.ttir.add_row_coalescing(pm)
-        # Newer libtriton bindings require a pipeline name for diagnostics.
-        # This preserves the 895 scheduling point and pass set; the string is
-        # only the pass-manager execution label.
-        pm.run(mod, "row_coalescing")
-        _export_coalesce_metadata(mod, metadata)
+        # RowCoalescing is now the pure-SIMT graph rule in make_ttir().  This
+        # stage only transfers its complete launch contract to metadata before
+        # handing TTIR to pure-SIMT codegen.
+        _export_coalesce_metadata(mod, metadata, require_row_contract=True)
         ttir_code = str(mod)
     with tempfile.TemporaryDirectory() as tmpdir:
         # prepare input

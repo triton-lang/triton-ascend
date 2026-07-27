@@ -15,6 +15,7 @@ add_triton_library(TritonToGraph
   LegacyMemoryAccess/StridedAxisCoalescing.cpp
   LegacyMemoryAccess/StridedLoadStoreRewrite.cpp
   Rules/LoadStoreTransposeRule.cpp
+  Rules/RowCoalescingRule.cpp
   Rules/TransposePointwiseReorderRule.cpp
   Rules/UBPreloadRule.cpp
 

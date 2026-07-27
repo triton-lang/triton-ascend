@@ -77,6 +77,7 @@ std::unique_ptr<GraphOptimizationRule> createTransposePointwiseReorderRule();
 std::unique_ptr<GraphOptimizationRule> createLoadStoreTransposeRule();
 std::unique_ptr<GraphOptimizationRule> createUBPreloadRule(
     unsigned ubCapacityBytes);
+std::unique_ptr<GraphOptimizationRule> createRowCoalescingRule();
 
 } // namespace cfg
 } // namespace triton

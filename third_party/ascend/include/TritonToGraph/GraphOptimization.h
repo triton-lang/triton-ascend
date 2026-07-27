@@ -37,10 +37,13 @@ enum class GraphOptimizationRuleId : uint8_t {
   LoadStoreTranspose = 1,
   TransposePointwiseReorder = 2,
   UBPreload = 4,
+  // RowCoalescing is a pure-SIMT-only graph rule.  It is intentionally
+  // scheduled once after the normal per-function phases because its launch
+  // contract must not be suppressed by their rewrite budget.
+  RowCoalescing = 8,
   // The following identities are owned by the layout/memory compatibility
   // passes.  They deliberately are not GraphOptimizationRule candidates and
   // are not added to GraphOptimizePass's per-function phase loop.
-  RowCoalescing = 8,
   StridedAxisCoalescing = 16,
   ChunkCoalescing = 32,
   StridedLoadStoreRewrite = 64,
@@ -75,6 +78,10 @@ struct GraphOptimizationOptions {
   unsigned maxRewritesPerFunction = 64;
   unsigned ubCapacityBytes = 0;
   bool emitRemarks = false;
+  // RowCoalescing changes the launch grid and is valid only for the
+  // force_simt_only compilation route.  This must be an explicit per-pass
+  // option rather than inferred from later pipeline state.
+  bool forceSimtOnly = false;
 };
 
 std::unique_ptr<OperationPass<ModuleOp>>

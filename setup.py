@@ -491,6 +491,7 @@ class CMakeBuild(build_ext):
         os.environ['LD_LIBRARY_PATH'] = f'{hitest_home}:{current_ld_path}'
 
     def run(self):
+        download_and_copy_dependencies()
         apply_triton_ascend_patch()
 
         try:
@@ -989,6 +990,7 @@ def apply_triton_ascend_patch():
         "python/triton/_utils.py",
         "python/triton/compiler/code_generator.py",
         "python/triton/compiler/compiler.py",
+        "python/triton/compiler/errors.py",
         "python/triton/language/math.py",
         "python/triton/language/semantic.py",
         "python/triton/language/standard.py",
@@ -999,8 +1001,6 @@ def apply_triton_ascend_patch():
         "bin/CMakeLists.txt",
         "bin/RegisterTritonDialects.h",
         "bin/triton-opt.cpp",
-        "python/triton/compiler/compiler.py",
-        "python/triton/compiler/errors.py",
         "python/triton/runtime/autotuner.py",
     ]
     if not bool(is_manylinux):

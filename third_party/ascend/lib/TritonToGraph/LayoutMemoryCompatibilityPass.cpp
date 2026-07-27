@@ -22,7 +22,6 @@
 
 #include "TritonToGraph/LayoutMemoryOptimization.h"
 #include "TritonToGraph/LegacyMemoryAccess/ChunkCoalescing.h"
-#include "TritonToGraph/LegacyMemoryAccess/RowCoalescing.h"
 #include "TritonToGraph/LegacyMemoryAccess/StridedAxisCoalescing.h"
 #include "TritonToGraph/LegacyMemoryAccess/StridedLoadStoreRewrite.h"
 
@@ -93,36 +92,11 @@ private:
   LayoutMemoryCompatibilityPhase phase;
 };
 
-class RowCoalescingCompatibilityPass final
-    : public PassWrapper<RowCoalescingCompatibilityPass,
-                         OperationPass<ModuleOp>> {
-public:
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(RowCoalescingCompatibilityPass)
-
-  void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<arith::ArithDialect, cf::ControlFlowDialect,
-                    math::MathDialect, scf::SCFDialect, tensor::TensorDialect,
-                    triton::TritonDialect,
-                    triton::ascend::TritonAscendDialect>();
-  }
-
-  void runOnOperation() override {
-    // Keep the pure-SIMT Row stage a single module rewrite with no cleanup or
-    // generic graph-rule mask interaction.
-    RowCoalescing::rewriteRowCoalesce(getOperation());
-  }
-};
-
 } // namespace
 
 std::unique_ptr<OperationPass<ModuleOp>>
 createLayoutMemoryCompatibilityPass(LayoutMemoryCompatibilityPhase phase) {
   return std::make_unique<LayoutMemoryCompatibilityPass>(phase);
-}
-
-std::unique_ptr<OperationPass<ModuleOp>>
-createRowCoalescingCompatibilityPass() {
-  return std::make_unique<RowCoalescingCompatibilityPass>();
 }
 
 } // namespace cfg

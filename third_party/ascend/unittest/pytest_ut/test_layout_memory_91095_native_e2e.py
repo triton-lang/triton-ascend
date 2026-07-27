@@ -73,11 +73,11 @@ class _NativePipelineObserver:
         export_metadata = ascend_compiler._export_coalesce_metadata
         make_launcher = ascend_driver.make_launcher
 
-        def observe_export(module, metadata):
+        def observe_export(module, metadata, **kwargs):
             # This is after Row or T2L's Axis/Chunk/SLS sequence but before
             # hacc.coalesce_* is intentionally removed for the vendor compiler.
             observer.pre_export_ir.append(str(module))
-            result = export_metadata(module, metadata)
+            result = export_metadata(module, metadata, **kwargs)
             observer.metadata_after_export.append(dict(metadata))
             return result
 

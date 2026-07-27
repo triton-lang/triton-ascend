@@ -199,8 +199,8 @@ def _run_ttir_to_npubin(
             "row_coalescing_applied": row_coalescing_applied,
         }
 
-    def export_coalesce_metadata(_mod, _metadata):
-        events.append("export")
+    def export_coalesce_metadata(_mod, _metadata, *, require_row_contract=False):
+        events.append(f"export:{require_row_contract}")
 
     def run_bisheng(command, **_kwargs):
         commands.append(list(command))
@@ -214,17 +214,6 @@ def _run_ttir_to_npubin(
         SimpleNamespace(
             pass_manager=lambda _context: (
                 events.append("pass_manager") or pass_manager
-            )
-        ),
-    )
-    monkeypatch.setattr(
-        compiler,
-        "ascend",
-        SimpleNamespace(
-            passes=SimpleNamespace(
-                ttir=SimpleNamespace(
-                    add_row_coalescing=lambda _pm: events.append("add_row")
-                )
             )
         ),
     )
@@ -319,7 +308,46 @@ def test_export_coalesce_metadata_removes_attrs_and_marks_row(compiler_module, m
     }
 
 
-def test_ttir_to_npubin_runs_row_only_for_pure_simt_in_original_order(
+def test_export_coalesce_metadata_rejects_partial_row_contract(
+    compiler_module, monkeypatch
+):
+    def get_int_attr(module, name):
+        return module.attrs.get(name)
+
+    def remove_attr(module, name):
+        module.attrs.pop(name, None)
+
+    monkeypatch.setattr(
+        compiler_module,
+        "ascend",
+        SimpleNamespace(
+            ir=SimpleNamespace(
+                get_int_attr=get_int_attr,
+                remove_attr=remove_attr,
+            )
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="launch contract"):
+        compiler_module._export_coalesce_metadata(
+            SimpleNamespace(attrs={"hacc.coalesce_factor": 4}), {},
+            require_row_contract=True,
+        )
+
+    with pytest.raises(RuntimeError, match="RowCoalescing"):
+        compiler_module._export_coalesce_metadata(
+            SimpleNamespace(
+                attrs={
+                    "hacc.coalesce_factor": 4,
+                    "hacc.coalesce_axis": 0,
+                }
+            ),
+            {},
+            require_row_contract=True,
+        )
+
+
+def test_ttir_to_npubin_exports_make_ttir_row_contract_only_for_pure_simt(
     compiler_module, monkeypatch
 ):
     events, _command = _run_ttir_to_npubin(
@@ -330,11 +358,7 @@ def test_ttir_to_npubin_runs_row_only_for_pure_simt_in_original_order(
     assert events == [
         "str:0",
         "parse",
-        "pass_manager",
-        "enable_debug",
-        "add_row",
-        "run_row",
-        "export",
+        "export:True",
         "str:1",
     ]
 
@@ -345,6 +369,74 @@ def test_ttir_to_npubin_runs_row_only_for_pure_simt_in_original_order(
             force_simt_only=False,
         )
     assert events == ["str:0", "parse"]
+
+
+def test_make_ttir_passes_force_simt_only_to_graph_optimize(
+    compiler_module, monkeypatch
+):
+    events = []
+    module = _FakeModule(events)
+    pass_manager = _FakePassManager(events)
+    graph_calls = []
+
+    def record(name):
+        return lambda _pm, *args, **kwargs: events.append((name, args, kwargs))
+
+    monkeypatch.setattr(
+        compiler_module,
+        "ir",
+        SimpleNamespace(pass_manager=lambda _context: pass_manager),
+    )
+    monkeypatch.setattr(
+        compiler_module,
+        "passes",
+        SimpleNamespace(
+            common=SimpleNamespace(
+                add_inliner=record("inliner"),
+                add_canonicalizer=record("canonicalizer"),
+                add_cse=record("cse"),
+                add_licm=record("licm"),
+                add_symbol_dce=record("symbol_dce"),
+            ),
+            ttir=SimpleNamespace(
+                add_combine=record("combine"),
+                add_reorder_broadcast=record("reorder_broadcast"),
+                add_loop_unroll=record("loop_unroll"),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        compiler_module,
+        "ascend",
+        SimpleNamespace(
+            passes=SimpleNamespace(
+                ttir=SimpleNamespace(
+                    add_graph_optimize=lambda _pm, **kwargs: graph_calls.append(kwargs)
+                )
+            )
+        ),
+    )
+    options = SimpleNamespace(
+        enable_graph_optimize=True,
+        graph_optimize_rule_mask=8,
+        graph_optimize_max_rewrites_per_function=17,
+        graph_optimize_ub_capacity_bytes=4096,
+        graph_optimize_emit_remarks=True,
+        force_simt_only=True,
+        debug=False,
+    )
+
+    assert compiler_module.make_ttir(module, {}, options) is module
+    assert graph_calls == [
+        {
+            "rule_mask": 8,
+            "max_rewrites_per_function": 17,
+            "ub_capacity_bytes": 4096,
+            "emit_remarks": True,
+            "force_simt_only": True,
+        }
+    ]
+    assert events[-1] == "run_row"
 
 
 def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):

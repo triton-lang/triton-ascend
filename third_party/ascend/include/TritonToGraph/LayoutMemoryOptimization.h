@@ -45,9 +45,6 @@ enum class LayoutMemoryCompatibilityPhase : uint8_t {
 std::unique_ptr<OperationPass<ModuleOp>>
 createLayoutMemoryCompatibilityPass(LayoutMemoryCompatibilityPhase phase);
 
-std::unique_ptr<OperationPass<ModuleOp>>
-createRowCoalescingCompatibilityPass();
-
 } // namespace cfg
 } // namespace triton
 } // namespace mlir

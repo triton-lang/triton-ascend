@@ -10,11 +10,11 @@
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
 
-"""IR contracts for the pure-SIMT Row compatibility pass.
+"""IR contracts for the pure-SIMT Row graph-optimization rule.
 
-This intentionally enters through the public ``add_row_coalescing`` pybind
-API, rather than a synthetic command-line pass.  Row has no public CLI pass:
-its only valid scheduling slot is the pure-SIMT compiler path.
+Row is selected by graph-rule bit 8 and the explicit ``force_simt_only`` pass
+option.  The test enters through the public graph-optimization binding, which
+is the same pass scheduled by ``make_ttir()``.
 """
 
 import pytest
@@ -23,20 +23,46 @@ from triton._C.libtriton import ascend, ir
 from triton._C.libtriton.ascend import ir as ascend_ir
 
 
-if not hasattr(ascend.passes.ttir, "add_row_coalescing"):
+if not hasattr(ascend.passes.ttir, "add_graph_optimize"):
     pytest.skip(
-        "requires the TritonAscend build containing Row compatibility pass",
+        "requires the TritonAscend build containing graph optimization",
         allow_module_level=True,
     )
 
 
-def _row_module(name, width, *, axis="x", reads_num_programs=False, body="copy"):
+def _row_module(
+    name,
+    width,
+    *,
+    axis="x",
+    reads_num_programs=False,
+    pid_derived_outside_work=False,
+    has_direct_call=False,
+    body="copy",
+):
     num_programs = (
         f"    %num_programs = tt.get_num_programs {axis} : i32\n"
         if reads_num_programs
         else ""
     )
     pre_load = ""
+    pre_pid = ""
+    helper = ""
+    if has_direct_call:
+        # Keep the call outside the work region so this test exercises the
+        # V1 entry-closure gate rather than merely Row's liftable-op filter.
+        pre_pid = "    tt.call @row_helper() : () -> ()\n"
+        helper = """  tt.func private @row_helper() {
+    tt.return
+  }
+"""
+    pid_prefix = ""
+    pid_in_work = "%pid"
+    if pid_derived_outside_work:
+        pid_prefix = """    %one = arith.constant 1 : i32
+    %pid_base = arith.addi %pid, %one : i32
+"""
+        pid_in_work = "%pid_base"
     load = f"    %value = tt.load %src_ptr : tensor<{width}x!tt.ptr<f32>>"
     post_load = ""
     store_value = "%value"
@@ -85,14 +111,14 @@ def _row_module(name, width, *, axis="x", reads_num_programs=False, body="copy")
     return f"""
 module {{
   tt.func public @{name}(%src: !tt.ptr<f32>, %dst: !tt.ptr<f32>, %valid: !tt.ptr<i32>) {{
-    %pid = tt.get_program_id {axis} : i32
-{num_programs}    %count = tt.load %valid : !tt.ptr<i32>
+{pre_pid}    %pid = tt.get_program_id {axis} : i32
+{num_programs}{pid_prefix}    %count = tt.load %valid : !tt.ptr<i32>
     %past_end = arith.cmpi sge, %pid, %count : i32
     cf.cond_br %past_end, ^bb_return, ^bb_work
   ^bb_return:
     tt.return
   ^bb_work:
-    %pid_splat = tt.splat %pid : i32 -> tensor<{width}xi32>
+    %pid_splat = tt.splat {pid_in_work} : i32 -> tensor<{width}xi32>
     %range = tt.make_range {{end = {width} : i32, start = 0 : i32}} : tensor<{width}xi32>
     %offsets = arith.addi %pid_splat, %range : tensor<{width}xi32>
     %src_splat = tt.splat %src : !tt.ptr<f32> -> tensor<{width}x!tt.ptr<f32>>
@@ -103,11 +129,11 @@ module {{
     tt.store %dst_ptr, {store_value}{store_mask} : tensor<{width}x!tt.ptr<f32>>
     tt.return
   }}
-}}
+{helper}}}
 """
 
 
-def _run_row(text, tmp_path):
+def _run_row(text, tmp_path, *, force_simt_only=True, rule_mask=8):
     context = ir.context()
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
@@ -115,8 +141,12 @@ def _run_row(text, tmp_path):
     path.write_text(text)
     module = ir.parse_mlir_module(str(path), context)
     pm = ir.pass_manager(context)
-    ascend.passes.ttir.add_row_coalescing(pm)
-    pm.run(module, "row-coalescing-compat-test")
+    ascend.passes.ttir.add_graph_optimize(
+        pm,
+        rule_mask=rule_mask,
+        force_simt_only=force_simt_only,
+    )
+    pm.run(module, "row-coalescing-graph-rule-test")
     return str(module)
 
 
@@ -137,7 +167,7 @@ def _assert_row_bailout(text):
     ("width", "factor"),
     ((16, 8), (32, 4), (1024, 2)),
 )
-def test_row_coalescing_compatibility_pass_preserves_h_selection(
+def test_row_coalescing_graph_rule_preserves_h_selection(
     width, factor, tmp_path
 ):
     text = _run_row(_row_module(f"row_h{factor}", width), tmp_path)
@@ -229,3 +259,61 @@ def test_row_coalescing_preserves_nonzero_row_axis(tmp_path):
 
     _assert_row_hit(text, axis=1)
     assert "tt.get_program_id y" in text
+
+
+def test_row_coalescing_requires_force_simt_only_and_rule_bit(tmp_path):
+    source = _row_module("row_force_gate", 16)
+
+    force_disabled = _run_row(source, tmp_path, force_simt_only=False)
+    mask_disabled = _run_row(source, tmp_path, rule_mask=7)
+
+    _assert_row_bailout(force_disabled)
+    _assert_row_bailout(mask_disabled)
+
+
+def test_row_coalescing_rejects_pid_value_defined_before_work_block(tmp_path):
+    text = _run_row(
+        _row_module("row_pid_derived_before_work", 16, pid_derived_outside_work=True),
+        tmp_path,
+    )
+
+    _assert_row_bailout(text)
+    # The Python MLIR printer may renumber SSA values, so check the preserved
+    # scalar add structurally rather than relying on its textual value name.
+    assert text.count("arith.addi") >= 2
+
+
+def test_row_coalescing_rejects_direct_call_even_outside_work_region(tmp_path):
+    text = _run_row(_row_module("row_with_call", 16, has_direct_call=True), tmp_path)
+
+    _assert_row_bailout(text)
+    assert "tt.call @row_helper()" in text
+
+
+def test_row_coalescing_requires_one_public_entry_but_ignores_unused_private_funcs(
+    tmp_path,
+):
+    source = _row_module("row_one_public", 16)
+    multiple_public = source.replace(
+        "\n}\n",
+        """
+  tt.func public @another_entry() {
+    tt.return
+  }
+}
+""",
+        1,
+    )
+    with_unused_private = source.replace(
+        "\n}\n",
+        """
+  tt.func private @unused_helper() {
+    tt.return
+  }
+}
+""",
+        1,
+    )
+
+    _assert_row_bailout(_run_row(multiple_public, tmp_path))
+    _assert_row_hit(_run_row(with_unused_private, tmp_path))

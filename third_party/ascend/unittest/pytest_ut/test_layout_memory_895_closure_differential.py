@@ -118,42 +118,9 @@ def _exec_functions(source, names, namespace):
     return namespace
 
 
-class _NormalizeAllowedRowPassManagerLabel(ast.NodeTransformer):
-    """Normalize only the required libtriton diagnostic-label adaptation.
-
-    The migrated compiler must stay AST-identical to 895 everywhere else.  Do
-    not broadly erase ``run`` arguments: accepting precisely
-    ``pm.run(mod, "row_coalescing")`` makes a new scheduling/pass change fail
-    this differential test instead of being hidden by the normalization.
-    """
-
-    def __init__(self):
-        self.normalized_count = 0
-
-    def visit_Call(self, node):
-        self.generic_visit(node)
-        if (
-            isinstance(node.func, ast.Attribute)
-            and node.func.attr == "run"
-            and len(node.args) == 2
-            and isinstance(node.args[0], ast.Name)
-            and node.args[0].id == "mod"
-            and isinstance(node.args[1], ast.Constant)
-            and node.args[1].value == "row_coalescing"
-        ):
-            node.args.pop()
-            self.normalized_count += 1
-        return node
-
-
-def _normalised_function_ast(source, name, *, normalize_row_label=False):
+def _normalised_function_ast(source, name):
     function = _top_level_functions(source, name)[0]
-    normalizer = None
-    if normalize_row_label:
-        normalizer = _NormalizeAllowedRowPassManagerLabel()
-        function = normalizer.visit(function)
-        ast.fix_missing_locations(function)
-    return ast.dump(function, include_attributes=False), normalizer
+    return ast.dump(function, include_attributes=False)
 
 
 def _load_compiler_closure(source):
@@ -177,34 +144,18 @@ def _load_compiler_closure(source):
     return namespace
 
 
-def test_895_compiler_closure_ast_is_identical_except_row_pm_label(source_pairs):
-    """Prove all compiler-closure inputs retain the 895 source behavior.
-
-    The dynamic matrix below exercises the relevant combinations.  This
-    stronger AST check closes the gap for unenumerated values: these complete
-    functions are byte-for-byte equivalent at the AST level once the single
-    binding-required diagnostic label is normalized.
-    """
+def test_895_compiler_closure_ast_is_identical_outside_row_migration(source_pairs):
+    """Keep compiler helpers unchanged outside the intentional Row migration."""
 
     baseline_source, target_source = source_pairs["compiler"]
     for name in (
         "_get_then_remove_rc",
-        "_export_coalesce_metadata",
         "_parse_ttir_metadata",
         "get_common_bishengir_compile_options",
     ):
-        baseline, _ = _normalised_function_ast(baseline_source, name)
-        target, _ = _normalised_function_ast(target_source, name)
+        baseline = _normalised_function_ast(baseline_source, name)
+        target = _normalised_function_ast(target_source, name)
         assert target == baseline, name
-
-    baseline, _ = _normalised_function_ast(baseline_source, "ttir_to_npubin")
-    target, normalizer = _normalised_function_ast(
-        target_source,
-        "ttir_to_npubin",
-        normalize_row_label=True,
-    )
-    assert normalizer is not None and normalizer.normalized_count == 1
-    assert target == baseline
 
 
 class _FakeIrModule:
@@ -362,8 +313,8 @@ def _export_coalesce_metadata(closure, attrs):
     return metadata, module.attrs, removed
 
 
-def test_895_pure_simt_bisheng_argv_matrix_and_row_pm_label(source_pairs):
-    """All 96 895 argv cases survive; only the binding-required PM label differs."""
+def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_pairs):
+    """All 96 pure-SIMT argv cases survive after Row leaves npubin."""
     baseline_source, target_source = source_pairs["compiler"]
     common_prefix = [
         "--common-before-pure-simt",
@@ -440,11 +391,10 @@ def test_895_pure_simt_bisheng_argv_matrix_and_row_pm_label(source_pairs):
             "kernel",
         ], case
 
-        # This is the sole allowed source-level API adaptation: newer
-        # libtriton requires the diagnostic pipeline label, not a different
-        # scheduling position or pass set.
+        # Row is now applied by make_ttir's graph pass.  npubin must preserve
+        # all compile arguments while no longer creating a Row pass manager.
         assert baseline_pm.run_calls == [()], case
-        assert target_pm.run_calls == [("row_coalescing",)], case
+        assert target_pm.run_calls == [], case
         count += 1
 
     assert count == 96

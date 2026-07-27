@@ -337,7 +337,6 @@ class TritonSemantic(Generic[TensorTy]):
         other_scalar_ty = other.type.scalar
         # float % float
         if scalar_ty.is_floating():
-            # input - input.div(other, rounding_mode="floor") * other
             return self.tensor(self.builder.create_frem(input.handle, other.handle), input.type)
         # % int
         elif scalar_ty.is_int():
@@ -345,9 +344,6 @@ class TritonSemantic(Generic[TensorTy]):
                 raise TypeError("Cannot mod " + scalar_ty.__repr__() + " by " + other_scalar_ty.__repr__() + " "
                                 "because they have different signedness;"
                                 "this is unlikely to result in a useful answer. Cast them to the same signedness.")
-            if hasattr(input, 'was_bool_to_int8'):
-                false_val = self.builder.get_int1(False)
-                return self.tensor(false_val, tl.int1)
             if scalar_ty.is_int_signed():
                 return self.tensor(self.builder.create_srem(input.handle, other.handle), input.type)
             else:
@@ -433,61 +429,22 @@ class TritonSemantic(Generic[TensorTy]):
         return self.tensor(self.builder.create_xor(input.handle, other.handle), input.type)
 
     def logical_and(self, input: TensorTy, other: TensorTy) -> TensorTy:
-        dst_sca_ty = tl.dtype("int1")
-        dst_bits = dst_sca_ty.primitive_bitwidth
-        if hasattr(input, 'was_bool_to_int8'):
-            assert input.type.scalar.is_int8(), "input wat bool to int8. However, input.type is not int8."
-            input = self.cast(input, tl.int1)
         if not input.type.is_int1():
-            src_sca_ty = input.type.scalar
-            src_bits = src_sca_ty.primitive_bitwidth
-            if src_bits == dst_bits or src_sca_ty.is_ptr() or dst_sca_ty.is_ptr():
-                input = self.bitcast(input, tl.int1)
-            else:
-                input = self.not_equal(input, 0)
-        if hasattr(other, 'was_bool_to_int8'):
-            assert other.type.scalar.is_int8(), "Other input wat bool to int8. However, other input.type is not int8."
-            other = self.cast(other, tl.int1)
+            input = self.bitcast(input, tl.int1)
         if not other.type.is_int1():
-            src_sca_ty = other.type.scalar
-            src_bits = src_sca_ty.primitive_bitwidth
-            if src_bits == dst_bits or src_sca_ty.is_ptr() or dst_sca_ty.is_ptr():
-                other = self.bitcast(other, tl.int1)
-            else:
-                other = self.not_equal(other, 0)
+            other = self.bitcast(other, tl.int1)
         return self.and_(input, other)
 
     def logical_or(self, input: TensorTy, other: TensorTy) -> TensorTy:
-        dst_sca_ty = tl.dtype("int1")
-        dst_bits = dst_sca_ty.primitive_bitwidth
-        if hasattr(input, 'was_bool_to_int8'):
-            assert input.type.scalar.is_int8(), "input wat bool to int8. However, input.type is not int8."
-            input = self.cast(input, tl.int1)
         if not input.type.is_int1():
-            src_sca_ty = input.type.scalar
-            src_bits = src_sca_ty.primitive_bitwidth
-            if src_bits == dst_bits or src_sca_ty.is_ptr() or dst_sca_ty.is_ptr():
-                input = self.bitcast(input, tl.int1)
-            else:
-                input = self.not_equal(input, 0)
-        if hasattr(other, 'was_bool_to_int8'):
-            assert other.type.scalar.is_int8(), "Other wat bool to int8. However, other.type is not int8."
-            other = self.cast(other, tl.int1)
+            input = self.bitcast(input, tl.int1)
         if not other.type.is_int1():
-            src_sca_ty = other.type.scalar
-            src_bits = src_sca_ty.primitive_bitwidth
-            if src_bits == dst_bits or src_sca_ty.is_ptr() or dst_sca_ty.is_ptr():
-                other = self.bitcast(other, tl.int1)
-            else:
-                other = self.not_equal(other, 0)
+            other = self.bitcast(other, tl.int1)
         return self.or_(input, other)
 
     def not_(self, input: TensorTy):
-        if hasattr(input, 'was_bool_to_int8'):
-            assert input.type.scalar.is_int8(), "input wat bool to int8. However, input.type is not int8."
-            input = self.cast(input, tl.int1)
-        if input.type.scalar.is_floating():
-            raise TypeError(f"unexpected type {input.type.scalar}")
+        if not input.type.is_int1():
+            input = self.bitcast(input, tl.int1)
         return self.invert(input)
 
     def lshr(self, input: TensorTy, other: TensorTy) -> TensorTy:
@@ -511,22 +468,14 @@ class TritonSemantic(Generic[TensorTy]):
 
     def minus(self, input: TensorTy) -> TensorTy:
         input_sca_ty = input.type.scalar
-        if hasattr(input, 'was_bool_to_int8'):
-            if input.type.scalar.is_int8():
-                raise TypeError("unexpected type bool")
         if input_sca_ty.is_ptr():
             raise ValueError("wrong type argument to unary minus (" + input_sca_ty.__repr__() + ")")
         _0 = self.tensor(self.builder.get_null_value(input_sca_ty.to_ir(self.builder)), input_sca_ty)
         return self.sub(_0, input, True)
 
     def invert(self, input: TensorTy) -> TensorTy:
-        if hasattr(input, 'was_bool_to_int8'):
-            assert input.type.scalar.is_int8(), "input wat bool to int8. However, input.type is not int8."
-            input = self.cast(input, tl.int1)
         input_sca_ty = input.type.scalar
-        if input_sca_ty.is_floating():
-            raise TypeError(f"unexpected type {input_sca_ty}")
-        if input_sca_ty.is_ptr():
+        if input_sca_ty.is_ptr() or input_sca_ty.is_floating():
             raise ValueError("wrong type argument to unary invert (" + input_sca_ty.__repr__() + ")")
         _1 = self.tensor(self.builder.get_all_ones_value(input_sca_ty.to_ir(self.builder)), input_sca_ty)
         return self.xor_(input, _1)
@@ -630,11 +579,8 @@ class TritonSemantic(Generic[TensorTy]):
         if end <= start:
             raise ValueError("arange's end argument must be greater than the start argument")
         range = end - start
-        # Check if compile_mode is simt, then range must be a power of 2
-        if self.builder.is_simt_mode():
-            # Check if range is a power of 2
-            if (range & (range - 1)) != 0:
-                raise ValueError("arange's range must be a power of 2")
+        if (range & (range - 1)) != 0:
+            raise ValueError("arange's range must be a power of 2")
         shape = [range]
         if ret_ty is None:
             ret_ty = tl.block_type(tl.int32, shape)
@@ -1063,8 +1009,6 @@ class TritonSemantic(Generic[TensorTy]):
         # Check `boundary_check` argument
         boundary_check = self._canonicalize_boundary_check(boundary_check, dst_ty.get_block_shapes())
 
-        if boundary_check and padding is None:
-            padding = ir.PADDING_OPTION.PAD_ZERO
         # Build IR
         return self.tensor(
             self.builder.create_tensor_pointer_load(ptr.handle, boundary_check, padding, cache, eviction, is_volatile),
@@ -1082,12 +1026,7 @@ class TritonSemantic(Generic[TensorTy]):
             raise ValueError("`padding_option` or `boundary_check` argument is not supported for loading a tensor of"
                              "pointers or loading a scalar. Because the compiler does not know the boundary; please "
                              "use block pointers (defined by `make_block_ptr`) instead")
-        if mask is not None and other is None:
-            # Get element type to determine default padding value
-            elt_ty = ptr.type.scalar.element_ty
-            # Use 0.0 for floating point types, 0 for integer types
-            default_value = 0.0 if elt_ty.is_floating() else 0
-            other = self.to_tensor(default_value)
+
         # For a pointer of scalar, check the type of `mask` and `other`
         if not ptr.type.is_block():
             if mask and mask.type.is_block():
@@ -1126,19 +1065,13 @@ class TritonSemantic(Generic[TensorTy]):
 
         # Build IR
         if mask is None:
-            load_handle = self.builder.create_load(ptr.handle, cache, eviction, is_volatile)
+            ret = self.tensor(self.builder.create_load(ptr.handle, cache, eviction, is_volatile), dst_ty)
         else:
-            load_handle = self.builder.create_masked_load(ptr.handle, mask.handle, other.handle if other else None,
-                                                          cache, eviction, is_volatile)
-
+            ret = self.tensor(
+                self.builder.create_masked_load(ptr.handle, mask.handle, other.handle if other else None, cache,
+                                                eviction, is_volatile), dst_ty)
         if is_bool:
-            load_handle.set_attr("was_bool_to_int8", self.builder.get_bool_attr(True))
-
-        ret = self.tensor(load_handle, dst_ty)
-        # Do not cast back to int1 when is_bool=true. We directly use the int8 tensor given by tl.load
-        if is_bool:
-            ret.was_bool_to_int8 = True
-
+            ret = self.cast(ret, tl.int1)
         return ret
 
     def load(self, ptr: TensorTy, mask: Optional[TensorTy], other: Optional[TensorTy], boundary_check: Tuple,

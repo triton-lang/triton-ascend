@@ -860,6 +860,10 @@ void triton_launch_kernel(
     const int64_t* shapes_data, const int* shape_dims, int num_tensors,
     const int* tensor_kinds,
     const void* const* kernel_args, const size_t* arg_sizes, int num_args) {{
+  if (gridX <=0 || gridY <=0 || gridZ <=0) {{
+    printf("WARNING: Skipping launch for kernel '%s' due to empty grid (gridX=%d, gridY=%d, gridZ=%d).\\n", kernelName, gridX, gridY, gridZ);
+    return;
+  }}
   std::vector<std::vector<int64_t>> tensorShapes;
   if (shapes_data != nullptr && shape_dims != nullptr) {{
     int shapes_idx = 0;
@@ -999,6 +1003,10 @@ void triton_launch_kernel(
 
 static void _launch(const char* kernelName, const void* func, rtStream_t stream, int gridX, int gridY, int gridZ, std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{(', ' + arg_decls) if len(arg_decls) > 0 else ''}) {{
   // Keep Python launcher on the stable local packing path.
+  if (gridX <=0 || gridY <=0 || gridZ <=0) {{
+    printf("WARNING: Skipping launch for kernel '%s' due to empty grid (gridX=%d, gridY=%d, gridZ=%d).\\n", kernelName, gridX, gridY, gridZ);
+    return;
+  }}
   std::string name = "";
   name.append(kernelName);
   void *workspace_addr_ptr = NULL;

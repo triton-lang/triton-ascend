@@ -126,11 +126,10 @@ LogicalResult OpTrait::impl::verifyTensorSize(Operation *op) {
         return op->emitError("Maximum allowed number of elements is ")
                << maxTensorNumElements << ", but " << *op
                << " has more than that";
-      // FIXME:patched triton community
-      // if ((numElements & (numElements - 1)) != 0)
-      //   return op->emitError("Number of elements must be power-of-two, but ")
-      //          << *op << " doesn't follow the rule (" << numElements << ")"
-      //          << " elements";
+      if ((numElements & (numElements - 1)) != 0)
+        return op->emitError("Number of elements must be power-of-two, but ")
+               << *op << " doesn't follow the rule (" << numElements << ")"
+               << " elements";
     }
   }
   for (auto opType : op->getResultTypes()) {
@@ -142,11 +141,10 @@ LogicalResult OpTrait::impl::verifyTensorSize(Operation *op) {
         return op->emitError("Maximum allowed number of elements is ")
                << maxTensorNumElements << ", but " << *op
                << " has more than that";
-      // FIXME:patched triton community
-      // if ((numElements & (numElements - 1)) != 0)
-      //   return op->emitError("Number of elements must be power-of-two, but ")
-      //          << *op << " doesn't follow the rule (" << numElements << ")"
-      //          << " elements";
+      if ((numElements & (numElements - 1)) != 0)
+        return op->emitError("Number of elements must be power-of-two, but ")
+               << *op << " doesn't follow the rule (" << numElements << ")"
+               << " elements";
     }
   }
   return success();

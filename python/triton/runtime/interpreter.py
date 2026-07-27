@@ -22,25 +22,6 @@ from .._C.libtriton import ir as _ir
 
 T = TypeVar("T")
 
-# Import Ascend-specific interpreter builder (with deferred import to avoid circular dependency)
-_has_ascend_support = False
-AscendInterpreterBuilder = None
-
-
-def _try_import_ascend():
-    global _has_ascend_support, AscendInterpreterBuilder
-    try:
-        from . import ascend_interpreter
-        AscendInterpreterBuilder = ascend_interpreter.AscendInterpreterBuilder
-        _has_ascend_support = True
-    except ImportError:
-        _has_ascend_support = False
-        AscendInterpreterBuilder = None
-    except Exception:
-        # Catch other exceptions (like circular import) and log them
-        _has_ascend_support = False
-        AscendInterpreterBuilder = None
-
 
 @dataclass
 class TensorHandle:
@@ -153,7 +134,7 @@ class InterpreterOptions:
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e5b16", "fp8e4nv", "fp8e4b8", "fp8e4b15")
     deprecated_fp8_dot_operand_dtypes: Tuple[str] = ()
     default_dot_input_precision: str = "tf32"
-    allowed_dot_input_precisions: Tuple[str] = ("tf32", "tf32x3", "ieee", "hf32")
+    allowed_dot_input_precisions: Tuple[str] = ("tf32", "tf32x3", "ieee")
     max_num_imprecise_acc_default: int = 0
     backend_name: str = "interpreter"
 
@@ -229,8 +210,6 @@ def _convert_float(input, input_dtype, output_dtype, rounding_mode):
     bias_input = input_dtype.exponent_bias
     bias_output = output_dtype.exponent_bias
     exponent = ((input_bin >> input_dtype.fp_mantissa_width) & ((1 << input_exponent_width) - 1)).astype(np.int32)
-    # mark NAN value
-    input_nan_index = (exponent == (1 << input_exponent_width) - 1) & (significand != 0)
     subnormal_index = exponent == 0
     if np.any(subnormal_index):
         # Credit to Phil: phil@openai.com
@@ -250,13 +229,8 @@ def _convert_float(input, input_dtype, output_dtype, rounding_mode):
         significand[subnormal_index] = (significand[subnormal_index] << bit_pos[subnormal_index]) & (
             (1 << input_dtype.fp_mantissa_width) - 1)
     # Prevent overflow and underflow
-    exponent_unclamped = exponent - bias_input + bias_output
-    output_max_exponent = (1 << output_exponent_width) - 1
-    exponent_output = np.maximum(0, np.minimum(exponent_unclamped, output_max_exponent))
+    exponent_output = np.maximum(0, np.minimum((exponent - bias_input + bias_output), (1 << output_exponent_width) - 1))
     exponent_output = exponent_output.astype(output_unint_dtype)
-    # mark overflow index
-    overflow_index = exponent_unclamped > output_max_exponent - 1
-
     sign_output = sign.astype(output_unint_dtype)
     if input_dtype.primitive_bitwidth > output_dtype.primitive_bitwidth:  # Downcast
         significand_output = (significand >> (input_dtype.fp_mantissa_width - output_dtype.fp_mantissa_width)) & (
@@ -284,8 +258,6 @@ def _convert_float(input, input_dtype, output_dtype, rounding_mode):
         shift[subnormal_index] = (1 - bias_output) - (exponent[subnormal_index] - bias_input)
         significand_output[subnormal_index] = (significand_output[subnormal_index] >> shift[subnormal_index]) | (
             1 << (output_dtype.fp_mantissa_width - shift[subnormal_index]))
-    # covert overflow value to inf
-    significand_output[overflow_index & ~input_nan_index] = 0
     output = (sign_output << (output_dtype.primitive_bitwidth - 1)) | (
         exponent_output << output_dtype.fp_mantissa_width) | significand_output
     return output.reshape(input.shape)
@@ -340,8 +312,6 @@ class InterpreterBuilder:
         self.options = InterpreterOptions()
         self.codegen_fns = {}
         self.codegen_fns["convert_custom_types"] = ExtraFunctions._convert_custom_types
-        # For interpreter mode, don't enforce GPU hardware shape constraints
-        # NumPy matmul works with any size, including small matrices
         self.codegen_fns["min_dot_size"] = lambda lhsType, rhsType: (1, 1, 1)
 
     def set_grid_idx(self, x, y, z):
@@ -1220,11 +1190,6 @@ def _patch_lang(fn):
         _patch_lang_tensor(lang.tensor, scope)
         _patch_lang_core(lang, scope)
     _patch_builtin(tl.core.tensor_descriptor_base, interpreter_builder, scope)
-
-    # Patch Ascend extensions if using AscendInterpreterBuilder
-    if hasattr(interpreter_builder, 'patch_extensions'):
-        interpreter_builder.patch_extensions(fn, scope)
-
     return scope
 
 
@@ -1272,12 +1237,7 @@ def _implicit_cvt(arg):
     return arg
 
 
-# Use AscendInterpreterBuilder if available, otherwise fall back to base InterpreterBuilder
-_try_import_ascend()
-if _has_ascend_support and AscendInterpreterBuilder is not None:
-    interpreter_builder = AscendInterpreterBuilder()
-else:
-    interpreter_builder = InterpreterBuilder()
+interpreter_builder = InterpreterBuilder()
 interpreter_semantic = TritonSemantic(interpreter_builder)
 
 
@@ -1390,14 +1350,11 @@ class GridExecutor:
             grid = grid + (1, ) * (3 - len(grid))
             interpreter_builder.set_grid_dim(*grid)
             try:
-                if hasattr(interpreter_builder, 'execute_with_sub_vec_simulation'):
-                    interpreter_builder.execute_with_sub_vec_simulation(self.fn, args, grid)
-                else:
-                    for x in range(grid[0]):
-                        for y in range(grid[1]):
-                            for z in range(grid[2]):
-                                interpreter_builder.set_grid_idx(x, y, z)
-                                self.fn(**args)
+                for x in range(grid[0]):
+                    for y in range(grid[1]):
+                        for z in range(grid[2]):
+                            interpreter_builder.set_grid_idx(x, y, z)
+                            self.fn(**args)
             except Exception as e:
                 if triton.knobs.compilation.front_end_debugging:
                     raise

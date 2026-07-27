@@ -115,6 +115,7 @@ def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
         metadata["enable_mixed_cv"] = kwargs["enable_mixed_cv"]
         metadata["disable_auto_inject_block_sync"] = kwargs["disable_auto_inject_block_sync"]
         metadata["set_workspace_multibuffer"] = kwargs["set_workspace_multibuffer"]
+        metadata["disable_tightly_coupled_buffer_reuse"] = kwargs["disable_tightly_coupled_buffer_reuse"]
         if opt.debug:
             print(f"SSBUFFER return code={rc}, will fallback to enable_dynamic_cv_pipeline=False")
 
@@ -186,6 +187,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         auto_blockify_size = metadata["auto_blockify_size"]
         enable_mixed_cv = metadata.get("enable_mixed_cv")
         disable_auto_inject_block_sync = metadata.get("disable_auto_inject_block_sync")
+        disable_tightly_coupled_buffer_reuse = metadata.get("disable_tightly_coupled_buffer_reuse")
         set_workspace_multibuffer = metadata.get("set_workspace_multibuffer")
         if has_auto_blockify_blacklist_op or not auto_map_parallel_blocks_enabled:
             auto_blockify_size = 1
@@ -218,6 +220,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             metadata["set_workspace_multibuffer"] = 0
             metadata["enable_mixed_cv"] = True
             metadata["disable_auto_inject_block_sync"] = True
+            metadata["disable_tightly_coupled_buffer_reuse"] = True
             ascend.passes.ttir.set_enable_cube_block_merge(metadata["enable_cube_block_merge"])
             ascend.passes.ttir.set_enable_ub_refine_opt(mod, metadata["enable_ub_refine_opt"])
 
@@ -256,7 +259,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         pm.run(mod, 'ttir_to_linalg')
         _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
-                                          set_workspace_multibuffer=set_workspace_multibuffer)
+                                          set_workspace_multibuffer=set_workspace_multibuffer,
+                                          disable_tightly_coupled_buffer_reuse=disable_tightly_coupled_buffer_reuse)
         _export_coalesce_metadata(mod, metadata)
 
         if opt.debug:

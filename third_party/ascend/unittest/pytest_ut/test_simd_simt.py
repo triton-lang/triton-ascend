@@ -107,7 +107,7 @@ def test_indirect_index_load_add_kernel():
     add_src = torch.arange(8, dtype=torch.float32, device='npu')
     print(f"Source data: [{src[0]}, {src[1]}, ..., {src[255]}]")
 
-    indices = torch.tensor([10, 25, 100, 200, 5, 50, 150, 255], dtype=torch.int64, device='npu')
+    indices = torch.tensor([10, 25, 100, 200, 5, 50, 150, 230], dtype=torch.int64, device='npu')
     print(f"Indices: {indices.tolist()}")
 
     output = torch.zeros(8, dtype=torch.float32, device='npu')
@@ -237,7 +237,7 @@ def test_indirect_index_load_mul_kernel():
     add_src = torch.arange(8, dtype=torch.float32, device='npu')
     print(f"Source data: [{src[0]}, {src[1]}, ..., {src[255]}]")
 
-    indices = torch.tensor([10, 25, 100, 200, 5, 50, 150, 255], dtype=torch.int64, device='npu')
+    indices = torch.tensor([10, 25, 100, 200, 5, 50, 150, 230], dtype=torch.int64, device='npu')
     offset1 = torch.arange(8, dtype=torch.int64, device='npu')
     offset2 = torch.full((8, ), 3, dtype=torch.int64, device='npu')
     print(f"Indices: {indices.tolist()}")

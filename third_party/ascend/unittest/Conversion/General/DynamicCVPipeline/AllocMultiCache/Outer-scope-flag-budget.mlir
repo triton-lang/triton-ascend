@@ -1,8 +1,5 @@
 // RUN: triton-opt --add_multi_buffer_outer_scope %s | FileCheck %s
-// TC-FB01: flagCount > 7 forces single-buffer (no crossCoreDeps tags, no double-buffering)
-//   New design (refactor innerscope): single-buffer mode is a no-op pass-through —
-//   no ssbuffer.crossCoreDeps tags are added and input tags are preserved.
-//   Double-buffer tags (crossCoreDeps) only appear when inter_core_buf_count > 1.
+// TC-FB01: flagCount > 7 forces single-buffer (crossDeps only, no double-buffering)
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 func.func @tc_fb01_flag_gt_7() {
@@ -56,9 +53,9 @@ func.func @tc_fb01_flag_gt_7() {
 }
 }
 
-// flagCount=8 > 7: single-buffer — no crossCoreDeps, no double-buffering
+// flagCount=8 > 7: single-buffer — crossDeps present, no double-buffering
 // CHECK-LABEL: func.func @tc_fb01_flag_gt_7
-// CHECK-NOT: crossCoreDeps
+// CHECK: crossDeps
 // CHECK-NOT: tightly_coupled_buffer
 // CHECK-NOT: cross_buffer
 // CHECK-NOT: scf.if

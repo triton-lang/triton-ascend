@@ -126,8 +126,12 @@ struct PerfReportPass : public impl::PerfReportPassBase<PerfReportPass> {
 
     auto scheduledCyclesAttr =
         module->getAttrOfType<IntegerAttr>("ascend.scheduled_cycles");
+    auto rooflineCyclesAttr =
+        module->getAttrOfType<IntegerAttr>("ascend.roofline_cycles");
     int64_t scheduledCycles =
-        scheduledCyclesAttr ? scheduledCyclesAttr.getInt() : totalCycles;
+        scheduledCyclesAttr
+            ? scheduledCyclesAttr.getInt()
+            : (rooflineCyclesAttr ? rooflineCyclesAttr.getInt() : totalCycles);
 
     // Ascend 910B clock: 1.85 GHz = 1850 cycles/us
     constexpr double CYCLES_PER_US = 1850.0;

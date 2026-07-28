@@ -7,7 +7,7 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Parser/Parser.h"
-#include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/Passes.h" // createInlinerPass
 
 #include "ascend/include/AutoBlockify/Passes.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
@@ -41,7 +41,9 @@
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 
+#include <algorithm>
 #include <cstring>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -280,16 +282,32 @@ parseAscendCostmodelArgs(const std::vector<std::string> &extraArgs) {
 
 static double extractEstimatedTimeUs(mlir::ModuleOp module) {
   constexpr double CYCLES_PER_US = 1850.0;
-  if (auto scheduledCyclesAttr =
-          module->getAttrOfType<mlir::IntegerAttr>("ascend.scheduled_cycles")) {
-    return static_cast<double>(scheduledCyclesAttr.getInt()) / CYCLES_PER_US;
-  }
+
+  auto getCycleAttr = [&](llvm::StringRef name) -> std::optional<int64_t> {
+    if (auto attr = module->getAttrOfType<mlir::IntegerAttr>(name))
+      return attr.getInt();
+    return std::nullopt;
+  };
+
+  // PipelineAnalysisPass computes loop-multiplied roofline cycles.  Older
+  // callers looked for ascend.scheduled_cycles, so keep that first for
+  // compatibility, then fall back to the weighted roofline summary.
+  if (auto cycles = getCycleAttr("ascend.scheduled_cycles"))
+    return static_cast<double>(*cycles) / CYCLES_PER_US;
+  if (auto cycles = getCycleAttr("ascend.roofline_cycles"))
+    return static_cast<double>(*cycles) / CYCLES_PER_US;
+  if (auto cycles = getCycleAttr("ascend.simple_sum_cycles"))
+    return static_cast<double>(*cycles) / CYCLES_PER_US;
 
   int64_t fallbackCycles = 0;
   module.walk([&](mlir::Operation *op) {
     if (auto cyclesAttr =
             op->getAttrOfType<mlir::IntegerAttr>("estimated_cycles")) {
-      fallbackCycles += cyclesAttr.getInt();
+      int64_t multiplier = 1;
+      if (auto multiplierAttr =
+              op->getAttrOfType<mlir::IntegerAttr>("loop_multiplier"))
+        multiplier = std::max<int64_t>(1, multiplierAttr.getInt());
+      fallbackCycles += cyclesAttr.getInt() * multiplier;
     }
   });
   return static_cast<double>(fallbackCycles) / CYCLES_PER_US;
@@ -328,6 +346,16 @@ runAscendCostModelInProcess(const std::string &mlirText,
   }
 
   mlir::PassManager pm(&context);
+  // Inline tt.call helpers (e.g. softmax's @max/@sum reduce helpers) into the
+  // calling kernel BEFORE conversion/estimation. Without this, ops in a helper
+  // invoked from inside a loop are estimated at the helper's top level (outside
+  // the loop) and get loopMultiplier=1 instead of the caller's trip count, so
+  // per-iteration ops like reductions are under-counted. TritonDialect
+  // registers TritonInlinerInterface, so the generic MLIR inliner handles
+  // tt.call (CallOpInterface). SymbolDCE then erases the now-dead private
+  // helpers so their ops are not double-counted alongside the inlined copies.
+  pm.addPass(mlir::createInlinerPass());
+  pm.addPass(mlir::createSymbolDCEPass());
   pm.addPass(mlir::ascend::createConvertTritonToAscendPass());
   pm.addPass(mlir::ascend::createInsertDataTransfersPass());
   pm.addPass(mlir::ascend::createAssignOpIDsPass());

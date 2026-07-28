@@ -23,10 +23,13 @@ class CompilerCostmodelContractTest(unittest.TestCase):
 
         triton_mod = types.ModuleType("triton")
         triton_c_mod = types.ModuleType("triton._C")
+        ascend_backend_mod = types.ModuleType("triton.backends.ascend")
+        ascend_backend_mod._apply_ascend_patch = lambda: None
         libtriton_mod = types.ModuleType("triton._C.libtriton")
         libtriton_mod.ir = Dummy()
         libtriton_mod.passes = Dummy()
         libtriton_mod.ascend = Dummy()
+        libtriton_mod.buffer_ir = Dummy()
 
         utils_mod = types.ModuleType("triton.backends.ascend.utils")
         for name in [
@@ -35,11 +38,15 @@ class CompilerCostmodelContractTest(unittest.TestCase):
                 "_check_bishengir_is_regbased",
                 "_enable_print_ub_bits",
                 "_enable_dump_memory_info",
+                "_enable_msdebug",
                 "_get_kernel_target",
                 "_get_llvm_path",
                 "_get_mlir_path",
                 "_get_npucompiler_path",
                 "_get_triton_adapter_opt_path",
+                "_get_triton_mlir_opt_path",
+                "_get_triton_opt_path",
+                "_get_bishengir_opt_path",
                 "_is_ascend_sanitizer_enabled",
                 "_is_debug_line_info_disabled",
                 "_is_auto_map_parallel_blocks_enabled",
@@ -91,6 +98,7 @@ class CompilerCostmodelContractTest(unittest.TestCase):
 
         dump_mgr = DumpManager()
         cache_mod.get_dump_manager = lambda *args, **kwargs: dump_mgr
+        cache_mod._base32 = lambda value: value
 
         utils_mod.is_compile_on_910_95 = lambda: False
 
@@ -98,6 +106,7 @@ class CompilerCostmodelContractTest(unittest.TestCase):
             "triton": triton_mod,
             "triton._C": triton_c_mod,
             "triton._C.libtriton": libtriton_mod,
+            "triton.backends.ascend": ascend_backend_mod,
             "triton.backends.ascend.utils": utils_mod,
             "triton.backends.ascend.driver": driver_mod,
             "triton.backends.compiler": compiler_base_mod,
@@ -118,7 +127,7 @@ class CompilerCostmodelContractTest(unittest.TestCase):
         backend = cmplr.AscendBackend(GPUTarget(backend="npu", arch="910B"))
 
         opt_plain = backend.parse_options({})
-        self.assertFalse(hasattr(opt_plain, "use_bytecode"))
+        self.assertTrue(opt_plain.use_bytecode)
 
         opt_costmodel = backend.parse_options({"enable_costmodel_backend": True})
         self.assertTrue(opt_costmodel.enable_costmodel_backend)

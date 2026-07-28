@@ -190,13 +190,16 @@ struct ConvertTritonDot : public RewritePattern {
 
       int64_t bytes = getByteSize(tensorType);
 
-      // Vector store (write from vector core to L1/UB)
-      rewriter.create<VectorStoreOp>(loc, operand, bytes, nullptr, nullptr);
+      // Vector store (write from vector core to HBM via MTE3)
+      rewriter.create<VectorStoreOp>(
+          loc, operand, bytes, rewriter.getStringAttr("ub"),
+          rewriter.getStringAttr("hbm"), nullptr, nullptr);
 
-      // Cube load (read into cube core)
+      // Cube load (read into cube core L1 via MTE2)
       Value placeholder = createPlaceholderSource(tensorType, loc, rewriter);
       auto cubeLoad = rewriter.create<CubeLoadOp>(
-          loc, tensorType, placeholder ? placeholder : operand, bytes, nullptr,
+          loc, tensorType, placeholder ? placeholder : operand, bytes,
+          rewriter.getStringAttr("hbm"), rewriter.getStringAttr("l1"), nullptr,
           nullptr);
 
       return cubeLoad.getResult();
@@ -232,10 +235,11 @@ struct ConvertTritonDot : public RewritePattern {
     auto matmul = rewriter.create<MatmulOp>(loc, resultType, lhsInput, rhsInput,
                                             M, N, K, nullptr, nullptr);
 
-    // Output: cube_store (write from cube to L1/UB)
+    // Output: cube_store (write from cube L0C to HBM via FixPipe)
     int64_t resultBytes = getByteSize(resultType);
-    rewriter.create<CubeStoreOp>(loc, matmul.getResult(), resultBytes, nullptr,
-                                 nullptr);
+    rewriter.create<CubeStoreOp>(
+        loc, matmul.getResult(), resultBytes, rewriter.getStringAttr("l0c"),
+        rewriter.getStringAttr("hbm"), nullptr, nullptr);
 
     // Check if result is used by vector operations (or loop yield)
     // If so, insert vector_load to bring data into vector core
@@ -250,12 +254,13 @@ struct ConvertTritonDot : public RewritePattern {
     }
 
     if (usedByVectorOps) {
-      // Vector load (read into vector core for subsequent vector ops)
+      // Vector load (read from HBM into vector core UB via MTE2)
       auto resultTensorType = dyn_cast<RankedTensorType>(resultType);
       Value placeholder = createPlaceholderSource(resultType, loc, rewriter);
       auto vecLoad = rewriter.create<VectorLoadOp>(
           loc, resultType, placeholder ? placeholder : matmul.getResult(),
-          resultBytes, nullptr, nullptr);
+          resultBytes, rewriter.getStringAttr("hbm"),
+          rewriter.getStringAttr("ub"), nullptr, nullptr);
       rewriter.replaceOp(op, vecLoad.getResult());
     } else {
       rewriter.replaceOp(op, matmul.getResult());
@@ -300,12 +305,14 @@ struct ConvertTritonLoad : public RewritePattern {
     bool usedByDot = op->hasAttr("ascend.used_by_dot");
 
     if (usedByDot) {
-      auto cubeLoad = rewriter.create<CubeLoadOp>(loc, resultType, source,
-                                                  bytes, nullptr, nullptr);
+      auto cubeLoad = rewriter.create<CubeLoadOp>(
+          loc, resultType, source, bytes, rewriter.getStringAttr("hbm"),
+          rewriter.getStringAttr("l1"), nullptr, nullptr);
       rewriter.replaceOp(op, cubeLoad.getResult());
     } else {
-      auto vecLoad = rewriter.create<VectorLoadOp>(loc, resultType, source,
-                                                   bytes, nullptr, nullptr);
+      auto vecLoad = rewriter.create<VectorLoadOp>(
+          loc, resultType, source, bytes, rewriter.getStringAttr("hbm"),
+          rewriter.getStringAttr("ub"), nullptr, nullptr);
       rewriter.replaceOp(op, vecLoad.getResult());
     }
     return success();
@@ -363,7 +370,9 @@ struct ConvertTritonStore : public RewritePattern {
     Value data = op->getOperand(1);
     int64_t bytes = getByteSize(data.getType());
 
-    rewriter.create<VectorStoreOp>(op->getLoc(), data, bytes, nullptr, nullptr);
+    rewriter.create<VectorStoreOp>(
+        op->getLoc(), data, bytes, rewriter.getStringAttr("ub"),
+        rewriter.getStringAttr("hbm"), nullptr, nullptr);
     rewriter.eraseOp(op);
     return success();
   }

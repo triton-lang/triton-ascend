@@ -40,3 +40,19 @@ tt.func public @triton_indirect_load_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<
 // CHECK-LABEL: tt.func public @triton_indirect_load_kernel
 // CHECK: ascend.indirect_load{{.*}} : <f32>, {{.*}} : tensor<8x32xi64> {{.*}}-> tensor<8x32xf32>
 // CHECK: tt.store
+
+// -----
+
+// Block-pointer load with mayDiscretememaccess must not use SIMT indirect_load.
+tt.func public @block_ptr_load_skip_indirect(%arg0: !tt.ptr<f32>) -> tensor<32x32xf32> attributes {noinline = false} {
+  %c32_i64 = arith.constant 32 : i64
+  %c1_i64 = arith.constant 1 : i64
+  %c0_i32 = arith.constant 0 : i32
+  %0 = tt.make_tensor_ptr %arg0, [%c32_i64, %c32_i64], [%c32_i64, %c1_i64], [%c0_i32, %c0_i32] {order = array<i32: 1, 0>} : <tensor<32x32xf32>>
+  %1 = tt.load %0 : !tt.ptr<tensor<32x32xf32>>
+  annotation.mark %1 {mayDiscretememaccess} : tensor<32x32xf32>
+  tt.return %1 : tensor<32x32xf32>
+}
+
+// CHECK-LABEL: tt.func public @block_ptr_load_skip_indirect
+// CHECK-NOT: ascend.indirect_load

@@ -120,6 +120,13 @@ static void attachMemCrossDeps(Operation *op, int tid, int seqId,
                                     builder.getI32IntegerAttr(seqId)}));
 }
 
+static void attachCrossCoreDeps(Operation *op, int tid, int seqId,
+                                OpBuilder &builder) {
+  op->setAttr(CVPipeline::kCrossCoreDeps,
+              builder.getArrayAttr({builder.getI32IntegerAttr(tid),
+                                    builder.getI32IntegerAttr(seqId)}));
+}
+
 static void attachAnalyzeFlagIdTag(Operation *op) {
   MLIRContext *ctx = op->getContext();
   op->setAttr(CVPipeline::kAnalyzeFlagId, UnitAttr::get(ctx));
@@ -560,6 +567,8 @@ Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(
       }
     }
     sendOp = storeOp;
+    attachCrossCoreDeps(sendOp, transferIndex, CVPipeline::crossCoreProducerId,
+                        builder);
     LOG_DEBUG("before readFromSSBuffer\n");
     builder.setInsertionPoint(cubeStartOp);
     SmallVector<Operation *> readOps;
@@ -579,7 +588,8 @@ Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(
       }
     }
     receiveOp = loadOp;
-
+    attachCrossCoreDeps(receiveOp, transferIndex,
+                        CVPipeline::crossCoreConsumerId, builder);
   } else {
     // Step 1: Get input information (2D tensor: MxN)
     auto srcTensorType = cast<RankedTensorType>(srcValue.getType());
@@ -596,7 +606,8 @@ Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(
         loc, mlir::TypeRange{}, normalizedValue, vecAllocOp->getResult(0));
 
     attachTransferTags(copyOp, vecBlockId, "VECTOR", transferIndex);
-
+    attachCrossCoreDeps(copyOp, transferIndex, CVPipeline::crossCoreProducerId,
+                        builder);
     LOG_DEBUG("[copyOp]: " << *copyOp << "\n");
 
     builder.setInsertionPoint(cubeStartOp);
@@ -618,6 +629,8 @@ Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(
           );
       memValue = convertLayoutOp.getResult();
       attachTransferTags(convertLayoutOp, cubeBlockId, "CUBE", transferIndex);
+      attachCrossCoreDeps(convertLayoutOp, transferIndex,
+                          CVPipeline::crossCoreConsumerId, builder);
     }
     auto plainMemrefType = MemRefType::get(srcTensorType.getShape(), elemType);
     auto memspaceCastOp = builder.create<memref::MemorySpaceCastOp>(
@@ -626,6 +639,10 @@ Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(
         loc, srcTensorType, memspaceCastOp.getResult(), true, true);
 
     attachTransferTags(memspaceCastOp, cubeBlockId, "CUBE", transferIndex);
+    if (is1DTensor) {
+      attachCrossCoreDeps(memspaceCastOp, transferIndex,
+                          CVPipeline::crossCoreConsumerId, builder);
+    }
     attachTransferTags(toTensorOp, cubeBlockId, "CUBE", transferIndex);
     LOG_DEBUG("[toTensorOp]: " << *toTensorOp << "\n");
     sendOp = copyOp;
@@ -683,6 +700,8 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
       mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, nullptr, nullptr,
       mlir::ArrayAttr{}, nullptr);
   attachTransferTags(fixpipeOp, cubeBlockId, "CUBE", transferIndex);
+  attachCrossCoreDeps(fixpipeOp, transferIndex, CVPipeline::crossCoreProducerId,
+                      builder);
   LOG_DEBUG("[fixpipeOp]: " << *fixpipeOp << "\n");
 
   // Vector side: memspace_cast + to_tensor
@@ -696,6 +715,8 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
       loc, targetTensorType, memspaceCastOp.getResult(), true, true);
 
   attachTransferTags(memspaceCastOp, vecBlockId, "VECTOR", transferIndex);
+  attachCrossCoreDeps(memspaceCastOp, transferIndex,
+                      CVPipeline::crossCoreConsumerId, builder);
   attachTransferTags(toTensorOp, vecBlockId, "VECTOR", transferIndex);
   LOG_DEBUG("[toTensorOp]: " << *toTensorOp << "\n");
 
@@ -1153,10 +1174,15 @@ LogicalResult InterCoreTransferAndSyncPass::handleMemoryDependency(
               << "\n");
     return success();
   }
-  int predId = 1;
-  int nextId = 0;
-  attachMemCrossDeps(dep.predOp, transferIndex, predId, builder);
-  attachMemCrossDeps(dep.nextOp, transferIndex, nextId, builder);
+
+  attachMemCrossDeps(dep.predOp, transferIndex, CVPipeline::crossCoreProducerId,
+                     builder);
+  attachMemCrossDeps(dep.nextOp, transferIndex, CVPipeline::crossCoreConsumerId,
+                     builder);
+  attachCrossCoreDeps(dep.predOp, transferIndex,
+                      CVPipeline::crossCoreProducerId, builder);
+  attachCrossCoreDeps(dep.nextOp, transferIndex,
+                      CVPipeline::crossCoreConsumerId, builder);
   // Get flag ID
   int flagId = flagManager.acquireId(prodStart);
 

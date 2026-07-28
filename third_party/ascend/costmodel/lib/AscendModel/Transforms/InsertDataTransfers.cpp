@@ -106,6 +106,11 @@ struct InsertDataTransfersPass
 
       // Null attrs for optional parameters
       ::mlir::IntegerAttr nullAttr;
+      // Memory-space attrs for transfer ops (tilesim migration, root cause 1).
+      auto hbm = builder.getStringAttr("hbm");
+      auto l1 = builder.getStringAttr("l1");
+      auto l0c = builder.getStringAttr("l0c");
+      auto ub = builder.getStringAttr("ub");
 
       // === Step 1: Handle inputs to Cube ===
       // MatmulOp has lhs and rhs operands
@@ -140,9 +145,8 @@ struct InsertDataTransfersPass
             hbmValue = it->second;
           } else {
             // Insert vector_store: UB → HBM (MTE3)
-            // VectorStoreOp: (data, bytes, estimated_cycles, op_id)
-            builder.create<VectorStoreOp>(loc, operand, bytes, nullAttr,
-                                          nullAttr);
+            builder.create<VectorStoreOp>(loc, operand, bytes, ub, hbm,
+                                          nullAttr, nullAttr);
             hbmValue = operand; // After store, conceptually in HBM
             vectorToHBM[operand] = hbmValue;
           }
@@ -154,9 +158,8 @@ struct InsertDataTransfersPass
             l1Value = it2->second;
           } else {
             // Insert cube_load: HBM → L1 (MTE2)
-            // CubeLoadOp: (result_type, source, bytes, estimated_cycles, op_id)
             auto cubeLoad = builder.create<CubeLoadOp>(
-                loc, tensorType, hbmValue, bytes, nullAttr, nullAttr);
+                loc, tensorType, hbmValue, bytes, hbm, l1, nullAttr, nullAttr);
             l1Value = cubeLoad.getResult();
             hbmToL1[hbmValue] = l1Value;
           }
@@ -193,13 +196,12 @@ struct InsertDataTransfersPass
       uint64_t bytes = static_cast<uint64_t>(getByteSize(resultType));
 
       // Insert cube_store: L0C → HBM (FixPipe)
-      // CubeStoreOp: (data, bytes, estimated_cycles, op_id)
-      builder.create<CubeStoreOp>(loc, matmulResult, bytes, nullAttr, nullAttr);
+      builder.create<CubeStoreOp>(loc, matmulResult, bytes, l0c, hbm, nullAttr,
+                                  nullAttr);
 
       // Insert vector_load: HBM → UB (MTE2)
-      // VectorLoadOp: (result_type, source, bytes, estimated_cycles, op_id)
       auto vectorLoad = builder.create<VectorLoadOp>(
-          loc, resultType, matmulResult, bytes, nullAttr, nullAttr);
+          loc, resultType, matmulResult, bytes, hbm, ub, nullAttr, nullAttr);
 
       // Replace uses in Vector operations
       for (OpOperand *use : vectorUsers) {

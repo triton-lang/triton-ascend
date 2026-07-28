@@ -11,7 +11,6 @@ module {
     // CHECK: bufferization.to_tensor %{{.*}} : memref<1024x1024xf32> to tensor<1024x1024xf32>
     // CHECK-NOT: ssbuffer.core_type
     %tensor = bufferization.to_tensor %memref {ssbuffer.core_type = "CUBE"} : memref<1024x1024xf32> to tensor<1024x1024xf32>
-
     return
   }
 

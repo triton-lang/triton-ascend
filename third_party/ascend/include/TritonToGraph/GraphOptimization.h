@@ -36,7 +36,7 @@ namespace cfg {
 enum class GraphOptimizationRuleId : uint8_t {
   LoadStoreTranspose = 1,
   TransposePointwiseReorder = 2,
-  UBPreload = 4,
+  StoreCoalescing = 4,
   // RowCoalescing is a pure-SIMT-only graph rule.  It is intentionally
   // scheduled once after the normal per-function phases because its launch
   // contract must not be suppressed by their rewrite budget.
@@ -57,7 +57,7 @@ constexpr uint8_t kAllGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::LoadStoreTranspose) |
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::TransposePointwiseReorder) |
-    getGraphOptimizationRuleMask(GraphOptimizationRuleId::UBPreload) |
+    getGraphOptimizationRuleMask(GraphOptimizationRuleId::StoreCoalescing) |
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::RowCoalescing) |
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::StridedAxisCoalescing) |

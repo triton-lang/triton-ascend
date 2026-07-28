@@ -253,7 +253,8 @@ public:
   // with any protected access. Without entryArgPointerAliases, only statically
   // proven tt.load/tt.store operations with the same base and disjoint ranges
   // are permitted. With it, accesses rooted at distinct entry pointers are
-  // additionally permitted under the UBPreload entry-argument ABI contract.
+  // additionally permitted under the StoreCoalescing entry-argument ABI
+  // contract.
   ProofOutcome proveNoConflictingLoadStoreEffects(
       Operation *first, Operation *last,
       llvm::ArrayRef<StaticAccess> protectedAccesses,

@@ -279,14 +279,17 @@ def test_default_generic_graph_mask_excludes_legacy_memory_compatibility(
     assert "hacc.coalesce_grid_ceil_div" not in text
     assert "tt.indirect_load" not in text
     assert "tt.indirect_store" not in text
-    # The native graph-rule bundle is 1|2|4.  Adding the four compatibility
-    # identities to reach 127 must be observationally inert in make_ttir().
+    # The native graph-rule bundle is LoadStoreTranspose |
+    # TransposePointwiseReorder | StoreCoalescing (1|2|4). Adding the four
+    # compatibility identities to reach 127 must be observationally inert in
+    # make_ttir().
     assert text == str(native_only_result)
     assert_reparseable(default_result, tmp_path, "generic-legacy-memory-isolation")
 
 
 def test_default_graph_mask_preserves_native_graph_rule_bundle(monkeypatch, tmp_path):
-    """Default 127 retains generic 1|2|4 behavior without running legacy rules.
+    """Default 127 retains native 1|2|4 behavior, including StoreCoalescing,
+    without running legacy rules.
 
     This input has the LoadStoreTranspose (bit 1) structural signature.  Compare
     the public native-only bundle (7) against the default all-identity mask

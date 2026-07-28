@@ -52,7 +52,7 @@ namespace {
 constexpr std::array<GraphOptimizationRuleId, 3> kRulePhases = {
     GraphOptimizationRuleId::LoadStoreTranspose,
     GraphOptimizationRuleId::TransposePointwiseReorder,
-    GraphOptimizationRuleId::UBPreload,
+    GraphOptimizationRuleId::StoreCoalescing,
 };
 
 using ProgramOrderMap = llvm::DenseMap<Operation *, unsigned>;
@@ -261,8 +261,9 @@ void GraphOptimizePass::runOnOperation() {
     // RowCoalescing has the same function-local candidate/rewrite interface
     // as the native graph rules, but it has distinct launch semantics.  Its
     // historical pass ran once and was not subject to the generic rewrite
-    // budget, so run it once after phases 1/2/4 even when that budget has
-    // already been exhausted.
+    // budget, so run it once after LoadStoreTranspose,
+    // TransposePointwiseReorder, and StoreCoalescing even when that budget
+    // has already been exhausted.
     if (!isRuleEnabled(options.enabledRuleMask,
                        GraphOptimizationRuleId::RowCoalescing))
       continue;
@@ -363,8 +364,9 @@ void populateBuiltinGraphOptimizationRules(
                     GraphOptimizationRuleId::TransposePointwiseReorder)) {
     rules.push_back(createTransposePointwiseReorderRule());
   }
-  if (isRuleEnabled(options.enabledRuleMask, GraphOptimizationRuleId::UBPreload)) {
-    rules.push_back(createUBPreloadRule(options.ubCapacityBytes));
+  if (isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::StoreCoalescing)) {
+    rules.push_back(createStoreCoalescingRule(options.ubCapacityBytes));
   }
   if (options.forceSimtOnly &&
       isRuleEnabled(options.enabledRuleMask,

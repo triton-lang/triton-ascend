@@ -17,7 +17,7 @@ add_triton_library(TritonToGraph
   Rules/LoadStoreTransposeRule.cpp
   Rules/RowCoalescingRule.cpp
   Rules/TransposePointwiseReorderRule.cpp
-  Rules/UBPreloadRule.cpp
+  Rules/StoreCoalescingRule.cpp
 
   DEPENDS
   TritonToGraphPassIncGen

@@ -9,7 +9,6 @@
 #
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
-
 """Source-level contracts for the layout / memory-access compiler closure.
 
 These tests intentionally load ``backend/compiler.py`` from this checkout.
@@ -27,9 +26,7 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = pytest.mark.backend("none")
-
 
 _UNSET = object()
 
@@ -46,11 +43,11 @@ def _stub_graph_ub_budget_bytes_for_arch(arch):
     if arch.startswith(("Ascend910_95", "Ascend950")):
         return 128 * 1024
     if arch.startswith((
-        "Ascend910A",
-        "Ascend910B",
-        "Ascend910D",
-        "Ascend910_93",
-        "Ascend310B",
+            "Ascend910A",
+            "Ascend910B",
+            "Ascend910D",
+            "Ascend910_93",
+            "Ascend310B",
     )):
         return 96 * 1024
     return 0
@@ -101,26 +98,26 @@ def compiler_module():
 
     utils_stub = types.ModuleType(utils_name)
     for name in (
-        "_check_bishengir_api_change",
-        "_check_bishengir_able_save_ir",
-        "_check_bishengir_is_regbased",
-        "_enable_print_ub_bits",
-        "_enable_dump_memory_info",
-        "_enable_msdebug",
-        "_is_ascend_sanitizer_enabled",
-        "_is_debug_line_info_disabled",
-        "_is_auto_map_parallel_blocks_enabled",
-        "force_disable_ffts",
+            "_check_bishengir_api_change",
+            "_check_bishengir_able_save_ir",
+            "_check_bishengir_is_regbased",
+            "_enable_print_ub_bits",
+            "_enable_dump_memory_info",
+            "_enable_msdebug",
+            "_is_ascend_sanitizer_enabled",
+            "_is_debug_line_info_disabled",
+            "_is_auto_map_parallel_blocks_enabled",
+            "force_disable_ffts",
     ):
         setattr(utils_stub, name, return_false)
     for name in (
-        "_get_kernel_target",
-        "_get_llvm_path",
-        "_get_mlir_path",
-        "_get_triton_adapter_opt_path",
-        "_get_triton_mlir_opt_path",
-        "_get_triton_opt_path",
-        "_get_bishengir_opt_path",
+            "_get_kernel_target",
+            "_get_llvm_path",
+            "_get_mlir_path",
+            "_get_triton_adapter_opt_path",
+            "_get_triton_mlir_opt_path",
+            "_get_triton_opt_path",
+            "_get_bishengir_opt_path",
     ):
         setattr(utils_stub, name, lambda *_args, **_kwargs: "")
     utils_stub._get_npucompiler_path = lambda *_args, **_kwargs: ("", {})
@@ -139,9 +136,8 @@ def compiler_module():
 
     cache_stub = types.ModuleType(cache_name)
     cache_stub._base32 = lambda value: str(value)
-    cache_stub.get_dump_manager = lambda *_args, **_kwargs: SimpleNamespace(
-        cache_dir="", put=lambda *_args, **_kwargs: None
-    )
+    cache_stub.get_dump_manager = lambda *_args, **_kwargs: SimpleNamespace(cache_dir="", put=lambda *_args, **_kwargs:
+                                                                            None)
 
     previous_utils = sys.modules.get(utils_name)
     previous_driver = sys.modules.get(driver_name)
@@ -173,9 +169,7 @@ def compiler_module():
 
 
 def _parse_options(compiler, arch, opts=None):
-    backend = compiler.AscendBackend(
-        SimpleNamespace(backend="npu", arch=arch)
-    )
+    backend = compiler.AscendBackend(SimpleNamespace(backend="npu", arch=arch))
     return backend.parse_options({} if opts is None else opts)
 
 
@@ -193,9 +187,7 @@ def _parse_options(compiler, arch, opts=None):
         ("unknown-arch", None, 0),
     ),
 )
-def test_npu_options_normalizes_graph_ub_budget(
-    compiler_module, arch, requested_capacity, expected_capacity
-):
+def test_npu_options_normalizes_graph_ub_budget(compiler_module, arch, requested_capacity, expected_capacity):
     """Direct NPUOptions users receive the same final integer as JIT users."""
     kwargs = {"arch": arch}
     if requested_capacity is not _UNSET:
@@ -218,9 +210,7 @@ def test_npu_options_normalizes_graph_ub_budget(
         ("Ascend910B1", 96 * 1024 + 1, 96 * 1024),
     ),
 )
-def test_parse_options_normalizes_graph_ub_budget(
-    compiler_module, arch, requested_capacity, expected_capacity
-):
+def test_parse_options_normalizes_graph_ub_budget(compiler_module, arch, requested_capacity, expected_capacity):
     opts = {}
     if requested_capacity is not _UNSET:
         opts["graph_optimize_ub_capacity_bytes"] = requested_capacity
@@ -233,18 +223,10 @@ def test_parse_options_normalizes_graph_ub_budget(
 
 def test_normalized_graph_ub_budget_contributes_to_npu_hash(compiler_module):
     auto = compiler_module.NPUOptions(arch="Ascend910B1")
-    explicit_none = compiler_module.NPUOptions(
-        arch="Ascend910B1", graph_optimize_ub_capacity_bytes=None
-    )
-    disabled = compiler_module.NPUOptions(
-        arch="Ascend910B1", graph_optimize_ub_capacity_bytes=0
-    )
-    small = compiler_module.NPUOptions(
-        arch="Ascend910B1", graph_optimize_ub_capacity_bytes=4096
-    )
-    clamped = compiler_module.NPUOptions(
-        arch="Ascend910B1", graph_optimize_ub_capacity_bytes=96 * 1024 + 1
-    )
+    explicit_none = compiler_module.NPUOptions(arch="Ascend910B1", graph_optimize_ub_capacity_bytes=None)
+    disabled = compiler_module.NPUOptions(arch="Ascend910B1", graph_optimize_ub_capacity_bytes=0)
+    small = compiler_module.NPUOptions(arch="Ascend910B1", graph_optimize_ub_capacity_bytes=4096)
+    clamped = compiler_module.NPUOptions(arch="Ascend910B1", graph_optimize_ub_capacity_bytes=96 * 1024 + 1)
 
     assert auto.__dict__["graph_optimize_ub_capacity_bytes"] == 96 * 1024
     assert explicit_none.graph_optimize_ub_capacity_bytes == 96 * 1024
@@ -262,9 +244,7 @@ def test_normalized_graph_ub_budget_contributes_to_npu_hash(compiler_module):
         (1.5, TypeError),
     ),
 )
-def test_npu_options_rejects_invalid_graph_ub_budget_requests(
-    compiler_module, requested_capacity, error_type
-):
+def test_npu_options_rejects_invalid_graph_ub_budget_requests(compiler_module, requested_capacity, error_type):
     with pytest.raises(error_type):
         compiler_module.NPUOptions(
             arch="Ascend910B1",
@@ -341,11 +321,7 @@ def _run_ttir_to_npubin(
     monkeypatch.setattr(
         compiler,
         "ir",
-        SimpleNamespace(
-            pass_manager=lambda _context: (
-                events.append("pass_manager") or pass_manager
-            )
-        ),
+        SimpleNamespace(pass_manager=lambda _context: (events.append("pass_manager") or pass_manager)),
     )
     monkeypatch.setattr(compiler, "_parse_ttir_metadata", parse_ttir_metadata)
     monkeypatch.setattr(compiler, "_export_coalesce_metadata", export_coalesce_metadata)
@@ -354,9 +330,7 @@ def _run_ttir_to_npubin(
         "get_common_bishengir_compile_options",
         lambda _metadata: list(common_options),
     )
-    monkeypatch.setattr(
-        compiler, "_get_npucompiler_path", lambda: ("/fake/bisheng", {})
-    )
+    monkeypatch.setattr(compiler, "_get_npucompiler_path", lambda: ("/fake/bisheng", {}))
     monkeypatch.setattr(
         compiler,
         "_is_auto_map_parallel_blocks_enabled",
@@ -396,21 +370,17 @@ def test_export_coalesce_metadata_removes_attrs_and_marks_row(compiler_module, m
     monkeypatch.setattr(
         compiler_module,
         "ascend",
-        SimpleNamespace(
-            ir=SimpleNamespace(
-                get_int_attr=get_int_attr,
-                remove_attr=remove_attr,
-            )
-        ),
+        SimpleNamespace(ir=SimpleNamespace(
+            get_int_attr=get_int_attr,
+            remove_attr=remove_attr,
+        )),
     )
 
-    coalesced = SimpleNamespace(
-        attrs={
-            "hacc.coalesce_factor": 4,
-            "hacc.coalesce_axis": 2,
-            "hacc.coalesce_grid_ceil_div": 1,
-        }
-    )
+    coalesced = SimpleNamespace(attrs={
+        "hacc.coalesce_factor": 4,
+        "hacc.coalesce_axis": 2,
+        "hacc.coalesce_grid_ceil_div": 1,
+    })
     metadata = {}
     compiler_module._export_coalesce_metadata(coalesced, metadata)
 
@@ -438,9 +408,8 @@ def test_export_coalesce_metadata_removes_attrs_and_marks_row(compiler_module, m
     }
 
 
-def test_export_coalesce_metadata_rejects_partial_row_contract(
-    compiler_module, monkeypatch
-):
+def test_export_coalesce_metadata_rejects_partial_row_contract(compiler_module, monkeypatch):
+
     def get_int_attr(module, name):
         return module.attrs.get(name)
 
@@ -450,36 +419,31 @@ def test_export_coalesce_metadata_rejects_partial_row_contract(
     monkeypatch.setattr(
         compiler_module,
         "ascend",
-        SimpleNamespace(
-            ir=SimpleNamespace(
-                get_int_attr=get_int_attr,
-                remove_attr=remove_attr,
-            )
-        ),
+        SimpleNamespace(ir=SimpleNamespace(
+            get_int_attr=get_int_attr,
+            remove_attr=remove_attr,
+        )),
     )
 
     with pytest.raises(RuntimeError, match="launch contract"):
         compiler_module._export_coalesce_metadata(
-            SimpleNamespace(attrs={"hacc.coalesce_factor": 4}), {},
+            SimpleNamespace(attrs={"hacc.coalesce_factor": 4}),
+            {},
             require_row_contract=True,
         )
 
     with pytest.raises(RuntimeError, match="RowCoalescing"):
         compiler_module._export_coalesce_metadata(
-            SimpleNamespace(
-                attrs={
-                    "hacc.coalesce_factor": 4,
-                    "hacc.coalesce_axis": 0,
-                }
-            ),
+            SimpleNamespace(attrs={
+                "hacc.coalesce_factor": 4,
+                "hacc.coalesce_axis": 0,
+            }),
             {},
             require_row_contract=True,
         )
 
 
-def test_ttir_to_npubin_exports_make_ttir_row_contract_only_for_pure_simt(
-    compiler_module, monkeypatch
-):
+def test_ttir_to_npubin_exports_make_ttir_row_contract_only_for_pure_simt(compiler_module, monkeypatch):
     events, _command = _run_ttir_to_npubin(
         compiler_module,
         monkeypatch,
@@ -536,22 +500,15 @@ def _run_make_ttir_with_recorded_graph_options(compiler, monkeypatch, options):
     monkeypatch.setattr(
         compiler,
         "ascend",
-        SimpleNamespace(
-            passes=SimpleNamespace(
-                ttir=SimpleNamespace(
-                    add_graph_optimize=lambda _pm, **kwargs: graph_calls.append(kwargs)
-                )
-            )
-        ),
+        SimpleNamespace(passes=SimpleNamespace(ttir=SimpleNamespace(
+            add_graph_optimize=lambda _pm, **kwargs: graph_calls.append(kwargs)))),
     )
 
     assert compiler.make_ttir(module, {}, options) is module
     return events, graph_calls
 
 
-def test_make_ttir_passes_force_simt_only_to_graph_optimize(
-    compiler_module, monkeypatch
-):
+def test_make_ttir_passes_force_simt_only_to_graph_optimize(compiler_module, monkeypatch):
     options = SimpleNamespace(
         enable_graph_optimize=True,
         graph_optimize_rule_mask=8,
@@ -562,19 +519,15 @@ def test_make_ttir_passes_force_simt_only_to_graph_optimize(
         debug=False,
     )
 
-    events, graph_calls = _run_make_ttir_with_recorded_graph_options(
-        compiler_module, monkeypatch, options
-    )
+    events, graph_calls = _run_make_ttir_with_recorded_graph_options(compiler_module, monkeypatch, options)
 
-    assert graph_calls == [
-        {
-            "rule_mask": 8,
-            "max_rewrites_per_function": 17,
-            "ub_capacity_bytes": 4096,
-            "emit_remarks": True,
-            "force_simt_only": True,
-        }
-    ]
+    assert graph_calls == [{
+        "rule_mask": 8,
+        "max_rewrites_per_function": 17,
+        "ub_capacity_bytes": 4096,
+        "emit_remarks": True,
+        "force_simt_only": True,
+    }]
     assert events[-1] == "run_row"
 
 
@@ -587,9 +540,8 @@ def test_make_ttir_passes_force_simt_only_to_graph_optimize(
         (96 * 1024 + 1, 96 * 1024),
     ),
 )
-def test_make_ttir_forwards_normalized_graph_ub_budget(
-    compiler_module, monkeypatch, requested_capacity, expected_capacity
-):
+def test_make_ttir_forwards_normalized_graph_ub_budget(compiler_module, monkeypatch, requested_capacity,
+                                                       expected_capacity):
     options = compiler_module.NPUOptions(
         arch="Ascend910B1",
         graph_optimize_rule_mask=8,
@@ -599,19 +551,15 @@ def test_make_ttir_forwards_normalized_graph_ub_budget(
         force_simt_only=True,
     )
 
-    events, graph_calls = _run_make_ttir_with_recorded_graph_options(
-        compiler_module, monkeypatch, options
-    )
+    events, graph_calls = _run_make_ttir_with_recorded_graph_options(compiler_module, monkeypatch, options)
 
-    assert graph_calls == [
-        {
-            "rule_mask": 8,
-            "max_rewrites_per_function": 17,
-            "ub_capacity_bytes": expected_capacity,
-            "emit_remarks": True,
-            "force_simt_only": True,
-        }
-    ]
+    assert graph_calls == [{
+        "rule_mask": 8,
+        "max_rewrites_per_function": 17,
+        "ub_capacity_bytes": expected_capacity,
+        "emit_remarks": True,
+        "force_simt_only": True,
+    }]
     assert events[-1] == "run_row"
 
 
@@ -639,12 +587,12 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
     auto_blockify_flag = "--enable-auto-blockify-loop"
 
     for (
-        env_enabled,
-        user_option,
-        blacklisted,
-        row_applied,
-        superblock,
-        case_bisheng_options,
+            env_enabled,
+            user_option,
+            blacklisted,
+            row_applied,
+            superblock,
+            case_bisheng_options,
     ) in itertools.product(
         (False, True),
         (None, False, True),
@@ -671,23 +619,18 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
                 disable_fma=True,
             )
 
-        first_injection = (
-            env_enabled and (user_option is None or user_option)
-        ) or (not env_enabled and bool(user_option))
+        first_injection = (env_enabled and
+                           (user_option is None or user_option)) or (not env_enabled and bool(user_option))
         second_injection = env_enabled and not blacklisted and not row_applied
-        case = (
-            f"E={env_enabled}, O={user_option}, B={blacklisted}, "
-            f"R={row_applied}, superblock={superblock}, "
-            f"bisheng_options={case_bisheng_options!r}"
-        )
+        case = (f"E={env_enabled}, O={user_option}, B={blacklisted}, "
+                f"R={row_applied}, superblock={superblock}, "
+                f"bisheng_options={case_bisheng_options!r}")
 
         expected_options = [*common_options, *pure_simt_prefix]
         if first_injection:
             expected_options.append(auto_blockify_flag)
         if case_bisheng_options is not None:
-            expected_options.append(
-                f"--append-bisheng-options={case_bisheng_options}"
-            )
+            expected_options.append(f"--append-bisheng-options={case_bisheng_options}")
         if second_injection:
             expected_options.append(auto_blockify_flag)
             if superblock > 0:
@@ -704,9 +647,7 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
         assert Path(command[-1]).name == "kernel", case
 
 
-def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(
-    compiler_module,
-):
+def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compiler_module, ):
     """The normal compiler default supplies the second half of the T2L gate.
 
     Axis/Chunk/SLS must remain controlled by the original

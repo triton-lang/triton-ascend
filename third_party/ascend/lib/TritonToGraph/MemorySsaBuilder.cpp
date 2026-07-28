@@ -489,8 +489,8 @@ TensorObject *MemorySSABuilder::createTensorObject(Operation *op) {
   // 设置默认的kind（可以根据操作类型推断）
   TensorObject::TensorKind kind = TensorObject::TensorKind::GLOBAL_MEMORY;
 
-  auto tensorOwner =
-      std::make_unique<TensorObject>(name, shape, resultType, elementType, kind);
+  auto tensorOwner = std::make_unique<TensorObject>(name, shape, resultType,
+                                                    elementType, kind);
   TensorObject *tensor = tensorOwner.get();
   ownedTensorObjects.push_back(std::move(tensorOwner));
 

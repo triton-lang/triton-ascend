@@ -53,10 +53,10 @@ public:
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(LayoutMemoryCompatibilityPass)
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<arith::ArithDialect, cf::ControlFlowDialect,
-                    math::MathDialect, scf::SCFDialect, tensor::TensorDialect,
-                    triton::TritonDialect,
-                    triton::ascend::TritonAscendDialect>();
+    registry
+        .insert<arith::ArithDialect, cf::ControlFlowDialect, math::MathDialect,
+                scf::SCFDialect, tensor::TensorDialect, triton::TritonDialect,
+                triton::ascend::TritonAscendDialect>();
   }
 
   void runOnOperation() override {

@@ -237,15 +237,15 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
     if (auto intTy = dyn_cast<IntegerType>(elemTy)) {
       TypedAttr zero = IntegerAttr::get(intTy, 0);
       if (rt)
-        return rw.create<arith::ConstantOp>(
-            zloc, ty, DenseElementsAttr::get(rt, zero));
+        return rw.create<arith::ConstantOp>(zloc, ty,
+                                            DenseElementsAttr::get(rt, zero));
       return rw.create<arith::ConstantOp>(zloc, ty, zero);
     }
     if (auto fpTy = dyn_cast<FloatType>(elemTy)) {
       TypedAttr zero = FloatAttr::get(fpTy, 0.0);
       if (rt)
-        return rw.create<arith::ConstantOp>(
-            zloc, ty, DenseElementsAttr::get(rt, zero));
+        return rw.create<arith::ConstantOp>(zloc, ty,
+                                            DenseElementsAttr::get(rt, zero));
       return rw.create<arith::ConstantOp>(zloc, ty, zero);
     }
     return Value();
@@ -262,8 +262,8 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
   Value pidHSplat = rw.create<triton::SplatOp>(loc, hI32Ty, pidH);
   Value rows = rw.create<arith::AddIOp>(loc, pidHSplat, lane);
   Value validSplat = rw.create<triton::SplatOp>(loc, hI32Ty, seed.validCount);
-  Value rowMask = rw.create<arith::CmpIOp>(
-      loc, arith::CmpIPredicate::slt, rows, validSplat);
+  Value rowMask = rw.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt, rows,
+                                           validSplat);
 
   DenseMap<Value, Value> vmap;
   vmap[pidVal] = rows;
@@ -297,8 +297,8 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
     if (!isa<RankedTensorType>(v.getType()))
       return v;
     Value expanded = rw.create<triton::ExpandDimsOp>(v.getLoc(), v, 0);
-    Value broadcast =
-        rw.create<triton::BroadcastOp>(v.getLoc(), liftTy(v.getType()), expanded);
+    Value broadcast = rw.create<triton::BroadcastOp>(
+        v.getLoc(), liftTy(v.getType()), expanded);
     if (localMap)
       (*localMap)[v] = broadcast;
     else
@@ -348,9 +348,8 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
       Value oneD = rw.create<triton::MakeRangeOp>(
           opLoc, range.getType(), range.getStart(), range.getEnd());
       Value expanded = rw.create<triton::ExpandDimsOp>(opLoc, oneD, 0);
-      (*localMap)[range.getResult()] =
-          rw.create<triton::BroadcastOp>(opLoc, liftTy(range.getType()),
-                                         expanded);
+      (*localMap)[range.getResult()] = rw.create<triton::BroadcastOp>(
+          opLoc, liftTy(range.getType()), expanded);
       return true;
     }
 
@@ -368,7 +367,8 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
           cur = rw.create<triton::ExpandDimsOp>(
               opLoc, cur, cast<RankedTensorType>(cur.getType()).getRank());
         }
-        result = rw.create<triton::BroadcastOp>(opLoc, liftTy(sp.getType()), cur);
+        result =
+            rw.create<triton::BroadcastOp>(opLoc, liftTy(sp.getType()), cur);
       }
       (*localMap)[sp.getResult()] = result;
       return true;
@@ -378,8 +378,8 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
       Value src = liftOperand(ed.getSrc(), localMap);
       if (!src)
         return false;
-      (*localMap)[ed.getResult()] = rw.create<triton::ExpandDimsOp>(
-          opLoc, src, ed.getAxis() + 1);
+      (*localMap)[ed.getResult()] =
+          rw.create<triton::ExpandDimsOp>(opLoc, src, ed.getAxis() + 1);
       return true;
     }
 
@@ -432,17 +432,18 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
       if (!ptr)
         return false;
       Value mask = ld.getMask() ? liftOperand(ld.getMask(), localMap) : Value();
-      Value rowMaskForLoad = maskForType(opLoc, cast<ShapedType>(ptr.getType()));
+      Value rowMaskForLoad =
+          maskForType(opLoc, cast<ShapedType>(ptr.getType()));
       if (rowMaskForLoad) {
         mask = mask ? rw.create<arith::AndIOp>(opLoc, mask, rowMaskForLoad)
                     : rowMaskForLoad;
       }
-      Value other = ld.getOther() ? liftOperand(ld.getOther(), localMap)
-                                  : makeZero(opLoc, liftTy(ld.getResult().getType()));
-      auto nu = rw.create<triton::LoadOp>(opLoc, ptr, mask, other,
-                                          ld.getBoundaryCheck(), ld.getPadding(),
-                                          ld.getCache(), ld.getEvict(),
-                                          ld.getIsVolatile());
+      Value other = ld.getOther()
+                        ? liftOperand(ld.getOther(), localMap)
+                        : makeZero(opLoc, liftTy(ld.getResult().getType()));
+      auto nu = rw.create<triton::LoadOp>(
+          opLoc, ptr, mask, other, ld.getBoundaryCheck(), ld.getPadding(),
+          ld.getCache(), ld.getEvict(), ld.getIsVolatile());
       copyAttrs(ld, nu);
       (*localMap)[ld.getResult()] = nu.getResult();
       return true;
@@ -454,7 +455,8 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
       if (!ptr || !val)
         return false;
       Value mask = st.getMask() ? liftOperand(st.getMask(), localMap) : Value();
-      Value rowMaskForStore = maskForType(opLoc, cast<ShapedType>(ptr.getType()));
+      Value rowMaskForStore =
+          maskForType(opLoc, cast<ShapedType>(ptr.getType()));
       if (rowMaskForStore) {
         mask = mask ? rw.create<arith::AndIOp>(opLoc, mask, rowMaskForStore)
                     : rowMaskForStore;
@@ -523,7 +525,8 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
       rw.create<scf::YieldOp>(oldYield.getLoc(), yieldVals);
       rw.eraseOp(newTerm);
 
-      for (auto [oldR, newR] : llvm::zip(forOp.getResults(), newFor.getResults()))
+      for (auto [oldR, newR] :
+           llvm::zip(forOp.getResults(), newFor.getResults()))
         (*localMap)[oldR] = newR;
       rw.setInsertionPointAfter(newFor);
       return true;
@@ -554,9 +557,8 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
       else
         resultTypes.push_back(resultTy);
     }
-    Operation *nu =
-        rw.create(opLoc, op->getName().getIdentifier(), operands, resultTypes,
-                  op->getAttrs());
+    Operation *nu = rw.create(opLoc, op->getName().getIdentifier(), operands,
+                              resultTypes, op->getAttrs());
     for (auto [oldR, newR] : llvm::zip(op->getResults(), nu->getResults()))
       (*localMap)[oldR] = newR;
     return true;
@@ -626,12 +628,11 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
   moduleOp->setAttr(kCoalesceGridCeilDivAttr, IntegerAttr::get(i32Ty, 1));
 }
 
-}  // namespace
+} // namespace
 
 void rewriteRowCoalesce(ModuleOp moduleOp) {
   IRRewriter rw(moduleOp.getContext());
   rewriteModule(moduleOp, rw);
 }
-
 
 } // namespace RowCoalescing

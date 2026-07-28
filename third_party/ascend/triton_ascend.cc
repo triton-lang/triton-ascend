@@ -14,14 +14,14 @@
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 #include "ascend/include/TritonControlFlowOpt/Passes.h"
 #include "ascend/include/TritonToAnnotation/Passes.h"
+#include "ascend/include/TritonToGraph/GraphOptimization.h"
+#include "ascend/include/TritonToGraph/LayoutMemoryOptimization.h"
 #include "ascend/include/TritonToHFusion/Passes.h"
 #include "ascend/include/TritonToHIVM/Passes.h"
 #include "ascend/include/TritonToLLVM/Passes.h"
 #include "ascend/include/TritonToLinalg/Passes.h"
 #include "ascend/include/TritonToStructured/Passes.h"
 #include "ascend/include/TritonToUnstructure/Passes.h"
-#include "ascend/include/TritonToGraph/GraphOptimization.h"
-#include "ascend/include/TritonToGraph/LayoutMemoryOptimization.h"
 
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
@@ -134,8 +134,8 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
   m.def(
       "add_graph_optimize",
       [](mlir::PassManager &pm, std::uint64_t ruleMask,
-         std::uint64_t maxRewritesPerFunction,
-         std::uint64_t ubCapacityBytes, bool emitRemarks, bool forceSimtOnly) {
+         std::uint64_t maxRewritesPerFunction, std::uint64_t ubCapacityBytes,
+         bool emitRemarks, bool forceSimtOnly) {
         if (ruleMask > std::numeric_limits<std::uint8_t>::max())
           throw py::value_error("rule_mask must fit in uint8_t");
         if (maxRewritesPerFunction > std::numeric_limits<unsigned>::max())

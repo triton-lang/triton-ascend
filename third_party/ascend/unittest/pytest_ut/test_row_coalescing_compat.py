@@ -9,7 +9,6 @@
 #
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
-
 """IR contracts for the pure-SIMT Row graph-optimization rule.
 
 Row is selected by graph-rule bit 8 and the explicit ``force_simt_only`` pass
@@ -21,7 +20,6 @@ import pytest
 
 from triton._C.libtriton import ascend, ir
 from triton._C.libtriton.ascend import ir as ascend_ir
-
 
 if not hasattr(ascend.passes.ttir, "add_graph_optimize"):
     pytest.skip(
@@ -40,11 +38,7 @@ def _row_module(
     has_direct_call=False,
     body="copy",
 ):
-    num_programs = (
-        f"    %num_programs = tt.get_num_programs {axis} : i32\n"
-        if reads_num_programs
-        else ""
-    )
+    num_programs = (f"    %num_programs = tt.get_num_programs {axis} : i32\n" if reads_num_programs else "")
     pre_load = ""
     pre_pid = ""
     helper = ""
@@ -167,9 +161,7 @@ def _assert_row_bailout(text):
     ("width", "factor"),
     ((16, 8), (32, 4), (1024, 2)),
 )
-def test_row_coalescing_graph_rule_preserves_h_selection(
-    width, factor, tmp_path
-):
+def test_row_coalescing_graph_rule_preserves_h_selection(width, factor, tmp_path):
     text = _run_row(_row_module(f"row_h{factor}", width), tmp_path)
 
     assert f"hacc.coalesce_factor = {factor} : i32" in text
@@ -197,16 +189,8 @@ def test_row_coalescing_adds_tail_mask_to_masked_load_and_store(tmp_path):
     assert text.count("arith.andi") >= 2
     assert text.count("tensor<8x16xi1>") >= 4
 
-    lifted_loads = [
-        line
-        for line in text.splitlines()
-        if "tt.load" in line and "tensor<8x16x!tt.ptr<f32>>" in line
-    ]
-    lifted_stores = [
-        line
-        for line in text.splitlines()
-        if "tt.store" in line and "tensor<8x16x!tt.ptr<f32>>" in line
-    ]
+    lifted_loads = [line for line in text.splitlines() if "tt.load" in line and "tensor<8x16x!tt.ptr<f32>>" in line]
+    lifted_stores = [line for line in text.splitlines() if "tt.store" in line and "tensor<8x16x!tt.ptr<f32>>" in line]
     assert len(lifted_loads) == 1 and lifted_loads[0].count(",") >= 2
     assert len(lifted_stores) == 1 and lifted_stores[0].count(",") >= 2
 
@@ -290,9 +274,7 @@ def test_row_coalescing_rejects_direct_call_even_outside_work_region(tmp_path):
     assert "tt.call @row_helper()" in text
 
 
-def test_row_coalescing_requires_one_public_entry_but_ignores_unused_private_funcs(
-    tmp_path,
-):
+def test_row_coalescing_requires_one_public_entry_but_ignores_unused_private_funcs(tmp_path, ):
     source = _row_module("row_one_public", 16)
     multiple_public = source.replace(
         "\n}\n",

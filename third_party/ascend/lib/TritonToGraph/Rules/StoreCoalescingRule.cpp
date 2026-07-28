@@ -520,8 +520,7 @@ materializeRowMajorFlatValue(IRRewriter &rewriter,
   return reshape.getResult();
 }
 
-LogicalResult applyRun(IRRewriter &rewriter,
-                       const StoreCoalescingRun &run) {
+LogicalResult applyRun(IRRewriter &rewriter, const StoreCoalescingRun &run) {
   if (!run.anchor || run.addressOrderStores.size() < 2 ||
       run.programOrderStores.size() != run.addressOrderStores.size() ||
       run.totalElements <= 0 || !fitsI32(run.firstOffset) ||

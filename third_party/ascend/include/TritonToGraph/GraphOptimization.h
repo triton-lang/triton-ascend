@@ -66,8 +66,7 @@ constexpr uint8_t kAllGraphOptimizationRuleMask =
         GraphOptimizationRuleId::StridedLoadStoreRewrite);
 
 constexpr bool isValidGraphOptimizationRuleMask(uint8_t ruleMask) {
-  return (ruleMask & static_cast<uint8_t>(~kAllGraphOptimizationRuleMask)) ==
-         0;
+  return (ruleMask & static_cast<uint8_t>(~kAllGraphOptimizationRuleMask)) == 0;
 }
 
 struct GraphOptimizationOptions {

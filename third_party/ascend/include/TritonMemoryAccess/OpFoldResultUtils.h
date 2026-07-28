@@ -69,9 +69,9 @@ bool isOne(const OpFoldResult ofr);
 Value convertToIndexIfNeeded(Value input, const Location &loc,
                              OpBuilder &builder);
 
-RankedTensorType getExtractSlicedType(
-    llvm::ArrayRef<OpFoldResult> shape,
-    const llvm::SmallBitVector &droppedDims, Type elemType);
+RankedTensorType getExtractSlicedType(llvm::ArrayRef<OpFoldResult> shape,
+                                      const llvm::SmallBitVector &droppedDims,
+                                      Type elemType);
 
 OpFoldResult getOpFoldResultOfLayoutInfo(Value value, OpBuilder &builder);
 

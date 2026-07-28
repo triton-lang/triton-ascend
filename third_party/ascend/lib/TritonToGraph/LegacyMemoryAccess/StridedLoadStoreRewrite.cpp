@@ -21,8 +21,8 @@
  */
 
 #include "TritonToGraph/LegacyMemoryAccess/StridedLoadStoreRewrite.h"
-#include "TritonMemoryAccess/MemoryAccessTags.h"
 #include "TritonMemoryAccess/LoadStoreMaskAnalysis.h"
+#include "TritonMemoryAccess/MemoryAccessTags.h"
 #include "TritonToStructured/PtrAnalysis.h"
 #include "Utils/Utils.h"
 

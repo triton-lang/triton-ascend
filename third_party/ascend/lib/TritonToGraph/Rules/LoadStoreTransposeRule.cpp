@@ -23,11 +23,6 @@
 #include "TritonToGraph/GraphOptimizationRule.h"
 #include "TritonToGraph/PermutationAnalysis.h"
 
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/SetVector.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/STLExtras.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -36,6 +31,11 @@
 #include "mlir/IR/Verifier.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallVector.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -230,8 +230,7 @@ std::optional<unsigned> getSingleVaryingAxis(Value value, unsigned rank) {
   return varyingAxis;
 }
 
-std::optional<AffineLaneAxis> parseAffineLaneTerm(Value value,
-                                                   unsigned rank) {
+std::optional<AffineLaneAxis> parseAffineLaneTerm(Value value, unsigned rank) {
   auto broadcast = value.getDefiningOp<triton::BroadcastOp>();
   if (!broadcast || broadcast.getResult() != value)
     return std::nullopt;
@@ -318,8 +317,8 @@ bool haveSamePermutation(ArrayRef<int32_t> lhs, ArrayRef<int32_t> rhs) {
 
 std::optional<AffineLayoutAccess> analyzeAffineLayout(Value pointer) {
   auto pointerType = dyn_cast<RankedTensorType>(pointer.getType());
-  if (!pointerType || !pointerType.hasStaticShape() || pointerType.getEncoding() ||
-      pointerType.getRank() < 2 ||
+  if (!pointerType || !pointerType.hasStaticShape() ||
+      pointerType.getEncoding() || pointerType.getRank() < 2 ||
       !isa<triton::PointerType>(pointerType.getElementType()) ||
       triton::isTensorPointerType(pointerType.getElementType()))
     return std::nullopt;
@@ -384,8 +383,8 @@ std::optional<AffineLayoutAccess> analyzeAffineLayout(Value pointer) {
       for (unsigned other : remaining) {
         if (candidate == other)
           continue;
-        if (compareScaleExpressions(axes[candidate].scale,
-                                    axes[other].scale) != 1) {
+        if (compareScaleExpressions(axes[candidate].scale, axes[other].scale) !=
+            1) {
           largerThanAll = false;
           break;
         }
@@ -398,8 +397,7 @@ std::optional<AffineLayoutAccess> analyzeAffineLayout(Value pointer) {
     }
     if (!selected)
       return std::nullopt;
-    permutation.push_back(
-        static_cast<int32_t>(axes[*selected].outputAxis));
+    permutation.push_back(static_cast<int32_t>(axes[*selected].outputAxis));
     remaining.erase(llvm::find(remaining, *selected));
   }
 
@@ -407,13 +405,13 @@ std::optional<AffineLayoutAccess> analyzeAffineLayout(Value pointer) {
       isIdentityPermutation(permutation))
     return std::nullopt;
 
-  return AffineLayoutAccess{pointer, baseSplat.getSrc(), addPtr.getOffset(),
-                            pointerType, std::move(axes),
-                            std::move(permutation)};
+  return AffineLayoutAccess{
+      pointer,     baseSplat.getSrc(), addPtr.getOffset(),
+      pointerType, std::move(axes),    std::move(permutation)};
 }
 
 const AffineLaneAxis *getAxisForOutputAxis(const AffineLayoutAccess &access,
-                                            unsigned outputAxis) {
+                                           unsigned outputAxis) {
   for (const AffineLaneAxis &axis : access.axes) {
     if (axis.outputAxis == outputAxis)
       return &axis;
@@ -423,8 +421,8 @@ const AffineLaneAxis *getAxisForOutputAxis(const AffineLayoutAccess &access,
 
 bool isStaticInjectiveAccess(const AffineLayoutAccess &access) {
   int64_t innerReachableOffset = 0;
-  for (int index = static_cast<int>(access.permutation.size()) - 1;
-       index >= 0; --index) {
+  for (int index = static_cast<int>(access.permutation.size()) - 1; index >= 0;
+       --index) {
     const auto outputAxis = static_cast<unsigned>(access.permutation[index]);
     const AffineLaneAxis *axis = getAxisForOutputAxis(access, outputAxis);
     if (!axis || !axis->scale.symbols.empty() ||
@@ -473,8 +471,8 @@ bool collectUniformScaleExpression(Value value, ScaleExpression &scale) {
          normalizeScaleExpression(scale);
 }
 
-std::optional<ScaleExpression>
-getStrictUpperBoundFor(arith::CmpIOp comparison, Value lane) {
+std::optional<ScaleExpression> getStrictUpperBoundFor(arith::CmpIOp comparison,
+                                                      Value lane) {
   const arith::CmpIPredicate predicate = comparison.getPredicate();
   if ((predicate == arith::CmpIPredicate::slt ||
        predicate == arith::CmpIPredicate::ult) &&
@@ -518,10 +516,9 @@ bool dominatesScaleExpression(const ScaleExpression &lhs,
          llvm::equal(lhs.symbols, rhs.symbols);
 }
 
-void collectAxisCapacities(
-    const AffineLaneAxis &axis, int64_t staticExtent,
-    ArrayRef<arith::CmpIOp> comparisons,
-    SmallVectorImpl<ScaleExpression> &capacities) {
+void collectAxisCapacities(const AffineLaneAxis &axis, int64_t staticExtent,
+                           ArrayRef<arith::CmpIOp> comparisons,
+                           SmallVectorImpl<ScaleExpression> &capacities) {
   if (staticExtent > 0)
     capacities.push_back(ScaleExpression{staticExtent, {}});
   for (arith::CmpIOp comparison : comparisons) {
@@ -552,16 +549,14 @@ bool hasDynamicMaskProof(Value mask, const AffineLayoutAccess &access) {
   if (!collectMaskComparisons(mask, comparisons, visited))
     return false;
 
-  for (unsigned outerIndex = 0;
-       outerIndex + 1 < access.permutation.size(); ++outerIndex) {
+  for (unsigned outerIndex = 0; outerIndex + 1 < access.permutation.size();
+       ++outerIndex) {
     const auto outerOutputAxis =
         static_cast<unsigned>(access.permutation[outerIndex]);
     const auto innerOutputAxis =
         static_cast<unsigned>(access.permutation[outerIndex + 1]);
-    const AffineLaneAxis *outer =
-        getAxisForOutputAxis(access, outerOutputAxis);
-    const AffineLaneAxis *inner =
-        getAxisForOutputAxis(access, innerOutputAxis);
+    const AffineLaneAxis *outer = getAxisForOutputAxis(access, outerOutputAxis);
+    const AffineLaneAxis *inner = getAxisForOutputAxis(access, innerOutputAxis);
     if (!outer || !inner)
       return false;
 
@@ -617,8 +612,7 @@ bool hasUnsupportedLoadAttributes(triton::LoadOp load) {
   }
   if (load->getAttr("padding"))
     return true;
-  if (auto boundary =
-          load->getAttrOfType<DenseI32ArrayAttr>("boundaryCheck")) {
+  if (auto boundary = load->getAttrOfType<DenseI32ArrayAttr>("boundaryCheck")) {
     if (!boundary.asArrayRef().empty())
       return true;
   }
@@ -637,9 +631,9 @@ bool hasUnsupportedStoreAttributes(triton::StoreOp store) {
 bool isSupportedClonableOperation(Operation *operation) {
   if (!operation || operation->getNumRegions() != 0)
     return false;
-  if (isa<triton::LoadOp, triton::StoreOp, triton::AssertOp,
-          triton::SplatOp, triton::BroadcastOp, triton::ExpandDimsOp,
-          triton::AddPtrOp, triton::TransOp, arith::ConstantOp>(operation))
+  if (isa<triton::LoadOp, triton::StoreOp, triton::AssertOp, triton::SplatOp,
+          triton::BroadcastOp, triton::ExpandDimsOp, triton::AddPtrOp,
+          triton::TransOp, arith::ConstantOp>(operation))
     return true;
   return operation->hasTrait<OpTrait::Elementwise>() &&
          isMemoryEffectFree(operation);
@@ -733,10 +727,10 @@ rebuildFullRankExpand(IRRewriter &rewriter, triton::ExpandDimsOp expand,
 //
 //   P[Q'[new]] == Q[P[new]],
 //
-// hence Q' = P.inverse() \u2218 Q \u2218 P under the shared new-axis-to-old-axis
-// convention.  This is deliberately computed with Permutation::compose rather
-// than a 2-D swap shortcut: non-self-inverse 3-D orders are the regression
-// case that would otherwise silently be wrong.
+// hence Q' = P.inverse() \u2218 Q \u2218 P under the shared
+// new-axis-to-old-axis convention.  This is deliberately computed with
+// Permutation::compose rather than a 2-D swap shortcut: non-self-inverse 3-D
+// orders are the regression case that would otherwise silently be wrong.
 std::optional<SmallVector<int32_t, 4>>
 getReindexedTransOrder(triton::TransOp trans, const Permutation &layout) {
   FailureOr<Permutation> original = Permutation::create(trans.getOrder());
@@ -754,9 +748,8 @@ getReindexedTransOrder(triton::TransOp trans, const Permutation &layout) {
 }
 
 std::optional<Operation *>
-rebuildTransOperation(IRRewriter &rewriter, triton::TransOp trans,
-                      Value input, Type resultType,
-                      const Permutation &permutation,
+rebuildTransOperation(IRRewriter &rewriter, triton::TransOp trans, Value input,
+                      Type resultType, const Permutation &permutation,
                       SmallVectorImpl<Operation *> *created = nullptr) {
   auto newResultType = dyn_cast<RankedTensorType>(resultType);
   if (!newResultType || !isLayoutTensor(input.getType(), permutation.rank()) ||
@@ -957,14 +950,13 @@ void collectLayoutProvenance(Value value, const Permutation &permutation,
 
 bool isClosureInBlock(const LayoutClosure &closure, Block *block) {
   return block && llvm::all_of(closure.operations, [&](Operation *operation) {
-    return operation && operation->getBlock() == block;
-  });
+           return operation && operation->getBlock() == block;
+         });
 }
 
-bool verifyLayoutClosureUses(
-    const LayoutClosure &closure, Operation *endpoint,
-    ArrayRef<Operation *> selectedBlockOperations,
-    ArrayRef<ExternalAssertPort> assertPorts) {
+bool verifyLayoutClosureUses(const LayoutClosure &closure, Operation *endpoint,
+                             ArrayRef<Operation *> selectedBlockOperations,
+                             ArrayRef<ExternalAssertPort> assertPorts) {
   if (!endpoint)
     return false;
 
@@ -995,9 +987,8 @@ bool verifyLayoutClosureUses(
 // side users of the same pointer-layout provenance.  Any other side use of a
 // layout value in the resulting closure makes the whole candidate fail closed.
 bool collectAutomaticOverflowAssertClosure(
-    LayoutPermutationCandidate &candidate, Block *assertBlock,
-    Operation *limit, ArrayRef<Value> pointerRoots,
-    const Permutation &permutation) {
+    LayoutPermutationCandidate &candidate, Block *assertBlock, Operation *limit,
+    ArrayRef<Value> pointerRoots, const Permutation &permutation) {
   if (!assertBlock || !limit || limit->getBlock() != assertBlock)
     return false;
 
@@ -1078,13 +1069,12 @@ bool collectAutomaticOverflowAssertClosure(
   if (!isClosureInBlock(addressClosure, assertBlock))
     return false;
 
-  Operation *endpoint = candidate.loop
-                            ? candidate.loop.getOperation()
-                            : nullptr;
+  Operation *endpoint =
+      candidate.loop ? candidate.loop.getOperation() : nullptr;
   if (!endpoint && candidate.block)
     endpoint = candidate.anchor;
   if (!verifyLayoutClosureUses(addressClosure, endpoint,
-                                candidate.blockOperations, ports))
+                               candidate.blockOperations, ports))
     return false;
 
   // Some loop-only external tensors (for example the full-rank pointer
@@ -1155,8 +1145,7 @@ std::optional<Type> getReducedResultType(RankedTensorType inputType,
   return inputType.clone(shape);
 }
 
-std::optional<LayoutPermutationCandidate>
-matchLoopCandidate(scf::ForOp loop) {
+std::optional<LayoutPermutationCandidate> matchLoopCandidate(scf::ForOp loop) {
   if (!loop || !loop.getBody() || !loop.getBody()->hasNoPredecessors() ||
       loop.getBody()->getNumArguments() != loop.getInitArgs().size() + 1)
     return std::nullopt;
@@ -1170,20 +1159,23 @@ matchLoopCandidate(scf::ForOp loop) {
 
   for (Operation &operation : *body) {
     if (auto load = dyn_cast<triton::LoadOp>(operation)) {
-      if (hasUnsupportedLoadAttributes(load) || !isUniformOther(load.getOther()))
+      if (hasUnsupportedLoadAttributes(load) ||
+          !isUniformOther(load.getOther()))
         return std::nullopt;
-      std::optional<unsigned> iterArgIndex = getForIterArgIndex(loop, load.getPtr());
+      std::optional<unsigned> iterArgIndex =
+          getForIterArgIndex(loop, load.getPtr());
       auto pointerType = dyn_cast<RankedTensorType>(load.getPtr().getType());
       if (!iterArgIndex || !pointerType || !pointerType.hasStaticShape() ||
           pointerType.getEncoding() || pointerType.getRank() < 2)
         return std::nullopt;
       std::optional<AffineLayoutAccess> access =
           analyzeAffineLayout(loop.getInitArgs()[*iterArgIndex]);
-      if (!access || !isLayoutTensor(load.getResult().getType(),
-                                     access->type.getRank()) ||
+      if (!access ||
+          !isLayoutTensor(load.getResult().getType(), access->type.getRank()) ||
           !hasValidEndpointMask(load.getMask(), *access))
         return std::nullopt;
-      if (permutation && !haveSamePermutation(*permutation, access->permutation))
+      if (permutation &&
+          !haveSamePermutation(*permutation, access->permutation))
         return std::nullopt;
       permutation = access->permutation;
       loadResults.insert(load.getResult());
@@ -1195,16 +1187,18 @@ matchLoopCandidate(scf::ForOp loop) {
     if (auto store = dyn_cast<triton::StoreOp>(operation)) {
       if (hasUnsupportedStoreAttributes(store))
         return std::nullopt;
-      std::optional<unsigned> iterArgIndex = getForIterArgIndex(loop, store.getPtr());
+      std::optional<unsigned> iterArgIndex =
+          getForIterArgIndex(loop, store.getPtr());
       if (!iterArgIndex)
         return std::nullopt;
       std::optional<AffineLayoutAccess> access =
           analyzeAffineLayout(loop.getInitArgs()[*iterArgIndex]);
-      if (!access || !isLayoutTensor(store.getValue().getType(),
-                                     access->type.getRank()) ||
+      if (!access ||
+          !isLayoutTensor(store.getValue().getType(), access->type.getRank()) ||
           !hasValidEndpointMask(store.getMask(), *access))
         return std::nullopt;
-      if (permutation && !haveSamePermutation(*permutation, access->permutation))
+      if (permutation &&
+          !haveSamePermutation(*permutation, access->permutation))
         return std::nullopt;
       permutation = access->permutation;
       stores.push_back(store);
@@ -1290,8 +1284,8 @@ matchLoopCandidate(scf::ForOp loop) {
     candidate.transformedResultIndices.push_back(index);
     for (OpOperand &use : result.getUses()) {
       auto reduce = dyn_cast<triton::ReduceOp>(use.getOwner());
-      if (!reduce || reduce.getNumOperands() != 1 || use.getOperandNumber() != 0 ||
-          reduce->getNumResults() != 1)
+      if (!reduce || reduce.getNumOperands() != 1 ||
+          use.getOperandNumber() != 0 || reduce->getNumResults() != 1)
         return std::nullopt;
       const int32_t newAxis =
           layoutPermutation->mapOldAxisToNew(reduce.getAxis());
@@ -1340,8 +1334,8 @@ bool isSafeExternalBlockTensor(Value value, const Permutation &permutation) {
         !visited.insert(current).second)
       continue;
     Operation *operation = current.getDefiningOp();
-    if (!operation || isa<triton::LoadOp, triton::StoreOp, triton::AssertOp>(
-                          operation))
+    if (!operation ||
+        isa<triton::LoadOp, triton::StoreOp, triton::AssertOp>(operation))
       return false;
     for (Value operand : operation->getOperands())
       pending.push_back(operand);
@@ -1349,8 +1343,7 @@ bool isSafeExternalBlockTensor(Value value, const Permutation &permutation) {
   return true;
 }
 
-std::optional<LayoutPermutationCandidate>
-matchBlockCandidate(Block *block) {
+std::optional<LayoutPermutationCandidate> matchBlockCandidate(Block *block) {
   if (!block || block->empty())
     return std::nullopt;
   if (auto loop = dyn_cast_or_null<scf::ForOp>(block->getParentOp())) {
@@ -1374,8 +1367,7 @@ matchBlockCandidate(Block *block) {
     if (!access || !isLayoutTensor(valueType, access->type.getRank()) ||
         !hasValidEndpointMask(mask, *access))
       return false;
-    if (permutation &&
-        !haveSamePermutation(*permutation, access->permutation))
+    if (permutation && !haveSamePermutation(*permutation, access->permutation))
       return false;
     permutation = access->permutation;
     accesses.push_back(std::move(*access));
@@ -1384,8 +1376,10 @@ matchBlockCandidate(Block *block) {
 
   for (Operation &operation : *block) {
     if (auto load = dyn_cast<triton::LoadOp>(operation)) {
-      if (hasUnsupportedLoadAttributes(load) || !isUniformOther(load.getOther()) ||
-          !recordAccess(load.getPtr(), load.getMask(), load.getResult().getType()))
+      if (hasUnsupportedLoadAttributes(load) ||
+          !isUniformOther(load.getOther()) ||
+          !recordAccess(load.getPtr(), load.getMask(),
+                        load.getResult().getType()))
         return std::nullopt;
       auto pointerType = dyn_cast<RankedTensorType>(load.getPtr().getType());
       if (pointerType && pointerType.getRank() >= 2) {
@@ -1396,7 +1390,8 @@ matchBlockCandidate(Block *block) {
     }
     if (auto store = dyn_cast<triton::StoreOp>(operation)) {
       if (hasUnsupportedStoreAttributes(store) ||
-          !recordAccess(store.getPtr(), store.getMask(), store.getValue().getType()))
+          !recordAccess(store.getPtr(), store.getMask(),
+                        store.getValue().getType()))
         return std::nullopt;
       auto pointerType = dyn_cast<RankedTensorType>(store.getPtr().getType());
       if (pointerType && pointerType.getRank() >= 2)
@@ -1433,11 +1428,11 @@ matchBlockCandidate(Block *block) {
     for (Operation &operation : *block) {
       if (selected.contains(&operation))
         continue;
-      bool usesSelectedValue = llvm::any_of(operation.getOperands(),
-                                             [&](Value operand) {
-        Operation *definingOperation = operand.getDefiningOp();
-        return definingOperation && selected.contains(definingOperation);
-      });
+      bool usesSelectedValue =
+          llvm::any_of(operation.getOperands(), [&](Value operand) {
+            Operation *definingOperation = operand.getDefiningOp();
+            return definingOperation && selected.contains(definingOperation);
+          });
       if (!usesSelectedValue)
         continue;
       // Assert is a zero-result side use, not part of the forward data DAG.
@@ -1567,11 +1562,10 @@ private:
           oldType ? getPermutedTensorType(oldType, permutation) : std::nullopt;
       if (!dense || !dense.isSplat() || !newType)
         return std::nullopt;
-      SmallVector<Attribute, 1> elements = {
-          dense.getSplatValue<Attribute>()};
+      SmallVector<Attribute, 1> elements = {dense.getSplatValue<Attribute>()};
       auto newDense = DenseElementsAttr::get(*newType, elements);
-      auto rebuilt = rewriter.create<arith::ConstantOp>(
-          operation->getLoc(), *newType, newDense);
+      auto rebuilt = rewriter.create<arith::ConstantOp>(operation->getLoc(),
+                                                        *newType, newDense);
       created.push_back(rebuilt.getOperation());
       return rebuilt.getOperation();
     }
@@ -1669,9 +1663,9 @@ cloneLoopOperation(IRRewriter &rewriter, Operation *operation,
     if (!newType)
       return std::nullopt;
     SmallVector<Attribute, 1> elements = {dense.getSplatValue<Attribute>()};
-    auto rebuilt = rewriter.create<arith::ConstantOp>(operation->getLoc(),
-                                                       *newType,
-                                                       DenseElementsAttr::get(*newType, elements));
+    auto rebuilt = rewriter.create<arith::ConstantOp>(
+        operation->getLoc(), *newType,
+        DenseElementsAttr::get(*newType, elements));
     if (created)
       created->push_back(rebuilt.getOperation());
     mapping.map(constant.getResult(), rebuilt.getResult());
@@ -1701,9 +1695,9 @@ cloneLoopOperation(IRRewriter &rewriter, Operation *operation,
   if (auto trans = dyn_cast<triton::TransOp>(operation)) {
     if (operands.size() != 1 || resultTypes.size() != 1)
       return std::nullopt;
-    std::optional<Operation *> rebuiltTrans = rebuildTransOperation(
-        rewriter, trans, operands.front(), resultTypes.front(), permutation,
-        created);
+    std::optional<Operation *> rebuiltTrans =
+        rebuildTransOperation(rewriter, trans, operands.front(),
+                              resultTypes.front(), permutation, created);
     if (!rebuiltTrans)
       return std::nullopt;
     rebuilt = *rebuiltTrans;
@@ -1749,9 +1743,10 @@ cloneLoopOperation(IRRewriter &rewriter, Operation *operation,
   return rebuilt;
 }
 
-std::optional<triton::ReduceOp>
-cloneReduction(IRRewriter &rewriter, triton::ReduceOp reduce, Value newInput,
-               const Permutation &permutation) {
+std::optional<triton::ReduceOp> cloneReduction(IRRewriter &rewriter,
+                                               triton::ReduceOp reduce,
+                                               Value newInput,
+                                               const Permutation &permutation) {
   if (reduce.getNumOperands() != 1 || reduce->getNumResults() != 1)
     return std::nullopt;
   const int32_t newAxis = permutation.mapOldAxisToNew(reduce.getAxis());
@@ -1772,10 +1767,10 @@ cloneReduction(IRRewriter &rewriter, triton::ReduceOp reduce, Value newInput,
 using AssertConditionReplacement = std::pair<Operation *, Value>;
 
 std::optional<SmallVector<AssertConditionReplacement, 8>>
-cloneExternalAssertConditions(
-    IRRewriter &rewriter,
-    ArrayRef<ExternalAssertPort> assertPorts,
-    LayoutValueCloner &externalValues, const Permutation &permutation) {
+cloneExternalAssertConditions(IRRewriter &rewriter,
+                              ArrayRef<ExternalAssertPort> assertPorts,
+                              LayoutValueCloner &externalValues,
+                              const Permutation &permutation) {
   SmallVector<AssertConditionReplacement, 8> replacements;
   replacements.reserve(assertPorts.size());
   for (const ExternalAssertPort &port : assertPorts) {
@@ -1817,7 +1812,7 @@ void commitAssertConditionReplacements(
 void eraseDeadPureClosure(IRRewriter &rewriter,
                           ArrayRef<Operation *> retireOperations) {
   SmallVector<Operation *, 32> pending(retireOperations.begin(),
-                                        retireOperations.end());
+                                       retireOperations.end());
   bool erasedAny = true;
   while (erasedAny) {
     erasedAny = false;
@@ -1840,7 +1835,7 @@ bool canCommitLoopRewrite(const LayoutPermutationCandidate &candidate,
     return false;
 
   DenseSet<unsigned> transformed(candidate.transformedResultIndices.begin(),
-                                  candidate.transformedResultIndices.end());
+                                 candidate.transformedResultIndices.end());
   DenseSet<Operation *> expectedReductions;
   for (const ReductionPort &port : candidate.reductionPorts) {
     if (!port.reduce || port.forResultIndex >= oldFor.getNumResults())
@@ -1902,10 +1897,9 @@ LogicalResult applyCandidate(IRRewriter &rewriter,
   SmallVector<Operation *, 32> created;
   rewriter.setInsertionPoint(oldFor);
   LayoutValueCloner externalValues(rewriter, *permutation, created);
-  std::optional<SmallVector<AssertConditionReplacement, 8>>
-      assertReplacements = cloneExternalAssertConditions(
-          rewriter, candidate.externalAssertPorts, externalValues,
-          *permutation);
+  std::optional<SmallVector<AssertConditionReplacement, 8>> assertReplacements =
+      cloneExternalAssertConditions(rewriter, candidate.externalAssertPorts,
+                                    externalValues, *permutation);
   if (!assertReplacements) {
     eraseCreatedOperations(rewriter, created);
     return failure();
@@ -1930,10 +1924,9 @@ LogicalResult applyCandidate(IRRewriter &rewriter,
     newInitArgs.push_back(*mapped);
   }
 
-  auto newFor = rewriter.create<scf::ForOp>(oldFor.getLoc(),
-                                             oldFor.getLowerBound(),
-                                             oldFor.getUpperBound(),
-                                             oldFor.getStep(), newInitArgs);
+  auto newFor = rewriter.create<scf::ForOp>(
+      oldFor.getLoc(), oldFor.getLowerBound(), oldFor.getUpperBound(),
+      oldFor.getStep(), newInitArgs);
   created.push_back(newFor.getOperation());
   Block *newBody = newFor.getBody();
   // The generated SCF builder may leave a newly created body empty.  Do not
@@ -1991,8 +1984,9 @@ LogicalResult applyCandidate(IRRewriter &rewriter,
                        newFor.getResult(port.forResultIndex), *permutation);
     if (rebuilt)
       created.push_back((*rebuilt).getOperation());
-    if (!rebuilt || (*rebuilt)->getResult(0).getType() !=
-                         port.reduce->getResult(0).getType() ||
+    if (!rebuilt ||
+        (*rebuilt)->getResult(0).getType() !=
+            port.reduce->getResult(0).getType() ||
         failed(mlir::verify((*rebuilt).getOperation()))) {
       eraseCreatedOperations(rewriter, created);
       return failure();
@@ -2010,7 +2004,7 @@ LogicalResult applyCandidate(IRRewriter &rewriter,
   // change their conditions, then replace the old loop as one committed unit.
   commitAssertConditionReplacements(rewriter, *assertReplacements);
   DenseSet<unsigned> transformed(candidate.transformedResultIndices.begin(),
-                                  candidate.transformedResultIndices.end());
+                                 candidate.transformedResultIndices.end());
   for (auto [index, oldResult] : llvm::enumerate(oldFor.getResults())) {
     if (transformed.contains(index))
       continue;
@@ -2026,8 +2020,8 @@ LogicalResult applyCandidate(IRRewriter &rewriter,
   return success();
 }
 
-LogicalResult applyBlockCandidate(
-    IRRewriter &rewriter, const LayoutPermutationCandidate &candidate) {
+LogicalResult applyBlockCandidate(IRRewriter &rewriter,
+                                  const LayoutPermutationCandidate &candidate) {
   if (!candidate.block || !candidate.anchor ||
       candidate.blockOperations.empty())
     return failure();
@@ -2039,10 +2033,9 @@ LogicalResult applyBlockCandidate(
   SmallVector<Operation *, 32> created;
   rewriter.setInsertionPoint(candidate.anchor);
   LayoutValueCloner externalValues(rewriter, *permutation, created);
-  std::optional<SmallVector<AssertConditionReplacement, 8>>
-      assertReplacements = cloneExternalAssertConditions(
-          rewriter, candidate.externalAssertPorts, externalValues,
-          *permutation);
+  std::optional<SmallVector<AssertConditionReplacement, 8>> assertReplacements =
+      cloneExternalAssertConditions(rewriter, candidate.externalAssertPorts,
+                                    externalValues, *permutation);
   if (!assertReplacements) {
     eraseCreatedOperations(rewriter, created);
     return failure();
@@ -2201,7 +2194,6 @@ public:
 
 } // namespace
 
-std::unique_ptr<GraphOptimizationRule>
-cfg::createLoadStoreTransposeRule() {
+std::unique_ptr<GraphOptimizationRule> cfg::createLoadStoreTransposeRule() {
   return std::make_unique<LoadStoreTransposeRule>();
 }

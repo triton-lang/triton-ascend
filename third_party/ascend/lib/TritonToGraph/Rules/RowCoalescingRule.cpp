@@ -23,9 +23,6 @@
 #include "TritonToGraph/GraphOptimizationRule.h"
 #include "TritonToGraph/LegacyMemoryAccess/RowCoalescing.h"
 
-#include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Math/IR/Math.h"
@@ -35,6 +32,9 @@
 #include "mlir/IR/Verifier.h"
 #include "mlir/Interfaces/CallInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 
 #include <algorithm>
 #include <memory>
@@ -229,8 +229,7 @@ bool hasEscapingWorkResult(ArrayRef<Operation *> ordered, Block *workBlock) {
 
 std::optional<RowSeed> matchRowSeed(triton::FuncOp function) {
   SmallVector<triton::GetProgramIdOp> pids;
-  function.walk(
-      [&](triton::GetProgramIdOp pid) { pids.push_back(pid); });
+  function.walk([&](triton::GetProgramIdOp pid) { pids.push_back(pid); });
   if (pids.size() != 1)
     return std::nullopt;
 
@@ -249,7 +248,8 @@ std::optional<RowSeed> matchRowSeed(triton::FuncOp function) {
     if (!entryBlock || entryBlock != pid->getBlock() ||
         !entryBlock->mightHaveTerminator())
       continue;
-    auto branch = dyn_cast_or_null<cf::CondBranchOp>(entryBlock->getTerminator());
+    auto branch =
+        dyn_cast_or_null<cf::CondBranchOp>(entryBlock->getTerminator());
     if (!branch || branch.getCondition() != guard.getResult())
       continue;
 
@@ -277,9 +277,10 @@ std::optional<RowSeed> matchRowSeed(triton::FuncOp function) {
 
 std::optional<RowCandidate> analyzeRow(triton::FuncOp function) {
   ModuleOp module = function->getParentOfType<ModuleOp>();
-  if (!module || !isPublicEntry(function) || !isOnlyPublicEntry(module, function) ||
-      function->getNumRegions() != 1 || function->getRegion(0).empty() ||
-      hasDirectCall(function) || module->hasAttr(kCoalesceFactorAttr) ||
+  if (!module || !isPublicEntry(function) ||
+      !isOnlyPublicEntry(module, function) || function->getNumRegions() != 1 ||
+      function->getRegion(0).empty() || hasDirectCall(function) ||
+      module->hasAttr(kCoalesceFactorAttr) ||
       module->hasAttr(kCoalesceAxisAttr) ||
       module->hasAttr(kCoalesceGridCeilDivAttr))
     return std::nullopt;
@@ -345,8 +346,7 @@ public:
     // cloned IR verifies successfully.
     ModuleOp sandbox = ModuleOp::create(candidate.function.getLoc());
     sandbox.getBody()->push_back(candidate.function->clone());
-    auto clonedFunction =
-        dyn_cast<triton::FuncOp>(&sandbox.getBody()->front());
+    auto clonedFunction = dyn_cast<triton::FuncOp>(&sandbox.getBody()->front());
     if (!clonedFunction)
       return failure();
 
@@ -391,7 +391,8 @@ public:
   LogicalResult findCandidates(
       GraphOptimizationContext &context,
       SmallVectorImpl<std::unique_ptr<RewritePlan>> &plans) override {
-    if (std::optional<RowCandidate> candidate = analyzeRow(context.getFunction()))
+    if (std::optional<RowCandidate> candidate =
+            analyzeRow(context.getFunction()))
       plans.push_back(
           std::make_unique<RowCoalescingPlan>(*candidate, context.getEpoch()));
     return success();

@@ -809,7 +809,7 @@ diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
 index 48049f0268..8f8fe8ea46 100644
 --- a/bin/RegisterTritonDialects.h
 +++ b/bin/RegisterTritonDialects.h
-@@ -1,6 +1,36 @@
+@@ -1,6 +1,35 @@
  #pragma once
 +#include "ascend/include/AutoBlockify/Passes.h"
 +#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
@@ -820,8 +820,7 @@ index 48049f0268..8f8fe8ea46 100644
 +#include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
 +#include "ascend/include/DynamicCVPipeline/Passes.h"
 +#include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
-+#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/AddMultiBufferToGMLoadPass.h"
-+#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromCompute/AsyncLoadHoistingPass.h"
++#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromComputePass.h"
 +#include "ascend/include/DynamicCVPipeline/SplitDataflow/RefineArgsBlockId.h"
 +#include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
 +#include "ascend/include/TritonControlFlowOpt/Passes.h"
@@ -866,7 +865,7 @@ index 48049f0268..8f8fe8ea46 100644
    mlir::registerLLVMDIScope();
    mlir::LLVM::registerInlinerInterface(registry);
    mlir::NVVM::registerInlinerInterface(registry);
-@@ -136,16 +179,39 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -136,16 +179,38 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::proton::gpu::registerScheduleBufferStorePass();
    mlir::triton::proton::gpu::registerAddSchedBarriersPass();
  
@@ -883,8 +882,7 @@ index 48049f0268..8f8fe8ea46 100644
 +  mlir::triton::registerPlanComputeBlockPasses();
 +  mlir::triton::registerOpClassifierPass();
 +  mlir::triton::registerRefineArgsBlockIdPasses();
-+  mlir::triton::registerAsyncLoadHoistingPasses();
-+  mlir::triton::registerAddMultiBufferToGMLoadPasses();
++  mlir::triton::registerSeparateMemoryFromComputePasses();
 +
    registry.insert<
        mlir::triton::TritonDialect, mlir::cf::ControlFlowDialect,

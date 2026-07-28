@@ -43,6 +43,8 @@ public:
 
 std::unique_ptr<OperationPass<ModuleOp>> createSeparateMemoryFromComputePass();
 
+void registerSeparateMemoryFromComputePasses();
+
 } // namespace triton
 } // namespace mlir
 

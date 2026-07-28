@@ -51,11 +51,11 @@ using namespace cfg;
 namespace {
 
 // This rule deliberately does not reuse StaticAccessAnalysis.  That analysis
-// is the strict, static, row-major proof used by UBPreload.  Here we need a
-// separate fail-closed affine-layout proof which accepts symbolic physical
-// strides (for example N and 256 * N), masks, and scf loop-carried pointers.
-// Keeping it local also prevents a load/store layout extension from changing
-// UBPreload admission semantics.
+// is the strict, static, row-major proof used by StoreCoalescing. Here we
+// need a separate fail-closed affine-layout proof which accepts symbolic
+// physical strides (for example N and 256 * N), masks, and scf loop-carried
+// pointers. Keeping it local also prevents a load/store layout extension from
+// changing StoreCoalescing admission semantics.
 struct ScaleExpression {
   int64_t constantFactor = 1;
   SmallVector<Value, 4> symbols;

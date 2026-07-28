@@ -977,7 +977,7 @@ ProofOutcome ProtectedIntervalAnalysis::proveNoConflictingLoadStoreEffects(
     }
 
     // All protected stores are rooted at a distinct entry pointer. This is
-    // sufficient under the UBPreload ABI contract, including scalar or
+    // sufficient under the StoreCoalescing ABI contract, including scalar or
     // dynamically indexed accesses that StaticAccessAnalysis cannot parse.
     if (sameRootAccesses.empty())
       return ProofOutcome::proven();

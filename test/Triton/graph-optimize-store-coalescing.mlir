@@ -427,8 +427,8 @@ tt.func @reject_load_between_stores(%base: !tt.ptr<i32>) {
 }
 
 // A distinct entry root does not conflict with the delayed output store under
-// the UBPreload ABI assumption. The side store remains in program order and
-// the two %base stores pack at the final anchor.
+// the StoreCoalescing ABI contract. The side store remains in program order,
+// and the two %base stores pack at the final anchor.
 // CHECK-LABEL: tt.func @pack_distinct_root_store_between_stores(
 // CHECK-NOT: tt.store
 // CHECK: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>

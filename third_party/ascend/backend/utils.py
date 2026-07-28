@@ -576,7 +576,7 @@ def ub_size_in_kbytes_for_arch(arch: str) -> int:
 def graph_ub_budget_bytes_for_arch(arch: str) -> int:
     """Return the conservative graph-optimization UB budget in bytes.
 
-    UBPreload does not model all live local buffers, so graph optimization is
+    StoreCoalescing does not model all live local buffers, so its budget is
     capped at one half of the target's raw UB capacity.
     """
     return ub_size_in_kbytes_for_arch(arch) * 1024 // 2

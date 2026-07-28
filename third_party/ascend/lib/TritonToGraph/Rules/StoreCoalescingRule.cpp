@@ -62,7 +62,7 @@ struct StoreCandidate {
   DictionaryAttr attributes;
 };
 
-struct UBPreloadRun {
+struct StoreCoalescingRun {
   SmallVector<StoreCandidate, 4> addressOrderStores;
   SmallVector<Operation *, 4> programOrderStores;
   Operation *anchor = nullptr;
@@ -266,7 +266,8 @@ bool isLocalValueBeforeAnchor(Value value, Operation *anchor,
          definition->isBeforeInBlock(anchor);
 }
 
-bool valuesDominateAnchor(const UBPreloadRun &run, triton::FuncOp function) {
+bool valuesDominateAnchor(const StoreCoalescingRun &run,
+                          triton::FuncOp function) {
   if (!run.anchor || !function)
     return false;
 
@@ -284,7 +285,7 @@ bool valuesDominateAnchor(const UBPreloadRun &run, triton::FuncOp function) {
   return true;
 }
 
-std::optional<UBPreloadRun>
+std::optional<StoreCoalescingRun>
 buildRun(ArrayRef<StoreCandidate> addressOrderStores, triton::FuncOp function,
          unsigned ubCapacityBytes,
          const EntryArgPointerAliasAnalysis *entryAliases) {
@@ -321,7 +322,7 @@ buildRun(ArrayRef<StoreCandidate> addressOrderStores, triton::FuncOp function,
       totalBytes > static_cast<uint64_t>(ubCapacityBytes))
     return std::nullopt;
 
-  UBPreloadRun run;
+  StoreCoalescingRun run;
   run.addressOrderStores.append(addressOrderStores.begin(),
                                 addressOrderStores.end());
   run.firstOffset = first.access.firstOffset;
@@ -376,10 +377,10 @@ buildRun(ArrayRef<StoreCandidate> addressOrderStores, triton::FuncOp function,
   return run;
 }
 
-SmallVector<UBPreloadRun, 4>
+SmallVector<StoreCoalescingRun, 4>
 findRuns(triton::FuncOp function, unsigned ubCapacityBytes,
          const EntryArgPointerAliasAnalysis *entryAliases) {
-  SmallVector<UBPreloadRun, 4> runs;
+  SmallVector<StoreCoalescingRun, 4> runs;
   if (!function || !entryAliases || ubCapacityBytes == 0)
     return runs;
 
@@ -450,7 +451,7 @@ findRuns(triton::FuncOp function, unsigned ubCapacityBytes,
         if (!endsRun)
           continue;
         if (index - runBegin >= 2) {
-          std::optional<UBPreloadRun> run =
+          std::optional<StoreCoalescingRun> run =
               buildRun(ArrayRef<StoreCandidate>(bucket).slice(runBegin,
                                                               index - runBegin),
                        function, ubCapacityBytes, entryAliases);
@@ -464,7 +465,7 @@ findRuns(triton::FuncOp function, unsigned ubCapacityBytes,
   return runs;
 }
 
-bool hasSameAddressOrder(const UBPreloadRun &run,
+bool hasSameAddressOrder(const StoreCoalescingRun &run,
                          ArrayRef<Operation *> operations) {
   if (run.addressOrderStores.size() != operations.size())
     return false;
@@ -475,11 +476,12 @@ bool hasSameAddressOrder(const UBPreloadRun &run,
   return true;
 }
 
-std::optional<UBPreloadRun>
+std::optional<StoreCoalescingRun>
 findRunByOperations(triton::FuncOp function, unsigned ubCapacityBytes,
                     const EntryArgPointerAliasAnalysis *entryAliases,
                     ArrayRef<Operation *> operations) {
-  for (UBPreloadRun &run : findRuns(function, ubCapacityBytes, entryAliases)) {
+  for (StoreCoalescingRun &run :
+       findRuns(function, ubCapacityBytes, entryAliases)) {
     if (hasSameAddressOrder(run, operations))
       return run;
   }
@@ -518,7 +520,8 @@ materializeRowMajorFlatValue(IRRewriter &rewriter,
   return reshape.getResult();
 }
 
-LogicalResult applyRun(IRRewriter &rewriter, const UBPreloadRun &run) {
+LogicalResult applyRun(IRRewriter &rewriter,
+                       const StoreCoalescingRun &run) {
   if (!run.anchor || run.addressOrderStores.size() < 2 ||
       run.programOrderStores.size() != run.addressOrderStores.size() ||
       run.totalElements <= 0 || !fitsI32(run.firstOffset) ||
@@ -658,11 +661,11 @@ LogicalResult applyRun(IRRewriter &rewriter, const UBPreloadRun &run) {
   return success();
 }
 
-class UBPreloadPlan final : public RewritePlan {
+class StoreCoalescingPlan final : public RewritePlan {
 public:
-  UBPreloadPlan(const UBPreloadRun &run, triton::FuncOp function,
-                const EntryArgPointerAliasAnalysis *entryAliases,
-                unsigned ubCapacityBytes, unsigned epoch)
+  StoreCoalescingPlan(const StoreCoalescingRun &run, triton::FuncOp function,
+                      const EntryArgPointerAliasAnalysis *entryAliases,
+                      unsigned ubCapacityBytes, unsigned epoch)
       : function(function), anchor(run.anchor), entryAliases(entryAliases),
         ubCapacityBytes(ubCapacityBytes), epoch(epoch) {
     for (const StoreCandidate &candidate : run.addressOrderStores)
@@ -670,7 +673,7 @@ public:
   }
 
   GraphOptimizationRuleId getRuleId() const override {
-    return GraphOptimizationRuleId::UBPreload;
+    return GraphOptimizationRuleId::StoreCoalescing;
   }
 
   unsigned getBenefit() const override {
@@ -689,7 +692,7 @@ public:
         &context.getEntryArgPointerAliasAnalysis() != entryAliases)
       return failure();
 
-    std::optional<UBPreloadRun> current = findRunByOperations(
+    std::optional<StoreCoalescingRun> current = findRunByOperations(
         function, ubCapacityBytes, entryAliases, addressOrderStores);
     if (!current || current->anchor != anchor)
       return failure();
@@ -699,7 +702,7 @@ public:
   LogicalResult apply(IRRewriter &rewriter) override {
     if (!function || !anchor || !entryAliases)
       return failure();
-    std::optional<UBPreloadRun> current = findRunByOperations(
+    std::optional<StoreCoalescingRun> current = findRunByOperations(
         function, ubCapacityBytes, entryAliases, addressOrderStores);
     if (!current || current->anchor != anchor)
       return failure();
@@ -715,13 +718,13 @@ private:
   unsigned epoch;
 };
 
-class UBPreloadRule final : public GraphOptimizationRule {
+class StoreCoalescingRule final : public GraphOptimizationRule {
 public:
-  explicit UBPreloadRule(unsigned ubCapacityBytes)
+  explicit StoreCoalescingRule(unsigned ubCapacityBytes)
       : ubCapacityBytes(ubCapacityBytes) {}
 
   GraphOptimizationRuleId getId() const override {
-    return GraphOptimizationRuleId::UBPreload;
+    return GraphOptimizationRuleId::StoreCoalescing;
   }
 
   AnalysisRequirement getAnalysisRequirements() const override {
@@ -737,9 +740,9 @@ public:
 
     const EntryArgPointerAliasAnalysis *entryAliases =
         &context.getEntryArgPointerAliasAnalysis();
-    for (const UBPreloadRun &run :
+    for (const StoreCoalescingRun &run :
          findRuns(context.getFunction(), ubCapacityBytes, entryAliases)) {
-      plans.push_back(std::make_unique<UBPreloadPlan>(
+      plans.push_back(std::make_unique<StoreCoalescingPlan>(
           run, context.getFunction(), entryAliases, ubCapacityBytes,
           context.getEpoch()));
     }
@@ -753,6 +756,6 @@ private:
 } // namespace
 
 std::unique_ptr<GraphOptimizationRule>
-cfg::createUBPreloadRule(unsigned ubCapacityBytes) {
-  return std::make_unique<UBPreloadRule>(ubCapacityBytes);
+cfg::createStoreCoalescingRule(unsigned ubCapacityBytes) {
+  return std::make_unique<StoreCoalescingRule>(ubCapacityBytes);
 }

@@ -75,7 +75,7 @@ void populateBuiltinGraphOptimizationRules(
 
 std::unique_ptr<GraphOptimizationRule> createTransposePointwiseReorderRule();
 std::unique_ptr<GraphOptimizationRule> createLoadStoreTransposeRule();
-std::unique_ptr<GraphOptimizationRule> createUBPreloadRule(
+std::unique_ptr<GraphOptimizationRule> createStoreCoalescingRule(
     unsigned ubCapacityBytes);
 std::unique_ptr<GraphOptimizationRule> createRowCoalescingRule();
 

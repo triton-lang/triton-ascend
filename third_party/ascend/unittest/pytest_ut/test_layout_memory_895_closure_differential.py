@@ -9,7 +9,6 @@
 #
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
-
 """895 closure differential tests for layout / memory-access migration.
 
 The migration deliberately keeps the original compiler, launcher, and
@@ -32,7 +31,6 @@ import tempfile
 from types import SimpleNamespace
 
 import pytest
-
 
 _BASELINE_COMMIT = "895c5fbe2b0e69349b76388e65fd8c3e79703bb9"
 _REQUIRE_BASELINE_ENV = "TRITON_REQUIRE_895_DIFFERENTIAL"
@@ -88,10 +86,8 @@ def source_pairs():
                 pytest.fail(message)
             pytest.skip(message)
         if result.returncode != 0:
-            message = (
-                "895 closure differential baseline is unavailable: "
-                f"{result.stderr.strip() or _BASELINE_COMMIT}"
-            )
+            message = ("895 closure differential baseline is unavailable: "
+                       f"{result.stderr.strip() or _BASELINE_COMMIT}")
             if _baseline_is_required():
                 pytest.fail(message)
             pytest.skip(message)
@@ -101,11 +97,7 @@ def source_pairs():
 
 def _top_level_functions(source, *names):
     tree = ast.parse(source)
-    by_name = {
-        node.name: node
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
+    by_name = {node.name: node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
     missing = set(names) - set(by_name)
     assert not missing, f"source no longer defines closure functions: {sorted(missing)}"
     return [copy.deepcopy(by_name[name]) for name in names]
@@ -127,9 +119,7 @@ def _load_compiler_closure(source):
     # The selected functions only need these imported names.  Keeping a tiny
     # namespace lets the test execute the exact source closure without loading
     # the installed compiler package or an NPU toolchain.
-    subprocess_proxy = SimpleNamespace(
-        CalledProcessError=subprocess.CalledProcessError,
-    )
+    subprocess_proxy = SimpleNamespace(CalledProcessError=subprocess.CalledProcessError, )
     namespace = {
         "os": os,
         "tempfile": tempfile,
@@ -149,9 +139,9 @@ def test_895_compiler_closure_ast_is_identical_outside_row_migration(source_pair
 
     baseline_source, target_source = source_pairs["compiler"]
     for name in (
-        "_get_then_remove_rc",
-        "_parse_ttir_metadata",
-        "get_common_bishengir_compile_options",
+            "_get_then_remove_rc",
+            "_parse_ttir_metadata",
+            "get_common_bishengir_compile_options",
     ):
         baseline = _normalised_function_ast(baseline_source, name)
         target = _normalised_function_ast(target_source, name)
@@ -235,15 +225,13 @@ def _run_ttir_to_npubin(
 
     def parse_ttir_metadata(_ttir, metadata):
         parsed = dict(metadata)
-        parsed.update(
-            {
-                "bisheng_options": bisheng_options,
-                "has_auto_blockify_blacklist_op": blacklisted,
-                # _export_coalesce_metadata below replaces this with the row
-                # pass result from the mock module attrs, just like production.
-                "row_coalescing_applied": False,
-            }
-        )
+        parsed.update({
+            "bisheng_options": bisheng_options,
+            "has_auto_blockify_blacklist_op": blacklisted,
+            # _export_coalesce_metadata below replaces this with the row
+            # pass result from the mock module attrs, just like production.
+            "row_coalescing_applied": False,
+        })
         metadata_after_parse.append(parsed)
         return parsed
 
@@ -256,9 +244,7 @@ def _run_ttir_to_npubin(
     closure["ir"] = SimpleNamespace(pass_manager=lambda _context: pass_manager)
     closure["ascend"] = SimpleNamespace(
         ir=SimpleNamespace(get_int_attr=get_int_attr, remove_attr=remove_attr),
-        passes=SimpleNamespace(
-            ttir=SimpleNamespace(add_row_coalescing=lambda _pm: None),
-        ),
+        passes=SimpleNamespace(ttir=SimpleNamespace(add_row_coalescing=lambda _pm: None), ),
     )
     closure["_parse_ttir_metadata"] = parse_ttir_metadata
     closure["get_common_bishengir_compile_options"] = lambda _metadata: [
@@ -305,9 +291,7 @@ def _export_coalesce_metadata(closure, attrs):
         removed.append(name)
         current_module.attrs.pop(name, None)
 
-    closure["ascend"] = SimpleNamespace(
-        ir=SimpleNamespace(get_int_attr=get_int_attr, remove_attr=remove_attr),
-    )
+    closure["ascend"] = SimpleNamespace(ir=SimpleNamespace(get_int_attr=get_int_attr, remove_attr=remove_attr), )
     metadata = {}
     closure["_export_coalesce_metadata"](module, metadata)
     return metadata, module.attrs, removed
@@ -361,19 +345,16 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
             superblock_factor=superblock,
             bisheng_options=bisheng_options,
         )
-        case = (
-            f"E={env_enabled}, O={user_option}, B={blacklisted}, "
-            f"R={row_applied}, superblock={superblock}, "
-            f"bisheng_options={bisheng_options!r}"
-        )
+        case = (f"E={env_enabled}, O={user_option}, B={blacklisted}, "
+                f"R={row_applied}, superblock={superblock}, "
+                f"bisheng_options={bisheng_options!r}")
         assert _normalise_command(baseline_command) == _normalise_command(target_command), case
 
         # Do not only compare two possibly-regressed closures: retain the
         # historic envelope/option placement as a concrete oracle as well.
         expected_options = list(common_prefix)
-        first_auto_blockify = (
-            env_enabled and (user_option is None or user_option)
-        ) or (not env_enabled and bool(user_option))
+        first_auto_blockify = (env_enabled and
+                               (user_option is None or user_option)) or (not env_enabled and bool(user_option))
         second_auto_blockify = env_enabled and not blacklisted and not row_applied
         if first_auto_blockify:
             expected_options.append("--enable-auto-blockify-loop")
@@ -634,7 +615,7 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
 
     for family, factors, ceil_div in families:
         for factor, axis, env_enabled, blacklisted, row_applied in itertools.product(
-            factors,
+                factors,
             (0, 1, 2),
             (False, True),
             (False, True),
@@ -649,26 +630,15 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
                 blacklisted=blacklisted,
                 row_applied=row_applied,
             )
-            baseline_src = baseline_make_launcher(
-                constants={}, signature={0: "*fp32", 1: "*fp32"}, metadata=metadata
-            )
-            target_src = target_make_launcher(
-                constants={}, signature={0: "*fp32", 1: "*fp32"}, metadata=metadata
-            )
+            baseline_src = baseline_make_launcher(constants={}, signature={0: "*fp32", 1: "*fp32"}, metadata=metadata)
+            target_src = target_make_launcher(constants={}, signature={0: "*fp32", 1: "*fp32"}, metadata=metadata)
             grid = grid_names[axis]
-            case = (
-                f"{family}: H={factor}, axis={axis}, ceil={ceil_div}, "
-                f"E={env_enabled}, B={blacklisted}, R={row_applied}"
-            )
-            expected_assignment = (
-                f"{grid} = ({grid} + {factor} - 1) / {factor};"
-                if ceil_div
-                else f"{grid} = {grid} / {factor};"
-            )
+            case = (f"{family}: H={factor}, axis={axis}, ceil={ceil_div}, "
+                    f"E={env_enabled}, B={blacklisted}, R={row_applied}")
+            expected_assignment = (f"{grid} = ({grid} + {factor} - 1) / {factor};"
+                                   if ceil_div else f"{grid} = {grid} / {factor};")
             expected_cap_count = 1 if env_enabled and not blacklisted else 0
-            for baseline_path, target_path in zip(
-                _launcher_paths(baseline_src), _launcher_paths(target_src)
-            ):
+            for baseline_path, target_path in zip(_launcher_paths(baseline_src), _launcher_paths(target_src)):
                 assert _coalescing_fragment(baseline_path) == _coalescing_fragment(target_path), case
                 assert baseline_path.count(expected_assignment) == 1, case
                 assert target_path.count(expected_assignment) == 1, case
@@ -676,10 +646,8 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
                     assert f"grid[{axis}] not divisible by coalesce_factor" not in baseline_path, case
                     assert f"grid[{axis}] not divisible by coalesce_factor" not in target_path, case
                 else:
-                    guard = (
-                        f"ChunkCoalescing: grid[{axis}] not divisible by "
-                        f"coalesce_factor {factor}"
-                    )
+                    guard = (f"ChunkCoalescing: grid[{axis}] not divisible by "
+                             f"coalesce_factor {factor}")
                     assert baseline_path.count(guard) == 1, case
                     assert target_path.count(guard) == 1, case
                 assert baseline_path.count(cap) == expected_cap_count, case
@@ -722,9 +690,7 @@ def test_895_launcher_keeps_mixed_simt_sls_marker_in_both_paths(source_pairs):
 def _load_inject_grid_num_tiles(source):
     tree = ast.parse(source)
     candidates = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "_inject_grid_num_tiles"
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_inject_grid_num_tiles"
     ]
     assert len(candidates) == 1
     function = copy.deepcopy(candidates[0])
@@ -798,44 +764,35 @@ def _expected_relocated_legacy_core(name, baseline):
             '#include "TritonToGraph/LegacyMemoryAccess/ChunkCoalescing.h"',
         )
     if name == "sls":
-        return (
-            baseline.replace(
-                '#include "TritonToLinalg/StridedLoadStoreRewrite.h"',
-                '#include "TritonToGraph/LegacyMemoryAccess/StridedLoadStoreRewrite.h"',
-            )
-            .replace(
-                '#include "TritonToLinalg/ImplicitPermute.h"',
-                '#include "TritonMemoryAccess/MemoryAccessTags.h"',
-            )
-            .replace(
-                '#include "TritonToLinalg/MaskAnalysis.h"',
-                '#include "TritonMemoryAccess/LoadStoreMaskAnalysis.h"',
-            )
-            .replace(
-                "ImplicitPermute::ImplicitPermuteHandledTAG",
-                "mlir::triton::memory_access::ImplicitPermuteHandledTAG",
-            )
-        )
+        return (baseline.replace(
+            '#include "TritonToLinalg/StridedLoadStoreRewrite.h"',
+            '#include "TritonToGraph/LegacyMemoryAccess/StridedLoadStoreRewrite.h"',
+        ).replace(
+            '#include "TritonToLinalg/ImplicitPermute.h"',
+            '#include "TritonMemoryAccess/MemoryAccessTags.h"',
+        ).replace(
+            '#include "TritonToLinalg/MaskAnalysis.h"',
+            '#include "TritonMemoryAccess/LoadStoreMaskAnalysis.h"',
+        ).replace(
+            "ImplicitPermute::ImplicitPermuteHandledTAG",
+            "mlir::triton::memory_access::ImplicitPermuteHandledTAG",
+        ))
     if name == "row":
         old_wrapper_start = baseline.index("\nnamespace {\n\nstruct RowCoalescingPass")
-        old_wrapper_end = baseline.index(
-            "\n}  // namespace RowCoalescing", old_wrapper_start
-        )
+        old_wrapper_end = baseline.index("\n}  // namespace RowCoalescing", old_wrapper_start)
         return (
             baseline.replace(
                 '#include "TritonToLinalg/RowCoalescing.h"',
                 '#include "TritonToGraph/LegacyMemoryAccess/RowCoalescing.h"',
-            )
-            .replace('#include "mlir/Pass/Pass.h"\n', "")
-            .replace(baseline[old_wrapper_start:old_wrapper_end], "")
-            .replace("}  // namespace RowCoalescing", "} // namespace RowCoalescing")
+            ).replace('#include "mlir/Pass/Pass.h"\n', "").replace(baseline[old_wrapper_start:old_wrapper_end],
+                                                                   "").replace("}  // namespace RowCoalescing",
+                                                                               "} // namespace RowCoalescing")
             # The moved file keeps one explicit visual separator where the old
             # pass wrapper was removed; permit that one formatting-only delta.
             .replace(
                 "\n\n} // namespace RowCoalescing",
                 "\n\n\n} // namespace RowCoalescing",
-            )
-        )
+            ))
     raise AssertionError(f"unknown legacy core: {name}")
 
 

@@ -189,16 +189,14 @@ def test_make_launcher_block_cap_uses_only_env_and_blacklist(
     # The Row result must not leak into the launcher predicate: only E && !B
     # controls whether both generated launch paths contain the physical-core
     # cap.  (O is intentionally absent here; it is a compiler argv option.)
-    for env_enabled, blacklisted, row_applied in product(
-        (False, True), (False, True), (False, True)
-    ):
+    for env_enabled, blacklisted, row_applied in product((False, True), (False, True), (False, True)):
         metadata = _make_metadata()
         metadata.row_coalescing_applied = row_applied
         metadata.has_auto_blockify_blacklist_op = blacklisted
         with patch.object(
-            driver,
-            "_is_auto_map_parallel_blocks_enabled",
-            return_value=env_enabled,
+                driver,
+                "_is_auto_map_parallel_blocks_enabled",
+                return_value=env_enabled,
         ):
             src = driver.make_launcher(
                 constants={},

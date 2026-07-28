@@ -97,10 +97,10 @@ def test_chunk_coalescing_grid_axis0_e2e():
     block = 16
     num_tiles = 32
     n = block * num_tiles
-    src = test_common.generate_tensor((n,), "float32").npu()
+    src = test_common.generate_tensor((n, ), "float32").npu()
     dst = torch.empty_like(src)
 
-    kernel_chunk_coalescing_axis0[(num_tiles,)](
+    kernel_chunk_coalescing_axis0[(num_tiles, )](
         src,
         dst,
         n,
@@ -114,7 +114,7 @@ def test_chunk_coalescing_grid_axis2_e2e():
     block = 16
     num_tiles = 32
     n = block * num_tiles
-    src = test_common.generate_tensor((n,), "float32").npu()
+    src = test_common.generate_tensor((n, ), "float32").npu()
     dst = torch.empty_like(src)
 
     kernel_chunk_coalescing_axis2[(1, 1, num_tiles)](

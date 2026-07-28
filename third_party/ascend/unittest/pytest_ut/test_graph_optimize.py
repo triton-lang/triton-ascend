@@ -34,7 +34,6 @@ from triton.compiler.code_generator import ast_to_ttir
 from triton.compiler.compiler import ASTSource
 from triton.errors import TritonError
 
-
 pytestmark = pytest.mark.backend("none")
 
 
@@ -46,9 +45,7 @@ def graph_optimize_kernel(x_ptr, y_ptr, BLOCK: tl.constexpr):
 
 
 @triton.jit
-def graph_optimize_legacy_memory_isolation_kernel(
-    x_ptr, y_ptr, BLOCK: tl.constexpr
-):
+def graph_optimize_legacy_memory_isolation_kernel(x_ptr, y_ptr, BLOCK: tl.constexpr):
     # This is deliberately a strided AddPtr load/store shape.  It is eligible
     # for the legacy T2L StridedLoadStoreRewrite, but must remain untouched by
     # the early generic graph-optimize pass even when its default mask carries
@@ -59,9 +56,7 @@ def graph_optimize_legacy_memory_isolation_kernel(
 
 
 @triton.jit
-def overflow_assert_provenance_kernel(
-    output_ptr, n, BLOCK: tl.constexpr
-):
+def overflow_assert_provenance_kernel(output_ptr, n, BLOCK: tl.constexpr):
     offsets = tl.arange(0, BLOCK)
     checked_offset = offsets * n
     # Deliberately reuse the automatic message.  This must remain a user
@@ -128,9 +123,7 @@ def fused_swiglu_bwd_b_graph_optimize_kernel(
     sum_b_fc = tl.zeros((BLOCK_SIZE_N, BLOCK_SIZE_M), dtype=tl.float32)
 
     for row_idx in range(0, tl.cdiv(M, BLOCK_SIZE_M)):
-        mask = (row_off[None, :] < M - row_idx * BLOCK_SIZE_M) & (
-            col_off[:, None] < N
-        )
+        mask = (row_off[None, :] < M - row_idx * BLOCK_SIZE_M) & (col_off[:, None] < N)
         dy = tl.load(dy_ptrs, mask=mask, other=0.0).to(tl.float32)
         g = tl.load(g_ptrs, mask=mask, other=0.0)
         fc = tl.load(fc_ptrs, mask=mask, other=0.0).to(tl.float32)
@@ -244,9 +237,7 @@ def test_graph_optimize_pass_accepts_zero_rule_mask(tmp_path):
     assert_reparseable(module, tmp_path, "zero-rule-mask")
 
 
-def test_default_generic_graph_mask_excludes_legacy_memory_compatibility(
-    tmp_path,
-):
+def test_default_generic_graph_mask_excludes_legacy_memory_compatibility(tmp_path, ):
     """The 8/16/32/64 identities are enabled by default, not generic rules.
 
     The generic GraphOptimizePass runs at early TTIR.  Row, Axis, Chunk, and
@@ -376,17 +367,13 @@ def test_auto_overflow_assert_has_frontend_provenance_marker():
         {},
     )
     overflow_asserts = [
-        line
-        for line in str(module).splitlines()
-        if '"int32 overflow detected for operation mul"' in line
+        line for line in str(module).splitlines() if '"int32 overflow detected for operation mul"' in line
     ]
     assert any("tt.auto_overflow_assert" in line for line in overflow_asserts)
     assert any("tt.auto_overflow_assert" not in line for line in overflow_asserts)
 
 
-def test_fused_swiglu_bwd_b_256x32_graph_optimize_structure(
-    monkeypatch, tmp_path
-):
+def test_fused_swiglu_bwd_b_256x32_graph_optimize_structure(monkeypatch, tmp_path):
     """Keep the original production tile as a TTIR-only structural gate."""
     # make_ttir() writes its debug dump through Triton's standard dump manager;
     # keep test artifacts scoped to pytest's disposable directory.
@@ -402,12 +389,8 @@ def test_fused_swiglu_bwd_b_256x32_graph_optimize_structure(
         )
         module = make_fused_swiglu_ttir(options)
         ttir = str(module)
-        assert_ttir_text_reparseable(
-            ttir, tmp_path, f"fused-swiglu-256x32-{int(enabled)}"
-        )
-        (tmp_path / f"fused-swiglu-256x32-{int(enabled)}.ttir").write_text(
-            ttir
-        )
+        assert_ttir_text_reparseable(ttir, tmp_path, f"fused-swiglu-256x32-{int(enabled)}")
+        (tmp_path / f"fused-swiglu-256x32-{int(enabled)}.ttir").write_text(ttir)
         ttirs[enabled] = ttir
 
     off_ttir = ttirs[False]
@@ -418,10 +401,10 @@ def test_fused_swiglu_bwd_b_256x32_graph_optimize_structure(
     assert "tensor<32x256x!tt.ptr<bf16>>" not in on_ttir
     assert "tensor<256x32x!tt.ptr<bf16>>" in on_ttir
     for old_guard_shape in (
-        "tensor<1x256xi64>",
-        "tensor<32x256xi64>",
-        "tensor<1x256xi1>",
-        "tensor<32x256xi1>",
+            "tensor<1x256xi64>",
+            "tensor<32x256xi64>",
+            "tensor<1x256xi1>",
+            "tensor<32x256xi1>",
     ):
         assert old_guard_shape not in on_ttir
 
@@ -455,7 +438,7 @@ def test_graph_optimize_numerical_equivalence(monkeypatch, tmp_path):
             # launch to ensure TRITON_ALWAYS_COMPILE reaches triton.compile().
             graph_optimize_kernel.device_caches.clear()
             output = torch.empty_like(source)
-            compiled = graph_optimize_kernel[(1,)](
+            compiled = graph_optimize_kernel[(1, )](
                 source,
                 output,
                 BLOCK=16,
@@ -476,9 +459,7 @@ def test_graph_optimize_numerical_equivalence(monkeypatch, tmp_path):
     torch.testing.assert_close(outputs[True], outputs[False])
 
 
-def test_fused_swiglu_bwd_b_small_tiling_graph_optimize_equivalence(
-    monkeypatch, tmp_path
-):
+def test_fused_swiglu_bwd_b_small_tiling_graph_optimize_equivalence(monkeypatch, tmp_path):
     """Run the task kernel shape with a CANN-friendly validation tile.
 
     The production kernel's 256x32 autotune configuration is intentionally not
@@ -535,11 +516,9 @@ def test_fused_swiglu_bwd_b_small_tiling_graph_optimize_equivalence(
         fused_swiglu_bwd_b_graph_optimize_kernel.device_caches.clear()
         dg = torch.empty((m, n), dtype=dtype, device="npu")
         dfc = torch.empty((m, n), dtype=dtype, device="npu")
-        db_g = torch.empty((n,), dtype=dtype, device="npu")
-        db_fc = torch.empty((n,), dtype=dtype, device="npu")
-        compiled = fused_swiglu_bwd_b_graph_optimize_kernel[
-            (triton.cdiv(n, block_n),)
-        ](
+        db_g = torch.empty((n, ), dtype=dtype, device="npu")
+        db_fc = torch.empty((n, ), dtype=dtype, device="npu")
+        compiled = fused_swiglu_bwd_b_graph_optimize_kernel[(triton.cdiv(n, block_n), )](
             dy,
             g,
             fc,
@@ -571,9 +550,7 @@ def test_fused_swiglu_bwd_b_small_tiling_graph_optimize_equivalence(
     last_runtime_error = None
 
     def write_summary():
-        (tmp_path / "fused-swiglu-small-tiling-summary.json").write_text(
-            json.dumps(summary, indent=2, sort_keys=True)
-        )
+        (tmp_path / "fused-swiglu-small-tiling-summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True))
 
     def run_repeated_mode(enabled, block_m, block_n):
         repeated = []
@@ -610,9 +587,7 @@ def test_fused_swiglu_bwd_b_small_tiling_graph_optimize_equivalence(
             candidate["error"] = str(error)
             summary["candidates"].append(candidate)
             write_summary()
-            raise AssertionError(
-                "graph-optimize failed for a tiling that succeeds with it disabled"
-            ) from error
+            raise AssertionError("graph-optimize failed for a tiling that succeeds with it disabled") from error
 
         selected = (block_m, block_n)
         outputs = {False: off_output, True: on_output}
@@ -623,21 +598,13 @@ def test_fused_swiglu_bwd_b_small_tiling_graph_optimize_equivalence(
 
     if selected is None:
         write_summary()
-        raise RuntimeError(
-            "all fused_swiglu validation tilings failed"
-        ) from last_runtime_error
+        raise RuntimeError("all fused_swiglu validation tilings failed") from last_runtime_error
 
-    for index, (off, on, reference) in enumerate(
-        zip(outputs[False], outputs[True], expected)
-    ):
+    for index, (off, on, reference) in enumerate(zip(outputs[False], outputs[True], expected)):
         torch.testing.assert_close(on, off, rtol=3e-2, atol=1e-1)
         torch.testing.assert_close(on, reference, rtol=3e-2, atol=1e-1)
-        summary[f"output_{index}_max_abs_on_off"] = float(
-            (on.float() - off.float()).abs().max().item()
-        )
-        summary[f"output_{index}_max_abs_eager"] = float(
-            (on.float() - reference.float()).abs().max().item()
-        )
+        summary[f"output_{index}_max_abs_on_off"] = float((on.float() - off.float()).abs().max().item())
+        summary[f"output_{index}_max_abs_eager"] = float((on.float() - reference.float()).abs().max().item())
 
     block_m, block_n = selected
     on_ttir = ttirs[True]
@@ -663,16 +630,10 @@ def test_fused_swiglu_bwd_b_small_tiling_graph_optimize_equivalence(
         "num_stages": 2,
     }
     summary["graph_optimize_assert_count"] = on_ttir.count("tt.assert")
-    summary["device"] = (
-        torch.npu.get_device_name(torch.npu.current_device())
-        if hasattr(torch.npu, "get_device_name")
-        else "npu"
-    )
+    summary["device"] = (torch.npu.get_device_name(torch.npu.current_device())
+                         if hasattr(torch.npu, "get_device_name") else "npu")
     write_summary()
 
 
 def test_graph_optimize_options_contribute_to_npu_hash():
-    assert (
-        NPUOptions(enable_graph_optimize=False).hash()
-        != NPUOptions(enable_graph_optimize=True).hash()
-    )
+    assert (NPUOptions(enable_graph_optimize=False).hash() != NPUOptions(enable_graph_optimize=True).hash())

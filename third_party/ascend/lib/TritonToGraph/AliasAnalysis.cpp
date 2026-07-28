@@ -48,8 +48,7 @@ bool AliasAnalysis::beginDataFlowGraphBorrow() {
 }
 
 void AliasAnalysis::endDataFlowGraphBorrow() {
-  assert(dataFlowGraphBorrowed &&
-         "unbalanced DataFlowGraph alias borrow");
+  assert(dataFlowGraphBorrowed && "unbalanced DataFlowGraph alias borrow");
   if (!dataFlowGraphBorrowed)
     return;
   dataFlowGraphBorrowed = false;

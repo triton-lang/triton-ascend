@@ -9,7 +9,6 @@
 #
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
-
 """NPU regression for the pure-SIMT Row compatibility scheduling slot."""
 
 import pytest
@@ -17,7 +16,6 @@ import torch
 import triton
 import triton.language as tl
 from triton.backends.ascend.utils import is_compile_on_910_95
-
 
 pytestmark = pytest.mark.skipif(
     not is_compile_on_910_95(),
@@ -48,7 +46,7 @@ def test_row_coalescing_tail_pure_simt_e2e(dtype):
     src = torch.arange(n, dtype=dtype).npu()
     dst = torch.full_like(src, -1)
 
-    row_coalescing_tail_copy[(n,)](
+    row_coalescing_tail_copy[(n, )](
         src,
         dst,
         n,

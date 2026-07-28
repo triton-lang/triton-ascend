@@ -9,7 +9,6 @@
 #
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
-
 """Native 910_95 observability regressions for layout/memory compatibility.
 
 These are deliberately *not* 910B4 smoke tests.  The four migrated legacy
@@ -33,6 +32,7 @@ import pytest
 try:
     from triton.backends.ascend.utils import is_compile_on_910_95
 except Exception:
+
     def is_compile_on_910_95():
         return False
 
@@ -47,7 +47,6 @@ if not is_compile_on_910_95():
         allow_module_level=True,
     )
 
-
 torch = pytest.importorskip("torch")
 pytest.importorskip("torch_npu")
 
@@ -55,7 +54,6 @@ import triton
 import triton.language as tl
 from triton.backends.ascend import compiler as ascend_compiler
 from triton.backends.ascend import driver as ascend_driver
-
 
 pytestmark = pytest.mark.backend("torch_npu")
 
@@ -87,9 +85,7 @@ class _NativePipelineObserver:
             observer.launcher_sources.append(source)
             return source
 
-        monkeypatch.setattr(
-            ascend_compiler, "_export_coalesce_metadata", observe_export
-        )
+        monkeypatch.setattr(ascend_compiler, "_export_coalesce_metadata", observe_export)
         monkeypatch.setattr(ascend_driver, "make_launcher", observe_launcher)
         return observer
 
@@ -97,19 +93,15 @@ class _NativePipelineObserver:
         for ir_text in reversed(self.pre_export_ir):
             if needle in ir_text:
                 return ir_text
-        raise AssertionError(
-            f"did not observe {needle!r} before metadata export; captured "
-            f"{len(self.pre_export_ir)} module(s)"
-        )
+        raise AssertionError(f"did not observe {needle!r} before metadata export; captured "
+                             f"{len(self.pre_export_ir)} module(s)")
 
     def launcher_with(self, needle: str) -> str:
         for source in reversed(self.launcher_sources):
             if needle in source:
                 return source
-        raise AssertionError(
-            f"did not observe launcher fragment {needle!r}; generated "
-            f"{len(self.launcher_sources)} launcher(s)"
-        )
+        raise AssertionError(f"did not observe launcher fragment {needle!r}; generated "
+                             f"{len(self.launcher_sources)} launcher(s)")
 
 
 def _launch_with_observer(monkeypatch, kernel, grid, *args, **compile_options):
@@ -193,7 +185,7 @@ def test_row_91095_native_metadata_launcher_and_ir(monkeypatch):
     compiled, observer = _launch_with_observer(
         monkeypatch,
         _row_tail_copy,
-        (n,),
+        (n, ),
         src,
         dst,
         n,
@@ -256,9 +248,7 @@ def test_chunk_91095_native_metadata_launcher_and_ir(monkeypatch):
 
     launcher = observer.launcher_with("gridY = gridY / 16;")
     assert launcher.count("gridY = gridY / 16;") == 2
-    assert launcher.count(
-        "ChunkCoalescing: grid[1] not divisible by coalesce_factor 16"
-    ) == 2
+    assert launcher.count("ChunkCoalescing: grid[1] not divisible by coalesce_factor 16") == 2
 
 
 def test_chunk_axis2_91095_native_metadata_launcher_and_ir(monkeypatch):
@@ -296,9 +286,7 @@ def test_chunk_axis2_91095_native_metadata_launcher_and_ir(monkeypatch):
     launcher = observer.launcher_with("gridZ = gridZ / 16;")
     # make_launcher emits both the stable ABI and local C++ packing paths.
     assert launcher.count("gridZ = gridZ / 16;") == 2
-    assert launcher.count(
-        "ChunkCoalescing: grid[2] not divisible by coalesce_factor 16"
-    ) == 2
+    assert launcher.count("ChunkCoalescing: grid[2] not divisible by coalesce_factor 16") == 2
 
 
 def test_chunk_sanitizer_preserves_original_bailout_91095(monkeypatch):
@@ -330,14 +318,8 @@ def test_chunk_sanitizer_preserves_original_bailout_91095(monkeypatch):
     assert compiled.metadata.coalesce_grid_ceil_div is False
     assert compiled.metadata.row_coalescing_applied is False
     assert compiled.metadata.parallel_mode == "simd"
-    assert all(
-        "hacc.coalesce_factor" not in ir_text
-        for ir_text in observer.pre_export_ir
-    )
-    assert all(
-        "gridY = gridY / 16;" not in launcher
-        for launcher in observer.launcher_sources
-    )
+    assert all("hacc.coalesce_factor" not in ir_text for ir_text in observer.pre_export_ir)
+    assert all("gridY = gridY / 16;" not in launcher for launcher in observer.launcher_sources)
 
 
 def test_sls_91095_native_ir_metadata_and_mixed_simt_launcher(monkeypatch):
@@ -349,7 +331,7 @@ def test_sls_91095_native_ir_metadata_and_mixed_simt_launcher(monkeypatch):
     compiled, observer = _launch_with_observer(
         monkeypatch,
         _sls_masked_stride4_gather,
-        (1,),
+        (1, ),
         src,
         dst,
         N=n,

@@ -24,10 +24,10 @@
 #include "TritonToGraph/GraphOptimizationRule.h"
 #include "TritonToGraph/Passes.h"
 
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/PatternMatch.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
 
 #include <algorithm>
 #include <array>
@@ -60,9 +60,8 @@ using ProgramOrderMap = llvm::DenseMap<Operation *, unsigned>;
 ProgramOrderMap buildProgramOrderMap(triton::FuncOp function) {
   ProgramOrderMap programOrder;
   unsigned nextOrder = 0;
-  function.walk([&](Operation *operation) {
-    programOrder[operation] = nextOrder++;
-  });
+  function.walk(
+      [&](Operation *operation) { programOrder[operation] = nextOrder++; });
   return programOrder;
 }
 
@@ -105,15 +104,14 @@ private:
   LogicalResult getStableOptions(GraphOptimizationOptions &options);
 };
 
-LogicalResult GraphOptimizePass::getStableOptions(
-    GraphOptimizationOptions &options) {
+LogicalResult
+GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
   const uint64_t cliRuleMask = this->ruleMask;
   const uint64_t cliMaxRewrites = this->maxRewritesPerFunction;
   const uint64_t cliUBCapacityBytes = this->ubCapacityBytes;
 
   if (cliRuleMask > std::numeric_limits<uint8_t>::max() ||
-      !isValidGraphOptimizationRuleMask(
-          static_cast<uint8_t>(cliRuleMask))) {
+      !isValidGraphOptimizationRuleMask(static_cast<uint8_t>(cliRuleMask))) {
     getOperation().emitError()
         << "graph-optimize rule-mask contains unknown or out-of-range bits: "
         << cliRuleMask;
@@ -230,8 +228,7 @@ void GraphOptimizePass::runOnOperation() {
           break;
         }
 
-        const GraphOptimizationRuleId appliedRuleId =
-            selectedPlan->getRuleId();
+        const GraphOptimizationRuleId appliedRuleId = selectedPlan->getRuleId();
         IRRewriter rewriter(&getContext());
         if (failed(selectedPlan->apply(rewriter))) {
           selectedPlan.reset();
@@ -242,9 +239,8 @@ void GraphOptimizePass::runOnOperation() {
         }
 
         if (options.emitRemarks)
-          function.emitRemark()
-              << "applied graph optimization rule "
-              << static_cast<unsigned>(appliedRuleId);
+          function.emitRemark() << "applied graph optimization rule "
+                                << static_cast<unsigned>(appliedRuleId);
 
         // Plans can retain pointers into analysis results, so destroy all of
         // them before invalidating the context for the next IR epoch.
@@ -291,33 +287,33 @@ void GraphOptimizePass::runOnOperation() {
       return;
     }
     rowPlans.erase(
-        std::remove_if(
-            rowPlans.begin(), rowPlans.end(),
-            [](const std::unique_ptr<RewritePlan> &plan) {
-              return !plan ||
-                     plan->getRuleId() !=
-                         GraphOptimizationRuleId::RowCoalescing;
-            }),
+        std::remove_if(rowPlans.begin(), rowPlans.end(),
+                       [](const std::unique_ptr<RewritePlan> &plan) {
+                         return !plan ||
+                                plan->getRuleId() !=
+                                    GraphOptimizationRuleId::RowCoalescing;
+                       }),
         rowPlans.end());
     if (rowPlans.empty())
       continue;
 
     ProgramOrderMap programOrder = buildProgramOrderMap(function);
-    std::stable_sort(
-        rowPlans.begin(), rowPlans.end(),
-        [&programOrder](const std::unique_ptr<RewritePlan> &lhs,
-                        const std::unique_ptr<RewritePlan> &rhs) {
-          if (lhs->getBenefit() != rhs->getBenefit())
-            return lhs->getBenefit() > rhs->getBenefit();
+    std::stable_sort(rowPlans.begin(), rowPlans.end(),
+                     [&programOrder](const std::unique_ptr<RewritePlan> &lhs,
+                                     const std::unique_ptr<RewritePlan> &rhs) {
+                       if (lhs->getBenefit() != rhs->getBenefit())
+                         return lhs->getBenefit() > rhs->getBenefit();
 
-          const unsigned lhsOrder = getProgramOrder(*lhs, programOrder);
-          const unsigned rhsOrder = getProgramOrder(*rhs, programOrder);
-          if (lhsOrder != rhsOrder)
-            return lhsOrder < rhsOrder;
+                       const unsigned lhsOrder =
+                           getProgramOrder(*lhs, programOrder);
+                       const unsigned rhsOrder =
+                           getProgramOrder(*rhs, programOrder);
+                       if (lhsOrder != rhsOrder)
+                         return lhsOrder < rhsOrder;
 
-          return static_cast<unsigned>(lhs->getRuleId()) <
-                 static_cast<unsigned>(rhs->getRuleId());
-        });
+                       return static_cast<unsigned>(lhs->getRuleId()) <
+                              static_cast<unsigned>(rhs->getRuleId());
+                     });
 
     std::unique_ptr<RewritePlan> selectedRowPlan;
     for (std::unique_ptr<RewritePlan> &plan : rowPlans) {

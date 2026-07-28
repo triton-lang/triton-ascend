@@ -9,7 +9,6 @@
 #
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
-
 """Native gate-on regression for ``StridedAxisCoalescing``.
 
 This intentionally uses the original T2L eligibility shape instead of forcing
@@ -55,19 +54,19 @@ def strided_axis_coalescing_copy(src, dst, T: tl.constexpr, S: tl.constexpr, BLO
 
     src_block = tl.make_block_ptr(
         base=src + head,
-        shape=(T,),
-        strides=(S,),
-        offsets=(tile * BLOCK,),
-        block_shape=(BLOCK,),
-        order=(0,),
+        shape=(T, ),
+        strides=(S, ),
+        offsets=(tile * BLOCK, ),
+        block_shape=(BLOCK, ),
+        order=(0, ),
     )
     dst_block = tl.make_block_ptr(
         base=dst + head,
-        shape=(T,),
-        strides=(S,),
-        offsets=(tile * BLOCK,),
-        block_shape=(BLOCK,),
-        order=(0,),
+        shape=(T, ),
+        strides=(S, ),
+        offsets=(tile * BLOCK, ),
+        block_shape=(BLOCK, ),
+        order=(0, ),
     )
     value = tl.load(src_block)
     tl.store(dst_block, value)
@@ -121,7 +120,7 @@ def test_strided_axis_coalescing_gate_on_e2e():
     kernel = strided_axis_coalescing_copy.warmup(
         src,
         dst,
-        grid=(grid_x,),
+        grid=(grid_x, ),
         T=t,
         S=s,
         BLOCK=block,
@@ -148,10 +147,8 @@ def test_strided_axis_coalescing_gate_on_e2e():
     # value-only smoke test.  A missing launcher representation would leave
     # Axis's floor-div grid contract unverified, so it must fail rather than
     # downgrade the native gate-on result to a warning.
-    assert launcher_source is not None, (
-        "StridedAxisCoalescing launcher source introspection is unavailable: "
-        f"{launcher_reason}"
-    )
+    assert launcher_source is not None, ("StridedAxisCoalescing launcher source introspection is unavailable: "
+                                         f"{launcher_reason}")
 
     # make_launcher emits both the C ABI and local C++ launch paths.  Check
     # both, including Axis's floor-divisibility contract (unlike Row's

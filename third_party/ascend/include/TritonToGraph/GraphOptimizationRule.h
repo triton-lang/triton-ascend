@@ -26,9 +26,9 @@
 #include "TritonToGraph/GraphOptimization.h"
 #include "TritonToGraph/GraphOptimizationContext.h"
 
-#include "llvm/ADT/SmallVector.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Support/LogicalResult.h"
+#include "llvm/ADT/SmallVector.h"
 
 #include <memory>
 
@@ -49,8 +49,7 @@ public:
   virtual unsigned getCreationEpoch() const = 0;
 
   // Failure means this plan is no longer applicable to the current epoch.
-  virtual LogicalResult revalidate(GraphOptimizationContext &context) const =
-      0;
+  virtual LogicalResult revalidate(GraphOptimizationContext &context) const = 0;
   virtual LogicalResult apply(IRRewriter &rewriter) = 0;
 };
 
@@ -62,9 +61,9 @@ public:
   virtual AnalysisRequirement getAnalysisRequirements() const = 0;
 
   // Candidate discovery may inspect analyses but must not mutate IR.
-  virtual LogicalResult findCandidates(
-      GraphOptimizationContext &context,
-      SmallVectorImpl<std::unique_ptr<RewritePlan>> &plans) = 0;
+  virtual LogicalResult
+  findCandidates(GraphOptimizationContext &context,
+                 SmallVectorImpl<std::unique_ptr<RewritePlan>> &plans) = 0;
 };
 
 // Internal extension point for the builtin rule set. Concrete rules receive a
@@ -75,8 +74,8 @@ void populateBuiltinGraphOptimizationRules(
 
 std::unique_ptr<GraphOptimizationRule> createTransposePointwiseReorderRule();
 std::unique_ptr<GraphOptimizationRule> createLoadStoreTransposeRule();
-std::unique_ptr<GraphOptimizationRule> createStoreCoalescingRule(
-    unsigned ubCapacityBytes);
+std::unique_ptr<GraphOptimizationRule>
+createStoreCoalescingRule(unsigned ubCapacityBytes);
 std::unique_ptr<GraphOptimizationRule> createRowCoalescingRule();
 
 } // namespace cfg

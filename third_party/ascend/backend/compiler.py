@@ -1174,16 +1174,12 @@ class NPUOptions:
         if requested_graph_ub_capacity_bytes is None:
             graph_ub_capacity_bytes = graph_ub_budget_bytes
         else:
-            if (isinstance(requested_graph_ub_capacity_bytes, bool) or
-                    not isinstance(requested_graph_ub_capacity_bytes, Integral)):
-                raise TypeError(
-                    "graph_optimize_ub_capacity_bytes must be a non-negative integer or None"
-                )
+            if (isinstance(requested_graph_ub_capacity_bytes, bool)
+                    or not isinstance(requested_graph_ub_capacity_bytes, Integral)):
+                raise TypeError("graph_optimize_ub_capacity_bytes must be a non-negative integer or None")
             if requested_graph_ub_capacity_bytes < 0:
                 raise ValueError("graph_optimize_ub_capacity_bytes must be non-negative")
-            graph_ub_capacity_bytes = min(
-                int(requested_graph_ub_capacity_bytes), graph_ub_budget_bytes
-            )
+            graph_ub_capacity_bytes = min(int(requested_graph_ub_capacity_bytes), graph_ub_budget_bytes)
         object.__setattr__(self, "graph_optimize_ub_capacity_bytes", graph_ub_capacity_bytes)
 
         # Parse compile_mode and set related fields

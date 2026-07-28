@@ -22,6 +22,7 @@ import ctypes
 import functools
 import hashlib
 import glob
+from numbers import Integral
 import os
 import re
 import shlex
@@ -58,6 +59,7 @@ from triton.backends.ascend.utils import (
     _warn_auto_blockify_disabled,
     downgrade_llir,
     force_disable_ffts,
+    graph_ub_budget_bytes_for_arch,
     get_cann_version_file_hash,
     is_compile_on_910_95,
 )
@@ -1058,7 +1060,7 @@ class NPUOptions:
     enable_graph_optimize: bool = True
     graph_optimize_rule_mask: int = 127
     graph_optimize_max_rewrites_per_function: int = 64
-    graph_optimize_ub_capacity_bytes: int = 0
+    graph_optimize_ub_capacity_bytes: Optional[int] = None
     graph_optimize_emit_remarks: bool = False
     allow_fp8e4nv: bool = False
     auto_tile_and_bind_subblock: bool = True
@@ -1163,6 +1165,23 @@ class NPUOptions:
         from triton.backends.ascend import _apply_ascend_patch
 
         _apply_ascend_patch()
+        graph_ub_budget_bytes = graph_ub_budget_bytes_for_arch(self.arch)
+        requested_graph_ub_capacity_bytes = self.graph_optimize_ub_capacity_bytes
+        if requested_graph_ub_capacity_bytes is None:
+            graph_ub_capacity_bytes = graph_ub_budget_bytes
+        else:
+            if (isinstance(requested_graph_ub_capacity_bytes, bool) or
+                    not isinstance(requested_graph_ub_capacity_bytes, Integral)):
+                raise TypeError(
+                    "graph_optimize_ub_capacity_bytes must be a non-negative integer or None"
+                )
+            if requested_graph_ub_capacity_bytes < 0:
+                raise ValueError("graph_optimize_ub_capacity_bytes must be non-negative")
+            graph_ub_capacity_bytes = min(
+                int(requested_graph_ub_capacity_bytes), graph_ub_budget_bytes
+            )
+        object.__setattr__(self, "graph_optimize_ub_capacity_bytes", graph_ub_capacity_bytes)
+
         # Parse compile_mode and set related fields
         if self.compile_mode == "simd":
             object.__setattr__(self, "parallel_mode", "simd")

@@ -438,7 +438,7 @@ index 582cd876cb..41325dfa79 100644
  
          return check
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
-index 42bf7024f4..97eb83f8d6 100644
+index 9433d511de..67b78f7d43 100644
 --- a/python/triton/language/semantic.py
 +++ b/python/triton/language/semantic.py
 @@ -344,6 +344,9 @@ class TritonSemantic(Generic[TensorTy]):
@@ -656,7 +656,7 @@ index cd871cb2e1..2d6b878189 100644
 +def _try_import_ascend():
 +    global _has_ascend_support, AscendInterpreterBuilder
 +    try:
-+        from third_party.ascend.backend import ascend_interpreter
++        from triton.backends.ascend import ascend_interpreter
 +        AscendInterpreterBuilder = ascend_interpreter.AscendInterpreterBuilder
 +        _has_ascend_support = True
 +    except ImportError:
@@ -806,10 +806,10 @@ index 0f506818f9..1e07a267fa 100644
                      # skip runtime specialization:
                      specialization.append(f'("{kp.annotation_type}", None)')
 diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
-index 48049f0268..8f8fe8ea46 100644
+index 48049f0268..e96284bc21 100644
 --- a/bin/RegisterTritonDialects.h
 +++ b/bin/RegisterTritonDialects.h
-@@ -1,6 +1,35 @@
+@@ -1,6 +1,34 @@
  #pragma once
 +#include "ascend/include/AutoBlockify/Passes.h"
 +#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
@@ -820,7 +820,6 @@ index 48049f0268..8f8fe8ea46 100644
 +#include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
 +#include "ascend/include/DynamicCVPipeline/Passes.h"
 +#include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
-+#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromComputePass.h"
 +#include "ascend/include/DynamicCVPipeline/SplitDataflow/RefineArgsBlockId.h"
 +#include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
 +#include "ascend/include/TritonControlFlowOpt/Passes.h"
@@ -845,7 +844,7 @@ index 48049f0268..8f8fe8ea46 100644
  #include "nvidia/include/Dialect/NVGPU/IR/Dialect.h"
  #include "nvidia/include/Dialect/NVWS/IR/Dialect.h"
  #include "proton/Dialect/include/Conversion/ProtonGPUToLLVM/Passes.h"
-@@ -85,6 +115,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -85,6 +113,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::registerConvertTritonGPUToLLVMPass();
    mlir::triton::registerConvertNVGPUToLLVMPass();
    mlir::triton::registerAllocateSharedMemoryNvPass();
@@ -865,7 +864,7 @@ index 48049f0268..8f8fe8ea46 100644
    mlir::registerLLVMDIScope();
    mlir::LLVM::registerInlinerInterface(registry);
    mlir::NVVM::registerInlinerInterface(registry);
-@@ -136,16 +179,38 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -136,16 +177,37 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::proton::gpu::registerScheduleBufferStorePass();
    mlir::triton::proton::gpu::registerAddSchedBarriersPass();
  
@@ -882,7 +881,6 @@ index 48049f0268..8f8fe8ea46 100644
 +  mlir::triton::registerPlanComputeBlockPasses();
 +  mlir::triton::registerOpClassifierPass();
 +  mlir::triton::registerRefineArgsBlockIdPasses();
-+  mlir::triton::registerSeparateMemoryFromComputePasses();
 +
    registry.insert<
        mlir::triton::TritonDialect, mlir::cf::ControlFlowDialect,

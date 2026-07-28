@@ -23,13 +23,8 @@ from triton._C.libtriton.ascend import ir as ascend_ir
 
 from .testing import do_bench_npu
 
-from ._backcompat_imports import install as _install_backcompat
-
-_install_backcompat()
-
 
 def _apply_ascend_patch():
-    from triton.compiler import compiler as triton_compiler
     from triton.compiler.code_generator import CodeGenerator
 
     if not getattr(CodeGenerator, "_ascend_patch_applied", False):

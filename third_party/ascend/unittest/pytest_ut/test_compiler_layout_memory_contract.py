@@ -28,6 +28,34 @@ from types import SimpleNamespace
 import pytest
 
 
+pytestmark = pytest.mark.backend("none")
+
+
+_UNSET = object()
+
+
+def _stub_graph_ub_budget_bytes_for_arch(arch):
+    """Mirror the documented architecture table for the compiler import shim.
+
+    The table itself is covered by the source-loaded backend-utils test.  This
+    local shim keeps this compiler-only contract independent of the installed
+    Ascend package while retaining meaningful option-normalization assertions.
+    """
+    if not isinstance(arch, str) or not arch:
+        return 0
+    if arch.startswith(("Ascend910_95", "Ascend950")):
+        return 128 * 1024
+    if arch.startswith((
+        "Ascend910A",
+        "Ascend910B",
+        "Ascend910D",
+        "Ascend910_93",
+        "Ascend310B",
+    )):
+        return 96 * 1024
+    return 0
+
+
 class _FakeModule:
 
     def __init__(self, events):
@@ -100,6 +128,7 @@ def compiler_module():
     utils_stub._warn_auto_blockify_disabled = lambda *_args, **_kwargs: None
     utils_stub.downgrade_llir = lambda llir: llir
     utils_stub.get_cann_version_file_hash = lambda: ""
+    utils_stub.graph_ub_budget_bytes_for_arch = _stub_graph_ub_budget_bytes_for_arch
 
     class UnusedNPUUtils:
         pass
@@ -140,6 +169,106 @@ def compiler_module():
         else:
             sys.modules[cache_name] = previous_cache
     return module
+
+
+def _parse_options(compiler, arch, opts=None):
+    backend = compiler.AscendBackend(
+        SimpleNamespace(backend="npu", arch=arch)
+    )
+    return backend.parse_options({} if opts is None else opts)
+
+
+@pytest.mark.parametrize(
+    ("arch", "requested_capacity", "expected_capacity"),
+    (
+        ("Ascend910B1", _UNSET, 96 * 1024),
+        ("Ascend910B1", None, 96 * 1024),
+        ("Ascend910_9581", None, 128 * 1024),
+        ("Ascend950A3", None, 128 * 1024),
+        ("Ascend910B1", 0, 0),
+        ("Ascend910B1", 4096, 4096),
+        ("Ascend910B1", 96 * 1024 + 1, 96 * 1024),
+        ("Ascend910_9581", 128 * 1024 + 1, 128 * 1024),
+        ("unknown-arch", None, 0),
+    ),
+)
+def test_npu_options_normalizes_graph_ub_budget(
+    compiler_module, arch, requested_capacity, expected_capacity
+):
+    """Direct NPUOptions users receive the same final integer as JIT users."""
+    kwargs = {"arch": arch}
+    if requested_capacity is not _UNSET:
+        kwargs["graph_optimize_ub_capacity_bytes"] = requested_capacity
+
+    options = compiler_module.NPUOptions(**kwargs)
+
+    assert options.graph_optimize_ub_capacity_bytes == expected_capacity
+
+
+@pytest.mark.parametrize(
+    ("arch", "requested_capacity", "expected_capacity"),
+    (
+        ("Ascend910B1", _UNSET, 96 * 1024),
+        ("Ascend910B1", None, 96 * 1024),
+        ("Ascend910_9581", None, 128 * 1024),
+        ("Ascend950A3", None, 128 * 1024),
+        ("Ascend910B1", 0, 0),
+        ("Ascend910B1", 4096, 4096),
+        ("Ascend910B1", 96 * 1024 + 1, 96 * 1024),
+    ),
+)
+def test_parse_options_normalizes_graph_ub_budget(
+    compiler_module, arch, requested_capacity, expected_capacity
+):
+    opts = {}
+    if requested_capacity is not _UNSET:
+        opts["graph_optimize_ub_capacity_bytes"] = requested_capacity
+
+    options = _parse_options(compiler_module, arch, opts)
+
+    assert options.arch == arch
+    assert options.graph_optimize_ub_capacity_bytes == expected_capacity
+
+
+def test_normalized_graph_ub_budget_contributes_to_npu_hash(compiler_module):
+    auto = compiler_module.NPUOptions(arch="Ascend910B1")
+    explicit_none = compiler_module.NPUOptions(
+        arch="Ascend910B1", graph_optimize_ub_capacity_bytes=None
+    )
+    disabled = compiler_module.NPUOptions(
+        arch="Ascend910B1", graph_optimize_ub_capacity_bytes=0
+    )
+    small = compiler_module.NPUOptions(
+        arch="Ascend910B1", graph_optimize_ub_capacity_bytes=4096
+    )
+    clamped = compiler_module.NPUOptions(
+        arch="Ascend910B1", graph_optimize_ub_capacity_bytes=96 * 1024 + 1
+    )
+
+    assert auto.__dict__["graph_optimize_ub_capacity_bytes"] == 96 * 1024
+    assert explicit_none.graph_optimize_ub_capacity_bytes == 96 * 1024
+    assert clamped.graph_optimize_ub_capacity_bytes == 96 * 1024
+    assert auto.hash() == explicit_none.hash() == clamped.hash()
+    assert auto.hash() != disabled.hash()
+    assert auto.hash() != small.hash()
+
+
+@pytest.mark.parametrize(
+    ("requested_capacity", "error_type"),
+    (
+        (-1, ValueError),
+        (True, TypeError),
+        (1.5, TypeError),
+    ),
+)
+def test_npu_options_rejects_invalid_graph_ub_budget_requests(
+    compiler_module, requested_capacity, error_type
+):
+    with pytest.raises(error_type):
+        compiler_module.NPUOptions(
+            arch="Ascend910B1",
+            graph_optimize_ub_capacity_bytes=requested_capacity,
+        )
 
 
 def _make_opt(
@@ -371,9 +500,7 @@ def test_ttir_to_npubin_exports_make_ttir_row_contract_only_for_pure_simt(
     assert events == ["str:0", "parse"]
 
 
-def test_make_ttir_passes_force_simt_only_to_graph_optimize(
-    compiler_module, monkeypatch
-):
+def _run_make_ttir_with_recorded_graph_options(compiler, monkeypatch, options):
     events = []
     module = _FakeModule(events)
     pass_manager = _FakePassManager(events)
@@ -383,12 +510,12 @@ def test_make_ttir_passes_force_simt_only_to_graph_optimize(
         return lambda _pm, *args, **kwargs: events.append((name, args, kwargs))
 
     monkeypatch.setattr(
-        compiler_module,
+        compiler,
         "ir",
         SimpleNamespace(pass_manager=lambda _context: pass_manager),
     )
     monkeypatch.setattr(
-        compiler_module,
+        compiler,
         "passes",
         SimpleNamespace(
             common=SimpleNamespace(
@@ -406,7 +533,7 @@ def test_make_ttir_passes_force_simt_only_to_graph_optimize(
         ),
     )
     monkeypatch.setattr(
-        compiler_module,
+        compiler,
         "ascend",
         SimpleNamespace(
             passes=SimpleNamespace(
@@ -416,6 +543,14 @@ def test_make_ttir_passes_force_simt_only_to_graph_optimize(
             )
         ),
     )
+
+    assert compiler.make_ttir(module, {}, options) is module
+    return events, graph_calls
+
+
+def test_make_ttir_passes_force_simt_only_to_graph_optimize(
+    compiler_module, monkeypatch
+):
     options = SimpleNamespace(
         enable_graph_optimize=True,
         graph_optimize_rule_mask=8,
@@ -426,12 +561,52 @@ def test_make_ttir_passes_force_simt_only_to_graph_optimize(
         debug=False,
     )
 
-    assert compiler_module.make_ttir(module, {}, options) is module
+    events, graph_calls = _run_make_ttir_with_recorded_graph_options(
+        compiler_module, monkeypatch, options
+    )
+
     assert graph_calls == [
         {
             "rule_mask": 8,
             "max_rewrites_per_function": 17,
             "ub_capacity_bytes": 4096,
+            "emit_remarks": True,
+            "force_simt_only": True,
+        }
+    ]
+    assert events[-1] == "run_row"
+
+
+@pytest.mark.parametrize(
+    ("requested_capacity", "expected_capacity"),
+    (
+        (None, 96 * 1024),
+        (0, 0),
+        (4096, 4096),
+        (96 * 1024 + 1, 96 * 1024),
+    ),
+)
+def test_make_ttir_forwards_normalized_graph_ub_budget(
+    compiler_module, monkeypatch, requested_capacity, expected_capacity
+):
+    options = compiler_module.NPUOptions(
+        arch="Ascend910B1",
+        graph_optimize_rule_mask=8,
+        graph_optimize_max_rewrites_per_function=17,
+        graph_optimize_ub_capacity_bytes=requested_capacity,
+        graph_optimize_emit_remarks=True,
+        force_simt_only=True,
+    )
+
+    events, graph_calls = _run_make_ttir_with_recorded_graph_options(
+        compiler_module, monkeypatch, options
+    )
+
+    assert graph_calls == [
+        {
+            "rule_mask": 8,
+            "max_rewrites_per_function": 17,
+            "ub_capacity_bytes": expected_capacity,
             "emit_remarks": True,
             "force_simt_only": True,
         }
@@ -545,6 +720,7 @@ def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(
     assert default_options.compile_mode == "unstructured_in_simt"
     assert default_options.force_simt_template is True
     assert default_options.force_simt_only is False
+    assert default_options.graph_optimize_ub_capacity_bytes == 0
 
     simd_options = compiler_module.NPUOptions(compile_mode="simd")
     assert simd_options.force_simt_template is False

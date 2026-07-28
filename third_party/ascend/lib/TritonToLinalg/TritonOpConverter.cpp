@@ -58,6 +58,7 @@
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HFusion/IR/HFusion.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 namespace TTOpConverters {
 using namespace mlir;
@@ -1331,7 +1332,18 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
     auto memrefType = MemRefType::get(shape, elementType);
     Value inputMemRef =
         rewriter.create<bufferization::ToBufferOp>(loc, memrefType, scanInput);
-    Value outputMemRef = rewriter.create<memref::AllocOp>(loc, memrefType);
+
+    // Wrap scan logic in a scope with UB address space for the output buffer.
+    auto tensorResultType = RankedTensorType::get(shape, elementType);
+    auto scopeOp =
+        rewriter.create<scope::ScopeOp>(loc, TypeRange{tensorResultType});
+    scopeOp.getBodyRegion().emplaceBlock();
+    rewriter.setInsertionPointToEnd(&scopeOp.getBodyRegion().front());
+
+    auto ubMemRefType = MemRefType::get(
+        shape, elementType, nullptr,
+        rewriter.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::UB));
+    Value outputMemRef = rewriter.create<memref::AllocOp>(loc, ubMemRefType);
 
     auto processDimension = [&](ArrayRef<Value> baseIdxsArray) {
       auto startInd = rewriter.create<arith::ConstantIndexOp>(op.getLoc(), 0);
@@ -1428,13 +1440,17 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
     createSimpleNestedLoops(rewriter, loc, outputMemRef, nonScanDims,
                             processDimension);
 
-    rewriter.setInsertionPointAfter(op);
-
     mlir::Type resultType = mlir::memref::getTensorTypeFromMemRefType(
         dyn_cast<mlir::MemRefType>(outputMemRef.getType()));
     Value outputTensor = rewriter.create<bufferization::ToTensorOp>(
         loc, resultType, outputMemRef, true);
-    rewriter.replaceOp(op, outputTensor);
+    rewriter.create<scope::ReturnOp>(loc, ValueRange{outputTensor});
+
+    scopeOp->setAttr(hivm::TCoreTypeAttr::name,
+                     hivm::TCoreTypeAttr::get(rewriter.getContext(),
+                                              hivm::TCoreType::VECTOR));
+
+    rewriter.replaceOp(op, scopeOp.getResult(0));
     return success();
   }
 }

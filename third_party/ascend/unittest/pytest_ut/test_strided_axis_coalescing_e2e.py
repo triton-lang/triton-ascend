@@ -30,15 +30,16 @@ import triton
 import triton.language as tl
 
 try:
-    from triton.tools.get_ascend_devices import is_compile_on_910_95
+    from triton.backends.ascend.utils import is_compile_on_910_95
 except Exception:
     # Keep collection safe in generic CI images where the Ascend device helper
     # is unavailable.  The actual test must never run without the real gate.
-    is_compile_on_910_95 = False
+    def is_compile_on_910_95():
+        return False
 
 
 pytestmark = pytest.mark.skipif(
-    not is_compile_on_910_95,
+    not is_compile_on_910_95(),
     reason="StridedAxisCoalescing native validation requires an Ascend 910_95/A5 toolchain",
 )
 

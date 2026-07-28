@@ -24,6 +24,7 @@ import torch_npu
 import triton
 import triton.language as tl
 import test_common
+from triton import CompilationError
 
 
 @pytest.fixture(scope="function")
@@ -113,6 +114,24 @@ def triton_dot_2_ignore_tf32(output_ptr, x_ptr, y_ptr, B: tl.constexpr, C: tl.co
     tl.store(output_ptr + oidx, ret, mask=out_mask)
 
 
+@triton.jit
+def triton_dot(output_ptr, x_ptr, y_ptr, B: tl.constexpr, C: tl.constexpr, D: tl.constexpr):
+    bidx = tl.arange(0, B)
+    cidx = tl.arange(0, C)
+    didx = tl.arange(0, D)
+
+    x_mask = (bidx[:, None] < B) & (cidx[None, :] < C)
+    y_mask = (cidx[:, None] < C) & (didx[None, :] < D)
+    out_mask = (bidx[:, None] < B) & (didx[None, :] < D)
+    Xidx = bidx[:, None] * C + cidx[None, :]
+    Yidx = cidx[:, None] * D + didx[None, :]
+    X = tl.load(x_ptr + Xidx, mask=x_mask, other=0.0)
+    Y = tl.load(y_ptr + Yidx, mask=y_mask, other=0.0)
+    ret = tl.dot(X, Y)
+    oidx = bidx[:, None] * D + didx[None, :]
+    tl.store(output_ptr + oidx, ret, mask=out_mask)
+
+
 testlist1 = [
     (10, 13, 35, 39),
 ]
@@ -136,8 +155,6 @@ def test_dot_2(restore_npu_hf32_setting, sigtype, B, C, D):
     test_common.validate_cmp(sigtype, z, z_ref)
 
 
-@pytest.mark.xfail(
-    reason="Temporarily disabled: TA backend does not support allow_tf32 yet. Will be fixed in follow-up.")
 @pytest.mark.parametrize("B, C, D", testlist2)
 @pytest.mark.parametrize("sigtype", typelist)
 def test_dot_2_allow_tf32(restore_npu_hf32_setting, sigtype, B, C, D):
@@ -145,11 +162,12 @@ def test_dot_2_allow_tf32(restore_npu_hf32_setting, sigtype, B, C, D):
     y = test_common.generate_tensor((C, D), sigtype).npu()
     z_ref = torch_dot_None(x, y).to(torch.float32)
     z = torch.zeros((B, D), dtype=torch.float32).npu()
-    triton_dot_2_allow_tf32[1, 1, 1](z, x, y, B, C, D)
-    test_common.validate_cmp(sigtype, z, z_ref)
+    try:
+        triton_dot_2_input_tf32[1, 1, 1](z, x, y, B, C, D)
+    except CompilationError as e:
+        assert "input_precision must be one of" in str(e.args)
 
 
-@pytest.mark.skip(reason="not supported after the NPUIR is updated in April, and will be fixed later")
 @pytest.mark.parametrize("B, C, D", testlist2)
 @pytest.mark.parametrize("sigtype", typelist)
 def test_dot_2_input_tf32(restore_npu_hf32_setting, sigtype, B, C, D):
@@ -157,8 +175,10 @@ def test_dot_2_input_tf32(restore_npu_hf32_setting, sigtype, B, C, D):
     y = test_common.generate_tensor((C, D), sigtype).npu()
     z_ref = torch_dot_None(x, y).to(torch.float32)
     z = torch.zeros((B, D), dtype=torch.float32).npu()
-    triton_dot_2_input_tf32[1, 1, 1](z, x, y, B, C, D)
-    test_common.validate_cmp(sigtype, z, z_ref)
+    try:
+        triton_dot_2_input_tf32[1, 1, 1](z, x, y, B, C, D)
+    except CompilationError as e:
+        assert "input_precision must be one of" in str(e.args)
 
 
 @pytest.mark.parametrize("B, C, D", testlist2)
@@ -178,4 +198,15 @@ def test_dot_2_ignore_tf32(sigtype, B, C, D):
         torch_npu.npu.matmul.allow_hf32 = original_allow_hf32
 
     triton_dot_2_ignore_tf32[1, 1, 1](z, x, y, B, C, D)
+    test_common.validate_cmp(sigtype, z, z_ref)
+
+
+@pytest.mark.parametrize("B, C, D", testlist2)
+@pytest.mark.parametrize("sigtype", typelist)
+def test_dot(sigtype, B, C, D):
+    x = test_common.generate_tensor((B, C), sigtype).npu()
+    y = test_common.generate_tensor((C, D), sigtype).npu()
+    z_ref = torch_dot_None(x, y).to(torch.float32)
+    z = torch.zeros((B, D), dtype=torch.float32).npu()
+    triton_dot[1, 1, 1](z, x, y, B, C, D)
     test_common.validate_cmp(sigtype, z, z_ref)

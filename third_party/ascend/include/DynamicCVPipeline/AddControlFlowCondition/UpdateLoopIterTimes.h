@@ -73,6 +73,9 @@ private:
 
   int replaceForOpCounterInIfOps();
 
+  int UpdateWhileLoopCondition(
+      DenseMap<int, SmallVector<Operation *>> &mainLoopIdMap);
+
   // Calculate factor = requiredBuffers / x
   std::pair<int, int> calculateFactor(scf::ForOp forOp);
 

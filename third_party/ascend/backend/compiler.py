@@ -98,10 +98,15 @@ def _export_coalesce_metadata(mod, metadata):
     # no longer interprets the attrs. Read them into metadata here and strip them
     # from the module so the hacc.* attrs never reach hivmc (which rejects
     # unknown module attrs). Absent attrs -> factor 1 (no-op) / axis -1.
+    # RowCoalescing also records whether the launcher should use ceil-div when
+    # shrinking the grid, because its runtime valid-count guard handles tails.
     factor = _get_then_remove_rc(mod, "hacc.coalesce_factor")
     axis = _get_then_remove_rc(mod, "hacc.coalesce_axis")
+    ceil_div = _get_then_remove_rc(mod, "hacc.coalesce_grid_ceil_div")
     metadata["coalesce_factor"] = factor if isinstance(factor, int) and factor > 1 else 1
     metadata["coalesce_axis"] = axis if isinstance(axis, int) and axis >= 0 else -1
+    metadata["coalesce_grid_ceil_div"] = bool(isinstance(ceil_div, int) and ceil_div > 0)
+    metadata["row_coalescing_applied"] = metadata["coalesce_factor"] > 1
 
 
 def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
@@ -1059,6 +1064,13 @@ def ttir_to_npubin(mod, metadata, opt):
     # Get Triton-MLIR as string
     ttir_code = str(mod)
     metadata = _parse_ttir_metadata(ttir_code, metadata)
+    if opt.force_simt_only:
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+        ascend.passes.ttir.add_row_coalescing(pm)
+        pm.run(mod)
+        _export_coalesce_metadata(mod, metadata)
+        ttir_code = str(mod)
     with tempfile.TemporaryDirectory() as tmpdir:
         # prepare input
         src_path = os.path.join(tmpdir, "kernel.ttir.mlir")
@@ -1095,7 +1107,9 @@ def ttir_to_npubin(mod, metadata, opt):
             # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
             # mirroring the SIMD compile paths. driver.py's runtime block-count
             # cap keys off the same env switch, so the two stay in sync.
-            if _is_auto_map_parallel_blocks_enabled():
+            if (_is_auto_map_parallel_blocks_enabled()
+                    and not metadata.get("has_auto_blockify_blacklist_op", False)
+                    and not metadata.get("row_coalescing_applied", False)):
                 _compile_option_list += ["--enable-auto-blockify-loop"]
                 if opt.superblock_factor > 1:
                     _compile_option_list += [f"--super-block-factor={opt.superblock_factor}"]

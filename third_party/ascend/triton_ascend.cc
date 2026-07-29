@@ -14,6 +14,7 @@
 #include "ascend/include/TritonToAnnotation/Passes.h"
 #include "ascend/include/TritonControlFlowOpt/Passes.h"
 #include "ascend/include/TritonToLinalg/Passes.h"
+#include "ascend/include/TritonToLinalg/RowCoalescing.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 #include "ascend/include/TritonToUnstructure/Passes.h"
@@ -330,6 +331,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
 
   m.def("add_triton_control_flow_opt", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::createTritonControlFlowOptPass());});
+
+  m.def("add_row_coalescing", [](mlir::PassManager &pm) {
+    pm.addPass(RowCoalescing::createRowCoalescingPass());
+  });
 
   m.def("add_triton_to_annotation", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::createTritonToAnnotationPass());});

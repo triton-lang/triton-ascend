@@ -93,7 +93,7 @@ def _apply_ascend_patch():
             # the precision is HF32,convert it to TF32.
             if input_precision.lower() == "tf32":
                 input_precision = "hf32"
-            
+
             # Ascend NPU does not support imprecise accumulation.
             # Force max_num_imprecise_acc to None so the upstream None
             # branch handles it (via max_num_imprecise_acc_default = 0),

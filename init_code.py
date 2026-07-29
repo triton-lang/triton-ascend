@@ -1,11 +1,11 @@
-import os
 import subprocess
+
 
 def checkout_file(files):
     try:
         subprocess.run(["git", "checkout", "--"] + files, check=True, stdout=subprocess.DEVNULL)
-    except subprocess.CalledProcessError:
-        raise RuntimeError(f"init code failed,list:{files}")
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"init code failed,list:{files}") from e
 
 
 def init_triton_ascend_code():
@@ -34,5 +34,6 @@ def init_triton_ascend_code():
     checkout_file(dev_patch_files)
     checkout_file(patch_files)
     print("init triton ascend successfully")
+
 
 init_triton_ascend_code()

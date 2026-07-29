@@ -167,6 +167,7 @@ def test_dot_2_allow_tf32(restore_npu_hf32_setting, sigtype, B, C, D):
         test_common.validate_cmp(sigtype, z, z_ref)
     assert "Tensor-likes are not close" in str(exc_info.value)
 
+
 @pytest.mark.parametrize("B, C, D", testlist2)
 @pytest.mark.parametrize("sigtype", typelist)
 def test_dot_2_input_tf32(restore_npu_hf32_setting, sigtype, B, C, D):

@@ -22,7 +22,6 @@ import os
 import pytest
 import triton
 import torch
-from triton.compiler.errors import MLIRCompilationError
 import triton.language as tl
 import triton.extension.buffer.language as bl
 import triton.language.extra.cann.extension as al

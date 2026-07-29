@@ -24,7 +24,7 @@ import triton
 import triton.language as tl
 import numpy as np
 import test_common
-from triton.tools.get_ascend_devices import is_compile_on_910_95
+from triton.backends.ascend.utils import is_compile_on_910_95
 
 # Chained dot_scaled: first matmul with zero init, second accumulates via acc=.
 # Mirrors normalize-matmul.mlir @test_mmadmx_chain_no_elemwise_decompose:
@@ -90,7 +90,7 @@ testlist = [
 ]
 
 
-@pytest.mark.skipif(not is_compile_on_910_95, reason="only support in A5")
+@pytest.mark.skipif(not is_compile_on_910_95(), reason="only support in A5")
 @pytest.mark.parametrize("dtype", ["fp8e4m3", "fp8e5m2"])
 @pytest.mark.parametrize("M, N, K", testlist)
 def test_2D_scaled_dot_chain(M, N, K, dtype):

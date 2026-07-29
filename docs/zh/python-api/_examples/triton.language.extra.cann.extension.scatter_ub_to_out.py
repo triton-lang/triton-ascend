@@ -2,7 +2,7 @@ import torch
 import triton
 import triton.language as tl
 from triton.language.extra.cann.extension import scatter_ub_to_out
-from triton.tools.get_ascend_devices import is_compile_on_910_95
+from triton.backends.ascend.utils import is_compile_on_910_95
 
 
 @triton.jit
@@ -52,7 +52,7 @@ def test_scatter_ub_to_out():
 
 
 if __name__ == "__main__":
-    if not is_compile_on_910_95:
+    if not is_compile_on_910_95():
         print("scatter_ub_to_out is only supported on Ascend 950, skipping test.")
     else:
         test_scatter_ub_to_out()

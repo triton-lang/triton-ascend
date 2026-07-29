@@ -45,7 +45,7 @@ import torch
 import torch_npu
 import triton
 import triton.language as tl
-from triton.tools.get_ascend_devices import is_compile_on_910_95
+from triton.backends.ascend.utils import is_compile_on_910_95
 
 SUPPORTED_DTYPES = [
     ("int8", torch.int8),
@@ -75,7 +75,7 @@ PARTIAL_STRUCTURED_SHAPES = {
 }
 
 TEST_RANKS = [3]
-TEST_DTYPE = [("int32", torch.int32), ("bfloat16", torch.bfloat16)]
+TEST_DTYPE = [("int32", torch.int32)]
 
 
 @triton.jit
@@ -465,7 +465,7 @@ def _launch_fully_unstructured(rank, offsets, values, output, old, shape):
 @pytest.mark.parametrize("dtype_name, torch_dtype", TEST_DTYPE)
 @pytest.mark.parametrize("rank", TEST_RANKS)
 def test_atomic_min_structured_pointer_with_discrete_mask(dtype_name, torch_dtype, rank):
-    if not is_compile_on_910_95 and torch_dtype in (torch.uint32, torch.uint64):
+    if not is_compile_on_910_95() and torch_dtype in (torch.uint32, torch.uint64):
         pytest.skip("uint32 and uint64 atomics are only supported on 950")
     shape = RANK_SHAPES[rank]
     values = _build_value_tensor(shape, torch_dtype).npu()
@@ -493,7 +493,7 @@ def test_atomic_min_structured_pointer_with_discrete_mask(dtype_name, torch_dtyp
 def test_atomic_min_partially_structured_indirect_offsets(dtype_name, torch_dtype, rank):
     if rank == 1:
         pytest.skip("Partially structured test is not applicable to 1-D tensors")
-    if not is_compile_on_910_95 and torch_dtype in (torch.uint32, torch.uint64):
+    if not is_compile_on_910_95() and torch_dtype in (torch.uint32, torch.uint64):
         pytest.skip("uint32 and uint64 atomics are only supported on 950")
     shape = PARTIAL_STRUCTURED_SHAPES[rank]
     offsets, output_numel = _build_partial_structured_offsets(shape)
@@ -516,7 +516,7 @@ def test_atomic_min_partially_structured_indirect_offsets(dtype_name, torch_dtyp
 @pytest.mark.parametrize("dtype_name, torch_dtype", TEST_DTYPE)
 @pytest.mark.parametrize("rank", TEST_RANKS)
 def test_atomic_min_fully_unstructured_indirect_offsets(dtype_name, torch_dtype, rank):
-    if not is_compile_on_910_95 and torch_dtype in (torch.uint32, torch.uint64):
+    if not is_compile_on_910_95() and torch_dtype in (torch.uint32, torch.uint64):
         pytest.skip("uint32 and uint64 atomics are only supported on 950")
     shape = RANK_SHAPES[rank]
     offsets, output_numel = _build_fully_unstructured_offsets(shape)

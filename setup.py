@@ -492,6 +492,7 @@ class CMakeBuild(build_ext):
 
     def run(self):
         download_and_copy_dependencies()
+        apply_triton_ascend_patch()
 
         try:
             out = subprocess.check_output(["cmake", "--version"])
@@ -640,7 +641,7 @@ class CMakeBuild(build_ext):
 
         # Copy triton-mlir-opt tool to extdir for runtime use
         # This tool is needed for converting MLIR to Bytecode
-        triton_mlir_opt_src = os.path.join(cmake_dir, "bin", "triton-mlir-opt")
+        triton_mlir_opt_src = os.path.join(cmake_dir, "third_party", "ascend", "bin", "triton-mlir-opt")
         if os.path.exists(triton_mlir_opt_src):
             triton_mlir_opt_dst = os.path.join(extdir, "triton-mlir-opt")
             shutil.copy2(triton_mlir_opt_src, triton_mlir_opt_dst)
@@ -959,6 +960,53 @@ def get_git_version_suffix():
         return ""
     else:
         return get_git_commit_hash()
+
+
+def apply_patch(patch_path):
+    try:
+        subprocess.run(["git", "apply", patch_path], check=True, stdout=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        raise RuntimeError(f"patch({patch_path}) failed")
+    except FileNotFoundError:
+        raise RuntimeError(f"patch({patch_path}) not found.")
+
+
+def checkout_file(files):
+    try:
+        subprocess.run(["git", "checkout", "--"] + files, check=True, stdout=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        raise RuntimeError(f"init code failed,list:{files}")
+
+
+def apply_triton_ascend_patch():
+    patch_path = os.path.join("third_party", "ascend", "patch")
+    dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.6.0.patch")
+    patch = os.path.join(patch_path, "triton-ascend-3.6.0.patch")
+    patch_files = [
+        "CMakeLists.txt",
+        "include/triton/Dialect/Triton/IR/TritonAttrDefs.td",
+        "lib/Dialect/Triton/IR/Traits.cpp",
+        "python/src/ir.cc",
+        "python/triton/_utils.py",
+        "python/triton/compiler/code_generator.py",
+        "python/triton/compiler/compiler.py",
+        "python/triton/compiler/errors.py",
+        "python/triton/language/math.py",
+        "python/triton/language/semantic.py",
+        "python/triton/language/standard.py",
+        "python/triton/runtime/interpreter.py",
+        "python/triton/runtime/jit.py",
+        "bin/RegisterTritonDialects.h",
+        "bin/triton-opt.cpp",
+        "bin/CMakeLists.txt",
+    ]
+    dev_patch_files = [
+        "python/triton/runtime/autotuner.py",
+    ]
+    checkout_file(dev_patch_files)
+    apply_patch(dev_patch)
+    checkout_file(patch_files)
+    apply_patch(patch)
 
 
 def get_triton_version_suffix():

@@ -32,6 +32,7 @@
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinAttributes.h"
 
@@ -485,6 +486,51 @@ static int buildIfBlockCrossCoreDAG(ModuleOp module,
   return 0;
 }
 
+// Detect cross-core cycle in the if-block DAG using DFS.
+// All edges in this DAG are cross-core (CUBE↔VECTOR), so any cycle
+// indicates a deadlock-prone bidirectional data dependency.
+enum class DfsState : uint8_t { Unvisited, Visiting, Done };
+
+static bool dfsCycle(scf::IfOp node,
+                     llvm::DenseMap<scf::IfOp, SmallVector<scf::IfOp>> &dag,
+                     llvm::DenseMap<scf::IfOp, DfsState> &state) {
+  state[node] = DfsState::Visiting;
+  auto it = dag.find(node);
+  if (it != dag.end()) {
+    for (scf::IfOp neighbor : it->second) {
+      auto s = state.lookup(neighbor);
+      if (s == DfsState::Visiting)
+        return true;
+      if (s == DfsState::Unvisited && dfsCycle(neighbor, dag, state))
+        return true;
+    }
+  }
+  state[node] = DfsState::Done;
+  return false;
+}
+
+static int detectCrossCoreCycle(ControlFlowConditionInfo *info) {
+  // Collect all nodes in the DAG (both producers and consumers)
+  llvm::DenseMap<scf::IfOp, DfsState> state;
+  for (auto &entry : info->ifBlockCrossCoreDAG) {
+    state.try_emplace(entry.first, DfsState::Unvisited);
+    for (scf::IfOp consumer : entry.second) {
+      state.try_emplace(consumer, DfsState::Unvisited);
+    }
+  }
+
+  for (auto &entry : state) {
+    if (entry.second == DfsState::Unvisited) {
+      if (dfsCycle(entry.first, info->ifBlockCrossCoreDAG, state)) {
+        LDBG("Cross-core cycle detected in DAG");
+        return -1;
+      }
+    }
+  }
+
+  return 0;
+}
+
 // DFS helper function to find nodes at target distance from start node
 static void dfsFindNodesAtDistance(
     scf::IfOp currentNode, int currentDistance, int targetDistance,
@@ -611,22 +657,29 @@ void InitDependentMapPass::runOnOperation() {
   // Step 3: Compute producer buffer count for flowOpt condition
   computeProducerBufferCount(info, module);
 
-  // Step 4: Build if block DAG from crossCoreDependentMap
+  // Step 4: Build if block DAG from crossCoreDependentMap (always)
+  if (buildIfBlockCrossCoreDAG(module, info) != 0) {
+    LDBG("buildIfBlockCrossCoreDAG failed!");
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
+
+  // Step 5: Detect cross-core cycle in DAG
+  if (detectCrossCoreCycle(info) != 0) {
+    LDBG("Cross-core cycle detected!");
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
+    return;
+  }
+
+  // Step 6: Collect flowOpt if block pairs from DAG (only when buffer counts
+  // exceed threshold)
   if (info->crossCoreBufferCount > CROSS_CORE_BUFFER_COUNT_THRESHOLD &&
       info->intraCoreBufferCount > INTRA_CORE_BUFFER_COUNT_THRESHOLD) {
-    LDBG("Buffer counts meet requirements, building DAG and collecting flowOpt "
-         "pairs.");
+    LDBG("Buffer counts meet requirements, collecting flowOpt pairs.");
 
-    if (buildIfBlockCrossCoreDAG(module, info) != 0) {
-      LDBG("buildIfBlockCrossCoreDAG failed!");
-      signalPassFailure();
-      return;
-    }
-
-    // Step 5: Collect flowOpt if block pairs from DAG
     if (collectFlowOptIfOpPairs(module, info) != 0) {
       LDBG("collectFlowOptIfOpPairs failed!");
-      signalPassFailure();
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return;
     }
 

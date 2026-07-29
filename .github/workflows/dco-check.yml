@@ -1,0 +1,28 @@
+name: DCO Check
+
+on:
+  pull_request_target:
+  merge_group:
+    branches: [main, 'release/**', '**-dev']
+    types: [checks_requested]
+  push:
+    branches: [main, 'release/**', '**-dev']
+
+concurrency:
+  group: dco-check-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dco:
+    name: Developer Certificate of Origin
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: KineticCafe/actions-dco@v3.1.0
+        with:
+          config: |
+            comment = true

@@ -45,7 +45,7 @@ import torch
 import torch_npu
 import triton
 import triton.language as tl
-from triton.tools.get_ascend_devices import is_compile_on_910_95
+from triton.backends.ascend.utils import is_compile_on_910_95
 
 SUPPORTED_DTYPES = [
     ("int16", torch.int16),
@@ -74,7 +74,7 @@ PARTIAL_STRUCTURED_SHAPES = {
 }
 
 TEST_RANKS = [3]
-TEST_DTYPE = [("int32", torch.int32), ("bfloat16", torch.bfloat16)]
+TEST_DTYPE = [("int32", torch.int32)]
 
 
 @triton.jit

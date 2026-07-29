@@ -103,7 +103,7 @@ class NPUUtils(object):
         if npu_device_limit_str is None:
             return num_aic, num_aiv
 
-        is_valid = re.match(r'^\d+(,\d+)$', npu_device_limit_str.strip())
+        is_valid = re.match(r'^\d+ *, *\d+$', npu_device_limit_str.strip())
         if is_valid:
             parts = [part.strip() for part in npu_device_limit_str.split(",")]
             num_aic_env = int(parts[0])
@@ -116,7 +116,7 @@ class NPUUtils(object):
                     f"[ERROR]NPU_DEVICE_LIMIT={npu_device_limit_str}, both cube_core_num and vector_core_num "
                     f"must be less than or equal to device properties ({num_aic},{num_aiv}).")
             else:
-                print(f"[INFO]NPU_DEVICE_LIMIT from env: cube_core_num={num_aic_env},vector_core_num={num_aic_env}).")
+                print(f"[INFO]NPU_DEVICE_LIMIT from env: cube_core_num={num_aic_env},vector_core_num={num_aiv_env}).")
                 return num_aic_env, num_aiv_env
         else:
             raise ValueError(f"[ERROR]NPU_DEVICE_LIMIT={npu_device_limit_str}, which has invalid format: "
@@ -125,6 +125,9 @@ class NPUUtils(object):
     @functools.lru_cache()
     def get_device_aicore(self):
         return self.npu_utils_mod.get_aicore_num()
+
+    def has_device_limit(self):
+        return self.get_device_aicore() != self.get_aicore_num()
 
     def get_device_properties(self, device):
         # temperoarily added "max_shared_mem" properties to avoid triton-compiler complain
@@ -498,7 +501,8 @@ def make_launcher(constants, signature, metadata):
         int gridX, gridY, gridZ;
         rtStream_t stream;
         const void *functon;
-        PyObject* packed_metadata,
+        PyObject* packed_metadata, *launch_metadata;
+        PyObject* launch_enter_hook, *launch_exit_hook;
         *args_expand
     """
 
@@ -649,27 +653,6 @@ static inline DevicePtrInfo getPointer(PyObject *obj, int idx) {
     ptr_info.dev_ptr = reinterpret_cast<void *>(PyLong_AsUnsignedLongLong(ret));
     if(!ptr_info.dev_ptr)
       return ptr_info;
-        aclrtPtrAttributes attributes;
-        aclError status = aclrtPointerGetAttributes(ptr_info.dev_ptr, &attributes);
-
-        if (status == ACL_SUCCESS) {
-          if (attributes.location.type != ACL_MEM_LOCATION_TYPE_DEVICE && attributes.location.type != 4) {
-            Py_DECREF(ret);
-            PyErr_Format(PyExc_ValueError,
-                         "Pointer argument (at %d) cannot be accessed from Triton (cpu tensor?)", idx);
-            ptr_info.valid = false;
-            return ptr_info;
-          }
-        } else {
-          Py_DECREF(ret);
-          PyErr_Format(PyExc_RuntimeError,
-                       "Failed to query pointer attributes at argument %d. "
-                       "Error code: %d. This may indicate invalid memory address "
-                       "or NPU device error.",
-                       idx, status);
-          ptr_info.valid = false;
-          return ptr_info;
-        }
     Py_DECREF(ret);
     return ptr_info;
   }
@@ -877,6 +860,10 @@ void triton_launch_kernel(
     const int64_t* shapes_data, const int* shape_dims, int num_tensors,
     const int* tensor_kinds,
     const void* const* kernel_args, const size_t* arg_sizes, int num_args) {{
+  if (gridX <=0 || gridY <=0 || gridZ <=0) {{
+    printf("WARNING: Skipping launch for kernel '%s' due to empty grid (gridX=%d, gridY=%d, gridZ=%d).\\n", kernelName, gridX, gridY, gridZ);
+    return;
+  }}
   std::vector<std::vector<int64_t>> tensorShapes;
   if (shapes_data != nullptr && shape_dims != nullptr) {{
     int shapes_idx = 0;
@@ -1014,8 +1001,12 @@ void triton_launch_kernel(
 }}
 }} // extern "C"
 
-static void _launch(const char* kernelName, const void* func, rtStream_t stream, int gridX, int gridY, int gridZ, std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{', ' + arg_decls if len(signature) > 0 else ''}) {{
+static void _launch(const char* kernelName, const void* func, rtStream_t stream, int gridX, int gridY, int gridZ, std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{(', ' + arg_decls) if len(arg_decls) > 0 else ''}) {{
   // Keep Python launcher on the stable local packing path.
+  if (gridX <=0 || gridY <=0 || gridZ <=0) {{
+    printf("WARNING: Skipping launch for kernel '%s' due to empty grid (gridX=%d, gridY=%d, gridZ=%d).\\n", kernelName, gridX, gridY, gridZ);
+    return;
+  }}
   std::string name = "";
   name.append(kernelName);
   void *workspace_addr_ptr = NULL;

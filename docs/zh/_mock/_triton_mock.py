@@ -176,6 +176,24 @@ def install() -> None:
     ]:
         _make_module(_name)
 
+    _make_module("triton.extension")
+    _make_module("triton.extension.buffer")
+
+    class _StubAddressSpace:
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    _bl = types.ModuleType("triton.extension.buffer.language")
+    _bl.__package__ = "triton.extension.buffer.language"
+    _bl.__path__ = []
+    _bl.address_space = _StubAddressSpace
+    sys.modules["triton.extension.buffer.language"] = _bl
+
+    _extra = _make_module("triton.language.extra")
+    _cann = _make_module("triton.language.extra.cann", parent=_extra)
+    _make_module("triton.language.extra.extension", parent=_extra)
+
     # ------------------------------------------------------------------ #
     # Optional runtime deps                                               #
     # ------------------------------------------------------------------ #

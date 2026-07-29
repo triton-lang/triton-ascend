@@ -40,12 +40,15 @@ import pytest
 import test_common
 
 try:
-    from triton.tools.get_ascend_devices import is_compile_on_910_95
+    from triton.backends.ascend.utils import is_compile_on_910_95
 except Exception:
-    is_compile_on_910_95 = False
+
+    def is_compile_on_910_95():
+        return False
+
 
 a3_known_boundary_load_issue = pytest.mark.xfail(
-    not is_compile_on_910_95,
+    not is_compile_on_910_95(),
     reason=("Known A3 baseline issue on release/3.2.2-dev: make_block_ptr "
             "boundary_check + static power-of-two stride"),
     strict=False,

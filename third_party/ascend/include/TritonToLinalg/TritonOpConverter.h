@@ -128,6 +128,12 @@ public:
       return rewriter.notifyMatchFailure(
           op, "ScalarMathCanonicalizer handles op not within tt.scan.");
     }
+    if (auto linalgOp =
+            op->template getParentOfType<triton::MapElementwiseOp>()) {
+      return rewriter.notifyMatchFailure(
+          op,
+          "ScalarMathCanonicalizer handles op not within tt.map_elementwise.");
+    }
     auto loc = op.getLoc();
     llvm::SmallVector<Value> inputs;
     for (auto input : op->getOperands()) {
@@ -479,6 +485,36 @@ protected:
   convertToTargetOpExtended(triton::ScanOp op,
                             typename triton::ScanOp::Adaptor adaptor,
                             ConversionPatternRewriter &rewriter) const override;
+};
+
+/*
+ * Decompose tt.map_elementwise region body into tensor-level Named Ops.
+ * Each scalar op (arith, math, scf.if, etc.) is promoted to its tensor
+ * counterpart, producing a chain of independent Named Ops.
+ */
+class MapElementwiseDecomposeConverter
+    : public OpConversionPattern<triton::MapElementwiseOp> {
+public:
+  using OpConversionPattern<triton::MapElementwiseOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::MapElementwiseOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+
+private:
+  // Promote a single scalar op to tensor-level and record the result in
+  // valueMap.  Returns the tensor result values (one per op result).
+  SmallVector<Value> promoteOp(Operation *op,
+                               llvm::DenseMap<Value, Value> &valueMap,
+                               OpBuilder &builder, Location loc,
+                               ArrayRef<int64_t> tensorShape) const;
+
+  // Promote ops in a region body (excluding terminator), return the yielded
+  // tensor values from the terminator.
+  SmallVector<Value> promoteRegionBody(Region &region,
+                                       llvm::DenseMap<Value, Value> &valueMap,
+                                       OpBuilder &builder, Location loc,
+                                       ArrayRef<int64_t> tensorShape) const;
 };
 
 class ExternElementwiseClOpConverter

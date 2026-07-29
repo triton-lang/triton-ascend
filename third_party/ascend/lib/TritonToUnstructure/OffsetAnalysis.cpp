@@ -765,11 +765,11 @@ void parseClampF(triton::ClampFOp op, const Location &loc,
   parse(src, op.getLoc(), rewriter, offsetMap);
   PtrOffsetInfo srcOffsetInfo = offsetMap.at(src);
   // Get clampF min
-  auto clampMin = op.getX();
+  auto clampMin = op.getMin();
   parse(clampMin, op.getLoc(), rewriter, offsetMap);
   PtrOffsetInfo minOffsetInfo = offsetMap.at(clampMin);
   // Get clampF max
-  auto clampMax = op.getX();
+  auto clampMax = op.getMax();
   parse(clampMax, op.getLoc(), rewriter, offsetMap);
   PtrOffsetInfo maxOffsetInfo = offsetMap.at(clampMax);
   // Set clampF offset map

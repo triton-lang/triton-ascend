@@ -27,6 +27,9 @@
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
 
+#include "triton/Dialect/Triton/IR/Dialect.h"
+
+#include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
@@ -34,6 +37,7 @@
 #include "mlir/AsmParser/AsmParser.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
+#include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/AffineExpr.h"
@@ -49,11 +53,15 @@ namespace py = pybind11;
 
 struct AscendNPUIROpBuilder : public TritonOpBuilder {
   std::string target;
+  std::string compile_mode;
   static constexpr char kTarget910_95[] = "Ascend910_95";
   static constexpr char kTarget950[] = "Ascend950";
 
-  explicit AscendNPUIROpBuilder(MLIRContext *context, std::string target = "")
-      : TritonOpBuilder(context), target(target) {}
+  explicit AscendNPUIROpBuilder(MLIRContext *context, std::string target = "",
+                                std::string compile_mode = "simd")
+      : TritonOpBuilder(context), target(target), compile_mode(compile_mode) {}
+
+  bool isSimtMode() const { return compile_mode == "simt"; }
 
   bool is_910_95() const {
     // TODO: Use enum instead of strings after enabling HACC in satandalone
@@ -607,11 +615,333 @@ void init_ascend_ir(py::module &&m) {
   });
   m.def("remove_attr",
         [](OpState &op, std::string &name) -> void { op->removeAttr(name); });
+  py::class_<StringAttr, Attribute>(m, "str_attr", py::module_local());
+  py::class_<ArrayAttr, Attribute>(m, "array_attr", py::module_local());
 
   py::class_<AscendNPUIROpBuilder, TritonOpBuilder>(
       m, "ascendnpu_ir_builder", py::module_local(), py::dynamic_attr())
-      .def(py::init<MLIRContext *, std::string>(), py::arg("context"),
-           py::arg("target") = "")
+      .def(py::init<MLIRContext *, std::string, std::string>(),
+           py::arg("context"), py::arg("target") = "",
+           py::arg("compile_mode") = "simd",
+           "Create a TritonOpBuilder with optional compile_mode (simt or simd, "
+           "default: simd)")
+      .def("is_simt_mode", &AscendNPUIROpBuilder::isSimtMode,
+           "Check if the compile mode is simt")
+      .def("get_i64_array_attr",
+           [](AscendNPUIROpBuilder &self, const std::vector<int64_t> &array) {
+             return self.getBuilder().getI64ArrayAttr(array);
+           })
+      .def("get_buffer_ty",
+           [](AscendNPUIROpBuilder &self, std::vector<int64_t> &shape,
+              Type &elementType, const Attribute &memorySpace) -> Type {
+             return MemRefType::get(shape, elementType,
+                                    MemRefLayoutAttrInterface{}, memorySpace);
+           })
+      .def("get_buffer_ty_with_strides",
+           [](AscendNPUIROpBuilder &self, std::vector<int64_t> &shape,
+              Type &elementType, const std::vector<int64_t> &strides,
+              const Attribute &memorySpace) -> Type {
+             // create a layout with strides, using dynamic offset
+             auto layout = StridedLayoutAttr::get(
+                 self.getBuilder().getContext(), ShapedType::kDynamic, strides);
+             return MemRefType::get(shape, elementType, layout, memorySpace);
+           })
+      .def("create_extract_scalar",
+           [](AscendNPUIROpBuilder &self, Value &src,
+              std::vector<Value> &indices) -> Value {
+             llvm::SmallVector<Value> arg_indices;
+             for (const auto &i : indices) {
+               auto iTy = i.getType();
+               if (!iTy.isIndex()) {
+                 auto v = self.create<arith::IndexCastOp>(
+                     self.getBuilder().getIndexType(), i);
+                 arg_indices.push_back(v);
+               } else {
+                 arg_indices.push_back(i);
+               }
+             }
+             auto ret = self.create<tensor::ExtractOp>(src, arg_indices);
+             return ret;
+           })
+      .def("create_extract_slice",
+           [](AscendNPUIROpBuilder &self, Value &ful,
+              std::vector<Value> &offs_vec, std::vector<int> &sizs_vec,
+              std::vector<int> &strd_vec) -> Value {
+             llvm::SmallVector<Value> offsets;
+             llvm::SmallVector<int64_t> staticOffsets;
+             for (const auto &o : offs_vec) {
+               auto oTy = o.getType();
+               if (!oTy.isIndex()) {
+                 auto v = self.create<arith::IndexCastOp>(
+                     self.getBuilder().getIndexType(), o);
+                 offsets.push_back(v);
+               } else {
+                 offsets.push_back(o);
+               }
+               staticOffsets.push_back(ShapedType::kDynamic);
+             }
+             llvm::SmallVector<Value> sizes;
+             llvm::SmallVector<int64_t> staticSizes;
+             llvm::SmallVector<int64_t> retSizes;
+             for (const auto &s : sizs_vec) {
+               // auto v = self.create<arith::ConstantIndexOp>(s);
+               // sizes.push_back(v);
+               staticSizes.push_back(s);
+               retSizes.push_back(s);
+             }
+             llvm::SmallVector<Value> strides;
+             llvm::SmallVector<int64_t> staticStrides;
+             for (const auto &s : strd_vec) {
+               auto v = self.create<arith::ConstantIndexOp>(s);
+               strides.push_back(v);
+               staticStrides.push_back(ShapedType::kDynamic);
+             }
+             auto retTy = RankedTensorType::get(
+                 retSizes,
+                 cast<RankedTensorType>(ful.getType()).getElementType());
+
+             return self.create<tensor::ExtractSliceOp>(
+                 retTy, ful, offsets, sizes, strides, staticOffsets,
+                 staticSizes, staticStrides);
+           })
+      .def("create_insert_slice",
+           [](AscendNPUIROpBuilder &self, Value &ful, Value &sub,
+              std::vector<Value> &offs_vec, std::vector<int> &sizs_vec,
+              std::vector<int> &strd_vec) -> Value {
+             llvm::SmallVector<Value> offsets;
+             llvm::SmallVector<int64_t> staticOffsets;
+             for (const auto &o : offs_vec) {
+               auto oTy = o.getType();
+               if (!oTy.isIndex()) {
+                 auto v = self.create<arith::IndexCastOp>(
+                     self.getBuilder().getIndexType(), o);
+                 offsets.push_back(v);
+               } else {
+                 offsets.push_back(o);
+               }
+               staticOffsets.push_back(ShapedType::kDynamic);
+             }
+             llvm::SmallVector<Value> sizes;
+             llvm::SmallVector<int64_t> staticSizes;
+             llvm::SmallVector<int64_t> retSizes;
+             for (const auto &s : sizs_vec) {
+               // auto v = self.create<arith::ConstantIndexOp>(s);
+               // sizes.push_back(v);
+               staticSizes.push_back(s);
+               retSizes.push_back(s);
+             }
+             llvm::SmallVector<Value> strides;
+             llvm::SmallVector<int64_t> staticStrides;
+             for (const auto &s : strd_vec) {
+               auto v = self.create<arith::ConstantIndexOp>(s);
+               strides.push_back(v);
+               staticStrides.push_back(ShapedType::kDynamic);
+             }
+             auto retTy = RankedTensorType::get(
+                 retSizes,
+                 cast<RankedTensorType>(ful.getType()).getElementType());
+             auto ret = self.create<tensor::InsertSliceOp>(
+                 sub, ful, offsets, sizes, strides, staticOffsets, staticSizes,
+                 staticStrides);
+             return ret;
+           })
+      .def("create_custom_op_for_inter_core_sync",
+           [](AscendNPUIROpBuilder &self, std::string &op_name,
+              std::string &mode_or_sender, int id) -> void {
+             auto args = self.getBuilder().getArrayAttr(
+                 {self.getBuilder().getStringAttr(mode_or_sender),
+                  self.getBuilder().getI32IntegerAttr(id)});
+             self.create<triton::ascend::CustomOp>(op_name, args, ValueRange());
+           })
+      .def("create_index_select_simd",
+           [](AscendNPUIROpBuilder &self, Value &src, Value &index, int32_t dim,
+              std::vector<Value> &srcShape, std::vector<Value> &srcOffset,
+              std::vector<int32_t> &readShape,
+              std::vector<int32_t> &returnShape) -> Value {
+             auto &builder = self.getBuilder();
+             auto loc = self.getLastLoc();
+
+             // Get element type from source pointer
+             Type elemType;
+             if (auto ptrTy = dyn_cast<triton::PointerType>(src.getType())) {
+               elemType = ptrTy.getPointeeType();
+             } else {
+               llvm::report_fatal_error(
+                   "index_select_simd: src must be pointer type");
+             }
+
+             // Create return tensor type
+             llvm::SmallVector<int64_t> retShape;
+             for (const auto &s : returnShape) {
+               retShape.push_back(s);
+             }
+             auto retTensorType = RankedTensorType::get(retShape, elemType);
+
+             // Convert srcShape and srcOffset values to index type if needed
+             llvm::SmallVector<Value> srcShapeIndex;
+             for (auto val : srcShape) {
+               if (!val.getType().isIndex()) {
+                 val = self.create<arith::IndexCastOp>(builder.getIndexType(),
+                                                       val);
+               }
+               srcShapeIndex.push_back(val);
+             }
+
+             llvm::SmallVector<Value> srcOffsetIndex;
+             for (auto val : srcOffset) {
+               if (!val.getType().isIndex()) {
+                 val = self.create<arith::IndexCastOp>(builder.getIndexType(),
+                                                       val);
+               }
+               srcOffsetIndex.push_back(val);
+             }
+
+             // Create attributes
+             auto dimAttr = builder.getI32IntegerAttr(dim);
+             auto readShapeAttr = builder.getDenseI32ArrayAttr(readShape);
+
+             // Create the IndexSelectSimdOp
+             // Parameter order must match TritonOps.td definition:
+             // src, index, dim, src_shape, src_offset, read_shape
+             auto indexSelectSimdOp =
+                 builder.create<triton::ascend::IndexSelectSimdOp>(
+                     loc,
+                     retTensorType,  // result type
+                     src,            // src pointer
+                     index,          // index tensor
+                     dimAttr,        // dim attribute
+                     srcShapeIndex,  // src_shape (variadic, index type)
+                     srcOffsetIndex, // src_offset (variadic, index type)
+                     readShapeAttr   // read_shape attribute
+                 );
+
+             return indexSelectSimdOp.getResult();
+           })
+      .def("create_index_put",
+           [](AscendNPUIROpBuilder &self, Value &ptr, Value &index,
+              Value &value, const int32_t dim, const int64_t indexBoundary,
+              std::vector<Value> &endOffset, std::vector<Value> &startOffset,
+              std::vector<Value> &dstStride) -> void {
+             // dim need to be i32 type
+             auto dimI32Ty = self.getBuilder().getI32Type();
+             auto dim_val = self.create<arith::ConstantIntOp>(dimI32Ty, dim);
+             // indexBoundary need to be i64 type
+             auto BoundI64Ty = self.getBuilder().getI64Type();
+             auto bound_val =
+                 self.create<arith::ConstantIntOp>(BoundI64Ty, indexBoundary);
+
+             self.create<triton::ascend::IndexPutOp>(ptr, index, value, dim_val,
+                                                     bound_val, endOffset,
+                                                     startOffset, dstStride);
+           })
+      .def("create_gather_out_to_ub",
+           [](AscendNPUIROpBuilder &self, Value &src, Value &index,
+              const int64_t indexBoundary, const int32_t dim,
+              std::vector<Value> &srcStride, std::vector<Value> &endOffset,
+              std::vector<Value> &startOffset,
+              std::optional<Value> &other) -> Value {
+             auto elemTy =
+                 cast<triton::PointerType>(src.getType()).getPointeeType();
+             auto idxTy = cast<RankedTensorType>(index.getType());
+             auto idxShape = idxTy.getShape();
+             std::vector<int64_t> retShape(idxShape.begin(), idxShape.end());
+             auto resType = RankedTensorType::get(retShape, elemTy);
+
+             // indexBoundary need to be i64 type
+             auto BoundI64Ty = self.getBuilder().getI64Type();
+             auto bound_val =
+                 self.create<arith::ConstantIntOp>(BoundI64Ty, indexBoundary);
+             // dim need to be i32 type
+             auto dimI32Ty = self.getBuilder().getI32Type();
+             auto dim_val = self.create<arith::ConstantIntOp>(dimI32Ty, dim);
+             return self.create<triton::ascend::GatherOutToUbOp>(
+                 resType, src, index, bound_val, dim_val, srcStride, endOffset,
+                 startOffset, other.value_or(Value()));
+           })
+      .def("create_scatter_ub_to_out",
+           [](AscendNPUIROpBuilder &self, Value &ptr, Value &value,
+              Value &index, const int64_t indexBoundary, const int32_t dim,
+              std::vector<Value> &dstStride, std::vector<Value> &endOffset,
+              std::vector<Value> &startOffset) -> void {
+             auto idxTy = cast<RankedTensorType>(index.getType());
+
+             // indexBoundary need to be i64 type
+             auto BoundI64Ty = self.getBuilder().getI64Type();
+             auto bound_val =
+                 self.create<arith::ConstantIntOp>(BoundI64Ty, indexBoundary);
+             // dim need to be i32 type
+             auto dimI32Ty = self.getBuilder().getI32Type();
+             auto dim_val = self.create<arith::ConstantIntOp>(dimI32Ty, dim);
+
+             self.create<triton::ascend::ScatterUbToOutOp>(
+                 ptr, value, index, bound_val, dim_val, dstStride, endOffset,
+                 startOffset);
+           })
+      // conv1d operation
+      .def(
+          "create_conv1d",
+          [](AscendNPUIROpBuilder &self, Value input, Value weight,
+             py::object bias, int64_t stride, int64_t padding_size,
+             int64_t dilation, int64_t groups, Type output_type) -> Value {
+            Value biasValue;
+            if (!bias.is_none()) {
+              biasValue = bias.cast<Value>();
+            } else {
+              biasValue = Value();
+            }
+            auto &builder = self.getBuilder();
+            auto strideAttr = builder.getI64IntegerAttr(stride);
+            auto paddingSizeAttr = builder.getI64IntegerAttr(padding_size);
+            auto dilationAttr = builder.getI64IntegerAttr(dilation);
+            auto groupsAttr = builder.getI64IntegerAttr(groups);
+            auto op = self.create<triton::ascend::Conv1dOp>(
+                output_type, input, weight, biasValue, strideAttr,
+                paddingSizeAttr, dilationAttr, groupsAttr);
+            return op.getResult();
+          },
+          py::arg("input"), py::arg("weight"), py::arg("bias"),
+          py::arg("stride"), py::arg("padding_size"), py::arg("dilation"),
+          py::arg("groups"), py::arg("output_type"))
+      // Add sort
+      .def("create_sort",
+           [](AscendNPUIROpBuilder &self, Value src, int64_t dim,
+              bool descending) -> Value {
+             auto &builder = self.getBuilder();
+             auto loc = self.getLastLoc();
+
+             auto dimAttr = builder.getI64IntegerAttr(dim);
+             auto descendingAttr = builder.getBoolAttr(descending);
+
+             auto op = builder.create<triton::ascend::SortOp>(loc, src, dimAttr,
+                                                              descendingAttr);
+
+             return op->getResult(0);
+           })
+      // Add flip
+      .def("create_flip",
+           [](AscendNPUIROpBuilder &self, Value src, int64_t dim) -> Value {
+             auto &builder = self.getBuilder();
+             auto loc = self.getLastLoc();
+
+             auto dimAttr = builder.getI64IntegerAttr(dim);
+
+             auto op =
+                 builder.create<triton::ascend::FlipOp>(loc, src, dimAttr);
+
+             return op->getResult(0);
+           })
+      .def("create_tanh",
+           [](AscendNPUIROpBuilder &self, Value &val) -> Value {
+             return self.create<math::TanhOp>(val);
+           })
+      // Add an annotation
+      .def("create_annotation",
+           [](AscendNPUIROpBuilder &self, Value &ptr,
+              const std::string &attrKey, Attribute &attrVal) {
+             auto annotationOp = self.create<triton::ascend::AnnotationOp>(ptr);
+             annotationOp->setAttr(self.getBuilder().getStringAttr(attrKey),
+                                   attrVal);
+           })
       .def("get_int_attr",
            [](AscendNPUIROpBuilder &self, int64_t value) -> Attribute {
              return IntegerAttr::get(self.getBuilder().getI64Type(), value);

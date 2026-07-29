@@ -73,7 +73,6 @@ third_party/nvidia/backend/lib/cupti
 
 # Docs
 docs/_build/
-docs/**/_build/
 docs/python-api/generated/
 docs/dialects/
 docs/getting-started/tutorials
@@ -87,7 +86,6 @@ docs/sg_execution_times.rst
 /compile_commands.json
 .vscode
 .vs
-.idea/
 .cursor
 
 # Vim
@@ -95,23 +93,3 @@ docs/sg_execution_times.rst
 
 # macOS
 .DS_Store
-triton_ascend.egg-info/
-
-# cann
-fusion_result.json
-kernel_meta/
-
-# compilation
-/triton/
-build/
-
-# artifact
-dist/
-*.egg-info/
-.eggs/
-docs/zh/python-api/generated/
-
-# Docs PR gate: checker bundle is fetched at run time, not vendored;
-# output.md / result.json are generated reports.
-/output.md
-/result.json

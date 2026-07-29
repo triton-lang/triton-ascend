@@ -246,6 +246,8 @@ bool allResultHasOneUser(Operation *op);
 
 int64_t getBTSizeFromValidBroadcastOp(linalg::BroadcastOp broadcastOp);
 
+int getLoopCarriedArgIndex(Value operand, Block *block);
+
 } // namespace CVPipeline
 } // namespace mlir
 

@@ -87,6 +87,12 @@ Value getViewSource(Value val)
     return val;
 }
 
+bool isFuncEntryArg(Value val)
+{
+    auto arg = llvm::dyn_cast<BlockArgument>(val);
+    return arg && arg.getOwner()->isEntryBlock();
+}
+
 MemoryEffects::EffectInstance remapEffectValue(const MemoryEffects::EffectInstance &effect, Value value)
 {
     if (auto result = dyn_cast<OpResult>(value)) {
@@ -133,8 +139,8 @@ MemoryDependenceGraph::MemoryDependenceGraph(Operation *root, AliasAnalysis &aa)
         return;
     }
     analyzeOp(root);
-    slots.clear();
-    valueToSlot.clear();
+    clearSlotState();
+    aliasCache.clear();
 }
 
 ArrayRef<Operation *> MemoryDependenceGraph::getMemDefs(Operation *op) const
@@ -184,8 +190,8 @@ SmallVector<Operation *> MemoryDependenceGraph::getRealDependency(Operation *fro
     bool backUnknown = unknown;
 
     // Create slots for frontOps, using existing effects logic to process
-    slots.clear();
-    valueToSlot.clear();
+    clearSlotState();
+    aliasCache.clear();
     llvm::SmallSetVector<Operation *, INIT_SIZE> dependencyOps;
     for (Operation *leafOp : leafOps) {
         auto effects = collectOuterEffects(leafOp, unknown, false);
@@ -233,14 +239,16 @@ void MemoryDependenceGraph::analyzeOp(Operation *op)
     SmallVector<Operation *> defs;
     SmallVector<Operation *> preds;
     collectPreds(effects, unknown, defs, preds);
-    LOG_DEBUG("Defs: \n");
-    for (auto def: defs) {
-        LOG_DEBUG(*def << "\n");
-    }
-    LOG_DEBUG("Preds: \n");
-    for (auto pred: preds) {
-        LOG_DEBUG(*pred << "\n");
-    }
+    LLVM_DEBUG({
+        llvm::dbgs() << " [" << DEBUG_TYPE << "] Defs:\n";
+        for (auto def : defs) {
+            llvm::dbgs() << " [" << DEBUG_TYPE << "] " << *def << "\n";
+        }
+        llvm::dbgs() << " [" << DEBUG_TYPE << "] Preds:\n";
+        for (auto pred : preds) {
+            llvm::dbgs() << " [" << DEBUG_TYPE << "] " << *pred << "\n";
+        }
+    });
 
     // Step 3: extract edges from defs and preds to the graph.
     recordEdges(op, defs, preds);
@@ -264,8 +272,7 @@ void MemoryDependenceGraph::analyzeRegionsOf(Operation *op)
         // Snapshot is used for quickly restoration.
         Snapshot snap = takeSnapshot();
         if (isolated) {
-            slots.clear();
-            valueToSlot.clear();
+            clearSlotState();
         }
 
         for (Block &block : region) {
@@ -336,14 +343,24 @@ SmallVector<MemoryEffects::EffectInstance> MemoryDependenceGraph::collectOuterEf
 
 AliasResult MemoryDependenceGraph::queryAlias(Value lhs, Value rhs)
 {
-    auto isFuncEntryArg = [] (const Value &val) -> bool {
-        auto arg = llvm::dyn_cast<BlockArgument>(val);
-        return arg && arg.getOwner()->isEntryBlock();
-    };
-    if (isFuncEntryArg(getViewSource(lhs)) && isFuncEntryArg(getViewSource(rhs))) {
-        return lhs == rhs ? AliasResult::MustAlias : AliasResult::NoAlias;
+    // Memoize the (expensive) alias query. The result depends only on the two
+    // Values and aa.alias is symmetric, so canonicalize the key ordering to let
+    // (lhs, rhs) and (rhs, lhs) share one cache entry.
+    if (rhs.getAsOpaquePointer() < lhs.getAsOpaquePointer()) {
+        std::swap(lhs, rhs);
     }
-    return aa.alias(lhs, rhs);
+    auto key = std::make_pair(lhs, rhs);
+    auto it = aliasCache.find(key);
+    if (it != aliasCache.end()) {
+        return it->second;
+    }
+    // Two distinct function entry args are separate memory; conservative AA
+    // would otherwise report a spurious MayAlias between them.
+    AliasResult result = (isFuncEntryArg(getViewSource(lhs)) && isFuncEntryArg(getViewSource(rhs)))
+                             ? (lhs == rhs ? AliasResult::MustAlias : AliasResult::NoAlias)
+                             : aa.alias(lhs, rhs);
+    aliasCache.try_emplace(key, result);
+    return result;
 }
 
 SmallVector<MemoryDependenceGraph::MemSlot *> MemoryDependenceGraph::findAliasSlots(Value v)
@@ -366,18 +383,23 @@ SmallVector<MemoryDependenceGraph::MemSlot *> MemoryDependenceGraph::findAliasSl
         seen.insert(it->second);
     }
 
+    // Two distinct func entry args never alias (the only aliasing case, an exact
+    // match, is already handled above), so when v is one we skip every
+    // func-entry-arg slot and only alias-query the rest.
+    const bool vIsFuncEntryArg = isFuncEntryArg(getViewSource(v));
     for (auto &slot : slots) {
         MemSlot *raw = slot.get();
+        if (vIsFuncEntryArg && raw->isFuncEntryArgSlot) {
+            continue;
+        }
         if (seen.contains(raw) || !raw->memref) {
             continue;
         }
-        auto aliasResult = queryAlias(raw->memref, v);
-        if (aliasResult != AliasResult::NoAlias) {
+        if (queryAlias(raw->memref, v) != AliasResult::NoAlias) {
             result.push_back(raw);
             seen.insert(raw);
         }
     }
-
     return result;
 }
 
@@ -392,9 +414,16 @@ MemoryDependenceGraph::MemSlot *MemoryDependenceGraph::getOrCreateSlot(Value v)
     }
     auto slot = std::make_unique<MemSlot>(v);
     MemSlot *raw = slot.get();
+    raw->isFuncEntryArgSlot = isFuncEntryArg(getViewSource(v));
     slots.push_back(std::move(slot));
     valueToSlot[v] = raw;
     return raw;
+}
+
+void MemoryDependenceGraph::clearSlotState()
+{
+    slots.clear();
+    valueToSlot.clear();
 }
 
 ArrayRef<MemoryDependenceGraph::MemSlot *> MemoryDependenceGraph::resolveAliasSlots(
@@ -514,8 +543,7 @@ void MemoryDependenceGraph::applyEffects(Operation *op, ArrayRef<MemoryEffects::
                     toRemove.insert(slot.get());
                 }
             } else {
-                auto aliasSlots = findAliasSlots(v);
-                for (auto *slot : aliasSlots) {
+                for (auto *slot : findAliasSlots(v)) {
                     toRemove.insert(slot);
                 }
             }
@@ -545,8 +573,7 @@ MemoryDependenceGraph::Snapshot MemoryDependenceGraph::takeSnapshot() const
 
 void MemoryDependenceGraph::restoreSnapshot(Snapshot &&snap)
 {
-    slots.clear();
-    valueToSlot.clear();
+    clearSlotState();
     slots.reserve(snap.states.size());
     for (auto &s : snap.states) {
         auto slot = std::make_unique<MemSlot>(std::move(s));

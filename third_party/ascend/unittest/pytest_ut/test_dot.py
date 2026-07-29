@@ -162,11 +162,10 @@ def test_dot_2_allow_tf32(restore_npu_hf32_setting, sigtype, B, C, D):
     y = test_common.generate_tensor((C, D), sigtype).npu()
     z_ref = torch_dot_None(x, y).to(torch.float32)
     z = torch.zeros((B, D), dtype=torch.float32).npu()
-    try:
-        triton_dot_2_input_tf32[1, 1, 1](z, x, y, B, C, D)
-    except CompilationError as e:
-        assert "input_precision must be one of" in str(e.args)
-
+    triton_dot_2_allow_tf32[1, 1, 1](z, x, y, B, C, D)
+    with pytest.raises(AssertionError) as exc_info:
+        test_common.validate_cmp(sigtype, z, z_ref)
+    assert "Tensor-likes are not close" in str(exc_info.value)
 
 @pytest.mark.parametrize("B, C, D", testlist2)
 @pytest.mark.parametrize("sigtype", typelist)
@@ -175,10 +174,8 @@ def test_dot_2_input_tf32(restore_npu_hf32_setting, sigtype, B, C, D):
     y = test_common.generate_tensor((C, D), sigtype).npu()
     z_ref = torch_dot_None(x, y).to(torch.float32)
     z = torch.zeros((B, D), dtype=torch.float32).npu()
-    try:
-        triton_dot_2_input_tf32[1, 1, 1](z, x, y, B, C, D)
-    except CompilationError as e:
-        assert "input_precision must be one of" in str(e.args)
+    triton_dot_2_input_tf32[1, 1, 1](z, x, y, B, C, D)
+    test_common.validate_cmp(sigtype, z, z_ref)
 
 
 @pytest.mark.parametrize("B, C, D", testlist2)

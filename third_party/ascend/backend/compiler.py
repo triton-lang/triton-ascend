@@ -530,9 +530,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 multi_buffer_value = False
             elif num_stages is not None and num_stages == 1:
                 multi_buffer_value = False
-            # bishengir-compile defaults to --enable-auto-multi-buffer=false;
-            # only forward when the computed value differs (i.e. True).
-            if multi_buffer_value:
+            # bishengir-compile defaults to --enable-auto-multi-buffer=true;
+            # only forward when the computed value differs (i.e. False).
+            if not multi_buffer_value:
                 _compile_option_list += [
                     f"--enable-auto-multi-buffer={multi_buffer_value}",
                 ]
@@ -806,9 +806,9 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 multi_buffer_value = False
             elif num_stages is not None and num_stages == 1:
                 multi_buffer_value = False
-            # bishengir-compile defaults to --enable-auto-multi-buffer=false;
-            # only forward when the computed value differs (i.e. True).
-            if multi_buffer_value:
+            # bishengir-compile defaults to --enable-auto-multi-buffer=true;
+            # only forward when the computed value differs (i.e. False).
+            if not multi_buffer_value:
                 _compile_option_list.append(f"--enable-auto-multi-buffer={multi_buffer_value}")
 
         enable_ubuf_saving = metadata["enable_ubuf_saving"]
@@ -1051,7 +1051,7 @@ class NPUOptions:
     extern_libs: dict = None
     bisheng_options: str = "-cce-link-aicore-ll-module " + get_libdevice()
 
-    # AscendNPU-IR defaults: --enable-auto-multi-buffer=false (A3 & A5)
+    # AscendNPU-IR defaults: --enable-auto-multi-buffer=true (A3 & A5)
     multibuffer: bool = None
     storage_align: bool = None
     ops_reorder: bool = None

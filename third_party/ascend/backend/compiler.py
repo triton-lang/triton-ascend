@@ -1111,7 +1111,7 @@ class NPUOptions:
     enable_sync_block_lock: bool = False
     # only take effect on the simt-only & simd-simt-mix scenarios
     shared_mem_dynamic_size: int = None
-    # AscendNPU-IR defaults: --enable-bishengir-simt-optimization=900101 (A3 & A5)
+    # AscendNPU-IR defaults: --enable-bishengir-simt-optimization=0 (A3 & A5)
     enable_bishengir_simt_optimization: int = None
     # compile_mode: "simd" (default), "unstructured_in_simt", "simt_only"
     # When compile_mode is provided, it automatically sets other fields
@@ -1133,7 +1133,7 @@ class NPUOptions:
     # AscendNPU-IR defaults: --disable-fma=false (A5 only)
     disable_fma: bool = None
 
-    # AscendNPU-IR defaults: --super-block-factor=1 (A3 & A5); 1 means no super-blocking
+    # AscendNPU-IR defaults: --super-block-factor=0 (A3 & A5); 0 means no super-blocking
     superblock_factor: int = None
 
     def __post_init__(self):
@@ -1181,8 +1181,10 @@ def ttir_to_npubin(mod, metadata, opt):
             _compile_option_list += ["--pure-simt"]
             _compile_option_list += [f"--num-warps={opt.num_warps}"]
             _compile_option_list += [f"--threads-per-warp={opt.warp_size}"]
+            # bishengir-compile defaults to --enable-bishengir-simt-optimization=0;
+            # only forward when explicitly set and differs from 0.
             if opt.enable_bishengir_simt_optimization is not None and \
-                    opt.enable_bishengir_simt_optimization != 900101:
+                    opt.enable_bishengir_simt_optimization != 0:
                 _compile_option_list += [
                     f"--enable-bishengir-simt-optimization={opt.enable_bishengir_simt_optimization}"
                 ]
@@ -1219,9 +1221,9 @@ def ttir_to_npubin(mod, metadata, opt):
             # cap keys off the same env switch, so the two stay in sync.
             if _is_auto_map_parallel_blocks_enabled():
                 _compile_option_list += ["--enable-auto-blockify-loop"]
-                # bishengir-compile defaults to --super-block-factor=1;
-                # only forward when explicitly set and differs from 1.
-                if opt.superblock_factor is not None and opt.superblock_factor != 1:
+                # bishengir-compile defaults to --super-block-factor=0;
+                # only forward when explicitly set and differs from 0.
+                if opt.superblock_factor is not None and opt.superblock_factor != 0:
                     _compile_option_list += [f"--super-block-factor={opt.superblock_factor}"]
 
         npu_compiler_path, env = _get_npucompiler_path()

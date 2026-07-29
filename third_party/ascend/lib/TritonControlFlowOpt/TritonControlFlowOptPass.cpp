@@ -1255,6 +1255,204 @@ static bool isRangeFromZeroByOne(scf::ForOp forOp) {
          isConstantIndex(forOp.getStep(), 1);
 }
 
+static bool canPredicateOneTripLoopBody(scf::ForOp forOp) {
+  for (Operation &op : forOp.getBody()->without_terminator()) {
+    if (op.getNumRegions() != 0)
+      return false;
+    if (isa<triton::LoadOp, triton::StoreOp>(op))
+      continue;
+    if (isa<triton::AddPtrOp, triton::SplatOp, triton::MakeRangeOp,
+            triton::ExpandDimsOp, triton::BroadcastOp, triton::TransOp,
+            triton::ReshapeOp, triton::IntToPtrOp, triton::PtrToIntOp,
+            triton::BitcastOp>(op))
+      continue;
+    if (!isMemoryEffectFree(&op))
+      return false;
+  }
+  return true;
+}
+
+static LogicalResult clonePredicatedBodyOp(Operation &op, IRRewriter &rewriter,
+                                           IRMapping &mapping,
+                                           Value condition) {
+  Location loc = op.getLoc();
+  auto createZero = [&](Type type) -> Value {
+    if (type.isIndex())
+      return rewriter.create<arith::ConstantIndexOp>(loc, 0);
+
+    if (auto tensorType = dyn_cast<RankedTensorType>(type)) {
+      Attribute zero = rewriter.getZeroAttr(tensorType.getElementType());
+      return rewriter.create<arith::ConstantOp>(
+          loc, DenseElementsAttr::get(tensorType, zero));
+    }
+
+    if (isa<IntegerType, FloatType>(type))
+      return rewriter.create<arith::ConstantOp>(loc, type,
+                                                rewriter.getZeroAttr(type));
+
+    return nullptr;
+  };
+  auto addLoopPredicate = [&](Value mask, Type valueType) -> Value {
+    Type maskType = rewriter.getI1Type();
+    if (auto tensorType = dyn_cast<RankedTensorType>(valueType))
+      maskType = RankedTensorType::get(tensorType.getShape(),
+                                       rewriter.getI1Type(),
+                                       tensorType.getEncoding());
+
+    Value predMask = condition;
+    if (condition.getType() != maskType) {
+      auto tensorType = dyn_cast<RankedTensorType>(maskType);
+      if (!tensorType || tensorType.getElementType() != rewriter.getI1Type())
+        return nullptr;
+      predMask = rewriter.create<triton::SplatOp>(loc, tensorType, condition);
+    }
+
+    if (!mask)
+      return predMask;
+    if (mask.getType() != maskType)
+      return nullptr;
+    return rewriter.create<arith::AndIOp>(loc, mask, predMask);
+  };
+
+  if (auto loadOp = dyn_cast<triton::LoadOp>(op)) {
+    Value ptr = mapping.lookupOrDefault(loadOp.getPtr());
+    Value mask = nullptr;
+    if (loadOp.getMask())
+      mask = mapping.lookupOrDefault(loadOp.getMask());
+    Value other = nullptr;
+    if (loadOp.getOther())
+      other = mapping.lookupOrDefault(loadOp.getOther());
+    else
+      other = createZero(loadOp.getType());
+    if (!other)
+      return failure();
+
+    Value predicatedMask = addLoopPredicate(mask, loadOp.getType());
+    if (!predicatedMask)
+      return failure();
+
+    auto newLoad = rewriter.create<triton::LoadOp>(
+        loc, ptr, predicatedMask, other, loadOp.getBoundaryCheck(),
+        loadOp.getPadding(), loadOp.getCache(), loadOp.getEvict(),
+        loadOp.getIsVolatile());
+    for (auto attr : loadOp->getAttrs()) {
+      if (!newLoad->hasAttr(attr.getName()))
+        newLoad->setAttr(attr.getName(), attr.getValue());
+    }
+    mapping.map(loadOp.getResult(), newLoad.getResult());
+    return success();
+  }
+
+  if (auto storeOp = dyn_cast<triton::StoreOp>(op)) {
+    Value ptr = mapping.lookupOrDefault(storeOp.getPtr());
+    Value value = mapping.lookupOrDefault(storeOp.getValue());
+    Value mask = nullptr;
+    if (storeOp.getMask())
+      mask = mapping.lookupOrDefault(storeOp.getMask());
+
+    Value predicatedMask =
+        addLoopPredicate(mask, storeOp.getValue().getType());
+    if (!predicatedMask)
+      return failure();
+
+    auto newStore = rewriter.create<triton::StoreOp>(
+        loc, ptr, value, predicatedMask, storeOp.getBoundaryCheck(),
+        storeOp.getCache(), storeOp.getEvict());
+    for (auto attr : storeOp->getAttrs()) {
+      if (!newStore->hasAttr(attr.getName()))
+        newStore->setAttr(attr.getName(), attr.getValue());
+    }
+    return success();
+  }
+
+  rewriter.clone(op, mapping);
+  return success();
+}
+
+static LogicalResult predicateOneTripForOp(scf::ForOp forOp,
+                                           IRRewriter &rewriter) {
+  auto isOne = [](Value value) {
+    if (auto constIndex = value.getDefiningOp<arith::ConstantIndexOp>())
+      return constIndex.value() == 1;
+
+    APInt intValue;
+    if (matchPattern(value, m_ConstantInt(&intValue)))
+      return intValue.isOne();
+
+    Attribute attr;
+    if (!matchPattern(value, m_Constant(&attr)))
+      return false;
+    auto intAttr = dyn_cast<IntegerAttr>(attr);
+    return intAttr && intAttr.getValue().isOne();
+  };
+
+  auto canSelect = [](Value value) {
+    Type type = value.getType();
+    if (isa<IntegerType, IndexType, FloatType>(type))
+      return true;
+    auto tensorType = dyn_cast<RankedTensorType>(type);
+    return tensorType &&
+           isa<IntegerType, IndexType, FloatType>(
+               tensorType.getElementType());
+  };
+
+  auto minOp = forOp.getUpperBound().getDefiningOp<arith::MinSIOp>();
+  if (!isOne(forOp.getStep()) || !minOp ||
+      (!isOne(minOp.getLhs()) && !isOne(minOp.getRhs())) ||
+      !canPredicateOneTripLoopBody(forOp))
+    return failure();
+
+  auto yieldOp = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
+  if (yieldOp.getNumOperands() != forOp.getInitArgs().size())
+    return failure();
+
+  for (auto [result, initArg] :
+       llvm::zip(forOp.getResults(), forOp.getInitArgs())) {
+    if (result.use_empty())
+      continue;
+    if (initArg.getType() != result.getType() ||
+        !canSelect(result))
+      return failure();
+  }
+
+  OpBuilder::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPoint(forOp);
+  Value condition = rewriter.create<arith::CmpIOp>(
+      forOp.getLoc(), arith::CmpIPredicate::slt, forOp.getLowerBound(),
+      forOp.getUpperBound());
+
+  IRMapping mapping;
+  mapping.map(forOp.getInductionVar(), forOp.getLowerBound());
+  for (auto [iterArg, initArg] :
+       llvm::zip(forOp.getRegionIterArgs(), forOp.getInitArgs()))
+    mapping.map(iterArg, initArg);
+
+  for (Operation &op : forOp.getBody()->without_terminator()) {
+    if (failed(clonePredicatedBodyOp(op, rewriter, mapping, condition)))
+      return failure();
+  }
+
+  SmallVector<Value> replacements;
+  replacements.reserve(forOp.getNumResults());
+  for (auto [idx, result] : llvm::enumerate(forOp.getResults())) {
+    Value initArg = forOp.getInitArgs()[idx];
+    if (result.use_empty()) {
+      replacements.push_back(initArg);
+      continue;
+    }
+
+    Value yielded = mapping.lookupOrDefault(yieldOp.getOperand(idx));
+    if (yielded.getType() != initArg.getType())
+      return failure();
+    replacements.push_back(
+        rewriter.create<arith::SelectOp>(yieldOp.getLoc(), condition, yielded,
+                                         initArg));
+  }
+
+  rewriter.replaceOp(forOp, replacements);
+  return success();
+}
+
 static bool isDefinedOutside(Operation *scope, Value value) {
   if (Operation *defOp = value.getDefiningOp())
     return !scope->isAncestor(defOp);
@@ -2136,6 +2334,17 @@ void TritonControlFlowOptPass::runOnOperation() {
     }
   }
 
+  SmallVector<scf::ForOp> oneTripForOps;
+  moduleOp.walk<WalkOrder::PostOrder>(
+      [&](scf::ForOp forOp) { oneTripForOps.push_back(forOp); });
+
+  IRRewriter rewriter(moduleOp.getContext());
+  for (scf::ForOp forOp : oneTripForOps) {
+    if (forOp->getParentOp() == nullptr)
+      continue;
+    (void)predicateOneTripForOp(forOp, rewriter);
+  }
+
   SmallVector<Operation *> targets;
   moduleOp.walk<WalkOrder::PostOrder>([&](Operation *op) {
     if (isa<scf::ForOp, scf::WhileOp, scf::IfOp>(op))
@@ -2147,7 +2356,6 @@ void TritonControlFlowOptPass::runOnOperation() {
                  << " structured control-flow targets for later decoupling\n";
   });
 
-  IRRewriter rewriter(moduleOp.getContext());
   for (Operation *op : targets) {
     if (op->getParentOp() == nullptr)
       continue;

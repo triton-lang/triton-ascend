@@ -10,6 +10,7 @@
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -290,6 +291,34 @@ scf::YieldOp MainLoop::getLoopYieldOp(Operation *loopOp) {
   if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp))
     return dyn_cast<scf::YieldOp>(whileOp.getAfter().front().getTerminator());
   return {};
+}
+
+int getLoopCarriedArgIndex(Value operand, Block *block) {
+  auto barg = dyn_cast<BlockArgument>(operand);
+  if (!barg || barg.getOwner() != block) {
+    return -1;
+  }
+
+  auto parentOp = block->getParentOp();
+  if (!isa<scf::ForOp, scf::WhileOp>(parentOp)) {
+    return -1;
+  }
+
+  auto *terminator = block->getTerminator();
+  if (!terminator || !isa<scf::YieldOp>(terminator)) {
+    return -1;
+  }
+
+  int numArgs = block->getNumArguments();
+  int numYieldOperands = terminator->getNumOperands();
+  int offset = numArgs - numYieldOperands;
+  int argIdx = barg.getArgNumber() - offset;
+
+  if (argIdx < 0 || argIdx >= numYieldOperands) {
+    return -1;
+  }
+
+  return argIdx;
 }
 
 } // namespace CVPipeline

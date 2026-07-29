@@ -65,3 +65,9 @@ A: PR 的 CI 检查包括：编码安全与规范检查、开源片段检查、�
 **Q: 有没有性能分析工具（profiler）可以使用？**
 
 A: 有集成性能分析工具（profiler），请参考 [算子性能调优方法](./debug_guide/profiling.md)
+
+## 7. UB Overflow 常见问题
+
+**Q: 编译时报 "UB Overflow" 错误，如何解决？**
+
+A: UB Overflow 是 Triton-Ascend 开发中常见的问题，请参考 [UB Overflow 问题排查指南](./debug_guide/ub_overflow.md)

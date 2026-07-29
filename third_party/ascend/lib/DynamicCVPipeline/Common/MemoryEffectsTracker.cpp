@@ -135,6 +135,7 @@ MemoryDependenceGraph::MemoryDependenceGraph(Operation *root, AliasAnalysis &aa)
     analyzeOp(root);
     slots.clear();
     valueToSlot.clear();
+    lastBarrier = nullptr;
 }
 
 ArrayRef<Operation *> MemoryDependenceGraph::getMemDefs(Operation *op) const
@@ -186,6 +187,7 @@ SmallVector<Operation *> MemoryDependenceGraph::getRealDependency(Operation *fro
     // Create slots for frontOps, using existing effects logic to process
     slots.clear();
     valueToSlot.clear();
+    lastBarrier = nullptr;
     llvm::SmallSetVector<Operation *, INIT_SIZE> dependencyOps;
     for (Operation *leafOp : leafOps) {
         auto effects = collectOuterEffects(leafOp, unknown, false);
@@ -266,6 +268,7 @@ void MemoryDependenceGraph::analyzeRegionsOf(Operation *op)
         if (isolated) {
             slots.clear();
             valueToSlot.clear();
+            lastBarrier = nullptr;
         }
 
         for (Block &block : region) {
@@ -304,7 +307,22 @@ SmallVector<MemoryEffects::EffectInstance> MemoryDependenceGraph::collectOuterEf
 
     std::optional<SmallVector<MemoryEffects::EffectInstance>> raw;
     if (recursive) {
-        raw = getEffectsRecursively(op);
+        SmallVector<Operation *> leafOps;
+        collectLeafOps(op, leafOps);
+        raw.emplace();
+        for (Operation *leaf : leafOps) {
+            bool leafUnknown = false;
+            SmallVector<MemoryEffects::EffectInstance> leafEffects =
+                collectOuterEffects(leaf, leafUnknown, /*recursive=*/false);
+            if (leafUnknown) {
+                if (leaf != op) {
+                    LOG_DEBUG("Op " << *op << " is unknown due to nested op " << *leaf << "\n");
+                }
+                unknown = true;
+                return {};
+            }
+            raw->append(leafEffects.begin(), leafEffects.end());
+        }
     } else if (auto effectInterface = dyn_cast<MemoryEffectOpInterface>(op)) {
         raw.emplace();
         effectInterface.getEffects(*raw);
@@ -450,6 +468,10 @@ void MemoryDependenceGraph::collectPreds(ArrayRef<MemoryEffects::EffectInstance>
             for (MemSlot *s : resolveAliasSlots(v, cache)) {
                 addFromSlot(s, true);
             }
+        } else if (isa<MemoryEffects::Allocate>(e.getEffect())) {
+            if (lastBarrier) {
+                preds.insert(lastBarrier);
+            }
         }
     }
 
@@ -465,6 +487,7 @@ void MemoryDependenceGraph::applyEffects(Operation *op, ArrayRef<MemoryEffects::
             slot->lastWriter = op;
             slot->pendingReads.clear();
         }
+        lastBarrier = op;
         return;
     }
 
@@ -536,6 +559,7 @@ void MemoryDependenceGraph::applyEffects(Operation *op, ArrayRef<MemoryEffects::
 MemoryDependenceGraph::Snapshot MemoryDependenceGraph::takeSnapshot() const
 {
     Snapshot snap;
+    snap.lastBarrier = lastBarrier;
     snap.states.reserve(slots.size());
     for (const auto &slot : slots) {
         snap.states.push_back(*slot);
@@ -545,6 +569,7 @@ MemoryDependenceGraph::Snapshot MemoryDependenceGraph::takeSnapshot() const
 
 void MemoryDependenceGraph::restoreSnapshot(Snapshot &&snap)
 {
+    lastBarrier = snap.lastBarrier;
     slots.clear();
     valueToSlot.clear();
     slots.reserve(snap.states.size());

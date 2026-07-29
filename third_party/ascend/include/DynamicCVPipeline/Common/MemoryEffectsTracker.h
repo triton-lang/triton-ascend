@@ -58,6 +58,7 @@ private:
 
     struct Snapshot {
         SmallVector<MemSlot> states;
+        Operation *lastBarrier = nullptr;
     };
 
     void analyzeOp(Operation *op);
@@ -95,6 +96,11 @@ private:
 
     SmallVector<std::unique_ptr<MemSlot>> slots;
     DenseMap<Value, MemSlot *> valueToSlot;
+
+    // Most recent unknown (barrier) op in program order within the current
+    // scope. A newly allocated buffer is ordered after it so that allocations
+    // do not move across an unknown op (see collectPreds / applyEffects).
+    Operation *lastBarrier = nullptr;
 };
 
 } // namespace CVPipeline

@@ -530,9 +530,12 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 multi_buffer_value = False
             elif num_stages is not None and num_stages == 1:
                 multi_buffer_value = False
-            _compile_option_list += [
-                f"--enable-auto-multi-buffer={multi_buffer_value}",
-            ]
+            # bishengir-compile defaults to --enable-auto-multi-buffer=false;
+            # only forward when the computed value differs (i.e. True).
+            if multi_buffer_value:
+                _compile_option_list += [
+                    f"--enable-auto-multi-buffer={multi_buffer_value}",
+                ]
 
         storage_align = metadata["storage_align"]
         if storage_align is not None:
@@ -565,12 +568,18 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             ]
 
         disable_tightly_coupled_buffer_reuse = metadata["disable_tightly_coupled_buffer_reuse"]
-        if disable_tightly_coupled_buffer_reuse:
+        # bishengir-compile defaults to --disable-tightly-coupled-buffer-reuse=false;
+        # only forward when explicitly set to True.
+        if disable_tightly_coupled_buffer_reuse is not None and disable_tightly_coupled_buffer_reuse:
             _compile_option_list += ["--disable-tightly-coupled-buffer-reuse"]
 
-        _compile_option_list += [
-            f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
-        ]
+        # bishengir-compile defaults to --enable-auto-bind-sub-block=true;
+        # only forward when the value differs (i.e. False).
+        _auto_bind_sub_block = get_auto_bind_sub_block_option(metadata)
+        if _auto_bind_sub_block is not None and not _auto_bind_sub_block:
+            _compile_option_list += [
+                f"--enable-auto-bind-sub-block={_auto_bind_sub_block}",
+            ]
         npu_utils = NPUUtils()
         if npu_utils.has_device_limit():
             _compile_option_list += [
@@ -711,15 +720,21 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
 
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
         vf_merge_level = metadata["vf_merge_level"]
-        if vf_merge_level is not None:
+        # bishengir-compile defaults to --enable-vf-merge-level=1;
+        # only forward when explicitly set and differs from 1.
+        if vf_merge_level is not None and vf_merge_level != 1:
             cmd_list += [f"--enable-vf-merge-level={vf_merge_level}"]
 
         hfusion_enable_multiple_consumer_fusion = metadata["hfusion_enable_multiple_consumer_fusion"]
-        if hfusion_enable_multiple_consumer_fusion:
+        # bishengir-compile defaults to --hfusion-enable-multiple-consumer-fusion=false;
+        # only forward when explicitly set to True.
+        if hfusion_enable_multiple_consumer_fusion is not None and hfusion_enable_multiple_consumer_fusion:
             cmd_list += [f"--hfusion-enable-multiple-consumer-fusion={hfusion_enable_multiple_consumer_fusion}"]
 
         enable_cross_if_fusion = metadata["enable_cross_if_fusion"]
-        if enable_cross_if_fusion:
+        # bishengir-compile defaults to --hfusion-enable-cross-if-fusion=false (A5 only);
+        # only forward when explicitly set to True.
+        if enable_cross_if_fusion is not None and enable_cross_if_fusion:
             cmd_list += [f"--hfusion-enable-cross-if-fusion={enable_cross_if_fusion}"]
 
         plan_memory_strategy = metadata["plan_memory_strategy"]
@@ -791,7 +806,10 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 multi_buffer_value = False
             elif num_stages is not None and num_stages == 1:
                 multi_buffer_value = False
-            _compile_option_list.append(f"--enable-auto-multi-buffer={multi_buffer_value}")
+            # bishengir-compile defaults to --enable-auto-multi-buffer=false;
+            # only forward when the computed value differs (i.e. True).
+            if multi_buffer_value:
+                _compile_option_list.append(f"--enable-auto-multi-buffer={multi_buffer_value}")
 
         enable_ubuf_saving = metadata["enable_ubuf_saving"]
         if enable_ubuf_saving is not None:
@@ -823,9 +841,13 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 f"--enable-preload={enable_preload}",
             ]
 
-        _compile_option_list += [
-            f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
-        ]
+        # bishengir-compile defaults to --enable-auto-bind-sub-block=true;
+        # only forward when the value differs (i.e. False).
+        _auto_bind_sub_block = get_auto_bind_sub_block_option(metadata)
+        if _auto_bind_sub_block is not None and not _auto_bind_sub_block:
+            _compile_option_list += [
+                f"--enable-auto-bind-sub-block={_auto_bind_sub_block}",
+            ]
 
         if _is_ascend_sanitizer_enabled():
             _compile_option_list += ["--enable-sanitizer=true"]
@@ -1017,18 +1039,20 @@ class NPUOptions:
     backend_name: str = 'cann'
     instrumentation_mode: str = ""
     allow_fp8e4nv: bool = False
-    auto_tile_and_bind_subblock: bool = True
-    vf_merge_level: int = 0
+    # AscendNPU-IR defaults: --enable-auto-bind-sub-block=true (A3 & A5)
+    auto_tile_and_bind_subblock: bool = None
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")
     deprecated_fp8_dtypes: Tuple[str] = ()
-    vf_merge_level: int = 1
+    # AscendNPU-IR defaults: --enable-vf-merge-level=1 (A3 & A5)
+    vf_merge_level: int = None
     default_dot_input_precision: str = "ieee"
     allowed_dot_input_precisions: Tuple[str] = ("ieee", "hf32")
     max_num_imprecise_acc_default: int = 0
     extern_libs: dict = None
     bisheng_options: str = "-cce-link-aicore-ll-module " + get_libdevice()
 
-    multibuffer: bool = True
+    # AscendNPU-IR defaults: --enable-auto-multi-buffer=false (A3 & A5)
+    multibuffer: bool = None
     storage_align: bool = None
     ops_reorder: bool = None
     code_motion: bool = None
@@ -1036,7 +1060,8 @@ class NPUOptions:
     enable_ubuf_saving: bool = None
     enable_preload: bool = None
     enable_auto_bind_sub_block: bool = None
-    disable_tightly_coupled_buffer_reuse: bool = False
+    # AscendNPU-IR defaults: --disable-tightly-coupled-buffer-reuse=false (A3 & A5)
+    disable_tightly_coupled_buffer_reuse: bool = None
     enable_select_analysis: bool = True
     enable_hivm_auto_cv_balance: bool = None
     sync_solver: bool = None
@@ -1068,8 +1093,10 @@ class NPUOptions:
     enable_ub_refine_opt: bool = False
     # Multi-cache insertion optimization: avoid redundant tensor compute in the middle of an `if`.
     enable_buffer_insert_optimization: bool = True
-    hfusion_enable_multiple_consumer_fusion: bool = False
-    enable_cross_if_fusion: bool = False
+    # AscendNPU-IR defaults: --hfusion-enable-multiple-consumer-fusion=false (A3 & A5)
+    hfusion_enable_multiple_consumer_fusion: bool = None
+    # AscendNPU-IR defaults: --hfusion-enable-cross-if-fusion=false (A5 only)
+    enable_cross_if_fusion: bool = None
     has_auto_blockify_blacklist_op: Optional[bool] = None
     intra_cache_num: int = None
     inter_cache_num: int = None
@@ -1084,9 +1111,8 @@ class NPUOptions:
     enable_sync_block_lock: bool = False
     # only take effect on the simt-only & simd-simt-mix scenarios
     shared_mem_dynamic_size: int = None
-    # enable_bishengir_simt_optimization is passed as
-    # -enable-bishengir-simt-optimization flag to bishengir-compile.
-    enable_bishengir_simt_optimization: int = 000
+    # AscendNPU-IR defaults: --enable-bishengir-simt-optimization=900101 (A3 & A5)
+    enable_bishengir_simt_optimization: int = None
     # compile_mode: "simd" (default), "unstructured_in_simt", "simt_only"
     # When compile_mode is provided, it automatically sets other fields
     compile_mode: str = "unstructured_in_simt"
@@ -1101,14 +1127,14 @@ class NPUOptions:
     # If False, the compilation flow is:
     #   Linalg IR → LLIR → Binary (via bishengir-compile directly)
     use_bytecode: bool = True
-    # take effect on the reorder instruction pattern for SIMT. The pattern is disabled by default.
-    enable_simt_reorder_instruction: bool = False
+    # AscendNPU-IR defaults: --enable-simt-reorder-instruction=false (A5 only)
+    enable_simt_reorder_instruction: bool = None
     enable_costmodel_backend: bool = False
-    # disable simt fma optimization to get high precision
-    disable_fma: bool = False
+    # AscendNPU-IR defaults: --disable-fma=false (A5 only)
+    disable_fma: bool = None
 
-    # superblocking factor
-    superblock_factor: int = 0
+    # AscendNPU-IR defaults: --super-block-factor=1 (A3 & A5); 1 means no super-blocking
+    superblock_factor: int = None
 
     def __post_init__(self):
         from triton.backends.ascend import _apply_ascend_patch
@@ -1155,7 +1181,8 @@ def ttir_to_npubin(mod, metadata, opt):
             _compile_option_list += ["--pure-simt"]
             _compile_option_list += [f"--num-warps={opt.num_warps}"]
             _compile_option_list += [f"--threads-per-warp={opt.warp_size}"]
-            if opt.enable_bishengir_simt_optimization != 000:
+            if opt.enable_bishengir_simt_optimization is not None and \
+                    opt.enable_bishengir_simt_optimization != 900101:
                 _compile_option_list += [
                     f"--enable-bishengir-simt-optimization={opt.enable_bishengir_simt_optimization}"
                 ]
@@ -1163,9 +1190,13 @@ def ttir_to_npubin(mod, metadata, opt):
                 _compile_option_list += [f"--simt-stack-limit={opt.simt_stack_limit}"]
             if opt.shared_mem_dynamic_size is not None:
                 _compile_option_list += [f"--shared-mem-dynamic-size={opt.shared_mem_dynamic_size}"]
-            if opt.enable_simt_reorder_instruction:
+            # bishengir-compile defaults to --enable-simt-reorder-instruction=false;
+            # only forward when explicitly set to True.
+            if opt.enable_simt_reorder_instruction is not None and opt.enable_simt_reorder_instruction:
                 _compile_option_list += ["--enable-simt-reorder-instruction=true"]
-            if opt.disable_fma:
+            # bishengir-compile defaults to --disable-fma=false;
+            # only forward when explicitly set to True.
+            if opt.disable_fma is not None and opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
 
             # Enable SIMT auto-blockify if user opted in, or if the env var is
@@ -1188,7 +1219,9 @@ def ttir_to_npubin(mod, metadata, opt):
             # cap keys off the same env switch, so the two stay in sync.
             if _is_auto_map_parallel_blocks_enabled():
                 _compile_option_list += ["--enable-auto-blockify-loop"]
-                if opt.superblock_factor > 0:
+                # bishengir-compile defaults to --super-block-factor=1;
+                # only forward when explicitly set and differs from 1.
+                if opt.superblock_factor is not None and opt.superblock_factor != 1:
                     _compile_option_list += [f"--super-block-factor={opt.superblock_factor}"]
 
         npu_compiler_path, env = _get_npucompiler_path()

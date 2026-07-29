@@ -239,6 +239,7 @@ std::optional<int> getTightlyCoupledBufferId(Value allocVal);
 // `bufferization.to_tensor`'s source. Returns the input unchanged when no
 // such cast is found.
 Value traceBackToMemrefAlloc(Value v);
+int getLoopCarriedArgIndex(Value operand, Block *block);
 
 } // namespace CVPipeline
 } // namespace mlir

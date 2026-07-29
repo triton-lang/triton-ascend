@@ -669,7 +669,7 @@ static bool needsLoopCarryPreserve(Operation *owner, unsigned slotIndex, StringR
 static bool isProducedByForeignScope(Value operand, StringRef scopeType)
 {
     Operation *producer = operand.getDefiningOp();
-    if (!producer->hasAttr(CVPipeline::kCoreType)) {
+    if (!producer || !producer->hasAttr(CVPipeline::kCoreType)) {
         return false;
     }
 

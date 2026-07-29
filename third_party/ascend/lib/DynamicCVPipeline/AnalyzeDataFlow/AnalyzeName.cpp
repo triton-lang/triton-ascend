@@ -40,7 +40,9 @@ using namespace triton;
 
 namespace {
 
-static constexpr llvm::StringLiteral interceptrFunc[] {""};
+static constexpr llvm::StringLiteral interceptrFunc[] {
+    "kernel_sdpa_bwd_kv"
+};
 
 static LogicalResult verifyFuncNames(ModuleOp module)
 {

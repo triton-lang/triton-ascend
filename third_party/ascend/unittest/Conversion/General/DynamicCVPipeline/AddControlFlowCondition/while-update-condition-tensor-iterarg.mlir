@@ -14,22 +14,26 @@
 // CHECK: scf.while
 // CHECK-SAME: %[[TINIT]]
 
-// Consumer if=5: eq 1 (and-ed with cross/counter), then -1.
+// Consumer if=5: after cross sgt, eq 1 is and-ed into cond; then -1 inside if.
+// IR order: c1 (cross) ; load ; sgt ; c1 (tensor) ; eq ; andi ; andi ; scf.if
+// Bind ONE only after sgt so it is the tensor eq constant, not the cross-core one.
+// CHECK: arith.cmpi sgt
 // CHECK: %[[ONE:.*]] = arith.constant 1 : i32
-// CHECK: %[[EQ1:.*]] = arith.cmpi eq, %{{.*}}, %[[ONE]] : i32
+// CHECK: arith.cmpi eq, %{{.*}}, %[[ONE]] : i32
 // CHECK: arith.andi
-// CHECK: scf.if
-// CHECK: %[[ONE_D:.*]] = arith.constant 1 : i32
-// CHECK: arith.subi %{{.*}}, %[[ONE_D]] : i32
+// CHECK: %[[COND5:.*]] = arith.andi
+// CHECK: scf.if %[[COND5]]
+// CHECK: arith.subi
 // CHECK: } {{.*}}ssbuffer.if = 5
 
-// Producer if=6: eq 0 (and-ed with cross/counter), then +1.
+// Producer if=6: after cross slt, eq 0 is and-ed into cond; then +1 inside if.
+// CHECK: arith.cmpi slt
 // CHECK: %[[ZERO:.*]] = arith.constant 0 : i32
-// CHECK: %[[EQ0:.*]] = arith.cmpi eq, %{{.*}}, %[[ZERO]] : i32
+// CHECK: arith.cmpi eq, %{{.*}}, %[[ZERO]] : i32
 // CHECK: arith.andi
-// CHECK: scf.if
-// CHECK: %[[ONE_I:.*]] = arith.constant 1 : i32
-// CHECK: arith.addi %{{.*}}, %[[ONE_I]] : i32
+// CHECK: %[[COND6:.*]] = arith.andi
+// CHECK: scf.if %[[COND6]]
+// CHECK: arith.addi
 // CHECK: } {{.*}}ssbuffer.if = 6
 
 // CHECK: scf.yield
@@ -88,9 +92,12 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         hivm.hir.sync_block_wait {ssbuffer.block_id = 0 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
         %t0 = tensor.empty() {ssbuffer.block_id = 0 : i32} : tensor<128x128xf32>
         hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, ssbuffer.block_id = 0 : i32, ssbuffer.transfer_id = 1 : i32, ssbuffer.crossCoreDeps = [0 : i32, 1 : i32]} ins(%t0 : tensor<128x128xf32>) outs(%alloc_ub : memref<128x128xf32, #hivm.address_space<ub>>)
-        %conv = hivm.hir.convert_layout %alloc_c output_shape [128, 128] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 0 : i32, ssbuffer.transfer_id = 0 : i32, ssbuffer.crossCoreDeps = [0 : i32, 0 : i32]} : (memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) -> memref<128x128xf16, #hivm.address_space<cbuf>>
         %next0 = arith.addi %arg14, %c16_i32 {ssbuffer.block_id = 0 : i32} : i32
-        scf.yield %next0 : i32
+
+        hivm.hir.sync_block_wait {ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
+        %conv = hivm.hir.convert_layout %alloc_c output_shape [128, 128] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32, ssbuffer.crossCoreDeps = [0 : i32, 0 : i32]} : (memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) -> memref<128x128xf16, #hivm.address_space<cbuf>>
+        %next1 = arith.addi %arg14, %c16_i32 {ssbuffer.block_id = 1 : i32} : i32
+        scf.yield %next1 : i32
       } attributes {Undefined, ssbuffer.main_loop = 0 : i32}
       scope.return
     } {hivm.tcore_type = #hivm.tcore_type<CUBE>}

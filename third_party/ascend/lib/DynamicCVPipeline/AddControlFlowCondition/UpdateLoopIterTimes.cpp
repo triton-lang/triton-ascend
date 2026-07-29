@@ -27,6 +27,7 @@
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "llvm/ADT/DenseMap.h"
@@ -101,11 +102,21 @@ static scf::ForOp getOtherScopeMainloop(ModuleOp module, bool currentIsCube,
     // id
     scopeOp.walk([&](Operation *op) {
       if (op->hasAttr(CVPipeline::kMainLoop)) {
-        auto targetForOp = dyn_cast<scf::ForOp>(op);
-        if (!targetForOp) {
-          LDBG("do not support other mainloop op except ForOp");
+        // Support both ForOp and WhileOp for mainloop
+        bool isValidLoop = isa<scf::ForOp>(op) || isa<scf::WhileOp>(op);
+        if (!isValidLoop) {
+          LDBG("mainloop must be ForOp or WhileOp!");
           return WalkResult::advance();
         }
+
+        // Only cast to ForOp for compatibility with current interface
+        // WhileOp will be skipped in later steps
+        auto targetForOp = dyn_cast<scf::ForOp>(op);
+        if (!targetForOp) {
+          // WhileOp case: skip for now, will be handled separately
+          return WalkResult::advance();
+        }
+
         auto targetMainLoopId =
             targetForOp->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
         if (targetMainLoopId && targetMainLoopId.getInt() == mainLoopId) {
@@ -836,7 +847,137 @@ scf::ForOp UpdateLoopIterTimesPass::extendForOpIterationCount(
   return newForOp;
 }
 
-// step4: Replace loop counter by if blocks' counter
+// Update WhileOp condition based on ifblock conditions
+// Uses info->whileBlockArgMap: {WhileOp: {block_id: {new_arg_idx:
+// old_arg_idx}}} For each IfOp in WhileOp, get its block_id Get new args and
+// mapping from info->whileBlockArgMap Copy entire beforeRegion and replace old
+// args with new args Combine all ifblock conditions with OR operation
+int UpdateLoopIterTimesPass::UpdateWhileLoopCondition(
+    DenseMap<int, SmallVector<Operation *>> &mainLoopIdMap) {
+  int ret = 0;
+
+  for (auto &entry : mainLoopIdMap) {
+    for (Operation *loopOp : entry.second) {
+      if (!isa<scf::WhileOp>(loopOp)) {
+        continue;
+      }
+
+      auto whileOp = dyn_cast<scf::WhileOp>(loopOp);
+      if (!info->whileBlockArgMap.count(whileOp)) {
+        LDBG("WhileOp not found in whileBlockArgMap!");
+        return -1;
+      }
+      auto &blockArgMap = info->whileBlockArgMap[whileOp];
+      if (blockArgMap.empty()) {
+        LDBG("blockArgMap is empty for WhileOp!");
+        return -1;
+      }
+
+      // Get the 'before' region which contains the condition
+      Region &beforeRegion = whileOp.getBefore();
+      Block &beforeBlock = beforeRegion.front();
+      Operation *terminator = beforeBlock.getTerminator();
+      if (!terminator || !isa<scf::ConditionOp>(terminator)) {
+        LDBG("Before block has no valid ConditionOp terminator!");
+        return -1;
+      }
+      auto conditionOp = dyn_cast<scf::ConditionOp>(terminator);
+      Value originalCondition = conditionOp.getCondition();
+      OpBuilder builder(conditionOp);
+      Location loc = whileOp.getLoc();
+
+      // Collect all operations to clone
+      SmallVector<Operation *> opsToClone;
+      for (Operation &op : beforeBlock.without_terminator()) {
+        opsToClone.push_back(&op);
+      }
+
+      // Traverse all IfOps with ssbuffer.if and
+      // build condition for each IfOp directly
+      Value combinedCondition;
+      whileOp.walk([&](scf::IfOp ifOp) {
+        if (!ifOp->hasAttr(CVPipeline::kIf)) {
+          return WalkResult::advance();
+        }
+
+        auto blockIdAttr = ifOp->getAttrOfType<IntegerAttr>(CVPipeline::kIf);
+        if (!blockIdAttr) {
+          ret = -1;
+          return WalkResult::interrupt();
+        }
+        int blockId = blockIdAttr.getInt();
+        if (!blockArgMap.count(blockId)) {
+          ret = -1;
+          LDBG("blockId " << blockId << " not found in blockArgMap!");
+          return WalkResult::interrupt();
+        }
+
+        auto &argMap = blockArgMap[blockId]; // {new_arg_idx: old_arg_idx}
+
+        // Step 1: Build arg replacement mapping
+        IRMapping mapper;
+        for (auto &argEntry : argMap) {
+          int newArgIdx = argEntry.first;
+          int oldArgIdx = argEntry.second;
+
+          BlockArgument oldArg = beforeBlock.getArgument(oldArgIdx);
+          BlockArgument newArg = beforeBlock.getArgument(newArgIdx);
+
+          mapper.map(oldArg, newArg);
+        }
+
+        // Step 2: Clone entire beforeRegion
+        // Set insertion point before conditionOp
+        builder.setInsertionPoint(conditionOp);
+
+        // Clone all operations
+        Value newCondition;
+        for (Operation *op : opsToClone) {
+          Operation *clonedOp = builder.clone(*op, mapper);
+
+          // If this op defines the original condition, get the corresponding
+          // result
+          if (op->getResultTypes().size() > 0) {
+            for (unsigned i = 0; i < op->getNumResults(); ++i) {
+              if (op->getResult(i) == originalCondition) {
+                newCondition = clonedOp->getResult(i);
+                break;
+              }
+            }
+          }
+        }
+
+        if (!newCondition) {
+          ret = -1;
+          LDBG("Failed to create new condition for blockId: " << blockId);
+          return WalkResult::interrupt();
+        }
+
+        // Step 3: Combine with existing conditions using OR
+        if (!combinedCondition) {
+          combinedCondition = newCondition;
+        } else {
+          combinedCondition = builder.create<arith::OrIOp>(
+              loc, combinedCondition, newCondition);
+        }
+
+        return WalkResult::advance();
+      });
+
+      // Step 4: Update the condition in the before block
+      if (combinedCondition) {
+        conditionOp.getConditionMutable().assign(combinedCondition);
+        LDBG("Updated WhileOp condition for: " << whileOp);
+      } else {
+        LDBG("Failed to generate valid condition!");
+        return -1;
+      }
+    }
+  }
+
+  return ret;
+}
+
 // Traverse each mainloop, find ifOp with ssbuffer.if attribute inside,
 // and replace the mainloop's induction variable with the counter in cntArgs
 int UpdateLoopIterTimesPass::replaceForOpCounterInIfOps() {
@@ -844,6 +985,12 @@ int UpdateLoopIterTimesPass::replaceForOpCounterInIfOps() {
   // Traverse all mainloops in the module
   getOperation().walk([&](Operation *op) {
     if (op->hasAttr(CVPipeline::kMainLoop)) {
+      // Skip WhileOp, only process ForOp in this step
+      if (isa<scf::WhileOp>(op)) {
+        LDBG("Skip WhileOp in replaceForOpCounterInIfOps.");
+        return WalkResult::advance();
+      }
+
       auto forOp = dyn_cast<scf::ForOp>(op);
       if (!forOp) {
         ret = -1;
@@ -903,21 +1050,21 @@ int UpdateLoopIterTimesPass::GetMainLoopIdToLoopOpMap(
     // Walk for loops inside the scope
     scopeOp.walk([&](Operation *op) {
       if (op->hasAttr(CVPipeline::kMainLoop)) {
-        auto forOp = dyn_cast<scf::ForOp>(op);
-        if (!forOp) {
+        // Support both ForOp and WhileOp for mainloop
+        bool isValidLoop = isa<scf::ForOp>(op) || isa<scf::WhileOp>(op);
+        if (!isValidLoop) {
           ret = -1;
-          LDBG("do not surpport other loop op temprarily!");
+          LDBG("mainloop must be ForOp or WhileOp!");
           return mlir::WalkResult::interrupt();
         }
 
-        auto mainLoopId =
-            forOp->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
+        auto mainLoopId = op->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
         if (mainLoopId) {
           int id = mainLoopId.getInt();
           if (isCube) {
-            cmap[id].push_back(forOp.getOperation());
+            cmap[id].push_back(op);
           } else if (isVector) {
-            vmap[id].push_back(forOp.getOperation());
+            vmap[id].push_back(op);
           }
         }
       }
@@ -936,6 +1083,10 @@ int UpdateLoopIterTimesPass::ComputeMainLoopTimes(
     DenseMap<Operation *, IterationTimesInfo> &infoMap) {
   for (auto &entry : loopMap) {
     for (Operation *loopOp : entry.second) {
+      if (isa<scf::WhileOp>(loopOp)) {
+        continue;
+      }
+
       scf::ForOp forOp = dyn_cast<scf::ForOp>(loopOp);
       if (!forOp) {
         LDBG("currently only support forOp!");
@@ -992,6 +1143,10 @@ int UpdateLoopIterTimesPass::collectForOpsAndUpdateMax(
     DenseMap<Operation *, IterationTimesInfo> &infoMap) {
   if (map.count(id)) {
     for (Operation *loopOp : map[id]) {
+      if (!isa<scf::ForOp>(loopOp)) {
+        continue;
+      }
+
       allForOps.push_back(loopOp);
       if (infoMap.count(loopOp)) {
         IterationTimesInfo &iterInfo = infoMap[loopOp];
@@ -1045,13 +1200,13 @@ int UpdateLoopIterTimesPass::UpdateForLoopIteration(
     if (ret != 0)
       return -1;
 
-    if (maxIfCount == 0) {
-      LDBG("no ifblock in mainloop!");
-      return -1;
-    }
-
     // Update all loops with this id using the same max values
     for (Operation *loopOp : sameIdForOps) {
+      if (maxIfCount == 0) {
+        LDBG("no ifblock in mainloop!");
+        return -1;
+      }
+
       scf::ForOp oldForOp = dyn_cast<scf::ForOp>(loopOp);
       if (!oldForOp) {
         LDBG("do not surpport other loop op except forOp!");
@@ -1131,6 +1286,18 @@ void UpdateLoopIterTimesPass::runOnOperation() {
   ret = replaceForOpCounterInIfOps();
   if (ret != 0) {
     LDBG("replaceForOpCounterInIfOps Failed!");
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+  }
+
+  // step5: Update WhileOp condition based on ifblock conditions
+  ret = UpdateWhileLoopCondition(cmap);
+  if (ret != 0) {
+    LDBG("UpdateWhileLoopCondition from cube Failed!");
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+  }
+  ret = UpdateWhileLoopCondition(vmap);
+  if (ret != 0) {
+    LDBG("UpdateWhileLoopCondition from vector Failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
   }
 

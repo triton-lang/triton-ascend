@@ -168,6 +168,12 @@ createForOpAndMigrateBody(scf::ForOp oldForOp, int numExtraArgs,
   Block *oldBlock = oldForOp.getBody();
   Block *newBlock = newForOp.getBody();
 
+  // create<scf::ForOp> inserts a default terminator. Erase it before moving
+  // ops; otherwise moveBefore(block, end()) appends *after* the terminator and
+  // leaves a malformed block. Destroying that IR triggers free(): invalid size.
+  if (!newBlock->empty())
+    newBlock->getTerminator()->erase();
+
   if (failed(replaceBlockArguments(oldBlock, newBlock))) {
     newForOp.erase();
     return scf::ForOp();
@@ -246,13 +252,26 @@ LogicalResult extendForOpWithExtraArgs(scf::ForOp oldForOp,
     extraInitArgs.push_back(builder.create<arith::ConstantOp>(
         oldForOp.getLoc(), builder.getI32Type(), builder.getI32IntegerAttr(1)));
 
+  // Capture before migration so we can remap stored iterArg Values.
+  Block *oldBody = oldForOp.getBody();
+  unsigned baseIdx = oldForOp.getNumRegionIterArgs();
+
   scf::ForOp newForOp =
       createForOpAndMigrateBody(oldForOp, totalExtraArgs, extraInitArgs);
   if (!newForOp) {
     return failure();
   }
 
-  unsigned baseIdx = oldForOp.getNumRegionIterArgs();
+  // depsVecCopy still holds Values from the old for body; remap onto the new
+  // for before the old for is erased.
+  for (auto &entry : depsVecCopy) {
+    if (auto blockArg = dyn_cast<BlockArgument>(entry.iterArg)) {
+      if (blockArg.getOwner() == oldBody)
+        entry.iterArg =
+            newForOp.getBody()->getArgument(blockArg.getArgNumber());
+    }
+  }
+
   if (numBlockCounters > 0) {
     SmallVector<int> indices;
     for (int j = 0; j < numBlockCounters; ++j)
@@ -518,17 +537,10 @@ LogicalResult UpdateForOpsPass::analyzeTensorIterArgDependencies(
           continue;
         }
 
-        bool isProducer = false;
-        if (isa<scf::YieldOp>(user)) {
-          auto yieldOp = cast<scf::YieldOp>(user);
-          Operation *parentOp = yieldOp->getParentOp();
-          while (parentOp && parentOp != ifOp.getOperation()) {
-            parentOp = parentOp->getParentOp();
-          }
-          if (parentOp == ifOp.getOperation()) {
-            isProducer = true;
-          }
-        }
+        // Only the direct terminator of this ssbuffer.if is a producer.
+        // Nested if/for/while yields that forward iter_arg are consumers.
+        bool isProducer = isa<scf::YieldOp>(user) &&
+                          user->getParentOp() == ifOp.getOperation();
 
         // Check and update status of ifOp
         if (isProducer) {

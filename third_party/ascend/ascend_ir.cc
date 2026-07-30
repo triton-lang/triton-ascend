@@ -1109,15 +1109,15 @@ void init_ascend_ir(py::module &&m) {
                    self.create<hivm::FixpipeOp>(
                            mlir::TypeRange{dstValue.getType()}, src, dstValue,
                            dma_mode_attr, dual_dst_mode_attr,
-                           pre_quant_mode_attr, pre_relu_mode_attr,
-                           channel_split)
+                           /*sub_block_idx=*/nullptr, pre_quant_mode_attr,
+                           pre_relu_mode_attr, channel_split)
                        .getResult(0));
 
              } else {
-               self.create<hivm::FixpipeOp>(mlir::TypeRange{}, src, dstValue,
-                                            dma_mode_attr, dual_dst_mode_attr,
-                                            pre_quant_mode_attr,
-                                            pre_relu_mode_attr, channel_split);
+               self.create<hivm::FixpipeOp>(
+                   mlir::TypeRange{}, src, dstValue, dma_mode_attr,
+                   dual_dst_mode_attr, /*sub_block_idx=*/nullptr,
+                   pre_quant_mode_attr, pre_relu_mode_attr, channel_split);
                return py::none();
              }
            })

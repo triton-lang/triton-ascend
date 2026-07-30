@@ -270,6 +270,13 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             # Keep the existing default-on buffer insertion behavior.
             ascend.passes.ttir.set_enable_buffer_insert_optimization(mod)
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
+        elif metadata.get("enable_cv_split_scheduling") and compile_on_910_95:
+            metadata["multibuffer"] = False
+            metadata["set_workspace_multibuffer"] = 0
+            metadata["enable_mixed_cv"] = True
+            metadata["disable_auto_inject_block_sync"] = True
+            metadata["has_auto_blockify_blacklist_op"] = True
+            ascend.passes.ttir.add_cv_split_scheduling(pm, compile_on_910_95, metadata["cv_split_unroll_factor"])
 
         if _enable_msdebug():
             ascend.passes.ttir.add_normalize_debug_line_locations(pm)
@@ -1135,6 +1142,11 @@ class NPUOptions:
     enable_vf_fusion: bool = None
     enable_dynamic_cv_pipeline: bool = None
     enable_cube_block_merge: bool = False
+    enable_ub_refine_opt: bool = False
+    # Multi-cache insertion optimization: avoid redundant tensor compute in the middle of an `if`.
+    enable_buffer_insert_optimization: bool = True
+    enable_cv_split_scheduling: bool = False
+    cv_split_unroll_factor: int = 2
     hfusion_enable_multiple_consumer_fusion: bool = None
     buf_slot_num_of_veccore: int = None
     buf_slot_num_of_crosscore: int = None

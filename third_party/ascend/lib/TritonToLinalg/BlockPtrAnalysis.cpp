@@ -2352,7 +2352,7 @@ BlockDataParser::rewriteTerminator(
     }
 
     Value v = *stateValue;
-    auto reintCastOp = v.getDefiningOp<memref::ReinterpretCastOp>();
+    auto reintCastOp = v.template getDefiningOp<memref::ReinterpretCastOp>();
 
     BlockData state;
     if (reintCastOp) {
@@ -2739,7 +2739,7 @@ BlockDataParser::rewriteLoopOp(LoopLikeOpInterface op,
                isa<UnrankedMemRefType>(mappedV.getType())) &&
              "cannot take pointer block argument as init arg for for loop");
       if (auto reinterpretCastOp =
-              mappedV.getDefiningOp<memref::ReinterpretCastOp>()) {
+              mappedV.template getDefiningOp<memref::ReinterpretCastOp>()) {
         // Record memref::ReinterpretCastOp
         reintCastOp = reinterpretCastOp;
         newInitArgs.push_back(mappedV);

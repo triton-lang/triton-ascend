@@ -11,6 +11,7 @@ add_subdirectory(TritonToUnstructure)
 add_subdirectory(TritonToLLVM)
 add_subdirectory(TritonToStructured)
 add_subdirectory(DynamicCVPipeline)
+add_subdirectory(CVSplitScheduling)
 
 if(TRITON_ENABLE_COVERAGE_HITEST)
   set(_instrument_targets

@@ -172,8 +172,7 @@ static bool checkAllProgramIdNonOverlap(ModuleOp module) {
 
 LogicalResult isDiscreteMask(Operation *op, Value mask,
                              PatternRewriter &rewriter) {
-  if (!mask ||
-      op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName)) {
+  if (!mask || op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName)) {
     return failure();
   }
 

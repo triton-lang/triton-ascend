@@ -634,9 +634,8 @@ static Value buildBoundaryMask(Location loc, PatternRewriter &rewriter,
   return combined;
 }
 
-static DenseI64ArrayAttr
-getAllUnstructuredDims(RankedTensorType tensorType,
-                       PatternRewriter &rewriter) {
+static DenseI64ArrayAttr getAllUnstructuredDims(RankedTensorType tensorType,
+                                                PatternRewriter &rewriter) {
   SmallVector<int64_t> dimensions;
   dimensions.reserve(tensorType.getRank());
   for (int64_t dimension = 0; dimension < tensorType.getRank(); ++dimension)
@@ -794,13 +793,12 @@ static LogicalResult tryRewriteAddPtrLoad(triton::LoadOp op,
   offsetTensor =
       addScalarOffsetToTensor(offsetTensor, scalarOffset, loc, rewriter);
 
-  auto unstructuredLoad =
-      rewriter.create<triton::ascend::UnstructuredLoadOp>(
-          loc, resultType, src, offsetTensor,
-          getAllUnstructuredDims(resultType, rewriter), op.getMask(),
-          op.getOther(), op.getCacheAttr(), op.getEvictAttr(),
-          rewriter.getBoolAttr(
-              ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op)));
+  auto unstructuredLoad = rewriter.create<triton::ascend::UnstructuredLoadOp>(
+      loc, resultType, src, offsetTensor,
+      getAllUnstructuredDims(resultType, rewriter), op.getMask(), op.getOther(),
+      op.getCacheAttr(), op.getEvictAttr(),
+      rewriter.getBoolAttr(
+          ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op)));
   unstructuredLoad->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
                             UnitAttr::get(rewriter.getContext()));
 
@@ -1011,13 +1009,12 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
   }
 
   // ---- Emit ascend.unstructured_load ----
-  auto unstructuredLoad =
-      rewriter.create<triton::ascend::UnstructuredLoadOp>(
-          loc, resultType, src, offsetTensor,
-          getAllUnstructuredDims(resultType, rewriter), mask, other,
-          op.getCacheAttr(), op.getEvictAttr(),
-          rewriter.getBoolAttr(
-              ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op)));
+  auto unstructuredLoad = rewriter.create<triton::ascend::UnstructuredLoadOp>(
+      loc, resultType, src, offsetTensor,
+      getAllUnstructuredDims(resultType, rewriter), mask, other,
+      op.getCacheAttr(), op.getEvictAttr(),
+      rewriter.getBoolAttr(
+          ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op)));
   unstructuredLoad->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
                             UnitAttr::get(rewriter.getContext()));
 
@@ -1150,11 +1147,10 @@ static LogicalResult tryRewriteAddPtrStore(triton::StoreOp op,
   offsetTensor =
       addScalarOffsetToTensor(offsetTensor, scalarOffset, loc, rewriter);
 
-  auto unstructuredStore =
-      rewriter.create<triton::ascend::UnstructuredStoreOp>(
-          loc, src, offsetTensor, op.getValue(),
-          getAllUnstructuredDims(valueType, rewriter), op.getMask(),
-          op.getCacheAttr(), op.getEvictAttr());
+  auto unstructuredStore = rewriter.create<triton::ascend::UnstructuredStoreOp>(
+      loc, src, offsetTensor, op.getValue(),
+      getAllUnstructuredDims(valueType, rewriter), op.getMask(),
+      op.getCacheAttr(), op.getEvictAttr());
   unstructuredStore->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
                              UnitAttr::get(rewriter.getContext()));
 
@@ -1324,11 +1320,10 @@ static LogicalResult tryRewriteBlockPtrStore(triton::StoreOp op,
                 : boundaryMask;
   }
 
-  auto unstructuredStore =
-      rewriter.create<triton::ascend::UnstructuredStoreOp>(
-          loc, src, offsetTensor, op.getValue(),
-          getAllUnstructuredDims(valueType, rewriter), mask,
-          op.getCacheAttr(), op.getEvictAttr());
+  auto unstructuredStore = rewriter.create<triton::ascend::UnstructuredStoreOp>(
+      loc, src, offsetTensor, op.getValue(),
+      getAllUnstructuredDims(valueType, rewriter), mask, op.getCacheAttr(),
+      op.getEvictAttr());
   unstructuredStore->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
                              UnitAttr::get(rewriter.getContext()));
 

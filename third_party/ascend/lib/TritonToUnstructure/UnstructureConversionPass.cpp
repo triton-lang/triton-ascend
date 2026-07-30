@@ -159,34 +159,29 @@ LogicalResult tryRewriteUnstructuredLoadStoreFastPath(
     // Keep IntToPtr bases visible through AddPtr so the type converter can
     // materialize the expected memref for the template ABI.
     Value base = srcPtr;
-    if (auto intToPtrOp =
-            srcPtr.template getDefiningOp<triton::IntToPtrOp>()) {
+    if (auto intToPtrOp = srcPtr.template getDefiningOp<triton::IntToPtrOp>()) {
       auto zeroOffset = rewriter.create<arith::ConstantOp>(
           loc, rewriter.getZeroAttr(intToPtrOp.getSrc().getType()));
       base = rewriter.create<triton::AddPtrOp>(loc, srcPtr.getType(), srcPtr,
                                                zeroOffset);
     }
-    auto unstructuredLoad =
-        rewriter.create<triton::ascend::UnstructuredLoadOp>(
-            loc, op.getType(), base, ptrOffset,
-            rewriter.getDenseI64ArrayAttr(unstructuredDims), op.getMask(),
-            op.getOther(), op.getCacheAttr(), op.getEvictAttr(),
-            rewriter.getBoolAttr(
-                ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(),
-                                                             op)));
+    auto unstructuredLoad = rewriter.create<triton::ascend::UnstructuredLoadOp>(
+        loc, op.getType(), base, ptrOffset,
+        rewriter.getDenseI64ArrayAttr(unstructuredDims), op.getMask(),
+        op.getOther(), op.getCacheAttr(), op.getEvictAttr(),
+        rewriter.getBoolAttr(
+            ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op)));
     rewriter.replaceOp(op, unstructuredLoad.getResult());
     return success();
   } else if constexpr (std::is_same_v<MemAccOpTy, triton::StoreOp>) {
     // For bool stores, unwrap ptr<i1> -> ptr<i8> bitcasts. Keeping ptr<i1>
     // lets the type converter map the destination to memref<?xi8>.
     Value base = srcPtr;
-    if (auto bitcastOp =
-            srcPtr.template getDefiningOp<triton::BitcastOp>()) {
+    if (auto bitcastOp = srcPtr.template getDefiningOp<triton::BitcastOp>()) {
       auto srcPtrTy =
           dyn_cast<triton::PointerType>(bitcastOp.getSrc().getType());
       auto dstPtrTy = dyn_cast<triton::PointerType>(bitcastOp.getType());
-      if (srcPtrTy && dstPtrTy &&
-          srcPtrTy.getPointeeType().isInteger(1) &&
+      if (srcPtrTy && dstPtrTy && srcPtrTy.getPointeeType().isInteger(1) &&
           dstPtrTy.getPointeeType().isInteger(8)) {
         base = bitcastOp.getSrc();
       }
@@ -539,13 +534,11 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
                 std::is_same_v<MemAccOpTy, triton::StoreOp>) {
     bool useUnstructuredOp =
         compileOn91095Flag &&
-        ((unstructureCompileModeFlag ==
-              triton::ascend::CompileMode::SimdSimt &&
+        ((unstructureCompileModeFlag == triton::ascend::CompileMode::SimdSimt &&
           (ptrOffsetInfo.hasUnstructuredDim() || mixCompileDiscreteMask)) ||
          (unstructureCompileModeFlag ==
               triton::ascend::CompileMode::SimdSimtTemplate &&
-          simtTemplateLoadStoreFastPathEnabled &&
-          rankWithinSimtTemplateLimit));
+          simtTemplateLoadStoreFastPathEnabled && rankWithinSimtTemplateLimit));
     if (useUnstructuredOp) {
       auto unstructuredDims = ptrOffsetInfo.getUnstructuredDims();
       if (succeeded(tryRewriteUnstructuredLoadStoreFastPath(

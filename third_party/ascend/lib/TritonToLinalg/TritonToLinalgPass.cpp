@@ -183,8 +183,8 @@ static bool isSIMTOp(Operation *op) {
   return isa<triton::ascend::IndexPutOp, triton::ascend::GatherOutToUbOp,
              triton::ascend::ScatterUbToOutOp,
              triton::ascend::UnstructuredLoadOp,
-             triton::ascend::UnstructuredStoreOp,
-             triton::ascend::StrideLoadOp, triton::ascend::StrideStoreOp>(op);
+             triton::ascend::UnstructuredStoreOp, triton::ascend::StrideLoadOp,
+             triton::ascend::StrideStoreOp>(op);
 }
 
 TritonTypeConverter::TritonTypeConverter() {

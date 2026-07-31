@@ -7,6 +7,8 @@ add_triton_library(TritonToUnstructure
 
   DEPENDS
   TritonToUnstructureConversionPassIncGen
+  # Headers pull in HIVM.h; wait for tablegen on clean parallel builds.
+  BiShengIRHIVMEnumsIncGen
 
   LINK_LIBS PUBLIC
   MLIRArithDialect

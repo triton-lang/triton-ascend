@@ -8,22 +8,22 @@ Before performance optimization, you need to obtain accurate performance data, u
 
 The msProf performance analysis tool is used to collect and analyze key performance metrics of operators running on Ascend AI Processors. You can efficiently locate software and hardware performance bottlenecks of operators based on the output performance data, thereby enhancing the overall efficiency of operator performance analysis.
 
-- Note: The msProf tool depends on the msopprof executable file in the CANN package. The interface functions in this file are the same as those in msprof op. This file is provided by the CANN package and does not need to be installed separately. For details about common msProf commands, see [Common msProf Commands](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/ODtools/Operatordevelopmenttools/atlasopdev_16_0082.html).
+- Note: The msProf tool depends on the msprof executable file in the CANN package. The interface functions in this file are the same as those in msprof op. This file is provided by the CANN package and does not need to be installed separately. For details about common msProf commands, see [Common msProf Commands](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/ODtools/Operatordevelopmenttools/atlasopdev_16_0082.html).
 
-The following command is an example of collecting performance data of an operator on a board. You can flexibly combine and configure parameters as required. In the example, **--output** is an optional parameter for specifying the path for storing the collected performance data. **--kernel-name** is an optional parameter for specifying the performance data of a single kernel to be collected. If you want to collect the performance data of all operators, you do not need to specify **--kernel-name**. **$HOME/projects/test_op.py** is the executable script of the operator.
+The following command is an example of collecting performance data of an operator on a board. You can flexibly combine and configure parameters as required. In the example, **--output** is an optional parameter for specifying the path for storing the collected performance data. **--kernel-name** is an optional parameter for specifying the performance data of a single kernel to be collected. If it is not specified, only the first operator scheduled during the program execution is collected. **$HOME/projects/test_op.py** is the executable script of the operator.
 
-```python
+```bash
 msprof op --kernel-name=target_kernel_name --output=$HOME/projects/output python3 $HOME/projects/test_op.py
 ```
 
-The following uses the [03-layer-norm.py](../../../third_party/ascend/tutorials/03-layer-norm.py) test case as an example (the generated data file is saved in the current path when **if --output** is not specified):
+The following uses the [05-layer-norm.py](./../../../third_party/ascend/tutorials/05-layer-norm.py) test case as an example (the generated data file is saved in the current path when **if --output** is not specified):
 
-```python
+```bash
 msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
-```  
+```
 
 - Note: For details about the result data of all the following collection items, see [op_summary (Operator Details)](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/Profiling/atlasprofiling_16_0067.html) in the *CANN Performance Optimization Tool User Guide*.
-**Figure 1** PipeUtilization.csv (ratios of time taken by compute units and MTEs) 
+**Figure 1** PipeUtilization.csv (ratios of time taken by compute units and MTEs)
 ![alt text](../figures/time_consumed.png)
 
 ### Operator Simulation Pipeline Diagram
@@ -31,16 +31,16 @@ msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
 The operator optimization tool msProf supports profile data collection and automatic parsing in a simulation environment. For details about how to obtain the simulation pipeline diagram by using the msProf tool, see [Pipeline diagram](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/optool/atlasopdev_16_0087.html).
 The command for generating the operator simulation pipeline diagram is similar to that for collecting operator board performance data. The preceding `03-layer-norm.py` is used as an example. `--soc-version` is used to specify the hardware version of the current machine. You can enter `npu-smi info` in the terminal to view the hardware version.
 
-```python
+```bash
 # Path of the source simulator
-export LD_LIBRARY_PATH=/root/CANN/Install_CANN/Ascend/ascend_toolkit/latest/tools/simulator/{soc-version}/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$HOME/CANN/Install_CANN/Ascend/ascend_toolkit/latest/tools/simulator/{soc-version}/lib:$LD_LIBRARY_PATH
 # Collecting the operator simulation pipeline diagram
 msprof op simulator --kernel-name=_layer_norm_fwd_fused --soc-version={soc-version} python3 03-layer-norm.py
 ```
 
 - Note: In the preceding example, `soc-version=Ascend910B3`.
 
-|Soc-Version|
+| Ascend 910 series | Ascend 310 / 310P series | Ascend 310B series |
 | :---: | :---: | :---: |
 |Ascend910A|Ascend310|Ascend310B1|
 |Ascend910B|Ascend310P1|Ascend310B2|
@@ -54,25 +54,43 @@ The following two files save the obtained performance data:
 
 - trace.json
 - visualize_data.bin
-  
+
 The trace.json file supports the following two visualized display modes:
 
-- Chrome browser 
-  Enter the `chrome://tracing` address in the address box of the Chrome browser, drag the instruction pipeline file (**trace.json**) generated by msprof op simulator to the blank area, and press the shortcut keys on the keyboard (**W**: zoom in; **S**: zoom out; **A**: move left; **D**: move right) to view the file. 
-  **Figure 2** Timeline page on Chrome 
+- Chrome browser
+  Enter the `chrome://tracing` address in the address box of the Chrome browser, drag the instruction pipeline file (**trace.json**) generated by msprof op simulator to the blank area, and press the shortcut keys on the keyboard (**W**: zoom in; **S**: zoom out; **A**: move left; **D**: move right) to view the file.
+  **Figure 2** Timeline page on Chrome
 ![alt text](../figures/trace_json_with_chrome.png)
 
-- [MindStudio Insight](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/GUI_baseddevelopmenttool/msascendinsightug/Insight_userguide_0005.html) visualized display 
+- [MindStudio Insight](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/GUI_baseddevelopmenttool/msascendinsightug/Insight_userguide_0005.html) visualized display
 MindStudio Insight provides the running status of instructions on the Ascend AI Processor in a sequence diagram. Users can identify the sequence optimization points of micro instructions by analyzing the instruction details, instruction execution time, call stack of the code associated with the instruction, and synchronization lines between instructions and pipelines in the sequence diagram.
-  **Figure 3** Timeline page on MindStudio Insight 
+  **Figure 3** Timeline page on MindStudio Insight
   ![alt text](../figures/trace_json_with_insight.png)
 
 The **visualize_data.bin** file can be visualized on MindStudio Insight.
 
-- In addition to collecting performance data like **trace.json**, **visualize_data.bin** also provides an instruction association dashboard corresponding to the source code (for example, **03-layer-norm.py**). 
+- In addition to collecting performance data like **trace.json**, **visualize_data.bin** also provides an instruction association dashboard corresponding to the source code (for example, **03-layer-norm.py**).
   **Figure 4** MindStudio Insight-visualize_data.bin instruction association
   - Note: For details about the result data of the following collection items, see [Operator Optimization](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/GUI_baseddevelopmenttool/msascendinsightug/Insight_userguide_0068.html) in *MindStudio Insight*.
   ![alt text](../figures/visualize_data_with_insight.png)
+
+#### Building a Debug Version of a Triton Kernel for Simulation Pipeline Profiling
+
+By default, the simulation pipeline files (`trace.json` / `visualize_data.bin`) contain only instruction addresses and instruction names. To use the instruction-correlation panel in MindStudio Insight — i.e. to view the Triton/Python source line and call stack associated with each instruction (Method 4 in [Locating Bottlenecks](#locating-bottlenecks)) — the kernel must be built with `debug_line` debug information. When this is disabled, `msprof op simulator` emits the following warnings and the code-correlation files are empty:
+
+```text
+[WARN] Kernel missed debug_line information. If you need code call stack, please recompile kernel with -g option
+[WARN] Code call stack is empty
+[WARN] Lack of code info of files
+```
+
+A Triton kernel does not need a manual `-g`. The triton-ascend backend controls whether `--enable-debug-info=true` is appended to the `bishengir-compile` command via the environment variable `TRITON_DISABLE_LINE_INFO`. Note that triton-ascend defaults this to `true` (i.e. line-number information is **off** by default, the opposite of upstream Triton, which enables it by default), so it must be set to `false` explicitly:
+
+```bash
+export TRITON_DISABLE_LINE_INFO=false
+```
+
+To verify it took effect: the `[DEBUG] cmd_list:` line in the log should now include `--enable-debug-info=true`, and the `Kernel missed debug_line information` warning should disappear. After that, import `visualize_data.bin` into MindStudio Insight to view the source line and call stack associated with each instruction in the instruction timeline.
 
 ## Analyzing Performance Data
 
@@ -99,7 +117,7 @@ View the **op_summary_\*.csv** file parsed by board profiling to analyze the pip
 
     In ideal cases, the utilization rate of each pipeline should be 100%. Any pipeline falling short of this target represents room for improvement. The preceding figure shows the data obtained from an AI processor. In the first scenario of the Vector operator _layer_norm_fwd_fused, the Vector pipeline utilization **aiv_vec_ratio** is less than 10%, indicating that the computing power is not fully utilized. The Scalar pipeline utilization **aiv_scalar_ratio** is about 60%, indicating that Scalar is the longest pipeline. \
     When Scalar is the longest pipeline, analyze whether complex operations are performed on scalar values in the operator source code. The SIMD microarchitecture of Ascend is more suitable for multi-data parallel computing. Another possibility is that the Triton software stack degrades vector computing to scalar computing because some instructions do not support specific data types on the hardware. Optimization should involve both pipeline and scalar optimization methods. For details, see method 3 to view the simulation pipeline diagram and method 4 to view the code hotspots for further analysis. \
-    For more general cases such as MTE2 data transfer and actual scenarios: The shapes of the three input matrices are (128,128), (128,1), and (128,1), respectively, and the data type is float16. The current algorithm uses the two-pass method. Therefore, X is moved in for three times, and W and B are moved in for one time. The total amount of data to be transferred can be calculated accordingly. The theoretical value calculated based on the method described in the [Theoretical Parameters](#theoretical-parameters) section is sizeof(float16) *(128* 128 * 3 + 128 + 128)/1.8 TB/s ≈ 0.1991 μs (calculated based on 1 TB = 10<sup>12</sup> Byte), which is greatly different from the actual performance data aiv_mte2_time. Analysis shows the total input size is smaller than the Unified Buffer (UB) capacity (192 KB for the A2 model). Therefore, if the MTE2 time is excessive, the basic block obtained through tiling computation may be too small, triggering redundant transfer instructions. In this case, pipeline optimization and tiling optimization are required, you can refer to method 3 to view the simulation pipeline diagram and analyze each pipeline for further analysis.
+    For more general cases such as MTE2 data transfer and actual scenarios: The shapes of the three input matrices are (128,128), (128,1), and (128,1), respectively, and the data type is float16. The current algorithm uses the two-pass method. Therefore, X is moved in for three times, and W and B are moved in for one time. The total amount of data to be transferred can be calculated accordingly. The theoretical value calculated based on the method described in the [Theoretical Parameters](#theoretical-parameters) section is sizeof(float16) *(128* 128 * 3 + 128 + 128)/1.8 TB/s ≈ 0.055 μs (calculated based on 1 TB = 10<sup>12</sup> Bytes), which is greatly different from the actual performance data aiv_mte2_time. Analysis shows the total input size is smaller than the Unified Buffer (UB) capacity (192 KB for the A2 model). Therefore, if the MTE2 time is excessive, the basic block obtained through tiling computation may be too small, triggering redundant transfer instructions. In this case, pipeline optimization and tiling optimization are required, you can refer to method 3 to view the simulation pipeline diagram and analyze each pipeline for further analysis.
 
 - Method 2: Use board profiling to analyze the tiling.
 The AI processor used in the previous example has 48 vector cores. The _layer_norm_fwd_fused operator is a pure vector operator. However, in some scenarios, too many blocks (Block Dim > 48) are delivered, causing excessive host scheduling overhead. In this case, the next step is to optimize the tiling.
@@ -111,7 +129,7 @@ The AI processor used in the previous example has 48 vector cores. The _layer_no
 - Method 4: Analyze the code hotspot.
 ![analyse_data_code_mapping](../figures/performance_analysis_analyse_data_code_mapping.png) \
     The preceding figure shows the data obtained from an AI processor simulator. The load interface on the left corresponds to a group of assembly instructions on the right (only instructions related to code lines are displayed and sorted in descending order by cycle count). The high proportion of scalar instructions is inconsistent with the scenario where the MTE proportion should be high when load is used as the memory access interface. Therefore, the main optimization direction is scalar calculation.
-  
+
 ### Example: i64/i32 Comparison Failing to Vectorize on NPU, Leading to Scalar Fallback
 
 [Description] The i64/i32 comparison (cmp) cannot enable Vector on the NPU, causing them to degenerate into scalar computation and reducing efficiency. The i64/i32 cmp is converted to fp32 to accelerate vector operations by using vec_cast and vec_cmp.
@@ -131,14 +149,14 @@ def npu_vector_cmp_kernel(
     stride_out_row,    # [Scalar] stride of row in Out, normally equals to stride_x_row
     M,                 # [Scalar] row number
     N,                 # [Scalar] col number
-    eps,               # [Scalar] epsilon to aviod division by zeros
+    eps,               # [Scalar] epsilon to avoid division by zeros
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr
 ):
     """
     an example of layernorm to checkout Vector Cmp
     Out = ((X - E[X]) / sqrt(V[X] + eps)) on dim -1
-    
+
     just for easy case, we assume that:
     1. BLOCK_N >= X.shape(-1), group_n = 0 only
     2. BLOCK_M = 1, group_m = range(0, row, 1)
@@ -159,8 +177,8 @@ def npu_vector_cmp_kernel(
     # calculate mean & rstd
     mean = tl.sum(x, axis=0) / N
     tl.store(Mean + row, mean)
-    
--   xbar = tl.where(cols < N, x - mean, 0.0) # N is a scalar value.
+
+-   xbar = tl.where(cols < N, x - mean, 0.0) # N is the column count.
 
 +   # change cols(i64) into cols_cmp(f32) to enable vector processing
 +   cols_cmp = cols.to(tl.float32)

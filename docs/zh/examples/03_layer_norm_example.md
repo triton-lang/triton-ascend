@@ -68,11 +68,11 @@ def _layer_norm_fwd_fused(
 def layer_norm(x, weight, bias, eps=1e-5):
     # 分配与输入相同形状和数据类型的输出张量
     y = torch.empty_like(x)
-    
+
     # 将输入 x 展平成二维形状 [-1, feature_dim] 以便处理最后一个维度
     x_arg = x.reshape(-1, x.shape[-1])
     M, N = x_arg.shape
-    
+
     mean = torch.empty((M, ), dtype=torch.float32, device=x.device)
     rstd = torch.empty((M, ), dtype=torch.float32, device=x.device)
 
@@ -83,7 +83,7 @@ def layer_norm(x, weight, bias, eps=1e-5):
         x_arg, y, weight, bias, mean, rstd,  # 输入输出及中间量
         x_arg.stride(0), N, eps,
         BLOCK_SIZE=BLOCK_SIZE)
-    # 返回归一化后的输出结果    
+    # 返回归一化后的输出结果
     return y
 
 # 前向传播时调用层归一化
@@ -98,7 +98,7 @@ def _layer_norm(M, N, dtype, eps=1e-5, device='npu'):
     x.requires_grad_(True)
     # 前向传播
     y_tri = layer_norm(x, weight, bias, eps)
-    y_ref = torch.nn.functional.layer_norm(x, weight, bias, eps).to(dtype)
+    y_ref = torch.nn.functional.layer_norm(x, w_shape, weight, bias, eps).to(dtype)
     # 判断是否近似
     assert torch.allclose(y_tri, y_ref, atol=1e-2, rtol=0)
     print(f"y_tri: {y_tri}")

@@ -1,9 +1,11 @@
 # Autotune
 
-In this section, we will demonstrate how to use the autotune method of Triton to automatically select the optimal kernel configuration parameters. Currently, Triton-Ascend autotune is fully compatible with the usage of the autotune in the community (visit <https://triton-lang.org/main/python-api/generated/triton.autotune.html>). That is, users need to manually pass some defined **triton.Config** to autotune, and then autotune selects the optimal kernel configuration through benchmarking. In addition, Triton-Ascend provides the **advanced autotune** usage. Users need to provide information such as the split and tiling axes of the current Triton kernel. In this case, autotune automatically generates some possible optimal kernel configurations based on the actual input size, and then selects the optimal configuration through benchmarking or profiling.
+If you want the recommended Triton-Ascend autotune usage, the meaning of `configs=[]`, and the scope of automatic tiling, read the [Triton-Ascend Autotune Guide](../autotune_guide.md) first.
+
+In this section, we show how to use Triton autotune to select the best kernel configuration automatically. Triton-Ascend is fully compatible with the community autotune interface (see <https://triton-lang.org/main/python-api/generated/triton.autotune.html>): users can provide a set of predefined `triton.Config` objects, and autotune selects the best one through benchmarking. Triton-Ascend also provides an advanced mode in which autotune can infer split and tiling axes from kernel semantics, generate promising candidate configurations automatically, and then select the best configuration through benchmarking or profiling.
 
 Note:
-Currently, Triton-Ascend autotune supports block size and multibuffer (compiler optimization). However, the **num_warps** and **num_stages** parameters are not supported due to hardware architecture differences. In the future, more adjustable autotune options will be added.
+Currently, Triton-Ascend autotune supports block size and multibuffer (a compiler optimization). However, the **num_warps** and **num_stages** parameters are not supported because of hardware-architecture differences. More tunable autotune options will be added in the future.
 
 ## Community Autotune Usage Example
 
@@ -82,7 +84,7 @@ if __name__ == "__main__":
 #     The axis name must be in the axis name set of the parameter `key`. Do not prefix the axis name with 'r'.
 #     This parameter can be left empty. If both split_params and tiling_params are empty, autotune is not performed.
 #     The split axis can be determined based on the kernel splitting statement `tl.program_id()`.
-# In the dictionary consisting of "tiling_params (Dict[str, str]): axis name: argument name", the argument is an tunable parameter of the tiling axis, for example, 'XBLOCK_SUB'.
+# In the dictionary consisting of "tiling_params (Dict[str, str]): axis name: argument name", the argument is a tunable parameter of the tiling axis, for example, 'XBLOCK_SUB'.
 #     The axis name must be in the axis name set of the parameter `key`. Do not prefix the axis name with 'r'.
 #     This parameter can be left empty. If both split_params and tiling_params are empty, autotune is not performed.
 #     The tiling axis can be determined based on the `tl.arange()` expression.
@@ -128,7 +130,7 @@ def add_kernel(
 Note:
 
 1. By default, Triton-Ascend uses the benchmark mode to obtain the on-chip computation time. After the environment variable is set by running `export TRITON_BENCH_METHOD="npu"`, the on-chip computation time of each kernel is obtained by using `torch_npu.profiler.profile`. For some Triton kernels that compute fast, such as small-shape operators, this method can obtain more accurate computation time than the default method. However, this will significantly increase the overall autotune time. Therefore, exercise caution when enabling this method.
-2. Currently, this advanced usage is mainly used for vector operators and is not supported by cube operators. For more advanced usage examples, see [Advanced Autotune Cases](https://gitcode.com/Ascend/triton-ascend/tree/master/ascend/examples/autotune_cases).
+2. Currently, this advanced usage is mainly used for vector operators and is not supported by cube operators. For more advanced usage examples, see [Advanced Autotune Cases](https://github.com/triton-lang/triton-ascend/tree/main/third_party/ascend/unittest/autotune_ut/).
 
 ### Automatic Parameter Parsing
 
@@ -137,10 +139,10 @@ Before automatically parsing parameters, the system obtains the parameters that 
 ```Python
 @triton.jit
 def kernel_func(
-    outputptr, 
-    input_ptr, 
-    n_rows, 
-    n_cols, 
+    outputptr,
+    input_ptr,
+    n_rows,
+    n_cols,
     BLOCK_SIZE: tl.constexpr,
     XBLOCK: tl.constexpr,
     XBLOCK_SUB: tl.constexpr,
@@ -159,11 +161,11 @@ The split axis parameters are parsed based on the kernel splitting statement `tl
 
 Finally, the split axis corresponding to the current parameters is identified through mask comparison and the `key` passed in `autotune`.
 
-Notes: 1. The split axis parameter must be multiplied by `tl.program_id()`. 2. The mask comparison must be performed, and the `key` corresponding to the split axis or the min function with the `key` as the parameter must be used as the right value. Otherwise, the axis cannot be identified and the parameter parsing will fail.3. The identified axis parameters are limited to the candidate parameter list. This ensures that only the parameters that can be dynamically tuned by autotune are considered. 
+Notes: 1. The split axis parameter must be multiplied by `tl.program_id()`. 2. The mask comparison must be performed, and the `key` corresponding to the split axis or the min function with the `key` as the parameter must be used as the right value. Otherwise, the axis cannot be identified and the parameter parsing will fail.3. The identified axis parameters are limited to the candidate parameter list. This ensures that only the parameters that can be dynamically tuned by autotune are considered.
 
 ```Python
 @triton.autotune(
-    key={"n_elements"} # It needs to be specified.
+    key=["n_elements"] # It needs to be specified.
     ...
 )
 @triton.jit
@@ -193,11 +195,11 @@ The tiling axis parameter is determined based on the `tl.arange()`, `tl.range()`
 
 Finally, the split axis corresponding to the current parameter is identified through mask comparison with the `key` passed in `autotune`.
 
-Notes: 1. The tiling axis parameters must be used in the call of `tl.arange()` and be involved in the computation of the loop range in the `for` loop through `tl.range()`, `range()`, or integer division (`//`). 2. The mask comparison must be performed, and the key corresponding to the tiling axis or the min function with the key as the parameter must be used as the right value. Otherwise, the axis cannot be identified and the parameter parsing will fail.3. The identified tiling parameters are limited to the candidate parameter list. This ensures that only the parameters that can be dynamically tuned by autotune are considered. 
+Notes: 1. The tiling axis parameters must be used in the call of `tl.arange()` and be involved in the computation of the loop range in the `for` loop through `tl.range()`, `range()`, or integer division (`//`). 2. The mask comparison must be performed, and the key corresponding to the tiling axis or the min function with the key as the parameter must be used as the right value. Otherwise, the axis cannot be identified and the parameter parsing will fail.3. The identified tiling parameters are limited to the candidate parameter list. This ensures that only the parameters that can be dynamically tuned by autotune are considered.
 
 ```Python
 @triton.autotune(
-    key={"n_rows", "n_cols"} # It needs to be specified.
+    key=["n_rows", "n_cols"] # It needs to be specified.
     ...
 )
 @triton.jit
@@ -233,7 +235,7 @@ Notes: 1. The low-dimensional axis must be computed using `tl.arange()` and slic
 
 ```Python
 @triton.autotune(
-    key={"n_rows", "n_cols"} # Automatically allocated in the order of {"x": "n_rows", "y": "n_cols"}
+    key=["n_rows", "n_cols"] # Automatically allocated in the order of {"x": "n_rows", "y": "n_cols"}
     ...
 )
 @triton.jit

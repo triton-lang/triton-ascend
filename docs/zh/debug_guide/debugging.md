@@ -83,7 +83,7 @@ rm -rf ~/.triton/cache
 调试时禁用缓存: 在调试编译问题时，建议临时禁用缓存以确保每次都重新编译：
 
 ```bash
-export TRITON_DISABLE_CACHE=1
+export TRITON_ALWAYS_COMPILE=1
 ```
 
 缓存验证: 当怀疑缓存导致问题时，可删除相关缓存文件后重新测试。
@@ -110,7 +110,7 @@ export TRITON_DISABLE_CACHE=1
 ```bash
 # 在运行 Triton 程序前设置环境变量
 export TRITON_DEBUG=1
-export TRITON_DISABLE_CACHE=1
+export TRITON_ALWAYS_COMPILE=1
 
 # 运行 Triton kernel
 python your_triton_program.py
@@ -137,29 +137,29 @@ python your_triton_program.py
 
 以示范测试用例  [01-vector-add.py](../../../third_party/ascend/tutorials/01-vector-add.py#) 举例说明编译流程：
 这是一个简单的两个tensor的加法计算，计算逻辑请参考示范用例中的注解。
-通过TRITON_DEBUG=1开启dump文件输出，设置TRITON_DISABLE_CACHE=1禁用缓存确保重新编译，可以获取到 kernel.ttir.mlir 和 kernel.ttadapter.mlir 
+通过TRITON_DEBUG=1开启dump文件输出，TRITON_ALWAYS_COMPILE=1禁用缓存确保重新编译，可以获取到 kernel.ttir.mlir 和 kernel.ttadapter.mlir
 
 - 运行用例
 
-```python
-TRITON_DEBUG=1 TRITON_DISABLE_CACHE=1 python 01-vector-add.py
+```bash
+TRITON_DEBUG=1 TRITON_ALWAYS_COMPILE=1 python 01-vector-add.py
 ```
 
 运行用例后会打印dump文件路径，默认是 ~/.triton/dump，显示如下：
 
-```python
-Dumping intermediate results to ~/.triton/dump/xxx 
+```text
+Dumping intermediate results to ~/.triton/dump/xxx
 # xxx是一串hash的唯一标识符
 ```
 
-进入该dump路径，查看 kernel.ttir.mlir 和 kernel.ttadapter.mlir 
+进入该dump路径，查看 kernel.ttir.mlir 和 kernel.ttadapter.mlir
 
 #### 3.4.1 TTIR（Triton Intermediate Representation）
 
 - TTIR 样例
 查看 kernel.ttir.mlir 如下：
 
-```python
+```mlir
 module {
   tt.func public @add_kernel(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg2: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg3: i32 {tt.divisibility = 16 : i32} ) attributes {noinline = false} {
     %cst = arith.constant dense<0.000000e+00> : tensor<1024xf32> loc(#loc1)
@@ -201,7 +201,7 @@ TTIR 层面仍基于 Triton 原生抽象（如 `!tt.ptr<f32>`、`tt.load`/`tt.st
 - TTAdapter IR 样例
 查看 kernel.ttadapter.mlir 如下：
 
-```python
+```mlir
 module {
   func.func @add_kernel(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32, %arg7: i32, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "aiv", parallel_mode = "simd"} {
     %cst = arith.constant 0.000000e+00 : f32
@@ -304,36 +304,36 @@ export TRITON_INTERPRET=0
 
 使用方法：
 
-1. 在 Triton kernel 中，为需要调试的常量参数添加 tl.static_print 语句
+1.在 Triton kernel 中，为需要调试的常量参数添加 tl.static_print 语句
 
 ```python
 import triton.language as tl
 
 @triton.jit
 def triton_kernel(
-    out_ptr0, 
-    in_ptr0, 
-    in_ptr1, 
+    out_ptr0,
+    in_ptr0,
+    in_ptr1,
     XBLOCK: tl.constexpr,  # 编译时常量参数
     USE_FP16: tl.constexpr  # 编译时常量参数
 ):
     # 打印编译时常量参数
     tl.static_print("XBLOCK = ", XBLOCK)
     tl.static_print("USE_FP16 = ", USE_FP16)
-    
+
     idx = tl.arange(0, XBLOCK)
     tmp0 = tl.load(in_ptr0 + idx)
     tmp1 = tl.load(in_ptr1 + idx)
-    
+
     # 打印常量计算结果
     elements_per_thread = XBLOCK // 32
     tl.static_print("Elements per thread = ", elements_per_thread)
-    
+
     tmp2 = tmp0 + tmp1
     tl.store(out_ptr0 + idx, tmp2)
 ```
 
-2. 设置环境变量并运行程序进行编译
+2.设置环境变量并运行程序进行编译
 
 ```bash
 # 启用 Triton 调试输出（包含 static_print）
@@ -364,7 +364,7 @@ def triton_kernel(out_ptr0, in_ptr0, in_ptr1, XBLOCK: tl.constexpr):
     tl.store(out_ptr0 + idx, tmp2)
 ```
 
-2. 设置环境变量`TRITON_DEVICE_PRINT=1`并运行程序，窗口将打印出该变量的值。
+2.设置环境变量`TRITON_DEVICE_PRINT=1`并运行程序，窗口将打印出该变量的值。
 
 ```bash
 # 启用 Triton 调试输出（包含 device_print）
@@ -372,6 +372,17 @@ export TRITON_DEVICE_PRINT=1
 
 # 运行 Python 程序，会在编译阶段看到打印输出
 python your_program.py
+```
+
+运行后，`tl.device_print` 打印的变量内容会显示在 `HiIPU Print` 区块内，示例如下：
+
+```text
+-----------------------------------------------------------------------------
+---------------------------------HiIPU Print---------------------------------
+-----------------------------------------------------------------------------
+=> Vec 0
+ tmp2 after addition =:
+[1.000000,2.000000,3.000000,4.000000,5.000000,6.000000,7.000000,8.000000,9.000000,10.000000,11.000000,12.000000,13.000000,14.000000,15.000000,16.000000]
 ```
 
 - 注：打印长度限制：
@@ -423,7 +434,7 @@ def compile_fn(ttir):
 **示例:**
 假设在 `compiler.py` 的第 123 行设置了断点，程序暂停后：
 
-```python
+```text
 python
 (Pdb) l  # 查看当前代码上下文
 118     def compile_fn(ttir):
@@ -474,9 +485,9 @@ python your_triton_script.py
 
 **使用建议**
 仅在怀疑 LLVM 后端 bug 时启用（如生成非法指令、性能异常）
-配合 LLVM_DEBUG_ONLY 限制输出范围
+配合 TRITON_LLVM_DEBUG_ONLY 限制输出范围
 
-在启用 `TRITON_ENABLE_LLVM_DEBUG=1` 时，可通过 `LLVM_DEBUG_ONLY` 环境变量指定仅输出特定模块的调试日志。以下是常用 `DEBUG_TYPE` 的简要解释：
+在启用 `TRITON_ENABLE_LLVM_DEBUG=1` 时，可通过 `TRITON_LLVM_DEBUG_ONLY` 环境变量指定仅输出特定模块的调试日志。以下是常用 `DEBUG_TYPE` 的简要解释：
 
 ```bash
 ## `isel`（Instruction Selection）
@@ -510,7 +521,7 @@ python your_triton_script.py
 
 ```bash
 export TRITON_ENABLE_LLVM_DEBUG=1
-export LLVM_DEBUG_ONLY="isel"
+export TRITON_LLVM_DEBUG_ONLY="isel"
 python your_triton_script.py
 ```
 
@@ -518,7 +529,7 @@ python your_triton_script.py
 先启用 `MLIR_ENABLE_DUMP=1`
 → 验证 MLIR 层转换是否正确（如 ReduceOp → scf.for）
 若 MLIR 正常但结果错误
-→ 怀疑 LLVM 问题，再启用 `TRITON_ENABLE_LLVM_DEBUG=1 + LLVM_DEBUG_ONLY`
+→ 怀疑 LLVM 问题，再启用 `TRITON_ENABLE_LLVM_DEBUG=1 + TRITON_LLVM_DEBUG_ONLY`
 避免直接开启 `TRITON_ENABLE_LLVM_DEBUG=1`
 → 日志过大易掩盖关键信息，且严重影响运行速度
 
@@ -527,7 +538,7 @@ python your_triton_script.py
 | 变量                      | 作用                             |
 |--------------------------|----------------------------------|
 | `TRITON_DEBUG=1`         | 启用中间 IR 转储                 |
-| `TRITON_DISABLE_CACHE=1` | 禁用编译缓存                     |
+| `TRITON_ALWAYS_COMPILE=1` | 启用重编译，不复用缓存               |
 | `TRITON_INTERPRET=1`     | 使用 CPU 解释器执行 kernel       |
 | `TRITON_DEVICE_PRINT=1`  | 启用运行时打印输出，同时也会启用编译时打印输出      |
 | `MLIR_ENABLE_DUMP=1`  | 启用 MLIR 高层 IR 的自动 dump。在每个 MLIR Pass 执行前后，将当前函数的 IR 以可读文本形式输出 |

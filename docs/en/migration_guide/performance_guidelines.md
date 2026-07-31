@@ -25,7 +25,7 @@ When executing Triton operators, NPUs leverage parallel mechanisms such as multi
     ```diff
     @triton.jit
     def npu_vector_add_kernel(
-        input,                          # [Tensor] input tensor (1 x col)     
+        input,                          # [Tensor] input tensor (1 x col)
         output,                         # [Tensor] output tensor (1 x col)
         M: tl.constexpr,                # len of the vector
         BLOCK_SIZE: tl.constexpr
@@ -41,7 +41,7 @@ When executing Triton operators, NPUs leverage parallel mechanisms such as multi
     ```diff
     @triton.jit
     def npu_vector_add_kernel(
-        input,                          # [Tensor] input tensor (1 x col)     
+        input,                          # [Tensor] input tensor (1 x col)
         output,                         # [Tensor] output tensor (1 x col)
         M: tl.constexpr,                # len of the vector
         BLOCK_SIZE: tl.constexpr
@@ -136,7 +136,7 @@ The following operations are involved.
 
 |  **Operator Name** |  **Unsupported Data Type** |
 |---|---|
-| Vector Add| int64 | 
+| Vector Add| int64 |
 | Vector Cmp| int64/int32 |
 
 ### II. Code Examples
@@ -148,7 +148,7 @@ The following operations are involved.
     ``` diff
     @triton.jit
     def npu_vector_add_kernel(
-        x,                          # [Tensor] input tensor (1 x col)     
+        x,                          # [Tensor] input tensor (1 x col)
         y,                          # [Tensor] input tensor (1 x col)
         z,                          # [Tensor] output tensor (1 x col)
         vector_len: tl.constexpr,   # len of the vector

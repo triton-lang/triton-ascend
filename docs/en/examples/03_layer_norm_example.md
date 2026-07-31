@@ -68,11 +68,11 @@ LayerNorm Implementation Defined by Using Triton
 def layer_norm(x, weight, bias, eps=1e-5):
     # Allocate the output tensor with the same shape and data type as the input.
     y = torch.empty_like(x)
-    
+
     # Flatten the input x into a two-dimensional shape [-1, feature_dim] for processing the last dimension.
     x_arg = x.reshape(-1, x.shape[-1])
     M, N = x_arg.shape
-    
+
     mean = torch.empty((M, ), dtype=torch.float32, device=x.device)
     rstd = torch.empty((M, ), dtype=torch.float32, device=x.device)
 
@@ -83,7 +83,7 @@ def layer_norm(x, weight, bias, eps=1e-5):
         x_arg, y, weight, bias, mean, rstd,  # Input, output, and intermediate variables
         x_arg.stride(0), N, eps,
         BLOCK_SIZE=BLOCK_SIZE)
-    # Return the normalized output.   
+    # Return the normalized output.
     return y
 
 # Call layer normalization during forward pass.
@@ -98,7 +98,7 @@ def _layer_norm(M, N, dtype, eps=1e-5, device='npu'):
     x.requires_grad_(True)
     # Forward pass
     y_tri = layer_norm(x, weight, bias, eps)
-    y_ref = torch.nn.functional.layer_norm(x, weight, bias, eps).to(dtype)
+    y_ref = torch.nn.functional.layer_norm(x, w_shape, weight, bias, eps).to(dtype)
     # Determine whether the results are approximate.
     assert torch.allclose(y_tri, y_ref, atol=1e-2, rtol=0)
     print(f"y_tri: {y_tri}")

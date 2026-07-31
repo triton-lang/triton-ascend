@@ -36,7 +36,7 @@ def naive_softmax(x):
 Purpose of kernel fusion
 
 When implemented naively in PyTorch, computing `y = naive_softmax(x)` requires reading 5 × *MN* + 2 × *M* elements from DRAM and writing back 3 *MN* + 2 *M* elements. Obviously, this is very inefficient. A more efficient solution is to use a custom "fused" kernel that reads `x` only once and completes all necessary computations on the chip.
-Doing so requires reading and writing back only 2 × *MN* bytes. Therefore, the theoretical speedup ratio is about 4 times, that is, 8 × *MN* + 4 × *M*)/2 × *MN*.
+Doing so requires reading and writing back only 2 × *MN* bytes. Therefore, the theoretical speedup ratio is about 4 times, that is, (8 × *MN* + 4 × *M*) / (2 × *MN*).
 
 `torch.jit.script` is designed to automatically perform this kind of "kernel fusion", but it is still far from ideal.
 
@@ -76,10 +76,9 @@ def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride, n
 Create a helper function. This function can add the kernel function and its meta-parameters to the execution queue to process any given input tensor.
 
 ```Python
-target = triton.runtime.driver.active.get_current_target()
 kernels = {}
 
-def softmax(x, stream):
+def softmax(x):
     n_rows, n_cols = x.shape
 
     # The block size for each loop iteration is the smallest power of two greater than or equal to the number of columns in `x`.
@@ -113,11 +112,9 @@ def softmax(x, stream):
 The processed kernel needs to be tested on a matrix with irregular numbers of rows and columns. This can verify that the padding mechanism works.
 
 ```Python
-device = torch.npu.current_device()
-stream = torch.npu.current_stream(device).npu_stream
 torch.manual_seed(0)
 x = torch.randn(1823, 781, device='npu')
-y_triton = softmax(x, stream)
+y_triton = softmax(x)
 y_torch = torch.softmax(x, axis=1)
 assert torch.allclose(y_triton, y_torch), (y_triton, y_torch)
 print(y_triton)

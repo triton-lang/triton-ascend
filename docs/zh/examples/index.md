@@ -1,4 +1,4 @@
-# Examples
+# Tutorials
 
 ## Triton 示例列表
 
@@ -11,4 +11,21 @@
 | [05_matrix_multiplication_example](./05_matrix_multiplication_example.md)| 矩阵乘法高效实现示例 |
 | [06_autotune_example](./06_autotune_example.md)| 使用 Autotune 进行内核自动调优示例 |
 | [07_accuracy_comparison_example](./07_accuracy_comparison_example.md)| 精度比对示例 |
-| [08_costmodel_example](./08_costmodel_example.md)| Costmodel 端到端预测示例 |
+| [08_max_autotune_example](./08_max_autotune_example.md)| 使用 max_autotune 进行内核自动调优示例 |
+| [09_costmodel_example](./09_costmodel_example.md)| Costmodel 端到端预测示例 |
+
+```{toctree}
+:maxdepth: 3
+:hidden:
+
+01_vector_add_example.md
+02_fused_softmax_example.md
+03_layer_norm_example.md
+04_fused_attention_example.md
+05_matrix_multiplication_example.md
+06_autotune_example.md
+07_accuracy_comparison_example.md
+08_max_autotune_example.md
+09_costmodel_example.md
+
+```

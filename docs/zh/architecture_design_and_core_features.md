@@ -7,16 +7,16 @@
 
 **核心组件：**
 
-- **`Ascend language extension`**：适配 Ascend 的 Triton 语言扩展  
-- **`compiler`**：适配 Ascend 的 Triton 编译器  
+- **`Ascend language extension`**：适配 Ascend 的 Triton 语言扩展
+- **`compiler`**：适配 Ascend 的 Triton 编译器
 - **`driver`**：适配 Ascend 的设备驱动接口
 
 **组件功能：**
 
-- **`Ascend language extension`**  
+- **`Ascend language extension`**
   在标准 Triton 语言基础上，引入针对 Ascend NPU 架构的语法与语义扩展。
 
-- **`compiler`**  
+- **`compiler`**
   接收来自上层 Triton compiler 生成的中间表示文件 `TTIR`（Triton IR），执行一系列适配昇腾硬件的转换。
 
   ```python
@@ -25,7 +25,7 @@
 
   Triton IR 转换为 Linalg IR，再经 BiSheng Compiler 生成面向 Ascend NPU 的可执行二进制文件  `triton_xxx_kernel.o`。
 
-- **`driver`**  
+- **`driver`**
   提供 Triton 运行时与 Ascend 软件栈（CANN）之间的对接能力， 加载由 BiSheng Compiler 生成的设备侧可执行内核 `triton_xxx_kernel.o` 。
 
 ## 2.代码结构
@@ -34,30 +34,23 @@
 
 本项目在标准 Triton 基础上，扩展支持华为 Ascend NPU（通过 CANN 软件栈）。整体设计遵循以下**代码原则**：
 
-> - **若修改与目标硬件无关**（target independent），应保留在 **Triton core** 部分（如language、runtime的通用修改）；  
+> - **若修改与目标硬件无关**（target independent），应保留在 **Triton core** 部分（如language、runtime的通用修改）；
 > - **若修改与 Ascend 硬件强相关**（target affinitive），应放在 **Triton-Ascend** 中。
 
 ### 2.2 目录结构与功能说明
 
-**`include/` 和 `lib/`**
-
-- **内容**：包含针对 Ascend NPU 的 **MLIR Passes**、**Dialects**（方言）以及相关工具。
-- **作用**：用于在 MLIR 编译流程中表达和优化 Ascend 特定的计算图。
-
-**`libdevice.py`**
-
-- **内容**：适配 Ascend NPU 的 `libdevice` 接口。
-- **作用**：提供适配 Ascend NPU 硬件的底层实现支持，供 Triton 算子调用。
-
-**`backend/compiler.py`**
-
-- **内容**：`triton-ascend` 编译器主入口。
-- **作用**：将 Triton 高层 DSL 代码编译为可在 Ascend NPU 上执行的**可执行二进制文件**（如 `.o`文件）。
-
-**`backend/driver.py`**
-
-- **内容**：`triton-ascend` 驱动模块。
-- **作用**：加载并启动已编译的可执行二进制。
+| 目录或文件 | 对应架构层级 | 功能说明 |
+| --- | --- | --- |
+| `python/` | Triton core | 保留标准 Triton 的 Python 侧通用实现，包括 `triton.language`、JIT、运行时、缓存、工具链入口等。与硬件无关的通用能力优先放在该目录。 |
+| `include/` 和 `lib/` | Triton core | 保留标准 Triton 的通用 C++/MLIR 基础设施、Dialect、Pass 和转换逻辑。这里不承载 Ascend 专属后端实现。 |
+| `third_party/ascend/` | Triton-Ascend | Ascend 后端的根目录，集中放置与 Ascend NPU、CANN、BiSheng Compiler 强相关的语言扩展、编译后端、运行时驱动、MLIR Pass、示例和测试。 |
+| `third_party/ascend/language/` | Ascend language extension | Ascend 语言扩展目录，安装后会链接到 `triton.language.extra` 下，供 Triton kernel 通过 `triton.language.extra.cann` 使用。 |
+| `third_party/ascend/language/cann/libdevice.py` | Ascend language extension | 适配 Ascend NPU 的 `libdevice` Python 接口，提供数学函数和底层算子封装，供 Triton 算子调用。 |
+| `third_party/ascend/backend/compiler.py` | compiler | Ascend 编译器后端主入口，负责注册编译选项、组织 TTIR 到 Ascend 适配 IR、Linalg/LLVM 等阶段的转换，并调用后续工具链生成可执行二进制文件。 |
+| `third_party/ascend/backend/driver.py` | driver | Ascend 运行时驱动模块，负责与 CANN/TorchNPU 等运行时环境对接，加载并启动已编译的设备侧可执行文件。 |
+| `third_party/ascend/include/` 和 `third_party/ascend/lib/` | compiler | Ascend 专属 MLIR Dialect、Pass 和转换实现，例如 `TritonToLinalg`、`TritonToStructured`、`DynamicCVPipeline`、`AutoBlockify` 等。 |
+| `third_party/ascend/AscendNPU-IR/` | compiler | Ascend NPU 相关 IR 与 BiSheng 编译链适配内容，是从 Triton-Ascend 编译流程继续下沉到硬件侧代码生成的重要组成部分。 |
+| `third_party/ascend/tutorials/` 和 `third_party/ascend/unittest/` | 示例与测试 | 提供 Ascend 平台上的 Triton 示例、迁移样例、Python 单元测试和 MLIR 转换测试，用于验证 Ascend 后端能力。 |
 
 ## 3. Modules
 
@@ -71,13 +64,13 @@
 | 2    | `tl.extract_slice(full, offsets, sizes, strides)`     | 按照指定的偏移量（offsets）、尺寸（sizes）和步幅（strides）参数，从另一个张量中提取一个切片张量。<br>**返回值**：切片张量。<br>**full**：源张量，从此张量中提取切片。<br>**offsets**：源张量上的偏移量（整数元组）。<br>**sizes**：切片张量的尺寸（整数元组）。<br>**strides**：源张量上的步幅（整数元组）。                        |
 | 3    | `tl.get_element(source, offset)`                      | 读取一个具有维度的张量，并返回指定偏移量处的单个元素。<br>**source**：源张量。<br>**offset**：元素提取位置的偏移量（整数元组）。   |
 
-## 3.2 Triton-Ascend
+### 3.2 Triton-Ascend
 
-### 3.2.1 Compiler Options
+#### 3.2.1 Compiler Options
 
 |序号| NPUOptions                                    | 硬件平台     | 用途 |
 | --- | --------------------------------------------- | ---------- | ----- |
-| 1   | multibuffer                                   | NPU        | Autotune Option: Enable or disable ping-pong pipeline. |
+| 1   | multibuffer                                   | NPU        | Autotune Option: Enable or disable ping-pong pipeline. Enabled by default. |
 | 2   | enable_auto_bind_sub_block                    | NPU        | Autotune option (CV-fused kernels only): Enable or disable auto-binding of sub-blocks. |
 | 3   | enable_hivm_auto_cv_balance                   | NPU        | Autotune option (CV-fused kernels only): Enable or disable automatic CV balancing. |
 | 4   | sync_solver                                   | NPU        | Autotune option (CV-fused kernels only): Enable or disable the synchronization solver. |
@@ -94,8 +87,9 @@
 | 15  | enable_linearize                              | NPU        | Autotune option: Enable or disable the linearization pass. |
 | 16  | enable_nd2nz_on_vector                        | NPU        | Autotune option (CV-fused kernels only): Enable or disable the ND (n-dimensional) to NZ (non-zero) layout transformation. |
 | 17  | auto_blockify_size                            | NPU        | Autotune option: Enable or disable AutoBlockify pass. It is ignored when TRITON_ALL_BLOCKS_PARALLEL is not set |
+| 18  | compile_mode                                  | NPU (950)  | Compilation mode: `"unstructured_in_simt"` (default) / `"simd"` / `"simt_only"`. |
 
-### 3.2.2 SIMD compiler
+#### 3.2.2 SIMD compiler
 
 | 序号 | Pass                   | 目的                                                                   | IR 转换                 |
 | ------ | ---------------------- |----------------------------------------------------------------------| ----------------------- |
@@ -104,7 +98,7 @@
 | 3      | triton-to-linalg       | memory/reduction/view/creation/math/arith/linear algebra to linalgir | ttir->linalgir          |
 | 4      | triton-to-other        | ttir->hivm/hfusion/llvm                                              | ttir->hivm/hfusion/llvm |
 
-#### 3.2.2.1 TritonToStructured
+##### 3.2.2.1 TritonToStructured
 
 处理指针表达式和mask表达式中的整除取余，通过升维的方法，去除整除取余后重新生成load/store 等OP。
 
@@ -122,7 +116,7 @@
 | RewriteWhile             | 处理 `while` 循环体内的指针叠加操作。                                                          | 不支持循环体内包含条件分支 (`if`) 的复杂指针路径变换。                                         |
 | RewriteFor               | 处理 `for` 循环体内的指针叠加操作。                        |                                              |
 
-#### 3.2.2.2 TritonToUnstructured
+##### 3.2.2.2 TritonToUnstructured
 
 | 序号 | Pass / 转换器                              | 描述  |
 |------|-------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -130,7 +124,7 @@
 | 2    | triton-to-unstructured           | 将经过`discrete-mask-access-conversion`识别出的、包含离散轴（Discrete Axes）的张量操作，转换为基于显式标量循环的标量访存。 |
 | 3    | bubble-up-operation                       | 主要对`extract op/extract_slice`顺序上移优化。这可以优化数据局部性，有些场景能消除转换后产生的不必要的循环，从而提升生成代码的执行效率。 |
 
-##### 3.2.2.2.1 discrete-mask-access-conversion
+###### 3.2.2.2.1 discrete-mask-access-conversion
 
 | 转换器名称                  | 描述|
 |----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -138,7 +132,7 @@
 | DiscreteMaskLoadConversion  | 首先进行mask分析，如果mask分析结果是非连续的，将原始的load操作转化为以下序列：<br>1. load（加载源tensor的所有内容）<br>2. select（根据mask挑选源tensor内容，被掩盖部分设置为other值）                     |
 | DiscreteMaskAtomicAddConversion | 首先进行mask分析，如果mask分析结果是非连续的，将原始的atomic_add操作转化为以下序列：<br>1. select（根据mask挑选value的值，被掩盖部分设为0）<br>2. atomic_add（使用select后的结果重新生成atomic_add操作） |
 
-##### 3.2.2.2.2 triton-to-unstructured
+###### 3.2.2.2.2 triton-to-unstructured
 
 | TritonToUnstructured Converters | 描述 |
 |---|---|
@@ -147,23 +141,23 @@
 | UnstructuredMemAccessConverter\<triton::AtomicRMWOp\> | 将AtomicRMWOp转化为多重循环标量Atomic操作 |
 | UnstructuredMemAccessConverter\<triton::AtomicCASOp\> | 将AtomicCASOp转化为多重循环标量Atomic操作 |
 
-##### 3.2.2.2.3 bubble-up-operation
+###### 3.2.2.2.3 bubble-up-operation
 
 | 转换器名称 | 描述 |
 |---|---|
 | BubbleUpExtract\<tensor::ExtractOp\> | extract op顺序上移优化，在某些场景可以避免产生不必要的循环 |
 | BubbleUpExtract\<tensor::ExtractSliceOp\> | extract op/extract_slice顺序上移优化，在某些场景可以避免产生不必要的循环 |
 
-#### 3.2.2.3 TritonToLinalg
+##### 3.2.2.3 TritonToLinalg
 
-##### 3.2.2.3.1 triton-to-linalg
+###### 3.2.2.3.1 triton-to-linalg
 
 TritonToLinalg converts ttir to linalg ir.
 
 | Converter                                  | 描述                                                  |
 | ------------------------------------------ | ------------------------------------------------------------ |
 | StoreConverter                             | triton::StoreOp to memref::copy                              |
-| AddPtrConverter                            | triton::AddPtrOp to memref::ReinterpretCast                  |
+| AddPtrConverter                            | triton::AddPtrOp to memref::ReinterpretCastOp                  |
 | GetProgramIDConverter                      | triton::GetProgramIdOp to a param in functionOp              |
 | GetNumProgramsConverter                    | triton::GetNumProgramsOp to a param in functionOp            |
 | LoadConverter                              | triton::LoadOp to memref::copy and bufferization::ToTensorOp |
@@ -203,7 +197,7 @@ TritonToLinalg converts ttir to linalg ir.
 | PtrToIntConverter                          | triton::PtrToIntOp                                           |
 | MakeTensorPtrConverter                     | triton::PtrToIntOp to arith::IndexCastOp                     |
 
-#### 3.2.2.4 other passes 
+##### 3.2.2.4 other passes
 
 | Pass名称 | 功能描述 | 核心转换器 | 转换器描述 |
 |---|---|---|---|
@@ -212,7 +206,101 @@ TritonToLinalg converts ttir to linalg ir.
 | triton-to-hivm | 处理Triton的块同步操作 (`tl.sync_block_all`, `tl.sync_block_set`, `tl.sync_block_wait`)，将其转换为Ascend NPU的`HIVM`方言中的跨核心同步指令。这些指令用于管理多核流水线中的同步与数据依赖，是流水优化的关键。 | TritonCustomOpToHIVMSyncOpConversion | 实现Triton同步指令到HIVM同步指令的转换：<br>• `sync_block_all`：全局块同步<br>• `sync_block_set`：设置同步点<br>• `sync_block_wait`：等待同步点 |
 | triton-to-llvm | 将Triton中的内联汇编操作 (`tl.inline_assembly`) 转换为LLVM方言的内联汇编，并最终映射为Ascend NPU的CCE硬件固有函数（Intrinsics） | ElementwiseInlineAsmOpConversion | 将 `triton::ElementwiseInlineAsmOp` 转换为 `LLVM::InlineAsmOp` |
 
-### 3.2.3 Ascend affinitive Operators
+#### 3.2.3 SIMT Compiler（Ascend 950）
+
+昇腾 950 在 SIMD 路径之外增加 SIMT 能力，用于加速**非结构化 / 离散**访存（如间接索引的 load/store）。
+开发者通过 `compile_mode` 选择编译路径。
+
+##### 3.2.3.1 `compile_mode` 说明
+
+| `compile_mode` | 含义 | 编译路径 |
+|---|---|---|
+| `"simd"` | 纯 SIMD：结构化访存走 DMA；非结构化走标量循环 | `Triton IR → Linalg IR → AscendNPU IR` |
+| `"unstructured_in_simt"`（**默认**） | 混合：结构化仍走 SIMD；离散访存尽量走 SIMT 模板 | `Triton IR → Linalg IR → AscendNPU IR` |
+| `"simt_only"` | 纯 SIMT：直接下发 Triton IR 给NPU IR处理 | `Triton IR → AscendNPU IR` |
+
+用法示例：
+
+```python
+# 纯 SIMD
+kernel[grid](..., compile_mode="simd")
+
+# 混合（默认；950 上离散访存优先走 SIMT）
+kernel[grid](..., compile_mode="unstructured_in_simt")
+
+# 纯 SIMT
+kernel[grid](..., compile_mode="simt_only", num_warps=32)
+```
+
+##### 3.2.3.2 三种模式的编译分流
+
+```mermaid
+flowchart TD
+    A[compile_mode] --> B["simd"]
+    A --> C["unstructured_in_simt"]
+    A --> D["simt_only"]
+
+    %% simt_only 分支
+    D --> D1[直接下发 Triton IR，纯SIMT编译，Triton IR → AscendNPU IR]
+
+    %% simd 完整链路
+    B --> B1[discrete-mask-access-conversion]
+    B1 --> B2[拆成连续/离散后用 SIMD 方式处理]
+    B2 --> B3[triton-to-unstructured]
+    B3 --> B4[离散访存展开为标量循环]
+    B4 --> B5[TritonToLinalg]
+    B5 --> B6[AscendNPU IR]
+
+    %% unstructured_in_simt 完整链路
+    C --> C1[discrete-mask-access-conversion]
+    C1 --> C2[满足条件打上标记，下发下层SIMT处理]
+    C2 --> C3[triton-to-unstructured]
+    C3 --> C4{离散访存可转为 indirect_load/store SIMT 模板？}
+    C4 -- 是 --> B5
+    C4 -- 否 --> C5[回退标量循环]
+    C5 --> B5
+
+    %% 样式定义
+    classDef root fill:#e6f7ff,stroke:#1890ff
+    classDef pass fill:#fff7e6,stroke:#fa8c16,stroke-width:2px
+    classDef logic fill:#f0fff4,stroke:#52c41a
+    classDef simtOnly fill:#f0f2f5,stroke:#8c8c8c
+
+    %% 绑定样式
+    class A root
+    class B1,C1,B3,C3,B5,B6 pass
+    class B2,B4,C2,C4,C5 logic
+    class D,D1 simtOnly
+```
+
+| 阶段 | `"simd"` | `"unstructured_in_simt"` | `"simt_only"` |
+|------|----------|--------------------------|---------------|
+| 离散 mask 处理 | 拆成连续/离散边界，用 load + select / store 处理 | Ascend 950 且张量维数 ≤ 5：标记后交给下游；否则同左 | 不运行 |
+| 非结构化访存 | 展开为标量循环 | 尽量转为 SIMT 间接访存（维数 ≤ 5）；失败则回退标量循环 | 不运行 |
+| TritonToLinalg | 常规 Linalg IR 降级 | 常规 Linalg IR 降级 | 不运行 |
+
+##### 3.2.3.3 混合模式：只对离散访存走 SIMT
+
+混合模式**不会**把整个 kernel 切到 SIMT，只对离散 / 非结构化访存点走 SIMT，其余仍走 SIMD：
+
+1. **离散 mask 处理**
+   - 若判定为非连续 mask，且满足 Ascend 950、混合模式、维数 ≤ 5：不改写 IR，只标记「下游走 SIMT」。
+   - 否则（纯 SIMD 或不满足条件）：将 mask 拆成连续 / 离散部分，用连续边界限定全局内存访问，再通过 select 合并结果。
+
+2. **非结构化访存处理**
+   - 在 Ascend 950 混合模式下，对非结构化访存或已标记的离散访存走 SIMT 快速通道：
+     - `load` / `store` → `indirect_load` / `indirect_store`（维数 ≤ 5）
+     - `atomic` 操作 → `hivm.custom(symbol="__builtin_indirect_atomic")`
+   - 不满足条件则回退为标量循环（与 `"simd"` 一致）。
+
+3. **TritonToLinalg**
+   - 常规 Linalg IR 降级。
+
+##### 3.2.3.4 纯 SIMT（`simt_only`）
+
+`"simt_only"` 直接下发 Triton IR 交给 AscendNPU IR 做纯 SIMT 编译。
+
+#### 3.2.4 Ascend affinitive Operators
 
 | 序号 | Operator | 功能描述 |
 |---|---|---|

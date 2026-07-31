@@ -68,9 +68,9 @@ Triton-Ascend follows the [PEP 440](https://peps.python.org/pep-0440/) versionin
 
 **`main` branch mapping:**
 
-| Triton-Ascend | Triton commit hash                                           | Python    | CANN  | PyTorch | LLVM commit hash                                             | Patch                                                        |
-| ------------- | ------------------------------------------------------------ | --------- | ----- | ------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| `main`        | [85400f8](https://github.com/triton-lang/triton-ascend/commit/85400f8) | `3.9~3.13` | `9.0.0` | `2.10.0`   | [f6ded0b](https://github.com/llvm/llvm-project/commit/f6ded0b) | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
+| Triton-Ascend | Triton commit hash                                           | Python    | CANN    | PyTorch | LLVM commit hash                                             | Patch                                                        |
+| ------------- | ------------------------------------------------------------ | --------- |---------| ------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| `main`        | [85400f8](https://github.com/triton-lang/triton-ascend/commit/85400f8) | `3.9~3.13` | `9.1.0` | `2.10.0`   | [f6ded0b](https://github.com/llvm/llvm-project/commit/f6ded0b) | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
 
 ### Maintenance Branches and Lifecycle
 
@@ -80,10 +80,11 @@ Maintenance branch statuses include:
 - **Maintenance**: Only accepts critical bug fixes and security patches; no feature improvements are released
 - **End of Life**: No fixes are accepted; maintenance of the branch has stopped
 
-| Branch              | Status     | Triton Version | Triton-Ascend Release              | End of Maintenance |
-| ----------------- | -------- | ------------ | ----------------------------------- | -------- |
-| `main`            | `Active`   | `3.6.0`      | /                                   | /        |
-| `release/3.2.1` | `Active`   | `3.2.0`      | `3.2.1`                             | /        |
+| Branch          | Status     | Triton Version | Triton-Ascend Release                    | End of Maintenance |
+|-----------------| -------- | ------------ |------------------------------------------| -------- |
+| `main`          | `Active`   | `3.6.0`      | /                                        | /        |
+| `release/3.2.2` | `Active`   | `3.2.0`      | `3.2.2`                                  | /        |
+| `release/3.2.1` | `Maintenance`   | `3.2.0`      | `3.2.1`                                  | /        |
 | `release/3.2.x` | `Maintenance`   | `3.2.0`      | `3.2.0rc2`，`3.2.0rc3`，`3.2.0rc4`，`3.2.0` | /        |
 
 ## Release Cycle
@@ -94,18 +95,20 @@ Maintenance branch statuses include:
 
 ### Release Timeline
 
-| Date       | Event                     |
-| ---------- | ------------------------ |
+| Date       | Event                              |
+|------------|------------------------------------|
+| 2026-07-31 | Release stable version `3.2.2`     |
 | 2026-05-06 | Release stable version `3.2.1`     |
 | 2026-01-21 | Release stable version `3.2.0`     |
-| 2025-11-14 | Release preview version `3.2.0rc4`  |
-| 2025-11-12 | Release preview version `3.2.0rc3`  |
-| 2025-05-26 | Release preview version `3.2.0rc2`  |
+| 2025-11-14 | Release preview version `3.2.0rc4` |
+| 2025-11-12 | Release preview version `3.2.0rc3` |
+| 2025-05-26 | Release preview version `3.2.0rc2` |
 
 ## Version Compatibility Matrix
 
-| Triton-Ascend | Triton | Python              | CANN  | PyTorch | LLVM commit hash | LLVM Patch |
-| ------------- | ------ | ------------------- | ----- | ------- | ---------------- | --------- |
+| Triton-Ascend | Triton | Python              | CANN    | PyTorch | LLVM commit hash | LLVM Patch |
+|---------------| ------ | ------------------- |---------| ------- | ---------------- | --------- |
+| `3.2.2`       | `3.2.0` | `3.9`(x86), `3.10-3.13` | `9.1.0` | `2.7.1`   | `b5cc222`        | -         |
 | `3.2.1`       | `3.2.0` | `3.9`(x86), `3.10-3.13` | `9.0.0` | `2.7.1`   | `b5cc222`        | -         |
 | `3.2.0`       | `3.2.0` | `3.9-3.11`          | `8.5.0` | `2.6.0`   | `b5cc222`        | -         |
 | `3.2.0rc4`    | `3.2.0` | `3.9-3.11`          | `8.5.0` | `2.6.0`   | `b5cc222`        | -         |

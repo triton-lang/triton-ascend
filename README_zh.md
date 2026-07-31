@@ -1,91 +1,217 @@
-# Triton-Ascend
+<!-- markdownlint-disable-file MD041 -->
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/vllm-project/vllm-ascend/main/docs/source/logos/vllm-ascend-logo-text-dark.png">
+  </picture>
+</p>
 
-## 项目简介与价值主张
-Triton-Ascend是面向昇腾平台构建的Triton编译框架，旨在让Triton代码能够在昇腾硬件上高效运行。
-- #### 核心价值说明
-Triton是近几年来受到开发者青睐的Python化编译框架。开发者仅需关注Tile/Block的切分方式以及基于Tile/Block的运算逻辑，编译器将在Triton代码的编译过程中结合底层硬件特点自动完成内存分配、数据搬运、数据计算、流水并行等，因此，算子的开发难度大幅降低、开发效率显著提升。
-Triton-Ascend将Triton编译栈适配到华为昇腾NPU上，在Triton的基础上提供一系列针对性的优化，使Triton代码能够编译后在昇腾硬件上高效运行。
-目前，Triton-Ascend仍在持续完善中，我们将不断提升Triton Python API完备度、数据类型支持度、访存方式灵活性等，并持续优化编译器的自动优化能力，提升Triton-Ascend整体的功能与性能泛化性。
-- #### 昇腾生态定位
-Triton-Ascend编译框架打通了Triton与昇腾硬件之间的壁垒，使熟悉Triton框架的开发者可以更有效率地使用昇腾NPU。它通过提供通用、高效的算子开发范式，为昇腾软件栈补齐了敏捷开发的关键一环，极大丰富了昇腾的算子库和上层应用生态。
+<h3 align="center"><font size="68">
+Triton-Ascend
+</font></h3>
 
-## 最新动态与里程碑
-- #### 近期版本更新
-当前版本：[Triton-Ascend 3.2.0](https://pypi.org/project/triton-ascend/)  
-配套CANN版本：[昇腾CANN社区版8.5.0](https://www.hiascend.com/developer/download/community/result?module=cann&cann=8.5.0)  
-2026年版本计划：升级triton版本到triton3.5
+<p align="center">
+  <a href="https://deepwiki.com/triton-lang/triton-ascend">
+    <img src="https://deepwiki.com/badge.svg" alt="Ask AI on DeepWiki">
+  </a>
+</p>
 
-- #### 里程碑
-| 里程碑 | 重要特性更新情况 | 状态 |
-|------|------|------|
-| 2026.04 | Triton-Ascend 3.2.0 post版本上线  |  |
-| 2026.01.20 | Triton-Ascend 3.2.0 正式版本上线  | ✅ |
-| 2025.11.14 | Triton-Ascend 3.2.0rc4预发布版本上线：<br>[扩展 tt.fp_to_fp 接口，新增对 FP8的类型转换支持](https://gitcode.com/Ascend/triton-ascend/pull/891) <br>[新增 scatter_ub_to_out 接口，支持从UB到GM的高效数据分散操作](https://gitcode.com/Ascend/triton-ascend/pull/864)| ✅ |
-| 2025.09.30 | 完善Scan/Sort类Triton Python API，支持非连续访存，完成vLLM、sglang开源仓中重点Triton算子适配 | ✅ |
-| 2025.09.19 | 支持Triton-Ascend [nightly包](https://test.pypi.org/project/triton-ascend/#history)提取  | ✅ |
-| 2025.08.15 | 完善Atomic类Triton Python API支持，完成Flaggems开源仓重点Triton算子适配，提供Matmul等简单算子高性能实现参考用例 | ✅ |
-| 2025.06.30 | 支持85% Triton Python API，支持连续访存，覆盖基本使用场景需求 | ✅ |
-| 2025.05.20 | Triton-Ascend开源，Gitcode代码仓Alive！ | ✅ |
-- #### 社区活动信息
-1. [会议日历](https://meeting.osinfra.cn/ascend)
-2. [会议纪要看板]( https://etherpad-ascend.meeting.osinfra.cn/p/sig-AscendNPU-IR)
+<p align="center">
+<a href="README.md"><b>English</b></a> | <a href="README_zh.md"><b>中文</b></a>
+</p>
 
-## 性能
-### GroupGEMM 算子性能
-选取`GroupGEMM`算子作为示例。展示`Triton-Ascend`与`AscendC`的性能对比。
+<p align="center">
+| <a href="https://triton-ascend.readthedocs.io/zh-cn/latest/"><b>官方文档</b></a> | <a href="https://www.hiascend.com/developer/operator?tag=triton"><b>算子开发用户旅程</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>社区例会</b></a> | <a href="https://www.hiascend.com/"><b>关于昇腾</b></a> |
+</p>
 
-<div style="text-align: center;">
-  <img src="docs/zh/figures/groupgemm_speedup.svg" alt="GroupGEMM Performance" width="600">
+---
+
+## 🔥 最新消息
+
+- [2026.07.31]Triton-Ascend 3.2.2正式版本上线
+- [2026.04.30]Triton-Ascend 3.2.1正式版本上线
+- [2026.01.20]Triton-Ascend 3.2.0正式版本上线
+
+<div style="margin-left:1em">
+<details>
+<summary>更多最新消息</summary>
+
+- [2025.11.14]Triton-Ascend3.2.0rc4预发布版本上线：<br>- [扩展tt.fp_to_fp接口，新增对FP8的类型转换支持](https://gitcode.com/Ascend/triton-ascend/pull/891) <br>- [新增scatter_ub_to_out接口，支持从UB到GM的高效数据分散操作](https://gitcode.com/Ascend/triton-ascend/pull/864)
+- [2025.09.30]完善Scan/Sort类Triton Python API，支持非连续访存，完成vLLM、sglang开源仓中重点Triton算子适配
+- [2025.09.19]支持Triton-Ascend [nightly包](https://test.pypi.org/project/triton-ascend/#history)提取
+- [2025.08.15]完善Atomic类Triton Python API支持，完成Flaggems开源仓重点Triton算子适配，提供Matmul等简单算子高性能实现参考用例
+- [2025.06.30]支持85% Triton Python API，支持连续访存，覆盖基本使用场景需求
+- [2025.05.20]Triton-Ascend开源，Gitcode代码仓Alive！
+
+</details>
 </div>
 
-- Y轴为加速比(`Speedup= AscendC_Duration_Time / Triton_Duration_Time`)
-- 使用硬件为`Ascend 950`系列
-- 算子性能优化请参考[算子调优指南](./docs/zh/debug_guide/profiling.md)：
+---
 
-## 支持范围
+## 📖 快速安装
 
-- #### 硬件支持
-Triton-Ascend 在昇腾 AI 产品支持使用，具体型号如下：
+### 环境准备
 
-| 产品系列                   | 产品型号                              |
-|----------------------------|---------------------------------------|
-| **Atlas A3 训练系列产品**   | Atlas 800T A3 超节点服务器<br>Atlas 900 A3 SuperPoD 超节点<br>A200T A3 Box8 超节点服务器            |
-| **Atlas A3 推理系列产品**   | Atlas 800I A3 超节点服务器            |
-| **Atlas A2 训练系列产品**   | Atlas 800T A2 训练服务器<br>Atlas 900 A2 PoD 集群基础单元<br>Atlas 200T A2 Box16 异构子框              |
-| **Atlas A2 推理系列产品**   | Atlas 800I A2 推理服务器<br>Atlas 300I A2 推理卡<br>A200I A2 Box 异构组件              |
+#### 硬件要求
 
-- #### 兼容性
+支持的操作系统: linux(arch64/x86_64)
 
-**支持操作系统：**
-Triton-Ascend 所支持的操作系统与 CANN 一致。请参考 CANN 官方文档，下载并安装适用于您操作系统的 CANN 版本。
+支持的Ascend产品:Atlas A2/A3/950系列
 
-**CANN版本：**
+最小硬件配置: 单卡32GB显存（推荐）
 
-- 商用版
+#### 软件依赖
 
-| Triton-Ascend版本 | CANN商用版本 | CANN发布日期 |
-|-------------------|----------------------|--------------------|
-| 3.2.0             | CANN 8.5.0           | 2026/01/16         |
-| 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.3.RC1         | 2025/11/20<br>2025/10/30         |
+确定Python、CANN和TorchNPU软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。
 
-- 社区版
+- Python版本选择：py3.9-py3.11 均可。
 
-| Triton-Ascend版本 | CANN社区版本 | CANN发布日期 |
-|-------------------|----------------------|--------------------|
-| 3.2.0             | CANN 8.5.0           | 2026/01/16         |
-| 3.2.0rc4          | CANN 8.3.RC2<br>CANN 8.5.0.alpha001<br>CANN 8.3.RC1         | 2025/11/20<br>2025/11/12<br>2025/10/30         |
+- CANN版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成CANN的安装与配置。建议下载安装 9.1.0 版本。
 
-## 入门指引
+- TorchNPU版本选择：当前配套的TorchNPU版本为2.7.1.post8。
 
-- [在线文档](https://triton-ascend.readthedocs.io/zh-cn/latest/index.html)
+### 访问昇腾NPU
+
+如果您需要访问昇腾NPU算力资源进行开发或测试，请进入HiDevLab平台的 [HiDevLab-在线开发](https://hidevlab.huawei.com/online-develop-intro) 页面申请并使用算力。
+
+### 快速安装
+
+```bash
+#以安装triton-ascend 3.2.2 为例
+pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
+```
+
+### 源码安装
+
+<div style="margin-left:1em">
+<details>
+<summary>更多源码安装</summary>
+
+#### 安装依赖
+
+```bash
+apt updata
+apt install zliblg-dev clang-15 lld-15
+apt install ccache # optional
+update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 100
+update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-15 100
+pip install ninja cmake wheel pybind11 # build-time dependencies
+```
+
+#### 编译Triton-Ascend
+
+```bash
+git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
+git checkout main
+pip install -e .
+```
+
+#### 自定义LLVM构建（可选）
+
+```bash
+# 如果需要自定义构建LLVM过程的，可以先执行这一步再去编译Triton-Ascend
+# 检出指定版本的LLVM源码并应用补丁
+git clone --no-checkout https://github.com/llvm/llvm-project.git
+cd llvm-project
+git checkout fad3272286528b8a491085183434c5ad4b59ab92
+wget https://raw.gitcode.com/Ascend/triton-ascend/blobs/2b0a06eb21438359d6d0576b622e3bb5e0292d17/fad3272.patch
+git apply fad3272.patch
+
+export LLVM_INSTALL_PREFIX=/path/to/llvm-install
+
+# 构建自定义LLVM版本
+cd {PATH_TO}/llvm_project
+mkdir build
+cd build
+cmake ../llvm \
+    -G Ninja \
+    -DCMAKE_C_COMPILER=/usr/bin/clang-15 \
+    -DCMAKE_CXX_COMPILER=/usr/bin/clang++-15 \
+    -DCMAKE_LINKER=/usr/bin/lld-15 \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLLVM_ENABLE_ASSERTIONS=ON \
+    -DLLVM_ENABLE_PROJECTS="mlir;llvm;lld" \
+    -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU" \
+    -DLLVM_ENABLE_LLD=ON \
+    -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
+ninja install
+
+# 编译Triton-Ascend
+git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
+
+LLVM_SYSPATH=${LLVM_INSTALL_PREFIX} \
+TRITON_BUILD_WITH_CCACHE=true \
+TRITON_BUILD_WITH_CLANG_LLD=true \
+TRITON_BUILD_PROTON=OFF \
+TRITON_WHEEL_NAME="triton-ascend" \
+TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
+python3 setup.py install
+```
+
+</details>
+</div>
+
+### 镜像使用
+
+<div style="margin-left:1em">
+<details>
+<summary>更多镜像使用</summary>
+
+- 我们提供了Dockerfile帮助您安装Docker环境镜像。构建过程使用`quay.io/ascend/cann`预构建镜像作为基础镜像，跳过CANN安装步骤，显著加快构建速度。
+
+- 您需要通过`--build-arg`指定`CANN_BASE_IMAGE`参数来选择适合您机器的CANN基础镜像。可用的CANN基础镜像标签可在[quay.io/ascend/cann](https://quay.io/repository/ascend/cann?tab=tags)查看。
+
+- 您可以通过npu-smi命令查看系统上的NPU型号。
+
+```bash
+git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
+docker build \
+--build-arg CANN_BASE_IMAGE=quay.io/ascend/cann:8.5.0-a3-ubuntu22.04-py3.10 \
+-t triton-ascend-image:latest -f ./docker/Dockerfile .
+```
+
+- 根据该镜像启动容器，可以参考下面的命令：
+
+```bash
+docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container --net=host --privileged \
+--security-opt seccomp=unconfined \
+--device=/dev/davinci0 \
+--device=/dev/davinci1 \
+--device=/dev/davinci2 \
+--device=/dev/davinci3 \
+--device=/dev/davinci4 \
+--device=/dev/davinci5 \
+--device=/dev/davinci6 \
+--device=/dev/davinci7 \
+--device=/dev/davinci_manager \
+--device=/dev/devmm_svm \
+--device=/dev/hisi_hdc \
+-v /usr/local/dcmi:/usr/local/dcmi \
+-v /usr/local/bin/npu-smi:/usr/local/bin/npu-smi \
+-v /usr/local/sbin/npu-smi:/usr/local/sbin/npu-smi \
+-v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
+-v /home:/home \
+-v /etc/ascend_install.info:/etc/ascend_install.info \
+triton-ascend-image:latest \
+/bin/bash
+
+# 进入容器
+docker exec -u root -it triton-ascend_container /bin/bash
+```
+
+</details>
+</div>
+
+## ✏️文档入口
 
 - [快速开始](./docs/zh/quick_start.md)
+
+- [在线完整文档（推荐）](https://triton-ascend.readthedocs.io/zh-cn/latest/index.html)
 
 - [安装指南](./docs/zh/installation_guide.md)
 
 - [架构设计与核心特性](./docs/zh/architecture_design_and_core_features.md)
 
-- [算子开发指南](./docs/zh/programming_guide.md)
+- [算子开发指南](./docs/zh/programming_guide/index.md)
 
 - [算子迁移指南](./docs/zh/migration_guide/migrate_from_gpu.md)
 
@@ -93,18 +219,17 @@ Triton-Ascend 所支持的操作系统与 CANN 一致。请参考 CANN 官方文
 
 - [性能调优指南](./docs/zh/debug_guide/profiling.md#)
 
-- [环境变量](docs/zh/environment_variable_reference.md)
+- [环境变量参考](./docs/zh/environment_variable_and_compiler_options_reference.md)
 
-## 常见问题
+- [常见问题FAQ](./docs/zh/FAQ.md)
 
-在使用Triton-Ascend时遇到的常见问题，详见 [FAQ](./docs/zh/FAQ.md#)
+## 🏘️ 社区活动信息
 
-## 安全声明
+1. [会议日历](https://meeting.osinfra.cn/ascend)
+2. [会议纪要看板](https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0)
 
-我们重视开发者在使用Triton-Ascend时的信息安全，安全防护建议与相关信息请见 [安全声明](./SECURITYNOTE.md)
+## 🤝 社区与贡献
 
-## 许可证信息
-本项目代码与文档均采用 [MIT许可证](./LICENSE)
+- 欢迎参与Triton-Ascend的开发及代码贡献，详情请参阅 [贡献指南](./docs/zh/community/CONTRIBUTING_zh.md)
 
-## 社区与贡献
-欢迎参与Triton-Ascend的开发及代码贡献，详情请参阅 [贡献指南](./CONTRIBUTING_zh.md)
+- 请通过[Issue](https://github.com/triton-lang/triton-ascend/issues)来告知我们您遇到的任何Bug。

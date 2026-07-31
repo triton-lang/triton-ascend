@@ -20,9 +20,9 @@ Minimum hardware configuration: 32 GB memory per card (recommended)
 
 Determine and install the CANN, Python, and TorchNPU software versions. For the driver and firmware installation, you can refer to [CANN Quick Installation](https://www.hiascend.com/cann/download) on the Ascend community official website.
 
-- CANN version: 9.0.0
+- CANN version: 9.1.0
 - Python version: python3.11
-- TorchNPU version: 2.7.1.post4
+- TorchNPU version: 2.7.1.post8
 
 Note: For more compatibility relationships, please refer to the [Version Description Table](./release_note.md#version-compatibility-matrix).
 

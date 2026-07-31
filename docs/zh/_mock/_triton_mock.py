@@ -157,20 +157,6 @@ def install() -> None:
     ]:
         _make_module(_name)
 
-    _lang = _make_module("triton.language")
-    _make_module("triton.language.core", parent=_lang)
-    _extra = _make_module("triton.language.extra", parent=_lang)
-    _cann = _make_module("triton.language.extra.cann", parent=_extra)
-    _cann_ext = _make_module("triton.language.extra.cann.extension", parent=_cann)
-    _make_module("triton.language.extra.cann.extension.dispatch", parent=_cann_ext)
-    _make_module("triton.language.extra.cann.extension.builder", parent=_cann_ext)
-
-    _ext = _make_module("triton.extension")
-    _ext_buf = _make_module("triton.extension.buffer", parent=_ext)
-    _bl = _make_module("triton.extension.buffer.language", parent=_ext_buf)
-    _make_module("triton.extension.buffer.language.core", parent=_bl)
-    _make_module("triton.extension.buffer.language.builder", parent=_bl)
-
     try:
         import pybind11  # noqa: F401
     except ImportError:

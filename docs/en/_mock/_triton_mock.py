@@ -184,9 +184,26 @@ def install() -> None:
     except ImportError:
         sys.modules["pybind11"] = MagicMock(name="pybind11")
 
+    _stub_modules = {
+        n for n in sys.modules
+        if n == "triton" or n.startswith("triton.")
+    }
+    _save = os.environ.get("TORCH_DEVICE_BACKEND_AUTOLOAD")
+    os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
     try:
         import torch  # noqa: F401
-    except ImportError:
+    except Exception:
         sys.modules["torch"] = MagicMock(name="torch")
         sys.modules["torch.nn"] = MagicMock(name="torch.nn")
         sys.modules["torch._C"] = MagicMock(name="torch._C")
+    finally:
+        if _save is None:
+            del os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"]
+        else:
+            os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = _save
+        for _name in [
+            n for n in sys.modules
+            if (n == "triton" or n.startswith("triton."))
+            and n not in _stub_modules
+        ]:
+            del sys.modules[_name]

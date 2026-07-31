@@ -1,0 +1,21 @@
+/* Furo theme customizations */
+
+.content img {
+    max-width: 100%;
+    height: auto;
+}
+
+div[role="main"] table.docutils,
+article table.docutils {
+    margin-left: 0;
+    margin-right: auto;
+}
+
+.github-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+    text-decoration: none;
+    margin-right: 8px;
+}

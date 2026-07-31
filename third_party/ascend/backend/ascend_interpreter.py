@@ -31,8 +31,8 @@ import warnings
 import contextlib
 import numpy as np
 import triton.language as tl
-from triton.runtime.interpreter import InterpreterBuilder, TensorHandle, ReduceOps, _get_np_dtype, _patch_builtin, _LangPatchScope
-from triton._C.libtriton import interpreter as _interpreter
+from triton.runtime.interpreter import InterpreterBuilder, TensorHandle, ReduceOps, ScanOps, _get_np_dtype, _patch_builtin, _patch_attr, _LangPatchScope
+from triton._C.libtriton import interpreter as _interpreter, ir as _ir
 
 
 class AscendReduceOps(ReduceOps):
@@ -58,6 +58,230 @@ class AscendReduceOps(ReduceOps):
         else:
             # Fall back to the slow mode
             return self.generic_reduce(input_param)
+
+    def sum(self, input):
+        # Align with compiler optimization: promote fp16 to fp32
+        data = input.handle.data
+        if data.dtype == np.float16:
+            result = np.sum(data.astype(np.float32), axis=self.axis, keepdims=self.keep_dims).astype(np.float16)
+        else:
+            result = np.sum(data, axis=self.axis, keepdims=self.keep_dims)
+        return self.to_tensor(result, input.dtype)
+
+    def generic_reduce(self, input):
+        original_axis = self.axis
+        input, axis = self.unravel(input, self.axis)
+        input_data = []
+        output_data = []
+        input_shape = input[0].handle.data.shape
+        output_shape = input_shape[0:axis] + input_shape[axis + 1:]
+        for arg in input:
+            input_data.append(arg.handle.data)
+            output_data.append(np.zeros(output_shape, dtype=arg.handle.data.dtype))
+        # Reduce on axis
+        for i in range(input_data[0].size):
+            # Recover input_index from i using input_shape
+            input_index = np.unravel_index(i, input_shape)
+            output_index = input_index[0:axis] + input_index[axis + 1:]
+            # For tuple input (value, index), the index input should use local
+            # index along the reduce axis instead of the stored global index,
+            # so that the result matches torch.min/torch.max which return
+            # per-axis local indices. Only apply this conversion for the
+            # canonical (value, index) two-input form to avoid side effects on
+            # other custom combine functions.
+            is_indexed_reduce = len(input_data) == 2
+            input_tuple = []
+            for ii, d in enumerate(input_data):
+                if is_indexed_reduce and ii == 1:
+                    # Second input is the index parameter - use local index along the reduce axis
+                    val = input_index[axis]
+                else:
+                    val = d[input_index]
+                input_tuple.append(self.to_tensor(val, input[ii].dtype))
+            input_tuple = tuple(input_tuple)
+            if input_index[axis] == 0:
+                # First element
+                for j in range(len(output_data)):
+                    output_data[j][output_index] = input_tuple[j].handle.data.item()
+            else:
+                acc_tuple = tuple(self.to_tensor(o[output_index], input[oi].dtype) for oi, o in enumerate(output_data))
+                combine_fn_ret = self.combine_fn.fn(*acc_tuple, *input_tuple)
+                acc_tuple = (combine_fn_ret, ) if not isinstance(combine_fn_ret, tuple) else combine_fn_ret
+                for j in range(len(output_data)):
+                    output_data[j][output_index] = acc_tuple[j].handle.data.item() if isinstance(
+                        acc_tuple[j], tl.core.tensor) else acc_tuple[j]
+        # Pack output
+        ret = []
+        for i, data in enumerate(output_data):
+            if self.keep_dims:
+                if original_axis is not None:
+                    data = np.expand_dims(data, axis)
+                else:
+                    for _ in range(len(input_shape)):
+                        data = np.expand_dims(data, 0)
+
+            elif original_axis is None:
+                # Take a scalar
+                data = data.item()
+            ret.append(self.to_tensor(data, input[i].dtype))
+        return ret
+
+
+class AscendScanOps(ScanOps):
+
+    def cumsum(self, input):
+        # Align with compiler optimization: promote fp16 to fp32
+        data = input.handle.data
+        if data.dtype == np.float16:
+            result = np.cumsum(data.astype(np.float32), axis=self.axis).astype(np.float16)
+        else:
+            result = np.cumsum(data, axis=self.axis)
+        return [self.to_tensor(result, dtype=input.dtype)]
+
+
+# AST rewriting: convert Python `and`/`or`/`not` to element-wise `&`/`|`/`~`
+import ast as _ast
+import inspect as _inspect
+import types as _types
+
+_boolop_cache: dict = {}
+
+
+class _BoolOpRewriter(_ast.NodeTransformer):
+
+    def visit_BoolOp(self, node):
+        self.generic_visit(node)
+        values = node.values
+        if isinstance(node.op, _ast.And):
+            result = values[0]
+            for v in values[1:]:
+                result = _ast.BinOp(left=result, op=_ast.BitAnd(), right=v)
+                _ast.copy_location(result, node)
+            return result
+        elif isinstance(node.op, _ast.Or):
+            result = values[0]
+            for v in values[1:]:
+                result = _ast.BinOp(left=result, op=_ast.BitOr(), right=v)
+                _ast.copy_location(result, node)
+            return result
+        return node
+
+    def visit_UnaryOp(self, node):
+        self.generic_visit(node)
+        if isinstance(node.op, _ast.Not):
+            return _ast.UnaryOp(op=_ast.Invert(), operand=node.operand)
+        return node
+
+
+class _SubscriptRewriter(_ast.NodeTransformer):
+    """Wrap subscript values with _ensure_indexable() when the slice contains
+    None, so Python scalars (e.g. loop variables from range()) support
+    [None, None] broadcasting like the compiler does.
+
+    In compiler mode, `for ii in range(4)` yields constexpr values, and
+    `(ii * 4 + jj)[None, None]` is handled by the AST visitor as an
+    expand_dims on a scalar. In interpreter mode, `ii` is a plain Python
+    int, and `int[None, None]` raises TypeError. This transformer wraps the
+    subscript value in _ensure_indexable() which is a no-op for tensors but
+    converts scalars to 0-d tensors.
+    """
+
+    def _has_none_index(self, node):
+        if isinstance(node, _ast.Constant) and node.value is None:
+            return True
+        if isinstance(node, _ast.Tuple):
+            return any(self._has_none_index(elt) for elt in node.elts)
+        return False
+
+    def visit_Subscript(self, node):
+        self.generic_visit(node)
+        if self._has_none_index(node.slice):
+            node.value = _ast.Call(
+                func=_ast.Name(id='_ensure_indexable', ctx=_ast.Load()),
+                args=[node.value],
+                keywords=[],
+            )
+            _ast.copy_location(node.value, node)
+        return node
+
+
+def _ensure_indexable(value):
+    """Make a value support [None, ...] indexing for broadcasting.
+
+    Tensors are returned as-is; Python scalars are converted to 0-d tensors
+    so that scalar[None, None] works like it does in compiler mode.
+    """
+    if isinstance(value, tl.tensor):
+        return value
+    if isinstance(value, bool):
+        np_val = np.array([value], dtype=np.bool_)
+        tt_type = tl.int1
+    elif isinstance(value, int):
+        np_val = np.array([value], dtype=np.int32)
+        tt_type = tl.int32
+    elif isinstance(value, float):
+        np_val = np.array([value], dtype=np.float32)
+        tt_type = tl.float32
+    else:
+        return value
+    return tl.tensor(TensorHandle(np_val, tt_type.scalar), tt_type)
+
+
+def _rewrite_boolops(fn):
+    """Return a copy of *fn* whose AST has `and`→`&`, `or`→`|`, `not`→`~`,
+    and scalar subscripts wrapped to support [None, None] broadcasting."""
+    if fn in _boolop_cache:
+        return _boolop_cache[fn]
+    try:
+        src = _inspect.getsource(fn)
+        # Dedent in case the function is nested (e.g. inside a class)
+        import textwrap
+        src = textwrap.dedent(src)
+        tree = _ast.parse(src)
+        tree = _BoolOpRewriter().visit(tree)
+        tree = _SubscriptRewriter().visit(tree)
+        _ast.fix_missing_locations(tree)
+        code = compile(tree, filename=_inspect.getfile(fn), mode='exec')
+        # Inject helper so the rewritten function can access it
+        fn.__globals__['_ensure_indexable'] = _ensure_indexable
+        ns: dict = {}
+        exec(code, fn.__globals__, ns)
+        new_fn = ns[fn.__name__]
+        new_fn.__defaults__ = fn.__defaults__
+        new_fn.__kwdefaults__ = fn.__kwdefaults__
+        _boolop_cache[fn] = new_fn
+        return new_fn
+    except Exception:
+        return fn
+
+
+class _GlobalsProxy:
+    """Wraps fn.__globals__ (a dict) so _LangPatchScope.set_attr (which uses
+    getattr/setattr/delattr) can patch directly-imported builtin functions.
+
+    When a kernel does ``from ...extension import gather_out_to_ub``, the name
+    is bound in fn.__globals__ as a direct reference to the original function.
+    Patching the source module attribute does not update this binding, so we
+    need to patch the dict entry itself.
+    """
+
+    def __init__(self, d):
+        object.__setattr__(self, '_d', d)
+
+    def __getattr__(self, name):
+        try:
+            return self._d[name]
+        except KeyError:
+            raise AttributeError(name)
+
+    def __setattr__(self, name, value):
+        self._d[name] = value
+
+    def __delattr__(self, name):
+        try:
+            del self._d[name]
+        except KeyError:
+            pass
 
 
 def _compute_strides(shape):
@@ -89,6 +313,8 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         self.sub_vec_id = 0
         # Flag to track if sub_vec_id simulation is needed
         self._sub_vec_simulation_enabled = False
+        # Alias so semantic.py can access builder._ascend_builder.create_*
+        self._ascend_builder = self
 
     def to_int_val(self, val):
         """
@@ -101,7 +327,7 @@ class AscendInterpreterBuilder(InterpreterBuilder):
             return int(val.data.item())
         return int(val)
 
-    def _patch_lang_ascend(self, fn):
+    def _patch_lang_ascend(self, fn, scope: _LangPatchScope):
 
         def _new_range(arg1, arg2=None, step=None, **kwargs):
             if step is None:
@@ -115,35 +341,19 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         def _new_reduce(input_param, axis, combine_fn, keep_dims=False, **kwargs):
             return AscendReduceOps(axis, combine_fn, keep_dims).apply(input_param)
 
+        def _new_scan(input, axis, combine_fn, reverse=False, **kwargs):
+            return AscendScanOps(axis, combine_fn, reverse).apply(input)
+
         @contextlib.contextmanager
         def _dummpy_scope(*args, **kwargs):
             yield
 
-        tl.extra.cann.extension.scope = _dummpy_scope
-        tl.extra.cann.extension.parallel = _new_range
-        tl.reduce = _new_reduce
-        tl.core.reduce = _new_reduce
-
-    def get_additional_reserved_keywords(self):
-        """
-        Return additional reserved keywords specific to Ascend backend.
-
-        These keywords will be filtered out from kernel call arguments
-        and are not supported by the interpreter.
-
-        :return: List of additional reserved keyword strings
-        """
-        return [
-            "multibuffer",  # Ascend-specific memory buffering
-            "debug",
-            "optimize_dynamic_offset",
-            "enable_mixed_cv",
-            "enable_auto_bind_sub_block",
-            "sync_solver",
-            # Add more Ascend-specific keywords here as needed
-            # "ascend_option1",
-            # "ascend_option2",
-        ]
+        scope.set_attr(tl.extra.cann.extension, "scope", _dummpy_scope)
+        scope.set_attr(tl.extra.cann.extension, "parallel", _new_range)
+        scope.set_attr(tl, "reduce", _new_reduce)
+        scope.set_attr(tl.core, "reduce", _new_reduce)
+        scope.set_attr(tl, "associative_scan", _new_scan)
+        scope.set_attr(tl.core, "associative_scan", _new_scan)
 
     def patch_extensions(self, fn, scope: _LangPatchScope):
         """
@@ -156,19 +366,26 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         :param fn: The kernel function to patch extensions for
         :param scope: The language patch scope to use for patching
         """
-        self._patch_lang_ascend(fn)
+        self._patch_lang_ascend(fn, scope)
 
         # Patch all modules in fn's globals that might be extension modules
+        # and directly-imported builtin functions (e.g. `from ...extension import gather_out_to_ub`)
+        globals_proxy = _GlobalsProxy(fn.__globals__)
         for name, value in list(fn.__globals__.items()):
             if value is None:
                 continue
             try:
-                # Check if it looks like an extension module (has builtin functions)
-                if hasattr(value, '__name__') and 'extension' in str(value.__name__):
+                if tl.core.is_builtin(value):
+                    # Direct import of a builtin function: patch the dict entry
+                    # itself so the kernel resolves to the interpreter-patched version.
+                    _patch_attr(globals_proxy, name, value, self, scope)
+                elif hasattr(value, '__name__') and 'extension' in str(value.__name__):
                     _patch_builtin(value, self, scope)
                 # Also try patching any module-like object that might have builtin functions
-                elif hasattr(value, '__dict__') and not isinstance(value, type):
-                    # Try to patch it and ignore if it fails
+                # Skip non-triton modules (torch/numpy/etc.) to avoid inspect.getmembers
+                # side-effects on C extensions that can cause heap corruption.
+                elif (hasattr(value, '__dict__') and not isinstance(value, type) and hasattr(value, '__name__')
+                      and 'triton' in str(value.__name__)):
                     try:
                         _patch_builtin(value, self, scope)
                     except Exception:
@@ -199,6 +416,8 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         # Reset simulation flag at the beginning of each execution
         self._sub_vec_simulation_enabled = False
         self.sub_vec_id = 0
+        # Rewrite `and`→`&`, `or`→`|`, `not`→`~` to match compiler semantics
+        fn = _rewrite_boolops(fn)
 
         # First, try a single execution to see if sub_vec_id is used
         for x in range(grid[0]):
@@ -730,3 +949,91 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         else:
             warnings.warn(f"compile_hint '{hint_name}' is not supported in interpreter mode, just pass it", UserWarning,
                           stacklevel=2)
+
+    def create_idiv(self, lhs, rhs):
+        # NPU hardware saturates on integer division by zero:
+        #   positive // 0 → dtype max (acts as +inf)
+        #   negative // 0 → dtype min (acts as -inf)
+        #   0 // 0 → 0
+        # numpy returns 0 for all these cases. Match NPU behaviour.
+        result = (lhs.data - np.fmod(lhs.data, rhs.data)) // rhs.data
+        if lhs.data.dtype.kind in ('i', 'u'):
+            zero_mask = (rhs.data == 0)
+            if np.any(zero_mask):
+                result = result.copy()
+                dt_info = np.iinfo(lhs.data.dtype)
+                pos_mask = zero_mask & (lhs.data > 0)
+                neg_mask = zero_mask & (lhs.data < 0)
+                if np.any(pos_mask):
+                    result[pos_mask] = dt_info.max
+                if np.any(neg_mask):
+                    result[neg_mask] = dt_info.min
+        return TensorHandle(result, lhs.dtype.scalar)
+
+    def create_histogram(self, data, bins, mask):
+        # Override to ensure histogram result is always int32, regardless of
+        # input dtype (base impl uses input dtype for weights, causing int64
+        # results that fail TensorHandle validation for int32 return type).
+        if mask is None:
+            mask = TensorHandle(np.ones_like(data.data, dtype=bool), tl.int1)
+        dummy_weights = np.ones_like(data.data, dtype=np.int32)
+        masked_data = np.where(mask.data, data.data, np.zeros_like(data.data))
+        histogram = np.histogram(masked_data, bins=bins, range=(0, bins), weights=dummy_weights)[0]
+        histogram[0] -= np.logical_not(mask.data).sum()
+        return TensorHandle(histogram.astype(np.int32), tl.int32)
+
+    def create_atomic_rmw(self, rmwOp, ptr, val, mask, sem, scope):
+        """
+        Override create_atomic_rmw to support float32/float64 MAX/MIN.
+
+        The community C++ interpreter only instantiates MAX/MIN over int32/int64
+        (and UMAX/UMIN over uint32/uint64), so  We reuse the GPU triton trick : bitcast the float
+        to int/uint  of the same width and dispatch onto the existing integer atomic ops.
+        When the intrusive modification of atomic_max/atomic_min op is fallback, this function can be deleted.
+        """
+
+        sca_ty = val.dtype.scalar
+        is_float_max = rmwOp == _ir.ATOMIC_OP.MAX and sca_ty in {tl.float32, tl.float64}
+        is_float_min = rmwOp == _ir.ATOMIC_OP.MIN and sca_ty in {tl.float32, tl.float64}
+
+        if not (is_float_max or is_float_min):
+            return super().create_atomic_rmw(rmwOp, ptr, val, mask, sem, scope)
+
+        # Map float dtype to int/uint (numpy + triton) of the same bit-width.
+        if sca_ty == tl.float32:
+            int_np, uint_np = np.int32, np.uint32
+            triton_int_type, triton_uint_type = tl.int32, tl.uint32
+        else:  # tl.float64
+            int_np, uint_np = np.int64, np.uint64
+            triton_int_type, triton_uint_type = tl.int64, tl.uint64
+
+        # Bitcast float val/ptr to int / uint (zero-copy view; ascontiguousarray
+        # guards against non-C-contiguous inputs which would break .view()).
+        int_val = TensorHandle(np.ascontiguousarray(val.data).view(int_np), triton_int_type)
+        uint_val = TensorHandle(np.ascontiguousarray(val.data).view(uint_np), triton_uint_type)
+        int_ptr = TensorHandle(ptr.data, tl.pointer_type(triton_int_type, 1))
+        uint_ptr = TensorHandle(ptr.data, tl.pointer_type(triton_uint_type, 1))
+
+        # Split mask by sign of val (matches GPU semantic._signbit: 1 == negative).
+        # np.signbit handles NaN (signbit=0 -> treated as positive, matching IEEE 754).
+        is_negative = np.signbit(val.data)
+        is_positive = ~is_negative
+        pos_mask = TensorHandle(np.logical_and(mask.data, is_positive), mask.dtype)
+        neg_mask = TensorHandle(np.logical_and(mask.data, is_negative), mask.dtype)
+
+        # Pick the integer ops that preserve float ordering.
+        if is_float_max:
+            pos_op, neg_op = _ir.ATOMIC_OP.MAX, _ir.ATOMIC_OP.UMIN
+        else:  # MIN
+            pos_op, neg_op = _ir.ATOMIC_OP.MIN, _ir.ATOMIC_OP.UMAX
+
+        # Two disjoint atomic ops (pos_mask & neg_mask do not overlap).
+        pos_ret = super().create_atomic_rmw(pos_op, int_ptr, int_val, pos_mask, sem, scope)
+        neg_ret = super().create_atomic_rmw(neg_op, uint_ptr, uint_val, neg_mask, sem, scope)
+
+        pos_ret_int = np.ascontiguousarray(pos_ret.data).view(int_np)
+        neg_ret_int = np.ascontiguousarray(neg_ret.data).view(int_np)
+        combined_int = np.where(is_positive, pos_ret_int, neg_ret_int)
+
+        result = np.ascontiguousarray(combined_int).view(_get_np_dtype(sca_ty))
+        return TensorHandle(result, sca_ty)

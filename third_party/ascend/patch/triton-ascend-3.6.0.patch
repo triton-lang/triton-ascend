@@ -809,7 +809,7 @@ diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
 index 48049f0268..e96284bc21 100644
 --- a/bin/RegisterTritonDialects.h
 +++ b/bin/RegisterTritonDialects.h
-@@ -1,6 +1,34 @@
+@@ -1,6 +1,35 @@
  #pragma once
 +#include "ascend/include/AutoBlockify/Passes.h"
 +#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
@@ -830,6 +830,7 @@ index 48049f0268..e96284bc21 100644
 +#include "ascend/include/TritonToLLVM/Passes.h"
 +#include "ascend/include/TritonToLinalg/Passes.h"
 +#include "ascend/include/TritonToStructured/Passes.h"
++#include "ascend/include/GatherOptimization/Passes.h"
 +#include "ascend/include/TritonToUnstructure/Passes.h"
 +
 +#include "bishengir/Dialect/Annotation/IR/Annotation.h"
@@ -844,7 +845,7 @@ index 48049f0268..e96284bc21 100644
  #include "nvidia/include/Dialect/NVGPU/IR/Dialect.h"
  #include "nvidia/include/Dialect/NVWS/IR/Dialect.h"
  #include "proton/Dialect/include/Conversion/ProtonGPUToLLVM/Passes.h"
-@@ -85,6 +113,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -85,6 +114,20 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::registerConvertTritonGPUToLLVMPass();
    mlir::triton::registerConvertNVGPUToLLVMPass();
    mlir::triton::registerAllocateSharedMemoryNvPass();
@@ -853,6 +854,7 @@ index 48049f0268..e96284bc21 100644
 +  mlir::triton::registerDiscreteMaskAccessConversion();
 +  mlir::triton::registerTritonToStructuredPasses();
 +  mlir::triton::registerTritonToAnnotationPasses();
++  mlir::triton::registerGatherOptimizationPasses();
 +  mlir::triton::registerTritonToUnstructurePasses();
 +  mlir::triton::registerTritonToHIVMPasses();
 +  mlir::triton::registerTritonToHFusionPasses();
@@ -928,7 +930,7 @@ diff --git a/bin/CMakeLists.txt b/bin/CMakeLists.txt
 index cc0b4fa15a..9d8955c464 100644
 --- a/bin/CMakeLists.txt
 +++ b/bin/CMakeLists.txt
-@@ -1,11 +1,35 @@
+@@ -1,11 +1,36 @@
  get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
  
 +include_directories(
@@ -950,6 +952,7 @@ index cc0b4fa15a..9d8955c464 100644
 +  TritonToLinalg
 +  TritonToLLVM
 +  TritonToStructured
++  GatherOptimization
 +  TritonToUnstructure
 +  # BiShengIR dialects
 +  BiShengIRAnnotationDialect
@@ -964,7 +967,7 @@ index cc0b4fa15a..9d8955c464 100644
    # tests
    TritonTestAnalysis
    TritonTestDialect
-@@ -27,6 +51,25 @@ mlir_check_all_link_libraries(triton-reduce)
+@@ -27,6 +52,25 @@ mlir_check_all_link_libraries(triton-reduce)
  llvm_update_compile_flags(triton-reduce)
  target_link_libraries(triton-reduce PRIVATE
    ${triton_libs}
@@ -990,7 +993,7 @@ index cc0b4fa15a..9d8955c464 100644
    # tests
    TritonTestAnalysis
    TritonTestDialect
-@@ -47,6 +90,25 @@ add_llvm_executable(triton-lsp triton-lsp.cpp PARTIAL_SOURCES_INTENDED)
+@@ -47,6 +91,25 @@ add_llvm_executable(triton-lsp triton-lsp.cpp PARTIAL_SOURCES_INTENDED)
  llvm_update_compile_flags(triton-lsp)
  target_link_libraries(triton-lsp PRIVATE
    ${triton_libs}
@@ -1016,7 +1019,7 @@ index cc0b4fa15a..9d8955c464 100644
    # tests
    TritonTestAnalysis
    TritonTestDialect
-@@ -86,6 +148,26 @@ export_executable_symbols_for_plugins(triton-llvm-opt)
+@@ -86,6 +149,26 @@ export_executable_symbols_for_plugins(triton-llvm-opt)
  add_llvm_executable(triton-tensor-layout triton-tensor-layout.cpp PARTIAL_SOURCES_INTENDED)
  target_link_libraries(triton-tensor-layout PRIVATE
    ${triton_libs}

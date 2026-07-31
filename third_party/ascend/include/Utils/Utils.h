@@ -126,6 +126,44 @@ void traverseForwardUpdateUserChainIf(
     std::function<void(OpBuilder &, Operation *)> actionFn,
     llvm::SmallPtrSet<Operation *, 16> &stopOps);
 
+/// Traverse back and return an operand definition that fulfills a condition
+/// \param operand operand whose defining operation will be checked
+/// \param condFn condition that has to be fulfilled
+///
+/// \returns operation which fulfills condition, nullptr if not found
+mlir::Operation *findOperandDefinitionWithCondition(
+    mlir::Value operand, const std::function<bool(Operation *)> &condFn);
+
+/// Traverse back and return preceding operation that fulfills a condition
+/// \param rootOp starting operation (will be excluded from condition check)
+/// \param condFn condition that has to be fulfilled
+///
+/// \returns operation which fulfills condition, nullptr if not found
+mlir::Operation *
+findPrecedingOpWithCondition(mlir::Operation *rootOp,
+                             const std::function<bool(Operation *)> &condFn);
+
+/// Traverse back and return operand definition that fulfills a condition
+/// \param operand the operand whose defining operation will be checked
+/// \param condFn condition that has to be fulfilled
+/// \param stopFn stop processing a branch if this condition is true
+///
+/// \returns operation which fulfills condition, nullptr if not found
+mlir::Operation *findOperandDefinitionWithCondition(
+    mlir::Value operand, const std::function<bool(Operation *)> &condFn,
+    const std::function<bool(Operation *)> &stopFn);
+
+/// Traverse back and return preceding operation that fulfills a condition
+/// \param rootOp starting operation (will be excluded from condition check)
+/// \param condFn condition that has to be fulfilled
+/// \param stopFn stop processing a branch if this condition is true
+///
+/// \returns operation which fulfills condition, nullptr if not found
+mlir::Operation *
+findPrecedingOpWithCondition(mlir::Operation *rootOp,
+                             const std::function<bool(Operation *)> &condFn,
+                             const std::function<bool(Operation *)> &stopFn);
+
 // UseAnalysis will tag operations whose results are used only as meta-data
 // with "MetaUse" tag.
 bool isMetaUse(Operation *op);

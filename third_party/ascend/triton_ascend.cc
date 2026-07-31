@@ -12,6 +12,7 @@
 #include "ascend/include/AutoBlockify/Passes.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
+#include "ascend/include/GatherOptimization/Passes.h"
 #include "ascend/include/TritonControlFlowOpt/Passes.h"
 #include "ascend/include/TritonToAnnotation/Passes.h"
 #include "ascend/include/TritonToHFusion/Passes.h"
@@ -82,6 +83,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
               globalKernel, namedOps, enableNd2nzOnVector, enableSelectAnalysis,
               compileOn91095));
         });
+
+  m.def("add_gather_optimization", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createGatherOptimizationPass());
+  });
 
   m.def("add_triton_to_unstructure",
         [](mlir::PassManager &pm, bool compileOn91095, bool forceSimtTemplate) {

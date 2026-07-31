@@ -891,6 +891,260 @@ void traverseForwardUpdateUserChainIf(
                                    builder, stopOps);
 }
 
+mlir::Operation *findOperandDefinitionWithCondition(
+    mlir::Value operand, const std::function<bool(Operation *)> &condFn) {
+  return findOperandDefinitionWithCondition(operand, condFn, nullptr);
+}
+
+mlir::Operation *
+findPrecedingOpWithCondition(mlir::Operation *rootOp,
+                             const std::function<bool(Operation *)> &condFn) {
+  return findPrecedingOpWithCondition(rootOp, condFn, nullptr);
+}
+
+/* Traverse back and return operand definition for which condFn is true.
+ * Stop traversing a branch if stopFn returns true.
+ * Return nullptr if condFn is false for all operations.
+ */
+mlir::Operation *findOperandDefinitionWithCondition(
+    mlir::Value operand, const std::function<bool(Operation *)> &condFn,
+    const std::function<bool(Operation *)> &stopFn) {
+  auto rootOp = operand.getDefiningOp();
+  if (!rootOp) {
+    return nullptr;
+  }
+  if (stopFn != nullptr && stopFn(rootOp)) {
+    LLVM_DEBUG({
+      auto &os = llvm::dbgs();
+      os << "[findOperandDefinitionWithCondition] stop condition true: { "
+         << *rootOp << " }\n";
+    });
+    return nullptr;
+  }
+  if (condFn(rootOp)) {
+    LLVM_DEBUG({
+      auto &os = llvm::dbgs();
+      os << "[findOperandDefinitionWithCondition] condition true: { " << *rootOp
+         << " }\n";
+    });
+    return rootOp;
+  }
+  SmallVector<mlir::Value> operands;
+
+  // Ifs and loops require operand for getResultNumber(),
+  // so we skip handling through findPrecedingOpWithCondition,
+  // unless no yielded values are found, then nullptr will be returned.
+  if (auto op = dyn_cast<scf::IfOp>(rootOp)) {
+    auto index = cast<OpResult>(operand).getResultNumber();
+    Block &thenBlock = op.getThenRegion().front();
+    operands.push_back(thenBlock.getTerminator()->getOperand(index));
+    if (op.elseBlock()) {
+      Block &elseBlock = op.getElseRegion().front();
+      operands.push_back(elseBlock.getTerminator()->getOperand(index));
+    }
+    for (auto yieldedValue : operands) {
+      if (auto targetOp = findOperandDefinitionWithCondition(yieldedValue,
+                                                             condFn, stopFn)) {
+        return targetOp;
+      }
+    }
+  } else if (auto op = dyn_cast<LoopLikeOpInterface>(rootOp)) {
+    auto resNum = cast<OpResult>(operand).getResultNumber();
+    Value yieldedValue = nullptr;
+    if (auto whileOp = dyn_cast<scf::WhileOp>(op.getOperation())) {
+      yieldedValue = whileOp.getConditionOp().getArgs()[resNum];
+    } else {
+      yieldedValue = op.getYieldedValues()[resNum];
+    }
+    if (yieldedValue) {
+      if (auto targetOp = findOperandDefinitionWithCondition(yieldedValue,
+                                                             condFn, stopFn)) {
+        return targetOp;
+      }
+    }
+  }
+
+  return findPrecedingOpWithCondition(rootOp, condFn, stopFn);
+}
+
+mlir::Operation *
+findPrecedingOpWithCondition(mlir::Operation *rootOp,
+                             const std::function<bool(Operation *)> &condFn,
+                             const std::function<bool(Operation *)> &stopFn) {
+  LLVM_DEBUG({
+    auto &os = llvm::dbgs();
+    os << "[findPrecedingOpWithCondition] check parents for op: { " << *rootOp
+       << " }\n";
+  });
+  SmallVector<mlir::Value> operands;
+
+  if (auto op = dyn_cast<triton::AddPtrOp>(rootOp)) {
+    operands.push_back(op.getPtr());
+    operands.push_back(op.getOffset());
+  } else if (auto op = dyn_cast<triton::LoadOp>(rootOp)) {
+    operands.push_back(op.getPtr());
+  } else if (auto op = dyn_cast<triton::AdvanceOp>(rootOp)) {
+    operands.push_back(op.getPtr());
+  } else if (auto op = dyn_cast<triton::ReduceOp>(rootOp)) {
+    operands.push_back(op->getOperand(0));
+  } else if (auto op = dyn_cast<triton::ReduceReturnOp>(rootOp)) {
+    operands.push_back(op->getOperand(0));
+  } else if (auto op = dyn_cast<arith::AddIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::SubIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::MulIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::DivSIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::RemSIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<triton::SplatOp>(rootOp)) {
+    operands.push_back(op.getSrc());
+  } else if (auto op = dyn_cast<triton::BroadcastOp>(rootOp)) {
+    operands.push_back(op.getSrc());
+  } else if (auto op = dyn_cast<triton::ExpandDimsOp>(rootOp)) {
+    operands.push_back(op.getSrc());
+  } else if (auto op = dyn_cast<triton::BitcastOp>(rootOp)) {
+    operands.push_back(op.getSrc());
+  } else if (auto op = dyn_cast<triton::IntToPtrOp>(rootOp)) {
+    operands.push_back(op.getSrc());
+  } else if (auto op = dyn_cast<arith::IndexCastOp>(rootOp)) {
+    operands.push_back(op.getIn());
+  } else if (auto op = dyn_cast<arith::ExtSIOp>(rootOp)) {
+    operands.push_back(op.getIn());
+  } else if (auto op = dyn_cast<arith::SelectOp>(rootOp)) {
+    operands.push_back(op.getCondition());
+    operands.push_back(op.getTrueValue());
+    operands.push_back(op.getFalseValue());
+  } else if (auto op = dyn_cast<arith::FPToSIOp>(rootOp)) {
+    operands.push_back(op.getIn());
+  } else if (auto op = dyn_cast<arith::SIToFPOp>(rootOp)) {
+    operands.push_back(op.getIn());
+  } else if (auto op = dyn_cast<arith::MulFOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::DivFOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::AddFOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::SubFOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::MinNumFOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::MaxNumFOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::MaxSIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::MinSIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::CmpIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::AndIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::OrIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<triton::ClampFOp>(rootOp)) {
+    operands.push_back(op.getX());
+    operands.push_back(op.getMin());
+    operands.push_back(op.getMax());
+  } else if (auto op = dyn_cast<scf::YieldOp>(rootOp)) {
+    for (auto src : rootOp->getOperands())
+      operands.push_back(src);
+  } else if (auto op = dyn_cast<tensor::ExtractSliceOp>(rootOp)) {
+    operands.push_back(op.getSource());
+  } else if (auto op = dyn_cast<tensor::InsertSliceOp>(rootOp)) {
+    operands.push_back(op.getSource());
+    operands.push_back(op.getDest());
+  } else if (auto op = dyn_cast<tensor::ExtractOp>(rootOp)) {
+    operands.push_back(op.getTensor());
+  } else if (auto op = dyn_cast<tensor::InsertOp>(rootOp)) {
+    operands.push_back(op.getScalar());
+    operands.push_back(op.getDest());
+  } else if (auto op = dyn_cast<arith::ShLIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::ShRSIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::ShRUIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::XOrIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::ExtUIOp>(rootOp)) {
+    operands.push_back(op.getIn());
+  } else if (auto op = dyn_cast<arith::TruncIOp>(rootOp)) {
+    operands.push_back(op.getIn());
+  } else if (auto op = dyn_cast<arith::CmpFOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::ExtFOp>(rootOp)) {
+    operands.push_back(op.getIn());
+  } else if (auto op = dyn_cast<arith::TruncFOp>(rootOp)) {
+    operands.push_back(op.getIn());
+  } else if (auto op = dyn_cast<arith::NegFOp>(rootOp)) {
+    operands.push_back(op.getOperand());
+  } else if (auto op = dyn_cast<arith::FPToUIOp>(rootOp)) {
+    operands.push_back(op.getIn());
+  } else if (auto op = dyn_cast<arith::UIToFPOp>(rootOp)) {
+    operands.push_back(op.getIn());
+  } else if (auto op = dyn_cast<arith::DivUIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::CeilDivSIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::FloorDivSIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::MaxUIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (auto op = dyn_cast<arith::MinUIOp>(rootOp)) {
+    operands.push_back(op.getLhs());
+    operands.push_back(op.getRhs());
+  } else if (isa<arith::ConstantFloatOp>(rootOp)) {
+  } else if (isa<arith::ConstantIntOp>(rootOp)) {
+  } else if (isa<arith::ConstantOp>(rootOp)) {
+  } else if (isa<triton::GetProgramIdOp>(rootOp)) {
+  } else if (isa<triton::GetNumProgramsOp>(rootOp)) {
+  } else if (isa<triton::MakeRangeOp>(rootOp)) {
+  } else if (isa<triton::MakeTensorPtrOp>(rootOp)) {
+  } else if (isa<scf::IfOp>(rootOp)) {
+  } else if (isa<LoopLikeOpInterface>(rootOp)) {
+  } else {
+    rootOp->emitRemark("Backtracing encounters unsupported Operation");
+    return nullptr;
+  }
+
+  // Backtrace operands
+  for (auto operand : operands) {
+    if (mlir::Operation *targetOp =
+            findOperandDefinitionWithCondition(operand, condFn, stopFn)) {
+      return targetOp;
+    }
+  }
+
+  return nullptr;
+}
+
 bool isMetaUse(Operation *op) { return op->hasAttr("MetaUse"); }
 
 bool isMixUse(Operation *op) { return op->hasAttr("MixUse"); }

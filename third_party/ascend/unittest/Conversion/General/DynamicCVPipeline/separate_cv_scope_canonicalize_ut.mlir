@@ -661,7 +661,9 @@ module {
 // CHECK-NEXT:     %[[SELC:.*]] = arith.select
 // CHECK-NEXT:     scf.condition(%[[SELC]])
 // CHECK-NEXT:   } do {
+// CHECK-NEXT:   ^bb0
 // CHECK-NEXT:     memref.store
+// CHECK-NEXT:     arith.addi
 // CHECK-NEXT:     scf.yield
 // CHECK-NEXT:   }
 // CHECK-NEXT:   scope.return
@@ -839,6 +841,72 @@ module {
     %sc = arith.addf %1#0, %cc_init {ssbuffer.core_type = "CUBE"} : tensor<4xf32>
     %ec = tensor.extract %sc[%idxc] {ssbuffer.core_type = "CUBE"} : tensor<4xf32>
     memref.store %ec, %outc[%idxc] {ssbuffer.core_type = "CUBE"} : memref<1xf32>
+    func.return
+  }
+}
+
+// -----
+
+// A VECTOR for can initialize a VECTOR while whose scalar results are consumed
+// directly by CUBE operations. The CUBE clone must retain both complete state
+// transitions; keeping either loop shell with neutral yields changes the live
+// while results.
+// CHECK-LABEL: func.func @vector_while_results_drive_cube(
+// CHECK:      scope.scope : () -> () {
+// CHECK:        %[[INIT:.*]]:2 = scf.for
+// CHECK:          arith.index_cast
+// CHECK-NEXT:     arith.addi
+// CHECK-NEXT:     arith.addi
+// CHECK-NEXT:     scf.yield
+// CHECK:        %[[WHILE:.*]]:2 = scf.while
+// CHECK:          arith.cmpi
+// CHECK-NEXT:     scf.condition
+// CHECK:        } do {
+// CHECK:          arith.addi
+// CHECK-NEXT:     arith.addi
+// CHECK-NEXT:     scf.yield
+// CHECK:        arith.muli %[[WHILE]]#0, %[[WHILE]]#1
+// CHECK-NEXT:   memref.store
+// CHECK-NEXT:   scope.return
+// CHECK-NEXT: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
+module {
+  func.func @vector_while_results_drive_cube(
+      %index_init: i64, %offset_init: i64, %limit: i64,
+      %out: memref<1xi64>) {
+    %idx = arith.constant {ssbuffer.core_type = "CUBE"} 0 : index
+    %c0 = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
+    %c2 = arith.constant {ssbuffer.core_type = "VECTOR"} 2 : index
+    %c1 = arith.constant {ssbuffer.core_type = "VECTOR"} 1 : index
+    %step = arith.constant {ssbuffer.core_type = "VECTOR"} 1 : i64
+    %0:2 = scf.for %i = %c0 to %c2 step %c1
+        iter_args(%index = %index_init, %offset = %offset_init)
+        -> (i64, i64) {
+      %i64 = arith.index_cast %i {ssbuffer.core_type = "VECTOR"}
+          : index to i64
+      %next_index = arith.addi %index, %i64
+          {ssbuffer.core_type = "VECTOR"} : i64
+      %next_offset = arith.addi %offset, %next_index
+          {ssbuffer.core_type = "VECTOR"} : i64
+      scf.yield {ssbuffer.core_type = "VECTOR, VECTOR"}
+          %next_index, %next_offset : i64, i64
+    } {ssbuffer.core_type = "VECTOR, VECTOR"}
+    %1:2 = scf.while (%index = %0#0, %offset = %0#1)
+        : (i64, i64) -> (i64, i64) {
+      %continue = arith.cmpi slt, %index, %limit
+          {ssbuffer.core_type = "VECTOR"} : i64
+      scf.condition(%continue) %index, %offset : i64, i64
+    } do {
+    ^bb0(%index: i64, %offset: i64):
+      %next_index = arith.addi %index, %step
+          {ssbuffer.core_type = "VECTOR"} : i64
+      %next_offset = arith.addi %offset, %next_index
+          {ssbuffer.core_type = "VECTOR"} : i64
+      scf.yield {ssbuffer.core_type = "VECTOR, VECTOR"}
+          %next_index, %next_offset : i64, i64
+    } attributes {ssbuffer.core_type = "VECTOR, VECTOR"}
+    %product = arith.muli %1#0, %1#1 {ssbuffer.core_type = "CUBE"} : i64
+    memref.store %product, %out[%idx] {ssbuffer.core_type = "CUBE"}
+        : memref<1xi64>
     func.return
   }
 }

@@ -293,20 +293,20 @@ void UBUsageOptPass::buildUBUsageGraph(Block *block, DenseMap<Operation *, int> 
                     LOG_DEBUG("Add memory edage from " << *srcInBlock << " to " << blockOp << "\nweight = " << 0
                                                        << "\n");
                 }
-                addEdge(srcNode, dstNode, 0);
+                addEdge(srcNode, dstNode, MAX_EDGE_SIZE);
             }
         });
     }
 }
 
-SmallVector<int> findDependency(int targetNdoe, int preNode, const SmallVector<SmallVector<int>> &linkIn,
-                                const SmallVector<int> &linkStart)
+SmallVector<int> findDependency(int targetNode, int preNode, const SmallVector<SmallVector<int>> &linkIn,
+                                const SmallVector<int> &linkStart, const SmallVector<int> &linkSize, const SmallVector<int> &nodeBlockId)
 {
     SmallVector<int> dependNodes;
     DenseSet<int> visited;
     std::queue<int> queue;
-    queue.push(targetNdoe);
-    visited.insert(targetNdoe);
+    queue.push(targetNode);
+    visited.insert(targetNode);
     while (!queue.empty()) {
         int curNode = queue.front();
         queue.pop();
@@ -316,6 +316,9 @@ SmallVector<int> findDependency(int targetNdoe, int preNode, const SmallVector<S
 
         for (int inEdgeId : linkIn[curNode]) {
             int inStart = linkStart[inEdgeId];
+            if (linkSize[inEdgeId] == 0 && nodeBlockId[inStart] != nodeBlockId[targetNode]) {
+                continue; // scalar edge, stop traversal
+            }
             if (visited.insert(inStart).second) {
                 dependNodes.push_back(inStart);
                 queue.push(inStart);
@@ -326,8 +329,9 @@ SmallVector<int> findDependency(int targetNdoe, int preNode, const SmallVector<S
 }
 
 bool isActiveEndNode(int srcNode, int endNode, const SmallVector<SmallVector<int>> &linkIn,
-                     const SmallVector<int> &linkStart, const SmallVector<int> &nodeBlockId,
-                     const SmallVector<int> &nodeCoreType, DenseMap<int, Operation *> nodeId2op)
+                     const SmallVector<int> &linkStart, const SmallVector<int> &linkSize,
+                     const SmallVector<int> &nodeBlockId, const SmallVector<int> &nodeCoreType,
+                     DenseMap<int, Operation *> nodeId2op)
 {
     int nodeNum = static_cast<int>(nodeBlockId.size());
     if (nodeCoreType[endNode] != nodeCoreType[srcNode]) {
@@ -343,10 +347,10 @@ bool isActiveEndNode(int srcNode, int endNode, const SmallVector<SmallVector<int
     }
     // To avoid cycles: we only collect 2 kind node:
     // 1. endNode only from src compute block. A->endnode->...
-    // 2. endNode's srcs donnot depend any compute block.  A->endnode;args/const/->src1->endnode->...
+    // 2. endNode's srcs donnot depend any other compute block.  A->endnode;args/const/->src1->endnode->...
     // In fact the second kind includes first;
     // BFS/DFS search expanding dependNodes transitively
-    auto dependNodes = findDependency(endNode, srcNode, linkIn, linkStart);
+    auto dependNodes = findDependency(endNode, srcNode, linkIn, linkStart, linkSize, nodeBlockId);
     for (int node : dependNodes) {
         if (nodeBlockId[node] != nodeBlockId[endNode] && nodeBlockId[node] != nodeBlockId[srcNode]) {
             return false;
@@ -358,8 +362,8 @@ bool isActiveEndNode(int srcNode, int endNode, const SmallVector<SmallVector<int
 static SmallVector<SmallVector<int>>
 collectNeedUbOpts(const SmallVector<SmallVector<int>> &linkOut, const SmallVector<SmallVector<int>> &linkIn,
                   const SmallVector<int> &linkStart, const SmallVector<int> &linkEnd,
-                  const SmallVector<int> &nodeBlockId, const SmallVector<int> &nodeCoreType,
-                  DenseMap<int, Operation *> nodeId2op)
+                  const SmallVector<int> &linkSize, const SmallVector<int> &nodeBlockId,
+                  const SmallVector<int> &nodeCoreType, DenseMap<int, Operation *> nodeId2op)
 {
     SmallVector<SmallVector<int>> needUbOpts;
     int maxBlockId = -1; // FIXME: We need to count how many compute block in the graph, but use max is not accurate.
@@ -379,7 +383,7 @@ collectNeedUbOpts(const SmallVector<SmallVector<int>> &linkOut, const SmallVecto
         bool canOptimize = false;
         for (int outEdgeId : linkOut[i]) {
             int dstNode = linkEnd[outEdgeId];
-            if (isActiveEndNode(i, dstNode, linkIn, linkStart, nodeBlockId, nodeCoreType, nodeId2op)) {
+            if (isActiveEndNode(i, dstNode, linkIn, linkStart, linkSize, nodeBlockId, nodeCoreType, nodeId2op)) {
                 canOptimize = true;
                 break;
             }
@@ -410,8 +414,8 @@ int UBUsageOptPass::sumIncomingLinkSize(int nodeId, const SmallVector<SmallVecto
 
 static bool findUniqueDependentNode(int curNode, int optBlockId, const SmallVector<SmallVector<int>> &linkOut,
                                     const SmallVector<SmallVector<int>> &linkIn, const SmallVector<int> &linkStart,
-                                    const SmallVector<int> &linkEnd, const SmallVector<int> &nodeBlockId,
-                                    int &uniqueNextNode)
+                                    const SmallVector<int> &linkSize, const SmallVector<int> &linkEnd,
+                                    const SmallVector<int> &nodeBlockId, int &uniqueNextNode)
 {
     // only find A link single chain.
     if (linkOut[curNode].size() != 1)
@@ -424,7 +428,7 @@ static bool findUniqueDependentNode(int curNode, int optBlockId, const SmallVect
     }
     // uniqueNextNode's dependent is all in nodeBlockId[curNode]
     bool onlyDependsOnCur = true;
-    auto dependNodes = findDependency(uniqueNextNode, curNode, linkIn, linkStart);
+    auto dependNodes = findDependency(uniqueNextNode, curNode, linkIn, linkStart, linkSize, nodeBlockId);
     for (auto node : dependNodes) {
         if (nodeBlockId[node] != nodeBlockId[curNode]) {
             return false;
@@ -447,7 +451,7 @@ DenseMap<int, int> UBUsageOptPass::collectRecordChange(
             SmallVector<int> activateSet;
             for (int outEdgeId : linkOut[optNode]) {
                 int dstNode = linkEnd[outEdgeId];
-                if (isActiveEndNode(optNode, dstNode, linkIn, linkStart, nodeBlockId, nodeCoreType, nodeId2op)) {
+                if (isActiveEndNode(optNode, dstNode, linkIn, linkStart, linkSize, nodeBlockId, nodeCoreType, nodeId2op)) {
                     if (std::find(activateSet.begin(), activateSet.end(), dstNode) == activateSet.end()) {
                         activateSet.push_back(dstNode);
                     }
@@ -468,7 +472,7 @@ DenseMap<int, int> UBUsageOptPass::collectRecordChange(
                 while (true) {
                     int curNode = chain.back();
                     int uniqueNextNode = -1;
-                    if (!findUniqueDependentNode(curNode, optBlockId, linkOut, linkIn, linkStart, linkEnd, nodeBlockId,
+                    if (!findUniqueDependentNode(curNode, optBlockId, linkOut, linkIn, linkStart, linkSize, linkEnd, nodeBlockId,
                                                  uniqueNextNode)) {
                         break;
                     }
@@ -497,7 +501,7 @@ DenseMap<int, int> UBUsageOptPass::collectRecordChange(
                     for (int i = 0; i < bestCutPointIdx; ++i) {
                         recordChange[chain[i]] = optBlockId;
                         auto chainPreNode = i - 1 < 0 ? optNode : chain[i - 1];
-                        auto dependNodes = findDependency(chain[i], chainPreNode, linkIn, linkStart);
+                        auto dependNodes = findDependency(chain[i], chainPreNode, linkIn, linkStart, linkSize, nodeBlockId);
                         for (auto node : dependNodes) {
                             if (nodeBlockId[node] != optBlockId) {
                                 recordChange[node] = optBlockId;
@@ -709,7 +713,7 @@ llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(Block *block, const CVPi
     buildUBUsageGraph(block, op2nodeId, nodeId2op, linkOut, linkIn, linkSize, linkStart, linkEnd, nodeBlockId,
                       nodeCoreType, nodeArgs, memGraph, bm);
     SmallVector<SmallVector<int>> needUbOpts =
-        collectNeedUbOpts(linkOut, linkIn, linkStart, linkEnd, nodeBlockId, nodeCoreType, nodeId2op);
+        collectNeedUbOpts(linkOut, linkIn, linkStart, linkEnd, linkSize, nodeBlockId, nodeCoreType, nodeId2op);
     int candidateCnt = 0;
     for (const auto &nodes : needUbOpts) {
         candidateCnt += static_cast<int>(nodes.size());

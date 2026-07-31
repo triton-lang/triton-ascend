@@ -507,14 +507,19 @@ static bool isEmptyFillPattern(Value depVal) {
 SmallVector<Value>
 collectBufferValues(DenseMap<Value, SmallVector<Value>> &depValueMap) {
   SmallVector<Value> valueList;
-  SmallVector<Operation *> seenOps;
+  // Dedup by depVal (not by defining op): a multi-result op like
+  // scf.if / scf.while shares one defining op across all its results, so
+  // collapsing by op would skip every yield after the first and leave
+  // downstream deps unbuffered.
+  llvm::DenseSet<Value> seenVals;
 
   for (auto &p : depValueMap) {
     for (Value depVal : p.second) {
       Operation *op = depVal.getDefiningOp();
-      if (!op || llvm::is_contained(seenOps, op))
+      if (!op)
         continue;
-      seenOps.push_back(op);
+      if (!seenVals.insert(depVal).second)
+        continue;
 
       auto shapedType = dyn_cast<ShapedType>(depVal.getType());
       if (!shapedType)
@@ -1716,7 +1721,11 @@ static int processTensorDependencies(
     DenseMap<Value, SmallVector<Value>> &depValueMap,
     DenseMap<Value, SmallVector<Operation *>> &depUserMap, BufferMap &bufferMap,
     OpBuilder &globalBuilder, int &groupId) {
-  SmallVector<Operation *> seenOps;
+  // Dedup by depVal (not by defining op): a multi-result op like
+  // scf.if / scf.while shares one defining op across all its results, so
+  // collapsing by op would skip every yield after the first and leave
+  // downstream deps unbuffered.
+  llvm::DenseSet<Value> seenVals;
 
   for (auto &blockPair : blocks) {
     Value blockKey = blockPair.first;
@@ -1728,9 +1737,8 @@ static int processTensorDependencies(
 
     for (Value depVal : depValues) {
       // Skip if already processed
-      if (llvm::is_contained(seenOps, depVal.getDefiningOp()))
+      if (!seenVals.insert(depVal).second)
         continue;
-      seenOps.push_back(depVal.getDefiningOp());
 
       // Validate dependency value (skip BlockArgument, null definingOp,
       // non-ShapedType)

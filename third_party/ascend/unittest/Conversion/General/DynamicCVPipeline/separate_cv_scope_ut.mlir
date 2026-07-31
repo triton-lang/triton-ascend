@@ -52,4 +52,49 @@ module {
     memref.store %1#2, %outc[%idxc] {ssbuffer.core_type = "CUBE"} : memref<1xi32>
     func.return
   }
+
+  // A while induction variable can belong to VECTOR while still controlling
+  // the trip count of CUBE work. Both separated scopes must preserve the
+  // predicate-carried value and its update.
+
+  // CHECK-LABEL: func.func @while_predicate_controls_mixed_scope(
+  // CHECK-SAME: %[[UB:.*]]: i32
+  // CHECK: scope.scope : () -> () {
+  // CHECK: scf.while (%[[V_IV:.*]] = %{{.*}}) : (i32) -> i32 {
+  // CHECK: %[[V_COND:.*]] = arith.cmpi slt, %[[V_IV]], %[[UB]]
+  // CHECK: scf.condition(%[[V_COND]]) %[[V_IV]] : i32
+  // CHECK: ^bb0(%[[V_BODY_IV:.*]]: i32):
+  // CHECK: %[[V_NEXT:.*]] = arith.addi %[[V_BODY_IV]], %{{.*}}
+  // CHECK: scf.yield %[[V_NEXT]] : i32
+  // CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+  // CHECK: scope.scope : () -> () {
+  // CHECK: scf.while (%[[C_IV:.*]] = %{{.*}}) : (i32) -> i32 {
+  // CHECK: %[[C_COND:.*]] = arith.cmpi slt, %[[C_IV]], %[[UB]]
+  // CHECK: scf.condition(%[[C_COND]]) %[[C_IV]] : i32
+  // CHECK: ^bb0(%[[C_BODY_IV:.*]]: i32):
+  // CHECK: memref.store
+  // CHECK: %[[C_NEXT:.*]] = arith.addi %[[C_BODY_IV]], %{{.*}}
+  // CHECK: scf.yield %[[C_NEXT]] : i32
+  // CHECK: } {hivm.matmul_limited_in_cube, hivm.tcore_type = #hivm.tcore_type<CUBE>}
+  func.func @while_predicate_controls_mixed_scope(
+      %ub: i32, %outv: memref<1xi32>, %outc: memref<1xi32>) {
+    %idxv = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : index
+    %idxc = arith.constant {ssbuffer.core_type = "CUBE"} 0 : index
+    %c0 = arith.constant {ssbuffer.core_type = "VECTOR"} 0 : i32
+    %c1 = arith.constant {ssbuffer.core_type = "VECTOR"} 1 : i32
+    %cube_value = arith.constant {ssbuffer.core_type = "CUBE"} 7 : i32
+
+    %result = scf.while (%iv = %c0) : (i32) -> i32 {
+      %cond = arith.cmpi slt, %iv, %ub {ssbuffer.core_type = "VECTOR"} : i32
+      scf.condition(%cond) {ssbuffer.core_type = "VECTOR"} %iv : i32
+    } do {
+    ^bb0(%iv: i32):
+      memref.store %cube_value, %outc[%idxc] {ssbuffer.core_type = "CUBE"} : memref<1xi32>
+      %next = arith.addi %iv, %c1 {ssbuffer.core_type = "VECTOR"} : i32
+      scf.yield {ssbuffer.core_type = "VECTOR"} %next : i32
+    } attributes {ssbuffer.core_type = "VECTOR"}
+
+    memref.store %result, %outv[%idxv] {ssbuffer.core_type = "VECTOR"} : memref<1xi32>
+    func.return
+  }
 }

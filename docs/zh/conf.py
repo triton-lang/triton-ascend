@@ -65,6 +65,9 @@ def _load_module(module_name, file_path):
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {module_name!r} from {file_path!r}")
     module = _ilu.module_from_spec(spec)
+    # Register in sys.modules before execution so that relative imports
+    # inside the module can find parent packages.
+    _sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -92,6 +95,40 @@ import triton.language.extra as _tl_extra
 _cann_lang_path = os.path.join(_REPO, "third_party", "ascend", "language")
 if _cann_lang_path not in _tl_extra.__path__:
     _tl_extra.__path__.append(_cann_lang_path)
+
+if _force_mock:
+    # Fix mock __path__ so Python can discover real sub-packages underneath.
+    # The mock stubs have __path__ = [] which prevents import of sub-modules.
+    _src = os.path.join(_REPO, "python", "triton")
+    _extra_paths = [
+        os.path.join(_src, "language", "extra"),
+        _cann_lang_path,  # third_party/ascend/language (where real cann lives)
+    ]
+    _sys.modules["triton.language.extra"].__path__[:] = _extra_paths
+    _sys.modules["triton.extension"].__path__[:] = [os.path.join(_src, "extension")]
+    _sys.modules["triton.extension.buffer"].__path__[:] = [
+        os.path.join(_src, "extension", "buffer")]
+
+    # Re-import triton.language + core from real source for autosummary
+    # docstrings.  triton.language.extra stays mock but with real __path__
+    # so sub-packages (cann) can be discovered below.
+    for _name in ("triton.language", "triton.language.core"):
+        _sys.modules.pop(_name, None)
+    import triton.language
+
+    # Now that tl.core is real, re-import cann extension from real source.
+    for _name in ("triton.language.extra.cann",
+                  "triton.language.extra.cann.extension"):
+        _sys.modules.pop(_name, None)
+    import triton.language.extra.cann.extension
+
+    # Same for buffer language.
+    for _name in ("triton.extension", "triton.extension.buffer",
+                  "triton.extension.buffer.language",
+                  "triton.extension.buffer.language.core",
+                  "triton.extension.buffer.language.builder"):
+        _sys.modules.pop(_name, None)
+    import triton.extension.buffer.language
 
 # -- Sphinx helpers – unwrap JITFunction --------------------------------------
 import sphinx.ext.autosummary

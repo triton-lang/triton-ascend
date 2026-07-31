@@ -157,6 +157,32 @@ def install() -> None:
     ]:
         _make_module(_name)
 
+    # Language / extension stubs so that `import triton` doesn't crash on
+    #   triton.compiler.code_generator → import triton.language.extra.cann.extension
+    _lang = _make_module("triton.language")
+    _make_module("triton.language.core", parent=_lang)
+    _extra = _make_module("triton.language.extra", parent=_lang)
+    _cann = _make_module("triton.language.extra.cann", parent=_extra)
+    _cann_ext = _make_module("triton.language.extra.cann.extension", parent=_cann)
+    _make_module("triton.language.extra.cann.extension.dispatch", parent=_cann_ext)
+    _make_module("triton.language.extra.cann.extension.builder", parent=_cann_ext)
+
+    _ext = _make_module("triton.extension")
+    _ext_buf = _make_module("triton.extension.buffer", parent=_ext)
+    _bl = _make_module("triton.extension.buffer.language", parent=_ext_buf)
+    _make_module("triton.extension.buffer.language.core", parent=_bl)
+    _make_module("triton.extension.buffer.language.builder", parent=_bl)
+
+    # Real stub for bl.address_space so cann/extension/core.py can extend it
+    # without MagicMock __init__ failures.
+    class _AddressSpaceStub:
+        """Stub for triton.extension.buffer.language.address_space."""
+
+        def to_ir(self, builder):
+            raise RuntimeError("Abstract address_space cannot be converted to ir")
+
+    _bl.address_space = _AddressSpaceStub
+
     try:
         import pybind11  # noqa: F401
     except ImportError:

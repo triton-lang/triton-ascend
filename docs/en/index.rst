@@ -35,6 +35,15 @@ Documentation
 - :doc:`Triton-Ascend Operator Debugging and Profiling <debug_guide/index>`
 - :doc:`Environment Variables and Compiler Options <environment_variable_and_compiler_options_reference>`
 
+**API Reference**
+
+- :doc:`triton <python-api/triton>`
+- :doc:`triton.language <python-api/triton.language>`
+- :doc:`triton.testing <python-api/triton.testing>`
+- :doc:`triton.language.extra.cann.extension <python-api/triton.language.extra.cann.extension>`
+- :doc:`triton.language.extra.cann.libdevice <python-api/triton.language.extra.cann.libdevice>`
+- :doc:`triton.extension.buffer.language <python-api/triton.extension.buffer.language>`
+
 **Features**
 
 - :doc:`Architecture Design and Core Features <architecture_design_and_core_features>`
@@ -53,8 +62,6 @@ Documentation
 - :doc:`Contributors <community/CONTRIBUTOR>`
 - :doc:`Security Note <community/SECURITYNOTE>`
 
-
-.. toctree sidebar navigation.
 
 .. toctree::
    :hidden:
@@ -85,6 +92,18 @@ Documentation
    Triton-Ascend Operator Migration <migration_guide/index>
    Triton-Ascend Operator Debugging and Profiling <debug_guide/index>
    Environment Variables and Compiler Options <environment_variable_and_compiler_options_reference>
+
+.. toctree::
+   :hidden:
+   :titlesonly:
+   :caption: API Reference
+
+   triton <python-api/triton>
+   triton.language <python-api/triton.language>
+   triton.testing <python-api/triton.testing>
+   triton.language.extra.cann.extension <python-api/triton.language.extra.cann.extension>
+   triton.language.extra.cann.libdevice <python-api/triton.language.extra.cann.libdevice>
+   triton.extension.buffer.language <python-api/triton.extension.buffer.language>
 
 .. toctree::
    :hidden:

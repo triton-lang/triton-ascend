@@ -44,6 +44,7 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/Utils/Utils.h"
 #include "bishengir/Dialect/Utils/Util.h"
 
 using namespace mlir;
@@ -250,7 +251,9 @@ void OpClassifierPass::matchTransposePattern(Operation *def) {
   // Check input tensor
   auto operands = transposeOp->getOperands();
   for (const auto &op : operands) {
-    if (shouldMarkCubeSeed(op.getDefiningOp())) {
+    if (shouldMarkCubeSeed(op.getDefiningOp()) &&
+        !utils::getAnnotateOpWithAttr(
+            op, hivm::kMayImplicitTransposeWithLastAxis)) {
       markCube(op.getDefiningOp());
       cubeSeeds.push_back(op.getDefiningOp());
       break; // No need to check other operands, one is enough to seed the

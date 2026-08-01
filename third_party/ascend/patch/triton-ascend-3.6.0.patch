@@ -1,8 +1,8 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index c9620e3f4c..c38a42c9b7 100644
+index cab58801f..406ed4634 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -15,6 +15,9 @@ include(CTest)
+@@ -15,13 +15,22 @@ include(CTest)
  
  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
  
@@ -12,7 +12,20 @@ index c9620e3f4c..c38a42c9b7 100644
  # Options
  option(TRITON_BUILD_PYTHON_MODULE "Build Python Triton bindings" OFF)
  option(TRITON_BUILD_PROTON "Build the Triton Proton profiler" ON)
-@@ -129,6 +132,21 @@ function(add_triton_library name)
++option(TRITON_BUILD_DISTRIBUTED "Build Triton Distributed" OFF)
+ option(TRITON_BUILD_UT "Build C++ Triton Unit Tests" ON)
+ option(TRITON_BUILD_WITH_CCACHE "Build with ccache (if available)" ON)
+ set(TRITON_CODEGEN_BACKENDS "" CACHE STRING "Enable different codegen backends")
+ 
++if(TRITON_BUILD_DISTRIBUTED)
++  set(TRITON_USE_ASCEND ON)
++  add_compile_definitions(TRITON_USE_ASCEND=1)
++endif()
++
+ if(TRITON_BUILD_WITH_CCACHE)
+   find_program(CCACHE_PROGRAM ccache)
+   if(CCACHE_PROGRAM)
+@@ -129,6 +138,21 @@ function(add_triton_library name)
    set_property(GLOBAL APPEND PROPERTY TRITON_LIBS ${name})
    add_triton_object(${name} ${ARGN})
    llvm_update_compile_flags(${name})
@@ -34,7 +47,7 @@ index c9620e3f4c..c38a42c9b7 100644
  endfunction()
  
  set_property(GLOBAL PROPERTY TRITON_PLUGINS "")
-@@ -164,6 +182,21 @@ if (NOT WIN32 AND NOT APPLE AND NOT BSD)
+@@ -164,6 +188,21 @@ if (NOT WIN32 AND NOT APPLE AND NOT BSD)
    link_libraries(stdc++fs)
  endif()
  
@@ -56,7 +69,7 @@ index c9620e3f4c..c38a42c9b7 100644
  
  # -----
  
-@@ -176,6 +209,12 @@ if(TRITON_BUILD_PYTHON_MODULE)
+@@ -176,11 +215,21 @@ if(TRITON_BUILD_PYTHON_MODULE)
    # Python Interpreter is used to run lit tests
    find_package(Python3 REQUIRED COMPONENTS Development.Module Interpreter)
    find_package(pybind11 CONFIG REQUIRED HINTS "${Python3_SITELIB}")
@@ -69,7 +82,16 @@ index c9620e3f4c..c38a42c9b7 100644
  
    foreach(CODEGEN_BACKEND ${TRITON_CODEGEN_BACKENDS})
      add_subdirectory(third_party/${CODEGEN_BACKEND})
-@@ -337,6 +376,12 @@ endif()
+   endforeach()
+ 
++  if(TRITON_BUILD_DISTRIBUTED)
++    list(APPEND TRITON_PLUGIN_NAMES "distributed")
++  endif()
++
+   if (TRITON_BUILD_PROTON)
+     add_subdirectory(third_party/proton)
+   endif()
+@@ -338,6 +387,12 @@ endif()
  find_package(Threads REQUIRED)
  
  add_subdirectory(third_party/f2reduce)
@@ -82,8 +104,246 @@ index c9620e3f4c..c38a42c9b7 100644
  add_subdirectory(bin)
  add_subdirectory(test)
  
+diff --git a/bin/CMakeLists.txt b/bin/CMakeLists.txt
+index cc0b4fa15..9d8955c46 100644
+--- a/bin/CMakeLists.txt
++++ b/bin/CMakeLists.txt
+@@ -1,11 +1,35 @@
+ get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
+ 
++include_directories(
++    ${PROJECT_SOURCE_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
++    ${PROJECT_BINARY_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
++  )
++
+ add_llvm_executable(triton-opt triton-opt.cpp PARTIAL_SOURCES_INTENDED)
+ 
+ # TODO: what's this?
+ llvm_update_compile_flags(triton-opt)
+ target_link_libraries(triton-opt PRIVATE
+   ${triton_libs}
++  # Ascend backend libraries
++  DiscreteMaskAccessConversion
++  TritonToAnnotation
++  TritonToHFusion
++  TritonToHIVM
++  TritonToLinalg
++  TritonToLLVM
++  TritonToStructured
++  TritonToUnstructure
++  # BiShengIR dialects
++  BiShengIRAnnotationDialect
++  BiShengIRHACCDialect
++  BiShengIRHFusionDialect
++  BiShengIRHIVMDialect
++  BiShengIRMathExtDialect
++  BiShengIRMemRefExtDialect
++  BiShengIRScopeDialect
++  BiShengIRSymbolDialect
++  BiShengIRTensorDialect
+   # tests
+   TritonTestAnalysis
+   TritonTestDialect
+@@ -27,6 +51,25 @@ mlir_check_all_link_libraries(triton-reduce)
+ llvm_update_compile_flags(triton-reduce)
+ target_link_libraries(triton-reduce PRIVATE
+   ${triton_libs}
++  # Ascend backend libraries
++  DiscreteMaskAccessConversion
++  TritonToAnnotation
++  TritonToHFusion
++  TritonToHIVM
++  TritonToLinalg
++  TritonToLLVM
++  TritonToStructured
++  TritonToUnstructure
++  # BiShengIR dialects
++  BiShengIRAnnotationDialect
++  BiShengIRHACCDialect
++  BiShengIRHFusionDialect
++  BiShengIRHIVMDialect
++  BiShengIRMathExtDialect
++  BiShengIRMemRefExtDialect
++  BiShengIRScopeDialect
++  BiShengIRSymbolDialect
++  BiShengIRTensorDialect
+   # tests
+   TritonTestAnalysis
+   TritonTestDialect
+@@ -47,6 +90,25 @@ add_llvm_executable(triton-lsp triton-lsp.cpp PARTIAL_SOURCES_INTENDED)
+ llvm_update_compile_flags(triton-lsp)
+ target_link_libraries(triton-lsp PRIVATE
+   ${triton_libs}
++  # Ascend backend libraries
++  DiscreteMaskAccessConversion
++  TritonToAnnotation
++  TritonToHFusion
++  TritonToHIVM
++  TritonToLinalg
++  TritonToLLVM
++  TritonToStructured
++  TritonToUnstructure
++  # BiShengIR dialects
++  BiShengIRAnnotationDialect
++  BiShengIRHACCDialect
++  BiShengIRHFusionDialect
++  BiShengIRHIVMDialect
++  BiShengIRMathExtDialect
++  BiShengIRMemRefExtDialect
++  BiShengIRScopeDialect
++  BiShengIRSymbolDialect
++  BiShengIRTensorDialect
+   # tests
+   TritonTestAnalysis
+   TritonTestDialect
+@@ -86,6 +148,26 @@ export_executable_symbols_for_plugins(triton-llvm-opt)
+ add_llvm_executable(triton-tensor-layout triton-tensor-layout.cpp PARTIAL_SOURCES_INTENDED)
+ target_link_libraries(triton-tensor-layout PRIVATE
+   ${triton_libs}
++  # Ascend backend libraries
++  DiscreteMaskAccessConversion
++  TritonToAnnotation
++  TritonToHFusion
++  TritonToHIVM
++  TritonToLinalg
++  TritonToLLVM
++  TritonToStructured
++  TritonToUnstructure
++  # BiShengIR dialects
++  BiShengIRAnnotationDialect
++  BiShengIRHACCDialect
++  BiShengIRHFusionDialect
++  BiShengIRHIVMDialect
++  BiShengIRMathExtDialect
++  BiShengIRMemRefExtDialect
++  BiShengIRScopeDialect
++  BiShengIRSymbolDialect
++  BiShengIRTensorDialect
++  # tests
+   TritonTestAnalysis
+   TritonTestDialect
+   TritonTestProton
+diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
+index 48049f026..e96284bc2 100644
+--- a/bin/RegisterTritonDialects.h
++++ b/bin/RegisterTritonDialects.h
+@@ -1,6 +1,34 @@
+ #pragma once
++#include "ascend/include/AutoBlockify/Passes.h"
++#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
++#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
++#include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
++#include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferOuterScope.h"
++#include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
++#include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
++#include "ascend/include/DynamicCVPipeline/Passes.h"
++#include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
++#include "ascend/include/DynamicCVPipeline/SplitDataflow/RefineArgsBlockId.h"
++#include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
++#include "ascend/include/TritonControlFlowOpt/Passes.h"
++#include "ascend/include/TritonToAnnotation/Passes.h"
++#include "ascend/include/TritonToGraph/Passes.h"
++#include "ascend/include/TritonToHFusion/Passes.h"
++#include "ascend/include/TritonToHIVM/Passes.h"
++#include "ascend/include/TritonToLLVM/Passes.h"
++#include "ascend/include/TritonToLinalg/Passes.h"
++#include "ascend/include/TritonToStructured/Passes.h"
++#include "ascend/include/TritonToUnstructure/Passes.h"
++
++#include "bishengir/Dialect/Annotation/IR/Annotation.h"
++#include "bishengir/Dialect/HACC/IR/HACC.h"
++#include "bishengir/Dialect/HFusion/IR/HFusion.h"
++#include "bishengir/Dialect/HIVM/IR/HIVM.h"
++#include "bishengir/Dialect/Scope/IR/Scope.h"
++
+ #include "amd/include/Dialect/TritonAMDGPU/IR/Dialect.h"
+ #include "amd/include/TritonAMDGPUTransforms/Passes.h"
++#include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
+ #include "nvidia/include/Dialect/NVGPU/IR/Dialect.h"
+ #include "nvidia/include/Dialect/NVWS/IR/Dialect.h"
+ #include "proton/Dialect/include/Conversion/ProtonGPUToLLVM/Passes.h"
+@@ -85,6 +113,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+   mlir::triton::registerConvertTritonGPUToLLVMPass();
+   mlir::triton::registerConvertNVGPUToLLVMPass();
+   mlir::triton::registerAllocateSharedMemoryNvPass();
++  mlir::triton::registerTritonToLinalgPasses();
++  mlir::triton::registerTritonControlFlowOptPasses();
++  mlir::triton::registerDiscreteMaskAccessConversion();
++  mlir::triton::registerTritonToStructuredPasses();
++  mlir::triton::registerTritonToAnnotationPasses();
++  mlir::triton::registerTritonToUnstructurePasses();
++  mlir::triton::registerTritonToHIVMPasses();
++  mlir::triton::registerTritonToHFusionPasses();
++  mlir::triton::registerTritonToLLVMPasses();
++  mlir::triton::registerAutoBlockifyPasses();
++  mlir::triton::cfg::registerTritonToGraphPasses();
++  mlir::triton::registerBubbleUpOperationPass();
++
+   mlir::registerLLVMDIScope();
+   mlir::LLVM::registerInlinerInterface(registry);
+   mlir::NVVM::registerInlinerInterface(registry);
+@@ -136,16 +177,37 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+   mlir::triton::proton::gpu::registerScheduleBufferStorePass();
+   mlir::triton::proton::gpu::registerAddSchedBarriersPass();
+ 
++  // DynamicCVPipeline passes
++  mlir::triton::registerAddDynamicCVPipelinePasses();
++  mlir::triton::registerPreCheckAvailablePasses();
++  mlir::triton::registerStandardizeOpPasses();
++  mlir::triton::registerAddControlFlowConditionPasses();
++  mlir::triton::registerAddMultiBufferOuterScopePasses();
++  mlir::triton::registerAddMultiBufferInnerScopePasses();
++  mlir::triton::registerRemoveSsbufAttrPasses();
++  mlir::triton::registerAnalyzeDataFlowPasses();
++  mlir::triton::registerComputeBlockOptPasses();
++  mlir::triton::registerPlanComputeBlockPasses();
++  mlir::triton::registerOpClassifierPass();
++  mlir::triton::registerRefineArgsBlockIdPasses();
++
+   registry.insert<
+       mlir::triton::TritonDialect, mlir::cf::ControlFlowDialect,
+       mlir::triton::nvidia_gpu::TritonNvidiaGPUDialect,
+       mlir::triton::gpu::TritonGPUDialect,
+       mlir::triton::instrument::TritonInstrumentDialect,
+       mlir::math::MathDialect, mlir::arith::ArithDialect, mlir::scf::SCFDialect,
+-      mlir::gpu::GPUDialect, mlir::LLVM::LLVMDialect, mlir::NVVM::NVVMDialect,
++      mlir::tensor::TensorDialect, mlir::gpu::GPUDialect,
++      mlir::LLVM::LLVMDialect, mlir::NVVM::NVVMDialect,
+       mlir::triton::nvgpu::NVGPUDialect, mlir::triton::nvws::NVWSDialect,
+       mlir::triton::amdgpu::TritonAMDGPUDialect,
+       mlir::triton::proton::ProtonDialect,
+       mlir::triton::proton::gpu::ProtonGPUDialect, mlir::ROCDL::ROCDLDialect,
+-      mlir::triton::gluon::GluonDialect>();
++      mlir::triton::gluon::GluonDialect,
++      mlir::triton::ascend::TritonAscendDialect, mlir::hivm::HIVMDialect,
++      mlir::scope::ScopeDialect, mlir::hacc::HACCDialect,
++      mlir::annotation::AnnotationDialect, mlir::hfusion::HFusionDialect,
++      mlir::tensor::TensorDialect, mlir::linalg::LinalgDialect,
++      mlir::memref::MemRefDialect, mlir::bufferization::BufferizationDialect,
++      mlir::func::FuncDialect>();
+ }
+diff --git a/bin/triton-opt.cpp b/bin/triton-opt.cpp
+index 2d2570771..91ed8b79a 100644
+--- a/bin/triton-opt.cpp
++++ b/bin/triton-opt.cpp
+@@ -1,4 +1,5 @@
+ #include "./RegisterTritonDialects.h"
++#include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
+ 
+ #include "mlir/Tools/mlir-opt/MlirOptMain.h"
+ 
+@@ -6,6 +7,9 @@ int main(int argc, char **argv) {
+   mlir::DialectRegistry registry;
+   registerTritonDialects(registry);
+ 
++  // Register AddMultiBufferInnerScope pass
++  mlir::triton::registerAddMultiBufferInnerScopePasses();
++
+   return mlir::asMainReturnCode(mlir::MlirOptMain(
+       argc, argv, "Triton (GPU) optimizer driver\n", registry));
+ }
 diff --git a/include/triton/Dialect/Triton/IR/TritonAttrDefs.td b/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
-index 5a76a1d7b1..4114df60ce 100644
+index 5a76a1d7b..4114df60c 100644
 --- a/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
 +++ b/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
 @@ -130,8 +130,9 @@ def TT_InputPrecisionAttr : I32EnumAttr<
@@ -99,7 +359,7 @@ index 5a76a1d7b1..4114df60ce 100644
    let cppNamespace = "::mlir::triton";
  }
 diff --git a/lib/Dialect/Triton/IR/Traits.cpp b/lib/Dialect/Triton/IR/Traits.cpp
-index 1b72c13762..ee5defb6e9 100644
+index 1b72c1376..ee5defb6e 100644
 --- a/lib/Dialect/Triton/IR/Traits.cpp
 +++ b/lib/Dialect/Triton/IR/Traits.cpp
 @@ -126,10 +126,11 @@ LogicalResult OpTrait::impl::verifyTensorSize(Operation *op) {
@@ -135,7 +395,7 @@ index 1b72c13762..ee5defb6e9 100644
    }
    return success();
 diff --git a/python/src/ir.cc b/python/src/ir.cc
-index 5af645bc04..5ffe71866f 100644
+index 5af645bc0..5ffe71866 100644
 --- a/python/src/ir.cc
 +++ b/python/src/ir.cc
 @@ -332,6 +332,7 @@ void init_triton_ir(py::module &&m) {
@@ -147,7 +407,7 @@ index 5af645bc04..5ffe71866f 100644
        .value("BF16x6", InputPrecision::BF16x6)
        .export_values();
 diff --git a/python/triton/_utils.py b/python/triton/_utils.py
-index a3cf0ff0cb..28ba11c929 100644
+index a3cf0ff0c..28ba11c92 100644
 --- a/python/triton/_utils.py
 +++ b/python/triton/_utils.py
 @@ -50,8 +50,9 @@ def validate_block_shape(shape: List[int]):
@@ -163,7 +423,7 @@ index a3cf0ff0cb..28ba11c929 100644
  
      if numel > TRITON_MAX_TENSOR_NUMEL:
 diff --git a/python/triton/compiler/code_generator.py b/python/triton/compiler/code_generator.py
-index c572f81e3e..218703f73e 100644
+index c572f81e3..6e06b8477 100644
 --- a/python/triton/compiler/code_generator.py
 +++ b/python/triton/compiler/code_generator.py
 @@ -10,8 +10,16 @@ from dataclasses import dataclass
@@ -195,7 +455,23 @@ index c572f81e3e..218703f73e 100644
  
  def check_identifier_legality(name, type):
      pattern = r'^[a-zA-Z_][a-zA-Z0-9_]*$'
-@@ -309,6 +321,17 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -300,7 +312,14 @@ class CodeGenerator(ast.NodeVisitor):
+             self.semantic = GluonSemantic(self.builder)
+         else:
+             from triton.language.semantic import TritonSemantic
+-            self.builder = ir.builder(context)
++            try:
++                from .._C.libtriton import distributed
++            except ImportError:
++                distributed = None
++            if distributed is not None:
++                self.builder = distributed.ir.DistributedOpBuilder(context)
++            else:
++                self.builder = ir.builder(context)
+             self.semantic = TritonSemantic(self.builder)
+ 
+         self.name_loc_as_prefix = None
+@@ -309,6 +328,17 @@ class CodeGenerator(ast.NodeVisitor):
          self.begin_line = begin_line - 1
          self.builder.set_loc(file_name, begin_line, 0)
          self.builder.options = options
@@ -213,7 +489,7 @@ index c572f81e3e..218703f73e 100644
          # dict of functions provided by the backend. Below are the list of possible functions:
          # Convert custom types not natively supported on HW.
          # convert_custom_types(input_tensor, dtype, fp_downcast_rounding=None, _builder=None)
-@@ -451,17 +474,19 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -451,17 +481,19 @@ class CodeGenerator(ast.NodeVisitor):
          self.lscope[name] = value
          self.local_defs[name] = value
  
@@ -239,7 +515,7 @@ index c572f81e3e..218703f73e 100644
  
      def _find_carries(self, node, liveins, ignore: set[str] = set()):
          # create loop body block
-@@ -980,6 +1005,26 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -980,6 +1012,26 @@ class CodeGenerator(ast.NodeVisitor):
                  return self.visit(node.orelse)
  
      def visit_With(self, node):
@@ -266,7 +542,7 @@ index c572f81e3e..218703f73e 100644
          # Lower `with` statements by constructing context managers and calling their enter/exit hooks
          # Instantiate each context manager with builder injection
          cm_list = []
-@@ -1147,7 +1192,7 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1147,7 +1199,7 @@ class CodeGenerator(ast.NodeVisitor):
          flatten = False
          warp_specialize = False
          disable_licm = False
@@ -275,7 +551,7 @@ index c572f81e3e..218703f73e 100644
              iterator = IteratorClass(*iter_args, **iter_kwargs)
              # visit iterator arguments
              # note: only `range` iterator is supported now
-@@ -1224,7 +1269,9 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1224,7 +1276,9 @@ class CodeGenerator(ast.NodeVisitor):
              if warp_specialize:
                  for_op.set_attr("tt.warp_specialize", self.builder.get_unit_attr())
              if disable_licm:
@@ -286,7 +562,7 @@ index c572f81e3e..218703f73e 100644
  
              self.scf_stack.append(node)
              for_op_body = for_op.get_body(0)
-@@ -1286,7 +1333,7 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1286,7 +1340,7 @@ class CodeGenerator(ast.NodeVisitor):
          args = inspect.getcallargs(fn.fn, *args, **kwargs)
          args = [args[name] for name in fn.arg_names]
          for i, arg in enumerate(args):
@@ -295,7 +571,7 @@ index c572f81e3e..218703f73e 100644
                  args[i] = language.core.constexpr(arg)
          args_cst = find_paths_if(args, lambda _, x: _is_constexpr(x))
          args_cst = {path: get_iterable_path(args, path) for path in args_cst}
-@@ -1340,6 +1387,11 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1340,6 +1394,11 @@ class CodeGenerator(ast.NodeVisitor):
              return self.call_JitFunction(fn, args, kws)
          if (hasattr(fn, '__self__') and _is_triton_value(fn.__self__)) or language.core.is_builtin(fn) or isinstance(
                  fn, ConstexprFunction):
@@ -307,7 +583,7 @@ index c572f81e3e..218703f73e 100644
              extra_kwargs = dict()
  
              if isinstance(fn, ConstexprFunction):
-@@ -1355,6 +1407,9 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1355,6 +1414,9 @@ class CodeGenerator(ast.NodeVisitor):
                  # builtin functions return plain tuples for readability
                  if isinstance(ret, tuple):
                      ret = language.tuple(ret)
@@ -317,7 +593,7 @@ index c572f81e3e..218703f73e 100644
                  return ret
              except Exception as e:
                  if knobs.compilation.front_end_debugging:
-@@ -1594,6 +1649,7 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1594,6 +1656,7 @@ class CodeGenerator(ast.NodeVisitor):
          ttgl.static_print: static_executor(print),
          int: static_executor(int),
          len: static_executor(len),
@@ -326,7 +602,7 @@ index c572f81e3e..218703f73e 100644
  
  
 diff --git a/python/triton/compiler/compiler.py b/python/triton/compiler/compiler.py
-index d4872a4635..51347e1444 100644
+index d4872a463..51347e144 100644
 --- a/python/triton/compiler/compiler.py
 +++ b/python/triton/compiler/compiler.py
 @@ -10,6 +10,7 @@ from ..runtime.autotuner import OutOfResources
@@ -390,7 +666,7 @@ index d4872a4635..51347e1444 100644
          if self.metadata.num_warps * warp_size > self.n_max_threads:
              raise_(OutOfResources(self.metadata.num_warps * warp_size, self.n_max_threads, "threads"))
 diff --git a/python/triton/compiler/errors.py b/python/triton/compiler/errors.py
-index 39e6c4dfb0..c72ca65c24 100644
+index 39e6c4dfb..c72ca65c2 100644
 --- a/python/triton/compiler/errors.py
 +++ b/python/triton/compiler/errors.py
 @@ -49,3 +49,24 @@ class CompileTimeAssertionFailure(CompilationError):
@@ -419,7 +695,7 @@ index 39e6c4dfb0..c72ca65c24 100644
 +    def format_line_delim(self, keyword):
 +        return f"///------------------{keyword}------------------\n"
 diff --git a/python/triton/language/math.py b/python/triton/language/math.py
-index 582cd876cb..41325dfa79 100644
+index 7d1d65b21..13ff1cef0 100644
 --- a/python/triton/language/math.py
 +++ b/python/triton/language/math.py
 @@ -21,8 +21,12 @@ def _check_dtype(dtypes: List[str]) -> T:
@@ -438,7 +714,7 @@ index 582cd876cb..41325dfa79 100644
  
          return check
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
-index 9433d511de..67b78f7d43 100644
+index 52192cf3e..8a2934e07 100644
 --- a/python/triton/language/semantic.py
 +++ b/python/triton/language/semantic.py
 @@ -344,6 +344,9 @@ class TritonSemantic(Generic[TensorTy]):
@@ -606,7 +882,7 @@ index 9433d511de..67b78f7d43 100644
  
      def load(self, ptr: TensorTy, mask: Optional[TensorTy], other: Optional[TensorTy], boundary_check: Tuple,
 diff --git a/python/triton/language/standard.py b/python/triton/language/standard.py
-index b1dd327bb9..c49330d40d 100644
+index b1dd327bb..c49330d40 100644
 --- a/python/triton/language/standard.py
 +++ b/python/triton/language/standard.py
 @@ -170,11 +170,17 @@ def _elementwise_max(a, b):
@@ -641,7 +917,7 @@ index b1dd327bb9..c49330d40d 100644
  
  @core._tensor_member_fn
 diff --git a/python/triton/runtime/interpreter.py b/python/triton/runtime/interpreter.py
-index cd871cb2e1..2d6b878189 100644
+index cd871cb2e..988d2a7f9 100644
 --- a/python/triton/runtime/interpreter.py
 +++ b/python/triton/runtime/interpreter.py
 @@ -22,6 +22,25 @@ from .._C.libtriton import ir as _ir
@@ -768,7 +1044,7 @@ index cd871cb2e1..2d6b878189 100644
                  if triton.knobs.compilation.front_end_debugging:
                      raise
 diff --git a/python/triton/runtime/jit.py b/python/triton/runtime/jit.py
-index 0f506818f9..1e07a267fa 100644
+index 0f506818f..1e07a267f 100644
 --- a/python/triton/runtime/jit.py
 +++ b/python/triton/runtime/jit.py
 @@ -398,14 +398,15 @@ def create_function_from_signature(sig, kparams, backend):
@@ -805,241 +1081,3 @@ index 0f506818f9..1e07a267fa 100644
                  else:
                      # skip runtime specialization:
                      specialization.append(f'("{kp.annotation_type}", None)')
-diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
-index 48049f0268..e96284bc21 100644
---- a/bin/RegisterTritonDialects.h
-+++ b/bin/RegisterTritonDialects.h
-@@ -1,6 +1,34 @@
- #pragma once
-+#include "ascend/include/AutoBlockify/Passes.h"
-+#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
-+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
-+#include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
-+#include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferOuterScope.h"
-+#include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
-+#include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
-+#include "ascend/include/DynamicCVPipeline/Passes.h"
-+#include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
-+#include "ascend/include/DynamicCVPipeline/SplitDataflow/RefineArgsBlockId.h"
-+#include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
-+#include "ascend/include/TritonControlFlowOpt/Passes.h"
-+#include "ascend/include/TritonToAnnotation/Passes.h"
-+#include "ascend/include/TritonToGraph/Passes.h"
-+#include "ascend/include/TritonToHFusion/Passes.h"
-+#include "ascend/include/TritonToHIVM/Passes.h"
-+#include "ascend/include/TritonToLLVM/Passes.h"
-+#include "ascend/include/TritonToLinalg/Passes.h"
-+#include "ascend/include/TritonToStructured/Passes.h"
-+#include "ascend/include/TritonToUnstructure/Passes.h"
-+
-+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
-+#include "bishengir/Dialect/HACC/IR/HACC.h"
-+#include "bishengir/Dialect/HFusion/IR/HFusion.h"
-+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
-+#include "bishengir/Dialect/Scope/IR/Scope.h"
-+
- #include "amd/include/Dialect/TritonAMDGPU/IR/Dialect.h"
- #include "amd/include/TritonAMDGPUTransforms/Passes.h"
-+#include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
- #include "nvidia/include/Dialect/NVGPU/IR/Dialect.h"
- #include "nvidia/include/Dialect/NVWS/IR/Dialect.h"
- #include "proton/Dialect/include/Conversion/ProtonGPUToLLVM/Passes.h"
-@@ -85,6 +113,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
-   mlir::triton::registerConvertTritonGPUToLLVMPass();
-   mlir::triton::registerConvertNVGPUToLLVMPass();
-   mlir::triton::registerAllocateSharedMemoryNvPass();
-+  mlir::triton::registerTritonToLinalgPasses();
-+  mlir::triton::registerTritonControlFlowOptPasses();
-+  mlir::triton::registerDiscreteMaskAccessConversion();
-+  mlir::triton::registerTritonToStructuredPasses();
-+  mlir::triton::registerTritonToAnnotationPasses();
-+  mlir::triton::registerTritonToUnstructurePasses();
-+  mlir::triton::registerTritonToHIVMPasses();
-+  mlir::triton::registerTritonToHFusionPasses();
-+  mlir::triton::registerTritonToLLVMPasses();
-+  mlir::triton::registerAutoBlockifyPasses();
-+  mlir::triton::cfg::registerTritonToGraphPasses();
-+  mlir::triton::registerBubbleUpOperationPass();
-+
-   mlir::registerLLVMDIScope();
-   mlir::LLVM::registerInlinerInterface(registry);
-   mlir::NVVM::registerInlinerInterface(registry);
-@@ -136,16 +177,37 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
-   mlir::triton::proton::gpu::registerScheduleBufferStorePass();
-   mlir::triton::proton::gpu::registerAddSchedBarriersPass();
- 
-+  // DynamicCVPipeline passes
-+  mlir::triton::registerAddDynamicCVPipelinePasses();
-+  mlir::triton::registerPreCheckAvailablePasses();
-+  mlir::triton::registerStandardizeOpPasses();
-+  mlir::triton::registerAddControlFlowConditionPasses();
-+  mlir::triton::registerAddMultiBufferOuterScopePasses();
-+  mlir::triton::registerAddMultiBufferInnerScopePasses();
-+  mlir::triton::registerRemoveSsbufAttrPasses();
-+  mlir::triton::registerAnalyzeDataFlowPasses();
-+  mlir::triton::registerComputeBlockOptPasses();
-+  mlir::triton::registerPlanComputeBlockPasses();
-+  mlir::triton::registerOpClassifierPass();
-+  mlir::triton::registerRefineArgsBlockIdPasses();
-+
-   registry.insert<
-       mlir::triton::TritonDialect, mlir::cf::ControlFlowDialect,
-       mlir::triton::nvidia_gpu::TritonNvidiaGPUDialect,
-       mlir::triton::gpu::TritonGPUDialect,
-       mlir::triton::instrument::TritonInstrumentDialect,
-       mlir::math::MathDialect, mlir::arith::ArithDialect, mlir::scf::SCFDialect,
--      mlir::gpu::GPUDialect, mlir::LLVM::LLVMDialect, mlir::NVVM::NVVMDialect,
-+      mlir::tensor::TensorDialect, mlir::gpu::GPUDialect,
-+      mlir::LLVM::LLVMDialect, mlir::NVVM::NVVMDialect,
-       mlir::triton::nvgpu::NVGPUDialect, mlir::triton::nvws::NVWSDialect,
-       mlir::triton::amdgpu::TritonAMDGPUDialect,
-       mlir::triton::proton::ProtonDialect,
-       mlir::triton::proton::gpu::ProtonGPUDialect, mlir::ROCDL::ROCDLDialect,
--      mlir::triton::gluon::GluonDialect>();
-+      mlir::triton::gluon::GluonDialect,
-+      mlir::triton::ascend::TritonAscendDialect, mlir::hivm::HIVMDialect,
-+      mlir::scope::ScopeDialect, mlir::hacc::HACCDialect,
-+      mlir::annotation::AnnotationDialect, mlir::hfusion::HFusionDialect,
-+      mlir::tensor::TensorDialect, mlir::linalg::LinalgDialect,
-+      mlir::memref::MemRefDialect, mlir::bufferization::BufferizationDialect,
-+      mlir::func::FuncDialect>();
- }
-diff --git a/bin/triton-opt.cpp b/bin/triton-opt.cpp
-index 2d2570771a..91ed8b79ae 100644
---- a/bin/triton-opt.cpp
-+++ b/bin/triton-opt.cpp
-@@ -1,4 +1,5 @@
- #include "./RegisterTritonDialects.h"
-+#include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
- 
- #include "mlir/Tools/mlir-opt/MlirOptMain.h"
- 
-@@ -6,6 +7,9 @@ int main(int argc, char **argv) {
-   mlir::DialectRegistry registry;
-   registerTritonDialects(registry);
- 
-+  // Register AddMultiBufferInnerScope pass
-+  mlir::triton::registerAddMultiBufferInnerScopePasses();
-+
-   return mlir::asMainReturnCode(mlir::MlirOptMain(
-       argc, argv, "Triton (GPU) optimizer driver\n", registry));
- }
-diff --git a/bin/CMakeLists.txt b/bin/CMakeLists.txt
-index cc0b4fa15a..9d8955c464 100644
---- a/bin/CMakeLists.txt
-+++ b/bin/CMakeLists.txt
-@@ -1,11 +1,35 @@
- get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
- 
-+include_directories(
-+    ${PROJECT_SOURCE_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
-+    ${PROJECT_BINARY_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
-+  )
-+
- add_llvm_executable(triton-opt triton-opt.cpp PARTIAL_SOURCES_INTENDED)
- 
- # TODO: what's this?
- llvm_update_compile_flags(triton-opt)
- target_link_libraries(triton-opt PRIVATE
-   ${triton_libs}
-+  # Ascend backend libraries
-+  DiscreteMaskAccessConversion
-+  TritonToAnnotation
-+  TritonToHFusion
-+  TritonToHIVM
-+  TritonToLinalg
-+  TritonToLLVM
-+  TritonToStructured
-+  TritonToUnstructure
-+  # BiShengIR dialects
-+  BiShengIRAnnotationDialect
-+  BiShengIRHACCDialect
-+  BiShengIRHFusionDialect
-+  BiShengIRHIVMDialect
-+  BiShengIRMathExtDialect
-+  BiShengIRMemRefExtDialect
-+  BiShengIRScopeDialect
-+  BiShengIRSymbolDialect
-+  BiShengIRTensorDialect
-   # tests
-   TritonTestAnalysis
-   TritonTestDialect
-@@ -27,6 +51,25 @@ mlir_check_all_link_libraries(triton-reduce)
- llvm_update_compile_flags(triton-reduce)
- target_link_libraries(triton-reduce PRIVATE
-   ${triton_libs}
-+  # Ascend backend libraries
-+  DiscreteMaskAccessConversion
-+  TritonToAnnotation
-+  TritonToHFusion
-+  TritonToHIVM
-+  TritonToLinalg
-+  TritonToLLVM
-+  TritonToStructured
-+  TritonToUnstructure
-+  # BiShengIR dialects
-+  BiShengIRAnnotationDialect
-+  BiShengIRHACCDialect
-+  BiShengIRHFusionDialect
-+  BiShengIRHIVMDialect
-+  BiShengIRMathExtDialect
-+  BiShengIRMemRefExtDialect
-+  BiShengIRScopeDialect
-+  BiShengIRSymbolDialect
-+  BiShengIRTensorDialect
-   # tests
-   TritonTestAnalysis
-   TritonTestDialect
-@@ -47,6 +90,25 @@ add_llvm_executable(triton-lsp triton-lsp.cpp PARTIAL_SOURCES_INTENDED)
- llvm_update_compile_flags(triton-lsp)
- target_link_libraries(triton-lsp PRIVATE
-   ${triton_libs}
-+  # Ascend backend libraries
-+  DiscreteMaskAccessConversion
-+  TritonToAnnotation
-+  TritonToHFusion
-+  TritonToHIVM
-+  TritonToLinalg
-+  TritonToLLVM
-+  TritonToStructured
-+  TritonToUnstructure
-+  # BiShengIR dialects
-+  BiShengIRAnnotationDialect
-+  BiShengIRHACCDialect
-+  BiShengIRHFusionDialect
-+  BiShengIRHIVMDialect
-+  BiShengIRMathExtDialect
-+  BiShengIRMemRefExtDialect
-+  BiShengIRScopeDialect
-+  BiShengIRSymbolDialect
-+  BiShengIRTensorDialect
-   # tests
-   TritonTestAnalysis
-   TritonTestDialect
-@@ -86,6 +148,26 @@ export_executable_symbols_for_plugins(triton-llvm-opt)
- add_llvm_executable(triton-tensor-layout triton-tensor-layout.cpp PARTIAL_SOURCES_INTENDED)
- target_link_libraries(triton-tensor-layout PRIVATE
-   ${triton_libs}
-+  # Ascend backend libraries
-+  DiscreteMaskAccessConversion
-+  TritonToAnnotation
-+  TritonToHFusion
-+  TritonToHIVM
-+  TritonToLinalg
-+  TritonToLLVM
-+  TritonToStructured
-+  TritonToUnstructure
-+  # BiShengIR dialects
-+  BiShengIRAnnotationDialect
-+  BiShengIRHACCDialect
-+  BiShengIRHFusionDialect
-+  BiShengIRHIVMDialect
-+  BiShengIRMathExtDialect
-+  BiShengIRMemRefExtDialect
-+  BiShengIRScopeDialect
-+  BiShengIRSymbolDialect
-+  BiShengIRTensorDialect
-+  # tests
-   TritonTestAnalysis
-   TritonTestDialect
-   TritonTestProton

@@ -1271,7 +1271,7 @@ class AscendBackend(BaseBackend):
         from triton._C.libtriton import buffer_ir
         from triton._C.libtriton.ascend import ir as ascend_ir
         if distributed is not None:
-            distributed.load_dialects(ctx)
+            distributed.ir.load_dialects(ctx)
         buffer_ir.load_dialects(ctx)
         ascend_ir.load_dialects(ctx)
         ascend.load_dialects(ctx)

@@ -681,20 +681,21 @@ class CMakeBuild(build_ext):
                     pass
             print(f"Copied triton-opt to {triton_opt_dst}")
 
+
 def ensure_distributed_submodule():
     if not check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):
         return
     distributed_dir = Path(triton_dir) / "third_party" / "ascend" / "Triton-distributed-ascend"
     if not (distributed_dir / "CMakeLists.txt").is_file() and is_git_repo():
-        subprocess.check_call([
-            "git", "submodule", "update", "--init", "--",
-            "third_party/ascend/Triton-distributed-ascend"
-        ], cwd=triton_dir)
+        subprocess.check_call(
+            ["git", "submodule", "update", "--init", "--", "third_party/ascend/Triton-distributed-ascend"],
+            cwd=triton_dir)
     if not (distributed_dir / "CMakeLists.txt").is_file():
         raise RuntimeError(f"Triton-Distributed submodule is not initialized: {distributed_dir}")
 
 
 ensure_distributed_submodule()
+
 
 def download_and_copy_dependencies():
     nvidia_version_path = os.path.join(get_base_dir(), "cmake", "nvidia-toolchain-version.json")
@@ -812,8 +813,8 @@ def get_package_dirs():
         yield ("triton.profiler.hooks", "third_party/proton/proton/hooks")
 
     if check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):
-        yield ("triton_dist",
-               os.path.join("third_party", "ascend", "Triton-distributed-ascend", "python", "triton_dist"))
+        yield ("triton_dist", os.path.join("third_party", "ascend", "Triton-distributed-ascend", "python",
+                                           "triton_dist"))
 
 
 def get_packages():

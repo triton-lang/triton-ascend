@@ -25,29 +25,6 @@ from . import libdevice
 from . import extension
 
 extension.parallel = extension.aux_ops.parallel
-if not triton_enable_libdevice_simt():
-    libdevice.atan2 = extension.math_ops.atan2
-libdevice.isfinited = extension.math_ops.isfinited
-libdevice.finitef = extension.math_ops.finitef
-libdevice.flip = extension.flip
-
-libdevice.umulhi = math.umulhi
-libdevice.exp = math.exp
-libdevice.exp2 = math.exp2
-libdevice.log = math.log
-libdevice.log2 = math.log2
-libdevice.cos = math.cos
-libdevice.sin = math.sin
-libdevice.sqrt = math.sqrt
-libdevice.sqrt_rn = math.sqrt_rn
-libdevice.rsqrt = math.rsqrt
-libdevice.div_rn = math.div_rn
-libdevice.erf = math.erf
-libdevice.floor = math.floor
-libdevice.ceil = math.ceil
-libdevice.fdiv = math.fdiv
-libdevice.fma = math.fma
-libdevice.abs = math.abs
 math.tanh = libdevice.tanh
 
 __all__ = ["libdevice", "extension"]

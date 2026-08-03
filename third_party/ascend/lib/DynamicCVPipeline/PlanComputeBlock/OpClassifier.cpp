@@ -655,7 +655,7 @@ int OpClassifierPass::propagateCubeUpstream() {
 
       // Skip arith dialect ops with tensor results (they should be VECTOR, not
       // CUBE)
-      if (isa<arith::ArithDialect>(def->getDialect())) {
+      if (isa<arith::ArithDialect>(def->getDialect()) || isa<math::MathDialect>(def->getDialect())) {
         bool hasTensorResult = false;
         for (Value result : def->getResults()) {
           if (isa<RankedTensorType>(result.getType())) {
@@ -850,6 +850,8 @@ void OpClassifierPass::propagateCubeUpstreamForOp(Operation *startOp) {
       if (!upstreamOp || cubeVisited.count(upstreamOp))
         continue;
       if (isa<linalg::MatmulOp>(upstreamOp))
+        continue;
+      if (isa<arith::ArithDialect>(upstreamOp->getDialect()) || isa<math::MathDialect>(upstreamOp->getDialect()))
         continue;
 
       cubeVisited.insert(upstreamOp);

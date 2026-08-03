@@ -841,6 +841,230 @@ void DataDependencyAnalysisPass::collectMemDepInfo(
   memoryDependencies.push_back(depInfo);
 }
 
+// Trace defining op chain to check if any upstream op is vector-only.
+// Returns true if a vector-only op is found in the chain.
+// Values in `stopValues` are treated as already-handled scalar dependencies;
+// the trace stops when it hits one, avoiding redundant detection of downstream
+// scalars whose upstream values have already been transferred via SSBuffer.
+// This mirrors AnalyzeCubeControlFlowInputChain's hasIncompatibleOpForCondition.
+static bool hasVectorOpInDefChain(
+    mlir::Value val,
+    llvm::DenseSet<mlir::Operation *> &visited,
+    const llvm::DenseSet<mlir::Value> *stopValues = nullptr) {
+  if (stopValues && stopValues->contains(val)) {
+    return false;
+  }
+
+  mlir::Operation *defOp = val.getDefiningOp();
+  if (!defOp || visited.contains(defOp)) {
+    return false;
+  }
+  visited.insert(defOp);
+
+  if (CVPipeline::isVectorOnlyOp(defOp)) {
+    return true;
+  }
+
+  for (mlir::Value operand : defOp->getOperands()) {
+    if (hasVectorOpInDefChain(operand, visited, stopValues)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Check if a scf.for body contains CUBE operations.
+static bool forOpHasCubeOps(
+    scf::ForOp forOp,
+    llvm::DenseMap<int, BlockInfo> &blockInfoMap) {
+  bool hasCube = false;
+  forOp.walk([&](mlir::Operation *op) {
+    auto blockIdOpt = CVPipeline::getOpBlockId(op);
+    if (!blockIdOpt) {
+      return mlir::WalkResult::advance();
+    }
+    auto it = blockInfoMap.find(*blockIdOpt);
+    if (it != blockInfoMap.end() && it->second.isCube) {
+      hasCube = true;
+      return mlir::WalkResult::interrupt();
+    }
+    return mlir::WalkResult::advance();
+  });
+  return hasCube;
+}
+
+// Check if any region of an scf.if contains CUBE operations.
+static bool ifOpHasCubeOps(
+    scf::IfOp ifOp,
+    llvm::DenseMap<int, BlockInfo> &blockInfoMap) {
+  bool hasCube = false;
+  ifOp.walk([&](mlir::Operation *op) {
+    auto blockIdOpt = CVPipeline::getOpBlockId(op);
+    if (!blockIdOpt) {
+      return mlir::WalkResult::advance();
+    }
+    auto it = blockInfoMap.find(*blockIdOpt);
+    if (it != blockInfoMap.end() && it->second.isCube) {
+      hasCube = true;
+      return mlir::WalkResult::interrupt();
+    }
+    return mlir::WalkResult::advance();
+  });
+  return hasCube;
+}
+
+// Analyze scalar V->C dependencies from control flow ops.
+// Detects when scf.for loop bounds or scf.if conditions are scalar values whose
+// defining chain traces back to vector-only ops (e.g. math.floor/math.ceil on
+// tensors, linalg.reduce). These scalars must be transferred from VECTOR to CUBE.
+//
+// To avoid redundant transfers, scalars already recorded as dependencies are
+// tracked in a stop-set: downstream scalars whose defining chain only reaches
+// vector-only ops through an already-handled scalar are NOT re-recorded.
+void DataDependencyAnalysisPass::analyzeScalarVToCDependencies(
+    DataDependencyInfo &info) {
+  auto &blockInfoMap = info.getBlockInfoMap();
+  auto &v2cDependencies = info.getV2CDependencies();
+
+  // Scalars already recorded as V->C deps — downstream values depending on
+  // these don't need separate transfer since the upstream value will be
+  // available on the CUBE side after SSBuffer transfer.
+  llvm::DenseSet<mlir::Value> handledScalarValues;
+
+  // For-loops whose bounds have been handled — ifOp conditions inside these
+  // loops will be computable on CUBE via the induction variable after the
+  // bounds are transferred, so they don't need separate scalar deps.
+  llvm::DenseSet<scf::ForOp> handledForOps;
+
+  LOG_DEBUG("Analyzing scalar V->C dependencies from control flow ops...\n");
+
+  // ---- scf.for loop bounds ----
+  module.walk([&](scf::ForOp forOp) {
+    if (!forOpHasCubeOps(forOp, blockInfoMap)) {
+      return;
+    }
+
+    llvm::SmallVector<mlir::Value> bounds;
+    bounds.push_back(forOp.getLowerBound());
+    bounds.push_back(forOp.getUpperBound());
+    // Step is typically a constant; still check it for completeness.
+    bounds.push_back(forOp.getStep());
+
+    for (mlir::Value bound : bounds) {
+      // Only handle scalar types (int/float/index). Tensor types cannot be
+      // transferred through the SSBuffer scalar channel.
+      if (!isa<mlir::IntegerType, mlir::FloatType, mlir::IndexType>(
+              bound.getType())) {
+        continue;
+      }
+
+      mlir::Operation *defOp = bound.getDefiningOp();
+      if (!defOp) {
+        continue;
+      }
+
+      llvm::DenseSet<mlir::Operation *> visited;
+      if (!hasVectorOpInDefChain(bound, visited, &handledScalarValues)) {
+        continue;
+      }
+
+      auto producerIdOpt = CVPipeline::getOpBlockId(defOp);
+      if (!producerIdOpt) {
+        continue;
+      }
+      int producerId = *producerIdOpt;
+
+      LOG_DEBUG("Found scalar V->C dependency from forOp bounds: "
+                << bound << "\n");
+
+      // Mark this for-loop as handled so that ifOp conditions nested inside
+      // it are skipped — they will be computable on CUBE via the induction
+      // variable once the bounds are transferred.
+      handledForOps.insert(forOp);
+
+      // Record a single V->C dependency using the for-loop op's own block_id
+      // as the consumer.  The bound is also used by ops inside the loop body,
+      // but those are in the same CUBE scope after CV separation and will use
+      // the transferred value via normal SSA dominance — no separate transfer
+      // needed per inner consumer.
+      auto forBlockIdOpt = CVPipeline::getOpBlockId(forOp.getOperation());
+      if (!forBlockIdOpt) {
+        continue;
+      }
+      int forBlockId = *forBlockIdOpt;
+      auto it = blockInfoMap.find(forBlockId);
+      if (it == blockInfoMap.end() || !it->second.isCube) {
+        continue;
+      }
+      collectDepInfo(bound, DependencyType::VectorToCube, v2cDependencies,
+                     producerId, forBlockId, info);
+      v2cDependencies.back().isScaler = true;
+      handledScalarValues.insert(bound);
+    }
+  });
+
+  // ---- scf.if condition ----
+  module.walk([&](scf::IfOp ifOp) {
+    if (!ifOpHasCubeOps(ifOp, blockInfoMap)) {
+      return;
+    }
+
+    // Skip if this ifOp is nested inside a for-loop whose bounds have already
+    // been transferred.  The induction variable carries the transferred values,
+    // so any scalar condition computed from it is already available on CUBE.
+    mlir::Operation *parent = ifOp->getParentOp();
+    while (parent) {
+      if (auto parentForOp = dyn_cast<scf::ForOp>(parent)) {
+        if (handledForOps.contains(parentForOp)) {
+          return;
+        }
+      }
+      parent = parent->getParentOp();
+    }
+
+    mlir::Value condition = ifOp.getCondition();
+    if (!isa<mlir::IntegerType>(condition.getType())) {
+      return;
+    }
+
+    mlir::Operation *defOp = condition.getDefiningOp();
+    if (!defOp) {
+      return;
+    }
+
+    llvm::DenseSet<mlir::Operation *> visited;
+    if (!hasVectorOpInDefChain(condition, visited, &handledScalarValues)) {
+      return;
+    }
+
+    auto producerIdOpt = CVPipeline::getOpBlockId(defOp);
+    if (!producerIdOpt) {
+      return;
+    }
+    int producerId = *producerIdOpt;
+
+    auto consumerIdOpt = CVPipeline::getOpBlockId(ifOp.getOperation());
+    if (!consumerIdOpt) {
+      return;
+    }
+    int consumerId = *consumerIdOpt;
+    auto it = blockInfoMap.find(consumerId);
+    if (it == blockInfoMap.end() || !it->second.isCube) {
+      return;
+    }
+
+    LOG_DEBUG("Found scalar V->C dependency from ifOp condition: "
+              << condition << "\n");
+
+    collectDepInfo(condition, DependencyType::VectorToCube, v2cDependencies,
+                   producerId, consumerId, info);
+    v2cDependencies.back().isScaler = true;
+    handledScalarValues.insert(condition);
+  });
+
+  LOG_DEBUG("Scalar V->C dependency analysis complete.\n");
+}
+
 void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
   auto &memoryDependencies = info.getMemoryDependencies();
   LOG_DEBUG("\n=== start mem dep analysis ===\n");
@@ -1054,6 +1278,8 @@ void DataDependencyAnalysisPass::runOnOperation() {
   analyzeExternalInputs(info);
 
   analyzeExternalOutputs(info);
+
+  analyzeScalarVToCDependencies(info);
 
   // Step 4: Analyze memory dependencies (memdep sync)
   analyzeMemoryEffect(info);

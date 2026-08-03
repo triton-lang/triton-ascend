@@ -276,7 +276,7 @@ def check_subview(src, offsets, sizes, strides):
     length = len(strides)
     src_strides = [1] * length
     if length == 1:
-        if offset[0] % base_byte != 0:
+        if offsets[0] % base_byte != 0:
             raise TypeError(f"all strides should be 1 and the offset value should be 32-bytes aligned.")
         return
     for i in range(length - 2, -1, -1):

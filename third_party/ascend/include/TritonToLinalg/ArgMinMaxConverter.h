@@ -176,11 +176,6 @@ public:
     } else {
       return failure();
     }
-    if (!indexSelectOp || indexSelectOp.getCondition() != shouldUpdate ||
-        currIndex != indexSelectOp.getTrueValue() ||
-        reduceIndex != indexSelectOp.getFalseValue()) {
-      return failure();
-    }
 
     LLVM_DEBUG(llvm::dbgs() << "Matching: " << *opsIt << "\n");
     auto termOp = dyn_cast<triton::ReduceReturnOp>(*opsIt++);

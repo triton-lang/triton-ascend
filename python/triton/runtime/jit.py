@@ -14,6 +14,7 @@ from types import ModuleType
 from triton._C.libtriton import get_cache_invalidating_env_vars
 from .driver import driver
 from . import _async_compile
+from .kernel_args_dump import dump_kernel_args
 
 TRITON_MODULE = __name__[:-len(".runtime.jit")]
 
@@ -581,6 +582,8 @@ class JITFunction(KernelInterface[T]):
             self.create_binder(backend)
 
         bound_args, sig_and_spec, constexpr_vals, non_constexpr_vals, excess_kwargs = self.binder(*args, **kwargs)
+
+        dump_kernel_args(self.fn.__name__, bound_args, warmup=warmup)
 
         # compute cache key
         key = ''.join(sig_and_spec) + str((constexpr_vals, excess_kwargs))

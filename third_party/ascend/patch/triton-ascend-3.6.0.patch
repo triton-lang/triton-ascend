@@ -105,7 +105,7 @@ index c9620e3f4c56188514337756484a93be97b5c5b8..c38a42c9b7a42e2a5c06936a98bb2f83
  add_subdirectory(test)
  
 diff --git a/bin/CMakeLists.txt b/bin/CMakeLists.txt
-index cc0b4fa15a212c0b865c322bb5257ef7cb10fb6f..82f52f87e141e4acfe20b8385350402df2d880ba 100644
+index cc0b4fa15..82f52f87e 100644
 --- a/bin/CMakeLists.txt
 +++ b/bin/CMakeLists.txt
 @@ -1,11 +1,38 @@
@@ -400,7 +400,7 @@ index 1b72c13762c0b831d7bfb5e450c5ab0082212a04..ee5defb6e939db8da2c834eb7416c8b9
    }
    return success();
 diff --git a/python/src/ir.cc b/python/src/ir.cc
-index 5af645bc043f30c613501f18d164dc41080a127d..011f82d6000a49fc0fdc50ca03895ffd258c5699 100644
+index 5af645bc0..011f82d60 100644
 --- a/python/src/ir.cc
 +++ b/python/src/ir.cc
 @@ -332,6 +332,7 @@ void init_triton_ir(py::module &&m) {
@@ -738,7 +738,7 @@ index 582cd876cb13374a0d31e8c783e4fea1a1003c4a..41325dfa796d27257f3e8b754e793c0c
  
          return check
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
-index 42bf7024f41090e0680f9f262c15074c956c250d..8ab2a95b28bd75f9659af8e455f91870c5379454 100644
+index 52192cf3e..241ba3378 100644
 --- a/python/triton/language/semantic.py
 +++ b/python/triton/language/semantic.py
 @@ -219,7 +219,7 @@ class TritonSemantic(Generic[TensorTy]):
@@ -914,7 +914,7 @@ index 42bf7024f41090e0680f9f262c15074c956c250d..8ab2a95b28bd75f9659af8e455f91870
          return ret
  
      def load(self, ptr: TensorTy, mask: Optional[TensorTy], other: Optional[TensorTy], boundary_check: Tuple,
-@@ -1837,12 +1903,17 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -1799,12 +1865,17 @@ class TritonSemantic(Generic[TensorTy]):
          is_signed = [arg.dtype.is_int_signed() for arg in args]
          return self.tensor(self.builder.create_print(prefix, hex, new_args, is_signed), tl.void)
  
@@ -970,7 +970,7 @@ index b1dd327bb9947c0c70786912c70863db6c8a905f..c49330d40d24757bd29c5eaffeee875f
  
  @core._tensor_member_fn
 diff --git a/python/triton/runtime/interpreter.py b/python/triton/runtime/interpreter.py
-index cd871cb2e1f1205bf9368235cd6193435aaff12d..8566c3811f79c831ec17af61732511e56517fb82 100644
+index cd871cb2e..82eb6960d 100644
 --- a/python/triton/runtime/interpreter.py
 +++ b/python/triton/runtime/interpreter.py
 @@ -22,6 +22,25 @@ from .._C.libtriton import ir as _ir

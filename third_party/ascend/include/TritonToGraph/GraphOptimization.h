@@ -47,6 +47,9 @@ enum class GraphOptimizationRuleId : uint16_t {
   // DiagonalMaskRemoval rewrites compute logic rather than memory access, so
   // it is architecture and template independent.
   DiagonalMaskRemoval = 128,
+  // ConvertModuloToMask linearizes wrapped tile addresses.  It runs before the
+  // memory-access rules so they see the linear form.
+  ConvertModuloToMask = 256,
   // The following identities are owned by the layout/memory compatibility
   // passes.  They deliberately are not GraphOptimizationRule candidates and
   // are not added to GraphOptimizePass's per-function phase loop.
@@ -66,6 +69,7 @@ constexpr uint16_t kAllGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::StoreCoalescing) |
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::RowCoalescing) |
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::DiagonalMaskRemoval) |
+    getGraphOptimizationRuleMask(GraphOptimizationRuleId::ConvertModuloToMask) |
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::StridedAxisCoalescing) |
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::ChunkCoalescing) |

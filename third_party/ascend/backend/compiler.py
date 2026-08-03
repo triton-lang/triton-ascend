@@ -1057,7 +1057,7 @@ class NPUOptions:
     backend_name: str = 'cann'
     instrumentation_mode: str = ""
     enable_graph_optimize: bool = True
-    graph_optimize_rule_mask: int = 255
+    graph_optimize_rule_mask: int = 511
     graph_optimize_max_rewrites_per_function: int = 64
     graph_optimize_ub_capacity_bytes: Optional[int] = None
     graph_optimize_emit_remarks: bool = False

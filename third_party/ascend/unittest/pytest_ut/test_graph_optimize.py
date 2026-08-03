@@ -82,6 +82,40 @@ def diagonal_shift_reverse_kernel(x_ptr, y_ptr, BLOCK: tl.constexpr):
 
 
 @triton.jit
+def wrapped_tile_copy_kernel(src_ptr, dst_ptr, n, BLOCK_K: tl.constexpr, BLOCK_N: tl.constexpr):
+    # The fused-MoE weight-tile shape: the column offset wraps on a runtime
+    # dimension, and the store mask already discards the lanes past it.
+    # ConvertModuloToMask must drop the wrap and mask the load instead.
+    pid = tl.program_id(0)
+    offs_n = pid * BLOCK_N + tl.arange(0, BLOCK_N)
+    offs_k = tl.arange(0, BLOCK_K)
+    wrapped = offs_n % n
+    tile = tl.load(src_ptr + (offs_k[:, None] * n + wrapped[None, :]))
+    tl.store(
+        dst_ptr + (offs_k[:, None] * n + offs_n[None, :]),
+        tile,
+        mask=offs_n[None, :] < n,
+    )
+
+
+@triton.jit
+def constexpr_wrapped_tile_copy_kernel(src_ptr, dst_ptr, N: tl.constexpr, BLOCK_K: tl.constexpr, BLOCK_N: tl.constexpr):
+    # Same shape with a compile-time bound.  TritonToStructured can keep this
+    # wrap and re-express it as a strided access, which is exactly equivalent,
+    # so ConvertModuloToMask must leave it alone.
+    pid = tl.program_id(0)
+    offs_n = pid * BLOCK_N + tl.arange(0, BLOCK_N)
+    offs_k = tl.arange(0, BLOCK_K)
+    wrapped = offs_n % N
+    tile = tl.load(src_ptr + (offs_k[:, None] * N + wrapped[None, :]))
+    tl.store(
+        dst_ptr + (offs_k[:, None] * N + offs_n[None, :]),
+        tile,
+        mask=offs_n[None, :] < N,
+    )
+
+
+@triton.jit
 def overflow_assert_provenance_kernel(output_ptr, n, BLOCK: tl.constexpr):
     offsets = tl.arange(0, BLOCK)
     checked_offset = offsets * n
@@ -269,7 +303,7 @@ def test_default_generic_graph_mask_excludes_legacy_memory_compatibility(tmp_pat
     The generic GraphOptimizePass runs at early TTIR.  Row, Axis, Chunk, and
     StridedLoadStoreRewrite retain their original compatibility-pass slots, so
     this strided memory shape must not acquire either coalescing metadata or
-    an indirect-memory op merely because the default mask is 255.
+    an indirect-memory op merely because the default mask is 511.
     """
     default_options = NPUOptions(arch="Ascend910_95", enable_graph_optimize=True)
     native_only_options = NPUOptions(
@@ -277,7 +311,7 @@ def test_default_generic_graph_mask_excludes_legacy_memory_compatibility(tmp_pat
         enable_graph_optimize=True,
         graph_optimize_rule_mask=7,
     )
-    assert default_options.graph_optimize_rule_mask == 255
+    assert default_options.graph_optimize_rule_mask == 511
 
     default_result = make_ttir(
         make_legacy_memory_isolation_ast_ttir(default_options),
@@ -298,20 +332,21 @@ def test_default_generic_graph_mask_excludes_legacy_memory_compatibility(tmp_pat
     assert "tt.indirect_store" not in text
     # The native graph-rule bundle exercised by this shape is
     # LoadStoreTranspose | TransposePointwiseReorder | StoreCoalescing (1|2|4).
-    # Adding the four compatibility identities and DiagonalMaskRemoval to reach
-    # 255 must be observationally inert in make_ttir(): this input carries no
-    # diagonal-select-reduce pattern.
+    # Adding the four compatibility identities, DiagonalMaskRemoval and
+    # ConvertModuloToMask to reach 511 must be observationally inert in
+    # make_ttir(): this input carries neither a diagonal-select-reduce pattern
+    # nor a wrapped tile address.
     assert text == str(native_only_result)
     assert_reparseable(default_result, tmp_path, "generic-legacy-memory-isolation")
 
 
 def test_default_graph_mask_preserves_native_graph_rule_bundle(monkeypatch, tmp_path):
-    """Default 255 retains native 1|2|4 behavior, including StoreCoalescing,
+    """Default 511 retains native 1|2|4 behavior, including StoreCoalescing,
     without running legacy rules.
 
     This input has the LoadStoreTranspose (bit 1) structural signature.  Compare
     the public native-only bundle (7) against the default all-identity mask
-    (255): both must apply the same native rewrite.  Together with the legacy
+    (511): both must apply the same native rewrite.  Together with the legacy
     isolation test above, this catches either failure mode: accidentally
     dropping native rules when the default changed, or scheduling compatibility
     passes from the early generic graph pass.
@@ -335,7 +370,7 @@ def test_default_graph_mask_preserves_native_graph_rule_bundle(monkeypatch, tmp_
     native_only_ttir = str(make_fused_swiglu_ttir(native_only_options))
     default_ttir = str(make_fused_swiglu_ttir(default_options))
 
-    assert default_options.graph_optimize_rule_mask == 255
+    assert default_options.graph_optimize_rule_mask == 511
     assert default_ttir == native_only_ttir
     # A rule-mask=0 control would retain the original [N, M] pointer layout;
     # the default must still perform the native transpose rewrite to [M, N].
@@ -749,7 +784,7 @@ def test_diagonal_mask_removal_numerical_equivalence(monkeypatch, tmp_path):
     ])
 
     outputs = {}
-    for rule_mask in (127, 255):
+    for rule_mask in (127, 511):
         diagonal_shift_forward_kernel.device_caches.clear()
         output = torch.empty_like(source)
         compiled = diagonal_shift_forward_kernel[(1, )](
@@ -768,7 +803,127 @@ def test_diagonal_mask_removal_numerical_equivalence(monkeypatch, tmp_path):
 
     assert "arith.subf" in compiled.asm["ttir"]
     torch.testing.assert_close(outputs[127], expected, rtol=1e-5, atol=1e-6)
-    torch.testing.assert_close(outputs[255], outputs[127], rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(outputs[511], outputs[127], rtol=1e-5, atol=1e-6)
+
+
+def make_wrapped_tile_ttir(options, block_k=8, block_n=16, bound=None):
+    kernel = wrapped_tile_copy_kernel if bound is None else constexpr_wrapped_tile_copy_kernel
+    signature = {"src_ptr": "*fp32", "dst_ptr": "*fp32"}
+    constants = {"BLOCK_K": block_k, "BLOCK_N": block_n}
+    if bound is None:
+        signature["n"] = "i32"
+    else:
+        constants["N"] = bound
+
+    source = ASTSource(kernel, signature, constants)
+    context = ir.context()
+    ir.load_dialects(context)
+    ascend_ir.load_dialects(context)
+    module = ast_to_ttir(kernel, source, context, options, {}, {})
+    return str(make_ttir(module, {}, options))
+
+
+def test_convert_modulo_to_mask_linearizes_wrapped_tile():
+    """The wrap gives way to a linear offset plus a boundary mask on the load.
+
+    The point of the rewrite is the address form: TritonToStructured can turn a
+    linear masked access into one contiguous transfer, while it has no way to
+    keep a wrapped address contiguous.
+    """
+    options = NPUOptions(arch="Ascend910B1", enable_graph_optimize=True)
+
+    ttir = make_wrapped_tile_ttir(options)
+
+    assert "arith.remsi" not in ttir
+    assert "arith.cmpi slt" in ttir
+    # The load carries a mask and a zero fill it did not have before.
+    assert "tt.load" in ttir
+    assert "arith.constant dense<0.000000e+00> : tensor<8x16xf32>" in ttir
+
+
+def test_convert_modulo_to_mask_is_gated_by_its_rule_bit():
+    """Mask 255 is every other identity, so the wrap must survive intact."""
+    options = NPUOptions(
+        arch="Ascend910B1",
+        enable_graph_optimize=True,
+        graph_optimize_rule_mask=255,
+    )
+
+    ttir = make_wrapped_tile_ttir(options)
+
+    assert "arith.remsi" in ttir
+
+
+def test_convert_modulo_to_mask_leaves_compile_time_bounds_alone():
+    """A constant divisor belongs to TritonToStructured, which stays equivalent.
+
+    visitOperandRem re-expresses such a wrap as a strided access instead of
+    discarding it, so claiming this candidate would trade an exact rewrite for
+    an approximate one.
+    """
+    options = NPUOptions(arch="Ascend910B1", enable_graph_optimize=True)
+
+    ttir = make_wrapped_tile_ttir(options, bound=20)
+
+    assert "arith.remsi" in ttir
+
+
+def test_convert_modulo_to_mask_applies_without_simt_route():
+    """The rewrite is address logic, so it must not depend on force_simt_only."""
+    for force_simt_only in (False, True):
+        options = NPUOptions(
+            arch="Ascend910B1",
+            enable_graph_optimize=True,
+            force_simt_only=force_simt_only,
+        )
+
+        ttir = make_wrapped_tile_ttir(options)
+
+        assert "arith.remsi" not in ttir
+
+
+def test_convert_modulo_to_mask_numerical_equivalence(monkeypatch, tmp_path):
+    """The lanes the store keeps must read exactly what the wrap gave them.
+
+    A bound that is not a multiple of the tile makes the last program a boundary
+    tile, which is the only place the wrap ever mattered.
+    """
+    torch = _require_npu()
+    monkeypatch.setenv("TRITON_ALWAYS_COMPILE", "1")
+    block_k = 8
+    block_n = 16
+    bound = 20
+    # The wrapped lanes now address past the last row instead of folding back
+    # into the tensor, so the allocation carries one tile of slack.  Whether the
+    # lowered transfer actually stops at the mask is a TritonToStructured
+    # property, asserted structurally by the tests above.
+    source = torch.rand(block_k * bound + block_n, dtype=torch.float32, device="npu")
+    expected = source[:block_k * bound].cpu()
+
+    outputs = {}
+    for rule_mask in (255, 511):
+        wrapped_tile_copy_kernel.device_caches.clear()
+        output = torch.zeros(block_k * bound, dtype=torch.float32, device="npu")
+        grid = ((bound + block_n - 1) // block_n, )
+        compiled = wrapped_tile_copy_kernel[grid](
+            source,
+            output,
+            bound,
+            BLOCK_K=block_k,
+            BLOCK_N=block_n,
+            graph_optimize_rule_mask=rule_mask,
+        )
+        torch.npu.synchronize()
+        assert_ttir_text_reparseable(
+            compiled.asm["ttir"],
+            tmp_path,
+            f"wrapped-tile-{rule_mask}",
+        )
+        outputs[rule_mask] = output.cpu()
+
+    assert "arith.remsi" not in compiled.asm["ttir"]
+    torch.testing.assert_close(outputs[255], expected, rtol=0, atol=0)
+    torch.testing.assert_close(outputs[511], outputs[255], rtol=0, atol=0)
 
 
 def test_graph_optimize_options_contribute_to_npu_hash():

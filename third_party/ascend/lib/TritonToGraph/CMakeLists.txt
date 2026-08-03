@@ -14,6 +14,7 @@ add_triton_library(TritonToGraph
   LegacyMemoryAccess/RowCoalescing.cpp
   LegacyMemoryAccess/StridedAxisCoalescing.cpp
   LegacyMemoryAccess/StridedLoadStoreRewrite.cpp
+  Rules/ConvertModuloToMaskRule.cpp
   Rules/DiagonalMaskRemovalRule.cpp
   Rules/LoadStoreTransposeRule.cpp
   Rules/RowCoalescingRule.cpp

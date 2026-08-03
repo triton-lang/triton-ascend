@@ -153,7 +153,7 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
         options.forceSimtOnly = forceSimtOnly;
         pm.addPass(mlir::triton::cfg::createGraphOptimizePass(options));
       },
-      py::arg("pm"), py::arg("rule_mask") = 255,
+      py::arg("pm"), py::arg("rule_mask") = 511,
       py::arg("max_rewrites_per_function") = 64,
       py::arg("ub_capacity_bytes") = 0, py::arg("emit_remarks") = false,
       py::arg("force_simt_only") = false);

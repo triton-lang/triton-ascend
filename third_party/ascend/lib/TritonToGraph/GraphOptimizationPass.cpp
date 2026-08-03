@@ -77,7 +77,7 @@ unsigned getProgramOrder(const RewritePlan &plan,
   return it->second;
 }
 
-bool isRuleEnabled(uint8_t ruleMask, GraphOptimizationRuleId ruleId) {
+bool isRuleEnabled(uint16_t ruleMask, GraphOptimizationRuleId ruleId) {
   return (ruleMask & getGraphOptimizationRuleMask(ruleId)) != 0;
 }
 
@@ -110,8 +110,8 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
   const uint64_t cliMaxRewrites = this->maxRewritesPerFunction;
   const uint64_t cliUBCapacityBytes = this->ubCapacityBytes;
 
-  if (cliRuleMask > std::numeric_limits<uint8_t>::max() ||
-      !isValidGraphOptimizationRuleMask(static_cast<uint8_t>(cliRuleMask))) {
+  if (cliRuleMask > std::numeric_limits<uint16_t>::max() ||
+      !isValidGraphOptimizationRuleMask(static_cast<uint16_t>(cliRuleMask))) {
     getOperation().emitError()
         << "graph-optimize rule-mask contains unknown or out-of-range bits: "
         << cliRuleMask;
@@ -132,7 +132,7 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
     return failure();
   }
 
-  options.enabledRuleMask = static_cast<uint8_t>(cliRuleMask);
+  options.enabledRuleMask = static_cast<uint16_t>(cliRuleMask);
   options.maxRewritesPerFunction = static_cast<unsigned>(cliMaxRewrites);
   options.ubCapacityBytes = static_cast<unsigned>(cliUBCapacityBytes);
   options.emitRemarks = this->emitRemarks;

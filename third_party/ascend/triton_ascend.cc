@@ -136,8 +136,8 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
       [](mlir::PassManager &pm, std::uint64_t ruleMask,
          std::uint64_t maxRewritesPerFunction, std::uint64_t ubCapacityBytes,
          bool emitRemarks, bool forceSimtOnly) {
-        if (ruleMask > std::numeric_limits<std::uint8_t>::max())
-          throw py::value_error("rule_mask must fit in uint8_t");
+        if (ruleMask > std::numeric_limits<std::uint16_t>::max())
+          throw py::value_error("rule_mask must fit in uint16_t");
         if (maxRewritesPerFunction > std::numeric_limits<unsigned>::max())
           throw py::value_error(
               "max_rewrites_per_function must fit in unsigned");
@@ -145,7 +145,7 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
           throw py::value_error("ub_capacity_bytes must fit in unsigned");
 
         mlir::triton::cfg::GraphOptimizationOptions options;
-        options.enabledRuleMask = static_cast<std::uint8_t>(ruleMask);
+        options.enabledRuleMask = static_cast<std::uint16_t>(ruleMask);
         options.maxRewritesPerFunction =
             static_cast<unsigned>(maxRewritesPerFunction);
         options.ubCapacityBytes = static_cast<unsigned>(ubCapacityBytes);

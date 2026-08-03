@@ -33,7 +33,10 @@ namespace mlir {
 namespace triton {
 namespace cfg {
 
-enum class GraphOptimizationRuleId : uint8_t {
+// The identity of every rule is one bit of the pass rule mask, so the mask
+// width bounds how many rules can ever be registered.  It is 16-bit because
+// the 8-bit range is already fully assigned.
+enum class GraphOptimizationRuleId : uint16_t {
   LoadStoreTranspose = 1,
   TransposePointwiseReorder = 2,
   StoreCoalescing = 4,
@@ -49,11 +52,11 @@ enum class GraphOptimizationRuleId : uint8_t {
   StridedLoadStoreRewrite = 64,
 };
 
-constexpr uint8_t getGraphOptimizationRuleMask(GraphOptimizationRuleId rule) {
-  return static_cast<uint8_t>(rule);
+constexpr uint16_t getGraphOptimizationRuleMask(GraphOptimizationRuleId rule) {
+  return static_cast<uint16_t>(rule);
 }
 
-constexpr uint8_t kAllGraphOptimizationRuleMask =
+constexpr uint16_t kAllGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::LoadStoreTranspose) |
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::TransposePointwiseReorder) |
@@ -65,15 +68,17 @@ constexpr uint8_t kAllGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::StridedLoadStoreRewrite);
 
-constexpr bool isValidGraphOptimizationRuleMask(uint8_t ruleMask) {
-  return (ruleMask & static_cast<uint8_t>(~kAllGraphOptimizationRuleMask)) == 0;
+constexpr bool isValidGraphOptimizationRuleMask(uint16_t ruleMask) {
+  constexpr uint16_t unknownRuleBits =
+      static_cast<uint16_t>(~kAllGraphOptimizationRuleMask);
+  return (ruleMask & unknownRuleBits) == 0;
 }
 
 struct GraphOptimizationOptions {
   // A zero mask intentionally disables every native GraphOptimizationRule.
   // Layout/memory compatibility stages retain their original fixed scheduling
   // and do not use this option as a new opt-out.
-  uint8_t enabledRuleMask = kAllGraphOptimizationRuleMask;
+  uint16_t enabledRuleMask = kAllGraphOptimizationRuleMask;
   unsigned maxRewritesPerFunction = 64;
   unsigned ubCapacityBytes = 0;
   bool emitRemarks = false;

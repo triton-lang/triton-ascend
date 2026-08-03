@@ -23,7 +23,10 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_SSBUFFER_MANAGER_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_SSBUFFER_MANAGER_H
 
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/DenseMap.h"
@@ -32,6 +35,8 @@
 namespace mlir {
 namespace triton {
 
+static constexpr llvm::StringRef kMemrefExtVolatile = "memref_ext.volatile";
+
 // SSBuffer Manager for managing SSBuffer address allocation and type tracking
 // Purpose: Globally manage SSBuffer addresses across the entire pass pipeline
 // This class maintains a single mapping table: Value -> address (int64_t)
@@ -39,7 +44,6 @@ namespace triton {
 class SSBufferManager {
 public:
   // SSBuffer address space and constants
-  static constexpr int SSBUF_ADDR_SPACE = 11;
   static constexpr int ADDR_INT_TYPE = 64;
   static constexpr int SSBUF_BASE_ADDR = 2048; // Base address for SSBuffer
   static constexpr int SSBUF_ADDR_OFFSET =
@@ -82,6 +86,32 @@ private:
   // This avoids O(n) traversal in findValueByAddr
   llvm::DenseMap<int64_t, Value> addrToValueMap;
 };
+
+static constexpr int ADDR_INT_TYPE = 64;
+static constexpr int CONST_INT_TYPE = 32;
+
+inline MemRefType getSsbufMemrefType(Builder &builder) {
+  auto i32Type = builder.getIntegerType(CONST_INT_TYPE);
+  auto addressSpaceAttr =
+      builder.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::SSBUF);
+  return MemRefType::get({}, i32Type, nullptr, addressSpaceAttr);
+}
+
+inline std::pair<arith::ConstantOp, hivm::PointerCastOp>
+getSsbufConstAndPointerCast(OpBuilder &builder, Location loc, uint64_t addr) {
+  auto i64Type = builder.getIntegerType(ADDR_INT_TYPE);
+  auto addrAttr = builder.getIntegerAttr(i64Type, addr);
+  auto addrConst = builder.create<arith::ConstantOp>(loc, i64Type, addrAttr);
+
+  return {addrConst,
+          builder.create<hivm::PointerCastOp>(loc, getSsbufMemrefType(builder),
+                                              addrConst.getResult())};
+}
+
+inline hivm::PointerCastOp createPointerCastOp(OpBuilder &builder, Location loc,
+                                               uint64_t addr) {
+  return getSsbufConstAndPointerCast(builder, loc, addr).second;
+}
 
 } // namespace triton
 } // namespace mlir

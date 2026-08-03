@@ -211,7 +211,7 @@ void launch_kernel_via_stub(
 }
 ```
 
-> **Note:** The `func` parameter in this example is a kernel function handle registered via CANN runtime. The registration flow (`rtDevBinaryRegister` / `rtFunctionRegister`) is standard CANN runtime procedure — consult the CANN header (`runtime/kernel.h`) for exact API signatures. The `loadKernelBinary` / `registerKernel` functions in `npu_utils.cpp` provide Python-side wrappers. Whether these helper functions may be documented as public API is a pending decision — see [Pending Items](#pending-items).
+> **Note:** The `func` parameter in this example is a kernel function handle registered via CANN runtime. The registration flow (`rtDevBinaryRegister` / `rtFunctionRegister`) is standard CANN runtime procedure — consult the CANN header (`runtime/kernel.h`) for exact API signatures. The `loadKernelBinary` / `registerKernel` functions in `npu_utils.cpp` provide Python-side wrappers.
 
 ### 6.2 Python ctypes Example
 

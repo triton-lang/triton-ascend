@@ -88,8 +88,8 @@ pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.c
 #### 安装依赖
 
 ```bash
-apt updata
-apt install zliblg-dev clang-15 lld-15
+apt update
+apt install zlib1g-dev clang-15 lld-15
 apt install ccache # optional
 update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 100
 update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-15 100

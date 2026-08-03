@@ -210,7 +210,7 @@ void launch_kernel_via_stub(
 }
 ```
 
-> **说明：** 示例中的 `func` 参数是 CANN runtime 注册后的 kernel function handle，获取方式（`rtDevBinaryRegister` / `rtFunctionRegister`）属于 CANN runtime 标准流程。当前仓内 `npu_utils.cpp` 中的 `loadKernelBinary` / `registerKernel` 函数提供了 Python 侧的封装实现，具体 API 签名请以 CANN 头文件（`runtime/kernel.h`）为准。关于这些辅助函数是否可作为公开 API 文档化，请参见[待确认事项](#待确认事项)。
+> **说明：** 示例中的 `func` 参数是 CANN runtime 注册后的 kernel function handle，获取方式（`rtDevBinaryRegister` / `rtFunctionRegister`）属于 CANN runtime 标准流程。当前仓内 `npu_utils.cpp` 中的 `loadKernelBinary` / `registerKernel` 函数提供了 Python 侧的封装实现，具体 API 签名请以 CANN 头文件（`runtime/kernel.h`）为准。
 
 ### 6.2 Python ctypes 示例
 

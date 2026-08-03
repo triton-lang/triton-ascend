@@ -345,7 +345,7 @@ python your_program.py
 
 ### 5.1.2 运行时调试方法
 
-此方法的使用 `tl.device_print` 可以灵活打印需要观察的变量的值。
+此方法使用 `tl.device_print` 可以灵活打印需要观察的变量的值。
 设置环境变量 `TRITON_DEVICE_PRINT=1` 可启用 `tl.device_print` 功能。此函数允许在kernel内部打印张量值，是分阶段验证计算精度的高效方法。
 **使用方法：**
 

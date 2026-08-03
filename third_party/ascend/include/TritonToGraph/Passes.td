@@ -46,7 +46,7 @@ def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
   let summary = "Optimize Triton IR with graph analyses";
   let constructor = "mlir::triton::cfg::createGraphOptimizePass()";
   let options = [
-    Option<"ruleMask", "rule-mask", "uint64_t", "127",
+    Option<"ruleMask", "rule-mask", "uint64_t", "255",
            "Bitmask of registered graph rule identities; this pass executes only native graph-rule phases">,
     Option<"maxRewritesPerFunction", "max-rewrites-per-function", "uint64_t",
            "64", "Maximum graph rewrites per function">,

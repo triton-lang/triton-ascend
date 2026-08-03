@@ -49,7 +49,11 @@ namespace triton {
 namespace cfg {
 namespace {
 
-constexpr std::array<GraphOptimizationRuleId, 3> kRulePhases = {
+constexpr std::array<GraphOptimizationRuleId, 4> kRulePhases = {
+    // DiagonalMaskRemoval runs first because it deletes a quadratic
+    // intermediate tensor, so the later phases match and budget UB against the
+    // already shrunken IR.
+    GraphOptimizationRuleId::DiagonalMaskRemoval,
     GraphOptimizationRuleId::LoadStoreTranspose,
     GraphOptimizationRuleId::TransposePointwiseReorder,
     GraphOptimizationRuleId::StoreCoalescing,
@@ -352,6 +356,10 @@ void GraphOptimizePass::runOnOperation() {
 void populateBuiltinGraphOptimizationRules(
     const GraphOptimizationOptions &options,
     SmallVectorImpl<std::unique_ptr<GraphOptimizationRule>> &rules) {
+  if (isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::DiagonalMaskRemoval)) {
+    rules.push_back(createDiagonalMaskRemovalRule());
+  }
   if (isRuleEnabled(options.enabledRuleMask,
                     GraphOptimizationRuleId::LoadStoreTranspose)) {
     rules.push_back(createLoadStoreTransposeRule());

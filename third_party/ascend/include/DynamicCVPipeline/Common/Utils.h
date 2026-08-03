@@ -162,6 +162,62 @@ inline bool isCubeOp(Operation *op) {
   return !isScfOp(op) && CVPipeline::getOpCoreType(op) == CoreType::CUBE_ONLY;
 }
 
+// ============================================================================
+// Unified Loop Helpers: abstract ForOp/WhileOp differences
+// ============================================================================
+// Get the body block of a loop (ForOp's body or WhileOp's after-body block)
+inline Block *getLoopBodyBlock(Operation *loop) {
+  if (auto forOp = dyn_cast<scf::ForOp>(loop))
+    return forOp.getBody();
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loop))
+    return whileOp.getAfterBody()->getNextNode();
+  return nullptr;
+}
+
+// Get the init values of a loop (ForOp's initArgs or WhileOp's inits)
+inline ValueRange getLoopInitValues(Operation *loop) {
+  if (auto forOp = dyn_cast<scf::ForOp>(loop))
+    return forOp.getInitArgs();
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loop))
+    return whileOp.getInits();
+  return {};
+}
+
+// Get the yield terminator of a loop's body
+inline Operation *getLoopYieldOp(Operation *loop) {
+  if (auto forOp = dyn_cast<scf::ForOp>(loop))
+    return forOp.getBody()->getTerminator();
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loop))
+    return whileOp.getAfterBody()->getTerminator();
+  return nullptr;
+}
+
+// Check if a block argument is an iter_arg of a loop (ForOp body or WhileOp
+// after-body)
+inline bool isLoopIterArg(BlockArgument blockArg) {
+  Operation *parentOp = blockArg.getOwner()->getParentOp();
+  if (isa<scf::ForOp>(parentOp))
+    return true;
+  if (auto whileOp = dyn_cast<scf::WhileOp>(parentOp))
+    return blockArg.getOwner() == whileOp.getAfterBody()->getNextNode();
+  return false;
+}
+
+// Helper: Check if a value is a scalar (not a tensor type)
+inline bool isScalarType(Value value) {
+  return !isa<RankedTensorType>(value.getType());
+}
+
+// Helper: Check if a value is a scalar iter_arg from scf.for or scf.while
+inline bool isScalarIterArgOp(Value iterArg) {
+  auto blockArg = dyn_cast<BlockArgument>(iterArg);
+  if (!blockArg)
+    return false;
+  if (!isLoopIterArg(blockArg))
+    return false;
+  return isScalarType(iterArg);
+}
+
 bool isVectorOnlyOp(Operation *op);
 
 bool isScalarLike(Value value);

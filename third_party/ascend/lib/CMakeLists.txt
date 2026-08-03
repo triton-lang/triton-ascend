@@ -11,6 +11,7 @@ add_subdirectory(TritonToUnstructure)
 add_subdirectory(TritonToLLVM)
 add_subdirectory(TritonToStructured)
 add_subdirectory(DynamicCVPipeline)
+add_subdirectory(AnnotateUserCasts)
 
 if(TRITON_ENABLE_COVERAGE_HITEST)
   set(_instrument_targets
@@ -27,6 +28,7 @@ if(TRITON_ENABLE_COVERAGE_HITEST)
       TritonAscendIR               # from Dialect/TritonAscend/IR
       TritonStructuredIR           # from Dialect/TritonStructured/IR
       AutoBlockify
+      AnnotateUserCasts
   )
 
   foreach(_target ${_instrument_targets})

@@ -195,6 +195,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             enable_sync_block_lock
         )
         ascend.passes.ttir.add_triton_to_annotation(pm)
+        ascend.passes.ttir.add_annotate_user_casts(pm)
         ascend.passes.ttir.add_triton_to_unstructure(
             pm,
             compile_on_910_95,

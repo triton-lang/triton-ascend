@@ -12,6 +12,7 @@
 #include "ascend/include/AutoBlockify/Passes.h"
 #include "ascend/include/TritonToStructured/Passes.h"
 #include "ascend/include/TritonToAnnotation/Passes.h"
+#include "ascend/include/AnnotateUserCasts/Passes.h"
 #include "ascend/include/TritonControlFlowOpt/Passes.h"
 #include "ascend/include/TritonToLinalg/Passes.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
@@ -333,6 +334,9 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
 
   m.def("add_triton_to_annotation", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::createTritonToAnnotationPass());});
+  
+  m.def("add_annotate_user_casts", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createAnnotateUserCastsPass());});
 
   m.def("add_triton_to_linalg", [](mlir::PassManager &pm, bool globalKernel,
     bool namedOps, bool enableNd2nzOnVector, bool enableSelectAnalysis,

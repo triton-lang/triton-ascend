@@ -50,6 +50,7 @@ inline constexpr llvm::StringLiteral kIntraBufCount = "ssbuffer.intra_buf_count"
 inline constexpr llvm::StringLiteral kInterCoreBufCount = "ssbuffer.inter_core_buf_count";
 inline constexpr llvm::StringLiteral kLoadStoreBufCount = "ssbuffer.load_store_buf_count";
 inline constexpr llvm::StringLiteral kAnalyzeFlagId = "ssbuffer.analyze_flag_id";
+inline constexpr llvm::StringLiteral kCiTestTrigger = "ssbuffer.ci_test_trigger";
 inline constexpr llvm::StringLiteral kLoopCarriedL0C = "ssbuffer.loop_carried_l0c";
 inline constexpr llvm::StringLiteral kCrossDeps = "ssbuffer.crossDeps";
 inline constexpr llvm::StringLiteral kIntraDeps = "ssbuffer.intraDeps";

@@ -1,0 +1,76 @@
+name: DynamicCVPipeline Tests
+
+on:
+  pull_request:
+    paths:
+      - 'third_party/ascend/lib/DynamicCVPipeline/**'
+      - 'third_party/ascend/include/DynamicCVPipeline/**'
+  workflow_dispatch:
+    inputs:
+      pr_id:
+        description: PR number to (re)trigger test against
+        required: true
+
+concurrency:
+  group: dcv-pipeline-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'queue' }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  build-check:
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: linux-amd64-cpu-16
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:8.5.0-910b-ubuntu22.04-py3.11-latest
+    timeout-minutes: 360
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: "true"
+
+      - name: Add git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache build dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.triton/llvm
+            ~/.triton/json
+            ~/.triton/nvidia
+            ${{ github.workspace }}/.ccache
+          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-dcv-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-dcv
+
+      - name: Build triton-ascend
+        shell: bash
+        env:
+          TRITON_BUILD_WITH_CCACHE: "true"
+          TRITON_BUILD_WITH_CLANG_LLD: "TRUE"
+          TRITON_DISABLE_LINE_INFO: 1
+          CCACHE_COMPRESS: "true"
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          TRITON_BUILD_WITH_O1: true
+          TRITON_BUILD_PROTON: OFF
+          TRITON_WHEEL_NAME: triton-ascend
+          TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=OFF"
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --zero-stats
+          NUM_PROCS=$(( $(nproc) / 3 ))
+          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          cd python
+          MAX_JOBS="$NUM_PROCS" python setup.py bdist_wheel --dist-dir="${GITHUB_WORKSPACE}/wheelhouse"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dcv-wheels-${{ github.event.pull_request.number || inputs.pr_id }}
+          path: ./wheelhouse/*.whl

@@ -22,13 +22,8 @@ from ..runtime.jit import _normalize_ty, get_jit_fn_file_line
 from ..runtime import JITFunction
 from .errors import (CompilationError, CompileTimeAssertionFailure, UnsupportedLanguageConstruct)
 from types import ModuleType
-# Central registry for all 'with' statement handlers
-WITH_DISPATCH = {}
-
-# Import and register Ascend extension dispatch handlers
-from triton.language.extra.cann.extension.dispatch import ASCEND_WITH_DISPATCH
 from triton.language.extra.cann.extension.builder import setup_unified_builder
-WITH_DISPATCH.update(ASCEND_WITH_DISPATCH)
+from triton.language.extra.cann.extension.code_generator import mangle_ty as _ascend_mangle_ty
 
 
 def mangle_ty(ty):
@@ -48,7 +43,7 @@ def mangle_ty(ty):
         return 'V'
     raise TypeError(f'Unsupported type {ty}')
 
-mangle_ty = WITH_DISPATCH.get("mangle_ty", mangle_ty)
+mangle_ty = _ascend_mangle_ty
 
 
 def mangle_fn(name, arg_tys, constants):
@@ -94,6 +89,13 @@ def _check_fn_args(node, fn, args):
 
 
 _condition_types = {bool, int, type(None)}  # Python types accepted for conditionals inside kernels
+
+
+class _CodeGeneratorSemantic:
+
+    def __init__(self, builder, generator):
+        self.builder = builder
+        self.generator = generator
 
 
 class enter_sub_region:
@@ -221,6 +223,7 @@ class CodeGenerator(ast.NodeVisitor):
         self.begin_line = begin_line - 1
         self.builder.set_loc(file_name, begin_line, 0)
         self.builder.options = options
+        self.semantic = _CodeGeneratorSemantic(self.builder, self)
 
         # Set up unified builder interface with methods from specialized builders
         self.ascend_builder = ascend_ir.ascendnpu_ir_builder(context, getattr(options, "arch", ""))
@@ -795,23 +798,30 @@ class CodeGenerator(ast.NodeVisitor):
             else:
                 return self.visit(node.orelse)
 
+    def visit_With(self, node):
+        # Lower `with` statements by constructing context managers and calling their enter/exit hooks
+        # Instantiate each context manager with builder injection
+        cm_list = []
+        for item in node.items:
+            call = item.context_expr
+            fn = self.visit(call.func)
+            args = [self.visit(arg) for arg in call.args]
+            kws = dict(self.visit(kw) for kw in call.keywords)
+            cm = fn(*args, _semantic=self.semantic, **kws)
+            cm_list.append(cm)
+        for cm, item in zip(cm_list, node.items):
+            res = cm.__enter__()
+            if item.optional_vars is not None:
+                var_name = self.visit(item.optional_vars)
+                self.set_value(var_name, res)
+        if ContainsReturnChecker(self.gscope).visit(node):
+            raise self._unsupported(node, "Cannot have `return` statements inside `with` statements in triton ")
+        self.visit_compound_statement(node.body)
+        for cm in reversed(cm_list):
+            cm.__exit__(None, None, None)
+
     def visit_Pass(self, node):
         pass
-
-    def visit_With(self, node):
-        """Handle 'with' statements using dispatch pattern."""
-        assert len(node.items) == 1
-        context = node.items[0].context_expr
-
-        # Check if context is a Call and dispatch to registered handler
-        if isinstance(context, ast.Call):
-            withitemClass = self.visit(context.func)
-            handler = WITH_DISPATCH.get(withitemClass)
-            if handler:
-                return handler(self, node)
-
-        # Fall back to visiting body for unhandled cases
-        return self.visit_compound_statement(node.body)
 
     def visit_Compare(self, node):
         if not (len(node.comparators) == 1 and len(node.ops) == 1):

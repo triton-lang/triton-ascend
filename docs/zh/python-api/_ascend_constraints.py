@@ -268,10 +268,7 @@ CONSTRAINTS = {
         "triton.language.compile_hint",
     },
     "triton.language.core.__rshift__": {
-        "constraints": [
-            "DataType: Ascend does not support uint16, uint32, uint64, uint8 (hardware limitation).",
-            "``other``: 仅支持标量，不支持 tensor（即 x >> 2 合法，x >> y（y 为 tensor）暂不支持）",
-        ],
+        "constraints": [],
     },
     "triton.language.cos": {
         "constraints": [
@@ -370,11 +367,10 @@ CONSTRAINTS = {
     },
     "triton.language.dot_scaled": {
         "constraints": [
-            "DataType: Ascend does not support fp4, fp8 (hardware limitation).",
-            "``lhs_k_pack``: 不支持 fp4/fp8 格式，矩阵解压缩能力缺失（硬件限制）",
-            "``rhs_k_pack``: 不支持 fp4/fp8 格式，矩阵解压缩能力缺失（硬件限制）",
-            "Ascend 不支持 fp4、fp8 格式（硬件限制）",
-            "输入矩阵 lhs、rhs 推荐输入范围为 [-5, 5]",
+            "DataType: Ascend A2/A3 does not support fp4、fp8 dtype, Ascend A5 does not support fp4 dtype (hardware limitation).",
+            "``lhs_k_pack``: unsupport for fp4 dtype, without matrix decompression function (hardware limitation).",
+            "``rhs_k_pack``: unsupport for fp4 dtype, without matrix decompression function (hardware limitation).",
+            "the input matrix lhs、rhs recommend input range is [-5, 5]",
         ],
         "example":
         "triton.language.dot_scaled",
@@ -850,7 +846,7 @@ CONSTRAINTS = {
     },
     "triton.language.neg": {
         "constraints": [
-            "DataType: Ascend does not support bool, fp64, uint16, uint32, uint64 (hardware limitation).",
+            "DataType: Ascend does not support bool, fp64 (hardware limitation).",
         ],
         "example": "triton.language.neg",
     },

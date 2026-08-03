@@ -30,7 +30,13 @@ from triton.compiler.code_generator import ast_to_ttir
 from triton._C.libtriton import ir
 from triton._C.libtriton.ascend import ir as ascend_ir
 from triton.backends.ascend.compiler import NPUOptions, make_ttir, ttir_to_linalg, min_dot_size
+from triton.backends.ascend import _apply_ascend_patch
 import pytest
+
+# Apply Ascend patch to inject hacc.target attribute into MLIR modules.
+# Required by bishengir FixpipeOp::verify() which checks isAscend950(moduleOp)
+# via the hacc.target attribute; without it, dst=UB fixpipe ops are rejected.
+_apply_ascend_patch()
 
 # ============================================================================
 # MLIR output configuration
@@ -80,7 +86,7 @@ def compile_kernel(kernel, signature, constants):
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
     try:
-        options = NPUOptions(compile_on_910_95=True, enable_dynamic_cv_pipeline=True)
+        options = NPUOptions(arch="Ascend910_9589", compile_on_910_95=True, enable_dynamic_cv_pipeline=True)
         # Register codegen_fns, including min_dot_size required by tl.dot.
         # The normal compilation path obtains this via backend.get_codegen_implementation(options);
         # here we import min_dot_size directly from the Ascend backend and construct it.

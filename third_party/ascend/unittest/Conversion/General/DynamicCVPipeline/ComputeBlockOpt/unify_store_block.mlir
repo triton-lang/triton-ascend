@@ -166,4 +166,42 @@ module {
     %ext = arith.muli %add, %c64 {ssbuffer.block_id = 13 : i32, ssbuffer.core_type = "VECTOR"} : index
     return
   }
+
+  // ============================================
+  // Test 7: producer and store already share the same block_id, but viewOps
+  // in between have a different block_id. The pass should still collect and
+  // unify those viewOps to the producer's block_id.
+  //
+  // Pattern:
+  //   arith.truncf(VECTOR, block_id=5)                <- producer
+  //     -> tensor.extract_slice(block_id=6)            <- viewOp to unify
+  //     -> bufferization.materialize_in_destination(block_id=5)  <- store
+  //   dest chain: memref.reinterpret_cast(block_id=6)  <- viewOp to unify
+  //             -> memref.subview(block_id=6)           <- viewOp to unify
+  //
+  // All viewOps (extract_slice, reinterpret_cast, subview) at block_id=6
+  // should be unified to block_id=5.
+  // ============================================
+  // CHECK-LABEL: func @test_producer_store_same_block
+  func.func @test_producer_store_same_block(%arg0: memref<?xf16> {tt.divisibility = 16 : i32}, %in: tensor<64x64xf32>) {
+    // %c0: scalar dep at block 6, unified to 5.
+    // CHECK: arith.constant {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR"} 0 : index
+    %c0 = arith.constant {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "VECTOR"} 0 : index
+    // producer stays at block 5.
+    // CHECK: arith.truncf %{{.*}} {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32> to tensor<64x64xf16>
+    %trunc = arith.truncf %in {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf32> to tensor<64x64xf16>
+    // extract_slice at block 6, unified to 5.
+    // CHECK: tensor.extract_slice %{{.*}} {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf16> to tensor<64x64xf16>
+    %extract = tensor.extract_slice %trunc[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "VECTOR"} : tensor<64x64xf16> to tensor<64x64xf16>
+    // reinterpret_cast at block 6, unified to 5.
+    // CHECK: memref.reinterpret_cast %{{.*}} {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR"} : memref<?xf16> to memref<128x64xf16, strided<[64, 1], offset: ?>>
+    %reinterpret = memref.reinterpret_cast %arg0 to offset: [%c0], sizes: [128, 64], strides: [64, 1] {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "VECTOR"} : memref<?xf16> to memref<128x64xf16, strided<[64, 1], offset: ?>>
+    // subview at block 6, unified to 5.
+    // CHECK: memref.subview %{{.*}} {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR"} : memref<128x64xf16, strided<[64, 1], offset: ?>> to memref<64x64xf16, strided<[64, 1], offset: ?>>
+    %subview = memref.subview %reinterpret[0, 0] [64, 64] [1, 1] {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "VECTOR"} : memref<128x64xf16, strided<[64, 1], offset: ?>> to memref<64x64xf16, strided<[64, 1], offset: ?>>
+    // store stays at block 5.
+    // CHECK: bufferization.materialize_in_destination %{{.*}} {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR"} : (tensor<64x64xf16>, memref<64x64xf16, strided<[64, 1], offset: ?>>) -> ()
+    bufferization.materialize_in_destination %extract in writable %subview {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR"} : (tensor<64x64xf16>, memref<64x64xf16, strided<[64, 1], offset: ?>>) -> ()
+    return
+  }
 }

@@ -134,8 +134,7 @@ static void collectViewOpsToUnify(SmallVector<Operation *> &ops,
                                   CVPipeline::ComputeBlockIdManager &bm,
                                   SmallPtrSet<Operation *, 16> &seen) {
   auto addIfMatch = [&](Operation *op) {
-    if (bm.getBlockIdByOp(op) == bm.getBlockIdByOp(storeOp) &&
-        seen.insert(op).second) {
+    if (seen.insert(op).second) {
       ops.push_back(op);
     }
   };
@@ -258,9 +257,8 @@ static bool matchStorePattern(Operation *storeOp,
   }
 
   int targetBlockId = bm.getBlockIdByOp(producer);
-  if (targetBlockId == -1 || targetBlockId == storeBlockId) {
-    LOG_DEBUG("ProducerOp has no block_id, or block_id is the same as "
-              "storeOp's, no need to unify\n");
+  if (targetBlockId == -1) {
+    LOG_DEBUG("ProducerOp has no block_id, cannot unify! ");
     return false; // producer has no block_id, cannot unify
   }
 

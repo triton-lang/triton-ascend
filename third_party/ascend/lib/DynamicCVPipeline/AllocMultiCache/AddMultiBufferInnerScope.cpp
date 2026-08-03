@@ -1872,6 +1872,18 @@ static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp,
   if (blocks.empty())
     return -1;
 
+  // Memref-type dep values are not supported here. The check is performed on
+  // Phase 1's snapshot (BEFORE cloning) so that clone-induced memref deps
+  // (e.g. a cloned memref.load at consumer block referencing a producer-side
+  // memref view) do not trigger a false-failure on otherwise-valid user IR.
+  // If Phase 1 has no memref dep, Phase 2's memref deps — if any — must come
+  // from cloneEmptyFillsInBlocks / rematerializeTensorRootedScalarDeps and
+  // are our own responsibility to route through the multi-buffer pipeline.
+  if (hasMemrefDepValue(depValueMap)) {
+    LDBG("ERROR: Memref type dependent values found in user IR, fallback");
+    return -1;
+  }
+
   // Phase 1: build initial depUserMap and clone empty+fill patterns. We use
   // a fresh user map built from the initial allOps so the clone can find
   // consumer-block users; the cloned fills will rewrite those users' uses.
@@ -1904,12 +1916,25 @@ static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp,
   if (blocks.empty())
     return -1;
 
-  // Memref-type dep values are not supported here; fail loudly so downstream
-  // passes don't see an unmarked-but-skipped scope.
-  if (hasMemrefDepValue(depValueMap)) {
-    LDBG("ERROR: Memref type dependent values found!");
-    return -1;
+  // Drop memref-typed deps from Phase 2's collection. Phase 1 already failed
+  // loudly on any user-introduced memref dep above, so any memref dep present
+  // here must be clone-induced (e.g. a cloned memref.load at consumer block
+  // referencing a producer-side memref view). The multi-buffer pipeline can
+  // only operate on memref/tensor storage, not on view ops, so we filter
+  // these out instead of trying to route them through.
+  int droppedMemrefDeps = 0;
+  for (auto &p : depValueMap) {
+    llvm::erase_if(p.second, [&droppedMemrefDeps](Value v) {
+      if (isa<MemRefType>(v.getType())) {
+        ++droppedMemrefDeps;
+        return true;
+      }
+      return false;
+    });
   }
+  if (droppedMemrefDeps > 0)
+    LDBG("Dropped " + std::to_string(droppedMemrefDeps) +
+         " clone-induced memref deps from Phase 2 depValueMap");
 
   auto depUserMap = buildDepUserMap(blocks, allOps, depValueMap);
 

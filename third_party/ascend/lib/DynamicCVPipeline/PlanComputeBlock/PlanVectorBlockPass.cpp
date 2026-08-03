@@ -207,43 +207,63 @@ void findCandidates(DenseMap<Operation *, int> &indegree,
   }
 }
 
-static SmallVector<Operation *>
-findOpsAdjacentToCube(Block *block, const SmallVector<Operation *> &fuseGroup,
-                      DenseMap<Operation *, bool> &visited,
-                      const CVPipeline::MemoryDependenceGraph &memGraph) {
-  SmallVector<Operation *> toProcess;
-  std::optional<int> blockId;
-  for (Operation *op : fuseGroup) {
-    SmallVector<Operation *> allUsers;
-    allUsers.append(op->getUsers().begin(), op->getUsers().end());
-    for (auto memUser : memGraph.getExecAfter(op)) {
-      allUsers.push_back(memUser);
-    }
+static SmallVector<Operation *> findOpsAdjacentToCube(Block *block, const SmallVector<Operation *> &fuseGroup,
+                                                      DenseMap<Operation *, bool> &visited,
+                                                      const CVPipeline::MemoryDependenceGraph &memGraph,
+                                                      CVPipeline::ComputeBlockIdManager &bm)
+{
+    SmallVector<Operation *> toProcess;
+    std::optional<int> minBlockId = std::nullopt;
 
-    for (auto user : allUsers) {
-      auto userInBlock = CVPipeline::getAncestorInBlock(user, block);
-      if (!userInBlock || (block->mightHaveTerminator() &&
-                           userInBlock == block->getTerminator())) {
-        continue;
-      }
-      if (!isFusableOp(userInBlock) && !visited[userInBlock]) {
-        auto newBlockId = getOpBlockId(user);
-        if (!newBlockId.has_value()) {
-          newBlockId =
-              getOpBlockId(userInBlock); // Some op will be tagged outside
+    for (Operation *op : fuseGroup) {
+        SmallVector<Operation *> allUsers;
+        allUsers.append(op->getUsers().begin(), op->getUsers().end());
+        for (auto memUser : memGraph.getExecAfter(op)) {
+            allUsers.push_back(memUser);
         }
 
-        if (!blockId.has_value()) {
-          blockId = newBlockId;
+        for (auto user : allUsers) {
+            auto userInBlock = CVPipeline::getAncestorInBlock(user, block);
+            if (!userInBlock || (block->mightHaveTerminator() && userInBlock == block->getTerminator())) {
+                continue;
+            }
+            if (!isFusableOp(userInBlock) && !visited[userInBlock]) {
+                auto newBlockId = bm.getBlockIdByOp(userInBlock);
+                if (!minBlockId.has_value() || newBlockId < minBlockId) {
+                    minBlockId = newBlockId;
+                }
+            }
         }
-        if (!newBlockId.has_value() || blockId == newBlockId) {
-          toProcess.push_back(op);
-        }
-      }
     }
-  }
-  return toProcess;
+
+    if (!minBlockId.has_value()) {
+        return {};
+    }
+
+    for (Operation *op : fuseGroup) {
+        SmallVector<Operation *> allUsers;
+        allUsers.append(op->getUsers().begin(), op->getUsers().end());
+        for (auto memUser : memGraph.getExecAfter(op)) {
+            allUsers.push_back(memUser);
+        }
+
+        for (auto user : allUsers) {
+            auto userInBlock = CVPipeline::getAncestorInBlock(user, block);
+            if (!userInBlock || (block->mightHaveTerminator() && userInBlock == block->getTerminator())) {
+                continue;
+            }
+            if (!isFusableOp(userInBlock) && !visited[userInBlock]) {
+                auto newBlockId = bm.getBlockIdByOp(userInBlock);
+                if (newBlockId == minBlockId) {
+                    toProcess.push_back(op);
+                    break;
+                }
+            }
+        }
+    }
+    return toProcess;
 }
+
 
 static int getLoopCarriedArgIndex(Value operand, Block *block) {
   auto barg = dyn_cast<BlockArgument>(operand);
@@ -259,7 +279,7 @@ static int getLoopCarriedArgIndex(Value operand, Block *block) {
 }
 
 static SetVector<Operation *>
-collectKeepOps(Block *block, SmallVector<Operation *> toProcess,
+collectKeepOpsToCube(Block *block, SmallVector<Operation *> toProcess,
                const SmallVector<Operation *> &fuseGroup,
                const CVPipeline::MemoryDependenceGraph &memGraph) {
   SetVector<Operation *> keepOps;
@@ -401,32 +421,6 @@ extractToProcessFromFuseGroup(Block *block,
     }
   }
 
-  for (auto op : nowFuseGroup) {
-    for (auto result : op->getResults()) {
-      if (auto tensorType = dyn_cast<mlir::TensorType>(result.getType())) {
-        mlir::Type elemType = tensorType.getElementType();
-        if (!elemType.isInteger(1)) {
-          continue;
-        }
-      }
-      bool hasExternalUser = false;
-      for (auto user : result.getUsers()) {
-        if (!llvm::is_contained(nowFuseGroup, user)) {
-          hasExternalUser = true;
-          break;
-        }
-      }
-      if (hasExternalUser) {
-        collectAllUsersInFuseGroup(op, nowFuseGroup, toRemove);
-        for (auto operand : op->getOperands()) {
-          if (auto definingOp = operand.getDefiningOp()) {
-            collectAllDependenciesInFuseGroup(definingOp, nowFuseGroup,
-                                              toRemove);
-          }
-        }
-      }
-    }
-  }
   for (auto op : toRemove) {
     LOG_DEBUG("Removing op when refining: " << *op << "\n");
     toProcess.erase(std::remove(toProcess.begin(), toProcess.end(), op),
@@ -494,14 +488,14 @@ void refineFuseGroup(Block *block, SmallVector<Operation *> &nowFuseGroup,
                      SmallVector<Operation *> &candidates,
                      DenseMap<Operation *, int> &indegree,
                      const CVPipeline::MemoryDependenceGraph &memGraph,
-                     ComputeBlockIdManager &bm, bool isUBRefineOptEnabled) {
+                     ComputeBlockIdManager &bm) {
   // 1.Find ops in fuse group whose next node is a non-fusable (CUBE-only) op
   auto toProcess =
-      findOpsAdjacentToCube(block, nowFuseGroup, visited, memGraph);
+      findOpsAdjacentToCube(block, nowFuseGroup, visited, memGraph, bm);
 
   // 2. If no cube adjacent op, extract toProcess from fuseGroup using fallback
   // rules
-  if (toProcess.empty() && isUBRefineOptEnabled) {
+  if (toProcess.empty()) {
     LOG_DEBUG("No Cube adjacent op, extracting toProcess from fuseGroup.\n");
     toProcess = extractToProcessFromFuseGroup(block, nowFuseGroup, bm);
   }
@@ -511,12 +505,14 @@ void refineFuseGroup(Block *block, SmallVector<Operation *> &nowFuseGroup,
     LOG_DEBUG("No op will be cut after extraction.\n");
     findCandidates(indegree, candidates, visited, memGraph, bm);
     if (candidates.empty()) {
+      // even cut ops into next search, their no choice, like this:
+      // v1->v2->yield,  after findCandidates, no more new ops, need to fuse nowFuseGroup.
       return;
     }
   }
 
   // 4. Collect keepOps transitively (data + memory + loop-carried deps)
-  auto keepOps = collectKeepOps(block, toProcess, nowFuseGroup, memGraph);
+  auto keepOps = collectKeepOpsToCube(block, toProcess, nowFuseGroup, memGraph);
 
   // 5. Remove non-kept ops from fuseGroup and restore BFS state
   evictAndRestoreState(block, keepOps, nowFuseGroup, visited, candidates,
@@ -524,11 +520,128 @@ void refineFuseGroup(Block *block, SmallVector<Operation *> &nowFuseGroup,
   LOG_DEBUG("After cutting, kept " << keepOps.size() << "\n");
 }
 
+static SmallVector<Operation *> findOpsAdjacentFromCube(Block *block, const SmallVector<Operation *> &fuseGroup,
+                                                      DenseMap<Operation *, bool> &visited,
+                                                      const CVPipeline::MemoryDependenceGraph &memGraph,
+                                                      CVPipeline::ComputeBlockIdManager &bm)
+{
+    SmallVector<Operation *> toProcess;
+    std::optional<int> minBlockId = std::nullopt;
+
+    for (Operation *op : fuseGroup) {
+      SmallVector<Operation *> allDefs;
+      for (auto operand : op->getOperands()) {
+          if (auto defOp = operand.getDefiningOp()) {
+            allDefs.push_back(defOp);
+          }
+      }
+      
+      for (auto memDef : memGraph.getExecBefore(op)) {
+          allDefs.push_back(memDef);
+      }
+
+      for (auto defOp : allDefs) {
+        auto defInBlock = CVPipeline::getAncestorInBlock(defOp, block);
+        if(!defInBlock){
+          continue;
+        }
+        if(!isFusableOp(defInBlock)) {
+          auto newBlockId = bm.getBlockIdByOp(defInBlock);
+          if (!minBlockId.has_value() || newBlockId < minBlockId) {
+              minBlockId = newBlockId;
+          }
+        }
+      }
+    }
+
+    if (!minBlockId.has_value()) {
+        return {};
+    }
+
+    for (Operation *op : fuseGroup) {
+      SmallVector<Operation *> allDefs;
+      for (auto operand : op->getOperands()) {
+          if (auto defOp = operand.getDefiningOp()) {
+            allDefs.push_back(defOp);
+          }
+      }
+      for (auto memDef : memGraph.getExecBefore(op)) {
+          allDefs.push_back(memDef);
+      }
+      for (auto defOp : allDefs) {
+          auto userInBlock = CVPipeline::getAncestorInBlock(defOp, block);
+          if (!userInBlock ) {
+              continue;
+          }
+          if (!isFusableOp(userInBlock) && !visited[userInBlock]) {
+						auto newBlockId = bm.getBlockIdByOp(userInBlock);
+						if (newBlockId == minBlockId) {
+							toProcess.push_back(op);
+							break;
+						}
+          }
+      }
+    }
+    return toProcess;
+}
+
+SetVector<Operation*> collectKeepOpsFromCube(Block *block, SmallVector<Operation *> toProcess,
+												const SmallVector<Operation *> &fuseGroup,
+												const CVPipeline::MemoryDependenceGraph &memGraph) {
+	SetVector<Operation *> keepOps;
+	while (!toProcess.empty()) {
+		Operation *op = toProcess.front();
+		toProcess.erase(toProcess.begin());
+		if (keepOps.contains(op)) {
+			continue;
+		}
+		keepOps.insert(op);
+
+		// Add all users to process
+		for (auto user : op->getUsers()) {
+			if (!keepOps.contains(user) && llvm::is_contained(fuseGroup, user)) {
+				toProcess.push_back(user);
+			}
+		}
+
+		// Memory dependency
+		for (auto memUser : memGraph.getExecAfter(op)) {
+			if (!keepOps.contains(memUser) && llvm::is_contained(fuseGroup, memUser)) {
+				toProcess.push_back(memUser);
+			}
+		}
+	}
+	return keepOps;
+}
+
+void reverseRefineFuseGroup(Block *block, SmallVector<Operation *> &nowFuseGroup,
+                        DenseMap<Operation *, bool> &visited,
+                        SmallVector<Operation *> &candidates,
+                        DenseMap<Operation *, int> &indegree,
+                        const CVPipeline::MemoryDependenceGraph &memGraph,
+                        ComputeBlockIdManager &bm) {
+  // 1. Find ops in fuse group whose pre node is a non-fusable op
+	auto toProcess =
+			findOpsAdjacentFromCube(block, nowFuseGroup, visited, memGraph, bm);
+	// 2. If no op from cube, extract toProcess from fuseGroup using fallback
+  // rules
+	if (toProcess.empty()) {
+    LOG_DEBUG("No op from cube, extracting toProcess from fuseGroup.\n");
+    return;
+  }
+	// 3. Collect keepOps transitively (data + memory + loop-carried deps)
+	auto keepOps = collectKeepOpsFromCube(block, toProcess, nowFuseGroup, memGraph);
+	// 4. Remove non-kept ops from fuseGroup and restore BFS state
+  evictAndRestoreState(block, keepOps, nowFuseGroup, visited, candidates,
+                       indegree, memGraph);
+  LOG_DEBUG("After reverse cutting, kept " << keepOps.size() << "\n");
+}
+
 // Main function to plan vector block id for one block
 llvm::LogicalResult
 planVectorBlockId(Block *block,
                   const CVPipeline::MemoryDependenceGraph &memGraph,
-                  ComputeBlockIdManager &bm, bool isUBRefineOptEnabled) {
+                  ComputeBlockIdManager &bm) {
   // 1. topo initialize
   llvm::DenseMap<Operation *, int> indegree;
   llvm::SmallVector<Operation *> queue;
@@ -559,12 +672,15 @@ planVectorBlockId(Block *block,
     if (queue.empty() || nextFused == nullptr) {
       LOG_DEBUG("Prepare to check this group: \n");
       for (auto op : nowFuseGroup) {
-        LOG_DEBUG("fuseing: " << *op << "\n");
+        LOG_DEBUG("prepare: " << *op << "\n");
       }
       // finish one group, assign block id and start next iteration
       // Cut error operations before assigning block id
       refineFuseGroup(block, nowFuseGroup, visited, queue, indegree, memGraph,
-                      bm, isUBRefineOptEnabled);
+                      bm);
+
+      reverseRefineFuseGroup(block, nowFuseGroup, visited, queue, indegree, memGraph,
+                             bm);
       LOG_DEBUG("Group after cutting: \n");
       for (auto op : nowFuseGroup) {
         LOG_DEBUG("fuseing: " << *op << "\n");
@@ -592,16 +708,11 @@ void PlanVectorBlockPass::runOnOperation() {
   auto &aa = getAnalysis<AliasAnalysis>();
   auto memDepGraph = MemoryDependenceGraph(moduleOp, aa);
   auto bm = ComputeBlockIdManager(moduleOp);
-  bool isUBRefineOptEnabled = false;
-  auto attr = moduleOp->getAttr(CVPipeline::kEnableUbRefineOpt);
-  if (attr) {
-    isUBRefineOptEnabled = true;
-  }
 
   // 2. search blocks in topo order and assign block id for each block
   auto result = moduleOp.walk([&](Block *block) -> WalkResult {
     if (llvm::failed(
-            planVectorBlockId(block, memDepGraph, bm, isUBRefineOptEnabled))) {
+            planVectorBlockId(block, memDepGraph, bm))) {
       return WalkResult::interrupt();
     }
     return WalkResult::advance();

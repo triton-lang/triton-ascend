@@ -26,6 +26,7 @@
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
 #include "llvm/ADT/ArrayRef.h"
 
 namespace mlir {
@@ -73,6 +74,23 @@ bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify,
  */
 void cloneScalarOpsForCrossBlockUses(ComputeBlockIdManager &bmOriginal,
                                      SetVector<Operation *> &matchedOps);
+
+/**
+ * @brief Check if a view-like operation originates from global memory (GM)
+ *
+ * Traces back through nested view-like operations (subview, reinterpret_cast,
+ * etc.) to determine if the source is a function argument (block argument in
+ * the entry block). Only view-like operations in the same block as the input
+ * viewOp are collected.
+ *
+ * @param viewOp The view-like operation to check
+ * @param matchedOps SetVector to collect all same-block view-like operations in
+ * the trace
+ * @return bool Returns true if the source is from global memory (function
+ * argument), false otherwise
+ */
+bool isSubviewFromGlobalMemory(ViewLikeOpInterface viewOp,
+                               SetVector<Operation *> &matchedOps);
 
 } // namespace CVPipeline
 } // namespace mlir

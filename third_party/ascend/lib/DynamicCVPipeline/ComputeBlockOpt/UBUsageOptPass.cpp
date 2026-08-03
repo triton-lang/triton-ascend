@@ -378,7 +378,9 @@ bool isActiveEndNode(int srcNode, int endNode,
   for (int node : dependNodes) {
     if (nodeBlockId[node] != nodeBlockId[endNode] &&
         nodeBlockId[node] != nodeBlockId[srcNode]) {
-      return false;
+        if (linkIn[node].size() != 0){
+          return false;
+        }
     }
   }
   return true;
@@ -679,6 +681,9 @@ static void processOpsInblock(Operation *parentOp, int targetId,
   if (parentBlockId == -1) {
     return;
   }
+  if(isa<linalg::LinalgDialect>(parentOp->getDialect())) {
+    return;
+  }
 
   bool allSame = true;
   parentOp->walk([&](Operation *op) {
@@ -838,6 +843,10 @@ UBUsageOptPass::optBroadcast(Block *block,
   return llvm::success();
 }
 
+
+/**
+
+ */
 llvm::LogicalResult
 UBUsageOptPass::optSmallBlock(Block *block,
                               const CVPipeline::MemoryDependenceGraph &memGraph,
@@ -921,11 +930,6 @@ void mlir::triton::UBUsageOptPass::runOnOperation() {
   auto &aliasAnalysis = getAnalysis<AliasAnalysis>();
   CVPipeline::MemoryDependenceGraph memDepGraph(module, aliasAnalysis);
   auto bm = CVPipeline::ComputeBlockIdManager(module);
-  bool isUBRefineOptEnabled = false;
-  auto attr = module->getAttr(CVPipeline::kEnableUbRefineOpt);
-  if (attr) {
-    isUBRefineOptEnabled = true;
-  }
 
   llvm::SmallVector<Block *> blocks;
   module.walk([&](Block *block) { blocks.push_back(block); });
@@ -933,15 +937,6 @@ void mlir::triton::UBUsageOptPass::runOnOperation() {
   for (Block *block : blocks) {
     if (UBUsageOptimization(block, memDepGraph, bm).failed()) {
       llvm::errs() << "UB usage optimization failed in block.\n";
-    }
-    if (isUBRefineOptEnabled) {
-      if (optBroadcast(block, memDepGraph, bm).failed()) {
-        llvm::errs() << "Broadcast check failed in block.\n";
-      }
-
-      if (optSmallBlock(block, memDepGraph, bm).failed()) {
-        llvm::errs() << "Small block optimization failed in block.\n";
-      }
     }
   }
 

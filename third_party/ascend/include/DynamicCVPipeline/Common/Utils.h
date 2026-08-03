@@ -60,8 +60,6 @@ inline constexpr llvm::StringLiteral kIntraDeps = "ssbuffer.intraDeps";
 inline constexpr llvm::StringLiteral kMemCrossDeps = "ssbuffer.memCrossDeps";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
 inline constexpr llvm::StringLiteral kClone = "ssbuffer.clone";
-inline constexpr llvm::StringLiteral kEnableUbRefineOpt =
-    "ssbuffer.enable_ub_refine_opt";
 inline constexpr llvm::StringLiteral kInsertionOptimization =
     "ssbuffer.insertionOptimization";
 static constexpr llvm::StringLiteral kInlinableQuantScaleAttr =

@@ -145,10 +145,7 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
         [](bool enable) { mlir::CVPipeline::setEnableCubeBlockMerge(enable); });
 
   m.def("set_enable_ub_refine_opt", [](mlir::ModuleOp &moduleop, bool enable) {
-    OpBuilder builder(moduleop.getContext());
-    if (enable) {
-      moduleop->setAttr(CVPipeline::kEnableUbRefineOpt, builder.getUnitAttr());
-    }
+    return;
   });
   m.def("set_enable_buffer_insert_optimization",
         [](mlir::ModuleOp &moduleop, bool enable) {

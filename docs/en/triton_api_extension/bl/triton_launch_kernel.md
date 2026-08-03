@@ -61,7 +61,7 @@ The function iterates over `kernel_args` and `arg_sizes`, copying each argument 
 
 The function assembles all launch arguments into a contiguous `std::vector<char> launch_args` buffer with the following layout (each slot aligned per its alignment requirement):
 
-```bash
+```text
 [ffts_addr] → [syncBlockLock_ptr] → [workspace_addr_ptr] →
 [kernel_arg_0] [kernel_arg_1] ... [kernel_arg_N-1] →
 [gridX] [gridY] [gridZ] →
@@ -91,7 +91,7 @@ Depends on the `TRITON_ENABLE_TASKQUEUE` environment variable (default `"true"`)
 
 This path does **not** go through `triton_launch_kernel`. It is the standard Triton invocation flow:
 
-```bash
+```text
 User code:   kernel[grid](args...)
   │
   ▼
@@ -115,7 +115,7 @@ rtKernelLaunch() → NPU hardware execution
 
 For scenarios requiring C-level kernel launch:
 
-```bash
+```text
 Third-party C/C++ code
   │  dlopen / dlsym to obtain triton_launch_kernel symbol
   │  or directly link against launcher stub .so

@@ -90,6 +90,12 @@ inline bool hasScopeVecMode(Operation *op, llvm::StringRef mode) {
 
 static constexpr unsigned kFuncNameCap = 128;
 
+// Fractal (zN) block geometry, shared by ascend.dot's type inference
+static constexpr int64_t kFractalBlock = 16;
+static constexpr int64_t kBytesPerFractalCol = 32;
+static constexpr unsigned kBitsPerByte = 8;
+static constexpr unsigned kDotAccIntWidth = 32;
+
 } // namespace ascend
 } // namespace triton
 

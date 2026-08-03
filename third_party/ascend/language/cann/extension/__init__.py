@@ -40,6 +40,7 @@ from .core import (
     sync_block_wait,
     SYNC_IN_VF,
     conv1d,
+    dot,
 )
 
 from .scope import scope
@@ -149,4 +150,7 @@ __all__ = [
     "gather_out_to_ub",
     "scatter_ub_to_out",
     "index_select_simd",
+
+    # dot ops
+    "dot",
 ]

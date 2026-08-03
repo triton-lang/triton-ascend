@@ -27,6 +27,7 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Operation.h"
@@ -103,69 +104,41 @@ void SinkI1ProducersIntoUsersPass::runOnOperation() {
   LOG_DEBUG(moduleOp);
 
   SmallVector<Operation *> producers;
+  //find single-result and regionless op with i1 tensor result-type
   moduleOp.walk([&](Operation *op) {
-    if (isI1Producer(op) && isPureAndRegionless(op)) {
-      LOG_DEBUG("found i1 producer: " << op->getName() << "\n");
+    if (isa<scf::SCFDialect>(op->getDialect())) {
+      LOG_DEBUG("skip scf dialect op: " << op << "\n");
+    }
+    // todo: adapt sinki1 pass with multi-result op
+    else if (op->getNumResults() > 1) {
+      LOG_DEBUG("skip multi-result op: " << op << " with " << op->getNumResults() << " results\n");
+    }
+    else if (isI1Producer(op) && isPureAndRegionless(op)) {
+      LOG_DEBUG("found i1 producer: " << op << "\n");
       producers.push_back(op);
     }
   });
 
   for (Operation *p : producers) {
-    SmallVector<std::pair<OpOperand *, unsigned>> i1Uses;
+
     for (OpOperand &use : p->getUses()) {
-      Type t = use.get().getType();
-      bool isi1 = false;
-      if (auto tensorType = dyn_cast<mlir::TensorType>(t)) {
-        mlir::Type elemType = tensorType.getElementType();
-        if (elemType.isInteger(1)) {
-          isi1 = true;
-        }
-      }
-      if (isi1) {
-        unsigned idx = use.getOperandNumber();
-        i1Uses.push_back({&use, idx});
-      }
-    }
-
-    if (i1Uses.empty()) {
-      p->erase();
-      continue;
-    }
-
-    bool hasSameBlockUser = false;
-
-    for (auto [use, resultIdx] : i1Uses) {
-      Operation *consumer = use->getOwner();
+      Operation *consumer = use.getOwner();
 
       if (bm.isSameBlock(p, consumer)) {
-        hasSameBlockUser = true;
         continue;
       }
 
+      //clone producer op to consumer block and adapt use
       int consumerBlockId = bm.getBlockIdByOp(consumer);
       Operation *cloned = p->clone();
-      use->set(cloned->getResult(resultIdx));
-      bm.updateBlockId(cloned, consumerBlockId);
-
-      SmallVector<Operation *> opsToCheck = {cloned};
-      if (CVPipeline::willCreateCycle(opsToCheck, memGraph, consumerBlockId,
-                                      bm)) {
-        use->set(p->getResult(resultIdx));
-        cloned->erase();
-        continue;
-      }
-
-      if (consumerBlockId != -1) {
-        cloned->setAttr(
-            mlir::CVPipeline::kBlockId,
-            mlir::IntegerAttr::get(mlir::IntegerType::get(p->getContext(), 32),
-                                   consumerBlockId));
-      }
       consumer->getBlock()->push_back(cloned);
       cloned->moveBefore(consumer);
+      use.set(cloned->getResult(0));
+      bm.updateBlockId(cloned, consumerBlockId);
     }
 
-    if (!hasSameBlockUser && p->use_empty())
+    //erase producer with no user left
+    if (p->use_empty())
       p->erase();
   }
   LOG_DEBUG("== SinkI1ProducersIntoUsers Pass Complete ==\n");

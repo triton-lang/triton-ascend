@@ -1,0 +1,77 @@
+name: DynamicCVPipeline Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+concurrency:
+  group: dynamic-cv-pipeline-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+permissions: read-all
+
+jobs:
+
+  remote-test:
+    name: Run ci.py on remote server
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Setup SSH and run test
+        env:
+          SSH_HOST:     ${{ secrets.DYNAMIC_CV_TEST_HOST }}
+          SSH_USER:     ${{ secrets.DYNAMIC_CV_TEST_USER }}
+          SSH_PASSWORD: ${{ secrets.DYNAMIC_CV_TEST_PASSWORD }}
+          PR_NUM:       ${{ github.event.pull_request.number }}
+        run: |
+          set -eu
+
+          sudo apt-get install -y sshpass expect
+
+          # Legacy KexAlgorithms required by older SSH server
+          SSH_OPTS="-o StrictHostKeyChecking=no -o KexAlgorithms=diffie-hellman-group-exchange-sha1,diffie-hellman-group14-sha1,diffie-hellman-group1-sha1 -o HostKeyAlgorithms=+ssh-rsa -o PreferredAuthentications=password,keyboard-interactive -o PasswordAuthentication=yes -o PubkeyAuthentication=no"
+
+          REMOTE_TMP="/tmp/dynamic-cv-pr-${PR_NUM}"
+
+          # Use expect to handle SSH password prompt reliably
+          run_remote() {
+            local HOST="$1"
+            local USER="$2"
+            local PASS="$3"
+            local CMD="$4"
+            expect -c "
+              set timeout 60
+              spawn ssh ${SSH_OPTS} ${USER}@${HOST} {${CMD}}
+              expect {
+                \"assword:\" { send \"${PASS}\r\"; exp_continue }
+                eof { catch wait result; exit [lindex \$result 3] }
+                timeout { exit 1 }
+              }
+            "
+          }
+
+          run_remote "${SSH_HOST}" "${SSH_USER}" "${SSH_PASSWORD}" "
+            docker start z00896713
+            docker exec z00896713 bash -c '
+              chmod -R a+rwX /home/z00896713
+              cd /home/z00896713/ci
+              python ci.py
+            '
+            mkdir -p ${REMOTE_TMP}
+            docker cp z00896713:/home/z00896713/ci/hello.txt ${REMOTE_TMP}/hello.txt
+          "
+
+          # Copy hello.txt back from remote
+          export SSHPASS="${SSH_PASSWORD}"
+          sshpass -e scp ${SSH_OPTS} \
+            ${SSH_USER}@${SSH_HOST}:${REMOTE_TMP}/hello.txt ./hello.txt
+
+          # Cleanup remote temp
+          run_remote "${SSH_HOST}" "${SSH_USER}" "${SSH_PASSWORD}" \
+            "rm -rf ${REMOTE_TMP}"
+
+      - name: Upload hello.txt as PR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hello-txt-pr-${{ github.event.pull_request.number }}
+          path: ./hello.txt

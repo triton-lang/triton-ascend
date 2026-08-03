@@ -143,7 +143,7 @@ pip install ninja cmake wheel pybind11 # build-time dependencies
 ### 快速安装
 
 ```bash
-git clone https://gitcode.com/Ascend/triton-ascend.git
+git clone https://github.com/triton-lang/triton-ascend.git
 cd triton-ascend
 git checkout main
 
@@ -204,7 +204,7 @@ Triton 使用 LLVM20 为 GPU 和 CPU 生成代码。同样，昇腾的毕昇编�
 #### 克隆 Triton-Ascend
 
 ```bash
-git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend/python
+git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend/python
 ```
 
 #### 构建 Triton-Ascend
@@ -256,7 +256,7 @@ triton-ascend/CMakeLists.txt
 | 2 |      `910b`       | Atlas A2 训练系列产品 |            Atlas800T A2             |   A2    |
 
 ```bash
-git clone https://gitcode.com/Ascend/triton-ascend.git && cd triton-ascend
+git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
 docker build \
 --build-arg CHIP_TYPE=A3 \
 --build-arg CANN_VERSION=8.5.0 \
@@ -299,7 +299,7 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
 ```bash
    # 拉取triton-ascend源码仓及用例（可选，非源码编译安装运行示例时需拉源码仓）
-   git clone https://gitcode.com/Ascend/triton-ascend.git
+   git clone https://github.com/triton-lang/triton-ascend.git
    cd triton-ascend && pip install -r requirements.txt
 ```
 

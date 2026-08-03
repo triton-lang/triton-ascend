@@ -587,7 +587,8 @@ void DataDependencyAnalysisPass::processIterArgDependencies() {
     mlir::Operation *yieldOp = forOp.getBody()->getTerminator();
     if (!checkYieldCoreType(yieldOp)) {
       LOG_DEBUG("[ERROR]: Yield core type mismatch defining op\n");
-      signalPassFailure();
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+      return;
     }
     for (int iterArgIndex = 0; iterArgIndex < numIterArgs; ++iterArgIndex) {
       mlir::Value initValue = forOp.getInits()[iterArgIndex];

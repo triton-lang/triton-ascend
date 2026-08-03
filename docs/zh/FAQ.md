@@ -35,7 +35,7 @@ A: 不可以，只能在 Ascend NPU 硬件环境使用 Triton-Ascend
 **Q: NPU 运行结果和 PyTorch/CPU/GPU 参考结果不一致，如何排查？**
 
 A: 用例请参考 [07_accuracy_comparison_example.md](../zh/examples/07_accuracy_comparison_example.md)
-调试方法请参考 [解释器模式调试方法](./debug_guide/debugging.md#5-调试方法)
+调试方法请参考 [解释器模式调试方法](./debug_guide/debugging.md#4-解释器模式)
 
 ## 3. 错误代码与异常处理
 
@@ -51,7 +51,7 @@ A: 可以使用 TRITON_DEBUG=1 获取详细的调试转储文件，请参考 [�
 
 **Q: 能否在 kernel 中打印中间张量值？tl.device_print 是否可用？**
 
-A: 可以使用 tl.device_print 打印 kernel 中的张量，请参考 [打印调试方法](debug_guide/debugging.md#51-打印调试方法)
+A: 可以使用 tl.device_print 打印 kernel 中的张量，请参考 [打印调试方法](./debug_guide/debugging.md#51-打印调试方法)
 
 ## 5. 开发与贡献
 
@@ -80,7 +80,7 @@ A5上可运行的算子迁移到A2/A3由于UB大小的差异可能导致UB Overf
 
 **Q: Triton Kernel 中指针参数有哪些使用限制？**
 
-A: Triton-Ascend 编译期假设所有外部输入的指针参数本质上指向不同的内存区域，无法识别指针别名（Pointer Alias）场景。当多个指针参数在运行时实际指向同一块内存，但编译期无法获知这一事实时，可能导致优化失效或运行结果异常。例如：
+A: Triton-Ascend 编译器假设所有外部输入的指针参数本质上指向不同的内存区域，无法识别指针别名（Pointer Alias）场景。当多个指针参数在运行时实际指向同一块内存，但编译器无法获知这一事实时，可能导致优化失效或运行结果异常。例如：
 
 ```Python
 @triton.jit
@@ -94,7 +94,7 @@ in_out_tensor = torch.randn(shape)
 func[grid](in_out_tensor, in_out_tensor)
 ```
 
-上述代码中 `ptr0` 和 `ptr1` 实际指向同一块内存（即同一个 `in_out_tensor`），但编译期无法识别这种指针别名关系，因此这种同一个张量同时作为多个指针参数传入的写法是不受支持的，对应的 Kernel 将无法使能相关优化。
+上述代码中 `ptr0` 和 `ptr1` 实际指向同一块内存（即同一个 `in_out_tensor`），但编译器无法识别这种指针别名关系，因此这种同一个张量同时作为多个指针参数传入的写法是不受支持的，对应的 Kernel 将无法使能相关优化。
 
 **Q: 在 `if` / `for` / `while` / `scope` 等控制流OP中使用 `tl.load` / `tl.store` 有哪些限制？**
 

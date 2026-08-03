@@ -59,9 +59,7 @@ void FlagIdManager::scanExistingFlags(ModuleOp module) {
   });
 }
 
-int FlagIdManager::acquireId(Operation *insertionPoint) {
-  return ++currentMaxId;
-}
+int FlagIdManager::acquireId() { return ++currentMaxId; }
 
 bool FlagIdManager::checkCurrentId() {
   BufferCountManager::DepType depType = BufferCountManager::DepType::InterCore;

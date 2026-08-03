@@ -26,6 +26,7 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/StringRef.h"
+#include <optional>
 #include <string_view>
 
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
@@ -67,6 +68,10 @@ static constexpr llvm::StringLiteral kInlinableQuantScaleAttr =
     "enable_fast_tf32_mul";
 inline constexpr llvm::StringLiteral kHIVMMatmulLimitedInCubeAttr =
     "hivm.matmul_limited_in_cube";
+inline constexpr llvm::StringLiteral kTightlyCoupledBufferAttr =
+    "hivm.tightly_coupled_buffer";
+inline constexpr llvm::StringLiteral kCoreTypeCube = "CUBE";
+inline constexpr llvm::StringLiteral kCoreTypeVector = "VECTOR";
 
 inline constexpr const char *ERRCODE_ATTR =
     "triton_ascend.dynamic_cv_pipeline.rc";
@@ -121,6 +126,22 @@ bool isVectorOnlyOp(Operation *op);
 bool isScalarLike(Value value);
 bool isStoreLike(Operation *op);
 bool isViewLike(Operation *op);
+
+// Returns true iff `v` is the result of a `linalg.fill` initialized with a
+// 0 scalar constant. Used to detect the "add 0" operand of VECTOR pseudo-ops
+// (`arith.addf` / `arith.addi` carrying `ssbuffer.add_from_matmul`).
+bool isZeroFillValue(Value v);
+
+// Read the `hivm.tightly_coupled_buffer<N>` id attached to a `memref.alloc`
+// via its `annotation.mark` user. Returns nullopt when no annotation with
+// a concrete id is present, or when `allocVal` is null.
+std::optional<int> getTightlyCoupledBufferId(Value allocVal);
+
+// Walk back through opaque memref casts (`memref.memory_space_cast`,
+// `memref.cast`) to recover the underlying `memref.alloc` that backs a
+// `bufferization.to_tensor`'s source. Returns the input unchanged when no
+// such cast is found.
+Value traceBackToMemrefAlloc(Value v);
 
 } // namespace CVPipeline
 } // namespace mlir

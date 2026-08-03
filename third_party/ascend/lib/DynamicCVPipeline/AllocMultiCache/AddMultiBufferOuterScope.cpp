@@ -458,7 +458,7 @@ static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
 
   // 6. Acquire output flag
   for (int attempt = 0; attempt < kMaxFlagAttempts; ++attempt) {
-    int64_t pf = flagIdMgr.acquireId(nullptr);
+    int64_t pf = flagIdMgr.acquireId();
     if (pf == FlagIdManager::INVALID_FLAG_ID) {
       break;
     }

@@ -8,6 +8,7 @@
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Math/IR/Math.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -178,6 +179,65 @@ bool isViewLike(mlir::Operation *op) {
     return true;
   }
   return false;
+}
+
+bool isZeroFillValue(mlir::Value v) {
+  auto fill = v.getDefiningOp<linalg::FillOp>();
+  if (!fill) {
+    return false;
+  }
+  if (fill.getInputs().empty()) {
+    return false;
+  }
+  Value insVal = fill.getInputs()[0];
+  auto constOp = insVal.getDefiningOp<arith::ConstantOp>();
+  if (!constOp) {
+    return false;
+  }
+  Attribute value = constOp.getValue();
+  if (auto intAttr = dyn_cast<IntegerAttr>(value)) {
+    return intAttr.getValue().isZero();
+  }
+  if (auto fpAttr = dyn_cast<FloatAttr>(value)) {
+    return fpAttr.getValue().isZero();
+  }
+  return false;
+}
+
+// Read the `hivm.tightly_coupled_buffer<N>` id attached to a `memref.alloc`
+// via its `annotation.mark` user. Returns nullopt when no annotation with
+// a concrete id is present, or when `allocVal` is null.
+std::optional<int> getTightlyCoupledBufferId(Value allocVal) {
+  if (!allocVal) {
+    return std::nullopt;
+  }
+  for (Operation *user : allocVal.getUsers()) {
+    if (auto tcbAttr = user->getAttrOfType<hivm::HIVMTightlyCoupledBufferAttr>(
+            CVPipeline::kTightlyCoupledBufferAttr)) {
+      auto id = tcbAttr.getId();
+      if (id.has_value()) {
+        return id;
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+// Walk back through opaque memref casts to recover the underlying
+// `memref.alloc` that backs a `bufferization.to_tensor`'s source.
+Value traceBackToMemrefAlloc(Value v) {
+  while (true) {
+    if (auto cast = v.getDefiningOp<memref::MemorySpaceCastOp>()) {
+      v = cast.getSource();
+      continue;
+    }
+    if (auto cast = v.getDefiningOp<memref::CastOp>()) {
+      v = cast.getSource();
+      continue;
+    }
+    break;
+  }
+  return v;
 }
 
 } // namespace CVPipeline

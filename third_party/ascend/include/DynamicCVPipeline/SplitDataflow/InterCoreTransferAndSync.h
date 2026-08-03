@@ -28,14 +28,17 @@
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/FlagIdReuse.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include <optional>
 
 namespace mlir {
 namespace triton {
@@ -49,6 +52,21 @@ struct TransferPipeConfig {
   hivm::TCoreTypeAttr dstCoreAttr;
   llvm::StringRef srcCoreType;
   llvm::StringRef dstCoreType;
+};
+
+// Information found while matching a VECTOR to_tensor yielded from an SCF op.
+struct VectorToTensorInfo {
+  bufferization::ToTensorOp toTensor;
+  scf::YieldOp yield;
+  int tightlyCoupledBufferId;
+};
+
+// Result of matching a CUBE -> VECTOR direct-store pattern: CUBE data is
+// transferred through UB and directly stored by VECTOR, without VECTOR tensor
+// computation.
+struct CubeToVectorDirectStoreInfo {
+  std::optional<int> tightlyCoupledBufferId;
+  Operation *storeOp = nullptr;
 };
 
 // Define pass
@@ -162,6 +180,21 @@ private:
                         mlir::Operation *consumerOp, int flag,
                         mlir::Location loc, bool isCubeToVector,
                         FlagIdReuseManager &flagIdReuseManager);
+  // Match the CUBE -> VECTOR direct-store pattern inside the given SCF op:
+  // CUBE data reaches VECTOR through UB and is stored without VECTOR tensor
+  // computation (`scf.for` / `scf.while` / `scf.if`).
+  static std::optional<CubeToVectorDirectStoreInfo>
+  matchCubeToVectorDirectStorePattern(Operation *scfOp);
+  // Detect SCF ops whose yielded data flows out via fixpipe and is then
+  // stored by a post-loop materialize_in_destination. Insert a
+  // CUBE.PIPE_FIX -> VECTOR.PIPE_MTE3 sync pair to guard the store.
+  void
+  processCubeToVectorDirectStoreSync(mlir::OpBuilder &builder,
+                                     FlagIdManager &flagManager,
+                                     FlagIdReuseManager &flagIdReuseManager);
+  // Remove VECTOR add-from-matmul pseudo-ops so the SCF yield points at the
+  // real data source.
+  void removeVectorPseudoOps();
   void sortDependencies(llvm::SmallVector<DependencyInfo> &dependencies,
                         mlir::ModuleOp module);
   llvm::SmallVector<mlir::Operation *>

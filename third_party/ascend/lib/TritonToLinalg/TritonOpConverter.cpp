@@ -2203,20 +2203,7 @@ MatmulConverter::matchAndRewrite(triton::DotOp op, OpAdaptor adaptor,
   auto dstType = cast<RankedTensorType>(op.getType());
   auto elemTy = dstType.getElementType();
   auto inputPrec = op.getInputPrecision();
-  // Ascend does not support tf32;  map it to hf32 which provides similar
-  // functionality.HF32 is only valid for fp32 x fp32 inputs; for other
-  // dtypes, fall back to ieee.
-  if (inputPrec == InputPrecision::TF32) {
-    op->emitWarning("Ascend does not support tf32; map it to hf32.");
-    inputPrec = InputPrecision::HF32;
-  }
-  if (inputPrec == InputPrecision::HF32) {
-    auto opaElemTy = cast<RankedTensorType>(opa.getType()).getElementType();
-    auto opbElemTy = cast<RankedTensorType>(opb.getType()).getElementType();
-    if (!opaElemTy.isF32() || !opbElemTy.isF32()) {
-      inputPrec = InputPrecision::IEEE;
-    }
-  }
+
   auto createOp = [&](auto &&rewriter, ValueRange operands,
                       ValueRange results) -> Operation * {
     if (dstType.getRank() == 2)
@@ -2452,13 +2439,10 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
       }
     };
 
-    auto lhsFmt = convertFormat(lhsElemType);
-    auto rhsFmt = convertFormat(rhsElemType);
-
     Value matmulMxResult = rewriter.create<hfusion::MatMulMxOp>(
         loc, dstType, lhs, rhs, lhsScale, rhsScale, acc,
-        /*lhsFormat(optional)*/ nullptr,
-        /*rhsFormat(optional)*/ nullptr);
+        /*lhsFormat(optional)*/ convertFormat(lhsElemType),
+        /*rhsFormat(optional)*/ convertFormat(rhsElemType));
 
     Value finalResult = matmulMxResult;
     if (dstType.getElementType().isBF16()) {

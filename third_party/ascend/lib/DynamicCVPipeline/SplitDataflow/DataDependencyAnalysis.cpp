@@ -587,7 +587,8 @@ void DataDependencyAnalysisPass::processIterArgDependencies() {
     mlir::Operation *yieldOp = forOp.getBody()->getTerminator();
     if (!checkYieldCoreType(yieldOp)) {
       LOG_DEBUG("[ERROR]: Yield core type mismatch defining op\n");
-      signalPassFailure();
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+      return;
     }
     for (int iterArgIndex = 0; iterArgIndex < numIterArgs; ++iterArgIndex) {
       mlir::Value initValue = forOp.getInits()[iterArgIndex];
@@ -615,7 +616,7 @@ void DataDependencyAnalysisPass::processIterArgDependencies() {
         auto realInitValue = resolveNestedIterArgInitValue(initValue);
         auto realInitDefOp = realInitValue.getDefiningOp();
         auto realInitDefReuslt = dyn_cast<mlir::OpResult>(realInitValue);
-        if (!realInitDefOp) {
+        if (!realInitDefOp || isCubeOrVectorOp(realInitDefOp)) {
           continue;
         }
         if (getCoreTypeWithIndex(realInitDefOp,

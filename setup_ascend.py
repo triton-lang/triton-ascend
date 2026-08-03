@@ -435,22 +435,29 @@ def _patch_module(mod):
 
     mod.BuildWheel = BuildWheel
 
-    # 5. Patch get_package_dirs to include distributed package.
+    # 5. Patch get_package_dirs to include Ascend package data and the
+    # distributed package.
     _orig_get_package_dirs = mod.get_package_dirs
 
     def get_package_dirs():
         yield from _orig_get_package_dirs()
+        yield (
+            "triton.backends.ascend.costmodel.configs",
+            os.path.join("third_party", "ascend", "costmodel", "configs"),
+        )
         if mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
             yield ("triton_dist",
                    os.path.join("third_party", "ascend", "Triton-distributed-ascend", "python", "triton_dist"))
 
     mod.get_package_dirs = get_package_dirs
 
-    # 6. Patch get_packages to include distributed subpackages.
+    # 6. Patch get_packages to include the Costmodel profiles package and
+    # distributed subpackages.
     _orig_get_packages = mod.get_packages
 
     def get_packages():
         yield from _orig_get_packages()
+        yield "triton.backends.ascend.costmodel.configs"
         if mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
             distributed_pkg_root = os.path.join("third_party", "ascend", "Triton-distributed-ascend", "python",
                                                 "triton_dist")
@@ -499,8 +506,9 @@ def _build_setup_kwargs(mod, kwargs):
     # install_requires
     kwargs["install_requires"] = _get_install_requirements()
 
-    # package_data for distributed
+    # package_data for the Costmodel hardware profiles and distributed
     package_data = dict(kwargs.get("package_data") or {})
+    package_data["triton.backends.ascend.costmodel.configs"] = ["*.json"]
     if mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
         package_data["triton_dist"] = ["*.py", "*.pyi"]
     if package_data:

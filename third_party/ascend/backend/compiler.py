@@ -1331,6 +1331,23 @@ class AscendBackend(BaseBackend):
             # Include all binary file extensions (mlirbc is used in bytecode mode)
             self.binary_extensions = {"npubin", "mlirbc"}
 
+    def prune_configs_by_costmodel(self, fn, configs, named_args, runtime_kwargs, options):
+        """Rank autotune configs with the Ascend TTIR costmodel.
+
+        This optional backend hook keeps the generic Triton autotuner independent
+        of Ascend-specific TTIR generation and costmodel runtime details.
+        """
+        from .runtime.costmodel_runtime import prune_configs_by_costmodel
+
+        return prune_configs_by_costmodel(
+            backend=self,
+            fn=fn,
+            configs=configs,
+            named_args=named_args,
+            runtime_kwargs=runtime_kwargs,
+            options=options,
+        )
+
     def parse_options(self, opts) -> Any:
         # TODO: get available targets when building options?
         if self.target.backend == "npu":

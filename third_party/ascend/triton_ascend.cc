@@ -261,11 +261,15 @@ parseAscendCostModelOptionString(const std::string &option,
   };
 
   // Fast path for single-key payloads passed as next argv token.
-  if (startsWith(option, "arg-bindings=")) {
+  if (startsWith(option, "arg-bindings=") &&
+      option.find(",hardware-config=") == std::string::npos &&
+      option.find(" hardware-config=") == std::string::npos) {
     opts.argBindings = trim(option.substr(std::string("arg-bindings=").size()));
     return;
   }
-  if (startsWith(option, "hardware-config=")) {
+  if (startsWith(option, "hardware-config=") &&
+      option.find(",arg-bindings=") == std::string::npos &&
+      option.find(" arg-bindings=") == std::string::npos) {
     opts.hardwareConfig =
         trim(option.substr(std::string("hardware-config=").size()));
     return;
@@ -299,6 +303,14 @@ parseAscendCostmodelArgs(const std::vector<std::string> &extraArgs) {
           extraArgs[i + 1][0] != '-') {
         parseAscendCostModelOptionString(extraArgs[++i], opts);
       }
+      continue;
+    }
+    // Prefer one top-level option per argv entry. This avoids overloading the
+    // comma used inside arg-bindings as a pass-option separator. Keep the
+    // combined option-string parser above for backwards compatibility.
+    if (arg.rfind("arg-bindings=", 0) == 0 ||
+        arg.rfind("hardware-config=", 0) == 0) {
+      parseAscendCostModelOptionString(arg, opts);
       continue;
     }
     constexpr const char *kShortPrefix = "-ascend-perf-model=";

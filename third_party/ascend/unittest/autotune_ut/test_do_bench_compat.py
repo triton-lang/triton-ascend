@@ -18,6 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import importlib
 from types import MethodType, SimpleNamespace
 
 import pytest
@@ -53,6 +54,8 @@ def _make_run_tuner(configs):
     tuner.generate_key_and_configs = lambda *args, **kwargs: key
     tuner.prune_configs = lambda kwargs: configs
     tuner.enable_ubtuner = False
+    tuner.costmodel_options = None
+    tuner._costmodel_fallback_configs = []
     tuner.cache_results = True
     tuner.print_autotuning = False
     tuner.auto_profile_dir = None
@@ -166,6 +169,126 @@ def test_autotilingtuner_marks_user_defined_do_bench():
 
     assert tuner.user_defined_do_bench is True
     assert marker["called"] is False
+
+
+@pytest.mark.parametrize(
+    ("costmodel", "expected"),
+    [
+        (True, {}),
+        (False, None),
+        (None, None),
+        ({"top_k": 2}, {"top_k": 2}),
+    ],
+)
+def test_autotilingtuner_parses_costmodel_options(costmodel, expected):
+
+    def _dummy_kernel():
+        return None
+
+    _dummy_kernel.arg_names = []
+    tuner = AutoTilingTuner(
+        _dummy_kernel,
+        [],
+        [Config({})],
+        [],
+        None,
+        None,
+        prune_configs_by={"costmodel": costmodel},
+    )
+
+    assert tuner.costmodel_options == expected
+    assert tuner._costmodel_fallback_configs == []
+
+
+@pytest.mark.parametrize("costmodel", [1, "enabled", [], object()])
+def test_autotilingtuner_rejects_invalid_costmodel_options(costmodel):
+
+    def _dummy_kernel():
+        return None
+
+    _dummy_kernel.arg_names = []
+    with pytest.raises(TypeError, match="`costmodel` must be"):
+        AutoTilingTuner(
+            _dummy_kernel,
+            [],
+            [Config({})],
+            [],
+            None,
+            None,
+            prune_configs_by={"costmodel": costmodel},
+        )
+
+
+def test_autotilingtuner_rejects_perf_model_with_costmodel():
+
+    def _dummy_kernel():
+        return None
+
+    _dummy_kernel.arg_names = []
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        AutoTilingTuner(
+            _dummy_kernel,
+            [],
+            [Config({})],
+            [],
+            None,
+            None,
+            prune_configs_by={"perf_model": lambda **_kwargs: 1.0, "costmodel": True},
+        )
+
+
+def test_autotilingtuner_prunes_with_backend_costmodel(monkeypatch):
+    cfg0 = Config({"BLOCK_SIZE": 128})
+    cfg1 = Config({"BLOCK_SIZE": 256})
+    cfg2 = Config({"BLOCK_SIZE": 512})
+    tuner = object.__new__(AutoTilingTuner)
+    tuner.configs = [cfg0, cfg1, cfg2]
+    tuner.nargs = {"n_elements": 1024}
+    tuner.early_config_prune = None
+    tuner.perf_model = None
+    tuner.configs_top_k = 1.0
+    tuner.costmodel_options = {"top_k": 1}
+    tuner._costmodel_fallback_configs = []
+    tuner.fn = object()
+
+    calls = {}
+
+    def _prune_configs_by_costmodel(**kwargs):
+        calls.update(kwargs)
+        return [cfg1], [cfg2, cfg0]
+
+    backend = SimpleNamespace(prune_configs_by_costmodel=_prune_configs_by_costmodel)
+    target = object()
+    active = SimpleNamespace(get_current_target=lambda: target)
+    monkeypatch.setattr("triton.compiler.compiler.make_backend", lambda actual_target: backend)
+    driver_module = importlib.import_module("triton.runtime.driver")
+    monkeypatch.setattr(driver_module, "driver", SimpleNamespace(active=active))
+
+    result = tuner.prune_configs({"grid": (1, )})
+
+    assert result == [cfg1]
+    assert tuner._costmodel_fallback_configs == [cfg2, cfg0]
+    assert calls == {
+        "fn": tuner.fn,
+        "configs": [cfg0, cfg1, cfg2],
+        "named_args": tuner.nargs,
+        "runtime_kwargs": {"grid": (1, )},
+        "options": {"top_k": 1},
+    }
+
+
+@pytest.mark.parametrize(
+    ("timing", "expected"),
+    [
+        (1.0, True),
+        ((1.0, 0.9, 1.1), True),
+        (float("inf"), False),
+        ([], False),
+        ("invalid", False),
+    ],
+)
+def test_autotilingtuner_identifies_finite_timing(timing, expected):
+    assert AutoTilingTuner._is_finite_timing(timing) is expected
 
 
 def test_ascend_autotune_decorator_forwards_do_bench(monkeypatch):

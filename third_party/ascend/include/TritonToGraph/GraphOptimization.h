@@ -44,6 +44,9 @@ enum class GraphOptimizationRuleId : uint16_t {
   // scheduled once after the normal per-function phases because its launch
   // contract must not be suppressed by their rewrite budget.
   RowCoalescing = 8,
+  // DiagonalMaskRemoval rewrites compute logic rather than memory access, so
+  // it is architecture and template independent.
+  DiagonalMaskRemoval = 128,
   // The following identities are owned by the layout/memory compatibility
   // passes.  They deliberately are not GraphOptimizationRule candidates and
   // are not added to GraphOptimizePass's per-function phase loop.
@@ -62,6 +65,7 @@ constexpr uint16_t kAllGraphOptimizationRuleMask =
         GraphOptimizationRuleId::TransposePointwiseReorder) |
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::StoreCoalescing) |
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::RowCoalescing) |
+    getGraphOptimizationRuleMask(GraphOptimizationRuleId::DiagonalMaskRemoval) |
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::StridedAxisCoalescing) |
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::ChunkCoalescing) |

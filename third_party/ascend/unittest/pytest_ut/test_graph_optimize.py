@@ -56,6 +56,32 @@ def graph_optimize_legacy_memory_isolation_kernel(x_ptr, y_ptr, BLOCK: tl.conste
 
 
 @triton.jit
+def diagonal_shift_forward_kernel(x_ptr, y_ptr, BLOCK: tl.constexpr):
+    # Shift a cumulative sum left by one the way the segmented-cumsum kernels
+    # spell it: a sub-diagonal mask over a BLOCK x BLOCK matrix, reduced back
+    # to one dimension.  DiagonalMaskRemoval must collapse it to a subtraction.
+    offsets = tl.arange(0, BLOCK)
+    x = tl.load(x_ptr + offsets)
+    cumulative = tl.cumsum(x, axis=0)
+    rows = tl.arange(0, BLOCK)[:, None]
+    cols = tl.arange(0, BLOCK)[None, :]
+    matrix = tl.where(rows == cols + 1, cumulative[None, :], 0.0)
+    tl.store(y_ptr + offsets, tl.sum(matrix, axis=1))
+
+
+@triton.jit
+def diagonal_shift_reverse_kernel(x_ptr, y_ptr, BLOCK: tl.constexpr):
+    # The mirrored form: a reverse scan shifted right by a super-diagonal mask.
+    offsets = tl.arange(0, BLOCK)
+    x = tl.load(x_ptr + offsets)
+    cumulative = tl.cumsum(x, axis=0, reverse=True)
+    rows = tl.arange(0, BLOCK)[:, None]
+    cols = tl.arange(0, BLOCK)[None, :]
+    matrix = tl.where(rows == cols - 1, cumulative[None, :], 0.0)
+    tl.store(y_ptr + offsets, tl.sum(matrix, axis=1))
+
+
+@triton.jit
 def overflow_assert_provenance_kernel(output_ptr, n, BLOCK: tl.constexpr):
     offsets = tl.arange(0, BLOCK)
     checked_offset = offsets * n
@@ -243,7 +269,7 @@ def test_default_generic_graph_mask_excludes_legacy_memory_compatibility(tmp_pat
     The generic GraphOptimizePass runs at early TTIR.  Row, Axis, Chunk, and
     StridedLoadStoreRewrite retain their original compatibility-pass slots, so
     this strided memory shape must not acquire either coalescing metadata or
-    an indirect-memory op merely because the default mask is 127.
+    an indirect-memory op merely because the default mask is 255.
     """
     default_options = NPUOptions(arch="Ascend910_95", enable_graph_optimize=True)
     native_only_options = NPUOptions(
@@ -251,7 +277,7 @@ def test_default_generic_graph_mask_excludes_legacy_memory_compatibility(tmp_pat
         enable_graph_optimize=True,
         graph_optimize_rule_mask=7,
     )
-    assert default_options.graph_optimize_rule_mask == 127
+    assert default_options.graph_optimize_rule_mask == 255
 
     default_result = make_ttir(
         make_legacy_memory_isolation_ast_ttir(default_options),
@@ -270,21 +296,22 @@ def test_default_generic_graph_mask_excludes_legacy_memory_compatibility(tmp_pat
     assert "hacc.coalesce_grid_ceil_div" not in text
     assert "tt.indirect_load" not in text
     assert "tt.indirect_store" not in text
-    # The native graph-rule bundle is LoadStoreTranspose |
-    # TransposePointwiseReorder | StoreCoalescing (1|2|4). Adding the four
-    # compatibility identities to reach 127 must be observationally inert in
-    # make_ttir().
+    # The native graph-rule bundle exercised by this shape is
+    # LoadStoreTranspose | TransposePointwiseReorder | StoreCoalescing (1|2|4).
+    # Adding the four compatibility identities and DiagonalMaskRemoval to reach
+    # 255 must be observationally inert in make_ttir(): this input carries no
+    # diagonal-select-reduce pattern.
     assert text == str(native_only_result)
     assert_reparseable(default_result, tmp_path, "generic-legacy-memory-isolation")
 
 
 def test_default_graph_mask_preserves_native_graph_rule_bundle(monkeypatch, tmp_path):
-    """Default 127 retains native 1|2|4 behavior, including StoreCoalescing,
+    """Default 255 retains native 1|2|4 behavior, including StoreCoalescing,
     without running legacy rules.
 
     This input has the LoadStoreTranspose (bit 1) structural signature.  Compare
     the public native-only bundle (7) against the default all-identity mask
-    (127): both must apply the same native rewrite.  Together with the legacy
+    (255): both must apply the same native rewrite.  Together with the legacy
     isolation test above, this catches either failure mode: accidentally
     dropping native rules when the default changed, or scheduling compatibility
     passes from the early generic graph pass.
@@ -308,7 +335,7 @@ def test_default_graph_mask_preserves_native_graph_rule_bundle(monkeypatch, tmp_
     native_only_ttir = str(make_fused_swiglu_ttir(native_only_options))
     default_ttir = str(make_fused_swiglu_ttir(default_options))
 
-    assert default_options.graph_optimize_rule_mask == 127
+    assert default_options.graph_optimize_rule_mask == 255
     assert default_ttir == native_only_ttir
     # A rule-mask=0 control would retain the original [N, M] pointer layout;
     # the default must still perform the native transpose rewrite to [M, N].
@@ -633,6 +660,115 @@ def test_fused_swiglu_bwd_b_small_tiling_graph_optimize_equivalence(monkeypatch,
     summary["device"] = (torch.npu.get_device_name(torch.npu.current_device())
                          if hasattr(torch.npu, "get_device_name") else "npu")
     write_summary()
+
+
+def make_diagonal_shift_ttir(kernel, options, block=16):
+    source = ASTSource(
+        kernel,
+        {"x_ptr": "*fp32", "y_ptr": "*fp32"},
+        {"BLOCK": block},
+    )
+    context = ir.context()
+    ir.load_dialects(context)
+    ascend_ir.load_dialects(context)
+    module = ast_to_ttir(kernel, source, context, options, {}, {})
+    return str(make_ttir(module, {}, options))
+
+
+@pytest.mark.parametrize(
+    "kernel",
+    (diagonal_shift_forward_kernel, diagonal_shift_reverse_kernel),
+    ids=("forward-left-shift", "reverse-right-shift"),
+)
+def test_diagonal_mask_removal_collapses_quadratic_shift(kernel):
+    """The 16x16 intermediate and its reduction give way to one subtraction."""
+    options = NPUOptions(arch="Ascend910B1", enable_graph_optimize=True)
+
+    ttir = make_diagonal_shift_ttir(kernel, options)
+
+    assert "arith.subf" in ttir
+    assert "tt.reduce" not in ttir
+    assert "tt.scan" in ttir
+    # The quadratic intermediate is what the rule exists to remove.
+    assert "tensor<16x16xf32>" not in ttir
+    assert "tensor<16x16xi1>" not in ttir
+
+
+@pytest.mark.parametrize(
+    "kernel",
+    (diagonal_shift_forward_kernel, diagonal_shift_reverse_kernel),
+    ids=("forward-left-shift", "reverse-right-shift"),
+)
+def test_diagonal_mask_removal_is_gated_by_its_rule_bit(kernel):
+    """Mask 127 is every other identity, so the pattern must survive intact."""
+    options = NPUOptions(
+        arch="Ascend910B1",
+        enable_graph_optimize=True,
+        graph_optimize_rule_mask=127,
+    )
+
+    ttir = make_diagonal_shift_ttir(kernel, options)
+
+    assert "tt.reduce" in ttir
+    assert "tensor<16x16xf32>" in ttir
+    assert "arith.subf" not in ttir
+
+
+def test_diagonal_mask_removal_applies_without_simt_route():
+    """The rewrite is compute logic, so it must not depend on force_simt_only.
+
+    Its predecessor lived behind the 910_95 plus force-SIMT gate of
+    processStridedLoadStoreRewriteOperations and therefore never ran on other
+    targets.
+    """
+    for force_simt_only in (False, True):
+        options = NPUOptions(
+            arch="Ascend910B1",
+            enable_graph_optimize=True,
+            force_simt_only=force_simt_only,
+        )
+
+        ttir = make_diagonal_shift_ttir(diagonal_shift_forward_kernel, options)
+
+        assert "arith.subf" in ttir
+        assert "tt.reduce" not in ttir
+
+
+def test_diagonal_mask_removal_numerical_equivalence(monkeypatch, tmp_path):
+    """Compare against the unrewritten kernel on hardware.
+
+    The float rewrite is not bit-exact, since scan[i] - x[i] only recovers
+    scan[i - 1] up to rounding, so this asserts closeness rather than equality.
+    """
+    torch = _require_npu()
+    monkeypatch.setenv("TRITON_ALWAYS_COMPILE", "1")
+    source = torch.rand(16, dtype=torch.float32, device="npu")
+    expected = torch.cat([
+        torch.zeros(1, dtype=torch.float32),
+        torch.cumsum(source.cpu(), dim=0)[:-1],
+    ])
+
+    outputs = {}
+    for rule_mask in (127, 255):
+        diagonal_shift_forward_kernel.device_caches.clear()
+        output = torch.empty_like(source)
+        compiled = diagonal_shift_forward_kernel[(1, )](
+            source,
+            output,
+            BLOCK=16,
+            graph_optimize_rule_mask=rule_mask,
+        )
+        torch.npu.synchronize()
+        assert_ttir_text_reparseable(
+            compiled.asm["ttir"],
+            tmp_path,
+            f"diagonal-{rule_mask}",
+        )
+        outputs[rule_mask] = output.cpu()
+
+    assert "arith.subf" in compiled.asm["ttir"]
+    torch.testing.assert_close(outputs[127], expected, rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(outputs[255], outputs[127], rtol=1e-5, atol=1e-6)
 
 
 def test_graph_optimize_options_contribute_to_npu_hash():

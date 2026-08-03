@@ -824,10 +824,21 @@ LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(Modul
     return success();
   }
 
+  // Both passes below coalesce by recording a single module-level
+  // (hacc.coalesce_factor, hacc.coalesce_axis) pair. The full-TA path owns the
+  // grid division: compiler.py strips both attrs into host metadata and the
+  // launcher (driver.py) divides grid[axis] by the factor before launch --
+  // bishengir does NOT interpret them. At most one pass may claim the factor per
+  // module. StridedAxisCoalescing has PRIORITY: it runs first and
+  // unconditionally, and TileChunkCoalescing yields (bails) if the factor is
+  // already set.
 
-
-  // coalesce adjacent strided axes into one  so that to convert discrete memory asccess
-  // into continuous memory access .
+  // StridedAxisCoalescing (default-on, higher priority): fold the FLA
+  // H-axis-split strided load/store into a 2D contiguous [BT,H] tile (H as a
+  // parallel inner lane), turning the per-element strided access into a
+  // contiguous one. Bails per kernel when the load->store subgraph is not
+  // lane-safe (e.g. contains tt.dot), leaving those loads to the stride dispatch
+  // below.
   StridedAxisCoalescing::rewriteStridedAxisCoalesce(moduleOp);
 
   // TileChunkCoalescing (default-on, lower priority): when the outermost

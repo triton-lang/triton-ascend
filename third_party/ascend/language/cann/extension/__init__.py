@@ -42,6 +42,7 @@ from .core import (
     sync_block_wait,
     SYNC_IN_VF,
     conv1d,
+    dot,
 )
 
 from .scope import scope
@@ -158,4 +159,7 @@ __all__ = [
 
     # utils
     "is_compile_on_910_95",
+
+    # dot ops
+    "dot",
 ]

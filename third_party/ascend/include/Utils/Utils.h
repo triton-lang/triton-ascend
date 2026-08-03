@@ -199,6 +199,21 @@ ModuleOp getModuleOpFromOperation(Operation *op);
 
 bool isTensorPtrType(Type type);
 
+namespace ascend {
+
+// Fractal (zN) block geometry shared by ascend.dot's type inference/verifier
+// (DotOp::inferReturnTypes) and its lowering (DotConverter). The inner block is
+// [kFractalBlock, b] with b = kBytesPerFractalCol / elemBytes, i.e. f16/bf16 ->
+// 16, f32 -> 8, int8 -> 32; fractal_c is the L0C accumulator fractal, always
+// [kFractalBlock, kFractalBlock].
+inline constexpr int64_t kFractalBlock = 16;
+inline constexpr int64_t kBytesPerFractalCol = 32;
+inline constexpr unsigned kBitsPerByte = 8;
+// Cube accumulator width for integer inputs (int8 -> i32).
+inline constexpr unsigned kDotAccIntWidth = 32;
+
+} // namespace ascend
+
 } // namespace triton
 
 class OpBuilder;

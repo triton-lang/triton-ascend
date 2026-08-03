@@ -720,6 +720,7 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   patterns.add<TTOpConverters::DeviceAssertConverter>(patterns.getContext());
   patterns.add<TTOpConverters::DevicePrintConverter>(patterns.getContext());
   patterns.add<TTOpConverters::MatmulConverter>(patterns.getContext());
+  patterns.add<TTOpConverters::DotConverter>(patterns.getContext());
   patterns.add<TTOpConverters::DotScaledConverter>(patterns.getContext());
   patterns.add<TTOpConverters::PtrToIntConverter>(patterns.getContext());
 
@@ -940,6 +941,13 @@ void TritonToLinalgPass::runOnOperation() {
     return WalkResult::interrupt();
   });
   moduleOp.walk([&](triton::DotScaledOp dotScaledOp) {
+    existDot = true;
+    return WalkResult::interrupt();
+  });
+  // dot decomposes into a cube linalg.matmul, so a kernel containing it is
+  // a cube (mix) kernel, not a pure-AIV one. Without this the func gets tagged
+  // mix_mode="aiv" and the cube tile-and-slice fails (cbuf overflow).
+  moduleOp.walk([&](triton::ascend::DotOp dotOp) {
     existDot = true;
     return WalkResult::interrupt();
   });

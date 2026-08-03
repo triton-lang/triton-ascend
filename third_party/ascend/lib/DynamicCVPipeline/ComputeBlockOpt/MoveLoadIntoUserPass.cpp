@@ -265,7 +265,7 @@ void MoveLoadIntoUserPass::runOnOperation() {
     // Check for cycles before moving
     SmallVector<Operation *> opsVec(opsToMove.begin(), opsToMove.end());
     if (CVPipeline::willCreateCycle(opsVec, memGraph, targetBlockId, bmNew)) {
-      LOG_DEBUG("Moving would create a cycle, skip");
+      LOG_DEBUG("Moving would create a cycle, skip("<< commonBlockId<<")");
       continue;
     }
 

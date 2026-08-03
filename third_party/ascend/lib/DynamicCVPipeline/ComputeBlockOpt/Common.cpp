@@ -197,9 +197,7 @@ void cloneScalarOpsForCrossBlockUses(ComputeBlockIdManager &bmOriginal,
             CVPipeline::getAncestorInBlock(userOp, op->getBlock());
         if (!userInBlock)
           continue;
-        if (llvm::find(matchedOps, userInBlock) == matchedOps.end() &&
-            bmOriginal.getBlockIdByOp(userInBlock) !=
-                bmOriginal.getBlockIdByOp(matchedOps[0])) {
+        if (llvm::find(matchedOps, userInBlock) == matchedOps.end()) {
           otherUses.push_back(&use);
         }
       }

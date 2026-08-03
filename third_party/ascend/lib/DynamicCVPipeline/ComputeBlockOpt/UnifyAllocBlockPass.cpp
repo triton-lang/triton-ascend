@@ -31,6 +31,7 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/IR/Block.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "llvm/ADT/SmallVector.h"
@@ -268,8 +269,11 @@ static FillInfo splitSCFIfIfNeeded(FillInfo &info) {
 }
 
 /// Trace back along the view-like chain from \p src and collect all ops.
-static void traceViewChain(Value src, SmallVectorImpl<Operation *> &result) {
+static void traceViewChain(Value src, Block* block, SmallVectorImpl<Operation *> &result) {
   for (Value v = src; auto *defOp = v.getDefiningOp();) {
+    if (defOp->getBlock() != block) {
+      break;
+    }
     if (auto viewOp = dyn_cast<ViewLikeOpInterface>(defOp))
       result.push_back(viewOp), v = viewOp.getViewSource();
     else if (auto sliceOp = dyn_cast<tensor::ExtractSliceOp>(defOp))
@@ -305,7 +309,7 @@ collectSourceViewChainOps(ArrayRef<Operation *> directUsers) {
       Operation *cur = worklist.pop_back_val();
       for (auto *user : cur->getUsers()) {
         if (auto copyOp = dyn_cast<memref::CopyOp>(user)) {
-          traceViewChain(copyOp.getSource(), chainOps);
+          traceViewChain(copyOp.getSource(), user->getBlock(), chainOps);
         } else if (isa<ViewLikeOpInterface, tensor::ExtractSliceOp>(user)) {
           worklist.push_back(user);
         }

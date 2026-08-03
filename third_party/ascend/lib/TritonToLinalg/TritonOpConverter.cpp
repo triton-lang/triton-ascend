@@ -2230,6 +2230,207 @@ MatmulConverter::matchAndRewrite(triton::DotOp op, OpAdaptor adaptor,
   return success();
 }
 
+// Fractal (zN) block geometry for ascend.dot lowering comes from Utils.h,
+// shared with DotOp::inferReturnTypes.
+
+// zN block column count b = 32 bytes / element bytes.
+static int64_t nzBlockCol(Type elemTy) {
+  return triton::ascend::kBytesPerFractalCol /
+         (elemTy.getIntOrFloatBitWidth() / triton::ascend::kBitsPerByte);
+}
+
+static hivm::DataLayoutAttr dotNdLayout(MLIRContext *ctx) {
+  return hivm::DataLayoutAttr::get(ctx, hivm::DataLayout::ND);
+}
+
+static hivm::DataLayoutAttr dotFractalLayout(MLIRContext *ctx, int64_t blockRow,
+                                             int64_t blockCol) {
+  return hivm::DataLayoutAttr::get(
+      ctx, hivm::DataLayout::Fractal, /*transpose=*/nullptr,
+      DenseI64ArrayAttr::get(ctx, {blockRow, blockCol}));
+}
+
+// A 4D fractal dot operand -> 2D ND (no-op if already ND). Both operands are zN
+// (non-transpose): lhs [K1,M1,16,b] -> [M,K] and rhs [N1,K1,16,b] -> [K,N],
+// each = [d1*d2, d0*d3].
+static Value dotFractalToND(ConversionPatternRewriter &rewriter, Location loc,
+                            Value operand, bool isLhs) {
+  auto operandTy = cast<RankedTensorType>(operand.getType());
+  if (operandTy.getRank() != 4)
+    return operand;
+  auto blockedShape = operandTy.getShape();
+  SmallVector<int64_t> ndShape{blockedShape[1] * blockedShape[2],
+                               blockedShape[0] * blockedShape[3]};
+  MLIRContext *ctx = rewriter.getContext();
+  return rewriter.create<hivm::ConvertLayoutOp>(
+      loc, RankedTensorType::get(ndShape, operandTy.getElementType()), operand,
+      /*srcLayout=*/dotFractalLayout(ctx, blockedShape[2], blockedShape[3]),
+      /*dstLayout=*/dotNdLayout(ctx), DenseI64ArrayAttr::get(ctx, ndShape),
+      /*output_shape=*/ValueRange{});
+}
+
+// If `v` is a freshly-loaded buffer used only here -- to_tensor of an alloc
+// with a single writer copy (the load) -- return that load copy so its DMA can
+// be retargeted into the padded buffer (one copy, not load-then-copy); else
+// null.
+static memref::CopyOp findRedirectableLoad(Value v) {
+  auto toTensor = v.getDefiningOp<bufferization::ToTensorOp>();
+  if (!toTensor || v.hasNUsesOrMore(2))
+    return nullptr;
+  Value srcBuf = toTensor.getBuffer();
+  if (!srcBuf.getDefiningOp<memref::AllocOp>())
+    return nullptr;
+  memref::CopyOp loadCopy = nullptr;
+  for (Operation *user : srcBuf.getUsers()) {
+    if (user == toTensor.getOperation())
+      continue;
+    // Bail on a non-copy user, a source-use of srcBuf, or a second writer.
+    auto copyOp = dyn_cast<memref::CopyOp>(user);
+    if (!copyOp || copyOp.getTarget() != srcBuf || loadCopy)
+      return nullptr;
+    loadCopy = copyOp;
+  }
+  return loadCopy;
+}
+
+// Zero-pad `v`'s dimension `dim` up to `target` (no-op if already that size).
+// Uses memref.alloc + fill(0) + subview + copy, NOT tensor.insert_slice: the
+// latter lowers (in AscendNPU-IR AutoVectorizeV2) to a scalar copy loop that
+// blows up cbuf.
+static Value zeroPadDimTo(Value v, int64_t dim, int64_t target,
+                          ConversionPatternRewriter &rewriter, Location loc) {
+  auto t = cast<RankedTensorType>(v.getType());
+  if (t.getShape()[dim] == target)
+    return v;
+  Type elemTy = t.getElementType();
+
+  // Push the pad through a transpose (pad the mapped input dim, re-transpose).
+  if (auto trans = v.getDefiningOp<linalg::TransposeOp>()) {
+    ArrayRef<int64_t> perm = trans.getPermutation();
+    Value paddedInput =
+        zeroPadDimTo(trans.getInput(), perm[dim], target, rewriter, loc);
+    SmallVector<int64_t> outShape(t.getShape().begin(), t.getShape().end());
+    outShape[dim] = target;
+    Value init = rewriter.create<tensor::EmptyOp>(loc, outShape, elemTy);
+    return rewriter.create<linalg::TransposeOp>(loc, paddedInput, init, perm)
+        .getResults()[0];
+  }
+
+  SmallVector<int64_t> paddedShape(t.getShape().begin(), t.getShape().end());
+  paddedShape[dim] = target;
+
+  // Allocate the padded buffer and zero-fill it.
+  auto paddedMemTy = MemRefType::get(paddedShape, elemTy);
+  Value padded = rewriter.create<memref::AllocOp>(loc, paddedMemTy);
+  Value zero =
+      rewriter.create<arith::ConstantOp>(loc, rewriter.getZeroAttr(elemTy));
+  rewriter.create<linalg::FillOp>(loc, ValueRange{zero}, ValueRange{padded});
+
+  // Subview covering the real (unpadded) region, then fill it with one copy.
+  int64_t rank = t.getRank();
+  SmallVector<OpFoldResult> offsets(rank, rewriter.getIndexAttr(0));
+  SmallVector<OpFoldResult> strides(rank, rewriter.getIndexAttr(1));
+  SmallVector<OpFoldResult> sizes;
+  for (int64_t d : t.getShape())
+    sizes.push_back(rewriter.getIndexAttr(d));
+  auto subviewTy =
+      memref::SubViewOp::inferResultType(paddedMemTy, offsets, sizes, strides);
+  Value subview = rewriter.create<memref::SubViewOp>(
+      loc, cast<MemRefType>(subviewTy), padded, offsets, sizes, strides);
+
+  if (memref::CopyOp loadCopy = findRedirectableLoad(v)) {
+    rewriter.create<memref::CopyOp>(loc, loadCopy.getSource(), subview);
+    rewriter.eraseOp(loadCopy);
+  } else {
+    auto srcBufferTy = MemRefType::get(t.getShape(), elemTy);
+    Value srcBuffer =
+        rewriter.create<bufferization::ToBufferOp>(loc, srcBufferTy, v);
+    rewriter.create<memref::CopyOp>(loc, srcBuffer, subview);
+  }
+
+  return rewriter.create<bufferization::ToTensorOp>(
+      loc, RankedTensorType::get(paddedShape, elemTy), padded,
+      /*restrict=*/true, /*writable=*/true);
+}
+
+// Reconcile the ND operands' contraction (K) dim (a/b mutated in place). When
+// exactly one operand is fractal, its K is block-rounded while the ND side may
+// be shorter; zero-padding the ND side to the block-aligned K is safe (the
+// extra K products are * 0). Only an in-one-block gap is padding; else error.
+static LogicalResult
+reconcileDotContractionK(triton::ascend::DotOp op, Value &a, Value &b,
+                         Type elemTy, ConversionPatternRewriter &rewriter,
+                         Location loc) {
+  if (op.getFractalA() == op.getFractalB())
+    return success();
+  int64_t kA = cast<RankedTensorType>(a.getType()).getShape()[1]; // A_nd [M,kA]
+  int64_t kB = cast<RankedTensorType>(b.getType()).getShape()[0]; // B_nd [kB,N]
+  if (kA == kB)
+    return success();
+  int64_t paddedK = std::max(kA, kB), shortK = std::min(kA, kB);
+  int64_t blockK = nzBlockCol(elemTy);
+  if (paddedK % blockK != 0 || paddedK - shortK >= blockK)
+    return op.emitError()
+           << "dot: contraction dim mismatch (A K=" << kA << ", B K=" << kB
+           << ") is larger than fractal padding; pad the operand "
+              "explicitly";
+  op.emitWarning() << "dot: auto zero-padding the non-fractal operand's K from "
+                   << shortK << " to " << paddedK
+                   << " to match the fractal operand's block-aligned K";
+  a = zeroPadDimTo(a, /*dim=*/1, paddedK, rewriter, loc); // A_nd [M,K]
+  b = zeroPadDimTo(b, /*dim=*/0, paddedK, rewriter, loc); // B_nd [K,N]
+  return success();
+}
+
+// Decompose `ascend.dot` (D = A * B): fractal inputs -> ND, a plain
+// linalg.matmul, then (if fractal_c) the ND result back to fractal.
+LogicalResult
+DotConverter::matchAndRewrite(triton::ascend::DotOp op, OpAdaptor adaptor,
+                              ConversionPatternRewriter &rewriter) const {
+  Location loc = op.getLoc();
+  MLIRContext *ctx = rewriter.getContext();
+  auto resTy = cast<RankedTensorType>(op.getType());
+  // The result carries the cube accumulator dtype (f32/i32); the matmul inputs
+  // and K-padding use the operands' own (input) dtype.
+  Type accTy = resTy.getElementType();
+
+  Value a = op.getFractalA()
+                ? dotFractalToND(rewriter, loc, adaptor.getA(), /*isLhs=*/true)
+                : adaptor.getA();
+  Value b = op.getFractalB()
+                ? dotFractalToND(rewriter, loc, adaptor.getB(), /*isLhs=*/false)
+                : adaptor.getB();
+  Type inElemTy = cast<RankedTensorType>(a.getType()).getElementType();
+  if (failed(reconcileDotContractionK(op, a, b, inElemTy, rewriter, loc)))
+    return failure();
+
+  // Uninitialized accumulator (accTy): mmadL1 (accumulate=false) overwrites it.
+  int64_t numRows = cast<RankedTensorType>(a.getType()).getShape()[0];
+  int64_t numCols = cast<RankedTensorType>(b.getType()).getShape()[1];
+  auto ndResultTy = RankedTensorType::get({numRows, numCols}, accTy);
+  Value acc = rewriter.create<tensor::EmptyOp>(
+      loc, ArrayRef<int64_t>{numRows, numCols}, accTy);
+  auto matmul = rewriter.create<linalg::MatmulOp>(
+      loc, TypeRange{ndResultTy}, ValueRange{a, b}, ValueRange{acc});
+  matmul->setAttr("input_precision", rewriter.getStringAttr("ieee"));
+  Value ndResult = matmul->getResult(0);
+
+  if (!op.getFractalC()) {
+    rewriter.replaceOp(op, ndResult);
+    return success();
+  }
+  // fractal_c: ND result -> the L0C accumulator fractal (block [16, 16]).
+  Value fractalResult = rewriter.create<hivm::ConvertLayoutOp>(
+      loc, resTy, ndResult, /*srcLayout=*/dotNdLayout(ctx),
+      /*dstLayout=*/
+      dotFractalLayout(ctx, triton::ascend::kFractalBlock,
+                       triton::ascend::kFractalBlock),
+      DenseI64ArrayAttr::get(ctx, resTy.getShape()), /*output_shape=*/
+      ValueRange{});
+  rewriter.replaceOp(op, fractalResult);
+  return success();
+}
+
 LogicalResult
 FlipOpConverter::matchAndRewrite(triton::ascend::FlipOp op, OpAdaptor adaptor,
                                  ConversionPatternRewriter &rewriter) const {

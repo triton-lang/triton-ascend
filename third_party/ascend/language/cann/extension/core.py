@@ -24,7 +24,7 @@ __all__ = [
     "ascend_address_space", "builtin", "CORE", "copy_from_ub_to_l1", "copy", "debug_barrier", "fixpipe",
     "FixpipeDMAMode", "FixpipeDualDstMode", "FixpipePreQuantMode", "FixpipePreReluMode", "int64", "is_builtin", "MODE",
     "PIPE", "SYNC_HINT", "EVENT_ID", "IteratorType", "sub_vec_id", "sub_vec_num", "sync_block_all", "sync_block_set",
-    "sync_block_wait", "SYNC_IN_VF", "conv1d"
+    "sync_block_wait", "SYNC_IN_VF", "conv1d", "dot"
 ]
 
 import enum
@@ -567,3 +567,111 @@ def conv1d(input: tl.tensor, weight: tl.tensor, bias: tl.tensor = None, stride=N
         output_shape = [C_out, L_out_val]
 
     return semantic.conv1d(input, weight, bias, stride, padding_size_int, dilation, groups, output_shape, _semantic)
+
+
+def _dot_to_nd_shape(shape, fractal, is_lhs):
+    """A fractal operand's ND shape; lhs -> [M,K], rhs -> [K,N]. 2D is already ND.
+
+    Both operands use the zN fractal (non-transpose): A [M,K] <-> [K1,M1,16,b]
+    and B [K,N] <-> [N1,K1,16,b]. In each the two logical dims are
+    [d1*d2, d0*d3] (block rows on d2, block cols on d3)."""
+    if not (fractal and len(shape) == 4):
+        return [shape[0], shape[1]]
+    return [shape[1] * shape[2], shape[0] * shape[3]]
+
+
+def _check_dot_fractal_block(name, shape, is_lhs, dtype):
+    """Validate an nZ operand's trailing block [.., block_row, block_col].
+
+    block_col must equal 32 / elem_bytes. block_row must be 16, except for int8
+    where the cube fractal is per-operand: a non-transpose left operand is 16
+    and a non-transpose right operand is 32.
+    """
+    elem_bytes = dtype.primitive_bitwidth // 8
+    expected_col = 32 // elem_bytes
+    block_row = _unwrap_if_constexpr(shape[-2])
+    block_col = _unwrap_if_constexpr(shape[-1])
+
+    if block_col != expected_col:
+        raise ValueError(f"dot nZ operand `{name}`: block col dim is {block_col}, expected "
+                         f"{expected_col} (= 32 / {elem_bytes} bytes per {dtype} element)")
+
+    if elem_bytes != 1:
+        if block_row != 16:
+            raise ValueError(f"dot nZ operand `{name}`: block row dim is {block_row}, expected 16")
+        return
+
+    if block_row not in (16, 32):
+        raise ValueError(f"dot int8 nZ operand `{name}`: block row dim is {block_row}, expected 16 or 32")
+    if not is_lhs and block_row == 16:
+        raise ValueError(f"dot int8 right operand `{name}`: block row dim is 16, but a non-transpose "
+                         f"`{name}` needs 32 (block [32,32], i.e. zN[N/32, K/32, 32, 32]); a [16,32] "
+                         f"block forces an unsupported layout conversion in the backend")
+
+
+def _dot_operand_is_fractal(name, fmt):
+    """Resolve operand ``name``'s layout from its ``format_*`` string:
+
+      ``"fractal"``             -> fractal (zN)
+      ``"nd"`` / ``""`` / unset -> non-fractal (ND)
+      anything else             -> ValueError
+    """
+    fmt = _unwrap_if_constexpr(fmt)
+    if fmt is None or fmt == "" or fmt == "nd":
+        return False
+    if fmt == "fractal":
+        return True
+    raise ValueError(f"dot `{name}`: format must be 'fractal', 'nd', or '' "
+                     f"(empty/unset = non-fractal ND); got {fmt!r}")
+
+
+@builtin
+def dot(a: tl.tensor, b: tl.tensor, format_a="", format_b="", format_c="", _semantic=None) -> tl.tensor:
+    """
+    Matrix multiply ``D = A * B`` with per-operand layout format.
+
+    ``format_a`` / ``format_b`` / ``format_c`` select each operand's layout:
+      - ``"fractal"``: zN fractal (4D)
+      - ``"nd"`` / ``""`` / unset: ND (non-fractal, 2D)
+      - any other value raises ``ValueError``.
+
+    zN convention (non-transpose, block [16, b], b = 32 / elem_bytes):
+        A [M,K] <-> [K1, M1, 16, b]      (ND = [d1*d2, d0*d3])
+        B [K,N] <-> [N1, K1, 16, b]      (ND = [d1*d2, d0*d3])
+        C [M,N] <-> [N1, M1, 16, 16]     (L0C accumulator, block 16x16)
+
+    :param a: left matrix A (2D ND, or 4D fractal when ``format_a="fractal"``).
+    :param b: right matrix B (2D ND, or 4D fractal when ``format_b="fractal"``).
+    :param format_a: layout of A: "fractal" | "nd" | "" (default ND).
+    :param format_b: layout of B: "fractal" | "nd" | "" (default ND).
+    :param format_c: layout of D: "fractal" | "nd" | "" (default ND).
+
+    :return: D = A * B (fractal 4D if ``format_c="fractal"`` else 2D ND).
+    :rtype: tensor
+    """
+    fractal_a = _dot_operand_is_fractal("a", format_a)
+    fractal_b = _dot_operand_is_fractal("b", format_b)
+    fractal_c = _dot_operand_is_fractal("c", format_c)
+
+    for name, operand, is_frac, is_lhs in (("a", a, fractal_a, True), ("b", b, fractal_b, False)):
+        if not isinstance(operand, tl.tensor):
+            raise TypeError(f"dot operand `{name}` must be a tensor, got {type(operand)}")
+        if len(operand.shape) not in (2, 4):
+            raise ValueError(f"dot operand `{name}` must be 2D (ND) or 4D (fractal zN), "
+                             f"got rank {len(operand.shape)}")
+        if is_frac and len(operand.shape) == 4:
+            _check_dot_fractal_block(name, operand.shape, is_lhs, operand.dtype)
+
+    # cube mmad requires both inputs share the element dtype (the output takes
+    # the accumulator dtype separately, see semantic.dot).
+    if a.dtype != b.dtype:
+        raise TypeError(f"dot operands must have the same dtype, got {a.dtype} and {b.dtype}")
+
+    a_nd = _dot_to_nd_shape([_unwrap_if_constexpr(s) for s in a.shape], fractal_a, True)
+    b_nd = _dot_to_nd_shape([_unwrap_if_constexpr(s) for s in b.shape], fractal_b, False)
+    m, n = a_nd[0], b_nd[1]
+    # The result carries the cube accumulator dtype (f32/i32, see semantic.dot);
+    # fractal_c is the L0C accumulator fractal, whose block is 16x16.
+    output_shape = [n // 16, m // 16, 16, 16] if fractal_c else [m, n]
+
+    return semantic.dot(a, b, fractal_a, fractal_b, fractal_c, output_shape, _semantic=_semantic)

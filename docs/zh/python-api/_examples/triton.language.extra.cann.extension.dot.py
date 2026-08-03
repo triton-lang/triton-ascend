@@ -42,7 +42,7 @@ def test_dot_a_fractal():
     b_npu = b_nd.npu()
     out_npu = torch.empty(M, N, dtype=torch.float16).npu()
 
-    dot_fractal_a_kernel[(1,)](a_npu, b_npu, out_npu, M, N, K)
+    dot_fractal_a_kernel[(1, )](a_npu, b_npu, out_npu, M, N, K)
 
     gold = torch.mm(a_nd.to(torch.float32), b_nd.to(torch.float32)).to(torch.float16)
     torch.testing.assert_close(out_npu.cpu(), gold, rtol=1e-2, atol=1e-2)

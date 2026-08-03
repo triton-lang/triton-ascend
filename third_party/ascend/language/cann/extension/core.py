@@ -593,24 +593,20 @@ def _check_dot_fractal_block(name, shape, is_lhs, dtype):
     block_col = _unwrap_if_constexpr(shape[-1])
 
     if block_col != expected_col:
-        raise ValueError(
-            f"dot nZ operand `{name}`: block col dim is {block_col}, expected "
-            f"{expected_col} (= 32 / {elem_bytes} bytes per {dtype} element)")
+        raise ValueError(f"dot nZ operand `{name}`: block col dim is {block_col}, expected "
+                         f"{expected_col} (= 32 / {elem_bytes} bytes per {dtype} element)")
 
     if elem_bytes != 1:
         if block_row != 16:
-            raise ValueError(
-                f"dot nZ operand `{name}`: block row dim is {block_row}, expected 16")
+            raise ValueError(f"dot nZ operand `{name}`: block row dim is {block_row}, expected 16")
         return
 
     if block_row not in (16, 32):
-        raise ValueError(
-            f"dot int8 nZ operand `{name}`: block row dim is {block_row}, expected 16 or 32")
+        raise ValueError(f"dot int8 nZ operand `{name}`: block row dim is {block_row}, expected 16 or 32")
     if not is_lhs and block_row == 16:
-        raise ValueError(
-            f"dot int8 right operand `{name}`: block row dim is 16, but a non-transpose "
-            f"`{name}` needs 32 (block [32,32], i.e. zN[N/32, K/32, 32, 32]); a [16,32] "
-            f"block forces an unsupported layout conversion in the backend")
+        raise ValueError(f"dot int8 right operand `{name}`: block row dim is 16, but a non-transpose "
+                         f"`{name}` needs 32 (block [32,32], i.e. zN[N/32, K/32, 32, 32]); a [16,32] "
+                         f"block forces an unsupported layout conversion in the backend")
 
 
 def _dot_operand_is_fractal(name, fmt):
@@ -625,15 +621,12 @@ def _dot_operand_is_fractal(name, fmt):
         return False
     if fmt == "fractal":
         return True
-    raise ValueError(
-        f"dot `{name}`: format must be 'fractal', 'nd', or '' "
-        f"(empty/unset = non-fractal ND); got {fmt!r}")
+    raise ValueError(f"dot `{name}`: format must be 'fractal', 'nd', or '' "
+                     f"(empty/unset = non-fractal ND); got {fmt!r}")
 
 
 @builtin
-def dot(a: tl.tensor, b: tl.tensor,
-        format_a="", format_b="", format_c="",
-        _semantic=None) -> tl.tensor:
+def dot(a: tl.tensor, b: tl.tensor, format_a="", format_b="", format_c="", _semantic=None) -> tl.tensor:
     """
     Matrix multiply ``D = A * B`` with per-operand layout format.
 

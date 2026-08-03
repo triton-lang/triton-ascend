@@ -798,7 +798,8 @@ CONSTRAINTS = {
             "Fractal block_row must be 16; for int8 the right operand requires 32 (zN[N/32, K/32, 32, 32]).",
             "Output dtype: f32 for float inputs, i32 for int8 (cube L0C accumulator dtype).",
         ],
-        "example": "triton.language.extra.cann.extension.dot",
+        "example":
+        "triton.language.extra.cann.extension.dot",
     },
     "triton.language.split": {
         "constraints": [

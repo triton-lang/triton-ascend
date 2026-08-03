@@ -196,8 +196,8 @@ def conv1d(input_tensor: tl.tensor, weight_tensor: tl.tensor, bias: Union[tl.ten
     return tl.tensor(out, output_ty)
 
 
-def dot(a: tl.tensor, b: tl.tensor, fractal_a: bool, fractal_b: bool, fractal_c: bool,
-        output_shape, _semantic=None) -> tl.tensor:
+def dot(a: tl.tensor, b: tl.tensor, fractal_a: bool, fractal_b: bool, fractal_c: bool, output_shape,
+        _semantic=None) -> tl.tensor:
     # Go through `_ascend_builder` explicitly rather than the unified-builder
     # allow-list (builder.py:setup_unified_builder): `create_dot` collides with
     # upstream `ir.builder.create_dot`, so attaching it to the main builder

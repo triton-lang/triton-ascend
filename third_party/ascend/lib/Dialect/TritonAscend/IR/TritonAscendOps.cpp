@@ -43,10 +43,11 @@ void StrideLoadOp::getEffects(
 //-- DotOp --
 // Fractal (zN) block geometry (kFractalBlock / kDotAccIntWidth) comes from
 // Utils.h, shared with DotConverter's lowering.
-LogicalResult DotOp::inferReturnTypes(
-    MLIRContext *context, std::optional<Location> location, ValueRange operands,
-    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
-    SmallVectorImpl<Type> &inferredReturnTypes) {
+LogicalResult
+DotOp::inferReturnTypes(MLIRContext *context, std::optional<Location> location,
+                        ValueRange operands, DictionaryAttr attributes,
+                        OpaqueProperties properties, RegionRange regions,
+                        SmallVectorImpl<Type> &inferredReturnTypes) {
   DotOpAdaptor adaptor(operands, attributes, properties, regions);
   auto aTy = dyn_cast<RankedTensorType>(adaptor.getA().getType());
   auto bTy = dyn_cast<RankedTensorType>(adaptor.getB().getType());
@@ -68,9 +69,10 @@ LogicalResult DotOp::inferReturnTypes(
   // for int8), not the input dtype. fractal_c produces the L0C accumulator
   // fractal, whose block is 16x16 regardless of dtype.
   Type inElemTy = aTy.getElementType();
-  Type accTy = isa<IntegerType>(inElemTy)
-                   ? static_cast<Type>(IntegerType::get(context, kDotAccIntWidth))
-                   : static_cast<Type>(Float32Type::get(context));
+  Type accTy =
+      isa<IntegerType>(inElemTy)
+          ? static_cast<Type>(IntegerType::get(context, kDotAccIntWidth))
+          : static_cast<Type>(Float32Type::get(context));
   SmallVector<int64_t> resShape{m, n};
   if (adaptor.getFractalC())
     // ND [M,N] -> zN accumulator [N1, M1, 16, 16].

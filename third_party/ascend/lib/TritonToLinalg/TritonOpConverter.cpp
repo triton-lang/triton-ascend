@@ -2285,9 +2285,10 @@ static Value dotFractalToND(ConversionPatternRewriter &rewriter, Location loc,
       /*output_shape=*/ValueRange{});
 }
 
-// If `v` is a freshly-loaded buffer used only here -- to_tensor of an alloc with
-// a single writer copy (the load) -- return that load copy so its DMA can be
-// retargeted into the padded buffer (one copy, not load-then-copy); else null.
+// If `v` is a freshly-loaded buffer used only here -- to_tensor of an alloc
+// with a single writer copy (the load) -- return that load copy so its DMA can
+// be retargeted into the padded buffer (one copy, not load-then-copy); else
+// null.
 static memref::CopyOp findRedirectableLoad(Value v) {
   auto toTensor = v.getDefiningOp<bufferization::ToTensorOp>();
   if (!toTensor || v.hasNUsesOrMore(2))
@@ -2337,8 +2338,8 @@ static Value zeroPadDimTo(Value v, int64_t dim, int64_t target,
   // Allocate the padded buffer and zero-fill it.
   auto paddedMemTy = MemRefType::get(paddedShape, elemTy);
   Value padded = rewriter.create<memref::AllocOp>(loc, paddedMemTy);
-  Value zero = rewriter.create<arith::ConstantOp>(
-      loc, rewriter.getZeroAttr(elemTy));
+  Value zero =
+      rewriter.create<arith::ConstantOp>(loc, rewriter.getZeroAttr(elemTy));
   rewriter.create<linalg::FillOp>(loc, ValueRange{zero}, ValueRange{padded});
 
   // Subview covering the real (unpadded) region, then fill it with one copy.
@@ -2385,10 +2386,10 @@ reconcileDotContractionK(triton::ascend::DotOp op, Value &a, Value &b,
   int64_t paddedK = std::max(kA, kB), shortK = std::min(kA, kB);
   int64_t blockK = nzBlockCol(elemTy);
   if (paddedK % blockK != 0 || paddedK - shortK >= blockK)
-    return op.emitError() << "dot: contraction dim mismatch (A K=" << kA
-                          << ", B K=" << kB
-                          << ") is larger than fractal padding; pad the operand "
-                             "explicitly";
+    return op.emitError()
+           << "dot: contraction dim mismatch (A K=" << kA << ", B K=" << kB
+           << ") is larger than fractal padding; pad the operand "
+              "explicitly";
   op.emitWarning() << "dot: auto zero-padding the non-fractal operand's K from "
                    << shortK << " to " << paddedK
                    << " to match the fractal operand's block-aligned K";

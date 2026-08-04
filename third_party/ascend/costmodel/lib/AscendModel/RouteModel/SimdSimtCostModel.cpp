@@ -2524,15 +2524,16 @@ mlir::ascend::estimateSimdSimtCandidates(
 
   report.breakdown.simdSetupCycles = profile.simdSetupCycles;
   report.breakdown.simtSetupCycles = profile.simtSetupCycles;
-  report.breakdown.simdIssuePayloadCycles =
+    report.breakdown.simdIssuePayloadCycles =
       std::max(report.breakdown.simdComputeCycles +
-                   report.breakdown.simdDotCycles,
-               report.breakdown.simdMemoryCycles);
-  report.breakdown.simtIssuePayloadCycles =
-      std::max(report.breakdown.simtComputeCycles +
-                   report.breakdown.simtShuffleCycles +
-                   report.breakdown.simtDotCycles,
-               report.breakdown.simtMemoryCycles) +
+             report.breakdown.simdDotCycles,
+           report.breakdown.simdMemoryCycles);
+    // For SIMT, treat compute and memory as interleaved/serial: sum them.
+    report.breakdown.simtIssuePayloadCycles =
+      report.breakdown.simtComputeCycles +
+      report.breakdown.simtShuffleCycles +
+      report.breakdown.simtDotCycles +
+      report.breakdown.simtMemoryCycles +
       report.breakdown.simtPredicateCycles;
   report.breakdown.programIssueScale = profile.programIssueScale;
   report.breakdown.simdAnalyticalCycles =

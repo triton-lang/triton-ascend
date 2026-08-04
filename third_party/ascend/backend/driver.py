@@ -452,8 +452,7 @@ def make_launcher(constants, signature, metadata):
                           lock_init_val if hasattr(metadata, 'lock_init_val') else 0)
     lock_num = int(metadata.lock_num) \
                           if hasattr(metadata, 'lock_num') else -1
-    has_unordered_sync_block_lock = bool(getattr(
-        metadata, "has_unordered_sync_block_lock", False))
+    has_unordered_sync_block_lock = bool(getattr(metadata, "has_unordered_sync_block_lock", False))
     unordered_sync_block_lock_stride_i64 = (1 + 2 * 1024) * 8
     # Zero the sync_block_lock buffer ON THE COMPUTE STREAM.
     if has_unordered_sync_block_lock and lock_num > 0:
@@ -470,15 +469,13 @@ def make_launcher(constants, signature, metadata):
                    reinterpret_cast<void *>(lockInitData.data()),
                    syncBlockLockSize, RT_MEMCPY_HOST_TO_DEVICE);"""
     elif lock_init_value == 0:
-        lock_init_stmt = (
-            "ret = rtMemsetAsync(syncBlockLock_ptr, syncBlockLockSize, 0, "
-            "syncBlockLockSize, stream);")
+        lock_init_stmt = ("ret = rtMemsetAsync(syncBlockLock_ptr, syncBlockLockSize, 0, "
+                          "syncBlockLockSize, stream);")
     else:
-        lock_init_stmt = (
-            f"std::vector<int64_t> lockInitData({lock_num}, {lock_init_value});\n"
-            "    ret = rtMemcpy(syncBlockLock_ptr, syncBlockLockSize, "
-            "reinterpret_cast<void *>(lockInitData.data()), syncBlockLockSize, "
-            "RT_MEMCPY_HOST_TO_DEVICE);")
+        lock_init_stmt = (f"std::vector<int64_t> lockInitData({lock_num}, {lock_init_value});\n"
+                          "    ret = rtMemcpy(syncBlockLock_ptr, syncBlockLockSize, "
+                          "reinterpret_cast<void *>(lockInitData.data()), syncBlockLockSize, "
+                          "RT_MEMCPY_HOST_TO_DEVICE);")
     bs_task_type = metadata.bs_task_type if hasattr(metadata, 'bs_task_type') else 0
     mix_mode = metadata.mix_mode
     compile_on_910_95 = metadata.compile_on_910_95

@@ -96,14 +96,14 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
           pm.addPass(mlir::triton::createTritonToHFusionPass(compileOn91095));
         });
 
-  m.def("add_discrete_mask_access_conversion", [](mlir::PassManager &pm,
-                                                  bool compileOn91095,
-                                                  bool forceSimtTemplate) {
-    DiscreteMaskAccessConversionOptions opts;
-    opts.compileOn91095 = compileOn91095;
-    opts.forceSimtTemplate = forceSimtTemplate;
-    pm.addPass(mlir::triton::createDiscreteMaskAccessConversionPass(opts));
-  });
+  m.def("add_discrete_mask_access_conversion",
+        [](mlir::PassManager &pm, bool compileOn91095, bool forceSimtTemplate) {
+          DiscreteMaskAccessConversionOptions opts;
+          opts.compileOn91095 = compileOn91095;
+          opts.forceSimtTemplate = forceSimtTemplate;
+          pm.addPass(
+              mlir::triton::createDiscreteMaskAccessConversionPass(opts));
+        });
 
   m.def("add_triton_to_hivm", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::createTritonToHIVMPass());

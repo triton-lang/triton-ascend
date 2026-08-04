@@ -395,8 +395,7 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
     # Force disable auto tile and bind subblock if attribute is present in module
     metadata["auto_tile_and_bind_subblock"] = not re.search(DISABLE_AUTO_TILE_AND_BIND_SUBBLOCK_REGEX, linalg)
     # Turn off auto-blockify only for the ORDERED (token-ring) sync_block_lock:
-    if re.search(SYNC_BLOCK_LOCK_REGEX, linalg) and not re.search(
-            r"sync_block_lock_unordered", linalg):
+    if re.search(SYNC_BLOCK_LOCK_REGEX, linalg) and not re.search(r"sync_block_lock_unordered", linalg):
         metadata["has_auto_blockify_blacklist_op"] = True
     # The unordered (Bakery) discrete-mask lock cannot coexist with CV sub-tiling
     # (auto-bind-sub-block)

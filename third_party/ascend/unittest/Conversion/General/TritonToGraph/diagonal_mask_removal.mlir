@@ -21,11 +21,11 @@ tt.func public @diagonal_forward_sub_diagonal(%arg0: !tt.ptr<f32> {tt.divisibili
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = false} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<16x16xf32>
@@ -69,11 +69,11 @@ tt.func public @diagonal_reverse_super_diagonal(%arg0: !tt.ptr<f32> {tt.divisibi
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = true} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = true}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<16x16xf32>
@@ -117,11 +117,11 @@ tt.func public @diagonal_integer_cumsum(%arg0: !tt.ptr<i32> {tt.divisibility = 1
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<i32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<i32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = false} : (tensor<16xi32>) -> tensor<16xi32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = false}> ({
   ^bb0(%a: i32, %b: i32):
     %s = arith.addi %a, %b : i32
     tt.scan.return %s : i32
-  }
+  }) : (tensor<16xi32>) -> tensor<16xi32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
   %bcast = tt.broadcast %expd : tensor<1x16xi32> -> tensor<16x16xi32>
@@ -165,11 +165,11 @@ tt.func public @diagonal_offset_before_expand_dims(%arg0: !tt.ptr<f32> {tt.divis
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = false} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<16x16xf32>
@@ -214,11 +214,11 @@ tt.func public @diagonal_offset_on_kept_side(%arg0: !tt.ptr<f32> {tt.divisibilit
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = false} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<16x16xf32>
@@ -262,11 +262,11 @@ tt.func public @diagonal_non_zero_range_start(%arg0: !tt.ptr<f32> {tt.divisibili
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = false} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<16x16xf32>
@@ -318,11 +318,11 @@ tt.func public @diagonal_batched_scan(%arg0: !tt.ptr<f32> {tt.divisibility = 16 
   %src_ptr = tt.addptr %src_base, %offset : tensor<4x16x!tt.ptr<f32>>, tensor<4x16xi32>
   %x = tt.load %src_ptr : tensor<4x16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 1 : i32, reverse = false} : (tensor<4x16xf32>) -> tensor<4x16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 1 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<4x16xf32>) -> tensor<4x16xf32>
 
   %expd = tt.expand_dims %scan {axis = 1 : i32} : tensor<4x16xf32> -> tensor<4x1x16xf32>
   %bcast = tt.broadcast %expd : tensor<4x1x16xf32> -> tensor<4x16x16xf32>
@@ -367,11 +367,11 @@ tt.func public @diagonal_skip_shift_of_two(%arg0: !tt.ptr<f32> {tt.divisibility 
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = false} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<16x16xf32>
@@ -415,11 +415,11 @@ tt.func public @diagonal_skip_range_start_breaks_unit_shift(%arg0: !tt.ptr<f32> 
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = false} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<16x16xf32>
@@ -462,11 +462,11 @@ tt.func public @diagonal_skip_direction_mismatch(%arg0: !tt.ptr<f32> {tt.divisib
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = true} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = true}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<16x16xf32>
@@ -509,11 +509,11 @@ tt.func public @diagonal_skip_non_zero_fill(%arg0: !tt.ptr<f32> {tt.divisibility
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = false} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<16x16xf32>
@@ -556,11 +556,11 @@ tt.func public @diagonal_skip_max_reduce(%arg0: !tt.ptr<f32> {tt.divisibility = 
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = false} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<16x16xf32>
@@ -603,11 +603,11 @@ tt.func public @diagonal_skip_wrong_reduce_axis(%arg0: !tt.ptr<f32> {tt.divisibi
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = false} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<16x16xf32>
@@ -659,11 +659,11 @@ tt.func public @diagonal_skip_replicated_dim_not_adjacent(%arg0: !tt.ptr<f32> {t
   %src_ptr = tt.addptr %src_base, %offset : tensor<16x16x!tt.ptr<f32>>, tensor<16x16xi32>
   %x = tt.load %src_ptr : tensor<16x16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 1 : i32, reverse = false} : (tensor<16x16xf32>) -> tensor<16x16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 1 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16x16xf32>) -> tensor<16x16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16x16xf32> -> tensor<1x16x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16x16xf32> -> tensor<16x16x16xf32>
@@ -708,11 +708,11 @@ tt.func public @diagonal_skip_non_square(%arg0: !tt.ptr<f32> {tt.divisibility = 
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = false} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<8x16xf32>
@@ -755,11 +755,11 @@ tt.func public @diagonal_skip_slt_predicate(%arg0: !tt.ptr<f32> {tt.divisibility
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = false} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<16x16xf32>
@@ -801,11 +801,11 @@ tt.func public @diagonal_skip_mul_scan(%arg0: !tt.ptr<f32> {tt.divisibility = 16
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = false} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.mulf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<16x16xf32>
@@ -849,11 +849,11 @@ tt.func public @diagonal_disabled_by_rule_mask(%arg0: !tt.ptr<f32> {tt.divisibil
   %src_ptr = tt.addptr %src_base, %range : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %x = tt.load %src_ptr : tensor<16x!tt.ptr<f32>>
 
-  %scan = tt.scan %x {axis = 0 : i32, reverse = false} : (tensor<16xf32>) -> tensor<16xf32> {
+  %scan = "tt.scan"(%x) <{axis = 0 : i32, reverse = false}> ({
   ^bb0(%a: f32, %b: f32):
     %s = arith.addf %a, %b : f32
     tt.scan.return %s : f32
-  }
+  }) : (tensor<16xf32>) -> tensor<16xf32>
 
   %expd = tt.expand_dims %scan {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
   %bcast = tt.broadcast %expd : tensor<1x16xf32> -> tensor<16x16xf32>

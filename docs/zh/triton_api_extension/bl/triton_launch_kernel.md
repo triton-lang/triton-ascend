@@ -61,7 +61,7 @@ void triton_launch_kernel(
 
 函数内部将所有发射参数组装到一段连续的 `std::vector<char> launch_args` 中，按以下顺序布局（各槽位按对齐要求偏移）：
 
-```
+```bash
 [ffts_addr] → [syncBlockLock_ptr] → [workspace_addr_ptr] →
 [kernel_arg_0] [kernel_arg_1] ... [kernel_arg_N-1] →
 [gridX] [gridY] [gridZ] →
@@ -91,7 +91,7 @@ void triton_launch_kernel(
 
 此路径**不经过** `triton_launch_kernel`，是 Triton 的标准调用方式：
 
-```
+```bash
 用户代码:  kernel[grid](args...)
   │
   ▼
@@ -115,7 +115,7 @@ rtKernelLaunch() → NPU 硬件执行
 
 面向需要 C 级别 kernel 发射的场景：
 
-```
+```bash
 第三方 C/C++ 代码
   │  dlopen / dlsym 获取 triton_launch_kernel 符号
   │  或直接链接 launcher stub .so
@@ -210,7 +210,7 @@ void launch_kernel_via_stub(
 }
 ```
 
-> **说明：** 示例中的 `func` 参数是 CANN runtime 注册后的 kernel function handle，获取方式（`rtDevBinaryRegister` / `rtFunctionRegister`）属于 CANN runtime 标准流程。当前仓内 `npu_utils.cpp` 中的 `loadKernelBinary` / `registerKernel` 函数提供了 Python 侧的封装实现，具体 API 签名请以 CANN 头文件（`runtime/kernel.h`）为准。关于这些辅助函数是否可作为公开 API 文档化，请参见[待确认事项](#待确认事项)。
+> **说明：** 示例中的 `func` 参数是 CANN runtime 注册后的 kernel function handle，获取方式（`rtDevBinaryRegister` / `rtFunctionRegister`）属于 CANN runtime 标准流程。当前仓内 `npu_utils.cpp` 中的 `loadKernelBinary` / `registerKernel` 函数提供了 Python 侧的封装实现，具体 API 签名请以 CANN 头文件（`runtime/kernel.h`）为准。
 
 ### 6.2 Python ctypes 示例
 

@@ -23,7 +23,6 @@ Triton-Ascend是面向昇腾平台构建的Triton编译框架，旨在让Triton�
 Tag遵循以下格式：<br/>
 `{triton-ascend版本}-{CANN版本}-{torch_npu版本}-{适用产品}-<操作系统>-<python版本>`
 
-
 | 字段              | 示例值                        |
 |-----------------|----------------------------|
 | triton-ascend版本 | 3.2.1                      |
@@ -97,7 +96,7 @@ quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntu22.04-py3.11
 docker build \
 --network host \
 --build-arg TARGETPLATFORM=linux/arm64 \
--t triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntun22.04-py3.11-aarch64 \
+-t triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntu22.04-py3.11-aarch64 \
 -f Dockerfile .
 ```
 
@@ -107,7 +106,7 @@ docker build \
 docker build \
 --network host \
 --build-arg TARGETPLATFORM=linux/amd64 \
--t triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntun22.04-py3.11-x86_64 \
+-t triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntu22.04-py3.11-x86_64 \
 -f Dockerfile .
 ```
 

@@ -61,7 +61,7 @@ The function iterates over `kernel_args` and `arg_sizes`, copying each argument 
 
 The function assembles all launch arguments into a contiguous `std::vector<char> launch_args` buffer with the following layout (each slot aligned per its alignment requirement):
 
-```
+```bash
 [ffts_addr] → [syncBlockLock_ptr] → [workspace_addr_ptr] →
 [kernel_arg_0] [kernel_arg_1] ... [kernel_arg_N-1] →
 [gridX] [gridY] [gridZ] →
@@ -91,7 +91,7 @@ Depends on the `TRITON_ENABLE_TASKQUEUE` environment variable (default `"true"`)
 
 This path does **not** go through `triton_launch_kernel`. It is the standard Triton invocation flow:
 
-```
+```bash
 User code:   kernel[grid](args...)
   │
   ▼
@@ -115,7 +115,7 @@ rtKernelLaunch() → NPU hardware execution
 
 For scenarios requiring C-level kernel launch:
 
-```
+```bash
 Third-party C/C++ code
   │  dlopen / dlsym to obtain triton_launch_kernel symbol
   │  or directly link against launcher stub .so
@@ -211,7 +211,7 @@ void launch_kernel_via_stub(
 }
 ```
 
-> **Note:** The `func` parameter in this example is a kernel function handle registered via CANN runtime. The registration flow (`rtDevBinaryRegister` / `rtFunctionRegister`) is standard CANN runtime procedure — consult the CANN header (`runtime/kernel.h`) for exact API signatures. The `loadKernelBinary` / `registerKernel` functions in `npu_utils.cpp` provide Python-side wrappers. Whether these helper functions may be documented as public API is a pending decision — see [Pending Items](#pending-items).
+> **Note:** The `func` parameter in this example is a kernel function handle registered via CANN runtime. The registration flow (`rtDevBinaryRegister` / `rtFunctionRegister`) is standard CANN runtime procedure — consult the CANN header (`runtime/kernel.h`) for exact API signatures. The `loadKernelBinary` / `registerKernel` functions in `npu_utils.cpp` provide Python-side wrappers.
 
 ### 6.2 Python ctypes Example
 

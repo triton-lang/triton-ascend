@@ -362,7 +362,7 @@ def masked_fill(inp, expand_mask, value):
 
 ### 为什么会出现UBSIZE超出内存的错误
 
-切分不合理,存在过多的非对齐访存或者运算，例如对（64，32）二维数据搬运，对应stride(12832，128),如果是对齐数据的访存，对应的stride(32,1)。 对于非对齐访问内容，在最内轴新增一个大小为1的轴，变为（64，32，4） 由于硬件要求vector算子场景ub内存32bytes对齐 ，假设type=float16，对应stride应该为(12832, 128,1)
+切分不合理,存在过多的非对齐访存或者运算，例如对（64，32）二维数据搬运，对应stride(12832，128),如果是对齐数据的访存，对应的stride(32,1)。对于非对齐访问内容，在最内轴新增一个大小为1的轴，变为（64，32，4）由于硬件要求vector算子场景ub内存32Byte对齐，假设type=float16，对应stride应该为(12832, 128,1)
 
 ### 离散访存代码逐行对比观察scalar低效映射
 
@@ -372,8 +372,8 @@ def masked_fill(inp, expand_mask, value):
 bishengir-compile xxx.ttadapter --target=Ascend910B3 --enable-auto-multi-buffer=True --enable-hfusion-compile=true --enable-hivm-compile=true --enable-triton-kernel-compile=true --hivm-compile-args=bishengir-print-ir-after=hivm-inject-sync
 ```
 
-会有输出IR ， 对比Triton 算子逻辑与IR内部的操作，观察是否有未映射成指令的操作。
-观察HIVM IR阶段是否存在纯scalar搬运或者计算， 没有映射为simd指令，这会成为性能瓶颈。
+会有输出IR，对比Triton 算子逻辑与IR内部的操作，观察是否有未映射成指令的操作。
+观察HIVM IR阶段是否存在纯scalar搬运或者计算，没有映射为simd指令，这会成为性能瓶颈。
 
 问题：离散访存 && scalar低效映射
 b[1024, 32] = a[1024, 32]  Triton原先写法利用thread的方式 对[1024,32] 中的最低维度32绑定线程块, 再对1024切16，分为[64， 16， 32]，再对64绑定线程块

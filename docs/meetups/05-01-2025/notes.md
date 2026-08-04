@@ -91,11 +91,11 @@ Speaker: Adnan Aziz (Meta)
   * Tutorials for users: writing triton code, kernel profilers
   * Panel of triton users: power users and new users.
   * Keren: academic/scientific domains. Physicists are using triton for simulations. Broader HPC.
-  * Jason: EVO and mosaic talks (embracing sharing). Cutlass dsl, we should be learning form them.
+  * Jason: EVO and mosaic talks (embracing sharing). Cutlass dsl, we should be learning from them.
   * Cicie: do we have proposal submission process? No. We had a compressed timeframe-10 weeks. Some proposals didn't make it due to time.
 * Please give us feedback.
 * We promised to give Microsoft feedback to the process.
-* Triton summit will try to colocate with PyTorch conference.  Probably at the Mosconi Center in SF (but still needs to be verified from Microsoft).
+* Triton summit will try to colocate with PyTorch conference. Probably at the Mosconi Center in SF (but still needs to be verified from Microsoft).
 * What is Microsoft's timeline/plans?
 
 ### Minutes

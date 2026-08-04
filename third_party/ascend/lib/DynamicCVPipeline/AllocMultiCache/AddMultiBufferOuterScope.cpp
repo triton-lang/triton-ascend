@@ -15,6 +15,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/IRMapping.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/FlagIdManager.h"
@@ -27,6 +28,10 @@ static constexpr const char *DEBUG_TYPE = "AddMultiBufferOuterScope";
 using namespace mlir;
 using namespace triton;
 using namespace hivm;
+using namespace CVPipeline;
+
+// Local constexpr for attrs not (yet) in Utils.h
+static constexpr llvm::StringLiteral kCrossBuffer = "ssbuffer.cross_buffer";
 
 namespace mlir {
 namespace triton {
@@ -51,13 +56,13 @@ static int getFlagFromSyncOp(Operation *op) {
 }
 
 static int getBlockId(Operation *op) {
-  if (auto attr = op->getAttrOfType<IntegerAttr>(mlir::CVPipeline::kBlockId))
+  if (auto attr = op->getAttrOfType<IntegerAttr>(kBlockId))
     return attr.getInt();
   return -1;
 }
 
 static int getTransferId(Operation *op) {
-  if (auto attr = op->getAttrOfType<IntegerAttr>(mlir::CVPipeline::kTransferId))
+  if (auto attr = op->getAttrOfType<IntegerAttr>(kTransferId))
     return attr.getInt();
   return -1;
 }
@@ -76,28 +81,11 @@ static bool isInVectorScope(Operation *op) {
 
 // --- main_loop attribute helpers ---
 
-/// Check if forOp (or its terminator) has ssbuffer.main_loop attribute
-static bool forOpHasMainLoopAttr(scf::ForOp forOp) {
-  if (forOp->hasAttr("ssbuffer.main_loop")) {
-    return true;
-  }
-  Operation *terminator = forOp.getBody()->getTerminator();
-  return terminator && terminator->hasAttr("ssbuffer.main_loop");
-}
-
 /// Check if a sync op's direct parent has ssbuffer.main_loop attribute
 static bool parentOpHasMainLoopAttr(Operation *syncOp) {
-  if (!syncOp) {
+  if (!syncOp)
     return false;
-  }
-  Operation *parent = syncOp->getParentOp();
-  if (!parent) {
-    return false;
-  }
-  if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
-    return forOpHasMainLoopAttr(forOp);
-  }
-  return false;
+  return isMainLoopOp(syncOp->getParentOp());
 }
 
 // --- Operation search helpers ---
@@ -172,7 +160,7 @@ static int
 collectOpsByTransferId(ModuleOp module,
                        DenseMap<int, SmallVector<Operation *>> &opsByTid) {
   module.walk([&](Operation *op) {
-    if (!op->hasAttr(mlir::CVPipeline::kTransferId)) {
+    if (!op->hasAttr(kTransferId)) {
       return;
     }
     int tid = getTransferId(op);
@@ -196,37 +184,84 @@ collectOpsByTransferId(ModuleOp module,
   return 0;
 }
 
-/// Collect alloc/mark pairs (independent of block_id and main_loop)
+/// Collect alloc/mark pairs from transfer ops in the group.
+/// Identifies the correct cross-core buffer (ub/cbuf) used by each transfer op,
+/// ignoring local buffers (cc on CUBE side) that are not part of the data transfer.
 static int collectBufferAllocs(const SmallVector<Operation *> &ops,
-                               BufferAllocInfo &info) {
-  SmallVector<Operation *> allocs;
-  SmallVector<Operation *> marks;
+                               TransferGroupInfo &info) {
+  // Helper: find the annotation.mark for a given alloc op
+  auto findMarkForAlloc = [](Operation *allocOp) -> Operation * {
+    Value allocResult = allocOp->getResult(0);
+    for (auto *user : allocResult.getUsers()) {
+      if (isa<annotation::MarkOp>(user))
+        return user;
+    }
+    return nullptr;
+  };
 
-  for (Operation *op : ops) {
-    if (isa<memref::AllocOp>(op)) {
-      allocs.push_back(op);
-    } else if (isa<annotation::MarkOp>(op)) {
-      marks.push_back(op);
+  // Identify sender's cross-core buffer from transferOp's outs operand
+  if (info.senderChain.transferOp) {
+    Operation *transferOp = info.senderChain.transferOp;
+    // fixpipe / hir.copy: cross-core buffer is the last operand (outs)
+    Value crossCoreBuf =
+        transferOp->getOperand(transferOp->getNumOperands() - 1);
+    if (auto *defOp = crossCoreBuf.getDefiningOp()) {
+      if (isa<memref::AllocOp>(defOp)) {
+        info.senderBuf.allocOp = defOp;
+        info.senderBuf.markOp = findMarkForAlloc(defOp);
+        LDBG("Sender cross-core buffer: alloc from transferOp outs");
+      }
     }
   }
 
-  LDBG("collectBufferAllocs: allocs=" << allocs.size()
-                                      << ", marks=" << marks.size());
-
-  // Pair in order: sender first, receiver second
-  if (!allocs.empty()) {
-    info.sender.allocOp = allocs[0];
-  }
-  if (allocs.size() > 1) {
-    info.receiver.allocOp = allocs[1];
-  }
-  if (!marks.empty()) {
-    info.sender.markOp = marks[0];
-  }
-  if (marks.size() > 1) {
-    info.receiver.markOp = marks[1];
+  // Identify receiver's cross-core buffer from transferOp's input operand
+  if (info.receiverChain.transferOp) {
+    Operation *transferOp = info.receiverChain.transferOp;
+    // memref.memory_space_cast / hivm.convert_layout: cross-core buffer is
+    // the first operand
+    Value crossCoreBuf = transferOp->getOperand(0);
+    if (auto *defOp = crossCoreBuf.getDefiningOp()) {
+      if (isa<memref::AllocOp>(defOp)) {
+        info.receiverBuf.allocOp = defOp;
+        info.receiverBuf.markOp = findMarkForAlloc(defOp);
+        LDBG("Receiver cross-core buffer: alloc from transferOp input");
+      }
+    }
   }
 
+  // Collect alloc/mark for the OTHER side if not yet found.
+  // Some transfer ops (e.g. fixpipe) have both a local input (cc) and a
+  // cross-core output (ub). The receiver side's buffer is the cross-core one.
+  // Walk all allocs in the group to find any remaining unassigned buffer.
+  SmallVector<Operation *> allocs;
+  SmallVector<Operation *> marks;
+  for (Operation *op : ops) {
+    if (isa<memref::AllocOp>(op))
+      allocs.push_back(op);
+    else if (isa<annotation::MarkOp>(op))
+      marks.push_back(op);
+  }
+
+  // Fill missing side from remaining allocs (prefer allocs with marks)
+  for (auto *allocOp : allocs) {
+    if (allocOp == info.senderBuf.allocOp || allocOp == info.receiverBuf.allocOp)
+      continue;
+    Operation *mark = findMarkForAlloc(allocOp);
+    if (!info.senderBuf.allocOp) {
+      info.senderBuf.allocOp = allocOp;
+      info.senderBuf.markOp = mark;
+    } else if (!info.receiverBuf.allocOp) {
+      info.receiverBuf.allocOp = allocOp;
+      info.receiverBuf.markOp = mark;
+    }
+  }
+
+  LDBG("Sender buffer: " << (info.senderBuf.allocOp ? "alloc" : "none")
+                          << " + "
+                          << (info.senderBuf.markOp ? "mark" : "none"));
+  LDBG("Receiver buffer: " << (info.receiverBuf.allocOp ? "alloc" : "none")
+                            << " + "
+                            << (info.receiverBuf.markOp ? "mark" : "none"));
   return 0;
 }
 
@@ -234,7 +269,7 @@ static int collectBufferAllocs(const SmallVector<Operation *> &ops,
 static int collectLoadStoreOpsByTransferId(
     ModuleOp module, DenseMap<int, SmallVector<Operation *>> &loadStoreByTid) {
   module.walk([&](Operation *op) {
-    if (!op->hasAttr(mlir::CVPipeline::kTransferId)) {
+    if (!op->hasAttr(kTransferId)) {
       return;
     }
     int tid = getTransferId(op);
@@ -265,7 +300,7 @@ static int tagLoadStoreOpsWithCrossDeps(
         Value ptr = storeOp.getOperand(1);
         if (auto *ptrDefOp = ptr.getDefiningOp()) {
           ptrDefOp->setAttr(
-              mlir::CVPipeline::kCrossCoreDeps,
+              kCrossCoreDeps,
               builder.getArrayAttr({builder.getI32IntegerAttr(tid),
                                     builder.getI32IntegerAttr(1)}));
           LDBG("Tagged ptr-defining-op with crossDeps={tid=" << tid << ", 1}");
@@ -273,7 +308,7 @@ static int tagLoadStoreOpsWithCrossDeps(
       } else if (auto loadOp = dyn_cast<mlir::LLVM::LoadOp>(op)) {
         // consumer: crossDeps = {tid, 0}
         // Tag the load op itself
-        op->setAttr(mlir::CVPipeline::kCrossCoreDeps,
+        op->setAttr(kCrossCoreDeps,
                     builder.getArrayAttr({builder.getI32IntegerAttr(tid),
                                           builder.getI32IntegerAttr(0)}));
         LDBG("Tagged llvm.load volatile with crossDeps={tid=" << tid << ", 0}");
@@ -394,20 +429,7 @@ static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
 
   LDBG("Building group tid=" << tid << ", ops=" << ops.size());
 
-  // 1. Collect buffer alloc/mark pairs
-  BufferAllocInfo bufInfo;
-  if (collectBufferAllocs(ops, bufInfo)) {
-    return -1;
-  }
-  info.senderBuf = bufInfo.sender;
-  info.receiverBuf = bufInfo.receiver;
-  LDBG("Sender buffer: " << (info.senderBuf.allocOp ? "alloc" : "none") << " + "
-                         << (info.senderBuf.markOp ? "mark" : "none"));
-  LDBG("Receiver buffer: " << (info.receiverBuf.allocOp ? "alloc" : "none")
-                           << " + "
-                           << (info.receiverBuf.markOp ? "mark" : "none"));
-
-  // 2. Determine original flag
+  // 1. Determine original flag
   for (Operation *op : ops) {
     if ((isa<hivm::SyncBlockSetOp>(op) || isa<hivm::SyncBlockWaitOp>(op))) {
       int f = getFlagFromSyncOp(op);
@@ -418,7 +440,7 @@ static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
     }
   }
 
-  // 3. Collect extra sync (parent has no main_loop)
+  // 2. Collect extra sync (parent has no main_loop)
   ExtraSyncInfo extraInfo;
   if (collectExtraSync(ops, info.originalFlag, extraInfo)) {
     return -1;
@@ -433,7 +455,7 @@ static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
     LDBG("Extra sync: not found");
   }
 
-  // 4. Collect transfer chain (parent has main_loop)
+  // 3. Collect transfer chain (parent has main_loop)
   TransferChainInfo chainInfo;
   if (collectTransferChains(ops, info.originalFlag, chainInfo)) {
     return -1;
@@ -441,7 +463,7 @@ static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
   info.senderChain = chainInfo.sender;
   info.receiverChain = chainInfo.receiver;
 
-  // 5. Determine direction
+  // 4. Determine direction
   if (info.senderChain.transferOp) {
     if (isa<hivm::FixpipeOp>(info.senderChain.transferOp)) {
       info.isCtoV = true;
@@ -450,10 +472,12 @@ static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
     }
   }
 
-  // For C→V transfer, sender uses receiver's buffer (the second alloc)
-  if (info.isCtoV && info.senderBuf.allocOp && info.receiverBuf.allocOp) {
-    LDBG("C→V transfer: swapping sender/receiver buffers");
-    std::swap(info.senderBuf, info.receiverBuf);
+  // 5. Collect buffer alloc/mark pairs from transfer ops
+  //    Must run after transfer chain collection to identify the correct
+  //    cross-core buffer (ub/cbuf) from each transfer op's operands,
+  //    ignoring local buffers (e.g. cc on CUBE side).
+  if (collectBufferAllocs(ops, info)) {
+    return -1;
   }
 
   // 6. Acquire output flag
@@ -565,9 +589,9 @@ static int createOutputBufferPair(Operation *inputAllocOp, int tid, int tcbId,
 
   builder.setInsertionPointAfter(inputAllocOp);
   auto outputAlloc = builder.create<memref::AllocOp>(loc, memRefType);
-  outputAlloc->setAttr(mlir::CVPipeline::kBlockId,
+  outputAlloc->setAttr(kBlockId,
                        builder.getI32IntegerAttr(outputBlockId));
-  outputAlloc->setAttr(mlir::CVPipeline::kTransferId,
+  outputAlloc->setAttr(kTransferId,
                        builder.getI32IntegerAttr(tid));
   outputBuffer = outputAlloc.getResult();
 
@@ -579,9 +603,9 @@ static int createOutputBufferPair(Operation *inputAllocOp, int tid, int tcbId,
 
   auto outputMark = builder.create<annotation::MarkOp>(loc, outputBuffer);
   outputMark->setAttr("effects", builder.getStrArrayAttr({"write", "read"}));
-  outputMark->setAttr(mlir::CVPipeline::kBlockId,
+  outputMark->setAttr(kBlockId,
                       builder.getI32IntegerAttr(outputBlockId));
-  outputMark->setAttr(mlir::CVPipeline::kTransferId,
+  outputMark->setAttr(kTransferId,
                       builder.getI32IntegerAttr(tid));
   outputMark->setAttr(
       "hivm.tightly_coupled_buffer",
@@ -596,11 +620,11 @@ static constexpr unsigned kBits32 = 32;
 
 static int attachSsbufferTags(Operation *op, int blockId, int transferId) {
   MLIRContext *ctx = op->getContext();
-  op->setAttr(mlir::CVPipeline::kBlockId,
+  op->setAttr(kBlockId,
               IntegerAttr::get(IntegerType::get(ctx, kBits32), blockId));
-  op->setAttr(mlir::CVPipeline::kTransferId,
+  op->setAttr(kTransferId,
               IntegerAttr::get(IntegerType::get(ctx, kBits32), transferId));
-  op->setAttr("ssbuffer.analyze_flag_id", UnitAttr::get(ctx));
+  op->setAttr(kAnalyzeFlagId, UnitAttr::get(ctx));
   return 0;
 }
 
@@ -716,13 +740,13 @@ static int addConsumerCrossDepsTags(TransferGroupInfo &g, ModuleOp module) {
 
   if (consumerBuf.allocOp) {
     consumerBuf.allocOp->setAttr(
-        mlir::CVPipeline::kCrossCoreDeps,
+        kCrossCoreDeps,
         builder.getArrayAttr(
             {builder.getI32IntegerAttr(g.tid), builder.getI32IntegerAttr(1)}));
   }
   if (consumerChain.transferOp) {
     consumerChain.transferOp->setAttr(
-        mlir::CVPipeline::kCrossCoreDeps,
+        kCrossCoreDeps,
         builder.getArrayAttr(
             {builder.getI32IntegerAttr(g.tid), builder.getI32IntegerAttr(0)}));
   }
@@ -736,9 +760,90 @@ static int addConsumerCrossDepsTags(TransferGroupInfo &g, ModuleOp module) {
 /// Set ssbuffer tags on an op
 static int setSsbufferTags(Operation *op, OpBuilder &builder, int blockId,
                            int tid) {
-  op->setAttr(mlir::CVPipeline::kBlockId, builder.getI32IntegerAttr(blockId));
-  op->setAttr(mlir::CVPipeline::kTransferId, builder.getI32IntegerAttr(tid));
+  op->setAttr(kBlockId, builder.getI32IntegerAttr(blockId));
+  op->setAttr(kTransferId, builder.getI32IntegerAttr(tid));
   return 0;
+}
+
+/// Ensure a WhileOp has an i32 iteration counter loop-carried variable.
+/// Returns the counter Value; polling condition is (counter % 2) == 0.
+/// Uses the Builder callback API, matching InnerScope's setupWhileIterArgCounter.
+/// Reuses an existing counter (e.g. one injected by InnerScope, detected via
+/// kIterCounter); injects a new one only when absent.
+static Value ensureWhileOpHasCounter(scf::WhileOp whileOp) {
+  if (whileOp->hasAttr(kIterCounter)) {
+    Block &after = whileOp.getAfter().front();
+    return after.getArgument(after.getNumArguments() - 1);
+  }
+
+  OpBuilder builder(whileOp);
+  Location loc = whileOp.getLoc();
+  auto oldWhile = whileOp;
+  Type i32Type = builder.getI32Type();
+
+  // Init counter = 0
+  Value zero = builder.create<arith::ConstantIntOp>(loc, 0, 32);
+
+  SmallVector<Value> newInits(oldWhile.getInits());
+  newInits.push_back(zero);
+  SmallVector<Type> newResultTypes(oldWhile.getResultTypes());
+  newResultTypes.push_back(i32Type);
+
+  Value counterIterArg;
+
+  // Use Builder callback API (matching InnerScope setupWhileIterArgCounter)
+  auto newWhile = builder.create<scf::WhileOp>(
+      loc, newResultTypes, newInits,
+      [&](OpBuilder &bb, Location bl, ValueRange iterArgs) {
+        Block *oldBefore = oldWhile.getBeforeBody();
+        unsigned n = oldBefore->getNumArguments();
+        IRMapping map;
+        for (unsigned i = 0; i < n; ++i)
+          map.map(oldBefore->getArgument(i), iterArgs[i]);
+
+        for (Operation &op : oldBefore->without_terminator())
+          bb.clone(op, map);
+
+        auto oldCond = cast<scf::ConditionOp>(oldBefore->getTerminator());
+        SmallVector<Value> condArgs;
+        for (Value a : oldCond.getArgs())
+          condArgs.push_back(map.lookupOrDefault(a));
+        condArgs.push_back(iterArgs[n]); // counter
+        bb.create<scf::ConditionOp>(bl, map.lookupOrDefault(oldCond.getCondition()),
+                                    condArgs);
+      },
+      [&](OpBuilder &ab, Location al, ValueRange iterArgs) {
+        Block *oldAfter = oldWhile.getAfterBody();
+        unsigned n = oldAfter->getNumArguments();
+        counterIterArg = iterArgs[n];
+        IRMapping map;
+        for (unsigned i = 0; i < n; ++i)
+          map.map(oldAfter->getArgument(i), iterArgs[i]);
+
+        for (Operation &op : oldAfter->without_terminator())
+          ab.clone(op, map);
+
+        auto oldYield = cast<scf::YieldOp>(oldAfter->getTerminator());
+        Value one = ab.create<arith::ConstantIntOp>(al, 1, 32);
+        Value nextCounter = ab.create<arith::AddIOp>(al, counterIterArg, one);
+        SmallVector<Value> yOps;
+        for (Value v : oldYield.getOperands())
+          yOps.push_back(map.lookupOrDefault(v));
+        yOps.push_back(nextCounter);
+        ab.create<scf::YieldOp>(al, yOps);
+      });
+
+  // Copy attrs and mark as processed
+  for (auto attr : oldWhile->getAttrs())
+    newWhile->setAttr(attr.getName(), attr.getValue());
+  newWhile->setAttr(kIterCounter, builder.getUnitAttr());
+
+  // Replace results (exclude counter result)
+  for (unsigned i = 0, e = oldWhile.getNumResults(); i < e; ++i)
+    oldWhile.getResult(i).replaceAllUsesWith(newWhile.getResult(i));
+  oldWhile.erase();
+
+  return counterIterArg;
 }
 
 /// Create polling condition: (iter / step) % 2 == 0 (true=input, false=output)
@@ -784,9 +889,9 @@ static Operation *wrapSyncOpWithScfIf(
   Location loc = op->getLoc();
   auto ifOp = builder.create<scf::IfOp>(loc, TypeRange{}, cond,
                                         true /* withElseRegion */);
-  ifOp->setAttr(mlir::CVPipeline::kBlockId,
+  ifOp->setAttr(kBlockId,
                 builder.getI32IntegerAttr(getBlockId(op)));
-  ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
+  ifOp->setAttr(kCrossBuffer, builder.getI32IntegerAttr(1));
 
   // then branch: clone original op
   auto thenBuilder = ifOp.getThenBodyBuilder();
@@ -800,18 +905,18 @@ static Operation *wrapSyncOpWithScfIf(
   int bid = getBlockId(op);
   int tid = getTransferId(op);
   if (bid >= 0) {
-    cloned->setAttr(mlir::CVPipeline::kBlockId, builder.getI32IntegerAttr(bid));
-    altOp->setAttr(mlir::CVPipeline::kBlockId, builder.getI32IntegerAttr(bid));
+    cloned->setAttr(kBlockId, builder.getI32IntegerAttr(bid));
+    altOp->setAttr(kBlockId, builder.getI32IntegerAttr(bid));
   }
   if (tid >= 0) {
-    cloned->setAttr(mlir::CVPipeline::kTransferId,
+    cloned->setAttr(kTransferId,
                     builder.getI32IntegerAttr(tid));
-    altOp->setAttr(mlir::CVPipeline::kTransferId,
+    altOp->setAttr(kTransferId,
                    builder.getI32IntegerAttr(tid));
   }
-  if (op->hasAttr("ssbuffer.analyze_flag_id")) {
-    cloned->setAttr("ssbuffer.analyze_flag_id", builder.getUnitAttr());
-    altOp->setAttr("ssbuffer.analyze_flag_id", builder.getUnitAttr());
+  if (op->hasAttr(kAnalyzeFlagId)) {
+    cloned->setAttr(kAnalyzeFlagId, builder.getUnitAttr());
+    altOp->setAttr(kAnalyzeFlagId, builder.getUnitAttr());
   }
 
   op->replaceAllUsesWith(ifOp.getOperation());
@@ -865,14 +970,14 @@ static Operation *wrapTransferOpWithScfIfYield(Operation *transferOp,
   if (isProducer) {
     auto crossDeps = builder.getArrayAttr(
         {builder.getI32IntegerAttr(tid), builder.getI32IntegerAttr(1)});
-    thenCloned->setAttr(mlir::CVPipeline::kCrossCoreDeps, crossDeps);
-    elseCloned->setAttr(mlir::CVPipeline::kCrossCoreDeps, crossDeps);
+    thenCloned->setAttr(kCrossCoreDeps, crossDeps);
+    elseCloned->setAttr(kCrossCoreDeps, crossDeps);
   }
 
   // Tag the ifOp
-  ifOp->setAttr(mlir::CVPipeline::kBlockId, builder.getI32IntegerAttr(bid));
-  ifOp->setAttr(mlir::CVPipeline::kTransferId, builder.getI32IntegerAttr(tid));
-  ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
+  ifOp->setAttr(kBlockId, builder.getI32IntegerAttr(bid));
+  ifOp->setAttr(kTransferId, builder.getI32IntegerAttr(tid));
+  ifOp->setAttr(kCrossBuffer, builder.getI32IntegerAttr(1));
 
   // Replace all uses of the original transferOp
   for (auto [oldResult, newResult] :
@@ -921,14 +1026,14 @@ static Operation *wrapTransferOpWithScfIfSimple(Operation *transferOp,
   if (isProducer) {
     auto crossDeps = builder.getArrayAttr(
         {builder.getI32IntegerAttr(tid), builder.getI32IntegerAttr(1)});
-    thenCloned->setAttr(mlir::CVPipeline::kCrossCoreDeps, crossDeps);
-    elseCloned->setAttr(mlir::CVPipeline::kCrossCoreDeps, crossDeps);
+    thenCloned->setAttr(kCrossCoreDeps, crossDeps);
+    elseCloned->setAttr(kCrossCoreDeps, crossDeps);
   }
 
   // Tag the ifOp
-  ifOp->setAttr(mlir::CVPipeline::kBlockId, builder.getI32IntegerAttr(bid));
-  ifOp->setAttr(mlir::CVPipeline::kTransferId, builder.getI32IntegerAttr(tid));
-  ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
+  ifOp->setAttr(kBlockId, builder.getI32IntegerAttr(bid));
+  ifOp->setAttr(kTransferId, builder.getI32IntegerAttr(tid));
+  ifOp->setAttr(kCrossBuffer, builder.getI32IntegerAttr(1));
 
   transferOp->erase();
   return ifOp.getOperation();
@@ -982,17 +1087,17 @@ static Operation *wrapReceiverChainWithScfIf(Operation *transferOp,
     // from the original (which may carry [tid, 0] from upstream tagging),
     // but consumer role is owned by the ifOp wrapper below. Inner clone
     // must stay clean.
-    clonedTransfer->removeAttr(mlir::CVPipeline::kCrossCoreDeps);
+    clonedTransfer->removeAttr(kCrossCoreDeps);
     Value chainResult = clonedTransfer->getResult(0);
     auto thenMapper = inputMap;
     thenMapper.map(transferOp->getResult(0), chainResult);
     for (Operation *op : trailingOps) {
       Operation *cloned = thenBuilder.clone(*op, thenMapper);
-      cloned->removeAttr(mlir::CVPipeline::kCrossCoreDeps);
+      cloned->removeAttr(kCrossCoreDeps);
       thenMapper.map(op->getResult(0), cloned->getResult(0));
     }
     Operation *clonedToTensor = thenBuilder.clone(*toTensorOp, thenMapper);
-    clonedToTensor->removeAttr(mlir::CVPipeline::kCrossCoreDeps);
+    clonedToTensor->removeAttr(kCrossCoreDeps);
     thenBuilder.create<scf::YieldOp>(loc, clonedToTensor->getResult(0));
   }
 
@@ -1004,25 +1109,25 @@ static Operation *wrapReceiverChainWithScfIf(Operation *transferOp,
       outputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1),
                     outputBuffer);
     Operation *clonedTransfer = elseBuilder.clone(*transferOp, outputMap);
-    clonedTransfer->removeAttr(mlir::CVPipeline::kCrossCoreDeps);
+    clonedTransfer->removeAttr(kCrossCoreDeps);
     Value chainResult = clonedTransfer->getResult(0);
     auto elseMapper = outputMap;
     elseMapper.map(transferOp->getResult(0), chainResult);
     for (Operation *op : trailingOps) {
       Operation *cloned = elseBuilder.clone(*op, elseMapper);
-      cloned->removeAttr(mlir::CVPipeline::kCrossCoreDeps);
+      cloned->removeAttr(kCrossCoreDeps);
       elseMapper.map(op->getResult(0), cloned->getResult(0));
     }
     Operation *clonedToTensor = elseBuilder.clone(*toTensorOp, elseMapper);
-    clonedToTensor->removeAttr(mlir::CVPipeline::kCrossCoreDeps);
+    clonedToTensor->removeAttr(kCrossCoreDeps);
     elseBuilder.create<scf::YieldOp>(loc, clonedToTensor->getResult(0));
   }
 
   // Tag the wrapper — single source of truth for consumer role
-  ifOp->setAttr(mlir::CVPipeline::kBlockId, builder.getI32IntegerAttr(bid));
-  ifOp->setAttr(mlir::CVPipeline::kTransferId, builder.getI32IntegerAttr(tid));
-  ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
-  ifOp->setAttr(mlir::CVPipeline::kCrossCoreDeps,
+  ifOp->setAttr(kBlockId, builder.getI32IntegerAttr(bid));
+  ifOp->setAttr(kTransferId, builder.getI32IntegerAttr(tid));
+  ifOp->setAttr(kCrossBuffer, builder.getI32IntegerAttr(1));
+  ifOp->setAttr(kCrossCoreDeps,
                 builder.getArrayAttr({builder.getI32IntegerAttr(tid),
                                       builder.getI32IntegerAttr(0)}));
 
@@ -1108,24 +1213,51 @@ static int processTransferChain(TransferOpChain &chain, Value cond,
   return 0;
 }
 
+/// Create polling condition and builder for a loop op (ForOp or WhileOp).
+/// Returns the condition Value; `builderOut` is set to the insertion point
+/// for subsequent wrapping ops (before the loop terminator).
+static Value prepareLoopPolling(Operation *loopOp, Operation *waitOp,
+                                OpBuilder &builderOut) {
+  int bid = getBlockId(waitOp);
+  int tid = getTransferId(waitOp);
+
+  if (auto forOp = dyn_cast<scf::ForOp>(loopOp)) {
+    OpBuilder condBuilder(forOp.getBody(), Block::iterator(waitOp));
+    Value cond =
+        createPollingCondition(forOp, condBuilder, bid, tid);
+    builderOut.setInsertionPoint(forOp.getBody()->getTerminator());
+    return cond;
+  }
+
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp)) {
+    // Counter was already injected in preprocessing.
+    // Polling condition: (counter % 2) == 0
+    Block &after = whileOp.getAfter().front();
+    Value counter = after.getArgument(after.getNumArguments() - 1);
+    builderOut.setInsertionPoint(after.getTerminator());
+    OpBuilder condBuilder(builderOut);
+    Value c2 = condBuilder.create<arith::ConstantIntOp>(whileOp.getLoc(), 2, 32);
+    Value rem = condBuilder.create<arith::RemSIOp>(whileOp.getLoc(), counter, c2);
+    Value c0 = condBuilder.create<arith::ConstantIntOp>(whileOp.getLoc(), 0, 32);
+    return condBuilder.create<arith::CmpIOp>(
+        whileOp.getLoc(), arith::CmpIPredicate::eq, rem, c0);
+  }
+
+  llvm_unreachable("unexpected loop op type");
+}
+
 /// Add polling control flow for all transfer groups
 static int addPollingControlFlow(DenseMap<int, TransferGroupInfo> &groups) {
   for (auto &p : groups) {
     TransferGroupInfo &g = p.second;
 
-    // Get sender's scf.for
+    // Get sender's loop op (ForOp or WhileOp)
     Operation *senderWaitParent = g.senderChain.waitOp->getParentOp();
-    scf::ForOp senderForOp = cast<scf::ForOp>(senderWaitParent);
 
-    int senderBid = getBlockId(g.senderChain.waitOp);
-    int senderTid = getTransferId(g.senderChain.waitOp);
-
-    // Insert polling condition at sender waitOp's position
-    OpBuilder senderCondBuilderForInsert(senderForOp.getBody(),
-                                         Block::iterator(g.senderChain.waitOp));
-    Value senderCond = createPollingCondition(
-        senderForOp, senderCondBuilderForInsert, senderBid, senderTid);
-    OpBuilder senderBuilder(senderForOp.getBody()->getTerminator());
+    // Prepare polling condition and builder for sender loop
+    OpBuilder senderBuilder(senderWaitParent->getContext());
+    Value senderCond =
+        prepareLoopPolling(senderWaitParent, g.senderChain.waitOp, senderBuilder);
 
     // Process sender chain (isProducer=true)
     if (processTransferChain(g.senderChain, senderCond, g.senderInputBuffer,
@@ -1134,28 +1266,22 @@ static int addPollingControlFlow(DenseMap<int, TransferGroupInfo> &groups) {
       return -1;
     }
 
-    // Process receiver chain (may use different scf.for) (isProducer=false)
+    // Process receiver chain (may use different loop op) (isProducer=false)
     if (g.receiverChain.waitOp) {
       Operation *receiverWaitParent = g.receiverChain.waitOp->getParentOp();
 
       if (receiverWaitParent == senderWaitParent) {
-        // Use the same cond
+        // Use the same cond and builder
         if (processTransferChain(g.receiverChain, senderCond,
                                  g.receiverInputBuffer, g.receiverOutputBuffer,
                                  g.outputFlag, false, senderBuilder) != 0) {
           return -1;
         }
       } else {
-        // Receiver uses a different scf.for, create new cond
-        scf::ForOp receiverForOp = cast<scf::ForOp>(receiverWaitParent);
-        int receiverBid = getBlockId(g.receiverChain.waitOp);
-        int receiverTid = getTransferId(g.receiverChain.waitOp);
-        OpBuilder receiverCondBuilderForInsert(
-            receiverForOp.getBody(), Block::iterator(g.receiverChain.waitOp));
-        Value receiverCond =
-            createPollingCondition(receiverForOp, receiverCondBuilderForInsert,
-                                   receiverBid, receiverTid);
-        OpBuilder receiverBuilder(receiverForOp.getBody()->getTerminator());
+        // Receiver uses a different loop op, prepare new cond and builder
+        OpBuilder receiverBuilder(receiverWaitParent->getContext());
+        Value receiverCond = prepareLoopPolling(
+            receiverWaitParent, g.receiverChain.waitOp, receiverBuilder);
         if (processTransferChain(g.receiverChain, receiverCond,
                                  g.receiverInputBuffer, g.receiverOutputBuffer,
                                  g.outputFlag, false, receiverBuilder) != 0) {
@@ -1165,6 +1291,37 @@ static int addPollingControlFlow(DenseMap<int, TransferGroupInfo> &groups) {
     }
   }
   return 0;
+}
+
+// ============================================================================
+// Preprocessing: inject toggle iter_arg into WhileOps with main_loop
+// ============================================================================
+
+/// Inject toggle i1 loop-carried variable into every WhileOp that has
+/// main_loop and contains transfer_id ops. Must run BEFORE Step 1 so
+/// subsequent data collection sees the already-modified IR.
+static void preInjectWhileOpToggles(ModuleOp module) {
+  SmallVector<scf::WhileOp> whileOps;
+  module.walk([&](scf::WhileOp whileOp) {
+    if (!isMainLoopOp(whileOp))
+      return;
+    bool hasTransferOps = false;
+    whileOp.walk([&](Operation *op) {
+      if (op->hasAttr(kTransferId)) {
+        hasTransferOps = true;
+        return WalkResult::interrupt();
+      }
+      return WalkResult::advance();
+    });
+    if (hasTransferOps)
+      whileOps.push_back(whileOp);
+  });
+
+  for (auto whileOp : whileOps)
+    ensureWhileOpHasCounter(whileOp);
+
+  LDBG("Preprocessed " << whileOps.size()
+                        << " WhileOps with toggle injection");
 }
 
 // ============================================================================
@@ -1182,6 +1339,17 @@ void AddMultiBufferOuterScopePass::runOnOperation() {
   LDBG("[AddMultiBufferOuterScope] ENTER");
   LDBG("============================================================");
 
+  // Determine buffer mode early; only inject toggle for double-buffer
+  int interCoreBufNum = BufferCountManager(module).getBufferCountByType(
+      BufferCountManager::DepType::InterCore);
+  bool isDoubleBuf = (interCoreBufNum > 1);
+
+  // Preprocessing: inject toggle into WhileOps before data collection
+  // (only needed for double-buffer polling)
+  if (isDoubleBuf) {
+    preInjectWhileOpToggles(module);
+  }
+
   // Step 1: Collect transfer group information
   LDBG("[Step 1/3] Start: transfer group collection");
   FlagIdManager flagIdMgr(module);
@@ -1195,11 +1363,6 @@ void AddMultiBufferOuterScopePass::runOnOperation() {
   }
   LDBG("[Step 1/3] Done: " << groups.size() << " transfer groups");
 
-  int interCoreBufNum = BufferCountManager(module).getBufferCountByType(
-      BufferCountManager::DepType::InterCore);
-  bool isDoubleBuf = (interCoreBufNum > 1);
-  LDBG("[BufferCount] interCoreBufNum=" << interCoreBufNum
-                                        << " doubleBuf=" << isDoubleBuf);
   if (isDoubleBuf) {
     // Tag llvm.load/store volatile ops with crossDeps
     DenseMap<int, SmallVector<Operation *>> loadStoreByTid;

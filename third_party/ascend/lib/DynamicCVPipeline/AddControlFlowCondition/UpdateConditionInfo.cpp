@@ -19,8 +19,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
 #include <functional>
+#include <optional>
 #include <string>
 #include <type_traits>
 
@@ -34,6 +34,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Location.h"
 #include "mlir/IR/ValueRange.h"
 
@@ -89,6 +90,148 @@ static void logOutputGroupValues(llvm::StringRef label,
   LDBG(os.str());
 }
 
+// Read block id from ssbuffer.if on ifOp. Missing attr is unexpected.
+static int getIfBlockId(scf::IfOp ifOp, int &outBlockId) {
+  auto attr = ifOp->getAttrOfType<IntegerAttr>(kIf);
+  if (!attr) {
+    LDBG("ssbuffer.if missing block id on ifOp: " << ifOp << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+  outBlockId = static_cast<int>(attr.getInt());
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
+// for: body region iter args; while-do: after-region args.
+static int getLoopRegionIterArgs(Operation *loopOp,
+                                 MutableArrayRef<BlockArgument> &outArgs) {
+  if (auto forOp = dyn_cast<scf::ForOp>(loopOp)) {
+    outArgs = forOp.getRegionIterArgs();
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp)) {
+    outArgs = whileOp.getAfterArguments();
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
+  LDBG("getLoopRegionIterArgs expects scf.for or scf.while, got " << *loopOp
+                                                                  << "\n");
+  return UPDATE_CONDITION_INFO_FAILED;
+}
+
+static int getLoopRegionIterArg(Operation *loopOp, int argIdx, Value &outArg) {
+  MutableArrayRef<BlockArgument> args;
+  if (getLoopRegionIterArgs(loopOp, args) == UPDATE_CONDITION_INFO_FAILED)
+    return UPDATE_CONDITION_INFO_FAILED;
+  if (argIdx < 0 || argIdx >= static_cast<int>(args.size())) {
+    LDBG("Invalid loop region iter arg index: "
+         << argIdx << ", iter args " << args.size() << ", loopOp=" << *loopOp
+         << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+  outArg = args[argIdx];
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
+// Clone only the SSA def-chain that produces `condition` when it lives in
+// beforeRegion.
+static int cloneConditionDefChain(Value value, Region &beforeRegion,
+                                  IRMapping &mapping, OpBuilder &builder,
+                                  Value &outValue) {
+  if (Value mapped = mapping.lookupOrNull(value)) {
+    outValue = mapped;
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
+
+  if (auto blockArg = dyn_cast<BlockArgument>(value)) {
+    if (blockArg.getParentRegion() == &beforeRegion) {
+      LDBG("Before-region arg is not in whileBlockArgMap mapping: " << value
+                                                                    << "\n");
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+    outValue = value;
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
+
+  Operation *defOp = value.getDefiningOp();
+  if (!defOp) {
+    outValue = value;
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
+  // Defined outside before-region: reuse as-is (constants, outer values).
+  if (defOp->getParentRegion() != &beforeRegion) {
+    outValue = value;
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
+
+  for (Value operand : defOp->getOperands()) {
+    Value remappedOperand;
+    if (cloneConditionDefChain(operand, beforeRegion, mapping, builder,
+                               remappedOperand) == UPDATE_CONDITION_INFO_FAILED)
+      return UPDATE_CONDITION_INFO_FAILED;
+    if (!mapping.lookupOrNull(operand))
+      mapping.map(operand, remappedOperand);
+  }
+
+  Operation *cloned = builder.clone(*defOp, mapping);
+  outValue = cloned->getResult(cast<OpResult>(value).getResultNumber());
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
+// Remap scf.condition(x): clone only ops that produce x into the after region,
+// remapping before args via whileBlockArgMap[while][blockId]:
+// {new_arg_idx(after) -> old_arg_idx(before)}.
+static int buildWhileCounterCondition(
+    scf::WhileOp whileOp, scf::IfOp ifOp, ControlFlowConditionInfo *info,
+    OpBuilder &builder, const DenseMap<Value, Value> &controlVarToLatestValue,
+    Value &outCond) {
+  int blockId;
+  if (getIfBlockId(ifOp, blockId) == UPDATE_CONDITION_INFO_FAILED)
+    return UPDATE_CONDITION_INFO_FAILED;
+
+  auto whileIt = info->whileBlockArgMap.find(whileOp);
+  if (whileIt == info->whileBlockArgMap.end()) {
+    LDBG("whileBlockArgMap has no entry for whileOp=" << whileOp << ", ifOp="
+                                                      << ifOp << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+  auto blockIt = whileIt->second.find(blockId);
+  if (blockIt == whileIt->second.end()) {
+    LDBG("whileBlockArgMap has no entry for blockId "
+         << blockId << ", whileOp=" << whileOp << ", ifOp=" << ifOp << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+
+  const DenseMap<int, int> &argIdxMap = blockIt->second;
+  auto beforeArgs = whileOp.getBeforeArguments();
+  auto afterArgs = whileOp.getAfterArguments();
+
+  IRMapping mapping;
+  for (auto [newArgIdx, oldArgIdx] : argIdxMap) {
+    if (oldArgIdx < 0 || oldArgIdx >= static_cast<int>(beforeArgs.size()) ||
+        newArgIdx < 0 || newArgIdx >= static_cast<int>(afterArgs.size())) {
+      LDBG("Invalid whileBlockArgMap entry (new="
+           << newArgIdx << ", old=" << oldArgIdx << "), whileOp=" << whileOp
+           << ", ifOp=" << ifOp << "\n");
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+    Value afterArg = afterArgs[newArgIdx];
+    auto latestIt = controlVarToLatestValue.find(afterArg);
+    if (latestIt != controlVarToLatestValue.end())
+      afterArg = latestIt->second;
+    mapping.map(beforeArgs[oldArgIdx], afterArg);
+  }
+
+  // Only take condition value x from scf.condition(x);
+  scf::ConditionOp condOp = whileOp.getConditionOp();
+  Value beforeCond = condOp.getCondition();
+  if (cloneConditionDefChain(beforeCond, whileOp.getBefore(), mapping, builder,
+                             outCond) == UPDATE_CONDITION_INFO_FAILED) {
+    LDBG("Failed to remap while before-region condition expression, whileOp="
+         << whileOp << ", ifOp=" << ifOp << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
 // Allocate the SSBuffer pointer
 SmallVector<SmallVector<Value>>
 UpdateConditionInfoPass::allocSSBuffer(ModuleOp module) {
@@ -140,10 +283,10 @@ UpdateConditionInfoPass::allocSSBuffer(ModuleOp module) {
 
 // Collect dependency buffer
 void UpdateConditionInfoPass::collectDependencyBuffers(
-    ModuleOp module, SmallVector<scf::ForOp> &mainLoopForOps,
+    ModuleOp module, SmallVector<Operation *> &mainLoopOps,
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         &crossCoreBuffers,
-    DenseMap<scf::ForOp,
+    DenseMap<Operation *,
              DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>>
         &intraCoreBuffersMap) {
   // Collect crossCoreBuffers by traversing module in deterministic order
@@ -159,18 +302,18 @@ void UpdateConditionInfoPass::collectDependencyBuffers(
     return WalkResult::advance();
   });
 
-  // Collect intraCoreBuffers for all forOps
-  for (scf::ForOp forOp : mainLoopForOps) {
-    if (info->intraCoreDependentMap.count(forOp)) {
-      auto &forOpDeps = info->intraCoreDependentMap[forOp];
+  // Collect intraCoreBuffers for all main_loop for/while ops
+  for (Operation *loopOp : mainLoopOps) {
+    if (info->intraCoreDependentMap.count(loopOp)) {
+      auto &loopDeps = info->intraCoreDependentMap[loopOp];
       DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
           intraCoreBuffers;
       int intraCoreIdx = 0;
-      for (auto &entry : forOpDeps) {
+      for (auto &entry : loopDeps) {
         intraCoreBuffers[intraCoreIdx][entry.first] = entry.second;
         intraCoreIdx++;
       }
-      intraCoreBuffersMap[forOp] = intraCoreBuffers;
+      intraCoreBuffersMap[loopOp] = intraCoreBuffers;
     }
   }
 }
@@ -202,18 +345,22 @@ int addEquivalentOps(Operation *op, SmallVector<Operation *> &tcbOps,
 }
 
 int UpdateConditionInfoPass::buildIdxToVarMap(
-    scf::ForOp forOp,
+    Operation *loopOp,
     const DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         &intraCoreBuffers,
     DenseMap<int, Value> &idxToVar) {
   int varIdx = 0;
-  int iterArgNum = static_cast<int>(forOp.getNumRegionIterArgs());
+  MutableArrayRef<BlockArgument> regionIterArgs;
+  if (getLoopRegionIterArgs(loopOp, regionIterArgs) ==
+      UPDATE_CONDITION_INFO_FAILED)
+    return UPDATE_CONDITION_INFO_FAILED;
+  int iterArgNum = static_cast<int>(regionIterArgs.size());
 
-  const auto &innerDepIndices = info->innerDepConds[forOp];
+  const auto &innerDepIndices = info->innerDepConds[loopOp];
   if (innerDepIndices.size() < intraCoreBuffers.size()) {
     LDBG("Not enough inner dependency condition indices: assigned "
          << innerDepIndices.size() << ", expected " << intraCoreBuffers.size()
-         << "\n");
+         << ", loopOp=" << *loopOp << "\n");
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
@@ -222,12 +369,13 @@ int UpdateConditionInfoPass::buildIdxToVarMap(
 
     int argIdx = innerDepIndices[varIdx];
     if (argIdx < 0 || argIdx >= iterArgNum) {
-      LDBG("Invalid inner dependency arg index: " << argIdx << ", iter args "
-                                                  << iterArgNum << "\n");
+      LDBG("Invalid inner dependency arg index: "
+           << argIdx << ", iter args " << iterArgNum << ", loopOp=" << *loopOp
+           << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
-    idxToVar[idx] = forOp.getRegionIterArgs()[argIdx];
+    idxToVar[idx] = regionIterArgs[argIdx];
     LDBG("Assign intraCore buffer group " << idx << " to iter arg index "
                                           << argIdx << "\n");
     varIdx++;
@@ -367,13 +515,17 @@ int UpdateConditionInfoPass::getInputOutputValues(
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
-Value UpdateConditionInfoPass::getVarValue(scf::ForOp forOp, int varIndex) {
-  if (!info->innerDepConds.count(forOp))
+Value UpdateConditionInfoPass::getVarValue(Operation *loopOp, int varIndex) {
+  if (!info->innerDepConds.count(loopOp))
     return Value();
-  SmallVector<int> &innerDepIndices = info->innerDepConds[forOp];
+  SmallVector<int> &innerDepIndices = info->innerDepConds[loopOp];
   if (varIndex < (int)innerDepIndices.size()) {
     int argIdx = innerDepIndices[varIndex];
-    return forOp.getRegionIterArgs()[argIdx];
+    Value arg;
+    if (getLoopRegionIterArg(loopOp, argIdx, arg) ==
+        UPDATE_CONDITION_INFO_FAILED)
+      return Value();
+    return arg;
   }
   return Value();
 }
@@ -776,19 +928,19 @@ int UpdateConditionInfoPass::collectIntraCoreOutputConditions(
 }
 
 // Build the ifOp variable mapping for the tensor iter_args
-int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(scf::ForOp forOp) {
+int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(Operation *loopOp) {
   // Clear any previous data
   tensorIterArgIfOpVars.clear();
 
-  if (!info->tensorIterArgDepsMap.count(forOp) ||
-      !info->tensorIterArgIndicesMap.count(forOp)) {
-    LDBG("Skip buildTensorIterArgIfOpVarMap: no tensor iter_args info for this "
-         "forOp\n");
+  if (!info->tensorIterArgDepsMap.count(loopOp) ||
+      !info->tensorIterArgIndicesMap.count(loopOp)) {
+    LDBG("Skip buildTensorIterArgIfOpVarMap: no tensor iter_args info for "
+         << *loopOp << "\n");
     return UPDATE_CONDITION_INFO_SUCCESS;
   }
 
-  auto &depsVec = info->tensorIterArgDepsMap[forOp];
-  auto &indicesMap = info->tensorIterArgIndicesMap[forOp];
+  auto &depsVec = info->tensorIterArgDepsMap[loopOp];
+  auto &indicesMap = info->tensorIterArgIndicesMap[loopOp];
 
   llvm::DenseMap<scf::IfOp, llvm::DenseSet<Value>> producerVars;
   llvm::DenseMap<scf::IfOp, llvm::DenseSet<Value>> consumerVars;
@@ -798,22 +950,32 @@ int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(scf::ForOp forOp) {
     TensorIterArgIfOpRelation &relation = depEntry;
 
     if (!indicesMap.count(origIterArg)) {
-      LDBG("[Error]: origIterArg not found in indicesMap\n");
+      LDBG("[Error]: origIterArg not found in indicesMap, loopOp=" << *loopOp
+                                                                   << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
     SmallVector<int> &argIndices = indicesMap[origIterArg];
 
     if (relation.consumers.size() != argIndices.size()) {
       LDBG("[Error]: consumers size mismatch: "
-           << relation.consumers.size() << " vs " << argIndices.size() << "\n");
+           << relation.consumers.size() << " vs " << argIndices.size()
+           << ", loopOp=" << *loopOp << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
     // Establish a mapping (one-to-one) from consumers to variables
+    // for: region iter args; while-do: after-region args.
     llvm::DenseMap<scf::IfOp, Value> consumerToVar;
     for (size_t i = 0; i < relation.consumers.size(); ++i) {
       scf::IfOp consumer = relation.consumers[i];
-      Value var = forOp.getRegionIterArg(argIndices[i]);
+      Value var;
+      if (getLoopRegionIterArg(loopOp, argIndices[i], var) ==
+          UPDATE_CONDITION_INFO_FAILED) {
+        LDBG("[Error]: invalid tensor iter_arg index "
+             << argIndices[i] << ", loopOp=" << *loopOp
+             << ", consumer=" << consumer << "\n");
+        return UPDATE_CONDITION_INFO_FAILED;
+      }
       consumerToVar[consumer] = var;
     }
 
@@ -960,8 +1122,14 @@ int UpdateConditionInfoPass::setIntraCoreCondition(
 
 // Set the FlowOpt extra condition for the third if block in the DAG
 int UpdateConditionInfoPass::setFlowOptCondition(scf::IfOp currentIfOp,
-                                                 scf::ForOp forOp,
+                                                 Operation *loopOp,
                                                  Value &flowOptCond) {
+  auto forOp = dyn_cast<scf::ForOp>(loopOp);
+  if (!forOp) {
+    flowOptCond = nullptr;
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
+
   // Check if current ifOp is a target node (third node) in flowOptIfOpPairs
   if (!info->flowOptIfOpPairs.count(currentIfOp)) {
     LDBG("Current ifOp is not a flowOpt target node, skip.");
@@ -982,8 +1150,9 @@ int UpdateConditionInfoPass::setFlowOptCondition(scf::IfOp currentIfOp,
   scf::IfOp sourceIfOp = info->flowOptIfOpPairs[currentIfOp];
   if (!info->cntArgs.count(sourceIfOp)) {
     LDBG("[Error] Start node has no counter in cntArgs, cannot build flowOpt "
-         "condition. "
-         << "sourceIfOp: " << *sourceIfOp);
+         "condition. currentIfOp="
+         << currentIfOp << ", sourceIfOp=" << sourceIfOp << ", forOp=" << forOp
+         << "\n");
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
@@ -1089,10 +1258,9 @@ void UpdateConditionInfoPass::updateControlVarToLatestValue(scf::IfOp newIfOp,
 
 // Update the yield in the forOp
 int UpdateConditionInfoPass::updateForOpYield(scf::ForOp forOp) {
-  LDBG("Enter update forOp yield " << "\n");
   if (controlVarToLatestValue.empty()) {
-    LDBG("Failed to update forOp yield: no latest control variable values."
-         << "\n");
+    LDBG("Failed to update forOp yield: no latest control variable values, "
+         << "forOp=" << forOp << "\n");
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
@@ -1100,7 +1268,8 @@ int UpdateConditionInfoPass::updateForOpYield(scf::ForOp forOp) {
   Block *forBody = forOp.getBody();
   auto yieldOp = dyn_cast<scf::YieldOp>(forBody->getTerminator());
   if (!yieldOp) {
-    LDBG("Failed to update forOp yield: terminator is not scf.yield." << "\n");
+    LDBG("Failed to update forOp yield: terminator is not scf.yield, forOp="
+         << forOp << "\n");
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
@@ -1109,7 +1278,7 @@ int UpdateConditionInfoPass::updateForOpYield(scf::ForOp forOp) {
   if (newYieldOperands.size() != forOp.getNumRegionIterArgs()) {
     LDBG("Failed to update forOp yield: yield operands "
          << newYieldOperands.size() << ", iter args "
-         << forOp.getNumRegionIterArgs() << "\n");
+         << forOp.getNumRegionIterArgs() << ", forOp=" << forOp << "\n");
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
@@ -1124,8 +1293,8 @@ int UpdateConditionInfoPass::updateForOpYield(scf::ForOp forOp) {
     auto it = iterArgToIndex.find(origVar);
     if (it == iterArgToIndex.end()) {
       LDBG("Failed to update forOp yield: control variable is not a region "
-           "iter arg."
-           << "\n");
+           "iter arg, forOp="
+           << forOp << ", var=" << origVar << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
     newYieldOperands[it->second] = latestValue;
@@ -1137,7 +1306,130 @@ int UpdateConditionInfoPass::updateForOpYield(scf::ForOp forOp) {
   yieldOp.erase();
   LDBG("Updated forOp yield with " << controlVarToLatestValue.size()
                                    << " latest control values." << "\n");
-  LDBG("Exit update forOp yield " << "\n");
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
+int UpdateConditionInfoPass::updateWhileOpYield(scf::WhileOp whileOp) {
+  LDBG("Enter update whileOp yield " << "\n");
+  if (controlVarToLatestValue.empty()) {
+    LDBG("Skip update whileOp yield: no latest control variable values, "
+         << "whileOp=" << whileOp << "\n");
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
+
+  Location loc = whileOp.getLoc();
+  Block *afterBody = whileOp.getAfterBody();
+  auto yieldOp = dyn_cast<scf::YieldOp>(afterBody->getTerminator());
+  if (!yieldOp) {
+    LDBG("Failed to update whileOp yield: terminator is not scf.yield, "
+         << "whileOp=" << whileOp << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+
+  SmallVector<Value> newYieldOperands(yieldOp.getOperands().begin(),
+                                      yieldOp.getOperands().end());
+  auto afterArgs = whileOp.getAfterArguments();
+  if (newYieldOperands.size() != afterArgs.size()) {
+    LDBG("Failed to update whileOp yield: yield operands "
+         << newYieldOperands.size() << ", after args " << afterArgs.size()
+         << ", whileOp=" << whileOp << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+
+  DenseMap<Value, unsigned> iterArgToIndex;
+  for (auto [idx, arg] : llvm::enumerate(afterArgs))
+    iterArgToIndex[arg] = idx;
+
+  for (auto &entry : controlVarToLatestValue) {
+    Value origVar = entry.first;
+    Value latestValue = entry.second;
+    auto it = iterArgToIndex.find(origVar);
+    if (it == iterArgToIndex.end()) {
+      LDBG("Failed to update whileOp yield: control variable is not an after "
+           "region iter arg, whileOp="
+           << whileOp << ", var=" << origVar << "\n");
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+    newYieldOperands[it->second] = latestValue;
+    LDBG("Update whileOp yield operand index " << it->second << "\n");
+  }
+
+  OpBuilder yieldBuilder(yieldOp);
+  yieldBuilder.create<scf::YieldOp>(loc, newYieldOperands);
+  yieldOp.erase();
+  LDBG("Updated whileOp yield with " << controlVarToLatestValue.size()
+                                     << " latest control values." << "\n");
+  LDBG("Exit update whileOp yield " << "\n");
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
+int UpdateConditionInfoPass::updateLoopYield(Operation *loopOp) {
+  if (auto forOp = dyn_cast<scf::ForOp>(loopOp))
+    return updateForOpYield(forOp);
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp))
+    return updateWhileOpYield(whileOp);
+  LDBG("updateLoopYield expects scf.for or scf.while, got " << *loopOp << "\n");
+  return UPDATE_CONDITION_INFO_FAILED;
+}
+
+int UpdateConditionInfoPass::collectSSBufferIfOps(
+    Operation *loopOp, SmallVector<scf::IfOp> &ifOps) {
+  auto collectIfOps = [&](Operation *op) -> WalkResult {
+    if (!op->hasAttr(kIf)) {
+      return WalkResult::advance();
+    }
+
+    auto ifOp = dyn_cast<scf::IfOp>(op);
+    if (!ifOp) {
+      LDBG("Found unsupported ssbuffer if op: "
+           << op->getName() << " under loopOp=" << *loopOp << "\n");
+      return WalkResult::interrupt();
+    }
+
+    ifOps.push_back(ifOp);
+    return WalkResult::advance();
+  };
+
+  WalkResult ifWalkResult;
+  if (auto forOp = dyn_cast<scf::ForOp>(loopOp)) {
+    ifWalkResult = forOp.walk(collectIfOps);
+  } else if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp)) {
+    // while-do: only after-region.
+    ifWalkResult = whileOp.getAfterBody()->walk(collectIfOps);
+  } else {
+    LDBG("collectSSBufferIfOps expects scf.for or scf.while, got " << *loopOp
+                                                                   << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+
+  if (ifWalkResult.wasInterrupted()) {
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
+int UpdateConditionInfoPass::validateBlockCounters(Operation *loopOp,
+                                                   size_t ifOpCount) {
+  auto forOp = dyn_cast<scf::ForOp>(loopOp);
+  if (!forOp) {
+    // blockCounters / cntArgs are for-only.
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
+
+  auto counterIt = info->blockCounters.find(forOp);
+  if (counterIt == info->blockCounters.end()) {
+    LDBG("Failed to assign counters for ssbuffer if ops: no counters for "
+         << "forOp=" << forOp << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+
+  size_t counterNum = counterIt->second.size();
+  if (ifOpCount > counterNum) {
+    LDBG("Failed to assign counters for all ssbuffer if ops: if ops "
+         << ifOpCount << ", counters " << counterNum << ", forOp=" << forOp
+         << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
@@ -1234,15 +1526,11 @@ void UpdateConditionInfoPass::populateNewThenBlock(
   thenBuilder.create<scf::YieldOp>(loc, thenYieldOperands);
 }
 
-void UpdateConditionInfoPass::populateNewElseBlock(
-    scf::IfOp newIfOp, scf::IfOp oldIfOp, bool needsYield, bool oldHasElse,
-    bool hasCounter, Value counter) {
-  if (!needsYield && !oldHasElse) {
-    LDBG("Skip populating else block: no yield needed and old if has no else."
-         << "\n");
-    return;
-  }
-
+void UpdateConditionInfoPass::populateNewElseBlock(scf::IfOp newIfOp,
+                                                   scf::IfOp oldIfOp,
+                                                   bool oldHasElse,
+                                                   bool hasCounter,
+                                                   Value counter) {
   Location loc = newIfOp.getLoc();
   Block &newElseBlock = newIfOp.getElseRegion().front();
   SmallVector<Value> oldElseYieldOperands;
@@ -1260,43 +1548,40 @@ void UpdateConditionInfoPass::populateNewElseBlock(
          << oldElseYieldOperands.size() << " old else yield operands." << "\n");
   }
 
-  if (needsYield) {
-    OpBuilder elseBuilder(&newElseBlock, newElseBlock.end());
-    SmallVector<Value> elseYieldOperands;
-    for (Value operand : oldElseYieldOperands) {
-      Value newOperand = operand;
-      auto it = controlVarToLatestValue.find(operand);
-      if (it != controlVarToLatestValue.end()) {
-        newOperand = it->second;
-      }
-      elseYieldOperands.push_back(newOperand);
+  OpBuilder elseBuilder(&newElseBlock, newElseBlock.end());
+  SmallVector<Value> elseYieldOperands;
+  for (Value operand : oldElseYieldOperands) {
+    Value newOperand = operand;
+    auto it = controlVarToLatestValue.find(operand);
+    if (it != controlVarToLatestValue.end()) {
+      newOperand = it->second;
     }
+    elseYieldOperands.push_back(newOperand);
+  }
 
-    for (Value var : currentUsedVars) {
-      Value varToUse = var;
-      auto it = controlVarToLatestValue.find(var);
-      if (it != controlVarToLatestValue.end()) {
-        varToUse = it->second;
-      }
-      elseYieldOperands.push_back(varToUse);
+  for (Value var : currentUsedVars) {
+    Value varToUse = var;
+    auto it = controlVarToLatestValue.find(var);
+    if (it != controlVarToLatestValue.end()) {
+      varToUse = it->second;
     }
+    elseYieldOperands.push_back(varToUse);
+  }
 
-    if (hasCounter) {
-      Value counterToUse = counter;
-      auto it = controlVarToLatestValue.find(counter);
-      if (it != controlVarToLatestValue.end()) {
-        counterToUse = it->second;
-      }
-      elseYieldOperands.push_back(counterToUse);
+  if (hasCounter) {
+    Value counterToUse = counter;
+    auto it = controlVarToLatestValue.find(counter);
+    if (it != controlVarToLatestValue.end()) {
+      counterToUse = it->second;
     }
+    elseYieldOperands.push_back(counterToUse);
+  }
 
-    LDBG("Create else yield with " << elseYieldOperands.size() << " operands."
-                                   << "\n");
-    elseBuilder.create<scf::YieldOp>(loc, elseYieldOperands);
-  } else if (oldElseYieldOp) {
+  LDBG("Create else yield with " << elseYieldOperands.size() << " operands."
+                                 << "\n");
+  elseBuilder.create<scf::YieldOp>(loc, elseYieldOperands);
+  if (oldElseYieldOp) {
     oldElseYieldOp->erase();
-    LDBG("Erase old else yield because new if does not need yield values."
-         << "\n");
   }
 }
 
@@ -1310,9 +1595,12 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(
 
   bool needsYield = !currentUsedVars.empty() || hasCounter;
   bool oldHasElse = oldIfOp.getElseRegion().hasOneBlock();
+  // Only create else when we will populate it;
+  bool withElse = needsYield || oldHasElse;
   LDBG("Create replacement if op: needs yield "
-       << needsYield << ", old has else " << oldHasElse
-       << ", current used vars " << currentUsedVars.size() << "." << "\n");
+       << needsYield << ", old has else " << oldHasElse << ", with else "
+       << withElse << ", current used vars " << currentUsedVars.size() << "."
+       << "\n");
 
   Block &oldThenBlock = oldIfOp.getThenRegion().front();
   Operation *oldThenYieldOp = nullptr;
@@ -1321,7 +1609,7 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(
   SmallVector<Type> resultTypes =
       buildNewIfResultTypes(oldIfOp, hasCounter, counter);
   scf::IfOp newIfOp =
-      builder.create<scf::IfOp>(loc, resultTypes, combinedCond, true);
+      builder.create<scf::IfOp>(loc, resultTypes, combinedCond, withElse);
   LDBG("Created replacement if op with " << resultTypes.size() << " results."
                                          << "\n");
 
@@ -1331,8 +1619,9 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(
 
   populateNewThenBlock(newIfOp, oldThenBlock, oldThenYieldOp, oldYieldOperands,
                        varUpdateTypes, hasCounter, counter, step);
-  populateNewElseBlock(newIfOp, oldIfOp, needsYield, oldHasElse, hasCounter,
-                       counter);
+  if (withElse) {
+    populateNewElseBlock(newIfOp, oldIfOp, oldHasElse, hasCounter, counter);
+  }
 
   for (size_t i = 0; i < oldIfOp.getNumResults(); ++i) {
     oldIfOp.getResult(i).replaceAllUsesWith(newIfOp.getResult(i));
@@ -1346,12 +1635,13 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(
 // condition + flowOpt condition
 int UpdateConditionInfoPass::combineConditions(
     ModuleOp module, Value crossCoreCond, Value intraCoreCond,
-    Value flowOptCond, scf::IfOp ifOp, scf::ForOp forOp, size_t &usedCounterNum,
-    DenseMap<Value, VarUpdateType> &varUpdateTypes) {
+    Value flowOptCond, scf::IfOp ifOp, Operation *loopOp,
+    size_t &usedCounterNum, DenseMap<Value, VarUpdateType> &varUpdateTypes) {
   Location loc = ifOp.getLoc();
   SmallVector<Value> validConditions;
   Value counter;
-  bool hasCounter = false;
+  // Only for updates counter args inside if then  (+step).
+  bool updateCounterArg = false;
 
   if (crossCoreCond) {
     validConditions.push_back(crossCoreCond);
@@ -1363,55 +1653,74 @@ int UpdateConditionInfoPass::combineConditions(
     validConditions.push_back(flowOptCond);
   }
 
-  if (!info->blockCounters.count(forOp)) {
-    LDBG("Missing block counters for forOp." << "\n");
-    return UPDATE_CONDITION_INFO_FAILED;
-  }
+  auto forOp = dyn_cast<scf::ForOp>(loopOp);
+  auto whileOp = dyn_cast<scf::WhileOp>(loopOp);
+  OpBuilder condBuilder(ifOp);
 
-  SmallVector<int> &counterIndices = info->blockCounters[forOp];
-
-  if (info->cntArgs.count(ifOp)) {
-    counter = info->cntArgs[ifOp];
-    hasCounter = true;
-  } else {
-    if (usedCounterNum >= counterIndices.size()) {
-      LDBG("Not enough counters for ssbuffer if ops: used "
-           << usedCounterNum << ", counters " << counterIndices.size() << "\n");
+  if (forOp) {
+    if (!info->blockCounters.count(forOp)) {
+      LDBG("Missing block counters for forOp=" << forOp << ", ifOp=" << ifOp
+                                               << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
-    int argIdx = counterIndices[usedCounterNum];
-    int iterArgNum = static_cast<int>(forOp.getNumRegionIterArgs());
-    if (argIdx < 0 || argIdx >= iterArgNum) {
-      LDBG("Invalid counter arg index: " << argIdx << ", iter args "
-                                         << iterArgNum << "\n");
-      return UPDATE_CONDITION_INFO_FAILED;
+    SmallVector<int> &counterIndices = info->blockCounters[forOp];
+
+    if (info->cntArgs.count(ifOp)) {
+      counter = info->cntArgs[ifOp];
+      updateCounterArg = true;
+    } else {
+      if (usedCounterNum >= counterIndices.size()) {
+        LDBG("Not enough counters for ssbuffer if ops: used "
+             << usedCounterNum << ", counters " << counterIndices.size()
+             << ", forOp=" << forOp << ", ifOp=" << ifOp << "\n");
+        return UPDATE_CONDITION_INFO_FAILED;
+      }
+
+      int argIdx = counterIndices[usedCounterNum];
+      int iterArgNum = static_cast<int>(forOp.getNumRegionIterArgs());
+      if (argIdx < 0 || argIdx >= iterArgNum) {
+        LDBG("Invalid counter arg index: " << argIdx << ", iter args "
+                                           << iterArgNum << ", forOp=" << forOp
+                                           << ", ifOp=" << ifOp << "\n");
+        return UPDATE_CONDITION_INFO_FAILED;
+      }
+
+      counter = forOp.getRegionIterArgs()[argIdx];
+      updateCounterArg = true;
+      info->cntArgs[ifOp] = counter;
+      usedCounterNum++;
+      LDBG("Assign counter iter arg index " << argIdx << " to ssbuffer if op."
+                                            << "\n");
     }
 
-    counter = forOp.getRegionIterArgs()[argIdx];
-    hasCounter = true;
-    info->cntArgs[ifOp] = counter;
-    usedCounterNum++;
-    LDBG("Assign counter iter arg index " << argIdx << " to ssbuffer if op."
-                                          << "\n");
-  }
-
-  LDBG("this ifop used counter is: " << counter << "\n");
-  if (hasCounter) {
-    OpBuilder builder(ifOp);
+    LDBG("this ifop used counter is: " << counter << "\n");
     Value upperBound = forOp.getUpperBound();
     Value counterToUse = counter;
     auto latestIt = controlVarToLatestValue.find(counter);
     if (latestIt != controlVarToLatestValue.end()) {
       counterToUse = latestIt->second;
     }
-    Value counterCond = builder.create<arith::CmpIOp>(
+    Value counterCond = condBuilder.create<arith::CmpIOp>(
         loc, arith::CmpIPredicate::slt, counterToUse, upperBound);
     validConditions.push_back(counterCond);
+  } else if (whileOp) {
+    // Only add remapped scf.condition(x) expression;
+    Value counterCond;
+    if (buildWhileCounterCondition(whileOp, ifOp, info, condBuilder,
+                                   controlVarToLatestValue,
+                                   counterCond) == UPDATE_CONDITION_INFO_FAILED)
+      return UPDATE_CONDITION_INFO_FAILED;
+    validConditions.push_back(counterCond);
+  } else {
+    LDBG("Unsupported loop op for counter condition, loopOp="
+         << *loopOp << ", ifOp=" << ifOp << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
   }
 
   if (validConditions.empty()) {
-    LDBG("Failed to build any condition for ssbuffer if op." << "\n");
+    LDBG("Failed to build any condition for ssbuffer if op, ifOp="
+         << ifOp << ", loopOp=" << *loopOp << "\n");
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
@@ -1424,13 +1733,14 @@ int UpdateConditionInfoPass::combineConditions(
         builder.create<arith::AndIOp>(loc, combinedCond, validConditions[i]);
   }
 
+  Value step = updateCounterArg ? forOp.getStep() : Value();
   scf::IfOp newIfOp = createNewIfOpWithBlocks(
-      ifOp, combinedCond, varUpdateTypes, hasCounter, counter, forOp.getStep());
+      ifOp, combinedCond, varUpdateTypes, updateCounterArg, counter, step);
 
   // Update DAG nodes
   updateDAGAfterIfOpReplacement(ifOp, newIfOp);
 
-  if (hasCounter) {
+  if (updateCounterArg) {
     info->cntArgs.erase(ifOp);
     info->cntArgs[newIfOp] = counter;
   }
@@ -1444,8 +1754,8 @@ int UpdateConditionInfoPass::combineConditions(
   }
 
   // Update tensorIterArgDepsMap with new ifOp
-  if (info->tensorIterArgDepsMap.count(forOp)) {
-    auto &depsVec = info->tensorIterArgDepsMap[forOp];
+  if (info->tensorIterArgDepsMap.count(loopOp)) {
+    auto &depsVec = info->tensorIterArgDepsMap[loopOp];
     for (auto &relation : depsVec) {
       // Update producer ifOp - use pointer comparison
       if (relation.producer.getOperation() == ifOp.getOperation()) {
@@ -1460,7 +1770,7 @@ int UpdateConditionInfoPass::combineConditions(
     }
   }
 
-  updateControlVarToLatestValue(newIfOp, ifOp, hasCounter, counter);
+  updateControlVarToLatestValue(newIfOp, ifOp, updateCounterArg, counter);
 
   ifOp.erase();
   return UPDATE_CONDITION_INFO_SUCCESS;
@@ -1469,96 +1779,72 @@ int UpdateConditionInfoPass::combineConditions(
 // Update the conditions of ifOp.
 int UpdateConditionInfoPass::updateIfConds(
     ModuleOp module, SmallVector<SmallVector<Value>> ssbufferPtrs) {
-  // Walk the forOp in the module to update the conditions of ifOp
-  SmallVector<scf::ForOp> mainLoopForOps;
+  // Walk main_loop for/while ops to update the conditions of ifOp
+  SmallVector<Operation *> mainLoopOps;
   WalkResult walkResult = module.walk([&](Operation *op) -> WalkResult {
-    if (!op->hasAttr(kMainLoop)) {
+    if (CVPipeline::isMainLoopOp(op)) {
+      mainLoopOps.push_back(op);
       return WalkResult::advance();
     }
 
-    auto forOp = dyn_cast<scf::ForOp>(op);
-    if (!forOp) {
-      LDBG("Found unsupported main loop op: " << op->getName() << "\n");
+    if (op->hasAttr(kMainLoop)) {
+      LDBG("Found unsupported main loop op: " << *op << "\n");
       return WalkResult::interrupt();
     }
-    mainLoopForOps.push_back(forOp);
     return WalkResult::advance();
   });
   if (walkResult.wasInterrupted()) {
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
-  // Step0: Collect dependency buffers once outside the for loop
+  // Step0: Collect dependency buffers once outside the loop
   DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
       crossCoreBuffers;
-  DenseMap<scf::ForOp,
+  DenseMap<Operation *,
            DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>>
       intraCoreBuffersMap;
-  collectDependencyBuffers(module, mainLoopForOps, crossCoreBuffers,
+  collectDependencyBuffers(module, mainLoopOps, crossCoreBuffers,
                            intraCoreBuffersMap);
 
-  for (scf::ForOp forOp : mainLoopForOps) {
+  for (Operation *loopOp : mainLoopOps) {
     controlVarToLatestValue.clear();
-
-    // Step 0: Build the ifOp variable mapping for the tensor iter_args
-    if (buildTensorIterArgIfOpVarMap(forOp) == UPDATE_CONDITION_INFO_FAILED) {
-      return UPDATE_CONDITION_INFO_FAILED;
-    }
 
     // Step1: Get intraCoreBuffers from pre-collected map
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         intraCoreBuffers;
-    if (intraCoreBuffersMap.count(forOp)) {
-      intraCoreBuffers = intraCoreBuffersMap[forOp];
+    if (intraCoreBuffersMap.count(loopOp)) {
+      intraCoreBuffers = intraCoreBuffersMap[loopOp];
     }
 
+    // for/while requires at least one of cross/intra deps;
     if (crossCoreBuffers.empty() && intraCoreBuffers.empty()) {
-      LDBG("crossCoreBuffers and intraCoreBuffers are all empty!" << "\n");
+      LDBG("crossCoreBuffers and intraCoreBuffers are all empty! loopOp="
+           << *loopOp << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
-    // Step2:Assign a variable to each inputValue of this forOp
+    // Step2: Assign control variables (intraCore inputs / tensor iter_args)
     DenseMap<int, Value> idxToVar;
-    if (buildIdxToVarMap(forOp, intraCoreBuffers, idxToVar) ==
+    if (buildIdxToVarMap(loopOp, intraCoreBuffers, idxToVar) ==
         UPDATE_CONDITION_INFO_FAILED) {
       return UPDATE_CONDITION_INFO_FAILED;
     }
+    if (buildTensorIterArgIfOpVarMap(loopOp) == UPDATE_CONDITION_INFO_FAILED) {
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+
     size_t usedCounterNum = 0;
     SmallVector<scf::IfOp> ifOps;
-    WalkResult ifWalkResult = forOp.walk([&](Operation *op) -> WalkResult {
-      if (!op->hasAttr(kIf)) {
-        return WalkResult::advance();
-      }
-
-      auto ifOp = dyn_cast<scf::IfOp>(op);
-      if (!ifOp) {
-        LDBG("Found unsupported ssbuffer if op: " << op->getName() << "\n");
-        return WalkResult::interrupt();
-      }
-
-      ifOps.push_back(ifOp);
-      return WalkResult::advance();
-    });
-    if (ifWalkResult.wasInterrupted()) {
+    if (collectSSBufferIfOps(loopOp, ifOps) == UPDATE_CONDITION_INFO_FAILED) {
       return UPDATE_CONDITION_INFO_FAILED;
     }
-    auto counterIt = info->blockCounters.find(forOp);
-    if (counterIt == info->blockCounters.end()) {
-      LDBG("Failed to assign counters for ssbuffer if ops: no counters for "
-           "forOp."
-           << "\n");
+    if (validateBlockCounters(loopOp, ifOps.size()) ==
+        UPDATE_CONDITION_INFO_FAILED) {
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
-    size_t counterNum = counterIt->second.size();
-    if (ifOps.size() > counterNum) {
-      LDBG("Failed to assign counters for all ssbuffer if ops: if ops "
-           << ifOps.size() << ", counters " << counterNum << "\n");
-      return UPDATE_CONDITION_INFO_FAILED;
-    }
-    // Update the conditions of ifOp in this forOp.
+    // Update the conditions of ifOp in this loop op.
     for (scf::IfOp ifOp : ifOps) {
-      // Walk the ifOp in this forOp to update the conditions of ifOp
       SmallVector<int> crossCoreInputValues;
       SmallVector<int> crossCoreOutputValues;
       SmallVector<int> intraCoreInputValues;
@@ -1568,7 +1854,8 @@ int UpdateConditionInfoPass::updateIfConds(
                                crossCoreInputValues, crossCoreOutputValues,
                                intraCoreInputValues,
                                intraCoreOutputValues) != 0) {
-        LDBG("getInputOutputValues failed!" << "\n");
+        LDBG("getInputOutputValues failed! ifOp=" << ifOp << ", loopOp="
+                                                  << *loopOp << "\n");
         return UPDATE_CONDITION_INFO_FAILED;
       }
 
@@ -1577,7 +1864,8 @@ int UpdateConditionInfoPass::updateIfConds(
       if (setCrossCoreCondition(crossCoreInputValues, crossCoreOutputValues,
                                 crossCoreBuffers, ifOp, ssbufferPtrs,
                                 crossCoreCond) != 0) {
-        LDBG("setCrossCoreCondition failed!" << "\n");
+        LDBG("setCrossCoreCondition failed! ifOp=" << ifOp << ", loopOp="
+                                                   << *loopOp << "\n");
         return UPDATE_CONDITION_INFO_FAILED;
       }
       // Step4:Set the intraCore condition
@@ -1589,22 +1877,22 @@ int UpdateConditionInfoPass::updateIfConds(
           UPDATE_CONDITION_INFO_FAILED) {
         return UPDATE_CONDITION_INFO_FAILED;
       }
-      // Step5:Set the flowOpt condition
+      // Step5:Set the flowOpt condition (for only; needs lb/ub/step)
       Value flowOptCond;
-      if (setFlowOptCondition(ifOp, forOp, flowOptCond) ==
+      if (setFlowOptCondition(ifOp, loopOp, flowOptCond) ==
           UPDATE_CONDITION_INFO_FAILED) {
         return UPDATE_CONDITION_INFO_FAILED;
       }
-      // Step6:Combine the conditions: crossCore condition + intraCore condition
-      // + counter condition + flowOpt condition
+      // Step6:Combine the conditions: crossCore + intraCore + counter +
+      // flowOpt
       if (combineConditions(module, crossCoreCond, intraCoreCond, flowOptCond,
-                            ifOp, forOp, usedCounterNum,
+                            ifOp, loopOp, usedCounterNum,
                             varUpdateTypes) == UPDATE_CONDITION_INFO_FAILED) {
         return UPDATE_CONDITION_INFO_FAILED;
       }
     }
-    // Step6:Update the yield variable of the forOp
-    if (updateForOpYield(forOp) == UPDATE_CONDITION_INFO_FAILED) {
+    // Step7: Update loop yield with latest control values
+    if (updateLoopYield(loopOp) == UPDATE_CONDITION_INFO_FAILED) {
       return UPDATE_CONDITION_INFO_FAILED;
     }
   }

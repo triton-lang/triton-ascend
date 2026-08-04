@@ -280,14 +280,13 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
     if (failed(isDiscreteMask(op, mask, rewriter)))
       return failure();
 
-    op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
-
     auto ptr = op.getPtr();
     auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
     bool rankWithinIndirectFastPathLimit =
         ptrType && ptrType.getShape().size() <= 5;
-    if (!useSyncBlockLockFlag && compileOn91095Flag && forceSimtTemplateFlag &&
+    if (compileOn91095Flag && forceSimtTemplateFlag &&
         rankWithinIndirectFastPathLimit) {
+      op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
       return failure();
     }
 
@@ -364,13 +363,12 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
     if (failed(isDiscreteMask(op, mask, rewriter)))
       return failure();
 
-    op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
-
     auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
     bool rankWithinIndirectFastPathLimit =
         ptrType && ptrType.getShape().size() <= 5;
-    if (!useSyncBlockLockFlag && compileOn91095Flag && forceSimtTemplateFlag &&
+    if (compileOn91095Flag && forceSimtTemplateFlag &&
         rankWithinIndirectFastPathLimit) {
+      op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
       return failure();
     }
 

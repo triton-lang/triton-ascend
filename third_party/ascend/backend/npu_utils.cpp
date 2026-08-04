@@ -299,12 +299,12 @@ static PyObject *copyMemory(PyObject *self, PyObject *args) {
 
 #ifdef USE_TORCH_NPU
 struct RetainedTensorHandle {
-  RetainedTensorHandle(at::Tensor tensor, const char *kind, uint64_t size)
-      : tensor(std::move(tensor)), kind(kind), size(size),
+  RetainedTensorHandle(at::Tensor tensor, std::string kind, uint64_t size)
+      : tensor(std::move(tensor)), kind(std::move(kind)), size(size),
         data(const_cast<void *>(this->tensor.storage().data())) {}
 
   at::Tensor tensor;
-  const char *kind;
+  std::string kind;
   uint64_t size;
   void *data;
 };

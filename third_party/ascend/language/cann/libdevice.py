@@ -354,12 +354,16 @@ def sad(arg0, arg1, arg2, _semantic=None):
 
 @core.extern
 def ffs(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.ffs for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("int32"), ): ("__hmf_ffs_i32", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95:
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("int32"), ): ("__hmf_ffs_i32", core.dtype("int32")),
+                (core.dtype("int64"), ): ("__hmf_ffsll_i64", core.dtype("int32")),
+            }, is_pure=True, _semantic=_semantic)
+    core.static_print("livdevice.ffs for simd is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern

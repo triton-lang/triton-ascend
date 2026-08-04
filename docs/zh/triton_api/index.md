@@ -316,6 +316,19 @@ Math_Ops/sqrt_rn.md
 Math_Ops/umulhi.md
 ```
 
+## 逐元素映射操作
+
+|api|简要说明|
+|--|--|
+|[map_elementwise](./Elementwise_Ops/map_elementwise.md) | 将一个 `@triton.jit` 标记的标量函数映射到输入张量的每个元素上执行，支持在标量函数内编写 `if/elif/else` 多分支控制流和 `for` 循环，提供比 `tl.where` 更灵活的元素级计算表达能力。 |
+
+```{toctree}
+:maxdepth: 3
+:hidden:
+
+Elementwise_Ops/map_elementwise.md
+```
+
 ## 内存/指针操作
 
 |api|简要说明|

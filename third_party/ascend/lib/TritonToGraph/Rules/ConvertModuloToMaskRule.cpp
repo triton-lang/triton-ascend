@@ -442,7 +442,7 @@ LogicalResult applyCandidate(IRRewriter &rewriter,
 
   // Everything needed has been built and verified, so the observable rewrite
   // can now run without any step that could still fail.
-  for (const LoadMask &loadMask : loadMasks) {
+  for (LoadMask &loadMask : loadMasks) {
     loadMask.load.getMaskMutable().assign(loadMask.mask);
     if (loadMask.other)
       loadMask.load.getOtherMutable().assign(loadMask.other);

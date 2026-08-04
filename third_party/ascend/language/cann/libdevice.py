@@ -236,9 +236,14 @@ def pow(arg0, arg1, _semantic=None):
 
     :param arg0: The base tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg0: tl.tensor
-    :param arg1: The exponent tensor. Supported dtypes: fp32, fp16, bf16.
+    :param arg1: The exponent tensor. Supported dtypes: fp32, fp16, bf16, int32.
     :type arg1: tl.tensor
     """
+    arg0 = _semantic.to_tensor(arg0)
+    arg1 = _semantic.to_tensor(arg1)
+    if arg1.dtype == core.dtype("int32"):
+        arg1 = _semantic.cast(arg1, arg0.dtype)
+
     if triton_enable_libdevice_simt():
         return core.extern_elementwise("", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_pow_fp32", core.dtype("fp32")),

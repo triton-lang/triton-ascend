@@ -35,29 +35,29 @@ A: 不可以，只能在 Ascend NPU 硬件环境使用 Triton-Ascend
 **Q: NPU 运行结果和 PyTorch/CPU/GPU 参考结果不一致，如何排查？**
 
 A: 用例请参考 [07_accuracy_comparison_example.md](../zh/examples/07_accuracy_comparison_example.md)
-调试方法请参考 [解释器模式调试方法](./debug_guide/debugging.md#4-解释器模式)
+调试方法请参考 [解释器模式调试方法](./debug_guide/debugging.md#debug-interpreter-mode)
 
 ## 3. 错误代码与异常处理
 
 **Q: 为什么 kernel 编译时报 MLIRCompilationError？如何定位具体失败的 Pass？**
 
-A: 请参考 [编译错误调试方法](./debug_guide/debugging.md#52-编译错误调试方法)
+A: 请参考 [编译错误调试方法](./debug_guide/debugging.md#debug-compilation-error)
 
 ## 4. 调试与日志
 
 **Q: 如何开启详细日志输出？TRITON_DEBUG=1 输出在哪？**
 
-A: 可以使用 TRITON_DEBUG=1 获取详细的调试转储文件，请参考 [调试转储文件（Dump Files）](./debug_guide/debugging.md#32-调试转储文件dump-files)
+A: 可以使用 TRITON_DEBUG=1 获取详细的调试转储文件，请参考 [调试转储文件（Dump Files）](./debug_guide/debugging.md#debug-dump-files)
 
 **Q: 能否在 kernel 中打印中间张量值？tl.device_print 是否可用？**
 
-A: 可以使用 tl.device_print 打印 kernel 中的张量，请参考 [打印调试方法](./debug_guide/debugging.md#51-打印调试方法)
+A: 可以使用 tl.device_print 打印 kernel 中的张量，请参考 [打印调试方法](./debug_guide/debugging.md#debug-printing)
 
 ## 5. 开发与贡献
 
 **Q: 如何本地构建并测试 Triton-Ascend？**
 
-A: 本地构建和测试方法，请参考 [通过源码安装Triton-Ascend](./installation_guide.md#源码安装)
+A: 本地构建和测试方法，请参考 [通过源码安装Triton-Ascend](./installation_guide.md#install-from-source)
 
 **Q: 提交 PR 需要通过哪些 CI 检查？**
 

@@ -88,6 +88,8 @@ export TRITON_ALWAYS_COMPILE=1
 
 Cache verification: If you suspect that the issue is caused by the cache, delete related cache files and perform the test again.
 
+<a id="debug-dump-files"></a>
+
 ### 3.2 Dump Files
 
 You can set the environment variable **TRITON_DEBUG** to **1** to dump intermediate representation files to disks during compilation. These files are key resources for debugging compilation issues.
@@ -255,6 +257,8 @@ TTIR is converted to TTAdapter IR to adapt to the Ascend NPU architecture in the
 
 TTAdapter IR has been abstracted from Triton to adapt to the Ascend NPU format.
 
+<a id="debug-interpreter-mode"></a>
+
 ## 4 Interpreter Mode
 
 The core value of the interpreter is to **isolate hardware differences**. You can set the environment variable `TRITON_INTERPRET` to `1` to forcibly execute kernel computation on the CPU. The result of the kernel computation can be used as the benchmark for determining the NPU computation accuracy.
@@ -285,6 +289,8 @@ export TRITON_INTERPRET=0
 ```
 
 ## 5 Debugging Methods
+
+<a id="debug-printing"></a>
 
 ### 5.1 Debugging by Printing
 
@@ -404,6 +410,8 @@ Description of environment variables:
 **TRITON_DEVICE_PRINT=1**: enables runtime printing and compilation printing.
 
 **TRITON_DEBUG=1**: enables all debugging outputs (including compilation and runtime printing).
+
+<a id="debug-compilation-error"></a>
 
 ### 5.2 Compilation Error Debugging
 

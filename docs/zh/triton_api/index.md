@@ -17,14 +17,7 @@
 :maxdepth: 3
 :hidden:
 
-Extension_Ops/extract_slice.md
-Extension_Ops/insert_slice.md
-Extension_Ops/sync_block.md
-Extension_Ops/compile_hint.md
-Extension_Ops/multibuffer.md
-Extension_Ops/parallel.md
-Extension_Ops/get_element.md
-Extension_Ops/index_select_simd.md
+Extension_Ops/index.md
 ```
 
 ## 原子操作
@@ -44,14 +37,7 @@ Extension_Ops/index_select_simd.md
 :maxdepth: 3
 :hidden:
 
-Atomic_Ops/atomic_add.md
-Atomic_Ops/atomic_and.md
-Atomic_Ops/atomic_cas.md
-Atomic_Ops/atomic_max.md
-Atomic_Ops/atomic_min.md
-Atomic_Ops/atomic_or.md
-Atomic_Ops/atomic_xchg.md
-Atomic_Ops/atomic_xor.md
+Atomic_Ops/index.md
 ```
 
 ## 比较操作
@@ -69,12 +55,7 @@ Atomic_Ops/atomic_xor.md
 :maxdepth: 3
 :hidden:
 
-Comparing_Ops/eq.md
-Comparing_Ops/le.md
-Comparing_Ops/ge.md
-Comparing_Ops/lt.md
-Comparing_Ops/gt.md
-Comparing_Ops/ne.md
+Comparing_Ops/index.md
 ```
 
 ## 编译器提示操作
@@ -95,15 +76,7 @@ Comparing_Ops/ne.md
 :maxdepth: 3
 :hidden:
 
-Compiler_Hint_Ops/debug_barrier.md
-Compiler_Hint_Ops/max_constancy.md
-Compiler_Hint_Ops/max_contiguous.md
-Compiler_Hint_Ops/multiple_of.md
-Compiler_Hint_Ops/assume.md
-Extension_Ops/compile_hint.md
-Extension_Ops/multibuffer.md
-Extension_Ops/parallel.md
-Extension_Ops/sync_block.md
+Compiler_Hint_Ops/index.md
 ```
 
 ## 创建操作
@@ -121,12 +94,7 @@ Extension_Ops/sync_block.md
 :maxdepth: 3
 :hidden:
 
-Creation_Ops/arange.md
-Creation_Ops/cat.md
-Creation_Ops/full.md
-Creation_Ops/zeros.md
-Creation_Ops/zeros_like.md
-Creation_Ops/cast.md
+Creation_Ops/index.md
 ```
 
 ## 调试操作
@@ -142,10 +110,7 @@ Creation_Ops/cast.md
 :maxdepth: 3
 :hidden:
 
-Debug_Ops/static_print.md
-Debug_Ops/static_assert.md
-Debug_Ops/device_print.md
-Debug_Ops/device_assert.md
+Debug_Ops/index.md
 
 ```
 
@@ -164,12 +129,7 @@ Debug_Ops/device_assert.md
 :maxdepth: 3
 :hidden:
 
-Indexing_Ops/flip.md
-Indexing_Ops/where.md
-Indexing_Ops/swizzle2d.md
-Extension_Ops/get_element.md
-Extension_Ops/index_select_simd.md
-Indexing_Ops/gather.md
+Indexing_Ops/index.md
 ```
 
 ## 内联汇编
@@ -182,7 +142,7 @@ Indexing_Ops/gather.md
 :maxdepth: 3
 :hidden:
 
-Inline_Assembly/inline_asm_elementwise.md
+Inline_Assembly/index.md
 ```
 
 ## 迭代器
@@ -196,8 +156,7 @@ Inline_Assembly/inline_asm_elementwise.md
 :maxdepth: 3
 :hidden:
 
-Iterators/range.md
-Iterators/static_range.md
+Iterators/index.md
 ```
 
 ## 线性代数操作
@@ -211,8 +170,7 @@ Iterators/static_range.md
 :maxdepth: 3
 :hidden:
 
-Linear_Algebra_Ops/dot.md
-Linear_Algebra_Ops/dot_scaled.md
+Linear_Algebra_Ops/index.md
 ```
 
 ## 逻辑操作
@@ -233,16 +191,7 @@ Linear_Algebra_Ops/dot_scaled.md
 :maxdepth: 3
 :hidden:
 
-Logical_Ops/and.md
-Logical_Ops/or.md
-Logical_Ops/not.md
-Logical_Ops/logical_and.md
-Logical_Ops/logical_or.md
-Logical_Ops/not.md
-Logical_Ops/invert.md
-Logical_Ops/lshift.md
-Logical_Ops/rshift.md
-Logical_Ops/xor.md
+Logical_Ops/index.md
 ```
 
 ## 数学操作
@@ -284,36 +233,7 @@ Logical_Ops/xor.md
 :maxdepth: 3
 :hidden:
 
-Math_Ops/add.md
-Math_Ops/sub.md
-Math_Ops/mul.md
-Math_Ops/div.md
-Math_Ops/floordiv.md
-Math_Ops/abs.md
-Math_Ops/neg.md
-Math_Ops/cdiv.md
-Math_Ops/ceil.md
-Math_Ops/clamp.md
-Math_Ops/cos.md
-Math_Ops/div_rn.md
-Math_Ops/erf.md
-Math_Ops/exp.md
-Math_Ops/exp2.md
-Math_Ops/fdiv.md
-Math_Ops/floor.md
-Math_Ops/fma.md
-Math_Ops/log.md
-Math_Ops/log2.md
-Math_Ops/mod.md
-Math_Ops/maximum.md
-Math_Ops/minimum.md
-Math_Ops/rsqrt.md
-Math_Ops/sigmoid.md
-Math_Ops/sin.md
-Math_Ops/softmax.md
-Math_Ops/sqrt.md
-Math_Ops/sqrt_rn.md
-Math_Ops/umulhi.md
+Math_Ops/index.md
 ```
 
 ## 内存/指针操作
@@ -332,13 +252,7 @@ Math_Ops/umulhi.md
 :maxdepth: 3
 :hidden:
 
-Memory_Pointer_Ops/tl.load.md
-Memory_Pointer_Ops/tl.store.md
-Memory_Pointer_Ops/tl.make_block_ptr.md
-Memory_Pointer_Ops/tl.advance.md
-Memory_Pointer_Ops/load_tensor_descriptor.md
-Memory_Pointer_Ops/make_tensor_descriptor.md
-Memory_Pointer_Ops/store_tensor_descriptor.md
+Memory_Pointer_Ops/index.md
 ```
 
 ## 编程模型
@@ -353,8 +267,7 @@ Memory_Pointer_Ops/store_tensor_descriptor.md
 :maxdepth: 3
 :hidden:
 
-Programming_Model/program_id.md
-Programming_Model/num_programs.md
+Programming_Model/index.md
 ```
 
 ## 随机数生成
@@ -370,10 +283,7 @@ Programming_Model/num_programs.md
 :maxdepth: 3
 :hidden:
 
-Random_Number_Generation/randint4x.md
-Random_Number_Generation/randint.md
-Random_Number_Generation/rand.md
-Random_Number_Generation/randn.md
+Random_Number_Generation/index.md
 ```
 
 ## 归约操作
@@ -392,13 +302,7 @@ Random_Number_Generation/randn.md
 :maxdepth: 3
 :hidden:
 
-Reduction_Ops/argmax.md
-Reduction_Ops/argmin.md
-Reduction_Ops/max.md
-Reduction_Ops/min.md
-Reduction_Ops/reduce.md
-Reduction_Ops/sum.md
-Reduction_Ops/xor_sum.md
+Reduction_Ops/index.md
 ```
 
 ## 扫描/排序操作
@@ -415,11 +319,7 @@ Reduction_Ops/xor_sum.md
 :maxdepth: 3
 :hidden:
 
-Scan_Sort_Ops/associative_scan.md
-Scan_Sort_Ops/cumprod.md
-Scan_Sort_Ops/cumsum.md
-Scan_Sort_Ops/histogram.md
-Scan_Sort_Ops/sort.md
+Scan_Sort_Ops/index.md
 ```
 
 ## Shape操作
@@ -444,17 +344,5 @@ Scan_Sort_Ops/sort.md
 :maxdepth: 3
 :hidden:
 
-Shape_Manipulation_Ops/broadcast.md
-Shape_Manipulation_Ops/broadcast_to.md
-Shape_Manipulation_Ops/expand_dims.md
-Shape_Manipulation_Ops/interleave.md
-Shape_Manipulation_Ops/join.md
-Shape_Manipulation_Ops/permute.md
-Shape_Manipulation_Ops/ravel.md
-Shape_Manipulation_Ops/reshape.md
-Shape_Manipulation_Ops/split.md
-Shape_Manipulation_Ops/trans.md
-Shape_Manipulation_Ops/view.md
-Extension_Ops/extract_slice.md
-Extension_Ops/insert_slice.md
+Shape_Manipulation_Ops/index.md
 ```

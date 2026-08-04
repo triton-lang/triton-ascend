@@ -37,29 +37,29 @@ A: No. Triton-Ascend can be used only in the Ascend NPU hardware environment.
 **Q: How can I troubleshoot the inconsistency between the NPU running result and the PyTorch/CPU/GPU reference result?**
 
 A: For details, see [07_accuracy_comparison_example.md](../en/examples/07_accuracy_comparison_example.md).
-For details about the debugging method, see [Debugging in Interpreter Mode](./debug_guide/debugging.md#5-debugging-methods).
+For details about the debugging method, see [Debugging in Interpreter Mode](./debug_guide/debugging.md#debug-interpreter-mode).
 
 ## 3. Error Code and Exception Handling
 
 **Q: Why is the error message "MLIRCompilationError" displayed during kernel compilation? How can I locate the failed pass?**
 
-A: For details, see [Compilation Error Debugging](./debug_guide/debugging.md#52-compilation-error-debugging).
+A: For details, see [Compilation Error Debugging](./debug_guide/debugging.md#debug-compilation-error).
 
 ## 4. Debugging and Logging
 
 **Q: How can I enable detailed log output? Where is the output of TRITON_DEBUG=1?**
 
-A: You can use **TRITON_DEBUG=1** to obtain detailed dump files for debugging. For details, see [Dump Files](./debug_guide/debugging.md#32-dump-files).
+A: You can use **TRITON_DEBUG=1** to obtain detailed dump files for debugging. For details, see [Dump Files](./debug_guide/debugging.md#debug-dump-files).
 
 **Q: Can I print the intermediate tensor value in the kernel? Is tl.device_print available?**
 
-A: You can use tl.device_print to print the tensor in the kernel. For details, see [Debugging by Printing](./debug_guide/debugging.md#51-debugging-by-printing).
+A: You can use tl.device_print to print the tensor in the kernel. For details, see [Debugging by Printing](./debug_guide/debugging.md#debug-printing).
 
 ## 5. Development and Contributions
 
 **Q: How can I build and test Triton-Ascend locally?**
 
-A: For details about the local build and test methods, see [Installing Triton-Ascend Using the Source Code](./installation_guide.md#source-code-compilation-installation).
+A: For details about the local build and test methods, see [Installing Triton-Ascend Using the Source Code](./installation_guide.md#install-from-source).
 
 **Q: What CI checks are required for submitting a PR?**
 

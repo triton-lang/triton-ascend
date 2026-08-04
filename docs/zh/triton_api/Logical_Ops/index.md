@@ -20,7 +20,7 @@ or.md
 not.md
 logical_and.md
 logical_or.md
-not.md
+neg.md
 invert.md
 lshift.md
 rshift.md

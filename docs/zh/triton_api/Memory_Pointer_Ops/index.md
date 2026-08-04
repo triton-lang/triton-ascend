@@ -18,3 +18,4 @@ tl.make_block_ptr.md
 tl.advance.md
 load_tensor_descriptor.md
 make_tensor_descriptor.md
+store_tensor_descriptor.md

@@ -6,7 +6,7 @@
 
 该接口以 `extern "C"` 方式导出，与标准 Python JIT 调用路径（`@triton.jit` → `kernel[grid](...)`）**并列独立**——普通用户通过 `@triton.jit` 调用时不经过此函数；它面向的是需要 C 级别 kernel 发射能力的高级场景，如自定义部署流水线、推理引擎集成、同签名 kernel 复用等。
 
-每个 JIT 编译产物（launcher stub `.so`）中均包含一份由 `generate_npu_wrapper_src()` 动态生成的 `triton_launch_kernel`，其参数区内存布局受 kernel signature、metadata（workspace / syncBlockLock / coalesce）、device_print、ffts 等因素共同影响。调用方应注意不同编译产物之间的布局差异（详见[第 8 章](#8-限制与注意事项)）。
+每个 JIT 编译产物（launcher stub `.so`）中均包含一份由 `generate_npu_wrapper_src()` 动态生成的 `triton_launch_kernel`，其参数区内存布局受 kernel signature、metadata（workspace / syncBlockLock / coalesce）、device_print、ffts 等因素共同影响。调用方应注意不同编译产物之间的布局差异（详见[第 8 章](#limitations-and-notes)）。
 
 ## 2. 函数签名
 
@@ -290,6 +290,8 @@ add_kernel[grid](x, y, output, 1024, BLOCK_SIZE=256)
 
 > **注意：** 以上默认值仅在 `release/3.2.2` 分支中验证。其他分支或版本可能有不同默认值，请以实际源码为准。
 
+<a id="limitations-and-notes"></a>
+
 ## 8. 限制与注意事项
 
 ### 平台限制
@@ -325,5 +327,3 @@ add_kernel[grid](x, y, output, 1024, BLOCK_SIZE=256)
 - `kernel_args` 深拷贝增加 `sum(arg_sizes[i])` 字节的临时内存开销
 - `shapes_data` / `shape_dims` / `tensor_kinds` 主要用于 msprof tensor 信息上报；不传（设为 `nullptr`）不影响 kernel 正确性，但 profiler 中 tensor 信息将缺失
 - 该接口生成的代码依赖 CANN 运行时版本，升级 CANN 后需重新编译 launcher stub
-
----

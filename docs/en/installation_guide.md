@@ -221,6 +221,8 @@ Determine and install the CANN, Python, and Torch-NPU software versions. Both pa
     pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
     ```
 
+<a id="install-from-source"></a>
+
 ### Source Code Compilation Installation
 
 If you need to develop or customize **Triton-Ascend**, you can use the source code compilation installation method. After the installation environment and dependencies are ready, it is recommended to use the [<u>Online Installation</u>](#quick-install) method to complete the source-based installation; if you have special requirements, such as the target machine cannot connect to the network, you can perform [<u>Offline Installation</u>](#manual-install).

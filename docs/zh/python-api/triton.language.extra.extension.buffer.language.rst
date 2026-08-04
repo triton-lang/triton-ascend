@@ -1,7 +1,7 @@
 :orphan:
 
 triton.language.extra.extension.buffer.language
-================================
+=================================================
 
 .. currentmodule:: triton.language.extra.extension.buffer.language
 

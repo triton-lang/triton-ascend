@@ -26,6 +26,8 @@ msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
 **图1** PipeUtilization.csv（计算单元和搬运单元耗时占比）文件示例
 ![alt text](../figures/time_consumed.png)
 
+<a id="operator-simulation-pipeline"></a>
+
 ### 算子仿真流水图
 
 算子调优工具 msProf 支持仿真环境下的性能数据采集和自动解析。使用msProf工具获取仿真流水图的具体方式请参考[指令流水图](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/optool/atlasopdev_16_0087.html)。
@@ -76,7 +78,7 @@ visualize_data.bin支持在MindStudio Insight可视化呈现：
 
 #### 仿真流水图采集Triton算子Debug版本
 
-仿真流水图（trace.json / visualize_data.bin）默认只包含指令地址与指令名。若希望在MindStudio Insight中使用指令关联看板、查看指令对应的Triton/Python源码行与调用栈（即[查找瓶颈](#查找瓶颈)中的方法四），需要将算子编译为带debug_line调试信息的版本。未开启时，msprof op simulator会输出如下提示，且代码关联文件为空：
+仿真流水图（trace.json / visualize_data.bin）默认只包含指令地址与指令名。若希望在MindStudio Insight中使用指令关联看板、查看指令对应的Triton/Python源码行与调用栈（即[查找瓶颈](#locating-bottlenecks)中的方法四），需要将算子编译为带debug_line调试信息的版本。未开启时，msprof op simulator会输出如下提示，且代码关联文件为空：
 
 ```text
 [WARN] Kernel missed debug_line information. If you need code call stack, please recompile kernel with -g option
@@ -94,6 +96,8 @@ export TRITON_DISABLE_LINE_INFO=false
 
 ## 分析性能数据
 
+<a id="theoretical-parameters"></a>
+
 ### 理论参数
 
 理论性能为算子实际性能的理想目标。不同的硬件平台的硬件规格各异，理论性能可以帮助我们了解硬件的潜能，从而设定性能优化的目标。
@@ -107,6 +111,8 @@ export TRITON_DISABLE_LINE_INFO=false
 >
 - 计算相关流水（Cube/Vector/Scalar等）的理论耗时 = 计算数据量（单位：Element） / 理论算力。例如：某款AI处理器对float数据类型的Vector理论峰值算力为11.06 TOPS，想要进行一次32K float类型的Element单指令计算，计算的理论耗时是32K / 11.06TOPS = 0.003us （按照1K =1000来计算）。
 
+<a id="locating-bottlenecks"></a>
+
 ### 查找瓶颈
 
 获取性能数据后，和理论数值差异较大的地方、耗时较长的流程被认为是“瓶颈点”。下文将介绍如何通过性能数据找到瓶颈点和对应的优化方向。
@@ -117,7 +123,7 @@ export TRITON_DISABLE_LINE_INFO=false
 
     每条流水线的利用率理想情况下应为100%，没有达到100%的流水就可能有提升空间。上图示例中为某款AI处理器上获取的数据，可以看到Vector算子_layer_norm_fwd_fused的第一个场景中，Vector流水的利用率aiv_vec_ratio小于10%，判断未充分发挥算力；Scalar流水的利用率aiv_scalar_ratio已经在60%左右，判断Scalar是最长的流水。 \
     当Scalar是最长的流水时：需要分析算子源码中是否对标量值进行复杂的运算，昇腾的SIMD微架构更适合多数据并行计算；另一种可能性是，由于一部分指令在硬件上不支持特定的数据类型，Triton软件栈将向量计算退化为标量计算。需要结合流水和标量优化手段进行优化，可参考方法三、查看仿真流水图，以及方法四、查看代码热点的情况进一步分析。 \
-    对于更一般的情况，例如MTE2搬运和实际的场景：三个输入矩阵的shape分别为(128,128)、(128,1)、(128,1)，数据类型为float16。当前算法为Two-pass方法，因此有三次X的搬入，以及W、B的各一次搬入，由此可以计算出总共需要搬运的数据量，继而通过[理论参数](#理论参数)中介绍的搬运流水理论耗时计算方法计算出理论值为 `sizeof(float16) * (128 * 128 * 3 + 128 + 128) / 1.8 TB/s ≈ 0.055 us`（按照1 TB = $10^{12}$ Byte来计算），与实际性能数据aiv_mte2_time存在比较大的差距。经分析，输入数据的总大小小于UB的空间（A2型号为192KB）。因此MTE2时间过长可能是Tiling计算得到的基本块太小，导致发射冗余的搬运指令。需要结合流水优化和Tiling优化手段进行优化。可参考方法三，查看仿真流水图，进一步分析各条流水的情况。
+    对于更一般的情况，例如MTE2搬运和实际的场景：三个输入矩阵的shape分别为(128,128)、(128,1)、(128,1)，数据类型为float16。当前算法为Two-pass方法，因此有三次X的搬入，以及W、B的各一次搬入，由此可以计算出总共需要搬运的数据量，继而通过[理论参数](#theoretical-parameters)中介绍的搬运流水理论耗时计算方法计算出理论值为 `sizeof(float16) * (128 * 128 * 3 + 128 + 128) / 1.8 TB/s ≈ 0.055 us`（按照1 TB = $10^{12}$ Byte来计算），与实际性能数据aiv_mte2_time存在比较大的差距。经分析，输入数据的总大小小于UB的空间（A2型号为192KB）。因此MTE2时间过长可能是Tiling计算得到的基本块太小，导致发射冗余的搬运指令。需要结合流水优化和Tiling优化手段进行优化。可参考方法三，查看仿真流水图，进一步分析各条流水的情况。
 
 - 方法二：通过上板Profiling分析Tiling情况 \
 先前示例中使用的AI处理器，可以通过硬件平台查看到有48个Vector核，_layer_norm_fwd_fused算子是一个纯Vector算子，但是有些场景下发了过多的Block（Block Dim > 48），造成Host调度开销过大。那么下一步的主要优化方向为Tiling优化。
@@ -197,4 +203,4 @@ def npu_vector_cmp_kernel(
 **示例图** 优化前后数据对比图
 ![图2 optimization2](../figures/optimization.png)
 通过分析图中的数据可以发现，优化前后的aiv_scalar_time(us)和aiv_scalar_ratio差距较大，说明性能差的原因是有很多scalar运算，
-通过采集[算子仿真流水图](#算子仿真流水图)可以得到visualize_data.bin，再用MindStudio Insight解析visualize_data.bin，可以发现xbar = tl.where(cols < N, x - mean, 0.0)有很多scalar运算，通过上面优化可以减少scalar运算。
+通过采集[算子仿真流水图](#operator-simulation-pipeline)可以得到visualize_data.bin，再用MindStudio Insight解析visualize_data.bin，可以发现xbar = tl.where(cols < N, x - mean, 0.0)有很多scalar运算，通过上面优化可以减少scalar运算。

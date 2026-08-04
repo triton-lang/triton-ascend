@@ -25,7 +25,7 @@
 - Python版本：python3.11
 - TorchNPU版本：2.7.1.post4
 
-注：更多配套关系请参考[版本说明表](./release_note.md#版本兼容性矩阵)。
+注：更多配套关系请参考[版本说明表](./release_note.md#version-compatibility-matrix)。
 
 ## 快速安装
 

@@ -88,6 +88,8 @@ export TRITON_ALWAYS_COMPILE=1
 
 缓存验证: 当怀疑缓存导致问题时，可删除相关缓存文件后重新测试。
 
+<a id="debug-dump-files"></a>
+
 ### 3.2 调试转储文件（Dump Files）
 
 通过设置环境变量 TRITON_DEBUG=1，可以在编译过程中将中间表示文件转储到磁盘，这些文件是调试编译问题的关键资源。
@@ -255,6 +257,8 @@ TTAdapter IR 是 Triton-Ascend 编译流程中将 TTIR 转换为适配昇腾 NPU
 
 TTAdapter IR 已完成从 Triton 抽象到适配昇腾 NPU 的格式。
 
+<a id="debug-interpreter-mode"></a>
+
 ## 4 解释器模式
 
 解释器的核心价值在于**隔离硬件差异**。通过环境变量 `TRITON_INTERPRET=1` 强制Triton在CPU上执行kernel计算，其结果可作为判断NPU计算精度的基准。
@@ -285,6 +289,8 @@ export TRITON_INTERPRET=0
 ```
 
 ## 5 调试方法
+
+<a id="debug-printing"></a>
 
 ### 5.1 打印调试方法
 
@@ -403,6 +409,8 @@ tl.device_print 在张量打印有长度限制，具体表现为：当张量长�
 TRITON_DEVICE_PRINT=1：启用运行时打印，同时也会启用编译时打印
 
 TRITON_DEBUG=1：启用所有调试输出（包括编译时和运行时打印）
+
+<a id="debug-compilation-error"></a>
 
 ### 5.2 编译错误调试方法
 

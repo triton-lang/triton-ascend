@@ -30,8 +30,14 @@ extensions = [
     'sphinx.ext.coverage',
     'sphinx.ext.napoleon',
     'sphinx.ext.autosectionlabel',
+    'sphinx.ext.mathjax',
     'myst_parser',
 ]
+
+# -- MyST configuration -------------------------------------------------------
+# Enable dollar-math extension so that $$...$$ and $...$ syntax is parsed.
+myst_enable_extensions = ['dollarmath']
+myst_dollar_math = True
 
 # -- I18n: detect language and root doc ---------------------------------------
 _readthedocs_lang = os.environ.get('READTHEDOCS_LANGUAGE')

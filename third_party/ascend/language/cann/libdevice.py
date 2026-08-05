@@ -247,6 +247,7 @@ def pow(arg0, arg1, _semantic=None):
     if triton_enable_libdevice_simt():
         return core.extern_elementwise("", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_pow_fp32", core.dtype("fp32")),
+            (core.dtype("fp32"), core.dtype("int32")): ("__hmf_powi_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
     return core.extern_elementwise(
         "", "", [arg0, arg1], {
@@ -289,12 +290,16 @@ def isnan(arg0, _semantic=None):
 
 @core.extern
 def clz(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.clz for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("int32"), ): ("__hmf_clz_i32", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("int32"), ): ("__hmf_clz_i32", core.dtype("int32")),
+                (core.dtype("int64"), ): ("__hmf_clzll_i64", core.dtype("int32")),
+            }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.clz for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
@@ -309,12 +314,15 @@ def popc(arg0, _semantic=None):
 
 @core.extern
 def byte_perm(arg0, arg1, arg2, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.byte_perm for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1, arg2], {
-        (core.dtype("int32"), core.dtype("int32"), core.dtype("int32")): ("__hmf_byte_perm_i32", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0, arg1, arg2], {
+            (core.dtype("int32"), core.dtype("int32"), core.dtype("int32")):
+            ("__hmf_byte_perm_i32", core.dtype("int32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.byte_perm for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
@@ -339,12 +347,16 @@ def mul24(arg0, arg1, _semantic=None):
 
 @core.extern
 def brev(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.brev for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("int32"), ): ("__hmf_brev_i32", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("int32"), ): ("__hmf_brev_i32", core.dtype("int32")),
+                (core.dtype("int64"), ): ("__hmf_brevll_i64", core.dtype("int64")),
+            }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.brev for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
@@ -403,62 +415,74 @@ def rhadd(arg0, arg1, _semantic=None):
 
 @core.extern
 def fdim(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.fdim for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fdim_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fdim_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.fdim for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def exp10(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.exp10 for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_exp10_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_exp10_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.exp10 for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def add_rn(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.add_rn for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_add_rn_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_add_rn_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.add_rn for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def add_rz(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.add_rz for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_add_rz_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_add_rz_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.add_rz for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def add_rd(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.add_rd for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_add_rd_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_add_rd_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.add_rd for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def add_ru(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.add_ru for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_add_ru_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_add_ru_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.add_ru for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
@@ -543,22 +567,26 @@ def mul_rd(arg0, arg1, _semantic=None):
 
 @core.extern
 def div_rd(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.div_rd for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_div_rd_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_div_rd_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.div_rd for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def div_ru(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.div_ru for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_div_ru_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_div_ru_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.div_ru for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
@@ -750,92 +778,110 @@ def fast_expf(arg0, _semantic=None):
 
 @core.builtin
 def fast_exp10f(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.fast_exp10f for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_fast_exp10_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_fast_exp10_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.fast_exp10f for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.builtin
 def fast_sinf(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.fast_sinf for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_fast_sin_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_fast_sin_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.fast_sinf for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.builtin
 def fast_cosf(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.fast_cosf for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_fast_cos_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_fast_cos_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.fast_cosf for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.builtin
 def fast_tanf(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.fast_tanf for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_fast_tan_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_fast_tan_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.fast_tanf for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.builtin
 def fast_tanhf(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.fast_tanhf for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_fast_tanh_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_fast_tanh_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.fast_tanhf for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.builtin
 def fast_log2f(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.fast_log2f for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_fast_log2_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_fast_log2_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.fast_log2f for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.builtin
 def fast_logf(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.fast_logf for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_fast_log_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_fast_log_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.fast_logf for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.builtin
 def fast_log10f(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.fast_log10f for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_fast_log10_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_fast_log10_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.fast_log10f for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.builtin
 def fast_powf(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.fast_powf for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fast_pow_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fast_pow_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.fast_powf for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
@@ -896,12 +942,14 @@ def int_as_float(arg0, _semantic=None):
 
 @core.extern
 def float_as_uint(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.float_as_uint for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_float_as_uint_fp32", core.dtype("uint32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_float_as_uint_fp32", core.dtype("uint32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.float_as_uint for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
@@ -916,42 +964,50 @@ def uint_as_float(arg0, _semantic=None):
 
 @core.extern
 def float2int_rn(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.float2int_rn for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_float2int_rn_fp32", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_float2int_rn_fp32", core.dtype("int32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.float2int_rn for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def float2int_rz(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.float2int_rz for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_float2int_rz_fp32", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_float2int_rz_fp32", core.dtype("int32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.float2int_rz for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def float2int_rd(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.float2int_rd for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_float2int_rd_fp32", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_float2int_rd_fp32", core.dtype("int32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.float2int_rd for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def float2int_ru(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.float2int_ru for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_float2int_ru_fp32", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_float2int_ru_fp32", core.dtype("int32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.float2int_ru for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
@@ -1096,12 +1152,14 @@ def float2ll_rz(arg0, _semantic=None):
 
 @core.extern
 def float2ll_rd(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.float2ll_rd for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_float2ll_rd_fp32", core.dtype("int64")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_float2ll_rd_fp32", core.dtype("int64")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.float2ll_rd for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
@@ -1614,12 +1672,14 @@ def hypot(arg0: core.tensor, arg1: core.tensor, _semantic=None):
 
 @core.extern
 def cbrt(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.cbrt for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_cbrt_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_cbrt_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.cbrt for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
@@ -1861,12 +1921,14 @@ def cyl_bessel_i0(arg0: core.tensor, _semantic=None):
 
 @core.extern
 def cyl_bessel_i1(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.cyl_bessel_i1 for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_cyl_bessel_i1_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_cyl_bessel_i1_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.cyl_bessel_i1 for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
@@ -1916,32 +1978,38 @@ def erf(arg0, _semantic=None):
 
 @core.extern
 def erfc(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.erfc for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_erfc_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_erfc_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.erfc for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def erfcx(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.erfcx for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_erfcx_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_erfcx_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.erfcx for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def erfcinv(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.erfcxinv for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_erfcinv_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_erfcinv_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.erfcinv for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 # Note:
@@ -2266,12 +2334,14 @@ def sinpi(arg0, _semantic=None):
 
 @core.extern
 def cospi(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.cospi for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_cospi_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_cospi_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.cospi for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.builtin
@@ -2463,84 +2533,77 @@ def llround(arg0, _semantic=None):
 
 @core.extern
 def abs(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.abs for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise(
-        "", "", [arg0], {
-            (core.dtype("fp32"), ): ("__hmf_abs_fp32", core.dtype("fp32")),
-            (core.dtype("int32"), ): ("__hmf_abs_i32", core.dtype("int32")),
-        }, is_pure=True, _semantic=_semantic)
-
-
-@core.extern
-def brevll(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.brevll for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("int64"), ): ("__hmf_brevll_i64", core.dtype("int64")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("fp32"), ): ("__hmf_abs_fp32", core.dtype("fp32")),
+                (core.dtype("int32"), ): ("__hmf_abs_i32", core.dtype("int32")),
+                (core.dtype("int64"), ): ("__hmf_llabs_i64", core.dtype("int64")),
+            }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.abs for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def ceil(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.ceil for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_ceil_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
-
-
-@core.extern
-def clzll(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.clzll for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("int64"), ): ("__hmf_clzll_i64", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_ceil_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.ceil for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def cos(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.cos for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_cos_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_cos_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.cos for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def div_rn(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.div_rn for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_div_rn_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_div_rn_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.div_rn for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def exp(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.exp for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_exp_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_exp_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.exp for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
 def exp2(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.exp2 for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_exp2_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_exp2_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.exp2 for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
@@ -2555,12 +2618,14 @@ def fast_exp2f(arg0, _semantic=None):
 
 @core.extern
 def float2half_rn(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.float2half_rn for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_float2half_rn_fp32", core.dtype("fp16")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_float2half_rn_fp32", core.dtype("fp16")),
+        }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.float2half_rn for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
@@ -2618,16 +2683,6 @@ def half2float(arg0, _semantic=None):
 
 
 @core.extern
-def llabs(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.llabs for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("int64"), ): ("__hmf_llabs_i64", core.dtype("int64")),
-    }, is_pure=True, _semantic=_semantic)
-
-
-@core.extern
 def log(arg0, _semantic=None):
     if not triton_enable_libdevice_simt():
         core.static_print("libdevice.log for simd is unsupported for now.")
@@ -2674,16 +2729,6 @@ def popcll(arg0, _semantic=None):
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
         (core.dtype("int64"), ): ("__hmf_popcll_i64", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
-
-
-@core.extern
-def powif(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.powif for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("fp32"), core.dtype("int32")): ("__hmf_powi_fp32", core.dtype("fp32")),
     }, is_pure=True, _semantic=_semantic)
 
 

@@ -22,7 +22,7 @@ from math import pi as math_pi
 from triton.language import core, math, semantic
 from triton._C.libtriton import ir
 from triton.runtime.jit import jit
-from triton.backends.ascend.utils import get_ascend_arch_from_env, triton_enable_libdevice_simt
+from triton.backends.ascend.utils import get_ascend_arch_from_env, is_compile_on_910_95, triton_enable_libdevice_simt
 
 
 @core.extern
@@ -359,12 +359,16 @@ def sad(arg0, arg1, arg2, _semantic=None):
 
 @core.extern
 def ffs(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.ffs for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("int32"), ): ("__hmf_ffs_i32", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if is_compile_on_910_95():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("int32"), ): ("__hmf_ffs_i32", core.dtype("int32")),
+                (core.dtype("int64"), ): ("__hmf_ffs_i64", core.dtype("int32")),
+            }, is_pure=True, _semantic=_semantic)
+    core.static_print(f"libdevice.ffs for {dtype} is unspported for now.")
+    core.static_assert(False)
 
 
 @core.extern
@@ -2546,16 +2550,6 @@ def fast_exp2f(arg0, _semantic=None):
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_fast_exp2_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
-
-
-@core.extern
-def ffsll(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.ffsll for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("int64"), ): ("__hmf_ffsll_i64", core.dtype("int32")),
     }, is_pure=True, _semantic=_semantic)
 
 

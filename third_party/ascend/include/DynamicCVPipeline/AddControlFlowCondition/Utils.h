@@ -108,7 +108,9 @@ scf::ForOp createNewForOpWithExtras(scf::ForOp oldForOp,
                                     ArrayRef<Value> extraInitArgs);
 
 // Creates a new scf.while with `extraInitArgs` appended to the original inits
-// and empty before/after blocks. Returns `oldWhileOp` unchanged when empty.
+// and empty before/after blocks (no terminators; caller migrates/rebuilds
+// them). Uses the SCF before/after builder API. Returns `oldWhileOp`
+// unchanged when empty.
 scf::WhileOp createNewWhileOpWithExtras(scf::WhileOp oldWhileOp,
                                         ArrayRef<Value> extraInitArgs);
 

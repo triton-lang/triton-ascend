@@ -27,6 +27,7 @@
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Verifier.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
@@ -365,6 +366,17 @@ extendMainLoopOpWithExtraArgs(Operation *oldLoopOp,
 
   Operation *newOp = createMainLoopOpAndMigrateBody(oldLoopOp, extraInitArgs);
   if (!newOp) {
+    cfcTrace("UpdateLoopOps", "FAIL: createMainLoopOpAndMigrateBody returned null");
+    return failure();
+  }
+
+  // Verify the rebuilt loop immediately so a bad migrate/yield is attributed
+  // to this step instead of an outer tt.* reproducer after the whole pass.
+  if (failed(verify(newOp))) {
+    cfcTrace("UpdateLoopOps",
+             "FAIL: rebuilt main_loop failed verify after migrate");
+    newOp->emitError() << "invalid main_loop IR after UpdateLoopOps migrate";
+    newOp->erase();
     return failure();
   }
 

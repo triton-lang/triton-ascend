@@ -23,6 +23,7 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "mlir/IR/Visitors.h"
 #include "llvm/Support/Debug.h"
 #include <optional>
 
@@ -292,6 +293,13 @@ bool isIfOpWithOnlySyncOps(Operation *op) {
 // Migrate ops from oldBlock to newBlock; replaceAllUsesWith on oldBlock's args
 // to newBlock's args (same index).
 void migrateBody(Block *oldBlock, Block *newBlock) {
+  // Fresh scf.for/while bodies may already contain only an auto-inserted
+  // terminator. Erase it first; otherwise moveBefore(end) places ops AFTER the
+  // terminator and leaves invalid IR (verify_each / walk crash).
+  if (!newBlock->empty() && newBlock->without_terminator().empty()) {
+    newBlock->getTerminator()->erase();
+  }
+
   for (unsigned i = 0; i < oldBlock->getNumArguments(); ++i) {
     oldBlock->getArgument(i).replaceAllUsesWith(newBlock->getArgument(i));
   }
@@ -358,6 +366,19 @@ void buildNewWhileCondition(scf::WhileOp whileOp, scf::WhileOp newWhileOp) {
   oldCond.erase();
 }
 
+// Copy only pipeline-relevant discardable attrs onto a rebuilt main-loop op.
+// Blind getAttrs() copies can overwrite inherent / operand-segment metadata
+// when the new op has a different operand/result shape.
+static void copyMainLoopDiscardableAttrs(Operation *oldOp, Operation *newOp) {
+  for (NamedAttribute attr : oldOp->getAttrs()) {
+    StringRef name = attr.getName().strref();
+    if (name.starts_with("ssbuffer.") || name.starts_with("hivm.") ||
+        name == "Undefined") {
+      newOp->setAttr(attr.getName(), attr.getValue());
+    }
+  }
+}
+
 // Creates a new scf.for with `extraInitArgs` appended to the original init
 // args. Returns `oldForOp` unchanged when `extraInitArgs` is empty.
 scf::ForOp createNewForOpWithExtras(scf::ForOp oldForOp,
@@ -371,18 +392,20 @@ scf::ForOp createNewForOpWithExtras(scf::ForOp oldForOp,
                                  oldForOp.getInitArgs().end());
   llvm::append_range(newInitArgs, extraInitArgs);
 
+  // Empty body builder: avoid relying on nullptr-overload terminator policy
+  // across LLVM versions. migrateBody + buildNewYieldOp fill the body.
   scf::ForOp newForOp = builder.create<scf::ForOp>(
       oldForOp.getLoc(), oldForOp.getLowerBound(), oldForOp.getUpperBound(),
-      oldForOp.getStep(), newInitArgs);
+      oldForOp.getStep(), newInitArgs,
+      [](OpBuilder &, Location, Value, ValueRange) {});
 
-  for (auto &attr : oldForOp->getAttrs()) {
-    newForOp->setAttr(attr.getName(), attr.getValue());
-  }
+  copyMainLoopDiscardableAttrs(oldForOp, newForOp);
   return newForOp;
 }
 
 // Creates a new scf.while with `extraInitArgs` appended to the original inits
-// and empty before/after blocks. Returns `oldWhileOp` unchanged when empty.
+// and empty before/after blocks (no terminators yet). Returns `oldWhileOp`
+// unchanged when empty.
 scf::WhileOp createNewWhileOpWithExtras(scf::WhileOp oldWhileOp,
                                         ArrayRef<Value> extraInitArgs) {
   if (extraInitArgs.empty()) {
@@ -401,23 +424,14 @@ scf::WhileOp createNewWhileOpWithExtras(scf::WhileOp oldWhileOp,
     newResultTypes.push_back(v.getType());
   }
 
+  // Builder API creates before/after entry blocks with args; callers migrate
+  // or rebuild terminators afterwards.
   scf::WhileOp newWhileOp = builder.create<scf::WhileOp>(
-      oldWhileOp.getLoc(), newResultTypes, newInits);
+      oldWhileOp.getLoc(), newResultTypes, newInits,
+      [](OpBuilder &, Location, ValueRange) {},
+      [](OpBuilder &, Location, ValueRange) {});
 
-  for (auto &attr : oldWhileOp->getAttrs()) {
-    newWhileOp->setAttr(attr.getName(), attr.getValue());
-  }
-
-  SmallVector<Type> argTypes;
-  argTypes.reserve(newInits.size());
-  for (Value v : newInits) {
-    argTypes.push_back(v.getType());
-  }
-  SmallVector<Location> argLocs(newInits.size(), oldWhileOp.getLoc());
-
-  builder.createBlock(&newWhileOp.getBefore(), {}, argTypes, argLocs);
-  builder.createBlock(&newWhileOp.getAfter(), {}, argTypes, argLocs);
-
+  copyMainLoopDiscardableAttrs(oldWhileOp, newWhileOp);
   return newWhileOp;
 }
 
@@ -465,7 +479,9 @@ void cfcTraceModuleSummary(llvm::StringRef pass, ModuleOp module,
   }
   llvm::errs() << ": first_top=" << module.getBody()->front().getName();
   int mainLoopCount = 0;
-  module.walk([&](Operation *op) {
+  // Skip into main-loop bodies: if extend/migrate left a broken region,
+  // descending into it can crash before we finish the summary line.
+  module->walk<WalkOrder::PreOrder>([&](Operation *op) {
     if (!isMainLoopOp(op))
       return WalkResult::advance();
     ++mainLoopCount;
@@ -476,7 +492,7 @@ void cfcTraceModuleSummary(llvm::StringRef pass, ModuleOp module,
       llvm::errs() << " | while#results=" << whileOp.getNumResults()
                    << " inits=" << whileOp.getInits().size();
     }
-    return WalkResult::advance();
+    return WalkResult::skip();
   });
   llvm::errs() << " | main_loops=" << mainLoopCount;
   if (CVPipeline::hasFallbackAttr(module)) {

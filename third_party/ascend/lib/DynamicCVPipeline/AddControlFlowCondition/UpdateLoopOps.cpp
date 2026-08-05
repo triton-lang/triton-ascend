@@ -231,18 +231,24 @@ static unsigned getMainLoopBaseIdx(Operation *oldLoopOp, bool isWhile) {
                  : cast<scf::ForOp>(oldLoopOp).getNumRegionIterArgs();
 }
 
-// Appends initial values for extra iter_args: block counters from
-// blockCounterInitFn (forOp reuses getLowerBound(); whileOp creates a new
-// arith.constant per counter so each new iter_arg has a distinct SSA value),
-// dep conds from i32(0), tensor iter_args from i32(1).
-static void
-buildMainLoopExtraInitArgs(OpBuilder &builder, Location loc,
-                           llvm::function_ref<Value()> blockCounterInitFn,
-                           int numBlockCounters, int numInnerDepConds,
-                           int numTensorIterArgs,
-                           llvm::SmallVector<Value> &extraInitArgs) {
+// Appends initial values for extra iter_args:
+// - block counters: forOp reuses lowerBound; whileOp creates a fresh i32(0)
+//   per counter (distinct SSA values)
+// - inner dep conds: i32(0)
+// - tensor iter_args: i32(1)
+static void buildMainLoopExtraInitArgs(OpBuilder &builder, Location loc,
+                                       Value forOpLowerBound, bool isWhile,
+                                       int numBlockCounters,
+                                       int numInnerDepConds,
+                                       int numTensorIterArgs,
+                                       llvm::SmallVector<Value> &extraInitArgs) {
   for (int i = 0; i < numBlockCounters; ++i) {
-    extraInitArgs.push_back(blockCounterInitFn());
+    if (isWhile) {
+      extraInitArgs.push_back(builder.create<arith::ConstantOp>(
+          loc, builder.getI32Type(), builder.getI32IntegerAttr(0)));
+    } else {
+      extraInitArgs.push_back(forOpLowerBound);
+    }
   }
   for (int i = 0; i < numInnerDepConds; ++i) {
     extraInitArgs.push_back(builder.create<arith::ConstantOp>(
@@ -341,29 +347,33 @@ extendMainLoopOpWithExtraArgs(Operation *oldLoopOp,
   // counter); WhileOp creates a fresh arith.constant per counter so each new
   // iter_arg has a distinct SSA value (expected by tests and downstream
   // passes).
+  // NOTE: do not bind llvm::function_ref to a temporary lambda here — the
+  // lambda dies at the end of the assignment and later calls are UAF/crash.
   OpBuilder builder(oldLoopOp);
   Value forOpLowerBound;
-  llvm::function_ref<Value()> blockCounterInitFn;
   bool isWhile = false;
   if (auto forOp = dyn_cast<scf::ForOp>(oldLoopOp)) {
     forOpLowerBound = forOp.getLowerBound();
-    blockCounterInitFn = [&]() { return forOpLowerBound; };
-  } else if (auto whileOp = dyn_cast<scf::WhileOp>(oldLoopOp)) {
-    blockCounterInitFn = [&]() {
-      return builder.create<arith::ConstantOp>(
-          whileOp.getLoc(), builder.getI32Type(), builder.getI32IntegerAttr(0));
-    };
+  } else if (isa<scf::WhileOp>(oldLoopOp)) {
     isWhile = true;
   } else {
     LDBG("[Error]: main_loop op is neither scf::ForOp nor scf::WhileOp");
     return failure();
   }
 
+  llvm::errs() << "[CFC][UpdateLoopOps] extend "
+               << (isWhile ? "while" : "for") << " extras=" << totalExtraArgs
+               << " (counters=" << numBlockCounters
+               << " deps=" << numInnerDepConds
+               << " tensors=" << numTensorIterArgs << ") @"
+               << oldLoopOp->getLoc() << "\n";
+
   llvm::SmallVector<Value> extraInitArgs;
-  buildMainLoopExtraInitArgs(builder, oldLoopOp->getLoc(), blockCounterInitFn,
-                             numBlockCounters, numInnerDepConds,
+  buildMainLoopExtraInitArgs(builder, oldLoopOp->getLoc(), forOpLowerBound,
+                             isWhile, numBlockCounters, numInnerDepConds,
                              numTensorIterArgs, extraInitArgs);
 
+  cfcTrace("UpdateLoopOps", "extend: createMainLoopOpAndMigrateBody");
   Operation *newOp = createMainLoopOpAndMigrateBody(oldLoopOp, extraInitArgs);
   if (!newOp) {
     cfcTrace("UpdateLoopOps", "FAIL: createMainLoopOpAndMigrateBody returned null");
@@ -372,6 +382,7 @@ extendMainLoopOpWithExtraArgs(Operation *oldLoopOp,
 
   // Verify the rebuilt loop immediately so a bad migrate/yield is attributed
   // to this step instead of an outer tt.* reproducer after the whole pass.
+  cfcTrace("UpdateLoopOps", "extend: verify rebuilt main_loop");
   if (failed(verify(newOp))) {
     cfcTrace("UpdateLoopOps",
              "FAIL: rebuilt main_loop failed verify after migrate");
@@ -388,7 +399,13 @@ extendMainLoopOpWithExtraArgs(Operation *oldLoopOp,
                                numTensorIterArgs, depsVecCopy);
   transferMainLoopInfoMaps(oldLoopOp, newOp, info, isWhile);
 
-  return replaceMainLoopOpUsesAndErase(oldLoopOp, newOp);
+  cfcTrace("UpdateLoopOps", "extend: replaceMainLoopOpUsesAndErase");
+  if (failed(replaceMainLoopOpUsesAndErase(oldLoopOp, newOp))) {
+    cfcTrace("UpdateLoopOps", "FAIL: replaceMainLoopOpUsesAndErase");
+    return failure();
+  }
+  cfcTrace("UpdateLoopOps", "extend: OK");
+  return success();
 }
 
 // Add block counter and inner dep cond iter args to for ops (and whileOps).
@@ -408,7 +425,12 @@ LogicalResult UpdateLoopOpsPass::addBlockCountersAndInnerDepConds(
     mainLoopOpsToProcess.insert(p.first);
   }
 
+  llvm::errs() << "[CFC][UpdateLoopOps] addBlockCounters: loops_to_process="
+               << mainLoopOpsToProcess.size() << "\n";
+  int loopIdx = 0;
   for (Operation *loopOp : mainLoopOpsToProcess) {
+    llvm::errs() << "[CFC][UpdateLoopOps] addBlockCounters: processing loop #"
+                 << loopIdx++ << "\n";
     if (failed(extendMainLoopOpWithExtraArgs(loopOp, info)))
       return failure();
   }

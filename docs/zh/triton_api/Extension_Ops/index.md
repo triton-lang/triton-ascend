@@ -9,7 +9,7 @@
 |[multibuffer](./multibuffer.md) | 为张量设置多缓冲，允许编译器对同一张量创建多个副本。 |
 |[parallel](./parallel.md) | `parallel` 是一个专门用于多核心并行执行的迭代器,提供显式的多核心并行语义。 |
 |[get_element](./get_element.md)| 根据给定的索引，从输入张量中读取单个元素。 |
-|[index_select 高性能接口](./index_select_simd.md) | 在非尾轴维度上并行 gather 多个索引，并以 tile 为单位将数据零拷贝地从全局内存（GM）直接搬运到统一缓冲区（UB）的正确位置。该操作等效于 `torch.index_select` 的高性能实现，适用于嵌入层查找、稀疏索引访问等场景。 |
+|[index_select 高性能接口](./index_select_simd.md) | 在非最后一个维度上并行 gather 多个索引，并以 tile 为单位将数据零拷贝地从全局内存（GM）直接搬运到统一缓冲区（UB）的正确位置。该操作等效于 `torch.index_select` 的高性能实现，适用于嵌入层查找、稀疏索引访问等场景。 |
 
 ```{toctree}
 :maxdepth: 3

@@ -39,6 +39,8 @@ pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/asce
 Vector addition example: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)
 By comparing the output of the Triton kernel with that of native PyTorch computation, it proves that the Ascend NPU device can correctly call the Triton kernel and ensure computational accuracy.
 
+> ⚠️ The following commands must be run in a bash environment. If using POSIX sh, replace `source` with `.`.
+
 ```bash
 # Set CANN environment variables (taking the root user's default installation path `/usr/local/Ascend` as an example)
 source /usr/local/Ascend/ascend-toolkit/set_env.sh

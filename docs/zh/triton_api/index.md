@@ -11,7 +11,7 @@
 |[multibuffer](./Extension_Ops/multibuffer.md) | 为张量设置多缓冲，允许编译器对同一张量创建多个副本。 |
 |[parallel](./Extension_Ops/parallel.md) | `parallel` 是一个专门用于多核心并行执行的迭代器,提供显式的多核心并行语义。 |
 |[get_element](./Extension_Ops/get_element.md)| 根据给定的索引，从输入张量中读取单个元素。 |
-|[index_select 高性能接口](./Extension_Ops/index_select_simd.md) | 在非尾轴维度上并行 gather 多个索引，并以 tile 为单位将数据零拷贝地从全局内存（GM）直接搬运到统一缓冲区（UB）的正确位置。该操作等效于 `torch.index_select` 的高性能实现，适用于嵌入层查找、稀疏索引访问等场景。 |
+|[index_select 高性能接口](./Extension_Ops/index_select_simd.md) | 在非最后一个维度上并行 gather 多个索引，并以 tile 为单位将数据零拷贝地从全局内存（GM）直接搬运到统一缓冲区（UB）的正确位置。该操作等效于 `torch.index_select` 的高性能实现，适用于嵌入层查找、稀疏索引访问等场景。 |
 
 ```{toctree}
 :maxdepth: 3
@@ -122,7 +122,7 @@ Debug_Ops/index.md
 |[where](./Indexing_Ops/where.md) |根据 condition 返回来自 x 或 y 的元素组成的张量 |
 |[swizzle2d](./Indexing_Ops/swizzle2d.md) |将行主序排列为 size_i * size_j 的矩阵的索引，转换为每组 size_g 行的列主序矩阵的索引 |
 |[get_element](./Extension_Ops/get_element.md)| 根据给定的索引，从输入张量中读取单个元素。 |
-|[index_select 高性能接口](./Extension_Ops/index_select_simd.md) | 在非尾轴维度上并行 gather 多个索引，并以 tile 为单位将数据零拷贝地从全局内存（GM）直接搬运到统一缓冲区（UB）的正确位置。该操作等效于 `torch.index_select` 的高性能实现，适用于嵌入层查找、稀疏索引访问等场景。 |
+|[index_select 高性能接口](./Extension_Ops/index_select_simd.md) | 在非最后一个维度上并行 gather 多个索引，并以 tile 为单位将数据零拷贝地从全局内存（GM）直接搬运到统一缓冲区（UB）的正确位置。该操作等效于 `torch.index_select` 的高性能实现，适用于嵌入层查找、稀疏索引访问等场景。 |
 |[gather](./Indexing_Ops/gather.md) | 对`src`tensor沿`axis`维度按照`index`执行gather操作 |
 
 ```{toctree}

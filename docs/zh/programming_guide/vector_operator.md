@@ -65,5 +65,5 @@ sub_block_size = max((ub_budget - block_x * element_bytes) //
 
 - grid 是否远大于物理 Vector Core 数，导致多轮下发。
 - 离散访存是否可转化为“批量搬入 UB 后在 UB 内选择”。
-- 尾轴是否满足 32B 对齐；不满足时是否可用转置或借轴转置规避自动 padding。
+- 尾轴（最后一个维度）是否满足 32B 对齐；不满足时是否可用转置或借轴转置规避自动 padding。
 - `BLOCK_X` 和 `SUB_BLOCK_SIZE` 是否造成 UB overflow 或过小的搬运粒度。

@@ -41,7 +41,7 @@ tl.store(c_ptrs, c, mask=c_mask)
 
 1. **主计算层**：识别哪些步骤必须走 Cube，例如 QK、PV、GEMM、batched matmul。
 2. **Vector 后处理层**：识别 softmax、activation、mask、scale、normalization、cat/slice、layout transform 等是否能在同一 tile 内完成。
-3. **访存重排层**：对离散 KV cache、MoE token 重排、短尾轴 tensor，优先在 UB 中用 `extension.insert_slice`、`extension.extract_slice`、转置或借轴转置形成硬件友好的连续访问。
+3. **访存重排层**：对离散 KV cache、MoE token 重排、短尾轴（最后一个维度） tensor，优先在 UB 中用 `extension.insert_slice`、`extension.extract_slice`、转置或借轴转置形成硬件友好的连续访问。
 4. **流水和同步层**：通过 `multibuffer`、`set_workspace_multibuffer`、`tile_mix_vector_loop`、`tile_mix_cube_loop` 等编译选项探索 Cube 与 Vector 的重叠执行。
 5. **分核层**：CV 融合算子通常按 Cube Core 数量发射 grid；运行时会以约 1:2 的比例协同 Vector Core。不要简单沿用 GPU 上的大 grid。
 

@@ -39,6 +39,7 @@ pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/asce
 
 向量加法实例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)
 通过对比Triton算子与PyTorch原生计算的输出结果，证明昇腾NPU设备可正确调用Triton算子并保证计算精度。
+> ⚠️ 下述命令需在 bash 环境下执行。若使用 POSIX sh，请将 `source` 替换为 `.`。
 
 ```bash
 # 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）

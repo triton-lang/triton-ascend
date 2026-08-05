@@ -1242,9 +1242,12 @@ void UpdateLoopIterTimesPass::runOnOperation() {
   ModuleOp module = getOperation();
 
   if (CVPipeline::hasFallbackAttr(module)) {
+    cfcTrace("UpdateLoopIterTimes", "SKIP (fallback already set)");
     return;
   }
 
+  cfcTrace("UpdateLoopIterTimes", "ENTER");
+  cfcTraceModuleSummary("UpdateLoopIterTimes", module, "before");
   LDBG("before updateloopitertimes:\n" << module);
   LDBG("\nEnter UpdateLoopIterTimesPass!");
 
@@ -1253,56 +1256,83 @@ void UpdateLoopIterTimesPass::runOnOperation() {
   // vector
   DenseMap<int, SmallVector<Operation *>> cmap;
   DenseMap<int, SmallVector<Operation *>> vmap;
+  cfcTrace("UpdateLoopIterTimes", "step: GetMainLoopIdToLoopOpMap");
   ret = GetMainLoopIdToLoopOpMap(module, cmap, vmap);
   if (ret != 0) {
+    cfcTrace("UpdateLoopIterTimes", "FAIL: GetMainLoopIdToLoopOpMap");
     LDBG("GetMainLoopIdToLoopOpMap Failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
   }
+  llvm::errs() << "[CFC][UpdateLoopIterTimes] map sizes cube=" << cmap.size()
+               << " vector=" << vmap.size() << "\n";
 
   // step2: Calculate info for each loop operation, store into the same
   // iterationTimesinfoMap
   DenseMap<Operation *, IterationTimesInfo> infoMap;
+  cfcTrace("UpdateLoopIterTimes", "step: ComputeMainLoopTimes(cube)");
   ret = ComputeMainLoopTimes(cmap, infoMap);
   if (ret != 0) {
+    cfcTrace("UpdateLoopIterTimes", "FAIL: ComputeMainLoopTimes(cube)");
     LDBG("ComputeMainLoopTimes from cube Failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
   }
+  cfcTrace("UpdateLoopIterTimes", "step: ComputeMainLoopTimes(vector)");
   ret = ComputeMainLoopTimes(vmap, infoMap);
   if (ret != 0) {
+    cfcTrace("UpdateLoopIterTimes", "FAIL: ComputeMainLoopTimes(vector)");
     LDBG("ComputeMainLoopTimes from vector Failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
   }
 
   // step3: Update loop iteration count (process loop operations with same id
   // from both cmap and vmap)
+  cfcTrace("UpdateLoopIterTimes", "step: UpdateForLoopIteration");
   ret = UpdateForLoopIteration(cmap, vmap, infoMap);
   if (ret != 0) {
+    cfcTrace("UpdateLoopIterTimes", "FAIL: UpdateForLoopIteration");
     LDBG("Update ForLoop Iteration Failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
   }
+  cfcTraceModuleSummary("UpdateLoopIterTimes", module,
+                        "after UpdateForLoopIteration");
   LDBG("after UpdateForLoopIteration:\n" << module);
 
   // step4: Replace loop counter by if blocks' counter
+  cfcTrace("UpdateLoopIterTimes", "step: replaceForOpCounterInIfOps");
   ret = replaceForOpCounterInIfOps();
   if (ret != 0) {
+    cfcTrace("UpdateLoopIterTimes", "FAIL: replaceForOpCounterInIfOps");
     LDBG("replaceForOpCounterInIfOps Failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
   }
 
   // step5: Update WhileOp condition based on ifblock conditions
+  cfcTrace("UpdateLoopIterTimes", "step: UpdateWhileLoopCondition(cube)");
   ret = UpdateWhileLoopCondition(cmap);
   if (ret != 0) {
+    cfcTrace("UpdateLoopIterTimes", "FAIL: UpdateWhileLoopCondition(cube)");
     LDBG("UpdateWhileLoopCondition from cube Failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
   }
+  cfcTrace("UpdateLoopIterTimes", "step: UpdateWhileLoopCondition(vector)");
   ret = UpdateWhileLoopCondition(vmap);
   if (ret != 0) {
+    cfcTrace("UpdateLoopIterTimes", "FAIL: UpdateWhileLoopCondition(vector)");
     LDBG("UpdateWhileLoopCondition from vector Failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
   }
 
+  cfcTraceModuleSummary("UpdateLoopIterTimes", module, "after");
   LDBG("after updateloopitertimes:\n" << module);
   LDBG("\nExit UpdateLoopIterTimes pass.");
+  cfcTrace("UpdateLoopIterTimes", "EXIT OK");
 }
 
 namespace mlir {

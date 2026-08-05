@@ -27,6 +27,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "third_party/ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
@@ -616,20 +617,26 @@ void InitDependentMapPass::runOnOperation() {
   ModuleOp module = getOperation();
 
   if (CVPipeline::hasFallbackAttr(module)) {
+    cfcTrace("InitDependentMap", "SKIP (fallback already set)");
     return;
   }
 
+  cfcTrace("InitDependentMap", "ENTER");
   LDBG("Enter InitDependentMap pass.");
 
   // Step 1: Initialize crossCoreDependentMap
+  cfcTrace("InitDependentMap", "step: initCrossCoreDependentMap");
   if (initCrossCoreDependentMap(module, info) != 0) {
+    cfcTrace("InitDependentMap", "FAIL: initCrossCoreDependentMap");
     LDBG("initCrossCoreDependentMap failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Step 2: Initialize intraCoreDependentMap
+  cfcTrace("InitDependentMap", "step: initIntraCoreDependentMap");
   if (initIntraCoreDependentMap(module, info) != 0) {
+    cfcTrace("InitDependentMap", "FAIL: initIntraCoreDependentMap");
     LDBG("initIntraCoreDependentMap failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
@@ -639,17 +646,22 @@ void InitDependentMapPass::runOnOperation() {
   LLVM_DEBUG(printDependentMaps(info));
 
   // Step 4: Compute producer buffer count for flowOpt condition
+  cfcTrace("InitDependentMap", "step: computeProducerBufferCount");
   computeProducerBufferCount(info, module);
 
   // Step 4: Build if block DAG from crossCoreDependentMap (always)
+  cfcTrace("InitDependentMap", "step: buildIfBlockCrossCoreDAG");
   if (buildIfBlockCrossCoreDAG(module, info) != 0) {
+    cfcTrace("InitDependentMap", "FAIL: buildIfBlockCrossCoreDAG");
     LDBG("buildIfBlockCrossCoreDAG failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Step 5: Detect cross-core cycle in DAG
+  cfcTrace("InitDependentMap", "step: detectCrossCoreCycle");
   if (detectCrossCoreCycle(info) != 0) {
+    cfcTrace("InitDependentMap", "FAIL: Cross-core cycle detected");
     LDBG("Cross-core cycle detected!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
     return;
@@ -660,8 +672,10 @@ void InitDependentMapPass::runOnOperation() {
   if (info->crossCoreBufferCount > CROSS_CORE_BUFFER_COUNT_THRESHOLD &&
       info->intraCoreBufferCount > INTRA_CORE_BUFFER_COUNT_THRESHOLD) {
     LDBG("Buffer counts meet requirements, collecting flowOpt pairs.");
+    cfcTrace("InitDependentMap", "step: collectFlowOptIfOpPairs");
 
     if (collectFlowOptIfOpPairs(module, info) != 0) {
+      cfcTrace("InitDependentMap", "FAIL: collectFlowOptIfOpPairs");
       LDBG("collectFlowOptIfOpPairs failed!");
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return;
@@ -671,6 +685,7 @@ void InitDependentMapPass::runOnOperation() {
   }
 
   LDBG("Exit InitDependentMap pass.");
+  cfcTrace("InitDependentMap", "EXIT OK");
 }
 
 namespace mlir {

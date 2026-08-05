@@ -681,9 +681,12 @@ void UpdateLoopOpsPass::runOnOperation() {
   ModuleOp module = getOperation();
 
   if (CVPipeline::hasFallbackAttr(module)) {
+    cfcTrace("UpdateLoopOps", "SKIP (fallback already set)");
     return;
   }
 
+  cfcTrace("UpdateLoopOps", "ENTER");
+  cfcTraceModuleSummary("UpdateLoopOps", module, "before");
   LDBG("before updateLoopOps:\n" << module);
 
   // Use provided info, or create a local one if not available
@@ -692,29 +695,43 @@ void UpdateLoopOpsPass::runOnOperation() {
 
   // Analyze the dependencies of the tensor type iter_args in the main_loop with
   // the ssbuffer.if ops
+  cfcTrace("UpdateLoopOps", "step: analyzeTensorIterArgDependencies");
   if (failed(analyzeTensorIterArgDependencies(module, infoToUse))) {
+    cfcTrace("UpdateLoopOps", "FAIL: analyzeTensorIterArgDependencies");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Derive block counters from ssbuffer.if if blockCounterNums is empty
   if (infoToUse->blockCounterNums.empty()) {
+    cfcTrace("UpdateLoopOps", "step: deriveBlockCountersFromIfOps");
     if (failed(deriveBlockCountersFromIfOps(module, infoToUse))) {
+      cfcTrace("UpdateLoopOps", "FAIL: deriveBlockCountersFromIfOps");
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return;
     }
+  } else {
+    llvm::errs()
+        << "[CFC][UpdateLoopOps] step: reuse blockCounterNums from CreateIfOps "
+           "(size="
+        << infoToUse->blockCounterNums.size() << ")\n";
   }
 
   // Update for/while ops iter_args for block counters and inner dep conds.
   // forOp from info-driven sets (no-ops when empty); whileOp unconditionally.
+  cfcTrace("UpdateLoopOps", "step: addBlockCountersAndInnerDepConds");
   if (infoToUse &&
       (failed(addBlockCountersAndInnerDepConds(module, infoToUse)))) {
+    cfcTrace("UpdateLoopOps", "FAIL: addBlockCountersAndInnerDepConds");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
+  cfcTraceModuleSummary("UpdateLoopOps", module, "after extend loops");
 
   // Insert PIPE_S inter-core synchronization
+  cfcTrace("UpdateLoopOps", "step: insertInterCorePipeS");
   if (failed(insertInterCorePipeS(module))) {
+    cfcTrace("UpdateLoopOps", "FAIL: insertInterCorePipeS");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
@@ -726,7 +743,9 @@ void UpdateLoopOpsPass::runOnOperation() {
                        "whileBlockArgMap contents after updateLoopOps "
                        "(whileOp -> block_id -> (new_arg_idx -> old_arg_idx))");
 
+  cfcTraceModuleSummary("UpdateLoopOps", module, "after");
   LDBG("after updateLoopOps:\n" << module);
+  cfcTrace("UpdateLoopOps", "EXIT OK");
 }
 
 namespace mlir {

@@ -330,9 +330,11 @@ void CreateIfOpsPass::runOnOperation() {
   ModuleOp module = getOperation();
 
   if (CVPipeline::hasFallbackAttr(module)) {
+    cfcTrace("CreateIfOps", "SKIP (fallback already set)");
     return;
   }
 
+  cfcTrace("CreateIfOps", "ENTER");
   LDBG("before createIfOps:\n" << module);
 
   auto walkResult = module.walk([&](Operation *op) -> WalkResult {
@@ -344,6 +346,7 @@ void CreateIfOpsPass::runOnOperation() {
     if (failed(collectOpsByBlockId(op, blockOps))) {
       LDBG("[Error]: op with ssbuffer.main_loop is neither scf::ForOp nor "
            "scf::WhileOp, or a body op is missing ssbuffer.block_id\n");
+      cfcTrace("CreateIfOps", "FAIL: collectOpsByBlockId");
       return WalkResult::interrupt();
     }
 
@@ -358,11 +361,13 @@ void CreateIfOpsPass::runOnOperation() {
 
     if (failed(computeYieldValues(op, blockOps, thenYieldValues,
                                   elseYieldValues))) {
+      cfcTrace("CreateIfOps", "FAIL: computeYieldValues");
       return WalkResult::interrupt();
     }
 
     if (failed(createIfInMainLoop(op, blockOps, thenYieldValues,
                                   elseYieldValues))) {
+      cfcTrace("CreateIfOps", "FAIL: createIfInMainLoop");
       return WalkResult::interrupt();
     }
     return WalkResult::advance();
@@ -373,6 +378,7 @@ void CreateIfOpsPass::runOnOperation() {
   }
 
   LDBG("after createIfOps:\n" << module);
+  cfcTrace("CreateIfOps", "EXIT OK");
 }
 
 namespace mlir {

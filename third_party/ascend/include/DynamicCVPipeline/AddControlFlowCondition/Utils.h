@@ -123,5 +123,14 @@ Operation *createMainLoopOpWithExtras(Operation *oldOp,
 void dumpWhileBlockArgMap(const triton::WhileBlockArgMap &map,
                           llvm::StringRef header);
 
+// Always-on stderr stage marker for nested CFC passes. Visible without
+// -debug / LLVM_DEBUG so failures can be located from ordinary CI logs.
+void cfcTrace(llvm::StringRef pass, llvm::StringRef msg);
+
+// Prints a one-line module summary to stderr: first top-level op name and
+// each ssbuffer.main_loop's result / iter_arg counts.
+void cfcTraceModuleSummary(llvm::StringRef pass, ModuleOp module,
+                           llvm::StringRef label);
+
 } // namespace mlir
 #endif // TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_UTILS_H

@@ -47,6 +47,7 @@
 #include "bishengir/Dialect/HIVM/IR/HIVMInterfaces.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
+#include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 
 static constexpr const char *DEBUG_TYPE = "UpdateConditionInfoPass";
 static constexpr int VECTOR_SSBUF_OFFSET = 1024;
@@ -1903,23 +1904,39 @@ void UpdateConditionInfoPass::runOnOperation() {
   ModuleOp module = getOperation();
 
   if (CVPipeline::hasFallbackAttr(module)) {
+    cfcTrace("UpdateConditionInfo", "SKIP (fallback already set)");
     return;
   }
 
+  cfcTrace("UpdateConditionInfo", "ENTER");
+  cfcTraceModuleSummary("UpdateConditionInfo", module, "before");
   LDBG("Enter UpdateConditionInfo pass." << "\n");
+
   // Step1:Init the ssbufferPtrs
+  cfcTrace("UpdateConditionInfo", "step: allocSSBuffer");
   SmallVector<SmallVector<Value>> ssbufferPtrs = allocSSBuffer(module);
+  llvm::errs() << "[CFC][UpdateConditionInfo] allocSSBuffer groups="
+               << ssbufferPtrs.size();
+  if (!ssbufferPtrs.empty())
+    llvm::errs() << " ptrs0=" << ssbufferPtrs[0].size();
+  llvm::errs() << "\n";
 
   // Step2:Update the conditions of ifOp based on the intraCoreDependentMap and
   // crossCoreDependentMap
+  cfcTrace("UpdateConditionInfo", "step: updateIfConds");
   int updateResult = updateIfConds(module, ssbufferPtrs);
 
   if (updateResult != UPDATE_CONDITION_INFO_SUCCESS) {
+    cfcTrace("UpdateConditionInfo", "FAIL: updateIfConds");
     LDBG("updateIfConds failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    cfcTraceModuleSummary("UpdateConditionInfo", module, "after FAIL");
+    return;
   }
 
+  cfcTraceModuleSummary("UpdateConditionInfo", module, "after");
   LDBG("Exit UpdateConditionInfo pass." << "\n");
+  cfcTrace("UpdateConditionInfo", "EXIT OK");
 }
 
 namespace mlir {

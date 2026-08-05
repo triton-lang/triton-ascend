@@ -834,27 +834,34 @@ void ProcessArgsPass::runOnOperation() {
   ModuleOp module = getOperation();
 
   if (CVPipeline::hasFallbackAttr(module)) {
+    cfcTrace("ProcessArgs", "SKIP (fallback already set)");
     return;
   }
 
+  cfcTrace("ProcessArgs", "ENTER");
   LDBG("before processArgs:\n" << module);
 
   // 1. While-specific decoupling: snapshot original iter_args; per scf.while,
   //    clone cond-used iter_arg update chains per block_id; record in
   //    info->whileBlockArgMap.
+  cfcTrace("ProcessArgs", "step: updateIndependentCondsInWhileBlocks");
   if (failed(updateIndependentCondsInWhileBlocks(module))) {
+    cfcTrace("ProcessArgs", "FAIL: updateIndependentCondsInWhileBlocks");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // 2. Process shared iter_args (adds per-block clones for args shared
   //    across block_ids). Uses originalWhileIterArgIndices captured above.
+  cfcTrace("ProcessArgs", "step: processSharedIterArgs");
   if (failed(processSharedIterArgs(module))) {
+    cfcTrace("ProcessArgs", "FAIL: processSharedIterArgs");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   LDBG("after processArgs:\n" << module);
+  cfcTrace("ProcessArgs", "EXIT OK");
 }
 
 namespace mlir {

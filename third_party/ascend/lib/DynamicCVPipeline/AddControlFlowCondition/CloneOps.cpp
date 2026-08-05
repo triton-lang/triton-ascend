@@ -555,13 +555,16 @@ void CloneOpsPass::runOnOperation() {
   ModuleOp module = getOperation();
 
   if (CVPipeline::hasFallbackAttr(module)) {
+    cfcTrace("CloneOps", "SKIP (fallback already set)");
     return;
   }
 
+  cfcTrace("CloneOps", "ENTER");
   LDBG("before cloneOps:\n" << module);
 
   // Validate block_ids are consecutive before cloning
   if (failed(validateBlockIdsConsecutive(module))) {
+    cfcTrace("CloneOps", "FAIL: validateBlockIdsConsecutive");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
@@ -574,11 +577,13 @@ void CloneOpsPass::runOnOperation() {
     }
 
     if (failed(cloneOpsInMainLoop(op))) {
+      cfcTrace("CloneOps", "FAIL: cloneOpsInMainLoop");
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return WalkResult::interrupt();
     }
 
     if (failed(cleanupClonedOpsInMainLoop(op))) {
+      cfcTrace("CloneOps", "FAIL: cleanupClonedOpsInMainLoop");
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return WalkResult::interrupt();
     }
@@ -592,9 +597,11 @@ void CloneOpsPass::runOnOperation() {
 
   // Validate no cloned tensor ops remaining in VECTOR main_loop op
   if (failed(validateClonedOpsInVector(module))) {
+    cfcTrace("CloneOps", "FAIL: validateClonedOpsInVector");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
+  cfcTrace("CloneOps", "EXIT OK");
 }
 
 namespace mlir {

@@ -452,4 +452,39 @@ void dumpWhileBlockArgMap(const triton::WhileBlockArgMap &map,
   });
 }
 
+void cfcTrace(llvm::StringRef pass, llvm::StringRef msg) {
+  llvm::errs() << "[CFC][" << pass << "] " << msg << "\n";
+}
+
+void cfcTraceModuleSummary(llvm::StringRef pass, ModuleOp module,
+                           llvm::StringRef label) {
+  llvm::errs() << "[CFC][" << pass << "] " << label;
+  if (module.getBody()->empty()) {
+    llvm::errs() << ": <empty module>\n";
+    return;
+  }
+  llvm::errs() << ": first_top=" << module.getBody()->front().getName();
+  int mainLoopCount = 0;
+  module.walk([&](Operation *op) {
+    if (!isMainLoopOp(op))
+      return WalkResult::advance();
+    ++mainLoopCount;
+    if (auto forOp = dyn_cast<scf::ForOp>(op)) {
+      llvm::errs() << " | for#results=" << forOp.getNumResults()
+                   << " iter_args=" << forOp.getNumRegionIterArgs();
+    } else if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
+      llvm::errs() << " | while#results=" << whileOp.getNumResults()
+                   << " inits=" << whileOp.getInits().size();
+    }
+    return WalkResult::advance();
+  });
+  llvm::errs() << " | main_loops=" << mainLoopCount;
+  if (CVPipeline::hasFallbackAttr(module)) {
+    auto rc = module->getAttrOfType<IntegerAttr>(CVPipeline::ERRCODE_ATTR);
+    llvm::errs() << " | fallback_rc="
+                 << (rc ? rc.getInt() : CVPipeline::ERRCODE_FAILED);
+  }
+  llvm::errs() << "\n";
+}
+
 } // namespace mlir

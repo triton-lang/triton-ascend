@@ -28,6 +28,7 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopOps.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
@@ -66,14 +67,19 @@ void AddControlFlowConditionPass::runOnOperation() {
   ModuleOp module = getOperation();
 
   if (CVPipeline::hasFallbackAttr(module)) {
+    cfcTrace("AddControlFlowCondition", "SKIP (fallback already set)");
     return;
   }
 
+  cfcTrace("AddControlFlowCondition", "ENTER nested pipeline");
   LDBG("Enter add controlflow condition pass.\n");
   LDBG("before AddControlFlowCondition:");
   LLVM_DEBUG(module.dump());
+  cfcTraceModuleSummary("AddControlFlowCondition", module, "before");
 
   if (failed(verifyControlFlowPrerequisites(module))) {
+    cfcTrace("AddControlFlowCondition",
+             "SKIP (prerequisites failed / ssbuffer.skip)");
     return;
   }
 
@@ -82,21 +88,25 @@ void AddControlFlowConditionPass::runOnOperation() {
 
   // Step0: Clone ops in vector/cube to ensure that each block_id has its own
   // ops without sharing
+  cfcTrace("AddControlFlowCondition", "schedule Step0 CloneOps");
   pm.addPass(createCloneOpsPass());
 
   // Step1: Process shared iter_args in for ops to eliminate arg sharing across
   // block_ids
+  cfcTrace("AddControlFlowCondition", "schedule Step1 ProcessArgs");
   std::unique_ptr<ProcessArgsPass> processArgsPass(new ProcessArgsPass());
   processArgsPass->setConditionInfo(&info);
   pm.addPass(std::move(processArgsPass));
 
   // Step2: Create if ops based on block_id
+  cfcTrace("AddControlFlowCondition", "schedule Step2 CreateIfOps");
   std::unique_ptr<CreateIfOpsPass> createIfOpsPass(new CreateIfOpsPass());
   createIfOpsPass->setConditionInfo(&info);
   pm.addPass(std::move(createIfOpsPass));
 
   // Step3: Initialize crossCoreDependentMap, intraCoreDependentMap, and build
   // if block DAG
+  cfcTrace("AddControlFlowCondition", "schedule Step3 InitDependentMap");
   std::unique_ptr<InitDependentMapPass> initDependentMapPass(
       new InitDependentMapPass());
   initDependentMapPass->setConditionInfo(&info);
@@ -104,29 +114,40 @@ void AddControlFlowConditionPass::runOnOperation() {
 
   // Step4: Update for ops with block counters and inner dependency conditions,
   // and insert PIPE_S inter-core synchronization
+  cfcTrace("AddControlFlowCondition", "schedule Step4 UpdateLoopOps");
   std::unique_ptr<UpdateLoopOpsPass> updateLoopOpsPass(new UpdateLoopOpsPass());
   updateLoopOpsPass->setConditionInfo(&info);
   pm.addPass(std::move(updateLoopOpsPass));
 
   // Step5:Update the conditions of ifOp based on the intraCoreDependentMap and
   // crossCoreDependentMap
+  cfcTrace("AddControlFlowCondition", "schedule Step5 UpdateConditionInfo");
   auto updatePass = std::make_unique<UpdateConditionInfoPass>();
   updatePass->setConditionInfo(&info);
   pm.addPass(std::move(updatePass));
 
   // Step6: Update for loop iteration times based on intraCoreDependentMap
+  cfcTrace("AddControlFlowCondition", "schedule Step6 UpdateLoopIterTimes");
   std::unique_ptr<UpdateLoopIterTimesPass> updateLoopIterTimesPass(
       new UpdateLoopIterTimesPass());
   updateLoopIterTimesPass->setConditionInfo(&info);
   pm.addPass(std::move(updateLoopIterTimesPass));
 
   if (failed(runPipeline(pm, module))) {
+    cfcTrace("AddControlFlowCondition",
+             "FAIL nested runPipeline (pass crash/verify)");
     LDBG("Pass failed!");
     if (!CVPipeline::hasFallbackAttr(module)) {
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     }
+  } else if (CVPipeline::hasFallbackAttr(module)) {
+    cfcTrace("AddControlFlowCondition",
+             "FAIL nested pipeline soft-failed (fallback attr set by a step)");
+  } else {
+    cfcTrace("AddControlFlowCondition", "OK nested pipeline");
   }
 
+  cfcTraceModuleSummary("AddControlFlowCondition", module, "after");
   LDBG("Exit add controlflow condition pass.");
 }
 

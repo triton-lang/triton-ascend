@@ -19,10 +19,127 @@
 # THE SOFTWARE.
 
 from math import pi as math_pi
-from triton.language import core, math, semantic
+from triton.language import core, math, semantic, standard
 from triton._C.libtriton import ir
 from triton.runtime.jit import jit
 from triton.backends.ascend.utils import get_ascend_arch_from_env, is_compile_on_910_95, triton_enable_libdevice_simt
+
+
+class _FlipStaticRange:
+
+    def __init__(self, arg1, arg2=None, step=None):
+        self.step = core.constexpr(1) if step is None else step
+        if arg2 is None:
+            self.start = core.constexpr(0)
+            self.end = arg1
+        else:
+            self.start = arg1
+            self.end = arg2
+
+    def __iter__(self):
+        self._current = core._unwrap_if_constexpr(self.start)
+        self._end = core._unwrap_if_constexpr(self.end)
+        self._step = core._unwrap_if_constexpr(self.step)
+        return self
+
+    def __next__(self):
+        if self._current >= self._end:
+            raise StopIteration
+        value = self._current
+        self._current += self._step
+        return value
+
+
+@core.builtin
+def flip(ptr, dim=-1, _semantic=None, _generator=None):
+    """Flips a tensor along the specified dimension."""
+
+    def flip_impl(ptr: core.tensor, dim: int, builder: ir.builder, generator=None):
+
+        def _get_flip_dim(dim, shape):
+            dim = core._unwrap_if_constexpr(dim)
+            shape = core._unwrap_if_constexpr(shape)
+            if dim is None:
+                dim = len(shape) - 1
+            if dim < 0:
+                dim += len(shape)
+            return core.constexpr(dim)
+
+        def _log2(i: core.constexpr):
+            log2 = 0
+            n = core.constexpr(i).value
+            while n > 1:
+                n >>= 1
+                log2 += 1
+            return core.constexpr(log2)
+
+        def flip_simd(ptr: core.tensor, dim: int, builder: ir.builder):
+            shape = getattr(ptr, "shape", None)
+            if shape is None or shape == ():
+                shape = getattr(getattr(ptr, "type", None), "shape", None)
+
+            rank = None
+            if shape is not None:
+                try:
+                    rank = len(shape)
+                except Exception:
+                    rank = len(list(shape))
+
+            if rank is not None:
+                if rank < 1:
+                    raise ValueError("ascend.flip requires tensor rank >= 1")
+                norm_dim = dim if dim >= 0 else dim + rank
+                if not (0 <= norm_dim < rank):
+                    raise ValueError(f"ascend.flip got invalid dim={dim} for shape {tuple(shape)}")
+                dim = norm_dim
+            elif dim < 0:
+                raise ValueError("ascend.flip with unknown rank requires non-negative dim")
+
+            flipped_vals = builder.create_flip(ptr.handle, dim)
+            return core.tensor(flipped_vals, type=ptr.type)
+
+        if not builder.is_simt_mode():
+            return flip_simd(ptr, dim, builder)
+        if not (-len(ptr.shape) <= dim < len(ptr.shape)):
+            raise ValueError(f"invalid dim={dim} for shape {tuple(ptr.shape)}")
+        flip_dim = core._unwrap_if_constexpr(_get_flip_dim(dim, ptr.shape))
+        if not standard._is_power_of_two(ptr.shape[flip_dim]):
+            raise ValueError("flip in SIMT mode requires the flipped dimension to be a power of two")
+        steps = core._unwrap_if_constexpr(_log2(ptr.shape[flip_dim]))
+        if steps == 0:
+            return ptr
+
+        idtype = core.get_int_dtype(bitwidth=ptr.dtype.primitive_bitwidth, signed=True)
+        reshaped = core.reshape(
+            ptr.to(idtype, bitcast=True, _semantic=_semantic),
+            ptr.shape.__getitem__(slice(None, flip_dim)) + [2] * steps +
+            ptr.shape.__getitem__(slice(flip_dim + 1, None)),
+            _semantic=_semantic,
+            _generator=_generator,
+        )
+        for i in _FlipStaticRange(steps):
+            reduced = core.reduce(
+                reshaped,
+                flip_dim + i,
+                standard._xor_combine,
+                keep_dims=True,
+                _semantic=_semantic,
+                _generator=generator,
+            )
+            reshaped = reshaped.__xor__(reduced, _semantic=_semantic)
+        return core.reshape(reshaped, ptr.shape, _semantic=_semantic, _generator=_generator).to(
+            ptr.dtype,
+            bitcast=True,
+            _semantic=_semantic,
+        )
+
+    try:
+        dim = int(dim.value) if hasattr(dim, "value") else int(dim)
+    except Exception as exc:
+        raise TypeError(f"dim must be an integer (or tl.constexpr int), got {dim!r}") from exc
+
+    dim = len(ptr.shape) - 1 if dim == -1 else dim
+    return flip_impl(ptr, dim, _semantic.builder, _generator)
 
 
 @core.extern
@@ -256,15 +373,40 @@ def pow(arg0, arg1, _semantic=None):
         }, is_pure=True, _semantic=_semantic)
 
 
+@core._tensor_member_fn
+@jit
+@math._add_math_1arg_docstr("isfinited")
+def isfinited(arg0):
+    _is_int8_type: core.constexpr = arg0.dtype.is_int8()
+    core.static_assert(
+        not _is_int8_type,
+        "Expected dtype fp16/fp32/bf16, but got int8 or int1",
+    )
+    _is_floating_type: core.constexpr = arg0.dtype.is_floating()
+    core.static_assert(
+        _is_floating_type == True,
+        f"Expected dtype fp16/fp32/bf16, but got {core.constexpr(arg0.dtype)}",
+    )
+    nan_mask = isnan(arg0)
+    inf_mask = isinf(arg0)
+    return (~nan_mask & ~inf_mask).to(core.int1)
+
+
 @core.extern
+@math._add_math_1arg_docstr("finitef")
 def finitef(arg0, _semantic=None):
     if triton_enable_libdevice_simt():
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_finite_fp32", core.dtype("int1")),
         }, is_pure=True, _semantic=_semantic)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_finitef", core.dtype("int1")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    if arg0.dtype.is_int8():
+        raise ValueError("finitef only supports float32, but got int8 or int1")
+    if arg0.dtype != core.float32:
+        raise ValueError(f"finitef only supports float32, but got {core.constexpr(arg0.dtype)}")
+    nan_mask = isnan(arg0, _semantic=_semantic)
+    inf_mask = isinf(arg0, _semantic=_semantic)
+    return _semantic.logical_and(_semantic.not_(nan_mask), _semantic.not_(inf_mask))
 
 
 @core.extern
@@ -622,13 +764,15 @@ def rcp_ru(arg0, _semantic=None):
 
 
 @core.extern
+@math._check_dtype(dtypes=["fp32"])
+@math._add_math_1arg_docstr("precise square root (rounding to nearest wrt the IEEE standard)")
 def sqrt_rn(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.sqrt_rn for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_sqrt_rn_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_sqrt_rn_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    return core.tensor(_semantic.builder.create_precise_sqrt(arg0.handle), arg0.type)
 
 
 @core.extern
@@ -1235,7 +1379,8 @@ def ull2float_ru(arg0, _semantic=None):
 
 
 @core.extern
-def atan2(arg0, arg1, _semantic):
+@math._add_math_2arg_docstr("atan2")
+def atan2(arg0, arg1, _semantic=None):
     """
     Computes the arctangent of arg0/arg1, using signs to determine the quadrant.
 
@@ -1244,14 +1389,45 @@ def atan2(arg0, arg1, _semantic):
     :param arg1: The x-coordinate tensor. Supported dtypes: fp32, fp16.
     :type arg1: tl.tensor
     """
-    if arg0.dtype == core.dtype("bf16") or arg1.dtype == core.dtype("bf16"):
-        core.static_print("extern livdevice.atan2 for dtype bf16 is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise(
-        "", "", [arg0, arg1], {
-            (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_atan2_fp16", core.dtype("fp16")),
-            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_atan2_fp32", core.dtype("fp32")),
-        }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        if arg0.dtype == core.dtype("bf16") or arg1.dtype == core.dtype("bf16"):
+            core.static_print("extern livdevice.atan2 for dtype bf16 is unspported for now.")
+            core.static_assert(False)
+        return core.extern_elementwise(
+            "", "", [arg0, arg1], {
+                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_atan2_fp16", core.dtype("fp16")),
+                (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_atan2_fp32", core.dtype("fp32")),
+            }, is_pure=True, _semantic=_semantic)
+
+    arg0 = _semantic.to_tensor(arg0)
+    arg1 = _semantic.to_tensor(arg1)
+    pi = 3.1415926536
+    _is_int8_type_x: core.constexpr = arg1.dtype.is_int8()
+    core.static_assert(not _is_int8_type_x, "Expected dtype fp16/fp32/bf16, but got int8 or int1", _semantic=_semantic)
+    _is_int8_type_y: core.constexpr = arg0.dtype.is_int8()
+    core.static_assert(not _is_int8_type_y, "Expected dtype fp16/fp32/bf16, but got int8 or int1", _semantic=_semantic)
+    _is_floating_type_x: core.constexpr = arg1.dtype.is_floating()
+    core.static_assert(_is_floating_type_x == True,
+                       f"Expected dtype fp16/fp32/bf16, but got {core.constexpr(arg1.dtype)}", _semantic=_semantic)
+    _is_floating_type_y: core.constexpr = arg0.dtype.is_floating()
+    core.static_assert(_is_floating_type_y == True,
+                       f"Expected dtype fp16/fp32/bf16, but got {core.constexpr(arg0.dtype)}", _semantic=_semantic)
+    half_pi: core.constexpr = 0.5 * pi
+    arg0_fp32 = arg0.to(core.dtype("fp32"), _semantic=_semantic)
+    arg1_fp32 = arg1.to(core.dtype("fp32"), _semantic=_semantic)
+    atan_input = _semantic.truediv(arg0_fp32, arg1_fp32)
+    x_eq_zero = _semantic.equal(arg1, 0)
+    y_gt_zero = _semantic.greater_than(arg0, 0)
+    y_lt_zero = _semantic.less_than(arg0, 0)
+    x_lt_zero = _semantic.less_than(arg1, 0)
+    y_ge_zero = _semantic.greater_equal(arg0, 0)
+    base = _semantic.where(x_eq_zero, 0.0, atan(atan_input, _semantic=_semantic))
+    base = _semantic.where(_semantic.logical_and(x_eq_zero, y_gt_zero), half_pi, base)
+    base = _semantic.where(_semantic.logical_and(x_eq_zero, y_lt_zero), -half_pi, base)
+    add_pi = _semantic.where(_semantic.logical_and(x_lt_zero, y_ge_zero), pi, 0.0)
+    sub_pi = _semantic.where(_semantic.logical_and(x_lt_zero, y_lt_zero), -pi, 0.0)
+    ret = _semantic.add(_semantic.add(base, add_pi, True), sub_pi, True)
+    return ret.to(arg1.dtype, _semantic=_semantic)
 
 
 @core.builtin
@@ -1905,13 +2081,15 @@ def signbit(arg0, _semantic=None):
 
 
 @core.extern
+@math._check_dtype(dtypes=["fp32", "fp64"])
+@math._add_math_1arg_docstr("error function")
 def erf(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("livdevice.erf for simd is unspported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_erf_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_erf_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    return core.tensor(_semantic.builder.create_erf(arg0.handle), arg0.type)
 
 
 @core.extern
@@ -2462,15 +2640,27 @@ def llround(arg0, _semantic=None):
 
 
 @core.extern
+@math._add_math_1arg_docstr("absolute value")
 def abs(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.abs for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise(
-        "", "", [arg0], {
-            (core.dtype("fp32"), ): ("__hmf_abs_fp32", core.dtype("fp32")),
-            (core.dtype("int32"), ): ("__hmf_abs_i32", core.dtype("int32")),
-        }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise(
+            "", "", [arg0], {
+                (core.dtype("fp32"), ): ("__hmf_abs_fp32", core.dtype("fp32")),
+                (core.dtype("int32"), ): ("__hmf_abs_i32", core.dtype("int32")),
+            }, is_pure=True, _semantic=_semantic)
+
+    arg0 = _semantic.to_tensor(arg0)
+    dtype = arg0.dtype
+    if dtype.is_fp8e4b15():
+        mask = core.full(arg0.shape, 0x7F, core.int8, _semantic=_semantic)
+        return core.tensor(_semantic.builder.create_and(arg0.handle, mask.handle), arg0.type)
+    if dtype.is_floating():
+        return core.tensor(_semantic.builder.create_fabs(arg0.handle), arg0.type)
+    if dtype.is_int_signed():
+        return core.tensor(_semantic.builder.create_iabs(arg0.handle), arg0.type)
+    if dtype.is_int_unsigned():
+        return arg0
+    assert False, f"Unexpected dtype {dtype}"
 
 
 @core.extern
@@ -2484,13 +2674,15 @@ def brevll(arg0, _semantic=None):
 
 
 @core.extern
+@math._check_dtype(dtypes=["fp32", "fp64"])
+@math._add_math_1arg_docstr("ceil")
 def ceil(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.ceil for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_ceil_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_ceil_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    return core.tensor(_semantic.builder.create_ceil(arg0.handle), arg0.type)
 
 
 @core.extern
@@ -2504,43 +2696,62 @@ def clzll(arg0, _semantic=None):
 
 
 @core.extern
+@math._check_dtype(dtypes=["fp32", "fp64"])
+@math._add_math_1arg_docstr("cosine")
 def cos(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.cos for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_cos_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_cos_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    return core.tensor(_semantic.builder.create_cos(arg0.handle), arg0.type)
 
 
 @core.extern
+@math._check_dtype(dtypes=["fp32"])
+@math._add_math_2arg_docstr("precise division (rounding to nearest wrt the IEEE standard)")
 def div_rn(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.div_rn for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_div_rn_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_div_rn_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    arg1 = _semantic.to_tensor(arg1)
+    arg0, arg1 = core.binary_op_type_legalization(arg0, arg1, _semantic)
+    return core.tensor(_semantic.builder.create_precise_divf(arg0.handle, arg1.handle), arg0.type)
+
+
+@core.builtin
+@math._add_math_2arg_docstr("fast division")
+def fdiv(arg0, arg1, ieee_rounding=False, _semantic=None):
+    ieee_rounding = core._unwrap_if_constexpr(ieee_rounding)
+    arg0 = _semantic.to_tensor(arg0)
+    arg1 = _semantic.to_tensor(arg1)
+    return _semantic.fdiv(arg0, arg1, ieee_rounding)
 
 
 @core.extern
+@math._check_dtype(dtypes=["fp16", "fp32", "fp64"])
+@math._add_math_1arg_docstr("exponential")
 def exp(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.exp for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_exp_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_exp_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    return core.tensor(_semantic.builder.create_exp(arg0.handle), arg0.type)
 
 
 @core.extern
+@math._check_dtype(dtypes=["fp32", "fp64"])
+@math._add_math_1arg_docstr("exponential (base 2)")
 def exp2(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.exp2 for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_exp2_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_exp2_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    return core.tensor(_semantic.builder.create_exp2(arg0.handle), arg0.type)
 
 
 @core.extern
@@ -2564,23 +2775,31 @@ def float2half_rn(arg0, _semantic=None):
 
 
 @core.extern
+@math._check_dtype(dtypes=["fp32", "fp64"])
+@math._add_math_1arg_docstr("floor")
 def floor(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.floor for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_floor_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_floor_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    return core.tensor(_semantic.builder.create_floor(arg0.handle), arg0.type)
 
 
 @core.extern
+@math._add_math_3arg_docstr("fused multiply-add")
 def fma(arg0, arg1, arg2, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.fma for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1, arg2], {
-        (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fma_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0, arg1, arg2], {
+            (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fma_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    arg1 = _semantic.to_tensor(arg1)
+    arg2 = _semantic.to_tensor(arg2)
+    arg0, arg1 = core.binary_op_type_legalization(arg0, arg1, _semantic)
+    arg2, arg0 = core.binary_op_type_legalization(arg2, arg0, _semantic)
+    arg2, arg1 = core.binary_op_type_legalization(arg2, arg1, _semantic)
+    return core.tensor(_semantic.builder.create_fma(arg0.handle, arg1.handle, arg2.handle), arg0.type)
 
 
 @core.extern
@@ -2613,7 +2832,7 @@ def half2float(arg0, _semantic=None):
         core.static_print("libdevice.half2float for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp16"), ): ("__hmf_half2float_fp32", core.dtype("fp32")),
+        (core.dtype("fp16"), ): ("__hmf_half2float_fp16", core.dtype("fp32")),
     }, is_pure=True, _semantic=_semantic)
 
 
@@ -2628,23 +2847,27 @@ def llabs(arg0, _semantic=None):
 
 
 @core.extern
+@math._check_dtype(dtypes=["fp32", "fp64"])
+@math._add_math_1arg_docstr("natural logarithm")
 def log(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.log for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_log_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_log_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    return core.tensor(_semantic.builder.create_log(arg0.handle), arg0.type)
 
 
 @core.extern
+@math._check_dtype(dtypes=["fp32", "fp64"])
+@math._add_math_1arg_docstr("logarithm (base 2)")
 def log2(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.log2 for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_log2_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_log2_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    return core.tensor(_semantic.builder.create_log2(arg0.handle), arg0.type)
 
 
 @core.extern
@@ -2663,7 +2886,7 @@ def nan(arg0, _semantic=None):
         core.static_print("libdevice.nan for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_nanf_fp32", core.dtype("fp32")),
+        (core.dtype("fp32"), ): ("__hmf_nan_fp32", core.dtype("fp32")),
     }, is_pure=True, _semantic=_semantic)
 
 
@@ -2688,33 +2911,39 @@ def powif(arg0, arg1, _semantic=None):
 
 
 @core.extern
+@math._check_dtype(dtypes=["fp32", "fp64"])
+@math._add_math_1arg_docstr("inverse square root")
 def rsqrt(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.rsqrt for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_rsqrt_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_rsqrt_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    return core.tensor(_semantic.builder.create_rsqrt(arg0.handle), arg0.type)
 
 
 @core.extern
+@math._check_dtype(dtypes=["fp32", "fp64"])
+@math._add_math_1arg_docstr("sine")
 def sin(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.sin for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_sin_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_sin_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    return core.tensor(_semantic.builder.create_sin(arg0.handle), arg0.type)
 
 
 @core.extern
+@math._check_dtype(dtypes=["fp32", "fp64"])
+@math._add_math_1arg_docstr("fast square root")
 def sqrt(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.sqrt for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_sqrt_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_sqrt_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    return core.tensor(_semantic.builder.create_sqrt(arg0.handle), arg0.type)
 
 
 @core.extern
@@ -2748,13 +2977,16 @@ def umul64hi(arg0, arg1, _semantic=None):
 
 
 @core.extern
+@math._check_dtype(dtypes=["uint32", "uint64"])
+@math._add_math_2arg_docstr("most significant N bits of the 2N-bit product")
 def umulhi(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.umulhi for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_umulhi_u32", core.dtype("uint32")),
-    }, is_pure=True, _semantic=_semantic)
+    if triton_enable_libdevice_simt():
+        return core.extern_elementwise("", "", [arg0, arg1], {
+            (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_umulhi_u32", core.dtype("uint32")),
+        }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    arg1 = _semantic.to_tensor(arg1)
+    return core.tensor(_semantic.builder.create_umulhi(arg0.handle, arg1.handle), arg0.type)
 
 
 @core.extern

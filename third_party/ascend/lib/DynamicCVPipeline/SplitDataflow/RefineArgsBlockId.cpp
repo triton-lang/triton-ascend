@@ -39,20 +39,7 @@ static constexpr const char *DEBUG_TYPE = "refine-args-block-id";
 
 using namespace mlir::triton;
 
-int getLoopCarriedArgIndex(Value operand, Block *block) {
-  auto barg = dyn_cast<BlockArgument>(operand);
-  if (!barg || barg.getOwner() != block ||
-      !isa<scf::ForOp>(block->getParentOp())) {
-    return -1;
-  }
-  unsigned argIdx = barg.getArgNumber();
-  if (argIdx == 0) {
-    return -1;
-  }
-  return argIdx;
-}
-
-int findFirstUser(BlockArgument iterArg, Block *forBlock,
+int findFirstUser(Value iterArg, Block *forBlock,
                   CVPipeline::ComputeBlockIdManager &bm) {
   llvm::SetVector<Value> visited;
   SmallVector<std::pair<Value, int>> worklist;
@@ -90,9 +77,10 @@ bool isDependenceOther(Operation *yieldDefOp, Block *forBlock, int argsId,
       }
     } else {
       // if have block argument from for block. Skip;
-      if (getLoopCarriedArgIndex(operand, forBlock) != argsId + 1) {
+      if (CVPipeline::getLoopCarriedArgIndex(operand, forBlock) != argsId) {
         LOG_DEBUG("Yield def op depends on other arg:"
-                  << getLoopCarriedArgIndex(operand, forBlock) << "\n");
+                  << CVPipeline::getLoopCarriedArgIndex(operand, forBlock)
+                  << "\n");
         return true;
       }
     }
@@ -109,19 +97,27 @@ bool isDependenceOther(Operation *yieldDefOp, Block *forBlock, int argsId,
   return false;
 }
 
-void processOnefor(scf::ForOp forOp, CVPipeline::ComputeBlockIdManager &bm,
-                   const CVPipeline::MemoryDependenceGraph &memGraph) {
-
-  Block *forBlock = &forOp.getRegion().front();
-  auto yieldOp = dyn_cast<scf::YieldOp>(forBlock->getTerminator());
-  if (!yieldOp) {
-    LOG_DEBUG("No yield op found in for block\n");
+void processOneLoop(Operation *loopOp, CVPipeline::ComputeBlockIdManager &bm,
+                    const CVPipeline::MemoryDependenceGraph &memGraph) {
+  auto ml = CVPipeline::MainLoop(loopOp);
+  Block *loopBlock = nullptr;
+  for (Region &region : loopOp->getRegions()) {
+    if (auto *terminator = region.front().getTerminator()) {
+      if (isa<scf::YieldOp>(terminator)) {
+        loopBlock = &region.front();
+        break;
+      }
+    }
+  }
+  if (!loopBlock) {
+    LOG_DEBUG("No yield op found in loop block\n");
     return;
   }
-  ArrayRef<BlockArgument> iterArgs = forOp.getRegionIterArgs();
+  auto yieldOp = cast<scf::YieldOp>(loopBlock->getTerminator());
 
+  SmallVector<Value> iterArgs = ml.getIterArgs();
   for (size_t i = 0; i < iterArgs.size(); ++i) {
-    BlockArgument argsi = iterArgs[i];
+    auto argsi = iterArgs[i];
 
     Value yieldOperand = yieldOp.getOperand(i);
     Operation *yieldDefOp = yieldOperand.getDefiningOp();
@@ -132,14 +128,14 @@ void processOnefor(scf::ForOp forOp, CVPipeline::ComputeBlockIdManager &bm,
     }
     LOG_DEBUG("yieldDefOp: " << *yieldDefOp << "\n"
                              << "idx: " << i << "\n");
-    if (isDependenceOther(yieldDefOp, forBlock, i, memGraph)) {
+    if (isDependenceOther(yieldDefOp, loopBlock, i, memGraph)) {
       continue;
     }
 
     int updateBlockId = bm.getBlockIdByOp(yieldDefOp);
     LOG_DEBUG("Update block id for yield def op: " << updateBlockId << "\n");
 
-    int firstUserBlockId = findFirstUser(argsi, forBlock, bm);
+    int firstUserBlockId = findFirstUser(argsi, loopBlock, bm);
     LOG_DEBUG("First user block id: " << firstUserBlockId << "\n");
 
     if (firstUserBlockId != -1 && updateBlockId != firstUserBlockId) {
@@ -150,7 +146,7 @@ void processOnefor(scf::ForOp forOp, CVPipeline::ComputeBlockIdManager &bm,
       auto firstUserOps = bm.getOpsByBlockId(firstUserBlockId);
       Operation *lastOpInFirstUserBlock = nullptr;
       for (Operation *op : firstUserOps) {
-        if (op->getBlock() != forBlock)
+        if (op->getBlock() != loopBlock)
           continue;
         if (!lastOpInFirstUserBlock ||
             op->isBeforeInBlock(lastOpInFirstUserBlock)) {
@@ -175,11 +171,13 @@ void RefineArgsBlockIdPass::runOnOperation() {
   CVPipeline::ComputeBlockIdManager bm(moduleOp);
   auto &aa = getAnalysis<AliasAnalysis>();
   LOG_DEBUG(*moduleOp);
-  moduleOp.walk([&](scf::ForOp forOp) {
-    if (forOp->hasAttr("ssbuffer.main_loop")) {
-      auto memDepGraph = CVPipeline::MemoryDependenceGraph(forOp, aa);
-      processOnefor(forOp, bm, memDepGraph);
+  moduleOp.walk([&](Operation *op) {
+    if (!op->hasAttr(CVPipeline::kMainLoop) ||
+        !isa<scf::ForOp, scf::WhileOp>(op)) {
+      return;
     }
+    auto memDepGraph = CVPipeline::MemoryDependenceGraph(op, aa);
+    processOneLoop(op, bm, memDepGraph);
   });
 
   LOG_DEBUG("--- exit RefineArgsBlockIdPass --->\n");

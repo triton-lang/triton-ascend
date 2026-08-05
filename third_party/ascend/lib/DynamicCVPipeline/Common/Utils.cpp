@@ -10,6 +10,7 @@
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -204,6 +205,18 @@ bool isZeroFillValue(mlir::Value v) {
   return false;
 }
 
+bool isZeroAdd(mlir::Operation *op) {
+  if (isa<arith::AddFOp, arith::AddIOp>(op)) {
+    Value lhs = op->getOperand(0);
+    Value rhs = op->getOperand(1);
+    if (isZeroFillValue(lhs) || isZeroFillValue(rhs)) {
+      return true;
+    }
+    return false;
+  }
+  return false;
+}
+
 // Read the `hivm.tightly_coupled_buffer<N>` id attached to a `memref.alloc`
 // via its `annotation.mark` user. Returns nullopt when no annotation with
 // a concrete id is present, or when `allocVal` is null.
@@ -238,6 +251,86 @@ Value traceBackToMemrefAlloc(Value v) {
     break;
   }
   return v;
+}
+
+Block *MainLoop::getBody() const { return body; }
+
+Operation *MainLoop::getOperation() const { return op; }
+
+MLIRContext *MainLoop::getContext() const { return op->getContext(); }
+
+Location MainLoop::getLoc() const { return op->getLoc(); }
+
+Block *MainLoop::getBlock() const { return op->getBlock(); }
+
+Block::iterator MainLoop::getIterator() const { return op->getIterator(); }
+
+Operation *MainLoop::operator->() const { return op; }
+
+bool MainLoop::isWhile() const { return isa<scf::WhileOp>(op); }
+
+SmallVector<Value> MainLoop::getIterArgs() const {
+  SmallVector<Value> result;
+  if (auto f = dyn_cast<scf::ForOp>(op)) {
+    result.append(f.getRegionIterArgs().begin(), f.getRegionIterArgs().end());
+  } else if (auto w = dyn_cast<scf::WhileOp>(op)) {
+    Block::BlockArgListType args = w.getAfterBody()->getArguments();
+    result.append(args.begin(), args.end());
+  }
+  return result;
+}
+
+SmallVector<Value> MainLoop::getBeforeIterArgs() const {
+  SmallVector<Value> result;
+  if (auto w = dyn_cast<scf::WhileOp>(op)) {
+    Block::BlockArgListType args = w.getBeforeBody()->getArguments();
+    result.append(args.begin(), args.end());
+  }
+  return result;
+}
+
+MainLoop::MainLoop(Operation *loopOp) {
+  op = loopOp;
+  if (auto f = dyn_cast<scf::ForOp>(loopOp))
+    body = f.getBody();
+  else if (auto w = dyn_cast<scf::WhileOp>(loopOp))
+    body = w.getAfterBody();
+}
+
+scf::YieldOp MainLoop::getLoopYieldOp(Operation *loopOp) {
+  if (auto forOp = dyn_cast<scf::ForOp>(loopOp))
+    return dyn_cast<scf::YieldOp>(forOp.getBody()->getTerminator());
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp))
+    return dyn_cast<scf::YieldOp>(whileOp.getAfter().front().getTerminator());
+  return {};
+}
+
+int getLoopCarriedArgIndex(Value operand, Block *block) {
+  auto barg = dyn_cast<BlockArgument>(operand);
+  if (!barg || barg.getOwner() != block) {
+    return -1;
+  }
+
+  auto parentOp = block->getParentOp();
+  if (!isa<scf::ForOp, scf::WhileOp>(parentOp)) {
+    return -1;
+  }
+
+  auto *terminator = block->getTerminator();
+  if (!terminator || !isa<scf::YieldOp>(terminator)) {
+    return -1;
+  }
+
+  int numArgs = block->getNumArguments();
+  int numYieldOperands = terminator->getNumOperands();
+  int offset = numArgs - numYieldOperands;
+  int argIdx = barg.getArgNumber() - offset;
+
+  if (argIdx < 0 || argIdx >= numYieldOperands) {
+    return -1;
+  }
+
+  return argIdx;
 }
 
 } // namespace CVPipeline

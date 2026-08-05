@@ -50,6 +50,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
 
 using namespace mlir;
@@ -79,9 +80,22 @@ bool isDefinedInside(Value v, Operation *op) {
   return op->isProperAncestor(defOp);
 }
 
+static Value getAliasSource(Value val) {
+  auto *op = val.getDefiningOp();
+  if (!op) {
+    return nullptr;
+  }
+  return llvm::TypeSwitch<Operation *, Value>(op)
+      .Case([](ViewLikeOpInterface viewOp) { return viewOp.getViewSource(); })
+      .Case([](bufferization::ToTensorOp totensorOp) {
+        return totensorOp.getBuffer();
+      })
+      .Default([](auto) { return nullptr; });
+}
+
 Value getViewSource(Value val) {
-  while (auto viewLike = val.getDefiningOp<ViewLikeOpInterface>()) {
-    val = viewLike.getViewSource();
+  while (auto source = getAliasSource(val)) {
+    val = source;
   }
   return val;
 }
@@ -332,15 +346,25 @@ MemoryDependenceGraph::collectOuterEffects(Operation *op, bool &unknown,
 }
 
 AliasResult MemoryDependenceGraph::queryAlias(Value lhs, Value rhs) {
+  auto lhsSource = getViewSource(lhs);
+  auto rhsSource = getViewSource(rhs);
+  if (!rhsSource) {
+    rhsSource = rhs;
+  }
   auto isFuncEntryArg = [](const Value &val) -> bool {
     auto arg = llvm::dyn_cast<BlockArgument>(val);
-    return arg && arg.getOwner()->isEntryBlock();
+    if (!arg) {
+      return false;
+    }
+    auto *block = arg.getOwner();
+    return block->isEntryBlock() &&
+           llvm::isa<func::FuncOp>(block->getParentOp());
   };
   if (isFuncEntryArg(getViewSource(lhs)) &&
       isFuncEntryArg(getViewSource(rhs))) {
     return lhs == rhs ? AliasResult::MustAlias : AliasResult::NoAlias;
   }
-  return aa.alias(lhs, rhs);
+  return aa.alias(lhsSource, rhsSource);
 }
 
 SmallVector<MemoryDependenceGraph::MemSlot *>

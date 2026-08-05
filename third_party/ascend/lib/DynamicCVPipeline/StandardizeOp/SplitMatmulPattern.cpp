@@ -707,6 +707,8 @@ static LogicalResult splitMatmul(linalg::MatmulOp matmulOp,
                                                   splitInfo.outerOutValue);
     auto selectOp = rewriter.create<arith::SelectOp>(
         loc, executed, splitInfo.outerOutValue, fillOp.getResult(0));
+    fillOp->setAttr(CVPipeline::kForMayNotExec, rewriter.getUnitAttr());
+    selectOp->setAttr(CVPipeline::kForMayNotExec, rewriter.getUnitAttr());
     newOutValue = selectOp.getResult();
     preservedUsers.insert(selectOp);
     preservedUsers.insert(fillOp);

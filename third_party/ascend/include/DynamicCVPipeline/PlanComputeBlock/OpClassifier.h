@@ -130,8 +130,9 @@ private:
   // results are consumed exclusively by CUBE ops.
   int penetrateCubeIntoForLoops();
 
-  // Helper: decide whether an scf.for is a pure cube-loader loop
+  // Helper: decide whether an scf.for or scf.while is a pure cube-loader loop
   bool isCubeLoaderForOp(scf::ForOp forOp);
+  bool isCubeLoaderForWhileOp(scf::WhileOp whileOp);
 
   // Initialize the pass
   void initializePass(ModuleOp module);

@@ -437,7 +437,7 @@ InterCoreTransferAndSyncPass::findMainLoopforTransfer(Operation *endOp,
   }
   Operation *current = lca;
   while (current) {
-    if (isa<scf::ForOp>(current)) {
+    if (isa<scf::ForOp, scf::WhileOp>(current)) {
       return current;
     }
     current = current->getParentOp();
@@ -824,7 +824,7 @@ bool InterCoreTransferAndSyncPass::isStoreDirectlyInUserChain(
       }
 
       // Check if user is in skip range
-      if (CVPipeline::isViewLike(user)) {
+      if (CVPipeline::isViewLike(user) || CVPipeline::isZeroAdd(user) || user->hasAttr(CVPipeline::kForMayNotExec)) {
         // Continue traversing through skip ops
         for (Value result : user->getResults()) {
           if (!visited.count(result)) {

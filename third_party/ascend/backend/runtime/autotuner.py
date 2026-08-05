@@ -80,6 +80,14 @@ def _inject_default_simt_stack_limit(options: Dict[str, object], stack_limit: in
         options["simt_stack_limit"] = stack_limit
 
 
+def _format_autotune_timing(timing) -> str:
+    """Format the timing returned by the active autotune benchmarker."""
+    if isinstance(timing, (tuple, list)):
+        labels = ("p50", "p20", "p80")
+        return ", ".join(f"{label}={value:.4f} ms" for label, value in zip(labels, timing))
+    return f"mean={timing:.4f} ms"
+
+
 def _get_constexpr_candidates_from_fn(fn) -> List[str]:
     """
     Returns all constexpr parameter names from the kernel function definition.
@@ -2140,6 +2148,7 @@ class AutoTilingTuner(Autotuner):
         if self.print_autotuning and did_benchmark:
             print(f"Triton autotuning for function {self.base_fn.__name__} finished after "
                   f"{self.bench_time:.2f}s; best config selected: {self.best_config};")
+            self._print_benchmark_results(self.configs_timings)
 
         if did_benchmark and self.auto_profile_dir is not None:
             self._profile(*args, config=self.best_config, **kwargs)
@@ -2179,6 +2188,15 @@ class AutoTilingTuner(Autotuner):
         except Exception as e:
             if self.print_autotuning:
                 print(f"[WARN] encounter exception when try ubtune, Details: {e}")
+
+    def _print_benchmark_results(self, timings) -> None:
+        if not self.print_autotuning:
+            return
+
+        print(f"Triton autotuning benchmark results for function {self.base_fn.__name__}:")
+        for config, timing in timings.items():
+            selected = " [selected]" if config == self.best_config else ""
+            print(f"  config={config}; {_format_autotune_timing(timing)}{selected}")
 
     def _batch_bench(self, *args, configs, **kwargs):
         from triton.compiler.errors import CompileTimeAssertionFailure, MLIRCompilationError
@@ -2614,7 +2632,8 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore_va
 
     If the environment variable :code:`TRITON_PRINT_AUTOTUNING` is set to
     :code:`"1"`, Triton will print a message to stdout after autotuning each
-    kernel, including the time spent autotuning and the best configuration.
+    kernel, including the benchmark timing for each valid configuration, the
+    time spent autotuning, and the best configuration.
 
     :param configs: a list of :code:`triton.Config` objects
     :type configs: list[triton.Config]

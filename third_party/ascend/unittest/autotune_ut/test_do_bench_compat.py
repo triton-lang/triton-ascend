@@ -170,6 +170,62 @@ def test_autotilingtuner_marks_user_defined_do_bench():
     assert marker["called"] is False
 
 
+def test_print_benchmark_results_formats_quantiles_and_selected_config(capsys):
+
+    def _dummy_kernel():
+        return None
+
+    selected = Config({"BLOCK_SIZE": 128}, num_warps=4)
+    other = Config({"BLOCK_SIZE": 256}, num_warps=8)
+    tuner = object.__new__(AutoTilingTuner)
+    tuner.print_autotuning = True
+    tuner.base_fn = _dummy_kernel
+    tuner.best_config = selected
+
+    tuner._print_benchmark_results({
+        selected: (1.23456, 1.0, 1.8),
+        other: 2.34567,
+    })
+
+    output = capsys.readouterr().out
+    assert "Triton autotuning benchmark results for function _dummy_kernel:" in output
+    assert "config=BLOCK_SIZE: 128, num_warps: 4" in output
+    assert "p50=1.2346 ms, p20=1.0000 ms, p80=1.8000 ms [selected]" in output
+    assert "config=BLOCK_SIZE: 256, num_warps: 8" in output
+    assert "mean=2.3457 ms" in output
+
+
+def test_print_benchmark_results_is_disabled_without_debug_flag(capsys):
+    tuner = object.__new__(AutoTilingTuner)
+    tuner.print_autotuning = False
+
+    tuner._print_benchmark_results({Config({"BLOCK_SIZE": 128}): 1.0})
+
+    assert capsys.readouterr().out == ""
+
+
+def test_run_prints_benchmark_results_after_tuning(capsys):
+
+    def _dummy_kernel():
+        return None
+
+    selected = Config({"BLOCK_SIZE": 128}, num_warps=4)
+    other = Config({"BLOCK_SIZE": 256}, num_warps=8)
+    tuner, _ = _make_run_tuner([selected, other])
+    tuner.cache_results = False
+    tuner.print_autotuning = True
+    tuner.base_fn = _dummy_kernel
+    tuner._batch_bench = lambda *args, configs, **kwargs: {
+        selected: (1.0, 0.9, 1.1),
+        other: (2.0, 1.8, 2.2),
+    }
+
+    assert tuner.run() == "kernel-result"
+    output = capsys.readouterr().out
+    assert "Triton autotuning benchmark results for function _dummy_kernel:" in output
+    assert "p50=1.0000 ms, p20=0.9000 ms, p80=1.1000 ms [selected]" in output
+
+
 def test_ascend_autotune_decorator_forwards_do_bench(monkeypatch):
     import triton.backends.ascend.runtime.autotuner as ascend_autotuner
 

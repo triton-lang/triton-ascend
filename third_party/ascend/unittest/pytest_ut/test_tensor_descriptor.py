@@ -415,8 +415,7 @@ def test_host_tensor_descriptor_padding(padding):
     inp = torch.arange(IM * IN, device="npu", dtype=torch.float32).reshape(IM, IN)
     out = torch.zeros((OM, ON), device="npu", dtype=torch.float32)
 
-    in_desc = TensorDescriptor(inp, list(inp.shape), list(inp.stride()), [BLOCK_M, BLOCK_N],
-                               padding=padding)
+    in_desc = TensorDescriptor(inp, list(inp.shape), list(inp.stride()), [BLOCK_M, BLOCK_N], padding=padding)
     out_desc = TensorDescriptor(out, list(out.shape), list(out.stride()), [BLOCK_M, BLOCK_N])
 
     grid = (triton.cdiv(OM, BLOCK_M), triton.cdiv(ON, BLOCK_N))

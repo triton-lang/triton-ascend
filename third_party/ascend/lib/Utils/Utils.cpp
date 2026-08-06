@@ -329,8 +329,8 @@ Value getScalarValue(Value operand, Location loc,
           if (auto attr = dyn_cast<DenseElementsAttr>(c.getValue());
               attr && attr.isSplat()) {
             cond = arith::ConstantOp::materialize(
-                rewriter, attr.getSplatValue<Attribute>(), attr.getElementType(),
-                c.getLoc());
+                rewriter, attr.getSplatValue<Attribute>(),
+                attr.getElementType(), c.getLoc());
           } else {
             return nullptr;
           }

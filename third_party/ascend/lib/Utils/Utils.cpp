@@ -47,6 +47,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
@@ -709,6 +710,38 @@ SmallVector<int64_t> getUnbroadcastDims(RankedTensorType src,
     }
   }
   return unbroadcastDims;
+}
+
+bool isHoistablePointerBroadcast(triton::BroadcastOp op) {
+  auto resultType = dyn_cast<RankedTensorType>(op.getType());
+  auto sourceType = dyn_cast<RankedTensorType>(op.getSrc().getType());
+  if (!resultType || !sourceType ||
+      !isa<triton::PointerType>(resultType.getElementType()) ||
+      resultType.getRank() != sourceType.getRank()) {
+    return false;
+  }
+
+  int broadcastedDims = 0;
+  for (auto [srcDim, resultDim] :
+       llvm::zip(sourceType.getShape(), resultType.getShape())) {
+    if (srcDim == 1 && resultDim != 1) {
+      ++broadcastedDims;
+      continue;
+    }
+    if (srcDim != resultDim) {
+      return false;
+    }
+  }
+  if (broadcastedDims != 1) {
+    return false;
+  }
+
+  Value source = op.getSrc();
+  while (auto addPtr = source.getDefiningOp<triton::AddPtrOp>()) {
+    source = addPtr.getPtr();
+  }
+  auto splat = source.getDefiningOp<triton::SplatOp>();
+  return splat && isa<triton::PointerType>(splat.getSrc().getType());
 }
 
 } // namespace ConverterUtils

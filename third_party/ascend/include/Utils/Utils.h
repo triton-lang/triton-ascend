@@ -90,6 +90,11 @@ SmallVector<int64_t> getBroadcastDims(RankedTensorType src,
 SmallVector<int64_t> getUnbroadcastDims(RankedTensorType src,
                                         RankedTensorType dst);
 
+// Return true when a pointer broadcast can be lowered by the dedicated
+// pointer-broadcast hoister. Keep this predicate shared with earlier memory
+// rewrites so they do not destroy a legal form expected by that lowering.
+bool isHoistablePointerBroadcast(triton::BroadcastOp op);
+
 } // namespace ConverterUtils
 
 class ConversionPatternRewriter;

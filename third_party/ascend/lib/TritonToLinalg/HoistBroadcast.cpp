@@ -207,21 +207,13 @@ BroadcastHoister::replaceBroadcastOp(triton::BroadcastOp op,
 }
 
 bool BroadcastHoister::canBroadcast() {
-  auto resultType = dyn_cast<RankedTensorType>(opToHoist.getType());
-  auto srcType = dyn_cast<RankedTensorType>(opToHoist.getSrc().getType());
-  int broadcastedDims = 0;
-  for (size_t i = 0; i < resultType.getShape().size(); ++i) {
-    if (srcType.getShape()[i] == 1 && resultType.getShape()[i] != 1) {
-      broadcastedDims++;
-    }
-  }
-  if (broadcastedDims != 1) {
+  if (!ConverterUtils::isHoistablePointerBroadcast(opToHoist)) {
     LLVM_DEBUG({
       llvm::dbgs() << "Now cannot handle broadcast for ptr tensor with multi "
                       "broadcasted dimension.\n";
     });
     return false;
   }
-  return source != nullptr && isa<triton::PointerType>(source.getType());
+  return true;
 }
 } // namespace HoistBroadcast

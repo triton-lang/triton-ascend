@@ -716,8 +716,13 @@ MakeTensorPtrCanonicalizer::matchAndRewrite(triton::MakeTensorPtrOp op,
 LogicalResult
 ReduceSingleCanonicalizer::matchAndRewrite(triton::ReduceOp reduceOp,
                                            PatternRewriter &rewriter) const {
-  assert(reduceOp.getSrcs().size() <= 2 &&
-         "Only reduce or reduce with index are supported");
+  // This canonicalization only handles value reductions and value/index
+  // reductions.  Multi-input reductions, such as Welford's
+  // (mean, count, m2) reduction, must fall through to ReduceConverter's
+  // extended lowering instead of terminating the compiler here.
+  if (reduceOp.getSrcs().size() > 2)
+    return rewriter.notifyMatchFailure(
+        reduceOp, "only canonicalizes value and value/index reductions");
   auto src = reduceOp.getSrcs()[0];
   auto srcType = cast<RankedTensorType>(src.getType());
   auto srcShape = srcType.getShape();
@@ -1198,6 +1203,79 @@ LogicalResult ReduceConverter::convertToTargetOpExtended(
     triton::ReduceOp op, typename triton::ReduceOp::Adaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
+  auto operands = adaptor.getOperands();
+
+  // BiShengIR's VReduce lowering only supports a single value input (or a
+  // value/index pair).  A multi-input `tt.reduce`, such as Welford's
+  // (mean, count, m2) reduction, cannot be represented by that VReduceOp.
+  // Keep the current reduction body, but lower the static rank-1 scalar case
+  // to an explicit scalar loop so it never reaches the variadic VReduce path.
+  if (operands.size() > 2) {
+    auto inputType = dyn_cast<RankedTensorType>(operands.front().getType());
+    if (!inputType || inputType.getRank() != 1 || adaptor.getAxis() != 0 ||
+        ShapedType::isDynamic(inputType.getShape()[0]) ||
+        inputType.getShape()[0] < 1) {
+      return rewriter.notifyMatchFailure(
+          op, "multi-input reduce fallback requires static rank-1 axis-0 "
+              "inputs");
+    }
+    if (op.getResult().size() != operands.size()) {
+      return rewriter.notifyMatchFailure(
+          op, "multi-input reduce results do not match input count");
+    }
+
+    for (auto [i, operand] : llvm::enumerate(operands)) {
+      auto operandType = dyn_cast<RankedTensorType>(operand.getType());
+      if (!operandType || operandType.getShape() != inputType.getShape() ||
+          op.getResult()[i].getType() != operandType.getElementType()) {
+        return rewriter.notifyMatchFailure(
+            op, "multi-input reduce fallback requires matching scalar "
+                "results");
+      }
+    }
+
+    auto reduceBlock = op.getBody();
+    if (reduceBlock->getNumArguments() != 2 * operands.size() ||
+        reduceBlock->getTerminator()->getNumOperands() != operands.size()) {
+      return rewriter.notifyMatchFailure(
+          op, "unexpected multi-input reduce combine region");
+    }
+
+    Value zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+    Value one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+    Value upper =
+        rewriter.create<arith::ConstantIndexOp>(loc, inputType.getShape()[0]);
+    SmallVector<Value> initialValues;
+    initialValues.reserve(operands.size());
+    for (Value operand : operands)
+      initialValues.push_back(
+          rewriter.create<tensor::ExtractOp>(loc, operand, zero));
+
+    auto loop = rewriter.create<scf::ForOp>(
+        loc, one, upper, one, initialValues,
+        [&](OpBuilder &builder, Location loopLoc, Value inductionVar,
+            ValueRange iterArgs) {
+          IRMapping mapping;
+          for (auto [i, operand] : llvm::enumerate(operands)) {
+            Value current = builder.create<tensor::ExtractOp>(loopLoc, operand,
+                                                              inductionVar);
+            mapping.map(reduceBlock->getArgument(i), current);
+            mapping.map(reduceBlock->getArgument(i + operands.size()),
+                        iterArgs[i]);
+          }
+          for (Operation &innerOp : reduceBlock->without_terminator())
+            builder.clone(innerOp, mapping);
+
+          SmallVector<Value> yielded;
+          yielded.reserve(operands.size());
+          for (Value value : reduceBlock->getTerminator()->getOperands())
+            yielded.push_back(mapping.lookup(value));
+          builder.create<scf::YieldOp>(loopLoc, yielded);
+        });
+    rewriter.replaceOp(op, loop.getResults());
+    return success();
+  }
+
   auto elemTypes = op.getElementTypes();
 
   auto valueResultType = dyn_cast<RankedTensorType>(op.getType(0));

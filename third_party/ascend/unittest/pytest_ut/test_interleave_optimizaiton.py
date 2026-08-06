@@ -50,8 +50,9 @@ def torch_interleave_loadstore_with_mask(q, head_dim_half, bias, numel):
 @triton.jit
 def triton_interleave_load(q_ptr, k_ptr, head_dim_half: tl.constexpr, bias: tl.constexpr):
     d_indices = tl.program_id(0) + tl.arange(0, head_dim_half)
-    q_real = tl.load(q_ptr + d_indices * 2 + bias)
-    q_imag = tl.load(q_ptr + d_indices * 2 + 1 + bias)
+    q_base = q_ptr + bias
+    q_real = tl.load(q_base + d_indices * 2)
+    q_imag = tl.load(q_base + d_indices * 2 + 1)
     new_q_real = q_real
     new_q_imag = -q_imag
     tl.store(k_ptr + d_indices * 2 + bias, new_q_real)
@@ -63,8 +64,9 @@ def triton_interleave_load_with_mask(q_ptr, k_ptr, head_dim_half: tl.constexpr, 
                                      numel: tl.constexpr):
     d_indices = tl.program_id(0) + tl.arange(0, head_dim_half)
     mask = d_indices < numel
-    q_real = tl.load(q_ptr + d_indices * 2 + bias, mask)
-    q_imag = tl.load(q_ptr + d_indices * 2 + 1 + bias, mask)
+    q_base = q_ptr + bias
+    q_real = tl.load(q_base + d_indices * 2, mask)
+    q_imag = tl.load(q_base + d_indices * 2 + 1, mask)
     new_q_real = q_real
     new_q_imag = -q_imag
     tl.store(k_ptr + d_indices * 2 + bias, new_q_real, mask)
@@ -76,16 +78,19 @@ def triton_interleave_load_with_mask(q_ptr, k_ptr, head_dim_half: tl.constexpr, 
 def triton_interleave_loadstore_with_mask(q_ptr, head_dim_half: tl.constexpr, bias: tl.constexpr, numel: tl.constexpr):
     d_indices = tl.arange(0, head_dim_half)
     mask = d_indices < numel
-    q_real = tl.load(q_ptr + d_indices * 2 + bias, mask)
-    q_imag = tl.load(q_ptr + d_indices * 2 + 1 + bias, mask)
+    q_base = q_ptr + bias
+    q_real = tl.load(q_base + d_indices * 2, mask)
+    q_imag = tl.load(q_base + d_indices * 2 + 1, mask)
     new_q_real = q_real
     new_q_imag = -q_imag
-    tl.store(q_ptr + d_indices * 2 + bias, new_q_real, mask)
-    tl.store(q_ptr + d_indices * 2 + 1 + bias, new_q_imag, mask)
+    tl.store(q_base + d_indices * 2, new_q_real, mask)
+    tl.store(q_base + d_indices * 2 + 1, new_q_imag, mask)
 
 
 @pytest.mark.parametrize('para_type,data_type,head_dim_half,bias', [
     ['float32', torch.float32, 16, 4],
+    ['float32', torch.float32, 16, 64],
+    ['float32', torch.float32, 16, 65],
 ])
 def test_interleave(para_type, data_type, head_dim_half, bias):
     length = bias + head_dim_half * 2
@@ -100,6 +105,7 @@ def test_interleave(para_type, data_type, head_dim_half, bias):
 
 @pytest.mark.parametrize('para_type,data_type,head_dim_half,bias,numel', [
     ['float32', torch.float32, 16, 0, 8],
+    ['float32', torch.float32, 16, 64, 8],
 ])
 def test_interleave_with_mask(para_type, data_type, head_dim_half, bias, numel):
     length = bias + head_dim_half * 2
@@ -114,6 +120,7 @@ def test_interleave_with_mask(para_type, data_type, head_dim_half, bias, numel):
 
 @pytest.mark.parametrize('para_type,data_type,head_dim_half,bias,numel', [
     ['float32', torch.float32, 16, 0, 8],
+    ['float32', torch.float32, 16, 64, 8],
 ])
 def test_interleave_loadstore_with_mask(para_type, data_type, head_dim_half, bias, numel):
     length = bias + head_dim_half * 2

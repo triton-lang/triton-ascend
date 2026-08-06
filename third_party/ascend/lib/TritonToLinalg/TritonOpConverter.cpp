@@ -186,14 +186,19 @@ LogicalResult MakeTensorPtrConverter::matchAndRewrite(
 LogicalResult PreciseDivConverter::matchAndRewrite(
     triton::PreciseDivFOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
-  Value opa = op.getX();
-  Value opb = op.getY();
+  Value opa = adaptor.getX();
+  Value opb = adaptor.getY();
   auto loc = op.getLoc();
 
-  auto resType = dyn_cast<RankedTensorType>(op.getResult().getType());
-  auto divOp = rewriter.create<arith::DivFOp>(loc, resType, opa, opb);
+  if (opa.getType() != opb.getType())
+    return rewriter.notifyMatchFailure(op, "operands must have the same type");
 
-  rewriter.replaceOp(op, divOp);
+  // Let DivFOp infer its result type from converted operands.  PreciseDivFOp
+  // is valid for both scalar and tensor floating-point values; casting the
+  // original result to RankedTensorType made scalar divisions produce a null
+  // result type during partial conversion.
+  auto divOp = rewriter.create<arith::DivFOp>(loc, opa, opb);
+  rewriter.replaceOp(op, divOp.getResult());
   return success();
 }
 

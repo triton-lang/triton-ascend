@@ -26,11 +26,13 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
 #include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 
@@ -79,6 +81,11 @@ static bool findNearestConvergence(ArrayRef<Operation *> consumers,
         parent[user] = cur;
         bfsQueue.push_back({user, myIdx});
       } else if (it->second != myIdx) {
+        // Reject 1-step false convergence when `user` is itself a starting
+        // consumer — adjacent siblings are not a real two-branch merge.
+        if (llvm::is_contained(consumers, user)) {
+          continue;
+        }
         Operation *cons1 = consumers[it->second];
         Operation *cons2 = consumers[myIdx];
         Operation *convergenceOp = user;
@@ -116,6 +123,26 @@ static bool findNearestConvergence(ArrayRef<Operation *> consumers,
           }
         }
         chainOps.push_back(convergenceOp);
+
+        // Pull the convergence op's same-block VECTOR_ONLY direct users
+        // along so the moved convergence op doesn't leave its tail behind.
+        auto convBlockIdOpt = CVPipeline::getOpBlockId(convergenceOp);
+        if (convBlockIdOpt && *convBlockIdOpt >= 0) {
+          int convBlockId = *convBlockIdOpt;
+          for (Operation *user : convergenceOp->getUsers()) {
+            if (CVPipeline::getOpCoreType(user) !=
+                CVPipeline::CoreType::VECTOR_ONLY) {
+              continue;
+            }
+            auto userBidOpt = CVPipeline::getOpBlockId(user);
+            if (!userBidOpt || *userBidOpt != convBlockId) {
+              continue;
+            }
+            if (inChain.insert(user).second) {
+              chainOps.push_back(user);
+            }
+          }
+        }
         return true;
       }
     }
@@ -131,6 +158,12 @@ static void tryMergeSource(Operation *source,
     return;
   }
   int srcBlockId = *srcBlockIdOpt;
+
+  // Skip constants as merge sources: they have no axis semantics and their
+  // many users routinely trigger trivial 1-step BFS convergence.
+  if (mlir::isa<mlir::arith::ConstantOp>(source)) {
+    return;
+  }
 
   SmallVector<Operation *> consumers;
   for (Operation *user : source->getUsers()) {

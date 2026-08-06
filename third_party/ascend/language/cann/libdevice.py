@@ -244,7 +244,7 @@ def pow(arg0, arg1, _semantic=None):
     if arg1.dtype == core.dtype("int32"):
         arg1 = _semantic.cast(arg1, arg0.dtype)
 
-    if triton_enable_libdevice_simt():
+    if arg0.dtype == core.dtype("fp32") and is_compile_on_910_95():
         return core.extern_elementwise("", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_pow_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)

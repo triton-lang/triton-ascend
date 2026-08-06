@@ -295,6 +295,17 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
       return success();
   }
 
+  // AddPtrSplatConverter can preserve a non-singleton zero-stride dimension
+  // as a pointer broadcast. TritonToLinalg has a dedicated lowering for this
+  // legal form; rebuilding it here drops the zero-stride dimension from the
+  // pointer and mask while the value remains full-rank.
+  if (auto ptrBroadcast = oldPtr.getDefiningOp<triton::BroadcastOp>();
+      ptrBroadcast &&
+      ConverterUtils::isHoistablePointerBroadcast(ptrBroadcast)) {
+    return rewriter.notifyMatchFailure(
+        op, "defer hoistable pointer broadcast store to TritonToLinalg");
+  }
+
   MemOpTransformer tf(MemOpTransformer::MemType::store, optimizeDynamicOffset);
 
   auto newPtr = tf.createNewPtr(oldPtr, loc, rewriter);

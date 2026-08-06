@@ -581,6 +581,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 f"--custom-aiv-number={npu_utils.get_aivector_core_num()}",
             ]
 
+        if metadata.get("enable_partition_and_bind_sub_block", False):
+            _compile_option_list += ["--partition-and-bind-sub-block=load-balanced"]
+
         if force_disable_ffts():
             _compile_option_list += ["--disable-ffts"]
         if _is_ascend_sanitizer_enabled():
@@ -1063,6 +1066,7 @@ class NPUOptions:
     enable_ubuf_saving: bool = None
     enable_preload: bool = None
     enable_auto_bind_sub_block: bool = None
+    enable_partition_and_bind_sub_block: bool = False
     disable_tightly_coupled_buffer_reuse: bool = False
     enable_select_analysis: bool = True
     enable_hivm_auto_cv_balance: bool = None

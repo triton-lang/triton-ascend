@@ -141,7 +141,7 @@ def make_ttir(mod, metadata, opt):
     pm = ir.pass_manager(mod.context)
     pm.enable_debug()
     passes.common.add_inliner(pm)
-    passes.ttir.add_rewrite_tensor_pointer(pm)
+    # passes.ttir.add_rewrite_tensor_pointer(pm)
     passes.ttir.add_rewrite_tensor_descriptor_to_pointer(pm)
     passes.ttir.add_combine(pm)
     passes.common.add_canonicalizer(pm)

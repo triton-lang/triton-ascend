@@ -59,4 +59,4 @@ def test_indirect_load_pointer_cast_precise_size_e2e():
 
     expected = (block_table_cpu[positions_cpu // block_size] * block_size + positions_cpu % block_size).to(torch.int64)
 
-    assert torch.equal(out.cpu(), expected)
+    assert torch.equal(out.cpu(), expected.cpu())

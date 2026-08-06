@@ -51,6 +51,7 @@
 #include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Interfaces/CallInterfaces.h"
@@ -453,11 +454,10 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
     return failure();
   }
 
-  // Handle RTNE (default) rounding mode with arith.truncf/extf
-  auto srcType = cast<RankedTensorType>(input.getType());
-  auto dstType = cast<RankedTensorType>(resultType);
-  auto srcElemType = srcType.getElementType();
-  auto dstElemType = dstType.getElementType();
+  // Handle RTNE (default) rounding mode with arith.truncf/extf. This can be
+  // either a scalar conversion or a ranked tensor conversion.
+  auto srcElemType = getElementTypeOrSelf(input.getType());
+  auto dstElemType = getElementTypeOrSelf(resultType);
   if (!isa<FloatType>(srcElemType) || !isa<FloatType>(dstElemType)) {
     return op.emitError("FpToFp expects floating point types");
   }
@@ -471,12 +471,12 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
 
   if (srcBitwidth > dstBitwidth) {
     // Downcast: use arith.truncf with round_mode=rint
-    auto truncOp = rewriter.create<arith::TruncFOp>(loc, dstType, input);
+    auto truncOp = rewriter.create<arith::TruncFOp>(loc, resultType, input);
     truncOp->setAttr("round_mode", roundModeAttr);
     rewriter.replaceOp(op, truncOp.getResult());
   } else if (srcBitwidth < dstBitwidth) {
     // Upcast: use arith.extf with round_mode=rint
-    auto extOp = rewriter.create<arith::ExtFOp>(loc, dstType, input);
+    auto extOp = rewriter.create<arith::ExtFOp>(loc, resultType, input);
     extOp->setAttr("round_mode", roundModeAttr);
     rewriter.replaceOp(op, extOp.getResult());
   } else {

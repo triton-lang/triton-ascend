@@ -183,7 +183,9 @@ class NPULauncher(object):
         spec = importlib.util.spec_from_file_location("__triton_launcher", self.so_launcher_path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        self.launch = getattr(mod, "launch")
+        cst_key = lambda i: self.src.fn.arg_names.index(i) if isinstance(i, str) else i
+        signature = {cst_key(key): value for key, value in self.src.signature.items()}
+        self.launch = wrap_handle_tensordesc(getattr(mod, "launch"), signature)
 
     def _make_launcher_stub_path(self):
         header_src = generate_npu_header_src()
@@ -424,6 +426,8 @@ def generate_npu_header_src():
 def ty_to_cpp(ty):
     if ty[0] == '*':
         return "void*"
+    if ty.startswith("tensordesc"):
+        return "void*"
     return {
         "i1": "int32_t",
         "i8": "int8_t",
@@ -443,6 +447,34 @@ def ty_to_cpp(ty):
     }[ty]
 
 
+_BASE_ARGS_FORMAT = "iiiKKOOOO"
+_BASE_ARGS_FORMAT_LEN = len(_BASE_ARGS_FORMAT)
+
+
+def make_tensordesc_arg(arg):
+    return [arg.base, *arg.shape, *arg.strides, arg.padding == "nan", *arg.shape, *arg.strides]
+
+
+def wrap_handle_tensordesc(launcher, signature):
+    has_tensor_desc_arg = any(isinstance(sig, str) and sig.startswith("tensordesc") for sig in signature.values())
+    if not has_tensor_desc_arg:
+        return launcher
+
+    tensordesc_indices = set(
+        [i for i, sig in enumerate(signature.values()) if isinstance(sig, str) and sig.startswith("tensordesc")])
+
+    def inner(*args):
+        final_args = list(args[:_BASE_ARGS_FORMAT_LEN])
+        for i, arg in enumerate(args[_BASE_ARGS_FORMAT_LEN:]):
+            if i in tensordesc_indices:
+                final_args.extend(make_tensordesc_arg(arg))
+            else:
+                final_args.append(arg)
+        return launcher(*final_args)
+
+    return inner
+
+
 # the template is from triton-adapter HEAD. Wrapping the generated kernel binary into a python module
 def make_launcher(constants, signature, metadata):
     import os
@@ -458,16 +490,51 @@ def make_launcher(constants, signature, metadata):
     parallel_mode = metadata.parallel_mode
     enable_simt = ("simt" in parallel_mode) or metadata.force_simt_only
 
-    def _serialize_signature(sig):
+    def _expand_signature(signature):
+        output = []
+        # Expand tensor descriptor arguments into base pointer, shape and
+        # strides. Ascend always rewrites tensordesc to pointer (no TMA).
+        for sig in signature:
+            if isinstance(sig, str) and sig.startswith("tensordesc"):
+                match = re.match("tensordesc<([^[>]*)\\[([^]]*)\\]", sig)
+                dtype = match.group(1)
+                shape = match.group(2)
+                ndim = shape.count(",") + 1
+
+                output.append("*" + dtype)
+                # Currently the host side tensor descriptors get passed in as a
+                # tensor desc, shape, and strides. We have no way to use these
+                # shape and strides when processing tensor descriptors which is
+                # why we provide our own decomposition above. Sadly this means
+                # we have to pass the shape and strides twice.
+                for _ in range(2 * ndim):
+                    output.append("i64")
+                output.append("i1")
+
+                for _ in range(ndim):
+                    output.append("i32")
+                for _ in range(ndim):
+                    output.append("i64")
+            else:
+                output.append(sig)
+
+        return output
+
+    def _flatten_signature(sig, output):
+        # Flatten tuples
         if isinstance(sig, tuple):
-            return ','.join(map(_serialize_signature, sig))
-        return sig
+            for x in sig:
+                _flatten_signature(x, output)
+        else:
+            output.append(sig)
 
     def _extracted_type(ty):
         if isinstance(ty, tuple):
             val = ','.join(map(_extracted_type, ty))
             return f"[{val}]"
         if ty[0] == '*':
+            return "PyObject*"
+        if ty.startswith("tensordesc"):
             return "PyObject*"
         if ty in ("constexpr"):
             return "PyObject*"
@@ -478,6 +545,8 @@ def make_launcher(constants, signature, metadata):
             val = ''.join(map(format_of, ty))
             return f"({val})"
         if ty[0] == '*':
+            return "O"
+        if ty.startswith("tensordesc"):
             return "O"
         if ty in ("constexpr"):
             return "O"
@@ -525,11 +594,16 @@ def make_launcher(constants, signature, metadata):
         *args_expand
     """
 
+    expand_signature = _expand_signature(signature.values())
+    signature = {i: s for i, s in enumerate(expand_signature)}
+
     args_format = ''.join([format_of(ty) for ty in signature.values()])
-    format = "iiiKKOOOO" + args_format
-    signature = ','.join(map(_serialize_signature, signature.values()))
-    signature = list(filter(bool, signature.split(',')))
-    signature = {i: s for i, s in enumerate(signature)}
+    format = _BASE_ARGS_FORMAT + args_format
+
+    flat_signature = []
+    for sig in signature.values():
+        _flatten_signature(sig, flat_signature)
+    signature = {i: s for i, s in enumerate(flat_signature)}
     args_list = ', ' + ', '.join(f"&_arg{i}" for i, ty in signature.items()) if len(signature) > 0 else ''
     # Record the end of regular arguments;
     # subsequent arguments are architecture-specific descriptors.
@@ -570,10 +644,10 @@ def make_launcher(constants, signature, metadata):
     alloc_success_code = 'return 1;'
     sync_lock_fail_code = 'fprintf(stderr, "Error: syncBlockLock allocation failed\\n"); return;'
     workspace_fail_code = 'fprintf(stderr, "Error: workspace allocation failed\\n"); return;'
-    launch_signature_items = [(i, ty) for i, ty in signature.items() if i not in constants]
+    launch_signature_items = [(i, ty) for i, ty in signature.items() if ty != "constexpr"]
     launch_arg_count = len(launch_signature_items)
     launch_arg_ptrs = ', '.join(f'static_cast<const void*>(&arg{i})' for i, ty in launch_signature_items)
-    launch_arg_sizes = ', '.join(f'sizeof({ty_to_cpp(ty)})' for i, ty in launch_signature_items if ty != "constexpr")
+    launch_arg_sizes = ', '.join(f'sizeof({ty_to_cpp(ty)})' for i, ty in launch_signature_items)
 
     npu_utils_inst = NPUUtils()
     npu_utils_mod = getattr(npu_utils_inst, "npu_utils_mod", None)
@@ -1083,7 +1157,7 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
       {'void* ffts_addr __attribute__((aligned(8)));' if target_support_ffts else ''}
       {'void* syncBlockLock __attribute__((aligned(8)));' if not metadata.force_simt_only else ''}
       {'void* workspace_addr __attribute__((aligned(8)));' if not metadata.force_simt_only else ''}
-      {' '.join(f'{ty_to_cpp(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in signature.items() if i not in constants and ty != "constexpr")}
+      {' '.join(f'{ty_to_cpp(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in signature.items() if ty != "constexpr")}
       {' '.join(f'{ty_to_cpp(ty)} grid{mark} __attribute__((aligned(4)));' for mark, ty in grid_info.items())}
       {'void* DTData __attribute__((aligned(8)));' if enable_device_print else ''}
     }} args = {{
@@ -1091,7 +1165,7 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
       {('static_cast<void*>(syncBlockLock_ptr),' if lock_num > 0 else 'nullptr,') if not metadata.force_simt_only else ''}
       {('static_cast<void*>(workspace_addr_ptr),' if workspace_size > 0 else 'nullptr,') if not metadata.force_simt_only else ''}
       {(lambda _rt: (', '.join(_rt) + ',') if _rt else '')(
-        [f'static_cast<{ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if i not in constants and ty != "constexpr"]
+        [f'static_cast<{ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if ty != "constexpr"]
       )}
       {', '.join(f'static_cast<{ty_to_cpp(ty)}>(grid{mark})' for mark, ty in grid_info.items())}
       {', static_cast<void*>(DTData)' if enable_device_print else ''}

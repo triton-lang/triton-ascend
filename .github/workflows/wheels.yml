@@ -7,11 +7,11 @@ on:
   workflow_dispatch:
   push:
     branches: [release/**]
-  # pull_request:
-  #   paths:
-  #     - .github/workflows/wheels.yml
-  # schedule:
-  #   - cron: "0 8 * * *"
+  pull_request:
+    paths:
+      - .github/workflows/wheels.yml
+  schedule:
+    - cron: "0 8 * * *"
 
 concurrency:
   group: wheels-${{ github.ref }}
@@ -24,17 +24,19 @@ jobs:
   Build-Wheels:
     timeout-minutes: 360
     runs-on: ${{ matrix.config.runs_on }}
+    # container:
+    #   image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
 
     strategy:
       fail-fast: false
       matrix:
         config:
-        - {runs_on: 'ubuntu-22.04', arch: 'x86_64'}
-        - {runs_on: 'ubuntu-22.04-arm', arch: 'aarch64'}
+        - {runs_on: 'linux-amd64-cpu-4', arch: 'x86_64'}
+        - {runs_on: 'linux-aarch64-cpu-4', arch: 'aarch64'}
         python: ["cp310", "cp311", "cp312", "cp313"]
         branch:
         - {ref: 'main', tag: 'main', local: 'dev', path: '.'}
-        - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release', path: 'python'}
+        # - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release', path: 'python'}
 
     permissions:
       id-token: write
@@ -42,12 +44,11 @@ jobs:
 
     steps:
 
-      - name: Prune stale docker containers
-        run: |
-          # If cibuildwheel crashes (or, say, is OOM-killed), it leaves behind a
-          # docker container.  Eventually these consume all the disk space on
-          # this machine.
-          docker container prune -f
+      # NOTE: disabled on shared self-hosted runners to avoid interfering
+      # with other workloads.
+      # - name: Prune stale docker containers
+      #   run: |
+      #     docker container prune -f
 
       - name: Check for new commits
         if: github.event_name == 'push'
@@ -74,6 +75,24 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+      # - name: Install Python
+      #   run: |
+      #     # Self-hosted runners may not have Python pre-installed.
+      #     # setup-python action doesn't work on these runners (no tool cache).
+      #     if command -v python3 &> /dev/null; then
+      #       echo "Found $(python3 --version)"
+      #     elif command -v apt-get &> /dev/null; then
+      #       apt-get update && apt-get install -y python3 python3-pip
+      #     elif command -v yum &> /dev/null; then
+      #       yum install -y python3 python3-pip
+      #     elif command -v dnf &> /dev/null; then
+      #       dnf install -y python3 python3-pip
+      #     else
+      #       echo "ERROR: cannot install Python on this runner"
+      #       exit 1
+      #     fi
+      #     python3 --version
+      #     python3 -m pip install --upgrade pip
 
       - name: Cache build dependencies
         uses: actions/cache@v4
@@ -88,7 +107,7 @@ jobs:
       - name: Build wheels
         if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
         run: |
-          python --version
+          python3 --version
           # Make sure cibuildwheel is updated to latest, this will enable latest python builds
           python3 -m pip install cibuildwheel --upgrade --user
           # Pass MAX_JOBS=4 because, at time of writing, the VM "only" has 32GB

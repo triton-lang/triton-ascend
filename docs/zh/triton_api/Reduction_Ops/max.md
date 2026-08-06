@@ -15,13 +15,13 @@ triton.language.max(input, axis=None, return_indices=False, return_indices_tie_b
 | 参数名 | 类型 | 说明 |
 | :---: | :---: | --- |
 | `input` | `tensor` | 输入的张量数据 |
-| `axis`   | `int` | 指定在哪个维度上进行规约； axis = none时在所有轴进行规约 |
+| `axis`   | `int` | 指定在哪个维度上进行规约； axis = None时在所有轴进行规约 |
 | `keep_dims` | `bool` | 保持规约轴规约后的维度 |
-| `return_indices` | `bool` | if true, return index corresponding to the maximum value 除了返回最大值外，返回最大值所在下标 |
-| `return_indices_tie_break_left` | `bool` | 如果多个元素有相同的最大值，返回最左侧最大值的下标  if true, in case of a tie (i.e., multiple elements have the same maximum value), return the left-most index for values that aren’t NaN  |
+| `return_indices` | `bool` | 若为True，返回最大值对应的索引；否则仅返回最大值 |
+| `return_indices_tie_break_left` | `bool` | 如果多个元素有相同的最大值，返回最左侧最大值的下标（仅当 return_indices 为 True 时生效） |
 
 返回值：
-`tl.tensor`：同`input`的shape的张量
+`tl.tensor`：当keep_dims=True时，输出shape与input具有相同维度数（规约轴维度保持为1）；当keep_dims=False时，规约轴被移除（维度减少）
 return_indices = true，返回的index下标类型是fp32类型。
 
 参数组合支持：
@@ -67,7 +67,8 @@ return_indices = true，返回的index下标类型是fp32类型。
 
 更多示例参考triton-ascend代码仓，ascend/examples/generalization_cases/test_max.py
 
-```@triton.jit
+```python
+@triton.jit
 def triton_max_1d(in_ptr0, out_ptr1, xnumel, XBLOCK : tl.constexpr):
     xoffset = tl.program_id(0) + tl.arange(0, XBLOCK)
     tmp0 = tl.load(in_ptr0 + xoffset, None)
@@ -77,4 +78,4 @@ def triton_max_1d(in_ptr0, out_ptr1, xnumel, XBLOCK : tl.constexpr):
 
 ### 2.4 特殊限制
 
-Ascend A3 对比 GPU 不支持uint16、uint32、uint64、fp64
+Ascend A3 对比 GPU 不支持uint16、uint32、uint64

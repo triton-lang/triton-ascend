@@ -6,7 +6,7 @@
 
 该接口以 `extern "C"` 方式导出，与标准 Python JIT 调用路径（`@triton.jit` → `kernel[grid](...)`）**并列独立**——普通用户通过 `@triton.jit` 调用时不经过此函数；它面向的是需要 C 级别 kernel 发射能力的高级场景，如自定义部署流水线、推理引擎集成、同签名 kernel 复用等。
 
-每个 JIT 编译产物（launcher stub `.so`）中均包含一份由 `generate_npu_wrapper_src()` 动态生成的 `triton_launch_kernel`，其参数区内存布局受 kernel signature、metadata（workspace / syncBlockLock / coalesce）、device_print、ffts 等因素共同影响。调用方应注意不同编译产物之间的布局差异（详见[第 8 章](#8-限制与注意事项)）。
+每个 JIT 编译产物（launcher stub `.so`）中均包含一份由 `generate_npu_wrapper_src()` 动态生成的 `triton_launch_kernel`，其参数区内存布局受 kernel signature、metadata（workspace / syncBlockLock / coalesce）、device_print、ffts 等因素共同影响。调用方应注意不同编译产物之间的布局差异（详见[第 8 章](#limitations-and-notes)）。
 
 ## 2. 函数签名
 
@@ -61,7 +61,7 @@ void triton_launch_kernel(
 
 函数内部将所有发射参数组装到一段连续的 `std::vector<char> launch_args` 中，按以下顺序布局（各槽位按对齐要求偏移）：
 
-```
+```bash
 [ffts_addr] → [syncBlockLock_ptr] → [workspace_addr_ptr] →
 [kernel_arg_0] [kernel_arg_1] ... [kernel_arg_N-1] →
 [gridX] [gridY] [gridZ] →
@@ -91,7 +91,7 @@ void triton_launch_kernel(
 
 此路径**不经过** `triton_launch_kernel`，是 Triton 的标准调用方式：
 
-```
+```bash
 用户代码:  kernel[grid](args...)
   │
   ▼
@@ -115,7 +115,7 @@ rtKernelLaunch() → NPU 硬件执行
 
 面向需要 C 级别 kernel 发射的场景：
 
-```
+```bash
 第三方 C/C++ 代码
   │  dlopen / dlsym 获取 triton_launch_kernel 符号
   │  或直接链接 launcher stub .so
@@ -210,7 +210,7 @@ void launch_kernel_via_stub(
 }
 ```
 
-> **说明：** 示例中的 `func` 参数是 CANN runtime 注册后的 kernel function handle，获取方式（`rtDevBinaryRegister` / `rtFunctionRegister`）属于 CANN runtime 标准流程。当前仓内 `npu_utils.cpp` 中的 `loadKernelBinary` / `registerKernel` 函数提供了 Python 侧的封装实现，具体 API 签名请以 CANN 头文件（`runtime/kernel.h`）为准。关于这些辅助函数是否可作为公开 API 文档化，请参见[待确认事项](#待确认事项)。
+> **说明：** 示例中的 `func` 参数是 CANN runtime 注册后的 kernel function handle，获取方式（`rtDevBinaryRegister` / `rtFunctionRegister`）属于 CANN runtime 标准流程。当前仓内 `npu_utils.cpp` 中的 `loadKernelBinary` / `registerKernel` 函数提供了 Python 侧的封装实现，具体 API 签名请以 CANN 头文件（`runtime/kernel.h`）为准。
 
 ### 6.2 Python ctypes 示例
 
@@ -290,6 +290,8 @@ add_kernel[grid](x, y, output, 1024, BLOCK_SIZE=256)
 
 > **注意：** 以上默认值仅在 `release/3.2.2` 分支中验证。其他分支或版本可能有不同默认值，请以实际源码为准。
 
+<a id="limitations-and-notes"></a>
+
 ## 8. 限制与注意事项
 
 ### 平台限制
@@ -325,5 +327,3 @@ add_kernel[grid](x, y, output, 1024, BLOCK_SIZE=256)
 - `kernel_args` 深拷贝增加 `sum(arg_sizes[i])` 字节的临时内存开销
 - `shapes_data` / `shape_dims` / `tensor_kinds` 主要用于 msprof tensor 信息上报；不传（设为 `nullptr`）不影响 kernel 正确性，但 profiler 中 tensor 信息将缺失
 - 该接口生成的代码依赖 CANN 运行时版本，升级 CANN 后需重新编译 launcher stub
-
----

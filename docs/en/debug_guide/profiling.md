@@ -12,13 +12,13 @@ The msProf performance analysis tool is used to collect and analyze key performa
 
 The following command is an example of collecting performance data of an operator on a board. You can flexibly combine and configure parameters as required. In the example, **--output** is an optional parameter for specifying the path for storing the collected performance data. **--kernel-name** is an optional parameter for specifying the performance data of a single kernel to be collected. If it is not specified, only the first operator scheduled during the program execution is collected. **$HOME/projects/test_op.py** is the executable script of the operator.
 
-```python
+```bash
 msprof op --kernel-name=target_kernel_name --output=$HOME/projects/output python3 $HOME/projects/test_op.py
 ```
 
 The following uses the [05-layer-norm.py](./../../../third_party/ascend/tutorials/05-layer-norm.py) test case as an example (the generated data file is saved in the current path when **if --output** is not specified):
 
-```python
+```bash
 msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
 ```
 
@@ -31,7 +31,7 @@ msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
 The operator optimization tool msProf supports profile data collection and automatic parsing in a simulation environment. For details about how to obtain the simulation pipeline diagram by using the msProf tool, see [Pipeline diagram](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/optool/atlasopdev_16_0087.html).
 The command for generating the operator simulation pipeline diagram is similar to that for collecting operator board performance data. The preceding `03-layer-norm.py` is used as an example. `--soc-version` is used to specify the hardware version of the current machine. You can enter `npu-smi info` in the terminal to view the hardware version.
 
-```python
+```bash
 # Path of the source simulator
 export LD_LIBRARY_PATH=$HOME/CANN/Install_CANN/Ascend/ascend_toolkit/latest/tools/simulator/{soc-version}/lib:$LD_LIBRARY_PATH
 # Collecting the operator simulation pipeline diagram
@@ -117,7 +117,7 @@ View the **op_summary_\*.csv** file parsed by board profiling to analyze the pip
 
     In ideal cases, the utilization rate of each pipeline should be 100%. Any pipeline falling short of this target represents room for improvement. The preceding figure shows the data obtained from an AI processor. In the first scenario of the Vector operator _layer_norm_fwd_fused, the Vector pipeline utilization **aiv_vec_ratio** is less than 10%, indicating that the computing power is not fully utilized. The Scalar pipeline utilization **aiv_scalar_ratio** is about 60%, indicating that Scalar is the longest pipeline. \
     When Scalar is the longest pipeline, analyze whether complex operations are performed on scalar values in the operator source code. The SIMD microarchitecture of Ascend is more suitable for multi-data parallel computing. Another possibility is that the Triton software stack degrades vector computing to scalar computing because some instructions do not support specific data types on the hardware. Optimization should involve both pipeline and scalar optimization methods. For details, see method 3 to view the simulation pipeline diagram and method 4 to view the code hotspots for further analysis. \
-    For more general cases such as MTE2 data transfer and actual scenarios: The shapes of the three input matrices are (128,128), (128,1), and (128,1), respectively, and the data type is float16. The current algorithm uses the two-pass method. Therefore, X is moved in for three times, and W and B are moved in for one time. The total amount of data to be transferred can be calculated accordingly. The theoretical value calculated based on the method described in the [Theoretical Parameters](#theoretical-parameters) section is sizeof(float16) *(128* 128 * 3 + 128 + 128)/1.8 TB/s ≈ 0.1991 μs (calculated based on 1 TB = 10<sup>12</sup> Byte), which is greatly different from the actual performance data aiv_mte2_time. Analysis shows the total input size is smaller than the Unified Buffer (UB) capacity (192 KB for the A2 model). Therefore, if the MTE2 time is excessive, the basic block obtained through tiling computation may be too small, triggering redundant transfer instructions. In this case, pipeline optimization and tiling optimization are required, you can refer to method 3 to view the simulation pipeline diagram and analyze each pipeline for further analysis.
+    For more general cases such as MTE2 data transfer and actual scenarios: The shapes of the three input matrices are (128,128), (128,1), and (128,1), respectively, and the data type is float16. The current algorithm uses the two-pass method. Therefore, X is moved in for three times, and W and B are moved in for one time. The total amount of data to be transferred can be calculated accordingly. The theoretical value calculated based on the method described in the [Theoretical Parameters](#theoretical-parameters) section is sizeof(float16) *(128* 128 * 3 + 128 + 128)/1.8 TB/s ≈ 0.055 μs (calculated based on 1 TB = 10<sup>12</sup> Bytes), which is greatly different from the actual performance data aiv_mte2_time. Analysis shows the total input size is smaller than the Unified Buffer (UB) capacity (192 KB for the A2 model). Therefore, if the MTE2 time is excessive, the basic block obtained through tiling computation may be too small, triggering redundant transfer instructions. In this case, pipeline optimization and tiling optimization are required, you can refer to method 3 to view the simulation pipeline diagram and analyze each pipeline for further analysis.
 
 - Method 2: Use board profiling to analyze the tiling.
 The AI processor used in the previous example has 48 vector cores. The _layer_norm_fwd_fused operator is a pure vector operator. However, in some scenarios, too many blocks (Block Dim > 48) are delivered, causing excessive host scheduling overhead. In this case, the next step is to optimize the tiling.
@@ -178,7 +178,7 @@ def npu_vector_cmp_kernel(
     mean = tl.sum(x, axis=0) / N
     tl.store(Mean + row, mean)
 
--   xbar = tl.where(cols < N, x - mean, 0.0) # N is a scalar value.
+-   xbar = tl.where(cols < N, x - mean, 0.0) # N is the column count.
 
 +   # change cols(i64) into cols_cmp(f32) to enable vector processing
 +   cols_cmp = cols.to(tl.float32)

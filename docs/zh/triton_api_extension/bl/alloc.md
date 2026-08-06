@@ -26,7 +26,7 @@
     <td>说明</td>
   </tr>
   <tr>
-    <td>type</td>
+    <td>etype</td>
     <td>tl.dtype</td>
     <td>是</td>
     <td>数据类型/element type</td>

@@ -12,6 +12,10 @@ set(ASCENDNPU_IR_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/AscendNPU-IR")
 set(BISHENGIR_ENABLE_A5_UNPUBLISHED_FEATURES ON)
 set(BISHENGIR_BUILD_STANDALONE_IR_ONLY ON)
 
+set(TRITON_DISTRIBUTED_ASCEND_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Triton-distributed-ascend" CACHE PATH
+    "Path to Triton-distributed-ascend source root")
+set(TRITON_DISTRIBUTED_ASCEND_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/Triton-distributed-ascend")
+
 # Temporarily save and clear the RULE_LAUNCH_* attributes in the current directory to ensure AscendNPU-IR is not affected.
 get_property(_saved_launch_compile DIRECTORY PROPERTY RULE_LAUNCH_COMPILE)
 get_property(_saved_launch_link DIRECTORY PROPERTY RULE_LAUNCH_LINK)
@@ -31,6 +35,44 @@ add_subdirectory(bin)
 add_subdirectory(include)
 add_subdirectory(lib)
 
+if(TRITON_BUILD_DISTRIBUTED)
+  if(NOT EXISTS "${TRITON_DISTRIBUTED_ASCEND_SRC_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "Triton-Distributed submodule is not initialized: ${TRITON_DISTRIBUTED_ASCEND_SRC_DIR}")
+  endif()
+
+  set(TRITON_USE_ASCEND ON)
+  add_compile_definitions(TRITON_USE_ASCEND=1)
+
+  if(TRITON_BUILD_PYTHON_MODULE)
+    # Python3::Module / pybind11::headers targets are created in the root
+    # CMakeLists.txt *after* this directory is processed, so resolve them here
+    # when the distributed plugin needs them.
+    if(NOT Python3_FOUND OR NOT TARGET Python3::Module)
+      find_package(Python3 REQUIRED COMPONENTS Development Interpreter)
+    endif()
+    if(NOT pybind11_FOUND)
+      find_package(pybind11 CONFIG REQUIRED HINTS "${Python3_SITELIB}")
+    endif()
+    include_directories(${Python3_INCLUDE_DIRS})
+    include_directories(${pybind11_INCLUDE_DIR})
+  endif()
+
+  include_directories(${TRITON_DISTRIBUTED_ASCEND_SRC_DIR}/include)
+  include_directories(${TRITON_DISTRIBUTED_ASCEND_BINARY_DIR}/include)
+  add_subdirectory(${TRITON_DISTRIBUTED_ASCEND_SRC_DIR}/include/TritonDistributed
+                   ${TRITON_DISTRIBUTED_ASCEND_BINARY_DIR}/include/TritonDistributed)
+  add_subdirectory(${TRITON_DISTRIBUTED_ASCEND_SRC_DIR}/lib
+                   ${TRITON_DISTRIBUTED_ASCEND_BINARY_DIR}/lib)
+
+  if(TRITON_BUILD_PYTHON_MODULE)
+    set(PYTHON_DIST_SRC_PATH ${TRITON_DISTRIBUTED_ASCEND_SRC_DIR}/python/src)
+    add_triton_plugin(TritonDistributed
+      ${PYTHON_DIST_SRC_PATH}/triton_distributed.cc
+      ${PYTHON_DIST_SRC_PATH}/ascend_passes.cc
+      ${PYTHON_DIST_SRC_PATH}/ir.cc)
+    target_link_libraries(TritonDistributed PRIVATE DistributedIR Python3::Module pybind11::headers)
+  endif()
+endif()
 
 option(TRITON_ASCEND_ENABLE_COSTMODEL_INPROC "Enable in-process costmodel C++ bridge" ON)
 if(TRITON_ASCEND_ENABLE_COSTMODEL_INPROC)

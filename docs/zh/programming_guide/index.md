@@ -119,7 +119,7 @@ def add_kernel(x_ptr,
 
 ### 尽量保证Tensor的尾轴大小数据对齐
 
-【描述】对于VV类算子需要调用Vector核计算时，昇腾硬件的UB要求Tensor的尾轴大小能被32Bytes整除，而对于CV类算子需要调用vector核和Cube核计算时，要求Tensor的尾轴大小能被512Bytes整除，若尾轴长度不足则会自动补齐。在此前提下，对模型中shape为(2048,3)和(2048,1)Tensor的种种操作，都会因为自动补齐导致性能明显恶化，此时可考虑通过转置操作将对齐轴转到低维，直到store时再转置为原始状态，从而规避自动补齐，优化计算速度。同时由于转置操作本身也受自动补齐规则的影响，因此同样需要特殊技巧来规避补齐。这里列出一个"借轴转置"的tip，适用于**tensor.numel() % 256Byte == 0**的场景，具体操作如下：
+【描述】对于VV类算子需要调用Vector核计算时，昇腾硬件的UB要求Tensor的尾轴大小能被32Byte整除，而对于CV类算子需要调用vector核和Cube核计算时，要求Tensor的尾轴大小能被512Byte整除，若尾轴长度不足则会自动补齐。在此前提下，对模型中shape为(2048,3)和(2048,1)Tensor的种种操作，都会因为自动补齐导致性能明显恶化，此时可考虑通过转置操作将对齐轴转到低维，直到store时再转置为原始状态，从而规避自动补齐，优化计算速度。同时由于转置操作本身也受自动补齐规则的影响，因此同样需要特殊技巧来规避补齐。这里列出一个"借轴转置"的tip，适用于**tensor.numel() % 256Byte == 0**的场景，具体操作如下：
 
 - 注：VV类算子表示该类算子在运算过程中只使用了Vector Core；CV类算子表示该类算子运算过程中既使用了AI Core又使用了Vector Core。
 - 示例
@@ -127,7 +127,7 @@ def add_kernel(x_ptr,
 ```python
 # conv_state = tensor([2048, 3], bfloat16)
 conv_state = tl.load(conv_state_ptr + conv_batch_offs * conv_batch_stride + doffs * 3 + tl.arange(0, 2048 * 3)) # 当成1D tensor load，此时由于numel对齐，不会自动补齐。
-conv_state_T = conv_state.reshape(128, 16 * 3).trans().reshape(16, 3 * 128).trans().reshape(3 * 2048,) # 长轴(2048)裂出一根对齐轴(16)借给短轴(3)，从而让两个轴都对齐
+conv_state_T = conv_state.reshape(128, 16 * 3).transpose().reshape(16, 3 * 128).transpose().reshape(3 * 2048,) # 长轴(2048)裂出一根对齐轴(16)借给短轴(3)，从而让两个轴都对齐
 ```
 
 ### 先将数据搬运到UB上，再从UB中select目标值
@@ -136,7 +136,7 @@ conv_state_T = conv_state.reshape(128, 16 * 3).trans().reshape(16, 3 * 128).tran
 
 - 示例
 
-```diff
+```python
 @triton.jit
 def pick_kernel(
         x_ptr,
@@ -402,7 +402,7 @@ f'{torch.max(torch.abs(output_torch - output_triton))}')
 例:
 
  ```diff
-BLOCK_SIZE = 256  # 256 * 4 bytes = 1024 bytes，对齐良好
+BLOCK_SIZE = 256  # 256 * 4 Byte = 1024 Byte，对齐良好
 
 @triton.jit
 def vec_add_kernel(X, Y, Z, N,

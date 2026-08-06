@@ -2424,13 +2424,10 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
       }
     };
 
-    auto lhsFmt = convertFormat(lhsElemType);
-    auto rhsFmt = convertFormat(rhsElemType);
-
     Value matmulMxResult = rewriter.create<hfusion::MatMulMxOp>(
         loc, dstType, lhs, rhs, lhsScale, rhsScale, acc,
-        /*lhsFormat(optional)*/ nullptr,
-        /*rhsFormat(optional)*/ nullptr);
+        /*lhsFormat(optional)*/ convertFormat(lhsElemType),
+        /*rhsFormat(optional)*/ convertFormat(rhsElemType));
 
     Value finalResult = matmulMxResult;
     if (dstType.getElementType().isBF16()) {

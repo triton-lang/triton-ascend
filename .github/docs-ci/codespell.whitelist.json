@@ -321,5 +321,7 @@
   "vllm",
   "topk",
   "rtol",
-  "atol"
+  "atol",
+  "ffts",
+  "ctypes"
 ]

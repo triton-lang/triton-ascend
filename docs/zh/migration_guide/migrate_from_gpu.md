@@ -51,11 +51,11 @@ NPU 与 GPU 的计算单元和支持的数据类型存在差异。迁移后应�
 
 ```diff
 import torch
-+import torch_npu  # 【新增】导入昇腾NPU PyTorch适配库，提供NPU设备支持
+import torch_npu  # 【新增】导入昇腾NPU PyTorch适配库，提供NPU设备支持
 import triton
 import triton.language as tl
 
--DEVICE = triton.runtime.driver.active.get_active_torch_device()  # 【删除】GPU设备自动获取，NPU无需此逻辑
+# DEVICE = triton.runtime.driver.active.get_active_torch_device()  # 【删除】GPU设备自动获取，NPU无需此逻辑
 
 @triton.jit
 def add_kernel(
@@ -76,7 +76,7 @@ def add_kernel(
 
 def add(x: torch.Tensor, y: torch.Tensor):
     output = torch.empty_like(x)
--    assert x.device == DEVICE and y.device == DEVICE and output.device == DEVICE  # 【删除】GPU设备一致性校验，NPU无需显式断言
+    # assert x.device == DEVICE and y.device == DEVICE and output.device == DEVICE  # 【删除】GPU设备一致性校验，NPU无需显式断言
     n_elements = output.numel()
     grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
     add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
@@ -84,10 +84,10 @@ def add(x: torch.Tensor, y: torch.Tensor):
 
 torch.manual_seed(0)
 size = 98432
--x = torch.rand(size, device='cuda')  # 【删除】GPU设备指定
-+x = torch.rand(size, device='npu')  # 【修改】指定为昇腾NPU设备
--y = torch.rand(size, device='cuda')  # 【删除】GPU设备指定
-+y = torch.rand(size, device='npu')  # 【修改】指定为昇腾NPU设备
+# x = torch.rand(size, device='cuda')  # 【删除】GPU设备指定
+x = torch.rand(size, device='npu')  # 【修改】指定为昇腾NPU设备
+# y = torch.rand(size, device='cuda')  # 【删除】GPU设备指定
+y = torch.rand(size, device='npu')  # 【修改】指定为昇腾NPU设备
 output_torch = x + y
 output_triton = add(x, y)
 print(output_torch)
@@ -123,11 +123,11 @@ def test_npu_1d(shape, dtype):
     XS = shape[0]
     YS = 4
 
--    x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='cuda')
-+    x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='npu')
+    # x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='cuda')
+    x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='npu')
     std = torch.broadcast_to(x, (YS, XS))
--    output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='cuda')
-+    output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='npu')
+    # output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='cuda')
+    output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='npu')
     fn_broadcast_1d[(1,)](output, x, XS, YS)
     assert torch.allclose(std, output)
 ```
@@ -362,7 +362,7 @@ def masked_fill(inp, expand_mask, value):
 
 ### 为什么会出现UBSIZE超出内存的错误
 
-切分不合理,存在过多的非对齐访存或者运算，例如对（64，32）二维数据搬运，对应stride(12832，128),如果是对齐数据的访存，对应的stride(32,1)。 对于非对齐访问内容，在最内轴新增一个大小为1的轴，变为（64，32，4） 由于硬件要求vector算子场景ub内存32bytes对齐 ，假设type=float16，对应stride应该为(12832, 128,1)
+切分不合理,存在过多的非对齐访存或者运算，例如对（64，32）二维数据搬运，对应stride(12832，128),如果是对齐数据的访存，对应的stride(32,1)。对于非对齐访问内容，在最内轴新增一个大小为1的轴，变为（64，32，4）由于硬件要求vector算子场景ub内存32Byte对齐，假设type=float16，对应stride应该为(12832, 128,1)
 
 ### 离散访存代码逐行对比观察scalar低效映射
 
@@ -372,8 +372,8 @@ def masked_fill(inp, expand_mask, value):
 bishengir-compile xxx.ttadapter --target=Ascend910B3 --enable-auto-multi-buffer=True --enable-hfusion-compile=true --enable-hivm-compile=true --enable-triton-kernel-compile=true --hivm-compile-args=bishengir-print-ir-after=hivm-inject-sync
 ```
 
-会有输出IR ， 对比Triton 算子逻辑与IR内部的操作，观察是否有未映射成指令的操作。
-观察HIVM IR阶段是否存在纯scalar搬运或者计算， 没有映射为simd指令，这会成为性能瓶颈。
+会有输出IR，对比Triton 算子逻辑与IR内部的操作，观察是否有未映射成指令的操作。
+观察HIVM IR阶段是否存在纯scalar搬运或者计算，没有映射为simd指令，这会成为性能瓶颈。
 
 问题：离散访存 && scalar低效映射
 b[1024, 32] = a[1024, 32]  Triton原先写法利用thread的方式 对[1024,32] 中的最低维度32绑定线程块, 再对1024切16，分为[64， 16， 32]，再对64绑定线程块

@@ -45,15 +45,19 @@ def Ascend_MatmulOp : AscendModel_Op<"matmul", [Pure, DeclareOpInterfaceMethods<
 // Memory Transfer Operations
 //===----------------------------------------------------------------------===//
 
-def Ascend_CubeLoadOp : AscendModel_Op<"cube_load", [DeclareOpInterfaceMethods<EstimateCyclesOpInterface, ["getTransferBytes"]>]> {
+def Ascend_CubeLoadOp : AscendModel_Op<"cube_load", [DeclareOpInterfaceMethods<EstimateCyclesOpInterface, ["getTransferBytes", "getSrcMemSpace", "getDstMemSpace"]>]> {
   let summary = "Load data for Cube Core via MTE2";
   let description = [{
     Loads tensor data from memory to Cube Core's local buffer via MTE2.
+    ``src_space``/``dst_space`` select the per-(src,dst,corenum) bandwidth
+    (tilesim migration). Defaults: hbm -> l1.
   }];
 
   let arguments = (ins
     AnyType:$source,
     I64Attr:$bytes,
+    OptionalAttr<StrAttr>:$src_space,
+    OptionalAttr<StrAttr>:$dst_space,
     OptionalAttr<I64Attr>:$estimated_cycles,
     OptionalAttr<I64Attr>:$op_id
   );
@@ -65,15 +69,19 @@ def Ascend_CubeLoadOp : AscendModel_Op<"cube_load", [DeclareOpInterfaceMethods<E
   }];
 }
 
-def Ascend_CubeStoreOp : AscendModel_Op<"cube_store", [DeclareOpInterfaceMethods<EstimateCyclesOpInterface, ["getTransferBytes"]>]> {
+def Ascend_CubeStoreOp : AscendModel_Op<"cube_store", [DeclareOpInterfaceMethods<EstimateCyclesOpInterface, ["getTransferBytes", "getSrcMemSpace", "getDstMemSpace"]>]> {
   let summary = "Store Cube Core result via FixPipe";
   let description = [{
     Stores Cube Core computation results to memory via FixPipe.
+    ``src_space``/``dst_space`` select the bandwidth (tilesim migration).
+    Defaults: l0c -> hbm.
   }];
 
   let arguments = (ins
     AnyType:$data,
     I64Attr:$bytes,
+    OptionalAttr<StrAttr>:$src_space,
+    OptionalAttr<StrAttr>:$dst_space,
     OptionalAttr<I64Attr>:$estimated_cycles,
     OptionalAttr<I64Attr>:$op_id
   );
@@ -85,15 +93,19 @@ def Ascend_CubeStoreOp : AscendModel_Op<"cube_store", [DeclareOpInterfaceMethods
   }];
 }
 
-def Ascend_VectorLoadOp : AscendModel_Op<"vector_load", [DeclareOpInterfaceMethods<EstimateCyclesOpInterface, ["getTransferBytes"]>]> {
+def Ascend_VectorLoadOp : AscendModel_Op<"vector_load", [DeclareOpInterfaceMethods<EstimateCyclesOpInterface, ["getTransferBytes", "getSrcMemSpace", "getDstMemSpace"]>]> {
   let summary = "Load data for Vector Core via VecMTE2";
   let description = [{
     Loads tensor data for Vector Core operations via dedicated MTE2.
+    ``src_space``/``dst_space`` select the per-(src,dst,corenum) bandwidth
+    (tilesim migration). Defaults: hbm -> ub.
   }];
 
   let arguments = (ins
     AnyType:$source,
     I64Attr:$bytes,
+    OptionalAttr<StrAttr>:$src_space,
+    OptionalAttr<StrAttr>:$dst_space,
     OptionalAttr<I64Attr>:$estimated_cycles,
     OptionalAttr<I64Attr>:$op_id
   );
@@ -105,15 +117,19 @@ def Ascend_VectorLoadOp : AscendModel_Op<"vector_load", [DeclareOpInterfaceMetho
   }];
 }
 
-def Ascend_VectorStoreOp : AscendModel_Op<"vector_store", [DeclareOpInterfaceMethods<EstimateCyclesOpInterface, ["getTransferBytes"]>]> {
+def Ascend_VectorStoreOp : AscendModel_Op<"vector_store", [DeclareOpInterfaceMethods<EstimateCyclesOpInterface, ["getTransferBytes", "getSrcMemSpace", "getDstMemSpace"]>]> {
   let summary = "Store Vector Core result via MTE3";
   let description = [{
     Stores Vector Core computation results to memory via MTE3.
+    ``src_space``/``dst_space`` select the bandwidth (tilesim migration).
+    Defaults: ub -> hbm.
   }];
 
   let arguments = (ins
     AnyType:$data,
     I64Attr:$bytes,
+    OptionalAttr<StrAttr>:$src_space,
+    OptionalAttr<StrAttr>:$dst_space,
     OptionalAttr<I64Attr>:$estimated_cycles,
     OptionalAttr<I64Attr>:$op_id
   );

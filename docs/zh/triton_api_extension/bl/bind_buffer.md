@@ -4,7 +4,7 @@
 
 将tensor绑定到buffer上
 
-### 2.接口说明
+## 2.接口说明
 
 <table>
   <tr>
@@ -12,7 +12,7 @@
   </tr>
 </table>
 
-#### 2.1 入参
+### 2.1 入参
 
 <table>
   <tr>
@@ -41,11 +41,11 @@
   </tr>
 </table>
 
-#### 2.2 返回值
+### 2.2 返回值
 
 如果使用bind_buffer参数,返回bind_buffer本身
 
-#### 2.3示例
+### 2.3示例
 
 输入示例
 
@@ -63,11 +63,11 @@
   </tr>
 </table>
 
-### 3.约束说明
+## 3.约束说明
 
 - bind_buffer参数必须是buffer类型
 
-- tensor和bind_buffer的shape和element  type必须一致
+- tensor和bind_buffer的shape和element type必须一致
 
 - 不允许将一个tensor与多个buffer绑定
 

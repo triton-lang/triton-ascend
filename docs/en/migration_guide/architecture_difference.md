@@ -85,6 +85,12 @@ def standard_unary(x0):
 The following is an example of a simple kernel written in Triton, demonstrating how to define and call a basic Triton kernel function. This example implements a simple mathematical operation (GELU activation function).
 
 ```Python
+import torch
+import torch_npu
+
+import triton
+import triton.language as tl
+
 # Define the triton_kernel function.
 @triton.jit
 def triton_easy_kernel(in_ptr0, out_ptr0, NUMEL: tl.constexpr):
@@ -92,6 +98,13 @@ def triton_easy_kernel(in_ptr0, out_ptr0, NUMEL: tl.constexpr):
     x = tl.load(in_ptr0 + idx_block)
     ret = x * 0.5 * (1.0 + tl.erf(x / tl.sqrt(2.0)))
     tl.store(out_ptr0 + idx_block, ret)
+
+# Call the triton_kernel function.
+ncore = 32
+x0 = torch.rand(32768, device='npu')
+out1 = torch.empty_like(x0)
+triton_easy_kernel[ncore, 1, 1](x0, out1, x0.numel())
+
 ```
 
 Precautions
@@ -108,6 +121,13 @@ The following is an example of an optimized Triton kernel implementation suitabl
 
 ```Python
 # Define the triton_kernel function.
+import torch
+import torch_npu
+
+import triton
+import triton.language as tl
+
+# Define the triton_kernel function.
 @triton.jit
 def triton_better_kernel(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
     xoffset = tl.program_id(0) * XBLOCK
@@ -122,6 +142,8 @@ def triton_better_kernel(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK
 ncore = 32
 xblock = 32768
 xblock_sub = 8192
+x0 = torch.rand(32768, device='npu')
+out1 = torch.empty_like(x0)
 triton_better_kernel[ncore, 1, 1](x0, out1, x0.numel(), xblock, xblock_sub)
 ```
 

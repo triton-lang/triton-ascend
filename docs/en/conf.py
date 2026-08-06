@@ -30,8 +30,19 @@ extensions = [
     'sphinx.ext.coverage',
     'sphinx.ext.napoleon',
     'sphinx.ext.autosectionlabel',
+    'sphinx.ext.autosummary',
+    'sphinx.ext.mathjax',
     'myst_parser',
 ]
+
+# -- MyST configuration -------------------------------------------------------
+# Enable dollar-math extension so that $$...$$ and $...$ syntax is parsed.
+myst_enable_extensions = ['dollarmath']
+myst_dollar_math = True
+
+# Suppress duplicate autosectionlabel warnings caused by subdirectory
+# index.md headings sharing names with category headings in main index.md.
+suppress_warnings = ["autosectionlabel"]
 
 # -- I18n: detect language and root doc ---------------------------------------
 _readthedocs_lang = os.environ.get('READTHEDOCS_LANGUAGE')
@@ -49,6 +60,9 @@ if _is_zh:
     exclude_patterns.extend(['../en'])
 else:
     exclude_patterns.extend(['../zh'])
+
+# python-api RST files require triton import; mock it at build time.
+autodoc_mock_imports = ['triton']
 
 # -- General configuration ---------------------------------------------------
 templates_path = ['_templates']

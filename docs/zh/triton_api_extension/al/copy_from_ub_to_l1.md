@@ -41,7 +41,7 @@
 
 ## 3. 约束说明
 
-- src 和 dst 必须同时为 tensor 或者 buffer ，tensor 暂时不支持
+- src 和 dst 必须同时为 tensor 或者 buffer
 
 - src 的address space 必须为UB， dst 的address space 必须为L1
 

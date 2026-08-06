@@ -2,7 +2,7 @@
 
 ## 1. OP 概述
 
-简介：根据给定值 将tensor张量进行左移位。
+简介：根据给定值将张量进行左移位。
 
 ```python
 triton.language.core.__lshift__(

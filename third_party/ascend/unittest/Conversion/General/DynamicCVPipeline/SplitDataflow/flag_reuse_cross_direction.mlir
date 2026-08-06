@@ -12,7 +12,7 @@
 // Here a long Vector->Cube->Vector matmul chain needs more than MAX_FLAG_ID
 // flags, forcing reuse; the result must partition strictly by direction.
 
-module {
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   func.func @flag_reuse_cross_direction() {
     %cst = arith.constant {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "VECTOR"} 0.000000e+00 : f32
     %e0 = tensor.empty() {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "VECTOR"} : tensor<32x32xf32>

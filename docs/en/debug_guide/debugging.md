@@ -88,6 +88,8 @@ export TRITON_ALWAYS_COMPILE=1
 
 Cache verification: If you suspect that the issue is caused by the cache, delete related cache files and perform the test again.
 
+<a id="debug-dump-files"></a>
+
 ### 3.2 Dump Files
 
 You can set the environment variable **TRITON_DEBUG** to **1** to dump intermediate representation files to disks during compilation. These files are key resources for debugging compilation issues.
@@ -159,7 +161,7 @@ Go to the dump path and view **kernel.ttir.mlir** and **kernel.ttadapter.mlir**.
 - TTIR example
 The **kernel.ttir.mlir** file is as follows:
 
-```text
+```mlir
 module {
   tt.func public @add_kernel(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg2: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg3: i32 {tt.divisibility = 16 : i32} ) attributes {noinline = false} {
     %cst = arith.constant dense<0.000000e+00> : tensor<1024xf32> loc(#loc1)
@@ -201,7 +203,7 @@ The TTIR layer is still based on the native abstraction (such as `!tt.ptr<f32>`,
 - TTAdapter IR example
 The **kernel.ttadapter.mlir** file is as follows:
 
-```text
+```mlir
 module {
   func.func @add_kernel(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32, %arg7: i32, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "aiv", parallel_mode = "simd"} {
     %cst = arith.constant 0.000000e+00 : f32
@@ -255,6 +257,8 @@ TTIR is converted to TTAdapter IR to adapt to the Ascend NPU architecture in the
 
 TTAdapter IR has been abstracted from Triton to adapt to the Ascend NPU format.
 
+<a id="debug-interpreter-mode"></a>
+
 ## 4 Interpreter Mode
 
 The core value of the interpreter is to **isolate hardware differences**. You can set the environment variable `TRITON_INTERPRET` to `1` to forcibly execute kernel computation on the CPU. The result of the kernel computation can be used as the benchmark for determining the NPU computation accuracy.
@@ -285,6 +289,8 @@ export TRITON_INTERPRET=0
 ```
 
 ## 5 Debugging Methods
+
+<a id="debug-printing"></a>
 
 ### 5.1 Debugging by Printing
 
@@ -404,6 +410,8 @@ Description of environment variables:
 **TRITON_DEVICE_PRINT=1**: enables runtime printing and compilation printing.
 
 **TRITON_DEBUG=1**: enables all debugging outputs (including compilation and runtime printing).
+
+<a id="debug-compilation-error"></a>
 
 ### 5.2 Compilation Error Debugging
 

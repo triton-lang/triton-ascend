@@ -36,7 +36,7 @@
 
 ## 4. 约束说明
 
-- 输入的参数size、offset、stride必须大于0（offset可以是0），不能为负值。
+- 输入的参数size、stride必须大于0，offset必须大于等于0，不能为负值。
 
 - size的每一个维度的大小不能大于原buffer的大小。
 

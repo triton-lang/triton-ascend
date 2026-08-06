@@ -4,7 +4,7 @@
 
 ### 一、自动合并Grid分核优化原则
 
-部分场景下，Triton算子从GPU迁移到NPU。由于体系结构的差异，基于GPU开发的Triton算子Grid分核数较多。在NPU上执行时，无法一次全部调度，多轮下发导致下发时延过大，影响算子性能。基于NPU优Triton算子过程中，需要首先检查Grid分核数。当分核数较大时，使用TRITON_ALL_BLOCKS_PARALLEL环境变量提升算子执行性能。
+部分场景下，Triton算子从GPU迁移到NPU。由于体系结构的差异，基于GPU开发的Triton算子Grid分核数较多。在NPU上执行时，无法一次全部调度，多轮下发导致下发时延过大，影响算子性能。基于NPU优化Triton算子过程中，需要首先检查Grid分核数。当分核数较大时，使用TRITON_ALL_BLOCKS_PARALLEL环境变量提升算子执行性能。
 
 ## 指令并行优化
 
@@ -45,10 +45,11 @@ Triton算子在NPU上执行时，为了提升性能，NPU底层提供multi buffe
         M: tl.constexpr,                # len of the vector
         BLOCK_SIZE: tl.constexpr
     ):
+        N = BLOCK_SIZE
         idx = tl.arange(0, N)
         mask = idx < M
-    -   data = tl.load(input + idx, mask = mask) # 或者指定other=-1等值
-    +   data = tl.load(input + idx, mask = mask, care_padding=False) # 或者指定other=-1等值
+        # data = tl.load(input + idx, mask = mask) # 或者指定other=-1等值
+        data = tl.load(input + idx, mask = mask, care_padding=False) # 或者指定other=-1等值
     ```
 
 - 示例2：在Triton算子内，使用for循环，增加Tiling，提升并行度
@@ -66,7 +67,7 @@ Triton算子在NPU上执行时，为了提升性能，NPU底层提供multi buffe
             bs_upper: tl.constexpr,
             page_size: tl.constexpr,
             max_num_extend_tokens: tl.constexpr,
-    +       BLOCK_SIZE: tl.constexpr = 1024,
+            BLOCK_SIZE: tl.constexpr = 1024, # Add Param BLOCK_SIZE
     ):
         pid = tl.program_id(0)
 
@@ -98,32 +99,32 @@ Triton算子在NPU上执行时，为了提升性能，NPU底层提供multi buffe
                 - (pre_len + page_size - 1) // page_size * page_size
         )
 
-    -   # load data at once
-    -   offset_many_page = tl.arange(0, max_num_extend_tokens)
-    -   page_start = tl.load(
-    -       free_page_ptr + new_page_start_loc + offset_many_page // page_size,
-    -       mask=offset_many_page < num_part2,
-    -   )
-    -   tl.store(
-    -       out_indices + output_start_loc + offset_many_page,
-    -       page_start * page_size + offset_many_page % page_size,
-    -       mask=offset_many_page < num_part2,
-    -   )
+        # load data at once
+        # offset_many_page = tl.arange(0, max_num_extend_tokens)
+        # page_start = tl.load(
+        #     free_page_ptr + new_page_start_loc + offset_many_page // page_size,
+        #     mask=offset_many_page < num_part2,
+        # )
+        # tl.store(
+        #     out_indices + output_start_loc + offset_many_page,
+        #     page_start * page_size + offset_many_page % page_size,
+        #     mask=offset_many_page < num_part2,
+        # )
 
-    +   # load data using loop
-    +   num_loop = tl.cdiv(max_num_extend_tokens, BLOCK_SIZE)
-    +   blk_offset = tl.arange(0, BLOCK_SIZE)
-    +   for i in range(num_loop):
-    +       offset_many_page = blk_offset + i * BLOCK_SIZE
-    +       page_start = tl.load(
-    +           free_page_ptr + new_page_start_loc + offset_many_page // page_size,
-    +           mask=offset_many_page < num_part2,
-    +       )
-    +       tl.store(
-    +           out_indices + output_start_loc + offset_many_page,
-    +           page_start * page_size + offset_many_page % page_size,
-    +           mask=offset_many_page < num_part2,
-    +       )
+        # load data using loop
+        num_loop = tl.cdiv(max_num_extend_tokens, BLOCK_SIZE)
+        blk_offset = tl.arange(0, BLOCK_SIZE)
+        for i in range(num_loop):
+            offset_many_page = blk_offset + i * BLOCK_SIZE
+            page_start = tl.load(
+                free_page_ptr + new_page_start_loc + offset_many_page // page_size,
+                mask=offset_many_page < num_part2,
+            )
+            tl.store(
+                out_indices + output_start_loc + offset_many_page,
+                page_start * page_size + offset_many_page % page_size,
+                mask=offset_many_page < num_part2,
+            )
     ```
 
 ## 数据类型优化
@@ -199,9 +200,9 @@ A2/A3 向量运算单元的部分运算操作不支持某些数据类型，这�
         mean = tl.sum(x, axis=0) / N
         tl.store(Mean + row, mean)
         # [Changed begin]
-    -   xbar = tl.where(cols < N, X - mean, 0.0)
-    +   cols_cmp = cols.to(tl.float32)
-    +   xbar = tl.where(cols_cmp < N, x - mean, 0.0)
+        # xbar = tl.where(cols < N, X - mean, 0.0)
+        cols_cmp = cols.to(tl.float32)
+        xbar = tl.where(cols_cmp < N, x - mean, 0.0)
         # [Changed end]
 
         var = tl.sum(xbar * xbar, axis=0) / N

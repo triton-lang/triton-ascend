@@ -398,15 +398,14 @@ def create_function_from_signature(sig, kparams, backend):
     assert len(sig.parameters) == len(kparams)
     # Create the function argument list and the dict entries for the return statement
     specialization = []
-    integer_annotation_types = {"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"}
     # signature
     for name, kp in zip(sig.parameters.keys(), kparams):
         if kp.is_constexpr:
             specialization.append(f'("constexpr", {name})')
         else:
-            is_const = kp.is_const
-            specialize = not kp.do_not_specialize
-            align = not kp.do_not_specialize_on_alignment
+            is_const = 'True' if kp.is_const else 'False'
+            specialize = 'False' if kp.do_not_specialize else 'True'
+            align = 'False' if kp.do_not_specialize_on_alignment else 'True'
             ret = f"specialize_impl(backend, {name}, {is_const}, {specialize}, {align})"
             if kp.annotation_type:
                 if isinstance(kp.annotation_type, str):
@@ -414,13 +413,7 @@ def create_function_from_signature(sig, kparams, backend):
                         # we do not specialize non-constexpr floats and bools:
                         specialize = False
                 if specialize:
-                    if kp.annotation_type in integer_annotation_types:
-                        # An integer annotation constrains the type of runtime values, but must not discard a
-                        # constexpr classification already produced by the value specializer (for example, 1).
-                        specialization.append(f'(lambda ret: ret if ret[0] == "constexpr" '
-                                              f'else ("{kp.annotation_type}",) + ret[1:])({ret})')
-                    else:
-                        specialization.append(f'("{kp.annotation_type}",) + {ret}[1:]')
+                    specialization.append(f'("{kp.annotation_type}",) + {ret}[1:]')
                 else:
                     # skip runtime specialization:
                     specialization.append(f'("{kp.annotation_type}", None)')

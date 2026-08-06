@@ -17,17 +17,19 @@
 确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》
 完成驱动与固件安装。
 
-- CANN版本：9.0.0
+- CANN版本：9.1.0
 - Python版本：python3.11
-- TorchNPU版本：2.7.1.post4
+- TorchNPU版本：2.7.1.post8
 
-注：更多配套关系请参考[版本说明表](./release_note.md#版本兼容性矩阵)。
+注：更多配套关系请参考[版本说明表](./release_note.md#version-compatibility-matrix)。
 
 ## 快速安装
 
 ```bash
 pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
+
+<a id="install-from-source"></a>
 
 ## 源码安装
 

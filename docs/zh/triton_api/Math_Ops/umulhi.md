@@ -19,7 +19,7 @@ triton.language.umulhi(x, y, _semantic=None)
 | `_semantic`   | -                 | 保留参数，暂不支持外部调用           |
 
 返回值：
-`x`：输出张量的shape与输入x的shape相同
+输出张量的shape与输入x的shape相同
 
 ### 2.2 OP 规格
 
@@ -48,7 +48,7 @@ int64不支持
 
 ### 2.4 使用方法
 
-以下示例实现了对输入张量 `x` 做显著N位：
+以下示例实现了对输入张量 `x` 和 `y` 的乘积取最显著N位：
 
 ```python
 @triton.jit

@@ -33,7 +33,12 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, Optional, Tuple, Union
 
-from triton._C.libtriton import ir, passes, ascend
+from triton._C.libtriton import ir, passes, ascend, buffer_ir
+from triton._C.libtriton.ascend import ir as ascend_ir
+try:
+    from triton._C.libtriton import distributed
+except ImportError:
+    distributed = None
 from triton.backends.ascend.utils import (
     _check_bishengir_api_change,
     _check_bishengir_able_save_ir,
@@ -189,6 +194,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             auto_blockify_size = 1
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
+        if distributed is not None:
+            distributed.ascend_passes.ttgpuir.add_convert_triton_distributed_to_hivm(pm)
         # ascend.passes.ttir.add_auto_blockify(pm, auto_blockify_size)
 
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
@@ -1109,6 +1116,9 @@ class NPUOptions:
     superblock_factor: int = 0
 
     def __post_init__(self):
+        from triton.backends.ascend import _apply_ascend_patch
+
+        _apply_ascend_patch()
         # Parse compile_mode and set related fields
         if self.compile_mode == "simd":
             object.__setattr__(self, "parallel_mode", "simd")
@@ -1254,14 +1264,14 @@ class AscendBackend(BaseBackend):
     def get_codegen_implementation(self, options):
         # Note: a dict of functions is required to generate vendor-specific code piecies
         #       e.g. convert custom types like fp8e4b15
-        from triton.backends.ascend import _apply_ascend_patch
-        _apply_ascend_patch()
         codegen_fns = {"min_dot_size": min_dot_size(self.target)}
         return codegen_fns
 
     def load_dialects(self, ctx):
         from triton._C.libtriton import buffer_ir
         from triton._C.libtriton.ascend import ir as ascend_ir
+        if distributed is not None:
+            distributed.ir.load_dialects(ctx)
         buffer_ir.load_dialects(ctx)
         ascend_ir.load_dialects(ctx)
         ascend.load_dialects(ctx)

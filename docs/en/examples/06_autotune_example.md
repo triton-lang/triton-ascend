@@ -84,7 +84,7 @@ if __name__ == "__main__":
 #     The axis name must be in the axis name set of the parameter `key`. Do not prefix the axis name with 'r'.
 #     This parameter can be left empty. If both split_params and tiling_params are empty, autotune is not performed.
 #     The split axis can be determined based on the kernel splitting statement `tl.program_id()`.
-# In the dictionary consisting of "tiling_params (Dict[str, str]): axis name: argument name", the argument is an tunable parameter of the tiling axis, for example, 'XBLOCK_SUB'.
+# In the dictionary consisting of "tiling_params (Dict[str, str]): axis name: argument name", the argument is a tunable parameter of the tiling axis, for example, 'XBLOCK_SUB'.
 #     The axis name must be in the axis name set of the parameter `key`. Do not prefix the axis name with 'r'.
 #     This parameter can be left empty. If both split_params and tiling_params are empty, autotune is not performed.
 #     The tiling axis can be determined based on the `tl.arange()` expression.

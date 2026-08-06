@@ -100,8 +100,18 @@ jobs:
           ccache --zero-stats
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          # setup.py is at repo root on main, under python/ on older release branches.
+          if [ -f setup.py ]; then
+            SETUP_DIR="."
+          elif [ -f python/setup.py ]; then
+            SETUP_DIR="python"
+          else
+            echo "ERROR: setup.py not found" >&2
+            exit 1
+          fi
+          cd "$SETUP_DIR"
           MAX_JOBS="$NUM_PROCS" \
-          python setup.py bdist_wheel --dist-dir=./wheelhouse
+          python setup.py bdist_wheel --dist-dir="${GITHUB_WORKSPACE}/wheelhouse"
 
       - uses: actions/upload-artifact@v4
         with:

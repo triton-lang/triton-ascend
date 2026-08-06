@@ -23,7 +23,7 @@ triton.language.semantic.less_equal(
 | :---: | :---: | :---: |
 | `input` | `tensor` | 张量数据, 左操作数, 代表要进行比较的主数据 |
 | `other`   | `tensor` | 张量数据, 右操作数, 与`input`逐元素进行比较 |
-| `_builder` | - | 保留参数，暂不支持外部调用 |
+| `builder` | - | 保留参数，暂不支持外部调用 |
 
 返回值：
 `tl.tensor`：同`input`的shape的张量

@@ -98,8 +98,7 @@ class NPUUtils(object):
                 input and the hardware actual caps.
         """
         npu_device_limit_str = os.getenv("NPU_DEVICE_LIMIT")
-        num_aic = self.get_device_aicore()
-        num_aiv = num_aic * 2
+        num_aic, num_aiv = self.get_device_core()
         if npu_device_limit_str is None:
             return num_aic, num_aiv
 
@@ -108,6 +107,7 @@ class NPUUtils(object):
             parts = [part.strip() for part in npu_device_limit_str.split(",")]
             num_aic_env = int(parts[0])
             num_aiv_env = int(parts[1])
+
             if num_aic_env <= 0 or num_aiv_env <= 0:
                 raise ValueError(f"[ERROR]NPU_DEVICE_LIMIT={npu_device_limit_str}, which has non-positive value,"
                                  f"both cube_core_num and vector_core_num must be positive.")
@@ -115,19 +115,38 @@ class NPUUtils(object):
                 raise ValueError(
                     f"[ERROR]NPU_DEVICE_LIMIT={npu_device_limit_str}, both cube_core_num and vector_core_num "
                     f"must be less than or equal to device properties ({num_aic},{num_aiv}).")
+            elif num_aic_env * (num_aiv / num_aic) != num_aiv_env:
+                env_quotient = num_aiv_env / num_aic_env
+                env_quotient_decimal = round(env_quotient, 1)
+                quotient = num_aiv / num_aic
+                quotient_decimal = round(quotient, 1)
+                raise ValueError(
+                    f"[ERROR]NPU_DEVICE_LIMIT={npu_device_limit_str}; expected ratio is consistent, actual, "
+                    f"the ratio of vector_core_num/cube_core_num({num_aiv_env}/{num_aic_env}={env_quotient_decimal}) does "
+                    f"not equal device properties vector_core_num/cube_core_num({num_aiv}/{num_aic}={quotient_decimal}) ratio."
+                )
             else:
                 print(f"[INFO]NPU_DEVICE_LIMIT from env: cube_core_num={num_aic_env},vector_core_num={num_aiv_env}).")
                 return num_aic_env, num_aiv_env
         else:
             raise ValueError(f"[ERROR]NPU_DEVICE_LIMIT={npu_device_limit_str}, which has invalid format: "
-                             f"It should be like '14,28' (cube_core_num,vector_core_num).")
+                             f"It should be like '14,28' (cube_core_num,vector_core_num) "
+                             f"and it must be a positive number.")
 
     @functools.lru_cache()
-    def get_device_aicore(self):
-        return self.npu_utils_mod.get_aicore_num()
+    def get_device_core(self):
+        import torch
+        device = torch.npu.current_device()
+        prop = torch.npu.get_device_properties(device)
+        cube_core_num, vector_core_num = prop.cube_core_num, prop.vector_core_num
+        return cube_core_num, vector_core_num
 
     def has_device_limit(self):
-        return self.get_device_aicore() != self.get_aicore_num()
+        num_aic, num_aiv = self.get_device_core()
+        try:
+            return num_aic != self.get_aicore_num() or num_aiv != self.get_aivector_core_num()
+        except ValueError:
+            return False
 
     def get_device_properties(self, device):
         # temperoarily added "max_shared_mem" properties to avoid triton-compiler complain

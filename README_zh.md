@@ -27,6 +27,7 @@ Triton-Ascend
 
 ## 🔥 最新消息
 
+- [2026.07.31]Triton-Ascend 3.2.2正式版本上线
 - [2026.04.30]Triton-Ascend 3.2.1正式版本上线
 - [2026.01.20]Triton-Ascend 3.2.0正式版本上线
 
@@ -64,9 +65,9 @@ Triton-Ascend
 
 - Python版本选择：py3.9-py3.11 均可。
 
-- CANN版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成CANN的安装与配置。建议下载安装 9.0.0 版本。
+- CANN版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成CANN的安装与配置。建议下载安装 9.1.0 版本。
 
-- TorchNPU版本选择：当前配套的TorchNPU版本为2.7.1.post4。
+- TorchNPU版本选择：当前配套的TorchNPU版本为2.7.1.post8。
 
 ### 访问昇腾NPU
 
@@ -75,8 +76,8 @@ Triton-Ascend
 ### 快速安装
 
 ```bash
-#以安装triton-ascend 3.2.1 为例
-pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
+#以安装triton-ascend 3.2.2 为例
+pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 
 ### 源码安装
@@ -88,8 +89,8 @@ pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.c
 #### 安装依赖
 
 ```bash
-apt updata
-apt install zliblg-dev clang-15 lld-15
+apt update
+apt install zlib1g-dev clang-15 lld-15
 apt install ccache # optional
 update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 100
 update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-15 100

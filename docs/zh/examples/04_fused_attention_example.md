@@ -327,8 +327,8 @@ def test_op(Z, H, N_CTX, HEAD_DIM, causal, dtype, BM, BN):
             scale=sm_scale,
             keep_prob=1.0,
             input_layout="BNSD",
-            pre_tockens=65535,
-            next_tockens=65535,
+            pre_tokens=65535,
+            next_tokens=65535,
             sparse_mode=0,
             )[0]
 

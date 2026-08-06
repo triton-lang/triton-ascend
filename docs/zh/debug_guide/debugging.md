@@ -88,6 +88,8 @@ export TRITON_ALWAYS_COMPILE=1
 
 缓存验证: 当怀疑缓存导致问题时，可删除相关缓存文件后重新测试。
 
+<a id="debug-dump-files"></a>
+
 ### 3.2 调试转储文件（Dump Files）
 
 通过设置环境变量 TRITON_DEBUG=1，可以在编译过程中将中间表示文件转储到磁盘，这些文件是调试编译问题的关键资源。
@@ -159,7 +161,7 @@ Dumping intermediate results to ~/.triton/dump/xxx
 - TTIR 样例
 查看 kernel.ttir.mlir 如下：
 
-```text
+```mlir
 module {
   tt.func public @add_kernel(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg2: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg3: i32 {tt.divisibility = 16 : i32} ) attributes {noinline = false} {
     %cst = arith.constant dense<0.000000e+00> : tensor<1024xf32> loc(#loc1)
@@ -201,7 +203,7 @@ TTIR 层面仍基于 Triton 原生抽象（如 `!tt.ptr<f32>`、`tt.load`/`tt.st
 - TTAdapter IR 样例
 查看 kernel.ttadapter.mlir 如下：
 
-```text
+```mlir
 module {
   func.func @add_kernel(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32, %arg7: i32, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "aiv", parallel_mode = "simd"} {
     %cst = arith.constant 0.000000e+00 : f32
@@ -255,6 +257,8 @@ TTAdapter IR 是 Triton-Ascend 编译流程中将 TTIR 转换为适配昇腾 NPU
 
 TTAdapter IR 已完成从 Triton 抽象到适配昇腾 NPU 的格式。
 
+<a id="debug-interpreter-mode"></a>
+
 ## 4 解释器模式
 
 解释器的核心价值在于**隔离硬件差异**。通过环境变量 `TRITON_INTERPRET=1` 强制Triton在CPU上执行kernel计算，其结果可作为判断NPU计算精度的基准。
@@ -285,6 +289,8 @@ export TRITON_INTERPRET=0
 ```
 
 ## 5 调试方法
+
+<a id="debug-printing"></a>
 
 ### 5.1 打印调试方法
 
@@ -345,7 +351,7 @@ python your_program.py
 
 ### 5.1.2 运行时调试方法
 
-此方法的使用 `tl.device_print` 可以灵活打印需要观察的变量的值。
+此方法使用 `tl.device_print` 可以灵活打印需要观察的变量的值。
 设置环境变量 `TRITON_DEVICE_PRINT=1` 可启用 `tl.device_print` 功能。此函数允许在kernel内部打印张量值，是分阶段验证计算精度的高效方法。
 **使用方法：**
 
@@ -404,6 +410,8 @@ TRITON_DEVICE_PRINT=1：启用运行时打印，同时也会启用编译时打�
 
 TRITON_DEBUG=1：启用所有调试输出（包括编译时和运行时打印）
 
+<a id="debug-compilation-error"></a>
+
 ### 5.2 编译错误调试方法
 
 当 `ttir.mlir` → `ttadapter.mlir` 的转换过程失败，无法生成`ttadapter.mlir`，报错`MLIRCompileError`.
@@ -434,7 +442,7 @@ def compile_fn(ttir):
 **示例:**
 假设在 `compiler.py` 的第 123 行设置了断点，程序暂停后：
 
-```python
+```text
 python
 (Pdb) l  # 查看当前代码上下文
 118     def compile_fn(ttir):

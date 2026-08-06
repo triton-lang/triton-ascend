@@ -26,6 +26,7 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/StringRef.h"
+#include <optional>
 #include <string_view>
 
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
@@ -54,7 +55,7 @@ inline constexpr llvm::StringLiteral kAnalyzeFlagId =
     "ssbuffer.analyze_flag_id";
 inline constexpr llvm::StringLiteral kLoopCarriedL0C =
     "ssbuffer.loop_carried_l0c";
-inline constexpr llvm::StringLiteral kCrossDeps = "ssbuffer.crossDeps";
+inline constexpr llvm::StringLiteral kCrossCoreDeps = "ssbuffer.crossCoreDeps";
 inline constexpr llvm::StringLiteral kIntraDeps = "ssbuffer.intraDeps";
 inline constexpr llvm::StringLiteral kMemCrossDeps = "ssbuffer.memCrossDeps";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
@@ -67,11 +68,19 @@ static constexpr llvm::StringLiteral kInlinableQuantScaleAttr =
     "enable_fast_tf32_mul";
 inline constexpr llvm::StringLiteral kHIVMMatmulLimitedInCubeAttr =
     "hivm.matmul_limited_in_cube";
+inline constexpr llvm::StringLiteral kTightlyCoupledBufferAttr =
+    "hivm.tightly_coupled_buffer";
+inline constexpr llvm::StringLiteral kCoreTypeCube = "CUBE";
+inline constexpr llvm::StringLiteral kCoreTypeVector = "VECTOR";
 
 inline constexpr const char *ERRCODE_ATTR =
     "triton_ascend.dynamic_cv_pipeline.rc";
 static constexpr const int ERRCODE_FAILED = 1;
 static constexpr const int ERRCODE_IGNORED = 2;
+constexpr int64_t CACHE_TABLE_BUFFER_SIZE = 4096;
+constexpr int64_t BYTE_SIZE = 8;
+static constexpr int crossCoreProducerId = 1;
+static constexpr int crossCoreConsumerId = 0;
 
 enum CoreType {
   UNDETERMINED = 0,
@@ -117,6 +126,22 @@ bool isVectorOnlyOp(Operation *op);
 bool isScalarLike(Value value);
 bool isStoreLike(Operation *op);
 bool isViewLike(Operation *op);
+
+// Returns true iff `v` is the result of a `linalg.fill` initialized with a
+// 0 scalar constant. Used to detect the "add 0" operand of VECTOR pseudo-ops
+// (`arith.addf` / `arith.addi` carrying `ssbuffer.add_from_matmul`).
+bool isZeroFillValue(Value v);
+
+// Read the `hivm.tightly_coupled_buffer<N>` id attached to a `memref.alloc`
+// via its `annotation.mark` user. Returns nullopt when no annotation with
+// a concrete id is present, or when `allocVal` is null.
+std::optional<int> getTightlyCoupledBufferId(Value allocVal);
+
+// Walk back through opaque memref casts (`memref.memory_space_cast`,
+// `memref.cast`) to recover the underlying `memref.alloc` that backs a
+// `bufferization.to_tensor`'s source. Returns the input unchanged when no
+// such cast is found.
+Value traceBackToMemrefAlloc(Value v);
 
 } // namespace CVPipeline
 } // namespace mlir

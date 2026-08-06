@@ -518,17 +518,10 @@ LogicalResult UpdateForOpsPass::analyzeTensorIterArgDependencies(
           continue;
         }
 
-        bool isProducer = false;
-        if (isa<scf::YieldOp>(user)) {
-          auto yieldOp = cast<scf::YieldOp>(user);
-          Operation *parentOp = yieldOp->getParentOp();
-          while (parentOp && parentOp != ifOp.getOperation()) {
-            parentOp = parentOp->getParentOp();
-          }
-          if (parentOp == ifOp.getOperation()) {
-            isProducer = true;
-          }
-        }
+        // Only the direct terminator of this ssbuffer.if is a producer.
+        // Nested if/for/while yields that forward iter_arg are consumers.
+        bool isProducer = isa<scf::YieldOp>(user) &&
+                          user->getParentOp() == ifOp.getOperation();
 
         // Check and update status of ifOp
         if (isProducer) {

@@ -41,7 +41,7 @@ namespace triton {
 enum class VarUpdateType { INC, DEC };
 
 struct OutputGroupInfo {
-  SmallVector<Value> outputs;
+  SmallVector<Operation *> outputs;
   SmallVector<Value> inputVars;
 };
 
@@ -77,17 +77,9 @@ private:
       ModuleOp module, SmallVector<scf::ForOp> &mainLoopForOps,
       DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
           &crossCoreBuffers,
-      DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
-          &memCrossCoreBuffers,
       DenseMap<scf::ForOp,
                DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>>
           &intraCoreBuffersMap);
-
-  DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
-  extendCrossCoreBuffersWithEquivalentValues(
-      ModuleOp module,
-      DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
-          crossCoreBuffers);
 
   int buildIdxToVarMap(
       scf::ForOp forOp,
@@ -99,8 +91,6 @@ private:
       scf::IfOp ifOp,
       DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
           crossCoreBuffers,
-      DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
-          memCrossCoreBuffers,
       DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
           intraCoreBuffers,
       SmallVector<int> &crossCoreInputValues,
@@ -188,8 +178,6 @@ private:
       SmallVector<int> crossCoreOutputValues,
       DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
           &crossCoreBuffers,
-      DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
-          &memCrossCoreBuffers,
       scf::IfOp ifOp, SmallVector<SmallVector<Value>> ssbufferPtrs,
       Value &crossCoreCond);
 
@@ -218,8 +206,6 @@ private:
       SmallVector<int> crossCoreOutputValues,
       DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
           &crossCoreBuffers,
-      DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
-          &memCrossCoreBuffers,
       bool isAIC, Value zeroConst, DenseMap<int, Value> &precomputedPtrs,
       SmallVector<SmallVector<Value>> ssbufferPtrs);
 

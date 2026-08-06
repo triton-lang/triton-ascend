@@ -152,6 +152,157 @@ std::unique_ptr<HardwareConfig> HardwareConfig::getDefault910B() {
   return createHardcodedDefault910B();
 }
 
+/// Populate the tilesim-migrated micro-architecture tables with the 910B1
+/// measured values (bandwidth_910B1.csv / vec_cycle_910B1.csv / 910B1.yaml).
+/// Used by the hardcoded fallback so the migrated model is available even
+/// when the JSON config file cannot be located. The JSON config is the
+/// authoritative source in production; this mirrors the same numbers.
+void HardwareConfig::populateTilesimDefaults910B() {
+  // ---- Bandwidth tables (GB/s) ----
+  // Core-independent movers.
+  auto addScalar = [&](llvm::StringRef key, double gbps) {
+    BandwidthTable t;
+    t.singleGbps = gbps;
+    bandwidthTables[key.str()] = std::move(t);
+  };
+  addScalar("hbm:l2", 33.68666667); // GM->SHM(L2)
+  addScalar("l2:hbm", 34.34291667); // SHM->GM
+  addScalar("l2:ub", 137.0);        // L2->UB
+  addScalar("ub:l2", 93.0);         // UB->L2
+  addScalar("hbm:l1", 135.0);       // GM->L1 (cube MTE2)
+  addScalar("l2:l1", 221.0);        // L2->L1
+  addScalar("l1:l2", 221.0);        // L1->L2
+  addScalar("l1:l0a", 441.0);       // MTE1 A
+  addScalar("l1:l0b", 220.5);       // MTE1 B
+  addScalar("hbm:l0b", 104.5);
+  addScalar("l0c:hbm", 70.0); // FixPipe
+  addScalar("l0c:l2", 70.0);
+  addScalar("l0c:l1", 70.0);
+  addScalar("hbm:l2_agg", 1638.4); // aggregate HBM bandwidth
+
+  // GM->UB per-core (vector MTE2): bandwidth degrades as cores contend.
+  {
+    static const double gmUb[] = {
+        100.9,       64.5,        88.29666667, 77.945,      84.852,
+        80.82666667, 73.31571429, 68.93375,    73.22888889, 67.586,
+        71.13727273, 68.08833333, 69.14615385, 72.60785714, 74.99866667,
+        73.26375,    72.05058824, 70.66833333, 73.27,       68.7705,
+        68.72190476, 66.07909091, 66.33826087, 65.08041667, 65.3448,
+        62.61884615, 62.15148148, 58.95964286, 58.23,       56.146,
+        56.48,       53.3059375,  51.55151515, 49.97264706, 48.51342857,
+        46.525,      46.06621622, 43.74315789, 42.97435897, 41.5595,
+        40.44609756, 39.31904762, 38.47302326, 37.03886364, 36.33777778,
+        35.40717391, 34.83446809, 33.68666667};
+    BandwidthTable t;
+    t.hasPerCore = true;
+    for (int c = 1; c <= 48; ++c)
+      t.perCoreGbps[c] = gmUb[c - 1];
+    t.singleGbps = gmUb[47];
+    bandwidthTables["hbm:ub"] = std::move(t);
+  }
+  // UB->GM per-core (MTE3).
+  {
+    static const double ubGm[] = {
+        188.46,        210.53,        117.2733333,   130.295,       108.964,
+        119.54,        117.280446425, 115.02089285,  112.761339275, 110.5017857,
+        108.242232125, 105.98267855,  103.723124975, 101.4635714,   100.0593333,
+        100.373125,    96.81470588,   98.78555556,   90.44578947,   88.896,
+        83.38571429,   83.77727273,   77.92608696,   76.65166667,   71.0792,
+        70.58615385,   66.58407407,   66.42357143,   61.56655172,   59.854,
+        56.1083871,    55.9315625,    53.0,          51.53,         49.45828571,
+        48.11111111,   46.14540541,   45.26947368,   43.51512821,   42.56075,
+        40.9797561,    40.19857143,   38.46488372,   38.07454545,   36.684,
+        36.17608696,   34.70893617,   34.34291667};
+    BandwidthTable t;
+    t.hasPerCore = true;
+    for (int c = 1; c <= 48; ++c)
+      t.perCoreGbps[c] = ubGm[c - 1];
+    t.singleGbps = ubGm[47];
+    bandwidthTables["ub:hbm"] = std::move(t);
+  }
+
+  // ---- Vector instruction cycle tables (intrinsic -> dtype -> triplet) ----
+  auto addVec = [&](llvm::StringRef inst, int bits, int compute, int head,
+                    int interval) {
+    llvm::StringRef dt = (bits == 32) ? "fp32" : "fp16";
+    vecCycleTables[inst.str()][dt.str()] =
+        VecCycleEntry{compute, head, interval};
+  };
+  // (intrinsic, dtype, computing, head, interval) from vec_cycle_910B1.csv.
+  addVec("VADD", 16, 2, 13, 18);
+  addVec("VADD", 32, 2, 13, 18);
+  addVec("VSUB", 16, 2, 13, 18);
+  addVec("VSUB", 32, 2, 13, 18);
+  addVec("VMUL", 16, 2, 13, 19);
+  addVec("VMUL", 32, 2, 13, 19);
+  addVec("VDIV", 16, 8, 13, 25);
+  addVec("VDIV", 32, 4, 13, 25);
+  addVec("VMAX", 16, 2, 14, 16);
+  addVec("VMAX", 32, 2, 14, 16);
+  addVec("VMIN", 16, 2, 14, 16);
+  addVec("VMIN", 32, 2, 14, 16);
+  addVec("VEXP", 16, 4, 13, 24);
+  addVec("VEXP", 32, 2, 13, 24);
+  addVec("VSQRT", 16, 2, 14, 25);
+  addVec("VSQRT", 32, 2, 14, 25);
+  addVec("VABS", 16, 1, 13, 16);
+  addVec("VABS", 32, 1, 14, 16);
+  addVec("RELU", 16, 1, 14, 16);
+  addVec("RELU", 32, 1, 14, 16);
+  addVec("LOG", 16, 2, 26, 14);
+  addVec("LOG", 32, 2, 26, 14);
+  addVec("VSEL", 16, 2, 13, 13);
+  addVec("VSEL", 32, 2, 13, 14);
+  addVec("VBRCB", 16, 0, 0, 18);
+  addVec("VBRCB", 32, 0, 0, 18);
+  addVec("VCMPV_NE", 16, 2, 14, 22);
+  addVec("VCMPV_NE", 32, 2, 14, 22);
+  addVec("VCMPV_GE", 16, 2, 14, 22);
+  addVec("VCMPV_GE", 32, 2, 14, 22);
+  addVec("CMPV_EQ", 16, 2, 13, 22);
+  addVec("CMPV_EQ", 32, 2, 13, 22);
+  addVec("VCGADD", 32, 1, 14, 24);
+  addVec("VCGMAX", 32, 1, 14, 17);
+  addVec("VCGMIN", 32, 1, 14, 17);
+  addVec("VREDUCEV2", 32, 14, 14, 20);
+  addVec("VCOPY", 16, 1, 11, 13);
+  addVec("VCOPY", 32, 1, 11, 13);
+  addVec("CONV_F322F16", 32, 1, 16, 14);
+  addVec("CONV_F162F32", 16, 2, 13, 15);
+  addVec("CONV_F322BF16", 32, 1, 14, 16);
+  addVec("CONV_BF162F32", 16, 2, 14, 18);
+
+  // ---- Cube (GEMM) model ----
+  cubeModel.basicM = 16;
+  cubeModel.basicKNumerator = 32;
+  cubeModel.basicN = 16;
+  cubeModel.l0TileLimitKb = 32;
+  cubeModel.repeatCycles["fp32"] = 2;
+  cubeModel.repeatCycles["fp16"] = 1;
+  cubeModel.repeatCycles["bf16"] = 1;
+  cubeModel.repeatCycles["int8"] = 1;
+
+  activeBandwidthCores = 48;
+  // tilesim's engineering by-rule-pipeline path (eval_by_rule_pipe.py, the
+  // "main simulation loop" this costmodel is aligned to) sets
+  // enable_small_pkt_bw=True; the base config default (False) is not the
+  // accuracy target. Global pkt_param mirrors tilesim 910B1.yaml.
+  enableSmallPacketBw = true;
+  globalSmallPacket.enabled = true;
+  globalSmallPacket.thresholdBytes = 256;
+  globalSmallPacket.a64 = 0.295;
+  globalSmallPacket.b64 = 12.061;
+  globalSmallPacket.a128 = 0.272;
+  globalSmallPacket.b128 = 16.820;
+  globalSmallPacket.a256 = 0.322;
+  globalSmallPacket.b256 = 24.004;
+  hasGlobalSmallPacket = true;
+  // Mutex unit cliques (tilesim MutexComponents / pipe_exclusive_config).
+  // 910B: AIV MTE2 (vec load) and MTE3 (vec store) share one pipeline.
+  mutexGroups.clear();
+  mutexGroups.push_back({"vec_mte2", "mte3"});
+}
+
 /// Hardcoded fallback configuration (used when JSON file not found)
 std::unique_ptr<HardwareConfig> HardwareConfig::createHardcodedDefault910B() {
   auto config = std::make_unique<HardwareConfig>();
@@ -388,6 +539,9 @@ std::unique_ptr<HardwareConfig> HardwareConfig::createHardcodedDefault910B() {
   config->parallelismFlags["cube_and_vector"] = true;
   config->parallelismFlags["cube_mte2_and_fixpipe"] = true;
   config->parallelismFlags["vector_mte2_and_mte3"] = true;
+
+  // tilesim-migrated micro-architecture tables (bandwidth/vec/cube).
+  config->populateTilesimDefaults910B();
 
   return config;
 }
@@ -650,6 +804,150 @@ bool HardwareConfig::parseJSON(const llvm::json::Value &json,
       readInt("sqrt", "vsqrt");
       readInt("rsqrt", "vrsqrt");
       readInt("div", "vdiv");
+    }
+  }
+
+  //===------------------------------------------------------------------===//
+  // tilesim-migrated micro-architecture tables (root cause ①/②)
+  // All fields are optional; absence leaves the (less accurate) legacy
+  // estimation path intact, preserving backward compatibility.
+  //===------------------------------------------------------------------===//
+
+  // Bandwidth tables keyed by "src:dst". Supports core-independent
+  // ("bandwidth_gbps") and per-core ("per_core_gbps": {coreNum: gbps})
+  // forms, plus optional small-packet fitting coefficients.
+  if (const auto *bwTables = root->getObject("bandwidth_tables")) {
+    for (const auto &kv : *bwTables) {
+      const auto *obj = kv.second.getAsObject();
+      if (!obj)
+        continue;
+      BandwidthTable tbl;
+      if (auto gbps = obj->getNumber("bandwidth_gbps")) {
+        tbl.singleGbps = *gbps;
+      } else if (const auto *perCore = obj->getObject("per_core_gbps")) {
+        tbl.hasPerCore = true;
+        for (const auto &pkv : *perCore) {
+          if (auto v = pkv.second.getAsNumber()) {
+            int cores = std::stoi(pkv.first.str());
+            tbl.perCoreGbps[cores] = *v;
+          }
+        }
+        // singleGbps fallback = the largest (most-saturated) core entry.
+        if (!tbl.perCoreGbps.empty())
+          tbl.singleGbps = tbl.perCoreGbps.rbegin()->second;
+      }
+      if (const auto *sp = obj->getObject("small_packet")) {
+        tbl.smallPacket.enabled = true;
+        if (auto t = sp->getInteger("threshold_bytes"))
+          tbl.smallPacket.thresholdBytes = *t;
+        auto readPair = [&](llvm::StringRef key, double &a, double &b) {
+          if (const auto *arr = sp->getArray(key); arr && arr->size() >= 2) {
+            if (auto va = (*arr)[0].getAsNumber())
+              a = *va;
+            if (auto vb = (*arr)[1].getAsNumber())
+              b = *vb;
+          }
+        };
+        readPair("64B", tbl.smallPacket.a64, tbl.smallPacket.b64);
+        readPair("128B", tbl.smallPacket.a128, tbl.smallPacket.b128);
+        readPair("256B", tbl.smallPacket.a256, tbl.smallPacket.b256);
+      }
+      bandwidthTables[kv.first.str()] = std::move(tbl);
+    }
+  }
+
+  // Vector instruction cycle tables: intrinsic -> dtype ->
+  // {compute,head,interval}.
+  if (const auto *vecTables = root->getObject("vec_cycle_tables")) {
+    for (const auto &kv : *vecTables) {
+      const auto *byDtype = kv.second.getAsObject();
+      if (!byDtype)
+        continue;
+      llvm::StringMap<VecCycleEntry> inner;
+      for (const auto &dkv : *byDtype) {
+        const auto *entry = dkv.second.getAsObject();
+        if (!entry)
+          continue;
+        VecCycleEntry e;
+        if (auto v = entry->getInteger("compute"))
+          e.compute = *v;
+        if (auto v = entry->getInteger("head"))
+          e.head = *v;
+        if (auto v = entry->getInteger("interval"))
+          e.interval = *v;
+        inner[dkv.first.str()] = e;
+      }
+      vecCycleTables[kv.first.str()] = std::move(inner);
+    }
+  }
+
+  // Cube (GEMM) micro-architecture: throughput [m,k,n], repeat cycles, L0
+  // limit.
+  if (const auto *cube = root->getObject("cube_model")) {
+    if (const auto *arr = cube->getArray("throughput");
+        arr && arr->size() >= 3) {
+      if (auto v = (*arr)[0].getAsInteger())
+        cubeModel.basicM = *v;
+      if (auto v = (*arr)[1].getAsInteger())
+        cubeModel.basicKNumerator = *v;
+      if (auto v = (*arr)[2].getAsInteger())
+        cubeModel.basicN = *v;
+    }
+    if (const auto *rc = cube->getObject("repeat_cycles")) {
+      for (const auto &rkv : *rc) {
+        if (auto v = rkv.second.getAsInteger())
+          cubeModel.repeatCycles[rkv.first.str()] = static_cast<int>(*v);
+      }
+    }
+    if (auto v = cube->getInteger("l0_tile_limit_kb"))
+      cubeModel.l0TileLimitKb = *v;
+  }
+
+  // tilesim tuning knobs.
+  if (const auto *ts = root->getObject("tilesim")) {
+    if (auto v = ts->getInteger("active_bandwidth_cores"))
+      activeBandwidthCores = *v;
+    if (auto v = ts->getBoolean("enable_small_packet_bw"))
+      enableSmallPacketBw = *v;
+    // Global pkt_param (tilesim 910B1.yaml pkt_param): one (a,b) set per size
+    // bucket applied to every mover. Sits behind any per-table small_packet
+    // entry parsed above from bandwidth_tables.
+    if (const auto *sp = ts->getObject("small_packet")) {
+      SmallPacketCoeffs c;
+      c.enabled = true;
+      if (auto t = sp->getInteger("threshold_bytes"))
+        c.thresholdBytes = *t;
+      auto readPair = [&](llvm::StringRef key, double &a, double &b) {
+        if (const auto *arr = sp->getArray(key); arr && arr->size() >= 2) {
+          if (auto va = (*arr)[0].getAsNumber())
+            a = *va;
+          if (auto vb = (*arr)[1].getAsNumber())
+            b = *vb;
+        }
+      };
+      readPair("64B", c.a64, c.b64);
+      readPair("128B", c.a128, c.b128);
+      readPair("256B", c.a256, c.b256);
+      globalSmallPacket = c;
+      hasGlobalSmallPacket = true;
+    }
+    // Mutex unit cliques (tilesim MutexComponents): object with a "cliques"
+    // array of unit-name arrays, e.g. {"cliques":[["vec_mte2","mte3"]]}.
+    // Units in a clique share a pipeline and cannot run in parallel.
+    if (const auto *mg = ts->getObject("mutex_groups")) {
+      mutexGroups.clear();
+      if (const auto *cliques = mg->getArray("cliques")) {
+        for (const auto &clique : *cliques) {
+          if (const auto *units = clique.getAsArray()) {
+            std::vector<std::string> group;
+            for (const auto &u : *units)
+              if (auto s = u.getAsString())
+                group.push_back(s->str());
+            if (group.size() >= 2)
+              mutexGroups.push_back(std::move(group));
+          }
+        }
+      }
     }
   }
 
@@ -923,6 +1221,169 @@ int64_t HardwareConfig::estimateMemoryCyclesWithLatency(llvm::StringRef space,
   return std::max<int64_t>(1, mem->latencyCycles +
                                   static_cast<int64_t>(std::ceil(
                                       bytes / mem->bandwidthBytesPerCycle)));
+}
+
+//===----------------------------------------------------------------------===//
+// tilesim-migrated micro-architecture queries (root cause ①/②)
+//===----------------------------------------------------------------------===//
+
+namespace {
+/// Map an element bit width to the dtype key used in the migrated tables.
+/// 16-bit types (fp16/bf16) share the FP16 bucket, matching tilesim's CSV.
+llvm::StringRef elementBitsToDtypeKey(int elementBits) {
+  if (elementBits == 8)
+    return "int8";
+  if (elementBits == 32)
+    return "fp32";
+  if (elementBits == 64)
+    return "fp64";
+  return "fp16"; // fp16 / bf16
+}
+
+/// tilesim small-packet bandwidth convention: 1 GB/s == 1073.741824 B/us
+/// (it treats "GB" as GiB when converting the measured GB/s figures).
+constexpr double kBytesPerUsPerGbs =
+    (1024.0 * 1024.0 * 1024.0) / 1e6; // 1073.74...
+} // namespace
+
+BandwidthEntry HardwareConfig::lookupBandwidth(llvm::StringRef src,
+                                               llvm::StringRef dst, int coreNum,
+                                               int64_t pktBytes) const {
+  BandwidthEntry result;
+  std::string key = (src + ":" + dst).str();
+  auto it = bandwidthTables.find(key);
+  if (it != bandwidthTables.end()) {
+    const BandwidthTable &tbl = it->second;
+    double gbps = tbl.singleGbps;
+    if (tbl.hasPerCore && !tbl.perCoreGbps.empty()) {
+      // tilesim selects the exact core-count row; clamp out-of-range counts
+      // to the nearest tabulated value (no interpolation, matching tilesim).
+      int cores = coreNum > 0 ? coreNum : activeBandwidthCores;
+      int minCores = tbl.perCoreGbps.begin()->first;
+      int maxCores = tbl.perCoreGbps.rbegin()->first;
+      if (cores <= minCores) {
+        gbps = tbl.perCoreGbps.begin()->second;
+      } else if (cores >= maxCores) {
+        gbps = tbl.perCoreGbps.rbegin()->second;
+      } else {
+        auto eit = tbl.perCoreGbps.find(cores);
+        gbps = (eit != tbl.perCoreGbps.end())
+                   ? eit->second
+                   : tbl.perCoreGbps.rbegin()->second;
+      }
+    }
+    result.bwGBs = gbps;
+
+    // Small-packet fitting (tilesim pkt_param). tilesim keeps a single global
+    // pkt_param applied to every mover; a per-table small_packet entry
+    // overrides it. Opt-in via enableSmallPacketBw.
+    if (enableSmallPacketBw && pktBytes > 0) {
+      const SmallPacketCoeffs *sp = nullptr;
+      if (tbl.smallPacket.enabled)
+        sp = &tbl.smallPacket;
+      else if (hasGlobalSmallPacket && globalSmallPacket.enabled)
+        sp = &globalSmallPacket;
+      if (sp && pktBytes < sp->thresholdBytes) {
+        double a = 0, b = 0;
+        if (pktBytes < 64) {
+          a = sp->a64;
+          b = sp->b64;
+        } else if (pktBytes < 128) {
+          a = sp->a128;
+          b = sp->b128;
+        } else {
+          a = sp->a256;
+          b = sp->b256;
+        }
+        if (b > 0) {
+          // tilesim: bw[B/us] = b / (a*b + pkt_GB) * 1024^3/1e6
+          double pktGb =
+              static_cast<double>(pktBytes) / (1024.0 * 1024.0 * 1024.0);
+          double bwBus = b / (a * b + pktGb) * kBytesPerUsPerGbs;
+          result.bwGBs = bwBus / kBytesPerUsPerGbs; // back to GB/s
+          result.isSmallPacket = true;
+        }
+      }
+    }
+  } else {
+    // Unknown (src,dst): fall back to aggregate HBM bandwidth so estimates
+    // degrade gracefully instead of returning zero.
+    result.bwGBs = getHBMBandwidthGBs();
+  }
+  return result;
+}
+
+VecCycleEntry HardwareConfig::lookupVecCycle(llvm::StringRef intrinsic,
+                                             int elementBits) const {
+  auto it = vecCycleTables.find(intrinsic);
+  if (it != vecCycleTables.end()) {
+    const auto &byDtype = it->second;
+    llvm::StringRef dt = elementBitsToDtypeKey(elementBits);
+    auto dit = byDtype.find(dt);
+    if (dit != byDtype.end())
+      return dit->second;
+    // tilesim falls back to FP32 then warns; we silently fall back.
+    auto fp32 = byDtype.find("fp32");
+    if (fp32 != byDtype.end())
+      return fp32->second;
+  }
+  return VecCycleEntry{1, 0, 0};
+}
+
+int64_t HardwareConfig::estimateTransferCycles(llvm::StringRef src,
+                                               llvm::StringRef dst,
+                                               int64_t bytes,
+                                               int coreNum) const {
+  BandwidthEntry bw = lookupBandwidth(src, dst, coreNum, bytes);
+  if (bw.bwGBs <= 0)
+    bw.bwGBs = getHBMBandwidthGBs();
+  if (bw.bwGBs <= 0)
+    bw.bwGBs = 1600.0;
+  // Replicate tilesim: latency[us] = bytes / (bw[B/us]); cycles = latency *
+  // clock[MHz].
+  double bwBus = bw.bwGBs * kBytesPerUsPerGbs;
+  double latencyUs = static_cast<double>(bytes) / bwBus;
+  double cycles = latencyUs * (clockFreqGHz * 1000.0);
+  return static_cast<int64_t>(std::ceil(cycles));
+}
+
+void HardwareConfig::getCubeModelThroughput(int elementBits, int &basicM,
+                                            int &basicK, int &basicN) const {
+  basicM = cubeModel.basicM;
+  int elemBytes = (elementBits + 7) / 8;
+  basicK = elemBytes > 0 ? cubeModel.basicKNumerator / elemBytes
+                         : cubeModel.basicKNumerator;
+  basicN = cubeModel.basicN;
+}
+
+int HardwareConfig::getCubeModelRepeatCycles(int elementBits) const {
+  llvm::StringRef dt = elementBitsToDtypeKey(elementBits);
+  auto it = cubeModel.repeatCycles.find(dt);
+  if (it != cubeModel.repeatCycles.end())
+    return it->second;
+  // tilesim: fp32 -> 2, fp16/bf16/int8 -> 1.
+  return (elementBits == 32) ? 2 : 1;
+}
+
+int HardwareConfig::getCubeModelL0TileLimitBytes() const {
+  return cubeModel.l0TileLimitKb * 1024;
+}
+
+bool HardwareConfig::areMutexUnits(llvm::StringRef a, llvm::StringRef b) const {
+  if (a.empty() || b.empty() || a == b)
+    return false;
+  for (const auto &group : mutexGroups) {
+    bool hasA = false, hasB = false;
+    for (const auto &u : group) {
+      if (u == a)
+        hasA = true;
+      if (u == b)
+        hasB = true;
+    }
+    if (hasA && hasB)
+      return true;
+  }
+  return false;
 }
 
 //===----------------------------------------------------------------------===//

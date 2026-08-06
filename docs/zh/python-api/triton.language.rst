@@ -130,6 +130,7 @@ Reduction Ops
     max
     min
     reduce
+    reduce_or
     sum
     xor_sum
 
@@ -146,6 +147,7 @@ Scan/Sort Ops
     histogram
     sort
     topk
+    bitonic_merge
 
 Atomic Ops
 ----------

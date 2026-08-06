@@ -45,7 +45,7 @@ public:
   // analysis), if cannot reuse, then increment and allocate. insertionPoint:
   // the position where sync operation will be inserted, used for linear
   // comparison in reuse analysis. Can be nullptr.
-  int acquireId(Operation *insertionPoint);
+  int acquireId();
 
   bool checkCurrentId();
 

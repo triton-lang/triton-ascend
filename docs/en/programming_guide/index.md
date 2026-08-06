@@ -127,7 +127,7 @@ def add_kernel(x_ptr,
 ```python
 # conv_state = tensor([2048, 3], bfloat16)
 conv_state = tl.load(conv_state_ptr + conv_batch_offs * conv_batch_stride + doffs * 3 + tl.arange(0, 2048 * 3)) # It is considered as the 1D tensor load. In this case, numel is aligned and no padding is performed.
-conv_state_T = conv_state.reshape(128, 16 * 3).trans().reshape(16, 3 * 128).trans().reshape(3 * 2048,) # The long axis (2048) is split into an aligned axis (16) and lent to the short axis (3) to align the two axes.
+conv_state_T = conv_state.reshape(128, 16 * 3).transpose().reshape(16, 3 * 128).transpose().reshape(3 * 2048,) # The long axis (2048) is split into an aligned axis (16) and lent to the short axis (3) to align the two axes.
 ```
 
 ### Transferring Data to the UB and Then Selecting the Target Value from the UB
@@ -136,7 +136,7 @@ conv_state_T = conv_state.reshape(128, 16 * 3).trans().reshape(16, 3 * 128).tran
 
 - Example
 
-```diff
+```python
 @triton.jit
 def pick_kernel(
         x_ptr,

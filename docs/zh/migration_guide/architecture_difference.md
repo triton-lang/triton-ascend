@@ -86,6 +86,13 @@ def standard_unary(x0):
 以下是一个使用 Triton 编写的简单内核示例，用于展示如何定义和调用一个基本的Triton内核函数。此示例实现了一个简单的数学运算（GELU 激活函数）。
 
 ```Python
+
+import torch
+import torch_npu
+
+import triton
+import triton.language as tl
+
 # 定义triton_kernel核函数
 @triton.jit
 def triton_easy_kernel(in_ptr0, out_ptr0, NUMEL: tl.constexpr):
@@ -93,6 +100,12 @@ def triton_easy_kernel(in_ptr0, out_ptr0, NUMEL: tl.constexpr):
     x = tl.load(in_ptr0 + idx_block)
     ret = x * 0.5 * (1.0 + tl.erf(x / tl.sqrt(2.0)))
     tl.store(out_ptr0 + idx_block, ret)
+
+# 调用triton_kernel核函数
+ncore = 32
+x0 = torch.rand(32768, device='npu')
+out1 = torch.empty_like(x0)
+triton_easy_kernel[ncore, 1, 1](x0, out1, x0.numel())
 ```
 
 注意事项
@@ -109,6 +122,13 @@ def triton_easy_kernel(in_ptr0, out_ptr0, NUMEL: tl.constexpr):
 下面是一个经过优化的 Triton 内核实现示例，适用于大规模张量计算。
 
 ```Python
+
+import torch
+import torch_npu
+
+import triton
+import triton.language as tl
+
 # 定义triton_kernel核函数
 @triton.jit
 def triton_better_kernel(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
@@ -120,10 +140,12 @@ def triton_better_kernel(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK
         ret = x * 0.5 * (1.0 + tl.erf(x / tl.sqrt(2.0)))
         tl.store(out_ptr0 + x_index, ret, xmask)
 
-# 调用triton_kernel核函数
 ncore = 32
 xblock = 32768
 xblock_sub = 8192
+x0 = torch.rand(32768, device='npu')
+out1 = torch.empty_like(x0)
+# 调用triton_kernel核函数
 triton_better_kernel[ncore, 1, 1](x0, out1, x0.numel(), xblock, xblock_sub)
 ```
 

@@ -48,84 +48,84 @@ When executing Triton operators, NPUs leverage parallel mechanisms such as multi
     ):
         idx = tl.arange(0, N)
         mask = idx < M
-    -   data = tl.load(input + idx, mask = mask) # Alternatively, specify a value such as other=-1.
-    +   data = tl.load(input + idx, mask = mask, care_padding=False) # Alternatively, specify a value such as other=-1.
+        # data = tl.load(input + idx, mask = mask) # Alternatively, specify a value such as other=-1.
+        data = tl.load(input + idx, mask = mask, care_padding=False) # Alternatively, specify a value such as other=-1.
     ```
 
-- Example 2: Using `for` loops in Triton operators to increase tiling and enhance DOP
+  - Example 2: Using `for` loops in Triton operators to increase tiling and enhance DOP
 
-    In Triton operator programming, `mask` operations are frequently employed in syntax such as `load`, `store`, and `where`. During performance optimization, you should prioritize identifying performance degradation caused by these operations. When the logic within Triton operators executes sequentially in a single pass (Start -> Data-in -> Computation -> Data-out -> End), instructions cannot be parallelized, resulting in low execution efficiency. By introducing `for` loops to increase tiling, you can process data in multiple passes (with each pass handling a reduced data volume), enabling parallel execution of data-in, computation, and data-out. This approach reduces serial waiting time and improves overall performance. Additionally, compared to monolithic (non-tiled) data processing, the use of `for` loops for tiling reduces UB space consumption.
-    Note: Mathematical equivalence is an important aspect to consider when you increase data tiling.
+      In Triton operator programming, `mask` operations are frequently employed in syntax such as `load`, `store`, and `where`. During performance optimization, you should prioritize identifying performance degradation caused by these operations. When the logic within Triton operators executes sequentially in a single pass (Start -> Data-in -> Computation -> Data-out -> End), instructions cannot be parallelized, resulting in low execution efficiency. By introducing `for` loops to increase tiling, you can process data in multiple passes (with each pass handling a reduced data volume), enabling parallel execution of data-in, computation, and data-out. This approach reduces serial waiting time and improves overall performance. Additionally, compared to monolithic (non-tiled) data processing, the use of `for` loops for tiling reduces UB space consumption.
+      Note: Mathematical equivalence is an important aspect to consider when you increase data tiling.
 
-    ```diff
-    @triton.jit
-    def alloc_extend_kernel(
-            pre_lens_ptr,
-            seq_lens_ptr,
-            free_page_ptr,
-            out_indices,
-            bs_upper: tl.constexpr,
-            page_size: tl.constexpr,
-            max_num_extend_tokens: tl.constexpr,
-    +       BLOCK_SIZE: tl.constexpr = 1024,
-    ):
-        pid = tl.program_id(0)
+      ```diff
+      @triton.jit
+      def alloc_extend_kernel(
+              pre_lens_ptr,
+              seq_lens_ptr,
+              free_page_ptr,
+              out_indices,
+              bs_upper: tl.constexpr,
+              page_size: tl.constexpr,
+              max_num_extend_tokens: tl.constexpr,
+              BLOCK_SIZE: tl.constexpr = 1024,  # Add Param BLOCK_SIZE
+      ):
+          pid = tl.program_id(0)
 
-        load_offset = tl.arange(0, bs_upper)
-        seq_lens = tl.load(seq_lens_ptr + load_offset, mask=load_offset <= pid)
-        pre_lens = tl.load(pre_lens_ptr + load_offset, mask=load_offset <= pid)
-        extend_lens = seq_lens - pre_lens
+          load_offset = tl.arange(0, bs_upper)
+          seq_lens = tl.load(seq_lens_ptr + load_offset, mask=load_offset <= pid)
+          pre_lens = tl.load(pre_lens_ptr + load_offset, mask=load_offset <= pid)
+          extend_lens = seq_lens - pre_lens
 
-        seq_len = tl.load(seq_lens_ptr + pid)
-        pre_len = tl.load(pre_lens_ptr + pid)
-        extend_len = seq_len - pre_len
+          seq_len = tl.load(seq_lens_ptr + pid)
+          pre_len = tl.load(pre_lens_ptr + pid)
+          extend_len = seq_len - pre_len
 
-        sum_extend_lens = tl.sum(extend_lens)
-        output_start_loc = sum_extend_lens - extend_len
+          sum_extend_lens = tl.sum(extend_lens)
+          output_start_loc = sum_extend_lens - extend_len
 
-        num_pages_after = (seq_lens + page_size - 1) // page_size
-        num_pages_before = (pre_lens + page_size - 1) // page_size
-        num_new_pages = num_pages_after - num_pages_before
+          num_pages_after = (seq_lens + page_size - 1) // page_size
+          num_pages_before = (pre_lens + page_size - 1) // page_size
+          num_new_pages = num_pages_after - num_pages_before
 
-        num_page_start_loc_self = (seq_len + page_size - 1) // page_size - (
-                pre_len + page_size - 1
-        ) // page_size
-        sum_num_new_pages = tl.sum(num_new_pages)
-        new_page_start_loc = sum_num_new_pages - num_page_start_loc_self
+          num_page_start_loc_self = (seq_len + page_size - 1) // page_size - (
+                  pre_len + page_size - 1
+          ) // page_size
+          sum_num_new_pages = tl.sum(num_new_pages)
+          new_page_start_loc = sum_num_new_pages - num_page_start_loc_self
 
-        # Part 2: fill the new full pages
-        num_part2 = (
-                seq_len // page_size * page_size
-                - (pre_len + page_size - 1) // page_size * page_size
-        )
+          # Part 2: fill the new full pages
+          num_part2 = (
+                  seq_len // page_size * page_size
+                  - (pre_len + page_size - 1) // page_size * page_size
+          )
 
-    -   # load data at once
-    -   offset_many_page = tl.arange(0, max_num_extend_tokens)
-    -   page_start = tl.load(
-    -       free_page_ptr + new_page_start_loc + offset_many_page // page_size,
-    -       mask=offset_many_page < num_part2,
-    -   )
-    -   tl.store(
-    -       out_indices + output_start_loc + offset_many_page,
-    -       page_start * page_size + offset_many_page % page_size,
-    -       mask=offset_many_page < num_part2,
-    -   )
+          #   load data at once
+          #   offset_many_page = tl.arange(0, max_num_extend_tokens)
+          #   page_start = tl.load(
+          #       free_page_ptr + new_page_start_loc + offset_many_page // page_size,
+          #       mask=offset_many_page < num_part2,
+          #   )
+          #   tl.store(
+          #       out_indices + output_start_loc + offset_many_page,
+          #       page_start * page_size + offset_many_page % page_size,
+          #       mask=offset_many_page < num_part2,
+          #   )
 
-    +   # load data using loop
-    +   num_loop = tl.cdiv(max_num_extend_tokens, BLOCK_SIZE)
-    +   blk_offset = tl.arange(0, BLOCK_SIZE)
-    +   for i in range(num_loop):
-    +       offset_many_page = blk_offset + i * BLOCK_SIZE
-    +       page_start = tl.load(
-    +           free_page_ptr + new_page_start_loc + offset_many_page // page_size,
-    +           mask=offset_many_page < num_part2,
-    +       )
-    +       tl.store(
-    +           out_indices + output_start_loc + offset_many_page,
-    +           page_start * page_size + offset_many_page % page_size,
-    +           mask=offset_many_page < num_part2,
-    +       )
-    ```
+          # load data using loop
+          num_loop = tl.cdiv(max_num_extend_tokens, BLOCK_SIZE)
+          blk_offset = tl.arange(0, BLOCK_SIZE)
+          for i in range(num_loop):
+              offset_many_page = blk_offset + i * BLOCK_SIZE
+              page_start = tl.load(
+                  free_page_ptr + new_page_start_loc + offset_many_page // page_size,
+                  mask=offset_many_page < num_part2,
+              )
+              tl.store(
+                  out_indices + output_start_loc + offset_many_page,
+                  page_start * page_size + offset_many_page % page_size,
+                  mask=offset_many_page < num_part2,
+              )
+      ```
 
 ## Optimizing Data Types
 
@@ -200,9 +200,9 @@ The following operations are involved.
         mean = tl.sum(x, axis=0) / N
         tl.store(Mean + row, mean)
         # [Changed begin]
-    -   xbar = tl.where(cols < N, X - mean, 0.0)
-    +   cols_cmp = cols.to(tl.float32)
-    +   xbar = tl.where(cols_cmp < N, x - mean, 0.0)
+        # xbar = tl.where(cols < N, X - mean, 0.0)
+        cols_cmp = cols.to(tl.float32)
+        xbar = tl.where(cols_cmp < N, x - mean, 0.0)
         # [Changed end]
 
         var = tl.sum(xbar * xbar, axis=0) / N

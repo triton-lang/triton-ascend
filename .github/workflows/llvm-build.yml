@@ -3,18 +3,18 @@ name: LLVM Build
 # TEMPORARILY DISABLED — all triggers commented out so this workflow never
 # starts and never occupies a runner. Uncomment to re-enable.
 on:
-  # push:
-  #   paths:
-  #     - cmake/llvm-hash.txt
-  #     - third_party/ascend/patch/**
-  #     - .github/workflows/llvm-build.yml
-  #     - .github/workflows/llvm-build/**
-  # pull_request:
-  #   paths:
-  #     - cmake/llvm-hash.txt
-  #     - third_party/ascend/patch/**
-  #     - .github/workflows/llvm-build.yml
-  #     - .github/workflows/llvm-build/**
+  push:
+    paths:
+      - cmake/llvm-hash.txt
+      - third_party/ascend/patch/**
+      - .github/workflows/llvm-build.yml
+      - .github/workflows/llvm-build/**
+  pull_request:
+    paths:
+      - cmake/llvm-hash.txt
+      - third_party/ascend/patch/**
+      - .github/workflows/llvm-build.yml
+      - .github/workflows/llvm-build/**
   workflow_dispatch:
 
 env:
@@ -35,10 +35,10 @@ jobs:
       fail-fast: true
       matrix:
         config:
-        - {runner: 'Ubuntu 22.04', runs_on: 'ubuntu-22.04', target-os: 'ubuntu', arch: 'x64'}
-        - {runner: 'Ubuntu 22.04 ARM64', runs_on: 'ubuntu-22.04-arm', target-os: 'ubuntu', arch: 'arm64'}
-        - {runner: 'AlmaLinux 8', runs_on: 'ubuntu-22.04', target-os: 'almalinux', arch: 'x64'}
-        - {runner: 'AlmaLinux 8 ARM64', runs_on: 'ubuntu-22.04-arm', target-os: 'almalinux', arch: 'arm64'}
+        - {runner: 'Ubuntu 22.04', runs_on: 'linux-amd64-cpu-4', target-os: 'ubuntu', arch: 'x64'}
+        - {runner: 'Ubuntu 22.04 ARM64', runs_on: 'linux-aarch-cpu-4', target-os: 'ubuntu', arch: 'arm64'}
+        # - {runner: 'AlmaLinux 8', runs_on: 'ubuntu-22.04', target-os: 'almalinux', arch: 'x64'}
+        # - {runner: 'AlmaLinux 8 ARM64', runs_on: 'ubuntu-22.04-arm', target-os: 'almalinux', arch: 'arm64'}
 
     steps:
 
@@ -153,14 +153,18 @@ jobs:
 
     - name: Configure, Build, and Install LLVM (AlmaLinux)
       if: matrix.config.target-os == 'almalinux'
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: llvm-build/.github/workflows/llvm-build/almalinux.Dockerfile
+        build-args: |
+          llvm_dir=llvm-project
+        load: true
+        tags: llvm-build
+
+    - name: Extract LLVM Artifacts (AlmaLinux)
+      if: matrix.config.target-os == 'almalinux'
       run: |
-        # if this step crashes, it can leave behind a stale docker container
-        docker container prune -f
-        docker rmi -f $(docker images -q) 2>/dev/null || true
-
-        docker build --tag llvm-build --build-arg llvm_dir=llvm-project \
-          -f llvm-build/.github/workflows/llvm-build/almalinux.Dockerfile .
-
         # Create temporary container to copy cache and installed artifacts.
         CONTAINER_ID=$(docker create llvm-build)
 

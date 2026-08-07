@@ -30,8 +30,6 @@ namespace mlir {
 namespace triton {
 
 std::unique_ptr<OperationPass<ModuleOp>> createUBUsageOptPass();
-std::unique_ptr<OperationPass<ModuleOp>> createMergeSameSourceAxisPass();
-void registerMergeSameSourceAxisPass();
 std::unique_ptr<OperationPass<ModuleOp>> createUnifyAllocBlockPass();
 void registerUnifyAllocBlockPass();
 std::unique_ptr<OperationPass<ModuleOp>> createMergeVectorIfBlockPass();

@@ -163,7 +163,7 @@ static bool offsetMayContainStrideGtOne(Value offset, int depthBudget = 16) {
 }
 
 // Walk through shape-only wrappers to find the underlying scalar !tt.ptr<T>.
-// TileChunkCoalescing lifts invariant pointer tensors as
+// ChunkCoalescing lifts invariant pointer tensors as
 // broadcast(expand_dims(splat(ptr))), which is still a scalar base pointer for
 // indirect access construction.
 static Value getScalarBasePtr(Value tensorPtr, int depthBudget = 8) {

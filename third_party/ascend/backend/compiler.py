@@ -103,10 +103,15 @@ def _export_coalesce_metadata(mod, metadata):
     # no longer interprets the attrs. Read them into metadata here and strip them
     # from the module so the hacc.* attrs never reach hivmc (which rejects
     # unknown module attrs). Absent attrs -> factor 1 (no-op) / axis -1.
+    # RowCoalescing also records whether the launcher should use ceil-div when
+    # shrinking the grid, because its runtime valid-count guard handles tails.
     factor = _get_then_remove_rc(mod, "hacc.coalesce_factor")
     axis = _get_then_remove_rc(mod, "hacc.coalesce_axis")
+    ceil_div = _get_then_remove_rc(mod, "hacc.coalesce_grid_ceil_div")
     metadata["coalesce_factor"] = factor if isinstance(factor, int) and factor > 1 else 1
     metadata["coalesce_axis"] = axis if isinstance(axis, int) and axis >= 0 else -1
+    metadata["coalesce_grid_ceil_div"] = bool(isinstance(ceil_div, int) and ceil_div > 0)
+    metadata["row_coalescing_applied"] = metadata["coalesce_factor"] > 1
 
 
 def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
@@ -185,6 +190,18 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         set_workspace_multibuffer = metadata.get("set_workspace_multibuffer")
         if has_auto_blockify_blacklist_op or not auto_map_parallel_blocks_enabled:
             auto_blockify_size = 1
+
+        # Inject grid tile-count hint for ChunkCoalescing. When the kernel
+        # has no boundary mask but grid[axis] is known at compile time (e.g.
+        # from constexpr nchunks), the pass uses this to safely choose H.
+        grid_num_tiles = metadata.get("grid_num_tiles")
+        if isinstance(grid_num_tiles, int) and grid_num_tiles > 0:
+            try:
+                _builder = ascend.ir.ascendnpu_ir_builder(mod.context, opt.arch)
+                mod.set_attr("hacc.grid_num_tiles", _builder.parse_attr(f"{grid_num_tiles} : i32"))
+            except Exception:
+                pass  # graceful fallback: pass runs without hint
+
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
         if distributed is not None:
@@ -201,6 +218,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             passes.common.add_cse(pm)
             passes.common.add_canonicalizer(pm)
         ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
+        ascend.passes.ttir.add_convert_modulo_to_mask(pm)
         ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, force_simt_template,
                                                                enable_sync_block_lock)
         ascend.passes.ttir.add_triton_to_annotation(pm)
@@ -1109,6 +1127,11 @@ class NPUOptions:
     # superblocking factor
     superblock_factor: int = 0
 
+    # ChunkCoalescing: number of tiles along the outermost grid axis.
+    # Auto-injected from static grid tuples; enables safe coalescing for
+    # unmasked kernels whose grid dims are compile-time known.
+    grid_num_tiles: int = None
+
     def __post_init__(self):
         from triton.backends.ascend import _apply_ascend_patch
 
@@ -1139,6 +1162,13 @@ def ttir_to_npubin(mod, metadata, opt):
     # Get Triton-MLIR as string
     ttir_code = str(mod)
     metadata = _parse_ttir_metadata(ttir_code, metadata)
+    if opt.force_simt_only:
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+        ascend.passes.ttir.add_row_coalescing(pm)
+        pm.run(mod)
+        _export_coalesce_metadata(mod, metadata)
+        ttir_code = str(mod)
     with tempfile.TemporaryDirectory() as tmpdir:
         # prepare input
         src_path = os.path.join(tmpdir, "kernel.ttir.mlir")
@@ -1185,7 +1215,8 @@ def ttir_to_npubin(mod, metadata, opt):
             # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
             # mirroring the SIMD compile paths. driver.py's runtime block-count
             # cap keys off the same env switch, so the two stay in sync.
-            if _is_auto_map_parallel_blocks_enabled():
+            if (_is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False)
+                    and not metadata.get("row_coalescing_applied", False)):
                 _compile_option_list += ["--enable-auto-blockify-loop"]
                 if opt.superblock_factor > 0:
                     _compile_option_list += [f"--super-block-factor={opt.superblock_factor}"]

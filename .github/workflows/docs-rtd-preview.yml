@@ -13,8 +13,9 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - 'docs/**'
-      - .github/workflows/scripts/readthedocs_checkout.sh
-      - .github/workflows/docs-rtd-preview.yml
+      - '*.md'
+      - '.github/workflows/scripts/readthedocs_checkout.sh'
+      - '.github/workflows/docs-rtd-preview.yml'
       - '.readthedocs.yaml'
 
 permissions:

@@ -28,6 +28,7 @@
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallBitVector.h"
+#include "llvm/Support/LogicalResult.h"
 
 #include <optional>
 
@@ -35,16 +36,30 @@ namespace mlir {
 
 class OpBuilder;
 
+enum class IntegerExtensionKind {
+  Signed,
+  Unsigned,
+};
+
+FailureOr<Value>
+castIntegerLike(OpBuilder &builder, Location loc, Value value, Type targetType,
+                IntegerExtensionKind extension = IntegerExtensionKind::Signed);
+
 std::optional<int64_t> getConstantOfAttr(const OpFoldResult &arg);
 
+/// Without an explicit result type, preserve equal types and widen signless
+/// integers. Mixed index/integer operands require an explicit result type.
 OpFoldResult addOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &builder);
+                             const Location &loc, OpBuilder &builder,
+                             Type resultType = {});
 
 OpFoldResult subOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
                              const Location &loc, OpBuilder &builder);
 
+/// Uses the same result-type rules as addOpFoldResult.
 OpFoldResult mulOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &builder);
+                             const Location &loc, OpBuilder &builder,
+                             Type resultType = {});
 
 OpFoldResult divOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
                              const Location &loc, OpBuilder &builder);

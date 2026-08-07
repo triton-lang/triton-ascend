@@ -22,6 +22,7 @@ import ctypes
 import functools
 import hashlib
 import glob
+import json
 from numbers import Integral
 import os
 import re
@@ -71,7 +72,7 @@ from triton.backends.compiler import (
     BaseBackend,
     GPUTarget,
 )
-from triton.runtime.cache import _base32, get_dump_manager
+from triton.runtime.cache import get_dump_manager
 
 
 # TODO: materialize the concrete min shape
@@ -142,15 +143,8 @@ def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
 
 
 def _get_dump_paths(hash_key: str, src_path: str, dst_path: str) -> Tuple[str, str]:
-    """
-    If TRITON_DUMP_DIR is set, return paths under that directory.
-    Otherwise, return the original src_path and dst_path.
-    """
-    dump_dir_env = os.getenv("TRITON_DUMP_DIR")
-    if dump_dir_env:
-        dump_dir = os.path.join(dump_dir_env, _base32(hash_key))
-        return (os.path.join(dump_dir, os.path.basename(src_path)), os.path.join(dump_dir, os.path.basename(dst_path)))
-    return (src_path, dst_path)
+    dump_manager = get_dump_manager(hash_key)
+    return (dump_manager._make_path(os.path.basename(src_path)), dump_manager._make_path(os.path.basename(dst_path)))
 
 
 def make_ttir(mod, metadata, opt):
@@ -772,7 +766,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             cmd_list += [f"--plan-memory-strategy={plan_memory_strategy}"]
 
         if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
-            print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
+            print_cmd_list = cmd_list.copy()
+            print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
+            print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
         try:
             ret = subprocess.run(cmd_list, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
@@ -989,12 +985,11 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
-        if opt.debug:
+
+        if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
             print_cmd_list = cmd_list.copy()
             print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
             print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
-        elif os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
-            print(f"[DEBUG] cmd_list: {' '.join(cmd_list)}")
 
         try:
             ret = subprocess.run(cmd_list, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
@@ -1233,8 +1228,7 @@ def ttir_to_npubin(mod, metadata, opt):
                 _compile_option_list += [
                     f"--enable-bishengir-simt-optimization={opt.enable_bishengir_simt_optimization}"
                 ]
-            if opt.simt_stack_limit:
-                _compile_option_list += [f"--simt-stack-limit={opt.simt_stack_limit}"]
+            _compile_option_list += [f"--simt-stack-limit={get_simt_stack_limit()}"]
             if opt.shared_mem_dynamic_size is not None:
                 _compile_option_list += [f"--shared-mem-dynamic-size={opt.shared_mem_dynamic_size}"]
             if opt.enable_simt_reorder_instruction:
@@ -1275,6 +1269,27 @@ def ttir_to_npubin(mod, metadata, opt):
             print(f"[DEBUG] Stderr:\n{error_msg}")
             raise subprocess.CalledProcessError(ret.returncode, cmd_list, ret.stdout, ret.stderr)
         return Path(bin_path).read_bytes()
+
+
+def get_simt_stack_limit():
+    # simt_stack_limit resolution precedence:
+    #  1.torch_npu's acl_default.json "StackSize":{"simt_stack_size":N}
+    #    takes precedence and the user-specified value is ignored.
+    #  2.if that config key is absent ,fail back to the kernel-time
+    #    default simt_stack_limit=1152
+    _simt_stack_limit = 1152
+    try:
+        import torch_npu
+        torch_npu_basic_path = os.path.dirname(torch_npu.__file__)
+        _acl_cfg_path = os.path.join(torch_npu_basic_path, "acl_default.json")
+        with open(_acl_cfg_path, "r") as f:
+            _acl_cfg = json.load(f)
+        _cfg_stack = _acl_cfg.get("StackSize", {}).get("simt_stack_size", None)
+        if _cfg_stack is not None and _cfg_stack > 0:
+            _simt_stack_limit = _cfg_stack
+    except Exception as e:
+        print(f"[DEBUG] read acl_default.json failed: {e}")
+    return _simt_stack_limit
 
 
 class AscendBackend(BaseBackend):

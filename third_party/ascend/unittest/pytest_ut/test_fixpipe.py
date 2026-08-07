@@ -28,8 +28,11 @@ from triton.compiler.compiler import ASTSource
 from triton.compiler.code_generator import ast_to_ttir
 from triton._C.libtriton import ir
 from triton._C.libtriton.ascend import ir as ascend_ir
+from triton.backends.ascend import _apply_ascend_patch
 
 os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
+
+_apply_ascend_patch()
 
 
 class Options:
@@ -39,7 +42,7 @@ class Options:
     cluster_dims = (1, 1, 1)
     enable_fp_fusion = True
     debug = False
-    arch = "Ascend910_95"
+    arch = "Ascend910_9589"
     sanitize_overflow = True
 
 

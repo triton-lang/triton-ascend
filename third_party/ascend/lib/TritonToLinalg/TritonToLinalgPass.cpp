@@ -55,7 +55,6 @@
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -509,13 +508,13 @@ void TritonToLinalgPass::convertTTFunc(triton::FuncOp func, const bool existDot,
 
 void TritonToLinalgPass::addDynamicLegal(
     ConversionTarget &target, TritonTypeConverter &tritonTypeConverter) {
-  target.addLegalDialect<
-      func::FuncDialect, arith::ArithDialect, math::MathDialect,
-      linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
-      cf::ControlFlowDialect, tensor::TensorDialect, LLVM::LLVMDialect,
-      bufferization::BufferizationDialect, memref::MemRefDialect,
-      annotation::AnnotationDialect, hivm::HIVMDialect, hfusion::HFusionDialect,
-      scope::ScopeDialect>();
+  target.addLegalDialect<func::FuncDialect, arith::ArithDialect,
+                         math::MathDialect, linalg::LinalgDialect,
+                         affine::AffineDialect, scf::SCFDialect,
+                         cf::ControlFlowDialect, tensor::TensorDialect,
+                         LLVM::LLVMDialect, bufferization::BufferizationDialect,
+                         memref::MemRefDialect, annotation::AnnotationDialect,
+                         hivm::HIVMDialect, hfusion::HFusionDialect>();
 
   // add legal dialect on condition
   target.addLegalOp<ModuleOp>();
@@ -718,6 +717,7 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   patterns.add<TTOpConverters::DeviceAssertConverter>(patterns.getContext());
   patterns.add<TTOpConverters::DevicePrintConverter>(patterns.getContext());
   patterns.add<TTOpConverters::MatmulConverter>(patterns.getContext());
+  patterns.add<TTOpConverters::DotConverter>(patterns.getContext());
   patterns.add<TTOpConverters::DotScaledConverter>(patterns.getContext());
   patterns.add<TTOpConverters::PtrToIntConverter>(patterns.getContext());
 
@@ -750,12 +750,11 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
 }
 
 void TritonToLinalgPass::getDependentDialects(DialectRegistry &registry) const {
-  registry
-      .insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
-              linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
-              tensor::TensorDialect, bufferization::BufferizationDialect,
-              memref::MemRefDialect, hfusion::HFusionDialect, hivm::HIVMDialect,
-              annotation::AnnotationDialect, scope::ScopeDialect>();
+  registry.insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
+                  linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
+                  tensor::TensorDialect, bufferization::BufferizationDialect,
+                  memref::MemRefDialect, hfusion::HFusionDialect,
+                  hivm::HIVMDialect, annotation::AnnotationDialect>();
 }
 
 LogicalResult
@@ -933,6 +932,13 @@ void TritonToLinalgPass::runOnOperation() {
     return WalkResult::interrupt();
   });
   moduleOp.walk([&](triton::DotScaledOp dotScaledOp) {
+    existDot = true;
+    return WalkResult::interrupt();
+  });
+  // dot decomposes into a cube linalg.matmul, so a kernel containing it is
+  // a cube (mix) kernel, not a pure-AIV one. Without this the func gets tagged
+  // mix_mode="aiv" and the cube tile-and-slice fails (cbuf overflow).
+  moduleOp.walk([&](triton::ascend::DotOp dotOp) {
     existDot = true;
     return WalkResult::interrupt();
   });

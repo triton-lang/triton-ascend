@@ -47,6 +47,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
@@ -948,6 +949,10 @@ bool isTensorPtrType(Type type) {
 }
 
 } // namespace triton
+
+bool haveSameTypes(TypeRange lhs, TypeRange rhs) {
+  return llvm::equal(lhs, rhs);
+}
 
 void addReduceWithIndexAttr(ReduceWithIndexParams params,
                             ConversionPatternRewriter &rewriter,

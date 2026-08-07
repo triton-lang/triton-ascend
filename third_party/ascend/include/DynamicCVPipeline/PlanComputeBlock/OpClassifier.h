@@ -82,6 +82,8 @@ private:
 
   // Seed operations for CUBE upstream propagation
   llvm::SmallVector<Operation *> cubeSeeds;
+  // if A*B+C's C from broadcast chain, they need to keep for Normalize.
+  llvm::DenseSet<Operation *> inBroadcastChain;
 
   std::shared_ptr<AliasAnalysis> aliasAnalysis;
   std::shared_ptr<CVPipeline::MemoryDependenceGraph> memDepGraph;
@@ -97,6 +99,8 @@ private:
   void matchTransposePattern(Operation *def);
   void matchFillPattern(Operation *def);
   void matchEmptyPattern(Operation *def);
+  void matchBroadcastPattern(Operation *def);
+  Value extractMmadBiasFromPotentialUnitDimExpand(Value bias);
 
   // Downstream pattern matching helpers
   void matchStorePattern(Operation *user);
@@ -130,8 +134,9 @@ private:
   // results are consumed exclusively by CUBE ops.
   int penetrateCubeIntoForLoops();
 
-  // Helper: decide whether an scf.for is a pure cube-loader loop
+  // Helper: decide whether an scf.for or scf.while is a pure cube-loader loop
   bool isCubeLoaderForOp(scf::ForOp forOp);
+  bool isCubeLoaderForWhileOp(scf::WhileOp whileOp);
 
   // Initialize the pass
   void initializePass(ModuleOp module);

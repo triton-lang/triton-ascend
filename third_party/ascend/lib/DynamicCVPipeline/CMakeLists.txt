@@ -51,6 +51,7 @@ add_triton_library(DynamicCVPipeline
   ${PRE_CHECK_AVAILABLE_SRC_FILES}
   SplitDataflow.cpp
   SeparateMemoryFromComputePass.cpp
+  SeparateMemoryFromCompute/MarkGMLoadPass.cpp
   AllocMultiCache.cpp
   AddControlFlowCondition.cpp
   ${PLAN_COMPUTE_BLOCK_SRC_FILES}

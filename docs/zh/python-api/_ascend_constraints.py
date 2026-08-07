@@ -789,6 +789,18 @@ CONSTRAINTS = {
         ],
         "example": "triton.language.extra.cann.extension.sort",
     },
+    "triton.language.extra.cann.extension.dot": {
+        "constraints": [
+            "DataType: Ascend supports f16, bf16, f32, int8. A and B must have the same dtype.",
+            "format_a/b/c: must be ``\"fractal\"`` (zN 4D), ``\"nd\"`` (2D), or ``\"\"`` (default ND).",
+            "Fractal operand must be 4D (zN); ND operand must be 2D.",
+            "Fractal block_col must be 32/elem_bytes (f16/bf16→16, f32→8, int8→32).",
+            "Fractal block_row must be 16; for int8 the right operand requires 32 (zN[N/32, K/32, 32, 32]).",
+            "Output dtype: f32 for float inputs, i32 for int8 (cube L0C accumulator dtype).",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.dot",
+    },
     "triton.language.split": {
         "constraints": [
             "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64 (hardware limitation).",

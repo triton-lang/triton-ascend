@@ -340,8 +340,9 @@ Value getScalarValue(Value operand, Location loc,
       }
       if (isa<ShapedType>(cond.getType()))
         return nullptr;
-      return rewriter.create<arith::SelectOp>(loc, trueVal.getType(), cond,
-                                              trueVal, falseVal);
+      Value scalarSelect = rewriter.create<arith::SelectOp>(
+          loc, trueVal.getType(), cond, trueVal, falseVal);
+      return reconstructScalarValue(scalarSelect);
     } else if (auto op = operand.getDefiningOp<arith::SIToFPOp>()) {
       ops.push_back(op.getOperation());
       operand = op.getIn();

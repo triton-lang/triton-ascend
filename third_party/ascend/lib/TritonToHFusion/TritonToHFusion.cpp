@@ -97,10 +97,11 @@ struct TritonFpToFpToHFusionConversion : OpRewritePattern<triton::FpToFpOp> {
       return failure();
     }
 
-    // Only non-RTNE tensor conversions are lowered to HFusion.
-    auto srcType = dyn_cast<TensorType>(input.getType());
-    auto dstType = dyn_cast<TensorType>(resultType);
-    if (!srcType || !dstType || !srcType.getElementType().isIntOrFloat() ||
+    // HFusion owns only non-RTNE tensor conversions. Keep the tensor
+    // precondition checked here; a scalar must not silently fall through.
+    auto srcType = cast<TensorType>(input.getType());
+    auto dstType = cast<TensorType>(resultType);
+    if (!srcType.getElementType().isIntOrFloat() ||
         !dstType.getElementType().isIntOrFloat()) {
       return failure();
     }

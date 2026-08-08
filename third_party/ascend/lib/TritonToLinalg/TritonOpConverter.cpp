@@ -469,19 +469,51 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
   auto roundModeAttr = hfusion::RoundModeAttr::get(rewriter.getContext(),
                                                    hfusion::RoundMode::RINT);
 
-  if (srcBitwidth > dstBitwidth) {
+  // A no-op conversion is valid only when the complete MLIR type is identical.
+  // Equal element bitwidth alone is insufficient: FP8 formats such as
+  // f8E4M3FN and f8E5M2 have different numerical semantics.
+  if (input.getType() == resultType) {
+    rewriter.replaceOp(op, input);
+    return success();
+  }
+
+  if (srcBitwidth == dstBitwidth) {
+    if (srcElemType == dstElemType) {
+      return op.emitError(
+          "fp_to_fp with identical element types has incompatible "
+          "container or layout types");
+    }
+
+    // arith.extf/truncf require a strict bitwidth change. Materialize an f32
+    // intermediate so the conversion remains a numerical cast in TTAdapter
+    // IR and can follow the normal Bisheng lowering path.
+    Type f32Type;
+    if (auto tensorType = dyn_cast<RankedTensorType>(input.getType())) {
+      f32Type =
+          RankedTensorType::get(tensorType.getShape(), rewriter.getF32Type(),
+                                tensorType.getEncoding());
+    } else if (isa<FloatType>(input.getType())) {
+      f32Type = rewriter.getF32Type();
+    } else {
+      return op.emitError("FpToFp expects a scalar or ranked tensor type");
+    }
+
+    auto extOp = rewriter.create<arith::ExtFOp>(loc, f32Type, input);
+    extOp->setAttr("round_mode", roundModeAttr);
+    auto truncOp =
+        rewriter.create<arith::TruncFOp>(loc, resultType, extOp.getResult());
+    truncOp->setAttr("round_mode", roundModeAttr);
+    rewriter.replaceOp(op, truncOp.getResult());
+  } else if (srcBitwidth > dstBitwidth) {
     // Downcast: use arith.truncf with round_mode=rint
     auto truncOp = rewriter.create<arith::TruncFOp>(loc, resultType, input);
     truncOp->setAttr("round_mode", roundModeAttr);
     rewriter.replaceOp(op, truncOp.getResult());
-  } else if (srcBitwidth < dstBitwidth) {
+  } else {
     // Upcast: use arith.extf with round_mode=rint
     auto extOp = rewriter.create<arith::ExtFOp>(loc, resultType, input);
     extOp->setAttr("round_mode", roundModeAttr);
     rewriter.replaceOp(op, extOp.getResult());
-  } else {
-    // Same bitwidth, should not happen but handle gracefully
-    rewriter.replaceOp(op, input);
   }
 
   return success();

@@ -48,9 +48,9 @@ namespace mlir {
 namespace triton {
 // For origin MemRefType of ReinterpretCastOp under interleave state, here wanna
 // adjust its shape info by expanding last dimension double.
-MemRefType
-expandInterleaveMemRefType(MemRefType originType,
-                           std::optional<OpFoldResult> castOffset = std::nullopt) {
+MemRefType expandInterleaveMemRefType(
+    MemRefType originType,
+    std::optional<OpFoldResult> castOffset = std::nullopt) {
   // Double the last dimension shape
   SmallVector<int64_t> shape(originType.getShape());
   shape.back() = shape.back() * 2;
@@ -469,7 +469,7 @@ InterleaveStatusOptimization(SmallVector<Operation *> materializeVec) {
   // Create new op
   // 1. Get new destination memref type
   auto dstType = expandInterleaveMemRefType(firstReinterpretCastOp.getType(),
-                                             newCastOffset);
+                                            newCastOffset);
 
   // 2. New tensor::EmptyOp
   auto emptyTensor = builder.create<tensor::EmptyOp>(loc, dstType.getShape(),
@@ -619,7 +619,7 @@ InterleaveStatusWithMaskOptimization(SmallVector<Operation *> materializeVec) {
   // Create new op
   // 1. Get new destination memref type
   auto dstType = expandInterleaveMemRefType(firstReinterpretCastOp.getType(),
-                                             newCastOffset);
+                                            newCastOffset);
 
   // 2. New tensor::EmptyOp
   auto emptyTensor = builder.create<tensor::EmptyOp>(loc, dstType.getShape(),

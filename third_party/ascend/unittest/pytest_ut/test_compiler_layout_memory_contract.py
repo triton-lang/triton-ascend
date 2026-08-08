@@ -290,7 +290,7 @@ def _run_ttir_to_npubin(
     common_options=(),
     bisheng_options=None,
     enable_bishengir_simt_optimization=0,
-    simt_stack_limit=0,
+    resolved_simt_stack_limit=1152,
     shared_mem_dynamic_size=None,
     enable_simt_reorder_instruction=False,
     disable_fma=False,
@@ -336,6 +336,14 @@ def _run_ttir_to_npubin(
         "_is_auto_map_parallel_blocks_enabled",
         lambda: auto_map_enabled,
     )
+    # StackSize precedence is covered by test_compiler.py.  Keep this argv
+    # matrix independent of the host torch_npu configuration while verifying
+    # that ttir_to_npubin uses the resolver rather than the legacy option.
+    monkeypatch.setattr(
+        compiler,
+        "get_simt_stack_limit",
+        lambda: resolved_simt_stack_limit,
+    )
     monkeypatch.setattr(compiler.subprocess, "run", run_bisheng)
 
     result = compiler.ttir_to_npubin(
@@ -346,7 +354,6 @@ def _run_ttir_to_npubin(
             enable_auto_blockify=enable_auto_blockify,
             superblock_factor=superblock_factor,
             enable_bishengir_simt_optimization=enable_bishengir_simt_optimization,
-            simt_stack_limit=simt_stack_limit,
             shared_mem_dynamic_size=shared_mem_dynamic_size,
             enable_simt_reorder_instruction=enable_simt_reorder_instruction,
             disable_fma=disable_fma,
@@ -613,7 +620,7 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
                 common_options=common_options,
                 bisheng_options=case_bisheng_options,
                 enable_bishengir_simt_optimization=17,
-                simt_stack_limit=64,
+                resolved_simt_stack_limit=64,
                 shared_mem_dynamic_size=4096,
                 enable_simt_reorder_instruction=True,
                 disable_fma=True,

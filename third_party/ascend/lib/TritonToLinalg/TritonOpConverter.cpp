@@ -52,6 +52,7 @@
 #include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Interfaces/CallInterfaces.h"
@@ -484,11 +485,10 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
     return failure();
   }
 
-  // Handle RTNE (default) rounding mode with arith.truncf/extf
-  auto srcType = cast<RankedTensorType>(input.getType());
-  auto dstType = cast<RankedTensorType>(resultType);
-  auto srcElemType = srcType.getElementType();
-  auto dstElemType = dstType.getElementType();
+  // Handle RTNE (default) rounding mode with arith.truncf/extf. This can be
+  // either a scalar conversion or a ranked tensor conversion.
+  auto srcElemType = getElementTypeOrSelf(input.getType());
+  auto dstElemType = getElementTypeOrSelf(resultType);
   if (!isa<FloatType>(srcElemType) || !isa<FloatType>(dstElemType)) {
     return op.emitError("FpToFp expects floating point types");
   }
@@ -500,19 +500,51 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
   auto roundModeAttr = hfusion::RoundModeAttr::get(rewriter.getContext(),
                                                    hfusion::RoundMode::RINT);
 
-  if (srcBitwidth > dstBitwidth) {
-    // Downcast: use arith.truncf with round_mode=rint
-    auto truncOp = rewriter.create<arith::TruncFOp>(loc, dstType, input);
+  // A no-op conversion is valid only when the complete MLIR type is identical.
+  // Equal element bitwidth alone is insufficient: FP8 formats such as
+  // f8E4M3FN and f8E5M2 have different numerical semantics.
+  if (input.getType() == resultType) {
+    rewriter.replaceOp(op, input);
+    return success();
+  }
+
+  if (srcBitwidth == dstBitwidth) {
+    if (srcElemType == dstElemType) {
+      return op.emitError(
+          "fp_to_fp with identical element types has incompatible "
+          "container or layout types");
+    }
+
+    // arith.extf/truncf require a strict bitwidth change. Materialize an f32
+    // intermediate so the conversion remains a numerical cast in TTAdapter
+    // IR and can follow the normal Bisheng lowering path.
+    Type f32Type;
+    if (auto tensorType = dyn_cast<RankedTensorType>(input.getType())) {
+      f32Type =
+          RankedTensorType::get(tensorType.getShape(), rewriter.getF32Type(),
+                                tensorType.getEncoding());
+    } else if (isa<FloatType>(input.getType())) {
+      f32Type = rewriter.getF32Type();
+    } else {
+      return op.emitError("FpToFp expects a scalar or ranked tensor type");
+    }
+
+    auto extOp = rewriter.create<arith::ExtFOp>(loc, f32Type, input);
+    extOp->setAttr("round_mode", roundModeAttr);
+    auto truncOp =
+        rewriter.create<arith::TruncFOp>(loc, resultType, extOp.getResult());
     truncOp->setAttr("round_mode", roundModeAttr);
     rewriter.replaceOp(op, truncOp.getResult());
-  } else if (srcBitwidth < dstBitwidth) {
+  } else if (srcBitwidth > dstBitwidth) {
+    // Downcast: use arith.truncf with round_mode=rint
+    auto truncOp = rewriter.create<arith::TruncFOp>(loc, resultType, input);
+    truncOp->setAttr("round_mode", roundModeAttr);
+    rewriter.replaceOp(op, truncOp.getResult());
+  } else {
     // Upcast: use arith.extf with round_mode=rint
-    auto extOp = rewriter.create<arith::ExtFOp>(loc, dstType, input);
+    auto extOp = rewriter.create<arith::ExtFOp>(loc, resultType, input);
     extOp->setAttr("round_mode", roundModeAttr);
     rewriter.replaceOp(op, extOp.getResult());
-  } else {
-    // Same bitwidth, should not happen but handle gracefully
-    rewriter.replaceOp(op, input);
   }
 
   return success();

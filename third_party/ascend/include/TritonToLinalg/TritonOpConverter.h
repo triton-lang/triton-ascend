@@ -74,9 +74,14 @@ public:
 Convert `tt.fp_to_fp` operation with RTNE (default) rounding mode to
 `arith.truncf` or `arith.extf` operation.
 
-For fp8 conversions with default RTNE rounding:
+For default RTNE rounding:
 - downcast: tt.fp_to_fp -> arith.truncf
 - upcast: tt.fp_to_fp -> arith.extf
+- same-bitwidth conversions between distinct floating-point formats:
+  tt.fp_to_fp -> arith.extf (to f32) -> arith.truncf
+
+Only an operation whose complete input and result MLIR types are identical can
+be eliminated as an identity conversion.
 
 Note: Non-RTNE rounding modes (e.g., RTZ) are handled by TritonToHFusion pass.
 */

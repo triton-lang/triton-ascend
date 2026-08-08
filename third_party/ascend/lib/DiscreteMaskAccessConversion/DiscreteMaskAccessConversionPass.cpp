@@ -413,6 +413,14 @@ struct DiscreteMaskAtomicConversion
     if (failed(isDiscreteMask(op, mask, rewriter)))
       return failure();
 
+    // Keep the original lane mask for A5 SIMT indirect atomic lowering.
+    // Replacing it with a select here would leave the indirect atomic without
+    // the predicate that prevents inactive lanes from dereferencing ptr.
+    if (compileOn91095Flag && forceSimtTemplateFlag) {
+      op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
+      return failure();
+    }
+
     const std::map<RMWOp, TypelessValue> initMap = {
         {RMWOp::FADD, TypelessValue::Zero},
         {RMWOp::ADD, TypelessValue::Zero},

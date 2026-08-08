@@ -1,5 +1,67 @@
 // RUN: triton-opt '--discrete-mask-access-conversion=compile-on-910-95=True force-simt-template=True' '--triton-to-unstructure=compile-on-910-95=True force-simt-template=True' --split-input-file %s | FileCheck %s
 
+// CHECK-LABEL: tt.func public @structured_disc_mask_atomic_add_2d
+// CHECK-NOT: arith.select
+// CHECK: %[[OFFSET_I64:.*]] = arith.extsi {{.*}} : tensor<4x4xi32> to tensor<4x4xi64>
+// CHECK: %[[OFFSET_FLAT:.*]] = tt.reshape %[[OFFSET_I64]] : tensor<4x4xi64> -> tensor<16xi64>
+// CHECK: %[[VALUE_FLAT:.*]] = tt.reshape {{.*}} : tensor<4x4xi32> -> tensor<16xi32>
+// CHECK: %[[MASK_I8:.*]] = arith.extui {{.*}} : tensor<4x4xi1> to tensor<4x4xi8>
+// CHECK: %[[MASK_FLAT:.*]] = tt.reshape %[[MASK_I8]] : tensor<4x4xi8> -> tensor<16xi8>
+// CHECK: %[[OLD_FLAT:.*]] = hivm.hir.custom {extra_attr = "operate=add"{{.*}}} "__builtin_indirect_atomic" ins(%arg1, %[[OFFSET_FLAT]], %[[VALUE_FLAT]], %[[MASK_FLAT]]
+// CHECK: %[[OLD:.*]] = tt.reshape %[[OLD_FLAT]] : tensor<16xi32> -> tensor<4x4xi32>
+// CHECK: ascend.indirect_store %arg2 : <i32>, %[[OFFSET_I64]] : tensor<4x4xi64>, %[[OLD]] : tensor<4x4xi32>,
+tt.func public @structured_disc_mask_atomic_add_2d(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32}, %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32}, %arg2: !tt.ptr<i32> {tt.divisibility = 16 : i32}) attributes {noinline = false} {
+  %cst = arith.constant dense<16> : tensor<4x4xi32>
+  %cst_0 = arith.constant dense<2> : tensor<4x4xi32>
+  %cst_1 = arith.constant dense<4> : tensor<4x1xi32>
+  %0 = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+  %1 = tt.expand_dims %0 {axis = 1 : i32} : tensor<4xi32> -> tensor<4x1xi32>
+  %2 = tt.expand_dims %0 {axis = 0 : i32} : tensor<4xi32> -> tensor<1x4xi32>
+  %3 = arith.muli %1, %cst_1 : tensor<4x1xi32>
+  %4 = tt.broadcast %3 : tensor<4x1xi32> -> tensor<4x4xi32>
+  %5 = tt.broadcast %2 : tensor<1x4xi32> -> tensor<4x4xi32>
+  %6 = arith.addi %4, %5 : tensor<4x4xi32>
+  %7 = arith.muli %6, %cst_0 : tensor<4x4xi32>
+  %8 = arith.cmpi slt, %7, %cst : tensor<4x4xi32>
+  %9 = tt.splat %arg0 : !tt.ptr<i32> -> tensor<4x4x!tt.ptr<i32>>
+  %10 = tt.addptr %9, %6 : tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>
+  %11 = tt.load %10 : tensor<4x4x!tt.ptr<i32>>
+  %12 = tt.splat %arg1 : !tt.ptr<i32> -> tensor<4x4x!tt.ptr<i32>>
+  %13 = tt.addptr %12, %6 : tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>
+  %14 = tt.atomic_rmw add, acq_rel, gpu, %13, %11, %8 : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
+  %15 = tt.splat %arg2 : !tt.ptr<i32> -> tensor<4x4x!tt.ptr<i32>>
+  %16 = tt.addptr %15, %6 : tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>
+  tt.store %16, %14, %8 : tensor<4x4x!tt.ptr<i32>>
+  tt.return
+}
+
+// -----
+
+// CHECK-LABEL: tt.func @structured_disc_mask_atomic_max_i16_fallback
+// CHECK-NOT: arith.select
+// CHECK-NOT: hivm.hir.custom
+// CHECK: tt.atomic_rmw max, acq_rel, gpu, {{.*}} {DiscreteMemAccess} : (tensor<1024x!tt.ptr<i16>>, tensor<1024xi16>, tensor<1024xi1>) -> tensor<1024xi16>
+// CHECK-NOT: arith.select
+// CHECK-NOT: hivm.hir.custom
+// CHECK: tt.return
+tt.func @structured_disc_mask_atomic_max_i16_fallback(%arg0: !tt.ptr<i16>, %arg1: !tt.ptr<i16>) {
+  %cst = arith.constant dense<200> : tensor<1024xi32>
+  %cst_0 = arith.constant dense<400> : tensor<1024xi32>
+  %0 = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32>
+  %1 = arith.cmpi slt, %0, %cst : tensor<1024xi32>
+  %2 = arith.cmpi sgt, %0, %cst_0 : tensor<1024xi32>
+  %3 = arith.ori %1, %2 : tensor<1024xi1>
+  %4 = tt.splat %arg0 : !tt.ptr<i16> -> tensor<1024x!tt.ptr<i16>>
+  %5 = tt.addptr %4, %0 : tensor<1024x!tt.ptr<i16>>, tensor<1024xi32>
+  %6 = tt.splat %arg1 : !tt.ptr<i16> -> tensor<1024x!tt.ptr<i16>>
+  %7 = tt.addptr %6, %0 : tensor<1024x!tt.ptr<i16>>, tensor<1024xi32>
+  %8 = tt.load %7 : tensor<1024x!tt.ptr<i16>>
+  %9 = tt.atomic_rmw max, acq_rel, gpu, %5, %8, %3 : (tensor<1024x!tt.ptr<i16>>, tensor<1024xi16>, tensor<1024xi1>) -> tensor<1024xi16>
+  tt.return
+}
+
+// -----
+
 // CHECK-LABEL: tt.func public @fully_unstructured_atomic_add_2d
 // CHECK: %[[MASK_TRUE:.*]] = arith.constant dense<1> : tensor<16xi8>
 // CHECK: %[[OFFSET_FLAT:.*]] = tt.reshape {{.*}} : tensor<4x4xi64> -> tensor<16xi64>

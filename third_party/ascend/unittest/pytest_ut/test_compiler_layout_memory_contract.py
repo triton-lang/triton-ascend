@@ -498,6 +498,7 @@ def _run_make_ttir_with_recorded_graph_options(compiler, monkeypatch, options):
                 add_symbol_dce=record("symbol_dce"),
             ),
             ttir=SimpleNamespace(
+                add_rewrite_tensor_descriptor_to_pointer=record("rewrite_tensor_descriptor_to_pointer"),
                 add_combine=record("combine"),
                 add_reorder_broadcast=record("reorder_broadcast"),
                 add_loop_unroll=record("loop_unroll"),

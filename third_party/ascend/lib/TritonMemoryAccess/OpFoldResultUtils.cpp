@@ -114,14 +114,14 @@ FailureOr<OpFoldResult> castIntegerFoldResult(const OpFoldResult &operand,
   return OpFoldResult(*converted);
 }
 
-FailureOr<Value>
-materializeIntegerOperand(const OpFoldResult &operand,
-                          std::optional<int64_t> constant, Type targetType,
-                          Location loc, OpBuilder &builder) {
+FailureOr<Value> materializeIntegerOperand(const OpFoldResult &operand,
+                                           std::optional<int64_t> constant,
+                                           Type targetType, Location loc,
+                                           OpBuilder &builder) {
   if (constant)
     return builder
-        .create<arith::ConstantOp>(loc,
-                                   builder.getIntegerAttr(targetType, *constant))
+        .create<arith::ConstantOp>(
+            loc, builder.getIntegerAttr(targetType, *constant))
         .getResult();
   auto value = dyn_cast<Value>(operand);
   if (!value)

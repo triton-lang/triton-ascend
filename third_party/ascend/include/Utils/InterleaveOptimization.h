@@ -68,13 +68,6 @@ namespace triton {
 
 enum class IndexMode : int { EVEN_MODE = 0, ODD_MODE = 1 };
 
-MemRefType expandInterleaveMemRefType(MemRefType originType);
-
-bool checkIsCaseOffsetValid(OpFoldResult originOffset);
-
-std::pair<OpFoldResult, IndexMode>
-recountReinterpretCastOffset(OpFoldResult originOffset, Builder &builder);
-
 LogicalResult
 DeinterleaveStatusOptimization(triton::LoadOp op,
                                triton::LoadOp::Adaptor adaptor,

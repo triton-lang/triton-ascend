@@ -48,7 +48,7 @@ namespace mlir {
 namespace triton {
 // For origin MemRefType of ReinterpretCastOp under interleave state, here wanna
 // adjust its shape info by expanding last dimension double.
-MemRefType expandInterleaveMemRefType(
+static MemRefType expandInterleaveMemRefType(
     MemRefType originType,
     std::optional<OpFoldResult> castOffset = std::nullopt) {
   // Double the last dimension shape

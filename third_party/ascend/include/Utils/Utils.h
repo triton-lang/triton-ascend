@@ -47,6 +47,7 @@ namespace ConverterUtils {
 
 const std::string GeneratedByMakeTensorPtrTAG = "GeneratedByMakeTensorPtr";
 const std::string discreteMaskAttrName = "DiscreteMask";
+const std::string preserveAtomicMaskAttrName = "PreserveAtomicMask";
 const std::string discreteAttrName = "DiscreteMemAccess";
 const std::string continuousAttrName = "ContinuousMemAccess";
 const std::string customSrcPtrIndexAttrName = "SrcPtrIndex";

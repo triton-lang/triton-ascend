@@ -40,7 +40,8 @@ tt.func public @structured_disc_mask_atomic_add_2d(%arg0: !tt.ptr<i32> {tt.divis
 // CHECK-LABEL: tt.func @structured_disc_mask_atomic_max_i16_fallback
 // CHECK-NOT: arith.select
 // CHECK-NOT: hivm.hir.custom
-// CHECK: tt.atomic_rmw max, acq_rel, gpu, {{.*}} {DiscreteMemAccess} : (tensor<1024x!tt.ptr<i16>>, tensor<1024xi16>, tensor<1024xi1>) -> tensor<1024xi16>
+// CHECK: scf.if
+// CHECK: tt.atomic_rmw max, acq_rel, gpu, {{.*}} {DiscreteMemAccess} : (tensor<1x!tt.ptr<i16>>, tensor<1xi16>) -> tensor<1xi16>
 // CHECK-NOT: arith.select
 // CHECK-NOT: hivm.hir.custom
 // CHECK: tt.return

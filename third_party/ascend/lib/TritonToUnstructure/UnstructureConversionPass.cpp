@@ -471,6 +471,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   auto ptr = op.getPtr();
   auto ptrType = resolvePtrTensorType(ptr);
   auto routeDiscreteMaskToSimt = op->hasAttr(kRouteDiscreteMaskToSimtAttrName);
+  auto preserveAtomicMask =
+      op->hasAttr(ConverterUtils::preserveAtomicMaskAttrName);
 
   if (!ptrType || op->hasAttr(ConverterUtils::discreteAttrName))
     return failure();
@@ -482,7 +484,15 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   if (checkUnstructureAnnotated(op, rewriter))
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
 
+  // A masked atomic must retain the complete lane predicate. Force it through
+  // the scalarized path unless the A5 indirect-atomic fast path can consume
+  // the mask explicitly. A select(value, identity) is not an equivalent
+  // replacement because it still dereferences ptr on a false lane.
+  if (preserveAtomicMask)
+    ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
+
   if (ptrOffsetInfo.isStructured() && !routeDiscreteMaskToSimt &&
+      !preserveAtomicMask &&
       (!ptrOffsetInfo.isScalarLike() ||
        llvm::all_of(ptrType.getShape(), [](int64_t dim) { return dim == 1; })))
     return failure();
@@ -551,7 +561,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   bool indirectFastPathEnabled =
       compileOn91095Flag && forceSimtTemplateFlag &&
       ((!ptrOffsetInfo.isStructured() && sizeInByte < 64) ||
-       routeDiscreteMaskToSimt);
+       routeDiscreteMaskToSimt || preserveAtomicMask);
   bool rankWithinIndirectLoadStoreFastPathLimit = resultShape.size() <= 5;
   if (indirectFastPathEnabled &&
       succeeded(tryRewriteIndirectFastPath(op, loc, srcPtr, ptrOffset,
@@ -710,10 +720,53 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   accessedOp->setAttr(ConverterUtils::discreteAttrName,
                       UnitAttr::get(rewriter.getContext()));
 
+  // For the generic fallback, materialize the original mask as control flow
+  // around the actual atomic. The false branch yields an arbitrary result
+  // value when the old value is used, matching Triton's masked-atomic
+  // semantics; importantly, it never evaluates an atomic operation.
+  Value predicatedAtomicResult;
+  if constexpr (std::is_same_v<MemAccOpTy, triton::AtomicRMWOp>) {
+    if (preserveAtomicMask && isLoadLike && fullyUnstructured &&
+        accessedOp.getMask()) {
+      auto mask =
+          createExtractOp(loc, accessedOp.getMask(), rewriter,
+                          SmallVector<OpFoldResult>(ptrOffsetInfo.getRank(),
+                                                    rewriter.getIndexAttr(0)));
+      Type atomicResultType = accessedOp.getResult().getType();
+      auto ifOp = rewriter.create<scf::IfOp>(loc, TypeRange{atomicResultType},
+                                             mask, /*withElseRegion=*/true);
+      {
+        OpBuilder::InsertionGuard guard(rewriter);
+        rewriter.setInsertionPointToStart(&ifOp.getThenRegion().front());
+        auto atomic = rewriter.create<triton::AtomicRMWOp>(
+            loc, accessedOp.getType(), accessedOp.getAtomicRmwOp(),
+            accessedOp.getPtr(), accessedOp.getVal(), nullptr,
+            accessedOp.getSem(), accessedOp.getScope());
+        atomic->setAttr(ConverterUtils::discreteAttrName,
+                        UnitAttr::get(rewriter.getContext()));
+        rewriter.create<scf::YieldOp>(loc, atomic.getResult());
+
+        rewriter.setInsertionPointToStart(&ifOp.getElseRegion().front());
+        if (auto tensorType = dyn_cast<RankedTensorType>(atomicResultType)) {
+          auto empty = rewriter.create<tensor::EmptyOp>(
+              loc, tensorType.getShape(), tensorType.getElementType());
+          rewriter.create<scf::YieldOp>(loc, empty.getResult());
+        } else {
+          auto zero = rewriter.create<arith::ConstantOp>(
+              loc, rewriter.getZeroAttr(atomicResultType));
+          rewriter.create<scf::YieldOp>(loc, zero.getResult());
+        }
+      }
+      predicatedAtomicResult = ifOp.getResult(0);
+      rewriter.eraseOp(accessedOp);
+    }
+  }
+
   if (isLoadLike) {
     assert(iterArg && "Load case must have iterArg in for loop");
 
-    Value value = accessedOp->getResult(0);
+    Value value = predicatedAtomicResult ? predicatedAtomicResult
+                                         : accessedOp->getResult(0);
     Value result;
     if (!isa<RankedTensorType>(value.getType()) &&
         (std::is_same_v<MemAccOpTy, triton::AtomicRMWOp> ||
@@ -750,7 +803,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     }
   } else {
     if constexpr (std::is_same_v<MemAccOpTy, triton::AtomicRMWOp>) {
-      if (fullyUnstructured && accessedOp.getMask()) {
+      if (!predicatedAtomicResult && fullyUnstructured &&
+          accessedOp.getMask()) {
         auto mask = createExtractOp(
             loc, accessedOp.getMask(), rewriter,
             SmallVector<OpFoldResult>(ptrOffsetInfo.getRank(),

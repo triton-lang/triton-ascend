@@ -173,7 +173,8 @@ static bool checkAllProgramIdNonOverlap(ModuleOp module) {
 
 LogicalResult isDiscreteMask(Operation *op, Value mask,
                              PatternRewriter &rewriter) {
-  if (!mask || op->hasAttr(routeDiscreteMaskToSimtAttrName)) {
+  if (!mask || op->hasAttr(routeDiscreteMaskToSimtAttrName) ||
+      op->hasAttr(ConverterUtils::preserveAtomicMaskAttrName)) {
     return failure();
   }
 
@@ -404,60 +405,18 @@ struct DiscreteMaskAtomicConversion
 
   LogicalResult matchAndRewrite(mlir::triton::AtomicRMWOp op,
                                 PatternRewriter &rewriter) const final {
-    auto loc = op.getLoc();
-    auto ptr = op.getPtr();
-    auto src = op.getVal();
     auto mask = op.getMask();
-    RMWOp rmwOp = op.getAtomicRmwOp();
 
     if (failed(isDiscreteMask(op, mask, rewriter)))
       return failure();
 
-    // Keep the original lane mask for A5 SIMT indirect atomic lowering.
-    // Replacing it with a select here would leave the indirect atomic without
-    // the predicate that prevents inactive lanes from dereferencing ptr.
-    if (compileOn91095Flag && forceSimtTemplateFlag) {
-      op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
-      return failure();
-    }
-
-    const std::map<RMWOp, TypelessValue> initMap = {
-        {RMWOp::FADD, TypelessValue::Zero},
-        {RMWOp::ADD, TypelessValue::Zero},
-        {RMWOp::UMAX, TypelessValue::Zero},
-        {RMWOp::OR, TypelessValue::Zero},
-        {RMWOp::MIN, TypelessValue::Max},
-        {RMWOp::UMIN, TypelessValue::Max},
-        {RMWOp::AND, TypelessValue::Max},
-        {RMWOp::MAX, TypelessValue::Min},
-        {RMWOp::XOR, TypelessValue::Zero},
-        {RMWOp::XCHG, TypelessValue::Undefined},
-    };
-    assert(initMap.find(rmwOp) != initMap.end());
-    auto typelessVal = initMap.at(rmwOp);
-    if (typelessVal == TypelessValue::Undefined) {
-      // Undefined default value atomic op will be decomposed in AscendNPU-IR
-      op->setAttr(ConverterUtils::discreteMaskAttrName,
-                  UnitAttr::get(rewriter.getContext()));
-      return failure();
-    }
-
-    FailureOr<mlir::Value> fill = specializeTypelessValueToConstant(
-        typelessVal, src.getType(), loc, rewriter);
-    if (failed(fill)) {
-      LLVM_DEBUG({
-        llvm::dbgs() << "Unsupported type for constant creation: "
-                     << src.getType() << "\n";
-      });
-      op->emitError("Unsupported atomic operation.");
-      return failure();
-    }
-
-    auto maskedValue = rewriter.create<arith::SelectOp>(loc, mask, src, *fill);
-    auto newAtomicOp = rewriter.create<mlir::triton::AtomicRMWOp>(
-        loc, src.getType(), rmwOp, ptr, maskedValue, mlir::Value(), op.getSem(),
-        op.getScope());
-    rewriter.replaceOp(op, newAtomicOp);
+    // A zero-valued update is not equivalent to a masked atomic: the false
+    // lane must not dereference ptr or participate in the RMW operation.
+    // Preserve the complete original mask for target-independent lowering.
+    rewriter.modifyOpInPlace(op, [&]() {
+      op->setAttr(ConverterUtils::preserveAtomicMaskAttrName,
+                  rewriter.getUnitAttr());
+    });
     return success();
   }
 };

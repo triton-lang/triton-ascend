@@ -739,7 +739,18 @@ static LogicalResult rebuildVectorToCubePacks(ArrayRef<VectorToCubePack> packs, 
         int64_t N = pType.getShape()[1];
         int64_t N16 = N / kNzTileSize, M16 = M / kNzTileSize;
         Type elemType = pType.getElementType();
-        OpBuilder b(p.anchor);
+        Operation *pProducer = p.pSrc.getDefiningOp();
+        if (!pProducer || pProducer->getBlock() != p.anchor->getBlock() || !pProducer->isBeforeInBlock(p.anchor)) {
+            emitError(loc, "V->C pack source must be defined before its sync anchor in the vector scope");
+            return failure();
+        }
+
+        // Begin the layout-only pack immediately after P is formed. This lets
+        // the transpose overlap the independent denominator/alpha update in
+        // the same VF, matching the hand-unrolled schedule. The final reshape,
+        // UB view, copy, and signal remain at the phase-end anchor below.
+        OpBuilder b(pProducer);
+        b.setInsertionPointAfter(pProducer);
         auto l1AddrSpace = b.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::L1);
         auto expectedL1Type = MemRefType::get({N16, 2 * M16, kNzTileSize, kNzTileSize}, elemType, nullptr, l1AddrSpace);
         if (!p.l1Alloc || p.l1Alloc.getType() != expectedL1Type) {
@@ -757,6 +768,8 @@ static LogicalResult rebuildVectorToCubePacks(ArrayRef<VectorToCubePack> packs, 
         auto emptyT = b.create<tensor::EmptyOp>(loc, ArrayRef<int64_t> {N16, M, kNzTileSize}, elemType);
         auto transp =
             b.create<linalg::TransposeOp>(loc, resh1.getResult(), emptyT.getResult(), ArrayRef<int64_t> {1, 0, 2});
+
+        b.setInsertionPoint(p.anchor);
         // reshape [N16,M,kNzTileSize] -> [N16,M16,kNzTileSize,kNzTileSize]
         auto s4Type = RankedTensorType::get({4}, i64Ty);
         auto s4 = b.create<arith::ConstantOp>(
@@ -882,7 +895,6 @@ LogicalResult createScopeSeparation(func::FuncOp funcOp, scf::ForOp innerLoop,
     auto vecScope = builder.create<scope::ScopeOp>(loc, ArrayRef<Type> {});
     vecScope.getBodyRegion().emplaceBlock();
     vecScope->setAttr("noinline", UnitAttr::get(ctx));
-
     Block *vecBlock = &vecScope.getBodyRegion().front();
     // Move original inner loop into VECTOR scope
     innerLoop->remove();
@@ -895,7 +907,7 @@ LogicalResult createScopeSeparation(func::FuncOp funcOp, scf::ForOp innerLoop,
     OpBuilder vecBuilder(vecBlock, vecBlock->end());
     vecBuilder.create<scope::ReturnOp>(loc);
 
-    // Step 3: Set core type attributes (match target: only tcore_type + noinline)
+    // Step 3: Set core type attributes.
     cubeScope->setAttr(hivm::TCoreTypeAttr::name, hivm::TCoreTypeAttr::get(ctx, hivm::TCoreType::CUBE));
     vecScope->setAttr(hivm::TCoreTypeAttr::name, hivm::TCoreTypeAttr::get(ctx, hivm::TCoreType::VECTOR));
 

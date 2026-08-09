@@ -4,9 +4,9 @@
 // All candidates pass classification and Stage 8. The first is rejected by
 // Stage 9 because ROW_SPLIT cannot retile a non-splat shaped constant. The
 // second reaches the post-transformation verifier, which rejects the stale
-// static sizes on a generically retiled tensor.extract_slice. The third has no
-// stageable Q candidate. Every function must be restored exactly, and
-// triton-opt must still exit successfully.
+// static sizes on a generically retiled tensor.extract_slice. The third is a
+// valid candidate and must still be transformed after both earlier candidates
+// are restored. triton-opt must exit successfully.
 
 // DIAG: [cv-split] Function: stage9_retiling_failure
 // DIAG: [cv-split] Function: verifier_rejects_retile
@@ -16,12 +16,10 @@
 // DIAG: [cv-split] Stage 9 complete
 // DIAG: error: expected type to be 'tensor<32x16xf32>'
 // DIAG: [cv-split] Candidate failed; restoring function and trying next function
-// DIAG: [cv-split] No Q staging candidate found
-// DIAG: [cv-split] Candidate failed; restoring function and trying next function
-// DIAG: [cv-split] No candidate transformed; keeping original IR
+// DIAG: [cv-split] Stage 9 complete
+// DIAG: [cv-split] Function attributes set on missing_q_staging_candidate
 
-// IR-NOT: ssbuffer.core_type
-// IR-NOT: hivm.disable_auto_tile_and_bind_subblock
+// IR: module attributes {{.*}}hivm.disable_auto_tile_and_bind_subblock
 // IR-LABEL: func.func @stage9_retiling_failure
 // IR: %[[FIRST_STEP:.*]] = arith.constant 1 : index
 // IR: scf.for %{{.*}} = %{{.*}} to %{{.*}} step %[[FIRST_STEP]] {
@@ -39,12 +37,15 @@
 // IR-NEXT: }
 // IR-NOT: scope.scope
 // IR-LABEL: func.func @missing_q_staging_candidate
-// IR: %[[THIRD_STEP:.*]] = arith.constant 1 : index
+// IR: %[[THIRD_STEP:.*]] = arith.constant 4 : index
+// IR: scope.scope
 // IR: scf.for %{{.*}} = %{{.*}} to %{{.*}} step %[[THIRD_STEP]] {
 // IR-NEXT: %{{.*}} = linalg.matmul
-// IR-NEXT: %{{.*}} = math.exp
-// IR-NEXT: }
-// IR-NOT: scope.scope
+// IR: } {hivm.tcore_type = #hivm.tcore_type<CUBE>, noinline}
+// IR: scope.scope
+// IR: scf.for %{{.*}} = %{{.*}} to %{{.*}} step %[[THIRD_STEP]] {
+// IR: %{{.*}} = math.exp
+// IR: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>, noinline}
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
   func.func @stage9_retiling_failure(

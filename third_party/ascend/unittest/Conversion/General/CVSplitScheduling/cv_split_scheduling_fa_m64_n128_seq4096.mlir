@@ -6,36 +6,40 @@
 // CHECK: module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">, hivm.disable_auto_tile_and_bind_subblock} {
 // CHECK-LABEL: func.func @_attn_fwd
 
+// Invariant accumulator templates are materialized once, outside the physical
+// program loop, instead of being rebuilt by every program.
+// CHECK: %{{.*}} = linalg.fill ins(%{{.*}} : f32) outs(%{{.*}} : tensor<64x128xf32>) -> tensor<64x128xf32>
+// CHECK: %{{.*}} = linalg.fill ins(%{{.*}} : f32) outs(%{{.*}} : tensor<32x128xf32>) -> tensor<32x128xf32>
+// CHECK: %{{.*}} = linalg.fill ins(%{{.*}} : f32) outs(%{{.*}} : tensor<32xf32>) -> tensor<32xf32>
+// CHECK: %{{.*}} = linalg.fill ins(%{{.*}} : f32) outs(%{{.*}} : tensor<32x64xf32>) -> tensor<32x64xf32>
+// CHECK: scf.for
+
 // CHECK: %reinterpret_cast = memref.reinterpret_cast %arg2
+// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<64x64xf16>
+// CHECK-NEXT: memref.copy %{{.*}}, %{{.*}} : memref<64x64xf16, strided<[64, 1], offset: ?>> to memref<64x64xf16>
+// CHECK-NEXT: %{{.*}} = bufferization.to_tensor %{{.*}} restrict writable : memref<64x64xf16>
 // CHECK-NEXT: %{{.*}} = arith.constant 512 : i32
-// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<32x128xf32, #hivm.address_space<ub>>
+// The two physical GM addresses are loop-carried below.  Their initial values
+// are formed here, before the persistent UB/CBUF allocations.
+// CHECK: %{{.*}} = memref.alloc() : memref<32x128xf32, #hivm.address_space<ub>>
 // CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<32x128xf32, #hivm.address_space<ub>>
 // CHECK-NEXT: %{{.*}} = memref.alloc() : memref<32x128xf32, #hivm.address_space<ub>>
 // CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<32x128xf32, #hivm.address_space<ub>>
-// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<64x64xf16, #hivm.address_space<cbuf>>
-// CHECK-NEXT: annotation.mark %{{.*}} {mem_unique} : memref<64x64xf16, #hivm.address_space<cbuf>>
-// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<64x64xf16, #hivm.address_space<cbuf>>
+// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
+// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
 // CHECK-NEXT: %{{.*}} = memref.alloc() : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
 // CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
 // CHECK-NEXT: %{{.*}} = memref.alloc() : memref<32x64xf32, #hivm.address_space<ub>>
 // CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<32x64xf32, #hivm.address_space<ub>>
-// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
-// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<8x4x16x16xf16, #hivm.address_space<cbuf>>
 // CHECK-NEXT: %{{.*}} = memref.alloc() : memref<32x64xf32, #hivm.address_space<ub>>
 // CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<32x64xf32, #hivm.address_space<ub>>
 
 // CHECK: scope.scope : () -> () {
-// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<64x64xf16>
-// CHECK-NEXT: memref.copy %{{.*}}, %{{.*}} : memref<64x64xf16, strided<[64, 1], offset: ?>> to memref<64x64xf16>
-// CHECK-NEXT: %{{.*}} = bufferization.to_tensor %{{.*}} restrict writable : memref<64x64xf16>
-// CHECK-NEXT: annotation.mark %{{.*}} keys = ["bind_buffer"] values = [%{{.*}} : memref<64x64xf16, #hivm.address_space<cbuf>>] : tensor<64x64xf16>
-// CHECK-NEXT: %{{.*}} = memref.memory_space_cast %{{.*}} : memref<64x64xf16, #hivm.address_space<cbuf>> to memref<64x64xf16>
-// CHECK-NEXT: %{{.*}} = bufferization.to_tensor %{{.*}} restrict writable : memref<64x64xf16>
 // CHECK-NEXT: %{{.*}} = hivm.hir.convert_layout %{{.*}} output_shape [64, 128] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<ND>} : (memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) -> memref<64x128xf16, #hivm.address_space<cbuf>>
 // CHECK-NEXT: %{{.*}} = hivm.hir.convert_layout %{{.*}} output_shape [64, 128] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<ND>} : (memref<8x4x16x16xf16, #hivm.address_space<cbuf>>) -> memref<64x128xf16, #hivm.address_space<cbuf>>
 // CHECK-NEXT: %{{.*}} = memref.memory_space_cast %{{.*}} : memref<64x128xf16, #hivm.address_space<cbuf>> to memref<64x128xf16>
 // CHECK-NEXT: %{{.*}} = memref.memory_space_cast %{{.*}} : memref<64x128xf16, #hivm.address_space<cbuf>> to memref<64x128xf16>
-// CHECK-NEXT: %{{.*}}:2 = scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} iter_args(%{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}) -> (i32, i32) : i32 {
+// CHECK-NEXT: %{{.*}}:4 = scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} iter_args(%{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}) -> (i32, i32, index, index) : i32 {
 
 // CHECK: hivm.hir.fixpipe {dma_mode = #hivm.dma_mode{{<}}nz2nd{{>}}} ins(%{{.*}} : tensor<64x128xf32>) outs(%{{.*}} : memref<32x128xf32, #hivm.address_space<ub>>) dual_dst_mode = {{<}}ROW_SPLIT{{>}}
 // CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 0
@@ -47,51 +51,44 @@
 // CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 3
 // CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 4
 // CHECK: hivm.hir.fixpipe {{.*}} ins(%{{.*}} : tensor<64x64xf32>) outs(%{{.*}} : memref<32x64xf32, #hivm.address_space<ub>>) dual_dst_mode = {{<}}ROW_SPLIT{{>}}
-// CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 5
+// CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 8
+// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 5
+// CHECK: hivm.hir.fixpipe {{.*}} dual_dst_mode = {{<}}ROW_SPLIT{{>}}
+// CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 9
 // CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 6
 // CHECK: hivm.hir.fixpipe {{.*}} dual_dst_mode = {{<}}ROW_SPLIT{{>}}
-// CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 8
-// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 7
-// CHECK: hivm.hir.fixpipe {{.*}} dual_dst_mode = {{<}}ROW_SPLIT{{>}}
 // CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 10
-// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 9
+// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 7
 // CHECK: hivm.hir.fixpipe {{.*}} dual_dst_mode = {{<}}ROW_SPLIT{{>}}
 // CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 11
 
 // CHECK: scope.return
 // CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<CUBE>, noinline}
 
-// CHECK: %{{.*}} = tensor.empty() : tensor<32xf32>
-// CHECK-NEXT: %{{.*}} = tensor.empty() : tensor<32x128xf32>
-// CHECK-NEXT: %{{.*}} = linalg.fill ins(%{{.*}} : f32) outs(%{{.*}} : tensor<32x128xf32>) -> tensor<32x128xf32>
+// Reusable output templates remain outside the vector loop.
+// CHECK: %{{.*}} = tensor.empty() : tensor<32x128xf32>
 // CHECK-NEXT: %{{.*}} = tensor.empty() : tensor<32xf32>
-// CHECK-NEXT: %{{.*}} = linalg.fill ins(%{{.*}} : f32) outs(%{{.*}} : tensor<32xf32>) -> tensor<32xf32>
-// CHECK-NEXT: %{{.*}} = tensor.empty() : tensor<32x128xf32>
 // CHECK-NEXT: %{{.*}} = tensor.empty() : tensor<32x64xf32>
-// CHECK-NEXT: %{{.*}} = tensor.empty() : tensor<32xf32>
-// CHECK-NEXT: %{{.*}} = linalg.fill ins(%{{.*}} : f32) outs(%{{.*}} : tensor<32xf32>) -> tensor<32xf32>
-// CHECK-NEXT: %{{.*}} = tensor.empty() : tensor<32x64xf32>
-// CHECK-NEXT: %{{.*}} = linalg.fill ins(%{{.*}} : f32) outs(%{{.*}} : tensor<32x64xf32>) -> tensor<32x64xf32>
 
 // CHECK: scope.scope : () -> () {
 // CHECK-NEXT: %{{.*}} = hivm.hir.get_sub_block_idx -> i64
 // CHECK-NEXT: %{{.*}} = arith.index_cast %{{.*}} : i64 to index
-// CHECK-NEXT: %{{.*}}:5 = scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} iter_args(%{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}) -> (tensor<32xf32>, tensor<32x64xf32>, tensor<32xf32>, i32, i32) : i32 {
+// CHECK-NEXT: %{{.*}}:7 = scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} iter_args(%{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}) -> (tensor<32xf32>, tensor<32x64xf32>, tensor<32xf32>, i32, i32, index, index) : i32 {
 
 // CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 0
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 1
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 2
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 3
 // CHECK: hivm.hir.copy ins(%{{.*}} : memref<8x2x16x16xf16, #hivm.address_space<ub>>) outs(%{{.*}} : memref<8x2x16x16xf16, strided<[1024, 256, 16, 1], offset: ?>, #hivm.address_space<cbuf>>)
 // CHECK-NEXT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 4
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 5
+// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 1
+// CHECK: hivm.hir.copy ins(%{{.*}} : memref<8x2x16x16xf16, #hivm.address_space<ub>>) outs(%{{.*}} : memref<8x2x16x16xf16, strided<[1024, 256, 16, 1], offset: ?>, #hivm.address_space<cbuf>>)
+// CHECK-NEXT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 5
+// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 2
 // CHECK: hivm.hir.copy ins(%{{.*}} : memref<8x2x16x16xf16, #hivm.address_space<ub>>) outs(%{{.*}} : memref<8x2x16x16xf16, strided<[1024, 256, 16, 1], offset: ?>, #hivm.address_space<cbuf>>)
 // CHECK-NEXT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 6
+// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 3
 // CHECK: hivm.hir.copy ins(%{{.*}} : memref<8x2x16x16xf16, #hivm.address_space<ub>>) outs(%{{.*}} : memref<8x2x16x16xf16, strided<[1024, 256, 16, 1], offset: ?>, #hivm.address_space<cbuf>>)
 // CHECK-NEXT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 7
 // CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 8
-// CHECK: hivm.hir.copy ins(%{{.*}} : memref<8x2x16x16xf16, #hivm.address_space<ub>>) outs(%{{.*}} : memref<8x2x16x16xf16, strided<[1024, 256, 16, 1], offset: ?>, #hivm.address_space<cbuf>>)
-// CHECK-NEXT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 9
+// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 9
 // CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 10
 // CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 11
 

@@ -26,6 +26,7 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Pass/PassManager.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -33,9 +34,24 @@ namespace mlir::triton::cv_split {
 
 #define DEBUG_TYPE "cv-split-scheduling"
 
+namespace {
+StringRef stringifyEngineType(EngineType engineType)
+{
+    switch (engineType) {
+        case EngineType::CUBE:
+            return "CUBE";
+        case EngineType::VECTOR:
+            return "VECTOR";
+    }
+    llvm_unreachable("unknown CV-split engine type");
+}
+} // namespace
+
 void setOpEngineTypeAttr(Operation *op, EngineType engineType)
 {
-    StringRef coreType = engineType == EngineType::CUBE ? "CUBE" : "VECTOR";
+    if (!op)
+        return;
+    StringRef coreType = stringifyEngineType(engineType);
     op->setAttr(CVPipeline::kCoreType, StringAttr::get(op->getContext(), coreType));
 }
 
@@ -51,6 +67,8 @@ LogicalResult runDCVPClassifier(ModuleOp module)
 
 FailureOr<Classification> readDCVPClassification(Block *body)
 {
+    if (!body)
+        return failure();
     Classification classification;
     for (Operation &op : *body) {
         if (isa<scf::YieldOp>(op))
@@ -74,13 +92,19 @@ FailureOr<Classification> readDCVPClassification(Block *body)
 
 bool checkCoreClassifications(Block *body, const Classification &classification)
 {
+    if (!body)
+        return false;
     int nCube = 0;
     int nVector = 0;
     for (const auto &entry : classification) {
-        if (entry.second == EngineType::CUBE)
-            ++nCube;
-        else
-            ++nVector;
+        switch (entry.second) {
+            case EngineType::CUBE:
+                ++nCube;
+                break;
+            case EngineType::VECTOR:
+                ++nVector;
+                break;
+        }
     }
 
     LLVM_DEBUG({
@@ -94,7 +118,7 @@ bool checkCoreClassifications(Block *body, const Classification &classification)
             if (it == classification.end())
                 llvm::dbgs() << "??";
             else
-                llvm::dbgs() << (it->second == EngineType::CUBE ? "CUBE" : "VECTOR");
+                llvm::dbgs() << stringifyEngineType(it->second);
             llvm::dbgs() << " " << op.getName() << "\n";
         }
     });

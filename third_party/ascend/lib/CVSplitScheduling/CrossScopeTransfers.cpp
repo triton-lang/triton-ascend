@@ -34,7 +34,9 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Builders.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -61,6 +63,8 @@ static constexpr unsigned kMaxTransferFlags = kMaxTransferFlagId + 1;
 struct CrossScopeTransfer {
     Value value;
     Operation *producer;
+    Operation *transferInsertionAnchor;
+    Operation *waitInsertionAnchor;
     SmallVector<Operation *> consumers;
     enum Direction { CUBE_TO_VECTOR, VECTOR_TO_CUBE } direction;
     int64_t originId;
@@ -78,7 +82,8 @@ static FailureOr<int64_t> getUnrollOriginId(Operation *producer)
 }
 
 static FailureOr<SmallVector<CrossScopeTransfer>>
-findCrossScopeValues(Block *body, const DenseMap<Operation *, EngineType> &classification)
+findCrossScopeValues(Block *body, const DenseMap<Operation *, EngineType> &classification,
+                     const DenseMap<Operation *, Operation *> &transferPhaseEnds)
 {
     SmallVector<CrossScopeTransfer> transfers;
 
@@ -124,7 +129,9 @@ findCrossScopeValues(Block *body, const DenseMap<Operation *, EngineType> &class
                     FailureOr<int64_t> originId = getUnrollOriginId(&op);
                     if (failed(originId))
                         return failure();
-                    transfers.push_back({result, &op, crossUsers, CrossScopeTransfer::CUBE_TO_VECTOR, *originId});
+                    transfers.push_back(
+                        {result, &op, &op, crossUsers.front(), crossUsers, CrossScopeTransfer::CUBE_TO_VECTOR,
+                         *originId});
                 }
             }
         } else if (prodType == EngineType::VECTOR) {
@@ -149,7 +156,15 @@ findCrossScopeValues(Block *body, const DenseMap<Operation *, EngineType> &class
                     FailureOr<int64_t> originId = getUnrollOriginId(&op);
                     if (failed(originId))
                         return failure();
-                    transfers.push_back({result, &op, crossUsers, CrossScopeTransfer::VECTOR_TO_CUBE, *originId});
+                    Operation *transferAnchor = transferPhaseEnds.lookup(&op);
+                    if (!transferAnchor) {
+                        op.emitError("VECTOR-to-CUBE producer is missing its scheduled phase end");
+                        return failure();
+                    }
+                    transfers.push_back(
+                        {result, &op, transferAnchor, crossUsers.front(), crossUsers,
+                         CrossScopeTransfer::VECTOR_TO_CUBE,
+                         *originId});
                 }
             }
         }
@@ -269,7 +284,6 @@ static void emitCubeToVectorTransfer(const TransferEmitContext &c, CrossScopeTra
     ArrayRef<int64_t> shape = tensorType.getShape();
 
     OpBuilder builder(c.ctx);
-    auto flagAttr = builder.getIntegerAttr(builder.getI64Type(), flagId);
 
     auto ubAddrSpace = builder.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::UB);
     SmallVector<int64_t, 4> ubShape(shape.begin(), shape.end());
@@ -283,6 +297,10 @@ static void emitCubeToVectorTransfer(const TransferEmitContext &c, CrossScopeTra
     auto sharedAllocOp = bufferPool.getOrCreate(builder, c.loc, xfer.originId, allocType);
 
     // fixpipe after the producer (inside loop body) -> writes the shared buffer.
+    // Keep all same-phase VECTOR state maintenance (for example softmax's
+    // denominator reduction) in one fusible region.  Inserting the pack and
+    // sync immediately after the P producer splits that region into two VFs
+    // and keeps its full score tile live across the synchronization boundary.
     builder.setInsertionPointAfter(xfer.producer);
     auto dmaModeAttr = hivm::FixpipeDMAModeAttr::get(c.ctx, hivm::FixpipeDMAMode::NZ2ND);
     auto dualDstAttr = hivm::FixpipeDualDstModeAttr::get(c.ctx, hivm::FixpipeDualDstMode::ROW_SPLIT);
@@ -294,17 +312,18 @@ static void emitCubeToVectorTransfer(const TransferEmitContext &c, CrossScopeTra
     setOpEngineTypeAttr(fixpipeOp, EngineType::CUBE);
 
     // CUBE signals VECTOR.
-    auto syncSetOp = builder.create<hivm::SyncBlockSetOp>(c.loc, c.cubeCoreAttr, c.pipeFixAttr, c.pipeVAttr, flagAttr);
+    auto syncSetOp = builder.create<hivm::SyncBlockSetOp>(c.loc, c.cubeCoreAttr, c.pipeFixAttr, c.pipeVAttr,
+                                                          OpFoldResult(builder.getI64IntegerAttr(flagId)));
     setOpEngineTypeAttr(syncSetOp, EngineType::CUBE);
 
     // Consumer side: wait + read the shared buffer back as an M/2-row tensor.
-    Operation *firstConsumer = xfer.consumers.front();
-    for (auto *cons : xfer.consumers)
-        if (cons->isBeforeInBlock(firstConsumer))
-            firstConsumer = cons;
-    builder.setInsertionPoint(firstConsumer);
+    // The precomputed anchor includes the independent prefix of the consumer's
+    // VECTOR dependency chain so that prefix and the transfer consumer remain
+    // in one vector function.
+    builder.setInsertionPoint(xfer.waitInsertionAnchor);
 
-    auto syncWaitOp = builder.create<hivm::SyncBlockWaitOp>(c.loc, c.vecCoreAttr, c.pipeFixAttr, c.pipeVAttr, flagAttr);
+    auto syncWaitOp = builder.create<hivm::SyncBlockWaitOp>(c.loc, c.vecCoreAttr, c.pipeFixAttr, c.pipeVAttr,
+                                                            OpFoldResult(builder.getI64IntegerAttr(flagId)));
     setOpEngineTypeAttr(syncWaitOp, EngineType::VECTOR);
 
     auto plainMemrefType = MemRefType::get(ubShape, elemType);
@@ -334,7 +353,6 @@ static VectorToCubeTransferChain emitVectorToCubeTransfer(const TransferEmitCont
     ArrayRef<int64_t> shape = tensorType.getShape();
 
     OpBuilder builder(c.ctx);
-    auto flagAttr = builder.getIntegerAttr(builder.getI64Type(), flagId);
 
     int64_t M = shape[0];
     int64_t N = shape[1];
@@ -353,7 +371,9 @@ static VectorToCubeTransferChain emitVectorToCubeTransfer(const TransferEmitCont
     builder.setInsertionPoint(c.loop);
     auto sharedL1AllocOp = bufferPool.getOrCreate(builder, c.loc, xfer.originId, l1AllocType);
 
-    // Inside loop body after producer: (NZ pack) -> to_memref -> cast -> copy.
+    // Start the layout-only part of the NZ pack as soon as P is available. The
+    // hand-written schedule overlaps this work with the independent recurrent
+    // softmax-state update that follows P in the same vector function.
     builder.setInsertionPointAfter(xfer.producer);
     auto ubAddrSpace = builder.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::UB);
     Value packedTensor = xfer.value;
@@ -378,12 +398,26 @@ static VectorToCubeTransferChain emitVectorToCubeTransfer(const TransferEmitCont
                                                           ArrayRef<int64_t> {1, 0, 2});
         packingOps.push_back(transp);
         setOpEngineTypeAttr(transp, EngineType::VECTOR);
+        packedTensor = transp->getResult(0);
+    }
+
+    // Commit the UB->L1 handoff only after every operation in this producer
+    // phase has executed. This keeps P packing, denominator/alpha maintenance,
+    // and the copy in one VF instead of splitting the state update behind a
+    // synchronization boundary.
+    Operation *lateAnchor = xfer.transferInsertionAnchor;
+    if (lateAnchor == xfer.producer && !packingOps.empty())
+        lateAnchor = packingOps.back();
+    builder.setInsertionPointAfter(lateAnchor);
+
+    if (useNZ) {
+        auto i64Ty = builder.getI64Type();
         auto s4Type = RankedTensorType::get({4}, i64Ty);
         auto s4Const = builder.create<arith::ConstantOp>(
             c.loc, s4Type, DenseElementsAttr::get(s4Type, ArrayRef<int64_t> {N16, M16, kNzTileSize, kNzTileSize}));
         setOpEngineTypeAttr(s4Const, EngineType::VECTOR);
         auto nzTensorType = RankedTensorType::get({N16, M16, kNzTileSize, kNzTileSize}, elemType);
-        auto resh2 = builder.create<tensor::ReshapeOp>(c.loc, nzTensorType, transp->getResult(0), s4Const.getResult());
+        auto resh2 = builder.create<tensor::ReshapeOp>(c.loc, nzTensorType, packedTensor, s4Const.getResult());
         packingOps.push_back(resh2);
         setOpEngineTypeAttr(resh2, EngineType::VECTOR);
         packedTensor = resh2.getResult();
@@ -406,8 +440,8 @@ static VectorToCubeTransferChain emitVectorToCubeTransfer(const TransferEmitCont
     setOpEngineTypeAttr(copyOp, EngineType::VECTOR);
 
     // VECTOR signals CUBE.
-    auto syncSetOp =
-        builder.create<hivm::SyncBlockSetOp>(c.loc, c.vecCoreAttr, c.pipeMte3Attr, c.pipeMte1Attr, flagAttr);
+    auto syncSetOp = builder.create<hivm::SyncBlockSetOp>(c.loc, c.vecCoreAttr, c.pipeMte3Attr, c.pipeMte1Attr,
+                                                          OpFoldResult(builder.getI64IntegerAttr(flagId)));
     setOpEngineTypeAttr(syncSetOp, EngineType::VECTOR);
 
     // Consumer (CUBE) side: wait, then expose the MTE-populated L1 buffer as a
@@ -418,8 +452,8 @@ static VectorToCubeTransferChain emitVectorToCubeTransfer(const TransferEmitCont
             firstConsumer = cons;
     builder.setInsertionPoint(firstConsumer);
 
-    auto syncWaitOp =
-        builder.create<hivm::SyncBlockWaitOp>(c.loc, c.cubeCoreAttr, c.pipeMte3Attr, c.pipeMte1Attr, flagAttr);
+    auto syncWaitOp = builder.create<hivm::SyncBlockWaitOp>(c.loc, c.cubeCoreAttr, c.pipeMte3Attr, c.pipeMte1Attr,
+                                                            OpFoldResult(builder.getI64IntegerAttr(flagId)));
     setOpEngineTypeAttr(syncWaitOp, EngineType::CUBE);
 
     Value ndViewVal = getOrCreateL1NdView(c, sharedL1AllocOp, tensorType, bufferPool);
@@ -439,15 +473,17 @@ static VectorToCubeTransferChain emitVectorToCubeTransfer(const TransferEmitCont
 
 } // namespace
 
-FailureOr<CrossScopeTransferInfo> insertCrossScopeTransfers(scf::ForOp loop,
-                                                            const DenseMap<Operation *, EngineType> &classification)
+FailureOr<CrossScopeTransferInfo>
+insertCrossScopeTransfers(scf::ForOp loop, const DenseMap<Operation *, EngineType> &classification,
+                          const DenseMap<Operation *, Operation *> &transferPhaseEnds)
 {
 
     MLIRContext *ctx = loop.getContext();
     Location loc = loop.getLoc();
     Block *body = loop.getBody();
 
-    FailureOr<SmallVector<CrossScopeTransfer>> transferResult = findCrossScopeValues(body, classification);
+    FailureOr<SmallVector<CrossScopeTransfer>> transferResult =
+        findCrossScopeValues(body, classification, transferPhaseEnds);
     if (failed(transferResult))
         return failure();
     SmallVector<CrossScopeTransfer> transfers = std::move(*transferResult);
@@ -462,6 +498,83 @@ FailureOr<CrossScopeTransferInfo> insertCrossScopeTransfers(scf::ForOp loop,
                          << kMaxTransferFlags << " are available (IDs 0.." << kMaxTransferFlagId << ")";
         return failure();
     }
+
+    // DependencyScheduler completes sibling VECTOR state before each V->C
+    // boundary producer.  The producer is therefore both the actual insertion
+    // point of the P copy/signal and the authoritative end of that phase.
+    // Keeping this boundary exact is also required when placing the following
+    // C->V wait; extending it through later VECTOR work would describe an order
+    // different from the IR that emitVectorToCubeTransfer actually creates.
+
+    // A CUBE->VECTOR result may join a VECTOR chain whose other input is
+    // already computable.  Waiting immediately before the join lets that
+    // independent prefix become a separate vector function.  For attention,
+    // this turns `acc * alpha + PV` into one VF for `acc * alpha` and another
+    // VF for the add, whereas the hand-written unroll emits one fused VF after
+    // waiting for PV.
+    //
+    // Move the wait to the earliest VECTOR predecessor of the first consumer,
+    // but never across the preceding VECTOR->CUBE handoff.  That handoff is
+    // the phase boundary: moving a PV wait before it would serialize softmax
+    // with the prior CUBE work.  The walk is purely SSA/dependency based and
+    // therefore also covers other join patterns without recognizing attention.
+    for (CrossScopeTransfer &xfer : transfers) {
+        if (xfer.direction != CrossScopeTransfer::CUBE_TO_VECTOR)
+            continue;
+
+        Operation *firstConsumer = xfer.consumers.front();
+        for (Operation *consumer : xfer.consumers)
+            if (consumer->isBeforeInBlock(firstConsumer))
+                firstConsumer = consumer;
+
+        Operation *lowerBoundary = nullptr;
+        for (const CrossScopeTransfer &candidate : transfers) {
+            if (candidate.direction == CrossScopeTransfer::VECTOR_TO_CUBE) {
+                if (!candidate.transferInsertionAnchor->isBeforeInBlock(firstConsumer))
+                    continue;
+                if (!lowerBoundary || lowerBoundary->isBeforeInBlock(candidate.transferInsertionAnchor))
+                    lowerBoundary = candidate.transferInsertionAnchor;
+                continue;
+            }
+
+            // A preceding C->V consumer completes the prior join phase.  Do
+            // not walk through it when placing the next wait, otherwise all
+            // waits in an accumulator chain collapse at the start of the
+            // chain and serialize CUBE and VECTOR instead of alternating.
+            for (Operation *candidateConsumer : candidate.consumers) {
+                if (candidateConsumer == firstConsumer || !candidateConsumer->isBeforeInBlock(firstConsumer))
+                    continue;
+                if (!lowerBoundary || lowerBoundary->isBeforeInBlock(candidateConsumer))
+                    lowerBoundary = candidateConsumer;
+            }
+        }
+
+        // The scheduler has already formed phase-contiguous VECTOR regions.
+        // Put the wait before the first VECTOR operation in this region.  The
+        // lower boundary is either the preceding P handoff or the preceding
+        // C->V join, so this retains QK/P/PV overlap while preventing a prefix
+        // of the current join from being outlined as a standalone VF.
+        Operation *waitAnchor = lowerBoundary ? lowerBoundary->getNextNode() : &body->front();
+        if (!waitAnchor || firstConsumer->isBeforeInBlock(waitAnchor))
+            waitAnchor = firstConsumer;
+        xfer.waitInsertionAnchor = waitAnchor;
+    }
+
+    // Allocate shared scalar-buffer IDs in the same three phases as the
+    // reference schedule: QK C->V, P V->C, then PV C->V.  At this point all QK
+    // producers precede the final P producer, while PV producers follow it.
+    Operation *lastVectorToCubeProducer = nullptr;
+    for (const CrossScopeTransfer &xfer : transfers)
+        if (xfer.direction == CrossScopeTransfer::VECTOR_TO_CUBE)
+            lastVectorToCubeProducer = xfer.producer;
+    llvm::stable_sort(transfers, [&](const CrossScopeTransfer &lhs, const CrossScopeTransfer &rhs) {
+        auto phase = [&](const CrossScopeTransfer &xfer) {
+            if (xfer.direction == CrossScopeTransfer::VECTOR_TO_CUBE)
+                return 1;
+            return lastVectorToCubeProducer && xfer.producer->isBeforeInBlock(lastVectorToCubeProducer) ? 0 : 2;
+        };
+        return phase(lhs) < phase(rhs);
+    });
 
     // ROW_SPLIT is materialized by the C->V fixpipes below. Their source is the
     // full CUBE result [BLOCK_M, ...], while their destination UB allocation is

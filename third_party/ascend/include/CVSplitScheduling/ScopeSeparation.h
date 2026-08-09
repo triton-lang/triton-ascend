@@ -27,6 +27,7 @@
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Support/LogicalResult.h"
 
 namespace mlir::triton::cv_split {
 

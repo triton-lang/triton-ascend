@@ -25,27 +25,48 @@
 
 #include "ascend/include/CVSplitScheduling/classifyAllOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/DenseMap.h"
 
 #include <cstdint>
 
 namespace mlir::triton::cv_split {
 
+/// Describes the IR emitted for one VECTOR-to-CUBE transfer. The values and
+/// operation pointers are non-owning handles into the loop being transformed.
 struct VectorToCubeTransferChain {
+    /// VECTOR-produced tensor that must be packed for CUBE consumption.
     Value pSrc;
+    /// Shared L1 destination allocated for the packed tensor.
     Value l1Alloc;
+    /// Synchronization operation before which the final copy is committed.
     Operation *anchor;
+    /// Pack operations still owned by the IR. Scope separation must erase them
+    /// in reverse order before rebuilding a per-vector-core pack.
     SmallVector<Operation *> operationsToErase;
 };
 
+/// Cross-scope transfer metadata consumed by scope separation.
 struct CrossScopeTransferInfo {
+    /// Full row count before the VECTOR scope is split across two cores.
     int64_t blockM;
     SmallVector<VectorToCubeTransferChain> vectorToCubeChains;
 };
 
-FailureOr<CrossScopeTransferInfo> insertCrossScopeTransfers(scf::ForOp loop, const Classification &classification);
+/// Materializes CUBE-to-VECTOR and VECTOR-to-CUBE data movement and
+/// synchronization for `loop`.
+///
+/// `classification` assigns each operation to its execution engine.
+/// `transferPhaseEnds` maps a VECTOR producer to the last operation that must
+/// finish before its final UB-to-L1 copy and ready signal may be committed.
+/// The returned handles remain owned by the mutated IR and must be consumed
+/// before the referenced operations are erased or reordered.
+FailureOr<CrossScopeTransferInfo>
+insertCrossScopeTransfers(scf::ForOp loop, const Classification &classification,
+                          const llvm::DenseMap<Operation *, Operation *> &transferPhaseEnds);
 
 } // namespace mlir::triton::cv_split
 

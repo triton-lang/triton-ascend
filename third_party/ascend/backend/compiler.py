@@ -195,6 +195,11 @@ def make_ttir(mod, metadata, opt):
     return mod
 
 
+def _configure_cv_split_metadata(metadata):
+    """Keep CV-split's explicit scopes/syncs without overriding user policy."""
+    metadata["disable_auto_inject_block_sync"] = True
+
+
 def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
     # use triton_adapter to lower Triton-MLIR to linalg
     # Get Triton-MLIR as string
@@ -287,11 +292,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             ascend.passes.ttir.set_enable_buffer_insert_optimization(mod, metadata["enable_buffer_insert_optimization"])
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
         elif metadata.get("enable_cv_split_scheduling") and compile_on_910_95:
-            metadata["multibuffer"] = False
-            metadata["set_workspace_multibuffer"] = 0
-            metadata["enable_mixed_cv"] = True
-            metadata["disable_auto_inject_block_sync"] = True
-            metadata["has_auto_blockify_blacklist_op"] = True
+            _configure_cv_split_metadata(metadata)
             ascend.passes.ttir.add_cv_split_scheduling(pm, compile_on_910_95, metadata["cv_split_unroll_factor"])
 
         if _enable_msdebug():

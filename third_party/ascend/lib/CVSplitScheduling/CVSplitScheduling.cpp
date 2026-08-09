@@ -34,6 +34,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/SCF/Utils/Utils.h"
@@ -51,6 +52,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cstdlib>
@@ -116,6 +118,428 @@ static void tagUnrollOriginIds(scf::ForOp loop)
 static void removeUnrollOriginIdAttrs(Operation *root)
 {
     root->walk([](Operation *op) { op->removeAttr(kUnrollOriginIdAttrName); });
+}
+
+// loopUnrollByFactor clones the tensor.empty destination of a transpose once
+// per unrolled lane.  These destinations carry no data, and every transpose
+// overwrites the complete tensor before its immediately following matmul reads
+// it.  Keeping the clones makes bufferization materialize one UB allocation per
+// lane, while the hand-unrolled reference deliberately reuses one destination.
+// Fold only clones of the same original empty (identified by the temporary
+// unroll-origin ID), and only when every use is the destination of a transpose.
+static void reuseUnrolledTransposeDestinations(scf::ForOp loop)
+{
+    DenseMap<int64_t, DenseMap<Type, tensor::EmptyOp>> canonicalByOrigin;
+    SmallVector<tensor::EmptyOp> empties;
+    for (Operation &op : *loop.getBody())
+        if (auto empty = dyn_cast<tensor::EmptyOp>(op))
+            empties.push_back(empty);
+
+    for (tensor::EmptyOp empty : empties) {
+        auto origin = empty->getAttrOfType<IntegerAttr>(kUnrollOriginIdAttrName);
+        if (!origin)
+            continue;
+
+        bool isTransposeDestination = !empty.getResult().use_empty();
+        for (OpOperand &use : empty.getResult().getUses()) {
+            auto transpose = dyn_cast<linalg::TransposeOp>(use.getOwner());
+            if (!transpose || transpose.getDpsInitOperand(0)->get() != empty.getResult()) {
+                isTransposeDestination = false;
+                break;
+            }
+        }
+        if (!isTransposeDestination)
+            continue;
+
+        auto &byType = canonicalByOrigin[origin.getInt()];
+        auto [it, inserted] = byType.try_emplace(empty.getType(), empty);
+        if (inserted)
+            continue;
+
+        empty.getResult().replaceAllUsesWith(it->second.getResult());
+        empty.erase();
+    }
+}
+
+// Unrolling also clones tensor-semantics fills that initialize reductions.
+// A zero-filled tensor is immutable, so clones of the same original fill can
+// share one result exactly as the hand-unrolled kernel does.  Restrict this to
+// fills whose results are used only as reduction init operands; other fills may
+// represent lane-specific state and must remain independent.
+static void reuseUnrolledReductionInitializers(scf::ForOp loop)
+{
+    DenseMap<int64_t, DenseMap<Type, linalg::FillOp>> canonicalByOrigin;
+    SmallVector<linalg::FillOp> fills;
+    for (Operation &op : *loop.getBody())
+        if (auto fill = dyn_cast<linalg::FillOp>(op))
+            fills.push_back(fill);
+
+    for (linalg::FillOp fill : fills) {
+        auto origin = fill->getAttrOfType<IntegerAttr>(kUnrollOriginIdAttrName);
+        if (!origin || fill->getNumResults() != 1)
+            continue;
+
+        Value result = fill->getResult(0);
+        bool isReductionInitializer = !result.use_empty();
+        for (OpOperand &use : result.getUses()) {
+            auto reduce = dyn_cast<linalg::ReduceOp>(use.getOwner());
+            if (!reduce || reduce.getDpsInitOperand(0)->get() != result) {
+                isReductionInitializer = false;
+                break;
+            }
+        }
+        if (!isReductionInitializer)
+            continue;
+
+        auto &byType = canonicalByOrigin[origin.getInt()];
+        auto [it, inserted] = byType.try_emplace(result.getType(), fill);
+        if (inserted)
+            continue;
+
+        linalg::FillOp canonical = it->second;
+        Value fillValue = fill.getInputs().front();
+        Value canonicalValue = canonical.getInputs().front();
+        bool sameFillValue = fillValue == canonicalValue;
+        if (!sameFillValue) {
+            auto fillConstant = fillValue.getDefiningOp<arith::ConstantOp>();
+            auto canonicalConstant = canonicalValue.getDefiningOp<arith::ConstantOp>();
+            sameFillValue = fillConstant && canonicalConstant &&
+                            fillConstant.getValue() == canonicalConstant.getValue();
+        }
+        if (!sameFillValue)
+            continue;
+
+        result.replaceAllUsesWith(canonical->getResult(0));
+        fill.erase();
+    }
+}
+
+// Keep immutable tensor templates outside the physical-program loop.  The
+// hand-unrolled FA kernel exposes its accumulator initializers in that form:
+// the template is filled once and each program iteration receives a cheap UB
+// copy.  CV splitting otherwise leaves the same invariant fills in the parent
+// loop body, so bufferization emits vector fill functions on every program.
+//
+// Restrict the motion to direct children of the immediately enclosing loop,
+// pure tensor fills with static tensor.empty destinations, and scalar fill
+// values defined outside that loop.  Reusing tensor.empty destinations of the
+// same type is valid because tensor.empty carries no data and every linalg.fill
+// returns a new tensor value.
+static void hoistInvariantTensorFillTemplates(scf::ForOp outerLoop)
+{
+    if (!outerLoop)
+        return;
+
+    SmallVector<linalg::FillOp> fills;
+    for (Operation &op : *outerLoop.getBody()) {
+        auto fill = dyn_cast<linalg::FillOp>(op);
+        if (!fill || fill->getNumResults() != 1 || !isa<RankedTensorType>(fill->getResult(0).getType()))
+            continue;
+
+        Value fillValue = fill.getInputs().front();
+        Operation *fillValueDef = fillValue.getDefiningOp();
+        if (!fillValueDef)
+            continue;
+
+        // The tensor template and its scalar splat are both loop invariant.
+        // Constants commonly remain next to the fill until scope separation;
+        // move only that trivially safe producer.  Any other producer inside
+        // the physical-program loop rejects the transformation.
+        bool moveFillValue = outerLoop->isAncestor(fillValueDef);
+        if (moveFillValue &&
+            (!isa<arith::ConstantOp>(fillValueDef) || fillValueDef->getBlock() != outerLoop.getBody()))
+            continue;
+
+        auto empty = fill.getOutputs().front().getDefiningOp<tensor::EmptyOp>();
+        if (!empty || empty->getBlock() != outerLoop.getBody() || !empty.getDynamicSizes().empty())
+            continue;
+        fills.push_back(fill);
+    }
+
+    DenseMap<Type, tensor::EmptyOp> canonicalEmptyByType;
+    for (linalg::FillOp fill : fills) {
+        Operation *fillValueDef = fill.getInputs().front().getDefiningOp();
+        if (outerLoop->isAncestor(fillValueDef))
+            fillValueDef->moveBefore(outerLoop);
+
+        auto empty = fill.getOutputs().front().getDefiningOp<tensor::EmptyOp>();
+        Type type = empty.getType();
+        auto [it, inserted] = canonicalEmptyByType.try_emplace(type, empty);
+        if (inserted) {
+            empty->moveBefore(outerLoop);
+        } else {
+            fill.getDpsInitOperand(0)->set(it->second.getResult());
+            if (empty.getResult().use_empty())
+                empty.erase();
+        }
+        fill->moveBefore(outerLoop);
+    }
+}
+
+struct LinearUnrolledAddress {
+    arith::AddIOp address;
+    Value outerBase;
+    Value loopCarriedBase;
+    int64_t logicalOffset;
+    int64_t elementStride;
+};
+
+static FailureOr<std::pair<Value, int64_t>> peelConstantAddChain(Value value)
+{
+    Value base = value;
+    int64_t offset = 0;
+    while (auto add = base.getDefiningOp<arith::AddIOp>()) {
+        std::optional<int64_t> lhs = getConstantIntValue(add.getLhs());
+        std::optional<int64_t> rhs = getConstantIntValue(add.getRhs());
+        Value nextBase;
+        int64_t increment;
+        if (lhs) {
+            nextBase = add.getRhs();
+            increment = *lhs;
+        } else if (rhs) {
+            nextBase = add.getLhs();
+            increment = *rhs;
+        } else
+            break;
+
+        int64_t nextOffset;
+        if (llvm::AddOverflow(offset, increment, nextOffset))
+            return failure();
+        offset = nextOffset;
+        base = nextBase;
+    }
+    return std::make_pair(base, offset);
+}
+
+static bool isNonNegativeLoopCarriedValue(Value value, scf::ForOp loop)
+{
+    auto argument = dyn_cast<BlockArgument>(value);
+    if (!argument || argument.getOwner() != loop.getBody() || argument.getArgNumber() == 0)
+        return false;
+
+    unsigned iterArgIndex = argument.getArgNumber() - 1;
+    if (iterArgIndex >= loop.getInitArgs().size())
+        return false;
+    std::optional<int64_t> initial = getConstantIntValue(loop.getInitArgs()[iterArgIndex]);
+    if (!initial || *initial < 0)
+        return false;
+
+    auto yield = cast<scf::YieldOp>(loop.getBody()->getTerminator());
+    Value next = yield.getOperand(iterArgIndex);
+    FailureOr<std::pair<Value, int64_t>> nextBaseAndOffset = peelConstantAddChain(next);
+    if (failed(nextBaseAndOffset))
+        return false;
+    return nextBaseAndOffset->first == value && nextBaseAndOffset->second >= 0;
+}
+
+static FailureOr<std::pair<Value, int64_t>> matchLoopBaseAndOffset(Value value, scf::ForOp loop)
+{
+    if (auto maximum = value.getDefiningOp<arith::MaxSIOp>()) {
+        std::optional<int64_t> lhs = getConstantIntValue(maximum.getLhs());
+        std::optional<int64_t> rhs = getConstantIntValue(maximum.getRhs());
+        if (lhs && *lhs == 0)
+            value = maximum.getRhs();
+        else if (rhs && *rhs == 0)
+            value = maximum.getLhs();
+        else
+            return failure();
+    }
+
+    // loopUnrollByFactor builds a recurrence chain rather than independent
+    // `base + laneOffset` expressions:
+    //
+    //   lane1 = base + step
+    //   lane2 = lane1 + step
+    //   lane3 = lane2 + step
+    //
+    // Peel the complete constant chain so every cloned address is related to
+    // the same loop-carried base.  A single-add matcher recognizes lane 1 but
+    // rejects all later lanes and therefore leaves the expensive cast/multiply
+    // chain intact.
+    FailureOr<std::pair<Value, int64_t>> baseAndOffset = peelConstantAddChain(value);
+    if (failed(baseAndOffset))
+        return failure();
+    Value base = baseAndOffset->first;
+    int64_t offset = baseAndOffset->second;
+
+    if (offset < 0 || !isNonNegativeLoopCarriedValue(base, loop))
+        return failure();
+    return std::make_pair(base, offset);
+}
+
+static FailureOr<LinearUnrolledAddress> matchLinearUnrolledAddress(arith::AddIOp address, scf::ForOp loop)
+{
+    arith::MulIOp multiply = address.getLhs().getDefiningOp<arith::MulIOp>();
+    Value outerBase = address.getRhs();
+    if (!multiply) {
+        multiply = address.getRhs().getDefiningOp<arith::MulIOp>();
+        outerBase = address.getLhs();
+    }
+    if (!multiply)
+        return failure();
+
+    Value castValue;
+    std::optional<int64_t> stride = getConstantIntValue(multiply.getLhs());
+    if (stride)
+        castValue = multiply.getRhs();
+    else {
+        stride = getConstantIntValue(multiply.getRhs());
+        castValue = multiply.getLhs();
+    }
+    if (!stride || *stride <= 0)
+        return failure();
+
+    auto indexCast = castValue.getDefiningOp<arith::IndexCastOp>();
+    if (!indexCast || !isa<IndexType>(indexCast.getType()))
+        return failure();
+    FailureOr<std::pair<Value, int64_t>> baseAndOffset = matchLoopBaseAndOffset(indexCast.getIn(), loop);
+    if (failed(baseAndOffset))
+        return failure();
+
+    return LinearUnrolledAddress{address, outerBase, baseAndOffset->first, baseAndOffset->second, *stride};
+}
+
+// Triton block-pointer advances become scalar address arithmetic before this
+// pass runs.  Generic loop unrolling consequently clones the complete
+// `(state + lane) * stride + base` chain for every lane.  The hand-unrolled
+// kernel instead computes the first address once and issues later DMA loads at
+// constant offsets from it.  Recreate that form only for address expressions
+// with the same outer base, loop-carried base, and element stride, and only
+// after proving that the loop-carried state and all lane offsets are
+// nonnegative (so stripping the max-with-zero is exact).
+static FailureOr<scf::ForOp> strengthReduceUnrolledAddresses(scf::ForOp loop)
+{
+    SmallVector<LinearUnrolledAddress> canonicals;
+    SmallVector<arith::AddIOp> addresses;
+    for (Operation &op : *loop.getBody())
+        if (auto add = dyn_cast<arith::AddIOp>(op))
+            addresses.push_back(add);
+
+    for (arith::AddIOp address : addresses) {
+        FailureOr<LinearUnrolledAddress> match = matchLinearUnrolledAddress(address, loop);
+        if (failed(match))
+            continue;
+
+        auto it = llvm::find_if(canonicals, [&](const LinearUnrolledAddress &candidate) {
+            return candidate.outerBase == match->outerBase &&
+                   candidate.loopCarriedBase == match->loopCarriedBase &&
+                   candidate.elementStride == match->elementStride;
+        });
+        if (it == canonicals.end()) {
+            canonicals.push_back(*match);
+            continue;
+        }
+        LinearUnrolledAddress &canonical = *it;
+        if (!canonical.address->isBeforeInBlock(match->address.getOperation()))
+            continue;
+
+        int64_t logicalDelta;
+        int64_t elementDelta;
+        if (llvm::SubOverflow(match->logicalOffset, canonical.logicalOffset, logicalDelta) ||
+            llvm::MulOverflow(logicalDelta, match->elementStride, elementDelta))
+            continue;
+
+        OpBuilder builder(address);
+        Value replacement = canonical.address.getResult();
+        if (elementDelta != 0) {
+            Value delta = builder.create<arith::ConstantIndexOp>(address.getLoc(), elementDelta);
+            replacement = builder.create<arith::AddIOp>(address.getLoc(), replacement, delta);
+        }
+        address.getResult().replaceAllUsesWith(replacement);
+        address.erase();
+    }
+
+    // Carry the first physical address of each proven linear group through the
+    // loop. The generic unroller otherwise recomputes
+    // `max(logical, 0) -> index_cast -> logical * stride + outerBase` for the
+    // first K/V load of every unrolled iteration. The hand-unrolled kernel
+    // carries the already-scaled index and advances it once per iteration.
+    struct PhysicalRecurrence {
+        LinearUnrolledAddress address;
+        Value initialAddress;
+        int64_t elementIncrement;
+    };
+    SmallVector<PhysicalRecurrence> recurrences;
+    OpBuilder initBuilder(loop);
+    for (const LinearUnrolledAddress &canonical : canonicals) {
+        auto argument = cast<BlockArgument>(canonical.loopCarriedBase);
+        unsigned iterArgIndex = argument.getArgNumber() - 1;
+        Value initialLogical = loop.getInitArgs()[iterArgIndex];
+        auto yield = cast<scf::YieldOp>(loop.getBody()->getTerminator());
+        FailureOr<std::pair<Value, int64_t>> nextBaseAndOffset =
+            peelConstantAddChain(yield.getOperand(iterArgIndex));
+        if (failed(nextBaseAndOffset) || nextBaseAndOffset->first != canonical.loopCarriedBase ||
+            nextBaseAndOffset->second <= 0 || !isa<IndexType>(canonical.outerBase.getType()))
+            continue;
+
+        int64_t physicalIncrement;
+        if (llvm::MulOverflow(nextBaseAndOffset->second, canonical.elementStride, physicalIncrement))
+            continue;
+
+        Value initialIndex = initialLogical;
+        if (!isa<IndexType>(initialIndex.getType()))
+            initialIndex = initBuilder.create<arith::IndexCastOp>(loop.getLoc(), initBuilder.getIndexType(),
+                                                                  initialLogical);
+        Value scaledInitial = initialIndex;
+        if (canonical.elementStride != 1) {
+            Value stride = initBuilder.create<arith::ConstantIndexOp>(loop.getLoc(), canonical.elementStride);
+            scaledInitial = initBuilder.create<arith::MulIOp>(loop.getLoc(), initialIndex, stride);
+        }
+        Value initialAddress =
+            initBuilder.create<arith::AddIOp>(loop.getLoc(), scaledInitial, canonical.outerBase);
+        recurrences.push_back({canonical, initialAddress, physicalIncrement});
+    }
+
+    if (recurrences.empty())
+        return loop;
+
+    SmallVector<Value> newInitArgs(loop.getInitArgs());
+    for (const PhysicalRecurrence &recurrence : recurrences)
+        newInitArgs.push_back(recurrence.initialAddress);
+
+    OpBuilder builder(loop);
+    auto newLoop = builder.create<scf::ForOp>(loop.getLoc(), loop.getLowerBound(), loop.getUpperBound(),
+                                               loop.getStep(), newInitArgs);
+    newLoop->setAttrs(loop->getAttrs());
+
+    IRMapping mapping;
+    mapping.map(loop.getInductionVar(), newLoop.getInductionVar());
+    for (auto [oldArg, newArg] : llvm::zip(loop.getRegionIterArgs(), newLoop.getRegionIterArgs().take_front(
+                                                                            loop.getRegionIterArgs().size())))
+        mapping.map(oldArg, newArg);
+
+    Block *newBody = newLoop.getBody();
+    Operation *newYield;
+    if (newBody->empty()) {
+        builder.setInsertionPointToEnd(newBody);
+        newYield = builder.create<scf::YieldOp>(loop.getLoc(), newLoop.getRegionIterArgs());
+    } else {
+        newYield = &newBody->back();
+    }
+    builder.setInsertionPoint(newYield);
+    for (Operation &op : loop.getBody()->without_terminator())
+        builder.clone(op, mapping);
+
+    SmallVector<Value> newYields;
+    auto oldYield = cast<scf::YieldOp>(loop.getBody()->getTerminator());
+    for (Value value : oldYield.getOperands())
+        newYields.push_back(mapping.lookupOrDefault(value));
+
+    unsigned oldIterArgCount = loop.getRegionIterArgs().size();
+    for (auto [index, recurrence] : llvm::enumerate(recurrences)) {
+        BlockArgument physicalAddress = newLoop.getRegionIterArgs()[oldIterArgCount + index];
+        Value increment = builder.create<arith::ConstantIndexOp>(loop.getLoc(), recurrence.elementIncrement);
+        newYields.push_back(builder.create<arith::AddIOp>(loop.getLoc(), physicalAddress, increment));
+
+        Value clonedAddress = mapping.lookup(recurrence.address.address.getResult());
+        clonedAddress.replaceAllUsesWith(physicalAddress);
+    }
+    cast<scf::YieldOp>(newYield).getResultsMutable().assign(newYields);
+
+    for (auto [oldResult, newResult] : llvm::zip(loop.getResults(), newLoop.getResults().take_front(loop.getNumResults())))
+        oldResult.replaceAllUsesWith(newResult);
+    loop.erase();
+    return newLoop;
 }
 
 static void commitModuleClone(ModuleOp destination, ModuleOp source)
@@ -294,7 +718,7 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
         return transformedAnyCandidate;
     }
 
-    LogicalResult unrollCandidateLoop(scf::ForOp loop)
+    LogicalResult unrollCandidateLoop(scf::ForOp &loop)
     {
         tagUnrollOriginIds(loop);
 
@@ -304,12 +728,19 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
             LLVM_DEBUG(llvm::dbgs() << "[cv-split] Unroll failed, bail\n");
             return failure();
         }
+        reuseUnrolledTransposeDestinations(loop);
+        reuseUnrolledReductionInitializers(loop);
+        FailureOr<scf::ForOp> reducedLoop = strengthReduceUnrolledAddresses(loop);
+        if (failed(reducedLoop))
+            return failure();
+        loop = *reducedLoop;
         LLVM_DEBUG(llvm::dbgs() << "[cv-split] Unrolled by " << unrollFactor << "\n");
         return success();
     }
 
     LogicalResult processFunction(func::FuncOp funcOp, scf::ForOp loop)
     {
+        scf::ForOp outerLoop = loop->getParentOfType<scf::ForOp>();
         Block *body = loop.getBody();
 
         // Stage 3: Import the classifications stamped by the single module-level
@@ -329,7 +760,8 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
         // Stages 4-7: build the dependency graph, assign BFS levels, verify the
         // CUBE/VECTOR work is cleanly separable, and reorder the body by level.
         cv_split::DependencyScheduler scheduler;
-        if (failed(scheduler.run(body, classification)))
+        llvm::DenseMap<Operation *, Operation *> transferPhaseEnds;
+        if (failed(scheduler.run(body, classification, transferPhaseEnds)))
             return failure();
 
         // Stage 7.5: Unfuse PV matmuls (split matmul(p,v,acc*alpha) into pv + addf)
@@ -339,7 +771,7 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
         // Stage 8: Insert cross-scope transfers (BEFORE scope separation)
         LLVM_DEBUG(llvm::dbgs() << "[cv-split] === Stage 8: cross-scope transfers ===\n");
         FailureOr<cv_split::CrossScopeTransferInfo> transferInfo =
-            cv_split::insertCrossScopeTransfers(loop, classification);
+            cv_split::insertCrossScopeTransfers(loop, classification, transferPhaseEnds);
         if (failed(transferInfo)) {
             return failure();
         }
@@ -353,13 +785,8 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
         if (failed(cv_split::createScopeSeparation(funcOp, loop, *transferInfo))) {
             return failure();
         }
+        hoistInvariantTensorFillTemplates(outerLoop);
         LLVM_DEBUG(llvm::dbgs() << "[cv-split] Stage 9 complete\n");
-
-        // Stage 11.5: bind the loop-invariant matmul LHS (Q) into a cbuf buffer so
-        // the QK matmul reads an aligned NZ L1 operand (matches the manual kernel
-        // and avoids the misaligned implicit GM/UB->L1 stage of a plain memref).
-        if (failed(cv_split::bindLoopInvariantMatmulLhsToCbuf(funcOp)))
-            return failure();
 
         // Stage 10: Ensure function has mix_mode attribute (it should already)
         // Note: do NOT add hivm.func_core_type=MIX — that triggers SplitMixKernel
@@ -369,12 +796,15 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
             funcOp->setAttr("mix_mode", StringAttr::get(funcOp.getContext(), "mix"));
         LLVM_DEBUG(llvm::dbgs() << "[cv-split] Function attributes set on " << funcOp.getName() << "\n");
 
-        // Stage 11: Set module attribute to disable auto-tiling
-        // Without this, BiShengIR's auto-tile pass creates invalid pointer_casts
-        // inside our scoped loops (they're not IsolatedFromAbove).
-        if (auto moduleOp = funcOp->getParentOfType<ModuleOp>()) {
+        // The pass has already split the M dimension across both vector
+        // sub-blocks and rebuilt every cross-core/output view with the
+        // sub-block index.  The generic TileAndBindSubBlock fallback interprets
+        // a disabled auto-tiler as a 1:1 kernel and wraps every UB->L1 copy and
+        // GM store in `sub_block_id == 0`.  That drops the second ROW_SPLIT
+        // half.  Skip only that later transformation; AutoBlockifyParallelLoop
+        // is independent and must still form the physical-block loop.
+        if (auto moduleOp = funcOp->getParentOfType<ModuleOp>())
             moduleOp->setAttr("hivm.disable_auto_tile_and_bind_subblock", UnitAttr::get(funcOp.getContext()));
-        }
 
         return success();
     }

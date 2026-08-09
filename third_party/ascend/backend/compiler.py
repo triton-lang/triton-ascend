@@ -1180,9 +1180,11 @@ def ttir_to_npubin(mod, metadata, opt):
             if _is_auto_map_parallel_blocks_enabled():
                 if enable_auto_blockify is None or enable_auto_blockify:
                     _compile_option_list += ["--enable-auto-blockify-loop"]
+                    _compile_option_list += [f"--super-block-factor={opt.superblock_factor}"]
             else:
                 if enable_auto_blockify:
                     _compile_option_list += ["--enable-auto-blockify-loop"]
+                    _compile_option_list += [f"--super-block-factor={opt.superblock_factor}"]
 
             bisheng_options = metadata["bisheng_options"]
             if bisheng_options is not None:

@@ -1797,10 +1797,11 @@ BlockDataParser::rewriteTerminator(
       // If this value is a tensor of pointers produced by AddPtrOp,
       // we should have already converted to a ReinterpretCastOp without
       // layout information for the normal cases
-      if (v.getDefiningOp<triton::AddPtrOp>() ||
-          v.getDefiningOp<triton::AdvanceOp>() ||
-          v.getDefiningOp<triton::MakeTensorPtrOp>()) {
-        if (auto castOp = mappedV.getDefiningOp<memref::ReinterpretCastOp>()) {
+      if (v.template getDefiningOp<triton::AddPtrOp>() ||
+          v.template getDefiningOp<triton::AdvanceOp>() ||
+          v.template getDefiningOp<triton::MakeTensorPtrOp>()) {
+        if (auto castOp =
+                mappedV.template getDefiningOp<memref::ReinterpretCastOp>()) {
           v = castOp;
         } else {
           llvm_unreachable("mapped value defined by an unexpected op");
@@ -1825,7 +1826,7 @@ BlockDataParser::rewriteTerminator(
     if (blockArgIdxSet.find(i) == blockArgIdxSet.end())
       continue;
 
-    auto reintCastOp = v.getDefiningOp<memref::ReinterpretCastOp>();
+    auto reintCastOp = v.template getDefiningOp<memref::ReinterpretCastOp>();
     assert(
         reintCastOp ||
         (isa<TensorType>(v.getType()) &&

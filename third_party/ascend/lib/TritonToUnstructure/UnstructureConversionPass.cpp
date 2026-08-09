@@ -181,6 +181,16 @@ LogicalResult tryRewriteIndirectFastPath(MemAccOpTy op, Location loc,
     Value mask = op.getMask();
     Value other = op.getOther();
     auto resultType = op.getType();
+    // when mask is set but `other` is null, default the masked-out elements to 0
+    // so the library function called by IndirectLoadConverter::matchAndRewrite
+    // sees a well-defined fallback value.
+    if (mask && !other) {
+      Type elemTy = (isa<RankedTensorType>(resultType))
+                        ? cast<RankedTensorType>(resultType).getElementType()
+                        : resultType;
+      other = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getZeroAttr(elemTy));
+    }
     auto newPtr = srcPtr;
     if (auto *defOp = srcPtr.getDefiningOp()) {
       if (auto intToPtrOp = dyn_cast<triton::IntToPtrOp>(defOp)) {
@@ -448,10 +458,22 @@ void UnstructuredMemAccessConverter<triton::LoadOp>::splatAndLoadScenario<
       /*PaddingOptionAttr=*/nullptr);
   loadedValue = rewriter.create<triton::SplatOp>(loc, op.getResult().getType(),
                                                  loadedValue);
-  if (mask)
+  if (mask) {
+    // when mask is set but `other` is null, default the masked-out elements
+    // to 0. Without this, `arith::SelectOp` would be constructed with a null
+    // false-value, which is illegal.
+    if (!other) {
+      auto resTy = loadedValue.getType();
+      Type elemTy = (isa<RankedTensorType>(resTy))
+                        ? cast<RankedTensorType>(resTy).getElementType()
+                        : resTy;
+      other = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getZeroAttr(elemTy));
+    }
     rewriter.replaceOpWithNewOp<arith::SelectOp>(op, mask, loadedValue, other);
-  else
+  } else {
     rewriter.replaceOp(op, loadedValue);
+  }
 }
 
 template <typename MemAccOpTy>
@@ -736,10 +758,21 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
                   UnitAttr::get(rewriter.getContext()));
     rewriter.restoreInsertionPoint(insertPoint);
     if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-      if (op.getMask() && op.getOther()) {
+      if (op.getMask()) {
+        Value other = op.getOther();
+        // when mask is set but `other` is null, default the masked-out 
+        // elements to 0 so the mask semantics are preserved end-to-end.
+        if (!other) {
+          auto resTy = newOpResult.getType();
+          Type elemTy = (isa<RankedTensorType>(resTy))
+                            ? cast<RankedTensorType>(resTy).getElementType()
+                            : resTy;
+          other = rewriter.create<arith::ConstantOp>(
+              loc, rewriter.getZeroAttr(elemTy));
+        }
         rewriter
             .replaceOpWithNewOp<arith::SelectOp>(op, op.getMask(), newOpResult,
-                                                 op.getOther())
+                                                 other)
             ->setAttr(ConverterUtils::discreteAttrName,
                       UnitAttr::get(rewriter.getContext()));
       } else {

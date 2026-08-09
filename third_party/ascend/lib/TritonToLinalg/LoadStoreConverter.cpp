@@ -401,21 +401,21 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     } else {
       dstOffsets = srcOffsets;
     }
-    if (padding.has_value()) {
-      TypedAttr padAttr = rewriter.getZeroAttr(memRefElementType);
-      // triton already ensure only NAN and ZERO are passed in
-      if (padding.value() == triton::PaddingOption::PAD_NAN) {
-        // FIXME: Why NaN requires elemTy to be non-int or non-index?
-        assert(!memRefElementType.isIntOrIndex());
-        auto apNaN = llvm::APFloat::getNaN(
-            cast<FloatAttr>(padAttr).getValue().getSemantics());
-        padAttr = rewriter.getFloatAttr(memRefElementType, apNaN);
-      }
-      auto padVal = rewriter.create<arith::ConstantOp>(loc, padAttr);
-
-      fillTensorWithOtherForMaskScenario(padVal, allocOp, boundarySizes,
-                                         rewriter);
+    // When `padding` is not specified, default to zero. Both PAD_ZERO and
+    // unset (nullopt) map to 0; only PAD_NAN maps to NaN.
+    TypedAttr padAttr = rewriter.getZeroAttr(memRefElementType);
+    if (padding.value_or(triton::PaddingOption::PAD_ZERO) ==
+        triton::PaddingOption::PAD_NAN) {
+      // FIXME: Why NaN requires elemTy to be non-int or non-index?
+      assert(!memRefElementType.isIntOrIndex());
+      auto apNaN = llvm::APFloat::getNaN(
+          cast<FloatAttr>(padAttr).getValue().getSemantics());
+      padAttr = rewriter.getFloatAttr(memRefElementType, apNaN);
     }
+    auto padVal = rewriter.create<arith::ConstantOp>(loc, padAttr);
+
+    fillTensorWithOtherForMaskScenario(padVal, allocOp, boundarySizes,
+                                       rewriter);
     auto srcSubView = mlir::ConverterUtils::makeSubViewOp(
         ptr, srcOffsets, boundarySizes, loc, rewriter);
     auto dstSubview = mlir::ConverterUtils::makeSubViewOp(
@@ -477,16 +477,20 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
         op, "can not lower uncontinuout masked loads");
   }
 
+  // When mask is provided but no `other`, default the masked-out elements
+  // to zero.
+  Value effectiveOther;
   if (other) {
-    auto scalarOther =
-        mlir::ConverterUtils::getScalarValue(other, loc, rewriter);
-    assert(
-        scalarOther &&
-        "other value used in masked load produced by unsupported instruction!");
-
-    fillTensorWithOtherForMaskScenario(scalarOther, allocOp, mstate.dims,
-                                       rewriter);
+    effectiveOther = mlir::ConverterUtils::getScalarValue(other, loc, rewriter);
+    assert(effectiveOther &&
+           "other value used in masked load produced by unsupported "
+           "instruction!");
+  } else {
+    effectiveOther = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getZeroAttr(memRefElementType));
   }
+  fillTensorWithOtherForMaskScenario(effectiveOther, allocOp, mstate.dims,
+                                     rewriter);
 
   // To enable deinterleave optimization with mask load, mask state along last
   // dimension couldn't be split, which means `dims.back()` must be equal to

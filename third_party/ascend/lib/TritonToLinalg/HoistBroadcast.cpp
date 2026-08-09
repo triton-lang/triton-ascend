@@ -209,8 +209,9 @@ BroadcastHoister::replaceBroadcastOp(triton::BroadcastOp op,
 bool BroadcastHoister::canBroadcast() {
   if (!ConverterUtils::isHoistablePointerBroadcast(opToHoist)) {
     LLVM_DEBUG({
-      llvm::dbgs() << "Now cannot handle broadcast for ptr tensor with multi "
-                      "broadcasted dimension.\n";
+      llvm::dbgs() << "Cannot hoist pointer broadcast: expected a same-rank "
+                      "single-axis broadcast rooted at tt.splat of a scalar "
+                      "pointer.\n";
     });
     return false;
   }

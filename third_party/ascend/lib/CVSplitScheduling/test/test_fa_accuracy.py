@@ -7,16 +7,18 @@ Config: B=1, H=1, N=8192, D=64, BLOCK_M=32, BLOCK_N=32 (large-context inner-loop
 """
 import os
 
-os.environ["TRITON_ASCEND_SOC_VERSION"] = "Ascend950PR_9589"
-os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
+if __name__ == "__main__":
+    # Configure the standalone execution environment before importing the NPU
+    # runtime, without changing the caller's environment when this module is
+    # imported for discovery or reuse.
+    os.environ["TRITON_ASCEND_SOC_VERSION"] = "Ascend950PR_9589"
+    os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
 
 import torch
 import torch_npu
 import triton
 import triton.language as tl
 import math
-
-torch.manual_seed(42)
 
 # Config matched to test_fa_reference_scoped.py (the manually-written target kernel):
 #   Z=1, H=1, N_CTX=256, HEAD_DIM=64, BM=BN=32, non-causal, std=0.5 init, seed 42
@@ -32,10 +34,6 @@ CORE_NUM = 32
 ACTIVE_BLOCKS = 1
 sm_scale = 1.0 / math.sqrt(D)
 
-q_cpu = torch.empty(B, H, N, D, dtype=torch.float16).normal_(mean=0.0, std=0.5)
-k_cpu = torch.empty(B, H, N, D, dtype=torch.float16).normal_(mean=0.0, std=0.5)
-v_cpu = torch.empty(B, H, N, D, dtype=torch.float16).normal_(mean=0.0, std=0.5)
-
 
 def reference_attention(q, k, v, sm_scale):
     q_f = q.float()
@@ -46,14 +44,10 @@ def reference_attention(q, k, v, sm_scale):
     return torch.matmul(attn, v_f).half()
 
 
-# Only the first ACTIVE_BLOCKS*BLOCK_M query rows are computed by the kernel, so
-# the reference is computed for just those rows (cheap even at N_CTX=8192).
-REF_ROWS = ACTIVE_BLOCKS * BLOCK_M
-ref_out = reference_attention(q_cpu[:, :, :REF_ROWS, :], k_cpu, v_cpu, sm_scale)
-print(f"Reference output: shape={ref_out.shape}, mean={ref_out.float().mean():.6f}, std={ref_out.float().std():.6f}")
-print(f"Reference range: [{ref_out.float().min():.4f}, {ref_out.float().max():.4f}]")
-
-
+# Keep the canonical Flash-Attention helper signature, including the currently
+# unused start_m/STAGE/offset parameters. This regression intentionally matches
+# the production frontend shape used to generate and compare the manual and
+# CV-split compiler schedules; removing them would change that test contract.
 @triton.jit
 def _attn_fwd_inner(acc, l_i, m_i, q, K_block_ptr, V_block_ptr, start_m, qk_scale: tl.constexpr, BLOCK_M: tl.constexpr,
                     HEAD_DIM: tl.constexpr, BLOCK_N: tl.constexpr, STAGE: tl.constexpr, offs_m: tl.constexpr,
@@ -204,41 +198,57 @@ def check_accuracy(name, out, ref, atol=0.05, rtol=0.05):
     return close
 
 
-# ---- Run both variants ----
-q_npu = q_cpu.to("npu")
-k_npu = k_cpu.to("npu")
-v_npu = v_cpu.to("npu")
+def main():
+    variant = os.environ.get("FA_VARIANT", "cvsplit").lower()
+    if variant not in ("cvsplit", "baseline"):
+        raise ValueError(f"FA_VARIANT must be cvsplit|baseline, got {variant!r}")
 
-NUM_BLOCKS_M = triton.cdiv(N, BLOCK_M)
-NUM_BLOCKS = min(NUM_BLOCKS_M * B * H, ACTIVE_BLOCKS)
-print(f"\nConfig: B={B}, H={H}, N={N}, D={D}, BLOCK_M={BLOCK_M}, BLOCK_N={BLOCK_N}")
-print(f"  Inner loop iters (pre-unroll): {N // BLOCK_N}")
-_UF = int(os.environ.get("CV_SPLIT_UNROLL", "4"))
-print(f"  Inner loop iters (post-unroll by {_UF}): {N // BLOCK_N // _UF}")
-print(f"  ACTIVE query tiles: {NUM_BLOCKS} (-> {NUM_BLOCKS} AI core(s), each 2 veccores)")
-print(f"  NUM_BLOCKS={NUM_BLOCKS}, CORE_NUM={CORE_NUM}")
+    torch.manual_seed(42)
+    q_cpu = torch.empty(B, H, N, D, dtype=torch.float16).normal_(mean=0.0, std=0.5)
+    k_cpu = torch.empty(B, H, N, D, dtype=torch.float16).normal_(mean=0.0, std=0.5)
+    v_cpu = torch.empty(B, H, N, D, dtype=torch.float16).normal_(mean=0.0, std=0.5)
 
-# Variant selected by env var so baseline and our pass run as SEPARATE
-# simulator invocations (isolated OPPROF + accuracy, one failure can't block the other):
-#   FA_VARIANT=cvsplit  -> run our CVSplit pass    (default)
-#   FA_VARIANT=baseline -> run baseline (no CVSplit)
-VARIANT = os.environ.get("FA_VARIANT", "cvsplit").lower()
-assert VARIANT in ("cvsplit", "baseline"), f"FA_VARIANT must be cvsplit|baseline, got {VARIANT!r}"
-use_cvsplit = (VARIANT == "cvsplit")
-name = "CVSPLIT (our pass)" if use_cvsplit else "BASELINE (no CVSplit)"
+    # Only the first ACTIVE_BLOCKS*BLOCK_M query rows are computed by the
+    # kernel, so compute the reference for only those rows.
+    ref_rows = ACTIVE_BLOCKS * BLOCK_M
+    ref_out = reference_attention(q_cpu[:, :, :ref_rows, :], k_cpu, v_cpu, sm_scale)
+    print(f"Reference output: shape={ref_out.shape}, mean={ref_out.float().mean():.6f}, "
+          f"std={ref_out.float().std():.6f}")
+    print(f"Reference range: [{ref_out.float().min():.4f}, {ref_out.float().max():.4f}]")
 
-print("\n" + "=" * 60)
-print(f" Running {name}...  [FA_VARIANT={VARIANT}]")
-print("=" * 60)
-try:
-    out = run_attention(q_npu, k_npu, v_npu, sm_scale, use_cvsplit=use_cvsplit)
-    # Only the first REF_ROWS rows were computed (ACTIVE_BLOCKS tiles).
-    ok = check_accuracy(VARIANT.upper(), out[:, :, :REF_ROWS, :], ref_out)
-except Exception as e:
-    print(f"  {VARIANT.upper()} FAILED: {e}")
-    ok = False
+    q_npu = q_cpu.to("npu")
+    k_npu = k_cpu.to("npu")
+    v_npu = v_cpu.to("npu")
 
-print("\n" + "=" * 60)
-print(f" SUMMARY: {VARIANT}={'PASS' if ok else 'FAIL'}")
-print("=" * 60)
-print("\nACCURACY TEST DONE")
+    num_blocks_m = triton.cdiv(N, BLOCK_M)
+    num_blocks = min(num_blocks_m * B * H, ACTIVE_BLOCKS)
+    print(f"\nConfig: B={B}, H={H}, N={N}, D={D}, BLOCK_M={BLOCK_M}, BLOCK_N={BLOCK_N}")
+    print(f"  Inner loop iters (pre-unroll): {N // BLOCK_N}")
+    unroll_factor = int(os.environ.get("CV_SPLIT_UNROLL", "4"))
+    print(f"  Inner loop iters (post-unroll by {unroll_factor}): {N // BLOCK_N // unroll_factor}")
+    print(f"  ACTIVE query tiles: {num_blocks} (-> {num_blocks} AI core(s), each 2 veccores)")
+    print(f"  NUM_BLOCKS={num_blocks}, CORE_NUM={CORE_NUM}")
+
+    # Run baseline and CV-split in separate invocations so each has isolated
+    # profiling and accuracy state.
+    use_cvsplit = variant == "cvsplit"
+    name = "CVSPLIT (our pass)" if use_cvsplit else "BASELINE (no CVSplit)"
+
+    print("\n" + "=" * 60)
+    print(f" Running {name}...  [FA_VARIANT={variant}]")
+    print("=" * 60)
+    try:
+        out = run_attention(q_npu, k_npu, v_npu, sm_scale, use_cvsplit=use_cvsplit)
+        ok = check_accuracy(variant.upper(), out[:, :, :ref_rows, :], ref_out)
+    except Exception as exc:
+        print(f"  {variant.upper()} FAILED: {exc}")
+        ok = False
+
+    print("\n" + "=" * 60)
+    print(f" SUMMARY: {variant}={'PASS' if ok else 'FAIL'}")
+    print("=" * 60)
+    print("\nACCURACY TEST DONE")
+
+
+if __name__ == "__main__":
+    main()

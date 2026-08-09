@@ -26,12 +26,14 @@
 #include "ascend/include/CVSplitScheduling/classifyAllOps.h"
 #include "mlir/IR/Block.h"
 #include "mlir/Support/LogicalResult.h"
+#include "llvm/ADT/DenseMap.h"
 
 namespace mlir::triton::cv_split {
 
 class DependencyScheduler {
   public:
-    LogicalResult run(Block *body, const Classification &classification);
+    LogicalResult run(Block *body, const Classification &classification,
+                      llvm::DenseMap<Operation *, Operation *> &transferPhaseEnds);
 };
 
 } // namespace mlir::triton::cv_split

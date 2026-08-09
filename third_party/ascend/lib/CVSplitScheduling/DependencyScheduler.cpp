@@ -23,8 +23,11 @@
 #include "ascend/include/CVSplitScheduling/DependencyScheduler.h"
 
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -74,18 +77,6 @@ static void buildDependencyGraph(Block *body, DenseMap<Operation *, SmallVector<
     // The source reinterpret_cast depends on address arithmetic that computes
     // the GM offset. Ensure copy is ordered after its source address is ready.
     // (This is already captured by SSA edges since copy USES the source value.)
-}
-
-static LogicalResult validateDependencyGraph(const DenseMap<Operation *, SmallVector<Operation *>> &predecessors)
-{
-    for (const auto &entry : predecessors) {
-        if (entry.second.empty()) {
-            LLVM_DEBUG(llvm::dbgs() << "[cv-split] Invalid empty predecessor entry for " << entry.first->getName()
-                                    << ", bail\n");
-            return failure();
-        }
-    }
-    return success();
 }
 
 // ============================================================================
@@ -176,10 +167,11 @@ static void logLevelHistogram(Block *body, const DenseMap<Operation *, int> &lev
         for (Operation &op : *body) {
             if (isa<scf::YieldOp>(&op))
                 continue;
-            auto lvlIt = levels.find(&op);
-            if (lvlIt->second != lvl)
+            if (levels.at(&op) != lvl)
                 continue;
             auto classIt = classification.find(&op);
+            if (classIt == classification.end())
+                continue;
             if (classIt->second == EngineType::CUBE)
                 cubeOps.push_back(&op);
             else
@@ -192,20 +184,186 @@ static void logLevelHistogram(Block *body, const DenseMap<Operation *, int> &lev
 }
 
 // ============================================================================
-// Stage 7: Reorder by dependency level
+// Stage 7: Reorder around VECTOR -> CUBE producer boundaries
 // ============================================================================
-static void reorderByLevel(Block *body, const DenseMap<Operation *, int> &levels)
+// A breadth-first dependency-level order starts every independent unrolled
+// chain before completing any one of them.  For attention this leaves four
+// full score tiles and their softmax temporaries live at once, fragments the
+// vector functions, and can overflow UB.  The useful cross-core schedule is
+// instead organized around values that VECTOR must produce before CUBE can
+// continue (for example, each softmax P tile consumed by a PV matmul).
+//
+// Complete the dependency slice of each such producer in original program
+// order, then append the remaining operations.  The input block is already a
+// valid topological order, so filtering that order by a dependency-closed
+// slice preserves SSA order.  After scope separation this yields the intended
+// phase order without matching a particular kernel:
+//
+//   CUBE:   producer work for all boundaries, then consuming work
+//   VECTOR: complete boundary 0, boundary 1, ..., then remaining work
+//
+// If a loop has no VECTOR -> CUBE boundary, retain the existing level order.
+static void collectPredecessorSlice(Operation *op,
+                                    const DenseMap<Operation *, SmallVector<Operation *>> &predecessors,
+                                    DenseSet<Operation *> &slice)
 {
-    SmallVector<Operation *> ops;
+    if (!slice.insert(op).second)
+        return;
+    auto it = predecessors.find(op);
+    if (it == predecessors.end())
+        return;
+    for (Operation *pred : it->second)
+        collectPredecessorSlice(pred, predecessors, slice);
+}
+
+// A boundary tensor can have state-maintenance users that are not predecessors
+// of the value sent to CUBE.  Softmax is the important example: exp(score) is
+// both truncated into P (the boundary value) and reduced into the running
+// denominator.  Leaving that rank-1 reduction branch for the later PV phase
+// keeps the full score tile live across all unrolled stages.  Close a producer
+// slice over ready scalar/rank-1 VECTOR operations so this state is completed
+// with the boundary, while deliberately excluding rank-2 work such as the PV
+// accumulator update.
+static void extendWithReadyVectorState(
+    Block *body, const DenseMap<Operation *, SmallVector<Operation *>> &predecessors,
+    const Classification &classification, const DenseSet<Operation *> &alreadyScheduled,
+    DenseSet<Operation *> &slice)
+{
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (Operation &op : *body) {
+            if (slice.contains(&op) || isa<scf::YieldOp>(&op))
+                continue;
+            auto classIt = classification.find(&op);
+            if (classIt == classification.end() || classIt->second != EngineType::VECTOR || op.getNumResults() == 0)
+                continue;
+
+            bool isScalarOrRankOne = llvm::all_of(op.getResultTypes(), [](Type type) {
+                if (auto shaped = dyn_cast<ShapedType>(type))
+                    return shaped.hasRank() && shaped.getRank() <= 1;
+                return true;
+            });
+            if (!isScalarOrRankOne)
+                continue;
+
+            auto predIt = predecessors.find(&op);
+            if (predIt == predecessors.end())
+                continue;
+            bool touchesSlice = false;
+            for (Operation *pred : predIt->second)
+                touchesSlice |= slice.contains(pred);
+            if (!touchesSlice)
+                continue;
+
+            // Pull in private scalar/rank-1 initializers as well.  For example,
+            // a linalg.reduce commonly has a fresh rank-1 linalg.fill init that
+            // is not yet in the boundary slice.  Reject the candidate if its
+            // newly required dependency closure contains any other rank-2
+            // value; that would absorb the next tile or PV accumulator phase.
+            DenseSet<Operation *> candidateSlice;
+            collectPredecessorSlice(&op, predecessors, candidateSlice);
+            bool safe = true;
+            for (Operation *candidate : candidateSlice) {
+                if (slice.contains(candidate) || alreadyScheduled.contains(candidate))
+                    continue;
+                auto candidateClassIt = classification.find(candidate);
+                if (candidateClassIt == classification.end() || candidateClassIt->second != EngineType::VECTOR ||
+                    !llvm::all_of(candidate->getResultTypes(), [](Type type) {
+                        if (auto shaped = dyn_cast<ShapedType>(type))
+                            return shaped.hasRank() && shaped.getRank() <= 1;
+                        return true;
+                    })) {
+                    safe = false;
+                    break;
+                }
+            }
+            if (!safe)
+                continue;
+            for (Operation *candidate : candidateSlice)
+                slice.insert(candidate);
+            changed = true;
+        }
+    }
+}
+
+static SmallVector<Operation *> collectVectorToCubeProducers(Block *body, const Classification &classification)
+{
+    SmallVector<Operation *> producers;
+    DenseSet<Operation *> seen;
+    for (Operation &op : *body) {
+        auto classIt = classification.find(&op);
+        if (classIt == classification.end() || classIt->second != EngineType::VECTOR)
+            continue;
+
+        bool feedsCubeMatmul = false;
+        for (Value result : op.getResults()) {
+            for (Operation *user : result.getUsers()) {
+                if (user->getBlock() != body || !isa<linalg::MatmulOp>(user))
+                    continue;
+                auto userClassIt = classification.find(user);
+                if (userClassIt == classification.end() || userClassIt->second != EngineType::CUBE)
+                    continue;
+                if (user->getOperand(0) == result || user->getOperand(1) == result) {
+                    feedsCubeMatmul = true;
+                    break;
+                }
+            }
+            if (feedsCubeMatmul)
+                break;
+        }
+        if (feedsCubeMatmul && seen.insert(&op).second)
+            producers.push_back(&op);
+    }
+    return producers;
+}
+
+static void reorderForCrossScopeProducerPhases(
+    Block *body, const DenseMap<Operation *, SmallVector<Operation *>> &predecessors,
+    const DenseMap<Operation *, int> &levels, const Classification &classification,
+    DenseMap<Operation *, Operation *> &transferPhaseEnds)
+{
+    SmallVector<Operation *> originalOrder;
     for (Operation &op : *body) {
         if (!isa<scf::YieldOp>(&op))
-            ops.push_back(&op);
+            originalOrder.push_back(&op);
     }
 
-    llvm::stable_sort(ops, [&](Operation *a, Operation *b) { return levels.lookup(a) < levels.lookup(b); });
+    SmallVector<Operation *> boundaryProducers = collectVectorToCubeProducers(body, classification);
+    SmallVector<Operation *> scheduled;
+    DenseSet<Operation *> alreadyScheduled;
+
+    if (boundaryProducers.empty()) {
+        scheduled = originalOrder;
+        llvm::stable_sort(scheduled, [&](Operation *a, Operation *b) { return levels.at(a) < levels.at(b); });
+    } else {
+        for (Operation *producer : boundaryProducers) {
+            DenseSet<Operation *> slice;
+            collectPredecessorSlice(producer, predecessors, slice);
+            extendWithReadyVectorState(body, predecessors, classification, alreadyScheduled, slice);
+
+            // Keep the original topological order of the complete producer
+            // phase. The actual cross-core handoff is inserted after the last
+            // operation in this phase, so independent recurrent state can be
+            // updated in the same vector function after the P value is formed.
+            Operation *phaseEnd = producer;
+            for (Operation *op : originalOrder) {
+                if (!slice.contains(op))
+                    continue;
+                if (alreadyScheduled.insert(op).second) {
+                    scheduled.push_back(op);
+                    phaseEnd = op;
+                }
+            }
+            transferPhaseEnds[producer] = phaseEnd;
+        }
+        for (Operation *op : originalOrder)
+            if (alreadyScheduled.insert(op).second)
+                scheduled.push_back(op);
+    }
 
     Operation *yield = body->getTerminator();
-    for (auto *op : ops)
+    for (Operation *op : scheduled)
         op->moveBefore(yield);
 }
 
@@ -217,18 +375,17 @@ static void reorderByLevel(Block *body, const DenseMap<Operation *, int> &levels
 //      memory edges),
 //   2. assign every op a level = longest dependency depth from a root,
 //   3. report the per-level CUBE/VECTOR distribution,
-//   4. reorder the body by level, ready to be
-//      split into a CUBE scope and a VECTOR scope.
+//   4. complete each VECTOR -> CUBE producer slice before starting unrelated
+//      work, then split into a CUBE scope and a VECTOR scope.
 // run() fails when dependency levels cannot be assigned to every op.
 // ============================================================================
-LogicalResult DependencyScheduler::run(Block *body, const Classification &classification)
+LogicalResult DependencyScheduler::run(Block *body, const Classification &classification,
+                                       DenseMap<Operation *, Operation *> &transferPhaseEnds)
 {
     DenseMap<Operation *, SmallVector<Operation *>> predecessors;
     DenseMap<Operation *, int> levels;
 
     buildDependencyGraph(body, predecessors);
-    if (failed(validateDependencyGraph(predecessors)))
-        return failure();
 
     SmallVector<Operation *> roots = collectRoots(body, predecessors);
     LLVM_DEBUG(llvm::dbgs() << "[cv-split] " << roots.size() << " roots\n");
@@ -240,8 +397,8 @@ LogicalResult DependencyScheduler::run(Block *body, const Classification &classi
 
     logLevelHistogram(body, levels, classification, maxLevel);
 
-    reorderByLevel(body, levels);
-    LLVM_DEBUG(llvm::dbgs() << "[cv-split] Reordered by level\n");
+    reorderForCrossScopeProducerPhases(body, predecessors, levels, classification, transferPhaseEnds);
+    LLVM_DEBUG(llvm::dbgs() << "[cv-split] Reordered by cross-scope producer phase\n");
     return success();
 }
 

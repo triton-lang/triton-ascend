@@ -8,6 +8,7 @@ three variants change only explicit compiler switches:
 | `baseline` | off | off |
 | `dcvp` | on | off |
 | `cvsplit` | off | on, unroll 4 |
+| `auto` | on (fallback) | on (first attempt) |
 
 This explicit matrix is important because DynamicCVPipeline is enabled by
 default on A5.  An empty launch option set is therefore not a plain baseline.
@@ -43,7 +44,9 @@ python test/summarize_msprof.py ./msprof_bm64_cvsplit --warmup 3
 ```
 
 Repeat the command without changing shape, grid, inputs, warmup, or iteration
-count for `baseline` and `dcvp`.  A performance result is reportable only when:
+count for `baseline`, `dcvp`, and `auto`. Use `auto --unroll-factor 3` to prove
+that CV rejection falls back to DCVP with correct output. A performance result
+is reportable only when:
 
 1. all variants use this same Python kernel and input distribution;
 2. all variants run the full query grid on the same device;

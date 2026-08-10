@@ -1,6 +1,8 @@
 // RUN: sed 's/inter_core_buf_count = 2/inter_core_buf_count = 1/' %S/cv_split_scheduling_fa.mlir | triton-opt "--cv_split_scheduling=compile-on-910-95=true unroll-factor=4" | FileCheck %s --check-prefix=DEPTH1
 // RUN: sed 's/inter_core_buf_count = 2/inter_core_buf_count = 3/' %S/cv_split_scheduling_fa.mlir | triton-opt "--cv_split_scheduling=compile-on-910-95=true unroll-factor=4" 2>/dev/null | FileCheck %s --check-prefix=REJECT
 // RUN: sed '/^  func.func @_attn_fwd/a\    hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 0' %S/cv_split_scheduling_fa.mlir | triton-opt "--cv_split_scheduling=compile-on-910-95=true unroll-factor=4" | FileCheck %s --check-prefix=COLLISION
+// RUN: triton-opt %S/cv_split_scheduling_fa.mlir "--cv_split_scheduling=compile-on-910-95=true unroll-factor=4" "--add_dynamic_cv_pipeline=compile-on-910-95=true" | FileCheck %s --check-prefix=AUTO-COMMIT
+// RUN: triton-opt %S/cv_split_scheduling_fa.mlir "--cv_split_scheduling=compile-on-910-95=true unroll-factor=3" "--add_dynamic_cv_pipeline=compile-on-910-95=true" | FileCheck %s --check-prefix=AUTO-FALLBACK
 //
 // This contract proves that CV split consumes DynamicCVPipeline's canonical
 // inter-core buffer-count attribute.  Depth one produces one physical buffer
@@ -26,3 +28,17 @@
 // COLLISION: scope.scope
 // COLLISION: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 1
 // COLLISION: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 12
+
+// When CV commits, the existing DCVP wrapper sees the result and leaves the
+// two proven CV scopes untouched.
+// AUTO-COMMIT: module attributes {{.*}}triton_ascend.cv_split_scheduling.applied = 1 : i32
+// AUTO-COMMIT-NOT: triton_ascend.dynamic_cv_pipeline.rc
+// AUTO-COMMIT-COUNT-2: scope.scope
+
+// Invalid unroll factor three rejects CV before mutation.  DCVP then runs on
+// the original module and succeeds, producing its own two scopes without a CV
+// result or fallback error code.
+// AUTO-FALLBACK: module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">}
+// AUTO-FALLBACK-NOT: triton_ascend.cv_split_scheduling.applied
+// AUTO-FALLBACK-NOT: triton_ascend.dynamic_cv_pipeline.rc
+// AUTO-FALLBACK-COUNT-2: scope.scope

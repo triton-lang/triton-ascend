@@ -172,7 +172,14 @@ def get_compile_options(variant, unroll_factor=4):
             "enable_cv_split_scheduling": True,
             "cv_split_unroll_factor": unroll_factor,
         }
-    raise ValueError(f"variant must be baseline|dcvp|cvsplit, got {variant!r}")
+    if variant == "auto":
+        return {
+            "enable_dynamic_cv_pipeline": True,
+            "enable_cv_split_scheduling": True,
+            "cv_split_unroll_factor": unroll_factor,
+        }
+    raise ValueError(
+        f"variant must be baseline|dcvp|cvsplit|auto, got {variant!r}")
 
 
 def run_attention(q, k, v, sm_scale, use_cvsplit=False, variant=None):
@@ -225,9 +232,9 @@ def check_accuracy(name, out, ref, atol=0.05, rtol=0.05):
 
 def main():
     variant = os.environ.get("FA_VARIANT", "cvsplit").lower()
-    if variant not in ("cvsplit", "dcvp", "baseline"):
+    if variant not in ("cvsplit", "dcvp", "baseline", "auto"):
         raise ValueError(
-            f"FA_VARIANT must be cvsplit|dcvp|baseline, got {variant!r}")
+            f"FA_VARIANT must be cvsplit|dcvp|baseline|auto, got {variant!r}")
 
     torch.manual_seed(42)
     q_cpu = torch.empty(B, H, N, D, dtype=torch.float16).normal_(mean=0.0, std=0.5)
@@ -260,6 +267,7 @@ def main():
     use_cvsplit = variant == "cvsplit"
     names = {
         "cvsplit": "CVSPLIT (our pass)",
+        "auto": "CVSPLIT TRY WITH DYNAMIC CV FALLBACK",
         "dcvp": "DYNAMIC CV PIPELINE",
         "baseline": "PLAIN BASELINE (both CV pipelines disabled)",
     }

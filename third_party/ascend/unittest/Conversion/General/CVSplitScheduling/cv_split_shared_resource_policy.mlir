@@ -1,5 +1,6 @@
 // RUN: sed 's/inter_core_buf_count = 2/inter_core_buf_count = 1/' %S/cv_split_scheduling_fa.mlir | triton-opt "--cv_split_scheduling=compile-on-910-95=true unroll-factor=4" | FileCheck %s --check-prefix=DEPTH1
 // RUN: sed 's/inter_core_buf_count = 2/inter_core_buf_count = 3/' %S/cv_split_scheduling_fa.mlir | triton-opt "--cv_split_scheduling=compile-on-910-95=true unroll-factor=4" 2>/dev/null | FileCheck %s --check-prefix=REJECT
+// RUN: sed '/^  func.func @_attn_fwd/a\    hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 0' %S/cv_split_scheduling_fa.mlir | triton-opt "--cv_split_scheduling=compile-on-910-95=true unroll-factor=4" | FileCheck %s --check-prefix=COLLISION
 //
 // This contract proves that CV split consumes DynamicCVPipeline's canonical
 // inter-core buffer-count attribute.  Depth one produces one physical buffer
@@ -17,3 +18,11 @@
 
 // REJECT-NOT: scope.scope
 // REJECT: scf.for {{.*}} step %c32_i32
+
+// The shared FlagIdManager must see an existing flag zero and allocate the CV
+// schedule above it.  This is a collision-avoidance contract, not merely a
+// check that CV split happens to emit a familiar sequence on an empty module.
+// COLLISION: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 0
+// COLLISION: scope.scope
+// COLLISION: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 1
+// COLLISION: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 12

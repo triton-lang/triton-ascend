@@ -69,6 +69,16 @@ def triton_deinterleave_static_pair(q_ptr, out_ptr, second_offset: tl.constexpr,
 
 
 @triton.jit
+def triton_interleave_load_runtime_bias(q_ptr, out_ptr, bias, head_dim_half: tl.constexpr):
+    d_indices = tl.program_id(0) + tl.arange(0, head_dim_half)
+    q_base = q_ptr + bias
+    q_real = tl.load(q_base + d_indices * 2)
+    q_imag = tl.load(q_base + d_indices * 2 + 1)
+    tl.store(out_ptr + d_indices, q_real)
+    tl.store(out_ptr + d_indices + head_dim_half, -q_imag)
+
+
+@triton.jit
 def triton_interleave_load_with_mask(q_ptr, k_ptr, head_dim_half: tl.constexpr, bias: tl.constexpr,
                                      numel: tl.constexpr):
     d_indices = tl.program_id(0) + tl.arange(0, head_dim_half)
@@ -124,6 +134,19 @@ def test_static_deinterleave_pair_selection(second_offset, expect_deinterleave):
 
     assert torch.allclose(out.cpu(), expected)
     assert ("tensor.extract_slice" in kernel.asm["ttadapter"]) == expect_deinterleave
+
+
+def test_interleave_runtime_bias_uses_deinterleave():
+    head_dim_half = 16
+    bias = 64
+    q = torch.randn((bias + head_dim_half * 2, ), dtype=torch.float32).npu()
+    out = torch.empty((head_dim_half * 2, ), dtype=torch.float32).npu()
+
+    kernel = triton_interleave_load_runtime_bias[(1, )](q, out, bias, head_dim_half)
+
+    expected = torch.cat((q[bias::2][:head_dim_half], -q[bias + 1::2][:head_dim_half]))
+    assert torch.allclose(out, expected)
+    assert kernel.asm["ttadapter"].count("tensor.extract_slice") == 2
 
 
 @pytest.mark.parametrize('para_type,data_type,head_dim_half,bias,numel', [

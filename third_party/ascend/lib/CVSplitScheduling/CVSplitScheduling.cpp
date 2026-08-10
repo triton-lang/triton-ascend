@@ -27,6 +27,7 @@
 #include "ascend/include/CVSplitScheduling/ScopeSeparation.h"
 #include "ascend/include/CVSplitScheduling/UnfusePVMatmuls.h"
 #include "ascend/include/CVSplitScheduling/UnrollOrigin.h"
+#include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/CVSplitScheduling/classifyAllOps.h"
 
 #include "bishengir/Dialect/HACC/IR/HACC.h"
@@ -769,8 +770,18 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
 
         // Stage 8: Insert cross-scope transfers (BEFORE scope separation)
         LLVM_DEBUG(llvm::dbgs() << "[cv-split] === Stage 8: cross-scope transfers ===\n");
-        FailureOr<cv_split::CrossScopeTransferInfo> transferInfo =
-            cv_split::insertCrossScopeTransfers(loop, classification, transferPhaseEnds);
+        auto moduleOp = funcOp->getParentOfType<ModuleOp>();
+        BufferCountManager bufferCountManager(moduleOp, /*initializeDefaults=*/false);
+        int interCoreBufferDepth = bufferCountManager
+                                       .getConfiguredBufferCount(BufferCountManager::DepType::InterCore)
+                                       .value_or(2);
+        if (interCoreBufferDepth < 1 || interCoreBufferDepth > 2) {
+            funcOp.emitError() << "CVSplitScheduling supports inter-core buffer depth 1 or 2, got "
+                               << interCoreBufferDepth;
+            return failure();
+        }
+        FailureOr<cv_split::CrossScopeTransferInfo> transferInfo = cv_split::insertCrossScopeTransfers(
+            loop, classification, transferPhaseEnds, static_cast<unsigned>(interCoreBufferDepth));
         if (failed(transferInfo)) {
             return failure();
         }

@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index cab58801f..406ed4634 100644
+index c9620e3f4c56188514337756484a93be97b5c5b8..c38a42c9b7a42e2a5c06936a98bb2f831d480f9c 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -15,13 +15,22 @@ include(CTest)
@@ -105,18 +105,21 @@ index cab58801f..406ed4634 100644
  add_subdirectory(test)
  
 diff --git a/bin/CMakeLists.txt b/bin/CMakeLists.txt
-index cc0b4fa15..9d8955c46 100644
+index cc0b4fa15..82f52f87e 100644
 --- a/bin/CMakeLists.txt
 +++ b/bin/CMakeLists.txt
-@@ -1,11 +1,35 @@
+@@ -1,11 +1,38 @@
  get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
  
 +include_directories(
++    ${PROJECT_SOURCE_DIR}/third_party/ascend/include
 +    ${PROJECT_SOURCE_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
 +    ${PROJECT_BINARY_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
 +  )
 +
  add_llvm_executable(triton-opt triton-opt.cpp PARTIAL_SOURCES_INTENDED)
++target_include_directories(triton-opt PRIVATE
++  "${PROJECT_SOURCE_DIR}/third_party/ascend/include")
  
  # TODO: what's this?
  llvm_update_compile_flags(triton-opt)
@@ -144,7 +147,7 @@ index cc0b4fa15..9d8955c46 100644
    # tests
    TritonTestAnalysis
    TritonTestDialect
-@@ -27,6 +51,25 @@ mlir_check_all_link_libraries(triton-reduce)
+@@ -27,6 +54,25 @@ mlir_check_all_link_libraries(triton-reduce)
  llvm_update_compile_flags(triton-reduce)
  target_link_libraries(triton-reduce PRIVATE
    ${triton_libs}
@@ -170,7 +173,7 @@ index cc0b4fa15..9d8955c46 100644
    # tests
    TritonTestAnalysis
    TritonTestDialect
-@@ -47,6 +90,25 @@ add_llvm_executable(triton-lsp triton-lsp.cpp PARTIAL_SOURCES_INTENDED)
+@@ -47,6 +93,25 @@ add_llvm_executable(triton-lsp triton-lsp.cpp PARTIAL_SOURCES_INTENDED)
  llvm_update_compile_flags(triton-lsp)
  target_link_libraries(triton-lsp PRIVATE
    ${triton_libs}
@@ -196,7 +199,7 @@ index cc0b4fa15..9d8955c46 100644
    # tests
    TritonTestAnalysis
    TritonTestDialect
-@@ -86,6 +148,26 @@ export_executable_symbols_for_plugins(triton-llvm-opt)
+@@ -86,6 +151,26 @@ export_executable_symbols_for_plugins(triton-llvm-opt)
  add_llvm_executable(triton-tensor-layout triton-tensor-layout.cpp PARTIAL_SOURCES_INTENDED)
  target_link_libraries(triton-tensor-layout PRIVATE
    ${triton_libs}
@@ -224,10 +227,10 @@ index cc0b4fa15..9d8955c46 100644
    TritonTestDialect
    TritonTestProton
 diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
-index 48049f026..e96284bc2 100644
+index 48049f02682fdf932d14692fc45bcfd20a81fda6..24f48ecfb0771be39f579318409994e07d361a06 100644
 --- a/bin/RegisterTritonDialects.h
 +++ b/bin/RegisterTritonDialects.h
-@@ -1,6 +1,34 @@
+@@ -1,6 +1,35 @@
  #pragma once
 +#include "ascend/include/AutoBlockify/Passes.h"
 +#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
@@ -238,6 +241,7 @@ index 48049f026..e96284bc2 100644
 +#include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
 +#include "ascend/include/DynamicCVPipeline/Passes.h"
 +#include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
++#include "ascend/include/DynamicCVPipeline/SeparateMemoryFromComputePass.h"
 +#include "ascend/include/DynamicCVPipeline/SplitDataflow/RefineArgsBlockId.h"
 +#include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
 +#include "ascend/include/TritonControlFlowOpt/Passes.h"
@@ -262,7 +266,7 @@ index 48049f026..e96284bc2 100644
  #include "nvidia/include/Dialect/NVGPU/IR/Dialect.h"
  #include "nvidia/include/Dialect/NVWS/IR/Dialect.h"
  #include "proton/Dialect/include/Conversion/ProtonGPUToLLVM/Passes.h"
-@@ -85,6 +113,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -85,6 +114,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::registerConvertTritonGPUToLLVMPass();
    mlir::triton::registerConvertNVGPUToLLVMPass();
    mlir::triton::registerAllocateSharedMemoryNvPass();
@@ -282,7 +286,7 @@ index 48049f026..e96284bc2 100644
    mlir::registerLLVMDIScope();
    mlir::LLVM::registerInlinerInterface(registry);
    mlir::NVVM::registerInlinerInterface(registry);
-@@ -136,16 +177,37 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -136,16 +178,38 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::proton::gpu::registerScheduleBufferStorePass();
    mlir::triton::proton::gpu::registerAddSchedBarriersPass();
  
@@ -299,6 +303,7 @@ index 48049f026..e96284bc2 100644
 +  mlir::triton::registerPlanComputeBlockPasses();
 +  mlir::triton::registerOpClassifierPass();
 +  mlir::triton::registerRefineArgsBlockIdPasses();
++  mlir::triton::registerSeparateMemoryFromComputePasses();
 +
    registry.insert<
        mlir::triton::TritonDialect, mlir::cf::ControlFlowDialect,
@@ -323,7 +328,7 @@ index 48049f026..e96284bc2 100644
 +      mlir::func::FuncDialect>();
  }
 diff --git a/bin/triton-opt.cpp b/bin/triton-opt.cpp
-index 2d2570771..91ed8b79a 100644
+index 2d2570771ab41070521b5cc22ebcf79c58380dbe..91ed8b79ae9a084f83be17c36a44a710743ff376 100644
 --- a/bin/triton-opt.cpp
 +++ b/bin/triton-opt.cpp
 @@ -1,4 +1,5 @@
@@ -343,7 +348,7 @@ index 2d2570771..91ed8b79a 100644
        argc, argv, "Triton (GPU) optimizer driver\n", registry));
  }
 diff --git a/include/triton/Dialect/Triton/IR/TritonAttrDefs.td b/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
-index 5a76a1d7b..4114df60c 100644
+index 5a76a1d7b15ff981cf804a9271c518de65c76c86..4114df60ce5582979f48d24a750bd4fc058ceec1 100644
 --- a/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
 +++ b/include/triton/Dialect/Triton/IR/TritonAttrDefs.td
 @@ -130,8 +130,9 @@ def TT_InputPrecisionAttr : I32EnumAttr<
@@ -359,7 +364,7 @@ index 5a76a1d7b..4114df60c 100644
    let cppNamespace = "::mlir::triton";
  }
 diff --git a/lib/Dialect/Triton/IR/Traits.cpp b/lib/Dialect/Triton/IR/Traits.cpp
-index 1b72c1376..ee5defb6e 100644
+index 1b72c13762c0b831d7bfb5e450c5ab0082212a04..ee5defb6e939db8da2c834eb7416c8b9ba3792eb 100644
 --- a/lib/Dialect/Triton/IR/Traits.cpp
 +++ b/lib/Dialect/Triton/IR/Traits.cpp
 @@ -126,10 +126,11 @@ LogicalResult OpTrait::impl::verifyTensorSize(Operation *op) {
@@ -395,7 +400,7 @@ index 1b72c1376..ee5defb6e 100644
    }
    return success();
 diff --git a/python/src/ir.cc b/python/src/ir.cc
-index 5af645bc0..5ffe71866 100644
+index 5af645bc0..011f82d60 100644
 --- a/python/src/ir.cc
 +++ b/python/src/ir.cc
 @@ -332,6 +332,7 @@ void init_triton_ir(py::module &&m) {
@@ -406,8 +411,27 @@ index 5af645bc0..5ffe71866 100644
        .value("BF16x3", InputPrecision::BF16x3)
        .value("BF16x6", InputPrecision::BF16x6)
        .export_values();
+@@ -1790,6 +1791,18 @@ void init_triton_ir(py::module &&m) {
+                                                 llvm::StringRef(message));
+              self.create<AssertOp>(condition, messageAttr);
+            })
++      // This is intentionally separate from create_assert: user-authored
++      // device_assert operations must not acquire the internal provenance
++      // marker merely because they happen to use an overflow-like message.
++      .def("create_auto_overflow_assert",
++           [](TritonOpBuilder &self, Value &condition,
++              const std::string &message) -> void {
++             auto messageAttr = StringAttr::get(self.getBuilder().getContext(),
++                                                llvm::StringRef(message));
++             auto assertOp = self.create<AssertOp>(condition, messageAttr);
++             assertOp->setAttr("tt.auto_overflow_assert",
++                               self.getBuilder().getUnitAttr());
++           })
+       .def("create_assume",
+            [](TritonOpBuilder &self, Value &condition) {
+              self.create<LLVM::AssumeOp>(condition);
 diff --git a/python/triton/_utils.py b/python/triton/_utils.py
-index a3cf0ff0c..28ba11c92 100644
+index a3cf0ff0cbdb6047e9379cbc38cc44e5c2b52a62..28ba11c9295fb90e30dd57d3177f6a12bf0e575d 100644
 --- a/python/triton/_utils.py
 +++ b/python/triton/_utils.py
 @@ -50,8 +50,9 @@ def validate_block_shape(shape: List[int]):
@@ -423,7 +447,7 @@ index a3cf0ff0c..28ba11c92 100644
  
      if numel > TRITON_MAX_TENSOR_NUMEL:
 diff --git a/python/triton/compiler/code_generator.py b/python/triton/compiler/code_generator.py
-index c572f81e3..6e06b8477 100644
+index c572f81e3e13fe7f3f6f2dd72542c3ef737e581d..218703f73ebe94a6c08c3610974d50f5d122e382 100644
 --- a/python/triton/compiler/code_generator.py
 +++ b/python/triton/compiler/code_generator.py
 @@ -10,8 +10,16 @@ from dataclasses import dataclass
@@ -602,7 +626,7 @@ index c572f81e3..6e06b8477 100644
  
  
 diff --git a/python/triton/compiler/compiler.py b/python/triton/compiler/compiler.py
-index d4872a463..51347e144 100644
+index d4872a463589d2cfdf302a546b8c2e021fb1a7c3..51347e14446b027674fe4d040e7eb526da1ad551 100644
 --- a/python/triton/compiler/compiler.py
 +++ b/python/triton/compiler/compiler.py
 @@ -10,6 +10,7 @@ from ..runtime.autotuner import OutOfResources
@@ -666,7 +690,7 @@ index d4872a463..51347e144 100644
          if self.metadata.num_warps * warp_size > self.n_max_threads:
              raise_(OutOfResources(self.metadata.num_warps * warp_size, self.n_max_threads, "threads"))
 diff --git a/python/triton/compiler/errors.py b/python/triton/compiler/errors.py
-index 39e6c4dfb..c72ca65c2 100644
+index 39e6c4dfb04dd2067d50ce7c79f762c5e7e2d5b8..c72ca65c24713400eef8bc40cf02fac1b9521c3b 100644
 --- a/python/triton/compiler/errors.py
 +++ b/python/triton/compiler/errors.py
 @@ -49,3 +49,24 @@ class CompileTimeAssertionFailure(CompilationError):
@@ -695,7 +719,7 @@ index 39e6c4dfb..c72ca65c2 100644
 +    def format_line_delim(self, keyword):
 +        return f"///------------------{keyword}------------------\n"
 diff --git a/python/triton/language/math.py b/python/triton/language/math.py
-index 7d1d65b21..13ff1cef0 100644
+index 582cd876cb13374a0d31e8c783e4fea1a1003c4a..41325dfa796d27257f3e8b754e793c0c93f13798 100644
 --- a/python/triton/language/math.py
 +++ b/python/triton/language/math.py
 @@ -21,8 +21,12 @@ def _check_dtype(dtypes: List[str]) -> T:
@@ -714,9 +738,18 @@ index 7d1d65b21..13ff1cef0 100644
  
          return check
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
-index 52192cf3e..8a2934e07 100644
+index 52192cf3e..241ba3378 100644
 --- a/python/triton/language/semantic.py
 +++ b/python/triton/language/semantic.py
+@@ -219,7 +219,7 @@ class TritonSemantic(Generic[TensorTy]):
+         min_value = self.scalar_constant(min_value, tl.int64)
+         cond = self.and_(self.less_equal(ret, max_value), self.greater_equal(ret, min_value))
+         msg = f"int{lhs_sca_ty.int_bitwidth} overflow detected for operation {binary_op.__name__}"
+-        self.device_assert(cond, msg, None)
++        self.device_assert(cond, msg, None, auto_overflow=True)
+ 
+     def add(self, input: TensorTy | numbers.Number, other: TensorTy | numbers.Number,
+             sanitize_overflow: bool) -> TensorTy:
 @@ -344,6 +344,9 @@ class TritonSemantic(Generic[TensorTy]):
                  raise TypeError("Cannot mod " + scalar_ty.__repr__() + " by " + other_scalar_ty.__repr__() + " "
                                  "because they have different signedness;"
@@ -869,20 +902,40 @@ index 52192cf3e..8a2934e07 100644
 +            load_handle = self.builder.create_masked_load(ptr.handle, mask.handle, other.handle if other else None,
 +                                                          cache, eviction, is_volatile)
 +
-         if is_bool:
--            ret = self.cast(ret, tl.int1)
++        if is_bool:
 +            load_handle.set_attr("was_bool_to_int8", self.builder.get_bool_attr(True))
 +
 +        ret = self.tensor(load_handle, dst_ty)
 +        # Do not cast back to int1 when is_bool=true. We directly use the int8 tensor given by tl.load
-+        if is_bool:
+         if is_bool:
+-            ret = self.cast(ret, tl.int1)
 +            ret.was_bool_to_int8 = True
 +
          return ret
  
      def load(self, ptr: TensorTy, mask: Optional[TensorTy], other: Optional[TensorTy], boundary_check: Tuple,
+@@ -1799,12 +1865,17 @@ class TritonSemantic(Generic[TensorTy]):
+         is_signed = [arg.dtype.is_int_signed() for arg in args]
+         return self.tensor(self.builder.create_print(prefix, hex, new_args, is_signed), tl.void)
+ 
+-    def device_assert(self, cond: TensorTy, msg: str, mask: Optional[TensorTy]) -> TensorTy:
++    def device_assert(self, cond: TensorTy, msg: str, mask: Optional[TensorTy],
++                      auto_overflow: bool = False) -> TensorTy:
+         if not self.builder.options.debug:
+             return
+         if mask is not None:
+             cond = self.or_(cond, self.not_(mask))
+-        return self.tensor(self.builder.create_assert(cond.handle, msg), tl.void)
++        if auto_overflow:
++            self.builder.create_auto_overflow_assert(cond.handle, msg)
++        else:
++            self.builder.create_assert(cond.handle, msg)
++        return self.tensor(None, tl.void)
+ 
+     def assume(self, cond) -> TensorTy:
+         return self.tensor(self.builder.create_assume(cond.handle), tl.void)
 diff --git a/python/triton/language/standard.py b/python/triton/language/standard.py
-index b1dd327bb..c49330d40 100644
+index b1dd327bb9947c0c70786912c70863db6c8a905f..c49330d40d24757bd29c5eaffeee875fbba24be5 100644
 --- a/python/triton/language/standard.py
 +++ b/python/triton/language/standard.py
 @@ -170,11 +170,17 @@ def _elementwise_max(a, b):
@@ -917,7 +970,7 @@ index b1dd327bb..c49330d40 100644
  
  @core._tensor_member_fn
 diff --git a/python/triton/runtime/interpreter.py b/python/triton/runtime/interpreter.py
-index cd871cb2e..988d2a7f9 100644
+index cd871cb2e..82eb6960d 100644
 --- a/python/triton/runtime/interpreter.py
 +++ b/python/triton/runtime/interpreter.py
 @@ -22,6 +22,25 @@ from .._C.libtriton import ir as _ir
@@ -997,7 +1050,17 @@ index cd871cb2e..988d2a7f9 100644
          self.codegen_fns["min_dot_size"] = lambda lhsType, rhsType: (1, 1, 1)
  
      def set_grid_idx(self, x, y, z):
-@@ -1190,6 +1220,11 @@ def _patch_lang(fn):
+@@ -755,6 +785,9 @@ class InterpreterBuilder:
+         # Interpreter's device_assert function has a different format than Triton's device_assert
+         assert condition, f"{message}"
+ 
++    def create_auto_overflow_assert(self, condition, message):
++        self.create_assert(condition, message)
++
+     def create_assume(self, condition):
+         assert condition, "Assume failed"
+ 
+@@ -1190,6 +1223,11 @@ def _patch_lang(fn):
          _patch_lang_tensor(lang.tensor, scope)
          _patch_lang_core(lang, scope)
      _patch_builtin(tl.core.tensor_descriptor_base, interpreter_builder, scope)
@@ -1009,7 +1072,7 @@ index cd871cb2e..988d2a7f9 100644
      return scope
  
  
-@@ -1237,7 +1272,12 @@ def _implicit_cvt(arg):
+@@ -1237,7 +1275,12 @@ def _implicit_cvt(arg):
      return arg
  
  
@@ -1023,7 +1086,7 @@ index cd871cb2e..988d2a7f9 100644
  interpreter_semantic = TritonSemantic(interpreter_builder)
  
  
-@@ -1350,11 +1390,14 @@ class GridExecutor:
+@@ -1350,11 +1393,14 @@ class GridExecutor:
              grid = grid + (1, ) * (3 - len(grid))
              interpreter_builder.set_grid_dim(*grid)
              try:
@@ -1044,7 +1107,7 @@ index cd871cb2e..988d2a7f9 100644
                  if triton.knobs.compilation.front_end_debugging:
                      raise
 diff --git a/python/triton/runtime/jit.py b/python/triton/runtime/jit.py
-index 0f506818f..1e07a267f 100644
+index 0f506818f9d9790961fbd519f7a6067ca1e9c303..1e07a267fa69c89533f36391fe56bdcbe16043d8 100644
 --- a/python/triton/runtime/jit.py
 +++ b/python/triton/runtime/jit.py
 @@ -398,14 +398,15 @@ def create_function_from_signature(sig, kparams, backend):

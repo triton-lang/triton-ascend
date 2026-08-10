@@ -1,4 +1,5 @@
 import importlib.util
+from itertools import product
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -34,6 +35,10 @@ def _make_metadata():
         debug=False,
         coalesce_factor=1,
         coalesce_axis=-1,
+        coalesce_grid_ceil_div=False,
+        has_auto_blockify_blacklist_op=False,
+        row_coalescing_applied=False,
+        enable_auto_blockify=None,
     )
 
 
@@ -95,6 +100,114 @@ def test_make_launcher_shrinks_coalesced_grid_for_both_launch_paths(
     )
 
     assert src.count("gridY = gridY / 16;") == 2
+    assert src.count("ChunkCoalescing: grid[1] not divisible by coalesce_factor 16") == 2
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_make_launcher_uses_ceil_div_for_row_coalescing(
+    _mock_backend_func_patch,
+    _mock_arch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    metadata = _make_metadata()
+    metadata.coalesce_factor = 4
+    metadata.coalesce_axis = 2
+    metadata.coalesce_grid_ceil_div = True
+
+    src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32", 1: "*fp32"},
+        metadata=metadata,
+    )
+
+    assert src.count("gridZ = (gridZ + 4 - 1) / 4;") == 2
+    assert "ChunkCoalescing: grid[2] not divisible" not in src
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_make_launcher_enables_91095_simt_for_sls_mixed_parallel_mode(
+    _mock_backend_func_patch,
+    _mock_arch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    """SLS-created indirect ops keep the original mixed-SIMT launch path."""
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    metadata = _make_metadata()
+    metadata.compile_on_910_95 = True
+    metadata.parallel_mode = "mix_simd_simt"
+    metadata.shared_mem_dynamic_size = 221184
+
+    src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32", 1: "*fp32"},
+        metadata=metadata,
+    )
+
+    # Both the ABI and local generated launch paths use the 910_95 SIMT launch
+    # API only when the T2L result advertises SIMT in parallel_mode.
+    assert src.count("rtKernelLaunchWithFlagV2") == 2
+    assert src.count("rtArgsEx_t argsInfo") == 2
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_make_launcher_block_cap_uses_only_env_and_blacklist(
+    _mock_backend_func_patch,
+    _mock_arch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    mock_npu_utils,
+):
+    """The launcher cap is the 895 E && !B contract, independent of Row."""
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    cap = "blockNum = std::min(blockNum, (uint32_t)40);"
+
+    # E = TRITON_ALL_BLOCKS_PARALLEL, B = blacklist, R = Row coalescing.
+    # The Row result must not leak into the launcher predicate: only E && !B
+    # controls whether both generated launch paths contain the physical-core
+    # cap.  (O is intentionally absent here; it is a compiler argv option.)
+    for env_enabled, blacklisted, row_applied in product((False, True), (False, True), (False, True)):
+        metadata = _make_metadata()
+        metadata.row_coalescing_applied = row_applied
+        metadata.has_auto_blockify_blacklist_op = blacklisted
+        with patch.object(
+                driver,
+                "_is_auto_map_parallel_blocks_enabled",
+                return_value=env_enabled,
+        ):
+            src = driver.make_launcher(
+                constants={},
+                signature={0: "*fp32", 1: "*fp32"},
+                metadata=metadata,
+            )
+        case = f"E={env_enabled}, B={blacklisted}, R={row_applied}"
+        expected_per_launch_path = 1 if env_enabled and not blacklisted else 0
+        c_abi_launch, cpp_launch = src.split("static void _launch(", maxsplit=1)
+        assert c_abi_launch.count(cap) == expected_per_launch_path, case
+        assert cpp_launch.count(cap) == expected_per_launch_path, case
 
 
 @patch("importlib.util.module_from_spec")

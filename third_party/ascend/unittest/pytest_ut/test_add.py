@@ -26,6 +26,7 @@ import pytest
 import test_common
 
 
+# Reference implementation used to validate the Triton kernel output below.
 def torch_pointwise(x0, x1):
     res = x0 + x1
     return res

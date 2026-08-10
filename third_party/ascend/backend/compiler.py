@@ -1240,6 +1240,10 @@ class AscendBackend(BaseBackend):
     def supports_target(target: GPUTarget):
         return target.backend == "npu"
 
+    @staticmethod
+    def use_alignment_specialization(options: dict) -> bool:
+        return options.get("compile_mode") == "simt_only" or bool(options.get("force_simt_only", False))
+
     def __init__(self, target: GPUTarget) -> None:
         super().__init__(target)
         if target.backend == "npu":

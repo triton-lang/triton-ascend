@@ -27,6 +27,7 @@ import test_common
 
 
 def torch_pointwise(x0):
+    # Absolute value is an identity for unsigned tensor elements.
     if x0.dtype in [torch.uint8, torch.uint16, torch.uint32, torch.uint64]:
         return x0
     res = torch.abs(x0)

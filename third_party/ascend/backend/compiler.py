@@ -200,6 +200,20 @@ def _configure_cv_split_metadata(metadata):
     metadata["disable_auto_inject_block_sync"] = True
 
 
+def _select_cv_pipeline_policy(metadata, compile_on_910_95):
+    """Return the two ordered pipeline attempts for this compilation.
+
+    When both are requested, CV split runs first and the DCVP wrapper observes
+    its commit-result attribute.  DCVP runs only when CV split kept the input
+    unchanged.  Keeping this helper pure makes default/off/auto policy directly
+    unit-testable without an NPU runtime.
+    """
+    try_cv_split = bool(
+        metadata.get("enable_cv_split_scheduling") and compile_on_910_95)
+    try_dynamic_cv = bool(metadata.get("enable_dynamic_cv_pipeline"))
+    return try_cv_split, try_dynamic_cv
+
+
 def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
     # use triton_adapter to lower Triton-MLIR to linalg
     # Get Triton-MLIR as string
@@ -279,10 +293,10 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         # bishengir-opt, so the loss happens in code generation.
         if compile_on_910_95:
             ascend.passes.ttir.add_merge_concat_load_buffer(pm)
-        if metadata["enable_dynamic_cv_pipeline"]:
-            metadata["set_workspace_multibuffer"] = 0
-            metadata["enable_mixed_cv"] = True
-            metadata["disable_auto_inject_block_sync"] = True
+        try_cv_split, try_dynamic_cv = _select_cv_pipeline_policy(
+            metadata, compile_on_910_95)
+
+        if try_dynamic_cv:
             ascend.passes.ttir.set_enable_cube_block_merge(metadata["enable_cube_block_merge"])
             ascend.passes.ttir.set_enable_ub_refine_opt(mod, metadata["enable_ub_refine_opt"])
 
@@ -290,10 +304,12 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             # AddMultiBufferInnerScope pass reads the module-level
             # `ssbuffer.insertionOptimization` attribute (set here) at run time.
             ascend.passes.ttir.set_enable_buffer_insert_optimization(mod, metadata["enable_buffer_insert_optimization"])
-            ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
-        elif metadata.get("enable_cv_split_scheduling") and compile_on_910_95:
-            _configure_cv_split_metadata(metadata)
+
+        if try_cv_split:
             ascend.passes.ttir.add_cv_split_scheduling(pm, compile_on_910_95, metadata["cv_split_unroll_factor"])
+
+        if try_dynamic_cv:
+            ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
 
         if _enable_msdebug():
             ascend.passes.ttir.add_normalize_debug_line_locations(pm)
@@ -325,6 +341,14 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             print(f"[DEBUG] cmd list: {shlex.join(cmd)}")
 
         pm.run(mod, 'ttir_to_linalg')
+        cv_split_applied = _get_then_remove_rc(
+            mod, "triton_ascend.cv_split_scheduling.applied") == 1
+        if cv_split_applied:
+            _configure_cv_split_metadata(metadata)
+        elif try_dynamic_cv:
+            metadata["set_workspace_multibuffer"] = 0
+            metadata["enable_mixed_cv"] = True
+            metadata["disable_auto_inject_block_sync"] = True
         _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)

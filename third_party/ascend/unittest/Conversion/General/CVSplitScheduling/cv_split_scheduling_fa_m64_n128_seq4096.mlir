@@ -3,7 +3,7 @@
 // Size-variant regression for the FA CV split path.
 // BM=64 BN=128 N=4096 unroll-factor=4 pass output.
 
-// CHECK: module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">, hivm.disable_auto_tile_and_bind_subblock} {
+// CHECK: module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">, hivm.disable_auto_tile_and_bind_subblock, ssbuffer.inter_core_buf_count = 2 : i32} {
 // CHECK-LABEL: func.func @_attn_fwd
 
 // Invariant accumulator templates are materialized once, outside the physical
@@ -95,7 +95,7 @@
 // CHECK: scope.return
 // CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>, noinline}
 
-module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">, ssbuffer.inter_core_buf_count = 2 : i32} {
   func.func @_attn_fwd(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg5: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg6: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg7: i32, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd"} {
     %c64 = arith.constant 64 : index
     %cst = arith.constant 1.000000e+00 : f32

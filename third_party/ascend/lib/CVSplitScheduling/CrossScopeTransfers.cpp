@@ -23,6 +23,7 @@
 #include "ascend/include/CVSplitScheduling/CrossScopeTransfers.h"
 #include "ascend/include/CVSplitScheduling/HardwareConstants.h"
 #include "ascend/include/CVSplitScheduling/UnrollOrigin.h"
+#include "ascend/include/DynamicCVPipeline/Common/FlagIdManager.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -201,7 +202,7 @@ static memref::AllocOp createAnnotatedAlloc(OpBuilder &builder, Location loc, Me
     return allocOp;
 }
 
-// Depth-2 ping/pong buffer pool. Transfers that share an identical buffer type
+// Configured ping/pong buffer pool. Transfers that share an identical buffer type
 // (e.g. all the unrolled qk_ub fixpipe targets, or all the P L1 packs) reuse a
 // rotating set of `depth` physical allocations instead of one fresh buffer per
 // unrolled stage. This mirrors the manual kernel's qk_ub_0/1, pv_ub_0/1,
@@ -215,7 +216,9 @@ struct BufferPool {
     DenseMap<int64_t, DenseMap<Type, unsigned>> useCount;
     // Cached 2D ND view for each physical L1 buffer.
     llvm::DenseMap<Operation *, Value> ndView;
-    unsigned depth = 2;
+    explicit BufferPool(unsigned depth) : depth(depth) {}
+
+    unsigned depth;
 
     // Allocation to use for the next transfer of `allocType`: a new physical
     // buffer only while the rotating set is smaller than `depth`, otherwise the
@@ -475,7 +478,8 @@ static VectorToCubeTransferChain emitVectorToCubeTransfer(const TransferEmitCont
 
 FailureOr<CrossScopeTransferInfo>
 insertCrossScopeTransfers(scf::ForOp loop, const DenseMap<Operation *, EngineType> &classification,
-                          const DenseMap<Operation *, Operation *> &transferPhaseEnds)
+                          const DenseMap<Operation *, Operation *> &transferPhaseEnds,
+                          unsigned interCoreBufferDepth)
 {
 
     MLIRContext *ctx = loop.getContext();
@@ -631,14 +635,23 @@ insertCrossScopeTransfers(scf::ForOp loop, const DenseMap<Operation *, EngineTyp
     // order and destination-core wait order contain the same transfers in the
     // same order. Reject the transformation if the resulting allocation still
     // requires more than 15 IDs.
-    int nextSyncFlagId = 0;
+    auto module = loop->getParentOfType<ModuleOp>();
+    FlagIdManager flagIdManager(module, /*firstAvailableId=*/0);
 
-    // Depth-2 ping/pong pool shared by all transfers: same-typed buffers (all
-    // unrolled qk_ub, all pv_ub, all P L1) rotate over 2 physical allocations.
-    BufferPool bufferPool;
+    // The shared DCVP buffer-count policy controls the pool depth. Same-typed
+    // buffers (all unrolled qk_ub, all pv_ub, all P L1) rotate over that many
+    // physical allocations; absence of a frontend policy defaults to two.
+    BufferPool bufferPool(interCoreBufferDepth);
     SmallVector<VectorToCubeTransferChain> vectorToCubeChains;
 
     for (auto &xfer : transfers) {
+        int syncFlagId = flagIdManager.acquireId(xfer.producer);
+        if (syncFlagId > static_cast<int>(kMaxTransferFlagId)) {
+            loop.emitError() << "CVSplitScheduling exhausted synchronization flags; "
+                             << "next ID is " << syncFlagId << " but IDs 0.." << kMaxTransferFlagId
+                             << " are available";
+            return failure();
+        }
         auto tensorType = cast<RankedTensorType>(xfer.value.getType());
         if (tensorType.getRank() != 2) {
             loop.emitError("cross-scope transfers require rank-2 tensors");
@@ -646,13 +659,12 @@ insertCrossScopeTransfers(scf::ForOp loop, const DenseMap<Operation *, EngineTyp
         }
 
         if (xfer.direction == CrossScopeTransfer::CUBE_TO_VECTOR)
-            emitCubeToVectorTransfer(ec, xfer, tensorType, nextSyncFlagId, bufferPool);
+            emitCubeToVectorTransfer(ec, xfer, tensorType, syncFlagId, bufferPool);
         else
-            vectorToCubeChains.push_back(emitVectorToCubeTransfer(ec, xfer, tensorType, nextSyncFlagId, bufferPool));
-        ++nextSyncFlagId;
+            vectorToCubeChains.push_back(emitVectorToCubeTransfer(ec, xfer, tensorType, syncFlagId, bufferPool));
     }
 
-    LLVM_DEBUG(llvm::dbgs() << "[cv-split] Inserted " << transfers.size() << " transfers with " << nextSyncFlagId
+    LLVM_DEBUG(llvm::dbgs() << "[cv-split] Inserted " << transfers.size() << " transfers with " << transfers.size()
                             << " sync flags\n");
     return CrossScopeTransferInfo {*blockM, std::move(vectorToCubeChains)};
 }

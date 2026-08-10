@@ -66,7 +66,8 @@ struct CrossScopeTransferInfo {
 /// before the referenced operations are erased or reordered.
 FailureOr<CrossScopeTransferInfo>
 insertCrossScopeTransfers(scf::ForOp loop, const Classification &classification,
-                          const llvm::DenseMap<Operation *, Operation *> &transferPhaseEnds);
+                          const llvm::DenseMap<Operation *, Operation *> &transferPhaseEnds,
+                          unsigned interCoreBufferDepth);
 
 } // namespace mlir::triton::cv_split
 

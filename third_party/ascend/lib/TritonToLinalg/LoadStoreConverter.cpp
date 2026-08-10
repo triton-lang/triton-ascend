@@ -227,6 +227,101 @@ void LoadConverter::fillTensorWithOtherForMaskScenario(
 LoadConverter::LoadConverter(MLIRContext *context)
     : OpConversionPattern<triton::LoadOp>(context) {}
 
+// Masked load whose `other` is a non-scalar tensor.
+// ---------------------------------------------------------------------------
+// Case 1: other = mask   (Python: tl.load(ptr, mask=mask, other=mask))
+//
+// DSL:
+//   mask = offs < N
+//   x = tl.load(in_ptr + offs, mask=mask, other=mask)
+//   tl.store(out_ptr + offs, x, mask=mask)
+//
+// TTIR (fp — uitofp; int — extui/extsi):
+//   %mask  = arith.cmpi slt, %offs, %N : tensor<Nx i1>
+//   %other = arith.uitofp %mask …            // or arith.extui for i8
+//   %x     = tt.load %ptr, %mask, %other
+//
+// Lowering (linalg):
+//   %alloc = memref.alloc()
+//   memref.copy %src_view, %dst_view         // active SRC only
+//   %loaded = bufferization.to_tensor %alloc
+//   %zeros  = linalg.fill 0                  // [OTHER] cast(mask)→0 on pad
+//   %x = arith.select %mask, %loaded, %zeros
+// ---------------------------------------------------------------------------
+// Case 2: other = prior tensor
+//   (Python: other = tl.load(fill_ptr+offs); x = tl.load(ptr, mask=mask,
+//   other=other); tl.store(out, x)  # full store — pad must stay OTHER)
+//
+// TTIR:
+//   %other = tt.load %fill_ptr
+//   %x     = tt.load %ptr, %mask, %other
+//
+// Lowering:
+//   %other_t = bufferization.to_tensor …    // prior load
+//   %alloc = memref.alloc()
+//   memref.copy …                           // active SRC
+//   %loaded = bufferization.to_tensor %alloc
+//   %x = arith.select %mask, %loaded, %other_t
+// ---------------------------------------------------------------------------
+LogicalResult LoadConverter::replaceMaskedLoadWithTensorOther(
+    triton::LoadOp op, Value alloc, bool mayImplicitTransposeWithLastAxis,
+    ConversionPatternRewriter &rewriter) const {
+  auto loc = op.getLoc();
+  auto tensorType = cast<RankedTensorType>(op.getResult().getType());
+  Value mask = op.getMask();
+  Value tensorOther = op.getOther();
+  if (!mask || !tensorOther) {
+    return rewriter.notifyMatchFailure(
+        op,
+        "replaceMaskedLoadWithTensorOther requires non-null mask and other");
+  }
+
+  Value loadedTensor = rewriter.create<bufferization::ToTensorOp>(
+      loc, tensorType, alloc, true, true);
+  propagateWasBoolToInt8Attr(op.getOperation(), loadedTensor.getDefiningOp(),
+                             rewriter);
+  if (mayImplicitTransposeWithLastAxis) {
+    auto markOp = rewriter.create<annotation::MarkOp>(loc, loadedTensor);
+    markOp->setAttr(MayImplicitTransposeWithLastAxisTAG,
+                    UnitAttr::get(rewriter.getContext()));
+  }
+
+  // Case 1: cast(mask) → inactive is 0. Cover fp (uitofp/sitofp) and int
+  // (extui/extsi). Case 2: keep prior tensor as-is.
+  Value otherVal = tensorOther;
+  if (Value remappedOther = rewriter.getRemappedValue(tensorOther))
+    otherVal = remappedOther;
+
+  bool otherIsZeroOnInactive = false;
+  if (auto uitofp = tensorOther.getDefiningOp<arith::UIToFPOp>())
+    otherIsZeroOnInactive = (uitofp.getIn() == mask);
+  else if (auto sitofp = tensorOther.getDefiningOp<arith::SIToFPOp>())
+    otherIsZeroOnInactive = (sitofp.getIn() == mask);
+  else if (auto extui = tensorOther.getDefiningOp<arith::ExtUIOp>())
+    otherIsZeroOnInactive = (extui.getIn() == mask);
+  else if (auto extsi = tensorOther.getDefiningOp<arith::ExtSIOp>())
+    otherIsZeroOnInactive = (extsi.getIn() == mask);
+
+  if (otherIsZeroOnInactive) {
+    auto empty = rewriter.create<tensor::EmptyOp>(loc, tensorType.getShape(),
+                                                  tensorType.getElementType());
+    Value zero = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getZeroAttr(tensorType.getElementType()));
+    otherVal =
+        rewriter
+            .create<linalg::FillOp>(loc, ValueRange{zero}, ValueRange{empty})
+            .getResult(0);
+  }
+
+  if (Value remappedMask = rewriter.getRemappedValue(mask))
+    mask = remappedMask;
+
+  Value result =
+      rewriter.create<arith::SelectOp>(loc, mask, loadedTensor, otherVal);
+  rewriter.replaceOp(op, result);
+  return success();
+}
+
 LogicalResult
 LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                                ConversionPatternRewriter &rewriter) const {
@@ -477,15 +572,20 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
         op, "can not lower uncontinuout masked loads");
   }
 
+  Value tensorOtherBase;
   if (other) {
     auto scalarOther =
         mlir::ConverterUtils::getScalarValue(other, loc, rewriter);
-    assert(
-        scalarOther &&
-        "other value used in masked load produced by unsupported instruction!");
-
-    fillTensorWithOtherForMaskScenario(scalarOther, allocOp, mstate.dims,
-                                       rewriter);
+    if (scalarOther) {
+      fillTensorWithOtherForMaskScenario(scalarOther, allocOp, mstate.dims,
+                                         rewriter);
+    } else if (isa<RankedTensorType>(other.getType())) {
+      tensorOtherBase = other;
+    } else {
+      return rewriter.notifyMatchFailure(
+          op, "other value used in masked load produced by unsupported "
+              "instruction");
+    }
   }
 
   // To enable deinterleave optimization with mask load, mask state along last
@@ -494,7 +594,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   //
   // The basis is that last dimension range comparison would generate
   // unaccepted discontinuous mask.
-  if (mstate.getRank() == memRefType.getRank() &&
+  if (!tensorOtherBase && mstate.getRank() == memRefType.getRank() &&
       isConstantIntValue(mstate.offsets.back(), 0) &&
       isConstantIntValue(mstate.dims.back(), memRefType.getShape().back())) {
     auto [ptrStrides, ptrOffsets] = memRefType.getStridesAndOffset();
@@ -540,8 +640,15 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                       UnitAttr::get(rewriter.getContext()));
     }
   }
-  return this->toTensorAndReplace(
-      op, tensorType, allocOp, mayImplicitTransposeWithLastAxis, loc, rewriter);
+
+  if (!tensorOtherBase) {
+    return this->toTensorAndReplace(op, tensorType, allocOp,
+                                    mayImplicitTransposeWithLastAxis, loc,
+                                    rewriter);
+  }
+
+  return replaceMaskedLoadWithTensorOther(
+      op, allocOp, mayImplicitTransposeWithLastAxis, rewriter);
 }
 
 AtomicRMWConverter::AtomicRMWConverter(MLIRContext *context)

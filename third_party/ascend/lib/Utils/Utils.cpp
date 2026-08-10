@@ -261,12 +261,8 @@ SmallVector<utils::IteratorType> getNParallelLoopsAttrs(unsigned n) {
 
 Value getScalarValue(Value operand, Location loc,
                      ConversionPatternRewriter &rewriter) {
-  // Peel splat / dense-splat / (s|u)itofp / truncf / select(pad, nan, zero)
-  // chains looking for a true scalar. Descriptor-load lowering emits
-  //   other = arith.select %padding, dense<nan>, dense<0>
-  // which must collapse to a scalar select so masked load can fill UB lanes.
-  // Returns nullptr when the value is a non-splat tensor so callers can fall
-  // back to a tensor-other path.
+  // Peel splat / cast / select chains down to a scalar; nullptr if non-splat
+  // tensor.
   SmallVector<Operation *> ops;
   auto reconstructScalarValue = [&](Value src) {
     for (auto op = ops.rbegin(); op != ops.rend(); ++op) {

@@ -1715,13 +1715,13 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
     }
 
     // extern libdevice ops -> hivm.hir.custom
-    static constexpr llvm::StringLiteral simtLibdeviceSuffixes[] = {
+    static constexpr llvm::StringLiteral libdeviceSuffixes[] = {
         "_fp32", "_fp16", "_bf16", "_i32", "_i64", "_u32", "_u64"};
-    bool isSimtLibdeviceOp =
-        llvm::any_of(simtLibdeviceSuffixes, [&](llvm::StringRef suffix) {
+    bool isLibdeviceOp =
+        llvm::any_of(libdeviceSuffixes, [&](llvm::StringRef suffix) {
           return op.getSymbol().ends_with(suffix);
         });
-    if (isSimtLibdeviceOp) {
+    if (isLibdeviceOp) {
       auto originalTensorType = isDstScalar
                                     ? RankedTensorType::get({1}, dstElemTy)
                                     : cast<RankedTensorType>(dstTy);
@@ -1829,6 +1829,7 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
       customOp->setAttr("symbol",
                         mlir::StringAttr::get(customOp->getContext(), sym));
       customOp->setAttr("arg_attrs", argAttrsArray);
+      customOp.setInlineMode(hivm::InlineMode::AlwaysInline);
 
       // Restore the result's shape and element type
       Value finalResult = customOp.getResults().front();

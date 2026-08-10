@@ -4,6 +4,7 @@
 #include "ascend/include/DynamicCVPipeline/Passes.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
 #include "ascend/include/TritonToLinalg/Passes.h"
+#include "ascend/include/CVSplitScheduling/Passes.h"
 #include "ascend/include/TritonControlFlowOpt/Passes.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
@@ -79,6 +80,7 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
   // mlir::triton::registerConvertNVGPUToLLVMPass();
   // mlir::triton::registerDecomposeUnsupportedNVIDIAConversions();
   mlir::triton::registerTritonToLinalgPasses();
+  mlir::triton::registerCVSplitSchedulingPasses();
   mlir::triton::registerTritonControlFlowOptPasses();
   mlir::triton::registerDiscreteMaskAccessConversion();
   mlir::triton::registerTritonToStructuredPasses();

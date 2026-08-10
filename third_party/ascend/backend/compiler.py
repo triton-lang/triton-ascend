@@ -140,6 +140,11 @@ def make_ttir(mod, metadata, opt):
     return mod
 
 
+def _configure_cv_split_metadata(metadata):
+    """Keep CV-split's explicit scopes/syncs without overriding user policy."""
+    metadata["disable_auto_inject_block_sync"] = True
+
+
 def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
     # use triton_adapter to lower Triton-MLIR to linalg
     # Get Triton-MLIR as string
@@ -231,6 +236,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             # `ssbuffer.insertionOptimization` attribute (set here) at run time.
             ascend.passes.ttir.set_enable_buffer_insert_optimization(mod, metadata["enable_buffer_insert_optimization"])
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
+        elif metadata.get("enable_cv_split_scheduling") and compile_on_910_95:
+            _configure_cv_split_metadata(metadata)
+            ascend.passes.ttir.add_cv_split_scheduling(pm, compile_on_910_95, metadata["cv_split_unroll_factor"])
 
         _intra_val = metadata.get("intra_cache_num")
         if _intra_val is not None:
@@ -992,6 +1000,8 @@ class NPUOptions:
     enable_ub_refine_opt: bool = False
     # Multi-cache insertion optimization: avoid redundant tensor compute in the middle of an `if`.
     enable_buffer_insert_optimization: bool = False
+    enable_cv_split_scheduling: bool = False
+    cv_split_unroll_factor: int = 2
     hfusion_enable_multiple_consumer_fusion: bool = False
     enable_cross_if_fusion: bool = False
     has_auto_blockify_blacklist_op: Optional[bool] = None

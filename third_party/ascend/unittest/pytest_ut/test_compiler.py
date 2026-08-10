@@ -3,7 +3,28 @@ import os
 import sys
 from unittest.mock import MagicMock
 
+import pytest
 import triton.backends.ascend.compiler as compiler
+
+pytestmark = pytest.mark.backend("cpu")
+
+
+def test_cv_split_preserves_user_pipeline_policy():
+    metadata = {
+        "multibuffer": True,
+        "set_workspace_multibuffer": 2,
+        "has_auto_blockify_blacklist_op": False,
+        "enable_mixed_cv": False,
+        "disable_auto_inject_block_sync": False,
+    }
+
+    compiler._configure_cv_split_metadata(metadata)
+
+    assert metadata["multibuffer"] is True
+    assert metadata["set_workspace_multibuffer"] == 2
+    assert metadata["has_auto_blockify_blacklist_op"] is False
+    assert metadata["enable_mixed_cv"] is False
+    assert metadata["disable_auto_inject_block_sync"] is True
 
 
 def _make_torch_npu_mock(cfg_dir):

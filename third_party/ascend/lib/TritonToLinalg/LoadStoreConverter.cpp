@@ -322,6 +322,42 @@ LogicalResult LoadConverter::replaceMaskedLoadWithTensorOther(
   return success();
 }
 
+static bool skipNonComplementaryStaticDeinterleave(triton::LoadOp lhs) {
+  if (lhs->hasAttr("skip_deinterleave"))
+    return true;
+  auto lhsAddPtr = lhs.getPtr().getDefiningOp<triton::AddPtrOp>();
+  if (!lhsAddPtr)
+    return false;
+  auto lhsOffset = getConstantIntValue(lhsAddPtr.getOffset());
+  if (!lhsOffset)
+    return false;
+  auto pairBase = [](int64_t offset) {
+    int64_t lane = offset % 2;
+    return offset - (lane < 0 ? lane + 2 : lane);
+  };
+
+  for (triton::LoadOp rhs : lhs->getBlock()->getOps<triton::LoadOp>()) {
+    if (lhs == rhs || rhs.getMask() || rhs.getOther() ||
+        lhs.getResult().getType() != rhs.getResult().getType())
+      continue;
+    auto rhsAddPtr = rhs.getPtr().getDefiningOp<triton::AddPtrOp>();
+    if (!rhsAddPtr || lhsAddPtr.getPtr() != rhsAddPtr.getPtr())
+      continue;
+    auto rhsOffset = getConstantIntValue(rhsAddPtr.getOffset());
+    if (!rhsOffset)
+      continue;
+    if (lhsOffset.value() != rhsOffset.value() &&
+        pairBase(lhsOffset.value()) == pairBase(rhsOffset.value()))
+      continue;
+    // The first load can be rewritten before its sibling; tag both now.
+    auto skipAttr = UnitAttr::get(lhs->getContext());
+    lhs->setAttr("skip_deinterleave", skipAttr);
+    rhs->setAttr("skip_deinterleave", skipAttr);
+    return true;
+  }
+  return false;
+}
+
 LogicalResult
 LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                                ConversionPatternRewriter &rewriter) const {
@@ -544,6 +580,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
       // If last dimension stride equals 2, try deinterleave optimization.
       auto [ptrStrides, ptrOffsets] = memRefType.getStridesAndOffset();
       if (ptrStrides.back() == 2 && (memRefShape.back() % 2 == 0) &&
+          !skipNonComplementaryStaticDeinterleave(op) &&
           mlir::triton::DeinterleaveStatusOptimization(op, adaptor, rewriter)
               .succeeded()) {
         return success();

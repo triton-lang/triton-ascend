@@ -408,7 +408,11 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
 
   Value allocOp;
   Value allocOpTmp;
-  if (op->hasAttr(ConverterUtils::discreteAttrName)) {
+  auto parentLoop = dyn_cast<scf::ForOp>(op->getParentOp());
+  bool hasValidDiscreteLoop = op->hasAttr(ConverterUtils::discreteAttrName) &&
+                              parentLoop &&
+                              parentLoop->hasAttr("ExtractedLoadOrStore");
+  if (hasValidDiscreteLoop) {
     Operation *loop = op->getParentOp();
     int extractedLoopCount = 1;
     for (auto parentOp = loop->getParentOp();

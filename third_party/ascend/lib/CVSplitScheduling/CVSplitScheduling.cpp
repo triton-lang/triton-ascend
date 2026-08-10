@@ -24,7 +24,6 @@
 #include "ascend/include/CVSplitScheduling/CrossScopeTransfers.h"
 #include "ascend/include/CVSplitScheduling/DependencyScheduler.h"
 #include "ascend/include/CVSplitScheduling/PreCheck.h"
-#include "ascend/include/CVSplitScheduling/QStaging.h"
 #include "ascend/include/CVSplitScheduling/ScopeSeparation.h"
 #include "ascend/include/CVSplitScheduling/UnfusePVMatmuls.h"
 #include "ascend/include/CVSplitScheduling/UnrollOrigin.h"

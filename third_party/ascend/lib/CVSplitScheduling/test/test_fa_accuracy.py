@@ -1,4 +1,4 @@
-"""FA accuracy test: CVSplit vs Baseline vs PyTorch reference.
+"""FA accuracy test: CVSplit/DCVP/plain baseline vs PyTorch reference.
 Config: B=1, H=1, N=8192, D=64, BLOCK_M=32, BLOCK_N=32 (large-context inner-loop scale)
   Inner loop: N_CTX/BLOCK_N = 8192/32 = 256 iterations (64 after unroll by 4)
   ISOLATED: only ACTIVE_BLOCKS=1 query tile launched -> 1 AI core (its 2 veccores),
@@ -149,7 +149,33 @@ def _attn_fwd(Q, K, V, sm_scale: tl.constexpr, M, Out, stride_qz: tl.constexpr, 
         tl.store(O_block_ptr, acc.to(Out.type.element_ty))
 
 
-def run_attention(q, k, v, sm_scale, use_cvsplit=False):
+def get_compile_options(variant, unroll_factor=4):
+    """Return an explicit compiler policy for a fair three-way comparison.
+
+    A5 enables DynamicCVPipeline by default, so an empty kwargs dictionary is
+    not a plain baseline.  Keep both feature switches explicit here to make it
+    impossible for a default change to silently alter the comparison.
+    """
+    if variant == "baseline":
+        return {
+            "enable_dynamic_cv_pipeline": False,
+            "enable_cv_split_scheduling": False,
+        }
+    if variant == "dcvp":
+        return {
+            "enable_dynamic_cv_pipeline": True,
+            "enable_cv_split_scheduling": False,
+        }
+    if variant == "cvsplit":
+        return {
+            "enable_dynamic_cv_pipeline": False,
+            "enable_cv_split_scheduling": True,
+            "cv_split_unroll_factor": unroll_factor,
+        }
+    raise ValueError(f"variant must be baseline|dcvp|cvsplit, got {variant!r}")
+
+
+def run_attention(q, k, v, sm_scale, use_cvsplit=False, variant=None):
     o = torch.empty_like(q)
     NUM_BLOCKS_M = triton.cdiv(q.shape[2], BLOCK_M)
     # Cap the number of query tiles actually launched (isolate the inner loop).
@@ -157,11 +183,10 @@ def run_attention(q, k, v, sm_scale, use_cvsplit=False):
     grid = (CORE_NUM, )
     M = torch.empty((q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32)
 
-    kwargs = dict(
-        enable_dynamic_cv_pipeline=False,
-        enable_cv_split_scheduling=use_cvsplit,
-        cv_split_unroll_factor=int(os.environ.get("CV_SPLIT_UNROLL", "4")),
-    ) if use_cvsplit else {}
+    if variant is None:
+        variant = "cvsplit" if use_cvsplit else "baseline"
+    kwargs = get_compile_options(
+        variant, int(os.environ.get("CV_SPLIT_UNROLL", "4")))
 
     _attn_fwd[grid](q, k, v, sm_scale, M, o, q.stride(0),
                     q.stride(1), q.stride(2), q.stride(3), k.stride(0), k.stride(1), k.stride(2), k.stride(3),
@@ -200,8 +225,9 @@ def check_accuracy(name, out, ref, atol=0.05, rtol=0.05):
 
 def main():
     variant = os.environ.get("FA_VARIANT", "cvsplit").lower()
-    if variant not in ("cvsplit", "baseline"):
-        raise ValueError(f"FA_VARIANT must be cvsplit|baseline, got {variant!r}")
+    if variant not in ("cvsplit", "dcvp", "baseline"):
+        raise ValueError(
+            f"FA_VARIANT must be cvsplit|dcvp|baseline, got {variant!r}")
 
     torch.manual_seed(42)
     q_cpu = torch.empty(B, H, N, D, dtype=torch.float16).normal_(mean=0.0, std=0.5)
@@ -232,13 +258,20 @@ def main():
     # Run baseline and CV-split in separate invocations so each has isolated
     # profiling and accuracy state.
     use_cvsplit = variant == "cvsplit"
-    name = "CVSPLIT (our pass)" if use_cvsplit else "BASELINE (no CVSplit)"
+    names = {
+        "cvsplit": "CVSPLIT (our pass)",
+        "dcvp": "DYNAMIC CV PIPELINE",
+        "baseline": "PLAIN BASELINE (both CV pipelines disabled)",
+    }
+    name = names[variant]
 
     print("\n" + "=" * 60)
     print(f" Running {name}...  [FA_VARIANT={variant}]")
     print("=" * 60)
     try:
-        out = run_attention(q_npu, k_npu, v_npu, sm_scale, use_cvsplit=use_cvsplit)
+        out = run_attention(
+            q_npu, k_npu, v_npu, sm_scale,
+            use_cvsplit=use_cvsplit, variant=variant)
         ok = check_accuracy(variant.upper(), out[:, :, :ref_rows, :], ref_out)
     except Exception as exc:
         print(f"  {variant.upper()} FAILED: {exc}")

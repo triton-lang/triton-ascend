@@ -60,6 +60,15 @@ def triton_interleave_load(q_ptr, k_ptr, head_dim_half: tl.constexpr, bias: tl.c
 
 
 @triton.jit
+def triton_deinterleave_static_pair(q_ptr, out_ptr, second_offset: tl.constexpr, head_dim_half: tl.constexpr):
+    d_indices = tl.program_id(0) + tl.arange(0, head_dim_half)
+    first = tl.load(q_ptr + d_indices * 2 + 64)
+    second = tl.load(q_ptr + d_indices * 2 + second_offset)
+    tl.store(out_ptr + d_indices, first)
+    tl.store(out_ptr + d_indices + head_dim_half, second)
+
+
+@triton.jit
 def triton_interleave_load_with_mask(q_ptr, k_ptr, head_dim_half: tl.constexpr, bias: tl.constexpr,
                                      numel: tl.constexpr):
     d_indices = tl.program_id(0) + tl.arange(0, head_dim_half)
@@ -101,6 +110,20 @@ def test_interleave(para_type, data_type, head_dim_half, bias):
     triton_interleave_load[(1, )](q, k, head_dim_half, bias)
     k_ref = torch_interleave_load(q, k_ref, head_dim_half, bias)
     assert torch.allclose(k, k_ref)
+
+
+@pytest.mark.parametrize("second_offset,expect_deinterleave", [(65, True), (66, False)])
+def test_static_deinterleave_pair_selection(second_offset, expect_deinterleave):
+    head_dim_half = 16
+    q_cpu = torch.randn((64 + head_dim_half * 2 + 2, ), dtype=torch.float32)
+    expected = torch.cat((q_cpu[64::2][:head_dim_half], q_cpu[second_offset::2][:head_dim_half]))
+    q = q_cpu.npu()
+    out = torch.empty((head_dim_half * 2, ), dtype=torch.float32).npu()
+
+    kernel = triton_deinterleave_static_pair[(1, )](q, out, second_offset, head_dim_half)
+
+    assert torch.allclose(out.cpu(), expected)
+    assert ("tensor.extract_slice" in kernel.asm["ttadapter"]) == expect_deinterleave
 
 
 @pytest.mark.parametrize('para_type,data_type,head_dim_half,bias,numel', [

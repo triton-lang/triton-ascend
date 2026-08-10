@@ -3,7 +3,7 @@
 // Size-variant regression for the FA CV split path.
 // BM=64 BN=128 N=4096 unroll-factor=4 pass output.
 
-// CHECK: module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">, hivm.disable_auto_tile_and_bind_subblock, ssbuffer.inter_core_buf_count = 2 : i32} {
+// CHECK: module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">, hivm.disable_auto_tile_and_bind_subblock, ssbuffer.inter_core_buf_count = 2 : i32, triton_ascend.cv_split_scheduling.applied = 1 : i32} {
 // CHECK-LABEL: func.func @_attn_fwd
 
 // Invariant accumulator templates are materialized once, outside the physical

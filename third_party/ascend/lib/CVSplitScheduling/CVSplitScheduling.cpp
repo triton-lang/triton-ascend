@@ -22,6 +22,7 @@
 
 #include "ascend/include/CVSplitScheduling/CVSplitScheduling.h"
 #include "ascend/include/CVSplitScheduling/CrossScopeTransfers.h"
+#include "ascend/include/CVSplitScheduling/Attributes.h"
 #include "ascend/include/CVSplitScheduling/DependencyScheduler.h"
 #include "ascend/include/CVSplitScheduling/PreCheck.h"
 #include "ascend/include/CVSplitScheduling/ScopeSeparation.h"
@@ -657,6 +658,9 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
             return;
         }
 
+        transformedModule->getOperation()->setAttr(
+            cv_split::kAppliedAttr,
+            IntegerAttr::get(IntegerType::get(moduleOp.getContext(), 32), 1));
         commitModuleClone(moduleOp, *transformedModule);
 
         LLVM_DEBUG(llvm::dbgs() << "\n[cv-split] ============================\n"

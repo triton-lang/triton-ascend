@@ -27,6 +27,26 @@ def test_cv_split_preserves_user_pipeline_policy():
     assert metadata["disable_auto_inject_block_sync"] is True
 
 
+@pytest.mark.parametrize(
+    "dynamic, cv_split, target_is_a5, expected",
+    [
+        (False, False, True, (False, False)),
+        (True, False, True, (False, True)),
+        (False, True, True, (True, False)),
+        # Auto mode: attempt CV split, then let DCVP observe the commit result
+        # and run only if CV split kept the original module.
+        (True, True, True, (True, True)),
+        (True, True, False, (False, True)),
+    ],
+)
+def test_cv_pipeline_selection(dynamic, cv_split, target_is_a5, expected):
+    metadata = {
+        "enable_dynamic_cv_pipeline": dynamic,
+        "enable_cv_split_scheduling": cv_split,
+    }
+    assert compiler._select_cv_pipeline_policy(metadata, target_is_a5) == expected
+
+
 def _make_torch_npu_mock(cfg_dir):
     """Create a mock torch_npu module whose __file__ is in cfg_dir."""
     mock = MagicMock()

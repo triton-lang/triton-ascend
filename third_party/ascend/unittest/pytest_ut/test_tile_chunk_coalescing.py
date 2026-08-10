@@ -19,30 +19,38 @@
 # THE SOFTWARE.
 
 import pytest
+import torch
+import triton
+import triton.language as tl
+
+import test_common
 
 
-@pytest.fixture(scope="module", autouse=True)
-def assign_npu(request, worker_id):
-    marker = request.node.get_closest_marker("backend")
-    if marker:
-        backend = marker.args[0]
-    else:
-        backend = "torch_npu"
-    if backend == "torch_npu":
-        import torch
-        npu_count = torch.npu.device_count()
-        if worker_id == "master":
-            npu_id = 0
-        else:
-            idx = int(worker_id.replace("gw", ""))
-            npu_id = idx % npu_count
-        torch.npu.set_device(npu_id)
-    elif backend == "mindspore":
-        import mindspore
-        npu_count = mindspore.device_context.ascend.device_count()
-        if worker_id == "master":
-            npu_id = 0
-        else:
-            idx = int(worker_id.replace("gw", ""))
-            npu_id = idx % npu_count
-        mindspore.set_device("Ascend", npu_id)
+@triton.jit
+def kernel_tile_chunk_coalescing_axis1(src, dst, N: tl.constexpr, BLOCK: tl.constexpr):
+    batch = tl.program_id(0)
+    tile = tl.program_id(1)
+    offsets = tile * BLOCK + tl.arange(0, BLOCK)
+    mask = offsets < N
+    base = batch * N
+    values = tl.load(src + base + offsets, mask=mask, other=0.0)
+    tl.store(dst + base + offsets, values, mask=mask)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float16"])
+def test_tile_chunk_coalescing_grid_axis1_e2e(dtype):
+    batch = 2
+    block = 16
+    num_tiles = 32
+    n = block * num_tiles
+    src = test_common.generate_tensor((batch, n), dtype).npu()
+    dst = torch.empty_like(src)
+
+    kernel_tile_chunk_coalescing_axis1[(batch, num_tiles)](
+        src,
+        dst,
+        n,
+        BLOCK=block,
+    )
+
+    assert torch.equal(dst.cpu(), src.cpu())

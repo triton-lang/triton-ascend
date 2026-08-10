@@ -228,30 +228,24 @@ void DataFlowInfo::exportToJSON(llvm::raw_ostream &os) const {
 // DataFlowGraph
 //===----------------------------------------------------------------------===//
 
-DataFlowGraph::~DataFlowGraph() {
-  if (!memorySSABuilder)
-    return;
-  cfg.traverse([](BasicBlock &block) {
-    for (const auto &instruction : block.getInstructions())
-      instruction->getMemorySSAInfo().clear();
-  });
-  aliasAnalysis.endDataFlowGraphBorrow();
-}
-
 void DataFlowGraph::build() {
-  if (memorySSABuilder)
-    return;
   LLVM_DEBUG(llvm::dbgs() << "=== Starting Data Flow Graph Build ===" << "\n");
 
-  auto builder =
-      std::make_unique<MemorySSABuilder>(cfg, aliasAnalysis, dataFlowInfo);
-  if (!aliasAnalysis.beginDataFlowGraphBorrow())
-    return;
-  memorySSABuilder = std::move(builder);
+  // 步骤1: 构建Alias分析
+  aliasAnalysis = std::make_unique<AliasAnalysis>();
+  aliasAnalysis->analyzePointerAliases(cfg);
+  // aliasAnalysis->print(llvm::outs());
+
+  LLVM_DEBUG(llvm::dbgs() << "Alias analysis complete" << "\n");
+
+  // 步骤2: 构建Memory SSA
+  memorySSABuilder =
+      std::make_unique<MemorySSABuilder>(cfg, *aliasAnalysis, dataFlowInfo);
   memorySSABuilder->build();
 
   LLVM_DEBUG(llvm::dbgs() << "Memory SSA build complete" << "\n");
 
+  // 步骤3: 构建def-use图
   buildDefUseGraph();
 
   LLVM_DEBUG(llvm::dbgs() << "=== Data Flow Graph Build Complete ===" << "\n");

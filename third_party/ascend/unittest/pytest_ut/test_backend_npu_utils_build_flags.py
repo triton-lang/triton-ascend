@@ -3,10 +3,6 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
-pytestmark = pytest.mark.backend("none")
-
 DEFAULT_UTILS_PATH = (Path(__file__).resolve().parents[2] / "backend" / "utils.py")
 
 
@@ -63,22 +59,3 @@ def _assert_npu_utils_uses_special_flags(utils, monkeypatch, tmp_path):
 def test_npu_utils_build_uses_special_flags(monkeypatch, tmp_path):
     utils = _load_utils_module()
     _assert_npu_utils_uses_special_flags(utils, monkeypatch, tmp_path)
-
-
-@pytest.mark.parametrize(
-    ("arch", "raw_ub_kib", "graph_budget_bytes"),
-    (
-        ("Ascend910B1", 192, 96 * 1024),
-        ("Ascend910_9581", 256, 128 * 1024),
-        ("Ascend950A3", 256, 128 * 1024),
-        ("", 0, 0),
-        ("unknown-arch", 0, 0),
-        (None, 0, 0),
-    ),
-)
-def test_graph_ub_budget_resolves_from_explicit_arch(arch, raw_ub_kib, graph_budget_bytes):
-    """The compiler-side resolver must not depend on the active NPU device."""
-    utils = _load_utils_module()
-
-    assert utils.ub_size_in_kbytes_for_arch(arch) == raw_ub_kib
-    assert utils.graph_ub_budget_bytes_for_arch(arch) == graph_budget_bytes

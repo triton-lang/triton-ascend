@@ -23,7 +23,6 @@
 #ifndef TRITONNPU_UTILS_UTILS_H
 #define TRITONNPU_UTILS_UTILS_H
 
-#include "TritonMemoryAccess/OpFoldResultUtils.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -220,8 +219,43 @@ inline constexpr unsigned kDotAccIntWidth = 32;
 
 class OpBuilder;
 
+enum class IntegerExtensionKind {
+  Signed,
+  Unsigned,
+};
+
 /// Returns true when both ranges have identical ordered type signatures.
 bool haveSameTypes(TypeRange lhs, TypeRange rhs);
+
+FailureOr<Value>
+castIntegerLike(OpBuilder &builder, Location loc, Value value, Type targetType,
+                IntegerExtensionKind extension = IntegerExtensionKind::Signed);
+
+/// Without an explicit result type, preserve equal types and widen signless
+/// integers. Mixed index/integer operands require an explicit result type.
+OpFoldResult addOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
+                             const Location &loc, OpBuilder &b,
+                             Type resultType = {});
+
+OpFoldResult subOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
+                             const Location &loc, OpBuilder &b);
+
+/// Uses the same result-type rules as addOpFoldResult.
+OpFoldResult mulOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
+                             const Location &loc, OpBuilder &b,
+                             Type resultType = {});
+
+OpFoldResult divOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
+                             const Location &loc, OpBuilder &b);
+
+OpFoldResult remOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
+                             const Location &loc, OpBuilder &b);
+
+OpFoldResult minOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
+                             const Location &loc, OpBuilder &b);
+
+OpFoldResult maxOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
+                             const Location &loc, OpBuilder &b);
 
 enum class ReduceWithIndexType { MAX, MIN, None };
 enum class TieBreakType { LEFT, RIGHT, None };
@@ -239,6 +273,8 @@ void addReduceWithIndexAttr(ReduceWithIndexParams params,
                             ConversionPatternRewriter &rewriter,
                             linalg::ReduceOp reduceOp);
 
+OpFoldResult getOpFoldResultOfLayoutInfo(Value value, OpBuilder &builder);
+
 enum class TypelessValue { Undefined = 0, Zero = 1, Min = 2, Max = 3 };
 
 FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue, Type,
@@ -246,6 +282,18 @@ FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue, Type,
 
 FailureOr<Value> specializeTypelessValueToConstant(TypelessValue, Type,
                                                    Location, OpBuilder &);
+
+std::optional<int64_t> getIntAttr(const OpFoldResult ofr);
+
+Value materializeValue(OpBuilder &builder, Location loc, OpFoldResult ofr);
+
+bool isZero(const OpFoldResult ofr);
+
+bool isOne(const OpFoldResult ofr);
+
+RankedTensorType getExtractSlicedType(ArrayRef<OpFoldResult> shape,
+                                      const llvm::SmallBitVector &droppedDims,
+                                      Type elemType);
 
 bool checkStructureAnnotated(Operation *op, RewriterBase &rewriter);
 

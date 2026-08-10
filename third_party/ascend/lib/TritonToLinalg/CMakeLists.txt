@@ -6,8 +6,12 @@ add_triton_library(TritonToLinalg
         TritonOpConverter.cpp
         HoistBroadcast.cpp
         BlockPtrAnalysis.cpp
+        MaskAnalysis.cpp
         UseAnalysis.cpp
         ImplicitPermute.cpp
+        StridedLoadStoreRewrite.cpp
+        StridedAxisCoalescing.cpp
+        TileChunkCoalescing.cpp
         DescriptorConverter.cpp
         MarkTensorKindPass.cpp
         DevicePrintOffsetRewrite.cpp
@@ -28,8 +32,6 @@ add_triton_library(TritonToLinalg
   TritonIR
   TritonTransforms
   TritonAnalysis
-  TritonMemoryAccessAnalysis
-  TritonToGraph
   MLIRTritonNPUUtils
   MLIRSCFTransforms
   MLIRLinalgTransforms

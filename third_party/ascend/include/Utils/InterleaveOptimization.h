@@ -22,7 +22,9 @@
 
 #pragma once
 
-#include "TritonMemoryAccess/LoadStoreMaskAnalysis.h"
+#include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
+#include "ascend/include/TritonToLinalg/MaskAnalysis.h"
+#include "ascend/include/TritonToLinalg/UseAnalysis.h"
 #include "ascend/include/Utils/Utils.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"

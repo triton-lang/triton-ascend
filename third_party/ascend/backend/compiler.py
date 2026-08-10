@@ -23,7 +23,6 @@ import functools
 import hashlib
 import glob
 import json
-from numbers import Integral
 import os
 import re
 import shlex
@@ -63,7 +62,6 @@ from triton.backends.ascend.utils import (
     _warn_auto_blockify_disabled,
     downgrade_llir,
     force_disable_ffts,
-    graph_ub_budget_bytes_for_arch,
     get_cann_version_file_hash,
     is_compile_on_910_95,
 )
@@ -98,7 +96,7 @@ def _get_then_remove_rc(mod, attr_name: str) -> int:
     return attr_value
 
 
-def _export_coalesce_metadata(mod, metadata, *, require_row_contract=False):
+def _export_coalesce_metadata(mod, metadata):
     # Tile/strided coalescing (TritonToLinalg) records the chosen coalesce factor
     # H and the grid axis it applies to as module attrs hacc.coalesce_factor /
     # hacc.coalesce_axis. In the full-TA design the *launcher* (driver.py) owns
@@ -106,27 +104,10 @@ def _export_coalesce_metadata(mod, metadata, *, require_row_contract=False):
     # no longer interprets the attrs. Read them into metadata here and strip them
     # from the module so the hacc.* attrs never reach hivmc (which rejects
     # unknown module attrs). Absent attrs -> factor 1 (no-op) / axis -1.
-    # RowCoalescing also records whether the launcher should use ceil-div when
-    # shrinking the grid, because its runtime valid-count guard handles tails.
-    # A Row result is only valid as the complete triple.  The regular T2L
-    # Axis/Chunk ABI predates ceil-div and deliberately remains compatible with
-    # a missing ceil-div attr.
     factor = _get_then_remove_rc(mod, "hacc.coalesce_factor")
     axis = _get_then_remove_rc(mod, "hacc.coalesce_axis")
-    ceil_div = _get_then_remove_rc(mod, "hacc.coalesce_grid_ceil_div")
-    has_any_contract_attr = any(value != -1 for value in (factor, axis, ceil_div))
-    valid_factor = isinstance(factor, int) and factor > 1
-    valid_axis = isinstance(axis, int) and axis in (0, 1, 2)
-    valid_ceil_div = isinstance(ceil_div, int) and ceil_div > 0
-    if has_any_contract_attr and (not valid_factor or not valid_axis):
-        raise RuntimeError("invalid hacc.coalesce launch contract")
-    if require_row_contract and has_any_contract_attr and not valid_ceil_div:
-        raise RuntimeError("RowCoalescing requires hacc.coalesce_grid_ceil_div")
-
-    metadata["coalesce_factor"] = factor if valid_factor else 1
-    metadata["coalesce_axis"] = axis if valid_axis else -1
-    metadata["coalesce_grid_ceil_div"] = valid_ceil_div
-    metadata["row_coalescing_applied"] = metadata["coalesce_factor"] > 1
+    metadata["coalesce_factor"] = factor if isinstance(factor, int) and factor > 1 else 1
+    metadata["coalesce_axis"] = axis if isinstance(axis, int) and axis >= 0 else -1
 
 
 def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
@@ -163,15 +144,6 @@ def make_ttir(mod, metadata, opt):
     passes.common.add_licm(pm)
     passes.common.add_symbol_dce(pm)
     passes.ttir.add_loop_unroll(pm)
-    if opt.enable_graph_optimize:
-        ascend.passes.ttir.add_graph_optimize(
-            pm,
-            rule_mask=opt.graph_optimize_rule_mask,
-            max_rewrites_per_function=opt.graph_optimize_max_rewrites_per_function,
-            ub_capacity_bytes=opt.graph_optimize_ub_capacity_bytes,
-            emit_remarks=opt.graph_optimize_emit_remarks,
-            force_simt_only=opt.force_simt_only,
-        )
     pm.run(mod, 'make_ttir')
     if opt.debug:
         dump_manager = get_dump_manager(metadata["hash"])
@@ -216,18 +188,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         set_workspace_multibuffer = metadata.get("set_workspace_multibuffer")
         if has_auto_blockify_blacklist_op or not auto_map_parallel_blocks_enabled:
             auto_blockify_size = 1
-
-        # Inject grid tile-count hint for ChunkCoalescing. When the kernel
-        # has no boundary mask but grid[axis] is known at compile time (e.g.
-        # from constexpr nchunks), the pass uses this to safely choose H.
-        grid_num_tiles = metadata.get("grid_num_tiles")
-        if isinstance(grid_num_tiles, int) and grid_num_tiles > 0:
-            try:
-                _builder = ascend.ir.ascendnpu_ir_builder(mod.context, opt.arch)
-                mod.set_attr("hacc.grid_num_tiles", _builder.parse_attr(f"{grid_num_tiles} : i32"))
-            except Exception:
-                pass  # graceful fallback: pass runs without hint
-
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
         if distributed is not None:
@@ -1061,11 +1021,6 @@ class NPUOptions:
     launch_cooperative_grid: bool = False
     backend_name: str = 'cann'
     instrumentation_mode: str = ""
-    enable_graph_optimize: bool = True
-    graph_optimize_rule_mask: int = 511
-    graph_optimize_max_rewrites_per_function: int = 64
-    graph_optimize_ub_capacity_bytes: Optional[int] = None
-    graph_optimize_emit_remarks: bool = False
     allow_fp8e4nv: bool = False
     auto_tile_and_bind_subblock: bool = True
     vf_merge_level: int = 0
@@ -1160,28 +1115,10 @@ class NPUOptions:
     # superblocking factor
     superblock_factor: int = 0
 
-    # ChunkCoalescing: number of tiles along the outermost grid axis.
-    # Auto-injected from static grid tuples; enables safe coalescing for
-    # unmasked kernels whose grid dims are compile-time known.
-    grid_num_tiles: int = None
-
     def __post_init__(self):
         from triton.backends.ascend import _apply_ascend_patch
 
         _apply_ascend_patch()
-        graph_ub_budget_bytes = graph_ub_budget_bytes_for_arch(self.arch)
-        requested_graph_ub_capacity_bytes = self.graph_optimize_ub_capacity_bytes
-        if requested_graph_ub_capacity_bytes is None:
-            graph_ub_capacity_bytes = graph_ub_budget_bytes
-        else:
-            if (isinstance(requested_graph_ub_capacity_bytes, bool)
-                    or not isinstance(requested_graph_ub_capacity_bytes, Integral)):
-                raise TypeError("graph_optimize_ub_capacity_bytes must be a non-negative integer or None")
-            if requested_graph_ub_capacity_bytes < 0:
-                raise ValueError("graph_optimize_ub_capacity_bytes must be non-negative")
-            graph_ub_capacity_bytes = min(int(requested_graph_ub_capacity_bytes), graph_ub_budget_bytes)
-        object.__setattr__(self, "graph_optimize_ub_capacity_bytes", graph_ub_capacity_bytes)
-
         # Parse compile_mode and set related fields
         if self.compile_mode == "simd":
             object.__setattr__(self, "parallel_mode", "simd")
@@ -1208,12 +1145,6 @@ def ttir_to_npubin(mod, metadata, opt):
     # Get Triton-MLIR as string
     ttir_code = str(mod)
     metadata = _parse_ttir_metadata(ttir_code, metadata)
-    if opt.force_simt_only:
-        # RowCoalescing is now the pure-SIMT graph rule in make_ttir().  This
-        # stage only transfers its complete launch contract to metadata before
-        # handing TTIR to pure-SIMT codegen.
-        _export_coalesce_metadata(mod, metadata, require_row_contract=True)
-        ttir_code = str(mod)
     with tempfile.TemporaryDirectory() as tmpdir:
         # prepare input
         src_path = os.path.join(tmpdir, "kernel.ttir.mlir")
@@ -1259,8 +1190,7 @@ def ttir_to_npubin(mod, metadata, opt):
             # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
             # mirroring the SIMD compile paths. driver.py's runtime block-count
             # cap keys off the same env switch, so the two stay in sync.
-            if (_is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False)
-                    and not metadata.get("row_coalescing_applied", False)):
+            if _is_auto_map_parallel_blocks_enabled():
                 _compile_option_list += ["--enable-auto-blockify-loop"]
                 if opt.superblock_factor > 0:
                     _compile_option_list += [f"--super-block-factor={opt.superblock_factor}"]

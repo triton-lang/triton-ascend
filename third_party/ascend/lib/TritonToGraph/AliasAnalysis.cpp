@@ -38,32 +38,8 @@ using namespace cfg;
 // AliasAnalysis Implementation
 //===----------------------------------------------------------------------===//
 
-bool AliasAnalysis::beginDataFlowGraphBorrow() {
-  assert(!dataFlowGraphBorrowed &&
-         "an AliasAnalysis can only be borrowed by one DataFlowGraph");
-  if (dataFlowGraphBorrowed)
-    return false;
-  dataFlowGraphBorrowed = true;
-  return true;
-}
-
-void AliasAnalysis::endDataFlowGraphBorrow() {
-  assert(dataFlowGraphBorrowed && "unbalanced DataFlowGraph alias borrow");
-  if (!dataFlowGraphBorrowed)
-    return;
-  dataFlowGraphBorrowed = false;
-}
-
 void AliasAnalysis::analyzePointerAliases(ControlFlowGraph &cfg) {
   LLVM_DEBUG(llvm::dbgs() << "=== Starting Pointer Alias Analysis ===\n");
-
-  assert(!dataFlowGraphBorrowed &&
-         "cannot rebuild aliases while a DataFlowGraph borrows them");
-  if (dataFlowGraphBorrowed)
-    return;
-  aliasMap.clear();
-  baseTensorMap.clear();
-  ownedTensorObjects.clear();
 
   // 步骤1: 识别全局内存参数
   triton::FuncOp func = cfg.getFunction();
@@ -83,11 +59,9 @@ void AliasAnalysis::analyzePointerAliases(ControlFlowGraph &cfg) {
       // 使用辅助函数提取shape和element type
       extractShapeAndElementType(argType, shape, elementType);
 
-      auto tensorOwner = std::make_unique<TensorObject>(
-          paramName, shape, argType, elementType,
-          TensorObject::TensorKind::GLOBAL_MEMORY);
-      TensorObject *tensor = tensorOwner.get();
-      ownedTensorObjects.push_back(std::move(tensorOwner));
+      TensorObject *tensor =
+          new TensorObject(paramName, shape, argType, elementType,
+                           TensorObject::TensorKind::GLOBAL_MEMORY);
 
       // 记录alias关系 [param, param, tensor]
       addAlias(arg, arg, tensor);

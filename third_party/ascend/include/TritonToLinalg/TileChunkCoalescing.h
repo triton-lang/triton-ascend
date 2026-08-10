@@ -23,15 +23,39 @@
 #ifndef TRITON_ASCEND_TILE_CHUNK_COALESCING_H
 #define TRITON_ASCEND_TILE_CHUNK_COALESCING_H
 
-#include "TritonToGraph/LegacyMemoryAccess/ChunkCoalescing.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 
+// TileChunkCoalescing: fix the "tiny per-tile DMA" pathology of kernels that
+// over-decompose a contiguous problem axis onto the (outermost) launch grid.
+//
+// Pattern (the "phenomenon", not a specific kernel): the *last* program-id axis
+// `a` is used purely as an independent tile index --
+//     blk      = program_id(a) * T          (T = constexpr tile length)
+//     offs     = blk + arange(0, T)
+//     mask     = offs < BOUND                (BOUND = constexpr problem length)
+//     ... load(offs) -> elementwise / intra-tile scan|reduce -> store(offs) ...
+// with (1) `program_id(a)` flowing only into address / mask integer arithmetic
+// (never into tensor *data*), (2) no cross-tile dependency (every scan/reduce
+// runs along an intra-tile axis), and (3) tiles laid out contiguously so that H
+// adjacent tiles form one contiguous block.
+//
+// When T is small the per-tile load/store are tiny DMAs (e.g. 16xf32 = 64B),
+// wasting HBM bandwidth on transfer overhead. This pass folds H adjacent tiles
+// into a single program by prepending an H lane to the whole load->store
+// subgraph: the T-element loads/stores become one contiguous H*T block, scans
+// and reduces keep their (now +1) intra-tile axis, and `program_id(a)` is
+// replaced by the lane vector `program_id(a)*H + arange(0,H)`. H is chosen so
+// the merged block is >= kMinContigBytes and the lifted footprint stays within
+// the UB budget, and so that H divides the tile count.
+//
+// The pass records `hacc.coalesce_factor = H` and `hacc.coalesce_axis = a` on
+// the module; the TA compiler exports them to launch metadata, and the host
+// launcher divides grid[a] by H. The pass is a no-op (bails) whenever the
+// pattern or the safety conditions above do not hold, including unmasked
+// kernels whose runtime tile count cannot be proven from IR.
 namespace TileChunkCoalescing {
 
-// Compatibility shim for clients of the pre-895 API. The implementation is
-// the 895 ChunkCoalescing logic owned by TritonToGraph.
-inline void rewriteTileChunkCoalesce(mlir::ModuleOp moduleOp) {
-  ChunkCoalescing::rewriteChunkCoalesce(moduleOp);
-}
+void rewriteTileChunkCoalesce(mlir::ModuleOp moduleOp);
 
 } // namespace TileChunkCoalescing
 

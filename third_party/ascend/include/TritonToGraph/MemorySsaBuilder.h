@@ -30,8 +30,6 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 
-#include <memory>
-
 namespace mlir {
 namespace triton {
 namespace cfg {
@@ -142,8 +140,8 @@ private:
   std::map<TensorObject *, size_t> nextVersion;
   std::map<std::string, size_t> nextTensor;
 
-  SmallVector<std::unique_ptr<TensorObject>> ownedTensorObjects;
-  SmallVector<std::unique_ptr<MemorySSADef>> allDefinitions;
+  // 所有创建的definitions（用于内存管理）
+  SmallVector<MemorySSADef *> allDefinitions;
 
   // tensor对象缓存
   DenseMap<Value, TensorObject *> tensorObjectCache;

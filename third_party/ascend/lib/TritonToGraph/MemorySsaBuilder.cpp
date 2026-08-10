@@ -39,7 +39,10 @@ using namespace cfg;
 // MemorySSABuilder
 //===----------------------------------------------------------------------===//
 
-MemorySSABuilder::~MemorySSABuilder() = default;
+MemorySSABuilder::~MemorySSABuilder() {
+  // 清理所有创建的tensor objects（如果有动态分配的）
+  // 这里假设TensorObject由外部管理生命周期
+}
 
 void MemorySSABuilder::build() {
   LLVM_DEBUG(llvm::dbgs() << "=== Starting Memory SSA Build ===\n");
@@ -115,11 +118,8 @@ void MemorySSABuilder::createParameterDefinitions() {
 
         extractShapeAndElementType(argType, shape, elementType);
 
-        auto tensorOwner = std::make_unique<TensorObject>(
-            paramName, shape, argType, elementType,
-            TensorObject::TensorKind::GLOBAL_MEMORY);
-        tensor = tensorOwner.get();
-        ownedTensorObjects.push_back(std::move(tensorOwner));
+        tensor = new TensorObject(paramName, shape, argType, elementType,
+                                  TensorObject::TensorKind::GLOBAL_MEMORY);
       }
 
       tensor->print(llvm::outs());
@@ -357,11 +357,9 @@ void MemorySSABuilder::processIfOp(scf::IfOp ifOp, Instruction *inst,
       if (tensor) {
         std::string phiName = "phi_" + std::to_string(ifOp.getNumResults()) +
                               "_" + std::to_string(i);
-        auto phiTensorOwner = std::make_unique<TensorObject>(
-            phiName, tensor->getShape(), resultType, tensor->getElementType(),
-            tensor->getKind());
-        TensorObject *phiTensor = phiTensorOwner.get();
-        ownedTensorObjects.push_back(std::move(phiTensorOwner));
+        TensorObject *phiTensor =
+            new TensorObject(phiName, tensor->getShape(), resultType,
+                             tensor->getElementType(), tensor->getKind());
 
         MemorySSADef *phiDef = createDefinition(phiTensor, ifOp.getOperation());
 
@@ -461,10 +459,9 @@ void MemorySSABuilder::processForOp(scf::ForOp forOp, Instruction *inst,
 MemorySSADef *MemorySSABuilder::createDefinition(TensorObject *tensor,
                                                  Operation *op) {
   unsigned version = isParameter(op) ? 0 : ++nextVersion[tensor];
-  auto definition = std::make_unique<MemorySSADef>(tensor, op, version);
-  MemorySSADef *result = definition.get();
-  allDefinitions.push_back(std::move(definition));
-  return result;
+  auto *def = new MemorySSADef(tensor, op, version);
+  allDefinitions.push_back(def);
+  return def;
 }
 
 MemorySSAUse MemorySSABuilder::createUse(MemorySSADef *def, Operation *userOp,
@@ -489,10 +486,7 @@ TensorObject *MemorySSABuilder::createTensorObject(Operation *op) {
   // 设置默认的kind（可以根据操作类型推断）
   TensorObject::TensorKind kind = TensorObject::TensorKind::GLOBAL_MEMORY;
 
-  auto tensorOwner = std::make_unique<TensorObject>(name, shape, resultType,
-                                                    elementType, kind);
-  TensorObject *tensor = tensorOwner.get();
-  ownedTensorObjects.push_back(std::move(tensorOwner));
+  auto *tensor = new TensorObject(name, shape, resultType, elementType, kind);
 
   // 缓存tensor对象
   if (!op->getResults().empty()) {

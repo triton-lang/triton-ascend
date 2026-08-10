@@ -59,9 +59,7 @@ class CompilerCostmodelContractTest(unittest.TestCase):
             setattr(utils_mod, name, lambda *args, **kwargs: False)
         utils_mod._get_auto_blockify_blacklist_reasons = lambda *args, **kwargs: []
         utils_mod._is_auto_map_parallel_blocks_enabled = lambda *args, **kwargs: False
-        utils_mod._warn_auto_blockify_disabled = lambda *args, **kwargs: None
         utils_mod.get_cann_version_file_hash = lambda *args, **kwargs: ""
-        utils_mod.graph_ub_budget_bytes_for_arch = lambda *args, **kwargs: 0
 
         driver_mod = types.ModuleType("triton.backends.ascend.driver")
         driver_mod.NPUUtils = Dummy

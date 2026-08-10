@@ -3,23 +3,8 @@ add_triton_library(TritonToGraph
   ControlFlowGraph.cpp
   ControlFlowGraphBuilder.cpp
   DataflowGraph.cpp
-  EntryArgPointerAliasAnalysis.cpp
-  GraphOptimizationContext.cpp
-  GraphOptimizationPass.cpp
-  LayoutMemoryCompatibilityPass.cpp
   MemorySsaBuilder.cpp
-  PermutationAnalysis.cpp
   Passes.cpp
-  LegacyMemoryAccess/ChunkCoalescing.cpp
-  LegacyMemoryAccess/RowCoalescing.cpp
-  LegacyMemoryAccess/StridedAxisCoalescing.cpp
-  LegacyMemoryAccess/StridedLoadStoreRewrite.cpp
-  Rules/ConvertModuloToMaskRule.cpp
-  Rules/DiagonalMaskRemovalRule.cpp
-  Rules/LoadStoreTransposeRule.cpp
-  Rules/RowCoalescingRule.cpp
-  Rules/TransposePointwiseReorderRule.cpp
-  Rules/StoreCoalescingRule.cpp
 
   DEPENDS
   TritonToGraphPassIncGen
@@ -30,16 +15,10 @@ add_triton_library(TritonToGraph
   MLIRDialectUtils
   MLIRIR
   MLIRFuncDialect
-  MLIRMathDialect
   MLIRPass
   MLIRSCFDialect
   MLIRSupport
-  MLIRTensorDialect
   MLIRTransforms
-  MLIRTritonNPUUtils
-  TritonAscendIR
   TritonIR
-  TritonMemoryAccessAnalysis
-  TritonToStructured
   TritonTransforms
 )

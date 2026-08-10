@@ -708,21 +708,15 @@ static void release_npu_tensor_handle(void* handle) {{
     # and the program-id/grid axis it applies to. Each program now covers H tiles
     # along that axis, so the host shrinks the matching grid dim by H here (the
     # equivalent of what bishengir AutoBlockify used to do via hacc.coalesce_factor;
-    # bishengir no longer touches it). RowCoalescing can request ceil-div because
-    # its generated row mask handles tail rows.
+    # bishengir no longer touches it). The division is unconditional and mirrors the
+    # old integer division -- the kernel rewrite assumes grid[axis] % H == 0.
     coalesce_factor = int(getattr(metadata, "coalesce_factor", 1) or 1)
     coalesce_axis = int(getattr(metadata, "coalesce_axis", -1))
-    coalesce_grid_ceil_div = bool(getattr(metadata, "coalesce_grid_ceil_div", False))
     if coalesce_factor > 1 and coalesce_axis in (0, 1, 2):
         _coalesce_grid_var = {0: "gridX", 1: "gridY", 2: "gridZ"}[coalesce_axis]
-        _coalesce_grid_expr = (f"({_coalesce_grid_var} + {coalesce_factor} - 1) / {coalesce_factor}"
-                               if coalesce_grid_ceil_div else f"{_coalesce_grid_var} / {coalesce_factor}")
-        coalesce_grid_div = (
-            f"// coalescing: each program covers {coalesce_factor} tiles along "
-            f"axis {coalesce_axis}; shrink that grid dim.\n" +
-            ("" if coalesce_grid_ceil_div else f"  assert({_coalesce_grid_var} % {coalesce_factor} == 0 && "
-             f"\"ChunkCoalescing: grid[{coalesce_axis}] not divisible by coalesce_factor {coalesce_factor}\");\n") +
-            f"  {_coalesce_grid_var} = {_coalesce_grid_expr};")
+        coalesce_grid_div = (f"// coalescing: each program covers {coalesce_factor} tiles along "
+                             f"axis {coalesce_axis}; shrink that grid dim.\n"
+                             f"  {_coalesce_grid_var} = {_coalesce_grid_var} / {coalesce_factor};")
     else:
         coalesce_grid_div = ""
 

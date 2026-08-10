@@ -5,6 +5,4 @@ add_triton_library(MLIRTritonNPUUtils
   LINK_LIBS PUBLIC
   MLIRIR
   TritonIR
-  TritonMemoryAccessAnalysis
-  TritonMemoryAccessCore
 )

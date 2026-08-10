@@ -105,21 +105,18 @@ index cab58801f..406ed4634 100644
  add_subdirectory(test)
  
 diff --git a/bin/CMakeLists.txt b/bin/CMakeLists.txt
-index cc0b4fa15..82f52f87e 100644
+index cc0b4fa15..9d8955c46 100644
 --- a/bin/CMakeLists.txt
 +++ b/bin/CMakeLists.txt
-@@ -1,11 +1,38 @@
+@@ -1,11 +1,35 @@
  get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
  
 +include_directories(
-+    ${PROJECT_SOURCE_DIR}/third_party/ascend/include
 +    ${PROJECT_SOURCE_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
 +    ${PROJECT_BINARY_DIR}/third_party/ascend/AscendNPU-IR/bishengir/include
 +  )
 +
  add_llvm_executable(triton-opt triton-opt.cpp PARTIAL_SOURCES_INTENDED)
-+target_include_directories(triton-opt PRIVATE
-+  "${PROJECT_SOURCE_DIR}/third_party/ascend/include")
  
  # TODO: what's this?
  llvm_update_compile_flags(triton-opt)
@@ -147,7 +144,7 @@ index cc0b4fa15..82f52f87e 100644
    # tests
    TritonTestAnalysis
    TritonTestDialect
-@@ -27,6 +54,25 @@ mlir_check_all_link_libraries(triton-reduce)
+@@ -27,6 +51,25 @@ mlir_check_all_link_libraries(triton-reduce)
  llvm_update_compile_flags(triton-reduce)
  target_link_libraries(triton-reduce PRIVATE
    ${triton_libs}
@@ -173,7 +170,7 @@ index cc0b4fa15..82f52f87e 100644
    # tests
    TritonTestAnalysis
    TritonTestDialect
-@@ -47,6 +93,25 @@ add_llvm_executable(triton-lsp triton-lsp.cpp PARTIAL_SOURCES_INTENDED)
+@@ -47,6 +90,25 @@ add_llvm_executable(triton-lsp triton-lsp.cpp PARTIAL_SOURCES_INTENDED)
  llvm_update_compile_flags(triton-lsp)
  target_link_libraries(triton-lsp PRIVATE
    ${triton_libs}
@@ -199,7 +196,7 @@ index cc0b4fa15..82f52f87e 100644
    # tests
    TritonTestAnalysis
    TritonTestDialect
-@@ -86,6 +151,26 @@ export_executable_symbols_for_plugins(triton-llvm-opt)
+@@ -86,6 +148,26 @@ export_executable_symbols_for_plugins(triton-llvm-opt)
  add_llvm_executable(triton-tensor-layout triton-tensor-layout.cpp PARTIAL_SOURCES_INTENDED)
  target_link_libraries(triton-tensor-layout PRIVATE
    ${triton_libs}
@@ -402,7 +399,7 @@ index 1b72c1376..ee5defb6e 100644
    }
    return success();
 diff --git a/python/src/ir.cc b/python/src/ir.cc
-index 5af645bc0..011f82d60 100644
+index 5af645bc0..5ffe71866 100644
 --- a/python/src/ir.cc
 +++ b/python/src/ir.cc
 @@ -332,6 +332,7 @@ void init_triton_ir(py::module &&m) {
@@ -413,25 +410,6 @@ index 5af645bc0..011f82d60 100644
        .value("BF16x3", InputPrecision::BF16x3)
        .value("BF16x6", InputPrecision::BF16x6)
        .export_values();
-@@ -1790,6 +1791,18 @@ void init_triton_ir(py::module &&m) {
-                                                 llvm::StringRef(message));
-              self.create<AssertOp>(condition, messageAttr);
-            })
-+      // This is intentionally separate from create_assert: user-authored
-+      // device_assert operations must not acquire the internal provenance
-+      // marker merely because they happen to use an overflow-like message.
-+      .def("create_auto_overflow_assert",
-+           [](TritonOpBuilder &self, Value &condition,
-+              const std::string &message) -> void {
-+             auto messageAttr = StringAttr::get(self.getBuilder().getContext(),
-+                                                llvm::StringRef(message));
-+             auto assertOp = self.create<AssertOp>(condition, messageAttr);
-+             assertOp->setAttr("tt.auto_overflow_assert",
-+                               self.getBuilder().getUnitAttr());
-+           })
-       .def("create_assume",
-            [](TritonOpBuilder &self, Value &condition) {
-              self.create<LLVM::AssumeOp>(condition);
 diff --git a/python/triton/_utils.py b/python/triton/_utils.py
 index a3cf0ff0c..28ba11c92 100644
 --- a/python/triton/_utils.py
@@ -740,18 +718,9 @@ index 7d1d65b21..13ff1cef0 100644
  
          return check
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
-index 52192cf3e..241ba3378 100644
+index 52192cf3e..8a2934e07 100644
 --- a/python/triton/language/semantic.py
 +++ b/python/triton/language/semantic.py
-@@ -219,7 +219,7 @@ class TritonSemantic(Generic[TensorTy]):
-         min_value = self.scalar_constant(min_value, tl.int64)
-         cond = self.and_(self.less_equal(ret, max_value), self.greater_equal(ret, min_value))
-         msg = f"int{lhs_sca_ty.int_bitwidth} overflow detected for operation {binary_op.__name__}"
--        self.device_assert(cond, msg, None)
-+        self.device_assert(cond, msg, None, auto_overflow=True)
- 
-     def add(self, input: TensorTy | numbers.Number, other: TensorTy | numbers.Number,
-             sanitize_overflow: bool) -> TensorTy:
 @@ -344,6 +344,9 @@ class TritonSemantic(Generic[TensorTy]):
                  raise TypeError("Cannot mod " + scalar_ty.__repr__() + " by " + other_scalar_ty.__repr__() + " "
                                  "because they have different signedness;"
@@ -904,38 +873,18 @@ index 52192cf3e..241ba3378 100644
 +            load_handle = self.builder.create_masked_load(ptr.handle, mask.handle, other.handle if other else None,
 +                                                          cache, eviction, is_volatile)
 +
-+        if is_bool:
+         if is_bool:
+-            ret = self.cast(ret, tl.int1)
 +            load_handle.set_attr("was_bool_to_int8", self.builder.get_bool_attr(True))
 +
 +        ret = self.tensor(load_handle, dst_ty)
 +        # Do not cast back to int1 when is_bool=true. We directly use the int8 tensor given by tl.load
-         if is_bool:
--            ret = self.cast(ret, tl.int1)
++        if is_bool:
 +            ret.was_bool_to_int8 = True
 +
          return ret
  
      def load(self, ptr: TensorTy, mask: Optional[TensorTy], other: Optional[TensorTy], boundary_check: Tuple,
-@@ -1799,12 +1865,17 @@ class TritonSemantic(Generic[TensorTy]):
-         is_signed = [arg.dtype.is_int_signed() for arg in args]
-         return self.tensor(self.builder.create_print(prefix, hex, new_args, is_signed), tl.void)
- 
--    def device_assert(self, cond: TensorTy, msg: str, mask: Optional[TensorTy]) -> TensorTy:
-+    def device_assert(self, cond: TensorTy, msg: str, mask: Optional[TensorTy],
-+                      auto_overflow: bool = False) -> TensorTy:
-         if not self.builder.options.debug:
-             return
-         if mask is not None:
-             cond = self.or_(cond, self.not_(mask))
--        return self.tensor(self.builder.create_assert(cond.handle, msg), tl.void)
-+        if auto_overflow:
-+            self.builder.create_auto_overflow_assert(cond.handle, msg)
-+        else:
-+            self.builder.create_assert(cond.handle, msg)
-+        return self.tensor(None, tl.void)
- 
-     def assume(self, cond) -> TensorTy:
-         return self.tensor(self.builder.create_assume(cond.handle), tl.void)
 diff --git a/python/triton/language/standard.py b/python/triton/language/standard.py
 index b1dd327bb..c49330d40 100644
 --- a/python/triton/language/standard.py
@@ -972,7 +921,7 @@ index b1dd327bb..c49330d40 100644
  
  @core._tensor_member_fn
 diff --git a/python/triton/runtime/interpreter.py b/python/triton/runtime/interpreter.py
-index cd871cb2e..82eb6960d 100644
+index cd871cb2e..988d2a7f9 100644
 --- a/python/triton/runtime/interpreter.py
 +++ b/python/triton/runtime/interpreter.py
 @@ -22,6 +22,25 @@ from .._C.libtriton import ir as _ir
@@ -1052,17 +1001,7 @@ index cd871cb2e..82eb6960d 100644
          self.codegen_fns["min_dot_size"] = lambda lhsType, rhsType: (1, 1, 1)
  
      def set_grid_idx(self, x, y, z):
-@@ -755,6 +785,9 @@ class InterpreterBuilder:
-         # Interpreter's device_assert function has a different format than Triton's device_assert
-         assert condition, f"{message}"
- 
-+    def create_auto_overflow_assert(self, condition, message):
-+        self.create_assert(condition, message)
-+
-     def create_assume(self, condition):
-         assert condition, "Assume failed"
- 
-@@ -1190,6 +1223,11 @@ def _patch_lang(fn):
+@@ -1190,6 +1220,11 @@ def _patch_lang(fn):
          _patch_lang_tensor(lang.tensor, scope)
          _patch_lang_core(lang, scope)
      _patch_builtin(tl.core.tensor_descriptor_base, interpreter_builder, scope)
@@ -1074,7 +1013,7 @@ index cd871cb2e..82eb6960d 100644
      return scope
  
  
-@@ -1237,7 +1275,12 @@ def _implicit_cvt(arg):
+@@ -1237,7 +1272,12 @@ def _implicit_cvt(arg):
      return arg
  
  
@@ -1088,7 +1027,7 @@ index cd871cb2e..82eb6960d 100644
  interpreter_semantic = TritonSemantic(interpreter_builder)
  
  
-@@ -1350,11 +1393,14 @@ class GridExecutor:
+@@ -1350,11 +1390,14 @@ class GridExecutor:
              grid = grid + (1, ) * (3 - len(grid))
              interpreter_builder.set_grid_dim(*grid)
              try:

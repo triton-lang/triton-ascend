@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  */
 
-#include "TritonToGraph/LegacyMemoryAccess/StridedAxisCoalescing.h"
+#include "TritonToLinalg/StridedAxisCoalescing.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Math/IR/Math.h"

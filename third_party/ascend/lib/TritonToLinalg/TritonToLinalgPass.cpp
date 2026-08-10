@@ -23,7 +23,6 @@
 
 #include <cstdlib>
 
-#include "TritonToGraph/LayoutMemoryOptimization.h"
 #include "TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/TritonToLinalg/ArgMinMaxConverter.h"
@@ -34,6 +33,9 @@
 #include "ascend/include/TritonToLinalg/ImplicitPermute.h"
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
 #include "ascend/include/TritonToLinalg/MarkTensorKindPass.h"
+#include "ascend/include/TritonToLinalg/StridedAxisCoalescing.h"
+#include "ascend/include/TritonToLinalg/StridedLoadStoreRewrite.h"
+#include "ascend/include/TritonToLinalg/TileChunkCoalescing.h"
 #include "ascend/include/TritonToLinalg/TritonOpConverter.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
 #include "ascend/include/TritonToLinalg/UseAnalysis.h"
@@ -866,23 +868,28 @@ LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(
     return success();
   }
 
-  auto runLayoutMemoryPhase =
-      [&](cfg::LayoutMemoryCompatibilityPhase phase) -> LogicalResult {
-    mlir::PassManager phasePm(&getContext(), moduleOp.getOperationName());
-    phasePm.addPass(cfg::createLayoutMemoryCompatibilityPass(phase));
-    return runPipeline(phasePm, getOperation());
-  };
+  // coalesce adjacent strided axes into one  so that to convert discrete memory
+  // asccess into continuous memory access .
+  StridedAxisCoalescing::rewriteStridedAxisCoalesce(moduleOp);
 
-  // Keep the original insertion point after ImplicitPermute.  Axis remains in
-  // the pre-Diagonal slot; the current target has no Diagonal migration, so
-  // the two compatibility phases run adjacently.
-  if (failed(runLayoutMemoryPhase(
-          cfg::LayoutMemoryCompatibilityPhase::BeforeDiagonal))) {
-    return failure();
-  }
+  // TileChunkCoalescing (default-on, lower priority): when the outermost
+  // program-id axis is a pure tile index over a contiguous problem axis with a
+  // small tile T, fold H adjacent tiles into one program so the per-tile
+  // load/store become a single contiguous H*T DMA (H picked so the block is
+  // >= 512B and within UB). Emits hacc.coalesce_factor = H and
+  // hacc.coalesce_axis. Bails when the pattern / lane-safety do not hold, when
+  // the kernel reads num_programs(axis) (the launcher changes it), or when
+  // StridedAxisCoalescing above already claimed the coalesce factor.
+  TileChunkCoalescing::rewriteTileChunkCoalesce(moduleOp);
 
-  if (failed(runLayoutMemoryPhase(
-          cfg::LayoutMemoryCompatibilityPhase::AfterDiagonal))) {
+  mlir::RewritePatternSet patterns(&getContext());
+  patterns.add<StridedLoadStoreRewrite::LoadConverter,
+               StridedLoadStoreRewrite::StoreConverter>(patterns.getContext());
+
+  if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
+    LLVM_DEBUG({
+      llvm::dbgs() << "StridedLoadStoreRewrite: pattern application failed\n";
+    });
     return failure();
   }
 

@@ -557,31 +557,6 @@ def get_ascend_arch_from_env():
     return arch
 
 
-def ub_size_in_kbytes_for_arch(arch: str) -> int:
-    """Return the raw UB capacity for a supported Ascend target architecture.
-
-    This resolver is deliberately independent of the active runtime device so
-    compiler options can be normalized for an explicit compilation target.
-    Unknown and empty targets fail closed instead of guessing a UB capacity.
-    """
-    if not isinstance(arch, str) or not arch:
-        return 0
-    if arch.startswith(("Ascend910_95", "Ascend950")):
-        return 256
-    if arch.startswith(("Ascend910A", "Ascend910B", "Ascend910D", "Ascend910_93", "Ascend310B")):
-        return 192
-    return 0
-
-
-def graph_ub_budget_bytes_for_arch(arch: str) -> int:
-    """Return the conservative graph-optimization UB budget in bytes.
-
-    StoreCoalescing does not model all live local buffers, so its budget is
-    capped at one half of the target's raw UB capacity.
-    """
-    return ub_size_in_kbytes_for_arch(arch) * 1024 // 2
-
-
 def is_ffts_supported(arch: str):
     '''
     Cases:

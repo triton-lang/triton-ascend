@@ -1,3 +1,5 @@
+"""CPU/native regression tests for Ascend specialization cache policy."""
+
 import inspect
 from collections import namedtuple
 
@@ -8,6 +10,9 @@ from triton.backends.ascend.compiler import AscendBackend
 from triton.backends.compiler import GPUTarget
 from triton.backends.nvidia.compiler import CUDABackend
 from triton.runtime.jit import KernelParam, compute_cache_key, create_function_from_signature
+
+
+pytestmark = pytest.mark.backend("native")
 
 
 class PointerArg:

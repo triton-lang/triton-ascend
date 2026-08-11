@@ -1,0 +1,70 @@
+// SIMT launch-overhead probe for Ascend (dav-c310).
+// Measures the cost of one cce::async_invoke (SIMT VF launch) and compares three
+// ways of doing the SAME [R=32, N=32] cumsum:
+//   mode 0  empty-launch : async_invoke of a VF that writes 1 element -> isolates
+//                          the PURE launch cost (no real compute).
+//   mode 1  SIMT-scan    : async_invoke of the warp-shuffle Kogge-Stone scan
+//                          (launch + the actual SIMT compute).
+//   mode 2  SIMD-scan    : the same scan done inline as register-resident vector
+//                          adds (no SIMT, no launch at all).
+// `barrier` toggles a pipe_barrier(PIPE_ALL) after each op (serialized vs
+// back-to-back). Host sweeps K and takes the slope to get per-op cycles, so:
+//   launch       = mode0
+//   SIMT compute = mode1 - mode0
+//   SIMD compute = mode2
+// Result (2026-06-07): launch ~115 ns; SIMT scan ~1391 ns; SIMD scan ~73 ns.
+#include "RegBase/VecUtils.h"
+#include "Vector/VecUtils.h"
+#include "Utils.h"
+#include "RegBase/Cumulative/SIMTCumsumCore.h"
+
+using DT = float;
+constexpr int R = 32, N = 32;
+
+// Minimal SIMT VF: writes one element so the launch can't be optimized away,
+// but does no real work -> its cost is essentially the async_invoke launch.
+template <typename T>
+__simt_vf__ LAUNCH_BOUND(1024) __aiv__ __attribute__((always_inline)) static void
+empty_vf(__ubuf__ T *p) {
+  int l = blockIdx.x * blockDim.y + threadIdx.y;
+  if (l == 0 && threadIdx.x == 0)
+    p[0] = (T)1;
+}
+
+extern "C" __global__ [aicore] void measure(__gm__ long long *out, int K, int mode, int barrier) {
+  auto ub = reinterpret_cast<__ubuf__ DT *>(0);
+  auto ub2 = reinterpret_cast<__ubuf__ DT *>(8192);
+  uint32_t cnt = (uint32_t)N;
+  uint16_t rL = (uint16_t)R;
+
+  pipe_barrier(PIPE_ALL);
+  long long t0 = _sys_cnt();
+  for (int i = 0; i < K; i++) {
+    if (mode == 0) {
+      // pure launch
+      cce::async_invoke<empty_vf<DT>>(cce::dim3{32, 32, 1}, ub);
+    } else if (mode == 1) {
+      // launch + SIMT warp-shuffle scan
+      cce::async_invoke<simt_cumsum_core<DT>>(cce::dim3{32, 32, 1}, ub, ub2, 1, R, N, 0, N, 0);
+    } else {
+      // inline SIMD scan (register-resident sequential cumsum over R rows)
+      __VEC_SCOPE__ {
+        VectorReg<DT> acc, x2;
+        vector_bool m;
+        CREATE_MASK_BY_SIZE(m, DT, cnt);
+        vlds(acc, ub, 0, NORM);
+        vsts(acc, ub2, 0, NORM_B32, m);
+        for (uint16_t r = 1; r < rL; r++) {
+          vlds(x2, ub + (int)r * N, 0, NORM);
+          vadd(acc, acc, x2, m);
+          vsts(acc, ub2 + (int)r * N, 0, NORM_B32, m);
+        }
+      }
+    }
+    if (barrier)
+      pipe_barrier(PIPE_ALL);
+  }
+  long long t1 = _sys_cnt();
+  pipe_barrier(PIPE_ALL);
+  out[0] = t1 - t0;
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "simd_simt_calibration_feedback",
+  "profile_version": "david-v100-des-feedback-20260727-v1",
+  "feedback_version": "david-v100-des-feedback-20260727-v1",
+  "target": "Ascend950PR/dav-c310",
+  "base_profile_version": "david-v100-simd-simt-20260727-v3",
+  "rules": [],
+  "validation": {
+    "event_validated": false,
+    "maximum_fallback_ratio": 0.1
+  },
+  "provenance": {
+    "producer": "HIVMAnalysisReport JSON",
+    "policy": "Only enable a rule after op coverage and source mapping pass their gates",
+    "current_status": "Interface enabled; no correction is applied because the current gather-dot DES run has 1672/1727 scalar-or-unknown fallback operations and FBGEMM three-candidate coverage is incomplete"
+  }
+}

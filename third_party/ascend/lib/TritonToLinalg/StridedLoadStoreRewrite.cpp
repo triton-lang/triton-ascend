@@ -21,6 +21,7 @@
  */
 
 #include "TritonToLinalg/StridedLoadStoreRewrite.h"
+#include "AscendModel/RouteModel/SimtSelection.h"
 #include "TritonToLinalg/ImplicitPermute.h"
 #include "TritonToLinalg/MaskAnalysis.h"
 #include "TritonToStructured/PtrAnalysis.h"
@@ -1348,6 +1349,13 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
   auto loc = op.getLoc();
   (void)loc;
 
+  // In model-controlled compilation, only operations inside the selected
+  // local SIMT scope may use this fast path.
+  if (mlir::ascend::simt_selection::isModelControlled(op) &&
+      !mlir::ascend::simt_selection::shouldUseSimtTemplate(
+          op, /*legacyForceSimt=*/false))
+    return failure();
+
   // ---- Re-entry / cross-step guards ----
   if (op->hasAttr(InspectedByStridedLoadStoreRewriteTAG))
     return failure();
@@ -1393,6 +1401,11 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
 
 LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
                                               PatternRewriter &rewriter) const {
+  if (mlir::ascend::simt_selection::isModelControlled(op) &&
+      !mlir::ascend::simt_selection::shouldUseSimtTemplate(
+          op, /*legacyForceSimt=*/false))
+    return failure();
+
   // ---- Re-entry / cross-step guards (same convention as LoadConverter) ----
   if (op->hasAttr(InspectedByStridedLoadStoreRewriteTAG))
     return failure();

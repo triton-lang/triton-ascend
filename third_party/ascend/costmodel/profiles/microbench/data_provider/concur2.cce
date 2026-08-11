@@ -1,0 +1,63 @@
+// Decompose the per-element cost of a SIMD cumsum into load / add / store, to
+// see whether the 4-wide vadd issue helps OneWay at all, or whether OneWay is
+// issue-bound across load+add+store (so vadd ILP is irrelevant).
+// All modes use 4 independent accumulators (ILP4, which already saturates the
+// vadd issue at ~3.3/cyc per the tput probe). Per "pass" = 4 ops of the kind.
+//   mode 0 : add-only        (acc_i += k)                   -> pure vadd issue rate
+//   mode 1 : load + add      (vlds x_i; acc_i += x_i)       -> + load cost
+//   mode 2 : load + add + st (vlds; acc_i += x_i; vsts)     -> + store cost  (= cumsum element)
+#include "RegBase/VecUtils.h"
+#include "Vector/VecUtils.h"
+#include "Utils.h"
+#include "RegBase/Cumulative/SIMTCumsumCore.h"
+
+using DT = float;
+constexpr int W = 64;
+
+extern "C" __global__ [aicore] void measure(__gm__ long long *out, int K, int a, int b, int iters, int mode) {
+  auto ob = reinterpret_cast<__ubuf__ DT *>(0);
+  auto kb = reinterpret_cast<__ubuf__ DT *>(32768);
+  uint32_t cnt = (uint32_t)W;
+
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int k = 0; k < K; k++) {
+    __VEC_SCOPE__ {
+      vector_bool m;
+      CREATE_MASK_BY_SIZE(m, DT, cnt);
+      VectorReg<DT> kk; vlds(kk, kb, 0, NORM);
+      VectorReg<DT> a0, a1, a2, a3, x0, x1, x2, x3;
+      vlds(a0, ob+0*W,0,NORM); vlds(a1, ob+1*W,0,NORM); vlds(a2, ob+2*W,0,NORM); vlds(a3, ob+3*W,0,NORM);
+      if (mode == 0) {
+        for (uint16_t it = 0; it < (uint16_t)iters; it++) {
+          vadd(a0,a0,kk,m); vadd(a1,a1,kk,m); vadd(a2,a2,kk,m); vadd(a3,a3,kk,m);
+        }
+      } else if (mode == 1) {
+        for (uint16_t it = 0; it < (uint16_t)iters; it++) {
+          vlds(x0, ob+4*W,0,NORM); vlds(x1, ob+5*W,0,NORM); vlds(x2, ob+6*W,0,NORM); vlds(x3, ob+7*W,0,NORM);
+          vadd(a0,a0,x0,m); vadd(a1,a1,x1,m); vadd(a2,a2,x2,m); vadd(a3,a3,x3,m);
+        }
+      } else if (mode == 2) {
+        // INDEPENDENT load+add+store (Sklansky-inner shape: 4 parallel acc) -> issue-bound
+        for (uint16_t it = 0; it < (uint16_t)iters; it++) {
+          vlds(x0, ob+4*W,0,NORM); vlds(x1, ob+5*W,0,NORM); vlds(x2, ob+6*W,0,NORM); vlds(x3, ob+7*W,0,NORM);
+          vadd(a0,a0,x0,m); vadd(a1,a1,x1,m); vadd(a2,a2,x2,m); vadd(a3,a3,x3,m);
+          vsts(a0, ob+8*W,0,NORM_B32,m); vsts(a1, ob+9*W,0,NORM_B32,m); vsts(a2, ob+10*W,0,NORM_B32,m); vsts(a3, ob+11*W,0,NORM_B32,m);
+        }
+      } else {
+        // DEPENDENT load+add+store (plain_seq shape: ONE acc chain) -> latency-bound?
+        for (uint16_t it = 0; it < (uint16_t)iters; it++) {
+          vlds(x0, ob+4*W,0,NORM); vadd(a0,a0,x0,m); vsts(a0, ob+8*W,0,NORM_B32,m);
+          vlds(x1, ob+5*W,0,NORM); vadd(a0,a0,x1,m); vsts(a0, ob+9*W,0,NORM_B32,m);
+          vlds(x2, ob+6*W,0,NORM); vadd(a0,a0,x2,m); vsts(a0, ob+10*W,0,NORM_B32,m);
+          vlds(x3, ob+7*W,0,NORM); vadd(a0,a0,x3,m); vsts(a0, ob+11*W,0,NORM_B32,m);
+        }
+      }
+      vsts(a0, ob+0*W,0,NORM_B32,m); vsts(a1, ob+1*W,0,NORM_B32,m); vsts(a2, ob+2*W,0,NORM_B32,m); vsts(a3, ob+3*W,0,NORM_B32,m);
+    }
+    pipe_barrier(PIPE_ALL);
+  }
+  long long t1 = get_sys_cnt();
+  pipe_barrier(PIPE_ALL);
+  out[0] = t1 - t0;
+}

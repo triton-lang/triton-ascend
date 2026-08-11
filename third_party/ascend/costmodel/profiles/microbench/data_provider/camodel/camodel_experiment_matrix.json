@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "unit": "system_cycles",
+  "target": "Ascend950PR/dav-c310",
+  "sweeps": {
+    "repetitions": [
+      64,
+      128,
+      256,
+      512
+    ],
+    "ilp": [
+      1,
+      2,
+      4,
+      8
+    ],
+    "num_warps": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32
+    ],
+    "active_lanes": [
+      1,
+      8,
+      16,
+      32
+    ]
+  },
+  "experiments": [
+    {
+      "family": "simd_compute",
+      "ops": [
+        "f32.add",
+        "f32.mul",
+        "f32.div",
+        "f32.exp",
+        "f32.min",
+        "f32.max"
+      ],
+      "variants": [
+        "dependent_chain",
+        "independent_ilp"
+      ],
+      "outputs": [
+        "startup",
+        "dependent_latency",
+        "peak_throughput"
+      ]
+    },
+    {
+      "family": "simt_compute",
+      "ops": [
+        "f32.add",
+        "f32.mul",
+        "f32.div",
+        "f32.min",
+        "f32.max",
+        "i32.add",
+        "i32.mul"
+      ],
+      "variants": [
+        "dependent_chain",
+        "independent_ilp"
+      ],
+      "sweep": [
+        "repetitions",
+        "ilp",
+        "num_warps",
+        "active_lanes"
+      ],
+      "outputs": [
+        "startup",
+        "dependent_latency",
+        "issue_rate_curve"
+      ]
+    },
+    {
+      "family": "simt_shuffle",
+      "ops": [
+        "shuffle_xor",
+        "shuffle_up",
+        "reduce_sum",
+        "reduce_min",
+        "reduce_max"
+      ],
+      "variants": [
+        "dependent_chain",
+        "independent_ilp"
+      ],
+      "sweep": [
+        "repetitions",
+        "num_warps",
+        "active_lanes"
+      ],
+      "outputs": [
+        "dependent_latency",
+        "issue_rate_curve"
+      ]
+    },
+    {
+      "family": "memory",
+      "spaces": [
+        "gm",
+        "ub_shared"
+      ],
+      "patterns": [
+        "sequential",
+        "stride",
+        "gather_random"
+      ],
+      "variants": [
+        "load_to_use_chain",
+        "independent_loads",
+        "stores"
+      ],
+      "sweep": [
+        "repetitions",
+        "ilp",
+        "num_warps",
+        "active_lanes"
+      ],
+      "outputs": [
+        "latency",
+        "bytes_per_system_cycle",
+        "transactions_per_system_cycle"
+      ]
+    },
+    {
+      "family": "predicate_control",
+      "ops": [
+        "predicate",
+        "uniform_branch",
+        "divergent_branch"
+      ],
+      "sweep": [
+        "repetitions",
+        "num_warps",
+        "active_lanes"
+      ],
+      "outputs": [
+        "issue_rate",
+        "divergence_penalty"
+      ]
+    },
+    {
+      "family": "atomic",
+      "ops": [
+        "atomic_add"
+      ],
+      "conflict_ratio": [
+        0.0,
+        0.25,
+        0.5,
+        1.0
+      ],
+      "sweep": [
+        "repetitions",
+        "num_warps",
+        "active_lanes"
+      ],
+      "outputs": [
+        "throughput",
+        "serialization_penalty"
+      ]
+    },
+    {
+      "family": "resource_pair",
+      "pairs": [
+        [
+          "simd_mte2",
+          "simd_vector"
+        ],
+        [
+          "simd_vector",
+          "simd_mte3"
+        ],
+        [
+          "cube",
+          "vector"
+        ],
+        [
+          "scalar_agu",
+          "vector"
+        ],
+        [
+          "simt_lsu",
+          "simt_alu"
+        ],
+        [
+          "simt_shuffle",
+          "simt_alu"
+        ]
+      ],
+      "variants": [
+        "a_only",
+        "b_only",
+        "a_plus_b"
+      ],
+      "outputs": [
+        "overlap_coefficient",
+        "shared_resource"
+      ]
+    }
+  ],
+  "required_metadata": [
+    "git_revision",
+    "compiler_revision",
+    "cann_version",
+    "camodel_version",
+    "target",
+    "kernel",
+    "shape",
+    "dtype",
+    "num_warps",
+    "active_lanes",
+    "ilp",
+    "repetitions",
+    "raw_opprof_path"
+  ]
+}

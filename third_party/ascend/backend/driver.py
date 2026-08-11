@@ -19,6 +19,8 @@
 # THE SOFTWARE.
 
 from pathlib import Path
+import contextlib
+import fcntl
 import tempfile
 import os
 import os.path
@@ -39,6 +41,30 @@ from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, conv
 import triton.backends.ascend.utils as _ascend_utils
 
 
+def _get_cache_lock_path(cache):
+    lock_path = getattr(cache, "lock_path", None)
+    if lock_path is not None:
+        return lock_path
+    file_cache_manager = getattr(cache, "_file_cache_manager", None)
+    return getattr(file_cache_manager, "lock_path", None)
+
+
+@contextlib.contextmanager
+def _cache_build_lock(cache):
+    lock_path = _get_cache_lock_path(cache)
+    if lock_path is None:
+        yield
+        return
+
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    with open(lock_path, "a") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+
 class NPUUtils(object):
 
     def __new__(cls):
@@ -47,15 +73,39 @@ class NPUUtils(object):
         return cls.instance
 
     def __init__(self):
+        if getattr(self, "_initialized", False):
+            return
+        self._initialized = True
+        self._cache_path = None
+        self.npu_utils_mod = None
+
+    def get_so_path(self):
+        if self._cache_path is None:
+            self._cache_path = self._build_or_get_cached_so()
+        return self._cache_path
+
+    def _build_or_get_cached_so(self):
         dirname = os.path.dirname(os.path.realpath(__file__))
         src_path = os.path.join(dirname, "npu_utils.cpp")
         src = Path(src_path).read_text()
-        version_info = get_backend_func("version_hash")
-        key = hashlib.md5((src + "_".join(version_info)).encode("utf-8")).hexdigest()
+        key_parts = [
+            "npu_utils",
+            "torch_npu_wrapper_abi=triton_async_launch_v1",
+            "USE_TORCH_NPU",
+            src,
+        ]
+        key = hashlib.md5("\0".join(key_parts).encode("utf-8")).hexdigest()
         cache = get_cache_manager(key)
         fname = "npu_utils.so"
         cache_path = cache.get_file(fname)
-        if cache_path is None or not os.path.exists(cache_path):
+        if cache_path is not None and os.path.exists(cache_path):
+            return cache_path
+
+        with _cache_build_lock(cache):
+            cache_path = cache.get_file(fname)
+            if cache_path is not None and os.path.exists(cache_path):
+                return cache_path
+
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_src_path = os.path.join(tmpdir, "npu_utils.cpp")
                 with open(tmp_src_path, "w") as f:
@@ -63,16 +113,23 @@ class NPUUtils(object):
                 so = _build_npu_ext("npu_utils", tmp_src_path)
                 with open(so, "rb") as f:
                     cache_path = cache.put(f.read(), fname, binary=True)
+        return cache_path
+
+    def _load_mod(self):
+        if self.npu_utils_mod is not None:
+            return self.npu_utils_mod
+
         import importlib.util
-        spec = importlib.util.spec_from_file_location("npu_utils", cache_path)
+        spec = importlib.util.spec_from_file_location("npu_utils", self.get_so_path())
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self.npu_utils_mod = mod
-        # setup for remote run
-        env_arch = get_ascend_arch_from_env()
+        return self.npu_utils_mod
 
-    def load_binary(self, name, kernel, shared, device, mix_mode):
-        return self.npu_utils_mod.load_kernel_binary(name, kernel, shared, device, mix_mode)
+    def load_binary(self, name, kernel, shared, device, mix_mode=None):
+        if mix_mode is None:
+            name, mix_mode = name.rsplit("_", 1)
+        return self._load_mod().load_kernel_binary(name, kernel, shared, device, mix_mode)
 
     def _get_npu_device_limit_form_env(self) -> tuple[int, int]:
         """Read and validate the NPU_DEVICE_LIMIT env var, return the capped AICore and AIVector counts.
@@ -156,7 +213,7 @@ class NPUUtils(object):
 
     def get_arch(self):
         # temporarily return empty arch descriptor
-        return self.npu_utils_mod.get_arch()
+        return self._load_mod().get_arch()
 
     def get_aicore_num(self):
         # temporarily return empty arch descriptor
@@ -174,6 +231,11 @@ class NPULauncher(object):
                                                        'false').lower() in ('true', '1')
         self.src = src
         self.metadata = metadata
+        constants = self.src.constants if hasattr(self.src, "constants") else dict()
+        cst_key = lambda i: self.src.fn.arg_names.index(i) if isinstance(i, str) else i
+        constants = {cst_key(key): value for key, value in constants.items()}
+        signature = {cst_key(key): value for key, value in self.src.signature.items()}
+        self.runtime_arg_indices = [i for i, ty in signature.items() if i not in constants and ty != "constexpr"]
         self.so_launcher_path = self._make_launcher_stub_path()
         # setup for remote run
         # TODO: use a var to pack all vars required to run on a remote machine
@@ -191,13 +253,19 @@ class NPULauncher(object):
         cst_key = lambda i: self.src.fn.arg_names.index(i) if isinstance(i, str) else i
         constants = {cst_key(key): value for key, value in constants.items()}
         signature = {cst_key(key): value for key, value in self.src.signature.items()}
-        wrapper_src = make_launcher(constants, signature, self.metadata)
+        wrapper_src = generate_npu_wrapper_src(constants, signature, self.metadata)
         return make_npu_launcher_stub(header_src, wrapper_src, self.metadata.debug)
 
     def get_launcher_so_path(self):
         return self.so_launcher_path
 
     def __call__(self, *args, **kwargs):
+        fixed_arg_count = 9
+        if len(args) > fixed_arg_count and self.runtime_arg_indices:
+            fixed_args = args[:fixed_arg_count]
+            bound_args = args[fixed_arg_count:]
+            runtime_args = tuple(bound_args[i] for i in self.runtime_arg_indices if i < len(bound_args))
+            args = fixed_args + runtime_args
         if self.compile_only:
             cache_manager = get_cache_manager(args[5]['hash'])
             print("[INFO]: skip running kernel")
@@ -240,9 +308,6 @@ class NPUDriver(DriverBase):
             warnings.warn(red + str(e_npucompiler) + reset)
             return False
 
-    def map_python_to_cpp_type(self, ty: str) -> str:
-        return ty_to_cpp(ty)
-
     def get_current_target(self):
         backend = "npu"
         env_target = get_ascend_arch_from_env()
@@ -253,15 +318,38 @@ class NPUDriver(DriverBase):
         warp_size = 0
         return GPUTarget(backend, arch, warp_size)
 
+    def map_python_to_cpp_type(self, ty: str) -> str:
+        if ty[0] == '*':
+            return "void*"
+        return {
+            "i1": "int32_t",
+            "i8": "int8_t",
+            "i16": "int16_t",
+            "i32": "int32_t",
+            "i64": "int64_t",
+            "u1": "uint32_t",
+            "u8": "uint8_t",
+            "u16": "uint16_t",
+            "u32": "uint32_t",
+            "u64": "uint64_t",
+            "fp16": "float",
+            "bf16": "float",
+            "fp32": "float",
+            "f32": "float",
+            "fp64": "double",
+        }[ty]
+
+    def get_active_torch_device(self):
+        import torch
+        if hasattr(torch, "npu"):
+            return torch.device("npu", self.get_current_device())
+        return torch.device("cpu")
+
     def get_current_device(self):
         """
         Get current device
         """
         return get_backend_func("get_current_device")
-
-    def get_active_torch_device(self):
-        import torch
-        return torch.device("npu", self.get_current_device())
 
     def set_current_device(self, device):
         """
@@ -287,9 +375,6 @@ class NPUDriver(DriverBase):
     def get_empty_cache_for_benchmark(self):
         cache_size = 192 * 1024 * 1024
         return get_backend_func("get_empty_tensor", cache_size // 4)
-
-    def clear_cache(self, cache):
-        cache.zero_()
 
 
 def make_npu_launcher_stub(header_src, wrapper_src, debug=False):
@@ -351,7 +436,7 @@ def extract_device_print_code_from_cann():
 
         # remove [aicore] functions
         aicore_positions = []
-        for m in re.finditer(r'\[aicore\]', code):
+        for m in re.finditer('\[aicore\]', code):
             aicore_positions.append(m.start())
 
         def find_aicore_function_span(src, pos):
@@ -416,35 +501,8 @@ def generate_npu_header_src():
 """
 
 
-# ------------------------
-# Launcher
-# ------------------------
-
-
-def ty_to_cpp(ty):
-    if ty[0] == '*':
-        return "void*"
-    return {
-        "i1": "int32_t",
-        "i8": "int8_t",
-        "i16": "int16_t",
-        "i32": "int32_t",
-        "i64": "int64_t",
-        "u1": "uint32_t",
-        "u8": "uint8_t",
-        "u16": "uint16_t",
-        "u32": "uint32_t",
-        "u64": "uint64_t",
-        "fp16": "float",
-        "bf16": "float",
-        "fp32": "float",
-        "f32": "float",
-        "fp64": "double",
-    }[ty]
-
-
 # the template is from triton-adapter HEAD. Wrapping the generated kernel binary into a python module
-def make_launcher(constants, signature, metadata):
+def generate_npu_wrapper_src(constants, signature, metadata):
     import os
     workspace_size = int(metadata.workspace_size) \
                           if hasattr(metadata, 'workspace_size') else -1
@@ -458,44 +516,63 @@ def make_launcher(constants, signature, metadata):
     parallel_mode = metadata.parallel_mode
     enable_simt = ("simt" in parallel_mode) or metadata.force_simt_only
 
-    def _serialize_signature(sig):
-        if isinstance(sig, tuple):
-            return ','.join(map(_serialize_signature, sig))
-        return sig
-
-    def _extracted_type(ty):
-        if isinstance(ty, tuple):
-            val = ','.join(map(_extracted_type, ty))
-            return f"[{val}]"
+    def _ty_to_cpp(ty):
         if ty[0] == '*':
-            return "PyObject*"
-        if ty in ("constexpr"):
-            return "PyObject*"
-        return ty_to_cpp(ty)
-
-    def format_of(ty):
-        if isinstance(ty, tuple):
-            val = ''.join(map(format_of, ty))
-            return f"({val})"
-        if ty[0] == '*':
-            return "O"
-        if ty in ("constexpr"):
-            return "O"
-        if ty == "void*":
-            return "O"
+            return "void*"
         return {
+            "i1": "int32_t",
+            "i8": "int8_t",
+            "i16": "int16_t",
+            "i32": "int32_t",
+            "i64": "int64_t",
+            "u1": "uint32_t",
+            "u8": "uint8_t",
+            "u16": "uint16_t",
+            "u32": "uint32_t",
+            "u64": "uint64_t",
+            "fp16": "float",
+            "bf16": "float",
+            "fp32": "float",
+            "f32": "float",
+            "fp64": "double",
+        }[ty]
+
+    def _extracted_ty(ty):
+        if ty[0] == '*':
+            return "PyObject*"
+        return {
+            'i1': 'int32_t',
+            'i8': 'int8_t',
+            'i16': 'int16_t',
+            'i32': 'int32_t',
+            'i64': 'int64_t',
+            'u1': 'uint32_t',
+            'u8': 'uint8_t',
+            'u16': 'uint16_t',
+            'u32': 'uint32_t',
+            'u64': 'uint64_t',
+            'fp16': 'float',
+            'bf16': 'float',
+            'fp32': 'float',
+            'f32': 'float',
+            'fp64': 'double',
+        }[ty]
+
+    def _format_of(ty):
+        return {
+            "PyObject*": "O",
             "float": "f",
             "double": "d",
             "long": "l",
             "int8_t": "b",
             "int16_t": "h",
             "int32_t": "i",
-            "int64_t": "L",
+            "int64_t": "l",
             "uint8_t": "B",
             "uint16_t": "H",
             "uint32_t": "I",
             "uint64_t": "K",
-        }[ty_to_cpp(ty)]
+        }[ty]
 
     def _format_of_msprof_task_type_ratio(bs_task_type, mix_mode):
         # Default fallback based on mix_mode
@@ -515,6 +592,8 @@ def make_launcher(constants, signature, metadata):
         task_type = task_type_map.get(task_type_num, default_task_type)
         return task_type, mix_block_dim_ratio
 
+    runtime_signature = {i: ty for i, ty in signature.items() if i not in constants and ty != "constexpr"}
+    arg_decls = ', '.join(f"{_ty_to_cpp(ty)} arg{i}" for i, ty in runtime_signature.items())
     """
     args:
         int gridX, gridY, gridZ;
@@ -525,29 +604,7 @@ def make_launcher(constants, signature, metadata):
         *args_expand
     """
 
-    args_format = ''.join([format_of(ty) for ty in signature.values()])
-    format = "iiiKKOOOO" + args_format
-    signature = ','.join(map(_serialize_signature, signature.values()))
-    signature = list(filter(bool, signature.split(',')))
-    signature = {i: s for i, s in enumerate(signature)}
-    args_list = ', ' + ', '.join(f"&_arg{i}" for i, ty in signature.items()) if len(signature) > 0 else ''
-    # Record the end of regular arguments;
-    # subsequent arguments are architecture-specific descriptors.
-    arg_decls = ', '.join(f"{ty_to_cpp(ty)} arg{i}" for i, ty in signature.items() if ty != "constexpr")
-    internal_args_list = []
-    for i, ty in signature.items():
-        if ty[0] == "*":
-            internal_args_list.append(f"ptr_info{i}.dev_ptr")
-        elif ty != "constexpr":
-            internal_args_list.append(f"_arg{i}")
-
-    # generate glue code
-    newline = '\n  '
-    ptr_decls = [
-        f"DevicePtrInfo ptr_info{i} = getPointer(_arg{i}, {i}); if (!ptr_info{i}.valid) return NULL;"
-        for i, ty in signature.items()
-        if ty[0] == "*"
-    ]
+    format = "iiiKKOOOO" + ''.join([_format_of(_extracted_ty(ty)) for ty in runtime_signature.values()])
     grid_info = {'X': 'i32', 'Y': 'i32', 'Z': 'i32'}
     # TODO: automatically check if gather load ops are used.
 
@@ -570,14 +627,12 @@ def make_launcher(constants, signature, metadata):
     alloc_success_code = 'return 1;'
     sync_lock_fail_code = 'fprintf(stderr, "Error: syncBlockLock allocation failed\\n"); return;'
     workspace_fail_code = 'fprintf(stderr, "Error: workspace allocation failed\\n"); return;'
-    launch_signature_items = [(i, ty) for i, ty in signature.items() if i not in constants]
+    launch_signature_items = list(runtime_signature.items())
     launch_arg_count = len(launch_signature_items)
     launch_arg_ptrs = ', '.join(f'static_cast<const void*>(&arg{i})' for i, ty in launch_signature_items)
-    launch_arg_sizes = ', '.join(f'sizeof({ty_to_cpp(ty)})' for i, ty in launch_signature_items if ty != "constexpr")
+    launch_arg_sizes = ', '.join(f'sizeof({_ty_to_cpp(ty)})' for i, ty in launch_signature_items)
 
-    npu_utils_inst = NPUUtils()
-    npu_utils_mod = getattr(npu_utils_inst, "npu_utils_mod", None)
-    npu_utils_so_path = getattr(npu_utils_mod, "__file__", "")
+    npu_utils_so_path = NPUUtils().get_so_path()
     cpp_npu_utils_dlopen = f"""
 typedef void* (*triton_allocate_workspace_legacy_t)(uint64_t);
 typedef void* (*triton_allocate_sync_block_lock_t)(uint64_t, void*, void**);
@@ -1083,17 +1138,17 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
       {'void* ffts_addr __attribute__((aligned(8)));' if target_support_ffts else ''}
       {'void* syncBlockLock __attribute__((aligned(8)));' if not metadata.force_simt_only else ''}
       {'void* workspace_addr __attribute__((aligned(8)));' if not metadata.force_simt_only else ''}
-      {' '.join(f'{ty_to_cpp(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in signature.items() if i not in constants and ty != "constexpr")}
-      {' '.join(f'{ty_to_cpp(ty)} grid{mark} __attribute__((aligned(4)));' for mark, ty in grid_info.items())}
+      {' '.join(f'{_ty_to_cpp(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in runtime_signature.items())}
+      {' '.join(f'{_ty_to_cpp(ty)} grid{mark} __attribute__((aligned(4)));' for mark, ty in grid_info.items())}
       {'void* DTData __attribute__((aligned(8)));' if enable_device_print else ''}
     }} args = {{
       {'static_cast<void*>(ffts_addr),' if target_support_ffts else ''}
       {('static_cast<void*>(syncBlockLock_ptr),' if lock_num > 0 else 'nullptr,') if not metadata.force_simt_only else ''}
       {('static_cast<void*>(workspace_addr_ptr),' if workspace_size > 0 else 'nullptr,') if not metadata.force_simt_only else ''}
       {(lambda _rt: (', '.join(_rt) + ',') if _rt else '')(
-        [f'static_cast<{ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if i not in constants and ty != "constexpr"]
+        [f'static_cast<{_ty_to_cpp(ty)}>(arg{i})' for i, ty in runtime_signature.items()]
       )}
-      {', '.join(f'static_cast<{ty_to_cpp(ty)}>(grid{mark})' for mark, ty in grid_info.items())}
+      {', '.join(f'static_cast<{_ty_to_cpp(ty)}>(grid{mark})' for mark, ty in grid_info.items())}
       {', static_cast<void*>(DTData)' if enable_device_print else ''}
     }};
     {cpp_msprof_call_before_launch}
@@ -1147,13 +1202,12 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
   PyObject *launch_enter_hook = NULL;
   PyObject *launch_exit_hook = NULL;
   std::vector<std::vector<int64_t>> tensorShapes;
-
-  {newline.join([f"{_extracted_type(ty)} _arg{i};" for i, ty in signature.items()])}
+  {' '.join([f"{_extracted_ty(ty)} _arg{i}; " for i, ty in runtime_signature.items()])}
   if(!PyArg_ParseTuple(
       args, \"{format}\",
       &gridX, &gridY, &gridZ, &stream, &function,
       &packedMetadata, &launch_metadata, &launch_enter_hook, &launch_exit_hook
-      {', ' + ', '.join(f"&_arg{i}" for i, ty in signature.items()) if len(signature) > 0 else ''}
+      {', ' + ', '.join(f"&_arg{i}" for i, ty in runtime_signature.items()) if len(runtime_signature) > 0 else ''}
       )
     ) {{
     return NULL;
@@ -1163,7 +1217,7 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
     {
       LINE_CHANGE_CHAR.join(
         f"{{ auto tmp = _get_tensor_shape(_arg{i}); if (!tmp.empty()) tensorShapes.push_back(tmp); }}"
-        for i, ty in signature.items() if ty[0] == "*"
+        for i, ty in runtime_signature.items() if ty[0] == "*"
       )
     }
   }}
@@ -1193,8 +1247,8 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
 
 
   // raise exception asap
-  {newline.join(ptr_decls)}
-  _launch(kernelName, function, stream, gridX, gridY, gridZ, tensorShapes, tensorKinds{', ' + ', '.join(internal_args_list) if len(internal_args_list) > 0 else ''});
+  {"; ".join([f"DevicePtrInfo ptr_info{i} = getPointer(_arg{i}, {i}); if (!ptr_info{i}.valid) return NULL;" if ty[0]=="*" else "" for i, ty in runtime_signature.items()])};
+  _launch(kernelName, function, stream, gridX, gridY, gridZ, tensorShapes, tensorKinds{', ' + ', '.join(f"ptr_info{i}.dev_ptr" if ty[0]=="*" else f"_arg{i}" for i, ty in runtime_signature.items()) if len(runtime_signature) > 0 else ''});
   if (PyErr_Occurred()) {{
     return NULL;
   }}

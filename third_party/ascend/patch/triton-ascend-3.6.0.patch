@@ -1056,8 +1056,47 @@ index cd871cb2e..988d2a7f9 100644
              except Exception as e:
                  if triton.knobs.compilation.front_end_debugging:
                      raise
+diff --git a/python/triton/runtime/jit.py b/python/triton/runtime/jit.py
+index 0f506818f..1e07a267f 100644
+--- a/python/triton/runtime/jit.py
++++ b/python/triton/runtime/jit.py
+@@ -398,14 +398,15 @@ def create_function_from_signature(sig, kparams, backend):
+     assert len(sig.parameters) == len(kparams)
+     # Create the function argument list and the dict entries for the return statement
+     specialization = []
++    integer_annotation_types = {"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"}
+     # signature
+     for name, kp in zip(sig.parameters.keys(), kparams):
+         if kp.is_constexpr:
+             specialization.append(f'("constexpr", {name})')
+         else:
+-            is_const = 'True' if kp.is_const else 'False'
+-            specialize = 'False' if kp.do_not_specialize else 'True'
+-            align = 'False' if kp.do_not_specialize_on_alignment else 'True'
++            is_const = kp.is_const
++            specialize = not kp.do_not_specialize
++            align = not kp.do_not_specialize_on_alignment
+             ret = f"specialize_impl(backend, {name}, {is_const}, {specialize}, {align})"
+             if kp.annotation_type:
+                 if isinstance(kp.annotation_type, str):
+@@ -413,7 +414,13 @@ def create_function_from_signature(sig, kparams, backend):
+                         # we do not specialize non-constexpr floats and bools:
+                         specialize = False
+                 if specialize:
+-                    specialization.append(f'("{kp.annotation_type}",) + {ret}[1:]')
++                    if kp.annotation_type in integer_annotation_types:
++                        # An integer annotation constrains the type of runtime values, but must not discard a
++                        # constexpr classification already produced by the value specializer (for example, 1).
++                        specialization.append(f'(lambda ret: ret if ret[0] == "constexpr" '
++                                              f'else ("{kp.annotation_type}",) + ret[1:])({ret})')
++                    else:
++                        specialization.append(f'("{kp.annotation_type}",) + {ret}[1:]')
+                 else:
+                     # skip runtime specialization:
+                     specialization.append(f'("{kp.annotation_type}", None)')
+
 diff --git a/python/triton/backends/compiler.py b/python/triton/backends/compiler.py
-index 10754e7..016e342 100644
+index 10754e715..016e342c2 100644
 --- a/python/triton/backends/compiler.py
 +++ b/python/triton/backends/compiler.py
 @@ -90,3 +90,8 @@ class BaseBackend(metaclass=ABCMeta):
@@ -1070,180 +1109,16 @@ index 10754e7..016e342 100644
 +        """Return whether runtime argument alignment contributes to specialization."""
 +        return True
 diff --git a/python/triton/runtime/jit.py b/python/triton/runtime/jit.py
-index 0f50681..14e3483 100644
+index 1e07a267f..b2992457f 100644
 --- a/python/triton/runtime/jit.py
 +++ b/python/triton/runtime/jit.py
-@@ -390,2 +390,14 @@ def serialize_specialization_data(name, signature, constants, attrs, options, ke
-
-+def _find_available_name(name, parameters):
-+    while name in parameters:
-+        name += "_"
-+    return name
-+
-+
-+def _specialize_with_integer_annotation(specialization, annotation_type):
-+    if specialization[0] == "constexpr":
-+        return specialization
-+    return (annotation_type, ) + specialization[1:]
-+
-+
- def create_function_from_signature(sig, kparams, backend):
-@@ -400,2 +412,6 @@ def create_function_from_signature(sig, kparams, backend):
-     specialization = []
-+    integer_annotation_types = {"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"}
-+    alignment_specialization_name = _find_available_name("__triton_use_alignment_specialization", sig.parameters)
-+    integer_annotation_helper_name = _find_available_name("__triton_specialize_with_integer_annotation",
-+                                                          sig.parameters)
-     # signature
-@@ -405,6 +421,8 @@ def create_function_from_signature(sig, kparams, backend):
-         else:
--            is_const = 'True' if kp.is_const else 'False'
--            specialize = 'False' if kp.do_not_specialize else 'True'
--            align = 'False' if kp.do_not_specialize_on_alignment else 'True'
+@@ -407,7 +407,8 @@ def create_function_from_signature(sig, kparams, backend):
+             is_const = kp.is_const
+             specialize = not kp.do_not_specialize
+             align = not kp.do_not_specialize_on_alignment
 -            ret = f"specialize_impl(backend, {name}, {is_const}, {specialize}, {align})"
-+            is_const = kp.is_const
-+            specialize = not kp.do_not_specialize
-+            align = not kp.do_not_specialize_on_alignment
-+            specialize_on_alignment = f"{align} and {alignment_specialization_name}"
-+            ret = (f"specialize_impl(backend, {name}, {is_const}, {specialize}, {specialize_on_alignment}, "
-+                   f"{alignment_specialization_name})")
++            ret = (f"specialize_impl(backend, {name}, {is_const}, {specialize}, "
++                   f"{align} and backend.use_alignment_specialization(options))")
              if kp.annotation_type:
-@@ -415,3 +433,7 @@ def create_function_from_signature(sig, kparams, backend):
-                 if specialize:
--                    specialization.append(f'("{kp.annotation_type}",) + {ret}[1:]')
-+                    if kp.annotation_type in integer_annotation_types:
-+                        specialization.append(
-+                            f"{integer_annotation_helper_name}({ret}, {kp.annotation_type!r})")
-+                    else:
-+                        specialization.append(f'("{kp.annotation_type}",) + {ret}[1:]')
-                 else:
-@@ -427,2 +449,3 @@ def dynamic_func({", ".join(list(map(arg, sig.parameters.items())) + ["**options
-     params = {{{', '.join([f"'{name}': {name}" for name in sig.parameters.keys()])}}}
-+    {alignment_specialization_name} = backend.use_alignment_specialization(options)
-     specialization = [{','.join(specialization)}]
-@@ -442,2 +465,3 @@ def dynamic_func({", ".join(list(map(arg, sig.parameters.items())) + ["**options
-     func_namespace["JITCallable"] = JITCallable
-+    func_namespace[integer_annotation_helper_name] = _specialize_with_integer_annotation
-
-diff --git a/python/src/specialize.cc b/python/src/specialize.cc
-index 3449e3c..adee954 100644
---- a/python/src/specialize.cc
-+++ b/python/src/specialize.cc
-@@ -36,2 +36,7 @@ specialize_arg(PyObject *backend, PyObject *arg, bool is_const,
-
-+static std::pair<py::object, py::object>
-+specialize_arg_recursively(PyObject *backend, PyObject *arg, bool is_const,
-+                           bool specialize_value,
-+                           bool alignment_specialization_enabled);
-+
- static bool init_called = false;
-@@ -380,6 +385,6 @@ handle_jit_callable(PyObject *backend, PyObject *arg, bool is_const,
-
--std::pair<py::object, py::object> handle_tuple(PyObject *backend, PyObject *arg,
--                                               bool is_const,
--                                               bool specialize_value,
--                                               bool align) {
-+std::pair<py::object, py::object>
-+handle_tuple_recursively(PyObject *backend, PyObject *arg, bool is_const,
-+                         bool specialize_value,
-+                         bool alignment_specialization_enabled) {
-   Py_ssize_t size = PyTuple_GET_SIZE(arg);
-@@ -404,5 +409,7 @@ std::pair<py::object, py::object> handle_tuple(PyObject *backend, PyObject *arg,
-     PyObject *item = PyTuple_GET_ITEM(arg, i); // Borrowed reference
--    // python reference calls specialize recursively with default arguments set
--    // currently this is is_const=False, specialize_value=True, align=True
--    auto [type, key] = specialize_arg(backend, item, false, true, true);
-+    // Tuple elements keep the historical is_const=false and
-+    // specialize_value=true defaults while sharing one alignment policy at
-+    // every nesting level.
-+    auto [type, key] = specialize_arg_recursively(
-+        backend, item, false, true, alignment_specialization_enabled);
-     if (!type || !key)
-@@ -428,2 +435,12 @@ std::pair<py::object, py::object> handle_tuple(PyObject *backend, PyObject *arg,
-
-+std::pair<py::object, py::object> handle_tuple(PyObject *backend, PyObject *arg,
-+                                               bool is_const,
-+                                               bool specialize_value,
-+                                               bool align) {
-+  // Preserve the historical native five-argument behavior: tuple elements
-+  // specialize on alignment independently of the top-level parameter flag.
-+  return handle_tuple_recursively(backend, arg, is_const, specialize_value,
-+                                  true);
-+}
-+
- // initialize type handler which returns specialize impelemntations based on
-@@ -530,2 +547,14 @@ std::pair<py::object, py::object> specialize_arg(PyObject *backend,
-
-+std::pair<py::object, py::object>
-+specialize_arg_recursively(PyObject *backend, PyObject *arg, bool is_const,
-+                           bool specialize_value,
-+                           bool alignment_specialization_enabled) {
-+  if (PyTuple_Check(arg)) {
-+    return handle_tuple_recursively(backend, arg, is_const, specialize_value,
-+                                    alignment_specialization_enabled);
-+  }
-+  return specialize_arg(backend, arg, is_const, specialize_value,
-+                        alignment_specialization_enabled);
-+}
-+
- // main entry-point from Python implementing specialization logic natively
-@@ -539,5 +568,5 @@ PyObject *specialize_impl(PyObject *self, PyObject *const *args,
-
--  if (nargs != 5) {
-+  if (nargs != 5 && nargs != 6) {
-     PyErr_SetString(PyExc_TypeError,
--                    "native_specialize_impl expected 5 arguments");
-+                    "native_specialize_impl expected 5 or 6 arguments");
-     return nullptr;
-@@ -547,16 +576,28 @@ PyObject *specialize_impl(PyObject *self, PyObject *const *args,
-   PyObject *arg = args[1];
-   int is_const = PyObject_IsTrue(args[2]);
-   int specialize_value = PyObject_IsTrue(args[3]);
--  int align = PyObject_IsTrue(args[4]);
--
--  if (is_const == -1 || specialize_value == -1 || align == -1) {
-+  int alignment_specialization_enabled = PyObject_IsTrue(args[4]);
-+  // Five arguments preserve the historical direct-call behavior where tuple
-+  // elements always specialize on alignment. The binder supplies the sixth
-+  // backend-policy argument for mode-aware recursive specialization.
-+  int recursive_alignment_specialization_enabled =
-+      nargs == 6 ? PyObject_IsTrue(args[5]) : 1;
-+
-+  if (is_const == -1 || specialize_value == -1 ||
-+      alignment_specialization_enabled == -1 ||
-+      recursive_alignment_specialization_enabled == -1) {
-     PyErr_SetString(PyExc_TypeError, "native_specialize_impl expected boolean "
--                                     "arguments for args2, args3, args4");
-+                                     "arguments for args2, args3, args4, args5");
-     return nullptr;
-   }
-
--  auto [type, key] =
--      specialize_arg(backend, arg, is_const, specialize_value, align);
-+  auto [type, key] = PyTuple_Check(arg)
-+                         ? specialize_arg_recursively(
-+                               backend, arg, is_const, specialize_value,
-+                               recursive_alignment_specialization_enabled)
-+                         : specialize_arg(backend, arg, is_const,
-+                                          specialize_value,
-+                                          alignment_specialization_enabled);
-
-   // check if specialization failed
-   if (!type || !key) {
-
-diff --git a/python/test/unit/runtime/test_specialize.py b/python/test/unit/runtime/test_specialize.py
-index 0b82abc..e64d6a2 100644
---- a/python/test/unit/runtime/test_specialize.py
-+++ b/python/test/unit/runtime/test_specialize.py
-@@ -118,6 +118,11 @@ def derived_inputs_to_specialize():
- def tuples_to_specialize():
-+    tensor = torch.empty(17, dtype=torch.float32, device="cpu")
-     return [
-         (1, 1),
-+        (16, 17),
-+        (tensor[:16], tensor[1:]),
-         (False, True),
-         namedtuple('strides', ['x', 'y'])(1, 1),
-+        namedtuple('alignment', ['x', 'y'])(16, 17),
-+        namedtuple('pointers', ['x', 'y'])(tensor[:16], tensor[1:]),
-         namedtuple('flags', ['x', 'y'])(False, True),
+                 if isinstance(kp.annotation_type, str):
+                     if kp.annotation_type == "u1" or kp.annotation_type[:2] in ["fp", "bf"]:

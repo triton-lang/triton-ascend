@@ -1,5 +1,4 @@
 import inspect
-from collections import namedtuple
 
 import pytest
 import torch
@@ -7,7 +6,7 @@ import torch
 from triton.backends.ascend.compiler import AscendBackend
 from triton.backends.compiler import GPUTarget
 from triton.backends.nvidia.compiler import CUDABackend
-from triton.runtime.jit import KernelParam, compute_cache_key, create_function_from_signature, native_specialize_impl
+from triton.runtime.jit import KernelParam, compute_cache_key, create_function_from_signature
 
 
 class PointerArg:
@@ -19,34 +18,6 @@ class PointerArg:
 
     def data_ptr(self):
         return self.address
-
-
-TupleArg = namedtuple("TupleArg", ["value"])
-
-
-def plain_tuple(value):
-    return (value, )
-
-
-def named_tuple(value):
-    return TupleArg(value)
-
-
-def nested_tuple(value):
-    return ((value, ), )
-
-
-TUPLE_FACTORIES = [
-    pytest.param(plain_tuple, id="tuple"),
-    pytest.param(named_tuple, id="namedtuple"),
-    pytest.param(nested_tuple, id="nested-tuple"),
-]
-
-
-def first_tuple_leaf(value):
-    while isinstance(value, tuple):
-        value = value[0]
-    return value
 
 
 def make_binder(backend=None):
@@ -63,23 +34,6 @@ def make_binder(backend=None):
 
 def bind_and_key(binder, cache, value, address, options):
     _, specialization, raw_options = binder(value, PointerArg(address), **options)
-    return specialization, compute_cache_key(cache, specialization, raw_options)
-
-
-def make_tuple_binder(do_not_specialize_on_alignment=False, backend=None):
-
-    def kernel(arg):
-        pass
-
-    signature = inspect.signature(kernel)
-    params = [KernelParam(0, next(iter(signature.parameters.values())), False, do_not_specialize_on_alignment)]
-    if backend is None:
-        backend = AscendBackend(GPUTarget("npu", "Ascend910B", 32))
-    return create_function_from_signature(signature, params, backend)
-
-
-def bind_tuple_and_key(binder, cache, arg, options):
-    _, specialization, raw_options = binder(arg, **options)
     return specialization, compute_cache_key(cache, specialization, raw_options)
 
 
@@ -191,36 +145,6 @@ def test_non_ascend_backend_keeps_alignment_specialization():
     assert unaligned == [("i32", ""), ("*fp32", "")]
 
 
-def test_internal_alignment_flag_does_not_shadow_kernel_parameter():
-
-    def kernel(__triton_use_alignment_specialization):
-        pass
-
-    signature = inspect.signature(kernel)
-    params = [KernelParam(0, next(iter(signature.parameters.values())), False, False)]
-    backend = AscendBackend(GPUTarget("npu", "Ascend910B", 32))
-    binder = create_function_from_signature(signature, params, backend)
-
-    _, specialization, _ = binder(16, compile_mode="simd")
-
-    assert specialization == [("i32", "")]
-
-
-def test_internal_integer_annotation_helper_does_not_shadow_kernel_parameter():
-
-    def kernel(__triton_specialize_with_integer_annotation: "i32"):
-        pass
-
-    signature = inspect.signature(kernel)
-    params = [KernelParam(0, next(iter(signature.parameters.values())), False, False)]
-    backend = AscendBackend(GPUTarget("npu", "Ascend910B", 32))
-    binder = create_function_from_signature(signature, params, backend)
-
-    _, specialization, _ = binder(1, compile_mode="simd")
-
-    assert specialization == [("constexpr", 1)]
-
-
 @pytest.mark.parametrize("annotation", ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"])
 @pytest.mark.parametrize("options", SIMD_OPTIONS + SIMT_OPTIONS)
 def test_annotated_integer_one_keeps_constexpr_specialization(annotation, options):
@@ -284,119 +208,3 @@ def test_annotated_integer_do_not_specialize_keeps_legacy_cache_key(options, val
 
     assert first_specialization == second_specialization == [("i32", None)]
     assert first_key == second_key
-
-
-@pytest.mark.parametrize("make_tuple", TUPLE_FACTORIES)
-@pytest.mark.parametrize("options", SIMD_OPTIONS)
-@pytest.mark.parametrize("values", [(16, 17), (17, 16)], ids=["aligned-first", "unaligned-first"])
-def test_simd_tuple_integer_alignment_reuses_cache_key(make_tuple, options, values):
-    binder = make_tuple_binder()
-    cache = {}
-    first, first_key = bind_tuple_and_key(binder, cache, make_tuple(values[0]), options)
-    second, second_key = bind_tuple_and_key(binder, cache, make_tuple(values[1]), options)
-
-    assert first_key == second_key
-    assert first_tuple_leaf(first[0][1]) == first_tuple_leaf(second[0][1]) == ""
-
-
-@pytest.mark.parametrize("make_tuple", TUPLE_FACTORIES)
-@pytest.mark.parametrize("options", SIMD_OPTIONS)
-@pytest.mark.parametrize("addresses", [(0x1000, 0x1004), (0x1004, 0x1000)],
-                         ids=["aligned-first", "unaligned-first"])
-def test_simd_tuple_pointer_alignment_reuses_cache_key(make_tuple, options, addresses):
-    binder = make_tuple_binder()
-    cache = {}
-    first, first_key = bind_tuple_and_key(binder, cache, make_tuple(PointerArg(addresses[0])), options)
-    second, second_key = bind_tuple_and_key(binder, cache, make_tuple(PointerArg(addresses[1])), options)
-
-    assert first_key == second_key
-    assert first_tuple_leaf(first[0][1]) == first_tuple_leaf(second[0][1]) == ""
-
-
-@pytest.mark.parametrize("make_tuple", TUPLE_FACTORIES)
-@pytest.mark.parametrize("options", SIMT_OPTIONS)
-@pytest.mark.parametrize("values", [(16, 17), (17, 16)], ids=["aligned-first", "unaligned-first"])
-def test_simt_tuple_integer_alignment_keeps_distinct_cache_keys(make_tuple, options, values):
-    binder = make_tuple_binder()
-    cache = {}
-    first, first_key = bind_tuple_and_key(binder, cache, make_tuple(values[0]), options)
-    second, second_key = bind_tuple_and_key(binder, cache, make_tuple(values[1]), options)
-
-    assert first_key != second_key
-    assert {first_tuple_leaf(first[0][1]), first_tuple_leaf(second[0][1])} == {"", "D"}
-
-
-@pytest.mark.parametrize("make_tuple", TUPLE_FACTORIES)
-@pytest.mark.parametrize("options", SIMT_OPTIONS)
-@pytest.mark.parametrize("addresses", [(0x1000, 0x1004), (0x1004, 0x1000)],
-                         ids=["aligned-first", "unaligned-first"])
-def test_simt_tuple_pointer_alignment_keeps_distinct_cache_keys(make_tuple, options, addresses):
-    binder = make_tuple_binder()
-    cache = {}
-    first, first_key = bind_tuple_and_key(binder, cache, make_tuple(PointerArg(addresses[0])), options)
-    second, second_key = bind_tuple_and_key(binder, cache, make_tuple(PointerArg(addresses[1])), options)
-
-    assert first_key != second_key
-    assert {first_tuple_leaf(first[0][1]), first_tuple_leaf(second[0][1])} == {"", "D"}
-
-
-def test_native_tuple_recursive_alignment_policy_is_separate_from_top_level_alignment():
-    backend = AscendBackend(GPUTarget("npu", "Ascend910B", 32))
-
-    legacy = native_specialize_impl(backend, (16, ), False, True, False)
-    simd = native_specialize_impl(backend, (16, ), False, True, False, False)
-
-    assert legacy == (("i32", ), ("D", ))
-    assert simd == (("i32", ), ("", ))
-
-
-@pytest.mark.parametrize("make_tuple", TUPLE_FACTORIES)
-@pytest.mark.parametrize("options", SIMT_OPTIONS)
-@pytest.mark.parametrize("values", [(16, 17), (17, 16)], ids=["aligned-first", "unaligned-first"])
-def test_simt_tuple_alignment_decorator_keeps_legacy_integer_behavior(make_tuple, options, values):
-    binder = make_tuple_binder(do_not_specialize_on_alignment=True)
-    cache = {}
-    first, first_key = bind_tuple_and_key(binder, cache, make_tuple(values[0]), options)
-    second, second_key = bind_tuple_and_key(binder, cache, make_tuple(values[1]), options)
-
-    assert first_key != second_key
-    assert {first_tuple_leaf(first[0][1]), first_tuple_leaf(second[0][1])} == {"", "D"}
-
-
-@pytest.mark.parametrize("make_tuple", TUPLE_FACTORIES)
-@pytest.mark.parametrize("options", SIMT_OPTIONS)
-@pytest.mark.parametrize("addresses", [(0x1000, 0x1004), (0x1004, 0x1000)],
-                         ids=["aligned-first", "unaligned-first"])
-def test_simt_tuple_alignment_decorator_keeps_legacy_pointer_behavior(make_tuple, options, addresses):
-    binder = make_tuple_binder(do_not_specialize_on_alignment=True)
-    cache = {}
-    first, first_key = bind_tuple_and_key(binder, cache, make_tuple(PointerArg(addresses[0])), options)
-    second, second_key = bind_tuple_and_key(binder, cache, make_tuple(PointerArg(addresses[1])), options)
-
-    assert first_key != second_key
-    assert {first_tuple_leaf(first[0][1]), first_tuple_leaf(second[0][1])} == {"", "D"}
-
-
-@pytest.mark.parametrize("values", [(16, 17), (17, 16)], ids=["aligned-first", "unaligned-first"])
-def test_non_ascend_tuple_alignment_decorator_keeps_legacy_behavior(values):
-    backend = CUDABackend(GPUTarget("cuda", 80, 32))
-    binder = make_tuple_binder(do_not_specialize_on_alignment=True, backend=backend)
-    cache = {}
-    first, first_key = bind_tuple_and_key(binder, cache, (values[0], ), {})
-    second, second_key = bind_tuple_and_key(binder, cache, (values[1], ), {})
-
-    assert first_key != second_key
-    assert {first_tuple_leaf(first[0][1]), first_tuple_leaf(second[0][1])} == {"", "D"}
-
-
-@pytest.mark.parametrize("make_tuple", TUPLE_FACTORIES)
-@pytest.mark.parametrize("options", SIMD_OPTIONS + SIMT_OPTIONS)
-@pytest.mark.parametrize("values", [(1, 2), (2, 1)], ids=["one-first", "one-second"])
-def test_tuple_integer_one_keeps_distinct_cache_key(make_tuple, options, values):
-    binder = make_tuple_binder()
-    cache = {}
-    first, first_key = bind_tuple_and_key(binder, cache, make_tuple(values[0]), options)
-    second, second_key = bind_tuple_and_key(binder, cache, make_tuple(values[1]), options)
-
-    assert first_key != second_key
-    assert {first_tuple_leaf(first[0][0]), first_tuple_leaf(second[0][0])} == {"constexpr", "i32"}

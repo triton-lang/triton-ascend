@@ -34,10 +34,8 @@ namespace mlir::ascend::simt_selection {
 
 inline constexpr llvm::StringLiteral kEffectiveExecutionAttr =
     "ascend.simt_costmodel.effective";
-// The kanuak mixed SIMD/SIMT pipeline consumes `vec_mode`. Keep
-// `vector_type` readable for compatibility, but materialize `vec_mode` in new
-// IR so the existing lowering recognizes the selected scope.
-inline constexpr llvm::StringLiteral kVectorModeAttr = "vec_mode";
+// Use one spelling from the Python API through TTIR and Route Model lowering.
+inline constexpr llvm::StringLiteral kVectorModeAttr = "vector_mode";
 inline constexpr llvm::StringLiteral kLegacyVectorModeAttr = "vector_type";
 
 inline constexpr llvm::StringLiteral kAllSimd = "all_simd";

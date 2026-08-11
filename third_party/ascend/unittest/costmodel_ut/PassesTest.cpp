@@ -474,7 +474,7 @@ module {
   ASSERT_TRUE(mlir::succeeded(materializeSimtAnchorPlan(*module, plan)));
   Operation *scope = findFirstOp(*module, "scope.scope");
   ASSERT_NE(scope, nullptr);
-  EXPECT_EQ(scope->getAttrOfType<mlir::StringAttr>("vec_mode").getValue(),
+  EXPECT_EQ(scope->getAttrOfType<mlir::StringAttr>("vector_mode").getValue(),
             "simt");
   Operation *initialLoad = findFirstOp(*module, "tt.load");
   ASSERT_NE(initialLoad, nullptr);
@@ -658,8 +658,9 @@ module attributes {
   ASSERT_NE(scopeOp, nullptr);
   ASSERT_EQ(scopeOp->getNumRegions(), 1u);
   ASSERT_EQ(scopeOp->getNumResults(), 1u);
-  ASSERT_TRUE(scopeOp->getAttrOfType<StringAttr>("vec_mode"));
-  EXPECT_EQ(scopeOp->getAttrOfType<StringAttr>("vec_mode").getValue(), "simt");
+  ASSERT_TRUE(scopeOp->getAttrOfType<StringAttr>("vector_mode"));
+  EXPECT_EQ(scopeOp->getAttrOfType<StringAttr>("vector_mode").getValue(),
+            "simt");
 
   auto &scopeBody = scopeOp->getRegion(0).front();
   Operation *scopedAdd = nullptr;
@@ -695,9 +696,9 @@ module {
       "scope.scope"() ({
         %0 = arith.addi %arg0, %c1 : i32
         "scope.return"() : () -> ()
-      }) {vec_mode = "simt"} : () -> ()
+      }) {vector_mode = "simt"} : () -> ()
       "scope.return"() : () -> ()
-    }) {vec_mode = "simt"} : () -> ()
+    }) {vector_mode = "simt"} : () -> ()
     return
   }
 }
@@ -722,7 +723,7 @@ module {
   func.func public @main(%arg0: i32) -> i32 {
     %0 = "scope.scope"() ({
       "scope.return"(%arg0) : (i32) -> ()
-    }) {vec_mode = "simt"} : () -> i32
+    }) {vector_mode = "simt"} : () -> i32
     return %0 : i32
   }
 }

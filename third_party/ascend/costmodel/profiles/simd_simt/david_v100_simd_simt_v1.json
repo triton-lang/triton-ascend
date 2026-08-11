@@ -83,7 +83,7 @@
           "mixed_simd_simt": 1.0,
           "all_simt_only_validated": false,
           "mixed_simd_simt_validated": false,
-          "source": "Identity placeholders after invalidating the previous solve-tril calibration. The old feature extractor treated each dynamic 16x16 recurrence as one iteration instead of the structurally known 14 and the earlier 22.3130 us mixed label did not pass --enable-simd-simt-mix-compile. Both non-SIMD production routes stay disabled until the canonical vec_mode scope is observed as hivm.vf_mode<SIMT>, the corrected raw scores are emitted, and all routes are remeasured on A5 card 0.",
+          "source": "Identity placeholders after invalidating the previous solve-tril calibration. The old feature extractor treated each dynamic 16x16 recurrence as one iteration instead of the structurally known 14 and the earlier 22.3130 us mixed label did not pass --enable-simd-simt-mix-compile. Both non-SIMD production routes stay disabled until the canonical TTIR vector_mode scope is observed as hivm.vf_mode<SIMT>, the corrected raw scores are emitted, and all routes are remeasured on A5 card 0.",
           "confidence": "low"
         }
       }

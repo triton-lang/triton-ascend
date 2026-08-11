@@ -7,6 +7,6 @@
 tt.func public @simt_scope(%arg0: !tt.ptr<f32>) {
   scope.scope : () -> () {
     scope.return
-  } {vec_mode = "simt"}
+  } {vector_mode = "simt"}
   tt.return
 }

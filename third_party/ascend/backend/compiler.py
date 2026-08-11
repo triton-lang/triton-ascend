@@ -245,7 +245,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         # Once the C++ Route Model has made an explicit decision, lowering
         # must implement that decision rather than also applying the legacy
         # global SIMT-template switch. A mixed decision is represented solely
-        # by the materialized scope.scope<vec_mode=simt>; an all-SIMD
+        # by the materialized scope.scope<vector_mode=simt>; an all-SIMD
         # decision contains no such scope.  Keep the old global behavior only
         # for backend_default/report/off compatibility paths.
         model_owns_local_routing = cpp_decision in {
@@ -291,6 +291,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
         ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, enable_nd2nz_on_vector, enable_select_analysis,
                                                 compile_on_910_95, compile_mode)
+        ascend.passes.ttir.set_enable_buffer_insert_optimization(
+            mod, metadata.get("enable_buffer_insert_optimization", True))
         if metadata["enable_dynamic_cv_pipeline"]:
             metadata["set_workspace_multibuffer"] = 0
             metadata["enable_mixed_cv"] = True
@@ -298,10 +300,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             ascend.passes.ttir.set_enable_cube_block_merge(metadata["enable_cube_block_merge"])
             ascend.passes.ttir.set_enable_ub_refine_opt(mod, metadata["enable_ub_refine_opt"])
 
-            # Must run before add_dynamic_cv_pipeline because the driven
-            # AddMultiBufferInnerScope pass reads the module-level
-            # `ssbuffer.insertionOptimization` attribute (set here) at run time.
-            ascend.passes.ttir.set_enable_buffer_insert_optimization(mod, metadata["enable_buffer_insert_optimization"])
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
 
         _intra_val = metadata.get("intra_cache_num")
@@ -609,6 +607,17 @@ def _needs_lib_call_no_inline(metadata):
     return arch.startswith("Ascend950")
 
 
+@functools.lru_cache()
+def _npu_compiler_supports_option(compiler_path: str, option: str) -> bool:
+    """Check an optional BiShengIR flag instead of assuming toolchain parity."""
+    try:
+        result = subprocess.run([compiler_path, "--help"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return option in result.stdout
+
+
 def get_auto_bind_sub_block_option(metadata):
     # auto_tile_and_bind_subblock is read from the module.
     # enable_auto_bind_sub_block is set by the user and has a higher priority.
@@ -854,7 +863,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 "--enable-hfusion-compile=true",
                 "--enable-triton-kernel-compile=true",
             ]
-            if _needs_lib_call_no_inline(metadata):
+            if (_needs_lib_call_no_inline(metadata)
+                    and _npu_compiler_supports_option(npu_compiler_path, "--enable-lib-call-no-inline")):
                 _compile_option_list += ["--enable-lib-call-no-inline=false"]
             if metadata.get("parallel_mode") == "mix_simd_simt":
                 _compile_option_list += ["--enable-simd-simt-mix-compile"]
@@ -1122,11 +1132,9 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 bishengir_hivm_opt,
                 "--enable-triton-kernel-compile=true",
             ]
-            # CANN 9.1's hivmc-a5 cannot translate hacc.noinline yet. A2/A3
-            # BiShengIR versions may not recognize this command-line option.
-            if _needs_lib_call_no_inline(metadata):
+            if (_needs_lib_call_no_inline(metadata)
+                    and _npu_compiler_supports_option(npu_compiler_path, "--enable-lib-call-no-inline")):
                 _compile_option_list += ["--enable-lib-call-no-inline=false"]
-
         _compile_option_list += ["--mlir-print-ir-after-failure"]
         _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:

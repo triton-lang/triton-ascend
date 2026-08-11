@@ -242,7 +242,7 @@ def MaterializeSimtScopesPass
     the selector pass.  This compatibility pass verifies that:
 
       ascend.simt_costmodel.effective = "mixed_simd_simt"
-      scope.scope {vec_mode = "simt"}
+      scope.scope {vector_mode = "simt"}
 
     coexist in the IR.  It does not rediscover anchors or read/write a
     per-operation selected marker.

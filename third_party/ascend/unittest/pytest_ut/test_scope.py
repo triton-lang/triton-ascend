@@ -96,19 +96,8 @@ def kernel_scope_disable_auto_sync(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr
 
 
 @triton.jit
-def kernel_scope_vector_mode_simt(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):
-    """Test vector_mode SIMT annotation."""
-    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
-    with al.scope(vector_mode="simt"):
-        x = tl.load(x_ptr + i, mask=i < n)
-        y = tl.load(y_ptr + i, mask=i < n)
-        result = x + y
-        tl.store(out_ptr + i, result, mask=i < n)
-
-
-@triton.jit
 def kernel_whole_body_simt(out_ptr):
-    with al.scope(vec_mode="simt"):
+    with al.scope(vector_mode="simt"):
         tl.store(out_ptr, 1.0)
 
 
@@ -160,25 +149,15 @@ def test_scope_disable_auto_sync():
     assert "hivm.disable_auto_sync" in mlir
 
 
-def test_scope_vector_mode_simt():
-    """Test the legacy API alias generates canonical BiShengIR IR."""
-    mlir = compile_kernel(
-        kernel_scope_vector_mode_simt,
-        {"x_ptr": "*fp32", "y_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"},
-        {"BLOCK": 256},
-    )
-    assert "scope.scope" in mlir
-    assert 'vec_mode = "simt"' in mlir
-    assert "vector_mode =" not in mlir
-    assert "simt" in mlir
-
-
 def test_native_whole_body_simt_scope():
     module = compile_kernel_module(
         kernel_whole_body_simt,
         {"out_ptr": "*fp32"},
         {},
     )
+    module_text = str(module)
+    assert 'vector_mode = "simt"' in module_text
+    assert "vec_mode" not in module_text
     assert ascend_ir.is_whole_body_void_simt_scope(module)
     assert ascend_ir.inline_void_simt_scopes_for_pure_simt(module) == 1
     assert module.verify()

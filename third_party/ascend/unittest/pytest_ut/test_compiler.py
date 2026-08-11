@@ -3,7 +3,55 @@ import os
 import sys
 from unittest.mock import MagicMock
 
+import pytest
 import triton.backends.ascend.compiler as compiler
+
+pytestmark = pytest.mark.backend("cpu")
+
+
+def test_cv_split_preserves_user_pipeline_policy():
+    metadata = {
+        "multibuffer": True,
+        "set_workspace_multibuffer": 2,
+        "has_auto_blockify_blacklist_op": False,
+        "enable_mixed_cv": False,
+        "disable_auto_inject_block_sync": False,
+    }
+
+    compiler._configure_cv_split_metadata(metadata)
+
+    assert metadata["multibuffer"] is True
+    assert metadata["set_workspace_multibuffer"] == 2
+    assert metadata["has_auto_blockify_blacklist_op"] is False
+    assert metadata["enable_mixed_cv"] is False
+    assert metadata["disable_auto_inject_block_sync"] is True
+
+
+@pytest.mark.parametrize(
+    "dynamic, cv_split, target_is_a5, expected",
+    [
+        (False, False, True, (False, False)),
+        (True, False, True, (False, True)),
+        (False, True, True, (True, False)),
+        # Auto mode: attempt CV split, then let DCVP observe the commit result
+        # and run only if CV split kept the original module.
+        (True, True, True, (True, True)),
+        (True, True, False, (False, True)),
+    ],
+)
+def test_cv_pipeline_selection(dynamic, cv_split, target_is_a5, expected):
+    metadata = {
+        "enable_dynamic_cv_pipeline": dynamic,
+        "enable_cv_split_scheduling": cv_split,
+    }
+    assert compiler._select_cv_pipeline_policy(metadata, target_is_a5) == expected
+
+
+def test_cv_split_a5_default_is_transactional_auto():
+    fields = compiler.NPUOptions.__dataclass_fields__
+    assert fields["enable_cv_split_scheduling"].default == compiler.is_compile_on_910_95
+    assert fields["enable_dynamic_cv_pipeline"].default == compiler.is_compile_on_910_95
+    assert fields["cv_split_unroll_factor"].default == 4
 
 
 def _make_torch_npu_mock(cfg_dir):

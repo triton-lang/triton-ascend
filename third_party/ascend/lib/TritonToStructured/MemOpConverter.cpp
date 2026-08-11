@@ -226,9 +226,8 @@ LogicalResult rewriteCatPointerStore(triton::StoreOp op, triton::CatOp catOp,
 
 // TTIR requires a store value to have the same shape as its pointer. A DSL
 // scalar is consequently represented either by tt.splat of a scalar or by a
-// folded dense splat constant. Only these uniform values are safe to defer for
-// a zero-stride pointer broadcast: all aliased lanes then write the same value.
-bool isScalarStoreValue(Value value) {
+// folded dense splat constant.
+bool isUniformScalarStoreValue(Value value) {
   if (auto splat = value.getDefiningOp<triton::SplatOp>())
     return !isa<ShapedType>(splat.getSrc().getType());
 
@@ -237,6 +236,46 @@ bool isScalarStoreValue(Value value) {
       return dense.isSplat();
   }
   return false;
+}
+
+// Return true only for the store form that must be left to the later pointer
+// broadcast lowering. A non-singleton zero-stride pointer dimension aliases
+// lanes, so deferring is sound only when the DSL supplied one scalar value.
+bool shouldDeferScalarPointerBroadcastStore(Value ptr, Value value) {
+  if (!isUniformScalarStoreValue(value))
+    return false;
+
+  auto broadcast = ptr.getDefiningOp<triton::BroadcastOp>();
+  if (!broadcast)
+    return false;
+
+  auto resultType = dyn_cast<RankedTensorType>(broadcast.getType());
+  auto sourceType = dyn_cast<RankedTensorType>(broadcast.getSrc().getType());
+  if (!resultType || !sourceType ||
+      !isa<triton::PointerType>(resultType.getElementType()) ||
+      resultType.getRank() != sourceType.getRank()) {
+    return false;
+  }
+
+  int broadcastedDims = 0;
+  for (size_t i = 0; i < resultType.getShape().size(); ++i) {
+    const int64_t srcDim = sourceType.getShape()[i];
+    const int64_t resultDim = resultType.getShape()[i];
+    if (srcDim == 1 && resultDim != 1) {
+      ++broadcastedDims;
+      continue;
+    }
+    if (srcDim != resultDim)
+      return false;
+  }
+  if (broadcastedDims != 1)
+    return false;
+
+  Value source = broadcast.getSrc();
+  while (auto addPtr = source.getDefiningOp<triton::AddPtrOp>())
+    source = addPtr.getPtr();
+  auto splat = source.getDefiningOp<triton::SplatOp>();
+  return splat && isa<triton::PointerType>(splat.getSrc().getType());
 }
 
 } // namespace
@@ -311,15 +350,11 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
   }
 
   // AddPtrSplatConverter can preserve a non-singleton zero-stride dimension
-  // as a pointer broadcast. TritonToLinalg has a dedicated lowering for this
-  // legal form; rebuilding it here drops the zero-stride dimension from the
-  // pointer and mask while the scalar store value remains full-rank.
-  if (auto ptrBroadcast = oldPtr.getDefiningOp<triton::BroadcastOp>();
-      ptrBroadcast &&
-      isScalarStoreValue(oldValue) &&
-      ConverterUtils::isHoistablePointerBroadcast(ptrBroadcast)) {
+  // as a pointer broadcast. Rebuilding the scalar store here drops that
+  // dimension from the pointer and mask while the store value stays full-rank.
+  if (shouldDeferScalarPointerBroadcastStore(oldPtr, oldValue)) {
     return rewriter.notifyMatchFailure(
-        op, "defer hoistable pointer broadcast store to TritonToLinalg");
+        op, "defer scalar pointer broadcast store to TritonToLinalg");
   }
 
   MemOpTransformer tf(MemOpTransformer::MemType::store, optimizeDynamicOffset);

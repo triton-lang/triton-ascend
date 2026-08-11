@@ -37,7 +37,6 @@ libdevice.exp2 = math.exp2
 libdevice.log = math.log
 libdevice.log2 = math.log2
 libdevice.cos = math.cos
-libdevice.sin = math.sin
 libdevice.sqrt = math.sqrt
 libdevice.sqrt_rn = math.sqrt_rn
 libdevice.rsqrt = math.rsqrt

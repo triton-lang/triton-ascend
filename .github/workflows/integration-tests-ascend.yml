@@ -102,8 +102,22 @@ jobs:
           ccache --zero-stats
           NUM_PROCS=$(( $(nproc) / 3 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          if [ -f setup_ascend.py ]; then
+            SETUP_DIR="./"
+            SETUP_PY="setup_ascend.py"
+          elif [ -f setup.py ]; then
+            SETUP_DIR="./"
+            SETUP_PY="setup.py"
+          elif [ -f python/setup.py ]; then
+            SETUP_DIR="python"
+            SETUP_PY="setup.py"
+          else
+            echo "ERROR: setup.py or setup_ascend.py not found" >&2
+            exit 1
+          fi
+          cd "$SETUP_DIR"
           MAX_JOBS="$NUM_PROCS" \
-          ${PYTHON} setup.py bdist_wheel
+          ${PYTHON} ${SETUP_PY} bdist_wheel
           ${PYTHON} -m pip install dist/*.whl
 
       - name: CCache stats

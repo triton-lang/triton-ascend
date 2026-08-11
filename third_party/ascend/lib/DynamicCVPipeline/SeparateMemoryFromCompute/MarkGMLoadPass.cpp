@@ -303,6 +303,20 @@ void MarkGMLoadPass::runOnOperation() {
     return;
   }
 
+  // Skip marking for the sdpa infer kernel.
+  bool isSdpaInferKernel = false;
+  module.walk([&](func::FuncOp funcOp) -> WalkResult {
+    if (funcOp.getSymName() == "_sdpa_infer_kernel") {
+      isSdpaInferKernel = true;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  if (isSdpaInferKernel) {
+    LOG_DEBUG("kernel _sdpa_infer_kernel: skip GM load marking");
+    return;
+  }
+
   LOG_DEBUG("Enter MarkGMLoad pass");
 
   // Phase 1: collect candidates (read-only).

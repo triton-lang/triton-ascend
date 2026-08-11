@@ -1311,7 +1311,7 @@ def acos(arg0: core.tensor, _semantic=None):
     """
     if triton_enable_libdevice_simt():
         if arg0.dtype == core.dtype("bf16"):
-            core.static_print("extern livdevice.acos for dtype bf16 is unspported for now.")
+            core.static_print("extern livdevice.acos for dtype bf16 is unspported for now")
             core.static_assert(False)
         return core.extern_elementwise(
             "", "", [arg0], {

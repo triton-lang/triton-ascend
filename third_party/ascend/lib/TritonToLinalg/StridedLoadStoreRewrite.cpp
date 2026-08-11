@@ -81,6 +81,13 @@ static std::optional<int64_t> getStaticConstInt(Value v) {
   return std::nullopt;
 }
 
+static bool hasStaticZeroStride(ValueRange strides) {
+  return llvm::any_of(strides, [](Value stride) {
+    auto value = getStaticConstInt(stride);
+    return value.has_value() && value.value() == 0;
+  });
+}
+
 static std::optional<int64_t> getStaticMaskUpperBound(Value mask) {
   if (!mask)
     return std::nullopt;
@@ -817,40 +824,43 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
   ArrayRef<int64_t> shape = resultType.getShape();
   int64_t rank = static_cast<int64_t>(shape.size());
 
-  // ---- order must match the "non-permuted" layout: order[i] == rank-1-i,
-  //      i.e. innermost (fastest-changing) is the last dim of the tensor.
-  //      ImplicitPermute handles permuted layouts via tt.trans, so we
-  //      leave anything non-canonical alone.
-  auto order = mtpt.getOrder();
-  if (static_cast<int64_t>(order.size()) != rank)
-    return failure();
-  for (int64_t i = 0; i < rank; ++i) {
-    if (order[i] != rank - 1 - i) {
-      return failure();
-    }
-  }
-
   // ---- stride check ----
   auto strides = mtpt.getStrides();
   if (strides.empty() || static_cast<int64_t>(strides.size()) != rank)
     return failure();
-  // Stride dispatch: strided DMA on the MTE engine only supports power-of-two
-  // strides; a non-power-of-two stride would degrade to a slow scalar access.
-  // Dynamic strides stay on the structured SIMD path because they may be
-  // runtime stride 1 or power-of-two, where SIMT stride is slower. So we
-  // only rewrite to SIMT stride for *static non-power-of-two* strides:
-  //   stride 1 -> contiguous; stride 2 (even dim) -> deinterleave;
-  //   stride >= 4 (power of two) -> (compact) strided DMA.
-  APInt lastStrideC;
-  if (!matchPattern(strides.back(), m_ConstantInt(&lastStrideC)))
-    return failure();
-  int64_t lastStride = std::abs(lastStrideC.getSExtValue());
-  if (lastStride <= 1)
-    return failure();
-  if (lastStride == 2)
-    return failure(); // even -> deinterleave; odd -> strided DMA
-  if ((lastStride & (lastStride - 1)) == 0)
-    return failure(); // power-of-two >= 4 -> strided DMA
+  const bool zeroStrideBroadcast = hasStaticZeroStride(strides);
+  int64_t lastStride = 0;
+  if (!zeroStrideBroadcast) {
+    // ---- order must match the "non-permuted" layout: order[i] == rank-1-i,
+    //      i.e. innermost (fastest-changing) is the last dim of the tensor.
+    //      ImplicitPermute handles permuted layouts via tt.trans, so we
+    //      leave anything non-canonical alone.
+    auto order = mtpt.getOrder();
+    if (static_cast<int64_t>(order.size()) != rank)
+      return failure();
+    for (int64_t i = 0; i < rank; ++i) {
+      if (order[i] != rank - 1 - i)
+        return failure();
+    }
+
+    // Stride dispatch: strided DMA on the MTE engine only supports power-of-two
+    // strides; a non-power-of-two stride would degrade to a slow scalar access.
+    // Dynamic strides stay on the structured SIMD path because they may be
+    // runtime stride 1 or power-of-two, where SIMT stride is slower. So we
+    // only rewrite to SIMT stride for *static non-power-of-two* strides:
+    //   stride 1 -> contiguous; stride 2 (even dim) -> deinterleave;
+    //   stride >= 4 (power of two) -> (compact) strided DMA.
+    APInt lastStrideC;
+    if (!matchPattern(strides.back(), m_ConstantInt(&lastStrideC)))
+      return failure();
+    lastStride = std::abs(lastStrideC.getSExtValue());
+    if (lastStride <= 1)
+      return failure();
+    if (lastStride == 2)
+      return failure(); // even -> deinterleave; odd -> strided DMA
+    if ((lastStride & (lastStride - 1)) == 0)
+      return failure(); // power-of-two >= 4 -> strided DMA
+  }
 
   // ---- Compute per-axis effective base offsets: mtpt.offsets[d] +
   // (advance.offsets[d] if present)
@@ -915,8 +925,8 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
     scalarBase = rewriter.create<arith::AddIOp>(loc, scalarBase, prod);
   }
 
-  if (resultType.getRank() >= 1 && resultType.getRank() <= 3 &&
-      resultType.hasStaticShape()) {
+  if (!zeroStrideBroadcast && resultType.getRank() >= 1 &&
+      resultType.getRank() <= 3 && resultType.hasStaticShape()) {
     FailureOr<SmallVector<Value>> numels = getBlockPtrStrideNumels(
         op.getOperation(), op.getMask(), op.getBoundaryCheck(), mtpt,
         resultType, logicalOffsets, rewriter);
@@ -944,7 +954,7 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
     }
   }
 
-  if (rank <= 3)
+  if (!zeroStrideBroadcast && rank <= 3)
     return failure();
 
   auto i64TensorTy = RankedTensorType::get(shape, i64Ty);

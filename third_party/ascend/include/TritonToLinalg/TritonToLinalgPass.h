@@ -89,7 +89,6 @@ private:
                                                 RewritePatternSet &patterns,
                                                 unsigned int launchGridRank);
 
-  LogicalResult processDescriptorOperations(ModuleOp moduleOp);
   LogicalResult processPtrBroadcastOperations(ModuleOp moduleOp);
   LogicalResult processImplicitPermuteOperations(ModuleOp moduleOp);
   LogicalResult processStridedLoadStoreRewriteOperations(ModuleOp moduleOp);

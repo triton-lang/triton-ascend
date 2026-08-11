@@ -30,4 +30,15 @@ def MarkTensorKind : Pass<"mark-tensor-kind", "mlir::ModuleOp"> {
     let constructor = "triton::createMarkTensorKindPass()";
 }
 
+def ConvertDescriptorOps : Pass<"convert-descriptor-ops", "mlir::ModuleOp"> {
+    let summary = "Lower Triton tensor descriptor operations to plain Triton IR";
+    let description = [{
+        Converts `tt.descriptor_load`, `tt.descriptor_store`, `tt.descriptor_gather`,
+        `tt.descriptor_scatter`, and `tt.descriptor_reduce` operations (which operate
+        on `!tt.tensordesc` values produced by `tt.make_tensor_descriptor`) into
+        equivalent Triton block-pointer, `tt.load`/`tt.store`, and `scf.for` based
+        IR that no longer references `!tt.tensordesc`.
+    }];
+    let constructor = "triton::createConvertDescriptorOpsPass()";
+}
 #endif // TRITON_TO_LINALG_CONVERSION_PASSES

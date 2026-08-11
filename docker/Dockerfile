@@ -7,7 +7,7 @@ ENV TZ="Asia/shanghai"
 
 ARG APTMIRROR
 ARG PIP_INDEX_URL="https://repo.huaweicloud.com/repository/pypi/simple"
-ARG PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cpu"
+ARG TORCH_INDEX_URL="http://cache-service.nginx-pypi-cache.svc.cluster.local/whl/cpu"
 ARG PIP_TRUSTED_HOST=""
 
 RUN if [ -n "$APTMIRROR" ]; then \
@@ -45,10 +45,15 @@ RUN if [ -n "$APTMIRROR" ]; then \
     update-ca-certificates
 
 RUN mkdir -p /root/.config/pip && \
-    printf '[global]\nindex-url = %s\nextra-index-url = %s\n' "$PIP_INDEX_URL" "$PYTORCH_INDEX_URL" > /root/.config/pip/pip.conf && \
+    printf '[global]\nindex-url = %s\n' "$PIP_INDEX_URL" > /root/.config/pip/pip.conf && \
     if [ -n "$PIP_TRUSTED_HOST" ]; then printf 'trusted-host = %s\n' "$PIP_TRUSTED_HOST" >> /root/.config/pip/pip.conf; fi
 
 COPY requirements.txt requirements_dev.txt ./
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install torch==2.7.1+cpu \
+      --index-url ${TORCH_INDEX_URL} \
+      --trusted-host ${PIP_TRUSTED_HOST:-cache-service.nginx-pypi-cache.svc.cluster.local}
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install -r requirements_dev.txt && \

@@ -1,0 +1,138 @@
+diff --git a/python/src/specialize.cc b/python/src/specialize.cc
+index 3449e3c90..f2aa584d2 100644
+--- a/python/src/specialize.cc
++++ b/python/src/specialize.cc
+@@ -36,2 +36,7 @@ specialize_arg(PyObject *backend, PyObject *arg, bool is_const,
+
++static std::pair<py::object, py::object>
++specialize_arg_recursively(PyObject *backend, PyObject *arg, bool is_const,
++                           bool specialize_value,
++                           bool alignment_specialization_enabled);
++
+ static bool init_called = false;
+@@ -380,6 +385,6 @@ handle_jit_callable(PyObject *backend, PyObject *arg, bool is_const,
+
+-std::pair<py::object, py::object> handle_tuple(PyObject *backend, PyObject *arg,
+-                                               bool is_const,
+-                                               bool specialize_value,
+-                                               bool align) {
++std::pair<py::object, py::object>
++handle_tuple_recursively(PyObject *backend, PyObject *arg, bool is_const,
++                         bool specialize_value,
++                         bool alignment_specialization_enabled) {
+   Py_ssize_t size = PyTuple_GET_SIZE(arg);
+@@ -404,5 +409,7 @@ std::pair<py::object, py::object> handle_tuple(PyObject *backend, PyObject *arg,
+     PyObject *item = PyTuple_GET_ITEM(arg, i); // Borrowed reference
+-    // python reference calls specialize recursively with default arguments set
+-    // currently this is is_const=False, specialize_value=True, align=True
+-    auto [type, key] = specialize_arg(backend, item, false, true, true);
++    // Tuple elements keep the historical is_const=false and
++    // specialize_value=true defaults while sharing one alignment policy at
++    // every nesting level.
++    auto [type, key] = specialize_arg_recursively(
++        backend, item, false, true, alignment_specialization_enabled);
+     if (!type || !key)
+@@ -428,2 +435,12 @@ std::pair<py::object, py::object> handle_tuple(PyObject *backend, PyObject *arg,
+
++std::pair<py::object, py::object> handle_tuple(PyObject *backend, PyObject *arg,
++                                               bool is_const,
++                                               bool specialize_value,
++                                               bool align) {
++  // Preserve the historical native five-argument behavior: tuple elements
++  // specialize on alignment independently of the top-level parameter flag.
++  return handle_tuple_recursively(backend, arg, is_const, specialize_value,
++                                  true);
++}
++
+ // initialize type handler which returns specialize impelemntations based on
+@@ -530,2 +547,14 @@ std::pair<py::object, py::object> specialize_arg(PyObject *backend,
+
++std::pair<py::object, py::object>
++specialize_arg_recursively(PyObject *backend, PyObject *arg, bool is_const,
++                           bool specialize_value,
++                           bool alignment_specialization_enabled) {
++  if (PyTuple_Check(arg)) {
++    return handle_tuple_recursively(backend, arg, is_const, specialize_value,
++                                    alignment_specialization_enabled);
++  }
++  return specialize_arg(backend, arg, is_const, specialize_value,
++                        alignment_specialization_enabled);
++}
++
+ // main entry-point from Python implementing specialization logic natively
+@@ -539,5 +568,5 @@ PyObject *specialize_impl(PyObject *self, PyObject *const *args,
+
+-  if (nargs != 5) {
++  if (nargs != 5 && nargs != 6) {
+     PyErr_SetString(PyExc_TypeError,
+-                    "native_specialize_impl expected 5 arguments");
++                    "native_specialize_impl expected 5 or 6 arguments");
+     return nullptr;
+@@ -550,6 +579,12 @@ PyObject *specialize_impl(PyObject *self, PyObject *const *args,
+   int align = PyObject_IsTrue(args[4]);
+-
+-  if (is_const == -1 || specialize_value == -1 || align == -1) {
++  // Five arguments preserve the historical direct-call behavior where tuple
++  // elements always specialize on alignment. The binder supplies the sixth
++  // backend-policy argument for mode-aware recursive specialization.
++  int alignment_specialization_enabled =
++      nargs == 6 ? PyObject_IsTrue(args[5]) : 1;
++
++  if (is_const == -1 || specialize_value == -1 ||
++      align == -1 || alignment_specialization_enabled == -1) {
+     PyErr_SetString(PyExc_TypeError, "native_specialize_impl expected boolean "
+-                                     "arguments for args2, args3, args4");
++                                     "arguments for args2, args3, args4, args5");
+     return nullptr;
+@@ -557,4 +592,13 @@ PyObject *specialize_impl(PyObject *self, PyObject *const *args,
+
++  // Preserve the exact historical five-argument API. Binder-generated calls
++  // use the sixth argument to apply one backend policy across nested tuples.
+   auto [type, key] =
+-      specialize_arg(backend, arg, is_const, specialize_value, align);
++      nargs == 5
++          ? specialize_arg(backend, arg, is_const, specialize_value, align)
++      : PyTuple_Check(arg)
++          ? specialize_arg_recursively(backend, arg, is_const,
++                                       specialize_value,
++                                       alignment_specialization_enabled)
++          : specialize_arg(backend, arg, is_const, specialize_value,
++                           align && alignment_specialization_enabled);
+
+diff --git a/python/test/unit/runtime/test_specialize.py b/python/test/unit/runtime/test_specialize.py
+index 0b82abca1..e64d6a2fd 100644
+--- a/python/test/unit/runtime/test_specialize.py
++++ b/python/test/unit/runtime/test_specialize.py
+@@ -118,6 +118,11 @@ def derived_inputs_to_specialize():
+ def tuples_to_specialize():
++    tensor = torch.empty(17, dtype=torch.float32, device="cpu")
+     return [
+         (1, 1),
++        (16, 17),
++        (tensor[:16], tensor[1:]),
+         (False, True),
+         namedtuple('strides', ['x', 'y'])(1, 1),
++        namedtuple('alignment', ['x', 'y'])(16, 17),
++        namedtuple('pointers', ['x', 'y'])(tensor[:16], tensor[1:]),
+         namedtuple('flags', ['x', 'y'])(False, True),
+diff --git a/python/triton/backends/compiler.py b/python/triton/backends/compiler.py
+index 10754e715..016e342c2 100644
+--- a/python/triton/backends/compiler.py
++++ b/python/triton/backends/compiler.py
+@@ -92 +92,6 @@ class BaseBackend(metaclass=ABCMeta):
+         return ""
++
++    @staticmethod
++    def use_alignment_specialization(options: dict) -> bool:
++        """Return whether runtime argument alignment contributes to specialization."""
++        return True
+diff --git a/python/triton/runtime/jit.py b/python/triton/runtime/jit.py
+index 1e07a267f..a9ae96372 100644
+--- a/python/triton/runtime/jit.py
++++ b/python/triton/runtime/jit.py
+@@ -409,3 +409,4 @@ def create_function_from_signature(sig, kparams, backend):
+             align = not kp.do_not_specialize_on_alignment
+-            ret = f"specialize_impl(backend, {name}, {is_const}, {specialize}, {align})"
++            ret = (f"specialize_impl(backend, {name}, {is_const}, {specialize}, {align}, "
++                   f"backend.use_alignment_specialization(options))")
+             if kp.annotation_type:

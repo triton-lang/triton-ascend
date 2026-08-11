@@ -1094,31 +1094,3 @@ index 0f506818f..1e07a267f 100644
                  else:
                      # skip runtime specialization:
                      specialization.append(f'("{kp.annotation_type}", None)')
-
-diff --git a/python/triton/backends/compiler.py b/python/triton/backends/compiler.py
-index 10754e715..016e342c2 100644
---- a/python/triton/backends/compiler.py
-+++ b/python/triton/backends/compiler.py
-@@ -90,3 +90,8 @@ class BaseBackend(metaclass=ABCMeta):
-         if arg.data_ptr() % 16 == 0 and kwargs.get("align", False):
-             return "D"
-         return ""
-+
-+    @staticmethod
-+    def use_alignment_specialization(options: dict) -> bool:
-+        """Return whether runtime argument alignment contributes to specialization."""
-+        return True
-diff --git a/python/triton/runtime/jit.py b/python/triton/runtime/jit.py
-index 1e07a267f..b2992457f 100644
---- a/python/triton/runtime/jit.py
-+++ b/python/triton/runtime/jit.py
-@@ -407,7 +407,8 @@ def create_function_from_signature(sig, kparams, backend):
-             is_const = kp.is_const
-             specialize = not kp.do_not_specialize
-             align = not kp.do_not_specialize_on_alignment
--            ret = f"specialize_impl(backend, {name}, {is_const}, {specialize}, {align})"
-+            ret = (f"specialize_impl(backend, {name}, {is_const}, {specialize}, "
-+                   f"{align} and backend.use_alignment_specialization(options))")
-             if kp.annotation_type:
-                 if isinstance(kp.annotation_type, str):
-                     if kp.annotation_type == "u1" or kp.annotation_type[:2] in ["fp", "bf"]:

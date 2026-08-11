@@ -1041,11 +1041,14 @@ def apply_triton_ascend_patch():
     patch_path = os.path.join("third_party", "ascend", "patch")
     dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.6.0.patch")
     patch = os.path.join(patch_path, "triton-ascend-3.6.0.patch")
+    specialization_patch = os.path.join(patch_path, "triton-ascend-specialization-3.6.0.patch")
     patch_files = [
         "CMakeLists.txt",
         "include/triton/Dialect/Triton/IR/TritonAttrDefs.td",
         "lib/Dialect/Triton/IR/Traits.cpp",
         "python/src/ir.cc",
+        "python/src/specialize.cc",
+        "python/test/unit/runtime/test_specialize.py",
         "python/triton/_utils.py",
         "python/triton/backends/compiler.py",
         "python/triton/compiler/code_generator.py",
@@ -1067,6 +1070,7 @@ def apply_triton_ascend_patch():
     apply_patch(dev_patch)
     checkout_file(patch_files)
     apply_patch(patch)
+    apply_patch(specialization_patch)
 
 
 def get_triton_version_suffix():

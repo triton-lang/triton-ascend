@@ -21,6 +21,7 @@
  */
 
 #include "TritonToUnstructure/UnstructureConversionPass.h"
+#include "AscendModel/RouteModel/SimtSelection.h"
 #include "TritonToLinalg/MaskAnalysis.h"
 #include "TritonToStructured/CannonicalizerConverter.h"
 #include "TritonToUnstructure/IndirectAtomicUtils.h"
@@ -53,6 +54,9 @@ static triton::ascend::CompileMode unstructureCompileModeFlag =
 namespace {
 
 constexpr int64_t kBitsPerByte = 8;
+
+static constexpr const char *kRouteDiscreteMaskToSimtAttrName =
+    "route_discrete_mask_to_simt";
 
 static RankedTensorType resolvePtrTensorType(Value ptr) {
   auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
@@ -113,8 +117,10 @@ void normalizeDiscreteMaskAccessForFallback(MemAccOpTy &op,
 // ======================== 950 SIMT Template Fast-Path Lowering
 // ========================
 // 1. SIMT Fast-Path Gate
-//    The SIMT template lowering path is enabled only when:
-//      - compileOn91095Flag && forceSimtTemplateFlag
+//    The SIMT indirect lowering path is enabled only when:
+//      - compileOn91095Flag
+//      - and either a legacy mixed compile mode is active, or the C++ cost
+//        model selected this operation through a local SIMT scope.
 //      - and the access is either:
 //          * unstructured, or has tag with 'MixCompileDiscreteMask'
 //
@@ -456,6 +462,12 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   auto ptrType = resolvePtrTensorType(ptr);
   auto mixCompileDiscreteMask =
       op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName);
+  auto routeDiscreteMaskToSimt = op->hasAttr(kRouteDiscreteMaskToSimtAttrName);
+  bool scopeForcesSimt =
+      mlir::ascend::simt_selection::hasEnclosingVectorMode(op, "simt");
+  bool scopeForcesSimd =
+      mlir::ascend::simt_selection::hasEnclosingVectorMode(op, "simd");
+  bool modelControlled = mlir::ascend::simt_selection::isModelControlled(op);
 
   if (!ptrType || op->hasAttr(ConverterUtils::discreteAttrName))
     return failure();
@@ -468,6 +480,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
 
   if (ptrOffsetInfo.isStructured() && !mixCompileDiscreteMask &&
+      !routeDiscreteMaskToSimt &&
       (!ptrOffsetInfo.isScalarLike() ||
        llvm::all_of(ptrType.getShape(), [](int64_t dim) { return dim == 1; })))
     return failure();
@@ -531,14 +544,29 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     os << "compileOn91095Flag: " << compileOn91095Flag << "\n";
     os << "compileModeFlag: " << static_cast<int>(unstructureCompileModeFlag)
        << "\n";
+    os << "forceSimtTemplateFlag: " << forceSimtTemplateFlag << "\n";
+    os << "modelControlled: " << modelControlled << "\n";
+    os << "scopeForcesSimt: " << scopeForcesSimt << "\n";
+    os << "scopeForcesSimd: " << scopeForcesSimd << "\n";
   });
 
-  // Preserve the existing template eligibility limits while using one
-  // canonical unstructured load/store op in both mixed compilation modes.
-  bool simtFastPathEnabled =
-      compileOn91095Flag && forceSimtTemplateFlag &&
+  const bool legacyMixedRoute =
+      unstructureCompileModeFlag == triton::ascend::CompileMode::SimdSimt ||
+      unstructureCompileModeFlag ==
+          triton::ascend::CompileMode::SimdSimtTemplate;
+  bool simtRouteRequested =
+      mlir::ascend::simt_selection::shouldUseSimtTemplate(op, legacyMixedRoute);
+
+  // Preserve the template eligibility limits while using one canonical
+  // unstructured load/store op in both mixed compilation modes.
+  bool simtTemplateLoadStoreFastPathEnabled =
+      compileOn91095Flag && forceSimtTemplateFlag && simtRouteRequested &&
       ((!ptrOffsetInfo.isStructured() && sizeInByte < 64) ||
-       mixCompileDiscreteMask);
+       mixCompileDiscreteMask || routeDiscreteMaskToSimt);
+  bool simtTemplateAtomicFastPathEnabled =
+      compileOn91095Flag && forceSimtTemplateFlag && simtRouteRequested &&
+      ((!ptrOffsetInfo.isStructured() && sizeInByte < 64) ||
+       mixCompileDiscreteMask || routeDiscreteMaskToSimt);
   bool rankWithinSimtTemplateLimit = resultShape.size() <= 5;
 
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
@@ -546,10 +574,12 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     bool useUnstructuredOp =
         compileOn91095Flag &&
         ((unstructureCompileModeFlag == triton::ascend::CompileMode::SimdSimt &&
-          (ptrOffsetInfo.hasUnstructuredDim() || mixCompileDiscreteMask)) ||
+          simtRouteRequested &&
+          (ptrOffsetInfo.hasUnstructuredDim() || mixCompileDiscreteMask ||
+           routeDiscreteMaskToSimt)) ||
          (unstructureCompileModeFlag ==
               triton::ascend::CompileMode::SimdSimtTemplate &&
-          simtFastPathEnabled && rankWithinSimtTemplateLimit));
+          simtTemplateLoadStoreFastPathEnabled && rankWithinSimtTemplateLimit));
     if (useUnstructuredOp) {
       auto unstructuredDims = ptrOffsetInfo.getUnstructuredDims();
       if (succeeded(tryRewriteUnstructuredLoadStoreFastPath(
@@ -560,8 +590,9 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   if constexpr (std::is_same_v<MemAccOpTy, triton::AtomicRMWOp> ||
                 std::is_same_v<MemAccOpTy, triton::AtomicCASOp>) {
-    if (simtFastPathEnabled && succeeded(tryRewriteIndirectAtomicFastPath(
-                                   op, srcPtr, ptrOffset, rewriter))) {
+    if (simtTemplateAtomicFastPathEnabled &&
+        succeeded(tryRewriteIndirectAtomicFastPath(op, srcPtr, ptrOffset,
+                                                   rewriter))) {
       return success();
     }
   }
@@ -574,7 +605,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     }
     if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
                   std::is_same_v<MemAccOpTy, triton::StoreOp>) {
-      if (simtFastPathEnabled && !rankWithinSimtTemplateLimit) {
+      if (simtTemplateLoadStoreFastPathEnabled &&
+          !rankWithinSimtTemplateLimit) {
         auto &os = llvm::dbgs();
         os << "Skip ascend.unstructured_load/store fast path because rank is "
            << resultShape.size() << " (>5), falling back to scalar loop path\n";
@@ -922,6 +954,11 @@ void TritonToUnstructurePass::runOnOperation() {
     moduleOp->emitError("failed to apply Patterns");
     signalPassFailure();
   }
+
+  // Keep the local SIMT scope alive.  This pass is only the first consumer;
+  // Reduce/Scan and other route-sensitive conversions run later in
+  // TritonToLinalg, and scope.scope is also the native region contract carried
+  // into the external BiShengIR lowering.
 
   PassManager pm(&getContext(), moduleOp.getOperationName());
   pm.addPass(createCSEPass());

@@ -1,0 +1,50 @@
+// SIMT shuffle dependent-latency and throughput probe for dav-c310.
+#include "RegBase/VecUtils.h"
+#include "Vector/VecUtils.h"
+#include "Utils.h"
+
+using DT = float;
+
+template <typename T>
+__simt_vf__ LAUNCH_BOUND(1024) __aiv__ __attribute__((always_inline)) static void
+simt_shuffle_core(__ubuf__ T *sink, int nlane, int nwarp, int iters,
+                  int mode) {
+  int lane = threadIdx.x;
+  int warp = threadIdx.y;
+  if (lane >= nlane || warp >= nwarp)
+    return;
+
+  T x0 = (T)(lane + warp + 1);
+  T x1 = x0 + (T)1;
+  T x2 = x0 + (T)2;
+  T x3 = x0 + (T)3;
+  for (int i = 0; i < iters; ++i) {
+    if (mode == 0) {
+      // One dependent chain: latency-oriented.
+      x0 = __shfl_up(x0, 1, 32);
+    } else {
+      // Four independent chains: throughput-oriented.
+      x0 = __shfl_up(x0, 1, 32);
+      x1 = __shfl_up(x1, 2, 32);
+      x2 = __shfl_up(x2, 4, 32);
+      x3 = __shfl_up(x3, 8, 32);
+    }
+  }
+  sink[warp * 32 + lane] = x0 + x1 + x2 + x3;
+}
+
+extern "C" __global__ [aicore] void measure(__gm__ long long *out, int K,
+                                             int nlane, int nwarp, int iters,
+                                             int mode) {
+  auto sink = reinterpret_cast<__ubuf__ DT *>(0);
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int i = 0; i < K; ++i) {
+    cce::async_invoke<simt_shuffle_core<DT>>(
+        cce::dim3{32, (unsigned)nwarp, 1}, sink, nlane, nwarp, iters, mode);
+    pipe_barrier(PIPE_ALL);
+  }
+  long long t1 = get_sys_cnt();
+  pipe_barrier(PIPE_ALL);
+  out[0] = t1 - t0;
+}

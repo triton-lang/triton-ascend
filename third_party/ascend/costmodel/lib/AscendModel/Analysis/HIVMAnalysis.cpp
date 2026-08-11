@@ -33,6 +33,8 @@
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/JSON.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 
@@ -505,6 +507,19 @@ static void eraseAttributeAssignment(std::string &line, llvm::StringRef name) {
   }
 }
 
+static void eraseAngleBracketClause(std::string &line, llvm::StringRef name) {
+  std::string needle = (name + " = <").str();
+  for (;;) {
+    size_t pos = line.find(needle);
+    if (pos == std::string::npos)
+      return;
+    size_t valueEnd = line.find('>', pos + needle.size());
+    if (valueEnd == std::string::npos)
+      return;
+    line.erase(pos, valueEnd - pos + 1);
+  }
+}
+
 static std::string sanitizeMlirBuffer(llvm::StringRef buffer) {
   // Pre-process to remove custom dialect attributes/types that require
   // registered dialects.  When built without BiShengIR, the parser cannot
@@ -517,12 +532,14 @@ static std::string sanitizeMlirBuffer(llvm::StringRef buffer) {
     for (llvm::StringRef line : lines) {
       llvm::StringRef trimmed = line.trim();
       if (trimmed.starts_with("warning: ") ||
+          trimmed.starts_with("bisheng: warning:") ||
           trimmed.ends_with("warning generated."))
         break;
       if (trimmed.starts_with("ld.lld:") || trimmed.starts_with("[ERROR]") ||
           trimmed.starts_with("[WARNING]") || trimmed.starts_with("[INFO]"))
         continue;
       std::string l = line.str();
+#ifndef TRITONSIM_HAS_BISHENGIR_HIVM
       // Replace #hivm.address_space<xxx> with integer memory space
       while (auto pos = l.find("#hivm.address_space<")) {
         auto end = l.find('>', pos);
@@ -551,6 +568,10 @@ static std::string sanitizeMlirBuffer(llvm::StringRef buffer) {
       eraseAttributeAssignment(l, "hacc.arg_type");
       eraseAttributeAssignment(l, "hivm.func_core_type");
       eraseAttributeAssignment(l, "hacc.function_kind");
+#endif
+      // Newer HIVM printers emit this optional policy clause, but older
+      // BiShengIR parsers do not accept it. It does not affect this model.
+      eraseAngleBracketClause(l, "eviction_policy");
       os << l << "\n";
     }
     os.flush();
@@ -612,6 +633,32 @@ static std::string canonicalizeStaticEventToken(llvm::StringRef token) {
   if (token.consume_front("EVENT_ID"))
     return token.str();
   return token.str();
+}
+
+static std::string stringifyTypedValue(mlir::Value value) {
+  if (!value)
+    return "";
+  std::string text;
+  llvm::raw_string_ostream os(text);
+  value.printAsOperand(os, mlir::OpPrintingFlags());
+  return os.str();
+}
+
+static std::string
+stringifyTypedEvent(std::optional<mlir::hivm::EventAttr> staticEvent,
+                    mlir::Value dynamicEvent) {
+  if (staticEvent)
+    return canonicalizeStaticEventToken(
+        mlir::hivm::stringifyEVENT(staticEvent->getEvent()));
+  return stringifyTypedValue(dynamicEvent);
+}
+
+static std::string
+stringifyTypedFlag(std::optional<mlir::IntegerAttr> staticFlag,
+                   mlir::Value dynamicFlag) {
+  if (staticFlag)
+    return std::to_string(staticFlag->getInt());
+  return stringifyTypedValue(dynamicFlag);
 }
 
 static bool populateTypedHivmOp(mlir::Operation *op, ParsedOp &parsed) {
@@ -2835,6 +2882,58 @@ void HIVMAnalysisReport::print(llvm::raw_ostream &os,
       os << ", " << op->elements << " elems";
     os << "\n";
   }
+}
+
+void HIVMAnalysisReport::emitFeedbackJSON(llvm::raw_ostream &os,
+                                          const HardwareConfig &config) const {
+  const double fallbackRatio =
+      opCount > 0 ? static_cast<double>(unknownOpCount) / opCount : 1.0;
+  const bool scheduleComplete =
+      opCount > 0 && operations.size() == opCount && unknownOpCount == 0;
+
+  llvm::json::Object pipes;
+  for (const auto &entry : pipeBusyCycles)
+    pipes[HIVMAnalyzer::stringifyPipe(entry.first).str()] = entry.second;
+
+  llvm::json::Object weightedPipes;
+  for (const auto &entry : weightedPipeCycles)
+    weightedPipes[HIVMAnalyzer::stringifyPipe(entry.first).str()] =
+        entry.second;
+
+  llvm::json::Object quality;
+  quality["parsed_operation_count"] = static_cast<int64_t>(operations.size());
+  quality["scheduled_operation_count"] = static_cast<int64_t>(opCount);
+  quality["fallback_operation_count"] = static_cast<int64_t>(unknownOpCount);
+  quality["fallback_ratio"] = fallbackRatio;
+  quality["schedule_complete"] = scheduleComplete;
+
+  llvm::json::Object summary;
+  summary["critical_path_cycles"] = oneIterationCycles;
+  summary["critical_path_us"] = config.cyclesToMicroseconds(oneIterationCycles);
+  summary["weighted_cycles"] = weightedCycles;
+  summary["sync_cycles"] = syncCycles;
+  summary["barrier_cycles"] = barrierCycles;
+  summary["operation_count"] = static_cast<int64_t>(opCount);
+  summary["sync_operation_count"] = static_cast<int64_t>(syncOpCount);
+  summary["barrier_count"] = static_cast<int64_t>(barrierCount);
+  summary["max_loop_multiplier"] = maxLoopMultiplier;
+
+  llvm::json::Object root;
+  root["schema_version"] = 1;
+  root["kind"] = "hivm_des_feedback_source";
+  root["source_mode"] = sourceMode;
+  root["source"] = sourcePath;
+  root["scheduler"] = HIVMAnalyzer::stringifySchedulerMode(schedulerMode).str();
+  root["target"] = config.getName();
+  root["scope"] = "single_program";
+  root["cycle_domain"] = "device_clock_cycles";
+  root["clock_frequency_ghz"] = config.getClockFrequencyGHz();
+  root["excludes"] = llvm::json::Array({"host_launch", "grid_wave_count"});
+  root["quality"] = std::move(quality);
+  root["summary"] = std::move(summary);
+  root["pipe_busy_cycles"] = std::move(pipes);
+  root["weighted_pipe_cycles"] = std::move(weightedPipes);
+  os << llvm::formatv("{0:2}", llvm::json::Value(std::move(root)));
 }
 
 void HIVMAnalysisReport::emitPerfettoTrace(llvm::raw_ostream &os,

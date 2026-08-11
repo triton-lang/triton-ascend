@@ -1,0 +1,1021 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "simd_simt_profile_schema.json",
+  "title": "Ascend SIMD/SIMT Route Model profile",
+  "description": "Target-specific policy, calibration, priors, and measurement references used to rank all-SIMD, all-SIMT, and mixed SIMD/SIMT candidates.",
+  "$comment": "Standard JSON has no // comments. Property descriptions in this schema are the canonical field comments for Route Model profiles.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "profile_version",
+    "target",
+    "description",
+    "microbenchmark_profile",
+    "compatible_targets",
+    "score_unit",
+    "policy",
+    "selection_calibration",
+    "simd",
+    "simt"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Relative path to this JSON Schema; used by editors and offline validators, not by Route Model scoring."
+    },
+    "schema_version": {
+      "const": 4,
+      "description": "Machine-readable Route Model layout version. The current v11 profile requires schema version 4."
+    },
+    "profile_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Version identifier accepted by the C++ Route Model loader and emitted in decision reports."
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical target for this calibration; it must equal the target of the referenced shared microbenchmark profile."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable ownership boundary and purpose of this Route Model profile."
+    },
+    "microbenchmark_profile": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path, relative to this file, to the model-neutral hardware measurement profile."
+    },
+    "compatible_targets": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Additional wildcard target aliases accepted by the target-compatibility gate.",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "One case-insensitive wildcard target pattern; '*' and '?' are supported."
+      }
+    },
+    "score_unit": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unit label for candidate scores. Values retain SYS_CNT-cycle structure but are selection scores after empirical residual calibration."
+    },
+    "policy": {
+      "$ref": "#/definitions/policy"
+    },
+    "selection_calibration": {
+      "$ref": "#/definitions/selection_calibration"
+    },
+    "simd": {
+      "$ref": "#/definitions/simd_model"
+    },
+    "simt": {
+      "$ref": "#/definitions/simt_model"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "none",
+        "low",
+        "medium",
+        "high"
+      ],
+      "description": "Evidence confidence ordered as none < low < medium < high."
+    },
+    "policy": {
+      "type": "object",
+      "description": "Decision-admission policy applied after candidate scoring.",
+      "required": [
+        "description",
+        "minimum_confidence_for_decision",
+        "unknown_op",
+        "notes"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable scope and current loader-consumption status of this policy object."
+        },
+        "minimum_confidence_for_decision": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Minimum final ranking-confidence level required by the confidence gate."
+        },
+        "unknown_op": {
+          "type": "string",
+          "description": "Documented handling intent for unknown operations. The current C++ loader does not consume this field; unsupported terms are collected directly during analysis."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free-form explanation of score semantics and the gates that remain mandatory; not parsed as policy logic."
+        }
+      },
+      "additionalProperties": false
+    },
+    "selection_calibration": {
+      "type": "object",
+      "description": "Model-specific scale, confidence, domain bounds, and residual terms used for route ranking.",
+      "required": [
+        "description",
+        "program_issue_scale",
+        "ranking_confidence",
+        "source",
+        "coverage",
+        "simd_structural_penalty_ratio",
+        "event_route_score_multiplier"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable role and evidence boundary of the complete calibration object."
+        },
+        "program_issue_scale": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Multiplier applied after route-specific payload aggregation; SIMD uses its compute-versus-memory roofline maximum, while SIMT serially sums compute, dot, shuffle, memory, and predicate cycles. Setup cost is not multiplied."
+        },
+        "ranking_confidence": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Confidence assigned to Event-calibrated structural residuals; inside a covered structural domain it is combined with resource and mixed-setup-fallback confidence by taking the lowest level."
+        },
+        "source": {
+          "type": "string",
+          "description": "Workloads, measurements, and rollout boundary from which the route-specific calibration was derived. It is loaded into profile metadata but currently does not affect scoring or reports."
+        },
+        "coverage": {
+          "$ref": "#/definitions/coverage"
+        },
+        "simd_structural_penalty_ratio": {
+          "$ref": "#/definitions/simd_structural_penalty"
+        },
+        "event_route_score_multiplier": {
+          "$ref": "#/definitions/event_route_score_multiplier"
+        }
+      },
+      "additionalProperties": false
+    },
+    "event_route_score_multiplier": {
+      "type": "object",
+      "description": "Versioned Event residuals applied after analytical/structural scoring and before legal-candidate ranking.",
+      "required": [
+        "description",
+        "domains"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Formula, evidence boundary, and report visibility of the route multipliers."
+        },
+        "domains": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Map from calibration-domain name to independently measured route corrections.",
+          "additionalProperties": {
+            "$ref": "#/definitions/event_route_domain"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "event_route_domain": {
+      "type": "object",
+      "description": "One bounded workload-structure domain. Multipliers preserve feature-sensitive raw scores while correcting route-relative residual error.",
+      "required": [
+        "all_simd",
+        "all_simt_only",
+        "mixed_simd_simt",
+        "all_simt_only_validated",
+        "mixed_simd_simt_validated",
+        "source",
+        "confidence"
+      ],
+      "properties": {
+        "all_simd": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Multiplier for the raw all-SIMD score."
+        },
+        "all_simt_only": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Multiplier for the raw all-SIMT score."
+        },
+        "mixed_simd_simt": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Multiplier for the raw mixed score."
+        },
+        "all_simt_only_validated": {
+          "type": "boolean",
+          "description": "True only when the BackendConditional whole-kernel pure-SIMT route passed correctness in this bounded domain. It cannot promote an Unsupported or AliasesMixed route."
+        },
+        "mixed_simd_simt_validated": {
+          "type": "boolean",
+          "description": "True only when C++ anchor materialization, BiShengIR compilation, and correctness passed for the local-scope mixed route in this bounded domain. False demotes the otherwise structurally Native mixed candidate."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact shape/config, timing protocol, medians, and correctness result used to fit the multipliers."
+        },
+        "confidence": {
+          "$ref": "#/definitions/confidence"
+        }
+      },
+      "additionalProperties": false
+    },
+    "coverage": {
+      "type": "object",
+      "description": "Feature-domain admission bounds for trusting Event-calibrated ranking residuals.",
+      "required": [
+        "description",
+        "minimum_irregular_density",
+        "tiny_dot_flops_max",
+        "tiny_dot_max_tensor_numel",
+        "rowwise_loop_trip_sum_max",
+        "rowwise_mask_rank_sum_max",
+        "rowwise_weighted_reductions_max",
+        "rowwise_max_tensor_numel",
+        "rank1_weighted_reductions_max",
+        "rank1_max_tensor_numel",
+        "triangular_loop_count_max",
+        "triangular_loop_trip_sum_max",
+        "triangular_mask_rank_sum_max",
+        "triangular_weighted_reductions_max",
+        "triangular_max_tensor_numel"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Meaning of these thresholds and warning that they are model-validity limits, not hardware limits."
+        },
+        "minimum_irregular_density": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Minimum value of the current rank-based pointer irregularity proxy required by calibrated irregular domains. The proxy is rank>1 pointer-operation count divided by unique ranked tensor-shape count across tt.addptr/tt.load/tt.store; it does not inspect actual address strides or lane dependence."
+        },
+        "tiny_dot_flops_max": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum dot FLOP count admitted to the tiny-gather-dot calibration domain."
+        },
+        "tiny_dot_max_tensor_numel": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum tensor element count admitted to the tiny-gather-dot calibration domain."
+        },
+        "rowwise_loop_trip_sum_max": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum sum of statically known loop trip counts admitted to rowwise and rank-1 calibrated domains."
+        },
+        "rowwise_mask_rank_sum_max": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum sum of ranks of mask-producing tensor expressions admitted to the masked-rowwise calibration domain."
+        },
+        "rowwise_weighted_reductions_max": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum loop-execution-weighted tt.reduce count admitted to the masked-rowwise calibration domain. Each reduce contributes the product of its enclosing static scf.for trip counts."
+        },
+        "rowwise_max_tensor_numel": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum tensor element count admitted to the masked-rowwise calibration domain. This is bounded by the largest calibrated per-program tensor and must not be widened merely to make a new workload pass admission."
+        },
+        "rank1_weighted_reductions_max": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum loop-execution-weighted tt.reduce count admitted to the rank-1 indirect vector-reduction domain. Each reduce contributes the product of its enclosing static scf.for trip counts."
+        },
+        "rank1_max_tensor_numel": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum tensor element count admitted to the rank-1 indirect vector-reduction domain."
+        },
+        "triangular_loop_count_max": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of sibling 16x16 recurrence loops inside the one materializable triangular-solve scope. BT64 has four."
+        },
+        "triangular_loop_trip_sum_max": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum structurally modeled recurrence trip sum in the triangular-solve domain. A full BT64 tile is 4 * (16 - 2) = 56."
+        },
+        "triangular_mask_rank_sum_max": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum unweighted mask-rank sum admitted to the triangular-solve calibration domain."
+        },
+        "triangular_weighted_reductions_max": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum loop-execution-weighted tt.reduce count for one BT64 triangular-solve scope."
+        },
+        "triangular_max_tensor_numel": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum tensor element count admitted to the 16x16 triangular recurrence calibration domain."
+        }
+      },
+      "additionalProperties": false
+    },
+    "simd_structural_penalty": {
+      "type": "object",
+      "description": "Parameters for the additive SIMD-only structural residual ratio. The summed ratio multiplies A_SIMD and is added to A_SIMD; it never references A_SIMT.",
+      "required": [
+        "description",
+        "irregular_per_density",
+        "irregular_cap",
+        "tiny_dot_irregular_per_density",
+        "tiny_dot_irregular_cap",
+        "per_mask_rank",
+        "mask_cap",
+        "per_weighted_reduction",
+        "reduction_cap",
+        "per_static_loop_trip",
+        "loop_cap",
+        "control_flow",
+        "rank1_indirect_vector_reduction",
+        "tiny_dot",
+        "tiny_dot_flops_max"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable meaning of the all-SIMD structural residual model."
+        },
+        "irregular_per_density": {
+          "type": "number",
+          "minimum": 0,
+          "description": "All-SIMD penalty ratio per unit of the current rank-based pointer irregularity proxy outside the tiny-dot special case."
+        },
+        "irregular_cap": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Maximum penalty ratio contributed by the rank-based pointer irregularity proxy outside the tiny-dot special case."
+        },
+        "tiny_dot_irregular_per_density": {
+          "type": "number",
+          "minimum": 0,
+          "description": "All-SIMD penalty ratio per unit of the rank-based pointer irregularity proxy for tiny-dot workloads."
+        },
+        "tiny_dot_irregular_cap": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Maximum penalty ratio contributed by the rank-based pointer irregularity proxy for tiny-dot workloads."
+        },
+        "per_mask_rank": {
+          "type": "number",
+          "minimum": 0,
+          "description": "All-SIMD mask-materialization penalty ratio added per unit of mask_rank_sum."
+        },
+        "mask_cap": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Maximum accumulated mask-materialization penalty ratio."
+        },
+        "per_weighted_reduction": {
+          "type": "number",
+          "minimum": 0,
+          "description": "All-SIMD reduction-lowering penalty ratio per loop-execution-weighted tt.reduce."
+        },
+        "reduction_cap": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Maximum accumulated reduction-lowering penalty ratio."
+        },
+        "per_static_loop_trip": {
+          "type": "number",
+          "minimum": 0,
+          "description": "All-SIMD loop-control penalty ratio per statically known loop trip."
+        },
+        "loop_cap": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Maximum accumulated static-loop-control penalty ratio."
+        },
+        "control_flow": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Fixed all-SIMD structural penalty ratio when control flow is present."
+        },
+        "rank1_indirect_vector_reduction": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Fixed all-SIMD penalty ratio for the rank-1 indirect vector-reduction pattern."
+        },
+        "tiny_dot": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Maximum tiny-dot startup penalty ratio, multiplied by the computed underfill fraction."
+        },
+        "tiny_dot_flops_max": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "FLOP count at which tiny-dot underfill and its startup penalty reach zero."
+        }
+      },
+      "additionalProperties": false
+    },
+    "op_profiles": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Map from semantic operation name to either a shared throughput measurement or a cycle multiplier relative to another operation.",
+      "additionalProperties": {
+        "$ref": "#/definitions/op_profile"
+      }
+    },
+    "op_profile": {
+      "type": "object",
+      "description": "One SIMD or SIMT operation-cost rule.",
+      "required": [
+        "description"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Operation-specific provenance and interpretation of this rule."
+        },
+        "throughput_measurement": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Key of a throughput measurement in microbenchmark_profile."
+        },
+        "throughput_vector_instructions_per_system_cycle": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Inline SIMD vector-instruction throughput fallback in vector instructions per SYS_CNT cycle."
+        },
+        "throughput_scalar_ops_per_system_cycle": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Inline SIMT scalar-operation throughput fallback in scalar lane operations per SYS_CNT cycle."
+        },
+        "relative_to": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Operation name whose resolved throughput supplies the base cycle estimate."
+        },
+        "factor": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Multiplier applied to the resolved base cycle estimate; values above one make this operation slower."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Confidence of this measured or relative operation rule; when the operation occurs, it contributes to the resource-confidence minimum used by the gate."
+        }
+      },
+      "additionalProperties": false
+    },
+    "simd_model": {
+      "type": "object",
+      "description": "All-SIMD resource and operation model.",
+      "required": [
+        "description",
+        "vector_width_measurement",
+        "startup_system_cycles",
+        "ops",
+        "memory",
+        "dot"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable role of the all-SIMD model."
+        },
+        "vector_width_measurement": {
+          "type": "string",
+          "description": "Shared measurement key for physical SIMD vector width in bits."
+        },
+        "vector_width_bits": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Inline SIMD vector-width fallback supported by the loader when no measurement key is provided."
+        },
+        "startup_system_cycles": {
+          "$ref": "#/definitions/simd_startup"
+        },
+        "ops": {
+          "$ref": "#/definitions/op_profiles"
+        },
+        "memory": {
+          "$ref": "#/definitions/simd_memory"
+        },
+        "dot": {
+          "$ref": "#/definitions/dot_model"
+        }
+      },
+      "additionalProperties": false
+    },
+    "simd_startup": {
+      "type": "object",
+      "description": "Legacy all-SIMD startup priors in SYS_CNT cycles.",
+      "required": [
+        "description",
+        "vector",
+        "mte2",
+        "mte3",
+        "source",
+        "confidence",
+        "note"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable status and current consumption boundary of these startup priors."
+        },
+        "vector": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Fixed all-SIMD vector setup cost in SYS_CNT cycles; this is the only startup value currently consumed."
+        },
+        "mte2": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Legacy MTE2 startup prior in SYS_CNT cycles; currently not consumed by Route Model scoring."
+        },
+        "mte3": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Legacy MTE3 startup prior in SYS_CNT cycles; currently not consumed by Route Model scoring."
+        },
+        "source": {
+          "type": "string",
+          "description": "Origin of the startup priors."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Documentary confidence of the legacy startup priors; the current Route Model loader does not consume it."
+        },
+        "note": {
+          "type": "string",
+          "description": "Evidence caveat retained for human review; not consumed by scoring."
+        }
+      },
+      "additionalProperties": false
+    },
+    "simd_memory": {
+      "type": "object",
+      "description": "All-SIMD memory rates and their model-specific provenance.",
+      "required": [
+        "description",
+        "hbm_bytes_per_system_cycle",
+        "vector_mte2_bytes_per_system_cycle",
+        "mte3_bytes_per_system_cycle",
+        "source",
+        "confidence",
+        "note"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable role and consumption boundary of these rates."
+        },
+        "hbm_bytes_per_system_cycle": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Legacy whole-device HBM-rate seed in byte/SYS_CNT-cycle; currently not consumed by Route Model scoring."
+        },
+        "vector_mte2_bytes_per_system_cycle": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "All-SIMD load-path rate in byte/SYS_CNT-cycle; load cycles equal load bytes divided by this value."
+        },
+        "mte3_bytes_per_system_cycle": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "All-SIMD store-path rate in byte/SYS_CNT-cycle; store cycles equal store bytes divided by this value."
+        },
+        "source": {
+          "type": "string",
+          "description": "Origin and validity caveat of these model-specific rates."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Confidence of the all-SIMD memory rates; when load or store work exists, it contributes to the resource-confidence minimum used by the gate."
+        },
+        "note": {
+          "type": "string",
+          "description": "Warning that these are fallback Route Model inputs rather than shared isolated measurements."
+        }
+      },
+      "additionalProperties": false
+    },
+    "dot_model": {
+      "type": "object",
+      "description": "Fixed setup plus throughput model for dot work.",
+      "required": [
+        "description",
+        "startup_system_cycles",
+        "flops_per_system_cycle",
+        "source",
+        "confidence"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable role and execution mode of this dot model."
+        },
+        "startup_system_cycles": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Fixed dot setup cost in SYS_CNT cycles."
+        },
+        "flops_per_system_cycle": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Modeled dot arithmetic rate in FLOP per SYS_CNT cycle."
+        },
+        "source": {
+          "type": "string",
+          "description": "Origin and intended refinement path for the dot prior."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Confidence of this dot prior; when dot work exists, it contributes to the resource-confidence minimum used by the gate."
+        }
+      },
+      "additionalProperties": false
+    },
+    "simt_model": {
+      "type": "object",
+      "description": "All-SIMT resources plus mixed-mode setup evidence.",
+      "required": [
+        "description",
+        "warp_size_measurement",
+        "setup_system_cycles",
+        "ops",
+        "dot",
+        "camodel_effective",
+        "shuffle",
+        "memory",
+        "mixed_setup_fallback"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable role of the all-SIMT and mixed-mode inputs."
+        },
+        "warp_size_measurement": {
+          "type": "string",
+          "description": "Shared measurement key for the number of scalar lanes in one SIMT warp."
+        },
+        "warp_size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Inline warp-size fallback supported by the loader when no measurement key is provided."
+        },
+        "setup_system_cycles": {
+          "$ref": "#/definitions/simt_setup"
+        },
+        "ops": {
+          "$ref": "#/definitions/op_profiles"
+        },
+        "dot": {
+          "$ref": "#/definitions/dot_model"
+        },
+        "camodel_effective": {
+          "$ref": "#/definitions/camodel_effective"
+        },
+        "shuffle": {
+          "$ref": "#/definitions/simt_shuffle"
+        },
+        "memory": {
+          "$ref": "#/definitions/simt_memory"
+        },
+        "mixed_setup_fallback": {
+          "$ref": "#/definitions/mixed_setup_fallbacks"
+        }
+      },
+      "additionalProperties": false
+    },
+    "simt_setup": {
+      "type": "object",
+      "description": "Standalone SIMT setup cost.",
+      "required": [
+        "description",
+        "empty_launch_measurement"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable meaning and source boundary of the setup cost."
+        },
+        "empty_launch_measurement": {
+          "type": "string",
+          "description": "Shared measurement key for standalone empty-SIMT setup in SYS_CNT cycles."
+        },
+        "empty_launch": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Inline empty-SIMT setup fallback in SYS_CNT cycles."
+        }
+      },
+      "additionalProperties": false
+    },
+    "camodel_effective": {
+      "type": "object",
+      "description": "Workload-effective CaModel rates retained as fallback calibration context.",
+      "required": [
+        "description",
+        "scope",
+        "simulator_clock_mhz",
+        "conversion",
+        "warp_instructions_per_system_cycle",
+        "warp_size",
+        "source",
+        "confidence",
+        "note"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable warning that only part of this block is currently consumed."
+        },
+        "scope": {
+          "type": "string",
+          "description": "Workload and active-vector-core scope from which these effective rates were derived."
+        },
+        "simulator_clock_mhz": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Clock used by the simulator-cycle measurements before conversion to SYS_CNT cycles."
+        },
+        "conversion": {
+          "type": "string",
+          "description": "Documentary formula used to convert aggregate simulator-cycle rates into SYS_CNT-cycle rates; not evaluated by the loader."
+        },
+        "warp_instructions_per_system_cycle": {
+          "$ref": "#/definitions/camodel_rates"
+        },
+        "warp_size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Warp size assumed by the CaModel workload. The current loader uses simt.warp_size_measurement instead."
+        },
+        "source": {
+          "type": "string",
+          "description": "CaModel artifact and profiling run that produced these workload-effective rates."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Documentary confidence of the complete CaModel workload-effective block; the current loader does not propagate it to predicate-cost confidence or the gate."
+        },
+        "note": {
+          "type": "string",
+          "description": "Warning that these values include workload dependencies and stalls and are not isolated peak rates."
+        }
+      },
+      "additionalProperties": false
+    },
+    "camodel_rates": {
+      "type": "object",
+      "description": "Workload-effective aggregate warp-instruction issue rates in warp instructions per SYS_CNT cycle. The current loader consumes only predicate.",
+      "required": [
+        "memory",
+        "float_alu",
+        "shuffle",
+        "predicate",
+        "control",
+        "int_alu"
+      ],
+      "properties": {
+        "memory": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Effective memory warp-instruction rate; retained as context and not currently consumed."
+        },
+        "float_alu": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Effective floating-point ALU warp-instruction rate; retained as context and not currently consumed."
+        },
+        "shuffle": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Effective shuffle warp-instruction rate; isolated shared measurement is used instead."
+        },
+        "predicate": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Effective predicate warp-instruction rate consumed to estimate mask predicate cycles."
+        },
+        "control": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Effective control warp-instruction rate; retained as context and not currently consumed."
+        },
+        "int_alu": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Effective integer-ALU warp-instruction rate; retained as context and not currently consumed."
+        }
+      },
+      "additionalProperties": false
+    },
+    "simt_shuffle": {
+      "type": "object",
+      "description": "SIMT shuffle issue-rate input.",
+      "required": [
+        "description",
+        "throughput_measurement"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable meaning and source boundary of the shuffle rate."
+        },
+        "throughput_measurement": {
+          "type": "string",
+          "description": "Shared measurement key for shuffle throughput in warp instructions per SYS_CNT cycle."
+        },
+        "warp_instructions_per_system_cycle": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Inline shuffle-throughput fallback supported by the loader."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Optional explicit shuffle confidence; otherwise confidence is inherited from the referenced shared measurement and contributes to the gate when shuffle work exists."
+        }
+      },
+      "additionalProperties": false
+    },
+    "simt_memory": {
+      "type": "object",
+      "description": "SIMT GM load/store warp-instruction issue-rate inputs.",
+      "required": [
+        "description",
+        "load_throughput_measurement",
+        "store_throughput_measurement"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable meaning and source boundary of the SIMT memory rates."
+        },
+        "load_throughput_measurement": {
+          "type": "string",
+          "description": "Shared measurement key for GM-load throughput in warp instructions per SYS_CNT cycle."
+        },
+        "store_throughput_measurement": {
+          "type": "string",
+          "description": "Shared measurement key for GM-store throughput in warp instructions per SYS_CNT cycle."
+        },
+        "load_warp_instructions_per_system_cycle": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Inline GM-load throughput fallback supported by the loader."
+        },
+        "store_warp_instructions_per_system_cycle": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Inline GM-store throughput fallback supported by the loader."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Optional explicit SIMT-memory confidence; otherwise the lower confidence of the referenced load/store measurements is used when memory work exists."
+        }
+      },
+      "additionalProperties": false
+    },
+    "mixed_setup_fallbacks": {
+      "type": "object",
+      "description": "Map from warp count to low-confidence mixed setup fallback. The referenced probes contain no SIMD phase and are not directional transition measurements.",
+      "required": [
+        "1",
+        "2",
+        "4",
+        "8",
+        "16",
+        "32",
+        "confidence",
+        "note"
+      ],
+      "properties": {
+        "1": {
+          "$ref": "#/definitions/mixed_setup_fallback_entry"
+        },
+        "2": {
+          "$ref": "#/definitions/mixed_setup_fallback_entry"
+        },
+        "4": {
+          "$ref": "#/definitions/mixed_setup_fallback_entry"
+        },
+        "8": {
+          "$ref": "#/definitions/mixed_setup_fallback_entry"
+        },
+        "16": {
+          "$ref": "#/definitions/mixed_setup_fallback_entry"
+        },
+        "32": {
+          "$ref": "#/definitions/mixed_setup_fallback_entry"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Required Route Model confidence for using these standalone empty-VF probes as mixed setup fallbacks."
+        },
+        "note": {
+          "type": "string",
+          "description": "Required warning that true directional switching and dependent hand-off costs remain unmeasured."
+        }
+      },
+      "additionalProperties": false
+    },
+    "mixed_setup_fallback_entry": {
+      "type": "object",
+      "description": "One low-confidence mixed setup fallback for a measured warp count.",
+      "required": [
+        "description",
+        "measurement"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable warp-count scope and evidence limitation of this fallback entry."
+        },
+        "measurement": {
+          "type": "string",
+          "description": "Shared measurement key for the standalone empty-VF harness proxy in SYS_CNT cycles."
+        },
+        "empty_simt_setup_system_cycles": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Inline mixed setup fallback supported by the loader."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

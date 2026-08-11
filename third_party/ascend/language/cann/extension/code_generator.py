@@ -64,7 +64,8 @@ def _extract_scope_attributes(context_expr):
     scope_attrs = {}
     for keyword in context_expr.keywords:
         if isinstance(keyword.value, ast.Constant):
-            scope_attrs[keyword.arg] = keyword.value.value
+            attr_name = "vec_mode" if keyword.arg == "vector_mode" else keyword.arg
+            scope_attrs[attr_name] = keyword.value.value
     return scope_attrs
 
 

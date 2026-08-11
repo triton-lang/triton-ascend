@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -132,6 +133,37 @@ class CompilerCostmodelContractTest(unittest.TestCase):
         opt_costmodel = backend.parse_options({"enable_costmodel_backend": True})
         self.assertTrue(opt_costmodel.enable_costmodel_backend)
         self.assertFalse(opt_costmodel.use_bytecode)
+
+    def test_costmodel_profiles_use_canonical_source_in_checkout(self):
+        cmplr, _dump_mgr, _GPUTarget = self._load_compiler_module()
+
+        expected = Path(__file__).resolve().parents[2] / "costmodel" / "profiles"
+        self.assertEqual(cmplr._costmodel_profiles_dir(), expected)
+
+    def test_costmodel_profiles_find_native_package_assets(self):
+        cmplr, _dump_mgr, _GPUTarget = self._load_compiler_module()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            package = Path(temporary) / "triton"
+            compiler = package / "backends" / "ascend" / "compiler.py"
+            profiles = package / "_C" / "ascend" / "costmodel_profiles"
+            legacy_profiles = compiler.parent / "costmodel_profiles"
+            compiler.parent.mkdir(parents=True)
+            profiles.mkdir(parents=True)
+            legacy_profiles.mkdir()
+            cmplr.__file__ = str(compiler)
+
+            self.assertEqual(cmplr._costmodel_profiles_dir(), profiles)
+
+    def test_lib_call_no_inline_is_only_enabled_for_ascend950(self):
+        cmplr, _dump_mgr, GPUTarget = self._load_compiler_module()
+
+        for arch in ("Ascend910B3", "Ascend910_95"):
+            metadata = {"target": GPUTarget(backend="npu", arch=arch)}
+            self.assertFalse(cmplr._needs_lib_call_no_inline(metadata))
+
+        metadata = {"target": GPUTarget(backend="npu", arch="Ascend950PR_9579")}
+        self.assertTrue(cmplr._needs_lib_call_no_inline(metadata))
 
 
 if __name__ == "__main__":

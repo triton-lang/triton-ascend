@@ -1,0 +1,69 @@
+// SIMT UB-memory throughput probe for dav-c310.
+//
+// mode 0: eight independent UB loads + one sink store per thread/iteration.
+// mode 1: eight independent UB stores per thread/iteration.
+//
+// The host takes a slope over `iters`, removing async_invoke and SYS_CNT
+// overhead.  The address rotates over 32 cache lines so loads cannot be hoisted
+// into registers across iterations.
+#include "RegBase/VecUtils.h"
+#include "Vector/VecUtils.h"
+#include "Utils.h"
+
+using DT = float;
+
+template <typename T>
+__simt_vf__ LAUNCH_BOUND(1024) __aiv__ __attribute__((always_inline)) static void
+simt_memory_core(__ubuf__ T *buf, int nlane, int nwarp, int iters, int mode) {
+  int lane = threadIdx.x;
+  int warp = threadIdx.y;
+  if (lane >= nlane || warp >= nwarp)
+    return;
+
+  int tid = warp * 32 + lane;
+  int threads = nwarp * 32;
+  T acc = (T)(tid + 1);
+  for (int i = 0; i < iters; ++i) {
+    // Four rotating working sets keep the maximum 32-warp footprint at
+    // 128 KiB, within the 192 KiB local-memory allocation.
+    int base = (i & 3) * threads * 8 + tid;
+    if (mode == 0) {
+      T x0 = buf[base + threads * 0];
+      T x1 = buf[base + threads * 1];
+      T x2 = buf[base + threads * 2];
+      T x3 = buf[base + threads * 3];
+      T x4 = buf[base + threads * 4];
+      T x5 = buf[base + threads * 5];
+      T x6 = buf[base + threads * 6];
+      T x7 = buf[base + threads * 7];
+      acc += x0 + x1 + x2 + x3 + x4 + x5 + x6 + x7;
+    } else {
+      buf[base + threads * 0] = acc;
+      buf[base + threads * 1] = acc + (T)1;
+      buf[base + threads * 2] = acc + (T)2;
+      buf[base + threads * 3] = acc + (T)3;
+      buf[base + threads * 4] = acc + (T)4;
+      buf[base + threads * 5] = acc + (T)5;
+      buf[base + threads * 6] = acc + (T)6;
+      buf[base + threads * 7] = acc + (T)7;
+      acc += (T)1;
+    }
+  }
+  buf[tid] = acc;
+}
+
+extern "C" __global__ [aicore] void measure(__gm__ long long *out, int K,
+                                             int nlane, int nwarp, int iters,
+                                             int mode) {
+  auto buf = reinterpret_cast<__ubuf__ DT *>(0);
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int i = 0; i < K; ++i) {
+    cce::async_invoke<simt_memory_core<DT>>(
+        cce::dim3{32, (unsigned)nwarp, 1}, buf, nlane, nwarp, iters, mode);
+    pipe_barrier(PIPE_ALL);
+  }
+  long long t1 = get_sys_cnt();
+  pipe_barrier(PIPE_ALL);
+  out[0] = t1 - t0;
+}

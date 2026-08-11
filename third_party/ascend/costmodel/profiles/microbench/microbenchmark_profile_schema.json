@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "microbenchmark_profile_schema.json",
+  "title": "Ascend shared microbenchmark evidence profile",
+  "description": "Model-neutral hardware facts and isolated measurements shared by the absolute and SIMD/SIMT route cost models.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "profile_version",
+    "target",
+    "description",
+    "measurements"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Relative path to this JSON Schema; used by editors and validators, not by the cost formula."
+    },
+    "schema_version": {
+      "const": 1,
+      "description": "Machine-readable layout version expected by MicrobenchmarkProfile::loadFromJSON."
+    },
+    "profile_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable version of this concrete target evidence set."
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical compiler target for which every measurement in this file is valid."
+    },
+    "description": {
+      "type": "string",
+      "description": "Purpose and ownership boundary of the complete shared evidence profile."
+    },
+    "measurements": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Map from stable semantic measurement keys to typed values and their provenance.",
+      "additionalProperties": {
+        "$ref": "#/definitions/measurement"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "measurement": {
+      "type": "object",
+      "description": "One model-neutral hardware fact or isolated measurement with units, scope, provenance, and evidence confidence.",
+      "required": [
+        "description",
+        "value",
+        "unit",
+        "cycle_domain",
+        "scope",
+        "source_kind",
+        "source",
+        "confidence"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable meaning of this measurement and the distinction from similarly named rates."
+        },
+        "value": {
+          "type": "number",
+          "description": "Measured or declared numeric value before any cost-model-specific scaling."
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Physical unit of value; loaders validate the expected unit at each use site."
+        },
+        "cycle_domain": {
+          "type": "string",
+          "enum": [
+            "none",
+            "wall_clock",
+            "SYS_CNT",
+            "device_compute"
+          ],
+          "description": "Clock domain for cycle-based values; required for correct rate conversion."
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact execution scope and workload shape, such as one AIV, warp count, dependency pattern, and working set."
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": [
+            "isolated_microbenchmark",
+            "device_configuration",
+            "architecture_fact"
+          ],
+          "description": "Evidence category: measured result, device configuration, or architecture contract."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Reproducible file, command, configuration, or artifact from which value was obtained."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ],
+          "description": "Evidence confidence. This is consumed by Route Model admission and is not a documentation-only comment."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

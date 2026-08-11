@@ -30,6 +30,10 @@ set_property(DIRECTORY PROPERTY RULE_LAUNCH_LINK ${_saved_launch_link})
 
 include_directories(${ASCENDNPU_IR_SRC_DIR}/bishengir/include)
 include_directories(${ASCENDNPU_IR_BINARY_DIR}/bishengir/include) # Tablegen'd files
+# RouteModel exposes a small header-only execution-selection contract used by
+# backend lowerings. Make CostModel public headers visible before those targets
+# are created by add_subdirectory(lib).
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/costmodel/include)
 
 add_subdirectory(bin)
 add_subdirectory(include)
@@ -103,6 +107,20 @@ if(TRITON_ASCEND_ENABLE_COSTMODEL_INPROC)
     include_directories("${CMAKE_BINARY_DIR}/third_party/ascend/costmodel_build/include_AscendModel")
     include_directories("${TRITON_ASCEND_COSTMODEL_SOURCE_DIR}/include")
 
+    # The vendored cost model is built inside Triton-Ascend, where BiShengIR
+    # has already been added above. Enable native HIVM parsing explicitly;
+    # otherwise HIVMAnalyzer is compiled in generic/unregistered-dialect mode.
+    set(TRITONSIM_HAS_BISHENGIR_HIVM ON)
+    set(TRITONSIM_BISHENGIR_INCLUDE_DIRS
+      "${ASCENDNPU_IR_SRC_DIR}/bishengir/include"
+      "${ASCENDNPU_IR_BINARY_DIR}/bishengir/include"
+    )
+    set(TRITONSIM_BISHENGIR_HIVM_LIBS
+      BiShengIRAnnotationDialect
+      BiShengIRHACCDialect
+      BiShengIRHIVMDialect
+    )
+
     add_subdirectory(${_costmodel_include_dir} ${CMAKE_BINARY_DIR}/third_party/ascend/costmodel_build/include_AscendModel)
     add_subdirectory(${_costmodel_lib_dir} ${CMAKE_BINARY_DIR}/third_party/ascend/costmodel_build/lib_AscendModel)
     set(TRITON_ASCEND_HAS_INPROC_COSTMODEL 1)
@@ -122,6 +140,27 @@ add_triton_plugin(TritonAscend
   BiShengIRScopeDialect
   BiShengIRHIVMDialect
 )
+
+# Keep canonical Cost Model profiles under costmodel/profiles.  Python's
+# community-owned setup.py builds the native extension before build_py, so an
+# Ascend-owned CMake target can place the runtime copy next to that extension
+# without teaching setup.py about backend-specific resources.
+if(TRITON_BUILD_PYTHON_MODULE AND CMAKE_LIBRARY_OUTPUT_DIRECTORY)
+  set(_ascend_costmodel_profile_source
+      "${CMAKE_CURRENT_SOURCE_DIR}/costmodel/profiles")
+  set(_ascend_costmodel_profile_package
+      "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/ascend/costmodel_profiles")
+  add_custom_target(TritonAscendCostModelProfiles ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${_ascend_costmodel_profile_package}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${_ascend_costmodel_profile_source}"
+            "${_ascend_costmodel_profile_package}"
+    COMMENT "Copying Ascend Cost Model profiles beside the native extension"
+    VERBATIM
+  )
+  add_dependencies(TritonAscend TritonAscendCostModelProfiles)
+endif()
 
 option(TRITON_ENABLE_COVERAGE_LLVM_COV "Enable code llvm-cov coverage tool for Ascend plugin " OFF)
 if(TRITON_ENABLE_COVERAGE_LLVM_COV)

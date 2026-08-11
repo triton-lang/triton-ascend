@@ -90,6 +90,8 @@ struct HIVMAnalysisReport {
   void emitPerfettoTrace(llvm::raw_ostream &os,
                          const HardwareConfig &config) const;
   void emitDESGraph(llvm::raw_ostream &os, const HardwareConfig &config) const;
+  void emitFeedbackJSON(llvm::raw_ostream &os,
+                        const HardwareConfig &config) const;
 };
 
 class HIVMAnalyzer {

@@ -3,6 +3,7 @@
   "$id": "hardware_schema.json",
   "title": "TritonSim Hardware Configuration",
   "description": "Schema for defining NPU/accelerator hardware parameters",
+  "$comment": "Standard JSON has no // comments. Property descriptions in this schema are the canonical field comments for hardware configuration files.",
   "type": "object",
   "required": [
     "name",
@@ -13,19 +14,39 @@
   ],
 
   "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Relative path to this JSON Schema; used by editors and offline validators, not by the runtime cost formulas."
+    },
     "name": {
       "type": "string",
       "description": "Hardware name (e.g., Ascend 910B)"
     },
     "vendor": {
-      "type": "string"
+      "type": "string",
+      "description": "Hardware or accelerator vendor."
     },
     "version": {
-      "type": "string"
+      "type": "string",
+      "description": "Version of this configuration data, not the silicon generation."
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable scope, evidence boundary, and usage warning for this concrete target configuration."
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical compiler target used to validate referenced measurement assets"
+    },
+    "microbenchmark_profile": {
+      "type": "string",
+      "description": "Path, relative to this hardware config, to the shared model-neutral measurement catalog"
     },
 
     "clock": {
       "type": "object",
+      "description": "Device-compute clock configuration. SYS_CNT is a separate clock domain stored in the shared microbenchmark profile.",
       "required": [
         "frequency_ghz"
       ],
@@ -37,15 +58,24 @@
         },
         "cycles_per_us": {
           "type": "integer",
-          "description": "Derived: cycles per microsecond"
+          "description": "Human-readable frequency_ghz × 1000. The current C++ loader derives timing from frequency_ghz and does not consume this scalar."
+        },
+        "description": {
+          "type": "string",
+          "description": "Meaning and clock-domain boundary of this object."
+        },
+        "field_metadata": {
+          "$ref": "#/definitions/field_metadata"
         }
       }
     },
 
     "memory_spaces": {
       "type": "object",
+      "description": "Named addressable memory hierarchy. Names are referenced by compute units and data movers.",
       "additionalProperties": {
         "type": "object",
+        "description": "One named memory space and its capacity, bandwidth, latency, purpose, and optional per-field provenance.",
         "required": [
           "type"
         ],
@@ -57,28 +87,43 @@
               "on_chip_shared",
               "on_chip_local",
               "register_file"
-            ]
+            ],
+            "description": "Memory category: off-chip, shared on-chip, local on-chip, or register-file-like storage."
           },
           "size_gb": {
-            "type": "number"
+            "type": "number",
+            "description": "Capacity label in GB; the current loader multiplies by 1024^3 bytes, so its effective interpretation is GiB-like."
           },
           "size_mb": {
-            "type": "number"
+            "type": "number",
+            "description": "Capacity label in MB; the current loader multiplies by 1024^2 bytes."
           },
           "size_kb": {
-            "type": "number"
+            "type": "number",
+            "description": "Capacity label in KB; the current loader multiplies by 1024 bytes."
           },
           "bandwidth_tbps": {
-            "type": "number"
+            "type": "number",
+            "description": "Theoretical or model bandwidth in decimal 10^12 byte/s; converted to byte/device-compute-cycle."
           },
           "bandwidth_gbps": {
-            "type": "number"
+            "type": "number",
+            "description": "Theoretical or model bandwidth in decimal 10^9 byte/s; converted to byte/device-compute-cycle."
           },
           "latency_cycles": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Fixed access-latency prior in device-compute cycles."
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "Purpose, source boundary, and calibration status of this memory space."
+          },
+          "field_metadata": {
+            "$ref": "#/definitions/field_metadata"
+          },
+          "source": {
+            "type": "string",
+            "description": "Optional source shared by the complete memory-space record."
           }
         }
       }
@@ -86,8 +131,10 @@
 
     "compute_units": {
       "type": "object",
+      "description": "Named compute engines and their declared topology, peak rates, legal types, and memory-space contract.",
       "additionalProperties": {
         "type": "object",
+        "description": "One named compute engine and its physical width, peak rates, supported operations, and memory-space contract.",
         "required": [
           "type"
         ],
@@ -98,55 +145,87 @@
               "matrix_engine",
               "simd_engine",
               "scalar_engine"
-            ]
+            ],
+            "description": "Compute-engine category."
+          },
+          "description": {
+            "type": "string",
+            "description": "Purpose and evidence boundary of this compute unit."
           },
           "tflops_fp16": {
-            "type": "number"
+            "type": "number",
+            "description": "Declared FP16 peak arithmetic rate in TFLOP/s."
           },
           "tflops_fp32": {
-            "type": "number"
+            "type": "number",
+            "description": "Declared FP32 peak arithmetic rate in TFLOP/s."
           },
           "tflops_int8": {
-            "type": "number"
+            "type": "number",
+            "description": "Declared INT8 peak operation rate; the legacy field name says TFLOPS although TOPS is the more precise unit."
+          },
+          "fractal_sizes": {
+            "type": "object",
+            "description": "Dtype-specific Cube atomic matrix shapes.",
+            "additionalProperties": {
+              "$ref": "#/definitions/fractal_size"
+            }
           },
           "tile_m": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Fallback Cube tile M when no dtype-specific fractal shape is found."
           },
           "tile_n": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Fallback Cube tile N when no dtype-specific fractal shape is found."
           },
           "tile_k": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Fallback Cube reduction dimension K when no dtype-specific fractal shape is found."
           },
           "width_elements": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Nominal SIMD element count, traditionally expressed for the reference dtype; do not use as a dtype-independent lane count."
           },
           "width_bytes": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Physical SIMD vector width in bytes; lane count equals width_bytes × 8 / element_bits."
           },
           "input_spaces": {
             "type": "array",
+            "description": "Names of memory spaces read by this compute engine.",
             "items": {
               "type": "string"
             }
           },
           "output_space": {
-            "type": "string"
+            "type": "string",
+            "description": "Name of the memory space written by this compute engine."
           },
           "compute_space": {
-            "type": "string"
+            "type": "string",
+            "description": "Local memory space in which this engine executes its arithmetic."
           },
           "supported_ops": {
             "type": "array",
+            "description": "Operation categories declared as supported by this engine.",
             "items": {
               "type": "string"
             }
           },
           "supported_dtypes": {
             "type": "array",
+            "description": "Data types declared as supported by this engine.",
             "items": {
               "type": "string"
             }
+          },
+          "field_metadata": {
+            "$ref": "#/definitions/field_metadata"
+          },
+          "source": {
+            "type": "string",
+            "description": "Optional source shared by the complete compute-unit record."
           }
         }
       }
@@ -154,41 +233,55 @@
 
     "data_movers": {
       "type": "object",
+      "description": "Named hardware transfer paths between memory spaces.",
       "additionalProperties": {
         "type": "object",
+        "description": "One named data-mover path, including its endpoints, modeled bandwidth, burst constraints, and fused capabilities.",
         "required": [
           "src_space"
         ],
         "properties": {
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "Human-readable role and transfer direction."
           },
           "src_space": {
-            "type": "string"
+            "type": "string",
+            "description": "Source memory-space name."
           },
           "dst_space": {
-            "type": "string"
+            "type": "string",
+            "description": "Single destination memory-space name."
           },
           "dst_spaces": {
             "type": "array",
+            "description": "Multiple destination memory-space names; when present, the loader replaces dst_space with this list.",
             "items": {
               "type": "string"
             }
           },
           "bandwidth_gbps": {
-            "type": "number"
+            "type": "number",
+            "description": "Modeled transfer bandwidth in decimal GB/s."
           },
           "max_burst_bytes": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Maximum bytes in one modeled burst."
           },
           "alignment_bytes": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Required or efficient byte alignment for this transfer path."
           },
           "supports_accumulate": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether accumulation may be fused into this transfer."
           },
           "supports_cast": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether type conversion may be fused into this transfer."
+          },
+          "field_metadata": {
+            "$ref": "#/definitions/field_metadata"
           }
         }
       }
@@ -196,25 +289,364 @@
 
     "pipeline": {
       "type": "object",
-      "additionalProperties": {
-        "type": "object",
-        "properties": {
-          "stages": {
-            "type": "array",
-            "items": {
-              "type": "string"
+      "description": "Pipeline path declarations and intended overlap relationships.",
+      "properties": {
+        "cube_path": {
+          "$ref": "#/definitions/pipeline_path"
+        },
+        "vector_path": {
+          "$ref": "#/definitions/pipeline_path"
+        },
+        "hardware_units": {
+          "type": "object",
+          "description": "Map from hardware-unit name to its pipeline path and overlap capability. The current C++ loader does not consume this nested map.",
+          "additionalProperties": {
+            "$ref": "#/definitions/pipeline_hardware_unit"
+          }
+        },
+        "parallelism": {
+          "type": "object",
+          "description": "Intended inter-path and intra-path overlap relationships. The current nested representation is not consumed by the C++ loader.",
+          "properties": {
+            "inter_path": {
+              "$ref": "#/definitions/pipeline_overlap_group"
+            },
+            "intra_path": {
+              "$ref": "#/definitions/pipeline_overlap_group"
             }
-          },
-          "description": {
-            "type": "string"
           }
         }
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/pipeline_path"
       }
     },
 
     "performance_model": {
       "type": "object",
-      "description": "Custom performance estimation formulas"
+      "description": "Documentary analytical formulas. The current C++ loader does not interpret or execute this block.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Consumption-status warning for this block."
+        },
+        "cube_cycles_per_tile": {
+          "$ref": "#/definitions/formula_entry"
+        },
+        "vector_cycles_per_op": {
+          "$ref": "#/definitions/formula_entry"
+        },
+        "memory_cycles": {
+          "type": "object",
+          "description": "Documentary memory transfer formula.",
+          "properties": {
+            "description": {
+              "type": "string",
+              "description": "Human-readable status and intended meaning of this formula."
+            },
+            "formula": {
+              "type": "string",
+              "description": "Human-readable expression; it is not evaluated by the loader."
+            },
+            "include_latency": {
+              "type": "boolean",
+              "description": "Documents whether the conceptual formula includes fixed latency; not consumed from this block."
+            }
+          }
+        }
+      }
+    },
+
+    "calibration": {
+      "type": "object",
+      "description": "Absolute-model priors, evidence notes, and target-specific calibration parameters.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Origin, inheritance, and recalibration requirements for this target profile."
+        },
+        "startup_latencies": {
+          "type": "object",
+          "description": "Startup-cycle priors. The current JSON loader does not consume this object; getters use C++ defaults.",
+          "properties": {
+            "description": {
+              "type": "string",
+              "description": "Consumption status or provenance shared by the startup-latency fields."
+            },
+            "vector_startup_cycles": {
+              "type": "integer",
+              "description": "Vector pipeline startup prior in device-compute cycles."
+            },
+            "mte2_startup_cycles": {
+              "type": "integer",
+              "description": "MTE2 startup prior in device-compute cycles."
+            },
+            "mte3_startup_cycles": {
+              "type": "integer",
+              "description": "MTE3 startup prior in device-compute cycles."
+            },
+            "cube_startup_cycles": {
+              "type": "integer",
+              "description": "Cube engine startup prior in device-compute cycles."
+            },
+            "fixpipe_startup_cycles": {
+              "type": "integer",
+              "description": "FixPipe startup prior in device-compute cycles."
+            },
+            "notes": {
+              "type": "string",
+              "description": "Free-form calibration rationale retained for human review; not consumed by the loader."
+            }
+          }
+        },
+        "vector_op_cycles_per_vec_instruction": {
+          "type": "object",
+          "description": "Legacy cycles-per-vector-instruction priors. This is the only calibration sub-object currently parsed from JSON.",
+          "properties": {
+            "description": {
+              "type": "string",
+              "description": "Consumption status or provenance shared by these operation-cycle priors."
+            },
+            "exp": {
+              "type": "integer",
+              "description": "Vector exponential cycles per instruction."
+            },
+            "log": {
+              "type": "integer",
+              "description": "Vector logarithm cycles per instruction."
+            },
+            "tanh": {
+              "type": "integer",
+              "description": "Vector tanh cycles per instruction."
+            },
+            "sigmoid": {
+              "type": "integer",
+              "description": "Vector sigmoid cycles per instruction."
+            },
+            "sqrt": {
+              "type": "integer",
+              "description": "Vector square-root cycles per instruction."
+            },
+            "rsqrt": {
+              "type": "integer",
+              "description": "Vector reciprocal-square-root cycles per instruction."
+            },
+            "div": {
+              "type": "integer",
+              "description": "Vector division cycles per instruction."
+            },
+            "simple_ops_add_sub_mul_etc": {
+              "type": "integer",
+              "description": "Shared legacy cycle prior for simple vector add, sub, mul, and cast instructions."
+            },
+            "notes": {
+              "type": "string",
+              "description": "Free-form calibration rationale retained for human review; not consumed as an operation cost."
+            }
+          }
+        },
+        "scalar_overhead": {
+          "type": "object",
+          "description": "Observed scalar/compute ratios retained as evidence; the current JSON loader does not consume them.",
+          "properties": {
+            "description": {
+              "type": "string",
+              "description": "Source and interpretation shared by the scalar-overhead fields."
+            },
+            "aiv_scalar_to_vec_ratio_steady_state": {
+              "type": "number",
+              "description": "Steady-state AIV scalar cost relative to vector cost."
+            },
+            "aic_scalar_to_mac_ratio_steady_state": {
+              "type": "number",
+              "description": "Steady-state AIC scalar cost relative to Cube MAC cost."
+            },
+            "aiv_vec_ratio_observed": {
+              "type": "number",
+              "description": "Observed fraction of AIV time attributed to vector work."
+            },
+            "aiv_scalar_overhead_factor": {
+              "type": "number",
+              "description": "Non-vector overhead factor in total ≈ vector × (1 + factor)."
+            }
+          }
+        },
+        "parallelism": {
+          "type": "object",
+          "description": "Declared physical core counts. The current JSON loader does not consume them; current getters still use C++ defaults.",
+          "properties": {
+            "num_aic_cores": {
+              "type": "integer",
+              "description": "Declared AIC/Cube core count."
+            },
+            "num_aiv_cores": {
+              "type": "integer",
+              "description": "Declared AIV/Vector core count."
+            },
+            "description": {
+              "type": "string",
+              "description": "Source of the declared core counts."
+            }
+          }
+        },
+        "pipe_barrier": {
+          "type": "object",
+          "description": "Barrier-overhead prior. The current JSON loader does not consume this object.",
+          "properties": {
+            "description": {
+              "type": "string",
+              "description": "Calibration source and interpretation of the barrier prior."
+            },
+            "cycles_per_inner_iteration": {
+              "type": "integer",
+              "description": "Modeled AIC/AIV pipe-barrier cost per inner iteration."
+            }
+          }
+        },
+        "wave_overhead": {
+          "type": "object",
+          "description": "Multi-wave overhead evidence and recalibration warning; not parsed by the current loader.",
+          "properties": {
+            "description": {
+              "type": "string",
+              "description": "Source and validity boundary of the wave-overhead model."
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "definitions": {
+    "pipeline_path": {
+      "type": "object",
+      "description": "One ordered hardware data/compute pipeline.",
+      "properties": {
+        "stages": {
+          "type": "array",
+          "description": "Ordered data-mover and compute-unit names in this path.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable role of this pipeline path."
+        },
+        "fully_pipelined": {
+          "type": "boolean",
+          "description": "Declares steady-state stage overlap. The current C++ JSON loader does not consume this field."
+        }
+      }
+    },
+    "pipeline_hardware_unit": {
+      "type": "object",
+      "description": "Pipeline membership and overlap declaration for one named hardware unit.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "enum": [
+            "cube",
+            "vector"
+          ],
+          "description": "Execution path to which this unit belongs."
+        },
+        "can_overlap": {
+          "type": "boolean",
+          "description": "Whether this unit is declared able to overlap with independent hardware units."
+        }
+      }
+    },
+    "pipeline_overlap_group": {
+      "type": "object",
+      "description": "Named overlap relationships within or between pipeline paths.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable interpretation of this group of overlap flags."
+        }
+      },
+      "additionalProperties": {
+        "type": "boolean",
+        "description": "Whether the hardware paths or stages named by this key may execute concurrently."
+      }
+    },
+    "field_metadata": {
+      "type": "object",
+      "description": "Per-field provenance and confidence without changing the scalar field shape expected by the runtime loader.",
+      "additionalProperties": {
+        "$ref": "#/definitions/field_metadata_entry"
+      }
+    },
+    "field_metadata_entry": {
+      "type": "object",
+      "description": "Meaning, provenance, and confidence attached to one scalar field while preserving that field's loader-compatible numeric type.",
+      "required": [
+        "description",
+        "source",
+        "confidence"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Meaning and scope of the concrete field value."
+        },
+        "source": {
+          "type": "string",
+          "description": "Specification, configuration, baseline, or measurement from which the value came."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ],
+          "description": "Evidence confidence for this concrete value."
+        }
+      },
+      "additionalProperties": false
+    },
+    "fractal_size": {
+      "type": "object",
+      "required": [
+        "m",
+        "n",
+        "k"
+      ],
+      "description": "Dtype-specific Cube atomic matrix dimensions.",
+      "properties": {
+        "m": {
+          "type": "integer",
+          "description": "Output-row dimension M."
+        },
+        "n": {
+          "type": "integer",
+          "description": "Output-column dimension N."
+        },
+        "k": {
+          "type": "integer",
+          "description": "Reduction dimension K."
+        }
+      }
+    },
+    "formula_entry": {
+      "type": "object",
+      "description": "Documentary formula entry; current C++ code does not evaluate this expression.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable status and intended meaning of this formula."
+        },
+        "formula": {
+          "type": "string",
+          "description": "Human-readable expression."
+        },
+        "base_cycles": {
+          "type": "integer",
+          "description": "Nominal cycles per atomic unit in the documented formula."
+        }
+      }
     }
   }
 }

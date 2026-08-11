@@ -52,7 +52,11 @@ inline constexpr const char *InspectedByStridedLoadStoreRewriteTAG =
 //   the stride==2 even-size case handled by DeinterleaveStatusOptimization).
 //
 //   Runs as a sub-step of TritonToLinalgPass, after processImplicitPermute,
-//   and is gated on 910_95 with compile-mode=simd_simt_template.
+//   and is gated on 910_95 with compile-mode=simd_simt_template. Cost-model
+//   controlled routing can also enable it for selected operations in local
+//   SIMT scopes while leaving unselected operations on the SIMD path.
+//   model-controlled routing additionally filters every rewrite to operations
+//   enclosed by the local SIMT route scope.
 class LoadConverter : public OpRewritePattern<triton::LoadOp> {
 public:
   explicit LoadConverter(MLIRContext *context)

@@ -1,3 +1,5 @@
 add_subdirectory(IR)
+add_subdirectory(Profile)
 add_subdirectory(Analysis)
+add_subdirectory(RouteModel)
 add_subdirectory(Transforms)

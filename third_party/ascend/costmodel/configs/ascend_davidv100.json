@@ -3,10 +3,26 @@
   "name": "Ascend davidV100",
   "vendor": "Huawei",
   "version": "1.0",
+  "description": "Hardware topology, theoretical limits, and absolute-cost-model priors for Ascend950PR/dav-c310. Values are not all board measurements; consult field_metadata and calibration.description.",
+  "target": "Ascend950PR/dav-c310",
+  "microbenchmark_profile": "../profiles/microbench/ascend_davidv100_v1.json",
 
   "clock": {
+    "description": "Device-compute clock domain used by the absolute cost model. SYS_CNT uses a different frequency stored in the shared microbenchmark profile.",
     "frequency_ghz": 1.65,
-    "cycles_per_us": 1650
+    "cycles_per_us": 1650,
+    "field_metadata": {
+      "frequency_ghz": {
+        "description": "Device-compute clock in GHz.",
+        "source": "tilesim davidV100 arc_config",
+        "confidence": "high"
+      },
+      "cycles_per_us": {
+        "description": "Human-readable frequency_ghz * 1000. The current C++ loader derives timing from frequency_ghz and does not read this scalar.",
+        "source": "Derived from frequency_ghz",
+        "confidence": "high"
+      }
+    }
   },
 
   "memory_spaces": {
@@ -14,13 +30,32 @@
       "type": "off_chip",
       "size_gb": 32,
       "bandwidth_tbps": 1.6,
-      "latency_cycles": 200
+      "latency_cycles": 200,
+      "description": "Device-level off-chip HBM model. These three values are inherited 910B baseline priors, not isolated Ascend950PR measurements.",
+      "field_metadata": {
+        "size_gb": {
+          "description": "Configured HBM capacity; HardwareConfig converts this value with 1024^3 bytes per unit.",
+          "source": "Inherited Ascend 910B baseline from cost-model PR #237; not verified on triton_a5",
+          "confidence": "low"
+        },
+        "bandwidth_tbps": {
+          "description": "Whole-device theoretical bandwidth seed in 10^12 byte/s; it is not the measured single-AIV GM bandwidth.",
+          "source": "Inherited Ascend 910B baseline from cost-model PR #237",
+          "confidence": "low"
+        },
+        "latency_cycles": {
+          "description": "Fixed HBM access-latency prior in device-compute cycles, used by latency-inclusive fallback estimates.",
+          "source": "Inherited model prior; no isolated Ascend950PR latency measurement is recorded",
+          "confidence": "low"
+        }
+      }
     },
     "l2": {
       "type": "on_chip_shared",
       "size_mb": 192,
       "bandwidth_gbps": 3200,
-      "latency_cycles": 50
+      "latency_cycles": 50,
+      "description": "Shared on-chip L2 model; the numeric values remain inherited baseline priors pending target-specific calibration."
     },
     "l1": {
       "type": "on_chip_local",
@@ -56,6 +91,7 @@
   "compute_units": {
     "cube": {
       "type": "matrix_engine",
+      "description": "Cube matrix engine topology, theoretical arithmetic rates, supported fractal shapes, and memory-space contract.",
       "tflops_fp16": 448,
       "tflops_fp32": 224,
       "tflops_int8": 896,
@@ -98,6 +134,7 @@
     },
     "vector": {
       "type": "simd_engine",
+      "description": "AIV SIMD engine topology and declared operation/data-type support; measured instruction rates live in the shared microbenchmark profile.",
       "width_elements": 128,
       "width_bytes": 256,
       "tflops_fp32": 14,
@@ -245,15 +282,19 @@
   },
 
   "performance_model": {
+    "description": "Documentary analytical formulas from the original model. The current HardwareConfig loader does not parse this block.",
     "cube_cycles_per_tile": {
+      "description": "Nominal Cube tile-count formula; not currently consumed by HardwareConfig::loadFromJSON.",
       "formula": "ceil(M/16) * ceil(N/16) * ceil(K/16)",
       "base_cycles": 1
     },
     "vector_cycles_per_op": {
+      "description": "Nominal SIMD instruction-count formula; not currently consumed by HardwareConfig::loadFromJSON.",
       "formula": "ceil(elements / 128)",
       "base_cycles": 1
     },
     "memory_cycles": {
+      "description": "Nominal bandwidth-plus-latency formula; not currently consumed from this block.",
       "formula": "bytes / bandwidth_per_cycle",
       "include_latency": true
     }
@@ -263,6 +304,7 @@
     "description": "davidV100 profile adapted from tilesim arc_config (clock=1650MHz, UB=512KB, core_config: cube=28, vector=56). Remaining model parameters follow Ascend 910B baseline and should be re-calibrated with davidV100 profiling data.",
 
     "startup_latencies": {
+      "description": "Absolute-model startup priors. The current JSON loader does not read this object; corresponding getters still use C++ defaults.",
       "vector_startup_cycles": 35,
       "mte2_startup_cycles": 50,
       "mte3_startup_cycles": 40,
@@ -271,6 +313,7 @@
     },
 
     "vector_op_cycles_per_vec_instruction": {
+      "description": "Legacy per-vector-instruction cycle priors. This is the only calibration sub-object currently consumed by HardwareConfig::loadFromJSON.",
       "exp": 4,
       "log": 3,
       "tanh": 3,
@@ -282,6 +325,7 @@
     },
 
     "scalar_overhead": {
+      "description": "Observed scalar/compute ratios retained as calibration evidence; the current JSON loader does not consume these fields.",
       "aiv_scalar_to_vec_ratio_steady_state": 1.27,
       "aic_scalar_to_mac_ratio_steady_state": 8.4,
       "aiv_vec_ratio_observed": 0.211,
@@ -295,6 +339,7 @@
     },
 
     "pipe_barrier": {
+      "description": "Legacy barrier-overhead prior; the current JSON loader does not consume this object.",
       "cycles_per_inner_iteration": 7500
     },
 

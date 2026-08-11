@@ -40,4 +40,5 @@ jobs:
             APTMIRROR=http://cache-service.nginx-pypi-cache.svc.cluster.local:8081
             PIP_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple
             PIP_TRUSTED_HOST=cache-service.nginx-pypi-cache.svc.cluster.local
+            PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
           provenance: false

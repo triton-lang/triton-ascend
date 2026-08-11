@@ -7,6 +7,7 @@ ENV TZ="Asia/shanghai"
 
 ARG APTMIRROR
 ARG PIP_INDEX_URL="https://repo.huaweicloud.com/repository/pypi/simple"
+ARG PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cpu"
 ARG PIP_TRUSTED_HOST=""
 
 RUN if [ -n "$APTMIRROR" ]; then \
@@ -44,7 +45,7 @@ RUN if [ -n "$APTMIRROR" ]; then \
     update-ca-certificates
 
 RUN mkdir -p /root/.config/pip && \
-    printf '[global]\nindex-url = %s\n' "$PIP_INDEX_URL" > /root/.config/pip/pip.conf && \
+    printf '[global]\nindex-url = %s\nextra-index-url = %s\n' "$PIP_INDEX_URL" "$PYTORCH_INDEX_URL" > /root/.config/pip/pip.conf && \
     if [ -n "$PIP_TRUSTED_HOST" ]; then printf 'trusted-host = %s\n' "$PIP_TRUSTED_HOST" >> /root/.config/pip/pip.conf; fi
 
 COPY requirements.txt requirements_dev.txt ./

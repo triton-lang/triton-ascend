@@ -1,17 +1,18 @@
 # CVSplitScheduling Flash-Attention validation
 
-`test_fa_accuracy.py` is the single kernel source for all comparisons.  The
-three variants change only explicit compiler switches:
+`test_fa_accuracy.py` is the single kernel source for all comparisons. The
+variants change only compiler policy switches:
 
 | Variant | DynamicCVPipeline | CVSplitScheduling |
 | --- | --- | --- |
+| `default` | target default | target default |
 | `baseline` | off | off |
 | `dcvp` | on | off |
 | `cvsplit` | off | on, unroll 4 |
 | `auto` | on (fallback) | on (first attempt) |
 
-This explicit matrix is important because DynamicCVPipeline is enabled by
-default on A5.  An empty launch option set is therefore not a plain baseline.
+The explicit `baseline` is important because an empty launch option set uses
+the A5 production default (`auto`) and is therefore not a plain baseline.
 
 ## Correctness
 
@@ -20,7 +21,7 @@ against the PyTorch reference:
 
 ```bash
 for block_m in 64 128; do
-  for variant in baseline dcvp cvsplit; do
+  for variant in default baseline dcvp cvsplit auto; do
     python test/profile_fa.py \
       --variant "$variant" --sequence-length 1024 \
       --batch-size 1 --num-heads 1 --block-m "$block_m" --block-n 128 \
@@ -35,7 +36,8 @@ Use the same full production grid for every variant.  `msprof` records three
 warmups followed by ten measured launches:
 
 ```bash
-msprof op --output=./msprof_bm64_cvsplit --application="python \
+msprof --output=./msprof_bm64_cvsplit --task-time=on --ai-core=on \
+  --aic-mode=task-based --application="python \
   test/profile_fa.py --variant cvsplit --sequence-length 1024 \
   --batch-size 128 --num-heads 8 --block-m 64 --block-n 128 \
   --active-blocks 0 --warmup 3 --iterations 10 --skip-accuracy"
@@ -44,7 +46,8 @@ python test/summarize_msprof.py ./msprof_bm64_cvsplit --warmup 3
 ```
 
 Repeat the command without changing shape, grid, inputs, warmup, or iteration
-count for `baseline`, `dcvp`, and `auto`. Use `auto --unroll-factor 3` to prove
+count for `default`, `baseline`, `dcvp`, and `auto`. Use
+`auto --unroll-factor 3` to prove
 that CV rejection falls back to DCVP with correct output. A performance result
 is reportable only when:
 

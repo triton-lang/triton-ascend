@@ -156,6 +156,8 @@ def get_compile_options(variant, unroll_factor=4):
     not a plain baseline.  Keep both feature switches explicit here to make it
     impossible for a default change to silently alter the comparison.
     """
+    if variant == "default":
+        return {}
     if variant == "baseline":
         return {
             "enable_dynamic_cv_pipeline": False,
@@ -179,7 +181,7 @@ def get_compile_options(variant, unroll_factor=4):
             "cv_split_unroll_factor": unroll_factor,
         }
     raise ValueError(
-        f"variant must be baseline|dcvp|cvsplit|auto, got {variant!r}")
+        f"variant must be default|baseline|dcvp|cvsplit|auto, got {variant!r}")
 
 
 def run_attention(q, k, v, sm_scale, use_cvsplit=False, variant=None):
@@ -232,9 +234,9 @@ def check_accuracy(name, out, ref, atol=0.05, rtol=0.05):
 
 def main():
     variant = os.environ.get("FA_VARIANT", "cvsplit").lower()
-    if variant not in ("cvsplit", "dcvp", "baseline", "auto"):
+    if variant not in ("default", "cvsplit", "dcvp", "baseline", "auto"):
         raise ValueError(
-            f"FA_VARIANT must be cvsplit|dcvp|baseline|auto, got {variant!r}")
+            f"FA_VARIANT must be default|cvsplit|dcvp|baseline|auto, got {variant!r}")
 
     torch.manual_seed(42)
     q_cpu = torch.empty(B, H, N, D, dtype=torch.float16).normal_(mean=0.0, std=0.5)
@@ -266,6 +268,7 @@ def main():
     # profiling and accuracy state.
     use_cvsplit = variant == "cvsplit"
     names = {
+        "default": "COMPILER DEFAULT POLICY",
         "cvsplit": "CVSPLIT (our pass)",
         "auto": "CVSPLIT TRY WITH DYNAMIC CV FALLBACK",
         "dcvp": "DYNAMIC CV PIPELINE",

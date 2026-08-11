@@ -22,7 +22,7 @@ import test_fa_accuracy as fa
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--variant", choices=("baseline", "dcvp", "cvsplit", "auto"),
+        "--variant", choices=("default", "baseline", "dcvp", "cvsplit", "auto"),
         required=True)
     parser.add_argument("--sequence-length", type=int, default=1024)
     parser.add_argument("--batch-size", type=int, default=1)

@@ -28,8 +28,8 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LogicalResult.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
 
 #include <cstdint>
 
@@ -46,22 +46,24 @@ struct VectorToCubeTransferChain {
     Operation *anchor;
     /// Pack operations still owned by the IR. Scope separation must erase them
     /// in reverse order before rebuilding a per-vector-core pack.
-    SmallVector<Operation *> operationsToErase;
+    llvm::SmallVector<Operation *> operationsToErase;
 };
 
 /// Cross-scope transfer metadata consumed by scope separation.
 struct CrossScopeTransferInfo {
-    /// Full row count before the VECTOR scope is split across two cores.
+    /// Full row count derived from the leading CUBE-to-VECTOR transfer
+    /// dimension. Scope separation halves it to M/2 rows per vector core.
     int64_t blockM;
-    SmallVector<VectorToCubeTransferChain> vectorToCubeChains;
+    llvm::SmallVector<VectorToCubeTransferChain> vectorToCubeChains;
 };
 
 /// Materializes CUBE-to-VECTOR and VECTOR-to-CUBE data movement and
 /// synchronization for `loop`.
 ///
 /// `classification` assigns each operation to its execution engine.
-/// `transferPhaseEnds` maps a VECTOR producer to the last operation that must
-/// finish before its final UB-to-L1 copy and ready signal may be committed.
+/// `transferPhaseEnds` maps a VECTOR-engine operation whose result is consumed
+/// by CUBE to the last VECTOR operation that must finish before its final
+/// UB-to-L1 copy and ready signal may be committed.
 /// The returned handles remain owned by the mutated IR and must be consumed
 /// before the referenced operations are erased or reordered.
 FailureOr<CrossScopeTransferInfo>

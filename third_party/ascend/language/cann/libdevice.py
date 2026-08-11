@@ -2694,12 +2694,12 @@ def rsqrt(arg0, _semantic=None):
 
 @core.extern
 def sin(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.sin for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0], {
-        (core.dtype("fp32"), ): ("__hmf_sin_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    arg0 = _semantic.to_tensor(arg0)
+    if arg0.dtype == core.dtype("fp32") and is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0], {
+            (core.dtype("fp32"), ): ("__hmf_sin_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
+    return core.tensor(_semantic.builder.create_sin(arg0.handle), arg0.type)
 
 
 @core.extern

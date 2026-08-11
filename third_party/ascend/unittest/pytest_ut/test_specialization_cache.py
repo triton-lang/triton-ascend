@@ -71,6 +71,21 @@ def _assert_aligned_and_unaligned_pair(first, second):
     assert {first.data_ptr() % 16, second.data_ptr() % 16} == {0, first.element_size()}
 
 
+def _pointer_views(src_base, dst_base, offsets, changed_pointer):
+    src_offsets = offsets if changed_pointer in {"src", "both"} else (0, 0)
+    dst_offsets = offsets if changed_pointer in {"dst", "both"} else (0, 0)
+    src = tuple(src_base[offset:offset + 16] for offset in src_offsets)
+    dst = tuple(dst_base[offset:offset + 16] for offset in dst_offsets)
+
+    for name, views in (("src", src), ("dst", dst)):
+        if changed_pointer in {name, "both"}:
+            _assert_aligned_and_unaligned_pair(*views)
+        else:
+            assert views[0].data_ptr() == views[1].data_ptr()
+
+    return src, dst
+
+
 @pytest.fixture(autouse=True)
 def _reset_cache_hook():
     _clear_kernel_cache()
@@ -105,8 +120,9 @@ def test_simd_integer_alignment_reuses_compilation(mode, values):
 
 
 @pytest.mark.parametrize("mode", ["simd", "unstructured_in_simt"])
-@pytest.mark.parametrize("offsets", [(0, 1), (1, 0)])
-def test_simd_pointer_alignment_reuses_compilation(mode, offsets):
+@pytest.mark.parametrize("offsets", [(0, 1), (1, 0)], ids=["aligned-first", "unaligned-first"])
+@pytest.mark.parametrize("changed_pointer", ["src", "dst", "both"], ids=["src-only", "dst-only", "src-and-dst"])
+def test_simd_pointer_alignment_reuses_compilation(mode, offsets, changed_pointer):
     src_base = torch.arange(17, dtype=torch.int32, device="npu")
     dst_base = torch.empty_like(src_base)
     compile_count = 0
@@ -116,14 +132,9 @@ def test_simd_pointer_alignment_reuses_compilation(mode, offsets):
         compile_count += 1
 
     triton.knobs.runtime.jit_cache_hook = count_compile
-    src0 = src_base[offsets[0]: offsets[0] + 16]
-    dst0 = dst_base[offsets[0]: offsets[0] + 16]
-    src1 = src_base[offsets[1]: offsets[1] + 16]
-    dst1 = dst_base[offsets[1]: offsets[1] + 16]
-    _assert_aligned_and_unaligned_pair(src0, src1)
-    _assert_aligned_and_unaligned_pair(dst0, dst1)
-    _run_case(16, src0, dst0, mode)
-    _run_case(16, src1, dst1, mode)
+    src, dst = _pointer_views(src_base, dst_base, offsets, changed_pointer)
+    _run_case(16, src[0], dst[0], mode)
+    _run_case(16, src[1], dst[1], mode)
 
     assert compile_count == 1
 
@@ -190,8 +201,9 @@ def test_simd_tuple_integer_alignment_reuses_compilation(mode, values):
 
 
 @pytest.mark.parametrize("mode", ["simd", "unstructured_in_simt"])
-@pytest.mark.parametrize("offsets", [(0, 1), (1, 0)])
-def test_simd_tuple_pointer_alignment_reuses_compilation(mode, offsets):
+@pytest.mark.parametrize("offsets", [(0, 1), (1, 0)], ids=["aligned-first", "unaligned-first"])
+@pytest.mark.parametrize("changed_pointer", ["src", "dst", "both"], ids=["src-only", "dst-only", "src-and-dst"])
+def test_simd_tuple_pointer_alignment_reuses_compilation(mode, offsets, changed_pointer):
     src_base = torch.arange(17, dtype=torch.int32, device="npu")
     dst_base = torch.empty_like(src_base)
     compile_count = 0
@@ -201,14 +213,9 @@ def test_simd_tuple_pointer_alignment_reuses_compilation(mode, offsets):
         compile_count += 1
 
     triton.knobs.runtime.jit_cache_hook = count_compile
-    src0 = src_base[offsets[0]: offsets[0] + 16]
-    dst0 = dst_base[offsets[0]: offsets[0] + 16]
-    src1 = src_base[offsets[1]: offsets[1] + 16]
-    dst1 = dst_base[offsets[1]: offsets[1] + 16]
-    _assert_aligned_and_unaligned_pair(src0, src1)
-    _assert_aligned_and_unaligned_pair(dst0, dst1)
-    _run_tuple_case(16, src0, dst0, mode)
-    _run_tuple_case(16, src1, dst1, mode)
+    src, dst = _pointer_views(src_base, dst_base, offsets, changed_pointer)
+    _run_tuple_case(16, src[0], dst[0], mode)
+    _run_tuple_case(16, src[1], dst[1], mode)
 
     assert compile_count == 1
 

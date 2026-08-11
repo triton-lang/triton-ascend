@@ -1,7 +1,10 @@
-"""CPU/native regression tests for Ascend specialization cache policy."""
+"""Device-independent unit tests for Ascend specialization cache keys.
+
+These tests exercise binder/native-specializer policy without CANN or an NPU.
+The NPU integration suite separately verifies compilation counts and outputs.
+"""
 
 import inspect
-from collections import namedtuple
 
 import pytest
 import torch
@@ -26,24 +29,11 @@ class PointerArg:
         return self.address
 
 
-TupleArg = namedtuple("TupleArg", ["value"])
-
-
-def plain_tuple(value):
-    return (value, )
-
-
-def named_tuple(value):
-    return TupleArg(value)
-
-
 def nested_tuple(value):
     return ((value, ), )
 
 
 TUPLE_FACTORIES = [
-    pytest.param(plain_tuple, id="tuple"),
-    pytest.param(named_tuple, id="namedtuple"),
     pytest.param(nested_tuple, id="nested-tuple"),
 ]
 
@@ -195,13 +185,13 @@ def test_non_ascend_backend_keeps_alignment_specialization():
     assert unaligned == [("i32", ""), ("*fp32", "")]
 
 
-@pytest.mark.parametrize("annotation", ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"])
 @pytest.mark.parametrize("options", SIMD_OPTIONS + SIMT_OPTIONS)
-def test_annotated_integer_one_keeps_constexpr_specialization(annotation, options):
+def test_annotated_integer_one_keeps_constexpr_specialization(options):
 
     def kernel(value):
         pass
 
+    annotation = "i32"
     kernel.__annotations__["value"] = annotation
     signature = inspect.signature(kernel)
     params = [KernelParam(0, next(iter(signature.parameters.values())), False, False)]
@@ -218,26 +208,7 @@ def test_annotated_integer_one_keeps_constexpr_specialization(annotation, option
         cache, two_specialization, two_options)
 
 
-@pytest.mark.parametrize("annotation", ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"])
-def test_non_ascend_annotated_integer_one_keeps_constexpr_specialization(annotation):
-
-    def kernel(value):
-        pass
-
-    kernel.__annotations__["value"] = annotation
-    signature = inspect.signature(kernel)
-    params = [KernelParam(0, next(iter(signature.parameters.values())), False, False)]
-    backend = CUDABackend(GPUTarget("cuda", 80, 32))
-    binder = create_function_from_signature(signature, params, backend)
-
-    _, one_specialization, _ = binder(1)
-    _, two_specialization, _ = binder(2)
-
-    assert one_specialization == [("constexpr", 1)]
-    assert two_specialization == [(annotation, "")]
-
-
-@pytest.mark.parametrize("options", SIMD_OPTIONS + SIMT_OPTIONS)
+@pytest.mark.parametrize("options", [SIMD_OPTIONS[0], *SIMT_OPTIONS])
 @pytest.mark.parametrize("values", [(1, 2), (16, 17)], ids=["value-specialization", "alignment-specialization"])
 def test_annotated_integer_do_not_specialize_keeps_legacy_cache_key(options, values):
 

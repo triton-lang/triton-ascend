@@ -1,12 +1,13 @@
-"""NPU-side regression checks for Ascend specialization cache behavior.
+"""NPU integration tests for Ascend specialization compilation and outputs.
 
 Run this file only with a configured CANN/TorchNPU environment, for example::
 
-    ASCEND_RT_VISIBLE_DEVICES=0 pytest -q test_specialization_cache.py
+    ASCEND_RT_VISIBLE_DEVICES=0 pytest -q test_specialization_cache_npu.py
 
-The SIMT-only path is intentionally covered by the CPU/native binder tests in
-``python/test/unit/runtime/test_ascend_specialize.py`` because current 910B
-hardware does not advertise the SIMT execution mode.
+The device-independent unit suite covers SIMT-only and exact cache-key policy;
+this file intentionally repeats the three acceptance paths end to end with
+real compilation counts and NPU output checks. Current 910B hardware does not
+advertise the SIMT execution mode.
 """
 
 import pytest

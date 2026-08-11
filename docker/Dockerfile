@@ -52,8 +52,7 @@ COPY requirements.txt requirements_dev.txt ./
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install torch==2.7.1+cpu \
-      --index-url ${TORCH_INDEX_URL} \
-      --trusted-host ${PIP_TRUSTED_HOST:-cache-service.nginx-pypi-cache.svc.cluster.local}
+      --find-links ${TORCH_INDEX_URL}/torch/
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install -r requirements_dev.txt && \

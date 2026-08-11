@@ -1041,7 +1041,6 @@ def apply_triton_ascend_patch():
     patch_path = os.path.join("third_party", "ascend", "patch")
     dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.6.0.patch")
     patch = os.path.join(patch_path, "triton-ascend-3.6.0.patch")
-    specialization_patch = os.path.join(patch_path, "triton-ascend-specialization-3.6.0.patch")
     patch_files = [
         "CMakeLists.txt",
         "include/triton/Dialect/Triton/IR/TritonAttrDefs.td",
@@ -1066,10 +1065,9 @@ def apply_triton_ascend_patch():
         "python/triton/runtime/autotuner.py",
     ]
     checkout_file(dev_patch_files)
-    apply_patch(dev_patch)
     checkout_file(patch_files)
     apply_patch(patch)
-    apply_patch(specialization_patch)
+    apply_patch(dev_patch)
 
 
 def get_triton_version_suffix():

@@ -20,3 +20,46 @@ index 0c4d710496..d98afb86f9 100644
              if verbose:
                  print(f"Autotuning failed with {e}")
              return [float("inf"), float("inf"), float("inf")]
+diff --git a/python/src/specialize.cc b/python/src/specialize.cc
+index 3449e3c90..e104743ae 100644
+--- a/python/src/specialize.cc
++++ b/python/src/specialize.cc
+@@ -403,8 +403,8 @@ std::pair<py::object, py::object> handle_tuple(PyObject *backend, PyObject *arg,
+   for (Py_ssize_t i = 0; i < size; ++i) {
+     PyObject *item = PyTuple_GET_ITEM(arg, i); // Borrowed reference
+-    // python reference calls specialize recursively with default arguments set
+-    // currently this is is_const=False, specialize_value=True, align=True
+-    auto [type, key] = specialize_arg(backend, item, false, true, true);
++    // Tuple elements keep the historical is_const=false and
++    // specialize_value=true defaults while propagating the alignment policy.
++    auto [type, key] = specialize_arg(backend, item, false, true, align);
+     if (!type || !key)
+       return {};
+     // Steals reference
+diff --git a/python/triton/backends/compiler.py b/python/triton/backends/compiler.py
+index 10754e715..016e342c2 100644
+--- a/python/triton/backends/compiler.py
++++ b/python/triton/backends/compiler.py
+@@ -90,3 +90,8 @@ class BaseBackend(metaclass=ABCMeta):
+         if arg.data_ptr() % 16 == 0 and kwargs.get("align", False):
+             return "D"
+         return ""
++
++    @staticmethod
++    def use_alignment_specialization(options: dict) -> bool:
++        """Return whether runtime argument alignment contributes to specialization."""
++        return True
+diff --git a/python/triton/runtime/jit.py b/python/triton/runtime/jit.py
+index 1e07a267f..b2992457f 100644
+--- a/python/triton/runtime/jit.py
++++ b/python/triton/runtime/jit.py
+@@ -407,7 +407,8 @@ def create_function_from_signature(sig, kparams, backend):
+             is_const = kp.is_const
+             specialize = not kp.do_not_specialize
+             align = not kp.do_not_specialize_on_alignment
+-            ret = f"specialize_impl(backend, {name}, {is_const}, {specialize}, {align})"
++            ret = (f"specialize_impl(backend, {name}, {is_const}, {specialize}, "
++                   f"{align} and backend.use_alignment_specialization(options))")
+             if kp.annotation_type:
+                 if isinstance(kp.annotation_type, str):
+                     if kp.annotation_type == "u1" or kp.annotation_type[:2] in ["fp", "bf"]:

@@ -732,6 +732,12 @@ CONSTRAINTS = {
         "constraints": [
             "DataType: Ascend A2/A3 does not support uint16, uint32, uint64; Ascend 950 does not fp8e4(E4M3), fp8e5(E5M2) (hardware limitation).",
             "``keep_dims=True`` requires more test coverage; currently verified for 3D tensor with dim=2.",
+            "Multi-input reduce fallback notation: ``K`` is the number of input tensors; ``T[i]`` and ``Res[i]`` are input tensor ``i`` and its scalar result, respectively; ``L = shape(T[0])[0]`` is the reduction length; ``x[i]`` is the current element passed to combine-region argument ``i``; and ``s[i]`` is the carried state passed to argument ``K + i`` (``0 <= i < K``).",
+            "``R`` is the number of effective combine-region operations: only operations backward-reachable from ``tt.reduce.return`` are counted, while ``ext``, ``trunc``, and ``bitcast`` are ignored. The explicit ``scf.for`` fallback is attempted only when ``K > 2`` and ``R != 1``; ``R = 1`` keeps the existing single-reduction lowering.",
+            "Input shape and axis: every ``T[i]`` must be a ``RankedTensor`` with the same static rank-1 shape, ``axis = 0``, and a positive static ``L``. Different ``T[i]`` values may have different element types.",
+            "Results: there must be exactly ``K`` results, and every ``Res[i]`` must be a scalar with the same element type as its corresponding ``T[i]``.",
+            "Combine region: it must have exactly ``2K`` block arguments and ``K`` ``tt.reduce.return`` operands. The fallback initializes ``s[i]`` from ``T[i][0]`` and combines elements in order for ``i = 1 ... L - 1``.",
+            "Semantics and performance: this path clones the combine region into a sequential ``scf.for``. It can have a different floating-point rounding order from a tree reduction, and it does not guarantee that every multi-input ``reduce`` will pass later lowering or have equivalent performance.",
         ],
         "example":
         "triton.language.reduce",

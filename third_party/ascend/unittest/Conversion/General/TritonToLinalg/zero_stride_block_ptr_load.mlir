@@ -1,14 +1,14 @@
-// RUN: triton-opt "--triton-to-linalg=global-kernel=false named-ops=True" --split-input-file %s | FileCheck %s
+// RUN: triton-opt --pass-pipeline="builtin.module(triton-to-unstructure{compile-on-910-95=false force-simt-template=true},triton-to-linalg{compile-on-910-95=false enable-nd2nz-on-vector=false enable-select-analysis=true global-kernel=false named-ops=true})" --split-input-file %s | FileCheck %s
 
-// A direct MTP load with zero strides must derive its boundary from the MTP
-// logical shape/offset. The converted physical offset is always zero and
-// cannot be divided by a zero physical stride to recover that information.
+// A block-pointer load with a static zero stride must avoid materializing a
+// zero-strided memref. It is lowered through the scalar-loop fallback, which
+// loads only the logical in-bounds region and initializes the rest with the
+// requested padding.
 // CHECK-LABEL: func.func @zero_stride_dynamic
-// CHECK: memref.reinterpret_cast {{.*}}strides: [0, 0]
-// CHECK: arith.subi
-// CHECK: arith.maxsi
-// CHECK: arith.minsi
-// CHECK: memref.copy
+// CHECK: linalg.fill
+// CHECK: scf.for
+// CHECK: memref.load
+// CHECK-NOT: strided<[0
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   tt.func public @zero_stride_dynamic(
       %src: !tt.ptr<f32> {tt.divisibility = 16 : i32},
@@ -36,11 +36,10 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 // -----
 
 // CHECK-LABEL: func.func @mixed_zero_stride_dynamic
-// CHECK: memref.reinterpret_cast {{.*}}strides: [0, 1]
-// CHECK: arith.subi
-// CHECK: arith.maxsi
-// CHECK: arith.minsi
-// CHECK: memref.copy
+// CHECK: linalg.fill
+// CHECK: scf.for
+// CHECK: memref.load
+// CHECK-NOT: strided<[0
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   tt.func public @mixed_zero_stride_dynamic(
       %src: !tt.ptr<f32> {tt.divisibility = 16 : i32},
@@ -68,9 +67,10 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 // -----
 
 // CHECK-LABEL: func.func @zero_stride_negative_offset
-// CHECK: memref.reinterpret_cast {{.*}}strides: [0, 0]
-// CHECK: memref.subview {{.*}}[2, 0]
-// CHECK: memref.copy
+// CHECK: linalg.fill
+// CHECK: scf.for
+// CHECK: memref.load
+// CHECK-NOT: strided<[0
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   tt.func public @zero_stride_negative_offset(
       %src: !tt.ptr<f32> {tt.divisibility = 16 : i32},

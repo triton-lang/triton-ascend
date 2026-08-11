@@ -18,8 +18,8 @@ jobs:
       fail-fast: false
       matrix:
         runner_info:
-          - {runner: linux-aarch64-cpu-4-buildkit, arch: arm64}
-          - {runner: linux-amd64-cpu-4-buildkit, arch: amd64}
+          - {runner: linux-aarch64-cpu-4, arch: arm64}
+          - {runner: linux-amd64-cpu-4, arch: amd64}
 
     steps:
       - name: Checkout

@@ -150,6 +150,8 @@ void processOnefor(scf::ForOp forOp, CVPipeline::ComputeBlockIdManager &bm,
       auto firstUserOps = bm.getOpsByBlockId(firstUserBlockId);
       Operation *lastOpInFirstUserBlock = nullptr;
       for (Operation *op : firstUserOps) {
+        if (op->getBlock() != forBlock)
+          continue;
         if (!lastOpInFirstUserBlock ||
             op->isBeforeInBlock(lastOpInFirstUserBlock)) {
           lastOpInFirstUserBlock = op;

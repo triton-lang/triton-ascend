@@ -20,7 +20,6 @@
  * THE SOFTWARE.
  */
 
-#include "TritonToUnstructure/IndirectAtomicUtils.h"
 #include "Utils/Utils.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 
@@ -454,6 +453,16 @@ struct DiscreteMaskAtomicConversion
       return failure();
     }
 
+    auto [contMask, discMask] = decomposeAndMask(op, mask, loc, rewriter);
+    if (!contMask && discMask && compileOn91095Flag && forceSimtTemplateFlag) {
+      // A pure discrete mask cannot safely be removed because masked-off
+      // elements may carry out-of-bounds pointers. Keep the original mask so
+      // Unstructure can use either the masked indirect atomic template or its
+      // masked fallback.
+      op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
+      return failure();
+    }
+
     FailureOr<mlir::Value> fill = specializeTypelessValueToConstant(
         typelessVal, src.getType(), loc, rewriter);
     if (failed(fill)) {
@@ -465,9 +474,21 @@ struct DiscreteMaskAtomicConversion
       return failure();
     }
 
-    auto maskedValue = rewriter.create<arith::SelectOp>(loc, mask, src, *fill);
+    // For mask = contMask & discMask, retain contMask as the memory-access
+    // guard and replace only the discrete part with the RMW identity value.
+    // The continuous mask can then be lowered to a bounded subview without
+    // accessing the masked-off tail.
+    Value valueMask = mask;
+    Value accessMask = nullptr;
+    if (contMask && discMask) {
+      valueMask = discMask;
+      accessMask = contMask;
+    }
+
+    auto maskedValue =
+        rewriter.create<arith::SelectOp>(loc, valueMask, src, *fill);
     auto newAtomicOp = rewriter.create<mlir::triton::AtomicRMWOp>(
-        loc, src.getType(), rmwOp, ptr, maskedValue, mlir::Value(), op.getSem(),
+        loc, src.getType(), rmwOp, ptr, maskedValue, accessMask, op.getSem(),
         op.getScope());
     rewriter.replaceOp(op, newAtomicOp);
     return success();

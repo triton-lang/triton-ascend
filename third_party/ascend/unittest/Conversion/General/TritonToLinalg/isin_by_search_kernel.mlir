@@ -1,8 +1,8 @@
 // RUN: triton-opt --discrete-mask-access-conversion --triton-to-unstructure --triton-to-linalg --split-input-file %s | FileCheck %s
 
 // CHECK-LABEL: func.func @isin_by_search_kernel
-// CHECK: %[[FOR_VAR:.*]]:6 = scf.for
-// CHECK-SAME: iter_args({{.*}}) -> (tensor<1xi1>, tensor<1xi1>, index, index, index, index) : i32
+// CHECK: %[[FOR_VAR:.*]]:5 = scf.for
+// CHECK-SAME: iter_args({{.*}}) -> (tensor<1xi1>, tensor<1xi1>, index, index, index) : i32
 module {
   tt.func public @isin_by_search_kernel(
     %arg0: !tt.ptr<i64> {tt.divisibility = 16 : i32},

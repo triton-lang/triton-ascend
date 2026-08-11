@@ -113,6 +113,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     pm.addPass(mlir::triton::createTritonToLLVMPass());
   });
 
+  m.def("add_normalize_debug_line_locations", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createNormalizeDebugLineLocationsPass());
+  });
+
   m.def("add_bubble_up_operation", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::createBubbleUpOperationPass());
   });

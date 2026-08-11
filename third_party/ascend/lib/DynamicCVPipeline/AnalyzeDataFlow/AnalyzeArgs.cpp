@@ -50,7 +50,6 @@ namespace {
 
 static constexpr llvm::StringLiteral containedFunc[]{
     "chunk_fwd_mesa_cg_dim64_kernel",
-    "fused_chunk_ttt_linear_bwd_kernel_h",
     "fused_chunk_based_fwd_kernel",
 };
 

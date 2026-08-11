@@ -28,13 +28,15 @@
 #  | structured pointer + discrete mask              | (A1) | (A2) | (A3) | (A4) | (A5) |
 #  | partial structured: high-dim disc + low-dim cont|  -   | (B2) | (B3) | (B4) | (B5) |
 #  | fully unstructured indirect offsets             | (C1) | (C2) | (C3) | (C4) | (C5) |
+#  | loaded mask + masked-off out-of-bounds offsets   | (D1) |  -   |  -   |  -   |  -   |
 #
 # Notes:
 # 1. Case A exercises the structured-pointer discrete-mask atomic_add path.
 # 2. Case B exercises a single high-dimension discrete remap with the
 #    remaining lower dimensions kept contiguous.
 # 3. Case C exercises fully unstructured indirect offsets.
-# 4. All cases validate both the final destination tensor and the atomic_add
+# 4. Case D verifies that a loaded discrete mask guards loaded invalid offsets.
+# 5. All cases validate both the final destination tensor and the atomic_add
 #    return value, which must be the old value observed at each access.
 # =============================================================================
 
@@ -90,6 +92,23 @@ def structured_disc_mask_atomic_add_1d(
     mask = (linear * 2) < D0
     value = tl.load(val_ptr + linear)
     old = tl.atomic_add(out_ptr + linear, value, mask=mask)
+    tl.store(old_ptr + linear, old, mask=mask)
+
+
+@triton.jit
+def loaded_mask_oob_offset_atomic_add_1d(
+    idx_ptr,
+    mask_ptr,
+    val_ptr,
+    out_ptr,
+    old_ptr,
+    BLOCK_SIZE: tl.constexpr,
+):
+    linear = tl.arange(0, BLOCK_SIZE)
+    offset = tl.load(idx_ptr + linear)
+    mask = tl.load(mask_ptr + linear) != 0
+    value = tl.load(val_ptr + linear)
+    old = tl.atomic_add(out_ptr + offset, value, mask=mask)
     tl.store(old_ptr + linear, old, mask=mask)
 
 
@@ -534,3 +553,39 @@ def test_atomic_add_fully_unstructured_indirect_offsets(dtype_name, torch_dtype,
     )
     _assert_equal(output, expected_output, dtype_name, rank, "fully-unstructured-indirect/output")
     _assert_equal(old, expected_old, dtype_name, rank, "fully-unstructured-indirect/old")
+
+
+def test_atomic_add_loaded_mask_skips_oob_offsets():
+    if not is_compile_on_910_95():
+        pytest.skip("masked indirect atomic template is only enabled on 910_95/950")
+
+    block_size = 8
+    invalid_offset = 1 << 30
+    offsets = torch.tensor(
+        [0, invalid_offset, 1, invalid_offset, 2, invalid_offset, 3, invalid_offset],
+        dtype=torch.int64,
+    )
+    mask = torch.tensor([1, 0, 1, 0, 1, 0, 1, 0], dtype=torch.int32)
+    values = torch.ones(block_size, dtype=torch.int32)
+    baseline = torch.tensor([10, 20, 30, 40], dtype=torch.int32)
+    old_sentinel = -777
+
+    output = baseline.clone().npu()
+    old = torch.full((block_size, ), old_sentinel, dtype=torch.int32).npu()
+    loaded_mask_oob_offset_atomic_add_1d[(1, )](
+        offsets.npu(),
+        mask.npu(),
+        values.npu(),
+        output,
+        old,
+        BLOCK_SIZE=block_size,
+    )
+    torch.npu.synchronize()
+
+    expected_output = baseline + 1
+    expected_old = torch.tensor(
+        [10, old_sentinel, 20, old_sentinel, 30, old_sentinel, 40, old_sentinel],
+        dtype=torch.int32,
+    )
+    _assert_equal(output, expected_output, "int32", 1, "loaded-mask-oob-offset/output")
+    _assert_equal(old, expected_old, "int32", 1, "loaded-mask-oob-offset/old")

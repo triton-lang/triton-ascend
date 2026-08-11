@@ -29,6 +29,7 @@
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -51,7 +52,7 @@ static constexpr const char *DEBUG_TYPE = "MarkGMLoad";
 
 namespace {
 
-static constexpr int kDefaultVBufferCount = 1;
+static constexpr int kDefaultVBufferCount = 2;
 static constexpr int kDefaultCBufferCount = 1;
 
 struct MarkCandidate {
@@ -59,6 +60,7 @@ struct MarkCandidate {
   memref::AllocOp destAlloc; // dest backing alloc after view-like piercing
   scope::ScopeOp scopeOp;    // nearest enclosing scope, should not be null
   int bufferCount;           // filled in Phase 2
+  bool fromHint = false;     // true if bufferCount came from gm_load hint
 };
 
 // Resolve whether a BlockArgument of func::FuncOp traces to a GM pointer.
@@ -126,6 +128,8 @@ static bool traceSourceToFuncArg(Value v) {
       return false;
     }
     if (auto forOp = dyn_cast<scf::ForOp>(parentOp)) {
+      if (blockArg.getArgNumber() == 0)
+        return false; // induction variable, cannot be a GM load source
       // iter_arg: trace its init value (skip induction var at index 0).
       v = forOp.getInitArgs()[blockArg.getArgNumber() - 1];
       continue;
@@ -191,6 +195,45 @@ static int resolveBufferCount(scope::ScopeOp scopeOp) {
   return buffer_num;
 }
 
+// Check whether the dest alloc has a user-specified gm_load compile
+// hint (annotation.mark with gm_load attr).  Returns the hint value
+// (0/1 = force-off, >=2 = force-on with specified depth), or -1 if no hint.
+//
+// The hint may be attached either directly to the alloc result
+// (post-bufferization) or to a tensor produced by bufferization.to_tensor
+// (pre-bufferization).  In the latter case we pierce through the to_tensor op
+// to find the annotation.
+static int resolveHintBufferCount(memref::AllocOp destAlloc) {
+  Value allocResult = destAlloc.getResult();
+  std::optional<int> foundHint;
+  auto hasConflictingHint = [&](annotation::MarkOp markOp) -> bool {
+    auto attr = markOp->getAttrOfType<IntegerAttr>(
+        CVPipeline::kGMLoadMultiBufferHintAttr);
+    if (!attr)
+      return false;
+    int val = static_cast<int>(attr.getInt());
+    markOp->removeAttr(CVPipeline::kGMLoadMultiBufferHintAttr);
+    if (foundHint && *foundHint != val) {
+      LOG_DEBUG("conflicting gm_load hints: " << *foundHint << " vs " << val);
+      return true; // signal conflict
+    }
+    foundHint = val;
+    return false;
+  };
+  for (auto *user : allocResult.getUsers()) {
+    // Pre-bufferization: hint is on the tensor produced by to_tensor.
+    if (auto toTensor = dyn_cast<bufferization::ToTensorOp>(user)) {
+      for (auto *tensorUser : toTensor.getResult().getUsers()) {
+        if (auto markOp = dyn_cast<annotation::MarkOp>(tensorUser)) {
+          if (hasConflictingHint(markOp))
+            return -1;
+        }
+      }
+    }
+  }
+  return foundHint.value_or(-1);
+}
+
 // Apply Rules 1 & 2 to a memref::CopyOp and build a MarkCandidate if eligible.
 // Returns std::nullopt when any rule fails.
 static std::optional<MarkCandidate> collectCandidate(memref::CopyOp copyOp) {
@@ -228,12 +271,17 @@ static bool markGMLoadCandidate(MarkCandidate &c) {
   if (existingMarkOp) {
     existingMarkOp->setAttr(hivm::MultiBufferAttr::name,
                             builder.getI32IntegerAttr(c.bufferCount));
+    if (c.fromHint)
+      existingMarkOp->setAttr(CVPipeline::kGMLoadHintAttr,
+                              builder.getUnitAttr());
   } else {
     builder.setInsertionPointAfter(c.destAlloc);
     auto markOp = builder.create<annotation::MarkOp>(c.destAlloc->getLoc(),
                                                      c.destAlloc.getResult());
     markOp->setAttr(hivm::MultiBufferAttr::name,
                     builder.getI32IntegerAttr(c.bufferCount));
+    if (c.fromHint)
+      markOp->setAttr(CVPipeline::kGMLoadHintAttr, builder.getUnitAttr());
   }
   LOG_DEBUG("marked multi_buffer = " << c.bufferCount << " on " << c.destAlloc);
   return true;
@@ -242,7 +290,8 @@ static bool markGMLoadCandidate(MarkCandidate &c) {
 } // namespace
 
 void MarkGMLoadPass::getDependentDialects(DialectRegistry &registry) const {
-  registry.insert<annotation::AnnotationDialect, hivm::HIVMDialect,
+  registry.insert<annotation::AnnotationDialect,
+                  bufferization::BufferizationDialect, hivm::HIVMDialect,
                   memref::MemRefDialect, scope::ScopeDialect, scf::SCFDialect,
                   func::FuncDialect>();
 }
@@ -272,11 +321,25 @@ void MarkGMLoadPass::runOnOperation() {
   // Phase 2 & 3: resolve buffer count N per candidate and insert
   // annotation::MarkOp (mutation).
   for (auto &c : candidates) {
-    c.bufferCount = resolveBufferCount(c.scopeOp);
-    if (c.bufferCount < 0) {
-      LOG_DEBUG("resolveBufferCount failed for " << c.copyOp << ", fallback");
-      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
-      return;
+    int hintVal = resolveHintBufferCount(c.destAlloc);
+    if (hintVal >= 0) {
+      // User specified a compile hint.
+      if (hintVal <= 1) {
+        // Force-off: skip marking entirely.
+        LOG_DEBUG("hint force-off (val=" << hintVal << "), skip marking");
+        continue;
+      }
+      c.bufferCount = hintVal;
+      c.fromHint = true;
+      LOG_DEBUG("hint force-on, bufferCount = " << hintVal);
+    } else {
+      // No hint: automatic resolution.
+      c.bufferCount = resolveBufferCount(c.scopeOp);
+      if (c.bufferCount < 0) {
+        LOG_DEBUG("resolveBufferCount failed for " << c.copyOp << ", fallback");
+        CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+        return;
+      }
     }
     markGMLoadCandidate(c);
   }

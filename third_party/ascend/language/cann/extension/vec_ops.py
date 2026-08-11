@@ -96,7 +96,9 @@ def extract_slice(ful, offsets, sizes, strides, _semantic=None, _generator=None)
                 new_offsets.append(o)
             else:
                 new_offsets.append(o.handle if hasattr(o, 'handle') else o)
-        ret_type = tl.block_type(ful.type.scalar, sizes)
+        # change sizes to list(sizes) for interpreter mode to bypass tl.block_type's assertion
+        # and has no effect on the compile mode
+        ret_type = tl.block_type(ful.type.scalar, list(sizes))
         out = builder.create_extract_slice(ful.handle, new_offsets, sizes, strides)
         return tensor(out, ret_type)
 

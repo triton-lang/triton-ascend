@@ -369,3 +369,63 @@ def test_tensor_descriptor_reduce(kind, dtype, M_BLOCK, N_BLOCK):
     expect = REDUCE_OP[kind](inp, out)
     kernel[(grid_m, grid_n)](inp, out, M, N, M_BLOCK, N_BLOCK, kind)
     torch.testing.assert_close(expect, out)
+
+
+@pytest.mark.parametrize("dtype", ["float32"])
+@pytest.mark.parametrize("M,N,BLOCK_M,BLOCK_N", [(64, 128, 16, 32)])
+def test_host_tensor_descriptor_args(dtype, M, N, BLOCK_M, BLOCK_N):
+    from triton.tools.tensor_descriptor import TensorDescriptor
+
+    @triton.jit
+    def kernel(in_desc, out_desc, M, N, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+        pid = tl.program_id(0)
+        grid_n = tl.cdiv(N, BLOCK_N)
+        pid_m = pid // grid_n
+        pid_n = pid % grid_n
+        off_m = (pid_m * BLOCK_M).to(tl.int32)
+        off_n = (pid_n * BLOCK_N).to(tl.int32)
+        tile = in_desc.load([off_m, off_n])
+        out_desc.store([off_m, off_n], tile)
+
+    torch_dtype = getattr(torch, dtype)
+    inp = torch.randn((M, N), dtype=torch_dtype, device="npu")
+    out = torch.empty((M, N), dtype=torch_dtype, device="npu")
+    in_desc = TensorDescriptor(inp, list(inp.shape), list(inp.stride()), [BLOCK_M, BLOCK_N])
+    out_desc = TensorDescriptor(out, list(out.shape), list(out.stride()), [BLOCK_M, BLOCK_N])
+
+    grid = (triton.cdiv(M, BLOCK_M) * triton.cdiv(N, BLOCK_N), )
+    kernel[grid](in_desc, out_desc, M, N, BLOCK_M, BLOCK_N)
+    torch.testing.assert_close(inp, out)
+
+
+@pytest.mark.parametrize("padding", ["zero", "nan"])
+def test_host_tensor_descriptor_padding(padding):
+    from triton.tools.tensor_descriptor import TensorDescriptor
+
+    @triton.jit
+    def kernel(in_desc, out_desc, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+        moffset = (tl.program_id(0) * BLOCK_M).to(tl.int32)
+        noffset = (tl.program_id(1) * BLOCK_N).to(tl.int32)
+        value = in_desc.load([moffset, noffset])
+        out_desc.store([moffset, noffset], value)
+
+    IM, IN = 48, 48
+    OM, ON = 64, 64
+    BLOCK_M, BLOCK_N = 32, 32
+    inp = torch.arange(IM * IN, device="npu", dtype=torch.float32).reshape(IM, IN)
+    out = torch.zeros((OM, ON), device="npu", dtype=torch.float32)
+
+    in_desc = TensorDescriptor(inp, list(inp.shape), list(inp.stride()), [BLOCK_M, BLOCK_N], padding=padding)
+    out_desc = TensorDescriptor(out, list(out.shape), list(out.stride()), [BLOCK_M, BLOCK_N])
+
+    grid = (triton.cdiv(OM, BLOCK_M), triton.cdiv(ON, BLOCK_N))
+    kernel[grid](in_desc, out_desc, BLOCK_M, BLOCK_N)
+
+    expected = torch.zeros((OM, ON), device="npu", dtype=torch.float32)
+    expected[0:IM, 0:IN] = inp
+    if padding == "nan":
+        expected[IM:OM, :] = float("nan")
+        expected[:, IN:ON] = float("nan")
+        # corner already nan from both; keep as nan
+        expected[IM:OM, IN:ON] = float("nan")
+    torch.testing.assert_close(expected, out, equal_nan=True)

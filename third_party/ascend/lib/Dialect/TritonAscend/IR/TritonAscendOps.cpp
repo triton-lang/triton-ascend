@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
+#include "ascend/include/Utils/Utils.h"
 #include "mlir/Dialect/SPIRV/IR/TargetAndABI.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "triton/Tools/Sys/GetEnv.hpp"
@@ -37,6 +38,73 @@ void StrideLoadOp::getEffects(
         &effects) {
   effects.emplace_back(MemoryEffects::Read::get(), &getSrcMutable(),
                        triton::GlobalMemory::get());
+}
+
+//-- DotOp --
+// Fractal (zN) block geometry (kFractalBlock / kDotAccIntWidth) comes from
+// Utils.h, shared with DotConverter's lowering.
+LogicalResult
+DotOp::inferReturnTypes(MLIRContext *context, std::optional<Location> location,
+                        ValueRange operands, DictionaryAttr attributes,
+                        OpaqueProperties properties, RegionRange regions,
+                        SmallVectorImpl<Type> &inferredReturnTypes) {
+  DotOpAdaptor adaptor(operands, attributes, properties, regions);
+  auto aTy = dyn_cast<RankedTensorType>(adaptor.getA().getType());
+  auto bTy = dyn_cast<RankedTensorType>(adaptor.getB().getType());
+  if (!aTy || !bTy)
+    return failure();
+
+  // A fractal operand's ND shape. Both operands are zN (non-transpose):
+  // lhs [K1,M1,16,b] -> [M,K], rhs [N1,K1,16,b] -> [K,N], each [d1*d2, d0*d3].
+  auto toND = [](ArrayRef<int64_t> shape, bool fractal,
+                 bool isLhs) -> SmallVector<int64_t> {
+    if (!fractal || shape.size() != 4)
+      return {shape[0], shape[1]};
+    return {shape[1] * shape[2], shape[0] * shape[3]};
+  };
+  int64_t m = toND(aTy.getShape(), adaptor.getFractalA(), /*isLhs=*/true)[0];
+  int64_t n = toND(bTy.getShape(), adaptor.getFractalB(), /*isLhs=*/false)[1];
+
+  // The result carries the cube accumulator dtype (f32 for float inputs, i32
+  // for int8), not the input dtype. fractal_c produces the L0C accumulator
+  // fractal, whose block is 16x16 regardless of dtype.
+  Type inElemTy = aTy.getElementType();
+  Type accTy =
+      isa<IntegerType>(inElemTy)
+          ? static_cast<Type>(IntegerType::get(context, kDotAccIntWidth))
+          : static_cast<Type>(Float32Type::get(context));
+  SmallVector<int64_t> resShape{m, n};
+  if (adaptor.getFractalC())
+    // ND [M,N] -> zN accumulator [N1, M1, 16, 16].
+    resShape = {n / kFractalBlock, m / kFractalBlock, kFractalBlock,
+                kFractalBlock};
+  inferredReturnTypes.push_back(RankedTensorType::get(resShape, accTy));
+  return success();
+}
+
+// Verify operand ranks match their fractal flags: a fractal operand must be 4D
+// (zN), a non-fractal operand must be 2D (ND). Anything else (e.g. rank > 4) is
+// a compile error.
+LogicalResult DotOp::verify() {
+  auto aTy = dyn_cast<RankedTensorType>(getA().getType());
+  auto bTy = dyn_cast<RankedTensorType>(getB().getType());
+  if (!aTy || !bTy)
+    return emitOpError("operands must be ranked tensors");
+  auto checkRank = [&](RankedTensorType ty, bool fractal,
+                       StringRef name) -> LogicalResult {
+    int64_t rank = ty.getRank();
+    if (fractal && rank != 4)
+      return emitOpError() << "fractal operand '" << name
+                           << "' must be 4D (zN), got rank " << rank;
+    if (!fractal && rank != 2)
+      return emitOpError() << "non-fractal operand '" << name
+                           << "' must be 2D (ND), got rank " << rank;
+    return success();
+  };
+  if (failed(checkRank(aTy, getFractalA(), "a")) ||
+      failed(checkRank(bTy, getFractalB(), "b")))
+    return failure();
+  return success();
 }
 
 //-- IndexSelectSimdOp --

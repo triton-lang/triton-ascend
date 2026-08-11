@@ -37,8 +37,6 @@
 
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 
-#include "triton/Dialect/Triton/IR/Dialect.h"
-
 namespace LoadStoreConverter {
 
 using namespace mlir;
@@ -73,6 +71,11 @@ private:
   fillTensorWithOtherForMaskScenario(Value other, Value localMem,
                                      ArrayRef<OpFoldResult> maskDim,
                                      ConversionPatternRewriter &rewriter) const;
+
+  LogicalResult
+  replaceMaskedLoadWithTensorOther(triton::LoadOp op, Value alloc,
+                                   bool mayImplicitTransposeWithLastAxis,
+                                   ConversionPatternRewriter &rewriter) const;
 
 public:
   explicit LoadConverter(MLIRContext *context);

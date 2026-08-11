@@ -35,6 +35,19 @@ def histogram_kernel(x_ptr, z_ptr, M: tl.constexpr, N: tl.constexpr):
     tl.store(z_ptr + offset2, z)
 
 
+@triton.jit
+def histogram_mask_kernel(x_ptr, z_ptr, n_elements, N: tl.constexpr, BLOCK_SIZE: tl.constexpr):
+    pid = tl.program_id(0)
+    block_start = pid * BLOCK_SIZE
+    offset1 = tl.arange(0, BLOCK_SIZE)
+    offset2 = tl.arange(0, N)
+    x_idx = block_start + offset1
+    mask = x_idx < n_elements
+    x = tl.load(x_ptr + x_idx)
+    z = tl.histogram(x, N, mask=mask)
+    tl.atomic_add(z_ptr + offset2, z)
+
+
 @pytest.mark.parametrize("M", [2048])
 @pytest.mark.parametrize("N", [2])
 @pytest.mark.parametrize("ncore", [1])
@@ -64,4 +77,25 @@ def test_histogram_uint(M, N, ncore, dtype):
     # triton结果
     y_ref = torch.empty(N, dtype=eval(f'torch.{dtype}'), device="npu")
     histogram_kernel[(ncore, )](x, y_ref, M=M, N=N)
+    test_common.validate_cmp(dtype, y_cal, y_ref)
+
+
+@pytest.mark.skip(reason="not supported before the NPUIR is updated, and will be fixed later.")
+@pytest.mark.parametrize("M", [2048])
+@pytest.mark.parametrize("N", [4])
+@pytest.mark.parametrize("BLOCK_SIZE", [10])
+@pytest.mark.parametrize("dtype", ["int32", "int64"])
+def test_histogram_with_mask(M, N, BLOCK_SIZE, dtype):
+    torch.manual_seed(42)
+
+    x = torch.randint(low=0, high=N, size=(M, ), dtype=eval(f'torch.{dtype}')).npu()
+    mask = torch.zeros((M, ), dtype=torch.bool)
+    mask[:M // 2] = True
+
+    valid_x = x.cpu()[mask]
+    ref_count = torch.bincount(valid_x, minlength=N)
+    y_cal = ref_count.to(eval(f'torch.{dtype}'))
+    y_ref = torch.zeros(N, dtype=eval(f'torch.{dtype}'), device="npu")
+    grid = lambda meta: (triton.cdiv(M, meta['BLOCK_SIZE']), )
+    histogram_mask_kernel[grid](x, y_ref, n_elements=M // 2, N=N, BLOCK_SIZE=BLOCK_SIZE)
     test_common.validate_cmp(dtype, y_cal, y_ref)

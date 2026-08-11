@@ -776,8 +776,7 @@ llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(
   }
 
   if (applyRecordChange(recordChange, nodeId2op, memGraph, bm)) {
-    // FIXME: it shouldn't happen....
-    llvm::errs() << "Some skiped when apply UB usage optimization changes.\n";
+    LOG_DEBUG("Some skiped when apply UB usage optimization changes.\n");
   }
   return llvm::success();
 }
@@ -932,15 +931,15 @@ void mlir::triton::UBUsageOptPass::runOnOperation() {
 
   for (Block *block : blocks) {
     if (UBUsageOptimization(block, memDepGraph, bm).failed()) {
-      llvm::errs() << "UB usage optimization failed in block.\n";
+      LOG_DEBUG("UB usage optimization failed in block.\n");
     }
     if (isUBRefineOptEnabled) {
       if (optBroadcast(block, memDepGraph, bm).failed()) {
-        llvm::errs() << "Broadcast check failed in block.\n";
+        LOG_DEBUG("Broadcast check failed in block.\n");
       }
 
       if (optSmallBlock(block, memDepGraph, bm).failed()) {
-        llvm::errs() << "Small block optimization failed in block.\n";
+        LOG_DEBUG("Small block optimization failed in block.\n");
       }
     }
   }

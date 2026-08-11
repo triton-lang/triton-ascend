@@ -257,8 +257,10 @@ LogicalResult MaskState::addStateScalar(const MaskState &state,
                                         const OpFoldResult scalar,
                                         const Location &loc,
                                         OpBuilder &builder) {
-  start = addOpFoldResult(state.start, scalar, loc, builder);
-  end = addOpFoldResult(state.end, scalar, loc, builder);
+  start = addOpFoldResult(state.start, scalar, loc, builder,
+                          builder.getIndexType());
+  end =
+      addOpFoldResult(state.end, scalar, loc, builder, builder.getIndexType());
   dims = state.dims;
   offsets = state.offsets;
 
@@ -341,8 +343,10 @@ LogicalResult MaskState::minStates(const MaskState &lhsState,
     auto newOffset = maxOpFoldResult(lhsOffset, rhsOffset, loc, builder);
     auto lhsDim = lhsState.dims[i];
     auto rhsDim = rhsState.dims[i];
-    auto lhsEnd = addOpFoldResult(lhsOffset, lhsDim, loc, builder);
-    auto rhsEnd = addOpFoldResult(rhsOffset, rhsDim, loc, builder);
+    auto lhsEnd = addOpFoldResult(lhsOffset, lhsDim, loc, builder,
+                                  builder.getIndexType());
+    auto rhsEnd = addOpFoldResult(rhsOffset, rhsDim, loc, builder,
+                                  builder.getIndexType());
     auto newEnd = minOpFoldResult(lhsEnd, rhsEnd, loc, builder);
     auto newDim = subOpFoldResult(newEnd, newOffset, loc, builder);
     auto clampedNewDim =
@@ -472,8 +476,10 @@ LogicalResult MaskState::parseSel(arith::SelectOp selOp, const Location &loc,
     return failure();
   }
 
-  auto trueScalar = dyn_cast<IntegerAttr>(cast<Attribute>(trueState.scalar));
-  auto falseScalar = dyn_cast<IntegerAttr>(cast<Attribute>(falseState.scalar));
+  auto trueScalar =
+      dyn_cast<IntegerAttr>(dyn_cast<Attribute>(trueState.scalar));
+  auto falseScalar =
+      dyn_cast<IntegerAttr>(dyn_cast<Attribute>(falseState.scalar));
 
   if (trueScalar && falseScalar) {
     if (trueScalar.getInt() == 1 && falseScalar.getInt() == 0) {
@@ -561,8 +567,8 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
   }
   case arith::CmpIPredicate::sle: {
     // lhs <= rhs  <=>  lhs < rhs + 1
-    auto rhsPlusOne =
-        addOpFoldResult(rhsState.scalar, builder.getIndexAttr(1), loc, builder);
+    auto rhsPlusOne = addOpFoldResult(rhsState.scalar, builder.getIndexAttr(1),
+                                      loc, builder, builder.getIndexType());
     auto realBound = maxOpFoldResult(lhsState.start, rhsPlusOne, loc, builder);
     auto newEnd = minOpFoldResult(lhsState.end, realBound, loc, builder);
     auto newDim = subOpFoldResult(newEnd, lhsState.start, loc, builder);
@@ -695,8 +701,8 @@ LogicalResult MaskState::parseSplat(triton::SplatOp splatOp,
   if (src.getType().isInteger(1) && !splatOp->use_empty() &&
       llvm::all_of(splatOp->getUsers(), splatAsMask)) {
     for (auto s : dstShape) {
-      auto currentDim =
-          mulOpFoldResult(builder.getIndexAttr(s), this->scalar, loc, builder);
+      auto currentDim = mulOpFoldResult(builder.getIndexAttr(s), this->scalar,
+                                        loc, builder, builder.getIndexType());
       this->dims.push_back(currentDim);
       this->offsets.push_back(builder.getIndexAttr(0));
     }

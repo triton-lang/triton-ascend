@@ -82,6 +82,8 @@ private:
 
   // Seed operations for CUBE upstream propagation
   llvm::SmallVector<Operation *> cubeSeeds;
+  // if A*B+C's C from broadcast chain, they need to keep for Normalize.
+  llvm::DenseSet<Operation *> inBroadcastChain;
 
   std::shared_ptr<AliasAnalysis> aliasAnalysis;
   std::shared_ptr<CVPipeline::MemoryDependenceGraph> memDepGraph;
@@ -97,6 +99,8 @@ private:
   void matchTransposePattern(Operation *def);
   void matchFillPattern(Operation *def);
   void matchEmptyPattern(Operation *def);
+  void matchBroadcastPattern(Operation *def);
+  Value extractMmadBiasFromPotentialUnitDimExpand(Value bias);
 
   // Downstream pattern matching helpers
   void matchStorePattern(Operation *user);

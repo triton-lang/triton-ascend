@@ -902,6 +902,20 @@ void init_ascend_ir(py::module &&m) {
           py::arg("input"), py::arg("weight"), py::arg("bias"),
           py::arg("stride"), py::arg("padding_size"), py::arg("dilation"),
           py::arg("groups"), py::arg("output_type"))
+      // dot: D = A * B with per-operand fractal (zN) flags; result type
+      // inferred from A, B and the flags.
+      .def(
+          "create_dot",
+          [](AscendNPUIROpBuilder &self, Value &a, Value &b, bool fractalA,
+             bool fractalB, bool fractalC) -> Value {
+            auto &builder = self.getBuilder();
+            auto op = self.create<triton::ascend::DotOp>(
+                a, b, builder.getBoolAttr(fractalA),
+                builder.getBoolAttr(fractalB), builder.getBoolAttr(fractalC));
+            return op.getResult();
+          },
+          py::arg("a"), py::arg("b"), py::arg("fractal_a"),
+          py::arg("fractal_b"), py::arg("fractal_c"))
       // Add sort
       .def("create_sort",
            [](AscendNPUIROpBuilder &self, Value src, int64_t dim,

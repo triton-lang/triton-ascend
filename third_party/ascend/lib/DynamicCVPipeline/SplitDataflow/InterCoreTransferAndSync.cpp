@@ -35,12 +35,10 @@
 #include "Utils/Utils.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMInterfaces.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/Block.h"
@@ -360,6 +358,7 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder,
     newValue = alignShapeByInsertSlice(builder, dep, loc, origValue,
                                        expectedShape, originBlockId);
   }
+
   // Step 3: insert nd2nz
   auto srcTensorType = cast<RankedTensorType>(newValue.getType());
   int64_t M = srcTensorType.getDimSize(0);
@@ -523,7 +522,7 @@ InterCoreTransferAndSyncPass::getConsumerWaitPoint(int transferIndex) {
       return;
     }
     if (!isa<hivm::ConvertLayoutOp>(op) &&
-        !isa<memref::MemorySpaceCastOp>(op) && !isa<LLVM::LoadOp>(op)) {
+        !isa<memref::MemorySpaceCastOp>(op) && !isa<memref::LoadOp>(op)) {
       return;
     }
     auto transferIdAttr =
@@ -561,7 +560,7 @@ Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(
     Operation *storeOp = nullptr;
     for (Operation *op : writeOps) {
       attachTransferTags(op, vecBlockId, "VECTOR", transferIndex);
-      if (isa<LLVM::StoreOp>(op)) {
+      if (isa<memref::StoreOp>(op)) {
         storeOp = op;
       }
     }
@@ -582,7 +581,7 @@ Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(
     Operation *loadOp = nullptr;
     for (Operation *op : readOps) {
       attachTransferTags(op, cubeBlockId, "CUBE", transferIndex);
-      if (isa<LLVM::LoadOp>(op)) {
+      if (isa<memref::LoadOp>(op)) {
         loadOp = op;
       }
     }
@@ -789,7 +788,7 @@ InterCoreTransferAndSyncPass::getTransferPipeConfig(Operation *transferOp,
     config.dstCoreAttr = cubeCoreAttr;
     config.srcCoreType = "VECTOR";
     config.dstCoreType = "CUBE";
-  } else if (isa<LLVM::StoreOp>(transferOp)) {
+  } else if (isa<memref::StoreOp>(transferOp)) {
     config.forReadTPipe = pipeVAttr;
     config.forReadPipe = pipeFixAttr;
     config.forWriteTPipe = pipeFixAttr;
@@ -1716,8 +1715,7 @@ void InterCoreTransferAndSyncPass::getDependentDialects(
   registry.insert<func::FuncDialect, arith::ArithDialect, linalg::LinalgDialect,
                   scf::SCFDialect, tensor::TensorDialect,
                   bufferization::BufferizationDialect, memref::MemRefDialect,
-                  hivm::HIVMDialect, LLVM::LLVMDialect,
-                  annotation::AnnotationDialect>();
+                  hivm::HIVMDialect, annotation::AnnotationDialect>();
 }
 
 // Pass Entry Point

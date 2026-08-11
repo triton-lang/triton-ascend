@@ -14,6 +14,48 @@ variants change only compiler policy switches:
 The explicit `baseline` is important because an empty launch option set uses
 the A5 production default (`auto`) and is therefore not a plain baseline.
 
+The names used in older experiments map to this table as follows:
+
+- **pass off / SSBUF:** `baseline` (both high-level CV schedulers disabled);
+- **SSBUF pipeline:** `dcvp` (legacy DynamicCVPipeline enabled);
+- **CVSS:** `cvsplit` (CVSplitScheduling explicitly enabled);
+- **pass on:** `auto` (CVSS first, SSBUF/DCVP only as transactional fallback);
+- **production invocation:** `default` (no policy keyword arguments).
+
+## Pinned five-way reproduction
+
+The one-command reproduction checks the exact embedded AscendNPU-IR revision
+and the SHA256 of `bishengir-compile`, validates full output for every policy,
+then profiles the same full BM128 grid for `baseline`, `dcvp`, `cvsplit`,
+`auto`, and `default`:
+
+```bash
+source /path/to/ascend-toolkit/set_env.sh
+export ASCEND_RT_VISIBLE_DEVICES=6
+PYTHON=/path/to/python MSPROF=/path/to/msprof \
+  ./test/reproduce_fa_matrix.sh /tmp/fa-repro
+```
+
+`fa_repro_lock.json` records the compiler implementation commit, embedded
+AscendNPU-IR commit, BishengIR revision and binary SHA256, hardware, shape,
+warmup count, and measured iteration count. `comparison.csv` is the compact
+result; the output directory also contains raw msprof data and accuracy logs.
+
+The clean hardware run on 2026-08-11 produced:
+
+| Policy | Mean AI_CORE time (us) | Speedup vs pass off |
+| --- | ---: | ---: |
+| pass off / `baseline` | 2539.363 | - |
+| legacy SSBUF pipeline / `dcvp` | 2387.597 | 5.98% |
+| explicit CVSS / `cvsplit` | 1882.369 | 25.87% |
+| pass on / `auto` | 1882.399 | 25.87% |
+| production invocation / `default` | 1882.416 | 25.87% |
+
+Every row used 13 captured launches, discarded the first three, and averaged
+the remaining ten. Full-output correctness passed for every policy with
+maximum absolute error `0.00003052`. The machine-readable result is
+`fa_reference_result_20260811.csv`.
+
 ## Correctness
 
 Run all query tiles with one batch and one head so every output can be checked

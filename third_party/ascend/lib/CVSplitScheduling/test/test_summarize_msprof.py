@@ -7,6 +7,10 @@ from summarize_msprof import summarize
 
 
 class SummarizeMsprofTest(unittest.TestCase):
+    def test_rejects_negative_warmup(self):
+        with self.assertRaisesRegex(ValueError, "warmup must be nonnegative"):
+            summarize("unused.csv", warmup=-1)
+
     def test_discards_warmup_and_ignores_non_kernel_tasks(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "task_time_test.csv"

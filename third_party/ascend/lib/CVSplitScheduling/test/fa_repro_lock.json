@@ -1,0 +1,22 @@
+{
+  "compiler_implementation_commit": "9b1d2c37e9d77de02d0acfce506875a3753849fb",
+  "ascend_npu_ir_submodule_commit": "f96183dede514142e8e44cc17278854423043946",
+  "bishengir_compile": {
+    "version": "1.2.0",
+    "revision": "b5b9e2852d3c",
+    "sha256": "97a86e5d22477910eb004bb5b28ae938f16bd2dd09a35c4264286f445b10bb67"
+  },
+  "reference_hardware": "Ascend950PR_9579",
+  "soc_version": "Ascend950PR_9589",
+  "profile": {
+    "batch_size": 128,
+    "num_heads": 8,
+    "sequence_length": 1024,
+    "head_dim": 64,
+    "block_m": 128,
+    "block_n": 128,
+    "core_num": 28,
+    "warmup": 3,
+    "iterations": 10
+  }
+}

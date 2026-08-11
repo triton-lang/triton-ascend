@@ -32,6 +32,8 @@ def read_kernel_times(path, kernel_name="_attn_fwd_0"):
 
 
 def summarize(path, warmup=3, kernel_name="_attn_fwd_0"):
+    if warmup < 0:
+        raise ValueError(f"warmup must be nonnegative, got {warmup}")
     csv_path, captured = read_kernel_times(path, kernel_name)
     measured = captured[warmup:]
     if not measured:

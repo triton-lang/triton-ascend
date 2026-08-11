@@ -224,6 +224,21 @@ LogicalResult rewriteCatPointerStore(triton::StoreOp op, triton::CatOp catOp,
   return success();
 }
 
+// TTIR requires a store value to have the same shape as its pointer. A DSL
+// scalar is consequently represented either by tt.splat of a scalar or by a
+// folded dense splat constant. Only these uniform values are safe to defer for
+// a zero-stride pointer broadcast: all aliased lanes then write the same value.
+bool isScalarStoreValue(Value value) {
+  if (auto splat = value.getDefiningOp<triton::SplatOp>())
+    return !isa<ShapedType>(splat.getSrc().getType());
+
+  if (auto constant = value.getDefiningOp<arith::ConstantOp>()) {
+    if (auto dense = dyn_cast<DenseElementsAttr>(constant.getValue()))
+      return dense.isSplat();
+  }
+  return false;
+}
+
 } // namespace
 
 LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
@@ -298,9 +313,10 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
   // AddPtrSplatConverter can preserve a non-singleton zero-stride dimension
   // as a pointer broadcast. TritonToLinalg has a dedicated lowering for this
   // legal form; rebuilding it here drops the zero-stride dimension from the
-  // pointer and mask while the value remains full-rank.
+  // pointer and mask while the scalar store value remains full-rank.
   if (auto ptrBroadcast = oldPtr.getDefiningOp<triton::BroadcastOp>();
       ptrBroadcast &&
+      isScalarStoreValue(oldValue) &&
       ConverterUtils::isHoistablePointerBroadcast(ptrBroadcast)) {
     return rewriter.notifyMatchFailure(
         op, "defer hoistable pointer broadcast store to TritonToLinalg");

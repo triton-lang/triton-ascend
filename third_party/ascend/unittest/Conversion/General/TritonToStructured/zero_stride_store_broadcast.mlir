@@ -12,7 +12,8 @@ module {
     %ptr_splat = tt.splat %arg0 : !tt.ptr<f32> -> tensor<1x64x!tt.ptr<f32>>
     %ptr_small = tt.addptr %ptr_splat, %offsets_2d : tensor<1x64x!tt.ptr<f32>>, tensor<1x64xi32>
     %ptr = tt.broadcast %ptr_small : tensor<1x64x!tt.ptr<f32>> -> tensor<16x64x!tt.ptr<f32>>
-    %value = arith.constant dense<0.000000e+00> : tensor<16x64xf32>
+    %zero = arith.constant 0.000000e+00 : f32
+    %value = tt.splat %zero : f32 -> tensor<16x64xf32>
     %mask = arith.constant dense<true> : tensor<16x64xi1>
     tt.store %ptr, %value, %mask : tensor<16x64x!tt.ptr<f32>>
     tt.return
@@ -20,5 +21,6 @@ module {
 }
 
 // CHECK-LABEL: tt.func public @zero_stride_store_broadcast
+// CHECK: %[[VALUE:.*]] = arith.constant dense<0.000000e+00> : tensor<16x64xf32>
 // CHECK: %[[PTR:.*]] = tt.broadcast {{.*}} : tensor<1x64x!tt.ptr<f32>> -> tensor<16x64x!tt.ptr<f32>>
-// CHECK: tt.store %[[PTR]], {{.*}} : tensor<16x64x!tt.ptr<f32>>
+// CHECK: tt.store %[[PTR]], %[[VALUE]] : tensor<16x64x!tt.ptr<f32>>

@@ -43,8 +43,9 @@ def zero_stride_store_broadcast_kernel(
     # Every logical row aliases the same backing row, so all writers store the
     # same value. This makes the end-to-end result deterministic while keeping
     # the full-rank zero-stride pointer broadcast that StoreConverter must defer.
-    values = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
-    tl.store(ptr + offsets, values, mask=mask)
+    # Match the triggering FlagGems path: 0.0 is a DSL scalar, represented as
+    # a uniform full-rank TTIR value, so every aliased row writes the same value.
+    tl.store(ptr + offsets, 0.0, mask=mask)
 
 
 def test_zero_stride_pointer_broadcast_store():

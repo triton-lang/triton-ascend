@@ -1168,6 +1168,36 @@ int UpdateLoopIterTimesPass::collectForOpsAndUpdateMax(
   return 0;
 }
 
+void UpdateLoopIterTimesPass::updateMainLoopMaps(
+    Operation *oldForOp, Operation *newForOp,
+    DenseMap<int, SmallVector<Operation *>> &cmap,
+    DenseMap<int, SmallVector<Operation *>> &vmap,
+    DenseMap<Operation *, IterationTimesInfo> &infoMap) {
+  // Update cmap
+  for (auto &entry : cmap) {
+    for (Operation *&op : entry.second) {
+      if (op == oldForOp) {
+        op = newForOp;
+      }
+    }
+  }
+  // Update vmap
+  for (auto &entry : vmap) {
+    for (Operation *&op : entry.second) {
+      if (op == oldForOp) {
+        op = newForOp;
+      }
+    }
+  }
+  // Update infoMap
+  auto it = infoMap.find(oldForOp);
+  if (it != infoMap.end()) {
+    IterationTimesInfo iterInfo = std::move(it->second);
+    infoMap.erase(it);
+    infoMap[newForOp] = std::move(iterInfo);
+  }
+}
+
 int UpdateLoopIterTimesPass::UpdateForLoopIteration(
     DenseMap<int, SmallVector<Operation *>> &cmap,
     DenseMap<int, SmallVector<Operation *>> &vmap,
@@ -1222,12 +1252,12 @@ int UpdateLoopIterTimesPass::UpdateForLoopIteration(
         LDBG("extendForOpIterationCount failed!");
         return -1;
       }
+      updateMainLoopMaps(loopOp, newForOp.getOperation(), cmap, vmap, infoMap);
       allForOps.push_back(loopOp);
     }
   }
 
-  // Delete old forOp after cntArgs has been updated in
-  // extendForOpIterationCount
+  // Delete old forOp after cntArgs and maps have been updated
   for (Operation *loopOp : allForOps) {
     if (!loopOp) {
       LDBG("erasing error: loopOp is nullptr, there are nested mainloop!");

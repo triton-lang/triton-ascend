@@ -299,8 +299,7 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
       }
 
       invertFalseDims.push_back(offVal);
-      trueDimOp = addOpFoldResult(offVal, dimVal, loc, rewriter,
-                                  rewriter.getIndexType());
+      trueDimOp = addOpFoldResult(offVal, dimVal, loc, rewriter);
       invertTrueDims.push_back(trueDimOp);
     }
   }

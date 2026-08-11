@@ -208,8 +208,7 @@ void PtrState::normalizeState(const Location loc, OpBuilder &builder) {
       for (++it; it != this->stateInfo.end() && isZero(it->stride) &&
                  it->dimIndex == dimIndex;
            ++it) {
-        newShape = mulOpFoldResult(newShape, it->shape, loc, builder,
-                                   builder.getIndexType());
+        newShape = mulOpFoldResult(newShape, it->shape, loc, builder);
       }
       newStateInfo.emplace_back(zeroAttr, newShape, dimIndex);
     }
@@ -443,13 +442,13 @@ LogicalResult PtrState::mulState(const PtrState &lhsState,
 
   SmallVector<StateInfo> newStateInfo;
   for (auto info : lhs->stateInfo) {
-    OpFoldResult newStride = mulOpFoldResult(info.stride, rhs->offset, loc,
-                                             builder, builder.getIndexType());
+    OpFoldResult newStride =
+        mulOpFoldResult(info.stride, rhs->offset, loc, builder);
     newStateInfo.emplace_back(newStride, info.shape, info.dimIndex);
   }
 
-  auto newOffset = mulOpFoldResult(lhsState.offset, rhsState.offset, loc,
-                                   builder, builder.getIndexType());
+  auto newOffset =
+      mulOpFoldResult(lhsState.offset, rhsState.offset, loc, builder);
   updatePtrState(newStateInfo, lhs->sizes, lhs->source, newOffset, loc, builder,
                  lhs->shouldLinearize);
 
@@ -561,8 +560,7 @@ LogicalResult PtrState::addState(PtrState &lhsState, PtrState &rhsState,
       return failure();
     }
 
-    auto newStride = addOpFoldResult(lIt->stride, rIt->stride, loc, builder,
-                                     builder.getIndexType());
+    auto newStride = addOpFoldResult(lIt->stride, rIt->stride, loc, builder);
     newStateInfo.emplace_back(newStride, newShape, lIt->dimIndex);
 
     if (isEqual(lIt->shape, newShape))
@@ -583,8 +581,8 @@ LogicalResult PtrState::addState(PtrState &lhsState, PtrState &rhsState,
   }
 
   auto newSource = source = lhsState.source ? lhsState.source : rhsState.source;
-  auto newOffset = addOpFoldResult(lhsState.offset, rhsState.offset, loc,
-                                   builder, builder.getIndexType());
+  auto newOffset =
+      addOpFoldResult(lhsState.offset, rhsState.offset, loc, builder);
   auto newShouldLinearize =
       lhsState.shouldLinearize || rhsState.shouldLinearize;
   auto newSizes = lhsState.sizes;

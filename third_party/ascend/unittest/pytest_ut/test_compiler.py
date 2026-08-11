@@ -47,6 +47,13 @@ def test_cv_pipeline_selection(dynamic, cv_split, target_is_a5, expected):
     assert compiler._select_cv_pipeline_policy(metadata, target_is_a5) == expected
 
 
+def test_cv_split_a5_default_is_transactional_auto():
+    fields = compiler.NPUOptions.__dataclass_fields__
+    assert fields["enable_cv_split_scheduling"].default == compiler.is_compile_on_910_95
+    assert fields["enable_dynamic_cv_pipeline"].default == compiler.is_compile_on_910_95
+    assert fields["cv_split_unroll_factor"].default == 4
+
+
 def _make_torch_npu_mock(cfg_dir):
     """Create a mock torch_npu module whose __file__ is in cfg_dir."""
     mock = MagicMock()

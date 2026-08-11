@@ -1024,8 +1024,11 @@ class NPUOptions:
     enable_ub_refine_opt: bool = False
     # Multi-cache insertion optimization: avoid redundant tensor compute in the middle of an `if`.
     enable_buffer_insert_optimization: bool = False
-    enable_cv_split_scheduling: bool = False
-    cv_split_unroll_factor: int = 2
+    # A5 defaults to transactional auto mode: CV split is attempted first and
+    # the unchanged DynamicCVPipeline runs when the candidate rejects. Callers
+    # retain an immediate kill switch by setting this option to False.
+    enable_cv_split_scheduling: bool = True if is_compile_on_910_95 else False
+    cv_split_unroll_factor: int = 4
     hfusion_enable_multiple_consumer_fusion: bool = False
     enable_cross_if_fusion: bool = False
     has_auto_blockify_blacklist_op: Optional[bool] = None

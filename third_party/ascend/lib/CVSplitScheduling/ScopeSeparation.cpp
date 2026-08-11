@@ -292,54 +292,6 @@ static scf::ForOp removeUnusedLoopCarriedValues(scf::ForOp loop)
     return newLoop;
 }
 
-// ============================================================================
-// Single-veccore output guard.
-// With NO_DUAL fixpipe, the cube delivers the whole MxN tile to one sub-block's
-// UB; the other veccore's UB is stale. Both veccores still execute the VECTOR
-// scope, so we must ensure only the veccore that owns valid data writes the
-// result to GM. We wrap the epilogue store(s) in `if (get_sub_block_idx == 0)`.
-// (Half vector throughput; correctness-first, does not match the ROW_SPLIT
-// target which uses both veccores.)
-// ============================================================================
-static void guardStoresToSubBlock0(scope::ScopeOp vecScope)
-{
-    Block &block = vecScope.getBodyRegion().front();
-
-    SmallVector<Operation *> stores;
-    for (Operation &op : block) {
-        if (isa<bufferization::MaterializeInDestinationOp>(&op))
-            stores.push_back(&op);
-    }
-    if (stores.empty()) {
-        LLVM_DEBUG(llvm::dbgs() << "[cv-split]   guardStores: no materialize_in_destination found\n");
-        return;
-    }
-
-    Operation *firstStore = stores.front();
-    Location loc = firstStore->getLoc();
-    Operation *terminator = block.getTerminator();
-
-    // Collect the contiguous epilogue tail [firstStore .. terminator) so that
-    // any intervening producers (e.g. the truncf feeding the 2nd store) move too.
-    SmallVector<Operation *> tail;
-    for (Operation *op = firstStore; op != terminator; op = op->getNextNode())
-        tail.push_back(op);
-
-    OpBuilder builder(firstStore);
-    auto sbid = builder.create<hivm::GetSubBlockIdxOp>(loc, builder.getI64Type());
-    auto zero = builder.create<arith::ConstantOp>(loc, builder.getI64IntegerAttr(0));
-    auto cond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq, sbid.getResult(), zero.getResult());
-    auto ifOp = builder.create<scf::IfOp>(loc, cond.getResult(),
-                                          /*withElseRegion=*/false);
-
-    Operation *thenTerm = ifOp.thenBlock()->getTerminator();
-    for (Operation *op : tail)
-        op->moveBefore(thenTerm);
-
-    LLVM_DEBUG(llvm::dbgs() << "[cv-split]   guardStores: wrapped " << stores.size() << " store(s) (+ "
-                            << (tail.size() - stores.size()) << " tail ops) in if(get_sub_block_idx==0)\n");
-}
-
 static LogicalResult retileVectorScopeForRowSplit(scope::ScopeOp vecScope, const CrossScopeTransferInfo &transferInfo);
 static void sinkCubeLoadChainsToMatmul(Block *body);
 
@@ -478,6 +430,13 @@ static Type retileRowHalve(Type t, int64_t Mfull)
     } else if (auto mt = dyn_cast<MemRefType>(t)) {
         auto sh = mt.getShape();
         if (!sh.empty() && sh[0] == Mfull) {
+            // Retiling preserves explicit strides. Reject arbitrary affine
+            // layouts here: changing their leading extent can change address
+            // semantics in a way this local transformation cannot prove.
+            SmallVector<int64_t> strides;
+            int64_t offset;
+            if (failed(getStridesAndOffset(mt, strides, offset)))
+                return t;
             SmallVector<int64_t> ns(sh.begin(), sh.end());
             ns[0] = half;
             return MemRefType::get(ns, mt.getElementType(), mt.getLayout(), mt.getMemorySpace());
@@ -657,6 +616,24 @@ static LogicalResult retileVectorScopeOps(scope::ScopeOp vecScope, int64_t Mfull
             }
         }
     }
+
+    // Generic type retiling must keep each scf.for result, init operand, and
+    // region iter_arg identical. A missed external initializer is a candidate
+    // rejection, never permission to leave temporarily invalid IR for a later
+    // verifier to diagnose without context.
+    WalkResult loopTypes = vecScope.walk([&](scf::ForOp loop) {
+        for (auto [init, iterArg, result] :
+             llvm::zip_equal(loop.getInitArgs(), loop.getRegionIterArgs(), loop.getResults())) {
+            if (init.getType() == iterArg.getType() && init.getType() == result.getType())
+                continue;
+            loop.emitError("VECTOR retiling produced mismatched scf.for "
+                           "init/iter_arg/result types");
+            return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+    });
+    if (loopTypes.wasInterrupted())
+        return failure();
     return success();
 }
 
@@ -687,10 +664,10 @@ static FailureOr<unsigned> retileOutputStores(scope::ScopeOp vecScope, Value sbi
                           "0");
             return failure();
         }
-        Value leadStride = getValueOrCreateConstantIndexOp(b, loc, strides[0]);
+        Value leadingStride = getValueOrCreateConstantIndexOp(b, loc, strides[0]);
         Value origOff = getValueOrCreateConstantIndexOp(b, loc, offsets[0]);
         Value halfValue = b.create<arith::ConstantIndexOp>(loc, half);
-        Value step = b.create<arith::MulIOp>(loc, halfValue, leadStride);
+        Value step = b.create<arith::MulIOp>(loc, halfValue, leadingStride);
         Value add = b.create<arith::MulIOp>(loc, sbidx, step);
         Value newOff = b.create<arith::AddIOp>(loc, origOff, add);
         sizes[0] = b.getIndexAttr(half);

@@ -45,14 +45,15 @@ RUN if [ -n "$APTMIRROR" ]; then \
     update-ca-certificates
 
 RUN mkdir -p /root/.config/pip && \
-    printf '[global]\nindex-url = %s\n' "$PIP_INDEX_URL" > /root/.config/pip/pip.conf && \
+    printf '[global]\nindex-url = %s\ntimeout = 600\n' "$PIP_INDEX_URL" > /root/.config/pip/pip.conf && \
     if [ -n "$PIP_TRUSTED_HOST" ]; then printf 'trusted-host = %s\n' "$PIP_TRUSTED_HOST" >> /root/.config/pip/pip.conf; fi
 
 COPY requirements.txt requirements_dev.txt ./
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install torch==2.7.1+cpu \
-      --find-links ${TORCH_INDEX_URL}/torch/
+      --find-links ${TORCH_INDEX_URL}/torch/ \
+      --timeout 600
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install -r requirements_dev.txt && \

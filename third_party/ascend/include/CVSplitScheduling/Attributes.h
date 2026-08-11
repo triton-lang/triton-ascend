@@ -20,8 +20,8 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ADAPTER_CV_SPLIT_SCHEDULING_ATTRIBUTES_H
-#define TRITON_ADAPTER_CV_SPLIT_SCHEDULING_ATTRIBUTES_H
+#ifndef TRITON_ASCEND_CV_SPLIT_SCHEDULING_ATTRIBUTES_H
+#define TRITON_ASCEND_CV_SPLIT_SCHEDULING_ATTRIBUTES_H
 
 namespace mlir::triton::cv_split {
 
@@ -32,4 +32,4 @@ inline constexpr char kAppliedAttr[] = "triton_ascend.cv_split_scheduling.applie
 
 } // namespace mlir::triton::cv_split
 
-#endif // TRITON_ADAPTER_CV_SPLIT_SCHEDULING_ATTRIBUTES_H
+#endif // TRITON_ASCEND_CV_SPLIT_SCHEDULING_ATTRIBUTES_H

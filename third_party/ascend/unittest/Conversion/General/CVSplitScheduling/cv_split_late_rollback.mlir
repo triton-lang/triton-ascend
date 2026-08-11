@@ -6,7 +6,9 @@
 // second reaches the post-transformation verifier, which rejects the stale
 // static sizes on a generically retiled tensor.extract_slice. The third is a
 // valid candidate and must still be transformed after both earlier candidates
-// are restored. triton-opt must exit successfully.
+// are restored. The fourth has an unsupported direct output destination and
+// must reject transactionally rather than silently retaining full-tile offsets.
+// triton-opt must exit successfully.
 
 // DIAG: [cv-split] Function: stage9_retiling_failure
 // DIAG: [cv-split] Function: verifier_rejects_retile
@@ -18,6 +20,10 @@
 // DIAG: [cv-split] Candidate failed; restoring function and trying next function
 // DIAG: [cv-split] Stage 9 complete
 // DIAG: [cv-split] Function attributes set on missing_q_staging_candidate
+// DIAG: [cv-split] Function: unsupported_output_destination
+// DIAG: [cv-split] === Stage 9: scope separation ===
+// DIAG: error: VECTOR output retiling requires a destination defined by memref.reinterpret_cast
+// DIAG: [cv-split] Candidate failed; restoring function and trying next function
 
 // IR: module attributes {{.*}}hivm.disable_auto_tile_and_bind_subblock
 // IR-LABEL: func.func @stage9_retiling_failure
@@ -46,6 +52,10 @@
 // IR: scf.for %{{.*}} = %{{.*}} to %{{.*}} step %[[THIRD_STEP]] {
 // IR: %{{.*}} = math.exp
 // IR: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>, noinline}
+// IR-LABEL: func.func @unsupported_output_destination
+// IR: scf.for
+// IR: bufferization.materialize_in_destination
+// IR-NOT: scope.scope
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
   func.func @stage9_retiling_failure(
@@ -102,6 +112,25 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
           outs(%init : tensor<32x16xf32>) -> tensor<32x16xf32>
       %vector = math.exp %matmul : tensor<32x16xf32>
     }
+    return
+  }
+
+  func.func @unsupported_output_destination(
+      %lhs: tensor<32x16xf16>, %rhs: tensor<16x16xf16>,
+      %init: tensor<32x16xf32>, %dst: memref<32x16xf32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %result = scf.for %iv = %c0 to %c16 step %c1
+        iter_args(%acc = %init) -> tensor<32x16xf32> {
+      %matmul = linalg.matmul
+          ins(%lhs, %rhs : tensor<32x16xf16>, tensor<16x16xf16>)
+          outs(%acc : tensor<32x16xf32>) -> tensor<32x16xf32>
+      %vector = math.exp %matmul : tensor<32x16xf32>
+      scf.yield %vector : tensor<32x16xf32>
+    }
+    bufferization.materialize_in_destination %result in writable %dst :
+        (tensor<32x16xf32>, memref<32x16xf32>) -> ()
     return
   }
 

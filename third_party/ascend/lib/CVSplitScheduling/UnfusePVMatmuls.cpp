@@ -41,6 +41,9 @@ namespace mlir::triton::cv_split {
 // the accumulator. Unfusing makes the PV matmul independent of the accumulator.
 LogicalResult unfusePVMatmuls(Block *body, Classification &classification)
 {
+    if (!body)
+        return failure();
+
     SmallVector<linalg::MatmulOp> toUnfuse;
     for (Operation &op : *body) {
         auto matmulOp = dyn_cast<linalg::MatmulOp>(&op);

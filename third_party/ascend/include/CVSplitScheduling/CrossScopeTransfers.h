@@ -42,7 +42,7 @@ struct VectorToCubeTransferChain {
     Value pSrc;
     /// Shared L1 destination allocated for the packed tensor.
     Value l1Alloc;
-    /// Synchronization operation before which the final copy is committed.
+    /// `hivm::SyncBlockSetOp` before which the final copy is committed.
     Operation *anchor;
     /// Pack operations still owned by the IR. Scope separation must erase them
     /// in reverse order before rebuilding a per-vector-core pack.
@@ -66,6 +66,8 @@ struct CrossScopeTransferInfo {
 /// UB-to-L1 copy and ready signal may be committed.
 /// The returned handles remain owned by the mutated IR and must be consumed
 /// before the referenced operations are erased or reordered.
+/// `blockM`, derived internally from the leading transfer, must be positive and
+/// divisible by 32 so scope separation can split it evenly across two AIVs.
 FailureOr<CrossScopeTransferInfo>
 insertCrossScopeTransfers(scf::ForOp loop, const Classification &classification,
                           const llvm::DenseMap<Operation *, Operation *> &transferPhaseEnds,

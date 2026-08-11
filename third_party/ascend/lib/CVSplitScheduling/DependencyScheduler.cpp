@@ -290,7 +290,6 @@ static void extendWithReadyVectorState(
 static SmallVector<Operation *> collectVectorToCubeProducers(Block *body, const Classification &classification)
 {
     SmallVector<Operation *> producers;
-    DenseSet<Operation *> seen;
     for (Operation &op : *body) {
         auto classIt = classification.find(&op);
         if (classIt == classification.end() || classIt->second != EngineType::VECTOR)
@@ -312,7 +311,7 @@ static SmallVector<Operation *> collectVectorToCubeProducers(Block *body, const 
             if (feedsCubeMatmul)
                 break;
         }
-        if (feedsCubeMatmul && seen.insert(&op).second)
+        if (feedsCubeMatmul)
             producers.push_back(&op);
     }
     return producers;

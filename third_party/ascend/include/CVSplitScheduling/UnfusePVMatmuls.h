@@ -29,6 +29,8 @@
 
 namespace mlir::triton::cv_split {
 
+/// Unfuses accumulator inputs for PV matmuls in `body`.
+/// Returns failure when `body` is null or required classification is missing.
 LogicalResult unfusePVMatmuls(Block *body, Classification &classification);
 
 } // namespace mlir::triton::cv_split

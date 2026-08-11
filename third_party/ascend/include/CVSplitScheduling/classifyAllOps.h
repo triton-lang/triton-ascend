@@ -48,10 +48,13 @@ LogicalResult runDCVPClassifier(ModuleOp module);
 
 /// Imports the DCVP classifications already stamped on operations directly
 /// contained in `body`.
+///
+/// Returns failure when a non-yield operation has no classification or is not
+/// classified as exactly one of CUBE or VECTOR.
 FailureOr<Classification> readDCVPClassification(Block *body);
 
 /// Logs the candidate body's classifications and returns true when both the
-/// CUBE and VECTOR subcores have work.
+/// CUBE and VECTOR subcores have work. `body` is used only for debug logging.
 bool checkCoreClassifications(Block *body, const Classification &classification);
 
 /// Removes the temporary core ownership attribute emitted by DCVP.

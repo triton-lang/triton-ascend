@@ -649,8 +649,11 @@ static FailureOr<unsigned> retileOutputStores(scope::ScopeOp vecScope, Value sbi
     unsigned retiledCount = 0;
     for (auto m : mats) {
         auto ric = m.getDest().getDefiningOp<memref::ReinterpretCastOp>();
-        if (!ric)
-            continue;
+        if (!ric) {
+            m.emitError("VECTOR output retiling requires a destination defined "
+                        "by memref.reinterpret_cast");
+            return failure();
+        }
         // Build the per-veccore reinterpret_cast right before the materialize (it is
         // inside the scope, so sub_block_idx dominates it). The original ric may be
         // a loop-invariant op hoisted into the parent block, where sbid is not in

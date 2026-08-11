@@ -38,6 +38,31 @@ using namespace dataflow;
 
 #define DEBUG_TYPE "triton-use-analysis"
 
+static bool hasPointerBitcastProvenance(Value pointer) {
+  // Different-width tensor pointers are materialized per lane as exact integer
+  // addresses and converted back with tt.int_to_ptr. Load/store
+  // canonicalization may wrap that pointer in a zero-offset AddPtr (and
+  // same-width bitcasts may also remain), so follow only address-preserving
+  // pointer operations.
+  if (auto intToPtr = pointer.getDefiningOp<triton::IntToPtrOp>())
+    return intToPtr->hasAttr(ConverterUtils::pointerBitcastPointerCastAttrName);
+  if (auto addPtr = pointer.getDefiningOp<triton::AddPtrOp>())
+    return hasPointerBitcastProvenance(addPtr.getPtr());
+  if (auto bitcast = pointer.getDefiningOp<triton::BitcastOp>())
+    return hasPointerBitcastProvenance(bitcast.getSrc());
+  return false;
+}
+
+static bool requiresPointerBitcastScalarStoreMask(triton::StoreOp store) {
+  return store->hasAttr(ConverterUtils::pointerBitcastPointerCastAttrName) ||
+         hasPointerBitcastProvenance(store.getPtr());
+}
+
+static bool requiresPointerBitcastScalarLoadOperands(triton::LoadOp load) {
+  return load->hasAttr(ConverterUtils::pointerBitcastPointerCastAttrName) ||
+         hasPointerBitcastProvenance(load.getPtr());
+}
+
 std::string stringifyUseType(UseType useTy) {
   std::string ret;
   if (useTy == UseType::MetaUse) {
@@ -76,12 +101,16 @@ void triton::UseAnalysis::visitOperation(Operation *op,
         propagateUse(operands[0], UseType::MetaUse);
         auto mask = load.getMask();
         auto other = load.getOther();
+        bool preserveRuntimeOperands =
+            requiresPointerBitcastScalarLoadOperands(load);
         if (mask) {
           assert(mask != other && "mask and other cannot be the same");
-          propagateUse(operands[1], UseType::MetaUse);
+          propagateUse(operands[1], preserveRuntimeOperands ? UseType::DataUse
+                                                            : UseType::MetaUse);
         }
         if (other) {
-          propagateUse(operands[2], UseType::MetaUse);
+          propagateUse(operands[2], preserveRuntimeOperands ? UseType::DataUse
+                                                            : UseType::MetaUse);
         }
       })
       .Case<triton::PrintOp>([&](auto print) {
@@ -97,7 +126,13 @@ void triton::UseAnalysis::visitOperation(Operation *op,
         auto mask = store.getMask();
         if (mask) {
           assert(mask != value && "mask and data cannot be the same");
-          propagateUse(operands[2], UseType::MetaUse);
+          // BlockPtrAnalysis scalarizes a different-width pointer-bitcast
+          // store after use analysis and extracts its mask at the current
+          // loop IV. Keep only that mask producer alive as runtime data.
+          auto maskUse = requiresPointerBitcastScalarStoreMask(store)
+                             ? UseType::DataUse
+                             : UseType::MetaUse;
+          propagateUse(operands[2], maskUse);
         }
       })
       .Case<triton::ascend::IndirectStoreOp>([&](auto store) {
@@ -380,14 +415,19 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
               auto ptr = load.getPtr();
               auto mask = load.getMask();
               auto other = load.getOther();
-              if (result == ptr || result == mask || result == other) {
+              bool preserveRuntimeOperands =
+                  requiresPointerBitcastScalarLoadOperands(load);
+              if (result == ptr || (!preserveRuntimeOperands &&
+                                    (result == mask || result == other))) {
                 metaUsers.insert(user);
               }
             })
             .Case<triton::StoreOp>([&](auto store) {
               auto ptr = store.getPtr();
               auto mask = store.getMask();
-              if (result == ptr || result == mask) {
+              bool preserveMaskAsData =
+                  mask && requiresPointerBitcastScalarStoreMask(store);
+              if (result == ptr || (result == mask && !preserveMaskAsData)) {
                 metaUsers.insert(user);
               }
             })

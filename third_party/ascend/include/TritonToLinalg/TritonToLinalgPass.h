@@ -83,7 +83,8 @@ private:
                        TritonTypeConverter &tritonTypeConverter);
 
   void
-  populateTritonToLinalgCanonicalizationPatterns(RewritePatternSet &patterns);
+  populateTritonToLinalgCanonicalizationPatterns(RewritePatternSet &patterns,
+                                                 bool &hadError);
 
   void populateTritonToLinalgConversionPatterns(TypeConverter &typeConverter,
                                                 RewritePatternSet &patterns,

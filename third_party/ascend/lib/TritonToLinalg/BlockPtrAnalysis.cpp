@@ -59,6 +59,21 @@
 namespace mlir {
 namespace triton {
 
+static hivm::PointerCastOp
+createPointerCastFromIntToPtr(triton::IntToPtrOp intToPtrOp,
+                              ConversionPatternRewriter &rewriter) {
+  auto pointerType =
+      cast<triton::PointerType>(intToPtrOp.getResult().getType());
+  auto memrefType =
+      MemRefType::get({ShapedType::kDynamic}, pointerType.getPointeeType());
+  auto pointerCast = rewriter.create<hivm::PointerCastOp>(
+      intToPtrOp.getLoc(), memrefType, ValueRange{intToPtrOp.getSrc()});
+  if (intToPtrOp->hasAttr(ConverterUtils::pointerBitcastPointerCastAttrName))
+    pointerCast->setAttr(ConverterUtils::pointerBitcastPointerCastAttrName,
+                         rewriter.getUnitAttr());
+  return pointerCast;
+}
+
 // MemAccType selectMaxMemAccTy(const MemAccType &v1, const MemAccType &v2) {
 //   return (v1 > v2) ? v1 : v2;
 // }
@@ -312,6 +327,8 @@ void BlockData::divBlock(BlockData &lBlock, BlockData &rBlock, Location loc,
   assert(this->isEmpty() && lBlock.getRank() == rBlock.getRank());
 
   assert(!(lBlock.hasSource() && rBlock.hasSource()));
+  // Integer division is not affine over a tensor block. For example,
+  // (1 + i) / 2 cannot be represented as 1 / 2 + i * (1 / 2).
   assert(lBlock.isScalar() && rBlock.isScalar());
 
   auto rScalar = rBlock.getScalar();
@@ -337,6 +354,38 @@ memref::ReinterpretCastOp BlockData::createCastOp(ArrayRef<int64_t> resultShape,
                                                   const Location &loc,
                                                   OpBuilder &builder) const {
   OpFoldResult resOffset = this->inferBlockOffset(loc, builder);
+  Value castSource = this->source;
+
+  // A pointer bitcast changes the unit in which offsets are expressed. Fold
+  // the already-rescaled offset into the typed pointer address before creating
+  // the memref view. This keeps the reinterpret_cast operand offset and its
+  // result layout consistent, and prevents the PointerCast post-processing
+  // from changing a type that is already consumed by downstream operations.
+  if (auto pointerCast = castSource.getDefiningOp<hivm::PointerCastOp>();
+      pointerCast &&
+      pointerCast->hasAttr(ConverterUtils::pointerBitcastPointerCastAttrName)) {
+    Value offset = getValueOrCreateConstantIndexOp(builder, loc, resOffset);
+    Value address = pointerCast.getAddrs().front();
+    if (offset.getType() != address.getType())
+      offset =
+          builder.create<arith::IndexCastOp>(loc, address.getType(), offset);
+
+    auto elementType =
+        cast<BaseMemRefType>(castSource.getType()).getElementType();
+    int64_t elementByteWidth = (elementType.getIntOrFloatBitWidth() + 7) / 8;
+    Value byteWidth = builder.create<arith::ConstantOp>(
+        loc, builder.getIntegerAttr(address.getType(), elementByteWidth));
+    Value byteOffset = builder.create<arith::MulIOp>(loc, offset, byteWidth);
+    Value rebasedAddress =
+        builder.create<arith::AddIOp>(loc, address, byteOffset);
+    auto rebasedPointerCast = builder.create<hivm::PointerCastOp>(
+        loc, castSource.getType(), ValueRange{rebasedAddress});
+    rebasedPointerCast->setAttr(
+        ConverterUtils::pointerBitcastPointerCastAttrName,
+        builder.getUnitAttr());
+    castSource = rebasedPointerCast.getResult();
+    resOffset = builder.getIndexAttr(0);
+  }
   auto resultType = this->getResultMemrefType(
       isa<Attribute>(resOffset) ? getConstantIntValue(resOffset).value()
                                 : ShapedType::kDynamic,
@@ -355,7 +404,7 @@ memref::ReinterpretCastOp BlockData::createCastOp(ArrayRef<int64_t> resultShape,
   }
 
   return builder.create<memref::ReinterpretCastOp>(
-      loc, resultType, this->source, resOffset, this->sizes, strides);
+      loc, resultType, castSource, resOffset, this->sizes, strides);
 }
 
 void BlockData::dump() const {
@@ -596,6 +645,7 @@ void BlockDataParser::parseDiv(
   BlockData lBlock, rBlock;
   parse(op.getLhs(), lBlock, loc, rewriter, known);
   parse(op.getRhs(), rBlock, loc, rewriter, known);
+
   data.divBlock(lBlock, rBlock, loc, rewriter);
 }
 
@@ -731,9 +781,9 @@ void BlockDataParser::parseBitcast(
         cast<triton::PointerType>(op.getSrc().getType()).getPointeeType();
     auto resPointeeType = cast<triton::PointerType>(resType).getPointeeType();
 
-    // Handling special case
-    // If Op is MetaUse or src is i1 block argument and dst is i8,
-    // it should be converted to UnrealizedConversionCast
+    // Keep the established same-storage pointer conversion path. Different
+    // storage widths are canonicalized to an exact integer address before
+    // BlockPtrAnalysis and therefore do not rely on this remapping.
     if (op->hasAttr("MetaUse") ||
         (isa<BlockArgument>(op.getSrc()) &&
          srcPointeeType == rewriter.getIntegerType(1) &&
@@ -1355,22 +1405,16 @@ void BlockDataParser::rewriteAddPtr(
 
   if (auto intToPtrOp = dyn_cast_or_null<triton::IntToPtrOp>(
           data.getSourceRef().getDefiningOp())) {
-    auto rtype = cast<triton::PointerType>(intToPtrOp.getResult().getType());
-    auto memrefType =
-        MemRefType::get({ShapedType::kDynamic}, rtype.getPointeeType());
-    auto hivmPointCastOp = rewriter.create<hivm::PointerCastOp>(
-        intToPtrOp.getLoc(), memrefType, ValueRange{intToPtrOp.getSrc()});
-    data.setSource(hivmPointCastOp.getResult());
+    data.setSource(
+        createPointerCastFromIntToPtr(intToPtrOp, rewriter).getResult());
   }
 
   if (data.hasResElemTy()) {
-    // Handle bitcast scenario
     auto memrefType = dyn_cast<BaseMemRefType>(data.getSourceRef().getType())
                           .cloneWith(std::nullopt, data.getResElemTyRef());
-    UnrealizedConversionCastOp castOp =
-        rewriter.create<mlir::UnrealizedConversionCastOp>(
-            op.getLoc(), memrefType, data.getSourceRef());
-    data.setSource(castOp.getOutputs()[0]);
+    auto castOp = rewriter.create<UnrealizedConversionCastOp>(
+        op.getLoc(), memrefType, data.getSourceRef());
+    data.setSource(castOp.getOutputs().front());
   }
 
   // ToDo: need to handle module scenario
@@ -1416,11 +1460,6 @@ void BlockDataParser::rewriteCustomOp(
   auto convertIntToPtr = [&rewriter](BlockData &data) {
     if (auto intToPtrOp = dyn_cast_or_null<triton::IntToPtrOp>(
             data.getSourceRef().getDefiningOp())) {
-      auto rtype = cast<triton::PointerType>(intToPtrOp.getResult().getType());
-      auto memrefType =
-          MemRefType::get({ShapedType::kDynamic}, rtype.getPointeeType());
-      auto hivmPointCastOp = rewriter.create<hivm::PointerCastOp>(
-          intToPtrOp.getLoc(), memrefType, ValueRange{intToPtrOp.getSrc()});
       if (data.getSizesRef().size() == 0) {
         data.getSizesRef().push_back(rewriter.getIndexAttr(1));
         if (data.getScalarRef().isNull()) {
@@ -1430,7 +1469,8 @@ void BlockDataParser::rewriteCustomOp(
         }
         data.getStridesRef().push_back(rewriter.getIndexAttr(1));
       }
-      data.setSource(hivmPointCastOp.getResult());
+      data.setSource(
+          createPointerCastFromIntToPtr(intToPtrOp, rewriter).getResult());
     }
   };
   for (auto in : op.getInputs()) {
@@ -1540,17 +1580,25 @@ void BlockDataParser::rewriteMakeTensorPtrOp(
 
   auto orderSize = op.getOrder().size();
 
-  // Handle base is defined by tt.bitcast
-  BlockDataParser::parse(op.getBase(), data, loc, rewriter, known);
-  if (data.hasResElemTy()) {
-    auto memrefType = dyn_cast<BaseMemRefType>(data.getSourceRef().getType())
-                          .cloneWith(std::nullopt, data.getResElemTyRef());
-    UnrealizedConversionCastOp castOp =
-        rewriter.create<mlir::UnrealizedConversionCastOp>(loc, memrefType,
-                                                          data.getSourceRef());
-    data.setSource(castOp.getOutputs()[0]);
+  // Only compiler-generated IntToPtr carries an exact byte address across a
+  // different-width pointer bitcast. Every other base, including same-width
+  // bitcasts and user IntToPtr operations, retains the main-dev path.
+  if (auto intToPtrOp = op.getBase().getDefiningOp<triton::IntToPtrOp>();
+      intToPtrOp &&
+      intToPtrOp->hasAttr(ConverterUtils::pointerBitcastPointerCastAttrName)) {
+    data.setSource(
+        createPointerCastFromIntToPtr(intToPtrOp, rewriter).getResult());
   } else {
-    data.setSource(rewriter.getRemappedValue(op.getBase()));
+    BlockDataParser::parse(op.getBase(), data, loc, rewriter, known);
+    if (data.hasResElemTy()) {
+      auto memrefType = dyn_cast<BaseMemRefType>(data.getSourceRef().getType())
+                            .cloneWith(std::nullopt, data.getResElemTyRef());
+      auto castOp = rewriter.create<UnrealizedConversionCastOp>(
+          loc, memrefType, data.getSourceRef());
+      data.setSource(castOp.getOutputs().front());
+    } else {
+      data.setSource(rewriter.getRemappedValue(op.getBase()));
+    }
   }
 
   data.getOffsetsRef() =
@@ -2504,17 +2552,24 @@ void BlockDataParser::rewriteAddPtrToUnstrucMemAcc(
       rewriter.create<arith::ConstantOp>(loc, rewriter.getIndexAttr(1));
   auto addptrRes = op.getResult();
   assert(addptrRes.hasOneUse() && "Invalid: tt.addptr has multiple users");
-  auto loadOp = *(addptrRes.user_begin());
+  Operation *memoryOp = *(addptrRes.user_begin());
+  auto loadOp = dyn_cast<triton::LoadOp>(memoryOp);
+  auto storeOp = dyn_cast<triton::StoreOp>(memoryOp);
+  if (!loadOp && !storeOp) {
+    op.emitError("unstructured addptr result must be consumed by a load or "
+                 "store");
+    return;
+  }
 
-  // Prepare empty tensor for loop based scalar load
-  // FIXME: We use cast here because addptr must return tensor<?x!tt.ptr<f32>>.
-  // True?
-  auto resTy = cast<ShapedType>(addptrRes.getType());
-  auto resEPtrTy = resTy.getElementType();
-  auto resETy = cast<triton::PointerType>(resEPtrTy).getPointeeType();
-  Value loaded = rewriter.create<tensor::EmptyOp>(loc, blockSizes, resETy);
   SmallVector<Value> initArgs;
-  initArgs.push_back(loaded);
+  if (loadOp) {
+    // The load converter fills this tensor one scalar lane at a time.
+    auto resTy = cast<ShapedType>(addptrRes.getType());
+    auto resEPtrTy = resTy.getElementType();
+    auto resETy = cast<triton::PointerType>(resEPtrTy).getPointeeType();
+    initArgs.push_back(
+        rewriter.create<tensor::EmptyOp>(loc, blockSizes, resETy));
+  }
 
   SmallVector<Value> forLBs;
   SmallVector<Value> forUBs;
@@ -2529,9 +2584,17 @@ void BlockDataParser::rewriteAddPtrToUnstrucMemAcc(
     forSteps.push_back(oneIdx);
   }
   SmallVector<Value> ivs;
-  OpBuilder builder(op);
+  // Stores need the active conversion listener because their replacement is
+  // cloned into a new region. Loads retain the original local builder path;
+  // their loop-carried result handling is not part of the store fallback.
+  ConversionPatternRewriter::InsertionGuard insertionGuard(rewriter);
+  OpBuilder loadBuilder(op);
+  if (storeOp)
+    rewriter.setInsertionPoint(memoryOp);
+  OpBuilder &loopBuilder =
+      storeOp ? static_cast<OpBuilder &>(rewriter) : loadBuilder;
   auto loop = createNestedLoops(
-      builder, loc, 0, blockSizes.size(), forLBs, forUBs, forSteps, ivs,
+      loopBuilder, loc, 0, blockSizes.size(), forLBs, forUBs, forSteps, ivs,
       initArgs,
       [&](OpBuilder &bB, Location bLoc, SmallVector<Value> &allIVs,
           ValueRange iterArgs) {
@@ -2540,8 +2603,10 @@ void BlockDataParser::rewriteAddPtrToUnstrucMemAcc(
 
         Value scalarOffsetRaw =
             bB.create<tensor::ExtractOp>(bLoc, ptrOffset, allIVs);
+
         Value scalarOffset = bB.create<arith::IndexCastOp>(
             bLoc, bB.getIndexType(), scalarOffsetRaw);
+
         OpFoldResult baseOffset = bB.getIndexAttr(0);
         for (auto ofr : data.getOffsetsRef()) {
           baseOffset =
@@ -2558,12 +2623,45 @@ void BlockDataParser::rewriteAddPtrToUnstrucMemAcc(
         data.getStridesRef().clear();
         data.getStridesRef().push_back(bB.getIndexAttr(1));
         memref::ReinterpretCastOp castOp = data.createCastOp({1}, bLoc, bB);
-        rewriter.replaceOp(op, castOp);
-        // Move tt.load using this tt.addptr into this block
-        loadOp->moveAfter(castOp);
-        loadOp->setAttr("IndirectLoad", UnitAttr::get(op.getContext()));
-        bB.create<scf::YieldOp>(bLoc, iterArgs);
+        if (storeOp) {
+          // Moving an existing illegal store into a newly created loop crosses
+          // dialect-conversion transaction boundaries. Clone it with the
+          // loop-local pointer instead, then remove the original operation.
+          auto yieldOp = bB.create<scf::YieldOp>(bLoc, iterArgs);
+          IRMapping mapping;
+          mapping.map(addptrRes, castOp.getResult());
+          // Keep value and mask attached to their original SSA producers.
+          // Some producers are converted after this addptr pattern; eagerly
+          // asking dialect conversion for remapped values would capture
+          // temporary unrealized casts instead of the eventual replacements.
+          for (Value operand : storeOp->getOperands())
+            if (operand != addptrRes)
+              mapping.map(operand, operand);
+          // Use the loop builder so operands remain ordinary SSA uses instead
+          // of being eagerly remapped to conversion materializations.
+          bB.setInsertionPoint(yieldOp);
+          Operation *scalarStore = bB.clone(*storeOp, mapping);
+          scalarStore->setAttr("IndirectStore", rewriter.getUnitAttr());
+          rewriter.replaceOp(storeOp, scalarStore);
+        } else {
+          // Preserve the pre-existing load lowering: it depends on the local
+          // builder and direct move for loop-carried result reconstruction.
+          rewriter.replaceOp(op, castOp);
+          memoryOp->moveAfter(castOp);
+          memoryOp->setAttr("IndirectLoad", rewriter.getUnitAttr());
+          bB.create<scf::YieldOp>(bLoc, iterArgs);
+        }
+        if (storeOp)
+          rewriter.replaceOp(op, castOp);
       });
+  if (storeOp && loop) {
+    // These loops implement scalarized memory lanes. Keep the generic loop
+    // converter from treating them as user control flow and rewriting the
+    // already converted pointer state a second time.
+    loop.walk([&](scf::ForOp forOp) {
+      forOp->setAttr("ExtractedLoadOrStore", rewriter.getUnitAttr());
+    });
+  }
 }
 
 } // namespace triton

@@ -100,14 +100,18 @@ public:
 };
 
 /*
- * Move tt.bitcast to a previous location if tt.bitcast is not directly applied
- * on function arguments
+ * Preserve different-width pointer bitcasts as exact address boundaries and
+ * canonicalize only same-width pointer shape operations.
  */
 class BitcastCanonicalizer : public OpRewritePattern<triton::BitcastOp> {
 public:
-  using OpRewritePattern<triton::BitcastOp>::OpRewritePattern;
+  BitcastCanonicalizer(MLIRContext *context, bool &hadError)
+      : OpRewritePattern<triton::BitcastOp>(context), hadError(hadError) {}
   LogicalResult matchAndRewrite(triton::BitcastOp bitcastOp,
                                 PatternRewriter &rewriter) const override;
+
+private:
+  bool &hadError;
 };
 
 template <typename MathOp>

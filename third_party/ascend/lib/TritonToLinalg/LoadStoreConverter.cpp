@@ -39,6 +39,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Passes.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/Attributes.h"
@@ -75,6 +76,16 @@ using namespace triton;
 
 const std::string MayImplicitTransposeWithLastAxisTAG =
     "MayImplicitTransposeWithLastAxis";
+
+static bool hasPointerBitcastProvenance(Value pointer) {
+  if (auto intToPtr = pointer.getDefiningOp<triton::IntToPtrOp>())
+    return intToPtr->hasAttr(ConverterUtils::pointerBitcastPointerCastAttrName);
+  if (auto addPtr = pointer.getDefiningOp<triton::AddPtrOp>())
+    return hasPointerBitcastProvenance(addPtr.getPtr());
+  if (auto bitcast = pointer.getDefiningOp<triton::BitcastOp>())
+    return hasPointerBitcastProvenance(bitcast.getSrc());
+  return false;
+}
 
 LogicalResult
 AddPtrConverter::matchAndRewrite(triton::AddPtrOp op, OpAdaptor adaptor,
@@ -379,6 +390,39 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     auto resTy = op.getResult().getType();
     auto idxZero =
         rewriter.create<arith::ConstantOp>(loc, rewriter.getIndexAttr(0));
+
+    // A mask on the exact-address pointer-bitcast path is a correctness guard,
+    // not only a value-selection hint. Keep the physical load inside the true
+    // branch so a false lane never touches its potentially invalid address.
+    // Ordinary scalar loads retain the main-dev lowering below.
+    bool requiresGuardedLoad =
+        op->hasAttr(ConverterUtils::pointerBitcastPointerCastAttrName) ||
+        hasPointerBitcastProvenance(op.getPtr());
+    if (requiresGuardedLoad && adaptor.getMask()) {
+      Value fallback = adaptor.getOther();
+      if (!fallback)
+        fallback = rewriter.create<arith::ConstantOp>(
+            loc, rewriter.getZeroAttr(resTy));
+      auto ifOp = rewriter.create<scf::IfOp>(loc, TypeRange{resTy},
+                                             adaptor.getMask(), true);
+      {
+        OpBuilder::InsertionGuard guard(rewriter);
+        rewriter.setInsertionPointToStart(ifOp.thenBlock());
+        auto loadedValue = rewriter.create<memref::LoadOp>(
+            loc, resTy, scalarMemref, idxZero.getResult());
+        propagateWasBoolToInt8Attr(op.getOperation(),
+                                   loadedValue.getOperation(), rewriter);
+        rewriter.create<scf::YieldOp>(loc, ValueRange{loadedValue.getResult()});
+      }
+      {
+        OpBuilder::InsertionGuard guard(rewriter);
+        rewriter.setInsertionPointToStart(ifOp.elseBlock());
+        rewriter.create<scf::YieldOp>(loc, ValueRange{fallback});
+      }
+      rewriter.replaceOp(op, ifOp.getResult(0));
+      return success();
+    }
+
     auto loadedValue = rewriter
                            .create<memref::LoadOp>(loc, resTy, scalarMemref,
                                                    idxZero.getResult())
@@ -1250,6 +1294,65 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
   auto loc = op.getLoc();
   auto ptr = adaptor.getPtr();
   auto val = adaptor.getValue();
+
+  // BlockPtrAnalysis lowers an unstructured tensor of pointers to a scalar
+  // loop whose current target is memref<1xT>. Keep the value and mask on the
+  // same lane as the pointer offset instead of reusing the generic contiguous
+  // store path, which would slice every iteration from source lane zero.
+  if (op->hasAttr("IndirectStore")) {
+    auto forOp = op->getParentOfType<scf::ForOp>();
+    if (!forOp)
+      return rewriter.notifyMatchFailure(
+          op, "indirect store is not nested in a scalar loop");
+
+    auto offsetExtract = dyn_cast<tensor::ExtractOp>(&forOp.getBody()->front());
+    if (!offsetExtract)
+      return rewriter.notifyMatchFailure(
+          op, "indirect store loop does not start with an offset extract");
+    ValueRange ivs = offsetExtract.getIndices();
+
+    auto extractLane = [&](Value value) -> Value {
+      if (!isa<ShapedType>(value.getType()))
+        return value;
+      return rewriter.create<tensor::ExtractOp>(loc, value, ivs);
+    };
+
+    Value scalarVal = extractLane(val);
+    Value zeroIdx = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+    auto createStore = [&]() {
+      rewriter.create<memref::StoreOp>(loc, scalarVal, ptr, zeroIdx);
+    };
+
+    if (Value convertedMask = adaptor.getMask()) {
+      Value condition;
+      if (auto maskType = dyn_cast<RankedTensorType>(convertedMask.getType())) {
+        // Dynamic extraction from a packed i1 tensor is not lane-correct on
+        // the SIMD backend. Widen outside the loop, then extract an i8 lane.
+        Value widenedMask;
+        {
+          OpBuilder::InsertionGuard guard(rewriter);
+          rewriter.setInsertionPoint(forOp);
+          widenedMask = rewriter.create<arith::ExtUIOp>(
+              loc, maskType.clone(rewriter.getI8Type()), convertedMask);
+        }
+        Value scalarMask = extractLane(widenedMask);
+        Value zero = rewriter.create<arith::ConstantIntOp>(loc, 0, 8);
+        condition = rewriter.create<arith::CmpIOp>(
+            loc, arith::CmpIPredicate::ne, scalarMask, zero);
+      } else {
+        condition = convertedMask;
+      }
+      auto ifOp = rewriter.create<scf::IfOp>(loc, condition);
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPointToStart(&ifOp.getThenRegion().front());
+      createStore();
+    } else {
+      createStore();
+    }
+
+    rewriter.eraseOp(op);
+    return success();
+  }
 
   // 1. boundary size check
   auto boundaryCheck = op.getBoundaryCheck();

@@ -26,6 +26,7 @@
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
 #include "ascend/include/Utils/Utils.h"
+
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
@@ -39,7 +40,9 @@
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
+
 #include <utility>
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -59,10 +62,91 @@
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HFusion/IR/HFusion.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "llvm/ADT/APInt.h"
 
 namespace TTOpConverters {
 using namespace mlir;
 using namespace triton;
+
+static triton::PointerType getScalarPointerType(Type type) {
+  if (auto shapedType = dyn_cast<ShapedType>(type))
+    type = shapedType.getElementType();
+  return dyn_cast<triton::PointerType>(type);
+}
+
+static unsigned getNormalizedPointeeBitWidth(triton::PointerType pointerType) {
+  Type pointeeType = pointerType.getPointeeType();
+  if (auto shapedType = dyn_cast<ShapedType>(pointeeType))
+    pointeeType = shapedType.getElementType();
+  if (!pointeeType.isIntOrFloat())
+    return 0;
+  unsigned bitWidth = pointeeType.getIntOrFloatBitWidth();
+  return bitWidth == 1 ? 8 : bitWidth;
+}
+
+static bool isKernelEntryArgument(Value value) {
+  auto blockArgument = dyn_cast<BlockArgument>(value);
+  if (!blockArgument || !blockArgument.getOwner())
+    return false;
+  Operation *parentOp = blockArgument.getOwner()->getParentOp();
+  auto funcOp = dyn_cast_or_null<triton::FuncOp>(parentOp);
+  return funcOp && funcOp.getVisibility() == SymbolTable::Visibility::Public;
+}
+
+static FailureOr<Value>
+materializeScalarPointerAddress(Value pointer, Location location,
+                                PatternRewriter &rewriter) {
+  if (isa<ShapedType>(pointer.getType()))
+    return failure();
+
+  if (auto intToPtrOp = pointer.getDefiningOp<triton::IntToPtrOp>())
+    return intToPtrOp.getSrc();
+  if (auto bitcastOp = pointer.getDefiningOp<triton::BitcastOp>())
+    return materializeScalarPointerAddress(bitcastOp.getSrc(), location,
+                                           rewriter);
+
+  if (auto addPtrOp = pointer.getDefiningOp<triton::AddPtrOp>()) {
+    FailureOr<Value> baseAddress =
+        materializeScalarPointerAddress(addPtrOp.getPtr(), location, rewriter);
+    if (failed(baseAddress))
+      return failure();
+
+    Value offset = addPtrOp.getOffset();
+    auto offsetType = dyn_cast<IntegerType>(offset.getType());
+    if (!offsetType || offsetType.getWidth() > 64)
+      return failure();
+    if (offsetType.getWidth() < 64)
+      offset = rewriter.create<arith::ExtSIOp>(location, rewriter.getI64Type(),
+                                               offset);
+
+    auto pointerType =
+        dyn_cast<triton::PointerType>(addPtrOp.getPtr().getType());
+    if (!pointerType)
+      return failure();
+    unsigned pointeeBitWidth = getNormalizedPointeeBitWidth(pointerType);
+    if (!pointeeBitWidth || pointeeBitWidth % 8 != 0)
+      return failure();
+    uint64_t pointeeByteWidth = pointeeBitWidth / 8;
+    if (pointeeByteWidth != 1) {
+      Value scale =
+          rewriter.create<arith::ConstantIntOp>(location, pointeeByteWidth, 64);
+      offset = rewriter.create<arith::MulIOp>(location, offset, scale);
+    }
+    return rewriter.create<arith::AddIOp>(location, *baseAddress, offset)
+        .getResult();
+  }
+
+  // PtrToInt lowering extracts only the aligned base from a converted memref.
+  // That is exact for a kernel argument, but not for a descriptor produced by
+  // control flow or another operation whose logical offset may be non-zero.
+  // Reject those producers until their descriptor offset can be materialized.
+  if (!isKernelEntryArgument(pointer))
+    return failure();
+
+  return rewriter
+      .create<triton::PtrToIntOp>(location, rewriter.getI64Type(), pointer)
+      .getResult();
+}
 
 /**
  * Retrieves a boolean environment variable.
@@ -112,33 +196,53 @@ BitcastConverter::matchAndRewrite(triton::BitcastOp op, OpAdaptor adaptor,
   Value result;
   auto loc = op.getLoc();
 
-  if (auto dstPtrTy = dyn_cast<triton::PointerType>(op.getType())) {
-    auto srcPtrTy = cast<triton::PointerType>(op.getSrc().getType());
-    auto resType =
-        MemRefType::get({ShapedType::kDynamic}, dstPtrTy.getPointeeType());
+  if (adaptor.getOperands().size() != 1 || !adaptor.getOperands().front())
+    return op.emitError(
+        "pointer bitcast expected exactly one converted source operand");
+  Value convertedSrc = adaptor.getOperands().front();
 
-    auto i1Ty = rewriter.getIntegerType(1);
-    auto i8Ty = rewriter.getIntegerType(8);
-    bool isI1toI8 = (srcPtrTy.getPointeeType() == i1Ty) &&
-                    (dstPtrTy.getPointeeType() == i8Ty);
-    // handling special case: ptr<i1> -> ptr<i8>, directly forward without
-    // arith.bitcast
+  auto srcPtrTy = getScalarPointerType(op.getSrc().getType());
+  auto dstPtrTy = getScalarPointerType(op.getType());
+  auto i1Ty = rewriter.getIntegerType(1);
+  auto i8Ty = rewriter.getIntegerType(8);
+  if (srcPtrTy && dstPtrTy && srcPtrTy.getPointeeType() != i1Ty &&
+      dstPtrTy.getPointeeType() == i1Ty)
+    return op.emitError(
+        "pointer bitcast to i1 from a different pointee type is unsupported "
+        "because i1 pointers use i8 storage");
+
+  if (auto scalarDstPtrTy = dyn_cast<triton::PointerType>(op.getType())) {
+    auto scalarSrcPtrTy = cast<triton::PointerType>(op.getSrc().getType());
+    unsigned srcBitWidth = getNormalizedPointeeBitWidth(scalarSrcPtrTy);
+    unsigned dstBitWidth = getNormalizedPointeeBitWidth(scalarDstPtrTy);
+    if (srcBitWidth != dstBitWidth)
+      return op.emitError(
+          "different-width pointer bitcast was not canonicalized to an "
+          "exact integer address");
+
+    bool isI1toI8 = (scalarSrcPtrTy.getPointeeType() == i1Ty) &&
+                    (scalarDstPtrTy.getPointeeType() == i8Ty);
+    // TypeConverter has already converted i1 pointer storage to i8.
     if (isI1toI8) {
-      // TypeConverter has already converted i1 to i8 memref,
-      LLVM_DEBUG({
-        llvm::dbgs()
-            << "[BitcastConverter] Special i1->i8 pointer bitcast. Forward "
-               "without arith.bitcast. srcConvertedTy="
-            << adaptor.getSrc().getType() << "\n";
-      });
-      rewriter.replaceOp(op, adaptor.getSrc());
+      rewriter.replaceOp(op, convertedSrc);
       return success();
     }
-    result = rewriter.create<arith::BitcastOp>(loc, resType, adaptor.getSrc());
+
+    auto resultType = MemRefType::get({ShapedType::kDynamic},
+                                      scalarDstPtrTy.getPointeeType());
+    result = rewriter.create<arith::BitcastOp>(loc, resultType, convertedSrc);
   } else {
     // handling normal case: bitcast between tensors/memrefs
-    result =
-        rewriter.create<arith::BitcastOp>(loc, op.getType(), adaptor.getSrc());
+    auto srcPtrTy = getScalarPointerType(op.getSrc().getType());
+    auto tensorDstPtrTy = getScalarPointerType(op.getType());
+    if (srcPtrTy && tensorDstPtrTy &&
+        getNormalizedPointeeBitWidth(srcPtrTy) !=
+            getNormalizedPointeeBitWidth(tensorDstPtrTy)) {
+      return op.emitError(
+          "different-width tensor pointer bitcast was not canonicalized to a "
+          "scalar base pointer");
+    }
+    result = rewriter.create<arith::BitcastOp>(loc, op.getType(), convertedSrc);
   }
   rewriter.replaceOp(op, result);
   return success();
@@ -366,65 +470,119 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
 }
 
 /*
- * Move tt.bitcast to a previous location if tt.bitcast is not directly applied
- * on function arguments
+ * Preserve different-width pointer bitcasts as address boundaries. Scalar
+ * pointers are materialized as integer addresses here; tensor pointers remain
+ * for the unstructured memory lowering, which tracks their offset in bytes.
+ * Same-width bitcasts may still move through shape-only pointer operations.
  */
 LogicalResult
 BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
                                       PatternRewriter &rewriter) const {
   Value castSrc = bitcastOp.getSrc();
   Value castRes = bitcastOp.getResult();
-  Type castSrcTy = castSrc.getType();
-  Type castSrcPtrTy = isa<ShapedType>(castSrcTy)
-                          ? cast<ShapedType>(castSrcTy).getElementType()
-                          : castSrcTy;
-  if (!isa<triton::PointerType>(castSrcPtrTy))
+  auto srcPtrTy = getScalarPointerType(castSrc.getType());
+  auto dstPtrTy = getScalarPointerType(castRes.getType());
+  if (!srcPtrTy || !dstPtrTy)
     return failure();
-
-  auto origBitwidth = getPointeeBitWidth(castSrc.getType());
-  auto castBitwidth = getPointeeBitWidth(castRes.getType());
-
-  if (origBitwidth == 1)
-    origBitwidth = 8;
-  if (castBitwidth == 1)
-    castBitwidth = 8;
-  if (origBitwidth != castBitwidth) {
-    bitcastOp.emitError() << "Casting pointers with unmatched bitwidth!\n";
+  auto failWithError = [&](llvm::StringRef message) {
+    if (!hadError)
+      bitcastOp.emitError(message);
+    hadError = true;
     return failure();
+  };
+
+  unsigned srcBitWidth = getNormalizedPointeeBitWidth(srcPtrTy);
+  unsigned dstBitWidth = getNormalizedPointeeBitWidth(dstPtrTy);
+  bool differentBitWidth = srcBitWidth != dstBitWidth;
+  if (srcPtrTy.getAddressSpace() != dstPtrTy.getAddressSpace())
+    return failWithError(
+        "cannot bitcast pointers between different address spaces");
+
+  if (srcPtrTy.getPointeeType() != rewriter.getIntegerType(1) &&
+      dstPtrTy.getPointeeType() == rewriter.getIntegerType(1)) {
+    return failWithError(
+        "pointer bitcast to i1 from a different pointee type is unsupported "
+        "because i1 pointers use i8 storage");
+  }
+
+  if (differentBitWidth) {
+    Type srcPointeeType = srcPtrTy.getPointeeType();
+    Type dstPointeeType = dstPtrTy.getPointeeType();
+    if (isa<ShapedType>(srcPointeeType) || isa<ShapedType>(dstPointeeType) ||
+        !srcBitWidth || !dstBitWidth || srcBitWidth < 8 || dstBitWidth < 8 ||
+        srcBitWidth % 8 != 0 || dstBitWidth % 8 != 0) {
+      return failWithError(
+          "different-width pointer bitcast requires byte-addressable scalar "
+          "integer or floating-point pointee types");
+    }
+
+    // Tensor pointer offsets are materialized one lane at a time by
+    // TritonToUnstructure. For scalar pointers (including make_block_ptr
+    // bases), calculate every pre-cast AddPtr in the element unit visible at
+    // that AddPtr and cross the bitcast boundary with an exact byte address.
+    if (isa<ShapedType>(castSrc.getType()))
+      return failure();
+    FailureOr<Value> address =
+        materializeScalarPointerAddress(castSrc, bitcastOp.getLoc(), rewriter);
+    if (failed(address)) {
+      if (Operation *producer = castSrc.getDefiningOp()) {
+        std::string message =
+            "different-width pointer bitcast cannot preserve the exact "
+            "address from unsupported producer '";
+        message += producer->getName().getStringRef().str();
+        message += "'";
+        return failWithError(message);
+      }
+      return failWithError(
+          "different-width pointer bitcast requires a public kernel argument "
+          "or a supported addptr/bitcast/inttoptr source chain");
+    }
+    Operation *sourceOp = castSrc.getDefiningOp();
+    auto intToPtrOp = rewriter.replaceOpWithNewOp<triton::IntToPtrOp>(
+        bitcastOp, castRes.getType(), *address);
+    // Only compiler-generated IntToPtr operations carry this provenance. It
+    // tells BlockPtrAnalysis that subsequent target-element offsets must be
+    // folded into this exact integer address before constructing a memref.
+    intToPtrOp->setAttr(ConverterUtils::pointerBitcastPointerCastAttrName,
+                        rewriter.getUnitAttr());
+    if (sourceOp && sourceOp->use_empty())
+      rewriter.eraseOp(sourceOp);
+    return success();
   }
 
   Operation *beforeCastOp = castSrc.getDefiningOp();
-  if (beforeCastOp == nullptr) {
+  if (beforeCastOp == nullptr)
     return failure();
-  }
 
   auto newRes =
       TypeSwitch<Operation *, FailureOr<Operation *>>(beforeCastOp)
-          // before: addptr - bitcast - load/store
-          // after: bitcast - addptr - load/store
-          .Case<triton::AddPtrOp>([&](triton::AddPtrOp addptrOp) {
-            auto newCastOp = rewriter.create<triton::BitcastOp>(
-                bitcastOp.getLoc(), castRes.getType(), addptrOp.getPtr());
-            return rewriter.create<triton::AddPtrOp>(
-                bitcastOp.getLoc(), castRes.getType(), newCastOp.getResult(),
-                addptrOp.getOffset());
-          })
-          .Case<triton::SplatOp>([&](triton::SplatOp splatOp) {
-            Type newCastSrcTy =
-                cast<RankedTensorType>(castRes.getType()).getElementType();
-
-            Value splatSrc = splatOp.getSrc();
-            Type splatSrcTy = splatSrc.getType();
-            if (auto splatSrcTensorTy = dyn_cast<RankedTensorType>(splatSrcTy))
-              newCastSrcTy =
-                  splatSrcTensorTy.cloneWith(std::nullopt, newCastSrcTy);
-            auto newCastOp = rewriter.create<triton::BitcastOp>(
-                bitcastOp.getLoc(), newCastSrcTy, splatSrc);
-            return rewriter.create<triton::SplatOp>(
-                bitcastOp.getLoc(), castRes.getType(), newCastOp);
-          })
-          // before: bitcast - bitcast
-          // after(fusion optimization): bitcast
+          .Case<triton::AddPtrOp>(
+              [&](triton::AddPtrOp addptrOp) -> FailureOr<Operation *> {
+                auto newCastOp = rewriter.create<triton::BitcastOp>(
+                    bitcastOp.getLoc(), castRes.getType(), addptrOp.getPtr());
+                return rewriter
+                    .create<triton::AddPtrOp>(
+                        bitcastOp.getLoc(), castRes.getType(),
+                        newCastOp.getResult(), addptrOp.getOffset())
+                    .getOperation();
+              })
+          .Case<triton::SplatOp>(
+              [&](triton::SplatOp splatOp) -> FailureOr<Operation *> {
+                Type newCastSrcTy =
+                    cast<RankedTensorType>(castRes.getType()).getElementType();
+                Value splatSrc = splatOp.getSrc();
+                Type splatSrcTy = splatSrc.getType();
+                if (auto splatSrcTensorTy =
+                        dyn_cast<RankedTensorType>(splatSrcTy))
+                  newCastSrcTy =
+                      splatSrcTensorTy.cloneWith(std::nullopt, newCastSrcTy);
+                auto newCastOp = rewriter.create<triton::BitcastOp>(
+                    bitcastOp.getLoc(), newCastSrcTy, splatSrc);
+                return rewriter
+                    .create<triton::SplatOp>(bitcastOp.getLoc(),
+                                             castRes.getType(), newCastOp)
+                    .getOperation();
+              })
           .Case<triton::BitcastOp>([&](triton::BitcastOp prevCastOp) {
             return rewriter.create<triton::BitcastOp>(
                 bitcastOp.getLoc(), castRes.getType(), prevCastOp.getSrc());
@@ -435,9 +593,8 @@ BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
           });
   if (succeeded(newRes)) {
     rewriter.replaceOp(bitcastOp, newRes.value());
-    if (beforeCastOp->use_empty()) {
+    if (beforeCastOp->use_empty())
       rewriter.eraseOp(beforeCastOp);
-    }
     return success();
   }
   return failure();

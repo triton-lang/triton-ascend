@@ -114,7 +114,8 @@ private:
 
   template <typename... Args>
   MemAccOpTy createMemAccOp(MemAccOpTy op, Value ptrToAccess, Location loc,
-                            PatternRewriter &rewriter, Args &&...args) const;
+                            PatternRewriter &rewriter, bool preserveLoadMask,
+                            Args &&...args) const;
 
   const llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap;
   const llvm::SmallDenseMap<Value, bool> &fromTensorArg;

@@ -58,6 +58,109 @@ static bool enableSyncBlockLockFlag = true;
 static constexpr const char *routeDiscreteMaskToSimtAttrName =
     "route_discrete_mask_to_simt";
 
+static triton::PointerType getScalarPointerType(Type type) {
+  if (auto shapedType = dyn_cast<ShapedType>(type))
+    type = shapedType.getElementType();
+  return dyn_cast<triton::PointerType>(type);
+}
+
+static unsigned getPointerPointeeByteWidth(Type type) {
+  auto pointerType = getScalarPointerType(type);
+  if (!pointerType)
+    return 0;
+
+  Type pointeeType = pointerType.getPointeeType();
+  if (auto shapedType = dyn_cast<ShapedType>(pointeeType))
+    pointeeType = shapedType.getElementType();
+  if (!pointeeType.isIntOrFloat())
+    return 0;
+
+  unsigned bitWidth = pointeeType.getIntOrFloatBitWidth();
+  if (bitWidth == 1)
+    bitWidth = 8;
+  if (bitWidth < 8 || bitWidth % 8 != 0)
+    return 0;
+  return bitWidth / 8;
+}
+
+static bool isPointerValue(Type type) {
+  if (auto shapedType = dyn_cast<ShapedType>(type))
+    type = shapedType.getElementType();
+  return isa<triton::PointerType>(type);
+}
+
+// Discrete-mask fallback may replace a masked memory operation with an
+// unmasked one followed by a select. That is not safe for exact byte addresses:
+// a false lane may contain an address that must never be accessed. Follow only
+// pointer-typed operands so ordinary value bitcasts cannot activate this gate.
+// Region operands are included because control-flow results and block arguments
+// carry their pointer provenance through terminators instead of direct
+// operands.
+static bool isDerivedFromDifferentWidthPointerBitcast(Value pointer) {
+  llvm::SmallVector<Value, 8> worklist;
+  llvm::SmallPtrSet<Value, 8> visited;
+  worklist.push_back(pointer);
+
+  auto enqueuePointerOperands = [&](Operation *operation) {
+    for (Value operand : operation->getOperands()) {
+      if (isPointerValue(operand.getType()))
+        worklist.push_back(operand);
+    }
+  };
+
+  while (!worklist.empty()) {
+    Value value = worklist.pop_back_val();
+    if (!visited.insert(value).second)
+      continue;
+
+    Operation *definingOp = value.getDefiningOp();
+    if (!definingOp) {
+      auto blockArgument = dyn_cast<BlockArgument>(value);
+      if (!blockArgument)
+        continue;
+      Operation *parentOp = blockArgument.getOwner()->getParentOp();
+      if (!parentOp || isa<triton::FuncOp>(parentOp))
+        continue;
+      enqueuePointerOperands(parentOp);
+      parentOp->walk([&](Operation *nestedOp) {
+        if (nestedOp != parentOp)
+          enqueuePointerOperands(nestedOp);
+      });
+      continue;
+    }
+
+    if (auto bitcastOp = dyn_cast<triton::BitcastOp>(definingOp)) {
+      unsigned sourceWidth =
+          getPointerPointeeByteWidth(bitcastOp.getSrc().getType());
+      unsigned targetWidth = getPointerPointeeByteWidth(bitcastOp.getType());
+      if (sourceWidth && targetWidth && sourceWidth != targetWidth)
+        return true;
+    }
+
+    enqueuePointerOperands(definingOp);
+    definingOp->walk([&](Operation *nestedOp) {
+      if (nestedOp != definingOp)
+        enqueuePointerOperands(nestedOp);
+    });
+  }
+  return false;
+}
+
+static LogicalResult
+rejectDifferentWidthPointerBitcastDiscreteMask(Operation *op, Value pointer,
+                                               bool &rejectedUnsafeMask) {
+  if (!isDerivedFromDifferentWidthPointerBitcast(pointer))
+    return success();
+
+  if (!rejectedUnsafeMask) {
+    op->emitError(
+        "different-width pointer bitcast does not support discrete masked "
+        "memory access");
+  }
+  rejectedUnsafeMask = true;
+  return failure();
+}
+
 static bool traceUserToTargetOp(Value val) {
   llvm::SmallVector<Value, 32> worklist;
   llvm::SmallPtrSet<Value, 32> visited;
@@ -264,7 +367,9 @@ static MaskDecomposition decomposeAndMask(Operation *op, Value mask,
 }
 
 struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
-  using OpRewritePattern<triton::StoreOp>::OpRewritePattern;
+  DiscreteMaskStoreConversion(MLIRContext *context, bool &rejectedUnsafeMask)
+      : OpRewritePattern<triton::StoreOp>(context),
+        rejectedUnsafeMask(rejectedUnsafeMask) {}
 
   LogicalResult matchAndRewrite(triton::StoreOp op,
                                 PatternRewriter &rewriter) const final {
@@ -285,6 +390,9 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
       op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
       return failure();
     }
+    if (failed(rejectDifferentWidthPointerBitcastDiscreteMask(
+            op, dst, rejectedUnsafeMask)))
+      return failure();
 
     // When mask = contMask & discMask, use contMask to bound GM accesses and
     // discMask to select the final per-element value. This prevents the
@@ -332,10 +440,15 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
     rewriter.replaceOp(op, newStore);
     return success();
   }
+
+private:
+  bool &rejectedUnsafeMask;
 };
 
 struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
-  using OpRewritePattern<triton::LoadOp>::OpRewritePattern;
+  DiscreteMaskLoadConversion(MLIRContext *context, bool &rejectedUnsafeMask)
+      : OpRewritePattern<triton::LoadOp>(context),
+        rejectedUnsafeMask(rejectedUnsafeMask) {}
 
   LogicalResult matchAndRewrite(triton::LoadOp op,
                                 PatternRewriter &rewriter) const final {
@@ -355,6 +468,9 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
       op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
       return failure();
     }
+    if (failed(rejectDifferentWidthPointerBitcastDiscreteMask(
+            op, ptr, rejectedUnsafeMask)))
+      return failure();
 
     // SIMD path: when mask = contMask & discMask, load only the safe range
     // defined by contMask and use discMask for the per-element select,
@@ -396,11 +512,16 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
     rewriter.replaceOp(op, discreteMaskOp);
     return success();
   }
+
+private:
+  bool &rejectedUnsafeMask;
 };
 
 struct DiscreteMaskAtomicConversion
     : OpRewritePattern<mlir::triton::AtomicRMWOp> {
-  using OpRewritePattern<mlir::triton::AtomicRMWOp>::OpRewritePattern;
+  DiscreteMaskAtomicConversion(MLIRContext *context, bool &rejectedUnsafeMask)
+      : OpRewritePattern<mlir::triton::AtomicRMWOp>(context),
+        rejectedUnsafeMask(rejectedUnsafeMask) {}
 
   LogicalResult matchAndRewrite(mlir::triton::AtomicRMWOp op,
                                 PatternRewriter &rewriter) const final {
@@ -411,6 +532,9 @@ struct DiscreteMaskAtomicConversion
     RMWOp rmwOp = op.getAtomicRmwOp();
 
     if (failed(isDiscreteMask(op, mask, rewriter)))
+      return failure();
+    if (failed(rejectDifferentWidthPointerBitcastDiscreteMask(
+            op, ptr, rejectedUnsafeMask)))
       return failure();
 
     const std::map<RMWOp, TypelessValue> initMap = {
@@ -452,6 +576,9 @@ struct DiscreteMaskAtomicConversion
     rewriter.replaceOp(op, newAtomicOp);
     return success();
   }
+
+private:
+  bool &rejectedUnsafeMask;
 };
 
 DiscreteMaskAccessConversionPass::DiscreteMaskAccessConversionPass(
@@ -465,12 +592,18 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
   enableSyncBlockLockFlag = !tileNonOverlap;
   auto moduleOp = getOperation();
 
+  bool rejectedUnsafeMask = false;
   RewritePatternSet patterns(&getContext());
   patterns.add<DiscreteMaskLoadConversion, DiscreteMaskStoreConversion,
-               DiscreteMaskAtomicConversion>(patterns.getContext());
-  if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
-    moduleOp->emitError("failed to apply discrete mask access patterns");
+               DiscreteMaskAtomicConversion>(patterns.getContext(),
+                                             rejectedUnsafeMask);
+  LogicalResult rewriteResult =
+      applyPatternsGreedily(moduleOp, std::move(patterns));
+  if (failed(rewriteResult) || rejectedUnsafeMask) {
+    if (!rejectedUnsafeMask)
+      moduleOp->emitError("failed to apply discrete mask access patterns");
     signalPassFailure();
+    return;
   }
 
   // Clean up dead analysis ops left behind by MaskState::parse().

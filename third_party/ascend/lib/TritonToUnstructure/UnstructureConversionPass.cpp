@@ -37,7 +37,9 @@
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
 #define DEBUG_TYPE "triton-unstructure-converter"
 
@@ -83,6 +85,109 @@ static int64_t getTypeSizeInByte(Type type) {
     return floatType.getWidth() / kBitsPerByte;
   }
   llvm_unreachable("Unhandled element type of tensor");
+}
+
+static unsigned getPointeeByteWidth(triton::PointerType pointerType) {
+  if (!pointerType)
+    return 0;
+  Type pointeeType = pointerType.getPointeeType();
+  if (auto shapedType = dyn_cast<ShapedType>(pointeeType))
+    pointeeType = shapedType.getElementType();
+  if (!pointeeType.isIntOrFloat())
+    return 0;
+  unsigned bitWidth = pointeeType.getIntOrFloatBitWidth();
+  if (bitWidth == 1)
+    bitWidth = kBitsPerByte;
+  if (bitWidth < kBitsPerByte || bitWidth % kBitsPerByte != 0)
+    return 0;
+  return bitWidth / kBitsPerByte;
+}
+
+static triton::PointerType getScalarPointerType(Type type) {
+  if (auto shapedType = dyn_cast<ShapedType>(type))
+    type = shapedType.getElementType();
+  return dyn_cast<triton::PointerType>(type);
+}
+
+static bool isDifferentWidthPointerBitcast(triton::BitcastOp op) {
+  auto sourceType = getScalarPointerType(op.getSrc().getType());
+  auto targetType = getScalarPointerType(op.getType());
+  unsigned sourceWidth = getPointeeByteWidth(sourceType);
+  unsigned targetWidth = getPointeeByteWidth(targetType);
+  return sourceWidth && targetWidth && sourceWidth != targetWidth;
+}
+
+static bool isPointerValue(Type type) {
+  auto shapedType = dyn_cast<ShapedType>(type);
+  return isa<triton::PointerType>(shapedType ? shapedType.getElementType()
+                                             : type);
+}
+
+// Byte-addressed offsets cannot be reconstructed by ReplaceArguments, whose
+// tt.addptr rebuilding interprets every offset in the root pointee's element
+// unit. Track only SSA values derived from a different-width pointer bitcast
+// and reject an actual structured-control-flow transfer. Capturing such a value
+// inside a region remains valid because no pointer state is reconstructed.
+static LogicalResult rejectByteAddressedControlFlow(ModuleOp moduleOp) {
+  SmallVector<Value> worklist;
+  llvm::DenseSet<Value> visited;
+  moduleOp.walk([&](triton::BitcastOp op) {
+    if (isDifferentWidthPointerBitcast(op))
+      worklist.push_back(op.getResult());
+  });
+
+  while (!worklist.empty()) {
+    Value value = worklist.pop_back_val();
+    if (!visited.insert(value).second)
+      continue;
+
+    for (OpOperand &use : value.getUses()) {
+      Operation *user = use.getOwner();
+      if (isa<scf::YieldOp, scf::ConditionOp, triton::ReturnOp, triton::CallOp>(
+              user) ||
+          isa<LoopLikeOpInterface>(user)) {
+        user->emitError(
+            "byte-addressed pointer cannot cross structured control flow or "
+            "a function boundary");
+        return failure();
+      }
+
+      // Memory operations consume the address but do not forward it. For all
+      // other operations, conservatively propagate provenance through every
+      // pointer result so an unfamiliar pointer-shaping op cannot hide a later
+      // control-flow transfer.
+      if (isa<triton::LoadOp, triton::StoreOp, triton::AtomicRMWOp,
+              triton::AtomicCASOp, triton::PtrToIntOp>(user))
+        continue;
+      for (Value result : user->getResults())
+        if (isPointerValue(result.getType()))
+          worklist.push_back(result);
+    }
+  }
+  return success();
+}
+
+static LogicalResult
+validateByteAddressedPointerTypes(triton::PointerType sourceType,
+                                  triton::PointerType targetType,
+                                  Operation *diagnosticOp) {
+  if (!sourceType || !targetType) {
+    diagnosticOp->emitError(
+        "byte-addressed pointer access requires a scalar root pointer");
+    return failure();
+  }
+  if (!getPointeeByteWidth(sourceType) || !getPointeeByteWidth(targetType)) {
+    diagnosticOp->emitError(
+        "different-width pointer bitcast requires byte-addressable scalar "
+        "integer or floating-point pointee types");
+    return failure();
+  }
+  if (sourceType.getAddressSpace() != targetType.getAddressSpace()) {
+    diagnosticOp->emitError(
+        "cannot bitcast pointers between different address spaces");
+    return failure();
+  }
+  return success();
 }
 
 template <typename MemAccOpTy>
@@ -342,7 +447,16 @@ template <>
 template <typename... Args>
 triton::LoadOp UnstructuredMemAccessConverter<triton::LoadOp>::createMemAccOp(
     triton::LoadOp op, Value ptrToAccess, Location loc,
-    PatternRewriter &rewriter, Args &&...args) const {
+    PatternRewriter &rewriter, bool preserveLoadMask, Args &&...args) const {
+  if (preserveLoadMask) {
+    Value mask = createExtractOp(loc, op.getMask(), rewriter,
+                                 std::forward<Args>(args)...);
+    Value other = createExtractOp(loc, op.getOther(), rewriter,
+                                  std::forward<Args>(args)...);
+    return rewriter.create<triton::LoadOp>(loc, ptrToAccess, mask, other,
+                                           op.getCache(), op.getEvict(),
+                                           op.getIsVolatile());
+  }
   return rewriter.create<triton::LoadOp>(loc, ptrToAccess, op.getCache(),
                                          op.getEvict(), op.getIsVolatile());
 }
@@ -352,7 +466,8 @@ template <typename... Args>
 triton::AtomicRMWOp
 UnstructuredMemAccessConverter<triton::AtomicRMWOp>::createMemAccOp(
     triton::AtomicRMWOp op, Value ptrToAccess, Location loc,
-    PatternRewriter &rewriter, Args &&...args) const {
+    PatternRewriter &rewriter, bool /*preserveLoadMask*/,
+    Args &&...args) const {
   auto extractedValue =
       createExtractOp(loc, op.getVal(), rewriter, std::forward<Args>(args)...);
   auto extractedMask =
@@ -389,7 +504,8 @@ template <typename... Args>
 triton::AtomicCASOp
 UnstructuredMemAccessConverter<triton::AtomicCASOp>::createMemAccOp(
     triton::AtomicCASOp op, Value ptrToAccess, Location loc,
-    PatternRewriter &rewriter, Args &&...args) const {
+    PatternRewriter &rewriter, bool /*preserveLoadMask*/,
+    Args &&...args) const {
   auto extractedCmp =
       createExtractOp(loc, op.getCmp(), rewriter, std::forward<Args>(args)...);
   auto extractedValue =
@@ -423,7 +539,8 @@ template <>
 template <typename... Args>
 triton::StoreOp UnstructuredMemAccessConverter<triton::StoreOp>::createMemAccOp(
     triton::StoreOp op, Value ptrToAccess, Location loc,
-    PatternRewriter &rewriter, Args &&...args) const {
+    PatternRewriter &rewriter, bool /*preserveLoadMask*/,
+    Args &&...args) const {
   auto extractedValue = createExtractOp(loc, op.getValue(), rewriter,
                                         std::forward<Args>(args)...);
   auto extractedMask =
@@ -474,13 +591,34 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   if (!ptrType || op->hasAttr(ConverterUtils::discreteAttrName))
     return failure();
+  // Structural analysis failures are diagnosed once by the pass before greedy
+  // rewriting. Returning failure here remains a plain pattern non-match.
   if (!offsetMap.contains(ptr))
-    return op.emitError() << "PtrOffsetInfo should be computed\n" << ptr;
+    return failure();
 
   auto ptrOffsetInfo = offsetMap.at(ptr);
 
-  if (checkUnstructureAnnotated(op, rewriter))
+  auto srcPtr = ptrOffsetInfo.getPtr();
+  auto sourcePointerType =
+      srcPtr ? dyn_cast<triton::PointerType>(srcPtr.getType()) : nullptr;
+  auto targetPointerType =
+      dyn_cast<triton::PointerType>(ptrType.getElementType());
+  if (!srcPtr)
+    return failure();
+  bool byteAddressed = ptrOffsetInfo.isByteAddressed();
+  if (byteAddressed &&
+      failed(validateByteAddressedPointerTypes(
+          sourcePointerType, targetPointerType, op.getOperation())))
+    return failure();
+
+  if (checkUnstructureAnnotated(op, rewriter) || byteAddressed)
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
+  if (byteAddressed) {
+    // The byte offset is exact but no longer affine in the target element
+    // unit. Keep every lane opaque until it is materialized as an integer
+    // address below. In particular, do not route atomics through BlockData.
+    ptrOffsetInfo.setScalarLike(false);
+  }
 
   if (ptrOffsetInfo.isStructured() && !routeDiscreteMaskToSimt &&
       (!ptrOffsetInfo.isScalarLike() ||
@@ -504,6 +642,27 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     }
   }
 
+  // Same-width pointer bitcasts do not change the offset unit, so analysis
+  // deliberately keeps the original scalar root. Create the typed view here,
+  // where the cast immediately has a real memory-rewrite use and cannot become
+  // a dangling analysis-only SSA value. targetPointerType is present only for
+  // tensor-of-pointers; block pointers have a data tensor pointee and must stay
+  // on the existing make_tensor_ptr path. Different-width boundaries use the
+  // byte-addressed path below and must not be handled here.
+  if (!byteAddressed && targetPointerType &&
+      sourcePointerType != targetPointerType) {
+    if (!sourcePointerType || !targetPointerType ||
+        sourcePointerType.getAddressSpace() !=
+            targetPointerType.getAddressSpace() ||
+        getPointeeByteWidth(sourcePointerType) !=
+            getPointeeByteWidth(targetPointerType)) {
+      return op.emitError(
+          "element-addressed pointer access requires matching pointer widths "
+          "and address spaces");
+    }
+    srcPtr = rewriter.create<triton::BitcastOp>(loc, targetPointerType, srcPtr);
+  }
+
   std::optional<MaskState> mstate = runMaskAnalysis(op, rewriter);
 
   normalizeDiscreteMaskAccessForFallback(op, ptrOffsetInfo, rewriter);
@@ -513,7 +672,6 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
   }
 
-  auto srcPtr = ptrOffsetInfo.getPtr();
   auto ptrOffset = ptrOffsetInfo.getOffset();
 
   // LoadLike is operation with result
@@ -553,7 +711,10 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       ((!ptrOffsetInfo.isStructured() && sizeInByte < 64) ||
        routeDiscreteMaskToSimt);
   bool rankWithinIndirectLoadStoreFastPathLimit = resultShape.size() <= 5;
-  if (indirectFastPathEnabled &&
+  // TODO: Preserve the indirect SIMT fast path by materializing a vectorized
+  // typed view from the exact byte addresses. Until that representation is
+  // supported, use the existing scalar-loop lowering.
+  if (indirectFastPathEnabled && !byteAddressed &&
       succeeded(tryRewriteIndirectFastPath(op, loc, srcPtr, ptrOffset,
                                            resultShape, rewriter))) {
     return success();
@@ -564,6 +725,10 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       auto &os = llvm::dbgs();
       os << "Skip SIMT indirect fast path because continuous shape product is "
          << sizeInByte << " (>=64)\n";
+    }
+    if (indirectFastPathEnabled && byteAddressed) {
+      llvm::dbgs() << "Skip SIMT indirect fast path for a different-width "
+                      "pointer bitcast\n";
     }
     if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
                   std::is_same_v<MemAccOpTy, triton::StoreOp>) {
@@ -586,6 +751,15 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   Value newOpResult = nullptr;
 
   auto insertPoint = rewriter.saveInsertionPoint();
+
+  Value byteBaseAddress;
+  if (byteAddressed) {
+    // PtrOffsetInfo::offset is a signed byte displacement in this mode. Hoist
+    // conversion of the root pointer out of the generated scalar loops, then
+    // add only the per-lane byte displacement inside the loop body.
+    byteBaseAddress =
+        rewriter.create<triton::PtrToIntOp>(loc, rewriter.getI64Type(), srcPtr);
+  }
 
   SmallVector<OpFoldResult> offsets;
   SmallVector<OpFoldResult> sizes;
@@ -692,23 +866,40 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   });
 
   assert(isa<triton::PointerType>(srcPtr.getType()) && "src must be ptr type");
-  if (!fullyUnstructured) {
+  if (!fullyUnstructured && !byteAddressed) {
     srcPtr = rewriter.create<triton::SplatOp>(
         loc, RankedTensorType::get(extractedShape, srcPtr.getType()), srcPtr);
   }
-  Value ptrToAccess = rewriter.create<triton::AddPtrOp>(
-      loc, srcPtr.getType(), srcPtr, extractedOffset);
+  Value ptrToAccess;
+  if (byteAddressed) {
+    assert(fullyUnstructured &&
+           "byte-addressed pointer access must be scalarized");
+    Value exactAddress =
+        rewriter.create<arith::AddIOp>(loc, byteBaseAddress, extractedOffset);
+    auto intToPtr = rewriter.create<triton::IntToPtrOp>(loc, targetPointerType,
+                                                        exactAddress);
+    intToPtr->setAttr(ConverterUtils::pointerBitcastPointerCastAttrName,
+                      rewriter.getUnitAttr());
+    ptrToAccess = intToPtr;
+  } else {
+    ptrToAccess = rewriter.create<triton::AddPtrOp>(loc, srcPtr.getType(),
+                                                    srcPtr, extractedOffset);
+  }
 
   MemAccOpTy accessedOp;
   if (fullyUnstructured) {
-    accessedOp = createMemAccOp(op, ptrToAccess, loc, rewriter, offsets);
-  } else {
     accessedOp =
-        createMemAccOp(op, ptrToAccess, loc, rewriter, offsets, sizes, strides);
+        createMemAccOp(op, ptrToAccess, loc, rewriter, byteAddressed, offsets);
+  } else {
+    accessedOp = createMemAccOp(op, ptrToAccess, loc, rewriter, byteAddressed,
+                                offsets, sizes, strides);
   }
 
   accessedOp->setAttr(ConverterUtils::discreteAttrName,
                       UnitAttr::get(rewriter.getContext()));
+  if (byteAddressed)
+    accessedOp->setAttr(ConverterUtils::pointerBitcastPointerCastAttrName,
+                        rewriter.getUnitAttr());
 
   if (isLoadLike) {
     assert(iterArg && "Load case must have iterArg in for loop");
@@ -779,9 +970,12 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   return success();
 }
 
-void TritonToUnstructurePass::runPreparse(LoopLikeOpInterface op) {
-  IRRewriter rewriter(&getContext());
-  auto loc = op.getLoc();
+static LogicalResult
+runPreparseChecked(LoopLikeOpInterface op, MLIRContext *context,
+                   llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
+                   llvm::DenseMap<Value, PtrOffsetInfo> &offsetMapForLoopArgs) {
+  IRRewriter rewriter(context);
+  Location loc = op.getLoc();
 
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
@@ -799,20 +993,27 @@ void TritonToUnstructurePass::runPreparse(LoopLikeOpInterface op) {
   }
 
   for (auto [arg, yield] : llvm::zip_equal(args, yields)) {
-    if (auto tensorType = dyn_cast<RankedTensorType>(yield.getType())) {
-      parse(yield, loc, rewriter, offsetMapForLoopArgs);
-      offsetMap[arg] = offsetMapForLoopArgs.at(yield);
-      LLVM_DEBUG({
-        auto &os = llvm::dbgs();
-        os << "Pre-parsing result of\n" << arg << "\nis ";
-        for (auto structured : offsetMap[arg].getStructuredRef())
-          os << static_cast<int>(structured);
-        os << '\n';
-      });
-    }
+    if (!isa<RankedTensorType>(yield.getType()))
+      continue;
+    if (failed(parseChecked(yield, loc, rewriter, offsetMapForLoopArgs)))
+      return failure();
+    offsetMap[arg] = offsetMapForLoopArgs.at(yield);
+    LLVM_DEBUG({
+      auto &os = llvm::dbgs();
+      os << "Pre-parsing result of\n" << arg << "\nis ";
+      for (auto structured : offsetMap[arg].getStructuredRef())
+        os << static_cast<int>(structured);
+      os << '\n';
+    });
   }
+  return success();
 }
 
+void TritonToUnstructurePass::runPreparse(LoopLikeOpInterface op) {
+  if (failed(runPreparseChecked(op, &getContext(), offsetMap,
+                                offsetMapForLoopArgs)))
+    signalPassFailure();
+}
 static bool isFromTensorArg(Value v,
                             llvm::SmallDenseMap<Value, bool> &fromTensorArg) {
   if (fromTensorArg.contains(v))
@@ -832,17 +1033,27 @@ static bool isFromTensorArg(Value v,
   return false;
 }
 
-template <typename MemAccOpTy, typename>
-void TritonToUnstructurePass::runParse(MemAccOpTy op) {
-  IRRewriter rewriter(&getContext());
+template <typename MemAccOpTy>
+static LogicalResult
+runParseChecked(MemAccOpTy op, MLIRContext *context,
+                llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
+                llvm::SmallDenseMap<Value, bool> &fromTensorArg) {
+  IRRewriter rewriter(context);
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
     os << "Parsing " << op->getName() << "\n" << op << "\n";
   });
-  parse(op.getPtr(), op.getLoc(), rewriter, offsetMap);
+  if (failed(parseChecked(op.getPtr(), op.getLoc(), rewriter, offsetMap)))
+    return failure();
   isFromTensorArg(op.getPtr(), fromTensorArg);
+  return success();
 }
 
+template <typename MemAccOpTy, typename>
+void TritonToUnstructurePass::runParse(MemAccOpTy op) {
+  if (failed(runParseChecked(op, &getContext(), offsetMap, fromTensorArg)))
+    signalPassFailure();
+}
 LogicalResult
 TritonToUnstructurePass::processIfYieldAddHoistOperations(ModuleOp moduleOp) {
   mlir::RewritePatternSet patterns(&getContext());
@@ -872,6 +1083,10 @@ void TritonToUnstructurePass::runOnOperation() {
 
   ModuleOp moduleOp = getOperation();
   MLIRContext *ctx = &getContext();
+  if (failed(rejectByteAddressedControlFlow(moduleOp))) {
+    signalPassFailure();
+    return;
+  }
 
   moduleOp->walk([this](triton::FuncOp funcOp) {
     replacePtrArguments(funcOp, offsetMapForLoopArgs);
@@ -882,18 +1097,72 @@ void TritonToUnstructurePass::runOnOperation() {
     moduleOp.emitWarning("Failed to process IfYieldAddHoist operations");
   }
 
-  moduleOp->walk([this](LoopLikeOpInterface op) { runPreparse(op); });
-  moduleOp->walk([this](Operation *op) {
-    if (auto loadOp = dyn_cast<triton::LoadOp>(op)) {
-      runParse(loadOp);
-    } else if (auto storeOp = dyn_cast<triton::StoreOp>(op)) {
-      runParse(storeOp);
-    } else if (auto atomicRMWOp = dyn_cast<triton::AtomicRMWOp>(op)) {
-      runParse(atomicRMWOp);
-    } else if (auto atomicCASOp = dyn_cast<triton::AtomicCASOp>(op)) {
-      runParse(atomicCASOp);
-    }
+  WalkResult preparseResult =
+      moduleOp->walk([&](LoopLikeOpInterface op) -> WalkResult {
+        if (failed(
+                runPreparseChecked(op, ctx, offsetMap, offsetMapForLoopArgs)))
+          return WalkResult::interrupt();
+        return WalkResult::advance();
+      });
+  if (preparseResult.wasInterrupted()) {
+    signalPassFailure();
+    return;
+  }
+
+  WalkResult parseResult = moduleOp->walk([&](Operation *op) -> WalkResult {
+    LogicalResult result = success();
+    if (auto loadOp = dyn_cast<triton::LoadOp>(op))
+      result = runParseChecked(loadOp, ctx, offsetMap, fromTensorArg);
+    else if (auto storeOp = dyn_cast<triton::StoreOp>(op))
+      result = runParseChecked(storeOp, ctx, offsetMap, fromTensorArg);
+    else if (auto atomicRMWOp = dyn_cast<triton::AtomicRMWOp>(op))
+      result = runParseChecked(atomicRMWOp, ctx, offsetMap, fromTensorArg);
+    else if (auto atomicCASOp = dyn_cast<triton::AtomicCASOp>(op))
+      result = runParseChecked(atomicCASOp, ctx, offsetMap, fromTensorArg);
+    return failed(result) ? WalkResult::interrupt() : WalkResult::advance();
   });
+  if (parseResult.wasInterrupted()) {
+    signalPassFailure();
+    return;
+  }
+  // A rewrite-pattern failure only means "not matched" to the greedy driver;
+  // diagnostics emitted from matchAndRewrite do not make the pass fail. Check
+  // this structural requirement after parsing so an unsupported tensor-root
+  // access cannot survive the pass while triton-opt still exits successfully.
+  WalkResult memoryAccessValidation =
+      moduleOp->walk([&](Operation *op) -> WalkResult {
+        Value ptr;
+        if (auto loadOp = dyn_cast<triton::LoadOp>(op)) {
+          ptr = loadOp.getPtr();
+        } else if (auto storeOp = dyn_cast<triton::StoreOp>(op)) {
+          ptr = storeOp.getPtr();
+        } else if (auto atomicRMWOp = dyn_cast<triton::AtomicRMWOp>(op)) {
+          ptr = atomicRMWOp.getPtr();
+        } else if (auto atomicCASOp = dyn_cast<triton::AtomicCASOp>(op)) {
+          ptr = atomicCASOp.getPtr();
+        } else {
+          return WalkResult::advance();
+        }
+
+        if (!resolvePtrTensorType(ptr) ||
+            op->hasAttr(ConverterUtils::discreteAttrName))
+          return WalkResult::advance();
+        auto ptrInfo = offsetMap.find(ptr);
+        // This validation was added for the different-width bitcast path. Do
+        // not turn missing information in a legacy pointer analysis into a new
+        // non-bitcast compilation failure.
+        if (ptrInfo == offsetMap.end() || !ptrInfo->second.isByteAddressed() ||
+            ptrInfo->second.getPtr())
+          return WalkResult::advance();
+
+        op->emitError(
+            "unstructured pointer access requires a scalar root pointer");
+        return WalkResult::interrupt();
+      });
+  if (memoryAccessValidation.wasInterrupted()) {
+    signalPassFailure();
+    return;
+  }
 
   RewritePatternSet patterns(ctx);
 
@@ -911,6 +1180,7 @@ void TritonToUnstructurePass::runOnOperation() {
   if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
     moduleOp->emitError("failed to apply Patterns");
     signalPassFailure();
+    return;
   }
 
   PassManager pm(&getContext(), moduleOp.getOperationName());

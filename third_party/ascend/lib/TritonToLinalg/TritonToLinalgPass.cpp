@@ -42,6 +42,7 @@
 #include "ascend/include/TritonToStructured/CannonicalizerConverter.h"
 #include "ascend/include/TritonToUnstructure/UnstructureConversionPass.h"
 #include "ascend/include/Utils/InterleaveOptimization.h"
+#include "ascend/include/Utils/Utils.h"
 
 #include "bishengir/Dialect/HFusion/IR/HFusion.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
@@ -85,8 +86,10 @@
 
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <optional>
 
+#include <utility>
 #define DEBUG_TYPE "triton-to-linalg"
 
 using namespace mlir;
@@ -595,13 +598,14 @@ void TritonToLinalgPass::addDynamicLegal(
 }
 
 void TritonToLinalgPass::populateTritonToLinalgCanonicalizationPatterns(
-    RewritePatternSet &patterns) {
+    RewritePatternSet &patterns, bool &hadError) {
   patterns.add<LoadStoreConverter::LoadStoreCanonicalizer<triton::LoadOp>,
                LoadStoreConverter::LoadStoreCanonicalizer<triton::StoreOp>,
                LoadStoreConverter::LoadStoreCanonicalizer<triton::AtomicRMWOp>,
                LoadStoreConverter::LoadStoreCanonicalizer<triton::AtomicCASOp>>(
       patterns.getContext());
-  patterns.add<TTOpConverters::BitcastCanonicalizer>(patterns.getContext());
+  patterns.add<TTOpConverters::BitcastCanonicalizer>(patterns.getContext(),
+                                                     hadError);
   patterns.add<TTOpConverters::FpToFpCanonicalizer>(patterns.getContext());
   patterns.add<LoadStoreConverter::ScalarStoreCanonicalizer>(
       patterns.getContext());
@@ -1013,12 +1017,17 @@ void TritonToLinalgPass::runOnOperation() {
   }
 
   RewritePatternSet canonicalizerPatterns(&getContext());
+  bool hadCanonicalizationError = false;
   // 1. Canonicalize load/store related patterns.
-  this->populateTritonToLinalgCanonicalizationPatterns(canonicalizerPatterns);
-  if (failed(
-          applyPatternsGreedily(moduleOp, std::move(canonicalizerPatterns)))) {
-    moduleOp->emitError("failed to apply Canonicalizer Patterns");
+  this->populateTritonToLinalgCanonicalizationPatterns(
+      canonicalizerPatterns, hadCanonicalizationError);
+  LogicalResult canonicalizationResult =
+      applyPatternsGreedily(moduleOp, std::move(canonicalizerPatterns));
+  if (failed(canonicalizationResult) || hadCanonicalizationError) {
+    if (!hadCanonicalizationError)
+      moduleOp->emitError("failed to apply Canonicalizer Patterns");
     signalPassFailure();
+    return;
   }
 
   // 2.1 Pre-clean dead control-flow before use analysis.
@@ -1143,6 +1152,21 @@ void TritonToLinalgPass::runOnOperation() {
   for (auto op : castOps) {
     SmallVector<Operation *> userOps(op->getUsers().begin(),
                                      op->getUsers().end());
+    bool isPointerBitcast =
+        op->hasAttr(ConverterUtils::pointerBitcastPointerCastAttrName);
+
+    if (isPointerBitcast && op.getAddrs().size() != 1) {
+      op.emitError("PointerCastOp must have exactly one address operand");
+      signalPassFailure();
+      return;
+    }
+    if (isPointerBitcast && llvm::any_of(userOps, [](Operation *userOp) {
+          return !isa<memref::ReinterpretCastOp>(userOp);
+        })) {
+      op.emitError("PointerCastOp must be consumed by memref.reinterpret_cast");
+      signalPassFailure();
+      return;
+    }
     IRRewriter rewriter(&getContext());
     rewriter.setInsertionPointAfter(op);
     Value addr = op.getAddrs()[0];
@@ -1162,33 +1186,110 @@ void TritonToLinalgPass::runOnOperation() {
     }
 
     for (auto userOp : userOps) {
-      auto reinterpretCastOp = cast<memref::ReinterpretCastOp>(userOp);
+      auto reinterpretCastOp = isPointerBitcast
+                                   ? dyn_cast<memref::ReinterpretCastOp>(userOp)
+                                   : cast<memref::ReinterpretCastOp>(userOp);
+      if (isPointerBitcast && !reinterpretCastOp) {
+        userOp->emitError("PointerCastOp user must be memref.reinterpret_cast");
+        signalPassFailure();
+        return;
+      }
       auto sizes = reinterpretCastOp.getStaticSizes();
       auto staticStrides = reinterpretCastOp.getStaticStrides();
       auto strides = reinterpretCastOp.getStrides();
-      if (reinterpretCastOp.getStaticOffsets().size() != 1)
+      if (reinterpretCastOp.getStaticOffsets().size() != 1) {
         userOp->emitError("IntToPtrOp must converted to PointerCastOp of "
                           "memref<?xdtype> type");
-      int64_t castOpSize = 0;
-      SmallVector<int64_t> dynamicSizes;
-      for (const auto &[size, stride] : llvm::zip_equal(sizes, staticStrides)) {
-        assert(!ShapedType::isDynamic(size));
-        if (ShapedType::isDynamic(stride))
-          dynamicSizes.push_back(size);
-        else
-          castOpSize = size * stride;
+        if (isPointerBitcast) {
+          signalPassFailure();
+          return;
+        }
       }
       rewriter.setInsertionPoint(reinterpretCastOp);
-      Value dynamicSize = rewriter.create<arith::ConstantOp>(
-          op.getLoc(), rewriter.getIndexAttr(castOpSize));
-      for (const auto &[size, stride] :
-           llvm::zip_equal(dynamicSizes, strides)) {
-        Value axisSize = rewriter.create<arith::ConstantOp>(
-            op.getLoc(), rewriter.getIndexAttr(size));
-        axisSize =
-            rewriter.create<arith::MulIOp>(op.getLoc(), stride, axisSize);
-        dynamicSize =
-            rewriter.create<arith::AddIOp>(op.getLoc(), dynamicSize, axisSize);
+      Value dynamicSize;
+      if (!isPointerBitcast) {
+        // Keep the main-dev size calculation byte-for-byte for ordinary
+        // PointerCastOp instances.
+        int64_t castOpSize = 0;
+        SmallVector<int64_t> dynamicSizes;
+        for (const auto &[size, stride] :
+             llvm::zip_equal(sizes, staticStrides)) {
+          assert(!ShapedType::isDynamic(size));
+          if (ShapedType::isDynamic(stride))
+            dynamicSizes.push_back(size);
+          else
+            castOpSize = size * stride;
+        }
+        dynamicSize = rewriter.create<arith::ConstantOp>(
+            op.getLoc(), rewriter.getIndexAttr(castOpSize));
+        for (const auto &[size, stride] :
+             llvm::zip_equal(dynamicSizes, strides)) {
+          Value axisSize = rewriter.create<arith::ConstantOp>(
+              op.getLoc(), rewriter.getIndexAttr(size));
+          axisSize =
+              rewriter.create<arith::MulIOp>(op.getLoc(), stride, axisSize);
+          dynamicSize = rewriter.create<arith::AddIOp>(op.getLoc(), dynamicSize,
+                                                       axisSize);
+        }
+      } else {
+        SmallVector<std::pair<int64_t, Value>> dynamicAxes;
+        auto dynamicStride = strides.begin();
+        bool hasZeroSize = false;
+        int64_t staticSpan = 1;
+        for (const auto &[size, stride] :
+             llvm::zip_equal(sizes, staticStrides)) {
+          if (ShapedType::isDynamic(size)) {
+            reinterpretCastOp.emitError(
+                "PointerCastOp requires statically known access sizes");
+            signalPassFailure();
+            return;
+          }
+          hasZeroSize |= size == 0;
+          if (ShapedType::isDynamic(stride)) {
+            if (dynamicStride == strides.end()) {
+              reinterpretCastOp.emitError(
+                  "PointerCastOp has inconsistent dynamic strides");
+              signalPassFailure();
+              return;
+            }
+            dynamicAxes.emplace_back(size, *dynamicStride++);
+            continue;
+          }
+          // Keep PointerCast at the user-computed logical element-zero address:
+          // rebasing it would require a compensating nonzero memref offset and
+          // would otherwise change the address. ReinterpretCast retains the
+          // signed stride; PointerCast size only needs its magnitude so the
+          // extent metadata cannot become negative.
+          int64_t strideMagnitude = stride < 0 ? -stride : stride;
+          staticSpan += (size - 1) * strideMagnitude;
+        }
+        if (dynamicStride != strides.end()) {
+          reinterpretCastOp.emitError(
+              "PointerCastOp has inconsistent dynamic strides");
+          signalPassFailure();
+          return;
+        }
+
+        // A strided view spans one element plus the distance from the first
+        // element to the last one along every dimension.
+        dynamicSize = rewriter.create<arith::ConstantOp>(
+            op.getLoc(), rewriter.getIndexAttr(hasZeroSize ? 0 : staticSpan));
+        if (!hasZeroSize) {
+          Value zero = rewriter.create<arith::ConstantOp>(
+              op.getLoc(), rewriter.getIndexAttr(0));
+          for (const auto &[size, stride] : dynamicAxes) {
+            Value axisExtent = rewriter.create<arith::ConstantOp>(
+                op.getLoc(), rewriter.getIndexAttr(size - 1));
+            Value negatedStride =
+                rewriter.create<arith::SubIOp>(op.getLoc(), zero, stride);
+            Value strideMagnitude = rewriter.create<arith::MaxSIOp>(
+                op.getLoc(), stride, negatedStride);
+            Value axisSpan = rewriter.create<arith::MulIOp>(
+                op.getLoc(), strideMagnitude, axisExtent);
+            dynamicSize = rewriter.create<arith::AddIOp>(op.getLoc(),
+                                                         dynamicSize, axisSpan);
+          }
+        }
       }
       Value offsetValue;
       auto staticOffset = reinterpretCastOp.getStaticOffsets()[0];

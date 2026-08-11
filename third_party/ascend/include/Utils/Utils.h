@@ -50,6 +50,8 @@ const std::string discreteMaskAttrName = "DiscreteMask";
 const std::string discreteAttrName = "DiscreteMemAccess";
 const std::string continuousAttrName = "ContinuousMemAccess";
 const std::string customSrcPtrIndexAttrName = "SrcPtrIndex";
+inline constexpr llvm::StringLiteral pointerBitcastPointerCastAttrName =
+    "tt.pointer_bitcast_pointer_cast";
 
 bool isaPermutedMemRefType(MemRefType);
 

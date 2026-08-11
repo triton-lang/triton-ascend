@@ -139,122 +139,6 @@ class AscendScanOps(ScanOps):
         return [self.to_tensor(result, dtype=input.dtype)]
 
 
-# AST rewriting: convert Python `and`/`or`/`not` to element-wise `&`/`|`/`~`
-import ast as _ast
-import inspect as _inspect
-import types as _types
-
-_boolop_cache: dict = {}
-
-
-class _BoolOpRewriter(_ast.NodeTransformer):
-
-    def visit_BoolOp(self, node):
-        self.generic_visit(node)
-        values = node.values
-        if isinstance(node.op, _ast.And):
-            result = values[0]
-            for v in values[1:]:
-                result = _ast.BinOp(left=result, op=_ast.BitAnd(), right=v)
-                _ast.copy_location(result, node)
-            return result
-        elif isinstance(node.op, _ast.Or):
-            result = values[0]
-            for v in values[1:]:
-                result = _ast.BinOp(left=result, op=_ast.BitOr(), right=v)
-                _ast.copy_location(result, node)
-            return result
-        return node
-
-    def visit_UnaryOp(self, node):
-        self.generic_visit(node)
-        if isinstance(node.op, _ast.Not):
-            return _ast.UnaryOp(op=_ast.Invert(), operand=node.operand)
-        return node
-
-
-class _SubscriptRewriter(_ast.NodeTransformer):
-    """Wrap subscript values with _ensure_indexable() when the slice contains
-    None, so Python scalars (e.g. loop variables from range()) support
-    [None, None] broadcasting like the compiler does.
-
-    In compiler mode, `for ii in range(4)` yields constexpr values, and
-    `(ii * 4 + jj)[None, None]` is handled by the AST visitor as an
-    expand_dims on a scalar. In interpreter mode, `ii` is a plain Python
-    int, and `int[None, None]` raises TypeError. This transformer wraps the
-    subscript value in _ensure_indexable() which is a no-op for tensors but
-    converts scalars to 0-d tensors.
-    """
-
-    def _has_none_index(self, node):
-        if isinstance(node, _ast.Constant) and node.value is None:
-            return True
-        if isinstance(node, _ast.Tuple):
-            return any(self._has_none_index(elt) for elt in node.elts)
-        return False
-
-    def visit_Subscript(self, node):
-        self.generic_visit(node)
-        if self._has_none_index(node.slice):
-            node.value = _ast.Call(
-                func=_ast.Name(id='_ensure_indexable', ctx=_ast.Load()),
-                args=[node.value],
-                keywords=[],
-            )
-            _ast.copy_location(node.value, node)
-        return node
-
-
-def _ensure_indexable(value):
-    """Make a value support [None, ...] indexing for broadcasting.
-
-    Tensors are returned as-is; Python scalars are converted to 0-d tensors
-    so that scalar[None, None] works like it does in compiler mode.
-    """
-    if isinstance(value, tl.tensor):
-        return value
-    if isinstance(value, bool):
-        np_val = np.array([value], dtype=np.bool_)
-        tt_type = tl.int1
-    elif isinstance(value, int):
-        np_val = np.array([value], dtype=np.int32)
-        tt_type = tl.int32
-    elif isinstance(value, float):
-        np_val = np.array([value], dtype=np.float32)
-        tt_type = tl.float32
-    else:
-        return value
-    return tl.tensor(TensorHandle(np_val, tt_type.scalar), tt_type)
-
-
-def _rewrite_boolops(fn):
-    """Return a copy of *fn* whose AST has `and`→`&`, `or`→`|`, `not`→`~`,
-    and scalar subscripts wrapped to support [None, None] broadcasting."""
-    if fn in _boolop_cache:
-        return _boolop_cache[fn]
-    try:
-        src = _inspect.getsource(fn)
-        # Dedent in case the function is nested (e.g. inside a class)
-        import textwrap
-        src = textwrap.dedent(src)
-        tree = _ast.parse(src)
-        tree = _BoolOpRewriter().visit(tree)
-        tree = _SubscriptRewriter().visit(tree)
-        _ast.fix_missing_locations(tree)
-        code = compile(tree, filename=_inspect.getfile(fn), mode='exec')
-        # Inject helper so the rewritten function can access it
-        fn.__globals__['_ensure_indexable'] = _ensure_indexable
-        ns: dict = {}
-        exec(code, fn.__globals__, ns)
-        new_fn = ns[fn.__name__]
-        new_fn.__defaults__ = fn.__defaults__
-        new_fn.__kwdefaults__ = fn.__kwdefaults__
-        _boolop_cache[fn] = new_fn
-        return new_fn
-    except Exception:
-        return fn
-
-
 class _GlobalsProxy:
     """Wraps fn.__globals__ (a dict) so _LangPatchScope.set_attr (which uses
     getattr/setattr/delattr) can patch directly-imported builtin functions.
@@ -416,8 +300,6 @@ class AscendInterpreterBuilder(InterpreterBuilder):
         # Reset simulation flag at the beginning of each execution
         self._sub_vec_simulation_enabled = False
         self.sub_vec_id = 0
-        # Rewrite `and`→`&`, `or`→`|`, `not`→`~` to match compiler semantics
-        fn = _rewrite_boolops(fn)
 
         # First, try a single execution to see if sub_vec_id is used
         for x in range(grid[0]):

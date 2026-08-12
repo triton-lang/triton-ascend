@@ -288,6 +288,10 @@ public:
                             ConversionPatternRewriter &rewriter,
                             llvm::SmallDenseMap<Value, BlockData> &known);
 
+  static FailureOr<Value>
+  materializePointer(Value ptr, ConversionPatternRewriter &rewriter,
+                     llvm::SmallDenseMap<Value, BlockData> &known);
+
   static void
   rewriteMakeTensorPtrOp(triton::MakeTensorPtrOp op, Value base,
                          ConversionPatternRewriter &rewriter,

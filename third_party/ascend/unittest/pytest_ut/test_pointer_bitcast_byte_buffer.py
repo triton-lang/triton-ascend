@@ -107,6 +107,34 @@ def _loop_bf16_load(
         tl.store(out + token_idx * ROPE_DIM + lanes, values, mask=mask)
 
 
+@triton.jit
+def _tensor_multi_addptr_bf16_load(
+    cache_ptr,
+    block_ids_ptr,
+    positions_ptr,
+    out_ptr,
+    block_stride,
+    token_bytes,
+    BF16_OFFSET: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
+    cols = tl.arange(0, BLOCK_N)
+    block_ids = tl.load(block_ids_ptr + cols)
+    positions = tl.load(positions_ptr + cols)
+
+    block_offsets = block_ids.to(tl.int64) * block_stride
+    block_ptrs = cache_ptr + block_offsets
+    token_ptrs = block_ptrs + positions * token_bytes
+    rope_bytes = token_ptrs + BF16_OFFSET
+    rope_ptrs = rope_bytes.to(tl.pointer_type(tl.bfloat16), bitcast=True)
+
+    rows = tl.arange(0, BLOCK_M)
+    values = tl.load(rope_ptrs[None, :] + rows[:, None])
+    output_offsets = rows[:, None] * BLOCK_N + cols[None, :]
+    tl.store(out_ptr + output_offsets, values)
+
+
 def test_pointer_bitcast_paged_scale_tensor_offset():
     cache_block_size = 4
     dim = 8
@@ -200,4 +228,38 @@ def test_pointer_bitcast_inside_dynamic_loop():
     )
 
     expected = torch.tensor(expected_values, dtype=torch.float32).to(torch.bfloat16)
+    torch.testing.assert_close(out.cpu(), expected, rtol=0, atol=0)
+
+
+def test_pointer_bitcast_tensor_multi_addptr_broadcast_load():
+    block_m = 4
+    block_n = 32
+    block_stride = 2048
+    token_bytes = 576
+    bf16_offset = 448
+
+    block_ids = torch.arange(block_n, dtype=torch.int32)
+    positions = torch.arange(block_n, dtype=torch.int32) % 3
+    host = torch.zeros(block_n * block_stride, dtype=torch.uint8)
+    expected = torch.empty((block_m, block_n), dtype=torch.bfloat16)
+    for col in range(block_n):
+        values = [float(col * block_m + row + 1) for row in range(block_m)]
+        byte_offset = (block_ids[col].item() * block_stride + positions[col].item() * token_bytes + bf16_offset)
+        _write_bf16_le(host, byte_offset, values)
+        expected[:, col] = torch.tensor(values, dtype=torch.bfloat16)
+
+    cache = host.npu()
+    out = torch.empty((block_m, block_n), dtype=torch.bfloat16, device="npu")
+    _tensor_multi_addptr_bf16_load[(1, )](
+        cache,
+        block_ids.npu(),
+        positions.npu(),
+        out,
+        block_stride,
+        token_bytes,
+        BF16_OFFSET=bf16_offset,
+        BLOCK_M=block_m,
+        BLOCK_N=block_n,
+    )
+
     torch.testing.assert_close(out.cpu(), expected, rtol=0, atol=0)

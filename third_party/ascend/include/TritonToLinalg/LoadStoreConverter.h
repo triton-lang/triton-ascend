@@ -36,8 +36,8 @@
 #include "mlir/Dialect/Arith/Utils/Utils.h"
 
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
+
 #include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
-#include "triton/Dialect/Triton/IR/Dialect.h"
 
 namespace LoadStoreConverter {
 

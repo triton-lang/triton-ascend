@@ -25,6 +25,7 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Casting.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -36,6 +37,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Interfaces/LoopLikeInterface.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
@@ -156,6 +158,30 @@ void OpClassifierPass::markCube(Operation *op) {
   }
 }
 
+static bool isExtractedLoadStoreRelated(Operation *op) {
+  if (!op)
+    return false;
+  return llvm::TypeSwitch<Operation *, bool>(op)
+      .Case([](bufferization::ToTensorOp toTensorOp) {
+        return isExtractedLoadStoreRelated(
+            toTensorOp.getBuffer().getDefiningOp());
+      })
+      .Case([](memref::AllocOp allocOp) {
+        Value memref = allocOp.getMemref();
+        for (auto user : memref.getUsers()) {
+          auto forOp = user->getParentOfType<scf::ForOp>();
+          if (forOp && forOp->hasAttr(hivm::ExtractLoadStoreAttr))
+            return true;
+        }
+        return false;
+      })
+      .Case([](ViewLikeOpInterface viewOp) {
+        return isExtractedLoadStoreRelated(
+            viewOp.getViewSource().getDefiningOp());
+      })
+      .Default([](auto) { return false; });
+}
+
 // ============================================================================
 // Pattern: to_tensor → matmul (Upstream)
 // ============================================================================
@@ -182,24 +208,21 @@ void OpClassifierPass::matchToTensorPattern(Operation *def) {
   if (!toTensorOp)
     return;
 
-  // special case: implicit transpose -> vector
+  // special case: implicit transpose -> remains vector
   if (utils::getAnnotateOpWithAttr(toTensorOp.getResult(),
                                    kMayImplicitTransposeWithLastAxis)) {
     return;
   }
 
-  Value memref = toTensorOp.getBuffer();
-  // special case: ExtractLoadStore -> vector
-  if (llvm::any_of(memref.getUsers(), [](Operation *user) {
-        auto forOp = user->getParentOfType<scf::ForOp>();
-        return forOp && forOp->hasAttr(hivm::ExtractLoadStoreAttr);
-      })) {
+  // special case: ExtractedLoadOrStore -> remains vector
+  if (isExtractedLoadStoreRelated(toTensorOp)) {
     return;
   }
 
   markCube(toTensorOp);
   cubeSeeds.push_back(toTensorOp);
 
+  Value memref = toTensorOp.getBuffer();
   // Also mark the memref allocation as CUBE
   if (Operation *memrefDef = memref.getDefiningOp()) {
     markCube(memrefDef);
@@ -246,7 +269,7 @@ void OpClassifierPass::matchTransposePattern(Operation *def) {
 
   // Helper lambda to check if an operand's defining op qualifies for CUBE seed
   auto shouldMarkCubeSeed = [](Operation *opDef) -> bool {
-    if (!opDef)
+    if (!opDef || isExtractedLoadStoreRelated(opDef))
       return false;
     return (isa<bufferization::BufferizationDialect>(opDef->getDialect()) &&
             !isa<bufferization::AllocTensorOp>(opDef)) ||
@@ -256,22 +279,16 @@ void OpClassifierPass::matchTransposePattern(Operation *def) {
   // Check input tensor
   auto operands = transposeOp->getOperands();
   for (const auto &op : operands) {
-    if (shouldMarkCubeSeed(op.getDefiningOp())) {
-      markCube(op.getDefiningOp());
-      cubeSeeds.push_back(op.getDefiningOp());
-      break; // No need to check other operands, one is enough to seed the
-             // transpose as CUBE
+    auto defOp = op.getDefiningOp();
+    if (!shouldMarkCubeSeed(defOp)) {
+      continue;
     }
-  }
-
-  // Check outs (DpsInits)
-  auto outs = transposeOp.getDpsInits();
-  for (const auto &out : outs) {
-    if (shouldMarkCubeSeed(out.getDefiningOp())) {
-      markCube(out.getDefiningOp());
-      cubeSeeds.push_back(out.getDefiningOp());
-      break;
+    if (llvm::isa<bufferization::ToTensorOp>(defOp)) {
+      matchToTensorPattern(defOp);
+      continue;
     }
+    markCube(defOp);
+    cubeSeeds.push_back(defOp);
   }
 }
 
@@ -756,6 +773,10 @@ int OpClassifierPass::propagateCubeUpstream() {
         }
       }
 
+      // Skip ExtractedLoadOrStore related op
+      if (isExtractedLoadStoreRelated(def))
+        continue;
+
       // Skip operations inside linalg block (internal values)
       // But don't skip the linalg op itself
       if (isInsideNestedLinalgRegion(def)) {
@@ -802,24 +823,6 @@ int OpClassifierPass::markRemainingAsVector() {
 
     if (opCoreTypes[op] == OP_UNDETERMINED && !isa<scf::YieldOp>(op)) {
       opCoreTypes[op] = OP_VECTOR_ONLY;
-    }
-
-    // ExtractLoadStoreAttr -> force on vector
-    if (isa<scf::ForOp>(op) && op->hasAttr(hivm::ExtractLoadStoreAttr)) {
-      op->walk([this](Operation *nestedOp) {
-        opCoreTypes[nestedOp] = OP_VECTOR_ONLY;
-        for (auto operand : nestedOp->getOperands()) {
-          if (auto allocOp = llvm::dyn_cast_if_present<memref::AllocOp>(
-                  operand.getDefiningOp())) {
-            opCoreTypes[allocOp] = OP_VECTOR_ONLY;
-            for (auto *user : allocOp->getUsers()) {
-              if (llvm::isa<bufferization::ToTensorOp>(user)) {
-                opCoreTypes[user] = OP_VECTOR_ONLY;
-              }
-            }
-          }
-        }
-      });
     }
   }
 

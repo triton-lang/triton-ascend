@@ -86,18 +86,6 @@ constexpr int64_t BYTE_SIZE = 8;
 static constexpr int crossCoreProducerId = 1;
 static constexpr int crossCoreConsumerId = 0;
 
-class MoveOnly {
-protected:
-  MoveOnly() = default;
-  ~MoveOnly() = default;
-
-  MoveOnly(const MoveOnly &) = delete;
-  MoveOnly &operator=(const MoveOnly &) = delete;
-
-  MoveOnly(MoveOnly &&) = default;
-  MoveOnly &operator=(MoveOnly &&) = default;
-};
-
 enum CoreType {
   UNDETERMINED = 0,
   VECTOR_ONLY = 1 << 0,
@@ -141,15 +129,6 @@ inline bool isCubeSimpleOpOrCf(Operation *op) {
 
 inline bool isVectorSimpleOpOrCf(Operation *op) {
   return getCoreTypeOfSimpleOpOrCf(op) == CoreType::VECTOR_ONLY;
-}
-
-template <typename RangeT, typename FuncT>
-inline llvm::LogicalResult allSucceededShortCircuit(RangeT &&range,
-                                                    FuncT &&func) {
-  return llvm::success(
-      llvm::all_of(std::forward<RangeT>(range), [&](auto &&item) {
-        return llvm::succeeded(func(std::forward<decltype(item)>(item)));
-      }));
 }
 
 bool isVectorOnlyOp(Operation *op);

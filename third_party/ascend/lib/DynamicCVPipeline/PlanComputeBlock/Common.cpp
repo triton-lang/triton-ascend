@@ -43,7 +43,11 @@ void DependencyHelper::forEachUser(Operation *op,
   }
 }
 
-template <bool AcrossIterArg>
+namespace {
+using SourceMode = DependencyHelper::SourceMode;
+}
+
+template <SourceMode SM>
 void DependencyHelper::forEachSource(Operation *op,
                                      DependencyHelper::PredFn pred) const {
   op->walk([&, this, op](Operation *subOp) {
@@ -55,7 +59,7 @@ void DependencyHelper::forEachSource(Operation *op,
         continue;
       }
 
-      if constexpr (AcrossIterArg) {
+      if constexpr (SM == SourceMode::AcrossIterArg) {
         if (auto *defOp = getLoopCarriedDefOp(operand, op->getBlock())) {
           pred(defOp);
         }
@@ -71,11 +75,13 @@ void DependencyHelper::forEachSource(Operation *op,
 }
 
 // Instantiate concrete functions for linking
-template void mlir::CVPipeline::DependencyHelper::forEachSource<true>(
+template void
+mlir::CVPipeline::DependencyHelper::forEachSource<SourceMode::Default>(
     mlir::Operation *op,
     llvm::function_ref<void(mlir::Operation *)> callback) const;
 
-template void mlir::CVPipeline::DependencyHelper::forEachSource<false>(
+template void
+mlir::CVPipeline::DependencyHelper::forEachSource<SourceMode::AcrossIterArg>(
     mlir::Operation *op,
     llvm::function_ref<void(mlir::Operation *)> callback) const;
 
@@ -85,7 +91,7 @@ void initializeIndegreeForBlock(Block *block,
                                 ComputeBlockIdManager &bm) {
   for (auto *op : llvm::make_pointer_range(block->getOperations())) {
     indegree[op] = 0;
-    depHelper.forEachSource<false>(op, [&](Operation *source) {
+    depHelper.forEachSource(op, [&](Operation *source) {
       if (source->getBlock() == block && !bm.isSameBlock(source, op)) {
         indegree[op]++;
       }

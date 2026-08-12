@@ -219,7 +219,7 @@ def test_sdf28():
     assert mlir and len(mlir) > 0, "MLIR code generation failed or is empty"
     assert "func.func @sdf28(" in mlir, \
         "Kernel function definition not found in MLIR code"
-    assert "scope" not in mlir, "Fallback scenario: MLIR code unexpectedly contains the 'scope' keyword"
+    assert "scope" in mlir, "MLIR code does not contain the 'scope' keyword"
 
     # Output MLIR code to the specified path
 

@@ -1158,6 +1158,8 @@ AtomicMaxMinCanonicalizer::matchAndRewrite(triton::AtomicRMWOp op,
     // if the return value of op is used, we can't simply erase it
     if (op.getResult().use_empty()) {
       rewriter.eraseOp(op);
+      if (ptrBitcastOp->use_empty())
+        rewriter.eraseOp(ptrBitcastOp);
       return success();
     }
     return failure();
@@ -1179,7 +1181,29 @@ AtomicMaxMinCanonicalizer::matchAndRewrite(triton::AtomicRMWOp op,
   if (auto andOp = originalMask.getDefiningOp<arith::AndIOp>())
     // LHS is convention in semantic interpreter
     originalMask = andOp.getLhs();
-  else if (auto cmpOp = originalMask.getDefiningOp<arith::CmpFOp>()) {
+  else if (auto xorOp = originalMask.getDefiningOp<arith::XOrIOp>()) {
+    // Current f32 atomic_min uses !signbit as the positive mask:
+    //   shrui(value_bits, 31) -> cmpi ne 0 -> xori true.
+    if ((rmwOp != triton::RMWOp::MIN && rmwOp != triton::RMWOp::MAX) ||
+        (!elementType.isF32() && !elementType.isF64()) ||
+        !matchPattern(xorOp.getRhs(), m_One())) {
+      return failure();
+    }
+
+    auto cmpOp = xorOp.getLhs().getDefiningOp<arith::CmpIOp>();
+    if (!cmpOp || cmpOp.getPredicate() != arith::CmpIPredicate::ne ||
+        !matchPattern(cmpOp.getRhs(), m_Zero()))
+      return op->emitError("Illegal mask for atomicrmwOp of float type");
+
+    auto shiftOp = cmpOp.getLhs().getDefiningOp<arith::ShRUIOp>();
+    if (!shiftOp || shiftOp.getLhs() != valueBitcastOp.getResult())
+      return op->emitError("Illegal mask for atomicrmwOp of float type");
+
+    // Restore the implicit all-true mask.
+    originalMask = rewriter.create<arith::ConstantOp>(
+        op->getLoc(),
+        DenseElementsAttr::get(cast<ShapedType>(op.getMask().getType()), true));
+  } else if (auto cmpOp = originalMask.getDefiningOp<arith::CmpFOp>()) {
     if (cmpOp.getPredicate() != mlir::arith::CmpFPredicate::OGE ||
         !matchPattern(cmpOp.getRhs(),
                       /*positive float zero matcher*/ m_PosZeroFloat()))
@@ -1234,6 +1258,11 @@ AtomicMaxMinCanonicalizer::matchAndRewrite(triton::AtomicRMWOp op,
   } else {
     rewriter.eraseOp(op);
   }
+
+  // The restored atomic uses ptrBitcastOp.getSrc(), i.e. the original GM
+  // pointer. Remove the pointer bitcast once the paired integer atomic is gone.
+  if (ptrBitcastOp->use_empty())
+    rewriter.eraseOp(ptrBitcastOp);
 
   return success();
 }

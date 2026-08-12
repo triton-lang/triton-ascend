@@ -23,6 +23,7 @@
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/RefineArgsBlockId.h"
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -39,8 +40,93 @@ static constexpr const char *DEBUG_TYPE = "refine-args-block-id";
 
 using namespace mlir::triton;
 
-int findFirstUser(Value iterArg, Block *forBlock,
-                  CVPipeline::ComputeBlockIdManager &bm) {
+static void eraseOpsWithUnusedUsers(Operation *op, Block *loopBlock) {
+  llvm::SetVector<Operation *> toErase;
+  llvm::SetVector<Operation *> visited;
+  SmallVector<Operation *> worklist;
+
+  worklist.push_back(op);
+
+  while (!worklist.empty()) {
+    Operation *cur = worklist.pop_back_val();
+    for (Value operand : cur->getOperands()) {
+      if (Operation *defOp = operand.getDefiningOp()) {
+        if (defOp->getResult(0).getNumUses() == 1) {
+          worklist.push_back(defOp);
+        }
+      }
+    }
+    cur->erase();
+  }
+}
+
+static bool cloneDepSubgraph(Operation *yieldDefOp, Block *loopBlock,
+                             SmallVector<Operation *> &clonedOps,
+                             IRMapping &mapping, int targetBlockId,
+                             CVPipeline::ComputeBlockIdManager &bm) {
+  SmallVector<Operation *> worklist;
+  llvm::SetVector<Operation *> visited;
+  SmallVector<Operation *> toClone;
+
+  // First pass: BFS to collect ops to clone
+  visited.insert(yieldDefOp);
+  toClone.push_back(yieldDefOp);
+  worklist.push_back(yieldDefOp);
+
+  while (!worklist.empty()) {
+    Operation *cur = worklist.pop_back_val();
+
+    for (Value operand : cur->getOperands()) {
+      Operation *defOp = operand.getDefiningOp();
+      if (!defOp || defOp->getBlock() != loopBlock || visited.count(defOp)) {
+        continue;
+      }
+      if (defOp != yieldDefOp &&
+          (defOp->getNumResults() != 1 ||
+           !CVPipeline::isScalarLike(defOp->getResult(0)))) {
+        return false;
+      }
+      visited.insert(defOp);
+      toClone.push_back(defOp);
+      worklist.push_back(defOp);
+    }
+  }
+
+  // Second pass: clone in code order and update mapping
+  llvm::sort(toClone,
+             [](Operation *l, Operation *r) { return l->isBeforeInBlock(r); });
+
+  for (Operation *cur : toClone) {
+    Operation *cloned = cur->clone(mapping);
+    loopBlock->push_back(cloned);
+    bm.updateBlockId(cloned, -1);
+    cloned->moveAfter(cur);
+    clonedOps.push_back(cloned);
+    mapping.map(cur->getResult(0), cloned->getResult(0));
+  }
+
+  // Move cloned ops to after the last op in target block
+  auto targetOps = bm.getOpsByBlockId(targetBlockId);
+  Operation *lastOpInTargetBlock = nullptr;
+  for (Operation *op : targetOps) {
+    if (op->getBlock() != loopBlock)
+      continue;
+    if (!lastOpInTargetBlock || lastOpInTargetBlock->isBeforeInBlock(op)) {
+      lastOpInTargetBlock = op;
+    }
+  }
+  if (lastOpInTargetBlock) {
+    for (Operation *cloned : llvm::reverse(clonedOps)) {
+      cloned->moveAfter(lastOpInTargetBlock);
+      bm.updateBlockId(cloned, targetBlockId);
+    }
+  }
+
+  return true;
+}
+
+static int findFirstUser(Value iterArg, Block *loopBlock,
+                         CVPipeline::ComputeBlockIdManager &bm) {
   llvm::SetVector<Value> visited;
   SmallVector<std::pair<Value, int>> worklist;
   int firstUserBlockId = -1;
@@ -48,7 +134,7 @@ int findFirstUser(Value iterArg, Block *forBlock,
 
   for (OpOperand &use : iterArg.getUses()) {
     Operation *user = use.getOwner();
-    auto userInblock = CVPipeline::getAncestorInBlock(user, forBlock);
+    auto userInblock = CVPipeline::getAncestorInBlock(user, loopBlock);
     if (!userInblock) {
       continue;
     }
@@ -63,31 +149,24 @@ int findFirstUser(Value iterArg, Block *forBlock,
   return firstUserBlockId;
 }
 
-bool isDependenceOther(Operation *yieldDefOp, Block *forBlock, int argsId,
-                       const CVPipeline::MemoryDependenceGraph &memGraph) {
-  // To avoid Cycle. Simplely consider the updateOp not dependent any other op.
+static bool
+isDependenceOther(Operation *yieldDefOp, Block *loopBlock, int argsId,
+                  const CVPipeline::MemoryDependenceGraph &memGraph) {
+  // Now we only filter the different iter_arg dependency.
   for (Value operand : yieldDefOp->getOperands()) {
-    if (Operation *defOp = operand.getDefiningOp()) {
-      // if have other op in for block. Skip;
-      auto userInBlock = CVPipeline::getAncestorInBlock(defOp, forBlock);
-      if (userInBlock) {
-        LOG_DEBUG("Yield def op depends on other op in for block: " << *defOp
-                                                                    << "\n");
-        return true;
-      }
-    } else {
-      // if have block argument from for block. Skip;
-      if (CVPipeline::getLoopCarriedArgIndex(operand, forBlock) != argsId) {
-        LOG_DEBUG("Yield def op depends on other arg:"
-                  << CVPipeline::getLoopCarriedArgIndex(operand, forBlock)
-                  << "\n");
-        return true;
-      }
+    if (operand.getDefiningOp())
+      continue;
+    // if have block argument from for block. Skip;
+    if (CVPipeline::getLoopCarriedArgIndex(operand, loopBlock) != argsId) {
+      LOG_DEBUG("Yield def op depends on other arg:"
+                << CVPipeline::getLoopCarriedArgIndex(operand, loopBlock)
+                << "\n");
+      return true;
     }
   }
 
   for (auto memDep : memGraph.getExecBefore(yieldDefOp)) {
-    auto userInBlock = CVPipeline::getAncestorInBlock(memDep, forBlock);
+    auto userInBlock = CVPipeline::getAncestorInBlock(memDep, loopBlock);
     if (userInBlock) {
       LOG_DEBUG("Yield def op depends on other memory in for block: " << *memDep
                                                                       << "\n");
@@ -97,8 +176,9 @@ bool isDependenceOther(Operation *yieldDefOp, Block *forBlock, int argsId,
   return false;
 }
 
-void processOneLoop(Operation *loopOp, CVPipeline::ComputeBlockIdManager &bm,
-                    const CVPipeline::MemoryDependenceGraph &memGraph) {
+static void processOneLoop(Operation *loopOp,
+                           CVPipeline::ComputeBlockIdManager &bm,
+                           const CVPipeline::MemoryDependenceGraph &memGraph) {
   auto ml = CVPipeline::MainLoop(loopOp);
   Block *loopBlock = nullptr;
   for (Region &region : loopOp->getRegions()) {
@@ -138,25 +218,34 @@ void processOneLoop(Operation *loopOp, CVPipeline::ComputeBlockIdManager &bm,
     int firstUserBlockId = findFirstUser(argsi, loopBlock, bm);
     LOG_DEBUG("First user block id: " << firstUserBlockId << "\n");
 
-    if (firstUserBlockId != -1 && updateBlockId != firstUserBlockId) {
-      LOG_DEBUG("Moving update op from block " << updateBlockId << " to block "
-                                               << firstUserBlockId << "\n");
-      bm.updateBlockId(yieldDefOp, firstUserBlockId);
-      // Move yieldDefOp to the end of the first user block
-      auto firstUserOps = bm.getOpsByBlockId(firstUserBlockId);
-      Operation *lastOpInFirstUserBlock = nullptr;
-      for (Operation *op : firstUserOps) {
-        if (op->getBlock() != loopBlock)
-          continue;
-        if (!lastOpInFirstUserBlock ||
-            op->isBeforeInBlock(lastOpInFirstUserBlock)) {
-          lastOpInFirstUserBlock = op;
-        }
-      }
-      if (lastOpInFirstUserBlock) {
-        yieldDefOp->moveAfter(lastOpInFirstUserBlock);
-      }
+    if (firstUserBlockId == -1 || updateBlockId == firstUserBlockId) {
+      continue;
     }
+
+    IRMapping mapping;
+    SmallVector<Operation *> clonedOps;
+
+    // Clone entire depSubgraph (yieldDefOp + upstream deps) to target block
+    if (!cloneDepSubgraph(yieldDefOp, loopBlock, clonedOps, mapping,
+                          firstUserBlockId, bm)) {
+      LOG_DEBUG("Skip iter_arg " << i << " due to non-scalar dependency\n");
+      continue;
+    }
+
+    // Check if clonedOps would create a cycle
+    if (willCreateCycle(clonedOps, memGraph, firstUserBlockId, bm)) {
+      LOG_DEBUG("Skip iter_arg " << i << " due to cycle detected\n");
+      continue;
+    }
+
+    // Update yield to use cloned yieldDefOp result
+    yieldOp.setOperand(i, mapping.lookup(yieldDefOp->getResult(0)));
+
+    // Erase original yieldDefOp and its upstream ops that have no more users
+    eraseOpsWithUnusedUsers(yieldDefOp, loopBlock);
+    LOG_DEBUG("Successfully moved iter_arg " << i << " from block "
+                                             << updateBlockId << " to block "
+                                             << firstUserBlockId << "\n");
   }
 }
 
@@ -170,7 +259,7 @@ void RefineArgsBlockIdPass::runOnOperation() {
 
   CVPipeline::ComputeBlockIdManager bm(moduleOp);
   auto &aa = getAnalysis<AliasAnalysis>();
-  LOG_DEBUG(*moduleOp);
+  LOG_DEBUG(*moduleOp << "\n");
   moduleOp.walk([&](Operation *op) {
     if (!op->hasAttr(CVPipeline::kMainLoop) ||
         !isa<scf::ForOp, scf::WhileOp>(op)) {
@@ -180,6 +269,7 @@ void RefineArgsBlockIdPass::runOnOperation() {
     processOneLoop(op, bm, memDepGraph);
   });
 
+  LOG_DEBUG(*moduleOp << "\n");
   LOG_DEBUG("--- exit RefineArgsBlockIdPass --->\n");
 }
 

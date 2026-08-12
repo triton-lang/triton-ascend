@@ -43,6 +43,9 @@ ComputeBlockIdManager::ComputeBlockIdManager(Operation *root) {
   root->walk([&](Operation *op) {
     if (auto blockIdAttr = op->getAttrOfType<IntegerAttr>(kBlockId)) {
       auto blockId = blockIdAttr.getInt();
+      if (blockId <= 0) {
+        return;
+      }
       opToBlockId[op] = blockId;
       blockIdToOps[blockId].push_back(op);
       cntComputeBlockId =
@@ -143,7 +146,7 @@ ComputeBlockIdManager::getBlockIdByOpOpt(Operation *op) const {
   return std::nullopt;
 }
 
-int ComputeBlockIdManager::getBlockIdByOp(Operation *op) {
+int ComputeBlockIdManager::getBlockIdByOp(Operation *op) const {
   return getBlockIdByOpOpt(op).value_or(-1);
 }
 
@@ -214,11 +217,13 @@ llvm::LogicalResult ComputeBlockIdManager::inheritFromParent(Block *block) {
   // 2. if we have marked nested ops with this block id, it could be correct,
   // since they will be re-marked with the same id, so no failures will be
   // returned, but this is less robust
-  return allSucceededShortCircuit(
-      block->getOperations(),
-      [this, blockId = blockIdOpt.value()](Operation &op) {
-        return markAndRecord(&op, blockId);
-      });
+  auto blockId = blockIdOpt.value();
+  for (auto &op : *block) {
+    if (llvm::failed(markAndRecord(&op, blockId))) {
+      return llvm::failure();
+    }
+  }
+  return llvm::success();
 }
 
 } // namespace CVPipeline

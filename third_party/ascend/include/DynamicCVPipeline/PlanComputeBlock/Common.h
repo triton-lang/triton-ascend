@@ -57,17 +57,17 @@ public:
 
   void forEachUser(Operation *op, PredFn pred) const;
 
-  template <bool AcrossIterArg>
+  enum class SourceMode { Default, AcrossIterArg };
+  template <SourceMode SM = SourceMode::Default>
   void forEachSource(Operation *op, PredFn pred) const;
 
   void forEachUserInSameBlock(Operation *op, PredFn pred) const {
     forEachUser(op, mapToAncestorInBlock(op->getBlock(), pred));
   }
 
-  template <bool AcrossIterArg>
+  template <SourceMode ST>
   void forEachSourceInSameBlock(Operation *op, PredFn pred) const {
-    forEachSource<AcrossIterArg>(op,
-                                 mapToAncestorInBlock(op->getBlock(), pred));
+    forEachSource<ST>(op, mapToAncestorInBlock(op->getBlock(), pred));
   }
 };
 

@@ -77,7 +77,7 @@ bool isDependenceOther(Operation *yieldDefOp, Block *forBlock, int argsId,
       }
     } else {
       // if have block argument from for block. Skip;
-      if (CVPipeline::getLoopCarriedArgIndex(operand, forBlock) != argsId + 1) {
+      if (CVPipeline::getLoopCarriedArgIndex(operand, forBlock) != argsId) {
         LOG_DEBUG("Yield def op depends on other arg:"
                   << CVPipeline::getLoopCarriedArgIndex(operand, forBlock)
                   << "\n");

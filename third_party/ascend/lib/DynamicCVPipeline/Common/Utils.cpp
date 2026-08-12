@@ -27,9 +27,9 @@
 
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 
-static constexpr const char *DEBUG_TYPE = "DynamicCVPipeline/Utils";
+static constexpr const char *DEBUG_TYPE = "dynamic-cv-pipeline-utils";
 #define DBGS(...) LLVM_DEBUG(llvm::dbgs() << __VA_ARGS__)
-#define LOG_DEBUG(...) DBGS("\n[" << DEBUG_TYPE << "] " << __VA_ARGS__)
+#define LOG_DEBUG(...) DBGS("[" << DEBUG_TYPE << "] " << __VA_ARGS__)
 
 namespace mlir {
 namespace CVPipeline {
@@ -185,7 +185,9 @@ CoreType getCoreTypeOfSimpleOpOrCf(Operation *op) {
     return WalkResult::skip();
   });
 
-  LOG_DEBUG("CoreType of RegionBranchOp is " << coreType << ": " << *op);
+  (void)failingOp;
+  LOG_DEBUG("CoreType of RegionBranchOp is " << coreType << ": " << *op
+                                             << "\n");
   LLVM_DEBUG({
     if (coreType == CoreType::UNDETERMINED && failingOp != nullptr) {
       llvm::dbgs() << "\nCoreType is UNDETERMINED due to " << *failingOp;

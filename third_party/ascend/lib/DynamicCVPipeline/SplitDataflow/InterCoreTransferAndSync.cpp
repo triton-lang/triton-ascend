@@ -697,7 +697,7 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
       srcValue,                  // src
       cubeAllocOp->getResult(0), // dst
       mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, nullptr, nullptr,
-      nullptr, mlir::ArrayAttr{}, nullptr);
+      nullptr, nullptr, mlir::ArrayAttr{}, nullptr);
   attachTransferTags(fixpipeOp, cubeBlockId, "CUBE", transferIndex);
   attachCrossCoreDeps(fixpipeOp, transferIndex, CVPipeline::crossCoreProducerId,
                       builder);

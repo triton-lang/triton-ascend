@@ -126,10 +126,11 @@ bool DependencyCycleDetector::detectCycleFrom(Operation *cur) {
   bool createsCycle = false;
 
   depHelper.forEachUserInSameBlock(cur, [&](Operation *user) {
-    createsCycle = createsCycle || llvm::any_of(bm.getOpsInSameBlock(user),
-                                                [this](Operation *user) {
-                                                  return detectCycleFrom(user);
-                                                });
+    if (createsCycle)
+      return;
+    createsCycle =
+        llvm::any_of(bm.getOpsInSameBlock(user),
+                     [this](Operation *user) { return detectCycleFrom(user); });
     return;
   });
 
@@ -184,7 +185,7 @@ void SeedRegionPlanner::run() {
   size_t head = 0;
   while (head < group.size()) {
     Operation *currOp = group[head++];
-    depHelper.forEachSource<true>(
+    depHelper.forEachSource<DependencyHelper::SourceMode::AcrossIterArg>(
         currOp, [this](Operation *source) { tryAddToGroup(source); });
   }
 }
@@ -281,11 +282,14 @@ llvm::LogicalResult TopologicalPartitionPlanner::removeReadyNonCubeOps() {
     }
   }
   if (indegreeBefore == indegree && beforeVisitedSize == bypassVisited.size()) {
-    if (Operation *parentOp = block->getParentOp()) {
-      parentOp->emitError("PlanCubeBlock cannot make progress while scheduling "
-                          "cube operations");
-    }
-    dumpQueueAndIndegreeInfo();
+    LLVM_DEBUG({
+      if (Operation *parentOp = block->getParentOp()) {
+        LOG_DEBUG("PlanCubeBlock cannot make progress while scheduling "
+                  "cube operations in: "
+                  << *parentOp);
+      }
+      dumpQueueAndIndegreeInfo();
+    });
     return llvm::failure();
   }
   return llvm::success();

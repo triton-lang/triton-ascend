@@ -39,7 +39,7 @@ namespace CVPipeline {
 /**
  * the class is to promise CUBEID and VECTORID are unified.
  */
-class ComputeBlockIdManager : MoveOnly {
+class ComputeBlockIdManager {
 public:
   ComputeBlockIdManager(Operation *root);
   bool isSameBlock(Operation *a, Operation *b);
@@ -54,11 +54,20 @@ public:
   llvm::LogicalResult inheritFromParent(Block *block);
 
   llvm::SmallVector<Operation *> getOpsByBlockId(int blockId) const;
+
+  // Get operations that share the same block_id AND mlir block of op
   llvm::SmallVector<Operation *> getOpsInSameBlock(Operation *op) const;
+
   std::optional<int> getBlockIdByOpOpt(Operation *op) const;
   int getNextId();
 
-  int getBlockIdByOp(Operation *op);
+  int getBlockIdByOp(Operation *op) const;
+
+  ~ComputeBlockIdManager() = default;
+  ComputeBlockIdManager(const ComputeBlockIdManager &) = delete;
+  ComputeBlockIdManager &operator=(const ComputeBlockIdManager &) = delete;
+  ComputeBlockIdManager(ComputeBlockIdManager &&) = delete;
+  ComputeBlockIdManager &operator=(ComputeBlockIdManager &&) = delete;
 
 private:
   int cntComputeBlockId = 0;

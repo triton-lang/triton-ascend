@@ -107,7 +107,7 @@ void ComputeBlockIdManager::updateBlockId(Operation *op, int blockId) {
 }
 
 llvm::SmallVector<Operation *>
-ComputeBlockIdManager::getOpsByBlockId(int blockId) const {
+ComputeBlockIdManager::getOpsByBlockId(int blockId) {
   if (blockId == -1) {
     return {};
   }

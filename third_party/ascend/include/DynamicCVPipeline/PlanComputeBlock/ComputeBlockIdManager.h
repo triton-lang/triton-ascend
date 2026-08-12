@@ -53,7 +53,7 @@ public:
   bool shouldInheritFromParent(Block *block, CoreType requiredCoreType) const;
   llvm::LogicalResult inheritFromParent(Block *block);
 
-  llvm::SmallVector<Operation *> getOpsByBlockId(int blockId) const;
+  llvm::SmallVector<Operation *> getOpsByBlockId(int blockId);
 
   // Get operations that share the same block_id AND mlir block of op
   llvm::SmallVector<Operation *> getOpsInSameBlock(Operation *op) const;

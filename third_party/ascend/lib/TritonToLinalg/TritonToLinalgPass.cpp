@@ -1213,12 +1213,27 @@ void TritonToLinalgPass::runOnOperation() {
       markOp->setAttr(hivm::AddressSpaceAttr::getMnemonic(),
                       {hivm::AddressSpaceAttr::get(rewriter.getContext(),
                                                    hivm::AddressSpace::GM)});
+
+      // update result offset
+      auto origResultType =
+          cast<MemRefType>(reinterpretCastOp.getResult().getType());
+      MemRefType newResultType = origResultType;
+      if (auto stridedLayout =
+              dyn_cast<StridedLayoutAttr>(origResultType.getLayout())) {
+        int64_t offset = stridedLayout.getOffset();
+        if (!ShapedType::isDynamic(offset)) {
+          auto newLayout = StridedLayoutAttr::get(rewriter.getContext(), 0,
+                                                  stridedLayout.getStrides());
+          newResultType = MemRefType::get(
+              origResultType.getShape(), origResultType.getElementType(),
+              newLayout, origResultType.getMemorySpace());
+        }
+      }
+
       rewriter.replaceOpWithNewOp<memref::ReinterpretCastOp>(
-          reinterpretCastOp,
-          cast<MemRefType>(reinterpretCastOp.getResult().getType()), newCastOp,
-          ValueRange({}), reinterpretCastOp.getSizes(),
-          reinterpretCastOp.getStrides(), SmallVector<int64_t>({0}),
-          reinterpretCastOp.getStaticSizes(),
+          reinterpretCastOp, newResultType, newCastOp, ValueRange({}),
+          reinterpretCastOp.getSizes(), reinterpretCastOp.getStrides(),
+          SmallVector<int64_t>({0}), reinterpretCastOp.getStaticSizes(),
           reinterpretCastOp.getStaticStrides());
     }
     rewriter.eraseOp(op);

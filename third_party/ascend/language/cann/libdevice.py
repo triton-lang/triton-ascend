@@ -1537,12 +1537,10 @@ def nextafter(arg0: core.tensor, arg1: core.tensor, _semantic=None):
     :param arg1: The direction value tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg1: tl.tensor
     """
-    if triton_enable_libdevice_simt():
-        return core.extern_elementwise(
-            "", "", [arg0, arg1], {
-                (core.dtype("fp16"), core.dtype("fp16")): ("__hmf_nextafter_fp16", core.dtype("fp16")),
-                (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_nextafter_fp32", core.dtype("fp32")),
-            }, is_pure=True, _semantic=_semantic)
+    if arg0.dtype == core.dtype("fp32") and is_compile_on_910_95():
+        return core.extern_elementwise("", "", [arg0, arg1], {
+            (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_nextafter_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
     else:
         x = _semantic.to_tensor(arg0)
         y = _semantic.to_tensor(arg1)

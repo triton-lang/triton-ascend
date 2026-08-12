@@ -151,6 +151,18 @@ static bool hasOnlySupportedPointerUses(Value pointer) {
         return false;
       continue;
     }
+    if (auto expandDimsOp = dyn_cast<triton::ExpandDimsOp>(user)) {
+      if (expandDimsOp.getSrc() != pointer ||
+          !hasOnlySupportedPointerUses(expandDimsOp.getResult()))
+        return false;
+      continue;
+    }
+    if (auto broadcastOp = dyn_cast<triton::BroadcastOp>(user)) {
+      if (broadcastOp.getSrc() != pointer ||
+          !hasOnlySupportedPointerUses(broadcastOp.getResult()))
+        return false;
+      continue;
+    }
     if (auto loadOp = dyn_cast<triton::LoadOp>(user)) {
       if (loadOp.getPtr() != pointer)
         return false;
@@ -172,16 +184,15 @@ static bool canRewriteSupportedPointerBitcast(triton::BitcastOp op) {
     return false;
 
   Value current = op.getSrc();
-  bool seenTensorAddPtr = false;
   while (Operation *producer = current.getDefiningOp()) {
     if (auto addPtrOp = dyn_cast<triton::AddPtrOp>(producer)) {
       Type offsetType = addPtrOp.getOffset().getType();
       if (isa<RankedTensorType>(current.getType())) {
-        if (seenTensorAddPtr)
-          return false;
-        seenTensorAddPtr = true;
+        auto pointerType = cast<RankedTensorType>(current.getType());
         auto tensorType = dyn_cast<RankedTensorType>(offsetType);
-        if (!tensorType || !tensorType.hasStaticShape())
+        if (!pointerType.hasStaticShape() || !tensorType ||
+            !tensorType.hasStaticShape() ||
+            pointerType.getShape() != tensorType.getShape())
           return false;
         auto elementType = dyn_cast<IntegerType>(tensorType.getElementType());
         if (!elementType ||
@@ -230,13 +241,32 @@ rewriteSupportedPointerBitcast(triton::BitcastOp op, IRRewriter &rewriter,
     return success();
   }
 
-  if (auto addPtrOp = src.getDefiningOp<triton::AddPtrOp>()) {
+  if (src.getDefiningOp<triton::AddPtrOp>()) {
+    Value base = src;
+    Value byteOffset;
+    while (auto currentAddPtr = base.getDefiningOp<triton::AddPtrOp>()) {
+      Value currentOffset = currentAddPtr.getOffset();
+      auto offsetType = cast<RankedTensorType>(currentOffset.getType());
+      auto elementType = cast<IntegerType>(offsetType.getElementType());
+      if (elementType.getWidth() < 64) {
+        auto i64OffsetType =
+            RankedTensorType::get(offsetType.getShape(), rewriter.getI64Type());
+        currentOffset = rewriter.create<arith::ExtSIOp>(
+            op.getLoc(), i64OffsetType, currentOffset);
+      }
+      if (byteOffset)
+        byteOffset = rewriter.create<arith::AddIOp>(op.getLoc(), byteOffset,
+                                                    currentOffset);
+      else
+        byteOffset = currentOffset;
+      base = currentAddPtr.getPtr();
+    }
     auto scaledOffset =
-        scaleTensorPointerOffset(addPtrOp.getOffset(), *divisor, rewriter);
+        scaleTensorPointerOffset(byteOffset, *divisor, rewriter);
     if (failed(scaledOffset))
       return failure();
-    nextBitcast = rewriter.create<triton::BitcastOp>(op.getLoc(), op.getType(),
-                                                     addPtrOp.getPtr());
+    nextBitcast =
+        rewriter.create<triton::BitcastOp>(op.getLoc(), op.getType(), base);
     auto newAddPtr = rewriter.create<triton::AddPtrOp>(
         op.getLoc(), op.getType(), nextBitcast, *scaledOffset);
     rewriter.replaceOp(op, newAddPtr.getResult());

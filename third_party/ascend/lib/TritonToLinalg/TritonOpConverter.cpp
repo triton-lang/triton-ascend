@@ -2007,44 +2007,23 @@ MatmulConverter::matchAndRewrite(triton::DotOp op, OpAdaptor adaptor,
   auto opb = adaptor.getB();
   auto opc = adaptor.getC();
   auto dstType = cast<RankedTensorType>(op.getType());
-  auto elemTy = dstType.getElementType();
   auto inputPrec = op.getInputPrecision();
 
-  auto createOp = [&](auto &&rewriter, ValueRange operands, ValueRange results) -> Operation* {
-    if (dstType.getRank() == 2)
-      return rewriter.template create<linalg::MatmulOp>(op.getLoc(), operands, results);
-    else if (dstType.getRank() == 3)
-      return rewriter.template create<linalg::BatchMatmulOp>(op.getLoc(), operands, results);
-    llvm_unreachable("Datatype of DotOp operands could only be 2D or 3D");
-  };
-
-  auto replaceOp = [&](auto &&rewriter, ValueRange operands, ValueRange results) -> Operation* {
-    if (dstType.getRank() == 2)
-      return rewriter.template replaceOpWithNewOp<linalg::MatmulOp>(op, operands, results);
-    else if (dstType.getRank() == 3)
-      return rewriter.template replaceOpWithNewOp<linalg::BatchMatmulOp>(op, operands, results);
-    llvm_unreachable("Datatype of DotOp operands could only be 2D or 3D");
-  };
-
-  Operation *matmulOp;
-  if (mlir::isa<mlir::FloatType>(elemTy) && !elemTy.isF32()) {
-    RankedTensorType opcFp32Ty = RankedTensorType::get(dstType.getShape(), rewriter.getF32Type());
-    Value opcFp32 = rewriter.create<arith::ExtFOp>(
-      op.getLoc(),
-      opcFp32Ty,
-      opc
-    );
-    matmulOp = createOp(rewriter, ValueRange{opa, opb}, ValueRange{opcFp32});
-    auto roundModeAttr = hfusion::RoundModeAttr::get(
-        rewriter.getContext(), hfusion::RoundMode::RINT);
-    auto truncOp = rewriter.replaceOpWithNewOp<arith::TruncFOp>(op, dstType, matmulOp->getResult(0));
-    truncOp->setAttr("round_mode", roundModeAttr);
+  if (dstType.getRank() == 2) {
+    auto matmulOp = rewriter.replaceOpWithNewOp<linalg::MatmulOp>(
+        op, ValueRange{opa, opb}, ValueRange{opc});
+    matmulOp->setAttr(
+        "input_precision",
+        rewriter.getStringAttr(stringifyInputPrecision(inputPrec)));
+  } else if (dstType.getRank() == 3) {
+    auto matmulOp = rewriter.replaceOpWithNewOp<linalg::BatchMatmulOp>(
+        op, ValueRange{opa, opb}, ValueRange{opc});
+    matmulOp->setAttr(
+        "input_precision",
+        rewriter.getStringAttr(stringifyInputPrecision(inputPrec)));
   } else {
-    matmulOp = replaceOp(rewriter, ValueRange{opa, opb}, ValueRange{opc});
+    llvm_unreachable("Datatype of DotOp operands could only be 2D or 3D");
   }
-  matmulOp->setAttr(
-      "input_precision",
-      rewriter.getStringAttr(stringifyInputPrecision(inputPrec)));
   return success();
 }
 

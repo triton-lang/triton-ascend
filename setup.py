@@ -686,21 +686,10 @@ def ensure_distributed_submodule():
     if not check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):
         return
     distributed_dir = Path(triton_dir) / "third_party" / "ascend" / "Triton-distributed-ascend"
-    commit_id = "d2ac268c7ab4dc09865ed51638104ee1b97dc460"
-    if not distributed_dir.is_dir():
-        subprocess.check_call([
-            "git",
-            "clone",
-            "https://gitcode.com/Ascend/Triton-distributed-ascend.git",
-            "-b",
-            "master",
-        ], cwd=Path(triton_dir) / "third_party" / "ascend")
     if not (distributed_dir / "CMakeLists.txt").is_file() and is_git_repo():
-        subprocess.check_call([
-            "git",
-            "checkout",
-            commit_id,
-        ], cwd=distributed_dir)
+        subprocess.check_call(
+            ["git", "submodule", "update", "--init", "--", "third_party/ascend/Triton-distributed-ascend"],
+            cwd=triton_dir)
     if not (distributed_dir / "CMakeLists.txt").is_file():
         raise RuntimeError(f"Triton-Distributed submodule is not initialized: {distributed_dir}")
 

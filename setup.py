@@ -1046,7 +1046,6 @@ def apply_triton_ascend_patch():
         "include/triton/Dialect/Triton/IR/TritonAttrDefs.td",
         "lib/Dialect/Triton/IR/Traits.cpp",
         "python/src/ir.cc",
-        "python/src/specialize.cc",
         "python/triton/_utils.py",
         "python/triton/compiler/code_generator.py",
         "python/triton/compiler/compiler.py",

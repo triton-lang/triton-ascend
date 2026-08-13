@@ -28,21 +28,6 @@ class PointerArg:
         return self.address
 
 
-def nested_tuple(value):
-    return ((value, ), )
-
-
-TUPLE_FACTORIES = [
-    pytest.param(nested_tuple, id="nested-tuple"),
-]
-
-
-def first_tuple_leaf(value):
-    while isinstance(value, tuple):
-        value = value[0]
-    return value
-
-
 def make_binder(backend=None):
 
     def kernel(value, pointer):
@@ -57,22 +42,6 @@ def make_binder(backend=None):
 
 def bind_and_key(binder, cache, value, address, options):
     _, specialization, raw_options = binder(value, PointerArg(address), **options)
-    return specialization, compute_cache_key(cache, specialization, raw_options)
-
-
-def make_tuple_binder():
-
-    def kernel(arg):
-        pass
-
-    signature = inspect.signature(kernel)
-    params = [KernelParam(0, next(iter(signature.parameters.values())), False, False)]
-    backend = AscendBackend(GPUTarget("npu", "Ascend910B", 32))
-    return create_function_from_signature(signature, params, backend)
-
-
-def bind_tuple_and_key(binder, cache, arg, options):
-    _, specialization, raw_options = binder(arg, **options)
     return specialization, compute_cache_key(cache, specialization, raw_options)
 
 
@@ -216,70 +185,3 @@ def test_annotated_integer_do_not_specialize_keeps_legacy_cache_key(options, val
 
     assert first_specialization == second_specialization == [("i32", None)]
     assert first_key == second_key
-
-
-@pytest.mark.parametrize("make_tuple", TUPLE_FACTORIES)
-@pytest.mark.parametrize("options", SIMD_OPTIONS)
-@pytest.mark.parametrize("values", [(16, 17), (17, 16)], ids=["aligned-first", "unaligned-first"])
-def test_simd_tuple_integer_alignment_reuses_cache_key(make_tuple, options, values):
-    binder = make_tuple_binder()
-    cache = {}
-    first, first_key = bind_tuple_and_key(binder, cache, make_tuple(values[0]), options)
-    second, second_key = bind_tuple_and_key(binder, cache, make_tuple(values[1]), options)
-
-    assert first_key == second_key
-    assert first_tuple_leaf(first[0][1]) == first_tuple_leaf(second[0][1]) == ""
-
-
-@pytest.mark.parametrize("make_tuple", TUPLE_FACTORIES)
-@pytest.mark.parametrize("options", SIMD_OPTIONS)
-@pytest.mark.parametrize("addresses", [(0x1000, 0x1004), (0x1004, 0x1000)],
-                         ids=["aligned-first", "unaligned-first"])
-def test_simd_tuple_pointer_alignment_reuses_cache_key(make_tuple, options, addresses):
-    binder = make_tuple_binder()
-    cache = {}
-    first, first_key = bind_tuple_and_key(binder, cache, make_tuple(PointerArg(addresses[0])), options)
-    second, second_key = bind_tuple_and_key(binder, cache, make_tuple(PointerArg(addresses[1])), options)
-
-    assert first_key == second_key
-    assert first_tuple_leaf(first[0][1]) == first_tuple_leaf(second[0][1]) == ""
-
-
-@pytest.mark.parametrize("make_tuple", TUPLE_FACTORIES)
-@pytest.mark.parametrize("options", SIMT_OPTIONS)
-@pytest.mark.parametrize("values", [(16, 17), (17, 16)], ids=["aligned-first", "unaligned-first"])
-def test_simt_tuple_integer_alignment_keeps_distinct_cache_keys(make_tuple, options, values):
-    binder = make_tuple_binder()
-    cache = {}
-    first, first_key = bind_tuple_and_key(binder, cache, make_tuple(values[0]), options)
-    second, second_key = bind_tuple_and_key(binder, cache, make_tuple(values[1]), options)
-
-    assert first_key != second_key
-    assert {first_tuple_leaf(first[0][1]), first_tuple_leaf(second[0][1])} == {"", "D"}
-
-
-@pytest.mark.parametrize("make_tuple", TUPLE_FACTORIES)
-@pytest.mark.parametrize("options", SIMT_OPTIONS)
-@pytest.mark.parametrize("addresses", [(0x1000, 0x1004), (0x1004, 0x1000)],
-                         ids=["aligned-first", "unaligned-first"])
-def test_simt_tuple_pointer_alignment_keeps_distinct_cache_keys(make_tuple, options, addresses):
-    binder = make_tuple_binder()
-    cache = {}
-    first, first_key = bind_tuple_and_key(binder, cache, make_tuple(PointerArg(addresses[0])), options)
-    second, second_key = bind_tuple_and_key(binder, cache, make_tuple(PointerArg(addresses[1])), options)
-
-    assert first_key != second_key
-    assert {first_tuple_leaf(first[0][1]), first_tuple_leaf(second[0][1])} == {"", "D"}
-
-
-@pytest.mark.parametrize("make_tuple", TUPLE_FACTORIES)
-@pytest.mark.parametrize("options", SIMD_OPTIONS + SIMT_OPTIONS)
-@pytest.mark.parametrize("values", [(1, 2), (2, 1)], ids=["one-first", "one-second"])
-def test_tuple_integer_one_keeps_distinct_cache_key(make_tuple, options, values):
-    binder = make_tuple_binder()
-    cache = {}
-    first, first_key = bind_tuple_and_key(binder, cache, make_tuple(values[0]), options)
-    second, second_key = bind_tuple_and_key(binder, cache, make_tuple(values[1]), options)
-
-    assert first_key != second_key
-    assert {first_tuple_leaf(first[0][0]), first_tuple_leaf(second[0][0])} == {"constexpr", "i32"}

@@ -1056,22 +1056,6 @@ index cd871cb2e..988d2a7f9 100644
              except Exception as e:
                  if triton.knobs.compilation.front_end_debugging:
                      raise
-diff --git a/python/src/specialize.cc b/python/src/specialize.cc
-index 3449e3c90..e104743ae 100644
---- a/python/src/specialize.cc
-+++ b/python/src/specialize.cc
-@@ -403,8 +403,8 @@ std::pair<py::object, py::object> handle_tuple(PyObject *backend, PyObject *arg,
-   for (Py_ssize_t i = 0; i < size; ++i) {
-     PyObject *item = PyTuple_GET_ITEM(arg, i); // Borrowed reference
--    // python reference calls specialize recursively with default arguments set
--    // currently this is is_const=False, specialize_value=True, align=True
--    auto [type, key] = specialize_arg(backend, item, false, true, true);
-+    // Tuple elements keep the historical is_const=false and
-+    // specialize_value=true defaults while propagating the alignment policy.
-+    auto [type, key] = specialize_arg(backend, item, false, true, align);
-     if (!type || !key)
-       return {};
-     // Steals reference
 diff --git a/python/triton/runtime/jit.py b/python/triton/runtime/jit.py
 index 0f506818f..b2992457f 100644
 --- a/python/triton/runtime/jit.py

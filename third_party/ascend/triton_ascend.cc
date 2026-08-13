@@ -13,6 +13,7 @@
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 #include "ascend/include/TritonControlFlowOpt/Passes.h"
+#include "ascend/include/TritonControlFlowOpt/HoistPointerChains.h"
 #include "ascend/include/TritonToAnnotation/Passes.h"
 #include "ascend/include/TritonToGraph/GraphOptimization.h"
 #include "ascend/include/TritonToGraph/LayoutMemoryOptimization.h"
@@ -71,6 +72,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
           pm.addPass(mlir::triton::createTritonToStructuredPass(
               enableMaskFallbackConversion, optimizeDynamicOffset));
         });
+
+  m.def("add_hoist_pointer_chains", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createTritonHoistPointerChainsPass());
+  });
 
   m.def("add_triton_control_flow_opt", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::createTritonControlFlowOptPass());

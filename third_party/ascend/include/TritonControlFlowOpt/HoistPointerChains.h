@@ -20,19 +20,31 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ADAPTER_TRITON_CONTROL_FLOW_OPT_PASSES_H
-#define TRITON_ADAPTER_TRITON_CONTROL_FLOW_OPT_PASSES_H
+#ifndef TRITON_ASCEND_TRITON_CONTROL_FLOW_OPT_HOIST_POINTER_CHAINS_H
+#define TRITON_ASCEND_TRITON_CONTROL_FLOW_OPT_HOIST_POINTER_CHAINS_H
 
+// Provides the GEN_PASS_CLASSES-generated TritonHoistPointerChainsBase.
 #include "TritonControlFlowOptPass.h"
-#include "HoistPointerChains.h"
 
 namespace mlir {
 namespace triton {
 
-#define GEN_PASS_REGISTRATION
-#include "ascend/include/TritonControlFlowOpt/Passes.h.inc"
+std::unique_ptr<OperationPass<ModuleOp>> createTritonHoistPointerChainsPass();
+
+/// Moves tt.ptr computation chains (tt.advance / tt.make_tensor_ptr /
+/// tt.addptr) out of scope::ScopeOp regions. Running this before
+/// TritonControlFlowOpt lets the block/tensor pointer decomposition trace
+/// pointer offsets without crossing scope region boundaries.
+class TritonHoistPointerChainsPass
+    : public TritonHoistPointerChainsBase<TritonHoistPointerChainsPass> {
+public:
+  TritonHoistPointerChainsPass() = default;
+
+  void getDependentDialects(DialectRegistry &registry) const override;
+  void runOnOperation() override;
+};
 
 } // namespace triton
 } // namespace mlir
 
-#endif // TRITON_ADAPTER_TRITON_CONTROL_FLOW_OPT_PASSES_H
+#endif // TRITON_ASCEND_TRITON_CONTROL_FLOW_OPT_HOIST_POINTER_CHAINS_H

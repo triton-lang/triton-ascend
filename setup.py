@@ -1064,9 +1064,9 @@ def apply_triton_ascend_patch():
         "python/triton/runtime/autotuner.py",
     ]
     checkout_file(dev_patch_files)
+    apply_patch(dev_patch)
     checkout_file(patch_files)
     apply_patch(patch)
-    apply_patch(dev_patch)
 
 
 def get_triton_version_suffix():

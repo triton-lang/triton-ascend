@@ -1086,12 +1086,9 @@ index 0f506818f..b2992457f 100644
          if kp.is_constexpr:
              specialization.append(f'("constexpr", {name})')
          else:
--            is_const = 'True' if kp.is_const else 'False'
--            specialize = 'False' if kp.do_not_specialize else 'True'
--            align = 'False' if kp.do_not_specialize_on_alignment else 'True'
-+            is_const = kp.is_const
-+            specialize = not kp.do_not_specialize
-+            align = not kp.do_not_specialize_on_alignment
+             is_const = 'True' if kp.is_const else 'False'
+             specialize = 'False' if kp.do_not_specialize else 'True'
+             align = 'False' if kp.do_not_specialize_on_alignment else 'True'
 -            ret = f"specialize_impl(backend, {name}, {is_const}, {specialize}, {align})"
 +            ret = (f"specialize_impl(backend, {name}, {is_const}, {specialize}, "
 +                   f"{align} and backend.use_alignment_specialization(options))")

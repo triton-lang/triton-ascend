@@ -32,6 +32,7 @@
 #include "ascend/include/CVSplitScheduling/classifyAllOps.h"
 
 #include "bishengir/Dialect/HACC/IR/HACC.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -543,6 +544,124 @@ static FailureOr<scf::ForOp> strengthReduceUnrolledAddresses(scf::ForOp loop)
     return newLoop;
 }
 
+// Trip count of a loop whose bounds and step are all constant, computed exactly
+// as the pre-check does so both agree on which candidates collapse.
+static std::optional<int64_t> getStaticTripCount(scf::ForOp loop)
+{
+    std::optional<int64_t> lowerBound = getConstantIntValue(loop.getLowerBound());
+    std::optional<int64_t> upperBound = getConstantIntValue(loop.getUpperBound());
+    std::optional<int64_t> step = getConstantIntValue(loop.getStep());
+    if (!lowerBound || !upperBound || !step || *step <= 0 || *upperBound <= *lowerBound)
+        return std::nullopt;
+
+    int64_t distance;
+    if (llvm::SubOverflow(*upperBound, *lowerBound, distance))
+        return std::nullopt;
+    return distance / *step + (distance % *step != 0);
+}
+
+// True when unrolling by `unrollFactor` consumes the candidate's entire trip
+// count, leaving a single unrolled iteration.
+static bool unrollFullyConsumesTripCount(scf::ForOp loop, int unrollFactor)
+{
+    std::optional<int64_t> tripCount = getStaticTripCount(loop);
+    return tripCount && *tripCount == static_cast<int64_t>(unrollFactor);
+}
+
+// Full-collapse unroll.
+//
+// `mlir::loopUnrollByFactor` ends with `promoteIfSingleIteration`, which erases
+// the loop and splices its body into the parent block whenever the unrolled
+// step covers the whole range.  Every later stage here (dependency scheduling,
+// cross-scope transfers, scope separation, retiling) is written against a live
+// `scf.for` body, so that promotion would leave them holding an erased loop.
+//
+// Unroll in place instead: clone the body once per remaining lane, chain each
+// lane's yields into the next lane's iteration arguments, and scale the step so
+// exactly one iteration remains.  The loop op keeps its identity, so its results
+// stay wired to their consumers and no outside reference is invalidated.  Lane
+// zero is the existing body and needs no remapping: with one iteration the
+// induction variable is the lower bound, which is precisely lane zero's value.
+//
+// The single-iteration loop that remains is a scaffold for the stages above,
+// not part of the intended output; `promoteSingleIterationScopeLoops` retires it
+// once the whole pass is done.
+static LogicalResult unrollFullyInPlace(scf::ForOp loop, int unrollFactor)
+{
+    std::optional<int64_t> lowerBound = getConstantIntValue(loop.getLowerBound());
+    std::optional<int64_t> step = getConstantIntValue(loop.getStep());
+    if (!lowerBound || !step)
+        return failure();
+
+    Location loc = loop.getLoc();
+    Block *body = loop.getBody();
+    auto yield = cast<scf::YieldOp>(body->getTerminator());
+    Type inductionType = loop.getInductionVar().getType();
+
+    SmallVector<Operation *> originalOps;
+    for (Operation &op : body->without_terminator())
+        originalOps.push_back(&op);
+
+    // Values the previous lane yields; lane zero yields what the body already does.
+    SmallVector<Value> previousYields(yield.getOperands().begin(), yield.getOperands().end());
+
+    OpBuilder builder(yield);
+    for (int lane = 1; lane < unrollFactor; ++lane) {
+        IRMapping mapping;
+        // Bounds and step are constant here, so fold the lane's induction value
+        // rather than emitting a multiply-add chain per lane.
+        Value laneInductionValue = builder.create<arith::ConstantOp>(
+            loc, builder.getIntegerAttr(inductionType, *lowerBound + lane * *step));
+        mapping.map(loop.getInductionVar(), laneInductionValue);
+        for (auto [iterArg, previous] : llvm::zip_equal(loop.getRegionIterArgs(), previousYields))
+            mapping.map(iterArg, previous);
+
+        for (Operation *op : originalOps)
+            builder.clone(*op, mapping);
+
+        SmallVector<Value> laneYields;
+        for (Value yielded : yield.getOperands())
+            laneYields.push_back(mapping.lookupOrDefault(yielded));
+        previousYields = std::move(laneYields);
+    }
+
+    yield.getResultsMutable().assign(previousYields);
+
+    // Scale the step exactly as loopUnrollByFactor would, so both unroll paths
+    // leave the same loop shape and only the remaining trip count differs.
+    OpBuilder boundsBuilder(loop);
+    loop.setStep(boundsBuilder.create<arith::ConstantOp>(
+        loc, boundsBuilder.getIntegerAttr(inductionType, *step * unrollFactor)));
+    return success();
+}
+
+// Retire the scaffold loops left by `unrollFullyInPlace`.  A candidate whose
+// unroll consumed its whole trip count keeps a single-iteration loop so the
+// stages after the unroll still see the `scf.for` body they are written
+// against; scope separation then duplicates it into both engine scopes.
+//
+// Promotion erases those loops and splices their bodies into the enclosing
+// scope, so this runs once the whole pass is finished and no stage still holds
+// operation handles into them.  Only loops inside the scopes this pass created
+// are considered, leaving any single-iteration loop in the input untouched, and
+// `promoteIfSingleIteration` itself ignores loops with more than one iteration.
+static void promoteSingleIterationScopeLoops(ModuleOp module)
+{
+    IRRewriter rewriter(module.getContext());
+    SmallVector<scf::ForOp> loops;
+    module.walk([&](scope::ScopeOp scopeOp) {
+        // Post-order: inner loops come first, so promoting one never disturbs a
+        // loop still waiting in the list.
+        scopeOp.walk([&](scf::ForOp forOp) { loops.push_back(forOp); });
+    });
+
+    unsigned promoted = 0;
+    for (scf::ForOp forOp : loops)
+        promoted += succeeded(forOp.promoteIfSingleIteration(rewriter));
+    LLVM_DEBUG(if (promoted) llvm::dbgs()
+               << "[cv-split] Promoted " << promoted << " single-iteration scope loop(s)\n");
+}
+
 static void commitModuleClone(ModuleOp destination, ModuleOp source)
 {
     Operation *destinationOp = destination.getOperation();
@@ -598,6 +717,7 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
     {
         this->compileOn91095 = options.compileOn91095;
         this->unrollFactor = options.unrollFactor;
+        this->promoteFullyUnrolled = options.promoteFullyUnrolled;
     }
 
     void runOnOperation() override
@@ -651,6 +771,12 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
         // cleanup point.
         removeUnrollOriginIdAttrs(*transformedModule);
         cv_split::removeDCVPClassificationAttrs(*transformedModule);
+
+        // Every stage is done, so the single-iteration scaffolds kept for them
+        // can go.  Still ahead of verification, so a bad promotion is rejected
+        // with the rest of the candidate rather than committed.
+        if (promoteFullyUnrolled)
+            promoteSingleIterationScopeLoops(*transformedModule);
 
         if (failed(verify(*transformedModule))) {
             LLVM_DEBUG(llvm::dbgs() << "[cv-split] Transformed IR failed verification; keeping "
@@ -727,11 +853,16 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
         tagUnrollOriginIds(loop);
 
         // Stage 2: Unroll the innermost loop
-        LogicalResult unrollResult = loopUnrollByFactor(loop, unrollFactor);
+        bool fullyUnrolled = unrollFullyConsumesTripCount(loop, unrollFactor);
+        LogicalResult unrollResult =
+            fullyUnrolled ? unrollFullyInPlace(loop, unrollFactor) : loopUnrollByFactor(loop, unrollFactor);
         if (failed(unrollResult)) {
             LLVM_DEBUG(llvm::dbgs() << "[cv-split] Unroll failed, bail\n");
             return failure();
         }
+        LLVM_DEBUG(if (fullyUnrolled) llvm::dbgs()
+                   << "[cv-split] Unroll consumes the whole trip count; keeping a "
+                      "single-iteration loop for the remaining stages\n");
         reuseUnrolledTransposeDestinations(loop);
         reuseUnrolledReductionInitializers(loop);
         FailureOr<scf::ForOp> reducedLoop = strengthReduceUnrolledAddresses(loop);

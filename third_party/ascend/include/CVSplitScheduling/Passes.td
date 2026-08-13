@@ -34,7 +34,11 @@ def CVSplitScheduling : Pass<"cv_split_scheduling", "mlir::ModuleOp"> {
            "compile on 910_95">,
     Option<"unrollFactor", "unroll-factor",
            "int", /*default*/"2",
-           "loop unroll factor (2, 4, or 8)">
+           "loop unroll factor (2, 4, or 8)">,
+    Option<"promoteFullyUnrolled", "promote-fully-unrolled",
+           "bool", /*default*/"true",
+           "promote the scope loops left by a candidate whose unroll consumed "
+           "its whole trip count; disable to keep them for inspection">
   ];
   let dependentDialects = [
     "mlir::scf::SCFDialect",

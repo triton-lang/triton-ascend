@@ -1048,7 +1048,6 @@ def apply_triton_ascend_patch():
         "python/src/ir.cc",
         "python/src/specialize.cc",
         "python/triton/_utils.py",
-        "python/triton/backends/compiler.py",
         "python/triton/compiler/code_generator.py",
         "python/triton/compiler/compiler.py",
         "python/triton/compiler/errors.py",

@@ -11,7 +11,6 @@ import torch
 
 from triton.backends.ascend.compiler import AscendBackend
 from triton.backends.compiler import GPUTarget
-from triton.backends.nvidia.compiler import CUDABackend
 from triton.runtime.jit import KernelParam, compute_cache_key, create_function_from_signature
 
 
@@ -171,18 +170,6 @@ def test_integer_one_keeps_distinct_cache_key(options, values):
 
     assert first_key != second_key
     assert {first[0][0], second[0][0]} == {"constexpr", "i32"}
-
-
-def test_non_ascend_backend_keeps_alignment_specialization():
-    backend = CUDABackend(GPUTarget("cuda", 80, 32))
-    binder = make_binder(backend)
-    cache = {}
-    aligned, aligned_key = bind_and_key(binder, cache, 16, 0x1000, {})
-    unaligned, unaligned_key = bind_and_key(binder, cache, 17, 0x1004, {})
-
-    assert aligned_key != unaligned_key
-    assert aligned == [("i32", "D"), ("*fp32", "D")]
-    assert unaligned == [("i32", ""), ("*fp32", "")]
 
 
 @pytest.mark.parametrize("options", SIMD_OPTIONS + SIMT_OPTIONS)

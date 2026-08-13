@@ -9,3 +9,4 @@ pytest
 sphinx-gallery
 sphinx-multiversion
 llnl-hatchet
+jieba

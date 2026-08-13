@@ -1,0 +1,35 @@
+{#-
+  Custom search page for the Chinese docs.
+
+  Sphinx 9.1.0 generates `window.Stemmer = ChineseStemmer;` in
+  language_data.js for zh builds, but the inlined stemmer rawcode is
+  english-stemmer.js (which defines EnglishStemmer), so `ChineseStemmer`
+  is never defined and the search page crashes with
+  "ReferenceError: ChineseStemmer is not defined", leaving it stuck on
+  "正在搜索中." forever.
+
+  The zh search language stems Latin words with the English snowball
+  stemmer at build time (e.g. "install" is indexed as "instal"), so the
+  query side must apply the same stemming or Latin queries stop
+  matching. Delegate to EnglishStemmer, which language_data.js defines
+  on the line just before the crashing assignment; fall back to a
+  passthrough if it is missing (Chinese words need no stemming either
+  way).
+
+  Safe to keep after the upstream fix lands (fixed language_data.js
+  assigns window.Stemmer = EnglishStemmer directly and no longer
+  references ChineseStemmer); see sphinx-doc/sphinx get_js_stemmer_code.
+-#}
+{%- extends "!furo/search.html" -%}
+
+{% block extrahead %}
+{{ super() }}
+<script>
+  var ChineseStemmer = function () {
+    if (typeof EnglishStemmer === "function") {
+      return new EnglishStemmer();
+    }
+    this.stemWord = function (word) { return word; };
+  };
+</script>
+{% endblock %}

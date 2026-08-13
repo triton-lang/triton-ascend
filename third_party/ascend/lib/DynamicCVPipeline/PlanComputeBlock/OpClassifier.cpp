@@ -756,34 +756,10 @@ int OpClassifierPass::propagateCubeUpstream() {
       if (!def || cubeVisited.count(def) || isa<linalg::MatmulOp>(def))
         continue;
 
-      // Skip arith dialect ops with tensor results (they should be VECTOR, not
-      // CUBE)
-      if (isa<arith::ArithDialect>(def->getDialect())) {
-        bool hasTensorResult = false;
-        for (Value result : def->getResults()) {
-          if (isa<RankedTensorType>(result.getType())) {
-            hasTensorResult = true;
-            break;
-          }
-        }
-        if (hasTensorResult) {
-          LLVM_DEBUG(DBGS() << "skip " << def->getName().getStringRef()
-                            << ": arith tensor op\n");
-          continue;
-        }
-      }
-
-      // Skip ExtractedLoadOrStore related op
-      if (isExtractedLoadStoreRelated(def))
+      // Skip rules are shared with propagateCubeUpstreamForOp; see
+      // shouldSkipCubeUpstream for details.
+      if (shouldSkipCubeUpstream(def))
         continue;
-
-      // Skip operations inside linalg block (internal values)
-      // But don't skip the linalg op itself
-      if (isInsideNestedLinalgRegion(def)) {
-        LLVM_DEBUG(DBGS() << "skip " << def->getName().getStringRef()
-                          << ": inside linalg block\n");
-        continue;
-      }
 
       cubeVisited.insert(def);
 
@@ -938,6 +914,43 @@ void OpClassifierPass::handleFillInScfIf(Operation *fillOp) {
   }
 }
 
+// Helper: shared skip predicates for CUBE upstream BFS.
+//
+// Mirrors the three skip rules that lived inline inside propagateCubeUpstream
+// so propagateCubeUpstreamForOp (triggered by handleFillInScfIf) stays
+// consistent with the main BFS. Without this, fill-in-scf.if propagation
+// would over-color ExtractedLoadStore-related ops and ops inside a nested
+// linalg region.
+//
+// Returns true (and emits the matching debug log) if `op` should NOT be
+// coloured CUBE during upstream propagation.
+bool OpClassifierPass::shouldSkipCubeUpstream(Operation *op) {
+  // arith dialect ops with tensor results are vector compute, not CUBE.
+  if (isa<arith::ArithDialect>(op->getDialect())) {
+    for (Value result : op->getResults()) {
+      if (isa<RankedTensorType>(result.getType())) {
+        LLVM_DEBUG(DBGS() << "skip " << op->getName().getStringRef()
+                          << ": arith tensor op\n");
+        return true;
+      }
+    }
+  }
+
+  // ExtractedLoadOrStore related ops must stay where their original
+  // placement says.
+  if (isExtractedLoadStoreRelated(op))
+    return true;
+
+  // Internal block values inside a nested linalg region.
+  if (isInsideNestedLinalgRegion(op)) {
+    LLVM_DEBUG(DBGS() << "skip " << op->getName().getStringRef()
+                      << ": inside linalg block\n");
+    return true;
+  }
+
+  return false;
+}
+
 // Helper: Propagate CUBE core type upstream for a given operation
 void OpClassifierPass::propagateCubeUpstreamForOp(Operation *startOp) {
   std::queue<Operation *> cubeQueue;
@@ -957,6 +970,11 @@ void OpClassifierPass::propagateCubeUpstreamForOp(Operation *startOp) {
       if (!upstreamOp || cubeVisited.count(upstreamOp))
         continue;
       if (isa<linalg::MatmulOp>(upstreamOp))
+        continue;
+      // Reuse the same skip rules as the main CUBE BFS so the two paths
+      // never disagree on arith-on-tensor / ExtractedLoadStore /
+      // inside-linalg.
+      if (shouldSkipCubeUpstream(upstreamOp))
         continue;
 
       cubeVisited.insert(upstreamOp);

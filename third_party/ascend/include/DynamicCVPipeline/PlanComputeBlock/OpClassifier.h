@@ -113,6 +113,11 @@ private:
   // Propagate CUBE upstream for a specific operation
   void propagateCubeUpstreamForOp(Operation *startOp);
 
+  // Shared skip predicates for both CUBE upstream BFS paths so the rules stay
+  // consistent: arith ops with tensor results, ExtractedLoadStore-related ops,
+  // and ops inside a nested linalg region.
+  bool shouldSkipCubeUpstream(Operation *op);
+
   // Helper: Handle fill op in scf.if - if all ops in scf.if are CUBE, mark
   // scf.if and propagate upstream
   void handleFillInScfIf(Operation *fillOp);

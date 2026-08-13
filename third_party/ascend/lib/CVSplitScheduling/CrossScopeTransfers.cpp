@@ -42,6 +42,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <optional>
+#include <map>
 
 namespace mlir::triton::cv_split {
 
@@ -60,6 +61,13 @@ static constexpr unsigned kMaxTransferFlags = kMaxTransferFlagId + 1;
 //
 // This runs BEFORE scope separation so both scopes see the shared buffers.
 // ============================================================================
+
+/// Flags and release duties for one transfer, resolved by the allocation in
+/// `insertCrossScopeTransfers`.
+struct TransferSyncPlan {
+    /// Producer-to-consumer handoff: the consumer waits before reading.
+    int forwardFlagId;
+};
 
 struct CrossScopeTransfer {
     Value value;
@@ -280,9 +288,16 @@ static Value getOrCreateL1NdView(const TransferEmitContext &c, memref::AllocOp s
 // ROW_SPLIT: for an M-row result, the UB buffer has M/2 rows and fixpipe sends
 // one half to each vector core's private UB. The VECTOR scope is re-tiled to
 // M/2 rows per vector core in a later stage.
+
+/// A VECTOR-side release whose placement is resolved after every transfer has
+/// been emitted, because the synchronization it should sit next to may belong
+/// to a later phase that does not exist yet while this one is being built.
+
 static void emitCubeToVectorTransfer(const TransferEmitContext &c, CrossScopeTransfer &xfer,
-                                     RankedTensorType tensorType, int flagId, BufferPool &bufferPool)
+                                     RankedTensorType tensorType, const TransferSyncPlan &plan,
+                                     BufferPool &bufferPool)
 {
+    const int flagId = plan.forwardFlagId;
     Type elemType = tensorType.getElementType();
     ArrayRef<int64_t> shape = tensorType.getShape();
 
@@ -305,6 +320,8 @@ static void emitCubeToVectorTransfer(const TransferEmitContext &c, CrossScopeTra
     // sync immediately after the P producer splits that region into two VFs
     // and keeps its full score tile live across the synchronization boundary.
     builder.setInsertionPointAfter(xfer.producer);
+
+
     auto dmaModeAttr = hivm::FixpipeDMAModeAttr::get(c.ctx, hivm::FixpipeDMAMode::NZ2ND);
     auto dualDstAttr = hivm::FixpipeDualDstModeAttr::get(c.ctx, hivm::FixpipeDualDstMode::ROW_SPLIT);
     auto fixpipeOp = builder.create<hivm::FixpipeOp>(c.loc, mlir::TypeRange {},
@@ -339,8 +356,9 @@ static void emitCubeToVectorTransfer(const TransferEmitContext &c, CrossScopeTra
     for (auto *consumer : xfer.consumers)
         consumer->replaceUsesOfWith(xfer.value, toTensorOp.getResult());
 
-    LLVM_DEBUG(llvm::dbgs() << "[cv-split]   C→V transfer #" << flagId << ": " << xfer.producer->getName() << " → "
-                            << ubShape[0] << "x" << ubShape[1] << " UB buffer (ROW_SPLIT)\n");
+
+    LLVM_DEBUG(llvm::dbgs() << "[cv-split]   C→V transfer #" << flagId << ": " << xfer.producer->getName() << " → " << ubShape[0] << "x" << ubShape[1]
+                            << " UB buffer (ROW_SPLIT)\n");
 }
 
 // VECTOR -> CUBE: a softmax/cast result is NZ-packed and copied UB->L1 into a
@@ -349,9 +367,10 @@ static void emitCubeToVectorTransfer(const TransferEmitContext &c, CrossScopeTra
 // NZ packing applies only when both dims are multiples of 16; otherwise the L1
 // buffer keeps the flat [M, N] layout.
 static VectorToCubeTransferChain emitVectorToCubeTransfer(const TransferEmitContext &c, CrossScopeTransfer &xfer,
-                                                          RankedTensorType tensorType, int flagId,
+                                                          RankedTensorType tensorType, const TransferSyncPlan &plan,
                                                           BufferPool &bufferPool)
 {
+    const int flagId = plan.forwardFlagId;
     Type elemType = tensorType.getElementType();
     ArrayRef<int64_t> shape = tensorType.getShape();
 
@@ -468,8 +487,8 @@ static VectorToCubeTransferChain emitVectorToCubeTransfer(const TransferEmitCont
     for (auto *consumer : xfer.consumers)
         consumer->replaceUsesOfWith(xfer.value, toTensorOp.getResult());
 
-    LLVM_DEBUG(llvm::dbgs() << "[cv-split]   V→C transfer #" << flagId << ": " << xfer.producer->getName() << " → " << M
-                            << "x" << N << " L1 buffer\n");
+
+    LLVM_DEBUG(llvm::dbgs() << "[cv-split]   V→C transfer #" << flagId << ": " << xfer.producer->getName() << " → " << M << "x" << N << " L1 buffer\n");
 
     return VectorToCubeTransferChain {xfer.value, sharedL1AllocOp.getResult(), syncSetOp, std::move(packingOps)};
 }
@@ -497,11 +516,9 @@ insertCrossScopeTransfers(scf::ForOp loop, const DenseMap<Operation *, EngineTyp
         return failure();
     }
 
-    if (transfers.size() > kMaxTransferFlags) {
-        loop.emitError() << "CVSplitScheduling requires " << transfers.size() << " synchronization flags, but only "
-                         << kMaxTransferFlags << " are available (IDs 0.." << kMaxTransferFlagId << ")";
-        return failure();
-    }
+    // Flag demand is checked once the transfers are grouped into phases, below.
+    // It depends on the number of phases and the buffer depth, not on the
+    // transfer count, because a phase's flags are reused across its lanes.
 
     // DependencyScheduler completes sibling VECTOR state before each V->C
     // boundary producer.  The producer is therefore both the actual insertion
@@ -623,49 +640,82 @@ insertCrossScopeTransfers(scf::ForOp loop, const DenseMap<Operation *, EngineTyp
                                   hivm::PipeAttr::get(ctx, hivm::PIPE::PIPE_MTE3),
                                   hivm::PipeAttr::get(ctx, hivm::PIPE::PIPE_MTE1)};
 
-    // FIXME: replace the per-direction counters below with one shared flag
-    // counter. The hardware exposes 16 shared scalar-buffer IDs; pipe direction
-    // does not create a separate ID namespace. Match DCVP by allocating IDs
-    // 0..14, reserving ID 15 for control-flow synchronization, and reject the
-    // transformation before mutation when more than 15 transfers are required.
-    // With unique IDs, the currently supported unroll factor 4 needs 12 IDs.
+    // Flag allocation.
     //
-    // FIXME: add counter reuse. Build dependency-ordered transfer phases and
-    // reuse one ID as a counter within a phase only when the source-core set
-    // order and destination-core wait order contain the same transfers in the
-    // same order. Reject the transformation if the resulting allocation still
-    // requires more than 15 IDs.
+    // Every unrolled clone of one original transfer forms a phase, and the
+    // clones of a phase rotate over `interCoreBufferDepth` physical buffers.
+    // Two lanes that share a buffer are already forced apart by that buffer, so
+    // they can share flags too: a phase needs one flag per buffer slot rather
+    // than one per lane, which makes the allocation independent of the unroll
+    // factor. `BufferPool` assigns slots per origin ID in the same order this
+    // loop visits them, so the slot is the visit ordinal modulo the depth.
+    //
+    // Each slot takes two flags. The forward flag is the existing producer to
+    // consumer handoff, ordering the consumer's read after the producer's write.
+    // The release flag runs the other way, ordering the next lane's write to the
+    // slot after the previous lane's read of it. Without it the producing core
+    // may overwrite a buffer that the consuming core is still reading; the two
+    // cores run concurrently and nothing else orders that pair.
+    //
+    // The first lane of a slot does not wait, and the last does not signal: the
+    // release only has to order lanes within one iteration. Across iterations
+    // the ordering already exists transitively, because the producing core must
+    // wait for the reverse-direction handoff of the phase that follows, and the
+    // consumer signals that only after reading this slot.
+    DenseMap<int64_t, unsigned> laneCountByOrigin;
+    DenseMap<int64_t, unsigned> phaseIndexByOrigin;
+    for (const CrossScopeTransfer &xfer : transfers) {
+        ++laneCountByOrigin[xfer.originId];
+        phaseIndexByOrigin.try_emplace(xfer.originId, phaseIndexByOrigin.size());
+    }
+
+    const unsigned phaseCount = phaseIndexByOrigin.size();
+    const unsigned flagsPerPhase = interCoreBufferDepth; // one forward flag per buffer slot
+    const unsigned requiredFlags = phaseCount * flagsPerPhase;
+
+    // The module may already synchronize on some IDs. Allocate this schedule
+    // above them: the manager scans the module on construction, so its first
+    // handed-out ID is the lowest one not already in use.
     auto module = loop->getParentOfType<ModuleOp>();
     FlagIdManager flagIdManager(module, /*firstAvailableId=*/0);
+    const int flagBase = flagIdManager.acquireId(/*insertionPoint=*/nullptr);
+    if (flagBase < 0 || static_cast<unsigned>(flagBase) + requiredFlags > kMaxTransferFlags) {
+        loop.emitError() << "CVSplitScheduling requires " << requiredFlags << " synchronization flags for "
+                         << phaseCount << " transfer phase(s) at buffer depth " << interCoreBufferDepth
+                         << " starting at ID " << flagBase << ", but only IDs 0.." << kMaxTransferFlagId
+                         << " are available";
+        return failure();
+    }
 
     // The shared DCVP buffer-count policy controls the pool depth. Same-typed
     // buffers (all unrolled qk_ub, all pv_ub, all P L1) rotate over that many
     // physical allocations; absence of a frontend policy defaults to two.
     BufferPool bufferPool(interCoreBufferDepth);
     SmallVector<VectorToCubeTransferChain> vectorToCubeChains;
+    DenseMap<int64_t, unsigned> laneOrdinalByOrigin;
 
     for (auto &xfer : transfers) {
-        int syncFlagId = flagIdManager.acquireId(xfer.producer);
-        if (syncFlagId > static_cast<int>(kMaxTransferFlagId)) {
-            loop.emitError() << "CVSplitScheduling exhausted synchronization flags; "
-                             << "next ID is " << syncFlagId << " but IDs 0.." << kMaxTransferFlagId
-                             << " are available";
-            return failure();
-        }
         auto tensorType = cast<RankedTensorType>(xfer.value.getType());
         if (tensorType.getRank() != 2) {
             loop.emitError("cross-scope transfers require rank-2 tensors");
             return failure();
         }
 
+        const unsigned ordinal = laneOrdinalByOrigin[xfer.originId]++;
+        const unsigned slot = ordinal % interCoreBufferDepth;
+        const unsigned phaseBase = flagBase + phaseIndexByOrigin[xfer.originId] * flagsPerPhase;
+        const TransferSyncPlan plan {
+            /*forwardFlagId=*/static_cast<int>(phaseBase + slot)};
+
         if (xfer.direction == CrossScopeTransfer::CUBE_TO_VECTOR)
-            emitCubeToVectorTransfer(ec, xfer, tensorType, syncFlagId, bufferPool);
+            emitCubeToVectorTransfer(ec, xfer, tensorType, plan, bufferPool);
         else
-            vectorToCubeChains.push_back(emitVectorToCubeTransfer(ec, xfer, tensorType, syncFlagId, bufferPool));
+            vectorToCubeChains.push_back(emitVectorToCubeTransfer(ec, xfer, tensorType, plan, bufferPool));
     }
 
-    LLVM_DEBUG(llvm::dbgs() << "[cv-split] Inserted " << transfers.size() << " transfers with " << transfers.size()
-                            << " sync flags\n");
+
+    LLVM_DEBUG(llvm::dbgs() << "[cv-split] Inserted " << transfers.size() << " transfers across " << phaseCount
+                            << " phase(s) using " << requiredFlags << " sync flags\n");
     return CrossScopeTransferInfo {*blockM, std::move(vectorToCubeChains)};
 }
 

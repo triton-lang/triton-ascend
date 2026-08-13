@@ -11,12 +11,19 @@
 
 // DEPTH1: memref.alloc() : memref<16x32xf32, #hivm.address_space<ub>>
 // DEPTH1-NOT: memref.alloc() : memref<16x32xf32, #hivm.address_space<ub>>
-// DEPTH1: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// DEPTH1-NOT: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
 // DEPTH1: memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
 // DEPTH1-NOT: memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
+// DEPTH1: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
+// DEPTH1-NOT: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
+
+// One forward flag per buffer slot per phase, so depth one needs three -- and
+// with a single slot per phase no lane reuses another's buffer, so there is
+// nothing for the schedule to order and no reverse traffic at all.
 // DEPTH1: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 0
-// DEPTH1: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 11
+// DEPTH1: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 0
+// DEPTH1-NOT: flag = 3
+// DEPTH1-NOT: sync_block{{.*}}<PIPE_V>, <PIPE_FIX>
+// DEPTH1-NOT: sync_block{{.*}}<PIPE_MTE1>, <PIPE_MTE3>
 
 // REJECT-NOT: scope.scope
 // REJECT: scf.for {{.*}} step %c32_i32
@@ -24,10 +31,13 @@
 // The shared FlagIdManager must see an existing flag zero and allocate the CV
 // schedule above it.  This is a collision-avoidance contract, not merely a
 // check that CV split happens to emit a familiar sequence on an empty module.
+// Three phases at depth two need six IDs, so shifting past the occupied zero
+// places them on 1..6.
 // COLLISION: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 0
 // COLLISION: scope.scope
 // COLLISION: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 1
-// COLLISION: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 12
+// COLLISION: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 5
+// COLLISION-NOT: flag = 7
 
 // When CV commits, the existing DCVP wrapper sees the result and leaves the
 // two proven CV scopes untouched.

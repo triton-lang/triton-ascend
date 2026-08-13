@@ -894,17 +894,8 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
 
         // Stages 4-7: build the dependency graph, assign BFS levels, verify the
         // CUBE/VECTOR work is cleanly separable, and reorder the body by level.
-        cv_split::DependencyScheduler scheduler;
-        llvm::DenseMap<Operation *, Operation *> transferPhaseEnds;
-        if (failed(scheduler.run(body, classification, transferPhaseEnds)))
-            return failure();
-
-        // Stage 7.5: Unfuse PV matmuls (split matmul(p,v,acc*alpha) into pv + addf)
-        if (failed(cv_split::unfusePVMatmuls(body, classification)))
-            return failure();
-
-        // Stage 8: Insert cross-scope transfers (BEFORE scope separation)
-        LLVM_DEBUG(llvm::dbgs() << "[cv-split] === Stage 8: cross-scope transfers ===\n");
+        // The buffer depth drives both the scheduler's pipeline distance and the
+        // transfer emitter's slot rotation; read it once, before either.
         auto moduleOp = funcOp->getParentOfType<ModuleOp>();
         BufferCountManager bufferCountManager(moduleOp, /*initializeDefaults=*/false);
         int interCoreBufferDepth = bufferCountManager
@@ -915,6 +906,19 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
                                << interCoreBufferDepth;
             return failure();
         }
+
+        cv_split::DependencyScheduler scheduler;
+        llvm::DenseMap<Operation *, Operation *> transferPhaseEnds;
+        if (failed(scheduler.run(body, classification, transferPhaseEnds,
+                                 static_cast<unsigned>(interCoreBufferDepth))))
+            return failure();
+
+        // Stage 7.5: Unfuse PV matmuls (split matmul(p,v,acc*alpha) into pv + addf)
+        if (failed(cv_split::unfusePVMatmuls(body, classification)))
+            return failure();
+
+        // Stage 8: Insert cross-scope transfers (BEFORE scope separation)
+        LLVM_DEBUG(llvm::dbgs() << "[cv-split] === Stage 8: cross-scope transfers ===\n");
         FailureOr<cv_split::CrossScopeTransferInfo> transferInfo = cv_split::insertCrossScopeTransfers(
             loop, classification, transferPhaseEnds, static_cast<unsigned>(interCoreBufferDepth));
         if (failed(transferInfo)) {

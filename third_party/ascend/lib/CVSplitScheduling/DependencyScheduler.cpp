@@ -30,6 +30,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 
 #include <algorithm>
 
@@ -320,7 +321,7 @@ static SmallVector<Operation *> collectVectorToCubeProducers(Block *body, const 
 static void reorderForCrossScopeProducerPhases(
     Block *body, const DenseMap<Operation *, SmallVector<Operation *>> &predecessors,
     const DenseMap<Operation *, int> &levels, const Classification &classification,
-    DenseMap<Operation *, Operation *> &transferPhaseEnds)
+    DenseMap<Operation *, Operation *> &transferPhaseEnds, unsigned pipelineDistance)
 {
     SmallVector<Operation *> originalOrder;
     for (Operation &op : *body) {
@@ -336,7 +337,9 @@ static void reorderForCrossScopeProducerPhases(
         scheduled = originalOrder;
         llvm::stable_sort(scheduled, [&](Operation *a, Operation *b) { return levels.at(a) < levels.at(b); });
     } else {
-        for (Operation *producer : boundaryProducers) {
+        // Phase slices, in boundary order.
+        SmallVector<SmallVector<Operation *>> phaseOps(boundaryProducers.size());
+        for (auto [index, producer] : llvm::enumerate(boundaryProducers)) {
             DenseSet<Operation *> slice;
             collectPredecessorSlice(producer, predecessors, slice);
             extendWithReadyVectorState(body, predecessors, classification, alreadyScheduled, slice);
@@ -350,14 +353,72 @@ static void reorderForCrossScopeProducerPhases(
                 if (!slice.contains(op))
                     continue;
                 if (alreadyScheduled.insert(op).second) {
-                    scheduled.push_back(op);
+                    phaseOps[index].push_back(op);
                     phaseEnd = op;
                 }
             }
             transferPhaseEnds[producer] = phaseEnd;
         }
-        for (Operation *op : originalOrder)
-            if (alreadyScheduled.insert(op).second)
+
+        // Everything left consumes results the other engine produces from a
+        // boundary -- for attention, the accumulator update that reads a PV
+        // matmul.  Attribute each such operation to the boundary it descends
+        // from, so it can be scheduled relative to that boundary instead of
+        // being deferred to the end of the body.
+        DenseMap<Operation *, unsigned> boundaryOfOp;
+        for (auto [index, producer] : llvm::enumerate(boundaryProducers))
+            for (Operation *op : phaseOps[index])
+                boundaryOfOp[op] = index;
+
+        SmallVector<SmallVector<Operation *>> tailOps(boundaryProducers.size());
+        SmallVector<Operation *> unattributed;
+        for (Operation *op : originalOrder) {
+            if (alreadyScheduled.contains(op))
+                continue;
+            // Latest boundary this operation transitively depends on.
+            DenseSet<Operation *> slice;
+            collectPredecessorSlice(op, predecessors, slice);
+            std::optional<unsigned> owner;
+            for (Operation *pred : slice) {
+                auto it = boundaryOfOp.find(pred);
+                if (it != boundaryOfOp.end() && (!owner || it->second > *owner))
+                    owner = it->second;
+            }
+            if (owner) {
+                tailOps[*owner].push_back(op);
+                boundaryOfOp[op] = *owner;
+            } else {
+                unattributed.push_back(op);
+            }
+        }
+
+        // Software-pipeline the two at a distance of `pipelineDistance`
+        // boundaries.  A boundary's consuming work is emitted just before the
+        // boundary that reuses its buffer slot, which puts an existing
+        // cross-core handoff between the read of a slot and the write that
+        // reuses it -- the ordering those shared slots require, taken from
+        // synchronization the schedule already performs rather than from a new
+        // edge.  Deferring all consuming work to the end of the body, as a
+        // plain two-phase order does, leaves no such handoff in between.
+        // Operations with no boundary anywhere in their dependency slice depend
+        // only on values defined outside the body, so they lead: the pipelined
+        // order below moves consumers ahead of where a plain two-phase order
+        // would put them, and those consumers may read these.
+        const unsigned distance = std::max(1u, pipelineDistance);
+        for (Operation *op : unattributed)
+            scheduled.push_back(op);
+        for (unsigned index = 0; index < boundaryProducers.size(); ++index) {
+            if (index >= distance)
+                for (Operation *op : tailOps[index - distance])
+                    scheduled.push_back(op);
+            for (Operation *op : phaseOps[index])
+                scheduled.push_back(op);
+        }
+        // Drain the boundaries whose consumers have no later boundary to sit in
+        // front of.
+        for (unsigned index = boundaryProducers.size() - std::min<unsigned>(distance, boundaryProducers.size());
+             index < boundaryProducers.size(); ++index)
+            for (Operation *op : tailOps[index])
                 scheduled.push_back(op);
     }
 
@@ -379,7 +440,8 @@ static void reorderForCrossScopeProducerPhases(
 // run() fails when dependency levels cannot be assigned to every op.
 // ============================================================================
 LogicalResult DependencyScheduler::run(Block *body, const Classification &classification,
-                                       DenseMap<Operation *, Operation *> &transferPhaseEnds)
+                                       DenseMap<Operation *, Operation *> &transferPhaseEnds,
+                                       unsigned pipelineDistance)
 {
     DenseMap<Operation *, SmallVector<Operation *>> predecessors;
     DenseMap<Operation *, int> levels;
@@ -396,7 +458,8 @@ LogicalResult DependencyScheduler::run(Block *body, const Classification &classi
 
     logLevelHistogram(body, levels, classification, maxLevel);
 
-    reorderForCrossScopeProducerPhases(body, predecessors, levels, classification, transferPhaseEnds);
+    reorderForCrossScopeProducerPhases(body, predecessors, levels, classification, transferPhaseEnds,
+                                       pipelineDistance);
     LLVM_DEBUG(llvm::dbgs() << "[cv-split] Reordered by cross-scope producer phase\n");
     return success();
 }

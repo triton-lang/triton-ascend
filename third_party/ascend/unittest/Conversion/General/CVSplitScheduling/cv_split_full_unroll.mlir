@@ -43,9 +43,9 @@
 // LANES-DAG: arith.constant 96 : i32
 
 // Cross-scope synchronization is allocated exactly as for a non-collapsing
-// unroll by 4: three transfers per lane, flags 0 through 11.
+// unroll by 4: three phases at buffer depth two, flags 0 through 5.
 // LANES-DAG: flag = 0
-// LANES-DAG: flag = 11
+// LANES-DAG: flag = 5
 
 // With promotion disabled the scaffold survives in both scopes, as one loop
 // whose step covers its whole range -- a single iteration carrying all lanes.

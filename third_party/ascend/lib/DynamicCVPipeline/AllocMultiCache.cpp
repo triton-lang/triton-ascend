@@ -21,6 +21,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache.h"
+#include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferCubeScope.h"
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferOuterScope.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
@@ -54,7 +55,10 @@ void AllocMultiCachePass::runOnOperation() {
   // Step 1:Inner multibuffer
   pm.addPass(createAddMultiBufferInnerScopePass());
 
-  // Step 2: Outer multibuffer
+  // Step 2: Cube-core intra-loop multibuffer
+  pm.addPass(createAddMultiBufferCubeScopePass());
+
+  // Step 3: Outer multibuffer
   pm.addPass(createAddMultiBufferOuterScopePass());
 
   if (failed(runPipeline(pm, module))) {

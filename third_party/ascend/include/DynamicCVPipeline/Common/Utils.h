@@ -53,6 +53,9 @@ inline constexpr llvm::StringLiteral kInterCoreBufCount =
     "ssbuffer.inter_core_buf_count";
 inline constexpr llvm::StringLiteral kLoadStoreBufCount =
     "ssbuffer.load_store_buf_count";
+inline constexpr llvm::StringLiteral kCubeBufCount =
+    "ssbuffer.cube_buf_count";
+inline constexpr llvm::StringLiteral kCubeBuffer = "ssbuffer.cubeBuffer";
 inline constexpr llvm::StringLiteral kAnalyzeFlagId =
     "ssbuffer.analyze_flag_id";
 inline constexpr llvm::StringLiteral kLoopCarriedL0C =

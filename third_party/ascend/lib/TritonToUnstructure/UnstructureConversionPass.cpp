@@ -29,6 +29,8 @@
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
+
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -47,6 +49,59 @@ using namespace mlir;
 using namespace triton;
 
 #include "llvm/Support/Debug.h"
+
+/// Hoist tt.ptr computation chains out of scope::ScopeOp regions so that
+/// downstream OffsetAnalysis can trace pointer chains without crossing
+/// region boundaries (which would cause dominance violations).
+static void hoistPointerChainsOutOfScopes(triton::FuncOp funcOp,
+                                          RewriterBase &rewriter) {
+  funcOp->walk([&](scope::ScopeOp scopeOp) {
+    Block &block = scopeOp.getRegion().front();
+    auto returnOp = cast<scope::ReturnOp>(block.getTerminator());
+
+    for (unsigned i = 0; i < scopeOp.getNumResults(); ++i) {
+      auto res = scopeOp.getResult(i);
+      if (!isa<triton::PointerType>(res.getType()))
+        continue;
+
+      Value returnedVal = returnOp.getResults()[i];
+      SetVector<Operation *> slice;
+      SmallVector<Value> worklist;
+      worklist.push_back(returnedVal);
+      bool allOutsideDeps = true;
+
+      while (!worklist.empty()) {
+        Value v = worklist.pop_back_val();
+        auto *defOp = v.getDefiningOp();
+        if (!defOp) {
+          continue;
+        }
+        if (defOp->getParentRegion() != &scopeOp.getRegion()) {
+          continue;
+        }
+        if (isa<triton::AdvanceOp, triton::MakeTensorPtrOp,
+                triton::AddPtrOp>(defOp)) {
+          slice.insert(defOp);
+          for (auto operand : defOp->getOperands())
+            worklist.push_back(operand);
+        } else {
+          allOutsideDeps = false;
+          break;
+        }
+      }
+
+      if (!allOutsideDeps || slice.empty())
+        continue;
+
+      rewriter.setInsertionPointAfter(scopeOp);
+      IRMapping mapping;
+      for (auto *op : slice) {
+        rewriter.clone(*op, mapping);
+      }
+      rewriter.replaceAllUsesWith(res, mapping.lookup(returnedVal));
+    }
+  });
+}
 
 bool forceSimtTemplateFlag = false;
 
@@ -1127,6 +1182,12 @@ void TritonToUnstructurePass::runOnOperation() {
 
   canonicalizeSupportedPointerBitcasts(moduleOp);
 
+  // Hoist pointer chains out of scopes before OffsetAnalysis runs
+  IRRewriter rewriter(ctx);
+  moduleOp->walk([&](triton::FuncOp funcOp) {
+    hoistPointerChainsOutOfScopes(funcOp, rewriter);
+  });
+
   moduleOp->walk([this](triton::FuncOp funcOp) {
     replacePtrArguments(funcOp, offsetMapForLoopArgs);
   });
@@ -1181,7 +1242,8 @@ void TritonToUnstructurePass::getDependentDialects(
                   affine::AffineDialect, scf::SCFDialect, tensor::TensorDialect,
                   bufferization::BufferizationDialect, memref::MemRefDialect,
                   triton::TritonDialect, triton::ascend::TritonAscendDialect,
-                  hivm::HIVMDialect>();
+                  hivm::HIVMDialect,
+                  scope::ScopeDialect>();
 }
 
 std::unique_ptr<OperationPass<ModuleOp>> triton::createTritonToUnstructurePass(

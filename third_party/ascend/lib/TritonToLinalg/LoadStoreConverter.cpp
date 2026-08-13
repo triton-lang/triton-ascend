@@ -76,6 +76,59 @@ using namespace triton;
 const std::string MayImplicitTransposeWithLastAxisTAG =
     "MayImplicitTransposeWithLastAxis";
 
+namespace {
+
+Value getRemappedOrOriginal(Value value, ConversionPatternRewriter &rewriter) {
+  if (Value remapped = rewriter.getRemappedValue(value))
+    return remapped;
+  return value;
+}
+
+bool hasStaticAllZeroStrides(triton::MakeTensorPtrOp makeTensorPtrOp) {
+  auto strides = makeTensorPtrOp.getStrides();
+  return !strides.empty() && llvm::all_of(strides, [](Value stride) {
+    auto constantStride = getConstantIntValue(stride);
+    return constantStride && constantStride.value() == 0;
+  });
+}
+
+SmallVector<OpFoldResult> getBoundarySizesFromAllZeroStrideMTP(
+    triton::MakeTensorPtrOp makeTensorPtrOp,
+    llvm::ArrayRef<int32_t> boundaryCheck, llvm::ArrayRef<int64_t> tileShape,
+    const Location &loc, ConversionPatternRewriter &rewriter) {
+  assert(makeTensorPtrOp.getShape().size() == tileShape.size());
+  assert(makeTensorPtrOp.getOffsets().size() == tileShape.size());
+
+  SmallVector<OpFoldResult> boundarySizes =
+      getAsIndexOpFoldResult(rewriter.getContext(), tileShape);
+  const OpFoldResult zero = rewriter.getIndexAttr(0);
+
+  for (size_t i = 0; i < tileShape.size(); ++i) {
+    if (llvm::find(boundaryCheck, i) == boundaryCheck.end())
+      continue;
+
+    OpFoldResult shape = getOpFoldResultOfLayoutInfo(
+        getRemappedOrOriginal(makeTensorPtrOp.getShape()[i], rewriter),
+        rewriter);
+    OpFoldResult offset = getOpFoldResultOfLayoutInfo(
+        getRemappedOrOriginal(makeTensorPtrOp.getOffsets()[i], rewriter),
+        rewriter);
+    // This is the exclusive end of the logical valid interval expressed in
+    // tile coordinates.  The caller removes the negative-offset prefix when
+    // it computes the destination subview.  Using shape - offset (rather
+    // than shape - max(offset, 0)) is necessary for cases such as
+    // shape=1, offset=-2, tile=4: lane 2 is valid and must not be dropped.
+    OpFoldResult remaining = maxOpFoldResult(
+        subOpFoldResult(shape, offset, loc, rewriter), zero, loc, rewriter);
+    boundarySizes[i] =
+        minOpFoldResult(boundarySizes[i], remaining, loc, rewriter);
+  }
+
+  return boundarySizes;
+}
+
+} // namespace
+
 LogicalResult
 AddPtrConverter::matchAndRewrite(triton::AddPtrOp op, OpAdaptor adaptor,
                                  ConversionPatternRewriter &rewriter) const {
@@ -365,6 +418,105 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   // Check if tt.load is modified by AddPtrConverter to a specified state.
   if (checkModifiedByAddPtrConverter(op).succeeded()) {
     return continueModifyFromAddPtrConverter(op, adaptor, rewriter);
+  }
+
+  auto makeTensorPtrOp = op.getPtr().getDefiningOp<triton::MakeTensorPtrOp>();
+  auto allZeroStrideBoundaryCheck = op.getBoundaryCheck();
+  const bool isStaticAllZeroStrideMTP =
+      makeTensorPtrOp && makeTensorPtrOp.getResult().hasOneUse() &&
+      !allZeroStrideBoundaryCheck.empty() && !op.getMask() && !op.getOther() &&
+      op.getPadding().has_value() && hasStaticAllZeroStrides(makeTensorPtrOp);
+  if (isStaticAllZeroStrideMTP) {
+    auto tensorType = dyn_cast<RankedTensorType>(op.getResult().getType());
+    if (!tensorType) {
+      return rewriter.notifyMatchFailure(
+          op,
+          "all-zero-stride tensor pointer load must return a ranked tensor");
+    }
+
+    Value base = getRemappedOrOriginal(makeTensorPtrOp.getBase(), rewriter);
+    auto baseMemRefType = dyn_cast<MemRefType>(base.getType());
+    if (!baseMemRefType || baseMemRefType.getRank() != 1 ||
+        baseMemRefType.getElementType() != tensorType.getElementType()) {
+      return rewriter.notifyMatchFailure(
+          op, "all-zero-stride tensor pointer load requires a rank-1 remapped "
+              "base with the result element type");
+    }
+
+    auto loc = op.getLoc();
+    auto memRefElementType = tensorType.getElementType();
+    Value allocOp = rewriter.create<memref::AllocOp>(
+        loc, MemRefType::get(tensorType.getShape(), memRefElementType));
+    auto boundarySizes = getBoundarySizesFromAllZeroStrideMTP(
+        makeTensorPtrOp, allZeroStrideBoundaryCheck, tensorType.getShape(), loc,
+        rewriter);
+
+    SmallVector<OpFoldResult> dstOffsets;
+    dstOffsets.reserve(boundarySizes.size());
+    const OpFoldResult zero = rewriter.getIndexAttr(0);
+    for (auto [idx, offset] : llvm::enumerate(makeTensorPtrOp.getOffsets())) {
+      if (llvm::find(allZeroStrideBoundaryCheck, idx) ==
+          allZeroStrideBoundaryCheck.end()) {
+        dstOffsets.push_back(zero);
+        continue;
+      }
+
+      OpFoldResult logicalOffset = getOpFoldResultOfLayoutInfo(
+          getRemappedOrOriginal(offset, rewriter), rewriter);
+      OpFoldResult leftPadding =
+          maxOpFoldResult(subOpFoldResult(zero, logicalOffset, loc, rewriter),
+                          zero, loc, rewriter);
+      OpFoldResult dstOffset =
+          minOpFoldResult(leftPadding, boundarySizes[idx], loc, rewriter);
+      boundarySizes[idx] =
+          subOpFoldResult(boundarySizes[idx], dstOffset, loc, rewriter);
+      dstOffsets.push_back(dstOffset);
+    }
+
+    auto dstSubview = mlir::ConverterUtils::makeSubViewOp(
+        allocOp, dstOffsets, boundarySizes, loc, rewriter);
+
+    auto padding = op.getPadding();
+    TypedAttr padAttr = rewriter.getZeroAttr(memRefElementType);
+    if (padding.value() == triton::PaddingOption::PAD_NAN) {
+      assert(!memRefElementType.isIntOrIndex());
+      auto apNaN = llvm::APFloat::getNaN(
+          cast<FloatAttr>(padAttr).getValue().getSemantics());
+      padAttr = rewriter.getFloatAttr(memRefElementType, apNaN);
+    }
+    auto padVal = rewriter.create<arith::ConstantOp>(loc, padAttr);
+    // boundarySizes now contains the actual valid extent after removal of a
+    // negative logical-offset prefix.  Fill against this final extent so the
+    // prefix is padded even when the right edge of the tile remains in range.
+    fillTensorWithOtherForMaskScenario(padVal, allocOp, boundarySizes,
+                                       rewriter);
+
+    Value zeroIndex = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+    Value hasValidRegion =
+        rewriter.create<arith::ConstantOp>(loc, rewriter.getBoolAttr(true));
+    for (const OpFoldResult &boundarySize : boundarySizes) {
+      Value boundarySizeValue =
+          getValueOrCreateConstantIndexOp(rewriter, loc, boundarySize);
+      Value hasValidDimension = rewriter.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::sgt, boundarySizeValue, zeroIndex);
+      hasValidRegion = rewriter.create<arith::AndIOp>(loc, hasValidRegion,
+                                                      hasValidDimension);
+    }
+
+    auto ifOp = rewriter.create<scf::IfOp>(loc, hasValidRegion);
+    {
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPointToStart(&ifOp.getThenRegion().front());
+      auto scalar =
+          rewriter.create<memref::LoadOp>(loc, base, ValueRange{zeroIndex});
+      auto fillOp = rewriter.create<linalg::FillOp>(loc, ValueRange{scalar},
+                                                    ValueRange{dstSubview});
+      propagateWasBoolToInt8Attr(op.getOperation(), fillOp.getOperation(),
+                                 rewriter);
+    }
+    return this->toTensorAndReplace(op, tensorType, allocOp,
+                                    /*mayImplicitTransposeWithLastAxis=*/false,
+                                    loc, rewriter);
   }
 
   auto ptr = adaptor.getPtr();

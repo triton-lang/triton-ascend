@@ -566,7 +566,7 @@ class CMakeBuild(build_ext):
         else:
             cmake_args += ["-DTRITON_BUILD_PROTON=OFF"]
 
-        if check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):
+        if check_env_flag("TRITON_BUILD_DISTRIBUTED", "OFF"):
             cmake_args += ["-DTRITON_BUILD_DISTRIBUTED=ON"]
         else:
             cmake_args += ["-DTRITON_BUILD_DISTRIBUTED=OFF"]
@@ -609,14 +609,28 @@ def is_git_repo():
 
 
 def ensure_distributed_submodule():
-    if not check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):
+    if not check_env_flag("TRITON_BUILD_DISTRIBUTED", "OFF"):
         return
     distributed_dir = Path(triton_dir) / "third_party" / "ascend" / "Triton-distributed-ascend"
-    if not (distributed_dir / "CMakeLists.txt").is_file() and is_git_repo():
+    if not distributed_dir.is_dir():
         subprocess.check_call([
-            "git", "submodule", "update", "--init", "--",
-            "third_party/ascend/Triton-distributed-ascend"
-        ], cwd=triton_dir)
+            "git",
+            "clone",
+            "https://gitcode.com/Ascend/Triton-distributed-ascend.git",
+            "-b",
+            "release/3.2.2",
+        ], cwd=Path(triton_dir) / "third_party" / "ascend")
+    if is_git_repo():
+        subprocess.check_call([
+            "git",
+            "checkout",
+            "release/3.2.2",
+        ], cwd=distributed_dir)
+        subprocess.check_call([
+            "git",
+            "pull",
+            "origin",
+        ], cwd=distributed_dir)
     if not (distributed_dir / "CMakeLists.txt").is_file():
         raise RuntimeError(f"Triton-Distributed submodule is not initialized: {distributed_dir}")
 
@@ -735,7 +749,7 @@ def add_links():
     add_link_to_backends()
     if check_env_flag("TRITON_BUILD_PROTON", "ON"):  # Default ON
         add_link_to_proton()
-    if check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):
+    if check_env_flag("TRITON_BUILD_DISTRIBUTED", "OFF"):
         add_link_to_distributed()
 
 
@@ -841,7 +855,7 @@ def get_packages():
     packages += get_language_extra_packages()
     if check_env_flag("TRITON_BUILD_PROTON", "ON"):  # Default ON
         packages += ["triton/profiler"]
-    if check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):
+    if check_env_flag("TRITON_BUILD_DISTRIBUTED", "OFF"):
         distributed_root = os.path.join(os.pardir, "third_party", "ascend", "Triton-distributed-ascend", "python")
         distributed_pkg_root = os.path.join(distributed_root, "triton_dist")
         if os.path.isdir(distributed_pkg_root):

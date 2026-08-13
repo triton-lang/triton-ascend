@@ -2552,64 +2552,48 @@ def copysign(arg0: core.tensor, arg1: core.tensor, _semantic=None):
         return _semantic.where(is_negative, neg_magnitude, magnitude)
 
 
-if get_ascend_arch_from_env() == "Ascend910_9589":
-    # if we have hardware support
-    @core.extern
-    def rint(arg0, _semantic=None):
-        """
-        Rounds the input tensor to the nearest integer using round-to-nearest-even.
+@core.builtin
+@math._check_dtype(dtypes=["fp16", "fp32", "bf16"])
+@math._add_math_1arg_docstr("rint")
+def rint(arg0: core.tensor, _semantic=None):
+    """
+    Rounds the input tensor to the nearest integer using round-to-nearest-even.
 
-        :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
-        :type arg0: tl.tensor
-        """
-        return core.extern_elementwise(
-            "", "", [arg0], {
-                (core.dtype("fp32"), ): ("__hmf_rint", core.dtype("fp32")),
-                (core.dtype("fp16"), ): ("__hmf_rint", core.dtype("fp16")),
-                (core.dtype("bf16"), ): ("__hmf_rint", core.dtype("bf16")),
-            }, is_pure=True, _semantic=_semantic)
-else:
+    :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
+    :type arg0: tl.tensor
+    """
+    arg0 = _semantic.to_tensor(arg0)
+    if is_compile_on_910_95():
+        if arg0.dtype != core.dtype("fp32"):
+            arg0 = _semantic.cast(arg0, core.dtype("fp32"))
+        return core.extern_elementwise("", "", [
+            arg0,
+        ], {
+            (core.dtype("fp32"), ): ("__hmf_rint_fp32", core.dtype("fp32")),
+        }, is_pure=True, _semantic=_semantic)
 
-    @core.builtin
-    @math._check_dtype(dtypes=["fp16", "fp32", "bf16"])
-    @math._add_math_1arg_docstr("rint")
-    def rint(arg0: core.tensor, _semantic=None):
-        """
-        Rounds the input tensor to the nearest integer using round-to-nearest-even.
+    floor_x = math.floor(arg0, _semantic=_semantic)
+    fractional = _semantic.sub(arg0, floor_x, True)
 
-        :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
-        :type arg0: tl.tensor
-        """
-        if triton_enable_libdevice_simt():
-            return core.extern_elementwise("", "", [
-                arg0,
-            ], {
-                (core.dtype("fp32"), ): ("__hmf_rint_fp32", core.dtype("fp32")),
-            }, is_pure=True, _semantic=_semantic)
-        arg0 = _semantic.to_tensor(arg0)
+    half = _semantic.full(arg0.shape, 0.5, arg0.type.scalar)
+    eps = _semantic.full(arg0.shape, 1e-8, arg0.type.scalar)
+    is_half = _semantic.less_than(math.abs(_semantic.sub(fractional, half, True), _semantic=_semantic), eps)
 
-        floor_x = math.floor(arg0, _semantic=_semantic)
-        fractional = _semantic.sub(arg0, floor_x, True)
+    floor_int = floor_x.to(core.int32, _semantic=_semantic) if hasattr(floor_x, "to") else _semantic.cast(
+        floor_x, core.int32)
+    two_i32 = _semantic.full(arg0.shape, 2, core.int32)
+    is_even = _semantic.equal(_semantic.mod(floor_int, two_i32), _semantic.full(arg0.shape, 0, core.int32))
 
-        half = _semantic.full(arg0.shape, 0.5, arg0.type.scalar)
-        eps = _semantic.full(arg0.shape, 1e-8, arg0.type.scalar)
-        is_half = _semantic.less_than(math.abs(_semantic.sub(fractional, half, True), _semantic=_semantic), eps)
+    zero = _semantic.full(arg0.shape, 0.0, arg0.type.scalar)
+    is_pos = _semantic.greater_equal(arg0, zero)
 
-        floor_int = floor_x.to(core.int32, _semantic=_semantic) if hasattr(floor_x, "to") else _semantic.cast(
-            floor_x, core.int32)
-        two_i32 = _semantic.full(arg0.shape, 2, core.int32)
-        is_even = _semantic.equal(_semantic.mod(floor_int, two_i32), _semantic.full(arg0.shape, 0, core.int32))
+    round_pos = math.floor(_semantic.add(arg0, half, True), _semantic=_semantic)
+    round_neg = math.ceil(_semantic.sub(arg0, half, True), _semantic=_semantic)
+    normal_round = _semantic.where(is_pos, round_pos, round_neg)
 
-        zero = _semantic.full(arg0.shape, 0.0, arg0.type.scalar)
-        is_pos = _semantic.greater_equal(arg0, zero)
+    half_round = _semantic.where(is_even, floor_x, _semantic.add(floor_x, 1.0, True))
 
-        round_pos = math.floor(_semantic.add(arg0, half, True), _semantic=_semantic)
-        round_neg = math.ceil(_semantic.sub(arg0, half, True), _semantic=_semantic)
-        normal_round = _semantic.where(is_pos, round_pos, round_neg)
-
-        half_round = _semantic.where(is_even, floor_x, _semantic.add(floor_x, 1.0, True))
-
-        return _semantic.where(is_half, half_round, normal_round)
+    return _semantic.where(is_half, half_round, normal_round)
 
 
 @core.extern

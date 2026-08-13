@@ -32,8 +32,13 @@ namespace mlir::triton::cv_split {
 
 class DependencyScheduler {
   public:
+    /// `pipelineDistance` is the inter-core buffer depth: consuming work is
+    /// scheduled that many boundaries after the boundary it belongs to, so an
+    /// existing cross-core handoff always separates a slot's read from the
+    /// write that reuses it.
     LogicalResult run(Block *body, const Classification &classification,
-                      llvm::DenseMap<Operation *, Operation *> &transferPhaseEnds);
+                      llvm::DenseMap<Operation *, Operation *> &transferPhaseEnds,
+                      unsigned pipelineDistance);
 };
 
 } // namespace mlir::triton::cv_split

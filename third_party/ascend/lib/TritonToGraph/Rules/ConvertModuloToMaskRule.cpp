@@ -151,6 +151,22 @@ bool hasStoreMaskGuard(Value offset, Value boundScalar) {
   return false;
 }
 
+// Returns true when two distinct loop-carried paths cross nested scf.for ops.
+// An address passed through one loop may still be lowered as a direct access,
+// but the current structured lowering does not preserve every component of a
+// nested loop-carried pointer state.  Keep the modulo in that shape until the
+// lowerer can prove the relay lossless.
+bool crossesNestedCarriedFor(ArrayRef<Operation *> carriedForChain,
+                             scf::ForOp nextFor) {
+  Operation *next = nextFor.getOperation();
+  return llvm::any_of(carriedForChain, [next](Operation *carriedFor) {
+    if (carriedFor == next)
+      return false;
+    return carriedFor->isProperAncestor(next) ||
+           next->isProperAncestor(carriedFor);
+  });
+}
+
 // Walks forward from the modulo result and collects the loads it addresses.
 // Returns false as soon as the value reaches anything else, which is what makes
 // dropping the wrap unobservable: no other consumer can see the widened index.
@@ -159,7 +175,8 @@ bool hasStoreMaskGuard(Value offset, Value boundScalar) {
 // axis recorded for the modulo result stays the axis it varies along in every
 // load that it reaches.  tt.trans and tt.reshape are therefore rejected.
 bool collectAddressedLoads(Value value, SmallPtrSetImpl<Value> &visited,
-                           SmallVectorImpl<triton::LoadOp> &loads) {
+                           SmallVectorImpl<triton::LoadOp> &loads,
+                           ArrayRef<Operation *> carriedForChain) {
   if (!visited.insert(value).second)
     return true;
 
@@ -177,7 +194,7 @@ bool collectAddressedLoads(Value value, SmallPtrSetImpl<Value> &visited,
     if (isa<triton::ExpandDimsOp, triton::BroadcastOp, triton::AddPtrOp,
             arith::MulIOp, arith::AddIOp>(user)) {
       for (Value result : user->getResults()) {
-        if (!collectAddressedLoads(result, visited, loads))
+        if (!collectAddressedLoads(result, visited, loads, carriedForChain))
           return false;
       }
       continue;
@@ -188,8 +205,12 @@ bool collectAddressedLoads(Value value, SmallPtrSetImpl<Value> &visited,
       for (auto [index, initArg] : llvm::enumerate(forOp.getInitArgs())) {
         if (initArg != value)
           continue;
+        if (crossesNestedCarriedFor(carriedForChain, forOp))
+          return false;
+        SmallVector<Operation *, 2> nextChain(carriedForChain);
+        nextChain.push_back(forOp.getOperation());
         if (!collectAddressedLoads(forOp.getRegionIterArg(index), visited,
-                                   loads))
+                                   loads, nextChain))
           return false;
       }
       continue;
@@ -201,7 +222,12 @@ bool collectAddressedLoads(Value value, SmallPtrSetImpl<Value> &visited,
       unsigned index = use.getOperandNumber();
       if (index >= forOp.getNumResults())
         return false;
-      if (!collectAddressedLoads(forOp.getResult(index), visited, loads))
+      if (crossesNestedCarriedFor(carriedForChain, forOp))
+        return false;
+      SmallVector<Operation *, 2> nextChain(carriedForChain);
+      nextChain.push_back(forOp.getOperation());
+      if (!collectAddressedLoads(forOp.getResult(index), visited, loads,
+                                 nextChain))
         return false;
       continue;
     }
@@ -330,7 +356,9 @@ std::optional<ModuloCandidate> analyzeModulo(Operation *op) {
   candidate.axis = *axis;
 
   SmallPtrSet<Value, 32> visited;
-  if (!collectAddressedLoads(candidate.result, visited, candidate.loads))
+  SmallVector<Operation *, 2> carriedForChain;
+  if (!collectAddressedLoads(candidate.result, visited, candidate.loads,
+                             carriedForChain))
     return std::nullopt;
   if (!areLoadsMaskable(candidate.loads, candidate.axis, candidate.tileSize))
     return std::nullopt;

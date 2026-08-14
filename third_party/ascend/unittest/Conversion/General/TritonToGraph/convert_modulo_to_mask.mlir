@@ -313,6 +313,62 @@ tt.func public @modulo_load_inside_loop(%base: !tt.ptr<f16> {tt.divisibility = 1
 }
 
 // -----
+// Negative: a pointer carried by an outer loop and then by an inner loop is
+// deliberately not linearized.  The direct-memory lowerer must preserve the
+// inner result as the outer loop state before this case can become eligible.
+// CHECK-LABEL: tt.func public @modulo_load_inside_nested_loop
+// CHECK: arith.remsi
+tt.func public @modulo_load_inside_nested_loop(%base: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                              %dst: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                              %n: i32) {
+  %c0 = arith.constant 0 : i32
+  %c1 = arith.constant 1 : i32
+  %c4 = arith.constant 4 : i32
+  %c16 = arith.constant 16 : i32
+  %pid = tt.get_program_id x : i32
+  %blk = arith.muli %pid, %c16 : i32
+  %blk_splat = tt.splat %blk : i32 -> tensor<16xi32>
+  %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+  %offs = arith.addi %blk_splat, %range : tensor<16xi32>
+  %n_splat = tt.splat %n : i32 -> tensor<16xi32>
+  %rem = arith.remsi %offs, %n_splat : tensor<16xi32>
+
+  %rem_expd = tt.expand_dims %rem {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+  %rem_bc = tt.broadcast %rem_expd : tensor<1x16xi32> -> tensor<32x16xi32>
+  %row = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32>
+  %row_expd = tt.expand_dims %row {axis = 1 : i32} : tensor<32xi32> -> tensor<32x1xi32>
+  %row_stride = arith.constant dense<16> : tensor<32x1xi32>
+  %row_scaled = arith.muli %row_expd, %row_stride : tensor<32x1xi32>
+  %row_bc = tt.broadcast %row_scaled : tensor<32x1xi32> -> tensor<32x16xi32>
+  %addr = arith.addi %row_bc, %rem_bc : tensor<32x16xi32>
+  %base_splat = tt.splat %base : !tt.ptr<f16> -> tensor<32x16x!tt.ptr<f16>>
+  %ptrs = tt.addptr %base_splat, %addr : tensor<32x16x!tt.ptr<f16>>, tensor<32x16xi32>
+  %step = arith.constant dense<512> : tensor<32x16xi32>
+  %zeros = arith.constant dense<0.000000e+00> : tensor<32x16xf16>
+
+  %outer:2 = scf.for %outer_iv = %c0 to %c4 step %c1 iter_args(%outer_acc = %zeros, %outer_ptrs = %ptrs) -> (tensor<32x16xf16>, tensor<32x16x!tt.ptr<f16>>) : i32 {
+    %inner:2 = scf.for %inner_iv = %c0 to %c4 step %c1 iter_args(%inner_acc = %outer_acc, %inner_ptrs = %outer_ptrs) -> (tensor<32x16xf16>, tensor<32x16x!tt.ptr<f16>>) : i32 {
+      %tile = tt.load %inner_ptrs : tensor<32x16x!tt.ptr<f16>>
+      %next_acc = arith.addf %inner_acc, %tile : tensor<32x16xf16>
+      %next_ptrs = tt.addptr %inner_ptrs, %step : tensor<32x16x!tt.ptr<f16>>, tensor<32x16xi32>
+      scf.yield %next_acc, %next_ptrs : tensor<32x16xf16>, tensor<32x16x!tt.ptr<f16>>
+    }
+    scf.yield %inner#0, %inner#1 : tensor<32x16xf16>, tensor<32x16x!tt.ptr<f16>>
+  }
+
+  %guard = arith.cmpi slt, %offs, %n_splat : tensor<16xi32>
+  %guard_expd = tt.expand_dims %guard {axis = 0 : i32} : tensor<16xi1> -> tensor<1x16xi1>
+  %guard_bc = tt.broadcast %guard_expd : tensor<1x16xi1> -> tensor<32x16xi1>
+  %col_expd = tt.expand_dims %offs {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+  %col_bc = tt.broadcast %col_expd : tensor<1x16xi32> -> tensor<32x16xi32>
+  %out_addr = arith.addi %row_bc, %col_bc : tensor<32x16xi32>
+  %dst_splat = tt.splat %dst : !tt.ptr<f16> -> tensor<32x16x!tt.ptr<f16>>
+  %out_ptrs = tt.addptr %dst_splat, %out_addr : tensor<32x16x!tt.ptr<f16>>, tensor<32x16xi32>
+  tt.store %out_ptrs, %outer#0, %guard_bc : tensor<32x16x!tt.ptr<f16>>
+  tt.return
+}
+
+// -----
 // Negative: a compile-time constant divisor belongs to TritonToStructured,
 // whose visitOperandRem keeps the wrap and re-expresses it as a strided access.
 // That is exactly equivalent, so it is always preferable to discarding the wrap.

@@ -24,6 +24,7 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "llvm/Support/Debug.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include <optional>
 
 static constexpr const char *DEBUG_TYPE = "AddControlFlowConditionUtils";
@@ -262,6 +263,36 @@ LogicalResult getScopeType(Operation *scopeOp, bool &isCube, bool &isVector) {
   }
 
   return success();
+}
+
+LogicalResult getOpCoreType(Operation *op, bool &isCube,
+                                      bool &isVector) {
+  isCube = false;
+  isVector = false;
+
+  auto scopeOp = op->getParentOfType<scope::ScopeOp>();
+  if (!scopeOp) {
+    return failure();
+  }
+
+  return getScopeType(scopeOp, isCube, isVector);
+}
+
+scf::IfOp findIfOpWithSSBufferAttr(Operation *op) {
+  if (!op) {
+    return nullptr;
+  }
+  Operation *current = op;
+  while (current) {
+    if (auto ifOp = dyn_cast<scf::IfOp>(current)) {
+      if (ifOp->hasAttr(CVPipeline::kIf)) {
+        return ifOp;
+      }
+    }
+    current = current->getParentOp();
+  }
+
+  return nullptr;
 }
 
 // Check if op is a scf.if whose body only contains hivm.hir.sync_block_wait,

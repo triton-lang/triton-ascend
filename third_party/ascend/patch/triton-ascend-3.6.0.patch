@@ -12,12 +12,12 @@ index cab58801f..406ed4634 100644
  # Options
  option(TRITON_BUILD_PYTHON_MODULE "Build Python Triton bindings" OFF)
  option(TRITON_BUILD_PROTON "Build the Triton Proton profiler" ON)
-+option(TRITON_BUILD_DISTRIBUTED "Build Triton Distributed" OFF)
++option(TRITON_BUILD_TD "Build Triton Distributed" OFF)
  option(TRITON_BUILD_UT "Build C++ Triton Unit Tests" ON)
  option(TRITON_BUILD_WITH_CCACHE "Build with ccache (if available)" ON)
  set(TRITON_CODEGEN_BACKENDS "" CACHE STRING "Enable different codegen backends")
  
-+if(TRITON_BUILD_DISTRIBUTED)
++if(TRITON_BUILD_TD)
 +  set(TRITON_USE_ASCEND ON)
 +  add_compile_definitions(TRITON_USE_ASCEND=1)
 +endif()
@@ -84,7 +84,7 @@ index cab58801f..406ed4634 100644
      add_subdirectory(third_party/${CODEGEN_BACKEND})
    endforeach()
  
-+  if(TRITON_BUILD_DISTRIBUTED)
++  if(TRITON_BUILD_TD)
 +    list(APPEND TRITON_PLUGIN_NAMES "distributed")
 +  endif()
 +

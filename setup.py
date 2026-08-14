@@ -52,7 +52,7 @@ triton_dir = os.path.dirname(os.path.abspath(__file__))
 os.environ.setdefault("TRITON_BUILD_WITH_CCACHE", "true")
 os.environ.setdefault("TRITON_BUILD_WITH_CLANG_LLD", "true")
 os.environ.setdefault("TRITON_BUILD_PROTON", "OFF")
-os.environ.setdefault("TRITON_BUILD_DISTRIBUTED", "OFF")
+os.environ.setdefault("TRITON_BUILD_TD", "OFF")
 os.environ.setdefault("TRITON_WHEEL_NAME", "triton-ascend")
 os.environ.setdefault("TRITON_APPEND_CMAKE_ARGS", "-DTRITON_BUILD_UT=OFF")
 
@@ -620,10 +620,10 @@ class CMakeBuild(build_ext):
         if check_env_flag("TRITON_BUILD_PROTON", "ON"):  # Default ON
             cmake_args += self.get_proton_cmake_args()
 
-        if check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):
-            cmake_args += ["-DTRITON_BUILD_DISTRIBUTED=ON"]
+        if check_env_flag("TRITON_BUILD_TD", "OFF"):
+            cmake_args += ["-DTRITON_BUILD_TD=ON"]
         else:
-            cmake_args += ["-DTRITON_BUILD_DISTRIBUTED=OFF"]
+            cmake_args += ["-DTRITON_BUILD_TD=OFF"]
 
         if is_offline_build():
             # unit test builds fetch googletests from GitHub

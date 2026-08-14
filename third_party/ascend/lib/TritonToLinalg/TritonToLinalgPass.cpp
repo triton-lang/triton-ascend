@@ -166,6 +166,11 @@ static bool isSIMTOp(Operation *op) {
            custom_op.getVFMode() == hivm::VFMode::SIMT;
   }
 
+  if (auto scopeOp = dyn_cast<scope::ScopeOp>(op)) {
+    auto vecTypeAttr = scopeOp->getAttrOfType<StringAttr>("vector_type");
+    return vecTypeAttr && vecTypeAttr.getValue() == "simt";
+  }
+
   if (isa<triton::GatherOp>(op) && compileOn91095Flag) {
     return true;
   }

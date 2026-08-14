@@ -73,7 +73,7 @@ struct ControlFlowConditionInfo {
   llvm::DenseMap<scf::ForOp, llvm::DenseMap<Value, SmallVector<int>>>
       tensorIterArgIndicesMap;
 
-  // unique counter value for each ifblock
+  // unique counter value for each ifblock scf.for only.
   llvm::DenseMap<scf::IfOp, Value> cntArgs;
 
   // DAG for if block cross-core dependencies

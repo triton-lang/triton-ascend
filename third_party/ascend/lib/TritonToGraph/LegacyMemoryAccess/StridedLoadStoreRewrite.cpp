@@ -20,9 +20,9 @@
  * THE SOFTWARE.
  */
 
-#include "TritonToLinalg/StridedLoadStoreRewrite.h"
-#include "TritonToLinalg/ImplicitPermute.h"
-#include "TritonToLinalg/MaskAnalysis.h"
+#include "TritonToGraph/LegacyMemoryAccess/StridedLoadStoreRewrite.h"
+#include "TritonMemoryAccess/LoadStoreMaskAnalysis.h"
+#include "TritonMemoryAccess/MemoryAccessTags.h"
 #include "TritonToStructured/PtrAnalysis.h"
 #include "Utils/Utils.h"
 
@@ -163,7 +163,7 @@ static bool offsetMayContainStrideGtOne(Value offset, int depthBudget = 16) {
 }
 
 // Walk through shape-only wrappers to find the underlying scalar !tt.ptr<T>.
-// TileChunkCoalescing lifts invariant pointer tensors as
+// ChunkCoalescing lifts invariant pointer tensors as
 // broadcast(expand_dims(splat(ptr))), which is still a scalar base pointer for
 // indirect access construction.
 static Value getScalarBasePtr(Value tensorPtr, int depthBudget = 8) {
@@ -1334,7 +1334,7 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
     return failure();
   if (op->hasAttr(RewrittenByStridedLoadStoreRewriteTAG))
     return failure();
-  if (op->hasAttr(ImplicitPermute::ImplicitPermuteHandledTAG))
+  if (op->hasAttr(mlir::triton::memory_access::ImplicitPermuteHandledTAG))
     return failure();
   if (op->hasAttr(mlir::ConverterUtils::discreteAttrName))
     return failure();
@@ -1379,7 +1379,7 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
     return failure();
   if (op->hasAttr(RewrittenByStridedLoadStoreRewriteTAG))
     return failure();
-  if (op->hasAttr(ImplicitPermute::ImplicitPermuteHandledTAG))
+  if (op->hasAttr(mlir::triton::memory_access::ImplicitPermuteHandledTAG))
     return failure();
   if (op->hasAttr(mlir::ConverterUtils::discreteAttrName))
     return failure();

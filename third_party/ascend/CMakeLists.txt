@@ -34,7 +34,7 @@ include_directories(${ASCENDNPU_IR_BINARY_DIR}/bishengir/include) # Tablegen'd f
 add_subdirectory(include)
 add_subdirectory(lib)
 
-if(TRITON_BUILD_DISTRIBUTED)
+if(TRITON_BUILD_TD)
   if(NOT EXISTS "${TRITON_DISTRIBUTED_ASCEND_SRC_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "Triton-Distributed submodule is not initialized: ${TRITON_DISTRIBUTED_ASCEND_SRC_DIR}")
   endif()

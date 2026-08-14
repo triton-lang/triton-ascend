@@ -2,6 +2,3 @@
 	path = third_party/ascend/AscendNPU-IR
 	url = https://gitcode.com/Ascend/AscendNPU-IR.git
     depth = 1
-[submodule "third_party/ascend/Triton-distributed-ascend"]
-	path = third_party/ascend/Triton-distributed-ascend
-	url = https://gitcode.com/Ascend/Triton-distributed-ascend.git

@@ -20,8 +20,8 @@
  * THE SOFTWARE.
  */
 
-#include "ascend/include/TritonToLinalg/MaskAnalysis.h"
-#include "ascend/include/Utils/Utils.h"
+#include "TritonMemoryAccess/LoadStoreMaskAnalysis.h"
+#include "TritonMemoryAccess/OpFoldResultUtils.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
@@ -61,6 +61,14 @@ std::optional<MaskState> runMaskAnalysisImpl(MemAccOpTy op,
     return std::nullopt;
   }
   return mstate;
+}
+
+bool isZeroMaskConstant(const OpFoldResult &value) {
+  // Keep the actual mlir::isZeroInteger implementation used by the source
+  // baseline: a zero IntegerAttr or a Value matched as a constant integer.
+  if (auto constant = getConstantIntValue(value))
+    return *constant == 0;
+  return false;
 }
 
 } // namespace
@@ -312,7 +320,7 @@ LogicalResult MaskState::divStates(const MaskState &lhsState,
                                    const MaskState &rhsState,
                                    const Location &loc, OpBuilder &builder) {
   if (!lhsState.scalar && rhsState.scalar) {
-    if (isZeroInteger(rhsState.scalar)) {
+    if (isZeroMaskConstant(rhsState.scalar)) {
       InFlightDiagnostic diag =
           emitError(loc)
           << "Unsupported scenario where rhs is zero constant in divide!";

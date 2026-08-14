@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include "TritonMemoryAccess/MemoryAccessTags.h"
 #include "TritonToStructured/MaskAnalysis.h"
 #include "TritonToStructured/PtrAnalysis.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -44,7 +45,7 @@ using namespace triton;
 // sub-steps (e.g. StridedLoadStoreRewrite) can detect "already handled by
 // ImplicitPermute" and avoid double-processing.
 inline constexpr const char *ImplicitPermuteHandledTAG =
-    "ImplicitPermuteHandled";
+    mlir::triton::memory_access::ImplicitPermuteHandledTAG;
 
 class LoadConverter : public OpRewritePattern<triton::LoadOp> {
 public:

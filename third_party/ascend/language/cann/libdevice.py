@@ -324,6 +324,7 @@ def mulhi(arg0, arg1, _semantic=None):
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
         (core.dtype("int32"), core.dtype("int32")): ("__hmf_mulhi_i32", core.dtype("int32")),
+        (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_umulhi_u32", core.dtype("uint32")),
     }, is_pure=True, _semantic=_semantic)
 
 
@@ -334,6 +335,7 @@ def mul24(arg0, arg1, _semantic=None):
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
         (core.dtype("int32"), core.dtype("int32")): ("__hmf_mul24_i32", core.dtype("int32")),
+        (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_umul24_u32", core.dtype("uint32")),
     }, is_pure=True, _semantic=_semantic)
 
 
@@ -354,6 +356,7 @@ def sad(arg0, arg1, arg2, _semantic=None):
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1, arg2], {
         (core.dtype("int32"), core.dtype("int32"), core.dtype("int32")): ("__hmf_sad_i32", core.dtype("int32")),
+        (core.dtype("uint32"), core.dtype("uint32"), core.dtype("uint32")): ("__hmf_usad_u32", core.dtype("uint32")),
     }, is_pure=True, _semantic=_semantic)
 
 
@@ -388,6 +391,7 @@ def hadd(arg0, arg1, _semantic=None):
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
         (core.dtype("int32"), core.dtype("int32")): ("__hmf_hadd_i32", core.dtype("int32")),
+        (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_uhadd_u32", core.dtype("uint32")),
     }, is_pure=True, _semantic=_semantic)
 
 
@@ -398,6 +402,7 @@ def rhadd(arg0, arg1, _semantic=None):
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
         (core.dtype("int32"), core.dtype("int32")): ("__hmf_rhadd_i32", core.dtype("int32")),
+        (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_urhadd_u32", core.dtype("uint32")),
     }, is_pure=True, _semantic=_semantic)
 
 
@@ -2710,24 +2715,6 @@ def sqrt(arg0, _semantic=None):
     }, is_pure=True, _semantic=_semantic)
 
 
-@core.extern
-def uhadd(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.uhadd for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_uhadd_u32_u32", core.dtype("uint32")),
-    }, is_pure=True, _semantic=_semantic)
-
-
-@core.extern
-def umul24(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.umul24 for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_umul24_u32", core.dtype("uint32")),
-    }, is_pure=True, _semantic=_semantic)
 
 
 @core.extern
@@ -2740,31 +2727,3 @@ def umul64hi(arg0, arg1, _semantic=None):
     }, is_pure=True, _semantic=_semantic)
 
 
-@core.extern
-def umulhi(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.umulhi for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_umulhi_u32", core.dtype("uint32")),
-    }, is_pure=True, _semantic=_semantic)
-
-
-@core.extern
-def urhadd(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.urhadd for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1], {
-        (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_urhadd_u32_u32", core.dtype("uint32")),
-    }, is_pure=True, _semantic=_semantic)
-
-
-@core.extern
-def usad(arg0, arg1, arg2, _semantic=None):
-    if not triton_enable_libdevice_simt():
-        core.static_print("libdevice.usad for simd is unsupported for now.")
-        core.static_assert(False)
-    return core.extern_elementwise("", "", [arg0, arg1, arg2], {
-        (core.dtype("uint32"), core.dtype("uint32"), core.dtype("uint32")): ("__hmf_usad_u32", core.dtype("uint32")),
-    }, is_pure=True, _semantic=_semantic)

@@ -1,4 +1,5 @@
 // RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=True force-simt-template=True' '--triton-to-unstructure=compile-on-910-95=True force-simt-template=True' %s --split-input-file | FileCheck %s
+// RUN: triton-opt '--triton-to-unstructure=compile-on-910-95=True force-simt-template=True' '--triton-to-linalg=compile-on-910-95=True' --split-input-file %s | FileCheck %s --check-prefix=LINALG
 
 // tt.store -> ascend.indirect_store
 tt.func public @triton_indirect_store_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<i64>, %arg2: !tt.ptr<f32>, %arg3: i32) attributes {noinline = false} {
@@ -40,3 +41,36 @@ tt.func public @triton_indirect_store_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr
 // CHECK:           ascend.indirect_store {{.*}} : <f32>, {{.*}} : tensor<8x32xi64>, {{.*}} : tensor<8x32xf32>
 // CHECK:           tt.return
 // CHECK:         }
+
+// tt.int_to_ptr + tt.store -> wrap with addptr(src, 0), then
+// ascend.indirect_store. The addptr wrap is required so that the later
+// TritonToLinalg AddPtrConverter can lower it to a hivm::PointerCastOp
+// (memref type), which IndirectStoreConverter needs to emit
+// func.call @triton_indirect_store.
+// CHECK-LABEL:     tt.func public @triton_indirect_store_int_to_ptr_kernel(
+// CHECK:           %[[ZERO:.*]] = arith.constant 0 : i64
+// CHECK:           %[[BASE:.*]] = tt.int_to_ptr {{.*}} : i64 -> !tt.ptr<f32>
+// CHECK:           %[[WRAPPED:.*]] = tt.addptr %[[BASE]], %[[ZERO]] : !tt.ptr<f32>, i64
+// CHECK:           ascend.indirect_store %[[WRAPPED]] : <f32>, {{.*}} : tensor<8xi64>, {{.*}} : tensor<8xf32>
+// CHECK:           tt.return
+// CHECK:         }
+
+// The same kernel lowered through TritonToLinalg must produce a
+// hivm::PointerCastOp (memref) from the wrapped addptr and finally a
+// func.call @triton_indirect_store.
+// LINALG-LABEL: func.func @triton_indirect_store_int_to_ptr_kernel
+// LINALG: hivm.hir.pointer_cast(%{{.*}}) [%{{.*}}] : memref<?xf32>
+// LINALG: call @triton_indirect_store{{.*}}(%{{.*}}, %{{.*}}, %{{.*}}) : (memref<{{.*}}xf32, strided<[1]>>, tensor<8xi64>, tensor<8xf32>) -> ()
+tt.func public @triton_indirect_store_int_to_ptr_kernel(%arg0: !tt.ptr<i64>, %arg1: !tt.ptr<f32>) {
+  %base_i64 = arith.constant 1024 : i64
+  %base = tt.int_to_ptr %base_i64 : i64 -> !tt.ptr<f32>
+  %cst = arith.constant dense<32> : tensor<8xi32>
+  %range = tt.make_range {end = 8 : i32, start = 0 : i32} : tensor<8xi32>
+  %idx = arith.addi %range, %cst : tensor<8xi32>
+  %base_splat = tt.splat %base : !tt.ptr<f32> -> tensor<8x!tt.ptr<f32>>
+  %ptr = tt.addptr %base_splat, %idx : tensor<8x!tt.ptr<f32>>, tensor<8xi32>
+  %val = tt.load %arg1 : !tt.ptr<f32>
+  %val_splat = tt.splat %val : f32 -> tensor<8xf32>
+  tt.store %ptr, %val_splat {route_discrete_mask_to_simt} : tensor<8x!tt.ptr<f32>>
+  tt.return
+}

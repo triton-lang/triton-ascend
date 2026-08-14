@@ -407,6 +407,24 @@ static bool canUseIndirectFastPath(Value srcPtr, Value ptrOffset) {
   return isa<RankedTensorType>(ptrOffset.getType());
 }
 
+// Wrap an int_to_ptr result with addptr(src, 0) so that the later
+// AddPtrConverter can lower it to a hivm::PointerCastOp (memref type), which
+// the IndirectLoad/StoreConverter needs to emit func.call @triton_indirect_*.
+// Returns the wrapped pointer, or the original srcPtr when it is not an
+// int_to_ptr result.
+static Value wrapIntToPtrWithAddPtr(Value srcPtr, Location loc,
+                                    PatternRewriter &rewriter) {
+  if (auto *defOp = srcPtr.getDefiningOp()) {
+    if (auto intToPtrOp = dyn_cast<triton::IntToPtrOp>(defOp)) {
+      auto zeroOffset = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getZeroAttr(intToPtrOp.getSrc().getType()));
+      return rewriter.create<triton::AddPtrOp>(loc, srcPtr.getType(), srcPtr,
+                                               zeroOffset);
+    }
+  }
+  return srcPtr;
+}
+
 template <typename MemAccOpTy>
 LogicalResult tryRewriteIndirectFastPath(MemAccOpTy op, Location loc,
                                          Value srcPtr, Value ptrOffset,
@@ -433,15 +451,7 @@ LogicalResult tryRewriteIndirectFastPath(MemAccOpTy op, Location loc,
     Value mask = op.getMask();
     Value other = op.getOther();
     auto resultType = op.getType();
-    auto newPtr = srcPtr;
-    if (auto *defOp = srcPtr.getDefiningOp()) {
-      if (auto intToPtrOp = dyn_cast<triton::IntToPtrOp>(defOp)) {
-        auto zeroOffset = rewriter.create<arith::ConstantOp>(
-            loc, rewriter.getZeroAttr(intToPtrOp.getSrc().getType()));
-        newPtr = rewriter.create<triton::AddPtrOp>(loc, srcPtr.getType(),
-                                                   srcPtr, zeroOffset);
-      }
-    }
+    auto newPtr = wrapIntToPtrWithAddPtr(srcPtr, loc, rewriter);
     auto indirect = rewriter.create<triton::ascend::IndirectLoadOp>(
         loc, resultType, newPtr, ptrOffset, mask, other,
         ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op));
@@ -461,6 +471,11 @@ LogicalResult tryRewriteIndirectFastPath(MemAccOpTy op, Location loc,
            "src must be ptr type");
     Value value = op.getValue();
     Value mask = op.getMask();
+
+    // Wrap int_to_ptr with addptr so that AddPtrConverter can later produce
+    // a hivm::PointerCastOp (memref type) from it, which is required by
+    // IndirectStoreConverter to emit func.call @triton_indirect_store.
+    srcPtr = wrapIntToPtrWithAddPtr(srcPtr, loc, rewriter);
 
     // For bool store, unwrap ptr<i1> -> ptr<i8> bitcast before creating
     // indirect_store. Keep ptr<i1> so TypeConverter can map it to memref<?xi8>.

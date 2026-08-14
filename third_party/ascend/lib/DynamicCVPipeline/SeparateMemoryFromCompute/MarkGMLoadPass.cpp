@@ -306,7 +306,8 @@ void MarkGMLoadPass::runOnOperation() {
   // Skip marking for the sdpa infer kernel.
   bool isSdpaInferKernel = false;
   module.walk([&](func::FuncOp funcOp) -> WalkResult {
-    if (funcOp.getSymName() == "_sdpa_infer_kernel" || funcOp.getSymName() == "kernel_sdpa_fwd") {
+    if (funcOp.getSymName() == "_sdpa_infer_kernel" ||
+        funcOp.getSymName() == "kernel_sdpa_fwd") {
       isSdpaInferKernel = true;
       return WalkResult::interrupt();
     }

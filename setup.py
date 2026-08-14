@@ -682,16 +682,55 @@ class CMakeBuild(build_ext):
             print(f"Copied triton-opt to {triton_opt_dst}")
 
 
+def add_git_safe_dir(path: str):
+    safe_dirs = subprocess.run([
+        "git",
+        "config",
+        "--global",
+        "--get-all",
+        "safe.directory",
+    ], capture_output=True, text=True, cwd=Path(triton_dir)).stdout.strip().splitlines()
+
+    if path not in safe_dirs:
+        subprocess.check_call([
+            "git",
+            "config",
+            "--global",
+            "--add",
+            "safe.directory",
+            path,
+        ], cwd=Path(triton_dir))
+
+
 def ensure_distributed_submodule():
-    if not check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):
+    if not check_env_flag("TRITON_BUILD_TD", "OFF"):
         return
     distributed_dir = Path(triton_dir) / "third_party" / "ascend" / "Triton-distributed-ascend"
-    if not (distributed_dir / "CMakeLists.txt").is_file() and is_git_repo():
-        subprocess.check_call(
-            ["git", "submodule", "update", "--init", "--", "third_party/ascend/Triton-distributed-ascend"],
-            cwd=triton_dir)
-    if not (distributed_dir / "CMakeLists.txt").is_file():
-        raise RuntimeError(f"Triton-Distributed submodule is not initialized: {distributed_dir}")
+    commit_id = "d2ac268c7ab4dc09865ed51638104ee1b97dc460"
+    if not distributed_dir.is_dir():
+        subprocess.check_call([
+            "git",
+            "clone",
+            "https://gitcode.com/Ascend/Triton-distributed-ascend.git",
+            "-b",
+            "master",
+        ], cwd=Path(triton_dir) / "third_party" / "ascend")
+    if is_git_repo():
+        add_git_safe_dir(str(distributed_dir))
+        subprocess.check_call([
+            "git",
+            "checkout",
+            commit_id,
+        ], cwd=distributed_dir)
+
+        result = subprocess.run([
+            "git",
+            "rev-parse",
+            "HEAD",
+        ], capture_output=True, text=True, cwd=distributed_dir)
+        current_id = result.stdout.strip()
+        if current_id != commit_id:
+            raise RuntimeError(f"Triton-Distributed submodule is not {commit_id}")
 
 
 ensure_distributed_submodule()
@@ -812,7 +851,7 @@ def get_package_dirs():
         yield ("triton.profiler", "third_party/proton/proton")
         yield ("triton.profiler.hooks", "third_party/proton/proton/hooks")
 
-    if check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):
+    if check_env_flag("TRITON_BUILD_TD", "OFF"):
         yield ("triton_dist", os.path.join("third_party", "ascend", "Triton-distributed-ascend", "python",
                                            "triton_dist"))
 
@@ -838,7 +877,7 @@ def get_packages():
     if check_env_flag("TRITON_BUILD_PROTON", "ON"):  # Default ON
         yield "triton.profiler"
 
-    if check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):
+    if check_env_flag("TRITON_BUILD_TD", "OFF"):
         distributed_pkg_root = os.path.join("third_party", "ascend", "Triton-distributed-ascend", "python",
                                             "triton_dist")
         if os.path.isdir(distributed_pkg_root):
@@ -897,7 +936,7 @@ def add_links(external_only):
     add_link_to_backends(external_only=external_only)
     if not external_only and check_env_flag("TRITON_BUILD_PROTON", "ON"):  # Default ON
         add_link_to_proton()
-    if not external_only and check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):
+    if not external_only and check_env_flag("TRITON_BUILD_TD", "OFF"):
         add_link_to_distributed()
 
 
@@ -1163,7 +1202,7 @@ with open(readme, encoding="utf-8") as fdesc:
     long_description = fdesc.read()
 
 package_data = {}
-if check_env_flag("TRITON_BUILD_DISTRIBUTED", "ON"):
+if check_env_flag("TRITON_BUILD_TD", "OFF"):
     # triton_dist lives outside of python/ and contains PEP 420 namespace
     # packages (e.g. triton_dist/language/extra/) whose loose .py files
     # would otherwise be dropped from the wheel.

@@ -22,15 +22,19 @@
 
 #include <optional>
 
+#include <map>
+
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/SeparateCVScope.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
@@ -38,12 +42,7 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/Interfaces/LoopLikeInterface.h"
 #include "mlir/Pass/Pass.h"
-
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/SplitDataflow/SeparateCVScope.h"
-
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "mlir/Transforms/RegionUtils.h"
 
 using namespace mlir;
 
@@ -1013,6 +1012,54 @@ void mlir::triton::SeparateCVScopePass::runOnOperation() {
   module.walk([](scope::ScopeOp scopeOp) {
     scopeOp->setAttr(CVPipeline::kHIVMMatmulLimitedInCubeAttr,
                      UnitAttr::get(scopeOp->getContext()));
+  });
+
+  // VECTOR scopes: replace the redundant store→load with the stored value.
+  module.walk([](scope::ScopeOp scopeOp) {
+    auto coreTypeAttr =
+        scopeOp->getAttrOfType<hivm::TCoreTypeAttr>(hivm::TCoreTypeAttr::name);
+    if (!coreTypeAttr ||
+        coreTypeAttr.getTcoretype() != hivm::TCoreType::VECTOR) {
+      return;
+    }
+
+    llvm::DenseMap<int64_t, mlir::Value> storedValues;
+    scopeOp.walk([&](LLVM::StoreOp storeOp) {
+      auto transferIdAttr =
+          storeOp->getAttrOfType<mlir::IntegerAttr>(CVPipeline::kTransferId);
+      if (!transferIdAttr) {
+        return;
+      }
+      int64_t tid = transferIdAttr.getInt();
+      storedValues[tid] = storeOp.getValue();
+    });
+
+    if (storedValues.empty()) {
+      return;
+    }
+
+    llvm::SmallVector<LLVM::LoadOp> deadLoads;
+    scopeOp.walk([&](LLVM::LoadOp loadOp) {
+      auto transferIdAttr =
+          loadOp->getAttrOfType<mlir::IntegerAttr>(CVPipeline::kTransferId);
+      if (!transferIdAttr) {
+        return;
+      }
+      int64_t tid = transferIdAttr.getInt();
+      auto it = storedValues.find(tid);
+      if (it == storedValues.end()) {
+        return;
+      }
+      mlir::Value storeVal = it->second;
+      if (storeVal == loadOp.getResult()) {
+        return;
+      }
+      loadOp.replaceAllUsesWith(storeVal);
+      deadLoads.push_back(loadOp);
+    });
+    for (LLVM::LoadOp loadOp : deadLoads) {
+      loadOp->erase();
+    }
   });
 
   debugDumpOperation("after SeparateCVScopePass", module.getOperation());

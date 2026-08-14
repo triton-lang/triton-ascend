@@ -900,9 +900,11 @@ extern "C" {
       int dataTypes[MSPROF_GE_TENSOR_DATA_NUM];
       if (tensorShapes.size() > 0) {{
         {LINE_CHANGE_CHAR.join(
-          f'dataTypes[{i}] = {convert_sigtype_to_int(ty[1:])};'
-          for i, ty in signature.items()
-          if ty.startswith("*") and i < 5
+          f'dataTypes[{idx}] = {convert_sigtype_to_int(ty[1:])};'
+          for idx, (_, ty) in enumerate(
+            (k, v) for k, v in signature.items() if v.startswith("*")
+          )
+          if idx < 5
         )}
       }}
       for (int i = 0; i < tensorShapes.size() && tensorCount < MSPROF_GE_TENSOR_DATA_NUM; i++) {{

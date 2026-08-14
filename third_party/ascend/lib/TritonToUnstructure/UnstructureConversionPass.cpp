@@ -327,6 +327,45 @@ static Type getResultElementType(RankedTensorType ptrType) {
   return resultElementType;
 }
 
+static triton::MakeTensorPtrOp getBaseMakeTensorPtr(Value ptr) {
+  while (auto advance = ptr.getDefiningOp<triton::AdvanceOp>())
+    ptr = advance.getPtr();
+  return ptr.getDefiningOp<triton::MakeTensorPtrOp>();
+}
+
+static bool hasStaticZeroStride(triton::MakeTensorPtrOp makeTensorPtr) {
+  return makeTensorPtr &&
+         llvm::any_of(makeTensorPtr.getStrides(), [](Value stride) {
+           auto constantStride = getConstantIntValue(stride);
+           return constantStride.has_value() && constantStride.value() == 0;
+         });
+}
+
+static Value castToIndex(Value value, Location loc, PatternRewriter &rewriter) {
+  if (value.getType().isIndex())
+    return value;
+  return rewriter.create<arith::IndexCastOp>(loc, rewriter.getIndexType(),
+                                             value);
+}
+
+static Value getPaddingValue(triton::LoadOp op, Type elementType,
+                             PatternRewriter &rewriter) {
+  auto padding = op.getPadding();
+  if (!padding.has_value())
+    return Value();
+
+  auto loc = op.getLoc();
+  TypedAttr padAttr = rewriter.getZeroAttr(elementType);
+  if (padding.value() == triton::PaddingOption::PAD_NAN) {
+    auto floatType = dyn_cast<FloatType>(elementType);
+    if (!floatType)
+      return Value();
+    auto nan = llvm::APFloat::getNaN(floatType.getFloatSemantics());
+    padAttr = rewriter.getFloatAttr(elementType, nan);
+  }
+  return rewriter.create<arith::ConstantOp>(loc, padAttr);
+}
+
 static int64_t getTypeSizeInByte(Type type) {
   if (auto intType = dyn_cast<IntegerType>(type)) {
     return intType.getWidth() / kBitsPerByte;
@@ -731,6 +770,25 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   auto ptrOffsetInfo = offsetMap.at(ptr);
 
+  // BishengIR does not accept a memref with a static zero stride.  A
+  // make_tensor_ptr load nevertheless has well-defined broadcast semantics:
+  // the physical offset does not advance on that axis, while boundary_check
+  // remains in the logical shape/offset coordinate system.  Force only this
+  // load through the existing scalar-loop fallback so it never materializes a
+  // zero-strided memref.  Other accesses keep their original structured path.
+  triton::MakeTensorPtrOp zeroStrideMakeTensorPtr;
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+    zeroStrideMakeTensorPtr = getBaseMakeTensorPtr(ptr);
+    // A5 pure-SIMT has a dedicated earlier rewrite to tt.indirect_load. Keep
+    // that efficient route intact; every other target/mode takes this generic
+    // fallback.
+    if (hasStaticZeroStride(zeroStrideMakeTensorPtr) &&
+        !(compileOn91095Flag && forceSimtTemplateFlag))
+      ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
+    else
+      zeroStrideMakeTensorPtr = nullptr;
+  }
+
   if (checkUnstructureAnnotated(op, rewriter))
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
 
@@ -834,6 +892,14 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   if (isLoadLike) {
     iterArg =
         rewriter.create<tensor::EmptyOp>(loc, resultShape, resultElementType);
+    if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+      if (zeroStrideMakeTensorPtr && !op.getBoundaryCheck().empty()) {
+        if (Value padding = getPaddingValue(op, resultElementType, rewriter)) {
+          iterArg = rewriter.create<linalg::FillOp>(loc, padding, iterArg)
+                        .getResult(0);
+        }
+      }
+    }
   }
   Value newOpResult = nullptr;
 
@@ -858,8 +924,11 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       extractedShape.push_back(size);
     } else {
       scf::ForOp forOp;
-      if (auto mtptOp =
-              srcPtr.template getDefiningOp<triton::MakeTensorPtrOp>()) {
+      auto mtptOp =
+          zeroStrideMakeTensorPtr
+              ? zeroStrideMakeTensorPtr
+              : srcPtr.template getDefiningOp<triton::MakeTensorPtrOp>();
+      if (mtptOp) {
         auto tptShape = mtptOp.getShape()[i];
         if (tptShape.getType() != rewriter.getIndexType()) {
           tptShape = rewriter.create<arith::IndexCastOp>(
@@ -870,18 +939,38 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
       Value loopLower = zeroIdx;
       Value loopUpper = sizeVal;
+      if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+        if (zeroStrideMakeTensorPtr && llvm::find(op.getBoundaryCheck(), i) !=
+                                           op.getBoundaryCheck().end()) {
+          Value logicalOffset =
+              castToIndex(ptrOffsetInfo.getOffsets()[i], loc, rewriter);
+          Value logicalShape =
+              castToIndex(zeroStrideMakeTensorPtr.getShape()[i], loc, rewriter);
+          Value firstValidIndex =
+              rewriter.create<arith::SubIOp>(loc, zeroIdx, logicalOffset);
+          firstValidIndex =
+              rewriter.create<arith::MaxSIOp>(loc, firstValidIndex, zeroIdx);
+          loopLower =
+              rewriter.create<arith::MinSIOp>(loc, firstValidIndex, sizeVal);
+
+          Value remaining =
+              rewriter.create<arith::SubIOp>(loc, logicalShape, logicalOffset);
+          remaining = rewriter.create<arith::MaxSIOp>(loc, remaining, zeroIdx);
+          loopUpper = rewriter.create<arith::MinSIOp>(loc, remaining, sizeVal);
+        }
+      }
       if (mstate && i < mstate->dims.size() && i < mstate->offsets.size()) {
         Value maskOffset =
             getValueOrCreateConstantIndexOp(rewriter, loc, mstate->offsets[i]);
         maskOffset = rewriter.create<arith::MaxSIOp>(loc, maskOffset, zeroIdx);
         maskOffset = rewriter.create<arith::MinSIOp>(loc, maskOffset, sizeVal);
-        loopLower = maskOffset;
+        loopLower = rewriter.create<arith::MaxSIOp>(loc, loopLower, maskOffset);
 
         Value maskDim =
             getValueOrCreateConstantIndexOp(rewriter, loc, mstate->dims[i]);
         maskDim = rewriter.create<arith::AddIOp>(loc, maskOffset, maskDim);
         maskDim = rewriter.create<arith::MinSIOp>(loc, maskDim, sizeVal);
-        loopUpper = maskDim;
+        loopUpper = rewriter.create<arith::MinSIOp>(loc, loopUpper, maskDim);
       }
 
       if (isLoadLike) {
@@ -910,8 +999,11 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   Value extractedOffset;
   if (fullyUnstructured) {
-    if (auto mtptOp =
-            srcPtr.template getDefiningOp<triton::MakeTensorPtrOp>()) {
+    auto mtptOp =
+        zeroStrideMakeTensorPtr
+            ? zeroStrideMakeTensorPtr
+            : srcPtr.template getDefiningOp<triton::MakeTensorPtrOp>();
+    if (mtptOp) {
       auto I64Type = rewriter.getIntegerType(64);
       srcPtr = mtptOp.getBase();
       extractedOffset = rewriter.create<arith::ConstantIntOp>(loc, 0, 64);

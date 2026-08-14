@@ -19,45 +19,27 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include <functional>
-#include <string>
-#include <type_traits>
-
+#include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfoLegacy.h"
+#include "DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "llvm/ADT/APFloat.h"
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringRef.h"
-#include "llvm/CodeGen/MachinePassManager.h"
-#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/IR/Builders.h"
-#include "mlir/IR/Location.h"
-#include "mlir/IR/ValueRange.h"
+#include <string>
 
-#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
-#include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-
-#include "bishengir/Dialect/Annotation/IR/Annotation.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "bishengir/Dialect/HIVM/IR/HIVMInterfaces.h"
-#include "bishengir/Dialect/Scope/IR/Scope.h"
-#include "mlir/Pass/PassManager.h"
-#include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
-
-static constexpr const char *DEBUG_TYPE = "UpdateConditionInfoPass";
+static constexpr const char *DEBUG_TYPE = "UpdateConditionInfoPassLegacy";
+static constexpr const char *SSBUFFER_Main_LOOP = "ssbuffer.main_loop";
+static constexpr const char *SSBUFFER_IF = "ssbuffer.if";
+static constexpr int SSBUF_ADDR_SPACE = 11;
+static constexpr int ADDR_INT_TYPE = 64;
+static constexpr int CONST_INT_TYPE = 32;
 static constexpr int VECTOR_SSBUF_OFFSET = 1024;
 static constexpr int VALUE_SSBUF_OFFSET = 4;
 static constexpr int UPDATE_CONDITION_INFO_SUCCESS = 0;
 static constexpr int UPDATE_CONDITION_INFO_FAILED = -1;
-static constexpr size_t kVectorCount = 2;
 
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
@@ -68,7 +50,6 @@ static constexpr size_t kVectorCount = 2;
 using namespace mlir;
 using namespace triton;
 using namespace hivm;
-using namespace CVPipeline;
 
 static void logConditionGroupIndices(llvm::StringRef label,
                                      llvm::ArrayRef<int> groupIndices) {
@@ -96,55 +77,67 @@ static void logOutputGroupValues(llvm::StringRef label,
 
 // Allocate the SSBuffer pointer
 SmallVector<SmallVector<Value>>
-UpdateConditionInfoPass::allocSSBuffer(ModuleOp module) {
+UpdateConditionInfoPassLegacy::allocSSBuffer(ModuleOp module) {
   OpBuilder builder(module.getContext());
   auto i64Type = builder.getIntegerType(ADDR_INT_TYPE);
   auto i32Type = builder.getIntegerType(CONST_INT_TYPE);
-  auto memrefType = getSsbufMemrefType(builder);
+  auto ptrType =
+      mlir::LLVM::LLVMPointerType::get(builder.getContext(), SSBUF_ADDR_SPACE);
 
   // alloc 2 group of ssbuffer pointers:
   // Core Vector 0: allocate ssbuffer address: 0, 4, 8, ...
   // Core Vector 1: allocate ssbuffer address: 1024, 1028, 1032, ...
-  SmallVector<SmallVector<Value>> ssbufferMemrefs;
-  SmallVector<Value> ssbufferVec0Memrefs;
-  SmallVector<Value> ssbufferVec1Memrefs;
+  SmallVector<SmallVector<Value>> ssbufferPtrs;
+  SmallVector<Value> ssbufferVec0Ptrs;
+  SmallVector<Value> ssbufferVec1Ptrs;
   int numBuffers = info->crossCoreDependentMap.size();
   if (numBuffers == 0) {
     LDBG("crossCoreDependentMap is empty!" << "\n");
-    return ssbufferMemrefs;
+    return ssbufferPtrs;
   }
 
   module->walk([&](Operation *op) {
     if (auto scopeOp = dyn_cast<scope::ScopeOp>(op)) {
       builder.setInsertionPoint(scopeOp);
-      auto loc = scopeOp.getLoc();
-      auto zeroConst = builder.create<arith::ConstantOp>(
+      auto zeroConst = builder.create<mlir::LLVM::ConstantOp>(
           scopeOp->getLoc(), i32Type, builder.getIntegerAttr(i32Type, 0));
 
       for (int i = 0; i < numBuffers; i++) {
-        auto memref0 =
-            createPointerCastOp(builder, loc, i * VALUE_SSBUF_OFFSET);
-        auto memref1 = createPointerCastOp(
-            builder, loc, VECTOR_SSBUF_OFFSET + i * VALUE_SSBUF_OFFSET);
+        auto addr0Attr =
+            builder.getIntegerAttr(i64Type, i * VALUE_SSBUF_OFFSET);
+        auto addr1Attr = builder.getIntegerAttr(
+            i64Type, VECTOR_SSBUF_OFFSET + i * VALUE_SSBUF_OFFSET);
 
-        builder.create<memref::StoreOp>(scopeOp->getLoc(), zeroConst, memref0);
-        builder.create<memref::StoreOp>(scopeOp->getLoc(), zeroConst, memref1);
+        auto addr0Const = builder.create<mlir::LLVM::ConstantOp>(
+            scopeOp->getLoc(), i64Type, addr0Attr);
+        auto addr1Const = builder.create<mlir::LLVM::ConstantOp>(
+            scopeOp->getLoc(), i64Type, addr1Attr);
 
-        ssbufferVec0Memrefs.push_back(memref0.getResult());
-        ssbufferVec1Memrefs.push_back(memref1.getResult());
+        auto ptr0 = builder.create<mlir::LLVM::IntToPtrOp>(
+            scopeOp->getLoc(), ptrType, addr0Const.getResult());
+        auto ptr1 = builder.create<mlir::LLVM::IntToPtrOp>(
+            scopeOp->getLoc(), ptrType, addr1Const.getResult());
+
+        builder.create<LLVM::StoreOp>(scopeOp->getLoc(), zeroConst, ptr0, 0,
+                                      /*volatile=*/true);
+        builder.create<LLVM::StoreOp>(scopeOp->getLoc(), zeroConst, ptr1, 0,
+                                      /*volatile=*/true);
+
+        ssbufferVec0Ptrs.push_back(ptr0.getResult());
+        ssbufferVec1Ptrs.push_back(ptr1.getResult());
       }
       return mlir::WalkResult::interrupt();
     }
     return mlir::WalkResult::advance();
   });
 
-  ssbufferMemrefs.push_back(ssbufferVec0Memrefs);
-  ssbufferMemrefs.push_back(ssbufferVec1Memrefs);
-  return ssbufferMemrefs;
+  ssbufferPtrs.push_back(ssbufferVec0Ptrs);
+  ssbufferPtrs.push_back(ssbufferVec1Ptrs);
+  return ssbufferPtrs;
 }
 
 // Collect dependency buffer
-void UpdateConditionInfoPass::collectDependencyBuffers(
+void UpdateConditionInfoPassLegacy::collectDependencyBuffers(
     ModuleOp module, SmallVector<scf::ForOp> &mainLoopForOps,
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         &crossCoreBuffers,
@@ -194,8 +187,8 @@ static int findTcbGroupId(
 }
 
 // Helper: Add all equivalent ops from tcbOps to ops (excluding op itself)
-int addEquivalentOps(Operation *op, SmallVector<Operation *> &tcbOps,
-                     SmallVector<Operation *> &ops) {
+static int addEquivalentOps(Operation *op, SmallVector<Operation *> &tcbOps,
+                            SmallVector<Operation *> &ops) {
   int ret = -1;
   for (Operation *equivOp : tcbOps) {
     if (equivOp != op && !llvm::is_contained(ops, equivOp)) {
@@ -206,7 +199,7 @@ int addEquivalentOps(Operation *op, SmallVector<Operation *> &tcbOps,
   return ret;
 }
 
-int UpdateConditionInfoPass::buildIdxToVarMap(
+int UpdateConditionInfoPassLegacy::buildIdxToVarMap(
     scf::ForOp forOp,
     const DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         &intraCoreBuffers,
@@ -284,7 +277,7 @@ static int buildBufferDependencyMappings(
 //   input/output groups
 //   3. Traverse ifOp.thenYield() operands, collect yield output groups
 //   4. Deduplicate and output four groups of index values
-int UpdateConditionInfoPass::getInputOutputValues(
+int UpdateConditionInfoPassLegacy::getInputOutputValues(
     scf::IfOp ifOp,
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         crossCoreBuffers,
@@ -372,7 +365,8 @@ int UpdateConditionInfoPass::getInputOutputValues(
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
-Value UpdateConditionInfoPass::getVarValue(scf::ForOp forOp, int varIndex) {
+Value UpdateConditionInfoPassLegacy::getVarValue(scf::ForOp forOp,
+                                                 int varIndex) {
   if (!info->innerDepConds.count(forOp))
     return Value();
   SmallVector<int> &innerDepIndices = info->innerDepConds[forOp];
@@ -384,7 +378,7 @@ Value UpdateConditionInfoPass::getVarValue(scf::ForOp forOp, int varIndex) {
 }
 
 // Build the information of the producer group.
-int UpdateConditionInfoPass::buildOutputGroups(
+int UpdateConditionInfoPassLegacy::buildOutputGroups(
     SmallVector<int> &intraCoreOutputValues,
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         &intraCoreBuffers,
@@ -441,10 +435,10 @@ int UpdateConditionInfoPass::buildOutputGroups(
 
 // Select corresponding SSBuffer ptr based on ifblock running on vector/cube
 // core
-Value UpdateConditionInfoPass::getSSBufferMemref(
+Value UpdateConditionInfoPassLegacy::getSSBufferPtr(
     bool isAIC, int groupIdx, int ptrSetIdx,
     DenseMap<int, Value> &VectorSSBufferPtrs,
-    ArrayRef<SmallVector<Value>> ssbufferPtrs) {
+    SmallVector<SmallVector<Value>> ssbufferPtrs) {
   if (isAIC) {
     return ssbufferPtrs[ptrSetIdx][groupIdx];
   } else {
@@ -454,7 +448,7 @@ Value UpdateConditionInfoPass::getSSBufferMemref(
 
 // Compute pointers for VECTOR core SSBuffer
 std::optional<DenseMap<int, Value>>
-UpdateConditionInfoPass::computeVectorSSBufferMemrefs(
+UpdateConditionInfoPassLegacy::computeVectorSSBufferPtrs(
     OpBuilder &builder, Location loc, Operation *scopeOp,
     SmallVector<int> crossCoreInputValues,
     SmallVector<int> crossCoreOutputValues) {
@@ -477,7 +471,7 @@ UpdateConditionInfoPass::computeVectorSSBufferMemrefs(
     }
   }
 
-  DenseMap<int, Value> vectorSSBufferMemrefs;
+  DenseMap<int, Value> vectorSSBufferPtrs;
 
   builder.setInsertionPointToStart(&scopeOp->getRegion(0).front());
   int vec1Offset = 1024;
@@ -493,37 +487,17 @@ UpdateConditionInfoPass::computeVectorSSBufferMemrefs(
         loc, groupIdx * VALUE_SSBUF_OFFSET, ADDR_INT_TYPE);
     auto ssbAddr =
         builder.create<arith::AddIOp>(loc, ssbBaseAddr, ssbAddrOffset);
-    Value memref = builder.create<PointerCastOp>(
-        loc, getSsbufMemrefType(builder), ssbAddr.getResult());
-    vectorSSBufferMemrefs[groupIdx] = memref;
+    Value ptr = builder.create<LLVM::IntToPtrOp>(
+        loc, LLVM::LLVMPointerType::get(builder.getContext(), SSBUF_ADDR_SPACE),
+        ssbAddr.getResult());
+    vectorSSBufferPtrs[groupIdx] = ptr;
   }
 
-  return vectorSSBufferMemrefs;
-}
-
-template <typename FuncTy>
-auto UpdateConditionInfoPass::createSsbufLoads(
-    OpBuilder &builder, Location loc, bool isAIC, int groupIdx,
-    DenseMap<int, Value> &vectorSSBufferMemrefs,
-    llvm::ArrayRef<SmallVector<Value>> ssbufferMemrefs, FuncTy &&pred) {
-  using ResTy = std::invoke_result_t<FuncTy, memref::LoadOp, int>;
-  SmallVector<ResTy, kVectorCount> res;
-  size_t resNum = isAIC ? kVectorCount : 1;
-  for (int ptrSetIdx : llvm::seq(resNum)) {
-    auto loadOp = builder.create<memref::LoadOp>(
-        loc,
-        getSSBufferMemref(isAIC, groupIdx, ptrSetIdx, vectorSSBufferMemrefs,
-                          ssbufferMemrefs),
-        ValueRange{});
-    auto markOp = builder.create<annotation::MarkOp>(loc, loadOp);
-    markOp->setAttr(kMemrefExtVolatile, builder.getUnitAttr());
-    res.push_back(std::invoke(pred, loadOp, ptrSetIdx));
-  }
-  return res;
+  return vectorSSBufferPtrs;
 }
 
 // Part 2: Add cross-core conditions
-Value UpdateConditionInfoPass::addCrossCoreConditions(
+Value UpdateConditionInfoPassLegacy::addCrossCoreConditions(
     OpBuilder &builder, Location loc, SmallVector<int> crossCoreInputValues,
     SmallVector<int> crossCoreOutputValues,
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
@@ -541,15 +515,31 @@ Value UpdateConditionInfoPass::addCrossCoreConditions(
   };
 
   for (int inputGroupIdx : crossCoreInputValues) {
-    auto conds = createSsbufLoads(
-        builder, loc, isAIC, inputGroupIdx, VectorSSBufferPtrs, ssbufferPtrs,
-        [&](memref::LoadOp loadOp, auto) {
-          return builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sgt,
-                                               loadOp, zeroConst);
-        });
-    Value cond = conds[0];
+    Value cond = nullptr;
     if (isAIC) {
-      cond = builder.create<arith::AndIOp>(loc, conds[0], conds[1]);
+      Value vec0Value = builder.create<LLVM::LoadOp>(
+          loc, builder.getI32Type(),
+          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs,
+                         ssbufferPtrs),
+          0, /*volatile=*/true);
+      Value vec1Value = builder.create<LLVM::LoadOp>(
+          loc, builder.getI32Type(),
+          getSSBufferPtr(isAIC, inputGroupIdx, 1, VectorSSBufferPtrs,
+                         ssbufferPtrs),
+          0, /*volatile=*/true);
+      Value vec0Cond = builder.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::sgt, vec0Value, zeroConst);
+      Value vec1Cond = builder.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::sgt, vec1Value, zeroConst);
+      cond = builder.create<arith::AndIOp>(loc, vec0Cond, vec1Cond);
+    } else {
+      Value value = builder.create<LLVM::LoadOp>(
+          loc, builder.getI32Type(),
+          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs,
+                         ssbufferPtrs),
+          0, /*volatile=*/true);
+      cond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sgt,
+                                           value, zeroConst);
     }
     combineCondition(cond);
   }
@@ -567,15 +557,31 @@ Value UpdateConditionInfoPass::addCrossCoreConditions(
     }
     Value bufferNum =
         builder.create<arith::ConstantIntOp>(loc, outputCount, CONST_INT_TYPE);
-    auto conds = createSsbufLoads(
-        builder, loc, isAIC, outputGroupIdx, VectorSSBufferPtrs, ssbufferPtrs,
-        [&](Value cond, auto) {
-          return builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt,
-                                               cond, bufferNum);
-        });
-    Value cond = conds[0];
+    Value cond = nullptr;
     if (isAIC) {
-      cond = builder.create<arith::AndIOp>(loc, conds[0], conds[1]);
+      Value vec0Value = builder.create<LLVM::LoadOp>(
+          loc, builder.getI32Type(),
+          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs,
+                         ssbufferPtrs),
+          0, /*volatile=*/true);
+      Value vec1Value = builder.create<LLVM::LoadOp>(
+          loc, builder.getI32Type(),
+          getSSBufferPtr(isAIC, outputGroupIdx, 1, VectorSSBufferPtrs,
+                         ssbufferPtrs),
+          0, /*volatile=*/true);
+      Value vec0Cond = builder.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::slt, vec0Value, bufferNum);
+      Value vec1Cond = builder.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::slt, vec1Value, bufferNum);
+      cond = builder.create<arith::AndIOp>(loc, vec0Cond, vec1Cond);
+    } else {
+      Value value = builder.create<LLVM::LoadOp>(
+          loc, builder.getI32Type(),
+          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs,
+                         ssbufferPtrs),
+          0, /*volatile=*/true);
+      cond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt,
+                                           value, bufferNum);
     }
     combineCondition(cond);
   }
@@ -584,7 +590,7 @@ Value UpdateConditionInfoPass::addCrossCoreConditions(
 }
 
 // Part 3: Update control variables in then block
-void UpdateConditionInfoPass::updateCrossCoreControlVars(
+void UpdateConditionInfoPassLegacy::updateCrossCoreControlVars(
     OpBuilder &builder, Location loc, scf::IfOp ifOp,
     SmallVector<int> crossCoreInputValues,
     SmallVector<int> crossCoreOutputValues, bool isAIC, Value oneConst,
@@ -595,34 +601,90 @@ void UpdateConditionInfoPass::updateCrossCoreControlVars(
   builder.setInsertionPoint(yieldOp);
 
   for (int inputGroupIdx : crossCoreInputValues) {
-    createSsbufLoads(builder, loc, isAIC, inputGroupIdx, VectorSSBufferPtrs,
-                     ssbufferPtrs, [&](Value loadRes, int ptrSetIdx) {
-                       Value newValue = builder.create<arith::SubIOp>(
-                           loc, loadRes, oneConst);
-                       return builder.create<memref::StoreOp>(
-                           loc, newValue,
-                           getSSBufferMemref(isAIC, inputGroupIdx, ptrSetIdx,
-                                             VectorSSBufferPtrs, ssbufferPtrs),
-                           ValueRange{});
-                     });
+    if (isAIC) {
+      Value vec0Value = builder.create<LLVM::LoadOp>(
+          loc, builder.getI32Type(),
+          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs,
+                         ssbufferPtrs),
+          0, /*volatile=*/true);
+      Value vec1Value = builder.create<LLVM::LoadOp>(
+          loc, builder.getI32Type(),
+          getSSBufferPtr(isAIC, inputGroupIdx, 1, VectorSSBufferPtrs,
+                         ssbufferPtrs),
+          0, /*volatile=*/true);
+      Value vec0NewValue =
+          builder.create<arith::SubIOp>(loc, vec0Value, oneConst);
+      Value vec1NewValue =
+          builder.create<arith::SubIOp>(loc, vec1Value, oneConst);
+      builder.create<LLVM::StoreOp>(loc, vec0NewValue,
+                                    getSSBufferPtr(isAIC, inputGroupIdx, 0,
+                                                   VectorSSBufferPtrs,
+                                                   ssbufferPtrs),
+                                    0, /*volatile=*/true);
+      builder.create<LLVM::StoreOp>(loc, vec1NewValue,
+                                    getSSBufferPtr(isAIC, inputGroupIdx, 1,
+                                                   VectorSSBufferPtrs,
+                                                   ssbufferPtrs),
+                                    0, /*volatile=*/true);
+    } else {
+      Value value = builder.create<LLVM::LoadOp>(
+          loc, builder.getI32Type(),
+          getSSBufferPtr(isAIC, inputGroupIdx, 0, VectorSSBufferPtrs,
+                         ssbufferPtrs),
+          0, /*volatile=*/true);
+      Value newValue = builder.create<arith::SubIOp>(loc, value, oneConst);
+      builder.create<LLVM::StoreOp>(loc, newValue,
+                                    getSSBufferPtr(isAIC, inputGroupIdx, 0,
+                                                   VectorSSBufferPtrs,
+                                                   ssbufferPtrs),
+                                    0, /*volatile=*/true);
+    }
   }
 
   for (int outputGroupIdx : crossCoreOutputValues) {
-    createSsbufLoads(builder, loc, isAIC, outputGroupIdx, VectorSSBufferPtrs,
-                     ssbufferPtrs, [&](Value loadRes, int ptrSetIdx) {
-                       Value newValue = builder.create<arith::AddIOp>(
-                           loc, loadRes, oneConst);
-                       return builder.create<memref::StoreOp>(
-                           loc, newValue,
-                           getSSBufferMemref(isAIC, outputGroupIdx, ptrSetIdx,
-                                             VectorSSBufferPtrs, ssbufferPtrs),
-                           ValueRange{});
-                     });
+    if (isAIC) {
+      Value vec0Value = builder.create<LLVM::LoadOp>(
+          loc, builder.getI32Type(),
+          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs,
+                         ssbufferPtrs),
+          0, /*volatile=*/true);
+      Value vec1Value = builder.create<LLVM::LoadOp>(
+          loc, builder.getI32Type(),
+          getSSBufferPtr(isAIC, outputGroupIdx, 1, VectorSSBufferPtrs,
+                         ssbufferPtrs),
+          0, /*volatile=*/true);
+      Value vec0NewValue =
+          builder.create<arith::AddIOp>(loc, vec0Value, oneConst);
+      Value vec1NewValue =
+          builder.create<arith::AddIOp>(loc, vec1Value, oneConst);
+      builder.create<LLVM::StoreOp>(loc, vec0NewValue,
+                                    getSSBufferPtr(isAIC, outputGroupIdx, 0,
+                                                   VectorSSBufferPtrs,
+                                                   ssbufferPtrs),
+                                    0, /*volatile=*/true);
+      builder.create<LLVM::StoreOp>(loc, vec1NewValue,
+                                    getSSBufferPtr(isAIC, outputGroupIdx, 1,
+                                                   VectorSSBufferPtrs,
+                                                   ssbufferPtrs),
+                                    0, /*volatile=*/true);
+    } else {
+      Value value = builder.create<LLVM::LoadOp>(
+          loc, builder.getI32Type(),
+          getSSBufferPtr(isAIC, outputGroupIdx, 0, VectorSSBufferPtrs,
+                         ssbufferPtrs),
+          0, /*volatile=*/true);
+      Value newValue = builder.create<arith::AddIOp>(loc, value, oneConst);
+      builder.create<LLVM::StoreOp>(loc, newValue,
+                                    getSSBufferPtr(isAIC, outputGroupIdx, 0,
+                                                   VectorSSBufferPtrs,
+                                                   ssbufferPtrs),
+                                    0, /*volatile=*/true);
+    }
   }
 }
 
 // Set the crossCore condition
-int UpdateConditionInfoPass::setCrossCoreCondition(
+int UpdateConditionInfoPassLegacy::setCrossCoreCondition(
     SmallVector<int> crossCoreInputValues,
     SmallVector<int> crossCoreOutputValues,
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
@@ -672,7 +734,7 @@ int UpdateConditionInfoPass::setCrossCoreCondition(
   // side
   DenseMap<int, Value> VectorSSBufferPtrs;
   if (!isAIC) {
-    auto result = computeVectorSSBufferMemrefs(
+    auto result = computeVectorSSBufferPtrs(
         builder, loc, scopeOp, crossCoreInputValues, crossCoreOutputValues);
     if (!result) {
       LDBG("computeVectorSSBufferPtrs failed!");
@@ -697,7 +759,7 @@ int UpdateConditionInfoPass::setCrossCoreCondition(
 }
 
 // Collect the conditions for intra-core consumer values.
-void UpdateConditionInfoPass::collectIntraCoreInputConditions(
+void UpdateConditionInfoPassLegacy::collectIntraCoreInputConditions(
     OpBuilder &builder, Location loc, SmallVector<int> &intraCoreInputValues,
     DenseMap<int, Value> &idxToVar, SmallVector<Value> &conditions,
     DenseSet<Value> &usedVarsSet,
@@ -737,7 +799,7 @@ void UpdateConditionInfoPass::collectIntraCoreInputConditions(
 }
 
 // Collect the conditions for intra-core producer values.
-int UpdateConditionInfoPass::collectIntraCoreOutputConditions(
+int UpdateConditionInfoPassLegacy::collectIntraCoreOutputConditions(
     OpBuilder &builder, Location loc,
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         &intraCoreBuffers,
@@ -781,7 +843,8 @@ int UpdateConditionInfoPass::collectIntraCoreOutputConditions(
 }
 
 // Build the ifOp variable mapping for the tensor iter_args
-int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(scf::ForOp forOp) {
+int UpdateConditionInfoPassLegacy::buildTensorIterArgIfOpVarMap(
+    scf::ForOp forOp) {
   // Clear any previous data
   tensorIterArgIfOpVars.clear();
 
@@ -853,7 +916,7 @@ int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(scf::ForOp forOp) {
 }
 
 // Collect the conditions for tensor iter arg consumer values.
-void UpdateConditionInfoPass::collectTensorIterArgInputConditions(
+void UpdateConditionInfoPassLegacy::collectTensorIterArgInputConditions(
     OpBuilder &builder, Location loc, scf::IfOp ifOp,
     SmallVector<Value> &conditions, DenseSet<Value> &usedVarsSet,
     DenseMap<Value, VarUpdateType> &varUpdateTypes) {
@@ -881,7 +944,7 @@ void UpdateConditionInfoPass::collectTensorIterArgInputConditions(
 }
 
 // Collect the conditions for tensor iter arg producer values.
-void UpdateConditionInfoPass::collectTensorIterArgOutputConditions(
+void UpdateConditionInfoPassLegacy::collectTensorIterArgOutputConditions(
     OpBuilder &builder, Location loc, scf::IfOp ifOp,
     SmallVector<Value> &conditions, DenseSet<Value> &usedVarsSet,
     DenseMap<Value, VarUpdateType> &varUpdateTypes) {
@@ -910,7 +973,7 @@ void UpdateConditionInfoPass::collectTensorIterArgOutputConditions(
 }
 
 // Set the intraCore condition.
-int UpdateConditionInfoPass::setIntraCoreCondition(
+int UpdateConditionInfoPassLegacy::setIntraCoreCondition(
     ModuleOp module, scf::IfOp ifOp,
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         &intraCoreBuffers,
@@ -964,9 +1027,9 @@ int UpdateConditionInfoPass::setIntraCoreCondition(
 }
 
 // Set the FlowOpt extra condition for the third if block in the DAG
-int UpdateConditionInfoPass::setFlowOptCondition(scf::IfOp currentIfOp,
-                                                 scf::ForOp forOp,
-                                                 Value &flowOptCond) {
+int UpdateConditionInfoPassLegacy::setFlowOptCondition(scf::IfOp currentIfOp,
+                                                       scf::ForOp forOp,
+                                                       Value &flowOptCond) {
   // Check if current ifOp is a target node (third node) in flowOptIfOpPairs
   if (!info->flowOptIfOpPairs.count(currentIfOp)) {
     LDBG("Current ifOp is not a flowOpt target node, skip.");
@@ -1025,8 +1088,8 @@ int UpdateConditionInfoPass::setFlowOptCondition(scf::IfOp currentIfOp,
 }
 
 // Update DAG nodes after ifOp replacement
-void UpdateConditionInfoPass::updateDAGAfterIfOpReplacement(scf::IfOp oldIfOp,
-                                                            scf::IfOp newIfOp) {
+void UpdateConditionInfoPassLegacy::updateDAGAfterIfOpReplacement(
+    scf::IfOp oldIfOp, scf::IfOp newIfOp) {
   // 1. Update ifBlockCrossCoreDAG
   if (info->ifBlockCrossCoreDAG.count(oldIfOp)) {
     auto consumers = info->ifBlockCrossCoreDAG[oldIfOp];
@@ -1057,10 +1120,8 @@ void UpdateConditionInfoPass::updateDAGAfterIfOpReplacement(scf::IfOp oldIfOp,
 }
 
 // Update the mapping of control variables to their latest values
-void UpdateConditionInfoPass::updateControlVarToLatestValue(scf::IfOp newIfOp,
-                                                            scf::IfOp oldIfOp,
-                                                            bool hasCounter,
-                                                            Value counter) {
+void UpdateConditionInfoPassLegacy::updateControlVarToLatestValue(
+    scf::IfOp newIfOp, scf::IfOp oldIfOp, bool hasCounter, Value counter) {
   if (currentUsedVars.empty() && !hasCounter) {
     LDBG("No control variable latest values to update." << "\n");
     return;
@@ -1093,7 +1154,7 @@ void UpdateConditionInfoPass::updateControlVarToLatestValue(scf::IfOp newIfOp,
 }
 
 // Update the yield in the forOp
-int UpdateConditionInfoPass::updateForOpYield(scf::ForOp forOp) {
+int UpdateConditionInfoPassLegacy::updateForOpYield(scf::ForOp forOp) {
   LDBG("Enter update forOp yield " << "\n");
   if (controlVarToLatestValue.empty()) {
     LDBG("Failed to update forOp yield: no latest control variable values."
@@ -1146,9 +1207,8 @@ int UpdateConditionInfoPass::updateForOpYield(scf::ForOp forOp) {
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
-SmallVector<Type>
-UpdateConditionInfoPass::buildNewIfResultTypes(scf::IfOp oldIfOp,
-                                               bool hasCounter, Value counter) {
+SmallVector<Type> UpdateConditionInfoPassLegacy::buildNewIfResultTypes(
+    scf::IfOp oldIfOp, bool hasCounter, Value counter) {
   SmallVector<Type> resultTypes;
   for (Value result : oldIfOp.getResults()) {
     resultTypes.push_back(result.getType());
@@ -1165,7 +1225,7 @@ UpdateConditionInfoPass::buildNewIfResultTypes(scf::IfOp oldIfOp,
   return resultTypes;
 }
 
-void UpdateConditionInfoPass::collectYieldOperands(
+void UpdateConditionInfoPassLegacy::collectYieldOperands(
     Block &block, Operation *&yieldOp, SmallVector<Value> &yieldOperands) {
   yieldOp = nullptr;
   yieldOperands.clear();
@@ -1187,7 +1247,7 @@ void UpdateConditionInfoPass::collectYieldOperands(
   LDBG("Collected " << yieldOperands.size() << " yield operands." << "\n");
 }
 
-void UpdateConditionInfoPass::populateNewThenBlock(
+void UpdateConditionInfoPassLegacy::populateNewThenBlock(
     scf::IfOp newIfOp, Block &oldThenBlock, Operation *oldThenYieldOp,
     ArrayRef<Value> oldYieldOperands,
     DenseMap<Value, VarUpdateType> &varUpdateTypes, bool hasCounter,
@@ -1239,7 +1299,7 @@ void UpdateConditionInfoPass::populateNewThenBlock(
   thenBuilder.create<scf::YieldOp>(loc, thenYieldOperands);
 }
 
-void UpdateConditionInfoPass::populateNewElseBlock(
+void UpdateConditionInfoPassLegacy::populateNewElseBlock(
     scf::IfOp newIfOp, scf::IfOp oldIfOp, bool needsYield, bool oldHasElse,
     bool hasCounter, Value counter) {
   if (!needsYield && !oldHasElse) {
@@ -1306,7 +1366,7 @@ void UpdateConditionInfoPass::populateNewElseBlock(
 }
 
 // Create new IfOp with new then and else blocks.
-scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(
+scf::IfOp UpdateConditionInfoPassLegacy::createNewIfOpWithBlocks(
     scf::IfOp oldIfOp, Value combinedCond,
     DenseMap<Value, VarUpdateType> &varUpdateTypes, bool hasCounter,
     Value counter, Value step) {
@@ -1349,7 +1409,7 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(
 
 // Combine the conditions: crossCore condition + intraCore condition + counter
 // condition + flowOpt condition
-int UpdateConditionInfoPass::combineConditions(
+int UpdateConditionInfoPassLegacy::combineConditions(
     ModuleOp module, Value crossCoreCond, Value intraCoreCond,
     Value flowOptCond, scf::IfOp ifOp, scf::ForOp forOp, size_t &usedCounterNum,
     DenseMap<Value, VarUpdateType> &varUpdateTypes) {
@@ -1472,12 +1532,12 @@ int UpdateConditionInfoPass::combineConditions(
 }
 
 // Update the conditions of ifOp.
-int UpdateConditionInfoPass::updateIfConds(
+int UpdateConditionInfoPassLegacy::updateIfConds(
     ModuleOp module, SmallVector<SmallVector<Value>> ssbufferPtrs) {
   // Walk the forOp in the module to update the conditions of ifOp
   SmallVector<scf::ForOp> mainLoopForOps;
   WalkResult walkResult = module.walk([&](Operation *op) -> WalkResult {
-    if (!op->hasAttr(kMainLoop)) {
+    if (!op->hasAttr(SSBUFFER_Main_LOOP)) {
       return WalkResult::advance();
     }
 
@@ -1531,7 +1591,7 @@ int UpdateConditionInfoPass::updateIfConds(
     size_t usedCounterNum = 0;
     SmallVector<scf::IfOp> ifOps;
     WalkResult ifWalkResult = forOp.walk([&](Operation *op) -> WalkResult {
-      if (!op->hasAttr(kIf)) {
+      if (!op->hasAttr(SSBUFFER_IF)) {
         return WalkResult::advance();
       }
 
@@ -1616,7 +1676,7 @@ int UpdateConditionInfoPass::updateIfConds(
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
-void UpdateConditionInfoPass::runOnOperation() {
+void UpdateConditionInfoPassLegacy::runOnOperation() {
   ModuleOp module = getOperation();
 
   if (CVPipeline::hasFallbackAttr(module)) {
@@ -1641,8 +1701,8 @@ void UpdateConditionInfoPass::runOnOperation() {
 
 namespace mlir {
 namespace triton {
-std::unique_ptr<OperationPass<ModuleOp>> createUpdateConditionInfoPass() {
-  return std::make_unique<UpdateConditionInfoPass>();
+std::unique_ptr<OperationPass<ModuleOp>> createUpdateConditionInfoPassLegacy() {
+  return std::make_unique<UpdateConditionInfoPassLegacy>();
 }
 } // namespace triton
 } // namespace mlir

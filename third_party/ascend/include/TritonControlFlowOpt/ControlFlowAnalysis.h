@@ -75,7 +75,6 @@ struct AnalyzedComponent {
 struct AnalyzedValue {
   Type originalType;
   SmallVector<AnalyzedComponent> components;
-  SmallVector<Value> invariants;
   SmallVector<Attribute> attributes;
 };
 

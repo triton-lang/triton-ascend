@@ -87,6 +87,8 @@ BubbleUpExtract<ExtractOpTy>::matchAndRewrite(ExtractOpTy op,
     bubbleUpIntBinaryOp(op, orIOp, loc, rewriter);
   } else if (auto cmpIOp = dyn_cast<arith::CmpIOp>(parentOp)) {
     bubbleUpOperation(op, cmpIOp, loc, rewriter);
+  } else if (auto selectOp = dyn_cast<arith::SelectOp>(parentOp)) {
+    bubbleUpOperation(op, selectOp, loc, rewriter);
   } else if (auto truncFOp = dyn_cast<arith::TruncFOp>(parentOp)) {
     bubbleUpOperation(op, truncFOp, loc, rewriter);
   } else if (auto extFOp = dyn_cast<arith::ExtFOp>(parentOp)) {
@@ -217,6 +219,20 @@ void BubbleUpExtract<ExtractOpTy>::bubbleUpOperation(
   auto rhs = createExtractOp(op, parentOp.getRhs(), loc, rewriter);
   rewriter.replaceOpWithNewOp<arith::CmpIOp>(op, parentOp.getPredicateAttr(),
                                              lhs, rhs);
+}
+
+template <typename ExtractOpTy>
+void BubbleUpExtract<ExtractOpTy>::bubbleUpOperation(
+    ExtractOpTy op, arith::SelectOp parentOp, Location loc,
+    PatternRewriter &rewriter) const {
+  Value condition = parentOp.getCondition();
+  if (isa<ShapedType>(condition.getType()))
+    condition = createExtractOp(op, condition, loc, rewriter);
+  Value trueValue = createExtractOp(op, parentOp.getTrueValue(), loc, rewriter);
+  Value falseValue =
+      createExtractOp(op, parentOp.getFalseValue(), loc, rewriter);
+  rewriter.replaceOpWithNewOp<arith::SelectOp>(op, condition, trueValue,
+                                               falseValue);
 }
 
 template <>

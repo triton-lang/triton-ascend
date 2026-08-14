@@ -45,6 +45,16 @@ namespace triton {
 
 enum class MemAccVal { Undefined = 0, StrucMemAcc = 1, UnstrucMemAcc = 2 };
 
+/// Creates a verifier-valid HIVM pointer cast for a scalar Triton pointer
+/// represented by an integer address. Triton scalar pointers do not carry an
+/// extent, while their downstream carrier is normally `memref<?xT>` and every
+/// dynamic memref dimension requires a size operand. Use one element as the
+/// conservative carrier extent; reinterpret-cast lowering replaces it with a
+/// precise access range when a larger descriptor is materialized.
+hivm::PointerCastOp createScalarPointerCast(OpBuilder &builder, Location loc,
+                                            MemRefType resultType,
+                                            Value address);
+
 struct MemAccType {
 
   MemAccVal value;
@@ -288,8 +298,8 @@ public:
                             ConversionPatternRewriter &rewriter,
                             llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void
-  rewriteMakeTensorPtrOp(triton::MakeTensorPtrOp op, Value base,
+  static LogicalResult
+  rewriteMakeTensorPtrOp(triton::MakeTensorPtrOp op, Value convertedBase,
                          ConversionPatternRewriter &rewriter,
                          llvm::SmallDenseMap<Value, BlockData> &known);
 
@@ -312,9 +322,9 @@ public:
 
   /// @param known is mainly designed for `rewriteLoop`, and is just non-const
   /// in `rewriteLoop`, `rewriteAddPtr` and `rewriteAdvance`
-  static void rewriteLoopOp(LoopLikeOpInterface op,
-                            ConversionPatternRewriter &rewriter,
-                            llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  rewriteLoopOp(LoopLikeOpInterface op, ConversionPatternRewriter &rewriter,
+                llvm::SmallDenseMap<Value, BlockData> &known);
 
   static void rewriteAddPtrToUnstrucMemAcc(triton::AddPtrOp op,
                                            triton::AddPtrOp::Adaptor &adaptor,

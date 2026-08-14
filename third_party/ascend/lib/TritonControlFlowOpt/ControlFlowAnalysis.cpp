@@ -44,7 +44,7 @@ static bool isSupportedControlFlow(Operation *op) {
 static void setResultIdentity(AnalyzedValue &value, Value result,
                               ArrayRef<unsigned> componentIndices) {
   // A transferred component is represented by the SCF result outside the op;
-  // invariant components retain their incoming symbolic identities.
+  // non-transferred components retain their incoming symbolic identities.
   for (unsigned index : componentIndices)
     value.components[index].identity =
         ComponentIdentity::fromValue(result, index);
@@ -120,8 +120,8 @@ void ControlFlowAnalysisContext::bindRegionArgument(
     Value argument, const AnalyzedValue &initial,
     ArrayRef<unsigned> componentIndices) {
   // Only candidate loop components acquire a new identity at region entry.
-  // Policy-owned invariants and non-carried components remain traceable to the
-  // initial descriptor and can therefore be checked at the backedge.
+  // Policy-owned non-carried components remain traceable to the initial
+  // descriptor and can therefore be checked at the backedge.
   AnalyzedValue argumentState = initial;
   for (unsigned index : componentIndices)
     argumentState.components[index].identity =

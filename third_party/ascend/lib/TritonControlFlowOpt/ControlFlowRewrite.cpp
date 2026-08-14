@@ -34,6 +34,8 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 
+#include <cstdint>
+#include <limits>
 #include <optional>
 
 using namespace mlir;
@@ -43,6 +45,7 @@ using mlir::triton::controlflow::ControlFlowRewritePlan;
 using mlir::triton::controlflow::ControlFlowRewritePolicy;
 using mlir::triton::controlflow::ControlFlowSlotAnalysis;
 using mlir::triton::controlflow::DecomposedValue;
+using mlir::triton::controlflow::kPointerDescriptorBoundaryAttr;
 
 namespace mlir::triton::controlflow {
 
@@ -65,7 +68,7 @@ namespace {
 // handlers are mutually recursive through rewriteBodyOps(), share one
 // short-lived RewriteEnv, and must agree on signature expansion, nested-op
 // ordering and failure cleanup. Splitting them by op kind would expose those
-// private invariants through additional internal headers without creating an
+// private constraints through additional internal headers without creating an
 // independently reusable component.
 //
 //===----------------------------------------------------------------------===//
@@ -84,8 +87,8 @@ namespace {
 /// offsets, a region-local environment can contain:
 /// valueMapping:      %old_ptr_arg -> %rebuilt_ptr
 /// decomposedValues:  %old_ptr_arg -> {
-///   components = [%shape0, %stride0, %new_offset0],
-///   invariants = [%base], attributes = [order]
+///   components = [%base, %shape0, %stride0, %new_offset0],
+///   attributes = [order]
 /// }
 /// Operations cloned into that region use the mapping, while pointer
 /// decomposition uses the stored components.
@@ -152,9 +155,9 @@ struct RewriteEnv {
   /// %next = tt.advance %ptr, [%delta0, %delta1]
   ///
   /// decomposeValue(%next) -> DecomposedValue {
-  ///   components = [%shape0, %shape1, %stride0, %stride1,
+  ///   components = [%base, %shape0, %shape1, %stride0, %stride1,
   ///                 %offset0 + %delta0, %offset1 + %delta1],
-  ///   invariants = [%base], attributes = [order]
+  ///   attributes = [order]
   /// }
   /// The caller can put selected components into a new control-flow signature
   /// or pass the whole descriptor to policy.recompose(). Unsupported values
@@ -219,6 +222,60 @@ struct IfPointerInfo {
   std::optional<DecomposedValue> thenInfo;
 };
 
+// Updates the downstream descriptor marker after a loop signature expansion.
+// Existing slots may have been recorded by an earlier pointer policy, so they
+// are remapped through oldToNewStart before the current policy's expanded
+// component slots are merged. The resulting DenseI32ArrayAttr is expressed in
+// the replacement loop's iter-argument/result coordinate space.
+//
+// Example:
+//   old slots = [0], oldToNewStart = [0, 1], new component slots = [1, 2]
+//   result = [0, 1, 2]
+static LogicalResult updatePointerDescriptorBoundaryMarker(
+    Operation *loop, ArrayRef<LoopPointerInfo> pointerInfos,
+    ArrayRef<unsigned> oldToNewStart, const ControlFlowRewritePolicy &policy) {
+  SmallVector<int32_t> descriptorSlots;
+  llvm::SmallDenseSet<unsigned> seenSlots;
+  auto appendSlot = [&](unsigned slot) -> LogicalResult {
+    if (slot > static_cast<unsigned>(std::numeric_limits<int32_t>::max()))
+      return failure();
+    if (!seenSlots.insert(slot).second)
+      return success();
+    descriptorSlots.push_back(static_cast<int32_t>(slot));
+    return success();
+  };
+
+  if (Attribute oldMarker = loop->getAttr(kPointerDescriptorBoundaryAttr)) {
+    auto oldSlots = dyn_cast<DenseI32ArrayAttr>(oldMarker);
+    if (!oldSlots)
+      return failure();
+    for (int32_t oldSlot : oldSlots.asArrayRef()) {
+      if (oldSlot < 0 ||
+          static_cast<unsigned>(oldSlot) >= oldToNewStart.size() ||
+          failed(appendSlot(oldToNewStart[oldSlot])))
+        return failure();
+    }
+  }
+
+  if (policy.requiresPointerDescriptorBoundaryMarker()) {
+    for (const LoopPointerInfo &pointerInfo : pointerInfos) {
+      for (unsigned newSlot : pointerInfo.newIndices) {
+        if (failed(appendSlot(newSlot)))
+          return failure();
+      }
+    }
+  }
+
+  if (descriptorSlots.empty()) {
+    loop->removeAttr(kPointerDescriptorBoundaryAttr);
+    return success();
+  }
+  llvm::sort(descriptorSlots);
+  loop->setAttr(kPointerDescriptorBoundaryAttr,
+                DenseI32ArrayAttr::get(loop->getContext(), descriptorSlots));
+  return success();
+}
+
 // Copies the values selected by indices into a new owning vector while
 // preserving their input order. Indices must be unique and in bounds; this
 // function reports failure instead of deduplicating or accessing invalid input.
@@ -245,9 +302,9 @@ static FailureOr<SmallVector<Value>> gatherValues(ValueRange sourceValues,
 // replacement changes the component type; the input object remains unchanged.
 //
 // Example:
-//   decomposition.components = [shape, stride, originalOffset]
-//   componentIndices = [2], replacements = [nextOffset]
-//   result.components = [shape, stride, nextOffset]
+//   decomposition.components = [base, shape, stride, originalOffset]
+//   componentIndices = [3], replacements = [nextOffset]
+//   result.components = [base, shape, stride, nextOffset]
 static FailureOr<DecomposedValue>
 withReplacedComponents(DecomposedValue decomposition,
                        ArrayRef<unsigned> componentIndices,
@@ -306,10 +363,12 @@ static auto findPointerInfoByOldIndex(InfoRange &pointerInfos,
   return nullptr;
 }
 
-// A replacement loop carries selected scalar or tensor descriptor components
-// instead of the original pointer iter-argument. Operations cloned from the
-// original body still expect one pointer-typed block argument, so this function
-// reconstructs that pointer at the replacement region entry.
+// A replacement loop carries policy-selected scalar or tensor descriptor
+// components instead of the original pointer iter-argument. BlockPtr selects
+// its complete descriptor; TensorPtr currently selects complete offsets only.
+// Operations cloned from the original body still expect one pointer-typed
+// block argument, so this function reconstructs that pointer at the replacement
+// region entry.
 // `pointerInfo.newIndices` selects the current component values from
 // `newRegionArguments`, while
 // `pointerInfo.componentIndices` identifies the descriptor fields that those
@@ -323,17 +382,17 @@ static auto findPointerInfoByOldIndex(InfoRange &pointerInfos,
 //
 // Example:
 //   oldRegionArgument = %old_ptr
-//   newRegionArguments = [%ordinary, %current_offset0, %current_offset1]
-//   pointerInfo.newIndices = [1, 2]
-//   pointerInfo.componentIndices = [4, 5]
+//   newRegionArguments = [%ordinary, %base, %shape, %stride, %offset]
+//   pointerInfo.newIndices = [1, 2, 3, 4]
+//   pointerInfo.componentIndices = [0, 1, 2, 3]
 //   pointerInfo.initInfo.components =
-//       [shape0, shape1, stride0, stride1, initial_offset0, initial_offset1]
+//       [initial_base, initial_shape, initial_stride, initial_offset]
 //
-// The rebuilt descriptor keeps shape and stride, replaces the final two
-// components with the current offsets, and records `%old_ptr -> %rebuilt_ptr`
-// in `regionEnv`. Invalid indices, incompatible component types, or a policy
-// that cannot recompose the descriptor return failure without recording a
-// partial binding; the enclosing loop rewrite owns cleanup of inserted IR.
+// The rebuilt BlockPtr descriptor replaces all four fields with the current
+// loop values and records `%old_ptr -> %rebuilt_ptr` in `regionEnv`. Invalid
+// indices, incompatible component types, or a policy that cannot recompose the
+// descriptor return failure without recording a partial binding; the enclosing
+// loop rewrite owns cleanup of inserted IR.
 static LogicalResult bindLoopCarriedPointer(Value oldRegionArgument,
                                             const LoopPointerInfo &pointerInfo,
                                             ValueRange newRegionArguments,
@@ -416,16 +475,19 @@ static LogicalResult bindLoopRegionArguments(
 // Example:
 //   oldOperands = [%next_ptr, %sum]
 //   pointerInfo = {
-//     oldIndex = 0, componentIndices = [4, 5], newIndices = [0, 1]
+//     oldIndex = 0, componentIndices = [0, 1, 2, 3],
+//     newIndices = [0, 1, 2, 3]
 //   }
-//   currentRegionArguments = [%current_offset0, %current_offset1, %sum_arg]
+//   currentRegionArguments =
+//       [%current_base, %current_shape, %current_stride, %current_offset,
+//        %sum_arg]
 //
 // A valid `%next_ptr` decomposition produces
-// `[%next_offset0, %next_offset1, %mapped_sum]`. If pointer decomposition or
-// component normalization fails, the output instead uses
-// `[%current_offset0, %current_offset1, %mapped_sum]`. The fallback keeps the
-// temporary scf.yield/scf.condition structurally complete until the enclosing
-// failed loop rewrite erases it.
+// `[%next_base, %next_shape, %next_stride, %next_offset, %mapped_sum]`. If
+// pointer decomposition or component normalization fails, the output instead
+// uses the four current descriptor arguments followed by `%mapped_sum`. The
+// fallback keeps the temporary scf.yield/scf.condition structurally complete
+// until the enclosing failed loop rewrite erases it.
 //
 // The output vector is separate from the LogicalResult intentionally. The
 // function visits every old operand and fills all available fallback positions
@@ -484,15 +546,17 @@ static LogicalResult rewriteLoopTerminatorOperands(
 //
 // Example:
 //   oldResults = [%old_sum, %old_ptr, %old_flag]
-//   newResults = [%new_sum, %offset0, %offset1, %new_flag]
+//   newResults =
+//       [%new_sum, %base, %shape, %stride, %offset, %new_flag]
 //   pointerInfo = {
-//     oldIndex = 1, componentIndices = [4, 5], newIndices = [1, 2]
+//     oldIndex = 1, componentIndices = [0, 1, 2, 3],
+//     newIndices = [1, 2, 3, 4]
 //   }
-//   oldToNewStart = [0, 1, 3]
+//   oldToNewStart = [0, 1, 5]
 //
 // The function maps `%old_sum -> %new_sum` and `%old_flag -> %new_flag`. It
-// inserts `%offset0` and `%offset1` into the pointer descriptor, rebuilds
-// `%old_ptr`, and records `%old_ptr -> %rebuilt_ptr` plus that decomposition.
+// inserts all four results into the pointer descriptor, rebuilds `%old_ptr`,
+// and records `%old_ptr -> %rebuilt_ptr` plus that decomposition.
 //
 // The caller must set the builder insertion point after the replacement loop,
 // so any rebuilt pointer dominates later operations. On failure this function
@@ -675,6 +739,12 @@ static LogicalResult rewriteForOp(scf::ForOp forOp, OpBuilder &builder,
         bodyBuilder.create<scf::YieldOp>(yieldOp.getLoc(), newYieldOperands);
       });
   newForOp->setAttrs(forOp->getAttrs());
+  if (analysis->rewritesOwnSignature() &&
+      failed(updatePointerDescriptorBoundaryMarker(
+          newForOp, pointerInfos, oldToNewStart, env.policy))) {
+    newForOp.erase();
+    return failure();
+  }
 
   if (!bodyOk) {
     newForOp.erase();
@@ -797,6 +867,12 @@ static LogicalResult rewriteWhileOp(scf::WhileOp whileOp, OpBuilder &builder,
         bodyBuilder.create<scf::YieldOp>(yieldOp.getLoc(), newYieldOperands);
       });
   newWhileOp->setAttrs(whileOp->getAttrs());
+  if (analysis->rewritesOwnSignature() &&
+      failed(updatePointerDescriptorBoundaryMarker(
+          newWhileOp, pointerInfos, oldToNewStart, env.policy))) {
+    newWhileOp.erase();
+    return failure();
+  }
 
   if (!bodyOk) {
     newWhileOp.erase();

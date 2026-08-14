@@ -34,8 +34,8 @@ using namespace mlir::triton::controlflow;
 
 namespace {
 
-static constexpr unsigned kOffsetsComponent = 0;
-static constexpr unsigned kBaseInvariant = 0;
+static constexpr unsigned kBaseComponent = 0;
+static constexpr unsigned kCompleteOffsetsComponent = 1;
 static constexpr unsigned kBaseIsScalarAttribute = 0;
 
 /// Identifies tensor-of-pointers handled by this stage:
@@ -48,14 +48,13 @@ static bool isTensorPointerType(Type type) {
 
 /// Tensor-pointer state used only by this policy:
 ///
-///   control-flow components = [complete_offsets]
-///   rewrite-only invariants = [common_base]
+///   components = [common_base, complete_offsets]
 ///   attributes = [base_is_scalar]
 ///
-/// Only `components` expand an SCF signature. The common base is deliberately
-/// kept out of iter-args and results; it must be identical at every incoming
-/// edge and is used to rebuild the tensor-of-pointers inside and after the
-/// rewritten control-flow operation.
+/// The complete offsets are the only transfer candidate in this NFC stage.
+/// The common base is now an ordinary component, but it must remain identical
+/// at every incoming edge and therefore stays outside expanded SCF signatures.
+///
 static RankedTensorType getDefaultOffsetsType(Type pointerType) {
   auto pointerTensor = cast<RankedTensorType>(pointerType);
   return RankedTensorType::get(pointerTensor.getShape(),
@@ -64,14 +63,12 @@ static RankedTensorType getDefaultOffsetsType(Type pointerType) {
 }
 
 /// Validates the policy-owned component layout, including the offsets shape
-/// and the representation selected for the invariant base.
-static bool hasValidSchema(Type originalType, Type offsetsType,
-                           ArrayRef<Value> invariants,
+/// and the scalar-or-tensor representation selected for the base component.
+static bool hasValidSchema(Type originalType, Type baseType, Type offsetsType,
                            ArrayRef<Attribute> attributes) {
   auto pointerTensor = dyn_cast<RankedTensorType>(originalType);
   auto offsetsTensor = dyn_cast<RankedTensorType>(offsetsType);
-  if (!pointerTensor || !offsetsTensor || invariants.size() != 1 ||
-      attributes.size() != 1 ||
+  if (!pointerTensor || !offsetsTensor || attributes.size() != 1 ||
       !isa<triton::PointerType>(pointerTensor.getElementType()) ||
       !isa<IntegerType>(offsetsTensor.getElementType()) ||
       pointerTensor.getShape() != offsetsTensor.getShape() ||
@@ -83,33 +80,39 @@ static bool hasValidSchema(Type originalType, Type offsetsType,
     return false;
   Type expectedBaseType =
       baseIsScalar.getValue() ? pointerTensor.getElementType() : originalType;
-  return invariants[kBaseInvariant].getType() == expectedBaseType;
+  return baseType == expectedBaseType;
 }
 
 /// Validates the concrete Value-based state created while rewriting IR.
 static bool hasValidLayout(const DecomposedValue &value) {
-  return value.components.size() == 1 &&
+  return value.components.size() == 2 &&
          hasValidSchema(value.originalType,
-                        value.components[kOffsetsComponent].getType(),
-                        value.invariants, value.attributes);
+                        value.components[kBaseComponent].getType(),
+                        value.components[kCompleteOffsetsComponent].getType(),
+                        value.attributes);
 }
 
 /// Validates the read-only counterpart without materializing component Values.
 static bool hasValidLayout(const AnalyzedValue &value) {
-  return value.components.size() == 1 &&
+  return value.components.size() == 2 &&
          hasValidSchema(value.originalType,
-                        value.components[kOffsetsComponent].type,
-                        value.invariants, value.attributes);
+                        value.components[kBaseComponent].type,
+                        value.components[kCompleteOffsetsComponent].type,
+                        value.attributes);
 }
 
-template <typename StateT>
-static bool haveSameTensorPtrBaseSchema(const StateT &lhs, const StateT &rhs) {
+static bool haveSameTensorPtrBaseSchema(const AnalyzedValue &lhs,
+                                        const AnalyzedValue &rhs) {
   return hasValidLayout(lhs) && hasValidLayout(rhs) &&
          lhs.originalType == rhs.originalType &&
-         lhs.invariants == rhs.invariants && lhs.attributes == rhs.attributes;
+         lhs.components[kBaseComponent].type ==
+             rhs.components[kBaseComponent].type &&
+         lhs.components[kBaseComponent].identity ==
+             rhs.components[kBaseComponent].identity &&
+         lhs.attributes == rhs.attributes;
 }
 
-/// Whether the invariant base must be broadcast before rebuilding addptr.
+/// Whether the scalar base component must be broadcast before rebuilding.
 static bool hasScalarBase(const DecomposedValue &value) {
   return cast<BoolAttr>(value.attributes[kBaseIsScalarAttribute]).getValue();
 }
@@ -206,14 +209,15 @@ public:
       FailureOr<AnalyzedValue> result = context.analyzeValue(addPtr.getPtr());
       if (failed(result) || !hasValidLayout(*result))
         return failure();
-      FailureOr<Type> offsetsType =
-          getWiderOffsetsType(result->components[kOffsetsComponent].type,
-                              addPtr.getOffset().getType());
+      FailureOr<Type> offsetsType = getWiderOffsetsType(
+          result->components[kCompleteOffsetsComponent].type,
+          addPtr.getOffset().getType());
       if (failed(offsetsType))
         return failure();
       result->originalType = value.getType();
-      result->components[kOffsetsComponent] = {
-          *offsetsType, ComponentIdentity::fromValue(value, kOffsetsComponent)};
+      result->components[kCompleteOffsetsComponent] = {
+          *offsetsType,
+          ComponentIdentity::fromValue(value, kCompleteOffsetsComponent)};
       return *result;
     }
 
@@ -223,10 +227,12 @@ public:
       if (!isa<triton::PointerType>(splat.getSrc().getType()))
         return failure();
       Type offsetsType = getDefaultOffsetsType(value.getType());
-      return AnalyzedValue{value.getType(),
-                           {{offsetsType, ComponentIdentity::zero()}},
-                           {splat.getSrc()},
-                           {BoolAttr::get(value.getContext(), true)}};
+      return AnalyzedValue{
+          value.getType(),
+          {{splat.getSrc().getType(),
+            ComponentIdentity::fromValue(splat.getSrc(), kBaseComponent)},
+           {offsetsType, ComponentIdentity::zero(kCompleteOffsetsComponent)}},
+          {BoolAttr::get(value.getContext(), true)}};
     }
 
     // An otherwise opaque tensor-of-pointers is treated as an already-vector
@@ -235,38 +241,40 @@ public:
     if (!matches(value.getType()))
       return failure();
     Type offsetsType = getDefaultOffsetsType(value.getType());
-    return AnalyzedValue{value.getType(),
-                         {{offsetsType, ComponentIdentity::zero()}},
-                         {value},
-                         {BoolAttr::get(value.getContext(), false)}};
+    return AnalyzedValue{
+        value.getType(),
+        {{value.getType(), ComponentIdentity::fromValue(value, kBaseComponent)},
+         {offsetsType, ComponentIdentity::zero(kCompleteOffsetsComponent)}},
+        {BoolAttr::get(value.getContext(), false)}};
   }
 
   /// Tensor pointers have exactly one loop-transfer candidate: the complete
-  /// per-lane offsets tensor at component index 0.
+  /// per-lane offsets tensor at component index 1.
   FailureOr<SmallVector<unsigned>>
   getLoopCandidateComponents(const AnalyzedValue &value) const override {
     if (!hasValidLayout(value))
       return failure();
-    return SmallVector<unsigned>{kOffsetsComponent};
+    return SmallVector<unsigned>{kCompleteOffsetsComponent};
   }
 
   /// Classifies the loop offsets as transferred only when the backedge changes
   /// their symbolic identity. The original pointer type, common base, and base
-  /// representation must remain invariant for reconstruction to be valid.
+  /// representation must remain unchanged for reconstruction to be valid.
   FailureOr<SmallVector<unsigned>>
   getLoopTransferredComponents(const AnalyzedValue &initial,
                                const AnalyzedValue &regionArgument,
                                const AnalyzedValue &next) const override {
     if (!haveSameTensorPtrBaseSchema(initial, regionArgument) ||
         !haveSameTensorPtrBaseSchema(initial, next) ||
-        failed(joinComponentTypes(initial.components[kOffsetsComponent].type,
-                                  next.components[kOffsetsComponent].type)))
+        failed(joinComponentTypes(
+            initial.components[kCompleteOffsetsComponent].type,
+            next.components[kCompleteOffsetsComponent].type)))
       return failure();
     // Yielding the region argument unchanged requires no new SCF iter-arg.
-    if (regionArgument.components[kOffsetsComponent].identity ==
-        next.components[kOffsetsComponent].identity)
+    if (regionArgument.components[kCompleteOffsetsComponent].identity ==
+        next.components[kCompleteOffsetsComponent].identity)
       return SmallVector<unsigned>{};
-    return SmallVector<unsigned>{kOffsetsComponent};
+    return SmallVector<unsigned>{kCompleteOffsetsComponent};
   }
 
   /// Merges the two `scf.if` pointer states. Different complete-offset
@@ -276,15 +284,15 @@ public:
   getIfTransferredComponents(const AnalyzedValue &thenValue,
                              const AnalyzedValue &elseValue) const override {
     if (!haveSameTensorPtrBaseSchema(thenValue, elseValue) ||
-        failed(
-            joinComponentTypes(thenValue.components[kOffsetsComponent].type,
-                               elseValue.components[kOffsetsComponent].type)))
+        failed(joinComponentTypes(
+            thenValue.components[kCompleteOffsetsComponent].type,
+            elseValue.components[kCompleteOffsetsComponent].type)))
       return failure();
-    // Identical symbolic offsets are available outside the if as an invariant.
-    if (thenValue.components[kOffsetsComponent].identity ==
-        elseValue.components[kOffsetsComponent].identity)
+    // Identical symbolic offsets remain available outside the if.
+    if (thenValue.components[kCompleteOffsetsComponent].identity ==
+        elseValue.components[kCompleteOffsetsComponent].identity)
       return SmallVector<unsigned>{};
-    return SmallVector<unsigned>{kOffsetsComponent};
+    return SmallVector<unsigned>{kCompleteOffsetsComponent};
   }
 
   /// Chooses the offsets type carried by the replacement control-flow op.
@@ -301,6 +309,8 @@ public:
   bool shouldDecomposeOperation(Operation *op) const override {
     return isa<triton::AddPtrOp>(op);
   }
+
+  bool requiresPointerDescriptorBoundaryMarker() const override { return true; }
 
   /// Materializes the same decomposition described by analyzeValue. This may
   /// create zero constants and integer additions, so it is called only after
@@ -331,18 +341,19 @@ public:
       // ControlFlowRewrite will use this Value in the expanded SCF signature.
       OpBuilder::InsertionGuard guard(builder);
       builder.setInsertionPoint(addPtr);
-      Value offsets = createOffsetsAdd(builder, addPtr.getLoc(),
-                                       result->components[kOffsetsComponent],
-                                       context.remap(addPtr.getOffset()));
+      Value offsets =
+          createOffsetsAdd(builder, addPtr.getLoc(),
+                           result->components[kCompleteOffsetsComponent],
+                           context.remap(addPtr.getOffset()));
       if (!offsets)
         return failure();
       result->originalType = value.getType();
-      result->components[kOffsetsComponent] = offsets;
+      result->components[kCompleteOffsetsComponent] = offsets;
       return *result;
     }
 
-    // A scalar pointer splat materializes zero offsets while retaining the
-    // scalar source as the common-base invariant.
+    // A scalar pointer splat materializes zero offsets and records the
+    // scalar source as component 0.
     if (auto splat = value.getDefiningOp<triton::SplatOp>()) {
       if (!isa<triton::PointerType>(splat.getSrc().getType()))
         return failure();
@@ -353,13 +364,12 @@ public:
       if (!offsets)
         return failure();
       return DecomposedValue{value.getType(),
-                             {offsets},
-                             {splat.getSrc()},
+                             {splat.getSrc(), offsets},
                              {builder.getBoolAttr(true)}};
     }
 
-    // Fallback for an opaque tensor base: use the entire tensor-of-pointers as
-    // the invariant base and represent only subsequent displacement in offsets.
+    // Fallback for an opaque tensor base: keep the entire tensor-of-pointers
+    // as component 0 and represent subsequent displacement in component 1.
     if (!matches(value.getType()))
       return failure();
 
@@ -373,22 +383,23 @@ public:
     if (!offsets)
       return failure();
     return DecomposedValue{
-        value.getType(), {offsets}, {value}, {builder.getBoolAttr(false)}};
+        value.getType(), {value, offsets}, {builder.getBoolAttr(false)}};
   }
 
-  /// Rebuilds the original tensor-of-pointers from the invariant base and the
+  /// Rebuilds the original tensor-of-pointers from the base component and
   /// complete offsets selected/carried by the rewritten control flow.
   Value recompose(const DecomposedValue &value, OpBuilder &builder,
                   Location loc) const override {
     if (!hasValidLayout(value))
       return nullptr;
-    Value base = value.invariants[kBaseInvariant];
+    Value base = value.components[kBaseComponent];
     // addptr requires matching tensor lanes; broadcast a scalar common base
     // only when the decomposition recorded `base_is_scalar = true`.
     if (hasScalarBase(value))
       base = builder.create<triton::SplatOp>(loc, value.originalType, base);
     return builder.create<triton::AddPtrOp>(
-        loc, value.originalType, base, value.components[kOffsetsComponent]);
+        loc, value.originalType, base,
+        value.components[kCompleteOffsetsComponent]);
   }
 };
 
@@ -400,10 +411,9 @@ namespace mlir::triton::controlflow {
 /// handling. The shared driver analyzes each outermost SCF root, then rewrites
 /// only the complete-offset components selected by this policy.
 LogicalResult runTensorPtrDecompose(ModuleOp module) {
-  // Carry only complete per-lane offsets through SCF. The common scalar base
-  // remains a rewrite invariant and is used to rebuild tensor-of-pointers at
-  // each region boundary. This decomposition is independent of
-  // BlockPtrDecompose.
+  // Carry only complete per-lane offsets through SCF. The base is a
+  // non-carried component used to rebuild tensor-of-pointers at each region
+  // boundary. This decomposition is independent of BlockPtrDecompose.
   // TODO: Replace this local extraction with TritonToUnstructure's common-base
   // analysis. Different or lane-wise bases must become explicit diagnostics
   // instead of pattern misses.

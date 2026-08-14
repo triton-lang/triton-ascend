@@ -207,6 +207,46 @@ PtrOffsetInfo combineInfo(const PtrOffsetInfo &lhs, const PtrOffsetInfo &rhs) {
   return info;
 }
 
+namespace {
+
+bool isScalarPointer(Value value) {
+  auto pointerType = dyn_cast<triton::PointerType>(value.getType());
+  return pointerType && !isa<ShapedType>(pointerType.getPointeeType());
+}
+
+bool isTensorPointer(Value value) {
+  auto tensorType = dyn_cast<RankedTensorType>(value.getType());
+  return tensorType && isa<triton::PointerType>(tensorType.getElementType());
+}
+
+// A scalar pointer selected or carried by structured control flow is already a
+// complete runtime address. Recording the SSA value itself as the source avoids
+// choosing one incoming source and losing the other branch or loop iteration.
+// Later addptr users can still accumulate a separate offset from this address.
+void recordOpaqueScalarPointer(
+    Value pointer, llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+  offsetMap[pointer] = PtrOffsetInfo();
+  offsetMap[pointer].setPtr(pointer);
+  offsetMap[pointer].setZeroOffset();
+  offsetMap[pointer].setScalarLike(true);
+}
+
+// A per-lane tensor-pointer select may choose a different source for every
+// element, so it cannot be represented by one incoming base plus a structured
+// offset. Preserve the selected pointer tensor itself as the complete opaque
+// base and attach a zero displacement. Later addptr parsing can accumulate an
+// additional offset without discarding the select's lane-wise source choice.
+void recordOpaqueTensorPointer(
+    Value pointerTensor, llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+  auto tensorType = cast<RankedTensorType>(pointerTensor.getType());
+  offsetMap[pointerTensor] = PtrOffsetInfo();
+  offsetMap[pointerTensor].setPtr(pointerTensor);
+  offsetMap[pointerTensor].setZeroOffset();
+  offsetMap[pointerTensor].setUnstructured(tensorType.getRank());
+}
+
+} // namespace
+
 void parse(Value operand, const Location &loc, RewriterBase &rewriter,
            llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
   if (offsetMap.contains(operand)) {
@@ -296,6 +336,11 @@ void parseLoopRegionIterArg(LoopLikeOpInterface loopOp, const Location &loc,
                             RewriterBase &rewriter,
                             llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
                             BlockArgument regionIterArg) {
+  if (isScalarPointer(regionIterArg)) {
+    recordOpaqueScalarPointer(regionIterArg, offsetMap);
+    return;
+  }
+
   if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp.getOperation());
       whileOp && whileOp.getAfterBody() == regionIterArg.getOwner()) {
     auto argNum = regionIterArg.getArgNumber();
@@ -787,6 +832,16 @@ void parseClampF(triton::ClampFOp op, const Location &loc,
 void parseSelect(arith::SelectOp op, const Location &loc,
                  RewriterBase &rewriter,
                  llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+  if (isScalarPointer(op.getResult())) {
+    recordOpaqueScalarPointer(op.getResult(), offsetMap);
+    return;
+  }
+
+  if (isTensorPointer(op.getResult())) {
+    recordOpaqueTensorPointer(op.getResult(), offsetMap);
+    return;
+  }
+
   // Get select condition
   auto condition = op.getCondition();
   parse(condition, op.getLoc(), rewriter, offsetMap);
@@ -967,6 +1022,11 @@ void parseReduceReturn(triton::ReduceReturnOp op, const Location &loc,
 
 void parseIf(scf::IfOp op, const Location &loc, RewriterBase &rewriter,
              llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap, Value dst) {
+  if (isScalarPointer(dst)) {
+    recordOpaqueScalarPointer(dst, offsetMap);
+    return;
+  }
+
   const unsigned int index = cast<OpResult>(dst).getResultNumber();
   // Get if then region
   Block &thenBlock = op.getThenRegion().front();
@@ -1022,6 +1082,11 @@ void parseYield(scf::YieldOp op, const Location &loc, RewriterBase &rewriter,
 void parseLoopOp(LoopLikeOpInterface op, const Location &loc,
                  RewriterBase &rewriter,
                  llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap, Value dst) {
+  if (isScalarPointer(dst)) {
+    recordOpaqueScalarPointer(dst, offsetMap);
+    return;
+  }
+
   auto resNum = cast<OpResult>(dst).getResultNumber();
   Value yieldedValue = nullptr;
   if (auto whileOp = dyn_cast<scf::WhileOp>(op.getOperation())) {

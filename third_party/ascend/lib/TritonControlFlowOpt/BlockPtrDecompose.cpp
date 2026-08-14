@@ -35,15 +35,26 @@ using namespace mlir::triton::controlflow;
 
 namespace {
 
+static constexpr unsigned kBaseComponent = 0;
+static constexpr unsigned getShapeStart() { return kBaseComponent + 1; }
+static constexpr unsigned getStrideStart(unsigned rank) {
+  return getShapeStart() + rank;
+}
+static constexpr unsigned getOffsetStart(unsigned rank) {
+  return getStrideStart(rank) + rank;
+}
+
 /// Block-pointer component layout used only by this policy:
 ///
-///   components = [shape..., strides..., offsets...]
-///   invariants = [base]
+///   components = [base_address, shape..., strides..., offsets...]
 ///   attributes = [order]
 ///
-/// Loops currently carry only `offsets`; shape and strides must remain
-/// invariant across a backedge. An scf.if may select any component whose SSA
-/// value differs between its branches.
+/// Every supported SCF boundary carries all components in this exact order.
+/// The base is represented as an i64 address rather than a pointer/memref so a
+/// control-flow merge remains an SSA value selection and cannot be lowered as
+/// a memory-object copy by the backend.
+/// `order` remains policy-owned static metadata and must agree on every
+/// incoming path.
 ///
 /// Keep rank/layout checks local to this file: the generic control-flow
 /// machinery intentionally does not know the descriptor format of a policy.
@@ -59,13 +70,39 @@ static FailureOr<unsigned> getRank(Type originalType) {
   return tensorType.getRank();
 }
 
+// Recovers the scalar pointer type accepted by tt.make_tensor_ptr from the
+// BlockPtr result type. The address space is preserved across the temporary
+// integer carrier.
+static FailureOr<triton::PointerType> getBasePointerType(Type originalType) {
+  auto pointerType = dyn_cast<triton::PointerType>(originalType);
+  if (!pointerType)
+    return failure();
+  auto tensorType = dyn_cast<RankedTensorType>(pointerType.getPointeeType());
+  if (!tensorType)
+    return failure();
+  return triton::PointerType::get(tensorType.getElementType(),
+                                  pointerType.getAddressSpace());
+}
+
 // Validates the common block-pointer schema for either state representation.
 // Their component element types differ, but this check only needs field sizes.
 template <typename StateT> static bool hasValidLayout(const StateT &state) {
   FailureOr<unsigned> rank = getRank(state.originalType);
-  return succeeded(rank) && state.components.size() == 3 * *rank &&
-         state.invariants.size() == 1 && state.attributes.size() == 1 &&
+  return succeeded(rank) && state.components.size() == 1 + 3 * *rank &&
+         state.attributes.size() == 1 &&
          isa<DenseI32ArrayAttr>(state.attributes.front());
+}
+
+/// Returns the complete, ordered descriptor range used to expand one
+/// block-pointer control-flow slot. Keeping this policy-local prevents the
+/// generic SCF rewrite from depending on the BlockPtr field layout.
+static SmallVector<unsigned>
+getAllComponentIndices(const AnalyzedValue &value) {
+  SmallVector<unsigned> indices;
+  indices.reserve(value.components.size());
+  for (unsigned index = 0; index < value.components.size(); ++index)
+    indices.push_back(index);
+  return indices;
 }
 
 class BlockPtrPolicy final : public ControlFlowRewritePolicy {
@@ -93,7 +130,11 @@ public:
       // types and symbolic identities here; this phase must not create IR.
       AnalyzedValue result;
       result.originalType = value.getType();
-      unsigned componentIndex = 0;
+      Value base = makePtr.getBase();
+      result.components.push_back(
+          {IntegerType::get(value.getContext(), 64),
+           ComponentIdentity::fromValue(base, kBaseComponent)});
+      unsigned componentIndex = getShapeStart();
       auto appendComponents = [&](ValueRange values) {
         for (Value component : values) {
           result.components.push_back(
@@ -104,7 +145,6 @@ public:
       appendComponents(makePtr.getShape());
       appendComponents(makePtr.getStrides());
       appendComponents(makePtr.getOffsets());
-      result.invariants.push_back(makePtr.getBase());
       result.attributes.push_back(makePtr.getOrderAttr());
       if (!hasValidLayout(result))
         return failure();
@@ -124,7 +164,7 @@ public:
     if (advance.getOffsets().size() != rank)
       return failure();
     for (unsigned dimension = 0; dimension < rank; ++dimension) {
-      unsigned componentIndex = 2 * rank + dimension;
+      unsigned componentIndex = getOffsetStart(rank) + dimension;
       result->components[componentIndex].identity =
           ComponentIdentity::fromValue(value, componentIndex);
     }
@@ -136,13 +176,9 @@ public:
   getLoopCandidateComponents(const AnalyzedValue &value) const override {
     if (!hasValidLayout(value))
       return failure();
-    unsigned rank = *getRank(value.originalType);
-    SmallVector<unsigned> indices;
-    // Only the final rank entries (offsets) are legal loop-carried state in the
-    // current block-pointer model.
-    for (unsigned dimension = 0; dimension < rank; ++dimension)
-      indices.push_back(2 * rank + dimension);
-    return indices;
+    // A BlockPtr never crosses a supported loop boundary directly. Its entire
+    // descriptor becomes ordinary loop-carried SSA state.
+    return getAllComponentIndices(value);
   }
 
   FailureOr<SmallVector<unsigned>>
@@ -153,35 +189,25 @@ public:
         !hasValidLayout(next) ||
         initial.originalType != regionArgument.originalType ||
         initial.originalType != next.originalType ||
-        initial.invariants != regionArgument.invariants ||
-        initial.invariants != next.invariants ||
         initial.attributes != regionArgument.attributes ||
         initial.attributes != next.attributes)
       return failure();
 
-    unsigned rank = *getRank(initial.originalType);
-    // The current implementation does not expand shape or stride iter_args.
-    // Reject a loop that changes either instead of silently reconstructing a
-    // descriptor with stale values.
-    for (unsigned index = 0; index < 2 * rank; ++index) {
-      if (initial.components[index].type != next.components[index].type ||
-          initial.components[index].identity != next.components[index].identity)
-        return failure();
-    }
-
-    SmallVector<unsigned> transferred;
-    // An offset is carried only if the backedge state depends on the region
-    // argument. Constant/invariant offsets remain outside the loop signature.
-    for (unsigned dimension = 0; dimension < rank; ++dimension) {
-      unsigned index = 2 * rank + dimension;
+    // Full descriptor transfer permits every field to change, but each
+    // position must retain the strict type required by tt.make_tensor_ptr.
+    // In particular, tt.advance preserving its base does not make the base a
+    // loop invariant: a nested if may rebuild the descriptor from a different
+    // root base, and that if result becomes the next backedge value. A generic
+    // SCF canonicalization may remove exactly forwarded components from an
+    // advance-only loop later; this policy must retain changing-base semantics.
+    for (unsigned index = 0; index < initial.components.size(); ++index) {
       if (failed(joinComponentTypes(initial.components[index].type,
+                                    regionArgument.components[index].type)) ||
+          failed(joinComponentTypes(initial.components[index].type,
                                     next.components[index].type)))
         return failure();
-      if (regionArgument.components[index].identity !=
-          next.components[index].identity)
-        transferred.push_back(index);
     }
-    return transferred;
+    return getAllComponentIndices(initial);
   }
 
   FailureOr<SmallVector<unsigned>>
@@ -189,24 +215,18 @@ public:
                              const AnalyzedValue &elseValue) const override {
     if (!hasValidLayout(thenValue) || !hasValidLayout(elseValue) ||
         thenValue.originalType != elseValue.originalType ||
-        thenValue.invariants != elseValue.invariants ||
-        thenValue.attributes != elseValue.attributes ||
-        thenValue.components.size() != elseValue.components.size())
+        thenValue.attributes != elseValue.attributes)
       return failure();
 
-    // Unlike loops, an if can select shape, stride, or offset components. Base
-    // and order remain invariants because AdapterIR cannot represent a runtime
-    // selection between heterogeneous pointer descriptors.
-    SmallVector<unsigned> transferred;
+    // Both branches yield a complete descriptor even when a field has the same
+    // symbolic identity. This gives every rewritten BlockPtr boundary one
+    // stable positional schema.
     for (unsigned index = 0; index < thenValue.components.size(); ++index) {
       if (failed(joinComponentTypes(thenValue.components[index].type,
                                     elseValue.components[index].type)))
         return failure();
-      if (thenValue.components[index].identity !=
-          elseValue.components[index].identity)
-        transferred.push_back(index);
     }
-    return transferred;
+    return getAllComponentIndices(thenValue);
   }
 
   FailureOr<Type> joinComponentTypes(Type lhs, Type rhs) const override {
@@ -223,6 +243,8 @@ public:
     // flattened descriptor rather than walking through the rebuilt pointer.
     return isa<triton::AdvanceOp>(op);
   }
+
+  bool requiresPointerDescriptorBoundaryMarker() const override { return true; }
 
   FailureOr<DecomposedValue> decompose(Value value,
                                        const ControlFlowRewriteContext &context,
@@ -241,13 +263,17 @@ public:
       // Materialize the concrete counterpart of analyzeValue's descriptor.
       DecomposedValue result;
       result.originalType = value.getType();
+      OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPoint(makePtr);
+      Value baseAddress = builder.create<triton::PtrToIntOp>(
+          makePtr.getLoc(), builder.getI64Type(), makePtr.getBase());
+      result.components.push_back(baseAddress);
       result.components.append(makePtr.getShape().begin(),
                                makePtr.getShape().end());
       result.components.append(makePtr.getStrides().begin(),
                                makePtr.getStrides().end());
       result.components.append(makePtr.getOffsets().begin(),
                                makePtr.getOffsets().end());
-      result.invariants.push_back(makePtr.getBase());
       result.attributes.push_back(makePtr.getOrderAttr());
       if (!hasValidLayout(result))
         return failure();
@@ -271,7 +297,7 @@ public:
     OpBuilder::InsertionGuard guard(builder);
     builder.setInsertionPoint(advance);
     for (auto [dim, delta] : llvm::enumerate(advance.getOffsets())) {
-      unsigned component = 2 * *rank + dim;
+      unsigned component = getOffsetStart(*rank) + dim;
       Value currentOffset = result->components[component];
       Value remappedDelta = context.remap(delta);
       if (!remappedDelta)
@@ -295,11 +321,18 @@ public:
       return nullptr;
     unsigned rank = *getRank(value.originalType);
     auto order = cast<DenseI32ArrayAttr>(value.attributes.front());
+    FailureOr<triton::PointerType> basePointerType =
+        getBasePointerType(value.originalType);
+    if (failed(basePointerType) ||
+        value.components[kBaseComponent].getType() != builder.getI64Type())
+      return nullptr;
+    Value base = builder.create<triton::IntToPtrOp>(
+        loc, *basePointerType, value.components[kBaseComponent]);
     return builder.create<triton::MakeTensorPtrOp>(
-        loc, value.originalType, value.invariants.front(),
-        ValueRange(value.components).take_front(rank),
-        ValueRange(value.components).slice(rank, rank),
-        ValueRange(value.components).take_back(rank), order);
+        loc, value.originalType, base,
+        ValueRange(value.components).slice(getShapeStart(), rank),
+        ValueRange(value.components).slice(getStrideStart(rank), rank),
+        ValueRange(value.components).slice(getOffsetStart(rank), rank), order);
   }
 };
 
@@ -308,8 +341,8 @@ public:
 namespace mlir::triton::controlflow {
 
 LogicalResult runBlockPtrDecompose(ModuleOp module) {
-  // Make the explicit descriptor carried by a block pointer cross each
-  // supported SCF boundary as ordinary SSA components.
+  // Expand every BlockPtr that crosses a supported SCF boundary into its full
+  // ordered descriptor, then rebuild the pointer at each use site.
   BlockPtrPolicy policy;
   return rewriteControlFlow(module, policy);
 }

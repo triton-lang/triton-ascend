@@ -23,6 +23,7 @@
 
 #include <cstdlib>
 
+#include "TritonControlFlowOpt/ControlFlowRewrite.h"
 #include "TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/TritonToLinalg/ArgMinMaxConverter.h"
@@ -74,7 +75,9 @@
 #include "mlir/Transforms/Passes.h"
 
 #include "llvm/ADT/BitVector.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/Twine.h"
@@ -85,6 +88,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 #define DEBUG_TYPE "triton-to-linalg"
@@ -95,6 +99,258 @@ using namespace triton;
 int nd2nzFlag = 0;
 bool compileOn91095Flag = false;
 bool existDotFlag = false;
+
+static bool containsTritonPointer(Type type) {
+  if (isa<triton::PointerType>(type))
+    return true;
+  auto shapedType = dyn_cast<ShapedType>(type);
+  return shapedType && isa<triton::PointerType>(shapedType.getElementType());
+}
+
+static bool hasPointerFreeBoundary(Operation *op) {
+  return llvm::none_of(op->getOperandTypes(), containsTritonPointer) &&
+         llvm::none_of(op->getResultTypes(), containsTritonPointer);
+}
+
+// Adds only the values that can produce one SSA result. Structured control
+// flow is followed by result index so preserving one pointer descriptor does
+// not retain unrelated values yielded by the same operation.
+static LogicalResult
+appendProducerOperands(Value value, SmallVectorImpl<Value> &producerWorklist) {
+  if (auto argument = dyn_cast<BlockArgument>(value)) {
+    Operation *parent = argument.getOwner()->getParentOp();
+    unsigned argumentIndex = argument.getArgNumber();
+    if (auto forOp = dyn_cast_or_null<scf::ForOp>(parent)) {
+      if (argumentIndex == 0)
+        return success();
+      unsigned iterIndex = argumentIndex - 1;
+      if (iterIndex >= forOp.getInitArgs().size())
+        return failure();
+      producerWorklist.push_back(forOp.getInitArgs()[iterIndex]);
+      producerWorklist.push_back(forOp.getYieldedValues()[iterIndex]);
+      return success();
+    }
+    if (auto whileOp = dyn_cast_or_null<scf::WhileOp>(parent)) {
+      if (argumentIndex >= whileOp.getInits().size())
+        return failure();
+      if (argument.getOwner() == whileOp.getBeforeBody()) {
+        producerWorklist.push_back(whileOp.getInits()[argumentIndex]);
+        producerWorklist.push_back(
+            whileOp.getYieldOp().getOperand(argumentIndex));
+        return success();
+      }
+      if (argument.getOwner() == whileOp.getAfterBody()) {
+        producerWorklist.push_back(
+            whileOp.getConditionOp().getArgs()[argumentIndex]);
+        return success();
+      }
+    }
+    return success();
+  }
+
+  Operation *producer = value.getDefiningOp();
+  if (!producer)
+    return success();
+
+  auto result = dyn_cast<OpResult>(value);
+  if (auto forOp = dyn_cast<scf::ForOp>(producer)) {
+    if (!result || result.getResultNumber() >= forOp.getNumResults())
+      return failure();
+    unsigned index = result.getResultNumber();
+    producerWorklist.push_back(forOp.getInitArgs()[index]);
+    producerWorklist.push_back(forOp.getYieldedValues()[index]);
+    return success();
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(producer)) {
+    if (!result || result.getResultNumber() >= whileOp.getNumResults())
+      return failure();
+    unsigned index = result.getResultNumber();
+    producerWorklist.push_back(whileOp.getInits()[index]);
+    producerWorklist.push_back(whileOp.getConditionOp().getArgs()[index]);
+    producerWorklist.push_back(whileOp.getYieldOp().getOperand(index));
+    return success();
+  }
+  if (auto ifOp = dyn_cast<scf::IfOp>(producer)) {
+    if (!result || result.getResultNumber() >= ifOp.getNumResults() ||
+        !ifOp.elseBlock())
+      return failure();
+    unsigned index = result.getResultNumber();
+    producerWorklist.push_back(ifOp.thenYield().getOperand(index));
+    producerWorklist.push_back(ifOp.elseYield().getOperand(index));
+    return success();
+  }
+
+  producerWorklist.append(producer->operand_begin(), producer->operand_end());
+  return success();
+}
+
+// PointerDescriptorBoundary records exactly which loop-carried slots rebuild
+// Triton pointers. Preserve only those init/condition/yield producer chains so
+// MetaUseEraser cannot leave dangling descriptor operands without retaining
+// unrelated accumulators, masks, bounds, or ordinary tensor computations.
+static LogicalResult preservePointerDescriptorComputations(ModuleOp moduleOp) {
+  bool valid = true;
+  moduleOp.walk([&](LoopLikeOpInterface loopOp) {
+    Operation *loop = loopOp.getOperation();
+    auto descriptorSlots = loop->getAttrOfType<DenseI32ArrayAttr>(
+        controlflow::kPointerDescriptorBoundaryAttr);
+    if (!loop->hasAttr(controlflow::kPointerDescriptorBoundaryAttr))
+      return;
+    if (!descriptorSlots) {
+      valid = false;
+      return;
+    }
+
+    loop->removeAttr("MetaUse");
+
+    SmallVector<Value> producerWorklist;
+    auto appendSlotValues = [&](ValueRange values, int32_t slot) {
+      if (slot < 0 || static_cast<unsigned>(slot) >= values.size()) {
+        valid = false;
+        return;
+      }
+      producerWorklist.push_back(values[slot]);
+    };
+
+    auto appendLoopSlotValues = [&](int32_t slot) {
+      if (auto forOp = dyn_cast<scf::ForOp>(loop)) {
+        appendSlotValues(forOp.getInitArgs(), slot);
+        appendSlotValues(forOp.getYieldedValues(), slot);
+        return;
+      }
+      if (auto whileOp = dyn_cast<scf::WhileOp>(loop)) {
+        appendSlotValues(whileOp.getInits(), slot);
+        appendSlotValues(whileOp.getConditionOp().getArgs(), slot);
+        appendSlotValues(whileOp.getYieldOp().getOperands(), slot);
+        return;
+      }
+      valid = false;
+    };
+
+    llvm::SmallDenseSet<int32_t> seenSlots;
+    for (int32_t slot : descriptorSlots.asArrayRef()) {
+      if (!seenSlots.insert(slot).second) {
+        valid = false;
+        continue;
+      }
+      appendLoopSlotValues(slot);
+    }
+
+    // A mixed loop can contain both CFO-expanded descriptor slots and a
+    // pointer slot that was invariant for a later policy. The latter still
+    // belongs to the legacy loop conversion and its producer must survive
+    // MetaUse erasure. Preserve exactly those residual pointer slots, without
+    // adding unrelated tensor/scalar loop state to the descriptor marker.
+    for (auto [slot, type] : llvm::enumerate(loop->getResultTypes())) {
+      if (!containsTritonPointer(type))
+        continue;
+      if (slot > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+        valid = false;
+        continue;
+      }
+      appendLoopSlotValues(static_cast<int32_t>(slot));
+    }
+
+    llvm::DenseSet<Value> visitedValues;
+
+    while (!producerWorklist.empty()) {
+      Value value = producerWorklist.pop_back_val();
+      if (!value || !visitedValues.insert(value).second)
+        continue;
+      Operation *producer = value.getDefiningOp();
+      if (producer)
+        producer->removeAttr("MetaUse");
+      if (failed(appendProducerOperands(value, producerWorklist)))
+        valid = false;
+    }
+  });
+  return success(valid);
+}
+
+// Recomputes the result layouts of subviews whose source descriptor has been
+// rebased. A memref.subview result layout is derived from both its mixed
+// offsets/strides and its source layout. For example, changing the source from
+// `memref<32xf32, strided<[1], offset: ?>>` to the equivalent rebased
+// `memref<32xf32, strided<[1]>>` changes a zero-offset subview result from a
+// dynamic offset to offset zero. Merely changing the source SSA value leaves
+// the old result type behind and makes SubViewOp verification fail.
+//
+// Subviews may be chained, so every updated result becomes a new worklist
+// source. Rank-reduced subviews retain their existing result shape while their
+// layout is inferred again from the rebased source.
+static LogicalResult propagateRebasedSubviewTypes(Value rebasedSource,
+                                                  IRRewriter &rewriter) {
+  SmallVector<Value> sources{rebasedSource};
+  llvm::SmallPtrSet<Operation *, 8> visited;
+
+  while (!sources.empty()) {
+    Value source = sources.pop_back_val();
+    for (Operation *user : source.getUsers()) {
+      auto subview = dyn_cast<memref::SubViewOp>(user);
+      if (!subview || !visited.insert(user).second)
+        continue;
+
+      auto sourceType = dyn_cast<MemRefType>(subview.getSource().getType());
+      auto oldResultType = dyn_cast<MemRefType>(subview.getResult().getType());
+      if (!sourceType || !oldResultType)
+        return failure();
+
+      Type inferredType;
+      if (sourceType.getRank() == oldResultType.getRank()) {
+        inferredType = memref::SubViewOp::inferResultType(
+            sourceType, subview.getMixedOffsets(), subview.getMixedSizes(),
+            subview.getMixedStrides());
+      } else {
+        inferredType = memref::SubViewOp::inferRankReducedResultType(
+            oldResultType.getShape(), sourceType, subview.getMixedOffsets(),
+            subview.getMixedSizes(), subview.getMixedStrides());
+      }
+
+      auto inferredMemRefType = dyn_cast<MemRefType>(inferredType);
+      if (!inferredMemRefType)
+        return failure();
+      if (inferredMemRefType != oldResultType) {
+        rewriter.modifyOpInPlace(
+            subview, [&] { subview.getResult().setType(inferredMemRefType); });
+      }
+      sources.push_back(subview.getResult());
+    }
+  }
+  return success();
+}
+
+// Returns true when rebasing a descriptor would reach a user whose type
+// contract is owned elsewhere. Only a subview chain ending in direct
+// memref.load/store operations is proven local here. Every other user,
+// including SCF/CFG terminators, function calls/returns and dialect-specific
+// fixed-type operations, conservatively keeps the original descriptor layout.
+static bool reachesLayoutSensitiveBoundary(Value root) {
+  SmallVector<Value> worklist{root};
+  llvm::DenseSet<Value> visited;
+  while (!worklist.empty()) {
+    Value value = worklist.pop_back_val();
+    if (!visited.insert(value).second)
+      continue;
+    for (Operation *user : value.getUsers()) {
+      if (auto subview = dyn_cast<memref::SubViewOp>(user)) {
+        if (subview.getSource() == value) {
+          worklist.push_back(subview.getResult());
+          continue;
+        }
+      }
+      if (auto load = dyn_cast<memref::LoadOp>(user)) {
+        if (load.getMemRef() == value)
+          continue;
+      }
+      if (auto store = dyn_cast<memref::StoreOp>(user)) {
+        if (store.getMemRef() == value)
+          continue;
+      }
+      return true;
+    }
+  }
+  return false;
+}
 
 // Convert structured custom ops after operand type converted,
 // for example tt.ptr converted to memref.
@@ -563,35 +819,58 @@ void TritonToLinalgPass::addDynamicLegal(
     return true;
   });
 
-  target.addDynamicallyLegalOp<scf::ForOp, scf::YieldOp>([](Operation *op) {
+  target.addDynamicallyLegalOp<scf::IfOp>(
+      [](scf::IfOp op) { return !TTOpConverters::hasScalarPointerResult(op); });
+
+  auto controlFlowTerminatorLegal = [](Operation *op) {
+    Operation *parent = op->getParentOp();
+    if (parent &&
+        parent->hasAttr(TTOpConverters::kScalarPointerCarrierBoundaryAttr)) {
+      auto parentIf = cast<scf::IfOp>(parent);
+      return llvm::equal(op->getOperandTypes(), parentIf.getResultTypes());
+    }
+
+    if (parent && parent->hasAttr(controlflow::kPointerDescriptorBoundaryAttr))
+      return hasPointerFreeBoundary(op);
+
     return llvm::all_of(op->getOperandTypes(), [](Type t) {
-      if (isa<triton::PointerType>(t)) {
+      if (isa<triton::PointerType>(t))
         return false;
-      }
-      if (auto shapedType = dyn_cast<ShapedType>(t)) {
+      if (auto shapedType = dyn_cast<ShapedType>(t))
         return shapedType.getElementType().isIntOrFloat();
-      }
       assert(t.isIntOrIndexOrFloat());
       return true;
     });
-  });
+  };
+
+  target.addDynamicallyLegalOp<scf::YieldOp, scf::ConditionOp>(
+      controlFlowTerminatorLegal);
+
+  auto isArithOrMathOpLegal = [this](Operation *op) {
+    if (op->hasAttr("MetaUse"))
+      return false;
+
+    if (isa<arith::ConstantOp>(op))
+      return true;
+
+    bool operateOnTensors = llvm::all_of(op->getOperandTypes(), [](Type type) {
+      return isa<RankedTensorType>(type);
+    });
+
+    return this->namedOps || !operateOnTensors;
+  };
+
+  // Numeric selects retain the existing Arith legality. Every scalar-pointer
+  // select uses the integer-address converter so no memref object crosses it.
+  target.addDynamicallyLegalOp<arith::SelectOp>(
+      [isArithOrMathOpLegal](arith::SelectOp op) {
+        if (TTOpConverters::isScalarPointerSelect(op))
+          return false;
+        return isArithOrMathOpLegal(op);
+      });
 
   target.addDynamicallyLegalDialect<arith::ArithDialect, math::MathDialect>(
-      [this](Operation *op) {
-        if (op->hasAttr("MetaUse")) {
-          return false;
-        }
-
-        if (isa<arith::ConstantOp>(op)) {
-          return true;
-        }
-
-        bool operateOnTensors =
-            llvm::all_of(op->getOperandTypes(),
-                         [](Type type) { return isa<RankedTensorType>(type); });
-
-        return this->namedOps || !operateOnTensors;
-      });
+      isArithOrMathOpLegal);
 }
 
 void TritonToLinalgPass::populateTritonToLinalgCanonicalizationPatterns(
@@ -710,11 +989,16 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   patterns.add<TTOpConverters::JoinConverter>(patterns.getContext());
   patterns.add<TTOpConverters::CatConverter>(patterns.getContext());
   patterns.add<TTOpConverters::BitcastConverter>(patterns.getContext());
-  patterns.add<TTOpConverters::LoopConverter<scf::ForOp>>(
-      patterns.getContext());
+  patterns.add<TTOpConverters::LoopConverter<scf::ForOp>>(patterns.getContext(),
+                                                          PatternBenefit(2));
   patterns.add<TTOpConverters::LoopConverter<scf::WhileOp>>(
-      patterns.getContext());
-  patterns.add<TTOpConverters::YieldConverter>(patterns.getContext());
+      patterns.getContext(), PatternBenefit(2));
+  patterns.add<TTOpConverters::YieldConverter>(patterns.getContext(),
+                                               PatternBenefit(2));
+  patterns.add<TTOpConverters::IfConverter>(
+      typeConverter, patterns.getContext(), PatternBenefit(2));
+  patterns.add<TTOpConverters::PointerSelectConverter>(typeConverter,
+                                                       patterns.getContext());
 
   patterns.add<TTOpConverters::DeviceAssertConverter>(patterns.getContext());
   patterns.add<TTOpConverters::DevicePrintConverter>(patterns.getContext());
@@ -722,6 +1006,8 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   patterns.add<TTOpConverters::DotConverter>(patterns.getContext());
   patterns.add<TTOpConverters::DotScaledConverter>(patterns.getContext());
   patterns.add<TTOpConverters::PtrToIntConverter>(patterns.getContext());
+  patterns.add<TTOpConverters::IntToPtrConverter>(typeConverter,
+                                                  patterns.getContext());
 
   patterns.add<TTOpConverters::IndirectLoadConverter>(patterns.getContext());
   patterns.add<TTOpConverters::StrideLoadConverter>(patterns.getContext());
@@ -1047,6 +1333,12 @@ void TritonToLinalgPass::runOnOperation() {
     }
   });
 
+  if (failed(preservePointerDescriptorComputations(moduleOp))) {
+    moduleOp->emitError("invalid PointerDescriptorBoundary slot metadata");
+    signalPassFailure();
+    return;
+  }
+
   RewritePatternSet patterns(&getContext());
   ConversionTarget target(getContext());
   TritonTypeConverter tritonTypeConverter{};
@@ -1055,8 +1347,11 @@ void TritonToLinalgPass::runOnOperation() {
   this->addDynamicLegal(target, tritonTypeConverter);
 
   // 4. Mark ops that must be converted explicitly (e.g. tt.scan).
-  auto loopOpLegalFn = [](LoopLikeOpInterface op) {
-    return !op.getOperation()->hasAttr("UnhandledLoopOp");
+  auto loopOpLegalFn = [](LoopLikeOpInterface loopOp) {
+    Operation *op = loopOp.getOperation();
+    if (op->hasAttr(controlflow::kPointerDescriptorBoundaryAttr))
+      return hasPointerFreeBoundary(op);
+    return !op->hasAttr("UnhandledLoopOp");
   };
 
   target.addIllegalOp<triton::ScanOp>();
@@ -1080,8 +1375,20 @@ void TritonToLinalgPass::runOnOperation() {
 
   moduleOp.walk([this](LoopLikeOpInterface loopOp) {
     auto *op = loopOp.getOperation();
-    if (!op->hasAttr("ExtractedLoadOrStore"))
+    // A marker identifies the slots already expanded by CFO. Skip the legacy
+    // loop rewrite only when that expansion made the complete boundary
+    // pointer-free. A mixed loop may still contain an invariant pointer slot;
+    // the legacy converter must process that remaining slot without losing the
+    // marker's precise producer-preservation roots.
+    bool hasPointerDescriptorSlots =
+        op->hasAttr(mlir::triton::controlflow::kPointerDescriptorBoundaryAttr);
+    bool hasCompletePointerFreeBoundary =
+        hasPointerDescriptorSlots && hasPointerFreeBoundary(op);
+    if (!op->hasAttr("ExtractedLoadOrStore") && !hasCompletePointerFreeBoundary)
       op->setAttr("UnhandledLoopOp", UnitAttr::get(op->getContext()));
+
+    if (hasCompletePointerFreeBoundary)
+      return;
 
     for (auto res : loopOp->getResults()) {
       if (auto tensorType = dyn_cast<RankedTensorType>(res.getType());
@@ -1097,7 +1404,18 @@ void TritonToLinalgPass::runOnOperation() {
   });
 
   // 7. Convert ops.
-  if (failed(applyPartialConversion(moduleOp, target, std::move(patterns)))) {
+  LogicalResult conversionResult =
+      applyPartialConversion(moduleOp, target, std::move(patterns));
+
+  // The marker is a contract between CFO and this conversion pass; no
+  // downstream dialect should observe this implementation detail.
+  moduleOp.walk([](LoopLikeOpInterface loopOp) {
+    loopOp->removeAttr(controlflow::kPointerDescriptorBoundaryAttr);
+  });
+  moduleOp.walk([](scf::IfOp ifOp) {
+    ifOp->removeAttr(TTOpConverters::kScalarPointerCarrierBoundaryAttr);
+  });
+  if (failed(conversionResult)) {
     moduleOp->emitError("failed to apply Conversion Patterns");
     signalPassFailure();
   }
@@ -1145,34 +1463,31 @@ void TritonToLinalgPass::runOnOperation() {
   moduleOp.walk([&](hivm::PointerCastOp op) { castOps.push_back(op); });
 
   for (auto op : castOps) {
-    SmallVector<Operation *> userOps(op->getUsers().begin(),
-                                     op->getUsers().end());
+    SmallVector<memref::ReinterpretCastOp> reinterpretCastOps;
+    for (Operation *user : op->getUsers()) {
+      if (auto reinterpretCast = dyn_cast<memref::ReinterpretCastOp>(user))
+        reinterpretCastOps.push_back(reinterpretCast);
+    }
+    if (reinterpretCastOps.empty())
+      continue;
+
     IRRewriter rewriter(&getContext());
     rewriter.setInsertionPointAfter(op);
     Value addr = op.getAddrs()[0];
     auto elementType =
         cast<MemRefType>(op.getResult().getType()).getElementType();
-    Value elementTypeSize;
-    if (auto intType = dyn_cast<IntegerType>(elementType)) {
-      elementTypeSize = rewriter.create<arith::ConstantOp>(
-          op.getLoc(),
-          rewriter.getIntegerAttr(addr.getType(), intType.getWidth() / 8));
-    } else if (auto floatType = dyn_cast<FloatType>(elementType)) {
-      elementTypeSize = rewriter.create<arith::ConstantOp>(
-          op.getLoc(),
-          rewriter.getIntegerAttr(addr.getType(), floatType.getWidth() / 8));
-    } else {
-      llvm_unreachable("Cannot get memory size");
-    }
 
-    for (auto userOp : userOps) {
-      auto reinterpretCastOp = cast<memref::ReinterpretCastOp>(userOp);
+    for (memref::ReinterpretCastOp reinterpretCastOp : reinterpretCastOps) {
       auto sizes = reinterpretCastOp.getStaticSizes();
       auto staticStrides = reinterpretCastOp.getStaticStrides();
       auto strides = reinterpretCastOp.getStrides();
-      if (reinterpretCastOp.getStaticOffsets().size() != 1)
-        userOp->emitError("IntToPtrOp must converted to PointerCastOp of "
-                          "memref<?xdtype> type");
+      if (reinterpretCastOp.getStaticOffsets().size() != 1) {
+        reinterpretCastOp->emitError(
+            "IntToPtrOp must converted to PointerCastOp of "
+            "memref<?xdtype> type");
+        signalPassFailure();
+        return;
+      }
       int64_t castOpSize = 0;
       SmallVector<int64_t> dynamicSizes;
       for (const auto &[size, stride] : llvm::zip_equal(sizes, staticStrides)) {
@@ -1194,53 +1509,108 @@ void TritonToLinalgPass::runOnOperation() {
         dynamicSize =
             rewriter.create<arith::AddIOp>(op.getLoc(), dynamicSize, axisSize);
       }
-      Value offsetValue;
+      Value offsetElements;
       auto staticOffset = reinterpretCastOp.getStaticOffsets()[0];
       if (ShapedType::isDynamic(staticOffset)) {
-        offsetValue = reinterpretCastOp.getOffsets()[0];
-        if (offsetValue.getType() != addr.getType())
-          offsetValue = rewriter.create<arith::IndexCastOp>(
-              op.getLoc(), addr.getType(), offsetValue);
+        offsetElements = reinterpretCastOp.getOffsets()[0];
       } else {
-        offsetValue = rewriter.create<arith::ConstantOp>(
-            op.getLoc(), rewriter.getIntegerAttr(addr.getType(), staticOffset));
+        offsetElements =
+            rewriter.create<arith::ConstantIndexOp>(op.getLoc(), staticOffset);
+      }
+
+      auto memrefType = MemRefType::get({ShapedType::kDynamic}, elementType);
+      auto createPointerCast = [&](Value address, Value capacity) {
+        auto cast = rewriter.create<hivm::PointerCastOp>(
+            op.getLoc(), memrefType, address, capacity);
+        auto mark =
+            rewriter.create<annotation::MarkOp>(op.getLoc(), cast.getResult());
+        mark->setAttr(hivm::AddressSpaceAttr::getMnemonic(),
+                      {hivm::AddressSpaceAttr::get(rewriter.getContext(),
+                                                   hivm::AddressSpace::GM)});
+        return cast;
+      };
+
+      if (reachesLayoutSensitiveBoundary(reinterpretCastOp.getResult())) {
+        // Keep the original descriptor type and offset at externally typed
+        // boundaries. Because the PointerCast still starts at the old base,
+        // its element capacity must cover both the leading offset and view.
+        Value pointerCapacity = dynamicSize;
+        if (offsetElements.getType() != pointerCapacity.getType())
+          offsetElements = rewriter.create<arith::IndexCastOp>(
+              op.getLoc(), pointerCapacity.getType(), offsetElements);
+        Value leadingExtent = offsetElements;
+        if (ShapedType::isDynamic(staticOffset)) {
+          Value zero = rewriter.create<arith::ConstantIndexOp>(op.getLoc(), 0);
+          leadingExtent = rewriter.create<arith::MaxSIOp>(op.getLoc(),
+                                                          offsetElements, zero);
+        }
+        if (ShapedType::isDynamic(staticOffset) || staticOffset > 0)
+          pointerCapacity = rewriter.create<arith::AddIOp>(
+              op.getLoc(), pointerCapacity, leadingExtent);
+        auto newCastOp = createPointerCast(addr, pointerCapacity);
+        rewriter.modifyOpInPlace(reinterpretCastOp, [&] {
+          reinterpretCastOp.getSourceMutable().assign(newCastOp.getResult());
+        });
+        continue;
+      }
+
+      Value offsetValue = offsetElements;
+      if (offsetValue.getType() != addr.getType())
+        offsetValue = rewriter.create<arith::IndexCastOp>(
+            op.getLoc(), addr.getType(), offsetValue);
+      Value elementTypeSize;
+      if (auto intType = dyn_cast<IntegerType>(elementType)) {
+        elementTypeSize = rewriter.create<arith::ConstantOp>(
+            op.getLoc(),
+            rewriter.getIntegerAttr(addr.getType(), intType.getWidth() / 8));
+      } else if (auto floatType = dyn_cast<FloatType>(elementType)) {
+        elementTypeSize = rewriter.create<arith::ConstantOp>(
+            op.getLoc(),
+            rewriter.getIntegerAttr(addr.getType(), floatType.getWidth() / 8));
+      } else {
+        llvm_unreachable("Cannot get memory size");
       }
       offsetValue = rewriter.create<arith::MulIOp>(op.getLoc(), offsetValue,
                                                    elementTypeSize);
       Value realAddr =
           rewriter.create<arith::AddIOp>(op.getLoc(), addr, offsetValue);
-      auto memrefType = MemRefType::get({ShapedType::kDynamic}, elementType);
-      auto newCastOp = rewriter.create<hivm::PointerCastOp>(
-          op.getLoc(), memrefType, realAddr, dynamicSize);
-      auto markOp = rewriter.create<annotation::MarkOp>(op.getLoc(),
-                                                        newCastOp.getResult());
-      markOp->setAttr(hivm::AddressSpaceAttr::getMnemonic(),
-                      {hivm::AddressSpaceAttr::get(rewriter.getContext(),
-                                                   hivm::AddressSpace::GM)});
-
-      // update result offset
-      auto origResultType =
+      auto newCastOp = createPointerCast(realAddr, dynamicSize);
+      // realAddr already includes the old reinterpret-cast offset in bytes.
+      // The replacement view therefore starts at offset zero, and its result
+      // type must describe the same rebased layout. Reusing the old type here
+      // would combine static_offsets=[0] with (for example) a type-level
+      // offset of 1, which is rejected by the ReinterpretCast verifier.
+      auto oldResultType =
           cast<MemRefType>(reinterpretCastOp.getResult().getType());
-      MemRefType newResultType = origResultType;
-      if (auto stridedLayout =
-              dyn_cast<StridedLayoutAttr>(origResultType.getLayout())) {
-        int64_t offset = stridedLayout.getOffset();
-        if (!ShapedType::isDynamic(offset)) {
-          auto newLayout = StridedLayoutAttr::get(rewriter.getContext(), 0,
-                                                  stridedLayout.getStrides());
-          newResultType = MemRefType::get(
-              origResultType.getShape(), origResultType.getElementType(),
-              newLayout, origResultType.getMemorySpace());
-        }
-      }
+      SmallVector<int64_t> rebasedStrides(
+          oldResultType.getStridesAndOffset().first);
+      auto rebasedResultType = MemRefType::get(
+          oldResultType.getShape(), oldResultType.getElementType(),
+          StridedLayoutAttr::get(oldResultType.getContext(), /*offset=*/0,
+                                 rebasedStrides),
+          oldResultType.getMemorySpace());
 
-      rewriter.replaceOpWithNewOp<memref::ReinterpretCastOp>(
-          reinterpretCastOp, newResultType, newCastOp, ValueRange({}),
-          reinterpretCastOp.getSizes(), reinterpretCastOp.getStrides(),
-          SmallVector<int64_t>({0}), reinterpretCastOp.getStaticSizes(),
-          reinterpretCastOp.getStaticStrides());
+      // Keep the old result and replacement types equal while RAUW updates all
+      // users to the rebased descriptor type.
+      rewriter.modifyOpInPlace(reinterpretCastOp, [&] {
+        reinterpretCastOp.getResult().setType(rebasedResultType);
+      });
+      auto rebasedReinterpretCast =
+          rewriter.replaceOpWithNewOp<memref::ReinterpretCastOp>(
+              reinterpretCastOp, rebasedResultType, newCastOp, ValueRange({}),
+              reinterpretCastOp.getSizes(), reinterpretCastOp.getStrides(),
+              SmallVector<int64_t>({0}), reinterpretCastOp.getStaticSizes(),
+              reinterpretCastOp.getStaticStrides());
+      if (failed(propagateRebasedSubviewTypes(
+              rebasedReinterpretCast.getResult(), rewriter))) {
+        rebasedReinterpretCast.emitError(
+            "failed to propagate rebased layout through subview users");
+        signalPassFailure();
+        return;
+      }
     }
-    rewriter.eraseOp(op);
+    if (op->use_empty())
+      rewriter.eraseOp(op);
   }
 
   // Try interleave optimization

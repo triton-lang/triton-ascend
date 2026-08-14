@@ -32,19 +32,27 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 
 namespace mlir::triton::controlflow {
 
+/// Handoff marker for SCF loops whose pointer slots have already been expanded
+/// into policy-owned descriptor components. Its DenseI32ArrayAttr value lists
+/// the loop-carried init/result slots occupied by pointer descriptor state.
+/// TritonToLinalg uses those slots to preserve only the required producer
+/// chains and removes the marker after conversion.
+inline constexpr llvm::StringLiteral kPointerDescriptorBoundaryAttr =
+    "PointerDescriptorBoundary";
+
 /// Policy-owned description of one value crossing a control-flow boundary.
 ///
-/// `components` are runtime values that a policy may place in an expanded SCF
-/// signature. `invariants` and `attributes` are public storage whose layout is
-/// interpreted only by the policy that creates them. The shared rewrite treats
-/// those fields as opaque and only accesses `components` directly.
+/// `components` contain every runtime value needed to rebuild the original
+/// value. A policy may place a selected subset in an expanded SCF signature.
+/// `attributes` retain non-SSA metadata. Both layouts are private to the
+/// policy; the shared rewrite never interprets pointer-specific fields.
 struct DecomposedValue {
   Type originalType;
   SmallVector<Value> components;
-  SmallVector<Value> invariants;
   SmallVector<Attribute> attributes;
 };
 
@@ -71,8 +79,9 @@ private:
 ///
 /// The policy decides how its value is decomposed and rebuilt, which components
 /// cross loop/if boundaries, and whether two decompositions share a compatible
-/// invariant schema. It is not an IR marker and carries no state between
-/// policy invocations.
+/// non-carried schema. It carries no mutable state between policy invocations;
+/// a capability hook tells the shared rewrite whether expanded loop slots must
+/// be recorded for downstream conversion.
 class ControlFlowRewritePolicy : public ControlFlowAnalysisPolicy {
 public:
   virtual ~ControlFlowRewritePolicy() = default;
@@ -80,6 +89,11 @@ public:
   /// Whether results of this ordinary operation need immediate decomposition
   /// after cloning so later operations can reuse their exact component state.
   virtual bool shouldDecomposeOperation(Operation *op) const = 0;
+
+  /// Whether rewritten loops owned by this policy must expose their descriptor
+  /// slots to downstream conversion. The shared rewrite owns the positional
+  /// marker because it alone knows both the previous and expanded signatures.
+  virtual bool requiresPointerDescriptorBoundaryMarker() const { return false; }
 
   virtual FailureOr<DecomposedValue>
   decompose(Value value, const ControlFlowRewriteContext &context,

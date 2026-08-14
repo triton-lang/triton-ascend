@@ -52,6 +52,11 @@ bool forceSimtTemplateFlag = false;
 
 namespace {
 
+static bool isTensorOfPointers(Type type) {
+  auto tensorType = dyn_cast<RankedTensorType>(type);
+  return tensorType && isa<triton::PointerType>(tensorType.getElementType());
+}
+
 constexpr int64_t kBitsPerByte = 8;
 
 static constexpr const char *kRouteDiscreteMaskToSimtAttrName =
@@ -412,6 +417,12 @@ LogicalResult tryRewriteIndirectFastPath(MemAccOpTy op, Location loc,
                                          Value srcPtr, Value ptrOffset,
                                          ArrayRef<int64_t> resultShape,
                                          PatternRewriter &rewriter) {
+  // Indirect backend operations accept one scalar base plus lane offsets. An
+  // opaque tensor base can contain a different pointer in every lane, so it
+  // must be handled by the scalar-loop fallback below.
+  if (!isa<triton::PointerType>(srcPtr.getType()))
+    return failure();
+
   bool rankWithinIndirectLoadStoreFastPathLimit = resultShape.size() <= 5;
 
   if (!canUseIndirectFastPath(srcPtr, ptrOffset)) {
@@ -767,6 +778,10 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   auto srcPtr = ptrOffsetInfo.getPtr();
   auto ptrOffset = ptrOffsetInfo.getOffset();
+  if (!isa<triton::PointerType>(srcPtr.getType()) &&
+      !isTensorOfPointers(srcPtr.getType()))
+    return rewriter.notifyMatchFailure(
+        op, "expected a scalar pointer or a tensor of scalar pointers");
 
   // LoadLike is operation with result
   bool isLoadLike = !op->use_empty();
@@ -943,8 +958,20 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     os << extractedOffset << "\n";
   });
 
-  assert(isa<triton::PointerType>(srcPtr.getType()) && "src must be ptr type");
-  if (!fullyUnstructured) {
+  // A tensor-of-pointers base is opaque: each lane may select a different
+  // allocation. Extract the base with the same scalar or slice coordinates as
+  // the offset, then form the access pointer lane by lane.
+  if (isTensorOfPointers(srcPtr.getType())) {
+    if (fullyUnstructured)
+      srcPtr = createExtractOp(loc, srcPtr, rewriter, offsets);
+    else
+      srcPtr = createExtractOp(loc, srcPtr, rewriter, offsets, sizes, strides);
+  }
+
+  assert((isa<triton::PointerType>(srcPtr.getType()) ||
+          isTensorOfPointers(srcPtr.getType())) &&
+         "src must be a scalar pointer or tensor of pointers");
+  if (!fullyUnstructured && isa<triton::PointerType>(srcPtr.getType())) {
     srcPtr = rewriter.create<triton::SplatOp>(
         loc, RankedTensorType::get(extractedShape, srcPtr.getType()), srcPtr);
   }

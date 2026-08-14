@@ -50,6 +50,11 @@ void replaceOperands(MutableArrayRef<OpOperand> oprs, RewriterBase &rewriter,
         }
         --it;
       } else {
+        // source == operand marks a complete scalar address whose source may be
+        // selected or loop-carried at runtime. Keep it as a pointer instead of
+        // replacing it with an offset relative to one statically chosen base.
+        if (offsetMap.at(operand).getPtr() == operand)
+          continue;
         opr.set(offsetMap.at(operand).getOffset());
       }
     }
@@ -82,6 +87,11 @@ void replaceArgs(ValueRange args, RewriterBase &rewriter,
       rewriter.replaceOpWithNewOp<triton::AddPtrOp>(
           tempVar.getDefiningOp(), tempVar.getType(), src, arg);
     } else if (auto ptrType = dyn_cast<triton::PointerType>(arg.getType())) {
+      parse(arg, arg.getLoc(), rewriter, offsetMap);
+      if (!isa<RankedTensorType>(ptrType.getPointeeType()) &&
+          offsetMap.at(arg).getPtr() == arg)
+        continue;
+
       RewriterBase::InsertionGuard guard(rewriter);
       if (auto blockArg = dyn_cast<BlockArgument>(arg)) {
         rewriter.setInsertionPointToStart(blockArg.getOwner());
@@ -92,7 +102,6 @@ void replaceArgs(ValueRange args, RewriterBase &rewriter,
                          .create<UnrealizedConversionCastOp>(
                              arg.getLoc(), arg.getType(), ValueRange({}))
                          ->getResult(0);
-      parse(arg, arg.getLoc(), rewriter, offsetMap);
       rewriter.replaceAllUsesWith(arg, tempVar);
       if (auto tensorType =
               dyn_cast<RankedTensorType>(ptrType.getPointeeType())) {

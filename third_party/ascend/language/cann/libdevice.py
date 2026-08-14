@@ -1402,30 +1402,36 @@ def atan2(arg0, arg1, _semantic=None):
     arg0 = _semantic.to_tensor(arg0)
     arg1 = _semantic.to_tensor(arg1)
     pi = 3.1415926536
+
     _is_int8_type_x: core.constexpr = arg1.dtype.is_int8()
     core.static_assert(not _is_int8_type_x, "Expected dtype fp16/fp32/bf16, but got int8 or int1", _semantic=_semantic)
+
     _is_int8_type_y: core.constexpr = arg0.dtype.is_int8()
     core.static_assert(not _is_int8_type_y, "Expected dtype fp16/fp32/bf16, but got int8 or int1", _semantic=_semantic)
+
     _is_floating_type_x: core.constexpr = arg1.dtype.is_floating()
     core.static_assert(_is_floating_type_x == True,
                        f"Expected dtype fp16/fp32/bf16, but got {core.constexpr(arg1.dtype)}", _semantic=_semantic)
+
     _is_floating_type_y: core.constexpr = arg0.dtype.is_floating()
     core.static_assert(_is_floating_type_y == True,
                        f"Expected dtype fp16/fp32/bf16, but got {core.constexpr(arg0.dtype)}", _semantic=_semantic)
+
     half_pi: core.constexpr = 0.5 * pi
-    arg0_fp32 = arg0.to(core.dtype("fp32"), _semantic=_semantic)
-    arg1_fp32 = arg1.to(core.dtype("fp32"), _semantic=_semantic)
-    atan_input = _semantic.truediv(arg0_fp32, arg1_fp32)
-    x_eq_zero = _semantic.equal(arg1, 0)
-    y_gt_zero = _semantic.greater_than(arg0, 0)
-    y_lt_zero = _semantic.less_than(arg0, 0)
-    x_lt_zero = _semantic.less_than(arg1, 0)
-    y_ge_zero = _semantic.greater_equal(arg0, 0)
-    base = _semantic.where(x_eq_zero, 0.0, atan(atan_input, _semantic=_semantic))
-    base = _semantic.where(_semantic.logical_and(x_eq_zero, y_gt_zero), half_pi, base)
-    base = _semantic.where(_semantic.logical_and(x_eq_zero, y_lt_zero), -half_pi, base)
-    add_pi = _semantic.where(_semantic.logical_and(x_lt_zero, y_ge_zero), pi, 0.0)
-    sub_pi = _semantic.where(_semantic.logical_and(x_lt_zero, y_lt_zero), -pi, 0.0)
+    atan_input = _semantic.truediv(arg0.to(core.dtype("fp32"), _semantic=_semantic),
+                                   arg1.to(core.dtype("fp32"), _semantic=_semantic))
+
+    base = _semantic.where(_semantic.equal(arg1, 0), 0.0, atan(atan_input, _semantic=_semantic))
+    base = _semantic.where(_semantic.logical_and(_semantic.equal(arg1, 0), _semantic.greater_than(arg0, 0)), half_pi,
+                           base)
+    base = _semantic.where(_semantic.logical_and(_semantic.equal(arg1, 0), _semantic.less_than(arg0, 0)), -half_pi,
+                           base)
+
+    add_pi = _semantic.where(_semantic.logical_and(_semantic.less_than(arg1, 0), _semantic.greater_equal(arg0, 0)), pi,
+                             0.0)
+    sub_pi = _semantic.where(_semantic.logical_and(_semantic.less_than(arg1, 0), _semantic.less_than(arg0, 0)), -pi,
+                             0.0)
+
     ret = _semantic.add(_semantic.add(base, add_pi, True), sub_pi, True)
     return ret.to(arg1.dtype, _semantic=_semantic)
 

@@ -979,6 +979,61 @@ static LogicalResult separateScopes(func::FuncOp funcOp) {
   return success();
 }
 
+// Mechanism A: in VECTOR scopes, replace each redundant store→load pair that
+// shares an ssbuffer.transfer_id with the stored value, then erase the load.
+//
+// The scope-clone step duplicates the CUBE-side scalar load into the VECTOR
+// scope too; there it reads back a value this scope itself just stored, so the
+// load is pure redundancy (not dead code — it has users), and DCE will not
+// remove it.
+static void replaceRedundantVectorStoreLoad(scope::ScopeOp scopeOp) {
+  auto coreTypeAttr =
+      scopeOp->getAttrOfType<hivm::TCoreTypeAttr>(hivm::TCoreTypeAttr::name);
+  if (!coreTypeAttr || coreTypeAttr.getTcoretype() != hivm::TCoreType::VECTOR) {
+    return;
+  }
+
+  // Pass 1: collect the value each ssbuffer.transfer_id stores.
+  llvm::DenseMap<int64_t, mlir::Value> storedValues;
+  scopeOp.walk([&](LLVM::StoreOp storeOp) {
+    auto transferIdAttr =
+        storeOp->getAttrOfType<mlir::IntegerAttr>(CVPipeline::kTransferId);
+    if (!transferIdAttr) {
+      return;
+    }
+    int64_t tid = transferIdAttr.getInt();
+    storedValues[tid] = storeOp.getValue();
+  });
+
+  if (storedValues.empty()) {
+    return;
+  }
+
+  // Pass 2: replace loads of the same transfer_id with the stored value.
+  llvm::SmallVector<LLVM::LoadOp> deadLoads;
+  scopeOp.walk([&](LLVM::LoadOp loadOp) {
+    auto transferIdAttr =
+        loadOp->getAttrOfType<mlir::IntegerAttr>(CVPipeline::kTransferId);
+    if (!transferIdAttr) {
+      return;
+    }
+    int64_t tid = transferIdAttr.getInt();
+    auto it = storedValues.find(tid);
+    if (it == storedValues.end()) {
+      return;
+    }
+    mlir::Value storeVal = it->second;
+    if (storeVal == loadOp.getResult()) {
+      return;
+    }
+    loadOp.replaceAllUsesWith(storeVal);
+    deadLoads.push_back(loadOp);
+  });
+  for (LLVM::LoadOp loadOp : deadLoads) {
+    loadOp->erase();
+  }
+}
+
 // Declare dependent dialects
 void mlir::triton::SeparateCVScopePass::getDependentDialects(
     DialectRegistry &registry) const {
@@ -1014,53 +1069,9 @@ void mlir::triton::SeparateCVScopePass::runOnOperation() {
                      UnitAttr::get(scopeOp->getContext()));
   });
 
-  // VECTOR scopes: replace the redundant store→load with the stored value.
-  module.walk([](scope::ScopeOp scopeOp) {
-    auto coreTypeAttr =
-        scopeOp->getAttrOfType<hivm::TCoreTypeAttr>(hivm::TCoreTypeAttr::name);
-    if (!coreTypeAttr ||
-        coreTypeAttr.getTcoretype() != hivm::TCoreType::VECTOR) {
-      return;
-    }
-
-    llvm::DenseMap<int64_t, mlir::Value> storedValues;
-    scopeOp.walk([&](LLVM::StoreOp storeOp) {
-      auto transferIdAttr =
-          storeOp->getAttrOfType<mlir::IntegerAttr>(CVPipeline::kTransferId);
-      if (!transferIdAttr) {
-        return;
-      }
-      int64_t tid = transferIdAttr.getInt();
-      storedValues[tid] = storeOp.getValue();
-    });
-
-    if (storedValues.empty()) {
-      return;
-    }
-
-    llvm::SmallVector<LLVM::LoadOp> deadLoads;
-    scopeOp.walk([&](LLVM::LoadOp loadOp) {
-      auto transferIdAttr =
-          loadOp->getAttrOfType<mlir::IntegerAttr>(CVPipeline::kTransferId);
-      if (!transferIdAttr) {
-        return;
-      }
-      int64_t tid = transferIdAttr.getInt();
-      auto it = storedValues.find(tid);
-      if (it == storedValues.end()) {
-        return;
-      }
-      mlir::Value storeVal = it->second;
-      if (storeVal == loadOp.getResult()) {
-        return;
-      }
-      loadOp.replaceAllUsesWith(storeVal);
-      deadLoads.push_back(loadOp);
-    });
-    for (LLVM::LoadOp loadOp : deadLoads) {
-      loadOp->erase();
-    }
-  });
+  // Mechanism A: clean up redundant VECTOR-side store→load pairs.
+  module.walk(
+      [](scope::ScopeOp scopeOp) { replaceRedundantVectorStoreLoad(scopeOp); });
 
   debugDumpOperation("after SeparateCVScopePass", module.getOperation());
 }

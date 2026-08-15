@@ -40,14 +40,14 @@ def _clear_kernel_cache(kernel=_add_value):
 
 
 def _run_case(n, src, dst, mode):
-    _add_value[(1,)](src, dst, n, 3, BLOCK=32, compile_mode=mode)
+    _add_value[(1, )](src, dst, n, 3, BLOCK=32, compile_mode=mode)
     torch.npu.synchronize()
     expected = src[:n] + 3
     torch.testing.assert_close(dst[:n], expected)
 
 
 def _run_annotated_case(n, value, src, dst, mode):
-    _add_annotated_value[(1,)](src, dst, n, value, BLOCK=32, compile_mode=mode)
+    _add_annotated_value[(1, )](src, dst, n, value, BLOCK=32, compile_mode=mode)
     torch.npu.synchronize()
     expected = src[:n] + value
     torch.testing.assert_close(dst[:n], expected)

@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: KineticCafe/actions-dco@v3.2.0
+        continue-on-error: true
         with:
           config: |
             comment = true

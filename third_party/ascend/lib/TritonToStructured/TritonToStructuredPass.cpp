@@ -95,6 +95,9 @@ void TritonToStructuredPass::populateTritonToStructuredCanonicalizationPatterns(
   // Move loads before broadcasts when safe
   patterns.add<CannonicalizerConverter::LoadBroadcastConverter>(
       patterns.getContext());
+  // Lower `make_tensor_ptr` with all-zero strides to scalar load + broadcast.
+  patterns.add<CannonicalizerConverter::ZeroStrideMakeTensorPtrConverter>(
+      patterns.getContext());
 }
 
 void TritonToStructuredPass::populateTritonToStructuredPatterns(

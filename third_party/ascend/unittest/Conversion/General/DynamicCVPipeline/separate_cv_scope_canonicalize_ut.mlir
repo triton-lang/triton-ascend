@@ -661,7 +661,9 @@ module {
 // CHECK-NEXT:     %[[SELC:.*]] = arith.select
 // CHECK-NEXT:     scf.condition(%[[SELC]])
 // CHECK-NEXT:   } do {
+// CHECK-NEXT:   ^bb0
 // CHECK-NEXT:     memref.store
+// CHECK-NEXT:     arith.addi
 // CHECK-NEXT:     scf.yield
 // CHECK-NEXT:   }
 // CHECK-NEXT:   scope.return

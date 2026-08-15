@@ -99,7 +99,7 @@ pip install -e .
     TRITON_BUILD_PROTON=OFF \
     TRITON_WHEEL_NAME="triton-ascend" \
     TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
-    python3 setup.py install
+    python3 setup_ascend.py install
     ```
 
 ## 开发镜像

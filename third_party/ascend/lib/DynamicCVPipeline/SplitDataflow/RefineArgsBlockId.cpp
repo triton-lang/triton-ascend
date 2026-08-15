@@ -39,19 +39,6 @@ static constexpr const char *DEBUG_TYPE = "refine-args-block-id";
 
 using namespace mlir::triton;
 
-int getLoopCarriedArgIndex(Value operand, Block *block) {
-  auto barg = dyn_cast<BlockArgument>(operand);
-  if (!barg || barg.getOwner() != block ||
-      !isa<scf::ForOp>(block->getParentOp())) {
-    return -1;
-  }
-  unsigned argIdx = barg.getArgNumber();
-  if (argIdx == 0) {
-    return -1;
-  }
-  return argIdx;
-}
-
 int findFirstUser(BlockArgument iterArg, Block *forBlock,
                   CVPipeline::ComputeBlockIdManager &bm) {
   llvm::SetVector<Value> visited;
@@ -90,9 +77,10 @@ bool isDependenceOther(Operation *yieldDefOp, Block *forBlock, int argsId,
       }
     } else {
       // if have block argument from for block. Skip;
-      if (getLoopCarriedArgIndex(operand, forBlock) != argsId + 1) {
+      if (CVPipeline::getLoopCarriedArgIndex(operand, forBlock) != argsId) {
         LOG_DEBUG("Yield def op depends on other arg:"
-                  << getLoopCarriedArgIndex(operand, forBlock) << "\n");
+                  << CVPipeline::getLoopCarriedArgIndex(operand, forBlock)
+                  << "\n");
         return true;
       }
     }

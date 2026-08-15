@@ -40,7 +40,7 @@ using namespace triton;
 
 namespace {
 
-static constexpr llvm::StringLiteral interceptrFunc[]{""};
+static constexpr llvm::StringLiteral interceptrFunc[]{"_fwd_kernel_alibi"};
 
 static LogicalResult verifyFuncNames(ModuleOp module) {
   bool intercepted = false;

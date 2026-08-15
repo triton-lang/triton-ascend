@@ -2,9 +2,10 @@
 #include <optional>
 
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -15,9 +16,19 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Matchers.h"
+#include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/Visitors.h"
+#include "mlir/Interfaces/ControlFlowInterfaces.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+
+static constexpr const char *DEBUG_TYPE = "dynamic-cv-pipeline-utils";
+#define DBGS(...) LLVM_DEBUG(llvm::dbgs() << __VA_ARGS__)
+#define LOG_DEBUG(...) DBGS("[" << DEBUG_TYPE << "] " << __VA_ARGS__)
 
 namespace mlir {
 namespace CVPipeline {
@@ -133,6 +144,55 @@ bool isOnlyDirectlyUse(Operation *preOp, Operation *nextOp,
     return false;
   }
   return (*allusers.begin()) == nextOp;
+}
+
+CoreType getCoreTypeOfSimpleOpOrCf(Operation *op) {
+  if (op == nullptr) {
+    return CoreType::UNDETERMINED;
+  }
+  if (!llvm::isa<RegionBranchOpInterface>(op)) {
+    return getOpCoreType(op);
+  }
+
+  CoreType coreType = CoreType::UNDETERMINED;
+  Operation *failingOp = nullptr;
+
+  // we need to skip sub-op of non-cf ops with regions, hence preorder here
+  op->walk<WalkOrder::PreOrder>([&](Operation *subOp) -> WalkResult {
+    if (llvm::isa<RegionBranchOpInterface>(subOp) ||
+        subOp->hasTrait<OpTrait::IsTerminator>()) {
+      return WalkResult::advance();
+    }
+
+    CoreType currCoreType = getOpCoreType(subOp);
+    // we have met a simple op without core type
+    if (currCoreType == CoreType::UNDETERMINED) {
+      coreType = CoreType::UNDETERMINED;
+      failingOp = subOp;
+      return WalkResult::interrupt();
+    }
+
+    if (coreType == CoreType::UNDETERMINED) {
+      coreType = currCoreType;
+    } else if (currCoreType != coreType) {
+      // some ops have different core type
+      coreType = CoreType::CUBE_AND_VECTOR;
+      return WalkResult::interrupt();
+    }
+
+    // skip sub-op
+    return WalkResult::skip();
+  });
+
+  (void)failingOp;
+  LOG_DEBUG("CoreType of RegionBranchOp is " << coreType << ": " << *op
+                                             << "\n");
+  LLVM_DEBUG({
+    if (coreType == CoreType::UNDETERMINED && failingOp != nullptr) {
+      llvm::dbgs() << "\nCoreType is UNDETERMINED due to " << *failingOp;
+    }
+  });
+  return coreType;
 }
 
 /** Determines if a value is "scalar-like" based on the following criteria:
@@ -291,6 +351,38 @@ int64_t getBTSizeFromValidBroadcastOp(linalg::BroadcastOp broadcastOp) {
   int64_t sizeBytes =
       numElements * (insType.getElementTypeBitWidth() / BYTE_SIZE);
   return sizeBytes;
+}
+
+int getLoopCarriedArgIndex(Value operand, Block *block) {
+  if (!block || !block->mightHaveTerminator()) {
+    return -1;
+  }
+
+  auto barg = dyn_cast_if_present<BlockArgument>(operand);
+  if (!barg || barg.getOwner() != block) {
+    return -1;
+  }
+
+  auto *parentOp = block->getParentOp();
+  if (!isa<scf::ForOp, scf::WhileOp>(parentOp)) {
+    return -1;
+  }
+
+  auto *terminator = block->getTerminator();
+  if (!llvm::isa_and_present<scf::YieldOp>(terminator)) {
+    return -1;
+  }
+
+  int numArgs = block->getNumArguments();
+  int numYieldOperands = terminator->getNumOperands();
+  int offset = numArgs - numYieldOperands;
+  int argIdx = barg.getArgNumber() - offset;
+
+  if (argIdx < 0 || argIdx >= numYieldOperands) {
+    return -1;
+  }
+
+  return argIdx;
 }
 
 } // namespace CVPipeline

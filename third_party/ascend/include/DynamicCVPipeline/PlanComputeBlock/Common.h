@@ -23,21 +23,58 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_COMMON_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_COMMON_H
 
-#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
+
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Operation.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/SmallVector.h"
+#include "mlir/IR/Value.h"
+
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+
+#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 
 namespace mlir {
 namespace CVPipeline {
 
+class DependencyHelper {
+  using PredFn = llvm::function_ref<void(Operation *)>;
+
+  template <typename Fn>
+  static auto mapToAncestorInBlock(Block *block, Fn &&pred) {
+    return [block, pred = std::forward<Fn>(pred)](Operation *op) {
+      if (auto *ancestor = block->findAncestorOpInBlock(*op)) {
+        return pred(ancestor);
+      }
+    };
+  }
+
+public:
+  const MemoryDependenceGraph &memGraph;
+
+  explicit DependencyHelper(const MemoryDependenceGraph &memGraph)
+      : memGraph(memGraph) {}
+
+  void forEachUser(Operation *op, PredFn pred) const;
+
+  enum class SourceMode { Default, AcrossIterArg };
+  template <SourceMode SM = SourceMode::Default>
+  void forEachSource(Operation *op, PredFn pred) const;
+
+  void forEachUserInSameBlock(Operation *op, PredFn pred) const {
+    forEachUser(op, mapToAncestorInBlock(op->getBlock(), pred));
+  }
+
+  template <SourceMode ST>
+  void forEachSourceInSameBlock(Operation *op, PredFn pred) const {
+    forEachSource<ST>(op, mapToAncestorInBlock(op->getBlock(), pred));
+  }
+};
+
 Operation *getAncestorInBlock(Operation *inner, Block *block);
 void initializeIndegreeForBlock(Block *block,
                                 llvm::DenseMap<Operation *, int> &indegree,
-                                const MemoryDependenceGraph &memGraph,
+                                const DependencyHelper &depHelper,
                                 ComputeBlockIdManager &bm);
 
 } // namespace CVPipeline

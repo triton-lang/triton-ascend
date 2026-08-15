@@ -23,30 +23,8 @@
 #ifndef TRITON_ASCEND_STRIDED_AXIS_COALESCING_H
 #define TRITON_ASCEND_STRIDED_AXIS_COALESCING_H
 
-#include "triton/Dialect/Triton/IR/Dialect.h"
-
-// StridedAxisCoalescing: a distinct optimisation path from
-// StridedLoadStoreRewrite.
-//
-// For the FLA "H-axis split" kernels (chunk_local_cumsum et al.) each program
-// handles one (b,h) and reads its column along T with a stride-H (>1) access.
-// StridedLoadStoreRewrite lowers such loads to a SIMT indirect gather; this
-// pass instead folds the H axis into the inner lane: it rewrites the
-//   strided ih-base load(s) -> lane-safe compute subgraph -> strided ih-base
-//   store(s)
-// chain into a 2D contiguous [BT,H] tile (H as a parallel inner lane), turning
-// the per-element strided DMA into a contiguous one. The bishengir
-// AutoBlockifyParallelLoop pass then divides the persistent-loop trip count by
-// the recorded `hacc.coalesce_factor`.
-namespace StridedAxisCoalescing {
-
-// Default-on rewrite (generalised liftTo2D): fold the strided ih-base load ->
-// lane-safe-compute subgraph -> strided ih-base store chain into a 2D
-// contiguous [BT,H] tile (H as a parallel inner lane). Covers forward/reverse
-// cumsum, scale, dtype casts and any elementwise body; bails (leaving the
-// original path) on anything unsafe (e.g. a tt.dot in the subgraph).
-void rewriteStridedAxisCoalesce(mlir::ModuleOp moduleOp);
-
-} // namespace StridedAxisCoalescing
+// Compatibility shim. The implementation is owned by TritonToGraph and is
+// scheduled only through its original T2L compatibility slot.
+#include "TritonToGraph/LegacyMemoryAccess/StridedAxisCoalescing.h"
 
 #endif // TRITON_ASCEND_STRIDED_AXIS_COALESCING_H

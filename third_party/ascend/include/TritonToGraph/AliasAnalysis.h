@@ -31,12 +31,16 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
+
+#include <memory>
 
 namespace mlir {
 namespace triton {
 namespace cfg {
 
 class ControlFlowGraph;
+class DataFlowGraph;
 
 // AliasAnalysis - Alias分析和指针跟踪
 // 用于分析pointer的alias关系，跟踪全局内存对象（如gm_obj）的别名链
@@ -131,6 +135,11 @@ public:
   }
 
 private:
+  friend class DataFlowGraph;
+
+  bool beginDataFlowGraphBorrow();
+  void endDataFlowGraphBorrow();
+
   // 分析addptr操作
   void analyzeAddPtrOp(mlir::triton::AddPtrOp addptrOp);
 
@@ -149,8 +158,10 @@ private:
   // 分析splat操作
   void analyzeSplatOp(mlir::triton::SplatOp splatOp);
 
+  SmallVector<std::unique_ptr<TensorObject>> ownedTensorObjects;
   DenseMap<Value, Value> aliasMap;               // ptr -> base ptr
   DenseMap<Value, TensorObject *> baseTensorMap; // value -> tensor
+  bool dataFlowGraphBorrowed = false;
 };
 
 } // namespace cfg

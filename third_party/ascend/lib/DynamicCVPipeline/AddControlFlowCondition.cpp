@@ -27,8 +27,8 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/ProcessArgs.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
-#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateForOps.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopOps.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
@@ -108,9 +108,9 @@ void AddControlFlowConditionPass::runOnOperation() {
 
   // Step4: Update for ops with block counters and inner dependency conditions,
   // and insert PIPE_S inter-core synchronization
-  std::unique_ptr<UpdateForOpsPass> updateForOpsPass(new UpdateForOpsPass());
-  updateForOpsPass->setConditionInfo(&info);
-  pm.addPass(std::move(updateForOpsPass));
+  std::unique_ptr<UpdateLoopOpsPass> updateLoopOpsPass(new UpdateLoopOpsPass());
+  updateLoopOpsPass->setConditionInfo(&info);
+  pm.addPass(std::move(updateLoopOpsPass));
 
   // Step5:Update the conditions of ifOp based on the intraCoreDependentMap and
   // crossCoreDependentMap
@@ -167,7 +167,7 @@ void registerAddControlFlowConditionPasses() {
   registerPass(createCloneOpsPass);
   registerPass(createCreateIfOpsPass);
   registerPass(createProcessArgsPass);
-  registerPass(createUpdateForOpsPass);
+  registerPass(createUpdateLoopOpsPass);
   registerPass(createAddControlFlowConditionPass);
 }
 } // namespace triton

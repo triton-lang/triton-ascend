@@ -209,14 +209,23 @@ void SeedRegionPlanner::run() {
       if (auto *def = iop.getDefiningOp()) {
         tryAddToGroup(def);
       }
-      // Check loop-carried dependencies (SCF ForOp iter_args)
+      // Check loop-carried dependencies (SCF ForOp/WhileOp iter_args)
       if (auto barg = dyn_cast<BlockArgument>(iop)) {
-        if (barg.getOwner() == block && isa<scf::ForOp>(block->getParentOp()) &&
-            barg.getArgNumber() > 0) {
-          auto *yieldOp = barg.getOwner()->getTerminator();
-          if (auto *yieldedValDef = yieldOp->getOperand(barg.getArgNumber() - 1)
-                                        .getDefiningOp()) {
-            tryAddToGroup(yieldedValDef);
+        if (barg.getOwner() == block) {
+          auto *terminator = block->getTerminator();
+          if (terminator && isa<scf::YieldOp>(terminator) &&
+              isa<scf::ForOp, scf::WhileOp>(block->getParentOp())) {
+            unsigned numArgs = block->getNumArguments();
+            unsigned numYieldOperands = terminator->getNumOperands();
+            int offset = (int)numArgs - (int)numYieldOperands;
+            int argIdx = (int)barg.getArgNumber() - offset;
+
+            if (argIdx >= 0 && argIdx < (int)numYieldOperands) {
+              Value yielded = terminator->getOperand(argIdx);
+              if (auto *yieldDefOp = yielded.getDefiningOp()) {
+                tryAddToGroup(yieldDefOp);
+              }
+            }
           }
         }
       }

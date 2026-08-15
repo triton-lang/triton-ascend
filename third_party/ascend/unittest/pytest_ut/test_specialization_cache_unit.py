@@ -8,17 +8,14 @@ import inspect
 
 import pytest
 import torch
-
 from triton.backends.ascend.compiler import AscendBackend
 from triton.backends.compiler import GPUTarget
 from triton.runtime.jit import KernelParam, compute_cache_key, create_function_from_signature
-
 
 pytestmark = pytest.mark.backend("native")
 
 
 class PointerArg:
-
     dtype = torch.float32
 
     def __init__(self, address):
@@ -160,8 +157,8 @@ def test_annotated_integer_one_keeps_constexpr_specialization(options):
 
     assert one_specialization == [("constexpr", 1)]
     assert two_specialization == [(annotation, "")]
-    assert compute_cache_key(cache, one_specialization, one_options) != compute_cache_key(
-        cache, two_specialization, two_options)
+    assert compute_cache_key(cache, one_specialization,
+                             one_options) != compute_cache_key(cache, two_specialization, two_options)
 
 
 @pytest.mark.parametrize("options", [SIMD_OPTIONS[0], *SIMT_OPTIONS])

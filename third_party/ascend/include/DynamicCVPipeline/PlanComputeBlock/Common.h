@@ -30,46 +30,11 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 
+#include "ascend/include/DynamicCVPipeline/Common/DependencyHelper.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
-
-#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 
 namespace mlir {
 namespace CVPipeline {
-
-class DependencyHelper {
-  using PredFn = llvm::function_ref<void(Operation *)>;
-
-  template <typename Fn>
-  static auto mapToAncestorInBlock(Block *block, Fn &&pred) {
-    return [block, pred = std::forward<Fn>(pred)](Operation *op) {
-      if (auto *ancestor = block->findAncestorOpInBlock(*op)) {
-        return pred(ancestor);
-      }
-    };
-  }
-
-public:
-  const MemoryDependenceGraph &memGraph;
-
-  explicit DependencyHelper(const MemoryDependenceGraph &memGraph)
-      : memGraph(memGraph) {}
-
-  void forEachUser(Operation *op, PredFn pred) const;
-
-  enum class SourceMode { Default, AcrossIterArg };
-  template <SourceMode SM = SourceMode::Default>
-  void forEachSource(Operation *op, PredFn pred) const;
-
-  void forEachUserInSameBlock(Operation *op, PredFn pred) const {
-    forEachUser(op, mapToAncestorInBlock(op->getBlock(), pred));
-  }
-
-  template <SourceMode ST>
-  void forEachSourceInSameBlock(Operation *op, PredFn pred) const {
-    forEachSource<ST>(op, mapToAncestorInBlock(op->getBlock(), pred));
-  }
-};
 
 Operation *getAncestorInBlock(Operation *inner, Block *block);
 void initializeIndegreeForBlock(Block *block,

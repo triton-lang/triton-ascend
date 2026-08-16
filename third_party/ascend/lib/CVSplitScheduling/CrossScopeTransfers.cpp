@@ -36,6 +36,7 @@
 #include "mlir/IR/Builders.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
@@ -236,6 +237,141 @@ struct BufferPool {
     }
 };
 
+struct LaneAliasedUbPlan {
+    SmallVector<CrossScopeTransfer *, 4> qkTransfers;
+    SmallVector<CrossScopeTransfer *, 4> pTransfers;
+    SmallVector<CrossScopeTransfer *, 4> pvTransfers;
+    DenseMap<Operation *, Value> bufferByProducer;
+    Operation *releaseAnchor = nullptr;
+};
+
+static bool reachesOperation(Value root, Operation *target, Block *body)
+{
+    SmallVector<Operation *> worklist(root.getUsers().begin(), root.getUsers().end());
+    llvm::SmallPtrSet<Operation *, 32> visited;
+    while (!worklist.empty()) {
+        Operation *op = worklist.pop_back_val();
+        if (op == target)
+            return true;
+        if (op->getBlock() != body || !visited.insert(op).second)
+            continue;
+        for (Value result : op->getResults())
+            llvm::append_range(worklist, result.getUsers());
+    }
+    return false;
+}
+
+// Recognize only the exact U4 QK -> P -> PV transfer schedule. Ordered
+// occurrence pairing is intentional: recurrent softmax state makes an
+// unrestricted backward slice ambiguous (QK_i may reach later lanes too).
+static std::optional<LaneAliasedUbPlan>
+matchLaneAliasedUbPlan(SmallVectorImpl<CrossScopeTransfer> &transfers,
+                       Operation *lastVectorToCubeProducer, Block *body)
+{
+    LaneAliasedUbPlan plan;
+    for (CrossScopeTransfer &xfer : transfers) {
+        if (xfer.direction == CrossScopeTransfer::VECTOR_TO_CUBE) {
+            plan.pTransfers.push_back(&xfer);
+        } else if (lastVectorToCubeProducer && xfer.producer->isBeforeInBlock(lastVectorToCubeProducer)) {
+            plan.qkTransfers.push_back(&xfer);
+        } else {
+            plan.pvTransfers.push_back(&xfer);
+        }
+    }
+
+    constexpr unsigned kSupportedLanes = 4;
+    if (plan.qkTransfers.size() != kSupportedLanes || plan.pTransfers.size() != kSupportedLanes ||
+        plan.pvTransfers.size() != kSupportedLanes) {
+        LLVM_DEBUG(llvm::dbgs() << "[cv-split] Lane-alias reject: transfer counts qk="
+                                << plan.qkTransfers.size() << " p=" << plan.pTransfers.size()
+                                << " pv=" << plan.pvTransfers.size() << "\n");
+        return std::nullopt;
+    }
+
+    auto sameOrigin = [](ArrayRef<CrossScopeTransfer *> group) {
+        return llvm::all_of(group, [&](CrossScopeTransfer *xfer) {
+            return xfer->originId == group.front()->originId;
+        });
+    };
+    if (!sameOrigin(plan.qkTransfers) || !sameOrigin(plan.pTransfers) || !sameOrigin(plan.pvTransfers)) {
+        LLVM_DEBUG(llvm::dbgs() << "[cv-split] Lane-alias reject: unroll origins are not uniform\n");
+        return std::nullopt;
+    }
+
+    for (unsigned lane = 0; lane < kSupportedLanes; ++lane) {
+        CrossScopeTransfer *qk = plan.qkTransfers[lane];
+        CrossScopeTransfer *p = plan.pTransfers[lane];
+        CrossScopeTransfer *pv = plan.pvTransfers[lane];
+        if (p->consumers.size() != 1 || p->consumers.front() != pv->producer ||
+            !reachesOperation(qk->value, p->producer, body)) {
+            LLVM_DEBUG(llvm::dbgs() << "[cv-split] Lane-alias reject: lane " << lane
+                                    << " does not form QK->P->PV\n");
+            return std::nullopt;
+        }
+
+        auto qkType = dyn_cast<RankedTensorType>(qk->value.getType());
+        auto pvType = dyn_cast<RankedTensorType>(pv->value.getType());
+        if (!qkType || !pvType || qkType.getRank() != 2 || pvType.getRank() != 2 ||
+            !qkType.hasStaticShape() || !pvType.hasStaticShape() ||
+            !qkType.getElementType().isF32() || qkType.getElementType() != pvType.getElementType() ||
+            qkType.getDimSize(0) != pvType.getDimSize(0) || qkType.getDimSize(0) % 2 != 0) {
+            LLVM_DEBUG(llvm::dbgs() << "[cv-split] Lane-alias reject: lane " << lane
+                                    << " has unsupported tensor types\n");
+            return std::nullopt;
+        }
+    }
+
+    plan.releaseAnchor = plan.pvTransfers.back()->consumers.front();
+    for (Operation *consumer : plan.pvTransfers.back()->consumers)
+        if (plan.releaseAnchor->isBeforeInBlock(consumer))
+            plan.releaseAnchor = consumer;
+    return plan;
+}
+
+static Value createContiguousUbView(OpBuilder &builder, Location loc, Value root, ArrayRef<int64_t> shape,
+                                    Type elementType)
+{
+    auto ubAddrSpace = builder.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::UB);
+    auto viewType = MemRefType::get(shape, elementType, nullptr, ubAddrSpace);
+    if (root.getType() == viewType)
+        return root;
+
+    SmallVector<OpFoldResult> sizes;
+    SmallVector<OpFoldResult> strides(shape.size());
+    sizes.reserve(shape.size());
+    int64_t stride = 1;
+    for (int64_t dim : shape)
+        sizes.push_back(builder.getIndexAttr(dim));
+    for (int64_t i = static_cast<int64_t>(shape.size()) - 1; i >= 0; --i) {
+        strides[i] = builder.getIndexAttr(stride);
+        stride *= shape[i];
+    }
+    return builder
+        .create<memref::ReinterpretCastOp>(loc, viewType, root, builder.getIndexAttr(0), sizes, strides)
+        .getResult();
+}
+
+static void materializeLaneAliasedUbPlan(const TransferEmitContext &c, LaneAliasedUbPlan &plan)
+{
+    OpBuilder builder(c.ctx);
+    builder.setInsertionPoint(c.loop);
+    for (unsigned lane = 0; lane < plan.qkTransfers.size(); ++lane) {
+        auto qkType = cast<RankedTensorType>(plan.qkTransfers[lane]->value.getType());
+        auto pvType = cast<RankedTensorType>(plan.pvTransfers[lane]->value.getType());
+        int64_t rows = qkType.getDimSize(0) / 2;
+        int64_t qkCols = qkType.getDimSize(1);
+        int64_t pvCols = pvType.getDimSize(1);
+        int64_t rootCols = std::max(qkCols, pvCols);
+        auto ubAddrSpace = builder.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::UB);
+        auto rootType = MemRefType::get({rows, rootCols}, qkType.getElementType(), nullptr, ubAddrSpace);
+        Value root = createAnnotatedAlloc(builder, c.loc, rootType).getResult();
+        plan.bufferByProducer[plan.qkTransfers[lane]->producer] =
+            createContiguousUbView(builder, c.loc, root, {rows, qkCols}, qkType.getElementType());
+        plan.bufferByProducer[plan.pvTransfers[lane]->producer] =
+            createContiguousUbView(builder, c.loc, root, {rows, pvCols}, pvType.getElementType());
+    }
+}
+
 // Return one 2D ND view per physical L1 buffer. The MTE UB->L1 copy performs
 // the hardware-specific blocked traversal; convert_layout does not move data
 // and only exposes the resulting L1 storage as an [M, N] memref.
@@ -281,7 +417,8 @@ static Value getOrCreateL1NdView(const TransferEmitContext &c, memref::AllocOp s
 // one half to each vector core's private UB. The VECTOR scope is re-tiled to
 // M/2 rows per vector core in a later stage.
 static void emitCubeToVectorTransfer(const TransferEmitContext &c, CrossScopeTransfer &xfer,
-                                     RankedTensorType tensorType, int flagId, BufferPool &bufferPool)
+                                     RankedTensorType tensorType, int flagId, BufferPool &bufferPool,
+                                     Value laneAliasedBuffer = {})
 {
     Type elemType = tensorType.getElementType();
     ArrayRef<int64_t> shape = tensorType.getShape();
@@ -297,7 +434,9 @@ static void emitCubeToVectorTransfer(const TransferEmitContext &c, CrossScopeTra
     // Ping/pong shared alloc before the loop (depth-2 reuse across unrolled
     // clones of this original transfer operation).
     builder.setInsertionPoint(c.loop);
-    auto sharedAllocOp = bufferPool.getOrCreate(builder, c.loc, xfer.originId, allocType);
+    Value sharedBuffer = laneAliasedBuffer;
+    if (!sharedBuffer)
+        sharedBuffer = bufferPool.getOrCreate(builder, c.loc, xfer.originId, allocType).getResult();
 
     // fixpipe after the producer (inside loop body) -> writes the shared buffer.
     // Keep all same-phase VECTOR state maintenance (for example softmax's
@@ -309,7 +448,7 @@ static void emitCubeToVectorTransfer(const TransferEmitContext &c, CrossScopeTra
     auto dualDstAttr = hivm::FixpipeDualDstModeAttr::get(c.ctx, hivm::FixpipeDualDstMode::ROW_SPLIT);
     auto fixpipeOp = builder.create<hivm::FixpipeOp>(c.loc, mlir::TypeRange {},
                                                      xfer.value,                // src (full M-row tile from matmul)
-                                                     sharedAllocOp.getResult(), // dst (M/2-row shared UB alloc)
+                                                     sharedBuffer, // dst (M/2-row shared UB alloc)
                                                      mlir::ValueRange {}, dmaModeAttr, dualDstAttr, nullptr, nullptr,
                                                      nullptr, mlir::ArrayAttr {}, nullptr);
     setOpEngineTypeAttr(fixpipeOp, EngineType::CUBE);
@@ -330,7 +469,7 @@ static void emitCubeToVectorTransfer(const TransferEmitContext &c, CrossScopeTra
     setOpEngineTypeAttr(syncWaitOp, EngineType::VECTOR);
 
     auto plainMemrefType = MemRefType::get(ubShape, elemType);
-    auto castOp = builder.create<memref::MemorySpaceCastOp>(c.loc, plainMemrefType, sharedAllocOp.getResult());
+    auto castOp = builder.create<memref::MemorySpaceCastOp>(c.loc, plainMemrefType, sharedBuffer);
     setOpEngineTypeAttr(castOp, EngineType::VECTOR);
     auto toTensorOp = builder.create<bufferization::ToTensorOp>(c.loc, halfTensorType, castOp.getResult(),
                                                                 /*restrict=*/true, /*writable=*/true);
@@ -580,6 +719,9 @@ insertCrossScopeTransfers(scf::ForOp loop, const DenseMap<Operation *, EngineTyp
         return phase(lhs) < phase(rhs);
     });
 
+    std::optional<LaneAliasedUbPlan> laneAliasedPlan =
+        matchLaneAliasedUbPlan(transfers, lastVectorToCubeProducer, body);
+
     // ROW_SPLIT is materialized by the C->V fixpipes below. Their source is the
     // full CUBE result [BLOCK_M, ...], while their destination UB allocation is
     // [BLOCK_M/2, ...]. Derive BLOCK_M from that semantic boundary and require
@@ -638,35 +780,70 @@ insertCrossScopeTransfers(scf::ForOp loop, const DenseMap<Operation *, EngineTyp
     auto module = loop->getParentOfType<ModuleOp>();
     FlagIdManager flagIdManager(module, /*firstAvailableId=*/0);
 
+    // Reserve every ID before mutating the IR. Lane-local UB aliasing needs one
+    // additional cross-iteration ownership token beyond the twelve U4 transfer
+    // flags. Existing flags in the module may shift all assigned IDs.
+    SmallVector<int> transferFlagIds;
+    transferFlagIds.reserve(transfers.size());
+    for (CrossScopeTransfer &xfer : transfers)
+        transferFlagIds.push_back(flagIdManager.acquireId(xfer.producer));
+    std::optional<int64_t> laneOwnershipFlagId;
+    if (laneAliasedPlan)
+        laneOwnershipFlagId = flagIdManager.acquireId(loop);
+    int highestFlagId = laneOwnershipFlagId ? static_cast<int>(*laneOwnershipFlagId)
+                                            : (transferFlagIds.empty() ? -1 : transferFlagIds.back());
+    if (highestFlagId > static_cast<int>(kMaxTransferFlagId)) {
+        loop.emitError() << "CVSplitScheduling exhausted synchronization flags; "
+                         << "next ID is " << highestFlagId << " but IDs 0.." << kMaxTransferFlagId
+                         << " are available";
+        return failure();
+    }
+
     // The shared DCVP buffer-count policy controls the pool depth. Same-typed
     // buffers (all unrolled qk_ub, all pv_ub, all P L1) rotate over that many
     // physical allocations; absence of a frontend policy defaults to two.
     BufferPool bufferPool(interCoreBufferDepth);
     SmallVector<VectorToCubeTransferChain> vectorToCubeChains;
 
-    for (auto &xfer : transfers) {
-        int syncFlagId = flagIdManager.acquireId(xfer.producer);
-        if (syncFlagId > static_cast<int>(kMaxTransferFlagId)) {
-            loop.emitError() << "CVSplitScheduling exhausted synchronization flags; "
-                             << "next ID is " << syncFlagId << " but IDs 0.." << kMaxTransferFlagId
-                             << " are available";
-            return failure();
-        }
+    if (laneAliasedPlan) {
+        materializeLaneAliasedUbPlan(ec, *laneAliasedPlan);
+
+        OpBuilder ownershipBuilder(ctx);
+        ownershipBuilder.setInsertionPointToStart(body);
+        auto wait = ownershipBuilder.create<hivm::SyncBlockWaitOp>(
+            loc, ec.cubeCoreAttr, ec.pipeVAttr, ec.pipeFixAttr,
+            OpFoldResult(ownershipBuilder.getI64IntegerAttr(*laneOwnershipFlagId)));
+        setOpEngineTypeAttr(wait, EngineType::CUBE);
+
+        ownershipBuilder.setInsertionPointAfter(laneAliasedPlan->releaseAnchor);
+        auto release = ownershipBuilder.create<hivm::SyncBlockSetOp>(
+            loc, ec.vecCoreAttr, ec.pipeVAttr, ec.pipeFixAttr,
+            OpFoldResult(ownershipBuilder.getI64IntegerAttr(*laneOwnershipFlagId)));
+        setOpEngineTypeAttr(release, EngineType::VECTOR);
+    }
+
+    for (auto indexedTransfer : llvm::enumerate(transfers)) {
+        CrossScopeTransfer &xfer = indexedTransfer.value();
+        int syncFlagId = transferFlagIds[indexedTransfer.index()];
         auto tensorType = cast<RankedTensorType>(xfer.value.getType());
         if (tensorType.getRank() != 2) {
             loop.emitError("cross-scope transfers require rank-2 tensors");
             return failure();
         }
 
-        if (xfer.direction == CrossScopeTransfer::CUBE_TO_VECTOR)
-            emitCubeToVectorTransfer(ec, xfer, tensorType, syncFlagId, bufferPool);
+        if (xfer.direction == CrossScopeTransfer::CUBE_TO_VECTOR) {
+            Value laneAliasedBuffer;
+            if (laneAliasedPlan)
+                laneAliasedBuffer = laneAliasedPlan->bufferByProducer.lookup(xfer.producer);
+            emitCubeToVectorTransfer(ec, xfer, tensorType, syncFlagId, bufferPool, laneAliasedBuffer);
+        }
         else
             vectorToCubeChains.push_back(emitVectorToCubeTransfer(ec, xfer, tensorType, syncFlagId, bufferPool));
     }
 
     LLVM_DEBUG(llvm::dbgs() << "[cv-split] Inserted " << transfers.size() << " transfers with " << transfers.size()
                             << " sync flags\n");
-    return CrossScopeTransferInfo {*blockM, std::move(vectorToCubeChains)};
+    return CrossScopeTransferInfo {*blockM, std::move(vectorToCubeChains), laneOwnershipFlagId};
 }
 
 } // namespace mlir::triton::cv_split

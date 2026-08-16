@@ -25,6 +25,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <limits>
+
 #include "ir.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -165,5 +167,91 @@ void init_buffer_ir(py::module &&m)
 
              return self.create<memref::SubViewOp>(source, mixedOffsets,
                                                    mixedSizes, mixedStrides);
+           })
+      .def("reinterpret_view",
+           [](BufferOpBuilder &self, Value source, int64_t offset,
+              const std::vector<int64_t> &sizes,
+              const std::vector<int64_t> &strides) -> Value {
+             auto sourceType = dyn_cast<MemRefType>(source.getType());
+             if (!sourceType || !sourceType.hasStaticShape() ||
+                 sourceType.getRank() == 0) {
+               throw std::runtime_error(
+                   "reinterpret_view source must be a statically shaped memref");
+             }
+             if (!source.getDefiningOp<memref::AllocOp>()) {
+               throw std::runtime_error(
+                   "reinterpret_view source must be a direct local allocation");
+             }
+             SmallVector<int64_t> sourceStrides;
+             int64_t sourceOffset;
+             if (failed(getStridesAndOffset(sourceType, sourceStrides,
+                                            sourceOffset)) ||
+                 sourceOffset != 0) {
+               throw std::runtime_error(
+                   "reinterpret_view source must have identity layout");
+             }
+             int64_t expectedStride = 1;
+             for (int64_t dim = sourceType.getRank() - 1; dim >= 0; --dim) {
+               if (sourceStrides[dim] != expectedStride) {
+                 throw std::runtime_error(
+                     "reinterpret_view source must have identity layout");
+               }
+               expectedStride *= sourceType.getDimSize(dim);
+             }
+             if (sizes.empty() || sizes.size() != strides.size()) {
+               throw std::runtime_error(
+                   "reinterpret_view sizes and strides must have the same non-zero rank");
+             }
+             if (offset < 0) {
+               throw std::runtime_error(
+                   "reinterpret_view offset must be non-negative");
+             }
+
+             int64_t maxIndex = offset;
+             for (size_t i = 0; i < sizes.size(); ++i) {
+               if (sizes[i] <= 0 || strides[i] <= 0) {
+                 throw std::runtime_error(
+                     "reinterpret_view sizes and strides must be positive");
+               }
+               const int64_t extent = sizes[i] - 1;
+               if (extent > 0 &&
+                   strides[i] >
+                       (std::numeric_limits<int64_t>::max() - maxIndex) /
+                           extent) {
+                 throw std::runtime_error(
+                     "reinterpret_view footprint calculation overflowed");
+               }
+               maxIndex += extent * strides[i];
+             }
+
+             const int64_t capacity = sourceType.getNumElements();
+             if (maxIndex >= capacity) {
+               throw std::runtime_error(
+                   "reinterpret_view footprint exceeds source allocation");
+             }
+
+             auto &builder = self.getBuilder();
+             auto *context = builder.getContext();
+             // buffer_type records strides but not an offset. Keep the result
+             // type's offset dynamic, as other buffer-language views do, while
+             // the reinterpret_cast operand still carries the proven constant.
+             auto layout = StridedLayoutAttr::get(
+                 context, ShapedType::kDynamic, strides);
+             auto resultType = MemRefType::get(
+                 sizes, sourceType.getElementType(), layout,
+                 sourceType.getMemorySpace());
+
+             SmallVector<OpFoldResult> mixedSizes;
+             SmallVector<OpFoldResult> mixedStrides;
+             mixedSizes.reserve(sizes.size());
+             mixedStrides.reserve(strides.size());
+             for (int64_t size : sizes)
+               mixedSizes.push_back(builder.getIndexAttr(size));
+             for (int64_t stride : strides)
+               mixedStrides.push_back(builder.getIndexAttr(stride));
+
+             return self.create<memref::ReinterpretCastOp>(
+                 resultType, source, builder.getIndexAttr(offset), mixedSizes,
+                 mixedStrides);
            });
 }

@@ -5,18 +5,24 @@
 // RUN: triton-opt %S/cv_split_scheduling_fa.mlir "--cv_split_scheduling=compile-on-910-95=true unroll-factor=3" "--add_dynamic_cv_pipeline=compile-on-910-95=true" | FileCheck %s --check-prefix=AUTO-FALLBACK
 //
 // This contract proves that CV split consumes DynamicCVPipeline's canonical
-// inter-core buffer-count attribute.  Depth one produces one physical buffer
-// per transfer lineage.  Unsupported depth three is rejected transactionally
-// and leaves the original unscoped loop intact.
+// inter-core buffer-count attribute. The exact U4 FA schedule overrides depth
+// one with four lane-owned UB roots because sharing QK/PV storage across lanes
+// is not live-range safe. P's L1 pool still obeys depth one. Unsupported depth
+// three is rejected transactionally and leaves the original loop intact.
 
-// DEPTH1: memref.alloc() : memref<16x32xf32, #hivm.address_space<ub>>
-// DEPTH1-NOT: memref.alloc() : memref<16x32xf32, #hivm.address_space<ub>>
+// DEPTH1: memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
+// DEPTH1: memref.reinterpret_cast {{.*}} to offset: [0], sizes: [16, 32], strides: [32, 1]
+// DEPTH1: memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
+// DEPTH1: memref.reinterpret_cast {{.*}} to offset: [0], sizes: [16, 32], strides: [32, 1]
+// DEPTH1: memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
+// DEPTH1: memref.reinterpret_cast {{.*}} to offset: [0], sizes: [16, 32], strides: [32, 1]
+// DEPTH1: memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
+// DEPTH1: memref.reinterpret_cast {{.*}} to offset: [0], sizes: [16, 32], strides: [32, 1]
 // DEPTH1: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
 // DEPTH1-NOT: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// DEPTH1: memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
-// DEPTH1-NOT: memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
 // DEPTH1: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 0
 // DEPTH1: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 11
+// DEPTH1: hivm.hir.sync_block_set[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 12
 
 // REJECT-NOT: scope.scope
 // REJECT: scf.for {{.*}} step %c32_i32
@@ -28,6 +34,7 @@
 // COLLISION: scope.scope
 // COLLISION: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 1
 // COLLISION: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 12
+// COLLISION: hivm.hir.sync_block_set[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 13
 
 // When CV commits, the existing DCVP wrapper sees the result and leaves the
 // two proven CV scopes untouched.

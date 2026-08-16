@@ -6,12 +6,16 @@
 // second reaches the post-transformation verifier, which rejects the stale
 // static sizes on a generically retiled tensor.extract_slice. The third is a
 // valid candidate and must still be transformed after both earlier candidates
-// are restored. The fourth has an unsupported direct output destination and
-// must reject transactionally rather than silently retaining full-tile offsets.
-// triton-opt must exit successfully.
+// are restored. Row-splitting the fourth makes its loop-carried output types
+// inconsistent before output-store retiling; it must reject transactionally
+// rather than committing malformed IR. triton-opt must exit successfully.
 
+// Candidate discovery and unrolling happen for every function before any
+// candidate is classified or transformed.
 // DIAG: [cv-split] Function: stage9_retiling_failure
 // DIAG: [cv-split] Function: verifier_rejects_retile
+// DIAG: [cv-split] Function: missing_q_staging_candidate
+// DIAG: [cv-split] Function: unsupported_output_destination
 // DIAG: [cv-split] === Stage 9: scope separation ===
 // DIAG: error: VECTOR retiling only supports shaped splat constants
 // DIAG: [cv-split] Candidate failed; restoring function and trying next function
@@ -20,9 +24,8 @@
 // DIAG: [cv-split] Candidate failed; restoring function and trying next function
 // DIAG: [cv-split] Stage 9 complete
 // DIAG: [cv-split] Function attributes set on missing_q_staging_candidate
-// DIAG: [cv-split] Function: unsupported_output_destination
 // DIAG: [cv-split] === Stage 9: scope separation ===
-// DIAG: error: VECTOR output retiling requires a destination defined by memref.reinterpret_cast
+// DIAG: error: VECTOR retiling produced mismatched scf.for init/iter_arg/result types
 // DIAG: [cv-split] Candidate failed; restoring function and trying next function
 
 // IR: module attributes {{.*}}hivm.disable_auto_tile_and_bind_subblock

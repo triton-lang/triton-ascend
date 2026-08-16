@@ -156,3 +156,25 @@ def subview(
         strides=result_memory_strides  
     )
     return bl.buffer(result_handle, buffer_ty)
+
+
+def reinterpret_view(
+    src: bl.buffer,
+    shape: List[tl.constexpr],
+    strides: List[tl.constexpr],
+    offset: tl.constexpr,
+    builder: ir.builder,
+) -> bl.buffer:
+    shape_int = tl._unwrap_shape(shape)
+    strides_int = tl._unwrap_shape(strides)
+    offset_int = tl._constexpr_to_value(offset)
+    result_handle = builder.reinterpret_view(
+        src.handle, offset_int, shape_int, strides_int
+    )
+    buffer_ty = bl.buffer_type(
+        element_ty=src.dtype,
+        shape=shape_int,
+        space=src.space,
+        strides=strides_int,
+    )
+    return bl.buffer(result_handle, buffer_ty)

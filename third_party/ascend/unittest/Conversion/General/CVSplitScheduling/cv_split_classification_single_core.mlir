@@ -1,12 +1,15 @@
 // RUN: triton-opt %s "--cv_split_scheduling=compile-on-910-95=true unroll-factor=4" 2>/dev/null | FileCheck %s --check-prefix=IR
 // RUN: triton-opt %s --debug-only=cv-split-scheduling "--cv_split_scheduling=compile-on-910-95=true unroll-factor=4" 2>&1 >/dev/null | FileCheck %s --check-prefix=DIAG
 
+// The pass prepares every function before the module-level classifier runs.
+// A vector-only loop has no matmul seed, so precheck rejects it before
+// classification. The cube-only candidate reaches classification but is then
+// rejected because a CV split requires both engines.
 // DIAG-LABEL: [cv-split] Function: cube_only
-// DIAG-LABEL: [cv-split] Function: vector_only
+// DIAG: [cv-split] Pre-check accepted candidate loop
+// DIAG: [cv-split] Function: vector_only
+// DIAG: [cv-split] Pre-check rejected function, skip
 // DIAG: [cv-split] Classification: 4C 0V
-// DIAG: [cv-split] Loop must contain both CUBE and VECTOR ops, skip
-// DIAG: [cv-split] Candidate failed; restoring function and trying next function
-// DIAG: [cv-split] Classification: 0C 4V
 // DIAG: [cv-split] Loop must contain both CUBE and VECTOR ops, skip
 // DIAG: [cv-split] Candidate failed; restoring function and trying next function
 // DIAG: [cv-split] No candidate transformed; keeping original IR

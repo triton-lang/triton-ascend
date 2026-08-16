@@ -21,18 +21,25 @@
 // CHECK-NEXT: %{{.*}} = arith.constant 128 : i32
 // The two physical GM addresses are loop-carried below.  Their initial values
 // are formed here, before the persistent UB/CBUF allocations.
-// CHECK: %{{.*}} = memref.alloc() : memref<16x32xf32, #hivm.address_space<ub>>
-// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<16x32xf32, #hivm.address_space<ub>>
-// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<16x32xf32, #hivm.address_space<ub>>
-// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<16x32xf32, #hivm.address_space<ub>>
+// Four lane-owned roots make the U4 schedule safe. QK uses a contiguous
+// 16x32 view; the later 16x64 PV result reuses the same lane root only after
+// the P-ready handoff proves that Vector has consumed QK.
+// CHECK: %[[LANE0:.*]] = memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
+// CHECK-NEXT: annotation.mark %[[LANE0]] {effects = ["write", "read"]} : memref<16x64xf32, #hivm.address_space<ub>>
+// CHECK-NEXT: %[[QK0:.*]] = memref.reinterpret_cast %[[LANE0]] to offset: [0], sizes: [16, 32], strides: [32, 1]
+// CHECK-NEXT: %[[LANE1:.*]] = memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
+// CHECK-NEXT: annotation.mark %[[LANE1]] {effects = ["write", "read"]} : memref<16x64xf32, #hivm.address_space<ub>>
+// CHECK-NEXT: %[[QK1:.*]] = memref.reinterpret_cast %[[LANE1]] to offset: [0], sizes: [16, 32], strides: [32, 1]
+// CHECK-NEXT: %[[LANE2:.*]] = memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
+// CHECK-NEXT: annotation.mark %[[LANE2]] {effects = ["write", "read"]} : memref<16x64xf32, #hivm.address_space<ub>>
+// CHECK-NEXT: %[[QK2:.*]] = memref.reinterpret_cast %[[LANE2]] to offset: [0], sizes: [16, 32], strides: [32, 1]
+// CHECK-NEXT: %[[LANE3:.*]] = memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
+// CHECK-NEXT: annotation.mark %[[LANE3]] {effects = ["write", "read"]} : memref<16x64xf32, #hivm.address_space<ub>>
+// CHECK-NEXT: %[[QK3:.*]] = memref.reinterpret_cast %[[LANE3]] to offset: [0], sizes: [16, 32], strides: [32, 1]
 // CHECK-NEXT: %{{.*}} = memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
 // CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
 // CHECK-NEXT: %{{.*}} = memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
 // CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
-// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<16x64xf32, #hivm.address_space<ub>>
-// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
-// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<16x64xf32, #hivm.address_space<ub>>
 
 // CHECK: scope.scope : () -> () {
 // CHECK-NEXT: %{{.*}} = hivm.hir.convert_layout %{{.*}} output_shape [32, 32] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<ND>} : (memref<2x2x16x16xf16, #hivm.address_space<cbuf>>) -> memref<32x32xf16, #hivm.address_space<cbuf>>
@@ -40,8 +47,9 @@
 // CHECK-NEXT: %{{.*}} = memref.memory_space_cast %{{.*}} : memref<32x32xf16, #hivm.address_space<cbuf>> to memref<32x32xf16>
 // CHECK-NEXT: %{{.*}} = memref.memory_space_cast %{{.*}} : memref<32x32xf16, #hivm.address_space<cbuf>> to memref<32x32xf16>
 // CHECK-NEXT: %{{.*}}:4 = scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} iter_args(%{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}) -> (i32, i32, index, index) : i32 {
+// CHECK-NEXT: hivm.hir.sync_block_wait[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 12
 
-// CHECK: hivm.hir.fixpipe {dma_mode = #hivm.dma_mode{{<}}nz2nd{{>}}} ins(%{{.*}} : tensor<32x32xf32>) outs(%{{.*}} : memref<16x32xf32, #hivm.address_space<ub>>) dual_dst_mode = {{<}}ROW_SPLIT{{>}}
+// CHECK: hivm.hir.fixpipe {dma_mode = #hivm.dma_mode{{<}}nz2nd{{>}}} ins(%{{.*}} : tensor<32x32xf32>) outs(%[[QK0]] : memref<16x32xf32, #hivm.address_space<ub>>) dual_dst_mode = {{<}}ROW_SPLIT{{>}}
 // CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 0
 // CHECK: hivm.hir.fixpipe {{.*}} dual_dst_mode = {{<}}ROW_SPLIT{{>}}
 // CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 1
@@ -73,6 +81,7 @@
 // CHECK: scope.scope : () -> () {
 // CHECK-NEXT: %{{.*}} = hivm.hir.get_sub_block_idx -> i64
 // CHECK-NEXT: %{{.*}} = arith.index_cast %{{.*}} : i64 to index
+// CHECK-NEXT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 12
 // CHECK-NEXT: %{{.*}}:7 = scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} iter_args(%{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}) -> (tensor<16xf32>, tensor<16x64xf32>, tensor<16xf32>, i32, i32, index, index) : i32 {
 
 // CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 0
@@ -91,6 +100,7 @@
 // CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 9
 // CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 10
 // CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 11
+// CHECK: hivm.hir.sync_block_set[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 12
 
 // CHECK: scope.return
 // CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<VECTOR>, noinline}

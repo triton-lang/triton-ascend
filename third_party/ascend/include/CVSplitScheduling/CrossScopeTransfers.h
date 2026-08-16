@@ -32,6 +32,7 @@
 #include "llvm/ADT/SmallVector.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace mlir::triton::cv_split {
 
@@ -55,6 +56,10 @@ struct CrossScopeTransferInfo {
     /// dimension. Scope separation halves it to M/2 rows per vector core.
     int64_t blockM;
     llvm::SmallVector<VectorToCubeTransferChain> vectorToCubeChains;
+    /// Optional cross-iteration ownership token for lane-local UB aliases.
+    /// Scope separation materializes the one-time VECTOR seed inside the
+    /// VECTOR scope; the CUBE wait and VECTOR return already live in the loop.
+    std::optional<int64_t> laneOwnershipFlagId;
 };
 
 /// Materializes CUBE-to-VECTOR and VECTOR-to-CUBE data movement and

@@ -879,6 +879,15 @@ LogicalResult createScopeSeparation(func::FuncOp funcOp, scf::ForOp innerLoop,
     // Move original inner loop into VECTOR scope
     innerLoop->remove();
     vecBlock->push_back(innerLoop.getOperation());
+    if (transferInfo.laneOwnershipFlagId) {
+        OpBuilder seedBuilder(innerLoop);
+        auto seed = seedBuilder.create<hivm::SyncBlockSetOp>(
+            loc, hivm::TCoreTypeAttr::get(ctx, hivm::TCoreType::VECTOR),
+            hivm::PipeAttr::get(ctx, hivm::PIPE::PIPE_V),
+            hivm::PipeAttr::get(ctx, hivm::PIPE::PIPE_FIX),
+            OpFoldResult(seedBuilder.getI64IntegerAttr(*transferInfo.laneOwnershipFlagId)));
+        setOpEngineTypeAttr(seed, EngineType::VECTOR);
+    }
     // Move epilogue ops into VECTOR scope
     for (Operation *op : epilogueOps) {
         op->remove();

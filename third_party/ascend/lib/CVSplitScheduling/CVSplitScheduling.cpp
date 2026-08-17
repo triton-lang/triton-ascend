@@ -718,6 +718,8 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
         this->compileOn91095 = options.compileOn91095;
         this->unrollFactor = options.unrollFactor;
         this->promoteFullyUnrolled = options.promoteFullyUnrolled;
+        this->privateBufferUbBudgetBytes = options.privateBufferUbBudgetBytes;
+        this->promotePrivateBufferPools = options.promotePrivateBufferPools;
     }
 
     void runOnOperation() override
@@ -920,7 +922,8 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
         // Stage 8: Insert cross-scope transfers (BEFORE scope separation)
         LLVM_DEBUG(llvm::dbgs() << "[cv-split] === Stage 8: cross-scope transfers ===\n");
         FailureOr<cv_split::CrossScopeTransferInfo> transferInfo = cv_split::insertCrossScopeTransfers(
-            loop, classification, transferPhaseEnds, static_cast<unsigned>(interCoreBufferDepth));
+            loop, classification, transferPhaseEnds, static_cast<unsigned>(interCoreBufferDepth),
+            static_cast<uint64_t>(privateBufferUbBudgetBytes), promotePrivateBufferPools);
         if (failed(transferInfo)) {
             return failure();
         }

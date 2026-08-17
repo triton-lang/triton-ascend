@@ -38,7 +38,24 @@ def CVSplitScheduling : Pass<"cv_split_scheduling", "mlir::ModuleOp"> {
     Option<"promoteFullyUnrolled", "promote-fully-unrolled",
            "bool", /*default*/"true",
            "promote the scope loops left by a candidate whose unroll consumed "
-           "its whole trip count; disable to keep them for inspection">
+           "its whole trip count; disable to keep them for inspection">,
+    Option<"privateBufferUbBudgetBytes", "private-buffer-ub-budget-bytes",
+           "int64_t", /*default*/"0",
+           "spare UB, in bytes, that cross-scope transfers may spend to stop "
+           "reusing buffers across unrolled lanes. It funds merging two "
+           "same-element-type CUBE-to-VECTOR roles onto one union slot per "
+           "lane, which is what lets HEAD_DIM differ from BLOCK_N: the slot is "
+           "sized for the larger role and the smaller takes a contiguous view "
+           "of its front. Merging equal-sized roles is free and happens "
+           "regardless. Zero funds only the free merges.">,
+    Option<"promotePrivateBufferPools", "promote-private-buffer-pools",
+           "bool", /*default*/"false",
+           "additionally give individual pools one buffer per lane instead of "
+           "a depth-sized rotating set, cheapest-first against the same UB "
+           "budget. Off by default: at the unroll factors in use the reuse it "
+           "removes is already ordered by a flag the schedule needs anyway, so "
+           "it costs buffers and flags without removing a stall. Turn it on to "
+           "stop depending on that ordering being emergent.">
   ];
   let dependentDialects = [
     "mlir::scf::SCFDialect",

@@ -34,16 +34,22 @@
 // LANES2-COUNT-4: linalg.matmul
 // LANES2-NOT: linalg.matmul
 
-// The same six flags: demand follows the phases and the buffer depth, never
-// the unroll factor.  The phase order differs from factor four -- with one lane
-// per slot nothing is reused, so there is nothing to pipeline and the schedule
-// keeps its plain order -- but the count does not.
+// Six forward flags, plus one.  Demand follows the phases and the buffer depth,
+// never the unroll factor, so the six do not move.  The extra one is the merged
+// group's back-edge release: at two lanes one union slot per lane is cheaper
+// than the two rotating pools it replaces, so the merge happens even on a zero
+// budget, and a merged slot's last reader is the consumer of the *second* role
+// -- past the point the producing core last waits -- so the loop back edge needs
+// a flag of its own.  It runs consumer-to-producer on the canonical
+// vector-to-cube channel, which is why the reverse-pipe checks below still hold.
 // FLAGS2-DAG: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 0
 // FLAGS2-DAG: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 1
 // FLAGS2-DAG: hivm.hir.sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
 // FLAGS2-DAG: hivm.hir.sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 3
 // FLAGS2-DAG: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 4
 // FLAGS2-DAG: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 5
-// FLAGS2-NOT: flag = 6
+// FLAGS2-DAG: hivm.hir.sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 6
+// FLAGS2-DAG: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 6
+// FLAGS2-NOT: flag = 7
 // FLAGS2-NOT: sync_block{{.*}}<PIPE_V>, <PIPE_FIX>
 // FLAGS2-NOT: sync_block{{.*}}<PIPE_MTE1>, <PIPE_MTE3>

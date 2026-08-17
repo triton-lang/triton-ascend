@@ -306,7 +306,10 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             ascend.passes.ttir.set_enable_buffer_insert_optimization(mod, metadata["enable_buffer_insert_optimization"])
 
         if try_cv_split:
-            ascend.passes.ttir.add_cv_split_scheduling(pm, compile_on_910_95, metadata["cv_split_unroll_factor"])
+            ascend.passes.ttir.add_cv_split_scheduling(
+                pm, compile_on_910_95, metadata["cv_split_unroll_factor"],
+                private_buffer_ub_budget_bytes=metadata["cv_split_private_buffer_ub_budget_bytes"],
+                promote_private_buffer_pools=metadata["cv_split_promote_private_buffer_pools"])
 
         if try_dynamic_cv:
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
@@ -1188,6 +1191,20 @@ class NPUOptions:
     # retain an immediate kill switch by setting this option to False.
     enable_cv_split_scheduling: bool = True if is_compile_on_910_95 else False
     cv_split_unroll_factor: int = 4
+    # Spare UB, in bytes, that cross-scope transfers may spend to stop reusing
+    # buffers across unrolled lanes. It funds merging the two CUBE->VECTOR
+    # roles onto one union slot per lane, which is what lets HEAD_DIM differ
+    # from BLOCK_N: the slot is sized for the larger role and the smaller takes
+    # a contiguous view of its front. Merging equal-sized roles costs nothing
+    # and happens regardless, so zero still gets the HEAD_DIM == BLOCK_N case.
+    cv_split_private_buffer_ub_budget_bytes: int = 0
+    # Additionally give individual pools one buffer per lane rather than a
+    # rotating set, cheapest-first against the same budget. Off by default: at
+    # the unroll factors in use, the reuse this removes is already ordered by a
+    # flag the schedule needs for its own data, so it costs buffers and flags
+    # without removing a stall. Turn it on to stop relying on that ordering
+    # being emergent rather than explicit.
+    cv_split_promote_private_buffer_pools: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = False
     enable_cross_if_fusion: bool = False
     has_auto_blockify_blacklist_op: Optional[bool] = None

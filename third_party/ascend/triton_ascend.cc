@@ -379,14 +379,19 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     });
 
   m.def("add_cv_split_scheduling", [](mlir::PassManager &pm,
-    bool compileOn91095, int unrollFactor, bool promoteFullyUnrolled) {
+    bool compileOn91095, int unrollFactor, bool promoteFullyUnrolled,
+    int64_t privateBufferUbBudgetBytes, bool promotePrivateBufferPools) {
       CVSplitSchedulingOptions opts;
       opts.compileOn91095 = compileOn91095;
       opts.unrollFactor = unrollFactor;
       opts.promoteFullyUnrolled = promoteFullyUnrolled;
+      opts.privateBufferUbBudgetBytes = privateBufferUbBudgetBytes;
+      opts.promotePrivateBufferPools = promotePrivateBufferPools;
       pm.addPass(mlir::triton::createCVSplitSchedulingPass(opts));
     }, py::arg("pm"), py::arg("compile_on_910_95"), py::arg("unroll_factor"),
-       py::arg("promote_fully_unrolled") = true);
+       py::arg("promote_fully_unrolled") = true,
+       py::arg("private_buffer_ub_budget_bytes") = 0,
+       py::arg("promote_private_buffer_pools") = false);
 
   m.def("set_buffer_count", [](mlir::ModuleOp &module, const std::string& type, int count) {
     mlir::triton::BufferCountManager mgr(module);

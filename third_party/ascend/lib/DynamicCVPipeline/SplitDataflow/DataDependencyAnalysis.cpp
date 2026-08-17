@@ -164,7 +164,11 @@ bool DataDependencyAnalysisPass::isValid1DValueForDependency(
     mlir::Value value) {
   auto tensorTy = dyn_cast<TensorType>(value.getType());
   if (tensorTy && tensorTy.getRank() == SHAPE_1D_LENGTH) {
-    return true;
+    // Only 1-D tensors consumed by linalg.broadcast count; extract-consumed
+    // ones go through the scalar SSBuffer channel instead.
+    return llvm::all_of(value.getUsers(), [](mlir::Operation *u) {
+      return isa<linalg::BroadcastOp>(u);
+    });
   }
   return false;
 }
@@ -1072,7 +1076,8 @@ void DataDependencyAnalysisPass::runOnOperation() {
   }
   createBlockInfoMap(info);
 
-  // Step 3: Analyze dependencies (populate v2c, c2v lists)
+  // Step 3: Analyze dependencies (v2c/c2v).  Scalar V->C deps come from
+  // analyzeExternalInputs (VECTOR scalars crossing into CUBE).
   analyzeExternalInputs(info);
 
   analyzeExternalOutputs(info);

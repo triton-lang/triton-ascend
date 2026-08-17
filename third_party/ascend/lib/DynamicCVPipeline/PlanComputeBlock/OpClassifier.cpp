@@ -130,6 +130,9 @@ void OpClassifierPass::initializePass(ModuleOp module) {
   opCoreTypes.clear();
   allOps.clear();
   cubeSeeds.clear();
+  vectorOnlyProducerCache.clear();
+  inBroadcastChain.clear();
+  CloneOpMap.clear();
 
   // Collect all operations
   module.walk([&](Operation *op) {
@@ -686,6 +689,74 @@ void OpClassifierPass::getUpstreamOpsWithMemoryDeps(
   }
 }
 
+// arith/math op with a tensor result is VECTOR-only (not CUBE).
+static bool isTensorArithOrMathOp(Operation *op) {
+  if (!isa<arith::ArithDialect, math::MathDialect>(op->getDialect())) {
+    return false;
+  }
+  for (Value result : op->getResults()) {
+    if (isa<RankedTensorType>(result.getType())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// True if ANY op in the defining chain is VECTOR-only.  Conservative by
+// design: once a chain contains a VECTOR-only op the value (and any extract of
+// it) cannot be recomputed on CUBE, so mixed VECTOR-only + CUBE producers still
+// classify as VECTOR.  Memoized in `cache` so a tensor extracted from multiple
+// times is not re-walked.
+static bool hasVectorOnlyProducer(Value value,
+                                  llvm::DenseMap<Value, bool> &cache) {
+  auto it = cache.find(value);
+  if (it != cache.end()) {
+    return it->second;
+  }
+
+  llvm::SmallVector<Value> worklist{value};
+  llvm::DenseSet<Operation *> visited;
+  bool result = false;
+  while (!worklist.empty()) {
+    Value cur = worklist.pop_back_val();
+    Operation *defOp = cur.getDefiningOp();
+    if (!defOp || !visited.insert(defOp).second) {
+      continue;
+    }
+    if (CVPipeline::isVectorOnlyOp(defOp)) {
+      result = true;
+      break;
+    }
+    for (Value operand : defOp->getOperands()) {
+      worklist.push_back(operand);
+    }
+  }
+  cache[value] = result;
+  return result;
+}
+
+// Shared skip predicates for both CUBE upstream BFS paths.
+bool OpClassifierPass::shouldSkipCubeUpstream(Operation *op) {
+  if (isTensorArithOrMathOp(op)) {
+    LLVM_DEBUG(DBGS() << "skip " << op->getName().getStringRef()
+                      << ": arith/math tensor op\n");
+    return true;
+  }
+  if (auto extOp = dyn_cast<tensor::ExtractOp>(op)) {
+    if (hasVectorOnlyProducer(extOp.getTensor(), vectorOnlyProducerCache)) {
+      LLVM_DEBUG(DBGS() << "skip " << op->getName().getStringRef()
+                        << ": extract of vector-only producer\n");
+      return true;
+    }
+  }
+  if (isInsideNestedLinalgRegion(op)) {
+    LLVM_DEBUG(DBGS() << "skip " << op->getName().getStringRef()
+                      << ": inside linalg block\n");
+    return true;
+  }
+  return false;
+}
+
 // Propagate CUBE core type upstream
 int OpClassifierPass::propagateCubeUpstream() {
   LLVM_DEBUG(DBGS() << "--- Step 2: CUBE upstream BFS --->\n");
@@ -712,30 +783,9 @@ int OpClassifierPass::propagateCubeUpstream() {
       if (!def || cubeVisited.count(def) || isa<linalg::MatmulOp>(def))
         continue;
 
-      // Skip arith dialect ops with tensor results (they should be VECTOR, not
-      // CUBE)
-      if (isa<arith::ArithDialect>(def->getDialect())) {
-        bool hasTensorResult = false;
-        for (Value result : def->getResults()) {
-          if (isa<RankedTensorType>(result.getType())) {
-            hasTensorResult = true;
-            break;
-          }
-        }
-        if (hasTensorResult) {
-          LLVM_DEBUG(DBGS() << "skip " << def->getName().getStringRef()
-                            << ": arith tensor op\n");
-          continue;
-        }
-      }
-
-      // Skip operations inside linalg block (internal values)
-      // But don't skip the linalg op itself
-      if (isInsideNestedLinalgRegion(def)) {
-        LLVM_DEBUG(DBGS() << "skip " << def->getName().getStringRef()
-                          << ": inside linalg block\n");
+      // Shared skip rules (see shouldSkipCubeUpstream).
+      if (shouldSkipCubeUpstream(def))
         continue;
-      }
 
       cubeVisited.insert(def);
 
@@ -910,6 +960,9 @@ void OpClassifierPass::propagateCubeUpstreamForOp(Operation *startOp) {
       if (!upstreamOp || cubeVisited.count(upstreamOp))
         continue;
       if (isa<linalg::MatmulOp>(upstreamOp))
+        continue;
+      // Same skip rules as the main CUBE BFS.
+      if (shouldSkipCubeUpstream(upstreamOp))
         continue;
 
       cubeVisited.insert(upstreamOp);

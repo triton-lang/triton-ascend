@@ -98,19 +98,24 @@ inline MemRefType getSsbufMemrefType(Builder &builder) {
 }
 
 inline std::pair<arith::ConstantOp, hivm::PointerCastOp>
-getSsbufConstAndPointerCast(OpBuilder &builder, Location loc, uint64_t addr) {
+getSsbufConstAndPointerCast(OpBuilder &builder, Location loc, uint64_t addr,
+                            Type elemType) {
   auto i64Type = builder.getIntegerType(ADDR_INT_TYPE);
   auto addrAttr = builder.getIntegerAttr(i64Type, addr);
   auto addrConst = builder.create<arith::ConstantOp>(loc, i64Type, addrAttr);
+  auto addressSpaceAttr =
+      builder.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::SSBUF);
+  auto memrefType = MemRefType::get({}, elemType, nullptr, addressSpaceAttr);
 
-  return {addrConst,
-          builder.create<hivm::PointerCastOp>(loc, getSsbufMemrefType(builder),
-                                              addrConst.getResult())};
+  return {addrConst, builder.create<hivm::PointerCastOp>(
+                         loc, memrefType, addrConst.getResult())};
 }
 
 inline hivm::PointerCastOp createPointerCastOp(OpBuilder &builder, Location loc,
                                                uint64_t addr) {
-  return getSsbufConstAndPointerCast(builder, loc, addr).second;
+  return getSsbufConstAndPointerCast(builder, loc, addr,
+                                     builder.getIntegerType(CONST_INT_TYPE))
+      .second;
 }
 
 } // namespace triton

@@ -789,10 +789,11 @@ InterCoreTransferAndSyncPass::getTransferPipeConfig(Operation *transferOp,
     config.srcCoreType = "VECTOR";
     config.dstCoreType = "CUBE";
   } else if (isa<memref::StoreOp>(transferOp)) {
-    config.forReadTPipe = pipeVAttr;
-    config.forReadPipe = pipeFixAttr;
-    config.forWriteTPipe = pipeFixAttr;
-    config.forWritePipe = pipeVAttr;
+    // Scalar sync uses PIPE_S to stay isolated from tensor flag space.
+    config.forReadTPipe = pipeSAttr;
+    config.forReadPipe = pipeSAttr;
+    config.forWriteTPipe = pipeSAttr;
+    config.forWritePipe = pipeSAttr;
     config.srcCoreAttr = vecCoreAttr;
     config.dstCoreAttr = cubeCoreAttr;
     config.srcCoreType = "VECTOR";

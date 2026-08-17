@@ -109,7 +109,7 @@ bool isVectorOnlyOp(Operation *op) {
 
   return llvm::TypeSwitch<Operation *, bool>(op)
       .Case([](linalg::ReduceOp) { return true; })
-      .Case<arith::SelectOp, math::FloorOp>([](Operation *op) {
+      .Case<arith::SelectOp, math::FloorOp, math::CeilOp>([](Operation *op) {
         return isa<RankedTensorType>(op->getResult(0).getType());
       })
       .Default([](auto) { return false; });

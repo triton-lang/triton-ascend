@@ -22,11 +22,16 @@
 
 #include <optional>
 
+#include <map>
+
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 
+#include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/SeparateCVScope.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -38,12 +43,7 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/Interfaces/LoopLikeInterface.h"
 #include "mlir/Pass/Pass.h"
-
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/SplitDataflow/SeparateCVScope.h"
-
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "mlir/Transforms/RegionUtils.h"
 
 using namespace mlir;
 
@@ -1026,11 +1026,75 @@ static LogicalResult separateScopes(func::FuncOp funcOp) {
   return success();
 }
 
+// Mechanism A: in VECTOR scopes, replace each redundant store→load pair that
+// shares an ssbuffer.transfer_id with the stored value, then erase the load.
+//
+// The scope-clone step duplicates the CUBE-side scalar load into the VECTOR
+// scope too; there it reads back a value this scope itself just stored, so the
+// load is pure redundancy (not dead code — it has users), and DCE will not
+// remove it.
+static void replaceRedundantVectorStoreLoad(scope::ScopeOp scopeOp) {
+  auto coreTypeAttr =
+      scopeOp->getAttrOfType<hivm::TCoreTypeAttr>(hivm::TCoreTypeAttr::name);
+  if (!coreTypeAttr || coreTypeAttr.getTcoretype() != hivm::TCoreType::VECTOR) {
+    return;
+  }
+
+  // Pass 1: collect the value each ssbuffer.transfer_id stores.
+  llvm::DenseMap<int64_t, mlir::Value> storedValues;
+  scopeOp.walk([&](memref::StoreOp storeOp) {
+    auto transferIdAttr =
+        storeOp->getAttrOfType<mlir::IntegerAttr>(CVPipeline::kTransferId);
+    if (!transferIdAttr) {
+      return;
+    }
+    int64_t tid = transferIdAttr.getInt();
+    storedValues[tid] = storeOp.getValue();
+  });
+
+  if (storedValues.empty()) {
+    return;
+  }
+
+  // Pass 2: replace loads of the same transfer_id with the stored value.
+  llvm::SmallVector<memref::LoadOp> deadLoads;
+  scopeOp.walk([&](memref::LoadOp loadOp) {
+    auto transferIdAttr =
+        loadOp->getAttrOfType<mlir::IntegerAttr>(CVPipeline::kTransferId);
+    if (!transferIdAttr) {
+      return;
+    }
+    int64_t tid = transferIdAttr.getInt();
+    auto it = storedValues.find(tid);
+    if (it == storedValues.end()) {
+      return;
+    }
+    mlir::Value storeVal = it->second;
+    if (storeVal == loadOp.getResult()) {
+      return;
+    }
+    // Drop the volatile annotation the scalar read attached to this load;
+    // it only makes sense while the load survives in the CUBE scope.
+    for (Operation *user :
+         llvm::make_early_inc_range(loadOp.getResult().getUsers())) {
+      if (isa<annotation::MarkOp>(user) && user->hasAttr(kMemrefExtVolatile)) {
+        user->erase();
+      }
+    }
+    loadOp.replaceAllUsesWith(storeVal);
+    deadLoads.push_back(loadOp);
+  });
+  for (memref::LoadOp loadOp : deadLoads) {
+    loadOp->erase();
+  }
+}
+
 // Declare dependent dialects
 void mlir::triton::SeparateCVScopePass::getDependentDialects(
     DialectRegistry &registry) const {
-  registry.insert<arith::ArithDialect, hivm::HIVMDialect, memref::MemRefDialect,
-                  scope::ScopeDialect>();
+  registry
+      .insert<annotation::AnnotationDialect, arith::ArithDialect,
+              hivm::HIVMDialect, memref::MemRefDialect, scope::ScopeDialect>();
 }
 
 void mlir::triton::SeparateCVScopePass::runOnOperation() {
@@ -1060,6 +1124,10 @@ void mlir::triton::SeparateCVScopePass::runOnOperation() {
     scopeOp->setAttr(CVPipeline::kHIVMMatmulLimitedInCubeAttr,
                      UnitAttr::get(scopeOp->getContext()));
   });
+
+  // Mechanism A: clean up redundant VECTOR-side store→load pairs.
+  module.walk(
+      [](scope::ScopeOp scopeOp) { replaceRedundantVectorStoreLoad(scopeOp); });
 
   debugDumpOperation("after SeparateCVScopePass", module.getOperation());
 }

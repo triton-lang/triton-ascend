@@ -768,22 +768,29 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if opt.debug:
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
-        cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
         vf_merge_level = metadata["vf_merge_level"]
         if vf_merge_level is not None:
-            cmd_list += [f"--enable-vf-merge-level={vf_merge_level}"]
+            _compile_option_list += [f"--enable-vf-merge-level={vf_merge_level}"]
 
         hfusion_enable_multiple_consumer_fusion = metadata["hfusion_enable_multiple_consumer_fusion"]
         if hfusion_enable_multiple_consumer_fusion:
-            cmd_list += [f"--hfusion-enable-multiple-consumer-fusion={hfusion_enable_multiple_consumer_fusion}"]
+            _compile_option_list += [
+                f"--hfusion-enable-multiple-consumer-fusion={hfusion_enable_multiple_consumer_fusion}"
+            ]
 
         enable_cross_if_fusion = metadata["enable_cross_if_fusion"]
         if enable_cross_if_fusion:
-            cmd_list += [f"--hfusion-enable-cross-if-fusion={enable_cross_if_fusion}"]
+            _compile_option_list += [f"--hfusion-enable-cross-if-fusion={enable_cross_if_fusion}"]
 
         plan_memory_strategy = metadata["plan_memory_strategy"]
         if plan_memory_strategy is not None:
-            cmd_list += [f"--plan-memory-strategy={plan_memory_strategy}"]
+            _compile_option_list += [f"--plan-memory-strategy={plan_memory_strategy}"]
+
+        if opt.debug:
+            src_file, _ = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
+            _compile_option_list += [f"--save-temps={os.path.dirname(src_file)}"]
+
+        cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
 
         if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
             print_cmd_list = cmd_list.copy()
@@ -1003,6 +1010,10 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
+
+        if opt.debug:
+            src_file, _ = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
+            _compile_option_list += [f"--save-temps={os.path.dirname(src_file)}"]
 
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
 

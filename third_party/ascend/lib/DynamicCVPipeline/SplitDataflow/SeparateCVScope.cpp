@@ -1046,9 +1046,9 @@ static void replaceRedundantVectorStoreLoad(scope::ScopeOp scopeOp) {
 // Declare dependent dialects
 void mlir::triton::SeparateCVScopePass::getDependentDialects(
     DialectRegistry &registry) const {
-  registry.insert<annotation::AnnotationDialect, arith::ArithDialect,
-                  hivm::HIVMDialect, memref::MemRefDialect,
-                  scope::ScopeDialect>();
+  registry
+      .insert<annotation::AnnotationDialect, arith::ArithDialect,
+              hivm::HIVMDialect, memref::MemRefDialect, scope::ScopeDialect>();
 }
 
 void mlir::triton::SeparateCVScopePass::runOnOperation() {

@@ -107,9 +107,8 @@ getSsbufConstAndPointerCast(OpBuilder &builder, Location loc, uint64_t addr,
       builder.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::SSBUF);
   auto memrefType = MemRefType::get({}, elemType, nullptr, addressSpaceAttr);
 
-  return {addrConst,
-          builder.create<hivm::PointerCastOp>(loc, memrefType,
-                                              addrConst.getResult())};
+  return {addrConst, builder.create<hivm::PointerCastOp>(
+                         loc, memrefType, addrConst.getResult())};
 }
 
 inline hivm::PointerCastOp createPointerCastOp(OpBuilder &builder, Location loc,

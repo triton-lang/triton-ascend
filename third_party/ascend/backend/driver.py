@@ -416,6 +416,7 @@ def generate_npu_header_src():
 #define TRITON_NPU_HEADERS
 #include <assert.h>
 #include <stdbool.h>
+#include <cstdlib>
 #include <string>
 #include <memory>
 #include <sys/syscall.h>
@@ -686,6 +687,13 @@ def make_launcher(constants, signature, metadata):
     npu_utils_inst = NPUUtils()
     npu_utils_mod = getattr(npu_utils_inst, "npu_utils_mod", None)
     npu_utils_so_path = getattr(npu_utils_mod, "__file__", "")
+    # The generated launcher source is part of its cache key. Preserve only the
+    # deterministic cache-key directory so the launcher can be reused after the
+    # cache root changes.
+    npu_utils_cache_relative = os.path.join(
+        os.path.basename(os.path.dirname(npu_utils_so_path)),
+        os.path.basename(npu_utils_so_path),
+    )
     cpp_npu_utils_dlopen = f"""
 typedef void* (*triton_allocate_workspace_t)(uint64_t, void**);
 typedef void* (*triton_allocate_sync_block_lock_t)(uint64_t, void*, void**);
@@ -706,10 +714,23 @@ static bool npu_utils_ready() {{
 
 static void init_npu_utils() {{
     if (npu_utils_ready()) return;
-    const char* so_path = "{npu_utils_so_path}";
-    void* handle = dlopen(so_path, RTLD_LAZY);
+    const char* cache_root = std::getenv("TRITON_CACHE_DIR");
+    std::string npu_utils_path;
+    if (cache_root && cache_root[0] != '\\0') {{
+        npu_utils_path = std::string(cache_root) + "/{npu_utils_cache_relative}";
+    }} else {{
+        const char* triton_home = std::getenv("TRITON_HOME");
+        const char* home = std::getenv("HOME");
+        const char* base = triton_home && triton_home[0] != '\\0' ? triton_home : home;
+        if (!base || base[0] == '\\0') {{
+            fprintf(stderr, "Error: neither TRITON_CACHE_DIR nor TRITON_HOME/HOME is set\\n");
+            return;
+        }}
+        npu_utils_path = std::string(base) + "/.triton/cache/{npu_utils_cache_relative}";
+    }}
+    void* handle = dlopen(npu_utils_path.c_str(), RTLD_LAZY);
     if (!handle) {{
-        fprintf(stderr, "Error: dlopen %s failed: %s\\n", so_path, dlerror());
+        fprintf(stderr, "Error: dlopen %s failed: %s\\n", npu_utils_path.c_str(), dlerror());
         return;
     }}
     g_allocate_workspace = (triton_allocate_workspace_t)dlsym(handle, "triton_allocate_workspace");

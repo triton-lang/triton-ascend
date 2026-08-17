@@ -79,6 +79,56 @@ def test_make_launcher_exposes_triton_launch_kernel(
 @patch.object(driver, "is_ffts_supported", return_value=True)
 @patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_make_launcher_resolves_npu_utils_from_active_cache_root(
+    _mock_backend_func_patch,
+    _mock_arch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    cache_key = "NPU_UTILS_CACHE_KEY"
+
+    def make_utils(cache_root):
+        return SimpleNamespace(
+            get_aivector_core_num=lambda: 40,
+            get_aicore_num=lambda: 20,
+            npu_utils_mod=SimpleNamespace(__file__=f"{cache_root}/{cache_key}/npu_utils.so"),
+        )
+
+    producer_utils = make_utils("/producer/cache")
+    consumer_utils = make_utils("/consumer/cache")
+    # make_launcher currently reads NPUUtils once for core counts and once for
+    # the loaded module path.
+    mock_npu_utils.side_effect = [producer_utils, producer_utils, consumer_utils, consumer_utils]
+
+    producer_src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32", 1: "*fp32"},
+        metadata=_make_metadata(),
+    )
+    consumer_src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32", 1: "*fp32"},
+        metadata=_make_metadata(),
+    )
+
+    assert producer_src == consumer_src
+    assert "/producer/cache" not in producer_src
+    assert "/consumer/cache" not in consumer_src
+    assert '#include <cstdlib>' in producer_src
+    assert 'const char* cache_root = std::getenv("TRITON_CACHE_DIR");' in producer_src
+    assert f'npu_utils_path = std::string(cache_root) + "/{cache_key}/npu_utils.so";' in producer_src
+    assert 'const char* triton_home = std::getenv("TRITON_HOME");' in producer_src
+    assert f'npu_utils_path = std::string(base) + "/.triton/cache/{cache_key}/npu_utils.so";' in producer_src
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_make_launcher_shrinks_coalesced_grid_for_both_launch_paths(
     _mock_backend_func_patch,
     _mock_arch,

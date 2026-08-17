@@ -28,13 +28,14 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 
+#include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/SeparateCVScope.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
@@ -995,7 +996,7 @@ static void replaceRedundantVectorStoreLoad(scope::ScopeOp scopeOp) {
 
   // Pass 1: collect the value each ssbuffer.transfer_id stores.
   llvm::DenseMap<int64_t, mlir::Value> storedValues;
-  scopeOp.walk([&](LLVM::StoreOp storeOp) {
+  scopeOp.walk([&](memref::StoreOp storeOp) {
     auto transferIdAttr =
         storeOp->getAttrOfType<mlir::IntegerAttr>(CVPipeline::kTransferId);
     if (!transferIdAttr) {
@@ -1010,8 +1011,8 @@ static void replaceRedundantVectorStoreLoad(scope::ScopeOp scopeOp) {
   }
 
   // Pass 2: replace loads of the same transfer_id with the stored value.
-  llvm::SmallVector<LLVM::LoadOp> deadLoads;
-  scopeOp.walk([&](LLVM::LoadOp loadOp) {
+  llvm::SmallVector<memref::LoadOp> deadLoads;
+  scopeOp.walk([&](memref::LoadOp loadOp) {
     auto transferIdAttr =
         loadOp->getAttrOfType<mlir::IntegerAttr>(CVPipeline::kTransferId);
     if (!transferIdAttr) {
@@ -1026,10 +1027,18 @@ static void replaceRedundantVectorStoreLoad(scope::ScopeOp scopeOp) {
     if (storeVal == loadOp.getResult()) {
       return;
     }
+    // Drop the volatile annotation the scalar read attached to this load;
+    // it only makes sense while the load survives in the CUBE scope.
+    for (Operation *user :
+         llvm::make_early_inc_range(loadOp.getResult().getUsers())) {
+      if (isa<annotation::MarkOp>(user) && user->hasAttr(kMemrefExtVolatile)) {
+        user->erase();
+      }
+    }
     loadOp.replaceAllUsesWith(storeVal);
     deadLoads.push_back(loadOp);
   });
-  for (LLVM::LoadOp loadOp : deadLoads) {
+  for (memref::LoadOp loadOp : deadLoads) {
     loadOp->erase();
   }
 }
@@ -1037,7 +1046,8 @@ static void replaceRedundantVectorStoreLoad(scope::ScopeOp scopeOp) {
 // Declare dependent dialects
 void mlir::triton::SeparateCVScopePass::getDependentDialects(
     DialectRegistry &registry) const {
-  registry.insert<arith::ArithDialect, hivm::HIVMDialect, memref::MemRefDialect,
+  registry.insert<annotation::AnnotationDialect, arith::ArithDialect,
+                  hivm::HIVMDialect, memref::MemRefDialect,
                   scope::ScopeDialect>();
 }
 

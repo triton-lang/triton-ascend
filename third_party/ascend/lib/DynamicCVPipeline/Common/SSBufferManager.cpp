@@ -104,7 +104,7 @@ SSBufferManager::writeToSSBuffer(Value value, OpBuilder &builder,
   int64_t addrValue = addrResult.value();
   Location loc = builder.getUnknownLoc();
   auto [constOp, pointerCastOp] =
-      getSsbufConstAndPointerCast(builder, loc, addrValue);
+      getSsbufConstAndPointerCast(builder, loc, addrValue, value.getType());
   createdOps.push_back(constOp);
   createdOps.push_back(pointerCastOp);
 
@@ -128,9 +128,11 @@ SSBufferManager::readFromSSBuffer(int64_t addr, OpBuilder &builder,
     return std::nullopt;
   }
 
+  // Load the value back with the original scalar type, not a hardcoded i32.
+  Type dataType = findResult.value().second;
   Location loc = builder.getUnknownLoc();
   auto [constOp, pointerCastOp] =
-      getSsbufConstAndPointerCast(builder, loc, addr);
+      getSsbufConstAndPointerCast(builder, loc, addr, dataType);
   createdOps.push_back(constOp);
   createdOps.push_back(pointerCastOp);
 

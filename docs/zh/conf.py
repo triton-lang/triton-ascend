@@ -61,13 +61,8 @@ _COMMUNITY_ROOT_DOCS = {
 }
 
 _EN_REPLACEMENTS = {
-    "python-api/triton.language.extra.extension.buffer.language":
-    "python-api/triton.language.extra.extension.buffer.language.rst", "python-api/triton.extension.buffer.language":
-    "python-api/triton.extension.buffer.language.rst", "python-api/triton.language.extra.cann.extension":
-    "python-api/triton.language.extra.cann.extension.rst", "python-api/triton.language.extra.cann.libdevice":
-    "python-api/triton.language.extra.cann.libdevice.rst", "python-api/triton.language":
-    "python-api/triton.language.rst", "python-api/triton": "python-api/triton.rst", "python-api/triton.testing":
-    "python-api/triton.testing.rst"
+    "python-api/triton.language.rst": "sources/python-api/triton.language", "python-api/triton.testing.rst":
+    "sources/python-api/triton.testing", "python-api/triton.rst": "sources/python-api/triton"
 }
 
 # Suppress duplicate autosectionlabel warnings caused by subdirectory

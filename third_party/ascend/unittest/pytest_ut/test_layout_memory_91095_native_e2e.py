@@ -154,6 +154,21 @@ def _chunk_axis1_copy(src, dst, N: tl.constexpr, BLOCK: tl.constexpr):
 
 
 @triton.jit
+def _chunk_axis1_extra_data_predicate(src, dst, N: tl.constexpr, BLOCK: tl.constexpr):
+    batch = tl.program_id(0)
+    tile = tl.program_id(1)
+    offsets = tile * BLOCK + tl.arange(0, BLOCK)
+    mask = offsets < N
+    base = batch * N
+    value = tl.load(src + base + offsets, mask=mask, other=0.0)
+    # A second pid-dependent compare that selects data instead of only feeding
+    # an assert.  N - 1 is not a whole number of tiles, so it also cannot be
+    # mistaken for the seed mask.
+    value = tl.where(offsets < N - 1, value, 0.0)
+    tl.store(dst + base + offsets, value, mask=mask)
+
+
+@triton.jit
 def _chunk_axis2_copy(src, dst, N: tl.constexpr, BLOCK: tl.constexpr):
     # Chunk chooses its seed from the greatest program-id axis.  Keeping axes
     # 0 and 1 at one makes this a real grid-Z case, rather than merely testing
@@ -228,10 +243,8 @@ def test_chunk_91095_native_metadata_launcher_and_ir(monkeypatch):
         # not set compile_on_910_95; _assert_real_91095_gate below proves the
         # device-derived gate remained true for the actual compiled kernel.
         force_simt_template=True,
-        # Keep the existing positive Chunk input form.  The historical matcher
-        # treats sanitizer-inserted non-mask compares on the pid dataflow as
-        # unsafe and conservatively bails; that rejection has its own test
-        # below, rather than relaxing the matcher or changing the default.
+        # Keep covering the uninstrumented form; the default instrumented one
+        # is covered by test_chunk_coalesces_through_overflow_sanitizer_91095.
         sanitize_overflow=False,
     )
 
@@ -289,8 +302,8 @@ def test_chunk_axis2_91095_native_metadata_launcher_and_ir(monkeypatch):
     assert launcher.count("ChunkCoalescing: grid[2] not divisible by coalesce_factor 16") == 2
 
 
-def test_chunk_sanitizer_preserves_original_bailout_91095(monkeypatch):
-    """The default overflow instrumentation must retain Chunk's no-op guard."""
+def test_chunk_coalesces_through_overflow_sanitizer_91095(monkeypatch):
+    """The default overflow instrumentation no longer suppresses Chunk."""
     batch, block, num_tiles = 2, 16, 32
     n = block * num_tiles
     src = torch.arange(batch * n, dtype=torch.float32).reshape(batch, n).npu()
@@ -305,19 +318,54 @@ def test_chunk_sanitizer_preserves_original_bailout_91095(monkeypatch):
         N=n,
         BLOCK=block,
         force_simt_template=True,
-        # Do not pass sanitize_overflow: the historical JIT default materializes
-        # extra overflow checks on the pid path, which the unchanged Chunk
-        # safety analysis must reject instead of attempting an unsafe coalesce.
+        # Do not pass sanitize_overflow: the JIT default instruments every
+        # pid-derived index with compares that can only trap.
     )
 
     assert torch.equal(dst.cpu(), src.cpu())
+    _assert_real_91095_gate(compiled, pure_simt=False)
+    assert compiled.metadata.sanitize_overflow is True
+    assert compiled.metadata.coalesce_factor == 16
+    assert compiled.metadata.coalesce_axis == 1
+    assert compiled.metadata.coalesce_grid_ceil_div is False
+    assert compiled.metadata.row_coalescing_applied is True
+
+    chunk_ir = observer.exported_ir_with("hacc.coalesce_factor = 16 : i32")
+    assert "hacc.coalesce_axis = 1 : i32" in chunk_ir
+    assert "hacc.coalesce_grid_ceil_div" not in chunk_ir
+
+    launcher = observer.launcher_with("gridY = gridY / 16;")
+    assert launcher.count("gridY = gridY / 16;") == 2
+    assert launcher.count("ChunkCoalescing: grid[1] not divisible by coalesce_factor 16") == 2
+
+
+def test_chunk_rejects_data_reaching_pid_predicate_91095(monkeypatch):
+    """Only trap-only compares are waived; one that selects data must bail."""
+    batch, block, num_tiles = 2, 16, 32
+    n = block * num_tiles
+    src = torch.arange(batch * n, dtype=torch.float32).reshape(batch, n).npu()
+    dst = torch.empty_like(src)
+
+    compiled, observer = _launch_with_observer(
+        monkeypatch,
+        _chunk_axis1_extra_data_predicate,
+        (batch, num_tiles),
+        src,
+        dst,
+        N=n,
+        BLOCK=block,
+        force_simt_template=True,
+    )
+
+    expected = src.clone()
+    expected[:, n - 1] = 0.0
+    assert torch.equal(dst.cpu(), expected.cpu())
     _assert_real_91095_gate(compiled, pure_simt=False)
     assert compiled.metadata.sanitize_overflow is True
     assert compiled.metadata.coalesce_factor == 1
     assert compiled.metadata.coalesce_axis == -1
     assert compiled.metadata.coalesce_grid_ceil_div is False
     assert compiled.metadata.row_coalescing_applied is False
-    assert compiled.metadata.parallel_mode == "simd"
     assert all("hacc.coalesce_factor" not in ir_text for ir_text in observer.pre_export_ir)
     assert all("gridY = gridY / 16;" not in launcher for launcher in observer.launcher_sources)
 

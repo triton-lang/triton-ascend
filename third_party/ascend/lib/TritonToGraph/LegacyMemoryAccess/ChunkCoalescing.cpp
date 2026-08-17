@@ -78,6 +78,8 @@ static bool getConstInt(Value v, int64_t &out) {
   return false;
 }
 
+// tt.assert is liftable: a group covers exactly H tiles of the original grid,
+// so a widened condition traps on the same inputs, only grouped differently.
 static bool isLiftable(Operation *op) {
   if (auto *d = op->getDialect()) {
     StringRef ns = d->getNamespace();
@@ -87,7 +89,32 @@ static bool isLiftable(Operation *op) {
   }
   return isa<triton::SplatOp, triton::AddPtrOp, triton::BroadcastOp,
              triton::ExpandDimsOp, triton::LoadOp, triton::StoreOp,
-             triton::ScanOp, triton::ReduceOp>(op);
+             triton::ScanOp, triton::ReduceOp, triton::AssertOp>(op);
+}
+
+// A pid-dependent predicate that can only trap does not constrain the rewrite:
+// tt.assert has no results, so nothing reaches an offset, a mask or a select.
+// The permitted sink is whitelisted rather than the forbidden ones blacklisted,
+// because the rewrite deletes the seed mask outright and so must fail closed.
+// sanitize_overflow is what makes this matter: it is on by default and
+// instruments nearly every pid-derived index.
+static bool onlyFeedsDeviceAssert(Value predicate) {
+  SmallVector<Value> wl{predicate};
+  DenseSet<Value> visited{predicate};
+  while (!wl.empty()) {
+    Value cur = wl.pop_back_val();
+    for (Operation *u : cur.getUsers()) {
+      if (isa<triton::AssertOp>(u))
+        continue;
+      // Only the instrumentation's own boolean combines may extend the chain.
+      if (!isa<arith::AndIOp, arith::OrIOp, arith::XOrIOp>(u))
+        return false;
+      for (Value r : u->getResults())
+        if (visited.insert(r).second)
+          wl.push_back(r);
+    }
+  }
+  return true;
 }
 
 static std::optional<TileSeed> findSeed(ModuleOp moduleOp) {
@@ -161,6 +188,8 @@ static std::optional<TileSeed> findSeed(ModuleOp moduleOp) {
                   mask = cmp.getResult();
                   continue;
                 }
+                if (onlyFeedsDeviceAssert(cmp.getResult()))
+                  continue;
                 unsafe = true;
                 break;
               }
@@ -317,11 +346,6 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
 
   int64_t numTiles = (seed->bound + seed->tileLen - 1) / seed->tileLen;
   int64_t H = chooseH(numTiles, seed->tileLen, elemBytes, maxH);
-  llvm::errs() << "ChunkCoalescing: tileLen=" << seed->tileLen
-               << " bound=" << seed->bound << " numTiles=" << numTiles
-               << " elemBytes=" << elemBytes
-               << " footprintUnit=" << footprintUnit << " maxH=" << maxH
-               << " H=" << H << "\n";
   if (H <= 1)
     return;
 

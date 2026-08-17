@@ -73,9 +73,9 @@ static std::optional<int64_t> getErrorCode(ModuleOp moduleOp) {
                      : std::nullopt;
 }
 
-static inline void addPasses(OpPassManager &pm) {
+static inline void addPasses(OpPassManager &pm, int aicoreNum) {
   DynamicCVAutoBlockifyPassOptions autoBlockifyOptions;
-  autoBlockifyOptions.aicoreNum = this->aicoreNum;
+  autoBlockifyOptions.aicoreNum = aicoreNum;
   pm.addPass(createDynamicCVAutoBlockifyPass(autoBlockifyOptions));
   pm.addPass(createPreCheckAvailablePass());
   pm.addPass(createStandardizeOpPass());
@@ -94,7 +94,7 @@ void AddDynamicCVPipelinePass::getDependentDialects(
     DialectRegistry &registry) const {
   Base::getDependentDialects(registry);
   OpPassManager tempPM(ModuleOp::getOperationName());
-  addPasses(tempPM);
+  addPasses(tempPM, this->aicoreNum);
   tempPM.getDependentDialects(registry);
 }
 
@@ -152,7 +152,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
 
     // Do not reuse pass instances or partially transformed IR on retry.
     PassManager pm(&getContext(), moduleOp.getOperationName());
-    addPasses(pm);
+    addPasses(pm, this->aicoreNum);
 
     // run passes in separate pm, instead of the pipeline to suppress reproducer
     auto result = pm.run(moduleOp);

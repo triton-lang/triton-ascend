@@ -353,7 +353,8 @@ static bool canSkipForwardingUse(OpOperand &use, StringRef scopeType) {
     }
     unsigned resultIndex = operandIndex - kForOpOperandPrefixCount;
     return resultIndex < forOp.getNumResults() &&
-           info->getResultType(resultIndex) != scopeType;
+           info->getResultType(resultIndex) != scopeType &&
+           !needsLoopCarryPreserve(forOp, resultIndex, scopeType);
   }
 
   if (auto whileOp = dyn_cast<scf::WhileOp>(user)) {
@@ -367,7 +368,9 @@ static bool canSkipForwardingUse(OpOperand &use, StringRef scopeType) {
     if (needsLoopCarryPreserve(whileOp, slotIdx, scopeType)) {
       return false;
     }
-    return true;
+    return llvm::none_of(whileOp->getUsers(), [&](Operation *user) {
+      return matchesScope(user, scopeType);
+    });
   }
   return false;
 }
@@ -556,6 +559,10 @@ static UseCheckResult checkConditionUse(OpOperand &use, Operation *owner,
   unsigned idx = use.getOperandNumber();
   if (conditionOp->getParentOp() != owner || idx == 0 || idx != slotIndex + 1) {
     Operation *parentOp = conditionOp->getParentOp();
+    if (parentOp && idx == 0 &&
+        controlFlowOpHasScopeContent(parentOp, scopeType)) {
+      return UseCheckResult::Active;
+    }
     if (parentOp && !matchesScope(parentOp, scopeType)) {
       return UseCheckResult::Continue;
     }
@@ -684,10 +691,52 @@ static bool isProducedByForeignScope(Value operand, StringRef scopeType) {
   return !matchesScope(producer, scopeType);
 }
 
-static LogicalResult neutralizeYieldInRegion(Operation *op,
-                                             const CoreTypeInfo &info,
-                                             StringRef scopeType,
-                                             Location loc) {
+static LogicalResult
+neutralizeCarriedTerminatorOperand(Operation *op, const CoreTypeInfo &info,
+                                   StringRef scopeType, Location loc,
+                                   unsigned slotIndex, OpOperand &operand) {
+  if (info.getResultType(slotIndex) == scopeType) {
+    return success();
+  }
+
+  // Preserve values read by an in-loop consumer through an iter_arg.
+  if (needsLoopCarryPreserve(op, slotIndex, scopeType)) {
+    return success();
+  }
+
+  Value oldOperand = operand.get();
+
+  // A foreign-scope producer must not be kept alive solely by the parent
+  // result-user check.
+  bool isLoopOp = isa<scf::ForOp, scf::WhileOp>(op);
+  if ((!isLoopOp || !isProducedByForeignScope(oldOperand, scopeType)) &&
+      slotIndex < op->getNumResults()) {
+    if (Operation *resultUser =
+            findLiveUser(op->getResult(slotIndex), scopeType)) {
+      logDebug("skip neutralizing carried operand #", slotIndex, " for scope ",
+               scopeType, " because parent result #", slotIndex,
+               " still has live user '", resultUser->getName().getStringRef(),
+               "'");
+      return success();
+    }
+  }
+
+  OpBuilder builder(operand.getOwner());
+  Value replacement = buildNeutralValue(builder, oldOperand, loc, scopeType);
+  if (!replacement) {
+    logDebug("neutralizeRegionTerminators failed for op '",
+             op->getName().getStringRef(), "' at carried operand #", slotIndex,
+             " in scope ", scopeType);
+    return failure();
+  }
+  operand.set(replacement);
+  return success();
+}
+
+static LogicalResult neutralizeRegionTerminators(Operation *op,
+                                                 const CoreTypeInfo &info,
+                                                 StringRef scopeType,
+                                                 Location loc) {
   if (op->getNumRegions() == 0) {
     return success();
   }
@@ -698,49 +747,23 @@ static LogicalResult neutralizeYieldInRegion(Operation *op,
     }
 
     for (Block &block : region) {
-      auto yieldOp = dyn_cast<scf::YieldOp>(block.getTerminator());
-      if (!yieldOp) {
+      Operation *terminator = block.getTerminator();
+      unsigned carriedOperandOffset = 0;
+      if (isa<scf::ConditionOp>(terminator)) {
+        // Operand 0 is the while condition; carried args start at operand 1.
+        carriedOperandOffset = 1;
+      } else if (!isa<scf::YieldOp>(terminator)) {
         continue;
       }
 
-      OpBuilder builder(yieldOp);
-      for (unsigned i = 0; i < yieldOp.getNumOperands(); ++i) {
-        if (info.getResultType(i) == scopeType) {
-          continue;
-        }
-
-        // First defense: skip neutralization when an in-loop consumer reads the
-        // carried value through an iter_arg.
-        if (needsLoopCarryPreserve(op, i, scopeType)) {
-          continue;
-        }
-
-        Value oldOperand = yieldOp.getOperand(i);
-
-        // Second defense: skip the result-user check when the value is produced
-        // by a foreign-scope op to prevent it from being trapped.
-        bool isLoopOp = isa<scf::ForOp, scf::WhileOp>(op);
-        if ((!isLoopOp || !isProducedByForeignScope(oldOperand, scopeType)) &&
-            i < op->getNumResults()) {
-          if (Operation *resultUser =
-                  findLiveUser(op->getResult(i), scopeType)) {
-            logDebug("skip neutralizing yield operand #", i, " for scope ",
-                     scopeType, " because parent result #", i,
-                     " still has live user '",
-                     resultUser->getName().getStringRef(), "'");
-            continue;
-          }
-        }
-
-        Value replacement =
-            buildNeutralValue(builder, oldOperand, loc, scopeType);
-        if (!replacement) {
-          logDebug("neutralizeYieldInRegion failed for op '",
-                   op->getName().getStringRef(), "' at operand #", i,
-                   " in scope ", scopeType);
+      unsigned numCarriedOperands =
+          terminator->getNumOperands() - carriedOperandOffset;
+      for (unsigned i = 0; i < numCarriedOperands; ++i) {
+        if (failed(neutralizeCarriedTerminatorOperand(
+                op, info, scopeType, loc, i,
+                terminator->getOpOperand(i + carriedOperandOffset)))) {
           return failure();
         }
-        yieldOp.setOperand(i, replacement);
       }
     }
   }
@@ -807,10 +830,26 @@ static LogicalResult normalizeRegionOp(Operation *op, StringRef scopeType) {
 
   debugDumpOperation("before normalizeRegionOp", op);
 
+  // Keep a loop intact when its body has no op for this scope but its results
+  // are still consumed here; neutralizing carried values would change them.
+  if (isa<scf::ForOp, scf::WhileOp>(op) &&
+      !controlFlowOpHasScopeContent(op, scopeType)) {
+    for (Value result : op->getResults()) {
+      if (Operation *resultUser = findLiveUser(result, scopeType)) {
+        logDebug("preserving complete loop '", op->getName().getStringRef(),
+                 "' in scope ", scopeType,
+                 " because its result still has live user '",
+                 resultUser->getName().getStringRef(), "'");
+        return success();
+      }
+    }
+  }
+
   if (op->getNumRegions() > 0) {
-    if (failed(neutralizeYieldInRegion(op, info, scopeType, loc))) {
-      logDebug("normalizeRegionOp failed while neutralizing yields for op '",
-               op->getName().getStringRef(), "' in scope ", scopeType);
+    if (failed(neutralizeRegionTerminators(op, info, scopeType, loc))) {
+      logDebug(
+          "normalizeRegionOp failed while neutralizing terminators for op '",
+          op->getName().getStringRef(), "' in scope ", scopeType);
       return failure();
     }
 

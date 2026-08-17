@@ -5,10 +5,10 @@ msgid ""
 msgstr ""
 "Project-Id-Version: triton-ascend-docs\n"
 
-"POT-Creation-Date: 2026-08-11 10:45+0800\n"
-"PO-Revision-Date: 2026-08-11 10:45+0800\n"
+"POT-Creation-Date: 2026-08-17 16:33+0800\n"
+"PO-Revision-Date: 2026-08-17 16:33+0800\n"
 
-"X-Source-Commit: a84757e040211ee3a2fe336b9ff0c56ab4bfe2ad\n"
+"X-Source-Commit: e7745bae0beb8a376cfc8077028ea4d7b5f1b545\n"
 
 "Last-Translator: Auto Translation (DeepSeek)\n"
 "Language-Team: English\n"
@@ -19,7 +19,10 @@ msgstr ""
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
 msgid ""
-msgstr "I'll translate the Chinese text into English following your rules. However, I notice that the text to translate is empty—you haven't provided any Chinese content. Please provide the Chinese text you'd like me to translate, and I'll proceed accordingly."
+msgstr ""
+"I'll translate the Chinese text into English following your rules. However, I notice that you've provided the instruction but haven't included the actual Chinese text to translate. The text appears to be missing from your message.\n"
+"\n"
+"Could you please provide the Chinese text you'd like me to translate?\n"
 
 msgid "版本说明"
 msgstr "Version Notes"
@@ -66,14 +69,14 @@ msgstr "Environment Variables and Compilation Options"
 msgid "开发指南"
 msgstr "Developer Guide"
 
-msgid "triton.language API"
-msgstr "triton.language API"
-
 msgid "triton"
 msgstr "triton"
 
-msgid "libdevice开发者手册"
-msgstr "Libdevice Developer Manual"
+msgid "triton.language"
+msgstr "Triton Language"
+
+msgid "triton.testing"
+msgstr "triton.testing"
 
 msgid "API参考"
 msgstr "API Reference"
@@ -174,14 +177,14 @@ msgstr ":doc:`Environment Variables and Compiler Options <environment_variable_a
 msgid "**API参考**"
 msgstr "**API Reference**"
 
-msgid ":doc:`triton.language API <triton_api/index>`"
-msgstr ":doc:`triton.language API <triton_api/index>`"
+msgid ":doc:`triton <python-api/triton>`"
+msgstr ":doc:`triton <python-api/triton>`"
 
-msgid ":doc:`triton <triton_api/triton/index>`"
-msgstr ":doc:`triton <triton_api/triton/index>`"
+msgid ":doc:`triton.language <python-api/triton.language>`"
+msgstr ":doc:`triton.language <python-api/triton.language>`"
 
-msgid ":doc:`libdevice开发者手册 <libdevice/libdevice_developer_guide>`"
-msgstr ":doc:`libdevice Developer Guide <libdevice/libdevice_developer_guide>`"
+msgid ":doc:`triton.testing <python-api/triton.testing>`"
+msgstr ": :doc:`triton.testing <python-api/triton.testing>`"
 
 msgid "**特性说明**"
 msgstr "**Feature Description**"

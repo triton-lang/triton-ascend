@@ -184,7 +184,7 @@ msgid ":doc:`triton.language <python-api/triton.language>`"
 msgstr ":doc:`triton.language <python-api/triton.language>`"
 
 msgid ":doc:`triton.testing <python-api/triton.testing>`"
-msgstr ": :doc:`triton.testing <python-api/triton.testing>`"
+msgstr ":doc:`triton.testing <python-api/triton.testing>`"
 
 msgid "**特性说明**"
 msgstr "**Feature Description**"

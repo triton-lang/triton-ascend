@@ -63,8 +63,19 @@ void TritonGridArgsToHIVMOpPass::getDependentDialects(DialectRegistry &registry)
 // is equivalent to the 3 actual args, [x, y, z], and PROGRAM_ID_ARGS will
 // later be erased from func args.
 //
-// New program_id expression:
+// The program_id decode order follows the launch order of the target arch.
 // idx = hivm::get_block_idx
+//
+// Reg-based (A5) keeps Triton's x-fastest launch order:
+// idx = program_id_0
+//     + program_id_1 * program_num_0(x)
+//     + program_id_2 * program_num_0(x) * program_num_1(y)
+// so,
+// program_id_0 = idx // (1)     mod x
+// program_id_1 = idx // (x)     mod y
+// program_id_2 = idx // (x * y) mod z
+//
+// Mem-based (A3) keeps the legacy z-fastest launch order:
 // idx = program_id_0 * program_num_1(y) * program_num_2(z)
 //     + program_id_1 * program_num_2(z)
 //     + program_id_2

@@ -65,12 +65,13 @@ void traceExceptions(Value input, SmallPtrSet<Operation *, 4> &exceptions) {
 
 void replaceBlockIdUsers(IRRewriter &rewriter,
                          hivm::GetBlockIdxOp getBlockIdxOp, Value iv,
-                         Value logicBlockNum, Operation *castedBlockID) {
+                         Value logicBlockNum, Operation *castedBlockID, Value blockifyV2) {
   rewriter.setInsertionPointAfterValue(iv);
   auto loc = getBlockIdxOp->getLoc();
-  auto castedIV =
-      rewriter.create<arith::ExtSIOp>(loc, rewriter.getI64Type(), iv);
-  rewriter.replaceAllUsesExcept(getBlockIdxOp, castedIV, castedBlockID);
+  auto mulOp = rewriter.create<arith::MulIOp>(loc, iv, blockifyV2);
+  auto castedMulOp =
+      rewriter.create<arith::ExtSIOp>(loc, rewriter.getI64Type(), mulOp);
+  rewriter.replaceAllUsesExcept(getBlockIdxOp, castedMulOp, castedBlockID);
 }
 
 LogicalResult loopOnLogicBlock(func::FuncOp funcOp, IRRewriter &rewriter, int aicoreNum) {
@@ -113,9 +114,18 @@ LogicalResult loopOnLogicBlock(func::FuncOp funcOp, IRRewriter &rewriter, int ai
   
   Value physicalBlockNumValue = rewriter.create<arith::ConstantIntOp>(
       loc, physicalBlockNum, intBits);
+  Value upperBound = logicBlockNum;
+  int blockifyNum = 1;
+  if (auto blockifyAttr = funcOp->getAttr("auto_blockify_size"))
+    blockifyNum = cast<IntegerAttr>(blockifyAttr).getInt();
+  Value blockifyV2 =
+      rewriter.create<arith::ConstantIntOp>(loc, blockifyNum, intBits);
+  if (blockifyNum > 1)
+    upperBound =
+        rewriter.create<arith::CeilDivSIOp>(loc, upperBound, blockifyV2);
   auto blockID = rewriter.create<arith::TruncIOp>(loc, rewriter.getI32Type(),
                                                   getBlockIdxOp);
-  auto forOp = rewriter.create<scf::ForOp>(loc, blockID, logicBlockNum,
+  auto forOp = rewriter.create<scf::ForOp>(loc, blockID, upperBound,
                                            physicalBlockNumValue);
 
   Block *loopBody = forOp.getBody();
@@ -126,7 +136,7 @@ LogicalResult loopOnLogicBlock(func::FuncOp funcOp, IRRewriter &rewriter, int ai
     }
   }
   replaceBlockIdUsers(rewriter, getBlockIdxOp, forOp.getInductionVar(),
-                      logicBlockNum, blockID);
+                      logicBlockNum, blockID, blockifyV2);
   auto unit = UnitAttr::get(forOp->getContext());
   forOp->setAttr(BlockifyLoopAttrName, unit);
   return success();

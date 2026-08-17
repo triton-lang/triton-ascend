@@ -2047,15 +2047,16 @@ class AutoTilingTuner(Autotuner):
         cache_miss = key not in self.cache
         if self.is_simt_mode and kwargs.get('simt_stack_limit', None) is None:
             kwargs['simt_stack_limit'] = self.simt_stack_limit
-        used_cached_result = True
+        did_benchmark = False
+        disk_cache_hit = False
         if cache_miss:
             # prune configs
             pruned_configs = self.prune_configs(kwargs)
             if self.enable_ubtuner or len(pruned_configs) > 1:
 
                 def benchmark():
-                    nonlocal used_cached_result
-                    used_cached_result = False
+                    nonlocal did_benchmark
+                    did_benchmark = True
                     bench_start = time.time()
                     timings = self._batch_bench(*args, configs=pruned_configs, **kwargs)
                     bench_end = time.time()
@@ -2077,7 +2078,7 @@ class AutoTilingTuner(Autotuner):
                         )
                         benchmark()
                     else:
-                        used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+                        disk_cache_hit = self.check_disk_cache(key, pruned_configs, benchmark)
                 else:
                     benchmark()
 
@@ -2089,11 +2090,11 @@ class AutoTilingTuner(Autotuner):
 
         self.best_config = config
 
-        if self.print_autotuning and not used_cached_result:
+        if self.print_autotuning and did_benchmark:
             print(f"Triton autotuning for function {self.base_fn.__name__} finished after "
                   f"{self.bench_time:.2f}s; best config selected: {self.best_config};")
 
-        if not used_cached_result and self.auto_profile_dir is not None:
+        if did_benchmark and self.auto_profile_dir is not None:
             self._profile(*args, config=self.best_config, **kwargs)
         ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
         if config.pre_hook is not None:
@@ -2110,7 +2111,7 @@ class AutoTilingTuner(Autotuner):
             return ret
         finally:
             self.nargs = None
-            if cache_miss:
+            if cache_miss and not disk_cache_hit:
                 # workaround for memory leak when some configs fail to compile
                 gc.collect()
 

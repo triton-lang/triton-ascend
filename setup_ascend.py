@@ -305,7 +305,7 @@ def _get_install_requirements():
         "scipy==1.15.1;python_version>='3.13'",
         "decorator==5.1.1",
         "psutil==6.0.0",
-        "pytest==8.3.2",
+        "pytest>=8.3.2,<9.0.0",
         "pytest-xdist==3.6.1",
         "pyyaml",
         "pybind11",

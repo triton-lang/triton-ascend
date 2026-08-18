@@ -323,5 +323,8 @@
   "rtol",
   "atol",
   "ffts",
-  "ctypes"
+  "ctypes",
+  "AMDGCN",
+  "ncore",
+  "xblock"
 ]

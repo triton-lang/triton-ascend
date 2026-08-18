@@ -183,7 +183,6 @@ def make_ttir(mod, metadata, opt):
             rule_mask=opt.graph_optimize_rule_mask,
             max_rewrites_per_function=opt.graph_optimize_max_rewrites_per_function,
             ub_capacity_bytes=opt.graph_optimize_ub_capacity_bytes,
-            emit_remarks=opt.graph_optimize_emit_remarks,
             force_simt_only=opt.force_simt_only,
         )
     pm.run(mod, 'make_ttir')
@@ -266,7 +265,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         ascend.passes.ttir.add_bubble_up_operation(pm)
         ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
         ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, enable_nd2nz_on_vector, enable_select_analysis,
-                                                compile_on_910_95, opt.graph_optimize_emit_remarks)
+                                                compile_on_910_95)
         # Restricted to 910_95/950. The merged buffer is written by two disjoint
         # memref.copy ops, and on 910_9362 the generated code only makes the
         # copy next to the surviving to_tensor visible, so the other half of the
@@ -1098,7 +1097,6 @@ class NPUOptions:
     graph_optimize_rule_mask: int = 511
     graph_optimize_max_rewrites_per_function: int = 64
     graph_optimize_ub_capacity_bytes: Optional[int] = None
-    graph_optimize_emit_remarks: bool = False
     allow_fp8e4nv: bool = False
     auto_tile_and_bind_subblock: bool = True
     vf_merge_level: int = 0

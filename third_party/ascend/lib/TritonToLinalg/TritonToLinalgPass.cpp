@@ -872,8 +872,7 @@ LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(
   auto runLayoutMemoryPhase =
       [&](cfg::LayoutMemoryCompatibilityPhase phase) -> LogicalResult {
     mlir::PassManager phasePm(&getContext(), moduleOp.getOperationName());
-    phasePm.addPass(cfg::createLayoutMemoryCompatibilityPass(
-        phase, this->emitGraphOptimizeRemarks));
+    phasePm.addPass(cfg::createLayoutMemoryCompatibilityPass(phase));
     return runPipeline(phasePm, getOperation());
   };
 
@@ -1376,14 +1375,12 @@ void TritonToLinalgPass::runOnOperation() {
   });
 }
 
-std::unique_ptr<OperationPass<ModuleOp>>
-triton::createTritonToLinalgPass(bool globalKernel, bool namedOps,
-                                 bool enableNd2nzOnVector,
-                                 bool enableSelectAnalysis, bool compileOn91095,
-                                 bool emitGraphOptimizeRemarks) {
+std::unique_ptr<OperationPass<ModuleOp>> triton::createTritonToLinalgPass(
+    bool globalKernel, bool namedOps, bool enableNd2nzOnVector,
+    bool enableSelectAnalysis, bool compileOn91095) {
   return std::make_unique<TritonToLinalgPass>(
       globalKernel, namedOps, enableNd2nzOnVector, enableSelectAnalysis,
-      compileOn91095, emitGraphOptimizeRemarks);
+      compileOn91095);
 }
 
 std::unique_ptr<OperationPass<ModuleOp>> triton::createTritonToLinalgPass() {

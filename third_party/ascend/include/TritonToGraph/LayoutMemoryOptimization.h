@@ -43,8 +43,7 @@ enum class LayoutMemoryCompatibilityPhase : uint8_t {
 };
 
 std::unique_ptr<OperationPass<ModuleOp>>
-createLayoutMemoryCompatibilityPass(LayoutMemoryCompatibilityPhase phase,
-                                    bool emitGraphOptimizeRemarks = false);
+createLayoutMemoryCompatibilityPass(LayoutMemoryCompatibilityPhase phase);
 
 } // namespace cfg
 } // namespace triton

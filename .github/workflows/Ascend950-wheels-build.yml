@@ -97,6 +97,7 @@ jobs:
           fi
           cd "$SETUP_DIR"
           MAX_JOBS="$NUM_PROCS" \
+          TRITON_BUILD_TD=ON \
           python ${SETUP_PY} bdist_wheel --dist-dir=./wheelhouse
 
       - uses: actions/upload-artifact@v4

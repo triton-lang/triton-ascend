@@ -117,6 +117,7 @@ jobs:
           fi
           cd "$SETUP_DIR"
           MAX_JOBS="$NUM_PROCS" \
+          TRITON_BUILD_TD=ON \
           ${PYTHON} ${SETUP_PY} bdist_wheel
           ${PYTHON} -m pip install dist/*.whl
 

@@ -92,7 +92,7 @@ jobs:
             exit 1
           fi
           cd "$SETUP_DIR"
-          MAX_JOBS="$NUM_PROCS" python ${SETUP_PY} bdist_wheel --dist-dir="${GITHUB_WORKSPACE}/base/wheelhouse"
+          MAX_JOBS="$NUM_PROCS" TRITON_BUILD_TD=ON python ${SETUP_PY} bdist_wheel --dist-dir="${GITHUB_WORKSPACE}/base/wheelhouse"
 
       - name: Build triton-ascend pr
         shell: bash
@@ -126,7 +126,7 @@ jobs:
             exit 1
           fi
           cd "$SETUP_DIR"
-          MAX_JOBS="$NUM_PROCS" python ${SETUP_PY} bdist_wheel --dist-dir="${GITHUB_WORKSPACE}/pr/wheelhouse"
+          MAX_JOBS="$NUM_PROCS" TRITON_BUILD_TD=ON python ${SETUP_PY} bdist_wheel --dist-dir="${GITHUB_WORKSPACE}/pr/wheelhouse"
 
       - name: generate ttadapter
         shell: bash

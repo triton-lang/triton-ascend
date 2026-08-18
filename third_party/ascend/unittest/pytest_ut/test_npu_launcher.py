@@ -157,9 +157,9 @@ def test_npu_launcher_skips_global_scratch_for_empty_grid(monkeypatch):
 def test_make_launcher_threads_scratch_through_pure_simt_abi(monkeypatch):
     src = _make_launcher_source(monkeypatch, force_simt_only=True)
 
-    parse = src[src.index("if(!PyArg_ParseTuple("):]
-    assert 'args, "iiiKKOOOOOOO"' in parse
-    _assert_order(parse, "&global_scratch_obj", "&profile_scratch_obj", "&packedMetadata")
+    parse = src[src.index("METH_FASTCALL fast path"):]
+    assert 'launch expects %d arguments, got %zd' in parse
+    _assert_order(parse, "global_scratch_obj = args[5]", "profile_scratch_obj = args[6]", "packedMetadata = args[7]")
 
     conversions = src[src.index("void *global_scratch = 0;"):src.index("// get kernel_name")]
     _assert_order(
@@ -199,8 +199,8 @@ def test_make_launcher_threads_scratch_through_pure_simt_abi(monkeypatch):
 def test_make_launcher_omits_scratch_from_non_simt_device_layout(monkeypatch):
     src = _make_launcher_source(monkeypatch, force_simt_only=False)
 
-    parse = src[src.index("if(!PyArg_ParseTuple("):]
-    _assert_order(parse, "&global_scratch_obj", "&profile_scratch_obj", "&packedMetadata")
+    parse = src[src.index("METH_FASTCALL fast path"):]
+    _assert_order(parse, "global_scratch_obj = args[5]", "profile_scratch_obj = args[6]", "packedMetadata = args[7]")
 
     internal = src[src.index("static void _launch("):]
     struct_start = internal.index("struct __attribute__((packed))")

@@ -355,4 +355,4 @@ def async_launch(func):
      fprintf(stderr, "Error: triton_async_launch is unavailable\\n");
      return;
    }}
-   g_async_launch(static_cast<void*>(&{func}), name.c_str());'''
+   g_async_launch(static_cast<void*>(&{func}), kernelName);'''

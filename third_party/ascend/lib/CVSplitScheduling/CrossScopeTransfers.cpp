@@ -406,8 +406,11 @@ static void emitCubeToVectorTransfer(const TransferEmitContext &c, CrossScopeTra
     auto fixpipeOp = builder.create<hivm::FixpipeOp>(c.loc, mlir::TypeRange {},
                                                      xfer.value,                // src (full M-row tile from matmul)
                                                      slotBuffer,                // dst (M/2-row shared UB slot)
-                                                     mlir::ValueRange {}, dmaModeAttr, dualDstAttr, nullptr, nullptr,
-                                                     nullptr, mlir::ArrayAttr {}, nullptr);
+                                                     mlir::ValueRange {}, dmaModeAttr, dualDstAttr,
+                                                     /*sub_block_idx=*/nullptr, /*pre_quant=*/nullptr,
+                                                     /*pre_relu=*/nullptr, /*channel_split=*/nullptr,
+                                                     /*c0_pad_en=*/nullptr, /*unit_flag_mode=*/mlir::ArrayAttr {},
+                                                     /*quant_scale=*/nullptr);
     setOpEngineTypeAttr(fixpipeOp, EngineType::CUBE);
 
     // CUBE signals VECTOR.
@@ -525,7 +528,7 @@ static VectorToCubeTransferChain emitVectorToCubeTransfer(const TransferEmitCont
     }
 
     auto srcMemrefType = MemRefType::get(srcShape, elemType);
-    auto toMemrefOp = builder.create<bufferization::ToMemrefOp>(c.loc, srcMemrefType, packedTensor);
+    auto toMemrefOp = builder.create<bufferization::ToBufferOp>(c.loc, srcMemrefType, packedTensor);
     packingOps.push_back(toMemrefOp);
     setOpEngineTypeAttr(toMemrefOp, EngineType::VECTOR);
     auto ubMemrefType = MemRefType::get(srcShape, elemType, nullptr, ubAddrSpace);
@@ -1109,7 +1112,7 @@ insertCrossScopeTransfers(scf::ForOp loop, const DenseMap<Operation *, EngineTyp
     // handed-out ID is the lowest one not already in use.
     auto module = loop->getParentOfType<ModuleOp>();
     FlagIdManager flagIdManager(module, /*firstAvailableId=*/0);
-    const int flagBase = flagIdManager.acquireId(/*insertionPoint=*/nullptr);
+    const int flagBase = flagIdManager.acquireId();
     if (flagBase < 0 || static_cast<unsigned>(flagBase) + requiredFlags > kMaxTransferFlags) {
         loop.emitError() << "CVSplitScheduling requires " << requiredFlags << " synchronization flags for "
                          << phaseCount << " transfer phase(s) at buffer depth " << interCoreBufferDepth

@@ -435,7 +435,7 @@ static Type retileRowHalve(Type t, int64_t Mfull)
             // semantics in a way this local transformation cannot prove.
             SmallVector<int64_t> strides;
             int64_t offset;
-            if (failed(getStridesAndOffset(mt, strides, offset)))
+            if (failed(mt.getStridesAndOffset(strides, offset)))
                 return t;
             SmallVector<int64_t> ns(sh.begin(), sh.end());
             ns[0] = half;
@@ -758,7 +758,7 @@ static LogicalResult rebuildVectorToCubePacks(ArrayRef<VectorToCubePack> packs, 
         auto resh2 = b.create<tensor::ReshapeOp>(loc, nzType, transp->getResult(0), s4.getResult());
         // to_memref + cast to UB
         auto memT = MemRefType::get({N16, M16, kNzTileSize, kNzTileSize}, elemType);
-        auto toMem = b.create<bufferization::ToMemrefOp>(loc, memT, resh2.getResult());
+        auto toMem = b.create<bufferization::ToBufferOp>(loc, memT, resh2.getResult());
         auto ubMemT = MemRefType::get({N16, M16, kNzTileSize, kNzTileSize}, elemType, nullptr, ubAddrSpace);
         auto cast = b.create<memref::MemorySpaceCastOp>(loc, ubMemT, toMem.getResult());
         // subview of L1 alloc [0, sbid*M16, 0, 0] [N16,M16,16,16]: each veccore owns

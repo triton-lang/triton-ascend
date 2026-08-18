@@ -17,7 +17,7 @@
 // CHECK: %reinterpret_cast = memref.reinterpret_cast %arg2
 // CHECK-NEXT: %{{.*}} = memref.alloc() : memref<32x64xf16>
 // CHECK-NEXT: memref.copy %{{.*}}, %{{.*}} : memref<32x64xf16, strided<[64, 1], offset: ?>> to memref<32x64xf16>
-// CHECK-NEXT: %{{.*}} = bufferization.to_tensor %{{.*}} restrict writable : memref<32x64xf16>
+// CHECK-NEXT: %{{.*}} = bufferization.to_tensor %{{.*}} restrict writable : memref<32x64xf16> to tensor<32x64xf16>
 // CHECK-NEXT: %{{.*}} = arith.constant 128 : i32
 // The two physical GM addresses are loop-carried below.  Their initial values
 // are formed here, before the persistent UB/CBUF allocations.
@@ -174,7 +174,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">, ssbuffer.inte
       %reinterpret_cast_3 = memref.reinterpret_cast %arg6 to offset: [%17], sizes: [32, 64], strides: [64, 1] : memref<?xf16> to memref<32x64xf16, strided<[64, 1], offset: ?>>
       %alloc = memref.alloc() : memref<32x64xf16>
       memref.copy %reinterpret_cast, %alloc : memref<32x64xf16, strided<[64, 1], offset: ?>> to memref<32x64xf16>
-      %18 = bufferization.to_tensor %alloc restrict writable : memref<32x64xf16>
+      %18 = bufferization.to_tensor %alloc restrict writable : memref<32x64xf16> to tensor<32x64xf16>
       %19:5 = scf.for %arg14 = %c0_i32 to %c8192_i32 step %c32_i32 iter_args(%arg15 = %7, %arg16 = %1, %arg17 = %6, %arg18 = %c0_i32, %arg19 = %c0_i32) -> (tensor<32xf32>, tensor<32x64xf32>, tensor<32xf32>, i32, i32)  : i32 {
         %28 = arith.maxsi %arg18, %c0_i32 : i32
         %29 = arith.index_cast %28 : i32 to index
@@ -188,7 +188,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">, ssbuffer.inte
         %reinterpret_cast_6 = memref.reinterpret_cast %arg3 to offset: [%35], sizes: [32, 64], strides: [64, 1] : memref<?xf16> to memref<32x64xf16, strided<[64, 1], offset: ?>>
         %alloc_7 = memref.alloc() : memref<32x64xf16>
         memref.copy %reinterpret_cast_6, %alloc_7 : memref<32x64xf16, strided<[64, 1], offset: ?>> to memref<32x64xf16>
-        %36 = bufferization.to_tensor %alloc_7 restrict writable : memref<32x64xf16>
+        %36 = bufferization.to_tensor %alloc_7 restrict writable : memref<32x64xf16> to tensor<32x64xf16>
         %37 = tensor.empty() : tensor<64x32xf16>
         %transposed = linalg.transpose ins(%36 : tensor<32x64xf16>) outs(%37 : tensor<64x32xf16>) permutation = [1, 0]
         %38 = linalg.matmul {input_precision = "ieee"} ins(%18, %transposed : tensor<32x64xf16>, tensor<64x32xf16>) outs(%4 : tensor<32x32xf32>) -> tensor<32x32xf32>
@@ -205,7 +205,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">, ssbuffer.inte
         %43 = arith.truncf %42 : tensor<32x32xf32> to tensor<32x32xf16>
         %alloc_9 = memref.alloc() : memref<32x64xf16>
         memref.copy %reinterpret_cast_5, %alloc_9 : memref<32x64xf16, strided<[64, 1], offset: ?>> to memref<32x64xf16>
-        %44 = bufferization.to_tensor %alloc_9 restrict writable : memref<32x64xf16>
+        %44 = bufferization.to_tensor %alloc_9 restrict writable : memref<32x64xf16> to tensor<32x64xf16>
         %45 = linalg.fill ins(%cst_2 : f32) outs(%5 : tensor<32xf32>) -> tensor<32xf32>
         %reduced_10 = linalg.reduce ins(%42 : tensor<32x32xf32>) outs(%45 : tensor<32xf32>) dimensions = [1]
           (%in: f32, %init: f32) {

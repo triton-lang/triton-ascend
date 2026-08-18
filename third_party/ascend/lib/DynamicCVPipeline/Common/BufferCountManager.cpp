@@ -159,7 +159,6 @@ int BufferCountManager::getBufferCountByType(DepType type) const {
   return count;
 }
 
-} // namespace triton
 std::optional<int>
 BufferCountManager::getConfiguredBufferCount(DepType type) const {
   if (!module_)
@@ -169,5 +168,7 @@ BufferCountManager::getConfiguredBufferCount(DepType type) const {
     return std::nullopt;
   return static_cast<int>(attr.getInt());
 }
+
+} // namespace triton
 
 } // namespace mlir

@@ -858,8 +858,14 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
 
         // Stage 2: Unroll the innermost loop
         bool fullyUnrolled = unrollFullyConsumesTripCount(loop, unrollFactor);
-        LogicalResult unrollResult =
-            fullyUnrolled ? unrollFullyInPlace(loop, unrollFactor) : loopUnrollByFactor(loop, unrollFactor);
+        // loopUnrollByFactor returns FailureOr<UnrolledLoopInfo>, which is
+        // mutually convertible with LogicalResult; keep the branches apart so
+        // the conversion is explicit rather than ambiguous.
+        LogicalResult unrollResult = success();
+        if (fullyUnrolled)
+            unrollResult = unrollFullyInPlace(loop, unrollFactor);
+        else if (failed(loopUnrollByFactor(loop, unrollFactor)))
+            unrollResult = failure();
         if (failed(unrollResult)) {
             LLVM_DEBUG(llvm::dbgs() << "[cv-split] Unroll failed, bail\n");
             return failure();

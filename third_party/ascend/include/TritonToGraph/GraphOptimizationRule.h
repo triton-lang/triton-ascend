@@ -29,6 +29,7 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <memory>
 
@@ -47,6 +48,11 @@ public:
   virtual unsigned getBenefit() const = 0;
   virtual Operation *getAnchor() const = 0;
   virtual unsigned getCreationEpoch() const = 0;
+
+  // Diagnostic-enabled plans override this to append a deterministic,
+  // single-line summary. The default keeps unrelated rules out of the
+  // GraphOptimize diagnostic surface.
+  virtual void printDebug(llvm::raw_ostream &) const {}
 
   // Failure means this plan is no longer applicable to the current epoch.
   virtual LogicalResult revalidate(GraphOptimizationContext &context) const = 0;

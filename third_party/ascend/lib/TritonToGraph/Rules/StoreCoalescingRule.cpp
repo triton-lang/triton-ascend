@@ -666,7 +666,19 @@ public:
                       const EntryArgPointerAliasAnalysis *entryAliases,
                       unsigned ubCapacityBytes, unsigned epoch)
       : function(function), anchor(run.anchor), entryAliases(entryAliases),
-        ubCapacityBytes(ubCapacityBytes), epoch(epoch) {
+        ubCapacityBytes(ubCapacityBytes),
+        runStoreCount(run.addressOrderStores.size()),
+        programStoreCount(run.programOrderStores.size()),
+        firstOffset(run.firstOffset), endExclusive(run.endExclusive),
+        totalElements(run.totalElements), totalBytes(run.totalBytes),
+        elementBytes(run.addressOrderStores.empty()
+                         ? 0
+                         : run.addressOrderStores.front().elementBytes),
+        hasDynamicOrigin(
+            !run.addressOrderStores.empty() &&
+            static_cast<bool>(
+                run.addressOrderStores.front().access.dynamicOrigin)),
+        epoch(epoch) {
     for (const StoreCandidate &candidate : run.addressOrderStores)
       addressOrderStores.push_back(candidate.operation);
   }
@@ -684,6 +696,17 @@ public:
   Operation *getAnchor() const override { return anchor; }
 
   unsigned getCreationEpoch() const override { return epoch; }
+
+  void printDebug(llvm::raw_ostream &os) const override {
+    os << " ub-capacity-bytes=" << ubCapacityBytes
+       << " stores=" << runStoreCount << " program-stores=" << programStoreCount
+       << " elements=" << totalElements << " bytes=" << totalBytes
+       << " element-bytes=" << elementBytes
+       << " dynamic-origin=" << (hasDynamicOrigin ? "true" : "false")
+       << " address-order=ascending program-order=preserved offsets=["
+       << firstOffset << ',' << endExclusive << ")"
+       << " erased=" << programStoreCount;
+  }
 
   LogicalResult revalidate(GraphOptimizationContext &context) const override {
     if (context.getEpoch() != epoch || !function || !anchor || !entryAliases ||
@@ -714,6 +737,14 @@ private:
   SmallVector<Operation *, 4> addressOrderStores;
   const EntryArgPointerAliasAnalysis *entryAliases;
   unsigned ubCapacityBytes;
+  size_t runStoreCount;
+  size_t programStoreCount;
+  int64_t firstOffset;
+  int64_t endExclusive;
+  int64_t totalElements;
+  uint64_t totalBytes;
+  uint64_t elementBytes;
+  bool hasDynamicOrigin;
   unsigned epoch;
 };
 

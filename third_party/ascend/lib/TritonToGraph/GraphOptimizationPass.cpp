@@ -28,6 +28,8 @@
 #include "mlir/IR/PatternMatch.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
 #include <array>
@@ -86,6 +88,56 @@ unsigned getProgramOrder(const RewritePlan &plan,
 
 bool isRuleEnabled(uint16_t ruleMask, GraphOptimizationRuleId ruleId) {
   return (ruleMask & getGraphOptimizationRuleMask(ruleId)) != 0;
+}
+
+bool isGraphDiagnosticsRule(GraphOptimizationRuleId ruleId) {
+  switch (ruleId) {
+  case GraphOptimizationRuleId::LoadStoreTranspose:
+  case GraphOptimizationRuleId::TransposePointwiseReorder:
+  case GraphOptimizationRuleId::StoreCoalescing:
+  case GraphOptimizationRuleId::RowCoalescing:
+    return true;
+  default:
+    return false;
+  }
+}
+
+llvm::StringRef getGraphRuleName(GraphOptimizationRuleId ruleId) {
+  switch (ruleId) {
+  case GraphOptimizationRuleId::LoadStoreTranspose:
+    return "LoadStoreTranspose";
+  case GraphOptimizationRuleId::TransposePointwiseReorder:
+    return "TransposePointwiseReorder";
+  case GraphOptimizationRuleId::StoreCoalescing:
+    return "StoreCoalescing";
+  case GraphOptimizationRuleId::RowCoalescing:
+    return "RowCoalescing";
+  default:
+    return "Unknown";
+  }
+}
+
+void writeGraphLogPrefix() { llvm::errs() << "[GRAPH] "; }
+
+void logCandidateSummary(GraphOptimizationRuleId ruleId, size_t count,
+                         unsigned epoch) {
+  writeGraphLogPrefix();
+  llvm::errs() << "event=candidates rule=" << getGraphRuleName(ruleId)
+               << " count=" << count << " epoch=" << epoch << '\n';
+}
+
+void logPlanEvent(llvm::StringRef event, const RewritePlan &plan,
+                  unsigned ordinal, unsigned epoch,
+                  llvm::StringRef suffix = "") {
+  writeGraphLogPrefix();
+  llvm::errs() << "event=" << event
+               << " rule=" << getGraphRuleName(plan.getRuleId())
+               << " benefit=" << plan.getBenefit() << " ordinal=" << ordinal
+               << " epoch=" << epoch;
+  plan.printDebug(llvm::errs());
+  if (!suffix.empty())
+    llvm::errs() << ' ' << suffix;
+  llvm::errs() << '\n';
 }
 
 class GraphOptimizePass final
@@ -167,11 +219,46 @@ void GraphOptimizePass::runOnOperation() {
   for (triton::FuncOp function : module.getOps<triton::FuncOp>()) {
     GraphOptimizationContext context(function);
     unsigned rewriteCount = 0;
+    unsigned rowRewriteCount = 0;
+    unsigned staleSkipped = 0;
+    unsigned revalidationSkipped = 0;
+    bool budgetExhausted = false;
+    std::array<unsigned, 4> successfulRewrites = {};
+
+    auto recordSuccessfulRewrite = [&](GraphOptimizationRuleId ruleId) {
+      switch (ruleId) {
+      case GraphOptimizationRuleId::LoadStoreTranspose:
+        ++successfulRewrites[0];
+        break;
+      case GraphOptimizationRuleId::TransposePointwiseReorder:
+        ++successfulRewrites[1];
+        break;
+      case GraphOptimizationRuleId::StoreCoalescing:
+        ++successfulRewrites[2];
+        break;
+      case GraphOptimizationRuleId::RowCoalescing:
+        ++successfulRewrites[3];
+        break;
+      default:
+        break;
+      }
+    };
+
+    writeGraphLogPrefix();
+    llvm::errs() << "event=pass-start function=" << function.getName()
+                 << " rule-mask="
+                 << static_cast<unsigned>(options.enabledRuleMask)
+                 << " max-rewrites=" << options.maxRewritesPerFunction
+                 << " ub-capacity-bytes=" << options.ubCapacityBytes
+                 << " force-simt-only="
+                 << (options.forceSimtOnly ? "true" : "false") << '\n';
 
     for (GraphOptimizationRuleId phase : kRulePhases) {
       if (!isRuleEnabled(options.enabledRuleMask, phase))
         continue;
 
+      const bool logPhase = isGraphDiagnosticsRule(phase);
+      bool loggedCandidateSummary = false;
       while (rewriteCount < options.maxRewritesPerFunction) {
         ProgramOrderMap programOrder = buildProgramOrderMap(function);
         SmallVector<std::unique_ptr<RewritePlan>> plans;
@@ -200,6 +287,10 @@ void GraphOptimizePass::runOnOperation() {
                              return !plan || plan->getRuleId() != phase;
                            }),
             plans.end());
+        if (logPhase && !loggedCandidateSummary) {
+          logCandidateSummary(phase, plans.size(), context.getEpoch());
+          loggedCandidateSummary = true;
+        }
         if (plans.empty())
           break;
 
@@ -220,13 +311,21 @@ void GraphOptimizePass::runOnOperation() {
             });
 
         std::unique_ptr<RewritePlan> selectedPlan;
+        unsigned selectedOrdinal = 0;
+        unsigned ordinal = 0;
         for (std::unique_ptr<RewritePlan> &plan : plans) {
-          if (plan->getCreationEpoch() != context.getEpoch())
+          ++ordinal;
+          if (plan->getCreationEpoch() != context.getEpoch()) {
+            ++staleSkipped;
             continue;
-          if (failed(plan->revalidate(context)))
+          }
+          if (failed(plan->revalidate(context))) {
+            ++revalidationSkipped;
             continue;
+          }
 
           selectedPlan = std::move(plan);
+          selectedOrdinal = ordinal;
           break;
         }
 
@@ -236,6 +335,9 @@ void GraphOptimizePass::runOnOperation() {
         }
 
         const GraphOptimizationRuleId appliedRuleId = selectedPlan->getRuleId();
+        if (logPhase)
+          logPlanEvent("plan-selected", *selectedPlan, selectedOrdinal,
+                       context.getEpoch());
         IRRewriter rewriter(&getContext());
         if (failed(selectedPlan->apply(rewriter))) {
           selectedPlan.reset();
@@ -244,6 +346,9 @@ void GraphOptimizePass::runOnOperation() {
           signalPassFailure();
           return;
         }
+        if (logPhase)
+          logPlanEvent("apply-ok", *selectedPlan, selectedOrdinal,
+                       context.getEpoch());
 
         if (options.emitRemarks)
           function.emitRemark() << "applied graph optimization rule "
@@ -255,10 +360,29 @@ void GraphOptimizePass::runOnOperation() {
         plans.clear();
         context.invalidate();
         ++rewriteCount;
+        if (logPhase)
+          recordSuccessfulRewrite(appliedRuleId);
       }
 
-      if (rewriteCount == options.maxRewritesPerFunction)
+      if (logPhase && !loggedCandidateSummary) {
+        writeGraphLogPrefix();
+        llvm::errs() << "event=candidates rule=" << getGraphRuleName(phase)
+                     << " status=not-scanned reason=rewrite-budget-exhausted"
+                     << " epoch=" << context.getEpoch() << '\n';
+      }
+
+      if (rewriteCount == options.maxRewritesPerFunction) {
+        budgetExhausted = true;
         break;
+      }
+    }
+
+    if (budgetExhausted) {
+      writeGraphLogPrefix();
+      llvm::errs() << "event=budget-exhausted function=" << function.getName()
+                   << " rewrites=" << rewriteCount
+                   << " max-rewrites=" << options.maxRewritesPerFunction
+                   << '\n';
     }
 
     // RowCoalescing has the same function-local candidate/rewrite interface
@@ -267,90 +391,132 @@ void GraphOptimizePass::runOnOperation() {
     // budget, so run it once after LoadStoreTranspose,
     // TransposePointwiseReorder, and StoreCoalescing even when that budget
     // has already been exhausted.
-    if (!isRuleEnabled(options.enabledRuleMask,
-                       GraphOptimizationRuleId::RowCoalescing))
-      continue;
+    if (isRuleEnabled(options.enabledRuleMask,
+                      GraphOptimizationRuleId::RowCoalescing)) {
+      if (!options.forceSimtOnly) {
+        writeGraphLogPrefix();
+        llvm::errs() << "event=rule-skip rule=RowCoalescing"
+                     << " reason=force-simt-only-false\n";
+      } else {
+        GraphOptimizationRule *rowRule = nullptr;
+        for (GraphOptimizationRule *rule : enabledRules) {
+          if (rule->getId() == GraphOptimizationRuleId::RowCoalescing) {
+            rowRule = rule;
+            break;
+          }
+        }
+        if (!rowRule) {
+          writeGraphLogPrefix();
+          llvm::errs() << "event=rule-skip rule=RowCoalescing"
+                       << " reason=not-registered\n";
+        } else {
+          if (failed(context.ensure(rowRule->getAnalysisRequirements()))) {
+            function.emitError()
+                << "graph-optimize failed to build Row analyses";
+            signalPassFailure();
+            return;
+          }
 
-    GraphOptimizationRule *rowRule = nullptr;
-    for (GraphOptimizationRule *rule : enabledRules) {
-      if (rule->getId() == GraphOptimizationRuleId::RowCoalescing) {
-        rowRule = rule;
-        break;
+          SmallVector<std::unique_ptr<RewritePlan>> rowPlans;
+          if (failed(rowRule->findCandidates(context, rowPlans))) {
+            function.emitError()
+                << "graph-optimize failed to discover Row candidate";
+            signalPassFailure();
+            return;
+          }
+          rowPlans.erase(
+              std::remove_if(
+                  rowPlans.begin(), rowPlans.end(),
+                  [](const std::unique_ptr<RewritePlan> &plan) {
+                    return !plan || plan->getRuleId() !=
+                                        GraphOptimizationRuleId::RowCoalescing;
+                  }),
+              rowPlans.end());
+          logCandidateSummary(GraphOptimizationRuleId::RowCoalescing,
+                              rowPlans.size(), context.getEpoch());
+
+          if (!rowPlans.empty()) {
+            ProgramOrderMap programOrder = buildProgramOrderMap(function);
+            std::stable_sort(
+                rowPlans.begin(), rowPlans.end(),
+                [&programOrder](const std::unique_ptr<RewritePlan> &lhs,
+                                const std::unique_ptr<RewritePlan> &rhs) {
+                  if (lhs->getBenefit() != rhs->getBenefit())
+                    return lhs->getBenefit() > rhs->getBenefit();
+
+                  const unsigned lhsOrder = getProgramOrder(*lhs, programOrder);
+                  const unsigned rhsOrder = getProgramOrder(*rhs, programOrder);
+                  if (lhsOrder != rhsOrder)
+                    return lhsOrder < rhsOrder;
+
+                  return static_cast<unsigned>(lhs->getRuleId()) <
+                         static_cast<unsigned>(rhs->getRuleId());
+                });
+
+            std::unique_ptr<RewritePlan> selectedRowPlan;
+            unsigned selectedRowOrdinal = 0;
+            unsigned ordinal = 0;
+            for (std::unique_ptr<RewritePlan> &plan : rowPlans) {
+              ++ordinal;
+              if (plan->getCreationEpoch() != context.getEpoch()) {
+                ++staleSkipped;
+                continue;
+              }
+              if (failed(plan->revalidate(context))) {
+                ++revalidationSkipped;
+                continue;
+              }
+              selectedRowPlan = std::move(plan);
+              selectedRowOrdinal = ordinal;
+              break;
+            }
+
+            if (selectedRowPlan) {
+              logPlanEvent("plan-selected", *selectedRowPlan,
+                           selectedRowOrdinal, context.getEpoch(),
+                           "sandbox=not-run");
+              IRRewriter rewriter(&getContext());
+              if (failed(selectedRowPlan->apply(rewriter))) {
+                selectedRowPlan.reset();
+                rowPlans.clear();
+                function.emitError()
+                    << "graph-optimize failed to apply Row rewrite";
+                signalPassFailure();
+                return;
+              }
+              logPlanEvent("apply-ok", *selectedRowPlan, selectedRowOrdinal,
+                           context.getEpoch(), "sandbox=verified");
+
+              if (options.emitRemarks)
+                function.emitRemark()
+                    << "applied graph optimization rule "
+                    << static_cast<unsigned>(
+                           GraphOptimizationRuleId::RowCoalescing);
+
+              selectedRowPlan.reset();
+              rowPlans.clear();
+              context.invalidate();
+              ++rowRewriteCount;
+              recordSuccessfulRewrite(GraphOptimizationRuleId::RowCoalescing);
+            }
+          }
+        }
       }
     }
-    if (!rowRule)
-      continue;
 
-    if (failed(context.ensure(rowRule->getAnalysisRequirements()))) {
-      function.emitError() << "graph-optimize failed to build Row analyses";
-      signalPassFailure();
-      return;
-    }
-
-    SmallVector<std::unique_ptr<RewritePlan>> rowPlans;
-    if (failed(rowRule->findCandidates(context, rowPlans))) {
-      function.emitError() << "graph-optimize failed to discover Row candidate";
-      signalPassFailure();
-      return;
-    }
-    rowPlans.erase(
-        std::remove_if(rowPlans.begin(), rowPlans.end(),
-                       [](const std::unique_ptr<RewritePlan> &plan) {
-                         return !plan ||
-                                plan->getRuleId() !=
-                                    GraphOptimizationRuleId::RowCoalescing;
-                       }),
-        rowPlans.end());
-    if (rowPlans.empty())
-      continue;
-
-    ProgramOrderMap programOrder = buildProgramOrderMap(function);
-    std::stable_sort(rowPlans.begin(), rowPlans.end(),
-                     [&programOrder](const std::unique_ptr<RewritePlan> &lhs,
-                                     const std::unique_ptr<RewritePlan> &rhs) {
-                       if (lhs->getBenefit() != rhs->getBenefit())
-                         return lhs->getBenefit() > rhs->getBenefit();
-
-                       const unsigned lhsOrder =
-                           getProgramOrder(*lhs, programOrder);
-                       const unsigned rhsOrder =
-                           getProgramOrder(*rhs, programOrder);
-                       if (lhsOrder != rhsOrder)
-                         return lhsOrder < rhsOrder;
-
-                       return static_cast<unsigned>(lhs->getRuleId()) <
-                              static_cast<unsigned>(rhs->getRuleId());
-                     });
-
-    std::unique_ptr<RewritePlan> selectedRowPlan;
-    for (std::unique_ptr<RewritePlan> &plan : rowPlans) {
-      if (plan->getCreationEpoch() != context.getEpoch())
-        continue;
-      if (failed(plan->revalidate(context)))
-        continue;
-      selectedRowPlan = std::move(plan);
-      break;
-    }
-    if (!selectedRowPlan)
-      continue;
-
-    IRRewriter rewriter(&getContext());
-    if (failed(selectedRowPlan->apply(rewriter))) {
-      selectedRowPlan.reset();
-      rowPlans.clear();
-      function.emitError() << "graph-optimize failed to apply Row rewrite";
-      signalPassFailure();
-      return;
-    }
-
-    if (options.emitRemarks)
-      function.emitRemark()
-          << "applied graph optimization rule "
-          << static_cast<unsigned>(GraphOptimizationRuleId::RowCoalescing);
-
-    selectedRowPlan.reset();
-    rowPlans.clear();
-    context.invalidate();
+    writeGraphLogPrefix();
+    llvm::errs() << "event=pass-end function=" << function.getName()
+                 << " rewrites-general=" << rewriteCount
+                 << " rewrites-row=" << rowRewriteCount
+                 << " rewrites-total=" << rewriteCount + rowRewriteCount
+                 << " success-load-store=" << successfulRewrites[0]
+                 << " success-transpose-pointwise=" << successfulRewrites[1]
+                 << " success-store-coalescing=" << successfulRewrites[2]
+                 << " success-row-coalescing=" << successfulRewrites[3]
+                 << " stale-skipped=" << staleSkipped
+                 << " revalidation-skipped=" << revalidationSkipped
+                 << " budget-exhausted=" << (budgetExhausted ? "true" : "false")
+                 << '\n';
   }
 }
 

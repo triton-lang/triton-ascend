@@ -322,6 +322,13 @@ public:
   Operation *getAnchor() const override { return candidate.anchor; }
   unsigned getCreationEpoch() const override { return epoch; }
 
+  void printDebug(llvm::raw_ostream &os) const override {
+    os << " axis=" << candidate.axis
+       << " rows-per-program=" << candidate.rowsPerProgram
+       << " entry-contract=public-unique-pid"
+       << " factor=" << candidate.rowsPerProgram << " ceil-div=1";
+  }
+
   LogicalResult revalidate(GraphOptimizationContext &context) const override {
     if (context.getFunction() != candidate.function)
       return failure();

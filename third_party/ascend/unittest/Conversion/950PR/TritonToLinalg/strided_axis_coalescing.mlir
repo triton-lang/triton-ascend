@@ -1,11 +1,13 @@
 // RUN: triton-opt %s --triton-to-unstructure='compile-on-910-95=true force-simt-template=true' \
-// RUN:                --triton-to-linalg='compile-on-910-95=true' --split-input-file \
+// RUN:                --triton-to-linalg='compile-on-910-95=true' --split-input-file 2> %t.stderr \
 // RUN: | FileCheck %s
+// RUN: FileCheck %s --check-prefix=LOG < %t.stderr
 
 // -----
 // The `pid % S` strided block-pointer shape is owned by StridedAxisCoalescing,
 // before Chunk and StridedLoadStoreRewrite.  It folds the S heads into the
 // inner tensor dimension and records the launch-axis shrink metadata.
+// LOG: [GRAPH] event=apply-ok rule=StridedAxisCoalescing block-rows=16 factor=4 axis=0 seed-loads=1 stores=1
 // CHECK-LABEL: module attributes {
 // CHECK: hacc.coalesce_axis = 0 : i32
 // CHECK: hacc.coalesce_factor = 4 : i32

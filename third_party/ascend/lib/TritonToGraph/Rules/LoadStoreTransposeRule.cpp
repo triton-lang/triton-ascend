@@ -2103,7 +2103,14 @@ class LayoutPermutationPlan final : public RewritePlan {
 public:
   LayoutPermutationPlan(LayoutPermutationCandidate candidate, unsigned epoch)
       : loop(candidate.loop), block(candidate.block), anchor(candidate.anchor),
-        permutation(std::move(candidate.permutation)), epoch(epoch) {}
+        permutation(std::move(candidate.permutation)),
+        externalTensorCount(candidate.externalTensorValues.size()),
+        reductionPortCount(candidate.reductionPorts.size()),
+        transformedResultCount(candidate.transformedResultIndices.size()),
+        blockOperationCount(candidate.blockOperations.size()),
+        externalAssertCount(candidate.externalAssertPorts.size()),
+        retireOperationCount(candidate.retireOperations.size()),
+        endpointCount(candidate.endpointCount), epoch(epoch) {}
 
   GraphOptimizationRuleId getRuleId() const override {
     return GraphOptimizationRuleId::LoadStoreTranspose;
@@ -2114,6 +2121,23 @@ public:
   Operation *getAnchor() const override { return anchor; }
 
   unsigned getCreationEpoch() const override { return epoch; }
+
+  void printDebug(llvm::raw_ostream &os) const override {
+    os << " scope=" << (loop ? "loop" : "block")
+       << " rank=" << permutation.size() << " permutation=[";
+    for (size_t index = 0; index < permutation.size(); ++index) {
+      if (index != 0)
+        os << ',';
+      os << permutation[index];
+    }
+    os << "] endpoints=" << endpointCount
+       << " external-tensors=" << externalTensorCount
+       << " reductions=" << reductionPortCount
+       << " transformed-results=" << transformedResultCount
+       << " closure-ops=" << blockOperationCount
+       << " external-asserts=" << externalAssertCount
+       << " retire-ops=" << retireOperationCount;
+  }
 
   LogicalResult revalidate(GraphOptimizationContext &context) const override {
     if (context.getEpoch() != epoch || !anchor || (!loop && !block) ||
@@ -2145,6 +2169,13 @@ private:
   Block *block;
   Operation *anchor;
   SmallVector<int32_t, 4> permutation;
+  size_t externalTensorCount;
+  size_t reductionPortCount;
+  size_t transformedResultCount;
+  size_t blockOperationCount;
+  size_t externalAssertCount;
+  size_t retireOperationCount;
+  unsigned endpointCount;
   unsigned epoch;
 };
 

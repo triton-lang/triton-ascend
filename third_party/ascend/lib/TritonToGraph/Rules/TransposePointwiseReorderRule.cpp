@@ -35,6 +35,7 @@
 
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 
 using namespace mlir;
@@ -246,7 +247,13 @@ public:
       : dot(chain.dot), dotOperation(chain.dot.getOperation()),
         operandIndex(chain.operandIndex), trans(chain.trans),
         transOperation(chain.trans.getOperation()),
-        unaryOps(std::move(chain.unaryOps)), epoch(epoch) {}
+        unaryOps(std::move(chain.unaryOps)),
+        sourceType(trans.getSrc().getType()),
+        resultType(trans.getResult().getType()), epoch(epoch) {
+    order.append(trans.getOrder().begin(), trans.getOrder().end());
+    for (Operation *unary : unaryOps)
+      unaryOpNames.push_back(unary->getName().getStringRef().str());
+  }
 
   GraphOptimizationRuleId getRuleId() const override {
     return GraphOptimizationRuleId::TransposePointwiseReorder;
@@ -259,6 +266,27 @@ public:
   Operation *getAnchor() const override { return dotOperation; }
 
   unsigned getCreationEpoch() const override { return epoch; }
+
+  void printDebug(llvm::raw_ostream &os) const override {
+    os << " operand=" << (operandIndex == 0 ? "A" : "B") << " order=[";
+    for (size_t index = 0; index < order.size(); ++index) {
+      if (index != 0)
+        os << ',';
+      os << order[index];
+    }
+    os << "] unary-count=" << unaryOpNames.size() << " unary-ops=[";
+    for (size_t index = 0; index < unaryOpNames.size(); ++index) {
+      if (index != 0)
+        os << ',';
+      os << unaryOpNames[index];
+    }
+    os << "] source-type=";
+    sourceType.print(os);
+    os << " result-type=";
+    resultType.print(os);
+    os << " created=" << unaryOps.size() + 1
+       << " erased=" << unaryOps.size() + 1;
+  }
 
   LogicalResult revalidate(GraphOptimizationContext &context) const override {
     if (context.getEpoch() != epoch || !dot)
@@ -366,6 +394,10 @@ private:
   triton::TransOp trans;
   Operation *transOperation;
   SmallVector<Operation *> unaryOps;
+  SmallVector<int32_t, 4> order;
+  SmallVector<std::string, 4> unaryOpNames;
+  Type sourceType;
+  Type resultType;
   unsigned epoch;
 };
 

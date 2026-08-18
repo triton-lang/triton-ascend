@@ -1189,7 +1189,10 @@ class NPUOptions:
     # A5 defaults to transactional auto mode: CV split is attempted first and
     # the unchanged DynamicCVPipeline runs when the candidate rejects. Callers
     # retain an immediate kill switch by setting this option to False.
-    enable_cv_split_scheduling: bool = True if is_compile_on_910_95 else False
+    # Left None here and resolved in parse_options, like every other
+    # target-dependent default: is_compile_on_910_95 is a function, so testing
+    # it directly would be true on every target.
+    enable_cv_split_scheduling: bool = None
     cv_split_unroll_factor: int = 4
     # Spare UB, in bytes, that cross-scope transfers may spend to stop reusing
     # buffers across unrolled lanes. It funds merging the two CUBE->VECTOR
@@ -1415,6 +1418,9 @@ class AscendBackend(BaseBackend):
             # Lazy init enable_dynamic_cv_pipeline if not provided
             if options.enable_dynamic_cv_pipeline is None:
                 object.__setattr__(options, "enable_dynamic_cv_pipeline", is_compile_on_910_95())
+            # Lazy init enable_cv_split_scheduling if not provided
+            if options.enable_cv_split_scheduling is None:
+                object.__setattr__(options, "enable_cv_split_scheduling", is_compile_on_910_95())
             # Costmodel path should avoid extra BC<->MLIR conversion stages
             # to keep compile-only autotune routing lightweight and stable.
             if getattr(options, "enable_costmodel_backend", False):

@@ -29,7 +29,7 @@ def _make_metadata():
         target=driver.GPUTarget("npu", "Ascend910B3", 0),
         workspace_size=0,
         lock_init_value=0,
-        lock_num=0,
+        sync_block_lock_layout=0,
         bs_task_type=0,
         mix_mode="aiv",
         shared=0,

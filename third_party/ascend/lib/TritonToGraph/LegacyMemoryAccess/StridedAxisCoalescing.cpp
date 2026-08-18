@@ -28,6 +28,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Matchers.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <functional>
 
@@ -576,6 +577,10 @@ void rewriteStridedAxisCoalesce(ModuleOp moduleOp) {
   auto i32t = IntegerType::get(moduleOp.getContext(), 32);
   moduleOp->setAttr("hacc.coalesce_factor", IntegerAttr::get(i32t, S));
   moduleOp->setAttr("hacc.coalesce_axis", IntegerAttr::get(i32t, coalesceAxis));
+  llvm::errs() << "[GRAPH] event=apply-ok rule=StridedAxisCoalescing"
+               << " block-rows=" << BT << " factor=" << S
+               << " axis=" << coalesceAxis << " seed-loads=" << seeds.size()
+               << " stores=" << sinks.size() << '\n';
 }
 
 } // namespace StridedAxisCoalescing

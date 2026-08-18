@@ -22,6 +22,7 @@
 
 #include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
+#include "ascend/include/Utils/DebugUtils.h"
 #include "ascend/include/Utils/Utils.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
@@ -612,6 +613,7 @@ void BlockDataParser::parseMakeRange(
     triton::MakeRangeOp op, BlockData &data, const Location &loc,
     ConversionPatternRewriter &rewriter,
     const llvm::SmallDenseMap<Value, BlockData> &known) {
+  insertDebugNop(op.getLoc(), rewriter);
   assert(data.isEmpty());
   auto shape = dyn_cast<ShapedType>(op.getType()).getShape();
 
@@ -1288,6 +1290,11 @@ void BlockDataParser::rewriteAddPtr(
   auto insertPoint = rewriter.saveInsertionPoint();
   rewriter.setInsertionPoint(op);
 
+  Location offLoc = op.getLoc();
+  if (Value off = op.getOffset())
+    if (Operation *defOp = off.getDefiningOp())
+      offLoc = defOp->getLoc();
+  insertDebugNop(offLoc, rewriter);
   BlockData data;
   parseAddPtr(op, data, op.getLoc(), rewriter, known);
 

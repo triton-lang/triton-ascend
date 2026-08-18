@@ -310,6 +310,7 @@ def _get_install_requirements():
         "pyyaml",
         "pybind11",
         "pandas",
+        "pyelftools>=0.29",
         "triton==3.6.0",
     ]
     return [*install_requires]

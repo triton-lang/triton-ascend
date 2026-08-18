@@ -25,6 +25,7 @@
 #include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
+#include "ascend/include/Utils/DebugUtils.h"
 #include "ascend/include/Utils/Utils.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
@@ -67,13 +68,13 @@ using namespace triton;
 /**
  * Retrieves a boolean environment variable.
  * @param envVar The name of the environment variable.
- * @param defaultValue The default value to return if the variable is not set or
- * cannot be parsed.
+ * @param defaultValue The default value to return if the variable is not set
+ * or cannot be parsed.
  * @return true if the environment variable exists and its value is parsed as
  * "true", otherwise returns defaultValue. Parsing rules (case-insensitive):
- * "true" values: any non-empty string not equal to "0", "false", "no", "off" is
- * considered true. "false" values: an empty string or a string equal to any of
- * the false literals is considered false.
+ * "true" values: any non-empty string not equal to "0", "false", "no", "off"
+ * is considered true. "false" values: an empty string or a string equal to
+ * any of the false literals is considered false.
  */
 bool getEnvBool(const char *envVar, bool defaultValue) {
   const char *val = std::getenv(envVar);
@@ -147,6 +148,7 @@ BitcastConverter::matchAndRewrite(triton::BitcastOp op, OpAdaptor adaptor,
 LogicalResult
 TransposeConverter::matchAndRewrite(triton::TransOp op, OpAdaptor adaptor,
                                     ConversionPatternRewriter &rewriter) const {
+  insertDebugNop(op.getLoc(), rewriter);
   auto src = adaptor.getSrc();
   auto res = ConverterUtils::getTransposedValue(src, op.getLoc(), rewriter,
                                                 op.getOrder());
@@ -366,8 +368,8 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
 }
 
 /*
- * Move tt.bitcast to a previous location if tt.bitcast is not directly applied
- * on function arguments
+ * Move tt.bitcast to a previous location if tt.bitcast is not directly
+ * applied on function arguments
  */
 LogicalResult
 BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
@@ -434,6 +436,8 @@ BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
                                                "Unknown bitcast pattern");
           });
   if (succeeded(newRes)) {
+    // Preserve debug location in case beforeCastOp is erased below.
+    insertDebugNop(beforeCastOp->getLoc(), rewriter);
     rewriter.replaceOp(bitcastOp, newRes.value());
     if (beforeCastOp->use_empty()) {
       rewriter.eraseOp(beforeCastOp);
@@ -454,8 +458,8 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
   auto roundingMode = op.getRounding();
   if (roundingMode.has_value() &&
       roundingMode.value() != triton::RoundingMode::RTNE) {
-    // Non-RTNE rounding modes (e.g., RTZ) should be handled by TritonToHFusion
-    // pass Return failure here so this pattern doesn't match
+    // Non-RTNE rounding modes (e.g., RTZ) should be handled by
+    // TritonToHFusion pass Return failure here so this pattern doesn't match
     return failure();
   }
 
@@ -799,6 +803,7 @@ LogicalResult
 MakeRangeConverter::matchAndRewrite(triton::MakeRangeOp op, OpAdaptor adaptor,
                                     ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
+  insertDebugNop(loc, rewriter);
   auto type = cast<TensorType>(op.getResult().getType());
   auto shape = type.getShape();
   auto elementType = type.getElementType();
@@ -858,6 +863,9 @@ LogicalResult
 SplatConverter::matchAndRewrite(triton::SplatOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
+  // These NOPs are transient debug anchors: DeduplicateDebugNopsPass collapses
+  // them to one per source line before codegen.
+  insertDebugNopForAllLines(loc, rewriter);
   auto shape = op.getType().getShape();
   auto init = rewriter.create<tensor::EmptyOp>(loc, shape,
                                                op.getType().getElementType());
@@ -881,8 +889,8 @@ UnsplatConverter::matchAndRewrite(triton::UnsplatOp op, OpAdaptor adaptor,
   auto srcType = cast<RankedTensorType>(src.getType());
   auto shape = srcType.getShape();
 
-  // Create index constants for all dimensions (all zeros since we're extracting
-  // the single element)
+  // Create index constants for all dimensions (all zeros since we're
+  // extracting the single element)
   SmallVector<Value> indices;
   for (int64_t dim : shape) {
     indices.push_back(
@@ -901,6 +909,7 @@ LogicalResult
 ReshapeConverter::matchAndRewrite(triton::ReshapeOp op, OpAdaptor adaptor,
                                   ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
+  insertDebugNop(loc, rewriter);
   auto src = op.getSrc();
   auto dst = op.getResult();
   Value shape = rewriter.create<arith::ConstantOp>(
@@ -916,6 +925,7 @@ LogicalResult ExpandDimsConverter::matchAndRewrite(
     triton::ExpandDimsOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
+  insertDebugNop(loc, rewriter);
   auto src = op.getSrc();
   auto resShape = cast<ShapedType>(op.getResult().getType()).getShape();
   auto axis = op.getAxis();
@@ -1004,7 +1014,7 @@ BroadcastConverter::matchAndRewrite(triton::BroadcastOp op, OpAdaptor adaptor,
   RankedTensorType resultType = cast<RankedTensorType>(op.getType());
   auto elementType = resultType.getElementType();
   auto loc = op.getLoc();
-
+  insertDebugNopForAllLines(loc, rewriter);
   auto initEmpty =
       rewriter.create<tensor::EmptyOp>(loc, resultType.getShape(), elementType);
 
@@ -1194,7 +1204,7 @@ ReduceConverter::convertToTargetOp(triton::ReduceOp op,
     finalResult =
         rewriter.create<tensor::ExtractOp>(loc, constantType, finalResult);
   }
-
+  insertDebugNop(loc, rewriter);
   rewriter.replaceOp(op, finalResult);
   return success();
 }
@@ -1317,6 +1327,7 @@ LogicalResult ReduceConverter::convertToTargetOpExtended(
     addReduceWithIndexAttr(*params, rewriter, linalgOp);
   }
 
+  insertDebugNop(loc, rewriter);
   if (isScalarReduce) {
     SmallVector<Value> reduceResults;
     for (auto i = 0; i < linalgOp.getResults().size() && i < elemTypes.size();
@@ -1579,8 +1590,8 @@ LogicalResult ScanConverter::convertToTargetOpExtended(
     inputTensTypes.push_back(tensorTy);
   }
 
-  // 3. Validate all input tensors have the same shape (scan operation requires
-  // matching input dimensions)
+  // 3. Validate all input tensors have the same shape (scan operation
+  // requires matching input dimensions)
   auto baseShape = inputTensTypes[0].getShape();
   int rank = baseShape.size();
   int axis = op.getAxis();
@@ -1630,8 +1641,8 @@ LogicalResult ScanConverter::convertToTargetOpExtended(
       firstIdx.push_back(startInd);
     }
 
-    // 5.1 Process the first element: directly copy multiple inputs to multiple
-    // outputs (initialize cumulative results)
+    // 5.1 Process the first element: directly copy multiple inputs to
+    // multiple outputs (initialize cumulative results)
     for (size_t i = 0; i < inputMemRefs.size(); ++i) {
       Value firstVal =
           rewriter.create<memref::LoadOp>(loc, inputMemRefs[i], firstIdx);
@@ -1657,8 +1668,8 @@ LogicalResult ScanConverter::convertToTargetOpExtended(
     Value k = forOp.getInductionVar();
 
     if (reverse) {
-      // Reverse scanning: Convert the forward loop index to the actual reverse
-      // index. (axis_size - 1) - k
+      // Reverse scanning: Convert the forward loop index to the actual
+      // reverse index. (axis_size - 1) - k
       Value axisSizeVal =
           rewriter.create<arith::ConstantIndexOp>(loc, baseShape[axis]);
       Value axisSizeMinusOne =
@@ -1705,8 +1716,8 @@ LogicalResult ScanConverter::convertToTargetOpExtended(
       return;
     }
     Block &combineBlock = combineRegion.front();
-    // Validate that the number of reduction region arguments matches (number of
-    // previous results + number of current elements)
+    // Validate that the number of reduction region arguments matches (number
+    // of previous results + number of current elements)
     if (combineBlock.getNumArguments() != 2 * inputMemRefs.size()) {
       op->emitError("Combine region arguments mismatch with input count");
       loopResult = failure();
@@ -1757,8 +1768,8 @@ LogicalResult ScanConverter::convertToTargetOpExtended(
     return failure();
   }
 
-  // 7. Convert multiple output MemRefs back to tensors and replace the original
-  // tt.scan operation
+  // 7. Convert multiple output MemRefs back to tensors and replace the
+  // original tt.scan operation
   llvm::SmallVector<Value> outputTensors;
   for (auto outputMemRef : outputMemRefs) {
     mlir::Type resultType = mlir::memref::getTensorTypeFromMemRefType(

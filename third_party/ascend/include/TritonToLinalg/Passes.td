@@ -30,4 +30,17 @@ def MarkTensorKind : Pass<"mark-tensor-kind", "mlir::ModuleOp"> {
     let constructor = "triton::createMarkTensorKindPass()";
 }
 
+def DeduplicateDebugNops : Pass<"deduplicate-debug-nops", "mlir::ModuleOp"> {
+    let summary = "Deduplicate llvm.inline_asm 'nop' debug-anchor ops by source line.";
+    let description = [{
+        Removes redundant `llvm.inline_asm "nop"` ops that share a
+        `(filename, line)` source location within a function. Keeps the
+        first occurrence in IR walk order; erases the rest.
+
+        Opt-in via env var `LLVM_EXTRACT_DI_LOCAL_VARIABLES=1`. With the
+        env var unset the pass is a no-op.
+    }];
+    let constructor = "triton::createDeduplicateDebugNopsPass()";
+}
+
 #endif // TRITON_TO_LINALG_CONVERSION_PASSES

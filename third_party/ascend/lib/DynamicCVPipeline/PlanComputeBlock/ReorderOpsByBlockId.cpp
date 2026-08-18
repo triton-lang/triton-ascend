@@ -33,6 +33,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -42,18 +43,16 @@
 #include "mlir/Pass/Pass.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
-
-#include "DynamicCVPipeline/Common/Utils.h"
-#include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
-#include "TritonToUnstructure/OffsetAnalysis.h"
-#include "triton/Dialect/Triton/IR/Dialect.h"
 
 using namespace mlir;
 static constexpr const char *DEBUG_TYPE = "ReorderOpsByBlockIdPass";
-#define LOG_DEBUG(...)                                                         \
-  LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__)
+
+#define DBGS(...) LLVM_DEBUG(llvm::dbgs() << __VA_ARGS__)
+#define LOG_DEBUG(...) DBGS("\n[" << DEBUG_TYPE << "] " << __VA_ARGS__)
 
 using namespace triton;
 using namespace CVPipeline;
@@ -117,7 +116,7 @@ void EdgeHelper::addEdge(Operation *pred, Operation *succ) {
   }
   if (seen.insert({pred, succ}).second) {
     LOG_DEBUG("Adding " << (IsMemory ? "memory " : "") << "edge from " << *pred
-                        << " to " << *succ << "\n");
+                        << " to " << *succ);
     graph.succs[pred].push_back(succ);
     graph.preds[succ].push_back(pred);
   }
@@ -135,7 +134,7 @@ BlockOpGraph::BlockOpGraph(ArrayRef<Operation *> allOps, Block *block,
   EdgeHelper edges(*this, block);
 
   for (Operation *op : allOps) {
-    LOG_DEBUG("Processing op: " << *op << "\n");
+    LOG_DEBUG("Processing op: " << *op);
     // Edges from operand defs (including defs nested inside other ops).
     for (Value const operand : op->getOperands()) {
       Operation *defOp = operand.getDefiningOp();
@@ -263,11 +262,11 @@ GroupAdjacencyGraph::GroupAdjacencyGraph(
   // Logging the constructed group graph.
   LOG_DEBUG("Group-level edges:\n");
   for (unsigned i = 0; i < n; ++i) {
-    LOG_DEBUG("  Group " << groupIds[i] << " -> ");
+    DBGS("  Group " << groupIds[i] << " -> ");
     for (unsigned succIdx : succs[i]) {
-      LOG_DEBUG(groupIds[succIdx] << " ");
+      DBGS(groupIds[succIdx] << " ");
     }
-    LOG_DEBUG("\n");
+    DBGS("\n");
   }
 }
 
@@ -301,9 +300,8 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
 
   LOG_DEBUG("Group order: ");
   for (int id : result) {
-    LOG_DEBUG(id << " ");
+    DBGS(id << " ");
   }
-  LOG_DEBUG("\n");
 
   if (result.size() == n) {
     return result;
@@ -393,7 +391,6 @@ reorderOpsInBlock(Block &block, const MemoryDependenceGraph &memGraph,
 }
 
 void ReorderOpsByBlockIdPass::runOnOperation() {
-  LOG_DEBUG("\n=== Pass: TuningOpSeq ===\n");
   OpBuilder const builder(&getContext());
 
   auto moduleOp = getOperation();

@@ -23,13 +23,15 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_COMMON_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_COMMON_H
 
-#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
+
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Operation.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/SmallVector.h"
+#include "mlir/IR/Value.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/DependencyHelper.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
 namespace mlir {
 namespace CVPipeline {
@@ -37,7 +39,7 @@ namespace CVPipeline {
 Operation *getAncestorInBlock(Operation *inner, Block *block);
 void initializeIndegreeForBlock(Block *block,
                                 llvm::DenseMap<Operation *, int> &indegree,
-                                const MemoryDependenceGraph &memGraph,
+                                const DependencyHelper &depHelper,
                                 ComputeBlockIdManager &bm);
 
 } // namespace CVPipeline

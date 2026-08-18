@@ -164,8 +164,14 @@ inline bool isMainLoopOp(Operation *op) {
   return op && isa<scf::ForOp, scf::WhileOp>(op) && op->hasAttr(kMainLoop);
 }
 
-inline bool isCubeOp(Operation *op) {
-  return !isScfOp(op) && CVPipeline::getOpCoreType(op) == CoreType::CUBE_ONLY;
+CoreType getCoreTypeOfSimpleOpOrCf(Operation *op);
+
+inline bool isCubeSimpleOpOrCf(Operation *op) {
+  return getCoreTypeOfSimpleOpOrCf(op) == CoreType::CUBE_ONLY;
+}
+
+inline bool isVectorSimpleOpOrCf(Operation *op) {
+  return getCoreTypeOfSimpleOpOrCf(op) == CoreType::VECTOR_ONLY;
 }
 
 // ============================================================================
@@ -250,6 +256,25 @@ bool allResultHasOneUser(Operation *op);
 int64_t getBTSizeFromValidBroadcastOp(linalg::BroadcastOp broadcastOp);
 
 int getLoopCarriedArgIndex(Value operand, Block *block);
+
+CoreType getValueCoreType(Value value);
+
+inline OpOperand *getTiedYieldOperand(Value value, Block *block) {
+  int argIdx = getLoopCarriedArgIndex(value, block);
+  if (argIdx == -1) {
+    return nullptr;
+  }
+  auto *terminator = block->getTerminator();
+  return &terminator->getOpOperand(argIdx);
+}
+
+inline Operation *getLoopCarriedDefOp(Value value, Block *block) {
+  auto *yieldOperand = getTiedYieldOperand(value, block);
+  if (yieldOperand && yieldOperand->get()) {
+    return yieldOperand->get().getDefiningOp();
+  }
+  return nullptr;
+}
 
 } // namespace CVPipeline
 } // namespace mlir

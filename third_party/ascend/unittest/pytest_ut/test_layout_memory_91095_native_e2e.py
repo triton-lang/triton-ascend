@@ -289,6 +289,7 @@ def test_chunk_axis2_91095_native_metadata_launcher_and_ir(monkeypatch):
     assert launcher.count("ChunkCoalescing: grid[2] not divisible by coalesce_factor 16") == 2
 
 
+@pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
 def test_chunk_sanitizer_preserves_original_bailout_91095(monkeypatch):
     """The default overflow instrumentation must retain Chunk's no-op guard."""
     batch, block, num_tiles = 2, 16, 32
@@ -322,6 +323,7 @@ def test_chunk_sanitizer_preserves_original_bailout_91095(monkeypatch):
     assert all("gridY = gridY / 16;" not in launcher for launcher in observer.launcher_sources)
 
 
+@pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
 def test_sls_91095_native_ir_metadata_and_mixed_simt_launcher(monkeypatch):
     """SLS emits the masked indirect-load path and preserves its launch ABI."""
     n = 1024

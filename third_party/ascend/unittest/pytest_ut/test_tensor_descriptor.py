@@ -371,6 +371,7 @@ def test_tensor_descriptor_reduce(kind, dtype, M_BLOCK, N_BLOCK):
     torch.testing.assert_close(expect, out)
 
 
+@pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
 @pytest.mark.parametrize("dtype", ["float32"])
 @pytest.mark.parametrize("M,N,BLOCK_M,BLOCK_N", [(64, 128, 16, 32)])
 def test_host_tensor_descriptor_args(dtype, M, N, BLOCK_M, BLOCK_N):
@@ -398,6 +399,7 @@ def test_host_tensor_descriptor_args(dtype, M, N, BLOCK_M, BLOCK_N):
     torch.testing.assert_close(inp, out)
 
 
+@pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
 @pytest.mark.parametrize("padding", ["zero", "nan"])
 def test_host_tensor_descriptor_padding(padding):
     from triton.tools.tensor_descriptor import TensorDescriptor

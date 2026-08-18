@@ -78,7 +78,7 @@ map_for_64_t = {37: 31}
 
 @pytest.mark.parametrize('dtype,sigtype', types)
 @pytest.mark.parametrize('N,NUMEL', shapes)
-def test_elementwsie_common(dtype, sigtype, N, NUMEL):
+def test_elementwise_common(dtype, sigtype, N, NUMEL):
     N = (-N) // torch.tensor(0, dtype=dtype).element_size() if N < 0 else N
 
     if sigtype == "int64":

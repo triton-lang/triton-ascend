@@ -33,6 +33,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -44,6 +46,8 @@
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
+#include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
+#include "bishengir/Dialect/HIVM/Utils/Utils.h"
 
 #include "DynamicCVPipeline/Common/Utils.h"
 #include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
@@ -299,11 +303,13 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
     }
   }
 
-  LOG_DEBUG("Group order: ");
-  for (int id : result) {
-    LOG_DEBUG(id << " ");
-  }
-  LOG_DEBUG("\n");
+  LLVM_DEBUG({
+    LOG_DEBUG("Group order: ");
+    for (int id : result) {
+      LOG_DEBUG(id << " ");
+    }
+    LOG_DEBUG("\n");
+  });
 
   if (result.size() == n) {
     return result;
@@ -341,10 +347,18 @@ buildReorderedOps(const BlockOpGraph &graph,
   }
 
   for (int const blockId : groupOrderResult.value()) {
+    SmallVector<Operation *> storeOps;
     for (Operation *op : graph.ops) {
       if (opBlockId.at(op) == blockId) {
+        if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp>(op)) {
+          storeOps.push_back(op);
+          continue;
+        }
         reordered.push_back(op);
       }
+    }
+    for (auto op : storeOps) {
+      reordered.push_back(op);
     }
   }
   return reordered;

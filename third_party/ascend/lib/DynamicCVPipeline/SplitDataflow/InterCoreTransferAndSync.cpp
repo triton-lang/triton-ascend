@@ -281,6 +281,30 @@ bool InterCoreTransferAndSyncPass::isExpectedShape(
   return isEqualedShape;
 }
 
+// insert copyop before store to avoid mte3 blocking (store and V->C use the
+// same PIPE)
+mlir::Operation *InterCoreTransferAndSyncPass::getCopyPointBeforeStore(
+    Value depValue, Operation *vectorEndOp, int iniProducerBlockId) {
+  Operation *curr = vectorEndOp;
+  Operation *firstStoreOpAfterProducer = nullptr;
+  while (curr) {
+    auto blockIdOpt = CVPipeline::getOpBlockId(curr);
+    if (blockIdOpt != iniProducerBlockId) {
+      break;
+    }
+    if (curr == depValue.getDefiningOp()) {
+      break;
+    }
+    if (CVPipeline::isStoreLike(curr)) {
+      firstStoreOpAfterProducer = curr->getPrevNode();
+      LOG_DEBUG("firstStoreOpAfterProducer: " << *firstStoreOpAfterProducer
+                                              << "\n");
+    }
+    curr = curr->getPrevNode();
+  }
+  return firstStoreOpAfterProducer;
+}
+
 // padding v->c tensor
 mlir::Value InterCoreTransferAndSyncPass::alignShapeByInsertSlice(
     OpBuilder &builder, DependencyInfo &dep, Location loc,
@@ -381,6 +405,13 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder,
 
   auto [newProdStart, newProdEnd] =
       getBlockStartEnd(dep.producerBlockId, module);
+  if (dep.iniProducerBlockId == dep.producerBlockId) {
+    auto producerPoint =
+        getCopyPointBeforeStore(newValue, newProdEnd, dep.iniProducerBlockId);
+    if (producerPoint) {
+      newProdEnd = producerPoint;
+    }
+  }
   builder.setInsertionPointAfter(newProdEnd);
 
   auto reshape3Dcst =
@@ -1294,14 +1325,19 @@ LogicalResult InterCoreTransferAndSyncPass::handleVectorToCube(
       consStart = consumerPoint;
     }
   }
+  if (dep.iniProducerBlockId == dep.producerBlockId) {
+    auto producerPoint =
+        getCopyPointBeforeStore(normalizedVal, prodEnd, dep.iniProducerBlockId);
+    if (producerPoint) {
+      prodEnd = producerPoint;
+    }
+  }
   LOG_DEBUG("after analyzeConsumerReadInsertPoint\n");
   Operation *transferOp = insertVectorToCubeTransfer(
       builder, srcValue, normalizedVal, prodEnd, consStart, loc, transferIndex,
       dep, is1DTensorDependency(dep.value), &consumedDataOp);
 
   int flagId = flagManager.acquireId();
-  auto [newProdStart, newProdEnd] =
-      getBlockStartEnd(dep.producerBlockId, module);
   auto [newConsStart, newConsEnd] =
       getBlockStartEnd(dep.consumerBlockId, module);
 

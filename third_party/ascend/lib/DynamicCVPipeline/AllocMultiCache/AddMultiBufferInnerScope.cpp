@@ -1407,7 +1407,7 @@ static int processDepVal(Value depVal, const MainLoop &loop,
   // Read the module-level `ssbuffer.insertionOptimization` attribute inline so
   // processDepVal can be called multiple times in the same pass run and stay
   // in sync with whatever the Python caller last wrote onto the ModuleOp.
-  bool enableOpt = false;
+  bool enableOpt = true;
   if (mlir::ModuleOp mod = loop->getParentOfType<mlir::ModuleOp>())
     enableOpt = mod->hasAttr(CVPipeline::kInsertionOptimization);
 
@@ -1981,6 +1981,12 @@ static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
   if (blocks.empty())
     return -1;
 
+  // Memref-type dep values are not supported here.
+  if (hasMemrefDepValue(depValueMap)) {
+    LDBG("ERROR: Memref type dependent values found in user IR, fallback");
+    return -1;
+  }
+
   // Phase 1: build initial depUserMap and clone empty+fill patterns. We use
   // a fresh user map built from the initial allOps so the clone can find
   // consumer-block users; the cloned fills will rewrite those users' uses.
@@ -2013,12 +2019,20 @@ static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
   if (blocks.empty())
     return -1;
 
-  // Memref-type dep values are not supported here; fail loudly so downstream
-  // passes don't see an unmarked-but-skipped scope.
-  if (hasMemrefDepValue(depValueMap)) {
-    LDBG("Falling Back: Memref type dependent values found!");
-    return -1;
+  // Drop memref-typed deps from Phase 2's collection
+  int droppedMemrefDeps = 0;
+  for (auto &p : depValueMap) {
+    llvm::erase_if(p.second, [&droppedMemrefDeps](Value v) {
+      if (isa<MemRefType>(v.getType())) {
+        ++droppedMemrefDeps;
+        return true;
+      }
+      return false;
+    });
   }
+  if (droppedMemrefDeps > 0)
+    LDBG("Dropped " + std::to_string(droppedMemrefDeps) +
+         " clone-induced memref deps from Phase 2 depValueMap");
 
   auto depUserMap = buildDepUserMap(blocks, allOps, depValueMap);
 

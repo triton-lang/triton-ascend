@@ -65,8 +65,6 @@ inline constexpr llvm::StringLiteral kDepMark = "ssbuffer.dep_mark";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
 inline constexpr llvm::StringLiteral kIterCounter = "ssbuffer.iterCounter";
 inline constexpr llvm::StringLiteral kClone = "ssbuffer.clone";
-inline constexpr llvm::StringLiteral kEnableUbRefineOpt =
-    "ssbuffer.enable_ub_refine_opt";
 inline constexpr llvm::StringLiteral kInsertionOptimization =
     "ssbuffer.insertionOptimization";
 inline constexpr llvm::StringLiteral kArg = "ssbuffer.arg";
@@ -81,6 +79,7 @@ inline constexpr llvm::StringLiteral kTightlyCoupledBufferAttr =
     "hivm.tightly_coupled_buffer";
 inline constexpr llvm::StringLiteral kCoreTypeCube = "CUBE";
 inline constexpr llvm::StringLiteral kCoreTypeVector = "VECTOR";
+inline constexpr llvm::StringLiteral kFromMakeRange = "tt.from_make_range";
 
 inline constexpr const char *ERRCODE_ATTR =
     "triton_ascend.dynamic_cv_pipeline.rc";

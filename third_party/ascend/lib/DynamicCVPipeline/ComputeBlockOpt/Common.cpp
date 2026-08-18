@@ -24,8 +24,11 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
 #include "triton/Analysis/Utility.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -180,8 +183,11 @@ bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify,
   return hasCycle;
 }
 
-void cloneScalarOpsForCrossBlockUses(ComputeBlockIdManager &bmOriginal,
-                                     SetVector<Operation *> &matchedOps) {
+void cloneScalarOpsForCrossBlockUses(ComputeBlockIdManager &bm,
+                                     SetVector<Operation *> &matchedOps,
+                                     int targetBlockId) {
+
+  // This means move matchedOps into targetBlockId
   auto sorted = mlir::topologicalSort(matchedOps);
   for (Operation *op : llvm::reverse(sorted)) {
     if (op->getNumResults() == 1 &&
@@ -196,21 +202,74 @@ void cloneScalarOpsForCrossBlockUses(ComputeBlockIdManager &bmOriginal,
         if (!userInBlock)
           continue;
         if (llvm::find(matchedOps, userInBlock) == matchedOps.end() &&
-            bmOriginal.getBlockIdByOp(userInBlock) !=
-                bmOriginal.getBlockIdByOp(matchedOps[0])) {
+            bm.getBlockIdByOp(userInBlock) != targetBlockId) {
           otherUses.push_back(&use);
         }
       }
       if (otherUses.size() > 0) {
-        LOG_DEBUG("now cloned: " << *op << "\n");
+        LOG_DEBUG("now cloned: " << *op);
         OpBuilder builder(op);
         auto clonedOp = builder.clone(*op);
+        bm.updateBlockId(clonedOp, bm.getBlockIdByOp(op));
         for (auto use : otherUses) {
           (*use).set(clonedOp->getResult(0));
         }
       }
     }
   }
+}
+
+bool collectViewOpsAndCheckGlobalMemory(Value viewValue,
+                                        SetVector<Operation *> &matchedOps) {
+  // Subview ops may be nested many layers deep through reinterpretation or
+  // other subviews. like, subview (subview (reinterpret_cast (subview
+  // (reinterpret_cast (arg0))))) so we need Search and only keep same block
+  // view-like op.
+  auto isFuncArg = [&](Value v) {
+    if (auto blockArg = dyn_cast<BlockArgument>(v)) {
+      Operation *parentOp = blockArg.getOwner()->getParentOp();
+      if (isa<func::FuncOp>(parentOp)) {
+        return true;
+      } else {
+        LOG_DEBUG(
+            "Subview source block argument is not from func entry block.");
+        return false;
+      }
+    }
+    return false;
+  };
+  if (isFuncArg(viewValue)) {
+    return true;
+  }
+
+  auto viewOp = viewValue.getDefiningOp<ViewLikeOpInterface>();
+  if (!viewOp) {
+    return false;
+  }
+  auto block = viewOp->getBlock();
+  LOG_DEBUG("Check view source: " << viewValue);
+  while (true) {
+
+    if (isFuncArg(viewValue)) {
+      return true;
+    }
+    if (!viewValue.getDefiningOp()) {
+      return false;
+    }
+    // From other view-like op
+    if (auto viewLike =
+            dyn_cast<ViewLikeOpInterface>(viewValue.getDefiningOp())) {
+      if (viewLike->getBlock() == block) {
+        matchedOps.insert(viewLike.getOperation());
+      }
+      viewValue = viewLike.getViewSource();
+      continue;
+    }
+    LOG_DEBUG(
+        "Subview source defining op is not ViewLikeOpInterface: " << viewValue);
+    return false;
+  }
+  return false;
 }
 
 } // namespace CVPipeline

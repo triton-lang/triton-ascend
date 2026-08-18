@@ -27,13 +27,27 @@ class PointerArg:
         return self.address
 
 
-def make_binder(backend=None):
+class CountingAscendBackend(AscendBackend):
+
+    def __init__(self):
+        super().__init__(GPUTarget("npu", "Ascend910B", 32))
+        self.alignment_specialization_calls = 0
+
+    def use_alignment_specialization(self, options):
+        self.alignment_specialization_calls += 1
+        return super().use_alignment_specialization(options)
+
+
+def make_binder(backend=None, do_not_specialize_on_alignment=False):
 
     def kernel(value, pointer):
         pass
 
     signature = inspect.signature(kernel)
-    params = [KernelParam(i, param, False, False) for i, param in enumerate(signature.parameters.values())]
+    params = [
+        KernelParam(i, param, False, do_not_specialize_on_alignment)
+        for i, param in enumerate(signature.parameters.values())
+    ]
     if backend is None:
         backend = AscendBackend(GPUTarget("npu", "Ascend910B", 32))
     return create_function_from_signature(signature, params, backend)
@@ -56,6 +70,59 @@ SIMT_OPTIONS = [
     pytest.param({"force_simt_only": True}, id="legacy-force-simt-only"),
     pytest.param({"compile_mode": "simd", "force_simt_only": True}, id="legacy-force-simt-overrides-mode"),
 ]
+
+
+def test_alignment_policy_is_evaluated_once_per_binder_call():
+    backend = CountingAscendBackend()
+    binder = make_binder(backend)
+
+    binder(16, PointerArg(0x1000), compile_mode="simd")
+    assert backend.alignment_specialization_calls == 1
+
+    binder(17, PointerArg(0x1004), compile_mode="simt_only")
+    assert backend.alignment_specialization_calls == 2
+
+
+def test_alignment_policy_is_not_evaluated_when_unused():
+    backend = CountingAscendBackend()
+    binder = make_binder(backend, do_not_specialize_on_alignment=True)
+
+    binder(16, PointerArg(0x1000), compile_mode="simd")
+
+    assert backend.alignment_specialization_calls == 0
+
+
+def test_alignment_policy_is_not_evaluated_for_non_specialized_annotation():
+
+    def kernel(value):
+        pass
+
+    kernel.__annotations__["value"] = "fp32"
+    signature = inspect.signature(kernel)
+    params = [KernelParam(0, next(iter(signature.parameters.values())), False, False)]
+    backend = CountingAscendBackend()
+    binder = create_function_from_signature(signature, params, backend)
+
+    _, specialization, _ = binder(1.25, compile_mode="simd")
+
+    assert specialization == [("fp32", None)]
+    assert backend.alignment_specialization_calls == 0
+
+
+def test_alignment_policy_is_not_evaluated_when_value_specialization_is_disabled():
+
+    def kernel(value):
+        pass
+
+    signature = inspect.signature(kernel)
+    params = [KernelParam(0, next(iter(signature.parameters.values())), True, False)]
+    backend = CountingAscendBackend()
+    binder = create_function_from_signature(signature, params, backend)
+
+    _, specialization, _ = binder(16, compile_mode="simd")
+
+    assert specialization == [("i32", None)]
+    assert backend.alignment_specialization_calls == 0
 
 
 @pytest.mark.parametrize("options", SIMD_OPTIONS)

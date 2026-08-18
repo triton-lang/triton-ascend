@@ -35,6 +35,7 @@
 
 #include "DynamicCVPipeline/Common/DependencyHelper.h"
 #include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"

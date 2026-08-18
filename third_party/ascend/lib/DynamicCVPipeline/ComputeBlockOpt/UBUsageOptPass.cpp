@@ -703,8 +703,7 @@ UBUsageOptPass::optBroadcast(Block *block,
     }
     llvm::SmallVector<Operation *> willaddOps{broadcastOp};
 
-    if (!willCreateCycle(willaddOps, block, memGraph, userBlockId, bm)
-             .value_or(true)) {
+    if (!CVPipeline::willCreateCycle(willaddOps, memGraph, userBlockId, bm)) {
       bm.updateBlockId(broadcastOp, userBlockId);
     } else {
       LOG_DEBUG("Moved" << *broadcastOp << " to blockId: " << userBlockId
@@ -770,9 +769,7 @@ UBUsageOptPass::optSmallBlock(Block *block,
     }
     llvm::SmallVector<Operation *> willaddOps(opsInSmallBlcok.begin(),
                                               opsInSmallBlcok.end());
-    if (!willCreateCycle(willaddOps, block, memGraph, candidateUserBlockIds[0],
-                         bm)
-             .value_or(true)) {
+    if (willCreateCycle(willaddOps, memGraph, candidateUserBlockIds[0], bm)) {
       for (Operation *op : opsInSmallBlcok) {
         bm.updateBlockId(op, candidateUserBlockIds[0]);
       }

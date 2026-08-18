@@ -182,6 +182,7 @@ findOpsAdjacentToCube(Block *block, const SmallVector<Operation *> &fuseGroup,
                       const CVPipeline::MemoryDependenceGraph &memGraph) {
   SmallVector<Operation *> toProcess;
   std::optional<int> blockId;
+  DependencyHelper depHelper{memGraph};
   for (Operation *op : fuseGroup) {
     depHelper.forEachUserInSameBlock(op, [&](Operation *user) {
       if (block->mightHaveTerminator() && user == block->getTerminator()) {

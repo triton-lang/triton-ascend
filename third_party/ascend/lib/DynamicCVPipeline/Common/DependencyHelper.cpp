@@ -50,36 +50,36 @@ mlir::WalkResult DependencyHelper::forEachUserImpl(Operation *op,
 template <SourceMode SM>
 mlir::WalkResult DependencyHelper::forEachSourceImpl(Operation *op,
                                                      CallbackFn pred) const {
-  return op->walk([this, op,
-                   pred = std::forward<CallbackFn>(pred)](Operation *subOp) {
-    for (auto operand : subOp->getOperands()) {
-      if (auto *defOp = operand.getDefiningOp(); defOp) {
-        if (!op->isAncestor(defOp)) {
-          if (pred(defOp).wasInterrupted()) {
-            return WalkResult::interrupt();
+  return op->walk(
+      [this, op, pred = std::forward<CallbackFn>(pred)](Operation *subOp) {
+        for (auto operand : subOp->getOperands()) {
+          if (auto *defOp = operand.getDefiningOp(); defOp) {
+            if (!op->isAncestor(defOp)) {
+              if (pred(defOp).wasInterrupted()) {
+                return WalkResult::interrupt();
+              }
+            }
+            continue;
           }
-        }
-        continue;
-      }
 
-      if constexpr (SM == SourceMode::AcrossIterArg) {
-        if (auto *defOp = getLoopCarriedDefOp(operand, op->getBlock())) {
-          if (pred(defOp).wasInterrupted()) {
-            return WalkResult::interrupt();
+          if constexpr (SM == SourceMode::AcrossIterArg) {
+            if (auto *defOp = getLoopCarriedDefOp(operand, op->getBlock())) {
+              if (pred(defOp).wasInterrupted()) {
+                return WalkResult::interrupt();
+              }
+            }
           }
         }
-      }
-    }
-    for (auto *source : memGraph.getExecBefore(subOp)) {
-      if (!op->isAncestor(
-              source)) { // this filters only the outer mem dependencies
-        if (pred(source).wasInterrupted()) {
-          return WalkResult::interrupt();
+        for (auto *source : memGraph.getExecBefore(subOp)) {
+          if (!op->isAncestor(
+                  source)) { // this filters only the outer mem dependencies
+            if (pred(source).wasInterrupted()) {
+              return WalkResult::interrupt();
+            }
+          }
         }
-      }
-    }
-    return WalkResult::advance();
-  });
+        return WalkResult::advance();
+      });
 }
 
 // Instantiate concrete functions for linking

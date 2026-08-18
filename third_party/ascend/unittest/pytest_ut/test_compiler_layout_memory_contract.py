@@ -580,6 +580,83 @@ def test_make_ttir_forwards_normalized_graph_ub_budget(compiler_module, monkeypa
     assert events[-1] == "run_row"
 
 
+def _run_ttir_to_linalg_with_recorded_graph_remarks(compiler, monkeypatch, emit_remarks):
+    """Record the final T2L binding arguments without loading the C++ extension."""
+    events = []
+    module = _FakeModule(events)
+    pass_manager = _FakePassManager(events)
+    t2l_calls = []
+
+    def record(_name):
+        return lambda _pm, *_args, **_kwargs: None
+
+    def record_t2l(_pm, *args, **kwargs):
+        assert not kwargs
+        t2l_calls.append(args)
+
+    ttir_passes = SimpleNamespace(
+        add_triton_control_flow_opt=record("triton_control_flow_opt"),
+        add_triton_to_structure=record("triton_to_structure"),
+        add_discrete_mask_access_conversion=record("discrete_mask_access_conversion"),
+        add_triton_to_annotation=record("triton_to_annotation"),
+        add_triton_to_unstructure=record("triton_to_unstructure"),
+        add_triton_to_hivm=record("triton_to_hivm"),
+        add_triton_to_hfusion=record("triton_to_hfusion"),
+        add_triton_to_llvm=record("triton_to_llvm"),
+        add_bubble_up_operation=record("bubble_up_operation"),
+        add_triton_to_linalg=record_t2l,
+        add_merge_concat_load_buffer=record("merge_concat_load_buffer"),
+    )
+
+    monkeypatch.setattr(
+        compiler,
+        "ir",
+        SimpleNamespace(pass_manager=lambda _context: pass_manager),
+    )
+    monkeypatch.setattr(
+        compiler,
+        "ascend",
+        SimpleNamespace(passes=SimpleNamespace(ttir=ttir_passes)),
+    )
+    monkeypatch.setattr(compiler, "distributed", None)
+    monkeypatch.setattr(compiler, "_is_auto_map_parallel_blocks_enabled", lambda: False)
+    monkeypatch.setattr(compiler, "_adjust_metadata_by_module_result", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(compiler, "_export_coalesce_metadata", lambda *_args, **_kwargs: None)
+
+    metadata = {
+        "enable_nd2nz_on_vector": False,
+        "enable_select_analysis": True,
+        "compile_on_910_95": True,
+        "force_simt_template": True,
+        "enable_mask_fallback_conversion": False,
+        "optimize_dynamic_offset": False,
+        "auto_blockify_size": 1,
+        "add_auto_scheduling": False,
+        "enable_dynamic_cv_pipeline": False,
+    }
+    options = SimpleNamespace(
+        arch="Ascend910_9589",
+        debug=False,
+        graph_optimize_emit_remarks=emit_remarks,
+    )
+
+    assert compiler.ttir_to_linalg(module, metadata, options) == "module {}"
+    return t2l_calls
+
+
+@pytest.mark.parametrize("emit_remarks", (False, True))
+def test_ttir_to_linalg_forwards_graph_remarks_to_layout_memory_pass(compiler_module, monkeypatch,
+                                                                      emit_remarks):
+    """Compatibility rules share the native graph-remark compiler switch."""
+    t2l_calls = _run_ttir_to_linalg_with_recorded_graph_remarks(
+        compiler_module,
+        monkeypatch,
+        emit_remarks,
+    )
+
+    assert t2l_calls == [(False, False, False, True, True, emit_remarks)]
+
+
 @pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
 def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
     """Keep the complete 895 pure-SIMT argv, including duplicate flag order.

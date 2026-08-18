@@ -43,7 +43,8 @@ namespace triton {
 std::unique_ptr<OperationPass<ModuleOp>> createTritonToLinalgPass();
 
 std::unique_ptr<OperationPass<ModuleOp>>
-createTritonToLinalgPass(bool, bool, bool, bool, bool);
+createTritonToLinalgPass(bool, bool, bool, bool, bool,
+                         bool emitGraphOptimizeRemarks = false);
 
 } // namespace triton
 } // namespace mlir
@@ -99,12 +100,14 @@ public:
   TritonToLinalgPass() = default;
 
   TritonToLinalgPass(bool globalKernel, bool namedOps, bool enableNd2nzOnVector,
-                     bool enableSelectAnalysis, bool compileOn91095) {
+                     bool enableSelectAnalysis, bool compileOn91095,
+                     bool emitGraphOptimizeRemarks) {
     this->globalKernel = globalKernel;
     this->namedOps = namedOps;
     this->enableNd2nzOnVector = enableNd2nzOnVector;
     this->enableSelectAnalysis = enableSelectAnalysis;
     this->compileOn91095 = compileOn91095;
+    this->emitGraphOptimizeRemarks = emitGraphOptimizeRemarks;
   };
 
   void getDependentDialects(DialectRegistry &registry) const override;

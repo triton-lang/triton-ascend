@@ -80,14 +80,19 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     pm.addPass(mlir::triton::createTritonToAnnotationPass());
   });
 
-  m.def("add_triton_to_linalg",
-        [](mlir::PassManager &pm, bool globalKernel, bool namedOps,
-           bool enableNd2nzOnVector, bool enableSelectAnalysis,
-           bool compileOn91095) {
-          pm.addPass(mlir::triton::createTritonToLinalgPass(
-              globalKernel, namedOps, enableNd2nzOnVector, enableSelectAnalysis,
-              compileOn91095));
-        });
+  m.def(
+      "add_triton_to_linalg",
+      [](mlir::PassManager &pm, bool globalKernel, bool namedOps,
+         bool enableNd2nzOnVector, bool enableSelectAnalysis,
+         bool compileOn91095, bool emitGraphOptimizeRemarks) {
+        pm.addPass(mlir::triton::createTritonToLinalgPass(
+            globalKernel, namedOps, enableNd2nzOnVector, enableSelectAnalysis,
+            compileOn91095, emitGraphOptimizeRemarks));
+      },
+      py::arg("pm"), py::arg("global_kernel"), py::arg("named_ops"),
+      py::arg("enable_nd2nz_on_vector"), py::arg("enable_select_analysis"),
+      py::arg("compile_on_910_95"),
+      py::arg("emit_graph_optimize_remarks") = false);
 
   m.def("add_merge_concat_load_buffer", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::cfg::createMergeConcatLoadBufferPass());

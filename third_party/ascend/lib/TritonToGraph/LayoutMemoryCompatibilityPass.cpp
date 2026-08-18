@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include "TritonToGraph/GraphOptimization.h"
 #include "TritonToGraph/LayoutMemoryOptimization.h"
 #include "TritonToGraph/LegacyMemoryAccess/ChunkCoalescing.h"
 #include "TritonToGraph/LegacyMemoryAccess/StridedAxisCoalescing.h"
@@ -47,8 +48,9 @@ class LayoutMemoryCompatibilityPass final
     : public PassWrapper<LayoutMemoryCompatibilityPass,
                          OperationPass<ModuleOp>> {
 public:
-  explicit LayoutMemoryCompatibilityPass(LayoutMemoryCompatibilityPhase phase)
-      : phase(phase) {}
+  explicit LayoutMemoryCompatibilityPass(LayoutMemoryCompatibilityPhase phase,
+                                         bool emitGraphOptimizeRemarks)
+      : phase(phase), emitGraphOptimizeRemarks(emitGraphOptimizeRemarks) {}
 
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(LayoutMemoryCompatibilityPass)
 
@@ -62,11 +64,20 @@ public:
   void runOnOperation() override {
     ModuleOp moduleOp = getOperation();
     switch (phase) {
-    case LayoutMemoryCompatibilityPhase::BeforeDiagonal:
+    case LayoutMemoryCompatibilityPhase::BeforeDiagonal: {
       // Preserve the original module-wide, no-op-on-bailout semantics.  This
       // phase intentionally has no cleanup pass.
+      const bool wasCoalesced = moduleOp->hasAttr("hacc.coalesce_factor");
       StridedAxisCoalescing::rewriteStridedAxisCoalesce(moduleOp);
+      if (emitGraphOptimizeRemarks && !wasCoalesced &&
+          moduleOp->hasAttr("hacc.coalesce_factor")) {
+        moduleOp.emitRemark()
+            << "applied graph optimization rule "
+            << static_cast<unsigned>(
+                   GraphOptimizationRuleId::StridedAxisCoalescing);
+      }
       return;
+    }
     case LayoutMemoryCompatibilityPhase::AfterDiagonal:
       // Keep the legacy order.  Chunk sees Axis's module attr and consumes the
       // static-grid hint before the greedy StridedLoadStore patterns run.
@@ -90,13 +101,16 @@ public:
 
 private:
   LayoutMemoryCompatibilityPhase phase;
+  bool emitGraphOptimizeRemarks;
 };
 
 } // namespace
 
 std::unique_ptr<OperationPass<ModuleOp>>
-createLayoutMemoryCompatibilityPass(LayoutMemoryCompatibilityPhase phase) {
-  return std::make_unique<LayoutMemoryCompatibilityPass>(phase);
+createLayoutMemoryCompatibilityPass(LayoutMemoryCompatibilityPhase phase,
+                                    bool emitGraphOptimizeRemarks) {
+  return std::make_unique<LayoutMemoryCompatibilityPass>(
+      phase, emitGraphOptimizeRemarks);
 }
 
 } // namespace cfg

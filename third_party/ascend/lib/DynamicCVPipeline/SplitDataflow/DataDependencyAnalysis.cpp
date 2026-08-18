@@ -164,11 +164,7 @@ bool DataDependencyAnalysisPass::isValid1DValueForDependency(
     mlir::Value value) {
   auto tensorTy = dyn_cast<TensorType>(value.getType());
   if (tensorTy && tensorTy.getRank() == SHAPE_1D_LENGTH) {
-    // Only 1-D tensors consumed by linalg.broadcast count; extract-consumed
-    // ones go through the scalar SSBuffer channel instead.
-    return llvm::all_of(value.getUsers(), [](mlir::Operation *u) {
-      return isa<linalg::BroadcastOp>(u);
-    });
+    return true;
   }
   return false;
 }

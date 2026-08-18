@@ -59,6 +59,7 @@
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HFusion/IR/HFusion.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 namespace TTOpConverters {
 using namespace mlir;
@@ -197,9 +198,38 @@ LogicalResult PreciseDivConverter::matchAndRewrite(
   return success();
 }
 
+// Return true if 'op' is enclosed by an explicit SIMT scope
+// (scope::ScopeOp with vector_mode = "simt").
+//
+// The whole ancestor chain is walked, so the scope does NOT need to be the
+// direct parent: 'op' may be nested under intermediate ops (e.g. scf.if /
+// scf.for) inside the scope. Every enclosing scope is inspected too, so a
+// select inside an inner scope that is itself nested in an outer SIMT scope
+// is also rejected.
+static bool isInsideSimtScope(Operation *op) {
+  for (Operation *curr = op->getParentOp(); curr; curr = curr->getParentOp()) {
+    auto scopeOp = dyn_cast<scope::ScopeOp>(curr);
+    if (!scopeOp) {
+      continue;
+    }
+    if (auto vecMode = scopeOp->getAttrOfType<StringAttr>("vector_mode");
+        vecMode && vecMode.getValue() == "simt")
+      return true;
+  }
+  return false;
+}
+
 LogicalResult
 SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
                                      PatternRewriter &rewriter) const {
+  // Do not rewrite masked selects inside an explicit SIMT scope: the SIMT
+  // lowering path must see the original select, and the extract/insert slice
+  // materialization is a SIMD-side optimization.
+  if (isInsideSimtScope(op)) {
+    return rewriter.notifyMatchFailure(
+        op, "Select inside an explicit SIMT scope is not canonicalized");
+  }
+
   auto loc = op.getLoc();
 
   // 0. Shortcut for scalars and bool type

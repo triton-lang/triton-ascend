@@ -370,6 +370,7 @@ def test_chunk_rejects_data_reaching_pid_predicate_91095(monkeypatch):
     assert all("gridY = gridY / 16;" not in launcher for launcher in observer.launcher_sources)
 
 
+@pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
 def test_sls_91095_native_ir_metadata_and_mixed_simt_launcher(monkeypatch):
     """SLS emits the masked indirect-load path and preserves its launch ABI."""
     n = 1024

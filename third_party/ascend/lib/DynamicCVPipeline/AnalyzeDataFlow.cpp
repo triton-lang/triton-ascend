@@ -53,6 +53,8 @@ void AnalyzeDataFlowPass::runOnOperation() {
 
   pm.addPass(createAnalyzeCubeContolFLowInputChainPass());
 
+  pm.addPass(createAnalyzeWhileConditionArgsPass());
+
   if (failed(runPipeline(pm, module))) {
     if (!CVPipeline::hasFallbackAttr(module)) {
       LDBG("Pass failed; fallback to compilation without dynamic CV pipeline.");
@@ -76,6 +78,7 @@ void registerAnalyzeDataFlowPasses() {
   registerPass(createAnalyzeFlagPass);
   registerPass(createAnalyzeScopePass);
   registerPass(createAnalyzeDataFlowPass);
+  registerPass(createAnalyzeWhileConditionArgsPass);
   registerPass(createAnalyzeCubeContolFLowInputChainPass);
 }
 

@@ -110,6 +110,27 @@ public:
   }
 };
 
+// Pass for analyzing whether an scf.while condition depends on non-scalar
+// (tensor) data through its loop-carried arg update chain
+class AnalyzeWhileConditionArgsPass
+    : public PassWrapper<AnalyzeWhileConditionArgsPass,
+                         OperationPass<ModuleOp>> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(AnalyzeWhileConditionArgsPass)
+
+  AnalyzeWhileConditionArgsPass() = default;
+
+  void runOnOperation() override;
+
+  llvm::StringRef getArgument() const override {
+    return "analyze-while-condition-args";
+  }
+  llvm::StringRef getDescription() const override {
+    return "Analyze whether scf.while condition args are updated with "
+           "non-scalar data";
+  }
+};
+
 // Pass for analyzing cube control flow input chain
 class AnalyzeCubeControlFlowInputChainPass
     : public PassWrapper<AnalyzeCubeControlFlowInputChainPass,
@@ -137,6 +158,7 @@ std::unique_ptr<OperationPass<ModuleOp>>
 createAnalyzeCubeContolFLowInputChainPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeDataFlowPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeScopePass();
+std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeWhileConditionArgsPass();
 
 void registerAnalyzeDataFlowPasses();
 

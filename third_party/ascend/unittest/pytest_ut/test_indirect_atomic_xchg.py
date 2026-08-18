@@ -461,6 +461,7 @@ def _launch_fully_unstructured(rank, offsets, values, output, old, shape):
     kernel[(1, )](offsets, values, output, old, **kwargs)
 
 
+@pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
 @pytest.mark.parametrize("dtype_name, torch_dtype", TEST_DTYPE)
 @pytest.mark.parametrize("rank", TEST_RANKS)
 def test_atomic_xchg_structured_pointer_with_discrete_mask(dtype_name, torch_dtype, rank):

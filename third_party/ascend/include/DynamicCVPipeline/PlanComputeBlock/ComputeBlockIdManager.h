@@ -25,6 +25,7 @@
 
 #include <optional>
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/LogicalResult.h"
@@ -54,6 +55,7 @@ public:
   llvm::LogicalResult inheritFromParent(Block *block);
 
   llvm::SmallVector<Operation *> getOpsByBlockId(int blockId) const;
+  llvm::ArrayRef<Operation *> getOpsRefByBlockId(int blockId) const;
 
   // Get operations that share the same block_id AND mlir block of op
   llvm::SmallVector<Operation *> getOpsInSameBlock(Operation *op) const;

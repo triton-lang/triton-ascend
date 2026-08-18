@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include <algorithm>
 #include <string_view>
 #include <utility>
 
@@ -208,8 +209,10 @@ struct GroupAdjacencyGraph {
   SmallVector<int> groupIds;
   SmallVector<SmallVector<unsigned>> succs;
   SmallVector<unsigned> inDeg;
+  ComputeBlockIdManager &bm;
   GroupAdjacencyGraph(const BlockOpGraph &g,
-                      const DenseMap<Operation *, int> &opBlockId);
+                      const DenseMap<Operation *, int> &opBlockId,
+                      ComputeBlockIdManager &bm);
   llvm::FailureOr<SmallVector<int>> computeTopologicalOrder();
 };
 
@@ -221,8 +224,9 @@ struct GroupAdjacencyGraph {
  * dependencies between those groups.
  */
 GroupAdjacencyGraph::GroupAdjacencyGraph(
-    const BlockOpGraph &g, const DenseMap<Operation *, int> &opBlockId)
-    : block(g.block) {
+    const BlockOpGraph &g, const DenseMap<Operation *, int> &opBlockId,
+    ComputeBlockIdManager &bm)
+    : block(g.block), bm(bm) {
   // 1. Collect distinct group IDs while preserving the first-appearance order.
   DenseSet<int> seenIds;
   for (Operation *op : g.ops) {
@@ -279,11 +283,38 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
   SmallVector<unsigned> ready; // Nodes with in-degree 0.
   unsigned n = groupIds.size();
 
-  for (unsigned i = 0; i < n; ++i) {
-    if (inDeg[i] == 0) {
+  SmallVector<unsigned> startingVectorBlocks;
+  for (auto [i, groupId] : llvm::enumerate(groupIds)) {
+    if (inDeg[i] != 0) {
+      continue;
+    }
+    auto ops = bm.getOpsRefByBlockId(groupId);
+    if (ops.empty() ||
+        getCoreTypeOfSimpleOpOrCf(ops.front()) == mlir::CVPipeline::CUBE_ONLY) {
       ready.push_back(i);
+    } else {
+      startingVectorBlocks.push_back(i);
     }
   }
+  std::stable_partition(startingVectorBlocks.begin(),
+                        startingVectorBlocks.end(), [this](unsigned idx) {
+                          const auto blockId = groupIds[idx];
+                          const auto ops = bm.getOpsRefByBlockId(blockId);
+                          auto computeOpCnt = 0;
+                          for (auto op : ops) {
+                            if (isTensorComputeOp(op)) {
+                              computeOpCnt++;
+                              LOG_DEBUG("Tensor compute op: " << *op);
+                            } else {
+                              LOG_DEBUG("Not tensor compute op: " << *op);
+                            }
+                          }
+                          LOG_DEBUG("Summary: group id "
+                                    << blockId
+                                    << " compute ops: " << computeOpCnt);
+                          return computeOpCnt > 1;
+                        });
+  ready.append(startingVectorBlocks);
 
   while (!ready.empty()) {
     auto cur = ready.pop_back_val();
@@ -330,9 +361,10 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
 // Stable sort ops based on their group orders
 static llvm::FailureOr<SmallVector<Operation *>>
 buildReorderedOps(const BlockOpGraph &graph,
-                  const DenseMap<Operation *, int> &opBlockId) {
+                  const DenseMap<Operation *, int> &opBlockId,
+                  ComputeBlockIdManager &bm) {
   SmallVector<Operation *> reordered;
-  GroupAdjacencyGraph adjacencyGraph{graph, opBlockId};
+  GroupAdjacencyGraph adjacencyGraph{graph, opBlockId, bm};
   auto groupOrderResult = adjacencyGraph.computeTopologicalOrder();
   if (llvm::failed(groupOrderResult)) {
     return llvm::failure();
@@ -380,7 +412,7 @@ reorderOpsInBlock(Block &block, const MemoryDependenceGraph &memGraph,
     LOG_DEBUG("  Op: " << *op << ", opBlockId = " << opBlockId[op] << "\n");
   }
 
-  const auto reorderedRes = buildReorderedOps(graph, opBlockId);
+  const auto reorderedRes = buildReorderedOps(graph, opBlockId, bm);
   if (failed(reorderedRes)) {
     return failure();
   }

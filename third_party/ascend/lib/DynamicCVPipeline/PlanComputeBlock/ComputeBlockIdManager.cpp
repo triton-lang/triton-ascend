@@ -105,8 +105,8 @@ void ComputeBlockIdManager::updateBlockId(Operation *op, int blockId) {
   blockIdToOps[blockId].push_back(op);
 }
 
-llvm::SmallVector<Operation *>
-ComputeBlockIdManager::getOpsByBlockId(int blockId) const {
+llvm::ArrayRef<Operation *>
+ComputeBlockIdManager::getOpsRefByBlockId(int blockId) const {
   if (blockId == -1) {
     return {};
   }
@@ -115,7 +115,13 @@ ComputeBlockIdManager::getOpsByBlockId(int blockId) const {
   if (it == blockIdToOps.end()) {
     return {};
   }
-  return llvm::SmallVector<Operation *>(it->second.begin(), it->second.end());
+  return it->second;
+}
+
+llvm::SmallVector<Operation *>
+ComputeBlockIdManager::getOpsByBlockId(int blockId) const {
+  auto ref = getOpsRefByBlockId(blockId);
+  return {ref.begin(), ref.end()};
 }
 
 llvm::SmallVector<Operation *>

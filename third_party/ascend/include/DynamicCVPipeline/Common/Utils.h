@@ -28,6 +28,7 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Casting.h"
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -288,6 +289,26 @@ inline Operation *getLoopCarriedDefOp(Value value, Block *block) {
     return yieldOperand->get().getDefiningOp();
   }
   return nullptr;
+}
+
+inline bool isTensorComputeOp(Operation *op) {
+  if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
+    if (linalg::isaCopyOpInterface(linalgOp))
+      return false;
+    auto genericOp = dyn_cast<linalg::GenericOp>(op);
+    if (genericOp && linalg::isaBroadcastOpInterface(genericOp).has_value())
+      return false;
+    if (isa<linalg::FillOp>(op))
+      return false;
+    return true;
+  }
+
+  if (op->hasTrait<mlir::OpTrait::Elementwise>()) {
+    return llvm::any_of(op->getResultTypes(),
+                        [](Type t) { return isa<RankedTensorType>(t); });
+  }
+
+  return false;
 }
 
 } // namespace CVPipeline

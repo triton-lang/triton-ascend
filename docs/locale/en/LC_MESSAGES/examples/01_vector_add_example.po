@@ -1,0 +1,67 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:21+0000\n"
+"PO-Revision-Date: 2026-08-11 02:21+0000\n"
+
+"X-Source-Commit: 94d1ff20b9ad348bc268e8108c83a33edf44ae50\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "This is a simple example that demonstrates how to use the Vector API to perform vector addition operations. The example creates two integer arrays and uses the Vector API to add their corresponding elements together, storing the result in a third array."
+
+msgid "向量相加 （Vector Addition）"
+msgstr "Vector Addition"
+
+msgid "在本节中，我们将使用 Triton 编写一个简单的向量相加的程序。 在此过程中，你会学习到："
+msgstr "In this section, we will use Triton to write a simple vector addition program. Along the way, you will learn:"
+
+msgid "Triton 的基本编程模式。"
+msgstr "Triton's basic programming model."
+
+msgid "用于定义Triton内核的`triton.jit`装饰器（decorator）。"
+msgstr "The `triton.jit` decorator used to define Triton kernels."
+
+msgid "计算内核:"
+msgstr "Compute kernel:"
+
+msgid "import torch\\n"
+msgstr "import torch"
+
+msgid "创建一个辅助函数用于："
+msgstr "Create a helper function to:"
+
+msgid "生成 z 张量；"
+msgstr "Generate the z tensor."
+
+msgid "用适当的 grid/block sizes 将上述内核加入队列。"
+msgstr "Enqueue the above kernel with appropriate grid/block sizes."
+
+msgid "def add(x: torch.Tensor, y: torch.Tensor):\\n"
+msgstr "def add(x: torch.Tensor, y: torch.Tensor):"
+
+msgid "使用上述函数计算两个 `torch.tensor` 对象的 element-wise sum，并测试其正确性："
+msgstr "Use the above function to compute the element-wise sum of two `torch.tensor` objects, and test its correctness:"
+
+msgid "torch.manual_seed(0)\\n"
+msgstr "torch.manual_seed(0)"
+
+msgid "Out:"
+msgstr "Out:"
+
+msgid "tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')\\n"
+msgstr "tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')"
+
+msgid "\"The maximum difference between torch and triton is 0.0\" 表示Triton和PyTorch的输出结果一致。"
+msgstr "\"The maximum difference between torch and triton is 0.0\" indicates that the outputs of Triton and PyTorch are identical."

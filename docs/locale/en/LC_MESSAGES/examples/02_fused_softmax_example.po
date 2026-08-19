@@ -1,0 +1,82 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:21+0000\n"
+"PO-Revision-Date: 2026-08-11 02:21+0000\n"
+
+"X-Source-Commit: c401f5682921c7814c9b783fd2a12d1cff572210\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "Fused Softmax Example"
+
+msgid "融合 Softmax （Fused Softmax）"
+msgstr "Fused Softmax"
+
+msgid "在本节中，我们将使用 Triton 编写一个融合的 softmax 操作的程序。 在此过程中，你会学习到："
+msgstr "In this section, we will use Triton to write a program for a fused softmax operation. Along the way, you will learn:"
+
+msgid "内核融合对于带宽受限操作的优势。"
+msgstr "The advantage of kernel fusion for bandwidth-bound operations."
+
+msgid "Triton 中缩减操作。"
+msgstr "Reduction operations in Triton."
+
+msgid "使用原生 PyTorch 对 X 逐行进行 Softmax 计算"
+msgstr "Performing row-wise Softmax computation on X using native PyTorch."
+
+msgid "import torch\\n"
+msgstr "import torch"
+
+msgid "内核融合的目的"
+msgstr "The purpose of kernel fusion."
+
+msgid "当在 PyTorch 中以原生方式实现时，计算`y=naive_softmax(x)`需要从 DRAM 中读取 5MN+2M 个元素，并写回 3MN+2M 个元素。显然这是非常低效的；我们更希望使用一个自定义的“融合”内核，它只需读取一次 x，并在芯片上完成所有必要的计算。 这样一来只需读取和写回 2MN 个字节，因此我们可以期望理论上的加速比大约为 4 倍（即 (8MN+4M)/2MN）。"
+msgstr "When implemented natively in PyTorch, computing `y=naive_softmax(x)` requires reading 5MN+2M elements from DRAM and writing back 3MN+2M elements. This is clearly very inefficient; we would prefer to use a custom \"fused\" kernel that reads x only once and performs all necessary computations on-chip. This way, only 2MN bytes need to be read and written back, so we can expect a theoretical speedup of approximately 4x (i.e., (8MN+4M)/2MN)."
+
+msgid "`torch.jit.script`旨在自动执行这种“内核融合”，但它仍然远未达到理想状态。"
+msgstr "`torch.jit.script` is intended to automatically perform this kind of \"kernel fusion,\" but it is still far from ideal."
+
+msgid "计算内核"
+msgstr "Compute kernel."
+
+msgid "softmax 内核工作原理如下：每个计算单元（program）以程序数量为步长加载输入矩阵X的一组行数据，执行归一化处理后，将结果写入输出矩阵Y。 注意：Triton 的一个重要限制是每个块必须具有 2 的幂次数的元素，因此，如果我们要处理任意可能的输入形状，需要在内部「填充」每一行，并确保内存操作正确性。"
+msgstr "The softmax kernel works as follows: each compute unit (program) loads a set of rows from the input matrix X with a stride equal to the number of programs, performs normalization, and writes the results to the output matrix Y. Note: An important limitation of Triton is that each block must have a power-of-two number of elements, so if we want to handle arbitrary possible input shapes, we need to internally \"pad\" each row and ensure memory operation correctness."
+
+msgid "@triton.jit\\n"
+msgstr "@triton.jit"
+
+msgid "我们可以创建一个辅助函数，该函数能够将核函数及其元参数加入执行队列，以处理任意给定的输入张量。"
+msgstr "We can create a helper function that enqueues the kernel function and its metadata parameters into the execution queue, so as to handle any given input tensor."
+
+msgid "kernels = {}\\n"
+msgstr "kernels = {}"
+
+msgid "单元测试"
+msgstr "Unit test"
+
+msgid "需要在一个具有不规则行和列数的矩阵上测试处理好的内核，此举可以验证Padding机制是否起作用"
+msgstr "We need to test the processed kernel on a matrix with irregular numbers of rows and columns, which can verify whether the Padding mechanism is working."
+
+msgid "torch.manual_seed(0)\\n"
+msgstr "torch.manual_seed(0)"
+
+msgid "Out:"
+msgstr "Out:"
+
+msgid "tensor([[0.0002, 0.0017, 0.0009,  ..., 0.0009, 0.0013, 0.0073],\\n"
+msgstr "tensor([[0.0002, 0.0017, 0.0009,  ..., 0.0009, 0.0013, 0.0073],"
+
+msgid "\"The maximum difference between torch and triton is 1.4901161193847656e-08\" 表示Triton和PyTorch的输出结果非常接近，肉眼不可区分。"
+msgstr "\"The maximum difference between torch and triton is 1.4901161193847656e-08\" indicates that the outputs of Triton and PyTorch are very close and indistinguishable to the naked eye."

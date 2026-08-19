@@ -79,8 +79,8 @@ for cfg in configs:
         {
             "config": cfg["name"],
             "ttir": ttir,
-            # n_elements 是 signature 中的第 4 个参数，对应 TTIR 里的 %arg3。
-            # pid_x 给 tl.program_id(0) 一个静态估算值。
+            # n_elements is the 4th argument in the signature, corresponding to %arg3 in TTIR.
+            # pid_x provides a static estimated value for tl.program_id(0).
             "arg_bindings": f"arg3={n_elements},pid_x=0",
         }
     )

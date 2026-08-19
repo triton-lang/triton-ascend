@@ -103,10 +103,10 @@ def embedding_kernel(
 ):
     pid = tl.program_id(0)
 
-    # 加载索引
+    # Load indices
     indices = tl.load(indices_ptr + pid * 16 + tl.arange(0, 16))
 
-    # 使用 index_select 批量读取嵌入向量
+    # Use index_select to read embedding vectors in batch
     embeddings = libdevice.index_select_simd(
         src=embed_ptr,
         dim=0,
@@ -116,7 +116,7 @@ def embedding_kernel(
         read_shape=(-1, embed_dim)
     )
 
-    # 存储结果
+    # Store the result
     offsets = tl.arange(0, 16)[:, None] * embed_dim + tl.arange(0, embed_dim)[None, :]
     tl.store(output_ptr + pid * 16 * embed_dim + offsets, embeddings)
 ```
@@ -129,14 +129,14 @@ def embedding_kernel(
 **与常规 load 的差异：**
 
 ```python
-## 常规 load 方式（低效）
+## Regular load approach (inefficient)
 for i in range(len(indices)):
     idx = tl.load(indices_ptr + i)
     offsets = idx * stride + tl.arange(0, size)
     data = tl.load(src_ptr + offsets)
-    # ... 处理 data
+    # ... process data
 
-## index_select 方式（高效）
+## index_select approach (efficient)
 indices = tl.load(indices_ptr + tl.arange(0, len(indices)))
 data = libdevice.index_select_simd(
     src=src_ptr,
@@ -146,7 +146,7 @@ data = libdevice.index_select_simd(
     src_offset=(-1, 0),
     read_shape=(-1, size)
 )
-## 一次性获取所有数据
+## Get all data at once
 ```
 
 ## 3 与GPU差异

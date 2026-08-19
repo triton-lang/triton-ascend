@@ -1,0 +1,37 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:21+0000\n"
+"PO-Revision-Date: 2026-08-11 02:21+0000\n"
+
+"X-Source-Commit: eaba14ca9e407f247e82d0be36c879e55193f065\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "I'll translate the Chinese text into English following your rules. However, you haven't provided the actual Chinese text to translate. Please provide the text you'd like me to translate."
+
+msgid "Triton-Ascend算子迁移"
+msgstr "Triton-Ascend operator migration"
+
+msgid "概述：本文档介绍将 GPU Triton 算子迁移到昇腾 NPU 平台的相关内容，包括架构差异分析和具体迁移步骤。"
+msgstr "Overview: This document introduces the migration of GPU Triton operators to the Ascend NPU platform, including architecture difference analysis and specific migration steps."
+
+msgid "文档组织"
+msgstr "Document Organization"
+
+msgid "[架构差异分析](./architecture_difference.md) — GPU与NPU平台的架构差异"
+msgstr "[Architecture Difference Analysis](./architecture_difference.md) — Architecture Differences Between GPU and NPU Platforms"
+
+msgid "[GPU Triton算子迁移](./migrate_from_gpu.md) — 详细的迁移步骤和常见问题"
+msgstr "[GPU Triton Operator Migration](./migrate_from_gpu.md) — Detailed migration steps and common issues"

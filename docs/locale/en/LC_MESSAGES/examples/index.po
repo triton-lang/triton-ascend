@@ -1,0 +1,88 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:21+0000\n"
+"PO-Revision-Date: 2026-08-11 02:21+0000\n"
+
+"X-Source-Commit: ab4120690f362c8636887544c380ac2ab3343bdd\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "I'm ready to translate the Chinese text into English. However, I notice that you mentioned \"(File: index)\" but didn't provide the actual Chinese text to translate. Please provide the Chinese content you'd like me to translate, and I'll follow all the rules you've specified."
+
+msgid "Tutorials"
+msgstr "Tutorials"
+
+msgid "Triton 示例列表"
+msgstr "Triton Example List"
+
+msgid "示例"
+msgstr "Example"
+
+msgid "简要说明"
+msgstr "Brief description"
+
+msgid "[01_vector_add_example](./01_vector_add_example.md)"
+msgstr "[01_vector_add_example](./01_vector_add_example.md)"
+
+msgid "简单加法示例"
+msgstr "Simple addition example"
+
+msgid "[02_fused_softmax_example](./02_fused_softmax_example.md)"
+msgstr "[02_fused_softmax_example](./02_fused_softmax_example.md)"
+
+msgid "Softmax 融合算子示例"
+msgstr "Softmax fusion operator example"
+
+msgid "[03_layer_norm_example](./03_layer_norm_example.md)"
+msgstr "[03_layer_norm_example](./03_layer_norm_example.md)"
+
+msgid "Layer Normalization 示例"
+msgstr "Layer Normalization Example"
+
+msgid "[04_fused_attention_example](./04_fused_attention_example.md)"
+msgstr "[04_fused_attention_example](./04_fused_attention_example.md)"
+
+msgid "Flash Attention v2 融合注意力算法示例"
+msgstr "Flash Attention v2 fused attention algorithm example"
+
+msgid "[05_matrix_multiplication_example](./05_matrix_multiplication_example.md)"
+msgstr "[05_matrix_multiplication_example](./05_matrix_multiplication_example.md)"
+
+msgid "矩阵乘法高效实现示例"
+msgstr "Efficient Implementation Example of Matrix Multiplication"
+
+msgid "[06_autotune_example](./06_autotune_example.md)"
+msgstr "[06_autotune_example](./06_autotune_example.md)"
+
+msgid "使用 Autotune 进行内核自动调优示例"
+msgstr "Example of Automatic Kernel Tuning Using Autotune"
+
+msgid "[07_accuracy_comparison_example](./07_accuracy_comparison_example.md)"
+msgstr "[07_accuracy_comparison_example](./07_accuracy_comparison_example.md)"
+
+msgid "精度比对示例"
+msgstr "Precision comparison example"
+
+msgid "[08_max_autotune_example](./08_max_autotune_example.md)"
+msgstr "[08_max_autotune_example](./08_max_autotune_example.md)"
+
+msgid "使用 max_autotune 进行内核自动调优示例"
+msgstr "Example of kernel auto-tuning using max_autotune"
+
+msgid "[09_costmodel_example](./09_costmodel_example.md)"
+msgstr "[09_costmodel_example](./09_costmodel_example.md)"
+
+msgid "Costmodel 端到端预测示例"
+msgstr "End-to-End Prediction Example for Costmodel"

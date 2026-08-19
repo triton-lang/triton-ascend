@@ -1,0 +1,79 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:21+0000\n"
+"PO-Revision-Date: 2026-08-11 02:21+0000\n"
+
+"X-Source-Commit: efbacbf02583c8897f237acab3cf3b6bed929ebc\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "成本模型示例"
+
+msgid "Costmodel 端到端示例"
+msgstr "End-to-End Example of Cost Model"
+
+msgid "本示例展示 costmodel 后端的基本调用流程："
+msgstr "This example demonstrates the basic calling flow of the costmodel backend."
+
+msgid "使用 Triton 前端算子生成 TTIR；"
+msgstr "Use the Triton frontend operator to generate TTIR."
+
+msgid "为多个候选 config 构造 `costmodel_bench` 输入；"
+msgstr "Construct `costmodel_bench` inputs for multiple candidate configs;"
+
+msgid "调用 `costmodel_bench` 得到每个 config 的预测耗时。"
+msgstr "Call `costmodel_bench` to obtain the predicted latency for each config."
+
+msgid "这个流程适合在 autotune 前快速筛掉预计性能较差的 config。示例只使用向量加法 kernel，便于聚焦 costmodel 的输入和返回值。"
+msgstr "This process is suitable for quickly filtering out configs with expected poor performance before autotune. The example only uses a vector addition kernel to focus on the inputs and return values of the costmodel."
+
+msgid "完整示例"
+msgstr "Complete example"
+
+msgid "将下面的代码保存为 `costmodel_example.py` 后运行："
+msgstr "Save the following code as `costmodel_example.py` and run it:"
+
+msgid "from __future__ import annotations\\n"
+msgstr "from __future__ import annotations"
+
+msgid "示例输出"
+msgstr "Example output"
+
+msgid "不同版本的 costmodel 参数可能会使具体数值略有不同，但输出结构类似："
+msgstr "Cost model parameters in different versions may cause slight variations in specific values, but the output structure is similar:"
+
+msgid "block256: 0.098 us\\n"
+msgstr "block256: 0.098 us"
+
+msgid "`costmodel_bench` 的返回值是一个字典，key 为传入的 `config`，value 为预测耗时，单位是微秒。上层 autotune 逻辑可以按 value 排序，优先保留预测更快的 config。"
+msgstr "The return value of `costmodel_bench` is a dictionary, where the key is the passed-in `config` and the value is the predicted latency in microseconds. The upper-level autotune logic can sort by value, prioritizing the retention of configs with faster predictions."
+
+msgid "关键点说明"
+msgstr "Key Points Explanation"
+
+msgid "`ASTSource + ast_to_ttir` 只生成 TTIR，不会真实编译或启动 kernel。"
+msgstr "`ASTSource + ast_to_ttir` only generates TTIR and does not actually compile or launch the kernel."
+
+msgid "`config` 会影响 `tl.constexpr`，例如 `BLOCK_SIZE`，因此每个候选 config 都需要生成各自的 TTIR。"
+msgstr "`config` affects `tl.constexpr`, such as `BLOCK_SIZE`, so each candidate config requires generating its own TTIR."
+
+msgid "`costmodel_bench` 接收的每个元素至少包含 `config` 和 `ttir`，也可以附带 `arg_bindings`。"
+msgstr "Each element received by `costmodel_bench` must contain at least `config` and `ttir`, and may also include `arg_bindings`."
+
+msgid "`arg_bindings` 用于把运行时整数参数绑定到 TTIR 中的 `%argN`。例如本例中 `n_elements=98432` 对应 `arg3=98432`。"
+msgstr "`arg_bindings` is used to bind runtime integer parameters to `%argN` in TTIR. For example, in this case, `n_elements=98432` corresponds to `arg3=98432`."
+
+msgid "如果 kernel 中使用 `tl.program_id(0)`，通常需要传入 `pid_x=0`。如果还使用 `tl.num_programs(0)`，可额外传入 `num_programs_x=...`。"
+msgstr "If the kernel uses `tl.program_id(0)`, you typically need to pass `pid_x=0`. If it also uses `tl.num_programs(0)`, you can additionally pass `num_programs_x=...`."

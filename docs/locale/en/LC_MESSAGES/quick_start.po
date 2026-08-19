@@ -1,0 +1,137 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:22+0000\n"
+"PO-Revision-Date: 2026-08-11 02:22+0000\n"
+
+"X-Source-Commit: 8d44537b2e6d1005fc02d7ca79306d0ce270b92a\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr ""
+"# Quick Start Guide\n"
+"\n"
+"Welcome to the Quick Start Guide! This guide will help you quickly get started with our product. Please follow the steps below to begin your journey.\n"
+"\n"
+"## Step 1: Installation\n"
+"\n"
+"First, you need to install the software. Run the following command in your terminal:\n"
+"\n"
+"```bash\n"
+"npm install your-package-name\n"
+"```\n"
+"\n"
+"## Step 2: Configuration\n"
+"\n"
+"After installation, you need to configure the settings. Create a configuration file and add the necessary parameters:\n"
+"\n"
+"```javascript\n"
+"const config = {\n"
+"  apiKey: \"your-api-key\",\n"
+"  endpoint: \"https://api.example.com\",\n"
+"  retryCount: 3\n"
+"};\n"
+"```\n"
+"\n"
+"## Step 3: Usage\n"
+"\n"
+"Once configured, you can start using the product. Here is a basic example:\n"
+"\n"
+"```python\n"
+"from your_package import Client\n"
+"\n"
+"client = Client(api_key=\"your-api-key\")\n"
+"result = client.query(\"Hello, world!\")\n"
+"print(result)\n"
+"```\n"
+"\n"
+"## Step 4: Troubleshooting\n"
+"\n"
+"If you encounter any issues, please refer to the FAQ section or contact our support team.\n"
+"\n"
+"---\n"
+"\n"
+"We hope you enjoy using our product! For more detailed information, please check the full documentation.\n"
+
+msgid "快速入门"
+msgstr "Quick Start"
+
+msgid "项目介绍"
+msgstr "Project Introduction"
+
+msgid "**Triton-Ascend**是适配华为Ascend处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对昇腾NPU特性进行深度优化，能够帮助用户在昇腾平台上快速开发和部署高性能计算任务。"
+msgstr "**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors, used for efficient kernel auto-tuning, operator compilation, and deployment. By being compatible with Triton core syntax and performing deep optimization for Ascend NPU features, it helps users quickly develop and deploy high-performance computing tasks on the Ascend platform."
+
+msgid "本文以**Ubuntu 22.04**环境下通过软件包部署方式在线安装并运行向量加法实例为例，指导用户快速上手使用**Triton-Ascend**。如需体验更多安装方式请阅读[安装指南](./installation_guide.md)文档。"
+msgstr "This document uses the deployment of a vector addition example via software package installation in an **Ubuntu 22.04** environment as an example to guide users in quickly getting started with **Triton-Ascend**. For more installation methods, please refer to the [Installation Guide](./installation_guide.md) document."
+
+msgid "环境准备"
+msgstr "Environment Preparation"
+
+msgid "**硬件要求**"
+msgstr "**Hardware Requirements**"
+
+msgid "支持的操作系统：linux（aarch64/x86_64）"
+msgstr "Supported operating systems: Linux (aarch64/x86_64)"
+
+msgid "支持的Ascend产品：Atlas A2/A3/950系列"
+msgstr "Supported Ascend products: Atlas A2/A3/950 series"
+
+msgid "最小硬件配置：单卡32GB内存（推荐）"
+msgstr "Minimum hardware configuration: single card with 32GB memory (recommended)"
+
+msgid "**软件依赖**"
+msgstr "**Software Dependencies**"
+
+msgid "确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》 完成驱动与固件安装。"
+msgstr "Determine the CANN, Python, and TorchNPU software versions and install them. For the driver and firmware installation, refer to the \"[CANN Quick Installation](https://www.hiascend.com/cann/download)\" guide on the Ascend community official website."
+
+msgid "CANN版本：9.1.0"
+msgstr "CANN version: 9.1.0"
+
+msgid "Python版本：python3.11"
+msgstr "Python version: python3.11"
+
+msgid "TorchNPU版本：2.7.1.post8"
+msgstr "TorchNPU version: 2.7.1.post8"
+
+msgid "注：更多配套关系请参考[版本说明表](./release_note.md#version-compatibility-matrix)。"
+msgstr "Note: For more compatibility details, please refer to the [Version Compatibility Matrix](./release_note.md#version-compatibility-matrix)."
+
+msgid "快速安装"
+msgstr "Quick Start Installation"
+
+msgid "pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi\\n"
+msgstr "pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi"
+
+msgid "快速开始"
+msgstr "Quick Start"
+
+msgid "**运行tutorials中向量加法实例验证结果**"
+msgstr "**Run the vector addition example in tutorials to verify the results**"
+
+msgid "向量加法实例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py) 通过对比Triton算子与PyTorch原生计算的输出结果，证明昇腾NPU设备可正确调用Triton算子并保证计算精度。"
+msgstr "Vector addition example: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py) demonstrates that the Ascend NPU device can correctly invoke Triton operators and ensure computational accuracy by comparing the output results of Triton operators with those of PyTorch native computation."
+
+msgid "⚠️ 下述命令需在 bash 环境下执行。若使用 POSIX sh，请将 `source` 替换为 `.`。"
+msgstr "⚠️ The following commands need to be executed in a bash environment. If using POSIX sh, replace `source` with `.`."
+
+msgid "# Set the CANN environment variables (using the root user's default installation path `/usr/local/Ascend` as an example)\\n"
+msgstr "# Set the CANN environment variables (using the root user's default installation path `/usr/local/Ascend` as an example)"
+
+msgid "观察到类似的输出即说明环境配置正确。"
+msgstr "Observing similar output indicates that the environment configuration is correct."
+
+msgid "tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')\\n"
+msgstr "tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')"

@@ -28,38 +28,38 @@ import triton.language as tl
 
 @triton.jit
 def triton_dot_2_Bias(
-    output_ptr,   # 输出张量指针，形状 (A, C)
-    x_ptr,        # 输入张量 x 指针，形状 (A, B)
-    y_ptr,        # 输入张量 y 指针，形状 (B, C)
-    z_ptr,        # 偏置张量 z 指针，形状 (A, C)
-    A: tl.constexpr,  # 第一维度大小（batch / 行数）
-    B: tl.constexpr,  # 共享维度（x 的列数，y 的行数）
-    C: tl.constexpr   # 第二维度大小（列数）
+    output_ptr,   # Output tensor pointer, shape (A, C)
+    x_ptr,        # Input tensor x pointer, shape (A, B)
+    y_ptr,        # Input tensor y pointer, shape (B, C)
+    z_ptr,        # Bias tensor z pointer, shape (A, C)
+    A: tl.constexpr,  # Size of the first dimension (batch / number of rows)
+    B: tl.constexpr,  # Shared dimension (number of columns in x, number of rows in y)
+    C: tl.constexpr   # Size of the second dimension (number of columns)
 ):
-    # 创建索引向量
-    bidx = tl.arange(0, A)  # [0, 1, ..., A-1]，用于行维度
-    cidx = tl.arange(0, B)  # [0, 1, ..., B-1]，用于 x 的列 / y 的行
-    didx = tl.arange(0, C)  # [0, 1, ..., C-1]，用于列维度
+    # Create index vectors
+    bidx = tl.arange(0, A)  # [0, 1, ..., A-1], used for the row dimension
+    cidx = tl.arange(0, B)  # [0, 1, ..., B-1], used for x's columns / y's rows
+    didx = tl.arange(0, C)  # [0, 1, ..., C-1], used for the column dimension
 
-    # 构造 x 的线性索引：(A, B) -> 展平为 A*B
-    Xidx = bidx[:, None] * B + cidx[None, :]  # 广播形成 (A, B) 索引网格
+    # Construct linear indices for x: (A, B) -> flattened to A*B
+    Xidx = bidx[:, None] * B + cidx[None, :]  # Broadcast to form an (A, B) index grid
 
-    # 构造 y 的线性索引：(B, C) -> 展平为 B*C
-    Yidx = cidx[:, None] * C + didx[None, :]  # (B, C) 索引网格
+    # Construct linear indices for y: (B, C) -> flattened to B*C
+    Yidx = cidx[:, None] * C + didx[None, :]  # (B, C) index grid
 
-    # 构造 z 和 output 的线性索引：(A, C)
-    Zidx = bidx[:, None] * C + didx[None, :]  # (A, C) 索引网格
+    # Construct linear indices for z and output: (A, C)
+    Zidx = bidx[:, None] * C + didx[None, :]  # (A, C) index grid
 
-    # 从全局内存加载数据
-    X = tl.load(x_ptr + Xidx)  # 加载 (A, B) 子块
-    Y = tl.load(y_ptr + Yidx)  # 加载 (B, C) 子块
-    Z = tl.load(z_ptr + Zidx)  # 加载偏置 (A, C)
+    # Load data from global memory
+    X = tl.load(x_ptr + Xidx)  # Load the (A, B) sub-block
+    Y = tl.load(y_ptr + Yidx)  # Load the (B, C) sub-block
+    Z = tl.load(z_ptr + Zidx)  # Load the bias (A, C)
 
-    # 执行矩阵乘法并加上偏置
-    ret = tl.dot(X, Y) + Z  # tl.dot 执行 (A, B) × (B, C) → (A, C)
+    # Perform matrix multiplication and add the bias
+    ret = tl.dot(X, Y) + Z  # tl.dot computes (A, B) × (B, C) → (A, C)
 
-    # 写回结果到全局内存
-    oidx = bidx[:, None] * C + didx[None, :]  # 与 Zidx 相同，可复用
+    # Write the result back to global memory
+    oidx = bidx[:, None] * C + didx[None, :]  # Same as Zidx, can be reused
     tl.store(output_ptr + oidx, ret)
 ```
 
@@ -69,12 +69,12 @@ def triton_dot_2_Bias(
 
 ```Python
 def torch_dot_Bias(x0, x1, bias):
-    """PyTorch 参考实现：执行矩阵乘法并加上偏置项。"""
+    """PyTorch reference implementation: performs matrix multiplication and adds the bias term."""
     res = torch.matmul(x0, x1) + bias
     return res
 
 def get_torch_typename(dtype):
-    """将字符串形式的数据类型映射为对应的 torch.dtype。"""
+    """Maps a string-form data type to the corresponding torch.dtype."""
     if dtype == 'float32':
         tyname = torch.float32
     elif dtype == 'int32':
@@ -96,7 +96,7 @@ def get_torch_typename(dtype):
     return tyname
 
 def generate_tensor(shape, dtype):
-    """根据指定形状和数据类型生成随机张量，适配不同数值类型的取值范围。"""
+    """Generates a random tensor with the given shape and dtype, adapted to the value range of different numeric types."""
     if dtype == 'float32' or dtype == 'float16' or dtype == 'bfloat16':
         return torch.randn(size=shape, dtype=eval('torch.' + dtype))
     elif dtype == 'int32' or dtype == 'int64' or dtype == 'int16':
@@ -109,7 +109,7 @@ def generate_tensor(shape, dtype):
         raise ValueError('Invalid parameter \"dtype\" is found : {}'.format(dtype))
 
 def validate_cmp(dtype, y_cal, y_ref):
-    """在 NPU 上比较 Triton 计算结果与 PyTorch 参考结果，按数据类型设置容差或严格相等。"""
+    """Compares the Triton result with the PyTorch reference on the NPU, setting tolerances or strict equality by dtype."""
     y_cal=y_cal.npu()
     y_ref=y_ref.npu()
     if dtype == 'float16':
@@ -131,46 +131,46 @@ def validate_cmp(dtype, y_cal, y_ref):
 使用 `pytest` 对 `triton_dot_2_Bias` 内核进行参数化功能验证，覆盖不同矩阵维度和数据类型组合。
 
 ```python
-# 测试用例配置：(A, B, C) 表示矩阵 x: (A,B), y: (B,C), bias/output: (A,C)
+# Test case configuration: (A, B, C) means matrix x: (A,B), y: (B,C), bias/output: (A,C)
 testlist = [
     (16, 16, 16),
 ]
 
-# 支持的数据类型列表（当前仅 float16）
+# List of supported data types (currently only float16)
 typelist = ['float16',]
 
 @pytest.mark.parametrize('A, B, C', testlist)
 @pytest.mark.parametrize('sigtype', typelist)
 def test_dot_2_Bias(sigtype, A, B, C):
-    """对 triton_dot_2_Bias 内核进行端到端功能测试。"""
+    """Performs an end-to-end functional test of the triton_dot_2_Bias kernel."""
     dtype = get_torch_typename(sigtype)
 
-    # 生成输入张量并移至 NPU
+    # Generate input tensors and move them to the NPU
     x0 = generate_tensor(shape=(A, B), dtype=sigtype).npu()
     x1 = generate_tensor(shape=(B, C), dtype=sigtype).npu()
 
-    # 偏置项统一用 float32 生成（避免整数偏置导致精度问题）
+    # The bias is always generated as float32 (to avoid precision issues with integer bias)
     if 'int' in sigtype:
         bias = generate_tensor(shape=(A, C), dtype='int32').npu()
-        # 整数输入需转为 float32 计算后再转回目标类型
+        # Integer inputs must be converted to float32 for computation, then converted back to the target type
         ans = torch_dot_Bias(x0.to(torch.float32), x1.to(torch.float32), bias.to(torch.float32)).to(dtype)
     else:
         bias = generate_tensor(shape=(A, C), dtype='float32').npu()
         ans = torch_dot_Bias(x0, x1, bias).to(eval(f"torch.{dtype}"))
 
-    # 初始化输出张量
+    # Initialize the output tensor
     output = torch.zeros((A, C), dtype=dtype).npu()
 
-    # 启动 Triton 内核（grid=(1,1,1)，单 block 执行）
+    # Launch the Triton kernel (grid=(1,1,1), executed with a single block)
     triton_dot_2_Bias[1, 1, 1](output, x0, x1, bias, A, B, C, debug=True)
 
-    # 验证结果正确性
+    # Verify the correctness of the result
     validate_cmp(sigtype, output, ans)
     print(f"Test matmul with dtype={sigtype}, shape=({A},{B},{C}) PASSED!")
 
 
 if __name__ == "__main__":
-    # 支持直接运行单个测试用例（便于调试）
+    # Supports directly running a single test case (for debugging convenience)
     test_dot_2_Bias("float16", 16, 16, 16)
 ```
 

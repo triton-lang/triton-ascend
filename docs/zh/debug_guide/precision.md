@@ -21,11 +21,11 @@ import triton.language as tl
 
 
 def test_vector_add(n, dtype):
-    # 1. 输入数据
+    # 1. Input data
     x = torch.randn(n, dtype=dtype, device="cpu")
     y = torch.randn(n, dtype=dtype, device="cpu")
 
-    # 2. 参考结果（PyTorch CPU）
+    # 2. Reference results (PyTorch CPU)
     torch_ref = x + y
 
     # 3. Triton kernel
@@ -43,7 +43,7 @@ def test_vector_add(n, dtype):
 
     triton_cal = triton_func(x, y)
 
-    # 4. 精度对比
+    # 4. Accuracy Comparison
     compare_precision(triton_cal.cpu(), torch_ref)
 ```
 
@@ -52,16 +52,16 @@ def test_vector_add(n, dtype):
 ```python
 def compare_precision(cal, ref):
     """
-    精度对比函数：根据数据类型选择合适的比对策略。
+    Precision comparison function: selects an appropriate comparison strategy based on the data type.
 
-    参数:
-        cal: 计算结果
-        ref: 参考结果
-        rtol: 相对误差容限
-        atol: 绝对误差容限
+    Args:
+        cal: Computed result
+        ref: Reference result
+        rtol: Relative error tolerance
+        atol: Absolute error tolerance
 
-    异常:
-        AssertionError: 精度不达标时抛出
+    Raises:
+        AssertionError: Raised when precision requirements are not met
     """
     assert cal.dtype == ref.dtype, f"dtype mismatch: {cal.dtype} vs {ref.dtype}"
     tensor_dtype = cal.dtype

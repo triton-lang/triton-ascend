@@ -17,27 +17,27 @@ import triton.language as tl
 
 
 @triton.jit
-def add_kernel(x_ptr,  # 指向第一个输入向量的指针。
-               y_ptr,  # 指向第二个输入向量的指针。
-               output_ptr,  # 指向输出向量的指针。
-               n_elements,  # 向量的大小。
-               BLOCK_SIZE: tl.constexpr,  # 每个程序应处理的元素数量。
-               # 注意：`constexpr` 将标记变量为常量。
+def add_kernel(x_ptr,  # Pointer to the first input vector.
+               y_ptr,  # Pointer to the second input vector.
+               output_ptr,  # Pointer to the output vector.
+               n_elements,  # Size of the vector.
+               BLOCK_SIZE: tl.constexpr,  # Number of elements each program should process.
+               # Note: `constexpr` marks the variable as a constant.
                ):
-    # 不同的数据由不同的“process”来处理，因此需要分配：
-    pid = tl.program_id(axis=0)  # 使用 1D 启动网格，因此轴为 0。
-    # 该程序将处理相对初始数据偏移的输入。
-    # 例如，如果有一个长度为 256, 块大小为 64 的向量，程序将各自访问 [0:64, 64:128, 128:192, 192:256] 的元素。
-    # 注意 offsets 是指针列表：
+    # Different data is handled by different "processes", so we need to allocate:
+    pid = tl.program_id(axis=0)  # Use a 1D launch grid, so axis is 0.
+    # This program will handle inputs relative to the initial data offset.
+    # For example, if there is a vector of length 256 with a block size of 64, the programs will each access elements [0:64, 64:128, 128:192, 192:256].
+    # Note that offsets is a list of pointers:
     block_start = pid * BLOCK_SIZE
     offsets = block_start + tl.arange(0, BLOCK_SIZE)
-    # 创建掩码以防止内存操作超出边界访问。
+    # Create a mask to prevent memory operations from accessing out of bounds.
     mask = offsets < n_elements
-    # 从 DRAM 加载 x 和 y，如果输入不是块大小的整数倍，则屏蔽掉任何多余的元素。
+    # Load x and y from DRAM, masking out any extra elements if the input is not a multiple of the block size.
     x = tl.load(x_ptr + offsets, mask=mask)
     y = tl.load(y_ptr + offsets, mask=mask)
     output = x + y
-    # 将 x + y 写回 DRAM。
+    # Write x + y back to DRAM.
     tl.store(output_ptr + offsets, output, mask=mask)
 ```
 
@@ -48,19 +48,19 @@ def add_kernel(x_ptr,  # 指向第一个输入向量的指针。
 
 ```Python
 def add(x: torch.Tensor, y: torch.Tensor):
-    # 需要预分配输出。
+    # The output needs to be pre-allocated.
     output = torch.empty_like(x)
     n_elements = output.numel()
-    # 启动网格表示并行运行的内核实例的数量。
-    # 可以是 Tuple[int]，也可以是 Callable(metaparameters) -> Tuple[int]。
-    # 在本case中，使用 1D 网格，其中大小是块的数量：
+    # The launch grid represents the number of kernel instances running in parallel.
+    # It can be a Tuple[int], or a Callable(metaparameters) -> Tuple[int].
+    # In this case, we use a 1D grid whose size is the number of blocks:
     grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
     # NOTE:
-    #  - 每个 torch.tensor 对象都会隐式转换为其第一个元素的指针。
-    #  - `triton.jit` 函数可以通过启动网格索引来获得可调用的 NPU 内核。
-    #  - 不要忘记以keywords的方式传递meta-parameters。
+    #  - Each torch.tensor object is implicitly converted to a pointer to its first element.
+    #  - `triton.jit` functions can be invoked through the launch grid index to obtain a callable NPU kernel.
+    #  - Do not forget to pass meta-parameters as keywords.
     add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
-    # 返回 z 的句柄。
+    # Return the handle of z.
     return output
 ```
 

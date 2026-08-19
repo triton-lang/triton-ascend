@@ -1,0 +1,574 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:21+0000\n"
+"PO-Revision-Date: 2026-08-11 02:21+0000\n"
+
+"X-Source-Commit: 128c94fa45f2dc7faf048d616c74ac47e15969a6\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "环境变量与编译器选项参考"
+
+msgid "环境变量与编译选项"
+msgstr "Environment Variables and Compiler Options"
+
+msgid "本文汇总 Triton-Ascend 中可由开发者显式控制的行为开关，包括运行前设置的环境变量，以及编译期通过 `triton.Config` 或 kernel launch meta-parameter 传入的 NPU 编译选项。"
+msgstr "This document summarizes the behavior switches in Triton-Ascend that can be explicitly controlled by developers, including environment variables set before runtime, and NPU compilation options passed in during the compilation phase via `triton.Config` or kernel launch meta-parameters."
+
+msgid "环境变量"
+msgstr "Environment variable"
+
+msgid "环境变量用法示例"
+msgstr "Environment Variable Usage Examples"
+
+msgid "环境变量需在运行 Python 程序前设置，例如："
+msgstr "Environment variables must be set before running the Python program, for example:"
+
+msgid "export TRITON_DEBUG=1\\n"
+msgstr "export TRITON_DEBUG=1"
+
+msgid "环境变量参考表"
+msgstr "Environment Variable Reference Table"
+
+msgid "环境变量配置参考下表："
+msgstr "Environment variable configuration reference table below:"
+
+msgid "类别"
+msgstr "Category"
+
+msgid "默认值"
+msgstr "Default value"
+
+msgid "功能说明"
+msgstr "Functional Description"
+
+msgid "配置说明"
+msgstr "Configuration Notes"
+
+msgid "变更声明"
+msgstr "Change Declaration"
+
+msgid "**调试与日志**"
+msgstr "**Debugging and Logging**"
+
+msgid "TRITON_DEBUG"
+msgstr "TRITON_DEBUG"
+
+msgid "0 或未设置"
+msgstr "0 or not set"
+
+msgid "启用 Triton 的调试输出功能，用于在运行时打印详细的调试信息。这对于排查编译或执行阶段的问题非常有用。 当设置为 1 时，Triton 会输出更多关于编译过程、内核生成和执行的信息。 某些实现中可能支持更细粒度的调试级别（如 2, 3 等），具体取决于 Triton 的版本和实现。"
+msgstr "Enable Triton's debug output functionality to print detailed debug information at runtime. This is very useful for troubleshooting issues during the compilation or execution phases. When set to 1, Triton will output more information about the compilation process, kernel generation, and execution. Some implementations may support finer-grained debug levels (such as 2, 3, etc.), depending on the version and implementation of Triton."
+
+msgid "0：不启用DEBUG<br>1：启用DEBUG"
+msgstr "0: DEBUG disabled<br>1: DEBUG enabled"
+
+msgid "<br>"
+msgstr "<br>"
+
+msgid "MLIR_ENABLE_DUMP"
+msgstr "MLIR_ENABLE_DUMP"
+
+msgid "在每次 MLIR 优化前转储所有内核的 IR。使用 `MLIR_ENABLE_DUMP=kernelName`可以只转储特定内核的IR。"
+msgstr "Dump the IR of all kernels before each MLIR optimization. Use `MLIR_ENABLE_DUMP=kernelName` to dump the IR of a specific kernel only."
+
+msgid "0：不转储<br>1：转储所有内核IR kernelName：转储特定内核IR"
+msgstr "0: Do not dump<br>1: Dump all kernel IR<br>kernelName: Dump IR for a specific kernel"
+
+msgid "Triton 缓存可能干扰转储。如果 `MLIR_ENABLE_DUMP=1`  不生效，可尝试清理 Triton 缓存： `rm -r ~/.triton/cache`"
+msgstr "Triton cache may interfere with dumping. If `MLIR_ENABLE_DUMP=1` does not take effect, try clearing the Triton cache: `rm -r ~/.triton/cache`"
+
+msgid "LLVM_IR_ENABLE_DUMP"
+msgstr "LLVM_IR_ENABLE_DUMP"
+
+msgid "在每次 LLVM IR 优化前转储 IR。"
+msgstr "Dump IR before each LLVM IR optimization."
+
+msgid "0：不转储<br>1：转储IR"
+msgstr "0: Do not dump<br>1: Dump IR"
+
+msgid "TRITON_REPRODUCER_PATH"
+msgstr "TRITON_REPRODUCER_PATH"
+
+msgid "未设置"
+msgstr "Not set"
+
+msgid "在每个 MLIR 编译阶段前生成 MLIR 复现文件。如果某阶段失败，`<reproducer_path>`  将保存失败前的 MLIR 状态。"
+msgstr "Generate MLIR reproducer files before each MLIR compilation phase. If a phase fails, `<reproducer_path>` will save the MLIR state before the failure."
+
+msgid "<reproducer_path>：保存路径"
+msgstr "<reproducer_path>: Save path"
+
+msgid "TRITON_INTERPRET"
+msgstr "TRITON_INTERPRET"
+
+msgid "使用 Triton 解释器而非 GPU 运行，支持在核函数代码中插入 Python 断点"
+msgstr "Run using the Triton interpreter instead of the GPU, supporting the insertion of Python breakpoints in kernel function code."
+
+msgid "0：不支持断点<br>1：支持断点"
+msgstr "0: Breakpoints not supported<br>1: Breakpoints supported"
+
+msgid "TRITON_ENABLE_LLVM_DEBUG"
+msgstr "TRITON_ENABLE_LLVM_DEBUG"
+
+msgid "向LLVM 传递`-debug`参数，输出大量调试信息。若信息过多，可使用`TRITON_LLVM_DEBUG_ONLY`限制输出范围。"
+msgstr "Pass the `-debug` argument to LLVM to output a large amount of debugging information. If there is too much information, you can use `TRITON_LLVM_DEBUG_ONLY` to limit the output scope."
+
+msgid "0：不传递<br>1：传递"
+msgstr "0: Do not pass<br>1: Pass"
+
+msgid "另一种减少输出干扰的方法是：先设置 `LLVM_IR_ENABLE_DUMP=1`运行程序，提取目标LLVM优化通道前的中间表示（IR），然后单独运行LLVM的`opt`工具，此时可通过命令行添加`-debug-only=foo`参数来限定调试范围。"
+msgstr "Another way to reduce output noise is to first set `LLVM_IR_ENABLE_DUMP=1` and run the program to extract the intermediate representation (IR) before the target LLVM optimization pass, then run LLVM's `opt` tool separately, where you can add the `-debug-only=foo` parameter on the command line to limit the debugging scope."
+
+msgid "TRITON_LLVM_DEBUG_ONLY"
+msgstr "TRITON_LLVM_DEBUG_ONLY"
+
+msgid "功能等同于 LLVM 的`-debug-only`命令行选项。该参数可将 LLVM 调试输出限定到特定的优化通道或组件名称（这些名称通过 LLVM 和 Triton 中的`#define DEBUG_TYPE`宏定义），从而有效减少调试信息的冗余输出。用户可指定一个或多个逗号分隔的值，例如：`TRITON_LLVM_DEBUG_ONLY=\"tritongpu-remove-layout-conversions\"`或`TRITON_LLVM_DEBUG_ONLY=\"tritongpu-remove-layout-conversions,regalloc\"`。"
+msgstr "Functionally equivalent to LLVM's `-debug-only` command-line option. This parameter restricts LLVM debug output to specific optimization passes or component names (defined via the `#define DEBUG_TYPE` macro in LLVM and Triton), effectively reducing redundant debug information output. Users can specify one or more comma-separated values, for example: `TRITON_LLVM_DEBUG_ONLY=\"tritongpu-remove-layout-conversions\"` or `TRITON_LLVM_DEBUG_ONLY=\"tritongpu-remove-layout-conversions,regalloc\"`."
+
+msgid "逗号分隔值：通道或组件名称"
+msgstr "Comma-separated values: channel or component names"
+
+msgid "USE_IR_LOC"
+msgstr "USE_IR_LOC"
+
+msgid "控制是否在生成的中间表示（IR）中包含位置信息（如文件名、行号等）。这些信息对调试很有帮助，但可能会增加生成的IR的大小。设置为1，会重新解析中间表示(IR)，将位置信息映射为具有特定扩展名的IR文件行号（而非Python源文件行号）。这能建立从IR到LLVM IR/PTX的直接映射关系。配合性能分析工具使用时，可实现对IR指令的细粒度性能剖析。"
+msgstr "Control whether to include location information (such as file names, line numbers, etc.) in the generated intermediate representation (IR). This information is helpful for debugging but may increase the size of the generated IR. When set to 1, the intermediate representation (IR) will be re-parsed, mapping location information to line numbers of IR files with a specific extension (rather than Python source file line numbers). This establishes a direct mapping from IR to LLVM IR/PTX. When used with performance analysis tools, it enables fine-grained performance profiling of IR instructions."
+
+msgid "0：不包含位置信息<br>1：包含位置信息"
+msgstr "0: Does not include location information<br>1: Includes location information"
+
+msgid "TRITON_PRINT_AUTOTUNING"
+msgstr "TRITON_PRINT_AUTOTUNING"
+
+msgid "在自动调优完成后，输出每个内核的最佳配置及总耗时。"
+msgstr "After auto-tuning is complete, output the best configuration and total time for each kernel."
+
+msgid "0：不输出<br>1：输出"
+msgstr "0: No output<br>1: Output"
+
+msgid "MLIR_ENABLE_REMARK"
+msgstr "MLIR_ENABLE_REMARK"
+
+msgid "启用MLIR 编译过程中的备注信息输出，包括以备注形式输出的性能警告。"
+msgstr "Enable MLIR compilation remark output, including performance warnings output in the form of remarks."
+
+msgid "0：不启用<br>1：启用"
+msgstr "0: Disabled<br>1: Enabled"
+
+msgid "TRITON_KERNEL_DUMP"
+msgstr "TRITON_KERNEL_DUMP"
+
+msgid "启用或禁用 Triton 内核的转储功能，当启用时，Triton 会将生成的内核代码（各编译阶段IR及最终PTX）保存到指定目录。"
+msgstr "Enable or disable the dump functionality for Triton kernels. When enabled, Triton will save the generated kernel code (IR at each compilation stage and the final PTX) to the specified directory."
+
+msgid "TRITON_DUMP_DIR"
+msgstr "TRITON_DUMP_DIR"
+
+msgid "~/.triton/dump"
+msgstr "~/.triton/dump"
+
+msgid "指定 Triton 内核转储文件的保存目录。当`TRITON_KERNEL_DUMP=1`时保存IR和PTX的目录。"
+msgstr "Specifies the save directory for Triton kernel dump files. When `TRITON_KERNEL_DUMP=1`, this is the directory where IR and PTX are saved."
+
+msgid "\"path\"：保存路径"
+msgstr "\"path\": Save path"
+
+msgid "TRITON_DEVICE_PRINT"
+msgstr "TRITON_DEVICE_PRINT"
+
+msgid "当设置为`1` 或者 `true`时（`TRUE` 将被转换为 `true`），启用`tl.device_print`功能。 重要说明：该功能使用GM缓冲区（其指针被传递给内核）。"
+msgstr "When set to `1` or `true` (`TRUE` will be converted to `true`), the `tl.device_print` feature is enabled. Important note: this feature uses the GM buffer (whose pointer is passed to the kernel)."
+
+msgid "0：不启动<br>1：启用`tl.device_print`功能"
+msgstr "0: Disabled<br>1: Enable the `tl.device_print` feature"
+
+msgid "每个线程的GM缓冲区最大为16KB，超限内容将被丢弃。该值目前固定，后续将通过环境变量调整。"
+msgstr "The maximum GM buffer per thread is 16KB, and content exceeding this limit will be discarded. This value is currently fixed and will be adjustable via environment variables in the future."
+
+msgid "TRITON_MEMORY_DISPLAY"
+msgstr "TRITON_MEMORY_DISPLAY"
+
+msgid "控制是否生成内存使用情况的 json 文件。当`TRITON_MEMORY_DISPLAY=1`时保存 memory_info_aic/aiv.json 文件到当前目录 。"
+msgstr "Controls whether to generate a JSON file for memory usage. When `TRITON_MEMORY_DISPLAY=1`, save the memory_info_aic/aiv.json file to the current directory."
+
+msgid "**编译控制**"
+msgstr "**Compilation Control**"
+
+msgid "TRITON_ALWAYS_COMPILE"
+msgstr "TRITON_ALWAYS_COMPILE"
+
+msgid "控制 Triton 是否每次运行都强制重新编译内核，而不是使用已有的缓存版本。 默认情况下，Triton 会对已经编译过的内核进行缓存（基于参数和配置），以提高性能。 设置为 1 后，Triton 将忽略缓存并每次都重新编译内核，这在调试或测试新编译器特性时非常有用。"
+msgstr "Controls whether Triton forces recompilation of kernels on every run instead of using cached versions. By default, Triton caches already-compiled kernels (based on parameters and configuration) to improve performance. When set to 1, Triton ignores the cache and recompiles kernels every time, which is useful for debugging or testing new compiler features."
+
+msgid "0：不启用<br>1：每次运行都重新编译所有内核"
+msgstr "0: Disabled<br>1: Recompile all kernels on every run"
+
+msgid "DISABLE_LLVM_OPT"
+msgstr "DISABLE_LLVM_OPT"
+
+msgid "当设置为 1 时，可以禁用 LLVM 编译过程中的优化步骤(make_llir和make_ptx的LLVM优化)。当设置为字符串，解析为要禁用的LLVM优化标志列表。例如使用`DISABLE_LLVM_OPT=\"disable-lsr\"`可禁用循环强度优化（该优化在某些存在寄存器压力的内核中可能导致高达10%的性能波动）。"
+msgstr "When set to 1, the optimization steps during LLVM compilation (LLVM optimizations for make_llir and make_ptx) can be disabled. When set to a string, it is parsed as a list of LLVM optimization flags to disable. For example, using `DISABLE_LLVM_OPT=\"disable-lsr\"` can disable loop strength reduction optimization (which may cause performance fluctuations of up to 10% in certain kernels with register pressure)."
+
+msgid "0：LLVM 的优化是启用状态<br>1：禁用 LLVM 编译过程中的优化步骤(make_llir和make_ptx的LLVM优化) <list>:\"disable-lsr\":禁用循环强度优化 </list>"
+msgstr "0: LLVM optimizations are enabled<br>1: Disable the optimization steps during LLVM compilation (LLVM optimizations for make_llir and make_ptx) <list>:\"disable-lsr\": Disable loop strength reduction optimization </list>"
+
+msgid "<list>"
+msgstr "<list>"
+
+msgid "</list>"
+msgstr "</list>"
+
+msgid "MLIR_ENABLE_TIMING"
+msgstr "MLIR_ENABLE_TIMING"
+
+msgid "启用或禁用 MLIR 编译过程中的时间统计功能。"
+msgstr "Enable or disable the time statistics feature during the MLIR compilation process."
+
+msgid "LLVM_ENABLE_TIMING"
+msgstr "LLVM_ENABLE_TIMING"
+
+msgid "启用或禁用 LLVM 编译过程中的时间统计功能。"
+msgstr "Enable or disable the time statistics feature during LLVM compilation."
+
+msgid "TRITON_DEFAULT_FP_FUSION"
+msgstr "TRITON_DEFAULT_FP_FUSION"
+
+msgid "1 启用"
+msgstr "1 Enable"
+
+msgid "控制是否默认启用浮点运算融合优化，覆盖默认的浮点运算融合行为（如mul+add->fma）。"
+msgstr "Controls whether floating-point operation fusion optimization is enabled by default, overriding the default floating-point operation fusion behavior (such as mul+add->fma)."
+
+msgid "TRITON_KERNEL_OVERRIDE"
+msgstr "TRITON_KERNEL_OVERRIDE"
+
+msgid "启用或禁用 Triton 内核覆盖功能，允许在每个编译阶段开始时用用户指定的外部文件（IR/PTX等）覆盖默认生成的内核代码。"
+msgstr "Enable or disable the Triton kernel override feature, allowing user-specified external files (IR/PTX, etc.) to override the default generated kernel code at the beginning of each compilation stage."
+
+msgid "TRITON_OVERRIDE_DIR"
+msgstr "TRITON_OVERRIDE_DIR"
+
+msgid "~/.triton/override"
+msgstr "~/.triton/override"
+
+msgid "指定 Triton 内核覆盖文件的查找目录。当`TRITON_KERNEL_OVERRIDE=1`时加载IR/PTX文件的目录。"
+msgstr "Directory for locating Triton kernel override files. When `TRITON_KERNEL_OVERRIDE=1`, this is the directory from which IR/PTX files are loaded."
+
+msgid "TRITON_ASCEND_COMPILE_SPEED_OPT"
+msgstr "TRITON_ASCEND_COMPILE_SPEED_OPT"
+
+msgid "控制JIT编译器在发现内核编译失败后是否跳过后续编译阶段。设为`1`跳过（默认`0`继续尝试）。"
+msgstr "Controls whether the JIT compiler skips subsequent compilation phases after detecting a kernel compilation failure. Set to `1` to skip (default `0` to continue attempting)."
+
+msgid "0：继续尝试<br>1：跳过"
+msgstr "0: Continue trying<br>1: Skip"
+
+msgid "TRITON_COMPILE_ONLY"
+msgstr "TRITON_COMPILE_ONLY"
+
+msgid "remote_launch时使用，只编译不运行。"
+msgstr "Used when remote_launch is enabled, compile only without running."
+
+msgid "TRITON_DISABLE_FFTS"
+msgstr "TRITON_DISABLE_FFTS"
+
+msgid "是否禁用FFTS。**注意**：逻辑为取反，0 表示启用 FFTS，1 表示禁用。"
+msgstr "Whether to disable FFTS. **Note**: The logic is inverted; 0 means FFTS is enabled, 1 means it is disabled."
+
+msgid "0：启用<br>1：禁用"
+msgstr "0: Enable<br>1: Disable"
+
+msgid "TRITON_DISABLE_PRECOMPILE"
+msgstr "TRITON_DISABLE_PRECOMPILE"
+
+msgid "是否禁用预编译。"
+msgstr "Whether to disable precompilation."
+
+msgid "0：启用预编译<br>1：禁用预编译"
+msgstr "0: Enable precompilation<br>1: Disable precompilation"
+
+msgid "**运行与调度**"
+msgstr "**Execution and Scheduling**"
+
+msgid "TRITON_ALL_BLOCKS_PARALLEL"
+msgstr "TRITON_ALL_BLOCKS_PARALLEL"
+
+msgid "启用或禁用自动根据物理核数优化逻辑核数，仅当逻辑核间可并行时方可启动。当逻辑核数大于物理核数时，启动该优化，则编译器自动调整逻辑核数量为物理核数，减少调度开销；启用后允许grid>65535。限制：triton kernel的逻辑必须对执行顺序不敏感才能开启该选项，否则可能会导致死锁。per-kernel 选项 `enable_auto_blockify`（详见 `architecture_difference.md`）在显式设置时优先于该环境变量；环境变量仅对未设置 `enable_auto_blockify` 的 kernel 起默认值作用。"
+msgstr "Enable or disable automatic optimization of the logical core count based on the physical core count; this can only be enabled when logical cores can run in parallel. When the logical core count is greater than the physical core count, enabling this optimization causes the compiler to automatically adjust the logical core count to the physical core count, reducing scheduling overhead; when enabled, grid>65535 is allowed. Limitation: the logic of the triton kernel must be insensitive to execution order for this option to be enabled; otherwise, it may lead to deadlock. The per-kernel option `enable_auto_blockify` (see `architecture_difference.md`) takes precedence over this environment variable when explicitly set; the environment variable only serves as the default value for kernels where `enable_auto_blockify` is not set."
+
+msgid "TRITON_ENABLE_TASKQUEUE"
+msgstr "TRITON_ENABLE_TASKQUEUE"
+
+msgid "1"
+msgstr "I notice you've provided the instruction but haven't included the actual Chinese text to translate. Please provide the Chinese text you'd like me to translate into English."
+
+msgid "是否开启task_queue。"
+msgstr "Whether to enable task_queue."
+
+msgid "TRITON_ENABLE_SANITIZER"
+msgstr "TRITON_ENABLE_SANITIZER"
+
+msgid "是否启用 SANITIZER。"
+msgstr "Whether to enable SANITIZER."
+
+msgid "ENABLE_PRINT_UB_BITS"
+msgstr "ENABLE_PRINT_UB_BITS"
+
+msgid "打开后可以获取当前UB占用量，给inductor使用。"
+msgstr "Once enabled, the current UB usage can be obtained for use by the inductor."
+
+msgid "NPU_DEVICE_LIMIT"
+msgstr "NPU_DEVICE_LIMIT"
+
+msgid "用户设置算子运行时最大aicore和vector_core,格式要求：数字以,分割。比如：14,28。"
+msgstr "Users set the operator's maximum aicore and vector_core at runtime, with the format requirement: numbers separated by commas. For example: 14,28."
+
+msgid "无默认值"
+msgstr "No default value."
+
+msgid "**其他**"
+msgstr "**Others**"
+
+msgid "TRITON_BENCH_METHOD"
+msgstr "TRITON_BENCH_METHOD"
+
+msgid "使用昇腾NPU时，将`testing.py`中的`do_bench`切换为`do_bench_npu`（需配合`INDUCTOR_ASCEND_AGGRESSIVE_AUTOTUNE = 1`使用）。设为`default`时即使NPU可用，仍调用原`do_bench`函数。"
+msgstr "When using Ascend NPU, switch `do_bench` in `testing.py` to `do_bench_npu` (requires `INDUCTOR_ASCEND_AGGRESSIVE_AUTOTUNE = 1`). When set to `default`, the original `do_bench` function is still called even if the NPU is available."
+
+msgid "\"npu\"：切换为`do_bench_npu`"
+msgstr "\"npu\": Switch to `do_bench_npu`"
+
+msgid "TRITON_REMOTE_RUN_CONFIG_PATH"
+msgstr "TRITON_REMOTE_RUN_CONFIG_PATH"
+
+msgid "path"
+msgstr "path"
+
+msgid "指定远程运行的配置路径。"
+msgstr "Specify the configuration path for remote execution."
+
+msgid "直接给定path"
+msgstr "Directly specify the path."
+
+msgid "编译选项"
+msgstr "Compilation options"
+
+msgid "编译选项用于控制单个 Triton kernel 的编译策略，可通过 `triton.Config`、Autotune 参数或 kernel launch meta-parameter 传入。"
+msgstr "Compilation options are used to control the compilation strategy of a single Triton kernel and can be passed via `triton.Config`, Autotune parameters, or kernel launch meta-parameters."
+
+msgid "编译选项用法示例"
+msgstr "Compilation Option Usage Examples"
+
+msgid "例如，可在 kernel launch 时直接传入 `multibuffer`："
+msgstr "For example, you can directly pass `multibuffer` at kernel launch:"
+
+msgid "import torch\\n"
+msgstr "import torch"
+
+msgid "编译选项参考表"
+msgstr "Compiler Options Reference Table"
+
+msgid "编译选项配置参考下表："
+msgstr "Compiler option configuration reference table below:"
+
+msgid "默认值/可选值"
+msgstr "Default value / optional value"
+
+msgid "**通用流水**"
+msgstr "**General Pipeline**"
+
+msgid "`multibuffer`"
+msgstr "`multibuffer`"
+
+msgid "`True`（默认）、`False`"
+msgstr "`True` (default), `False`"
+
+msgid "启用或禁用 ping-pong/double buffer 流水。默认开启。"
+msgstr "Enable or disable the ping-pong/double buffer pipeline. Enabled by default."
+
+msgid "`triton.Config` 或 launch meta-parameter"
+msgstr "`triton.Config` or launch meta-parameter"
+
+msgid "**CV 融合**"
+msgstr "**CV Fusion**"
+
+msgid "`enable_auto_bind_sub_block`"
+msgstr "enable_auto_bind_sub_block"
+
+msgid "`None`、`True`、`False`"
+msgstr "`None`, `True`, `False`"
+
+msgid "启用或禁用自动绑定 sub-block。"
+msgstr "Enable or disable automatic binding of sub-blocks."
+
+msgid "`enable_hivm_auto_cv_balance`"
+msgstr "`enable_hivm_auto_cv_balance`"
+
+msgid "启用或禁用自动 CV balance。"
+msgstr "Enable or disable automatic CV balance."
+
+msgid "`triton.Config` 或 Autotune 参数"
+msgstr "`triton.Config` or Autotune parameters"
+
+msgid "**CV 融合/同步**"
+msgstr "**CV Fusion/Sync**"
+
+msgid "`sync_solver`"
+msgstr "sync_solver"
+
+msgid "启用或禁用 HIVM 同步求解器。"
+msgstr "Enable or disable the HIVM synchronous solver."
+
+msgid "**同步**"
+msgstr "**Synchronization**"
+
+msgid "`unit_flag`"
+msgstr "unit_flag"
+
+msgid "Cube 搬出相关同步优化项。"
+msgstr "Cube-related synchronization optimization items have been moved out."
+
+msgid "`inject_barrier_all`"
+msgstr "inject_barrier_all"
+
+msgid "启用或禁用自动注入 barrier 同步。"
+msgstr "Enable or disable automatic injection of barrier synchronization."
+
+msgid "`inject_block_all`"
+msgstr "inject_block_all"
+
+msgid "启用或禁用自动注入 block 同步。"
+msgstr "Enable or disable automatic injection of block synchronization."
+
+msgid "**多缓冲范围**"
+msgstr "**Multi-Buffer Range**"
+
+msgid "`limit_auto_multi_buffer_only_for_local_buffer`"
+msgstr "`limit_auto_multi_buffer_only_for_local_buffer`"
+
+msgid "限制自动 multi-buffer 只作用于 local buffer。"
+msgstr "Restrict automatic multi-buffer to only apply to local buffers."
+
+msgid "`limit_auto_multi_buffer_of_local_buffer`"
+msgstr "`limit_auto_multi_buffer_of_local_buffer`"
+
+msgid "`None`、`\"no-limit\"`、`\"no-l0c\"`"
+msgstr "`None`, `\"no-limit\"`, `\"no-l0c\"`"
+
+msgid "配置 local buffer 自动 multi-buffer 的 scope。"
+msgstr "Configure the scope for local buffer automatic multi-buffering."
+
+msgid "**Workspace**"
+msgstr "**Workspace**"
+
+msgid "`set_workspace_multibuffer`"
+msgstr "set_workspace_multibuffer"
+
+msgid "`None`、`2`、`4`"
+msgstr "`None`, `2`, `4`"
+
+msgid "配置 workspace multi-buffer 档位。"
+msgstr "Configure the workspace multi-buffer level."
+
+msgid "**CV 融合 tiling**"
+msgstr "**CV fusion tiling**"
+
+msgid "`tile_mix_vector_loop`"
+msgstr "`tile_mix_vector_loop`"
+
+msgid "`None`、`2`、`4`、`8`"
+msgstr "`None`, `2`, `4`, `8`"
+
+msgid "配置 Vector loop 的切分份数。"
+msgstr "Configure the number of segments for the Vector loop."
+
+msgid "`tile_mix_cube_loop`"
+msgstr "`tile_mix_cube_loop`"
+
+msgid "配置 Cube loop 的切分份数。"
+msgstr "Configure the split count of the Cube loop."
+
+msgid "`disable_auto_inject_block_sync`"
+msgstr "`disable_auto_inject_block_sync`"
+
+msgid "启用或禁用自动 block sync 注入。"
+msgstr "Enable or disable automatic block sync injection."
+
+msgid "**运行流**"
+msgstr "**Execution Flow**"
+
+msgid "`stream`"
+msgstr "stream"
+
+msgid "`None` 或 NPU stream 标识"
+msgstr "`None` or NPU stream identifier"
+
+msgid "指定 NPU stream。"
+msgstr "Specify the NPU stream."
+
+msgid "launch meta-parameter"
+msgstr "launch meta-parameter"
+
+msgid "**编译 Pass**"
+msgstr "**Compilation Pass**"
+
+msgid "`enable_linearize`"
+msgstr "enable_linearize"
+
+msgid "版本相关"
+msgstr "Version-related"
+
+msgid "启用或禁用 linearization pass。"
+msgstr "Enable or disable the linearization pass."
+
+msgid "**CV 融合/layout**"
+msgstr "**CV Fusion/Layout**"
+
+msgid "`enable_nd2nz_on_vector`"
+msgstr "enable_nd2nz_on_vector"
+
+msgid "默认 `False`"
+msgstr "Default `False`"
+
+msgid "启用或禁用 Vector 路径上的 ND 到 NZ 布局转换。"
+msgstr "Enable or disable the ND-to-NZ layout conversion on the Vector path."
+
+msgid "**大 grid 优化**"
+msgstr "**Large Grid Optimization**"
+
+msgid "`auto_blockify_size`"
+msgstr "`auto_blockify_size`"
+
+msgid "默认 `1`"
+msgstr "Default `1`"
+
+msgid "启用或禁用 AutoBlockify pass。未设置 `TRITON_ALL_BLOCKS_PARALLEL` 时忽略。"
+msgstr "Enable or disable the AutoBlockify pass. Ignored when `TRITON_ALL_BLOCKS_PARALLEL` is not set."
+
+msgid "launch meta-parameter 或 `triton.Config`"
+msgstr "launch meta-parameter or `triton.Config`"
+
+msgid "**编译模式**"
+msgstr "**Compilation Mode**"
+
+msgid "`compile_mode`"
+msgstr "`compile_mode`"
+
+msgid "`\"unstructured_in_simt\"`（默认）、`\"simd\"`、`\"simt_only\"`"
+msgstr "`\"unstructured_in_simt\"` (default), `\"simd\"`, `\"simt_only\"`"
+
+msgid "控制 Ascend 950 上 SIMD / SIMT 编译路径。`\"simd\"`：纯 SIMD；`\"unstructured_in_simt\"`：混合（结构化 SIMD，离散/非结构化尽量走 SIMT 间接访存模板）；`\"simt_only\"`：纯 SIMT （`ttir→npubin`）。"
+msgstr "Controls the SIMD/SIMT compilation path on Ascend 950. `\"simd\"`: pure SIMD; `\"unstructured_in_simt\"`: hybrid (structured SIMD, discrete/unstructured paths prioritize SIMT indirect memory access templates as much as possible); `\"simt_only\"`: pure SIMT (`ttir→npubin`)."

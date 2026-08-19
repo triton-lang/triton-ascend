@@ -5,10 +5,10 @@
 简介：对 tensor 做逐元素逻辑非（0 变 1，非零变 0）。对应 Python 的 `not` 关键字 —— Triton 通过 AST visitor 特殊处理，把 `not X` 重写为 `X.__not__()`。与按位取反 `~X`（见 [invert](./invert.md)）不同：前者是逻辑非，后者是按位翻转。
 
 ```python
-# 通过 not 关键字（Triton AST 拦截处理）
+# Via the not keyword (handled by Triton's AST interception)
 not x
 
-# 或直接调用 dunder 方法
+# Or call the dunder method directly
 x.__not__()
 ```
 

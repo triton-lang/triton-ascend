@@ -1,0 +1,546 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:21+0000\n"
+"PO-Revision-Date: 2026-08-11 02:21+0000\n"
+
+"X-Source-Commit: f7bdba2857bd34bb21a411e7cf147bd5ee0b8eef\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr ""
+"# Max Autotune Guide\n"
+"\n"
+"This guide introduces the usage of the `max_autotune` feature in Triton. `max_autotune` is a high-level API provided by Triton for automatically searching and selecting optimal kernel configuration parameters. It can significantly simplify the tuning process and improve kernel performance.\n"
+"\n"
+"## Background\n"
+"\n"
+"In Triton, users typically need to manually specify kernel configuration parameters such as `num_warps`, `num_stages`, and `num_ctas`. These parameters have a significant impact on kernel performance. However, manually selecting the optimal parameters requires deep experience and extensive experimentation. To address this issue, Triton provides the `max_autotune` API, which automatically searches for the optimal configuration.\n"
+"\n"
+"## Basic Usage\n"
+"\n"
+"The `max_autotune` decorator can be applied to Triton kernels. When the kernel is called, Triton automatically searches for the optimal configuration parameters. Here is a basic usage example:\n"
+"\n"
+"```python\n"
+"import triton\n"
+"import triton.language as tl\n"
+"\n"
+"@triton.autotune(\n"
+"    configs=[\n"
+"        triton.Config({'BLOCK_SIZE': 64}, num_warps=4),\n"
+"        triton.Config({'BLOCK_SIZE': 128}, num_warps=8),\n"
+"        triton.Config({'BLOCK_SIZE': 256}, num_warps=8),\n"
+"    ],\n"
+"    key=['n_elements'],\n"
+")\n"
+"@triton.jit\n"
+"def kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):\n"
+"    pid = tl.program_id(axis=0)\n"
+"    block_start = pid * BLOCK_SIZE\n"
+"    offsets = block_start + tl.arange(0, BLOCK_SIZE)\n"
+"    mask = offsets < n_elements\n"
+"    x = tl.load(input_ptr + offsets, mask=mask)\n"
+"    tl.store(output_ptr + offsets, x, mask=mask)\n"
+"```\n"
+"\n"
+"In this example, `@triton.autotune` decorator specifies multiple configuration options. When the kernel is called, Triton will automatically test these configurations and select the one with the best performance.\n"
+"\n"
+"## Key Parameters\n"
+"\n"
+"### configs\n"
+"\n"
+"`configs` is a list of `triton.Config` objects, each specifying a set of kernel configuration parameters. Each `Config` can contain:\n"
+"- Kernel parameters (e.g., `BLOCK_SIZE` in the example above)\n"
+"- `num_warps`: number of warps\n"
+"- `num_stages`: number of pipeline stages\n"
+"- `num_ctas`: number of CTAs (for Hopper architecture)\n"
+"\n"
+"### key\n"
+"\n"
+"`key` specifies the kernel parameters that affect the optimal configuration. When these parameter values change, Triton will re-run the autotuning. For example, in the example above, `key=['n_elements']` means that when `n_elements` changes, the autotuning will be re-run.\n"
+"\n"
+"### warmup\n"
+"\n"
+"`warmup` specifies the number of warmup runs before timing. The default value is 25.\n"
+"\n"
+"### rep\n"
+"\n"
+"`rep` specifies the number of repeated runs during timing. The default value is 100.\n"
+"\n"
+"## Advanced Usage\n"
+"\n"
+"### Using max_autotune\n"
+"\n"
+"In addition to `@triton.autotune`, Triton also provides the `@triton.max_autotune` decorator, which supports more advanced autotuning features:\n"
+"\n"
+"```python\n"
+"@triton.max_autotune(\n"
+"    configs=[\n"
+"        triton.Config({'BLOCK_SIZE': 64}, num_warps=4),\n"
+"        triton.Config({'BLOCK_SIZE': 128}, num_warps=8),\n"
+"    ],\n"
+"    key=['n_elements'],\n"
+"    warmup=50,\n"
+"    rep=200,\n"
+")\n"
+"@triton.jit\n"
+"def kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):\n"
+"    # kernel implementation\n"
+"    pass\n"
+"```\n"
+"\n"
+"### Dynamic Configuration Search\n"
+"\n"
+"`max_autotune` supports dynamically generating configurations based on kernel parameters. This is useful when the optimal configuration depends on specific input sizes:\n"
+"\n"
+"```python\n"
+"def get_configs():\n"
+"    configs = []\n"
+"    for block_size in [64, 128, 256, 512]:\n"
+"        for num_warps in [4, 8]:\n"
+"            configs.append(\n"
+"                triton.Config({'BLOCK_SIZE': block_size}, num_warps=num_warps)\n"
+"            )\n"
+"    return configs\n"
+"\n"
+"@triton.max_autotune(\n"
+"    configs=get_configs(),\n"
+"    key=['n_elements'],\n"
+")\n"
+"@triton.jit\n"
+"def kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):\n"
+"    # kernel implementation\n"
+"    pass\n"
+"```\n"
+"\n"
+"### Using with other decorators\n"
+"\n"
+"`max_autotune` can be combined with other Triton decorators, such as `@triton.heuristics`:\n"
+"\n"
+"```python\n"
+"@triton.heuristics({\n"
+"    'EVEN': lambda n_elements: n_elements % 128 == 0,\n"
+"})\n"
+"@triton.max_autotune(\n"
+"    configs=[\n"
+"        triton.Config({'BLOCK_SIZE': 128}, num_warps=4),\n"
+"        triton.Config({'BLOCK_SIZE': 256}, num_warps=8),\n"
+"    ],\n"
+"    key=['n_elements'],\n"
+")\n"
+"@triton.jit\n"
+"def kernel(input_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr, EVEN: tl.constexpr):\n"
+"    # kernel implementation\n"
+"    pass\n"
+"```\n"
+"\n"
+"## Best Practices\n"
+"\n"
+"1. **Choose a reasonable configuration range**: The configuration search space should cover common scenarios but not be too large, otherwise the autotuning time will be too long.\n"
+"\n"
+"2. **Set appropriate `key` parameters**: Only include parameters that significantly affect performance in `key`. Too many `key` parameters will cause frequent re-autotuning.\n"
+"\n"
+"3. **Use warmup and rep appropriately**: For performance-critical kernels, you can increase the values of `warmup` and `rep` to obtain more accurate timing results.\n"
+"\n"
+"4. **Cache autotuning results**: Triton automatically caches autotuning results. In a production environment, you can use the `TRITON_CACHE_DIR` environment variable to specify the cache directory.\n"
+"\n"
+"5. **Consider hardware differences**: Different GPU architectures may have different optimal configurations. It is recommended to test on the target hardware.\n"
+"\n"
+"## Summary\n"
+"\n"
+"`max_autotune` is a powerful feature in Triton that can automatically search for optimal kernel configuration parameters. By using it appropriately, you can significantly improve kernel performance while reducing the time spent on manual tuning. It is recommended to fully utilize this feature in performance-critical kernels.\n"
+
+msgid "Triton-Ascend max_autotune 使用指南"
+msgstr "Triton-Ascend max_autotune Usage Guide"
+
+msgid "文档定位"
+msgstr "Document Positioning"
+
+msgid "本文面向已经熟悉 Triton-Ascend 自动调优机制的用户，介绍 `max_autotune` 装饰器的高级用法："
+msgstr "This document is intended for users who are already familiar with Triton-Ascend's automatic tuning mechanism, and introduces advanced usage of the `max_autotune` decorator:"
+
+msgid "`max_autotune` 与标准 `@triton.autotune` 的区别与联系；"
+msgstr "`max_autotune` and the standard `@triton.autotune`: differences and connections."
+
+msgid "如何利用笛卡尔积展开机制批量生成候选配置；"
+msgstr "How to use the Cartesian product expansion mechanism to batch generate candidate configurations."
+
+msgid "不同 `kernel_type` 支持的调优参数及其适用场景；"
+msgstr "Tuning parameters supported by different `kernel_type` and their applicable scenarios."
+
+msgid "何时选择 `max_autotune` 而非手写配置列表。"
+msgstr "When to choose `max_autotune` over a hand-written configuration list."
+
+msgid "快速上手"
+msgstr "Quick Start"
+
+msgid "`max_autotune` 是 `@triton.autotune` 的扩展版装饰器，它允许在自动调优前将每个基础配置与额外的调优参数进行笛卡尔积展开，从而大幅减少用户需要手工枚举的配置数量。"
+msgstr "`max_autotune` is an extended version of the `@triton.autotune` decorator, which allows each base configuration to be expanded via a Cartesian product with additional tuning parameters before autotuning, thereby significantly reducing the number of configurations users need to manually enumerate."
+
+msgid "1. 基本用法"
+msgstr "1\\. Basic Usage"
+
+msgid "import triton\\n"
+msgstr "import triton"
+
+msgid "上述配置展开后的等效配置数量为："
+msgstr "The equivalent configuration count after expanding the above configurations is:"
+
+msgid "基础配置：2 个"
+msgstr "Basic configuration: 2"
+
+msgid "用户提供的调优参数：`enable_hivm_auto_cv_balance`（2 种）、`tile_mix_vector_loop`（2 种）"
+msgstr "User-provided tuning parameters: `enable_hivm_auto_cv_balance` (2 types), `tile_mix_vector_loop` (2 types)"
+
+msgid "使用默认值的参数：`set_workspace_multibuffer`（2 种）、`tile_mix_cube_loop`（2 种）、其他参数各 1 种"
+msgstr "Parameters using default values: `set_workspace_multibuffer` (2 types), `tile_mix_cube_loop` (2 types), and 1 type for each of the other parameters."
+
+msgid "总配置数量：`2 × 2 × 2 × 2 × 2 = 32` 个配置。"
+msgstr "Total number of configurations: `2 × 2 × 2 × 2 × 2 = 32` configurations."
+
+msgid "注：`kernel_type=\"mix\"` 支持的参数较多，未显式提供的参数会使用默认值参与展开。如果希望某个参数不参与展开，可在基础 `Config` 的 `kwargs` 中固定其值。"
+msgstr "Note: `kernel_type=\"mix\"` supports many parameters; parameters not explicitly provided will use default values in the expansion. If you want a parameter to not participate in the expansion, you can fix its value in the `kwargs` of the base `Config`."
+
+msgid "2. `max_autotune` 与 `@triton.autotune` 的关系"
+msgstr "2\\. The relationship between `max_autotune` and `@triton.autotune`"
+
+msgid "`max_autotune` 本质上是先调用 `get_max_configs` 对基础配置进行展开，然后将展开后的配置列表传递给标准的 `@triton.autotune`。因此："
+msgstr "`max_autotune` essentially first calls `get_max_configs` to expand the base configuration, and then passes the expanded configuration list to the standard `@triton.autotune`. Therefore:"
+
+msgid "所有 `@triton.autotune` 支持的参数（`key`、`prune_configs_by`、`reset_to_zero` 等）在 `max_autotune` 中同样有效；"
+msgstr "All parameters supported by `@triton.autotune` (such as `key`, `prune_configs_by`, `reset_to_zero`, etc.) are equally valid in `max_autotune`."
+
+msgid "`max_autotune` 额外增加了 `kernel_type` 参数和 `**tuning_params` 调优参数空间；"
+msgstr "`max_autotune` additionally adds the `kernel_type` parameter and the `**tuning_params` tuning parameter space."
+
+msgid "最终仍然是 `@triton.autotune` 完成 benchmark、选优和缓存。"
+msgstr "Ultimately, it is still `@triton.autotune` that handles benchmarking, selection, and caching."
+
+msgid "3. 必须导入 Ascend backend 扩展"
+msgstr "3\\. Must import the Ascend backend extension."
+
+msgid "与使用 `configs=[]` 自动 Tiling 一样，`max_autotune` 需要 Ascend backend 扩展支持。`max_autotune` 需要从 Ascend backend 模块单独导入："
+msgstr "Same as automatic tiling with `configs=[]`, `max_autotune` requires support from the Ascend backend extension. `max_autotune` needs to be imported separately from the Ascend backend module:"
+
+msgid "from triton.backends.ascend.runtime import max_autotune\\n"
+msgstr "from triton.backends.ascend.runtime import max_autotune"
+
+msgid "Kernel 类型与支持的参数"
+msgstr "Kernel types and supported parameters"
+
+msgid "`max_autotune` 通过 `kernel_type` 参数区分不同类型的算子，每种类型支持不同的调优参数集合。"
+msgstr "`max_autotune` distinguishes different types of operators through the `kernel_type` parameter, and each type supports a different set of tuning parameters."
+
+msgid "参数支持矩阵"
+msgstr "Parameter Support Matrix"
+
+msgid "参数"
+msgstr "Parameter"
+
+msgid "cube"
+msgstr "cube"
+
+msgid "mix"
+msgstr "mix"
+
+msgid "vector"
+msgstr "vector"
+
+msgid "默认值"
+msgstr "Default value"
+
+msgid "有效值"
+msgstr "Effective value"
+
+msgid "说明"
+msgstr "Explanation"
+
+msgid "`num_stages`"
+msgstr "`num_stages`"
+
+msgid "✅"
+msgstr "✅"
+
+msgid "`[2]`"
+msgstr "[2]"
+
+msgid "`[1, 2]`"
+msgstr "[1, 2]"
+
+msgid "pipeline stages 数量"
+msgstr "Number of pipeline stages"
+
+msgid "`unit_flag`"
+msgstr "unit_flag"
+
+msgid "❌"
+msgstr "I'm sorry, but the text you provided for translation appears to be incomplete or missing. The text to translate is not visible in your message. Could you please provide the Chinese text you'd like me to translate into English?"
+
+msgid "`[False]`"
+msgstr "[False]"
+
+msgid "布尔列表"
+msgstr "Boolean list"
+
+msgid "Cube 搬出相关同步优化项"
+msgstr "Cube eviction-related synchronization optimization items"
+
+msgid "`limit_auto_multi_buffer_of_local_buffer`"
+msgstr "`limit_auto_multi_buffer_of_local_buffer`"
+
+msgid "`[\"no-l0c\"]`"
+msgstr "[\"no-l0c\"]"
+
+msgid "`[\"no-limit\", \"no-l0c\"]`"
+msgstr "`[\"no-limit\", \"no-l0c\"]`"
+
+msgid "配置 local buffer 自动 multi-buffer 的 scope"
+msgstr "Configure the scope of local buffer automatic multi-buffer."
+
+msgid "`limit_auto_multi_buffer_only_for_local_buffer`"
+msgstr "limit_auto_multi_buffer_only_for_local_buffer"
+
+msgid "限制自动 multi-buffer 只作用于 local buffer"
+msgstr "Restrict automatic multi-buffer to only apply to local buffers."
+
+msgid "`set_workspace_multibuffer`"
+msgstr "set_workspace_multibuffer"
+
+msgid "`[2, 4]`"
+msgstr "[2, 4]"
+
+msgid "配置 workspace multi-buffer 档位"
+msgstr "Configure the workspace multi-buffer level."
+
+msgid "`enable_hivm_auto_cv_balance`"
+msgstr "enable_hivm_auto_cv_balance"
+
+msgid "`[True]`"
+msgstr "[True]"
+
+msgid "启用或禁用自动 CV balance"
+msgstr "Enable or disable automatic CV balance."
+
+msgid "`tile_mix_vector_loop`"
+msgstr "`tile_mix_vector_loop`"
+
+msgid "`[2, 4, 8]`"
+msgstr "`[2, 4, 8]`"
+
+msgid "配置 Vector loop 的切分份数"
+msgstr "Configure the number of splits for the Vector loop."
+
+msgid "`tile_mix_cube_loop`"
+msgstr "`tile_mix_cube_loop`"
+
+msgid "配置 Cube loop 的切分份数"
+msgstr "Configure the split count for the Cube loop."
+
+msgid "`enable_ubuf_saving`"
+msgstr "`enable_ubuf_saving`"
+
+msgid "是否启用 ubuf 节省"
+msgstr "Enable ubuf saving."
+
+msgid "Kernel 类型说明"
+msgstr "Kernel Type Description"
+
+msgid "**cube**：纯 cube（矩阵乘法类）算子，支持最少的调优参数；"
+msgstr "**cube**: Pure cube (matrix multiplication) operator, supporting minimal tuning parameters."
+
+msgid "**vector**：纯向量算子，仅支持 `num_stages` 和 `enable_ubuf_saving`；"
+msgstr "**vector**: Pure vector operator, supports only `num_stages` and `enable_ubuf_saving`."
+
+msgid "**mix**：混合 cube+vector 算子（默认类型），支持最完整的调优参数集合。"
+msgstr "**mix**: Mixed cube+vector operator (default type), supports the most complete set of tuning parameters."
+
+msgid "参数值优先级与展开逻辑"
+msgstr "Parameter Value Priority and Expansion Logic"
+
+msgid "参数值优先级"
+msgstr "Parameter value priority"
+
+msgid "调优参数的值按以下优先级确定："
+msgstr "The values of tuning parameters are determined according to the following priority:"
+
+msgid "**tuning_params 参数**（最高优先级）：通过 `**tuning_params` 传递的候选值列表；"
+msgstr "**tuning_params parameter** (highest priority): the list of candidate values passed via `**tuning_params`;"
+
+msgid "**基础配置中的值**：如果基础 `Config` 的 `kwargs` 中已存在该参数，则固定为该值（转换为单元素列表）；"
+msgstr "**Values in the base configuration**: If the parameter already exists in the `kwargs` of the base `Config`, it is fixed to that value (converted to a single-element list)."
+
+msgid "**默认值**（最低优先级）：从内部默认值表获取。"
+msgstr "**Default Value** (lowest priority): Retrieved from the internal default value table."
+
+msgid "展开示例"
+msgstr "Expand example"
+
+msgid "假设有以下配置："
+msgstr "Assuming the following configuration:"
+
+msgid "@max_autotune(\\n"
+msgstr "@max_autotune("
+
+msgid "展开过程："
+msgstr "Expansion process:"
+
+msgid "`kernel_type=\"vector\"` 支持的参数为 `num_stages` 和 `enable_ubuf_saving`；"
+msgstr "The parameters supported by `kernel_type=\"vector\"` are `num_stages` and `enable_ubuf_saving`;"
+
+msgid "`num_stages` 在 `tuning_params` 中提供 `[1, 2]`，优先级最高；"
+msgstr "`num_stages` is provided as `[1, 2]` in `tuning_params`, with the highest priority;"
+
+msgid "`enable_ubuf_saving` 未提供，使用默认值 `[True]`；"
+msgstr "`enable_ubuf_saving` not provided, using default value `[True]`;"
+
+msgid "笛卡尔积展开后得到 2 个配置。"
+msgstr "After Cartesian product expansion, 2 configurations are obtained."
+
+msgid "展开结果等效于："
+msgstr "The expanded result is equivalent to:"
+
+msgid "configs=[\\n"
+msgstr "configs=["
+
+msgid "在基础配置中固定参数"
+msgstr "Fixed parameters in the base configuration."
+
+msgid "如果希望某个调优参数不参与展开，可以在基础配置中直接固定："
+msgstr "If you want a certain tuning parameter to not participate in expansion, you can directly fix it in the base configuration:"
+
+msgid "使用注意事项"
+msgstr "Usage Notes"
+
+msgid "1. 不支持的参数会被忽略"
+msgstr "1\\. Unsupported parameters will be ignored."
+
+msgid "如果通过 `tuning_params` 传递了当前 `kernel_type` 不支持的参数，会产生警告并忽略该参数："
+msgstr "If parameters not supported by the current `kernel_type` are passed via `tuning_params`, a warning will be generated and the parameter will be ignored."
+
+msgid "# Warning: tile_mix_vector_loop does not support kernel_type=\"vector\"\\n"
+msgstr "# Warning: tile_mix_vector_loop does not support kernel_type=\"vector\""
+
+msgid "2. 参数值必须是列表"
+msgstr "2\\. Parameter values must be lists."
+
+msgid "`tuning_params` 中的每个值必须是列表或元组，且不能为空："
+msgstr "Each value in `tuning_params` must be a list or tuple, and cannot be empty."
+
+msgid "# Correct way to write it\\n"
+msgstr "# Correct way to write it"
+
+msgid "3. 配置数量增长"
+msgstr "3\\. Increase in configuration quantity"
+
+msgid "展开后的配置数量等于： 基础配置数量 × Π(每个 tuning_param 的列表长度)"
+msgstr "The number of expanded configurations equals: base configuration count × Π(length of each tuning_param's list)"
+
+msgid "例如，2 个基础配置 × 3 个参数（列表长度分别为 2、3、2）= 12 个展开配置。"
+msgstr "For example, 2 base configurations × 3 parameters (with list lengths of 2, 3, and 2 respectively) = 12 expanded configurations."
+
+msgid "过多的配置会增加首次调优时间，建议根据实际需要合理控制参数空间。"
+msgstr "Excessive configuration increases the initial tuning time; it is recommended to reasonably control the parameter space based on actual needs."
+
+msgid "4. 与 `configs=[]` 的区别"
+msgstr "4\\. Difference from `configs=[]`"
+
+msgid "`max_autotune` 与 `@triton.autotune(configs=[], ...)` 是两种不同的自动调优策略："
+msgstr "`max_autotune` and `@triton.autotune(configs=[], ...)` are two different automatic tuning strategies:"
+
+msgid "特性"
+msgstr "Feature"
+
+msgid "`max_autotune`"
+msgstr "`max_autotune`"
+
+msgid "`@triton.autotune(configs=[])`"
+msgstr "`@triton.autotune(configs=[])`"
+
+msgid "Tiling 参数生成"
+msgstr "Tiling parameter generation"
+
+msgid "需要用户在基础配置中指定"
+msgstr "The user needs to specify this in the basic configuration."
+
+msgid "Ascend backend 自动生成"
+msgstr "Ascend backend auto-generation"
+
+msgid "编译参数调优"
+msgstr "Compilation parameter tuning"
+
+msgid "支持通过 `tuning_params` 展开"
+msgstr "Supports expansion via `tuning_params`."
+
+msgid "通过 `hints` 参数传入"
+msgstr "Pass the `hints` parameter in."
+
+msgid "适用场景"
+msgstr "Applicable Scenarios"
+
+msgid "明确知道 Tiling 参数空间，需要调优编译参数"
+msgstr "Clearly know the tiling parameter space, and need to tune the compilation parameters."
+
+msgid "希望 Tiling 参数也自动生成"
+msgstr "I hope the Tiling parameters are also automatically generated."
+
+msgid "进阶用法"
+msgstr "Advanced Usage"
+
+msgid "1. 结合多个调优参数"
+msgstr "1\\. Combining multiple tuning parameters."
+
+msgid "对于混合类型算子（`kernel_type=\"mix\"`），可以同时调优多个参数："
+msgstr "For mixed-type operators (`kernel_type=\"mix\"`), multiple parameters can be tuned simultaneously:"
+
+msgid "展开后配置数量计算："
+msgstr "Expanded configuration count calculation:"
+
+msgid "用户提供的参数：`num_stages`（2）、`enable_hivm_auto_cv_balance`（2）、`tile_mix_vector_loop`（3）、`tile_mix_cube_loop`（2）"
+msgstr "User-provided parameters: `num_stages` (2), `enable_hivm_auto_cv_balance` (2), `tile_mix_vector_loop` (3), `tile_mix_cube_loop` (2)"
+
+msgid "使用默认值的参数：`set_workspace_multibuffer`（默认 `[2, 4]` → 2）、其他参数各 1"
+msgstr "Parameters using default values: `set_workspace_multibuffer` (default `[2, 4]` → 2), all other parameters set to 1."
+
+msgid "总配置数量：`2 × 2 × 2 × 2 × 3 × 2 = 96` 个配置。"
+msgstr "Total number of configurations: `2 × 2 × 2 × 2 × 3 × 2 = 96` configurations."
+
+msgid "2. 针对 cube 类型算子的调优"
+msgstr "2\\. Tuning for cube-type operators"
+
+msgid "cube 类型算子（如纯矩阵乘法）支持的参数较少："
+msgstr "Cube-type operators (such as pure matrix multiplication) support fewer parameters:"
+
+msgid "3. 针对向量算子的调优"
+msgstr "3\\. Tuning for vector operators"
+
+msgid "向量算子支持最少的调优参数："
+msgstr "The vector operator supports minimal tuning parameters:"
+
+msgid "小结"
+msgstr "Summary"
+
+msgid "`max_autotune` 是 Triton-Ascend 提供的高级自动调优工具，适合以下场景："
+msgstr "`max_autotune` is an advanced automatic tuning tool provided by Triton-Ascend, suitable for the following scenarios:"
+
+msgid "已知 Tiling 参数空间，希望减少手工枚举配置的工作量；"
+msgstr "Given the tiling parameter space, the goal is to reduce the manual effort of enumerating configurations."
+
+msgid "需要联合调优多个 Ascend 编译参数（如 `num_stages`、`enable_hivm_auto_cv_balance` 等）；"
+msgstr "Multiple Ascend compilation parameters (such as `num_stages`, `enable_hivm_auto_cv_balance`, etc.) need to be jointly tuned."
+
+msgid "希望通过笛卡尔积方式批量生成候选配置。"
+msgstr "I hope to batch generate candidate configurations using the Cartesian product method."
+
+msgid "`max_autotune` 的核心价值在于：用少量基础配置 + 调优参数空间描述，自动展开出完整的候选配置集合，兼顾了灵活性与便利性。"
+msgstr "The core value of `max_autotune` lies in: using a small amount of basic configuration plus a description of the tuning parameter space, it automatically expands into a complete set of candidate configurations, balancing flexibility and convenience."

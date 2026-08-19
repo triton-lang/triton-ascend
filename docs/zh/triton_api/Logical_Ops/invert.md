@@ -5,10 +5,10 @@
 简介：将tensor每个值按比特位进行翻转。
 
 ```python
-# 通过操作符
+# Via the operator
 ~x
 
-# 或直接调用 dunder 方法
+# Or call the dunder method directly
 x.__invert__()
 ```
 

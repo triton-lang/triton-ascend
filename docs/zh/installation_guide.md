@@ -107,79 +107,24 @@ pip install -e .
 ### 检查镜像版本
 
 **表1** CANN版本与镜像标签对照表。
-<table style="table-layout: fixed; width: 100%; border-collapse: collapse;">
-  <tr style="height: 50px;">
-    <th style="width: 20%; border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #f5f5f5;">CANN版本</th>
-    <th style="width: 20%; border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #f5f5f5;">芯片类型</th>
-    <th style="width: 20%; border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #f5f5f5;">Python版本</th>
-    <th style="width: 40%; border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #f5f5f5;">镜像标签</th>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A2</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.10</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0-910b-ubuntu22.04-py3.10</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A3</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.10</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0-a3-ubuntu22.04-py3.10</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A2</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.11</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0-910b-ubuntu22.04-py3.11</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A3</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.11</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">8.5.0-a3-ubuntu22.04-py3.11</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A2</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.11</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-910b-ubuntu22.04-py3.11</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A3</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.11</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-a3-ubuntu22.04-py3.11</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">950</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.11</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-950-ubuntu22.04-py3.11</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A2</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.12</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-910b-ubuntu22.04-py3.12</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">A3</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.12</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-a3-ubuntu22.04-py3.12</td>
-  </tr>
-  <tr style="height: 50px;">
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">950</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">3.12</td>
-    <td style="border: 1px solid #ddd; padding: 8px; text-align: left;">9.0.0-950-ubuntu22.04-py3.12</td>
-  </tr>
-</table>
+
+| CANN版本 | 芯片类型 | Python版本 | 镜像标签 |
+| --- | --- | --- | --- |
+| 8.5.0 | A2 | 3.10 | 8.5.0-910b-ubuntu22.04-py3.10 |
+| 8.5.0 | A3 | 3.10 | 8.5.0-a3-ubuntu22.04-py3.10 |
+| 8.5.0 | A2 | 3.11 | 8.5.0-910b-ubuntu22.04-py3.11 |
+| 8.5.0 | A3 | 3.11 | 8.5.0-a3-ubuntu22.04-py3.11 |
+| 9.0.0 | A2 | 3.11 | 9.0.0-910b-ubuntu22.04-py3.11 |
+| 9.0.0 | A3 | 3.11 | 9.0.0-a3-ubuntu22.04-py3.11 |
+| 9.0.0 | 950 | 3.11 | 9.0.0-950-ubuntu22.04-py3.11 |
+| 9.0.0 | A2 | 3.12 | 9.0.0-910b-ubuntu22.04-py3.12 |
+| 9.0.0 | A3 | 3.12 | 9.0.0-a3-ubuntu22.04-py3.12 |
+| 9.0.0 | 950 | 3.12 | 9.0.0-950-ubuntu22.04-py3.12 |
 
 ### 镜像使用
 
 ```bash
-# 这里以 9.0.0-a3-ubuntu22.04-py3.11 为例
+# This example uses 9.0.0-a3-ubuntu22.04-py3.11
 docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container \
 --security-opt seccomp=unconfined \
 --device=/dev/davinci0 \
@@ -202,7 +147,7 @@ docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container \
 quay.io/ascend/cann:9.0.0-a3-ubuntu22.04-py3.11 \
 /bin/bash
 
-# 进入容器，可在前面的快速安装和源码安装中任选一种方式安装Triton-Ascend
+# Enter the container; you can install Triton-Ascend using either the quick install or source install method described above
 docker exec -u root -it triton-ascend_container /bin/bash
 ```
 
@@ -213,11 +158,11 @@ docker exec -u root -it triton-ascend_container /bin/bash
 向量加法实例：<a href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py" style="text-decoration: none; color: #0066cc;">01-vector-add.py </a>
 
 ```bash
-# 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
+# Set the CANN environment variables (using the root user's default installation path `/usr/local/Ascend` as an example)
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
-# 拉取triton-ascend源码仓及用例（使用源码安装Triton-Ascend的无需重复拉取）
+# Clone the triton-ascend source repository and examples (no need to clone again if you installed Triton-Ascend from source)
 git clone https://github.com/triton-lang/triton-ascend.git
-# 运行tutorials实例
+# Run the tutorials examples
 python3 ./third_party/ascend/tutorials/01-vector-add.py
 ```
 

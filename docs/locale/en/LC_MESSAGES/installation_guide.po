@@ -1,0 +1,277 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:21+0000\n"
+"PO-Revision-Date: 2026-08-11 02:21+0000\n"
+
+"X-Source-Commit: 668879f4fed651799521080c58279e6e90f45420\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "I'll translate the Chinese text into English following your rules. However, you haven't provided the actual Chinese text to translate. Please provide the text you'd like me to translate."
+
+msgid "安装指南"
+msgstr "Installation Guide"
+
+msgid "**Triton-Ascend**是适配华为Ascend处理器的Triton优化版本，主要用于提供高效的核函数自动调优、算子编译及部署能力，支持Ascend Atlas A2/A3/950系列产品，兼容Triton核心语法的同时，针对昇腾NPU特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。"
+msgstr "**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors, primarily designed to provide efficient kernel auto-tuning, operator compilation, and deployment capabilities. It supports Ascend Atlas A2/A3/950 series products and is compatible with Triton core syntax while undergoing deep optimization for Ascend NPU features, including automatic parsing of kernel function parameters, optimization of memory access logic, and enhancement of secure deployment mechanisms."
+
+msgid "环境准备"
+msgstr "Environment Preparation"
+
+msgid "**硬件要求**"
+msgstr "**Hardware Requirements**"
+
+msgid "Ascend产品：支持Atlas A2/A3/950系列。"
+msgstr "Ascend products: support Atlas A2/A3/950 series."
+
+msgid "NPU配置：建议至少单卡32GB内存。"
+msgstr "NPU configuration: It is recommended to have at least 32GB of memory per card."
+
+msgid "操作系统：需Linux系统，具体请参考<a href=\"https://www.hiascend.com/hardware/compatibility\" style=\"text-decoration: none; color: #0066cc;\">兼容性查询助手</a>。本文接下来所有操作均以**Ubuntu**环境演示。"
+msgstr "Operating System: Linux is required. For details, please refer to the <a href=\"https://www.hiascend.com/hardware/compatibility\" style=\"text-decoration: none; color: #0066cc;\">Compatibility Query Assistant</a>. All subsequent operations in this document are demonstrated in a **Ubuntu** environment."
+
+msgid "<a href=\"https://www.hiascend.com/hardware/compatibility\" style=\"text-decoration: none; color: #0066cc;\">"
+msgstr "<a href=\"https://www.hiascend.com/hardware/compatibility\" style=\"text-decoration: none; color: #0066cc;\">"
+
+msgid "</a>"
+msgstr "</a>"
+
+msgid "**软件依赖**"
+msgstr "**Software Dependencies**"
+
+msgid "确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》 完成驱动与固件安装。"
+msgstr "Determine the CANN, Python, and TorchNPU software versions and install them. For reference, you can follow the \"[CANN Quick Installation](https://www.hiascend.com/cann/download)\" guide on the Ascend community official website to complete the driver and firmware installation."
+
+msgid "CANN版本：9.1.0"
+msgstr "CANN version: 9.1.0"
+
+msgid "Python版本：python3.11"
+msgstr "Python version: python3.11"
+
+msgid "TorchNPU版本：2.7.1.post8"
+msgstr "TorchNPU version: 2.7.1.post8"
+
+msgid "注：更多配套关系请参考[版本说明表](./release_note.md#version-compatibility-matrix)。"
+msgstr "Note: For more compatibility details, please refer to the [Version Release Notes](./release_note.md#version-compatibility-matrix)."
+
+msgid "快速安装"
+msgstr "Quick Installation"
+
+msgid "pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi\\n"
+msgstr "pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi"
+
+msgid "源码安装"
+msgstr "Source code installation"
+
+msgid "安装依赖"
+msgstr "Install dependencies"
+
+msgid "apt update\\n"
+msgstr "apt update"
+
+msgid "编译Triton-Ascend"
+msgstr "Compile Triton-Ascend"
+
+msgid "git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend\\n"
+msgstr "git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend"
+
+msgid "自定义LLVM构建（可选）"
+msgstr "Custom LLVM Build (Optional)"
+
+msgid "如果需要自定义构建LLVM过程的，可以执行下面的步骤去编译Triton-Ascend。"
+msgstr "If you need to customize the LLVM build process, you can follow the steps below to compile Triton-Ascend."
+
+msgid "**代码准备**：通过`git checkout`检出指定版本的LLVM源码并应用补丁。"
+msgstr "**Code Preparation**: Check out the specified version of the LLVM source code via `git checkout` and apply the patch."
+
+msgid "git clone --no-checkout https://github.com/llvm/llvm-project.git\\n"
+msgstr "git clone --no-checkout https://github.com/llvm/llvm-project.git"
+
+msgid "**构建LLVM**：路径 `/path/llvm-install` 为用户规划的LLVM安装路径，需根据实际调整；路径`{PATH_TO}`为用户第一步检出LLVM源码的路径。"
+msgstr "**Building LLVM**: The path `/path/llvm-install` is the user-planned LLVM installation path, which should be adjusted according to the actual situation; the path `{PATH_TO}` is the path where the user checked out the LLVM source code in the first step."
+
+msgid "export LLVM_INSTALL_PREFIX=/path/llvm-install\\n"
+msgstr "export LLVM_INSTALL_PREFIX=/path/llvm-install"
+
+msgid "**编译Triton-Ascend**"
+msgstr "**Compile Triton-Ascend**"
+
+msgid "开发镜像"
+msgstr "Development image"
+
+msgid "检查镜像版本"
+msgstr "Check the image version."
+
+msgid "**表1** CANN版本与镜像标签对照表。"
+msgstr "**Table 1** Correspondence between CANN versions and image tags."
+
+msgid "CANN版本"
+msgstr "CANN version"
+
+msgid "芯片类型"
+msgstr "Chip type"
+
+msgid "Python版本"
+msgstr "Python version"
+
+msgid "镜像标签"
+msgstr "Image tag"
+
+msgid "8.5.0"
+msgstr "8.5.0"
+
+msgid "A2"
+msgstr "A2"
+
+msgid "3.10"
+msgstr "3.10"
+
+msgid "8.5.0-910b-ubuntu22.04-py3.10"
+msgstr "8.5.0-910b-ubuntu22.04-py3.10"
+
+msgid "A3"
+msgstr "A3"
+
+msgid "8.5.0-a3-ubuntu22.04-py3.10"
+msgstr "8.5.0-a3-ubuntu22.04-py3.10"
+
+msgid "3.11"
+msgstr "3.11"
+
+msgid "8.5.0-910b-ubuntu22.04-py3.11"
+msgstr "8.5.0-910b-ubuntu22.04-py3.11"
+
+msgid "8.5.0-a3-ubuntu22.04-py3.11"
+msgstr "8.5.0-a3-ubuntu22.04-py3.11"
+
+msgid "9.0.0"
+msgstr "9.0.0"
+
+msgid "9.0.0-910b-ubuntu22.04-py3.11"
+msgstr "9.0.0-910b-ubuntu22.04-py3.11"
+
+msgid "9.0.0-a3-ubuntu22.04-py3.11"
+msgstr "9.0.0-a3-ubuntu22.04-py3.11"
+
+msgid "950"
+msgstr "950"
+
+msgid "9.0.0-950-ubuntu22.04-py3.11"
+msgstr "9.0.0-950-ubuntu22.04-py3.11"
+
+msgid "3.12"
+msgstr "3.12"
+
+msgid "9.0.0-910b-ubuntu22.04-py3.12"
+msgstr "9.0.0-910b-ubuntu22.04-py3.12"
+
+msgid "9.0.0-a3-ubuntu22.04-py3.12"
+msgstr "9.0.0-a3-ubuntu22.04-py3.12"
+
+msgid "9.0.0-950-ubuntu22.04-py3.12"
+msgstr "9.0.0-950-ubuntu22.04-py3.12"
+
+msgid "镜像使用"
+msgstr "Image Usage"
+
+msgid "# This example uses 9.0.0-a3-ubuntu22.04-py3.11\\n"
+msgstr "# This example uses 9.0.0-a3-ubuntu22.04-py3.11"
+
+msgid "运行样例"
+msgstr "Run the example."
+
+msgid "**运行tutorials中向量加法实例验证结果**"
+msgstr "**Run the vector addition example in tutorials to verify the results**"
+
+msgid "向量加法实例：<a href=\"https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py\" style=\"text-decoration: none; color: #0066cc;\">01-vector-add.py </a>"
+msgstr "Vector addition example: <a href=\"https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py\" style=\"text-decoration: none; color: #0066cc;\">01-vector-add.py </a>"
+
+msgid "<a href=\"https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py\" style=\"text-decoration: none; color: #0066cc;\">"
+msgstr "<a href=\"https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py\" style=\"text-decoration: none; color: #0066cc;\">"
+
+msgid "# Set the CANN environment variables (using the root user's default installation path `/usr/local/Ascend` as an example)\\n"
+msgstr "# Set the CANN environment variables (using the root user's default installation path `/usr/local/Ascend` as an example)"
+
+msgid "观察到类似的输出即说明环境配置正确："
+msgstr "Observing similar output indicates that the environment is configured correctly:"
+
+msgid "tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')\\n"
+msgstr "tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')"
+
+msgid "安装常见问题"
+msgstr "Common Installation Issues"
+
+msgid "**问题一：安装TorchNPU时出现报错“ERROR: No matching distribution found for torch==2.7.1+cpu”**"
+msgstr "**Issue 1: When installing TorchNPU, the error \"ERROR: No matching distribution found for torch==2.7.1+cpu\" occurs**"
+
+msgid "**解决措施**"
+msgstr "**Resolution Measures**"
+
+msgid "可以尝试手动安装torch后再安装TorchNPU："
+msgstr "You can try manually installing torch first, then install TorchNPU."
+
+msgid "pip install torch==2.7.1+cpu --index-url https://download.pytorch.org/whl/cpu\\n"
+msgstr "pip install torch==2.7.1+cpu --index-url https://download.pytorch.org/whl/cpu"
+
+msgid "**问题二：编译安装Triton-Ascend时，如果GCC < 9.4.0，可能报错 “ld.lld: error: unable to find library -lstdc++fs”**"
+msgstr "**Issue 2: When compiling and installing Triton-Ascend, if GCC < 9.4.0, the error \"ld.lld: error: unable to find library -lstdc++fs\" may occur.**"
+
+msgid "一般是链接器无法找到stdc++fs库引起的报错。该库用于支持GCC 9之前版本的文件系统特性。此时需要手动把CMake文件中以下相关代码片段的注释打开。 文件路径：triton-ascend/CMakeLists.txt"
+msgstr "This error is usually caused by the linker being unable to find the stdc++fs library. This library is used to support filesystem features in versions prior to GCC 9. In this case, you need to manually uncomment the relevant code snippet in the CMake file. File path: triton-ascend/CMakeLists.txt"
+
+msgid "if (NOT WIN32 AND NOT APPLE)\\n"
+msgstr "if (NOT WIN32 AND NOT APPLE)"
+
+msgid "**问题三：执行算子时报错 ModuleNotFoundError: No module named 'triton._C.libtriton.ascend'; 'triton._C.libtriton' is not a package**"
+msgstr "**Issue 3: When executing an operator, an error is reported: ModuleNotFoundError: No module named 'triton._C.libtriton.ascend'; 'triton._C.libtriton' is not a package**"
+
+msgid "**根因分析**"
+msgstr "**Root Cause Analysis**"
+
+msgid "triton-ascend目录被triton覆盖，导致triton-ascend功能受损。"
+msgstr "The triton-ascend directory is overwritten by triton, causing triton-ascend functionality to be impaired."
+
+msgid "卸载已损坏的triton-ascend，重新安装即可。以3.2.1 版本为例，可执行如下命令修复："
+msgstr "To uninstall the corrupted triton-ascend and reinstall it, take version 3.2.1 as an example, and execute the following command to fix it:"
+
+msgid "pip uninstall triton-ascend triton\\n"
+msgstr "pip uninstall triton-ascend triton"
+
+msgid "**问题四：Triton-Ascend 3.2.1版本为何新增依赖triton？**"
+msgstr "**Question 4: Why does Triton-Ascend version 3.2.1 add a dependency on Triton?**"
+
+msgid "答复：Triton-Ascend是基于Triton进行的二次开发，与Triton安装目录同名。若用户安装Triton-Ascend之后，再次安装Triton或依赖Triton的三方件，会覆盖Triton目录，导致Triton-Ascend功能受损。 因此通过增加Triton依赖，当Triton被覆盖安装时会有如下提醒。"
+msgstr "Answer: Triton-Ascend is a secondary development based on Triton and shares the same installation directory name as Triton. If users install Triton-Ascend and then install Triton or third-party components that depend on Triton, the Triton directory will be overwritten, causing damage to Triton-Ascend functionality. Therefore, by adding a Triton dependency, the following reminder will appear when Triton is overwritten during installation."
+
+msgid "ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.\\n"
+msgstr "错误：pip的依赖解析器目前未考虑所有已安装的包。此行为是以下依赖冲突的根源。"
+
+msgid "若用户遇到且想恢复Triton-Ascend功能，可做如下操作："
+msgstr "If users encounter issues and wish to restore Triton-Ascend functionality, they can do the following:"
+
+msgid "**问题五：Triton-Ascend 3.2.1版本依赖的Triton版本为何不一致？**"
+msgstr "**Question 5: Why are the Triton versions inconsistent for the dependencies of Triton-Ascend 3.2.1?**"
+
+msgid "答复：X86与Arm使用不同版本的社区Triton安装包，是因为社区从Triton 3.2版本开始提供X86安装包，而Arm安装包是从Triton 3.5版本开始提供的。"
+msgstr "Answer: X86 and Arm use different versions of the community Triton installation packages because the community has been providing X86 installation packages since Triton version 3.2, while Arm installation packages have been available since Triton version 3.5."
+
+msgid "**问题六：如何确认芯片类型**"
+msgstr "**Question 6: How to Confirm the Chip Type**"
+
+msgid "您可以使用npu-smi命令查看系统上的NPU型号。例如，在npu-smi info命令的输出中，\"910B4\" 对应芯片类型A2（昇腾910b系列）："
+msgstr "You can use the npu-smi command to check the NPU model on the system. For example, in the output of the npu-smi info command, \"910B4\" corresponds to chip type A2 (Ascend 910B series)."
+
+msgid "root@localhost:/# npu-smi  info\\n"
+msgstr "root@localhost:/# npu-smi info"

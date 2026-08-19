@@ -1,0 +1,145 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:20+0000\n"
+"PO-Revision-Date: 2026-08-11 02:20+0000\n"
+
+"X-Source-Commit: 87ec59bde574a4ef76f8e67edc377b52ef2c0990\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "I notice you've provided the rules for translation but haven't included the actual Chinese text to translate. Please provide the Chinese text you'd like me to translate into English, and I'll follow the rules you've specified."
+
+msgid "精度对比与误差分析"
+msgstr "Precision Comparison and Error Analysis"
+
+msgid "本文档介绍如何在昇腾 NPU 上进行 Triton 算子的精度对比与误差分析，包括对比方法、评判标准及注意事项。"
+msgstr "This document describes how to perform precision comparison and error analysis of Triton operators on Ascend NPU, including comparison methods, evaluation criteria, and precautions."
+
+msgid "1. 精度对比流程"
+msgstr "1\\. Accuracy comparison process"
+
+msgid "基本步骤"
+msgstr "Basic steps"
+
+msgid "**获取参考结果**（Golden）：使用等价 Torch 算子在 CPU/GPU/NPU 上计算结果或者相同 Triton 算子在 CPU/GPU 上的计算结果"
+msgstr "**Obtaining Reference Results** (Golden): Use equivalent Torch operators to compute results on CPU/GPU/NPU, or use the same Triton operator to compute results on CPU/GPU."
+
+msgid "**获取 Triton 结果**：在昇腾 NPU 上运行 Triton kernel 得到计算结果"
+msgstr "**Obtaining Triton Results**: Run the Triton kernel on the Ascend NPU to obtain the computation results."
+
+msgid "**对比判断**：使用 `torch.testing.assert_close` 判断是否满足精度要求"
+msgstr "**Comparison Judgment**: Use `torch.testing.assert_close` to determine whether the precision requirements are met."
+
+msgid "示例：向量加法（Vector Add）"
+msgstr "Example: Vector Add"
+
+msgid "import torch\\n"
+msgstr "import torch"
+
+msgid "2. 精度对比函数"
+msgstr "2\\. Precision comparison function"
+
+msgid "def compare_precision(cal, ref):\\n"
+msgstr "def compare_precision(cal, ref):"
+
+msgid "3. 精度判定标准"
+msgstr "3\\. Precision Acceptance Criteria"
+
+msgid "判定规则"
+msgstr "Decision rules"
+
+msgid "`torch.testing.assert_close`/`torch.equal` 不抛出异常 → **通过**，否则 **不通过**。"
+msgstr "`torch.testing.assert_close`/`torch.equal` does not throw an exception → **Pass**, otherwise **Fail**."
+
+msgid "`torch.testing.assert_close`：如果张量在指定的容差范围内近似相等，则通过（不抛出异常）；否则不通过（抛出 AssertionError）。"
+msgstr "`torch.testing.assert_close`: Passes (does not raise an exception) if the tensors are approximately equal within the specified tolerance; otherwise, it fails (raises an AssertionError)."
+
+msgid "`torch.equal`：要求两个张量具有完全相同的形状，且所有元素在二进制级别上绝对相等，才返回 True，否则返回 False。"
+msgstr "`torch.equal`: It requires that two tensors have exactly the same shape and that all elements are absolutely equal at the binary level, only then does it return True; otherwise, it returns False."
+
+msgid "`torch.testing.assert_close` 的内部逻辑："
+msgstr "Internal logic of `torch.testing.assert_close`:"
+
+msgid "|cal - ref| <= atol + rtol * |ref|\\n"
+msgstr "|cal - ref| <= atol + rtol * |ref|"
+
+msgid "即：绝对误差 `|cal - ref|` 需要满足相对误差容限和绝对误差容限相加共同构成一个动态的误差边界。"
+msgstr "That is, the absolute error `|cal - ref|` must satisfy the dynamic error boundary formed by the sum of the relative error tolerance and the absolute error tolerance."
+
+msgid "按数据类型推荐容限"
+msgstr "Recommended tolerances by data type"
+
+msgid "数据类型"
+msgstr "Data Type"
+
+msgid "rtol"
+msgstr "rtol"
+
+msgid "atol"
+msgstr "atol"
+
+msgid "说明"
+msgstr "Instructions"
+
+msgid "`float32`"
+msgstr "`float32`"
+
+msgid "1e-5"
+msgstr "1e-5"
+
+msgid "严格"
+msgstr "Strict"
+
+msgid "`float16`"
+msgstr "`float16`"
+
+msgid "1e-3"
+msgstr "1e-3"
+
+msgid "精度较低，适当放宽"
+msgstr "Lower precision, appropriately relax the tolerance."
+
+msgid "`bfloat16`"
+msgstr "`bfloat16`"
+
+msgid "5e-3"
+msgstr "5e-3"
+
+msgid "`int8/16/32/64`"
+msgstr "`int8/16/32/64`"
+
+msgid "—"
+msgstr "—"
+
+msgid "必须完全一致（`torch.equal`）"
+msgstr "Must be exactly identical (`torch.equal`)"
+
+msgid "`bool`"
+msgstr "bool"
+
+msgid "4. 注意事项"
+msgstr "4\\. Precautions"
+
+msgid "NaN / Inf 处理"
+msgstr "NaN / Inf handling"
+
+msgid "`equal_nan=True` 将 NaN 视为相等。若需要严格检测 NaN 差异，设为 `False`。"
+msgstr "`equal_nan=True` treats NaN as equal. If strict detection of NaN differences is needed, set it to `False`."
+
+msgid "整数类型"
+msgstr "Integer type"
+
+msgid "整数和布尔类型不允许任何误差，需严格一致。在跨设备比对时，务必确保数据已移至同一设备（如 CPU），以避免底层表示差异带来的误判。"
+msgstr "Integer and boolean types do not allow any deviation and must match exactly. When comparing across devices, ensure that the data has been moved to the same device (e.g., CPU) to avoid misjudgment caused by differences in underlying representation."

@@ -1,0 +1,157 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:20+0000\n"
+"PO-Revision-Date: 2026-08-11 02:20+0000\n"
+
+"X-Source-Commit: 68124a1c13e65777265e3138fcffb1fe377e78d6\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "I need the Chinese text you'd like me to translate. Please provide it."
+
+msgid "Triton-Ascend FAQ"
+msgstr "Triton-Ascend FAQ"
+
+msgid "1. 安装与环境配置"
+msgstr "1\\. Installation and Environment Configuration"
+
+msgid "**Q: 如何正确安装 Triton-Ascend？是否支持 pip 直接安装？**"
+msgstr "**Q: How to correctly install Triton-Ascend? Does it support direct installation via pip?**"
+
+msgid "A: 可以直接使用pip 安装"
+msgstr "A: You can install it directly using pip."
+
+msgid "pip install triton-ascend\\n"
+msgstr "pip install triton-ascend"
+
+msgid "**Q: 社区 Triton 和 Triton-Ascend 能否同时存在？**"
+msgstr "**Q: Can Community Triton and Triton-Ascend coexist?**"
+
+msgid "A: triton-ascend 3.2.0 及以下不可以。需要先卸载社区 Triton，再安装 Triton-Ascend。<br> triton-ascend 3.2.1 及以上，Triton-Ascend 通过将 Triton 声明为安装依赖来缓解安装覆盖问题。 安装 Triton-Ascend 时会先安装社区 Triton，再由 Triton-Ascend 覆盖同名目录，从而避免后续安装其他依赖 Triton 的软件包时再次安装 Triton 而覆盖 Triton-Ascend。 x86 与 arm 使用不同版本的社区 Triton 安装包的原因是社区从 3.5 版本开始才提供 arm 版本安装包：x86 依赖 triton==3.2.0，arm 依赖 triton==3.5.0。"
+msgstr "A: triton-ascend 3.2.0 and below do not support this. You need to uninstall the community Triton first, then install Triton-Ascend.<br> For triton-ascend 3.2.1 and above, Triton-Ascend mitigates the installation overwrite issue by declaring Triton as an installation dependency. When installing Triton-Ascend, the community Triton is installed first, and then Triton-Ascend overwrites the directory with the same name, thereby preventing other packages that depend on Triton from reinstalling Triton and overwriting Triton-Ascend during subsequent installations. The reason x86 and arm use different versions of the community Triton installation packages is that the community only started providing arm version packages from version 3.5 onward: x86 depends on triton==3.2.0, while arm depends on triton==3.5.0."
+
+msgid "<br>"
+msgstr "<br>"
+
+msgid "注：若安装triton-ascend后，在安装依赖triton的三方件或者triton本身，将覆盖掉已安装的 Triton-Ascend 目录。 此时需要先卸载社区 Triton 和 Triton-Ascend，再安装 Triton-Ascend。"
+msgstr "Note: If you install triton-ascend and then install third-party components that depend on triton, or triton itself, the installed Triton-Ascend directory will be overwritten. In this case, you need to first uninstall the community Triton and Triton-Ascend, and then install Triton-Ascend."
+
+msgid "pip uninstall triton\\n"
+msgstr "pip uninstall triton"
+
+msgid "**Q: 能否在非 Ascend 硬件（如 CUDA AMD）上使用 Triton-Ascend？**"
+msgstr "**Q: Can Triton-Ascend be used on non-Ascend hardware (such as CUDA AMD)?**"
+
+msgid "A: 不可以，只能在 Ascend NPU 硬件环境使用 Triton-Ascend"
+msgstr "A: No, Triton-Ascend can only be used in the Ascend NPU hardware environment."
+
+msgid "2. 精度与数值一致性问题"
+msgstr "2\\. Precision and Numerical Consistency Issues"
+
+msgid "**Q: NPU 运行结果和 PyTorch/CPU/GPU 参考结果不一致，如何排查？**"
+msgstr "**Q: The NPU running results are inconsistent with the PyTorch/CPU/GPU reference results. How can I troubleshoot this?**"
+
+msgid "A: 用例请参考 [07_accuracy_comparison_example.md](../zh/examples/07_accuracy_comparison_example.md) 调试方法请参考 [解释器模式调试方法](./debug_guide/debugging.md#debug-interpreter-mode)"
+msgstr "A: For use cases, please refer to [07_accuracy_comparison_example.md](../zh/examples/07_accuracy_comparison_example.md). For debugging methods, please refer to [Interpreter Mode Debugging Guide](./debug_guide/debugging.md#debug-interpreter-mode)."
+
+msgid "3. 错误代码与异常处理"
+msgstr "3\\. Error Codes and Exception Handling"
+
+msgid "**Q: 为什么 kernel 编译时报 MLIRCompilationError？如何定位具体失败的 Pass？**"
+msgstr "**Q: Why does kernel compilation report MLIRCompilationError? How to locate the specific failing Pass?**"
+
+msgid "A: 请参考 [编译错误调试方法](./debug_guide/debugging.md#debug-compilation-error)"
+msgstr "A: Please refer to [Compilation Error Debugging Methods](./debug_guide/debugging.md#debug-compilation-error)"
+
+msgid "4. 调试与日志"
+msgstr "4\\. Debugging and Logging"
+
+msgid "**Q: 如何开启详细日志输出？TRITON_DEBUG=1 输出在哪？**"
+msgstr "**Q: How to enable detailed log output? Where does TRITON_DEBUG=1 output go?**"
+
+msgid "A: 可以使用 TRITON_DEBUG=1 获取详细的调试转储文件，请参考 [调试转储文件（Dump Files）](./debug_guide/debugging.md#debug-dump-files)"
+msgstr "A: You can use TRITON_DEBUG=1 to obtain detailed debug dump files. Please refer to [Debug Dump Files](./debug_guide/debugging.md#debug-dump-files)."
+
+msgid "**Q: 能否在 kernel 中打印中间张量值？tl.device_print 是否可用？**"
+msgstr "**Q: Can intermediate tensor values be printed in the kernel? Is tl.device_print available?**"
+
+msgid "A: 可以使用 tl.device_print 打印 kernel 中的张量，请参考 [打印调试方法](./debug_guide/debugging.md#debug-printing)"
+msgstr "A: You can use tl.device_print to print tensors in the kernel. Please refer to [Print Debugging Methods](./debug_guide/debugging.md#debug-printing)."
+
+msgid "5. 开发与贡献"
+msgstr "5\\. Development and Contribution"
+
+msgid "**Q: 如何本地构建并测试 Triton-Ascend？**"
+msgstr "**Q: How to build and test Triton-Ascend locally?**"
+
+msgid "A: 本地构建和测试方法，请参考 [通过源码安装Triton-Ascend](./installation_guide.md#install-from-source)"
+msgstr "A: For local build and testing methods, please refer to [Installing Triton-Ascend from Source](./installation_guide.md#install-from-source)"
+
+msgid "**Q: 提交 PR 需要通过哪些 CI 检查？**"
+msgstr "**Q: Which CI checks must be passed to submit a PR?**"
+
+msgid "A: PR 的 CI 检查包括：编码安全与规范检查、开源片段检查、恶意代码检查、编译构建、开发者测试"
+msgstr "A: PR's CI checks include: coding security and standards checks, open-source snippet checks, malicious code checks, compilation and build, and developer testing."
+
+msgid "6. 性能调优"
+msgstr "6\\. Performance Tuning"
+
+msgid "**Q: 有没有性能分析工具（profiler）可以使用？**"
+msgstr "**Q: Are there any performance analysis tools (profilers) available?**"
+
+msgid "A: 有集成性能分析工具（profiler），请参考 [算子性能调优方法](./debug_guide/profiling.md)"
+msgstr "A: There is an integrated performance analysis tool (profiler). Please refer to [Operator Performance Tuning Methods](./debug_guide/profiling.md)."
+
+msgid "7. UB Overflow 常见问题"
+msgstr "7\\. UB Overflow FAQ"
+
+msgid "**Q: 编译时报 \"UB Overflow\" 错误，如何解决？**"
+msgstr "**Q: Compilation reports \"UB Overflow\" error, how to resolve it?**"
+
+msgid "A: UB Overflow 是 Triton-Ascend 开发中常见的问题，请参考 [UB Overflow 问题排查指南](./debug_guide/ub_overflow.md) 排查问题。如果不知道如何减小tiling来减少UB占用，可以使用Autotune来自动选择最优配置，Autotune的使用请参考[Triton-Ascend autotune 使用指南](./autotune_guide.md)。 A5上可运行的算子迁移到A2/A3由于UB大小的差异可能导致UB Overflow，如果手动排查不出问题，也可采用Autotune自动选择最优配置。"
+msgstr "A: UB Overflow is a common issue in Triton-Ascend development. Please refer to the [UB Overflow Troubleshooting Guide](./debug_guide/ub_overflow.md) to diagnose the problem. If you are unsure how to reduce tiling to decrease UB usage, you can use Autotune to automatically select the optimal configuration. For guidance on using Autotune, please refer to the [Triton-Ascend Autotune Usage Guide](./autotune_guide.md). Operators that run on A5 may cause UB Overflow when migrated to A2/A3 due to differences in UB size. If manual troubleshooting fails to identify the issue, Autotune can also be used to automatically select the optimal configuration."
+
+msgid "8. Triton 使用限制"
+msgstr "8\\. Triton Usage Limitations"
+
+msgid "**Q: Triton Kernel 中指针参数有哪些使用限制？**"
+msgstr "**Q: What are the usage restrictions for pointer parameters in Triton Kernel?**"
+
+msgid "A: Triton-Ascend 编译器假设所有外部输入的指针参数本质上指向不同的内存区域，无法识别指针别名（Pointer Alias）场景。当多个指针参数在运行时实际指向同一块内存，但编译器无法获知这一事实时，可能导致优化失效或运行结果异常。例如："
+msgstr "A: The Triton-Ascend compiler assumes that all externally input pointer parameters essentially point to different memory regions and cannot recognize pointer alias scenarios. When multiple pointer parameters actually point to the same memory block at runtime, but the compiler cannot know this fact, it may lead to optimization failure or abnormal runtime results. For example:"
+
+msgid "@triton.jit\\n"
+msgstr "@triton.jit"
+
+msgid "上述代码中 `ptr0` 和 `ptr1` 实际指向同一块内存（即同一个 `in_out_tensor`），但编译器无法识别这种指针别名关系，因此这种同一个张量同时作为多个指针参数传入的写法是不受支持的，对应的 Kernel 将无法使能相关优化。"
+msgstr "In the above code, `ptr0` and `ptr1` actually point to the same memory block (i.e., the same `in_out_tensor`), but the compiler cannot recognize this pointer aliasing relationship. Therefore, this writing style where the same tensor is passed as multiple pointer parameters simultaneously is not supported, and the corresponding Kernel will not be able to enable related optimizations."
+
+msgid "**Q: 在 `if` / `for` / `while` / `scope` 等控制流OP中使用 `tl.load` / `tl.store` 有哪些限制？**"
+msgstr "**Q: What are the limitations of using `tl.load` / `tl.store` in control flow OPs such as `if` / `for` / `while` / `scope`?**"
+
+msgid "A: Triton-Ascend 支持同一来源 pointer 在控制流中进行简单地址更新后访存，`tl.load` / `tl.store` 放在控制流内部也是合理写法。 但不建议让不同来源或不同结构的 pointer 在控制流后合并，再统一执行访存；也不建议在复杂嵌套控制流中反复更新 pointer 状态并同时执行 store/read-after-write。"
+msgstr "A: Triton-Ascend supports memory access after simple address updates to a pointer from the same source within control flow; placing `tl.load` / `tl.store` inside control flow is also a reasonable pattern. However, it is not recommended to merge pointers from different sources or with different structures after control flow and then perform memory access uniformly; it is also not recommended to repeatedly update pointer states in complex nested control flow while simultaneously performing store/read-after-write operations."
+
+msgid "当前版本对于 `if` / `for` / `while` / `scope` 与 `tl.load` / `tl.store` 组合使用的场景支持还不完备，后续版本会持续完善。当前建议遵循以下限制。"
+msgstr "Current version support for combining `if` / `for` / `while` / `scope` with `tl.load` / `tl.store` is not yet complete, and future versions will continue to improve it. For now, it is recommended to follow the following restrictions."
+
+msgid "不推荐让不同基地址的 pointer，或在不同分支中分别构造的 block pointer，在分支后合并再访存："
+msgstr "It is not recommended to merge pointers with different base addresses, or block pointers constructed separately in different branches, after the branch and then perform memory access."
+
+msgid "if cond:\\n"
+msgstr "if condition:"
+
+msgid "推荐把访存放在各自分支中，让分支合并 loaded value，而不是 pointer 或 block pointer："
+msgstr "It is recommended to store the visitor in its own branch, allowing the branch to merge the loaded value rather than the pointer or block pointer."

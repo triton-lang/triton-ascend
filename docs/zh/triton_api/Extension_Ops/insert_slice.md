@@ -67,13 +67,13 @@ def triton_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
     mask = offsets < n_elements
     x = tl.load(x_ptr + offsets, mask=mask)
     y = tl.load(y_ptr + offsets, mask=mask)
-    # 提取切片
+    # Extract slices
     x_sub = tl.extract_slice(x, [block_start+SLICE_OFFSET], [SLICE_SIZE], [1])
     y_sub = tl.extract_slice(y, [block_start+SLICE_OFFSET], [SLICE_SIZE], [1])
     output_sub = x_sub + y_sub
-    # 加载原始输出张量
+    # Load the original output tensor
     output = tl.load(output_ptr + offsets, mask=mask)
-    # 将计算结果插入回原张量
+    # Insert the computation result back into the original tensor
     output = tl.insert_slice(output, output_sub, [block_start+SLICE_OFFSET], [SLICE_SIZE], [1])
     tl.store(output_ptr + offsets, output, mask=mask)
 ```

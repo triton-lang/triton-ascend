@@ -28,7 +28,7 @@ from triton.backends.ascend.runtime import max_autotune
     ],
     key=["M", "N"],
     kernel_type="mix",
-    # 额外的调优参数，每个值必须是列表
+    # Additional tuning parameters; each value must be a list
     enable_hivm_auto_cv_balance=[True, False],
     tile_mix_vector_loop=[2, 4],
 )
@@ -149,7 +149,7 @@ configs=[
     key=["M", "N"],
     kernel_type="vector",
     num_stages=[1, 2],
-    # enable_ubuf_saving 已在基础配置中固定为 False，不会使用默认值 [True]
+    # enable_ubuf_saving has been fixed to False in the base configuration; the default value [True] will not be used
 )
 @triton.jit
 def kernel(...):
@@ -163,12 +163,12 @@ def kernel(...):
 如果通过 `tuning_params` 传递了当前 `kernel_type` 不支持的参数，会产生警告并忽略该参数：
 
 ```python
-# 警告：tile_mix_vector_loop 不支持 kernel_type="vector"
+# Warning: tile_mix_vector_loop does not support kernel_type="vector"
 @max_autotune(
     configs=[...],
     key=["M"],
     kernel_type="vector",
-    tile_mix_vector_loop=[2, 4],  # 将被忽略并产生警告
+    tile_mix_vector_loop=[2, 4],  # Will be ignored and generate a warning
 )
 @triton.jit
 def kernel(...):
@@ -180,11 +180,11 @@ def kernel(...):
 `tuning_params` 中的每个值必须是列表或元组，且不能为空：
 
 ```python
-# 正确写法
+# Correct way to write it
 enable_hivm_auto_cv_balance=[True, False]
 
-# 错误写法：不是列表
-enable_hivm_auto_cv_balance=True  # 将导致验证错误
+# Incorrect usage: Not a list
+enable_hivm_auto_cv_balance=True  # Will result in a validation error
 ```
 
 ### 3. 配置数量增长

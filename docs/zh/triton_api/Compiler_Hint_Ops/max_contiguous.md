@@ -43,10 +43,10 @@ Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力�
 def triton_max_contiguous(A, B, BLOCK_SIZE : tl.constexpr):
     offsets = tl.arange(0, BLOCK_SIZE)
     val = tl.load(A + offsets)
-    # 声明offset里的前BLOCK_SIZE个数是连续的
+    # Declare that the first BLOCK_SIZE values in the offset are contiguous
     input_data = tl.max_contiguous(val, [BLOCK_SIZE])
 
-    # 编译器可以生成更高效的内存访问指令
+    # The compiler can generate more efficient memory access instructions
     result = input_data* 2
     tl.store(B + offsets, result)
 ```

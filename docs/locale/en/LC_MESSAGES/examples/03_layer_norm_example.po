@@ -1,0 +1,55 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:21+0000\n"
+"PO-Revision-Date: 2026-08-11 02:21+0000\n"
+
+"X-Source-Commit: 07739fd97a253224e4b1cdf99fb6d8285f64f6f2\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "Layer Normalization Example"
+
+msgid "层标准化 （Layer Normalization）"
+msgstr "Layer Normalization"
+
+msgid "在本节中，我们将使用 Triton 编写一个比 PyTorch 实现运行更快的高性能层标准化 (Layer Normalization) 内核。"
+msgstr "In this section, we will use Triton to write a high-performance Layer Normalization kernel that runs faster than the PyTorch implementation."
+
+msgid "计算内核"
+msgstr "Compute kernel"
+
+msgid "import pytest\\n"
+msgstr "import pytest"
+
+msgid "使用 Triton 自定义的 LayerNorm 实现方式"
+msgstr "Custom LayerNorm implementation using Triton"
+
+msgid "@torch.inference_mode()\\n"
+msgstr "@torch.inference_mode()"
+
+msgid "结果"
+msgstr "Result"
+
+msgid "y_tri: tensor([[ 0.2512,  0.0647,  0.8389,  ...,  2.3652,  1.5039,  1.1904],\\n"
+msgstr "y_tri: tensor([[ 0.2512,  0.0647,  0.8389,  ...,  2.3652,  1.5039,  1.1904],"
+
+msgid "“Layer Normalization 128,128 torch.float16 PASSED!”、 “Layer Normalization 128,128 torch.bfloat16 PASSED!”、 “Layer Normalization 128,128 torch.float32 PASSED!” 表明Triton和PyTorch上float16、bfloat16、float32数据类型的输出结果完全一致。"
+msgstr "\"Layer Normalization 128,128 torch.float16 PASSED!\", \"Layer Normalization 128,128 torch.bfloat16 PASSED!\", \"Layer Normalization 128,128 torch.float32 PASSED!\" indicate that the output results for float16, bfloat16, and float32 data types on Triton and PyTorch are completely consistent."
+
+msgid "<br />\\n"
+msgstr "<br />"
+
+msgid "\\\\\\n"
+msgstr "\\\\\\n"

@@ -1,0 +1,43 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:21+0000\n"
+"PO-Revision-Date: 2026-08-11 02:21+0000\n"
+
+"X-Source-Commit: 815d44f2633c8d2b783260f01bec3b1a83a8b87a\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "精度对比示例"
+
+msgid "精度比对 （Accuracy Comparison）"
+msgstr "Accuracy Comparison"
+
+msgid "在本节中，我们将使用 Triton 编写一个简单的精度比对的程序。 在此过程中，用户会学习到："
+msgstr "In this section, we will use Triton to write a simple accuracy comparison program. In the process, users will learn:"
+
+msgid "Triton 每种数据类型的精度比对方法。"
+msgstr "Precision comparison method for each data type in Triton."
+
+msgid "计算内核:"
+msgstr "Computing kernel:"
+
+msgid "def test_add(x0, x1):\\n"
+msgstr "def test_add(x0, x1):"
+
+msgid "创建一个精度比对函数，适应每一种dtype，采用对应的精度比对方法。"
+msgstr "Create a precision comparison function that adapts to each dtype and uses the corresponding precision comparison method."
+
+msgid "\\n"
+msgstr "Accuracy comparison example"

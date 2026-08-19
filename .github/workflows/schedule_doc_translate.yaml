@@ -1,0 +1,212 @@
+#
+# Copyright (c) 2025 Huawei Technologies Co., Ltd. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# This file is a part of the triton-ascend project.
+#
+
+name: Auto Doc Translate
+
+on:
+  schedule:
+    - cron: '0 0 */3 * *'
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: 'Target branch for the PR'
+        required: false
+        default: 'main'
+        type: string
+      full_translate:
+        description: 'Full translation: translate ALL docs (excluding python-api,triton_api,triton_api_extension,libdevice)'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: translation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      TARGET_BRANCH: ${{ inputs.target_branch || 'main' }}
+      GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          token: ${{ env.GH_TOKEN }}
+          ref: ${{ env.TARGET_BRANCH }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install openai sphinx myst-parser sphinx_rtd_theme
+
+      - name: Clean stale locale files for full translation
+        if: inputs.full_translate
+        run: |
+          echo "Cleaning old locale files to force full retranslation..."
+          rm -rf docs/locale/
+          rm -rf locale/
+          echo "Cleaned."
+
+      - name: Detect whether to translate
+        id: detect
+        run: |
+          # Determine mode: full translation or incremental
+          if [ "${{ inputs.full_translate }}" = "true" ]; then
+            echo "Full translation mode"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "full_translate=true" >> $GITHUB_OUTPUT
+          elif { [ -d "docs/locale/en/LC_MESSAGES" ] && [ "$(find docs/locale/en/LC_MESSAGES/ -name '*.po' 2>/dev/null | wc -l)" -gt 0 ]; } || \
+               { [ -d "locale/en/LC_MESSAGES" ] && [ "$(find locale/en/LC_MESSAGES/ -name '*.po' 2>/dev/null | wc -l)" -gt 0 ]; }; then
+            echo "Incremental mode: will detect changes via sphinx-build -b gettext"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "full_translate=false" >> $GITHUB_OUTPUT
+          else
+            echo "No existing .po files — performing full translation"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "full_translate=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Translate via DeepSeek API
+        if: steps.detect.outputs.has_changes == 'true'
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          if [ "${{ steps.detect.outputs.full_translate }}" = "true" ]; then
+            python .github/workflows/scripts/translate_md.py \
+              --first-time \
+              --output-json /tmp/translation_results.json
+          else
+            python .github/workflows/scripts/translate_md.py \
+              --all \
+              --output-json /tmp/translation_results.json
+          fi
+
+      - name: Process translated .po files
+        if: steps.detect.outputs.has_changes == 'true'
+        id: results
+        run: |
+          if [ ! -f /tmp/translation_results.json ]; then
+            echo "No translation results found"
+            exit 1
+          fi
+
+          success_files=$(python3 -c "
+          import json
+          with open('/tmp/translation_results.json') as f:
+              data = json.load(f)
+          for p in data.get('success_files', []):
+              print(p)
+          ")
+
+          if [ -z "$success_files" ]; then
+            echo "No files were successfully translated"
+            exit 1
+          fi
+
+          count=0
+          file_list=""
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            if [ -f "$file" ]; then
+              count=$((count + 1))
+              file_list="${file_list}- <code>${file}</code>"$'\n'
+              git add "$file"
+            fi
+          done <<< "$success_files"
+
+          [ $count -eq 0 ] && echo "No files to commit" && exit 1
+          echo "Staged $count translated .po file(s)"
+          {
+            echo "file_count=$count"
+            echo "file_list<<EOF"
+            echo "$file_list"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Create branch and commit
+        if: steps.detect.outputs.has_changes == 'true'
+        run: |
+          git diff --cached --quiet && echo "Nothing to commit" && exit 1
+
+          BRANCH_NAME="auto-pr/doc-translate-$(date +%Y%m%d%H%M%S)"
+          echo "BRANCH_NAME=${BRANCH_NAME}" >> $GITHUB_ENV
+
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          git checkout -b "${BRANCH_NAME}"
+
+          count=$(git diff --cached --name-only | wc -l)
+          git commit -s -m "[doc](feat) Auto-translate ${count} file(s) (Sphinx gettext)"
+          git push origin "${BRANCH_NAME}"
+
+      - name: Create Pull Request
+        if: steps.detect.outputs.has_changes == 'true'
+        env:
+          FILE_LIST: ${{ steps.results.outputs.file_list }}
+          FILE_COUNT: ${{ steps.results.outputs.file_count }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PR_HEAD: ${{ github.repository_owner }}:${{ env.BRANCH_NAME }}
+          PR_BASE: ${{ env.TARGET_BRANCH }}
+        run: |
+          if [ -z "${{ env.BRANCH_NAME }}" ]; then
+            echo "Error: BRANCH_NAME not set"
+            exit 1
+          fi
+
+          DATE=$(date +%Y-%m-%d)
+          # PR title must match: [<component>](<type>) <subject>
+          # Allowed types: feat | fix | NFC | style | test | chore | revert
+          # Max length: 72 chars
+          TITLE="[doc](feat) Auto-translate Chinese docs to English ${DATE}"
+
+          BODY=$(cat <<-BODYEOF
+          ## Auto-Translation Summary
+
+          Translated **${FILE_COUNT}** gettext .po file(s):
+
+          ${FILE_LIST}
+
+          This PR uses the **direct doc translation workflow**:
+          - Scans \`docs/zh/\` for Chinese source files (.md, .rst)
+          - Translates them via DeepSeek API into \`locale/en/LC_MESSAGES/\` preserving directory structure
+          - Read the Docs builds English docs using \`docs/conf_en.py\` with \`language=en\`
+
+          ---
+
+          [Workflow run](${RUN_URL})
+
+          > This PR was automatically generated by the scheduled doc translation workflow.
+          BODYEOF
+          )
+
+          gh pr create \
+            --base "${PR_BASE}" \
+            --head "${PR_HEAD}" \
+            --title "${TITLE}" \
+            --body "${BODY}" \
+            --repo "${{ github.repository }}" \
+            2>&1 || true

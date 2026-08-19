@@ -16,7 +16,7 @@ import triton.language as tl
 
 def test_triton_autotune():
 
-    # 返回一组不同的 kernel 配置，用于 autotune 测试
+    # Return a set of different kernel configurations for autotune testing
     def get_autotune_config():
         return [
             triton.Config({'XS': 1 * 128, 'multibuffer': True}),
@@ -26,89 +26,89 @@ def test_triton_autotune():
         ]
 
     @triton.autotune(
-        configs=get_autotune_config(),      # 配置列表
-        key=["numel"],                      # 当numel大小发生变化时会触发autotune
+        configs=get_autotune_config(),      # Configuration list
+        key=["numel"],                      # Autotune is triggered when the numel size changes
     )
     @triton.jit
     def triton_calc_kernel(
         out_ptr0, in_ptr0, in_ptr1, numel,
-        XS: tl.constexpr                  # 块大小，用于控制每个线程块处理多少数据
+        XS: tl.constexpr                  # Block size, controls how much data each thread block processes
     ):
-        pid = tl.program_id(0)            # 获取当前 program 的 ID
-        idx = pid * XS + tl.arange(0, XS) # 当前线程块处理的 index 范围
-        msk = idx < numel                 # 避免越界的掩码
+        pid = tl.program_id(0)            # Get the ID of the current program
+        idx = pid * XS + tl.arange(0, XS) # Index range processed by the current thread block
+        msk = idx < numel                 # Mask to avoid out-of-bounds access
 
-        # 重复执行一些计算以模拟负载（并测试性能）/ Repeat computation to simulate load (for perf test)
+        # Repeat some computation to simulate load (and test performance) / Repeat computation to simulate load (for perf test)
         for i in range(10000):
-            tmp0 = tl.load(in_ptr0 + idx, mask=msk, other=0.0)  # 加载 x0
-            tmp1 = tl.load(in_ptr1 + idx, mask=msk, other=0.0)  # 加载 x1
-            tmp2 = tl.math.exp(tmp0) + tmp1 + i                # 计算
-            tl.store(out_ptr0 + idx, tmp2, mask=msk)           # 存储到输出
+            tmp0 = tl.load(in_ptr0 + idx, mask=msk, other=0.0)  # Load x0
+            tmp1 = tl.load(in_ptr1 + idx, mask=msk, other=0.0)  # Load x1
+            tmp2 = tl.math.exp(tmp0) + tmp1 + i                # Compute
+            tl.store(out_ptr0 + idx, tmp2, mask=msk)           # Store to output
 
-    # Triton 调用函数，自动使用 autotuned kernel
+    # Triton invocation function that automatically uses the autotuned kernel
     def triton_calc_func(x0, x1):
         n = x0.numel()
         y0 = torch.empty_like(x0)
-        grid = lambda meta: (triton.cdiv(n, meta["XS"]), 1, 1)  # 计算 grid 大小
+        grid = lambda meta: (triton.cdiv(n, meta["XS"]), 1, 1)  # Compute the grid size
         triton_calc_kernel[grid](y0, x0, x1, n)
         return y0
 
-    # 使用 PyTorch 作为参考实现进行对比
+    # Use PyTorch as the reference implementation for comparison
     def torch_calc_func(x0, x1):
         return torch.exp(x0) + x1 + 10000 - 1
 
-    DEV = "npu"                         # 使用 NPU 作为设备
+    DEV = "npu"                         # Use NPU as the device
     DTYPE = torch.float32
-    N = 192 * 1024                      # 输入长度
-    x0 = torch.randn((N,), dtype=DTYPE, device=DEV)  # 随机输入 x0
-    x1 = torch.randn((N,), dtype=DTYPE, device=DEV)  # 随机输入 x1
-    torch_ref = torch_calc_func(x0, x1)              # 得到参考结果
-    triton_cal = triton_calc_func(x0, x1)            # 运行 Triton kernel
-    torch.testing.assert_close(triton_cal, torch_ref)  # 验证输出是否一致
+    N = 192 * 1024                      # Input length
+    x0 = torch.randn((N,), dtype=DTYPE, device=DEV)  # Random input x0
+    x1 = torch.randn((N,), dtype=DTYPE, device=DEV)  # Random input x1
+    torch_ref = torch_calc_func(x0, x1)              # Get the reference result
+    triton_cal = triton_calc_func(x0, x1)            # Run the Triton kernel
+    torch.testing.assert_close(triton_cal, torch_ref)  # Verify the outputs match
 
 if __name__ == "__main__":
     test_triton_autotune()
-    print("success: test_triton_autotune")  # 输出成功标志 / Print success message
+    print("success: test_triton_autotune")  # Print success flag / Print success message
 ```
 
 ## 进阶 autotune 使用示例
 
 ```Python
-# 下面说明进阶 autotune 与社区版的参数使用要点
+# The following explains the key parameter usage differences between the advanced autotune and the community version
 #
-# configs：
-# - 社区版 autotune（默认）需要显式传入一组 triton.Config，框架会对这些配置逐一编译并基准测试以选择最优配置
-# - 进阶版 autotune 框架基于 kernel 自动生成候选 tiling 配置，并对配置逐一编译并基准测试以选择最优配置
-# * 注意：1. 进阶模式启动需用户手动 import triton.backends.ascend.runtime;
-#        2. 若 configs=[]，框架基于 kernel 自动生成候选 tiling 配置，注意此时需要将@triton.autotune装饰器直接应用在@triton.jit之上，
-#           中间不能插入其他装饰器，例如libentry;
-#        3. 若 configs 不为空，则框架默认不会自动生成候选 tiling 配置;
-#        4. 若 configs 不为空，且hints.auto_gen_config=True,则框架自动生成Config,并与用户定义Config合并进行配置择优；
-#        5. 进阶版本支持通过设置os.environ["TRITON_BENCH_METHOD"] = ( "npu" ) 来设置性能采集方式。
+# configs:
+# - Community autotune (default) requires explicitly passing a set of triton.Config; the framework compiles and benchmarks each config one by one to select the best one
+# - Advanced autotune: the framework automatically generates candidate tiling configs based on the kernel, and compiles and benchmarks each config to select the best one
+# * Note: 1. To enable advanced mode, users must manually import triton.backends.ascend.runtime;
+#        2. If configs=[], the framework automatically generates candidate tiling configs based on the kernel; note that the @triton.autotune decorator must be applied directly on top of @triton.jit,
+#           and no other decorators (e.g. libentry) may be inserted in between;
+#        3. If configs is not empty, the framework will not automatically generate candidate tiling configs;
+#        4. If configs is not empty and hints.auto_gen_config=True, the framework auto-generates Configs and merges them with user-defined Configs for selection;
+#        5. The advanced version supports setting the performance measurement method via os.environ["TRITON_BENCH_METHOD"] = ("npu").
 #
-# hints(Dict[str, str])：
-# 注意：1. hints可选，用户不填时框架会自动解析切分轴（split_params），分块轴（tiling_params）等相关参数
-#      2. 用户可通过hints传参来生成tiling,涉及切分轴（split_params）、分块轴（tiling_params）、低维轴（low_dim_axes）、规约轴（reduction_axes），且四个参数需同时提供
+# hints(Dict[str, str]):
+# Note: 1. hints is optional; if not provided, the framework automatically parses related parameters such as split_params and tiling_params
+#      2. Users can pass hints to generate tiling; this involves split_params, tiling_params, low_dim_axes, and reduction_axes, and all four parameters must be provided together
 
-# split_params (Dict[str, str]): axis name: argument name组成的字典, argument 是切分轴的可调参数, 例如 'XBLOCK'
-#     axis name必须在参数key的轴名称集合里。 请勿在轴名称前添加前缀 r
-#     此参数可以为空，当split_params 和 tiling_params 都为空的时候不会进行自动寻优
-#     切分轴通常可以根据 `tl.program_id()` 分核语句来确定
-# tiling_params (Dict[str, str]): axis name: argument name组成的字典， argument 是分块轴的可调参数, 例如 'XBLOCK_SUB'
-#     axis name必须在参数key的轴名称集合里。请勿在轴名称前添加前缀 r
-#     此参数可以为空，当split_params 和 tiling_params 都为空的时候不会进行自动寻优
-#     分块轴通常可以根据 `tl.arange()` 分块表达式来确定
-# low_dim_axes (List[str]): 所有低维轴的轴名称列表，axis name必须在参数key的轴名称集合里
-# reduction_axes (List[str]): 所有规约轴的轴名称列表，axis name必须在参数key的轴名称集合里， 在轴名称前添加前缀 r
-# auto_gen_config (bool): 默认为False,涉及如下场景组合
-#     1. 用户未定义Config,无论是否设置auto_gen_config,框架默认自动生成Config；
-#     2. 用户定义了Config,且auto_gen_config=False,则框架不自动生成Config,只使用用户定义的Config；
-#     3. 用户定义了Config,且auto_gen_config=True,则框架自动生成Config,并与用户定义Config合并进行配置择优；
+# split_params (Dict[str, str]): A dict of axis name: argument name; argument is the tunable parameter of the split axis, e.g. 'XBLOCK'
+#     The axis name must be in the set of axis names of the parameter keys. Do not prefix the axis name with r
+#     This parameter can be empty; when both split_params and tiling_params are empty, no automatic optimization is performed
+#     The split axis can usually be determined by the `tl.program_id()` kernel-splitting statement
+# tiling_params (Dict[str, str]): A dict of axis name: argument name; argument is the tunable parameter of the tiling axis, e.g. 'XBLOCK_SUB'
+#     The axis name must be in the set of axis names of the parameter keys. Do not prefix the axis name with r
+#     This parameter can be empty; when both split_params and tiling_params are empty, no automatic optimization is performed
+#     The tiling axis can usually be determined by the `tl.arange()` tiling expression
+# low_dim_axes (List[str]): List of axis names of all low-dimension axes; the axis name must be in the set of axis names of the parameter keys
+# reduction_axes (List[str]): List of axis names of all reduction axes; the axis name must be in the set of axis names of the parameter keys, with the prefix r added before the axis name
+# auto_gen_config (bool): Defaults to False; involves the following scenarios
+#     1. If the user has not defined Config, the framework auto-generates Config by default regardless of the auto_gen_config setting;
+#     2. If the user defines Config and auto_gen_config=False, the framework does not auto-generate Config and only uses the user-defined Config;
+#     3. If the user defines Config and auto_gen_config=True, the framework auto-generates Config and merges it with the user-defined Config for selection;
 #
-# key（list[str]/Dict[str,str]）：
-# - 传入运行时参数名列表；列表中任一参数值变化会触发候选配置的重新生成与评估
-# 注意：1.若hints传递切分轴（split_params）、分块轴（tiling_params）、低维轴（low_dim_axes）、规约轴（reduction_axes）参数信息，key类型需为Dict[str,str],如示例1：
-#      2.若hints不传递切分轴（split_params）、分块轴（tiling_params）、低维轴（low_dim_axes）、规约轴（reduction_axes）参数信息，key类型需为list[str]，轴信息会按参数顺利进行分配，如示例2：
+# key (list[str]/Dict[str,str]):
+# - A list of runtime parameter names; a change in any parameter value triggers regeneration and re-evaluation of candidate configs
+# Note: 1. If hints passes split_params, tiling_params, low_dim_axes, reduction_axes, the key type must be Dict[str,str], as in Example 1:
+#      2. If hints does not pass split_params, tiling_params, low_dim_axes, reduction_axes, the key type must be list[str], and axis information is assigned according to the parameter order, as in Example 2:
 
 示例1:
 @triton.autotune(
@@ -128,27 +128,27 @@ if __name__ == "__main__":
 )
 @triton.jit
 def add_kernel(
-    x_ptr,  # *指向*第一个输入向量的指针。
-    y_ptr,  # *指向*第二个输入向量的指针。
-    output_ptr,  # *指向*输出向量的指针。
-    n_elements,  # 向量的大小。
-    BLOCK_SIZE: tl.constexpr,  # 每个核应该处理的元素数量。
-    # 注意：`constexpr` 表示它可以在编译时确定，因此可以作为形状（shape）值使用。
+    x_ptr,  # *Pointer* to the first input vector.
+    y_ptr,  # *Pointer* to the second input vector.
+    output_ptr,  # *Pointer* to the output vector.
+    n_elements,  # Size of the vector.
+    BLOCK_SIZE: tl.constexpr,  # Number of elements each kernel should process.
+    # Note: `constexpr` means it can be determined at compile time, so it can be used as a shape value.
 ):
-    pid = tl.program_id(axis=0)  # 我们使用一维的grid，因此轴为0。
-    # 当前核将处理的数据在内存中相对于起始地址的偏移。
-    # 例如，如果你有一个长度为256的向量，且块大小（block_size）为64，那么各个程序
-    # 将分别访问元素 [0:64, 64:128, 128:192, 192:256]。
-    # 注意，offsets 是一个指针列表：
+    pid = tl.program_id(axis=0)  # We use a 1D grid, so the axis is 0.
+    # The offset of the data this kernel will process in memory relative to the starting address.
+    # For example, if you have a vector of length 256 and a block size of 64, each program
+    # will access elements [0:64, 64:128, 128:192, 192:256] respectively.
+    # Note that offsets is a list of pointers:
     block_start = pid * BLOCK_SIZE
     offsets = block_start + tl.arange(0, BLOCK_SIZE)
-    # 创建一个掩码（mask），以防止内存操作访问越界。
+    # Create a mask to prevent memory operations from accessing out of bounds.
     mask = offsets < n_elements
-    # 加载x和y，并使用掩码屏蔽掉多余的元素，以防输入向量的长度不是块大小的整数倍。
+    # Load x and y, masking out extra elements in case the input vector length is not a multiple of the block size.
     x = tl.load(x_ptr + offsets, mask=mask)
     y = tl.load(y_ptr + offsets, mask=mask)
     output = x + y
-    # 将 x + y 写回。
+    # Write x + y back.
     tl.store(output_ptr + offsets, output, mask=mask)
 ```
 
@@ -175,8 +175,8 @@ def kernel_func(
     # kernel implementation
     ...
 
-# XBLOCK和XBLOCK_SUB未传入，则作为切分轴和分块轴参数的候选项
-# BLOCK_SIZE以关键字参数传入，不作为参数候选项，不会被识别
+# XBLOCK and XBLOCK_SUB are not passed, so they are candidates for split axis and tiling axis parameters
+# BLOCK_SIZE is passed as a keyword argument, so it is not a parameter candidate and will not be recognized
 kernel_func[grid](y, x, n_rows, n_cols, BLOCK_SIZE=block_size)
 ```
 
@@ -191,7 +191,7 @@ kernel_func[grid](y, x, n_rows, n_cols, BLOCK_SIZE=block_size)
 ```Python
 @triton.autotune(
     configs=[],
-    key={"n_elements"} # 需要指定
+    key={"n_elements"} # Must be specified
     ...
 )
 @triton.jit
@@ -212,7 +212,7 @@ def triton_func(...):
     mask = offsets < n_elements # 1
     mask = offsets < min(..., n_elements) # 2
 
-# 解析得到切分轴参数 split_params = {"x": "XBLOCK"}
+# The split axis parameter is resolved as split_params = {"x": "XBLOCK"}
 ```
 
 #### 分块轴参数解析
@@ -225,7 +225,7 @@ def triton_func(...):
 
 ```Python
 @triton.autotune(
-    key={"n_rows", "n_cols"} # 需要指定
+    key={"n_rows", "n_cols"} # Must be specified
     ...
 )
 @triton.jit
@@ -247,8 +247,8 @@ def triton_func(...):
         xmask = row_offsets < min(..., n_rows) # 2
         ymask = col_offsets < n_cols
 
-# 解析得到分块轴参数 tiling_params = {"x": "XBLOCK_SUB"}
-# 参数BLOCK_SIZE虽然也在tl.arange中且与n_cols比较计算mask，但不是一个分块轴参数
+# The tiling axis parameter is resolved as tiling_params = {"x": "XBLOCK_SUB"}
+# Although BLOCK_SIZE is also used in tl.arange and compared with n_cols to compute the mask, it is not a tiling axis parameter
 ```
 
 #### 低维轴参数解析
@@ -261,7 +261,7 @@ def triton_func(...):
 
 ```Python
 @triton.autotune(
-    key={"n_rows", "n_cols"} # 会按顺序自动分配成 {"x": "n_rows", "y": "n_cols"}
+    key={"n_rows", "n_cols"} # Will be automatically assigned in order as {"x": "n_rows", "y": "n_cols"}
     ...
 )
 @triton.jit
@@ -274,8 +274,8 @@ def triton_func(...):
         xmask = row_offsets < n_rows
         ymask = col_offsets < n_cols
 
-# 解析得到低维轴 low_dim_axes = {"y"}
-# row_offsets虽然也通过tl.arange计算且与n_rows比较计算mask，但切片在低维进行扩充，所以x不是一个低维轴
+# The low-dimension axis is resolved as low_dim_axes = {"y"}
+# Although row_offsets is also computed via tl.arange and compared with n_rows to compute the mask, the slicing expands along the low dimension, so x is not a low-dimension axis
 ```
 
 #### 参数指针解析
@@ -303,7 +303,7 @@ def triton_func(input_ptr, output_ptr, ...):
     outputs_ptr = output_ptr + offsets
     tl.store(outputs_ptr, input, mask=mask)
 
-# 解析得到指针类型参数为：input_ptr, output_ptr
+# The pointer type parameters are resolved as: input_ptr, output_ptr
 ```
 
 ## 更多功能
@@ -311,8 +311,8 @@ def triton_func(input_ptr, output_ptr, ...):
 ### 自动生成最优配置的 Profiling 结果
 
 ```Python
-# 自动在`auto_profile_dir`目录中生成当前autotune最优kernel配置的profiling结果，即利用`torch_npu.profiler.profile`采集的性能数据
-# 在社区autotune用法和进阶autotune用法中均可生效
+# Automatically generate profiling results of the current optimal autotune kernel configuration in the `auto_profile_dir` directory, i.e., performance data collected via `torch_npu.profiler.profile`
+# This takes effect in both community autotune usage and advanced autotune usage
 @triton.autotune(
     auto_profile_dir="./profile_result",
     ...

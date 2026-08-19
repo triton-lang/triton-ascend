@@ -36,13 +36,13 @@ import triton.language as tl
 
 @triton.jit
 def basic_static_assert_example(x_ptr, BLOCK_SIZE: tl.constexpr):
-    # 基本断言：检查BLOCK_SIZE是否为2的幂次
+    # Basic assertion: check whether BLOCK_SIZE is a power of 2
     tl.static_assert((BLOCK_SIZE & (BLOCK_SIZE - 1)) == 0)
 
-    # 带自定义错误消息的断言
+    # Assertion with a custom error message
     tl.static_assert(BLOCK_SIZE >= 64, "BLOCK_SIZE must be at least 64 for performance")
 
-    # 在static_assert的条件中出现非常量会编译错误
+    # A non-constant in the static_assert condition causes a compilation error
     # val = tl.load(x_ptr)
     # tl.static_assert(val <= 64)
 ```

@@ -51,11 +51,11 @@ NPU 与 GPU 的计算单元和支持的数据类型存在差异。迁移后应�
 
 ```diff
 import torch
-import torch_npu  # 【新增】导入昇腾NPU PyTorch适配库，提供NPU设备支持
+import torch_npu  # [NEW] Import the Ascend NPU PyTorch adaptation library to provide NPU device support
 import triton
 import triton.language as tl
 
-# DEVICE = triton.runtime.driver.active.get_active_torch_device()  # 【删除】GPU设备自动获取，NPU无需此逻辑
+# DEVICE = triton.runtime.driver.active.get_active_torch_device()  # [DELETE] Automatic GPU device acquisition; not needed on NPU
 
 @triton.jit
 def add_kernel(
@@ -76,7 +76,7 @@ def add_kernel(
 
 def add(x: torch.Tensor, y: torch.Tensor):
     output = torch.empty_like(x)
-    # assert x.device == DEVICE and y.device == DEVICE and output.device == DEVICE  # 【删除】GPU设备一致性校验，NPU无需显式断言
+    # assert x.device == DEVICE and y.device == DEVICE and output.device == DEVICE  # [DELETE] GPU device consistency check; no explicit assertion needed on NPU
     n_elements = output.numel()
     grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
     add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
@@ -84,10 +84,10 @@ def add(x: torch.Tensor, y: torch.Tensor):
 
 torch.manual_seed(0)
 size = 98432
-# x = torch.rand(size, device='cuda')  # 【删除】GPU设备指定
-x = torch.rand(size, device='npu')  # 【修改】指定为昇腾NPU设备
-# y = torch.rand(size, device='cuda')  # 【删除】GPU设备指定
-y = torch.rand(size, device='npu')  # 【修改】指定为昇腾NPU设备
+# x = torch.rand(size, device='cuda')  # [DELETE] GPU device specification
+x = torch.rand(size, device='npu')  # [MODIFY] Specify the Ascend NPU device
+# y = torch.rand(size, device='cuda')  # [DELETE] GPU device specification
+y = torch.rand(size, device='npu')  # [MODIFY] Specify the Ascend NPU device
 output_torch = x + y
 output_triton = add(x, y)
 print(output_torch)
@@ -212,7 +212,7 @@ def zeros_like(x, *, dtype=None, layout=None, device=None, pin_memory=None, memo
     N = x.numel()
     grid_fn = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
 
-    zeros_kernel[grid_fn](out, N, BLOCK_SIZE=1024)  # 原始值过小
+    zeros_kernel[grid_fn](out, N, BLOCK_SIZE=1024)  # Original value too small
     return out
 ```
 
@@ -247,7 +247,7 @@ def zeros_like(x, *, dtype=None, layout=None, device=None, pin_memory=None, memo
     out = torch.empty_like(x, device=device, dtype=dtype)
     N = x.numel()
     min_block_size = triton.next_power_of_2(triton.cdiv(N, 65535))
-    BLOCK_SIZE = max(32768, min_block_size) # 至少为 32768
+    BLOCK_SIZE = max(32768, min_block_size) # At least 32768
     grid_fn = lambda meta: (triton.cdiv(N, meta["BLOCK_SIZE"]),)
 
     zeros_kernel[grid_fn](out, N, BLOCK_SIZE=BLOCK_SIZE)
@@ -257,7 +257,7 @@ def zeros_like(x, *, dtype=None, layout=None, device=None, pin_memory=None, memo
 ### 动态计算适合的 BLOCK_SIZE 以避免 coreDim 超限
 
 ```diff
-optimal_block_size = 32768  # 根据计算得出的优化值
+optimal_block_size = 32768  # The optimized value derived from calculation
 
 grid_fn = lambda meta: (triton.cdiv(N, optimal_block_size),)
 
@@ -296,14 +296,14 @@ def masked_fill_kernel(inp, expand_mask, value, out, N, BLOCK_SIZE: tl.constexpr
     tl.store(out + offsets, value, fill_mask & mask)
 
 def masked_fill(inp, mask, value):
-    # ... 参数验证代码 ...
+    # ... parameter validation code ...
     # inp.device = "npu"
     out = torch.zeros_like(inp)
     N = inp.numel()
     if N == 0:
         return out
 
-    grid = lambda meta: (triton.cdiv(N, 4096),)  # 导致 coreDim 超限
+    grid = lambda meta: (triton.cdiv(N, 4096),)  # Causes coreDim to exceed the limit
     masked_fill_kernel[grid](inp, mask.to(torch.int), value, out, N, 4096)
     return out
 ```
@@ -323,19 +323,19 @@ def masked_fill_kernel(inp, expand_mask, value, out, N,
     BLOCK_SIZE: tl.constexpr, BLOCK_SIZE_SUB: tl.constexpr):
     pid = tl.program_id(axis=0)
     base_offset = pid * BLOCK_SIZE
-    # 计算需要处理的子块数量
+    # Compute the number of sub-blocks to process
     num_sub_blocks = tl.cdiv(BLOCK_SIZE, BLOCK_SIZE_SUB)
-    # 分块处理，避免 UB 溢出
+    # Process in sub-blocks to avoid UB overflow
     for sub_block_idx in range(num_sub_blocks):
         sub_offset = base_offset + sub_block_idx * BLOCK_SIZE_SUB
         offsets = sub_offset + tl.arange(0, BLOCK_SIZE_SUB)
         mask = offsets < N
-        # 分批加载和处理数据
+        # Load and process data in batches
         input_vals = tl.load(inp + offsets, mask=mask, other=0)
         fill_mask_vals = tl.load(expand_mask + offsets, mask=mask, other=0).to(tl.int1)
-        # 先写入原始数据
+        # First write the original data
         tl.store(out + offsets, input_vals, mask=mask)
-        # 然后在需要填充的位置覆写目标值
+        # Then overwrite the target value at positions that need filling
         value_to_write = tl.full([BLOCK_SIZE_SUB], value, dtype=input_vals.dtype)
         final_vals = tl.where(fill_mask_vals, value_to_write, input_vals)
         tl.store(out + offsets, final_vals, mask=mask)
@@ -344,15 +344,15 @@ def masked_fill(inp, expand_mask, value):
     logger.debug("GEMS MASKED FILL")
 
     out = torch.zeros_like(inp)
-    # ... 参数验证代码 ...
+    # ... parameter validation code ...
     # inp.device = "npu"
     N = inp.numel()
     if N == 0:
         return out
 
-    # 使用优化的参数配置
-    MAIN_BLOCK_SIZE = 32768  # 确保 coreDim 合规
-    SUB_BLOCK_SIZE = 1024    # 控制 UB 使用量
+    # Use the optimized parameter configuration
+    MAIN_BLOCK_SIZE = 32768  # Ensure coreDim compliance
+    SUB_BLOCK_SIZE = 1024    # Control UB usage
 
     grid = lambda meta: (triton.cdiv(N, MAIN_BLOCK_SIZE),)
     masked_fill_kernel[grid](inp, expand_mask.to(torch.int), value, out, N,
@@ -383,11 +383,11 @@ chunk_fwd_kernel_o[(NT, B * H)](
     p_g = tl.make_block_ptr(g, (T,), (H,), (i_t * BT,), (BT,), (0,))
     block_ptr = tl.make_block_ptr(
         base=input_ptr,
-        shape=(1024,), # 一维张量
-        strides=(32,), # 连续内存
-        offsets=(i_t * 16,), # 从起始位置开始
-        block_shape=(BT,), # 块大小
-        order=(0,) # 连续访问
+        shape=(1024,), # 1D tensor
+        strides=(32,), # Contiguous memory
+        offsets=(i_t * 16,), # From the starting position
+        block_shape=(BT,), # Block size
+        order=(0,) # Contiguous access
     )
 ​)
 ```
@@ -406,6 +406,6 @@ block_ptr = tl.make_block_ptr(
     strides=(32, 1),
     offsets=(i_t * BT, 0),
     block_shape=(BT, 32),
-    order=(1, 0) # 行优先布局：维度 1 最连续（stride 1），维度 0 最不连续
+    order=(1, 0) # Row-major layout: dimension 1 is the most contiguous (stride 1), dimension 0 is the least contiguous
 )
 ```

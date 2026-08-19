@@ -1,0 +1,127 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:20+0000\n"
+"PO-Revision-Date: 2026-08-11 02:20+0000\n"
+
+"X-Source-Commit: d3bbc1d8a2bfc2cf22f22282e7b6c4eb042aa0bd\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "好的，请提供需要翻译的中文文本，我会按照您的要求进行翻译。"
+
+msgid "技术例会"
+msgstr "Technical Meeting"
+
+msgid "Triton-Ascend 定期召开社区技术会议，作为项目治理的核心决策机制。技术方向、重大提案评审和版本发布等重大事项在技术会议中讨论和决定，由全体 `Maintainer` 投票。会议对所有社区成员开放，任何人均可参与讨论，但决策和投票仅由 `Maintainer` 进行。"
+msgstr "Triton-Ascend holds regular community technical meetings as the core decision-making mechanism for project governance. Major matters such as technical direction, review of significant proposals, and version releases are discussed and decided during these technical meetings, with voting conducted by all `Maintainer`s. The meetings are open to all community members, and anyone may participate in discussions, but decisions and voting are made solely by the `Maintainer`s."
+
+msgid "会议内容"
+msgstr "Meeting content"
+
+msgid "技术方向讨论与决策"
+msgstr "Technical Direction Discussion and Decision-Making"
+
+msgid "重大提案（RFC）评审与投票"
+msgstr "Major Proposal (RFC) Review and Voting"
+
+msgid "版本发布规划与时间线"
+msgstr "Release Planning and Timeline"
+
+msgid "社区 Issue 和 PR 优先级排序"
+msgstr "Community Issue and PR Prioritization"
+
+msgid "贡献者提名与移除讨论"
+msgstr "Contributor Nomination and Removal Discussion"
+
+msgid "会议安排"
+msgstr "Meeting Agenda"
+
+msgid "**会议频率**：每两周一次"
+msgstr "**Meeting Frequency**: Once every two weeks"
+
+msgid "**会议时间**：周四 14:15（UTC+8）"
+msgstr "**Meeting Time**: Thursday 14:15 (UTC+8)"
+
+msgid "**会议起始日期**：2026 年 6 月 4 日"
+msgstr "**Meeting Start Date**: June 4, 2026"
+
+msgid "**会议链接**：[链接](https://us06web.zoom.us/j/86540192059?pwd=X2N3pl5bnZH5CgiuX1zjyZoELItmjP.1)"
+msgstr "**Meeting Link**: [Link](https://us06web.zoom.us/j/86540192059?pwd=X2N3pl5bnZH5CgiuX1zjyZoELItmjP.1)"
+
+msgid "**会议室号**：865 4019 2059"
+msgstr "**Meeting Room Number**: 865 4019 2059"
+
+msgid "**会议室密码**：123456"
+msgstr "**Meeting Room Password**: 123456"
+
+msgid "**会议议程与纪要**：[议程&纪要](https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0)"
+msgstr "**Meeting Agenda and Minutes**: [Agenda & Minutes](https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0)"
+
+msgid "**会议 iCalendar**：[iCalendar-ics](https://us06web.zoom.us/meeting/tZIoc-mppzkqH92hP7TBYHppsqZUxg9F8VPf/ics?icsToken=DObLUj7lyTNwJj6XJgAALAAAAOvNV2DJnuObI9tqQGt1c3aeqVgCdzMYHV0m_J0KHIX0i4QUrtvsJwMu_EMF5VKyBKdX4rPWh_raTxvF4jAwMDAwMQ&meetingMasterEventId=1PZVSVC8S8WIBZJ1e4wuZQ)"
+msgstr "**Meeting iCalendar**: [iCalendar-ics](https://us06web.zoom.us/meeting/tZIoc-mppzkqH92hP7TBYHppsqZUxg9F8VPf/ics?icsToken=DObLUj7lyTNwJj6XJgAALAAAAOvNV2DJnuObI9tqQGt1c3aeqVgCdzMYHV0m_J0KHIX0i4QUrtvsJwMu_EMF5VKyBKdX4rPWh_raTxvF4jAwMDAwMQ&meetingMasterEventId=1PZVSVC8S8WIBZJ1e4wuZQ)"
+
+msgid "投票规则"
+msgstr "Voting rules"
+
+msgid "未出席会议的 `Maintainer` 须在会议后 3 个工作日内提交投票；逾期未投票视为弃权"
+msgstr "`Maintainer` who did not attend the meeting must submit their vote within 3 working days after the meeting; failure to vote within the deadline will be considered abstention."
+
+msgid "投票通过条件为参与投票的 `Maintainer` 超过半数同意（弃权不计入投票总数）"
+msgstr "The condition for passing a vote is that more than half of the participating `Maintainer`s agree (abstentions are not counted in the total number of votes)."
+
+msgid "投票结果记录于会议纪要中"
+msgstr "The voting results are recorded in the meeting minutes."
+
+msgid "决策流程"
+msgstr "Decision-making process"
+
+msgid "常规决策"
+msgstr "Routine decision-making"
+
+msgid "日常开发中的常规决策（如 `Bug` 修复、小功能改进）由相关模块的 `Maintainer` 在 `Issue` 或 `PR` 中审阅决定，无需召开会议。"
+msgstr "Routine decisions in daily development (such as `Bug` fixes and minor feature improvements) are reviewed and decided by the `Maintainer` of the relevant module in the `Issue` or `PR`, without the need to hold a meeting."
+
+msgid "重大决策"
+msgstr "Major Decision"
+
+msgid "以下事项视为重大决策，需由 `Maintainer` 在社区技术会议中集体讨论："
+msgstr "The following matters are considered major decisions and require collective discussion by the `Maintainer` at the community technical meeting:"
+
+msgid "重大架构变更"
+msgstr "Major architectural changes"
+
+msgid "破坏性 `API` 变更"
+msgstr "Breaking `API` changes"
+
+msgid "新增核心功能或移除现有功能"
+msgstr "Added core features or removed existing features."
+
+msgid "第三方依赖的重大升级"
+msgstr "Major Upgrades to Third-Party Dependencies"
+
+msgid "版本发布规划"
+msgstr "Version Release Planning"
+
+msgid "重大决策流程："
+msgstr "Major decision-making process:"
+
+msgid "提交 `RFC`（征求意见稿），描述变更内容、影响范围和实施方案"
+msgstr "Submit an RFC (Request for Comments) describing the changes, impact scope, and implementation plan."
+
+msgid "在技术会议中讨论"
+msgstr "Discussing in a technical meeting."
+
+msgid "`Maintainer` 共同决策"
+msgstr "`Maintainer` collective decision-making"

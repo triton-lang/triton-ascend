@@ -1,0 +1,322 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:21+0000\n"
+"PO-Revision-Date: 2026-08-11 02:21+0000\n"
+
+"X-Source-Commit: 30539a1f7a3119b79a808ef807d5739be093c8d7\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr ""
+"# Architecture Differences\n"
+"\n"
+"This document outlines the key architectural differences between the two systems.\n"
+
+msgid "昇腾与GPU的开发差异"
+msgstr "Development Differences Between Ascend and GPU"
+
+msgid "多核任务并行策略"
+msgstr "Multi-core task parallelization strategy"
+
+msgid "NPU在Triton多核并行中是物理核强绑定模式，与GPU逻辑维度并行+硬件自动物理映射的模式形成核心差异，核心对比如下表所示："
+msgstr "NPU in Triton multi-core parallelism adopts a physically core-bound mode, which forms a core difference from the GPU's logical dimension parallelism plus hardware automatic physical mapping mode. The core comparison is shown in the table below:"
+
+msgid "维度"
+msgstr "Dimension"
+
+msgid "GPU（NVIDIA）"
+msgstr "GPU (NVIDIA)"
+
+msgid "昇腾（Ascend）"
+msgstr "Ascend"
+
+msgid "grid 本质"
+msgstr "The essence of grid"
+
+msgid "逻辑任务维度（和物理核解耦）"
+msgstr "Logical task dimension (decoupled from physical cores)"
+
+msgid "物理核组映射（绑定 AI Core 拓扑）"
+msgstr "Physical core group mapping (binding AI Core topology)"
+
+msgid "核数 / 维度限制"
+msgstr "Core Count / Dimension Limitations"
+
+msgid "grid 维度 / 大小无硬限制"
+msgstr "Grid dimensions / size have no hard limits."
+
+msgid "grid 大小≤AI Core 总数，2D 需匹配拓扑"
+msgstr "Grid size ≤ total number of AI Cores; for 2D, the topology must be matched."
+
+msgid "GPU可绑定多个维度轴（三维grid=[n,m,l] 等同于乘积n×m×l个并行线程），每个线程仅对应一次kernel执行，且仅执行一次。 NPU的Vector核、Cube核属于多个物理核，不同代际硬件核数不同，每个核仅执行一次Block,且支持对该Block重复调度执行。"
+msgstr "GPUs can bind multiple dimension axes (a three-dimensional grid=[n,m,l] is equivalent to a product of n×m×l parallel threads), and each thread corresponds to only one kernel execution, which is executed only once. The Vector cores and Cube cores of NPUs belong to multiple physical cores, with different generations of hardware having different numbers of cores. Each core executes a Block only once and supports repeated scheduling and execution of that Block."
+
+msgid "<br />\\n"
+msgstr "<br />"
+
+msgid "\\\\\\n"
+msgstr "\\\\\\n"
+
+msgid "充分利用核数"
+msgstr "Fully utilize the number of cores."
+
+msgid "昇腾NPU具备多个计算核心，合理分配并充分利用所有可用核心，是提升算子性能的关键因素之一。 在调用Triton内核函数时，通过设置launch参数控制使用的核数量。以GELU算子为例："
+msgstr "The Ascend NPU has multiple compute cores. Reasonably allocating and fully utilizing all available cores is one of the key factors in improving operator performance. When calling Triton kernel functions, the number of cores used is controlled by setting the launch parameters. Taking the GELU operator as an example:"
+
+msgid "triton_gelu[n, 1, 1](...)  # The first parameter indicates the number of cores to use; n means using n cores\\n"
+msgstr "triton_gelu[n, 1, 1](...)  # The first parameter indicates the number of cores to use; n means using n cores"
+
+msgid "通过对核数的调优，可实现对所有计算资源的充分调度和利用，从而最大化并行度与吞吐量。未启用 `auto-blockify`（见下节）时，发射 grid 的核数需小于等于 65,535。"
+msgstr "By tuning the number of cores, full scheduling and utilization of all computing resources can be achieved, thereby maximizing parallelism and throughput. When `auto-blockify` is not enabled (see the next section), the number of cores for launching the grid must be less than or equal to 65,535."
+
+msgid "auto-blockify：突破 65,535 逻辑块上限"
+msgstr "auto-blockify: Breaking through the 65,535 logical block limit"
+
+msgid "社区 Triton 在 NVIDIA GPU 上把 grid 视为纯逻辑维度 —— `n` 个逻辑块按 1:1 映射到 `n` 个硬件块，运行时由硬件分发到各 SM，每个块不需要内部循环。昇腾上由于上节描述的物理核强绑定，可启动的 grid 上限被卡在 65,535，对含百万级逻辑工作项的 kernel（autotune 后的 reduce/scan、megablocks 风格的稀疏 kernel 等）过于严苛。"
+msgstr "Community Triton on NVIDIA GPUs treats the grid as a purely logical dimension — `n` logical blocks are mapped 1:1 to `n` hardware blocks, dispatched to SMs by the hardware at runtime, with no internal loops required per block. On Ascend, due to the strong physical core binding described in the previous section, the maximum launchable grid is capped at 65,535, which is too restrictive for kernels containing millions of logical work items (such as autotuned reduce/scan, megablocks-style sparse kernels, etc.)."
+
+msgid "`auto-blockify`（`SIMTAutoBlockify` 编译期 pass + 配套的运行期 cap）通过\"编译期视为逻辑、启动期折叠到物理核\"消除该限制："
+msgstr "`auto-blockify` (`SIMTAutoBlockify` compile-time pass + accompanying runtime cap) eliminates this limitation by \"treating it as logical at compile time, folding into physical cores at startup.\""
+
+msgid "**编译期**：Triton pass 把 kernel 函数体包进一层 `scf.for`，迭代变量由 `gpu.linear_block_id` 提供。chunk 大小 = `ceildiv(logical_block_count, physical_core_count)`，每个物理块依次跑 `chunk` 个逻辑 block id。"
+msgstr "**Compile time**: The Triton pass wraps the kernel function body in a layer of `scf.for`, with the iteration variable provided by `gpu.linear_block_id`. The chunk size = `ceildiv(logical_block_count, physical_core_count)`, and each physical block sequentially runs `chunk` logical block IDs."
+
+msgid "**运行期**：传给 launcher 的 block-count 参数从逻辑 grid clamp 到 `physical_core_count`，与编译期的折叠保持一致。"
+msgstr "**Runtime**: The block-count parameter passed to the launcher is clamped from the logical grid to `physical_core_count`, consistent with the folding behavior at compile time."
+
+msgid "两侧共享同一份 gating 元数据（`NPUOptions` 上的 `enable_auto_blockify`，未传时回落到 `TRITON_ALL_BLOCKS_PARALLEL`），编译期循环包与运行期 cap 永远同步 —— 不存在 kernel 按一种模式编译却按另一种模式启动的情形。"
+msgstr "Both sides share the same gating metadata (`enable_auto_blockify` on `NPUOptions`, falling back to `TRITON_ALL_BLOCKS_PARALLEL` when not provided), and the compile-time loop wrapping and the runtime cap are always in sync — there is no scenario where a kernel is compiled under one mode but launched under another."
+
+msgid "从 GPU Triton kernel 移植时的注意事项："
+msgstr "Notes on porting from GPU Triton kernels:"
+
+msgid "grid 大于 65,535 可直接运行，无需手动把外层维度折叠进 kernel 函数体。"
+msgstr "If the grid is greater than 65,535, it can be run directly without manually folding the outer dimension into the kernel function body."
+
+msgid "逻辑块之间必须保持顺序无关（循环按 chunk 顺序访问）。依赖严格逻辑 block id 顺序的 kernel（如基于特定顺序的跨块同步）需要改写。"
+msgstr "Logical blocks must remain order-independent (loops access them in chunk order). Kernels that rely on strict logical block ID ordering (such as cross-block synchronization based on a specific order) need to be rewritten."
+
+msgid "per-block workspace 分配从 `O(logical_block_count)` 降到 `O(physical_core_count)`，因为 workspace 在内层 `scf.for` 各次迭代间复用。"
+msgstr "Per-block workspace allocation is reduced from `O(logical_block_count)` to `O(physical_core_count)`, because the workspace is reused across iterations of the inner `scf.for` loop."
+
+msgid "单核数据搬运策略"
+msgstr "Single-core data transfer strategy"
+
+msgid "数据切分Tiling"
+msgstr "Data tiling"
+
+msgid "写Triton内核函数时，合理的数据切分策略对性能优化至关重要。通过调整不同的切分粒度参数，可以在不同维度上平衡计算负载与内存访问效率。"
+msgstr "When writing Triton kernel functions, a reasonable data partitioning strategy is crucial for performance optimization. By adjusting different partitioning granularity parameters, it is possible to balance computational load and memory access efficiency across different dimensions."
+
+msgid "常见的切分参数包括："
+msgstr "Common segmentation parameters include:"
+
+msgid "参数"
+msgstr "Parameter"
+
+msgid "说明"
+msgstr "Explanation"
+
+msgid "ncore"
+msgstr "ncore"
+
+msgid "启用的计算核数量，用于跨核任务切分"
+msgstr "Number of enabled compute cores, used for splitting tasks across cores."
+
+msgid "xblock"
+msgstr "xblock"
+
+msgid "核间数据分块尺寸，控制跨核切分粒度"
+msgstr "Inter-core data block size, controls the granularity of cross-core partitioning."
+
+msgid "xblock_sub"
+msgstr "xblock_sub"
+
+msgid "核内细分粒度，用于单个计算核内部的数据精细划分"
+msgstr "Fine-grained subdivision within a core, used for fine-grained partitioning of data within a single computing core."
+
+msgid "开发者可根据实际场景手动选择最优的切分配置，使得每次计算尽可能充分利用片上内存（On-chip Memory），避免频繁访问全局内存（Global Memory）造成的 性能瓶颈。"
+msgstr "Developers can manually select the optimal partitioning configuration based on the actual scenario, ensuring that each computation fully utilizes on-chip memory as much as possible, thereby avoiding performance bottlenecks caused by frequent access to global memory."
+
+msgid "以GELU算子为例，通过调整切分参数，可以有效适配片上缓存容量限制，从而提升执行效率。"
+msgstr "Taking the GELU operator as an example, by adjusting the splitting parameters, it can effectively adapt to the on-chip cache capacity constraints, thereby improving execution efficiency."
+
+msgid "注：Atlas 800T/I A2产品的片上内存容量为192KB，因此在设计切分策略时需考虑该限制，确保每轮计算的数据量不超过片上内存容量。"
+msgstr "Note: The Atlas 800T/I A2 product has an on-chip memory capacity of 192KB. Therefore, this limitation must be considered when designing the partitioning strategy to ensure that the data volume for each computation round does not exceed the on-chip memory capacity."
+
+msgid "GELU算子示例"
+msgstr "GELU operator example"
+
+msgid "GELU算子开发示例，使用3种方式计算结果。"
+msgstr "GELU operator development example, using 3 methods to compute the results."
+
+msgid "standard_unary      为标准Torch计算。"
+msgstr "standard_unary is standard Torch computation."
+
+msgid "triton_easy_kernel  为简单Triton实现。"
+msgstr "triton_easy_kernel is a simple Triton implementation."
+
+msgid "triton_better_kernel为更高效的Triton实现。"
+msgstr "triton_better_kernel is a more efficient Triton implementation."
+
+msgid "标准Torch写法"
+msgstr "Standard Torch implementation"
+
+msgid "输入tensor x0，经过torch计算实现 GELU 算子，返回结果值。"
+msgstr "Input tensor x0, computed via torch to implement the GELU operator, returns the result value."
+
+msgid "def standard_unary(x0):\\n"
+msgstr "def standard_unary(x0):"
+
+msgid "简单Triton写法"
+msgstr "Simple Triton implementation"
+
+msgid "以下是一个使用 Triton 编写的简单内核示例，用于展示如何定义和调用一个基本的Triton内核函数。此示例实现了一个简单的数学运算（GELU 激活函数）。"
+msgstr "Here is a simple kernel example written in Triton, used to demonstrate how to define and call a basic Triton kernel function. This example implements a simple mathematical operation (the GELU activation function)."
+
+msgid "import torch\\n"
+msgstr "import torch"
+
+msgid "注意事项"
+msgstr "Notes:"
+
+msgid "内存限制：上述写法中，所有输入数据一次性被加载到内存中进行计算。如果输入张量过大，可能会超出单个内核的片上内存容量，导致内存溢出错误。 因此，这种简单的写法更适合于小规模张量的计算或用于理解 Triton 内核的基本写法和调用方式。"
+msgstr "Memory limitation: In the above approach, all input data is loaded into memory at once for computation. If the input tensor is too large, it may exceed the on-chip memory capacity of a single kernel, leading to out-of-memory errors. Therefore, this simple approach is more suitable for small-scale tensor computations or for understanding the basic syntax and invocation of Triton kernels."
+
+msgid "适用场景：尽管这种方法有助于快速理解和入门 Triton 编程，但对于大规模数据集或高性能要求的应用场景，建议采用更复杂的数据切分策略（如 Tiling）， 以充分利用硬件资源并避免内存溢出问题。通过这种方式，开发者可以快速上手 Triton 编程，同时了解如何定义、调用以及优化 Triton 内核函数。"
+msgstr "Applicable scenarios: Although this approach helps quickly understand and get started with Triton programming, for large-scale datasets or applications with high-performance requirements, it is recommended to adopt more complex data partitioning strategies (such as Tiling) to fully utilize hardware resources and avoid memory overflow issues. Through this method, developers can quickly get started with Triton programming while learning how to define, call, and optimize Triton kernel functions."
+
+msgid "更高效triton写法"
+msgstr "A more efficient Triton implementation."
+
+msgid "在昇腾 NPU 上使用 Triton 编写高性能算子时，为了充分利用硬件资源、避免内存溢出并提升执行效率，通常需要采用数据切分（Tiling）策略。 下面是一个经过优化的 Triton 内核实现示例，适用于大规模张量计算。"
+msgstr "When writing high-performance operators with Triton on Ascend NPU, a data tiling strategy is typically required to fully utilize hardware resources, avoid memory overflow, and improve execution efficiency. Below is an optimized Triton kernel implementation example suitable for large-scale tensor computations."
+
+msgid "关键代码解释"
+msgstr "Explanation of key code"
+
+msgid "# Compute the starting offset address of the data block handled by the current core, realizing inter-core splitting. Each core is only responsible for a data range of XBLOCK size.\\n"
+msgstr "# Compute the starting offset address of the data block handled by the current core, realizing inter-core splitting. Each core is only responsible for a data range of XBLOCK size."
+
+msgid "编译优化能力"
+msgstr "Compilation optimization capabilities"
+
+msgid "AscendNPU IR优化"
+msgstr "AscendNPU IR optimization"
+
+msgid "针对昇腾软硬件特性，适配了AscendNPU IR优化的编译选项，如下表所示。 **使用方法**：在autotune的配置阶段，传入编译选项的值 以开启`multibuffer`选项举例，在autotune的配置阶段，即`triton.Config`中，传入`'multibuffer': True`，详见[autotune示例](../examples/06_autotune_example.md)："
+msgstr "For Ascend hardware and software features, the compilation options adapted for AscendNPU IR optimization are shown in the table below. **Usage**: During the autotune configuration phase, pass in the value of the compilation option. Taking the `multibuffer` option as an example, during the autotune configuration phase, i.e., in `triton.Config`, pass in `'multibuffer': True`. For details, see the [autotune example](../examples/06_autotune_example.md):"
+
+msgid "    def get_autotune_config():\\n"
+msgstr "def get_autotune_config():"
+
+msgid "选项"
+msgstr "Option"
+
+msgid "能力"
+msgstr "Capability"
+
+msgid "是否开启"
+msgstr "Enable or not"
+
+msgid "multibuffer"
+msgstr "multibuffer"
+
+msgid "开启流水并行数据搬运"
+msgstr "Enable pipeline parallel data transfer."
+
+msgid "默认true； true , false。 autotune中可配置"
+msgstr "Default is true; true, false. Configurable in autotune."
+
+msgid "unit_flag"
+msgstr "unit_flag"
+
+msgid "cube搬出的一个优化项"
+msgstr "An optimization item moved out of cube."
+
+msgid "默认None；true , false。  autotune中可配置"
+msgstr "Default None; true, false. Configurable in autotune."
+
+msgid "limit_auto_multi_buffer_only_for_local_buffer"
+msgstr "limit_auto_multi_buffer_only_for_local_buffer"
+
+msgid "CV算子一个优化项，cube搬出的一个优化项"
+msgstr "One optimization item for the CV operator, and one optimization item for the cube output."
+
+msgid "默认None；true , false。 autotune中可配置"
+msgstr "Default is None; true, false. Configurable in autotune."
+
+msgid "limit_auto_multi_buffer_of_local_buffer"
+msgstr "limit_auto_multi_buffer_of_local_buffer"
+
+msgid "cube算子开启double buffer具体的scope"
+msgstr "The specific scope for enabling double buffering in the cube operator."
+
+msgid "默认None；可取值 \"no-limit\" 或 \"no-l0c\"，autotune中可配置"
+msgstr "Default is None; possible values are \"no-limit\" or \"no-l0c\", configurable in autotune."
+
+msgid "set_workspace_multibuffer"
+msgstr "set_workspace_multibuffer"
+
+msgid "配置 workspace multi-buffer 档位，用于为 workspace 相关数据搬运启用多缓冲。"
+msgstr "Configure the workspace multi-buffer level to enable multi-buffering for workspace-related data transfers."
+
+msgid "默认None；可取单个值，如 2 或 4；autotune中可配置候选值"
+msgstr "Default is None; a single value such as 2 or 4 can be used; candidate values can be configured in autotune."
+
+msgid "enable_hivm_auto_cv_balance"
+msgstr "enable_hivm_auto_cv_balance"
+
+msgid "启用或禁用自动 CV balance，用于在 CV 融合场景下平衡 Cube 与 Vector 执行。"
+msgstr "Enable or disable automatic CV balancing, used to balance Cube and Vector execution in CV fusion scenarios."
+
+msgid "tile_mix_vector_loop"
+msgstr "tile_mix_vector_loop"
+
+msgid "CV算子的一个优化项，当前vector可以切几份"
+msgstr "An optimization item for the CV operator: how many parts the current vector can be split into."
+
+msgid "默认None；可取单个值，如 2、4 或 8；autotune中可配置候选值"
+msgstr "Default is None; can take a single value, such as 2, 4, or 8; candidate values can be configured in autotune."
+
+msgid "tile_mix_cube_loop"
+msgstr "tile_mix_cube_loop"
+
+msgid "CV算子一个优化项，当前cube可以切几份"
+msgstr "One optimization item for the CV operator: how many parts the current cube can be split into."
+
+msgid "auto_blockify_size"
+msgstr "auto_blockify_size"
+
+msgid "TRITON_ALL_BLOCKS_PARALLEL优化项，用于指定扩展的左起第一个维度的大小。"
+msgstr "TRITON_ALL_BLOCKS_PARALLEL optimization option, used to specify the size of the first dimension starting from the left of the extension."
+
+msgid "默认1；可取单个整数值，如 2、4 或 8；autotune中可配置候选值"
+msgstr "Default is 1; a single integer value can be used, such as 2, 4, or 8; candidate values can be configured in autotune."
+
+msgid "enable_auto_blockify"
+msgstr "enable_auto_blockify"
+
+msgid "per-kernel 级别覆盖 `TRITON_ALL_BLOCKS_PARALLEL` 环境变量。显式设为 **true** 或 **false** 时，kernel 按该值生效（忽略环境变量）；未设置（None）时由环境变量决定。优先级：该选项 > 环境变量 > 关。编译期 blockify pass 与运行期 block-count cap 都按此解析后的值生效，二者永远一致。"
+msgstr "Per-kernel level override of the `TRITON_ALL_BLOCKS_PARALLEL` environment variable. When explicitly set to **true** or **false**, the kernel takes effect according to that value (ignoring the environment variable); when unset (None), it is determined by the environment variable. Priority: this option > environment variable > off. Both the compile-time blockify pass and the runtime block-count cap take effect according to this resolved value, and the two are always consistent."
+
+msgid "默认 None；可取值 **true** / **false** / None。"
+msgstr "Default is None; possible values are **true** / **false** / None."
+
+msgid "注：优化编译选项在ascend/backend/compiler.py代码中。"
+msgstr "Note: The optimization compilation options are in the ascend/backend/compiler.py code."
+
+msgid "注：CV算子表示该算子运算过程中既使用了AI Core又使用了Vector Core。"
+msgstr "Note: The CV operator indicates that the operator uses both AI Core and Vector Core during its computation process."

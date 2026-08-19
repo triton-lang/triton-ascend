@@ -1,0 +1,94 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:21+0000\n"
+"PO-Revision-Date: 2026-08-11 02:21+0000\n"
+
+"X-Source-Commit: d7b0ea397beaed7b35f76fa17f9af8e2efd2a96a\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "I notice you haven't provided the Chinese text to translate. Please share the text you'd like me to translate, and I'll translate it according to your rules."
+
+msgid "Cube 算子开发"
+msgstr "Cube operator development"
+
+msgid "Cube 算子以矩阵乘或批量矩阵乘为主要计算负载，Triton 代码中通常以 `tl.dot` 为核心。Cube 算子的关键是围绕 M/N/K 三个维度设计 tile，使 A/B tile 能高效搬运到片上并在 Cube Core 上完成累加。"
+msgstr "The Cube operator primarily uses matrix multiplication or batched matrix multiplication as its main computational workload, with `tl.dot` typically at the core of Triton code. The key to the Cube operator is designing tiles around the M/N/K dimensions so that A/B tiles can be efficiently moved on-chip and accumulated on the Cube Core."
+
+msgid "Cube 简单算子开发"
+msgstr "Cube Simple Operator Development"
+
+msgid "简单 Cube 算子可参考本仓 [矩阵乘法样例](../examples/05_matrix_multiplication_example.md)。一个最小开发路径包括："
+msgstr "For a simple Cube operator, refer to the [matrix multiplication example](../examples/05_matrix_multiplication_example.md) in this repository. A minimal development path includes:"
+
+msgid "明确输入输出 shape 和 stride，例如 `A[M, K]`、`B[K, N]`、`C[M, N]`。"
+msgstr "Clearly define the input and output shapes and strides, for example, `A[M, K]`, `B[K, N]`, `C[M, N]`."
+
+msgid "用 `tl.program_id` 映射当前 program 到输出矩阵的 `(pid_m, pid_n)` tile。"
+msgstr "Map the current program to the `(pid_m, pid_n)` tile of the output matrix using `tl.program_id`."
+
+msgid "用 `BLOCK_SIZE_M/N/K` 构造 A/B 的二维偏移。"
+msgstr "Construct the 2D offsets for A/B using `BLOCK_SIZE_M/N/K`."
+
+msgid "沿 K 维循环加载 A/B 子块，并用 `tl.dot` 累加到 fp32 accumulator。"
+msgstr "Load A/B sub-blocks cyclically along the K dimension and accumulate them into the fp32 accumulator using `tl.dot`."
+
+msgid "将 accumulator 转为输出 dtype，并用边界 mask 写回 C。"
+msgstr "Cast the accumulator to the output dtype and write back to C using the boundary mask."
+
+msgid "核心结构如下："
+msgstr "The core structure is as follows:"
+
+msgid "@triton.jit\\n"
+msgstr "@triton.jit"
+
+msgid "简单 Cube 算子调参时优先关注："
+msgstr "When tuning parameters for a simple Cube operator, prioritize attention to:"
+
+msgid "`BLOCK_M/N/K` 是否满足硬件支持和 UB/L1 容量限制。"
+msgstr "Whether `BLOCK_M/N/K` satisfies hardware support and UB/L1 capacity constraints."
+
+msgid "K 维循环是否可以开启 `multibuffer` 以形成搬运和计算流水。"
+msgstr "Can the K-dimension loop enable `multibuffer` to form a pipeline of data movement and computation?"
+
+msgid "输出 tile 是否包含额外 bias、scale、activation。如果后处理很轻，可以仍归为 Cube 算子；如果后处理包含明显 Vector 归约或跨核同步，应按 CV 融合算子组织。"
+msgstr "Output tile whether it contains extra bias, scale, activation. If the post-processing is lightweight, it can still be classified as a Cube operator; if the post-processing includes significant Vector reduction or cross-core synchronization, it should be organized as a CV fusion operator."
+
+msgid "Cube 复杂算子开发"
+msgstr "Developing complex operators for Cube."
+
+msgid "复杂 Cube 场景通常来自 attention、batched matmul、grouped matmul 或形状不规则的矩阵乘。当前 [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops) 主分支的复杂案例集中在 `tutorial/best_practice/`，其中 [`002-decode_grouped_attention.py`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/best_practice/002-decode_grouped_attention.py) 可以作为复杂 Cube 核心逻辑的参考：它包含 QK、PV 两段 `tl.dot`，并展示了 KV cache 离散索引下如何重组 K/V 访存。"
+msgstr "Complex Cube scenarios typically arise from attention, batched matmul, grouped matmul, or matrix multiplication with irregular shapes. The complex cases in the current [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops) main branch are concentrated in `tutorial/best_practice/`, where [`002-decode_grouped_attention.py`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/best_practice/002-decode_grouped_attention.py) can serve as a reference for the core logic of complex Cube operations: it includes two `tl.dot` segments, QK and PV, and demonstrates how to reorganize K/V memory access under discrete KV cache indexing."
+
+msgid "复杂 Cube 算子建议按以下顺序拆解："
+msgstr "For complex Cube operators, it is recommended to decompose them in the following order:"
+
+msgid "**先抽出纯矩阵乘核心**：确认每次 `tl.dot` 的输入 tile shape、dtype、累加 dtype 和输出 tile shape。"
+msgstr "**Extract the pure matrix multiplication core first**: Confirm the input tile shape, dtype, accumulation dtype, and output tile shape for each `tl.dot`."
+
+msgid "**再处理不规则访存**：如果 K/V cache 低维离散、高维连续，直接二维 load 可能退化为标量访存。可先按连续维搬入 UB，再通过转置或 Ascend 扩展接口 `extension.insert_slice` 重组为 `tl.dot` 需要的布局。"
+msgstr "**Re-handling irregular memory access**: If the K/V cache has low-dimensional discreteness and high-dimensional continuity, direct 2D load may degrade into scalar memory access. You can first move data into the UB along the continuous dimension, then reorganize it into the layout required by `tl.dot` through transpose or the Ascend extension interface `extension.insert_slice`."
+
+msgid "**把归约和归一化留到边界明确的位置**：例如 attention 中的 `max/sum/exp` 属于 Vector 逻辑，若和 `tl.dot` 放在同一 kernel，需要转到 [CV 融合算子开发](./cv_fusion_operator.md) 的思路。"
+msgstr "**Defer reduction and normalization to well-defined boundaries**: For example, `max/sum/exp` in attention belongs to Vector logic. If placed in the same kernel as `tl.dot`, it requires shifting to the approach of [CV Fusion Operator Development](./cv_fusion_operator.md)."
+
+msgid "**为长 K 或长序列设计内层循环**：K 维循环要控制单次 A/B tile 的片上占用；序列维循环要避免一次 load 过大的 K/V block。"
+msgstr "**Designing Inner Loops for Long K or Long Sequences**: The K-dimensional loop must control the on-chip occupancy of a single A/B tile; the sequence-dimensional loop must avoid loading excessively large K/V blocks at once."
+
+msgid "**用 Autotune 管理候选 tile**：为常见 shape 准备多组 `BLOCK_M/N/K` 和 `multibuffer` 配置，让运行时选择最优组合。"
+msgstr "**Use Autotune to manage candidate tiles**: Prepare multiple sets of `BLOCK_M/N/K` and `multibuffer` configurations for common shapes, allowing the runtime to select the optimal combination."
+
+msgid "复杂 Cube 算子的常见风险是把 GPU 上的大量 program 直接迁移到 NPU。若输出 tile 数远大于物理 Cube Core 数，可考虑让每个 program 通过内层循环处理多个 tile，或者在确认逻辑核相互独立时设置 `TRITON_ALL_BLOCKS_PARALLEL=1` 降低调度开销。"
+msgstr "A common risk of complex Cube operators is directly migrating a large number of programs on the GPU to the NPU. If the number of output tiles is much larger than the number of physical Cube Cores, consider having each program process multiple tiles through an inner loop, or set `TRITON_ALL_BLOCKS_PARALLEL=1` to reduce scheduling overhead when the logical cores are confirmed to be independent."

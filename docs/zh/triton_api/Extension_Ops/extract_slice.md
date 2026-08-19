@@ -62,7 +62,7 @@ def triton_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
     x = tl.load(x_ptr + offsets, mask=mask)
     y = tl.load(y_ptr + offsets, mask=mask)
     output = x + y
-    # 提取前32个元素
+    # Extract the first 32 elements
     out_sub = tl.extract_slice(output, [block_start], [32], [1])
     out_idx = block_start + tl.arange(0, 32)
     out_msk = out_idx < n_elements

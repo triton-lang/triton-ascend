@@ -92,15 +92,15 @@ import triton.language.ascend as al
 
 @triton.jit
 def sync_example():
-    # Cube 核心计算并通知 Vector
+    # The Cube core computes and notifies the Vector core
     with al.Scope(core_mode="cube"):
-        # ... 执行 Cube 计算 ...
+        # ... execute Cube computation ...
         tl.sync_block_set("cube", "vector", 0)
 
-    # Vector 核心等待 Cube 完成
+    # The Vector core waits for the Cube core to complete
     with al.Scope(core_mode="vector"):
         tl.sync_block_wait("cube", "vector", 0)
-        # ... 执行 Vector 计算 ...
+        # ... execute Vector computation ...
 ```
 
 ### 5.2 Flash Attention 流水线示例

@@ -35,14 +35,14 @@ import triton.language as tl
 
 @triton.jit
 def basic_assume_example(x_ptr, y_ptr, BLOCK_SIZE: tl.constexpr):
-    # 假设BLOCK_SIZE是2的幂次，编译器可以基于此优化除法运算
+    # Assume BLOCK_SIZE is a power of 2; the compiler can optimize the division based on this
     tl.assume((BLOCK_SIZE & (BLOCK_SIZE - 1)) == 0)
 
     offsets = tl.arange(0, BLOCK_SIZE)
     x = tl.load(x_ptr + offsets)
     y = tl.load(y_ptr + offsets)
 
-    # 编译器知道BLOCK_SIZE是2的幂次，可以优化除法为移位操作
+    # The compiler knows BLOCK_SIZE is a power of 2 and can optimize the division into a shift operation
     result = x // BLOCK_SIZE + y % BLOCK_SIZE
     tl.store(y_ptr + offsets, result)
 ```

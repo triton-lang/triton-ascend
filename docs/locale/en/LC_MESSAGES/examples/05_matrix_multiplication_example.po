@@ -1,0 +1,85 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:21+0000\n"
+"PO-Revision-Date: 2026-08-11 02:21+0000\n"
+
+"X-Source-Commit: 91606d8e4dc62b566e11e547bb2f56bd950d76a6\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "矩阵乘法示例"
+
+msgid "矩阵乘法 （Matrix Multiplication）"
+msgstr "Matrix Multiplication"
+
+msgid "在本节中，我们展示了使用 Triton 进行矩阵乘法的内核实现。"
+msgstr "In this section, we demonstrate a kernel implementation for matrix multiplication using Triton."
+
+msgid "计算内核"
+msgstr "Compute kernel."
+
+msgid "以下 Triton 内核实现了一个带偏置项的批量矩阵乘法（Batched Matrix Multiplication with Bias）： 计算公式为："
+msgstr "The following Triton kernel implements a batched matrix multiplication with bias: the computation formula is:"
+
+msgid "$$ \\mathrm{output}[b, i, j] = \\sum_{k} x[b, i, k] \\cdot y[k, j] + z[b, i, j] $$"
+msgstr "$$ \\mathrm{output}[b, i, j] = \\sum_{k} x[b, i, k] \\cdot y[k, j] + z[b, i, j] $$"
+
+msgid "其中："
+msgstr "Where:"
+
+msgid "`x` 的形状为 `(A, B)`"
+msgstr "The shape of `x` is `(A, B)`."
+
+msgid "`y` 的形状为 `(B, C)`"
+msgstr "The shape of `y` is `(B, C)`."
+
+msgid "`z`（偏置）的形状为 `(A, C)`"
+msgstr "The shape of `z` (bias) is `(A, C)`."
+
+msgid "输出 `output` 的形状为 `(A, C)`"
+msgstr "The shape of `output` is `(A, C)`."
+
+msgid "该内核假设单个 block 负责整个输出矩阵的计算，适用于小规模矩阵（A、B、C 较小且能被当前程序块完全覆盖）。"
+msgstr "This kernel assumes that a single block is responsible for computing the entire output matrix, making it suitable for small-scale matrices (A, B, and C are small and can be fully covered by the current block)."
+
+msgid "import pytest\\n"
+msgstr "import pytest"
+
+msgid "工具方法"
+msgstr "Utility methods"
+
+msgid "以下辅助函数用于支持 Triton 内核的测试与验证，包括 PyTorch 参考实现、数据类型映射、随机张量生成及结果校验。"
+msgstr "The following helper functions are used to support testing and validation of Triton kernels, including PyTorch reference implementations, data type mapping, random tensor generation, and result verification."
+
+msgid "def torch_dot_Bias(x0, x1, bias):\\n"
+msgstr "def torch_dot_Bias(x0, x1, bias):"
+
+msgid "参数化测试"
+msgstr "Parameterized testing"
+
+msgid "使用 `pytest` 对 `triton_dot_2_Bias` 内核进行参数化功能验证，覆盖不同矩阵维度和数据类型组合。"
+msgstr "Use `pytest` to perform parameterized functional verification of the `triton_dot_2_Bias` kernel, covering different matrix dimensions and data type combinations."
+
+msgid "# Test case configuration: (A, B, C) means matrix x: (A,B), y: (B,C), bias/output: (A,C)\\n"
+msgstr "# Test case configuration: (A, B, C) means matrix x: (A,B), y: (B,C), bias/output: (A,C)"
+
+msgid "**输出示例：**"
+msgstr "**Output Example:**"
+
+msgid "Test matmul with dtype=float16, shape=(16,16,16) PASSED!\\n"
+msgstr "Test matmul with dtype=float16, shape=(16,16,16) PASSED!"
+
+msgid "上面输出日志表明Triton和Pytorch上的输出结果完全一致。"
+msgstr "The output log above indicates that the results from Triton and PyTorch are exactly identical."

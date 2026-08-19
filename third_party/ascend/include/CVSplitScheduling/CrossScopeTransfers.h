@@ -42,6 +42,12 @@ namespace mlir::triton::cv_split {
 constexpr unsigned kMaxTransferFlagId = 14;
 constexpr unsigned kMaxTransferFlags = kMaxTransferFlagId + 1;
 
+/// True when every CUBE->VECTOR role in `body` has the same UB footprint. Only
+/// then is merging them onto one union slot per lane free, and only then will
+/// `insertCrossScopeTransfers` take it without a budget -- which is what
+/// decides whether those pools still rotate.
+bool cubeToVectorRolesAreUniform(Block *body, const Classification &classification);
+
 /// Describes the IR emitted for one VECTOR-to-CUBE transfer. The values and
 /// operation pointers are non-owning handles into the loop being transformed.
 struct VectorToCubeTransferChain {

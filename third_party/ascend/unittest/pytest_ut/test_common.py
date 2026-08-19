@@ -67,7 +67,7 @@ def generate_tensor(shape, dtype):
         raise ValueError('Invalid parameter \"dtype\" is found : {}'.format(dtype))
 
 
-def generate_tensor_fp4_fp8(
+def generate_tensor_fp8(
         shape, dtype, seed=None, data_range=None,
         special_ratio=0.05,  # Ratio of inf/-inf/nan values (only takes effect when dtype is float type)
         precision_ratio=0.35,  # Ratio of precision small floats (only takes effect when dtype is float type)
@@ -79,28 +79,24 @@ def generate_tensor_fp4_fp8(
         'fp8e4m3': [-50, 50],
         'fp8e5m2': [-500, 500],
         'fp8e5b16': [-500, 500],
-        'fp4': [-6, 6],
     }
 
     float_precision_dict = {
         'fp8e4m3': [-1, 1],
         'fp8e5m2': [-1, 1],
         'fp8e5b16': [-1, 1],
-        'fp4': [-2, 2],
     }
 
     extreme_range_dict = {
         'fp8e4m3': [-448, 448],
         'fp8e5m2': [-57344, 57344],
         'fp8e5b16': [-57344, 57344],
-        'fp4': [-6, 6],
     }
 
     ddtype_dict = {
         'fp8e4m3': torch.float8_e4m3fn,
         'fp8e5m2': torch.float8_e5m2,
         'fp8e5b16': None,
-        'fp4': None,
     }
 
     if seed is not None:
@@ -113,12 +109,8 @@ def generate_tensor_fp4_fp8(
     min_val, max_val = extreme_range_dict[dtype]
     total = np.prod(shape)
 
-    if dtype == 'fp4':
-        left_range = (min_val, min_val + 1)
-        right_range = (max_val - 1, max_val)
-    else:
-        left_range = (min_val, min_val + 10)
-        right_range = (max_val - 10, max_val)
+    left_range = (min_val, min_val + 10)
+    right_range = (max_val - 10, max_val)
 
     if data_range == None:
         mid_range = middle_range_dict[dtype]

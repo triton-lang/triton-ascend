@@ -93,15 +93,15 @@ testlist = [
 @pytest.mark.skipif(not is_compile_on_910_95(), reason="only support in A5")
 @pytest.mark.parametrize("dtype", ["fp8e4m3", "fp8e5m2"])
 @pytest.mark.parametrize("M, N, K", testlist)
-def test_2D_scaled_dot_chain(M, N, K, dtype):
+def test_scaled_dot_fp8(M, N, K, dtype):
     if not ub_overflow_check(M, N, K):
         pytest.skip("UB overflow")
 
     lhs_format = dtype[3:]
     rhs_format = lhs_format
 
-    lhs = test_common.generate_tensor_fp4_fp8(shape=(M, K), dtype=dtype).npu()
-    rhs = test_common.generate_tensor_fp4_fp8(shape=(K, N), dtype=dtype).npu()
+    lhs = test_common.generate_tensor_fp8(shape=(M, K), dtype=dtype).npu()
+    rhs = test_common.generate_tensor_fp8(shape=(K, N), dtype=dtype).npu()
     lhs_scale = torch.randint(low=110, high=128, size=(M, K // 32), dtype=torch.int8).npu()
     rhs_scale = torch.randint(low=110, high=128, size=(N, K // 32), dtype=torch.int8).npu()
 
@@ -120,3 +120,85 @@ def test_2D_scaled_dot_chain(M, N, K, dtype):
         torch.testing.assert_close(triton_res.cpu(), torch_ref.cpu(), rtol=125e-03, atol=125e-03, equal_nan=True)
     elif dtype == "fp8e5m2":
         torch.testing.assert_close(triton_res.cpu(), torch_ref.cpu(), rtol=75e-02, atol=75e-02, equal_nan=True)
+
+
+@triton.jit
+def _dot_scaled_test_fp4(
+    a_ptr,
+    a_scale_ptr,
+    b_ptr,
+    b_scale_ptr,
+    c_ptr,
+    M: tl.constexpr,
+    N: tl.constexpr,
+    K: tl.constexpr,
+    K_PACKED: tl.constexpr,
+    K_SCALE: tl.constexpr,
+):
+    # A: [M, K_PACKED] uint8 (packed e2m1), scale [M, K_SCALE] uint8 e8m0
+    # B: [K_PACKED, N] uint8 (packed e2m1), scale [N, K_SCALE] uint8 e8m0
+    # note: rhs is [K, N] not [N, K] for dot_scaled
+    m_offs = tl.arange(0, M)
+    n_offs = tl.arange(0, N)
+    k_packed_offs = tl.arange(0, K_PACKED)
+    scale_offs = tl.arange(0, K_SCALE)
+
+    a = tl.load(a_ptr + m_offs[:, None] * K_PACKED + k_packed_offs[None, :])
+    a_scale = tl.load(a_scale_ptr + m_offs[:, None] * K_SCALE + scale_offs[None, :])
+
+    b = tl.load(b_ptr + k_packed_offs[:, None] * N + n_offs[None, :])
+    b_scale = tl.load(b_scale_ptr + n_offs[:, None] * K_SCALE + scale_offs[None, :])
+
+    acc = tl.dot_scaled(a, a_scale, "e2m1", b, b_scale, "e2m1")
+
+    tl.store(c_ptr + m_offs[:, None] * N + n_offs[None, :], acc)
+
+
+def dequant_e2m1(packed_uint8, scale_uint8, rows, K):
+    """Reference dequant for verification."""
+    vals = torch.tensor([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0],
+                        device=packed_uint8.device, dtype=torch.float32)
+    low = vals[(packed_uint8 & 0x0F).long()]
+    high = vals[((packed_uint8 >> 4) & 0x0F).long()]
+    out = torch.zeros(rows, K, device=packed_uint8.device, dtype=torch.float32)
+    out[:, 0::2] = low
+    out[:, 1::2] = high
+    scale_f = torch.pow(2.0, scale_uint8.float() - 127.0)
+    scale_expanded = scale_f.repeat_interleave(32, dim=1)[:, :K]
+    return out * scale_expanded
+
+
+@pytest.mark.skip(reason="to be supported in A5")
+def test_dot_scaled_fp4():
+    M, N, K = 16, 16, 64
+    K_PACKED = K // 2
+    K_SCALE = K // 32
+
+    a_packed = torch.randint(0, 256, (M, K_PACKED), device='npu', dtype=torch.uint8)
+    a_scale = torch.full((M, K_SCALE), 127, device='npu', dtype=torch.uint8)
+
+    # B for dot_scaled: [K_PACKED, N] (K-major)
+    b_packed_nk = torch.randint(0, 256, (N, K_PACKED), device='npu', dtype=torch.uint8)
+    b_packed_kn = b_packed_nk.t().contiguous()  # [K_PACKED, N]
+    b_scale = torch.full((N, K_SCALE), 127, device='npu', dtype=torch.uint8)
+
+    c = torch.empty(M, N, device='npu', dtype=torch.float32)
+
+    _dot_scaled_test_fp4[(1, )](
+        a_packed,
+        a_scale,
+        b_packed_kn,
+        b_scale,
+        c,
+        M,
+        N,
+        K,
+        K_PACKED,
+        K_SCALE,
+    )
+
+    # Reference
+    a_deq = dequant_e2m1(a_packed, a_scale, M, K)
+    b_deq = dequant_e2m1(b_packed_nk, b_scale, N, K)
+    ref = a_deq @ b_deq.t()
+    torch.testing.assert_close(c, ref)

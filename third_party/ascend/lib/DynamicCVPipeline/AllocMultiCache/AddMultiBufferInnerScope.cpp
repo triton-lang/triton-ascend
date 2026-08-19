@@ -1404,25 +1404,16 @@ static int processDepVal(Value depVal, const MainLoop &loop,
     return 0;
   SmallVector<Operation *> depUsers = userIt->second;
 
-  // Read the module-level `ssbuffer.insertionOptimization` attribute inline so
-  // processDepVal can be called multiple times in the same pass run and stay
-  // in sync with whatever the Python caller last wrote onto the ModuleOp.
-  bool enableOpt = true;
-  if (mlir::ModuleOp mod = loop->getParentOfType<mlir::ModuleOp>())
-    enableOpt = mod->hasAttr(CVPipeline::kInsertionOptimization);
-
   // Create producer
   OpBuilder producedBuffers(loop.getContext());
-  // When enable_buffer_insert_optimization is on, place the producer chain at
-  // the end of depDefinedOp's block_id=X region (after the last op with that
-  // block_id). Otherwise keep the original "right after depDefinedOp" anchor.
+  // Place the producer chain at the end of depDefinedOp's block_id=X region
+  // (after the last op with that block_id). When depDefinedOp has no block_id,
+  // anchor it right after depDefinedOp itself.
   Operation *producerAnchor = depDefinedOp;
-  if (enableOpt) {
-    if (auto prodId = getOpBlockId(depDefinedOp); prodId.has_value()) {
-      if (Operation *lastInRegion =
-              findLastOpWithBlockIdInBlock(depDefinedOp, *prodId))
-        producerAnchor = lastInRegion;
-    }
+  if (auto prodId = getOpBlockId(depDefinedOp); prodId.has_value()) {
+    if (Operation *lastInRegion =
+            findLastOpWithBlockIdInBlock(depDefinedOp, *prodId))
+      producerAnchor = lastInRegion;
   }
   producedBuffers.setInsertionPointAfter(producerAnchor);
   SmallVector<Operation *> producerNewOps =
@@ -1452,16 +1443,14 @@ static int processDepVal(Value depVal, const MainLoop &loop,
     if (isMultiRegionConsumerFromYield(depUser, depVal)) {
       // Multi-region op: process independently
       OpBuilder consumedBuilder(loop.getContext());
-      // When enable_buffer_insert_optimization is on, place the consumer chain
-      // at the start of depUser's block_id=X region (before the first op with
-      // that block_id). Otherwise keep "right before depUser".
+      // Place the consumer chain at the start of depUser's block_id=X region
+      // (before the first op with that block_id). When depUser has no
+      // block_id, anchor it right before depUser itself.
       Operation *consumerAnchor = depUser;
-      if (enableOpt) {
-        if (auto userId = getOpBlockId(depUser); userId.has_value()) {
-          if (Operation *firstInRegion =
-                  findFirstOpWithBlockIdInBlock(depUser, *userId))
-            consumerAnchor = firstInRegion;
-        }
+      if (auto userId = getOpBlockId(depUser); userId.has_value()) {
+        if (Operation *firstInRegion =
+                findFirstOpWithBlockIdInBlock(depUser, *userId))
+          consumerAnchor = firstInRegion;
       }
       consumedBuilder.setInsertionPoint(consumerAnchor);
 
@@ -1500,16 +1489,14 @@ static int processDepVal(Value depVal, const MainLoop &loop,
 
       Operation *firstOp = opsInRegion.front();
       OpBuilder consumedBuilder(loop.getContext());
-      // When enable_buffer_insert_optimization is on, place the consumer chain
-      // at the start of the dep user's block_id=X region (before the first op
-      // with that block_id). Otherwise keep "right before firstOp".
+      // Place the consumer chain at the start of the dep user's block_id=X
+      // region (before the first op with that block_id). When firstOp has no
+      // block_id, anchor it right before firstOp itself.
       Operation *consumerAnchor = firstOp;
-      if (enableOpt) {
-        if (auto userId = getOpBlockId(firstOp); userId.has_value()) {
-          if (Operation *firstInRegion =
-                  findFirstOpWithBlockIdInBlock(firstOp, *userId))
-            consumerAnchor = firstInRegion;
-        }
+      if (auto userId = getOpBlockId(firstOp); userId.has_value()) {
+        if (Operation *firstInRegion =
+                findFirstOpWithBlockIdInBlock(firstOp, *userId))
+          consumerAnchor = firstInRegion;
       }
       consumedBuilder.setInsertionPoint(consumerAnchor);
 

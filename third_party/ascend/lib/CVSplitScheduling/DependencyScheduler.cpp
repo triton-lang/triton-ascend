@@ -318,6 +318,11 @@ static SmallVector<Operation *> collectVectorToCubeProducers(Block *body, const 
     return producers;
 }
 
+unsigned countVectorToCubeBoundaries(Block *body, const Classification &classification)
+{
+    return collectVectorToCubeProducers(body, classification).size();
+}
+
 static void reorderForCrossScopeProducerPhases(
     Block *body, const DenseMap<Operation *, SmallVector<Operation *>> &predecessors,
     const DenseMap<Operation *, int> &levels, const Classification &classification,

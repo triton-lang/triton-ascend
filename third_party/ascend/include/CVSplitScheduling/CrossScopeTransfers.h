@@ -29,11 +29,18 @@
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/DenseMap.h"
+
+
 #include "llvm/ADT/SmallVector.h"
 
 #include <cstdint>
 
 namespace mlir::triton::cv_split {
+
+/// Highest synchronization flag ID the hardware offers this schedule, and the
+/// number of IDs that implies. Callers sizing a slot policy must fit inside it.
+constexpr unsigned kMaxTransferFlagId = 14;
+constexpr unsigned kMaxTransferFlags = kMaxTransferFlagId + 1;
 
 /// Describes the IR emitted for one VECTOR-to-CUBE transfer. The values and
 /// operation pointers are non-owning handles into the loop being transformed.
@@ -72,7 +79,8 @@ FailureOr<CrossScopeTransferInfo>
 insertCrossScopeTransfers(scf::ForOp loop, const Classification &classification,
                           const llvm::DenseMap<Operation *, Operation *> &transferPhaseEnds,
                           unsigned interCoreBufferDepth, uint64_t privateBufferUbBudgetBytes = 0,
-                          bool promotePrivateBufferPools = false);
+                          bool promotePrivateBufferPools = false,
+                          unsigned vectorToCubeSlotOverride = 0);
 
 } // namespace mlir::triton::cv_split
 

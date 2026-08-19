@@ -31,25 +31,34 @@
 // buffer *types*: the allocations of the three pools interleave in the output,
 // so a COUNT/NOT pair and a type-matching DAG group cannot share a prefix.
 
-// Defaults must leave the schedule exactly as it was before either option
-// existed -- three phases over two slots each, six flags.  Merging here would
-// cost 4*4096 against the 2*2048 + 2*4096 the separate pools use, so it is not
-// free and a zero budget declines it.
-// OFF-COUNT-6: memref.alloc() {{.*}}address_space
+// By default the two CUBE->VECTOR pools stay on the inter-core buffer count and
+// the VECTOR->CUBE pool takes one slot per lane.  That pool is in L1, so its
+// extra slots cost nothing against a UB budget, and with none of its slots
+// reused the schedule has nothing to pipeline against: CUBE issues every score
+// matmul before its first wait instead of stopping after two.  Merging the UB
+// roles is a different question and stays declined here -- it would cost
+// 4*4096 against the 2*2048 + 2*4096 the separate pools use, and the budget is
+// zero.  So 2 + 2 UB slots and 4 L1: eight allocations.
+// OFF-COUNT-8: memref.alloc() {{.*}}address_space
 // OFF-NOT: memref.alloc() {{.*}}address_space
 
 // OFFTYPE-DAG: memref.alloc() : memref<16x32xf32, #hivm.address_space<ub>>
 // OFFTYPE-DAG: memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
-// OFFTYPE-DAG: flag = 5
+// OFFTYPE-DAG: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
+// OFFTYPE-DAG: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
+// OFFTYPE-DAG: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
+// OFFTYPE-DAG: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
+// Two QK forward flags, four P, two PV: 0..7.
+// OFFTYPE-DAG: flag = 7
 // Nothing merged, so no union view and no back-edge release.
-// OFFTYPE-NOT: flag = 6
+// OFFTYPE-NOT: flag = 8
 // OFFTYPE-NOT: memref.reinterpret_cast {{.*}}offset: [0]{{.*}}address_space<ub>{{.*}}address_space<ub>
 
 // 4096 is exactly the difference between the two separate pools and four union
-// slots, so it buys the merge.  The allocation count is unchanged -- four UB
-// slots replace 2 + 2, and the L1 pool is untouched because promotion is off --
-// but every UB slot is now owned by one lane.
-// UNION-COUNT-6: memref.alloc() {{.*}}address_space
+// slots, so it buys the merge.  Four UB slots replace 2 + 2, and the L1 pool
+// already has one slot per lane by default: eight allocations, every one of
+// them owned by a single lane.
+// UNION-COUNT-8: memref.alloc() {{.*}}address_space
 // UNION-NOT: memref.alloc() {{.*}}address_space
 
 // Each UB slot is the larger of the two roles; the smaller role's own type is
@@ -61,9 +70,9 @@
 // function's parameters bufferize with an identity layout map and a strided
 // window could never be cast across that boundary.
 // UNIONVIEW-DAG: memref.reinterpret_cast %{{.*}} to offset: [0], sizes: [16, 32], strides: [32, 1] : memref<16x64xf32, #hivm.address_space<ub>> to memref<16x32xf32, #hivm.address_space<ub>>
-// Four QK + four PV forward flags, two L1 flags, one back-edge release: 0..10.
-// UNIONVIEW-DAG: flag = 10
-// UNIONVIEW-NOT: flag = 11
+// Four QK + four PV forward flags, four L1 flags, one back-edge release: 0..12.
+// UNIONVIEW-DAG: flag = 12
+// UNIONVIEW-NOT: flag = 13
 // The release must not introduce a reverse-pipe channel; both directions stay canonical.
 // UNIONVIEW-NOT: sync_block{{.*}}<PIPE_V>, <PIPE_FIX>
 // UNIONVIEW-NOT: sync_block{{.*}}<PIPE_MTE1>, <PIPE_MTE3>
@@ -76,7 +85,8 @@
 
 // PROMOTETYPE-COUNT-4: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
 // PROMOTETYPE-NOT: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// Two more flags than the union alone: 0..12.
+// The L1 pool is already one slot per lane by default, so opting in changes
+// nothing: the same 0..12.
 // PROMOTETYPE-DAG: flag = 12
 // PROMOTETYPE-NOT: flag = 13
 

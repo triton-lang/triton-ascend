@@ -31,13 +31,14 @@
 // The shared FlagIdManager must see an existing flag zero and allocate the CV
 // schedule above it.  This is a collision-avoidance contract, not merely a
 // check that CV split happens to emit a familiar sequence on an empty module.
-// Three phases at depth two need six IDs, so shifting past the occupied zero
-// places them on 1..6.
+// Two CUBE->VECTOR phases at depth two and a VECTOR->CUBE phase with one slot
+// per lane need eight IDs, so shifting past the occupied zero places them on
+// 1..8.
 // COLLISION: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 0
 // COLLISION: scope.scope
 // COLLISION: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 1
-// COLLISION: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 5
-// COLLISION-NOT: flag = 7
+// COLLISION: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 3
+// COLLISION-NOT: flag = 9
 
 // When CV commits, the existing DCVP wrapper sees the result and leaves the
 // two proven CV scopes untouched.

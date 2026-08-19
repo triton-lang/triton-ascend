@@ -49,9 +49,6 @@ namespace mlir::triton::cv_split {
 #define DEBUG_TYPE "cv-split-scheduling"
 namespace {
 
-static constexpr unsigned kMaxTransferFlagId = 14;
-static constexpr unsigned kMaxTransferFlags = kMaxTransferFlagId + 1;
-
 // ============================================================================
 // Stage 8: Insert cross-scope transfers and synchronization
 //
@@ -636,7 +633,7 @@ FailureOr<CrossScopeTransferInfo>
 insertCrossScopeTransfers(scf::ForOp loop, const DenseMap<Operation *, EngineType> &classification,
                           const DenseMap<Operation *, Operation *> &transferPhaseEnds,
                           unsigned interCoreBufferDepth, uint64_t privateBufferUbBudgetBytes,
-                          bool promotePrivateBufferPools)
+                          bool promotePrivateBufferPools, unsigned vectorToCubeSlotOverride)
 {
 
     MLIRContext *ctx = loop.getContext();
@@ -845,6 +842,19 @@ insertCrossScopeTransfers(scf::ForOp loop, const DenseMap<Operation *, EngineTyp
     DenseMap<int64_t, unsigned> slotCountByOrigin;
     for (int64_t origin : candidates)
         slotCountByOrigin[origin] = interCoreBufferDepth;
+
+    // The schedule pipelines a VECTOR->CUBE boundary's consuming work against
+    // the boundary that reuses its slot, so the reorder distance and this
+    // pool's slot count are the same number seen from two stages. The caller
+    // decides it once, before scheduling, and hands it down here; deciding it
+    // twice would let the two disagree, and a distance larger than the rotation
+    // period puts a slot's read after the write that reuses it.
+    if (vectorToCubeSlotOverride > 0)
+        for (int64_t origin : candidates) {
+            auto footprint = footprintByOrigin.find(origin);
+            if (footprint != footprintByOrigin.end() && !footprint->second.isUB)
+                slotCountByOrigin[origin] = vectorToCubeSlotOverride;
+        }
 
     // Role sharing: one slot per lane, shared between same-typed CUBE->VECTOR
     // phases.

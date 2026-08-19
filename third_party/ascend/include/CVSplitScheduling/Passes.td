@@ -39,6 +39,15 @@ def CVSplitScheduling : Pass<"cv_split_scheduling", "mlir::ModuleOp"> {
            "bool", /*default*/"true",
            "promote the scope loops left by a candidate whose unroll consumed "
            "its whole trip count; disable to keep them for inspection">,
+    Option<"pipelineDistance", "pipeline-distance",
+           "int", /*default*/"0",
+           "how many transfer boundaries apart to software-pipeline a "
+           "boundary's consuming work from the boundary that reuses its slot. "
+           "Zero follows the inter-core buffer depth, which is what the shared "
+           "slots need. A distance at or above the unroll factor emits every "
+           "boundary's own work first and drains the consumers after, which is "
+           "right when no slot is reused and the interleaving only shortens "
+           "the producing core's run-ahead.">,
     Option<"privateBufferUbBudgetBytes", "private-buffer-ub-budget-bytes",
            "int64_t", /*default*/"0",
            "spare UB, in bytes, that cross-scope transfers may spend to stop "

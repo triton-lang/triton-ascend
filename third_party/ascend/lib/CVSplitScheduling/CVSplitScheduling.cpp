@@ -909,10 +909,36 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
             return failure();
         }
 
+        // The reorder pipelines a VECTOR->CUBE boundary's consuming work against
+        // the boundary that reuses its slot, so the distance it needs and the
+        // number of slots that pool gets are the same quantity. Decide it once,
+        // here, and give it to both stages: computing it twice lets them
+        // disagree, and a distance above the rotation period leaves a slot's
+        // read after the write that reuses it.
+        //
+        // One slot per boundary is the better default. The pool is in L1, so the
+        // extra slots cost nothing against the UB budget, and with no slot
+        // reused there is nothing for the reorder to interleave -- CUBE issues
+        // every score matmul before it waits, instead of stopping after
+        // `interCoreBufferDepth` of them. Fall back to the depth when the flags
+        // one-per-boundary would need do not fit.
+        const unsigned vcBoundaries = cv_split::countVectorToCubeBoundaries(body, classification);
+        const unsigned flagsIfPrivate = 3 * vcBoundaries + 1;
+        unsigned vectorToCubeSlots = static_cast<unsigned>(interCoreBufferDepth);
+        // A frontend that pinned the depth to one asked for a single inter-core
+        // buffer per lineage; widening that pool would ignore the request. Only
+        // grow a pool the policy already allows to ping-pong.
+        if (interCoreBufferDepth >= 2 && vcBoundaries > vectorToCubeSlots &&
+            flagsIfPrivate <= cv_split::kMaxTransferFlags)
+            vectorToCubeSlots = vcBoundaries;
+        if (pipelineDistance > 0)
+            vectorToCubeSlots = static_cast<unsigned>(pipelineDistance);
+        LLVM_DEBUG(llvm::dbgs() << "[cv-split] " << vcBoundaries << " vector-to-cube boundaries; "
+                                << vectorToCubeSlots << " slot(s) each, pipelined at that distance\n");
+
         cv_split::DependencyScheduler scheduler;
         llvm::DenseMap<Operation *, Operation *> transferPhaseEnds;
-        if (failed(scheduler.run(body, classification, transferPhaseEnds,
-                                 static_cast<unsigned>(interCoreBufferDepth))))
+        if (failed(scheduler.run(body, classification, transferPhaseEnds, vectorToCubeSlots)))
             return failure();
 
         // Stage 7.5: Unfuse PV matmuls (split matmul(p,v,acc*alpha) into pv + addf)
@@ -923,7 +949,7 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
         LLVM_DEBUG(llvm::dbgs() << "[cv-split] === Stage 8: cross-scope transfers ===\n");
         FailureOr<cv_split::CrossScopeTransferInfo> transferInfo = cv_split::insertCrossScopeTransfers(
             loop, classification, transferPhaseEnds, static_cast<unsigned>(interCoreBufferDepth),
-            static_cast<uint64_t>(privateBufferUbBudgetBytes), promotePrivateBufferPools);
+            static_cast<uint64_t>(privateBufferUbBudgetBytes), promotePrivateBufferPools, vectorToCubeSlots);
         if (failed(transferInfo)) {
             return failure();
         }

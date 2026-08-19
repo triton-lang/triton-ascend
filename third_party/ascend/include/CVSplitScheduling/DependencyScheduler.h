@@ -30,6 +30,11 @@
 
 namespace mlir::triton::cv_split {
 
+/// Number of VECTOR->CUBE hand-offs in `body`. These are the boundaries the
+/// schedule pipelines against, so this is also the number of slots the
+/// VECTOR->CUBE pool needs before none of them is reused.
+unsigned countVectorToCubeBoundaries(Block *body, const Classification &classification);
+
 class DependencyScheduler {
   public:
     /// `pipelineDistance` is the inter-core buffer depth: consuming work is

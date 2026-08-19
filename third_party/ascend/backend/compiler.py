@@ -1195,9 +1195,12 @@ class NPUOptions:
     # buffers across unrolled lanes. It funds merging the two CUBE->VECTOR
     # roles onto one union slot per lane, which is what lets HEAD_DIM differ
     # from BLOCK_N: the slot is sized for the larger role and the smaller takes
-    # a contiguous view of its front. Merging equal-sized roles costs nothing
-    # and happens regardless, so zero still gets the HEAD_DIM == BLOCK_N case.
-    cv_split_private_buffer_ub_budget_bytes: int = 0
+    # a contiguous view of its front. Negative means the headroom is not known
+    # here -- this is settled before bufferization, and the backend's memory
+    # planner assigns the addresses and reports an overflow with the exact
+    # requirement -- so spend what the schedule asks and let it arbitrate.
+    # Zero declines any spend, keeping the rotating pools.
+    cv_split_private_buffer_ub_budget_bytes: int = -1
     # Additionally give individual pools one buffer per lane rather than a
     # rotating set, cheapest-first against the same budget. Off by default: at
     # the unroll factors in use, the reuse this removes is already ordered by a

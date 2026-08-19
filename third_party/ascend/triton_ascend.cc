@@ -154,7 +154,7 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
       },
       py::arg("pm"), py::arg("compile_on_910_95"), py::arg("unroll_factor"),
       py::arg("promote_fully_unrolled") = true,
-      py::arg("private_buffer_ub_budget_bytes") = 0,
+      py::arg("private_buffer_ub_budget_bytes") = -1,
       py::arg("promote_private_buffer_pools") = false);
 
   m.def(

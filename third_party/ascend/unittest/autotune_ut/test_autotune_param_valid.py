@@ -1637,3 +1637,52 @@ def test_inject_grid_num_tiles_uses_only_static_grid_and_preserves_explicit_valu
     explicit_hint = {"grid": (2, 16), "grid_num_tiles": 99}
     inject_grid_num_tiles(explicit_hint)
     assert explicit_hint["grid_num_tiles"] == 99
+
+
+def test_make_kernel_call_extracts_name_from_jit_run():
+    namespace = _load_autotuner_methods("_make_kernel_call")
+    _make_kernel_call = _normalize_loaded_method(namespace["_make_kernel_call"])
+
+    @triton.jit
+    def test_kernel_jit(x_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(x_ptr + offsets, mask=mask)
+        tl.store(x_ptr + offsets, x, mask=mask)
+
+    fake_self = SimpleNamespace(fn=test_kernel_jit, pre_hook=lambda full_nargs: None,
+                                post_hook=lambda full_nargs, exception=None: None, nargs={})
+    fake_config = SimpleNamespace(kwargs={"BLOCK_SIZE": 32}, all_kwargs=lambda: {"BLOCK_SIZE": 32}, pre_hook=None)
+
+    x = torch.zeros(128, dtype=torch.float32, device="npu")
+    kernel_call_closure = _make_kernel_call(fake_self, x, x.numel(), config=fake_config, grid=(1, ))
+    kernel_call_closure(warmup=False)
+
+    assert kernel_call_closure.target_kernel_name == "test_kernel_jit"
+
+
+def test_make_kernel_call_extracts_name_from_libentry_tuple():
+    namespace = _load_autotuner_methods("_make_kernel_call")
+    _make_kernel_call = _normalize_loaded_method(namespace["_make_kernel_call"])
+
+    from triton.runtime.libentry import libentry
+
+    @libentry()
+    @triton.jit
+    def test_kernel_libentry(x_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(x_ptr + offsets, mask=mask)
+        tl.store(x_ptr + offsets, x, mask=mask)
+
+    fake_self = SimpleNamespace(fn=test_kernel_libentry, pre_hook=lambda full_nargs: None,
+                                post_hook=lambda full_nargs, exception=None: None, nargs={})
+    fake_config = SimpleNamespace(kwargs={"BLOCK_SIZE": 32}, all_kwargs=lambda: {"BLOCK_SIZE": 32}, pre_hook=None)
+
+    x = torch.zeros(128, dtype=torch.float32, device="npu")
+    kernel_call_closure = _make_kernel_call(fake_self, x, x.numel(), config=fake_config, grid=(1, ))
+    kernel_call_closure(warmup=False)
+
+    assert kernel_call_closure.target_kernel_name == "test_kernel_libentry"

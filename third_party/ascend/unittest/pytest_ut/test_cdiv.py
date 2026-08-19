@@ -84,7 +84,7 @@ def test_cdiv(param_list):
     dtype, shape, ncore, xblock, xblock_sub = param_list
     torch_dtype = eval('torch.' + dtype)
     x0 = test_common.generate_tensor(shape, dtype).npu()
-    x1 = test_common.generate_tensor(shape, dtype).npu()
+    x1 = test_common.generate_tensor(shape, dtype).clamp_min(1).npu()
     # torch结果
     torch_res = torch_cdiv(x0, x1, dtype)
     # triton结果

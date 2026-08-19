@@ -23,6 +23,7 @@
 
 #include <cstdlib>
 
+#include "AscendModel/RouteModel/SimtSelection.h"
 #include "TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/TritonToLinalg/ArgMinMaxConverter.h"
@@ -42,8 +43,10 @@
 #include "ascend/include/TritonToStructured/CannonicalizerConverter.h"
 #include "ascend/include/TritonToUnstructure/UnstructureConversionPass.h"
 #include "ascend/include/Utils/InterleaveOptimization.h"
+#include "ascend/include/Utils/Utils.h"
 
 #include "bishengir/Dialect/HFusion/IR/HFusion.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -161,24 +164,44 @@ static bool isCustomOpOperandTypesLegal(TypeRange types) {
 }
 
 static bool isSIMTOp(Operation *op) {
+  // scope.scope is the canonical route contract.  It is also a native
+  // BiShengIR construct, so it survives this pass and lets the backend retain
+  // the selected region as SIMT even when no individual Triton op lowers to an
+  // intrinsically SIMT custom op (for example a triangular solve loop).
+  if (op->getName().getStringRef() == "scope.scope") {
+    auto mode = mlir::ascend::simt_selection::getVectorMode(op);
+    if (mode && mode.getValue() == "simt")
+      return true;
+  }
+
   if (auto custom_op = dyn_cast<hivm::CustomOp>(op)) {
     return custom_op.getCoreType() == hivm::TCoreType::VECTOR &&
            custom_op.getVFMode() == hivm::VFMode::SIMT;
   }
 
+  // backend_default retains the historical target-specific routing.  Once a
+  // concrete cost-model decision is present, direct SIMT templates must be
+  // backed by the enclosing local SIMT scope.  The scope remains live through
+  // this pass and is carried into TTAdapter/BiShengIR as the execution-region
+  // contract.
+  const bool directSimtEnabled =
+      !mlir::ascend::simt_selection::isModelControlled(op) ||
+      mlir::ascend::simt_selection::shouldUseSimtTemplate(
+          op, /*legacyForceSimt=*/false);
+
   if (isa<triton::GatherOp>(op) && compileOn91095Flag) {
-    return true;
+    return directSimtEnabled;
   }
 
   if (isa<triton::HistogramOp>(op) && compileOn91095Flag) {
-    return true;
+    return directSimtEnabled;
   }
 
   // tt.scan: only a 1-D cumsum is treated as a SIMT op (drives the kernel
   // parallel_mode -> mix_simd_simt -> enable_simt). Everything else stays SIMD.
   if (compileOn91095Flag) {
     if (auto scan = dyn_cast<triton::ScanOp>(op)) {
-      return isSimt1DCumsum(scan);
+      return directSimtEnabled && isSimt1DCumsum(scan);
     }
   }
   return isa<triton::ascend::IndexPutOp, triton::ascend::GatherOutToUbOp,
@@ -870,8 +893,39 @@ LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(
     ModuleOp moduleOp) {
   // The strided-axis rewrites below only apply in 950 SIMT mode. On other
   // targets we leave strided loads to the legacy strided DMA lowering.
+  bool hasModelControlledFunction =
+      mlir::ascend::simt_selection::isModelControlled(moduleOp);
+  if (!hasModelControlledFunction) {
+    moduleOp.walk([&](triton::FuncOp funcOp) {
+      if (mlir::ascend::simt_selection::isModelControlled(funcOp))
+        hasModelControlledFunction = true;
+    });
+  }
+
+  bool hasModelSelectedMemoryOp = false;
+  if (hasModelControlledFunction) {
+    moduleOp.walk([&](Operation *op) {
+      if (!isa<triton::LoadOp, triton::StoreOp>(op))
+        return WalkResult::advance();
+      if (mlir::ascend::simt_selection::isModelControlled(op) &&
+          mlir::ascend::simt_selection::shouldUseSimtTemplate(
+              op, /*legacyForceSimt=*/false)) {
+        hasModelSelectedMemoryOp = true;
+        return WalkResult::interrupt();
+      }
+      return WalkResult::advance();
+    });
+  }
+
+  // A concrete model decision owns routing for this compilation.  In
+  // particular, compile_mode=simd_simt still sets the historical global force
+  // flag, but all-SIMD and mixed-without-memory selections must not activate
+  // the module-wide strided/coalescing rewrites.
+  const bool useLegacyGlobalForce =
+      compileModeFlag == triton::ascend::CompileMode::SimdSimtTemplate &&
+      !hasModelControlledFunction;
   if (!(compileOn91095Flag &&
-        compileModeFlag == triton::ascend::CompileMode::SimdSimtTemplate)) {
+        (useLegacyGlobalForce || hasModelSelectedMemoryOp))) {
     return success();
   }
 
@@ -959,16 +1013,19 @@ void TritonToLinalgPass::runOnOperation() {
   });
   existDotFlag = existDot;
 
-  // NOTE: existSIMTOp is intentionally computed AFTER
-  // processStridedLoadStoreRewriteOperations below, because that step
-  // materializes triton::ascend::UnstructuredLoadOp/UnstructuredStoreOp
-  // (which isSIMTOp() counts). Walking here (before the rewrite) would miss
-  // them and mislabel the kernel parallel_mode as "simd" instead of
-  // "mix_simd_simt";
-  // then enable_simt would be false and the launch would not reserve
-  // localMemorySize for the SIMT templates -> VEC UB out-of-bounds (error 341)
-  // at runtime on mix-CV kernels.
+  // Preserve an explicit SIMT scope before earlier conversions can fold an
+  // empty scope. The post-rewrite scan below ORs in SIMT custom ops created by
+  // strided/unstructured rewrites.
   bool existSIMTOp = false;
+  moduleOp.walk([&](Operation *op) {
+    if (op->getName().getStringRef() != "scope.scope")
+      return WalkResult::advance();
+    auto mode = mlir::ascend::simt_selection::getVectorMode(op);
+    if (!mode || mode.getValue() != "simt")
+      return WalkResult::advance();
+    existSIMTOp = true;
+    return WalkResult::interrupt();
+  });
 
   // Execute tensor descriptor operations conversion
   if (failed(processDescriptorOperations(moduleOp))) {
@@ -1346,6 +1403,22 @@ void TritonToLinalgPass::runOnOperation() {
     }
     return WalkResult::advance();
   });
+
+  // Model report attributes are compile-time control state, not device IR.
+  // Python has already copied the report into compiler metadata.  Preserve
+  // scope.scope itself: it is the native BiShengIR execution-region contract,
+  // not a private cost-model marker.
+  for (llvm::StringRef name : {
+           "ascend.simt_costmodel.effective",
+           "ascend.simt_costmodel.recommended",
+           "ascend.simt_costmodel.selection_source",
+           "ascend.simt_costmodel.ranking_confidence",
+           "ascend.simt_costmodel.all_simd_score",
+           "ascend.simt_costmodel.all_simt_score",
+           "ascend.simt_costmodel.mixed_score",
+           "ascend.simt_costmodel.report_json",
+       })
+    moduleOp->removeAttr(name);
 }
 
 std::unique_ptr<OperationPass<ModuleOp>>

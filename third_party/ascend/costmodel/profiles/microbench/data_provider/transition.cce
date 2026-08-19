@@ -1,0 +1,95 @@
+// Measure SIMD/SIMT boundary costs with in-kernel SYS_CNT slope.
+//
+// Modes:
+//   0: SIMD tail only
+//   1: empty SIMT async_invoke only
+//   2: empty SIMT async_invoke followed by SIMD tail, no mid barrier
+//   3: SIMD tail followed by empty SIMT async_invoke, no mid barrier
+//   4: empty SIMT async_invoke, mid barrier, then SIMD tail
+//   5: SIMD tail, mid barrier, then empty SIMT async_invoke
+//   6: barrier only
+//
+// Each mode is repeated K times inside one AICore kernel. The host measures the
+// slope over K to remove SYS_CNT read and host launch overhead.
+#include "RegBase/VecUtils.h"
+#include "Vector/VecUtils.h"
+#include "Utils.h"
+
+using __cce_simd::NORM;
+using __cce_simd::NORM_B32;
+using __cce_simd::POST_UPDATE;
+
+using DT = float;
+
+template <typename T>
+__simt_vf__ LAUNCH_BOUND(1024) __aiv__ __attribute__((always_inline)) static void
+empty_vf(__ubuf__ T *p) {
+  if (threadIdx.x == 0 && threadIdx.y == 0) {
+    p[0] = (T)1;
+  }
+}
+
+__aiv__ __attribute__((always_inline)) static void simd_tail(__ubuf__ DT *src, __ubuf__ DT *dst, uint32_t cnt) {
+  __VEC_SCOPE__ {
+    VectorReg<DT> x, y;
+    vector_bool m;
+    CREATE_MASK_BY_SIZE(m, DT, cnt);
+    vlds(x, dst, 0, NORM);
+    vadd(y, x, x, m);
+    vsts(y, dst, 0, NORM_B32, m);
+  }
+}
+
+extern "C" __global__ [aicore] void measure(__gm__ long long *out, int K, int nwarp, int cnt, int tail_reps, int mode) {
+  auto src = reinterpret_cast<__ubuf__ DT *>(0);
+  auto dst = reinterpret_cast<__ubuf__ DT *>(32768);
+  uint32_t active = (uint32_t)(cnt <= 0 ? 64 : cnt);
+  int warps = nwarp;
+  if (warps < 1) {
+    warps = 1;
+  }
+  if (warps > 32) {
+    warps = 32;
+  }
+  int reps = tail_reps <= 0 ? 1 : tail_reps;
+
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int i = 0; i < K; i++) {
+    if (mode == 6) {
+      // The loop epilogue pipe_barrier below is the measured operation.
+    } else if (mode == 0) {
+      for (int r = 0; r < reps; r++) {
+        simd_tail(src, dst, active);
+      }
+    } else if (mode == 1) {
+      cce::async_invoke<empty_vf<DT>>(cce::dim3{32, (unsigned)warps, 1}, src);
+    } else if (mode == 2) {
+      cce::async_invoke<empty_vf<DT>>(cce::dim3{32, (unsigned)warps, 1}, src);
+      for (int r = 0; r < reps; r++) {
+        simd_tail(src, dst, active);
+      }
+    } else if (mode == 3) {
+      for (int r = 0; r < reps; r++) {
+        simd_tail(src, dst, active);
+      }
+      cce::async_invoke<empty_vf<DT>>(cce::dim3{32, (unsigned)warps, 1}, src);
+    } else if (mode == 4) {
+      cce::async_invoke<empty_vf<DT>>(cce::dim3{32, (unsigned)warps, 1}, src);
+      pipe_barrier(PIPE_ALL);
+      for (int r = 0; r < reps; r++) {
+        simd_tail(src, dst, active);
+      }
+    } else {
+      for (int r = 0; r < reps; r++) {
+        simd_tail(src, dst, active);
+      }
+      pipe_barrier(PIPE_ALL);
+      cce::async_invoke<empty_vf<DT>>(cce::dim3{32, (unsigned)warps, 1}, src);
+    }
+    pipe_barrier(PIPE_ALL);
+  }
+  long long t1 = get_sys_cnt();
+  pipe_barrier(PIPE_ALL);
+  out[0] = t1 - t0;
+}

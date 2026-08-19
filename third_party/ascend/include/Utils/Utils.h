@@ -77,7 +77,7 @@ inline bool isMixCompileMode(CompileMode mode) {
 inline bool hasScopeVecMode(Operation *op, llvm::StringRef mode) {
   for (Operation *parent = op->getParentOp(); parent;
        parent = parent->getParentOp()) {
-    if (auto vecModeAttr = parent->getAttrOfType<StringAttr>("vec_mode")) {
+    if (auto vecModeAttr = parent->getAttrOfType<StringAttr>("vector_mode")) {
       if (vecModeAttr.getValue() == mode)
         return true;
     }

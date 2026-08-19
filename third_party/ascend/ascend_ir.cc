@@ -29,6 +29,7 @@
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
+#include "AscendModel/RouteModel/SimtSelection.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -613,8 +614,40 @@ void init_ascend_ir(py::module &&m) {
     }
     return py::cast(ret.getInt());
   });
+  m.def("get_string_attr",
+        [](OpState &op, const std::string &name) -> py::object {
+          auto ret = op->getAttrOfType<StringAttr>(name);
+          if (!ret) {
+            return py::none();
+          }
+          return py::cast(ret.getValue().str());
+        });
   m.def("remove_attr",
         [](OpState &op, std::string &name) -> void { op->removeAttr(name); });
+
+  m.def("clear_simd_simt_costmodel_attrs", [](OpState &op) {
+    for (llvm::StringRef name : {
+             "ascend.simt_costmodel.effective",
+             "ascend.simt_costmodel.recommended",
+             "ascend.simt_costmodel.selection_source",
+             "ascend.simt_costmodel.ranking_confidence",
+             "ascend.simt_costmodel.all_simd_score",
+             "ascend.simt_costmodel.all_simt_score",
+             "ascend.simt_costmodel.mixed_score",
+             "ascend.simt_costmodel.report_json",
+         }) {
+      op->removeAttr(name);
+    }
+  });
+  m.def("is_whole_body_void_simt_scope", [](OpState &op) {
+    return ascend::simt_selection::findWholeBodyVoidSimtScope(
+               op.getOperation()) != nullptr;
+  });
+  m.def("inline_void_simt_scopes_for_pure_simt", [](OpState &op) {
+    return ascend::simt_selection::inlineVoidSimtScopesForPureSimt(
+        op.getOperation());
+  });
+
   py::class_<StringAttr, Attribute>(m, "str_attr", py::module_local());
   py::class_<ArrayAttr, Attribute>(m, "array_attr", py::module_local());
 

@@ -1,0 +1,337 @@
+{
+  "$schema": "./simd_simt_profile_schema.json",
+  "schema_version": 4,
+  "profile_version": "david-v100-simd-simt-20260806-v11",
+  "target": "Ascend950PR/dav-c310",
+  "description": "Route Model policy and target-specific calibration used to rank all-SIMD, all-SIMT, and mixed SIMD/SIMT candidates. Model-neutral hardware measurements are referenced from microbenchmark_profile instead of duplicated here.",
+  "microbenchmark_profile": "../microbench/ascend_davidv100_v1.json",
+  "compatible_targets": [
+    "Ascend950*",
+    "Ascend910_95*",
+    "dav-c310"
+  ],
+  "score_unit": "system_cycle_selection_score",
+  "policy": {
+    "description": "Admission policy for turning a ranking into an actionable route decision. Only minimum_confidence_for_decision is currently consumed by the C++ loader.",
+    "minimum_confidence_for_decision": "low",
+    "unknown_op": "mark_low_confidence",
+    "notes": "Analytical payloads use SYS_CNT cycles, but Event-calibrated structural residuals make final values selection scores rather than literal measured cycles. Low-confidence rankings may act only inside the bounded calibration domain and must still pass target, unsupported-term, legality, and gain gates."
+  },
+  "selection_calibration": {
+    "description": "Route-specific calibration that converts analytical resource costs into relative selection scores and bounds where those scores may make decisions. Mixed cost is partitioned from the materializable anchor plan; the removed legacy mixed_simd_fraction blend no longer participates.",
+    "program_issue_scale": 8.0,
+    "ranking_confidence": "low",
+    "source": "v11 keeps the measured masked-rowwise and tiny-gather-dot calibration, but invalidates the previous label-only triangular mixed result. Mixed scoring now uses the exact materialized scope operation set and insertion point, including safely movable mask setup but excluding the initial SIMD loads and dense dot tail; recognized 16x16 triangular recurrences use the structurally derived 14-trip full-block estimate; and SIMT predicate/shuffle work uses loop-weighted lane counts. Triangular route multipliers remain identity and non-SIMD production selection remains disabled until a real hivm.vf_mode<SIMT> A5 run is measured. No directional SIMD/SIMT boundary latency has been measured.",
+    "coverage": {
+      "description": "Feature-domain limits within which Event-calibrated structural ranking is admitted; these are model validity bounds rather than hardware limits. Masked-rowwise, rank-1 and triangular-solve use independent thresholds. The triangular bounds describe one BT64 scope containing four 16x16 recurrences and 56 structurally modeled loop trips/reductions; they do not reuse the rowwise ceiling of 16.",
+      "minimum_irregular_density": 0.25,
+      "tiny_dot_flops_max": 16384,
+      "tiny_dot_max_tensor_numel": 256,
+      "rowwise_loop_trip_sum_max": 32,
+      "rowwise_mask_rank_sum_max": 48,
+      "rowwise_weighted_reductions_max": 16,
+      "rowwise_max_tensor_numel": 128,
+      "rank1_weighted_reductions_max": 8,
+      "rank1_max_tensor_numel": 2048,
+      "triangular_loop_count_max": 4,
+      "triangular_loop_trip_sum_max": 56,
+      "triangular_mask_rank_sum_max": 64,
+      "triangular_weighted_reductions_max": 56,
+      "triangular_max_tensor_numel": 256
+    },
+    "simd_structural_penalty_ratio": {
+      "description": "Additive SIMD-only residual ratios for irregular addressing, mask materialization, reductions, loops, control flow, tiny dot, and rank-1 indirect reduction patterns. Their sum multiplies A_SIMD; A_SIMT never participates in the all-SIMD cost.",
+      "irregular_per_density": 0.8,
+      "irregular_cap": 0.5,
+      "tiny_dot_irregular_per_density": 0.24,
+      "tiny_dot_irregular_cap": 0.12,
+      "per_mask_rank": 0.022,
+      "mask_cap": 0.35,
+      "per_weighted_reduction": 0.02,
+      "reduction_cap": 0.15,
+      "per_static_loop_trip": 0.008,
+      "loop_cap": 0.15,
+      "control_flow": 0.03,
+      "rank1_indirect_vector_reduction": 0.75,
+      "tiny_dot": 0.06,
+      "tiny_dot_flops_max": 16384
+    },
+    "event_route_score_multiplier": {
+      "description": "Low-confidence route-relative residual calibration. For each bounded feature domain, calibrated_score = raw_analytical_structural_score * route_multiplier. Masked-rowwise and tiny-irregular-dot retain their measured A5 multipliers; triangular-solve uses identity placeholders after its former label-only mixed evidence was invalidated. Raw scores and multipliers are both emitted in the report. A validated flag may promote a non-default route only after correctness and real lowering were independently verified.",
+      "domains": {
+        "masked_rowwise_reduction": {
+          "all_simd": 67.628046,
+          "all_simt_only": 0.807671,
+          "mixed_simd_simt": 3.537276,
+          "all_simt_only_validated": true,
+          "mixed_simd_simt_validated": true,
+          "source": "A5 card 0, FBGEMM T128/D128/H8/num_warps4, 30 warmup + 100 NPU Event samples: median all-SIMD 68.9340 us, all-SIMT 26.7795 us, Auto mixed 36.0365 us; all routes correctness PASS.",
+          "confidence": "low"
+        },
+        "tiny_irregular_dot": {
+          "all_simd": 1.321185,
+          "all_simt_only": 1.0,
+          "mixed_simd_simt": 0.666478,
+          "all_simt_only_validated": false,
+          "mixed_simd_simt_validated": true,
+          "source": "A5 card 0, gather-dot-min M16/N16/K16/num_warps4, one process with routes interleaved after 50 warmup, 200 NPU Event samples each: median all-SIMD 29.2525 us and correctness PASS; all-SIMT 25.1570 us but mismatched 256/256 elements; C++-materialized 2-scope mixed 25.3980 us and correctness PASS after lowering buffer-semantics identity vtranspose to copy and using cross-core GSS instead of the delayed variant whose split-side anchor interval is reversed. Mixed is 13.18% faster than all-SIMD.",
+          "confidence": "low"
+        },
+        "triangular_solve_loop": {
+          "all_simd": 1.0,
+          "all_simt_only": 1.0,
+          "mixed_simd_simt": 1.0,
+          "all_simt_only_validated": false,
+          "mixed_simd_simt_validated": false,
+          "source": "Identity placeholders after invalidating the previous solve-tril calibration. The old feature extractor treated each dynamic 16x16 recurrence as one iteration instead of the structurally known 14 and the earlier 22.3130 us mixed label did not pass --enable-simd-simt-mix-compile. Both non-SIMD production routes stay disabled until the canonical TTIR vector_mode scope is observed as hivm.vf_mode<SIMT>, the corrected raw scores are emitted, and all routes are remeasured on A5 card 0.",
+          "confidence": "low"
+        }
+      }
+    }
+  },
+  "simd": {
+    "description": "Inputs used to estimate the all-SIMD candidate: SIMD width, setup, operation, memory, and dot costs.",
+    "vector_width_measurement": "simd.vector_width_bits",
+    "startup_system_cycles": {
+      "description": "Legacy SIMD pipeline startup priors in SYS_CNT cycles. Only vector is currently consumed by Route Model scoring.",
+      "vector": 21.212121,
+      "mte2": 30.303030,
+      "mte3": 24.242424,
+      "source": "Legacy selection-model seed inherited from device-cycle startup values",
+      "confidence": "low",
+      "note": "Not isolated davidV100 microbenchmark evidence; kept outside the shared catalog"
+    },
+    "ops": {
+      "f32.add": {
+        "description": "Measured FP32 SIMD add base throughput resolved from the shared microbenchmark profile.",
+        "throughput_measurement": "simd.f32.add.throughput"
+      },
+      "f32.sub": {
+        "description": "Estimated FP32 SIMD subtract cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 1.0,
+        "confidence": "medium"
+      },
+      "f32.mul": {
+        "description": "Estimated FP32 SIMD multiply cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 1.0,
+        "confidence": "medium"
+      },
+      "f32.div": {
+        "description": "Estimated FP32 SIMD divide cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 12.0,
+        "confidence": "low"
+      },
+      "f32.max": {
+        "description": "Estimated FP32 SIMD maximum cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 1.2,
+        "confidence": "medium"
+      },
+      "f32.abs": {
+        "description": "Estimated FP32 SIMD absolute-value cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 1.0,
+        "confidence": "medium"
+      },
+      "f32.exp": {
+        "description": "Estimated FP32 SIMD exponential cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 9.0,
+        "confidence": "low"
+      },
+      "f32.log": {
+        "description": "Estimated FP32 SIMD logarithm cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 12.0,
+        "confidence": "low"
+      },
+      "predicate.cmp": {
+        "description": "Estimated SIMD predicate-comparison cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 1.0,
+        "confidence": "medium"
+      },
+      "predicate.select": {
+        "description": "Estimated SIMD predicate-select cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 1.0,
+        "confidence": "low"
+      },
+      "convert.cast": {
+        "description": "Estimated SIMD conversion cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 1.5,
+        "confidence": "low"
+      },
+      "f32.clamp": {
+        "description": "Estimated FP32 SIMD clamp cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 2.0,
+        "confidence": "low"
+      }
+    },
+    "memory": {
+      "description": "Model-specific all-SIMD memory fallback rates. vector_mte2 and mte3 plus confidence are consumed; hbm is retained only as documentary legacy context.",
+      "hbm_bytes_per_system_cycle": 1617.96,
+      "vector_mte2_bytes_per_system_cycle": 202.25,
+      "mte3_bytes_per_system_cycle": 202.25,
+      "source": "Selection-model seed retained for v4 score continuity; 202.25 B/SYS_CNT-cycle corresponds to 200 GB/s and must not be presented as the davidV100 75/71 GB/s data-mover specification",
+      "confidence": "low",
+      "note": "Model-specific fallback, not shared microbenchmark evidence"
+    },
+    "dot": {
+      "description": "All-SIMD dot setup and throughput seed used for every dot operation; current calibrated admission is narrower and covers only tiny irregular dot.",
+      "startup_system_cycles": 128.0,
+      "flops_per_system_cycle": 4096.0,
+      "source": "AscendModel cube startup/throughput seed; DES feedback is expected to refine scheduled lowering",
+      "confidence": "low"
+    }
+  },
+  "simt": {
+    "description": "Inputs used to estimate the all-SIMT candidate and the SIMT portion of a mixed candidate.",
+    "warp_size_measurement": "simt.warp_size",
+    "setup_system_cycles": {
+      "description": "Conservative standalone SIMT setup proxy resolved from the serialized empty-VF shared measurement; it is completion-inclusive but still contains a UB write, barrier, and runtime-loop control.",
+      "empty_launch_measurement": "simt.setup.empty_with_barrier"
+    },
+    "ops": {
+      "f32.add": {
+        "description": "Measured FP32 SIMT scalar-add base throughput resolved from the shared microbenchmark profile.",
+        "throughput_measurement": "simt.f32.add.throughput"
+      },
+      "f32.sub": {
+        "description": "Estimated FP32 SIMT subtract cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 1.0,
+        "confidence": "medium"
+      },
+      "f32.mul": {
+        "description": "Estimated FP32 SIMT multiply cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 1.0,
+        "confidence": "medium"
+      },
+      "f32.div": {
+        "description": "Estimated FP32 SIMT divide cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 12.0,
+        "confidence": "low"
+      },
+      "f32.max": {
+        "description": "Estimated FP32 SIMT maximum cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 1.2,
+        "confidence": "medium"
+      },
+      "f32.abs": {
+        "description": "Estimated FP32 SIMT absolute-value cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 1.0,
+        "confidence": "medium"
+      },
+      "f32.exp": {
+        "description": "Estimated FP32 SIMT exponential cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 9.0,
+        "confidence": "low"
+      },
+      "f32.log": {
+        "description": "Estimated FP32 SIMT logarithm cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 12.0,
+        "confidence": "low"
+      },
+      "predicate.cmp": {
+        "description": "Estimated SIMT predicate-comparison cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 1.0,
+        "confidence": "medium"
+      },
+      "predicate.select": {
+        "description": "Estimated SIMT predicate-select cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 1.0,
+        "confidence": "low"
+      },
+      "convert.cast": {
+        "description": "Estimated SIMT conversion cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 1.5,
+        "confidence": "low"
+      },
+      "f32.clamp": {
+        "description": "Estimated FP32 SIMT clamp cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "relative_to": "f32.add",
+        "factor": 2.0,
+        "confidence": "low"
+      }
+    },
+    "dot": {
+      "description": "All-SIMT dot setup and scalar-FMA throughput seed used for every dot operation; current calibrated admission is narrower and covers only tiny irregular dot.",
+      "startup_system_cycles": 64.0,
+      "flops_per_system_cycle": 141.0,
+      "source": "SIMT scalar FMA issue seed plus fixed tiny-dot setup; calibrated by gather-dot ranking",
+      "confidence": "low"
+    },
+    "camodel_effective": {
+      "description": "Workload-effective CaModel issue rates retained as fallback calibration context. The current Route Model consumes only the predicate rate from the nested rate map.",
+      "scope": "FBGEMM scope_b8; 13 active veccores",
+      "simulator_clock_mhz": 1650.0,
+      "conversion": "ops_per_system_cycle = aggregate_ops_per_simulator_cycle * simulator_clock_mhz / SYS_CNT_mhz",
+      "warp_instructions_per_system_cycle": {
+        "memory": 2.1411,
+        "float_alu": 0.6429,
+        "shuffle": 0.3763,
+        "predicate": 0.0380,
+        "control": 0.2431,
+        "int_alu": 0.2325
+      },
+      "warp_size": 32,
+      "source": "simt_camodel_calibration_scope_b8.json; remote OPPROF_20260712042738_MECSEVSNUOCUDPXV",
+      "confidence": "low",
+      "note": "These are effective issue rates for one FBGEMM workload, including its dependencies and stalls. They are fallback calibration seeds, not isolated instruction peak throughput or latency."
+    },
+    "shuffle": {
+      "description": "SIMT workload-effective shuffle rate resolved from the shared runtime-loop microbenchmark. Route-level generalization confidence is intentionally lower than measurement repeatability.",
+      "throughput_measurement": "simt.shuffle.throughput",
+      "confidence": "low"
+    },
+    "memory": {
+      "description": "SIMT workload-effective GM load/store rates resolved from sequential rotating runtime-loop measurements. Indirect/random/coalescing behavior is not calibrated by these rates.",
+      "load_throughput_measurement": "simt.gm.load.throughput",
+      "store_throughput_measurement": "simt.gm.store.throughput",
+      "confidence": "low"
+    },
+    "mixed_setup_fallback": {
+      "1": {
+        "description": "Low-confidence mixed setup fallback for one warp, sourced from a standalone empty-VF net probe rather than a mixed transition.",
+        "measurement": "simt.setup.transition_harness_net.warps_1"
+      },
+      "2": {
+        "description": "Low-confidence mixed setup fallback for two warps, sourced from a standalone empty-VF net probe rather than a mixed transition.",
+        "measurement": "simt.setup.transition_harness_net.warps_2"
+      },
+      "4": {
+        "description": "Low-confidence mixed setup fallback for four warps, sourced from a standalone empty-VF net probe rather than a mixed transition.",
+        "measurement": "simt.setup.transition_harness_net.warps_4"
+      },
+      "8": {
+        "description": "Low-confidence mixed setup fallback for eight warps, sourced from a standalone empty-VF net probe rather than a mixed transition.",
+        "measurement": "simt.setup.transition_harness_net.warps_8"
+      },
+      "16": {
+        "description": "Low-confidence mixed setup fallback for sixteen warps, sourced from a standalone empty-VF net probe rather than a mixed transition.",
+        "measurement": "simt.setup.transition_harness_net.warps_16"
+      },
+      "32": {
+        "description": "Low-confidence mixed setup fallback for thirty-two warps, sourced from a standalone empty-VF net probe rather than a mixed transition.",
+        "measurement": "simt.setup.transition_harness_net.warps_32"
+      },
+      "confidence": "low",
+      "note": "These values are mode1(empty SIMT plus tail barrier) minus mode6(barrier only) in a branch-heavy harness. They contain no SIMD phase and are used only as conservative setup fallbacks. Directional SIMD-to-SIMT, SIMT-to-SIMD, and dependent UB hand-off costs remain unmeasured."
+    }
+  }
+}

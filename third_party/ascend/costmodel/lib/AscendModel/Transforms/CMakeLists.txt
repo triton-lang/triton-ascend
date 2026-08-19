@@ -15,7 +15,9 @@ add_mlir_library(AscendModelTransforms
   LINK_LIBS PUBLIC
   AscendModelIR
   AscendModelAnalysis
+  AscendModelRouteModel
   MLIRIR
+  MLIRFunctionInterfaces
   MLIRPass
   MLIRSupport
   MLIRTransformUtils
@@ -23,6 +25,7 @@ add_mlir_library(AscendModelTransforms
   MLIRArithDialect
   MLIRMathDialect
   MLIRTensorDialect
+  LLVMSupport
 )
 
 # Conditionally link Triton dialect library and add dependency

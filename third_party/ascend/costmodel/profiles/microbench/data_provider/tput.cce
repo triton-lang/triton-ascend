@@ -1,0 +1,93 @@
+// Saturated-throughput comparison: SIMD vs SIMT on the SAME AIV vector unit,
+// PLUS a SIMD ILP sweep to pin the vector issue width (full-width vadd/cycle).
+// Both grind independent ADD chains with the vector unit kept BUSY, so we
+// compare peak arithmetic throughput (scalar adds / cycle), not a specific algo.
+//   mode 0 : SIMT  — async_invoke, each of nlane*nwarp threads does 8 indep adds/iter
+//   mode 1 : SIMD  — inline __VEC_SCOPE__, `nwarp` independent full-width VectorRegs
+//                    (ILP = nwarp, 1..8); sweeping it shows where throughput saturates.
+// fp32 vector width W = sizeof(vector_f32)/4 = 64 lanes per vector op (dav-c310).
+#include "RegBase/VecUtils.h"
+#include "Vector/VecUtils.h"
+#include "Utils.h"
+
+using DT = float;
+constexpr int W = 64; // fp32 lanes per VectorReg (sizeof(vector_f32)==256B)
+
+#if defined(__DAV_C310__)
+// SIMT: each active thread runs 8 independent ADD chains (ILP8).
+template <typename T>
+__simt_vf__ LAUNCH_BOUND(1024) __aiv__ __attribute__((always_inline)) static void
+simt_add(__ubuf__ T *out, int nlane, int nwarp, int iters, T k) {
+  int lane = threadIdx.x;
+  int warp = threadIdx.y;
+  if (lane >= nlane || warp >= nwarp) return;
+  T b = (T)(lane + warp + 1);
+  T a0=b, a1=b+1, a2=b+2, a3=b+3, a4=b+4, a5=b+5, a6=b+6, a7=b+7;
+  for (int i = 0; i < iters; i++) {
+    a0+=k; a1+=k; a2+=k; a3+=k; a4+=k; a5+=k; a6+=k; a7+=k;
+  }
+  out[warp * 32 + lane] = a0+a1+a2+a3+a4+a5+a6+a7;
+}
+#endif
+
+// one full-width vadd chain of length `iters` starting from ub slot j
+#define VLD(reg, j) VectorReg<DT> reg; vlds(reg, ob + (j) * W, 0, NORM)
+#define VST(reg, j) vsts(reg, ob + (j) * W, 0, NORM_B32, m)
+
+extern "C" __global__ [aicore] void measure(__gm__ long long *out, int K, int nlane, int nwarp, int iters, int mode) {
+  auto ob = reinterpret_cast<__ubuf__ DT *>(0);
+  auto kb = reinterpret_cast<__ubuf__ DT *>(8192);
+  uint32_t cnt = (uint32_t)W;
+  int ilp = nwarp; // for SIMD (mode 1), nwarp carries the ILP count
+
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int i = 0; i < K; i++) {
+    if (mode == 0) {
+      cce::async_invoke<simt_add<DT>>(cce::dim3{32, 32, 1}, ob, nlane, nwarp, iters, (DT)1.0000001f);
+    } else {
+      __VEC_SCOPE__ {
+        vector_bool m;
+        CREATE_MASK_BY_SIZE(m, DT, cnt);
+        VectorReg<DT> kk;
+        vlds(kk, kb, 0, NORM);
+        // `ilp` independent full-width vadd chains -> sweep to find the issue width
+        if (ilp <= 1) {
+          VLD(a0, 0);
+          for (uint16_t r = 0; r < (uint16_t)iters; r++) { vadd(a0,a0,kk,m); }
+          VST(a0, 0);
+        } else if (ilp == 2) {
+          VLD(a0,0); VLD(a1,1);
+          for (uint16_t r = 0; r < (uint16_t)iters; r++) { vadd(a0,a0,kk,m); vadd(a1,a1,kk,m); }
+          VST(a0,0); VST(a1,1);
+        } else if (ilp == 3) {
+          VLD(a0,0); VLD(a1,1); VLD(a2,2);
+          for (uint16_t r = 0; r < (uint16_t)iters; r++) { vadd(a0,a0,kk,m); vadd(a1,a1,kk,m); vadd(a2,a2,kk,m); }
+          VST(a0,0); VST(a1,1); VST(a2,2);
+        } else if (ilp == 4) {
+          VLD(a0,0); VLD(a1,1); VLD(a2,2); VLD(a3,3);
+          for (uint16_t r = 0; r < (uint16_t)iters; r++) { vadd(a0,a0,kk,m); vadd(a1,a1,kk,m); vadd(a2,a2,kk,m); vadd(a3,a3,kk,m); }
+          VST(a0,0); VST(a1,1); VST(a2,2); VST(a3,3);
+        } else if (ilp == 6) {
+          VLD(a0,0); VLD(a1,1); VLD(a2,2); VLD(a3,3); VLD(a4,4); VLD(a5,5);
+          for (uint16_t r = 0; r < (uint16_t)iters; r++) {
+            vadd(a0,a0,kk,m); vadd(a1,a1,kk,m); vadd(a2,a2,kk,m);
+            vadd(a3,a3,kk,m); vadd(a4,a4,kk,m); vadd(a5,a5,kk,m);
+          }
+          VST(a0,0); VST(a1,1); VST(a2,2); VST(a3,3); VST(a4,4); VST(a5,5);
+        } else { // ilp >= 8
+          VLD(a0,0); VLD(a1,1); VLD(a2,2); VLD(a3,3); VLD(a4,4); VLD(a5,5); VLD(a6,6); VLD(a7,7);
+          for (uint16_t r = 0; r < (uint16_t)iters; r++) {
+            vadd(a0,a0,kk,m); vadd(a1,a1,kk,m); vadd(a2,a2,kk,m); vadd(a3,a3,kk,m);
+            vadd(a4,a4,kk,m); vadd(a5,a5,kk,m); vadd(a6,a6,kk,m); vadd(a7,a7,kk,m);
+          }
+          VST(a0,0); VST(a1,1); VST(a2,2); VST(a3,3); VST(a4,4); VST(a5,5); VST(a6,6); VST(a7,7);
+        }
+      }
+    }
+    pipe_barrier(PIPE_ALL);
+  }
+  long long t1 = get_sys_cnt();
+  pipe_barrier(PIPE_ALL);
+  out[0] = t1 - t0;
+}

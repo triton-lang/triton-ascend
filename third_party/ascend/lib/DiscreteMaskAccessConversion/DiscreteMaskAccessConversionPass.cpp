@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include "AscendModel/RouteModel/SimtSelection.h"
 #include "TritonToUnstructure/IndirectAtomicUtils.h"
 #include "Utils/Utils.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
@@ -56,6 +57,8 @@ static bool compileOn91095Flag = false;
 static mlir::triton::ascend::CompileMode compileModeFlag =
     mlir::triton::ascend::CompileMode::Simd;
 static bool enableSyncBlockLockFlag = true;
+static constexpr const char *routeDiscreteMaskToSimtAttrName =
+    "route_discrete_mask_to_simt";
 
 static bool traceUserToTargetOp(Value val) {
   llvm::SmallVector<Value, 32> worklist;
@@ -280,22 +283,19 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
 
     auto ptr = op.getPtr();
     auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
+    op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
     bool rankWithinIndirectFastPathLimit =
         ptrType && ptrType.getShape().size() <= 5;
-    if (compileOn91095Flag &&
-        compileModeFlag == triton::ascend::CompileMode::SimdSimt) {
-      rewriter.modifyOpInPlace(op, [&]() {
-        op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
-                    rewriter.getUnitAttr());
-      });
-      return success();
-    }
-
-    if (compileOn91095Flag &&
-        compileModeFlag == triton::ascend::CompileMode::SimdSimtTemplate &&
-        rankWithinIndirectFastPathLimit) {
-      op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
-                  rewriter.getUnitAttr());
+    const bool legacyMixedRoute =
+        compileModeFlag == triton::ascend::CompileMode::SimdSimt ||
+        compileModeFlag == triton::ascend::CompileMode::SimdSimtTemplate;
+    const bool simtRouteRequested =
+        mlir::ascend::simt_selection::shouldUseSimtTemplate(op.getOperation(),
+                                                            legacyMixedRoute);
+    const bool routeSupportsRank =
+        compileModeFlag == triton::ascend::CompileMode::SimdSimt ||
+        rankWithinIndirectFastPathLimit;
+    if (compileOn91095Flag && simtRouteRequested && routeSupportsRank) {
       return failure();
     }
 
@@ -364,22 +364,19 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
       return failure();
 
     auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
+    op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
     bool rankWithinIndirectFastPathLimit =
         ptrType && ptrType.getShape().size() <= 5;
-    if (compileOn91095Flag &&
-        compileModeFlag == triton::ascend::CompileMode::SimdSimt) {
-      rewriter.modifyOpInPlace(op, [&]() {
-        op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
-                    rewriter.getUnitAttr());
-      });
-      return success();
-    }
-
-    if (compileOn91095Flag &&
-        compileModeFlag == triton::ascend::CompileMode::SimdSimtTemplate &&
-        rankWithinIndirectFastPathLimit) {
-      op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
-                  rewriter.getUnitAttr());
+    const bool legacyMixedRoute =
+        compileModeFlag == triton::ascend::CompileMode::SimdSimt ||
+        compileModeFlag == triton::ascend::CompileMode::SimdSimtTemplate;
+    const bool simtRouteRequested =
+        mlir::ascend::simt_selection::shouldUseSimtTemplate(op.getOperation(),
+                                                            legacyMixedRoute);
+    const bool routeSupportsRank =
+        compileModeFlag == triton::ascend::CompileMode::SimdSimt ||
+        rankWithinIndirectFastPathLimit;
+    if (compileOn91095Flag && simtRouteRequested && routeSupportsRank) {
       return failure();
     }
 

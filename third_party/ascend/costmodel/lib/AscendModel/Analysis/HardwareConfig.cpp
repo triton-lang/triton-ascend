@@ -6,10 +6,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "AscendModel/HardwareConfig.h"
+#include "AscendModel/Profile/MicrobenchmarkProfile.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <mutex>
@@ -86,8 +89,6 @@ mlir::ascend::loadHardwareConfigForAnalysis(llvm::StringRef path,
 
 HardwareConfig::HardwareConfig() : clockFreqGHz(1.0) {}
 
-HardwareConfig::~HardwareConfig() = default;
-
 std::unique_ptr<HardwareConfig>
 HardwareConfig::loadFromFile(llvm::StringRef path) {
   auto bufferOrErr = llvm::MemoryBuffer::getFile(path);
@@ -103,7 +104,18 @@ HardwareConfig::loadFromFile(llvm::StringRef path) {
     return nullptr;
   }
 
-  return loadFromJSON(*json);
+  auto config = std::make_unique<HardwareConfig>();
+  std::string error;
+  if (!config->parseJSON(*json, error)) {
+    llvm::errs() << "Error parsing hardware config: " << error << "\n";
+    return nullptr;
+  }
+  if (!config->loadReferencedMicrobenchmarkProfile(path, error)) {
+    llvm::errs() << "Error loading shared microbenchmark profile: " << error
+                 << "\n";
+    return nullptr;
+  }
+  return config;
 }
 
 std::unique_ptr<HardwareConfig>
@@ -113,6 +125,22 @@ HardwareConfig::loadFromJSON(const llvm::json::Value &json) {
   if (!config->parseJSON(json, error)) {
     llvm::errs() << "Error parsing hardware config: " << error << "\n";
     return nullptr;
+  }
+  if (!config->microbenchmarkProfileReference.empty()) {
+    llvm::StringRef reference(config->microbenchmarkProfileReference);
+    if (!llvm::sys::path::is_absolute(reference)) {
+      llvm::errs()
+          << "Error parsing hardware config: relative microbenchmark_profile "
+             "requires HardwareConfig::loadFromFile so it can be resolved "
+             "against the owner JSON path\n";
+      return nullptr;
+    }
+    if (!config->loadReferencedMicrobenchmarkProfile(/*configPath=*/"",
+                                                     error)) {
+      llvm::errs() << "Error loading shared microbenchmark profile: " << error
+                   << "\n";
+      return nullptr;
+    }
   }
   return config;
 }
@@ -587,6 +615,23 @@ bool HardwareConfig::parseJSON(const llvm::json::Value &json,
     vendor = v->str();
   if (auto ver = root->getString("version"))
     version = ver->str();
+  if (const llvm::json::Value *rawTarget = root->get("target")) {
+    auto targetName = rawTarget->getAsString();
+    if (!targetName || targetName->empty()) {
+      error = "target must be a non-empty string";
+      return false;
+    }
+    target = targetName->str();
+  }
+  if (const llvm::json::Value *rawProfile =
+          root->get("microbenchmark_profile")) {
+    auto profile = rawProfile->getAsString();
+    if (!profile || profile->empty()) {
+      error = "microbenchmark_profile must be a non-empty string";
+      return false;
+    }
+    microbenchmarkProfileReference = profile->str();
+  }
 
   // Clock
   if (const auto *clock = root->getObject("clock")) {
@@ -954,6 +999,84 @@ bool HardwareConfig::parseJSON(const llvm::json::Value &json,
   return true;
 }
 
+bool HardwareConfig::loadReferencedMicrobenchmarkProfile(
+    llvm::StringRef configPath, std::string &error) {
+  if (microbenchmarkProfileReference.empty())
+    return true;
+
+  llvm::SmallString<256> resolved;
+  llvm::StringRef reference(microbenchmarkProfileReference);
+  if (llvm::sys::path::is_absolute(reference)) {
+    resolved = reference;
+  } else {
+    resolved = configPath;
+    llvm::sys::path::remove_filename(resolved);
+    llvm::sys::path::append(resolved, reference);
+    llvm::sys::path::remove_dots(resolved, true);
+  }
+
+  auto profile = MicrobenchmarkProfile::loadFromFile(resolved);
+  if (!profile) {
+    error = llvm::toString(profile.takeError());
+    return false;
+  }
+
+  auto measuredDeviceMHz = profile->requireValue(
+      "clock.device_compute.frequency_mhz", "MHz", "wall_clock");
+  if (!measuredDeviceMHz) {
+    error = llvm::toString(measuredDeviceMHz.takeError());
+    return false;
+  }
+
+  if (!target.empty() && llvm::StringRef(target) != profile->getTarget()) {
+    error = "shared microbenchmark target '" + profile->getTarget().str() +
+            "' does not match hardware config target '" + target + "'";
+    return false;
+  }
+
+  const double configuredDeviceMHz = clockFreqGHz * 1000.0;
+  const double clockToleranceMHz = std::max(1.0, configuredDeviceMHz * 1.0e-3);
+  if (configuredDeviceMHz <= 0.0 ||
+      std::abs(*measuredDeviceMHz - configuredDeviceMHz) > clockToleranceMHz) {
+    error = "shared microbenchmark device clock " +
+            std::to_string(*measuredDeviceMHz) +
+            " MHz does not match hardware config clock " +
+            std::to_string(configuredDeviceMHz) + " MHz";
+    return false;
+  }
+
+  auto measuredVectorWidth =
+      profile->requireValue("simd.vector_width_bits", "bit", "none");
+  if (!measuredVectorWidth) {
+    error = llvm::toString(measuredVectorWidth.takeError());
+    return false;
+  }
+  const int configuredVectorWidthBits = getVectorWidthBytes() * 8;
+  if (configuredVectorWidthBits <= 0 ||
+      std::llround(*measuredVectorWidth) != configuredVectorWidthBits) {
+    error = "shared microbenchmark SIMD vector width " +
+            std::to_string(*measuredVectorWidth) +
+            " bits does not match hardware config width " +
+            std::to_string(configuredVectorWidthBits) + " bits";
+    return false;
+  }
+
+  auto f32AddThroughput = profile->requireValue(
+      "simd.f32.add.throughput", "vector_instruction/system_cycle", "SYS_CNT");
+  if (!f32AddThroughput) {
+    error = llvm::toString(f32AddThroughput.takeError());
+    return false;
+  }
+  if (*f32AddThroughput <= 0.0) {
+    error = "shared microbenchmark SIMD f32.add throughput must be positive";
+    return false;
+  }
+
+  microbenchmarkProfile =
+      std::make_shared<MicrobenchmarkProfile>(std::move(*profile));
+  return true;
+}
+
 //===----------------------------------------------------------------------===//
 // Query Methods
 //===----------------------------------------------------------------------===//
@@ -1101,6 +1224,26 @@ int HardwareConfig::getVectorOpCyclesPerInstruction(
   if (opName == "vreduce")
     return 2;
   return 1;
+}
+
+double
+HardwareConfig::getMicrobenchmarkRatePerDeviceCycle(llvm::StringRef key) const {
+  if (!microbenchmarkProfile || clockFreqGHz <= 0.0)
+    return 0.0;
+  const MicrobenchmarkMeasurement *measurement =
+      microbenchmarkProfile->getMeasurement(key);
+  if (!measurement || measurement->value <= 0.0 ||
+      !llvm::StringRef(measurement->unit).ends_with("/system_cycle") ||
+      measurement->cycleDomain != "SYS_CNT")
+    return 0.0;
+
+  auto systemMHz = microbenchmarkProfile->requireValue(
+      "clock.sys_cnt.frequency_mhz", "MHz", "wall_clock");
+  if (!systemMHz) {
+    llvm::consumeError(systemMHz.takeError());
+    return 0.0;
+  }
+  return measurement->value * *systemMHz / (clockFreqGHz * 1000.0);
 }
 
 double HardwareConfig::getHBMBandwidthGBs() const {

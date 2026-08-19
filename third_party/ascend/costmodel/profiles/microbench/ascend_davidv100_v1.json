@@ -1,0 +1,259 @@
+{
+  "$schema": "./microbenchmark_profile_schema.json",
+  "schema_version": 1,
+  "profile_version": "david-v100-shared-microbench-20260730-v2",
+  "target": "Ascend950PR/dav-c310",
+  "description": "Model-neutral target facts and microbenchmark evidence. Model-specific scale, penalties, coverage, gates, and fallback priors are intentionally excluded.",
+  "measurements": {
+    "clock.sys_cnt.frequency_mhz": {
+      "description": "SYS_CNT counter frequency used to convert SYS_CNT cycles to wall-clock time and device-compute cycles.",
+      "value": 988.9,
+      "unit": "MHz",
+      "cycle_domain": "wall_clock",
+      "scope": "device",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/tput.cce; data_provider/build_commands.md",
+      "confidence": "high"
+    },
+    "clock.device_compute.frequency_mhz": {
+      "description": "Device compute clock from the local hardware/simulator configuration. It is not runtime telemetry from the measured A5 board and is used only for conditional clock-domain conversion.",
+      "value": 1650.0,
+      "unit": "MHz",
+      "cycle_domain": "wall_clock",
+      "scope": "device",
+      "source_kind": "device_configuration",
+      "source": "ascend_davidv100.json clock.frequency_ghz",
+      "confidence": "medium"
+    },
+    "simd.vector_width_bits": {
+      "description": "Physical SIMD vector width of one AIV, expressed in bits; FP32 lane count is width_bits / 32.",
+      "value": 2048,
+      "unit": "bit",
+      "cycle_domain": "none",
+      "scope": "single_aiv",
+      "source_kind": "architecture_fact",
+      "source": "Ascend vector ISA width",
+      "confidence": "high"
+    },
+    "simt.warp_size": {
+      "description": "Number of scalar SIMT lanes that execute as one warp.",
+      "value": 32,
+      "unit": "lane",
+      "cycle_domain": "none",
+      "scope": "single_warp",
+      "source_kind": "architecture_fact",
+      "source": "Ascend SIMT execution contract",
+      "confidence": "high"
+    },
+    "simd.f32.add.throughput": {
+      "description": "Effective source-level FP32 SIMD add throughput on one AIV for the tput.cce runtime-loop code shape. The numerator counts source vadd operations; loop/control/codegen overhead remains in elapsed cycles, so this is not a proven bare-ALU issue rate.",
+      "value": 3.30,
+      "unit": "vector_instruction/system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_runtime_loop_ilp4_or_more_effective_source_vadd",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/tput.cce; data_provider/concur2.cce; data_provider/build_commands.md",
+      "confidence": "high"
+    },
+    "simd.f32.add.dependent_latency": {
+      "description": "Latency of one FP32 SIMD add in a dependent instruction chain on one AIV.",
+      "value": 1.818,
+      "unit": "system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_dependent_chain",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/tput.cce; data_provider/concur2.cce; data_provider/build_commands.md",
+      "confidence": "high"
+    },
+    "simt.f32.add.throughput": {
+      "description": "Effective source-level FP32 SIMT scalar-add throughput on one AIV for the tput.cce runtime-loop code shape. The numerator counts only source fadd operations while loop increment/compare/branch and codegen overhead remain in elapsed cycles; this is not a proven bare-ALU peak.",
+      "value": 141.0,
+      "unit": "scalar_op/system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_runtime_loop_ilp8_32_launched_warps_effective_source_fadd",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/tput.cce; data_provider/build_commands.md",
+      "confidence": "high"
+    },
+    "simt.setup.empty": {
+      "description": "Back-to-back async_invoke enqueue/launch-issue slope without a per-iteration barrier. The end counter is read before the final completion barrier, so this is not a completed empty-VF latency.",
+      "value": 115.0,
+      "unit": "system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_empty_vf_enqueue_slope_no_per_iteration_barrier",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/meas.cce; data_provider/build_commands.md",
+      "confidence": "medium"
+    },
+    "simt.setup.empty_with_barrier": {
+      "description": "Serialized empty-VF completion proxy with a per-iteration PIPE_ALL barrier. It includes async_invoke, one thread(0,0) UB write, barrier, and runtime-loop control; it is not a pure barrier or SIMD/SIMT transition latency.",
+      "value": 141.0,
+      "unit": "system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_serialized_empty_vf_with_per_iteration_barrier",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/meas.cce; data_provider/build_commands.md",
+      "confidence": "medium"
+    },
+    "simt.shuffle.throughput": {
+      "description": "Effective source-level FP32 shfl-up rate for the stated 32-warp ILP4 runtime-loop workload. Loop/control and sink overhead remain in elapsed cycles; this is not an intrinsic shuffle-pipeline peak.",
+      "value": 0.817124,
+      "unit": "warp_instruction/system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_fp32_shfl_up_32_warps_ilp4_four_independent_chains",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/simt_shuffle.cce; data_provider/simt_shuffle_host.cpp; triton_cases/SIMT_Test/simt_shuffle_david_v100_20260725.csv; data_provider/build_commands.md",
+      "confidence": "medium"
+    },
+    "simt.shuffle.dependent_latency": {
+      "description": "Effective FP32 dependent shfl-up chain iteration cost for the stated one-warp runtime-loop workload. It includes loop/control overhead and is not an isolated intrinsic latency.",
+      "value": 27.284375,
+      "unit": "system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_fp32_shfl_up_1_warp_dependent_chain",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/simt_shuffle.cce; data_provider/simt_shuffle_host.cpp; triton_cases/SIMT_Test/simt_shuffle_david_v100_20260725.csv; data_provider/build_commands.md",
+      "confidence": "medium"
+    },
+    "simt.gm.load.throughput": {
+      "description": "Effective source GM-load rate for the stated 32-warp sequential rotating runtime-loop workload. Address generation, loop/control and the source sink remain in elapsed cycles; this is not an intrinsic LSU issue peak.",
+      "value": 0.1761917890625,
+      "unit": "warp_instruction/system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_32_warps_sequential_128mib_rotating_8_independent_ops_per_thread",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/simt_gm_memory.cce; data_provider/simt_gm_memory_host.cpp; triton_cases/SIMT_Test/simt_gm_memory_david_v100_20260725.csv; data_provider/build_commands.md",
+      "confidence": "medium"
+    },
+    "simt.gm.store.throughput": {
+      "description": "Effective source GM-store rate for the stated 32-warp sequential rotating runtime-loop workload. Address generation, value construction and loop/control remain in elapsed cycles; this is not an intrinsic LSU issue peak.",
+      "value": 0.12914221875,
+      "unit": "warp_instruction/system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_32_warps_sequential_128mib_rotating_8_independent_ops_per_thread",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/simt_gm_memory.cce; data_provider/simt_gm_memory_host.cpp; triton_cases/SIMT_Test/simt_gm_memory_david_v100_20260725.csv; data_provider/build_commands.md",
+      "confidence": "medium"
+    },
+    "simt.gm.load.bandwidth": {
+      "description": "Effective single-AIV GM-load byte bandwidth for the stated workload; this is not whole-device theoretical HBM peak bandwidth.",
+      "value": 22.552549,
+      "unit": "byte/system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_32_warps_sequential_128mib_rotating_8_independent_ops_per_thread",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/simt_gm_memory.cce; data_provider/simt_gm_memory_host.cpp; triton_cases/SIMT_Test/simt_gm_memory_david_v100_20260725.csv; data_provider/build_commands.md",
+      "confidence": "medium"
+    },
+    "simt.gm.store.bandwidth": {
+      "description": "Effective single-AIV GM-store byte bandwidth for the stated workload; this is not whole-device theoretical HBM peak bandwidth.",
+      "value": 16.530204,
+      "unit": "byte/system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_32_warps_sequential_128mib_rotating_8_independent_ops_per_thread",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/simt_gm_memory.cce; data_provider/simt_gm_memory_host.cpp; triton_cases/SIMT_Test/simt_gm_memory_david_v100_20260725.csv; data_provider/build_commands.md",
+      "confidence": "medium"
+    },
+    "simt.ub.load.throughput": {
+      "description": "Effective source UB-load rate for the stated 32-warp rotating-set runtime-loop workload. Address, ALU and loop/control overhead remain in elapsed cycles.",
+      "value": 0.5073532265625,
+      "unit": "warp_instruction/system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_32_warps_128kib_4_rotating_sets_8_independent_ops_per_thread",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/simt_memory.cce; data_provider/simt_memory_host.cpp; triton_cases/SIMT_Test/simt_memory_david_v100_20260725.csv; data_provider/build_commands.md",
+      "confidence": "medium"
+    },
+    "simt.ub.store.throughput": {
+      "description": "Effective source UB-store rate for the stated 32-warp rotating-set runtime-loop workload. Address, ALU and loop/control overhead remain in elapsed cycles.",
+      "value": 0.5301766328125,
+      "unit": "warp_instruction/system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_32_warps_128kib_4_rotating_sets_8_independent_ops_per_thread",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/simt_memory.cce; data_provider/simt_memory_host.cpp; triton_cases/SIMT_Test/simt_memory_david_v100_20260725.csv; data_provider/build_commands.md",
+      "confidence": "medium"
+    },
+    "simt.ub.load.bandwidth": {
+      "description": "Effective single-AIV UB-load byte bandwidth for the stated workload.",
+      "value": 64.941213,
+      "unit": "byte/system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_32_warps_128kib_4_rotating_sets_8_independent_ops_per_thread",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/simt_memory.cce; data_provider/simt_memory_host.cpp; triton_cases/SIMT_Test/simt_memory_david_v100_20260725.csv; data_provider/build_commands.md",
+      "confidence": "medium"
+    },
+    "simt.ub.store.bandwidth": {
+      "description": "Effective single-AIV UB-store byte bandwidth for the stated workload.",
+      "value": 67.862609,
+      "unit": "byte/system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_32_warps_128kib_4_rotating_sets_8_independent_ops_per_thread",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/simt_memory.cce; data_provider/simt_memory_host.cpp; triton_cases/SIMT_Test/simt_memory_david_v100_20260725.csv; data_provider/build_commands.md",
+      "confidence": "medium"
+    },
+    "simt.setup.transition_harness_net.warps_1": {
+      "description": "Standalone serialized empty-VF net setup proxy from the branch-heavy transition harness for one launched warp. It is mode1 minus barrier-only mode6 and does not contain a SIMD phase, so it is neither a mixed transition nor a dependent handoff latency.",
+      "value": 182.0,
+      "unit": "system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_transition_harness_standalone_empty_vf_net_1_warp",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/transition.cce; data_provider/transition_host.cpp; triton_cases/SIMT_Test/run_transition.remote.sh; data_provider/build_commands.md",
+      "confidence": "low"
+    },
+    "simt.setup.transition_harness_net.warps_2": {
+      "description": "Standalone serialized empty-VF net setup proxy from the branch-heavy transition harness for two launched warps. It is mode1 minus barrier-only mode6 and does not contain a SIMD phase, so it is neither a mixed transition nor a dependent handoff latency.",
+      "value": 182.0,
+      "unit": "system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_transition_harness_standalone_empty_vf_net_2_warps",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/transition.cce; data_provider/transition_host.cpp; triton_cases/SIMT_Test/run_transition.remote.sh; data_provider/build_commands.md",
+      "confidence": "low"
+    },
+    "simt.setup.transition_harness_net.warps_4": {
+      "description": "Standalone serialized empty-VF net setup proxy from the branch-heavy transition harness for four launched warps. It is mode1 minus barrier-only mode6 and does not contain a SIMD phase, so it is neither a mixed transition nor a dependent handoff latency.",
+      "value": 182.0,
+      "unit": "system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_transition_harness_standalone_empty_vf_net_4_warps",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/transition.cce; data_provider/transition_host.cpp; triton_cases/SIMT_Test/run_transition.remote.sh; data_provider/build_commands.md",
+      "confidence": "low"
+    },
+    "simt.setup.transition_harness_net.warps_8": {
+      "description": "Standalone serialized empty-VF net setup proxy from the branch-heavy transition harness for eight launched warps. It is mode1 minus barrier-only mode6 and does not contain a SIMD phase, so it is neither a mixed transition nor a dependent handoff latency.",
+      "value": 182.0,
+      "unit": "system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_transition_harness_standalone_empty_vf_net_8_warps",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/transition.cce; data_provider/transition_host.cpp; triton_cases/SIMT_Test/run_transition.remote.sh; data_provider/build_commands.md",
+      "confidence": "low"
+    },
+    "simt.setup.transition_harness_net.warps_16": {
+      "description": "Standalone serialized empty-VF net setup proxy from the branch-heavy transition harness for sixteen launched warps. It is mode1 minus barrier-only mode6 and does not contain a SIMD phase, so it is neither a mixed transition nor a dependent handoff latency.",
+      "value": 182.0,
+      "unit": "system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_transition_harness_standalone_empty_vf_net_16_warps",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/transition.cce; data_provider/transition_host.cpp; triton_cases/SIMT_Test/run_transition.remote.sh; data_provider/build_commands.md",
+      "confidence": "low"
+    },
+    "simt.setup.transition_harness_net.warps_32": {
+      "description": "Standalone serialized empty-VF net setup proxy from the branch-heavy transition harness for thirty-two launched warps. It is mode1 minus barrier-only mode6 and does not contain a SIMD phase, so it is neither a mixed transition nor a dependent handoff latency.",
+      "value": 223.0,
+      "unit": "system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_transition_harness_standalone_empty_vf_net_32_warps",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/transition.cce; data_provider/transition_host.cpp; triton_cases/SIMT_Test/run_transition.remote.sh; data_provider/build_commands.md",
+      "confidence": "low"
+    }
+  }
+}

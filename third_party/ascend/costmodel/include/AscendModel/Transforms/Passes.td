@@ -183,5 +183,71 @@ def PerfReportPass : Pass<"perf-report", "ModuleOp"> {
   }];
 }
 
+//===----------------------------------------------------------------------===//
+// SelectSimdSimtCostModel
+//===----------------------------------------------------------------------===//
+
+def SelectSimdSimtCostModelPass
+    : Pass<"select-simd-simt-costmodel", "ModuleOp"> {
+  let summary = "Select SIMD, SIMT-only, or mixed execution with the C++ cost model";
+  let description = [{
+    This pass runs the AscendModel C++ SIMD/SIMT candidate model directly on
+    Triton IR.  Report mode always records the complete three-candidate
+    diagnostic report.  Auto mode first checks calibration coverage and skips
+    candidate scoring for out-of-domain kernels; an admitted in-domain decision
+    becomes the authoritative execution intent.  A mixed decision passes the
+    same immutable anchor plan used for scoring directly to the C++
+    materializer, which creates local scope.scope regions without persisting
+    per-operation selection attributes.
+
+    Mandatory mixed is intentionally not part of this pass.  Singleton
+    legality fast paths can be added in front of the model after the calibrated
+    three-candidate path is complete.
+  }];
+
+  let options = [
+    Option<"mode", "mode", "std::string",
+           /*default=*/"\"report\"",
+           "Application mode: report or auto">,
+    Option<"profilePath", "profile-path", "std::string",
+           /*default=*/"\"\"",
+           "Versioned SIMD/SIMT calibration profile JSON">,
+    Option<"actualTarget", "actual-target", "std::string",
+           /*default=*/"\"\"",
+           "Backend target used for profile compatibility checks">,
+    Option<"numWarps", "num-warps", "int64_t",
+           /*default=*/"32",
+           "Number of logical warps in the candidate execution plan">,
+    Option<"marginRatio", "margin-ratio", "double",
+           /*default=*/"0.10",
+           "Minimum relative score advantage required for an online action">,
+    Option<"compileOn91095", "compile-on-910-95", "bool",
+           /*default=*/"false",
+           "Whether the target exposes the 910/95 SIMT lowering templates">,
+    Option<"reportFile", "report-file", "std::string",
+           /*default=*/"\"\"",
+           "Optional JSONL path for the C++ selection report">
+  ];
+}
+
+//===----------------------------------------------------------------------===//
+// MaterializeSimtScopes
+//===----------------------------------------------------------------------===//
+
+def MaterializeSimtScopesPass
+    : Pass<"materialize-simt-scopes", "ModuleOp"> {
+  let summary = "Validate the scope-only contract for an admitted mixed route";
+  let description = [{
+    Production materialization is performed from the immutable anchor plan in
+    the selector pass.  This compatibility pass verifies that:
+
+      ascend.simt_costmodel.effective = "mixed_simd_simt"
+      scope.scope {vector_mode = "simt"}
+
+    coexist in the IR.  It does not rediscover anchors or read/write a
+    per-operation selected marker.
+  }];
+}
+
 
 #endif // ASCEND_MODEL_TRANSFORMS_PASSES_TD

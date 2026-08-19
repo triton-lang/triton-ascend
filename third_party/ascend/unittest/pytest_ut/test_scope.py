@@ -3,7 +3,6 @@ import os
 
 os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
 
-import pytest
 import triton
 import triton.language as tl
 import triton.language.extra.cann.extension as al
@@ -23,14 +22,17 @@ class Options:
     sanitize_overflow = True
 
 
-def compile_kernel(kernel, signature, constants):
-    """Helper to compile a kernel to MLIR."""
+def compile_kernel_module(kernel, signature, constants):
     src = ASTSource(kernel, signature, constants)
     context = ir.context()
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
-    module = ast_to_ttir(kernel, src, context, Options(), {}, {})
-    return str(module)
+    return ast_to_ttir(kernel, src, context, Options(), {}, {})
+
+
+def compile_kernel(kernel, signature, constants):
+    """Helper to compile a kernel to MLIR."""
+    return str(compile_kernel_module(kernel, signature, constants))
 
 
 # ============== Kernel definitions ==============
@@ -93,6 +95,12 @@ def kernel_scope_disable_auto_sync(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr
         tl.store(out_ptr + i, result, mask=i < n)
 
 
+@triton.jit
+def kernel_whole_body_simt(out_ptr):
+    with al.scope(vector_mode="simt"):
+        tl.store(out_ptr, 1.0)
+
+
 # ============== Pytest tests ==============
 
 
@@ -141,20 +149,16 @@ def test_scope_disable_auto_sync():
     assert "hivm.disable_auto_sync" in mlir
 
 
-# ============== Main for manual testing ==============
-
-if __name__ == "__main__":
-    print("=" * 60)
-    print("Test 1: Nested Scopes")
-    print("=" * 60)
-    mlir = compile_kernel(kernel_nested_scope, {"x_ptr": "*fp32", "y_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"},
-                          {"BLOCK": 256})
-    print(f"✅ Generated MLIR ({len(mlir)} chars):\n")
-    print(mlir)
-
-    print("\n" + "=" * 60)
-    print("Test 2: Scope Escape")
-    print("=" * 60)
-    mlir = compile_kernel(kernel_scope_escape, {"x_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"}, {"BLOCK": 256})
-    print(f"✅ Generated MLIR ({len(mlir)} chars):\n")
-    print(mlir)
+def test_native_whole_body_simt_scope():
+    module = compile_kernel_module(
+        kernel_whole_body_simt,
+        {"out_ptr": "*fp32"},
+        {},
+    )
+    module_text = str(module)
+    assert 'vector_mode = "simt"' in module_text
+    assert "vec_mode" not in module_text
+    assert ascend_ir.is_whole_body_void_simt_scope(module)
+    assert ascend_ir.inline_void_simt_scopes_for_pure_simt(module) == 1
+    assert module.verify()
+    assert "scope.scope" not in str(module)

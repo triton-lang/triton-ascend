@@ -901,6 +901,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += [f"--num-warps={num_warps}"]
             warp_size = metadata.get("warp_size", opt.warp_size)
             _compile_option_list += [f"--threads-per-warp={warp_size}"]
+            if opt.shared_mem_dynamic_size is not None:
+                _compile_option_list += [f"--shared-mem-dynamic-size={opt.shared_mem_dynamic_size}"]
 
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
         vf_merge_level = metadata["vf_merge_level"]

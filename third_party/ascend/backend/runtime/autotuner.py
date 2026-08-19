@@ -2067,18 +2067,7 @@ class AutoTilingTuner(Autotuner):
                     self.configs_timings = timings
 
                 if self.cache_results:
-                    if self.enable_ubtuner:
-                        warnings.warn(
-                            "Autotune disk cache is disabled because UB-tuner is enabled "
-                            "(TRITON_ENABLE_UBTUNER is set). UB-tuner may dynamically add "
-                            "compile-time fixes to configs that cannot be safely cached to disk. "
-                            "To enable disk caching, unset TRITON_ENABLE_UBTUNER.",
-                            RuntimeWarning,
-                            stacklevel=2,
-                        )
-                        benchmark()
-                    else:
-                        disk_cache_hit = self.check_disk_cache(key, pruned_configs, benchmark)
+                    disk_cache_hit = self.check_disk_cache(key, pruned_configs, benchmark)
                 else:
                     benchmark()
 

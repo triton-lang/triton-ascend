@@ -49,14 +49,14 @@ def CVSplitScheduling : Pass<"cv_split_scheduling", "mlir::ModuleOp"> {
            "right when no slot is reused and the interleaving only shortens "
            "the producing core's run-ahead.">,
     Option<"privateBufferUbBudgetBytes", "private-buffer-ub-budget-bytes",
-           "int64_t", /*default*/"0",
-           "spare UB, in bytes, that cross-scope transfers may spend to stop "
-           "reusing buffers across unrolled lanes. It funds merging two "
-           "same-element-type CUBE-to-VECTOR roles onto one union slot per "
-           "lane, which is what lets HEAD_DIM differ from BLOCK_N: the slot is "
-           "sized for the larger role and the smaller takes a contiguous view "
-           "of its front. Merging equal-sized roles is free and happens "
-           "regardless. Zero funds only the free merges.">,
+           "int64_t", /*default*/"-1",
+           "spare UB, in bytes, that cross-scope pools may spend to stop "
+           "reusing a slot between lanes. Negative means the pass does not "
+           "know the headroom and spends what the schedule asks for; the "
+           "backend's memory planner is what actually decides whether it "
+           "fits, and it reports an overflow with the exact requirement when "
+           "it does not. Zero declines any spend, which keeps the rotating "
+           "pools and the interleaved schedule that orders them.">,
     Option<"promotePrivateBufferPools", "promote-private-buffer-pools",
            "bool", /*default*/"false",
            "additionally give individual pools one buffer per lane instead of "

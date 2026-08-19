@@ -629,12 +629,14 @@ static void emitMergedSlotRelease(const TransferEmitContext &c, ArrayRef<CrossSc
 
 } // namespace
 
-bool cubeToVectorRolesAreUniform(Block *body, const DenseMap<Operation *, EngineType> &classification)
+std::optional<uint64_t> cubeToVectorUnionExtraBytes(Block *body,
+                                                    const DenseMap<Operation *, EngineType> &classification,
+                                                    unsigned interCoreBufferDepth, unsigned lanes)
 {
     // Only the CUBE->VECTOR side is needed, and that side is decidable from the
-    // body alone. `findCrossScopeValues` cannot be reused here: its
-    // VECTOR->CUBE branch wants the phase-end anchors the scheduler has not
-    // produced yet, and this question has to be answered before scheduling.
+    // body alone. `findCrossScopeValues` cannot be reused: its VECTOR->CUBE
+    // branch wants the phase-end anchors the scheduler has not produced yet,
+    // and this question has to be answered before scheduling.
     DenseMap<int64_t, uint64_t> bytesByOrigin;
     for (Operation &op : *body) {
         if (isa<scf::YieldOp>(&op) || !isa<linalg::MatmulOp>(&op))
@@ -658,16 +660,25 @@ bool cubeToVectorRolesAreUniform(Block *body, const DenseMap<Operation *, Engine
                 continue;
             auto originAttr = op.getAttrOfType<IntegerAttr>(kUnrollOriginIdAttrName);
             if (!originAttr)
-                return false;
+                return std::nullopt;
             CrossScopeTransfer probe;
             probe.direction = CrossScopeTransfer::CUBE_TO_VECTOR;
             bytesByOrigin.try_emplace(originAttr.getInt(), getTransferFootprint(probe, tensorType).bytes);
         }
     }
-    if (bytesByOrigin.size() < 2)
-        return false;
-    const uint64_t first = bytesByOrigin.begin()->second;
-    return llvm::all_of(bytesByOrigin, [&](const auto &e) { return e.second == first; });
+    // A frontend that pinned the depth to one asked for a single inter-core
+    // buffer per lineage. Merging multiplies slots by the lane count, so it is
+    // not something to do behind that request's back.
+    if (bytesByOrigin.size() < 2 || lanes <= interCoreBufferDepth || interCoreBufferDepth < 2)
+        return std::nullopt;
+
+    uint64_t pooled = 0, largest = 0;
+    for (const auto &entry : bytesByOrigin) {
+        pooled += std::min(lanes, interCoreBufferDepth) * entry.second;
+        largest = std::max(largest, entry.second);
+    }
+    const uint64_t unionBytes = static_cast<uint64_t>(lanes) * largest;
+    return unionBytes > pooled ? unionBytes - pooled : 0;
 }
 
 FailureOr<CrossScopeTransferInfo>
@@ -952,6 +963,11 @@ insertCrossScopeTransfers(scf::ForOp loop, const DenseMap<Operation *, EngineTyp
     for (auto &entry : cubeToVectorOriginsByElemType) {
         SmallVector<int64_t> &group = entry.second;
         if (group.size() < 2)
+            continue;
+
+        // A pinned depth of one is an explicit request for a single inter-core
+        // buffer per lineage; merging would multiply that by the lane count.
+        if (interCoreBufferDepth < 2)
             continue;
 
         // One slot per lane only makes sense if every role in the group has the

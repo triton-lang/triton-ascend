@@ -34,6 +34,7 @@
 #include "llvm/ADT/SmallVector.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace mlir::triton::cv_split {
 
@@ -42,11 +43,14 @@ namespace mlir::triton::cv_split {
 constexpr unsigned kMaxTransferFlagId = 14;
 constexpr unsigned kMaxTransferFlags = kMaxTransferFlagId + 1;
 
-/// True when every CUBE->VECTOR role in `body` has the same UB footprint. Only
-/// then is merging them onto one union slot per lane free, and only then will
-/// `insertCrossScopeTransfers` take it without a budget -- which is what
-/// decides whether those pools still rotate.
-bool cubeToVectorRolesAreUniform(Block *body, const Classification &classification);
+/// UB bytes, beyond what the rotating pools already reserve, that merging the
+/// CUBE->VECTOR roles onto one union slot per lane would cost. Zero when the
+/// roles are the same size, in which case the merge is free. Returns
+/// `std::nullopt` when there is nothing to merge. Callers compare this against
+/// the same budget `insertCrossScopeTransfers` uses, so both stages reach the
+/// same answer about whether those pools still rotate.
+std::optional<uint64_t> cubeToVectorUnionExtraBytes(Block *body, const Classification &classification,
+                                                    unsigned interCoreBufferDepth, unsigned lanes);
 
 /// Describes the IR emitted for one VECTOR-to-CUBE transfer. The values and
 /// operation pointers are non-owning handles into the loop being transformed.

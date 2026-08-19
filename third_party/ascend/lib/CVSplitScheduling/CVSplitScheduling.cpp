@@ -43,6 +43,8 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/Builders.h"
+
+#include <limits>
 #include "mlir/IR/Dominance.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/PatternMatch.h"
@@ -924,10 +926,17 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
         // only when those roles are the same size. So the distance may be the
         // lane count only when they are; otherwise the depth still binds.
         const unsigned vcBoundaries = cv_split::countVectorToCubeBoundaries(body, classification);
-        const bool rolesUniform = cv_split::cubeToVectorRolesAreUniform(body, classification);
+        // Whether the CUBE->VECTOR pools still rotate is the same question
+        // `insertCrossScopeTransfers` answers, so ask it the same way: what the
+        // merge costs, against the same budget.
+        const std::optional<uint64_t> unionExtraBytes = cv_split::cubeToVectorUnionExtraBytes(
+            body, classification, static_cast<unsigned>(interCoreBufferDepth), vcBoundaries);
+        const uint64_t budget = privateBufferUbBudgetBytes < 0
+                                    ? std::numeric_limits<uint64_t>::max()
+                                    : static_cast<uint64_t>(privateBufferUbBudgetBytes);
         const unsigned flagsIfPrivate = 3 * vcBoundaries + 1;
-        const bool everyPoolPrivate =
-            rolesUniform && vcBoundaries > 1 && flagsIfPrivate <= cv_split::kMaxTransferFlags;
+        const bool everyPoolPrivate = unionExtraBytes.has_value() && *unionExtraBytes <= budget &&
+                                      vcBoundaries > 1 && flagsIfPrivate <= cv_split::kMaxTransferFlags;
 
         unsigned vectorToCubeSlots = static_cast<unsigned>(interCoreBufferDepth);
         // A frontend that pinned the depth to one asked for a single inter-core
@@ -941,8 +950,9 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
         if (pipelineDistance > 0)
             reorderDistance = static_cast<unsigned>(pipelineDistance);
         LLVM_DEBUG(llvm::dbgs() << "[cv-split] " << vcBoundaries << " vector-to-cube boundaries over "
-                                << vectorToCubeSlots << " slot(s); cube-to-vector roles "
-                                << (rolesUniform ? "uniform" : "differ") << ", so pipelining at distance "
+                                << vectorToCubeSlots << " slot(s); merging the cube-to-vector roles costs "
+                                << (unionExtraBytes ? *unionExtraBytes : 0) << " extra bytes and is "
+                                << (everyPoolPrivate ? "taken" : "declined") << ", so pipelining at distance "
                                 << reorderDistance << "\n");
 
         cv_split::DependencyScheduler scheduler;
@@ -958,7 +968,9 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
         LLVM_DEBUG(llvm::dbgs() << "[cv-split] === Stage 8: cross-scope transfers ===\n");
         FailureOr<cv_split::CrossScopeTransferInfo> transferInfo = cv_split::insertCrossScopeTransfers(
             loop, classification, transferPhaseEnds, static_cast<unsigned>(interCoreBufferDepth),
-            static_cast<uint64_t>(privateBufferUbBudgetBytes), promotePrivateBufferPools, vectorToCubeSlots);
+            privateBufferUbBudgetBytes < 0 ? std::numeric_limits<uint64_t>::max()
+                                           : static_cast<uint64_t>(privateBufferUbBudgetBytes),
+            promotePrivateBufferPools, vectorToCubeSlots);
         if (failed(transferInfo)) {
             return failure();
         }

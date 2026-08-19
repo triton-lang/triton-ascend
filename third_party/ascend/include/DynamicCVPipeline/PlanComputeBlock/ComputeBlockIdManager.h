@@ -63,7 +63,7 @@ public:
   std::optional<int> getBlockIdByOpOpt(Operation *op) const;
   int getNextId();
 
-  int getBlockIdByOp(Operation *op) const;
+  int getBlockIdByOp(Operation *op);
 
   ~ComputeBlockIdManager() = default;
   ComputeBlockIdManager(const ComputeBlockIdManager &) = delete;

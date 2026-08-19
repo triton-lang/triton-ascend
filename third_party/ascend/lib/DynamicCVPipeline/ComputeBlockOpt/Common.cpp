@@ -21,6 +21,8 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
+#include "DynamicCVPipeline/Common/CycleDetector.h"
+#include "DynamicCVPipeline/Common/DependencyHelper.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
@@ -41,71 +43,6 @@ using namespace mlir;
 
 namespace mlir {
 namespace CVPipeline {
-
-namespace {
-
-//===----------------------------------------------------------------------===//
-// Cycle detection
-//
-// Merging operations into a single block_id is only valid if the resulting
-// block-level dependency graph stays acyclic. The DFS below walks the SSA +
-// memory dependency edges, expanding any visited op into every op sharing its
-// block_id, and reports whether a cycle (a path back into the safe set) exists.
-//===----------------------------------------------------------------------===//
-
-struct CycleDfs {
-  llvm::DenseSet<mlir::Operation *> &okSet;
-  llvm::DenseSet<mlir::Operation *> visited;
-  const MemoryDependenceGraph &memGraph;
-  ComputeBlockIdManager &bm;
-  Block *block;
-  void clear() { visited.clear(); }
-  bool operator()(Operation *cur);
-  bool dfs(Operation *cur) { return (*this)(cur); };
-  CycleDfs(Block *block, const MemoryDependenceGraph &memGraph,
-           llvm::DenseSet<mlir::Operation *> &okSet, ComputeBlockIdManager &bm)
-      : okSet(okSet), memGraph(memGraph), bm(bm), block(block) {}
-};
-
-bool CycleDfs::operator()(Operation *cur) {
-  if (okSet.contains(cur)) {
-    return true;
-  }
-  if (!visited.insert(cur).second) {
-    return false;
-  }
-
-  SmallVector<Operation *> allusers;
-  allusers.append(cur->getUsers().begin(), cur->getUsers().end());
-  for (auto *memUser : memGraph.getExecAfter(cur)) {
-    allusers.push_back(memUser);
-  }
-  for (auto *user : allusers) {
-    auto *userInBlock = getAncestorInBlock(user, block);
-    if (!userInBlock)
-      continue;
-    if (okSet.contains(userInBlock)) {
-      LOG_DEBUG(
-          "[CycleDfs] Cycle found, userInBlock in okSet: " << *userInBlock);
-      return true;
-    }
-    int userBlockId = bm.getBlockIdByOp(userInBlock);
-    if (userBlockId == -1) {
-      if (dfs(userInBlock)) {
-        return true;
-      }
-    } else {
-      for (auto *nx : bm.getOpsByBlockId(userBlockId)) {
-        if (dfs(nx)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-} // namespace
 
 bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify,
                      const MemoryDependenceGraph &memGraph, int targetBlockId,
@@ -132,46 +69,8 @@ bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify,
   }
 
   // Initialize DFS detector
-  CycleDfs dfs(block, memGraph, okSet, bm);
-  bool hasCycle = false;
-
-  for (mlir::Operation *okOp : okSet) {
-    SmallVector<Operation *> allusers;
-    allusers.append(okOp->getUsers().begin(), okOp->getUsers().end());
-    for (auto *memUser : memGraph.getExecAfter(okOp)) {
-      allusers.push_back(memUser);
-    }
-    for (auto *user : allusers) {
-      auto *userInBlock = getAncestorInBlock(user, block);
-      if (!userInBlock)
-        continue;
-      if (okSet.contains(userInBlock)) {
-        continue;
-      }
-      int userBlockId = bm.getBlockIdByOp(userInBlock);
-      if (userBlockId == -1) {
-        dfs.clear();
-        if (dfs(userInBlock)) {
-          hasCycle = true;
-          break;
-        }
-      } else {
-        LOG_DEBUG("userInBlock: " << *userInBlock);
-        LOG_DEBUG("okOp: " << *okOp);
-        for (auto *userOp : bm.getOpsByBlockId(userBlockId)) {
-          dfs.clear();
-          LOG_DEBUG("userOp: " << *userOp);
-          if (dfs(userOp)) {
-            hasCycle = true;
-            break;
-          }
-        }
-      }
-    }
-    if (hasCycle) {
-      break;
-    }
-  }
+  DependencyCycleDetector dfs(block, DependencyHelper{memGraph}, okSet, bm);
+  auto hasCycle = dfs.detectCycle();
 
   for (auto &[op, origBlockId] : origBlockIdMap) {
     bm.updateBlockId(op, origBlockId);

@@ -151,7 +151,7 @@ ComputeBlockIdManager::getBlockIdByOpOpt(Operation *op) const {
   return std::nullopt;
 }
 
-int ComputeBlockIdManager::getBlockIdByOp(Operation *op) const {
+int ComputeBlockIdManager::getBlockIdByOp(Operation *op) {
   return getBlockIdByOpOpt(op).value_or(-1);
 }
 

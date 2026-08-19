@@ -31,6 +31,7 @@
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "DynamicCVPipeline/Common/DependencyHelper.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Block.h"

@@ -33,6 +33,7 @@
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "DynamicCVPipeline/Common/CycleDetector.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -92,64 +93,6 @@ public:
 };
 
 } // namespace
-
-namespace {
-
-class DependencyCycleDetector {
-  const llvm::DenseSet<mlir::Operation *> &group;
-  llvm::DenseSet<mlir::Operation *> visited;
-  const DependencyHelper &depHelper;
-  ComputeBlockIdManager &bm;
-  Block *const block;
-
-  bool detectCycleFrom(Operation *cur);
-
-public:
-  DependencyCycleDetector(Block *block, const DependencyHelper &depHelper,
-                          llvm::DenseSet<mlir::Operation *> &group,
-                          ComputeBlockIdManager &bm)
-      : block(block), depHelper(depHelper), group(group), bm(bm) {}
-
-  bool detectCycle();
-};
-
-} // namespace
-
-bool DependencyCycleDetector::detectCycleFrom(Operation *cur) {
-  if (group.contains(cur)) {
-    return true;
-  }
-  if (!visited.insert(cur).second) {
-    return false;
-  }
-
-  bool createsCycle = false;
-
-  depHelper.forEachUserInSameBlock(cur, [&](Operation *user) {
-    if (createsCycle)
-      return;
-    createsCycle =
-        llvm::any_of(bm.getOpsInSameBlock(user),
-                     [this](Operation *user) { return detectCycleFrom(user); });
-    return;
-  });
-
-  return createsCycle;
-}
-
-bool DependencyCycleDetector::detectCycle() {
-  llvm::DenseSet<Operation *> externalUsers;
-  for (auto *op : group) {
-    depHelper.forEachUserInSameBlock(op, [&](Operation *user) {
-      if (!group.contains(user)) {
-        externalUsers.insert(user);
-      }
-    });
-  }
-  return llvm::any_of(externalUsers, [this](Operation *op) {
-    return this->detectCycleFrom(op);
-  });
-}
 
 bool SeedRegionPlanner::willCreateCycle(Operation *op) {
   auto *block = op->getBlock();

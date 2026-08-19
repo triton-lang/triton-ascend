@@ -33,6 +33,7 @@
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "DynamicCVPipeline/Common/DependencyHelper.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -81,16 +82,14 @@ struct EdgeHelper {
   // either fails
   Operation *resolveToBlockOp(Operation *op);
 
-  template <bool IsMemory = false>
   void addEdge(Operation *pred, Operation *succ);
 
-  template <bool IsMemory = false>
   void addEdgeToUser(Operation *op, Operation *user) {
     if (graph.opIndex.contains(user)) {
       return; // same-level use, already covered by the def-side loop
     }
     Operation *ancestor = resolveToBlockOp(user);
-    addEdge<IsMemory>(op, ancestor);
+    addEdge(op, ancestor);
   };
 
   EdgeHelper(BlockOpGraph &g, Block *block) : graph(g), block(block) {};
@@ -109,14 +108,12 @@ Operation *EdgeHelper::resolveToBlockOp(Operation *op) {
   return ancestor;
 }
 
-template <bool IsMemory>
 void EdgeHelper::addEdge(Operation *pred, Operation *succ) {
   if (!pred || !succ || pred == succ) {
     return;
   }
   if (seen.insert({pred, succ}).second) {
-    LOG_DEBUG("Adding " << (IsMemory ? "memory " : "") << "edge from " << *pred
-                        << " to " << *succ);
+    LOG_DEBUG("Adding edge from " << *pred << " to " << *succ);
     graph.succs[pred].push_back(succ);
     graph.preds[succ].push_back(pred);
   }
@@ -132,35 +129,16 @@ BlockOpGraph::BlockOpGraph(ArrayRef<Operation *> allOps, Block *block,
   }
 
   EdgeHelper edges(*this, block);
+  DependencyHelper depHelper{memGraph};
 
   for (Operation *op : allOps) {
     LOG_DEBUG("Processing op: " << *op);
-    // Edges from operand defs (including defs nested inside other ops).
-    for (Value const operand : op->getOperands()) {
-      Operation *defOp = operand.getDefiningOp();
-      if (!defOp) {
-        continue;
-      }
-      Operation *def = edges.resolveToBlockOp(defOp);
+    depHelper.forEachSource(op, [&](Operation *source) {
+      Operation *def = edges.resolveToBlockOp(source);
       edges.addEdge(def, op);
-    }
-
-    // Edges from uses that live inside nested regions of another block-level
-    // op.
-    for (Value const result : op->getResults()) {
-      for (Operation *user : result.getUsers()) {
-        edges.addEdgeToUser(op, user);
-      }
-    }
-
-    for (auto *memDef : memGraph.getExecBefore(op)) {
-      Operation *def = edges.resolveToBlockOp(memDef);
-      edges.addEdge<true>(def, op);
-    }
-
-    for (auto *memUser : memGraph.getExecAfter(op)) {
-      edges.addEdgeToUser<true>(op, memUser);
-    }
+    });
+    depHelper.forEachUser(
+        op, [&](Operation *user) { edges.addEdgeToUser(op, user); });
   }
 }
 
@@ -296,6 +274,7 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
       startingVectorBlocks.push_back(i);
     }
   }
+  constexpr size_t kPriviledgedMaxComputeOpCnt = 1;
   std::stable_partition(startingVectorBlocks.begin(),
                         startingVectorBlocks.end(), [this](unsigned idx) {
                           const auto blockId = groupIds[idx];
@@ -312,7 +291,7 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
                           LOG_DEBUG("Summary: group id "
                                     << blockId
                                     << " compute ops: " << computeOpCnt);
-                          return computeOpCnt > 1;
+                          return computeOpCnt > kPriviledgedMaxComputeOpCnt;
                         });
   ready.append(startingVectorBlocks);
 

@@ -629,6 +629,47 @@ static void emitMergedSlotRelease(const TransferEmitContext &c, ArrayRef<CrossSc
 
 } // namespace
 
+bool cubeToVectorRolesAreUniform(Block *body, const DenseMap<Operation *, EngineType> &classification)
+{
+    // Only the CUBE->VECTOR side is needed, and that side is decidable from the
+    // body alone. `findCrossScopeValues` cannot be reused here: its
+    // VECTOR->CUBE branch wants the phase-end anchors the scheduler has not
+    // produced yet, and this question has to be answered before scheduling.
+    DenseMap<int64_t, uint64_t> bytesByOrigin;
+    for (Operation &op : *body) {
+        if (isa<scf::YieldOp>(&op) || !isa<linalg::MatmulOp>(&op))
+            continue;
+        auto prodIt = classification.find(&op);
+        if (prodIt == classification.end() || prodIt->second != EngineType::CUBE)
+            continue;
+        for (Value result : op.getResults()) {
+            auto tensorType = dyn_cast<RankedTensorType>(result.getType());
+            if (!tensorType || tensorType.getRank() != 2)
+                continue;
+            bool feedsVector = false;
+            for (Operation *user : result.getUsers()) {
+                if (user->getBlock() != body || isa<scf::YieldOp>(user))
+                    continue;
+                auto consIt = classification.find(user);
+                if (consIt != classification.end() && consIt->second == EngineType::VECTOR)
+                    feedsVector = true;
+            }
+            if (!feedsVector)
+                continue;
+            auto originAttr = op.getAttrOfType<IntegerAttr>(kUnrollOriginIdAttrName);
+            if (!originAttr)
+                return false;
+            CrossScopeTransfer probe;
+            probe.direction = CrossScopeTransfer::CUBE_TO_VECTOR;
+            bytesByOrigin.try_emplace(originAttr.getInt(), getTransferFootprint(probe, tensorType).bytes);
+        }
+    }
+    if (bytesByOrigin.size() < 2)
+        return false;
+    const uint64_t first = bytesByOrigin.begin()->second;
+    return llvm::all_of(bytesByOrigin, [&](const auto &e) { return e.second == first; });
+}
+
 FailureOr<CrossScopeTransferInfo>
 insertCrossScopeTransfers(scf::ForOp loop, const DenseMap<Operation *, EngineType> &classification,
                           const DenseMap<Operation *, Operation *> &transferPhaseEnds,

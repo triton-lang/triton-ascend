@@ -23,28 +23,26 @@
 // are formed here, before the persistent UB/CBUF allocations.
 // One pair per transfer phase, in the order the phases are emitted: the two QK
 // score slots, the two PV result slots, then the two L1 slots the P tiles are
-// packed into.  The two CUBE->VECTOR pools keep the inter-core buffer
-// count of two.  The VECTOR->CUBE pool gets one slot per lane instead:
-// it lives in L1, so the extra slots cost nothing against the UB budget,
-// and with no slot reused there is nothing for the schedule to pipeline
-// against -- CUBE issues every score matmul before it waits, rather than
-// stopping after two of them.
+// packed into.  Two of each CUBE->VECTOR pool, from the inter-core buffer
+// count.  The VECTOR->CUBE pool takes one slot per lane instead: it is in L1,
+// so the extra slots cost nothing against the UB budget, and a pool whose
+// slots are never reused has no write-after-read pair to order.
 // CHECK: %{{.*}} = memref.alloc() : memref<16x32xf32, #hivm.address_space<ub>>
 // CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<16x32xf32, #hivm.address_space<ub>>
 // CHECK-NEXT: %{{.*}} = memref.alloc() : memref<16x32xf32, #hivm.address_space<ub>>
 // CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<16x32xf32, #hivm.address_space<ub>>
-// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
 // CHECK-NEXT: %{{.*}} = memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
 // CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<16x64xf32, #hivm.address_space<ub>>
 // CHECK-NEXT: %{{.*}} = memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
 // CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<16x64xf32, #hivm.address_space<ub>>
+// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
+// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
+// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
+// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
+// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
+// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
+// CHECK-NEXT: %{{.*}} = memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
+// CHECK-NEXT: annotation.mark %{{.*}} {effects = ["write", "read"]} : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
 
 // CHECK: scope.scope : () -> () {
 // One ND view per physical L1 slot, and one slot per lane.
@@ -58,42 +56,45 @@
 // CHECK-NEXT: %{{.*}} = memref.memory_space_cast %{{.*}} : memref<32x32xf16, #hivm.address_space<cbuf>> to memref<32x32xf16>
 // CHECK-NEXT: %{{.*}}:4 = scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} iter_args(%{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}) -> (i32, i32, index, index) : i32 {
 
-// The two CUBE->VECTOR pools still rotate over two slots, so a lane's write
-// must not run until the consumer has read the previous lane's tile there. The
-// schedule supplies that ordering itself, without a release flag: consuming
-// work is pipelined behind by the number of slots the VECTOR->CUBE pool has,
-// which leaves an existing cross-core handoff between every read of a slot and
-// the write that reuses it.
+// Buffer slots are shared between lanes, so the write that reuses a slot must
+// not run until the consumer has finished reading the previous lane's tile.
+// The schedule supplies that ordering itself: consuming work is pipelined one
+// buffer-depth behind, which leaves an existing cross-core handoff between
+// every read of a slot and the write that reuses it.  No release flag, and no
+// synchronization beyond the handoffs the transfers already need -- three
+// phases at depth two, so six flags, whatever the unroll factor.
 //
-// That pool now has one slot per lane, so its distance is the lane count and
-// nothing is emitted early: CUBE issues all four score matmuls before it waits
-// on the first P tile, instead of stopping after two.  Four QK forward flags
-// would be two here (two slots, shared by the lanes that share them), four P
-// forward flags, two PV: eight in all.
-//
-// All four score tiles, back to back, no wait between them.
+// Lanes 0 and 1 fill the two QK slots; nothing precedes them.
 // CHECK: hivm.hir.fixpipe {dma_mode = #hivm.dma_mode{{<}}nz2nd{{>}}} ins(%{{.*}} : tensor<32x32xf32>) outs(%{{.*}} : memref<16x32xf32, #hivm.address_space<ub>>) dual_dst_mode = {{<}}ROW_SPLIT{{>}}
 // CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 0
 // CHECK: hivm.hir.fixpipe {{.*}} dual_dst_mode = {{<}}ROW_SPLIT{{>}}
 // CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 1
+
+// The P handoff for lane 0 arrives.  It is set only after that lane's softmax,
+// which read QK slot 0 -- so everything after it may reuse that slot.
+// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 4
+// CHECK: hivm.hir.fixpipe {{.*}} dual_dst_mode = {{<}}ROW_SPLIT{{>}}
+// CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 2
 // CHECK: hivm.hir.fixpipe {{.*}} dual_dst_mode = {{<}}ROW_SPLIT{{>}}
 // CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 0
+
+// Same for slot 1, behind lane 1's handoff.
+// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 5
+// CHECK: hivm.hir.fixpipe {{.*}} dual_dst_mode = {{<}}ROW_SPLIT{{>}}
+// CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 3
 // CHECK: hivm.hir.fixpipe {{.*}} dual_dst_mode = {{<}}ROW_SPLIT{{>}}
 // CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 1
 
-// Then each product tile, behind its own lane's P hand-off.
-// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
+// The PV slots are reused the same way.  Lane 2's handoff is set only after the
+// consumer read the PV result of lane 0, so it orders that slot's reuse too.
+// Each lane has its own P slot, so these are flags 6 and 7 rather than 4 and 5
+// reused.
+// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 6
 // CHECK: hivm.hir.fixpipe {{.*}} dual_dst_mode = {{<}}ROW_SPLIT{{>}}
-// CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 6
-// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 3
+// CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 2
+// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 7
 // CHECK: hivm.hir.fixpipe {{.*}} dual_dst_mode = {{<}}ROW_SPLIT{{>}}
-// CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 7
-// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 4
-// CHECK: hivm.hir.fixpipe {{.*}} dual_dst_mode = {{<}}ROW_SPLIT{{>}}
-// CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 6
-// CHECK: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 5
-// CHECK: hivm.hir.fixpipe {{.*}} dual_dst_mode = {{<}}ROW_SPLIT{{>}}
-// CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 7
+// CHECK-NEXT: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 3
 
 // CHECK: scope.return
 // CHECK-NEXT: } {hivm.tcore_type = #hivm.tcore_type<CUBE>, noinline}
@@ -108,33 +109,32 @@
 // CHECK-NEXT: %{{.*}} = arith.index_cast %{{.*}} : i64 to index
 // CHECK-NEXT: %{{.*}}:7 = scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} iter_args(%{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}, %{{.*}} = %{{.*}}) -> (tensor<16xf32>, tensor<16x64xf32>, tensor<16xf32>, i32, i32, index, index) : i32 {
 
-// Consumer side.  The VECTOR->CUBE pool has a slot per lane, so no lane's P
-// write reuses another's and nothing has to be interleaved to order it: all
-// four softmaxes run first, each behind its own score tile, and the four
-// accumulations drain afterwards.  A plain two-phase order is what the schedule
-// wants here, and it is what CUBE's uninterrupted run of score matmuls pairs
-// with.
-//
-// Score tiles are still shared two ways, so lanes 0 and 2 wait on the same
-// flag; each P hand-off gets its own.
+// Consumer side, pipelined one buffer-depth behind: each lane's softmax and P
+// handoff, with the PV result of the lane two back consumed in between.  That
+// interleaving is what puts a handoff between a slot's read and its reuse; a
+// plain two-phase order, all softmaxes then all accumulations, leaves none.
 // CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 0
-// CHECK: hivm.hir.copy ins(%{{.*}} : memref<2x1x16x16xf16, #hivm.address_space<ub>>) outs(%{{.*}} : memref<2x1x16x16xf16, strided<{{.*}}, offset: ?>, #hivm.address_space<cbuf>>)
-// CHECK-NEXT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 1
-// CHECK: hivm.hir.copy ins(%{{.*}} : memref<2x1x16x16xf16, #hivm.address_space<ub>>) outs(%{{.*}} : memref<2x1x16x16xf16, strided<{{.*}}, offset: ?>, #hivm.address_space<cbuf>>)
-// CHECK-NEXT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 3
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 0
-// CHECK: hivm.hir.copy ins(%{{.*}} : memref<2x1x16x16xf16, #hivm.address_space<ub>>) outs(%{{.*}} : memref<2x1x16x16xf16, strided<{{.*}}, offset: ?>, #hivm.address_space<cbuf>>)
+// CHECK: hivm.hir.copy ins(%{{.*}} : memref<2x1x16x16xf16, #hivm.address_space<ub>>) outs(%{{.*}} : memref<2x1x16x16xf16, strided<[512, 256, 16, 1], offset: ?>, #hivm.address_space<cbuf>>)
 // CHECK-NEXT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 4
 // CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 1
-// CHECK: hivm.hir.copy ins(%{{.*}} : memref<2x1x16x16xf16, #hivm.address_space<ub>>) outs(%{{.*}} : memref<2x1x16x16xf16, strided<{{.*}}, offset: ?>, #hivm.address_space<cbuf>>)
+// CHECK: hivm.hir.copy ins(%{{.*}} : memref<2x1x16x16xf16, #hivm.address_space<ub>>) outs(%{{.*}} : memref<2x1x16x16xf16, strided<[512, 256, 16, 1], offset: ?>, #hivm.address_space<cbuf>>)
 // CHECK-NEXT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 5
 
-// Then the four product tiles, over the two PV slots.
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 6
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 7
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 6
-// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 7
+// Lane 0's PV result is consumed here.  Lane 2 no longer overwrites lane 0's
+// L1 slot -- each lane owns one -- so this pairing is what the CUBE->VECTOR
+// slots need, and lanes 2 and 3 pack into their own P slots, flags 6 and 7.
+// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 2
+// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 0
+// CHECK: hivm.hir.copy ins(%{{.*}} : memref<2x1x16x16xf16, #hivm.address_space<ub>>) outs(%{{.*}} : memref<2x1x16x16xf16, strided<[512, 256, 16, 1], offset: ?>, #hivm.address_space<cbuf>>)
+// CHECK-NEXT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 6
+// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 3
+// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 1
+// CHECK: hivm.hir.copy ins(%{{.*}} : memref<2x1x16x16xf16, #hivm.address_space<ub>>) outs(%{{.*}} : memref<2x1x16x16xf16, strided<[512, 256, 16, 1], offset: ?>, #hivm.address_space<cbuf>>)
+// CHECK-NEXT: hivm.hir.sync_block_set[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 7
+
+// The last two PV results drain at the end; no later lane reuses their slots.
+// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 2
+// CHECK: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 3
 
 // Nothing runs the other way: no release flag exists in either direction.
 // CHECK-NOT: sync_block{{.*}}<PIPE_V>, <PIPE_FIX>

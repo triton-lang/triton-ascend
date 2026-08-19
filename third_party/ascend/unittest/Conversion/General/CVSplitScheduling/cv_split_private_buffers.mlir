@@ -19,10 +19,10 @@
 // role and the smaller one takes a contiguous view of its front, which is what
 // lets the two roles differ in size.  That is funded by a UB budget.
 //
-// Giving an individual *pool* one buffer per lane is a separate, opt-in switch.
-// It is off by default because the reuse it removes is already ordered by a
-// flag the schedule needs for its own data, so it costs buffers and flags
-// without removing a stall.
+// The VECTOR->CUBE pool takes one buffer per lane by default: it is in L1, so
+// the extra slots cost nothing against a UB budget.  Giving the *other* pools
+// one buffer per lane individually, rather than by merging them, stays an
+// opt-in switch.
 //
 // The candidate has three phases: QK (UB, 16x32xf32 = 2048 bytes a slot),
 // P (L1/cbuf, free against a UB budget) and PV (UB, 16x64xf32 = 4096 bytes).
@@ -31,23 +31,17 @@
 // buffer *types*: the allocations of the three pools interleave in the output,
 // so a COUNT/NOT pair and a type-matching DAG group cannot share a prefix.
 
-// By default the two CUBE->VECTOR pools stay on the inter-core buffer count and
-// the VECTOR->CUBE pool takes one slot per lane.  That pool is in L1, so its
-// extra slots cost nothing against a UB budget, and with none of its slots
-// reused the schedule has nothing to pipeline against: CUBE issues every score
-// matmul before its first wait instead of stopping after two.  Merging the UB
-// roles is a different question and stays declined here -- it would cost
-// 4*4096 against the 2*2048 + 2*4096 the separate pools use, and the budget is
-// zero.  So 2 + 2 UB slots and 4 L1: eight allocations.
+// By default the two CUBE->VECTOR pools keep the inter-core buffer count and
+// the VECTOR->CUBE pool takes one slot per lane: 2 + 2 UB and 4 L1, eight in
+// all.  Merging the UB roles is a separate question and stays declined here --
+// it would cost 4*4096 against the 2*2048 + 2*4096 the separate pools use, and
+// the budget is zero.  Their slots therefore still rotate, so the schedule
+// keeps pipelining at the buffer depth to order that reuse.
 // OFF-COUNT-8: memref.alloc() {{.*}}address_space
 // OFF-NOT: memref.alloc() {{.*}}address_space
 
 // OFFTYPE-DAG: memref.alloc() : memref<16x32xf32, #hivm.address_space<ub>>
 // OFFTYPE-DAG: memref.alloc() : memref<16x64xf32, #hivm.address_space<ub>>
-// OFFTYPE-DAG: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// OFFTYPE-DAG: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// OFFTYPE-DAG: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// OFFTYPE-DAG: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
 // Two QK forward flags, four P, two PV: 0..7.
 // OFFTYPE-DAG: flag = 7
 // Nothing merged, so no union view and no back-edge release.
@@ -55,9 +49,10 @@
 // OFFTYPE-NOT: memref.reinterpret_cast {{.*}}offset: [0]{{.*}}address_space<ub>{{.*}}address_space<ub>
 
 // 4096 is exactly the difference between the two separate pools and four union
-// slots, so it buys the merge.  Four UB slots replace 2 + 2, and the L1 pool
-// already has one slot per lane by default: eight allocations, every one of
-// them owned by a single lane.
+// slots, so it buys the merge.  Four UB slots replace 2 + 2, alongside the four
+// the L1 pool already has: eight allocations, every one owned by a single lane.
+// With nothing reused anywhere the schedule stops interleaving and CUBE issues
+// every score matmul before its first wait.
 // UNION-COUNT-8: memref.alloc() {{.*}}address_space
 // UNION-NOT: memref.alloc() {{.*}}address_space
 
@@ -77,16 +72,14 @@
 // UNIONVIEW-NOT: sync_block{{.*}}<PIPE_V>, <PIPE_FIX>
 // UNIONVIEW-NOT: sync_block{{.*}}<PIPE_MTE1>, <PIPE_MTE3>
 
-// Opting into pool promotion additionally takes the L1 pool to one slot per
-// lane.  It is free against a UB budget, so the only thing it spends is flags.
-// 4 UB + 4 L1 = 8.
+// The L1 pool already has one slot per lane, so opting into pool promotion
+// changes nothing here: still 4 UB + 4 L1 = 8.
 // PROMOTE-COUNT-8: memref.alloc() {{.*}}address_space
 // PROMOTE-NOT: memref.alloc() {{.*}}address_space
 
 // PROMOTETYPE-COUNT-4: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
 // PROMOTETYPE-NOT: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
-// The L1 pool is already one slot per lane by default, so opting in changes
-// nothing: the same 0..12.
+// The same 0..12 as the union alone.
 // PROMOTETYPE-DAG: flag = 12
 // PROMOTETYPE-NOT: flag = 13
 

@@ -16,9 +16,9 @@
 // DEPTH1: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
 // DEPTH1-NOT: memref.alloc() : memref<2x2x16x16xf16, #hivm.address_space<cbuf>>
 
-// One forward flag per buffer slot per phase, so depth one needs three -- and
-// with a single slot per phase no lane reuses another's buffer, so there is
-// nothing for the schedule to order and no reverse traffic at all.
+// One forward flag per buffer slot per phase, so depth one needs three.  A
+// frontend that pinned the count to one asked for a single inter-core buffer
+// per lineage, so the VECTOR->CUBE pool is not widened past it either.
 // DEPTH1: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 0
 // DEPTH1: hivm.hir.sync_block_wait[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 0
 // DEPTH1-NOT: flag = 3
@@ -37,7 +37,7 @@
 // COLLISION: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 0
 // COLLISION: scope.scope
 // COLLISION: hivm.hir.sync_block_set[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 1
-// COLLISION: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 3
+// COLLISION: hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 5
 // COLLISION-NOT: flag = 9
 
 // When CV commits, the existing DCVP wrapper sees the result and leaves the

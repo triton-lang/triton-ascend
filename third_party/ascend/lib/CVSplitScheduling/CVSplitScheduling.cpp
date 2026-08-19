@@ -909,36 +909,45 @@ class CVSplitSchedulingPass : public ::impl::CVSplitSchedulingBase<CVSplitSchedu
             return failure();
         }
 
-        // The reorder pipelines a VECTOR->CUBE boundary's consuming work against
-        // the boundary that reuses its slot, so the distance it needs and the
-        // number of slots that pool gets are the same quantity. Decide it once,
-        // here, and give it to both stages: computing it twice lets them
-        // disagree, and a distance above the rotation period leaves a slot's
-        // read after the write that reuses it.
+        // The reorder puts an existing cross-core handoff between a slot's read
+        // and the write that reuses it, by emitting a boundary's consuming work
+        // just before the boundary that reuses its slot. It therefore orders
+        // *every* pool's reuse at once, and its distance has to be the shortest
+        // rotation period among them -- a longer one leaves the tightest pool's
+        // read after the write that overwrites it.
         //
-        // One slot per boundary is the better default. The pool is in L1, so the
-        // extra slots cost nothing against the UB budget, and with no slot
-        // reused there is nothing for the reorder to interleave -- CUBE issues
-        // every score matmul before it waits, instead of stopping after
-        // `interCoreBufferDepth` of them. Fall back to the depth when the flags
-        // one-per-boundary would need do not fit.
+        // The VECTOR->CUBE pool gets one slot per lane: it is in L1, so the
+        // extra slots cost nothing against the UB budget, and a pool with more
+        // slots than the distance assumes is only ordered more strictly than it
+        // needs. But the CUBE->VECTOR pools still rotate over the buffer depth
+        // unless their roles merge onto one union slot per lane, which is free
+        // only when those roles are the same size. So the distance may be the
+        // lane count only when they are; otherwise the depth still binds.
         const unsigned vcBoundaries = cv_split::countVectorToCubeBoundaries(body, classification);
+        const bool rolesUniform = cv_split::cubeToVectorRolesAreUniform(body, classification);
         const unsigned flagsIfPrivate = 3 * vcBoundaries + 1;
+        const bool everyPoolPrivate =
+            rolesUniform && vcBoundaries > 1 && flagsIfPrivate <= cv_split::kMaxTransferFlags;
+
         unsigned vectorToCubeSlots = static_cast<unsigned>(interCoreBufferDepth);
         // A frontend that pinned the depth to one asked for a single inter-core
-        // buffer per lineage; widening that pool would ignore the request. Only
-        // grow a pool the policy already allows to ping-pong.
+        // buffer per lineage; widening that pool would ignore the request.
         if (interCoreBufferDepth >= 2 && vcBoundaries > vectorToCubeSlots &&
             flagsIfPrivate <= cv_split::kMaxTransferFlags)
             vectorToCubeSlots = vcBoundaries;
+
+        unsigned reorderDistance =
+            everyPoolPrivate ? vcBoundaries : static_cast<unsigned>(interCoreBufferDepth);
         if (pipelineDistance > 0)
-            vectorToCubeSlots = static_cast<unsigned>(pipelineDistance);
-        LLVM_DEBUG(llvm::dbgs() << "[cv-split] " << vcBoundaries << " vector-to-cube boundaries; "
-                                << vectorToCubeSlots << " slot(s) each, pipelined at that distance\n");
+            reorderDistance = static_cast<unsigned>(pipelineDistance);
+        LLVM_DEBUG(llvm::dbgs() << "[cv-split] " << vcBoundaries << " vector-to-cube boundaries over "
+                                << vectorToCubeSlots << " slot(s); cube-to-vector roles "
+                                << (rolesUniform ? "uniform" : "differ") << ", so pipelining at distance "
+                                << reorderDistance << "\n");
 
         cv_split::DependencyScheduler scheduler;
         llvm::DenseMap<Operation *, Operation *> transferPhaseEnds;
-        if (failed(scheduler.run(body, classification, transferPhaseEnds, vectorToCubeSlots)))
+        if (failed(scheduler.run(body, classification, transferPhaseEnds, reorderDistance)))
             return failure();
 
         // Stage 7.5: Unfuse PV matmuls (split matmul(p,v,acc*alpha) into pv + addf)

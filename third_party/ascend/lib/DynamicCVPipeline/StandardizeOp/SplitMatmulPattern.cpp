@@ -83,6 +83,7 @@ struct SplitInfo {
     Value outerInValue;
     Value outerOutValue;
     bool shouldSplit;
+    bool supported = false;
 };
 
 } // namespace
@@ -522,6 +523,35 @@ static std::optional<SplitInfo> handleMayNotExec(linalg::MatmulOp matmulOp)
     }
     auto initVal = forOp.getTiedLoopInit(blockArg)->get();
     auto result = forOp.getTiedLoopResult(blockArg);
+
+    // only enable set_enable_buffer_insert_optimization
+    auto moduleOp = matmulOp->getParentOfType<ModuleOp>();
+    if (moduleOp->hasAttr(CVPipeline::kInsertionOptimization)) {
+        // Check if matmul is used by subsequent L0C
+        auto matchMatmulC = [](Operation *op, Value value) {
+            if (auto nextMatmulOp = dyn_cast<linalg::MatmulOp>(op)) {
+                auto inputs = parseMatmulInputs(nextMatmulOp);
+                return inputs.a != value && inputs.b != value && inputs.bias == value;
+            }
+            return false;
+        };
+        auto usedByL0C = traceChainUser(result, true, matchMatmulC, [](Operation *op, Value value) { return false; });
+        
+        // Check if used by L0C in different block
+        if (usedByL0C.has_value() && usedByL0C.value()->getBlock() != result.getParentBlock()) {
+            return SplitInfo {false, initVal, result, false, false};
+        }
+        
+        // Check if outerInValue is defined by another matmul in different block
+        auto defMatmul = dyn_cast_if_present<linalg::MatmulOp>(hivm::traceDefOp<linalg::MatmulOp>(initVal).value_or(nullptr));
+        if (defMatmul) {
+            auto defInMatmulBlock = CVPipeline::getAncestorInBlock(defMatmul, matmulOp->getBlock());
+            if (!defInMatmulBlock) {
+                return SplitInfo {true, initVal, result, false, true};
+            }
+        }
+    }
+
     return SplitInfo {true, initVal, result, true};
 }
 
@@ -552,7 +582,7 @@ static std::optional<SplitInfo> shouldSplit(linalg::MatmulOp matmulOp, bool need
     auto matmulInput = parseMatmulInputs(matmulOp);
     if (needSplitAll) {
         LOG_DEBUG("Split because needSplitAll is true. " << matmulOp);
-        return SplitInfo {false, matmulInput.bias, matmulOp.getResult(0), true};
+        return SplitInfo {false, matmulInput.bias, matmulOp.getResult(0), true, false};
     }
 
     bool argsLimitedInMatmul = true;
@@ -564,7 +594,7 @@ static std::optional<SplitInfo> shouldSplit(linalg::MatmulOp matmulOp, bool need
     }
     if (!argsLimitedInMatmul) {
         LOG_DEBUG("Split because bias is not limited in args" << matmulOp); // S25
-        return SplitInfo {mayNotExec, outerInValue, outerOutValue, true};
+        return SplitInfo {mayNotExec, outerInValue, outerOutValue, true, false};
     }
 
     if (mayNotExec) {
@@ -577,10 +607,60 @@ static std::optional<SplitInfo> shouldSplit(linalg::MatmulOp matmulOp, bool need
     if (!shouldSplitByInput(matmulOp, outerOutValue, outerInValue) &&
         !shouldSplitByOutput(matmulOp, outerOutValue, outerInValue))
     {
-        return SplitInfo {mayNotExec, outerInValue, outerOutValue, false};
+        return SplitInfo {mayNotExec, outerInValue, outerOutValue, false, false};
     }
 
-    return SplitInfo {mayNotExec, outerInValue, outerOutValue, true};
+    return SplitInfo {mayNotExec, outerInValue, outerOutValue, true, false};
+}
+
+/**
+ * Handles the mayNotExec case by creating select operations.
+ * This function creates a select operation to choose between the actual result
+ * and a zero-filled result based on whether the loop will execute.
+ * 
+ * Returns the select result if mayNotExec is handled, otherwise returns the original outerOutValue.
+ */
+static Value handleMayNotExecSelect(linalg::MatmulOp matmulOp, PatternRewriter &rewriter, 
+                                     SplitInfo &splitInfo, bool replaceUses = true)
+{
+    auto forOp = llvm::dyn_cast_if_present<scf::ForOp>(splitInfo.outerOutValue.getDefiningOp());
+    if (!forOp) {
+        return splitInfo.outerOutValue;
+    }
+    
+    auto outputType = dyn_cast<RankedTensorType>(parseMatmulInputs(matmulOp).bias.getType());
+    if (!outputType) {
+        return splitInfo.outerOutValue;
+    }
+    auto elmType = outputType.getElementType();
+    Location loc = matmulOp.getLoc();
+    
+    rewriter.setInsertionPointAfterValue(splitInfo.outerOutValue);
+    
+    auto lb = forOp.getLowerBound();
+    auto ub = forOp.getUpperBound();
+    
+    Value executed = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sgt, ub, lb);
+    Value zeroValue;
+    if (auto floatType = dyn_cast<FloatType>(elmType)) {
+        APFloat zeroAPFloat = APFloat::getZero(floatType.getFloatSemantics());
+        zeroValue = rewriter.create<arith::ConstantFloatOp>(loc, zeroAPFloat, floatType).getResult();
+    } else if (auto intType = dyn_cast<IntegerType>(elmType)) {
+        zeroValue = rewriter.create<arith::ConstantIntOp>(loc, 0, intType).getResult();
+    }
+    auto fillOp = rewriter.create<linalg::FillOp>(loc, zeroValue, splitInfo.outerOutValue);
+    auto selectOp = rewriter.create<arith::SelectOp>(loc, executed, splitInfo.outerOutValue, fillOp.getResult(0));
+    
+    if (replaceUses) {
+        // Replace uses of outerOutValue with select result, except for the select and fill operations
+        splitInfo.outerOutValue.replaceUsesWithIf(
+            selectOp.getResult(), 
+            [&](OpOperand &operand) { return operand.getOwner() != selectOp && operand.getOwner() != fillOp; });
+    }
+    
+    forOp->setAttr(CVPipeline::kHIVMMatmulLimitedInCubeAttr, rewriter.getUnitAttr());
+    
+    return selectOp.getResult();
 }
 
 static LogicalResult splitMatmul(linalg::MatmulOp matmulOp, PatternRewriter &rewriter, SplitInfo splitInfo)
@@ -716,7 +796,11 @@ LogicalResult SplitMatmulPattern::matchAndRewrite(linalg::MatmulOp matmulOp, Pat
     }
 
     if (splitInfo.mayNotExec) {
-        matmulOp->setAttr(CVPipeline::kMayNotExec, rewriter.getUnitAttr());
+        if (splitInfo.supported) {
+            handleMayNotExecSelect(matmulOp, rewriter, splitInfo);
+        } else {
+            matmulOp->setAttr(CVPipeline::kMayNotExec, rewriter.getUnitAttr());
+        }
     }
 
     return success();

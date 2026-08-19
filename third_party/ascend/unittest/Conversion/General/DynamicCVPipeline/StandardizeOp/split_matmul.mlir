@@ -1,6 +1,6 @@
 // RUN: triton-opt -ssbuf-standardize-op-pattern-match %s | FileCheck %s
 
-module {
+module attributes {ssbuffer.insertionOptimization} {
   // Case 1: Bias is a block argument (no defining op in the current block).
   // According to Rule 2, its value is unknown, so we split it.
   // CHECK-LABEL: func.func @case1_block_arg_bias
@@ -445,6 +445,58 @@ module {
       scf.yield %mm : tensor<32x32xf32>
     }
     return %result : tensor<32x32xf32>
+  }
+
+  // Case 14:  There are for-loop cascading and the upper bound is loaded from gm.
+  // While upper bound is loaded from gm, the for-loop may not execute,
+  // it need to add SelectOp when the result of for-loop is used;
+  // However, non-final for loops within cascaded for loops cannot be wrapped with selectOp,
+  // otherwise, they will not be identified to remain in L0C.
+  
+  // CHECK-LABEL: func.func @case14_cascaded_for_loops_maynotexec
+  // CHECK-SAME: (%[[GM:.*]]: memref<?xi32>, %[[A:.*]]: tensor<32x64xf32>, %[[B:.*]]: tensor<64x32xf32>) -> tensor<32x32xf32>
+  // CHECK-DAG: %[[OFFSET:.*]] = arith.constant 0 : index
+  // CHECK-DAG: %[[LB:.*]] = arith.constant 0 : i32
+  // CHECK-DAG: %[[CST_ONE:.*]] = arith.constant 1 : i32
+  // CHECK-DAG: %[[CST_ZERO:.*]] = arith.constant 0.000000e+00 : f32
+
+  // CHECK: %[[REINTERPRET:.*]] = memref.reinterpret_cast %[[GM]] to offset: [%[[OFFSET]]], sizes: [1], strides: [1] : memref<?xi32> to memref<1xi32, strided<[1], offset: ?>>
+  // CHECK: %[[UB:.*]] = memref.load %[[REINTERPRET]][%[[OFFSET]]] : memref<1xi32, strided<[1], offset: ?>>
+
+  // CHECK: %[[FOR_RESULT1:.*]] = scf.for %{{.*}} = %{{.*}} to %[[UB]] step %{{.*}} iter_args(%[[ITER_BIAS1:.*]] = %{{.*}}) -> (tensor<32x32xf32>) : i32 {
+  // CHECK:   %[[MM1:.*]] = linalg.matmul {ssbuffer.loop_carried_l0c} ins(%[[A]], %[[B]] : tensor<32x64xf32>, tensor<64x32xf32>) outs(%[[ITER_BIAS1]] : tensor<32x32xf32>) -> tensor<32x32xf32>
+  // CHECK:   scf.yield %[[MM1]] : tensor<32x32xf32>
+  // CHECK: }
+  // CHECK: %[[FOR_RESULT2:.*]] = scf.for %{{.*}} = %{{.*}} to %[[UB]] step %{{.*}} iter_args(%[[ITER_BIAS2:.*]] = %[[FOR_RESULT1]]) -> (tensor<32x32xf32>) : i32 {
+  // CHECK:   %[[MM2:.*]] = linalg.matmul {ssbuffer.loop_carried_l0c} ins(%[[A]], %[[B]] : tensor<32x64xf32>, tensor<64x32xf32>) outs(%[[ITER_BIAS2]] : tensor<32x32xf32>) -> tensor<32x32xf32>
+  // CHECK:   scf.yield %[[MM2]] : tensor<32x32xf32>
+  // CHECK: } {hivm.matmul_limited_in_cube}
+
+  // CHECK: %[[COND:.*]] = arith.cmpi sgt, %[[UB]], %[[LB]] : i32
+  // CHECK: %[[ZERO_TENSOR:.*]] = linalg.fill ins(%{{.*}} : f32) outs(%[[FOR_RESULT2]] : tensor<32x32xf32>) -> tensor<32x32xf32>
+  // CHECK: %[[RESULT:.*]] = arith.select %[[COND]], %[[FOR_RESULT2]], %[[ZERO_TENSOR]] : tensor<32x32xf32>
+  // CHECK: return %[[RESULT]] : tensor<32x32xf32>
+  func.func @case14_cascaded_for_loops_maynotexec(%gm: memref<?xi32>, %A: tensor<32x64xf32>, %B: tensor<64x32xf32>) -> tensor<32x32xf32> {
+    %c0_idx = arith.constant 0 : index
+    %c0_i32 = arith.constant 0 : i32
+    %c1_i32 = arith.constant 1 : i32
+
+    %cst_zero = arith.constant 0.0 : f32
+    %empty1 = tensor.empty() : tensor<32x32xf32>
+    %c = linalg.fill ins(%cst_zero : f32) outs(%empty1 : tensor<32x32xf32>) -> tensor<32x32xf32>
+    %reinterpret_cast = memref.reinterpret_cast %gm to offset: [%c0_idx], sizes: [1], strides: [1] : memref<?xi32> to memref<1xi32, strided<[1], offset: ?>>
+    %upper_bound = memref.load %reinterpret_cast[%c0_idx] : memref<1xi32, strided<[1], offset: ?>>
+
+    // Chain 1: zero initialization, each matmul in a for loop
+    %for1_result = scf.for %i1 = %c0_i32 to %upper_bound step %c1_i32 iter_args(%bias1 = %c) -> (tensor<32x32xf32>) : i32 {
+      %mm1 = linalg.matmul ins(%A, %B : tensor<32x64xf32>, tensor<64x32xf32>) outs(%bias1 : tensor<32x32xf32>) -> tensor<32x32xf32>
+      scf.yield %mm1 : tensor<32x32xf32>
+    }
+    %for2_result = scf.for %i2 = %c0_i32 to %upper_bound step %c1_i32 iter_args(%bias2 = %for1_result) -> (tensor<32x32xf32>) : i32 {
+      %mm2 = linalg.matmul ins(%A, %B : tensor<32x64xf32>, tensor<64x32xf32>) outs(%bias2 : tensor<32x32xf32>) -> tensor<32x32xf32>
+      scf.yield %mm2 : tensor<32x32xf32>
+    }
+    func.return %for2_result : tensor<32x32xf32>
   }
 }
 

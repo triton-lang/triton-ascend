@@ -23,6 +23,7 @@ def _mock_backend_func(name, *args):
 
 def _make_metadata():
     return SimpleNamespace(
+        target=driver.GPUTarget("npu", "Ascend910B3", 0),
         workspace_size=0,
         lock_init_value=0,
         lock_num=0,
@@ -71,6 +72,7 @@ def test_make_launcher_exposes_triton_launch_kernel(
     assert 'std::vector<size_t> launch_arg_sizes;' in src
     assert 'std::vector<char> launch_args(total_size, 0);' in src
     assert 'memcpy(launch_args.data() + grid_offset, &gridX, sizeof(int32_t));' in src
+    _mock_ffts.assert_called_once_with("Ascend910B3")
 
 
 @patch.object(driver, "NPUUtils")

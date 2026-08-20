@@ -60,6 +60,7 @@ def _mock_backend_func(name, *args):
 
 def _make_launcher_source(monkeypatch, *, force_simt_only, global_scratch_size=0, workspace_size=0):
     metadata = SimpleNamespace(
+        target=driver.GPUTarget("npu", "Ascend910B", 0),
         workspace_size=workspace_size,
         lock_init_value=0,
         lock_num=0,
@@ -80,7 +81,6 @@ def _make_launcher_source(monkeypatch, *, force_simt_only, global_scratch_size=0
     monkeypatch.setattr(driver, "extract_device_print_code_from_cann", lambda: "/* print stub */")
     with patch.object(driver, "NPUUtils") as mock_npu_utils, \
             patch.object(driver, "get_backend_func", side_effect=_mock_backend_func), \
-            patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B"), \
             patch.object(driver, "is_ffts_supported", return_value=False), \
             patch.object(driver, "force_disable_ffts", return_value=False), \
             patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False):

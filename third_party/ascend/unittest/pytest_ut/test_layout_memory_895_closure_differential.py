@@ -478,6 +478,7 @@ def _load_make_launcher(source):
 
 def _make_metadata(*, factor, axis, ceil_div, blacklisted, row_applied):
     return SimpleNamespace(
+        target=SimpleNamespace(arch="Ascend910B"),
         workspace_size=0,
         lock_init_value=0,
         lock_num=0,
@@ -700,13 +701,14 @@ def _load_inject_grid_num_tiles(source):
     ]
     assert len(candidates) == 1
     function = copy.deepcopy(candidates[0])
-    # Execute the method as a stand-alone function.  Its body intentionally
-    # closes only over Python builtins, so this verifies the source behavior
-    # rather than importing whichever Triton wheel happens to be installed.
+    # Execute the method as a stand-alone function.  Supply a local equivalent
+    # of the backend's int marker so this verifies the source behavior rather
+    # than importing whichever Triton wheel happens to be installed.
     function.decorator_list = []
     module = ast.Module(body=[function], type_ignores=[])
     ast.fix_missing_locations(module)
-    namespace = {}
+    internal_npu_option_int = type("_InternalNPUOptionInt", (int, ), {})
+    namespace = {"_InternalNPUOptionInt": internal_npu_option_int}
     exec(compile(module, "<grid-num-tiles-closure>", "exec"), namespace)
     return namespace["_inject_grid_num_tiles"]
 

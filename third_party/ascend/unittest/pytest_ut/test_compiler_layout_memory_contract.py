@@ -125,6 +125,8 @@ def compiler_module():
     utils_stub._get_npucompiler_path = lambda *_args, **_kwargs: ("", {})
     utils_stub._get_auto_blockify_blacklist_reasons = lambda *_args, **_kwargs: []
     utils_stub._warn_auto_blockify_disabled = lambda *_args, **_kwargs: None
+    utils_stub._remove_deprecated_npu_options = lambda options, **_kwargs: options
+    utils_stub._warn_deprecated_ascend_env_vars = lambda: None
     utils_stub.downgrade_llir = lambda llir: llir
     utils_stub.get_cann_version_file_hash = lambda: ""
     utils_stub.graph_ub_budget_bytes_for_arch = _stub_graph_ub_budget_bytes_for_arch

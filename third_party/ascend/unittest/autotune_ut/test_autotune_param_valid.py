@@ -67,6 +67,7 @@ def _load_autotuner_methods(*method_names):
         "Sequence": Sequence,
         "valid_axis_names": VALID_AXIS_NAMES,
         "VectorAxes": _load_vector_axes_module().VectorAxes,
+        "_InternalNPUOptionInt": ascend_autotuner._InternalNPUOptionInt,
     }
     exec(compile(extracted_module, str(AUTOTUNER_PATH), "exec"), namespace)
     return namespace
@@ -1623,6 +1624,7 @@ def test_inject_grid_num_tiles_uses_only_static_grid_and_preserves_explicit_valu
     static_grid = {"grid": (2, 16)}
     inject_grid_num_tiles(static_grid)
     assert static_grid["grid_num_tiles"] == 16
+    assert isinstance(static_grid["grid_num_tiles"], ascend_autotuner._InternalNPUOptionInt)
 
     # Only the first three launch dimensions are visible to the compiler; use
     # the outermost one among those, matching the ChunkCoalescing contract.

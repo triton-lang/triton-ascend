@@ -42,7 +42,7 @@ from torch import Tensor
 
 import triton
 from triton.runtime.autotuner import Autotuner, Config
-from triton.backends.ascend.utils import is_compile_on_910_95
+from triton.backends.ascend.utils import (_InternalNPUOptionInt, _remove_deprecated_npu_options, is_compile_on_910_95)
 
 from .autoparser import (LowDimsAxesParser, PtrNumsParser, ReductionAxesParser, SplitAxesParser, TilingAxesParser)
 from .dsl_analysis.cv_param_parser import parse_cv_params
@@ -77,7 +77,19 @@ def _get_constexpr_candidates_from_fn(fn) -> List[str]:
     """
     Returns all constexpr parameter names from the kernel function definition.
     """
-    func_ast = fn.parse()
+    current_fn = fn
+    visited = set()
+    while current_fn is not None and id(current_fn) not in visited:
+        visited.add(id(current_fn))
+        parse = getattr(current_fn, "parse", None)
+        if callable(parse):
+            func_ast = parse()
+            break
+        jit_function = getattr(current_fn, "jit_function", None)
+        current_fn = jit_function if jit_function is not None else getattr(current_fn, "fn", None)
+    else:
+        return []
+
     constexpr_names = []
     for node in ast.walk(func_ast):
         if not isinstance(node, ast.FunctionDef):
@@ -109,6 +121,21 @@ def _clone_config_with_kwargs(
         pre_hook=config.pre_hook,
         ir_override=config.ir_override,
     )
+
+
+def _normalize_user_configs(configs, *, protected=()):
+    if not configs:
+        return configs
+    normalized_configs = []
+    for config in configs:
+        normalized_kwargs = _remove_deprecated_npu_options(config.kwargs, protected=protected)
+        if normalized_kwargs == config.kwargs:
+            normalized_configs.append(config)
+            continue
+        normalized_config = copy.copy(config)
+        normalized_config.kwargs = normalized_kwargs
+        normalized_configs.append(normalized_config)
+    return normalized_configs
 
 
 def _split_hints(hints: Optional[Dict[str, object]]):
@@ -231,6 +258,9 @@ class AutoTilingTuner(Autotuner):
             and trigger re-evaluation of candidate configs.
         :type key: List[str]
         """
+        constexpr_names = _get_constexpr_candidates_from_fn(fn)
+        hints = _remove_deprecated_npu_options(hints or {}, protected=constexpr_names)
+        configs = _normalize_user_configs(configs, protected=constexpr_names)
         _validate_user_hints(fn, hints)
         reserved_hints, config_hints = _split_hints(hints)
         config_hints = _normalize_config_hints(
@@ -2039,9 +2069,10 @@ class AutoTilingTuner(Autotuner):
             return
         outermost = grid[glen - 1]
         if isinstance(outermost, int) and outermost > 1:
-            kwargs["grid_num_tiles"] = outermost
+            kwargs["grid_num_tiles"] = _InternalNPUOptionInt(outermost)
 
     def run(self, *args, **kwargs):
+        kwargs = _remove_deprecated_npu_options(kwargs, protected=self.arg_names)
         self._inject_grid_num_tiles(kwargs)
         key = self.generate_key_and_configs(*args, **kwargs)
         cache_miss = key not in self.cache
@@ -2285,6 +2316,8 @@ class AutoTilingTuner(Autotuner):
         return kernel_call
 
     def warmup(self, *args, **kwargs):
+        kwargs = _remove_deprecated_npu_options(kwargs, protected=self.arg_names)
+        self._inject_grid_num_tiles(kwargs)
         _ = self.generate_key_and_configs(*args, **kwargs)
         pruned_configs = self.prune_configs(kwargs)
         ret = []
@@ -2817,6 +2850,8 @@ def get_max_configs(config, kernel_type="mixcv", **kwargs):
                    or from the defaults.
     :return: List of expanded Config objects.
     """
+    kwargs = _remove_deprecated_npu_options(kwargs)
+
     # Determine the set of parameters supported by the current kernel_type
     if kernel_type == "cube":
         supported = _CUBE_PARAMS
@@ -2913,6 +2948,8 @@ def max_autotune(configs, key, kernel_type="mixcv", prune_configs_by=None, reset
                           Each value must be a list; the Cartesian product of these lists
                           will be combined with each base config.
     """
+
+    tuning_params = _remove_deprecated_npu_options(tuning_params)
 
     def decorator(fn):
         if not configs or len(configs) == 0:

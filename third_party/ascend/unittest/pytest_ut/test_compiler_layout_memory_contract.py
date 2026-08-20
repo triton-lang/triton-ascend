@@ -116,7 +116,6 @@ def compiler_module():
     for name in (
             "_get_kernel_target",
             "_get_llvm_path",
-            "_get_mlir_path",
             "_get_triton_adapter_opt_path",
             "_get_triton_mlir_opt_path",
             "_get_triton_opt_path",

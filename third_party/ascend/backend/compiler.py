@@ -50,7 +50,6 @@ from triton.backends.ascend.utils import (
     _enable_msdebug,
     _get_kernel_target,
     _get_llvm_path,
-    _get_mlir_path,
     _get_npucompiler_path,
     _get_triton_adapter_opt_path,
     _get_triton_mlir_opt_path,

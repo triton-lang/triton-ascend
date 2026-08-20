@@ -607,12 +607,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 f"--vf-fusion-mode={vf_fusion_mode}",
             ]
 
-        code_motion = metadata["code_motion"]
-        if code_motion is not None:
-            _compile_option_list += [
-                f"--enable-code-motion={code_motion}",
-            ]
-
         enable_preload = metadata["enable_preload"]
         if enable_preload is not None:
             _compile_option_list += [
@@ -857,12 +851,6 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 f"--enable-ubuf-saving={enable_ubuf_saving}",
             ]
 
-        code_motion = metadata["code_motion"]
-        if code_motion is not None:
-            _compile_option_list += [
-                f"--enable-code-motion={code_motion}",
-            ]
-
         enable_preload = metadata["enable_preload"]
         if enable_preload is not None:
             _compile_option_list += [
@@ -1074,7 +1062,6 @@ class NPUOptions:
     max_num_imprecise_acc_default: int = 0
     extern_libs: dict = None
     multibuffer: bool = True
-    code_motion: bool = None
     vf_fusion_mode: str = None
     enable_ubuf_saving: bool = None
     enable_preload: bool = None
@@ -1206,6 +1193,7 @@ _REMOVED_NPU_COMPILE_OPTIONS = frozenset({
     "graph_optimize_ub_capacity_bytes",
     "graph_optimize_emit_remarks",
     "bisheng_options",
+    "code_motion",
     "ops_reorder",
     "storage_align",
 })

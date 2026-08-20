@@ -90,7 +90,6 @@ DEFAULT_UB_MEMORY_LIMIT = _Config.DEFAULT_UB_MEMORY_LIMIT
 
 UB_OPTION_COST_BENEFIT: Dict[str, Dict[str, float]] = {
     'auto_multi_buffer': {'cost': 8, 'benefit': 1.5},
-    'enable_code_motion': {'cost': 1, 'benefit': 1.05},
 
     # Str options: each possible value has its own cost/benefit entry
     'vf_fusion_mode#ub-aware-op': {'cost': 2, 'benefit': 1.0},
@@ -307,7 +306,6 @@ def run_mode_get_benefit_cost(available_options: List[str], fn: Callable, args: 
 # Legacy Option weights (kept for backward compatibility)
 OPTION_WEIGHTS: Dict[str, float] = {
     'auto_multi_buffer': 5.0,
-    'enable_code_motion': 1.0,
 }
 
 
@@ -393,7 +391,6 @@ class UBConfig:
 
     # Compiler options that affect UB usage (generated from UB_OPTION_METADATA)
     auto_multi_buffer: Optional[bool] = None
-    enable_code_motion: Optional[bool] = None
     ubuf_saving: Optional[bool] = None
     auto_bind_sub_block: Optional[bool] = None
     auto_blockify_loop: Optional[bool] = None

@@ -683,20 +683,14 @@ def is_ffts_supported(arch: str):
     """Return whether the specified compilation target supports FFTS."""
     if not isinstance(arch, str) or not arch:
         return False
-    if arch.startswith("Ascend910_95") or arch in ["Ascend910A", "Ascend310B4"]:
+    if is_compile_on_910_95(arch) or arch in ["Ascend910A", "Ascend310B4"]:
         return False
     return True
 
 
-def force_disable_ffts(arch: str = None):
-    """Disable FFTS for an A5 compilation target; ignore the old environment switch."""
-    if arch is not None:
-        if isinstance(arch, str) and arch.startswith("Ascend910_95"):
-            return True
-    elif is_compile_on_910_95():
-        return True
-    _warn_deprecated_ascend_env_var("TRITON_DISABLE_FFTS")
-    return False
+def force_disable_ffts(arch: str) -> bool:
+    """Return whether the selected target requires FFTS to be disabled."""
+    return is_compile_on_910_95(arch)
 
 
 def get_cann_version_file_hash():

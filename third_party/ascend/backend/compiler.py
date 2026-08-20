@@ -277,7 +277,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         if _enable_msdebug():
             ascend.passes.ttir.add_normalize_debug_line_locations(pm)
 
-        _intra_val = metadata.get("intra_cache_num")
+        _intra_val = metadata.get("buf_slot_num_of_veccore")
         if _intra_val is not None:
             ascend.passes.ttir.set_buffer_count(mod, "INTRA", _intra_val)
 
@@ -1046,7 +1046,7 @@ class NPUOptions:
     tile_mix_cube_loop: int = None
     enable_mixed_cv: bool = None
     enable_dynamic_cv_pipeline: bool = None
-    intra_cache_num: int = None
+    buf_slot_num_of_veccore: int = None
     inter_cache_num: int = None
     load_cache_num: int = None
 

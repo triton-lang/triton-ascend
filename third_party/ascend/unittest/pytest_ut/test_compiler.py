@@ -48,10 +48,29 @@ def test_cv_pipeline_selection(dynamic, cv_split, target_is_a5, expected):
 
 
 def test_cv_split_a5_default_is_transactional_auto():
+    """The two switches carry no value of their own.
+
+    Both are left unset on the dataclass and resolved in `parse_options` from
+    `is_compile_on_910_95()`, the same way `compile_on_910_95` itself is -- so
+    on an A5 target both halves of the transactional default turn on, and on
+    anything else neither does.
+
+    This asserts that they are unset and that an explicit choice survives, not
+    which callable the field happens to hold. Pinning the field default is what
+    this test used to do, and it went stale the moment the resolution moved.
+    """
     fields = compiler.NPUOptions.__dataclass_fields__
-    assert fields["enable_cv_split_scheduling"].default == compiler.is_compile_on_910_95
-    assert fields["enable_dynamic_cv_pipeline"].default == compiler.is_compile_on_910_95
+    assert fields["enable_cv_split_scheduling"].default is None
+    assert fields["enable_dynamic_cv_pipeline"].default is None
     assert fields["cv_split_unroll_factor"].default == 4
+
+    # Unset stays unset until parse_options fills it in.
+    assert compiler.NPUOptions().enable_cv_split_scheduling is None
+    assert compiler.NPUOptions().enable_dynamic_cv_pipeline is None
+
+    # An explicit choice is never overwritten by that resolution.
+    assert compiler.NPUOptions(enable_cv_split_scheduling=False).enable_cv_split_scheduling is False
+    assert compiler.NPUOptions(enable_dynamic_cv_pipeline=True).enable_dynamic_cv_pipeline is True
 
 
 def _make_torch_npu_mock(cfg_dir):

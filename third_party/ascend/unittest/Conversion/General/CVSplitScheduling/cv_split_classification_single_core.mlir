@@ -1,12 +1,17 @@
 // RUN: triton-opt %s "--cv_split_scheduling=compile-on-910-95=true unroll-factor=4" 2>/dev/null | FileCheck %s --check-prefix=IR
 // RUN: triton-opt %s --debug-only=cv-split-scheduling "--cv_split_scheduling=compile-on-910-95=true unroll-factor=4" 2>&1 >/dev/null | FileCheck %s --check-prefix=DIAG
 
+// A loop on one core alone is not a candidate, and the two ways of finding that
+// out are different.  `cube_only` has a matmul, so the pre-check accepts it and
+// the rejection lands at classification, once every op is known to be CUBE.
+// `vector_only` has no matmul at all, so the pre-check turns it away before any
+// of that work happens.  Either way the function is restored and nothing is
+// transformed.
 // DIAG-LABEL: [cv-split] Function: cube_only
+// DIAG: [cv-split] Pre-check accepted candidate loop
 // DIAG-LABEL: [cv-split] Function: vector_only
+// DIAG: [cv-split] Pre-check rejected function, skip
 // DIAG: [cv-split] Classification: 4C 0V
-// DIAG: [cv-split] Loop must contain both CUBE and VECTOR ops, skip
-// DIAG: [cv-split] Candidate failed; restoring function and trying next function
-// DIAG: [cv-split] Classification: 0C 4V
 // DIAG: [cv-split] Loop must contain both CUBE and VECTOR ops, skip
 // DIAG: [cv-split] Candidate failed; restoring function and trying next function
 // DIAG: [cv-split] No candidate transformed; keeping original IR

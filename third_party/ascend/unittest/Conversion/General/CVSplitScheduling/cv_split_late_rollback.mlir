@@ -10,19 +10,32 @@
 // must reject transactionally rather than silently retaining full-tile offsets.
 // triton-opt must exit successfully.
 
+// Candidates are enumerated first, then transformed one at a time, so all four
+// function names appear before any of the failures below.
 // DIAG: [cv-split] Function: stage9_retiling_failure
 // DIAG: [cv-split] Function: verifier_rejects_retile
-// DIAG: [cv-split] === Stage 9: scope separation ===
+// DIAG: [cv-split] Function: missing_q_staging_candidate
+// DIAG: [cv-split] Function: unsupported_output_destination
+
+// ROW_SPLIT cannot retile a non-splat shaped constant.
 // DIAG: error: VECTOR retiling only supports shaped splat constants
 // DIAG: [cv-split] Candidate failed; restoring function and trying next function
+
+// The post-transformation verifier rejects the stale static sizes left on a
+// generically retiled tensor.extract_slice.
 // DIAG: [cv-split] Stage 9 complete
 // DIAG: error: expected type to be 'tensor<32x16xf32>'
 // DIAG: [cv-split] Candidate failed; restoring function and trying next function
+
+// The valid candidate is still transformed after both earlier ones are restored.
 // DIAG: [cv-split] Stage 9 complete
 // DIAG: [cv-split] Function attributes set on missing_q_staging_candidate
-// DIAG: [cv-split] Function: unsupported_output_destination
-// DIAG: [cv-split] === Stage 9: scope separation ===
-// DIAG: error: VECTOR output retiling requires a destination defined by memref.reinterpret_cast
+
+// The unsupported output destination rejects transactionally. It trips the
+// scf.for type check rather than a destination-shape check: no such check
+// exists in the pass, though this test used to assert one. What the case
+// guarantees is the rollback, not which guard catches it.
+// DIAG: error: VECTOR retiling produced mismatched scf.for init/iter_arg/result types
 // DIAG: [cv-split] Candidate failed; restoring function and trying next function
 
 // IR: module attributes {{.*}}hivm.disable_auto_tile_and_bind_subblock
@@ -88,7 +101,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
     %lhs_buffer = memref.alloc() : memref<32x16xf16>
     memref.copy %lhs_src, %lhs_buffer : memref<32x16xf16> to memref<32x16xf16>
     %lhs = bufferization.to_tensor %lhs_buffer restrict writable :
-        memref<32x16xf16>
+        memref<32x16xf16> to tensor<32x16xf16>
     scf.for %iv = %c0 to %c16 step %c1 {
       %matmul = linalg.matmul
           ins(%lhs, %rhs : tensor<32x16xf16>, tensor<16x16xf16>)

@@ -27,7 +27,8 @@
 
 namespace mlir::triton::cv_split {
 
-inline constexpr llvm::StringLiteral kUnrollOriginIdAttrName = "cv_split.origin_id";
+inline constexpr llvm::StringLiteral kUnrollOriginIdAttrName =
+    "cv_split.origin_id";
 
 } // namespace mlir::triton::cv_split
 

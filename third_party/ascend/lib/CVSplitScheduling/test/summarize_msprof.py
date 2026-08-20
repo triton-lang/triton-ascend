@@ -37,8 +37,7 @@ def summarize(path, warmup=3, kernel_name="_attn_fwd_0"):
     csv_path, captured = read_kernel_times(path, kernel_name)
     measured = captured[warmup:]
     if not measured:
-        raise ValueError(
-            f"warmup={warmup} removes all {len(captured)} captured launches")
+        raise ValueError(f"warmup={warmup} removes all {len(captured)} captured launches")
     return {
         "task_time_csv": str(csv_path.resolve()),
         "kernel_name": kernel_name,

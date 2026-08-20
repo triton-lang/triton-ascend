@@ -34,7 +34,37 @@ def CVSplitScheduling : Pass<"cv_split_scheduling", "mlir::ModuleOp"> {
            "compile on 910_95">,
     Option<"unrollFactor", "unroll-factor",
            "int", /*default*/"2",
-           "loop unroll factor (2, 4, or 8)">
+           "loop unroll factor (2, 4, or 8)">,
+    Option<"promoteFullyUnrolled", "promote-fully-unrolled",
+           "bool", /*default*/"true",
+           "promote the scope loops left by a candidate whose unroll consumed "
+           "its whole trip count; disable to keep them for inspection">,
+    Option<"pipelineDistance", "pipeline-distance",
+           "int", /*default*/"0",
+           "how many transfer boundaries apart to software-pipeline a "
+           "boundary's consuming work from the boundary that reuses its slot. "
+           "Zero follows the inter-core buffer depth, which is what the shared "
+           "slots need. A distance at or above the unroll factor emits every "
+           "boundary's own work first and drains the consumers after, which is "
+           "right when no slot is reused and the interleaving only shortens "
+           "the producing core's run-ahead.">,
+    Option<"privateBufferUbBudgetBytes", "private-buffer-ub-budget-bytes",
+           "int64_t", /*default*/"-1",
+           "spare UB, in bytes, that cross-scope pools may spend to stop "
+           "reusing a slot between lanes. Negative means the pass does not "
+           "know the headroom and spends what the schedule asks for; the "
+           "backend's memory planner is what actually decides whether it "
+           "fits, and it reports an overflow with the exact requirement when "
+           "it does not. Zero declines any spend, which keeps the rotating "
+           "pools and the interleaved schedule that orders them.">,
+    Option<"promotePrivateBufferPools", "promote-private-buffer-pools",
+           "bool", /*default*/"false",
+           "additionally give individual pools one buffer per lane instead of "
+           "a depth-sized rotating set, cheapest-first against the same UB "
+           "budget. Off by default: at the unroll factors in use the reuse it "
+           "removes is already ordered by a flag the schedule needs anyway, so "
+           "it costs buffers and flags without removing a stall. Turn it on to "
+           "stop depending on that ordering being emergent.">
   ];
   let dependentDialects = [
     "mlir::scf::SCFDialect",

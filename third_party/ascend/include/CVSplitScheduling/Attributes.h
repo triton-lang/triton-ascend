@@ -28,7 +28,8 @@ namespace mlir::triton::cv_split {
 /// Set to an integer one only after a transactional CV-split transformation
 /// commits.  The DynamicCVPipeline wrapper uses it to implement in-pipeline
 /// try/fallback without inspecting CV-split's internal IR shape.
-inline constexpr char kAppliedAttr[] = "triton_ascend.cv_split_scheduling.applied";
+inline constexpr char kAppliedAttr[] =
+    "triton_ascend.cv_split_scheduling.applied";
 
 } // namespace mlir::triton::cv_split
 

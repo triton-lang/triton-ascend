@@ -601,12 +601,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 f"--enable-auto-multi-buffer={multi_buffer_value}",
             ]
 
-        storage_align = metadata["storage_align"]
-        if storage_align is not None:
-            _compile_option_list += [
-                f"--enable-hivm-auto-storage-align={storage_align}",
-            ]
-
         ops_reorder = metadata["ops_reorder"]
         if ops_reorder is not None:
             _compile_option_list += [
@@ -869,12 +863,6 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 f"--enable-ubuf-saving={enable_ubuf_saving}",
             ]
 
-        storage_align = metadata["storage_align"]
-        if storage_align is not None:
-            _compile_option_list += [
-                f"--enable-hivm-auto-storage-align={storage_align}",
-            ]
-
         ops_reorder = metadata["ops_reorder"]
         if ops_reorder is not None:
             _compile_option_list += [
@@ -1098,7 +1086,6 @@ class NPUOptions:
     max_num_imprecise_acc_default: int = 0
     extern_libs: dict = None
     multibuffer: bool = True
-    storage_align: bool = None
     ops_reorder: bool = None
     code_motion: bool = None
     vf_fusion_mode: str = None
@@ -1224,6 +1211,16 @@ def _get_npu_options_arch(options: NPUOptions) -> str:
 
 NPUOptions.arch = property(_get_npu_options_arch)
 
+_REMOVED_NPU_COMPILE_OPTIONS = frozenset({
+    "allow_fp8e4nv",
+    "auto_tile_and_bind_subblock",
+    "graph_optimize_rule_mask",
+    "graph_optimize_max_rewrites_per_function",
+    "graph_optimize_ub_capacity_bytes",
+    "graph_optimize_emit_remarks",
+    "bisheng_options",
+    "storage_align",
+})
 
 def ttir_to_npubin(mod, metadata, opt):
     # Get Triton-MLIR as string

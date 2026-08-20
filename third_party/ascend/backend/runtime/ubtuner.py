@@ -70,7 +70,6 @@ class _Config:
 # UB Option Metadata - Single source of truth for all UB tuning options
 # =============================================================================
 UB_OPTION_METADATA: Dict[str, Dict[str, Any]] = {
-    'enable_storage_align': {'type': bool, 'default': False, 'npu_option': 'storage_align'},
     'auto_multi_buffer': {'type': bool, 'default': False, 'npu_option': 'multibuffer'},
     'vf_fusion_mode':
     {'type': str, 'default': 'ub-aware-op', 'npu_option': 'vf_fusion_mode', 'values': ['ub-aware-op', 'max-parallel']},
@@ -90,7 +89,6 @@ UB_TO_NPU_OPTION_MAP = {k: v['npu_option'] for k, v in UB_OPTION_METADATA.items(
 DEFAULT_UB_MEMORY_LIMIT = _Config.DEFAULT_UB_MEMORY_LIMIT
 
 UB_OPTION_COST_BENEFIT: Dict[str, Dict[str, float]] = {
-    'enable_storage_align': {'cost': 4, 'benefit': 1.2},
     'auto_multi_buffer': {'cost': 8, 'benefit': 1.5},
     'enable_ops_reorder': {'cost': 2, 'benefit': 1.1},
     'enable_code_motion': {'cost': 1, 'benefit': 1.05},
@@ -309,7 +307,6 @@ def run_mode_get_benefit_cost(available_options: List[str], fn: Callable, args: 
 
 # Legacy Option weights (kept for backward compatibility)
 OPTION_WEIGHTS: Dict[str, float] = {
-    'enable_storage_align': 5.0,
     'auto_multi_buffer': 5.0,
     'enable_ops_reorder': 2.0,
     'enable_code_motion': 1.0,
@@ -397,7 +394,6 @@ class UBConfig:
     """
 
     # Compiler options that affect UB usage (generated from UB_OPTION_METADATA)
-    enable_storage_align: Optional[bool] = None
     auto_multi_buffer: Optional[bool] = None
     enable_ops_reorder: Optional[bool] = None
     enable_code_motion: Optional[bool] = None

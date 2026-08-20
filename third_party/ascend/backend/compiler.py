@@ -216,7 +216,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         triton_adapter_opt_path = _get_triton_adapter_opt_path()
 
         enable_nd2nz_on_vector = metadata["enable_nd2nz_on_vector"]
-        enable_select_analysis = metadata["enable_select_analysis"]
+        # Select analysis is a fixed lowering policy, not a user compile option.
+        enable_select_analysis = True
         compile_on_910_95 = metadata["compile_on_910_95"]
         force_simt_template = metadata["force_simt_template"]
         enable_mask_fallback_conversion = metadata["enable_mask_fallback_conversion"]
@@ -1047,7 +1048,6 @@ class NPUOptions:
     enable_preload: bool = None
     enable_auto_bind_sub_block: bool = None
     disable_tightly_coupled_buffer_reuse: bool = False
-    enable_select_analysis: bool = True
     enable_hivm_auto_cv_balance: bool = None
     sync_solver: bool = None
     unit_flag: bool = None
@@ -1174,6 +1174,7 @@ _REMOVED_NPU_COMPILE_OPTIONS = frozenset({
     "enable_cce_vf_auto_sync",
     "enable_cce_vf_remove_membar",
     "enable_drop_unit_dims",
+    "enable_select_analysis",
     "ops_reorder",
     "storage_align",
 })

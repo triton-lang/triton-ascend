@@ -224,12 +224,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         force_simt_template = metadata["force_simt_template"]
         enable_mask_fallback_conversion = metadata["enable_mask_fallback_conversion"]
         optimize_dynamic_offset = metadata["optimize_dynamic_offset"]
-        auto_blockify_size = metadata["auto_blockify_size"]
         enable_mixed_cv = metadata.get("enable_mixed_cv")
         disable_auto_inject_block_sync = metadata.get("disable_auto_inject_block_sync")
         set_workspace_multibuffer = metadata.get("set_workspace_multibuffer")
-        if has_auto_blockify_blacklist_op or not auto_map_parallel_blocks_enabled:
-            auto_blockify_size = 1
 
         # Inject grid tile-count hint for ChunkCoalescing. When the kernel
         # has no boundary mask but grid[axis] is known at compile time (e.g.
@@ -246,7 +243,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         pm.enable_debug()
         if distributed is not None:
             distributed.ascend_passes.ttgpuir.add_convert_triton_distributed_to_hivm(pm)
-        # ascend.passes.ttir.add_auto_blockify(pm, auto_blockify_size)
 
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
         if (metadata["add_auto_scheduling"]):
@@ -1085,7 +1081,6 @@ class NPUOptions:
     warp_size: int = field(default=32, init=False)
     ir_override: Optional[str] = None  # filename of a user-defined IR (*.{ttir|ttadapter|mlirbc|bcmlir|npubin})
 
-    auto_blockify_size: int = 1
     add_auto_scheduling: bool = False
     enable_auto_blockify: bool = None
     compile_on_910_95: bool = None

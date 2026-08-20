@@ -1081,7 +1081,8 @@ class NPUOptions:
     num_warps: int = 32
     num_ctas: int = 1
     num_stages: int = 2
-    warp_size: int = 32
+    # Ascend threads-per-warp is a backend capability, not a compile option.
+    warp_size: int = field(default=32, init=False)
     ir_override: Optional[str] = None  # filename of a user-defined IR (*.{ttir|ttadapter|mlirbc|bcmlir|npubin})
 
     auto_blockify_size: int = 1

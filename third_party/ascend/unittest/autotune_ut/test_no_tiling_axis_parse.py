@@ -89,7 +89,10 @@ def test_permute(shape, dtype):
     torch.testing.assert_close(torch_output, triton_output, rtol=1e-03, atol=1e-03, equal_nan=True)
 
 
-@pytest.mark.skipif(not is_compile_on_910_95(), reason="only support A5")
+@pytest.mark.skipif(
+    not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
+    reason="only support A5",
+)
 @pytest.mark.parametrize('shape', [(1024, 32)])
 @pytest.mark.parametrize('dtype', ['bfloat16'])
 def test_permute_simt(shape, dtype):

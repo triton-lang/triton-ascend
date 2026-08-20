@@ -12,7 +12,7 @@ try:
     from triton.backends.ascend.utils import is_compile_on_910_95
 except Exception:
 
-    def is_compile_on_910_95():
+    def is_compile_on_910_95(_arch):
         return False
 
 
@@ -50,7 +50,7 @@ def torch_reduce(arg0):
 
 
 @pytest.mark.skipif(
-    not is_compile_on_910_95(),
+    not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
     reason="simt is support on A5",
 )
 @pytest.mark.parametrize(

@@ -317,7 +317,8 @@ class AutoTilingTuner(Autotuner):
         self.user_specified_warps = None
         self.user_specified_num_stages = None
         self.user_specified_multibuffer = None
-        self.default_multibuffer = not is_compile_on_910_95()
+        target_arch = triton.runtime.driver.active.get_current_target().arch
+        self.default_multibuffer = not is_compile_on_910_95(target_arch)
         self.print_autotuning = os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1"
 
         # Mark the original function so ubtuner can detect autotune was applied

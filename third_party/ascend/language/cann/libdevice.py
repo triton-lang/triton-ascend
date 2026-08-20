@@ -22,7 +22,20 @@ from math import pi as math_pi
 from triton.language import core, math, semantic, standard
 from triton._C.libtriton import ir
 from triton.runtime.jit import jit
-from triton.backends.ascend.utils import is_compile_on_910_95, triton_enable_libdevice_simt
+from triton.backends.ascend.utils import is_compile_on_910_95
+
+
+def _is_libdevice_simt_enabled(_semantic) -> bool:
+    """Enable the SIMT libdevice implementation for A5 pure-SIMT compilation.
+
+    ``AscendBackend.parse_options`` injects ``GPUTarget.arch`` into
+    ``NPUOptions``.  The builder's established ``options.arch`` view exposes
+    that internal target without serializing a second architecture field.
+    Template-SIMT lowering keeps the language builder in SIMD mode, so only
+    the explicit pure-SIMT compile mode may select SIMT libdevice symbols.
+    """
+    options = _semantic.builder.options
+    return is_compile_on_910_95(options.arch) and options.compile_mode == "simt_only"
 
 
 class _FlipStaticRange:
@@ -150,7 +163,7 @@ def reciprocal(arg0, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_reciprocal_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -169,7 +182,7 @@ def log1p(arg0, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_log1p_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -188,7 +201,7 @@ def relu(arg0, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_relu_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -207,7 +220,7 @@ def isinf(arg0, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_isinf_fp32", core.dtype("int1")),
         }, is_pure=True, _semantic=_semantic)
@@ -227,7 +240,7 @@ def tan(arg0, _semantic=None):
     :param arg0: The input tensor in radians. Supported dtypes: fp32, fp16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_tan_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -246,7 +259,7 @@ def atan(arg0, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_atan_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -270,7 +283,7 @@ def tanh(arg0, _semantic=None):
     if original_dtype == core.dtype("bf16"):
         arg0 = _semantic.cast(arg0, core.float32)
 
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         dispatch = {
             (core.dtype("fp32"), ): ("__hmf_tanh_fp32", core.dtype("fp32")),
         }
@@ -294,7 +307,7 @@ def ilogb(arg0, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_ilogb_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -307,7 +320,7 @@ def ilogb(arg0, _semantic=None):
 
 @core.extern
 def logb(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.logb for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -325,7 +338,7 @@ def ldexp(arg0, arg1, _semantic=None):
     :param arg1: The exponent tensor. Supported dtype: int32.
     :type arg1: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("int32")): ("__hmf_ldexp_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -338,7 +351,7 @@ def ldexp(arg0, arg1, _semantic=None):
 
 @core.extern
 def scalbn(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.scalbn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -361,7 +374,7 @@ def pow(arg0, arg1, _semantic=None):
     if arg1.dtype == core.dtype("int32"):
         arg1 = _semantic.cast(arg1, arg0.dtype)
 
-    if arg0.dtype == core.dtype("fp32") and is_compile_on_910_95():
+    if arg0.dtype == core.dtype("fp32") and _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_pow_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -395,7 +408,7 @@ def isfinited(arg0):
 @core.extern
 @math._add_math_1arg_docstr("finitef")
 def finitef(arg0, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_finite_fp32", core.dtype("int1")),
         }, is_pure=True, _semantic=_semantic)
@@ -417,7 +430,7 @@ def isnan(arg0, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_isnan_fp32", core.dtype("int1")),
         }, is_pure=True, _semantic=_semantic)
@@ -431,7 +444,7 @@ def isnan(arg0, _semantic=None):
 
 @core.extern
 def clz(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.clz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -441,7 +454,7 @@ def clz(arg0, _semantic=None):
 
 @core.extern
 def popc(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.popc for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -451,7 +464,7 @@ def popc(arg0, _semantic=None):
 
 @core.extern
 def byte_perm(arg0, arg1, arg2, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.byte_perm for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1, arg2], {
@@ -461,7 +474,7 @@ def byte_perm(arg0, arg1, arg2, _semantic=None):
 
 @core.extern
 def mulhi(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.mulhi for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -471,7 +484,7 @@ def mulhi(arg0, arg1, _semantic=None):
 
 @core.extern
 def mul24(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.mul24 for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -481,7 +494,7 @@ def mul24(arg0, arg1, _semantic=None):
 
 @core.extern
 def brev(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.brev for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -491,7 +504,7 @@ def brev(arg0, _semantic=None):
 
 @core.extern
 def sad(arg0, arg1, arg2, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.sad for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1, arg2], {
@@ -503,7 +516,7 @@ def sad(arg0, arg1, arg2, _semantic=None):
 def ffs(arg0, _semantic=None):
     arg0 = _semantic.to_tensor(arg0)
     dtype = arg0.dtype
-    if is_compile_on_910_95():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("int32"), ): ("__hmf_ffs_i32", core.dtype("int32")),
@@ -515,7 +528,7 @@ def ffs(arg0, _semantic=None):
 
 @core.extern
 def saturatef(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.saturatef for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -525,7 +538,7 @@ def saturatef(arg0, _semantic=None):
 
 @core.extern
 def hadd(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.hadd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -535,7 +548,7 @@ def hadd(arg0, arg1, _semantic=None):
 
 @core.extern
 def rhadd(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.rhadd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -545,7 +558,7 @@ def rhadd(arg0, arg1, _semantic=None):
 
 @core.extern
 def fdim(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.fdim for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -555,7 +568,7 @@ def fdim(arg0, arg1, _semantic=None):
 
 @core.extern
 def exp10(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.exp10 for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -565,7 +578,7 @@ def exp10(arg0, _semantic=None):
 
 @core.extern
 def add_rn(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.add_rn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -575,7 +588,7 @@ def add_rn(arg0, arg1, _semantic=None):
 
 @core.extern
 def add_rz(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.add_rz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -585,7 +598,7 @@ def add_rz(arg0, arg1, _semantic=None):
 
 @core.extern
 def add_rd(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.add_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -595,7 +608,7 @@ def add_rd(arg0, arg1, _semantic=None):
 
 @core.extern
 def add_ru(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.add_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -605,7 +618,7 @@ def add_ru(arg0, arg1, _semantic=None):
 
 @core.extern
 def sub_rn(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.sub_rn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -615,7 +628,7 @@ def sub_rn(arg0, arg1, _semantic=None):
 
 @core.extern
 def sub_rz(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.sub_rz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -625,7 +638,7 @@ def sub_rz(arg0, arg1, _semantic=None):
 
 @core.extern
 def sub_rd(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.sub_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -635,7 +648,7 @@ def sub_rd(arg0, arg1, _semantic=None):
 
 @core.extern
 def sub_ru(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.sub_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -645,7 +658,7 @@ def sub_ru(arg0, arg1, _semantic=None):
 
 @core.extern
 def mul_rn(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.mul_rn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -655,7 +668,7 @@ def mul_rn(arg0, arg1, _semantic=None):
 
 @core.extern
 def mul_rz(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.mul_rz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -665,7 +678,7 @@ def mul_rz(arg0, arg1, _semantic=None):
 
 @core.extern
 def mul_ru(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.mul_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -675,7 +688,7 @@ def mul_ru(arg0, arg1, _semantic=None):
 
 @core.extern
 def mul_rd(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.mul_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -685,7 +698,7 @@ def mul_rd(arg0, arg1, _semantic=None):
 
 @core.extern
 def div_rd(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.div_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -695,7 +708,7 @@ def div_rd(arg0, arg1, _semantic=None):
 
 @core.extern
 def div_ru(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.div_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -713,7 +726,7 @@ def div_rz(arg0, arg1, _semantic=None):
     :param arg1: The divisor tensor. Supported dtype: fp32.
     :type arg1: tl.tensor
     """
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         arg0 = _semantic.to_tensor(arg0)
         arg1 = _semantic.to_tensor(arg1)
         ret = _semantic.fdiv(arg0, arg1, False)
@@ -725,7 +738,7 @@ def div_rz(arg0, arg1, _semantic=None):
 
 @core.extern
 def rcp_rn(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.rcp_rn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -735,7 +748,7 @@ def rcp_rn(arg0, _semantic=None):
 
 @core.extern
 def rcp_rz(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.rcp_rz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -745,7 +758,7 @@ def rcp_rz(arg0, _semantic=None):
 
 @core.extern
 def rcp_rd(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.rcp_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -755,7 +768,7 @@ def rcp_rd(arg0, _semantic=None):
 
 @core.extern
 def rcp_ru(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.rcp_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -767,7 +780,7 @@ def rcp_ru(arg0, _semantic=None):
 @math._check_dtype(dtypes=["fp32"])
 @math._add_math_1arg_docstr("precise square root (rounding to nearest wrt the IEEE standard)")
 def sqrt_rn(arg0, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_sqrt_rn_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -777,7 +790,7 @@ def sqrt_rn(arg0, _semantic=None):
 
 @core.extern
 def sqrt_rz(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.sqrt_rz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -787,7 +800,7 @@ def sqrt_rz(arg0, _semantic=None):
 
 @core.extern
 def sqrt_rd(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.sqrt_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -797,7 +810,7 @@ def sqrt_rd(arg0, _semantic=None):
 
 @core.extern
 def sqrt_ru(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.sqrt_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -807,7 +820,7 @@ def sqrt_ru(arg0, _semantic=None):
 
 @core.extern
 def rsqrt_rn(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.rsqrt_rn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -817,7 +830,7 @@ def rsqrt_rn(arg0, _semantic=None):
 
 @core.extern
 def fma_rn(arg0, arg1, arg2, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.fma_rn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1, arg2], {
@@ -827,7 +840,7 @@ def fma_rn(arg0, arg1, arg2, _semantic=None):
 
 @core.extern
 def fma_rz(arg0, arg1, arg2, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.fma_rz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1, arg2], {
@@ -837,7 +850,7 @@ def fma_rz(arg0, arg1, arg2, _semantic=None):
 
 @core.extern
 def fma_rd(arg0, arg1, arg2, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.fma_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1, arg2], {
@@ -847,7 +860,7 @@ def fma_rd(arg0, arg1, arg2, _semantic=None):
 
 @core.extern
 def fma_ru(arg0, arg1, arg2, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.fma_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1, arg2], {
@@ -865,7 +878,7 @@ def fast_dividef(arg0, arg1, _semantic=None):
     :param arg1: The divisor tensor.
     :type arg1: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fast_divide_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -883,7 +896,7 @@ def fast_expf(arg0, _semantic=None):
     :param arg0: The input tensor.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_fast_exp_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -894,7 +907,7 @@ def fast_expf(arg0, _semantic=None):
 
 @core.builtin
 def fast_exp10f(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.fast_exp10f for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -904,7 +917,7 @@ def fast_exp10f(arg0, _semantic=None):
 
 @core.builtin
 def fast_sinf(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.fast_sinf for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -914,7 +927,7 @@ def fast_sinf(arg0, _semantic=None):
 
 @core.builtin
 def fast_cosf(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.fast_cosf for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -924,7 +937,7 @@ def fast_cosf(arg0, _semantic=None):
 
 @core.builtin
 def fast_tanf(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.fast_tanf for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -934,7 +947,7 @@ def fast_tanf(arg0, _semantic=None):
 
 @core.builtin
 def fast_tanhf(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.fast_tanhf for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -944,7 +957,7 @@ def fast_tanhf(arg0, _semantic=None):
 
 @core.builtin
 def fast_log2f(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.fast_log2f for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -954,7 +967,7 @@ def fast_log2f(arg0, _semantic=None):
 
 @core.builtin
 def fast_logf(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.fast_logf for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -964,7 +977,7 @@ def fast_logf(arg0, _semantic=None):
 
 @core.builtin
 def fast_log10f(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.fast_log10f for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -974,7 +987,7 @@ def fast_log10f(arg0, _semantic=None):
 
 @core.builtin
 def fast_powf(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.fast_powf for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -992,7 +1005,7 @@ def fmod(arg0, arg1, _semantic=None):
     :param arg1: The divisor tensor. Supported dtype: fp32.
     :type arg1: tl.tensor
     """
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         arg0 = _semantic.to_tensor(arg0)
         arg1 = _semantic.to_tensor(arg1)
         ret = _semantic.mod(arg0, arg1)
@@ -1004,7 +1017,7 @@ def fmod(arg0, arg1, _semantic=None):
 
 @core.extern
 def remainder(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.remainder for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -1020,7 +1033,7 @@ def float_as_int(arg0, _semantic=None):
     :param arg0: The input tensor. Supported dtype: fp32.
     :type arg0: tl.tensor
     """
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float_as_int for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1030,7 +1043,7 @@ def float_as_int(arg0, _semantic=None):
 
 @core.extern
 def int_as_float(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.int_as_float for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1040,7 +1053,7 @@ def int_as_float(arg0, _semantic=None):
 
 @core.extern
 def float_as_uint(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float_as_uint for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1050,7 +1063,7 @@ def float_as_uint(arg0, _semantic=None):
 
 @core.extern
 def uint_as_float(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.uint_as_float for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1060,7 +1073,7 @@ def uint_as_float(arg0, _semantic=None):
 
 @core.extern
 def float2int_rn(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2int_rn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1070,7 +1083,7 @@ def float2int_rn(arg0, _semantic=None):
 
 @core.extern
 def float2int_rz(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2int_rz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1080,7 +1093,7 @@ def float2int_rz(arg0, _semantic=None):
 
 @core.extern
 def float2int_rd(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2int_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1090,7 +1103,7 @@ def float2int_rd(arg0, _semantic=None):
 
 @core.extern
 def float2int_ru(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2int_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1100,7 +1113,7 @@ def float2int_ru(arg0, _semantic=None):
 
 @core.extern
 def int2float_rn(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.int2float_rn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1110,7 +1123,7 @@ def int2float_rn(arg0, _semantic=None):
 
 @core.extern
 def int2float_rz(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.int2float_rz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1120,7 +1133,7 @@ def int2float_rz(arg0, _semantic=None):
 
 @core.extern
 def int2float_rd(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.int2float_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1130,7 +1143,7 @@ def int2float_rd(arg0, _semantic=None):
 
 @core.extern
 def int2float_ru(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.int2float_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1140,7 +1153,7 @@ def int2float_ru(arg0, _semantic=None):
 
 @core.extern
 def float2uint_rn(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2uint_rn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1150,7 +1163,7 @@ def float2uint_rn(arg0, _semantic=None):
 
 @core.extern
 def float2uint_rz(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2uint_rz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1160,7 +1173,7 @@ def float2uint_rz(arg0, _semantic=None):
 
 @core.extern
 def float2uint_rd(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2uint_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1170,7 +1183,7 @@ def float2uint_rd(arg0, _semantic=None):
 
 @core.extern
 def float2uint_ru(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2uint_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1180,7 +1193,7 @@ def float2uint_ru(arg0, _semantic=None):
 
 @core.extern
 def uint2float_rn(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.uint2float_rn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1190,7 +1203,7 @@ def uint2float_rn(arg0, _semantic=None):
 
 @core.extern
 def uint2float_rz(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.uint2float_rz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1200,7 +1213,7 @@ def uint2float_rz(arg0, _semantic=None):
 
 @core.extern
 def uint2float_rd(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.uint2float_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1210,7 +1223,7 @@ def uint2float_rd(arg0, _semantic=None):
 
 @core.extern
 def uint2float_ru(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.uint2float_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1220,7 +1233,7 @@ def uint2float_ru(arg0, _semantic=None):
 
 @core.extern
 def float2ll_rn(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2ll_rn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1230,7 +1243,7 @@ def float2ll_rn(arg0, _semantic=None):
 
 @core.extern
 def float2ll_rz(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2ll_rz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1240,7 +1253,7 @@ def float2ll_rz(arg0, _semantic=None):
 
 @core.extern
 def float2ll_rd(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2ll_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1250,7 +1263,7 @@ def float2ll_rd(arg0, _semantic=None):
 
 @core.extern
 def float2ll_ru(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2ll_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1260,7 +1273,7 @@ def float2ll_ru(arg0, _semantic=None):
 
 @core.extern
 def ll2float_rn(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.ll2float_rn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1270,7 +1283,7 @@ def ll2float_rn(arg0, _semantic=None):
 
 @core.extern
 def ll2float_rz(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.ll2float_rz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1280,7 +1293,7 @@ def ll2float_rz(arg0, _semantic=None):
 
 @core.extern
 def ll2float_rd(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.ll2float_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1290,7 +1303,7 @@ def ll2float_rd(arg0, _semantic=None):
 
 @core.extern
 def ll2float_ru(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.ll2float_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1300,7 +1313,7 @@ def ll2float_ru(arg0, _semantic=None):
 
 @core.extern
 def float2ull_rn(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2ull_rn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1310,7 +1323,7 @@ def float2ull_rn(arg0, _semantic=None):
 
 @core.extern
 def float2ull_rz(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2ull_rz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1320,7 +1333,7 @@ def float2ull_rz(arg0, _semantic=None):
 
 @core.extern
 def float2ull_rd(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2ull_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1330,7 +1343,7 @@ def float2ull_rd(arg0, _semantic=None):
 
 @core.extern
 def float2ull_ru(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.float2ull_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1340,7 +1353,7 @@ def float2ull_ru(arg0, _semantic=None):
 
 @core.extern
 def ull2float_rn(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.ull2float_rn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1350,7 +1363,7 @@ def ull2float_rn(arg0, _semantic=None):
 
 @core.extern
 def ull2float_rz(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.ull2float_rz for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1360,7 +1373,7 @@ def ull2float_rz(arg0, _semantic=None):
 
 @core.extern
 def ull2float_rd(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.ull2float_rd for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1370,7 +1383,7 @@ def ull2float_rd(arg0, _semantic=None):
 
 @core.extern
 def ull2float_ru(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.ull2float_ru for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1389,7 +1402,7 @@ def atan2(arg0, arg1, _semantic=None):
     :param arg1: The x-coordinate tensor. Supported dtypes: fp32, fp16.
     :type arg1: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         if arg0.dtype == core.dtype("bf16") or arg1.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.atan2 for dtype bf16 is unspported for now.")
             core.static_assert(False)
@@ -1446,7 +1459,7 @@ def trunc(arg0, _semantic=None):
     :param arg0: The input tensor. Supported dtype: fp32.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp16"), ): ("__hmf_trunc_fp16", core.dtype("fp16")),
@@ -1472,7 +1485,7 @@ def round(arg0, _semantic=None):
     :param arg0: The input tensor. Supported dtype: fp32.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_round_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -1491,7 +1504,7 @@ def acos(arg0: core.tensor, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg0: tl.tensor
     """
-    if arg0.dtype == core.dtype("fp32") and is_compile_on_910_95():
+    if arg0.dtype == core.dtype("fp32") and _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_acos_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -1553,7 +1566,7 @@ def sinh(arg0: core.tensor, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.sinh for dtype bf16 is unspported for now.")
             core.static_assert(False)
@@ -1581,7 +1594,7 @@ def cosh(arg0: core.tensor, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.cosh for dtype bf16 is unspported for now.")
             core.static_assert(False)
@@ -1609,7 +1622,7 @@ def acosh(arg0: core.tensor, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.acosh for dtype bf16 is unspported for now.")
             core.static_assert(False)
@@ -1636,7 +1649,7 @@ def asinh(arg0: core.tensor, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.asinh for dtype bf16 is unspported for now.")
             core.static_assert(False)
@@ -1663,7 +1676,7 @@ def atanh(arg0: core.tensor, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.atanh for dtype bf16 is unspported for now.")
             core.static_assert(False)
@@ -1692,7 +1705,7 @@ def expm1(arg0: core.tensor, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.expm1 for dtype bf16 is unspported for now.")
             core.static_assert(False)
@@ -1719,7 +1732,7 @@ def nextafter(arg0: core.tensor, arg1: core.tensor, _semantic=None):
     :param arg1: The direction value tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg1: tl.tensor
     """
-    if arg0.dtype == core.dtype("fp32") and is_compile_on_910_95():
+    if arg0.dtype == core.dtype("fp32") and _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_nextafter_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -1769,7 +1782,7 @@ def hypot(arg0: core.tensor, arg1: core.tensor, _semantic=None):
     :param arg1: The second input tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg1: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         if arg0.dtype == core.dtype("bf16"):
             core.static_print("extern livdevice.hypot for dtype bf16 is unspported for now.")
             core.static_assert(False)
@@ -1789,7 +1802,7 @@ def hypot(arg0: core.tensor, arg1: core.tensor, _semantic=None):
 
 @core.extern
 def cbrt(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.cbrt for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1799,7 +1812,7 @@ def cbrt(arg0, _semantic=None):
 
 @core.extern
 def rcbrt(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.rcbrt for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1809,7 +1822,7 @@ def rcbrt(arg0, _semantic=None):
 
 @core.extern
 def rhypot(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.rhypot for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -1819,7 +1832,7 @@ def rhypot(arg0, arg1, _semantic=None):
 
 @core.extern
 def norm3d(arg0, arg1, arg2, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.norm3d for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1, arg2], {
@@ -1829,7 +1842,7 @@ def norm3d(arg0, arg1, arg2, _semantic=None):
 
 @core.extern
 def rnorm3d(arg0, arg1, arg2, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.rnorm3d for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1, arg2], {
@@ -1839,7 +1852,7 @@ def rnorm3d(arg0, arg1, arg2, _semantic=None):
 
 @core.extern
 def norm4d(arg0, arg1, arg2, arg3, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.norm4d for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise(
@@ -1851,7 +1864,7 @@ def norm4d(arg0, arg1, arg2, arg3, _semantic=None):
 
 @core.extern
 def rnorm4d(arg0, arg1, arg2, arg3, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.rnorm4d for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise(
@@ -1863,7 +1876,7 @@ def rnorm4d(arg0, arg1, arg2, arg3, _semantic=None):
 
 @core.extern
 def j0(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.j0 for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1873,7 +1886,7 @@ def j0(arg0, _semantic=None):
 
 @core.extern
 def j1(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.j1 for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1883,7 +1896,7 @@ def j1(arg0, _semantic=None):
 
 @core.extern
 def jn(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.jn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -1893,7 +1906,7 @@ def jn(arg0, arg1, _semantic=None):
 
 @core.extern
 def y0(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.y0 for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1903,7 +1916,7 @@ def y0(arg0, _semantic=None):
 
 @core.extern
 def y1(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.y1 for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -1913,7 +1926,7 @@ def y1(arg0, _semantic=None):
 
 @core.extern
 def yn(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.yn for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -1935,7 +1948,7 @@ def cyl_bessel_i0(arg0: core.tensor, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         if arg0.dtype == core.dtype("fp16"):
             core.static_print("extern livdevice.cyl_bessel_i0 for dtype bf16 is unspported for now.")
             core.static_assert(False)
@@ -2036,7 +2049,7 @@ def cyl_bessel_i0(arg0: core.tensor, _semantic=None):
 
 @core.extern
 def cyl_bessel_i1(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.cyl_bessel_i1 for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2053,7 +2066,7 @@ def signbit(arg0, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp16"), ): ("__hmf_signbit_fp16", core.dtype("int32")),
@@ -2083,7 +2096,7 @@ def signbit(arg0, _semantic=None):
 @math._check_dtype(dtypes=["fp32", "fp64"])
 @math._add_math_1arg_docstr("error function")
 def erf(arg0, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_erf_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2093,7 +2106,7 @@ def erf(arg0, _semantic=None):
 
 @core.extern
 def erfc(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.erfc for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2103,7 +2116,7 @@ def erfc(arg0, _semantic=None):
 
 @core.extern
 def erfcx(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.erfcx for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2113,7 +2126,7 @@ def erfcx(arg0, _semantic=None):
 
 @core.extern
 def erfcinv(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.erfcxinv for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2136,7 +2149,7 @@ def erfinv(arg0, _semantic=None):
     :param arg0: The input tensor. Supported dtype: fp32.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_erfinv_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2241,7 +2254,7 @@ def erfinv(arg0, _semantic=None):
 
 @core.extern
 def normcdf(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.normcdf for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2251,7 +2264,7 @@ def normcdf(arg0, _semantic=None):
 
 @core.extern
 def normcdfinv(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.normcdfinv for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2275,7 +2288,7 @@ def gamma(arg0, _semantic=None):
     :param arg0: The input tensor. Supported dtype: fp32.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_tgamma_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2327,7 +2340,7 @@ def gamma(arg0, _semantic=None):
 
 @core.extern
 def tgamma(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.tgamma for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2352,7 +2365,7 @@ def lgamma(arg0, _semantic=None):
     :param arg0: The input tensor. Supported dtype: fp32.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_lgamma_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2380,7 +2393,7 @@ def nearbyint(arg0: core.tensor, _semantic=None):
     :param arg0: The input tensor. Supported dtype: fp32.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_nearbyint_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2433,7 +2446,7 @@ def nearbyint(arg0: core.tensor, _semantic=None):
 
 @core.extern
 def sinpi(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.sinpi for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2443,7 +2456,7 @@ def sinpi(arg0, _semantic=None):
 
 @core.extern
 def cospi(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.cospi for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2463,7 +2476,7 @@ def asin(arg0: core.tensor, _semantic=None):
     :param arg0: The input tensor. Supported dtype: fp32.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp16"), ): ("__hmf_asin_fp16", core.dtype("fp16")),
@@ -2496,7 +2509,7 @@ def log10(arg0: core.tensor, _semantic=None):
     :param arg0: The input tensor. Supported dtype: fp32.
     :type arg0: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_log10_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2529,7 +2542,7 @@ def copysign(arg0: core.tensor, arg1: core.tensor, _semantic=None):
     :param arg1: The sign tensor. Supported dtype: fp32.
     :type arg1: tl.tensor
     """
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_copysign_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2569,7 +2582,7 @@ def rint(arg0: core.tensor, _semantic=None):
     :type arg0: tl.tensor
     """
     arg0 = _semantic.to_tensor(arg0)
-    if is_compile_on_910_95():
+    if _is_libdevice_simt_enabled(_semantic):
         if arg0.dtype != core.dtype("fp32"):
             arg0 = _semantic.cast(arg0, core.dtype("fp32"))
         return core.extern_elementwise("", "", [
@@ -2604,7 +2617,7 @@ def rint(arg0: core.tensor, _semantic=None):
 
 @core.extern
 def llrint(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.llrint for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2614,7 +2627,7 @@ def llrint(arg0, _semantic=None):
 
 @core.extern
 def llround(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("livdevice.llround for simd is unspported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2625,7 +2638,7 @@ def llround(arg0, _semantic=None):
 @core.extern
 @math._add_math_1arg_docstr("absolute value")
 def abs(arg0, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("fp32"), ): ("__hmf_abs_fp32", core.dtype("fp32")),
@@ -2648,7 +2661,7 @@ def abs(arg0, _semantic=None):
 
 @core.extern
 def brevll(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.brevll for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2660,7 +2673,7 @@ def brevll(arg0, _semantic=None):
 @math._check_dtype(dtypes=["fp32", "fp64"])
 @math._add_math_1arg_docstr("ceil")
 def ceil(arg0, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_ceil_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2670,7 +2683,7 @@ def ceil(arg0, _semantic=None):
 
 @core.extern
 def clzll(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.clzll for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2682,7 +2695,7 @@ def clzll(arg0, _semantic=None):
 @math._check_dtype(dtypes=["fp32", "fp64"])
 @math._add_math_1arg_docstr("cosine")
 def cos(arg0, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_cos_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2694,7 +2707,7 @@ def cos(arg0, _semantic=None):
 @math._check_dtype(dtypes=["fp32"])
 @math._add_math_2arg_docstr("precise division (rounding to nearest wrt the IEEE standard)")
 def div_rn(arg0, arg1, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_div_rn_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2717,7 +2730,7 @@ def fdiv(arg0, arg1, ieee_rounding=False, _semantic=None):
 @math._check_dtype(dtypes=["fp16", "fp32", "fp64"])
 @math._add_math_1arg_docstr("exponential")
 def exp(arg0, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_exp_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2729,7 +2742,7 @@ def exp(arg0, _semantic=None):
 @math._check_dtype(dtypes=["fp32", "fp64"])
 @math._add_math_1arg_docstr("exponential (base 2)")
 def exp2(arg0, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_exp2_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2739,7 +2752,7 @@ def exp2(arg0, _semantic=None):
 
 @core.extern
 def fast_exp2f(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.fast_exp2f for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2749,7 +2762,7 @@ def fast_exp2f(arg0, _semantic=None):
 
 @core.extern
 def float2half_rn(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.float2half_rn for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2761,7 +2774,7 @@ def float2half_rn(arg0, _semantic=None):
 @math._check_dtype(dtypes=["fp32", "fp64"])
 @math._add_math_1arg_docstr("floor")
 def floor(arg0, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_floor_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2772,7 +2785,7 @@ def floor(arg0, _semantic=None):
 @core.extern
 @math._add_math_3arg_docstr("fused multiply-add")
 def fma(arg0, arg1, arg2, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0, arg1, arg2], {
             (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fma_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2787,7 +2800,7 @@ def fma(arg0, arg1, arg2, _semantic=None):
 
 @core.extern
 def max(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.max for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise(
@@ -2799,7 +2812,7 @@ def max(arg0, arg1, _semantic=None):
 
 @core.extern
 def min(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.min for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise(
@@ -2811,7 +2824,7 @@ def min(arg0, arg1, _semantic=None):
 
 @core.extern
 def half2float(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.half2float for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2821,7 +2834,7 @@ def half2float(arg0, _semantic=None):
 
 @core.extern
 def llabs(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.llabs for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2833,7 +2846,7 @@ def llabs(arg0, _semantic=None):
 @math._check_dtype(dtypes=["fp32", "fp64"])
 @math._add_math_1arg_docstr("natural logarithm")
 def log(arg0, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_log_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2845,7 +2858,7 @@ def log(arg0, _semantic=None):
 @math._check_dtype(dtypes=["fp32", "fp64"])
 @math._add_math_1arg_docstr("logarithm (base 2)")
 def log2(arg0, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_log2_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2855,7 +2868,7 @@ def log2(arg0, _semantic=None):
 
 @core.extern
 def mul64hi(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.mul64hi for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -2865,7 +2878,7 @@ def mul64hi(arg0, arg1, _semantic=None):
 
 @core.extern
 def nan(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.nan for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2875,7 +2888,7 @@ def nan(arg0, _semantic=None):
 
 @core.extern
 def popcll(arg0, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.popcll for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0], {
@@ -2885,7 +2898,7 @@ def popcll(arg0, _semantic=None):
 
 @core.extern
 def powif(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.powif for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -2897,7 +2910,7 @@ def powif(arg0, arg1, _semantic=None):
 @math._check_dtype(dtypes=["fp32", "fp64"])
 @math._add_math_1arg_docstr("inverse square root")
 def rsqrt(arg0, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_rsqrt_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2909,7 +2922,7 @@ def rsqrt(arg0, _semantic=None):
 @math._add_math_1arg_docstr("sine")
 def sin(arg0, _semantic=None):
     arg0 = _semantic.to_tensor(arg0)
-    if arg0.dtype == core.dtype("fp32") and is_compile_on_910_95():
+    if arg0.dtype == core.dtype("fp32") and _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_sin_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2920,7 +2933,7 @@ def sin(arg0, _semantic=None):
 @math._check_dtype(dtypes=["fp32", "fp64"])
 @math._add_math_1arg_docstr("fast square root")
 def sqrt(arg0, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_sqrt_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2930,7 +2943,7 @@ def sqrt(arg0, _semantic=None):
 
 @core.extern
 def uhadd(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.uhadd for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -2940,7 +2953,7 @@ def uhadd(arg0, arg1, _semantic=None):
 
 @core.extern
 def umul24(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.umul24 for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -2950,7 +2963,7 @@ def umul24(arg0, arg1, _semantic=None):
 
 @core.extern
 def umul64hi(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.umul64hi for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -2962,7 +2975,7 @@ def umul64hi(arg0, arg1, _semantic=None):
 @math._check_dtype(dtypes=["uint32", "uint64"])
 @math._add_math_2arg_docstr("most significant N bits of the 2N-bit product")
 def umulhi(arg0, arg1, _semantic=None):
-    if triton_enable_libdevice_simt():
+    if _is_libdevice_simt_enabled(_semantic):
         return core.extern_elementwise("", "", [arg0, arg1], {
             (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_umulhi_u32", core.dtype("uint32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2973,7 +2986,7 @@ def umulhi(arg0, arg1, _semantic=None):
 
 @core.extern
 def urhadd(arg0, arg1, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.urhadd for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1], {
@@ -2983,7 +2996,7 @@ def urhadd(arg0, arg1, _semantic=None):
 
 @core.extern
 def usad(arg0, arg1, arg2, _semantic=None):
-    if not triton_enable_libdevice_simt():
+    if not _is_libdevice_simt_enabled(_semantic):
         core.static_print("libdevice.usad for simd is unsupported for now.")
         core.static_assert(False)
     return core.extern_elementwise("", "", [arg0, arg1, arg2], {

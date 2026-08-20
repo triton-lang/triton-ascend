@@ -105,7 +105,7 @@ class CompilerCostmodelContractTest(unittest.TestCase):
         cache_mod.get_dump_manager = lambda *args, **kwargs: dump_mgr
         cache_mod._base32 = lambda value: value
 
-        utils_mod.is_compile_on_910_95 = lambda: False
+        utils_mod.is_compile_on_910_95 = lambda *_args: False
 
         sys.modules.update({
             "triton": triton_mod,

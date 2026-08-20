@@ -33,9 +33,6 @@ from triton.backends.ascend.backend_register import backend_strategy_registry
 
 import pybind11
 
-# Lazy init for is_compile_on_910_95
-_is_compile_on_910_95 = None
-
 # Phase-one compatibility boundary for compile-option cleanup.  Keep the
 # existing NPUOptions fields and their internal consumers intact while public
 # dictionaries route supported aliases and drop backend-managed fields.
@@ -167,18 +164,9 @@ def _warn_deprecated_ascend_env_vars() -> None:
         _warn_deprecated_ascend_env_var(name)
 
 
-def is_compile_on_910_95():
-    global _is_compile_on_910_95
-    if _is_compile_on_910_95 is None:
-        try:
-            import acl
-            name = acl.get_soc_name()
-            name_lower = name.lower()
-            _is_compile_on_910_95 = ("ascend910_95" in name_lower or "ascend950" in name_lower
-                                     or "910_958b" in name_lower)
-        except (ImportError, AttributeError):
-            _is_compile_on_910_95 = False
-    return _is_compile_on_910_95
+def is_compile_on_910_95(arch: str) -> bool:
+    """Return whether the explicit compilation target belongs to the A5 generation."""
+    return isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950"))
 
 
 AUTO_BLOCKIFY_BLACKLIST_RULES = (
@@ -709,11 +697,6 @@ def force_disable_ffts(arch: str = None):
         return True
     _warn_deprecated_ascend_env_var("TRITON_DISABLE_FFTS")
     return False
-
-
-def triton_enable_libdevice_simt():
-    enable_libdevice_simt = os.getenv("TRITON_ENABLE_LIBDEVICE_SIMT", False)
-    return enable_libdevice_simt and is_compile_on_910_95()
 
 
 def get_cann_version_file_hash():

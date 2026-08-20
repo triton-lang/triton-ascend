@@ -30,17 +30,20 @@ from typing import Any
 import pytest
 
 try:
+    import triton
     from triton.backends.ascend.utils import is_compile_on_910_95
+    _target_arch = triton.runtime.driver.active.get_current_target().arch
 except Exception:
+    _target_arch = ""
 
-    def is_compile_on_910_95():
+    def is_compile_on_910_95(_arch):
         return False
 
 
 # Do this before importing torch_npu, Triton, or defining JIT kernels.  In
 # particular, an Ascend 910B4 must collect this module as skipped rather than
 # execute a value-only fallback and be mistaken for a 910_95 gate-on result.
-if not is_compile_on_910_95():
+if not is_compile_on_910_95(_target_arch):
     pytest.skip(
         "requires a detected Ascend 910_95 / 950 toolchain; 910B4 is not a "
         "native gate-on substitute",
@@ -50,7 +53,6 @@ if not is_compile_on_910_95():
 torch = pytest.importorskip("torch")
 pytest.importorskip("torch_npu")
 
-import triton
 import triton.language as tl
 from triton.backends.ascend import compiler as ascend_compiler
 from triton.backends.ascend import driver as ascend_driver

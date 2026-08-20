@@ -18,7 +18,7 @@ import triton.language as tl
 from triton.backends.ascend.utils import is_compile_on_910_95
 
 pytestmark = pytest.mark.skipif(
-    not is_compile_on_910_95(),
+    not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
     reason="Row pure-SIMT binary validation requires an Ascend 910_95 toolchain",
 )
 

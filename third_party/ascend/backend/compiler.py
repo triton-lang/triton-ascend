@@ -1092,7 +1092,6 @@ class NPUOptions:
     backend_name: str = 'cann'
     instrumentation_mode: str = ""
     enable_graph_optimize: bool = True
-    auto_tile_and_bind_subblock: bool = True
     vf_merge_level: int = 0
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")
     deprecated_fp8_dtypes: Tuple[str] = ()

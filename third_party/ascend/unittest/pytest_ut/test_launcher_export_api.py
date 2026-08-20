@@ -98,12 +98,14 @@ def test_make_launcher_resolves_npu_utils_from_active_cache_root(
         return SimpleNamespace(
             get_aivector_core_num=lambda: 40,
             get_aicore_num=lambda: 20,
-            npu_utils_mod=SimpleNamespace(__file__=f"{cache_root}/{cache_key}/npu_utils.so"),
+            get_so_path=lambda: f"{cache_root}/{cache_key}/npu_utils.so",
         )
 
     producer_utils = make_utils("/producer/cache")
     consumer_utils = make_utils("/consumer/cache")
-    mock_npu_utils.side_effect = [producer_utils, consumer_utils]
+    # make_launcher currently reads NPUUtils once for core counts and once for
+    # the shared-object path.
+    mock_npu_utils.side_effect = [producer_utils, producer_utils, consumer_utils, consumer_utils]
 
     producer_src = driver.make_launcher(
         constants={},

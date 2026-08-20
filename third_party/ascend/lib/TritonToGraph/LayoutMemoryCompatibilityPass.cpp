@@ -49,10 +49,9 @@ namespace cfg {
 namespace {
 
 static void emitAppliedGraphOptimizationRule(GraphOptimizationRuleId rule) {
-  LLVM_DEBUG(llvm::dbgs()
-             << "[" DEBUG_TYPE "] applied graph optimization rule "
-             << static_cast<unsigned>(rule) << " ("
-             << getGraphOptimizationRuleName(rule) << ")\n");
+  LLVM_DEBUG(llvm::dbgs() << "[" DEBUG_TYPE "] applied graph optimization rule "
+                          << static_cast<unsigned>(rule) << " ("
+                          << getGraphOptimizationRuleName(rule) << ")\n");
 }
 
 static std::size_t countStridedLoadStoreRewrites(ModuleOp moduleOp) {
@@ -110,8 +109,7 @@ public:
     bool emitStridedLoadStoreMatch = false;
     LLVM_DEBUG(emitStridedLoadStoreMatch = true;);
     const std::size_t stridedLoadStoreRewritesBefore =
-        emitStridedLoadStoreMatch ? countStridedLoadStoreRewrites(moduleOp)
-                                   : 0;
+        emitStridedLoadStoreMatch ? countStridedLoadStoreRewrites(moduleOp) : 0;
     RewritePatternSet patterns(&getContext());
     patterns.add<StridedLoadStoreRewrite::LoadConverter,
                  StridedLoadStoreRewrite::StoreConverter>(
@@ -120,9 +118,8 @@ public:
       signalPassFailure();
       return;
     }
-    if (emitStridedLoadStoreMatch &&
-        countStridedLoadStoreRewrites(moduleOp) >
-            stridedLoadStoreRewritesBefore)
+    if (emitStridedLoadStoreMatch && countStridedLoadStoreRewrites(moduleOp) >
+                                         stridedLoadStoreRewritesBefore)
       emitAppliedGraphOptimizationRule(
           GraphOptimizationRuleId::StridedLoadStoreRewrite);
 

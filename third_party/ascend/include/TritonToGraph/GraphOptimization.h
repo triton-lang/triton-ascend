@@ -58,7 +58,8 @@ enum class GraphOptimizationRuleId : uint16_t {
   StridedLoadStoreRewrite = 64,
 };
 
-constexpr const char *getGraphOptimizationRuleName(GraphOptimizationRuleId rule) {
+constexpr const char *
+getGraphOptimizationRuleName(GraphOptimizationRuleId rule) {
   switch (rule) {
   case GraphOptimizationRuleId::LoadStoreTranspose:
     return "LoadStoreTranspose";

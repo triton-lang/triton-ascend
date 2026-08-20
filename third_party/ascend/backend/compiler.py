@@ -558,7 +558,7 @@ def try_compile_with_config(linalg: str, ub_config: Dict[str, Any], metadata: di
 def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_file_name = "kernel.mlir" if opt.use_bytecode else "kernel.ttadapter.mlir"
+        tmp_file_name = "kernel.mlir"
         ttadapter_path = os.path.join(tmpdir, tmp_file_name)
         Path(ttadapter_path).write_text(linalg)
         bin_file = os.path.join(tmpdir, "kernel")
@@ -759,7 +759,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
 def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_file_name = "kernel.mlir" if opt.use_bytecode else "kernel.ttadapter.mlir"
+        tmp_file_name = "kernel.mlir"
         ttadapter_path = os.path.join(tmpdir, tmp_file_name)
         Path(ttadapter_path).write_text(linalg)
         bin_file = os.path.join(tmpdir, "kernel")
@@ -1025,15 +1025,6 @@ class NPUOptions:
     # When compile_mode is provided, it automatically sets other fields
     compile_mode: str = "unstructured_in_simt"
     simt_stack_limit: int = None
-    # use_bytecode:
-    # If True, the compilation flow is:
-    #   Linalg IR → MLIR Bytecode (via triton-mlir-opt)
-    #            → LLIR (via bishengir-opt)
-    #            → Binary (via bishengir-compile)
-    #
-    # If False, the compilation flow is:
-    #   Linalg IR → LLIR → Binary (via bishengir-compile directly)
-    use_bytecode: bool = True
     # take effect on the reorder instruction pattern for SIMT. The pattern is disabled by default.
     enable_simt_reorder_instruction: bool = False
     enable_costmodel_backend: bool = False
@@ -1112,6 +1103,7 @@ _REMOVED_NPU_COMPILE_OPTIONS = frozenset({
     "ops_reorder",
     "storage_align",
     "mix_mode",
+    "use_bytecode",
 })
 
 def ttir_to_npubin(mod, metadata, opt):
@@ -1219,7 +1211,7 @@ class AscendBackend(BaseBackend):
         super().__init__(target)
         if target.backend == "npu":
             self.binary_ext = "npubin"
-            # Include all binary file extensions (mlirbc is used in bytecode mode)
+            # Include all binary file extensions (mlirbc is always emitted for normal kernels).
             self.binary_extensions = {"npubin", "mlirbc"}
 
     def parse_options(self, opts) -> Any:
@@ -1240,13 +1232,10 @@ class AscendBackend(BaseBackend):
             normalized_opts = opts if internal_options else _remove_deprecated_npu_options(opts, in_place=True)
             args = {k: normalized_opts[k] for k in option_names if k in normalized_opts}
             options = NPUOptions(arch=self.target.arch, **args)
-            # Lazy init enable_dynamic_cv_pipeline if not provided
+            # Lazy init enable_dynamic_cv_pipeline if not provided.
+            # compile_on_910_95 is already resolved from the requested target.
             if options.enable_dynamic_cv_pipeline is None:
                 object.__setattr__(options, "enable_dynamic_cv_pipeline", options.compile_on_910_95)
-            # Costmodel path should avoid extra BC<->MLIR conversion stages
-            # to keep compile-only autotune routing lightweight and stable.
-            if getattr(options, "enable_costmodel_backend", False):
-                object.__setattr__(options, "use_bytecode", False)
         else:
             raise NotImplementedError(f"Backend '{self.target.backend}' is not supported. "
                                       "Please ensure the target backend is set to 'npu'.")
@@ -1294,12 +1283,9 @@ class AscendBackend(BaseBackend):
                 stages["npubin"] = (lambda src, metadata: ttir_to_npubin(src, metadata, options))
                 return
             stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options, named_ops=True)
-            # Support BC mode: convert Linalg IR to Bytecode format, then back to MLIR
-            if options.use_bytecode:
-                # Step 1: Convert Linalg IR to Bytecode using triton-mlir-opt
-                stages["mlirbc"] = lambda src, metadata: linalg_to_bc_by_triton_mlir_opt(src, metadata, options)
-                # Step 2: Convert Bytecode back to MLIR text using bishengir-opt
-                stages["bcmlir"] = lambda src, metadata: bc_to_linalg_by_bishengir_opt(src, metadata, options)
+            # Normal kernels always convert Linalg IR to bytecode and back to MLIR text.
+            stages["mlirbc"] = lambda src, metadata: linalg_to_bc_by_triton_mlir_opt(src, metadata, options)
+            stages["bcmlir"] = lambda src, metadata: bc_to_linalg_by_bishengir_opt(src, metadata, options)
             if options.compile_on_910_95:
                 stages["npubin"] = (
                     lambda src, metadata: linalg_to_bin_enable_npu_compile_910_95(src, metadata, options))

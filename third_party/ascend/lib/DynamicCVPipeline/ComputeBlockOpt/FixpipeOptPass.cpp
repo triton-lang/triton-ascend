@@ -25,6 +25,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <optional>
 
+#include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -482,6 +483,15 @@ void FixpipeOptPass::runOnOperation() {
   */
   auto bmOriginal = CVPipeline::ComputeBlockIdManager(module);
   for (auto &matchedOps : allMatchedPatterns) {
+    if (matchedOps.empty()) {
+      continue;
+    }
+    CVPipeline::SplitIf::ScalarClosure closure{matchedOps.front()->getBlock(),
+                                               matchedOps.getArrayRef(), false};
+    closure.collect();
+    for (auto op : closure.scalarOps) {
+      matchedOps.insert(op);
+    }
     CVPipeline::cloneScalarOpsForCrossBlockUses(bmOriginal, matchedOps);
   }
 

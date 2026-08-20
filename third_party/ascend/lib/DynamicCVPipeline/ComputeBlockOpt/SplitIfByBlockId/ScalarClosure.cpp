@@ -39,7 +39,7 @@ void ScalarClosure::collectScalarClosure(Value val) {
   auto *defBlock = defOp->getBlock();
   if (!defBlock || (defBlock != block &&
                     // to prevent memref dependencies in main loop
-                    defBlock != parentBlock)) {
+                    (!includeParent || defBlock != parentBlock))) {
     return;
   }
 
@@ -72,8 +72,9 @@ ScalarClosure::ScalarClosure(BlockGroup &group, ArrayRef<Operation *> ops)
   parentBlock = parentOp->getBlock();
 }
 
-ScalarClosure::ScalarClosure(Block *block, ArrayRef<Operation *> ops)
-    : block(block), ops(ops) {
+ScalarClosure::ScalarClosure(Block *block, ArrayRef<Operation *> ops,
+                             bool includeParent)
+    : block(block), ops(ops), includeParent(includeParent) {
   if (!block)
     return;
   Operation *parentOp = block->getParentOp();

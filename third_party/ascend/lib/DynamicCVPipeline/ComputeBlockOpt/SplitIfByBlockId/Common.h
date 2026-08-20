@@ -50,6 +50,7 @@ class ScalarClosure {
 private:
   mlir::Block *block = nullptr;
   mlir::Block *parentBlock = nullptr;
+  bool includeParent = true;
   llvm::ArrayRef<Operation *> ops;
 
   void collectScalarClosure(Value val);
@@ -59,7 +60,7 @@ public:
   static constexpr size_t kExpectedMaxScalarOps = 4;
   llvm::SmallPtrSet<Operation *, kExpectedMaxScalarOps> scalarOps;
   ScalarClosure(BlockGroup &group, ArrayRef<Operation *> ops);
-  ScalarClosure(Block *block, ArrayRef<Operation *> ops);
+  ScalarClosure(Block *block, ArrayRef<Operation *> ops, bool includeParent);
   void collect();
 
   // Safety: both operations must be in scalarOps

@@ -33,8 +33,8 @@ from triton.runtime.cache import get_cache_manager, get_dump_manager
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
 from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int,
-                                          _is_auto_map_parallel_blocks_enabled, get_ascend_arch_from_env,
-                                          is_ffts_supported, force_disable_ffts, get_backend_func,
+                                          _is_auto_map_parallel_blocks_enabled, is_ffts_supported,
+                                          force_disable_ffts, get_backend_func,
                                           _warn_deprecated_ascend_env_var)
 # Bind the already-imported utils module once so the launch hot path can write
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
@@ -70,8 +70,6 @@ class NPUUtils(object):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self.npu_utils_mod = mod
-        # setup for remote run
-        env_arch = get_ascend_arch_from_env()
 
     def load_binary(self, name, kernel, shared, device, mix_mode):
         return self.npu_utils_mod.load_kernel_binary(name, kernel, shared, device, mix_mode)
@@ -256,13 +254,8 @@ class NPUDriver(DriverBase):
         return ty_to_cpp(ty)
 
     def get_current_target(self):
-        import torch
         backend = "npu"
-        env_target = get_ascend_arch_from_env()
-        if env_target:
-            arch = env_target
-        else:
-            arch = self.utils.get_arch()
+        arch = self.utils.get_arch()
         warp_size = 0
         return GPUTarget(backend, arch, warp_size)
 
@@ -863,7 +856,7 @@ def make_launcher(constants, signature, metadata):
     # TODO: automatically check if gather load ops are used.
 
     arch = metadata.target.arch
-    target_support_ffts = is_ffts_supported(arch) and (not force_disable_ffts())
+    target_support_ffts = is_ffts_supported(arch) and (not force_disable_ffts(arch))
     enable_device_print = os.getenv("TRITON_DEVICE_PRINT", 'false').lower() in ('true', '1')
     enable_taskqueue = os.getenv("TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
     enable_grid_warn_print = os.getenv("TRITON_GRID_WARN_PRINT", 'false').lower() in ('true', '1')

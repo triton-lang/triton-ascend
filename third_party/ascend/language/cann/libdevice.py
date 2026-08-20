@@ -22,7 +22,7 @@ from math import pi as math_pi
 from triton.language import core, math, semantic, standard
 from triton._C.libtriton import ir
 from triton.runtime.jit import jit
-from triton.backends.ascend.utils import get_ascend_arch_from_env, is_compile_on_910_95, triton_enable_libdevice_simt
+from triton.backends.ascend.utils import is_compile_on_910_95, triton_enable_libdevice_simt
 
 
 class _FlipStaticRange:

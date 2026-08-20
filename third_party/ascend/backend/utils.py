@@ -691,32 +691,23 @@ def graph_ub_budget_bytes_for_arch(arch: str) -> int:
 
 
 def is_ffts_supported(arch: str):
-    '''
-    Cases:
-    - empty str: User does not specify arch, thus it runs on 910B/910D both of which support ffts. Return True.
-    - Ascend310B4: 310B4 does not support ffts. Return False.
-    - Ascend910_95*: 910_95 does not support ffts. Return False.
-    - Other arch: 910B/910D supports ffts. Return True.
-    '''
-    if is_compile_on_910_95():
+    """Return whether the specified compilation target supports FFTS."""
+    if not isinstance(arch, str) or not arch:
         return False
-    if arch in ["Ascend910A", "Ascend310B4"]:
+    if arch.startswith("Ascend910_95") or arch in ["Ascend910A", "Ascend310B4"]:
         return False
     return True
 
 
-def force_disable_ffts():
-    '''
-    '''
-    if is_compile_on_910_95():
+def force_disable_ffts(arch: str = None):
+    """Disable FFTS for an A5 compilation target; ignore the old environment switch."""
+    if arch is not None:
+        if isinstance(arch, str) and arch.startswith("Ascend910_95"):
+            return True
+    elif is_compile_on_910_95():
         return True
     _warn_deprecated_ascend_env_var("TRITON_DISABLE_FFTS")
     return False
-
-
-def triton_support_ffts():
-    arch = get_ascend_arch_from_env()
-    return is_ffts_supported(arch) and (not force_disable_ffts())
 
 
 def triton_enable_libdevice_simt():

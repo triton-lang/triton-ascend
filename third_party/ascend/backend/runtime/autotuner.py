@@ -2265,6 +2265,8 @@ class AutoTilingTuner(Autotuner):
                     *args,
                     **current,
                 )
+                if isinstance(res, tuple):
+                    res = res[0]
                 packed_metadata = getattr(res, "packed_metadata", None)
                 if isinstance(packed_metadata, dict):
                     kernel_call.target_kernel_name = packed_metadata.get("kernel_name")

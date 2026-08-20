@@ -213,7 +213,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         Path(src_path).write_text(ttir_code)
         triton_adapter_opt_path = _get_triton_adapter_opt_path()
 
-        enable_nd2nz_on_vector = metadata["enable_nd2nz_on_vector"]
         # Select analysis is a fixed lowering policy, not a user compile option.
         enable_select_analysis = True
         compile_on_910_95 = metadata["compile_on_910_95"]
@@ -247,7 +246,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         ascend.passes.ttir.add_triton_to_llvm(pm)
         ascend.passes.ttir.add_bubble_up_operation(pm)
         ascend.passes.ttir.add_triton_to_structure(pm, False, False)
-        ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, enable_nd2nz_on_vector, enable_select_analysis,
+        ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, enable_select_analysis,
                                                 compile_on_910_95)
         # Restricted to 910_95/950. The merged buffer is written by two disjoint
         # memref.copy ops, and on 910_9362 the generated code only makes the
@@ -992,7 +991,6 @@ class NPUOptions:
     # Internal lowering selector derived from the explicit GPUTarget.arch.
     compile_on_910_95: bool = field(init=False, repr=False)
     enable_warp_specialization: bool = False
-    enable_nd2nz_on_vector: bool = False
     enable_persistent: bool = False
     optimize_epilogue: bool = False
     enable_fp_fusion: bool = True

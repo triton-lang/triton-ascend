@@ -34,7 +34,6 @@ FAKE_PIPELINE = "builtin.module(some-pass,another-pass)"
 
 def _make_metadata():
     return {
-        "enable_nd2nz_on_vector": False,
         "compile_on_910_95": False,
         "force_simt_template": False,
         "enable_sync_block_lock": False,

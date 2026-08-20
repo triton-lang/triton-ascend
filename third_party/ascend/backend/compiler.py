@@ -690,11 +690,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--enable-mixed-cv={enable_mixed_cv}"]
 
-        enable_cce_vf_remove_membar = metadata["enable_cce_vf_remove_membar"]
-        if enable_cce_vf_remove_membar is not None:
-            _compile_option_list += \
-                [f"--append-bisheng-options=-mllvm --cce-vf-remove-membar={enable_cce_vf_remove_membar}"]
-
         enable_vf_fusion = metadata["enable_vf_fusion"]
         if enable_vf_fusion is not None:
             _compile_option_list += \
@@ -1066,7 +1061,6 @@ class NPUOptions:
     enable_hivm_auto_cv_balance: bool = None
     sync_solver: bool = None
     unit_flag: bool = None
-    enable_cce_vf_remove_membar: bool = None
     enable_drop_unit_dims: bool = None
     enable_flatten: bool = None
     enable_auto_vectorize_v2: bool = None
@@ -1189,6 +1183,7 @@ _REMOVED_NPU_COMPILE_OPTIONS = frozenset({
     "bisheng_options",
     "code_motion",
     "enable_cce_vf_auto_sync",
+    "enable_cce_vf_remove_membar",
     "ops_reorder",
     "storage_align",
 })

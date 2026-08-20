@@ -258,7 +258,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         if metadata["enable_dynamic_cv_pipeline"]:
             metadata["set_workspace_multibuffer"] = 0
             metadata["enable_mixed_cv"] = True
-            ascend.passes.ttir.set_enable_cube_block_merge(metadata["enable_cube_block_merge"])
+            # Keep the existing default-off lowering behavior after removing
+            # the public compile option.
+            ascend.passes.ttir.set_enable_cube_block_merge(False)
             ascend.passes.ttir.set_enable_ub_refine_opt(mod, metadata["enable_ub_refine_opt"])
 
             # Must run before add_dynamic_cv_pipeline because the driven
@@ -1023,10 +1025,6 @@ class NPUOptions:
     tile_mix_cube_loop: int = None
     enable_mixed_cv: bool = None
     enable_dynamic_cv_pipeline: bool = None
-    # Gates the cube-loader penetration + cube-for block merge feature. Off by
-    # default so existing scenarios are unaffected; opt in per kernel to fuse a
-    # matmul's loader for-loop into the matmul's cube compute block.
-    enable_cube_block_merge: bool = False
     enable_ub_refine_opt: bool = False
     # Multi-cache insertion optimization: avoid redundant tensor compute in the middle of an `if`.
     enable_buffer_insert_optimization: bool = True

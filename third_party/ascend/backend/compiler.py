@@ -1006,7 +1006,6 @@ class NPUOptions:
 
     # plan memory strategy: "default" (default) or "largest-first"
     plan_memory_strategy: str = None
-    stream: int = None
     parallel_mode: str = "simd"
     force_simt_only: bool = False
     force_simt_template: bool = False
@@ -1098,6 +1097,7 @@ _REMOVED_NPU_COMPILE_OPTIONS = frozenset({
     "storage_align",
     "mix_mode",
     "use_bytecode",
+    "stream",
 })
 
 def ttir_to_npubin(mod, metadata, opt):

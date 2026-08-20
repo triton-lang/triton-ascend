@@ -21,7 +21,6 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
-#include "DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfoLegacy.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CloneOps.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CreateIfOps.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
@@ -126,18 +125,8 @@ void AddControlFlowConditionPass::runOnOperation() {
     }
   }
 
-  std::unique_ptr<Pass> updatePass;
-
-  if (useLegacyConditions) {
-    auto pass = std::make_unique<UpdateConditionInfoPassLegacy>();
-    pass->setConditionInfo(&info);
-    updatePass = std::move(pass);
-  } else {
-    auto pass = std::make_unique<UpdateConditionInfoPass>();
-    pass->setConditionInfo(&info);
-    updatePass = std::move(pass);
-  }
-
+  auto updatePass = std::make_unique<UpdateConditionInfoPass>();
+  updatePass->setConditionInfo(&info);
   pm.addPass(std::move(updatePass));
 
   // Step6: Update for loop iteration times based on intraCoreDependentMap

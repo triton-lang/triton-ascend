@@ -75,10 +75,9 @@ def test_make_launcher_exposes_triton_launch_kernel(
 
     assert 'void triton_launch_kernel(' in src
     assert 'const void* const* kernel_args, const size_t* arg_sizes, int num_args' in src
-    assert 'std::vector<std::vector<char>> copied_kernel_args;' not in src
-    assert 'static thread_local std::vector<char> launch_args;' in src
+    assert 'std::vector<std::vector<char>> copied_kernel_args;' in src
     assert 'std::vector<size_t> launch_arg_sizes;' in src
-    assert 'launch_args.assign(total_size, 0);' in src
+    assert 'std::vector<char> launch_args(total_size, 0);' in src
     assert 'memcpy(launch_args.data() + grid_offset, &gridX, sizeof(int32_t));' in src
 
 
@@ -486,8 +485,7 @@ def test_argument_packing_differs_between_launch_paths(
 
     c_abi_launch, cpp_launch = _split_launch_functions(src)
 
-    assert "static thread_local std::vector<char> launch_args;" in c_abi_launch
-    assert "launch_args.assign(total_size, 0);" in c_abi_launch
+    assert "std::vector<char> launch_args(total_size, 0);" in c_abi_launch
     assert "reserve_slot" in c_abi_launch
 
     assert "struct __attribute__((packed))" in cpp_launch

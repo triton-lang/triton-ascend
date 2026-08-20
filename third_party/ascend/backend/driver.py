@@ -672,17 +672,17 @@ def make_launcher(constants, signature, metadata):
          lockOffset += syncBlockLockStrideI64) {{
       lockInitData[lockOffset] = syncBlockLockParticipantNum;
     }}
-    ret = rtMemcpy(syncBlockLock_ptr, syncBlockLockSize,
+    ret = aclrtMemcpy(syncBlockLock_ptr, syncBlockLockSize,
                    reinterpret_cast<void *>(lockInitData.data()),
-                   syncBlockLockSize, RT_MEMCPY_HOST_TO_DEVICE);"""
+                   syncBlockLockSize, ACL_MEMCPY_HOST_TO_DEVICE);"""
     elif lock_init_value == 0:
-        lock_init_stmt = ("ret = rtMemsetAsync(syncBlockLock_ptr, syncBlockLockSize, 0, "
+        lock_init_stmt = ("ret = aclrtMemsetAsync(syncBlockLock_ptr, syncBlockLockSize, 0, "
                           "syncBlockLockSize, stream);")
     else:
         lock_init_stmt = (f"std::vector<int64_t> lockInitData({lock_num}, {lock_init_value});\n"
-                          "    ret = rtMemcpy(syncBlockLock_ptr, syncBlockLockSize, "
+                          "    ret = aclrtMemcpy(syncBlockLock_ptr, syncBlockLockSize, "
                           "reinterpret_cast<void *>(lockInitData.data()), syncBlockLockSize, "
-                          "RT_MEMCPY_HOST_TO_DEVICE);")
+                          "ACL_MEMCPY_HOST_TO_DEVICE);")
     bs_task_type = metadata.bs_task_type if hasattr(metadata, 'bs_task_type') else 0
     mix_mode = metadata.mix_mode
     compile_on_910_95 = metadata.compile_on_910_95
@@ -1212,13 +1212,14 @@ void triton_launch_kernel(const char* kernelName, aclrtFuncHandle func, aclrtStr
     return;
   }}
   std::vector<size_t> launch_arg_sizes;
-  launch_arg_sizes.assign(arg_sizes, arg_sizes + num_args);
-  // NOTE: We deliberately do not copy kernel_args into a separate buffer here.
-  // triton_async_launch() invokes the launch_call synchronously on the caller
-  // thread (see npu_utils.cpp triton_async_launch -> OpCommand::Run), so the
-  // caller-provided kernel_args/arg_sizes memory remains valid for the entire
-  // lifetime of launch_call. Avoiding the per-arg vector<vector<char>> copy
-  // removes num_args heap allocations per launch.
+  launch_arg_sizes.reserve(num_args);
+  std::vector<std::vector<char>> copied_kernel_args;
+  copied_kernel_args.reserve(num_args);
+  for (int arg_idx = 0; arg_idx < num_args; ++arg_idx) {{
+    launch_arg_sizes.push_back(arg_sizes[arg_idx]);
+    copied_kernel_args.emplace_back(arg_sizes[arg_idx]);
+    memcpy(copied_kernel_args.back().data(), kernel_args[arg_idx], arg_sizes[arg_idx]);
+  }}
 
   // Only 1D parallelization is supported for NPU.
   // Pointer type becomes flattened 1-D Memref tuple: base_ptr, data_ptr,
@@ -1252,8 +1253,7 @@ void triton_launch_kernel(const char* kernelName, aclrtFuncHandle func, aclrtStr
     {'size_t dtdata_offset = reserve_slot(sizeof(void*), 8);' if enable_device_print else ''}
     size_t total_size = args_offset;
 
-    static thread_local std::vector<char> launch_args;
-    launch_args.assign(total_size, 0);
+    std::vector<char> launch_args(total_size, 0);
     {'memcpy(launch_args.data() + ffts_offset, &ffts_addr, sizeof(void*));' if target_support_ffts else ''}
     {f'memcpy(launch_args.data() + sync_block_lock_offset, &syncBlockLock_ptr, sizeof(void*));' if not metadata.force_simt_only else ''}
     {f'memcpy(launch_args.data() + workspace_offset, &workspace_addr_ptr, sizeof(void*));' if not metadata.force_simt_only else ''}
@@ -1261,7 +1261,7 @@ void triton_launch_kernel(const char* kernelName, aclrtFuncHandle func, aclrtStr
     for (int arg_idx = 0; arg_idx < num_args; ++arg_idx) {{
       size_t alignment = launch_arg_sizes[arg_idx] >= 8 ? 8 : (launch_arg_sizes[arg_idx] >= 4 ? 4 : 1);
       kernel_arg_offset = _align_launch_offset(kernel_arg_offset, alignment);
-      memcpy(launch_args.data() + kernel_arg_offset, kernel_args[arg_idx], launch_arg_sizes[arg_idx]);
+      memcpy(launch_args.data() + kernel_arg_offset, copied_kernel_args[arg_idx].data(), launch_arg_sizes[arg_idx]);
       kernel_arg_offset += launch_arg_sizes[arg_idx];
     }}
     memcpy(launch_args.data() + grid_offset, &gridX, sizeof(int32_t));

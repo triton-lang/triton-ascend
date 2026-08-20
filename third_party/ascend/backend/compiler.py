@@ -196,15 +196,13 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
     # Get Triton-MLIR as string
     ttir_code = str(mod)
     auto_map_parallel_blocks_enabled = _is_auto_map_parallel_blocks_enabled()
-    blacklist_reasons = []
-    has_auto_blockify_blacklist_op = metadata.get("has_auto_blockify_blacklist_op")
-    if has_auto_blockify_blacklist_op is None and auto_map_parallel_blocks_enabled:
-        blacklist_reasons = _get_auto_blockify_blacklist_reasons(ttir_code)
-        has_auto_blockify_blacklist_op = bool(blacklist_reasons)
-    elif has_auto_blockify_blacklist_op is None:
-        has_auto_blockify_blacklist_op = False
+    # This is compiler-derived safety metadata, never a user compile option.
+    # Derive it even when the feature is currently disabled so a later runtime
+    # environment change cannot enable AutoBlockify for unsafe TTIR.
+    blacklist_reasons = _get_auto_blockify_blacklist_reasons(ttir_code)
+    has_auto_blockify_blacklist_op = bool(blacklist_reasons)
     metadata["has_auto_blockify_blacklist_op"] = has_auto_blockify_blacklist_op
-    if has_auto_blockify_blacklist_op and blacklist_reasons:
+    if auto_map_parallel_blocks_enabled and has_auto_blockify_blacklist_op and blacklist_reasons:
         kernel_name = re.search(r"tt\.func\spublic\s+@(\w+)", ttir_code).group(1)
         _warn_auto_blockify_disabled(kernel_name or "<unknown>", blacklist_reasons)
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -489,13 +487,9 @@ def _parse_ttir_metadata(ttir: str, metadata: dict):
     metadata["mix_mode"] = "aiv"
     metadata["kernel_name"] = re.search(KERNEL_NAME_REGEX, ttir).group(1)
     metadata["name"] = metadata["kernel_name"]
-    auto_map_parallel_blocks_enabled = _is_auto_map_parallel_blocks_enabled()
-    has_auto_blockify_blacklist_op = metadata.get("has_auto_blockify_blacklist_op")
-    if has_auto_blockify_blacklist_op is None and auto_map_parallel_blocks_enabled:
-        has_auto_blockify_blacklist_op = bool(_get_auto_blockify_blacklist_reasons(ttir))
-    elif has_auto_blockify_blacklist_op is None:
-        has_auto_blockify_blacklist_op = False
-    metadata["has_auto_blockify_blacklist_op"] = has_auto_blockify_blacklist_op
+    # Keep this as compiler-derived safety metadata.  In particular, do not
+    # trust a caller-provided False value to override an unsafe TTIR pattern.
+    metadata["has_auto_blockify_blacklist_op"] = bool(_get_auto_blockify_blacklist_reasons(ttir))
     # Parse all tensor kinds from arguments
     metadata["tensor_kinds"] = [int(kind) for _, kind in re.findall(TENSOR_KIND_REGEX, ttir)]
     return metadata
@@ -1016,7 +1010,6 @@ class NPUOptions:
     tile_mix_cube_loop: int = None
     enable_mixed_cv: bool = None
     enable_dynamic_cv_pipeline: bool = None
-    has_auto_blockify_blacklist_op: Optional[bool] = None
     intra_cache_num: int = None
     inter_cache_num: int = None
     load_cache_num: int = None

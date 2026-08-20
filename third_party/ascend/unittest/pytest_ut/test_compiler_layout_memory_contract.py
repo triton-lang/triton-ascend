@@ -611,7 +611,6 @@ def test_make_ttir_forwards_normalized_graph_ub_budget(compiler_module, monkeypa
     assert events[-1] == "run_row"
 
 
-@pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
 def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
     """Keep the env-and-safety-only pure-SIMT auto-blockify argv contract."""
     common_options = ["--common-before-pure-simt", "--common-after-pure-simt"]

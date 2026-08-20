@@ -138,17 +138,23 @@ def _load_compiler_closure(source):
 
 
 def test_895_compiler_closure_ast_is_identical_outside_row_migration(source_pairs):
-    """Keep compiler helpers unchanged outside the intentional Row migration."""
+    """Keep unrelated helpers stable and derive the block blacklist internally."""
 
     baseline_source, target_source = source_pairs["compiler"]
     for name in (
             "_get_then_remove_rc",
-            "_parse_ttir_metadata",
             "get_common_bishengir_compile_options",
     ):
         baseline = _normalised_function_ast(baseline_source, name)
         target = _normalised_function_ast(target_source, name)
         assert target == baseline, name
+
+    baseline_metadata = _normalised_function_ast(baseline_source, "_parse_ttir_metadata")
+    target_metadata = _normalised_function_ast(target_source, "_parse_ttir_metadata")
+    assert target_metadata != baseline_metadata
+    assert "_get_auto_blockify_blacklist_reasons" in target_metadata
+    assert "attr='get'" in baseline_metadata
+    assert "attr='get'" not in target_metadata
 
 
 class _FakeIrModule:

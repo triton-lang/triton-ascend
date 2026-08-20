@@ -497,7 +497,7 @@ def _warn_auto_blockify_disabled(kernel_name: str, blacklist_reasons) -> None:
     reasons = ", ".join(blacklist_reasons)
     print(f"[WARNING] AutoBlockify disabled for kernel '{kernel_name}'. "
           f"Unsafe ops: {reasons}. Enabling may cause correctness issues. "
-          "To force enable: set has_auto_blockify_blacklist_op=False.")
+          "The compiler keeps AutoBlockify disabled for this kernel.")
 
 
 def _enable_print_ub_bits() -> bool:

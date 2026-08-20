@@ -1006,7 +1006,9 @@ class NPUOptions:
 
     # plan memory strategy: "default" (default) or "largest-first"
     plan_memory_strategy: str = None
-    parallel_mode: str = "simd"
+    # Internal launch metadata.  The mode is initially derived from
+    # compile_mode, then replaced with the mode emitted by TritonToLinalg.
+    parallel_mode: str = field(default="simd", init=False)
     force_simt_only: bool = False
     force_simt_template: bool = False
     # only take effect on the simt-only & simd-simt-mix scenarios
@@ -1094,6 +1096,7 @@ _REMOVED_NPU_COMPILE_OPTIONS = frozenset({
     "disable_auto_inject_block_sync",
     "enable_select_analysis",
     "ops_reorder",
+    "parallel_mode",
     "storage_align",
     "mix_mode",
     "use_bytecode",

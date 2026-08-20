@@ -695,11 +695,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--enable-vf-fusion={enable_vf_fusion}"]
 
-        enable_drop_unit_dims = metadata["enable_drop_unit_dims"]
-        if enable_drop_unit_dims is not None:
-            _compile_option_list += \
-                [f"--enable-drop-unit-dims={enable_drop_unit_dims}"]
-
         enable_flatten = metadata["enable_flatten"]
         if enable_flatten is not None:
             _compile_option_list += \
@@ -882,11 +877,6 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--enable-hivm-unit-flag-sync={unit_flag}"]
 
-        enable_drop_unit_dims = metadata["enable_drop_unit_dims"]
-        if enable_drop_unit_dims is not None:
-            _compile_option_list += \
-                [f"--enable-drop-unit-dims={enable_drop_unit_dims}"]
-
         enable_flatten = metadata["enable_flatten"]
         if enable_flatten is not None:
             _compile_option_list += \
@@ -1061,7 +1051,6 @@ class NPUOptions:
     enable_hivm_auto_cv_balance: bool = None
     sync_solver: bool = None
     unit_flag: bool = None
-    enable_drop_unit_dims: bool = None
     enable_flatten: bool = None
     enable_auto_vectorize_v2: bool = None
     auto_vectorize_v2_max_fused_ops_num: int = None
@@ -1184,6 +1173,7 @@ _REMOVED_NPU_COMPILE_OPTIONS = frozenset({
     "code_motion",
     "enable_cce_vf_auto_sync",
     "enable_cce_vf_remove_membar",
+    "enable_drop_unit_dims",
     "ops_reorder",
     "storage_align",
 })

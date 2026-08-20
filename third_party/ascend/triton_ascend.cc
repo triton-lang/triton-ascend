@@ -142,7 +142,7 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
       "add_graph_optimize",
       [](mlir::PassManager &pm, std::uint64_t ruleMask,
          std::uint64_t maxRewritesPerFunction, std::uint64_t ubCapacityBytes,
-         bool emitRemarks, bool forceSimtOnly) {
+         bool forceSimtOnly) {
         if (ruleMask > std::numeric_limits<std::uint16_t>::max())
           throw py::value_error("rule_mask must fit in uint16_t");
         if (maxRewritesPerFunction > std::numeric_limits<unsigned>::max())
@@ -156,14 +156,12 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
         options.maxRewritesPerFunction =
             static_cast<unsigned>(maxRewritesPerFunction);
         options.ubCapacityBytes = static_cast<unsigned>(ubCapacityBytes);
-        options.emitRemarks = emitRemarks;
         options.forceSimtOnly = forceSimtOnly;
         pm.addPass(mlir::triton::cfg::createGraphOptimizePass(options));
       },
       py::arg("pm"), py::arg("rule_mask") = 511,
       py::arg("max_rewrites_per_function") = 64,
-      py::arg("ub_capacity_bytes") = 0, py::arg("emit_remarks") = false,
-      py::arg("force_simt_only") = false);
+      py::arg("ub_capacity_bytes") = 0, py::arg("force_simt_only") = false);
 
   m.def("set_buffer_count", [](mlir::ModuleOp &module, const std::string &type,
                                int count) {

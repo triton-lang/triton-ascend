@@ -91,6 +91,7 @@ def compiler_module():
     module_name = "triton.backends.ascend.compiler_layout_memory_contract_under_test"
     utils_name = "triton.backends.ascend.utils"
     driver_name = "triton.backends.ascend.driver"
+    debug_line_rewriter_name = "triton.backends.ascend.debug_line_rewriter"
     cache_name = "triton.runtime.cache"
 
     def return_false(*_args, **_kwargs):
@@ -134,6 +135,9 @@ def compiler_module():
     driver_stub = types.ModuleType(driver_name)
     driver_stub.NPUUtils = UnusedNPUUtils
 
+    debug_line_rewriter_stub = types.ModuleType(debug_line_rewriter_name)
+    debug_line_rewriter_stub.rewrite_debug_line = lambda artifact, **_kwargs: artifact
+
     cache_stub = types.ModuleType(cache_name)
     cache_stub._base32 = lambda value: str(value)
     cache_stub.get_dump_manager = lambda *_args, **_kwargs: SimpleNamespace(cache_dir="", put=lambda *_args, **_kwargs:
@@ -141,9 +145,11 @@ def compiler_module():
 
     previous_utils = sys.modules.get(utils_name)
     previous_driver = sys.modules.get(driver_name)
+    previous_debug_line_rewriter = sys.modules.get(debug_line_rewriter_name)
     previous_cache = sys.modules.get(cache_name)
     sys.modules[utils_name] = utils_stub
     sys.modules[driver_name] = driver_stub
+    sys.modules[debug_line_rewriter_name] = debug_line_rewriter_stub
     sys.modules[cache_name] = cache_stub
     sys.modules.pop(module_name, None)
     try:
@@ -161,6 +167,10 @@ def compiler_module():
             sys.modules.pop(driver_name, None)
         else:
             sys.modules[driver_name] = previous_driver
+        if previous_debug_line_rewriter is None:
+            sys.modules.pop(debug_line_rewriter_name, None)
+        else:
+            sys.modules[debug_line_rewriter_name] = previous_debug_line_rewriter
         if previous_cache is None:
             sys.modules.pop(cache_name, None)
         else:
@@ -530,7 +540,6 @@ def test_make_ttir_passes_force_simt_only_to_graph_optimize(compiler_module, mon
         graph_optimize_rule_mask=8,
         graph_optimize_max_rewrites_per_function=17,
         graph_optimize_ub_capacity_bytes=4096,
-        graph_optimize_emit_remarks=True,
         force_simt_only=True,
         debug=False,
     )
@@ -541,10 +550,14 @@ def test_make_ttir_passes_force_simt_only_to_graph_optimize(compiler_module, mon
         "rule_mask": 8,
         "max_rewrites_per_function": 17,
         "ub_capacity_bytes": 4096,
-        "emit_remarks": True,
         "force_simt_only": True,
     }]
     assert events[-1] == "run_row"
+
+
+def test_npu_options_do_not_expose_graph_remark_switch(compiler_module):
+    """Graph rewrite logging is controlled by LLVM DEBUG, not an NPU option."""
+    assert "graph_optimize_emit_remarks" not in compiler_module.NPUOptions.__dataclass_fields__
 
 
 @pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
@@ -564,7 +577,6 @@ def test_make_ttir_forwards_normalized_graph_ub_budget(compiler_module, monkeypa
         graph_optimize_rule_mask=8,
         graph_optimize_max_rewrites_per_function=17,
         graph_optimize_ub_capacity_bytes=requested_capacity,
-        graph_optimize_emit_remarks=True,
         force_simt_only=True,
     )
 
@@ -574,7 +586,6 @@ def test_make_ttir_forwards_normalized_graph_ub_budget(compiler_module, monkeypa
         "rule_mask": 8,
         "max_rewrites_per_function": 17,
         "ub_capacity_bytes": expected_capacity,
-        "emit_remarks": True,
         "force_simt_only": True,
     }]
     assert events[-1] == "run_row"

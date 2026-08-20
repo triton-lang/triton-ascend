@@ -58,6 +58,31 @@ enum class GraphOptimizationRuleId : uint16_t {
   StridedLoadStoreRewrite = 64,
 };
 
+constexpr const char *
+getGraphOptimizationRuleName(GraphOptimizationRuleId rule) {
+  switch (rule) {
+  case GraphOptimizationRuleId::LoadStoreTranspose:
+    return "LoadStoreTranspose";
+  case GraphOptimizationRuleId::TransposePointwiseReorder:
+    return "TransposePointwiseReorder";
+  case GraphOptimizationRuleId::StoreCoalescing:
+    return "StoreCoalescing";
+  case GraphOptimizationRuleId::RowCoalescing:
+    return "RowCoalescing";
+  case GraphOptimizationRuleId::DiagonalMaskRemoval:
+    return "DiagonalMaskRemoval";
+  case GraphOptimizationRuleId::ConvertModuloToMask:
+    return "ConvertModuloToMask";
+  case GraphOptimizationRuleId::StridedAxisCoalescing:
+    return "StridedAxisCoalescing";
+  case GraphOptimizationRuleId::ChunkCoalescing:
+    return "ChunkCoalescing";
+  case GraphOptimizationRuleId::StridedLoadStoreRewrite:
+    return "StridedLoadStoreRewrite";
+  }
+  return "Unknown";
+}
+
 constexpr uint16_t getGraphOptimizationRuleMask(GraphOptimizationRuleId rule) {
   return static_cast<uint16_t>(rule);
 }
@@ -89,7 +114,6 @@ struct GraphOptimizationOptions {
   uint16_t enabledRuleMask = kAllGraphOptimizationRuleMask;
   unsigned maxRewritesPerFunction = 64;
   unsigned ubCapacityBytes = 0;
-  bool emitRemarks = false;
   // RowCoalescing changes the launch grid and is valid only for the
   // force_simt_only compilation route.  This must be an explicit per-pass
   // option rather than inferred from later pipeline state.

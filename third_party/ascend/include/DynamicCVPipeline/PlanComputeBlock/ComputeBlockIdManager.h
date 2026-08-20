@@ -44,7 +44,7 @@ public:
                         llvm::DenseMap<Operation *, int> &indegree);
 
   llvm::LogicalResult markOpBlockId(Operation *op);
-  llvm::LogicalResult markOpsWithNewId(llvm::SmallVectorImpl<Operation *> &ops);
+  llvm::LogicalResult markOpsWithNewId(llvm::ArrayRef<Operation *> ops);
   void updateBlockId(Operation *op, int blockId);
 
   llvm::SmallVector<Operation *> getOpsByBlockId(int blockId);

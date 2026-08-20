@@ -189,12 +189,7 @@ def get_backend_func(name, *args, **kwargs):
     global backend_policy
     if backend_policy is None:
         _warn_deprecated_ascend_env_var("TRITON_BACKEND")
-        try:
-            import torch
-            import torch_npu
-            backend_policy = "torch_npu"
-        except ImportError:
-            backend_policy = "mindspore"
+        backend_policy = "torch_npu"
     return backend_strategy_registry.execute_func(backend_policy, name, *args, **kwargs)
 
 

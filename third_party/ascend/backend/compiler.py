@@ -182,7 +182,6 @@ def make_ttir(mod, metadata, opt):
     if opt.enable_graph_optimize:
         ascend.passes.ttir.add_graph_optimize(
             pm,
-            rule_mask=opt.graph_optimize_rule_mask,
             max_rewrites_per_function=opt.graph_optimize_max_rewrites_per_function,
             ub_capacity_bytes=opt.graph_optimize_ub_capacity_bytes,
             force_simt_only=opt.force_simt_only,
@@ -1095,7 +1094,6 @@ class NPUOptions:
     backend_name: str = 'cann'
     instrumentation_mode: str = ""
     enable_graph_optimize: bool = True
-    graph_optimize_rule_mask: int = 511
     graph_optimize_max_rewrites_per_function: int = 64
     graph_optimize_ub_capacity_bytes: Optional[int] = None
     allow_fp8e4nv: bool = False

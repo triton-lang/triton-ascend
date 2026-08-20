@@ -704,10 +704,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 "--enable-hfusion-compile=true",
                 "--enable-triton-kernel-compile=true",
             ]
-        mix_mode = opt.mix_mode
-        if mix_mode in ["aic"]:
-            _compile_option_list += ["--disable-hfusion-vectorize=true"]
-
         _compile_option_list += ["--mlir-print-ir-after-failure"]
         _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:
@@ -1028,7 +1024,6 @@ class NPUOptions:
     # compile_mode: "simd" (default), "unstructured_in_simt", "simt_only"
     # When compile_mode is provided, it automatically sets other fields
     compile_mode: str = "unstructured_in_simt"
-    mix_mode: str = ""
     simt_stack_limit: int = None
     # use_bytecode:
     # If True, the compilation flow is:
@@ -1113,6 +1108,7 @@ _REMOVED_NPU_COMPILE_OPTIONS = frozenset({
     "enable_select_analysis",
     "ops_reorder",
     "storage_align",
+    "mix_mode",
 })
 
 def ttir_to_npubin(mod, metadata, opt):

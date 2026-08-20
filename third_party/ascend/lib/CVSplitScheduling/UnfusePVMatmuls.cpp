@@ -25,6 +25,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/Builders.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -40,6 +41,9 @@ namespace mlir::triton::cv_split {
 // the accumulator. Unfusing makes the PV matmul independent of the accumulator.
 LogicalResult unfusePVMatmuls(Block *body, Classification &classification)
 {
+    if (!body)
+        return failure();
+
     SmallVector<linalg::MatmulOp> toUnfuse;
     for (Operation &op : *body) {
         auto matmulOp = dyn_cast<linalg::MatmulOp>(&op);
@@ -70,6 +74,7 @@ LogicalResult unfusePVMatmuls(Block *body, Classification &classification)
 
     LLVM_DEBUG(llvm::dbgs() << "[cv-split] Unfusing " << toUnfuse.size() << " PV matmuls with VECTOR outs\n");
 
+    DenseMap<Type, Value> zeroInitByType;
     for (auto matmulOp : toUnfuse) {
         OpBuilder builder(matmulOp);
         Location loc = matmulOp.getLoc();
@@ -81,12 +86,22 @@ LogicalResult unfusePVMatmuls(Block *body, Classification &classification)
             return failure();
         }
 
-        // Create zero init tensor
-        auto zeroAttr = builder.getZeroAttr(outsType.getElementType());
-        auto zeroConst = builder.create<arith::ConstantOp>(loc, outsType, DenseElementsAttr::get(outsType, zeroAttr));
+        // All unrolled PV matmuls of the same shape can share one immutable
+        // zero accumulator.  Creating one shaped constant per lane makes
+        // bufferization keep all of them live and is enough to overflow UB for
+        // BLOCK_M=128.  The manual unroll likewise uses one common zero init.
+        Value zeroInit = zeroInitByType.lookup(outsType);
+        arith::ConstantOp zeroConst = nullptr;
+        if (!zeroInit) {
+            auto zeroAttr = builder.getZeroAttr(outsType.getElementType());
+            zeroConst = builder.create<arith::ConstantOp>(loc, outsType,
+                                                          DenseElementsAttr::get(outsType, zeroAttr));
+            zeroInit = zeroConst.getResult();
+            zeroInitByType[outsType] = zeroInit;
+        }
 
         // Replace outs with zeros in the matmul
-        matmulOp.getDpsInitOperand(0)->set(zeroConst.getResult());
+        matmulOp.getDpsInitOperand(0)->set(zeroInit);
 
         // Insert arith.addf after matmul: combined = matmul_result + original_outs
         builder.setInsertionPointAfter(matmulOp);
@@ -97,9 +112,11 @@ LogicalResult unfusePVMatmuls(Block *body, Classification &classification)
         matResult.replaceAllUsesExcept(addOp.getResult(), addOp);
 
         // Classify new ops
-        classification[zeroConst] = EngineType::CUBE;
+        if (zeroConst) {
+            classification[zeroConst] = EngineType::CUBE;
+            setOpEngineTypeAttr(zeroConst, EngineType::CUBE);
+        }
         classification[addOp] = EngineType::VECTOR;
-        setOpEngineTypeAttr(zeroConst, EngineType::CUBE);
         setOpEngineTypeAttr(addOp, EngineType::VECTOR);
     }
 

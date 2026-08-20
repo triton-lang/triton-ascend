@@ -78,6 +78,12 @@ BufferCountManager::BufferCountManager(ModuleOp module) : module_(module) {
   initFromModule();
 }
 
+BufferCountManager::BufferCountManager(ModuleOp module, bool initializeDefaults)
+    : module_(module) {
+  if (initializeDefaults)
+    initFromModule();
+}
+
 void BufferCountManager::initFromModule() {
   if (!module_) {
     LOG_DEBUG("initFromModule: module_ is null, skip");
@@ -154,4 +160,14 @@ int BufferCountManager::getBufferCountByType(DepType type) const {
 }
 
 } // namespace triton
+std::optional<int>
+BufferCountManager::getConfiguredBufferCount(DepType type) const {
+  if (!module_)
+    return std::nullopt;
+  auto attr = module_->getAttrOfType<IntegerAttr>(getAttrName(type));
+  if (!attr)
+    return std::nullopt;
+  return static_cast<int>(attr.getInt());
+}
+
 } // namespace mlir

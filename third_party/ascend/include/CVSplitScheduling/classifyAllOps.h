@@ -23,7 +23,9 @@
 #ifndef TRITON_ASCEND_CV_SPLIT_SCHEDULING_CLASSIFY_ALL_OPS_H
 #define TRITON_ASCEND_CV_SPLIT_SCHEDULING_CLASSIFY_ALL_OPS_H
 
+#include "mlir/IR/Block.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/DenseMap.h"
@@ -31,6 +33,10 @@
 namespace mlir::triton::cv_split {
 
 enum class EngineType { CUBE, VECTOR };
+/// Maps operations to their assigned execution engine. Operation pointers are
+/// non-owning handles: they remain pointer-valid when moved, but the mapping's
+/// block-level meaning must be revalidated after a move and pointers become
+/// dangling when their operations are erased.
 using Classification = llvm::DenseMap<Operation *, EngineType>;
 
 /// Stamps a newly-created operation with the same core ownership attribute
@@ -42,10 +48,13 @@ LogicalResult runDCVPClassifier(ModuleOp module);
 
 /// Imports the DCVP classifications already stamped on operations directly
 /// contained in `body`.
+///
+/// Returns failure when a non-yield operation has no classification or is not
+/// classified as exactly one of CUBE or VECTOR.
 FailureOr<Classification> readDCVPClassification(Block *body);
 
 /// Logs the candidate body's classifications and returns true when both the
-/// CUBE and VECTOR subcores have work.
+/// CUBE and VECTOR subcores have work. `body` is used only for debug logging.
 bool checkCoreClassifications(Block *body, const Classification &classification);
 
 /// Removes the temporary core ownership attribute emitted by DCVP.

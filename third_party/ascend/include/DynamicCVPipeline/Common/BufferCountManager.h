@@ -28,6 +28,8 @@
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/DenseMap.h"
 #include <vector>
+#include <optional>
+
 
 namespace mlir {
 namespace triton {
@@ -38,6 +40,7 @@ public:
 
   explicit BufferCountManager(Operation *root);
   explicit BufferCountManager(ModuleOp module);
+  BufferCountManager(ModuleOp module, bool initializeDefaults);
 
   BufferCountManager(const BufferCountManager &) = delete;
   BufferCountManager &operator=(const BufferCountManager &) = delete;
@@ -49,6 +52,11 @@ public:
                       llvm::DenseMap<Value, int> &bufferCountMap, DepType type);
 
   int getBufferCountByType(DepType type) const;
+
+  /// Return a count only when the frontend explicitly configured one.  This
+  /// read-only query lets independent scheduling passes share the canonical
+  /// buffer-count contract without materializing DCVP defaults in the IR.
+  std::optional<int> getConfiguredBufferCount(DepType type) const;
 
 private:
   void initFromModule();

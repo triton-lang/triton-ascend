@@ -292,54 +292,6 @@ static scf::ForOp removeUnusedLoopCarriedValues(scf::ForOp loop)
     return newLoop;
 }
 
-// ============================================================================
-// Single-veccore output guard.
-// With NO_DUAL fixpipe, the cube delivers the whole MxN tile to one sub-block's
-// UB; the other veccore's UB is stale. Both veccores still execute the VECTOR
-// scope, so we must ensure only the veccore that owns valid data writes the
-// result to GM. We wrap the epilogue store(s) in `if (get_sub_block_idx == 0)`.
-// (Half vector throughput; correctness-first, does not match the ROW_SPLIT
-// target which uses both veccores.)
-// ============================================================================
-static void guardStoresToSubBlock0(scope::ScopeOp vecScope)
-{
-    Block &block = vecScope.getBodyRegion().front();
-
-    SmallVector<Operation *> stores;
-    for (Operation &op : block) {
-        if (isa<bufferization::MaterializeInDestinationOp>(&op))
-            stores.push_back(&op);
-    }
-    if (stores.empty()) {
-        LLVM_DEBUG(llvm::dbgs() << "[cv-split]   guardStores: no materialize_in_destination found\n");
-        return;
-    }
-
-    Operation *firstStore = stores.front();
-    Location loc = firstStore->getLoc();
-    Operation *terminator = block.getTerminator();
-
-    // Collect the contiguous epilogue tail [firstStore .. terminator) so that
-    // any intervening producers (e.g. the truncf feeding the 2nd store) move too.
-    SmallVector<Operation *> tail;
-    for (Operation *op = firstStore; op != terminator; op = op->getNextNode())
-        tail.push_back(op);
-
-    OpBuilder builder(firstStore);
-    auto sbid = builder.create<hivm::GetSubBlockIdxOp>(loc, builder.getI64Type());
-    auto zero = builder.create<arith::ConstantOp>(loc, builder.getI64IntegerAttr(0));
-    auto cond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq, sbid.getResult(), zero.getResult());
-    auto ifOp = builder.create<scf::IfOp>(loc, cond.getResult(),
-                                          /*withElseRegion=*/false);
-
-    Operation *thenTerm = ifOp.thenBlock()->getTerminator();
-    for (Operation *op : tail)
-        op->moveBefore(thenTerm);
-
-    LLVM_DEBUG(llvm::dbgs() << "[cv-split]   guardStores: wrapped " << stores.size() << " store(s) (+ "
-                            << (tail.size() - stores.size()) << " tail ops) in if(get_sub_block_idx==0)\n");
-}
-
 static LogicalResult retileVectorScopeForRowSplit(scope::ScopeOp vecScope, const CrossScopeTransferInfo &transferInfo);
 static void sinkCubeLoadChainsToMatmul(Block *body);
 
@@ -478,6 +430,13 @@ static Type retileRowHalve(Type t, int64_t Mfull)
     } else if (auto mt = dyn_cast<MemRefType>(t)) {
         auto sh = mt.getShape();
         if (!sh.empty() && sh[0] == Mfull) {
+            // Retiling preserves explicit strides. Reject arbitrary affine
+            // layouts here: changing their leading extent can change address
+            // semantics in a way this local transformation cannot prove.
+            SmallVector<int64_t> strides;
+            int64_t offset;
+            if (failed(getStridesAndOffset(mt, strides, offset)))
+                return t;
             SmallVector<int64_t> ns(sh.begin(), sh.end());
             ns[0] = half;
             return MemRefType::get(ns, mt.getElementType(), mt.getLayout(), mt.getMemorySpace());
@@ -657,6 +616,24 @@ static LogicalResult retileVectorScopeOps(scope::ScopeOp vecScope, int64_t Mfull
             }
         }
     }
+
+    // Generic type retiling must keep each scf.for result, init operand, and
+    // region iter_arg identical. A missed external initializer is a candidate
+    // rejection, never permission to leave temporarily invalid IR for a later
+    // verifier to diagnose without context.
+    WalkResult loopTypes = vecScope.walk([&](scf::ForOp loop) {
+        for (auto [init, iterArg, result] :
+             llvm::zip_equal(loop.getInitArgs(), loop.getRegionIterArgs(), loop.getResults())) {
+            if (init.getType() == iterArg.getType() && init.getType() == result.getType())
+                continue;
+            loop.emitError("VECTOR retiling produced mismatched scf.for "
+                           "init/iter_arg/result types");
+            return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+    });
+    if (loopTypes.wasInterrupted())
+        return failure();
     return success();
 }
 
@@ -672,8 +649,11 @@ static FailureOr<unsigned> retileOutputStores(scope::ScopeOp vecScope, Value sbi
     unsigned retiledCount = 0;
     for (auto m : mats) {
         auto ric = m.getDest().getDefiningOp<memref::ReinterpretCastOp>();
-        if (!ric)
-            continue;
+        if (!ric) {
+            m.emitError("VECTOR output retiling requires a destination defined "
+                        "by memref.reinterpret_cast");
+            return failure();
+        }
         // Build the per-veccore reinterpret_cast right before the materialize (it is
         // inside the scope, so sub_block_idx dominates it). The original ric may be
         // a loop-invariant op hoisted into the parent block, where sbid is not in
@@ -687,10 +667,10 @@ static FailureOr<unsigned> retileOutputStores(scope::ScopeOp vecScope, Value sbi
                           "0");
             return failure();
         }
-        Value leadStride = getValueOrCreateConstantIndexOp(b, loc, strides[0]);
+        Value leadingStride = getValueOrCreateConstantIndexOp(b, loc, strides[0]);
         Value origOff = getValueOrCreateConstantIndexOp(b, loc, offsets[0]);
         Value halfValue = b.create<arith::ConstantIndexOp>(loc, half);
-        Value step = b.create<arith::MulIOp>(loc, halfValue, leadStride);
+        Value step = b.create<arith::MulIOp>(loc, halfValue, leadingStride);
         Value add = b.create<arith::MulIOp>(loc, sbidx, step);
         Value newOff = b.create<arith::AddIOp>(loc, origOff, add);
         sizes[0] = b.getIndexAttr(half);
@@ -739,7 +719,18 @@ static LogicalResult rebuildVectorToCubePacks(ArrayRef<VectorToCubePack> packs, 
         int64_t N = pType.getShape()[1];
         int64_t N16 = N / kNzTileSize, M16 = M / kNzTileSize;
         Type elemType = pType.getElementType();
-        OpBuilder b(p.anchor);
+        Operation *pProducer = p.pSrc.getDefiningOp();
+        if (!pProducer || pProducer->getBlock() != p.anchor->getBlock() || !pProducer->isBeforeInBlock(p.anchor)) {
+            emitError(loc, "V->C pack source must be defined before its sync anchor in the vector scope");
+            return failure();
+        }
+
+        // Begin the layout-only pack immediately after P is formed. This lets
+        // the transpose overlap the independent denominator/alpha update in
+        // the same VF, matching the hand-unrolled schedule. The final reshape,
+        // UB view, copy, and signal remain at the phase-end anchor below.
+        OpBuilder b(pProducer);
+        b.setInsertionPointAfter(pProducer);
         auto l1AddrSpace = b.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::L1);
         auto expectedL1Type = MemRefType::get({N16, 2 * M16, kNzTileSize, kNzTileSize}, elemType, nullptr, l1AddrSpace);
         if (!p.l1Alloc || p.l1Alloc.getType() != expectedL1Type) {
@@ -757,6 +748,8 @@ static LogicalResult rebuildVectorToCubePacks(ArrayRef<VectorToCubePack> packs, 
         auto emptyT = b.create<tensor::EmptyOp>(loc, ArrayRef<int64_t> {N16, M, kNzTileSize}, elemType);
         auto transp =
             b.create<linalg::TransposeOp>(loc, resh1.getResult(), emptyT.getResult(), ArrayRef<int64_t> {1, 0, 2});
+
+        b.setInsertionPoint(p.anchor);
         // reshape [N16,M,kNzTileSize] -> [N16,M16,kNzTileSize,kNzTileSize]
         auto s4Type = RankedTensorType::get({4}, i64Ty);
         auto s4 = b.create<arith::ConstantOp>(
@@ -882,7 +875,6 @@ LogicalResult createScopeSeparation(func::FuncOp funcOp, scf::ForOp innerLoop,
     auto vecScope = builder.create<scope::ScopeOp>(loc, ArrayRef<Type> {});
     vecScope.getBodyRegion().emplaceBlock();
     vecScope->setAttr("noinline", UnitAttr::get(ctx));
-
     Block *vecBlock = &vecScope.getBodyRegion().front();
     // Move original inner loop into VECTOR scope
     innerLoop->remove();
@@ -895,7 +887,7 @@ LogicalResult createScopeSeparation(func::FuncOp funcOp, scf::ForOp innerLoop,
     OpBuilder vecBuilder(vecBlock, vecBlock->end());
     vecBuilder.create<scope::ReturnOp>(loc);
 
-    // Step 3: Set core type attributes (match target: only tcore_type + noinline)
+    // Step 3: Set core type attributes.
     cubeScope->setAttr(hivm::TCoreTypeAttr::name, hivm::TCoreTypeAttr::get(ctx, hivm::TCoreType::CUBE));
     vecScope->setAttr(hivm::TCoreTypeAttr::name, hivm::TCoreTypeAttr::get(ctx, hivm::TCoreType::VECTOR));
 

@@ -31,6 +31,7 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/MathExtras.h"
@@ -133,6 +134,12 @@ static LogicalResult checkMatmulOutsAreRankedTensors(scf::ForOp forOp)
     return success();
 }
 
+static bool containsMatmul(scf::ForOp forOp)
+{
+    return llvm::any_of(*forOp.getBody(),
+                        [](Operation &op) { return isa<linalg::MatmulOp>(op); });
+}
+
 static LogicalResult checkMatmulDimensionsAre16Aligned(scf::ForOp forOp)
 {
     auto is16AlignedRank2Tensor = [](Type type) {
@@ -216,6 +223,12 @@ FailureOr<scf::ForOp> mlir::triton::cv_split::preCheckCVSplitScheduling(func::Fu
     if (failed(checkStaticTensorShapes(candidate))) {
         LLVM_DEBUG(llvm::dbgs() << "[cv-split-pre-check] candidate loop contains an unranked "
                                    "or dynamically shaped tensor\n");
+        return failure();
+    }
+
+    if (!containsMatmul(candidate)) {
+        LLVM_DEBUG(llvm::dbgs() << "[cv-split-pre-check] candidate loop must "
+                                   "contain at least one linalg.matmul\n");
         return failure();
     }
 

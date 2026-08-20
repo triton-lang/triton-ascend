@@ -24,9 +24,13 @@
 #define TRITON_ASCEND_CV_SPLIT_SCHEDULING_UNFUSE_PV_MATMULS_H
 
 #include "ascend/include/CVSplitScheduling/classifyAllOps.h"
+#include "mlir/IR/Block.h"
+#include "mlir/Support/LogicalResult.h"
 
 namespace mlir::triton::cv_split {
 
+/// Unfuses accumulator inputs for PV matmuls in `body`.
+/// Returns failure when `body` is null or required classification is missing.
 LogicalResult unfusePVMatmuls(Block *body, Classification &classification);
 
 } // namespace mlir::triton::cv_split

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+ * Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -20,16 +20,16 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ASCEND_CV_SPLIT_SCHEDULING_Q_STAGING_H
-#define TRITON_ASCEND_CV_SPLIT_SCHEDULING_Q_STAGING_H
-
-#include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Support/LogicalResult.h"
+#ifndef TRITON_ASCEND_CV_SPLIT_SCHEDULING_ATTRIBUTES_H
+#define TRITON_ASCEND_CV_SPLIT_SCHEDULING_ATTRIBUTES_H
 
 namespace mlir::triton::cv_split {
 
-LogicalResult bindLoopInvariantMatmulLhsToCbuf(func::FuncOp funcOp);
+/// Set to an integer one only after a transactional CV-split transformation
+/// commits.  The DynamicCVPipeline wrapper uses it to implement in-pipeline
+/// try/fallback without inspecting CV-split's internal IR shape.
+inline constexpr char kAppliedAttr[] = "triton_ascend.cv_split_scheduling.applied";
 
 } // namespace mlir::triton::cv_split
 
-#endif // TRITON_ASCEND_CV_SPLIT_SCHEDULING_Q_STAGING_H
+#endif // TRITON_ASCEND_CV_SPLIT_SCHEDULING_ATTRIBUTES_H

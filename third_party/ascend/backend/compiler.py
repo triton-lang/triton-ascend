@@ -1139,7 +1139,6 @@ _REMOVED_NPU_COMPILE_OPTIONS = frozenset({
     "code_motion",
     "disable_size_align_for_cast",
     "disable_auto_inject_block_sync",
-    "enable_drop_unit_dims",
     "enable_select_analysis",
     "ops_reorder",
     "storage_align",

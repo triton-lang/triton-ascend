@@ -743,9 +743,12 @@ def test_diagonal_mask_removal_applies_without_simt_route():
     processStridedLoadStoreRewriteOperations and therefore never ran on other
     targets.
     """
-    for compile_mode in ("simd", "simt_only"):
+    for arch, compile_mode in (
+        ("Ascend910B1", "simd"),
+        ("Ascend910_9589", "simt_only"),
+    ):
         options = NPUOptions(
-            arch="Ascend910B1",
+            arch=arch,
             enable_graph_optimize=True,
             compile_mode=compile_mode,
         )
@@ -858,9 +861,12 @@ def test_convert_modulo_to_mask_leaves_compile_time_bounds_alone():
 
 def test_convert_modulo_to_mask_applies_without_simt_route():
     """The rewrite is address logic, so it must not depend on pure-SIMT mode."""
-    for compile_mode in ("simd", "simt_only"):
+    for arch, compile_mode in (
+        ("Ascend910B1", "simd"),
+        ("Ascend910_9589", "simt_only"),
+    ):
         options = NPUOptions(
-            arch="Ascend910B1",
+            arch=arch,
             enable_graph_optimize=True,
             compile_mode=compile_mode,
         )

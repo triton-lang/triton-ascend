@@ -1,6 +1,6 @@
 // RUN: triton-opt --triton-control-flow-opt %s -verify-each | FileCheck %s --check-prefix=CFO
 // RUN: triton-opt --triton-control-flow-opt --triton-to-unstructure %s -verify-each | FileCheck %s --check-prefix=T2U --implicit-check-not='tensor.extract {{.*}} : tensor<4x!tt.ptr<f32>>' --implicit-check-not=PointerDescriptorOffsetForm
-// RUN: triton-opt --triton-control-flow-opt '--triton-to-unstructure=compile-on-910-95=True force-simt-template=True' %s -verify-each | FileCheck %s --check-prefix=T2U --implicit-check-not='tensor.extract {{.*}} : tensor<4x!tt.ptr<f32>>' --implicit-check-not=PointerDescriptorOffsetForm
+// RUN: triton-opt --triton-control-flow-opt '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' %s -verify-each | FileCheck %s --check-prefix=T2U --implicit-check-not='tensor.extract {{.*}} : tensor<4x!tt.ptr<f32>>' --implicit-check-not=PointerDescriptorOffsetForm
 // RUN: triton-opt --triton-control-flow-opt --triton-to-unstructure --triton-to-linalg %s -verify-each | FileCheck %s --check-prefix=LINALG --implicit-check-not='!tt.ptr' --implicit-check-not=unrealized_conversion_cast --implicit-check-not=PointerDescriptorBoundary --implicit-check-not=PointerDescriptorRebuild --implicit-check-not=PointerDescriptorOffsetForm
 
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {

@@ -36,6 +36,7 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/LogicalResult.h"
 
@@ -48,6 +49,7 @@ namespace ConverterUtils {
 
 const std::string GeneratedByMakeTensorPtrTAG = "GeneratedByMakeTensorPtr";
 const std::string discreteMaskAttrName = "DiscreteMask";
+const std::string mixCompileDiscreteMaskAttrName = "MixCompileDiscreteMask";
 const std::string discreteAttrName = "DiscreteMemAccess";
 const std::string continuousAttrName = "ContinuousMemAccess";
 const std::string customSrcPtrIndexAttrName = "SrcPtrIndex";
@@ -97,6 +99,38 @@ SmallVector<int64_t> getUnbroadcastDims(RankedTensorType src,
 class ConversionPatternRewriter;
 
 namespace triton {
+
+namespace ascend {
+
+// Keep the C++ pass contract aligned with the public Python selector.  The
+// Python boundary performs the target validation and canonicalization; pass
+// parsing remains strict so direct pass-pipeline users cannot silently turn an
+// unknown string into SIMD.
+enum class CompileMode {
+  Simd,
+  SimtTemplate,
+  SimtOnly,
+};
+
+inline std::optional<CompileMode> parseCompileMode(llvm::StringRef mode) {
+  if (mode == "simd")
+    return CompileMode::Simd;
+  if (mode == "simd_simt_template" || mode == "unstructured_in_simt")
+    return CompileMode::SimtTemplate;
+  if (mode == "simt_only")
+    return CompileMode::SimtOnly;
+  return std::nullopt;
+}
+
+inline bool isSimtTemplateMode(CompileMode mode) {
+  return mode == CompileMode::SimtTemplate;
+}
+
+inline bool isPureSimtMode(CompileMode mode) {
+  return mode == CompileMode::SimtOnly;
+}
+
+} // namespace ascend
 
 enum class IndirectLoadInterfaceOpType { Undefined = 0, Load = 1, Calc = 2 };
 

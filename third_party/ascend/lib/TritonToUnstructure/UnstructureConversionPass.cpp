@@ -48,7 +48,8 @@ using namespace triton;
 
 #include "llvm/Support/Debug.h"
 
-bool forceSimtTemplateFlag = false;
+static triton::ascend::CompileMode unstructureCompileMode =
+    triton::ascend::CompileMode::Simd;
 
 namespace {
 
@@ -58,9 +59,6 @@ static bool isTensorOfPointers(Type type) {
 }
 
 constexpr int64_t kBitsPerByte = 8;
-
-static constexpr const char *kRouteDiscreteMaskToSimtAttrName =
-    "route_discrete_mask_to_simt";
 
 static triton::PointerType getScalarPointerType(Type type) {
   if (auto tensorType = dyn_cast<RankedTensorType>(type))
@@ -368,40 +366,11 @@ void normalizeDiscreteMaskAccessForFallback(MemAccOpTy &op,
   ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
 }
 
-// ======================== 950 SIMT Indirect Fast-Path Lowering
+// ======================== 950 template-SIMT indirect fast-path lowering
 // ========================
-// 1. SIMT Fast-Path Gate
-//    The SIMT indirect lowering path is enabled only when:
-//      - compileOn91095Flag && forceSimtTemplateFlag
-//      - and the access is either:
-//          * unstructured, or has tag with 'route_discrete_mask_to_simt'
-//
-// 2. Op-Specific Lowering
-//    (1) tt.load / tt.store
-//        Entry requirements:
-//          - SIMT fast-path gate enabled
-//          - tensor rank <= 5, simt template only supports up to 5D tensors for
-//          now
-//        Lowering:
-//          - tt.load / tt.store  -> tt.indirect_load / tt.indirect_store
-//    (2) tt.atomic_rmw / tt.atomic_cas
-//        Entry requirements:
-//          - SIMT fast-path gate enabled
-//          - offset/value/mask tensors have static shape (required for
-//          flatten-to-1D lowering)
-//        Lowering:
-//          tt.atomic_rmw fadd, acq_rel, gpu, %src, %value, %mask
-//          -> flatten offsets/data/mask to 1D
-//          -> create a custom op:
-//              hivm.hir.custom {
-//                extra_attr = "operate=<atomic_op>"
-//              } "__builtin_indirect_atomic" ins(%ptr, %offset, %value, %mask)
-//              outs(%out)
-//          -> reshape the returned 1D result back to the original tensor shape
-//
-// 3. Fallback Behavior
-//    If SIMT indirect lowering cannot be formed for any operation,
-//    conversion gracefully falls back to the legacy scalar-loop lowering path
+// Load/store uses the established indirect-template ABI when its rank and
+// pointer requirements are met. Atomic operations use the same gate with their
+// indirect custom-op lowering. Other cases fall back to scalar-loop lowering.
 // ======================================================================================
 static bool canUseIndirectFastPath(Value srcPtr, Value ptrOffset) {
   if (!srcPtr || !ptrOffset)
@@ -774,7 +743,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   auto ptr = op.getPtr();
   auto ptrType = resolvePtrTensorType(ptr);
-  auto routeDiscreteMaskToSimt = op->hasAttr(kRouteDiscreteMaskToSimtAttrName);
+  auto mixCompileDiscreteMask =
+      op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName);
 
   if (!ptrType || op->hasAttr(ConverterUtils::discreteAttrName))
     return failure();
@@ -786,7 +756,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   if (checkUnstructureAnnotated(op, rewriter))
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
 
-  if (ptrOffsetInfo.isStructured() && !routeDiscreteMaskToSimt &&
+  if (ptrOffsetInfo.isStructured() && !mixCompileDiscreteMask &&
       (!ptrOffsetInfo.isScalarLike() ||
        llvm::all_of(ptrType.getShape(), [](int64_t dim) { return dim == 1; })))
     return failure();
@@ -852,30 +822,32 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     os << "ptrOffsetInfo.isStructured: " << ptrOffsetInfo.isStructured()
        << "\n";
     os << "compileOn91095Flag: " << compileOn91095Flag << "\n";
-    os << "forceSimtTemplateFlag: " << forceSimtTemplateFlag << "\n";
+    os << "compileMode: " << static_cast<int>(unstructureCompileMode) << "\n";
   });
 
-  // SIMT Indirect Fast-Path Lowering in 950 seiries
-  bool indirectFastPathEnabled =
-      compileOn91095Flag && forceSimtTemplateFlag &&
+  bool templateIndirectFastPathEnabled =
+      compileOn91095Flag &&
+      triton::ascend::isSimtTemplateMode(unstructureCompileMode) &&
       ((!ptrOffsetInfo.isStructured() && sizeInByte < 64) ||
-       routeDiscreteMaskToSimt);
+       mixCompileDiscreteMask);
   bool rankWithinIndirectLoadStoreFastPathLimit = resultShape.size() <= 5;
-  if (indirectFastPathEnabled &&
+  if (templateIndirectFastPathEnabled &&
       succeeded(tryRewriteIndirectFastPath(op, loc, srcPtr, ptrOffset,
                                            resultShape, rewriter))) {
     return success();
   }
 
   LLVM_DEBUG({
-    if (sizeInByte >= 64) {
+    if (triton::ascend::isSimtTemplateMode(unstructureCompileMode) &&
+        sizeInByte >= 64) {
       auto &os = llvm::dbgs();
-      os << "Skip SIMT indirect fast path because continuous shape product is "
+      os << "Skip template-SIMT indirect fast path because continuous shape "
+            "product is "
          << sizeInByte << " (>=64)\n";
     }
     if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
                   std::is_same_v<MemAccOpTy, triton::StoreOp>) {
-      if (indirectFastPathEnabled &&
+      if (templateIndirectFastPathEnabled &&
           !rankWithinIndirectLoadStoreFastPathLimit) {
         auto &os = llvm::dbgs();
         os << "Skip tt.indirect_load/store fast path because rank is "
@@ -1181,13 +1153,21 @@ TritonToUnstructurePass::TritonToUnstructurePass(
 
 void TritonToUnstructurePass::runOnOperation() {
   compileOn91095Flag = this->compileOn91095;
-  forceSimtTemplateFlag = this->forceSimtTemplate;
+  auto compileMode = triton::ascend::parseCompileMode(this->compileMode);
+  if (!compileMode) {
+    getOperation().emitError()
+        << "triton-to-unstructure compile-mode is invalid: "
+        << this->compileMode;
+    signalPassFailure();
+    return;
+  }
+  unstructureCompileMode = *compileMode;
 
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
     os << "TritonToUnstructurePass started with options:\n";
     os << "  compileOn91095: " << compileOn91095Flag << "\n";
-    os << "  forceSimtTemplate: " << forceSimtTemplateFlag << "\n";
+    os << "  compileMode: " << this->compileMode << "\n";
   });
 
   ModuleOp moduleOp = getOperation();

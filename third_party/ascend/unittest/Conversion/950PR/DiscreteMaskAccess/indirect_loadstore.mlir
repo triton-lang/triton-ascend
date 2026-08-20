@@ -1,7 +1,7 @@
-// RUN: triton-opt '--discrete-mask-access-conversion=compile-on-910-95=True force-simt-template=True' --split-input-file %s | FileCheck %s
+// RUN: triton-opt '--discrete-mask-access-conversion=compile-on-910-95=True compile-mode=simd_simt_template' --split-input-file %s | FileCheck %s
 
 // CHECK-LABEL: tt.func @discrete_load
-// CHECK: tt.load {{.*}} {route_discrete_mask_to_simt} : tensor<1024x!tt.ptr<i32>>
+// CHECK: tt.load {{.*}} {MixCompileDiscreteMask} : tensor<1024x!tt.ptr<i32>>
 tt.func @discrete_load(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) {
   %cst = arith.constant dense<0> : tensor<1024xi32>
   %cst_0 = arith.constant dense<200> : tensor<1024xi32>
@@ -20,7 +20,7 @@ tt.func @discrete_load(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) {
 }
 
 // CHECK-LABEL: tt.func @discrete_store
-// CHECK: tt.store {{.*}} {route_discrete_mask_to_simt} : tensor<1024x!tt.ptr<i32>>
+// CHECK: tt.store {{.*}} {MixCompileDiscreteMask} : tensor<1024x!tt.ptr<i32>>
 tt.func @discrete_store(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) {
   %cst = arith.constant dense<0> : tensor<1024xi32>
   %cst_0 = arith.constant dense<200> : tensor<1024xi32>

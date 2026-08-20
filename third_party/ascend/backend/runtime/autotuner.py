@@ -1994,8 +1994,9 @@ class AutoTilingTuner(Autotuner):
 
     def generate_key_and_configs(self, *args, **kwargs):
         self.nargs = dict(zip(self.arg_names, args))
-        if "compile_mode" in kwargs:
-            self.is_simt_mode = kwargs["compile_mode"] == "simt_only"
+        compile_mode_is_explicit = kwargs.get("compile_mode_is_explicit", "compile_mode" in kwargs)
+        if compile_mode_is_explicit:
+            self.is_simt_mode = kwargs.get("compile_mode") == "simt_only"
         else:
             self.is_simt_mode = bool(kwargs.get("force_simt_only", False))
         if 'num_warps' in kwargs and kwargs['num_warps'] is not None:

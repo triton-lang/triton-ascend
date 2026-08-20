@@ -44,8 +44,8 @@ def test_float_indirect_atomic_min():
     n_elements = 257
     block_size = 128
 
-    values_cpu = torch.linspace(-4.0, 4.0, n_elements, dtype=torch.float32)
-    indices_cpu = torch.arange(n_elements - 1, -1, -1, dtype=torch.int64)
+    values_cpu = torch.linspace(-4.0, 4.0, n_elements, dtype=torch.float32, device="cpu")
+    indices_cpu = torch.arange(n_elements - 1, -1, -1, dtype=torch.int64, device="cpu")
 
     values = values_cpu.npu()
     indices = indices_cpu.npu()
@@ -60,7 +60,7 @@ def test_float_indirect_atomic_min():
         BLOCK_SIZE=block_size,
     )
 
-    expected = torch.full((n_elements, ), float("inf"), dtype=torch.float32)
+    expected = torch.full((n_elements, ), float("inf"), dtype=torch.float32, device="cpu")
     expected[indices_cpu] = values_cpu
 
     torch.testing.assert_close(output.cpu(), expected, rtol=0, atol=0)

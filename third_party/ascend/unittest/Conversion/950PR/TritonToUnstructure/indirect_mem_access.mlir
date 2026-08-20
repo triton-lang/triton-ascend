@@ -1,4 +1,4 @@
-// RUN: triton-opt %s '--triton-to-unstructure=compile-on-910-95=True force-simt-template=True' | FileCheck %s
+// RUN: triton-opt %s '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' | FileCheck %s
 
 // CHECK-LABEL: tt.func @triton_indirect_load
 // CHECK: ascend.indirect_load {{.*}} -> tensor<1024xi32>
@@ -14,7 +14,7 @@ tt.func @triton_indirect_load(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) {
   %5 = tt.addptr %4, %0 : tensor<1024x!tt.ptr<i32>>, tensor<1024xi32>
   %6 = tt.splat %arg1 : !tt.ptr<i32> -> tensor<1024x!tt.ptr<i32>>
   %7 = tt.addptr %6, %0 : tensor<1024x!tt.ptr<i32>>, tensor<1024xi32>
-  %8 = tt.load %5, %3, %cst {route_discrete_mask_to_simt} : tensor<1024x!tt.ptr<i32>>
+  %8 = tt.load %5, %3, %cst {MixCompileDiscreteMask} : tensor<1024x!tt.ptr<i32>>
   tt.store %7, %8 : tensor<1024x!tt.ptr<i32>>
   tt.return
 }
@@ -33,7 +33,7 @@ tt.func @triton_indirect_store(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) {
   %6 = tt.splat %arg1 : !tt.ptr<i32> -> tensor<1024x!tt.ptr<i32>>
   %7 = tt.addptr %6, %0 : tensor<1024x!tt.ptr<i32>>, tensor<1024xi32>
   %8 = tt.load %5 : tensor<1024x!tt.ptr<i32>>
-  tt.store %7, %8, %3 {route_discrete_mask_to_simt} : tensor<1024x!tt.ptr<i32>>
+  tt.store %7, %8, %3 {MixCompileDiscreteMask} : tensor<1024x!tt.ptr<i32>>
   tt.return
 }
 

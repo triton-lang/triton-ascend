@@ -252,6 +252,7 @@ def test_parse_options_normalizes_graph_ub_budget(compiler_module, arch, request
     options = _parse_options(compiler_module, arch, opts)
 
     assert options.arch == arch
+    assert not hasattr(options, "_arch")
     assert options.graph_optimize_ub_capacity_bytes == expected_capacity
 
 

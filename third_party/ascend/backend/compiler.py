@@ -30,7 +30,7 @@ import shlex
 import subprocess
 import tempfile
 import warnings
-from dataclasses import dataclass
+from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, Optional, Tuple, Union
@@ -237,7 +237,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         grid_num_tiles = metadata.get("grid_num_tiles")
         if isinstance(grid_num_tiles, int) and grid_num_tiles > 0:
             try:
-                _builder = ascend.ir.ascendnpu_ir_builder(mod.context, opt.arch)
+                _builder = ascend.ir.ascendnpu_ir_builder(mod.context, opt.target_arch)
                 mod.set_attr("hacc.grid_num_tiles", _builder.parse_attr(f"{grid_num_tiles} : i32"))
             except Exception:
                 pass  # graceful fallback: pass runs without hint
@@ -1070,7 +1070,12 @@ def get_libdevice():
 class NPUOptions:
     debug: bool = False
     sanitize_overflow: bool = True
-    arch: str = ""
+    # Backend-only construction input.  AscendBackend.parse_options injects
+    # GPUTarget.arch and never forwards a user-supplied compile option.
+    arch: InitVar[str] = ""
+    # This becomes compiler metadata, so its name must also be valid for the
+    # namedtuple constructed by CompiledKernel on Python 3.10.
+    target_arch: str = field(init=False, repr=False)
 
     cluster_dims: tuple = (1, 1, 1)
     num_warps: int = 32
@@ -1195,11 +1200,12 @@ class NPUOptions:
     # unmasked kernels whose grid dims are compile-time known.
     grid_num_tiles: int = None
 
-    def __post_init__(self):
+    def __post_init__(self, arch):
         from triton.backends.ascend import _apply_ascend_patch
 
         _apply_ascend_patch()
-        graph_ub_budget_bytes = graph_ub_budget_bytes_for_arch(self.arch)
+        object.__setattr__(self, "target_arch", arch)
+        graph_ub_budget_bytes = graph_ub_budget_bytes_for_arch(self.target_arch)
         requested_graph_ub_capacity_bytes = self.graph_optimize_ub_capacity_bytes
         if requested_graph_ub_capacity_bytes is None:
             graph_ub_capacity_bytes = graph_ub_budget_bytes
@@ -1232,6 +1238,20 @@ class NPUOptions:
         key = "_".join([f"{name}-{val}" for name, val in self.__dict__.items()])
         key = "_".join([key, get_cann_version_file_hash()])
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+def _get_npu_options_arch(options: NPUOptions) -> str:
+    """Expose the injected target to the established lowering builder API.
+
+    ``arch`` is an ``InitVar`` rather than a user compile option, so it is not
+    stored or serialized.  The builder still reads ``options.arch`` while
+    creating TTIR, and this view returns the target injected by
+    ``AscendBackend.parse_options``.
+    """
+    return options.target_arch
+
+
+NPUOptions.arch = property(_get_npu_options_arch)
 
 
 def ttir_to_npubin(mod, metadata, opt):
@@ -1353,7 +1373,10 @@ class AscendBackend(BaseBackend):
         # TODO: get available targets when building options?
         if self.target.backend == "npu":
             _warn_deprecated_ascend_env_vars()
-            option_names = NPUOptions.__dataclass_fields__.keys()
+            option_names = {
+                name for name, option_field in NPUOptions.__dataclass_fields__.items()
+                if option_field.init and name != "arch"
+            }
             # JIT and AOT hand the complete, already-normalized dataclass back to
             # parse_options before compilation.  Those values are internal state,
             # not a second batch of user overrides.
@@ -1363,8 +1386,7 @@ class AscendBackend(BaseBackend):
             # requiring any change to the community JIT implementation.
             normalized_opts = opts if internal_options else _remove_deprecated_npu_options(opts, in_place=True)
             args = {k: normalized_opts[k] for k in option_names if k in normalized_opts}
-            args.setdefault("arch", self.target.arch)
-            options = NPUOptions(**args)
+            options = NPUOptions(arch=self.target.arch, **args)
             # Lazy init compile_on_910_95 if not provided
             if options.compile_on_910_95 is None:
                 object.__setattr__(options, "compile_on_910_95", is_compile_on_910_95())

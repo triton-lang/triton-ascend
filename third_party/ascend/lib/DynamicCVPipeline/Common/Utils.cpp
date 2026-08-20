@@ -206,6 +206,18 @@ bool isZeroFillValue(mlir::Value v) {
   return false;
 }
 
+bool isZeroAdd(mlir::Operation *op) {
+  if (isa<arith::AddFOp, arith::AddIOp>(op)) {
+    Value lhs = op->getOperand(0);
+    Value rhs = op->getOperand(1);
+    if (isZeroFillValue(lhs) || isZeroFillValue(rhs)) {
+      return true;
+    }
+    return false;
+  }
+  return false;
+}
+
 // Read the `hivm.tightly_coupled_buffer<N>` id attached to a `memref.alloc`
 // via its `annotation.mark` user. Returns nullopt when no annotation with
 // a concrete id is present, or when `allocVal` is null.

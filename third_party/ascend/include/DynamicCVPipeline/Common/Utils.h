@@ -64,6 +64,8 @@ inline constexpr llvm::StringLiteral kMemCrossDeps = "ssbuffer.memCrossDeps";
 inline constexpr llvm::StringLiteral kDepMark = "ssbuffer.dep_mark";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
 inline constexpr llvm::StringLiteral kIterCounter = "ssbuffer.iterCounter";
+inline constexpr llvm::StringLiteral kForMayNotExec =
+    "ssbuffer.for_may_not_exec";
 inline constexpr llvm::StringLiteral kClone = "ssbuffer.clone";
 inline constexpr llvm::StringLiteral kEnableUbRefineOpt =
     "ssbuffer.enable_ub_refine_opt";
@@ -234,6 +236,7 @@ bool isViewLike(Operation *op);
 // 0 scalar constant. Used to detect the "add 0" operand of VECTOR pseudo-ops
 // (`arith.addf` / `arith.addi` carrying `ssbuffer.add_from_matmul`).
 bool isZeroFillValue(Value v);
+bool isZeroAdd(mlir::Operation *op);
 
 // Read the `hivm.tightly_coupled_buffer<N>` id attached to a `memref.alloc`
 // via its `annotation.mark` user. Returns nullopt when no annotation with

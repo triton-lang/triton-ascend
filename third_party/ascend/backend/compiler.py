@@ -1070,7 +1070,6 @@ def get_libdevice():
 class NPUOptions:
     debug: bool = False
     sanitize_overflow: bool = True
-    kernel_name: str = "triton_"
     arch: str = ""
 
     cluster_dims: tuple = (1, 1, 1)

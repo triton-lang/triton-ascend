@@ -138,7 +138,6 @@ def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
         # these options should also reverted.
         metadata["enable_dynamic_cv_pipeline"] = False
         metadata["enable_mixed_cv"] = kwargs["enable_mixed_cv"]
-        metadata["disable_auto_inject_block_sync"] = kwargs["disable_auto_inject_block_sync"]
         metadata["set_workspace_multibuffer"] = kwargs["set_workspace_multibuffer"]
         if opt.debug:
             print(f"SSBUFFER return code={rc}, will fallback to enable_dynamic_cv_pipeline=False")
@@ -223,7 +222,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         enable_mask_fallback_conversion = metadata["enable_mask_fallback_conversion"]
         optimize_dynamic_offset = metadata["optimize_dynamic_offset"]
         enable_mixed_cv = metadata.get("enable_mixed_cv")
-        disable_auto_inject_block_sync = metadata.get("disable_auto_inject_block_sync")
         set_workspace_multibuffer = metadata.get("set_workspace_multibuffer")
 
         # Inject grid tile-count hint for ChunkCoalescing. When the kernel
@@ -272,7 +270,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         if metadata["enable_dynamic_cv_pipeline"]:
             metadata["set_workspace_multibuffer"] = 0
             metadata["enable_mixed_cv"] = True
-            metadata["disable_auto_inject_block_sync"] = True
             ascend.passes.ttir.set_enable_cube_block_merge(metadata["enable_cube_block_merge"])
             ascend.passes.ttir.set_enable_ub_refine_opt(mod, metadata["enable_ub_refine_opt"])
 
@@ -313,7 +310,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
 
         pm.run(mod, 'ttir_to_linalg')
         _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
-                                          disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)
         _export_coalesce_metadata(mod, metadata)
 
@@ -714,11 +710,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--hfusion-max-fused-elementwise-ops={prevec_max_fused_ops_num}"]
 
-        disable_auto_inject_block_sync = metadata["disable_auto_inject_block_sync"]
-        if disable_auto_inject_block_sync is not None:
-            _compile_option_list += \
-                [f"--disable-auto-inject-block-sync={disable_auto_inject_block_sync}"]
-
         bitcodes = metadata["bitcodes"]
         if bitcodes is not None:
             for bitcode in bitcodes:
@@ -922,12 +913,6 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if auto_multi_buffer is not None:
             _compile_option_list += \
                 [f"--limit-auto-multi-buffer-of-local-buffer={auto_multi_buffer}"]
-
-        disable_auto_inject_block_sync = metadata["disable_auto_inject_block_sync"]
-        if disable_auto_inject_block_sync is not None:
-            _compile_option_list += \
-                [f"--disable-auto-inject-block-sync={disable_auto_inject_block_sync}"]
-
         bitcodes = metadata["bitcodes"]
         if bitcodes is not None:
             for bitcode in bitcodes:
@@ -1058,7 +1043,6 @@ class NPUOptions:
     set_workspace_multibuffer: int = None
     tile_mix_vector_loop: int = None
     tile_mix_cube_loop: int = None
-    disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
     enable_vf_fusion: bool = None
     enable_dynamic_cv_pipeline: bool = None
@@ -1166,6 +1150,7 @@ _REMOVED_NPU_COMPILE_OPTIONS = frozenset({
     "bisheng_options",
     "code_motion",
     "disable_size_align_for_cast",
+    "disable_auto_inject_block_sync",
     "enable_cce_vf_auto_sync",
     "enable_cce_vf_remove_membar",
     "enable_drop_unit_dims",

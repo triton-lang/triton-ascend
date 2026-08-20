@@ -131,7 +131,6 @@ def compiler_module():
     utils_stub.downgrade_llir = lambda llir: llir
     utils_stub.get_cann_version_file_hash = lambda: ""
     utils_stub.graph_ub_budget_bytes_for_arch = _stub_graph_ub_budget_bytes_for_arch
-    utils_stub.is_compile_on_910_95 = lambda: False
 
     class UnusedNPUUtils:
         pass

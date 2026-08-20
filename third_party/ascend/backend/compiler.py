@@ -67,7 +67,6 @@ from triton.backends.ascend.utils import (
     force_disable_ffts,
     graph_ub_budget_bytes_for_arch,
     get_cann_version_file_hash,
-    is_compile_on_910_95,
 )
 from triton.backends.ascend.driver import (NPUUtils)
 from triton.backends.compiler import (
@@ -992,7 +991,8 @@ class NPUOptions:
     warp_size: int = field(default=32, init=False)
     ir_override: Optional[str] = None  # filename of a user-defined IR (*.{ttir|ttadapter|mlirbc|bcmlir|npubin})
 
-    compile_on_910_95: bool = None
+    # Internal lowering selector derived from the explicit GPUTarget.arch.
+    compile_on_910_95: bool = field(init=False, repr=False)
     optimize_dynamic_offset: bool = False
     enable_mask_fallback_conversion: bool = False
     enable_warp_specialization: bool = False
@@ -1093,6 +1093,11 @@ class NPUOptions:
 
         _apply_ascend_patch()
         object.__setattr__(self, "target_arch", arch)
+        object.__setattr__(
+            self,
+            "compile_on_910_95",
+            isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950")),
+        )
 
         # Parse compile_mode and set related fields
         if self.compile_mode == "simd":
@@ -1266,12 +1271,9 @@ class AscendBackend(BaseBackend):
             normalized_opts = opts if internal_options else _remove_deprecated_npu_options(opts, in_place=True)
             args = {k: normalized_opts[k] for k in option_names if k in normalized_opts}
             options = NPUOptions(arch=self.target.arch, **args)
-            # Lazy init compile_on_910_95 if not provided
-            if options.compile_on_910_95 is None:
-                object.__setattr__(options, "compile_on_910_95", is_compile_on_910_95())
             # Lazy init enable_dynamic_cv_pipeline if not provided
             if options.enable_dynamic_cv_pipeline is None:
-                object.__setattr__(options, "enable_dynamic_cv_pipeline", is_compile_on_910_95())
+                object.__setattr__(options, "enable_dynamic_cv_pipeline", options.compile_on_910_95)
             # Costmodel path should avoid extra BC<->MLIR conversion stages
             # to keep compile-only autotune routing lightweight and stable.
             if getattr(options, "enable_costmodel_backend", False):

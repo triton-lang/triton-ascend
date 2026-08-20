@@ -25,6 +25,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/PassManager.h"
 
+#include "ascend/include/CVSplitScheduling/Attributes.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache.h"
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
@@ -76,6 +77,15 @@ void AddDynamicCVPipelinePass::runOnOperation() {
 
   LDBG("Enter pass");
   moduleOp->removeAttr(CVPipeline::ERRCODE_ATTR);
+
+  // CVSplitScheduling and DCVP are alternative owners of Cube/Vector scope
+  // formation.  CV split sets this result only after its transactional clone
+  // verifies and commits.  A missing result therefore means the original IR
+  // is intact and DCVP remains the safe fallback.
+  if (moduleOp->hasAttr(cv_split::kAppliedAttr)) {
+    LDBG("CVSplitScheduling committed; skip DynamicCVPipeline");
+    return;
+  }
 
   if (!compileOn91095Flag) {
     llvm::errs() << "Add-dynamic-cv-pipeline is only supported on 91095 now.\n";

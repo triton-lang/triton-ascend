@@ -1142,9 +1142,9 @@ def ttir_to_npubin(mod, metadata, opt):
             if opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
 
-            # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
-            # mirroring the SIMD compile paths. driver.py's runtime block-count
-            # cap keys off the same env switch, so the two stay in sync.
+            # Enable SIMT auto-blockify under the fixed automatic block-mapping
+            # policy, mirroring the SIMD compile paths. driver.py's runtime
+            # block-count cap keys off the same policy, so the two stay in sync.
             if (_is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False)
                     and not metadata.get("row_coalescing_applied", False)):
                 _compile_option_list += ["--enable-auto-blockify-loop"]

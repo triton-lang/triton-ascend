@@ -483,6 +483,7 @@ def _is_debug_line_info_disabled() -> bool:
 
 
 def _is_auto_map_parallel_blocks_enabled() -> bool:
+    """Return the fixed backend policy for automatic block mapping."""
     _warn_deprecated_ascend_env_var("TRITON_ALL_BLOCKS_PARALLEL")
     return True
 

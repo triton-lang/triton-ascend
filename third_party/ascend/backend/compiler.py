@@ -765,9 +765,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 "--enable-hfusion-compile=true",
                 "--enable-triton-kernel-compile=true",
             ]
-        bisheng_options = metadata["bisheng_options"]
-        if bisheng_options is not None:
-            _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
         mix_mode = opt.mix_mode
         if mix_mode in ["aic"]:
             _compile_option_list += ["--disable-hfusion-vectorize=true"]
@@ -1100,8 +1097,6 @@ class NPUOptions:
     allowed_dot_input_precisions: Tuple[str] = ("ieee", "hf32")
     max_num_imprecise_acc_default: int = 0
     extern_libs: dict = None
-    bisheng_options: str = "-cce-link-aicore-ll-module " + get_libdevice()
-
     multibuffer: bool = True
     storage_align: bool = None
     ops_reorder: bool = None
@@ -1280,10 +1275,6 @@ def ttir_to_npubin(mod, metadata, opt):
             else:
                 if enable_auto_blockify:
                     _compile_option_list += ["--enable-auto-blockify-loop"]
-
-            bisheng_options = metadata["bisheng_options"]
-            if bisheng_options is not None:
-                _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
 
             # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
             # mirroring the SIMD compile paths. driver.py's runtime block-count

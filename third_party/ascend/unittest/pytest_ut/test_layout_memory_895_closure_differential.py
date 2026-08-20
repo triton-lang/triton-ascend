@@ -213,7 +213,6 @@ def _run_ttir_to_npubin(
     blacklisted,
     row_applied,
     superblock_factor,
-    bisheng_options,
 ):
     """Run the historical pure-SIMT tail with a fake pass manager/compiler."""
     pass_manager = _FakePassManager()
@@ -229,12 +228,16 @@ def _run_ttir_to_npubin(
     def parse_ttir_metadata(_ttir, metadata):
         parsed = dict(metadata)
         parsed.update({
-            "bisheng_options": bisheng_options,
             "has_auto_blockify_blacklist_op": blacklisted,
             # _export_coalesce_metadata below replaces this with the row
             # pass result from the mock module attrs, just like production.
             "row_coalescing_applied": False,
         })
+        # The 895 baseline still reads this retired metadata key.  Supply a
+        # null legacy value only so its historical closure can be compared to
+        # the current source, which no longer consumes it.
+        if "bisheng_options" in closure["ttir_to_npubin"].__code__.co_consts:
+            parsed["bisheng_options"] = None
         metadata_after_parse.append(parsed)
         return parsed
 
@@ -259,6 +262,7 @@ def _run_ttir_to_npubin(
     ]
     closure["_get_npucompiler_path"] = lambda: ("bishengir-compile", {})
     closure["_is_auto_map_parallel_blocks_enabled"] = lambda: env_enabled
+    closure["get_simt_stack_limit"] = lambda: 64
     closure["subprocess"].run = run_bisheng
 
     result = closure["ttir_to_npubin"](
@@ -304,14 +308,15 @@ def _export_coalesce_metadata(closure, attrs):
 
 
 def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_pairs):
-    """All 96 pure-SIMT argv cases survive after Row leaves npubin."""
-    baseline_source, target_source = source_pairs["compiler"]
+    """The 48 remaining pure-SIMT argv cases omit retired Bisheng options."""
+    _baseline_source, target_source = source_pairs["compiler"]
     common_prefix = [
         "--common-before-pure-simt",
         "--common-after-pure-simt",
         "--enable-hivm-compile=false",
         "--enable-triton-ir-compile",
         "--pure-simt",
+        "--enable-global-scratch-allocation",
         "--num-warps=4",
         "--threads-per-warp=32",
         "--enable-bishengir-simt-optimization=17",
@@ -326,22 +331,11 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
         (False, True),  # B: blacklist result
         (False, True),  # R: Row pass result
         (0, 7),  # superblock factor
-        (None, "--preserve-bisheng-option-order"),
     )
 
     count = 0
-    for env_enabled, user_option, blacklisted, row_applied, superblock, bisheng_options in cases:
-        baseline_closure = _load_compiler_closure(baseline_source)
+    for env_enabled, user_option, blacklisted, row_applied, superblock in cases:
         target_closure = _load_compiler_closure(target_source)
-        baseline_pm, baseline_command, _baseline_metadata = _run_ttir_to_npubin(
-            baseline_closure,
-            env_enabled=env_enabled,
-            user_option=user_option,
-            blacklisted=blacklisted,
-            row_applied=row_applied,
-            superblock_factor=superblock,
-            bisheng_options=bisheng_options,
-        )
         target_pm, target_command, _target_metadata = _run_ttir_to_npubin(
             target_closure,
             env_enabled=env_enabled,
@@ -349,23 +343,17 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
             blacklisted=blacklisted,
             row_applied=row_applied,
             superblock_factor=superblock,
-            bisheng_options=bisheng_options,
         )
-        case = (f"E={env_enabled}, O={user_option}, B={blacklisted}, "
-                f"R={row_applied}, superblock={superblock}, "
-                f"bisheng_options={bisheng_options!r}")
-        assert _normalise_command(baseline_command) == _normalise_command(target_command), case
+        case = f"E={env_enabled}, O={user_option}, B={blacklisted}, R={row_applied}, superblock={superblock}"
 
-        # Do not only compare two possibly-regressed closures: retain the
-        # historic envelope/option placement as a concrete oracle as well.
+        # The target contract is explicit: after deleting bisheng_options,
+        # retain the full pure-SIMT envelope and its automatic block policy.
         expected_options = list(common_prefix)
         first_auto_blockify = (env_enabled and
                                (user_option is None or user_option)) or (not env_enabled and bool(user_option))
         second_auto_blockify = env_enabled and not blacklisted and not row_applied
         if first_auto_blockify:
             expected_options.append("--enable-auto-blockify-loop")
-        if bisheng_options is not None:
-            expected_options.append(f"--append-bisheng-options={bisheng_options}")
         if second_auto_blockify:
             expected_options.append("--enable-auto-blockify-loop")
             if superblock > 0:
@@ -378,13 +366,12 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
             "kernel",
         ], case
 
-        # Row is now applied by make_ttir's graph pass.  npubin must preserve
-        # all compile arguments while no longer creating a Row pass manager.
-        assert baseline_pm.run_calls == [()], case
+        # Row is applied by make_ttir's graph pass.  npubin must preserve all
+        # compile arguments while no longer creating a Row pass manager.
         assert target_pm.run_calls == [], case
         count += 1
 
-    assert count == 96
+    assert count == 48
 
 
 @pytest.mark.parametrize(

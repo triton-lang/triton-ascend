@@ -41,7 +41,6 @@ def _make_metadata():
         "enable_mask_fallback_conversion": False,
         "optimize_dynamic_offset": False,
         "auto_blockify_size": 1,
-        "add_auto_scheduling": False,
         "enable_dynamic_cv_pipeline": False,
         "hash": "deadbeef",
     }

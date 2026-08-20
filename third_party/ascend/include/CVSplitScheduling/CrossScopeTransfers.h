@@ -30,7 +30,6 @@
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/DenseMap.h"
 
-
 #include "llvm/ADT/SmallVector.h"
 
 #include <cstdint>
@@ -49,29 +48,30 @@ constexpr unsigned kMaxTransferFlags = kMaxTransferFlagId + 1;
 /// `std::nullopt` when there is nothing to merge. Callers compare this against
 /// the same budget `insertCrossScopeTransfers` uses, so both stages reach the
 /// same answer about whether those pools still rotate.
-std::optional<uint64_t> cubeToVectorUnionExtraBytes(Block *body, const Classification &classification,
-                                                    unsigned interCoreBufferDepth, unsigned lanes);
+std::optional<uint64_t>
+cubeToVectorUnionExtraBytes(Block *body, const Classification &classification,
+                            unsigned interCoreBufferDepth, unsigned lanes);
 
 /// Describes the IR emitted for one VECTOR-to-CUBE transfer. The values and
 /// operation pointers are non-owning handles into the loop being transformed.
 struct VectorToCubeTransferChain {
-    /// VECTOR-produced tensor that must be packed for CUBE consumption.
-    Value pSrc;
-    /// Shared L1 destination allocated for the packed tensor.
-    Value l1Alloc;
-    /// `hivm::SyncBlockSetOp` before which the final copy is committed.
-    Operation *anchor;
-    /// Pack operations still owned by the IR. Scope separation must erase them
-    /// in reverse order before rebuilding a per-vector-core pack.
-    llvm::SmallVector<Operation *> operationsToErase;
+  /// VECTOR-produced tensor that must be packed for CUBE consumption.
+  Value pSrc;
+  /// Shared L1 destination allocated for the packed tensor.
+  Value l1Alloc;
+  /// `hivm::SyncBlockSetOp` before which the final copy is committed.
+  Operation *anchor;
+  /// Pack operations still owned by the IR. Scope separation must erase them
+  /// in reverse order before rebuilding a per-vector-core pack.
+  llvm::SmallVector<Operation *> operationsToErase;
 };
 
 /// Cross-scope transfer metadata consumed by scope separation.
 struct CrossScopeTransferInfo {
-    /// Full row count derived from the leading CUBE-to-VECTOR transfer
-    /// dimension. Scope separation halves it to M/2 rows per vector core.
-    int64_t blockM;
-    llvm::SmallVector<VectorToCubeTransferChain> vectorToCubeChains;
+  /// Full row count derived from the leading CUBE-to-VECTOR transfer
+  /// dimension. Scope separation halves it to M/2 rows per vector core.
+  int64_t blockM;
+  llvm::SmallVector<VectorToCubeTransferChain> vectorToCubeChains;
 };
 
 /// Materializes CUBE-to-VECTOR and VECTOR-to-CUBE data movement and
@@ -85,12 +85,12 @@ struct CrossScopeTransferInfo {
 /// before the referenced operations are erased or reordered.
 /// `blockM`, derived internally from the leading transfer, must be positive and
 /// divisible by 32 so scope separation can split it evenly across two AIVs.
-FailureOr<CrossScopeTransferInfo>
-insertCrossScopeTransfers(scf::ForOp loop, const Classification &classification,
-                          const llvm::DenseMap<Operation *, Operation *> &transferPhaseEnds,
-                          unsigned interCoreBufferDepth, uint64_t privateBufferUbBudgetBytes = 0,
-                          bool promotePrivateBufferPools = false,
-                          unsigned vectorToCubeSlotOverride = 0);
+FailureOr<CrossScopeTransferInfo> insertCrossScopeTransfers(
+    scf::ForOp loop, const Classification &classification,
+    const llvm::DenseMap<Operation *, Operation *> &transferPhaseEnds,
+    unsigned interCoreBufferDepth, uint64_t privateBufferUbBudgetBytes = 0,
+    bool promotePrivateBufferPools = false,
+    unsigned vectorToCubeSlotOverride = 0);
 
 } // namespace mlir::triton::cv_split
 

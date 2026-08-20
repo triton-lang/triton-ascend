@@ -27,9 +27,8 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/DenseMap.h"
-#include <vector>
 #include <optional>
-
+#include <vector>
 
 namespace mlir {
 namespace triton {

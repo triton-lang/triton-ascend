@@ -55,7 +55,8 @@ FailureOr<Classification> readDCVPClassification(Block *body);
 
 /// Logs the candidate body's classifications and returns true when both the
 /// CUBE and VECTOR subcores have work. `body` is used only for debug logging.
-bool checkCoreClassifications(Block *body, const Classification &classification);
+bool checkCoreClassifications(Block *body,
+                              const Classification &classification);
 
 /// Removes the temporary core ownership attribute emitted by DCVP.
 void removeDCVPClassificationAttrs(ModuleOp module);

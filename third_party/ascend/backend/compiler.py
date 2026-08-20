@@ -723,10 +723,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if vf_merge_level is not None:
             _compile_option_list += [f"--enable-vf-merge-level={vf_merge_level}"]
 
-        enable_cross_if_fusion = metadata["enable_cross_if_fusion"]
-        if enable_cross_if_fusion:
-            _compile_option_list += [f"--hfusion-enable-cross-if-fusion={enable_cross_if_fusion}"]
-
         plan_memory_strategy = metadata["plan_memory_strategy"]
         if plan_memory_strategy is not None:
             _compile_option_list += [f"--plan-memory-strategy={plan_memory_strategy}"]
@@ -1020,7 +1016,6 @@ class NPUOptions:
     tile_mix_cube_loop: int = None
     enable_mixed_cv: bool = None
     enable_dynamic_cv_pipeline: bool = None
-    enable_cross_if_fusion: bool = False
     has_auto_blockify_blacklist_op: Optional[bool] = None
     intra_cache_num: int = None
     inter_cache_num: int = None

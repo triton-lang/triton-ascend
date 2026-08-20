@@ -33,9 +33,8 @@ from triton.runtime.cache import get_cache_manager, get_dump_manager
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
 from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int,
-                                          _is_auto_map_parallel_blocks_enabled, is_ffts_supported,
-                                          force_disable_ffts, get_backend_func,
-                                          _warn_deprecated_ascend_env_var)
+                                          _is_auto_map_parallel_blocks_enabled, is_ffts_supported, force_disable_ffts,
+                                          get_backend_func)
 # Bind the already-imported utils module once so the launch hot path can write
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils
@@ -170,8 +169,6 @@ class NPULauncher(object):
 
     def __init__(self, src, metadata):
         self.compile_only = os.getenv("TRITON_COMPILE_ONLY", 'false').lower() in ('true', '1')
-        _warn_deprecated_ascend_env_var("TRITON_REGISTER_TENSOR_MSPROF")
-        self.enable_msprof_register_tensor = False
         self.src = src
         self.metadata = metadata
         self.so_launcher_path = self._make_launcher_stub_path()
@@ -208,21 +205,16 @@ class NPULauncher(object):
             print("[INFO]: skip running kernel")
             print(f"[INFO]: The compiled kernel cache is in {cache_manager.cache_dir}")
             return
-        if self.enable_msprof_register_tensor:
-            tensor_params_shape = get_backend_func("get_tensor_params_shape", *kernel_args)
-            packed_metadata['tensor_params_shape'] = tensor_params_shape
-        else:
-            global_scratch = None
-            if self.global_scratch_size > 0 and gridX > 0 and gridY > 0 and gridZ > 0:
-                grid_size = gridX * gridY * gridZ
-                alloc_size = grid_size * self.global_scratch_size
-                alloc_fn = _allocation._allocator.get()
-                global_scratch = alloc_fn(alloc_size, self.global_scratch_align, stream)
+        global_scratch = None
+        if self.global_scratch_size > 0 and gridX > 0 and gridY > 0 and gridZ > 0:
+            grid_size = gridX * gridY * gridZ
+            alloc_size = grid_size * self.global_scratch_size
+            alloc_fn = _allocation._allocator.get()
+            global_scratch = alloc_fn(alloc_size, self.global_scratch_align, stream)
 
-            profiler_registered = self.launch(gridX, gridY, gridZ, stream, function, global_scratch, None,
-                                              packed_metadata, launch_metadata, launch_enter_hook, launch_exit_hook,
-                                              *kernel_args, **kwargs)
-            _ascend_utils.TRITON_PROFILER_REGISTERED = (profiler_registered == 1)
+        profiler_registered = self.launch(gridX, gridY, gridZ, stream, function, global_scratch, None, packed_metadata,
+                                          launch_metadata, launch_enter_hook, launch_exit_hook, *kernel_args, **kwargs)
+        _ascend_utils.TRITON_PROFILER_REGISTERED = (profiler_registered == 1)
 
 
 class NPUDriver(DriverBase):

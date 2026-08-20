@@ -34,7 +34,8 @@ from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
 from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int,
                                           _is_auto_map_parallel_blocks_enabled, get_ascend_arch_from_env,
-                                          is_ffts_supported, force_disable_ffts, get_backend_func)
+                                          is_ffts_supported, force_disable_ffts, get_backend_func,
+                                          _warn_deprecated_ascend_env_var)
 # Bind the already-imported utils module once so the launch hot path can write
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils
@@ -171,8 +172,8 @@ class NPULauncher(object):
 
     def __init__(self, src, metadata):
         self.compile_only = os.getenv("TRITON_COMPILE_ONLY", 'false').lower() in ('true', '1')
-        self.enable_msprof_register_tensor = os.getenv("TRITON_REGISTER_TENSOR_MSPROF",
-                                                       'false').lower() in ('true', '1')
+        _warn_deprecated_ascend_env_var("TRITON_REGISTER_TENSOR_MSPROF")
+        self.enable_msprof_register_tensor = False
         self.src = src
         self.metadata = metadata
         self.so_launcher_path = self._make_launcher_stub_path()
@@ -671,7 +672,7 @@ def make_launcher(constants, signature, metadata):
     grid_info = {'X': 'i32', 'Y': 'i32', 'Z': 'i32'}
     # TODO: automatically check if gather load ops are used.
 
-    arch = get_ascend_arch_from_env()
+    arch = metadata.target.arch
     target_support_ffts = is_ffts_supported(arch) and (not force_disable_ffts())
     enable_device_print = os.getenv("TRITON_DEVICE_PRINT", 'false').lower() in ('true', '1')
     enable_taskqueue = os.getenv("TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')

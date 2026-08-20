@@ -62,6 +62,9 @@ from triton.backends.ascend.utils import (
     _is_auto_map_parallel_blocks_enabled,
     _get_auto_blockify_blacklist_reasons,
     _warn_auto_blockify_disabled,
+    _remove_deprecated_npu_options,
+    _warn_deprecated_ascend_env_var,
+    _warn_deprecated_ascend_env_vars,
     downgrade_llir,
     force_disable_ffts,
     graph_ub_budget_bytes_for_arch,
@@ -998,7 +1001,8 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 _compile_option_list += \
                     [f"--link-aicore-bitcode={bitcode}"]
 
-        enable_libdevice = os.getenv("TRITON_ENABLE_LIBDEVICE", False)
+        _warn_deprecated_ascend_env_var("TRITON_ENABLE_LIBDEVICE")
+        enable_libdevice = True
         if enable_libdevice:
             _compile_option_list += [f"--link-aicore-bitcode={get_libdevice()}"]
 
@@ -1354,7 +1358,17 @@ class AscendBackend(BaseBackend):
     def parse_options(self, opts) -> Any:
         # TODO: get available targets when building options?
         if self.target.backend == "npu":
-            args = {k: opts[k] for k in NPUOptions.__dataclass_fields__.keys() if k in opts}
+            _warn_deprecated_ascend_env_vars()
+            option_names = NPUOptions.__dataclass_fields__.keys()
+            # JIT and AOT hand the complete, already-normalized dataclass back to
+            # parse_options before compilation.  Those values are internal state,
+            # not a second batch of user overrides.
+            internal_options = option_names <= opts.keys()
+            # JIT validates the same dictionary after this call.  Remove public
+            # compatibility keys in place so Ascend can accept them without
+            # requiring any change to the community JIT implementation.
+            normalized_opts = opts if internal_options else _remove_deprecated_npu_options(opts, in_place=True)
+            args = {k: normalized_opts[k] for k in option_names if k in normalized_opts}
             args.setdefault("arch", self.target.arch)
             options = NPUOptions(**args)
             # Lazy init compile_on_910_95 if not provided

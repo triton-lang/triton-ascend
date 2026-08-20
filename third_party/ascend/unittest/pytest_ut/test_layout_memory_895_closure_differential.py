@@ -478,6 +478,7 @@ def _load_make_launcher(source):
 
 def _make_metadata(*, factor, axis, ceil_div, blacklisted, row_applied):
     return SimpleNamespace(
+        target=SimpleNamespace(arch="Ascend910B"),
         workspace_size=0,
         lock_init_value=0,
         lock_num=0,

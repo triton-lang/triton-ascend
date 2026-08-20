@@ -938,11 +938,6 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if enable_libdevice:
             _compile_option_list += [f"--link-aicore-bitcode={get_libdevice()}"]
 
-        disable_size_align_for_cast = metadata["disable_size_align_for_cast"]
-        if disable_size_align_for_cast is not None:
-            _compile_option_list += \
-                [f"--disable-size-align-for-cast={disable_size_align_for_cast}"]
-
         if _is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False):
             _compile_option_list += ["--enable-auto-blockify-loop"]
         npu_compiler_path, env = _get_npucompiler_path()
@@ -1057,7 +1052,6 @@ class NPUOptions:
     prevec_max_fused_ops_num: int = None
     inject_barrier_all: bool = None
     inject_block_all: bool = None
-    disable_size_align_for_cast: bool = None
     limit_auto_multi_buffer_only_for_local_buffer: bool = None
     limit_auto_multi_buffer_of_local_buffer: str = None
     limit_auto_multi_buffer_buffer: str = None
@@ -1171,6 +1165,7 @@ _REMOVED_NPU_COMPILE_OPTIONS = frozenset({
     "graph_optimize_emit_remarks",
     "bisheng_options",
     "code_motion",
+    "disable_size_align_for_cast",
     "enable_cce_vf_auto_sync",
     "enable_cce_vf_remove_membar",
     "enable_drop_unit_dims",

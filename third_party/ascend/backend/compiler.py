@@ -675,11 +675,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--enable-mixed-cv={enable_mixed_cv}"]
 
-        enable_vf_fusion = metadata["enable_vf_fusion"]
-        if enable_vf_fusion is not None:
-            _compile_option_list += \
-                [f"--enable-vf-fusion={enable_vf_fusion}"]
-
         enable_flatten = metadata["enable_flatten"]
         if enable_flatten is not None:
             _compile_option_list += \
@@ -1027,7 +1022,6 @@ class NPUOptions:
     tile_mix_vector_loop: int = None
     tile_mix_cube_loop: int = None
     enable_mixed_cv: bool = None
-    enable_vf_fusion: bool = None
     enable_dynamic_cv_pipeline: bool = None
     # Gates the cube-loader penetration + cube-for block merge feature. Off by
     # default so existing scenarios are unaffected; opt in per kernel to fuse a

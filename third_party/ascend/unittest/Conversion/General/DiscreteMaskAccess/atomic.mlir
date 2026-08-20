@@ -236,11 +236,11 @@ tt.func @atomic_add_cont_disc_i32(%arg0: !tt.ptr<i32>, %arg1: i32) {
 // -----
 
 // CHECK-LABEL: tt.func @atomic_min_f32_splat_bitcast
-// CHECK: %[[VALUE_PTR:.*]] = tt.addptr %arg0, %{{.*}} : !tt.ptr<f32>, i32
-// CHECK: %[[VALUE_PTRS:.*]] = tt.splat %[[VALUE_PTR]] : !tt.ptr<f32> -> tensor<1x1x1x1x!tt.ptr<f32>>
+// CHECK-NOT: tt.addptr %arg0
+// CHECK: %[[VALUE_PTRS:.*]] = tt.splat %arg0 : !tt.ptr<f32> -> tensor<1x1x1x1x!tt.ptr<f32>>
 // CHECK: %[[VALUE:.*]] = tt.load %[[VALUE_PTRS]] : tensor<1x1x1x1x!tt.ptr<f32>>
-// CHECK: %[[OUTPUT_PTR:.*]] = tt.addptr %arg1, %{{.*}} : !tt.ptr<f32>, i32
-// CHECK: %[[OUTPUT_PTRS:.*]] = tt.splat %[[OUTPUT_PTR]] : !tt.ptr<f32> -> tensor<1x1x1x1x!tt.ptr<f32>>
+// CHECK-NOT: tt.addptr %arg1
+// CHECK: %[[OUTPUT_PTRS:.*]] = tt.splat %arg1 : !tt.ptr<f32> -> tensor<1x1x1x1x!tt.ptr<f32>>
 // CHECK: tt.atomic_rmw min, acq_rel, gpu, %[[OUTPUT_PTRS]], %[[VALUE]], %{{.*}} : (tensor<1x1x1x1x!tt.ptr<f32>>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xi1>) -> tensor<1x1x1x1xf32>
 // CHECK-NOT: tt.atomic_rmw umax
 tt.func @atomic_min_f32_splat_bitcast(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<f32>) {

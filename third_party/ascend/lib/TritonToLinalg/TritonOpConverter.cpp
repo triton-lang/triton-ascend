@@ -3303,6 +3303,15 @@ LogicalResult IndirectLoadConverter::matchAndRewrite(
   auto res = op.getResult();
   auto resTy = res.getType();
 
+  if (!isa<MemRefType>(src.getType())) {
+    llvm::SmallDenseMap<Value, BlockData> known;
+    FailureOr<Value> materialized =
+        BlockDataParser::materializePointer(op.getSrc(), rewriter, known);
+    if (failed(materialized))
+      return rewriter.notifyMatchFailure(
+          op, "unable to materialize indirect-load source as a memref");
+    src = *materialized;
+  }
   // convert !tt.ptr<f32> to memref<?xf32>
   auto srcTy = dyn_cast<MemRefType>(src.getType());
   if (!srcTy) {
@@ -3437,6 +3446,15 @@ LogicalResult IndirectStoreConverter::matchAndRewrite(
   auto value = op.getValue();
   auto mask = op.getMask();
 
+  if (!isa<MemRefType>(src.getType())) {
+    llvm::SmallDenseMap<Value, BlockData> known;
+    FailureOr<Value> materialized =
+        BlockDataParser::materializePointer(op.getSrc(), rewriter, known);
+    if (failed(materialized))
+      return rewriter.notifyMatchFailure(
+          op, "unable to materialize indirect-store source as a memref");
+    src = *materialized;
+  }
   // convert !tt.ptr<f32> to memref<?xf32>
   auto srcTy = dyn_cast<MemRefType>(src.getType());
   if (!srcTy) {

@@ -42,22 +42,18 @@ tt.func public @triton_indirect_store_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr
 // CHECK:           tt.return
 // CHECK:         }
 
-// tt.int_to_ptr + tt.store -> wrap with addptr(src, 0), then
-// ascend.indirect_store. The addptr wrap is required so that the later
-// TritonToLinalg AddPtrConverter can lower it to a hivm::PointerCastOp
-// (memref type), which IndirectStoreConverter needs to emit
-// func.call @triton_indirect_store.
+// tt.int_to_ptr + tt.store -> ascend.indirect_store with the original pointer.
+// TritonToLinalg materializes the pointer at the indirect-store consumer.
 // CHECK-LABEL:     tt.func public @triton_indirect_store_int_to_ptr_kernel(
-// CHECK:           %[[ZERO:.*]] = arith.constant 0 : i64
 // CHECK:           %[[BASE:.*]] = tt.int_to_ptr {{.*}} : i64 -> !tt.ptr<f32>
-// CHECK:           %[[WRAPPED:.*]] = tt.addptr %[[BASE]], %[[ZERO]] : !tt.ptr<f32>, i64
-// CHECK:           ascend.indirect_store %[[WRAPPED]] : <f32>, {{.*}} : tensor<8xi64>, {{.*}} : tensor<8xf32>
+// CHECK-NOT:       tt.addptr %[[BASE]]
+// CHECK:           ascend.indirect_store %[[BASE]] : <f32>, {{.*}} : tensor<8xi64>, {{.*}} : tensor<8xf32>
 // CHECK:           tt.return
 // CHECK:         }
 
 // The same kernel lowered through TritonToLinalg must produce a
-// hivm::PointerCastOp (memref) from the wrapped addptr and finally a
-// func.call @triton_indirect_store.
+// hivm::PointerCastOp (memref) directly from int_to_ptr and finally a func.call
+// @triton_indirect_store.
 // LINALG-LABEL: func.func @triton_indirect_store_int_to_ptr_kernel
 // LINALG: hivm.hir.pointer_cast(%{{.*}}) [%{{.*}}] : memref<?xf32>
 // LINALG: call @triton_indirect_store{{.*}}(%{{.*}}, %{{.*}}, %{{.*}}) : (memref<{{.*}}xf32, strided<[1]>>, tensor<8xi64>, tensor<8xf32>) -> ()

@@ -387,16 +387,11 @@ Value BlockDataParser::getScalarMemRef(Value ptr, Value memref,
                                        const Location &loc,
                                        ConversionPatternRewriter &rewriter) {
   assert(isa<triton::PointerType>(ptr.getType()) && "expect a scalar pointer");
-  if (ptr.getDefiningOp<triton::AddPtrOp>()) {
-    if (auto castOp = memref.getDefiningOp<memref::ReinterpretCastOp>()) {
-      return castOp.getResult();
-    } else {
-      llvm_unreachable("pointer value is defined by an unexpected op");
-    }
-  }
+  if (auto castOp = memref.getDefiningOp<memref::ReinterpretCastOp>())
+    return castOp.getResult();
 
-  assert(isa<BlockArgument>(ptr) &&
-         "pointer should be produced by addptr or block argument");
+  assert(isa<BaseMemRefType>(memref.getType()) &&
+         "converted scalar pointer should be a memref");
   BlockData data;
   data.setSource(memref);
   data.getOffsetsRef().push_back(rewriter.getIndexAttr(0));
@@ -1394,6 +1389,100 @@ void BlockDataParser::rewriteAddPtr(
 
   rewriter.replaceOp(op, src);
   rewriter.restoreInsertionPoint(insertPoint);
+}
+
+FailureOr<Value> BlockDataParser::materializePointer(
+    Value ptr, ConversionPatternRewriter &rewriter,
+    llvm::SmallDenseMap<Value, BlockData> &known) {
+  SmallVector<int64_t> resultShape;
+  if (auto resultTy = dyn_cast<RankedTensorType>(ptr.getType())) {
+    if (!isa<triton::PointerType>(resultTy.getElementType()))
+      return failure();
+    resultShape.append(resultTy.getShape().begin(), resultTy.getShape().end());
+  } else if (auto pointerTy = dyn_cast<triton::PointerType>(ptr.getType())) {
+    // A pointer to a shaped value is a block pointer, not a scalar element
+    // pointer. It is materialized by the make_tensor_ptr path instead.
+    if (isa<ShapedType>(pointerTy.getPointeeType()))
+      return failure();
+    resultShape.push_back(1);
+  } else {
+    return failure();
+  }
+
+  Operation *defOp = ptr.getDefiningOp();
+  if (!defOp)
+    return failure();
+
+  ConversionPatternRewriter::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPoint(defOp);
+
+  BlockData data;
+  parse(ptr, data, ptr.getLoc(), rewriter, known);
+  if (!data.hasSource() || data.getMemAccType().isUnstructured())
+    return failure();
+
+  if (data.getSizesRef().empty()) {
+    data.getSizesRef().push_back(rewriter.getIndexAttr(1));
+    data.getStridesRef().push_back(rewriter.getIndexAttr(0));
+    data.getOffsetsRef().push_back(data.getScalarRef().isNull()
+                                       ? OpFoldResult(rewriter.getIndexAttr(0))
+                                       : data.getScalarRef());
+  }
+
+  if (data.getRank() != static_cast<int64_t>(resultShape.size()))
+    return failure();
+
+  known[ptr] = data;
+
+  // A unit dimension with zero stride is represented as a normal contiguous
+  // unit dimension. Non-unit zero strides are intentional (for example a
+  // splatted base pointer) and must be preserved.
+  int64_t inferredSize = 1;
+  for (int64_t i = data.getRank() - 1; i >= 0; --i) {
+    auto strideConst = getConstantIntValue(data.getStridesRef()[i]);
+    auto sizeConst = getConstantIntValue(data.getSizesRef()[i]);
+    if (!sizeConst)
+      return failure();
+    if (sizeConst.value() == 1 && strideConst && strideConst.value() == 0)
+      data.getStridesRef()[i] = rewriter.getIndexAttr(inferredSize);
+    inferredSize *= sizeConst.value();
+  }
+
+  // Keep negative static offsets as SSA values. This mirrors rewriteAddPtr and
+  // avoids unsigned attribute handling in later reinterpret_cast lowering.
+  auto &offsets = data.getOffsetsRef();
+  for (OpFoldResult &offset : offsets) {
+    if (auto constVal = getConstantIntValue(offset);
+        constVal && constVal.value() < 0) {
+      offset =
+          rewriter
+              .create<arith::ConstantIndexOp>(ptr.getLoc(), constVal.value())
+              .getResult();
+    }
+  }
+
+  if (auto intToPtrOp = dyn_cast_or_null<triton::IntToPtrOp>(
+          data.getSourceRef().getDefiningOp())) {
+    auto pointerTy =
+        cast<triton::PointerType>(intToPtrOp.getResult().getType());
+    auto memrefTy =
+        MemRefType::get({ShapedType::kDynamic}, pointerTy.getPointeeType());
+    auto pointerCast = rewriter.create<hivm::PointerCastOp>(
+        intToPtrOp.getLoc(), memrefTy, ValueRange{intToPtrOp.getSrc()});
+    data.setSource(pointerCast.getResult());
+  }
+
+  if (data.hasResElemTy()) {
+    auto sourceTy = dyn_cast<BaseMemRefType>(data.getSourceRef().getType());
+    if (!sourceTy)
+      return failure();
+    auto castTy = sourceTy.cloneWith(std::nullopt, data.getResElemTyRef());
+    auto cast = rewriter.create<UnrealizedConversionCastOp>(
+        ptr.getLoc(), castTy, data.getSourceRef());
+    data.setSource(cast.getResult(0));
+  }
+
+  return data.createCastOp(resultShape, ptr.getLoc(), rewriter).getResult();
 }
 
 OpFoldResult

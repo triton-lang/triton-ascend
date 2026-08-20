@@ -675,6 +675,12 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   patterns.add<triton::MetaUseEraser>(patterns.getContext());
   patterns.add<LoadStoreConverter::StoreConverter>(patterns.getContext());
   patterns.add<LoadStoreConverter::AddPtrConverter>(patterns.getContext());
+  patterns
+      .add<LoadStoreConverter::MemoryPointerConverter<triton::SplatOp>,
+           LoadStoreConverter::MemoryPointerConverter<triton::BitcastOp>,
+           LoadStoreConverter::MemoryPointerConverter<triton::BroadcastOp>,
+           LoadStoreConverter::MemoryPointerConverter<triton::ExpandDimsOp>>(
+          patterns.getContext());
   patterns.add<FunctionConverter::GetProgramIDConverter>(patterns.getContext());
   patterns.add<FunctionConverter::GetNumProgramsConverter>(
       patterns.getContext());

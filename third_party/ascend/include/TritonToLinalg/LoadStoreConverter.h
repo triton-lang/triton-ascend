@@ -34,8 +34,9 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "mlir/Dialect/Arith/Utils/Utils.h"
-
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
+
+#include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
 
 namespace LoadStoreConverter {
 
@@ -48,6 +49,35 @@ public:
   LogicalResult
   matchAndRewrite(triton::AddPtrOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+};
+
+/// Materialize pointer tensor expressions directly instead of routing them
+/// through a synthetic AddPtrOp with a zero offset. A higher benefit than the
+/// generic value converters ensures pointer layout is handled by
+/// BlockDataParser.
+template <typename OpTy>
+class MemoryPointerConverter : public OpConversionPattern<OpTy> {
+public:
+  explicit MemoryPointerConverter(MLIRContext *context)
+      : OpConversionPattern<OpTy>(context, PatternBenefit(2)) {}
+
+  LogicalResult
+  matchAndRewrite(OpTy op, typename OpTy::Adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto resultTy = dyn_cast<RankedTensorType>(op->getResult(0).getType());
+    if (!resultTy || !isa<triton::PointerType>(resultTy.getElementType()))
+      return failure();
+
+    llvm::SmallDenseMap<Value, BlockData> known;
+    FailureOr<Value> memref =
+        BlockDataParser::materializePointer(op->getResult(0), rewriter, known);
+    if (failed(memref))
+      return rewriter.notifyMatchFailure(
+          op, "unsupported pointer expression for direct materialization");
+
+    rewriter.replaceOp(op, *memref);
+    return success();
+  }
 };
 
 class LoadConverter : public OpConversionPattern<triton::LoadOp> {
@@ -93,39 +123,36 @@ public:
   LogicalResult matchAndRewrite(OpTy op,
                                 PatternRewriter &rewriter) const override {
     Value ptrVal = op.getPtr();
-    Type ptrTy = ptrVal.getType();
-    auto ptrDefOp = ptrVal.getDefiningOp();
+    auto ptrTy = dyn_cast<RankedTensorType>(ptrVal.getType());
+    if (!ptrTy || !isa<triton::PointerType>(ptrTy.getElementType()))
+      return failure();
 
-    bool shouldAddZeros = false;
-    if (!isa<BlockArgument>(ptrVal))
-      shouldAddZeros = !isTensorPointerType(ptrTy) &&
-                       !isa_and_nonnull<triton::AddPtrOp>(ptrDefOp);
-    else if (auto ptrType = dyn_cast<triton::PointerType>(ptrTy))
-      shouldAddZeros = ptrType.getPointeeType().isIntOrIndexOrFloat();
+    // ReorderBroadcast may turn
+    //   addptr(splat(base), splat(offset))
+    // into
+    //   splat(addptr(base, offset)).
+    // Recover the former shape at the memory boundary so AddPtrConverter can
+    // keep using the real (non-synthetic) offset as its lowering anchor.
+    auto splatOp = ptrVal.getDefiningOp<triton::SplatOp>();
+    if (!splatOp)
+      return failure();
 
-    if (shouldAddZeros) {
-      if (isa_and_nonnull<triton::BitcastOp>(ptrDefOp)) {
-        auto castOp = cast<triton::BitcastOp>(ptrDefOp);
-        auto castSrc = castOp.getSrc();
-        if (!isa<BlockArgument>(castSrc)) {
-          auto castSrcDefOp = castSrc.getDefiningOp();
-          if (isa<triton::AddPtrOp>(castSrcDefOp)) {
-            return rewriter.notifyMatchFailure(
-                op, "BitcastCanonicalizer handles addptr->bitcast->load!");
-          }
-        }
-      }
+    auto scalarAddPtr = splatOp.getSrc().getDefiningOp<triton::AddPtrOp>();
+    if (!scalarAddPtr)
+      return failure();
 
-      Type zeroTy = getI32SameShape(ptrTy);
-      Value zeroVal =
-          createScalarOrSplatConstant(rewriter, op.getLoc(), zeroTy, 0);
-      Value addptrVal = rewriter.create<triton::AddPtrOp>(op.getLoc(), ptrTy,
-                                                          ptrVal, zeroVal);
-      rewriter.modifyOpInPlace(
-          op, [&]() { op->replaceUsesOfWith(ptrVal, addptrVal); });
-      return success();
-    }
-    return failure();
+    Value ptrSplat = rewriter.create<triton::SplatOp>(op.getLoc(), ptrTy,
+                                                      scalarAddPtr.getPtr());
+    auto offsetTy =
+        ptrTy.cloneWith(std::nullopt, scalarAddPtr.getOffset().getType());
+    Value offsetSplat = rewriter.create<triton::SplatOp>(
+        op.getLoc(), offsetTy, scalarAddPtr.getOffset());
+    Value addptr = rewriter.create<triton::AddPtrOp>(op.getLoc(), ptrTy,
+                                                     ptrSplat, offsetSplat);
+
+    rewriter.modifyOpInPlace(op,
+                             [&]() { op->replaceUsesOfWith(ptrVal, addptr); });
+    return success();
   }
 };
 

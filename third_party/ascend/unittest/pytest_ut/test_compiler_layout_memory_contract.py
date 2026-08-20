@@ -36,7 +36,7 @@ def _stub_graph_ub_budget_bytes_for_arch(arch):
 
     The table itself is covered by the source-loaded backend-utils test.  This
     local shim keeps this compiler-only contract independent of the installed
-    Ascend package while retaining meaningful option-normalization assertions.
+    Ascend package while retaining meaningful architecture-budget assertions.
     """
     if not isinstance(arch, str) or not arch:
         return 0
@@ -572,7 +572,7 @@ def _run_make_ttir_with_recorded_graph_options(compiler, monkeypatch, options):
 def test_make_ttir_passes_force_simt_only_to_graph_optimize(compiler_module, monkeypatch):
     options = SimpleNamespace(
         enable_graph_optimize=True,
-        graph_optimize_ub_capacity_bytes=4096,
+        target_arch="Ascend910B1",
         force_simt_only=True,
         debug=False,
     )
@@ -580,7 +580,7 @@ def test_make_ttir_passes_force_simt_only_to_graph_optimize(compiler_module, mon
     events, graph_calls = _run_make_ttir_with_recorded_graph_options(compiler_module, monkeypatch, options)
 
     assert graph_calls == [{
-        "ub_capacity_bytes": 4096,
+        "ub_capacity_bytes": 96 * 1024,
         "force_simt_only": True,
     }]
     assert events[-1] == "run_row"
@@ -725,7 +725,6 @@ def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compil
     assert default_options.compile_mode == "unstructured_in_simt"
     assert default_options.force_simt_template is True
     assert default_options.force_simt_only is False
-    assert default_options.graph_optimize_ub_capacity_bytes == 0
 
     simd_options = compiler_module.NPUOptions(compile_mode="simd")
     assert simd_options.force_simt_template is False

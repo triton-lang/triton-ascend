@@ -23,7 +23,6 @@ import functools
 import hashlib
 import glob
 import json
-from numbers import Integral
 import os
 import re
 import shlex
@@ -182,7 +181,7 @@ def make_ttir(mod, metadata, opt):
     if opt.enable_graph_optimize:
         ascend.passes.ttir.add_graph_optimize(
             pm,
-            ub_capacity_bytes=opt.graph_optimize_ub_capacity_bytes,
+            ub_capacity_bytes=graph_ub_budget_bytes_for_arch(opt.target_arch),
             force_simt_only=opt.force_simt_only,
         )
     pm.run(mod, 'make_ttir')
@@ -1093,7 +1092,6 @@ class NPUOptions:
     backend_name: str = 'cann'
     instrumentation_mode: str = ""
     enable_graph_optimize: bool = True
-    graph_optimize_ub_capacity_bytes: Optional[int] = None
     allow_fp8e4nv: bool = False
     auto_tile_and_bind_subblock: bool = True
     vf_merge_level: int = 0
@@ -1197,18 +1195,6 @@ class NPUOptions:
 
         _apply_ascend_patch()
         object.__setattr__(self, "target_arch", arch)
-        graph_ub_budget_bytes = graph_ub_budget_bytes_for_arch(self.target_arch)
-        requested_graph_ub_capacity_bytes = self.graph_optimize_ub_capacity_bytes
-        if requested_graph_ub_capacity_bytes is None:
-            graph_ub_capacity_bytes = graph_ub_budget_bytes
-        else:
-            if (isinstance(requested_graph_ub_capacity_bytes, bool)
-                    or not isinstance(requested_graph_ub_capacity_bytes, Integral)):
-                raise TypeError("graph_optimize_ub_capacity_bytes must be a non-negative integer or None")
-            if requested_graph_ub_capacity_bytes < 0:
-                raise ValueError("graph_optimize_ub_capacity_bytes must be non-negative")
-            graph_ub_capacity_bytes = min(int(requested_graph_ub_capacity_bytes), graph_ub_budget_bytes)
-        object.__setattr__(self, "graph_optimize_ub_capacity_bytes", graph_ub_capacity_bytes)
 
         # Parse compile_mode and set related fields
         if self.compile_mode == "simd":

@@ -116,6 +116,26 @@ def constexpr_wrapped_tile_copy_kernel(src_ptr, dst_ptr, N: tl.constexpr, BLOCK_
 
 
 @triton.jit
+def block_quant_wrapped_tile_kernel(src_ptr, scale_ptr, dst_ptr, n, BLOCK_K: tl.constexpr, BLOCK_N: tl.constexpr,
+                                    GROUP_N: tl.constexpr):
+    # The block-quantised fused-MoE shape: the wrapped column index addresses
+    # the weight tile and, divided by the group size, the rank-one scale vector.
+    # A uniform divisor keeps each lane of that derived index a function of the
+    # same lane, so the one boundary mask covers both loads.
+    pid = tl.program_id(0)
+    offs_n = pid * BLOCK_N + tl.arange(0, BLOCK_N)
+    offs_k = tl.arange(0, BLOCK_K)
+    wrapped = offs_n % n
+    tile = tl.load(src_ptr + (offs_k[:, None] * n + wrapped[None, :]))
+    scales = tl.load(scale_ptr + wrapped // GROUP_N)
+    tl.store(
+        dst_ptr + (offs_k[:, None] * n + offs_n[None, :]),
+        tile * scales[None, :],
+        mask=offs_n[None, :] < n,
+    )
+
+
+@triton.jit
 def overflow_assert_provenance_kernel(output_ptr, n, BLOCK: tl.constexpr):
     offsets = tl.arange(0, BLOCK)
     checked_offset = offsets * n
@@ -918,6 +938,99 @@ def test_convert_modulo_to_mask_numerical_equivalence(monkeypatch, tmp_path):
             compiled.asm["ttir"],
             tmp_path,
             f"wrapped-tile-{rule_mask}",
+        )
+        outputs[rule_mask] = output.cpu()
+
+    assert "arith.remsi" not in compiled.asm["ttir"]
+    torch.testing.assert_close(outputs[255], expected, rtol=0, atol=0)
+    torch.testing.assert_close(outputs[511], outputs[255], rtol=0, atol=0)
+
+
+def make_block_quant_ttir(options, block_k=8, block_n=16, group_n=8):
+    signature = {"src_ptr": "*fp32", "scale_ptr": "*fp32", "dst_ptr": "*fp32", "n": "i32"}
+    constants = {"BLOCK_K": block_k, "BLOCK_N": block_n, "GROUP_N": group_n}
+
+    source = ASTSource(block_quant_wrapped_tile_kernel, signature, constants)
+    context = ir.context()
+    ir.load_dialects(context)
+    ascend_ir.load_dialects(context)
+    module = ast_to_ttir(block_quant_wrapped_tile_kernel, source, context, options, {}, {})
+    return str(make_ttir(module, {}, options))
+
+
+def test_convert_modulo_to_mask_masks_derived_scale_index():
+    """A derived index no longer vetoes the candidate it shares with the tile.
+
+    The scale vector is rank one and is addressed by the wrapped index over the
+    group size.  Both loads take the same boundary mask, so both gain a zero
+    fill; the rank-one one is the evidence that the derived path was walked.
+    """
+    options = NPUOptions(arch="Ascend910B1", enable_graph_optimize=True)
+
+    ttir = make_block_quant_ttir(options)
+
+    assert "arith.remsi" not in ttir
+    assert "arith.cmpi slt" in ttir
+    assert "arith.constant dense<0.000000e+00> : tensor<8x16xf32>" in ttir
+    assert "arith.constant dense<0.000000e+00> : tensor<16xf32>" in ttir
+
+
+def test_convert_modulo_to_mask_derived_index_is_gated_by_its_rule_bit():
+    """Mask 255 is every other identity, so the wrap must survive intact."""
+    options = NPUOptions(
+        arch="Ascend910B1",
+        enable_graph_optimize=True,
+        graph_optimize_rule_mask=255,
+    )
+
+    ttir = make_block_quant_ttir(options)
+
+    assert "arith.remsi" in ttir
+
+
+def test_convert_modulo_to_mask_derived_index_numerical_equivalence(monkeypatch, tmp_path):
+    """The lanes the store keeps must read exactly what the wrap gave them.
+
+    Both loads are rewritten here, so a wrong mask orientation on either would
+    scale the surviving columns by zero rather than by their own group.
+    """
+    torch = _require_npu()
+    monkeypatch.setenv("TRITON_ALWAYS_COMPILE", "1")
+    block_k = 8
+    block_n = 16
+    group_n = 8
+    # A bound that is not a multiple of the tile makes the last program a
+    # boundary tile, which is the only place the wrap ever mattered.
+    bound = 20
+    # The widened lanes address past the end of both arrays instead of folding
+    # back into them, so each allocation carries one tile of slack.  Whether the
+    # lowered transfer really stops at the mask is a TritonToStructured
+    # property, asserted structurally by the tests above.
+    source = torch.rand(block_k * bound + block_n, dtype=torch.float32, device="npu")
+    scales = torch.rand((bound + block_n) // group_n + 1, dtype=torch.float32, device="npu")
+    columns = torch.arange(bound, device="npu")
+    expected = (source[:block_k * bound].view(block_k, bound) * scales[columns // group_n][None, :]).reshape(-1).cpu()
+
+    outputs = {}
+    for rule_mask in (255, 511):
+        block_quant_wrapped_tile_kernel.device_caches.clear()
+        output = torch.zeros(block_k * bound, dtype=torch.float32, device="npu")
+        grid = ((bound + block_n - 1) // block_n, )
+        compiled = block_quant_wrapped_tile_kernel[grid](
+            source,
+            scales,
+            output,
+            bound,
+            BLOCK_K=block_k,
+            BLOCK_N=block_n,
+            GROUP_N=group_n,
+            graph_optimize_rule_mask=rule_mask,
+        )
+        torch.npu.synchronize()
+        assert_ttir_text_reparseable(
+            compiled.asm["ttir"],
+            tmp_path,
+            f"block-quant-{rule_mask}",
         )
         outputs[rule_mask] = output.cpu()
 

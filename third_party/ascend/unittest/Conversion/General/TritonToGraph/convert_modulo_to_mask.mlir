@@ -369,6 +369,263 @@ tt.func public @modulo_load_inside_nested_loop(%base: !tt.ptr<f16> {tt.divisibil
 }
 
 // -----
+// In a debug build every tile offset carries an overflow-check cone.  It ends in
+// tt.assert, which has no results, so it never observes the un-wrapped index and
+// must not block the rewrite.
+// CHECK-LABEL: tt.func public @modulo_with_overflow_sanitizer_cone
+// CHECK-NOT: arith.remsi
+// CHECK: %[[BOUND:.*]] = arith.cmpi slt
+// CHECK: tt.assert
+// CHECK: %[[EXPAND:.*]] = tt.expand_dims %[[BOUND]] {axis = 0 : i32}
+// CHECK: %[[MASK:.*]] = tt.broadcast %[[EXPAND]]
+// CHECK: tt.load %{{.*}}, %[[MASK]], %{{.*}} : tensor<32x16x!tt.ptr<f16>>
+// CHECK-NOT: arith.remsi
+// DISABLED-LABEL: tt.func public @modulo_with_overflow_sanitizer_cone
+// DISABLED: arith.remsi
+tt.func public @modulo_with_overflow_sanitizer_cone(%base: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                                   %dst: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                                   %n: i32) {
+  %c16 = arith.constant 16 : i32
+  %pid = tt.get_program_id x : i32
+  %blk = arith.muli %pid, %c16 : i32
+  %blk_splat = tt.splat %blk : i32 -> tensor<16xi32>
+  %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+  %offs = arith.addi %blk_splat, %range : tensor<16xi32>
+  %n_splat = tt.splat %n : i32 -> tensor<16xi32>
+  %rem = arith.remsi %offs, %n_splat : tensor<16xi32>
+
+  %rem_expd = tt.expand_dims %rem {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+
+  // The sanitizer cone is a side use of the very value that addresses the load.
+  %wide = arith.extsi %rem_expd : tensor<1x16xi32> to tensor<1x16xi64>
+  %stride_wide = arith.constant dense<4> : tensor<1x16xi64>
+  %prod_wide = arith.muli %wide, %stride_wide : tensor<1x16xi64>
+  %i32_max = arith.constant dense<2147483647> : tensor<1x16xi64>
+  %i32_min = arith.constant dense<-2147483648> : tensor<1x16xi64>
+  %le = arith.cmpi sle, %prod_wide, %i32_max : tensor<1x16xi64>
+  %ge = arith.cmpi sge, %prod_wide, %i32_min : tensor<1x16xi64>
+  %ok = arith.andi %le, %ge : tensor<1x16xi1>
+  tt.assert %ok, "int32 overflow detected for operation mul" {tt.auto_overflow_assert} : tensor<1x16xi1>
+
+  %rem_bc = tt.broadcast %rem_expd : tensor<1x16xi32> -> tensor<32x16xi32>
+  %row = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32>
+  %row_expd = tt.expand_dims %row {axis = 1 : i32} : tensor<32xi32> -> tensor<32x1xi32>
+  %row_stride = arith.constant dense<16> : tensor<32x1xi32>
+  %row_scaled = arith.muli %row_expd, %row_stride : tensor<32x1xi32>
+  %row_bc = tt.broadcast %row_scaled : tensor<32x1xi32> -> tensor<32x16xi32>
+  %addr = arith.addi %row_bc, %rem_bc : tensor<32x16xi32>
+  %base_splat = tt.splat %base : !tt.ptr<f16> -> tensor<32x16x!tt.ptr<f16>>
+  %ptrs = tt.addptr %base_splat, %addr : tensor<32x16x!tt.ptr<f16>>, tensor<32x16xi32>
+  %val = tt.load %ptrs : tensor<32x16x!tt.ptr<f16>>
+
+  %guard = arith.cmpi slt, %offs, %n_splat : tensor<16xi32>
+  %guard_expd = tt.expand_dims %guard {axis = 0 : i32} : tensor<16xi1> -> tensor<1x16xi1>
+  %guard_bc = tt.broadcast %guard_expd : tensor<1x16xi1> -> tensor<32x16xi1>
+  %col_expd = tt.expand_dims %offs {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+  %col_bc = tt.broadcast %col_expd : tensor<1x16xi32> -> tensor<32x16xi32>
+  %out_addr = arith.addi %row_bc, %col_bc : tensor<32x16xi32>
+  %dst_splat = tt.splat %dst : !tt.ptr<f16> -> tensor<32x16x!tt.ptr<f16>>
+  %out_ptrs = tt.addptr %dst_splat, %out_addr : tensor<32x16x!tt.ptr<f16>>, tensor<32x16xi32>
+  tt.store %out_ptrs, %val, %guard_bc : tensor<32x16x!tt.ptr<f16>>
+  tt.return
+}
+
+// -----
+// Negative: the same cone without the frontend marker may be a user
+// device_assert, which would start checking a condition the kernel never wrote.
+// CHECK-LABEL: tt.func public @modulo_skip_unmarked_assert_cone
+// CHECK: arith.remsi
+tt.func public @modulo_skip_unmarked_assert_cone(%base: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                                %dst: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                                %n: i32) {
+  %c16 = arith.constant 16 : i32
+  %pid = tt.get_program_id x : i32
+  %blk = arith.muli %pid, %c16 : i32
+  %blk_splat = tt.splat %blk : i32 -> tensor<16xi32>
+  %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+  %offs = arith.addi %blk_splat, %range : tensor<16xi32>
+  %n_splat = tt.splat %n : i32 -> tensor<16xi32>
+  %rem = arith.remsi %offs, %n_splat : tensor<16xi32>
+
+  %rem_expd = tt.expand_dims %rem {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+  %wide = arith.extsi %rem_expd : tensor<1x16xi32> to tensor<1x16xi64>
+  %i32_max = arith.constant dense<2147483647> : tensor<1x16xi64>
+  %le = arith.cmpi sle, %wide, %i32_max : tensor<1x16xi64>
+  tt.assert %le, "int32 overflow detected for operation mul" : tensor<1x16xi1>
+
+  %rem_bc = tt.broadcast %rem_expd : tensor<1x16xi32> -> tensor<32x16xi32>
+  %row = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32>
+  %row_expd = tt.expand_dims %row {axis = 1 : i32} : tensor<32xi32> -> tensor<32x1xi32>
+  %row_stride = arith.constant dense<16> : tensor<32x1xi32>
+  %row_scaled = arith.muli %row_expd, %row_stride : tensor<32x1xi32>
+  %row_bc = tt.broadcast %row_scaled : tensor<32x1xi32> -> tensor<32x16xi32>
+  %addr = arith.addi %row_bc, %rem_bc : tensor<32x16xi32>
+  %base_splat = tt.splat %base : !tt.ptr<f16> -> tensor<32x16x!tt.ptr<f16>>
+  %ptrs = tt.addptr %base_splat, %addr : tensor<32x16x!tt.ptr<f16>>, tensor<32x16xi32>
+  %val = tt.load %ptrs : tensor<32x16x!tt.ptr<f16>>
+
+  %guard = arith.cmpi slt, %offs, %n_splat : tensor<16xi32>
+  %guard_expd = tt.expand_dims %guard {axis = 0 : i32} : tensor<16xi1> -> tensor<1x16xi1>
+  %guard_bc = tt.broadcast %guard_expd : tensor<1x16xi1> -> tensor<32x16xi1>
+  %col_expd = tt.expand_dims %offs {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+  %col_bc = tt.broadcast %col_expd : tensor<1x16xi32> -> tensor<32x16xi32>
+  %out_addr = arith.addi %row_bc, %col_bc : tensor<32x16xi32>
+  %dst_splat = tt.splat %dst : !tt.ptr<f16> -> tensor<32x16x!tt.ptr<f16>>
+  %out_ptrs = tt.addptr %dst_splat, %out_addr : tensor<32x16x!tt.ptr<f16>>, tensor<32x16xi32>
+  tt.store %out_ptrs, %val, %guard_bc : tensor<32x16x!tt.ptr<f16>>
+  tt.return
+}
+
+// -----
+// Negative: the widened index goes on to address a second load instead of
+// stopping at an assert, so it reaches memory and the wrap has to stay.
+// CHECK-LABEL: tt.func public @modulo_skip_widened_index_reaches_load
+// CHECK: arith.remsi
+tt.func public @modulo_skip_widened_index_reaches_load(%base: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                                      %dst: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                                      %n: i32) {
+  %c16 = arith.constant 16 : i32
+  %pid = tt.get_program_id x : i32
+  %blk = arith.muli %pid, %c16 : i32
+  %blk_splat = tt.splat %blk : i32 -> tensor<16xi32>
+  %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+  %offs = arith.addi %blk_splat, %range : tensor<16xi32>
+  %n_splat = tt.splat %n : i32 -> tensor<16xi32>
+  %rem = arith.remsi %offs, %n_splat : tensor<16xi32>
+
+  %rem_expd = tt.expand_dims %rem {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+  %rem_bc = tt.broadcast %rem_expd : tensor<1x16xi32> -> tensor<32x16xi32>
+  %row = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32>
+  %row_expd = tt.expand_dims %row {axis = 1 : i32} : tensor<32xi32> -> tensor<32x1xi32>
+  %row_stride = arith.constant dense<16> : tensor<32x1xi32>
+  %row_scaled = arith.muli %row_expd, %row_stride : tensor<32x1xi32>
+  %row_bc = tt.broadcast %row_scaled : tensor<32x1xi32> -> tensor<32x16xi32>
+  %addr = arith.addi %row_bc, %rem_bc : tensor<32x16xi32>
+  %base_splat = tt.splat %base : !tt.ptr<f16> -> tensor<32x16x!tt.ptr<f16>>
+  %ptrs = tt.addptr %base_splat, %addr : tensor<32x16x!tt.ptr<f16>>, tensor<32x16xi32>
+  %val = tt.load %ptrs : tensor<32x16x!tt.ptr<f16>>
+
+  // The widened index addresses memory instead of only feeding a check.
+  %wide = arith.extsi %rem_expd : tensor<1x16xi32> to tensor<1x16xi64>
+  %wide_bc = tt.broadcast %wide : tensor<1x16xi64> -> tensor<32x16xi64>
+  %wide_ptrs = tt.addptr %base_splat, %wide_bc : tensor<32x16x!tt.ptr<f16>>, tensor<32x16xi64>
+  %wide_val = tt.load %wide_ptrs : tensor<32x16x!tt.ptr<f16>>
+  %sum = arith.addf %val, %wide_val : tensor<32x16xf16>
+
+  %guard = arith.cmpi slt, %offs, %n_splat : tensor<16xi32>
+  %guard_expd = tt.expand_dims %guard {axis = 0 : i32} : tensor<16xi1> -> tensor<1x16xi1>
+  %guard_bc = tt.broadcast %guard_expd : tensor<1x16xi1> -> tensor<32x16xi1>
+  %col_expd = tt.expand_dims %offs {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+  %col_bc = tt.broadcast %col_expd : tensor<1x16xi32> -> tensor<32x16xi32>
+  %out_addr = arith.addi %row_bc, %col_bc : tensor<32x16xi32>
+  %dst_splat = tt.splat %dst : !tt.ptr<f16> -> tensor<32x16x!tt.ptr<f16>>
+  %out_ptrs = tt.addptr %dst_splat, %out_addr : tensor<32x16x!tt.ptr<f16>>, tensor<32x16xi32>
+  tt.store %out_ptrs, %sum, %guard_bc : tensor<32x16x!tt.ptr<f16>>
+  tt.return
+}
+
+// -----
+// Negative: the guard belongs to an unrelated store while the wrapped tile
+// leaves through an unmasked one, so the injected zeros would be written out
+// over what a deliberate circular index was meant to fetch.
+// CHECK-LABEL: tt.func public @modulo_skip_guard_from_unrelated_store
+// CHECK: arith.remsi
+tt.func public @modulo_skip_guard_from_unrelated_store(%base: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                                      %dst: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                                      %side: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                                      %n: i32) {
+  %c16 = arith.constant 16 : i32
+  %pid = tt.get_program_id x : i32
+  %blk = arith.muli %pid, %c16 : i32
+  %blk_splat = tt.splat %blk : i32 -> tensor<16xi32>
+  %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+  %offs = arith.addi %blk_splat, %range : tensor<16xi32>
+  %n_splat = tt.splat %n : i32 -> tensor<16xi32>
+  %rem = arith.remsi %offs, %n_splat : tensor<16xi32>
+
+  %rem_expd = tt.expand_dims %rem {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+  %rem_bc = tt.broadcast %rem_expd : tensor<1x16xi32> -> tensor<32x16xi32>
+  %row = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32>
+  %row_expd = tt.expand_dims %row {axis = 1 : i32} : tensor<32xi32> -> tensor<32x1xi32>
+  %row_stride = arith.constant dense<16> : tensor<32x1xi32>
+  %row_scaled = arith.muli %row_expd, %row_stride : tensor<32x1xi32>
+  %row_bc = tt.broadcast %row_scaled : tensor<32x1xi32> -> tensor<32x16xi32>
+  %addr = arith.addi %row_bc, %rem_bc : tensor<32x16xi32>
+  %base_splat = tt.splat %base : !tt.ptr<f16> -> tensor<32x16x!tt.ptr<f16>>
+  %ptrs = tt.addptr %base_splat, %addr : tensor<32x16x!tt.ptr<f16>>, tensor<32x16xi32>
+  %val = tt.load %ptrs : tensor<32x16x!tt.ptr<f16>>
+
+  // This guarded store supplies the proof, but it writes an unrelated value.
+  %guard = arith.cmpi slt, %offs, %n_splat : tensor<16xi32>
+  %guard_expd = tt.expand_dims %guard {axis = 0 : i32} : tensor<16xi1> -> tensor<1x16xi1>
+  %guard_bc = tt.broadcast %guard_expd : tensor<1x16xi1> -> tensor<32x16xi1>
+  %col_expd = tt.expand_dims %offs {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+  %col_bc = tt.broadcast %col_expd : tensor<1x16xi32> -> tensor<32x16xi32>
+  %side_addr = arith.addi %row_bc, %col_bc : tensor<32x16xi32>
+  %side_splat = tt.splat %side : !tt.ptr<f16> -> tensor<32x16x!tt.ptr<f16>>
+  %side_ptrs = tt.addptr %side_splat, %side_addr : tensor<32x16x!tt.ptr<f16>>, tensor<32x16xi32>
+  %ones = arith.constant dense<1.000000e+00> : tensor<32x16xf16>
+  tt.store %side_ptrs, %ones, %guard_bc : tensor<32x16x!tt.ptr<f16>>
+
+  // The wrapped tile itself leaves through a store that keeps every lane.
+  %dst_splat = tt.splat %dst : !tt.ptr<f16> -> tensor<32x16x!tt.ptr<f16>>
+  %out_ptrs = tt.addptr %dst_splat, %row_bc : tensor<32x16x!tt.ptr<f16>>, tensor<32x16xi32>
+  tt.store %out_ptrs, %val : tensor<32x16x!tt.ptr<f16>>
+  tt.return
+}
+
+// -----
+// A transpose moves the wrapped lanes from the columns of the tile to the rows
+// of the stored value, and the store mask discards exactly those rows.  The
+// permutation is tracked, so the injected mask still zeros the lanes the store
+// drops and the wrap can go.
+// CHECK-LABEL: tt.func public @modulo_tile_transposed_before_store
+// CHECK-NOT: arith.remsi
+// CHECK: %[[BOUND:.*]] = arith.cmpi slt
+// CHECK: %[[EXPAND:.*]] = tt.expand_dims %[[BOUND]] {axis = 0 : i32}
+// CHECK: %[[MASK:.*]] = tt.broadcast %[[EXPAND]]
+// CHECK: tt.load %{{.*}}, %[[MASK]], %{{.*}} : tensor<32x16x!tt.ptr<f16>>
+// CHECK: tt.trans
+// CHECK-NOT: arith.remsi
+tt.func public @modulo_tile_transposed_before_store(%base: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                                   %dst: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                                   %n: i32) {
+  %c16 = arith.constant 16 : i32
+  %pid = tt.get_program_id x : i32
+  %blk = arith.muli %pid, %c16 : i32
+  %blk_splat = tt.splat %blk : i32 -> tensor<16xi32>
+  %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+  %offs = arith.addi %blk_splat, %range : tensor<16xi32>
+  %n_splat = tt.splat %n : i32 -> tensor<16xi32>
+  %rem = arith.remsi %offs, %n_splat : tensor<16xi32>
+
+  %rem_expd = tt.expand_dims %rem {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+  %rem_bc = tt.broadcast %rem_expd : tensor<1x16xi32> -> tensor<32x16xi32>
+  %row = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32>
+  %row_expd = tt.expand_dims %row {axis = 1 : i32} : tensor<32xi32> -> tensor<32x1xi32>
+  %row_stride = arith.constant dense<16> : tensor<32x1xi32>
+  %row_scaled = arith.muli %row_expd, %row_stride : tensor<32x1xi32>
+  %row_bc = tt.broadcast %row_scaled : tensor<32x1xi32> -> tensor<32x16xi32>
+  %addr = arith.addi %row_bc, %rem_bc : tensor<32x16xi32>
+  %base_splat = tt.splat %base : !tt.ptr<f16> -> tensor<32x16x!tt.ptr<f16>>
+  %ptrs = tt.addptr %base_splat, %addr : tensor<32x16x!tt.ptr<f16>>, tensor<32x16xi32>
+  %val = tt.load %ptrs : tensor<32x16x!tt.ptr<f16>>
+  %flipped = tt.trans %val {order = array<i32: 1, 0>} : tensor<32x16xf16> -> tensor<16x32xf16>
+
+  %guard = arith.cmpi slt, %offs, %n_splat : tensor<16xi32>
+  %guard_expd = tt.expand_dims %guard {axis = 1 : i32} : tensor<16xi1> -> tensor<16x1xi1>
+  %guard_bc = tt.broadcast %guard_expd : tensor<16x1xi1> -> tensor<16x32xi1>
+  %out_row = tt.expand_dims %offs {axis = 1 : i32} : tensor<16xi32> -> tensor<16x1xi32>
+  %out_stride = arith.constant dense<32> : tensor<16x1xi32>
+  %out_scaled = arith.muli %out_row, %out_stride : tensor<16x1xi32>
+  %out_bc = tt.broadcast %out_scaled : tensor<16x1xi32> -> tensor<16x32xi32>
+  %dst_splat = tt.splat %dst : !tt.ptr<f16> -> tensor<16x32x!tt.ptr<f16>>
+  %out_ptrs = tt.addptr %dst_splat, %out_bc : tensor<16x32x!tt.ptr<f16>>, tensor<16x32xi32>
+  tt.store %out_ptrs, %flipped, %guard_bc : tensor<16x32x!tt.ptr<f16>>
+  tt.return
+}
+
+// -----
 // Negative: a compile-time constant divisor belongs to TritonToStructured,
 // whose visitOperandRem keeps the wrap and re-expresses it as a strided access.
 // That is exactly equivalent, so it is always preferable to discarding the wrap.
@@ -734,13 +991,180 @@ tt.func public @modulo_skip_transposed_address(%base: !tt.ptr<f16> {tt.divisibil
 }
 
 // -----
-// Negative: a rank-one load has no second dimension for the boundary mask to
-// leave alone, and it is already a contiguous transfer.
-// CHECK-LABEL: tt.func public @modulo_skip_rank_one_load
+// A rank-one load needs no expand_dims: the comparison already has one lane per
+// tile element, so it is the mask.  Such a load is how a block-quantised matmul
+// reads its scale vector, and rejecting it used to veto the whole candidate
+// including the weight tile beside it.
+// CHECK-LABEL: tt.func public @modulo_rank_one_load
+// CHECK-NOT: arith.remsi
+// CHECK: %[[BOUND:.*]] = arith.cmpi slt
+// CHECK: %[[FILL:.*]] = arith.constant dense<0.000000e+00> : tensor<16xf32>
+// CHECK: tt.load %{{.*}}, %[[BOUND]], %[[FILL]] : tensor<16x!tt.ptr<f32>>
+// CHECK-NOT: arith.remsi
+tt.func public @modulo_rank_one_load(%base: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                     %dst: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                     %n: i32) {
+  %c16 = arith.constant 16 : i32
+  %pid = tt.get_program_id x : i32
+  %blk = arith.muli %pid, %c16 : i32
+  %blk_splat = tt.splat %blk : i32 -> tensor<16xi32>
+  %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+  %offs = arith.addi %blk_splat, %range : tensor<16xi32>
+  %n_splat = tt.splat %n : i32 -> tensor<16xi32>
+  %rem = arith.remsi %offs, %n_splat : tensor<16xi32>
+
+  %base_splat = tt.splat %base : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+  %ptrs = tt.addptr %base_splat, %rem : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+  %val = tt.load %ptrs : tensor<16x!tt.ptr<f32>>
+
+  %guard = arith.cmpi slt, %offs, %n_splat : tensor<16xi32>
+  %dst_splat = tt.splat %dst : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+  %out_ptrs = tt.addptr %dst_splat, %offs : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+  tt.store %out_ptrs, %val, %guard : tensor<16x!tt.ptr<f32>>
+  tt.return
+}
+
+// -----
+// The wrapped column index also addresses a scale vector through a division by
+// the group size.  A uniform divisor leaves each lane of the derived index a
+// function of the same lane of the tracked one, so the one boundary mask fits
+// both loads.  The derived index may now run past the scale array, but only on
+// lanes the mask removes, so those lanes are never read.  This is the shape a
+// block-quantised fused-MoE weight tile has, and the scale load used to veto it.
+// CHECK-LABEL: tt.func public @modulo_derived_index_addresses_scale_vector
+// CHECK-NOT: arith.remsi
+// CHECK: %[[BOUND:.*]] = arith.cmpi slt
+// CHECK: %[[EXPAND:.*]] = tt.expand_dims %[[BOUND]] {axis = 0 : i32}
+// CHECK: %[[MASK:.*]] = tt.broadcast %[[EXPAND]]
+// CHECK: tt.load %{{.*}}, %[[MASK]], %{{.*}} : tensor<32x16x!tt.ptr<f32>>
+// CHECK: arith.divsi
+// CHECK: tt.load %{{.*}}, %[[BOUND]], %{{.*}} : tensor<16x!tt.ptr<f32>>
+// CHECK-NOT: arith.remsi
+// DISABLED-LABEL: tt.func public @modulo_derived_index_addresses_scale_vector
+// DISABLED: arith.remsi
+tt.func public @modulo_derived_index_addresses_scale_vector(%base: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                           %scale: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                           %dst: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                           %n: i32) {
+  %c16 = arith.constant 16 : i32
+  %pid = tt.get_program_id x : i32
+  %blk = arith.muli %pid, %c16 : i32
+  %blk_splat = tt.splat %blk : i32 -> tensor<16xi32>
+  %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+  %offs = arith.addi %blk_splat, %range : tensor<16xi32>
+  %n_splat = tt.splat %n : i32 -> tensor<16xi32>
+  %rem = arith.remsi %offs, %n_splat : tensor<16xi32>
+
+  // The weight tile, addressed by the wrapped index on its column axis.
+  %rem_expd = tt.expand_dims %rem {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+  %rem_bc = tt.broadcast %rem_expd : tensor<1x16xi32> -> tensor<32x16xi32>
+  %row = tt.make_range {end = 32 : i32, start = 0 : i32} : tensor<32xi32>
+  %row_expd = tt.expand_dims %row {axis = 1 : i32} : tensor<32xi32> -> tensor<32x1xi32>
+  %row_stride = arith.constant dense<16> : tensor<32x1xi32>
+  %row_scaled = arith.muli %row_expd, %row_stride : tensor<32x1xi32>
+  %row_bc = tt.broadcast %row_scaled : tensor<32x1xi32> -> tensor<32x16xi32>
+  %addr = arith.addi %row_bc, %rem_bc : tensor<32x16xi32>
+  %base_splat = tt.splat %base : !tt.ptr<f32> -> tensor<32x16x!tt.ptr<f32>>
+  %ptrs = tt.addptr %base_splat, %addr : tensor<32x16x!tt.ptr<f32>>, tensor<32x16xi32>
+  %tile = tt.load %ptrs : tensor<32x16x!tt.ptr<f32>>
+
+  // The per-group scale vector, addressed by the same index over the group size.
+  %group = arith.constant dense<8> : tensor<16xi32>
+  %group_index = arith.divsi %rem, %group : tensor<16xi32>
+  %scale_splat = tt.splat %scale : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+  %scale_ptrs = tt.addptr %scale_splat, %group_index : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+  %scales = tt.load %scale_ptrs : tensor<16x!tt.ptr<f32>>
+
+  %scales_expd = tt.expand_dims %scales {axis = 0 : i32} : tensor<16xf32> -> tensor<1x16xf32>
+  %scales_bc = tt.broadcast %scales_expd : tensor<1x16xf32> -> tensor<32x16xf32>
+  %scaled = arith.mulf %tile, %scales_bc : tensor<32x16xf32>
+
+  %guard = arith.cmpi slt, %offs, %n_splat : tensor<16xi32>
+  %guard_expd = tt.expand_dims %guard {axis = 0 : i32} : tensor<16xi1> -> tensor<1x16xi1>
+  %guard_bc = tt.broadcast %guard_expd : tensor<1x16xi1> -> tensor<32x16xi1>
+  %col_expd = tt.expand_dims %offs {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+  %col_bc = tt.broadcast %col_expd : tensor<1x16xi32> -> tensor<32x16xi32>
+  %out_addr = arith.addi %row_bc, %col_bc : tensor<32x16xi32>
+  %dst_splat = tt.splat %dst : !tt.ptr<f32> -> tensor<32x16x!tt.ptr<f32>>
+  %out_ptrs = tt.addptr %dst_splat, %out_addr : tensor<32x16x!tt.ptr<f32>>, tensor<32x16xi32>
+  tt.store %out_ptrs, %scaled, %guard_bc : tensor<32x16x!tt.ptr<f32>>
+  tt.return
+}
+
+// -----
+// Swapping the operands of the dot transposes the wrapped tile in and the
+// result back out.  Every step is a permutation of known dimensions, so the
+// wrapped lanes are still the ones the store mask discards even though both
+// intermediate shapes are square.
+// CHECK-LABEL: tt.func public @modulo_tile_transposed_through_dot
+// CHECK-NOT: arith.remsi
+// CHECK: %[[BOUND:.*]] = arith.cmpi slt
+// CHECK: %[[EXPAND:.*]] = tt.expand_dims %[[BOUND]] {axis = 0 : i32}
+// CHECK: %[[MASK:.*]] = tt.broadcast %[[EXPAND]]
+// CHECK: tt.load %{{.*}}, %[[MASK]], %{{.*}} : tensor<8x16x!tt.ptr<f32>>
+// CHECK: tt.dot
+// CHECK-NOT: arith.remsi
+tt.func public @modulo_tile_transposed_through_dot(%base: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                   %other: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                   %dst: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                   %n: i32) {
+  %c16 = arith.constant 16 : i32
+  %pid = tt.get_program_id x : i32
+  %blk = arith.muli %pid, %c16 : i32
+  %blk_splat = tt.splat %blk : i32 -> tensor<16xi32>
+  %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+  %offs = arith.addi %blk_splat, %range : tensor<16xi32>
+  %n_splat = tt.splat %n : i32 -> tensor<16xi32>
+  %rem = arith.remsi %offs, %n_splat : tensor<16xi32>
+
+  // The wrapped index addresses the columns of an 8x16 tile.
+  %rem_expd = tt.expand_dims %rem {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+  %rem_bc = tt.broadcast %rem_expd : tensor<1x16xi32> -> tensor<8x16xi32>
+  %row = tt.make_range {end = 8 : i32, start = 0 : i32} : tensor<8xi32>
+  %row_expd = tt.expand_dims %row {axis = 1 : i32} : tensor<8xi32> -> tensor<8x1xi32>
+  %row_stride = arith.constant dense<16> : tensor<8x1xi32>
+  %row_scaled = arith.muli %row_expd, %row_stride : tensor<8x1xi32>
+  %row_bc = tt.broadcast %row_scaled : tensor<8x1xi32> -> tensor<8x16xi32>
+  %addr = arith.addi %row_bc, %rem_bc : tensor<8x16xi32>
+  %base_splat = tt.splat %base : !tt.ptr<f32> -> tensor<8x16x!tt.ptr<f32>>
+  %ptrs = tt.addptr %base_splat, %addr : tensor<8x16x!tt.ptr<f32>>, tensor<8x16xi32>
+  %tile = tt.load %ptrs : tensor<8x16x!tt.ptr<f32>>
+
+  // Transposed it becomes the left operand, so the wrapped lanes are its rows.
+  %flipped = tt.trans %tile {order = array<i32: 1, 0>} : tensor<8x16xf32> -> tensor<16x8xf32>
+  // The right operand carries no wrapped lane, so it is addressed linearly.
+  %other_splat = tt.splat %other : !tt.ptr<f32> -> tensor<8x16x!tt.ptr<f32>>
+  %other_ptrs = tt.addptr %other_splat, %row_bc : tensor<8x16x!tt.ptr<f32>>, tensor<8x16xi32>
+  %rhs = tt.load %other_ptrs : tensor<8x16x!tt.ptr<f32>>
+  %acc = arith.constant dense<0.000000e+00> : tensor<16x16xf32>
+  %product = tt.dot %flipped, %rhs, %acc : tensor<16x8xf32> * tensor<8x16xf32> -> tensor<16x16xf32>
+
+  // Transposing the result back puts the wrapped lanes on the stored columns.
+  %result = tt.trans %product {order = array<i32: 1, 0>} : tensor<16x16xf32> -> tensor<16x16xf32>
+
+  %guard = arith.cmpi slt, %offs, %n_splat : tensor<16xi32>
+  %guard_expd = tt.expand_dims %guard {axis = 0 : i32} : tensor<16xi1> -> tensor<1x16xi1>
+  %guard_bc = tt.broadcast %guard_expd : tensor<1x16xi1> -> tensor<16x16xi1>
+  %out_row = tt.expand_dims %range {axis = 1 : i32} : tensor<16xi32> -> tensor<16x1xi32>
+  %out_stride = arith.constant dense<16> : tensor<16x1xi32>
+  %out_scaled = arith.muli %out_row, %out_stride : tensor<16x1xi32>
+  %out_bc = tt.broadcast %out_scaled : tensor<16x1xi32> -> tensor<16x16xi32>
+  %dst_splat = tt.splat %dst : !tt.ptr<f32> -> tensor<16x16x!tt.ptr<f32>>
+  %out_ptrs = tt.addptr %dst_splat, %out_bc : tensor<16x16x!tt.ptr<f32>>, tensor<16x16xi32>
+  tt.store %out_ptrs, %result, %guard_bc : tensor<16x16x!tt.ptr<f32>>
+  tt.return
+}
+
+// -----
+// Negative: the tile and the store mask are both square, but the mask discards
+// rows while the wrapped index varies along the columns.  Only tracking which
+// dimension the guard belongs to separates this from the transposing cases
+// above; a shape comparison alone cannot.
+// CHECK-LABEL: tt.func public @modulo_skip_guard_on_other_square_dim
 // CHECK: arith.remsi
-tt.func public @modulo_skip_rank_one_load(%base: !tt.ptr<f32> {tt.divisibility = 16 : i32},
-                                         %dst: !tt.ptr<f32> {tt.divisibility = 16 : i32},
-                                         %n: i32) {
+tt.func public @modulo_skip_guard_on_other_square_dim(%base: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                                     %dst: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                                     %n: i32) {
   %c16 = arith.constant 16 : i32
   %pid = tt.get_program_id x : i32
   %blk = arith.muli %pid, %c16 : i32
@@ -751,8 +1175,80 @@ tt.func public @modulo_skip_rank_one_load(%base: !tt.ptr<f32> {tt.divisibility =
   %rem = arith.remsi %offs, %n_splat : tensor<16xi32>
 
   %rem_expd = tt.expand_dims %rem {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32>
+  %rem_bc = tt.broadcast %rem_expd : tensor<1x16xi32> -> tensor<16x16xi32>
+  %row_expd = tt.expand_dims %range {axis = 1 : i32} : tensor<16xi32> -> tensor<16x1xi32>
+  %row_stride = arith.constant dense<16> : tensor<16x1xi32>
+  %row_scaled = arith.muli %row_expd, %row_stride : tensor<16x1xi32>
+  %row_bc = tt.broadcast %row_scaled : tensor<16x1xi32> -> tensor<16x16xi32>
+  %addr = arith.addi %row_bc, %rem_bc : tensor<16x16xi32>
+  %base_splat = tt.splat %base : !tt.ptr<f16> -> tensor<16x16x!tt.ptr<f16>>
+  %ptrs = tt.addptr %base_splat, %addr : tensor<16x16x!tt.ptr<f16>>, tensor<16x16xi32>
+  %val = tt.load %ptrs : tensor<16x16x!tt.ptr<f16>>
+
+  // The guard is expanded on the row axis, so it drops rows, not the columns
+  // the injected mask would zero.
+  %guard = arith.cmpi slt, %offs, %n_splat : tensor<16xi32>
+  %guard_expd = tt.expand_dims %guard {axis = 1 : i32} : tensor<16xi1> -> tensor<16x1xi1>
+  %guard_bc = tt.broadcast %guard_expd : tensor<16x1xi1> -> tensor<16x16xi1>
+  %dst_splat = tt.splat %dst : !tt.ptr<f16> -> tensor<16x16x!tt.ptr<f16>>
+  %out_ptrs = tt.addptr %dst_splat, %row_bc : tensor<16x16x!tt.ptr<f16>>, tensor<16x16xi32>
+  tt.store %out_ptrs, %val, %guard_bc : tensor<16x16x!tt.ptr<f16>>
+  tt.return
+}
+
+// -----
+// Negative: the wrapped index is the divisor rather than the dividend, so
+// dropping the wrap changes the divisor every lane is divided by instead of
+// only widening an index.
+// CHECK-LABEL: tt.func public @modulo_skip_derived_index_from_divisor
+// CHECK: arith.remsi
+tt.func public @modulo_skip_derived_index_from_divisor(%base: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                      %dst: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                      %n: i32) {
+  %c16 = arith.constant 16 : i32
+  %pid = tt.get_program_id x : i32
+  %blk = arith.muli %pid, %c16 : i32
+  %blk_splat = tt.splat %blk : i32 -> tensor<16xi32>
+  %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+  %offs = arith.addi %blk_splat, %range : tensor<16xi32>
+  %n_splat = tt.splat %n : i32 -> tensor<16xi32>
+  %rem = arith.remsi %offs, %n_splat : tensor<16xi32>
+
+  %group = arith.constant dense<8> : tensor<16xi32>
+  %derived = arith.divsi %group, %rem : tensor<16xi32>
   %base_splat = tt.splat %base : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
-  %ptrs = tt.addptr %base_splat, %rem : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+  %ptrs = tt.addptr %base_splat, %derived : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+  %val = tt.load %ptrs : tensor<16x!tt.ptr<f32>>
+
+  %guard = arith.cmpi slt, %offs, %n_splat : tensor<16xi32>
+  %dst_splat = tt.splat %dst : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+  %out_ptrs = tt.addptr %dst_splat, %offs : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+  tt.store %out_ptrs, %val, %guard : tensor<16x!tt.ptr<f32>>
+  tt.return
+}
+
+// -----
+// Negative: the divisor of the derived index varies per lane, so which lanes it
+// sends out of bounds no longer follows from the one boundary comparison.
+// CHECK-LABEL: tt.func public @modulo_skip_derived_index_lane_varying_divisor
+// CHECK: arith.remsi
+tt.func public @modulo_skip_derived_index_lane_varying_divisor(%base: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                              %dst: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                              %n: i32) {
+  %c16 = arith.constant 16 : i32
+  %pid = tt.get_program_id x : i32
+  %blk = arith.muli %pid, %c16 : i32
+  %blk_splat = tt.splat %blk : i32 -> tensor<16xi32>
+  %range = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+  %offs = arith.addi %blk_splat, %range : tensor<16xi32>
+  %n_splat = tt.splat %n : i32 -> tensor<16xi32>
+  %rem = arith.remsi %offs, %n_splat : tensor<16xi32>
+
+  %ones = arith.constant dense<1> : tensor<16xi32>
+  %varying = arith.addi %range, %ones : tensor<16xi32>
+  %derived = arith.divsi %rem, %varying : tensor<16xi32>
+  %base_splat = tt.splat %base : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+  %ptrs = tt.addptr %base_splat, %derived : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
   %val = tt.load %ptrs : tensor<16x!tt.ptr<f32>>
 
   %guard = arith.cmpi slt, %offs, %n_splat : tensor<16xi32>

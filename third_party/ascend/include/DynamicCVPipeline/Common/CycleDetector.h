@@ -32,7 +32,7 @@ namespace mlir::CVPipeline {
 class DependencyCycleDetector {
   const DenseSet<Operation *> &group;
   llvm::DenseSet<mlir::Operation *> visited;
-  const DependencyHelper &depHelper;
+  const DependencyHelper depHelper;
   ComputeBlockIdManager &bm;
   Block *const block;
 

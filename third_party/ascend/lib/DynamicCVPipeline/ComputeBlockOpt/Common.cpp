@@ -69,7 +69,8 @@ bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify,
   }
 
   // Initialize DFS detector
-  DependencyCycleDetector dfs(block, DependencyHelper{memGraph}, okSet, bm);
+  DependencyHelper depHelper{memGraph};
+  DependencyCycleDetector dfs(block, depHelper, okSet, bm);
   auto hasCycle = dfs.detectCycle();
 
   for (auto &[op, origBlockId] : origBlockIdMap) {

@@ -72,6 +72,17 @@ ScalarClosure::ScalarClosure(BlockGroup &group, ArrayRef<Operation *> ops)
   parentBlock = parentOp->getBlock();
 }
 
+ScalarClosure::ScalarClosure(Block *block, ArrayRef<Operation *> ops)
+    : block(block), ops(ops) {
+  if (!block)
+    return;
+  Operation *parentOp = block->getParentOp();
+  if (!parentOp) {
+    return;
+  }
+  parentBlock = parentOp->getBlock();
+}
+
 bool ScalarClosure::isBefore(Operation *a, Operation *b) {
   if (a->getBlock() == parentBlock || b->getBlock() == parentBlock) {
     a = parentBlock->findAncestorOpInBlock(*a);

@@ -34,6 +34,8 @@ using SourceMode = DependencyHelper::SourceMode;
 
 mlir::WalkResult DependencyHelper::forEachUserImpl(Operation *op,
                                                    CallbackFn pred) const {
+  if (!op)
+    return WalkResult::advance();
   for (auto *user : op->getUsers()) {
     if (pred(user).wasInterrupted()) {
       return WalkResult::interrupt();

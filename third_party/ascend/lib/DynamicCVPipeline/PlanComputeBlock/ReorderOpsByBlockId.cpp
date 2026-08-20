@@ -34,7 +34,9 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "DynamicCVPipeline/Common/DependencyHelper.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -351,10 +353,18 @@ buildReorderedOps(const BlockOpGraph &graph,
   }
 
   for (int const blockId : groupOrderResult.value()) {
+    SmallVector<Operation *> storeOps;
     for (Operation *op : graph.ops) {
       if (opBlockId.at(op) == blockId) {
+        if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp>(op)) {
+          storeOps.push_back(op);
+          continue;
+        }
         reordered.push_back(op);
       }
+    }
+    for (auto op : storeOps) {
+      reordered.push_back(op);
     }
   }
   return reordered;

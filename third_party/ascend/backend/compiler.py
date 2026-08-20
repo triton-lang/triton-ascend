@@ -992,7 +992,6 @@ class NPUOptions:
     warp_size: int = field(default=32, init=False)
     ir_override: Optional[str] = None  # filename of a user-defined IR (*.{ttir|ttadapter|mlirbc|bcmlir|npubin})
 
-    enable_auto_blockify: bool = None
     compile_on_910_95: bool = None
     optimize_dynamic_offset: bool = False
     enable_mask_fallback_conversion: bool = False
@@ -1189,17 +1188,6 @@ def ttir_to_npubin(mod, metadata, opt):
                 _compile_option_list += ["--enable-simt-reorder-instruction=true"]
             if opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
-
-            # Enable SIMT auto-blockify if user opted in, or if the env var is
-            # set and the user didn't explicitly opt out (matches the SIMD path
-            # at line ~541).
-            enable_auto_blockify = opt.enable_auto_blockify
-            if _is_auto_map_parallel_blocks_enabled():
-                if enable_auto_blockify is None or enable_auto_blockify:
-                    _compile_option_list += ["--enable-auto-blockify-loop"]
-            else:
-                if enable_auto_blockify:
-                    _compile_option_list += ["--enable-auto-blockify-loop"]
 
             # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
             # mirroring the SIMD compile paths. driver.py's runtime block-count

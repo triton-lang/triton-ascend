@@ -188,7 +188,6 @@ def _row_attrs(row_applied):
 
 def _make_opt(
     *,
-    user_option,
     superblock_factor,
 ):
     return SimpleNamespace(
@@ -200,7 +199,6 @@ def _make_opt(
         shared_mem_dynamic_size=4096,
         enable_simt_reorder_instruction=True,
         disable_fma=True,
-        enable_auto_blockify=user_option,
         superblock_factor=superblock_factor,
     )
 
@@ -209,7 +207,6 @@ def _run_ttir_to_npubin(
     closure,
     *,
     env_enabled,
-    user_option,
     blacklisted,
     row_applied,
     superblock_factor,
@@ -269,7 +266,6 @@ def _run_ttir_to_npubin(
         _FakeIrModule(_row_attrs(row_applied)),
         {},
         _make_opt(
-            user_option=user_option,
             superblock_factor=superblock_factor,
         ),
     )
@@ -308,7 +304,7 @@ def _export_coalesce_metadata(closure, attrs):
 
 
 def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_pairs):
-    """The 48 remaining pure-SIMT argv cases omit retired Bisheng options."""
+    """The fixed-policy pure-SIMT argv cases retain no user block switch."""
     _baseline_source, target_source = source_pairs["compiler"]
     common_prefix = [
         "--common-before-pure-simt",
@@ -325,36 +321,29 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
         "--enable-simt-reorder-instruction=true",
         "--disable-fma",
     ]
-    cases = itertools.product(
-        (False, True),  # E: TRITON_ALL_BLOCKS_PARALLEL
-        (None, False, True),  # O: explicit/user auto-blockify option
-        (False, True),  # B: blacklist result
-        (False, True),  # R: Row pass result
-        (0, 7),  # superblock factor
-    )
+    cases = itertools.product((False, True),  # E: TRITON_ALL_BLOCKS_PARALLEL
+                              (False, True),  # B: blacklist result
+                              (False, True),  # R: Row pass result
+                              (0, 7),  # superblock factor
+                              )
 
     count = 0
-    for env_enabled, user_option, blacklisted, row_applied, superblock in cases:
+    for env_enabled, blacklisted, row_applied, superblock in cases:
         target_closure = _load_compiler_closure(target_source)
         target_pm, target_command, _target_metadata = _run_ttir_to_npubin(
             target_closure,
             env_enabled=env_enabled,
-            user_option=user_option,
             blacklisted=blacklisted,
             row_applied=row_applied,
             superblock_factor=superblock,
         )
-        case = f"E={env_enabled}, O={user_option}, B={blacklisted}, R={row_applied}, superblock={superblock}"
+        case = f"E={env_enabled}, B={blacklisted}, R={row_applied}, superblock={superblock}"
 
         # The target contract is explicit: after deleting bisheng_options,
         # retain the full pure-SIMT envelope and its automatic block policy.
         expected_options = list(common_prefix)
-        first_auto_blockify = (env_enabled and
-                               (user_option is None or user_option)) or (not env_enabled and bool(user_option))
-        second_auto_blockify = env_enabled and not blacklisted and not row_applied
-        if first_auto_blockify:
-            expected_options.append("--enable-auto-blockify-loop")
-        if second_auto_blockify:
+        auto_blockify = env_enabled and not blacklisted and not row_applied
+        if auto_blockify:
             expected_options.append("--enable-auto-blockify-loop")
             if superblock > 0:
                 expected_options.append(f"--super-block-factor={superblock}")
@@ -371,7 +360,7 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
         assert target_pm.run_calls == [], case
         count += 1
 
-    assert count == 48
+    assert count == 16
 
 
 @pytest.mark.parametrize(
@@ -482,7 +471,6 @@ def _make_metadata(*, factor, axis, ceil_div, blacklisted, row_applied):
         coalesce_grid_ceil_div=ceil_div,
         has_auto_blockify_blacklist_op=blacklisted,
         row_coalescing_applied=row_applied,
-        enable_auto_blockify=None,
     )
 
 

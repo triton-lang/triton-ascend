@@ -60,13 +60,10 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "enable_sync_block_lock",
     "enable_ub_refine_opt",
     "enable_vf_fusion",
-    "force_simt_only",
-    "force_simt_template",
     "graph_optimize_emit_remarks",
     "graph_optimize_max_rewrites_per_function",
     "graph_optimize_rule_mask",
     "graph_optimize_ub_capacity_bytes",
-    "grid_num_tiles",
     "has_auto_blockify_blacklist_op",
     "hfusion_enable_multiple_consumer_fusion",
     "kernel_name",
@@ -81,11 +78,6 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "vf_merge_level",
     "warp_size",
 })
-
-_DEPRECATED_NPU_OPTION_ROUTES = {
-    "force_simt_only": ("compile_mode", "simt_only"),
-    "force_simt_template": ("compile_mode", "unstructured_in_simt"),
-}
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({
     "LLVM_ROOT",
@@ -117,14 +109,8 @@ def _get_deprecated_npu_options(options) -> set[str]:
 
 
 def _warn_deprecated_npu_option(name: str) -> None:
-    route = _DEPRECATED_NPU_OPTION_ROUTES.get(name)
-    if route is not None:
-        replacement_name, replacement_value = route
-        message = (f"Ascend compile option '{name}' is deprecated; "
-                   f"use {replacement_name}={replacement_value!r} instead.")
-    else:
-        message = (f"Ascend compile option '{name}' is deprecated and ignored; "
-                   "the backend-managed/default behavior is used instead.")
+    message = (f"Ascend compile option '{name}' is deprecated and ignored; "
+               "the backend-managed/default behavior is used instead.")
     warnings.warn(
         message,
         FutureWarning,
@@ -138,10 +124,6 @@ def _remove_deprecated_npu_options(options, *, protected=(), in_place=False):
     deprecated = _get_deprecated_npu_options(normalized) - set(protected)
     for name in sorted(deprecated):
         _warn_deprecated_npu_option(name)
-        route = _DEPRECATED_NPU_OPTION_ROUTES.get(name)
-        if route is not None and normalized[name]:
-            replacement_name, replacement_value = route
-            normalized.setdefault(replacement_name, replacement_value)
         normalized.pop(name)
     return normalized
 

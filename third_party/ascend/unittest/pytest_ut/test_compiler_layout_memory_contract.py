@@ -100,6 +100,12 @@ def compiler_module():
     def return_false(*_args, **_kwargs):
         return False
 
+    def remove_deprecated_npu_options(options, *, protected=(), in_place=False):
+        normalized = options if in_place else dict(options)
+        if "compile_on_910_95" not in protected:
+            normalized.pop("compile_on_910_95", None)
+        return normalized
+
     utils_stub = types.ModuleType(utils_name)
     for name in (
             "_check_bishengir_api_change",
@@ -125,7 +131,7 @@ def compiler_module():
     utils_stub._get_npucompiler_path = lambda *_args, **_kwargs: ("", {})
     utils_stub._get_auto_blockify_blacklist_reasons = lambda *_args, **_kwargs: []
     utils_stub._warn_auto_blockify_disabled = lambda *_args, **_kwargs: None
-    utils_stub._remove_deprecated_npu_options = lambda options, **_kwargs: options
+    utils_stub._remove_deprecated_npu_options = remove_deprecated_npu_options
     utils_stub._warn_deprecated_ascend_env_vars = lambda: None
     utils_stub.downgrade_llir = lambda llir: llir
     utils_stub.get_cann_version_file_hash = lambda: ""
@@ -376,6 +382,7 @@ def _run_ttir_to_npubin(
         "_is_auto_map_parallel_blocks_enabled",
         lambda: auto_map_enabled,
     )
+
     # Keep this argv matrix independent of the host torch_npu configuration
     # while checking that Pure-SIMT passes the explicit option to the resolver.
     def get_simt_stack_limit(user_stack_limit):

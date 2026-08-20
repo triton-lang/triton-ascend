@@ -285,7 +285,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         if _inter_val is not None:
             ascend.passes.ttir.set_buffer_count(mod, "INTER", _inter_val)
 
-        _load_val = metadata.get("load_cache_num")
+        _load_val = metadata.get("buf_slot_num_of_gm")
         if _load_val is not None:
             ascend.passes.ttir.set_buffer_count(mod, "LOAD", _load_val)
 
@@ -1048,7 +1048,7 @@ class NPUOptions:
     enable_dynamic_cv_pipeline: bool = None
     buf_slot_num_of_veccore: int = None
     buf_slot_num_of_crosscore: int = None
-    load_cache_num: int = None
+    buf_slot_num_of_gm: int = None
 
     # plan memory strategy: "default" (default) or "largest-first"
     plan_memory_strategy: str = None
@@ -1177,27 +1177,6 @@ def _normalize_bishengir_simt_optimization_for_context(options: NPUOptions, raw_
         stacklevel=3,
     )
     object.__setattr__(options, option_name, 0)
-
-
-_REMOVED_NPU_COMPILE_OPTIONS = frozenset({
-    "allow_fp8e4nv",
-    "auto_tile_and_bind_subblock",
-    "graph_optimize_rule_mask",
-    "graph_optimize_max_rewrites_per_function",
-    "graph_optimize_ub_capacity_bytes",
-    "graph_optimize_emit_remarks",
-    "bisheng_options",
-    "code_motion",
-    "disable_size_align_for_cast",
-    "disable_auto_inject_block_sync",
-    "enable_select_analysis",
-    "ops_reorder",
-    "parallel_mode",
-    "storage_align",
-    "mix_mode",
-    "use_bytecode",
-    "stream",
-})
 
 
 def ttir_to_npubin(mod, metadata, opt):

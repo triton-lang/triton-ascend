@@ -89,6 +89,7 @@ def compiler_module():
     """
     compiler_path = Path(__file__).resolve().parents[2] / "backend" / "compiler.py"
     module_name = "triton.backends.ascend.compiler_layout_memory_contract_under_test"
+    debug_line_rewriter_name = "triton.backends.ascend.debug_line_rewriter"
     utils_name = "triton.backends.ascend.utils"
     driver_name = "triton.backends.ascend.driver"
     debug_line_rewriter_name = "triton.backends.ascend.debug_line_rewriter"
@@ -161,6 +162,15 @@ def compiler_module():
     sys.modules[debug_line_rewriter_name] = debug_line_rewriter_stub
     sys.modules.pop(module_name, None)
     try:
+        debug_line_rewriter_path = compiler_path.with_name("debug_line_rewriter.py")
+        debug_line_rewriter_spec = importlib.util.spec_from_file_location(
+            debug_line_rewriter_name,
+            debug_line_rewriter_path,
+        )
+        debug_line_rewriter = importlib.util.module_from_spec(debug_line_rewriter_spec)
+        assert debug_line_rewriter_spec is not None and debug_line_rewriter_spec.loader is not None
+        sys.modules[debug_line_rewriter_name] = debug_line_rewriter
+        debug_line_rewriter_spec.loader.exec_module(debug_line_rewriter)
         spec = importlib.util.spec_from_file_location(module_name, compiler_path)
         module = importlib.util.module_from_spec(spec)
         assert spec is not None and spec.loader is not None

@@ -1070,7 +1070,6 @@ def get_libdevice():
 class NPUOptions:
     debug: bool = False
     sanitize_overflow: bool = True
-    llvm_version: int = 15
     kernel_name: str = "triton_"
     arch: str = ""
 

@@ -18,13 +18,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import re
-
-import triton
 import triton.backends.ascend as ascend
 
 
 def test_triton_and_ascend_version_api():
     assert hasattr(ascend, "__version__")
     triton_ascend_version = ascend.__version__
-    print("triton-ascend:", triton_ascend_version)
+    assert isinstance(triton_ascend_version, str)
+    assert triton_ascend_version

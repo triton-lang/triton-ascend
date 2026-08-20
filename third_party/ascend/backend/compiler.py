@@ -1059,6 +1059,9 @@ class NPUOptions:
             isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950")),
         )
 
+        if self.simt_stack_limit is not None:
+            _validate_simt_stack_limit(self.simt_stack_limit)
+
         # Parse compile_mode and set related fields
         if self.compile_mode == "simd":
             object.__setattr__(self, "parallel_mode", "simd")
@@ -1143,7 +1146,7 @@ def ttir_to_npubin(mod, metadata, opt):
                 _compile_option_list += [
                     f"--enable-bishengir-simt-optimization={opt.enable_bishengir_simt_optimization}"
                 ]
-            _compile_option_list += [f"--simt-stack-limit={get_simt_stack_limit()}"]
+            _compile_option_list += [f"--simt-stack-limit={get_simt_stack_limit(opt.simt_stack_limit)}"]
             if opt.shared_mem_dynamic_size is not None:
                 _compile_option_list += [f"--shared-mem-dynamic-size={opt.shared_mem_dynamic_size}"]
             if opt.enable_simt_reorder_instruction:
@@ -1173,12 +1176,20 @@ def ttir_to_npubin(mod, metadata, opt):
         return Path(bin_path).read_bytes()
 
 
-def get_simt_stack_limit():
+def _validate_simt_stack_limit(stack_limit):
+    if isinstance(stack_limit, bool) or not isinstance(stack_limit, int) or stack_limit <= 0:
+        raise ValueError("simt_stack_limit must be a positive integer")
+    return stack_limit
+
+
+def get_simt_stack_limit(user_stack_limit=None):
     # simt_stack_limit resolution precedence:
-    #  1.torch_npu's acl_default.json "StackSize":{"simt_stack_size":N}
-    #    takes precedence and the user-specified value is ignored.
-    #  2.if that config key is absent ,fail back to the kernel-time
-    #    default simt_stack_limit=1152
+    #  1. An explicit Triton compile option.
+    #  2. torch_npu's acl_default.json "StackSize":{"simt_stack_size":N}.
+    #  3. The kernel-time default simt_stack_limit=1152.
+    if user_stack_limit is not None:
+        return _validate_simt_stack_limit(user_stack_limit)
+
     _simt_stack_limit = 1152
     try:
         import torch_npu
@@ -1187,7 +1198,7 @@ def get_simt_stack_limit():
         with open(_acl_cfg_path, "r") as f:
             _acl_cfg = json.load(f)
         _cfg_stack = _acl_cfg.get("StackSize", {}).get("simt_stack_size", None)
-        if _cfg_stack is not None and _cfg_stack > 0:
+        if isinstance(_cfg_stack, int) and not isinstance(_cfg_stack, bool) and _cfg_stack > 0:
             _simt_stack_limit = _cfg_stack
     except Exception as e:
         print(f"[DEBUG] read acl_default.json failed: {e}")

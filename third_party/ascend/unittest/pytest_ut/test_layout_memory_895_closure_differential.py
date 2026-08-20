@@ -265,7 +265,7 @@ def _run_ttir_to_npubin(
     ]
     closure["_get_npucompiler_path"] = lambda: ("bishengir-compile", {})
     closure["_is_auto_map_parallel_blocks_enabled"] = lambda: env_enabled
-    closure["get_simt_stack_limit"] = lambda: 64
+    closure["get_simt_stack_limit"] = lambda _user_stack_limit=None: 64
     closure["subprocess"].run = run_bisheng
 
     result = closure["ttir_to_npubin"](

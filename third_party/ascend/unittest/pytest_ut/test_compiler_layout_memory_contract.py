@@ -293,7 +293,7 @@ def _make_opt(
     force_simt_only,
     superblock_factor=0,
     enable_bishengir_simt_optimization=0,
-    simt_stack_limit=0,
+    simt_stack_limit=None,
     shared_mem_dynamic_size=None,
     enable_simt_reorder_instruction=False,
     disable_fma=False,
@@ -322,6 +322,7 @@ def _run_ttir_to_npubin(
     superblock_factor=0,
     common_options=(),
     enable_bishengir_simt_optimization=0,
+    simt_stack_limit=None,
     resolved_simt_stack_limit=1152,
     shared_mem_dynamic_size=None,
     enable_simt_reorder_instruction=False,
@@ -370,14 +371,13 @@ def _run_ttir_to_npubin(
         "_is_auto_map_parallel_blocks_enabled",
         lambda: auto_map_enabled,
     )
-    # StackSize precedence is covered by test_compiler.py.  Keep this argv
-    # matrix independent of the host torch_npu configuration while verifying
-    # that ttir_to_npubin uses the resolver rather than the legacy option.
-    monkeypatch.setattr(
-        compiler,
-        "get_simt_stack_limit",
-        lambda: resolved_simt_stack_limit,
-    )
+    # Keep this argv matrix independent of the host torch_npu configuration
+    # while checking that Pure-SIMT passes the explicit option to the resolver.
+    def get_simt_stack_limit(user_stack_limit):
+        assert user_stack_limit == simt_stack_limit
+        return resolved_simt_stack_limit if user_stack_limit is None else user_stack_limit
+
+    monkeypatch.setattr(compiler, "get_simt_stack_limit", get_simt_stack_limit)
     monkeypatch.setattr(compiler.subprocess, "run", run_bisheng)
 
     result = compiler.ttir_to_npubin(
@@ -387,6 +387,7 @@ def _run_ttir_to_npubin(
             force_simt_only=force_simt_only,
             superblock_factor=superblock_factor,
             enable_bishengir_simt_optimization=enable_bishengir_simt_optimization,
+            simt_stack_limit=simt_stack_limit,
             shared_mem_dynamic_size=shared_mem_dynamic_size,
             enable_simt_reorder_instruction=enable_simt_reorder_instruction,
             disable_fma=disable_fma,

@@ -87,7 +87,7 @@ def test_linearize_mask_broadcast(M, N, BLOCK_SIZE_N, dtype, sigtype):
     grid = (ceil_div(2 * M * N, BLOCK_SIZE_N), )
 
     linearize_mask_broadcast_kernel[grid](in_tensor, triton_output, N=N, M=M, BLOCK_SIZE_N=BLOCK_SIZE_N,
-                                          optimize_dynamic_offset=True, enable_mask_fallback_conversion=True)
+                                          enable_mask_fallback_conversion=True)
 
     torch_output = torch_linearize_mask_broadcast(in_tensor.clone())
     assert torch.allclose(triton_output, torch_output, rtol=1e-5, atol=1e-8)
@@ -101,7 +101,7 @@ def triton_linearize_mask_broadcast(in_tensor, BLOCK_SIZE):
     grid = (ceil_div(2 * M * N, BLOCK_SIZE), )
 
     linearize_mask_broadcast_kernel[grid](in_tensor, triton_output, N=N, M=M, BLOCK_SIZE_N=BLOCK_SIZE,
-                                          optimize_dynamic_offset=True, enable_mask_fallback_conversion=False)
+                                          enable_mask_fallback_conversion=False)
 
 
 def profile_performance_test(M, N, dtype, BLOCK_SIZE):

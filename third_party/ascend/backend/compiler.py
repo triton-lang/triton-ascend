@@ -219,7 +219,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         compile_on_910_95 = metadata["compile_on_910_95"]
         force_simt_template = metadata["force_simt_template"]
         enable_mask_fallback_conversion = metadata["enable_mask_fallback_conversion"]
-        optimize_dynamic_offset = metadata["optimize_dynamic_offset"]
         enable_mixed_cv = metadata.get("enable_mixed_cv")
         set_workspace_multibuffer = metadata.get("set_workspace_multibuffer")
 
@@ -240,7 +239,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             distributed.ascend_passes.ttgpuir.add_convert_triton_distributed_to_hivm(pm)
 
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
-        ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
+        ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, False)
         ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, force_simt_template)
         ascend.passes.ttir.add_triton_to_annotation(pm)
         ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, force_simt_template)
@@ -248,7 +247,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         ascend.passes.ttir.add_triton_to_hfusion(pm, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_llvm(pm)
         ascend.passes.ttir.add_bubble_up_operation(pm)
-        ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
+        ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, False)
         ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, enable_nd2nz_on_vector, enable_select_analysis,
                                                 compile_on_910_95)
         # Restricted to 910_95/950. The merged buffer is written by two disjoint
@@ -993,7 +992,6 @@ class NPUOptions:
 
     # Internal lowering selector derived from the explicit GPUTarget.arch.
     compile_on_910_95: bool = field(init=False, repr=False)
-    optimize_dynamic_offset: bool = False
     enable_mask_fallback_conversion: bool = False
     enable_warp_specialization: bool = False
     enable_nd2nz_on_vector: bool = False

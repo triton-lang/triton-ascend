@@ -39,7 +39,6 @@ def _make_metadata():
         "force_simt_template": False,
         "enable_sync_block_lock": False,
         "enable_mask_fallback_conversion": False,
-        "optimize_dynamic_offset": False,
         "auto_blockify_size": 1,
         "enable_dynamic_cv_pipeline": False,
         "hash": "deadbeef",

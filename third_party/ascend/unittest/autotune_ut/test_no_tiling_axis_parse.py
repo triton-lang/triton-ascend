@@ -71,7 +71,7 @@ def case_triton(x_cal, is_simt_only=False):
     output = torch.randint(1, (ynumel, xnumel), dtype=x_cal.dtype, device=x_cal.device)
     if is_simt_only:
         (triton_permute_2d[lambda meta: (triton.cdiv(xnumel, meta['XBLOCK']), triton.cdiv(ynumel, meta['YBLOCK']), 1)](
-            output, x_cal, xnumel, ynumel, force_simt_only=True))
+            output, x_cal, xnumel, ynumel, compile_mode="simt_only"))
     else:
         (triton_permute_2d[lambda meta:
                            (triton.cdiv(xnumel, meta['XBLOCK']), triton.cdiv(ynumel, meta['YBLOCK']), 1)](output, x_cal,

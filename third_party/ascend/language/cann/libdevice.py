@@ -32,10 +32,11 @@ def _is_libdevice_simt_enabled(_semantic) -> bool:
     ``NPUOptions``.  The builder's established ``options.arch`` view exposes
     that internal target without serializing a second architecture field.
     Template-SIMT lowering keeps the language builder in SIMD mode, so only
-    the explicit pure-SIMT compile mode may select SIMT libdevice symbols.
+    an effective pure-SIMT selection may select SIMT libdevice symbols.
     """
     options = _semantic.builder.options
-    return is_compile_on_910_95(options.arch) and options.compile_mode == "simt_only"
+    return is_compile_on_910_95(options.arch) and (getattr(options, "is_pure_simt", False)
+                                                   or getattr(options, "compile_mode", "simd") == "simt_only")
 
 
 class _FlipStaticRange:

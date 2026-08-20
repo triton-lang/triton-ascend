@@ -115,7 +115,7 @@ struct GraphOptimizationOptions {
   unsigned maxRewritesPerFunction = 64;
   unsigned ubCapacityBytes = 0;
   // RowCoalescing changes the launch grid and is valid only for the
-  // force_simt_only compilation route.  This must be an explicit per-pass
+  // pure-SIMT compilation route.  This must be an explicit per-pass
   // option rather than inferred from later pipeline state.
   bool forceSimtOnly = false;
 };

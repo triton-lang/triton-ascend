@@ -51,7 +51,7 @@ def test_row_coalescing_tail_pure_simt_e2e(dtype):
         dst,
         n,
         BLOCK=16,
-        force_simt_only=True,
+        compile_mode="simt_only",
     )
     torch.npu.synchronize()
 

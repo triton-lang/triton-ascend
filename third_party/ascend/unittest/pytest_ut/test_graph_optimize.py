@@ -737,17 +737,17 @@ def test_diagonal_mask_removal_is_gated_by_its_rule_bit(kernel):
 
 
 def test_diagonal_mask_removal_applies_without_simt_route():
-    """The rewrite is compute logic, so it must not depend on force_simt_only.
+    """The rewrite is compute logic, so it must not depend on pure-SIMT mode.
 
     Its predecessor lived behind the 910_95 plus force-SIMT gate of
     processStridedLoadStoreRewriteOperations and therefore never ran on other
     targets.
     """
-    for force_simt_only in (False, True):
+    for compile_mode in ("simd", "simt_only"):
         options = NPUOptions(
             arch="Ascend910B1",
             enable_graph_optimize=True,
-            force_simt_only=force_simt_only,
+            compile_mode=compile_mode,
         )
 
         ttir = make_diagonal_shift_ttir(diagonal_shift_forward_kernel, options)
@@ -857,12 +857,12 @@ def test_convert_modulo_to_mask_leaves_compile_time_bounds_alone():
 
 
 def test_convert_modulo_to_mask_applies_without_simt_route():
-    """The rewrite is address logic, so it must not depend on force_simt_only."""
-    for force_simt_only in (False, True):
+    """The rewrite is address logic, so it must not depend on pure-SIMT mode."""
+    for compile_mode in ("simd", "simt_only"):
         options = NPUOptions(
             arch="Ascend910B1",
             enable_graph_optimize=True,
-            force_simt_only=force_simt_only,
+            compile_mode=compile_mode,
         )
 
         ttir = make_wrapped_tile_ttir(options)

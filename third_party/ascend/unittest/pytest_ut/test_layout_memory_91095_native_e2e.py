@@ -126,9 +126,9 @@ def _launch_with_observer(monkeypatch, kernel, grid, *args, **compile_options):
 
 
 def _assert_real_91095_gate(compiled, *, pure_simt: bool) -> None:
-    """Do not let a manually forced option masquerade as device gate-on."""
+    """Do not let a manual mode override masquerade as device gate-on."""
     assert compiled.metadata.compile_on_910_95 is True
-    assert compiled.metadata.force_simt_only is pure_simt
+    assert compiled.metadata.is_pure_simt is pure_simt
     if not pure_simt:
         assert compiled.metadata.force_simt_template is True
 
@@ -207,7 +207,7 @@ def test_row_91095_native_metadata_launcher_and_ir(monkeypatch):
         dst,
         n,
         BLOCK=16,
-        force_simt_only=True,
+        compile_mode="simt_only",
     )
 
     assert torch.equal(dst.cpu(), src.cpu())

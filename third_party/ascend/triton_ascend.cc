@@ -187,14 +187,11 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
       moduleop->setAttr(CVPipeline::kEnableUbRefineOpt, builder.getUnitAttr());
     }
   });
-  m.def("set_enable_buffer_insert_optimization",
-        [](mlir::ModuleOp &moduleop, bool enable) {
-          OpBuilder builder(moduleop.getContext());
-          if (enable) {
-            moduleop->setAttr(CVPipeline::kInsertionOptimization,
-                              builder.getUnitAttr());
-          }
-        });
+  m.def("set_enable_buffer_insert_optimization", [](mlir::ModuleOp &moduleop) {
+    OpBuilder builder(moduleop.getContext());
+    moduleop->setAttr(CVPipeline::kInsertionOptimization,
+                      builder.getUnitAttr());
+  });
 }
 
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL

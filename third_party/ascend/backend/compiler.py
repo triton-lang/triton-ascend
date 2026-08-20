@@ -265,7 +265,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             # Must run before add_dynamic_cv_pipeline because the driven
             # AddMultiBufferInnerScope pass reads the module-level
             # `ssbuffer.insertionOptimization` attribute (set here) at run time.
-            ascend.passes.ttir.set_enable_buffer_insert_optimization(mod, metadata["enable_buffer_insert_optimization"])
+            # Keep the existing default-on lowering behavior after removing
+            # the public compile option.
+            ascend.passes.ttir.set_enable_buffer_insert_optimization(mod)
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
 
         if _enable_msdebug():
@@ -1024,8 +1026,6 @@ class NPUOptions:
     tile_mix_cube_loop: int = None
     enable_mixed_cv: bool = None
     enable_dynamic_cv_pipeline: bool = None
-    # Multi-cache insertion optimization: avoid redundant tensor compute in the middle of an `if`.
-    enable_buffer_insert_optimization: bool = True
     hfusion_enable_multiple_consumer_fusion: bool = False
     enable_cross_if_fusion: bool = False
     has_auto_blockify_blacklist_op: Optional[bool] = None

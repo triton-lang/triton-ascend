@@ -1,9 +1,9 @@
-// RUN: triton-opt '--discrete-mask-access-conversion=compile-on-910-95=True force-simt-template=True' --split-input-file %s | FileCheck %s
+// RUN: triton-opt '--discrete-mask-access-conversion=compile-on-910-95=True compile-mode=simd_simt_template' --split-input-file %s | FileCheck %s
 
 // CHECK-LABEL: tt.func @structured_disc_mask_atomic_add_2d
 // CHECK-NOT: arith.select {{.*}} : tensor<4x4xi1>, tensor<4x4xi32>
-// CHECK: tt.atomic_rmw add, acq_rel, gpu, {{.*}} {route_discrete_mask_to_simt} : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
-// CHECK: tt.store {{.*}} {route_discrete_mask_to_simt} : tensor<4x4x!tt.ptr<i32>>
+// CHECK: tt.atomic_rmw add, acq_rel, gpu, {{.*}} {MixCompileDiscreteMask} : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
+// CHECK: tt.store {{.*}} {MixCompileDiscreteMask} : tensor<4x4x!tt.ptr<i32>>
 tt.func @structured_disc_mask_atomic_add_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>) {
 	%cst = arith.constant dense<16> : tensor<4x4xi32>
 	%cst_0 = arith.constant dense<2> : tensor<4x4xi32>
@@ -33,8 +33,8 @@ tt.func @structured_disc_mask_atomic_add_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<
 
 // CHECK-LABEL: tt.func @structured_disc_mask_atomic_and_2d
 // CHECK-NOT: arith.select {{.*}} : tensor<4x4xi1>, tensor<4x4xi32>
-// CHECK: tt.atomic_rmw and, acq_rel, gpu, {{.*}} {route_discrete_mask_to_simt} : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
-// CHECK: tt.store {{.*}} {route_discrete_mask_to_simt} : tensor<4x4x!tt.ptr<i32>>
+// CHECK: tt.atomic_rmw and, acq_rel, gpu, {{.*}} {MixCompileDiscreteMask} : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
+// CHECK: tt.store {{.*}} {MixCompileDiscreteMask} : tensor<4x4x!tt.ptr<i32>>
 tt.func @structured_disc_mask_atomic_and_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>) {
 	%cst = arith.constant dense<16> : tensor<4x4xi32>
 	%cst_0 = arith.constant dense<2> : tensor<4x4xi32>
@@ -64,8 +64,8 @@ tt.func @structured_disc_mask_atomic_and_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<
 
 // CHECK-LABEL: tt.func @structured_disc_mask_atomic_or_2d
 // CHECK-NOT: arith.select {{.*}} : tensor<4x4xi1>, tensor<4x4xi32>
-// CHECK: tt.atomic_rmw or, acq_rel, gpu, {{.*}} {route_discrete_mask_to_simt} : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
-// CHECK: tt.store {{.*}} {route_discrete_mask_to_simt} : tensor<4x4x!tt.ptr<i32>>
+// CHECK: tt.atomic_rmw or, acq_rel, gpu, {{.*}} {MixCompileDiscreteMask} : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
+// CHECK: tt.store {{.*}} {MixCompileDiscreteMask} : tensor<4x4x!tt.ptr<i32>>
 tt.func @structured_disc_mask_atomic_or_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>) {
 	%cst = arith.constant dense<16> : tensor<4x4xi32>
 	%cst_0 = arith.constant dense<2> : tensor<4x4xi32>
@@ -95,8 +95,8 @@ tt.func @structured_disc_mask_atomic_or_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i
 
 // CHECK-LABEL: tt.func @structured_disc_mask_atomic_xor_2d
 // CHECK-NOT: arith.select {{.*}} : tensor<4x4xi1>, tensor<4x4xi32>
-// CHECK: tt.atomic_rmw xor, acq_rel, gpu, {{.*}} {route_discrete_mask_to_simt} : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
-// CHECK: tt.store {{.*}} {route_discrete_mask_to_simt} : tensor<4x4x!tt.ptr<i32>>
+// CHECK: tt.atomic_rmw xor, acq_rel, gpu, {{.*}} {MixCompileDiscreteMask} : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
+// CHECK: tt.store {{.*}} {MixCompileDiscreteMask} : tensor<4x4x!tt.ptr<i32>>
 tt.func @structured_disc_mask_atomic_xor_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>) {
 	%cst = arith.constant dense<16> : tensor<4x4xi32>
 	%cst_0 = arith.constant dense<2> : tensor<4x4xi32>
@@ -125,8 +125,8 @@ tt.func @structured_disc_mask_atomic_xor_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<
 // -----
 
 // CHECK-LABEL: tt.func @structured_disc_mask_atomic_xchg_2d
-// CHECK: tt.atomic_rmw exch, acq_rel, gpu, {{.*}} {DiscreteMask} : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
-// CHECK: tt.store {{.*}} {route_discrete_mask_to_simt} : tensor<4x4x!tt.ptr<i32>>
+// CHECK: tt.atomic_rmw exch, acq_rel, gpu, {{.*}} {MixCompileDiscreteMask} : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
+// CHECK: tt.store {{.*}} {MixCompileDiscreteMask} : tensor<4x4x!tt.ptr<i32>>
 tt.func @structured_disc_mask_atomic_xchg_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>) {
 	%cst = arith.constant dense<16> : tensor<4x4xi32>
 	%cst_0 = arith.constant dense<2> : tensor<4x4xi32>
@@ -156,8 +156,8 @@ tt.func @structured_disc_mask_atomic_xchg_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr
 
 // CHECK-LABEL: tt.func @structured_disc_mask_atomic_max_2d
 // CHECK-NOT: arith.select {{.*}} : tensor<4x4xi1>, tensor<4x4xi32>
-// CHECK: tt.atomic_rmw max, acq_rel, gpu, {{.*}} {route_discrete_mask_to_simt} : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
-// CHECK: tt.store {{.*}} {route_discrete_mask_to_simt} : tensor<4x4x!tt.ptr<i32>>
+// CHECK: tt.atomic_rmw max, acq_rel, gpu, {{.*}} {MixCompileDiscreteMask} : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
+// CHECK: tt.store {{.*}} {MixCompileDiscreteMask} : tensor<4x4x!tt.ptr<i32>>
 tt.func @structured_disc_mask_atomic_max_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>) {
 	%cst = arith.constant dense<16> : tensor<4x4xi32>
 	%cst_0 = arith.constant dense<2> : tensor<4x4xi32>
@@ -187,8 +187,8 @@ tt.func @structured_disc_mask_atomic_max_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<
 
 // CHECK-LABEL: tt.func @structured_disc_mask_atomic_min_2d
 // CHECK-NOT: arith.select {{.*}} : tensor<4x4xi1>, tensor<4x4xi32>
-// CHECK: tt.atomic_rmw min, acq_rel, gpu, {{.*}} {route_discrete_mask_to_simt} : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
-// CHECK: tt.store {{.*}} {route_discrete_mask_to_simt} : tensor<4x4x!tt.ptr<i32>>
+// CHECK: tt.atomic_rmw min, acq_rel, gpu, {{.*}} {MixCompileDiscreteMask} : (tensor<4x4x!tt.ptr<i32>>, tensor<4x4xi32>, tensor<4x4xi1>) -> tensor<4x4xi32>
+// CHECK: tt.store {{.*}} {MixCompileDiscreteMask} : tensor<4x4x!tt.ptr<i32>>
 tt.func @structured_disc_mask_atomic_min_2d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>, %arg2: !tt.ptr<i32>) {
 	%cst = arith.constant dense<16> : tensor<4x4xi32>
 	%cst_0 = arith.constant dense<2> : tensor<4x4xi32>

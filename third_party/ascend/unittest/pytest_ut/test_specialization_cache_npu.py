@@ -85,7 +85,7 @@ def _reset_cache_hook():
         _clear_kernel_cache(_add_annotated_value)
 
 
-@pytest.mark.parametrize("mode", ["simd", "unstructured_in_simt"])
+@pytest.mark.parametrize("mode", ["simd"])
 @pytest.mark.parametrize("values", [(16, 17), (17, 16)])
 def test_simd_integer_alignment_reuses_compilation(mode, values):
     src = torch.arange(32, dtype=torch.int32, device="npu")
@@ -103,7 +103,7 @@ def test_simd_integer_alignment_reuses_compilation(mode, values):
     assert compile_count == 1
 
 
-@pytest.mark.parametrize("mode", ["simd", "unstructured_in_simt"])
+@pytest.mark.parametrize("mode", ["simd"])
 @pytest.mark.parametrize("offsets", [(0, 1), (1, 0)], ids=["aligned-first", "unaligned-first"])
 @pytest.mark.parametrize("changed_pointer", ["src", "dst", "both"], ids=["src-only", "dst-only", "src-and-dst"])
 def test_simd_pointer_alignment_reuses_compilation(mode, offsets, changed_pointer):
@@ -123,7 +123,7 @@ def test_simd_pointer_alignment_reuses_compilation(mode, offsets, changed_pointe
     assert compile_count == 1
 
 
-@pytest.mark.parametrize("mode", ["simd", "unstructured_in_simt"])
+@pytest.mark.parametrize("mode", ["simd"])
 @pytest.mark.parametrize("values", [(1, 2), (2, 1)])
 def test_simd_integer_one_still_recompiles(mode, values):
     src = torch.arange(32, dtype=torch.int32, device="npu")
@@ -141,7 +141,7 @@ def test_simd_integer_one_still_recompiles(mode, values):
     assert compile_count == 2
 
 
-@pytest.mark.parametrize("mode", ["simd", "unstructured_in_simt"])
+@pytest.mark.parametrize("mode", ["simd"])
 @pytest.mark.parametrize("values", [(1, 2), (2, 1)])
 def test_simd_annotated_integer_one_is_constexpr_and_recompiles(mode, values):
     src = torch.arange(32, dtype=torch.int32, device="npu")

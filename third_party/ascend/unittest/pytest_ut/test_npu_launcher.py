@@ -58,7 +58,7 @@ def _mock_backend_func(name, *args):
     return f"/* {name}: {args} */"
 
 
-def _make_launcher_source(monkeypatch, *, force_simt_only, global_scratch_size=0, workspace_size=0):
+def _make_launcher_source(monkeypatch, *, is_pure_simt, global_scratch_size=0, workspace_size=0):
     metadata = SimpleNamespace(
         target=driver.GPUTarget("npu", "Ascend910B", 0),
         workspace_size=workspace_size,
@@ -70,8 +70,8 @@ def _make_launcher_source(monkeypatch, *, force_simt_only, global_scratch_size=0
         global_scratch_size=global_scratch_size,
         global_scratch_align=1,
         compile_on_910_95=False,
-        parallel_mode="simt" if force_simt_only else "",
-        force_simt_only=force_simt_only,
+        parallel_mode="simt" if is_pure_simt else "",
+        is_pure_simt=is_pure_simt,
         shared_mem_dynamic_size=122880,
         debug=False,
         coalesce_factor=1,
@@ -155,7 +155,7 @@ def test_npu_launcher_skips_global_scratch_for_empty_grid(monkeypatch):
 
 
 def test_make_launcher_threads_scratch_through_pure_simt_abi(monkeypatch):
-    src = _make_launcher_source(monkeypatch, force_simt_only=True)
+    src = _make_launcher_source(monkeypatch, is_pure_simt=True)
 
     parse = src[src.index("METH_FASTCALL fast path"):]
     assert 'launch expects %d arguments, got %zd' in parse
@@ -197,7 +197,7 @@ def test_make_launcher_threads_scratch_through_pure_simt_abi(monkeypatch):
 
 
 def test_make_launcher_omits_scratch_from_non_simt_device_layout(monkeypatch):
-    src = _make_launcher_source(monkeypatch, force_simt_only=False)
+    src = _make_launcher_source(monkeypatch, is_pure_simt=False)
 
     parse = src[src.index("METH_FASTCALL fast path"):]
     _assert_order(parse, "global_scratch_obj = args[5]", "profile_scratch_obj = args[6]", "packedMetadata = args[7]")
@@ -220,7 +220,7 @@ def test_exported_launcher_rejects_nonzero_global_scratch_before_setup(monkeypat
     monkeypatch.setenv("TRITON_ENABLE_TASKQUEUE", "true")
     src = _make_launcher_source(
         monkeypatch,
-        force_simt_only=True,
+        is_pure_simt=True,
         global_scratch_size=64,
         workspace_size=32,
     )

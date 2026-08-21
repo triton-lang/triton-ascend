@@ -79,8 +79,8 @@ def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
            "64", "Maximum graph rewrites per function">,
     Option<"ubCapacityBytes", "ub-capacity-bytes", "uint64_t", "0",
            "Unified-buffer capacity available to StoreCoalescing">,
-    Option<"forceSimtOnly", "force-simt-only", "bool", "false",
-           "Enable pure-SIMT-only graph rules such as RowCoalescing">,
+    Option<"compileMode", "compile-mode", "std::string", "\"simd_simt_template\"",
+           "Compilation mode; RowCoalescing is enabled only for simt_only">,
   ];
 }
 

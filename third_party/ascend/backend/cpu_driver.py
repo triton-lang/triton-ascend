@@ -25,7 +25,7 @@ import os
 import sysconfig
 import subprocess
 import importlib
-from triton.backends.ascend.utils import _get_llvm_path
+from triton.backends.ascend.utils import _get_cxx
 
 
 # TODO: temporarily fake CPUUtils class
@@ -187,7 +187,7 @@ def compile_module(launcher_src):
                 Path(launcher_src_path).write_text(launcher_src)
                 # Compile it together.
                 subprocess.check_call([
-                    _get_llvm_path("bin", "clang++"), launcher_src_path, asm_src_path, f"-I{py_include_dir}",
+                    _get_cxx(), launcher_src_path, asm_src_path, f"-I{py_include_dir}",
                     f"-I{Path(__file__).resolve().parent}", "-shared", "-fPIC", "-o", so_path
                 ])
 

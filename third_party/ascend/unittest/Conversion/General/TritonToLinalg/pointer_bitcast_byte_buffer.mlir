@@ -1,7 +1,7 @@
 // RUN: triton-opt --triton-to-unstructure --triton-to-linalg="named-ops=True" --split-input-file %s | FileCheck %s
 // RUN: triton-opt --triton-to-unstructure --split-input-file %s | FileCheck %s --check-prefix=UNSTRUCTURE
-// RUN: triton-opt '--triton-to-unstructure=compile-on-910-95=True force-simt-template=True' --split-input-file %s | FileCheck %s --check-prefix=SIMT
-// RUN: triton-opt '--triton-to-unstructure=compile-on-910-95=True force-simt-template=True' '--triton-to-linalg=compile-on-910-95=True' --split-input-file %s | FileCheck %s --check-prefix=SIMT-LINALG
+// RUN: triton-opt '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' --split-input-file %s | FileCheck %s --check-prefix=SIMT
+// RUN: triton-opt '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' '--triton-to-linalg=compile-on-910-95=True compile-mode=simd_simt_template' --split-input-file %s | FileCheck %s --check-prefix=SIMT-LINALG
 
 // CHECK-LABEL: func.func @widen_tensor_offset
 // CHECK: scf.for

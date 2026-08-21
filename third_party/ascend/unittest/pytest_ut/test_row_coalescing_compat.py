@@ -11,9 +11,9 @@
 # all copies or substantial portions of the Software.
 """IR contracts for the pure-SIMT Row graph-optimization rule.
 
-Row is selected by graph-rule bit 8 and the explicit ``force_simt_only`` pass
-option.  The test enters through the public graph-optimization binding, which
-is the same pass scheduled by ``make_ttir()``.
+Row is selected by graph-rule bit 8 and ``compile_mode="simt_only"``.  The
+test enters through the public graph-optimization binding, which is the same
+pass scheduled by ``make_ttir()``.
 """
 
 import pytest
@@ -127,7 +127,7 @@ module {{
 """
 
 
-def _run_row(text, tmp_path, *, force_simt_only=True, rule_mask=8):
+def _run_row(text, tmp_path, *, compile_mode="simt_only", rule_mask=8):
     context = ir.context()
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
@@ -138,7 +138,7 @@ def _run_row(text, tmp_path, *, force_simt_only=True, rule_mask=8):
     ascend.passes.ttir.add_graph_optimize(
         pm,
         rule_mask=rule_mask,
-        force_simt_only=force_simt_only,
+        compile_mode=compile_mode,
     )
     pm.run(module, "row-coalescing-graph-rule-test")
     return str(module)
@@ -248,10 +248,10 @@ def test_row_coalescing_preserves_nonzero_row_axis(tmp_path):
 def test_row_coalescing_requires_force_simt_only_and_rule_bit(tmp_path):
     source = _row_module("row_force_gate", 16)
 
-    force_disabled = _run_row(source, tmp_path, force_simt_only=False)
+    mode_disabled = _run_row(source, tmp_path, compile_mode="simd")
     mask_disabled = _run_row(source, tmp_path, rule_mask=7)
 
-    _assert_row_bailout(force_disabled)
+    _assert_row_bailout(mode_disabled)
     _assert_row_bailout(mask_disabled)
 
 

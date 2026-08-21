@@ -33,9 +33,6 @@ from triton.backends.ascend.backend_register import backend_strategy_registry
 
 import pybind11
 
-# Lazy init for is_compile_on_910_95
-_is_compile_on_910_95 = None
-
 # Phase-one compatibility boundary for compile-option cleanup.  Keep the
 # existing NPUOptions fields and their internal consumers intact while public
 # dictionaries route supported aliases and drop backend-managed fields.
@@ -61,13 +58,10 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "enable_sync_block_lock",
     "enable_ub_refine_opt",
     "enable_vf_fusion",
-    "force_simt_only",
-    "force_simt_template",
     "graph_optimize_emit_remarks",
     "graph_optimize_max_rewrites_per_function",
     "graph_optimize_rule_mask",
     "graph_optimize_ub_capacity_bytes",
-    "grid_num_tiles",
     "has_auto_blockify_blacklist_op",
     "hfusion_enable_multiple_consumer_fusion",
     "kernel_name",
@@ -82,11 +76,6 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "vf_merge_level",
     "warp_size",
 })
-
-_DEPRECATED_NPU_OPTION_ROUTES = {
-    "force_simt_only": ("compile_mode", "simt_only"),
-    "force_simt_template": ("compile_mode", "unstructured_in_simt"),
-}
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({
     "LLVM_ROOT",
@@ -118,14 +107,8 @@ def _get_deprecated_npu_options(options) -> set[str]:
 
 
 def _warn_deprecated_npu_option(name: str) -> None:
-    route = _DEPRECATED_NPU_OPTION_ROUTES.get(name)
-    if route is not None:
-        replacement_name, replacement_value = route
-        message = (f"Ascend compile option '{name}' is deprecated; "
-                   f"use {replacement_name}={replacement_value!r} instead.")
-    else:
-        message = (f"Ascend compile option '{name}' is deprecated and ignored; "
-                   "the backend-managed/default behavior is used instead.")
+    message = (f"Ascend compile option '{name}' is deprecated and ignored; "
+               "the backend-managed/default behavior is used instead.")
     warnings.warn(
         message,
         FutureWarning,
@@ -139,10 +122,6 @@ def _remove_deprecated_npu_options(options, *, protected=(), in_place=False):
     deprecated = _get_deprecated_npu_options(normalized) - set(protected)
     for name in sorted(deprecated):
         _warn_deprecated_npu_option(name)
-        route = _DEPRECATED_NPU_OPTION_ROUTES.get(name)
-        if route is not None and normalized[name]:
-            replacement_name, replacement_value = route
-            normalized.setdefault(replacement_name, replacement_value)
         normalized.pop(name)
     return normalized
 
@@ -165,18 +144,9 @@ def _warn_deprecated_ascend_env_vars() -> None:
         _warn_deprecated_ascend_env_var(name)
 
 
-def is_compile_on_910_95():
-    global _is_compile_on_910_95
-    if _is_compile_on_910_95 is None:
-        try:
-            import acl
-            name = acl.get_soc_name()
-            name_lower = name.lower()
-            _is_compile_on_910_95 = ("ascend910_95" in name_lower or "ascend950" in name_lower
-                                     or "910_958b" in name_lower)
-        except (ImportError, AttributeError):
-            _is_compile_on_910_95 = False
-    return _is_compile_on_910_95
+def is_compile_on_910_95(arch: str) -> bool:
+    """Return whether the explicit compilation target belongs to the A5 generation."""
+    return isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950"))
 
 
 AUTO_BLOCKIFY_BLACKLIST_RULES = (
@@ -199,12 +169,7 @@ def get_backend_func(name, *args, **kwargs):
     global backend_policy
     if backend_policy is None:
         _warn_deprecated_ascend_env_var("TRITON_BACKEND")
-        try:
-            import torch
-            import torch_npu
-            backend_policy = "torch_npu"
-        except ImportError:
-            backend_policy = "mindspore"
+        backend_policy = "torch_npu"
     return backend_strategy_registry.execute_func(backend_policy, name, *args, **kwargs)
 
 
@@ -481,6 +446,7 @@ def _is_debug_line_info_disabled() -> bool:
 
 
 def _is_auto_map_parallel_blocks_enabled() -> bool:
+    """Return the fixed backend policy for automatic block mapping."""
     _warn_deprecated_ascend_env_var("TRITON_ALL_BLOCKS_PARALLEL")
     return True
 
@@ -495,7 +461,7 @@ def _warn_auto_blockify_disabled(kernel_name: str, blacklist_reasons) -> None:
     reasons = ", ".join(blacklist_reasons)
     print(f"[WARNING] AutoBlockify disabled for kernel '{kernel_name}'. "
           f"Unsafe ops: {reasons}. Enabling may cause correctness issues. "
-          "To force enable: set has_auto_blockify_blacklist_op=False.")
+          "The compiler keeps AutoBlockify disabled for this kernel.")
 
 
 def _enable_print_ub_bits() -> bool:
@@ -689,37 +655,17 @@ def graph_ub_budget_bytes_for_arch(arch: str) -> int:
 
 
 def is_ffts_supported(arch: str):
-    '''
-    Cases:
-    - empty str: User does not specify arch, thus it runs on 910B/910D both of which support ffts. Return True.
-    - Ascend310B4: 310B4 does not support ffts. Return False.
-    - Ascend910_95*: 910_95 does not support ffts. Return False.
-    - Other arch: 910B/910D supports ffts. Return True.
-    '''
-    if is_compile_on_910_95():
+    """Return whether the specified compilation target supports FFTS."""
+    if not isinstance(arch, str) or not arch:
         return False
-    if arch in ["Ascend910A", "Ascend310B4"]:
+    if is_compile_on_910_95(arch) or arch in ["Ascend910A", "Ascend310B4"]:
         return False
     return True
 
 
-def force_disable_ffts():
-    '''
-    '''
-    if is_compile_on_910_95():
-        return True
-    _warn_deprecated_ascend_env_var("TRITON_DISABLE_FFTS")
-    return False
-
-
-def triton_support_ffts():
-    arch = get_ascend_arch_from_env()
-    return is_ffts_supported(arch) and (not force_disable_ffts())
-
-
-def triton_enable_libdevice_simt():
-    enable_libdevice_simt = os.getenv("TRITON_ENABLE_LIBDEVICE_SIMT", False)
-    return enable_libdevice_simt and is_compile_on_910_95()
+def force_disable_ffts(arch: str) -> bool:
+    """Return whether the selected target requires FFTS to be disabled."""
+    return is_compile_on_910_95(arch)
 
 
 def get_cann_version_file_hash():

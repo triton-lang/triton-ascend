@@ -1,4 +1,4 @@
-// RUN: triton-opt --pass-pipeline="builtin.module(triton-to-unstructure{compile-on-910-95=true force-simt-template=false},triton-to-linalg{compile-on-910-95=true enable-nd2nz-on-vector=false global-kernel=false named-ops=true})" --split-input-file %s | FileCheck %s
+// RUN: triton-opt --pass-pipeline="builtin.module(triton-to-unstructure{compile-on-910-95=true compile-mode=simd},triton-to-linalg{compile-on-910-95=true enable-nd2nz-on-vector=false global-kernel=false named-ops=true compile-mode=simd})" --split-input-file %s | FileCheck %s
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   tt.func public @_dot_scaled_test_fp4(%a_ptr: !tt.ptr<i8>, %a_scale_ptr: !tt.ptr<i8>, %b_ptr: !tt.ptr<i8>, %b_scale_ptr: !tt.ptr<i8>, %c_ptr: !tt.ptr<f32>) attributes {noinline = false} {

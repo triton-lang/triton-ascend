@@ -505,8 +505,8 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
             // We need to ensure the intermediate ops are marked MixUse
             // so that they will be replaced instead of be erased without
             // conversion.
-            return (isa<triton::LoadOp>(curOp) || isa<triton::StoreOp>(curOp) ||
-                    isa<triton::ascend::IndirectStoreOp>(curOp)) &&
+            return (isa<triton::LoadOp, triton::StoreOp,
+                        triton::ascend::IndirectStoreOp>(curOp)) &&
                    !isMetaUse(curOp);
           },
           /*actionFn*/

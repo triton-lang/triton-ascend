@@ -86,7 +86,7 @@ def compile_kernel(kernel, signature, constants):
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
     try:
-        options = NPUOptions(arch="Ascend910_9589", compile_on_910_95=True, enable_dynamic_cv_pipeline=True)
+        options = NPUOptions(arch="Ascend910_9589", enable_dynamic_cv_pipeline=True)
         # Register codegen_fns, including min_dot_size required by tl.dot.
         # The normal compilation path obtains this via backend.get_codegen_implementation(options);
         # here we import min_dot_size directly from the Ascend backend and construct it.

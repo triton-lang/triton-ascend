@@ -23,14 +23,13 @@ import functools
 import hashlib
 import glob
 import json
-from numbers import Integral
 import os
 import re
 import shlex
 import subprocess
 import tempfile
 import warnings
-from dataclasses import dataclass
+from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, Optional, Tuple, Union
@@ -50,8 +49,6 @@ from triton.backends.ascend.utils import (
     _enable_dump_memory_info,
     _enable_msdebug,
     _get_kernel_target,
-    _get_llvm_path,
-    _get_mlir_path,
     _get_npucompiler_path,
     _get_triton_adapter_opt_path,
     _get_triton_mlir_opt_path,
@@ -68,7 +65,6 @@ from triton.backends.ascend.utils import (
     force_disable_ffts,
     graph_ub_budget_bytes_for_arch,
     get_cann_version_file_hash,
-    is_compile_on_910_95,
 )
 from triton.backends.ascend.driver import (NPUUtils)
 from triton.backends.compiler import (
@@ -182,10 +178,8 @@ def make_ttir(mod, metadata, opt):
     if opt.enable_graph_optimize:
         ascend.passes.ttir.add_graph_optimize(
             pm,
-            rule_mask=opt.graph_optimize_rule_mask,
-            max_rewrites_per_function=opt.graph_optimize_max_rewrites_per_function,
-            ub_capacity_bytes=opt.graph_optimize_ub_capacity_bytes,
-            force_simt_only=opt.force_simt_only,
+            ub_capacity_bytes=graph_ub_budget_bytes_for_arch(opt.target_arch),
+            compile_mode=opt.effective_compile_mode,
         )
     pm.run(mod, 'make_ttir')
     if opt.debug:
@@ -201,15 +195,13 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
     # Get Triton-MLIR as string
     ttir_code = str(mod)
     auto_map_parallel_blocks_enabled = _is_auto_map_parallel_blocks_enabled()
-    blacklist_reasons = []
-    has_auto_blockify_blacklist_op = metadata.get("has_auto_blockify_blacklist_op")
-    if has_auto_blockify_blacklist_op is None and auto_map_parallel_blocks_enabled:
-        blacklist_reasons = _get_auto_blockify_blacklist_reasons(ttir_code)
-        has_auto_blockify_blacklist_op = bool(blacklist_reasons)
-    elif has_auto_blockify_blacklist_op is None:
-        has_auto_blockify_blacklist_op = False
+    # This is compiler-derived safety metadata, never a user compile option.
+    # Derive it even when the feature is currently disabled so a later runtime
+    # environment change cannot enable AutoBlockify for unsafe TTIR.
+    blacklist_reasons = _get_auto_blockify_blacklist_reasons(ttir_code)
+    has_auto_blockify_blacklist_op = bool(blacklist_reasons)
     metadata["has_auto_blockify_blacklist_op"] = has_auto_blockify_blacklist_op
-    if has_auto_blockify_blacklist_op and blacklist_reasons:
+    if auto_map_parallel_blocks_enabled and has_auto_blockify_blacklist_op and blacklist_reasons:
         kernel_name = re.search(r"tt\.func\spublic\s+@(\w+)", ttir_code).group(1)
         _warn_auto_blockify_disabled(kernel_name or "<unknown>", blacklist_reasons)
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -218,18 +210,21 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         Path(src_path).write_text(ttir_code)
         triton_adapter_opt_path = _get_triton_adapter_opt_path()
 
-        enable_nd2nz_on_vector = metadata["enable_nd2nz_on_vector"]
-        enable_select_analysis = metadata["enable_select_analysis"]
+        # Select analysis is a fixed lowering policy, not a user compile option.
+        enable_select_analysis = True
         compile_on_910_95 = metadata["compile_on_910_95"]
-        force_simt_template = metadata["force_simt_template"]
-        enable_mask_fallback_conversion = metadata["enable_mask_fallback_conversion"]
-        optimize_dynamic_offset = metadata["optimize_dynamic_offset"]
-        auto_blockify_size = metadata["auto_blockify_size"]
+        # Use one effective lowering mode. It preserves an explicitly passed
+        # compile_mode; otherwise the direct force selectors choose their
+        # historical route.
+        compile_mode = getattr(
+            opt,
+            "effective_compile_mode",
+            getattr(opt, "compile_mode", "simd_simt_template"),
+        )
+        metadata["compile_mode"] = compile_mode
         enable_mixed_cv = metadata.get("enable_mixed_cv")
         disable_auto_inject_block_sync = metadata.get("disable_auto_inject_block_sync")
         set_workspace_multibuffer = metadata.get("set_workspace_multibuffer")
-        if has_auto_blockify_blacklist_op or not auto_map_parallel_blocks_enabled:
-            auto_blockify_size = 1
 
         # Inject grid tile-count hint for ChunkCoalescing. When the kernel
         # has no boundary mask but grid[axis] is known at compile time (e.g.
@@ -237,7 +232,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         grid_num_tiles = metadata.get("grid_num_tiles")
         if isinstance(grid_num_tiles, int) and grid_num_tiles > 0:
             try:
-                _builder = ascend.ir.ascendnpu_ir_builder(mod.context, opt.arch)
+                _builder = ascend.ir.ascendnpu_ir_builder(mod.context, opt.target_arch)
                 mod.set_attr("hacc.grid_num_tiles", _builder.parse_attr(f"{grid_num_tiles} : i32"))
             except Exception:
                 pass  # graceful fallback: pass runs without hint
@@ -246,28 +241,19 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         pm.enable_debug()
         if distributed is not None:
             distributed.ascend_passes.ttgpuir.add_convert_triton_distributed_to_hivm(pm)
-        # ascend.passes.ttir.add_auto_blockify(pm, auto_blockify_size)
 
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
-        if (metadata["add_auto_scheduling"]):
-            ascend.passes.ttir.add_dag_sync(pm)
-            ascend.passes.ttir.add_dag_scope(pm)
-            passes.common.add_cse(pm)
-            passes.common.add_canonicalizer(pm)
-            ascend.passes.ttir.add_dag_ssbuffer(pm)
-            passes.common.add_cse(pm)
-            passes.common.add_canonicalizer(pm)
-        ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
-        ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, force_simt_template)
+        ascend.passes.ttir.add_triton_to_structure(pm, False, False)
+        ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, compile_mode)
         ascend.passes.ttir.add_triton_to_annotation(pm)
-        ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, force_simt_template)
+        ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, compile_mode)
         ascend.passes.ttir.add_triton_to_hivm(pm)
         ascend.passes.ttir.add_triton_to_hfusion(pm, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_llvm(pm)
         ascend.passes.ttir.add_bubble_up_operation(pm)
-        ascend.passes.ttir.add_triton_to_structure(pm, enable_mask_fallback_conversion, optimize_dynamic_offset)
-        ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, enable_nd2nz_on_vector, enable_select_analysis,
-                                                compile_on_910_95)
+        ascend.passes.ttir.add_triton_to_structure(pm, False, False)
+        ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, enable_select_analysis, compile_on_910_95,
+                                                compile_mode)
         # Restricted to 910_95/950. The merged buffer is written by two disjoint
         # memref.copy ops, and on 910_9362 the generated code only makes the
         # copy next to the surviving to_tensor visible, so the other half of the
@@ -279,27 +265,29 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             metadata["set_workspace_multibuffer"] = 0
             metadata["enable_mixed_cv"] = True
             metadata["disable_auto_inject_block_sync"] = True
-            ascend.passes.ttir.set_enable_cube_block_merge(metadata["enable_cube_block_merge"])
-            ascend.passes.ttir.set_enable_ub_refine_opt(mod, metadata["enable_ub_refine_opt"])
+            # Cube block merge remains a backend-managed lowering policy.
+            ascend.passes.ttir.set_enable_cube_block_merge(False)
 
             # Must run before add_dynamic_cv_pipeline because the driven
             # AddMultiBufferInnerScope pass reads the module-level
             # `ssbuffer.insertionOptimization` attribute (set here) at run time.
-            ascend.passes.ttir.set_enable_buffer_insert_optimization(mod, metadata["enable_buffer_insert_optimization"])
+            # Keep the existing default-on lowering behavior after removing
+            # the public compile option.
+            ascend.passes.ttir.set_enable_buffer_insert_optimization(mod)
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
 
         if _enable_msdebug():
             ascend.passes.ttir.add_normalize_debug_line_locations(pm)
 
-        _intra_val = metadata.get("intra_cache_num")
+        _intra_val = metadata.get("buf_slot_num_of_veccore")
         if _intra_val is not None:
             ascend.passes.ttir.set_buffer_count(mod, "INTRA", _intra_val)
 
-        _inter_val = metadata.get("inter_cache_num")
+        _inter_val = metadata.get("buf_slot_num_of_crosscore")
         if _inter_val is not None:
             ascend.passes.ttir.set_buffer_count(mod, "INTER", _inter_val)
 
-        _load_val = metadata.get("load_cache_num")
+        _load_val = metadata.get("buf_slot_num_of_gm")
         if _load_val is not None:
             ascend.passes.ttir.set_buffer_count(mod, "LOAD", _load_val)
 
@@ -508,13 +496,9 @@ def _parse_ttir_metadata(ttir: str, metadata: dict):
     metadata["mix_mode"] = "aiv"
     metadata["kernel_name"] = re.search(KERNEL_NAME_REGEX, ttir).group(1)
     metadata["name"] = metadata["kernel_name"]
-    auto_map_parallel_blocks_enabled = _is_auto_map_parallel_blocks_enabled()
-    has_auto_blockify_blacklist_op = metadata.get("has_auto_blockify_blacklist_op")
-    if has_auto_blockify_blacklist_op is None and auto_map_parallel_blocks_enabled:
-        has_auto_blockify_blacklist_op = bool(_get_auto_blockify_blacklist_reasons(ttir))
-    elif has_auto_blockify_blacklist_op is None:
-        has_auto_blockify_blacklist_op = False
-    metadata["has_auto_blockify_blacklist_op"] = has_auto_blockify_blacklist_op
+    # Keep this as compiler-derived safety metadata.  In particular, do not
+    # trust a caller-provided False value to override an unsafe TTIR pattern.
+    metadata["has_auto_blockify_blacklist_op"] = bool(_get_auto_blockify_blacklist_reasons(ttir))
     # Parse all tensor kinds from arguments
     metadata["tensor_kinds"] = [int(kind) for _, kind in re.findall(TENSOR_KIND_REGEX, ttir)]
     return metadata
@@ -583,7 +567,7 @@ def try_compile_with_config(linalg: str, ub_config: Dict[str, Any], metadata: di
 def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_file_name = "kernel.mlir" if opt.use_bytecode else "kernel.ttadapter.mlir"
+        tmp_file_name = "kernel.mlir"
         ttadapter_path = os.path.join(tmpdir, tmp_file_name)
         Path(ttadapter_path).write_text(linalg)
         bin_file = os.path.join(tmpdir, "kernel")
@@ -608,28 +592,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 f"--enable-auto-multi-buffer={multi_buffer_value}",
             ]
 
-        storage_align = metadata["storage_align"]
-        if storage_align is not None:
-            _compile_option_list += [
-                f"--enable-hivm-auto-storage-align={storage_align}",
-            ]
-
-        ops_reorder = metadata["ops_reorder"]
-        if ops_reorder is not None:
-            _compile_option_list += [
-                f"--enable-ops-reorder={ops_reorder}",
-            ]
-
         vf_fusion_mode = metadata["vf_fusion_mode"]
         if vf_fusion_mode is not None:
             _compile_option_list += [
                 f"--vf-fusion-mode={vf_fusion_mode}",
-            ]
-
-        code_motion = metadata["code_motion"]
-        if code_motion is not None:
-            _compile_option_list += [
-                f"--enable-code-motion={code_motion}",
             ]
 
         enable_preload = metadata["enable_preload"]
@@ -654,7 +620,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 f"--custom-aiv-number={npu_utils.get_aivector_core_num()}",
             ]
 
-        if force_disable_ffts():
+        if force_disable_ffts(opt.target_arch):
             _compile_option_list += ["--disable-ffts"]
         if _is_ascend_sanitizer_enabled():
             _compile_option_list += ["--enable-sanitizer=true"]
@@ -715,26 +681,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--enable-mixed-cv={enable_mixed_cv}"]
 
-        enable_cce_vf_auto_sync = metadata["enable_cce_vf_auto_sync"]
-        if enable_cce_vf_auto_sync is not None:
-            _compile_option_list += \
-                [f"--append-bisheng-options=-mllvm --cce-vf-auto-sync={enable_cce_vf_auto_sync}"]
-
-        enable_cce_vf_remove_membar = metadata["enable_cce_vf_remove_membar"]
-        if enable_cce_vf_remove_membar is not None:
-            _compile_option_list += \
-                [f"--append-bisheng-options=-mllvm --cce-vf-remove-membar={enable_cce_vf_remove_membar}"]
-
-        enable_vf_fusion = metadata["enable_vf_fusion"]
-        if enable_vf_fusion is not None:
-            _compile_option_list += \
-                [f"--enable-vf-fusion={enable_vf_fusion}"]
-
-        enable_drop_unit_dims = metadata["enable_drop_unit_dims"]
-        if enable_drop_unit_dims is not None:
-            _compile_option_list += \
-                [f"--enable-drop-unit-dims={enable_drop_unit_dims}"]
-
         enable_flatten = metadata["enable_flatten"]
         if enable_flatten is not None:
             _compile_option_list += \
@@ -772,13 +718,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 "--enable-hfusion-compile=true",
                 "--enable-triton-kernel-compile=true",
             ]
-        bisheng_options = metadata["bisheng_options"]
-        if bisheng_options is not None:
-            _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
-        mix_mode = opt.mix_mode
-        if mix_mode in ["aic"]:
-            _compile_option_list += ["--disable-hfusion-vectorize=true"]
-
         _compile_option_list += ["--mlir-print-ir-after-failure"]
         _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:
@@ -787,16 +726,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         vf_merge_level = metadata["vf_merge_level"]
         if vf_merge_level is not None:
             _compile_option_list += [f"--enable-vf-merge-level={vf_merge_level}"]
-
-        hfusion_enable_multiple_consumer_fusion = metadata["hfusion_enable_multiple_consumer_fusion"]
-        if hfusion_enable_multiple_consumer_fusion:
-            _compile_option_list += [
-                f"--hfusion-enable-multiple-consumer-fusion={hfusion_enable_multiple_consumer_fusion}"
-            ]
-
-        enable_cross_if_fusion = metadata["enable_cross_if_fusion"]
-        if enable_cross_if_fusion:
-            _compile_option_list += [f"--hfusion-enable-cross-if-fusion={enable_cross_if_fusion}"]
 
         plan_memory_strategy = metadata["plan_memory_strategy"]
         if plan_memory_strategy is not None:
@@ -844,7 +773,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
 def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_file_name = "kernel.mlir" if opt.use_bytecode else "kernel.ttadapter.mlir"
+        tmp_file_name = "kernel.mlir"
         ttadapter_path = os.path.join(tmpdir, tmp_file_name)
         Path(ttadapter_path).write_text(linalg)
         bin_file = os.path.join(tmpdir, "kernel")
@@ -877,24 +806,6 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if enable_ubuf_saving is not None:
             _compile_option_list += [
                 f"--enable-ubuf-saving={enable_ubuf_saving}",
-            ]
-
-        storage_align = metadata["storage_align"]
-        if storage_align is not None:
-            _compile_option_list += [
-                f"--enable-hivm-auto-storage-align={storage_align}",
-            ]
-
-        ops_reorder = metadata["ops_reorder"]
-        if ops_reorder is not None:
-            _compile_option_list += [
-                f"--enable-ops-reorder={ops_reorder}",
-            ]
-
-        code_motion = metadata["code_motion"]
-        if code_motion is not None:
-            _compile_option_list += [
-                f"--enable-code-motion={code_motion}",
             ]
 
         enable_preload = metadata["enable_preload"]
@@ -937,11 +848,6 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if unit_flag is not None:
             _compile_option_list += \
                 [f"--enable-hivm-unit-flag-sync={unit_flag}"]
-
-        enable_drop_unit_dims = metadata["enable_drop_unit_dims"]
-        if enable_drop_unit_dims is not None:
-            _compile_option_list += \
-                [f"--enable-drop-unit-dims={enable_drop_unit_dims}"]
 
         enable_flatten = metadata["enable_flatten"]
         if enable_flatten is not None:
@@ -998,15 +904,6 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             for bitcode in bitcodes:
                 _compile_option_list += \
                     [f"--link-aicore-bitcode={bitcode}"]
-
-        enable_libdevice = os.getenv("TRITON_ENABLE_LIBDEVICE", False)
-        if enable_libdevice:
-            _compile_option_list += [f"--link-aicore-bitcode={get_libdevice()}"]
-
-        disable_size_align_for_cast = metadata["disable_size_align_for_cast"]
-        if disable_size_align_for_cast is not None:
-            _compile_option_list += \
-                [f"--disable-size-align-for-cast={disable_size_align_for_cast}"]
 
         if _is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False):
             _compile_option_list += ["--enable-auto-blockify-loop"]
@@ -1066,29 +963,66 @@ def get_libdevice():
     return os.path.join(current, "lib/libdevice.10.bc")
 
 
+def _is_a5_target_arch(arch: str) -> bool:
+    return isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950"))
+
+
+_CANONICAL_COMPILE_MODES = ("simd", "simd_simt_template", "simt_only")
+_COMPILE_MODE_ALIASES = {
+    "unstructured_in_simt": "simd_simt_template",
+}
+
+
+class _DefaultCompileMode(str):
+    """Distinguish an omitted compile_mode from an explicit default value."""
+
+
+_DEFAULT_COMPILE_MODE = _DefaultCompileMode("simd_simt_template")
+
+
+def _normalize_compile_mode(compile_mode, arch: str) -> str:
+    """Validate and canonicalize the public compile-mode contract.
+
+    ``simd_simt_template`` is the portable default: it retains the ordinary
+    SIMD pipeline on A2/A3 and enables the existing template-SIMT subpaths on
+    A5.  ``unstructured_in_simt`` is an equivalent spelling of that mode.
+    Pure-SIMT remains an A5-only explicit compile mode.
+    """
+    if not isinstance(compile_mode, str):
+        raise ValueError("compile_mode must be a string; expected one of: " + ", ".join(_CANONICAL_COMPILE_MODES))
+
+    canonical_mode = _COMPILE_MODE_ALIASES.get(compile_mode, compile_mode)
+    if canonical_mode not in _CANONICAL_COMPILE_MODES:
+        raise ValueError(f"invalid compile_mode={compile_mode!r}; expected one of: " +
+                         ", ".join(_CANONICAL_COMPILE_MODES))
+
+    if canonical_mode == "simt_only" and not _is_a5_target_arch(arch):
+        raise ValueError('compile_mode="simt_only" is supported only on A5 targets.')
+    return canonical_mode
+
+
 @dataclass(frozen=True)
 class NPUOptions:
     debug: bool = False
     sanitize_overflow: bool = True
-    llvm_version: int = 15
-    kernel_name: str = "triton_"
-    arch: str = ""
+    # Backend-only construction input.  AscendBackend.parse_options injects
+    # GPUTarget.arch and never forwards a user-supplied compile option.
+    arch: InitVar[str] = ""
+    # This becomes compiler metadata, so its name must also be valid for the
+    # namedtuple constructed by CompiledKernel on Python 3.10.
+    target_arch: str = field(init=False, repr=False)
 
     cluster_dims: tuple = (1, 1, 1)
     num_warps: int = 32
     num_ctas: int = 1
     num_stages: int = 2
-    warp_size: int = 32
+    # Ascend threads-per-warp is a backend capability, not a compile option.
+    warp_size: int = field(default=32, init=False)
     ir_override: Optional[str] = None  # filename of a user-defined IR (*.{ttir|ttadapter|mlirbc|bcmlir|npubin})
 
-    auto_blockify_size: int = 1
-    add_auto_scheduling: bool = False
-    enable_auto_blockify: bool = None
-    compile_on_910_95: bool = None
-    optimize_dynamic_offset: bool = False
-    enable_mask_fallback_conversion: bool = False
+    # Internal lowering selector derived from the explicit GPUTarget.arch.
+    compile_on_910_95: bool = field(init=False, repr=False)
     enable_warp_specialization: bool = False
-    enable_nd2nz_on_vector: bool = False
     enable_persistent: bool = False
     optimize_epilogue: bool = False
     enable_fp_fusion: bool = True
@@ -1096,12 +1030,6 @@ class NPUOptions:
     backend_name: str = 'cann'
     instrumentation_mode: str = ""
     enable_graph_optimize: bool = True
-    graph_optimize_rule_mask: int = 511
-    graph_optimize_max_rewrites_per_function: int = 64
-    graph_optimize_ub_capacity_bytes: Optional[int] = None
-    allow_fp8e4nv: bool = False
-    auto_tile_and_bind_subblock: bool = True
-    vf_merge_level: int = 0
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")
     deprecated_fp8_dtypes: Tuple[str] = ()
     vf_merge_level: int = 1
@@ -1109,31 +1037,21 @@ class NPUOptions:
     allowed_dot_input_precisions: Tuple[str] = ("ieee", "hf32")
     max_num_imprecise_acc_default: int = 0
     extern_libs: dict = None
-    bisheng_options: str = "-cce-link-aicore-ll-module " + get_libdevice()
-
     multibuffer: bool = True
-    storage_align: bool = None
-    ops_reorder: bool = None
-    code_motion: bool = None
     vf_fusion_mode: str = None
     enable_ubuf_saving: bool = None
     enable_preload: bool = None
     enable_auto_bind_sub_block: bool = None
     disable_tightly_coupled_buffer_reuse: bool = False
-    enable_select_analysis: bool = True
     enable_hivm_auto_cv_balance: bool = None
     sync_solver: bool = None
     unit_flag: bool = None
-    enable_cce_vf_auto_sync: bool = None
-    enable_cce_vf_remove_membar: bool = None
-    enable_drop_unit_dims: bool = None
     enable_flatten: bool = None
     enable_auto_vectorize_v2: bool = None
     auto_vectorize_v2_max_fused_ops_num: int = None
     prevec_max_fused_ops_num: int = None
     inject_barrier_all: bool = None
     inject_block_all: bool = None
-    disable_size_align_for_cast: bool = None
     limit_auto_multi_buffer_only_for_local_buffer: bool = None
     limit_auto_multi_buffer_of_local_buffer: str = None
     limit_auto_multi_buffer_buffer: str = None
@@ -1142,47 +1060,34 @@ class NPUOptions:
     tile_mix_cube_loop: int = None
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
-    enable_vf_fusion: bool = None
     enable_dynamic_cv_pipeline: bool = None
-    # Gates the cube-loader penetration + cube-for block merge feature. Off by
-    # default so existing scenarios are unaffected; opt in per kernel to fuse a
-    # matmul's loader for-loop into the matmul's cube compute block.
-    enable_cube_block_merge: bool = False
-    enable_ub_refine_opt: bool = False
-    # Multi-cache insertion optimization: avoid redundant tensor compute in the middle of an `if`.
-    enable_buffer_insert_optimization: bool = True
-    hfusion_enable_multiple_consumer_fusion: bool = False
-    enable_cross_if_fusion: bool = False
-    has_auto_blockify_blacklist_op: Optional[bool] = None
-    intra_cache_num: int = None
-    inter_cache_num: int = None
-    load_cache_num: int = None
+    buf_slot_num_of_veccore: int = None
+    buf_slot_num_of_crosscore: int = None
+    buf_slot_num_of_gm: int = None
 
     # plan memory strategy: "default" (default) or "largest-first"
     plan_memory_strategy: str = None
-    stream: int = None
-    parallel_mode: str = "simd"
+    # Internal launch metadata.  The mode is initially derived from
+    # compile_mode, then replaced with the mode emitted by TritonToLinalg.
+    parallel_mode: str = field(default="simd", init=False)
+    # Internal pure-SIMT state, derived from the effective lowering mode.
+    is_pure_simt: bool = field(default=False, init=False)
+    # Retained public selectors. They apply only when compile_mode was not
+    # explicitly supplied by the caller.
     force_simt_only: bool = False
     force_simt_template: bool = False
-    # only take effect on the simt-only & simd-simt-mix scenarios
+    # Only takes effect on the pure-SIMT path.
     shared_mem_dynamic_size: int = None
-    # enable_bishengir_simt_optimization is passed as
-    # -enable-bishengir-simt-optimization flag to bishengir-compile.
+    # A5 pure-SIMT-only option passed as -enable-bishengir-simt-optimization
+    # to bishengir-compile. Its value grammar belongs to the toolchain.
     enable_bishengir_simt_optimization: int = 000
-    # compile_mode: "simd" (default), "unstructured_in_simt", "simt_only"
-    # When compile_mode is provided, it automatically sets other fields
-    compile_mode: str = "unstructured_in_simt"
-    mix_mode: str = ""
+    # Canonical modes: SIMD (D), SIMD with template-SIMT (P), and pure-SIMT
+    # (T). ``unstructured_in_simt`` is an equivalent P spelling.
+    compile_mode: str = _DEFAULT_COMPILE_MODE
+    # Internal round-trip marker. The core compiler reconstructs NPUOptions
+    # from serialized metadata, so this preserves whether simd was explicit.
+    compile_mode_is_explicit: Optional[bool] = field(default=None, repr=False)
     simt_stack_limit: int = None
-    # use_bytecode:
-    # If True, the compilation flow is:
-    #   Linalg IR → MLIR Bytecode (via triton-mlir-opt)
-    #            → LLIR (via bishengir-opt)
-    #            → Binary (via bishengir-compile)
-    #
-    # If False, the compilation flow is:
-    #   Linalg IR → LLIR → Binary (via bishengir-compile directly)
-    use_bytecode: bool = True
     # take effect on the reorder instruction pattern for SIMT. The pattern is disabled by default.
     enable_simt_reorder_instruction: bool = False
     enable_costmodel_backend: bool = False
@@ -1197,38 +1102,57 @@ class NPUOptions:
     # unmasked kernels whose grid dims are compile-time known.
     grid_num_tiles: int = None
 
-    def __post_init__(self):
+    def __post_init__(self, arch):
         from triton.backends.ascend import _apply_ascend_patch
 
         _apply_ascend_patch()
-        graph_ub_budget_bytes = graph_ub_budget_bytes_for_arch(self.arch)
-        requested_graph_ub_capacity_bytes = self.graph_optimize_ub_capacity_bytes
-        if requested_graph_ub_capacity_bytes is None:
-            graph_ub_capacity_bytes = graph_ub_budget_bytes
+        object.__setattr__(self, "target_arch", arch)
+        object.__setattr__(
+            self,
+            "compile_on_910_95",
+            isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950")),
+        )
+        # The core compiler serializes ``options.__dict__`` into launch
+        # metadata.  An init=False field with its class-level default alone is
+        # not present there, so materialize the false state before the
+        # compile-mode branch may set it to true.
+        object.__setattr__(self, "is_pure_simt", False)
+
+        if self.simt_stack_limit is not None:
+            _validate_simt_stack_limit(self.simt_stack_limit)
+
+        compile_mode_is_explicit = self.compile_mode_is_explicit
+        if compile_mode_is_explicit is None:
+            compile_mode_is_explicit = self.compile_mode is not _DEFAULT_COMPILE_MODE
         else:
-            if (isinstance(requested_graph_ub_capacity_bytes, bool)
-                    or not isinstance(requested_graph_ub_capacity_bytes, Integral)):
-                raise TypeError("graph_optimize_ub_capacity_bytes must be a non-negative integer or None")
-            if requested_graph_ub_capacity_bytes < 0:
-                raise ValueError("graph_optimize_ub_capacity_bytes must be non-negative")
-            graph_ub_capacity_bytes = min(int(requested_graph_ub_capacity_bytes), graph_ub_budget_bytes)
-        object.__setattr__(self, "graph_optimize_ub_capacity_bytes", graph_ub_capacity_bytes)
+            compile_mode_is_explicit = bool(compile_mode_is_explicit)
 
-        # Parse compile_mode and set related fields
-        if self.compile_mode == "simd":
-            object.__setattr__(self, "parallel_mode", "simd")
-        elif self.compile_mode == "unstructured_in_simt":
-            # For historical compatibility reasons, force_simt_template will still be used.
-            object.__setattr__(self, "force_simt_template", True)
-        elif self.compile_mode == "simt_only":
-            object.__setattr__(self, "force_simt_only", True)
+        compile_mode = str(_normalize_compile_mode(self.compile_mode, arch))
+        object.__setattr__(self, "compile_mode", compile_mode)
+        object.__setattr__(self, "compile_mode_is_explicit", compile_mode_is_explicit)
+
+        if self.effective_compile_mode == "simt_only":
+            object.__setattr__(self, "is_pure_simt", True)
             object.__setattr__(self, "parallel_mode", "simt")
+        else:
+            object.__setattr__(self, "parallel_mode", "simd")
 
-        if self.force_simt_only:
+        if self.is_pure_simt:
             if self.shared_mem_dynamic_size is None:
                 object.__setattr__(self, "shared_mem_dynamic_size", 122880)
         else:
             object.__setattr__(self, "shared_mem_dynamic_size", 221184)
+
+    @property
+    def effective_compile_mode(self) -> str:
+        """Return the one lowering selector consumed after option parsing."""
+        if self.compile_mode_is_explicit:
+            return self.compile_mode
+        if self.force_simt_only:
+            return "simt_only"
+        if self.force_simt_template:
+            return "simd_simt_template"
+        return self.compile_mode
 
     def hash(self):
         key = "_".join([f"{name}-{val}" for name, val in self.__dict__.items()])
@@ -1236,11 +1160,45 @@ class NPUOptions:
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
+def _get_npu_options_arch(options: NPUOptions) -> str:
+    """Expose the injected target to the established lowering builder API.
+
+    ``arch`` is an ``InitVar`` rather than a user compile option, so it is not
+    stored or serialized.  The builder still reads ``options.arch`` while
+    creating TTIR, and this view returns the target injected by
+    ``AscendBackend.parse_options``.
+    """
+    return options.target_arch
+
+
+NPUOptions.arch = property(_get_npu_options_arch)
+
+
+def _normalize_bishengir_simt_optimization_for_context(options: NPUOptions, raw_options) -> None:
+    """Restrict the vendor SIMT optimization switch to its A5 pure-SIMT path."""
+    option_name = "enable_bishengir_simt_optimization"
+    if option_name not in raw_options:
+        return
+
+    if _is_a5_target_arch(options.target_arch) and options.is_pure_simt:
+        # The BiShengIR toolchain owns the option's value grammar; keep the
+        # Python boundary free of numeric or range validation.
+        return
+
+    warnings.warn(
+        "enable_bishengir_simt_optimization only takes effect for A5 "
+        "pure-SIMT compilation; ignoring the explicit value.",
+        UserWarning,
+        stacklevel=3,
+    )
+    object.__setattr__(options, option_name, 0)
+
+
 def ttir_to_npubin(mod, metadata, opt):
     # Get Triton-MLIR as string
     ttir_code = str(mod)
     metadata = _parse_ttir_metadata(ttir_code, metadata)
-    if opt.force_simt_only:
+    if opt.is_pure_simt:
         # RowCoalescing is now the pure-SIMT graph rule in make_ttir().  This
         # stage only transfers its complete launch contract to metadata before
         # handing TTIR to pure-SIMT codegen.
@@ -1256,7 +1214,7 @@ def ttir_to_npubin(mod, metadata, opt):
         metadata_path = os.path.join(tmpdir, "triton-metadata.json")
         # build compile options
         _compile_option_list = get_common_bishengir_compile_options(metadata)
-        if opt.force_simt_only:
+        if opt.is_pure_simt:
             _compile_option_list += [f"--triton-metadata-output={metadata_path}"]
             _compile_option_list += ["--enable-hivm-compile=false"]
             _compile_option_list += ["--enable-triton-ir-compile"]
@@ -1268,7 +1226,7 @@ def ttir_to_npubin(mod, metadata, opt):
                 _compile_option_list += [
                     f"--enable-bishengir-simt-optimization={opt.enable_bishengir_simt_optimization}"
                 ]
-            _compile_option_list += [f"--simt-stack-limit={get_simt_stack_limit()}"]
+            _compile_option_list += [f"--simt-stack-limit={get_simt_stack_limit(opt.simt_stack_limit)}"]
             if opt.shared_mem_dynamic_size is not None:
                 _compile_option_list += [f"--shared-mem-dynamic-size={opt.shared_mem_dynamic_size}"]
             if opt.enable_simt_reorder_instruction:
@@ -1276,24 +1234,9 @@ def ttir_to_npubin(mod, metadata, opt):
             if opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
 
-            # Enable SIMT auto-blockify if user opted in, or if the env var is
-            # set and the user didn't explicitly opt out (matches the SIMD path
-            # at line ~541).
-            enable_auto_blockify = opt.enable_auto_blockify
-            if _is_auto_map_parallel_blocks_enabled():
-                if enable_auto_blockify is None or enable_auto_blockify:
-                    _compile_option_list += ["--enable-auto-blockify-loop"]
-            else:
-                if enable_auto_blockify:
-                    _compile_option_list += ["--enable-auto-blockify-loop"]
-
-            bisheng_options = metadata["bisheng_options"]
-            if bisheng_options is not None:
-                _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
-
-            # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
-            # mirroring the SIMD compile paths. driver.py's runtime block-count
-            # cap keys off the same env switch, so the two stay in sync.
+            # Enable SIMT auto-blockify under the fixed automatic block-mapping
+            # policy, mirroring the SIMD compile paths. driver.py's runtime
+            # block-count cap keys off the same policy, so the two stay in sync.
             if (_is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False)
                     and not metadata.get("row_coalescing_applied", False)):
                 _compile_option_list += ["--enable-auto-blockify-loop"]
@@ -1308,17 +1251,25 @@ def ttir_to_npubin(mod, metadata, opt):
             print(f"[DEBUG] {bin_path} is not found")
             print(f"[DEBUG] Stderr:\n{error_msg}")
             raise subprocess.CalledProcessError(ret.returncode, cmd_list, ret.stdout, ret.stderr)
-        if opt.force_simt_only:
+        if opt.is_pure_simt:
             metadata.update(json.loads(Path(metadata_path).read_text()))
         return Path(bin_path).read_bytes()
 
 
-def get_simt_stack_limit():
+def _validate_simt_stack_limit(stack_limit):
+    if isinstance(stack_limit, bool) or not isinstance(stack_limit, int) or stack_limit <= 0:
+        raise ValueError("simt_stack_limit must be a positive integer")
+    return stack_limit
+
+
+def get_simt_stack_limit(user_stack_limit=None):
     # simt_stack_limit resolution precedence:
-    #  1.torch_npu's acl_default.json "StackSize":{"simt_stack_size":N}
-    #    takes precedence and the user-specified value is ignored.
-    #  2.if that config key is absent ,fail back to the kernel-time
-    #    default simt_stack_limit=1152
+    #  1. An explicit Triton compile option.
+    #  2. torch_npu's acl_default.json "StackSize":{"simt_stack_size":N}.
+    #  3. The kernel-time default simt_stack_limit=1152.
+    if user_stack_limit is not None:
+        return _validate_simt_stack_limit(user_stack_limit)
+
     _simt_stack_limit = 1152
     try:
         import torch_npu
@@ -1327,7 +1278,7 @@ def get_simt_stack_limit():
         with open(_acl_cfg_path, "r") as f:
             _acl_cfg = json.load(f)
         _cfg_stack = _acl_cfg.get("StackSize", {}).get("simt_stack_size", None)
-        if _cfg_stack is not None and _cfg_stack > 0:
+        if isinstance(_cfg_stack, int) and not isinstance(_cfg_stack, bool) and _cfg_stack > 0:
             _simt_stack_limit = _cfg_stack
     except Exception as e:
         print(f"[DEBUG] read acl_default.json failed: {e}")
@@ -1342,20 +1293,27 @@ class AscendBackend(BaseBackend):
 
     @staticmethod
     def use_alignment_specialization(options: dict) -> bool:
-        return options.get("compile_mode") == "simt_only" or bool(options.get("force_simt_only", False))
+        compile_mode_is_explicit = options.get("compile_mode_is_explicit", "compile_mode" in options)
+        if compile_mode_is_explicit:
+            return options["compile_mode"] == "simt_only"
+        return bool(options.get("force_simt_only", False))
 
     def __init__(self, target: GPUTarget) -> None:
         super().__init__(target)
         if target.backend == "npu":
             self.binary_ext = "npubin"
-            # Include all binary file extensions (mlirbc is used in bytecode mode)
+            # Include all binary file extensions (mlirbc is always emitted for normal kernels).
             self.binary_extensions = {"npubin", "mlirbc"}
 
     def parse_options(self, opts) -> Any:
         # TODO: get available targets when building options?
         if self.target.backend == "npu":
             _warn_deprecated_ascend_env_vars()
-            option_names = NPUOptions.__dataclass_fields__.keys()
+            option_names = {
+                name
+                for name, option_field in NPUOptions.__dataclass_fields__.items()
+                if option_field.init and name not in {"arch", "compile_mode_is_explicit"}
+            }
             # JIT and AOT hand the complete, already-normalized dataclass back to
             # parse_options before compilation.  Those values are internal state,
             # not a second batch of user overrides.
@@ -1365,18 +1323,14 @@ class AscendBackend(BaseBackend):
             # requiring any change to the community JIT implementation.
             normalized_opts = opts if internal_options else _remove_deprecated_npu_options(opts, in_place=True)
             args = {k: normalized_opts[k] for k in option_names if k in normalized_opts}
-            args.setdefault("arch", self.target.arch)
-            options = NPUOptions(**args)
-            # Lazy init compile_on_910_95 if not provided
-            if options.compile_on_910_95 is None:
-                object.__setattr__(options, "compile_on_910_95", is_compile_on_910_95())
-            # Lazy init enable_dynamic_cv_pipeline if not provided
+            if internal_options and "compile_mode_is_explicit" in normalized_opts:
+                args["compile_mode_is_explicit"] = normalized_opts["compile_mode_is_explicit"]
+            options = NPUOptions(arch=self.target.arch, **args)
+            # Lazy init enable_dynamic_cv_pipeline if not provided.
+            # compile_on_910_95 is already resolved from the requested target.
             if options.enable_dynamic_cv_pipeline is None:
-                object.__setattr__(options, "enable_dynamic_cv_pipeline", is_compile_on_910_95())
-            # Costmodel path should avoid extra BC<->MLIR conversion stages
-            # to keep compile-only autotune routing lightweight and stable.
-            if getattr(options, "enable_costmodel_backend", False):
-                object.__setattr__(options, "use_bytecode", False)
+                object.__setattr__(options, "enable_dynamic_cv_pipeline", options.compile_on_910_95)
+            _normalize_bishengir_simt_optimization_for_context(options, opts)
         else:
             raise NotImplementedError(f"Backend '{self.target.backend}' is not supported. "
                                       "Please ensure the target backend is set to 'npu'.")
@@ -1420,16 +1374,13 @@ class AscendBackend(BaseBackend):
     def add_stages(self, stages, options, language):
         if self.target.backend == "npu":
             stages["ttir"] = lambda src, metadata: make_ttir(src, metadata, options)
-            if options.force_simt_only:
+            if options.is_pure_simt:
                 stages["npubin"] = (lambda src, metadata: ttir_to_npubin(src, metadata, options))
                 return
             stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options, named_ops=True)
-            # Support BC mode: convert Linalg IR to Bytecode format, then back to MLIR
-            if options.use_bytecode:
-                # Step 1: Convert Linalg IR to Bytecode using triton-mlir-opt
-                stages["mlirbc"] = lambda src, metadata: linalg_to_bc_by_triton_mlir_opt(src, metadata, options)
-                # Step 2: Convert Bytecode back to MLIR text using bishengir-opt
-                stages["bcmlir"] = lambda src, metadata: bc_to_linalg_by_bishengir_opt(src, metadata, options)
+            # Normal kernels always convert Linalg IR to bytecode and back to MLIR text.
+            stages["mlirbc"] = lambda src, metadata: linalg_to_bc_by_triton_mlir_opt(src, metadata, options)
+            stages["bcmlir"] = lambda src, metadata: bc_to_linalg_by_bishengir_opt(src, metadata, options)
             if options.compile_on_910_95:
                 stages["npubin"] = (
                     lambda src, metadata: linalg_to_bin_enable_npu_compile_910_95(src, metadata, options))

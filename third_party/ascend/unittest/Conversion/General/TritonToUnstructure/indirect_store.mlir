@@ -1,5 +1,5 @@
-// RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=True force-simt-template=True' '--triton-to-unstructure=compile-on-910-95=True force-simt-template=True' %s --split-input-file | FileCheck %s
-// RUN: triton-opt '--triton-to-unstructure=compile-on-910-95=True force-simt-template=True' '--triton-to-linalg=compile-on-910-95=True' --split-input-file %s | FileCheck %s --check-prefix=LINALG
+// RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=True compile-mode=simd_simt_template' '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' %s --split-input-file | FileCheck %s
+// RUN: triton-opt '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' '--triton-to-linalg=compile-on-910-95=True compile-mode=simd_simt_template' --split-input-file %s | FileCheck %s --check-prefix=LINALG
 
 // tt.store -> ascend.indirect_store
 tt.func public @triton_indirect_store_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<i64>, %arg2: !tt.ptr<f32>, %arg3: i32) attributes {noinline = false} {
@@ -67,6 +67,6 @@ tt.func public @triton_indirect_store_int_to_ptr_kernel(%arg0: !tt.ptr<i64>, %ar
   %ptr = tt.addptr %base_splat, %idx : tensor<8x!tt.ptr<f32>>, tensor<8xi32>
   %val = tt.load %arg1 : !tt.ptr<f32>
   %val_splat = tt.splat %val : f32 -> tensor<8xf32>
-  tt.store %ptr, %val_splat {route_discrete_mask_to_simt} : tensor<8x!tt.ptr<f32>>
+  tt.store %ptr, %val_splat {MixCompileDiscreteMask} : tensor<8x!tt.ptr<f32>>
   tt.return
 }

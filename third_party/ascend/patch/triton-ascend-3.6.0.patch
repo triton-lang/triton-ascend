@@ -503,7 +503,7 @@ index c572f81e3..6e06b8477 100644
          self.builder.options = options
 +
 +        # Set up unified builder interface with methods from specialized builders
-+        compile_mode = "simt" if (hasattr(options, "force_simt_only") and options.force_simt_only) else "simd"
++        compile_mode = "simt" if getattr(options, "compile_mode", "simd") == "simt_only" else "simd"
 +        self.ascend_builder = ascend_ir.ascendnpu_ir_builder(context, getattr(options, "arch", ""),
 +                                                             compile_mode=compile_mode)
 +        self.ascend_builder.set_loc(file_name, begin_line, 0)

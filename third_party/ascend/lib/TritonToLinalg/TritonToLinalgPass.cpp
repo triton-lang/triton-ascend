@@ -95,6 +95,7 @@ using namespace triton;
 int nd2nzFlag = 0;
 bool compileOn91095Flag = false;
 bool existDotFlag = false;
+triton::ascend::CompileMode compileModeFlag = triton::ascend::CompileMode::Simd;
 
 // Convert structured custom ops after operand type converted,
 // for example tt.ptr converted to memref.
@@ -871,7 +872,8 @@ LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(
     ModuleOp moduleOp) {
   // The strided-axis rewrites below only apply in 950 SIMT mode. On other
   // targets we leave strided loads to the legacy strided DMA lowering.
-  if (!(compileOn91095Flag && forceSimtTemplateFlag)) {
+  if (!(compileOn91095Flag &&
+        triton::ascend::isSimtTemplateMode(compileModeFlag))) {
     return success();
   }
 
@@ -930,6 +932,14 @@ TritonToLinalgPass::processLegalStrideOperations(ModuleOp moduleOp) {
 
 void TritonToLinalgPass::runOnOperation() {
   compileOn91095Flag = this->compileOn91095;
+  auto compileMode = triton::ascend::parseCompileMode(this->compileMode);
+  if (!compileMode) {
+    getOperation().emitError()
+        << "triton-to-linalg compile-mode is invalid: " << this->compileMode;
+    signalPassFailure();
+    return;
+  }
+  compileModeFlag = *compileMode;
 
   auto moduleOp = getOperation();
 
@@ -1381,12 +1391,14 @@ void TritonToLinalgPass::runOnOperation() {
   });
 }
 
-std::unique_ptr<OperationPass<ModuleOp>> triton::createTritonToLinalgPass(
-    bool globalKernel, bool namedOps, bool enableNd2nzOnVector,
-    bool enableSelectAnalysis, bool compileOn91095) {
+std::unique_ptr<OperationPass<ModuleOp>>
+triton::createTritonToLinalgPass(bool globalKernel, bool namedOps,
+                                 bool enableNd2nzOnVector,
+                                 bool enableSelectAnalysis, bool compileOn91095,
+                                 const std::string &compileMode) {
   return std::make_unique<TritonToLinalgPass>(
       globalKernel, namedOps, enableNd2nzOnVector, enableSelectAnalysis,
-      compileOn91095);
+      compileOn91095, compileMode);
 }
 
 std::unique_ptr<OperationPass<ModuleOp>> triton::createTritonToLinalgPass() {

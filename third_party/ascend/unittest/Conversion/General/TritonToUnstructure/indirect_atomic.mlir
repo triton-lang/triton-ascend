@@ -1,4 +1,4 @@
-// RUN: triton-opt '--discrete-mask-access-conversion=compile-on-910-95=True force-simt-template=True' '--triton-to-unstructure=compile-on-910-95=True force-simt-template=True' --split-input-file %s | FileCheck %s
+// RUN: triton-opt '--discrete-mask-access-conversion=compile-on-910-95=True compile-mode=simd_simt_template' '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' --split-input-file %s | FileCheck %s
 
 // CHECK-LABEL: tt.func public @structured_discrete_mask_atomic_add_1d
 // CHECK-NOT: arith.select {{.*}} : tensor<8xi1>, tensor<8xi32>

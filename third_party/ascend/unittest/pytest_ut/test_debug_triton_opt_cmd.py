@@ -34,15 +34,8 @@ FAKE_PIPELINE = "builtin.module(some-pass,another-pass)"
 
 def _make_metadata():
     return {
-        "enable_nd2nz_on_vector": False,
-        "enable_select_analysis": False,
         "compile_on_910_95": False,
-        "force_simt_template": False,
-        "enable_sync_block_lock": False,
-        "enable_mask_fallback_conversion": False,
-        "optimize_dynamic_offset": False,
         "auto_blockify_size": 1,
-        "add_auto_scheduling": False,
         "enable_dynamic_cv_pipeline": False,
         "hash": "deadbeef",
     }

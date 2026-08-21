@@ -163,26 +163,6 @@ def get_empty_tensor(size):
     return torch.empty(size, dtype=torch.int32, device='npu')
 
 
-@backend_strategy_registry.register("mindspore", "get_tensor_params_shape")
-def get_tensor_params_shape(*args):
-    import mindspore
-    tensor_params = [arg for arg in args if isinstance(arg, mindspore.Tensor)]
-    tensor_params_shape = []
-    for t in tensor_params:
-        tensor_params_shape.append([s for s in t.shape])
-    return tensor_params_shape
-
-
-@backend_strategy_registry.register("torch_npu", "get_tensor_params_shape")
-def get_tensor_params_shape(*args):
-    import torch
-    tensor_params = [arg for arg in args if isinstance(arg, torch.Tensor)]
-    tensor_params_shape = []
-    for t in tensor_params:
-        tensor_params_shape.append([s for s in t.shape])
-    return tensor_params_shape
-
-
 @backend_strategy_registry.register("mindspore", "get_cc_cmd")
 def get_cc_cmd():
     import mindspore

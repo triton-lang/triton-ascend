@@ -90,7 +90,10 @@ testlist = [
 ]
 
 
-@pytest.mark.skipif(not is_compile_on_910_95(), reason="only support in A5")
+@pytest.mark.skipif(
+    not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
+    reason="only support in A5",
+)
 @pytest.mark.parametrize("dtype", ["fp8e4m3", "fp8e5m2"])
 @pytest.mark.parametrize("M, N, K", testlist)
 def test_scaled_dot_fp8(M, N, K, dtype):

@@ -14,8 +14,9 @@
 This intentionally uses the original T2L eligibility shape instead of forcing
 an option in the test: a one-dimensional block pointer has ``stride=S`` and a
 base of ``ptr + (pid % S)``; ``pid // S`` selects the T tile.  The default NPU
-compile mode is ``unstructured_in_simt``, which supplies the historical
-``force_simt_template`` half of the T2L gate on a real 910_95/A5 target.
+compile mode is ``simd_simt_template`` (also called ``unstructured_in_simt``),
+which supplies the historical template-SIMT half of the T2L gate on a real
+910_95/A5 target.
 
 Do not run this test on a generic/B4 machine.  Pretending that such a machine
 is 910_95 would exercise a different compiler/toolchain contract and would not
@@ -33,12 +34,12 @@ try:
 except Exception:
     # Keep collection safe in generic CI images where the Ascend device helper
     # is unavailable.  The actual test must never run without the real gate.
-    def is_compile_on_910_95():
+    def is_compile_on_910_95(_arch):
         return False
 
 
 pytestmark = pytest.mark.skipif(
-    not is_compile_on_910_95(),
+    not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
     reason="StridedAxisCoalescing native validation requires an Ascend 910_95/A5 toolchain",
 )
 
@@ -115,8 +116,7 @@ def test_strided_axis_coalescing_gate_on_e2e():
     dst = torch.empty_like(src)
 
     # Compile first through the normal JIT API, then retain its real metadata
-    # for the ABI checks below.  No target/compile-mode override is supplied:
-    # this must be the target's default 91095 gate-on configuration.
+    # for the ABI checks below.  Use the canonical public template-SIMT mode.
     kernel = strided_axis_coalescing_copy.warmup(
         src,
         dst,
@@ -124,20 +124,27 @@ def test_strided_axis_coalescing_gate_on_e2e():
         T=t,
         S=s,
         BLOCK=block,
+        compile_mode="simd_simt_template",
     )
     assert kernel is not None
-    strided_axis_coalescing_copy[(grid_x, )](src, dst, T=t, S=s, BLOCK=block)
+    strided_axis_coalescing_copy[(grid_x, )](
+        src,
+        dst,
+        T=t,
+        S=s,
+        BLOCK=block,
+        compile_mode="simd_simt_template",
+    )
     torch.npu.synchronize()
 
     assert torch.equal(dst.cpu(), src.cpu())
 
     # These fields are compiler output, not test-supplied options: together
-    # they prove the original compile_on_910_95 && force_simt_template slot
-    # actually ran StridedAxisCoalescing and exported the launch contract.
+    # they prove the compile_on_910_95 && compile_mode="simd_simt_template"
+    # condition actually ran StridedAxisCoalescing and exported the launch contract.
     metadata = kernel.metadata
-    assert metadata.compile_mode == "unstructured_in_simt"
+    assert metadata.compile_mode == "simd_simt_template"
     assert metadata.compile_on_910_95 is True
-    assert metadata.force_simt_template is True
     assert metadata.coalesce_factor == s
     assert metadata.coalesce_axis == 0
     assert metadata.coalesce_grid_ceil_div is False

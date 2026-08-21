@@ -35,14 +35,13 @@ def _make_metadata():
         shared=0,
         compile_on_910_95=False,
         parallel_mode="",
-        force_simt_only=False,
+        is_pure_simt=False,
         debug=False,
         coalesce_factor=1,
         coalesce_axis=-1,
         coalesce_grid_ceil_div=False,
         has_auto_blockify_blacklist_op=False,
         row_coalescing_applied=False,
-        enable_auto_blockify=None,
     )
 
 
@@ -55,11 +54,9 @@ def _split_launch_functions(src):
 @patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
-@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_make_launcher_exposes_triton_launch_kernel(
     _mock_backend_func_patch,
-    _mock_arch,
     _mock_ffts,
     _mock_disable_ffts,
     _mock_auto_map,
@@ -87,11 +84,9 @@ def test_make_launcher_exposes_triton_launch_kernel(
 @patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
-@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_make_launcher_resolves_npu_utils_from_active_cache_root(
     _mock_backend_func_patch,
-    _mock_arch,
     _mock_ffts,
     _mock_disable_ffts,
     _mock_auto_map,
@@ -135,11 +130,9 @@ def test_make_launcher_resolves_npu_utils_from_active_cache_root(
 @patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
-@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_make_launcher_shrinks_coalesced_grid_for_both_launch_paths(
     _mock_backend_func_patch,
-    _mock_arch,
     _mock_ffts,
     _mock_disable_ffts,
     _mock_auto_map,
@@ -165,11 +158,9 @@ def test_make_launcher_shrinks_coalesced_grid_for_both_launch_paths(
 @patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
-@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_make_launcher_uses_ceil_div_for_row_coalescing(
     _mock_backend_func_patch,
-    _mock_arch,
     _mock_ffts,
     _mock_disable_ffts,
     _mock_auto_map,
@@ -196,11 +187,9 @@ def test_make_launcher_uses_ceil_div_for_row_coalescing(
 @patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
-@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_make_launcher_enables_91095_simt_for_sls_mixed_parallel_mode(
     _mock_backend_func_patch,
-    _mock_arch,
     _mock_ffts,
     _mock_disable_ffts,
     _mock_auto_map,
@@ -232,11 +221,9 @@ def test_make_launcher_enables_91095_simt_for_sls_mixed_parallel_mode(
 @patch.object(driver, "NPUUtils")
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
-@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_make_launcher_block_cap_uses_only_env_and_blacklist(
     _mock_backend_func_patch,
-    _mock_arch,
     _mock_ffts,
     _mock_disable_ffts,
     mock_npu_utils,
@@ -270,11 +257,9 @@ def test_make_launcher_block_cap_uses_only_env_and_blacklist(
 @patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
-@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_merged_code_workspace_allocation_appears_in_both_paths(
     _mock_backend_func_patch,
-    _mock_arch,
     _mock_ffts,
     _mock_disable_ffts,
     _mock_auto_map,
@@ -303,11 +288,9 @@ def test_merged_code_workspace_allocation_appears_in_both_paths(
 @patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
-@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_merged_code_sync_block_lock_appears_in_both_paths(
     _mock_backend_func_patch,
-    _mock_arch,
     _mock_ffts,
     _mock_disable_ffts,
     _mock_auto_map,
@@ -336,11 +319,9 @@ def test_merged_code_sync_block_lock_appears_in_both_paths(
 @patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
-@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_merged_code_msprof_calls_in_both_paths(
     _mock_backend_func_patch,
-    _mock_arch,
     _mock_ffts,
     _mock_disable_ffts,
     _mock_auto_map,
@@ -367,11 +348,9 @@ def test_merged_code_msprof_calls_in_both_paths(
 @patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
-@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_merged_code_preamble_shared_variables_present(
     _mock_backend_func_patch,
-    _mock_arch,
     _mock_ffts,
     _mock_disable_ffts,
     _mock_auto_map,
@@ -400,11 +379,9 @@ def test_merged_code_preamble_shared_variables_present(
 @patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=True)
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
-@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_merged_code_taskqueue_mode_in_both_paths(
     _mock_backend_func_patch,
-    _mock_arch,
     _mock_ffts,
     _mock_disable_ffts,
     _mock_auto_map,
@@ -436,11 +413,9 @@ def test_merged_code_taskqueue_mode_in_both_paths(
 @patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
-@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_merged_code_grid_warning_in_both_paths(
     _mock_backend_func_patch,
-    _mock_arch,
     _mock_ffts,
     _mock_disable_ffts,
     _mock_auto_map,
@@ -466,11 +441,9 @@ def test_merged_code_grid_warning_in_both_paths(
 @patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
-@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_argument_packing_differs_between_launch_paths(
     _mock_backend_func_patch,
-    _mock_arch,
     _mock_ffts,
     _mock_disable_ffts,
     _mock_auto_map,

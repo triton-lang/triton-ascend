@@ -18,7 +18,7 @@ import triton.language as tl
 from triton.backends.ascend.utils import is_compile_on_910_95
 
 pytestmark = pytest.mark.skipif(
-    not is_compile_on_910_95(),
+    not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
     reason="Row pure-SIMT binary validation requires an Ascend 910_95 toolchain",
 )
 
@@ -51,7 +51,7 @@ def test_row_coalescing_tail_pure_simt_e2e(dtype):
         dst,
         n,
         BLOCK=16,
-        force_simt_only=True,
+        compile_mode="simt_only",
     )
     torch.npu.synchronize()
 

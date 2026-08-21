@@ -317,7 +317,8 @@ class AutoTilingTuner(Autotuner):
         self.user_specified_warps = None
         self.user_specified_num_stages = None
         self.user_specified_multibuffer = None
-        self.default_multibuffer = not is_compile_on_910_95()
+        target_arch = triton.runtime.driver.active.get_current_target().arch
+        self.default_multibuffer = not is_compile_on_910_95(target_arch)
         self.print_autotuning = os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1"
 
         # Mark the original function so ubtuner can detect autotune was applied
@@ -1993,7 +1994,11 @@ class AutoTilingTuner(Autotuner):
 
     def generate_key_and_configs(self, *args, **kwargs):
         self.nargs = dict(zip(self.arg_names, args))
-        self.is_simt_mode = (kwargs.get("force_simt_only", False) or kwargs.get("compile_mode") == "simt_only")
+        compile_mode_is_explicit = kwargs.get("compile_mode_is_explicit", "compile_mode" in kwargs)
+        if compile_mode_is_explicit:
+            self.is_simt_mode = kwargs.get("compile_mode") == "simt_only"
+        else:
+            self.is_simt_mode = bool(kwargs.get("force_simt_only", False))
         if 'num_warps' in kwargs and kwargs['num_warps'] is not None:
             self.user_specified_warps = kwargs['num_warps']
         else:

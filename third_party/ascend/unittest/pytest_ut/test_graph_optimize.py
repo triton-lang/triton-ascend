@@ -325,23 +325,11 @@ def test_default_generic_graph_mask_excludes_legacy_memory_compatibility(tmp_pat
     this strided memory shape must not acquire either coalescing metadata or
     an indirect-memory op merely because the default mask is 511.
     """
-    default_options = NPUOptions(arch="Ascend910_95", enable_graph_optimize=True)
-    native_only_options = NPUOptions(
-        arch="Ascend910_95",
-        enable_graph_optimize=True,
-        graph_optimize_rule_mask=7,
-    )
-    assert default_options.graph_optimize_rule_mask == 511
-
+    options = NPUOptions(arch="Ascend910_95", enable_graph_optimize=True)
     default_result = make_ttir(
-        make_legacy_memory_isolation_ast_ttir(default_options),
+        make_legacy_memory_isolation_ast_ttir(options),
         {},
-        default_options,
-    )
-    native_only_result = make_ttir(
-        make_legacy_memory_isolation_ast_ttir(native_only_options),
-        {},
-        native_only_options,
+        options,
     )
     text = str(default_result)
 
@@ -350,13 +338,6 @@ def test_default_generic_graph_mask_excludes_legacy_memory_compatibility(tmp_pat
     assert "hacc.coalesce_grid_ceil_div" not in text
     assert "tt.indirect_load" not in text
     assert "tt.indirect_store" not in text
-    # The native graph-rule bundle exercised by this shape is
-    # LoadStoreTranspose | TransposePointwiseReorder | StoreCoalescing (1|2|4).
-    # Adding the four compatibility identities, DiagonalMaskRemoval and
-    # ConvertModuloToMask to reach 511 must be observationally inert in
-    # make_ttir(): this input carries neither a diagonal-select-reduce pattern
-    # nor a wrapped tile address.
-    assert text == str(native_only_result)
     assert_reparseable(default_result, tmp_path, "generic-legacy-memory-isolation")
 
 
@@ -364,22 +345,14 @@ def test_default_graph_mask_preserves_native_graph_rule_bundle(monkeypatch, tmp_
     """Default 511 retains native 1|2|4 behavior, including StoreCoalescing,
     without running legacy rules.
 
-    This input has the LoadStoreTranspose (bit 1) structural signature.  Compare
-    the public native-only bundle (7) against the default all-identity mask
-    (511): both must apply the same native rewrite.  Together with the legacy
-    isolation test above, this catches either failure mode: accidentally
-    dropping native rules when the default changed, or scheduling compatibility
-    passes from the early generic graph pass.
+    This input has the LoadStoreTranspose (bit 1) structural signature.  The
+    default all-identity mask must retain that native rewrite.  Together with
+    the legacy isolation test above, this catches either failure mode:
+    accidentally dropping native rules, or scheduling compatibility passes
+    from the early generic graph pass.
     """
     monkeypatch.setenv("TRITON_DUMP_DIR", str(tmp_path / "dump"))
 
-    native_only_options = NPUOptions(
-        arch="Ascend910_95",
-        enable_graph_optimize=True,
-        graph_optimize_rule_mask=7,
-        debug=True,
-        sanitize_overflow=True,
-    )
     default_options = NPUOptions(
         arch="Ascend910_95",
         enable_graph_optimize=True,
@@ -387,13 +360,9 @@ def test_default_graph_mask_preserves_native_graph_rule_bundle(monkeypatch, tmp_
         sanitize_overflow=True,
     )
 
-    native_only_ttir = str(make_fused_swiglu_ttir(native_only_options))
     default_ttir = str(make_fused_swiglu_ttir(default_options))
 
-    assert default_options.graph_optimize_rule_mask == 511
-    assert default_ttir == native_only_ttir
-    # A rule-mask=0 control would retain the original [N, M] pointer layout;
-    # the default must still perform the native transpose rewrite to [M, N].
+    # The default must perform the native transpose rewrite to [M, N].
     assert "tensor<256x32x!tt.ptr<bf16>>" in default_ttir
     assert "tensor<32x256x!tt.ptr<bf16>>" not in default_ttir
     assert "hacc.coalesce_factor" not in default_ttir
@@ -465,7 +434,6 @@ def test_fused_swiglu_bwd_b_256x32_graph_optimize_structure(monkeypatch, tmp_pat
         options = NPUOptions(
             arch="Ascend910_95",
             enable_graph_optimize=enabled,
-            graph_optimize_rule_mask=1,
             debug=True,
             sanitize_overflow=True,
         )
@@ -585,7 +553,6 @@ def test_fused_swiglu_bwd_b_small_tiling_graph_optimize_equivalence(monkeypatch,
         "rtol": 3e-2,
         "atol": 1e-1,
         "enable_graph_optimize": [False, True],
-        "graph_optimize_rule_mask": 1,
         "debug": True,
         "sanitize_overflow": True,
         "torch_version": torch.__version__,
@@ -617,7 +584,6 @@ def test_fused_swiglu_bwd_b_small_tiling_graph_optimize_equivalence(monkeypatch,
             debug=True,
             sanitize_overflow=True,
             enable_graph_optimize=enabled,
-            graph_optimize_rule_mask=1,
         )
         torch.npu.synchronize()
         ttir = compiled.asm["ttir"]
@@ -717,7 +683,7 @@ def test_fused_swiglu_bwd_b_small_tiling_graph_optimize_equivalence(monkeypatch,
     write_summary()
 
 
-def make_diagonal_shift_ttir(kernel, options, block=16):
+def make_diagonal_shift_ttir(kernel, options, block=16, rule_mask=None):
     source = ASTSource(
         kernel,
         {"x_ptr": "*fp32", "y_ptr": "*fp32"},
@@ -727,7 +693,12 @@ def make_diagonal_shift_ttir(kernel, options, block=16):
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
     module = ast_to_ttir(kernel, source, context, options, {}, {})
-    return str(make_ttir(module, {}, options))
+    module = make_ttir(module, {}, options)
+    if rule_mask is not None:
+        pm = ir.pass_manager(module.context)
+        ascend.passes.ttir.add_graph_optimize(pm, rule_mask=rule_mask)
+        pm.run(module, "")
+    return str(module)
 
 
 @pytest.mark.parametrize(
@@ -756,13 +727,9 @@ def test_diagonal_mask_removal_collapses_quadratic_shift(kernel):
 )
 def test_diagonal_mask_removal_is_gated_by_its_rule_bit(kernel):
     """Mask 127 is every other identity, so the pattern must survive intact."""
-    options = NPUOptions(
-        arch="Ascend910B1",
-        enable_graph_optimize=True,
-        graph_optimize_rule_mask=127,
-    )
+    options = NPUOptions(arch="Ascend910B1", enable_graph_optimize=False)
 
-    ttir = make_diagonal_shift_ttir(kernel, options)
+    ttir = make_diagonal_shift_ttir(kernel, options, rule_mask=127)
 
     assert "tt.reduce" in ttir
     assert "tensor<16x16xf32>" in ttir
@@ -770,17 +737,20 @@ def test_diagonal_mask_removal_is_gated_by_its_rule_bit(kernel):
 
 
 def test_diagonal_mask_removal_applies_without_simt_route():
-    """The rewrite is compute logic, so it must not depend on force_simt_only.
+    """The rewrite is compute logic, so it must not depend on pure-SIMT mode.
 
     Its predecessor lived behind the 910_95 plus force-SIMT gate of
     processStridedLoadStoreRewriteOperations and therefore never ran on other
     targets.
     """
-    for force_simt_only in (False, True):
+    for arch, compile_mode in (
+        ("Ascend910B1", "simd"),
+        ("Ascend910_9589", "simt_only"),
+    ):
         options = NPUOptions(
-            arch="Ascend910B1",
+            arch=arch,
             enable_graph_optimize=True,
-            force_simt_only=force_simt_only,
+            compile_mode=compile_mode,
         )
 
         ttir = make_diagonal_shift_ttir(diagonal_shift_forward_kernel, options)
@@ -790,7 +760,7 @@ def test_diagonal_mask_removal_applies_without_simt_route():
 
 
 def test_diagonal_mask_removal_numerical_equivalence(monkeypatch, tmp_path):
-    """Compare against the unrewritten kernel on hardware.
+    """Compare the default graph path against the unoptimized kernel on hardware.
 
     The float rewrite is not bit-exact, since scan[i] - x[i] only recovers
     scan[i - 1] up to rounding, so this asserts closeness rather than equality.
@@ -804,29 +774,29 @@ def test_diagonal_mask_removal_numerical_equivalence(monkeypatch, tmp_path):
     ])
 
     outputs = {}
-    for rule_mask in (127, 511):
+    for enabled in (False, True):
         diagonal_shift_forward_kernel.device_caches.clear()
         output = torch.empty_like(source)
         compiled = diagonal_shift_forward_kernel[(1, )](
             source,
             output,
             BLOCK=16,
-            graph_optimize_rule_mask=rule_mask,
+            enable_graph_optimize=enabled,
         )
         torch.npu.synchronize()
         assert_ttir_text_reparseable(
             compiled.asm["ttir"],
             tmp_path,
-            f"diagonal-{rule_mask}",
+            f"diagonal-{int(enabled)}",
         )
-        outputs[rule_mask] = output.cpu()
+        outputs[enabled] = output.cpu()
 
     assert "arith.subf" in compiled.asm["ttir"]
-    torch.testing.assert_close(outputs[127], expected, rtol=1e-5, atol=1e-6)
-    torch.testing.assert_close(outputs[511], outputs[127], rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(outputs[False], expected, rtol=1e-5, atol=1e-6)
+    torch.testing.assert_close(outputs[True], outputs[False], rtol=1e-5, atol=1e-6)
 
 
-def make_wrapped_tile_ttir(options, block_k=8, block_n=16, bound=None):
+def make_wrapped_tile_ttir(options, block_k=8, block_n=16, bound=None, rule_mask=None):
     kernel = wrapped_tile_copy_kernel if bound is None else constexpr_wrapped_tile_copy_kernel
     signature = {"src_ptr": "*fp32", "dst_ptr": "*fp32"}
     constants = {"BLOCK_K": block_k, "BLOCK_N": block_n}
@@ -840,7 +810,12 @@ def make_wrapped_tile_ttir(options, block_k=8, block_n=16, bound=None):
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
     module = ast_to_ttir(kernel, source, context, options, {}, {})
-    return str(make_ttir(module, {}, options))
+    module = make_ttir(module, {}, options)
+    if rule_mask is not None:
+        pm = ir.pass_manager(module.context)
+        ascend.passes.ttir.add_graph_optimize(pm, rule_mask=rule_mask)
+        pm.run(module, "")
+    return str(module)
 
 
 def test_convert_modulo_to_mask_linearizes_wrapped_tile():
@@ -863,13 +838,9 @@ def test_convert_modulo_to_mask_linearizes_wrapped_tile():
 
 def test_convert_modulo_to_mask_is_gated_by_its_rule_bit():
     """Mask 255 is every other identity, so the wrap must survive intact."""
-    options = NPUOptions(
-        arch="Ascend910B1",
-        enable_graph_optimize=True,
-        graph_optimize_rule_mask=255,
-    )
+    options = NPUOptions(arch="Ascend910B1", enable_graph_optimize=False)
 
-    ttir = make_wrapped_tile_ttir(options)
+    ttir = make_wrapped_tile_ttir(options, rule_mask=255)
 
     assert "arith.remsi" in ttir
 
@@ -889,12 +860,15 @@ def test_convert_modulo_to_mask_leaves_compile_time_bounds_alone():
 
 
 def test_convert_modulo_to_mask_applies_without_simt_route():
-    """The rewrite is address logic, so it must not depend on force_simt_only."""
-    for force_simt_only in (False, True):
+    """The rewrite is address logic, so it must not depend on pure-SIMT mode."""
+    for arch, compile_mode in (
+        ("Ascend910B1", "simd"),
+        ("Ascend910_9589", "simt_only"),
+    ):
         options = NPUOptions(
-            arch="Ascend910B1",
+            arch=arch,
             enable_graph_optimize=True,
-            force_simt_only=force_simt_only,
+            compile_mode=compile_mode,
         )
 
         ttir = make_wrapped_tile_ttir(options)
@@ -921,7 +895,7 @@ def test_convert_modulo_to_mask_numerical_equivalence(monkeypatch, tmp_path):
     expected = source[:block_k * bound].cpu()
 
     outputs = {}
-    for rule_mask in (255, 511):
+    for enabled in (False, True):
         wrapped_tile_copy_kernel.device_caches.clear()
         output = torch.zeros(block_k * bound, dtype=torch.float32, device="npu")
         grid = ((bound + block_n - 1) // block_n, )
@@ -931,22 +905,22 @@ def test_convert_modulo_to_mask_numerical_equivalence(monkeypatch, tmp_path):
             bound,
             BLOCK_K=block_k,
             BLOCK_N=block_n,
-            graph_optimize_rule_mask=rule_mask,
+            enable_graph_optimize=enabled,
         )
         torch.npu.synchronize()
         assert_ttir_text_reparseable(
             compiled.asm["ttir"],
             tmp_path,
-            f"wrapped-tile-{rule_mask}",
+            f"wrapped-tile-{int(enabled)}",
         )
-        outputs[rule_mask] = output.cpu()
+        outputs[enabled] = output.cpu()
 
     assert "arith.remsi" not in compiled.asm["ttir"]
-    torch.testing.assert_close(outputs[255], expected, rtol=0, atol=0)
-    torch.testing.assert_close(outputs[511], outputs[255], rtol=0, atol=0)
+    torch.testing.assert_close(outputs[False], expected, rtol=0, atol=0)
+    torch.testing.assert_close(outputs[True], outputs[False], rtol=0, atol=0)
 
 
-def make_block_quant_ttir(options, block_k=8, block_n=16, group_n=8):
+def make_block_quant_ttir(options, block_k=8, block_n=16, group_n=8, rule_mask=None):
     signature = {"src_ptr": "*fp32", "scale_ptr": "*fp32", "dst_ptr": "*fp32", "n": "i32"}
     constants = {"BLOCK_K": block_k, "BLOCK_N": block_n, "GROUP_N": group_n}
 
@@ -955,7 +929,12 @@ def make_block_quant_ttir(options, block_k=8, block_n=16, group_n=8):
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
     module = ast_to_ttir(block_quant_wrapped_tile_kernel, source, context, options, {}, {})
-    return str(make_ttir(module, {}, options))
+    module = make_ttir(module, {}, options)
+    if rule_mask is not None:
+        pm = ir.pass_manager(module.context)
+        ascend.passes.ttir.add_graph_optimize(pm, rule_mask=rule_mask)
+        pm.run(module, "")
+    return str(module)
 
 
 def test_convert_modulo_to_mask_masks_derived_scale_index():
@@ -977,19 +956,15 @@ def test_convert_modulo_to_mask_masks_derived_scale_index():
 
 def test_convert_modulo_to_mask_derived_index_is_gated_by_its_rule_bit():
     """Mask 255 is every other identity, so the wrap must survive intact."""
-    options = NPUOptions(
-        arch="Ascend910B1",
-        enable_graph_optimize=True,
-        graph_optimize_rule_mask=255,
-    )
+    options = NPUOptions(arch="Ascend910B1", enable_graph_optimize=False)
 
-    ttir = make_block_quant_ttir(options)
+    ttir = make_block_quant_ttir(options, rule_mask=255)
 
     assert "arith.remsi" in ttir
 
 
 def test_convert_modulo_to_mask_derived_index_numerical_equivalence(monkeypatch, tmp_path):
-    """The lanes the store keeps must read exactly what the wrap gave them.
+    """Compare the default graph path against the unoptimized kernel on hardware.
 
     Both loads are rewritten here, so a wrong mask orientation on either would
     scale the surviving columns by zero rather than by their own group.
@@ -1012,7 +987,7 @@ def test_convert_modulo_to_mask_derived_index_numerical_equivalence(monkeypatch,
     expected = (source[:block_k * bound].view(block_k, bound) * scales[columns // group_n][None, :]).reshape(-1).cpu()
 
     outputs = {}
-    for rule_mask in (255, 511):
+    for enabled in (False, True):
         block_quant_wrapped_tile_kernel.device_caches.clear()
         output = torch.zeros(block_k * bound, dtype=torch.float32, device="npu")
         grid = ((bound + block_n - 1) // block_n, )
@@ -1024,19 +999,19 @@ def test_convert_modulo_to_mask_derived_index_numerical_equivalence(monkeypatch,
             BLOCK_K=block_k,
             BLOCK_N=block_n,
             GROUP_N=group_n,
-            graph_optimize_rule_mask=rule_mask,
+            enable_graph_optimize=enabled,
         )
         torch.npu.synchronize()
         assert_ttir_text_reparseable(
             compiled.asm["ttir"],
             tmp_path,
-            f"block-quant-{rule_mask}",
+            f"block-quant-{int(enabled)}",
         )
-        outputs[rule_mask] = output.cpu()
+        outputs[enabled] = output.cpu()
 
     assert "arith.remsi" not in compiled.asm["ttir"]
-    torch.testing.assert_close(outputs[255], expected, rtol=0, atol=0)
-    torch.testing.assert_close(outputs[511], outputs[255], rtol=0, atol=0)
+    torch.testing.assert_close(outputs[False], expected, rtol=0, atol=0)
+    torch.testing.assert_close(outputs[True], outputs[False], rtol=0, atol=0)
 
 
 def test_graph_optimize_options_contribute_to_npu_hash():
